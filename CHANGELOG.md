@@ -84,6 +84,28 @@
 
 ### Fixed
 
+- **`agents run <agent> --fallback …` no longer disables account rotation.**
+  A `--fallback` chain skipped strategy resolution entirely ("strategy balanced
+  ignored: --fallback pins versions directly"), so the bare primary always ran on
+  the pinned default version — one fixed account, every run. On a multi-account
+  host this silently stopped rotation for exactly the runs that most need it
+  (unattended monitors dispatching with a cross-agent fallback chain). The
+  fallback chain only names where to cascade; it never pinned the primary, so
+  the strategy now resolves the primary's version/account as usual. The
+  same-agent rotation failover (#348) also now composes with an explicit chain:
+  the other healthy accounts are unshifted ahead of the cross-agent entries, so
+  a rate limit exhausts same-agent accounts before switching CLIs. Explicit
+  `@version` pins and profiles keep their pinning behavior.
+
+- **Fallback now cascades on Claude billing refusals ("monthly spend limit",
+  "out of usage credits").** Two gaps: the messages matched no
+  `RATE_LIMIT_PATTERNS` entry, and Claude prints them to **stdout** while the
+  cascade only scanned stderr — so a capped account failed the whole run
+  (exit 1) with codex/droid sitting unused in the chain. Added both patterns,
+  and `runWithFallback` now tees a bounded stdout tail per attempt
+  (`captureStdoutTail`) and scans it alongside stderr. Output remains mirrored
+  to the parent's stdout exactly as before.
+
 - **`agents run --resume <id>` now spawns from the session's origin directory.**
   Native resume (claude/codex) resolves the transcript relative to the working
   directory (`projects/<cwd-hash>/`), but the resolver found the session across all

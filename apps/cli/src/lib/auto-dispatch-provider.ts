@@ -12,7 +12,7 @@ import type { Dispatcher } from './auto-dispatch.js';
 
 export function createProviderDispatcher(): Dispatcher {
   return {
-    async dispatch({ agent, prompt, repo, provider }) {
+    async dispatch({ agent, prompt, repo, provider, host }) {
       const p = resolveProvider(provider, agent);
       const caps = p.capabilities();
       if (!caps.available) {
@@ -21,7 +21,12 @@ export function createProviderDispatcher(): Dispatcher {
       if (!caps.dispatch) {
         throw new Error(`cloud provider '${p.id}' does not support dispatch`);
       }
-      const task = await p.dispatch({ agent, prompt, repo });
+      // The host provider clones nothing — a repo target is meaningless there
+      // and its dispatch() rejects it; a ticket project pinned to 'host' relies
+      // on the machine's own checkout (the project's `host` names the machine).
+      const task = p.id === 'host'
+        ? await p.dispatch({ agent, prompt, providerOptions: { host } })
+        : await p.dispatch({ agent, prompt, repo });
       return { id: task.id };
     },
   };

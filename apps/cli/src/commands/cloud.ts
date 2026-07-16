@@ -18,6 +18,7 @@ import type { CloudProvider, CloudProviderId, CloudTarget, CloudTaskStatus, Disp
 import { MissingTargetError, MAX_IMAGES_PER_DISPATCH } from '../lib/cloud/types.js';
 import type { JobConfig, JobTrigger } from '../lib/routines.js';
 import { normalizeTriggerEvent, validateTrigger, writeJob, jobExists, GITHUB_TRIGGER_EVENTS } from '../lib/routines.js';
+import { machineId } from '../lib/machine-id.js';
 import { emit } from '../lib/events.js';
 
 /** Map a supported image file extension to its wire mimeType. Rejects anything else. */
@@ -163,7 +164,7 @@ Examples:
   cloud
     .command('run [prompt]')
     .description('Dispatch a task to a cloud agent.')
-    .option('--provider <id>', 'Cloud backend: rush, codex, factory, antigravity (overrides agent auto-routing)')
+    .option('--provider <id>', 'Cloud backend: rush, codex, factory, antigravity, host (overrides agent auto-routing)')
     .option('--agent <name>', 'Agent to run: claude, codex, droid, antigravity (auto-routes to its native cloud)')
     .option(
       '--repo <owner/repo>',
@@ -185,6 +186,9 @@ Examples:
     .option('--model <model>', 'Model override')
     .option('--env <id>', 'Codex Cloud environment ID')
     .option('--computer <name>', 'Factory/Droid computer target')
+    .option('--host <name>', 'One of your machines as the target (a registered host, device, capability tag, or user@host). Implies --provider host.')
+    .option('--remote-cwd <dir>', 'Working directory on the host (--provider host only)')
+    .option('--any', 'With --host <cap> (a capability tag), pick any matching host instead of erroring when several match')
     .option('--autonomy <level>', 'Factory/Droid autonomy: low, medium, high (default high)')
     .option('--mode <mode>', 'Execution mode (e.g., plan, edit, full)')
     .option(
@@ -231,6 +235,10 @@ Examples:
   # Codex Cloud
   agents cloud run "add auth tests" --provider codex --env env_abc123
 
+  # One of your own machines (agents hosts / agents devices), over SSH
+  agents cloud run "run the nightly benchmark" --host gpu-box --agent claude
+  agents cloud run "rebuild the index" --host gpu --any --remote-cwd ~/proj
+
   # Default provider (set in ~/.agents/agents.yaml)
   agents cloud run "refactor auth module" --repo user/repo
 `)
@@ -252,9 +260,17 @@ Examples:
         }
       }
 
+      // --host names one of YOUR machines as the target — that only means
+      // something to the host provider, so it implies --provider host rather
+      // than silently riding along to a cloud backend that would ignore it.
+      if (options.host && options.provider && options.provider !== 'host') {
+        die(`--host targets your own machines (--provider host), not ${options.provider}. Drop --host, or use --provider host.`);
+      }
+      const explicitProvider = (options.provider as string | undefined) ?? (options.host ? 'host' : undefined);
+
       // Agent-aware: with no --provider, the agent routes to its native cloud
       // (claude→rush, codex→codex, droid→factory, antigravity→antigravity).
-      const provider = resolveProvider(options.provider as string | undefined, options.agent as string | undefined);
+      const provider = resolveProvider(explicitProvider, options.agent as string | undefined);
 
       // --repo is repeatable: commander gives us an array via our collector.
       // A single --repo value arrives as a one-element array; keep the legacy
@@ -279,6 +295,9 @@ Examples:
 
       if (options.env) dispatchOptions.providerOptions!.env = options.env as string;
       if (options.computer) dispatchOptions.providerOptions!.computer = options.computer as string;
+      if (options.host) dispatchOptions.providerOptions!.host = options.host as string;
+      if (options.remoteCwd) dispatchOptions.providerOptions!.remoteCwd = options.remoteCwd as string;
+      if (options.any) dispatchOptions.providerOptions!.any = true;
       if (options.autonomy) dispatchOptions.providerOptions!.autonomy = options.autonomy as string;
       if (options.mode) dispatchOptions.providerOptions!.mode = options.mode as string;
       if (options.balanced || (options.strategy as string) === 'balanced') {
@@ -322,6 +341,14 @@ Examples:
           prompt,
         };
         if (repoValues[0]) routine.repo = repoValues[0];
+        // --host with --on: the webhook-fired run places on that machine (the
+        // routine carries the placement, and firing pins to THIS device so a
+        // fleet of receivers can't each dispatch a duplicate).
+        if (options.host) {
+          routine.host = options.host as string;
+          if (options.remoteCwd) routine.remoteCwd = options.remoteCwd as string;
+          routine.devices = [machineId()];
+        }
         writeJob(routine);
 
         if (json) {

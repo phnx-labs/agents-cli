@@ -2,15 +2,16 @@
  * Agent-host provider contract.
  *
  * A `HostProvider` answers "what are my hosts, and how do I reach them?" — the
- * pluggable directory/metadata/reachability layer. v1 ships only the `local`
- * provider (ssh-config ∪ inline registry); `rush`/`tailscale`/`crabbox` are
- * additive fast-follows behind this same contract. Capability-gated so partial
- * providers are first-class (mirrors the cloud provider registry).
+ * pluggable directory/metadata/reachability layer. Shipped providers: `local`
+ * (ssh-config ∪ inline registry) and `devices` (the Tailscale fleet from
+ * `agents devices`); `rush`/`crabbox` remain additive fast-follows behind this
+ * same contract. Capability-gated so partial providers are first-class
+ * (mirrors the cloud provider registry).
  */
 
 import type { HostEntry } from '../types.js';
 
-export type HostProviderId = 'local';
+export type HostProviderId = 'local' | 'devices';
 
 export type HostStatus = 'online' | 'offline' | 'unknown';
 
@@ -21,6 +22,32 @@ export interface Host extends HostEntry {
   /** True when the host has an explicit overlay/inline entry in the registry. */
   enrolled?: boolean;
   status?: HostStatus;
+  /**
+   * False when the host is listed for honesty but can't carry a `--host` run
+   * (today: password-auth devices — offload rides BatchMode=yes ssh). Absent
+   * means dispatchable. Cap routing and target pickers filter on this.
+   */
+  dispatchable?: boolean;
+}
+
+/**
+ * Thrown when a device resolves but can't be used as an offload target because
+ * it authenticates with a password. The offload path runs over `sshExec`, whose
+ * `SSH_OPTS` force `BatchMode=yes` (no password prompts), so only key / ssh-config
+ * auth can carry a `--host` run. Named so the top-level catch prints the message
+ * cleanly instead of a stack trace. (Lives here, not registry.ts, so providers
+ * can throw it without a circular import; registry.ts re-exports it.)
+ */
+export class DeviceOffloadUnsupportedError extends Error {
+  constructor(name: string) {
+    super(
+      `Device "${name}" uses password auth, which --host offload can't use yet ` +
+        `(runs go over ssh with BatchMode=yes). Switch it to key auth with ` +
+        `\`agents devices set ${name} --auth key\`, or enroll it as a host with ` +
+        `\`agents hosts add ${name}\`.`,
+    );
+    this.name = 'DeviceOffloadUnsupportedError';
+  }
 }
 
 export interface HostProviderCapabilities {

@@ -26,7 +26,8 @@ export interface AutoDispatchProject {
   repoSlug?: string; // "owner/repo" — the dispatch's target repo
   autoDispatch?: boolean; // opt-in; default (undefined) = off
   maxAgents?: number; // per-project concurrency cap; <=0 or undefined = off
-  provider?: string; // optional pin: 'rush' | 'codex' | 'factory' | ... (else the agent's native cloud)
+  provider?: string; // optional pin: 'rush' | 'codex' | 'factory' | 'host' | ... (else the agent's native cloud)
+  host?: string; // provider 'host' only: which machine to dispatch onto (name/device/cap tag)
 }
 
 /** A Linear issue that is a candidate for dispatch. */
@@ -43,6 +44,7 @@ export interface PlannedDispatch {
   projectId: string;
   repoSlug?: string;
   provider?: string;
+  host?: string;
   issueId: string;
   identifier: string;
   title: string;
@@ -76,6 +78,7 @@ export function readAutoDispatchProjects(): AutoDispatchProject[] {
       autoDispatch: o.autoDispatch === true,
       maxAgents: typeof o.maxAgents === 'number' ? o.maxAgents : undefined,
       provider: typeof o.provider === 'string' ? o.provider : undefined,
+      host: typeof o.host === 'string' ? o.host : undefined,
     });
   }
   return out;
@@ -110,6 +113,7 @@ export function planAutoDispatch(
         projectId: p.id,
         repoSlug: p.repoSlug,
         provider: p.provider,
+        host: p.host,
         issueId: issue.id,
         identifier: issue.identifier,
         title: issue.title,
@@ -142,7 +146,7 @@ export interface LinearGateway {
 
 /** Dispatch surface — runs a ticket through agents-cli's cloud/local provider layer. */
 export interface Dispatcher {
-  dispatch(opts: { agent: string; prompt: string; repo?: string; provider?: string }): Promise<{ id: string }>;
+  dispatch(opts: { agent: string; prompt: string; repo?: string; provider?: string; host?: string }): Promise<{ id: string }>;
 }
 
 export interface AutoDispatchDeps {
@@ -181,6 +185,7 @@ export async function autoDispatchTick(deps: AutoDispatchDeps): Promise<PlannedD
         prompt: dispatchPrompt(d.identifier, d.title),
         repo: d.repoSlug,
         provider: d.provider,
+        host: d.host,
       });
       // Bookkeeping only — dispatch already happened; moving to Doing keeps the
       // ticket out of the next Todo poll. A failure here is non-fatal.

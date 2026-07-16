@@ -33,7 +33,8 @@ interface ExecCommandActionOptions {
   addDir: string[];
   env: string[];
   secrets: string[];
-  noAutoSecrets?: boolean;
+  /** Commander maps `--no-auto-secrets` to `autoSecrets` (default true, false when passed). */
+  autoSecrets?: boolean;
   json?: boolean;
   quiet?: boolean;
   headless?: boolean;
@@ -673,31 +674,38 @@ export function registerRunCommand(program: Command): void {
           process.exit(1);
         }
         const hostName = hostGiven[0];
-        const { resolveHost, resolveHostByCap } = await import('../lib/hosts/registry.js');
-        const { dispatchToHost, runInteractiveOnHost } = await import('../lib/hosts/dispatch.js');
-        const { registerHostSession, registerInteractiveHostSession } = await import('../lib/hosts/session-index.js');
+        const { resolveHostRunTarget, dispatchPromptToHost, HostResolutionError } = await import('../lib/hosts/run-target.js');
+        const { runInteractiveOnHost } = await import('../lib/hosts/dispatch.js');
+        const { registerInteractiveHostSession } = await import('../lib/hosts/session-index.js');
+        const { RUN_OPTION_REJECT_MESSAGES } = await import('../lib/hosts/remote-cmd.js');
         const { normalizeRunStrategy, RUN_STRATEGIES } = await import('../lib/rotate.js');
-        // A password-auth device throws DeviceOffloadUnsupportedError here; it's
-        // printed cleanly by the top-level catch in index.ts (covers every
-        // resolveHost caller), so it never falls through to capability routing.
-        let host = await resolveHost(hostName);
-        if (!host) {
-          // Not a host name — try capability routing (e.g. --host gpu). A
-          // "Multiple hosts tagged…" error is actionable and must surface;
-          // only "no host tagged" falls through to the generic unknown-host msg.
-          try {
-            host = await resolveHostByCap(hostName, options.any);
-          } catch (e) {
-            const msg = (e as Error).message ?? '';
-            if (msg.startsWith('Multiple hosts')) {
-              console.error(chalk.red(msg));
-              process.exit(1);
-            }
-          }
-        }
-        if (!host) {
-          console.error(chalk.red(`Unknown host "${hostName}". List hosts: agents hosts list`));
+
+        // The forwarding contract (RUN_OPTION_FORWARDING): options that cannot
+        // cross the SSH boundary fail loud BEFORE dispatch — never a silent
+        // drop. Value-aware: only reject what was actually passed.
+        const hostRejects: string[] = [];
+        if (options.secrets.length > 0) hostRejects.push(RUN_OPTION_REJECT_MESSAGES.secrets);
+        if (options.secretsKeys) hostRejects.push(RUN_OPTION_REJECT_MESSAGES.secretsKeys);
+        if (options.allowExpired) hostRejects.push(RUN_OPTION_REJECT_MESSAGES.allowExpired);
+        if (options.resumeCheckpoint) hostRejects.push(RUN_OPTION_REJECT_MESSAGES.resumeCheckpoint);
+        if (options.resume === true) hostRejects.push(RUN_OPTION_REJECT_MESSAGES.resumeBare);
+        if (hostRejects.length > 0) {
+          for (const msg of hostRejects) console.error(chalk.red(msg));
           process.exit(1);
+        }
+        // Shared resolution (name → capability tag → error). A password-auth
+        // device throws DeviceOffloadUnsupportedError inside the helper and
+        // propagates untouched — it's printed cleanly by the top-level catch in
+        // index.ts (covers every resolveHost caller).
+        let host;
+        try {
+          host = await resolveHostRunTarget(hostName, { any: options.any });
+        } catch (e) {
+          if (e instanceof HostResolutionError) {
+            console.error(chalk.red(e.message));
+            process.exit(1);
+          }
+          throw e;
         }
         try {
           const [runAgent, rawRunVersion] = agentSpec.split('@');
@@ -810,10 +818,12 @@ export function registerRunCommand(program: Command): void {
               agent: runAgent,
               version: resumeId ? undefined : runVersion,
               strategy: resumeId ? undefined : runStrategy,
+              fallback: options.fallback,
               prompt,
               mode: options.mode,
               model: options.model,
               effort: options.effort,
+              env: options.env,
               addDir: hostAddDirs,
               json: options.json,
               verbose: options.verbose,
@@ -838,32 +848,37 @@ export function registerRunCommand(program: Command): void {
             console.error(chalk.red('A prompt is required for headless host runs: agents run <agent> "<task>" --host <name>'));
             process.exit(1);
           }
-          const hostSessionId = runAgent === 'claude' && !resumeId ? randomUUID() : undefined;
-          const { task, exitCode } = await dispatchToHost(host, {
+          // Session-id mint, detached dispatch, and local session-index
+          // registration all live in the shared helper (lib/hosts/run-target.ts).
+          const { task, exitCode } = await dispatchPromptToHost(host, {
             agent: runAgent,
             version: resumeId ? undefined : runVersion,
             strategy: resumeId ? undefined : runStrategy,
+            fallback: options.fallback,
             prompt,
             mode: options.mode,
             model: options.model,
             effort: options.effort,
+            env: options.env,
             addDir: hostAddDirs,
+            timeout: options.timeout,
+            loop: options.loop,
+            maxIterations: options.maxIterations,
+            budget: options.budget,
+            until: options.until,
+            interval: options.interval,
             json: options.json,
             verbose: options.verbose,
-            timeout: options.timeout,
             yes: options.yes,
             acp: options.acp,
+            autoSecrets: options.autoSecrets,
             remoteCwd: hostCwd,
-            sessionId: hostSessionId,
             name: options.name,
             resume: resumeId,
             follow: options.follow !== false,
+            passthroughArgs,
             copyCreds: hostCopyCreds,
           });
-          // Register the dispatched run in the LOCAL session index so it shows
-          // up in `agents sessions` and resolves by id/name, even though its
-          // transcript lives on the host. No-op when no session id was captured.
-          registerHostSession(task, { cwd: process.cwd(), prompt });
           if (options.follow === false) {
             // The handle the caller uses to check on the run: the name if given,
             // else the real host-task id (never the old literal `<id>`). Steer
@@ -987,7 +1002,7 @@ export function registerRunCommand(program: Command): void {
         { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, rotationFailoverChain, shouldArmRotationFailover, RUN_STRATEGIES },
         { getGlobalDefault, getVersionHomePath, resolveVersion, resolveVersionAlias, ensureAgentRunnable },
         { buildDiscoveredPlugin, loadPluginManifest, syncPluginToVersion },
-        { parseWorkflowFrontmatter, resolveWorkflowRef, resolveAllowedSubagents, pruneStaleWorkflowSubagents },
+        { parseWorkflowFrontmatter, resolveWorkflowRef, resolveAllowedSubagents, pruneStaleWorkflowSubagents, ensureSubagentDispatchTool },
         { resolveRunDefaults },
         { getMcpServersByName, buildWorkflowMcpConfig },
         { supports },
@@ -1030,6 +1045,11 @@ export function registerRunCommand(program: Command): void {
       // produced item, and drives the teams supervisor to drain — no `teams`
       // subcommands needed.
       let workflowForEach: import('../lib/workflows.js').ForEachSpec | undefined;
+      // True once this run copies ≥1 dispatchable subagent into the shared agents
+      // dir. Used below to keep the `Task` tool in a `tools:`-restricted workflow —
+      // an orchestrator handed subagents but denied `Task` cannot reach them and
+      // degenerates to a no-op ("I'll wait for the completion notification").
+      let workflowHasSubagents = false;
       const cwd = options.cwd ?? process.cwd();
 
       if (isValidAgent(rawAgent)) {
@@ -1110,6 +1130,7 @@ export function registerRunCommand(program: Command): void {
             workflowSubagentTargets.push(dest);
             copied++;
           }
+          if (copied > 0) workflowHasSubagents = true;
           if (allowedAgents !== undefined) {
             // Surface any allowedAgents entry with no matching subagent file, and
             // report how many were filtered out, so the scope is auditable.
@@ -1158,7 +1179,9 @@ export function registerRunCommand(program: Command): void {
 
         // Auto-inject secrets bundles declared in the workflow's frontmatter `secrets:` field.
         // Union with any --secrets flags the user passed; dedupe. Skip when --no-auto-secrets is set.
-        if (!options.noAutoSecrets) {
+        // (Commander stores the negated flag as `autoSecrets: false` — the old
+        // `noAutoSecrets` read was never populated, making the flag a no-op.)
+        if (options.autoSecrets !== false) {
           const declared = workflowFrontmatter?.secrets ?? [];
           if (declared.length > 0) {
             const existing = new Set(options.secrets);
@@ -1198,8 +1221,14 @@ export function registerRunCommand(program: Command): void {
           ));
         } else if (hasScoping) {
           if (tools && tools.length > 0) {
-            workflowToolsRestrict = tools;
-            process.stderr.write(chalk.gray(`[workflow] restricting available tools to: ${tools.join(', ')} (Write/Bash/Edit unavailable unless listed)\n`));
+            // An orchestrator with dispatchable subagents MUST retain the `Task`
+            // tool, or it can't reach the subagents this run just installed for it
+            // — the run silently no-ops ("I'll wait for the completion notification").
+            workflowToolsRestrict = ensureSubagentDispatchTool(tools, workflowHasSubagents);
+            process.stderr.write(chalk.gray(`[workflow] restricting available tools to: ${workflowToolsRestrict.join(', ')} (Write/Bash/Edit unavailable unless listed)\n`));
+            if (workflowToolsRestrict.length !== tools.length) {
+              process.stderr.write(chalk.gray(`[workflow] kept Task tool: workflow ships subagents to dispatch\n`));
+            }
           }
           if (mcpServerNames && mcpServerNames.length > 0) {
             const servers = getMcpServersByName(mcpServerNames, { cwd });
@@ -1375,15 +1404,17 @@ export function registerRunCommand(program: Command): void {
       }
       const strategy = options.balanced ? 'balanced' : explicitStrategy ?? configuredStrategy;
 
-      // Strategy only applies to bare agent invocations. Explicit @version,
-      // profiles, and fallback chains already define their execution target.
+      // Strategy only applies to bare agent invocations. Explicit @version and
+      // profiles already define their execution target. A --fallback chain does
+      // NOT pin the primary: it only names where to cascade on a rate limit, so
+      // the bare primary still resolves through the strategy — otherwise every
+      // `agents run claude --fallback codex` run lands on the pinned default
+      // account and account rotation silently stops (the gh-monitor heal bug).
       if (strategy !== 'pinned' || options.balanced || explicitStrategy) {
         if (version) {
           process.stderr.write(chalk.yellow(`[agents] strategy ${strategy} ignored: version ${version} is pinned\n`));
         } else if (fromProfile) {
           process.stderr.write(chalk.yellow(`[agents] strategy ${strategy} ignored: profile pins its own version/auth\n`));
-        } else if (options.fallback) {
-          process.stderr.write(chalk.yellow(`[agents] strategy ${strategy} ignored: --fallback pins versions directly\n`));
         } else {
           try {
             const resolved = await resolveRunVersion(agent, strategy, cwd);
@@ -1687,18 +1718,24 @@ export function registerRunCommand(program: Command): void {
       // path (continuing the session via /continue). Because this injects into
       // the same `fallback` array `--fallback` uses, it must only arm for run
       // shapes that accept a fallback chain — shouldArmRotationFailover excludes
-      // acp/loop/resume-checkpoint (which reject a non-empty fallback below),
-      // interactive/no-prompt runs, and runs that already have an explicit or
-      // profile fallback. Pinned/single-account runs stay unchanged because
-      // rotationResult is null or rotationFailoverChain returns []. version is
-      // set here because rotationResult is only populated when resolveRunVersion
-      // picked one.
+      // acp/loop/resume-checkpoint (which reject a non-empty fallback below)
+      // and interactive/no-prompt runs. Pinned/single-account runs stay
+      // unchanged because rotationResult is null or rotationFailoverChain
+      // returns []. version is set here because rotationResult is only
+      // populated when resolveRunVersion picked one.
+      //
+      // Composes with an explicit --fallback chain: the same-agent accounts are
+      // UNSHIFTED ahead of the user's cross-agent entries, so a rate limit
+      // first tries the other accounts of the same agent (cheapest recovery —
+      // same CLI, session continues) and only then cascades to codex/gemini/etc.
+      // Profiles never compose: strategy is skipped for them, rotationResult
+      // stays null. (fromProfile's model-swap unshift above is therefore never
+      // displaced by this one.)
       if (
         shouldArmRotationFailover({
           hasRotation: !!rotationResult,
           hasVersion: !!version,
           hasPrompt: prompt !== undefined,
-          explicitFallback: fallback.length > 0,
           interactive: !!options.interactive,
           acp: !!options.acp,
           loop: !!options.loop,
@@ -1707,7 +1744,7 @@ export function registerRunCommand(program: Command): void {
       ) {
         const failover = rotationFailoverChain(rotationResult!, version!);
         if (failover.length > 0) {
-          fallback.push(...failover);
+          fallback.unshift(...failover);
           if (!options.quiet) {
             const accounts = failover.map(f => `${f.agent}@${f.version}`).join(', ');
             process.stderr.write(chalk.gray(`[agents] rate-limit failover armed: ${accounts}\n`));

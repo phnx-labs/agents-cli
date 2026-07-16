@@ -151,8 +151,13 @@ export function parseCloudSummaryIncremental(
     cache.committedChars = committedEnd;
   }
 
+  // Always return a fresh array, even on the no-tail path. Callers (e.g. React's
+  // useMemo in CloudActivityFeed) key downstream recomputation off this return
+  // value's identity; handing back the live cache.events reference would keep
+  // that identity stable across calls even as its contents grow via push(),
+  // freezing the rendered feed on whatever it first committed.
   const tail = s.slice(committedEnd).trim();
-  if (!tail) return cache.events;
+  if (!tail) return cache.events.slice();
   const withTail = cache.events.slice();
   parseOneLine(tail, withTail);
   return withTail;

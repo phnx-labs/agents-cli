@@ -279,24 +279,37 @@ export interface DispatchOptions {
   prompt: string;
   /** Explicit agent version pin (e.g. "2.1.207") to forward as `agent@version`. */
   version?: string;
-  /** Explicit run strategy (e.g. "balanced") to forward as `--strategy <strategy>`. */
+  /** Run strategy (e.g. "balanced") — the remote picks among ITS signed-in accounts. */
   strategy?: string;
+  balanced?: boolean;
+  fallback?: string;
   mode?: string;
   model?: string;
-  /** Reasoning effort to forward as `--effort <effort>`. */
+  /** Reasoning effort — forwarded unless 'auto' (the remote default). */
   effort?: string;
-  /** Additional directories to grant, already made remote-portable. */
+  /** `--env k=v` pairs, forwarded verbatim (the remote CLI parses them). */
+  env?: string[];
+  /** `--add-dir` grants, already made remote-portable. */
   addDir?: string[];
-  /** Stream events as JSON lines. */
-  json?: boolean;
-  /** Show detailed execution logs. */
-  verbose?: boolean;
-  /** Kill the agent after this duration, forwarded as `--timeout <duration>`. */
+  /** Agent wall-clock cap, forwarded as `--timeout <duration>` for the REMOTE to enforce. */
   timeout?: string;
-  /** Skip the interactive budget-confirm prompt. */
+  /** Loop family — the loop driver runs on the host. */
+  loop?: boolean;
+  maxIterations?: string;
+  budget?: string;
+  until?: string;
+  interval?: string;
+  /** Remote emits ndjson into its log; the local follow streams it verbatim. */
+  json?: boolean;
+  verbose?: boolean;
+  /** Skip the budget-confirm prompt — a detached remote run can't answer one. */
   yes?: boolean;
   /** Route through the Agent Client Protocol. */
   acp?: boolean;
+  /** False forwards --no-auto-secrets (workflow secrets resolve on the REMOTE keychain). */
+  autoSecrets?: boolean;
+  /** Native-CLI passthrough (everything after `--`), appended last. */
+  passthroughArgs?: string[];
   remoteCwd?: string;
   /**
    * Force the remote run's NEW session to use this exact id (Claude only, via
@@ -323,25 +336,38 @@ export interface DispatchOptions {
  * session-id / resume flag wiring is unit-testable without an SSH round-trip.
  * `--session-id` and `--resume` are mutually exclusive (the CLI rejects both);
  * resume wins when — defensively — both are set.
+ *
+ * Every field here is classified 'forward' in RUN_OPTION_FORWARDING
+ * (remote-cmd.ts) — keep the two in lockstep; run-forwarding.test.ts asserts
+ * the table side.
  */
 export function buildRunForwardedArgs(opts: DispatchOptions): string[] {
   const agentArg = opts.version ? `${opts.agent}@${opts.version}` : opts.agent;
   const args = ['run', agentArg, opts.prompt, '--quiet'];
-  if (opts.strategy) args.push('--strategy', opts.strategy);
   if (opts.mode) args.push('--mode', opts.mode);
   if (opts.model) args.push('--model', opts.model);
-  if (opts.effort) args.push('--effort', opts.effort);
-  if (opts.addDir) {
-    for (const dir of opts.addDir) args.push('--add-dir', dir);
-  }
+  // 'auto' is the remote default — forwarding it would only add noise.
+  if (opts.effort && opts.effort !== 'auto') args.push('--effort', opts.effort);
+  for (const kv of opts.env ?? []) args.push('--env', kv);
+  for (const dir of opts.addDir ?? []) args.push('--add-dir', dir);
+  if (opts.timeout) args.push('--timeout', opts.timeout);
+  if (opts.strategy) args.push('--strategy', opts.strategy);
+  if (opts.balanced) args.push('--balanced');
+  if (opts.fallback) args.push('--fallback', opts.fallback);
+  if (opts.loop) args.push('--loop');
+  if (opts.maxIterations) args.push('--max-iterations', opts.maxIterations);
+  if (opts.budget) args.push('--budget', opts.budget);
+  if (opts.until) args.push('--until', opts.until);
+  if (opts.interval) args.push('--interval', opts.interval);
   if (opts.json) args.push('--json');
   if (opts.verbose) args.push('--verbose');
-  if (opts.timeout) args.push('--timeout', opts.timeout);
   if (opts.yes) args.push('--yes');
   if (opts.acp) args.push('--acp');
+  if (opts.autoSecrets === false) args.push('--no-auto-secrets');
   if (opts.name) args.push('--name', opts.name);
   if (opts.resume) args.push('--resume', opts.resume);
   else if (opts.sessionId) args.push('--session-id', opts.sessionId);
+  if (opts.passthroughArgs && opts.passthroughArgs.length > 0) args.push('--', ...opts.passthroughArgs);
   return args;
 }
 
@@ -377,6 +403,10 @@ export interface InteractiveDispatchOptions {
   raw?: boolean;
   /** Forward `--interactive` to the remote so a prompt-bearing run still starts the TUI. */
   forceInteractive?: boolean;
+  /** `--env k=v` pairs, forwarded verbatim (the remote CLI parses them). */
+  env?: string[];
+  balanced?: boolean;
+  fallback?: string;
   /** Copy runtime credentials to the host before the run and shred them after. */
   copyCreds?: HostCredentials;
 }
@@ -393,16 +423,18 @@ export function buildInteractiveRunForwardedArgs(opts: InteractiveDispatchOption
   const args = ['run', agentArg];
   if (opts.prompt && opts.forceInteractive) args.push(opts.prompt);
   if (opts.forceInteractive) args.push('--interactive');
-  if (opts.strategy) args.push('--strategy', opts.strategy);
   if (opts.mode) args.push('--mode', opts.mode);
   if (opts.model) args.push('--model', opts.model);
-  if (opts.effort) args.push('--effort', opts.effort);
-  if (opts.addDir) {
-    for (const dir of opts.addDir) args.push('--add-dir', dir);
-  }
+  // 'auto' is the remote default — forwarding it would only add noise.
+  if (opts.effort && opts.effort !== 'auto') args.push('--effort', opts.effort);
+  for (const kv of opts.env ?? []) args.push('--env', kv);
+  for (const dir of opts.addDir ?? []) args.push('--add-dir', dir);
+  if (opts.timeout) args.push('--timeout', opts.timeout);
+  if (opts.strategy) args.push('--strategy', opts.strategy);
+  if (opts.balanced) args.push('--balanced');
+  if (opts.fallback) args.push('--fallback', opts.fallback);
   if (opts.json) args.push('--json');
   if (opts.verbose) args.push('--verbose');
-  if (opts.timeout) args.push('--timeout', opts.timeout);
   if (opts.yes) args.push('--yes');
   if (opts.acp) args.push('--acp');
   if (opts.name) args.push('--name', opts.name);

@@ -7,6 +7,12 @@ All notable changes to the Factory extension are documented here. Format follows
 ## [Unreleased]
 
 - **Agent panel checklist now consumes the CLI's computed `session.todos` instead of re-parsing the transcript (RUSH-1503).** The per-terminal panel derived its checklist by re-implementing the CLI's session engine — a `TodoWrite`/`update_plan` transcript parser (`extractTodoProgress` + helpers in `core/session.activity.ts`). That parser is deleted; the panel now reads `session.todos` off the same `agents sessions <id> --json` call it already makes for tool stats (`getSessionToolStatsViaAgentsCli`), mapped into the panel shape by `todoProgressFromCli`. One source of truth for checklist state, no extra subprocess, and Codex plan progress is now covered by the CLI (so the panel no longer regresses for Codex). Source: `apps/factory/src/core/session.activity.ts`, `apps/factory/src/core/handoff.ts` (`SessionToolStats.todos`), `apps/factory/src/vscode/agentPanel.vscode.ts`, `apps/factory/src/core/session.activity.test.ts`.
+- **Cloud agent activity feed no longer freezes on the first streamed event (RUSH-1558).**
+  `parseCloudSummaryIncremental` was returning its internal mutable cache array by
+  reference; React's `useMemo` in `CloudActivityFeed` keyed off that reference and
+  never saw it change as new events were pushed in place, so the detail pane's
+  live feed rendered only the first commit and stopped advancing. It now always
+  returns a fresh array. Source: `ui/settings/components/mission-control/cloudActivity.ts`.
 
 ## [0.9.294] - 2026-07-15
 

@@ -197,7 +197,15 @@ export async function resolveClaudeCredentialsBlob(opts?: {
   if (process.platform === 'darwin') {
     // 1) Bare service — the default native (non-managed) install.
     const bare = tryRead(service(undefined));
-    if (bare) return bare;
+    if (bare) {
+      if (!opts?.preferEmail) return bare;
+      // preferEmail is set — verify the bare service belongs to the right account
+      // before handing it back; on mismatch fall through to managed installs.
+      const realHome = process.env.AGENTS_REAL_HOME || os.homedir();
+      const bareEmail = await accountEmail(realHome).catch(() => null);
+      if (bareEmail === opts.preferEmail) return bare;
+      // email mismatch — fall through
+    }
 
     // 2) Managed installs — hash-suffixed service keyed to each version home.
     //    Prefer the version whose account email matches the copied config.

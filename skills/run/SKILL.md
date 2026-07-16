@@ -214,6 +214,25 @@ agents logs --host gpu-box   # pick one and view its log
 agents logs <id> -f          # re-attach to a running one and follow
 ```
 
+Run options follow a strict forwarding contract on `--host` runs — nothing
+silently drops at the SSH boundary:
+
+- **Forwarded** (same behavior remote as local): `--mode --model --name
+  --effort --env --add-dir --timeout --strategy/--balanced/--fallback`, the
+  `--loop` family, `--json --verbose --yes --acp`, `--resume <id>`, and `--
+  <passthrough>`.
+- **Rejected loud** (exit non-zero before dispatch): `--secrets/--secrets-keys/
+  --allow-expired` (Keychain values never cross SSH implicitly — provision with
+  `agents secrets export --host` instead), bare `--resume` (the picker can't
+  cross a detached dispatch — pass a concrete id),
+  `--resume-checkpoint`.
+- **Local-only** (consumed by the dispatching side): `--quiet --no-follow
+  --cwd/--project/--remote-cwd --host/--device/--any --lease`.
+
+Hosts are also a task backend (`agents cloud run "…" --host <name>` — see the
+`cloud` skill) and a routines placement target (`agents routines add …
+--run-on <name>` — see the `routines` skill).
+
 `agents logs [id]` is the unified viewer over both host-dispatch runs and local
 session transcripts; `agents hosts logs <id>` is the host-only equivalent.
 `agents hosts stop <id>` (alias `kill`) terminates the remote process group from

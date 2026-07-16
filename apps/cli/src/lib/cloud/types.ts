@@ -11,16 +11,18 @@ import type { JobTrigger } from '../routines.js';
 /**
  * Identifier for a supported cloud dispatch backend.
  *
- * Each id is one agent's *own* cloud:
+ * Each id is one agent's *own* cloud — plus your own machines:
  *   - `rush`        — Rush Cloud (runs Claude against a GitHub repo → PR)
  *   - `codex`       — OpenAI Codex Cloud (`codex cloud exec`)
  *   - `factory`     — Factory Droid Computers (`droid computer ssh` + remote `droid exec`)
  *   - `antigravity` — Google Gemini Managed Agents (Interactions API)
+ *   - `host`        — a machine you own (`agents hosts` / `agents devices`), over SSH
  *
  * Agents route to their native cloud automatically (see `cloudProvider` in the
- * agent registry); `--provider` overrides.
+ * agent registry); `--provider` overrides. Nothing auto-routes to `host` — it
+ * is always an explicit `--provider host` (or `--host <name>`) choice.
  */
-export type CloudProviderId = 'rush' | 'codex' | 'factory' | 'antigravity';
+export type CloudProviderId = 'rush' | 'codex' | 'factory' | 'antigravity' | 'host';
 
 /**
  * Lifecycle state of a cloud-dispatched task.
@@ -279,7 +281,7 @@ export interface CloudTarget {
 }
 
 /** Which dispatch option a provider's pre-provisioned target maps to. */
-export type TargetKind = 'env' | 'computer';
+export type TargetKind = 'env' | 'computer' | 'host';
 
 /**
  * Thrown by a provider's `dispatch()` when it needs a pre-provisioned target

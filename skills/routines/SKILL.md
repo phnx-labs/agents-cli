@@ -138,6 +138,22 @@ Run in the foreground, ignoring the schedule. Use this to validate prompts befor
 agents routines run daily-standup
 ```
 
+## Run on another machine
+
+`--run-on <name>` places the job body on a host/device over SSH (placement);
+`--devices` restricts which machine's scheduler may fire it (eligibility).
+`--run-on` without `--devices` auto-pins firing to the adding machine so a
+fleet of schedulers can't dispatch duplicates.
+
+```bash
+agents routines add nightly -s "0 2 * * *" -a claude -p "run the sweep" \
+  --run-on gpu-box --run-cwd ~/proj
+```
+
+The dispatched run tracks in `agents hosts ps` (named after the routine) and
+the run history finalizes from the remote exit code. Workflow-bundle and
+`loop:` routines can't cross SSH yet and refuse `--run-on` at add time.
+
 ## Pause and resume
 
 ```bash

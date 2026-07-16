@@ -1007,6 +1007,9 @@ describe('detectRateLimit', () => {
     ['429 too many requests', '429: Too Many Requests'],
     ['Anthropic overloaded', 'API Error: Overloaded'],
     ['api_overloaded snake case', 'error_type: api_overloaded'],
+    ['Claude org monthly spend limit (stdout, exit 1)', "You've hit your org's monthly spend limit · run /usage-credits to raise it, or visit claude.ai/admin-settings/usage"],
+    ['Claude out of usage credits (stdout, exit 1)', "You're out of usage credits. /model to switch models."],
+    ['out of credits without "usage"', 'Your account is out of credits.'],
   ])('matches %s', (_label, text) => {
     expect(detectRateLimit(text)).toBe(true);
   });

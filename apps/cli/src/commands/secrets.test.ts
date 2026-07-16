@@ -9,6 +9,7 @@ import {
   buildRemoteUnlockArgs,
   buildSecretsExecEnv,
   bundleEnvToDotenv,
+  formatHoldWindow,
   parseImportSource,
   parsePolicyOpt,
   quoteWin32ExecArg,
@@ -107,6 +108,24 @@ describe('assertNeverPolicyAcknowledged', () => {
 
   it('defers to an interactive prompt for never in a TTY', () => {
     expect(assertNeverPolicyAcknowledged('never', { interactive: true })).toBe('prompt');
+  });
+});
+
+describe('formatHoldWindow', () => {
+  it('renders whole hours and days for common holds', () => {
+    expect(formatHoldWindow(24 * 60 * 60 * 1000)).toBe('24 hours');
+    expect(formatHoldWindow(7 * 24 * 60 * 60 * 1000)).toBe('7 days');
+    expect(formatHoldWindow(60 * 60 * 1000)).toBe('1 hour');
+  });
+
+  it('never renders a confusing "0 hours" — sub-hour holds show minutes', () => {
+    expect(formatHoldWindow(60 * 1000)).toBe('1 minute');      // the 1m floor
+    expect(formatHoldWindow(30 * 60 * 1000)).toBe('30 minutes');
+    expect(formatHoldWindow(1)).toBe('1 minute');              // clamps up, never "0"
+  });
+
+  it('rounds 59.99 minutes to "1 hour", not "60 minutes"', () => {
+    expect(formatHoldWindow(3_599_999)).toBe('1 hour');
   });
 });
 

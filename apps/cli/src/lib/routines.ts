@@ -137,6 +137,17 @@ export interface JobConfig {
    * overdue; everywhere else it is inert and `run` refuses with a pointer.
    */
   devices?: string[];
+  /**
+   * Execution placement — run the job body on this machine over SSH (a
+   * registered host, device, capability tag, or user@host) instead of locally.
+   * Distinct from `devices`: `devices` says which daemon may FIRE the job,
+   * `host` says where the dispatched run EXECUTES. CLI flag: `--run-on`
+   * (`--host` on routines commands already means "manage routines on that
+   * machine" via the remote passthrough).
+   */
+  host?: string;
+  /** Working directory on the host for `host:`-placed runs. */
+  remoteCwd?: string;
   variables?: Record<string, string>;
   sandbox?: boolean;
   allow?: JobAllowConfig;
@@ -171,6 +182,11 @@ export interface RunMeta {
   startedAt: string;
   completedAt: string | null;
   exitCode: number | null;
+  /** Set for `host:`-placed runs — where the job body executes (no local pid). */
+  host?: string;
+  /** The host-task sidecar id backing a `host:` run; the daemon monitor
+   *  finalizes the run by reconciling it against the remote `.exit`. */
+  hostTaskId?: string;
 }
 
 /**
@@ -501,6 +517,25 @@ export function validateJob(config: Partial<JobConfig>): string[] {
   }
   if ((config as Record<string, unknown>).device !== undefined) {
     errors.push('singular "device" key is no longer supported — replace with devices: [<name>] (an array)');
+  }
+  if (config.host !== undefined) {
+    if (typeof config.host !== 'string' || config.host.trim() === '') {
+      errors.push('host must be a non-empty machine name (a registered host, device, capability tag, or user@host)');
+    }
+    // v1: the workflow bundle and the loop driver (with its signal files) live
+    // on the firing machine — neither can cross SSH to the target yet.
+    if (config.workflow) {
+      errors.push("host: can't be combined with workflow: yet (the bundle lives on the firing machine) — run the workflow locally or convert it to a plain prompt");
+    }
+    if (config.loop) {
+      errors.push("host: can't be combined with loop: yet (the loop driver and its signal files live on the firing machine)");
+    }
+    if (config.command) {
+      errors.push("host: can't be combined with command: yet (a plain shell command has no agent to place remotely) — run it locally, or convert it to a prompt");
+    }
+  }
+  if (config.remoteCwd !== undefined && config.host === undefined) {
+    errors.push('remoteCwd only applies to host:-placed routines — set host: too, or drop it');
   }
   if (config.devices !== undefined) {
     if (!Array.isArray(config.devices)) {

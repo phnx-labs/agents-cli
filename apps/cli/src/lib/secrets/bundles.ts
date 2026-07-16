@@ -41,7 +41,7 @@ import {
 import { fileStore } from './filestore.js';
 import { emit } from '../events.js';
 import { readMeta } from '../state.js';
-import { agentGetSync, agentAutoLoadSync, agentGetMetaSync, agentAutoLoadMetaSync, agentEvictSync, secretsAgentAutoEnabled, DEFAULT_TTL_MS } from './agent.js';
+import { agentGetSync, agentAutoLoadSync, agentGetMetaSync, agentAutoLoadMetaSync, agentEvictSync, secretsAgentAutoEnabled, secretsHoldMs } from './agent.js';
 import { createHash } from 'node:crypto';
 
 /** Which store carries a bundle's items. */
@@ -604,8 +604,11 @@ export function listBundles(): SecretsBundle[] {
         }
         for (const bundle of keychainBundles) out.push(bundle);
         // Populate the broker for the rest of the hold window (fire-and-forget).
+        // Same configurable cap as the value read-path — otherwise `secrets list`
+        // would keep serving a stale metadata snapshot for 7d even when the user
+        // capped the hold at 24h via secrets.agent.holdMs.
         if (useAgent && keychainBundles.length > 0) {
-          agentAutoLoadMetaSync(nameSetHash, keychainBundles, DEFAULT_TTL_MS);
+          agentAutoLoadMetaSync(nameSetHash, keychainBundles, secretsHoldMs());
         }
       }
     }
@@ -1112,9 +1115,12 @@ export function readAndResolveBundleEnv(
     emitReadAudit('success');
     // Auto-cache: this was a real keychain read (the agent fast-path returned
     // earlier on a hit). If the bundle opts into the `daily` policy and the user
-    // enabled `secrets.agent.auto`, populate the broker in the background so the
-    // next concurrent run reads silently. Skipped when noAgent (e.g. `unlock`,
-    // which loads the agent itself). Fire-and-forget — never blocks this read.
+    // enabled `secrets.agent.auto`, populate the broker so the next concurrent
+    // run reads silently. Skipped when noAgent (e.g. `unlock`, which loads the
+    // agent itself). When a broker is already up this warms it synchronously
+    // (bounded ~3s) so `daily` reliably sticks; only a cold-start broker uses the
+    // detached fire-and-forget path (see agentAutoLoadSync). The costly Touch ID
+    // prompt already happened, so the bounded wait is invisible.
     if (
       backend === 'keychain' &&
       !opts.noAgent &&
@@ -1122,7 +1128,7 @@ export function readAndResolveBundleEnv(
       bundlePolicy(bundle) === 'daily' &&
       secretsAgentAutoEnabled()
     ) {
-      agentAutoLoadSync(name, bundle, env, DEFAULT_TTL_MS);
+      agentAutoLoadSync(name, bundle, env, secretsHoldMs());
     }
     return { bundle, env };
   } catch (err) {
