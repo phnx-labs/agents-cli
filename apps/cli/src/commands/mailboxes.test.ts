@@ -103,7 +103,16 @@ describe('agents mailboxes', () => {
   afterAll(() => {
     if (savedMailboxEnv === undefined) delete process.env.AGENTS_MAILBOX_DIR;
     else process.env.AGENTS_MAILBOX_DIR = savedMailboxEnv;
-    fs.rmSync(TEST_HOME, { recursive: true, force: true });
+    try {
+      fs.rmSync(TEST_HOME, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    } catch (err) {
+      // Windows CI: a just-released handle on the spool (the aborted watch
+      // poll, or Defender scanning the tree) can outlive even the rm retries
+      // and EPERM the whole suite. Cleanup here is hygiene, not a behavior
+      // assertion — a leaked temp dir on an ephemeral runner is harmless, a
+      // false-negative suite is not. Stay strict on posix.
+      if (process.platform !== 'win32') throw err;
+    }
   });
 
   it('renders the masthead + sparkline overview and the preserved --json box shape', async () => {
