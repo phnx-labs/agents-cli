@@ -9,6 +9,8 @@ import {
   buildRemoteUnlockArgs,
   buildSecretsExecEnv,
   bundleEnvToDotenv,
+  exportBundleToFile,
+  importBundleFromFile,
   parseImportSource,
   parsePolicyOpt,
   quoteWin32ExecArg,
@@ -302,5 +304,83 @@ describe('buildRemoteUnlockArgs (unlock --host wiring)', () => {
 
   it('--all wins over any stray names', () => {
     expect(buildRemoteUnlockArgs(['x'], { all: true })).toEqual(['unlock', '--all']);
+  });
+});
+
+describe('exportBundleToFile / importBundleFromFile file round-trip', () => {
+  const PASS = 'test-passphrase-for-offline-file';
+
+  it('round-trips arbitrary values including quotes, backslashes, equals, and spaces', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-file-bundle-'));
+    const filePath = path.join(dir, 'bundle.enc');
+    const env = {
+      API_KEY: 'sk-test-abc123',
+      SECRET: 'p@ss w0rd',
+      WITH_SINGLE_QUOTE: "it's a secret",
+      WITH_DOUBLE_QUOTE: 'say "hi"',
+      WITH_BOTH: `mix'd "quotes"`,
+      WITH_BACKSLASH: 'a\\b\\c',
+      WITH_DOLLAR: '$HOME/and/$(cmd)',
+      WITH_SPACES: '  padded value  ',
+      WITH_EQUALS: 'key=val=ue',
+      WITH_HASH: 'token#frag',
+      EMPTY: '',
+    };
+    try {
+      exportBundleToFile(env, filePath, PASS);
+      expect(importBundleFromFile(filePath, PASS)).toEqual(env);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('round-trips multi-line values (not possible through the SSH dotenv path)', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-file-bundle-'));
+    const filePath = path.join(dir, 'bundle.enc');
+    const env = { SSH_KEY: '-----BEGIN EC PRIVATE KEY-----\nMHQCAQEEIA==\n-----END EC PRIVATE KEY-----\n' };
+    try {
+      exportBundleToFile(env, filePath, PASS);
+      expect(importBundleFromFile(filePath, PASS)).toEqual(env);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('the encrypted file is written with mode 0600 and is not plain JSON', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-file-bundle-'));
+    const filePath = path.join(dir, 'bundle.enc');
+    try {
+      exportBundleToFile({ KEY: 'val' }, filePath, PASS);
+      const stat = fs.statSync(filePath);
+      expect(stat.mode & 0o777).toBe(0o600);
+      // The raw file must not expose plaintext keys.
+      const raw = fs.readFileSync(filePath, 'utf-8');
+      expect(raw).not.toContain('KEY');
+      expect(raw).not.toContain('val');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a wrong passphrase with an actionable error', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-file-bundle-'));
+    const filePath = path.join(dir, 'bundle.enc');
+    try {
+      exportBundleToFile({ KEY: 'val' }, filePath, PASS);
+      expect(() => importBundleFromFile(filePath, 'wrong-passphrase')).toThrow(/decrypt.*tampered/i);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a corrupt file with an actionable error', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-file-bundle-'));
+    const filePath = path.join(dir, 'bundle.enc');
+    try {
+      fs.writeFileSync(filePath, 'not-valid-json');
+      expect(() => importBundleFromFile(filePath, PASS)).toThrow(/corrupt.*not valid JSON/i);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
