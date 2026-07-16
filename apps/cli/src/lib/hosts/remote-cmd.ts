@@ -132,6 +132,7 @@ export const RUN_OPTION_FORWARDING: Record<string, RunOptionForwarding> = {
   follow: 'local-only',
   lease: 'local-only',
   keepBox: 'local-only',
+  copyCreds: 'local-only', // copies creds TO the host before dispatch — local concern only
 };
 
 /** Actionable messages for value-aware rejections, keyed by attribute name. */

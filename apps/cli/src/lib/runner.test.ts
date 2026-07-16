@@ -110,6 +110,8 @@ describe('runner host placement', () => {
       fs.rmSync(path.dirname(runDir), { recursive: true, force: true });
       fs.rmSync(path.join(hostsCacheDir(), `${taskId}.json`), { force: true });
     }
+  });
+});
 
 describe('command-mode routines (executeJob foreground)', () => {
   const jobs: string[] = [];

@@ -466,6 +466,8 @@ describe('validateJob — host placement', () => {
 
   it('rejects remoteCwd without host', () => {
     expect(validateJob(baseJob({ remoteCwd: '~/proj' }))).toContainEqual(expect.stringContaining('remoteCwd only applies'));
+  });
+});
 
 describe('routine name path containment (C4)', () => {
   const runsDir = path.resolve(getRunsDir());
