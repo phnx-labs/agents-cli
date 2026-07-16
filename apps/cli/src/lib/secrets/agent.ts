@@ -729,6 +729,46 @@ export function agentGetSync(name: string): { bundle: SecretsBundle; env: Record
   }
 }
 
+/** Inline node program for a synchronous liveness ping. Connects, sends one
+ * `{cmd:'ping'}`, exits 0 iff a valid ping response comes back, else 3. A stale
+ * socket file with no listener refuses the connection immediately, so this
+ * fast-fails without riding any cold-start logic. argv after -e: [execPath, <socket>]. */
+const SYNC_PING_PROGRAM = `
+const net = require('net');
+const sock = process.argv[1];
+const c = net.createConnection(sock);
+let buf = '';
+const dead = () => { try { c.destroy(); } catch (e) {} process.exit(3); };
+const timer = setTimeout(dead, 700);
+c.on('error', dead);
+c.on('connect', () => c.write(JSON.stringify({ cmd: 'ping' }) + '\\n'));
+c.setEncoding('utf-8');
+c.on('data', (d) => {
+  buf += d;
+  const nl = buf.indexOf('\\n');
+  if (nl < 0) return;
+  clearTimeout(timer);
+  let r; try { r = JSON.parse(buf.slice(0, nl)); } catch (e) { return dead(); }
+  try { c.destroy(); } catch (e) {}
+  process.exit(r && r.ok && r.cmd === 'ping' ? 0 : 3);
+});
+`;
+
+/**
+ * Synchronous liveness check: is a broker actually LISTENING and answering (not
+ * just a lingering socket file)? Used to decide whether the auto-cache may take
+ * the synchronous warm path — a dead broker whose socket outlived it (crash,
+ * OOM, version-skew teardown) must NOT drag a foreground read through the
+ * worker's 20s cold-start budget. A stale socket refuses instantly, so this is
+ * fast in both the alive and dead cases. macOS only.
+ */
+export function agentReachableSync(): boolean {
+  if (!onDarwin()) return false;
+  if (!agentSocketExists()) return false;
+  const r = spawnSync(process.execPath, ['-e', SYNC_PING_PROGRAM, socketPath()], { timeout: 1500 });
+  return r.status === 0 && !r.error;
+}
+
 /**
  * Inline node program for the synchronous evict path. Mirrors SYNC_GET_PROGRAM:
  * writeBundle is synchronous and called synchronously everywhere, so a stale
@@ -821,18 +861,55 @@ export function secretsAgentAutoEnabled(): boolean {
   }
 }
 
+/** Minimum / maximum bounds for the configurable hold window. A too-small value
+ * would defeat the broker (constant re-prompts); a too-large one pins secrets in
+ * memory far longer than intended. */
+export const MIN_HOLD_MS = 60 * 1000;            // 1m
+export const MAX_HOLD_MS = 30 * 24 * 60 * 60 * 1000; // 30d
+
+/**
+ * How long an unlocked / auto-cached bundle is held before the next read
+ * re-prompts. Defaults to DEFAULT_TTL_MS (7d); override with
+ * `secrets.agent.holdMs` (milliseconds) in agents.yaml — e.g. 86400000 for a 24h
+ * cap. Clamped to [MIN_HOLD_MS, MAX_HOLD_MS] so a typo can neither disable the
+ * hold nor pin a secret in memory indefinitely. Best-effort: an unreadable or
+ * non-numeric value falls back to the 7d default. Pure except for the meta read.
+ */
+export function secretsHoldMs(): number {
+  try {
+    return clampHoldMs(readMeta().secrets?.agent?.holdMs);
+  } catch {
+    return DEFAULT_TTL_MS;
+  }
+}
+
+/** Pure clamp for a configured `holdMs`: a positive finite number is bounded to
+ * [MIN_HOLD_MS, MAX_HOLD_MS]; anything else (absent, 0, negative, NaN, non-number)
+ * falls back to the 7d default. Exported for direct unit testing. */
+export function clampHoldMs(v: unknown): number {
+  if (typeof v === 'number' && Number.isFinite(v) && v > 0) {
+    return Math.min(Math.max(Math.floor(v), MIN_HOLD_MS), MAX_HOLD_MS);
+  }
+  return DEFAULT_TTL_MS;
+}
+
 /**
  * Fire-and-forget: populate the broker with a freshly-resolved bundle so the
  * NEXT process reads it without a prompt. Used by the auto-cache path after a
- * real keychain read of a `daily`-policy bundle. Adds no latency to the caller
- * — it spawns a detached `secrets _agent-load` worker (passing the resolved env
- * over stdin, never argv) and returns immediately.
+ * real keychain read of a `daily`-policy bundle, so the NEXT concurrent read is
+ * silent. Env travels over stdin, never argv.
  *
- * The worker reuses the robust `ensureAgentRunning` path (spawn-then-ping with a
- * generous budget) rather than a tight inline retry loop: under heavy load the
- * broker is itself a cold-starting full CLI and can take several seconds to bind
- * the socket, so a short fixed budget would give up before it's ready and the
- * cache would silently never populate. Best-effort; never throws. macOS only.
+ * Reliability (this is what makes `daily` actually "stick"): when a broker is
+ * ALREADY listening, warm it SYNCHRONOUSLY with a bounded wait so the bundle is
+ * held by the time this process exits. The old detached-only path lost the race
+ * under load — a short-lived reader (`agents secrets export`, a release-script
+ * loop) exited before the unref'd worker connected, so the cache silently never
+ * populated and every read re-prompted despite the `daily` policy. Only when the
+ * broker must COLD-START (no socket yet) do we fall back to the detached worker,
+ * so a first-ever read never blocks on a multi-second broker boot.
+ *
+ * The worker reuses the robust `ensureAgentRunning` path (spawn-then-ping) rather
+ * than a tight inline retry loop. Best-effort; never throws. macOS only.
  */
 export function agentAutoLoadSync(
   name: string,
@@ -841,10 +918,28 @@ export function agentAutoLoadSync(
   ttlMs: number,
 ): void {
   if (!onDarwin()) return;
+  const payload = JSON.stringify({ name, bundle, env, ttlMs });
+  // Broker actually LISTENING → deterministic synchronous warm (bounded; the read
+  // already paid a Touch ID, so <1s here is invisible). We gate on a real liveness
+  // ping, NOT mere socket-file existence: a broker that died leaving its socket
+  // behind (crash, OOM, or the version-skew teardown in this file) would otherwise
+  // drag this FOREGROUND read through the worker's 20s cold-start budget on every
+  // read. A dead/stale socket fails the ping fast, so we drop straight to the
+  // detached path (which does the cold-start + stale-socket cleanup off the hot
+  // path) — restoring "a dead broker costs the foreground read nothing".
+  if (agentReachableSync()) {
+    try {
+      const { cmd, args } = cliSpawn(['secrets', '_agent-load']);
+      const r = spawnSync(cmd, args, { input: payload, timeout: 3000, stdio: ['pipe', 'ignore', 'ignore'] });
+      if (!r.error && r.status === 0) return;
+    } catch {
+      // fall through to the detached best-effort path
+    }
+  }
   try {
     const { cmd, args } = cliSpawn(['secrets', '_agent-load']);
     const worker = spawn(cmd, args, { stdio: ['pipe', 'ignore', 'ignore'], detached: true });
-    worker.stdin?.write(JSON.stringify({ name, bundle, env, ttlMs }));
+    worker.stdin?.write(payload);
     worker.stdin?.end();
     worker.unref();
   } catch {
@@ -855,8 +950,14 @@ export function agentAutoLoadSync(
 /**
  * Body of the hidden `secrets _agent-load` worker. Reads one `{name, bundle,
  * env, ttlMs}` payload from stdin, ensures the broker is up (robust, generous
- * budget), and loads the bundle into it. Detached from the originating read, so
- * its latency is invisible — which is why it can afford a long ensure budget.
+ * budget), and loads the bundle into it.
+ *
+ * Exit code is load-truthful: 0 ONLY when the bundle was actually loaded into a
+ * reachable broker; non-zero on any failure (malformed payload, broker couldn't
+ * be brought up, or the load transport failed). The synchronous caller
+ * (agentAutoLoadSync) relies on this to decide whether to skip the detached
+ * fallback — a bare "process exited 0" would otherwise be a false-positive
+ * success that silently reintroduces the very re-prompt storm this path fixes.
  */
 export async function runAgentLoadFromStdin(): Promise<void> {
   if (!onDarwin()) return;
@@ -866,13 +967,21 @@ export async function runAgentLoadFromStdin(): Promise<void> {
   try {
     payload = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
   } catch {
-    return; // malformed payload — nothing to load
+    process.exitCode = 1; // malformed payload — nothing loaded
+    return;
   }
-  if (!payload || !payload.name || !payload.bundle || !payload.env) return;
+  if (!payload || !payload.name || !payload.bundle || !payload.env) {
+    process.exitCode = 1;
+    return;
+  }
   // Generous budget: the broker is a cold-starting full CLI; under load it can
   // take several seconds to bind. We're detached, so waiting costs nothing.
-  if (!(await ensureAgentRunning(20000))) return;
-  await agentLoad(payload.name, payload.bundle, payload.env, payload.ttlMs ?? DEFAULT_TTL_MS);
+  if (!(await ensureAgentRunning(20000))) {
+    process.exitCode = 1; // broker couldn't be brought up — did NOT load
+    return;
+  }
+  const loaded = await agentLoad(payload.name, payload.bundle, payload.env, payload.ttlMs ?? DEFAULT_TTL_MS);
+  if (!loaded) process.exitCode = 1; // transport failed — did NOT load
 }
 
 /** Store a resolved bundle in the broker. Returns false on transport failure. */

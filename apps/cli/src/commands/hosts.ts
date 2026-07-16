@@ -13,6 +13,7 @@ import { terminalWidth, truncateToWidth, stringWidth } from '../lib/session/widt
 import { checkbox, confirm } from '@inquirer/prompts';
 import { assertValidSshTarget } from '../lib/ssh-exec.js';
 import { getProvider, listAllHosts, resolveHost } from '../lib/hosts/registry.js';
+import { getDevice } from '../lib/devices/registry.js';
 import { sshTargetFor, type Host } from '../lib/hosts/types.js';
 import { listSshConfigHosts, listKnownHosts, isSshConfigHost } from '../lib/hosts/ssh-config.js';
 import {
@@ -109,8 +110,8 @@ async function doAdd(name: string | undefined, target: string | undefined, opts:
     return;
   }
 
-  let spec: Host;
-  let sshTarget: string;
+  let spec: Host | undefined;
+  let sshTarget = '';
   if (target) {
     assertValidSshTarget(target);
     const { address, user } = parseTarget(target);
@@ -120,9 +121,35 @@ async function doAdd(name: string | undefined, target: string | undefined, opts:
     spec = { name, provider: 'local', source: 'ssh-config', caps: opts.cap, os: opts.os };
     sshTarget = name;
   } else {
-    console.log(chalk.red(`"${name}" is not in ~/.ssh/config. Pass a target: agents hosts add ${name} <user@host>`));
-    process.exitCode = 1;
-    return;
+    // A registered device enrolls with no target — connection details come from
+    // the device profile. The main reason to enroll one at all is the overlay
+    // metadata (capability tags); plain dispatch already works via the devices
+    // provider.
+    const device = await getDevice(name);
+    if (device && device.auth.method !== 'password') {
+      const address = device.address.dnsName ?? device.address.ip;
+      if (address) {
+        spec = {
+          name,
+          provider: 'local',
+          source: 'inline',
+          address,
+          user: device.user,
+          caps: opts.cap,
+          os: opts.os ?? (device.platform !== 'unknown' ? device.platform : undefined),
+        };
+        sshTarget = device.user ? `${device.user}@${address}` : address;
+      }
+    }
+    if (!spec) {
+      if (device?.auth.method === 'password') {
+        console.log(chalk.red(`Device "${name}" uses password auth — dispatch needs key auth. Switch it first: agents devices set ${name} --auth key`));
+      } else {
+        console.log(chalk.red(`"${name}" is not in ~/.ssh/config or the devices registry. Pass a target: agents hosts add ${name} <user@host>`));
+      }
+      process.exitCode = 1;
+      return;
+    }
   }
 
   const probe = probeHost(sshTarget);
@@ -148,8 +175,12 @@ async function doList(json: boolean): Promise<void> {
     // Cap TARGET at its column so a long user@host can't shove CAPS out of alignment.
     const tgtW = stringWidth(tgt);
     const tgtCol = tgtW > 28 ? truncateToWidth(tgt, 28) : tgt + ' '.repeat(28 - tgtW);
-    const mark = h.enrolled ? '' : chalk.gray(' ·available');
-    console.log(h.name.padEnd(20) + h.source.padEnd(13) + tgtCol + (h.caps?.join(',') ?? '') + mark);
+    // Devices surface their registry as SOURCE (they're synced, not enrolled here).
+    const source = h.provider === 'devices' ? 'devices' : h.source;
+    const mark = h.dispatchable === false
+      ? chalk.yellow(' ·password-auth (no dispatch)')
+      : h.enrolled ? '' : chalk.gray(' ·available');
+    console.log(h.name.padEnd(20) + source.padEnd(13) + tgtCol + (h.caps?.join(',') ?? '') + mark);
   }
 }
 
@@ -178,6 +209,12 @@ async function doRemove(name: string): Promise<void> {
   const host = await resolveHost(name);
   if (!host || !host.enrolled) {
     console.log(chalk.yellow(`"${name}" is not enrolled (nothing to remove).`));
+    return;
+  }
+  if (host.provider === 'devices') {
+    // The devices registry owns this entry — hosts remove would silently no-op.
+    console.log(chalk.yellow(`"${name}" comes from the devices registry. Remove it there: agents devices rm ${name}`));
+    process.exitCode = 1;
     return;
   }
   await getProvider('local').remove!(name);

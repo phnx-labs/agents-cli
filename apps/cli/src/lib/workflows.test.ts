@@ -9,6 +9,7 @@ import {
   listWorkflowsForAgent,
   resolveAllowedSubagents,
   pruneStaleWorkflowSubagents,
+  ensureSubagentDispatchTool,
   syncWorkflowToVersion,
   transformWorkflowForKimi,
   transformWorkflowForAntigravity,
@@ -128,6 +129,35 @@ describe('pruneStaleWorkflowSubagents — fail-closed cleanup (issue #401)', () 
 
     // A shared dir that does not exist yet is a no-op, never a throw.
     expect(pruneStaleWorkflowSubagents(path.join(os.tmpdir(), 'agents-missing-xyz-401'), ['a.md'], [])).toEqual([]);
+  });
+});
+
+describe('ensureSubagentDispatchTool — keep Task for orchestrators', () => {
+  const base = ['Read', 'Grep', 'Glob', 'Bash', 'Edit', 'Write', 'WebFetch'];
+
+  it('appends Task when the workflow ships subagents and Task is missing', () => {
+    // This is the doc-gaps / blog-engine bug: a `tools:` list that omits Task
+    // while shipping a subagents/ dir strips the orchestrator's only dispatch
+    // path, so the run silently no-ops.
+    expect(ensureSubagentDispatchTool(base, true)).toEqual([...base, 'Task']);
+  });
+
+  it('leaves the list unchanged when the workflow has no subagents', () => {
+    const out = ensureSubagentDispatchTool(base, false);
+    expect(out).toEqual(base);
+    expect(out).not.toContain('Task');
+  });
+
+  it('does not duplicate Task when it is already listed', () => {
+    const withTask = [...base, 'Task'];
+    expect(ensureSubagentDispatchTool(withTask, true)).toEqual(withTask);
+    expect(ensureSubagentDispatchTool(withTask, true).filter(t => t === 'Task')).toHaveLength(1);
+  });
+
+  it('does not mutate the input array', () => {
+    const input = [...base];
+    ensureSubagentDispatchTool(input, true);
+    expect(input).toEqual(base);
   });
 });
 

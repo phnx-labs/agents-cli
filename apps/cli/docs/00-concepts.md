@@ -120,11 +120,23 @@ no remote semantics reject the flag with a clear message rather than commander's
 raw `unknown option`. The target may be a registered host name, a capability tag
 (`--host gpu --any`), or a raw `user@host`.
 
-The two systems are parallel and independent — a machine can appear in both.
-Devices auto-populate from Tailscale and back the interactive `agents ssh`; hosts
-are enrolled deliberately and back `--host` dispatch. `agents devices render --write`
-bridges them one way (device → ssh_config → enrollable as a host). See
-[hosts.md](hosts.md) for the `--host` execution model.
+The two registries feed **one host pool** behind the `HostProvider` seam:
+`local` (agents.yaml overlay ∪ ssh-config) registers first, `devices` (the
+Tailscale registry) second, so an enrolled host shadows a same-name device.
+A device registered once with `agents devices sync` therefore shows up in
+`agents hosts list` (SOURCE `devices`), resolves as a `--host` target, and
+participates in capability routing — password-auth devices are listed but
+marked non-dispatchable (offload rides `BatchMode=yes` ssh). To tag a device
+with capabilities, `agents hosts add <device> --cap gpu` enrolls it inline,
+sourcing the address from its device profile. `agents devices render --write`
+still bridges to plain `ssh`/`scp` via ssh_config.
+
+Hosts are execution targets everywhere runs and tasks dispatch: `agents run
+--host`, `agents teams` placement, `agents cloud run --host <name>` (the `host`
+cloud provider — tasks visible in both `agents cloud ps` and `agents hosts
+ps`), and routines placement (`agents routines add … --run-on <name>`). See
+[hosts.md](hosts.md) for the `--host` execution model and the option-forwarding
+contract.
 
 ---
 

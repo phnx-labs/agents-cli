@@ -4,7 +4,7 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { describe, it, expect } from 'vitest';
 import type { SecretsBundle } from './bundles.js';
-import { handleAgentRequest, shouldSelfHealForUpgrade, shouldTeardownVersionSkewedBroker, realBundleCount, shouldWipeOnWatchEvent, agentEvictSync, startHostedBroker, runSecretsAgent, agentPing, secretsAgentServiceInstalled, retireLegacySecretsAgentService, META_CACHE_PREFIX, type StoredBundle, type Request } from './agent.js';
+import { handleAgentRequest, shouldSelfHealForUpgrade, shouldTeardownVersionSkewedBroker, realBundleCount, shouldWipeOnWatchEvent, agentEvictSync, startHostedBroker, runSecretsAgent, agentPing, secretsAgentServiceInstalled, retireLegacySecretsAgentService, clampHoldMs, DEFAULT_TTL_MS, MIN_HOLD_MS, MAX_HOLD_MS, META_CACHE_PREFIX, type StoredBundle, type Request } from './agent.js';
 
 /**
  * These tests target the broker's store semantics — the part with real bug
@@ -465,5 +465,26 @@ describe('shouldTeardownVersionSkewedBroker (client-side #435 twin: never wipe a
 
   it('tears down an empty version-skewed broker so it relaunches on new code', () => {
     expect(shouldTeardownVersionSkewedBroker(0)).toBe(true);
+  });
+});
+
+describe('clampHoldMs (configurable 24h hold cap)', () => {
+  it('passes a valid value through (24h stays 24h)', () => {
+    expect(clampHoldMs(24 * 60 * 60 * 1000)).toBe(24 * 60 * 60 * 1000);
+  });
+
+  it('falls back to the 7d default for absent / non-numeric / non-positive values', () => {
+    for (const v of [undefined, null, NaN, 0, -5, '86400000', {}]) {
+      expect(clampHoldMs(v)).toBe(DEFAULT_TTL_MS);
+    }
+  });
+
+  it('clamps below the floor up to MIN_HOLD_MS and above the ceiling down to MAX_HOLD_MS', () => {
+    expect(clampHoldMs(1000)).toBe(MIN_HOLD_MS);                 // 1s -> 1m floor
+    expect(clampHoldMs(999 * 24 * 60 * 60 * 1000)).toBe(MAX_HOLD_MS); // 999d -> 30d ceiling
+  });
+
+  it('floors fractional milliseconds', () => {
+    expect(clampHoldMs(MIN_HOLD_MS + 0.9)).toBe(MIN_HOLD_MS);
   });
 });

@@ -467,6 +467,31 @@ export function resolveAllowedSubagents(
   };
 }
 
+/** The Claude tool an orchestrator uses to dispatch subagents. Must stay in a
+ *  workflow's `--tools` allowlist whenever the workflow ships dispatchable
+ *  subagents, or the orchestrator has no way to reach them. */
+export const SUBAGENT_DISPATCH_TOOL = 'Task';
+
+/**
+ * Keep the subagent-dispatch tool (`Task`) in a `tools:`-restricted workflow's
+ * allowlist when the workflow actually ships subagents to dispatch.
+ *
+ * A WORKFLOW.md `tools:` list becomes Claude's `--tools` set, which *restricts*
+ * the available built-ins. An orchestrator whose `subagents/` files were just
+ * copied into the shared agents dir but whose `tools:` omits `Task` cannot
+ * reach any of them — it silently no-ops (observed: the run emits only "I'll
+ * wait for the completion notification" and exits). Omitting `Task` while
+ * shipping a `subagents/` dir is always an authoring miss, so we re-add it at
+ * the source rather than relying on every workflow author to remember.
+ *
+ * Returns `tools` unchanged when the workflow has no subagents or already lists
+ * `Task`; otherwise appends `Task`.
+ */
+export function ensureSubagentDispatchTool(tools: string[], hasSubagents: boolean): string[] {
+  if (!hasSubagents || tools.includes(SUBAGENT_DISPATCH_TOOL)) return tools;
+  return [...tools, SUBAGENT_DISPATCH_TOOL];
+}
+
 /**
  * Prune stale workflow-managed subagent files from the shared per-agent agents
  * dir before a scoped run writes the permitted set (issue #401, follow-up to

@@ -41,6 +41,8 @@ import {
   type FallbackEntry,
 } from './exec.js';
 import type { LoopDeps } from './loop.js';
+import { loadTask as loadHostTask } from './hosts/tasks.js';
+import { reconcileTask as reconcileHostTask } from './hosts/reconcile.js';
 import { backgroundSpawnOptions } from './platform/process.js';
 import { getBinaryPath, isVersionInstalled, resolveVersion } from './versions.js';
 import {
@@ -537,6 +539,12 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
   if (eligibility) {
     throw new Error(eligibility.message);
   }
+  // `host:` placement — the job body runs on another machine over SSH; local
+  // version selection / sandbox / spawn do not apply. Sync callers (manual
+  // `routines run`, catchup) follow the remote run to completion.
+  if (config.host) {
+    return executeJobOnHost(config, { detached: false });
+  }
 
   // Command-mode: run a plain shell command directly (no agent, no rotation,
   // no pinning, no sandbox overlay). Reuses the run-record machinery so
@@ -739,15 +747,74 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
   return { meta, reportPath: null };
 }
 
-/**
- * Foreground execution for a command-mode routine (`config.command`). Runs a
- * plain shell command in the REAL environment (no sandbox), captures stdout+
- * stderr to `stdout.log`, awaits completion, and honors `config.timeout` with
- * the same SIGTERM→SIGKILL kill mechanism the agent path uses. No agent is
- * spawned; the run record carries `command` instead of `agent`. There is no
- * agent report to extract, so `reportPath` is always null (the stdout log is
- * the artifact — same location the agent path writes).
- */
+async function executeJobOnHost(config: JobConfig, opts: { detached: boolean }): Promise<RunResult> {
+  if (config.workflow) {
+    throw new Error(`Routine '${config.name}' runs a workflow bundle, which can't execute on a host yet — remove 'host:' or 'workflow:'.`);
+  }
+  if (config.loop) {
+    throw new Error(`Routine '${config.name}' uses 'loop:', which can't execute on a host yet — remove 'host:' or 'loop:'.`);
+  }
+  if (config.command) {
+    throw new Error(`Routine '${config.name}' uses 'command:', which can't execute on a host yet — remove 'host:' or 'command:'.`);
+  }
+  const { resolveHostRunTarget, dispatchPromptToHost } = await import('./hosts/run-target.js');
+  const host = await resolveHostRunTarget(config.host!);
+
+  const timer = createTimer('agent.run', {
+    agent: config.agent,
+    jobName: config.name,
+    mode: config.mode,
+    host: host.name,
+    ...redactPrompt(config.prompt),
+    schedule: config.schedule,
+  });
+
+  const runId = generateRunId();
+  const runDir = getRunDir(config.name, runId);
+  fs.mkdirSync(runDir, { recursive: true });
+
+  const meta: RunMeta = {
+    jobName: config.name,
+    runId,
+    agent: config.agent,
+    pid: null, // no local process — the run lives on the host
+    spawnedAt: Date.now(),
+    status: 'running',
+    startedAt: new Date().toISOString(),
+    completedAt: null,
+    exitCode: null,
+    host: host.name,
+  };
+  writeRunMeta(meta);
+
+  const { task, exitCode } = await dispatchPromptToHost(host, {
+    agent: config.agent!,
+    prompt: resolveJobPrompt(config),
+    mode: normalizeMode(config.mode),
+    effort: config.effort,
+    model: config.config?.model as string | undefined,
+    timeout: config.timeout, // enforced by the REMOTE agents run
+    remoteCwd: config.remoteCwd,
+    name: config.name,
+    cwd: runDir,
+    follow: !opts.detached,
+  });
+  meta.hostTaskId = task.id;
+
+  // Sync path: a real exit code finalizes now. -1 (follow window closed) and
+  // the detached path leave the meta `running` for the monitor to reconcile.
+  if (!opts.detached && exitCode !== null && exitCode !== undefined && exitCode !== -1) {
+    meta.status = exitCode === 0 ? 'completed' : 'failed';
+    meta.exitCode = exitCode;
+    meta.completedAt = new Date().toISOString();
+  }
+  writeRunMeta(meta);
+  timer.end({ status: meta.status, exitCode: meta.exitCode ?? undefined, runId });
+  return { meta, reportPath: null };
+}
+
+/** Spawn a job as a detached process and return immediately with run metadata. */
+
 async function executeCommandJobForeground(config: JobConfig): Promise<RunResult> {
   const timer = createTimer('agent.run', {
     jobName: config.name,
@@ -841,11 +908,18 @@ async function executeCommandJobForeground(config: JobConfig): Promise<RunResult
 }
 
 /** Spawn a job as a detached process and return immediately with run metadata. */
+
+/** Spawn a job as a detached process and return immediately with run metadata. */
 export async function executeJobDetached(config: JobConfig): Promise<RunMeta> {
   const eligibility = checkJobDeviceEligibility(config);
   if (eligibility) {
     process.stderr.write(`[agents] daemon: skipping '${config.name}' — ${eligibility.message}\n`);
     throw new Error(eligibility.message);
+  }
+  // `host:` placement — dispatch over SSH and return; the monitor finalizes.
+  if (config.host) {
+    const { meta } = await executeJobOnHost(config, { detached: true });
+    return meta;
   }
 
   // Command-mode: fire a plain shell command detached (no agent, no rotation,
@@ -1140,6 +1214,24 @@ function isPidOurs(pid: number, spawnedAt: number | undefined): boolean {
   }
 }
 
+/**
+ * Finalize one `host:`-placed run by healing its host-task sidecar against the
+ * remote `.exit` (lib/hosts/reconcile.ts). Mutates + persists the meta only
+ * when the sidecar reached a terminal state.
+ */
+function finalizeHostRun(meta: RunMeta): void {
+  try {
+    const task = loadHostTask(meta.hostTaskId!);
+    if (!task) return;
+    const healed = reconcileHostTask(task);
+    if (healed.status !== 'completed' && healed.status !== 'failed') return;
+    meta.status = healed.status;
+    meta.exitCode = healed.exitCode ?? (healed.status === 'completed' ? 0 : 1);
+    meta.completedAt = healed.finishedAt ?? new Date().toISOString();
+    writeRunMeta(meta);
+  } catch { /* unreachable host or unreadable sidecar — retry next sweep */ }
+}
+
 /** Scan all runs marked "running" and finalize any whose process has exited. */
 export function monitorRunningJobs(): void {
   const runsDir = getRunsDir();
@@ -1160,6 +1252,15 @@ export function monitorRunningJobs(): void {
       try {
         const meta: RunMeta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
         if (meta.status !== 'running') continue;
+
+        // `host:`-placed run — no local pid to watch. Reconcile against the
+        // remote `.exit` (completion is confirmed, never guessed: an
+        // unreachable host leaves the run `running` for the next sweep).
+        if (meta.hostTaskId) {
+          finalizeHostRun(meta);
+          continue;
+        }
+
         if (!meta.pid) continue;
 
         const runDirPath = path.join(jobRunsPath, runDirEntry.name);

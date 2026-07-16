@@ -5,7 +5,10 @@
 > `usage`, `cost`, `doctor`, `list`, `sync`, `plugins`, `skills`, `status`,
 > `teams`, `routines`, …), on `agents run`, and on multi-host aggregators
 > (`sessions`, `feed`, `logs`). Groups with no remote semantics reject the flag
-> with a clear message — never a raw commander `unknown option`. This document is
+> with a clear message — never a raw commander `unknown option`.  Every `agents run` option is classified
+> by the forwarding contract (`RUN_OPTION_FORWARDING`,
+> `src/lib/hosts/remote-cmd.ts`) — forwarded, rejected loud, or local-only;
+> nothing silently drops at the SSH boundary. This document is
 > the design rationale; see [00-concepts.md](00-concepts.md#devices--hosts) for
 > the concept overview and how hosts relate to the Tailscale-backed
 > `agents devices` registry, and [09-ssh-transport.md](09-ssh-transport.md) for

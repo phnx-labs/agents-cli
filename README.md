@@ -395,6 +395,12 @@ agents devices list --full              # add per-device cores and free/total RA
 agents devices list --no-stats          # instant: names/addresses only, skip the probe
 agents ssh mac-mini                     # hardened SSH: fails fast if offline,
                                         # PowerShell on Windows, password-from-Keychain
+agents hosts list                       # devices show up here too (one host pool)
+agents hosts add mac-mini --cap gpu     # tag a device for capability routing (--host gpu)
+
+# Hosts as a task backend + scheduled placement
+agents cloud run "nightly benchmark" --host gpu-box --agent claude   # task in cloud ps AND hosts ps
+agents routines add nightly -s "0 2 * * *" -a claude -p "run the sweep" --run-on gpu-box
 ```
 
 `agents devices list` probes every reachable box in parallel (bounded timeout, so a
@@ -403,7 +409,7 @@ pressure, and an idle/light/busy/loaded headroom badge, plus a fleet-capacity su
 (`164 cores · 421G free / 518G RAM`). It answers "which machine has room right now?" —
 the utilization signal the teammate scheduler doesn't yet see.
 
-**Hosts** (`agents hosts`) are git-synced dispatch targets in `agents.yaml`; **devices** (`agents devices`) are your Tailscale machines in a local registry. Both ride SSH. See [docs/00-concepts.md](apps/cli/docs/00-concepts.md#devices--hosts).
+**Hosts** (`agents hosts`) are git-synced dispatch targets in `agents.yaml`; **devices** (`agents devices`) are your Tailscale machines in a local registry. Both ride SSH and feed one host pool: devices appear in `agents hosts list` and capability routing without a second enrollment. On `--host` runs every `agents run` option is either forwarded (`--effort --env --timeout --loop …`), rejected loud (`--secrets` never crosses SSH implicitly), or consumed locally — nothing silently drops. See [docs/00-concepts.md](apps/cli/docs/00-concepts.md#devices--hosts).
 
 Every `--host` command rides one multiplexed SSH engine, tuned for driving a fleet from a small laptop: the first call to a machine opens a control socket and every later call reuses it (no repeat TCP+auth handshake), connections carry keepalive so a dropped link dies in ~45 s instead of zombying, and following a remote run polls in a single round-trip per cycle. Measured against a Tailscale-relayed host: repeated calls **~6–7× faster**, dispatch readiness **~2×**, and the follow loop **~21× faster with 50% fewer local ssh spawns**. Design: [docs/09-ssh-transport.md](apps/cli/docs/09-ssh-transport.md) · reproduce: `node scripts/bench-ssh.mjs <host>`.
 
@@ -431,7 +437,7 @@ Team state is observable via `agents teams list --json` / `agents teams status -
 
 ## Cloud
 
-Some work shouldn't tie up your laptop. `agents cloud run` hands a task to a managed provider that clones the repo, plans, implements, tests, and opens a PR -- while your terminal stays free.
+Some work shouldn't tie up your laptop. `agents cloud run` hands a task to a managed provider that clones the repo, plans, implements, tests, and opens a PR -- while your terminal stays free. A fifth provider, `host`, dispatches the same way onto machines you own: `agents cloud run "…" --host gpu-box` (tasks track in `agents cloud ps` and `agents hosts ps` alike).
 
 <p align="center">
   <img src="assets/cloud.svg" alt="agents cloud run dispatches one prompt to a managed provider (Rush, Codex, Factory, or Antigravity) that clones, plans, tests, and opens a pull request while you keep working" width="100%" />

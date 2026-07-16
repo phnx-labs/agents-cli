@@ -121,9 +121,9 @@ describe('buildRunForwardedArgs', () => {
       '--effort', 'high',
       '--add-dir', '~/notes',
       '--add-dir', '/shared',
+      '--timeout', '30m',
       '--json',
       '--verbose',
-      '--timeout', '30m',
       '--yes',
       '--acp',
     ]);
@@ -208,9 +208,9 @@ describe('buildInteractiveRunForwardedArgs', () => {
       'run', 'claude',
       '--effort', 'max',
       '--add-dir', '~/notes',
+      '--timeout', '1h',
       '--json',
       '--verbose',
-      '--timeout', '1h',
       '--yes',
       '--acp',
     ]);

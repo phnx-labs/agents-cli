@@ -98,12 +98,11 @@ describe('rotationFailoverChain (#348 — synthesize a same-agent failover chain
 
 describe('shouldArmRotationFailover (#348 — arming gate; must not trip --acp/--loop guards)', () => {
   // The eligible baseline: a real rotation picked a version, there is a prompt,
-  // no explicit/profile fallback, and the run is a plain headless prompt run.
+  // and the run is a plain headless prompt run.
   const armable: FailoverArmingContext = {
     hasRotation: true,
     hasVersion: true,
     hasPrompt: true,
-    explicitFallback: false,
     interactive: false,
     acp: false,
     loop: false,
@@ -133,9 +132,11 @@ describe('shouldArmRotationFailover (#348 — arming gate; must not trip --acp/-
     expect(shouldArmRotationFailover({ ...armable, hasPrompt: false })).toBe(false);
   });
 
-  it('does NOT arm when an explicit or profile fallback is already set', () => {
-    expect(shouldArmRotationFailover({ ...armable, explicitFallback: true })).toBe(false);
-  });
+  // An explicit --fallback no longer disarms rotation failover: the same-agent
+  // accounts are unshifted ahead of the cross-agent entries (gh-monitor heal
+  // bug — `--fallback codex,droid` pinned every run to one capped account).
+  // The armable baseline above is the explicit-fallback case too: the gate has
+  // no explicitFallback input anymore.
 
   it('does NOT arm for pinned / non-rotation runs (no rotation or no picked version)', () => {
     expect(shouldArmRotationFailover({ ...armable, hasRotation: false })).toBe(false);
@@ -172,6 +173,16 @@ fs.writeFileSync(stateFile, String(n));
 if (mode === 'plain-fail') {
   process.stderr.write('Error: compile failure — not a limit\\n');
   process.exit(1);
+}
+if (mode === 'stdout-spend-limit-then-ok') {
+  // Claude prints billing refusals to STDOUT, not stderr — the cascade must
+  // still detect them (via the SpawnResult stdout tail).
+  if (n === 1) {
+    process.stdout.write("You've hit your org's monthly spend limit \\u00b7 run /usage-credits to raise it\\n");
+    process.exit(1);
+  }
+  process.stdout.write('done\\n');
+  process.exit(0);
 }
 if (n === 1) {
   process.stderr.write('API request failed: 429 Too Many Requests (rate limit exceeded)\\n');
@@ -212,6 +223,26 @@ process.exit(0);
     });
     expect(code).toBe(0);
     // Primary 429'd (call 1), re-dispatched once and succeeded (call 2).
+    expect(fs.readFileSync(stateFile, 'utf8')).toBe('2');
+  });
+
+  it('a billing refusal on STDOUT (spend limit) also cascades — the gh-monitor heal bug', async () => {
+    const { binDir, stateFile } = fakeAmp();
+    const code = await runWithFallback({
+      agent: 'amp',
+      prompt: 'do the task',
+      mode: 'edit',
+      effort: 'auto',
+      headless: true,
+      cwd: binDir,
+      env: {
+        PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}`,
+        AGENTS_TEST_MODE: 'stdout-spend-limit-then-ok',
+        AGENTS_TEST_STATE: stateFile,
+      },
+      fallback: [{ agent: 'amp' }],
+    });
+    expect(code).toBe(0);
     expect(fs.readFileSync(stateFile, 'utf8')).toBe('2');
   });
 
