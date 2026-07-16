@@ -8,16 +8,24 @@
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import type { Server } from 'http';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { startControlServer, spawnDetached } from './control.js';
 import type { ControlOptions, RunRequest } from './control.js';
 import type { ServeState } from './data.js';
 
 let server: Server | null = null;
+let tmpStreamDir: string | null = null;
 
 afterEach(async () => {
   if (server) {
     await new Promise<void>((r) => server!.close(() => r()));
     server = null;
+  }
+  if (tmpStreamDir) {
+    fs.rmSync(tmpStreamDir, { recursive: true, force: true });
+    tmpStreamDir = null;
   }
 });
 
@@ -171,6 +179,71 @@ describe('control server — unknown routes', () => {
   });
 });
 
+describe('control server — GET /api/session/:id/stream (SSE event bridge)', () => {
+  // Point the route at a temp capture file via the streamLogPathFor seam so the
+  // test never touches the real ~/.agents cache.
+  function bootStream(file: string): Promise<string> {
+    return boot({ streamPollMs: 15, streamLogPathFor: () => file });
+  }
+
+  async function readFrames(res: Response, until: (buf: string) => boolean): Promise<string> {
+    const reader = res.body!.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    while (!until(buf)) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value);
+    }
+    await reader.cancel();
+    return buf;
+  }
+
+  it('streams captured NDJSON events and closes on the terminal event', async () => {
+    tmpStreamDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-ctl-stream-'));
+    const file = path.join(tmpStreamDir, 'run.ndjson');
+    fs.writeFileSync(file, '{"type":"assistant","t":"hi"}\n{"type":"result"}\n');
+
+    const base = await bootStream(file);
+    const res = await fetch(base + '/api/session/sid-x/stream', { headers: auth });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/event-stream');
+
+    const buf = await readFrames(res, (b) => b.includes('event: end'));
+    expect(buf).toContain('event: assistant');
+    expect(buf).toContain('"t":"hi"');
+    expect(buf).toContain('event: result');
+    expect(buf).toContain('event: end');
+    // Each data frame carries a byte-offset id for resume.
+    expect(buf).toMatch(/\nid: \d+\n/);
+  });
+
+  it('resumes from ?offset= and does not replay earlier events', async () => {
+    tmpStreamDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-ctl-stream-'));
+    const file = path.join(tmpStreamDir, 'run.ndjson');
+    const l1 = '{"type":"assistant","t":"first"}\n';
+    fs.writeFileSync(file, l1 + '{"type":"result"}\n');
+
+    const base = await bootStream(file);
+    const res = await fetch(base + `/api/session/sid-x/stream?offset=${Buffer.byteLength(l1)}`, {
+      headers: auth,
+    });
+    const buf = await readFrames(res, (b) => b.includes('event: end'));
+    expect(buf).not.toContain('first'); // earlier event skipped
+    expect(buf).toContain('event: result');
+  });
+
+  it('requires the bearer token', async () => {
+    tmpStreamDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-ctl-stream-'));
+    const file = path.join(tmpStreamDir, 'run.ndjson');
+    fs.writeFileSync(file, '{"type":"result"}\n');
+    const base = await bootStream(file);
+    const res = await fetch(base + '/api/session/sid-x/stream');
+    expect(res.status).toBe(401);
+    await res.body?.cancel();
+  });
+});
+
 describe('spawnDetached — crash safety on spawn failure', () => {
   // Regression for the prix-cloud finding: a detached spawn with no 'error'
   // listener throws an unhandled 'error' (ENOENT) and takes down the whole
@@ -185,5 +258,27 @@ describe('spawnDetached — crash safety on spawn failure', () => {
 
   it('resolves when the process spawns successfully', async () => {
     await expect(spawnDetached(process.execPath, ['-e', ''])).resolves.toBeUndefined();
+  });
+
+  it('captures child stdout to an inherited fd (the defaultRunner capture path)', async () => {
+    tmpStreamDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-ctl-cap-'));
+    const file = path.join(tmpStreamDir, 'cap.ndjson');
+    const fd = fs.openSync(file, 'a');
+    try {
+      await spawnDetached(process.execPath, ['-e', 'process.stdout.write(\'{"type":"result"}\\n\')'], [
+        'ignore',
+        fd,
+        fd,
+      ]);
+    } finally {
+      fs.closeSync(fd);
+    }
+    // The detached child writes async; poll briefly for the line to land.
+    let contents = '';
+    for (let i = 0; i < 40 && !contents.includes('result'); i++) {
+      await new Promise((r) => setTimeout(r, 25));
+      contents = fs.readFileSync(file, 'utf-8');
+    }
+    expect(contents).toContain('{"type":"result"}');
   });
 });

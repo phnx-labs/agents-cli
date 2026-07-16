@@ -17,11 +17,14 @@
  */
 import type http from 'http';
 import { createServer } from 'http';
+import fs from 'fs';
+import type { StdioOptions } from 'child_process';
 import { spawn } from 'child_process';
 import { randomUUID, randomBytes } from 'crypto';
 import { getAgentsInvocation } from '../daemon.js';
 import { handleServeGet, resolveServeContext, type ServeOptions } from './server.js';
 import { verifyControlToken } from './token.js';
+import { readNewEvents, streamDir, streamLogPath } from './stream.js';
 
 /** A request to start an agent run on this anchor (local or offloaded). */
 export interface RunRequest {
@@ -57,9 +60,14 @@ export interface ControlOptions extends ServeOptions {
   runner?: RunDispatcher;
   /** Message sender. Defaults to spawning `agents message …`. */
   messenger?: Messenger;
+  /** Poll cadence (ms) for the session event stream. Defaults to 300. */
+  streamPollMs?: number;
+  /** Resolve a session id to its NDJSON capture file. Defaults to {@link streamLogPath}. */
+  streamLogPathFor?: (sessionId: string) => string;
 }
 
 const MAX_BODY_BYTES = 64 * 1024;
+const DEFAULT_STREAM_POLL_MS = 300;
 
 /** Pull the presented bearer token from either header form. */
 function presentedToken(req: http.IncomingMessage): string | undefined {
@@ -104,6 +112,62 @@ function sendJson(res: http.ServerResponse, code: number, obj: unknown): void {
 }
 
 /**
+ * SSE stream of a session's normalized NDJSON events, offset-tailed from its
+ * capture file. Resumes from `?offset=<bytes>` or the `Last-Event-ID` header
+ * (each event's `id:` is its exact byte offset, so resume neither loses nor
+ * duplicates). Closes when a terminal (`result`/`error`) event is seen or the
+ * client disconnects. A not-yet-created file simply yields nothing until the
+ * run starts writing — the phone can open the stream the instant it dispatches.
+ */
+export function startSessionStream(
+  file: string,
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  pollMs: number,
+): void {
+  res.writeHead(200, {
+    'content-type': 'text/event-stream',
+    'cache-control': 'no-cache',
+    connection: 'keep-alive',
+  });
+
+  const params = new URL(req.url ?? '/', 'http://anchor').searchParams;
+  const qOffset = Number.parseInt(params.get('offset') ?? '', 10);
+  const lastId = Number.parseInt(
+    Array.isArray(req.headers['last-event-id'])
+      ? req.headers['last-event-id'][0]
+      : req.headers['last-event-id'] ?? '',
+    10,
+  );
+  let offset = Number.isFinite(qOffset) ? qOffset : Number.isFinite(lastId) ? lastId : 0;
+
+  let closed = false;
+  let timer: ReturnType<typeof setInterval> | undefined;
+  const stop = () => {
+    closed = true;
+    if (timer) clearInterval(timer);
+  };
+  req.on('close', stop);
+
+  const tick = () => {
+    if (closed) return;
+    const { events, done } = readNewEvents(file, offset);
+    for (const { event, offset: at } of events) {
+      offset = at;
+      res.write(`id: ${at}\nevent: ${event.type}\ndata: ${JSON.stringify(event.raw)}\n\n`);
+    }
+    if (done && !closed) {
+      res.write('event: end\ndata: {"ok":true}\n\n');
+      stop();
+      res.end();
+    }
+  };
+
+  tick(); // immediate catch-up from the resume offset
+  if (!closed) timer = setInterval(tick, pollMs);
+}
+
+/**
  * Spawn a detached child and settle once it has either successfully spawned or
  * failed to. Attaching an `'error'` listener is mandatory: a `ChildProcess` is
  * an `EventEmitter`, so an `'error'` event (e.g. ENOENT from a stale/missing
@@ -113,9 +177,13 @@ function sendJson(res: http.ServerResponse, code: number, obj: unknown): void {
  * `teams/agents.ts`. The `'error'` listener registered by `once` survives after
  * a successful spawn, so a later error is absorbed rather than crashing.
  */
-export function spawnDetached(command: string, args: string[]): Promise<void> {
+export function spawnDetached(
+  command: string,
+  args: string[],
+  stdio: StdioOptions = 'ignore',
+): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { detached: true, stdio: 'ignore', env: process.env });
+    const child = spawn(command, args, { detached: true, stdio, env: process.env });
     child.once('spawn', () => {
       child.unref();
       resolve();
@@ -147,7 +215,23 @@ export const defaultRunner: RunDispatcher = async (req) => {
   const inv = getAgentsInvocation(argv);
   // Await spawn/error so a failed launch becomes a clean 400, never an
   // unhandled 'error' that crashes the anchor for every other session.
-  await spawnDetached(inv.command, inv.args);
+  //
+  // For an anchor-local run, capture the `--json` NDJSON to a per-session file
+  // so `GET /api/session/:id/stream` can offset-tail it. A `--host` run emits
+  // its NDJSON on the remote box (streaming that reuses pullRemoteLogDelta — a
+  // follow-up), so we don't capture the local dispatcher's output.
+  if (req.host) {
+    await spawnDetached(inv.command, inv.args);
+  } else {
+    fs.mkdirSync(streamDir(), { recursive: true });
+    const fd = fs.openSync(streamLogPath(sessionId), 'a');
+    try {
+      await spawnDetached(inv.command, inv.args, ['ignore', fd, fd]);
+    } finally {
+      // The child inherited the fd; the parent's copy is no longer needed.
+      fs.closeSync(fd);
+    }
+  }
   return { sessionId, name };
 };
 
@@ -173,6 +257,8 @@ export function createControlServer(opts: ControlOptions = {}): http.Server {
   const verify = opts.verifyToken ?? verifyControlToken;
   const runner = opts.runner ?? defaultRunner;
   const messenger = opts.messenger ?? defaultMessenger;
+  const streamPollMs = opts.streamPollMs ?? DEFAULT_STREAM_POLL_MS;
+  const streamLogPathFor = opts.streamLogPathFor ?? streamLogPath;
 
   return createServer(async (req, res) => {
     // Auth gates EVERY request — this server may be reachable off-box.
@@ -186,6 +272,12 @@ export function createControlServer(opts: ControlOptions = {}): http.Server {
     const url = (req.url || '/').split('?')[0];
 
     if (method === 'GET') {
+      const streamMatch = /^\/api\/session\/([^/]+)\/stream$/.exec(url);
+      if (streamMatch) {
+        const id = decodeURIComponent(streamMatch[1]);
+        startSessionStream(streamLogPathFor(id), req, res, streamPollMs);
+        return;
+      }
       const handled = await handleServeGet(url, req, res, ctx);
       if (!handled) sendJson(res, 404, { error: 'not found' });
       return;
