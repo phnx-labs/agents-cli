@@ -407,6 +407,15 @@ Missing npm authentication. Set it up with:
 
 ## Phase 5: Changelog
 
+> **Fragment model (preferred).** If the repo has a `.changelog/` directory (the
+> `code:changelog` skill / towncrier-style fragments), the changelog is a
+> GENERATED artifact: per-PR notes live in `.changelog/next/<ticket>.md`, and the
+> release script folds them into `.changelog/<version>.md` and regenerates
+> `CHANGELOG.md`. **Skip 5.3–5.4** — the release script owns the changelog; just
+> confirm the queue is non-empty (`ls .changelog/next/*.md`) so the release can
+> document itself. Sections 5.1–5.4 below are the legacy single-file path for
+> repos without `.changelog/`.
+
 ### 5.1 Get commits since last release
 
 ```bash
