@@ -21,7 +21,8 @@ import * as path from 'path';
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-devices-registry-test-'));
 process.env.HOME = TEST_HOME;
 
-const { upsertDevice, loadDevices, getDevice, removeDevice } = await import('./registry.js');
+const { upsertDevice, loadDevices, getDevice, removeDevice, deviceRole, isControlDevice } =
+  await import('./registry.js');
 
 function registryPath(): string {
   return path.join(TEST_HOME, '.agents', '.history', 'devices', 'registry.json');
@@ -77,6 +78,33 @@ describe('device registry round-trip', () => {
   it('rejects a name that is not a valid ssh alias (would break ssh_config render)', async () => {
     await expect(upsertDevice("Bisma's MacBook Pro", { platform: 'macos' })).rejects.toThrow(/Invalid device name/);
     expect(await getDevice("Bisma's MacBook Pro")).toBeNull();
+  });
+});
+
+describe('device role (control vs worker)', () => {
+  it('defaults to worker when unset — worker devices are dialable', async () => {
+    const d = await upsertDevice('box-a', { platform: 'linux' });
+    expect(d.role).toBeUndefined();
+    expect(deviceRole(d)).toBe('worker');
+    expect(isControlDevice(d)).toBe(false);
+  });
+
+  it('persists role=control and reads it back — control devices are skipped from dialing', async () => {
+    await upsertDevice('iphone', { platform: 'unknown' });
+    const marked = await upsertDevice('iphone', { role: 'control' });
+    expect(marked.role).toBe('control');
+    expect(isControlDevice(marked)).toBe(true);
+    // Survives reload and preserves the untouched platform.
+    const back = await getDevice('iphone');
+    expect(back!.role).toBe('control');
+    expect(back!.platform).toBe('unknown');
+  });
+
+  it('leaves role untouched when a later upsert does not mention it', async () => {
+    await upsertDevice('ipad', { role: 'control' });
+    const after = await upsertDevice('ipad', { user: 'muqsit' });
+    expect(after.role).toBe('control'); // not clobbered by an unrelated update
+    expect(after.user).toBe('muqsit');
   });
 });
 

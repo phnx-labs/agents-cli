@@ -23,6 +23,15 @@ import { getDevicesRegistryPath, getDevicesIgnoredPath } from '../state.js';
 /** Operating-system family of a device, used to pick the remote shell. */
 export type DevicePlatform = 'windows' | 'linux' | 'macos' | 'unknown';
 
+/**
+ * What a device is *for*. A `worker` (the default) can run agents — it's dialed
+ * over SSH for sessions and eligible for run/team placement. A `control` device
+ * is a cockpit that drives the fleet but never executes agents itself (an
+ * iPhone/iPad running the companion app): it appears in the fleet but is never
+ * dialed for SSH nor scheduled work. Absent `role` means `worker`.
+ */
+export type DeviceRole = 'worker' | 'control';
+
 /** Remote shell dialect derived from the platform. */
 export type DeviceShell = 'powershell' | 'posix';
 
@@ -69,8 +78,20 @@ export interface DeviceProfile {
   address: DeviceAddress;
   auth: DeviceAuth;
   tailscale?: DeviceTailscale;
+  /** What the device is for. Absent means `worker` (see {@link DeviceRole}). */
+  role?: DeviceRole;
   createdAt: string;
   updatedAt: string;
+}
+
+/** A device's effective role, defaulting to `worker` when unset. */
+export function deviceRole(d: DeviceProfile): DeviceRole {
+  return d.role ?? 'worker';
+}
+
+/** True for a control-only device (a cockpit) that must never be dialed/scheduled. */
+export function isControlDevice(d: DeviceProfile): boolean {
+  return deviceRole(d) === 'control';
 }
 
 /** Map of device name to profile. */
@@ -220,6 +241,7 @@ export interface DeviceInput {
   address?: DeviceAddress;
   auth?: DeviceAuth;
   tailscale?: DeviceTailscale;
+  role?: DeviceRole;
 }
 
 /**
@@ -243,6 +265,7 @@ export async function upsertDevice(name: string, input: DeviceInput): Promise<De
       address: input.address ?? prev?.address ?? { via: 'manual' },
       auth: input.auth ?? prev?.auth ?? { method: 'key' },
       tailscale: input.tailscale ?? prev?.tailscale,
+      role: input.role ?? prev?.role,
       createdAt: prev?.createdAt ?? now,
       updatedAt: now,
     };

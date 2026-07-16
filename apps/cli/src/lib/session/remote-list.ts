@@ -18,7 +18,7 @@ import chalk from 'chalk';
 import { SSH_OPTS, controlOpts, assertValidSshTarget, shellQuote } from '../ssh-exec.js';
 import { sshTargetFor } from '../devices/connect.js';
 import { resolveExplicitTargets } from '../devices/resolve-target.js';
-import { loadDevices, type DeviceProfile } from '../devices/registry.js';
+import { loadDevices, isControlDevice, type DeviceProfile } from '../devices/registry.js';
 import { remoteShellFor, buildWindowsAgentsCommand } from '../hosts/remote-cmd.js';
 import { machineId, normalizeHost } from './sync/config.js';
 import { NO_FANOUT_ENV } from './remote-active.js';
@@ -138,6 +138,9 @@ export async function gatherRemoteList(forwardedArgs: string[], hosts?: string[]
     for (const d of Object.values(reg)) {
       if (d.tailscale?.online !== true) continue;
       if (normalizeHost(d.name) === self) continue;
+      // Control-only devices (a phone/tablet running the cockpit) drive the fleet
+      // but never run agents — never dial them, whatever their platform reads as.
+      if (isControlDevice(d)) continue;
       // Only machines that can actually run the CLI. iOS/tablet nodes register as
       // `unknown` platform and can never answer, so skip them rather than burn a
       // full ConnectTimeout on each.

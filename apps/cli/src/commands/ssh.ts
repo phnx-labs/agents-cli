@@ -32,6 +32,8 @@ import {
   type DeviceProfile,
   type DeviceRegistry,
 } from '../lib/devices/registry.js';
+import { addControlToken } from '../lib/serve/token.js';
+import { DEFAULT_SERVE_PORT } from '../lib/serve/server.js';
 import {
   nodeToDeviceInput,
   parseTailscaleStatus,
@@ -458,6 +460,40 @@ Typical workflow:
         console.error(chalk.red(err.message));
         process.exit(1);
       }
+    });
+
+  devicesCmd
+    .command('pair-ios [name]')
+    .description('Pair an iPhone/iPad cockpit (RUSH-1733): mint a control token for `agents serve --control` and mark the device control-only. The token is shown ONCE — enter it in the app. Run this on the anchor.')
+    .option('--port <n>', 'Anchor control port to advertise to the app', String(DEFAULT_SERVE_PORT))
+    .action(async (name: string | undefined, opts: { port?: string }) => {
+      const label = (name || 'iphone').trim();
+      // Mint the bearer token — hash-only on disk, raw shown once (see serve/token.ts).
+      const { id, token } = addControlToken(label);
+      // If a device with this name is already registered (e.g. discovered over
+      // Tailscale as an `unknown`-platform node), mark it control-only so the
+      // fleet stops trying to dial it for sessions/placement.
+      let marked = false;
+      if (name) {
+        const existing = await getDevice(name);
+        if (existing) {
+          await upsertDevice(name, { role: 'control' });
+          marked = true;
+        }
+      }
+      const port = parseInt(opts.port ?? '', 10) || DEFAULT_SERVE_PORT;
+
+      console.log(chalk.green(`Paired cockpit '${label}'`) + chalk.gray(` (token id ${id})`));
+      if (marked) console.log(chalk.gray(`Marked device '${name}' role=control — the fleet won't dial it.`));
+      console.log();
+      console.log(chalk.bold('Control token (shown once — enter it in the app):'));
+      console.log('  ' + chalk.cyan(token));
+      console.log();
+      console.log('On the anchor, expose the control server on your tailnet:');
+      console.log(chalk.gray(`  agents serve --control --bind <anchor-tailnet-ip> --port ${port}`));
+      console.log('Then point the app at:');
+      console.log(chalk.gray(`  http://<anchor-tailnet-ip>:${port}   (Bearer: the token above)`));
+      console.log(chalk.yellow('Keep the control server on the tailnet — never public Funnel.'));
     });
 
   devicesCmd
