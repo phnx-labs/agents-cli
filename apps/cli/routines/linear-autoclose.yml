@@ -53,7 +53,7 @@ command: |
   }
 
   # ── fetch open issues with GitHub PR attachments ────────────────────────────
-  RESPONSE=$(linear_gql 'query { issues(filter:{ state:{ type:{ in:["unstarted","started"] } } },first:100){ nodes{ id identifier title state{ id type } team{ id } attachments{ nodes{ url sourceType } } } } }')
+  RESPONSE=$(linear_gql 'query { issues(filter:{ state:{ type:{ in:["unstarted","started"] } } },first:100){ nodes{ id identifier title state{ id type } team{ id } attachments{ nodes{ url sourceType } } } } }' || true)
 
   if [ -z "$RESPONSE" ] || echo "$RESPONSE" | jq -e '.errors' >/dev/null 2>&1; then
     echo "ERROR: Linear API call failed"
