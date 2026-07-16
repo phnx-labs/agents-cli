@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import type { Server } from 'http';
-import { startControlServer } from './control.js';
+import { startControlServer, spawnDetached } from './control.js';
 import type { ControlOptions, RunRequest } from './control.js';
 import type { ServeState } from './data.js';
 
@@ -168,5 +168,22 @@ describe('control server — unknown routes', () => {
     const base = await boot();
     const res = await fetch(base + '/api/nope', { headers: auth });
     expect(res.status).toBe(404);
+  });
+});
+
+describe('spawnDetached — crash safety on spawn failure', () => {
+  // Regression for the prix-cloud finding: a detached spawn with no 'error'
+  // listener throws an unhandled 'error' (ENOENT) and takes down the whole
+  // anchor. This must REJECT (a clean 400 upstream), and — critically — the
+  // process must survive. If the listener were missing this test run itself
+  // would crash rather than fail.
+  it('rejects instead of crashing when the binary does not exist', async () => {
+    await expect(spawnDetached('/definitely/not/a/real/binary-xyz-123', [])).rejects.toThrow();
+    // Reaching here at all proves the unhandled-error crash did not happen.
+    expect(process.exitCode ?? 0).toBe(0);
+  });
+
+  it('resolves when the process spawns successfully', async () => {
+    await expect(spawnDetached(process.execPath, ['-e', ''])).resolves.toBeUndefined();
   });
 });

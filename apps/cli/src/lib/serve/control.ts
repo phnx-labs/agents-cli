@@ -104,6 +104,27 @@ function sendJson(res: http.ServerResponse, code: number, obj: unknown): void {
 }
 
 /**
+ * Spawn a detached child and settle once it has either successfully spawned or
+ * failed to. Attaching an `'error'` listener is mandatory: a `ChildProcess` is
+ * an `EventEmitter`, so an `'error'` event (e.g. ENOENT from a stale/missing
+ * `agents` binary — a real condition `validateDaemonBinary` guards against)
+ * with no listener throws and would take down the whole anchor process, not
+ * just the one request. Mirrors the `once('spawn') / once('error')` pattern in
+ * `teams/agents.ts`. The `'error'` listener registered by `once` survives after
+ * a successful spawn, so a later error is absorbed rather than crashing.
+ */
+export function spawnDetached(command: string, args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { detached: true, stdio: 'ignore', env: process.env });
+    child.once('spawn', () => {
+      child.unref();
+      resolve();
+    });
+    child.once('error', (err) => reject(err instanceof Error ? err : new Error(String(err))));
+  });
+}
+
+/**
  * Default run dispatcher: re-invoke `agents run` with a server-minted id so the
  * run is addressable, detached so it outlives this request (and the anchor
  * process). Local runs detach here; `--host` runs detach on the executor via
@@ -124,12 +145,9 @@ export const defaultRunner: RunDispatcher = async (req) => {
   if (req.cwd) argv.push('--cwd', req.cwd);
 
   const inv = getAgentsInvocation(argv);
-  const child = spawn(inv.command, inv.args, {
-    detached: true,
-    stdio: 'ignore',
-    env: process.env,
-  });
-  child.unref();
+  // Await spawn/error so a failed launch becomes a clean 400, never an
+  // unhandled 'error' that crashes the anchor for every other session.
+  await spawnDetached(inv.command, inv.args);
   return { sessionId, name };
 };
 

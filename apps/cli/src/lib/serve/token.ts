@@ -48,8 +48,12 @@ function readStore(): TokenStore {
 function writeStore(store: TokenStore): void {
   const p = storePath();
   fs.mkdirSync(path.dirname(p), { recursive: true });
-  // 0600: readable only by the owner — it holds token hashes.
+  // 0600: readable only by the owner — it holds token hashes. `mode` on
+  // writeFileSync is honored only at *creation*, so chmod every write to
+  // self-heal if the perms were ever widened externally (this is a credential
+  // file, even if only hashes).
   fs.writeFileSync(p, JSON.stringify(store, null, 2), { mode: 0o600 });
+  fs.chmodSync(p, 0o600);
 }
 
 function sha256(s: string): string {

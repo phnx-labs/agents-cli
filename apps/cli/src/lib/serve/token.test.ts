@@ -51,4 +51,15 @@ describe('control-token store', () => {
     const mode = fs.statSync(storeFile).mode & 0o777;
     expect(mode).toBe(0o600);
   });
+
+  it('self-heals 0600 on rewrite if perms were widened externally', () => {
+    const storeFile = path.join(tmpHome, '.agents', '.cache', 'serve', 'control-tokens.json');
+    // Simulate an external widen (backup/restore, manual chmod).
+    fs.chmodSync(storeFile, 0o644);
+    expect(fs.statSync(storeFile).mode & 0o777).toBe(0o644);
+    // A subsequent write must restore owner-only — mode on writeFileSync alone
+    // would NOT (it's honored only at creation); the explicit chmod does.
+    tok.addControlToken('rewrite');
+    expect(fs.statSync(storeFile).mode & 0o777).toBe(0o600);
+  });
 });
