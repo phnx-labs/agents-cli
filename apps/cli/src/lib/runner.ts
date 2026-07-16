@@ -785,7 +785,7 @@ async function executeJobOnHost(config: JobConfig, opts: { detached: boolean }):
   writeRunMeta(meta);
 
   const { task, exitCode } = await dispatchPromptToHost(host, {
-    agent: config.agent,
+    agent: config.agent!,
     prompt: resolveJobPrompt(config),
     mode: normalizeMode(config.mode),
     effort: config.effort,

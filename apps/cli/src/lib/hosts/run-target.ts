@@ -21,6 +21,7 @@ import { resolveHost, resolveHostByCap } from './registry.js';
 import { dispatchToHost } from './dispatch.js';
 import type { DispatchResult } from './dispatch.js';
 import { registerHostSession } from './session-index.js';
+import type { HostCredentials } from './credentials.js';
 
 /**
  * Resolution failed with a user-actionable message the caller should print
@@ -93,6 +94,8 @@ export interface HostPromptRun {
   acp?: boolean;
   autoSecrets?: boolean;
   passthroughArgs?: string[];
+  /** Copy runtime credentials to the host before the run and shred them after. */
+  copyCreds?: HostCredentials;
 }
 
 /**
@@ -134,6 +137,7 @@ export async function dispatchPromptToHost(host: Host, opts: HostPromptRun): Pro
     acp: opts.acp,
     autoSecrets: opts.autoSecrets,
     passthroughArgs: opts.passthroughArgs,
+    copyCreds: opts.copyCreds,
   });
   registerHostSession(result.task, { cwd: opts.cwd ?? process.cwd(), prompt: opts.prompt });
   return result;
