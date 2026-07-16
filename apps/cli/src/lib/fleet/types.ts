@@ -11,8 +11,15 @@
  * the pure diff can be unit-tested without SSH.
  */
 
-/** How login/token state propagates to a device. */
-export type FleetLoginMode = 'sync' | 'prompt' | 'skip';
+/**
+ * How login/token state propagates to a device.
+ * - `sync` (default): push portable credentials where possible, surface the rest
+ *   as a manual login.
+ * - `skip`: probe/report only; take no login action.
+ * (A per-agent interactive `prompt` mode is intentionally not offered yet — it
+ * was removed rather than accepted as a silent no-op that behaves like `skip`.)
+ */
+export type FleetLoginMode = 'sync' | 'skip';
 
 /** Defaults applied to every targeted device unless a per-device entry overrides. */
 export interface FleetDefaults {

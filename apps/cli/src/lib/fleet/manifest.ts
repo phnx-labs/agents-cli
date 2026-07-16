@@ -18,7 +18,7 @@ import type {
   DeviceDesired,
 } from './types.js';
 
-const LOGIN_MODES: readonly FleetLoginMode[] = ['sync', 'prompt', 'skip'];
+const LOGIN_MODES: readonly FleetLoginMode[] = ['sync', 'skip'];
 
 function isStringArray(v: unknown): v is string[] {
   return Array.isArray(v) && v.every((x) => typeof x === 'string');

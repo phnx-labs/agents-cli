@@ -90,6 +90,48 @@ describe('diffFleet', () => {
     expect(plan.devices[0].loginBlocked).toContain('claude');
   });
 
+  it('does not flag a non-propagatable agent as needs-login on a macOS target', () => {
+    // Regression: the branch was `isPropagatableAgent(id) || platform === 'macos'`,
+    // which flagged EVERY agent on a mac target — including ones (like cursor)
+    // that have no portable credential and were never propagation candidates.
+    const macDesired: DeviceDesired[] = [
+      { device: 'mac', agents: ['cursor@latest'], sync: [], login: 'sync' },
+    ];
+    const probes = new Map<string, DeviceProbe>([
+      ['mac', { device: 'mac', reachable: true, platform: 'macos', cliVersion: CLI, installedAgents: ['cursor'] }],
+    ]);
+    const plan = diffFleet(macDesired, probes, { targetCliVersion: CLI, sourceAuth: srcAuth(['cursor']) });
+    expect(plan.actions.some((a) => a.kind === 'needs-login')).toBe(false);
+    expect(plan.devices[0].loginBlocked).toEqual([]);
+  });
+
+  it('does not flag a propagatable agent the source is not signed into (parity with linux)', () => {
+    // grok is propagatable but the source has no grok login — nothing to push and
+    // nothing to nag about; must stay silent on macOS just like on linux.
+    const macDesired: DeviceDesired[] = [
+      { device: 'mac', agents: ['grok@latest'], sync: [], login: 'sync' },
+    ];
+    const probes = new Map<string, DeviceProbe>([
+      ['mac', { device: 'mac', reachable: true, platform: 'macos', cliVersion: CLI, installedAgents: ['grok'] }],
+    ]);
+    const plan = diffFleet(macDesired, probes, { targetCliVersion: CLI, sourceAuth: srcAuth([]) });
+    expect(plan.actions.some((a) => a.kind === 'needs-login')).toBe(false);
+    expect(plan.devices[0].loginBlocked).toEqual([]);
+  });
+
+  it('flags a keychain-bound source token as needs-login on a linux target', () => {
+    // claude bound on the source (unextractable) → can't push, must surface manual.
+    const probes = new Map<string, DeviceProbe>([
+      ['s1', { device: 's1', reachable: true, platform: 'linux', cliVersion: CLI, installedAgents: ['claude', 'codex'] }],
+    ]);
+    const plan = diffFleet(desired, probes, { targetCliVersion: CLI, sourceAuth: srcAuth(['codex'], ['claude']) });
+    const claudeActions = plan.actions.filter((a) => a.agent === 'claude');
+    expect(claudeActions.some((a) => a.kind === 'needs-login')).toBe(true);
+    expect(plan.devices[0].loginBlocked).toContain('claude');
+    // codex is portable and available → still pushes.
+    expect(plan.actions.some((a) => a.agent === 'codex' && a.kind === 'push-login')).toBe(true);
+  });
+
   it('produces no actions for an unreachable device', () => {
     const probes = new Map<string, DeviceProbe>([
       ['s1', { device: 's1', reachable: false, platform: 'linux', installedAgents: [], note: 'unreachable' }],

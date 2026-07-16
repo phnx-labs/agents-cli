@@ -101,8 +101,15 @@ export function diffFleet(desired: DeviceDesired[], probes: Map<string, DevicePr
           const id = agentIdOf(spec);
           if (canPushLogin(id, probe.platform, ctx.sourceAuth)) {
             rowActions.push({ device: d.device, kind: 'push-login', agent: id, detail: `propagate ${id} login` });
-          } else if (isPropagatableAgent(id) || probe.platform === 'macos') {
-            // Desired here but can't be propagated — surface, don't fake.
+          } else if (
+            isPropagatableAgent(id) &&
+            (ctx.sourceAuth.bound.has(id) || (probe.platform === 'macos' && KEYCHAIN_BOUND_ON_MAC.has(id)))
+          ) {
+            // A login-propagation candidate we still can't push: the source token
+            // is keychain-bound (unextractable), or the macOS target consumes its
+            // own keychain. Surface those as manual — don't fake. Agents that were
+            // never propagation candidates (no portable file), or a source that
+            // simply isn't signed in, are silently skipped the same on every OS.
             loginBlocked.push(id);
             rowActions.push({ device: d.device, kind: 'needs-login', agent: id, detail: `${id} needs a manual login` });
           }

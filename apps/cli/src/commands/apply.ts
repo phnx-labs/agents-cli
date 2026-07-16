@@ -148,9 +148,13 @@ function renderPlan(plan: FleetPlan): void {
   }
 }
 
-/** padEnd on the visible width, ignoring chalk color codes. */
-function stripPad(s: string, width: number): string {
-  const visible = s.replace(/\[[0-9;]*m/g, '').length;
+/** padEnd on the visible width, ignoring chalk color codes. Exported for tests. */
+export function stripPad(s: string, width: number): string {
+  // Strip the whole SGR sequence (ESC `[` ... `m`). Matching only the `[...m`
+  // tail leaves each leading ESC byte counted as visible, so every colored
+  // cell over-pads and the plan table misaligns in a real TTY.
+  // eslint-disable-next-line no-control-regex
+  const visible = s.replace(/\x1b\[[0-9;]*m/g, '').length;
   return s + ' '.repeat(Math.max(1, width - visible));
 }
 
