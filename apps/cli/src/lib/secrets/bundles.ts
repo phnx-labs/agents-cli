@@ -879,6 +879,33 @@ export function resolveBundleEnv(bundle: SecretsBundle, _opts: ResolveBundleOpti
 }
 
 /**
+ * True when the current process is a background / non-interactive context that
+ * must NEVER raise a Keychain biometry prompt on the interactive user's screen —
+ * a prompt nobody is watching. Two signals, either sufficient:
+ *   - `AGENTS_RUNTIME` is `headless` or `teams` (set on the child env by
+ *     `agents run --headless`, scheduled routines, and teammates — see
+ *     exec.ts:resolveInteractive, runner.ts, teams/agents.ts).
+ *   - neither stdin nor stdout is a TTY (a detached/backgrounded task whose
+ *     stdio is redirected to a log — e.g. a release script run in the
+ *     background as `( ... ) >log 2>&1 </dev/null`).
+ * `AGENTS_SECRETS_NO_PROMPT=1` forces headless-safe; `=0` force-allows a prompt
+ * even in a non-TTY context. An interactive `eval "$(agents secrets export X)"`
+ * keeps its terminal stdin, so it is NOT classified headless and still prompts.
+ *
+ * A read in such a context resolves broker-only (agentOnly) and fails fast with
+ * an actionable error instead of hijacking Touch ID. This generalizes the
+ * per-caller pattern already used by the daemon (daemon.ts:readDaemonClaudeOAuthToken).
+ */
+export function isHeadlessSecretsContext(env: NodeJS.ProcessEnv = process.env): boolean {
+  const override = env.AGENTS_SECRETS_NO_PROMPT;
+  if (override === '1') return true;
+  if (override === '0') return false;
+  const runtime = env.AGENTS_RUNTIME;
+  if (runtime === 'headless' || runtime === 'teams') return true;
+  return !process.stdin.isTTY && !process.stdout.isTTY;
+}
+
+/**
  * Read a bundle's metadata AND resolve its env in a single Touch ID prompt.
  *
  * `readBundle` + `resolveBundleEnv` issued two separate `LAContext` calls
@@ -927,7 +954,12 @@ export function readAndResolveBundleEnv(
   }
 
   if (opts.agentOnly) {
-    throw new Error(`Secrets bundle '${name}' is not unlocked in the secrets agent.`);
+    throw new Error(
+      `Secrets bundle '${name}' is not unlocked in the secrets agent, and this is a ` +
+      `headless/background process that must not raise a Touch ID prompt on the ` +
+      `interactive user's screen. Run 'agents secrets unlock ${name}' in a terminal ` +
+      `first, or set AGENTS_SECRETS_NO_PROMPT=0 to force an interactive prompt.`
+    );
   }
 
   if (backend === 'file') assertFileBackendUsable(name);

@@ -982,7 +982,7 @@ export function registerRunCommand(program: Command): void {
         { buildExecCommand, parseExecEnv, execAgent, runWithFallback, normalizeMode, resolveMode, headlessPlanStallCommand, nativeResume, resolveInteractive },
         { ALL_AGENT_IDS },
         { profileExists, resolveProfileForRun },
-        { readAndResolveBundleEnv, describeBundle, assertRemoteBundleFlagsUnsupported },
+        { readAndResolveBundleEnv, describeBundle, assertRemoteBundleFlagsUnsupported, isHeadlessSecretsContext },
         { splitBundleRef, resolveSshTarget, remoteResolveEnv },
         { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, rotationFailoverChain, shouldArmRotationFailover, RUN_STRATEGIES },
         { getGlobalDefault, getVersionHomePath, resolveVersion, resolveVersionAlias, ensureAgentRunnable },
@@ -1558,6 +1558,10 @@ export function registerRunCommand(program: Command): void {
               caller: `agent ${agent}`,
               keys: secretsKeysSubset,
               allowExpired: options.allowExpired,
+              // A headless/background run (routine, teammate, detached) must not
+              // pop a Touch ID sheet nobody can answer — resolve broker-only and
+              // fail fast with an actionable error. Interactive runs still prompt.
+              agentOnly: isHeadlessSecretsContext(),
             });
             const entries = describeBundle(bundle);
             const counts: Record<string, number> = {};

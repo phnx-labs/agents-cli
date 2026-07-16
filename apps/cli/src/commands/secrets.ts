@@ -1495,7 +1495,7 @@ Examples:
       format?: string;
     }) => {
       try {
-        const { readAndResolveBundleEnv, bundleToEnvPrefix, isReservedEnvName } = await import('../lib/secrets/bundles.js');
+        const { readAndResolveBundleEnv, bundleToEnvPrefix, isReservedEnvName, isHeadlessSecretsContext } = await import('../lib/secrets/bundles.js');
         const resolvedBundleName = bundleName ?? (await pickBundleName('export'));
 
         // The presence of --host selects SSH push: --host is the destination
@@ -1624,7 +1624,15 @@ Examples:
           console.error(chalk.red('export prints secrets in the clear and requires --plaintext (works for TTY and pipes alike).'));
           process.exit(1);
         }
-        const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: `export to shell` });
+        // `agents secrets export --plaintext` is what release/CI scripts eval.
+        // When it runs detached (both stdio non-TTY) or under a headless agent,
+        // resolve broker-only so it can never pop a Touch ID sheet on the
+        // interactive user's screen. An interactive `eval "$(...)"` keeps its
+        // terminal stdin, so it is not headless and still prompts.
+        const { env } = readAndResolveBundleEnv(resolvedBundleName, {
+          caller: `export to shell`,
+          agentOnly: isHeadlessSecretsContext(),
+        });
         if (opts.format === 'json') {
           // Lossless, machine-readable form consumed by `remoteResolveEnv` over
           // SSH. Single object of KEY -> value; values verbatim (newlines, quotes).
