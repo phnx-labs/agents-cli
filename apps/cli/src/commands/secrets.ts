@@ -1509,6 +1509,18 @@ Examples:
       host?: string;
     }) => {
       try {
+        // A single import can name only one source. --from-file / --from-ssh are
+        // early-return paths, so guard them against each other and the --from /
+        // --from-1password pair (which parseImportSource guards on its own).
+        const namedFileOrSsh = [
+          opts.fromFile ? '--from-file' : null,
+          opts.fromSsh ? '--from-ssh' : null,
+        ].filter(Boolean);
+        if (namedFileOrSsh.length > 1 || (namedFileOrSsh.length > 0 && (opts.from || opts.from1password))) {
+          throw new Error(
+            '--from-file, --from-ssh, and --from/--from-1password are mutually exclusive; pick one import source.'
+          );
+        }
         if (opts.fromFile) {
           const passphrase = process.env.AGENTS_SECRETS_PASSPHRASE ?? '';
           if (!passphrase) {

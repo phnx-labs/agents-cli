@@ -191,11 +191,14 @@ The Windows push bridge is `buildWindowsStdinImportCommand` in
 | `secrets import [bundle] --from 1password:<vault>` | Import from a 1Password vault (requires `op` CLI; `--from-1password --vault <name>` is a deprecated alias) | `agents secrets import prod --from 1password:Personal` |
 | `secrets import [bundle] --from icloud` | Recover a bundle stranded in the iCloud Keychain by the pre-biometry era (macOS; omit the bundle name for an interactive multi-select of everything discovered) | `agents secrets import hetzner.com --from icloud` |
 | `secrets import --from icloud --purge` | After a successful import, delete the iCloud copies (propagates to your other devices) | `agents secrets import --from icloud --purge` |
+| `secrets import [bundle] --from-file <path>` | Recover from an AES-256-GCM encrypted offline bundle file (needs `AGENTS_SECRETS_PASSPHRASE`; server-independent, symmetric counterpart of `export --to-file`) | `agents secrets import prod --from-file prod.enc` |
+| `secrets import [bundle] --from-ssh --host <peer>` | Pull a bundle from a fleet peer over SSH and import it locally (no dependency on api.prix.dev) | `agents secrets import prod --from-ssh --host mac-mini` |
 | `secrets import ... --all-plaintext` | Store imported values as literals, skip keychain | `agents secrets import prod --from .env --all-plaintext` |
 | `secrets import ... --force` | Overwrite existing keys | `agents secrets import prod --from .env --force` |
 | `secrets export [bundle]` | Print `KEY=VALUE` lines for shell eval | `eval "$(agents secrets export prod --plaintext)"` |
 | `secrets export [bundle] --to-1password --vault <name>` | Push bundle to a 1Password vault | `agents secrets export prod --to-1password --vault Team` |
 | `secrets export ... --force` | Overwrite existing 1Password items | `agents secrets export prod --to-1password --vault Team --force` |
+| `secrets export [bundle] --to-file <path>` | Write the bundle as an AES-256-GCM encrypted offline file (needs `AGENTS_SECRETS_PASSPHRASE`; symmetric counterpart of `import --from-file`) | `agents secrets export prod --to-file prod.enc` |
 
 ### Agent commands (macOS)
 
