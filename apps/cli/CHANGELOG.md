@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fix: workflow routines that orchestrate subagents no longer silently no-op.** A `WORKFLOW.md` `tools:` list becomes Claude's `--tools` allowlist, which *restricts* the available built-ins. A workflow that ships a `subagents/` dir — whose files `agents run <workflow>` copies into the shared agents dir *specifically so the `Task` tool can dispatch them* — but whose `tools:` omits `Task` had its one dispatch path stripped: the orchestrator ran with no way to reach its own subagents and degenerated to a one-line no-op ("I'll wait for the completion notification") before the process exited. This bit every subagent-orchestrating workflow run headlessly (e.g. the `doc-gaps` / `blog-engine` / `iterate-until-good` routines, which showed "failed" on schedule). `agents run <workflow>` now keeps `Task` in the restricted tool set whenever the run installs ≥1 dispatchable subagent, so a `tools:` list that forgets `Task` can't strip an orchestrator's ability to orchestrate. Source: `apps/cli/src/lib/workflows.ts` (`ensureSubagentDispatchTool`), `apps/cli/src/commands/exec.ts`, `apps/cli/src/lib/workflows.test.ts`.
+
 ## 1.20.64
 
 - **`teams` skill documents the fleet-comms surface (RUSH-1739).** The Monitoring section now points teammates-of-teams at `agents feed` (what agents need from you), `agents mailboxes` / `--watch` / `--graph` / `--between` (what agents say to each other), and the `agents message` / `agents teams message` reply path — so an operator running a team can see and answer the whole conversation. Source: `skills/teams/SKILL.md`.

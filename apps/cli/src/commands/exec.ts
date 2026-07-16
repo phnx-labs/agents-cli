@@ -987,7 +987,7 @@ export function registerRunCommand(program: Command): void {
         { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, rotationFailoverChain, shouldArmRotationFailover, RUN_STRATEGIES },
         { getGlobalDefault, getVersionHomePath, resolveVersion, resolveVersionAlias, ensureAgentRunnable },
         { buildDiscoveredPlugin, loadPluginManifest, syncPluginToVersion },
-        { parseWorkflowFrontmatter, resolveWorkflowRef, resolveAllowedSubagents, pruneStaleWorkflowSubagents },
+        { parseWorkflowFrontmatter, resolveWorkflowRef, resolveAllowedSubagents, pruneStaleWorkflowSubagents, ensureSubagentDispatchTool },
         { resolveRunDefaults },
         { getMcpServersByName, buildWorkflowMcpConfig },
         { supports },
@@ -1030,6 +1030,11 @@ export function registerRunCommand(program: Command): void {
       // produced item, and drives the teams supervisor to drain — no `teams`
       // subcommands needed.
       let workflowForEach: import('../lib/workflows.js').ForEachSpec | undefined;
+      // True once this run copies ≥1 dispatchable subagent into the shared agents
+      // dir. Used below to keep the `Task` tool in a `tools:`-restricted workflow —
+      // an orchestrator handed subagents but denied `Task` cannot reach them and
+      // degenerates to a no-op ("I'll wait for the completion notification").
+      let workflowHasSubagents = false;
       const cwd = options.cwd ?? process.cwd();
 
       if (isValidAgent(rawAgent)) {
@@ -1110,6 +1115,7 @@ export function registerRunCommand(program: Command): void {
             workflowSubagentTargets.push(dest);
             copied++;
           }
+          if (copied > 0) workflowHasSubagents = true;
           if (allowedAgents !== undefined) {
             // Surface any allowedAgents entry with no matching subagent file, and
             // report how many were filtered out, so the scope is auditable.
@@ -1198,8 +1204,14 @@ export function registerRunCommand(program: Command): void {
           ));
         } else if (hasScoping) {
           if (tools && tools.length > 0) {
-            workflowToolsRestrict = tools;
-            process.stderr.write(chalk.gray(`[workflow] restricting available tools to: ${tools.join(', ')} (Write/Bash/Edit unavailable unless listed)\n`));
+            // An orchestrator with dispatchable subagents MUST retain the `Task`
+            // tool, or it can't reach the subagents this run just installed for it
+            // — the run silently no-ops ("I'll wait for the completion notification").
+            workflowToolsRestrict = ensureSubagentDispatchTool(tools, workflowHasSubagents);
+            process.stderr.write(chalk.gray(`[workflow] restricting available tools to: ${workflowToolsRestrict.join(', ')} (Write/Bash/Edit unavailable unless listed)\n`));
+            if (workflowToolsRestrict.length !== tools.length) {
+              process.stderr.write(chalk.gray(`[workflow] kept Task tool: workflow ships subagents to dispatch\n`));
+            }
           }
           if (mcpServerNames && mcpServerNames.length > 0) {
             const servers = getMcpServersByName(mcpServerNames, { cwd });
