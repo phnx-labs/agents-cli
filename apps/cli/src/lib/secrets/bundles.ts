@@ -892,11 +892,22 @@ export function resolveBundleEnv(bundle: SecretsBundle, _opts: ResolveBundleOpti
  * even in a non-TTY context. An interactive `eval "$(agents secrets export X)"`
  * keeps its terminal stdin, so it is NOT classified headless and still prompts.
  *
- * A read in such a context resolves broker-only (agentOnly) and fails fast with
- * an actionable error instead of hijacking Touch ID. This generalizes the
- * per-caller pattern already used by the daemon (daemon.ts:readDaemonClaudeOAuthToken).
+ * Only **macOS keychain** reads pop an interactive Touch ID sheet — the secrets
+ * broker itself is a no-op off darwin (see agent.ts), and libsecret (Linux) /
+ * the Windows credential store resolve without any prompt. So off-darwin this
+ * ALWAYS returns false: forcing broker-only there would break every headless
+ * Linux/Windows read (CI, `agents run --headless`, routines, the Linux-driven
+ * release flow) for no benefit — there is no prompt to suppress.
+ *
+ * A read in a macOS headless context resolves broker-only (agentOnly) and fails
+ * fast with an actionable error instead of hijacking Touch ID. This generalizes
+ * the per-caller pattern already used by the daemon (daemon.ts:readDaemonClaudeOAuthToken).
  */
-export function isHeadlessSecretsContext(env: NodeJS.ProcessEnv = process.env): boolean {
+export function isHeadlessSecretsContext(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  if (platform !== 'darwin') return false; // no biometry prompt to suppress off-darwin
   const override = env.AGENTS_SECRETS_NO_PROMPT;
   if (override === '1') return true;
   if (override === '0') return false;
@@ -953,7 +964,11 @@ export function readAndResolveBundleEnv(
     }
   }
 
-  if (opts.agentOnly) {
+  // Only keychain-backed bundles can pop a Touch ID prompt and are the only ones
+  // the broker ever holds. A file-backed bundle resolves via passphrase with no
+  // prompt, so agentOnly must never block it — the broker never holds file
+  // bundles, so the throw would fire unconditionally and break a legitimate read.
+  if (opts.agentOnly && backend === 'keychain') {
     throw new Error(
       `Secrets bundle '${name}' is not unlocked in the secrets agent, and this is a ` +
       `headless/background process that must not raise a Touch ID prompt on the ` +
