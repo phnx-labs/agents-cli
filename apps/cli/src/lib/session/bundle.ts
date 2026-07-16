@@ -88,6 +88,12 @@ export interface BuildRecordOpts {
   redact: boolean;
   /** Non-null → seal each body with this key; null → plaintext bodies. */
   encryptKey: Buffer | null;
+  /**
+   * Literal secret values to mask verbatim during redaction (value-aware pass):
+   * e.g. live credentials from an injected secrets bundle, so they never leak in
+   * an exported transcript regardless of format. Only used when `redact` is set.
+   */
+  knownSecrets?: readonly string[];
 }
 
 /** Look up the sync spec for an agent id (undefined → agent not sync-representable). */
@@ -108,7 +114,7 @@ export function isExportableAgent(agentId: string): boolean {
  */
 export function buildRecord(file: FileToExport, opts: BuildRecordOpts): BundleRecord {
   let body = fs.readFileSync(file.absPath, 'utf-8');
-  if (opts.redact) body = redactSecrets(body);
+  if (opts.redact) body = redactSecrets(body, opts.knownSecrets);
   const hash = hashContent(body);
   const size = Buffer.byteLength(body, 'utf-8');
 
@@ -177,6 +183,18 @@ export function serializeBundle(header: BundleHeader, records: BundleRecord[]): 
   const lines = [JSON.stringify(header)];
   for (const r of records) lines.push(JSON.stringify(r));
   return lines.join('\n') + '\n';
+}
+
+/**
+ * Write a serialized bundle to disk owner-only (0600). A bundle carries raw
+ * transcript bodies — even redacted, never world/group-readable — and encryption
+ * is opt-in, so the file mode is the baseline confidentiality guard. `mode` on
+ * `writeFileSync` only applies when the file is created, so we `chmod` too to
+ * clamp an existing (possibly looser) file on overwrite.
+ */
+export function writeBundleFile(outPath: string, wire: string): void {
+  fs.writeFileSync(outPath, wire, { encoding: 'utf-8', mode: 0o600 });
+  fs.chmodSync(outPath, 0o600);
 }
 
 /** Parse an NDJSON bundle, validating the header kind + version. Throws on malformed input. */

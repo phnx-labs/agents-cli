@@ -65,6 +65,41 @@ describe('bundle format', () => {
     expect(rec.hash).toBe(crypto.createHash('sha256').update(rec.body).digest('hex'));
   });
 
+  it('value-aware redaction masks a known secret value verbatim (any format)', () => {
+    // A credential whose shape matches no built-in pattern still leaks unless we
+    // mask its exact value (RUSH-1761).
+    const secret = 'zZ9-opaque-bundle-value-1761';
+    const abs = writeFixture(SRC, 'claude-known.jsonl', `{"text":"used ${secret} in a url"}\n`);
+    const rec = B.buildRecord(
+      { agent: 'claude', machine: 'boxA', sessionId: 'sess-known', relKey: 'sess-known.jsonl', absPath: abs },
+      { redact: true, encryptKey: null, knownSecrets: [secret] },
+    );
+    expect(rec.body).not.toContain(secret);
+    expect(rec.body).toContain('[REDACTED]');
+    expect(rec.hash).toBe(crypto.createHash('sha256').update(rec.body).digest('hex'));
+  });
+
+  it('writeBundleFile creates the export owner-only (mode 0600)', () => {
+    const rec = B.buildRecord(
+      { agent: 'claude', machine: 'boxA', sessionId: 'sess-perm', relKey: 'sess-perm.jsonl', absPath: writeFixture(SRC, 'perm.jsonl', '{"x":1}\n') },
+      { redact: false, encryptKey: null },
+    );
+    const wire = B.serializeBundle(
+      B.makeHeader({ origin: 'boxA', exportedAt: 'now', encrypted: false, redacted: false, records: [rec] }),
+      [rec],
+    );
+    const out = path.join(SRC, 'out.bundle');
+    B.writeBundleFile(out, wire);
+    expect(fs.readFileSync(out, 'utf-8')).toBe(wire);
+    expect(fs.statSync(out).mode & 0o777).toBe(0o600);
+
+    // Overwriting a pre-existing looser file still clamps to 0600.
+    fs.writeFileSync(out, 'stale', { mode: 0o644 });
+    fs.chmodSync(out, 0o644);
+    B.writeBundleFile(out, wire);
+    expect(fs.statSync(out).mode & 0o777).toBe(0o600);
+  });
+
   it('encrypted bundle round-trips: body is an envelope, planImport decrypts to the original', () => {
     const plaintext = '{"type":"user","text":"secret conversation"}\n';
     const abs = writeFixture(SRC, 'claude-enc.jsonl', plaintext);

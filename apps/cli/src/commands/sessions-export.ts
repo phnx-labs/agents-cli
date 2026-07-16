@@ -34,11 +34,13 @@ import {
   makeHeader,
   mergeRecords,
   serializeBundle,
+  writeBundleFile,
   specForAgent,
   type BundleHeader,
   type BundleRecord,
   type FileToExport,
 } from '../lib/session/bundle.js';
+import { knownSecretValuesFromEnv } from '../lib/redact.js';
 import { pullBundlesFromHosts } from '../lib/session/remote-bundle.js';
 import { setHelpSections } from '../lib/help.js';
 
@@ -150,12 +152,16 @@ async function runExport(selectors: string[], command: Command): Promise<void> {
   // 4. Resolve encryption key (opt-in) + redaction (default on via parent --no-redact).
   const encryptKey = g.encrypt ? resolveExportKey() : null;
   const redact = g.redact !== false;
+  // Value-aware redaction: mask live credential values already in the
+  // environment (e.g. an injected secrets bundle) verbatim, whatever their
+  // format. Only meaningful when redacting.
+  const knownSecrets = redact ? knownSecretValuesFromEnv() : undefined;
 
   // 5. Build records + header.
   const records: BundleRecord[] = [];
   for (const f of files) {
     try {
-      records.push(buildRecord(f, { redact, encryptKey }));
+      records.push(buildRecord(f, { redact, encryptKey, knownSecrets }));
     } catch (err) {
       process.stderr.write(chalk.yellow(`Skipped ${f.agent}/${f.sessionId} (${f.relKey}): ${(err as Error).message}\n`));
     }
@@ -221,7 +227,7 @@ function emitBundle(header: BundleHeader, records: BundleRecord[], g: GlobalSele
     return;
   }
   const outPath = g.output || defaultBundlePath();
-  fs.writeFileSync(outPath, wire, 'utf-8');
+  writeBundleFile(outPath, wire);
   process.stderr.write(chalk.green(
     `Exported ${header.sessions} session${header.sessions === 1 ? '' : 's'} ` +
     `(${header.count} file${header.count === 1 ? '' : 's'}${header.encrypted ? ', encrypted' : ''}${header.redacted ? ', redacted' : ''}) ` +
