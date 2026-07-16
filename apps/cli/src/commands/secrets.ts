@@ -487,7 +487,8 @@ export function renderPolicyCol(b: SecretsBundle, held?: Map<string, number>): s
 export function formatHoldWindow(ms: number): string {
   if (ms < 3_600_000) { // under an hour → minutes (never a confusing "0 hours")
     const mins = Math.max(1, Math.round(ms / 60_000));
-    return `${mins} minute${mins === 1 ? '' : 's'}`;
+    if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'}`;
+    // 59.99m rounds to 60 — call it 1 hour rather than "60 minutes".
   }
   const hrs = Math.round(ms / 3_600_000);
   if (hrs < 48) return `${hrs} hour${hrs === 1 ? '' : 's'}`;
@@ -1972,7 +1973,10 @@ Examples:
       }
       // Surface the hold window so "why did it prompt again" is answerable.
       const holdStr = formatHoldWindow(secretsHoldMs());
-      const configured = (() => { try { return typeof readMeta().secrets?.agent?.holdMs === 'number'; } catch { return false; } })();
+      // Only claim "(secrets.agent.holdMs)" when the config is actually honored —
+      // an invalid value (0/NaN/negative) falls back to the default via
+      // clampHoldMs, so it must read "(default)", not misattribute to config.
+      const configured = (() => { try { const v = readMeta().secrets?.agent?.holdMs; return typeof v === 'number' && Number.isFinite(v) && v > 0; } catch { return false; } })();
       console.log(chalk.gray(`hold: ${holdStr}${configured ? ' (secrets.agent.holdMs)' : ' (default)'} — a daily bundle prompts once, then stays silent for this long or until sleep/logout.`));
       const entries = await agentStatus();
       if (entries.length === 0) {

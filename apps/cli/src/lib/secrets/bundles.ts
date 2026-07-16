@@ -41,7 +41,7 @@ import {
 import { fileStore } from './filestore.js';
 import { emit } from '../events.js';
 import { readMeta } from '../state.js';
-import { agentGetSync, agentAutoLoadSync, agentGetMetaSync, agentAutoLoadMetaSync, agentEvictSync, secretsAgentAutoEnabled, secretsHoldMs, DEFAULT_TTL_MS } from './agent.js';
+import { agentGetSync, agentAutoLoadSync, agentGetMetaSync, agentAutoLoadMetaSync, agentEvictSync, secretsAgentAutoEnabled, secretsHoldMs } from './agent.js';
 import { createHash } from 'node:crypto';
 
 /** Which store carries a bundle's items. */
@@ -604,8 +604,11 @@ export function listBundles(): SecretsBundle[] {
         }
         for (const bundle of keychainBundles) out.push(bundle);
         // Populate the broker for the rest of the hold window (fire-and-forget).
+        // Same configurable cap as the value read-path — otherwise `secrets list`
+        // would keep serving a stale metadata snapshot for 7d even when the user
+        // capped the hold at 24h via secrets.agent.holdMs.
         if (useAgent && keychainBundles.length > 0) {
-          agentAutoLoadMetaSync(nameSetHash, keychainBundles, DEFAULT_TTL_MS);
+          agentAutoLoadMetaSync(nameSetHash, keychainBundles, secretsHoldMs());
         }
       }
     }

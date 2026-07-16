@@ -123,6 +123,10 @@ describe('formatHoldWindow', () => {
     expect(formatHoldWindow(30 * 60 * 1000)).toBe('30 minutes');
     expect(formatHoldWindow(1)).toBe('1 minute');              // clamps up, never "0"
   });
+
+  it('rounds 59.99 minutes to "1 hour", not "60 minutes"', () => {
+    expect(formatHoldWindow(3_599_999)).toBe('1 hour');
+  });
 });
 
 describe('renderPolicyCol', () => {
