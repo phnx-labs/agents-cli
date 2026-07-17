@@ -18,7 +18,7 @@ import type { AgentId } from './types.js';
 import { getMcpDir, getUserMcpDir, getProjectAgentsDir, getVersionsDir, getUserAgentsDir } from './state.js';
 import { getBinaryPath, getVersionHomePath } from './versions.js';
 import { IS_WINDOWS, execFileShellSpec } from './platform/index.js';
-import { AGENTS } from './agents.js';
+import { AGENTS, getProjectMcpConfigPath } from './agents.js';
 import { isCapable } from './capabilities.js';
 import { setGeminiAutoUpdateDisabled, updateGeminiSettings } from './gemini-settings.js';
 
@@ -735,6 +735,197 @@ function installMcpToOpenCodeConfig(server: InstalledMcpServer, versionHome: str
 }
 
 /**
+ * MCP server shaped for direct config-file serialization.
+ */
+export interface WritableMcpServer {
+  name: string;
+  transport: 'stdio' | 'http' | 'sse';
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
+}
+
+/**
+ * Serialize MCP servers into an agent-specific config file.
+ *
+ * `mode: 'overwrite'` replaces the whole MCP section (used for tool-managed
+ * version-home configs). `mode: 'merge'` updates/adds the provided server
+ * entries while preserving existing entries (used for project-level configs
+ * that users may hand-edit or populate via agent CLI commands).
+ */
+export function writeMcpConfig(
+  agentId: AgentId,
+  configPath: string,
+  servers: WritableMcpServer[],
+  mode: 'overwrite' | 'merge' = 'overwrite'
+): void {
+  if (servers.length === 0) {
+    return;
+  }
+
+  switch (agentId) {
+    case 'claude':
+    case 'cursor':
+    case 'gemini':
+    case 'openclaw':
+    case 'kimi':
+    case 'droid':
+    case 'forge': {
+      let config: Record<string, unknown> = {};
+      if (fs.existsSync(configPath)) {
+        try {
+          config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        } catch {
+          config = {};
+        }
+      }
+
+      const mcpServers: Record<string, unknown> =
+        mode === 'merge' && config.mcpServers && typeof config.mcpServers === 'object'
+          ? { ...(config.mcpServers as Record<string, unknown>) }
+          : {};
+
+      for (const server of servers) {
+        if (server.transport === 'stdio') {
+          mcpServers[server.name] = {
+            command: server.command,
+            args: server.args || [],
+            env: server.env || {},
+          };
+        } else {
+          mcpServers[server.name] = {
+            url: server.url,
+            ...(server.headers && { headers: server.headers }),
+          };
+        }
+      }
+
+      config.mcpServers = mcpServers;
+
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+      break;
+    }
+    case 'codex':
+    case 'grok': {
+      let config: Record<string, unknown> = {};
+      if (fs.existsSync(configPath)) {
+        try {
+          config = TOML.parse(fs.readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
+        } catch {
+          config = {};
+        }
+      }
+
+      const mcpServers: Record<string, unknown> =
+        mode === 'merge' && config.mcp_servers && typeof config.mcp_servers === 'object'
+          ? { ...(config.mcp_servers as Record<string, unknown>) }
+          : {};
+
+      for (const server of servers) {
+        if (server.transport === 'stdio') {
+          mcpServers[server.name] = {
+            command: server.command,
+            args: server.args || [],
+            ...(server.env && { env: server.env }),
+          };
+        } else {
+          mcpServers[server.name] = {
+            url: server.url,
+            ...(server.headers && { headers: server.headers }),
+          };
+        }
+      }
+
+      config.mcp_servers = mcpServers;
+
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(configPath, TOML.stringify(config), 'utf-8');
+      break;
+    }
+    case 'opencode': {
+      let config: Record<string, unknown> = {};
+      if (fs.existsSync(configPath)) {
+        try {
+          const content = fs.readFileSync(configPath, 'utf-8');
+          const jsonContent = content.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+          config = JSON.parse(jsonContent);
+        } catch {
+          config = {};
+        }
+      }
+
+      const mcp: Record<string, unknown> =
+        mode === 'merge' && config.mcp && typeof config.mcp === 'object'
+          ? { ...(config.mcp as Record<string, unknown>) }
+          : {};
+
+      for (const server of servers) {
+        if (server.transport === 'stdio') {
+          const commandArray = [server.command, ...(server.args || [])];
+          mcp[server.name] = {
+            type: 'local',
+            command: commandArray,
+            ...(server.env && { env: server.env }),
+          };
+        } else {
+          mcp[server.name] = {
+            type: 'remote',
+            url: server.url,
+          };
+        }
+      }
+
+      config.mcp = mcp;
+
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+      break;
+    }
+    case 'hermes': {
+      let config: Record<string, unknown> = {};
+      if (fs.existsSync(configPath)) {
+        try {
+          const parsed = yaml.parse(fs.readFileSync(configPath, 'utf-8'));
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            config = parsed as Record<string, unknown>;
+          }
+        } catch {
+          config = {};
+        }
+      }
+
+      const mcpServers: Record<string, unknown> =
+        mode === 'merge' && config.mcp_servers && typeof config.mcp_servers === 'object' && !Array.isArray(config.mcp_servers)
+          ? { ...(config.mcp_servers as Record<string, unknown>) }
+          : {};
+
+      for (const server of servers) {
+        if (server.transport === 'stdio') {
+          mcpServers[server.name] = {
+            command: server.command,
+            args: server.args || [],
+            ...(server.env && { env: server.env }),
+          };
+        } else {
+          mcpServers[server.name] = {
+            url: server.url,
+          };
+        }
+      }
+
+      config.mcp_servers = mcpServers;
+
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(configPath, yaml.stringify(config), 'utf-8');
+      break;
+    }
+  }
+}
+
+/**
  * Install MCP servers to an agent.
  * For Claude/Codex: uses CLI commands (claude mcp add, codex mcp add)
  * For others: edits config files directly
@@ -771,37 +962,44 @@ export function installMcpServers(
     try {
       if (agentId === 'claude') {
         installMcpViaClaude(binaryPath, server, versionHome);
-        applied.push(server.name);
       } else if (agentId === 'codex') {
         installMcpViaCodex(binaryPath, server, versionHome);
-        applied.push(server.name);
       } else if (agentId === 'gemini') {
         installMcpToGeminiConfig(server, versionHome);
-        applied.push(server.name);
       } else if (agentId === 'cursor') {
         installMcpToCursorConfig(server, versionHome);
-        applied.push(server.name);
       } else if (agentId === 'opencode') {
         installMcpToOpenCodeConfig(server, versionHome);
-        applied.push(server.name);
       } else if (agentId === 'grok') {
-        // Grok primarily uses [mcp_servers] in ~/.grok/config.toml (or project .grok/config.toml).
-        // We have the path helper; full writer can be added (reuse codex toml pattern).
-        // For now the general sync + toml editing via agents mcp works via the path helpers.
-        applied.push(server.name);
+        // Grok user-level config is handled below via writeMcpConfig so the
+        // [mcp_servers] section is actually written; the CLI path was a no-op.
       } else if (agentId === 'kimi') {
         installMcpToKimiConfig(server, versionHome);
-        applied.push(server.name);
       } else if (agentId === 'droid') {
         installMcpToFactoryConfig(server, versionHome);
-        applied.push(server.name);
       } else if (agentId === 'hermes') {
         installMcpToHermesConfig(server, versionHome);
-        applied.push(server.name);
       } else if (agentId === 'forge') {
         installMcpToForgeConfig(server, versionHome);
-        applied.push(server.name);
       }
+
+      // Project-layer servers also get merged into the agent's project-level
+      // config (e.g., .mcp.json, .codex/config.toml) so the CLI discovers them
+      // when run inside the repo.
+      if (server.scope === 'project' && options.cwd) {
+        const projectConfigPath = getProjectMcpConfigPath(agentId, options.cwd);
+        const writableServer: WritableMcpServer = {
+          name: server.config.name,
+          transport: server.config.transport,
+          command: server.config.command,
+          args: server.config.args,
+          env: server.config.env,
+          url: server.config.url,
+        };
+        writeMcpConfig(agentId, projectConfigPath, [writableServer], 'merge');
+      }
+
+      applied.push(server.name);
     } catch (err) {
       const message = (err as Error).message;
       // Check if it's an "already exists" error - that's not a real error

@@ -573,4 +573,27 @@ describe('McpHandler.sync', () => {
     expect(userConfig.mcpServers).toHaveProperty('user-server');
     expect(fs.existsSync(path.join(projectRoot, '.mcp.json'))).toBe(false);
   });
+
+  it('merges project-level config without clobbering pre-existing entries', () => {
+    writeMcpYaml(path.join(projectAgentsDir, 'mcp'), 'project-server.yaml', {
+      name: 'project-server',
+      transport: 'stdio',
+      command: 'node',
+      args: ['project.js'],
+    });
+
+    fs.mkdirSync(projectRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectRoot, '.mcp.json'),
+      JSON.stringify({ mcpServers: { 'manual-server': { command: 'manual' } } }, null, 2),
+      'utf-8'
+    );
+
+    McpHandler.sync('claude', versionHome, projectRoot);
+
+    const projectConfig = JSON.parse(fs.readFileSync(path.join(projectRoot, '.mcp.json'), 'utf-8'));
+    expect(projectConfig.mcpServers).toHaveProperty('project-server');
+    expect(projectConfig.mcpServers).toHaveProperty('manual-server');
+    expect(projectConfig.mcpServers['manual-server']).toEqual({ command: 'manual' });
+  });
 });

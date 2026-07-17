@@ -397,3 +397,93 @@ describe('MCP argv construction', () => {
     expect(log).toMatch(/ARG:--\nARG:demo\nARG:node\nARG:server\.js/);
   });
 });
+
+describe('installMcpServers project-level config', () => {
+  it.skipIf(IS_WINDOWS)('writes project-layer MCPs to the agent project config path', async () => {
+    const home = makeTempHome();
+    const version = '0.1.0';
+    const projectRoot = path.join(home, 'project');
+    const projectMcpDir = path.join(projectRoot, '.agents', 'mcp');
+    const userMcpDir = path.join(home, '.agents', 'mcp');
+    fs.mkdirSync(projectMcpDir, { recursive: true });
+    fs.mkdirSync(userMcpDir, { recursive: true });
+
+    fs.writeFileSync(
+      path.join(projectMcpDir, 'project-server.yaml'),
+      ['name: project-server', 'transport: stdio', 'command: node', 'args: ["project.js"]', ''].join('\n'),
+      'utf-8'
+    );
+    fs.writeFileSync(
+      path.join(userMcpDir, 'user-server.yaml'),
+      ['name: user-server', 'transport: stdio', 'command: node', 'args: ["user.js"]', ''].join('\n'),
+      'utf-8'
+    );
+
+    const moduleUrl = pathToFileURL(path.resolve('dist/lib/mcp.js')).href;
+    const versionHome = path.join(home, '.agents', '.history', 'versions', 'cursor', version, 'home');
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import { installMcpServers, trustProjectMcp } from ${JSON.stringify(moduleUrl)};
+      trustProjectMcp(${JSON.stringify(projectRoot)});
+      const result = installMcpServers('cursor', ${JSON.stringify(version)}, ${JSON.stringify(versionHome)}, undefined, { cwd: ${JSON.stringify(projectRoot)} });
+      console.log(JSON.stringify(result));
+    `], {
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+
+    expect(child.status, child.stderr).toBe(0);
+    const result = JSON.parse(child.stdout.trim());
+    expect(result.success).toBe(true);
+
+    const userConfig = JSON.parse(fs.readFileSync(path.join(versionHome, '.cursor', 'mcp.json'), 'utf-8'));
+    expect(userConfig.mcpServers).toHaveProperty('project-server');
+    expect(userConfig.mcpServers).toHaveProperty('user-server');
+
+    const projectConfig = JSON.parse(fs.readFileSync(path.join(projectRoot, '.cursor', 'mcp.json'), 'utf-8'));
+    expect(projectConfig.mcpServers).toHaveProperty('project-server');
+    expect(projectConfig.mcpServers).not.toHaveProperty('user-server');
+  });
+
+  it.skipIf(IS_WINDOWS)('merges project config without clobbering manual entries', async () => {
+    const home = makeTempHome();
+    const version = '0.1.0';
+    const projectRoot = path.join(home, 'project');
+    const projectMcpDir = path.join(projectRoot, '.agents', 'mcp');
+    fs.mkdirSync(projectMcpDir, { recursive: true });
+
+    fs.writeFileSync(
+      path.join(projectMcpDir, 'project-server.yaml'),
+      ['name: project-server', 'transport: stdio', 'command: node', 'args: ["project.js"]', ''].join('\n'),
+      'utf-8'
+    );
+
+    const projectConfigDir = path.join(projectRoot, '.cursor');
+    fs.mkdirSync(projectConfigDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectConfigDir, 'mcp.json'),
+      JSON.stringify({ mcpServers: { 'manual-server': { command: 'manual' } } }, null, 2),
+      'utf-8'
+    );
+
+    const moduleUrl = pathToFileURL(path.resolve('dist/lib/mcp.js')).href;
+    const versionHome = path.join(home, '.agents', '.history', 'versions', 'cursor', version, 'home');
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import { installMcpServers, trustProjectMcp } from ${JSON.stringify(moduleUrl)};
+      trustProjectMcp(${JSON.stringify(projectRoot)});
+      const result = installMcpServers('cursor', ${JSON.stringify(version)}, ${JSON.stringify(versionHome)}, undefined, { cwd: ${JSON.stringify(projectRoot)} });
+      console.log(JSON.stringify(result));
+    `], {
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+
+    expect(child.status, child.stderr).toBe(0);
+    const result = JSON.parse(child.stdout.trim());
+    expect(result.success).toBe(true);
+
+    const projectConfig = JSON.parse(fs.readFileSync(path.join(projectConfigDir, 'mcp.json'), 'utf-8'));
+    expect(projectConfig.mcpServers).toHaveProperty('project-server');
+    expect(projectConfig.mcpServers).toHaveProperty('manual-server');
+    expect(projectConfig.mcpServers['manual-server']).toEqual({ command: 'manual' });
+  });
+});
