@@ -41,7 +41,7 @@ import { colorAgent, resolveAgentName } from '../lib/agents.js';
 import { fuzzyMatch, FUZZY_PRESETS } from '../lib/fuzzy.js';
 import { resolveVersionAliasLoose } from '../lib/versions.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
-import { sessionPicker, type PickedSession } from './sessions-picker.js';
+import { sessionPicker, buildPreview, type PickedSession } from './sessions-picker.js';
 import { setHelpSections } from '../lib/help.js';
 import { registerSessionsTailCommand } from './sessions-tail.js';
 import { registerSessionsSyncCommand } from './sessions-sync.js';
@@ -103,6 +103,14 @@ interface SessionsOptions extends SessionFilterOptions {
   antigravity?: boolean;
   grok?: boolean;
   opencode?: boolean;
+  /** Force the printed listing even on a TTY. Commander's `--no-` convention:
+   * `--no-interactive` sets this false, opting out of the interactive browser. */
+  interactive?: boolean;
+  /** Print the canonical `ag sessions …` command for the given flags and exit —
+   * the non-interactive twin of the browser's `y` hotkey. */
+  printCmd?: boolean;
+  /** Print a compact preview of the matched session and exit (no pager). */
+  preview?: boolean;
 }
 
 /**
@@ -903,6 +911,52 @@ function printCrossMachineTip(): void {
   ));
 }
 
+/**
+ * True when the interactive session browser should open instead of a printed
+ * listing: a real TTY, no `--json`, and `--no-interactive` not set. The bare
+ * listing and `--active` both default to it; scripts/pipes/agents fall through
+ * to the existing printed/JSON paths.
+ */
+function useInteractiveBrowser(options: SessionsOptions): boolean {
+  return options.interactive !== false && !options.json && isInteractiveTerminal();
+}
+
+/** The canonical `ag sessions …` command for a set of flags — the twin of the
+ * browser's `y` hotkey (see --print-cmd). Normalizes to the stable flag form. */
+function canonicalSessionsCommand(query: string | undefined, options: SessionsOptions): string {
+  const a = ['sessions'];
+  if (options.active) a.push('--active');
+  if (options.teams) a.push('--teams');
+  if (options.agent) a.push('-a', options.agent);
+  for (const h of options.host ?? []) a.push('--device', h);
+  if (options.project) a.push('--project', options.project);
+  if (options.all) a.push('--all');
+  if (options.since) a.push('--since', options.since);
+  if (options.until) a.push('--until', options.until);
+  if (options.local) a.push('--local');
+  if (options.waiting) a.push('--waiting');
+  const q = (query ?? '').trim();
+  if (q) a.push(JSON.stringify(q));
+  return 'ag ' + a.join(' ');
+}
+
+/** Resolve a session by id/query globally and print its compact preview (no pager).
+ * Backs `--preview` — the fast path for the "peek before resume" hot loop. */
+async function renderSessionPreview(
+  query: string,
+  scope: { agent?: string; project?: string },
+): Promise<void> {
+  const discovered = await discoverSessions({ all: true, cwd: process.cwd(), limit: 5000 });
+  const pool = applyScopeFilters(discovered, scope);
+  const matches = resolveSessionById(pool, query);
+  const session = (matches.length > 0 ? matches : filterSessionsByQuery(pool, query))[0];
+  if (!session) {
+    console.log(chalk.gray(`No session matches "${query}".`));
+    return;
+  }
+  console.log(buildPreview(session));
+}
+
 /** Main action handler for `agents sessions`. Routes to picker, table, or single-session render. */
 async function sessionsAction(query: string | undefined, options: SessionsOptions): Promise<void> {
   // Explicit --query is interchangeable with the positional; it's how you search
@@ -915,6 +969,14 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
   applyAgentShorthands(options);
   if (options.device && options.device.length > 0) {
     options.host = [...(options.host ?? []), ...options.device];
+  }
+
+  // --print-cmd: echo the canonical `ag sessions …` for the given flags and exit.
+  // The non-interactive twin of the browser's `y` hotkey — lets an agent compose
+  // (or a human copy) the exact command a view maps to.
+  if (options.printCmd) {
+    process.stdout.write(canonicalSessionsCommand(query, options) + '\n');
+    return;
   }
 
   // --roots: emit the local session-scan directories, per agent, as JSON. A pure
@@ -947,6 +1009,19 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
   }
 
   if (options.active) {
+    // On a TTY (and not a scripting path), open the interactive browser seeded to
+    // running-only. --json / --waiting / --no-interactive / a peer fan-out keep the
+    // static dump untouched, so scripts and agents are unaffected.
+    if (useInteractiveBrowser(options) && !options.waiting && process.env.AGENTS_SESSIONS_LOCAL !== '1') {
+      const { runSessionBrowser } = await import('./sessions-browser.js');
+      await runSessionBrowser({
+        running: true,
+        teams: !!options.teams,
+        agent: options.agent,
+        device: options.host?.length === 1 ? options.host[0] : undefined,
+      });
+      return;
+    }
     // AGENTS_SESSIONS_LOCAL is set by a parent fan-out invocation (see
     // remote-active.ts) so a peer answers for itself without recursing.
     const forceLocal = options.local === true || process.env.AGENTS_SESSIONS_LOCAL === '1';
@@ -959,6 +1034,38 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
 
   if (options.cloud) {
     await runCloudSessions(query, options);
+    return;
+  }
+
+  // --preview <id/query>: resolve one session and print its compact preview, then
+  // exit. The fast peek that skips the pager.
+  if (options.preview) {
+    if (!query) {
+      console.error(chalk.red('--preview requires a session id or query.'));
+      process.exit(1);
+    }
+    await renderSessionPreview(query, { agent: options.agent, project: options.project });
+    return;
+  }
+
+  // Bare interactive listing → the interactive fleet browser (humans). A query,
+  // a render/filter flag, --flat/--tree, --json, or --no-interactive keep the
+  // existing printed/render paths (agents and scripts unaffected).
+  if (
+    useInteractiveBrowser(options) &&
+    !query &&
+    !options.flat &&
+    !options.tree &&
+    !options.markdown &&
+    !options.artifacts &&
+    options.artifact === undefined
+  ) {
+    const { runSessionBrowser } = await import('./sessions-browser.js');
+    await runSessionBrowser({
+      teams: !!options.teams,
+      agent: options.agent,
+      projectScope: options.all ? 'all' : 'repo',
+    });
     return;
   }
 
@@ -1768,7 +1875,7 @@ function warnNoPeerTarget(machine: string, session: SessionMeta): void {
   console.log(chalk.gray(`Register/wake it (ag devices), or run there: agents ssh ${machine}`));
 }
 
-async function handlePickedSession(picked: PickedSession): Promise<void> {
+export async function handlePickedSession(picked: PickedSession): Promise<void> {
   // A session on another machine is read/resumed ON that machine over SSH — its
   // transcript and agent binary live there. Both actions execute on the peer
   // (not a local `--host` hop, which would discover locally and dead-end for a
@@ -2326,7 +2433,7 @@ export function registerSessionsCommands(program: Command): void {
     .option('--opencode', 'Shorthand for --agent opencode')
     .option('--all', 'Include sessions from every directory (not just current project)')
     .option('--teams', 'Include team-spawned sessions (hidden by default)')
-    .option('--project <name>', 'Filter by project name (searches across all directories)')
+    .option('-p, --project <name>', 'Filter by project name (searches across all directories)')
     .option('--since <time>', 'Only sessions newer than this (e.g., 2h, 7d, 4w, or ISO date)')
     .option('--until <time>', 'Only sessions older than this (ISO timestamp)')
     .option('-n, --limit <n>', 'Maximum number of sessions to return', '50')
@@ -2350,7 +2457,10 @@ export function registerSessionsCommands(program: Command): void {
     .option('--cloud', 'Source sessions from Rush Cloud (captured runs) instead of local disk')
     .option('-H, --host <target...>', 'Run this query on remote machine(s) over SSH (host alias or user@host; repeatable)')
     .option('--device <target...>', 'Alias for --host (device alias from `agents devices`; repeatable)')
-    .option('--browser', 'List browser-profile captures (screenshots, PDFs, recordings, downloads) instead of agent transcripts — alias of `agents browser sessions`');
+    .option('--browser', 'List browser-profile captures (screenshots, PDFs, recordings, downloads) instead of agent transcripts — alias of `agents browser sessions`')
+    .option('--no-interactive', 'Print the listing instead of opening the interactive browser (default on a TTY for the bare listing and --active)')
+    .option('--print-cmd', 'Print the canonical `ag sessions …` command for the given flags and exit (the twin of the browser’s `y` hotkey)')
+    .option('--preview', 'With a session id/query: print a compact preview and exit (no pager)');
 
   setHelpSections(sessionsCmd, {
     examples: `
