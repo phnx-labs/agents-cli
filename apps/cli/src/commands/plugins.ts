@@ -101,8 +101,15 @@ When to use:
 `);
 
   // Shared list implementation — reused by `list` and the bare `agents plugins` default.
-  const runList = async () => {
+  const runList = async (options: { json?: boolean } = {}) => {
     const plugins = discoverPlugins();
+
+    if (options.json) {
+      // Structured dump (name/description + per-agent-version sync targets) — the
+      // same rows the table is built from, mirroring `plugins marketplaces --json`.
+      console.log(JSON.stringify(plugins.length === 0 ? [] : buildPluginRows(plugins), null, 2));
+      return;
+    }
 
     if (plugins.length === 0) {
       console.log(chalk.gray('No plugins found in ~/.agents/plugins/'));
@@ -121,13 +128,16 @@ When to use:
     });
   };
 
-  // Bare `agents plugins` → same as `list`.
+  // Bare `agents plugins` → same as `list`. (--json lives on the explicit `list`
+  // subcommand only; declaring it on both parent + child makes commander bind the
+  // flag to the parent for `plugins list --json`, dropping it from the subcommand.)
   pluginsCmd.action(runList);
 
   // agents plugins list
   pluginsCmd
     .command('list')
     .description('Show plugins in a table with sync status across agent versions')
+    .option('--json', 'Emit machine-readable JSON')
     .action(runList);
 
   // agents plugins marketplaces

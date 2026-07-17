@@ -13,6 +13,7 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { visibleWidth, padVisible } from '../lib/format.js';
+import { stripAnsi } from '../lib/session/width.js';
 import ora from 'ora';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -540,18 +541,31 @@ function renderCards(rows: RepoRow[], cols: number): void {
  * CHANGES cells; a narrow one gets one card per repo with wrapping detail;
  * `--verbose` forces the full-detail table at any width.
  */
-async function listRepos(alias: string | undefined, opts: { verbose?: boolean } = {}): Promise<void> {
+async function listRepos(alias: string | undefined, opts: { verbose?: boolean; json?: boolean } = {}): Promise<void> {
   const targets = collectRepoTargets(alias);
   if (!targets) {
     process.exitCode = 1;
     return;
   }
   if (targets.length === 0) {
+    if (opts.json) {
+      console.log('[]');
+      return;
+    }
     console.log(chalk.gray('No repos to show.'));
     return;
   }
 
   const rows = await Promise.all(targets.map(renderRepoRow));
+
+  if (opts.json) {
+    // Structured dump of the same rows so agents can enumerate repos + sync state.
+    // `raw` (the missing / no-git-remote human label) is the only colored field —
+    // strip ANSI so the JSON stays clean; every other field is already structured.
+    const clean = rows.map((r) => (r.raw !== undefined ? { ...r, raw: stripAnsi(r.raw) } : r));
+    console.log(JSON.stringify(clean, null, 2));
+    return;
+  }
   // TTY width when interactive; fall back to $COLUMNS (honored when piped) then 80.
   const cols = process.stdout.columns || Number(process.env.COLUMNS) || 80;
 
@@ -790,7 +804,8 @@ export function registerRepoCommands(program: Command): void {
     .alias('ls')
     .description('Show all repos with resource-level sync (skills/commands/plugins to pull or push) and local changes.')
     .option('-v, --verbose', 'Full per-resource detail in a table, regardless of terminal width')
-    .action(async (alias: string | undefined, options: { verbose?: boolean }) => {
+    .option('--json', 'machine-readable JSON output')
+    .action(async (alias: string | undefined, options: { verbose?: boolean; json?: boolean }) => {
       await listRepos(alias, options);
     });
 
@@ -1062,7 +1077,8 @@ export function registerRepoCommands(program: Command): void {
     .command('status [alias]', { hidden: true })
     .description('Alias of `list` (kept for muscle memory).')
     .option('-v, --verbose', 'Full per-resource detail in a table, regardless of terminal width')
-    .action(async (alias: string | undefined, options: { verbose?: boolean }) => {
+    .option('--json', 'machine-readable JSON output')
+    .action(async (alias: string | undefined, options: { verbose?: boolean; json?: boolean }) => {
       await listRepos(alias, options);
     });
 }
