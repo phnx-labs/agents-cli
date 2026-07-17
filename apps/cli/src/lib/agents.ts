@@ -18,7 +18,7 @@ import * as TOML from 'smol-toml';
 import * as yaml from 'yaml';
 import chalk from 'chalk';
 import type { AgentConfig, AgentId } from './types.js';
-import { needsWindowsShell, execFileShellSpec } from './platform/index.js';
+import { execFileShellSpec } from './platform/index.js';
 import { latestFileMtimeMs } from './fs-walk.js';
 import { damerauLevenshtein } from './fuzzy.js';
 import { getCacheDir, getVersionsDir, getShimsDir, getCliVersionCachePath } from './state.js';
@@ -1838,7 +1838,10 @@ export async function unregisterMcp(
   try {
     const bin = options?.binary || agent.cliCommand;
     const env = options?.home ? { ...process.env, HOME: options.home } : undefined;
-    await execFileAsync(bin, ['mcp', 'remove', name], { ...(env ? { env } : {}), shell: needsWindowsShell(bin) });
+    // RUSH-1752: same shell-safe path as registerMcp — attacker-controlled MCP
+    // `name` must not reach cmd.exe unescaped when shell:true is required.
+    const spec = execFileShellSpec(bin, ['mcp', 'remove', name]);
+    await execFileAsync(spec.command, spec.args, { ...(env ? { env } : {}), shell: spec.shell });
     return { success: true };
   } catch (err) {
     return { success: false, error: (err as Error).message };

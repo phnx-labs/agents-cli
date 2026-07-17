@@ -18,7 +18,7 @@ import {
   resolveLastActive,
   warnAgentDeprecated,
 } from './agents.js';
-import { IS_WINDOWS } from './platform/index.js';
+import { IS_WINDOWS, execFileShellSpec } from './platform/index.js';
 import type { CapabilityName } from './types.js';
 
 const tempDirs: string[] = [];
@@ -106,16 +106,26 @@ describe.skipIf(IS_WINDOWS)('MCP CLI execution', () => {
     const dir = makeTempDir();
     const { binary, logPath } = writeArgLogger(dir);
     const pwnedPath = path.join(dir, 'pwned');
+    const evilName = `demo"; touch ${pwnedPath}`;
 
     const result = runAgentsModule(
-      `unregisterMcp('codex', ${JSON.stringify(`demo"; touch ${pwnedPath}`)}, { binary: ${JSON.stringify(binary)}, home: ${JSON.stringify(dir)} })`
+      `unregisterMcp('codex', ${JSON.stringify(evilName)}, { binary: ${JSON.stringify(binary)}, home: ${JSON.stringify(dir)} })`
     ) as { success: boolean };
 
     const log = fs.readFileSync(logPath, 'utf-8');
     expect(result.success).toBe(true);
     expect(fs.existsSync(pwnedPath)).toBe(false);
     expect(log).toContain('ARG:mcp\nARG:remove');
-    expect(log).toContain(`ARG:demo"; touch ${pwnedPath}`);
+    expect(log).toContain(`ARG:${evilName}`);
+
+    // RUSH-1752: Windows shell path must quote the attacker-controlled name so
+    // metacharacters never reach cmd.exe unescaped (empty argv + composed line).
+    // Matches unregisterMcp's args: ['mcp', 'remove', name].
+    const metaName = 'demo&evil|more>out';
+    const winSpec = execFileShellSpec('codex.cmd', ['mcp', 'remove', metaName], 'win32');
+    expect(winSpec.shell).toBe(true);
+    expect(winSpec.args).toEqual([]);
+    expect(winSpec.command).toBe('codex.cmd mcp remove "demo&evil|more>out"');
   });
 
   it('preserves quoted MCP command arguments without invoking a shell', async () => {
