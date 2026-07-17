@@ -15,12 +15,35 @@ import simpleGit from 'simple-git';
 import {
   adoptRepo,
   assertSafeGitTransport,
+  assertValidBranchName,
   commitAndPush,
   displayHomePath,
   parseSource,
   pullRepo,
+  pushOrigin,
   syncRepoGit,
 } from './git.js';
+
+describe('assertValidBranchName', () => {
+  it('allows ordinary branch names', () => {
+    expect(() => assertValidBranchName('main')).not.toThrow();
+    expect(() => assertValidBranchName('feature/foo')).not.toThrow();
+    expect(() => assertValidBranchName('rush-1765-git-push')).not.toThrow();
+  });
+
+  it('rejects empty names', () => {
+    expect(() => assertValidBranchName('')).toThrow(/empty/);
+    expect(() => assertValidBranchName('   ')).toThrow(/empty/);
+  });
+
+  // RUSH-1765 finding 2: a branch beginning with "-" is parsed as a git push option.
+  it('rejects names that would be parsed as git push options', () => {
+    expect(() => assertValidBranchName('--mirror')).toThrow(/git option/);
+    expect(() => assertValidBranchName('--receive-pack=evil')).toThrow(/git option/);
+    expect(() => assertValidBranchName('-u')).toThrow(/git option/);
+    expect(() => assertValidBranchName('--force')).toThrow(/git option/);
+  });
+});
 
 describe('assertSafeGitTransport', () => {
   const allowed = [
@@ -305,6 +328,20 @@ describe('commitAndPush (clean-but-ahead + dirty)', () => {
     const verify = path.join(root, 'verify-dirty');
     await simpleGit().clone(remote, verify);
     expect(fs.readFileSync(path.join(verify, 'dirty.txt'), 'utf8')).toBe('new\n');
+  });
+
+  // RUSH-1765 finding 2: hostile branch names must never reach git as push options.
+  // Real simple-git instance; pushOrigin validates before any push argv is built.
+  it('refuses to push a hostile branch name that would be a git option', async () => {
+    const git = simpleGit(local);
+    await expect(pushOrigin(git, '--mirror')).rejects.toThrow(/git option/);
+    await expect(pushOrigin(git, '--receive-pack=evil')).rejects.toThrow(/git option/);
+    // Normal branch still pushes via the hardened path (real remote).
+    await commitFile(local, 'safe-push.txt', 'ok\n', 'safe push');
+    await pushOrigin(git, 'main');
+    const verify = path.join(root, 'verify-safe-push');
+    await simpleGit().clone(remote, verify);
+    expect(fs.readFileSync(path.join(verify, 'safe-push.txt'), 'utf8')).toBe('ok\n');
   });
 });
 

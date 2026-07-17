@@ -42,16 +42,18 @@ describe('package-name consistency (@phnx-labs canonical)', () => {
   });
 
   it('upgrade installs are built from the canonical package constant', () => {
-    // The npm install itself lives in src/lib/self-update.ts; index.ts builds
-    // the install spec from the shared NPM_PACKAGE_NAME constant.
+    // The npm install itself lives in src/lib/self-update.ts; index.ts resolves
+    // the package to install from the shared NPM_PACKAGE_NAME constant.
     const selfUpdate = read('src/lib/self-update.ts');
     expect(selfUpdate).toContain(`export const NPM_PACKAGE_NAME = '${NPM_PACKAGE}';`);
     expect(selfUpdate).not.toContain('@companion');
     const src = read('src/index.ts');
-    // The install spec is built once from the shared constant, then handed to
-    // the package-manager-specific installer (npm --prefix or `bun add -g`).
-    const specs = src.match(/const spec = `\$\{NPM_PACKAGE_NAME\}@/g) ?? [];
-    expect(specs.length).toBeGreaterThan(0);
+    // The upgrade resolves the canonical package's registry metadata (version +
+    // integrity + tarball) from the shared constant, then downloads and
+    // integrity-verifies that tarball before installing the local .tgz.
+    const metadataFetches = src.match(/registry\.npmjs\.org\/\$\{NPM_PACKAGE_NAME\}\//g) ?? [];
+    expect(metadataFetches.length).toBeGreaterThan(0);
+    expect(src).toContain('downloadVerifiedTarball(metadata.tarball, metadata.integrity)');
   });
 
   it('src/index.ts version-check URLs target the canonical package', () => {

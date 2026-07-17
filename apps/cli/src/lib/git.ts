@@ -63,6 +63,42 @@ export function assertSafeGitTransport(source: string): void {
 }
 
 /**
+ * Validate a branch name before it is passed to `git push` / `git pull`.
+ *
+ * A name beginning with `-` is parsed by git as a command-line option
+ * (e.g. `--mirror`, `--receive-pack=…`), not a ref. Pure string check —
+ * identical on every OS, no spawn.
+ *
+ * @throws Error if the name is empty or would be interpreted as a git option.
+ */
+export function assertValidBranchName(branch: string): void {
+  const b = branch.trim();
+  if (!b) {
+    throw new Error(
+      `Invalid branch name ${JSON.stringify(branch)}: branch name is empty.`,
+    );
+  }
+  if (b.startsWith('-')) {
+    throw new Error(
+      `Invalid branch name ${JSON.stringify(branch)}: a name starting with "-" is interpreted as a git option.`,
+    );
+  }
+}
+
+/**
+ * `git push origin <branch>` with option-injection hardening:
+ *   1. {@link assertValidBranchName} rejects leading `-`
+ *   2. `--` ends option parsing so a hostile ref cannot be read as a flag
+ *
+ * Prefer this over `git.push(remote, branch)` whenever the branch comes from
+ * repo state rather than a hard-coded literal.
+ */
+export async function pushOrigin(git: SimpleGit, branch: string): Promise<void> {
+  assertValidBranchName(branch);
+  await git.raw(['push', '--', 'origin', branch]);
+}
+
+/**
  * Whether installing a cloned/pulled repo's `.githooks/` is enabled.
  *
  * Installing hooks wires those scripts into `.git/hooks/`, so `git` EXECUTES
@@ -452,6 +488,7 @@ export async function commitAndPush(repoPath: string, message: string): Promise<
     const git = simpleGit(repoPath);
     let status = await git.status();
     const branch = status.current || 'main';
+    assertValidBranchName(branch);
 
     let committed = false;
     if (status.files.length > 0) {
@@ -480,7 +517,7 @@ export async function commitAndPush(repoPath: string, message: string): Promise<
       /* origin/<branch> may not exist yet (first push) */
     }
 
-    await git.push('origin', branch);
+    await pushOrigin(git, branch);
 
     let after = '';
     try {
@@ -848,6 +885,7 @@ export async function syncRepoGit(
     }
 
     const branch = status.current || 'main';
+    assertValidBranchName(branch);
     await git.fetch('origin');
     await git.pull('origin', branch, { '--rebase': 'true' });
 
@@ -855,7 +893,7 @@ export async function syncRepoGit(
 
     let pushed = false;
     if (opts.push) {
-      await git.push('origin', branch);
+      await pushOrigin(git, branch);
       pushed = true;
     }
 

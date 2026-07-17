@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'child_process';
+import { createHash } from 'crypto';
+import * as http from 'http';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -9,6 +11,7 @@ import {
   deriveGlobalPrefix,
   detectPackageManager,
   dismissUpdateVersion,
+  downloadVerifiedTarball,
   findAgentsCliInstalls,
   installPackageIntoPrefix,
   readInstalledVersion,
@@ -16,6 +19,7 @@ import {
   saveUpdateCheck,
   shouldPromptUpgrade,
   verifyInstalledVersion,
+  verifyTarballIntegrity,
 } from './self-update.js';
 
 const tempDirs: string[] = [];
@@ -184,6 +188,74 @@ describe('installPackageIntoPrefix', () => {
     await installPackageIntoPrefix(packDummyPackage('2.0.0'), prefixB);
 
     expect(() => verifyInstalledVersion(runningRoot, '2.0.0')).toThrow(/still 1\.0\.0 \(expected 2\.0\.0\)/);
+  });
+});
+
+function sriFor(buf: Buffer): string {
+  return `sha512-${createHash('sha512').update(buf).digest('base64')}`;
+}
+
+describe('verifyTarballIntegrity', () => {
+  const tarball = Buffer.from('fake tarball bytes   for integrity check');
+
+  it('accepts a tarball whose bytes match the SRI digest', () => {
+    expect(() => verifyTarballIntegrity(tarball, sriFor(tarball))).not.toThrow();
+  });
+
+  it('rejects a tarball whose bytes do not match the SRI digest (tampered/corrupt)', () => {
+    // The security gate: the registry attested one hash, the delivered bytes
+    // hash to another — self-update must refuse it, not install it.
+    const attested = sriFor(tarball);
+    const tampered = Buffer.concat([tarball, Buffer.from('!')]);
+    expect(() => verifyTarballIntegrity(tampered, attested)).toThrow(/integrity check failed/);
+  });
+
+  it('refuses an algorithm weaker than sha512', () => {
+    const sha1 = `sha1-${createHash('sha1').update(tarball).digest('base64')}`;
+    expect(() => verifyTarballIntegrity(tarball, sha1)).toThrow(/unsupported integrity algorithm 'sha1'/);
+  });
+
+  it('rejects a malformed integrity string', () => {
+    expect(() => verifyTarballIntegrity(tarball, 'not-an-sri')).toThrow(/unsupported integrity algorithm/);
+    expect(() => verifyTarballIntegrity(tarball, 'sha512')).toThrow(/malformed integrity string/);
+  });
+});
+
+describe('downloadVerifiedTarball', () => {
+  const servers: http.Server[] = [];
+  afterEach(async () => {
+    for (const s of servers.splice(0)) await new Promise<void>((r) => s.close(() => r()));
+  });
+
+  function serve(bytes: Buffer): Promise<string> {
+    const server = http.createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/octet-stream' });
+      res.end(bytes);
+    });
+    servers.push(server);
+    return new Promise((resolve) => {
+      server.listen(0, '127.0.0.1', () => {
+        const addr = server.address() as { port: number };
+        resolve(`http://127.0.0.1:${addr.port}/@phnx-labs/agents-cli/-/agents-cli-9.9.9.tgz`);
+      });
+    });
+  }
+
+  it('writes the tarball to disk when the served bytes match the integrity', async () => {
+    const bytes = Buffer.from('verified package payload');
+    const url = await serve(bytes);
+    const file = await downloadVerifiedTarball(url, sriFor(bytes));
+    expect(fs.readFileSync(file).equals(bytes)).toBe(true);
+    expect(path.basename(file)).toBe('agents-cli-9.9.9.tgz');
+    fs.rmSync(path.dirname(file), { recursive: true, force: true });
+  });
+
+  it('rejects a wrong-hash tarball and writes nothing', async () => {
+    // End-to-end over real HTTP + real crypto: the server delivers bytes that
+    // do not match the attested integrity; the download must reject.
+    const attested = sriFor(Buffer.from('the legitimate published tarball'));
+    const url = await serve(Buffer.from('a malicious substituted tarball'));
+    await expect(downloadVerifiedTarball(url, attested)).rejects.toThrow(/integrity check failed/);
   });
 });
 

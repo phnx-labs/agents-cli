@@ -33,6 +33,7 @@ import {
   resolveSshTarget,
   remoteSecretsRaw,
   remoteResolveEnv,
+  isDangerousRemoteEnvKey,
 } from './remote.js';
 
 const ok = (stdout: string): SshExecResult => ({ code: 0, stdout, stderr: '', timedOut: false });
@@ -228,5 +229,47 @@ describe('remoteResolveEnv', () => {
   it('throws a clear hint when the remote payload is not JSON', async () => {
     sshExecMock.mockReturnValue(ok('command not found: agents'));
     await expect(remoteResolveEnv('host', 'b')).rejects.toThrow(/--format json/);
+  });
+
+  it('drops dangerous-override keys returned by a peer, keeps benign ones (RUSH-1762)', async () => {
+    // A compromised/misconfigured peer returns keys that would silently reshape
+    // THIS process once merged (proxy MITM, base-url redirect, git/loader hijack).
+    sshExecMock.mockReturnValue(ok(JSON.stringify({
+      FOO: 'bar',                              // benign — kept
+      ANTHROPIC_BASE_URL: 'http://evil.test',  // *_BASE_URL — dropped
+      HTTPS_PROXY: 'http://evil.test:8080',    // *_PROXY — dropped
+      ALL_PROXY: 'socks5://evil.test',         // *_PROXY — dropped
+      GIT_SSH_COMMAND: 'ssh -o Foo=bar',       // GIT_* — dropped
+      GIT_CONFIG_GLOBAL: '/tmp/evil',          // GIT_* — dropped
+      LD_PRELOAD: '/tmp/evil.so',              // LD_* — dropped
+      DYLD_INSERT_LIBRARIES: '/tmp/evil.dylib',// DYLD_* — dropped
+      NODE_OPTIONS: '--require /tmp/evil.js',   // loader — dropped
+    })));
+    const env = await remoteResolveEnv('host', 'b');
+    expect(env).toEqual({ FOO: 'bar' });
+    for (const blocked of [
+      'ANTHROPIC_BASE_URL', 'HTTPS_PROXY', 'ALL_PROXY',
+      'GIT_SSH_COMMAND', 'GIT_CONFIG_GLOBAL',
+      'LD_PRELOAD', 'DYLD_INSERT_LIBRARIES', 'NODE_OPTIONS',
+    ]) {
+      expect(env).not.toHaveProperty(blocked);
+    }
+  });
+});
+
+describe('isDangerousRemoteEnvKey', () => {
+  it('blocks the override classes and passes ordinary secret keys', () => {
+    for (const k of [
+      'LD_PRELOAD', 'DYLD_INSERT_LIBRARIES', 'NODE_OPTIONS',
+      'GIT_SSH_COMMAND', 'GIT_CONFIG_GLOBAL',
+      'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
+      'ANTHROPIC_BASE_URL', 'OPENAI_BASE_URL',
+    ]) {
+      expect(isDangerousRemoteEnvKey(k)).toBe(true);
+      expect(isDangerousRemoteEnvKey(k.toLowerCase())).toBe(true); // case-insensitive
+    }
+    for (const k of ['FOO', 'ANTHROPIC_API_KEY', 'DATABASE_URL', 'GITHUB_TOKEN', 'MY_PROXYING']) {
+      expect(isDangerousRemoteEnvKey(k)).toBe(false);
+    }
   });
 });

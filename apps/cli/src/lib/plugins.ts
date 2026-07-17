@@ -611,6 +611,14 @@ export function syncPluginToVersion(
   // OpenCode uses TS/JS modules under ~/.config/opencode/plugins/, not the
   // Claude marketplace layout. Install those modules and return early.
   if (agent === 'opencode') {
+    // Trust gate (RUSH-1756): OpenCode plugins are raw executable TS/JS modules,
+    // so they must clear the same consent check as every other exec surface
+    // before install — this branch used to return early, bypassing the gate the
+    // Gemini/Hermes/marketplace branches all apply.
+    const enablePlugin = options.allowExecSurfaces === true || !hasPluginExecSurfaces(inspectPluginCapabilities(plugin.root));
+    if (!enablePlugin) {
+      return result;
+    }
     const ok = installOpenCodePlugin(plugin, versionHome);
     result.success = ok;
     if (ok) result.skills.push(plugin.name);
@@ -1135,6 +1143,63 @@ function writeGeminiExtensionManifest(plugin: DiscoveredPlugin, destRoot: string
   );
 }
 
+/**
+ * Security (RUSH-1755): `fs.cpSync(..., { recursive: true })` copies symlinks
+ * verbatim (dereference defaults to false), so a malicious plugin can ship a
+ * symlink whose target escapes the install root — e.g.
+ * `.agents-cli-managed -> ~/.bashrc`. The managed-marker / manifest writes that
+ * follow the copy would then write THROUGH the link, clobbering an
+ * attacker-chosen path outside the install root.
+ *
+ * Walk destRoot after the recursive copy, lstat each entry, and remove any
+ * symlink whose resolved target escapes BOTH destRoot and sourceRoot. Both roots
+ * matter because Node's cpSync rewrites a *relative* internal symlink
+ * (`./x`) into an *absolute* link back into the source tree, so a legitimate
+ * internal symlink resolves under sourceRoot (not destRoot) after the copy.
+ * Keeping targets within sourceRoot preserves those internal symlinks — matching
+ * copyPluginToMarketplace's policy — while genuinely external escapes are
+ * dropped, neutralizing the write-through.
+ */
+function stripEscapingSymlinks(destRoot: string, sourceRoot: string): string[] {
+  const realRoots = [destRoot, sourceRoot].map((r) => {
+    try { return fs.realpathSync(r); }
+    catch { return r; }
+  });
+  const within = (target: string): boolean =>
+    realRoots.some((root) => target === root || target.startsWith(root + path.sep));
+  const removed: string[] = [];
+  const walk = (dir: string): void => {
+    let entries: fs.Dirent[];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
+    catch { return; }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isSymbolicLink()) {
+        let escapes: boolean;
+        try {
+          escapes = !within(fs.realpathSync(full));
+        } catch {
+          // Dangling / unresolvable symlink — treat as escaping and drop it.
+          escapes = true;
+        }
+        if (escapes) {
+          try {
+            fs.rmSync(full, { force: true });
+            removed.push(path.relative(destRoot, full) || entry.name);
+          } catch { /* best effort */ }
+        }
+      } else if (entry.isDirectory()) {
+        // Do not descend into symlinked dirs — isDirectory() is false for a
+        // symlink even when it points at a directory, so this only recurses
+        // into real subdirectories, keeping the walk inside destRoot.
+        walk(full);
+      }
+    }
+  };
+  walk(destRoot);
+  return removed;
+}
+
 export function installGeminiPlugin(plugin: DiscoveredPlugin, versionHome: string): boolean {
   const destRoot = path.join(geminiExtensionsDir(versionHome), plugin.name);
   try {
@@ -1142,6 +1207,7 @@ export function installGeminiPlugin(plugin: DiscoveredPlugin, versionHome: strin
       fs.rmSync(destRoot, { recursive: true, force: true });
     }
     fs.cpSync(plugin.root, destRoot, { recursive: true });
+    stripEscapingSymlinks(destRoot, plugin.root);
     const userConfig = loadUserConfig(plugin.name);
     if (Object.keys(userConfig).length > 0) {
       expandUserConfigInDir(destRoot, userConfig);
@@ -1191,6 +1257,7 @@ export function installGoosePlugin(plugin: DiscoveredPlugin, versionHome: string
       fs.rmSync(destRoot, { recursive: true, force: true });
     }
     fs.cpSync(plugin.root, destRoot, { recursive: true });
+    stripEscapingSymlinks(destRoot, plugin.root);
     fs.writeFileSync(
       path.join(destRoot, '.agents-cli-managed'),
       `plugin=${plugin.name}\n`,
@@ -1288,6 +1355,7 @@ export function installHermesPlugin(plugin: DiscoveredPlugin, versionHome: strin
       fs.rmSync(destRoot, { recursive: true, force: true });
     }
     fs.cpSync(plugin.root, destRoot, { recursive: true });
+    stripEscapingSymlinks(destRoot, plugin.root);
     const userConfig = loadUserConfig(plugin.name);
     if (Object.keys(userConfig).length > 0) {
       expandUserConfigInDir(destRoot, userConfig);

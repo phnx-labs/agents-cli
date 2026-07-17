@@ -42,6 +42,13 @@ export interface SessionMeta {
 export interface CreateSessionOptions {
   name: string;
   cmd?: string;
+  /**
+   * Redacted copy of `cmd` to persist in SessionMeta.cmd instead of the real
+   * command. When set, `cmd` is still executed but only `metaCmd` is written to
+   * disk — used to keep resolved secret values out of the informational cmd
+   * field (see exec.ts buildTmuxAgentCommand, RUSH-1758). Defaults to `cmd`.
+   */
+  metaCmd?: string;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   socket?: string;
@@ -167,7 +174,9 @@ export async function createSession(opts: CreateSessionOptions): Promise<Session
     name: opts.name,
     socket,
     createdAt: Date.now(),
-    cmd: opts.cmd,
+    // Persist the redacted copy when provided so resolved secret values in the
+    // launch command never land on disk (RUSH-1758).
+    cmd: opts.metaCmd ?? opts.cmd,
     cwd: opts.cwd,
     source: opts.source ?? 'cli',
     labels: opts.labels,

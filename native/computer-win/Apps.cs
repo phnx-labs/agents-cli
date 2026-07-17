@@ -62,8 +62,25 @@ public static class Apps
         string target = path ?? name ?? bundleId
             ?? throw RpcError.Invalid("pass one of: bundle_id, path, name");
 
-        if ((name ?? "").Contains("..") || (name ?? "").Contains('/'))
-            throw RpcError.Invalid("name must not contain '/' or '..' — use path instead");
+        // RUSH-1763: never hand UNC/remote, protocol/URL, or traversal-shaped
+        // targets to ShellExecute. Explicit `path` must also be a local
+        // drive-rooted path (C:\...); bare names use name/bundle_id instead.
+        if (path is not null)
+        {
+            string? pathReject = LaunchTarget.RejectReason(path);
+            if (pathReject is not null) throw RpcError.Invalid(pathReject);
+            if (!LaunchTarget.IsLocalRootedPath(path))
+                throw RpcError.Invalid("path must be an absolute local path (e.g. C:\\Windows\\System32\\notepad.exe)");
+        }
+        else
+        {
+            // name / bundle_id: PATH-style short names only — no separators.
+            string shortName = name ?? bundleId ?? "";
+            if (shortName.Contains("..") || shortName.Contains('/') || shortName.Contains('\\'))
+                throw RpcError.Invalid("name must not contain path separators or '..' — use path instead");
+            string? nameReject = LaunchTarget.RejectReason(target);
+            if (nameReject is not null) throw RpcError.Invalid(nameReject);
+        }
 
         try
         {

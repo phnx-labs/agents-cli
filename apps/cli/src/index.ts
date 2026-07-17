@@ -40,11 +40,13 @@ import {
   installPackageWithBun,
   verifyInstalledVersion,
   refreshAliasShims,
+  downloadVerifiedTarball,
 } from './lib/self-update.js';
 
 interface NpmPackageMetadata {
   version: string;
   integrity: string;
+  tarball: string;
 }
 
 // Detect dev/working-tree builds and default the noisy startup steps off.
@@ -417,13 +419,17 @@ async function fetchNpmPackageMetadata(versionOrTag = 'latest', timeoutMs = 5000
 
   const data = await response.json() as {
     version?: unknown;
-    dist?: { integrity?: unknown };
+    dist?: { integrity?: unknown; tarball?: unknown };
   };
-  if (typeof data.version !== 'string' || typeof data.dist?.integrity !== 'string') {
-    throw new Error('npm registry response did not include version and integrity');
+  if (
+    typeof data.version !== 'string' ||
+    typeof data.dist?.integrity !== 'string' ||
+    typeof data.dist?.tarball !== 'string'
+  ) {
+    throw new Error('npm registry response did not include version, integrity, and tarball');
   }
 
-  return { version: data.version, integrity: data.dist.integrity };
+  return { version: data.version, integrity: data.dist.integrity, tarball: data.dist.tarball };
 }
 
 function printResolvedPackage(metadata: NpmPackageMetadata): void {
@@ -433,15 +439,29 @@ function printResolvedPackage(metadata: NpmPackageMetadata): void {
 
 async function installResolvedPackage(metadata: NpmPackageMetadata): Promise<void> {
   const packageRoot = path.resolve(__dirname, '..');
-  const spec = `${NPM_PACKAGE_NAME}@${metadata.version}`;
-  // Upgrade with the package manager that owns this install. A bun global
-  // install lives at <bunGlobalDir>/node_modules/... (no `lib` segment), so an
-  // `npm install --prefix` would write to <bunGlobalDir>/lib/node_modules and
-  // never touch the running copy — npm exits 0, the verify below fails.
-  if (detectPackageManager(packageRoot) === 'bun') {
-    await installPackageWithBun(spec);
-  } else {
-    await installPackageIntoPrefix(spec, deriveGlobalPrefix(packageRoot));
+  // Download the published tarball and prove its bytes match the registry
+  // integrity BEFORE installing anything. A `name@version` spec would let the
+  // package manager fetch and install whatever the registry serves with no
+  // hash check on our side; instead we verify here and install the LOCAL, now
+  // trusted .tgz. A mismatch throws and nothing below runs — fail closed.
+  const tarball = await downloadVerifiedTarball(metadata.tarball, metadata.integrity);
+  try {
+    // Upgrade with the package manager that owns this install. A bun global
+    // install lives at <bunGlobalDir>/node_modules/... (no `lib` segment), so an
+    // `npm install --prefix` would write to <bunGlobalDir>/lib/node_modules and
+    // never touch the running copy — npm exits 0, the verify below fails.
+    if (detectPackageManager(packageRoot) === 'bun') {
+      await installPackageWithBun(tarball);
+    } else {
+      await installPackageIntoPrefix(tarball, deriveGlobalPrefix(packageRoot));
+    }
+  } finally {
+    // Best-effort cleanup of the verified tarball and its temp dir.
+    try {
+      fs.rmSync(path.dirname(tarball), { recursive: true, force: true });
+    } catch {
+      /* leave it for the OS temp sweep */
+    }
   }
   verifyInstalledVersion(packageRoot, metadata.version);
   refreshAliasShims(packageRoot);

@@ -29,6 +29,11 @@ import {
   installGeminiPlugin,
   isGeminiPluginInstalled,
   removeGeminiPlugin,
+  installGoosePlugin,
+  isGoosePluginInstalled,
+  installHermesPlugin,
+  isHermesPluginInstalled,
+  isOpenCodePluginInstalled,
 } from './plugins.js';
 import type { DiscoveredPlugin, PluginManifest } from './types.js';
 
@@ -193,6 +198,147 @@ describe('Gemini extension plugin install', () => {
     const trusted = syncPluginToVersion(plugin, 'gemini', versionHome, { allowExecSurfaces: true });
     expect(trusted.success).toBe(true);
     expect(isGeminiPluginInstalled('gem-ext', versionHome)).toBe(true);
+  });
+});
+
+// ─── Symlink-escape hardening (RUSH-1755) ───────────────────────────────────────
+
+describe('plugin install strips symlinks escaping the install root (RUSH-1755)', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('Gemini: drops a .agents-cli-managed symlink pointing outside destRoot and writes a real marker instead', () => {
+    // Attacker's file the symlink aims at, seeded with known contents.
+    const secretDir = path.join(tmpDir, 'outside');
+    fs.mkdirSync(secretDir, { recursive: true });
+    const secret = path.join(secretDir, 'victim');
+    fs.writeFileSync(secret, 'ORIGINAL', 'utf-8');
+
+    const root = makePluginRoot(tmpDir, { name: 'evil', version: '1.0.0', description: 'Evil' });
+    // Malicious symlink: the follow-up writeFileSync(.agents-cli-managed) would
+    // write THROUGH this link to the attacker path without the fix.
+    fs.symlinkSync(secret, path.join(root, '.agents-cli-managed'), 'file');
+
+    const plugin = makeDiscoveredPlugin(root, { name: 'evil', version: '1.0.0', description: 'Evil' });
+    const versionHome = path.join(tmpDir, 'home');
+
+    expect(installGeminiPlugin(plugin, versionHome)).toBe(true);
+
+    const dest = path.join(versionHome, '.gemini', 'extensions', 'evil');
+    const marker = path.join(dest, '.agents-cli-managed');
+    // The write-through was neutralized: the outside file is untouched...
+    expect(fs.readFileSync(secret, 'utf-8')).toBe('ORIGINAL');
+    // ...and the marker in destRoot is a real regular file (not a symlink).
+    expect(fs.lstatSync(marker).isSymbolicLink()).toBe(false);
+    expect(fs.readFileSync(marker, 'utf-8')).toContain('plugin=evil');
+  });
+
+  it('Goose: drops an external-escaping symlink but keeps an internal one', () => {
+    const secretDir = path.join(tmpDir, 'outside');
+    fs.mkdirSync(secretDir, { recursive: true });
+    const secret = path.join(secretDir, 'victim');
+    fs.writeFileSync(secret, 'ORIGINAL', 'utf-8');
+
+    const root = makePluginRoot(tmpDir, { name: 'goose-plug', version: '1.0.0', description: 'Goose' });
+    fs.writeFileSync(path.join(root, 'real.txt'), 'hello\n', 'utf-8');
+    // Internal symlink (relative, stays inside the plugin) — must survive.
+    fs.symlinkSync('./real.txt', path.join(root, 'inside-link'), 'file');
+    // External-escaping symlink (absolute, points outside) — must be removed.
+    fs.symlinkSync(secret, path.join(root, 'escape-link'), 'file');
+
+    const plugin = makeDiscoveredPlugin(root, { name: 'goose-plug', version: '1.0.0', description: 'Goose' });
+    const versionHome = path.join(tmpDir, 'home');
+
+    expect(installGoosePlugin(plugin, versionHome)).toBe(true);
+    expect(isGoosePluginInstalled('goose-plug', versionHome)).toBe(true);
+
+    const dest = path.join(versionHome, '.agents', 'plugins', 'goose-plug');
+    // External-escaping symlink removed.
+    expect(fs.existsSync(path.join(dest, 'escape-link'))).toBe(false);
+    // Internal symlink preserved and still resolves inside destRoot.
+    expect(fs.lstatSync(path.join(dest, 'inside-link')).isSymbolicLink()).toBe(true);
+    expect(fs.readFileSync(path.join(dest, 'inside-link'), 'utf-8')).toBe('hello\n');
+    // Attacker file untouched.
+    expect(fs.readFileSync(secret, 'utf-8')).toBe('ORIGINAL');
+  });
+
+  it('Hermes: drops a plugin.yaml symlink pointing outside destRoot and writes a real manifest instead', () => {
+    const secretDir = path.join(tmpDir, 'outside');
+    fs.mkdirSync(secretDir, { recursive: true });
+    const secret = path.join(secretDir, 'victim');
+    fs.writeFileSync(secret, 'ORIGINAL', 'utf-8');
+
+    const root = makePluginRoot(tmpDir, { name: 'hermes-plug', version: '1.0.0', description: 'Hermes' });
+    fs.writeFileSync(path.join(root, 'real.txt'), 'hello\n', 'utf-8');
+    // Internal symlink (relative, stays inside the plugin) — must survive.
+    fs.symlinkSync('./real.txt', path.join(root, 'inside-link'), 'file');
+    // Malicious symlink at the manifest path: the follow-up
+    // writeHermesPluginManifest would write THROUGH this link to the attacker
+    // path without the fix.
+    fs.symlinkSync(secret, path.join(root, 'plugin.yaml'), 'file');
+
+    const plugin = makeDiscoveredPlugin(root, { name: 'hermes-plug', version: '1.0.0', description: 'Hermes' });
+    const versionHome = path.join(tmpDir, 'home');
+
+    expect(installHermesPlugin(plugin, versionHome, false)).toBe(true);
+    expect(isHermesPluginInstalled('hermes-plug', versionHome)).toBe(true);
+
+    const dest = path.join(versionHome, '.hermes', 'plugins', 'hermes-plug');
+    // The write-through was neutralized: the outside file is untouched...
+    expect(fs.readFileSync(secret, 'utf-8')).toBe('ORIGINAL');
+    // ...and the manifest in destRoot is a real regular file (not a symlink).
+    const manifest = path.join(dest, 'plugin.yaml');
+    expect(fs.lstatSync(manifest).isSymbolicLink()).toBe(false);
+    expect(fs.readFileSync(manifest, 'utf-8')).toContain('hermes-plug');
+    // Internal symlink preserved and still resolves inside destRoot.
+    expect(fs.lstatSync(path.join(dest, 'inside-link')).isSymbolicLink()).toBe(true);
+    expect(fs.readFileSync(path.join(dest, 'inside-link'), 'utf-8')).toBe('hello\n');
+  });
+});
+
+// ─── OpenCode consent gate (RUSH-1756) ──────────────────────────────────────────
+
+describe('syncPluginToVersion gates OpenCode plugins with exec surfaces (RUSH-1756)', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('does not install an OpenCode plugin with executable surfaces unless explicitly allowed', async () => {
+    const root = makePluginRoot(tmpDir, { name: 'oc-plug', version: '1.0.0', description: 'OpenCode' });
+    // A raw executable TS module (installOpenCodePlugin would copy it) ...
+    fs.mkdirSync(path.join(root, 'opencode'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'opencode', 'index.ts'), 'export default {}\n', 'utf-8');
+    // ... plus an exec surface so hasPluginExecSurfaces() flags it for consent.
+    fs.writeFileSync(path.join(root, '.mcp.json'), JSON.stringify({
+      mcpServers: { demo: { command: 'node', args: ['server.js'] } },
+    }));
+
+    const plugin = makeDiscoveredPlugin(root, { name: 'oc-plug', version: '1.0.0', description: 'OpenCode' });
+    plugin.hasMcp = true;
+    const versionHome = path.join(tmpDir, 'home');
+
+    const { syncPluginToVersion } = await import('./plugins.js');
+
+    const untrusted = syncPluginToVersion(plugin, 'opencode', versionHome);
+    expect(untrusted.success).toBe(false);
+    expect(isOpenCodePluginInstalled('oc-plug', versionHome)).toBe(false);
+
+    const trusted = syncPluginToVersion(plugin, 'opencode', versionHome, { allowExecSurfaces: true });
+    expect(trusted.success).toBe(true);
+    expect(isOpenCodePluginInstalled('oc-plug', versionHome)).toBe(true);
   });
 });
 

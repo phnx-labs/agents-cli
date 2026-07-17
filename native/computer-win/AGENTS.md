@@ -14,9 +14,11 @@ Rpc.cs          Method dispatch table (19 methods)
 Automation.cs   UI Automation tree walk + SendInput (click/type/key/scroll/drag) + window focus
 Screenshot.cs   Graphics.CopyFromScreen over the virtual screen
 Apps.cs         Process/window enumeration; launch_app via PATH + App Paths registry
+LaunchTarget.cs Pure path safety for launch_app (UNC/protocol rejection; RUSH-1763)
 ElementCache.cs @eN element handle cache
 smoke/smoke.mjs Smoke test (Unicode-typing regression loops for #554/#581)
 computer-helper-win.csproj   net10.0-windows, WPF + WinForms enabled
+tests/LaunchTarget.Tests.csproj  net10.0 xunit tests for LaunchTarget (cross-platform)
 ```
 
 ## Build
