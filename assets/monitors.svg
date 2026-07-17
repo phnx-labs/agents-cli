@@ -22,7 +22,8 @@
     <linearGradient id="barAmber" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#f5c451"/><stop offset="100%" stop-color="#f5c451" stop-opacity="0"/></linearGradient>
     <linearGradient id="barLime" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#a3e635"/><stop offset="100%" stop-color="#a3e635" stop-opacity="0"/></linearGradient>
     <filter id="soft" x="-20%" y="-20%" width="140%" height="150%"><feGaussianBlur stdDeviation="18" result="b"/><feOffset dy="14" result="o"/><feColorMatrix in="o" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.5 0" result="s"/><feMerge><feMergeNode in="s"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-    <filter id="neonLime" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <filter id="neonLime" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <filter id="halo" x="-30%" y="-60%" width="160%" height="220%"><feGaussianBlur stdDeviation="7"/></filter>
     <marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#a3e635"/></marker>
     <style><![CDATA[
       .kick { font: 600 14px ui-monospace,"SF Mono",Menlo,monospace; letter-spacing:.34em; fill:#5ad6c0; }
@@ -47,7 +48,8 @@
 
   <!-- header -->
   <text x="100" y="98" class="kick">AGENTS MONITORS<tspan fill="#a3e635"> · EVENT-TRIGGERED WATCHERS</tspan></text>
-  <text x="98" y="162" class="h1" fill="url(#title)" filter="url(#neonLime)">Watch a source. Fire an agent on change.</text>
+  <text x="98" y="162" class="h1" fill="#a3e635" opacity="0.38" filter="url(#halo)">Watch a source. Fire an agent on change.</text>
+  <text x="98" y="162" class="h1" fill="url(#title)">Watch a source. Fire an agent on change.</text>
   <text x="100" y="204" class="sub">Routines fire on a <tspan fill="#8a90b8" font-style="italic">clock</tspan> — monitors fire on a <tspan fill="#a3e635" font-weight="600">change</tspan>.</text>
 
   <!-- ===== SOURCE (cyan) ===== -->
