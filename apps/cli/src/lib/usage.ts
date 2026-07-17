@@ -382,12 +382,14 @@ export function formatUsageSummary(
   }
 
   if (snapshot) {
-    // Compact rows show the two windows every agent shares (session + week);
-    // extra windows (Claude's Sonnet week, Droid's month) render only in the
-    // full per-version usage section. An exhausted month window still surfaces
-    // here as the rate-limited badge via deriveUsageStatusFromSnapshot.
+    // Compact rows show every BLOCKING window — the same set
+    // deriveUsageStatusFromSnapshot uses for the rate-limited badge — so an
+    // account throttled by its month window (Droid meters on 5h/week/month)
+    // shows the bar that explains why. Claude's Sonnet week is a per-model
+    // sub-limit, not a blocking window; it renders only in the full
+    // per-version usage section.
     const windows = snapshot.windows
-      .filter((window) => window.key === 'session' || window.key === 'week')
+      .filter((window) => window.key !== 'sonnet_week')
       .map((window) =>
       `${chalk.gray(`${window.shortLabel}:`)} ${renderCompactUsageBar(window.usedPercent)}`
     );

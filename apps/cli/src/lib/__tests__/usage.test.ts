@@ -541,7 +541,7 @@ describe('normalizeDroidWindows', () => {
     expect(windows[0].usedPercent).toBe(100);
   });
 
-  it('keeps the month window out of the compact summary but in the snapshot', () => {
+  it('shows the month window in the compact summary — droid meters on it', () => {
     const snapshot: UsageSnapshot = {
       source: 'live',
       sourceLabel: 'live account data',
@@ -551,12 +551,36 @@ describe('normalizeDroidWindows', () => {
     const summary = stripAnsi(formatUsageSummary(null, snapshot));
     expect(summary).toContain('S:');
     expect(summary).toContain('W:');
-    expect(summary).not.toContain('M:');
-    // ...but an exhausted month window still flips the account to rate-limited.
+    // Month is a blocking window (an exhausted month throttles the account),
+    // so the compact row must show it — otherwise a droid account can read as
+    // rate-limited with no visible bar explaining why.
+    expect(summary).toContain('M:');
     const exhausted = normalizeDroidWindows({
       ...payload,
       limits: { standard: { ...payload.limits!.standard, monthly: { usedPercent: 100 } } },
     });
     expect(deriveUsageStatusFromSnapshot({ ...snapshot, windows: exhausted })).toBe('rate_limited');
+  });
+
+  it('keeps the non-blocking sonnet_week window out of the compact summary', () => {
+    const snapshot: UsageSnapshot = {
+      source: 'live',
+      sourceLabel: 'live account data',
+      capturedAt: new Date('2026-07-15T12:00:00Z'),
+      windows: [
+        ...normalizeDroidWindows(payload),
+        {
+          key: 'sonnet_week',
+          label: 'Current week (Sonnet only)',
+          shortLabel: 'So',
+          usedPercent: 40,
+          resetsAt: null,
+          windowMinutes: null,
+        },
+      ],
+    };
+    const summary = stripAnsi(formatUsageSummary(null, snapshot));
+    expect(summary).toContain('M:');
+    expect(summary).not.toContain('So:');
   });
 });
