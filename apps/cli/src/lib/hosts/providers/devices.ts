@@ -18,7 +18,7 @@
  * order, exactly like the old tier-2 devices fall-through in resolveHost.
  */
 
-import { loadDevices, getDevice, type DeviceProfile } from '../../devices/registry.js';
+import { loadDevices, getDevice, isControlDevice, type DeviceProfile } from '../../devices/registry.js';
 import type { Host, HostProvider, HostProviderCapabilities, HostStatus } from '../types.js';
 import { DeviceOffloadUnsupportedError } from '../types.js';
 
@@ -36,6 +36,11 @@ function statusOf(device: DeviceProfile): HostStatus {
  * shadows this row by provider precedence, carrying the caps.
  */
 function deviceToPoolHost(device: DeviceProfile): Host | null {
+  // A control device (a cockpit, e.g. a paired iPhone) drives the fleet but
+  // never runs agents — it must never enter the host pool or be resolvable as a
+  // dispatch target, whatever platform it reports (an iPhone syncs as `unknown`,
+  // which remoteShellFor would otherwise default to POSIX and try to SSH).
+  if (isControlDevice(device)) return null;
   const address = device.address.dnsName ?? device.address.ip;
   if (!address) return null; // unreachable profile — nothing to dispatch to
   return {
@@ -72,8 +77,16 @@ export class DevicesHostProvider implements HostProvider {
   async resolve(name: string): Promise<Host | null> {
     const device = await getDevice(name);
     if (!device) return null;
-    // Resolving is asking to dispatch — keep the long-standing typed refusal
-    // for password auth (BatchMode=yes can't answer a prompt).
+    // Resolving is asking to dispatch. A control device can't run agents — fail
+    // loud with a clear message instead of attempting an SSH dispatch onto a
+    // phone (which remoteShellFor would treat as a POSIX host).
+    if (isControlDevice(device)) {
+      throw new Error(
+        `Device "${device.name}" is a control device (a cockpit), not an executor — it can't run agents. Dispatch to a worker device instead.`,
+      );
+    }
+    // Keep the long-standing typed refusal for password auth (BatchMode=yes
+    // can't answer a prompt).
     if (device.auth.method === 'password') {
       throw new DeviceOffloadUnsupportedError(device.name);
     }

@@ -144,3 +144,37 @@ describe('devices in the unified pool', () => {
     expect((err as Error).name).toBe('DeviceOffloadUnsupportedError');
   });
 });
+
+describe('DevicesHostProvider — control devices are never dispatch targets', () => {
+  it('excludes a control device from the host pool even when online with a real platform', async () => {
+    await upsertDevice('worker', {
+      platform: 'linux',
+      address: { via: 'tailscale', dnsName: 'worker.ts.net' },
+      auth: { method: 'key' },
+      tailscale: { id: 'w', hostName: 'worker', online: true },
+    });
+    await upsertDevice('my-iphone', {
+      platform: 'linux', // a real platform — role must still exclude it
+      role: 'control',
+      address: { via: 'tailscale', dnsName: 'my-iphone.ts.net' },
+      auth: { method: 'key' },
+      tailscale: { id: 'p', hostName: 'my-iphone', online: true },
+    });
+
+    const hosts = await new DevicesHostProvider().list();
+    expect(hosts.map((h) => h.name)).toEqual(['worker']); // phone absent from the pool
+  });
+
+  it('refuses to resolve a control device for dispatch with a clear error', async () => {
+    await upsertDevice('my-ipad', {
+      platform: 'unknown', // the platform a freshly-synced iPad reports
+      role: 'control',
+      address: { via: 'tailscale', dnsName: 'my-ipad.ts.net' },
+      auth: { method: 'key' },
+      tailscale: { id: 'i', hostName: 'my-ipad', online: true },
+    });
+    const err = await resolveHost('my-ipad').catch((e) => e as Error);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toMatch(/control device/i);
+  });
+});
