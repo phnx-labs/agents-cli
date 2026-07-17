@@ -11,8 +11,14 @@ import { basename } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { readShareConfig, readWriteToken } from './config.js';
-import { captureCover } from './capture.js';
+import { captureCover, OG_WIDTH, OG_HEIGHT, OG_SCALE } from './capture.js';
 import { deriveMeta, injectOgMeta } from './og.js';
+
+type PutFn = (
+  url: string,
+  body: Buffer,
+  headers: Record<string, string>,
+) => Promise<{ ok: boolean; status: number; url?: string }>;
 
 export interface PublishOptions {
   slug?: string;
@@ -96,6 +102,41 @@ function guessContentType(filePath: string): string {
   return 'application/octet-stream';
 }
 
+/**
+ * Best-effort OG cover: capture a screenshot, upload it as `<slug>.png`, and return
+ * the page body with og:image meta injected (+ the cover URL). All IO is injected
+ * (`put`, `capturer`), so this whole path is unit-testable without config/keychain.
+ * Any miss — no capturer output, a failed upload — returns the original body and no
+ * coverUrl, so publishing never fails because a cover couldn't be made.
+ */
+export async function attachOgCover(
+  filePath: string,
+  body: Buffer,
+  ctx: {
+    /** Absolute URL to PUT the cover to, `${pageUrl}.png`. Doubles as the cover URL. */
+    pngUrl: string;
+    pageUrl: string;
+    put: PutFn;
+    pngHeaders: Record<string, string>;
+    capturer: (p: string) => Promise<Buffer | null>;
+  },
+): Promise<{ body: Buffer; coverUrl?: string }> {
+  const png = await ctx.capturer(filePath).catch(() => null);
+  if (!png) return { body };
+  const cr = await ctx.put(ctx.pngUrl, png, ctx.pngHeaders);
+  if (!cr.ok) return { body };
+  const { title, description } = deriveMeta(body.toString('utf8'));
+  const injected = injectOgMeta(body.toString('utf8'), {
+    title,
+    description,
+    imageUrl: ctx.pngUrl,
+    pageUrl: ctx.pageUrl,
+    imageWidth: OG_WIDTH * OG_SCALE,
+    imageHeight: OG_HEIGHT * OG_SCALE,
+  });
+  return { body: Buffer.from(injected, 'utf8'), coverUrl: ctx.pngUrl };
+}
+
 export async function publishFile(
   filePath: string,
   opts: PublishOptions = {},
@@ -123,26 +164,20 @@ export async function publishFile(
     return h;
   };
 
-  let body = readFileSync(filePath);
-  const isHtml = /\.html?$/i.test(filePath);
+  let body: Buffer = readFileSync(filePath);
   let coverUrl: string | undefined;
 
   // Cover: screenshot the page's hero → upload <slug>.png → inject og:image meta.
-  if (isHtml && opts.cover !== false) {
-    const capture = opts.capturer ?? captureCover;
-    const png = await capture(filePath).catch(() => null);
-    if (png) {
-      const imgUrl = `${pageUrl}.png`;
-      const cr = await put(`${cfg.baseUrl}/${slug}.png`, png, authHeaders('image/png'));
-      if (cr.ok) {
-        coverUrl = imgUrl;
-        const { title, description } = deriveMeta(body.toString('utf8'));
-        body = Buffer.from(
-          injectOgMeta(body.toString('utf8'), { title, description, imageUrl: imgUrl, pageUrl }),
-          'utf8',
-        );
-      }
-    }
+  if (/\.html?$/i.test(filePath) && opts.cover !== false) {
+    const res = await attachOgCover(filePath, body, {
+      pngUrl: `${pageUrl}.png`,
+      pageUrl,
+      put,
+      pngHeaders: authHeaders('image/png'),
+      capturer: opts.capturer ?? captureCover,
+    });
+    body = res.body;
+    coverUrl = res.coverUrl;
   }
 
   const r = await put(pageUrl, body, authHeaders(opts.contentType ?? guessContentType(filePath)));

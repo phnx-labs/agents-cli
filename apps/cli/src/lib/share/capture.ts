@@ -21,14 +21,17 @@ import os from 'node:os';
 import path from 'node:path';
 import { findFirstInstalledBrowser } from '../browser/chrome.js';
 
-/** OG standard card size; captured at 2× for retina crispness. */
+/** OG standard card size; captured at OG_SCALE× for retina crispness. */
 export const OG_WIDTH = 1200;
 export const OG_HEIGHT = 630;
+/** Device scale factor for the capture — the served PNG is OG_WIDTH*OG_SCALE × OG_HEIGHT*OG_SCALE. */
+export const OG_SCALE = 2;
 
 // Installed browsers that are poor `--headless` hosts (they hang instead of
 // capturing). We still let a managed Chromium or an explicit override handle those
-// machines; we just don't burn a timeout probing these.
-const BAD_HEADLESS_TYPES = new Set(['comet', 'arc']);
+// machines; we just don't burn a timeout probing these. (Only members of the
+// browser detector's `BrowserType` are meaningful here; Comet is the real case.)
+const BAD_HEADLESS_TYPES = new Set(['comet']);
 
 /** Ordered list of candidate Chromium-family binaries to try for headless capture. */
 export function candidateBrowsers(): string[] {
@@ -116,7 +119,7 @@ export async function captureCover(htmlPath: string, timeoutMs = 15_000): Promis
             '--hide-scrollbars',
             '--no-first-run',
             '--no-default-browser-check',
-            '--force-device-scale-factor=2',
+            `--force-device-scale-factor=${OG_SCALE}`,
             // Bound page JS (count-up animations etc.) so the shot fires promptly
             // instead of waiting on long-running timers.
             '--virtual-time-budget=8000',

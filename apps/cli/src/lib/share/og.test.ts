@@ -63,4 +63,16 @@ describe('injectOgMeta', () => {
     const out = injectOgMeta('<body>only body</body>', fields);
     expect(out).toContain('og:image');
   });
+
+  it('defaults image dimensions to the 1200×630 card', () => {
+    const out = injectOgMeta('<head></head>', fields);
+    expect(out).toContain('<meta property="og:image:width" content="1200">');
+    expect(out).toContain('<meta property="og:image:height" content="630">');
+  });
+
+  it('reports the real image dimensions when given (matches the served asset)', () => {
+    const out = injectOgMeta('<head></head>', { ...fields, imageWidth: 2400, imageHeight: 1260 });
+    expect(out).toContain('<meta property="og:image:width" content="2400">');
+    expect(out).toContain('<meta property="og:image:height" content="1260">');
+  });
 });

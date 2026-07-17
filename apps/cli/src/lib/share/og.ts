@@ -16,6 +16,9 @@ export interface OgFields {
   description: string;
   imageUrl: string;
   pageUrl: string;
+  /** Actual pixel dimensions of the served image (defaults to the 1200×630 OG card). */
+  imageWidth?: number;
+  imageHeight?: number;
 }
 
 function escapeAttr(s: string): string {
@@ -68,6 +71,8 @@ export function injectOgMeta(html: string, f: OgFields): string {
   const cleaned = stripPrevious(html);
   const t = escapeAttr(f.title);
   const d = escapeAttr(f.description);
+  const w = f.imageWidth ?? 1200;
+  const h = f.imageHeight ?? 630;
   const block =
     `${OG_MARK_OPEN}\n` +
     `<meta property="og:type" content="website">\n` +
@@ -76,8 +81,8 @@ export function injectOgMeta(html: string, f: OgFields): string {
     `<meta property="og:description" content="${d}">\n` +
     `<meta property="og:url" content="${escapeAttr(f.pageUrl)}">\n` +
     `<meta property="og:image" content="${escapeAttr(f.imageUrl)}">\n` +
-    `<meta property="og:image:width" content="1200">\n` +
-    `<meta property="og:image:height" content="630">\n` +
+    `<meta property="og:image:width" content="${w}">\n` +
+    `<meta property="og:image:height" content="${h}">\n` +
     `<meta name="twitter:card" content="summary_large_image">\n` +
     `<meta name="twitter:title" content="${t}">\n` +
     `<meta name="twitter:description" content="${d}">\n` +

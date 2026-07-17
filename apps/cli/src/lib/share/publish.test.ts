@@ -2,8 +2,62 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { parseExpire, slugify, detectProject, defaultSlug } from './publish.js';
+import { parseExpire, slugify, detectProject, defaultSlug, attachOgCover } from './publish.js';
 import { renderWorkerScript } from './worker-template.js';
+
+describe('attachOgCover', () => {
+  const ctx = (
+    put: (u: string, b: Buffer, h: Record<string, string>) => Promise<{ ok: boolean; status: number; url?: string }>,
+    capturer: (p: string) => Promise<Buffer | null>,
+  ) => ({ pngUrl: 'https://s.sh/x.png', pageUrl: 'https://s.sh/x', put, pngHeaders: {}, capturer });
+
+  it('uploads the cover and injects og:image + the true (2×) dimensions on success', async () => {
+    const puts: string[] = [];
+    const put = async (u: string) => {
+      puts.push(u);
+      return { ok: true, status: 200, url: u };
+    };
+    const r = await attachOgCover('/tmp/p.html', Buffer.from('<head></head>'), ctx(put, async () => Buffer.from('PNG')));
+    expect(r.coverUrl).toBe('https://s.sh/x.png');
+    expect(puts).toEqual(['https://s.sh/x.png']);
+    const html = r.body.toString();
+    expect(html).toContain('og:image" content="https://s.sh/x.png"');
+    expect(html).toContain('<meta property="og:image:width" content="2400">'); // 1200 * OG_SCALE(2)
+    expect(html).toContain('<meta property="og:image:height" content="1260">');
+  });
+
+  it('publishes the plain page (no meta, original body) when the cover upload fails', async () => {
+    const put = async () => ({ ok: false, status: 403 });
+    const r = await attachOgCover('/tmp/p.html', Buffer.from('<head></head>'), ctx(put, async () => Buffer.from('PNG')));
+    expect(r.coverUrl).toBeUndefined();
+    expect(r.body.toString()).toBe('<head></head>');
+    expect(r.body.toString()).not.toContain('og:image');
+  });
+
+  it('never attempts an upload when the capturer yields nothing', async () => {
+    let uploads = 0;
+    const put = async () => {
+      uploads++;
+      return { ok: true, status: 200 };
+    };
+    const r = await attachOgCover('/tmp/p.html', Buffer.from('<head></head>'), ctx(put, async () => null));
+    expect(r.coverUrl).toBeUndefined();
+    expect(uploads).toBe(0);
+    expect(r.body.toString()).not.toContain('og:image');
+  });
+
+  it('swallows a throwing capturer — a cover is never a reason to fail a publish', async () => {
+    const put = async () => ({ ok: true, status: 200 });
+    const r = await attachOgCover(
+      '/tmp/p.html',
+      Buffer.from('<head></head>'),
+      ctx(put, async () => {
+        throw new Error('boom');
+      }),
+    );
+    expect(r.coverUrl).toBeUndefined();
+  });
+});
 
 function expectedProject(dir: string): string {
   return basename(dir).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
