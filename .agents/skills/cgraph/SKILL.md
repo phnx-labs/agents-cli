@@ -15,6 +15,29 @@ about code structure or relationships. A graph call is one ~10ms round-trip and
 returns exactly the file:line (and often the source) you need, instead of many
 grep/read calls that burn context.
 
+## Setup (one-time — the tools don't exist until this is done)
+
+This skill routes to the `cgraph` MCP server. On a cold checkout that server is
+**not** registered — until it is, the `graph_*` tools below don't exist and you
+should navigate with grep/read. Registration is a local, per-machine step (the
+`.mcp.json` it writes is gitignored, not committed), so a fresh clone needs it.
+
+1. **Build cgraph from source** — it's a native C++ engine (CMake + vcpkg,
+   C++20; on Linux `igraph` also needs `gfortran`). Full instructions:
+   <https://github.com/taylor009/CGraph> → *Install & Setup*. This produces
+   `cgraph`, `graphd`, `cgraph-client`, and `cgraph-mcp`.
+2. **Register the MCP server** (project-scoped, absolute binary paths):
+   ```sh
+   agents mcp add cgraph -s project -a claude,codex -- \
+     /abs/path/to/cgraph-mcp --root "$(pwd)" --daemon /abs/path/to/graphd
+   agents mcp register cgraph
+   ```
+3. Restart the agent session so it picks up the server. `graph_status` should
+   then answer, and the first query triggers a one-time build (seconds).
+
+If the `graph_*` tools return "no such tool", registration hasn't happened —
+fall back to grep/read and (if you can) run the steps above.
+
 ## Routing: question → tool
 
 | When the user / task needs… | Call |
