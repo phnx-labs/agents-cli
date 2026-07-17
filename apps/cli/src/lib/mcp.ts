@@ -748,6 +748,29 @@ export interface WritableMcpServer {
 }
 
 /**
+ * Agents whose config file format is implemented by `writeMcpConfig`.
+ * Others are intentionally skipped until their schema is added.
+ */
+function writeMcpConfigSupportsAgent(agentId: AgentId): boolean {
+  switch (agentId) {
+    case 'claude':
+    case 'cursor':
+    case 'gemini':
+    case 'kimi':
+    case 'droid':
+    case 'forge':
+    case 'openclaw':
+    case 'codex':
+    case 'grok':
+    case 'opencode':
+    case 'hermes':
+      return true;
+    default:
+      return false;
+  }
+}
+
+/**
  * Serialize MCP servers into an agent-specific config file.
  *
  * `mode: 'overwrite'` replaces the whole MCP section (used for tool-managed
@@ -1001,17 +1024,37 @@ export function installMcpServers(
   }
 
   for (const server of servers) {
+    let handled = false;
+
     try {
       if (agentId === 'claude') {
         installMcpViaClaude(binaryPath, server, versionHome);
+        handled = true;
       } else if (agentId === 'codex') {
         installMcpViaCodex(binaryPath, server, versionHome);
+        handled = true;
       } else if (agentId === 'gemini') {
         installMcpToGeminiConfig(server, versionHome);
+        handled = true;
       } else if (agentId === 'cursor') {
         installMcpToCursorConfig(server, versionHome);
+        handled = true;
       } else if (agentId === 'opencode') {
         installMcpToOpenCodeConfig(server, versionHome);
+        handled = true;
+      } else if (agentId === 'openclaw') {
+        // OpenClaw has no install CLI; write the JSON config directly.
+        const userConfigPath = getMcpConfigPathForHome(agentId, versionHome);
+        const writableServer: WritableMcpServer = {
+          name: server.config.name,
+          transport: server.config.transport,
+          command: server.config.command,
+          args: server.config.args,
+          env: server.config.env,
+          url: server.config.url,
+        };
+        writeMcpConfig(agentId, userConfigPath, [writableServer], 'overwrite');
+        handled = true;
       } else if (agentId === 'grok') {
         // Grok has no working `grok mcp add` CLI, so write the TOML config
         // directly into the version-home directory for all scopes.
@@ -1025,20 +1068,25 @@ export function installMcpServers(
           url: server.config.url,
         };
         writeMcpConfig(agentId, userConfigPath, [writableServer], 'overwrite');
+        handled = true;
       } else if (agentId === 'kimi') {
         installMcpToKimiConfig(server, versionHome);
+        handled = true;
       } else if (agentId === 'droid') {
         installMcpToFactoryConfig(server, versionHome);
+        handled = true;
       } else if (agentId === 'hermes') {
         installMcpToHermesConfig(server, versionHome);
+        handled = true;
       } else if (agentId === 'forge') {
         installMcpToForgeConfig(server, versionHome);
+        handled = true;
       }
 
       // Project-layer servers also get merged into the agent's project-level
       // config (e.g., .mcp.json, .codex/config.toml) so the CLI discovers them
       // when run inside the repo.
-      if (server.scope === 'project' && options.cwd) {
+      if (server.scope === 'project' && options.cwd && writeMcpConfigSupportsAgent(agentId)) {
         const projectConfigPath = getProjectMcpConfigPath(agentId, options.cwd);
         const writableServer: WritableMcpServer = {
           name: server.config.name,
@@ -1049,9 +1097,12 @@ export function installMcpServers(
           url: server.config.url,
         };
         writeMcpConfig(agentId, projectConfigPath, [writableServer], 'merge');
+        handled = true;
       }
 
-      applied.push(server.name);
+      if (handled) {
+        applied.push(server.name);
+      }
     } catch (err) {
       const message = (err as Error).message;
       // Check if it's an "already exists" error - that's not a real error

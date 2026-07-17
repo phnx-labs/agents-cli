@@ -590,3 +590,70 @@ describe('installMcpServers grok user-level config', () => {
     });
   });
 });
+
+describe('installMcpServers handled-agent tracking', () => {
+  it.skipIf(IS_WINDOWS)('writes OpenClaw user-scoped servers and reports them applied', () => {
+    const home = makeTempHome();
+    const version = '0.1.0';
+    const userMcpDir = path.join(home, '.agents', 'mcp');
+    fs.mkdirSync(userMcpDir, { recursive: true });
+
+    fs.writeFileSync(
+      path.join(userMcpDir, 'user-server.yaml'),
+      ['name: user-server', 'transport: stdio', 'command: node', 'args: ["user.js"]', ''].join('\n'),
+      'utf-8'
+    );
+
+    const moduleUrl = pathToFileURL(path.resolve('dist/lib/mcp.js')).href;
+    const versionHome = path.join(home, '.agents', '.history', 'versions', 'openclaw', version, 'home');
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import { installMcpServers } from ${JSON.stringify(moduleUrl)};
+      const result = installMcpServers('openclaw', ${JSON.stringify(version)}, ${JSON.stringify(versionHome)});
+      console.log(JSON.stringify(result));
+    `], {
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+
+    expect(child.status, child.stderr).toBe(0);
+    const result = JSON.parse(child.stdout.trim());
+    expect(result.success).toBe(true);
+    expect(result.applied).toContain('user-server');
+
+    const config = JSON.parse(fs.readFileSync(path.join(versionHome, '.openclaw', 'openclaw.json'), 'utf-8'));
+    expect(config.mcp?.servers?.['user-server']).toEqual({
+      command: 'node',
+      args: ['user.js'],
+      env: {},
+    });
+  });
+
+  it.skipIf(IS_WINDOWS)('does not report fake success for agents with no config writer', () => {
+    const home = makeTempHome();
+    const version = '0.1.0';
+    const userMcpDir = path.join(home, '.agents', 'mcp');
+    fs.mkdirSync(userMcpDir, { recursive: true });
+
+    fs.writeFileSync(
+      path.join(userMcpDir, 'user-server.yaml'),
+      ['name: user-server', 'transport: stdio', 'command: node', 'args: ["user.js"]', ''].join('\n'),
+      'utf-8'
+    );
+
+    const moduleUrl = pathToFileURL(path.resolve('dist/lib/mcp.js')).href;
+    const versionHome = path.join(home, '.agents', '.history', 'versions', 'copilot', version, 'home');
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import { installMcpServers } from ${JSON.stringify(moduleUrl)};
+      const result = installMcpServers('copilot', ${JSON.stringify(version)}, ${JSON.stringify(versionHome)});
+      console.log(JSON.stringify(result));
+    `], {
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+
+    expect(child.status, child.stderr).toBe(0);
+    const result = JSON.parse(child.stdout.trim());
+    expect(result.success).toBe(true);
+    expect(result.applied).not.toContain('user-server');
+  });
+});
