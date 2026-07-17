@@ -188,6 +188,11 @@ export function sshExecAsync(target: string, remoteCmd: string, opts: SshExecOpt
     child.stdout.on('data', (chunk) => { stdout += chunk; });
     child.stderr.on('data', (chunk) => { stderr += chunk; });
 
+    // Guard the stdin pipe: if the child closes stdin early (e.g. exits fast), the
+    // end()/write below emits EPIPE on the stream. With no listener Node escalates
+    // that to an uncaught exception that kills the whole CLI. Swallow it — the real
+    // outcome is still reported by the 'close'/'error' handlers below.
+    child.stdin.on('error', () => {});
     if (opts.input !== undefined) child.stdin.end(opts.input);
     else child.stdin.end();
 

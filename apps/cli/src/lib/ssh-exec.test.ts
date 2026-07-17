@@ -137,4 +137,17 @@ describe('sshExecAsync (real spawn via a PATH ssh stub — no mocks)', () => {
     expect(res.timedOut).toBe(true);
     expect(res.code).toBeNull(); // SIGTERM-terminated child closes with a null exit code
   });
+
+  it('does not crash on EPIPE when input is piped to a child that exits before reading it', async () => {
+    // Stub exits immediately without reading stdin; end(bigInput) would emit EPIPE
+    // on child.stdin. Without the stream 'error' guard that is an uncaught exception
+    // that kills the process — with it, this resolves to a normal result.
+    const bigInput = 'x'.repeat(2 * 1024 * 1024);
+    const res = await withStubSsh(
+      '#!/bin/sh\nexit 0\n',
+      () => sshExecAsync('testhost', 'consume', { multiplex: false, input: bigInput }),
+    );
+    expect(res.timedOut).toBe(false);
+    expect(res.code === 0 || res.code === null).toBe(true);
+  });
 });
