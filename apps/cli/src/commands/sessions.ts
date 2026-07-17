@@ -1011,15 +1011,24 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
   if (options.active) {
     // On a TTY (and not a scripting path), open the interactive browser seeded to
     // running-only. --json / --waiting / --no-interactive / a peer fan-out keep the
-    // static dump untouched, so scripts and agents are unaffected.
-    if (useInteractiveBrowser(options) && !options.waiting && process.env.AGENTS_SESSIONS_LOCAL !== '1') {
+    // static dump untouched, so scripts and agents are unaffected. An explicit
+    // --since seeds the window; --until (no browser representation) or a multi-host
+    // scope fall through to the static dump that already honors them.
+    if (
+      useInteractiveBrowser(options) &&
+      !options.waiting &&
+      !options.until &&
+      (options.host?.length ?? 0) <= 1 &&
+      process.env.AGENTS_SESSIONS_LOCAL !== '1'
+    ) {
       const { runSessionBrowser } = await import('./sessions-browser.js');
       await runSessionBrowser(
         {
           running: true,
           teams: !!options.teams,
           agent: options.agent,
-          device: options.host?.length === 1 ? options.host[0] : undefined,
+          device: options.host?.[0],
+          window: options.since ?? '30d',
         },
         { local: options.local === true, hosts: options.host },
       );
@@ -1052,14 +1061,16 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
   }
 
   // Bare interactive listing → the interactive fleet browser (humans). A query,
-  // a render/filter flag, --flat/--tree, --json, or --no-interactive keep the
-  // existing printed/render paths (agents and scripts unaffected).
+  // a render/filter flag, --flat/--tree, --json, --until, or --no-interactive keep
+  // the existing printed/render paths (agents and scripts unaffected). An explicit
+  // --since seeds the browser's window so the flag is honored, not swallowed.
   if (
     useInteractiveBrowser(options) &&
     !query &&
     !options.flat &&
     !options.tree &&
     !options.markdown &&
+    !options.until &&
     !options.artifacts &&
     options.artifact === undefined
   ) {
@@ -1069,6 +1080,7 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
         teams: !!options.teams,
         agent: options.agent,
         projectScope: options.all ? 'all' : 'repo',
+        window: options.since ?? '30d',
       },
       { local: options.local === true, hosts: options.host },
     );
