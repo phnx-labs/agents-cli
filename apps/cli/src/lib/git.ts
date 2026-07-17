@@ -435,6 +435,30 @@ export async function getRemoteUrl(repoPath: string): Promise<string | null> {
 }
 
 /**
+ * Canonical `host/owner/repo` form of a git remote, transport-agnostic, so the
+ * same repo cloned over SSH vs HTTPS compares equal. Strips protocol, any
+ * `user@`, a trailing `.git`, and folds the scp-style `host:owner/repo` colon to
+ * a slash. Lower-cased. Used to decide whether an existing checkout is "the same
+ * repo" as a requested source before adopting it.
+ */
+export function canonicalGitRemote(url: string): string {
+  return url
+    .trim()
+    .replace(/\/+$/, '') // trailing slashes first, so a trailing-slash-after-.git still strips
+    .replace(/\.git$/i, '')
+    .replace(/^[a-z][a-z0-9+.-]*:\/\//i, '') // strip scheme (https://, ssh://, git://)
+    .replace(/^[^@/]+@/, '') // strip user@ (git@, ssh user)
+    .replace(':', '/') // scp-style host:owner/repo → host/owner/repo (first colon only)
+    .toLowerCase();
+}
+
+/** True when two git remote URLs point at the same repo across transport forms. */
+export function sameGitRemote(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false;
+  return canonicalGitRemote(a) === canonicalGitRemote(b);
+}
+
+/**
  * Set the remote URL for origin in a git repo.
  */
 export async function setRemoteUrl(repoPath: string, url: string): Promise<void> {

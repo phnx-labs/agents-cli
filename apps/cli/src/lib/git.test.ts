@@ -16,11 +16,13 @@ import {
   adoptRepo,
   assertSafeGitTransport,
   assertValidBranchName,
+  canonicalGitRemote,
   commitAndPush,
   displayHomePath,
   parseSource,
   pullRepo,
   pushOrigin,
+  sameGitRemote,
   syncRepoGit,
 } from './git.js';
 
@@ -442,5 +444,32 @@ describe('adoptRepo guards', () => {
     // A rejected adopt leaves no .git and no leftover temp.
     expect(fs.existsSync(path.join(target, '.git'))).toBe(false);
     expect(fs.existsSync(path.join(target, '.git-adopt-temp'))).toBe(false);
+  });
+});
+
+describe('sameGitRemote (adopt-existing repo matching)', () => {
+  it('treats the same repo cloned over SSH vs HTTPS as equal', () => {
+    // parseSource normalizes every github form to https://…/repo.git, but a
+    // hand-cloned checkout's origin may be the SSH form — they must still match
+    // so `repos add` adopts it instead of erroring.
+    expect(sameGitRemote('git@github.com:phnx-labs/.agents-extras.git', 'https://github.com/phnx-labs/.agents-extras.git')).toBe(true);
+    expect(sameGitRemote('ssh://git@github.com/acme/team-skills', 'https://github.com/acme/team-skills.git')).toBe(true);
+    expect(sameGitRemote('https://user@github.com/acme/team-skills.git', 'https://github.com/acme/team-skills')).toBe(true);
+  });
+
+  it('is case-insensitive on host/owner and tolerates trailing slash + .git', () => {
+    expect(sameGitRemote('https://GitHub.com/Acme/Team-Skills.git/', 'https://github.com/acme/team-skills')).toBe(true);
+  });
+
+  it('distinguishes different repos and refuses null/empty', () => {
+    expect(sameGitRemote('git@github.com:acme/a.git', 'git@github.com:acme/b.git')).toBe(false);
+    expect(sameGitRemote('https://github.com/acme/a', 'https://gitlab.com/acme/a')).toBe(false);
+    expect(sameGitRemote(null, 'https://github.com/acme/a')).toBe(false);
+    expect(sameGitRemote('https://github.com/acme/a', undefined)).toBe(false);
+  });
+
+  it('canonicalizes to host/owner/repo', () => {
+    expect(canonicalGitRemote('git@github.com:phnx-labs/.agents-extras.git')).toBe('github.com/phnx-labs/.agents-extras');
+    expect(canonicalGitRemote('https://github.com/phnx-labs/.agents-extras')).toBe('github.com/phnx-labs/.agents-extras');
   });
 });

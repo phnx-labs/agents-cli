@@ -64,6 +64,8 @@ import {
   isGitRepo,
   isSystemRepoOrigin,
   adoptRepo,
+  getRemoteUrl,
+  sameGitRemote,
   displayHomePath,
 } from '../lib/git.js';
 import { DEFAULT_SYSTEM_REPO } from '../lib/types.js';
@@ -709,7 +711,8 @@ export function registerRepoCommands(program: Command): void {
     .command('add <source>')
     .description('Register an existing local repo or clone a remote repo into ~/.agents-<alias>/')
     .option('--as <alias>', 'Override the auto-derived alias (letters, digits, _ or -)')
-    .action(async (source: string, options: { as?: string }) => {
+    .option('--adopt', 'If the target directory already holds a git checkout, register it in place instead of erroring (even if its origin differs)')
+    .action(async (source: string, options: { as?: string; adopt?: boolean }) => {
       const meta = readMeta();
       const extras: Record<string, ExtraRepoConfig> = { ...(meta.extraRepos || {}) };
 
@@ -749,7 +752,36 @@ export function registerRepoCommands(program: Command): void {
       ensureAgentsDir();
       const targetDir = getExtraRepoDir(alias);
       if (fs.existsSync(targetDir)) {
-        console.log(chalk.red(`Directory already exists: ${targetDir}`));
+        // Adopt an existing checkout instead of hard-erroring. The common case:
+        // the user already cloned ~/.agents-<alias> by hand, then ran `repos add`
+        // and hit a dead end — which forced a second, inconsistent install method.
+        // If it's already a git repo whose origin matches the requested source,
+        // register it in place (no re-clone); adopt a mismatched/remoteless repo
+        // only with an explicit --adopt.
+        if (isGitRepo(targetDir)) {
+          const existingUrl = await getRemoteUrl(targetDir);
+          const matches = sameGitRemote(existingUrl, parsed.url);
+          if (matches || options.adopt) {
+            const log = await simpleGit(targetDir).log({ maxCount: 1 }).catch(() => null);
+            const commit = log?.latest?.hash.slice(0, 8) || 'unknown';
+            extras[alias] = { url: parsed.url, path: targetDir, enabled: true };
+            updateMeta({ extraRepos: extras });
+            syncExtraAliasAcrossVersions(alias, true);
+            syncMarketplacesForDefaults();
+            console.log(chalk.green(`Adopted existing repo "${alias}" -> ${targetDir} (${commit})`));
+            if (!matches) {
+              console.log(chalk.gray(`  note: its origin is ${existingUrl ?? '(none)'}, not ${parsed.url} — adopted via --adopt.`));
+            }
+            console.log(chalk.gray(`Skills and commands from this repo will be picked up the next time you launch any agent.`));
+            return;
+          }
+          console.log(chalk.red(`Directory already exists and is a different repo: ${targetDir}`));
+          console.log(chalk.gray(`  its origin is ${existingUrl ?? '(none)'}, not ${parsed.url}.`));
+          console.log(chalk.gray('  Adopt it anyway with --adopt, or pick a different alias with --as.'));
+          process.exitCode = 1;
+          return;
+        }
+        console.log(chalk.red(`Directory already exists (and is not a git repo): ${targetDir}`));
         console.log(chalk.gray('Remove it manually or pick a different alias with --as.'));
         process.exitCode = 1;
         return;
