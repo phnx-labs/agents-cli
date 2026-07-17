@@ -51,7 +51,7 @@
   <text x="122" y="694" class="mm" font-size="16">skills · commands · hooks · mcp · settings · permissions</text>
 
   <!-- SYNC trunk + fan -->
-  <line x1="666" y1="500" x2="726" y2="500" stroke="#a78bfa" stroke-width="3" filter="url(#neon)"/>
+  <line x1="666" y1="500" x2="726" y2="500" stroke="#a78bfa" stroke-width="3"/>
   <text x="748" y="482" class="edge" text-anchor="middle">SYNC</text>
   <path d="M726 500 L760 348" stroke="#a78bfa" stroke-width="2.5" fill="none" marker-end="url(#arV)" opacity="0.9"/>
   <path d="M726 500 L760 500" stroke="#a78bfa" stroke-width="2.5" fill="none" marker-end="url(#arV)" opacity="0.9"/>
