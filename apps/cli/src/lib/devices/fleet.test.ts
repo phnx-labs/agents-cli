@@ -18,6 +18,7 @@ function device(overrides: Partial<DeviceProfile> & { name: string }): DevicePro
     address: overrides.address ?? { via: 'manual', dnsName: `${overrides.name}.ts.net` },
     auth: overrides.auth ?? { method: 'key' },
     tailscale: overrides.tailscale,
+    role: overrides.role,
     createdAt: overrides.createdAt ?? now,
     updatedAt: overrides.updatedAt ?? now,
   };
@@ -43,6 +44,21 @@ describe('planFleetTargets', () => {
     };
     const plan = planFleetTargets(reg);
     expect(plan[0].skip).toBe('no-address');
+  });
+
+  it('skips a control device (a cockpit) even when online with a real platform', () => {
+    const reg: DeviceRegistry = {
+      worker: device({ name: 'worker', tailscale: { online: true, direct: true } }),
+      phone: device({
+        name: 'phone',
+        platform: 'linux', // a real platform — must still be skipped by role
+        role: 'control',
+        tailscale: { online: true, direct: true },
+      }),
+    };
+    const byName = Object.fromEntries(planFleetTargets(reg).map((t) => [t.device.name, t]));
+    expect(byName.worker.skip).toBeUndefined();
+    expect(byName.phone.skip).toBe('control'); // update/run/list never dial it
   });
 });
 

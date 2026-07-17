@@ -9,10 +9,10 @@
  */
 
 import { spawnSync } from 'child_process';
-import type { DeviceProfile, DeviceRegistry } from './registry.js';
+import { isControlDevice, type DeviceProfile, type DeviceRegistry } from './registry.js';
 import { buildSshInvocation, sshTargetFor, writeAskpassShim } from './connect.js';
 
-export type FleetSkipReason = 'offline' | 'no-address';
+export type FleetSkipReason = 'offline' | 'no-address' | 'control';
 
 /** npm dist-tags / semver pins only — rejects shell metacharacters. */
 export const FLEET_VERSION_RE = /^[A-Za-z0-9._-]+$/;
@@ -35,6 +35,7 @@ export interface FleetRunResult {
 /**
  * Classify each registered device for a fleet operation.
  *
+ * - Control-only device (a cockpit, e.g. a paired iPhone) → skip `control`
  * - Tailscale-offline → skip `offline`
  * - No address → skip `no-address`
  * - Everything else is a target (including this machine, reached over ssh when
@@ -44,6 +45,11 @@ export function planFleetTargets(reg: DeviceRegistry): FleetTarget[] {
   const names = Object.keys(reg).sort();
   return names.map((name) => {
     const device = reg[name];
+    // A control device drives the fleet but never runs agents — never a target
+    // for update/run/stats, whatever its platform reads as.
+    if (isControlDevice(device)) {
+      return { device, skip: 'control' as const };
+    }
     if (device.tailscale && !device.tailscale.online) {
       return { device, skip: 'offline' as const };
     }
@@ -63,6 +69,8 @@ export function skipLabel(reason: FleetSkipReason): string {
       return 'offline';
     case 'no-address':
       return 'no address';
+    case 'control':
+      return 'control device';
   }
 }
 

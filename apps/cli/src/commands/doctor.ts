@@ -24,7 +24,7 @@
 import type { Command } from 'commander';
 import { addHostOption } from '../lib/hosts/option.js';
 import { buildRemoteAgentsInvocation } from '../lib/hosts/remote-cmd.js';
-import { loadDevices } from '../lib/devices/registry.js';
+import { loadDevices, isControlDevice } from '../lib/devices/registry.js';
 import { resolveHost } from '../lib/hosts/registry.js';
 import { sshExec } from '../lib/ssh-exec.js';
 import { sshTargetFor } from '../lib/hosts/types.js';
@@ -320,6 +320,9 @@ async function resolveFleetTargets(opts: DoctorOptions): Promise<FleetTarget[]> 
   const localName = machineId();
   return Object.values(registry)
     .filter((d) => d.name.toLowerCase() !== localName)
+    // Control devices (a cockpit) never run agents — skip them in the fleet
+    // fan-out (an explicit --device <name> still resolves above).
+    .filter((d) => !isControlDevice(d))
     .map((d) => ({
       name: d.name,
       sshTarget: d.name,

@@ -29,7 +29,7 @@ import { formatUsd, PRICING_VERSION } from '../lib/pricing/index.js';
 import { formatDuration } from '../lib/session/render.js';
 import { terminalWidth, truncateToWidth, padToWidth } from '../lib/session/width.js';
 import { collectGitOutput } from '../lib/output/git-output.js';
-import { loadDevices } from '../lib/devices/registry.js';
+import { loadDevices, isControlDevice } from '../lib/devices/registry.js';
 import { machineId } from '../lib/session/sync/config.js';
 
 const execFileAsync = promisify(execFile);
@@ -232,7 +232,7 @@ async function outputAction(options: OutputOptions): Promise<void> {
   const self = machineId();
   const registry = await loadDevices();
   const remotes = Object.values(registry)
-    .filter(d => d.tailscale?.online && d.name !== self)
+    .filter(d => d.tailscale?.online && d.name !== self && !isControlDevice(d))
     .map(d => d.name);
 
   if (!options.json) console.error(chalk.gray(`Folding in ${remotes.length} online device${remotes.length !== 1 ? 's' : ''}…`));
