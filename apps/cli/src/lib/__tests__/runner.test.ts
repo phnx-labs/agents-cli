@@ -87,8 +87,16 @@ describe('buildJobCommand', () => {
     expect(argv).not.toContain('--auto');
   });
 
-  it('kimi plan mode throws (no headless read-only mode)', () => {
-    expect(() => buildJobCommand(baseJob({ agent: 'kimi', mode: 'plan' }), 'Do the task.')).toThrow(/read-only/);
+  it('kimi plan mode downgrades to auto — no throw, no --plan (RUSH-1810)', () => {
+    // Routines run headless; kimi's headlessPlan:false makes a plan request degrade
+    // to auto (kimi -p auto-runs, carrying no startup-mode flag). Must not throw.
+    let argv: string[] = [];
+    expect(() => {
+      argv = buildJobCommand(baseJob({ agent: 'kimi', mode: 'plan' }), 'Do the task.');
+    }).not.toThrow();
+    expect(argv).toContain('--prompt');
+    expect(argv).not.toContain('--plan');
+    expect(argv).not.toContain('--auto');
   });
 });
 

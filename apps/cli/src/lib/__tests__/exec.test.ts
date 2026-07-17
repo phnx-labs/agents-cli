@@ -9,6 +9,7 @@ import {
   parseExecEnv,
   normalizeMode,
   resolveMode,
+  resolveHeadlessMode,
   defaultModeFor,
   headlessPlanStallCommand,
   type ExecOptions,
@@ -204,8 +205,10 @@ describe('buildExecCommand', () => {
       expect(cmd).toContain('--autopilot');
     });
 
-    it('grok plan produces --permission-mode plan', () => {
-      const cmd = buildExecCommand(opts({ agent: 'grok', mode: 'plan' }));
+    it('grok plan (interactive TUI) produces --permission-mode plan', () => {
+      // grok's --permission-mode plan works interactively; headless it stalls, so
+      // this pins the interactive mapping (headless downgrade tested below).
+      const cmd = buildExecCommand(opts({ agent: 'grok', mode: 'plan', prompt: undefined, interactive: true }));
       expect(cmd).toContain('--permission-mode');
       expect(cmd[cmd.indexOf('--permission-mode') + 1]).toBe('plan');
       expect(cmd).not.toContain('--mode');
@@ -264,10 +267,50 @@ describe('buildExecCommand', () => {
         expect(cmd).not.toContain('--yolo');
       });
 
-      it('headless plan throws (kimi has no read-only -p mode)', () => {
-        expect(() => buildExecCommand(opts({ agent: 'kimi', mode: 'plan' }))).toThrow(/read-only/);
+      it('headless plan downgrades to auto — no throw, no --plan (RUSH-1810)', () => {
+        // kimi's headlessPlan:false: a headless plan request degrades to auto, which
+        // for kimi -p carries no flag. Must not throw and must not emit --plan.
+        let cmd: string[] = [];
+        expect(() => {
+          cmd = buildExecCommand(opts({ agent: 'kimi', mode: 'plan' }));
+        }).not.toThrow();
+        expect(cmd).not.toContain('--plan');
+        expect(cmd).not.toContain('--auto');
+        expect(cmd).toContain('-p');
       });
     });
+
+    // Regression: grok launched headless with `-p` under --mode plan pushed
+    // `--permission-mode plan`, which silently stalls at grok's ExitPlanMode gate
+    // (no TTY to approve). Headless plan must degrade to auto→edit (no flag).
+    describe('grok headless -p cannot carry --permission-mode plan (RUSH-1810)', () => {
+      it('headless plan downgrades to edit — no --permission-mode', () => {
+        let cmd: string[] = [];
+        expect(() => {
+          cmd = buildExecCommand(opts({ agent: 'grok', mode: 'plan' }));
+        }).not.toThrow();
+        expect(cmd).not.toContain('--permission-mode');
+        expect(cmd).toContain('-p');
+      });
+    });
+
+    // The write-capable agents keep read-only plan headless — the downgrade is
+    // scoped to headlessPlan:false agents only.
+    it.each(['claude', 'codex', 'droid', 'opencode'] as const)(
+      '%s headless plan is unchanged (read-only preserved)',
+      (agent) => {
+        const cmd = buildExecCommand(opts({ agent, mode: 'plan', headless: true }));
+        if (agent === 'claude') {
+          expect(cmd[cmd.indexOf('--permission-mode') + 1]).toBe('plan');
+        } else if (agent === 'codex') {
+          expect(cmd[cmd.indexOf('--sandbox') + 1]).toBe('read-only');
+        } else if (agent === 'opencode') {
+          expect(cmd[cmd.indexOf('--agent') + 1]).toBe('plan');
+        }
+        // droid plan carries no flag (its exec default is read-only) — the
+        // assertion is simply that the build did not throw or downgrade.
+      },
+    );
 
     it('kimi json adds --output-format stream-json', () => {
       const cmd = buildExecCommand(opts({ agent: 'kimi', prompt: 'do the thing', mode: 'edit', json: true }));
@@ -1114,6 +1157,35 @@ describe('resolveMode', () => {
   it("throws on 'skip' for kiro (edit-only agent)", () => {
     expect(() => resolveMode('kiro', 'skip'))
       .toThrow(/kiro does not support 'skip' mode\. Supported modes: edit\./);
+  });
+});
+
+describe('resolveHeadlessMode (RUSH-1810)', () => {
+  it('downgrades headless plan to auto for kimi (headlessPlan:false → kimi keeps auto)', () => {
+    expect(AGENTS.kimi.capabilities.headlessPlan).toBe(false);
+    expect(resolveHeadlessMode('kimi', 'plan', false)).toBe('auto');
+  });
+
+  it('downgrades headless plan to edit for grok (auto→edit via resolveMode)', () => {
+    expect(AGENTS.grok.capabilities.headlessPlan).toBe(false);
+    // grok has no native auto; the auto downgrade resolves onward to edit.
+    expect(resolveHeadlessMode('grok', 'plan', false)).toBe('edit');
+  });
+
+  it('keeps interactive plan for kimi/grok (only headless downgrades)', () => {
+    expect(resolveHeadlessMode('kimi', 'plan', true)).toBe('plan');
+    expect(resolveHeadlessMode('grok', 'plan', true)).toBe('plan');
+  });
+
+  it('leaves headless plan untouched for agents with headlessPlan absent (claude/codex)', () => {
+    expect(AGENTS.claude.capabilities.headlessPlan).toBeUndefined();
+    expect(resolveHeadlessMode('claude', 'plan', false)).toBe('plan');
+    expect(resolveHeadlessMode('codex', 'plan', false)).toBe('plan');
+  });
+
+  it('passes non-plan modes straight through resolveMode (headless kimi skip → skip)', () => {
+    expect(resolveHeadlessMode('kimi', 'skip', false)).toBe('skip');
+    expect(resolveHeadlessMode('kimi', 'edit', false)).toBe('edit');
   });
 });
 
