@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 920" role="img" aria-label="agents apply replicates one machine's setup to every other: an agents.yaml fleet block (devices, agents, sync, login) reconciles each device over SSH — installing missing agents, syncing config, and propagating logins so one signed-in host seeds the fleet. Turns 6 hosts x 8 harnesses = 48 logins into one.">
+  <defs>
+    <radialGradient id="gMag" cx="10%" cy="0%" r="70%"><stop offset="0%" stop-color="#e879f9" stop-opacity="0.12"/><stop offset="60%" stop-color="#e879f9" stop-opacity="0"/></radialGradient>
+    <radialGradient id="gLime" cx="92%" cy="-6%" r="70%"><stop offset="0%" stop-color="#a3e635" stop-opacity="0.11"/><stop offset="60%" stop-color="#a3e635" stop-opacity="0"/></radialGradient>
+    <pattern id="grid" width="46" height="46" patternUnits="userSpaceOnUse"><path d="M 46 0 L 0 0 0 46" fill="none" stroke="#6b8dff" stroke-opacity="0.06" stroke-width="1"/></pattern>
+    <linearGradient id="title" x1="0" y1="0" x2="1" y2="0.4"><stop offset="0%" stop-color="#f0a6ff"/><stop offset="52%" stop-color="#e879f9"/><stop offset="100%" stop-color="#a3e635"/></linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ffffff" stop-opacity="0.05"/><stop offset="100%" stop-color="#ffffff" stop-opacity="0.015"/></linearGradient>
+    <linearGradient id="term" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0c1016"/><stop offset="100%" stop-color="#070a0e"/></linearGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="150%"><feGaussianBlur stdDeviation="18" result="b"/><feOffset dy="14" result="o"/><feColorMatrix in="o" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.5 0" result="s"/><feMerge><feMergeNode in="s"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <filter id="neon" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <filter id="halo" x="-30%" y="-60%" width="160%" height="220%"><feGaussianBlur stdDeviation="7"/></filter>
+    <marker id="arM" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#e879f9"/></marker>
+    <style><![CDATA[
+      .kick{font:600 14px ui-monospace,"SF Mono",Menlo,monospace;letter-spacing:.34em;fill:#e879f9;}
+      .h1{font:800 52px Inter,-apple-system,"SF Pro Display",system-ui,sans-serif;letter-spacing:-.02em;}
+      .sub{font:400 22px Inter,-apple-system,system-ui,sans-serif;fill:#8a90b8;}
+      .lab{font:600 12px ui-monospace,"SF Mono",Menlo,monospace;letter-spacing:.24em;fill:#6b7099;}
+      .m{font:500 21px ui-monospace,"SF Mono",Menlo,monospace;fill:#eaf2ff;}
+      .mm{font:500 18px ui-monospace,"SF Mono",Menlo,monospace;fill:#7a80a8;}
+      .mk{font:600 21px ui-monospace,"SF Mono",Menlo,monospace;fill:#e879f9;}
+      .ml{font:600 21px ui-monospace,"SF Mono",Menlo,monospace;fill:#a3e635;}
+      .dev{font:700 20px ui-monospace,"SF Mono",Menlo,monospace;fill:#eaf2ff;}
+      .chip{font:600 15px ui-monospace,"SF Mono",Menlo,monospace;fill:#a3e635;}
+      .edge{font:600 13px ui-monospace,"SF Mono",Menlo,monospace;letter-spacing:.06em;fill:#e879f9;}
+      .big{font:800 34px ui-monospace,"SF Mono",Menlo,monospace;fill:#a3e635;}
+      .note{font:400 19px Inter,-apple-system,system-ui,sans-serif;fill:#7a80a8;}
+      .noteA{font:600 19px Inter,-apple-system,system-ui,sans-serif;fill:#a3e635;}
+    ]]></style>
+  </defs>
+
+  <rect width="1600" height="920" fill="#08080f"/>
+  <rect width="1600" height="920" fill="url(#grid)"/>
+  <rect width="1600" height="920" fill="url(#gMag)"/>
+  <rect width="1600" height="920" fill="url(#gLime)"/>
+
+  <text x="100" y="98" class="kick">AGENTS APPLY<tspan fill="#a3e635"> · ONE SETUP, EVERY MACHINE</tspan></text>
+  <text x="98" y="162" class="h1" fill="#e879f9" opacity="0.34" filter="url(#halo)">Set up one machine. Match them all.</text>
+  <text x="98" y="162" class="h1" fill="url(#title)">Set up one machine. Match them all.</text>
+  <text x="100" y="204" class="sub">Same agents, same config, logins seeded — reconcile the whole fleet in one command.</text>
+
+  <!-- LEFT: agents.yaml fleet block -->
+  <g filter="url(#soft)"><rect x="90" y="284" width="470" height="360" rx="20" fill="url(#term)" stroke="#e879f9" stroke-opacity="0.3" stroke-width="1.5"/></g>
+  <circle cx="122" cy="318" r="6" fill="#fb7185"/><circle cx="144" cy="318" r="6" fill="#f5c451"/><circle cx="166" cy="318" r="6" fill="#a3e635"/>
+  <text x="530" y="324" class="lab" text-anchor="end">agents.yaml</text>
+  <line x1="118" y1="340" x2="532" y2="340" stroke="#1a2230" stroke-width="1"/>
+  <text x="122" y="390" class="mk">fleet:</text>
+  <text x="146" y="428" class="m">devices: <tspan class="ml">all</tspan></text>
+  <text x="146" y="466" class="m">agents: <tspan class="mm">[claude,</tspan></text>
+  <text x="170" y="500" class="mm">codex, gemini]</text>
+  <text x="146" y="538" class="m">sync: <tspan class="mm">[user]</tspan></text>
+  <text x="146" y="576" class="m">login: <tspan class="ml">sync</tspan></text>
+  <text x="122" y="624" class="mm" font-size="16">one profile · every device</text>
+
+  <!-- arrow -->
+  <line x1="576" y1="460" x2="668" y2="460" stroke="#e879f9" stroke-width="3" marker-end="url(#arM)" filter="url(#neon)"/>
+  <text x="622" y="446" class="edge" text-anchor="middle">agents apply</text>
+
+  <!-- RIGHT: reconciled devices -->
+  <g filter="url(#soft)"><rect x="686" y="284" width="824" height="360" rx="20" fill="url(#glass)" stroke="#3a425e" stroke-width="1.5"/></g>
+  <text x="718" y="330" class="lab">RECONCILED · INSTALL AGENTS &#183; SYNC CONFIG &#183; PROPAGATE LOGIN</text>
+  <line x1="718" y1="348" x2="1478" y2="348" stroke="#232a3a" stroke-width="1"/>
+
+  <!-- device rows -->
+  <g>
+    <text x="718" y="400" class="dev">yosemite-s0</text>
+    <g transform="translate(1010,382)">
+      <rect x="0" y="0" width="140" height="34" rx="9" fill="#a3e635" fill-opacity="0.1" stroke="#a3e635" stroke-opacity="0.3"/><text x="70" y="23" class="chip" text-anchor="middle">agents ✓</text>
+      <rect x="152" y="0" width="140" height="34" rx="9" fill="#a3e635" fill-opacity="0.1" stroke="#a3e635" stroke-opacity="0.3"/><text x="222" y="23" class="chip" text-anchor="middle">config ✓</text>
+      <rect x="304" y="0" width="140" height="34" rx="9" fill="#a3e635" fill-opacity="0.1" stroke="#a3e635" stroke-opacity="0.3"/><text x="374" y="23" class="chip" text-anchor="middle">login ✓</text>
+    </g>
+  </g>
+  <line x1="718" y1="426" x2="1478" y2="426" stroke="#1a2030" stroke-width="1"/>
+  <g>
+    <text x="718" y="470" class="dev">mac-mini</text>
+    <g transform="translate(1010,452)">
+      <rect x="0" y="0" width="140" height="34" rx="9" fill="#a3e635" fill-opacity="0.1" stroke="#a3e635" stroke-opacity="0.3"/><text x="70" y="23" class="chip" text-anchor="middle">agents ✓</text>
+      <rect x="152" y="0" width="140" height="34" rx="9" fill="#a3e635" fill-opacity="0.1" stroke="#a3e635" stroke-opacity="0.3"/><text x="222" y="23" class="chip" text-anchor="middle">config ✓</text>
+      <rect x="304" y="0" width="140" height="34" rx="9" fill="#f5c451" fill-opacity="0.1" stroke="#f5c451" stroke-opacity="0.35"/><text x="374" y="23" class="chip" text-anchor="middle" fill="#f5c451" font-size="14">login: manual</text>
+    </g>
+  </g>
+  <line x1="718" y1="496" x2="1478" y2="496" stroke="#1a2030" stroke-width="1"/>
+  <g>
+    <text x="718" y="540" class="dev">win-mini</text>
+    <g transform="translate(1010,522)">
+      <rect x="0" y="0" width="140" height="34" rx="9" fill="#a3e635" fill-opacity="0.1" stroke="#a3e635" stroke-opacity="0.3"/><text x="70" y="23" class="chip" text-anchor="middle">agents ✓</text>
+      <rect x="152" y="0" width="140" height="34" rx="9" fill="#a3e635" fill-opacity="0.1" stroke="#a3e635" stroke-opacity="0.3"/><text x="222" y="23" class="chip" text-anchor="middle">config ✓</text>
+      <rect x="304" y="0" width="140" height="34" rx="9" fill="#a3e635" fill-opacity="0.1" stroke="#a3e635" stroke-opacity="0.3"/><text x="374" y="23" class="chip" text-anchor="middle">login ✓</text>
+    </g>
+  </g>
+
+  <!-- consolidation motif -->
+  <text x="718" y="600" class="mm" font-size="17">48 OAuth flows <tspan class="big" font-size="22" dy="0">→ 1</tspan>  <tspan class="mm">one signed-in host seeds the fleet</tspan></text>
+
+  <!-- footer -->
+  <text x="100" y="792" class="note"><tspan class="mm" font-size="17">agents apply --plan</tspan>  shows the device × dimension matrix — changes nothing.</text>
+  <text x="100" y="830" class="note"><tspan class="noteA">Honest boundary</tspan> — macOS keychain-bound tokens surface as a one-time manual login, never faked.</text>
+</svg>

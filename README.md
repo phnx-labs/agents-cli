@@ -126,6 +126,11 @@ Write one `AGENTS.md`. It becomes `CLAUDE.md` for Claude Code, `GEMINI.md` for G
 
 ## Run any agent
 
+<p align="center">
+  <img src="assets/run-agent.svg" alt="agents run: one command runs any harness (claude/codex/gemini) against the project-pinned version, with an automatic rate-limit fallback chain." width="100%" />
+</p>
+
+
 ```bash
 agents run claude "Find all auth vulnerabilities in src/"
 agents run codex "Fix the issues Claude found"
@@ -206,6 +211,11 @@ ACP adapters are documented for claude, codex, gemini, cursor, opencode, opencla
 ---
 
 ## Sessions across agents
+
+<p align="center">
+  <img src="assets/sessions.svg" alt="agents sessions: search transcripts across Claude, Codex, Gemini, and OpenCode at once, plus a live --active panel showing each running session's state (working / waiting / idle)." width="100%" />
+</p>
+
 
 When you run multiple agents, conversations scatter across tools. Session search brings them together.
 
@@ -299,6 +309,11 @@ agents watchdog --watch    # daemon loop: a tick every --interval
 
 ## Sync the fleet
 
+<p align="center">
+  <img src="assets/fleet-sync.svg" alt="agents apply: reconcile every device to one profile from agents.yaml — install missing agents, sync config, and propagate logins across the fleet." width="100%" />
+</p>
+
+
 One machine is set up the way you like it. Make every other machine match -- same agents installed, same config, logins seeded -- in one command.
 
 ```yaml
@@ -367,6 +382,11 @@ Profile YAML has no secrets -- safe to `agents repo push` to a shared repo. `age
 
 ## Run on your own machines
 
+<p align="center">
+  <img src="assets/hosts.svg" alt="agents hosts: dispatch agents run and config commands to another machine over plain SSH (no daemon); the Tailscale fleet is auto-discovered." width="100%" />
+</p>
+
+
 Dispatch any read-only or config command -- and `agents run` itself -- to another machine over SSH. No daemon.
 
 ```bash
@@ -417,6 +437,11 @@ Every `--host` command rides one multiplexed SSH engine, tuned for driving a fle
 ---
 
 ## Teams
+
+<p align="center">
+  <img src="assets/teams.svg" alt="agents teams: parallel agents in dependency order, each detached in its own worktree with boundary contracts." width="100%" />
+</p>
+
 
 ```bash
 agents teams create auth-feature
@@ -470,6 +495,11 @@ Auto-routes each `--agent` to its native cloud, or pin the backend with `--provi
 
 ## Workflows
 
+<p align="center">
+  <img src="assets/workflows.svg" alt="agents workflows: bundle an orchestrator prompt with optional subagents, skills, and plugins into a named, reusable pipeline invoked as one agent." width="100%" />
+</p>
+
+
 Bundle an orchestrator prompt with optional subagents, skills, and plugins into a named, reusable pipeline. One bundle, one invocation.
 
 ```bash
@@ -520,6 +550,11 @@ Resolution is project > user > system: a `<repo>/.agents/workflows/<name>/` over
 ---
 
 ## Plugins
+
+<p align="center">
+  <img src="assets/plugins.svg" alt="agents plugins: bundle skills, commands, hooks, and MCP servers under one manifest, mirrored into every installed agent version automatically." width="100%" />
+</p>
+
 
 Bundle skills, commands, hooks, MCP servers, settings, and permissions under a single manifest. One source dir at `~/.agents/plugins/<name>/`, mirrored into every installed Claude / OpenClaw version automatically.
 
@@ -780,6 +815,11 @@ Sources: a command's stdout (`--watch` / `--poll`), an HTTP endpoint (`--poll-ht
 ---
 
 ## PTY
+
+<p align="center">
+  <img src="assets/pty.svg" alt="agents pty: give an agent a real terminal for REPLs and TUIs; a sidecar server holds sessions alive between CLI calls." width="100%" />
+</p>
+
 
 ```bash
 # Give agents a real terminal for REPLs, TUIs, interactive programs.

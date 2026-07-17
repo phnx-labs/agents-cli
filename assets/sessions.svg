@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 920" role="img" aria-label="agents sessions searches every agent's transcripts at once — Claude, Codex, Gemini, OpenCode — from one query, backed by a SQLite+FTS5 index; --active shows every live run and what it is doing right now (working, waiting for input, or idle) with the PR and worktree it owns.">
+  <defs>
+    <radialGradient id="gAmber" cx="10%" cy="0%" r="70%"><stop offset="0%" stop-color="#f5c451" stop-opacity="0.12"/><stop offset="60%" stop-color="#f5c451" stop-opacity="0"/></radialGradient>
+    <radialGradient id="gLime" cx="92%" cy="-6%" r="70%"><stop offset="0%" stop-color="#a3e635" stop-opacity="0.10"/><stop offset="60%" stop-color="#a3e635" stop-opacity="0"/></radialGradient>
+    <pattern id="grid" width="46" height="46" patternUnits="userSpaceOnUse"><path d="M 46 0 L 0 0 0 46" fill="none" stroke="#6b8dff" stroke-opacity="0.06" stroke-width="1"/></pattern>
+    <linearGradient id="title" x1="0" y1="0" x2="1" y2="0.4"><stop offset="0%" stop-color="#f7d47a"/><stop offset="52%" stop-color="#f5c451"/><stop offset="100%" stop-color="#a3e635"/></linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ffffff" stop-opacity="0.05"/><stop offset="100%" stop-color="#ffffff" stop-opacity="0.015"/></linearGradient>
+    <linearGradient id="term" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0c1016"/><stop offset="100%" stop-color="#070a0e"/></linearGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="150%"><feGaussianBlur stdDeviation="18" result="b"/><feOffset dy="14" result="o"/><feColorMatrix in="o" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.5 0" result="s"/><feMerge><feMergeNode in="s"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <filter id="neon" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <filter id="halo" x="-30%" y="-60%" width="160%" height="220%"><feGaussianBlur stdDeviation="7"/></filter>
+    <style><![CDATA[
+      .kick{font:600 14px ui-monospace,"SF Mono",Menlo,monospace;letter-spacing:.34em;fill:#f5c451;}
+      .h1{font:800 52px Inter,-apple-system,"SF Pro Display",system-ui,sans-serif;letter-spacing:-.02em;}
+      .sub{font:400 22px Inter,-apple-system,system-ui,sans-serif;fill:#8a90b8;}
+      .lab{font:600 12px ui-monospace,"SF Mono",Menlo,monospace;letter-spacing:.24em;fill:#6b7099;}
+      .m{font:500 21px ui-monospace,"SF Mono",Menlo,monospace;fill:#eaf2ff;}
+      .mm{font:500 17px ui-monospace,"SF Mono",Menlo,monospace;fill:#7a80a8;}
+      .chip{font:700 14px ui-monospace,"SF Mono",Menlo,monospace;}
+      .snip{font:500 18px ui-monospace,"SF Mono",Menlo,monospace;fill:#c7cde8;}
+      .st{font:600 18px ui-monospace,"SF Mono",Menlo,monospace;fill:#eaf2ff;}
+      .sm{font:500 15px ui-monospace,"SF Mono",Menlo,monospace;fill:#7a80a8;}
+      .note{font:400 19px Inter,-apple-system,system-ui,sans-serif;fill:#7a80a8;}
+      .noteA{font:600 19px Inter,-apple-system,system-ui,sans-serif;fill:#f5c451;}
+    ]]></style>
+  </defs>
+
+  <rect width="1600" height="920" fill="#08080f"/>
+  <rect width="1600" height="920" fill="url(#grid)"/>
+  <rect width="1600" height="920" fill="url(#gAmber)"/>
+  <rect width="1600" height="920" fill="url(#gLime)"/>
+
+  <text x="100" y="98" class="kick">AGENTS SESSIONS<tspan fill="#a3e635"> · SEARCH + LIVE STATE, EVERY AGENT</tspan></text>
+  <text x="98" y="162" class="h1" fill="#f5c451" opacity="0.34" filter="url(#halo)">Every conversation. Every agent. One search.</text>
+  <text x="98" y="162" class="h1" fill="url(#title)">Every conversation. Every agent. One search.</text>
+  <text x="100" y="204" class="sub">Claude, Codex, Gemini, OpenCode — searched together; live runs shown by what they're doing now.</text>
+
+  <!-- ===== SEARCH + RESULTS (left) ===== -->
+  <g filter="url(#soft)"><rect x="90" y="272" width="812" height="430" rx="20" fill="url(#glass)" stroke="#f5c451" stroke-opacity="0.28" stroke-width="1.5"/></g>
+  <text x="870" y="312" class="lab" text-anchor="end">SEARCH</text>
+  <rect x="122" y="300" width="708" height="52" rx="12" fill="#12161f" stroke="#2a3346" stroke-width="1"/>
+  <circle cx="152" cy="326" r="9" fill="none" stroke="#f5c451" stroke-width="2.4"/><line x1="159" y1="333" x2="167" y2="341" stroke="#f5c451" stroke-width="2.4"/>
+  <text x="184" y="333" class="m" font-size="20">agents sessions <tspan fill="#f5c451">"auth middleware"</tspan></text>
+
+  <!-- result rows -->
+  <g>
+    <rect x="122" y="392" width="86" height="32" rx="8" fill="#a3e635" fill-opacity="0.14" stroke="#a3e635" stroke-opacity="0.4"/><text x="165" y="414" class="chip" fill="#a3e635" text-anchor="middle">claude</text>
+    <text x="226" y="414" class="snip">…rotate the auth-middleware token before…</text>
+    <text x="878" y="414" class="mm" text-anchor="end">2d</text>
+  </g>
+  <line x1="122" y1="440" x2="878" y2="440" stroke="#1a2130" stroke-width="1"/>
+  <g>
+    <rect x="122" y="456" width="86" height="32" rx="8" fill="#22d3ee" fill-opacity="0.14" stroke="#22d3ee" stroke-opacity="0.4"/><text x="165" y="478" class="chip" fill="#22d3ee" text-anchor="middle">codex</text>
+    <text x="226" y="478" class="snip">fixed the 401 on refresh — see auth.ts…</text>
+    <text x="878" y="478" class="mm" text-anchor="end">5h</text>
+  </g>
+  <line x1="122" y1="504" x2="878" y2="504" stroke="#1a2130" stroke-width="1"/>
+  <g>
+    <rect x="122" y="520" width="86" height="32" rx="8" fill="#f5c451" fill-opacity="0.14" stroke="#f5c451" stroke-opacity="0.4"/><text x="165" y="542" class="chip" fill="#f5c451" text-anchor="middle">gemini</text>
+    <text x="226" y="542" class="snip">wrote tests for the middleware edge cases…</text>
+    <text x="878" y="542" class="mm" text-anchor="end">1d</text>
+  </g>
+  <line x1="122" y1="568" x2="878" y2="568" stroke="#1a2130" stroke-width="1"/>
+  <g>
+    <rect x="122" y="584" width="86" height="32" rx="8" fill="#e879f9" fill-opacity="0.14" stroke="#e879f9" stroke-opacity="0.4"/><text x="165" y="606" class="chip" fill="#e879f9" text-anchor="middle">opencode</text>
+    <text x="226" y="606" class="snip">migrated session store off the old auth…</text>
+    <text x="878" y="606" class="mm" text-anchor="end">3d</text>
+  </g>
+  <text x="122" y="668" class="mm">SQLite + FTS5 · warm reads ~100ms · --json / --markdown</text>
+
+  <!-- ===== LIVE (right) ===== -->
+  <g filter="url(#soft)"><rect x="930" y="272" width="580" height="430" rx="20" fill="url(#term)" stroke="#a3e635" stroke-opacity="0.5" stroke-width="1.6"/></g>
+  <circle cx="962" cy="310" r="6" fill="#a3e635" filter="url(#neon)"/>
+  <text x="984" y="316" class="lab" fill="#a3e635">LIVE · agents sessions --active</text>
+  <line x1="962" y1="336" x2="1478" y2="336" stroke="#1e2717" stroke-width="1"/>
+
+  <!-- working -->
+  <circle cx="972" cy="392" r="8" fill="#a3e635" filter="url(#neon)"/>
+  <text x="996" y="398" class="st">refactor-auth</text>
+  <text x="996" y="424" class="sm" fill="#a3e635">working · editing auth.ts</text>
+  <rect x="1330" y="378" width="148" height="30" rx="8" fill="#a3e635" fill-opacity="0.12" stroke="#a3e635" stroke-opacity="0.3"/><text x="1404" y="398" class="sm" fill="#a3e635" text-anchor="middle">PR #1249</text>
+  <line x1="962" y1="456" x2="1478" y2="456" stroke="#161b26" stroke-width="1"/>
+  <!-- waiting -->
+  <circle cx="972" cy="504" r="8" fill="#f5c451"/>
+  <text x="996" y="510" class="st">migrate-store</text>
+  <text x="996" y="536" class="sm" fill="#f5c451">waiting_input · plan review</text>
+  <rect x="1310" y="490" width="168" height="30" rx="8" fill="#f5c451" fill-opacity="0.10" stroke="#f5c451" stroke-opacity="0.3"/><text x="1394" y="510" class="sm" fill="#f5c451" text-anchor="middle">wt/migrate</text>
+  <line x1="962" y1="568" x2="1478" y2="568" stroke="#161b26" stroke-width="1"/>
+  <!-- idle -->
+  <circle cx="972" cy="616" r="8" fill="#6b7099"/>
+  <text x="996" y="622" class="st" fill="#c7cde8">nightly-drain</text>
+  <text x="996" y="648" class="sm">idle · queue empty</text>
+  <rect x="1350" y="602" width="128" height="30" rx="8" fill="#ffffff" fill-opacity="0.04" stroke="#3a425e"/><text x="1414" y="622" class="sm" text-anchor="middle">RUSH-1782</text>
+
+  <!-- footer -->
+  <text x="100" y="792" class="note">One index across every harness — <tspan class="noteA">search the past, watch the present</tspan>, from anywhere on the fleet.</text>
+  <text x="100" y="830" class="note"><tspan class="mm" font-size="17">agents sessions focus &lt;id&gt;</tspan>  jumps back into a live run in place — the tmux split, locally or over SSH.</text>
+</svg>
