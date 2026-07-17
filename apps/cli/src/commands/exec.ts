@@ -18,6 +18,8 @@ import type { RotateResult } from '../lib/rotate.js';
 import { AGENTS } from '../lib/agents.js';
 import { recordDispatchedRun } from '../lib/audit/log.js';
 import { warnUnpushedWork, shouldWarnUnpushed } from '../lib/warn-unpushed.js';
+import { isHostPinned, pinHostKey, managedKnownHostsPath } from '../lib/devices/known-hosts.js';
+import { sshResolve, type SshGResult } from '../lib/hosts/ssh-config.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -89,6 +91,80 @@ function formatRotationBanner(result: RotateResult, verb: string = 'balanced'): 
   const label = picked.email ? `${picked.email} · ${picked.agent}@${picked.version}` : `${picked.agent}@${picked.version}`;
   const ratio = `${healthy.length} of ${healthy.length + excluded.length} healthy`;
   return `[agents] ${verb} picked ${label} (${ratio})`;
+}
+
+/** The host descriptor fields the `--copy-creds` security gate reads. */
+export interface CopyCredsGateHost {
+  name: string;
+  /** Concrete SSH target for inline/provider hosts; unset for ssh-config aliases. */
+  address?: string;
+  /** `devices` = registered Tailscale fleet host; `local` = ssh-config/inline. */
+  provider?: string;
+}
+
+/** Outcome of the `--copy-creds` security gate (RUSH-1767). */
+export interface CopyCredsGateDecision {
+  /** Ship credentials? True only when the host key is pinned in the managed store. */
+  allowed: boolean;
+  /** The address whose key is checked/pinned — an ssh-config alias resolved to its real HostName. */
+  pinTarget: string;
+  /** True when the non-device self-pin path pinned the target during this call. */
+  selfPinned: boolean;
+}
+
+/** Injectable network seams so the gate decision is testable without ssh/keyscan. */
+export interface CopyCredsGateDeps {
+  /** Managed known_hosts store file (defaults to the real cache path). */
+  file?: string;
+  /** Resolve an ssh-config alias to its effective HostName/Port (defaults to real `ssh -G`). */
+  resolve?: (name: string) => SshGResult | undefined;
+  /** Self-pin `target` via ssh-keyscan; returns whether it's pinned afterward (defaults to real `pinHostKey`). */
+  selfPin?: (target: string, port: number | undefined, file: string) => boolean;
+}
+
+/**
+ * Decide whether `--copy-creds` may ship credentials (and the Claude OAuth
+ * token) to `host` (RUSH-1767). Credentials ship only to a host whose SSH host
+ * key is pinned in the managed known_hosts store, so the offload never rides an
+ * accept-new (TOFU) connection a machine-in-the-middle could intercept.
+ *
+ * Resolution:
+ *  - The checked target is the host's concrete `address`, else its ssh-config
+ *    HostName (`ssh -G`), else its name — so an alias is pinned/verified against
+ *    the SAME real host the strict dispatch later connects to.
+ *  - An unpinned NON-device (a bare `~/.ssh/config` `Host` alias or literal,
+ *    which `agents ssh <name>` can't reach — "Unknown device") is self-pinned in
+ *    place via ssh-keyscan. A registered device is left unpinned here — it earns
+ *    its pin through the normal `agents ssh <name>` accept-new connect, so the
+ *    caller steers there instead.
+ *
+ * The network seams (`resolve`, `selfPin`) default to the real ssh -G /
+ * ssh-keyscan implementations and are injectable so the ship/refuse decision is
+ * unit-testable against real known_hosts fixtures with no network.
+ */
+export function decideCopyCredsGate(host: CopyCredsGateHost, deps: CopyCredsGateDeps = {}): CopyCredsGateDecision {
+  const file = deps.file ?? managedKnownHostsPath();
+  const resolve = deps.resolve ?? sshResolve;
+  const selfPin =
+    deps.selfPin ?? ((target, port, f) => pinHostKey(target, { file: f, ...(port ? { port } : {}) }).pinned);
+
+  // For an ssh-config host `host.address` is unset; ssh -G gives the real
+  // HostName (and Port) the strict dispatch will verify against.
+  const cfg = host.address ? undefined : resolve(host.name);
+  const pinTarget = host.address ?? cfg?.hostname ?? host.name;
+
+  // Not pinned yet? A registered device earns its pin through the normal
+  // accept-new connect (`agents ssh <name>` / the fleet sweep), so leave it and
+  // let the caller steer there. A bare ssh-config alias / literal is NOT a
+  // registered device — that flow can never pin it — so pin it right here.
+  let selfPinned = false;
+  if (!isHostPinned(pinTarget, file) && host.provider !== 'devices') {
+    const cfgPort = cfg?.port;
+    const port = cfgPort && cfgPort !== '22' ? Number(cfgPort) : undefined;
+    selfPinned = selfPin(pinTarget, port, file);
+  }
+
+  return { allowed: isHostPinned(pinTarget, file), pinTarget, selfPinned };
 }
 
 /**
@@ -751,31 +827,15 @@ export function registerRunCommand(program: Command): void {
             // connection, so a machine-in-the-middle on an unverified first
             // connect could capture the tokens. The dispatch itself then verifies
             // strictly against that pin (see lib/hosts/dispatch.ts) (RUSH-1767).
-            const { isHostPinned, pinHostKey } = await import('../lib/devices/known-hosts.js');
-            const { sshResolve } = await import('../lib/hosts/ssh-config.js');
-            // For an ssh-config host `host.address` is unset; ssh -G gives the real
-            // HostName (and Port) the strict dispatch will verify against.
-            const cfg = host.address ? undefined : sshResolve(host.name);
-            const pinTarget = host.address ?? cfg?.hostname ?? host.name;
-
-            // Not pinned yet? A registered device earns its pin through the normal
-            // accept-new connect (`agents ssh <name>` / the fleet sweep), so keep
-            // steering there. But a bare `~/.ssh/config` Host alias (or ad-hoc
-            // literal) is NOT a registered device — `agents ssh <alias>` dead-ends
-            // at "Unknown device" (lib/devices/resolve-target.ts looksLikeHostLiteral),
-            // so that flow can never pin it. Pin it right here with the
-            // host-name-agnostic ssh-keyscan path so --copy-creds is usable for
-            // ssh-config-alias hosts instead of dead-ending on unusable advice.
-            if (!isHostPinned(pinTarget) && host.provider !== 'devices') {
-              const cfgPort = cfg?.port;
-              const port = cfgPort && cfgPort !== '22' ? Number(cfgPort) : undefined;
-              const { pinned } = pinHostKey(pinTarget, port ? { port } : {});
-              if (pinned) {
-                console.error(chalk.gray(`Pinned "${host.name}" (${pinTarget}) into the managed known_hosts store.`));
-              }
+            // The ship/refuse decision — pinTarget resolution, the non-device
+            // self-pin, and the final pinned check — lives in decideCopyCredsGate
+            // (unit-tested against real known_hosts fixtures).
+            const gate = decideCopyCredsGate(host);
+            if (gate.selfPinned) {
+              console.error(chalk.gray(`Pinned "${host.name}" (${gate.pinTarget}) into the managed known_hosts store.`));
             }
 
-            if (!isHostPinned(pinTarget)) {
+            if (!gate.allowed) {
               console.error(chalk.red(
                 `Refusing --copy-creds to "${host.name}": its SSH host key isn't pinned, so the ` +
                 `credentials could be exposed to a machine-in-the-middle on an unverified first connect.`,
@@ -784,7 +844,7 @@ export function registerRunCommand(program: Command): void {
                 host.provider === 'devices'
                   ? `Pin the key first by connecting once so agents records and verifies it:  agents ssh ${host.name}\n` +
                     `Then re-run with --copy-creds.`
-                  : `Couldn't reach "${pinTarget}" to pin its key (ssh-keyscan returned nothing). ` +
+                  : `Couldn't reach "${gate.pinTarget}" to pin its key (ssh-keyscan returned nothing). ` +
                     `Make sure the host is reachable over SSH, then re-run with --copy-creds.`,
               ));
               process.exit(1);
