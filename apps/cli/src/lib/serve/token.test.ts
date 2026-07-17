@@ -46,13 +46,15 @@ describe('control-token store', () => {
     for (const t of store.tokens) expect(t.hash).toMatch(/^[0-9a-f]{64}$/);
   });
 
-  it('writes the store 0600 (owner-only)', () => {
+  // Unix permission bits are unenforceable on Windows: Node reports 0o666 for
+  // every file regardless of chmod, so the 0600 assertions only hold on POSIX.
+  it.skipIf(process.platform === 'win32')('writes the store 0600 (owner-only)', () => {
     const storeFile = path.join(tmpHome, '.agents', '.cache', 'serve', 'control-tokens.json');
     const mode = fs.statSync(storeFile).mode & 0o777;
     expect(mode).toBe(0o600);
   });
 
-  it('self-heals 0600 on rewrite if perms were widened externally', () => {
+  it.skipIf(process.platform === 'win32')('self-heals 0600 on rewrite if perms were widened externally', () => {
     const storeFile = path.join(tmpHome, '.agents', '.cache', 'serve', 'control-tokens.json');
     // Simulate an external widen (backup/restore, manual chmod).
     fs.chmodSync(storeFile, 0o644);

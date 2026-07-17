@@ -240,7 +240,10 @@ describe('plugin install strips symlinks escaping the install root (RUSH-1755)',
     expect(fs.readFileSync(marker, 'utf-8')).toContain('plugin=evil');
   });
 
-  it('Goose: drops an external-escaping symlink but keeps an internal one', () => {
+  // Creating symlinks on Windows needs elevation/Developer Mode, so the CI
+  // runner can't set up the internal-symlink fixture; the escape-strip security
+  // behavior is covered on the POSIX runners.
+  it.skipIf(process.platform === 'win32')('Goose: drops an external-escaping symlink but keeps an internal one', () => {
     const secretDir = path.join(tmpDir, 'outside');
     fs.mkdirSync(secretDir, { recursive: true });
     const secret = path.join(secretDir, 'victim');
@@ -269,7 +272,7 @@ describe('plugin install strips symlinks escaping the install root (RUSH-1755)',
     expect(fs.readFileSync(secret, 'utf-8')).toBe('ORIGINAL');
   });
 
-  it('Hermes: drops a plugin.yaml symlink pointing outside destRoot and writes a real manifest instead', () => {
+  it.skipIf(process.platform === 'win32')('Hermes: drops a plugin.yaml symlink pointing outside destRoot and writes a real manifest instead', () => {
     const secretDir = path.join(tmpDir, 'outside');
     fs.mkdirSync(secretDir, { recursive: true });
     const secret = path.join(secretDir, 'victim');

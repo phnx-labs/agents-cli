@@ -46,6 +46,9 @@ describe('committed CHANGELOG.md', () => {
   it('is up to date with .changelog/ (regenerate with `npm run changelog`)', () => {
     const regenerated = generate(join(cliRoot, '.changelog'));
     const committed = readFileSync(join(cliRoot, 'CHANGELOG.md'), 'utf-8');
-    expect(committed).toBe(regenerated);
+    // Compare content, not line-endings: a Windows checkout with core.autocrlf
+    // rewrites the committed file to CRLF, while generate() always emits LF.
+    const normalize = (s: string) => s.replace(/\r\n/g, '\n');
+    expect(normalize(committed)).toBe(normalize(regenerated));
   });
 });
