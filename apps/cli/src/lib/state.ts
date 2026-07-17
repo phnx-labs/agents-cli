@@ -99,6 +99,9 @@ const CACHE_DIR = path.join(USER_AGENTS_DIR, '.cache');
 
 // Top-level user dirs (config/definitions only — runtime moves into .history/.cache).
 const ROUTINES_DIR = path.join(USER_AGENTS_DIR, 'routines');
+// Monitor definitions (event-triggered watchers). Sibling of ROUTINES_DIR: a
+// monitor is a routine whose trigger is a watched source instead of a clock.
+const MONITORS_DIR = path.join(USER_AGENTS_DIR, 'monitors');
 const TEAMS_DIR = path.join(USER_AGENTS_DIR, 'teams');
 
 // History bucket (durable).
@@ -106,6 +109,10 @@ const SESSIONS_DIR = path.join(HISTORY_DIR, 'sessions');
 const SESSIONS_DB_PATH = path.join(SESSIONS_DIR, 'sessions.db');
 const VERSIONS_DIR = path.join(HISTORY_DIR, 'versions');
 const RUNS_DIR = path.join(HISTORY_DIR, 'runs');
+// Durable per-monitor state-diff store + fire history (last-seen value/hash,
+// fires/<id>/). Sibling of RUNS_DIR — the native diff store that replaces the
+// hand-rolled markdown memory files monitors used to need.
+const MONITORS_HISTORY_DIR = path.join(HISTORY_DIR, 'monitors');
 const TEAMS_AGENTS_DIR = path.join(HISTORY_DIR, 'teams', 'agents');
 const BACKUPS_DIR = path.join(HISTORY_DIR, 'backups');
 const TRASH_DIR = path.join(HISTORY_DIR, 'trash');
@@ -374,6 +381,13 @@ export function getProjectRoutinesDir(cwd: string = process.cwd()): string | nul
 
 /** Path to routine execution logs (~/.agents/.history/runs/). */
 export function getRunsDir(): string { return RUNS_DIR; }
+
+/** Path to monitor YAML definitions (~/.agents/monitors/). */
+export function getMonitorsDir(): string { return MONITORS_DIR; }
+
+/** Path to the durable per-monitor state-diff store + fire history
+ * (~/.agents/.history/monitors/). */
+export function getMonitorsHistoryDir(): string { return MONITORS_HISTORY_DIR; }
 
 /** Root for per-agent mailboxes (~/.agents/.history/mailbox/). */
 export function getMailboxRootDir(): string { return MAILBOX_DIR; }
