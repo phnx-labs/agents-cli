@@ -209,6 +209,10 @@ export class MonitorEngine {
       const windowMs = parseInterval(monitor.rateLimit.per) ?? 60_000;
       fireTimes = recordFireTime(monitor.name, now, windowMs);
       if (fireTimes.length > monitor.rateLimit.max) {
+        // Record the tripped event in fire history too, so `agents monitors runs`
+        // reflects what `view`'s `lastFiredAt` shows — the firehose event the guard
+        // exists to surface must not be invisible in the fire log.
+        writeFireRecord(event, { action: monitor.action.type, ok: false, error: 'rate limited — auto-paused' });
         writeState(monitor.name, decision.value, decision.dedupeKey, { lastFiredAt: event.firedAt, fireTimes });
         try {
           setMonitorEnabled(monitor.name, false);

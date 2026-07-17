@@ -23,9 +23,20 @@ export async function evaluate(source: MonitorSource): Promise<Observation | nul
   const wanted = normalizeHost(name);
   const entry = Object.entries(registry).find(([k]) => normalizeHost(k) === wanted);
 
-  const stats = entry && normalizeHost(entry[0]) !== machineId()
-    ? await probeDeviceStats(entry[1])
-    : await probeLocalStats(name);
+  // An unregistered / removed device must NOT silently fall back to the local
+  // machine's stats — that would watch the wrong box under the requested name
+  // (the "no fallback logic" convention). `add` validates --watch-device up
+  // front, so this catches the device-removed-after-creation case at eval time.
+  if (!entry) {
+    return {
+      raw: `error\tdevice not registered: ${name}`,
+      meta: { error: true, reachable: false, device: name },
+    };
+  }
+
+  const stats = normalizeHost(entry[0]) === machineId()
+    ? await probeLocalStats(name)
+    : await probeDeviceStats(entry[1]);
 
   const bucket = headroom(stats);
   return {

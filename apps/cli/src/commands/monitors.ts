@@ -140,6 +140,8 @@ function buildSource(options: Record<string, any>): MonitorSource {
   if (options.ws) chosen.push({ type: 'ws', source: { type: 'ws', wsUrl: options.ws } });
   if (options.watchFile) chosen.push({ type: 'file', source: { type: 'file', path: options.watchFile } });
   if (options.watchDevice) {
+    // Name is validated against the registry in the async add handler (fail fast,
+    // same gate as --device/--devices) — buildSource is sync so it can't await.
     chosen.push({ type: 'device', source: { type: 'device', device: options.watchDevice } });
   }
   if (options.on) {
@@ -359,6 +361,12 @@ export function registerMonitorsCommands(program: Command): void {
       }
 
       const source = buildSource(options);
+      // A --watch-device source name must resolve to a registered fleet member —
+      // validate it (fail fast with the registered list) so a typo/removed device
+      // can't silently watch the local machine (same gate as --device/--devices).
+      if (source.type === 'device' && source.device) {
+        source.device = await validateDevice(source.device);
+      }
       const condition = buildCondition(options);
       const action = buildAction(options);
 
