@@ -11,7 +11,7 @@
   <a href="https://github.com/phnx-labs/agents-cli"><img src="https://img.shields.io/badge/github-phnx--labs%2Fagents--cli-blue?style=flat-square" alt="github" /></a>
 </p>
 
-**The missing toolchain for CLI coding agents.** Run any agent on your existing subscription. Spawn parallel teams in isolated terminals or dispatch to the cloud for a PR. Watch live state across the fleet, nudge stalled runs, and message agents mid-flight. Schedule routines, drive browsers and Electron apps, store secrets behind Touch ID, and file tickets from a menu-bar bar — all from one CLI.
+**The missing toolchain for CLI coding agents.** Run any agent on your existing subscription. Spawn parallel teams in isolated terminals or dispatch to the cloud for a PR. Watch live state across the fleet, nudge stalled runs, and message agents mid-flight. Schedule routines and set monitors that fire an agent when a source changes, drive browsers and Electron apps, store secrets behind Touch ID, and file tickets from a menu-bar bar — all from one CLI.
 
 <p align="center">
   <a href="https://github.com/anthropics/claude-code" title="Claude Code"><img src="assets/harnesses/anthropic.svg" height="32" alt="Claude Code" /></a>
@@ -60,6 +60,7 @@ Also available as `ag` -- all commands work with both `agents` and `ag`.
 - [Browser](#browser)
 - [Secrets](#secrets)
 - [Routines](#routines)
+- [Monitors](#monitors)
 - [PTY](#pty)
 - [Portable setup](#portable-setup)
 - [Menu bar](#menu-bar)
@@ -739,6 +740,34 @@ agents funnel up yosemite-s0 --local-port 8787 --port 443           # public HTT
 ```
 
 Jobs run sandboxed -- agents only see directories and tools you explicitly allow.
+
+---
+
+## Monitors
+
+```bash
+# Routines fire on a clock. Monitors fire on a change: watch a source, and when
+# it flips, spawn an agent, kick a routine, or notify. The cross-agent layer --
+# agents watching sources (including the fleet and other agents) and reacting.
+
+# CI goes red -> a Claude agent triages it (poll a command, diff, match a pattern)
+agents monitors add ci-red \
+  --poll 'gh pr checks 1249 --json name,bucket' 30s --match fail \
+  --run claude --prompt 'CI failed: {event}. Diagnose and fix.' \
+  --device yosemite-s0
+
+# A fleet box goes unreachable or overloaded -> notify (watch the fleet itself)
+agents monitors add box-down --watch-device mac-mini --on-change --notify telegram
+
+# Poll an endpoint every 8h; fire once when the body flips to "issued"
+agents monitors add cert-issued \
+  --poll-http 'https://secure.ssl.com/.../order' 8h --match issued --notify telegram
+
+agents monitors test ci-red    # Dry-run: evaluate the source once, show what it would fire -- no action
+agents monitors list           # Every monitor: source, owner device, last fired
+```
+
+Sources: a command's stdout (`--watch` / `--poll`), an HTTP endpoint (`--poll-http`), a file (`--watch-file`), a fleet device's reachability + load (`--watch-device`), or a signed webhook (`--on`). Conditions: fire on any change (`--on-change`), on a regex (`--match`), or `--every` tick -- deduped by a native state store, so a monitor stays silent until something *actually* changes. Actions: `--run <agent>` (the event is injected into the prompt as `{event}`), `--routine`, `--notify`, or `--webhook-out`. Pin a monitor to one owner device with `--device` (exactly-once), or offload the action elsewhere with `--run-on`. Runs in the routines daemon; `agents monitors pause` / `resume` any time.
 
 ---
 
