@@ -1306,8 +1306,9 @@ export function registerTeamsCommands(program: Command): void {
     }) => {
       // `--remote-cwd` rides the shared --host option family but is never read by
       // `teams add` (placement, not routing). Fail loud with guidance rather than
-      // silently ignoring it — see remoteCwdOnAddError.
-      if (opts.remoteCwd) {
+      // silently ignoring it — see remoteCwdOnAddError. `!== undefined` so even an
+      // explicit empty value (`--remote-cwd ""`) is rejected, not silently dropped.
+      if (opts.remoteCwd !== undefined) {
         die(remoteCwdOnAddError(team));
       }
       if (!(VALID_MODES as readonly string[]).includes(opts.mode)) {
