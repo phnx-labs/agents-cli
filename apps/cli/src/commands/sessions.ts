@@ -1031,6 +1031,7 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
       !options.waiting &&
       !options.until &&
       !options.project &&
+      !options.sort &&
       (options.host?.length ?? 0) <= 1 &&
       process.env.AGENTS_SESSIONS_LOCAL !== '1'
     ) {
@@ -1075,6 +1076,7 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
     !options.markdown &&
     !options.until &&
     !options.project &&
+    !options.sort &&
     !options.artifacts &&
     options.artifact === undefined
   ) {
