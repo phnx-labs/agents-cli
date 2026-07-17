@@ -17,7 +17,7 @@ import * as os from 'os';
 import type { AgentId } from './types.js';
 import { getMcpDir, getUserMcpDir, getProjectAgentsDir, getVersionsDir, getUserAgentsDir } from './state.js';
 import { getBinaryPath, getVersionHomePath } from './versions.js';
-import { IS_WINDOWS, needsWindowsShell } from './platform/index.js';
+import { IS_WINDOWS, execFileShellSpec } from './platform/index.js';
 import { AGENTS } from './agents.js';
 import { isCapable } from './capabilities.js';
 import { setGeminiAutoUpdateDisabled, updateGeminiSettings } from './gemini-settings.js';
@@ -386,19 +386,23 @@ function installMcpViaClaude(binaryPath: string, server: InstalledMcpServer, ver
       ...(server.config.args || [])
     ];
 
-    execFileSync(binaryPath, args, {
+    // RUSH-1752: user-controlled MCP command/args must not reach cmd.exe unquoted.
+    const spec = execFileShellSpec(binaryPath, args);
+    execFileSync(spec.command, spec.args, {
       stdio: 'pipe',
       timeout: 30000,
       env: execEnv,
-      shell: needsWindowsShell(binaryPath),
+      shell: spec.shell,
     });
   } else {
     // claude mcp add --scope user --transport http -- <name> <url>
-    execFileSync(binaryPath, ['mcp', 'add', '--scope', 'user', '--transport', 'http', '--', server.name, server.config.url!], {
+    const httpArgs = ['mcp', 'add', '--scope', 'user', '--transport', 'http', '--', server.name, server.config.url!];
+    const spec = execFileShellSpec(binaryPath, httpArgs);
+    execFileSync(spec.command, spec.args, {
       stdio: 'pipe',
       timeout: 30000,
       env: execEnv,
-      shell: needsWindowsShell(binaryPath),
+      shell: spec.shell,
     });
   }
 }
@@ -418,11 +422,13 @@ function installMcpViaCodex(binaryPath: string, server: InstalledMcpServer, vers
       ...(server.config.args || [])
     ];
 
-    execFileSync(binaryPath, args, {
+    // RUSH-1752: user-controlled MCP command/args must not reach cmd.exe unquoted.
+    const spec = execFileShellSpec(binaryPath, args);
+    execFileSync(spec.command, spec.args, {
       stdio: 'pipe',
       timeout: 30000,
       env: { ...process.env, HOME: versionHome },
-      shell: needsWindowsShell(binaryPath),
+      shell: spec.shell,
     });
   }
   // Note: Codex may not support HTTP MCPs
@@ -490,7 +496,9 @@ function registerMcpCommand(
       ? ['mcp', 'add', '--transport', transport, '--scope', scope, '--', name, ...commandArgs]
       : ['mcp', 'add', '--', name, ...commandArgs];
     const env = options.home ? { ...process.env, HOME: options.home } : process.env;
-    execFileSync(bin, args, { stdio: 'pipe', timeout: 30000, env, shell: needsWindowsShell(bin) });
+    // RUSH-1752: user-controlled MCP command/args must not reach cmd.exe unquoted.
+    const spec = execFileShellSpec(bin, args);
+    execFileSync(spec.command, spec.args, { stdio: 'pipe', timeout: 30000, env, shell: spec.shell });
     return { success: true };
   } catch (err) {
     return { success: false, error: (err as Error).message };

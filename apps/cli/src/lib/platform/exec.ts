@@ -121,3 +121,25 @@ export function quoteWin32ExecArg(arg: string): string {
 export function composeWin32CommandLine(command: string, args: string[]): string {
   return [command, ...args].map(quoteWin32ExecArg).join(' ');
 }
+
+/**
+ * DEP0190-safe execFile/spawn spec when the binary may need `shell: true` on Windows.
+ *
+ * When `needsWindowsShell(bin)` is true, compose ONE fully-quoted command line via
+ * `composeWin32CommandLine` and return an EMPTY args array so Node never concatenates
+ * user-controlled argv (MCP command/args, prompts, …) into the cmd.exe line unescaped.
+ * Off that path the original bin+args are returned unchanged.
+ *
+ * Call as: `const s = execFileShellSpec(bin, args); execFile(s.command, s.args, { shell: s.shell })`.
+ * Pure; optional `platform` override keeps the win32 branch unit-testable on any host.
+ */
+export function execFileShellSpec(
+  bin: string,
+  args: string[],
+  platform: NodeJS.Platform = process.platform,
+): { command: string; args: string[]; shell: boolean } {
+  if (!needsWindowsShell(bin, platform)) {
+    return { command: bin, args, shell: false };
+  }
+  return { command: composeWin32CommandLine(bin, args), args: [], shell: true };
+}

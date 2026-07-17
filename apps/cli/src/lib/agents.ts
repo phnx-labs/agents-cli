@@ -18,7 +18,7 @@ import * as TOML from 'smol-toml';
 import * as yaml from 'yaml';
 import chalk from 'chalk';
 import type { AgentConfig, AgentId } from './types.js';
-import { needsWindowsShell } from './platform/index.js';
+import { needsWindowsShell, execFileShellSpec } from './platform/index.js';
 import { latestFileMtimeMs } from './fs-walk.js';
 import { damerauLevenshtein } from './fuzzy.js';
 import { getCacheDir, getVersionsDir, getShimsDir, getCliVersionCachePath } from './state.js';
@@ -1803,7 +1803,10 @@ export async function registerMcp(
     // On Windows a bare command name / `.cmd` wrapper (the npm-installed agent
     // CLI) can't be exec'd directly — it needs shell:true for PATHEXT/cmd. Off
     // Windows this is always false, so the no-shell argv path is unchanged.
-    await execFileAsync(bin, args, { ...(env ? { env } : {}), shell: needsWindowsShell(bin) });
+    // RUSH-1752: when shell is needed, compose a fully-quoted command line and
+    // pass EMPTY argv so user-controlled MCP command/args never reach cmd.exe unescaped.
+    const spec = execFileShellSpec(bin, args);
+    await execFileAsync(spec.command, spec.args, { ...(env ? { env } : {}), shell: spec.shell });
     return { success: true };
   } catch (err) {
     return { success: false, error: (err as Error).message };

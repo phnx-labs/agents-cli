@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import { whichCommand, findExecutable, needsWindowsShell, posixShellPath, quoteWin32ExecArg, composeWin32CommandLine } from './exec.js';
+import { whichCommand, findExecutable, needsWindowsShell, posixShellPath, quoteWin32ExecArg, composeWin32CommandLine, execFileShellSpec } from './exec.js';
 
 describe('whichCommand', () => {
   it('is `where` on win32, `which` elsewhere', () => {
@@ -121,6 +121,57 @@ describe('composeWin32CommandLine', () => {
       .toBe('C:\\bin\\claude.cmd -p "hello world"');
     expect(composeWin32CommandLine('C:\\Program Files\\x\\node.exe', ['-e', 'a&b']))
       .toBe('"C:\\Program Files\\x\\node.exe" -e "a&b"');
+  });
+
+  // RUSH-1752: MCP install paths pass user-controlled command/args through execFile
+  // with shell:true on Windows. Metacharacters in those tokens must be quoted so
+  // cmd.exe does not interpret & | > ^ as operators (injection).
+  it('quotes cmd.exe metacharacters in MCP-shaped command/args', () => {
+    const mcpArgs = [
+      'mcp', 'add', '--scope', 'user', '--transport', 'stdio', '--',
+      'demo',
+      'npx',
+      'a&b|c>d^e',
+    ];
+    expect(composeWin32CommandLine('claude.cmd', mcpArgs))
+      .toBe('claude.cmd mcp add --scope user --transport stdio -- demo npx "a&b|c>d^e"');
+    // Each metachar is only safe inside the quoted token — not free in the line.
+    const line = composeWin32CommandLine('codex.cmd', [
+      'mcp', 'add', '--', 'svc', 'node', 'server.js', 'x&y', 'p|q', 'a>b', 'c^d',
+    ]);
+    expect(line).toContain('"x&y"');
+    expect(line).toContain('"p|q"');
+    expect(line).toContain('"a>b"');
+    expect(line).toContain('"c^d"');
+  });
+});
+
+describe('execFileShellSpec', () => {
+  // RUSH-1752: the three MCP execFile sites must empty argv on the win32 shell path.
+  it('on win32 shell path, MCP command/args with metacharacters become a quoted line + empty argv', () => {
+    const args = ['mcp', 'add', '--', 'demo', 'npx', 'a&b|c>d^e'];
+    const spec = execFileShellSpec('claude.cmd', args, 'win32');
+    expect(spec.shell).toBe(true);
+    expect(spec.args).toEqual([]);
+    expect(spec.command).toBe('claude.cmd mcp add -- demo npx "a&b|c>d^e"');
+  });
+
+  it('off win32 keeps the original argv form (no composition)', () => {
+    const args = ['mcp', 'add', '--', 'demo', 'npx', 'a&b|c>d^e'];
+    expect(execFileShellSpec('claude', args, 'linux')).toEqual({
+      command: 'claude',
+      args,
+      shell: false,
+    });
+  });
+
+  it('on win32, absolute .exe (no shell needed) keeps argv form', () => {
+    const args = ['mcp', 'add', '--', 'demo', 'node', 'a&b'];
+    expect(execFileShellSpec('C:\\tools\\claude.exe', args, 'win32')).toEqual({
+      command: 'C:\\tools\\claude.exe',
+      args,
+      shell: false,
+    });
   });
 });
 
