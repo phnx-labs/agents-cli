@@ -18,7 +18,7 @@ import type { AgentId } from './types.js';
 import { getMcpDir, getUserMcpDir, getProjectAgentsDir, getVersionsDir, getUserAgentsDir } from './state.js';
 import { getBinaryPath, getVersionHomePath } from './versions.js';
 import { IS_WINDOWS, execFileShellSpec } from './platform/index.js';
-import { AGENTS, getProjectMcpConfigPath } from './agents.js';
+import { AGENTS, getMcpConfigPathForHome, getProjectMcpConfigPath } from './agents.js';
 import { isCapable } from './capabilities.js';
 import { setGeminiAutoUpdateDisabled, updateGeminiSettings } from './gemini-settings.js';
 
@@ -769,7 +769,6 @@ export function writeMcpConfig(
     case 'claude':
     case 'cursor':
     case 'gemini':
-    case 'openclaw':
     case 'kimi':
     case 'droid':
     case 'forge': {
@@ -803,6 +802,49 @@ export function writeMcpConfig(
       }
 
       config.mcpServers = mcpServers;
+
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+      break;
+    }
+    case 'openclaw': {
+      let config: Record<string, unknown> = {};
+      if (fs.existsSync(configPath)) {
+        try {
+          config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        } catch {
+          config = {};
+        }
+      }
+
+      if (!config.mcp || typeof config.mcp !== 'object') {
+        config.mcp = {};
+      }
+      const mcp = config.mcp as Record<string, unknown>;
+
+      const mcpServers: Record<string, unknown> =
+        mode === 'merge' && mcp.servers && typeof mcp.servers === 'object'
+          ? { ...(mcp.servers as Record<string, unknown>) }
+          : {};
+
+      for (const server of servers) {
+        if (server.transport === 'stdio') {
+          mcpServers[server.name] = {
+            command: server.command,
+            args: server.args || [],
+            env: server.env || {},
+          };
+        } else {
+          mcpServers[server.name] = {
+            url: server.url,
+            transport: server.transport,
+            ...(server.headers && { headers: server.headers }),
+          };
+        }
+      }
+
+      mcp.servers = mcpServers;
+      config.mcp = mcp;
 
       fs.mkdirSync(path.dirname(configPath), { recursive: true });
       fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
@@ -971,8 +1013,18 @@ export function installMcpServers(
       } else if (agentId === 'opencode') {
         installMcpToOpenCodeConfig(server, versionHome);
       } else if (agentId === 'grok') {
-        // Grok user-level config is handled below via writeMcpConfig so the
-        // [mcp_servers] section is actually written; the CLI path was a no-op.
+        // Grok has no working `grok mcp add` CLI, so write the TOML config
+        // directly into the version-home directory for all scopes.
+        const userConfigPath = getMcpConfigPathForHome(agentId, versionHome);
+        const writableServer: WritableMcpServer = {
+          name: server.config.name,
+          transport: server.config.transport,
+          command: server.config.command,
+          args: server.config.args,
+          env: server.config.env,
+          url: server.config.url,
+        };
+        writeMcpConfig(agentId, userConfigPath, [writableServer], 'overwrite');
       } else if (agentId === 'kimi') {
         installMcpToKimiConfig(server, versionHome);
       } else if (agentId === 'droid') {

@@ -6,6 +6,7 @@ import { spawnSync } from 'child_process';
 import { afterEach, describe, expect, it } from 'vitest';
 import { parseMcpServerConfig, buildWorkflowMcpConfig, validateMcpServerName, registerMcpCommandToTargets, type InstalledMcpServer } from './mcp.js';
 import { IS_WINDOWS } from './platform/index.js';
+import * as TOML from 'smol-toml';
 
 const tempDirs: string[] = [];
 
@@ -485,5 +486,107 @@ describe('installMcpServers project-level config', () => {
     expect(projectConfig.mcpServers).toHaveProperty('project-server');
     expect(projectConfig.mcpServers).toHaveProperty('manual-server');
     expect(projectConfig.mcpServers['manual-server']).toEqual({ command: 'manual' });
+  });
+});
+
+describe('writeMcpConfig OpenClaw format', () => {
+  it('writes stdio servers under config.mcp.servers', () => {
+    const home = makeTempHome();
+    const configPath = path.join(home, '.openclaw', 'openclaw.json');
+    const moduleUrl = pathToFileURL(path.resolve('dist/lib/mcp.js')).href;
+
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import { writeMcpConfig } from ${JSON.stringify(moduleUrl)};
+      writeMcpConfig('openclaw', ${JSON.stringify(configPath)}, [{
+        name: 'claw-server',
+        transport: 'stdio',
+        command: 'node',
+        args: ['mcp.js'],
+        env: { API_KEY: 'secret' },
+      }], 'overwrite');
+      console.log('ok');
+    `], {
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+
+    expect(child.status, child.stderr).toBe(0);
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    expect(config.mcp?.servers?.['claw-server']).toEqual({
+      command: 'node',
+      args: ['mcp.js'],
+      env: { API_KEY: 'secret' },
+    });
+  });
+
+  it('merges without clobbering existing mcp.servers entries', () => {
+    const home = makeTempHome();
+    const configPath = path.join(home, '.openclaw', 'openclaw.json');
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({ mcp: { servers: { existing: { command: 'existing' } } } }, null, 2),
+      'utf-8'
+    );
+    const moduleUrl = pathToFileURL(path.resolve('dist/lib/mcp.js')).href;
+
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import { writeMcpConfig } from ${JSON.stringify(moduleUrl)};
+      writeMcpConfig('openclaw', ${JSON.stringify(configPath)}, [{
+        name: 'new-server',
+        transport: 'sse',
+        url: 'https://example.com/sse',
+      }], 'merge');
+      console.log('ok');
+    `], {
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+
+    expect(child.status, child.stderr).toBe(0);
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    expect(config.mcp?.servers?.existing).toEqual({ command: 'existing' });
+    expect(config.mcp?.servers?.['new-server']).toEqual({
+      url: 'https://example.com/sse',
+      transport: 'sse',
+    });
+  });
+});
+
+describe('installMcpServers grok user-level config', () => {
+  it.skipIf(IS_WINDOWS)('writes user-scoped servers to the version-home TOML config', () => {
+    const home = makeTempHome();
+    const version = '0.1.0';
+    const userMcpDir = path.join(home, '.agents', 'mcp');
+    fs.mkdirSync(userMcpDir, { recursive: true });
+
+    fs.writeFileSync(
+      path.join(userMcpDir, 'user-server.yaml'),
+      ['name: user-server', 'transport: stdio', 'command: node', 'args: ["user.js"]', ''].join('\n'),
+      'utf-8'
+    );
+
+    const moduleUrl = pathToFileURL(path.resolve('dist/lib/mcp.js')).href;
+    const versionHome = path.join(home, '.agents', '.history', 'versions', 'grok', version, 'home');
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import { installMcpServers } from ${JSON.stringify(moduleUrl)};
+      const result = installMcpServers('grok', ${JSON.stringify(version)}, ${JSON.stringify(versionHome)});
+      console.log(JSON.stringify(result));
+    `], {
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+
+    expect(child.status, child.stderr).toBe(0);
+    const result = JSON.parse(child.stdout.trim());
+    expect(result.success).toBe(true);
+    expect(result.applied).toContain('user-server');
+
+    const config = TOML.parse(fs.readFileSync(path.join(versionHome, '.grok', 'config.toml'), 'utf-8'));
+    expect(config.mcp_servers).toHaveProperty('user-server');
+    expect(config.mcp_servers['user-server']).toEqual({
+      command: 'node',
+      args: ['user.js'],
+    });
   });
 });
