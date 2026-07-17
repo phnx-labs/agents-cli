@@ -59,8 +59,9 @@ export function registerShareCommands(program: Command): void {
     .option('--worker <name>', 'Worker name', DEFAULT_WORKER_NAME)
     .option('--bucket <name>', 'R2 bucket name', DEFAULT_BUCKET_NAME)
     .option('--account <id>', 'Cloudflare account id (else read from the bundle / prompt)')
+    .option('--token <t>', 'Cloudflare API token (else read from the --bundle)')
     .option('--domain <host>', 'also map a custom domain (e.g. share.agents-cli.sh) if the token owns the zone')
-    .action(async (opts: { bundle: string; worker: string; bucket: string; account?: string; domain?: string }) => {
+    .action(async (opts: { bundle: string; worker: string; bucket: string; account?: string; token?: string; domain?: string }) => {
       try {
         await runSetup(opts);
       } catch (e) {
@@ -101,12 +102,16 @@ async function runSetup(opts: {
   worker: string;
   bucket: string;
   account?: string;
+  token?: string;
   domain?: string;
 }): Promise<void> {
   const { default: ora } = await import('ora');
   const { input } = await import('@inquirer/prompts');
 
-  const { apiToken, accountId: acctFromBundle } = readCloudflareCreds(opts.bundle);
+  const { apiToken, accountId: acctFromBundle } = readCloudflareCreds(opts.bundle, {
+    apiToken: opts.token,
+    accountId: opts.account,
+  });
   const accountId =
     opts.account || acctFromBundle || (await input({ message: 'Cloudflare account id' }));
   if (!accountId) throw new Error('A Cloudflare account id is required.');

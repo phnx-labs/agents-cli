@@ -99,10 +99,14 @@ export function readWriteToken(): string {
 
 /** Cloudflare API credentials for provisioning, read from `cloudflare.com` (or a
  * user-named bundle). Fuzzy-matches key names so it works across bundle layouts. */
-export function readCloudflareCreds(bundle = DEFAULT_CF_BUNDLE): {
-  apiToken: string;
-  accountId: string;
-} {
+export function readCloudflareCreds(
+  bundle = DEFAULT_CF_BUNDLE,
+  override?: { apiToken?: string; accountId?: string },
+): { apiToken: string; accountId: string } {
+  // Explicit --token/--account bypass the bundle entirely (robust escape hatch).
+  if (override?.apiToken) {
+    return { apiToken: override.apiToken, accountId: override.accountId ?? '' };
+  }
   const { env } = readAndResolveBundleEnv(bundle, {
     caller: 'share',
     agentOnly: isHeadlessSecretsContext(),
@@ -112,11 +116,15 @@ export function readCloudflareCreds(bundle = DEFAULT_CF_BUNDLE): {
     return '';
   };
   const apiToken = env.CLOUDFLARE_API_TOKEN || env.CF_API_TOKEN || find(/API[_-]?TOKEN|(?:^|_)TOKEN$/i);
-  const accountId = env.CLOUDFLARE_ACCOUNT_ID || env.CF_ACCOUNT_ID || find(/ACCOUNT[_-]?ID/i);
+  const accountId =
+    override?.accountId || env.CLOUDFLARE_ACCOUNT_ID || env.CF_ACCOUNT_ID || find(/ACCOUNT[_-]?ID/i);
   if (!apiToken) {
+    const keys = Object.keys(env);
     throw new Error(
-      `No Cloudflare API token found in the '${bundle}' bundle. ` +
-        `Add one with: agents secrets add ${bundle} CLOUDFLARE_API_TOKEN`,
+      `No Cloudflare API token in the '${bundle}' bundle ` +
+        `(keys present: ${keys.length ? keys.join(', ') : 'none'}). ` +
+        `Pass it directly with --token <t> [--account <id>], or add it: ` +
+        `agents secrets add ${bundle} CLOUDFLARE_API_TOKEN`,
     );
   }
   return { apiToken, accountId };
