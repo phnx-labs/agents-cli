@@ -1,6 +1,33 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, basename } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { parseExpire, slugify } from './publish.js';
+import { parseExpire, slugify, detectProject, defaultSlug } from './publish.js';
 import { renderWorkerScript } from './worker-template.js';
+
+function expectedProject(dir: string): string {
+  return basename(dir).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+describe('detectProject / defaultSlug', () => {
+  it('falls back to the dir basename outside a git repo', () => {
+    const d = mkdtempSync(join(tmpdir(), 'share-proj-'));
+    expect(detectProject(d)).toBe(expectedProject(d));
+  });
+
+  it('builds <project>-<feature>-<6hex> and drops a redundant leading plan-', () => {
+    const d = mkdtempSync(join(tmpdir(), 'projx-'));
+    const slug = defaultSlug('/somewhere/plan-fleet-cockpit.html', d);
+    expect(slug).toMatch(/-fleet-cockpit-[0-9a-f]{6}$/);
+    expect(slug).not.toContain('plan-fleet-cockpit');
+    expect(slug.startsWith(expectedProject(d) + '-')).toBe(true);
+  });
+
+  it('two publishes of the same file get distinct (hashed) slugs', () => {
+    const d = mkdtempSync(join(tmpdir(), 'projy-'));
+    expect(defaultSlug('/x/report.html', d)).not.toBe(defaultSlug('/x/report.html', d));
+  });
+});
 
 describe('parseExpire', () => {
   it('turns a relative window into a future ISO timestamp', () => {

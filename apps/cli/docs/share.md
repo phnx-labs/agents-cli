@@ -38,6 +38,15 @@ agent makes plan.html
   Cloudflare. `agents share join <baseUrl>` uses an existing endpoint without provisioning.
 - **Expiry.** `--expire 30d|12h|2026-08-01` writes `expires-at` into the object's metadata;
   the Worker `410`s and lazily deletes past that instant.
+- **Preview cards (OG images).** Publishing an HTML page screenshots its own hero at
+  1200×630 and attaches it as `og:image` + `twitter:card`, so the link unfurls into a
+  rich card in Slack, iMessage, Twitter/X, and Discord. Capture is client-side (headless
+  Chromium via the CLI's browser detector, with a managed-Chromium fallback), so there's
+  no central render service and no extra cost. No headless browser available → the cover
+  is skipped and the plain link still publishes. Opt out with `--no-cover`.
+- **Slugs.** With no `--slug`, the default is `<project>-<feature>-<hash>` (e.g.
+  `agents-cli-fleet-cockpit-3a6687`): the repo name scopes the link and a short random
+  tail keeps it unguessable and collision-free. Pass `--slug` for a stable, exact name.
 
 ## Where things live
 
@@ -54,7 +63,7 @@ Push it to a peer with `agents secrets export share --host <box>`.
 
 | Command | What it does |
 |---|---|
-| `agents share <file> [--slug s] [--expire spec]` | Publish `<file>`; print `https://<base>/<slug>`. Idempotent (re-publish = update). |
+| `agents share <file> [--slug s] [--expire spec] [--no-cover]` | Publish `<file>`; print the link. HTML pages get an auto OG cover unless `--no-cover`. Default slug `<project>-<feature>-<hash>`. |
 | `agents share setup [--token t] [--account id] [--bundle b] [--worker w] [--bucket b] [--domain h]` | Provision an R2 bucket + Worker on your Cloudflare and save the config. |
 | `agents share join <baseUrl>` | Use an existing endpoint (base URL + write token), no provisioning. |
 | `agents share status` | Show the configured endpoint. |

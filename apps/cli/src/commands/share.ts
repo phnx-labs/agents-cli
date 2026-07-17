@@ -30,9 +30,10 @@ export function registerShareCommands(program: Command): void {
     .command('share')
     .description('Publish an HTML file to your own Cloudflare R2 and get a shareable link (~$0).')
     .argument('[file]', 'file to publish (HTML or any static asset)')
-    .option('--slug <slug>', 'custom URL slug (default: derived from the filename)')
+    .option('--slug <slug>', 'custom URL slug (default: <project>-<feature>-<hash>)')
     .option('--expire <spec>', 'auto-expire, e.g. 30d, 12h, or 2026-08-01')
-    .action(async (file: string | undefined, opts: { slug?: string; expire?: string }) => {
+    .option('--no-cover', 'skip the OG preview image (HTML pages get one by default)')
+    .action(async (file: string | undefined, opts: { slug?: string; expire?: string; cover?: boolean }) => {
       if (!file) {
         shareCmd.help();
         return;
@@ -43,8 +44,13 @@ export function registerShareCommands(program: Command): void {
         return;
       }
       try {
-        const { url, expiresAt } = await publishFile(file, { slug: opts.slug, expire: opts.expire });
+        const { url, expiresAt, coverUrl } = await publishFile(file, {
+          slug: opts.slug,
+          expire: opts.expire,
+          cover: opts.cover,
+        });
         console.log(chalk.green(url));
+        if (coverUrl) console.log(chalk.dim(`  cover ${coverUrl}`));
         if (expiresAt) console.log(chalk.dim(`  expires ${new Date(expiresAt).toLocaleString()}`));
       } catch (e) {
         console.error(chalk.red((e as Error).message));
