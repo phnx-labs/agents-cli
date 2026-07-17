@@ -22,7 +22,7 @@ import { buildPreview } from './sessions-picker.js';
 import {
   formatPickerLabel,
   pickerColumnsFor,
-  filterSessionsByQuery,
+  ticketLabel,
   mergeLocalFirst,
   indexActiveBySessionId,
   handlePickedSession,
@@ -65,6 +65,31 @@ export function cycleWindow(current: string | undefined): string | undefined {
 
 function distinct(values: (string | undefined)[]): string[] {
   return [...new Set(values.filter((v): v is string => !!v))].sort();
+}
+
+/**
+ * Cheap client-side match for the `S` search — a plain substring test over a
+ * row's visible fields. Deliberately NOT the FTS `filterSessionsByQuery`: that
+ * runs a content-index scan per call, which is fine once over a pool but a
+ * CPU sink when a picker calls it per-row on every keystroke.
+ */
+export function sessionMatchesQuery(s: SessionMeta, query: string): boolean {
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return true;
+  const hay = [
+    s.shortId,
+    s.agent,
+    s.project,
+    s.cwd,
+    s.topic,
+    (s as { label?: string }).label,
+    ticketLabel(s),
+    s.machine,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return terms.every((t) => hay.includes(t));
 }
 
 /**
@@ -239,7 +264,7 @@ export async function runSessionBrowser(
     load,
     keyFor: (s) => s.id,
     labelFor: (s, q) => formatPickerLabel(s, q, cols),
-    matches: (s, q) => filterSessionsByQuery([s], q).length > 0,
+    matches: sessionMatchesQuery,
     buildPreview,
     headerFor,
     helpFor,

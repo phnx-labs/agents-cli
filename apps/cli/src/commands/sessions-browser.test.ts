@@ -1,5 +1,24 @@
 import { describe, it, expect } from 'bun:test';
-import { browserFilterToArgv, cycle, cycleWindow, type BrowserFilter } from './sessions-browser.js';
+import {
+  browserFilterToArgv,
+  cycle,
+  cycleWindow,
+  sessionMatchesQuery,
+  type BrowserFilter,
+} from './sessions-browser.js';
+import type { SessionMeta } from '../lib/session/types.js';
+
+const row = (over: Partial<SessionMeta> = {}): SessionMeta =>
+  ({
+    id: 'x',
+    shortId: 'a1b2c3d4',
+    agent: 'claude',
+    timestamp: '2026-07-16T00:00:00Z',
+    filePath: '/tmp/x.jsonl',
+    project: 'my-app',
+    topic: "Review Taylor's PRs and release",
+    ...over,
+  }) as SessionMeta;
 
 const base: BrowserFilter = {
   running: false,
@@ -86,5 +105,31 @@ describe('cycleWindow — W hotkey', () => {
     expect(cycleWindow('1d')).toBe('7d');
     expect(cycleWindow('7d')).toBe('30d');
     expect(cycleWindow('30d')).toBeUndefined();
+  });
+});
+
+describe('sessionMatchesQuery — the S search predicate (cheap, not FTS)', () => {
+  it('empty query matches everything', () => {
+    expect(sessionMatchesQuery(row(), '')).toBe(true);
+    expect(sessionMatchesQuery(row(), '   ')).toBe(true);
+  });
+
+  it('matches case-insensitively across topic / project / id', () => {
+    expect(sessionMatchesQuery(row(), 'taylor')).toBe(true); // topic
+    expect(sessionMatchesQuery(row(), 'MY-APP')).toBe(true); // project
+    expect(sessionMatchesQuery(row(), 'a1b2')).toBe(true); // shortId prefix
+  });
+
+  it('requires every whitespace-separated term (AND)', () => {
+    expect(sessionMatchesQuery(row(), 'taylor release')).toBe(true);
+    expect(sessionMatchesQuery(row(), 'taylor nope')).toBe(false);
+  });
+
+  it('non-matching query excludes the row', () => {
+    expect(sessionMatchesQuery(row(), 'zzzznomatch')).toBe(false);
+  });
+
+  it('matches the ticket/PR ref', () => {
+    expect(sessionMatchesQuery(row({ prNumber: 1248 }), 'pr#1248')).toBe(true);
   });
 });

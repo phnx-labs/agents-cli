@@ -28,6 +28,7 @@ import {
   isUpKey,
   isDownKey,
   isSpaceKey,
+  isBackspaceKey,
   Separator,
 } from '@inquirer/core';
 import chalk from 'chalk';
@@ -542,8 +543,9 @@ export function dynamicPicker<T, F>(config: DynamicPickerConfig<T, F>): Promise<
         return;
       }
 
-      // Search mode: let readline accumulate the typed text and mirror it into
-      // the query (backspace/edits handled by readline). Arrows still navigate.
+      // Search mode: we own the query buffer (readline's line doesn't survive
+      // across renders here, so we build it from key events). Clear readline
+      // every keystroke so nothing leaks, then append the typed character.
       if (mode === 'search') {
         if (key.name === 'escape') {
           rl.clearLine(0);
@@ -552,14 +554,25 @@ export function dynamicPicker<T, F>(config: DynamicPickerConfig<T, F>): Promise<
           return;
         }
         if (isUpKey(key)) {
+          rl.clearLine(0);
           if (results.length > 0) setActive((active - 1 + results.length) % results.length);
           return;
         }
         if (isDownKey(key)) {
+          rl.clearLine(0);
           if (results.length > 0) setActive((active + 1) % results.length);
           return;
         }
-        setQuery(rl.line);
+        if (isBackspaceKey(key)) {
+          rl.clearLine(0);
+          setQuery(query.slice(0, -1));
+          return;
+        }
+        const seq = (key as { sequence?: string }).sequence;
+        rl.clearLine(0);
+        if (seq && seq.length === 1 && seq >= ' ' && !key.ctrl) {
+          setQuery(query + seq);
+        }
         return;
       }
 
