@@ -1008,6 +1008,18 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
     return;
   }
 
+  // --preview <id/query>: resolve one session and print its compact preview, then
+  // exit — checked before --active so `--active --preview <id>` peeks the id
+  // rather than being swallowed by the active listing.
+  if (options.preview) {
+    if (!query) {
+      console.error(chalk.red('--preview requires a session id or query.'));
+      process.exit(1);
+    }
+    await renderSessionPreview(query, { agent: options.agent, project: options.project });
+    return;
+  }
+
   if (options.active) {
     // On a TTY (and not a scripting path), open the interactive browser seeded to
     // running-only. --json / --waiting / --no-interactive / a peer fan-out keep the
@@ -1046,17 +1058,6 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
 
   if (options.cloud) {
     await runCloudSessions(query, options);
-    return;
-  }
-
-  // --preview <id/query>: resolve one session and print its compact preview, then
-  // exit. The fast peek that skips the pager.
-  if (options.preview) {
-    if (!query) {
-      console.error(chalk.red('--preview requires a session id or query.'));
-      process.exit(1);
-    }
-    await renderSessionPreview(query, { agent: options.agent, project: options.project });
     return;
   }
 
