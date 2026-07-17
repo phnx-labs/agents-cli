@@ -671,6 +671,7 @@ Examples:
   pluginsCmd
     .command('update [name]')
     .description('Re-pull a plugin from its original source and re-sync to all versions')
+    .option('--allow-exec-surfaces', 'Consent to an update that introduces new executable surfaces (hooks/, bin/, scripts/, .mcp.json, settings.json, permissions/)')
     .addHelpText('after', `
 Examples:
   # Update a specific plugin
@@ -678,8 +679,11 @@ Examples:
 
   # Update all plugins
   agents plugins update
+
+  # Trust an update that adds new executable surfaces
+  agents plugins update rush-toolkit --allow-exec-surfaces
 `)
-    .action(async (nameArg?: string) => {
+    .action(async (nameArg: string | undefined, options: { allowExecSurfaces?: boolean }) => {
       const plugins = nameArg ? [getPlugin(nameArg)].filter(Boolean) as DiscoveredPlugin[] : discoverPlugins();
 
       if (nameArg && plugins.length === 0) {
@@ -692,25 +696,43 @@ Examples:
         return;
       }
 
+      const allowExec = options.allowExecSurfaces === true;
+
       for (const plugin of plugins) {
         process.stdout.write(`Updating ${plugin.name}... `);
-        const result = await updatePlugin(plugin.name);
+        const result = await updatePlugin(plugin.name, { allowExecSurfaces: allowExec });
         if (!result.success) {
-          console.log(chalk.red(`failed — ${result.error || 'unknown error'}`));
+          if (result.blockedByExecSurfaces) {
+            // Security (RUSH-1757): the update introduced new executable surfaces.
+            // Refuse without renewed consent; the last-good content stays in place.
+            console.log(chalk.yellow('skipped'));
+            console.log(chalk.yellow(`  Update introduces new executable surfaces: ${(result.newExecSurfaces || []).join(', ')}`));
+            console.log(chalk.gray('  Kept the currently-installed revision. Re-run with --allow-exec-surfaces if you trust the source.'));
+          } else {
+            console.log(chalk.red(`failed — ${result.error || 'unknown error'}`));
+          }
           continue;
         }
         console.log(chalk.green('done'));
 
-        // Re-sync to all supported installed versions
+        // Reload the plugin so the re-sync reads the freshly-applied revision.
+        const updated = getPlugin(plugin.name) ?? plugin;
+
+        // Re-sync to all supported installed versions. When the applied revision
+        // carries executable surfaces, only enable them if the user consented on
+        // this update (--allow-exec-surfaces); otherwise the benign content syncs
+        // but stays disabled, matching the install-time trust gate.
         for (const agentId of capableAgents('plugins')) {
-          if (!pluginSupportsAgent(plugin, agentId)) continue;
+          if (!pluginSupportsAgent(updated, agentId)) continue;
           const versions = listInstalledVersions(agentId);
           const defaultVer = getGlobalDefault(agentId);
           const targetVersions = defaultVer ? [defaultVer] : versions.slice(-1);
 
           for (const version of targetVersions) {
-            const syncResult = syncResourcesToVersion(agentId, version, { plugins: [plugin.name] });
-            if (syncResult.plugins.length > 0) {
+            const didSync = allowExec
+              ? syncPluginToVersion(updated, agentId, getVersionHomePath(agentId, version), { allowExecSurfaces: true, version }).success
+              : syncResourcesToVersion(agentId, version, { plugins: [updated.name] }).plugins.length > 0;
+            if (didSync) {
               console.log(chalk.gray(`  Re-synced to ${agentLabel(agentId)}@${version}`));
             }
           }

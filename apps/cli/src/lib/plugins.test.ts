@@ -1980,3 +1980,136 @@ describe('syncPluginToVersion (hermes plugin install)', () => {
     expect(config.plugins?.enabled ?? []).not.toContain('myplugin');
   });
 });
+
+// ─── updatePlugin — quarantine + capability-diff consent gate (RUSH-1757) ─────
+
+describe('updatePlugin exec-surface consent gate', () => {
+  let tmpDir: string;
+  let pluginsDir: string;
+  let sourceDir: string;
+
+  // Install a local-source plugin at pluginsDir/<name> whose .source points at a
+  // mutable upstream (sourceDir). Returns the paths so the test can mutate the
+  // upstream to simulate an update.
+  function install(name: string, seed: (root: string) => void): { pluginRoot: string; upstream: string } {
+    const upstream = path.join(sourceDir, name);
+    fs.mkdirSync(path.join(upstream, '.claude-plugin'), { recursive: true });
+    fs.writeFileSync(
+      path.join(upstream, '.claude-plugin', 'plugin.json'),
+      JSON.stringify({ name, version: '1.0.0', description: 'Test' }),
+      'utf-8'
+    );
+    seed(upstream);
+
+    const pluginRoot = path.join(pluginsDir, name);
+    fs.cpSync(upstream, pluginRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(pluginRoot, '.source'),
+      JSON.stringify({ source: upstream, isGit: false, version: '1.0.0' }),
+      'utf-8'
+    );
+    return { pluginRoot, upstream };
+  }
+
+  async function loadUpdate() {
+    vi.resetModules();
+    vi.doMock('./state.js', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('./state.js')>();
+      return {
+        ...actual,
+        getPluginsDir: () => pluginsDir,
+        getEnabledExtraRepos: () => [],
+        getProjectPluginsDir: () => null,
+        getSystemPluginsDir: () => path.join(tmpDir, 'no-system'),
+      };
+    });
+    return import('./plugins.js');
+  }
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-update-'));
+    pluginsDir = path.join(tmpDir, 'plugins');
+    sourceDir = path.join(tmpDir, 'source');
+    fs.mkdirSync(pluginsDir, { recursive: true });
+    fs.mkdirSync(sourceDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    vi.doUnmock('./state.js');
+    vi.resetModules();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('applies a benign update (no new exec surfaces) and swaps in the new content', async () => {
+    const { pluginRoot, upstream } = install('benign', () => {});
+    // Upstream ships a new benign resource and bumps its version.
+    fs.mkdirSync(path.join(upstream, 'skills'), { recursive: true });
+    fs.writeFileSync(path.join(upstream, 'skills', 'new.md'), '# new skill\n', 'utf-8');
+    fs.writeFileSync(
+      path.join(upstream, '.claude-plugin', 'plugin.json'),
+      JSON.stringify({ name: 'benign', version: '1.1.0', description: 'Test' }),
+      'utf-8'
+    );
+
+    const { updatePlugin } = await loadUpdate();
+    const result = await updatePlugin('benign');
+
+    expect(result.success).toBe(true);
+    expect(result.blockedByExecSurfaces).toBeUndefined();
+    expect(fs.existsSync(path.join(pluginRoot, 'skills', 'new.md'))).toBe(true);
+    // .source re-stamped to the fresh manifest version.
+    const src = JSON.parse(fs.readFileSync(path.join(pluginRoot, '.source'), 'utf-8'));
+    expect(src.version).toBe('1.1.0');
+    // Quarantine dir cleaned up.
+    expect(fs.existsSync(path.join(pluginsDir, '.benign.update-quarantine'))).toBe(false);
+  });
+
+  it('refuses an update that introduces a NEW exec surface and keeps the old content', async () => {
+    const { pluginRoot, upstream } = install('gains-hooks', () => {});
+    // Upstream is compromised to add a hooks/ surface.
+    fs.mkdirSync(path.join(upstream, 'hooks'), { recursive: true });
+    fs.writeFileSync(path.join(upstream, 'hooks', 'evil.json'), '{}', 'utf-8');
+
+    const { updatePlugin } = await loadUpdate();
+    const result = await updatePlugin('gains-hooks');
+
+    expect(result.success).toBe(false);
+    expect(result.blockedByExecSurfaces).toBe(true);
+    expect(result.newExecSurfaces).toContain('hooks/');
+    // Last-good content preserved — the hostile hooks/ never landed.
+    expect(fs.existsSync(path.join(pluginRoot, 'hooks'))).toBe(false);
+    // No quarantine residue.
+    expect(fs.existsSync(path.join(pluginsDir, '.gains-hooks.update-quarantine'))).toBe(false);
+  });
+
+  it('applies the surface-introducing update when consent is given', async () => {
+    const { pluginRoot, upstream } = install('gains-hooks-ok', () => {});
+    fs.mkdirSync(path.join(upstream, 'hooks'), { recursive: true });
+    fs.writeFileSync(path.join(upstream, 'hooks', 'trusted.json'), '{}', 'utf-8');
+
+    const { updatePlugin } = await loadUpdate();
+    const result = await updatePlugin('gains-hooks-ok', { allowExecSurfaces: true });
+
+    expect(result.success).toBe(true);
+    expect(result.hasExecSurfaces).toBe(true);
+    expect(fs.existsSync(path.join(pluginRoot, 'hooks', 'trusted.json'))).toBe(true);
+  });
+
+  it('does not gate a surface the plugin already carried (not a NEW surface)', async () => {
+    // Both the installed revision and the upstream ship hooks/ — the surface is
+    // pre-existing, so an update must not re-trigger the consent gate.
+    const { pluginRoot, upstream } = install('already-hooks', (root) => {
+      fs.mkdirSync(path.join(root, 'hooks'), { recursive: true });
+      fs.writeFileSync(path.join(root, 'hooks', 'existing.json'), '{}', 'utf-8');
+    });
+    // Upstream ships a benign change on top of the existing surface.
+    fs.writeFileSync(path.join(upstream, 'hooks', 'existing.json'), '{"v":2}', 'utf-8');
+
+    const { updatePlugin } = await loadUpdate();
+    const result = await updatePlugin('already-hooks');
+
+    expect(result.success).toBe(true);
+    expect(result.blockedByExecSurfaces).toBeUndefined();
+    expect(fs.readFileSync(path.join(pluginRoot, 'hooks', 'existing.json'), 'utf-8')).toContain('"v":2');
+  });
+});

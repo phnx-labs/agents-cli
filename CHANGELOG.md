@@ -4,6 +4,21 @@
 
 ### Security
 
+- **`agents plugins update` no longer silently executes a compromised upstream (RUSH-1757).**
+  A plugin's upstream is mutable: `updatePlugin` used to `git pull --ff-only` (or
+  re-copy) straight over the live plugin tree, then re-sync — and when the new
+  revision added an executable surface (`hooks/`, `.mcp.json`, `bin/`, `scripts/`,
+  `settings.json`, `permissions/`) it only *declined to add* an enablement key,
+  never *removed* a pre-existing one. A benign, already-enabled plugin whose
+  upstream was later compromised would therefore execute new hooks/MCP on the next
+  update without renewed consent. The update now fetches the incoming revision into
+  a **quarantine** dir first, diffs its capabilities against the current on-disk
+  baseline, and applies to the live tree only after the trust decision: an update
+  that introduces a *new* exec surface is **refused** (last-good content kept in
+  place) unless the user re-consents with `agents plugins update <name>
+  --allow-exec-surfaces`. A surface the user already trusted is not "new" and does
+  not re-trigger the gate. Source: `apps/cli/src/lib/plugins.ts` (`updatePlugin`,
+  `newExecSurfaceLabels`), `apps/cli/src/commands/plugins.ts`.
 - **`launch_app` on Windows rejects UNC/remote and protocol/URL targets (RUSH-1763).**
   Explicit `path` values used to flow straight into `ProcessStartInfo` with
   `UseShellExecute=true`, so a caller could launch `\\server\share\payload.exe`

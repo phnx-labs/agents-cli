@@ -1949,7 +1949,49 @@ export function getUpstreamManifestVersion(info: PluginSourceInfo): string | nul
  * Update an installed plugin by re-pulling from its original source.
  * Returns true if the update succeeded.
  */
-export async function updatePlugin(name: string): Promise<{ success: boolean; error?: string }> {
+/**
+ * Labels of exec surfaces present in `after` that were NOT present in `before`.
+ * Used by updatePlugin to distinguish a newly-appearing execution surface
+ * (upstream compromise → renewed consent required) from one the user already
+ * trusted (leave enablement alone).
+ */
+export function newExecSurfaceLabels(
+  before: PluginCapabilities,
+  after: PluginCapabilities,
+): string[] {
+  return (Object.keys(PLUGIN_EXEC_SURFACE_LABELS) as Array<keyof PluginCapabilities>)
+    .filter((key) => after[key] && !before[key])
+    .map((key) => PLUGIN_EXEC_SURFACE_LABELS[key]);
+}
+
+/**
+ * Re-fetch a plugin from its recorded source and apply the update to disk.
+ *
+ * Security (RUSH-1757): a plugin's upstream is mutable. `updatePlugin` never
+ * mutates the live plugin tree before it has inspected the incoming content —
+ * the new revision is fetched into a **quarantine** dir first, its capabilities
+ * are diffed against the current on-disk baseline, and the update is applied to
+ * `plugin.root` only after the trust decision. If the update introduces a NEW
+ * executable surface (hooks/, .mcp.json, bin/, scripts/, settings.json,
+ * permissions/) that the current revision did not carry, the update is refused
+ * unless `options.allowExecSurfaces` is set — the last-good content is kept in
+ * place, so a benign-then-compromised upstream can never execute on the next
+ * update without renewed consent. A surface the user already trusted is not a
+ * "new" surface and does not re-trigger the gate.
+ */
+export async function updatePlugin(
+  name: string,
+  options: { allowExecSurfaces?: boolean } = {},
+): Promise<{
+  success: boolean;
+  error?: string;
+  /** True when the update was refused because it introduced new exec surfaces. */
+  blockedByExecSurfaces?: boolean;
+  /** Labels of exec surfaces newly introduced by this update, if any. */
+  newExecSurfaces?: string[];
+  /** Whether the applied revision carries executable surfaces (for the caller's re-sync). */
+  hasExecSurfaces?: boolean;
+}> {
   const plugin = getPlugin(name);
   if (!plugin) {
     return { success: false, error: `Plugin '${name}' not found` };
@@ -1967,25 +2009,66 @@ export async function updatePlugin(name: string): Promise<{ success: boolean; er
     return { success: false, error: `Could not read source info for '${name}'` };
   }
 
+  // Baseline: what the live (already-trusted) revision ships today.
+  const before = inspectPluginCapabilities(plugin.root);
+
+  // Quarantine dir lives beside plugin.root (same filesystem) so the final
+  // apply can be a rename. The dot-prefix keeps it out of plugin discovery.
+  const quarantine = path.join(
+    path.dirname(plugin.root),
+    `.${path.basename(plugin.root)}.update-quarantine`,
+  );
+  const cleanupQuarantine = () => {
+    try { fs.rmSync(quarantine, { recursive: true, force: true }); } catch { /* best effort */ }
+  };
+  cleanupQuarantine();
+
   try {
+    // 1. Fetch the incoming revision into quarantine — never touch plugin.root yet.
     if (sourceInfo.isGit) {
-      execFileSync('git', ['-C', plugin.root, 'pull', '--ff-only'], { stdio: 'pipe' });
+      // Copy the working checkout (with its .git) and fast-forward the copy, so a
+      // hostile upstream diff lands in the quarantine, not the live tree.
+      fs.cpSync(plugin.root, quarantine, { recursive: true });
+      execFileSync('git', ['-C', quarantine, 'pull', '--ff-only'], { stdio: 'pipe' });
     } else {
       const resolvedSource = sourceInfo.source.replace(/^~/, homeDir());
       if (!fs.existsSync(resolvedSource)) {
+        cleanupQuarantine();
         return { success: false, error: `Source path no longer exists: ${resolvedSource}` };
       }
-      // Preserve .user-config.json and .source during re-copy
-      const userConfigPath = path.join(plugin.root, USER_CONFIG_FILE);
-      const userConfigBackup = fs.existsSync(userConfigPath)
-        ? fs.readFileSync(userConfigPath, 'utf-8')
-        : null;
-      fs.rmSync(plugin.root, { recursive: true, force: true });
-      fs.cpSync(resolvedSource, plugin.root, { recursive: true });
-      if (userConfigBackup !== null) {
-        fs.writeFileSync(userConfigPath, userConfigBackup, 'utf-8');
-      }
+      fs.cpSync(resolvedSource, quarantine, { recursive: true });
     }
+
+    // 2. Diff capabilities of the incoming revision against the baseline.
+    const after = inspectPluginCapabilities(quarantine);
+    const newSurfaces = newExecSurfaceLabels(before, after);
+
+    // 3. Refuse a surface-introducing update without renewed consent. The
+    //    last-good content stays in place untouched.
+    if (newSurfaces.length > 0 && options.allowExecSurfaces !== true) {
+      cleanupQuarantine();
+      return {
+        success: false,
+        blockedByExecSurfaces: true,
+        newExecSurfaces: newSurfaces,
+        error:
+          `Update refused: '${name}' introduces new executable surfaces (${newSurfaces.join(', ')}). ` +
+          `Re-run with --allow-exec-surfaces if you trust the source.`,
+      };
+    }
+
+    // 4. Apply: swap the quarantined revision into plugin.root, preserving the
+    //    user config and re-stamping .source.
+    const userConfigPath = path.join(plugin.root, USER_CONFIG_FILE);
+    const userConfigBackup = fs.existsSync(userConfigPath)
+      ? fs.readFileSync(userConfigPath, 'utf-8')
+      : null;
+    fs.rmSync(plugin.root, { recursive: true, force: true });
+    fs.renameSync(quarantine, plugin.root);
+    if (userConfigBackup !== null) {
+      fs.writeFileSync(userConfigPath, userConfigBackup, 'utf-8');
+    }
+
     // Re-stamp .source with the freshly pulled manifest version so the baseline
     // tracks what's now on disk (keeps the heal "unmodified?" check honest).
     const freshVersion = loadPluginManifest(plugin.root)?.version;
@@ -1994,9 +2077,10 @@ export async function updatePlugin(name: string): Promise<{ success: boolean; er
       JSON.stringify({ ...sourceInfo, version: freshVersion }),
       'utf-8',
     );
+
+    return { success: true, newExecSurfaces: newSurfaces, hasExecSurfaces: hasPluginExecSurfaces(after) };
   } catch (err) {
+    cleanupQuarantine();
     return { success: false, error: (err as Error).message };
   }
-
-  return { success: true };
 }
