@@ -175,6 +175,110 @@ describe('buildWorkflowMcpConfig', () => {
   });
 });
 
+describe('project MCP trust gate (RUSH-1776)', () => {
+  // Run an ESM snippet against the built module with an isolated HOME, so the
+  // trust store (~/.agents/mcp-trust.yaml) and the user MCP dir never touch the
+  // real home. Returns the JSON the snippet prints.
+  function probe(home: string, body: string): any {
+    const moduleUrl = pathToFileURL(path.resolve('dist/lib/mcp.js')).href;
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import * as mcp from ${JSON.stringify(moduleUrl)};
+      ${body}
+    `], { env: { ...process.env, HOME: home }, encoding: 'utf-8' });
+    if (child.status !== 0) throw new Error(child.stderr || 'probe failed');
+    return JSON.parse(child.stdout.trim());
+  }
+
+  // A temp HOME holding a trusted user-scoped MCP and a hostile project-scoped
+  // MCP (as if from a freshly cloned repo). Returns absolute paths.
+  function fixture(): { home: string; proj: string } {
+    const home = makeTempHome();
+    const userMcp = path.join(home, '.agents', 'mcp');
+    fs.mkdirSync(userMcp, { recursive: true });
+    fs.writeFileSync(
+      path.join(userMcp, 'user-good.yaml'),
+      ['name: user-good', 'transport: stdio', 'command: user-cmd', 'args: ["--safe"]', ''].join('\n'),
+      'utf-8'
+    );
+    const proj = path.join(home, 'proj');
+    const projMcp = path.join(proj, '.agents', 'mcp');
+    fs.mkdirSync(projMcp, { recursive: true });
+    fs.writeFileSync(
+      path.join(projMcp, 'evil.yaml'),
+      ['name: evil', 'transport: stdio', 'command: /bin/echo', 'args: ["pwned"]', ''].join('\n'),
+      'utf-8'
+    );
+    return { home, proj };
+  }
+
+  it('(a) does NOT register/apply an untrusted project-scoped MCP', () => {
+    const { home, proj } = fixture();
+    const out = probe(home, `
+      const enforced = mcp.getMcpServersByName(['evil'], { cwd: ${JSON.stringify(proj)} }).map(s => s.name);
+      const listed = mcp.listMcpServerConfigs(${JSON.stringify(proj)}, { enforceProjectTrust: true }).map(s => s.name);
+      console.log(JSON.stringify({ enforced, listed, trusted: mcp.isProjectMcpTrusted(${JSON.stringify(path.join(proj, '.agents'))}) }));
+    `);
+    expect(out.trusted).toBe(false);
+    expect(out.enforced).toEqual([]); // spawn path never sees the hostile server
+    expect(out.listed).not.toContain('evil');
+    expect(out.listed).toContain('user-good'); // user server still resolves
+  });
+
+  it('(b) DOES register the project-scoped MCP after explicit opt-in', () => {
+    const { home, proj } = fixture();
+    const out = probe(home, `
+      const before = mcp.getMcpServersByName(['evil'], { cwd: ${JSON.stringify(proj)} }).map(s => s.name);
+      const trustedPath = mcp.trustProjectMcp(${JSON.stringify(proj)});
+      const after = mcp.getMcpServersByName(['evil'], { cwd: ${JSON.stringify(proj)} }).map(s => s.name);
+      console.log(JSON.stringify({ before, after, trustedPath, trusted: mcp.isProjectMcpTrusted(${JSON.stringify(path.join(proj, '.agents'))}) }));
+    `);
+    expect(out.before).toEqual([]);
+    expect(out.trusted).toBe(true);
+    expect(out.after).toEqual(['evil']); // opt-in lets it through the spawn path
+    expect(fs.existsSync(path.join(home, '.agents', 'mcp-trust.yaml'))).toBe(true);
+  });
+
+  it('(c) leaves user-scoped MCPs unaffected regardless of project trust', () => {
+    const { home, proj } = fixture();
+    const out = probe(home, `
+      const untrusted = mcp.getMcpServersByName(['user-good'], { cwd: ${JSON.stringify(proj)} }).map(s => s.name);
+      mcp.trustProjectMcp(${JSON.stringify(proj)});
+      const trusted = mcp.getMcpServersByName(['user-good'], { cwd: ${JSON.stringify(proj)} }).map(s => s.name);
+      console.log(JSON.stringify({ untrusted, trusted }));
+    `);
+    expect(out.untrusted).toEqual(['user-good']);
+    expect(out.trusted).toEqual(['user-good']);
+  });
+
+  it('(d) surfaces the command+args when listing an untrusted project MCP', () => {
+    const { home, proj } = fixture();
+    const out = probe(home, `
+      const display = mcp.listMcpServerConfigs(${JSON.stringify(proj)}); // display path, no trust enforcement
+      const evil = display.find(s => s.name === 'evil');
+      const enforced = mcp.getMcpServersByName(['evil'], { cwd: ${JSON.stringify(proj)} }).map(s => s.name);
+      console.log(JSON.stringify({ scope: evil && evil.scope, command: evil && evil.config.command, args: evil && evil.config.args, enforced }));
+    `);
+    expect(out.scope).toBe('project');
+    expect(out.command).toBe('/bin/echo'); // user sees exactly what would run
+    expect(out.args).toEqual(['pwned']);
+    expect(out.enforced).toEqual([]); // ...but it still does not auto-apply
+  });
+
+  it('untrust revokes a previously granted trust', () => {
+    const { home, proj } = fixture();
+    const out = probe(home, `
+      mcp.trustProjectMcp(${JSON.stringify(proj)});
+      const afterTrust = mcp.getMcpServersByName(['evil'], { cwd: ${JSON.stringify(proj)} }).map(s => s.name);
+      const revoked = mcp.untrustProjectMcp(${JSON.stringify(proj)});
+      const afterUntrust = mcp.getMcpServersByName(['evil'], { cwd: ${JSON.stringify(proj)} }).map(s => s.name);
+      console.log(JSON.stringify({ afterTrust, revoked, afterUntrust }));
+    `);
+    expect(out.afterTrust).toEqual(['evil']);
+    expect(out.revoked).toBe(true);
+    expect(out.afterUntrust).toEqual([]);
+  });
+});
+
 describe('validateMcpServerName', () => {
   it('accepts common safe names', () => {
     expect(() => validateMcpServerName('demo')).not.toThrow();

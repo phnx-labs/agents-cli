@@ -33,10 +33,14 @@ import {
   listMcpServerConfigs,
   discoverMcpConfigsFromRepo,
   installMcpConfigCentrally,
+  isProjectMcpTrusted,
+  trustProjectMcp,
+  untrustProjectMcp,
+  getMcpTrustStorePath,
   type InstalledMcpServer,
 } from '../lib/mcp.js';
 import { cloneRepo } from '../lib/git.js';
-import { getMcpDir } from '../lib/state.js';
+import { getMcpDir, getProjectAgentsDir } from '../lib/state.js';
 import {
   getEffectiveHome,
   getGlobalDefault,
@@ -254,6 +258,44 @@ When to use:
         filterAgent,
         filterVersion,
       });
+    });
+
+  mcpCmd
+    .command('trust')
+    .description('Trust this project so its .agents/mcp/ servers may be registered and spawned')
+    .action(() => {
+      const projectAgentsDir = getProjectAgentsDir();
+      if (!projectAgentsDir) {
+        console.log(chalk.red('Not inside a project (no .agents/ directory found) — nothing to trust.'));
+        process.exit(1);
+      }
+      const servers = listMcpServerConfigs().filter((s) => s.scope === 'project');
+      if (servers.length > 0) {
+        console.log(chalk.bold('Project-scoped MCP servers that will be trusted to run:'));
+        for (const s of servers) {
+          console.log('  ' + chalk.cyan(s.name) + '  ' + chalk.white(formatCentralCommand(s)));
+        }
+      }
+      const trusted = trustProjectMcp();
+      console.log(chalk.green(`Trusted project MCP servers for: ${trusted}`));
+      console.log(chalk.gray(`Recorded in ${getMcpTrustStorePath()} — revoke with: agents mcp untrust`));
+    });
+
+  mcpCmd
+    .command('untrust')
+    .description('Revoke MCP trust for this project (its .agents/mcp/ servers stop auto-applying)')
+    .action(() => {
+      const projectAgentsDir = getProjectAgentsDir();
+      if (!projectAgentsDir) {
+        console.log(chalk.red('Not inside a project (no .agents/ directory found).'));
+        process.exit(1);
+      }
+      const removed = untrustProjectMcp();
+      if (removed) {
+        console.log(chalk.green('Revoked MCP trust for this project.'));
+      } else {
+        console.log(chalk.gray('This project was not trusted — nothing to revoke.'));
+      }
     });
 
   mcpCmd
@@ -941,7 +983,14 @@ function formatMcpDetail(
   const lines: string[] = [];
   lines.push(chalk.bold.cyan(name));
 
+  const isUntrustedProject = centralConfig?.scope === 'project'
+    && !isProjectMcpTrusted(getProjectAgentsDir() ?? '');
+
   const tag =
+    centralConfig?.scope === 'project'
+      ? (isUntrustedProject
+          ? chalk.yellow('declared in <repo>/.agents/mcp/ (untrusted project — will NOT auto-apply)')
+          : chalk.green('declared in <repo>/.agents/mcp/ (trusted project)')) :
     source === 'central' ? chalk.green('declared in ~/.agents/mcp/') :
     source === 'manifest' ? chalk.gray('declared in agents.yaml') :
     chalk.yellow('unmanaged (not in central or manifest)');
@@ -959,6 +1008,14 @@ function formatMcpDetail(
 
   if (command) {
     lines.push(`  ${chalk.gray('command:')} ${chalk.white(command)}`);
+  }
+
+  // A project-scoped server is an arbitrary command from a (possibly cloned)
+  // repo. Show exactly what would run and how to opt in (RUSH-1776).
+  if (isUntrustedProject) {
+    lines.push('');
+    lines.push('  ' + chalk.yellow('This project is untrusted — its MCP servers are skipped on sync and workflow runs.'));
+    lines.push('  ' + chalk.gray('Review the command above, then opt in with: ') + chalk.white('agents mcp trust'));
   }
 
   lines.push('');

@@ -33,7 +33,7 @@ import { resolveResource, listResources } from './resources.js';
 import { VERSION_RE, compareVersions } from './agent-spec/primitives.js';
 import { AGENTS, agentConfigDirName, getAccountEmail, getMcpConfigPathForHome, parseMcpConfig, resolveAgentName, formatAgentError, findInPath, isSelfUpdatingAgent } from './agents.js';
 import { getDefaultPermissionSet, applyPermissionsToVersion as applyPermsToVersion, discoverPermissionGroups, getTotalPermissionRuleCount, buildPermissionsFromGroups, CODEX_RULES_FILENAME, getActivePermissionPresetName, readPermissionPresetRecipe, PERMISSION_PRESET_ENV_VAR } from './permissions.js';
-import { installMcpServers, parseMcpServerConfig } from './mcp.js';
+import { installMcpServers, parseMcpServerConfig, isProjectMcpTrusted } from './mcp.js';
 import { markdownToToml } from './convert.js';
 import { createVersionedAlias, removeVersionedAlias, switchConfigSymlink, getConfigSymlinkVersion, ensureClaudeInsideSymlink } from './shims.js';
 import { importInstallScriptBinary } from './import.js';
@@ -2682,22 +2682,25 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   // For Claude/Codex: uses CLI commands (claude mcp add, codex mcp add)
   // For others: edits config files directly
   //
-  // Mirror the hooks defense: exclude project-scoped MCPs from the sync. An
-  // MCP server is an executable invoked under the agent's authority, so a
-  // cloned public repo's .agents/mcp/foo.yaml could install an arbitrary
-  // command. We pre-compute the set of project-scoped names and drop them
-  // before handing the list to installMcpServers. (The deeper helper-side
-  // dedup in lib/mcp.ts still lets a project entry shadow a same-named
-  // user entry, so name-collision shadowing is not fully closed here —
-  // tracked separately for a follow-up in lib/mcp.ts.)
-  const projectScopedMcpNames = new Set(
-    getScopedMcpResources(cwd).filter(r => r.scope === 'project').map(r => r.name)
+  // Mirror the hooks defense: an MCP server is an executable invoked under the
+  // agent's authority, so a cloned public repo's .agents/mcp/foo.yaml could
+  // install an arbitrary command (RUSH-1776). Project-scoped MCPs are UNTRUSTED
+  // by default — drop them before handing the list to installMcpServers unless
+  // the user has explicitly trusted this project (`agents mcp trust`). The
+  // register/spawn choke in lib/mcp.ts (getMcpServersByName) enforces the same
+  // trust gate and drops untrusted project entries before dedup, so a project
+  // entry can no longer shadow a same-named user entry either.
+  const projectMcpTrusted = projectAgentsDir ? isProjectMcpTrusted(projectAgentsDir) : false;
+  const untrustedProjectMcpNames = new Set(
+    projectMcpTrusted
+      ? []
+      : getScopedMcpResources(cwd).filter(r => r.scope === 'project').map(r => r.name)
   );
   const mcpWriter = getWriter('mcp', agent);
   const mcpToSyncAll = selection
     ? resolveSelection(selection.mcp, available.mcp)
     : (mcpWriter ? available.mcp : []);
-  const mcpToSync = mcpToSyncAll.filter(n => !projectScopedMcpNames.has(n));
+  const mcpToSync = mcpToSyncAll.filter(n => !untrustedProjectMcpNames.has(n));
 
   if (mcpToSync.length > 0 && mcpWriter) {
     const r = mcpWriter.write({ version, versionHome, selection: mcpToSync, cwd });

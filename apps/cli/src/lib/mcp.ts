@@ -15,7 +15,7 @@ import * as TOML from 'smol-toml';
 import { execFileSync } from 'child_process';
 import * as os from 'os';
 import type { AgentId } from './types.js';
-import { getMcpDir, getUserMcpDir, getProjectAgentsDir, getVersionsDir } from './state.js';
+import { getMcpDir, getUserMcpDir, getProjectAgentsDir, getVersionsDir, getUserAgentsDir } from './state.js';
 import { getBinaryPath, getVersionHomePath } from './versions.js';
 import { IS_WINDOWS, needsWindowsShell } from './platform/index.js';
 import { AGENTS } from './agents.js';
@@ -132,13 +132,119 @@ function isStringRecord(value: unknown): value is Record<string, string> {
   return Object.values(value).every((item) => typeof item === 'string');
 }
 
+// ─── Project MCP trust (RUSH-1776) ───────────────────────────────────────────
+// Project-scoped MCP configs (<repo>/.agents/mcp/*.yaml) are UNTRUSTED by
+// default. An MCP server is an arbitrary command spawned under the agent's
+// authority, so merely cloning a hostile repo must never auto-register or run
+// it. A project's MCP servers enter the register/spawn path only after the user
+// explicitly trusts that project (`agents mcp trust`), recorded in a user-owned
+// store OUTSIDE any repo so a cloned repo can't grant itself trust. User- and
+// system-scoped MCPs (~/.agents/mcp/*) are always trusted.
+
+/** Path to the user-owned project-trust store (never inside a repo). */
+export function getMcpTrustStorePath(): string {
+  return path.join(getUserAgentsDir(), 'mcp-trust.yaml');
+}
+
+/**
+ * Key a project by its ROOT (parent of `.agents/`), resolved through symlinks
+ * so the key is stable no matter how the cwd was spelled.
+ */
+function normalizeProjectKey(projectAgentsDir: string): string {
+  const root = path.dirname(projectAgentsDir);
+  try {
+    return fs.realpathSync(root);
+  } catch {
+    return path.resolve(root);
+  }
+}
+
+function readTrustedProjects(): Set<string> {
+  const storePath = getMcpTrustStorePath();
+  if (!fs.existsSync(storePath)) return new Set();
+  let parsed: unknown;
+  try {
+    parsed = yaml.parse(fs.readFileSync(storePath, 'utf-8'));
+  } catch {
+    return new Set();
+  }
+  const list = parsed && typeof parsed === 'object' && Array.isArray((parsed as { trustedProjects?: unknown }).trustedProjects)
+    ? (parsed as { trustedProjects: unknown[] }).trustedProjects
+    : [];
+  const out = new Set<string>();
+  for (const entry of list) {
+    if (typeof entry !== 'string' || entry.length === 0) continue;
+    try {
+      out.add(fs.realpathSync(entry));
+    } catch {
+      out.add(path.resolve(entry));
+    }
+  }
+  return out;
+}
+
+function writeTrustedProjects(trusted: Set<string>): void {
+  const storePath = getMcpTrustStorePath();
+  fs.mkdirSync(path.dirname(storePath), { recursive: true });
+  fs.writeFileSync(storePath, yaml.stringify({ trustedProjects: Array.from(trusted).sort() }), 'utf-8');
+}
+
+/**
+ * Whether the project that owns `projectAgentsDir` has been explicitly trusted
+ * for MCP auto-apply. Untrusted by default (fail closed).
+ */
+export function isProjectMcpTrusted(projectAgentsDir: string): boolean {
+  return readTrustedProjects().has(normalizeProjectKey(projectAgentsDir));
+}
+
+/**
+ * Record explicit trust for the project containing `cwd` so its project-scoped
+ * MCP servers may be registered/spawned. Returns the trusted project root, or
+ * null when `cwd` is not inside a project (no `.agents/` to trust).
+ */
+export function trustProjectMcp(cwd: string = process.cwd()): string | null {
+  const projectAgentsDir = getProjectAgentsDir(cwd);
+  if (!projectAgentsDir) return null;
+  const key = normalizeProjectKey(projectAgentsDir);
+  const trusted = readTrustedProjects();
+  if (!trusted.has(key)) {
+    trusted.add(key);
+    writeTrustedProjects(trusted);
+  }
+  return key;
+}
+
+/** Revoke MCP trust for the project containing `cwd`. Returns true if it was trusted. */
+export function untrustProjectMcp(cwd: string = process.cwd()): boolean {
+  const projectAgentsDir = getProjectAgentsDir(cwd);
+  if (!projectAgentsDir) return false;
+  const key = normalizeProjectKey(projectAgentsDir);
+  const trusted = readTrustedProjects();
+  if (!trusted.delete(key)) return false;
+  writeTrustedProjects(trusted);
+  return true;
+}
+
 /**
  * List all MCP server configs from ~/.agents/mcp/.
+ *
+ * When `enforceProjectTrust` is set, project-scoped configs are included only
+ * for a project the user has explicitly trusted (see `isProjectMcpTrusted`) —
+ * this is the choke point that keeps an untrusted cloned repo's MCP servers out
+ * of the register/spawn path. It ALSO fixes name-collision shadowing: an
+ * untrusted project entry is dropped before dedup, so it can never mask a
+ * same-named user entry. Display callers omit the flag to surface project
+ * entries (command+args and all) regardless of trust.
  */
-export function listMcpServerConfigs(cwd: string = process.cwd()): InstalledMcpServer[] {
+export function listMcpServerConfigs(
+  cwd: string = process.cwd(),
+  options: { enforceProjectTrust?: boolean } = {}
+): InstalledMcpServer[] {
   const dirs: Array<{ scope: 'project' | 'user'; dir: string }> = [];
   const projectAgentsDir = getProjectAgentsDir(cwd);
-  if (projectAgentsDir) {
+  const includeProject = projectAgentsDir !== null
+    && (!options.enforceProjectTrust || isProjectMcpTrusted(projectAgentsDir));
+  if (projectAgentsDir && includeProject) {
     dirs.push({ scope: 'project', dir: path.join(projectAgentsDir, 'mcp') });
   }
   // User dir first (wins on name collision), then system
@@ -218,8 +324,14 @@ export function installMcpConfigCentrally(
  * If names is provided, returns only those servers.
  * Otherwise returns all servers.
  */
-export function getMcpServersByName(names?: string[], options: { cwd?: string } = {}): InstalledMcpServer[] {
-  const allServers = listMcpServerConfigs(options.cwd);
+export function getMcpServersByName(
+  names?: string[],
+  options: { cwd?: string; enforceProjectTrust?: boolean } = {}
+): InstalledMcpServer[] {
+  // This feeds the register/spawn path (installMcpServers, workflow assembly),
+  // so untrusted project-scoped servers are excluded by default (fail closed).
+  const enforceProjectTrust = options.enforceProjectTrust ?? true;
+  const allServers = listMcpServerConfigs(options.cwd, { enforceProjectTrust });
   if (!names || names.length === 0) {
     return allServers;
   }
