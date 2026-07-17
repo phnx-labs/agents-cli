@@ -290,6 +290,22 @@ export async function runDaemon(): Promise<void> {
   }
   log('INFO', `Daemon started (PID: ${process.pid})`);
 
+  // RUSH-1759: the launchd plist / systemd unit no longer bake the Claude OAuth
+  // token onto disk. Obtain it here from the secure `claude` secrets bundle and
+  // inject into this process's env so every routine run this daemon spawns still
+  // receives it (via the sandbox allowlist), without the token ever being
+  // persisted in the service manifest. A read from a file-backed store (Linux)
+  // needs no prompt; on macOS it resolves broker-only from an unlocked
+  // secrets-agent and is otherwise absent (leaving the daemon on its existing
+  // interactive OAuth session), matching the detached-start path. Never blocks.
+  if (!process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+    const oauthToken = readDaemonClaudeOAuthToken();
+    if (oauthToken) {
+      process.env.CLAUDE_CODE_OAUTH_TOKEN = oauthToken;
+      log('INFO', 'Loaded Claude OAuth token from secrets bundle for routine runs');
+    }
+  }
+
   // Reap any stray duplicate daemon of this install that slipped past the start
   // lock or was orphaned by a hard-crash — before it can double-fire jobs.
   try {
@@ -664,18 +680,20 @@ export function writeOwnerOnlyServiceManifest(filePath: string, content: string)
   fs.writeFileSync(filePath, content, { encoding: 'utf-8', mode: 0o600 });
 }
 
-/** Generate a macOS launchd plist for auto-starting the daemon. */
+/**
+ * Generate a macOS launchd plist for auto-starting the daemon.
+ *
+ * The plist never embeds the Claude OAuth token (RUSH-1759): a persisted service
+ * manifest is a plaintext credential on disk even at 0600. The daemon instead
+ * obtains the token at startup from the `claude` secrets bundle
+ * (readDaemonClaudeOAuthToken, injected in runDaemon), so it stays in the
+ * Keychain-backed secure store and never touches the unit file.
+ */
 export function generateLaunchdPlist(
-  oauthToken: string | null = readDaemonClaudeOAuthToken(),
   agentsBin: string = getAgentsBinPath(),
 ): string {
   const launch = getDaemonLaunch(agentsBin);
   const logPath = getLogPath();
-  const oauthEntry = oauthToken
-    ? `
-    <key>${DAEMON_OAUTH_KEY}</key>
-    <string>${xmlEscape(oauthToken)}</string>`
-    : '';
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -698,7 +716,7 @@ ${[launch.command, ...launch.args].map((arg) => `    <string>${xmlEscape(arg)}</
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>${daemonNodeBinDir()}:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:${os.homedir()}/.bun/bin</string>${oauthEntry}
+    <string>${daemonNodeBinDir()}:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:${os.homedir()}/.bun/bin</string>
   </dict>
 </dict>
 </plist>`;
@@ -709,16 +727,20 @@ function systemdExecArg(value: string): string {
   return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
-/** Generate a Linux systemd user unit for auto-starting the daemon. */
+/**
+ * Generate a Linux systemd user unit for auto-starting the daemon.
+ *
+ * The unit never embeds the Claude OAuth token (RUSH-1759): a persisted service
+ * manifest is a plaintext credential on disk even at 0600. The daemon instead
+ * obtains the token at startup from the `claude` secrets bundle
+ * (readDaemonClaudeOAuthToken, injected in runDaemon), so it stays in the secure
+ * store and never touches the unit file.
+ */
 export function generateSystemdUnit(
-  oauthToken: string | null = readDaemonClaudeOAuthToken(),
   agentsBin: string = getAgentsBinPath(),
 ): string {
   const launch = getDaemonLaunch(agentsBin);
   const execStart = [launch.command, ...launch.args].map(systemdExecArg).join(' ');
-  const oauthLine = oauthToken
-    ? `\nEnvironment=${DAEMON_OAUTH_KEY}=${oauthToken}`
-    : '';
 
   return `[Unit]
 Description=Agents Daemon - Scheduled Job Runner
@@ -729,7 +751,7 @@ Type=simple
 ExecStart=${execStart}
 Restart=always
 RestartSec=10
-Environment=PATH=${daemonNodeBinDir()}:/usr/local/bin:/usr/bin:/bin${oauthLine}
+Environment=PATH=${daemonNodeBinDir()}:/usr/local/bin:/usr/bin:/bin
 
 [Install]
 WantedBy=default.target`;
@@ -858,9 +880,10 @@ function startDaemonLocked(agentsBin: string): { pid: number | null; method: str
       if (!fs.existsSync(plistDir)) {
         fs.mkdirSync(plistDir, { recursive: true });
       }
-      // The plist may embed a long-lived OAuth token in EnvironmentVariables;
-      // create owner-only atomically (no world-readable window before chmod).
-      writeOwnerOnlyServiceManifest(plistPath, generateLaunchdPlist(undefined, agentsBin));
+      // The plist carries no credential (RUSH-1759 — the daemon reads the OAuth
+      // token itself at startup); still create owner-only atomically to match the
+      // detached path and keep the log/PATH surface owner-private.
+      writeOwnerOnlyServiceManifest(plistPath, generateLaunchdPlist(agentsBin));
 
       try {
         execFileSync('launchctl', ['unload', plistPath], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
@@ -886,8 +909,9 @@ function startDaemonLocked(agentsBin: string): { pid: number | null; method: str
       if (!fs.existsSync(unitDir)) {
         fs.mkdirSync(unitDir, { recursive: true });
       }
-      // May embed a long-lived OAuth token in an Environment= line; owner-only.
-      writeOwnerOnlyServiceManifest(unitPath, generateSystemdUnit(undefined, agentsBin));
+      // Carries no credential (RUSH-1759 — the daemon reads the OAuth token
+      // itself at startup); owner-only to keep the PATH/log surface private.
+      writeOwnerOnlyServiceManifest(unitPath, generateSystemdUnit(agentsBin));
 
       execFileSync('systemctl', ['--user', 'daemon-reload'], { encoding: 'utf-8' });
       execFileSync('systemctl', ['--user', 'enable', SYSTEMD_UNIT], { encoding: 'utf-8' });

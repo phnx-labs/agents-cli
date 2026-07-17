@@ -1,12 +1,14 @@
 /**
  * Daemon service-manifest generation.
  *
- * The load-bearing behavior under test: a long-lived Claude OAuth token stored
- * in the `claude` secrets bundle is baked into the launchd plist / systemd unit
- * environment, so headless routine runs stop depending on the short-lived
- * interactive Keychain OAuth session. The Keychain itself is swapped for an
- * in-memory backend via setKeychainBackendForTest — the contract here is the
- * generator, not the Keychain wiring (that rides the e2e smoke run).
+ * The load-bearing security contract under test (RUSH-1759): the Claude OAuth
+ * token stored in the `claude` secrets bundle is NEVER written into the launchd
+ * plist / systemd unit, even when one is configured — a persisted service
+ * manifest is a plaintext credential on disk. The daemon obtains the token at
+ * startup from the secure store instead (readDaemonClaudeOAuthToken). The
+ * Keychain itself is swapped for an in-memory backend via
+ * setKeychainBackendForTest so the generators can be exercised with a token
+ * configured and proven to omit it.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -160,8 +162,8 @@ describe('writeOwnerOnlyServiceManifest', () => {
 });
 
 describe('generateLaunchdPlist', () => {
-  it('omits CLAUDE_CODE_OAUTH_TOKEN when none is configured', () => {
-    const plist = generateLaunchdPlist(readDaemonClaudeOAuthToken({ allowPrompt: true }));
+  it('never embeds CLAUDE_CODE_OAUTH_TOKEN, only PATH', () => {
+    const plist = generateLaunchdPlist();
     expect(plist).not.toContain('CLAUDE_CODE_OAUTH_TOKEN');
     // The PATH entry is always present so EnvironmentVariables is never empty.
     expect(plist).toContain('<key>PATH</key>');
@@ -171,36 +173,28 @@ describe('generateLaunchdPlist', () => {
     expect(plist).not.toContain('v24.0.0');
   });
 
-  it('injects the token into EnvironmentVariables when configured', () => {
+  it('omits the token even when one is configured in the claude bundle (RUSH-1759)', () => {
     seedKeychainBacked('sk-ant-oat01-abc123');
-    const plist = generateLaunchdPlist(readDaemonClaudeOAuthToken({ allowPrompt: true }));
-    expect(plist).toContain('<key>CLAUDE_CODE_OAUTH_TOKEN</key>');
-    expect(plist).toContain('<string>sk-ant-oat01-abc123</string>');
-    // Must sit inside the EnvironmentVariables dict, after PATH.
-    const envIdx = plist.indexOf('<key>EnvironmentVariables</key>');
-    const tokenIdx = plist.indexOf('<key>CLAUDE_CODE_OAUTH_TOKEN</key>');
-    expect(envIdx).toBeGreaterThan(-1);
-    expect(tokenIdx).toBeGreaterThan(envIdx);
-  });
-
-  it('XML-escapes special characters in the token value', () => {
-    seedKeychainBacked('tok&en<x>');
-    const plist = generateLaunchdPlist(readDaemonClaudeOAuthToken({ allowPrompt: true }));
-    expect(plist).toContain('<string>tok&amp;en&lt;x&gt;</string>');
-    expect(plist).not.toContain('<string>tok&en<x></string>');
+    // Sanity: the token IS resolvable — proving the omission below is the
+    // generator's doing, not an empty bundle.
+    expect(readDaemonClaudeOAuthToken({ allowPrompt: true })).toBe('sk-ant-oat01-abc123');
+    const plist = generateLaunchdPlist();
+    expect(plist).not.toContain('CLAUDE_CODE_OAUTH_TOKEN');
+    expect(plist).not.toContain('sk-ant-oat01-abc123');
   });
 });
 
 describe('generateSystemdUnit', () => {
-  it('omits the token Environment line when none is configured', () => {
+  it('never embeds a token Environment line, only PATH', () => {
     expect(generateSystemdUnit()).not.toContain('CLAUDE_CODE_OAUTH_TOKEN');
   });
 
-  it('adds an Environment line for the token when configured', () => {
+  it('omits the token even when one is configured in the claude bundle (RUSH-1759)', () => {
     seedKeychainBacked('sk-ant-oat01-abc123');
-    expect(generateSystemdUnit(readDaemonClaudeOAuthToken({ allowPrompt: true }))).toContain(
-      'Environment=CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-abc123',
-    );
+    expect(readDaemonClaudeOAuthToken({ allowPrompt: true })).toBe('sk-ant-oat01-abc123');
+    const unit = generateSystemdUnit();
+    expect(unit).not.toContain('CLAUDE_CODE_OAUTH_TOKEN');
+    expect(unit).not.toContain('sk-ant-oat01-abc123');
   });
 
   it('pins the running Node bin dir first on PATH and drops the stale hardcoded nvm version', () => {
@@ -239,8 +233,8 @@ describe('service manifest CLI entry injection', () => {
     const savedArgv1 = process.argv[1];
     process.argv[1] = postinstallEntry;
     try {
-      const plist = generateLaunchdPlist(null, installedEntry);
-      const unit = generateSystemdUnit(null, installedEntry);
+      const plist = generateLaunchdPlist(installedEntry);
+      const unit = generateSystemdUnit(installedEntry);
       expect(plist).toContain(`<string>${installedEntry}</string>`);
       expect(unit).toContain(systemdQuote(installedEntry));
       expect(plist).not.toContain(postinstallEntry);
