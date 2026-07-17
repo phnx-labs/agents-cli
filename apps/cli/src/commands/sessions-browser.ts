@@ -106,11 +106,14 @@ function copyToClipboard(text: string): boolean {
   return false;
 }
 
-/** The expensive fetch: the local index + a live fleet fan-out + the live index. */
+/** The transcript pool: the local index + (unless --local) a live fleet fan-out.
+ * The live index is fetched separately/lazily — it's the slow part and only the
+ * running filter needs it, so a bare browse stays instant. */
 async function fetchRawPool(
   f: BrowserFilter,
   self: string,
-): Promise<{ key: string; rows: SessionMeta[]; live: Map<string, ActiveSession> }> {
+  local: boolean,
+): Promise<{ key: string; rows: SessionMeta[] }> {
   const since = f.window;
   // Local pool: wide (every directory) — device/agent/project are applied in
   // memory so a hotkey toggle is instant and doesn't re-hit the disk.
@@ -124,25 +127,21 @@ async function fetchRawPool(
   });
 
   // Fleet: fold in every online peer's own index over SSH (no sync), same as the
-  // flag path. Best-effort — a fan-out failure leaves the local list intact.
-  try {
-    const forwarded = ['sessions', '--all', '--json', '--limit', '500'];
-    if (since) forwarded.push('--since', since);
-    if (f.teams) forwarded.push('--teams');
-    const { sessions: remote } = await gatherRemoteList(forwarded);
-    if (remote.length > 0) rows = mergeLocalFirst([...rows, ...remote], self);
-  } catch {
-    // enrichment, never a hard dependency
+  // flag path. Skipped under --local. Best-effort — a fan-out failure leaves the
+  // local list intact.
+  if (!local) {
+    try {
+      const forwarded = ['sessions', '--all', '--json', '--limit', '500'];
+      if (since) forwarded.push('--since', since);
+      if (f.teams) forwarded.push('--teams');
+      const { sessions: remote } = await gatherRemoteList(forwarded);
+      if (remote.length > 0) rows = mergeLocalFirst([...rows, ...remote], self);
+    } catch {
+      // enrichment, never a hard dependency
+    }
   }
 
-  let live: Map<string, ActiveSession>;
-  try {
-    live = indexActiveBySessionId(await getActiveSessions());
-  } catch {
-    live = new Map();
-  }
-
-  return { key: `${since ?? 'all'}|${f.teams}`, rows, live };
+  return { key: `${since ?? 'all'}|${f.teams}`, rows };
 }
 
 /** Apply the cheap in-memory filters (agent / device / project / running). */
@@ -187,16 +186,23 @@ function helpFor(_f: BrowserFilter, mode: 'nav' | 'search'): string {
  * `{ running: true }` for `--active`). Resolves after the user resumes a session
  * or cancels — the picked row is dispatched through the shared resume/focus path.
  */
-export async function runSessionBrowser(initial: Partial<BrowserFilter> = {}): Promise<void> {
+export async function runSessionBrowser(
+  initial: Partial<BrowserFilter> = {},
+  opts: { local?: boolean } = {},
+): Promise<void> {
   const self = machineId();
+  const local = opts.local ?? false;
 
   // Updated after each load so the A/D cycles range over what's actually present.
   let agentsInPool: string[] = [];
   let devicesInPool: string[] = [];
   let cols: PickerColumns = {};
-  // Cache the expensive fetch, keyed by (window, teams); agent/device/project/
+  // Cache the transcript fetch, keyed by (window, teams); agent/device/project/
   // running are applied in memory so their hotkeys don't re-fan-out the fleet.
-  let rawCache: { key: string; rows: SessionMeta[]; live: Map<string, ActiveSession> } | null = null;
+  let rawCache: { key: string; rows: SessionMeta[] } | null = null;
+  // The live index is slow (a full ps/tmux scan) and only the running filter
+  // needs it — fetch it once, lazily, the first time running is toggled on.
+  let liveCache: Map<string, ActiveSession> | null = null;
 
   const initialFilter: BrowserFilter = {
     running: initial.running ?? false,
@@ -210,11 +216,19 @@ export async function runSessionBrowser(initial: Partial<BrowserFilter> = {}): P
   const load = async (f: BrowserFilter): Promise<SessionMeta[]> => {
     const key = `${f.window ?? 'all'}|${f.teams}`;
     if (!rawCache || rawCache.key !== key) {
-      rawCache = await fetchRawPool(f, self);
+      rawCache = await fetchRawPool(f, self, local);
+    }
+    // Only pay for the live scan when the running filter needs it.
+    if (f.running && !liveCache) {
+      try {
+        liveCache = indexActiveBySessionId(await getActiveSessions());
+      } catch {
+        liveCache = new Map();
+      }
     }
     agentsInPool = distinct(rawCache.rows.map((r) => r.agent));
     devicesInPool = distinct(rawCache.rows.map((r) => r.machine ?? self));
-    const filtered = applyFilters(rawCache.rows, rawCache.live, f, self);
+    const filtered = applyFilters(rawCache.rows, liveCache ?? new Map(), f, self);
     cols = pickerColumnsFor(filtered);
     return filtered;
   };
@@ -231,7 +245,7 @@ export async function runSessionBrowser(initial: Partial<BrowserFilter> = {}): P
     helpFor,
     enterHint: 'resume',
     emptyMessage: 'No sessions match this filter.',
-    loadingMessage: 'Reaching machines…',
+    loadingMessage: local ? 'Loading…' : 'Loading (reaching other machines)…',
     keyBindings: {
       r: (f) => ({ ...f, running: !f.running }),
       c: (f) => ({ ...f, teams: !f.teams }),

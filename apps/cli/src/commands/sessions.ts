@@ -1014,12 +1014,15 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
     // static dump untouched, so scripts and agents are unaffected.
     if (useInteractiveBrowser(options) && !options.waiting && process.env.AGENTS_SESSIONS_LOCAL !== '1') {
       const { runSessionBrowser } = await import('./sessions-browser.js');
-      await runSessionBrowser({
-        running: true,
-        teams: !!options.teams,
-        agent: options.agent,
-        device: options.host?.length === 1 ? options.host[0] : undefined,
-      });
+      await runSessionBrowser(
+        {
+          running: true,
+          teams: !!options.teams,
+          agent: options.agent,
+          device: options.host?.length === 1 ? options.host[0] : undefined,
+        },
+        { local: options.local === true },
+      );
       return;
     }
     // AGENTS_SESSIONS_LOCAL is set by a parent fan-out invocation (see
@@ -1061,11 +1064,14 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
     options.artifact === undefined
   ) {
     const { runSessionBrowser } = await import('./sessions-browser.js');
-    await runSessionBrowser({
-      teams: !!options.teams,
-      agent: options.agent,
-      projectScope: options.all ? 'all' : 'repo',
-    });
+    await runSessionBrowser(
+      {
+        teams: !!options.teams,
+        agent: options.agent,
+        projectScope: options.all ? 'all' : 'repo',
+      },
+      { local: options.local === true },
+    );
     return;
   }
 
