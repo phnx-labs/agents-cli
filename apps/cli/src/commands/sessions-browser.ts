@@ -289,6 +289,12 @@ export async function runSessionBrowser(
   // The live index is slow (a full ps/tmux scan) and only the running filter
   // needs it — fetch it once, lazily, the first time running is toggled on.
   let liveCache: Map<string, ActiveSession> | null = null;
+  // Generation guard: two quick keypresses can start overlapping loads whose
+  // SSH fan-outs settle out of order. dynamicPicker's own gen ref guards which
+  // rows become `items`, but the shared closure state below (cols / cycle pools /
+  // caches) is a side channel it can't see — so a stale load must never commit
+  // it. We compute into locals and only write the shared state as the latest load.
+  let loadGen = 0;
 
   const initialFilter: BrowserFilter = {
     running: initial.running ?? false,
@@ -300,21 +306,31 @@ export async function runSessionBrowser(
   };
 
   const load = async (f: BrowserFilter): Promise<SessionMeta[]> => {
+    const myGen = ++loadGen;
     const key = `${f.window ?? 'all'}|${f.teams}`;
-    if (!rawCache || rawCache.key !== key) {
-      rawCache = await fetchRawPool(f, self, local, hosts);
+    let pool = rawCache && rawCache.key === key ? rawCache : null;
+    if (!pool) {
+      const fetched = await fetchRawPool(f, self, local, hosts);
+      if (myGen !== loadGen) return []; // superseded — don't touch shared state
+      pool = fetched;
     }
     // Only pay for the live scan when the running filter needs it.
-    if (f.running && !liveCache) {
+    let live = liveCache;
+    if (f.running && !live) {
       try {
-        liveCache = indexActiveBySessionId(await getActiveSessions());
+        live = indexActiveBySessionId(await getActiveSessions());
       } catch {
-        liveCache = new Map();
+        live = new Map();
       }
+      if (myGen !== loadGen) return [];
     }
-    agentsInPool = distinct(rawCache.rows.map((r) => r.agent));
-    devicesInPool = distinct(rawCache.rows.map((r) => r.machine ?? self));
-    const filtered = applyFilters(rawCache.rows, liveCache ?? new Map(), f, self);
+    // Latest load — commit shared state atomically (no await past this point, so
+    // no newer load can interleave between these writes).
+    rawCache = pool;
+    if (live) liveCache = live;
+    agentsInPool = distinct(pool.rows.map((r) => r.agent));
+    devicesInPool = distinct(pool.rows.map((r) => r.machine ?? self));
+    const filtered = applyFilters(pool.rows, live ?? new Map(), f, self);
     cols = pickerColumnsFor(filtered);
     return filtered;
   };
