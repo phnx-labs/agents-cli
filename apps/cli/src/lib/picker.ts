@@ -20,6 +20,7 @@ import {
   useKeypress,
   useEffect,
   useMemo,
+  useRef,
   usePagination,
   usePrefix,
   makeTheme,
@@ -421,6 +422,248 @@ export function multiItemPicker<T>(config: MultiPickerConfig<T>): Promise<T[] | 
       }
     }
 
+    parts.push(help);
+
+    return [header, parts.slice(1).join('\n')];
+  });
+  return prompt(config);
+}
+
+/** Configuration for the dynamic (async-refetch) picker prompt. */
+export interface DynamicPickerConfig<T, F> {
+  message: string;
+  /** The initial filter state. Changing it (via a keybinding) re-runs {@link load}. */
+  initialFilter: F;
+  /** Async loader for the current filter state. Its result is the row pool. */
+  load: (filter: F) => Promise<T[]>;
+  labelFor: (item: T, query: string) => string;
+  /** Stable identity for an item (used for the active-row cursor across reloads). */
+  keyFor: (item: T) => string;
+  /** Client-side text filter over the loaded pool (the `S` search). */
+  matches?: (item: T, query: string) => boolean;
+  buildPreview?: (item: T) => string;
+  /** Dim summary of the current filter state, rendered in the header. */
+  headerFor?: (filter: F) => string;
+  /** The hotkey-legend help line; receives the mode so it can adapt. */
+  helpFor?: (filter: F, mode: 'nav' | 'search') => string;
+  /**
+   * Single-key bindings (by key name) that transform the filter. Returning the
+   * SAME reference is a no-op; a new object triggers a reload.
+   */
+  keyBindings?: Record<string, (filter: F) => F>;
+  /**
+   * Side-effecting keys that don't change the filter (e.g. `y` copies a command).
+   * Return a short string to flash under the list.
+   */
+  onKey?: (name: string, filter: F, active: T | undefined) => string | void;
+  /** Key that enters search mode (default `s`). */
+  searchKey?: string;
+  /** Key that toggles the preview pane (default `tab`). */
+  previewKey?: string;
+  pageSize?: number;
+  emptyMessage?: string;
+  loadingMessage?: string;
+  enterHint?: string;
+}
+
+/** The result returned when the user selects a row: the item plus the live filter. */
+export interface DynamicPicked<T, F> {
+  item: T;
+  filter: F;
+}
+
+/**
+ * Async-refetch variant of {@link itemPicker}. Holds a `filter` object in state and
+ * re-runs `load(filter)` whenever a keybinding mutates it (with a loading placeholder
+ * while the fetch — e.g. an SSH fleet fan-out — is in flight). A separate `S` search
+ * mode filters the loaded pool client-side. `enter` returns the active row + the live
+ * filter; `esc` cancels (from search mode, `esc` first exits search).
+ *
+ * Same render/pagination/preview machinery as the static pickers — only the data
+ * source and keymap are dynamic.
+ */
+export function dynamicPicker<T, F>(config: DynamicPickerConfig<T, F>): Promise<DynamicPicked<T, F> | null> {
+  const prompt = createPrompt<DynamicPicked<T, F> | null, DynamicPickerConfig<T, F>>((cfg, done) => {
+    const theme = makeTheme({});
+    const [status, setStatus] = useState<'idle' | 'done'>('idle');
+    const [filter, setFilter] = useState<F>(() => cfg.initialFilter);
+    const [items, setItems] = useState<T[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [query, setQuery] = useState('');
+    const [mode, setMode] = useState<'nav' | 'search'>('nav');
+    const [previewOpen, setPreviewOpen] = useState(false);
+    const [active, setActive] = useState(0);
+    const [flash, setFlash] = useState('');
+    const prefix = usePrefix({ status, theme });
+    // Guards against a slow load resolving after a newer filter superseded it.
+    const gen = useRef(0);
+
+    useEffect(() => {
+      const my = ++gen.current;
+      setLoading(true);
+      Promise.resolve(cfg.load(filter))
+        .then((rows) => {
+          if (my !== gen.current) return;
+          setItems(rows);
+          setLoading(false);
+          setActive(0);
+        })
+        .catch(() => {
+          if (my !== gen.current) return;
+          setItems([]);
+          setLoading(false);
+        });
+    }, [filter]);
+
+    const results = useMemo(() => {
+      const q = query.trim();
+      const pool = q && cfg.matches ? items.filter((it) => cfg.matches!(it, q)) : items;
+      return pool.slice(0, 200).map<Choice<T>>((item) => ({
+        value: item,
+        label: cfg.labelFor(item, q),
+      }));
+    }, [items, query]);
+
+    useEffect(() => {
+      if (active >= results.length) setActive(0);
+    }, [results]);
+
+    const selected = results[active];
+
+    const finish = (): void => {
+      if (!selected) return;
+      setStatus('done');
+      done({ item: selected.value, filter });
+    };
+
+    useKeypress((key, rl) => {
+      if (isEnterKey(key)) {
+        finish();
+        return;
+      }
+
+      // Search mode: let readline accumulate the typed text and mirror it into
+      // the query (backspace/edits handled by readline). Arrows still navigate.
+      if (mode === 'search') {
+        if (key.name === 'escape') {
+          rl.clearLine(0);
+          setQuery('');
+          setMode('nav');
+          return;
+        }
+        if (isUpKey(key)) {
+          if (results.length > 0) setActive((active - 1 + results.length) % results.length);
+          return;
+        }
+        if (isDownKey(key)) {
+          if (results.length > 0) setActive((active + 1) % results.length);
+          return;
+        }
+        setQuery(rl.line);
+        return;
+      }
+
+      // Nav mode: single keys are hotkeys — clear the readline buffer so a hotkey
+      // letter (r/b/c/…) never accumulates as stray input.
+      rl.clearLine(0);
+      if (key.name === 'escape') {
+        done(null);
+        return;
+      }
+      if (isUpKey(key)) {
+        if (results.length > 0) setActive((active - 1 + results.length) % results.length);
+        return;
+      }
+      if (isDownKey(key)) {
+        if (results.length > 0) setActive((active + 1) % results.length);
+        return;
+      }
+      if (flash) setFlash('');
+      if (key.name === (cfg.searchKey ?? 's')) {
+        setMode('search');
+        return;
+      }
+      if (cfg.buildPreview && key.name === (cfg.previewKey ?? 'tab')) {
+        setPreviewOpen(!previewOpen);
+        return;
+      }
+      const binding = cfg.keyBindings?.[key.name ?? ''];
+      if (binding) {
+        const next = binding(filter);
+        if (!Object.is(next, filter)) setFilter(next);
+        return;
+      }
+      if (cfg.onKey) {
+        const msg = cfg.onKey(key.name ?? '', filter, selected?.value);
+        if (msg) setFlash(msg);
+      }
+    });
+
+    const message = theme.style.message(cfg.message, status);
+
+    if (status === 'done') {
+      return `${prefix} ${message}`;
+    }
+
+    const headerBits = [prefix, message];
+    if (cfg.headerFor) headerBits.push(chalk.gray(cfg.headerFor(filter)));
+    if (mode === 'search') {
+      headerBits.push(query ? chalk.cyan('/' + query) : chalk.gray('/ (type to filter)'));
+    } else if (query) {
+      headerBits.push(chalk.cyan('/' + query));
+    }
+    const header = headerBits.filter(Boolean).join(' ');
+
+    const page = usePagination({
+      items: results as any,
+      active,
+      renderItem({ item, isActive }: { item: Choice<T>; isActive: boolean }) {
+        if (Separator.isSeparator(item)) return ` ${(item as any).separator}`;
+        const cursor = isActive ? chalk.cyan('>') : ' ';
+        const row = isActive ? chalk.bold(item.label) : item.label;
+        return `${cursor} ${row}`;
+      },
+      pageSize: cfg.pageSize ?? 12,
+      loop: false,
+    });
+
+    const help = chalk.gray(
+      cfg.helpFor
+        ? cfg.helpFor(filter, mode)
+        : mode === 'search'
+          ? '↑↓ navigate · esc exit search · ⏎ ' + (cfg.enterHint ?? 'select')
+          : 's search · ↑↓ navigate · ⏎ ' + (cfg.enterHint ?? 'select') + ' · esc cancel',
+    );
+
+    const parts: string[] = [header];
+    if (loading) {
+      parts.push(chalk.gray(`  ${cfg.loadingMessage ?? 'Loading…'}`));
+    } else {
+      parts.push(page);
+      if (results.length === 0) {
+        parts.push(chalk.gray(`  ${cfg.emptyMessage ?? 'No matches.'}`));
+      }
+    }
+
+    if (previewOpen && selected && cfg.buildPreview && !loading) {
+      const width = terminalWidth();
+      const separator = chalk.gray('─'.repeat(Math.min(width, 80)));
+      const flashRows = flash ? renderedRows(flash, width) : 0;
+      const fixedRows =
+        renderedRows(header, width) +
+        renderedRows(parts.slice(1).join('\n'), width) +
+        renderedRows(separator, width) +
+        renderedRows(help, width) +
+        flashRows;
+      const availablePreviewRows = terminalRows() - fixedRows;
+      const preview = limitPreviewHeight(cfg.buildPreview(selected.value), availablePreviewRows, width);
+      if (preview) {
+        parts.push(separator);
+        parts.push(preview);
+      }
+    }
+
+    if (flash) parts.push(chalk.green(flash));
     parts.push(help);
 
     return [header, parts.slice(1).join('\n')];
