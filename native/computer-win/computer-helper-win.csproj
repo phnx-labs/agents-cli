@@ -38,4 +38,11 @@
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
 
+  <!-- Tests live next to source; project file is under tests/ (isolated obj/bin). -->
+  <ItemGroup>
+    <Compile Remove="LaunchTarget.Tests.cs" />
+    <None Include="LaunchTarget.Tests.cs" />
+    <None Include="tests\**" />
+  </ItemGroup>
+
 </Project>
