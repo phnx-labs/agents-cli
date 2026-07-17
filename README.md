@@ -236,6 +236,22 @@ agents sessions --active            # every live run across the fleet, with stat
 agents sessions focus a1b2c3d4      # jump back into one — attach in place, or resume
 ```
 
+On a terminal, `agents sessions --active` (and a bare `agents sessions`) open the **interactive session browser** — one filter you drive with single keys, re-pulled live across the fleet:
+
+| key | filters by | flag it mirrors |
+|---|---|---|
+| `s` | search text | `--query` / positional |
+| `r` | running only | `--active` |
+| `c` | team sessions | `--teams` |
+| `a` | agent (cycles) | `-a` |
+| `d` | device (cycles) | `--device` |
+| `p` | this repo ↔ all dirs | `--all` |
+| `w` | time window | `--since` |
+| `⏎` | resume / attach | `resume` / `focus` |
+| `y` | copy the equivalent command | `--print-cmd` |
+
+Filters **stack** (they AND together), the active set shows in the header, and the highlighted row previews below. Because every hotkey has a flag, the view you build by hand is a real command: press `y` (or run `--print-cmd`) to get the exact `ag sessions …` line — explore interactively, hand the line to an agent. Piped output, `--json`, or `--no-interactive` keep the plain listing for scripts. Peek without opening the pager with `agents sessions <id> --preview`.
+
 Each live session resolves to `working`, `waiting_input` (with why -- a question, a plan review, or a permission prompt), or `idle`, alongside badges for the PR it opened, the worktree it sits in, and the ticket it's working. `agents sessions focus [id]` attaches the live pane in place -- the tmux split locally or over SSH, or its Ghostty tab -- and falls back to a fresh tab + resume when the terminal is gone.
 
 Landing on a session cold? `agents sessions <id>` prints a catch-up digest: an inferred title, files changed grouped by directory (created / modified / deleted), a histogram of which tools did the work, and the last test verdict -- the signals to reload a task in seconds.
