@@ -982,6 +982,26 @@ async function pickTeamOr(
   }
 }
 
+/**
+ * `teams add --remote-cwd` is a no-op trap. `--remote-cwd` comes from the shared
+ * `--host` option family (option.ts) and is meaningful for commands that *route*
+ * to a host, but `teams add` special-cases `--host`/`--device` as PLACEMENT, so
+ * the flag is never read — a teammate's directory is the team's repo plus its
+ * `--worktree`, not a path passed here. Silently ignoring it misleads you into
+ * thinking it set the teammate's repo path (the exact wrong model that turns one
+ * team into a teardown-and-rebuild). Reject with guidance instead. Exported for
+ * the unit test that pins the message.
+ */
+export function remoteCwdOnAddError(team: string): string {
+  return (
+    `--remote-cwd has no effect on 'teams add' — it does not set a teammate's repo or directory.\n` +
+    `  A teammate works in the team's repo plus its own --worktree:\n` +
+    `    • Set the repo once, on the team:  agents teams create ${team} --repo <url|path>\n` +
+    `    • Place the teammate on a machine: agents teams add ${team} <agent> "<task>" --device <host> --worktree <name>\n` +
+    `  (Remote worktrees fork from the host's freshly-fetched origin/<default> automatically.)`
+  );
+}
+
 /** Register the `agents teams` command tree (list, create, add, status, start, remove, disband, logs, doctor). */
 export function registerTeamsCommands(program: Command): void {
   const teams = program
@@ -1026,6 +1046,20 @@ export function registerTeamsCommands(program: Command): void {
         'claude@2.1.112'   a specific installed version (see 'agents view')
         '<profile>'        a profile from 'agents view' — runs through 'agents
                            run <profile>' with the profile's host harness
+
+      Placement & repos (the part people get wrong):
+        --remote-cwd does NOT place a teammate or set its repo — it is ignored on
+        'teams add' (and rejected, so you find out immediately). A teammate's
+        directory is the team's repo plus its --worktree:
+          --device <host>     run THIS teammate on <host>
+          create --repo <r>   ONE repo for the whole team (defaults to this
+                              checkout's origin). Work spanning repos → one team
+                              per repo — don't build a cross-repo team then rebuild.
+        With --enable-worktrees each teammate gets its own worktree + branch:
+          local teammate      forks from your CURRENT local HEAD — no fetch, so
+                              pull/sync the checkout first or it forks stale
+          remote (--device)   forks from the freshly-fetched origin/<default> on
+                              the host (no manual sync needed)
 
       Short aliases:
         teams c  = create    teams a  = add       teams s  = status
@@ -1167,7 +1201,7 @@ export function registerTeamsCommands(program: Command): void {
     .option('--use-worktree <path>', 'All teammates share this existing worktree path (mutually exclusive with --enable-worktrees)')
     .option('--devices <list>', 'Pool of machines this team may run teammates on (comma-separated). Enables distributed auto-scheduling.')
     .option('--hosts <list>', 'Alias for --devices.')
-    .option('--repo <urlOrPath>', 'How each device gets the code (git URL to clone, or a path). Defaults to the local checkout origin.')
+    .option('--repo <urlOrPath>', 'How each remote (--device) teammate gets the code — ONE git URL/path for the whole team (existing checkout reused, else cloned). A team is single-repo; for work across repos, make one team per repo. Defaults to this checkout origin.')
     .option('--json', 'Output machine-readable JSON')
     .action(async (team: string, opts: { description?: string; enableWorktrees?: boolean; useWorktree?: string; devices?: string; hosts?: string; repo?: string; json?: boolean }) => {
       try {
@@ -1268,7 +1302,14 @@ export function registerTeamsCommands(program: Command): void {
       name?: string; mode: string; effort: string; model?: string; env: string[];
       cwd?: string; worktree?: string; after?: string; json?: boolean;
       taskType?: string; cloud?: string; host?: string; device?: string; repo?: string; branch?: string; force?: boolean;
+      remoteCwd?: string;
     }) => {
+      // `--remote-cwd` rides the shared --host option family but is never read by
+      // `teams add` (placement, not routing). Fail loud with guidance rather than
+      // silently ignoring it — see remoteCwdOnAddError.
+      if (opts.remoteCwd) {
+        die(remoteCwdOnAddError(team));
+      }
       if (!(VALID_MODES as readonly string[]).includes(opts.mode)) {
         die(`Invalid mode '${opts.mode}'. Use one of: ${VALID_MODES.join(', ')}`);
       }

@@ -94,6 +94,37 @@ agents teams add feat claude "..." --name w2 --device yosemite-s0    # or pin
 - `status` / `logs` show each teammate's host. **POSIX hosts only** in v1 (Windows
   hosts are rejected with a clear message).
 
+## Placement & Repos (read before a distributed or worktree team)
+
+The trap that turns one team into a teardown-and-rebuild — get these right up front:
+
+1. **`--remote-cwd` does NOT place a teammate or set its repo.** It rides the shared
+   `--host` flag family but `teams add` ignores it (and now **rejects** it with
+   guidance). Place a teammate with `--device <host>`; the code comes from the
+   team's `--repo`. There is **no per-teammate repo/path override** — don't reach
+   for `--remote-cwd` to send one teammate to a different repo.
+
+2. **One team = one repo.** A team's `--repo` is a single clone source shared by all
+   its remote teammates; local teammates work in the checkout you run `add` from.
+   Tasks spanning two repos → **one team per repo**, not a cross-repo team:
+
+   ```bash
+   agents teams create wave-cli  --repo ~/src/.../agents-cli --enable-worktrees
+   agents teams create wave-mono --repo ~/src/.../monorepo   --enable-worktrees
+   agents teams add  wave-cli claude "…" --name mcp --device yosemite-s0 --worktree mcp
+   ```
+
+3. **Worktree fork point differs by placement — and it bites.**
+   - **local** teammate → forks from your **current local `HEAD`, with no fetch**.
+     Fast-forward the checkout first (`git fetch && git merge --ff-only origin/<default>`)
+     or every teammate forks off stale code.
+   - **remote** (`--device`) teammate → forks from the host's **freshly-fetched
+     `origin/<default>`** automatically — no manual sync needed.
+
+4. **For a raw `--host` run (not teams), `--remote-cwd` resolves on the host.** Pass a
+   single-quoted `'$HOME/…'` path (an unquoted `~` expands *locally* — `/Users/you`
+   won't exist on a Linux worker) or a valid remote absolute path.
+
 ## Modes
 
 | Mode | Use When |

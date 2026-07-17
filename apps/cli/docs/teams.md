@@ -88,8 +88,36 @@ PENDING ──deps resolved──▶ spawned ──▶ RUNNING ──exit 0─�
 | `--enable-worktrees` | Each teammate works in its own git worktree |
 | `--use-worktree <path>` | All teammates share this existing worktree path |
 | `--devices <a,b,c>` | Distributed teams: pool of machines the team may run teammates on (alias `--hosts`). See [Distributed teams](#distributed-teams). |
-| `--repo <url\|path>` | How each device gets the code (git URL to clone, or a path). Defaults to the local checkout's `origin`. |
+| `--repo <url\|path>` | How each **remote** (`--device`) teammate gets the code — one git URL/path for the whole team. Defaults to the local checkout's `origin`. **A team is single-repo:** for work spanning repos, make one team per repo. See [Placement & repos](#placement-and-repos). |
 | `--json` | Machine-readable JSON |
+
+### Placement and repos
+
+*The part people get wrong* — the trap that turns one team into a teardown-and-rebuild.
+
+**`--remote-cwd` does NOT place a teammate or set its repo.** It rides the shared
+`--host` option family but is ignored on `teams add` (now **rejected** with
+guidance, so you find out at once instead of after building a whole team on the
+wrong model). A teammate's directory is the team's repo plus its `--worktree` —
+there is no per-teammate repo/path override. Place with `--device <host>`; set
+the code with the team's `--repo`.
+
+**A team's `--repo` is one clone source** shared by all its remote teammates
+(local teammates work in the checkout you run `add` from). If your tasks span two
+repos (e.g. `agents-cli` + a monorepo), create **one team per repo** rather than
+one team you tear down and rebuild:
+
+```bash
+agents teams create wave-cli  --repo ~/src/.../agents-cli --enable-worktrees
+agents teams create wave-mono --repo ~/src/.../monorepo   --enable-worktrees
+agents teams add  wave-cli claude "…" --name mcp --device yosemite-s0 --worktree mcp
+```
+
+For a **raw `--host` run** (not teams), `--remote-cwd` resolves on the host and is
+used verbatim: pass a single-quoted `'$HOME/…'` path (an unquoted `~` expands
+*locally* — `/Users/you` won't exist on a Linux worker) or a valid remote absolute
+path. `--cwd` is the friendlier option — it re-roots a local-home path onto the
+remote home for you.
 
 ### `teams add` options
 
@@ -230,6 +258,16 @@ Each teammate gets its own checkout of the branch. Worktrees are cleaned up on
 `teams stop` or `teams disband` unless uncommitted changes are present, in
 which case the worktree is kept and reported.
 
+**What the worktree forks from** differs by placement, and the difference bites:
+
+| Teammate | Base of the new worktree branch |
+|---|---|
+| **local** (no `--device`) | your **current local `HEAD`** — no fetch is run first (`createWorktree`). Sync the checkout (`git fetch && git merge --ff-only origin/<default>`) **before** `add`, or every teammate forks off stale code. |
+| **remote** (`--device host`) | the host's **freshly-fetched `origin/<default>`** (`createRemoteWorktree` fetches first) — no manual sync needed. |
+
+So the pre-flight for a **local** worktree team is: fast-forward your checkout to
+the default branch first. A remote team handles this itself.
+
 ## Distributed teams
 
 Teammates can run on **different machines** across your fleet, not just the box
@@ -272,6 +310,12 @@ agents teams start feat --watch
 checkout is reused, otherwise it is cloned into `~/.agents/repos/<team>`. With
 `--enable-worktrees`, each remote teammate also gets its own worktree on the host,
 branched off the freshly-fetched default branch, and cleaned up on stop/disband.
+
+`--repo` is **one** clone source for the whole team — see
+[Placement & repos](#placement-and-repos). Tasks spanning two repos need two teams
+(e.g. `wave-cli --repo …/agents-cli` and `wave-mono --repo …/monorepo`), each
+teammate placed with its own `--device`. Don't try to point individual teammates
+at different repos with `--remote-cwd` — that flag has no effect on `teams add`.
 
 `teams status` and `teams logs` show which host each teammate is on and stream its
 output back (the local log mirror is capped so a large fleet can't blow up the

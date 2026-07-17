@@ -20,7 +20,7 @@ export function addHostOption(cmd: Command): Command {
       'Run this command on another machine over SSH instead of locally — a device, a registered host, or user@host. See `agents devices` / `agents hosts`.',
     )
     .option('--device <name>', 'Alias of --host: run this command on a registered device (from `agents devices`).')
-    .option('--remote-cwd <dir>', 'Working directory on the host for --host runs.')
+    .option('--remote-cwd <dir>', "Working directory on the host for --host runs. Resolves on the REMOTE host — pass a '$HOME'-relative path (single-quoted so your local shell doesn't expand it) or a valid remote absolute path; a local ~ expands here and won't exist there (/Users/you vs /home/you). No effect on 'teams add'.")
     .option('--no-tty', 'Force non-interactive output for --host runs even from a terminal.')
     .option('--any', 'With --host <cap> (a capability tag), pick any matching host instead of erroring when several match.');
 }

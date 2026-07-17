@@ -468,7 +468,7 @@ export function registerRunCommand(program: Command): void {
       '--device <name>',
       'Alias of --host: offload this run onto a registered device (from `agents devices`).',
     )
-    .option('--remote-cwd <dir>', 'Explicit host working directory for --host runs (overrides --cwd; usually --cwd suffices).')
+    .option('--remote-cwd <dir>', "Explicit host working directory for --host runs, used VERBATIM (overrides --cwd; usually --cwd suffices — it re-roots a local-home path onto the remote home). Pass a single-quoted '$HOME/…' or a valid remote absolute path; a local ~ expands here and won't exist there (/Users/you vs /home/you).")
     .option('--no-follow', 'With --host, dispatch detached and return immediately (track via `agents hosts ps/logs`).')
     .option('--any', 'With --host <cap> (a capability tag), pick any matching host instead of erroring when several match.')
     .option(
