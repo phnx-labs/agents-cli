@@ -119,6 +119,29 @@ export function resolveMode(agent: AgentId, requested: Mode): Mode {
 }
 
 /**
+ * Resolve a requested mode for a run, honoring whether the run is HEADLESS.
+ *
+ * Wraps resolveMode with one extra rule: an agent may list `plan` in its modes
+ * (so interactive plan works) yet declare `capabilities.headlessPlan === false`
+ * because plan is broken in a headless `--prompt`/`-p` run — kimi refuses
+ * `--prompt` + `--plan`, and grok's `--permission-mode plan` silently stalls at
+ * its ExitPlanMode gate. For those agents, a headless plan request degrades to
+ * `auto` (kimi -p auto-runs; grok maps auto→edit via resolveMode) with a visible
+ * one-line stderr warning, mirroring the graceful plan→edit degrade cursor and
+ * antigravity get for having no plan flag at all. Interactive runs are never
+ * downgraded. This is the single source of truth shared by buildExecCommand
+ * (agents run / teams) and the routine runner.
+ */
+export function resolveHeadlessMode(agent: AgentId, requested: Mode, interactive: boolean): Mode {
+  const mode = resolveMode(agent, requested);
+  if (!interactive && mode === 'plan' && AGENTS[agent].capabilities.headlessPlan === false) {
+    process.stderr.write(`warning: ${agent} has no headless plan mode; running --mode auto instead\n`);
+    return resolveMode(agent, 'auto');
+  }
+  return mode;
+}
+
+/**
  * The mode an agent should run in when the caller has no preference.
  *
  * Returns the first entry in the agent's `capabilities.modes` table — the
@@ -701,9 +724,11 @@ export function buildExecCommand(options: ExecOptions): string[] {
   // Resolve the requested mode against the agent's capability table.
   // - `auto` on an agent without auto support → silently degrades to `edit`
   // - `plan` on an agent without a read-only mode → degrades to modes[0]
+  // - headless `plan` on an agent with headlessPlan:false (kimi, grok) →
+  //   degrades to `auto` with a stderr warning (see resolveHeadlessMode)
   // - `skip` on an unsupported agent → throws a clear error
-  // After resolveMode, the chosen mode is guaranteed to be in template.modeFlags.
-  const resolvedMode = resolveMode(options.agent, normalizeMode(options.mode));
+  // After resolution, the chosen mode is guaranteed to be in template.modeFlags.
+  const resolvedMode = resolveHeadlessMode(options.agent, normalizeMode(options.mode), interactive);
   const modeFlags = template.modeFlags[resolvedMode];
   if (!modeFlags) {
     // Defense in depth: would only fire if AGENTS.capabilities.modes and
@@ -736,12 +761,13 @@ export function buildExecCommand(options: ExecOptions): string[] {
     // all abort with "Cannot combine --prompt with --X" (verified against the live
     // kimi CLI). The write-capable modes (edit/auto/skip) all collapse to kimi's
     // default `-p` behavior, which already auto-approves tool calls, so we emit no
-    // mode flag. Plan (read-only) has no headless equivalent, so fail closed rather
-    // than silently letting a plan-mode run mutate the workspace.
+    // mode flag. Plan can't reach here headless — resolveHeadlessMode already
+    // downgraded it to auto (kimi's headlessPlan:false); this asserts that
+    // invariant so a plan-mode run can never silently mutate the workspace.
     if (resolvedMode === 'plan') {
       throw new Error(
-        'kimi has no headless read-only mode: `--prompt` cannot be combined with `--plan`. ' +
-          'Run kimi in plan mode interactively (omit the prompt), or use --mode edit, auto, or skip.',
+        `Internal error: kimi reached headless command build with resolved mode 'plan'; ` +
+          `resolveHeadlessMode should have downgraded it to auto (capabilities.headlessPlan is false).`,
       );
     }
     // edit/auto/skip: emit no mode flag — `kimi -p` auto-runs.

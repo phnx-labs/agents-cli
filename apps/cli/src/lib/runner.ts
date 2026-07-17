@@ -34,6 +34,7 @@ import { resolveModel, buildReasoningFlags } from './models.js';
 import { createTimer, maybeRotate, redactPrompt } from './events.js';
 import {
   normalizeMode,
+  resolveHeadlessMode,
   buildExecEnv,
   detectRateLimit,
   type ExecOptions,
@@ -164,14 +165,11 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string): stri
     // kimi daemon jobs always run headless via `--prompt`, which cannot be
     // combined with any startup-mode flag (--plan/--auto/--yolo all abort with
     // "Cannot combine --prompt with --X"). edit/auto/skip reduce to kimi's default
-    // headless auto-run, so emit no flag; plan has no headless read-only
-    // equivalent, so fail closed rather than silently allowing writes.
-    if (mode === 'plan') {
-      throw new Error(
-        'kimi has no headless read-only mode: routine jobs cannot run kimi with --mode plan ' +
-          '(kimi rejects --prompt + --plan). Use --mode edit, auto, or skip.',
-      );
-    }
+    // headless auto-run, so emit no flag. plan has no headless read-only
+    // equivalent, so resolveHeadlessMode downgrades a plan request to auto with a
+    // stderr warning (kimi's headlessPlan is false) — routines run headless, so
+    // interactive is always false here. The returned mode carries no flag either.
+    resolveHeadlessMode('kimi', mode, false);
 
     appendModelAndReasoning(cmd, config);
   }
