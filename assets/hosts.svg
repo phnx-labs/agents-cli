@@ -1,9 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 920" role="img" aria-label="agents hosts dispatches agents run and config commands to another machine over plain SSH with no daemon: enroll a host, run there, it executes on the remote box and follows live. Your Tailscale fleet is auto-discovered; credentials stream over encrypted SSH stdin and land 0600.">
   <defs>
     <radialGradient id="gTeal" cx="10%" cy="0%" r="70%"><stop offset="0%" stop-color="#5ad6c0" stop-opacity="0.13"/><stop offset="60%" stop-color="#5ad6c0" stop-opacity="0"/></radialGradient>
-    <radialGradient id="gLime" cx="92%" cy="-6%" r="70%"><stop offset="0%" stop-color="#a3e635" stop-opacity="0.11"/><stop offset="60%" stop-color="#a3e635" stop-opacity="0"/></radialGradient>
+    <radialGradient id="gLime" cx="92%" cy="-6%" r="70%"><stop offset="0%" stop-color="#B6E84A" stop-opacity="0.11"/><stop offset="60%" stop-color="#B6E84A" stop-opacity="0"/></radialGradient>
     <pattern id="grid" width="46" height="46" patternUnits="userSpaceOnUse"><path d="M 46 0 L 0 0 0 46" fill="none" stroke="#6b8dff" stroke-opacity="0.06" stroke-width="1"/></pattern>
-    <linearGradient id="title" x1="0" y1="0" x2="1" y2="0.4"><stop offset="0%" stop-color="#7ff0dd"/><stop offset="55%" stop-color="#5ad6c0"/><stop offset="100%" stop-color="#a3e635"/></linearGradient>
+    <linearGradient id="title" x1="0" y1="0" x2="1" y2="0.4"><stop offset="0%" stop-color="#7ff0dd"/><stop offset="55%" stop-color="#5ad6c0"/><stop offset="100%" stop-color="#B6E84A"/></linearGradient>
     <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ffffff" stop-opacity="0.05"/><stop offset="100%" stop-color="#ffffff" stop-opacity="0.015"/></linearGradient>
     <linearGradient id="term" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0c1016"/><stop offset="100%" stop-color="#070a0e"/></linearGradient>
     <filter id="soft" x="-20%" y="-20%" width="140%" height="150%"><feGaussianBlur stdDeviation="18" result="b"/><feOffset dy="14" result="o"/><feColorMatrix in="o" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.5 0" result="s"/><feMerge><feMergeNode in="s"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
@@ -18,12 +18,12 @@
       .m{font:500 21px ui-monospace,"SF Mono",Menlo,monospace;fill:#eaf2ff;}
       .mm{font:500 18px ui-monospace,"SF Mono",Menlo,monospace;fill:#7a80a8;}
       .mt{font:600 21px ui-monospace,"SF Mono",Menlo,monospace;fill:#5ad6c0;}
-      .ml{font:600 21px ui-monospace,"SF Mono",Menlo,monospace;fill:#a3e635;}
+      .ml{font:600 21px ui-monospace,"SF Mono",Menlo,monospace;fill:#B6E84A;}
       .pg{font:700 24px ui-monospace,"SF Mono",Menlo,monospace;fill:#eaf2ff;}
       .edge{font:600 13px ui-monospace,"SF Mono",Menlo,monospace;letter-spacing:.06em;}
       .chip{font:600 15px ui-monospace,"SF Mono",Menlo,monospace;fill:#c7cbe6;}
       .note{font:400 19px Inter,-apple-system,system-ui,sans-serif;fill:#7a80a8;}
-      .noteA{font:600 19px Inter,-apple-system,system-ui,sans-serif;fill:#a3e635;}
+      .noteA{font:600 19px Inter,-apple-system,system-ui,sans-serif;fill:#B6E84A;}
     ]]></style>
   </defs>
 
@@ -32,14 +32,14 @@
   <rect width="1600" height="920" fill="url(#gTeal)"/>
   <rect width="1600" height="920" fill="url(#gLime)"/>
 
-  <text x="100" y="98" class="kick">AGENTS HOSTS<tspan fill="#a3e635"> · DISPATCH OVER SSH, NO DAEMON</tspan></text>
+  <text x="100" y="98" class="kick">AGENTS HOSTS<tspan fill="#B6E84A"> · DISPATCH OVER SSH, NO DAEMON</tspan></text>
   <text x="98" y="162" class="h1" fill="#5ad6c0" opacity="0.34" filter="url(#halo)">Run on any machine you own.</text>
   <text x="98" y="162" class="h1" fill="url(#title)">Run on any machine you own.</text>
   <text x="100" y="204" class="sub">Dispatch <tspan class="mm" font-size="20">agents run</tspan> and config commands to another host over plain SSH — no daemon, no agent process.</text>
 
   <!-- ===== local terminal ===== -->
   <g filter="url(#soft)"><rect x="90" y="280" width="560" height="330" rx="20" fill="url(#term)" stroke="#5ad6c0" stroke-opacity="0.3" stroke-width="1.5"/></g>
-  <circle cx="122" cy="314" r="6" fill="#fb7185"/><circle cx="144" cy="314" r="6" fill="#f5c451"/><circle cx="166" cy="314" r="6" fill="#a3e635"/>
+  <circle cx="122" cy="314" r="6" fill="#fb7185"/><circle cx="144" cy="314" r="6" fill="#f5c451"/><circle cx="166" cy="314" r="6" fill="#B6E84A"/>
   <text x="622" y="320" class="lab" text-anchor="end">this machine</text>
   <line x1="118" y1="336" x2="622" y2="336" stroke="#1a2230" stroke-width="1"/>
   <text x="122" y="386" class="m"><tspan fill="#5ad6c0">$</tspan> agents hosts add <tspan class="mt">gpu-box</tspan></text>
@@ -49,7 +49,7 @@
   <text x="122" y="576" class="mm" font-size="16">no daemon · headless follows live</text>
 
   <!-- SSH arrow -->
-  <line x1="666" y1="440" x2="762" y2="440" stroke="#5ad6c0" stroke-width="3" marker-end="url(#arT)" filter="url(#neon)"/>
+  <line x1="666" y1="440" x2="762" y2="440" stroke="#5ad6c0" stroke-width="3" marker-end="url(#arT)"/>
   <text x="714" y="426" class="edge" fill="#5ad6c0" text-anchor="middle">SSH</text>
   <text x="714" y="464" class="mm" font-size="13" text-anchor="middle">creds 0600</text>
 
@@ -57,12 +57,12 @@
   <g filter="url(#soft)"><rect x="778" y="280" width="732" height="330" rx="20" fill="url(#glass)" stroke="#5ad6c0" stroke-opacity="0.5" stroke-width="1.6"/></g>
   <!-- server glyph -->
   <g>
-    <rect x="820" y="322" width="150" height="40" rx="8" fill="#12161f" stroke="#2a3346"/><circle cx="842" cy="342" r="5" fill="#a3e635"/><rect x="900" y="338" width="50" height="6" rx="3" fill="#5ad6c0" fill-opacity="0.5"/>
+    <rect x="820" y="322" width="150" height="40" rx="8" fill="#12161f" stroke="#2a3346"/><circle cx="842" cy="342" r="5" fill="#B6E84A"/><rect x="900" y="338" width="50" height="6" rx="3" fill="#5ad6c0" fill-opacity="0.5"/>
     <rect x="820" y="372" width="150" height="40" rx="8" fill="#12161f" stroke="#2a3346"/><circle cx="842" cy="392" r="5" fill="#5ad6c0"/><rect x="900" y="388" width="50" height="6" rx="3" fill="#5ad6c0" fill-opacity="0.5"/>
-    <rect x="820" y="422" width="150" height="40" rx="8" fill="#12161f" stroke="#2a3346"/><circle cx="842" cy="442" r="5" fill="#a3e635"/><rect x="900" y="438" width="50" height="6" rx="3" fill="#5ad6c0" fill-opacity="0.5"/>
+    <rect x="820" y="422" width="150" height="40" rx="8" fill="#12161f" stroke="#2a3346"/><circle cx="842" cy="442" r="5" fill="#B6E84A"/><rect x="900" y="438" width="50" height="6" rx="3" fill="#5ad6c0" fill-opacity="0.5"/>
   </g>
   <text x="1006" y="344" class="pg">gpu-box</text>
-  <circle cx="1018" cy="384" r="7" fill="#a3e635" filter="url(#neon)"/>
+  <circle cx="1018" cy="384" r="7" fill="#B6E84A" filter="url(#neon)"/>
   <text x="1036" y="391" class="mt" font-size="19">running · claude</text>
   <text x="1006" y="438" class="mm">the run executes here, streams back</text>
   <rect x="1006" y="462" width="300" height="34" rx="9" fill="#5ad6c0" fill-opacity="0.1" stroke="#5ad6c0" stroke-opacity="0.3"/>
@@ -71,9 +71,9 @@
   <!-- fleet chips -->
   <text x="100" y="674" class="lab">TAILSCALE FLEET · auto-discovered</text>
   <g>
-    <rect x="100" y="694" width="220" height="46" rx="14" fill="url(#glass)" stroke="#2a3346"/><circle cx="126" cy="717" r="6" fill="#a3e635"/><text x="146" y="723" class="chip">yosemite-s0</text>
-    <rect x="340" y="694" width="200" height="46" rx="14" fill="url(#glass)" stroke="#2a3346"/><circle cx="366" cy="717" r="6" fill="#a3e635"/><text x="386" y="723" class="chip">mac-mini</text>
-    <rect x="560" y="694" width="180" height="46" rx="14" fill="#5ad6c0" fill-opacity="0.08" stroke="#5ad6c0" stroke-opacity="0.4"/><circle cx="586" cy="717" r="6" fill="#a3e635" filter="url(#neon)"/><text x="606" y="723" class="chip" fill="#5ad6c0">gpu-box</text>
+    <rect x="100" y="694" width="220" height="46" rx="14" fill="url(#glass)" stroke="#2a3346"/><circle cx="126" cy="717" r="6" fill="#B6E84A"/><text x="146" y="723" class="chip">yosemite-s0</text>
+    <rect x="340" y="694" width="200" height="46" rx="14" fill="url(#glass)" stroke="#2a3346"/><circle cx="366" cy="717" r="6" fill="#B6E84A"/><text x="386" y="723" class="chip">mac-mini</text>
+    <rect x="560" y="694" width="180" height="46" rx="14" fill="#5ad6c0" fill-opacity="0.08" stroke="#5ad6c0" stroke-opacity="0.4"/><circle cx="586" cy="717" r="6" fill="#B6E84A" filter="url(#neon)"/><text x="606" y="723" class="chip" fill="#5ad6c0">gpu-box</text>
     <text x="770" y="723" class="mm" font-size="16">agents devices sync  ·  agents doctor --devices</text>
   </g>
 

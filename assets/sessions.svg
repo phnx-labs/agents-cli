@@ -1,9 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 920" role="img" aria-label="agents sessions searches every agent's transcripts at once — Claude, Codex, Gemini, OpenCode — from one query, backed by a SQLite+FTS5 index; --active shows every live run and what it is doing right now (working, waiting for input, or idle) with the PR and worktree it owns.">
   <defs>
     <radialGradient id="gAmber" cx="10%" cy="0%" r="70%"><stop offset="0%" stop-color="#f5c451" stop-opacity="0.12"/><stop offset="60%" stop-color="#f5c451" stop-opacity="0"/></radialGradient>
-    <radialGradient id="gLime" cx="92%" cy="-6%" r="70%"><stop offset="0%" stop-color="#a3e635" stop-opacity="0.10"/><stop offset="60%" stop-color="#a3e635" stop-opacity="0"/></radialGradient>
+    <radialGradient id="gLime" cx="92%" cy="-6%" r="70%"><stop offset="0%" stop-color="#B6E84A" stop-opacity="0.10"/><stop offset="60%" stop-color="#B6E84A" stop-opacity="0"/></radialGradient>
     <pattern id="grid" width="46" height="46" patternUnits="userSpaceOnUse"><path d="M 46 0 L 0 0 0 46" fill="none" stroke="#6b8dff" stroke-opacity="0.06" stroke-width="1"/></pattern>
-    <linearGradient id="title" x1="0" y1="0" x2="1" y2="0.4"><stop offset="0%" stop-color="#f7d47a"/><stop offset="52%" stop-color="#f5c451"/><stop offset="100%" stop-color="#a3e635"/></linearGradient>
+    <linearGradient id="title" x1="0" y1="0" x2="1" y2="0.4"><stop offset="0%" stop-color="#f7d47a"/><stop offset="52%" stop-color="#f5c451"/><stop offset="100%" stop-color="#B6E84A"/></linearGradient>
     <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ffffff" stop-opacity="0.05"/><stop offset="100%" stop-color="#ffffff" stop-opacity="0.015"/></linearGradient>
     <linearGradient id="term" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0c1016"/><stop offset="100%" stop-color="#070a0e"/></linearGradient>
     <filter id="soft" x="-20%" y="-20%" width="140%" height="150%"><feGaussianBlur stdDeviation="18" result="b"/><feOffset dy="14" result="o"/><feColorMatrix in="o" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.5 0" result="s"/><feMerge><feMergeNode in="s"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
@@ -30,7 +30,7 @@
   <rect width="1600" height="920" fill="url(#gAmber)"/>
   <rect width="1600" height="920" fill="url(#gLime)"/>
 
-  <text x="100" y="98" class="kick">AGENTS SESSIONS<tspan fill="#a3e635"> · SEARCH + LIVE STATE, EVERY AGENT</tspan></text>
+  <text x="100" y="98" class="kick">AGENTS SESSIONS<tspan fill="#B6E84A"> · SEARCH + LIVE STATE, EVERY AGENT</tspan></text>
   <text x="98" y="162" class="h1" fill="#f5c451" opacity="0.34" filter="url(#halo)">Every conversation. Every agent. One search.</text>
   <text x="98" y="162" class="h1" fill="url(#title)">Every conversation. Every agent. One search.</text>
   <text x="100" y="204" class="sub">Claude, Codex, Gemini, OpenCode — searched together; live runs shown by what they're doing now.</text>
@@ -44,7 +44,7 @@
 
   <!-- result rows -->
   <g>
-    <rect x="122" y="392" width="86" height="32" rx="8" fill="#a3e635" fill-opacity="0.14" stroke="#a3e635" stroke-opacity="0.4"/><text x="165" y="414" class="chip" fill="#a3e635" text-anchor="middle">claude</text>
+    <rect x="122" y="392" width="86" height="32" rx="8" fill="#B6E84A" fill-opacity="0.14" stroke="#B6E84A" stroke-opacity="0.4"/><text x="165" y="414" class="chip" fill="#B6E84A" text-anchor="middle">claude</text>
     <text x="226" y="414" class="snip">…rotate the auth-middleware token before…</text>
     <text x="878" y="414" class="mm" text-anchor="end">2d</text>
   </g>
@@ -69,16 +69,16 @@
   <text x="122" y="668" class="mm">SQLite + FTS5 · warm reads ~100ms · --json / --markdown</text>
 
   <!-- ===== LIVE (right) ===== -->
-  <g filter="url(#soft)"><rect x="930" y="272" width="580" height="430" rx="20" fill="url(#term)" stroke="#a3e635" stroke-opacity="0.5" stroke-width="1.6"/></g>
-  <circle cx="962" cy="310" r="6" fill="#a3e635" filter="url(#neon)"/>
-  <text x="984" y="316" class="lab" fill="#a3e635">LIVE · agents sessions --active</text>
+  <g filter="url(#soft)"><rect x="930" y="272" width="580" height="430" rx="20" fill="url(#term)" stroke="#B6E84A" stroke-opacity="0.5" stroke-width="1.6"/></g>
+  <circle cx="962" cy="310" r="6" fill="#B6E84A" filter="url(#neon)"/>
+  <text x="984" y="316" class="lab" fill="#B6E84A">LIVE · agents sessions --active</text>
   <line x1="962" y1="336" x2="1478" y2="336" stroke="#1e2717" stroke-width="1"/>
 
   <!-- working -->
-  <circle cx="972" cy="392" r="8" fill="#a3e635" filter="url(#neon)"/>
+  <circle cx="972" cy="392" r="8" fill="#B6E84A" filter="url(#neon)"/>
   <text x="996" y="398" class="st">refactor-auth</text>
-  <text x="996" y="424" class="sm" fill="#a3e635">working · editing auth.ts</text>
-  <rect x="1330" y="378" width="148" height="30" rx="8" fill="#a3e635" fill-opacity="0.12" stroke="#a3e635" stroke-opacity="0.3"/><text x="1404" y="398" class="sm" fill="#a3e635" text-anchor="middle">PR #1249</text>
+  <text x="996" y="424" class="sm" fill="#B6E84A">working · editing auth.ts</text>
+  <rect x="1330" y="378" width="148" height="30" rx="8" fill="#B6E84A" fill-opacity="0.12" stroke="#B6E84A" stroke-opacity="0.3"/><text x="1404" y="398" class="sm" fill="#B6E84A" text-anchor="middle">PR #1249</text>
   <line x1="962" y1="456" x2="1478" y2="456" stroke="#161b26" stroke-width="1"/>
   <!-- waiting -->
   <circle cx="972" cy="504" r="8" fill="#f5c451"/>

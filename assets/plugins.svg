@@ -20,7 +20,7 @@
       .mm{font:500 18px ui-monospace,"SF Mono",Menlo,monospace;fill:#7a80a8;}
       .mv{font:600 21px ui-monospace,"SF Mono",Menlo,monospace;fill:#a78bfa;}
       .vh{font:700 20px ui-monospace,"SF Mono",Menlo,monospace;fill:#eaf2ff;}
-      .ok{font:600 16px ui-monospace,"SF Mono",Menlo,monospace;fill:#a3e635;}
+      .ok{font:600 16px ui-monospace,"SF Mono",Menlo,monospace;fill:#B6E84A;}
       .edge{font:600 13px ui-monospace,"SF Mono",Menlo,monospace;letter-spacing:.06em;fill:#a78bfa;}
       .note{font:400 19px Inter,-apple-system,system-ui,sans-serif;fill:#7a80a8;}
       .noteA{font:600 19px Inter,-apple-system,system-ui,sans-serif;fill:#a78bfa;}

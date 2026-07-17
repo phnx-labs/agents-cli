@@ -18,7 +18,7 @@
       .m{font:500 21px ui-monospace,"SF Mono",Menlo,monospace;fill:#eaf2ff;}
       .mm{font:500 18px ui-monospace,"SF Mono",Menlo,monospace;fill:#7a80a8;}
       .mp{font:600 21px ui-monospace,"SF Mono",Menlo,monospace;fill:#fb7185;}
-      .out{font:500 21px ui-monospace,"SF Mono",Menlo,monospace;fill:#a3e635;}
+      .out{font:500 21px ui-monospace,"SF Mono",Menlo,monospace;fill:#B6E84A;}
       .edge{font:600 13px ui-monospace,"SF Mono",Menlo,monospace;letter-spacing:.06em;}
       .note{font:400 19px Inter,-apple-system,system-ui,sans-serif;fill:#7a80a8;}
       .noteA{font:600 19px Inter,-apple-system,system-ui,sans-serif;fill:#fb7185;}
@@ -37,7 +37,7 @@
 
   <!-- terminal window -->
   <g filter="url(#soft)"><rect x="90" y="280" width="1030" height="420" rx="20" fill="url(#term)" stroke="#fb7185" stroke-opacity="0.3" stroke-width="1.5"/></g>
-  <circle cx="122" cy="314" r="6" fill="#fb7185"/><circle cx="144" cy="314" r="6" fill="#f5c451"/><circle cx="166" cy="314" r="6" fill="#a3e635"/>
+  <circle cx="122" cy="314" r="6" fill="#fb7185"/><circle cx="144" cy="314" r="6" fill="#f5c451"/><circle cx="166" cy="314" r="6" fill="#B6E84A"/>
   <text x="1088" y="320" class="lab" text-anchor="end">agents pty · python3</text>
   <line x1="118" y1="336" x2="1092" y2="336" stroke="#1a2230" stroke-width="1"/>
   <text x="122" y="384" class="m"><tspan fill="#5ad6c0">$</tspan> SID=$(agents pty start)</text>
@@ -49,8 +49,8 @@
   <text x="122" y="654" class="mm" font-size="16">write · screen · stop — drive it programmatically</text>
 
   <!-- sidecar node -->
-  <line x1="1136" y1="450" x2="1224" y2="450" stroke="#fb7185" stroke-width="3" marker-end="url(#arP)" filter="url(#neon)"/>
-  <line x1="1224" y1="470" x2="1136" y2="470" stroke="#fb7185" stroke-width="3" marker-end="url(#arP)" filter="url(#neon)"/>
+  <line x1="1136" y1="450" x2="1224" y2="450" stroke="#fb7185" stroke-width="3" marker-end="url(#arP)"/>
+  <line x1="1224" y1="470" x2="1136" y2="470" stroke="#fb7185" stroke-width="3" marker-end="url(#arP)"/>
   <text x="1180" y="436" class="edge" fill="#fb7185" text-anchor="middle">PTY</text>
   <g filter="url(#soft)"><rect x="1240" y="330" width="270" height="240" rx="20" fill="url(#glass)" stroke="#fb7185" stroke-opacity="0.4" stroke-width="1.6"/></g>
   <text x="1375" y="392" class="lab" text-anchor="middle" fill="#fb7185">SIDECAR SERVER</text>
