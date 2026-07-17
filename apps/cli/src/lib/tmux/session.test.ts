@@ -84,6 +84,31 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
     expect(list[0].meta?.cmd).toBe('sleep 30');
   });
 
+  it('persists the redacted metaCmd to disk while executing the real cmd (RUSH-1758)', async () => {
+    // The real command carries a secret value; the persisted informational copy
+    // must not. Prove: (a) meta.cmd stored on disk is the redacted string,
+    // (b) the secret value never appears in the meta, (c) the REAL cmd still ran.
+    const secret = 'SECRET_VALUE_XYZ789';
+    const outFile = path.join(tempDir, 'ran.txt');
+    const meta = await createSession({
+      name: 'redact',
+      cmd: `sh -c 'printf ${secret} > ${outFile}; sleep 30'`,
+      metaCmd: 'exec env TOKEN=<redacted> claude',
+      socket,
+    });
+    expect(meta.cmd).toBe('exec env TOKEN=<redacted> claude');
+    expect(JSON.stringify(meta)).not.toContain(secret);
+
+    // Read back what actually hit disk (listSessions reads the persisted meta).
+    const list = await listSessions({ socket });
+    expect(list[0].meta?.cmd).toBe('exec env TOKEN=<redacted> claude');
+    expect(JSON.stringify(list[0].meta)).not.toContain(secret);
+
+    // The real cmd (with the secret) still executed in the live pane.
+    await wait(400);
+    expect(fs.readFileSync(outFile, 'utf8')).toContain(secret);
+  });
+
   it('captures live output from a running pane', async () => {
     await createSession({
       name: 'capture-test',

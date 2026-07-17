@@ -1041,11 +1041,22 @@ export function shouldWrapInTmux(ctx: TmuxWrapContext): boolean {
  *     `#{pane_pid}`, clean signal delivery on detach/kill).
  * Keys are filtered to valid identifiers so exported shell functions
  * (`BASH_FUNC_*%%`) can't make `env` choke.
+ *
+ * `redactEnvValues` replaces every value with a `<redacted>` marker while keeping
+ * the KEY names. The env map here carries resolved secrets bundles (options.env),
+ * so the real string would embed secret VALUES — which get persisted verbatim
+ * into SessionMeta.cmd on disk (tmux/session.ts). The launched command uses the
+ * real values; the stored/informational copy uses the redacted form (RUSH-1758).
  */
-export function buildTmuxAgentCommand(executable: string, args: string[], env: NodeJS.ProcessEnv): string {
+export function buildTmuxAgentCommand(
+  executable: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  opts: { redactEnvValues?: boolean } = {},
+): string {
   const envPrefix = Object.entries(env)
     .filter(([k, v]) => v !== undefined && EXEC_ENV_KEY_PATTERN.test(k))
-    .map(([k, v]) => `${k}=${shellQuote(String(v))}`)
+    .map(([k, v]) => `${k}=${opts.redactEnvValues ? '<redacted>' : shellQuote(String(v))}`)
     .join(' ');
   const agentCmd = [executable, ...args].map(shellQuote).join(' ');
   return `exec env ${envPrefix} ${agentCmd}`;
@@ -1095,12 +1106,17 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
   const cwd = options.cwd || process.cwd();
   const idSeed = (options.sessionId ?? randomUUID()).slice(0, 8);
   const name = slugifyName(`ag-${options.agent}-${idSeed}`);
-  const cmd = buildTmuxAgentCommand(executable, args, buildExecEnv(options));
+  const execEnv = buildExecEnv(options);
+  // Launch with the real env (secret VALUES materialized into the pane); persist
+  // only a value-redacted copy in SessionMeta.cmd so resolved secrets never hit
+  // disk via the informational cmd field (RUSH-1758).
+  const cmd = buildTmuxAgentCommand(executable, args, execEnv);
+  const metaCmd = buildTmuxAgentCommand(executable, args, execEnv, { redactEnvValues: true });
 
   const labels: Record<string, string> = { agent: options.agent };
   if (options.sessionId) labels.sessionId = options.sessionId;
 
-  const meta = await createSession({ name, cmd, cwd, socket, source: 'cli', labels });
+  const meta = await createSession({ name, cmd, metaCmd, cwd, socket, source: 'cli', labels });
   const pane = meta.pane;
 
   if (pane) {
