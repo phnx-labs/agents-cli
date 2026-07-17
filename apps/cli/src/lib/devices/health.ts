@@ -2,9 +2,10 @@
  * Device resource probing for `agents devices list`.
  *
  * One SSH round-trip per device gathers load average, memory pressure, and core
- * count (mac + linux), parsed into a {@link DeviceStats}. Probes run in parallel
- * with a bounded timeout so the list stays responsive — a slow or hung box
- * degrades to "no stats" instead of blocking the whole table.
+ * count (mac + linux via a POSIX snippet, windows via a CIM one-liner), parsed
+ * into a {@link DeviceStats}. Probes run in parallel with a bounded timeout so
+ * the list stays responsive — a slow or hung box degrades to "no stats" instead
+ * of blocking the whole table.
  *
  * The parsers are pure and unit-tested (health.test.ts). They mirror the ones in
  * the Factory extension (apps/factory/src/core/deviceHealth.ts) — kept as a
@@ -19,17 +20,31 @@ import { buildSshInvocation, writeAskpassShim } from './connect.js';
  * wedged box, long enough for a cold relayed SSH handshake. */
 export const PROBE_TIMEOUT_MS = 2_500;
 
+/** Windows probe budget. The first CIM query of a PowerShell session pays a
+ * "Preparing modules for first use" cost on top of PowerShell startup, which
+ * routinely blows the 2.5s POSIX budget on a relayed connection. */
+export const WIN_PROBE_TIMEOUT_MS = 6_000;
+
 const SEP = '---AGSTAT---';
 /** One-shot remote snapshot: load, then memory (mac vm_stat else linux
  * meminfo), then core count (linux nproc else mac hw.ncpu). */
 const PROBE_SNIPPET = `uptime; echo ${SEP}; (vm_stat 2>/dev/null || cat /proc/meminfo 2>/dev/null); echo ${SEP}; (nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null)`;
+
+/** Windows equivalent, one labeled line via CIM. PowerShell 5.1-safe: no `||`
+ * chaining, plain string concatenation. `LoadPercentage` is $null on some
+ * hosts/VMs, which concatenates to an empty field — the parser treats that as
+ * "no load signal" and headroom falls back to memory pressure alone.
+ * wrapRemoteCommand base64-encodes this for powershell-shell devices, so the
+ * quoting survives ssh intact. */
+const WIN_PROBE_SNIPPET = `$os = Get-CimInstance Win32_OperatingSystem; $cpu = (Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average; Write-Output ('AGWINSTAT load=' + $cpu + ' freeKb=' + $os.FreePhysicalMemory + ' totalKb=' + $os.TotalVisibleMemorySize + ' ncpu=' + $env:NUMBER_OF_PROCESSORS)`;
 
 export interface DeviceStats {
   host: string;
   reachable: boolean;
   loadAvg1?: number;
   ncpu?: number;
-  /** loadAvg1 / ncpu * 100 — load normalized to core count (the "has room" number). */
+  /** Load normalized to core count (the "has room" number): loadAvg1 / ncpu *
+   * 100 on mac/linux, CPU utilization % directly on windows (no loadAvg1). */
   loadPercent?: number;
   memPercent?: number;
   memTotalBytes?: number;
@@ -131,6 +146,28 @@ export function parseProbeOutput(host: string, stdout: string, fetchedAt: number
   };
 }
 
+/** Assemble a DeviceStats from the windows one-liner. A missing marker line
+ * (e.g. CIM unavailable) keeps `reachable: true` — ssh answered — with no
+ * numbers, mirroring how garbage POSIX output degrades. */
+export function parseWinProbeOutput(host: string, stdout: string, fetchedAt: number): DeviceStats {
+  const m = stdout.match(/AGWINSTAT load=([0-9.]*) freeKb=([0-9]+) totalKb=([0-9]+) ncpu=([0-9]+)/);
+  if (!m) return { host, reachable: true, fetchedAt };
+  const loadPercent = m[1] === '' ? undefined : parseFloat(m[1]);
+  const freeKb = parseInt(m[2], 10);
+  const totalKb = parseInt(m[3], 10);
+  const ncpu = parseInt(m[4], 10);
+  return {
+    host,
+    reachable: true,
+    ncpu: Number.isFinite(ncpu) && ncpu > 0 ? ncpu : undefined,
+    loadPercent: loadPercent !== undefined && Number.isFinite(loadPercent) ? loadPercent : undefined,
+    memPercent: totalKb > 0 ? Math.max(0, Math.min(100, ((totalKb - freeKb) / totalKb) * 100)) : undefined,
+    memTotalBytes: totalKb > 0 ? totalKb * 1024 : undefined,
+    memFreeBytes: totalKb > 0 ? freeKb * 1024 : undefined,
+    fetchedAt,
+  };
+}
+
 export interface FleetCapacity {
   reachable: number;
   cores: number;
@@ -175,6 +212,7 @@ export function probeDeviceStats(
 ): Promise<DeviceStats> {
   const host = device.name;
   const fetchedAt = opts.now ?? Date.now();
+  const isWin = device.shell === 'powershell';
   let args: string[];
   let env: Record<string, string>;
   try {
@@ -182,7 +220,8 @@ export function probeDeviceStats(
     // buildSshInvocation joins the cmd with spaces and hands the string to the
     // remote login shell, which evaluates the snippet's `;`/`||` directly — no
     // `sh -c` wrapper needed (and a wrapper would only re-quote the first token).
-    ({ args, env } = buildSshInvocation(device, [PROBE_SNIPPET], shim));
+    // For powershell devices it base64-encodes the snippet instead.
+    ({ args, env } = buildSshInvocation(device, [isWin ? WIN_PROBE_SNIPPET : PROBE_SNIPPET], shim));
   } catch {
     return Promise.resolve({ host, reachable: false, fetchedAt });
   }
@@ -190,10 +229,14 @@ export function probeDeviceStats(
     execFile(
       'ssh',
       args,
-      { encoding: 'utf-8', env: { ...process.env, ...env }, timeout: opts.timeoutMs ?? PROBE_TIMEOUT_MS },
+      {
+        encoding: 'utf-8',
+        env: { ...process.env, ...env },
+        timeout: opts.timeoutMs ?? (isWin ? WIN_PROBE_TIMEOUT_MS : PROBE_TIMEOUT_MS),
+      },
       (err, stdout) => {
         if (err || !stdout) return resolve({ host, reachable: false, fetchedAt });
-        resolve(parseProbeOutput(host, stdout, fetchedAt));
+        resolve(isWin ? parseWinProbeOutput(host, stdout, fetchedAt) : parseProbeOutput(host, stdout, fetchedAt));
       },
     );
   });
@@ -207,14 +250,15 @@ export function probeLocalStats(
   opts: { timeoutMs?: number; now?: number } = {},
 ): Promise<DeviceStats> {
   const fetchedAt = opts.now ?? Date.now();
+  const isWin = process.platform === 'win32';
   return new Promise<DeviceStats>((resolve) => {
     execFile(
-      'sh',
-      ['-c', PROBE_SNIPPET],
-      { encoding: 'utf-8', timeout: opts.timeoutMs ?? PROBE_TIMEOUT_MS },
+      isWin ? 'powershell' : 'sh',
+      isWin ? ['-NoProfile', '-Command', WIN_PROBE_SNIPPET] : ['-c', PROBE_SNIPPET],
+      { encoding: 'utf-8', timeout: opts.timeoutMs ?? (isWin ? WIN_PROBE_TIMEOUT_MS : PROBE_TIMEOUT_MS) },
       (err, stdout) => {
         if (err || !stdout) return resolve({ host, reachable: false, fetchedAt });
-        resolve(parseProbeOutput(host, stdout, fetchedAt));
+        resolve(isWin ? parseWinProbeOutput(host, stdout, fetchedAt) : parseProbeOutput(host, stdout, fetchedAt));
       },
     );
   });

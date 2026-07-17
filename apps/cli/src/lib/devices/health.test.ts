@@ -5,6 +5,7 @@ import {
   parseLinuxMemInfo,
   parseNcpu,
   parseProbeOutput,
+  parseWinProbeOutput,
   headroom,
   fmtBytes,
   fleetCapacity,
@@ -105,6 +106,38 @@ describe('parseProbeOutput', () => {
   it('leaves loadPercent undefined when ncpu is unknown', () => {
     const stdout = ['load average: 2.0, 1, 1', '---AGSTAT---', 'MemTotal: 100 kB\nMemAvailable: 50 kB', '---AGSTAT---', 'oops'].join('\n');
     expect(parseProbeOutput('box', stdout, 0).loadPercent).toBeUndefined();
+  });
+});
+
+describe('parseWinProbeOutput', () => {
+  it('reads cpu%, memory, and core count from the labeled line', () => {
+    const s = parseWinProbeOutput('uranus', 'AGWINSTAT load=12.5 freeKb=44447908 totalKb=66875660 ncpu=32\n', 111);
+    expect(s.loadPercent).toBe(12.5);
+    expect(s.ncpu).toBe(32);
+    expect(Math.round(s.memPercent!)).toBe(34); // (66875660 - 44447908) / 66875660
+    expect(s.memTotalBytes).toBe(66875660 * 1024);
+    expect(s.memFreeBytes).toBe(44447908 * 1024);
+    expect(s.loadAvg1).toBeUndefined();
+    expect(s.reachable).toBe(true);
+    expect(s.fetchedAt).toBe(111);
+  });
+  it('tolerates a $null LoadPercentage (empty load field) — mem still counts', () => {
+    const s = parseWinProbeOutput('uranus', 'AGWINSTAT load= freeKb=1000 totalKb=2000 ncpu=8\n', 0);
+    expect(s.loadPercent).toBeUndefined();
+    expect(s.memPercent).toBe(50);
+    expect(s.ncpu).toBe(8);
+  });
+  it('parses the marker line even with progress noise around it', () => {
+    const s = parseWinProbeOutput('uranus', 'Preparing modules for first use.\nAGWINSTAT load=3 freeKb=100 totalKb=400 ncpu=4\n', 0);
+    expect(s.loadPercent).toBe(3);
+    expect(Math.round(s.memPercent!)).toBe(75);
+  });
+  it('degrades to reachable-with-no-stats when the marker line is missing', () => {
+    const s = parseWinProbeOutput('uranus', 'garbage output', 0);
+    expect(s.reachable).toBe(true);
+    expect(s.loadPercent).toBeUndefined();
+    expect(s.memPercent).toBeUndefined();
+    expect(s.ncpu).toBeUndefined();
   });
 });
 
