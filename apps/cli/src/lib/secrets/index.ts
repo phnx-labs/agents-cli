@@ -932,7 +932,7 @@ function parseBatchRecords(out: string, record: (service: string, value: string)
  * a `ps` snapshot. Exported so a test can assert the value is absent from argv.
  */
 export function buildAddGenericPasswordArgs(account: string, item: string): string[] {
-  return ['add-generic-password', '-U', '-a', account, '-s', item];
+  return ['add-generic-password', '-U', '-a', account, '-s', item, '-w'];
 }
 
 export function setKeychainToken(item: string, value: string, opts?: { noAcl?: boolean }): void {
@@ -956,17 +956,19 @@ export function setKeychainToken(item: string, value: string, opts?: { noAcl?: b
   // sheet. -U upserts so repeated sets overwrite in place.
   if (!isOurItem(item)) {
     // The secret VALUE must never appear in argv — a `ps` snapshot on a shared
-    // host would leak it (RUSH-1764). `security add-generic-password` reads the
-    // password from stdin when `-w` is omitted (readpassphrase(3) falls back to
-    // fd 0 when it has no controlling terminal), so we pipe the value instead of
-    // passing it on the command line. The item stays ACL-free (no biometry gate),
-    // so the no-prompt /usr/bin/security read path in getKeychainToken still
-    // works. Values are newline-free on darwin (assertValueStorable above), so
-    // one stdin line carries the whole secret. `timeout` bounds the call so a
-    // context that unexpectedly wants a TTY prompt fails loudly instead of
-    // hanging — never a silent fall-through that would re-expose the value.
+    // host would leak it (RUSH-1764). `security add-generic-password` has no
+    // stdin-password flag; instead a BARE `-w` as the LAST option makes it prompt
+    // ("password data for new item:" / "retype...") and read the secret from fd 0
+    // via readpassphrase(3) -- so the value travels over stdin, never on the
+    // command line. The prompt asks twice (enter + confirm), so we pipe the value
+    // TWICE; a single line fails the confirm and would store an empty secret. The
+    // item stays ACL-free (no biometry gate), so the no-prompt /usr/bin/security
+    // read path in getKeychainToken still works. Values are newline-free on darwin
+    // (assertValueStorable above), so each line carries the whole secret verbatim
+    // (no shell/quoting layer). `timeout` bounds the call so a context that cannot
+    // read the prompt fails loudly instead of hanging.
     const sec = spawnSync('/usr/bin/security', buildAddGenericPasswordArgs(os.userInfo().username, item), {
-      input: `${value}\n`,
+      input: `${value}\n${value}\n`,
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: 10_000,
     });

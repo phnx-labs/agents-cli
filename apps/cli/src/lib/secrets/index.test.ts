@@ -37,9 +37,11 @@ describe('buildAddGenericPasswordArgs (RUSH-1764: value never in argv)', () => {
     // The whole point: the value must not appear anywhere in the command line.
     expect(args.some((a) => a.includes(secret))).toBe(false);
     expect(args).not.toContain(secret);
-    // Still the right item write: upsert (-U), account (-a), service (-s), no -w.
-    expect(args).toEqual(['add-generic-password', '-U', '-a', 'alice', '-s', 'linear-api-key']);
-    expect(args).not.toContain('-w');
+    // Still the right item write: upsert (-U), account (-a), service (-s), and a
+    // BARE `-w` last so security prompts and reads the value from stdin -- the flag
+    // carries no value, so the secret is still absent from argv.
+    expect(args).toEqual(['add-generic-password', '-U', '-a', 'alice', '-s', 'linear-api-key', '-w']);
+    expect(args[args.length - 1]).toBe('-w');
   });
 });
 
