@@ -1035,15 +1035,14 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
       (options.host?.length ?? 0) <= 1 &&
       process.env.AGENTS_SESSIONS_LOCAL !== '1'
     ) {
-      const { runSessionBrowser } = await import('./sessions-browser.js');
+      const { runSessionBrowser, activeBrowserSeed } = await import('./sessions-browser.js');
       await runSessionBrowser(
-        {
-          running: true,
-          teams: !!options.teams,
+        activeBrowserSeed({
+          teams: options.teams,
           agent: options.agent,
-          device: options.host?.[0],
-          window: options.since ?? '30d',
-        },
+          host: options.host,
+          since: options.since,
+        }),
         { local: options.local === true, hosts: options.host },
       );
       return;
@@ -1080,14 +1079,14 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
     !options.artifacts &&
     options.artifact === undefined
   ) {
-    const { runSessionBrowser } = await import('./sessions-browser.js');
+    const { runSessionBrowser, bareBrowserSeed } = await import('./sessions-browser.js');
     await runSessionBrowser(
-      {
-        teams: !!options.teams,
+      bareBrowserSeed({
+        teams: options.teams,
         agent: options.agent,
-        projectScope: options.all ? 'all' : 'repo',
-        window: options.since ?? '30d',
-      },
+        all: options.all,
+        since: options.since,
+      }),
       { local: options.local === true, hosts: options.host },
     );
     return;

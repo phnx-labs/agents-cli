@@ -4,6 +4,9 @@ import {
   cycle,
   cycleWindow,
   sessionMatchesQuery,
+  normalizeDeviceSeed,
+  activeBrowserSeed,
+  bareBrowserSeed,
   type BrowserFilter,
 } from './sessions-browser.js';
 import type { SessionMeta } from '../lib/session/types.js';
@@ -105,6 +108,50 @@ describe('cycleWindow — W hotkey', () => {
     expect(cycleWindow('1d')).toBe('7d');
     expect(cycleWindow('7d')).toBe('30d');
     expect(cycleWindow('30d')).toBeUndefined();
+  });
+});
+
+describe('activeBrowserSeed — the --active call-site filter (fleet-wide)', () => {
+  it('is fleet-wide (projectScope all), not repo-scoped', () => {
+    // The static --active is fleet-wide; the interactive one must match, else
+    // `sessions --active` silently narrows to the current directory.
+    expect(activeBrowserSeed({}).projectScope).toBe('all');
+  });
+
+  it('is running-only and defaults the window to 30d', () => {
+    const f = activeBrowserSeed({});
+    expect(f.running).toBe(true);
+    expect(f.window).toBe('30d');
+  });
+
+  it('seeds the window from --since', () => {
+    expect(activeBrowserSeed({ since: '2h' }).window).toBe('2h');
+  });
+
+  it('normalizes a user@host / FQDN device seed to the canonical machine id', () => {
+    expect(activeBrowserSeed({ host: ['muqsit@mac-mini.local'] }).device).toBe('mac-mini');
+    expect(activeBrowserSeed({ host: ['YOSEMITE-S1'] }).device).toBe('yosemite-s1');
+    expect(activeBrowserSeed({}).device).toBeUndefined();
+  });
+});
+
+describe('bareBrowserSeed — the bare-listing call-site filter', () => {
+  it('defaults to this-repo scope, widens to all dirs with --all', () => {
+    expect(bareBrowserSeed({}).projectScope).toBe('repo');
+    expect(bareBrowserSeed({ all: true }).projectScope).toBe('all');
+  });
+
+  it('is not running-only and seeds the window from --since', () => {
+    expect(bareBrowserSeed({}).running).toBeUndefined();
+    expect(bareBrowserSeed({ since: '7d' }).window).toBe('7d');
+  });
+});
+
+describe('normalizeDeviceSeed — canonical .machine form', () => {
+  it('strips user@ and domain, lowercases', () => {
+    expect(normalizeDeviceSeed('user@Zion.local')).toBe('zion');
+    expect(normalizeDeviceSeed('mac-mini')).toBe('mac-mini');
+    expect(normalizeDeviceSeed(undefined)).toBeUndefined();
   });
 });
 

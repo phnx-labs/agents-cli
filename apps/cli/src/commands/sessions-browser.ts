@@ -17,7 +17,7 @@ import type { SessionMeta } from '../lib/session/types.js';
 import { getActiveSessions, type ActiveSession } from '../lib/session/active.js';
 import { discoverSessions } from '../lib/session/discover.js';
 import { gatherRemoteList } from '../lib/session/remote-list.js';
-import { machineId } from '../lib/session/sync/config.js';
+import { machineId, normalizeHost } from '../lib/session/sync/config.js';
 import { buildPreview } from './sessions-picker.js';
 import {
   formatPickerLabel,
@@ -110,6 +110,55 @@ export function browserFilterToArgv(f: BrowserFilter, query = ''): string[] {
   const q = query.trim();
   if (q) a.push(JSON.stringify(q));
   return a;
+}
+
+/** Normalize a `--host`/`--device` token (`alias`, `user@host`, `host.domain`) to
+ * the canonical machine id the rows carry in `.machine`, so a flag seed matches
+ * (the `d` hotkey already cycles canonical ids). Mirrors sessions.ts `hostToken`. */
+export function normalizeDeviceSeed(host: string | undefined): string | undefined {
+  if (!host) return undefined;
+  return normalizeHost(host.split('@').pop() || host);
+}
+
+/**
+ * The initial filter for the `--active` browser: fleet-wide (matches the static
+ * `renderActiveSessions`, which has no project scoping — the `p` hotkey narrows to
+ * this repo), running-only, with the device seed normalized and `--since` seeding
+ * the window. Pure, so the routing call site is unit-testable.
+ */
+export function activeBrowserSeed(opts: {
+  teams?: boolean;
+  agent?: string;
+  host?: string[];
+  since?: string;
+}): Partial<BrowserFilter> {
+  return {
+    running: true,
+    teams: !!opts.teams,
+    agent: opts.agent,
+    projectScope: 'all',
+    device: normalizeDeviceSeed(opts.host?.[0]),
+    window: opts.since ?? '30d',
+  };
+}
+
+/**
+ * The initial filter for the bare interactive listing: current-repo subtree by
+ * default (matches the static overview's cwd scoping), `--all` widens to every
+ * directory, `--since` seeds the window.
+ */
+export function bareBrowserSeed(opts: {
+  teams?: boolean;
+  agent?: string;
+  all?: boolean;
+  since?: string;
+}): Partial<BrowserFilter> {
+  return {
+    teams: !!opts.teams,
+    agent: opts.agent,
+    projectScope: opts.all ? 'all' : 'repo',
+    window: opts.since ?? '30d',
+  };
 }
 
 /** Copy text to the OS clipboard (best-effort; silently no-ops if unavailable). */
