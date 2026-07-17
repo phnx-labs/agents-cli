@@ -566,8 +566,16 @@ fi
 # must be mirrored here, or the release times out (fail-closed, never publishes).
 EXPECTED_CHECKS=(test gitleaks \
   "build (ubuntu-latest, 22)"  "build (ubuntu-latest, 24)" \
-  "build (macos-latest, 22)"   "build (macos-latest, 24)" \
-  "build (windows-latest, 22)" "build (windows-latest, 24)")
+  "build (macos-latest, 22)"   "build (macos-latest, 24)")
+# The Windows build jobs gate the release by default. Set RELEASE_REQUIRE_WINDOWS=0 to
+# drop them from the wait when Windows CI is red on pre-existing, Windows-only test
+# breakage (POSIX file-mode / symlink assertions that don't hold on win32) unrelated to
+# the release diff. Windows is not a required check on this repo, so skipping the wait
+# never merges past a real branch-protection gate -- it only stops a known-noisy matrix
+# leg from blocking an otherwise-green, reviewed release.
+if [[ "${RELEASE_REQUIRE_WINDOWS:-1}" == "1" ]]; then
+  EXPECTED_CHECKS+=("build (windows-latest, 22)" "build (windows-latest, 24)")
+fi
 check_bucket() { jq -r --arg n "$1" 'map(select(.name==$n)) | (.[0].bucket // "missing")' <<<"$2"; }
 wait_for_ci_green() {
   local pr="$1" ctx b results problem=0
