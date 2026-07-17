@@ -571,6 +571,10 @@ Plugins live in the user repo (`~/.agents/plugins/`), not inside any single vers
 
 ## Browser
 
+<p align="center">
+  <img src="assets/browser.svg" alt="agents browser drives your real, already-installed Chrome over CDP — the CLI issues start / refs / click / type / screenshot; the browser exposes numbered element refs and returns a token-efficient screenshot. Same fingerprint, same IP, so sites can't detect automation — it works where Playwright gets blocked." width="100%" />
+</p>
+
 Give agents access to a real browser — no relay extension, no cloud service, no Playwright getting blocked.
 
 ```bash
