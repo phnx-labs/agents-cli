@@ -15,6 +15,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { createHash, timingSafeEqual } from 'crypto';
 import { spawnSync } from 'child_process';
 import { compareVersions } from './versions.js';
 import { needsWindowsShell } from './platform/index.js';
@@ -186,7 +187,67 @@ export async function installPackageWithBun(spec: string): Promise<void> {
   const { promisify } = await import('util');
   const execFileAsync = promisify(execFile);
   // On Windows `bun` resolves to `bun.exe`/`bun.cmd`; force shell for the .cmd case.
-  await execFileAsync('bun', ['add', '-g', spec], { shell: needsWindowsShell('bun') });
+  // --ignore-scripts: the tarball has already been integrity-verified, but its
+  // lifecycle scripts must not run at install time (the caller refreshes shims
+  // explicitly via refreshAliasShims()) — same fail-closed posture as the npm path.
+  await execFileAsync('bun', ['add', '-g', spec, '--ignore-scripts'], { shell: needsWindowsShell('bun') });
+}
+
+/**
+ * Verify a downloaded tarball's bytes against a Subresource Integrity (SRI)
+ * string of the form `sha512-<base64>` — npm's `dist.integrity`. Recomputes the
+ * digest over the actual bytes with the named algorithm and compares it, in
+ * constant time, to the decoded expected digest.
+ *
+ * Fails closed: a malformed SRI, an algorithm weaker than sha512, or any digest
+ * mismatch throws. This is the gate that makes self-update refuse a tampered or
+ * corrupted tarball *before* it is ever handed to a package manager to install.
+ */
+export function verifyTarballIntegrity(tarball: Buffer, integrity: string): void {
+  const dash = integrity.indexOf('-');
+  if (dash <= 0) {
+    throw new Error(`malformed integrity string: ${JSON.stringify(integrity)}`);
+  }
+  const algorithm = integrity.slice(0, dash);
+  const expectedBase64 = integrity.slice(dash + 1);
+  // npm publishes sha512 SRI; refuse to verify against anything weaker rather
+  // than silently accepting a downgraded (e.g. sha1) attestation.
+  if (algorithm !== 'sha512') {
+    throw new Error(`unsupported integrity algorithm '${algorithm}' (expected sha512)`);
+  }
+  const expected = Buffer.from(expectedBase64, 'base64');
+  const actual = createHash('sha512').update(tarball).digest();
+  if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
+    throw new Error(
+      `integrity check failed: tarball hash sha512-${actual.toString('base64')} ` +
+        `does not match expected ${integrity}`,
+    );
+  }
+}
+
+/**
+ * Download the published tarball at `tarballUrl` and prove its bytes match
+ * `integrity` before returning a path to it on disk. The returned .tgz is safe
+ * to hand to `npm install`/`bun add` — it has been verified byte-for-byte
+ * against the registry attestation. Fails closed: a non-200, a download error,
+ * or a hash mismatch throws and no file path is returned, so the caller never
+ * installs an unverified artifact.
+ */
+export async function downloadVerifiedTarball(
+  tarballUrl: string,
+  integrity: string,
+  timeoutMs = 60_000,
+): Promise<string> {
+  const response = await fetch(tarballUrl, { signal: AbortSignal.timeout(timeoutMs) });
+  if (!response.ok) {
+    throw new Error(`could not download tarball from ${tarballUrl} (HTTP ${response.status})`);
+  }
+  const tarball = Buffer.from(await response.arrayBuffer());
+  verifyTarballIntegrity(tarball, integrity);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-upgrade-'));
+  const file = path.join(dir, path.basename(new URL(tarballUrl).pathname) || 'package.tgz');
+  fs.writeFileSync(file, tarball);
+  return file;
 }
 
 /** Read the version field of the package.json at `packageRoot`, fresh from disk. */

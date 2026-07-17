@@ -98,6 +98,7 @@ match the mac helper exactly.
 | `Automation.cs` | UI Automation tree walk, `SendInput` click/type/key/scroll/drag, window focus |
 | `Screenshot.cs` | pid-scoped `Graphics.CopyFromScreen` capture: window list / window / display (`window_id` = HWND) |
 | `Apps.cs` | Process/window enumeration; `launch_app` via PATH + App Paths registry |
+| `LaunchTarget.cs` | Pure path safety for `launch_app` — rejects UNC/remote, protocol/URL, `..` (RUSH-1763) |
 | `ElementCache.cs` | `@eN` element handle cache |
 | `smoke/smoke.mjs` | Smoke test (incl. Unicode-typing regression loops for #554/#581) |
 | `computer-helper-win.csproj` | .NET 10 project (`net10.0-windows`, WPF + WinForms) |
@@ -110,7 +111,9 @@ match the mac helper exactly.
   (`TypeSettleMs`). The smoke test guards this.
 - **`bundle_id` is the process image name** (`notepad`, `msedge`), not an
   Apple-style reverse-DNS id — Windows has no bundle IDs. `launch_app` resolves
-  targets via PATH + the App Paths registry.
+  short names via PATH + the App Paths registry. Explicit `path` must be a
+  local drive-rooted absolute path; UNC/remote shares, protocol/URL schemes
+  (`http:`, `ms-settings:`, …), and `..` segments are rejected (RUSH-1763).
 - **`notify` is pass-through only** — there is no Windows Toast call; the Rush
   computer-manager intercepts the return value (mirrors `Notify.swift`).
 - **`background=true` is rejected** (`action_unsupported`) on `click`/`drag`

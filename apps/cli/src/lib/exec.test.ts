@@ -381,4 +381,20 @@ describe('buildTmuxAgentCommand (env-preserving pane command)', () => {
     expect(cmd).toContain('SET=');
     expect(cmd).not.toContain('UNSET');
   });
+
+  it('redacts secret VALUES but keeps KEY names when redactEnvValues is set (RUSH-1758)', () => {
+    const cmd = buildTmuxAgentCommand(
+      'claude',
+      ['--permission-mode', 'plan'],
+      { ANTHROPIC_API_KEY: 'sk-ant-supersecret', PATH: '/usr/bin:/bin' },
+      { redactEnvValues: true },
+    );
+    // Key names + agent command survive for provenance…
+    expect(cmd).toContain('ANTHROPIC_API_KEY=<redacted>');
+    expect(cmd).toContain('PATH=<redacted>');
+    expect(cmd).toMatch(/ claude --permission-mode plan$/);
+    // …but no real value leaks into the (persisted) string.
+    expect(cmd).not.toContain('sk-ant-supersecret');
+    expect(cmd).not.toContain('/usr/bin:/bin');
+  });
 });

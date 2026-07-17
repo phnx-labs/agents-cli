@@ -91,13 +91,14 @@ describe('bundle format', () => {
     const out = path.join(SRC, 'out.bundle');
     B.writeBundleFile(out, wire);
     expect(fs.readFileSync(out, 'utf-8')).toBe(wire);
-    expect(fs.statSync(out).mode & 0o777).toBe(0o600);
+    // POSIX-only: Windows (NTFS) has no 0600 bit; Node reports 0o666 regardless.
+    if (process.platform !== 'win32') expect(fs.statSync(out).mode & 0o777).toBe(0o600);
 
     // Overwriting a pre-existing looser file still clamps to 0600.
     fs.writeFileSync(out, 'stale', { mode: 0o644 });
     fs.chmodSync(out, 0o644);
     B.writeBundleFile(out, wire);
-    expect(fs.statSync(out).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') expect(fs.statSync(out).mode & 0o777).toBe(0o600);
   });
 
   it('encrypted bundle round-trips: body is an envelope, planImport decrypts to the original', () => {

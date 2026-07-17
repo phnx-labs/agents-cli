@@ -40,8 +40,9 @@ fi
 [[ -n "$DOTNET" ]] || die "dotnet not found. Install the .NET 10 SDK: curl -fsSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 10.0"
 
 # native/ lives at the repo root (siblings of apps/), not under apps/cli.
-PROJECT="../../native/computer-win"
-OUT="$PROJECT/dist"
+# Pin the main daemon csproj — the directory also holds LaunchTarget.Tests.csproj.
+PROJECT="../../native/computer-win/computer-helper-win.csproj"
+OUT="../../native/computer-win/dist"
 
 bold "Build (win-x64)"; echo "  $("$DOTNET" --version) — $PROJECT"
 echo

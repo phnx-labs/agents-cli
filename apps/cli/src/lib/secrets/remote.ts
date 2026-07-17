@@ -22,8 +22,34 @@ import { emit } from '../events.js';
 import { sshTargetFor } from '../hosts/types.js';
 import { buildRemoteAgentsInvocation } from '../hosts/remote-cmd.js';
 import { resolveRemoteOsSync } from '../hosts/remote-os.js';
+import { isLoaderOrInterpreterEnv } from './bundles.js';
 
 const REMOTE_TIMEOUT_MS = 30_000;
+
+/**
+ * Trust boundary for a remote-resolved env map. A peer's `secrets export` output
+ * is untrusted input: a compromised or misconfigured host could return keys that
+ * silently reshape THIS process's behavior once merged into the agent env
+ * (bundles.ts:251 `sanitizeProcessEnv` only strips loader vars from process.env,
+ * never the remote bundle). Block the dangerous-override classes here — at the
+ * source — so every consumer (`run --secrets b@host`, `secrets exec --host`) is
+ * protected, not just one call site:
+ *   - LD_* / DYLD_* / NODE_OPTIONS and the other loader/interpreter injections
+ *     (reuses the canonical bundles.ts predicate);
+ *   - GIT_*        — GIT_SSH_COMMAND et al. hijack every git subprocess;
+ *   - *_PROXY      — HTTP(S)_PROXY / ALL_PROXY reroute outbound traffic (MITM);
+ *   - *_BASE_URL   — ANTHROPIC_BASE_URL / OPENAI_BASE_URL redirect the model API.
+ * These keys are already rejected on the ADD side (validateEnvKey for loaders),
+ * so a legitimate bundle never carries them — only a hostile peer would.
+ */
+export function isDangerousRemoteEnvKey(name: string): boolean {
+  const upper = name.toUpperCase();
+  if (isLoaderOrInterpreterEnv(upper)) return true;
+  if (upper.startsWith('GIT_')) return true;
+  if (upper.endsWith('_PROXY')) return true;
+  if (upper.endsWith('_BASE_URL')) return true;
+  return false;
+}
 
 /** Remote OS for a host name or target string. Prefer the original host name
  * because enrolled inline hosts resolve to `user@address`, while the OS
@@ -172,8 +198,21 @@ export async function remoteResolveEnv(
     throw new Error(`Unexpected payload resolving '${bundle}' on ${target}.`);
   }
   const env: Record<string, string> = {};
+  const blocked: string[] = [];
   for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+    // Drop dangerous-override keys returned by the (untrusted) peer before they
+    // can reshape this process — see isDangerousRemoteEnvKey.
+    if (isDangerousRemoteEnvKey(k)) {
+      blocked.push(k);
+      continue;
+    }
     env[k] = typeof v === 'string' ? v : String(v);
+  }
+  if (blocked.length > 0) {
+    process.stderr.write(
+      `[secrets] Dropped ${blocked.length} dangerous key(s) from '${bundle}'@${target} ` +
+        `(remote override blocked): ${blocked.join(', ')}\n`,
+    );
   }
   // The remote host audits its own `secrets export` read; this emit records the
   // event on the INITIATING host too (values were pulled into this process and

@@ -4,6 +4,14 @@
 
 ### Security
 
+- **`launch_app` on Windows rejects UNC/remote and protocol/URL targets (RUSH-1763).**
+  Explicit `path` values used to flow straight into `ProcessStartInfo` with
+  `UseShellExecute=true`, so a caller could launch `\\server\share\payload.exe`
+  or `http://…` / `ms-settings:…` handlers. `launch_app` now rejects UNC/remote
+  paths, protocol/URL schemes, and `..` path segments; explicit `path` must be
+  a local drive-rooted absolute path (`C:\…`). Short names (`notepad`, `msedge`)
+  still resolve via PATH / App Paths. Source: `native/computer-win/LaunchTarget.cs`,
+  `native/computer-win/Apps.cs`.
 - **The Windows `computer` daemon now requires authentication.** `computer-helper-win`
   previously started with `authed = expectedToken == null` and the CLI never provisioned a
   token, so it ran open on `127.0.0.1` — and loopback TCP on Windows is not user/session

@@ -43,7 +43,10 @@ jobs:
           dotnet-version: '10.0.x'
 
       - name: Build (native win-x64)
-        run: dotnet build -c Release
+        run: dotnet build computer-helper-win.csproj -c Release
+
+      - name: Unit tests (LaunchTarget path safety)
+        run: dotnet test tests/LaunchTarget.Tests.csproj -c Release
 
       - name: Smoke test (UIAutomation roundtrip + screenshot)
         shell: pwsh
@@ -78,7 +81,7 @@ jobs:
 
       # Exact flags scripts/build-win.sh uses, so CI smokes the shipped artifact.
       - name: Publish (self-contained single-file win-x64)
-        run: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o dist
+        run: dotnet publish computer-helper-win.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o dist
 
       - name: Smoke test published single-file exe (UIA roundtrip + screenshot)
         shell: pwsh
@@ -112,7 +115,7 @@ jobs:
 
       # Exact flags scripts/build-win.sh uses — this artifact IS the shipped one.
       - name: Publish (self-contained single-file win-x64)
-        run: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o dist
+        run: dotnet publish computer-helper-win.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o dist
 
       - name: Smoke test the exe being released (UIA roundtrip + screenshot)
         shell: pwsh
