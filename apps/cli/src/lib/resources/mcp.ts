@@ -16,6 +16,7 @@ import * as yaml from 'yaml';
 import * as TOML from 'smol-toml';
 import type { AgentId, Layer, ResolvedItem, ResourceHandler, ResourceKind } from './types.js';
 import { capableAgents } from '../capabilities.js';
+import { getProjectMcpConfigPath } from '../agents.js';
 import {
   getSystemMcpDir,
   getUserMcpDir,
@@ -506,6 +507,41 @@ function syncToOpenClawConfig(configPath: string, items: McpItem[]): void {
 }
 
 /**
+ * Dispatch MCP items to the agent-specific config writer.
+ */
+function syncToAgentConfig(agent: AgentId, configPath: string, items: McpItem[]): void {
+  switch (agent) {
+    case 'claude':
+      syncToClaudeConfig(configPath, items);
+      break;
+    case 'codex':
+      syncToCodexConfig(configPath, items);
+      break;
+    case 'opencode':
+      syncToOpenCodeConfig(configPath, items);
+      break;
+    case 'cursor':
+      syncToCursorConfig(configPath, items);
+      break;
+    case 'gemini':
+      syncToGeminiConfig(configPath, items);
+      break;
+    case 'openclaw':
+      syncToOpenClawConfig(configPath, items);
+      break;
+    case 'grok':
+      syncToGrokConfig(configPath, items);
+      break;
+    case 'hermes':
+      syncToHermesConfig(configPath, items);
+      break;
+    case 'forge':
+      syncToCursorConfig(configPath, items);
+      break;
+  }
+}
+
+/**
  * MCP resource handler implementing ResourceHandler<McpItem>.
  */
 export const McpHandler: ResourceHandler<McpItem> = {
@@ -584,41 +620,22 @@ export const McpHandler: ResourceHandler<McpItem> = {
       return;
     }
 
+    // Sync resolved MCPs to the version home (user-level agent config).
     const configPath = getMcpConfigPath(agent, versionHome);
-    if (!configPath) {
-      return;
+    if (configPath) {
+      const mcpItems = items.map((r) => r.item);
+      syncToAgentConfig(agent, configPath, mcpItems);
     }
 
-    const mcpItems = items.map((r) => r.item);
-
-    switch (agent) {
-      case 'claude':
-        syncToClaudeConfig(configPath, mcpItems);
-        break;
-      case 'codex':
-        syncToCodexConfig(configPath, mcpItems);
-        break;
-      case 'opencode':
-        syncToOpenCodeConfig(configPath, mcpItems);
-        break;
-      case 'cursor':
-        syncToCursorConfig(configPath, mcpItems);
-        break;
-      case 'gemini':
-        syncToGeminiConfig(configPath, mcpItems);
-        break;
-      case 'openclaw':
-        syncToOpenClawConfig(configPath, mcpItems);
-        break;
-      case 'grok':
-        syncToGrokConfig(configPath, mcpItems);
-        break;
-      case 'hermes':
-        syncToHermesConfig(configPath, mcpItems);
-        break;
-      case 'forge':
-        syncToCursorConfig(configPath, mcpItems);
-        break;
+    // Sync project-layer MCPs to the agent's project-level config path so each
+    // agent CLI can discover them alongside its user-level config.
+    const projectAgentsDir = cwd ? getProjectAgentsDir(cwd) : null;
+    if (projectAgentsDir) {
+      const projectItems = items.filter((r) => r.layer === 'project').map((r) => r.item);
+      if (projectItems.length > 0) {
+        const projectConfigPath = getProjectMcpConfigPath(agent, path.dirname(projectAgentsDir));
+        syncToAgentConfig(agent, projectConfigPath, projectItems);
+      }
     }
   },
 

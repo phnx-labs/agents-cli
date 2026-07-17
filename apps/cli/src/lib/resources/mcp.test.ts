@@ -3,7 +3,8 @@ import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import * as TOML from 'smol-toml';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as state from '../state.js';
 import { getMcpConfigPath, McpHandler } from './mcp.js';
 import type { McpItem } from './mcp.js';
 
@@ -499,5 +500,77 @@ describe('OpenClaw MCP config format', () => {
       url: 'https://claw.example.com/sse',
       transport: 'sse',
     });
+  });
+});
+
+describe('McpHandler.sync', () => {
+  let tmpDir: string;
+  let projectRoot: string;
+  let projectAgentsDir: string;
+  let userMcpDir: string;
+  let systemMcpDir: string;
+  let versionHome: string;
+
+  beforeEach(() => {
+    tmpDir = makeTempDir();
+    projectRoot = path.join(tmpDir, 'project');
+    projectAgentsDir = path.join(projectRoot, '.agents');
+    userMcpDir = path.join(tmpDir, '.agents', 'mcp');
+    systemMcpDir = path.join(tmpDir, '.agents', '.system', 'mcp');
+    versionHome = path.join(tmpDir, 'version-home');
+
+    vi.spyOn(state, 'getUserMcpDir').mockReturnValue(userMcpDir);
+    vi.spyOn(state, 'getSystemMcpDir').mockReturnValue(systemMcpDir);
+    vi.spyOn(state, 'getProjectAgentsDir').mockReturnValue(projectAgentsDir);
+    vi.spyOn(state, 'getEnabledExtraRepos').mockReturnValue([]);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('writes user-level config and project-level config with project-layer MCPs only', () => {
+    writeMcpYaml(path.join(projectAgentsDir, 'mcp'), 'project-server.yaml', {
+      name: 'project-server',
+      transport: 'stdio',
+      command: 'node',
+      args: ['project.js'],
+    });
+    writeMcpYaml(userMcpDir, 'user-server.yaml', {
+      name: 'user-server',
+      transport: 'stdio',
+      command: 'node',
+      args: ['user.js'],
+    });
+
+    McpHandler.sync('claude', versionHome, projectRoot);
+
+    const userConfig = JSON.parse(
+      fs.readFileSync(path.join(versionHome, '.claude', 'settings.json'), 'utf-8')
+    );
+    expect(userConfig.mcpServers).toHaveProperty('project-server');
+    expect(userConfig.mcpServers).toHaveProperty('user-server');
+
+    const projectConfig = JSON.parse(fs.readFileSync(path.join(projectRoot, '.mcp.json'), 'utf-8'));
+    expect(projectConfig.mcpServers).toHaveProperty('project-server');
+    expect(projectConfig.mcpServers).not.toHaveProperty('user-server');
+  });
+
+  it('skips project-level sync when there is no project agents dir', () => {
+    vi.spyOn(state, 'getProjectAgentsDir').mockReturnValue(null);
+    writeMcpYaml(userMcpDir, 'user-server.yaml', {
+      name: 'user-server',
+      transport: 'stdio',
+      command: 'node',
+      args: ['user.js'],
+    });
+
+    McpHandler.sync('claude', versionHome, projectRoot);
+
+    const userConfig = JSON.parse(
+      fs.readFileSync(path.join(versionHome, '.claude', 'settings.json'), 'utf-8')
+    );
+    expect(userConfig.mcpServers).toHaveProperty('user-server');
+    expect(fs.existsSync(path.join(projectRoot, '.mcp.json'))).toBe(false);
   });
 });

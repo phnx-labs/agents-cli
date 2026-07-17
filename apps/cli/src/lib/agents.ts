@@ -2378,7 +2378,7 @@ export function getMcpConfigPathForHome(agentId: AgentId, home: string): string 
 /**
  * Get project-scoped MCP config path for an agent.
  */
-function getProjectMcpConfigPath(agentId: AgentId, cwd: string = process.cwd()): string {
+export function getProjectMcpConfigPath(agentId: AgentId, cwd: string = process.cwd()): string {
   switch (agentId) {
     case 'claude':
       // Claude uses .mcp.json at project root for project-scoped MCPs
