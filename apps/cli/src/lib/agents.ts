@@ -1011,6 +1011,56 @@ export interface AccountInfo {
   // we can't surface an address. Callers that only want to know "logged in or
   // not" should read this, not `email`.
   signedIn: boolean;
+  // Claude-only: raw organizationType/organizationName from .claude.json's
+  // oauthAccount ("claude_max", "claude_team", ...). Two installs can share an
+  // email yet belong to different orgs (a personal Max plan and a Team seat);
+  // these fields are what let display layers tell them apart. Optional so the
+  // other agents' return literals stay valid — absent means "not applicable".
+  organizationType?: string | null;
+  organizationName?: string | null;
+}
+
+/**
+ * Human-readable label for a Claude account's organizationType as read from
+ * .claude.json's oauthAccount ("claude_team" -> "Team"). Unrecognized values
+ * (future tiers) are rendered by stripping the "claude_" prefix and
+ * title-casing the rest — an unfamiliar-but-visible label beats silence.
+ * Returns null for missing input.
+ */
+export function formatClaudeOrgLabel(orgType: string | null | undefined): string | null {
+  if (!orgType) return null;
+  const known: Record<string, string> = {
+    claude_max: 'Max',
+    claude_pro: 'Pro',
+    claude_team: 'Team',
+    claude_enterprise: 'Enterprise',
+    claude_free: 'Free',
+  };
+  if (known[orgType]) return known[orgType];
+  return orgType
+    .replace(/^claude_/, '')
+    .split('_')
+    .filter(Boolean)
+    .map((w) => w[0].toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+/**
+ * Short badge identifying which org an account belongs to: "Turing Labs · Team"
+ * for multi-seat orgs, just the tier label ("Max") for personal plans — a
+ * personal org's name is auto-generated boilerplate ("<email>'s Organization"),
+ * not identity. Returns null when the account carries no organizationType
+ * (signed out, non-Claude agents, configs predating the field).
+ */
+export function accountOrgBadge(
+  info?: Pick<AccountInfo, 'organizationType' | 'organizationName'> | null
+): string | null {
+  const label = formatClaudeOrgLabel(info?.organizationType);
+  if (!label) return null;
+  const isMultiSeat =
+    info?.organizationType === 'claude_team' || info?.organizationType === 'claude_enterprise';
+  if (isMultiSeat && info?.organizationName) return `${info.organizationName} · ${label}`;
+  return label;
 }
 
 /** Return the email address associated with the agent's auth config, or null. */
@@ -1328,6 +1378,8 @@ export async function getAccountInfo(
           overageCredits,
           lastActive,
           signedIn: !!email,
+          organizationType: oa?.organizationType ?? null,
+          organizationName: oa?.organizationName ?? null,
         };
       }
       case 'codex': {

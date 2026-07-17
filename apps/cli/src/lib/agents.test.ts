@@ -9,8 +9,10 @@ import {
   AGENTS,
   ALL_AGENT_IDS,
   __resetAntigravityKeychainCacheForTest,
+  accountOrgBadge,
   antigravityOsKeyringProbe,
   deprecationNotice,
+  formatClaudeOrgLabel,
   getAccountInfo,
   resolveAgentName,
   resolveLastActive,
@@ -809,5 +811,125 @@ describe('getAccountInfo — grok (nested auth.json)', () => {
   it('treats grok as signed out when auth.json is absent', async () => {
     const info = await getAccountInfo('grok', makeTempDir());
     expect(info.signedIn).toBe(false);
+  });
+});
+
+describe('getAccountInfo — Claude organization identity', () => {
+  // Fixture shapes below mirror real .claude.json oauthAccount payloads: a
+  // personal Max plan carries an auto-generated organizationName while a Team
+  // seat carries the actual org name.
+  function writeClaudeConfig(oauthAccount: Record<string, unknown>): string {
+    const home = makeTempDir();
+    fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ oauthAccount }), 'utf-8');
+    return home;
+  }
+
+  it('extracts organizationType and organizationName from a Team seat', async () => {
+    const home = writeClaudeConfig({
+      accountUuid: 'acc-1',
+      organizationUuid: 'org-team',
+      emailAddress: 'taylor@example.com',
+      billingType: 'stripe_subscription',
+      organizationType: 'claude_team',
+      organizationName: 'Turing Labs',
+      organizationRole: 'user',
+      seatTier: 'team_tier_1',
+    });
+    const info = await getAccountInfo('claude', home);
+    expect(info.organizationType).toBe('claude_team');
+    expect(info.organizationName).toBe('Turing Labs');
+    expect(info.plan).toBe('Pro');
+  });
+
+  it('extracts organizationType from a personal Max plan, keeping the raw boilerplate name', async () => {
+    const home = writeClaudeConfig({
+      accountUuid: 'acc-1',
+      organizationUuid: 'org-personal',
+      emailAddress: 'taylor@example.com',
+      billingType: 'stripe_subscription',
+      organizationType: 'claude_max',
+      organizationName: "taylor@example.com's Organization",
+      organizationRole: 'admin',
+    });
+    const info = await getAccountInfo('claude', home);
+    expect(info.organizationType).toBe('claude_max');
+    // Raw value: display layers decide whether the boilerplate name is shown.
+    expect(info.organizationName).toBe("taylor@example.com's Organization");
+  });
+
+  it('returns nulls when the config predates the organization fields', async () => {
+    const home = writeClaudeConfig({
+      accountUuid: 'acc-1',
+      organizationUuid: 'org-old',
+      emailAddress: 'taylor@example.com',
+      billingType: 'stripe_subscription',
+    });
+    const info = await getAccountInfo('claude', home);
+    expect(info.organizationType).toBeNull();
+    expect(info.organizationName).toBeNull();
+    expect(info.plan).toBe('Pro');
+  });
+
+  it('keeps same-email accounts in different orgs distinguishable via accountKey', async () => {
+    const max = await getAccountInfo('claude', writeClaudeConfig({
+      accountUuid: 'acc-1',
+      organizationUuid: 'org-personal',
+      emailAddress: 'taylor@example.com',
+      organizationType: 'claude_max',
+    }));
+    const team = await getAccountInfo('claude', writeClaudeConfig({
+      accountUuid: 'acc-1',
+      organizationUuid: 'org-team',
+      emailAddress: 'taylor@example.com',
+      organizationType: 'claude_team',
+      organizationName: 'Turing Labs',
+    }));
+    expect(max.email).toBe(team.email);
+    expect(max.accountKey).not.toBe(team.accountKey);
+  });
+});
+
+describe('formatClaudeOrgLabel', () => {
+  it('maps the known organization types to human labels', () => {
+    expect(formatClaudeOrgLabel('claude_max')).toBe('Max');
+    expect(formatClaudeOrgLabel('claude_pro')).toBe('Pro');
+    expect(formatClaudeOrgLabel('claude_team')).toBe('Team');
+    expect(formatClaudeOrgLabel('claude_enterprise')).toBe('Enterprise');
+    expect(formatClaudeOrgLabel('claude_free')).toBe('Free');
+  });
+
+  it('title-cases unknown future types instead of hiding them', () => {
+    expect(formatClaudeOrgLabel('claude_startup_tier_9')).toBe('Startup Tier 9');
+    expect(formatClaudeOrgLabel('gov')).toBe('Gov');
+  });
+
+  it('returns null for missing input', () => {
+    expect(formatClaudeOrgLabel(null)).toBeNull();
+    expect(formatClaudeOrgLabel(undefined)).toBeNull();
+    expect(formatClaudeOrgLabel('')).toBeNull();
+  });
+});
+
+describe('accountOrgBadge', () => {
+  it('shows the org name only for multi-seat org types', () => {
+    expect(accountOrgBadge({ organizationType: 'claude_team', organizationName: 'Turing Labs' }))
+      .toBe('Turing Labs · Team');
+    expect(accountOrgBadge({ organizationType: 'claude_enterprise', organizationName: 'BigCo' }))
+      .toBe('BigCo · Enterprise');
+    // Personal orgs carry auto-generated boilerplate names — label only.
+    expect(accountOrgBadge({
+      organizationType: 'claude_max',
+      organizationName: "taylor@example.com's Organization",
+    })).toBe('Max');
+  });
+
+  it('falls back to the label when a team org has no name', () => {
+    expect(accountOrgBadge({ organizationType: 'claude_team', organizationName: null })).toBe('Team');
+  });
+
+  it('returns null when there is no organization type', () => {
+    expect(accountOrgBadge({ organizationType: null, organizationName: 'Ghost' })).toBeNull();
+    expect(accountOrgBadge(null)).toBeNull();
+    expect(accountOrgBadge(undefined)).toBeNull();
   });
 });

@@ -18,6 +18,7 @@ import * as yaml from 'yaml';
 import {
   AGENTS,
   ALL_AGENT_IDS,
+  accountOrgBadge,
   getAllCliStates,
   getAccountInfo,
   resolveAgentName,
@@ -90,12 +91,24 @@ const SIGNED_IN_LABEL = 'signed in';
  * account id (Kimi's user_id), show `id:<user_id>` so distinct accounts read
  * distinctly instead of a generic "signed in". Falls back to "signed in" when we
  * have neither (Antigravity), and empty when signed out.
+ *
+ * When the account carries a Claude organizationType, the org badge is appended
+ * — "email (Turing Labs · Team)" — so two installs signed into the same email
+ * under different orgs (personal Max vs a Team seat) read distinctly. The
+ * suffix is plain text inside the label so the existing column-width pass
+ * measures and pads it for free.
  */
-function accountColumnLabel(
-  info?: Pick<AccountInfo, 'email' | 'accountId' | 'signedIn'> | null
+export function accountColumnLabel(
+  info?: Pick<
+    AccountInfo,
+    'email' | 'accountId' | 'signedIn' | 'organizationType' | 'organizationName'
+  > | null
 ): string {
   if (!info) return '';
-  if (info.email) return info.email;
+  if (info.email) {
+    const badge = accountOrgBadge(info);
+    return badge ? `${info.email} (${badge})` : info.email;
+  }
   if (info.signedIn) return info.accountId ? `id:${info.accountId}` : SIGNED_IN_LABEL;
   return '';
 }
@@ -1110,6 +1123,12 @@ export interface ViewJsonVersion {
   // Opaque account identifier when the credential exposes one but no email
   // (Kimi's user_id). Optional for backward compatibility with older consumers.
   accountId?: string | null;
+  // Claude-only raw org identity from .claude.json's oauthAccount
+  // ("claude_max", "claude_team", ...). Raw values, no display label baked in —
+  // renderers map them via formatClaudeOrgLabel/accountOrgBadge. Optional for
+  // backward compatibility with older consumers.
+  organizationType?: string | null;
+  organizationName?: string | null;
   plan: string | null;
   usageStatus: 'available' | 'rate_limited' | 'out_of_credits' | null;
   // Optional so existing TypeScript consumers compiled against the prior
@@ -1377,6 +1396,8 @@ async function collectAgentsJson(filterAgentId?: AgentId, resourceSections?: Set
       signedIn: info.signedIn,
       email: info.email,
       accountId: info.accountId,
+      organizationType: info.organizationType ?? null,
+      organizationName: info.organizationName ?? null,
       plan: info.plan,
       usageStatus: info.usageStatus,
       overageCredits: info.overageCredits,
@@ -1440,6 +1461,20 @@ interface AgentPrunePlan {
   skippedDefaults: PrunePlanEntry[];
 }
 
+/**
+ * Identity key for duplicate-install detection. Prefers accountKey — which
+ * encodes account AND org — over the bare email: two installs can share an
+ * email yet belong to different orgs (a personal Max plan and a Team seat),
+ * and grouping those by email alone would propose pruning a live account.
+ * Falls back to the lowercased email for agents whose credentials expose no
+ * identity key. Null when there is no usable identity.
+ */
+export function pruneGroupKey(
+  info: Pick<AccountInfo, 'accountKey' | 'email'>
+): string | null {
+  return info.accountKey ?? info.email?.toLowerCase() ?? null;
+}
+
 async function buildAgentPrunePlan(agentId: AgentId): Promise<AgentPrunePlan> {
   const dirInfos = listInstalledVersionDirs(agentId);
   const entries = await Promise.all(
@@ -1458,16 +1493,17 @@ async function buildAgentPrunePlan(agentId: AgentId): Promise<AgentPrunePlan> {
   // working binary — those are the things that compete for "the live install
   // for this account."
   const installed = entries.filter((e) => e.hasBinary);
-  const byEmail = new Map<string, typeof installed>();
+  const byAccount = new Map<string, typeof installed>();
   for (const e of installed) {
     if (!e.info.email) continue;
-    const key = e.info.email.toLowerCase();
-    const list = byEmail.get(key) ?? [];
+    const key = pruneGroupKey(e.info);
+    if (!key) continue;
+    const list = byAccount.get(key) ?? [];
     list.push(e);
-    byEmail.set(key, list);
+    byAccount.set(key, list);
   }
 
-  for (const [, group] of byEmail) {
+  for (const [, group] of byAccount) {
     if (group.length < 2) continue;
     const sorted = [...group].sort((a, b) => compareVersions(b.version, a.version));
     const keeper = sorted[0].version;

@@ -17,6 +17,7 @@ import { select, confirm, checkbox } from '@inquirer/prompts';
 import {
   AGENTS,
   ALL_AGENT_IDS,
+  accountOrgBadge,
   getAccountEmail,
   getAccountInfo,
   agentLabel,
@@ -95,7 +96,12 @@ function fixSessionFilePaths(agent: AgentId, version: string, oldVersionDir: str
 
 function formatAccountHint(info: AccountInfo, usage: UsageSnapshot | null): string {
   const parts: string[] = [];
-  if (info.email) parts.push(info.email);
+  if (info.email) {
+    // Same-email accounts can live in different orgs (personal Max vs a Team
+    // seat) — the badge is what makes the picker disambiguate them.
+    const badge = accountOrgBadge(info);
+    parts.push(badge ? `${info.email} (${badge})` : info.email);
+  }
   const usageSummary = formatUsageSummary(info.plan, usage);
   if (usageSummary) parts.push(usageSummary);
   if (parts.length === 0) return '';
