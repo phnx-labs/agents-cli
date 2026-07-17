@@ -140,7 +140,7 @@ describe('secrets export --host push command (cross-platform)', () => {
   it('Windows target: PowerShell EncodedCommand runs the same import (no bash, no /dev/stdin)', () => {
     const cmd = buildRemoteAgentsInvocation(importArgs, undefined, 'windows');
     const script = decodeWindows(cmd);
-    expect(script).toBe(`& 'agents' 'secrets' 'import' 'mybundle' '--from' '-'; exit $LASTEXITCODE`);
+    expect(script).toBe(`$ProgressPreference = 'SilentlyContinue'; & 'agents' 'secrets' 'import' 'mybundle' '--from' '-'; exit $LASTEXITCODE`);
     expect(script).not.toContain('/dev/stdin');
     expect(script).not.toContain('|| true');
     expect(script).not.toContain('bash');
@@ -207,17 +207,24 @@ describe('buildRemoteAgentsInvocation — Windows targets speak PowerShell', () 
     const cmd = buildRemoteAgentsInvocation(['view', 'claude'], undefined, 'windows');
     expect(cmd.startsWith('powershell -NoProfile -EncodedCommand ')).toBe(true);
     expect(cmd).not.toContain('bash -lc');
-    expect(decodeWindows(cmd)).toBe("& 'agents' 'view' 'claude'; exit $LASTEXITCODE");
+    expect(decodeWindows(cmd)).toBe("$ProgressPreference = 'SilentlyContinue'; & 'agents' 'view' 'claude'; exit $LASTEXITCODE");
+  });
+
+  it('suppresses CLIXML by silencing the progress stream (PowerShell 5.1 serializes it on a redirected pipe)', () => {
+    // Without this, a remote agents failure comes back as a raw `#< CLIXML <Objs …>`
+    // blob instead of a readable message — verified against a live win-mini.
+    const script = decodeWindows(buildWindowsAgentsCommand({ args: ['doctor', '--json'] }));
+    expect(script.startsWith("$ProgressPreference = 'SilentlyContinue'; ")).toBe(true);
   });
 
   it('prefixes Set-Location for --remote-cwd', () => {
     const cmd = buildRemoteAgentsInvocation(['view'], 'C:\\srv\\app', 'windows');
-    expect(decodeWindows(cmd)).toBe("Set-Location -LiteralPath 'C:\\srv\\app'; & 'agents' 'view'; exit $LASTEXITCODE");
+    expect(decodeWindows(cmd)).toBe("$ProgressPreference = 'SilentlyContinue'; Set-Location -LiteralPath 'C:\\srv\\app'; & 'agents' 'view'; exit $LASTEXITCODE");
   });
 
   it('neutralizes injection — metacharacters are literal inside single quotes', () => {
     const cmd = buildRemoteAgentsInvocation(['view', '$(whoami); rm -rf /', '--json'], undefined, 'windows');
-    expect(decodeWindows(cmd)).toBe("& 'agents' 'view' '$(whoami); rm -rf /' '--json'; exit $LASTEXITCODE");
+    expect(decodeWindows(cmd)).toBe("$ProgressPreference = 'SilentlyContinue'; & 'agents' 'view' '$(whoami); rm -rf /' '--json'; exit $LASTEXITCODE");
   });
 
   it('carries env vars through buildRemoteAgentsInvocation on Windows', () => {
@@ -228,7 +235,7 @@ describe('buildRemoteAgentsInvocation — Windows targets speak PowerShell', () 
       { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' },
     );
     expect(decodeWindows(cmd)).toBe(
-      "$env:PATH = '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH'; & 'agents' 'teams' 'doctor' '--json'; exit $LASTEXITCODE",
+      "$ProgressPreference = 'SilentlyContinue'; $env:PATH = '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH'; & 'agents' 'teams' 'doctor' '--json'; exit $LASTEXITCODE",
     );
   });
 
@@ -238,13 +245,13 @@ describe('buildRemoteAgentsInvocation — Windows targets speak PowerShell', () 
       env: { AGENTS_SESSIONS_LOCAL: '1', COLUMNS: '120' },
     });
     expect(decodeWindows(cmd)).toBe(
-      "$env:AGENTS_SESSIONS_LOCAL = '1'; $env:COLUMNS = '120'; & 'agents' 'sessions' '--active' '--json'; exit $LASTEXITCODE",
+      "$ProgressPreference = 'SilentlyContinue'; $env:AGENTS_SESSIONS_LOCAL = '1'; $env:COLUMNS = '120'; & 'agents' 'sessions' '--active' '--json'; exit $LASTEXITCODE",
     );
   });
 
   it('can drop the exit-code propagation for sentinel-based probes', () => {
     const cmd = buildWindowsAgentsCommand({ args: ['--version'], propagateExit: false });
-    expect(decodeWindows(cmd)).toBe("& 'agents' '--version'");
+    expect(decodeWindows(cmd)).toBe("$ProgressPreference = 'SilentlyContinue'; & 'agents' '--version'");
   });
 });
 

@@ -81,7 +81,7 @@ describe('ready commands — Windows branch speaks PowerShell', () => {
   });
 
   it('version probe runs `agents --version` via PowerShell', () => {
-    expect(decodeWindows(buildRemoteVersionCommand('windows'))).toBe("& 'agents' '--version'; exit $LASTEXITCODE");
+    expect(decodeWindows(buildRemoteVersionCommand('windows'))).toBe("$ProgressPreference = 'SilentlyContinue'; & 'agents' '--version'; exit $LASTEXITCODE");
   });
 
   it('readyProbe emits the sentinel with Write-Output and branches on $LASTEXITCODE', () => {

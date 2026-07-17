@@ -248,6 +248,14 @@ export interface WindowsAgentsCommand {
 export function windowsAgentsScript(cmd: WindowsAgentsCommand): string {
   const { args, env, cwd, propagateExit = true } = cmd;
   const parts: string[] = [];
+  // Silence the progress stream. PowerShell 5.1 serializes progress records
+  // ("Preparing modules for first use.") to CLIXML when stderr is a redirected pipe
+  // (an ssh capture, not a console), so a remote `agents …` result otherwise comes
+  // back wrapped in a raw `#< CLIXML <Objs …>` blob — unreadable to humans and to the
+  // JSON parsers that consume doctor / fleet-status output. Verified against a live
+  // win-mini (PowerShell 5.1): this clears it. (`-OutputFormat Text` does NOT — that
+  // governs object serialization of the success stream, not the progress stream.)
+  parts.push("$ProgressPreference = 'SilentlyContinue'");
   if (env) for (const [k, v] of Object.entries(env)) parts.push(`$env:${k} = ${powershellQuote(v)}`);
   if (cwd) parts.push(`Set-Location -LiteralPath ${powershellQuote(cwd)}`);
   parts.push(`& ${['agents', ...args].map(powershellQuote).join(' ')}`);
