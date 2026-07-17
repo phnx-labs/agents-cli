@@ -26,6 +26,8 @@ import {
   mergeLocalFirst,
   indexActiveBySessionId,
   handlePickedSession,
+  shouldIncludeLocal,
+  remoteHostsToDial,
   type PickerColumns,
 } from './sessions.js';
 
@@ -133,33 +135,42 @@ function copyToClipboard(text: string): boolean {
 
 /** The transcript pool: the local index + (unless --local) a live fleet fan-out.
  * The live index is fetched separately/lazily — it's the slow part and only the
- * running filter needs it, so a bare browse stays instant. */
+ * running filter needs it, so a bare browse stays instant.
+ *
+ * `hosts` is the explicit `--host`/`--device` scope (if any): it restricts which
+ * peers are dialed and whether local is included, honoring the flag's "scope,
+ * not add" contract instead of always sweeping the whole fleet. */
 async function fetchRawPool(
   f: BrowserFilter,
   self: string,
   local: boolean,
+  hosts: string[] | undefined,
 ): Promise<{ key: string; rows: SessionMeta[] }> {
   const since = f.window;
   // Local pool: wide (every directory) — device/agent/project are applied in
-  // memory so a hotkey toggle is instant and doesn't re-hit the disk.
-  let rows = await discoverSessions({
-    all: true,
-    cwd: process.cwd(),
-    since,
-    excludeTeamOrigin: !f.teams,
-    limit: 500,
-    sortBy: 'timestamp',
-  });
+  // memory so a hotkey toggle is instant and doesn't re-hit the disk. Skipped
+  // when an explicit host scope excludes this machine.
+  let rows: SessionMeta[] = shouldIncludeLocal(hosts, self)
+    ? await discoverSessions({
+        all: true,
+        cwd: process.cwd(),
+        since,
+        excludeTeamOrigin: !f.teams,
+        limit: 500,
+        sortBy: 'timestamp',
+      })
+    : [];
 
-  // Fleet: fold in every online peer's own index over SSH (no sync), same as the
-  // flag path. Skipped under --local. Best-effort — a fan-out failure leaves the
-  // local list intact.
+  // Fleet: fold in peers' own indexes over SSH (no sync), same as the flag path.
+  // Skipped under --local. An explicit --host/--device scopes exactly which peers
+  // are dialed (undefined = sweep every online device). Best-effort — a fan-out
+  // failure leaves the local list intact.
   if (!local) {
     try {
       const forwarded = ['sessions', '--all', '--json', '--limit', '500'];
       if (since) forwarded.push('--since', since);
       if (f.teams) forwarded.push('--teams');
-      const { sessions: remote } = await gatherRemoteList(forwarded);
+      const { sessions: remote } = await gatherRemoteList(forwarded, remoteHostsToDial(hosts, self));
       if (remote.length > 0) rows = mergeLocalFirst([...rows, ...remote], self);
     } catch {
       // enrichment, never a hard dependency
@@ -213,10 +224,11 @@ function helpFor(_f: BrowserFilter, mode: 'nav' | 'search'): string {
  */
 export async function runSessionBrowser(
   initial: Partial<BrowserFilter> = {},
-  opts: { local?: boolean } = {},
+  opts: { local?: boolean; hosts?: string[] } = {},
 ): Promise<void> {
   const self = machineId();
   const local = opts.local ?? false;
+  const hosts = opts.hosts && opts.hosts.length > 0 ? opts.hosts : undefined;
 
   // Updated after each load so the A/D cycles range over what's actually present.
   let agentsInPool: string[] = [];
@@ -241,7 +253,7 @@ export async function runSessionBrowser(
   const load = async (f: BrowserFilter): Promise<SessionMeta[]> => {
     const key = `${f.window ?? 'all'}|${f.teams}`;
     if (!rawCache || rawCache.key !== key) {
-      rawCache = await fetchRawPool(f, self, local);
+      rawCache = await fetchRawPool(f, self, local, hosts);
     }
     // Only pay for the live scan when the running filter needs it.
     if (f.running && !liveCache) {
@@ -279,9 +291,11 @@ export async function runSessionBrowser(
       p: (f) => ({ ...f, projectScope: f.projectScope === 'repo' ? 'all' : 'repo' }),
       w: (f) => ({ ...f, window: cycleWindow(f.window) }),
     },
-    onKey: (name, f) => {
+    onKey: (name, f, _active, query) => {
       if (name === 'y') {
-        const cmd = 'ag ' + browserFilterToArgv(f).join(' ');
+        // Thread the live search query so the copied command reproduces the
+        // exact view — the human→agent bridge must include the search term.
+        const cmd = 'ag ' + browserFilterToArgv(f, query).join(' ');
         const ok = copyToClipboard(cmd);
         return ok ? `copied: ${cmd}` : cmd;
       }

@@ -1021,7 +1021,7 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
           agent: options.agent,
           device: options.host?.length === 1 ? options.host[0] : undefined,
         },
-        { local: options.local === true },
+        { local: options.local === true, hosts: options.host },
       );
       return;
     }
@@ -1070,7 +1070,7 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
         agent: options.agent,
         projectScope: options.all ? 'all' : 'repo',
       },
-      { local: options.local === true },
+      { local: options.local === true, hosts: options.host },
     );
     return;
   }

@@ -454,9 +454,10 @@ export interface DynamicPickerConfig<T, F> {
   keyBindings?: Record<string, (filter: F) => F>;
   /**
    * Side-effecting keys that don't change the filter (e.g. `y` copies a command).
-   * Return a short string to flash under the list.
+   * Receives the live search `query` so the effect can be search-aware. Return a
+   * short string to flash under the list.
    */
-  onKey?: (name: string, filter: F, active: T | undefined) => string | void;
+  onKey?: (name: string, filter: F, active: T | undefined, query: string) => string | void;
   /** Key that enters search mode (default `s`). */
   searchKey?: string;
   /** Key that toggles the preview pane (default `tab`). */
@@ -548,8 +549,10 @@ export function dynamicPicker<T, F>(config: DynamicPickerConfig<T, F>): Promise<
       // every keystroke so nothing leaks, then append the typed character.
       if (mode === 'search') {
         if (key.name === 'escape') {
+          // Exit search but KEEP the query as an active filter, so hotkeys (and
+          // the y copy-cmd) operate on the searched view. A second esc in nav
+          // clears it. Enter also confirms the highlighted row directly.
           rl.clearLine(0);
-          setQuery('');
           setMode('nav');
           return;
         }
@@ -580,6 +583,11 @@ export function dynamicPicker<T, F>(config: DynamicPickerConfig<T, F>): Promise<
       // letter (r/b/c/…) never accumulates as stray input.
       rl.clearLine(0);
       if (key.name === 'escape') {
+        // First esc clears an active search filter; a second (no filter) cancels.
+        if (query) {
+          setQuery('');
+          return;
+        }
         done(null);
         return;
       }
@@ -607,7 +615,7 @@ export function dynamicPicker<T, F>(config: DynamicPickerConfig<T, F>): Promise<
         return;
       }
       if (cfg.onKey) {
-        const msg = cfg.onKey(key.name ?? '', filter, selected?.value);
+        const msg = cfg.onKey(key.name ?? '', filter, selected?.value, query);
         if (msg) setFlash(msg);
       }
     });
