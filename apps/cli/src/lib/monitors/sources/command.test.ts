@@ -16,10 +16,15 @@ describe('command source evaluate', () => {
   });
 
   it('trims trailing whitespace so identical output diffs stably', async () => {
-    const a = await evaluate({ type: 'command', command: 'printf "x\\n\\n"' });
-    const b = await evaluate({ type: 'command', command: 'printf "x"' });
+    // `echo` appends a trailing newline (CRLF on Windows); a monitor re-runs the
+    // same command each poll, so that trailing whitespace must trim away to a
+    // stable observation rather than spuriously diffing. `echo` is portable across
+    // `/bin/sh -c` and `cmd /c`; `printf` is not (it's not a cmd builtin on Windows).
+    const a = await evaluate({ type: 'command', command: 'echo x' });
+    const b = await evaluate({ type: 'command', command: 'echo x' });
     expect(a!.raw).toBe('x');
     expect(b!.raw).toBe('x');
+    expect(a!.raw).toBe(b!.raw);
   });
 
   it('returns null when no command is set', async () => {
