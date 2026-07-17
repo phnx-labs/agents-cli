@@ -15,6 +15,7 @@ import { getDaemonDir as getDaemonDirRoot } from './state.js';
 import { isAlive, killTree, backgroundSpawnOptions } from './platform/index.js';
 import { listJobs as listAllJobs } from './routines.js';
 import { JobScheduler } from './scheduler.js';
+import { MonitorEngine } from './monitors/engine.js';
 import { executeJobDetached, monitorRunningJobs } from './runner.js';
 import { detectOverdueJobs, notifyOverdue } from './overdue.js';
 import { BrowserService } from './browser/service.js';
@@ -360,6 +361,16 @@ export async function runDaemon(): Promise<void> {
     log('INFO', `  ${job.name} -> next: ${job.nextRun?.toISOString() || 'unknown'}`);
   }
 
+  // Monitor engine: event-triggered watchers, beside the cron scheduler. Same
+  // daemon, same dispatch seam — a monitor is a routine whose trigger is a
+  // watched source instead of a clock. Reloads on SIGHUP alongside the scheduler.
+  const monitorEngine = new MonitorEngine((level, message) => log(level, message));
+  try {
+    monitorEngine.start();
+  } catch (err) {
+    log('ERROR', `Monitor engine failed to start: ${(err as Error).message}`);
+  }
+
   // Backlog detection: any enabled recurring job whose most-recent expected
   // fire is older than its most-recent recorded run is overdue. Happens when
   // the laptop was off or the daemon crashed through a scheduled fire.
@@ -595,6 +606,11 @@ export async function runDaemon(): Promise<void> {
     scheduler.reloadAll();
     const reloaded = scheduler.listScheduled();
     log('INFO', `Reloaded ${reloaded.length} jobs`);
+    try {
+      monitorEngine.reload();
+    } catch (err) {
+      log('ERROR', `Monitor engine reload failed: ${(err as Error).message}`);
+    }
     // Drop the memoized R2 config so rotated/added sync credentials are re-read
     // on the next cycle instead of waiting for a restart.
     void import('./session/sync/config.js').then(m => m.clearR2ConfigCache());
@@ -603,6 +619,7 @@ export async function runDaemon(): Promise<void> {
   const handleShutdown = async () => {
     log('INFO', 'Daemon shutting down');
     scheduler.stopAll();
+    monitorEngine.stop();
     await browserIPC.stop();
     clearInterval(monitorInterval);
     clearInterval(syncInterval);

@@ -122,6 +122,7 @@ const OWN_HOST_COMMANDS = new Set([
   'devices',
   'fleet', // alias of devices
   'apply', // `--device` scopes the fleet reconcile to one device (it targets devices itself)
+  'monitors', // `--device` names the OWNER machine (pin-to-one), not a routing target
 ]);
 
 /** `--no-tty` is stripped like the routing flags but carries no value. */

@@ -49,6 +49,7 @@ export const loadImport: ModuleLoader = async () => (await import('../../command
 export const loadPackages: ModuleLoader = async () => (await import('../../commands/packages.js')).registerPackagesCommands;
 export const loadDaemon: ModuleLoader = async () => (await import('../../commands/daemon.js')).registerDaemonCommands;
 export const loadRoutines: ModuleLoader = async () => (await import('../../commands/routines.js')).registerRoutinesCommands;
+export const loadMonitors: ModuleLoader = async () => (await import('../../commands/monitors.js')).registerMonitorsCommands;
 export const loadRun: ModuleLoader = async () => (await import('../../commands/exec.js')).registerRunCommand;
 export const loadDefaults: ModuleLoader = async () => (await import('../../commands/defaults.js')).registerDefaultsCommands;
 export const loadModels: ModuleLoader = async () => (await import('../../commands/models.js')).registerModelsCommand;
@@ -152,6 +153,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   install: [loadPackages],
   daemon: [loadDaemon],
   routines: [loadRoutines],
+  monitors: [loadMonitors],
   run: [loadRun],
   defaults: [loadDefaults],
   models: [loadModels],
