@@ -1024,12 +1024,13 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
     // On a TTY (and not a scripting path), open the interactive browser seeded to
     // running-only. --json / --waiting / --no-interactive / a peer fan-out keep the
     // static dump untouched, so scripts and agents are unaffected. An explicit
-    // --since seeds the window; --until (no browser representation) or a multi-host
-    // scope fall through to the static dump that already honors them.
+    // --since seeds the window; --until / --project (no browser field) or a
+    // multi-host scope fall through to the static dump that already honors them.
     if (
       useInteractiveBrowser(options) &&
       !options.waiting &&
       !options.until &&
+      !options.project &&
       (options.host?.length ?? 0) <= 1 &&
       process.env.AGENTS_SESSIONS_LOCAL !== '1'
     ) {
@@ -1062,9 +1063,10 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
   }
 
   // Bare interactive listing → the interactive fleet browser (humans). A query,
-  // a render/filter flag, --flat/--tree, --json, --until, or --no-interactive keep
-  // the existing printed/render paths (agents and scripts unaffected). An explicit
-  // --since seeds the browser's window so the flag is honored, not swallowed.
+  // a render/filter flag, --flat/--tree, --json, --until, --project (a named-project
+  // filter the browser can't represent), or --no-interactive keep the existing
+  // printed/render paths (agents and scripts unaffected). An explicit --since seeds
+  // the browser's window so the flag is honored, not swallowed.
   if (
     useInteractiveBrowser(options) &&
     !query &&
@@ -1072,6 +1074,7 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
     !options.tree &&
     !options.markdown &&
     !options.until &&
+    !options.project &&
     !options.artifacts &&
     options.artifact === undefined
   ) {
