@@ -1355,6 +1355,7 @@ export function installHermesPlugin(plugin: DiscoveredPlugin, versionHome: strin
       fs.rmSync(destRoot, { recursive: true, force: true });
     }
     fs.cpSync(plugin.root, destRoot, { recursive: true });
+    stripEscapingSymlinks(destRoot, plugin.root);
     const userConfig = loadUserConfig(plugin.name);
     if (Object.keys(userConfig).length > 0) {
       expandUserConfigInDir(destRoot, userConfig);

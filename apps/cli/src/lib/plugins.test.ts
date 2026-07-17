@@ -31,6 +31,8 @@ import {
   removeGeminiPlugin,
   installGoosePlugin,
   isGoosePluginInstalled,
+  installHermesPlugin,
+  isHermesPluginInstalled,
   isOpenCodePluginInstalled,
 } from './plugins.js';
 import type { DiscoveredPlugin, PluginManifest } from './types.js';
@@ -265,6 +267,39 @@ describe('plugin install strips symlinks escaping the install root (RUSH-1755)',
     expect(fs.readFileSync(path.join(dest, 'inside-link'), 'utf-8')).toBe('hello\n');
     // Attacker file untouched.
     expect(fs.readFileSync(secret, 'utf-8')).toBe('ORIGINAL');
+  });
+
+  it('Hermes: drops a plugin.yaml symlink pointing outside destRoot and writes a real manifest instead', () => {
+    const secretDir = path.join(tmpDir, 'outside');
+    fs.mkdirSync(secretDir, { recursive: true });
+    const secret = path.join(secretDir, 'victim');
+    fs.writeFileSync(secret, 'ORIGINAL', 'utf-8');
+
+    const root = makePluginRoot(tmpDir, { name: 'hermes-plug', version: '1.0.0', description: 'Hermes' });
+    fs.writeFileSync(path.join(root, 'real.txt'), 'hello\n', 'utf-8');
+    // Internal symlink (relative, stays inside the plugin) — must survive.
+    fs.symlinkSync('./real.txt', path.join(root, 'inside-link'), 'file');
+    // Malicious symlink at the manifest path: the follow-up
+    // writeHermesPluginManifest would write THROUGH this link to the attacker
+    // path without the fix.
+    fs.symlinkSync(secret, path.join(root, 'plugin.yaml'), 'file');
+
+    const plugin = makeDiscoveredPlugin(root, { name: 'hermes-plug', version: '1.0.0', description: 'Hermes' });
+    const versionHome = path.join(tmpDir, 'home');
+
+    expect(installHermesPlugin(plugin, versionHome, false)).toBe(true);
+    expect(isHermesPluginInstalled('hermes-plug', versionHome)).toBe(true);
+
+    const dest = path.join(versionHome, '.hermes', 'plugins', 'hermes-plug');
+    // The write-through was neutralized: the outside file is untouched...
+    expect(fs.readFileSync(secret, 'utf-8')).toBe('ORIGINAL');
+    // ...and the manifest in destRoot is a real regular file (not a symlink).
+    const manifest = path.join(dest, 'plugin.yaml');
+    expect(fs.lstatSync(manifest).isSymbolicLink()).toBe(false);
+    expect(fs.readFileSync(manifest, 'utf-8')).toContain('hermes-plug');
+    // Internal symlink preserved and still resolves inside destRoot.
+    expect(fs.lstatSync(path.join(dest, 'inside-link')).isSymbolicLink()).toBe(true);
+    expect(fs.readFileSync(path.join(dest, 'inside-link'), 'utf-8')).toBe('hello\n');
   });
 });
 
