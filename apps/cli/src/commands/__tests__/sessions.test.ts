@@ -6,8 +6,8 @@ import * as crypto from 'crypto';
 import { spawnSync } from 'child_process';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { buildResumeCommand } from '../sessions.js';
-import { needsWindowsShell } from '../../lib/platform/index.js';
+import { buildResumeCommand, resumeSpawnInvocation } from '../sessions.js';
+import { needsWindowsShell, composeWin32CommandLine } from '../../lib/platform/index.js';
 import type { SessionMeta } from '../../lib/session/types.js';
 
 const repoRoot = process.cwd();
@@ -905,6 +905,42 @@ describe('buildResumeCommand version-pinned resume', () => {
       const launcher = buildResumeCommand(session)![0];
       expect(needsWindowsShell(launcher, 'win32')).toBe(true);
       expect(needsWindowsShell(launcher, 'linux')).toBe(false);
+    }
+  });
+
+  // RUSH-1753: session.id comes from the JSONL filename with no char validation.
+  // spawn(cmd[0], cmd.slice(1), { shell: true }) on win32 concatenates args into
+  // the cmd.exe line unescaped — so id `x&calc.exe&` injects. resumeSpawnInvocation
+  // must compose a quoted line + empty argv when the shell is needed.
+  it('quotes shell metacharacters in session id on win32 resume spawn (RUSH-1753)', () => {
+    const evilId = 'x&calc.exe&';
+    const cmd = buildResumeCommand(baseSession({ id: evilId }))!;
+    expect(cmd).toEqual(['claude', '--resume', evilId]);
+
+    const inv = resumeSpawnInvocation(cmd, 'win32');
+    expect(inv.shell).toBe(true);
+    expect(inv.args).toEqual([]);
+    // Full line is the sole command; & | etc. sit inside quotes (not bare).
+    expect(inv.command).toBe(composeWin32CommandLine(cmd[0], cmd.slice(1)));
+    expect(inv.command).toBe('claude --resume "x&calc.exe&"');
+
+    // Posix path stays a direct exec (no shell, raw argv).
+    const posix = resumeSpawnInvocation(cmd, 'linux');
+    expect(posix).toEqual({ command: 'claude', args: ['--resume', evilId], shell: false });
+  });
+
+  it('quotes shell metacharacters for codex and opencode resume spawn too', () => {
+    const evilId = 'a|b<c>d';
+    for (const session of [
+      baseSession({ agent: 'codex', id: evilId }),
+      baseSession({ agent: 'opencode', id: evilId }),
+    ]) {
+      const cmd = buildResumeCommand(session)!;
+      const inv = resumeSpawnInvocation(cmd, 'win32');
+      expect(inv.shell).toBe(true);
+      expect(inv.args).toEqual([]);
+      expect(inv.command).toBe(composeWin32CommandLine(cmd[0], cmd.slice(1)));
+      expect(inv.command).toContain(`"${evilId}"`);
     }
   });
 });

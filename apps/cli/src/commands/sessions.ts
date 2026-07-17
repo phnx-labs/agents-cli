@@ -19,7 +19,7 @@ import type { AgentId } from '../lib/types.js';
 import type { SessionAgentId, SessionMeta, ViewMode } from '../lib/session/types.js';
 import { SESSION_AGENTS } from '../lib/session/types.js';
 import { discoverArtifacts, readArtifact, resolveArtifact } from '../lib/session/artifacts.js';
-import { looksLikePath, toComparablePath, homeDir, needsWindowsShell, findExecutable } from '../lib/platform/index.js';
+import { looksLikePath, toComparablePath, homeDir, needsWindowsShell, findExecutable, composeWin32CommandLine } from '../lib/platform/index.js';
 import { getActiveSessions, type ActiveSession } from '../lib/session/active.js';
 import { enumerateGhosttyTabs, assignGhosttyTabs } from '../lib/session/ghostty-tabs.js';
 import { mapPanesToTargets, listClients } from '../lib/tmux/session.js';
@@ -1835,10 +1835,38 @@ export async function resumeSessionInPlace(session: SessionMeta): Promise<void> 
 }
 
 /**
+ * Map a resume argv to the spawn(command, args, {shell}) triple.
+ *
+ * On Windows the agent launcher is a `.cmd`/PATHEXT shim and needs shell:true.
+ * With shell:true, Node concatenates args into the cmd.exe line unescaped
+ * (DEP0190 + injection). A session.id derived from a filename can carry
+ * metacharacters (`&|<>`); compose a fully-quoted line and pass an EMPTY args
+ * array so cmd.exe cannot reparse them (RUSH-1753). See composeWin32CommandLine.
+ *
+ * `platform` is injectable so the win32 shell path is unit-testable on any host.
+ */
+export function resumeSpawnInvocation(
+  cmd: string[],
+  platform: NodeJS.Platform = process.platform,
+): { command: string; args: string[]; shell: boolean } {
+  const shell = needsWindowsShell(cmd[0], platform);
+  if (shell) {
+    return {
+      command: composeWin32CommandLine(cmd[0], cmd.slice(1)),
+      args: [],
+      shell: true,
+    };
+  }
+  return { command: cmd[0], args: cmd.slice(1), shell: false };
+}
+
+/**
  * Spawn a resume command as a foreground takeover (inherited stdio), resolving
  * when it exits. On Windows the agent launcher is a `.cmd`/PATHEXT shim that
  * `spawn` can't exec directly — a bare-name `shell:false` spawn throws
  * `EFTYPE`/`ENOENT` there — so we go through the shell via `needsWindowsShell`.
+ * When shell:true, argv is composed via resumeSpawnInvocation (quoted line +
+ * empty args) so an untrusted session.id cannot inject through cmd.exe.
  * The spawn is guarded because such a failure can be thrown synchronously;
  * without the guard it would surface under an unrelated "Failed to discover
  * sessions" catch upstream instead of a truthful launch error.
@@ -1847,10 +1875,11 @@ function spawnResumeCommand(cmd: string[], cwd: string): Promise<void> {
   return new Promise<void>((resolve) => {
     let child: ChildProcess;
     try {
-      child = spawn(cmd[0], cmd.slice(1), {
+      const { command, args, shell } = resumeSpawnInvocation(cmd);
+      child = spawn(command, args, {
         cwd,
         stdio: 'inherit',
-        shell: needsWindowsShell(cmd[0]),
+        shell,
       });
     } catch (err: any) {
       console.error(chalk.red(`Failed to launch ${cmd[0]}: ${err.message}`));
