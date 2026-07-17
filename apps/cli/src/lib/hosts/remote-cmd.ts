@@ -245,17 +245,22 @@ export interface WindowsAgentsCommand {
  * `& agents …` invokes the CLI from the machine PATH (Windows has no login
  * shell, so there is no `bash -lc` equivalent — the shim is simply on PATH).
  */
+/**
+ * PowerShell prelude that silences the progress stream. PowerShell 5.1 serializes
+ * progress records ("Preparing modules for first use.") to CLIXML when stderr is a
+ * redirected pipe (an ssh capture, not a console), so a remote `agents …` result
+ * otherwise comes back wrapped in a raw `#< CLIXML <Objs …>` blob — unreadable to
+ * humans and to the JSON parsers that consume doctor / fleet-status output. Prepend
+ * this to EVERY Windows script that invokes `agents` (there is more than one builder
+ * in this file). Verified against a live win-mini (PowerShell 5.1): this clears it.
+ * (`-OutputFormat Text` does NOT — it governs success-stream object serialization,
+ * not the progress stream.)
+ */
+export const POWERSHELL_PROGRESS_SILENCE = "$ProgressPreference = 'SilentlyContinue'";
+
 export function windowsAgentsScript(cmd: WindowsAgentsCommand): string {
   const { args, env, cwd, propagateExit = true } = cmd;
-  const parts: string[] = [];
-  // Silence the progress stream. PowerShell 5.1 serializes progress records
-  // ("Preparing modules for first use.") to CLIXML when stderr is a redirected pipe
-  // (an ssh capture, not a console), so a remote `agents …` result otherwise comes
-  // back wrapped in a raw `#< CLIXML <Objs …>` blob — unreadable to humans and to the
-  // JSON parsers that consume doctor / fleet-status output. Verified against a live
-  // win-mini (PowerShell 5.1): this clears it. (`-OutputFormat Text` does NOT — that
-  // governs object serialization of the success stream, not the progress stream.)
-  parts.push("$ProgressPreference = 'SilentlyContinue'");
+  const parts: string[] = [POWERSHELL_PROGRESS_SILENCE];
   if (env) for (const [k, v] of Object.entries(env)) parts.push(`$env:${k} = ${powershellQuote(v)}`);
   if (cwd) parts.push(`Set-Location -LiteralPath ${powershellQuote(cwd)}`);
   parts.push(`& ${['agents', ...args].map(powershellQuote).join(' ')}`);
@@ -293,6 +298,9 @@ export function buildWindowsStdinImportCommand(bundle: string, opts: { force?: b
   // the secret-bearing temp file would otherwise be left behind (RUSH-1764). $tmp
   // starts null so a GetTempFileName that itself throws leaves nothing to remove.
   const script = [
+    // Same CLIXML guard as windowsAgentsScript — this builder also runs `& agents …`
+    // and its raw stderr is printed to the user on failure (secrets export --host <win>).
+    POWERSHELL_PROGRESS_SILENCE,
     '$in = [Console]::In.ReadToEnd()',
     '$tmp = $null',
     `try { $tmp = [System.IO.Path]::GetTempFileName(); [System.IO.File]::WriteAllText($tmp, $in); ` +

@@ -12,7 +12,7 @@ import { fileURLToPath } from 'url';
 import { sshExec, shellQuote } from '../ssh-exec.js';
 import type { Host } from './types.js';
 import { sshTargetFor } from './types.js';
-import { remoteShellFor, buildWindowsAgentsCommand, encodePowershell, powershellQuote } from './remote-cmd.js';
+import { remoteShellFor, buildWindowsAgentsCommand, encodePowershell, powershellQuote, POWERSHELL_PROGRESS_SILENCE } from './remote-cmd.js';
 import { resolveRemoteOsSync } from './remote-os.js';
 
 /** Resolve this CLI's own version by walking up to the nearest package.json. */
@@ -78,6 +78,7 @@ export function remoteAgentsVersion(target: string, os?: string): string | null 
 export function buildBootstrapCommand(spec: string, os?: string): string {
   if (remoteShellFor(os) === 'powershell') {
     const script =
+      `${POWERSHELL_PROGRESS_SILENCE}; ` +
       `npm install -g ${powershellQuote(spec)} 2>&1 | Select-Object -Last 3; ` +
       `if (-not (Test-Path "$HOME/.agents/.system")) { agents setup 2>&1 | Select-Object -Last 3 }; ` +
       `agents --version`;
@@ -127,6 +128,7 @@ export interface ReadyProbe {
 export function buildReadyProbeCommand(os?: string): string {
   if (remoteShellFor(os) === 'powershell') {
     const script =
+      `${POWERSHELL_PROGRESS_SILENCE}; ` +
       `agents --version 2>$null; Write-Output "${READY_MARKER}"; ` +
       `agents view 2>$null; if ($LASTEXITCODE -ne 0) { agents list 2>$null }`;
     return `powershell -NoProfile -EncodedCommand ${encodePowershell(script)}`;

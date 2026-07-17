@@ -258,6 +258,9 @@ describe('buildRemoteAgentsInvocation — Windows targets speak PowerShell', () 
 describe('buildWindowsStdinImportCommand', () => {
   it('bridges ssh stdin through a temp file (never a hanging --from -)', () => {
     const script = decodeWindows(buildWindowsStdinImportCommand('linear.app', { force: true }));
+    // Silences the progress stream first, same CLIXML guard as windowsAgentsScript —
+    // this builder also runs `& agents …` and its stderr is shown to the user on failure.
+    expect(script.startsWith("$ProgressPreference = 'SilentlyContinue'; ")).toBe(true);
     // Reads the piped .env in PowerShell (the shim can't forward stdin to node).
     expect(script).toContain('[Console]::In.ReadToEnd()');
     expect(script).toContain('[System.IO.Path]::GetTempFileName()');

@@ -88,7 +88,7 @@ describe('ready commands — Windows branch speaks PowerShell', () => {
     // Parser keys off the sentinel substring — this output must still parse.
     const script = decodeWindows(buildReadyProbeCommand('windows'));
     expect(script).toBe(
-      `agents --version 2>$null; Write-Output "${MARK}"; agents view 2>$null; if ($LASTEXITCODE -ne 0) { agents list 2>$null }`,
+      `$ProgressPreference = 'SilentlyContinue'; agents --version 2>$null; Write-Output "${MARK}"; agents view 2>$null; if ($LASTEXITCODE -ne 0) { agents list 2>$null }`,
     );
     // The script's stdout shape (marker on its own line) round-trips through parseReadyProbe.
     const p = parseReadyProbe(`2.1.170\n${MARK}\nClaude (balanced)\n`);
@@ -99,7 +99,8 @@ describe('ready commands — Windows branch speaks PowerShell', () => {
   it('bootstrap uses Select-Object -Last / Test-Path, never tail / [ -d ]', () => {
     const script = decodeWindows(buildBootstrapCommand('@phnx-labs/agents-cli@2.1.170', 'windows'));
     expect(script).toBe(
-      "npm install -g '@phnx-labs/agents-cli@2.1.170' 2>&1 | Select-Object -Last 3; " +
+      "$ProgressPreference = 'SilentlyContinue'; " +
+        "npm install -g '@phnx-labs/agents-cli@2.1.170' 2>&1 | Select-Object -Last 3; " +
         'if (-not (Test-Path "$HOME/.agents/.system")) { agents setup 2>&1 | Select-Object -Last 3 }; agents --version',
     );
     expect(script).not.toContain('tail -3');
