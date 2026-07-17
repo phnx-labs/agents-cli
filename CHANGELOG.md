@@ -217,6 +217,24 @@
   session databases migrate additively and backfill on the next scan (the first
   run re-indexes once).
 
+- **Interactive session browser — `agents sessions --active` and a bare `agents sessions`
+  now open a live, filterable picker on a TTY (RUSH-1802).** One canonical filter driven by
+  single keys, re-pulled across the fleet as you toggle: `s` search, `r` running-only, `c`
+  teams, `a` agent (cycles), `d` device (cycles), `p` this-repo↔all-dirs, `w` time window;
+  filters **stack** (AND together) and the active set shows in the header, with a live
+  preview of the highlighted row and `⏎` to resume/attach via the existing dispatch. Every
+  hotkey mirrors a flag, so the view is reproducible as a command — `y` copies (and
+  `--print-cmd` prints) the exact `ag sessions …` line the filters map to, bridging the
+  human picker and the agent/script flag surface. The interactive front-end is TTY-only:
+  `--json`, a pipe, or the new `--no-interactive` keep the existing static listing verbatim,
+  so scripts and headless agents are unchanged. Adds `-p` as the short form of `--project`,
+  `--print-cmd`, `--preview` (`agents sessions <id> --preview` prints the compact digest
+  without the pager), and `--no-interactive`. Built on a new async-refetch `dynamicPicker`
+  variant that reuses the existing render/pagination/preview machinery, the fleet SSH
+  fan-out, and the resume/focus path. Source: `apps/cli/src/lib/picker.ts` (`dynamicPicker`),
+  `apps/cli/src/commands/sessions-browser.ts` (+ `sessions-browser.test.ts`),
+  `apps/cli/src/commands/sessions.ts`.
+
 ## 1.20.58
 
 ### Added
