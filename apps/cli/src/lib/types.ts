@@ -786,6 +786,16 @@ export interface Meta {
    * Full shape in `lib/fleet/types.ts` (FleetManifest).
    */
   fleet?: import('./fleet/types.js').FleetManifest;
+  /** `agents share` endpoint (Cloudflare R2 + Worker). Set by `agents share
+   * setup`/`join`; syncs fleet-wide via `agents repo push/pull`. The write token
+   * lives in the `share` secrets bundle, not here. */
+  share?: {
+    baseUrl?: string;
+    accountId?: string;
+    workerName?: string;
+    bucketName?: string;
+    domain?: string;
+  };
 }
 
 /** Persisted agent-host entry in agents.yaml (overlay or inline). */

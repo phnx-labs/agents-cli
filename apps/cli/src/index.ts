@@ -136,6 +136,7 @@ import {
   loadPush,
   loadRepo,
   loadSetup,
+  loadShare,
   loadFeed,
   loadMailboxes,
   type ModuleLoader,
@@ -799,6 +800,7 @@ async function registerEagerForRequest(name: string): Promise<boolean> {
  */
 async function registerAllEagerCommands(): Promise<void> {
   await reg(loadView);
+  await reg(loadShare);
   await reg(loadInspect);
   await reg(loadFeedback);
   await reg(loadCommands);
