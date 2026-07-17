@@ -524,6 +524,12 @@ export function registerRunCommand(program: Command): void {
         skip  bypass every permission prompt (dangerously-skip-permissions)
         Legacy 'full' is silently rewritten to 'skip'.
 
+      Headless plan support (a prompt makes the run headless):
+        plan works headless on claude, codex, droid, opencode.
+        kimi, grok, cursor, antigravity have no headless plan mode — a headless
+        --mode plan auto-downgrades to --mode auto (with a stderr warning).
+        Interactive plan (omit the prompt) works everywhere it is listed.
+
       Run strategy (set via --strategy or run.<agent>.strategy in agents.yaml):
         pinned     use the workspace/global pinned version
         available  use pinned if it can run right now; otherwise switch to another signed-in version
