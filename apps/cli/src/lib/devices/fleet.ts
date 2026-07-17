@@ -32,6 +32,19 @@ export interface FleetRunResult {
   detail?: string;
 }
 
+export interface FanOutDeviceTarget {
+  name: string;
+  skip?: FleetSkipReason | string;
+}
+
+export interface FanOutDeviceResult<T> {
+  name: string;
+  status: 'ok' | 'failed' | 'skipped';
+  value?: T;
+  error?: string;
+  reason?: FleetSkipReason | string;
+}
+
 /**
  * Classify each registered device for a fleet operation.
  *
@@ -165,4 +178,33 @@ export function runFleet(
     }
   }
   return results;
+}
+
+/** Run one async probe per device in parallel, preserving input order. */
+export async function fanOutDevices<T, Target extends FanOutDeviceTarget = FanOutDeviceTarget>(
+  targets: Target[],
+  probe: (target: Target) => Promise<T>,
+): Promise<FanOutDeviceResult<T>[]> {
+  return Promise.all(targets.map(async (target) => {
+    if (target.skip) {
+      return {
+        name: target.name,
+        status: 'skipped' as const,
+        reason: target.skip,
+      };
+    }
+    try {
+      return {
+        name: target.name,
+        status: 'ok' as const,
+        value: await probe(target),
+      };
+    } catch (err) {
+      return {
+        name: target.name,
+        status: 'failed' as const,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }));
 }

@@ -17,6 +17,7 @@ import * as os from 'os';
 import * as path from 'path';
 import chalk from 'chalk';
 import ora from 'ora';
+import packageJson from '../../package.json' with { type: 'json' };
 import { readAndResolveBundleEnv, isHeadlessSecretsContext } from '../lib/secrets/bundles.js';
 import { machineId } from '../lib/session/sync/config.js';
 import {
@@ -52,20 +53,33 @@ import {
 } from '../lib/devices/connect.js';
 import { ensureManagedKnownHostsDir, isHostPinned } from '../lib/devices/known-hosts.js';
 import {
+  fanOutDevices,
   planFleetTargets,
   runFleet,
   skipLabel,
   upgradeCommand,
+  type FanOutDeviceTarget,
   type FleetRunResult,
 } from '../lib/devices/fleet.js';
 import {
   fleetCapacity,
   fmtBytes,
   headroom,
+  probeLocalStats,
   probeFleetStats,
   type DeviceStats,
   type Headroom,
 } from '../lib/devices/health.js';
+import {
+  buildFleetHealthReport,
+  renderFleetMatrix,
+  renderFleetWarnings,
+  type FleetHealthRow,
+} from '../lib/devices/health-report.js';
+import { checkSyncStatus, countOrphans } from '../lib/drift.js';
+import { checkAllClis } from '../lib/teams/agents.js';
+import { buildRemoteAgentsInvocation } from '../lib/hosts/remote-cmd.js';
+import { sshExec, sshExecAsync } from '../lib/ssh-exec.js';
 
 /** One-line summary of a device for `list`. `isSelf` marks the machine this
  * command is running on so it stands out from the rest of the tailnet. */
@@ -275,6 +289,104 @@ function printFleetResults(results: FleetRunResult[]): void {
   if (failed > 0) process.exitCode = 1;
 }
 
+interface RemoteDoctorJson {
+  clis?: FleetHealthRow['clis'];
+  sync?: FleetHealthRow['sync'];
+  orphans?: FleetHealthRow['orphans'];
+}
+
+interface FleetStatusTarget extends FanOutDeviceTarget {
+  platform?: string;
+}
+
+function localHealthRow(self: string, stats?: DeviceStats): FleetHealthRow {
+  return {
+    name: self,
+    platform: process.platform === 'darwin' ? 'macos' : process.platform,
+    version: packageJson.version,
+    stats,
+    clis: checkAllClis(),
+    sync: checkSyncStatus(process.cwd()),
+    orphans: countOrphans(),
+  };
+}
+
+async function probeRemoteHealth(target: FleetStatusTarget): Promise<Omit<FleetHealthRow, 'name' | 'platform' | 'stats'>> {
+  const isWin = /^win/i.test((target.platform ?? '').trim());
+  const env = isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' };
+  const versionCmd = buildRemoteAgentsInvocation(['--version'], undefined, isWin ? 'windows' : undefined, env);
+  const versionRes = await sshExecAsync(target.name, versionCmd, { timeoutMs: 15000, multiplex: true });
+  const version = versionRes.code === 0 ? versionRes.stdout.trim().split(/\s+/)[0] || null : null;
+
+  const doctorCmd = buildRemoteAgentsInvocation(['doctor', '--json'], undefined, isWin ? 'windows' : undefined, env);
+  const doctorRes = await sshExecAsync(target.name, doctorCmd, { timeoutMs: 30000, multiplex: true });
+  if (doctorRes.code !== 0) {
+    throw new Error(doctorRes.timedOut ? 'timed out' : (doctorRes.stderr.trim() || `exit ${doctorRes.code ?? 'unknown'}`));
+  }
+  const parsed = JSON.parse(doctorRes.stdout) as RemoteDoctorJson;
+  return {
+    version,
+    clis: parsed.clis ?? {},
+    sync: parsed.sync ?? [],
+    orphans: parsed.orphans ?? [],
+  };
+}
+
+async function runFleetStatus(opts: { json?: boolean; strict?: boolean; stats?: boolean }): Promise<void> {
+  const reg = await loadDevices();
+  const self = machineId();
+  const planned = planFleetTargets(reg);
+  const probeable = planned.filter((t) => !t.skip).map((t) => t.device);
+  const statsMap = opts.stats === false
+    ? new Map<string, DeviceStats>()
+    : await probeFleetStats(probeable, { selfName: self });
+  if (opts.stats !== false && !statsMap.has(self)) {
+    statsMap.set(self, await probeLocalStats(self));
+  }
+
+  const rows: FleetHealthRow[] = [localHealthRow(self, statsMap.get(self))];
+  const remoteTargets: FleetStatusTarget[] = planned
+    .filter((t) => t.device.name !== self)
+    .map((t) => ({
+      name: t.device.name,
+      platform: t.device.platform,
+      skip: t.skip,
+    }));
+  const remote = await fanOutDevices(remoteTargets, probeRemoteHealth);
+  for (const result of remote) {
+    const profile = reg[result.name];
+    if (result.status === 'ok' && result.value) {
+      rows.push({
+        name: result.name,
+        platform: profile?.platform,
+        stats: statsMap.get(result.name),
+        ...result.value,
+      });
+    } else {
+      rows.push({
+        name: result.name,
+        platform: profile?.platform,
+        stats: statsMap.get(result.name),
+        skipped: result.reason ? String(result.reason) : undefined,
+        error: result.error,
+        clis: {},
+        sync: [],
+        orphans: [],
+      });
+    }
+  }
+
+  const report = buildFleetHealthReport(rows);
+  if (opts.json) {
+    console.log(JSON.stringify(report, null, 2));
+  } else {
+    for (const line of renderFleetWarnings(report)) console.log(line);
+    console.log();
+    for (const line of renderFleetMatrix(report)) console.log(line);
+  }
+  if (opts.strict && report.hasWarnings) process.exitCode = 1;
+}
+
 /** Register the `agents devices` command tree (also aliased as `fleet`). */
 function registerDevicesCommands(program: Command): void {
   const devicesCmd = program
@@ -403,6 +515,16 @@ Typical workflow:
 
       console.log(chalk.bold(`Devices (${names.length})`));
       for (const line of renderDeviceTable(reg, names, self, statsMap, opts.full)) console.log(line);
+    });
+
+  devicesCmd
+    .command('status')
+    .description('Show fleet health: warnings rollup, per-device sync drift, CLI readiness, version skew, and resource headroom.')
+    .option('--json', 'output machine-readable JSON')
+    .option('--strict', 'exit non-zero when any device has drift or is unreachable')
+    .option('--no-stats', 'skip the live resource probe')
+    .action(async (opts: { json?: boolean; strict?: boolean; stats?: boolean }) => {
+      await runFleetStatus(opts);
     });
 
   devicesCmd

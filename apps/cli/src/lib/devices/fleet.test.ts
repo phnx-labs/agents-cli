@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   planFleetTargets,
+  fanOutDevices,
   runFleet,
   skipLabel,
   upgradeCommand,
@@ -92,6 +93,42 @@ describe('runFleet', () => {
     });
     expect(results.map((r) => r.status)).toEqual(['ok', 'failed', 'ok']);
     expect(results[1].detail).toMatch(/password auth/);
+  });
+});
+
+describe('fanOutDevices', () => {
+  it('runs targets concurrently while preserving input order', async () => {
+    const started: string[] = [];
+    const results = await fanOutDevices(
+      [{ name: 'slow' }, { name: 'fast' }],
+      async (target) => {
+        started.push(target.name);
+        if (target.name === 'slow') await new Promise((resolve) => setTimeout(resolve, 20));
+        return `${target.name}-ok`;
+      },
+    );
+
+    expect(started).toEqual(['slow', 'fast']);
+    expect(results.map((r) => [r.name, r.status, r.value])).toEqual([
+      ['slow', 'ok', 'slow-ok'],
+      ['fast', 'ok', 'fast-ok'],
+    ]);
+  });
+
+  it('records skipped and failed devices without aborting the fan-out', async () => {
+    const results = await fanOutDevices(
+      [{ name: 'a' }, { name: 'b', skip: 'offline' }, { name: 'c' }],
+      async (target) => {
+        if (target.name === 'c') throw new Error('timed out');
+        return target.name;
+      },
+    );
+
+    expect(results).toEqual([
+      { name: 'a', status: 'ok', value: 'a' },
+      { name: 'b', status: 'skipped', reason: 'offline' },
+      { name: 'c', status: 'failed', error: 'timed out' },
+    ]);
   });
 });
 

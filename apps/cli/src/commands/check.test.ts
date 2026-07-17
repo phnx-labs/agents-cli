@@ -123,4 +123,29 @@ describe('agents check — CI drift gate exit code', () => {
     expect(parsed.hasDrift).toBe(true);
     expect(parsed.stale).toBe(1);
   });
+
+  it('--devices exits non-zero when any registered device is unreachable', () => {
+    seedHome();
+    const registryDir = path.join(testHome, '.agents', '.history', 'devices');
+    fs.mkdirSync(registryDir, { recursive: true });
+    fs.writeFileSync(path.join(registryDir, 'registry.json'), JSON.stringify({
+      deadbox: {
+        name: 'deadbox',
+        platform: 'linux',
+        shell: 'posix',
+        user: 'muqsit',
+        address: { via: 'manual', dnsName: 'deadbox.example.invalid' },
+        auth: { method: 'key' },
+        tailscale: { online: false, direct: false, lastSeen: '2026-07-17T00:00:00.000Z' },
+        createdAt: '2026-07-17T00:00:00.000Z',
+        updatedAt: '2026-07-17T00:00:00.000Z',
+      },
+    }, null, 2));
+
+    const r = runCheck('--devices', '--json');
+    expect(r.status).not.toBe(0);
+    const parsed = JSON.parse(r.stdout);
+    expect(parsed.hasDrift).toBe(true);
+    expect(parsed.devices.some((d: any) => d.device === 'deadbox' && d.error === 'offline')).toBe(true);
+  });
 });

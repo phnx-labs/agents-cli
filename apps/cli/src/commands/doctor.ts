@@ -25,8 +25,9 @@ import type { Command } from 'commander';
 import { addHostOption } from '../lib/hosts/option.js';
 import { buildRemoteAgentsInvocation } from '../lib/hosts/remote-cmd.js';
 import { loadDevices, isControlDevice } from '../lib/devices/registry.js';
+import { fanOutDevices } from '../lib/devices/fleet.js';
 import { resolveHost } from '../lib/hosts/registry.js';
-import { sshExec } from '../lib/ssh-exec.js';
+import { sshExecAsync } from '../lib/ssh-exec.js';
 import { sshTargetFor } from '../lib/hosts/types.js';
 import { machineId } from '../lib/session/sync/config.js';
 import chalk from 'chalk';
@@ -342,7 +343,7 @@ async function probeFleetTarget(target: FleetTarget): Promise<DeviceDoctorResult
     // prevent $HOME expansion there, so skip the bootstrap on Windows.
     isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' },
   );
-  const res = sshExec(target.sshTarget, remoteCmd, { timeoutMs: 30000, multiplex: true });
+  const res = await sshExecAsync(target.sshTarget, remoteCmd, { timeoutMs: 30000, multiplex: true });
   if (res.code !== 0) {
     return {
       name: target.name,
@@ -376,9 +377,17 @@ async function runDevicesDoctor(opts: DoctorOptions): Promise<void> {
     results.push({ name: localName, online: true, agents: await collectTeamsDoctorData() });
   }
 
-  // Remote targets in parallel.
-  const remoteResults = await Promise.all(targets.map(probeFleetTarget));
-  results.push(...remoteResults);
+  // Remote targets in parallel, through the shared fleet fan-out helper.
+  const remoteResults = await fanOutDevices(targets, probeFleetTarget);
+  results.push(...remoteResults.map((r): DeviceDoctorResult => {
+    if (r.status === 'ok' && r.value) return r.value;
+    return {
+      name: r.name,
+      online: false,
+      error: r.error ?? String(r.reason ?? 'skipped'),
+      agents: {},
+    };
+  }));
 
   if (opts.json) {
     console.log(JSON.stringify({ devices: results }, null, 2));

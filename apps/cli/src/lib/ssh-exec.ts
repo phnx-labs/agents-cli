@@ -8,7 +8,7 @@
  * canonical definition; `commands/secrets.ts` re-exports it.
  */
 
-import { spawnSync } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getCacheDir } from './state.js';
@@ -157,6 +157,53 @@ export function sshExec(target: string, remoteCmd: string, opts: SshExecOptions 
     stderr: res.stderr ?? '',
     timedOut,
   };
+}
+
+/**
+ * Async variant of {@link sshExec}. Same hardened argv composition, but uses
+ * child_process.spawn so fleet fan-outs can probe multiple hosts concurrently.
+ */
+export function sshExecAsync(target: string, remoteCmd: string, opts: SshExecOptions = {}): Promise<SshExecResult> {
+  assertValidSshTarget(target);
+  const mux = opts.multiplex === false ? [] : controlOpts();
+  const args = [...sshConnectOpts(mux, opts.hostKeyOpts), ...(opts.extraSshArgs ?? []), target, remoteCmd];
+  return new Promise((resolve) => {
+    const child = spawn('ssh', args, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    let timedOut = false;
+    const timer = opts.timeoutMs
+      ? setTimeout(() => {
+          timedOut = true;
+          child.kill('SIGTERM');
+        }, opts.timeoutMs)
+      : null;
+
+    child.stdout.setEncoding('utf-8');
+    child.stderr.setEncoding('utf-8');
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+
+    if (opts.input !== undefined) child.stdin.end(opts.input);
+    else child.stdin.end();
+
+    child.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve({ code: null, stdout, stderr: stderr + err.message, timedOut });
+    });
+    child.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve({ code, stdout, stderr, timedOut });
+    });
+  });
 }
 
 export interface SshExecRawResult {

@@ -424,6 +424,9 @@ agents sync --host gpu-box              # make the remote machine current
 agents doctor --devices                 # readiness matrix for every registered device
 agents doctor --devices --json          # machine-readable fleet readiness
 agents doctor --device mac-mini         # same matrix, scoped to one device
+agents fleet status                     # warnings rollup + health/sync/version matrix
+agents fleet status --json --strict     # scriptable fleet health gate
+agents check --devices                  # CI drift gate across every registered device
 
 # Your Tailscale fleet, auto-discovered
 agents devices sync                     # ingest `tailscale status`
