@@ -528,6 +528,10 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       workflows: false,
       memory: true,
       modes: ['plan', 'edit', 'skip'],
+      // grok's `--permission-mode plan` silently stalls a headless `-p` run at
+      // its ExitPlanMode gate (no TTY to approve). Headless plan auto-downgrades
+      // to auto (→ edit via resolveMode). Interactive plan is unaffected.
+      headlessPlan: false,
       rulesImports: true,
     },
   },
@@ -567,6 +571,10 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       workflows: true,
       memory: false,
       modes: ['plan', 'edit', 'auto', 'skip'],
+      // kimi's headless `-p` refuses to combine with `--plan` (`Cannot combine
+      // --prompt with --plan`). Headless plan auto-downgrades to auto (kimi -p
+      // auto-runs). Interactive plan is unaffected.
+      headlessPlan: false,
       rulesImports: false,
     },
   },

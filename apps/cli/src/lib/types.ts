@@ -172,6 +172,16 @@ export interface AgentConfig {
      */
     modes: Mode[];
     /**
+     * Whether `plan` mode works in a HEADLESS run (`--prompt`/`-p`). Some CLIs
+     * list a `plan` mode that only works interactively — kimi refuses `--prompt`
+     * combined with `--plan`, and grok's `--permission-mode plan` silently stalls
+     * a headless run at its ExitPlanMode gate. Absent (undefined) means true:
+     * headless plan is assumed to work unless a agent opts out with `false`, in
+     * which case a headless `--mode plan` request auto-downgrades to `auto`
+     * (see resolveHeadlessMode). Interactive plan is unaffected.
+     */
+    headlessPlan?: boolean;
+    /**
      * Whether the agent natively resolves `@path/to/file` imports inside its
      * rules file at session start. If false, agents-cli must pre-compile the
      * rules file (inline all @-imports) when syncing it into the version home.
