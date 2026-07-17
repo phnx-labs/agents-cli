@@ -771,6 +771,31 @@ Sources: a command's stdout (`--watch` / `--poll`), an HTTP endpoint (`--poll-ht
 
 ---
 
+## Share
+
+```bash
+# Publish an HTML artifact to a public link on your own Cloudflare R2 (~$0).
+agents share setup                                  # once: provision bucket + Worker on your CF
+agents share plan.html --slug fleet --expire 30d    # → https://<base>/fleet
+agents share status                                 # show the endpoint
+```
+
+`agents share` closes the loop: an agent makes work (a plan, a viz, a report),
+publishes it, and you open the link to see it. `setup` reads a Cloudflare API token
+from your `cloudflare.com` secrets bundle (or `--token`), creates an R2 bucket, uploads
+a tiny Worker, and enables the free `*.workers.dev` subdomain (or maps `--domain
+share.example.com` when the token owns the zone). Writes are bearer-gated **through**
+the Worker (its R2 binding does the put, so the client needs no S3 keys); reads are
+**public**, so a link outlives the agent. R2 has zero egress + a 10 GB free tier, so
+this is effectively free.
+
+**Fleet mode:** provision one endpoint, then every fleet / cloud / ephemeral agent
+publishes through it with a shared write token — `agents share join <baseUrl>` uses an
+existing endpoint with no provisioning. `--expire 30d|12h|<date>` auto-expires a link.
+See [docs/share.md](apps/cli/docs/share.md).
+
+---
+
 ## PTY
 
 ```bash
