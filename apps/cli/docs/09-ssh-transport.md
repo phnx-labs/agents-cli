@@ -119,7 +119,9 @@ target itself with `pinHostKey` (ssh-keyscan against the alias's real
 `--copy-creds` works for ssh-config-alias hosts instead of dead-ending.
 **Remaining:** the broad `accept-new` baseline still governs
 non-credential fan-outs (`sessions --host`, the browser driver, `fleet run`),
-which learn keys into the managed store but don't yet verify strictly.
+which still use OpenSSH default `~/.ssh/known_hosts`, not the managed store, so
+they neither pin into it nor verify against it. Wiring those call sites onto the
+managed store (so they verify strictly too) is follow-up.
 
 ### 3. The follow loop: one round-trip per cycle (P1)
 
