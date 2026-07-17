@@ -745,6 +745,10 @@ Jobs run sandboxed -- agents only see directories and tools you explicitly allow
 
 ## Monitors
 
+<p align="center">
+  <img src="assets/monitors.svg" alt="agents monitors: a watched source (poll a command, an HTTP endpoint, or a fleet device) flows into a condition (changed? matched? deduped by a native state store) that fires an action — run an agent with the event in its prompt, kick a routine, or notify. Pin the owner device for exactly-once." width="100%" />
+</p>
+
 ```bash
 # Routines fire on a clock. Monitors fire on a change: watch a source, and when
 # it flips, spawn an agent, kick a routine, or notify. The cross-agent layer --

@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 820" role="img" aria-label="agents monitors: a watched source (poll a command, an endpoint, or a fleet device) flows into a condition (changed? matched? deduped by a native state store) which fires an action (run an agent with the event in its prompt, kick a routine, or notify). Routines fire on a clock; monitors fire on a change.">
+  <defs>
+    <radialGradient id="bgVignette" cx="50%" cy="40%" r="80%">
+      <stop offset="0%"  stop-color="#0d0d0d"/>
+      <stop offset="100%" stop-color="#040404"/>
+    </radialGradient>
+    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M 48 0 L 0 0 0 48" fill="none" stroke="#0f0f0f" stroke-width="1"/>
+    </pattern>
+    <linearGradient id="cardFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#131313"/>
+      <stop offset="100%" stop-color="#0a0a0a"/>
+    </linearGradient>
+    <linearGradient id="cardFillActive" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#12160b"/>
+      <stop offset="100%" stop-color="#0b0d07"/>
+    </linearGradient>
+    <linearGradient id="cardRim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2e2e2e"/>
+      <stop offset="50%" stop-color="#242424"/>
+      <stop offset="100%" stop-color="#1c1c1c"/>
+    </linearGradient>
+    <filter id="limeGlow" x="-40%" y="-60%" width="180%" height="220%">
+      <feGaussianBlur stdDeviation="3.5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="softShadow" x="-15%" y="-15%" width="130%" height="140%">
+      <feGaussianBlur stdDeviation="16" result="blur"/>
+      <feOffset dy="12" result="offset"/>
+      <feColorMatrix in="offset" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.55 0" result="shadow"/>
+      <feMerge><feMergeNode in="shadow"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <marker id="arrowLime" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#B6E84A"/>
+    </marker>
+    <style><![CDATA[
+      .section    { font: 600 13px -apple-system, "SF Pro Display", "Inter", system-ui, sans-serif; letter-spacing: 0.34em; fill: #B6E84A; }
+      .title      { font: 500 40px -apple-system, "SF Pro Display", "Inter", system-ui, sans-serif; fill: #f2f2f2; letter-spacing: -0.02em; }
+      .subtitle   { font: 400 20px -apple-system, "SF Pro Display", "Inter", system-ui, sans-serif; fill: #808080; }
+      .cardmeta   { font: 600 13px ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: 0.26em; fill: #6a6a6a; }
+      .cardmetaA  { font: 600 13px ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: 0.26em; fill: #B6E84A; }
+      .cardcap    { font: 500 15px -apple-system, "SF Pro Display", "Inter", system-ui, sans-serif; fill: #707070; }
+      .mono       { font: 500 21px ui-monospace, "SF Mono", Menlo, monospace; fill: #e6e6e6; }
+      .mono-mut   { font: 500 19px ui-monospace, "SF Mono", Menlo, monospace; fill: #7a7a7a; }
+      .mono-acc   { font: 600 21px ui-monospace, "SF Mono", Menlo, monospace; fill: #B6E84A; }
+      .flag       { font: 600 18px ui-monospace, "SF Mono", Menlo, monospace; fill: #c9d98a; }
+      .edge       { font: 600 12px -apple-system, "SF Pro Display", "Inter", system-ui, sans-serif; letter-spacing: 0.22em; fill: #6a6a6a; }
+      .note       { font: 400 18px -apple-system, "SF Pro Display", "Inter", system-ui, sans-serif; fill: #6f6f6f; }
+      .note-acc   { font: 500 18px -apple-system, "SF Pro Display", "Inter", system-ui, sans-serif; fill: #B6E84A; }
+    ]]></style>
+  </defs>
+
+  <rect width="1600" height="820" fill="url(#bgVignette)"/>
+  <rect width="1600" height="820" fill="url(#grid)"/>
+
+  <!-- header -->
+  <text x="100" y="96" class="section">AGENTS MONITORS</text>
+  <text x="100" y="150" class="title">Watch a source. Fire an agent on change.</text>
+  <text x="100" y="186" class="subtitle">Routines fire on a clock — monitors fire on a change.</text>
+
+  <!-- ============ SOURCE ============ -->
+  <g filter="url(#softShadow)">
+    <rect x="90" y="256" width="400" height="330" rx="22" fill="url(#cardFill)" stroke="url(#cardRim)" stroke-width="1.5"/>
+  </g>
+  <text x="122" y="306" class="cardmeta">SOURCE</text>
+  <line x1="122" y1="326" x2="458" y2="326" stroke="#232323" stroke-width="1"/>
+  <text x="122" y="376" class="mono">--poll <tspan class="flag">'gh pr checks'</tspan></text>
+  <text x="122" y="414" class="mono-mut">--poll-http · --watch-file</text>
+  <text x="122" y="452" class="mono">--watch-device <tspan class="mono-acc">mac-mini</tspan></text>
+  <text x="122" y="490" class="mono-mut">--on · --ws</text>
+  <text x="122" y="556" class="cardcap">what to watch</text>
+
+  <!-- arrow -->
+  <line x1="502" y1="421" x2="586" y2="421" stroke="#B6E84A" stroke-width="2.5" marker-end="url(#arrowLime)" filter="url(#limeGlow)"/>
+
+  <!-- ============ CONDITION ============ -->
+  <g filter="url(#softShadow)">
+    <rect x="600" y="256" width="400" height="330" rx="22" fill="url(#cardFill)" stroke="url(#cardRim)" stroke-width="1.5"/>
+  </g>
+  <text x="632" y="306" class="cardmeta">CONDITION</text>
+  <line x1="632" y1="326" x2="968" y2="326" stroke="#232323" stroke-width="1"/>
+  <text x="632" y="376" class="mono">--on-change <tspan class="mono-mut">(diff)</tspan></text>
+  <text x="632" y="414" class="mono">--match <tspan class="flag">'fail'</tspan></text>
+  <text x="632" y="452" class="mono-mut">--every · --dedupe-key</text>
+  <text x="632" y="490" class="mono-mut">state.json · silent baseline</text>
+  <text x="632" y="556" class="cardcap">did it change?</text>
+
+  <!-- arrow -->
+  <line x1="1012" y1="421" x2="1096" y2="421" stroke="#B6E84A" stroke-width="2.5" marker-end="url(#arrowLime)" filter="url(#limeGlow)"/>
+
+  <!-- ============ ACTION (active) ============ -->
+  <g filter="url(#softShadow)">
+    <rect x="1110" y="256" width="400" height="330" rx="22" fill="url(#cardFillActive)" stroke="#B6E84A" stroke-width="1.6" filter="url(#limeGlow)"/>
+  </g>
+  <text x="1142" y="306" class="cardmetaA">ACTION</text>
+  <line x1="1142" y1="326" x2="1478" y2="326" stroke="#2c3a18" stroke-width="1"/>
+  <text x="1142" y="376" class="mono-acc">--run claude</text>
+  <text x="1142" y="414" class="mono">--prompt <tspan class="flag">'…{event}…'</tspan></text>
+  <text x="1142" y="452" class="mono-mut">--routine · --notify</text>
+  <text x="1142" y="490" class="mono-mut">--webhook-out</text>
+  <text x="1142" y="556" class="cardcap">fire on change</text>
+
+  <!-- placement chip under action -->
+  <rect x="1110" y="612" width="400" height="46" rx="14" fill="#0e120b" stroke="#2c3a18" stroke-width="1"/>
+  <text x="1142" y="641" class="flag">--device <tspan class="mono-mut" style="fill:#7a7a7a">owner · exactly-once</tspan></text>
+
+  <!-- footer note -->
+  <text x="100" y="726" class="note">The cross-agent layer — <tspan class="note-acc">agents watching sources</tspan> (the fleet, other agents) and firing agents in response.</text>
+  <text x="100" y="762" class="note"><tspan class="mono-mut" style="font-size:16px">agents monitors test &lt;name&gt;</tspan>  dry-runs the source once and shows what it would fire — no action taken.</text>
+</svg>
