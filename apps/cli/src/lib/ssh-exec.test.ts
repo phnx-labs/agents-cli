@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { assertValidSshTarget, SSH_TARGET_RE, shellQuote, controlOpts, SSH_OPTS, sshConnectOpts } from './ssh-exec.js';
+import * as os from 'os';
+import { assertValidSshTarget, SSH_TARGET_RE, shellQuote, controlOpts, SSH_OPTS, sshConnectOpts, sshExecAsync } from './ssh-exec.js';
 
 describe('assertValidSshTarget', () => {
   it('accepts bare host aliases and user@host', () => {
@@ -96,5 +97,44 @@ describe('controlOpts (connection multiplexing)', () => {
     expect(cp).toContain('%C');
     const dir = path.dirname(cp!.replace('ControlPath=', ''));
     expect(fs.existsSync(dir)).toBe(true);
+  });
+});
+
+describe('sshExecAsync (real spawn via a PATH ssh stub — no mocks)', () => {
+  // Put a genuine executable named `ssh` first on PATH so sshExecAsync's spawn('ssh')
+  // runs it: a real subprocess round-trip that exercises stdout/stderr capture,
+  // exit-code propagation, and the timeout -> SIGTERM path — the primitive the fleet
+  // fan-out is built on — without needing a reachable host.
+  function withStubSsh<T>(script: string, fn: () => Promise<T>): Promise<T> {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sshstub-'));
+    fs.writeFileSync(path.join(dir, 'ssh'), script, { mode: 0o755 });
+    const prevPath = process.env.PATH;
+    process.env.PATH = dir + path.delimiter + prevPath;
+    return fn().finally(() => {
+      process.env.PATH = prevPath;
+      fs.rmSync(dir, { recursive: true, force: true });
+    });
+  }
+
+  it('captures stdout/stderr and propagates the exit code from a real spawn', async () => {
+    const res = await withStubSsh(
+      '#!/bin/sh\nprintf "OUT_OK"\nprintf "ERR_OK" 1>&2\nexit 7\n',
+      () => sshExecAsync('testhost', 'echo hi', { multiplex: false }),
+    );
+    expect(res.stdout).toContain('OUT_OK');
+    expect(res.stderr).toContain('ERR_OK');
+    expect(res.code).toBe(7);
+    expect(res.timedOut).toBe(false);
+  });
+
+  it('kills the child and flags timedOut when it exceeds timeoutMs', async () => {
+    const res = await withStubSsh(
+      // exec so the killed pid IS the sleep (its stdio pipes close on death, firing
+      // 'close'); a plain `sleep` child would orphan and hold the pipes open.
+      '#!/bin/sh\nexec sleep 30\n',
+      () => sshExecAsync('testhost', 'slow', { multiplex: false, timeoutMs: 150 }),
+    );
+    expect(res.timedOut).toBe(true);
+    expect(res.code).toBeNull(); // SIGTERM-terminated child closes with a null exit code
   });
 });

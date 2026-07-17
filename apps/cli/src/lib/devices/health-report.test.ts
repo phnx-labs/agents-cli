@@ -68,5 +68,11 @@ describe('fleet health renderers', () => {
     expect(matrix).toContain('fresh-box');
     expect(matrix).toContain('drift-box');
     expect(matrix).toContain('cold');
+    // Header must reserve the same 2-char status-glyph slot the rows prepend, so every
+    // column lines up (regression guard for the shipped-broken-table review fix).
+    const mlines = matrix.split('\n');
+    const header = mlines.find((l) => l.includes('Device'))!;
+    const dataRow = mlines.find((l) => l.includes('fresh-box'))!;
+    expect(header.indexOf('Device')).toBe(dataRow.indexOf('fresh-box'));
   });
 });

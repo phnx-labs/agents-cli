@@ -190,12 +190,14 @@ export function renderFleetMatrix(report: FleetHealthReport): string[] {
     Math.max(7, ...report.devices.map((r) => (r.version ?? '-').length)),
   );
   const width = terminalWidth();
-  const fixed = 2 + nameW + 2 + 8 + 2 + 9 + 2 + 9 + 2 + versionW + 2 + 9 + 2 + 9;
+  // 4 = leading "  " + the per-row status glyph + its trailing space (rows prefix
+  // `  ${statusGlyph} `; the header reserves the same 4 cols so every column lines up).
+  const fixed = 4 + nameW + 2 + 8 + 2 + 9 + 2 + 9 + 2 + versionW + 2 + 9 + 2 + 9;
   const noteW = Math.max(12, width - fixed);
   const lines = [
     chalk.bold('Fleet status'),
     chalk.gray(
-      `  ${padToWidth('Device', nameW)}  ${padToWidth('OS', 8)}  ${padToWidth('Health', 9)}  ${padToWidth('Sync', 9)}  ${padToWidth('CLI', 9)}  ${padToWidth('Version', versionW)}  ${padToWidth('Load/Mem', 9)}  Note`,
+      `    ${padToWidth('Device', nameW)}  ${padToWidth('OS', 8)}  ${padToWidth('Health', 9)}  ${padToWidth('Sync', 9)}  ${padToWidth('CLI', 9)}  ${padToWidth('Version', versionW)}  ${padToWidth('Load/Mem', 9)}  Note`,
     ),
   ];
   for (const row of report.devices) {
