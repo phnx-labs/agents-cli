@@ -19,6 +19,7 @@ import { resolveRemoteOsSync } from './remote-os.js';
 import { saveTask, updateTask, terminalPatch, type HostTask } from './tasks.js';
 import { followHostTask } from './progress.js';
 import { wrapHostCommandWithCredentials, type HostCredentials } from './credentials.js';
+import { hostKeyCheckingOpts } from '../devices/known-hosts.js';
 
 // Use $HOME (not ~) so the path is correct whether or not it's quoted and
 // regardless of the run's cwd. Task ids are 8 hex chars, so these paths are
@@ -219,10 +220,20 @@ async function launchDetached(host: Host, target: string, opts: LaunchOptions): 
     inner = wrapHostCommandWithCredentials(inner, opts.copyCreds);
   }
 
+  // When credentials ride this launch, verify the host key strictly against the
+  // managed pin (the gate in exec.ts already required the host to be pinned) and
+  // force a fresh connection — reusing a control socket opened by an earlier
+  // accept-new connection would bypass the strict check (RUSH-1767).
+  const credHostKeyOpts = opts.copyCreds ? hostKeyCheckingOpts(true) : undefined;
+
   // Outer: ensure dir, launch the login-shell wrapper as a new process-group
   // leader, and print that leader PID.
   const launch = `mkdir -p ${REMOTE_DIR}; ${buildDetachedLaunchCommand(inner)}`;
-  const res = sshExec(target, launch, { timeoutMs: 30000, multiplex: true });
+  const res = sshExec(target, launch, {
+    timeoutMs: 30000,
+    multiplex: !opts.copyCreds,
+    hostKeyOpts: credHostKeyOpts,
+  });
   if (res.code !== 0) {
     throw new Error(`Failed to launch on "${host.name}": ${(res.stderr || res.stdout).trim() || 'ssh error'}`);
   }
@@ -463,7 +474,15 @@ export async function runInteractiveOnHost(host: Host, opts: InteractiveDispatch
   if (opts.copyCreds) {
     remoteCmd = wrapHostCommandWithCredentials(remoteCmd, opts.copyCreds);
   }
-  return sshStream(target, remoteCmd, { tty: process.stdin.isTTY, multiplex: true });
+  // Credentials ride this stream when --copy-creds is set: verify the host key
+  // strictly against the managed pin and force a fresh connection so a stale
+  // accept-new control socket can't bypass the check (RUSH-1767).
+  const credHostKeyOpts = opts.copyCreds ? hostKeyCheckingOpts(true) : undefined;
+  return sshStream(target, remoteCmd, {
+    tty: process.stdin.isTTY,
+    multiplex: !opts.copyCreds,
+    hostKeyOpts: credHostKeyOpts,
+  });
 }
 
 /** Dispatch an `agents run <agent> "<prompt>"` onto a host (the `run --host` path). */

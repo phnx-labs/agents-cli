@@ -94,6 +94,19 @@ export function controlOpts(): string[] {
   ];
 }
 
+/**
+ * Compose an ssh connection-option prefix.
+ *
+ * `hostKeyOpts` (a caller's host-key posture, e.g. a pinned
+ * `StrictHostKeyChecking=yes` + managed `UserKnownHostsFile`) go FIRST, ahead of
+ * the `SSH_OPTS` baseline: ssh honors the *first* value it sees for each option,
+ * so an override placed after the baseline's `accept-new` would be silently
+ * ignored. Pure so the ordering contract is unit-testable. See RUSH-1767.
+ */
+export function sshConnectOpts(mux: string[], hostKeyOpts?: string[]): string[] {
+  return [...(hostKeyOpts ?? []), ...SSH_OPTS, ...mux];
+}
+
 export interface SshExecOptions {
   /** Piped to the remote command's stdin (never interpolated into the shell). */
   input?: string;
@@ -103,6 +116,13 @@ export interface SshExecOptions {
   extraSshArgs?: string[];
   /** Reuse a persistent control socket across calls (default true; see `controlOpts`). */
   multiplex?: boolean;
+  /**
+   * Host-key `-o` options that OVERRIDE the accept-new baseline — prepended so
+   * ssh's first-value-wins rule takes them (see {@link sshConnectOpts}). Used to
+   * force strict verification against the managed known_hosts store on the
+   * credential-copy path (RUSH-1767).
+   */
+  hostKeyOpts?: string[];
 }
 
 export interface SshExecResult {
@@ -122,7 +142,7 @@ export interface SshExecResult {
 export function sshExec(target: string, remoteCmd: string, opts: SshExecOptions = {}): SshExecResult {
   assertValidSshTarget(target);
   const mux = opts.multiplex === false ? [] : controlOpts();
-  const args = [...SSH_OPTS, ...mux, ...(opts.extraSshArgs ?? []), target, remoteCmd];
+  const args = [...sshConnectOpts(mux, opts.hostKeyOpts), ...(opts.extraSshArgs ?? []), target, remoteCmd];
   const res = spawnSync('ssh', args, {
     input: opts.input,
     encoding: 'utf-8',
@@ -156,7 +176,7 @@ export interface SshExecRawResult {
 export function sshExecRaw(target: string, remoteCmd: string, opts: SshExecOptions = {}): SshExecRawResult {
   assertValidSshTarget(target);
   const mux = opts.multiplex === false ? [] : controlOpts();
-  const args = [...SSH_OPTS, ...mux, ...(opts.extraSshArgs ?? []), target, remoteCmd];
+  const args = [...sshConnectOpts(mux, opts.hostKeyOpts), ...(opts.extraSshArgs ?? []), target, remoteCmd];
   const res = spawnSync('ssh', args, {
     input: opts.input,
     // No `encoding` → spawnSync returns Buffers.
@@ -188,6 +208,13 @@ export interface SshStreamOptions {
   tty?: boolean;
   /** Reuse a persistent control socket across calls (default true; see `controlOpts`). */
   multiplex?: boolean;
+  /**
+   * Host-key `-o` options that OVERRIDE the accept-new baseline — prepended so
+   * ssh's first-value-wins rule takes them (see {@link sshConnectOpts}). Used to
+   * force strict verification against the managed known_hosts store on the
+   * interactive credential-copy path (RUSH-1767).
+   */
+  hostKeyOpts?: string[];
 }
 
 /**
@@ -201,7 +228,7 @@ export function sshStream(target: string, remoteCmd: string, opts: SshStreamOpti
   assertValidSshTarget(target);
   const mux = opts.multiplex === false ? [] : controlOpts();
   const tty = opts.tty ? ['-tt'] : [];
-  const args = [...SSH_OPTS, ...mux, ...tty, target, remoteCmd];
+  const args = [...sshConnectOpts(mux, opts.hostKeyOpts), ...tty, target, remoteCmd];
   const res = spawnSync('ssh', args, { stdio: 'inherit' });
   if (typeof res.status === 'number') return res.status;
   return 255; // spawn error / signal — treat as a connection-layer failure

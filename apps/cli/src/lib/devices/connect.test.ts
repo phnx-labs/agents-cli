@@ -93,4 +93,23 @@ describe('buildSshInvocation', () => {
   it('password auth without a bundle is a hard error', () => {
     expect(() => buildSshInvocation(dev({ name: 'b', auth: { method: 'password' } }), [], '/shim')).toThrow(/no secrets bundle/);
   });
+
+  it('learns the host key on first connect (accept-new) against the managed store', () => {
+    const { args } = buildSshInvocation(dev({ name: 'k', user: 'me' }), ['uptime'], '/shim', { knownHostsFile: '/managed/kh' });
+    expect(args).toContain('StrictHostKeyChecking=accept-new');
+    expect(args).toContain('UserKnownHostsFile=/managed/kh');
+    expect(args).not.toContain('StrictHostKeyChecking=yes');
+  });
+
+  it('verifies strictly once the host key is pinned (RUSH-1767: no silent TOFU re-accept)', () => {
+    const { args } = buildSshInvocation(
+      dev({ name: 'k', user: 'me' }),
+      ['uptime'],
+      '/shim',
+      { pinned: true, knownHostsFile: '/managed/kh' },
+    );
+    expect(args).toContain('StrictHostKeyChecking=yes');
+    expect(args).toContain('UserKnownHostsFile=/managed/kh');
+    expect(args).not.toContain('StrictHostKeyChecking=accept-new');
+  });
 });

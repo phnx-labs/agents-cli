@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.20.65
+
+- **SSH host-key pinning + a credential-copy gate close a TOFU machine-in-the-middle window (RUSH-1767).** The shared SSH baseline used `StrictHostKeyChecking=accept-new`, which silently trusts whatever key answers on the first connect and never re-checks it — so a machine-in-the-middle present in that window is trusted forever. The CLI now keeps its own managed `known_hosts` store (`~/.agents/.cache/devices/known_hosts`, mode 0600), kept apart from `~/.ssh/known_hosts`: `agents ssh <device>` still learns the key on first connect (`accept-new`) but writes it into that store, and every subsequent connect verifies it with `StrictHostKeyChecking=yes`, so a later key swap is refused instead of re-accepted. `agents run --host <box> --copy-creds` now **refuses** to ship credentials (and the Claude OAuth token) to a host whose key isn't pinned in that store, and when it does run it verifies the host key strictly against the pin over a fresh (non-multiplexed) connection — so tokens never ride an unverified first connect. Remaining (documented follow-up): the broad `sshExec` baseline still uses `accept-new` for non-credential fan-outs (`agents sessions --host`, the browser driver, `fleet run`), which learn keys into the managed store but don't yet verify strictly. Source: `apps/cli/src/lib/devices/known-hosts.ts`, `apps/cli/src/lib/devices/connect.ts`, `apps/cli/src/commands/ssh.ts`, `apps/cli/src/commands/exec.ts`, `apps/cli/src/lib/hosts/dispatch.ts`, `apps/cli/src/lib/ssh-exec.ts`.
+
 ## 1.20.64
 
 - **`teams` skill documents the fleet-comms surface (RUSH-1739).** The Monitoring section now points teammates-of-teams at `agents feed` (what agents need from you), `agents mailboxes` / `--watch` / `--graph` / `--between` (what agents say to each other), and the `agents message` / `agents teams message` reply path — so an operator running a team can see and answer the whole conversation. Source: `skills/teams/SKILL.md`.

@@ -18,6 +18,7 @@ import * as path from 'path';
 import { assertValidSshTarget, shellQuote } from '../ssh-exec.js';
 import { encodePwshBase64 } from '../pwsh.js';
 import { getCacheDir } from '../state.js';
+import { hostKeyCheckingOpts } from './known-hosts.js';
 import { hostNameFor } from './ssh-config.js';
 import { type DeviceProfile } from './registry.js';
 
@@ -56,21 +57,43 @@ export function wrapRemoteCommand(device: DeviceProfile, cmd: string[]): string 
   return joined;
 }
 
+/** Host-key posture for {@link buildSshInvocation}. */
+export interface SshHostKeyOptions {
+  /**
+   * True when the device's host key is already pinned in the managed
+   * known_hosts store — connections then verify with `StrictHostKeyChecking=yes`
+   * (a key swap is refused). False (the default) keeps `accept-new` for a
+   * genuine first enrollment, whose learned key lands in the managed store and
+   * pins the host for every subsequent connect. See {@link hostKeyCheckingOpts}.
+   */
+  pinned?: boolean;
+  /** Managed known_hosts path override (tests). Defaults to the CLI-managed store. */
+  knownHostsFile?: string;
+}
+
 /**
  * Build the argv (after the `ssh` program name) and the environment overlay
  * for connecting to a device. For password auth this points `SSH_ASKPASS` at
  * the shim and disables pubkey + the host's interactive password prompt so the
  * shim is the only auth path. Pure (no spawn) so it is unit-testable.
+ *
+ * Host-key checking runs against the CLI-managed known_hosts store (never the
+ * user's `~/.ssh/known_hosts`): strict once `hostKey.pinned` is set, else
+ * `accept-new` to learn+pin the key on first connect (RUSH-1767).
  */
 export function buildSshInvocation(
   device: DeviceProfile,
   cmd: string[],
   askpassShimPath: string,
+  hostKey: SshHostKeyOptions = {},
 ): { args: string[]; env: Record<string, string> } {
   const target = sshTargetFor(device);
   const remote = wrapRemoteCommand(device, cmd);
   const env: Record<string, string> = {};
-  const args: string[] = ['-o', 'StrictHostKeyChecking=accept-new', '-o', 'ConnectTimeout=10'];
+  const args: string[] = [
+    ...hostKeyCheckingOpts(hostKey.pinned ?? false, hostKey.knownHostsFile),
+    '-o', 'ConnectTimeout=10',
+  ];
 
   if (device.auth.method === 'password') {
     if (!device.auth.bundle) {

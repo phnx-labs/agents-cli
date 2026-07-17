@@ -745,6 +745,29 @@ export function registerRunCommand(program: Command): void {
           // --lease, a host is persistent, so this is strictly opt-in per run.
           let hostCopyCreds: { runtimes: AgentId[]; detected: DetectedRuntime[]; claudeCredentialsJson?: string | null } | undefined;
           if (options.copyCreds) {
+            // Refuse to copy credentials (and the Claude OAuth token) to a host
+            // whose SSH host key isn't pinned in the managed known_hosts store:
+            // the offload transport would otherwise ride an accept-new (TOFU)
+            // connection, so a machine-in-the-middle on an unverified first
+            // connect could capture the tokens. Pinning is earned by connecting
+            // once through an agents SSH path, which records + verifies the key
+            // (RUSH-1767). The dispatch itself then verifies strictly against
+            // that pin (see lib/hosts/dispatch.ts).
+            const { isHostPinned } = await import('../lib/devices/known-hosts.js');
+            const { sshResolve } = await import('../lib/hosts/ssh-config.js');
+            const pinTarget = host.address ?? sshResolve(host.name)?.hostname ?? host.name;
+            if (!isHostPinned(pinTarget)) {
+              console.error(chalk.red(
+                `Refusing --copy-creds to "${host.name}": its SSH host key isn't pinned, so the ` +
+                `credentials could be exposed to a machine-in-the-middle on an unverified first connect.`,
+              ));
+              console.error(chalk.gray(
+                `Pin the key first by connecting once so agents records and verifies it:  agents ssh ${host.name}\n` +
+                `Then re-run with --copy-creds.`,
+              ));
+              process.exit(1);
+            }
+
             const { detectSignedInRuntimes, pickRuntimes, resolveClaudeCredentialsBlob } = await import('../lib/crabbox/runtimes.js');
             const { confirm } = await import('@inquirer/prompts');
 

@@ -50,6 +50,7 @@ import {
   buildSshInvocation,
   writeAskpassShim,
 } from '../lib/devices/connect.js';
+import { ensureManagedKnownHostsDir, isHostPinned } from '../lib/devices/known-hosts.js';
 import {
   planFleetTargets,
   runFleet,
@@ -625,7 +626,14 @@ secrets bundle via an askpass shim — the password never touches argv.
 
       try {
         const shim = writeAskpassShim();
-        const { args, env } = buildSshInvocation(device, cmd, shim);
+        // Pin the host key on first connect and verify strictly thereafter: the
+        // managed known_hosts store must exist before ssh writes the learned key
+        // into it, and a host already recorded there is checked with
+        // StrictHostKeyChecking=yes (RUSH-1767).
+        ensureManagedKnownHostsDir();
+        const addr = hostNameFor(device);
+        const pinned = addr ? isHostPinned(addr) : false;
+        const { args, env } = buildSshInvocation(device, cmd, shim, { pinned });
         const res = spawnSync('ssh', args, {
           stdio: 'inherit',
           env: { ...process.env, ...env },

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { assertValidSshTarget, SSH_TARGET_RE, shellQuote, controlOpts, SSH_OPTS } from './ssh-exec.js';
+import { assertValidSshTarget, SSH_TARGET_RE, shellQuote, controlOpts, SSH_OPTS, sshConnectOpts } from './ssh-exec.js';
 
 describe('assertValidSshTarget', () => {
   it('accepts bare host aliases and user@host', () => {
@@ -56,6 +56,26 @@ describe('SSH_OPTS (hardened baseline)', () => {
     // connection can hang before ssh gives up (~45s here).
     expect(SSH_OPTS).toContain('ServerAliveInterval=15');
     expect(SSH_OPTS).toContain('ServerAliveCountMax=3');
+  });
+});
+
+describe('sshConnectOpts (host-key override ordering)', () => {
+  it('is the plain baseline when no override is given', () => {
+    expect(sshConnectOpts(['-o', 'ControlMaster=auto'])).toEqual([
+      ...SSH_OPTS,
+      '-o', 'ControlMaster=auto',
+    ]);
+  });
+
+  it('prepends host-key opts AHEAD of the accept-new baseline (RUSH-1767: ssh honors the first value)', () => {
+    const override = ['-o', 'UserKnownHostsFile=/managed/kh', '-o', 'StrictHostKeyChecking=yes'];
+    const args = sshConnectOpts([], override);
+    const firstStrict = args.indexOf('StrictHostKeyChecking=yes');
+    const baselineAcceptNew = args.indexOf('StrictHostKeyChecking=accept-new');
+    // The strict override must appear before the baseline accept-new, or ssh
+    // would silently keep accept-new and ship creds over an unverified connect.
+    expect(firstStrict).toBeGreaterThanOrEqual(0);
+    expect(baselineAcceptNew).toBeGreaterThan(firstStrict);
   });
 });
 

@@ -89,6 +89,31 @@ simply started reusing sockets. It degrades safely: if the socket can't be opene
 ssh falls back to a fresh connection, and on Windows (no `ControlMaster`) the
 helper returns `[]`.
 
+### 2b. Host-key pinning: a managed `known_hosts` (RUSH-1767)
+
+`accept-new` in the baseline is trust-on-first-use: it silently accepts whatever
+key answers on the first connect and never re-checks it, so a
+machine-in-the-middle present in that window is trusted forever. The CLI keeps its
+own `known_hosts` store — `~/.agents/.cache/devices/known_hosts` (mode 0600),
+separate from `~/.ssh/known_hosts` — so a device's key can be *pinned*
+([`known-hosts.ts`](../src/lib/devices/known-hosts.ts)):
+
+```
+UserKnownHostsFile=<managed store>   StrictHostKeyChecking=yes   ← once pinned
+UserKnownHostsFile=<managed store>   StrictHostKeyChecking=accept-new  ← first connect
+```
+
+`agents ssh <device>` learns the key on first connect (`accept-new`, written into
+the managed store) and verifies it with `StrictHostKeyChecking=yes` on every
+subsequent connect — a later key swap is refused, not re-accepted. `run --host
+--copy-creds` **refuses** a host that isn't pinned there and, when it does run,
+prepends the strict host-key opts (they must come *before* the baseline —
+`sshConnectOpts` — because ssh honors the first value seen for each option) over a
+fresh, non-multiplexed connection, so credentials never ride an unverified
+connect. **Remaining:** the broad `accept-new` baseline still governs
+non-credential fan-outs (`sessions --host`, the browser driver, `fleet run`),
+which learn keys into the managed store but don't yet verify strictly.
+
 ### 3. The follow loop: one round-trip per cycle (P1)
 
 The old loop made two calls per cycle — `tail -c +offset` for new log bytes, then
