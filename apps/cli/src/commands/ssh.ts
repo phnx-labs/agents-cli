@@ -55,6 +55,7 @@ import { ensureManagedKnownHostsDir, isHostPinned } from '../lib/devices/known-h
 import {
   fanOutDevices,
   planFleetTargets,
+  remoteFleetTargets,
   runFleet,
   skipLabel,
   upgradeCommand,
@@ -345,8 +346,7 @@ async function runFleetStatus(opts: { json?: boolean; strict?: boolean; stats?: 
   }
 
   const rows: FleetHealthRow[] = [localHealthRow(self, statsMap.get(self))];
-  const remoteTargets: FleetStatusTarget[] = planned
-    .filter((t) => t.device.name !== self)
+  const remoteTargets: FleetStatusTarget[] = remoteFleetTargets(planned, self)
     .map((t) => ({
       name: t.device.name,
       platform: t.device.platform,

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   planFleetTargets,
+  remoteFleetTargets,
   fanOutDevices,
   runFleet,
   skipLabel,
@@ -60,6 +61,25 @@ describe('planFleetTargets', () => {
     const byName = Object.fromEntries(planFleetTargets(reg).map((t) => [t.device.name, t]));
     expect(byName.worker.skip).toBeUndefined();
     expect(byName.phone.skip).toBe('control'); // update/run/list never dial it
+  });
+});
+
+describe('remoteFleetTargets (fleet health/drift gate targeting)', () => {
+  it('drops this machine and control cockpits, but keeps offline/no-address as faults', () => {
+    const reg: DeviceRegistry = {
+      zion: device({ name: 'zion', tailscale: { online: true, direct: true } }), // self
+      worker: device({ name: 'worker', tailscale: { online: true, direct: true } }),
+      cockpit: device({ name: 'cockpit', role: 'control', tailscale: { online: true, direct: true } }),
+      dead: device({ name: 'dead', tailscale: { online: false, direct: false, lastSeen: 'y' } }),
+    };
+    const targets = remoteFleetTargets(planFleetTargets(reg), 'zion');
+    const byName = Object.fromEntries(targets.map((t) => [t.device.name, t]));
+    // A registered cockpit must NOT reach the fan-out — otherwise the CI gate
+    // (check --devices / fleet status --strict) fails on every run for its skip.
+    expect(byName.cockpit).toBeUndefined();
+    expect(byName.zion).toBeUndefined(); // self is probed in-process, not fanned out
+    expect(byName.worker.skip).toBeUndefined(); // a real probe target
+    expect(byName.dead.skip).toBe('offline'); // genuine fault — kept, surfaces as unreachable
   });
 });
 

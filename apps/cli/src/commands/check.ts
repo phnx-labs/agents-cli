@@ -17,7 +17,7 @@ import { AGENTS, ALL_AGENT_IDS } from '../lib/agents.js';
 import { setHelpSections } from '../lib/help.js';
 import { computeDrift, type SyncStatusRow } from '../lib/drift.js';
 import { loadDevices } from '../lib/devices/registry.js';
-import { fanOutDevices, planFleetTargets, type FanOutDeviceTarget } from '../lib/devices/fleet.js';
+import { fanOutDevices, planFleetTargets, remoteFleetTargets, type FanOutDeviceTarget } from '../lib/devices/fleet.js';
 import { machineId } from '../lib/session/sync/config.js';
 import { buildRemoteAgentsInvocation } from '../lib/hosts/remote-cmd.js';
 import { sshExecAsync } from '../lib/ssh-exec.js';
@@ -181,8 +181,7 @@ async function runDevicesCheck(opts: CheckOptions, cwd: string): Promise<void> {
   const self = machineId();
   const planned = planFleetTargets(registry);
   const local = checkPayload(self, computeDrift(cwd));
-  const remoteTargets: CheckFanOutTarget[] = planned
-    .filter((t) => t.device.name !== self)
+  const remoteTargets: CheckFanOutTarget[] = remoteFleetTargets(planned, self)
     .map((t) => ({
       name: t.device.name,
       platform: t.device.platform,
