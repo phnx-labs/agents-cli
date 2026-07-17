@@ -1044,6 +1044,7 @@ export function installMcpServers(
         handled = true;
       } else if (agentId === 'openclaw') {
         // OpenClaw has no install CLI; write the JSON config directly.
+        // Use merge because this loop runs once per server.
         const userConfigPath = getMcpConfigPathForHome(agentId, versionHome);
         const writableServer: WritableMcpServer = {
           name: server.config.name,
@@ -1053,11 +1054,12 @@ export function installMcpServers(
           env: server.config.env,
           url: server.config.url,
         };
-        writeMcpConfig(agentId, userConfigPath, [writableServer], 'overwrite');
+        writeMcpConfig(agentId, userConfigPath, [writableServer], 'merge');
         handled = true;
       } else if (agentId === 'grok') {
         // Grok has no working `grok mcp add` CLI, so write the TOML config
         // directly into the version-home directory for all scopes.
+        // Use merge because this loop runs once per server.
         const userConfigPath = getMcpConfigPathForHome(agentId, versionHome);
         const writableServer: WritableMcpServer = {
           name: server.config.name,
@@ -1067,7 +1069,7 @@ export function installMcpServers(
           env: server.config.env,
           url: server.config.url,
         };
-        writeMcpConfig(agentId, userConfigPath, [writableServer], 'overwrite');
+        writeMcpConfig(agentId, userConfigPath, [writableServer], 'merge');
         handled = true;
       } else if (agentId === 'kimi') {
         installMcpToKimiConfig(server, versionHome);

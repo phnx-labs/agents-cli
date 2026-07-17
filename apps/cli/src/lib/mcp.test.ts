@@ -554,15 +554,20 @@ describe('writeMcpConfig OpenClaw format', () => {
 });
 
 describe('installMcpServers grok user-level config', () => {
-  it.skipIf(IS_WINDOWS)('writes user-scoped servers to the version-home TOML config', () => {
+  it.skipIf(IS_WINDOWS)('writes multiple user-scoped servers without clobbering', () => {
     const home = makeTempHome();
     const version = '0.1.0';
     const userMcpDir = path.join(home, '.agents', 'mcp');
     fs.mkdirSync(userMcpDir, { recursive: true });
 
     fs.writeFileSync(
-      path.join(userMcpDir, 'user-server.yaml'),
-      ['name: user-server', 'transport: stdio', 'command: node', 'args: ["user.js"]', ''].join('\n'),
+      path.join(userMcpDir, 'server-a.yaml'),
+      ['name: server-a', 'transport: stdio', 'command: node', 'args: ["a.js"]', ''].join('\n'),
+      'utf-8'
+    );
+    fs.writeFileSync(
+      path.join(userMcpDir, 'server-b.yaml'),
+      ['name: server-b', 'transport: stdio', 'command: node', 'args: ["b.js"]', ''].join('\n'),
       'utf-8'
     );
 
@@ -580,27 +585,32 @@ describe('installMcpServers grok user-level config', () => {
     expect(child.status, child.stderr).toBe(0);
     const result = JSON.parse(child.stdout.trim());
     expect(result.success).toBe(true);
-    expect(result.applied).toContain('user-server');
+    expect(result.applied).toContain('server-a');
+    expect(result.applied).toContain('server-b');
 
     const config = TOML.parse(fs.readFileSync(path.join(versionHome, '.grok', 'config.toml'), 'utf-8'));
-    expect(config.mcp_servers).toHaveProperty('user-server');
-    expect(config.mcp_servers['user-server']).toEqual({
-      command: 'node',
-      args: ['user.js'],
-    });
+    expect(config.mcp_servers).toHaveProperty('server-a');
+    expect(config.mcp_servers).toHaveProperty('server-b');
+    expect(config.mcp_servers['server-a']).toEqual({ command: 'node', args: ['a.js'] });
+    expect(config.mcp_servers['server-b']).toEqual({ command: 'node', args: ['b.js'] });
   });
 });
 
 describe('installMcpServers handled-agent tracking', () => {
-  it.skipIf(IS_WINDOWS)('writes OpenClaw user-scoped servers and reports them applied', () => {
+  it.skipIf(IS_WINDOWS)('writes multiple OpenClaw user-scoped servers without clobbering', () => {
     const home = makeTempHome();
     const version = '0.1.0';
     const userMcpDir = path.join(home, '.agents', 'mcp');
     fs.mkdirSync(userMcpDir, { recursive: true });
 
     fs.writeFileSync(
-      path.join(userMcpDir, 'user-server.yaml'),
-      ['name: user-server', 'transport: stdio', 'command: node', 'args: ["user.js"]', ''].join('\n'),
+      path.join(userMcpDir, 'server-a.yaml'),
+      ['name: server-a', 'transport: stdio', 'command: node', 'args: ["a.js"]', ''].join('\n'),
+      'utf-8'
+    );
+    fs.writeFileSync(
+      path.join(userMcpDir, 'server-b.yaml'),
+      ['name: server-b', 'transport: stdio', 'command: node', 'args: ["b.js"]', ''].join('\n'),
       'utf-8'
     );
 
@@ -618,14 +628,12 @@ describe('installMcpServers handled-agent tracking', () => {
     expect(child.status, child.stderr).toBe(0);
     const result = JSON.parse(child.stdout.trim());
     expect(result.success).toBe(true);
-    expect(result.applied).toContain('user-server');
+    expect(result.applied).toContain('server-a');
+    expect(result.applied).toContain('server-b');
 
     const config = JSON.parse(fs.readFileSync(path.join(versionHome, '.openclaw', 'openclaw.json'), 'utf-8'));
-    expect(config.mcp?.servers?.['user-server']).toEqual({
-      command: 'node',
-      args: ['user.js'],
-      env: {},
-    });
+    expect(config.mcp?.servers?.['server-a']).toEqual({ command: 'node', args: ['a.js'], env: {} });
+    expect(config.mcp?.servers?.['server-b']).toEqual({ command: 'node', args: ['b.js'], env: {} });
   });
 
   it.skipIf(IS_WINDOWS)('does not report fake success for agents with no config writer', () => {
