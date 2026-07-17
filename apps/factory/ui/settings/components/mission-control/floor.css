@@ -484,6 +484,7 @@
 .swarmify-root .recap-row .rc-cost { flex: 0 0 auto; font-family: "Geist Mono", monospace; font-size: 10.5px; color: var(--ds-text-muted); font-variant-numeric: tabular-nums; }
 .swarmify-root .recap-row .rc-ago { flex: 0 0 auto; width: 64px; text-align: right; color: var(--ds-text-faint); font-size: 10.5px; }
 .swarmify-root .dispatch-panel { background: var(--ds-bg); border: 1px solid var(--ds-border-subtle); border-radius: var(--r-lg); padding: 12px 14px; }
+.swarmify-root .dispatch-panel.editing { border-color: var(--brand); box-shadow: inset 3px 0 0 var(--brand); background: var(--ds-bg-panel); }
 .swarmify-root .dp-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
 .swarmify-root .dp-k { width: 48px; font-size: 11px; color: var(--ds-text-dim); font-weight: 600; }
 

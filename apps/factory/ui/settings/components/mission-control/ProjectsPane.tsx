@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { Icon } from './icons'
 import type { ManagedProject, LinearProjectLite, ProjectRollup } from './floorModel'
 
@@ -53,6 +53,20 @@ export function ProjectsPane({ projects, rollups = {}, linearProjects, pickedFol
   const [name, setName] = useState('')
   const [repoSlug, setRepoSlug] = useState('')
   const [linearProjectId, setLinearProjectId] = useState('')
+
+  const formRef = useRef<HTMLDivElement>(null)
+  const folderInputRef = useRef<HTMLInputElement>(null)
+  const rowRefs = useRef(new Map<string, HTMLDivElement>())
+
+  // When the user clicks Edit on a long project list, the form sits below the fold.
+  // Scroll it into view, focus the first field, and keep the edited row highlighted.
+  useEffect(() => {
+    if (!editingId) return
+    const row = rowRefs.current.get(editingId)
+    row?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    folderInputRef.current?.focus()
+  }, [editingId])
 
   const resetForm = () => {
     setEditingId(null)
@@ -132,7 +146,8 @@ export function ProjectsPane({ projects, rollups = {}, linearProjects, pickedFol
             projects.map((p) => (
               <div
                 key={p.id}
-                className="dispatch-panel"
+                ref={(el) => { if (el) rowRefs.current.set(p.id, el); else rowRefs.current.delete(p.id) }}
+                className={`dispatch-panel${editingId === p.id ? ' editing' : ''}`}
                 style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}
               >
                 <div style={{ minWidth: 0, flex: 1 }}>
@@ -161,13 +176,14 @@ export function ProjectsPane({ projects, rollups = {}, linearProjects, pickedFol
         </div>
 
         {/* Add / edit form */}
-        <div>
+        <div ref={formRef}>
           <div className="lbl">{editingId ? 'Edit project' : 'Add project'}</div>
           <div className="dispatch-panel" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div>
               <div className="host-meta-k" style={{ marginBottom: 4 }}>Folder</div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <input
+                  ref={folderInputRef}
                   className="host-caps-input"
                   style={{ flex: 1 }}
                   placeholder="/absolute/path/to/repo"
