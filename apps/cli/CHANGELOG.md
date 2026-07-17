@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.20.67
+
+- **Interactive session browser — `agents sessions --active` and a bare `agents sessions`
+  now open a live, filterable picker on a TTY (RUSH-1802).** One canonical filter driven by
+  single keys, re-pulled across the fleet as you toggle: `s` search, `r` running-only, `c`
+  teams, `a` agent (cycles), `d` device (cycles), `p` this-repo↔all-dirs, `w` time window;
+  filters **stack** (AND together) and the active set shows in the header, with a live
+  preview of the highlighted row and `⏎` to resume/attach via the existing dispatch. Every
+  hotkey mirrors a flag, so the view is reproducible as a command — `y` copies (and
+  `--print-cmd` prints) the exact `ag sessions …` line the filters map to, bridging the
+  human picker and the agent/script flag surface. The interactive front-end is TTY-only:
+  `--json`, a pipe, or the new `--no-interactive` keep the existing static listing verbatim,
+  so scripts and headless agents are unchanged. Adds `-p` as the short form of `--project`,
+  `--print-cmd`, `--preview` (`agents sessions <id> --preview` prints the compact digest
+  without the pager), and `--no-interactive`. Built on a new async-refetch `dynamicPicker`
+  variant that reuses the existing render/pagination/preview machinery, the fleet SSH
+  fan-out, and the resume/focus path. Source: `apps/cli/src/lib/picker.ts` (`dynamicPicker`),
+  `apps/cli/src/commands/sessions-browser.ts` (+ `sessions-browser.test.ts`),
+  `apps/cli/src/commands/sessions.ts`.
+
+- **kimi/grok headless `--mode plan` now auto-downgrades to `auto` instead of
+  crashing or stalling (RUSH-1810).** kimi's headless `-p` refuses to combine with
+  `--plan` (it hard-failed at spawn) and grok's `--permission-mode plan` silently
+  stalls a headless run at its ExitPlanMode gate. Both now model this honestly with
+  a `capabilities.headlessPlan: false` flag: a headless plan request degrades to
+  `auto` (kimi `-p` auto-runs; grok maps `auto`→`edit`) with a one-line stderr
+  warning, mirroring the graceful plan→edit degrade cursor/antigravity already get.
+  Interactive plan is unchanged, and claude/codex/droid/opencode keep read-only
+  plan headless. The same downgrade covers `agents run`, `agents teams add`
+  teammates, and routine jobs. Source: `apps/cli/src/lib/exec.ts`
+  (`resolveHeadlessMode`), `apps/cli/src/lib/runner.ts`, `apps/cli/src/lib/agents.ts`,
+  `apps/cli/src/lib/types.ts`.
+
 ## 1.20.66
 
 - **Fix (`agents monitors`, RUSH-1782 follow-up): `--watch-device` no longer silently watches the local machine on a bad name.** An unregistered or mistyped `--watch-device` name is now rejected at `add` time (same registry gate as `--device`/`--devices`), and the device source evaluator returns an explicit `device not registered` observation instead of falling back to local stats if a watched device is removed later — closing a "monitors the wrong box, silently" gap. The rate-limit firehose trip now also writes a fire record (`ok:false, error:'rate limited'`), so `agents monitors runs` reflects the auto-pause that `view`'s `last fired` already showed. Adds `sources/device.test.ts`. Source: `apps/cli/src/lib/monitors/sources/device.ts`, `apps/cli/src/commands/monitors.ts`, `apps/cli/src/lib/monitors/engine.ts`.
