@@ -136,6 +136,7 @@ src/
     shims.ts           # Shim generation, config symlink switching
     hooks.ts           # hooks.yaml parser + per-agent registrar
     hooks/match.ts     # `matches:` predicate evaluator
+    monitors/          # `agents monitors` — event-triggered watchers (source→condition→action); native state-diff store; MonitorEngine runs in the daemon beside the cron scheduler. See docs/10-monitors.md
     migrate.ts         # One-shot idempotent migrations
     session/           # `agents sessions` READER — discovery/parse/render of agent transcripts
     terminal/          # Terminal launch engine — tab/split in iTerm/Ghostty/tmux, local or --host
