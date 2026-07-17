@@ -16,6 +16,7 @@ import {
   isHostPinned,
   isHostPinnedIn,
   newKnownHostsLines,
+  recordScannedKeys,
 } from './known-hosts.js';
 
 const KEY = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI0000000000000000000000000000000000000000000';
@@ -64,6 +65,59 @@ describe('newKnownHostsLines', () => {
   it('is a no-op when every scanned key is already pinned', () => {
     const line = `box.ts.net ${KEY}`;
     expect(newKnownHostsLines(`${line}\n`, `# c\n${line}\n`)).toEqual([]);
+  });
+});
+
+describe('recordScannedKeys (the non-device / ssh-config-alias pin path)', () => {
+  // The remedy for RUSH-1767's dead-end: a bare `~/.ssh/config` Host alias is
+  // NOT a registered device, so `agents ssh <alias>` can't pin it. The
+  // --copy-creds gate instead scans the alias's resolved HostName and records
+  // it here; this is the store-write half that decides the scan now counts as
+  // pinned, so --copy-creds stops refusing.
+  it('pins a non-device host from ssh-keyscan output, idempotently', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kh-'));
+    const file = path.join(dir, 'known_hosts');
+    try {
+      // `ssh -G web` resolves the alias to this real HostName — the pinTarget
+      // the gate scans and the strict dispatch then verifies against.
+      const scan = `# web.internal:22 SSH-2.0-OpenSSH_9.6\nweb.internal ${KEY}\n`;
+      expect(isHostPinned('web.internal', file)).toBe(false);
+      expect(recordScannedKeys('web.internal', scan, file)).toEqual({ pinned: true, added: 1 });
+      // Now pinned → the gate's `isHostPinned(pinTarget)` passes, so --copy-creds
+      // proceeds instead of dead-ending on `agents ssh web` (Unknown device).
+      expect(isHostPinned('web.internal', file)).toBe(true);
+      // A re-scan of the same key must not grow the store (still pinned, 0 added).
+      expect(recordScannedKeys('web.internal', scan, file)).toEqual({ pinned: true, added: 0 });
+      expect(fs.readFileSync(file, 'utf-8').match(/web\.internal/g)).toHaveLength(1);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('pins a custom-port alias recorded as [host]:port', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kh-'));
+    const file = path.join(dir, 'known_hosts');
+    try {
+      // ssh-keyscan -p 2222 emits `[host]:port` lines; isHostPinned strips the
+      // port, so the gate's port-agnostic pinTarget check still reports pinned.
+      const scan = `[box.internal]:2222 ${KEY}\n`;
+      expect(recordScannedKeys('box.internal', scan, file)).toEqual({ pinned: true, added: 1 });
+      expect(isHostPinned('box.internal', file)).toBe(true);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reports not-pinned when the scan yields no usable key (gate then refuses)', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kh-'));
+    const file = path.join(dir, 'known_hosts');
+    try {
+      // An unreachable host: ssh-keyscan emits only comments / nothing usable.
+      expect(recordScannedKeys('dead.internal', '# no key\n', file)).toEqual({ pinned: false, added: 0 });
+      expect(isHostPinned('dead.internal', file)).toBe(false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

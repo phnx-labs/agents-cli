@@ -101,10 +101,34 @@ export interface PinResult {
 }
 
 /**
+ * Merge `ssh-keyscan` output for `host` into the managed store at `file`,
+ * idempotently, and report whether `host` is pinned afterward. Split out from
+ * {@link pinHostKey} so the store-write half — the part that decides a scanned
+ * key now counts as pinned — is unit-testable with real keyscan text and no
+ * network (the spawn stays in `pinHostKey`).
+ */
+export function recordScannedKeys(host: string, scanned: string, file = managedKnownHostsPath()): PinResult {
+  ensureManagedKnownHostsDir(file);
+  const existing = readManagedKnownHosts(file);
+  const fresh = newKnownHostsLines(existing, scanned);
+  if (fresh.length > 0) {
+    const prefix = existing && !existing.endsWith('\n') ? '\n' : '';
+    fs.appendFileSync(file, prefix + fresh.join('\n') + '\n', { mode: 0o600 });
+  }
+  return { pinned: isHostPinned(host, file), added: fresh.length };
+}
+
+/**
  * `ssh-keyscan` a host at a trusted moment and append any new key lines to the
  * managed store, idempotently. This is the explicit pin path; the implicit one
  * is a normal `accept-new` connection whose learned key lands in the same store.
  * Returns whether the host is pinned afterward.
+ *
+ * Host-name-agnostic: it scans whatever address it is handed, so it also pins a
+ * host `agents ssh` can't reach — notably a bare `~/.ssh/config` `Host` alias,
+ * which is not a registered device. The `--copy-creds` gate (commands/exec.ts)
+ * calls this for exactly that case so the credential copy is usable for
+ * ssh-config-alias hosts (RUSH-1767).
  */
 export function pinHostKey(
   host: string,
@@ -126,11 +150,5 @@ export function pinHostKey(
     return { pinned: isHostPinned(host, file), added: 0 };
   }
 
-  const existing = readManagedKnownHosts(file);
-  const fresh = newKnownHostsLines(existing, res.stdout);
-  if (fresh.length > 0) {
-    const prefix = existing && !existing.endsWith('\n') ? '\n' : '';
-    fs.appendFileSync(file, prefix + fresh.join('\n') + '\n', { mode: 0o600 });
-  }
-  return { pinned: isHostPinned(host, file), added: fresh.length };
+  return recordScannedKeys(host, res.stdout, file);
 }

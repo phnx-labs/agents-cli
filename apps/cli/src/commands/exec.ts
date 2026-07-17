@@ -749,21 +749,43 @@ export function registerRunCommand(program: Command): void {
             // whose SSH host key isn't pinned in the managed known_hosts store:
             // the offload transport would otherwise ride an accept-new (TOFU)
             // connection, so a machine-in-the-middle on an unverified first
-            // connect could capture the tokens. Pinning is earned by connecting
-            // once through an agents SSH path, which records + verifies the key
-            // (RUSH-1767). The dispatch itself then verifies strictly against
-            // that pin (see lib/hosts/dispatch.ts).
-            const { isHostPinned } = await import('../lib/devices/known-hosts.js');
+            // connect could capture the tokens. The dispatch itself then verifies
+            // strictly against that pin (see lib/hosts/dispatch.ts) (RUSH-1767).
+            const { isHostPinned, pinHostKey } = await import('../lib/devices/known-hosts.js');
             const { sshResolve } = await import('../lib/hosts/ssh-config.js');
-            const pinTarget = host.address ?? sshResolve(host.name)?.hostname ?? host.name;
+            // For an ssh-config host `host.address` is unset; ssh -G gives the real
+            // HostName (and Port) the strict dispatch will verify against.
+            const cfg = host.address ? undefined : sshResolve(host.name);
+            const pinTarget = host.address ?? cfg?.hostname ?? host.name;
+
+            // Not pinned yet? A registered device earns its pin through the normal
+            // accept-new connect (`agents ssh <name>` / the fleet sweep), so keep
+            // steering there. But a bare `~/.ssh/config` Host alias (or ad-hoc
+            // literal) is NOT a registered device — `agents ssh <alias>` dead-ends
+            // at "Unknown device" (lib/devices/resolve-target.ts looksLikeHostLiteral),
+            // so that flow can never pin it. Pin it right here with the
+            // host-name-agnostic ssh-keyscan path so --copy-creds is usable for
+            // ssh-config-alias hosts instead of dead-ending on unusable advice.
+            if (!isHostPinned(pinTarget) && host.provider !== 'devices') {
+              const cfgPort = cfg?.port;
+              const port = cfgPort && cfgPort !== '22' ? Number(cfgPort) : undefined;
+              const { pinned } = pinHostKey(pinTarget, port ? { port } : {});
+              if (pinned) {
+                console.error(chalk.gray(`Pinned "${host.name}" (${pinTarget}) into the managed known_hosts store.`));
+              }
+            }
+
             if (!isHostPinned(pinTarget)) {
               console.error(chalk.red(
                 `Refusing --copy-creds to "${host.name}": its SSH host key isn't pinned, so the ` +
                 `credentials could be exposed to a machine-in-the-middle on an unverified first connect.`,
               ));
               console.error(chalk.gray(
-                `Pin the key first by connecting once so agents records and verifies it:  agents ssh ${host.name}\n` +
-                `Then re-run with --copy-creds.`,
+                host.provider === 'devices'
+                  ? `Pin the key first by connecting once so agents records and verifies it:  agents ssh ${host.name}\n` +
+                    `Then re-run with --copy-creds.`
+                  : `Couldn't reach "${pinTarget}" to pin its key (ssh-keyscan returned nothing). ` +
+                    `Make sure the host is reachable over SSH, then re-run with --copy-creds.`,
               ));
               process.exit(1);
             }

@@ -110,7 +110,14 @@ subsequent connect — a later key swap is refused, not re-accepted. `run --host
 prepends the strict host-key opts (they must come *before* the baseline —
 `sshConnectOpts` — because ssh honors the first value seen for each option) over a
 fresh, non-multiplexed connection, so credentials never ride an unverified
-connect. **Remaining:** the broad `accept-new` baseline still governs
+connect. A registered device earns its pin the ordinary way — connect once with
+`agents ssh <device>`. But a bare `~/.ssh/config` `Host` alias (or ad-hoc literal)
+is **not** a registered device, so `agents ssh <alias>` dead-ends at "Unknown
+device" and could never pin it; for that case the `--copy-creds` gate pins the
+target itself with `pinHostKey` (ssh-keyscan against the alias's real
+`HostName`/`Port`, resolved via `ssh -G`) before shipping anything, so
+`--copy-creds` works for ssh-config-alias hosts instead of dead-ending.
+**Remaining:** the broad `accept-new` baseline still governs
 non-credential fan-outs (`sessions --host`, the browser driver, `fleet run`),
 which learn keys into the managed store but don't yet verify strictly.
 
