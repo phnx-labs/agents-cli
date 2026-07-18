@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect } from 'vitest';
 import { getCliLaunch, isNodeScriptEntry } from './cli-entry.js';
 
 // Regression for the secrets-broker "Could not start the secrets broker" hang and
