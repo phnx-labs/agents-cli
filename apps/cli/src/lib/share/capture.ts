@@ -106,7 +106,20 @@ export async function captureCover(htmlPath: string, timeoutMs = 15_000): Promis
   if (!fs.existsSync(abs)) return null;
   const fileUrl = `file://${abs.split('/').map(encodeURIComponent).join('/')}`;
 
-  for (const bin of candidateBrowsers()) {
+  const candidates = candidateBrowsers();
+  if (candidates.length === 0) {
+    // A silently-dropped cover reads as "the CLI decided this page needs none",
+    // when in fact no headless browser was found. Say so and point at the escape
+    // hatch instead of leaving the publish coverless with no explanation.
+    process.stderr.write(
+      '[agents share] no headless browser found for the OG cover — install Chrome/Chromium ' +
+        'or set AGENTS_SHARE_BROWSER=/path/to/chrome. Publishing without a preview image.\n',
+    );
+    return null;
+  }
+
+  let lastFailure = '';
+  for (const bin of candidates) {
     const outPng = path.join(os.tmpdir(), `agents-share-cover-${process.pid}-${Date.now()}.png`);
     const userDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-share-chrome-'));
     try {
@@ -136,13 +149,22 @@ export async function captureCover(htmlPath: string, timeoutMs = 15_000): Promis
         const buf = fs.readFileSync(outPng);
         // A valid PNG starts with the 8-byte signature; guard against 0-byte writes.
         if (buf.length > 8 && buf[0] === 0x89 && buf[1] === 0x50) return buf;
+        lastFailure = `${path.basename(bin)}: produced no valid PNG`;
+      } else {
+        lastFailure = `${path.basename(bin)}: no screenshot written`;
       }
-    } catch {
-      // try the next candidate
+    } catch (err) {
+      lastFailure = `${path.basename(bin)}: ${(err as Error).message}`;
     } finally {
       fs.rmSync(outPng, { force: true });
       fs.rmSync(userDir, { recursive: true, force: true });
     }
   }
+  // Every candidate ran but none yielded a cover — surface the last reason so a
+  // missing preview card is diagnosable (timeout, crash, bad binary) rather than silent.
+  process.stderr.write(
+    `[agents share] OG cover capture failed (${lastFailure || 'unknown error'}) — ` +
+      'publishing without a preview image. Set AGENTS_SHARE_BROWSER to override.\n',
+  );
   return null;
 }
