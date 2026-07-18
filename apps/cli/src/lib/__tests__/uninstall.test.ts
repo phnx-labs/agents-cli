@@ -46,9 +46,13 @@ function runInHome(body: string): Record<string, unknown> {
     }
     ${body}
   `;
+  // Pin BOTH HOME and AGENTS_REAL_HOME to the test dir. state.ts derives
+  // ~/.agents from HOME while getAgentConfigPath honors AGENTS_REAL_HOME; if a
+  // stale AGENTS_REAL_HOME leaks in from the outer env the two diverge and the
+  // test breaks. Setting both keeps this subprocess hermetic regardless.
   const out = execFileSync('bun', ['--eval', script], {
     cwd: repoRoot,
-    env: { ...process.env, HOME: home },
+    env: { ...process.env, HOME: home, AGENTS_REAL_HOME: home },
     encoding: 'utf-8',
   });
   return JSON.parse(out.trim().split('\n').at(-1) ?? '{}');
