@@ -434,7 +434,9 @@ agents devices list                     # fleet + live headroom: load, mem, idle
 agents devices list --full              # add per-device cores and free/total RAM
 agents devices list --no-stats          # instant: names/addresses only, skip the probe
 agents ssh mac-mini                     # hardened SSH: fails fast if offline,
-                                        # PowerShell on Windows, password-from-Keychain
+                                        # PowerShell on Windows, password-from-Keychain,
+                                        # auto-syncs your terminfo (Ghostty/kitty/…) so
+                                        # backspace, colors & clear work on the remote
 agents hosts list                       # devices show up here too (one host pool)
 agents hosts add mac-mini --cap gpu     # tag a device for capability routing (--host gpu)
 
