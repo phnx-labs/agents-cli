@@ -34,6 +34,7 @@ import { getHelpersDir, readMeta } from '../state.js';
 import { isAlive } from '../platform/process.js';
 import { getKeychainHelperPath } from './install-helper.js';
 import { getCliVersion, getCliVersionFresh } from '../version.js';
+import { getCliLaunch } from '../cli-entry.js';
 import type { SecretsBundle } from './bundles.js';
 
 /** Bumped when the wire protocol changes; a client that pings a mismatched
@@ -174,19 +175,18 @@ function writeAgentToken(): string {
 
 /**
  * Argv for re-invoking THIS cli with a hidden subcommand, so a side-by-side dev
- * build spawns its own helpers rather than the registry-installed one. We always
- * go through `process.execPath` (the node binary) with the JS entrypoint as the
- * first arg — the entrypoint isn't reliably executable in dev builds (invoked as
- * `node dist/index.js`, no +x), so spawning it directly EACCES'd.
+ * build spawns its own helpers rather than the registry-installed one. Routed
+ * through the shared getCliLaunch so it handles both install shapes — a JS entry
+ * (`node dist/index.js …`) and a Bun standalone binary (run directly). The old
+ * hand-rolled `[process.execPath, process.argv[1], …]` broke on standalone builds:
+ * process.argv[1] is the bun virtual entry `/$bunfs/root/agents` (fs.existsSync
+ * reports it as present), so it was passed as an argv element and the broker died
+ * with `unknown command '/$bunfs/root/agents'` — the daemon-hosted broker never
+ * bound its socket and every unlock reported "Could not start the secrets broker".
  */
 function cliSpawn(sub: string[]): { cmd: string; args: string[] } {
-  const argv1 = process.argv[1];
-  const entry = argv1 && fs.existsSync(argv1) ? argv1 : null;
-  if (entry) return { cmd: process.execPath, args: [entry, ...sub] };
-  // No resolvable entrypoint (unusual) — fall back to the PATH shim.
-  let bin = 'agents';
-  try { bin = execFileSync('which', ['agents'], { encoding: 'utf-8' }).trim(); } catch { /* default */ }
-  return { cmd: bin, args: sub };
+  const { command, args } = getCliLaunch(sub);
+  return { cmd: command, args };
 }
 
 function brokerSpawn(): { cmd: string; args: string[] } {
