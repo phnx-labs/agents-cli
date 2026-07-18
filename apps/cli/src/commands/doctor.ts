@@ -32,7 +32,8 @@ import { sshTargetFor } from '../lib/hosts/types.js';
 import { machineId } from '../lib/session/sync/config.js';
 import chalk from 'chalk';
 import { checkAllClis, collectTeamsDoctorData, type TeamsDoctorEntry } from '../lib/teams/agents.js';
-import { AGENTS, ALL_AGENT_IDS, resolveAgentName, formatAgentError } from '../lib/agents.js';
+import { AGENTS, ALL_AGENT_IDS, resolveAgentName, formatAgentError, getAccountInfo, type AccountInfo } from '../lib/agents.js';
+import { formatSignInBadge } from '../lib/signin-badge.js';
 import type { AgentId } from '../lib/types.js';
 import {
   getGlobalDefault,
@@ -117,6 +118,7 @@ function renderOverviewText(
   syncRows: SyncStatusRow[],
   orphanRows: OrphanRow[],
   hostClis: ReturnType<typeof listCliStatus>,
+  signIn: Record<string, Pick<AccountInfo, 'signedIn' | 'email' | 'accountId'>>,
 ): void {
   console.log(chalk.bold('Agent CLIs'));
   // Show the fleet you actually run — agents that are ready in PATH, plus any
@@ -133,7 +135,9 @@ function renderOverviewText(
     for (const [name, entry] of shown) {
       const pretty = (AGENT_NAMES[name] || name).padEnd(11);
       if (entry.installed) {
-        console.log(`  ${chalk.green('ready')}  ${pretty} ${chalk.gray(entry.path || '')}`);
+        const badge = formatSignInBadge(signIn[name]);
+        const pathHint = entry.path ? chalk.gray(`  ${entry.path}`) : '';
+        console.log(`  ${chalk.green('ready')}  ${pretty} ${badge}${pathHint}`);
       } else {
         console.log(`  ${chalk.red('no   ')}  ${pretty} ${chalk.gray(entry.error || 'not installed')}`);
       }
@@ -807,9 +811,25 @@ export function registerDoctorCommand(program: Command): void {
         const syncRows = checkSyncStatus(cwd);
         const orphanRows = countOrphans();
         const hostClis = listCliStatus(cwd);
+        // Advisory login state per installed agent (file-based getAccountInfo,
+        // no home → the account-global/active credential). Best-effort: a probe
+        // failure just leaves that agent's badge as "logged out".
+        const signIn: Record<string, Pick<AccountInfo, 'signedIn' | 'email' | 'accountId'>> = {};
+        await Promise.all(
+          Object.entries(clis)
+            .filter(([, e]) => e.installed)
+            .map(async ([name]) => {
+              try {
+                signIn[name] = await getAccountInfo(name as AgentId);
+              } catch {
+                /* advisory only */
+              }
+            }),
+        );
         if (opts.json) {
           console.log(JSON.stringify({
             clis,
+            signIn,
             sync: syncRows,
             orphans: orphanRows,
             hostClis: {
@@ -824,7 +844,7 @@ export function registerDoctorCommand(program: Command): void {
           }, null, 2));
           return;
         }
-        renderOverviewText(clis, syncRows, orphanRows, hostClis);
+        renderOverviewText(clis, syncRows, orphanRows, hostClis, signIn);
         // Point at the interactive reconcile when anything is out of sync — the
         // report shouldn't be a dead end. `agents status` runs the unified
         // home-reading engine and offers to sync (opt-in, never auto-fires here).

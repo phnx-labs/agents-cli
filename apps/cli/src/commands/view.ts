@@ -27,6 +27,7 @@ import {
   colorAgent,
 } from '../lib/agents.js';
 import type { AccountInfo } from '../lib/agents.js';
+import { loginHint } from '../lib/signin-badge.js';
 import type { AgentId } from '../lib/types.js';
 import {
   agentReportsUsage,
@@ -574,7 +575,7 @@ async function showInstalledVersions(
 
         if (!hasEmail && !hasUsage && !signedIn) {
           // Installed but never signed in
-          parts.push(chalk.gray('(not signed in — run ' + agent.cliCommand + ' to log in)'));
+          parts.push(chalk.gray('(logged out — log in with: ' + loginHint(agentId) + ')'));
         } else {
           if (hasEmail || hasUsage || hasActive || signedIn) {
             // Signed-in agents without a local email show their account id

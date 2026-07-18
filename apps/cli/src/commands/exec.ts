@@ -41,6 +41,8 @@ interface ExecCommandActionOptions {
   quiet?: boolean;
   headless?: boolean;
   interactive?: boolean;
+  /** --no-auth-check: Commander maps it to `authCheck` (default true, false when passed). Silences the logged-out preflight warning on an interactive launch. */
+  authCheck?: boolean;
   /** --resume [id]: string id/prefix, or `true` for the bare flag (interactive picker). */
   resume?: string | boolean;
   sessionId?: string;
@@ -406,6 +408,7 @@ export function registerRunCommand(program: Command): void {
     .option('--json', 'Stream events as JSON lines (for parsing by other tools)')
     .option('--quiet', 'Suppress preamble (rotation banner, "Running:" line). Useful when piping JSON events to a parser.', false)
     .option('--headless', 'Force headless mode. Auto-enabled when a prompt is provided; pass explicitly to stay headless with no prompt (reads the prompt from stdin).', false)
+    .option('--no-auth-check', 'Skip the pre-launch "looks logged out" warning on an interactive run (advisory; never blocks anyway). Also silenced by AGENTS_NO_AUTH_CHECK=1.')
     .option('-i, --interactive', 'Force interactive mode even when a prompt is provided. Mutually exclusive with --headless.')
     .option('--resume [id]', 'Resume a previous conversation. Accepts a full or partial session id (prefix-matched against the index); omit the id to pick from recent sessions interactively. Resumes under the version that started the session. claude/codex resume natively; other agents replay via a /continue first message. Pair with a prompt to continue headlessly.')
     .option('--session-id <id>', 'Force a NEW conversation to use this exact session UUID (Claude only). This CREATES a session — to resume an existing one, use --resume.')
@@ -1576,6 +1579,38 @@ export function registerRunCommand(program: Command): void {
       }
 
       const defaultVersion = version ?? resolveVersion(agent, cwd);
+
+      // Login preflight (advisory, warn + continue). On a local INTERACTIVE
+      // launch, probe whether this agent's account has a credential and print a
+      // one-line warning if it looks logged out — so you find out BEFORE the TUI
+      // opens, not after typing a prompt and getting "/login" back. Uses the same
+      // account-global probe as `checkCliSignedIn` / `agents doctor`
+      // (getAccountInfo with no home): file-based, no Keychain ACL prompt, and
+      // correct for HOME-global credential agents (grok/codex) where a per-version
+      // home would false-negative. It can still false-negative for opaque
+      // credentials, so this NEVER blocks — it warns and launches anyway. Skipped
+      // for --json/--quiet, when a rotation already picked a signed-in account,
+      // and via --no-auth-check / AGENTS_NO_AUTH_CHECK=1. (--host/--lease return
+      // earlier.)
+      {
+        const interactiveLaunch = options.interactive === true || (prompt === undefined && options.headless !== true);
+        const authCheckOff = options.authCheck === false || process.env.AGENTS_NO_AUTH_CHECK === '1';
+        if (interactiveLaunch && !authCheckOff && !options.json && !options.quiet && !rotationResult) {
+          try {
+            const { getAccountInfo } = await import('../lib/agents.js');
+            const { loginHint } = await import('../lib/signin-badge.js');
+            const info = await getAccountInfo(agent);
+            if (!info.signedIn) {
+              process.stderr.write(
+                chalk.yellow(`⚠  ${agent} looks logged out — log in with: ${loginHint(agent)}. Launching anyway...\n`),
+              );
+            }
+          } catch {
+            // Advisory only — a probe failure must never block a launch.
+          }
+        }
+      }
+
       const runDefaults: ResolvedRunDefaults = fromProfile
         ? { sources: {} }
         : resolveRunDefaults(agent, defaultVersion, cwd);
