@@ -143,6 +143,8 @@ describe('command-mode routines (executeJob foreground)', () => {
     expect(result.meta.exitCode).toBe(0);
     expect(result.meta.command).toBe('exit 0');
     expect(result.meta.agent).toBeUndefined();
+    expect(result.meta.duration).toBeGreaterThanOrEqual(0);
+    expect(result.meta.errorMessage).toBeUndefined();
     expect(result.reportPath).toBeNull();
 
     // A real run record was written and is readable from disk.
@@ -152,6 +154,8 @@ describe('command-mode routines (executeJob foreground)', () => {
     expect(metaOnDisk.status).toBe('completed');
     expect(metaOnDisk.command).toBe('exit 0');
     expect(metaOnDisk.agent).toBeUndefined();
+    expect(metaOnDisk.duration).toBeGreaterThanOrEqual(0);
+    expect(metaOnDisk.errorMessage).toBeUndefined();
   });
 
   it('propagates a non-zero exit → status failed, exitCode preserved', async () => {
@@ -162,6 +166,8 @@ describe('command-mode routines (executeJob foreground)', () => {
     expect(result.meta.exitCode).toBe(3);
     expect(result.meta.command).toBe('exit 3');
     expect(result.meta.agent).toBeUndefined();
+    expect(result.meta.duration).toBeGreaterThanOrEqual(0);
+    expect(result.meta.errorMessage).toBeUndefined();
   });
 
   it('captures command stdout to the run log', async () => {
@@ -211,6 +217,8 @@ describe('command-mode routines (executeJobDetached — daemon/cron path)', () =
     expect(final.status).toBe('completed');
     expect(final.exitCode).toBe(0);
     expect(final.command).toBe('exit 0');
+    expect(final.duration).toBeGreaterThanOrEqual(0);
+    expect(final.errorMessage).toBeUndefined();
     // exit-code file is the posix restart-recovery source of truth (the sh subshell
     // wrapper writes it). Windows records status via child.on('exit') only — no file.
     if (process.platform !== 'win32') {
@@ -225,5 +233,7 @@ describe('command-mode routines (executeJobDetached — daemon/cron path)', () =
     const final = await waitTerminal('cmd-det-fail', meta.runId);
     expect(final.status).toBe('failed');
     expect(final.exitCode).toBe(3);
+    expect(final.duration).toBeGreaterThanOrEqual(0);
+    expect(final.errorMessage).toBeUndefined();
   });
 });

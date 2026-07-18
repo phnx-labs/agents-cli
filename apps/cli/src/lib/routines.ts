@@ -182,11 +182,41 @@ export interface RunMeta {
   startedAt: string;
   completedAt: string | null;
   exitCode: number | null;
+  /** Machine-readable failure reason when the run did not complete successfully. */
+  errorMessage?: string;
+  /** Wall-clock duration of the run in milliseconds (set when the run finishes). */
+  duration?: number;
   /** Set for `host:`-placed runs — where the job body executes (no local pid). */
   host?: string;
   /** The host-task sidecar id backing a `host:` run; the daemon monitor
    *  finalizes the run by reconciling it against the remote `.exit`. */
   hostTaskId?: string;
+}
+
+/**
+ * Finalize a run record with a terminal status, computing `duration` from
+ * `startedAt` and the completion timestamp. Keeps failure-reason population
+ * centralized so every completion path writes the same machine-readable fields.
+ */
+export function finalizeRunMeta(
+  meta: RunMeta,
+  status: RunMeta['status'],
+  exitCode: number | null,
+  opts?: { errorMessage?: string; completedAt?: string },
+): void {
+  meta.status = status;
+  meta.exitCode = exitCode;
+  meta.completedAt = opts?.completedAt ?? new Date().toISOString();
+  const started = Date.parse(meta.startedAt);
+  const completed = Date.parse(meta.completedAt);
+  meta.duration = Number.isFinite(started) && Number.isFinite(completed) && completed >= started
+    ? completed - started
+    : 0;
+  if (opts?.errorMessage) {
+    meta.errorMessage = opts.errorMessage;
+  } else {
+    delete meta.errorMessage;
+  }
 }
 
 /**

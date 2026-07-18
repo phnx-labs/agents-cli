@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
-import { validateJob, validateTrigger, normalizeTriggerEvent, writeJob, readJob, deleteJob, listJobs, jobRunsOnThisDevice, checkJobDeviceEligibility, getJobRunsDir, getRunDir, type JobConfig } from './routines.js';
+import { validateJob, validateTrigger, normalizeTriggerEvent, writeJob, readJob, deleteJob, listJobs, jobRunsOnThisDevice, checkJobDeviceEligibility, getJobRunsDir, getRunDir, finalizeRunMeta, type JobConfig, type RunMeta } from './routines.js';
 import { getRoutinesDir, getSystemRoutinesDir, getRunsDir, ensureAgentsDir } from './state.js';
 
 /** Minimal valid schedule-based job. */
@@ -507,5 +507,62 @@ describe('routine name path containment (C4)', () => {
     expect(() => getRunDir('../../../../tmp/evil-routine', 'run-1')).toThrow();
     expect(() => getJobRunsDir('..')).toThrow();
     expect(() => getJobRunsDir('a/b')).toThrow();
+  });
+});
+
+describe('finalizeRunMeta', () => {
+  function makeMeta(startedAt: string): RunMeta {
+    return {
+      jobName: 'j',
+      runId: 'r1',
+      agent: 'claude',
+      pid: null,
+      status: 'running',
+      startedAt,
+      completedAt: null,
+      exitCode: null,
+    };
+  }
+
+  it('sets completedAt, exitCode, status, and computes duration from startedAt', () => {
+    const startedAt = new Date(Date.now() - 1234).toISOString();
+    const meta = makeMeta(startedAt);
+    finalizeRunMeta(meta, 'completed', 0);
+    expect(meta.status).toBe('completed');
+    expect(meta.exitCode).toBe(0);
+    expect(meta.completedAt).not.toBeNull();
+    expect(meta.duration).toBeGreaterThanOrEqual(1234);
+    expect(meta.errorMessage).toBeUndefined();
+  });
+
+  it('records errorMessage on failure when provided', () => {
+    const meta = makeMeta(new Date().toISOString());
+    finalizeRunMeta(meta, 'failed', 1, { errorMessage: 'spawn failed' });
+    expect(meta.status).toBe('failed');
+    expect(meta.exitCode).toBe(1);
+    expect(meta.errorMessage).toBe('spawn failed');
+    expect(meta.duration).toBeGreaterThanOrEqual(0);
+  });
+
+  it('uses a provided completedAt override and computes duration from it', () => {
+    const startedAt = new Date('2026-01-01T00:00:00.000Z').toISOString();
+    const completedAt = new Date('2026-01-01T00:00:05.000Z').toISOString();
+    const meta = makeMeta(startedAt);
+    finalizeRunMeta(meta, 'completed', 0, { completedAt });
+    expect(meta.completedAt).toBe(completedAt);
+    expect(meta.duration).toBe(5000);
+  });
+
+  it('clears a stale errorMessage when finalizing successfully', () => {
+    const meta = makeMeta(new Date().toISOString());
+    meta.errorMessage = 'stale';
+    finalizeRunMeta(meta, 'completed', 0);
+    expect(meta.errorMessage).toBeUndefined();
+  });
+
+  it('falls back to zero duration when startedAt is unparseable', () => {
+    const meta = makeMeta('not-a-date');
+    finalizeRunMeta(meta, 'failed', 1);
+    expect(meta.duration).toBe(0);
   });
 });

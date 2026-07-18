@@ -26,6 +26,7 @@ import {
   getRunDir,
   jobRunsOnThisDevice,
   checkJobDeviceEligibility,
+  finalizeRunMeta,
 } from './routines.js';
 import { getRunsDir } from './state.js';
 import type { AgentId } from './types.js';
@@ -629,9 +630,13 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
       agent: effectiveAgent,
       version: primaryVersion,
     }, deps);
-    meta.status = loopResult.stoppedBy === 'error' ? 'failed' : 'completed';
-    meta.completedAt = new Date().toISOString();
-    meta.exitCode = loopResult.stoppedBy === 'error' ? 1 : 0;
+    const loopFailed = loopResult.stoppedBy === 'error';
+    finalizeRunMeta(
+      meta,
+      loopFailed ? 'failed' : 'completed',
+      loopFailed ? 1 : 0,
+      loopFailed ? { errorMessage: `loop stopped: ${loopResult.stoppedBy}` } : undefined,
+    );
     writeRunMeta(meta);
     timer.end({ status: meta.status, exitCode: meta.exitCode ?? undefined, runId });
     return { meta, reportPath: null };
@@ -682,8 +687,7 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
     writeRunMeta(meta);
 
     if (attempt.status === 'timeout') {
-      meta.status = 'timeout';
-      meta.completedAt = new Date().toISOString();
+      finalizeRunMeta(meta, 'timeout', null, { errorMessage: 'run timed out' });
       writeRunMeta(meta);
       timer.end({ status: 'timeout', runId });
       const reportPath = extractAndSaveReport(stdoutPath, effectiveAgent, runDir);
@@ -691,9 +695,7 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
     }
 
     if (attempt.status === 'completed') {
-      meta.exitCode = 0;
-      meta.status = 'completed';
-      meta.completedAt = new Date().toISOString();
+      finalizeRunMeta(meta, 'completed', 0);
       writeRunMeta(meta);
       timer.end({ status: 'completed', exitCode: 0, runId });
       const reportPath = extractAndSaveReport(stdoutPath, effectiveAgent, runDir);
@@ -722,9 +724,7 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
       );
     }
 
-    meta.exitCode = attempt.exitCode ?? 1;
-    meta.status = 'failed';
-    meta.completedAt = new Date().toISOString();
+    finalizeRunMeta(meta, 'failed', attempt.exitCode ?? 1, attempt.error ? { errorMessage: attempt.error } : undefined);
     writeRunMeta(meta);
     timer.end({
       status: 'failed',
@@ -737,9 +737,7 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
   }
 
   // Unreachable: chain is always non-empty, but keep a safe fallback.
-  meta.status = 'failed';
-  meta.exitCode = 1;
-  meta.completedAt = new Date().toISOString();
+  finalizeRunMeta(meta, 'failed', 1);
   writeRunMeta(meta);
   timer.end({ status: 'failed', exitCode: 1, runId });
   return { meta, reportPath: null };
@@ -802,9 +800,7 @@ async function executeJobOnHost(config: JobConfig, opts: { detached: boolean }):
   // Sync path: a real exit code finalizes now. -1 (follow window closed) and
   // the detached path leave the meta `running` for the monitor to reconcile.
   if (!opts.detached && exitCode !== null && exitCode !== undefined && exitCode !== -1) {
-    meta.status = exitCode === 0 ? 'completed' : 'failed';
-    meta.exitCode = exitCode;
-    meta.completedAt = new Date().toISOString();
+    finalizeRunMeta(meta, exitCode === 0 ? 'completed' : 'failed', exitCode);
   }
   writeRunMeta(meta);
   timer.end({ status: meta.status, exitCode: meta.exitCode ?? undefined, runId });
@@ -887,9 +883,12 @@ async function executeCommandJobForeground(config: JobConfig): Promise<RunResult
     });
   });
 
-  meta.status = result.status;
-  meta.exitCode = result.exitCode ?? (result.status === 'completed' ? 0 : 1);
-  meta.completedAt = new Date().toISOString();
+  finalizeRunMeta(
+    meta,
+    result.status,
+    result.exitCode ?? (result.status === 'completed' ? 0 : 1),
+    result.error ? { errorMessage: result.error } : undefined,
+  );
   writeRunMeta(meta);
 
   if (result.error) {
@@ -990,9 +989,7 @@ export async function executeJobDetached(config: JobConfig): Promise<RunMeta> {
 
   child.on('error', (err) => {
     try { fs.closeSync(stdoutFd); } catch { /* fd already closed */ }
-    meta.status = 'failed';
-    meta.exitCode = 1;
-    meta.completedAt = new Date().toISOString();
+    finalizeRunMeta(meta, 'failed', 1, { errorMessage: err.message });
     writeRunMeta(meta);
     process.stderr.write(`[agents] daemon: spawn failed for job "${config.name}": ${err.message}\n`);
   });
@@ -1056,17 +1053,15 @@ function executeCommandJobDetached(config: JobConfig): RunMeta {
   // fire-and-forget call, so the exit event fires here. (monitorRunningJobs no
   // longer force-fails command jobs; it reads exit-code only on the restart edge.)
   let settled = false;
-  const settle = (status: RunMeta['status'], exitCode: number) => {
+  const settle = (status: RunMeta['status'], exitCode: number, errorMessage?: string) => {
     if (settled) return;
     settled = true;
-    meta.status = status;
-    meta.exitCode = exitCode;
-    meta.completedAt = new Date().toISOString();
+    finalizeRunMeta(meta, status, exitCode, errorMessage ? { errorMessage } : undefined);
     writeRunMeta(meta);
   };
   child.on('exit', (code) => settle(code === 0 ? 'completed' : 'failed', code ?? 1));
   child.on('error', (err) => {
-    settle('failed', 1);
+    settle('failed', 1, err.message);
     process.stderr.write(`[agents] daemon: command spawn failed for job "${config.name}": ${err.message}\n`);
   });
 
@@ -1223,9 +1218,12 @@ function finalizeHostRun(meta: RunMeta): void {
     if (!task) return;
     const healed = reconcileHostTask(task);
     if (healed.status !== 'completed' && healed.status !== 'failed') return;
-    meta.status = healed.status;
-    meta.exitCode = healed.exitCode ?? (healed.status === 'completed' ? 0 : 1);
-    meta.completedAt = healed.finishedAt ?? new Date().toISOString();
+    finalizeRunMeta(
+      meta,
+      healed.status,
+      healed.exitCode ?? (healed.status === 'completed' ? 0 : 1),
+      { completedAt: healed.finishedAt ?? undefined },
+    );
     writeRunMeta(meta);
   } catch { /* unreachable host or unreadable sidecar — retry next sweep */ }
 }
@@ -1270,8 +1268,7 @@ export function monitorRunningJobs(): void {
 
         const wallClockMs = Date.now() - Date.parse(meta.startedAt);
         if (Number.isFinite(wallClockMs) && wallClockMs > MAX_WALL_CLOCK_MS) {
-          meta.status = 'timeout';
-          meta.completedAt = new Date().toISOString();
+          finalizeRunMeta(meta, 'timeout', null, { errorMessage: 'exceeded max wall clock' });
           writeRunMeta(meta);
           if (!isCommandRun) extractAndSaveReport(stdoutPath, meta.agent!, runDirPath);
           continue;
@@ -1285,18 +1282,15 @@ export function monitorRunningJobs(): void {
             // missed the exit event — recover the true code from the exit-code file
             // the child wrote; its absence means the child was killed/crashed.
             const ec = readCommandExitCode(runDirPath);
-            meta.status = ec === 0 ? 'completed' : 'failed';
-            meta.exitCode = ec;
+            finalizeRunMeta(meta, ec === 0 ? 'completed' : 'failed', ec);
           } else {
             const inferred = inferFinalStatusFromLog(stdoutPath, meta.agent!);
             if (inferred) {
-              meta.status = inferred.status;
-              meta.exitCode = inferred.exitCode;
+              finalizeRunMeta(meta, inferred.status, inferred.exitCode);
             } else {
-              meta.status = 'failed';
+              finalizeRunMeta(meta, 'failed', null, { errorMessage: 'process exited before final status could be inferred' });
             }
           }
-          meta.completedAt = new Date().toISOString();
           writeRunMeta(meta);
 
           if (!isCommandRun) extractAndSaveReport(stdoutPath, meta.agent!, runDirPath);

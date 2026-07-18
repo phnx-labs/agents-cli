@@ -79,6 +79,13 @@
 
 ### Added
 
+- **Routine `meta.json` now includes `duration` and `errorMessage` (RUSH-1281).**
+  `RunMeta` records wall-clock `duration` in milliseconds and a machine-readable
+  `errorMessage` on failure paths (spawn errors, timeouts, loop errors, host-reconcile
+  failures, and monitor-reaped runs). Populated on every terminal state in
+  `apps/cli/src/lib/runner.ts` via the new `finalizeRunMeta` helper in
+  `apps/cli/src/lib/routines.ts`.
+
 - **`agents run --lease` is now frictionless end-to-end (RUSH-1723).** Leasing a
   disposable cloud box to run an agent — the BYO-your-own-cloud way to offload heavy
   work when local CPU cores are exhausted — no longer needs an env var, a flag, or a
