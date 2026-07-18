@@ -81,6 +81,16 @@ import { checkSyncStatus, countOrphans } from '../lib/drift.js';
 import { checkAllClis } from '../lib/teams/agents.js';
 import { buildRemoteAgentsInvocation } from '../lib/hosts/remote-cmd.js';
 import { sshExec, sshExecAsync } from '../lib/ssh-exec.js';
+import { ALL_AGENT_IDS } from '../lib/agents.js';
+import {
+  formatCheckedAge,
+  probeLocalFleetAuth,
+  summarizeVerdicts,
+  verdictLabel,
+  writeFleetAuthRows,
+  type AuthProbeRow,
+  type VerdictSummary,
+} from '../lib/auth-health.js';
 
 /** One-line summary of a device for `list`. `isSelf` marks the machine this
  * command is running on so it stands out from the rest of the tailnet. */
@@ -387,6 +397,156 @@ async function runFleetStatus(opts: { json?: boolean; strict?: boolean; stats?: 
   if (opts.strict && report.hasWarnings) process.exitCode = 1;
 }
 
+interface FleetPingHostResult {
+  host: string;
+  rows: AuthProbeRow[];
+  error?: string;
+  skipped?: string;
+}
+
+/** SSH into a host and run its local auth probe, returning its rows. */
+async function probeRemoteAuth(target: FleetStatusTarget): Promise<AuthProbeRow[]> {
+  const isWin = /^win/i.test((target.platform ?? '').trim());
+  const env = isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' };
+  const cmd = buildRemoteAgentsInvocation(['devices', 'ping', '--local', '--json'], undefined, isWin ? 'windows' : undefined, env);
+  const res = await sshExecAsync(target.name, cmd, { timeoutMs: 60000, multiplex: true });
+  if (res.code !== 0) {
+    throw new Error(res.timedOut ? 'timed out' : (res.stderr.trim() || `exit ${res.code ?? 'unknown'}`));
+  }
+  const parsed = JSON.parse(res.stdout) as { host: string; rows: AuthProbeRow[] };
+  return parsed.rows ?? [];
+}
+
+async function runFleetPing(opts: { json?: boolean; local?: boolean; verbose?: boolean; strict?: boolean }): Promise<void> {
+  const self = machineId();
+  const cliVersion = packageJson.version;
+
+  // --local: probe just this host. Used both directly and as the fan-out worker.
+  if (opts.local) {
+    const rows = await probeLocalFleetAuth({ cliVersion });
+    writeFleetAuthRows(self, rows);
+    if (opts.json) {
+      console.log(JSON.stringify({ host: self, rows }));
+    } else {
+      for (const line of renderAuthMatrix([{ host: self, rows }], { verbose: opts.verbose })) console.log(line);
+    }
+    if (opts.strict && rows.some((r) => r.health.verdict === 'revoked')) {
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  // Origin: probe locally, then fan out to the rest of the fleet in parallel.
+  const reg = await loadDevices();
+  const planned = planFleetTargets(reg);
+  const results: FleetPingHostResult[] = [];
+
+  const localRows = await probeLocalFleetAuth({ cliVersion });
+  writeFleetAuthRows(self, localRows);
+  results.push({ host: self, rows: localRows });
+
+  const remoteTargets: FleetStatusTarget[] = remoteFleetTargets(planned, self).map((t) => ({
+    name: t.device.name,
+    platform: t.device.platform,
+    skip: t.skip,
+  }));
+  const probeable = remoteTargets.filter((t) => !t.skip).length;
+  const spinner = isInteractiveTerminal() && !opts.json
+    ? ora(`Pinging ${probeable} device${probeable === 1 ? '' : 's'}…`).start()
+    : undefined;
+  let remote: Awaited<ReturnType<typeof fanOutDevices<AuthProbeRow[], FleetStatusTarget>>>;
+  try {
+    remote = await fanOutDevices(remoteTargets, probeRemoteAuth);
+  } finally {
+    spinner?.stop();
+  }
+  for (const r of remote) {
+    if (r.status === 'ok' && r.value) {
+      results.push({ host: r.name, rows: r.value });
+      writeFleetAuthRows(r.name, r.value);
+    } else {
+      results.push({
+        host: r.name,
+        rows: [],
+        error: r.error,
+        skipped: r.reason ? String(r.reason) : undefined,
+      });
+    }
+  }
+
+  if (opts.json) {
+    console.log(JSON.stringify(results, null, 2));
+  } else {
+    for (const line of renderAuthMatrix(results, { verbose: opts.verbose })) console.log(line);
+  }
+
+  const anyBad = results.some((r) => r.rows.some((row) => row.health.verdict === 'revoked'));
+  if (opts.strict && anyBad) process.exitCode = 1;
+}
+
+/** Color a per-host×agent cell: green all-live, red any revoked/expired, yellow degraded. */
+function authCell(summary: VerdictSummary, width: number): string {
+  if (summary.total === 0) return chalk.dim('·'.padEnd(width));
+  const text = `${summary.live}/${summary.total}`;
+  const padded = text.padEnd(width);
+  if (summary.bad > 0) return chalk.red(padded);
+  if (summary.warn > 0) return chalk.yellow(padded);
+  return chalk.green(padded);
+}
+
+/** Render the fleet auth matrix (device rows × agent columns) plus an optional per-account breakdown. */
+function renderAuthMatrix(results: FleetPingHostResult[], opts?: { verbose?: boolean }): string[] {
+  // Only show agent columns that appear somewhere in the results.
+  const present = new Set<string>();
+  for (const r of results) for (const row of r.rows) present.add(row.agent);
+  const agents = ALL_AGENT_IDS.filter((a) => present.has(a));
+  const cellW = 5;
+  const nameW = Math.max(6, ...results.map((r) => r.host.length));
+
+  const lines: string[] = [chalk.bold('Fleet auth')];
+  const header = `  ${'Device'.padEnd(nameW)}  ${agents.map((a) => a.slice(0, cellW).padEnd(cellW)).join(' ')}`;
+  lines.push(chalk.gray(header));
+
+  for (const r of results) {
+    const cells = agents.map((a) => {
+      const verdicts = r.rows.filter((row) => row.agent === a).map((row) => row.health.verdict);
+      return authCell(summarizeVerdicts(verdicts), cellW);
+    });
+    let note = '';
+    if (r.skipped) note = chalk.dim(`  ${r.skipped}`);
+    else if (r.error) note = chalk.red(`  ${r.error}`);
+    else {
+      const dead = r.rows.filter((row) => row.health.verdict === 'revoked').length;
+      if (dead > 0) note = chalk.red(`  ${dead} revoked — re-login`);
+    }
+    lines.push(`  ${r.host.padEnd(nameW)}  ${cells.join(' ')}${note}`);
+  }
+
+  lines.push('');
+  lines.push(chalk.gray('  cell = live/total accounts · green all live · red revoked (re-login) · yellow expired/unverified/limited'));
+
+  if (opts?.verbose) {
+    lines.push('');
+    lines.push(chalk.bold('Accounts'));
+    for (const r of results) {
+      if (r.rows.length === 0) continue;
+      for (const row of r.rows.slice().sort((x, y) => (x.agent + x.version).localeCompare(y.agent + y.version))) {
+        const v = row.health.verdict;
+        const label = v === 'live' ? chalk.green(verdictLabel(v))
+          : (v === 'revoked' || v === 'expired') ? chalk.red(verdictLabel(v))
+          : chalk.yellow(verdictLabel(v));
+        const acctRaw = row.account ?? '—';
+        const acct = row.account ? chalk.cyan(acctRaw.padEnd(28)) : chalk.dim(acctRaw.padEnd(28));
+        const detail = row.health.detail ? chalk.dim(` ${row.health.detail}`) : '';
+        const age = chalk.dim(` · ${formatCheckedAge(row.health.checkedAt)}`);
+        lines.push(`  ${r.host.padEnd(nameW)}  ${`${row.agent}@${row.version}`.padEnd(22)}  ${acct}  ${label}${detail}${age}`);
+      }
+    }
+  }
+
+  return lines;
+}
+
 /** Register the `agents devices` command tree (also aliased as `fleet`). */
 function registerDevicesCommands(program: Command): void {
   const devicesCmd = program
@@ -525,6 +685,17 @@ Typical workflow:
     .option('--no-stats', 'skip the live resource probe')
     .action(async (opts: { json?: boolean; strict?: boolean; stats?: boolean }) => {
       await runFleetStatus(opts);
+    });
+
+  devicesCmd
+    .command('ping')
+    .description('Live auth health: complete a real request for every agent account across the fleet (unlike the cached "signed in" flag). Writes the shared auth-health cache read by `agents view` and `fleet status`.')
+    .option('--json', 'output machine-readable JSON')
+    .option('--local', 'probe only this host (used internally for fan-out)')
+    .option('--verbose', 'show a per-account breakdown, not just the per-host rollup')
+    .option('--strict', 'exit non-zero when any account is revoked or expired')
+    .action(async (opts: { json?: boolean; local?: boolean; verbose?: boolean; strict?: boolean }) => {
+      await runFleetPing(opts);
     });
 
   devicesCmd
