@@ -22,7 +22,7 @@ import {
   createProfile,
   ensureDefaultBrowserProfile,
 } from './profiles.js';
-import { findFirstInstalledBrowser, isPortInUse } from './chrome.js';
+import { findBrowserPath, findFirstInstalledBrowser, isPortInUse } from './chrome.js';
 import type { BrowserProfile } from './types.js';
 import type { BrowserProfileConfig } from '../types.js';
 import { readMeta, writeMeta } from '../state.js';
@@ -305,6 +305,24 @@ describe('profile YAML round-trip', () => {
       })
     ).resolves.toBeUndefined();
     expect(store.browser['remote-comet'].binary).toBe('/Applications/Comet Beta.app/Contents/MacOS/Comet Beta');
+  });
+
+  it('skips local browser binary validation for ssh endpoints', async () => {
+    const store: { browser: Record<string, BrowserProfileConfig> } = { browser: {} };
+    vi.mocked(readMeta).mockImplementation(() => store as any);
+    vi.mocked(writeMeta).mockImplementation((meta: any) => {
+      store.browser = (meta.browser ?? {}) as Record<string, BrowserProfileConfig>;
+    });
+
+    await createProfile({
+      name: 'remote-linux-chrome',
+      browser: 'custom',
+      binary: '/opt/google/chrome/chrome',
+      endpoints: ['ssh://linux-box?port=9222'],
+    });
+
+    expect(findBrowserPath).not.toHaveBeenCalled();
+    expect(store.browser['remote-linux-chrome'].binary).toBe('/opt/google/chrome/chrome');
   });
 
   it('rejects shell metacharacters in browser binaries used by ssh endpoints', async () => {
