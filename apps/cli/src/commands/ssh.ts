@@ -17,7 +17,7 @@ import * as os from 'os';
 import * as path from 'path';
 import chalk from 'chalk';
 import ora from 'ora';
-import packageJson from '../../package.json' with { type: 'json' };
+import { getCliVersion } from '../lib/version.js';
 import { readAndResolveBundleEnv, isHeadlessSecretsContext } from '../lib/secrets/bundles.js';
 import { machineId } from '../lib/session/sync/config.js';
 import {
@@ -304,7 +304,7 @@ function localHealthRow(self: string, stats?: DeviceStats): FleetHealthRow {
   return {
     name: self,
     platform: process.platform === 'darwin' ? 'macos' : process.platform,
-    version: packageJson.version,
+    version: getCliVersion(),
     stats,
     clis: checkAllClis(),
     sync: checkSyncStatus(process.cwd()),
