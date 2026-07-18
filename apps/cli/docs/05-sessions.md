@@ -224,6 +224,36 @@ cases a live pull can't reach: a machine that is **offline / asleep / decommissi
   on-demand `--host` reads and explicit export/import; reach for sync only when you want
   a passive always-on mirror (further below).
 
+## Forking (branch a conversation)
+
+`agents fork <session>` branches an existing conversation into a NEW, independent
+session. Where `resume` continues the *same* thread (same id, same file — it
+appends), `fork` copies the transcript under a fresh id, so continuing the fork
+diverges instead of mutating the original. It is the "git branch" of
+conversations — useful for exploring an alternative approach from a point you
+already reached, or fanning a promising session into two directions.
+
+```bash
+# Fork by (partial) id, then continue the copy — the original is untouched
+agents fork 4f3a9c21
+agents resume <new-id>
+
+# Name the fork
+agents fork 4f3a9c21 --name "try redis instead"
+```
+
+Mechanics (`lib/session/fork.ts`): a Claude session id *is* its `<id>.jsonl`
+filename, so a fork copies the transcript to a new-uuid file in the same
+directory, rewrites the embedded per-line `sessionId`, registers the new row via
+`upsertSession`, and labels it (`fork of <original>` by default, via the same
+run-name sidecar as `agents run --name`). The fork resolves immediately by
+`agents sessions` / `agents resume` and is version-pinned like any other session.
+
+Scope: v1 supports **Claude** (single-file transcript, native `--resume`). Codex
+(single-file) is a natural next step; multi-file agents (grok, kimi) and DB-only
+agents (opencode) need per-agent handling and are refused up front with a clear
+message.
+
 ## Export / Import (portable bundles)
 
 `agents sessions export` bundles selected sessions into a portable, self-describing
