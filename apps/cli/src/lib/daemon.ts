@@ -22,6 +22,7 @@ import { BrowserService } from './browser/service.js';
 import { BrowserIPCServer } from './browser/ipc.js';
 import { readAndResolveBundleEnv } from './secrets/bundles.js';
 import { redactSecrets } from './redact.js';
+import { getAgentsBinPath, getCliLaunch, BUN_VIRTUAL_ROOT } from './cli-entry.js';
 
 const PID_FILE = 'daemon.pid';
 const LOCK_FILE = 'daemon.lock';
@@ -774,52 +775,11 @@ Environment=PATH=${daemonNodeBinDir()}:/usr/local/bin:/usr/bin:/bin
 WantedBy=default.target`;
 }
 
-const BUN_VIRTUAL_ROOT = /[/\\]\$bunfs[/\\]root[/\\]/;
-
-function resolveBunStandaloneEntry(entry: string, execPath: string): string {
-  if (!BUN_VIRTUAL_ROOT.test(entry)) return entry;
-  if (!execPath || BUN_VIRTUAL_ROOT.test(execPath) || !fs.existsSync(execPath)) {
-    throw new Error(
-      `Cannot resolve agents CLI: Bun standalone executable not found at ${execPath || '(empty path)'}`,
-    );
-  }
-  return execPath;
-}
-
-export function getAgentsBinPath(
-  argv1: string | undefined = process.argv[1],
-  execPath: string = process.execPath,
-): string {
-  // Prefer the binary actively executing this code. `which agents` returns
-  // whatever happens to be first on PATH, which means a side-by-side dev
-  // build at ~/.local/bin would silently spawn the registry-installed
-  // daemon and run stale code. For a JS install, process.argv[1] is the
-  // absolute entrypoint the user actually invoked. A Bun standalone instead
-  // exposes its embedded /$bunfs/root entry at argv[1] and its physical signed
-  // executable at process.execPath; Bun reports both as existing paths.
-  const runningEntry = argv1 ? resolveBunStandaloneEntry(argv1, execPath) : undefined;
-  if (runningEntry && fs.existsSync(runningEntry)) {
-    // The package's browser/computer entrypoints are sibling shims without a
-    // `daemon` command. A daemon started as their IPC side effect must launch
-    // through the main agents entrypoint instead of replaying the shim path.
-    const entryName = path.basename(runningEntry);
-    const compiledShim = /^(browser|computer)\.(c|m)?js$/.test(entryName);
-    const installedShim = /^(browser|computer)$/.test(entryName);
-    if (compiledShim || installedShim) {
-      const agentsEntry = path.join(path.dirname(runningEntry), compiledShim ? 'index.js' : 'agents');
-      if (!fs.existsSync(agentsEntry)) {
-        throw new Error(`Cannot start agents daemon: main CLI entry not found at ${agentsEntry}`);
-      }
-      return agentsEntry;
-    }
-    return runningEntry;
-  }
-  try {
-    return execFileSync('which', ['agents'], { encoding: 'utf-8' }).trim();
-  } catch {
-    return 'agents';
-  }
-}
+// Binary-resolution helpers (getAgentsBinPath / isNodeScriptEntry / getCliLaunch)
+// live in ./cli-entry.js — a leaf module the secrets broker also imports without
+// forming a cycle. Re-exported so existing `from './daemon.js'` importers of
+// getAgentsBinPath keep resolving.
+export { getAgentsBinPath };
 
 /**
  * Ask the service manager for the daemon's live PID. Used as a fallback when
@@ -987,46 +947,7 @@ export function buildDetachedDaemonEnv(
 export function getDaemonLaunch(agentsBin: string = getAgentsBinPath()): { command: string; args: string[] } {
   const { warnings } = validateDaemonBinary(agentsBin);
   for (const w of warnings) process.stderr.write(`[agents] ${w}\n`);
-  if (isNodeScriptEntry(agentsBin)) {
-    return { command: process.execPath, args: [agentsBin, 'daemon', '_run'] };
-  }
-  return { command: agentsBin, args: ['daemon', '_run'] };
-}
-
-/**
- * A daemon entry must be launched through the Node runtime when it is a Node
- * script — a `.js`/`.cjs`/`.mjs` file, OR a symlink/extension-less shim whose
- * shebang names `node`. Package installs link `bin/agents` to a `dist/index.js`
- * (a symlink) or drop an extension-less `#!/usr/bin/env node` shim, so an
- * extension check alone misses them and they get run directly. Executing such an
- * entry then relies on the shebang resolving `node` off the daemon's PATH — and
- * when that PATH points at a pruned nvm version (or an ancient system node), the
- * daemon crash-loops at import (`node:util` has no `styleText` on Node 18). A
- * real compiled binary (Mach-O/ELF/PE) has no `#!node` shebang, so it takes the
- * direct branch and owns its own runtime resolution.
- */
-function isNodeScriptEntry(agentsBin: string): boolean {
-  let resolved = agentsBin;
-  try {
-    resolved = fs.realpathSync(agentsBin);
-  } catch {
-    // Unresolvable (e.g. a template path that does not exist on this box): fall
-    // back to the extension check on the path as given.
-  }
-  if (/\.(c|m)?js$/.test(resolved)) return true;
-  try {
-    const fd = fs.openSync(resolved, 'r');
-    try {
-      const buf = Buffer.alloc(128);
-      const n = fs.readSync(fd, buf, 0, 128, 0);
-      const firstLine = buf.toString('utf-8', 0, n).split('\n', 1)[0];
-      return firstLine.startsWith('#!') && /\bnode\b/.test(firstLine);
-    } finally {
-      fs.closeSync(fd);
-    }
-  } catch {
-    return false;
-  }
+  return getCliLaunch(['daemon', '_run'], agentsBin);
 }
 
 /**
@@ -1059,11 +980,7 @@ export function getAgentsInvocation(
   subArgs: string[],
   agentsBin: string = getAgentsBinPath(),
 ): { command: string; args: string[] } {
-  const resolvedBin = resolveBunStandaloneEntry(agentsBin, process.execPath);
-  if (/\.(c|m)?js$/.test(resolvedBin)) {
-    return { command: process.execPath, args: [resolvedBin, ...subArgs] };
-  }
-  return { command: resolvedBin, args: subArgs };
+  return getCliLaunch(subArgs, agentsBin);
 }
 
 export function validateDaemonBinary(binPath: string): { warnings: string[] } {
