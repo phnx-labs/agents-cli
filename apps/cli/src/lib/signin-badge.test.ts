@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatSignInBadge, loginHint } from './signin-badge.js';
+import { formatSignInBadge, loginHint, shouldCheckLoginBeforeLaunch } from './signin-badge.js';
 import type { AccountInfo } from './agents.js';
 
 // Strip ANSI so assertions read against text, not color codes.
@@ -48,5 +48,36 @@ describe('formatSignInBadge', () => {
   it('renders a bare signed-in badge for opaque credentials (no email, no id)', () => {
     // Kimi / Antigravity: signed in but no surfaceable identity.
     expect(plain(formatSignInBadge(acct({ signedIn: true })))).toBe('✓ signed in');
+  });
+});
+
+describe('shouldCheckLoginBeforeLaunch', () => {
+  it('fires on a bare interactive launch (no prompt, not headless)', () => {
+    expect(shouldCheckLoginBeforeLaunch({ hasPrompt: false })).toBe(true);
+  });
+
+  it('does NOT fire on a headless run (prompt present)', () => {
+    expect(shouldCheckLoginBeforeLaunch({ hasPrompt: true })).toBe(false);
+    expect(shouldCheckLoginBeforeLaunch({ hasPrompt: false, headless: true })).toBe(false);
+  });
+
+  it('fires on a forced-interactive resume even though the prompt was rewritten to /continue', () => {
+    // The finding-1 regression: `agents run kimi --resume` sets forceInteractive
+    // AND rewrites the prompt, so hasPrompt is true — but the TUI still opens.
+    expect(shouldCheckLoginBeforeLaunch({ hasPrompt: true, forceInteractive: true })).toBe(true);
+  });
+
+  it('fires on explicit --interactive even with a prompt', () => {
+    expect(shouldCheckLoginBeforeLaunch({ hasPrompt: true, interactive: true })).toBe(true);
+  });
+
+  it('is suppressed by --json / --quiet / disabled / rotation, even on an interactive launch', () => {
+    const base = { hasPrompt: false as const };
+    expect(shouldCheckLoginBeforeLaunch({ ...base, json: true })).toBe(false);
+    expect(shouldCheckLoginBeforeLaunch({ ...base, quiet: true })).toBe(false);
+    expect(shouldCheckLoginBeforeLaunch({ ...base, authCheckDisabled: true })).toBe(false);
+    expect(shouldCheckLoginBeforeLaunch({ ...base, rotated: true })).toBe(false);
+    // A suppressor wins even when forceInteractive is set.
+    expect(shouldCheckLoginBeforeLaunch({ ...base, forceInteractive: true, rotated: true })).toBe(false);
   });
 });

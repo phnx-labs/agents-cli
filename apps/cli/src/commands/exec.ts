@@ -1593,12 +1593,20 @@ export function registerRunCommand(program: Command): void {
       // and via --no-auth-check / AGENTS_NO_AUTH_CHECK=1. (--host/--lease return
       // earlier.)
       {
-        const interactiveLaunch = options.interactive === true || (prompt === undefined && options.headless !== true);
-        const authCheckOff = options.authCheck === false || process.env.AGENTS_NO_AUTH_CHECK === '1';
-        if (interactiveLaunch && !authCheckOff && !options.json && !options.quiet && !rotationResult) {
+        const { shouldCheckLoginBeforeLaunch, loginHint } = await import('../lib/signin-badge.js');
+        const preflight = shouldCheckLoginBeforeLaunch({
+          interactive: options.interactive,
+          forceInteractive, // a resumed interactive session (e.g. `run kimi --resume`) opens the TUI too
+          headless: options.headless,
+          hasPrompt: prompt !== undefined,
+          json: options.json,
+          quiet: options.quiet,
+          authCheckDisabled: options.authCheck === false || process.env.AGENTS_NO_AUTH_CHECK === '1',
+          rotated: !!rotationResult,
+        });
+        if (preflight) {
           try {
             const { getAccountInfo } = await import('../lib/agents.js');
-            const { loginHint } = await import('../lib/signin-badge.js');
             const info = await getAccountInfo(agent);
             if (!info.signedIn) {
               process.stderr.write(
