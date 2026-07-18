@@ -833,6 +833,31 @@ function assertSafeVersion(version: string): void {
 }
 
 /**
+ * Agents whose config directory can be relocated by an environment variable
+ * (the per-agent `managedEnv` block in `generateVersionedAliasScript` below).
+ *
+ * Only these can be installed with `agents add --isolated`: the versioned alias
+ * points that env var at the copy's private home, so the copy never reads or
+ * writes the user's real `~/.<agent>`. Every other agent isolates ONLY by
+ * adopting `~/.<agent>` via a symlink — which an isolated install deliberately
+ * skips — so an isolated copy would silently fall back to (and mutate) the real
+ * config dir. For those agents `--isolated` is refused up front.
+ *
+ * KEEP IN SYNC with the `managedEnv` switch in `generateVersionedAliasScript`.
+ * The colocated test `shims.isolation-capability.test.ts` enforces this.
+ */
+export const CONFIG_ENV_ISOLATED_AGENTS: readonly AgentId[] = ['claude', 'codex', 'copilot', 'grok', 'kimi'];
+
+/**
+ * Whether an agent supports a clean `--isolated` install — i.e. its config
+ * location can be redirected by an env var so the isolated copy stays fully
+ * separate from the user's real `~/.<agent>`. See {@link CONFIG_ENV_ISOLATED_AGENTS}.
+ */
+export function supportsIsolatedInstall(agent: AgentId): boolean {
+  return CONFIG_ENV_ISOLATED_AGENTS.includes(agent);
+}
+
+/**
  * Generate a versioned alias script that directly execs a specific version.
  * e.g., claude@2.0.65 -> directly runs that version's binary
  */

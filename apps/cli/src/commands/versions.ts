@@ -66,6 +66,8 @@ import { carryForwardSettings } from '../lib/settings-manifest.js';
 import {
   createShim,
   createVersionedAlias,
+  supportsIsolatedInstall,
+  CONFIG_ENV_ISOLATED_AGENTS,
   removeShim,
   shimExists,
   getShimsDir,
@@ -208,6 +210,13 @@ async function versionPruneAction(
 
     const { agent, version } = parsed;
     const agentConfig = AGENTS[agent];
+
+    // --isolated only ever applies to agents that can BE installed isolated;
+    // for the rest no isolated version can exist, so say so plainly.
+    if (isIsolated && !supportsIsolatedInstall(agent)) {
+      console.log(chalk.gray(`${agentLabel(agentConfig.id)} has no isolated installs (--isolated is not supported for it).`));
+      continue;
+    }
 
     // Script-installed agents (droid, grok) can have a *literal* `latest`
     // version dir on disk when the post-install version probe failed. An
@@ -426,6 +435,17 @@ export function registerVersionsCommands(program: Command): void {
         const agentConfig = AGENTS[agent];
 
         warnAgentDeprecated(agent);
+
+        // Isolation relies on a config-dir env var to redirect the copy away
+        // from the user's real ~/.<agent>. Agents without one isolate only by
+        // adopting ~/.<agent> (which --isolated skips), so an isolated copy
+        // would silently read/write the real config. Refuse rather than lie.
+        if (isIsolated && !supportsIsolatedInstall(agent)) {
+          console.log(chalk.red(`${agentLabel(agentConfig.id)} does not support --isolated installs.`));
+          console.log(chalk.gray(`  It has no config-directory env var, so it can only isolate by adopting ${agentConfig.configDir} — which --isolated deliberately avoids.`));
+          console.log(chalk.gray(`  Supported with --isolated: ${CONFIG_ENV_ISOLATED_AGENTS.join(', ')}.`));
+          continue;
+        }
 
         if (!agentConfig.npmPackage && !agentConfig.installScript) {
           console.log(chalk.yellow(`${agentLabel(agentConfig.id)} has no npm package. Install manually.`));
