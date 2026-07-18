@@ -29,6 +29,7 @@ import {
 import type { AccountInfo } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
 import {
+  agentReportsUsage,
   deriveUsageStatusFromSnapshot,
   formatUsageSection,
   formatUsageSummary,
@@ -328,7 +329,10 @@ function renderHostClisSection(cwd: string): void {
   }
 }
 
-async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
+async function showInstalledVersions(
+  filterAgentId?: AgentId,
+  viewOpts?: { forceRefresh?: boolean },
+): Promise<void> {
   const spinnerText = filterAgentId
     ? `Checking ${agentLabel(filterAgentId)} agents...`
     : 'Checking installed agents...';
@@ -419,7 +423,7 @@ async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
       cliVersion,
       info,
     })),
-  ]);
+  ], { forceRefresh: viewOpts?.forceRefresh });
 
   const mergeCanonical = (info: AccountInfo): AccountInfo => {
     const key = getUsageLookupKey(info);
@@ -512,7 +516,8 @@ async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
         const info = rawInfo ? mergeCanonical(rawInfo) : undefined;
         const usageKey = getUsageLookupKey(info);
         const usageInfo = usageKey ? usageByKey.get(usageKey) : undefined;
-        const usageStr = formatUsageSummary(info?.plan || null, usageInfo?.snapshot || null, maxPlanWidth);
+        const usageUnavailable = agentReportsUsage(agentId) && !!info?.signedIn && !usageInfo?.snapshot;
+        const usageStr = formatUsageSummary(info?.plan || null, usageInfo?.snapshot || null, maxPlanWidth, { unavailable: usageUnavailable });
         maxUsageWidth = Math.max(maxUsageWidth, visibleWidth(usageStr));
         const statusStr = formatUsageStatusBadge(info?.usageStatus);
         maxStatusWidth = Math.max(maxStatusWidth, visibleWidth(statusStr));
@@ -555,7 +560,8 @@ async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
         const parts = [`    ${label}`];
         const hasEmail = !!vInfo?.email;
         const signedIn = !!vInfo?.signedIn;
-        const usageStr = formatUsageSummary(vInfo?.plan || null, usageInfo?.snapshot || null, maxPlanWidth);
+        const usageUnavailable = agentReportsUsage(agentId) && signedIn && !usageInfo?.snapshot;
+        const usageStr = formatUsageSummary(vInfo?.plan || null, usageInfo?.snapshot || null, maxPlanWidth, { unavailable: usageUnavailable });
         const hasUsage = usageStr.length > 0;
         // Only show lastActive for versions with an actual logged-in account.
         // Otherwise it reflects install time (misleading "just now" for fresh installs).
@@ -1696,6 +1702,7 @@ export async function viewAction(
     dryRun?: boolean;
     resources?: string | boolean;
     detailed?: boolean;
+    refresh?: boolean;
   } & ViewSectionFilter,
 ): Promise<void> {
   // --resources / --detailed imply --json (they only shape structured output).
@@ -1740,7 +1747,7 @@ export async function viewAction(
       return;
     }
     // No argument: show all installed versions
-    await showInstalledVersions();
+    await showInstalledVersions(undefined, { forceRefresh: options?.refresh === true });
     return;
   }
 
@@ -1802,7 +1809,7 @@ export async function viewAction(
     await showAgentResources(agentId, 'default', filter);
   } else {
     // Just agent name: show versions for that agent
-    await showInstalledVersions(agentId);
+    await showInstalledVersions(agentId, { forceRefresh: options?.refresh === true });
   }
 }
 
@@ -1813,6 +1820,7 @@ export function registerViewCommand(program: Command): void {
     .option('--json', 'Emit machine-readable JSON (version list, usage, signed-in status).')
     .option('--resources [sections]', 'In --json mode, include each version\'s resources: "all" (default) or a comma list (skills,plugins,mcp,commands,workflows,memory,hooks). Implies --json.')
     .option('--detailed', 'Include all resources in --json output (alias for --resources all). Implies --json.')
+    .option('-r, --refresh', 'Force a live usage refresh, bypassing the cache (slower). Repopulates the S:/W: limit bars for every account whose token is reachable.')
     .option('--prune', 'Remove older installed versions that share an account with a newer installed version. Skips the global default.')
     .option('--dry-run', 'With --prune, show duplicate versions without deleting')
     .option('-y, --yes', 'Skip the prune confirmation prompt.')
@@ -1880,6 +1888,7 @@ Output:
         dryRun?: boolean;
         resources?: string | boolean;
         detailed?: boolean;
+        refresh?: boolean;
       } & ViewSectionFilter,
     ) => viewAction(agentArg, options));
 }

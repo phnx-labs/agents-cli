@@ -239,8 +239,22 @@ export function buildCanonicalUsageContext(inputs: UsageIdentityInput[]): {
   return { canonicalByUsageKey, usageFetchInputs };
 }
 
+/**
+ * Whether an agent exposes usage/limit data we can render — Claude/Kimi/Droid via
+ * a live API, Codex via local session logs. Everything else has no usage concept,
+ * so callers use this to decide whether a missing snapshot is worth flagging as
+ * "usage unavailable" (a signed-in Claude account with no data) versus simply not
+ * applicable (Antigravity, Grok, OpenCode).
+ */
+export function agentReportsUsage(agentId: AgentId): boolean {
+  return agentId === 'claude' || agentId === 'codex' || agentId === 'kimi' || agentId === 'droid';
+}
+
 /** Fetch usage info for all unique accounts in parallel, keyed by usage key. */
-export async function getUsageInfoByIdentity(inputs: UsageIdentityInput[]): Promise<{
+export async function getUsageInfoByIdentity(
+  inputs: UsageIdentityInput[],
+  opts?: { forceRefresh?: boolean }
+): Promise<{
   canonicalByUsageKey: Map<string, AccountInfo>;
   usageByKey: Map<string, UsageInfo>;
 }> {
@@ -253,7 +267,7 @@ export async function getUsageInfoByIdentity(inputs: UsageIdentityInput[]): Prom
         home: input.home,
         cliVersion: input.cliVersion,
         info: canonicalByUsageKey.get(key)!,
-      }),
+      }, opts),
     }))
   );
 
@@ -281,8 +295,12 @@ const inFlightRefreshes = new Map<string, Promise<void>>();
  * cache; every run after that returns instantly while the cache silently
  * refreshes in the background.
  */
-export async function getUsageInfoForIdentity(input: UsageIdentityInput): Promise<UsageInfo> {
+export async function getUsageInfoForIdentity(
+  input: UsageIdentityInput,
+  opts?: { forceRefresh?: boolean }
+): Promise<UsageInfo> {
   const usageKey = getUsageLookupKey(input.info);
+  const forceRefresh = opts?.forceRefresh === true;
 
   // Agents whose usage comes from a live network call (Claude, Kimi, Droid) go
   // through the stale-while-revalidate cache below so `agents run`/`agents view`
@@ -304,16 +322,21 @@ export async function getUsageInfoForIdentity(input: UsageIdentityInput): Promis
   const cached = readClaudeUsageCache(usageKey);
   const ageMs = cached?.capturedAt ? Date.now() - cached.capturedAt.getTime() : Infinity;
 
-  // Fresh: cache is recent enough, skip network entirely.
-  if (cached && ageMs < USAGE_CACHE_FRESH_MS) {
-    return { snapshot: cached, error: null };
-  }
+  // `--refresh` (forceRefresh) skips both cache short-circuits and blocks on a
+  // live fetch below, so `agents view --refresh` repopulates every account we can
+  // actually reach a token for.
+  if (!forceRefresh) {
+    // Fresh: cache is recent enough, skip network entirely.
+    if (cached && ageMs < USAGE_CACHE_FRESH_MS) {
+      return { snapshot: cached, error: null };
+    }
 
-  // Stale-while-revalidate: cache exists and isn't ancient, return it now and
-  // refresh in the background so the next invocation has fresh data.
-  if (cached && ageMs < USAGE_CACHE_SWR_MS) {
-    triggerBackgroundUsageRefresh(input, usageKey);
-    return { snapshot: cached, error: null };
+    // Stale-while-revalidate: cache exists and isn't ancient, return it now and
+    // refresh in the background so the next invocation has fresh data.
+    if (cached && ageMs < USAGE_CACHE_SWR_MS) {
+      triggerBackgroundUsageRefresh(input, usageKey);
+      return { snapshot: cached, error: null };
+    }
   }
 
   // Cold cache or > 24h old: block on live fetch.
@@ -373,7 +396,8 @@ function triggerBackgroundUsageRefresh(input: UsageIdentityInput, usageKey: stri
 export function formatUsageSummary(
   plan: string | null,
   snapshot: UsageSnapshot | null,
-  planWidth = 3
+  planWidth = 3,
+  opts?: { unavailable?: boolean }
 ): string {
   const parts: string[] = [];
 
@@ -387,15 +411,24 @@ export function formatUsageSummary(
     // account throttled by its month window (Droid meters on 5h/week/month)
     // shows the bar that explains why. Claude's Sonnet week is a per-model
     // sub-limit, not a blocking window; it renders only in the full
-    // per-version usage section.
+    // per-version usage section. Each window reads "S: ███░░ 58% (3d)" — the
+    // gauge, the exact percentage, and a compact hint of when it resets.
     const windows = snapshot.windows
       .filter((window) => window.key !== 'sonnet_week')
-      .map((window) =>
-      `${chalk.gray(`${window.shortLabel}:`)} ${renderCompactUsageBar(window.usedPercent)}`
-    );
+      .map((window) => {
+        const bar = renderCompactUsageBar(window.usedPercent);
+        const pct = colorUsage(`${Math.round(window.usedPercent)}%`, window.usedPercent);
+        const reset = window.resetsAt ? chalk.dim(` (${formatResetHint(window.resetsAt)})`) : '';
+        return `${chalk.gray(`${window.shortLabel}:`)} ${bar} ${pct}${reset}`;
+      });
     if (windows.length > 0) {
-      parts.push(windows.join(' '));
+      parts.push(windows.join('  '));
     }
+  } else if (opts?.unavailable) {
+    // Signed-in account we could NOT fetch usage for (no live token in a reachable
+    // home / org mismatch / fetch error). Say so explicitly instead of drawing a
+    // blank gauge that reads like "0% used".
+    parts.push(chalk.dim('usage unavailable'));
   }
 
   return parts.join('  ');
@@ -1433,6 +1466,23 @@ function getUsageColor(usedPercent: number): (text: string) => string {
 function formatPercent(value: number): string {
   const rounded = Math.round(value * 10) / 10;
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+
+/**
+ * Compact "time until reset" hint for the inline usage bars: "5m", "2h", "3d",
+ * or "now" once elapsed. Deliberately coarse (single unit, whole numbers) so it
+ * fits after a bar without wrapping the row — the detailed section
+ * (`formatResetAt`) carries the precise clock time.
+ */
+function formatResetHint(date: Date): string {
+  const diffMs = date.getTime() - Date.now();
+  if (diffMs <= 0) return 'now';
+  const mins = Math.round(diffMs / 60000);
+  if (mins < 60) return `${Math.max(1, mins)}m`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.round(hours / 24);
+  return `${days}d`;
 }
 
 /** Format a reset timestamp as a human-readable relative or absolute time. */

@@ -848,7 +848,9 @@ describe('getAccountInfo — Claude organization identity', () => {
     const info = await getAccountInfo('claude', home);
     expect(info.organizationType).toBe('claude_team');
     expect(info.organizationName).toBe('Turing Labs');
-    expect(info.plan).toBe('Pro');
+    // Plan tier is derived from organizationType, so a Team seat reads "Team" —
+    // not the billingType-derived "Pro" that mislabelled every subscription.
+    expect(info.plan).toBe('Team');
   });
 
   it('extracts organizationType from a personal Max plan, keeping the raw boilerplate name', async () => {
@@ -863,6 +865,8 @@ describe('getAccountInfo — Claude organization identity', () => {
     });
     const info = await getAccountInfo('claude', home);
     expect(info.organizationType).toBe('claude_max');
+    // The whole point of the fix: a Max account reads "Max", not "Pro".
+    expect(info.plan).toBe('Max');
     // Raw value: display layers decide whether the boilerplate name is shown.
     expect(info.organizationName).toBe("taylor@example.com's Organization");
   });
@@ -921,20 +925,28 @@ describe('formatClaudeOrgLabel', () => {
 });
 
 describe('accountOrgBadge', () => {
-  it('shows the org name only for multi-seat org types', () => {
+  it('shows just the org NAME for multi-seat org types', () => {
+    // The tier label (Team/Enterprise) now lives in the plan column, so the badge
+    // carries only the org name — the identity that disambiguates a Team seat.
     expect(accountOrgBadge({ organizationType: 'claude_team', organizationName: 'Turing Labs' }))
-      .toBe('Turing Labs · Team');
+      .toBe('Turing Labs');
     expect(accountOrgBadge({ organizationType: 'claude_enterprise', organizationName: 'BigCo' }))
-      .toBe('BigCo · Enterprise');
-    // Personal orgs carry auto-generated boilerplate names — label only.
+      .toBe('BigCo');
+  });
+
+  it('returns null for personal plans — the tier shows in the plan column instead', () => {
+    // Personal orgs carry auto-generated boilerplate names, and the tier already
+    // renders in the aligned column, so no badge (avoids the duplicate "(Max) … Max").
     expect(accountOrgBadge({
       organizationType: 'claude_max',
       organizationName: "taylor@example.com's Organization",
-    })).toBe('Max');
+    })).toBeNull();
+    expect(accountOrgBadge({ organizationType: 'claude_pro', organizationName: 'x' })).toBeNull();
+    expect(accountOrgBadge({ organizationType: 'claude_free', organizationName: 'x' })).toBeNull();
   });
 
-  it('falls back to the label when a team org has no name', () => {
-    expect(accountOrgBadge({ organizationType: 'claude_team', organizationName: null })).toBe('Team');
+  it('returns null when a multi-seat org has no name to show', () => {
+    expect(accountOrgBadge({ organizationType: 'claude_team', organizationName: null })).toBeNull();
   });
 
   it('returns null when there is no organization type', () => {

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AccountInfo } from '../agents.js';
 import * as state from '../state.js';
 import {
+  agentReportsUsage,
   buildCanonicalUsageContext,
   deriveUsageStatusFromSnapshot,
   formatUsageSummary,
@@ -86,6 +87,62 @@ describe('usage formatting', () => {
     expect(summary).toContain('S:');
     expect(summary).toContain('W:');
     expect(summary).not.toContain('So:');
+  });
+
+  it('appends the exact percentage and a compact reset hint to each bar', () => {
+    const snapshot: UsageSnapshot = {
+      source: 'live',
+      sourceLabel: 'live account data',
+      capturedAt: new Date(),
+      windows: [
+        {
+          key: 'session',
+          label: 'Current session',
+          shortLabel: 'S',
+          usedPercent: 34,
+          resetsAt: new Date(Date.now() + 2 * 60 * 60 * 1000), // 2h out
+          windowMinutes: 300,
+        },
+        {
+          key: 'week',
+          label: 'Current week',
+          shortLabel: 'W',
+          usedPercent: 58,
+          resetsAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000), // 3d out
+          windowMinutes: 10080,
+        },
+      ],
+    };
+    const summary = stripAnsi(formatUsageSummary(null, snapshot));
+    expect(summary).toContain('S:');
+    expect(summary).toContain('34% (2h)');
+    expect(summary).toContain('58% (3d)');
+  });
+
+  it('shows "usage unavailable" only when the opt is set and there is no snapshot', () => {
+    // A signed-in account we could not fetch: explicit label, not a fake-empty bar.
+    expect(stripAnsi(formatUsageSummary('Max', null, 3, { unavailable: true })))
+      .toContain('usage unavailable');
+    // Without the opt, a null snapshot renders just the plan (legacy behaviour).
+    expect(stripAnsi(formatUsageSummary('Max', null, 3))).not.toContain('usage unavailable');
+    // A real snapshot never shows the placeholder even if the opt is set.
+    const snapshot: UsageSnapshot = {
+      source: 'live',
+      sourceLabel: 'live account data',
+      capturedAt: new Date(),
+      windows: [{ key: 'session', label: 'S', shortLabel: 'S', usedPercent: 0, resetsAt: null, windowMinutes: 300 }],
+    };
+    expect(stripAnsi(formatUsageSummary('Max', snapshot, 3, { unavailable: true })))
+      .not.toContain('usage unavailable');
+  });
+
+  it('agentReportsUsage flags only the agents that expose usage data', () => {
+    for (const a of ['claude', 'codex', 'kimi', 'droid'] as const) {
+      expect(agentReportsUsage(a)).toBe(true);
+    }
+    for (const a of ['antigravity', 'grok', 'opencode', 'gemini'] as const) {
+      expect(agentReportsUsage(a)).toBe(false);
+    }
   });
 
   it('formatUsageStatusBadge renders only for throttled states', () => {

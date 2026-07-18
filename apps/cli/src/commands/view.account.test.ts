@@ -2,24 +2,24 @@ import { describe, expect, it } from 'vitest';
 import { accountColumnLabel, pruneGroupKey } from './view.js';
 
 describe('accountColumnLabel — organization suffix', () => {
-  it('appends the org badge for a Team seat', () => {
+  it('appends the org NAME (identity) for a Team seat — the tier shows in the plan column', () => {
     expect(accountColumnLabel({
       email: 'taylor@example.com',
       accountId: null,
       signedIn: true,
       organizationType: 'claude_team',
       organizationName: 'Turing Labs',
-    })).toBe('taylor@example.com (Turing Labs · Team)');
+    })).toBe('taylor@example.com (Turing Labs)');
   });
 
-  it('appends only the tier label for a personal Max plan', () => {
+  it('renders the bare email for a personal Max plan — no badge, tier is in the plan column', () => {
     expect(accountColumnLabel({
       email: 'taylor@example.com',
       accountId: null,
       signedIn: true,
       organizationType: 'claude_max',
       organizationName: "taylor@example.com's Organization",
-    })).toBe('taylor@example.com (Max)');
+    })).toBe('taylor@example.com');
   });
 
   it('renders the bare email when no organization type is present', () => {

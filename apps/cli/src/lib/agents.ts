@@ -1054,21 +1054,21 @@ export function formatClaudeOrgLabel(orgType: string | null | undefined): string
 }
 
 /**
- * Short badge identifying which org an account belongs to: "Turing Labs · Team"
- * for multi-seat orgs, just the tier label ("Max") for personal plans — a
- * personal org's name is auto-generated boilerplate ("<email>'s Organization"),
- * not identity. Returns null when the account carries no organizationType
- * (signed out, non-Claude agents, configs predating the field).
+ * Short badge identifying which ORG an account belongs to — "Turing Labs" for a
+ * multi-seat Team/Enterprise org, whose name is real identity that disambiguates
+ * a Team seat from a same-email personal plan. Returns null for personal plans
+ * (Max/Pro/Free): the tier label now lives in the aligned plan column, so a badge
+ * would only duplicate it, and a personal org's name is auto-generated boilerplate
+ * ("<email>'s Organization"), not identity. Also null when the account carries no
+ * organizationType (signed out, non-Claude agents, configs predating the field).
  */
 export function accountOrgBadge(
   info?: Pick<AccountInfo, 'organizationType' | 'organizationName'> | null
 ): string | null {
-  const label = formatClaudeOrgLabel(info?.organizationType);
-  if (!label) return null;
   const isMultiSeat =
     info?.organizationType === 'claude_team' || info?.organizationType === 'claude_enterprise';
-  if (isMultiSeat && info?.organizationName) return `${info.organizationName} · ${label}`;
-  return label;
+  if (isMultiSeat && info?.organizationName) return info.organizationName;
+  return null;
 }
 
 /** Return the email address associated with the agent's auth config, or null. */
@@ -1414,18 +1414,22 @@ export async function getAccountInfo(
         ]);
         const usageKey = buildIdentityKey(agentId, [['org', organizationId]]);
 
-        // Plan is derived from .claude.json's billingType only. Reading
-        // subscriptionType from the keychain item ("Claude Code-credentials-<hash>")
-        // forces a macOS Keychain ACL prompt on every `agents run` (one prompt per
-        // installed version under balanced rotation) because Claude Code writes its
-        // credentials with its own process in the ACL — our helper isn't trusted by
-        // that item. Callers that genuinely need subscriptionType (e.g. detailed
-        // `agents view`) should call loadClaudeOauth() directly.
-        let plan: string | null = null;
-        if (oa?.billingType === 'stripe_subscription') {
-          plan = 'Pro';
-        } else if (oa?.billingType) {
-          plan = oa.billingType;
+        // Plan tier is derived from .claude.json's organizationType, which carries
+        // the TRUE tier (claude_max → "Max", claude_pro → "Pro", claude_team →
+        // "Team") and is already in-hand from the config we just read — no Keychain
+        // prompt. billingType only distinguishes "has a Stripe subscription" and so
+        // mislabels every Max account as "Pro"; keep it as a fallback for older
+        // configs predating organizationType. (Reading subscriptionType from the
+        // keychain item would force a macOS Keychain ACL prompt on every `agents
+        // run`, so we deliberately avoid it — organizationType gives us the tier
+        // without that cost.)
+        let plan: string | null = formatClaudeOrgLabel(oa?.organizationType);
+        if (!plan) {
+          if (oa?.billingType === 'stripe_subscription') {
+            plan = 'Pro';
+          } else if (oa?.billingType) {
+            plan = oa.billingType;
+          }
         }
 
         // usageStatus is NOT derived from cachedExtraUsageDisabledReason. That
