@@ -29,6 +29,8 @@ import {
 import type { AccountInfo } from '../lib/agents.js';
 import { loginHint } from '../lib/signin-badge.js';
 import type { AgentId } from '../lib/types.js';
+import { machineId } from '../lib/machine-id.js';
+import { formatCheckedAge, readAuthHealth, type AuthVerdict } from '../lib/auth-health.js';
 import {
   agentReportsUsage,
   deriveUsageStatusFromSnapshot,
@@ -330,6 +332,22 @@ function renderHostClisSection(cwd: string): void {
   }
 }
 
+/**
+ * A compact live-auth chip for a version row, read from the fleet auth-health
+ * cache (written by `agents fleet ping` / the daemon). Empty when the install
+ * hasn't been probed — this is the local "signed in" flag's ground-truth
+ * companion: ● live, ○ revoked (re-login), ◐ unverified/limited, plus its age.
+ */
+function liveAuthChip(host: string, agentId: AgentId, version: string): string {
+  const h = readAuthHealth(host, agentId, version);
+  if (!h) return '';
+  const glyph = h.verdict === 'live' ? chalk.green('●')
+    : h.verdict === 'revoked' ? chalk.red('○')
+    : h.verdict === 'expired' ? chalk.yellow('○')
+    : chalk.yellow('◐');
+  return `${glyph} ${chalk.gray(formatCheckedAge(h.checkedAt))}`;
+}
+
 async function showInstalledVersions(
   filterAgentId?: AgentId,
   viewOpts?: { forceRefresh?: boolean },
@@ -367,6 +385,8 @@ async function showInstalledVersions(
   // Shim healing is silent — users don't need to know about internal repairs
 
   console.log(chalk.bold('Installed Agent CLIs\n'));
+
+  const selfHost = machineId();
 
   // Pre-fetch account info for all versions in parallel
   const infoFetches: Promise<{ agentId: AgentId; version: string; home: string; info: AccountInfo }>[] = [];
@@ -599,6 +619,8 @@ async function showInstalledVersions(
         if (runDefaultBits.length > 0) {
           parts.push(chalk.gray(`run ${runDefaultBits.join(' ')}`));
         }
+        const authChip = liveAuthChip(selfHost, agentId, version);
+        if (authChip) parts.push(authChip);
 
         console.log(parts.join('  '));
         if (showPaths) {
