@@ -52,7 +52,7 @@ import {
   writeAskpassShim,
 } from '../lib/devices/connect.js';
 import { ensureManagedKnownHostsDir, isHostPinned } from '../lib/devices/known-hosts.js';
-import { shouldSyncTerminfo, syncTerminfoToDevice } from '../lib/devices/terminfo.js';
+import { shouldSyncTerminfo, syncTerminfoToDevice, terminfoHostKey } from '../lib/devices/terminfo.js';
 import {
   fanOutDevices,
   planFleetTargets,
@@ -763,7 +763,7 @@ secrets bundle via an askpass shim — the password never touches argv.
         // Best-effort + cached per host — never blocks the login (see terminfo.ts).
         if (cmd.length === 0 && shouldSyncTerminfo({ term: process.env.TERM, shell: device.shell, interactive: process.stdout.isTTY ?? false })) {
           const { args: tinfoArgs, env: tinfoEnv } = buildSshInvocation(device, ['tic', '-x', '-'], shim, { pinned });
-          syncTerminfoToDevice({ device, host: addr ?? device.name, term: process.env.TERM, sshArgs: tinfoArgs, sshEnv: tinfoEnv });
+          syncTerminfoToDevice({ device, host: terminfoHostKey(device, addr), term: process.env.TERM, sshArgs: tinfoArgs, sshEnv: tinfoEnv });
         }
 
         const res = spawnSync('ssh', args, {

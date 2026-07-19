@@ -79,6 +79,19 @@ export function shouldSyncTerminfo(params: {
   return true;
 }
 
+/**
+ * Cache key for a device: the remote **user@host**, not just the host. terminfo
+ * is compiled into the *per-user* `~/.terminfo`, so `alice@box` and `bob@box`
+ * are distinct sync targets — keying on host alone would let the first user's
+ * stamp suppress the second user's (never-installed) sync. Mirrors
+ * {@link sshTargetFor}'s user handling; falls back to the device name when the
+ * address is unresolved.
+ */
+export function terminfoHostKey(device: Pick<DeviceProfile, 'user' | 'name'>, addr: string | undefined): string {
+  const host = addr ?? device.name;
+  return device.user ? `${device.user}@${host}` : host;
+}
+
 /** Directory holding per-host+TERM sync stamps. `cacheRoot` override is for tests. */
 function stampDir(cacheRoot?: string): string {
   return path.join(cacheRoot ?? getCacheDir(), 'devices', 'terminfo');

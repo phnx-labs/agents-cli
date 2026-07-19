@@ -7,6 +7,7 @@ import {
   terminfoSynced,
   markTerminfoSynced,
   localTerminfoSource,
+  terminfoHostKey,
 } from './terminfo.js';
 
 describe('shouldSyncTerminfo', () => {
@@ -33,6 +34,25 @@ describe('shouldSyncTerminfo', () => {
     for (const t of ['xterm-ghostty', 'xterm-kitty', 'alacritty', 'wezterm', 'foot', 'rio']) {
       expect(shouldSyncTerminfo({ term: t, shell: 'posix', interactive: true })).toBe(true);
     }
+  });
+});
+
+describe('terminfoHostKey', () => {
+  it('uses the bare host when no login user is set', () => {
+    expect(terminfoHostKey({ user: undefined, name: 'box' }, 'box.ts.net')).toBe('box.ts.net');
+  });
+
+  it('qualifies the key with the remote user — terminfo is per-user (~/.terminfo)', () => {
+    // The multi-user-host case the CLI supports via `agents ssh user@device`:
+    // alice and bob on the same host must NOT share a sync stamp, or bob's
+    // login sees alice's stamp and skips installing into bob's ~/.terminfo.
+    const addr = 'box.ts.net';
+    expect(terminfoHostKey({ user: 'alice', name: 'box' }, addr)).not.toBe(terminfoHostKey({ user: 'bob', name: 'box' }, addr));
+    expect(terminfoHostKey({ user: 'alice', name: 'box' }, addr)).toBe('alice@box.ts.net');
+  });
+
+  it('falls back to the device name when the address is unresolved', () => {
+    expect(terminfoHostKey({ user: 'alice', name: 'box' }, undefined)).toBe('alice@box');
   });
 });
 
