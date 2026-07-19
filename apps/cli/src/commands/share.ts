@@ -69,7 +69,7 @@ export function registerShareCommands(program: Command): void {
     .option('--domain <host>', 'also map a custom domain (e.g. share.agents-cli.sh) if the token owns the zone')
     .action(async (opts: { bundle: string; worker: string; bucket: string; account?: string; token?: string; domain?: string }) => {
       try {
-        await runSetup(opts);
+        await runShareProvision(opts);
       } catch (e) {
         console.error(chalk.red((e as Error).message));
         process.exitCode = 1;
@@ -82,7 +82,7 @@ export function registerShareCommands(program: Command): void {
     .argument('<baseUrl>', 'base URL of the endpoint, e.g. https://share.agents-cli.sh')
     .action(async (baseUrl: string) => {
       try {
-        await runJoin(baseUrl);
+        await runShareJoin(baseUrl);
       } catch (e) {
         console.error(chalk.red((e as Error).message));
         process.exitCode = 1;
@@ -103,7 +103,10 @@ export function registerShareCommands(program: Command): void {
     });
 }
 
-async function runSetup(opts: {
+/** Provision a fresh R2 bucket + Worker on the user's Cloudflare and persist the
+ * endpoint config + write token. Shared by `agents share setup` and the unified
+ * `agents setup share` wizard. */
+export async function runShareProvision(opts: {
   bundle: string;
   worker: string;
   bucket: string;
@@ -166,7 +169,10 @@ async function runSetup(opts: {
   }
 }
 
-async function runJoin(baseUrl: string): Promise<void> {
+/** Join an existing share endpoint (no provisioning): prompt for the endpoint
+ * details + write token and persist them. Shared by `agents share join` and the
+ * unified `agents setup share` wizard. */
+export async function runShareJoin(baseUrl: string): Promise<void> {
   const { password, input } = await import('@inquirer/prompts');
   const clean = baseUrl.replace(/\/+$/, '');
   const workerName = await input({ message: 'Worker name', default: DEFAULT_WORKER_NAME });

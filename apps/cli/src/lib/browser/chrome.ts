@@ -215,6 +215,30 @@ export function findFirstInstalledBrowser(
   return null;
 }
 
+/**
+ * List every installed Chromium-family browser on this machine, in the platform
+ * priority order. Used by `agents setup browser` to offer a pick when more than
+ * one is present. Returns [] if none are installed.
+ */
+export function listInstalledBrowsers(
+  platform: string = os.platform()
+): { browserType: BrowserType; binary: string }[] {
+  const priority = DEFAULT_BROWSER_PRIORITY[platform];
+  const platformPaths = BROWSER_PATHS[platform];
+  if (!priority || !platformPaths) return [];
+  const found: { browserType: BrowserType; binary: string }[] = [];
+  for (const browserType of priority) {
+    const candidates = platformPaths[browserType] || [];
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        found.push({ browserType, binary: resolveBrowserBinary(p) });
+        break; // one install path per browser type is enough
+      }
+    }
+  }
+  return found;
+}
+
 export interface LaunchResult {
   pid: number;
   port: number;
