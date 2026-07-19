@@ -60,6 +60,10 @@ export interface DiffContext {
   /** agents-cli version the source is on — the fleet target version. */
   targetCliVersion: string;
   sourceAuth: SourceAuth;
+  /** Secrets-bundle names the profile declares. Values are keychain-local and
+   * can't be pushed, so each reachable device surfaces them as a manual recreate
+   * (`needs-secret`) — informational, never an executed mutation. */
+  secretsBundles?: string[];
 }
 
 /** Pure: desired vs probed -> per-device diff + flat action list. */
@@ -76,6 +80,7 @@ export function diffFleet(desired: DeviceDesired[], probes: Map<string, DevicePr
     };
     const rowActions: FleetAction[] = [];
     const loginBlocked: string[] = [];
+    const secretsNeeded: string[] = [];
 
     if (probe.reachable) {
       // agents-cli presence.
@@ -115,9 +120,19 @@ export function diffFleet(desired: DeviceDesired[], probes: Map<string, DevicePr
           }
         }
       }
+      // secrets — surfaced, never pushed (values are keychain-local). Declared
+      // once at the manifest level, so every reachable device gets the same
+      // manual-recreate reminder. Not an executable action (see idempotence
+      // check in commands/apply.ts, which excludes needs-* kinds).
+      if (ctx.secretsBundles && ctx.secretsBundles.length > 0) {
+        for (const bundle of ctx.secretsBundles) {
+          secretsNeeded.push(bundle);
+          rowActions.push({ device: d.device, kind: 'needs-secret', detail: `recreate secrets bundle '${bundle}' (\`agents secrets create ${bundle}\`)` });
+        }
+      }
     }
 
-    devices.push({ device: d.device, desired: d, probe, actions: rowActions, loginBlocked });
+    devices.push({ device: d.device, desired: d, probe, actions: rowActions, loginBlocked, secretsNeeded });
     actions.push(...rowActions);
   }
 
@@ -224,11 +239,18 @@ export function reconcileDevice(row: DeviceDiff, device: DeviceProfile, ctx: Exe
     ok = ok && r.code === 0;
   }
 
-  // 3. config sync.
+  // 3. config sync — one `agents sync <scope>` per declared scope. Each scope is
+  // a positional repo target (system/user/project/alias); a bare `agents sync`
+  // would ignore the profile's declared scopes entirely.
   if (row.actions.some((a) => a.kind === 'sync-config')) {
-    const r = sshAgents(['sync']);
-    steps.push({ kind: 'sync-config', ok: r.code === 0, detail: `sync config` });
-    ok = ok && r.code === 0;
+    const scopes = row.desired.sync.length > 0 ? row.desired.sync : [''];
+    let syncOk = true;
+    for (const scope of scopes) {
+      const r = sshAgents(scope ? ['sync', scope] : ['sync']);
+      syncOk = syncOk && r.code === 0;
+    }
+    steps.push({ kind: 'sync-config', ok: syncOk, detail: `sync config (${row.desired.sync.join(', ') || 'default'})` });
+    ok = ok && syncOk;
   }
 
   // 4. login propagation — one bundle for all pushable agents on this device.
@@ -245,6 +267,11 @@ export function reconcileDevice(row: DeviceDiff, device: DeviceProfile, ctx: Exe
   // Surface blocked logins as (non-fatal) informational steps.
   for (const blocked of row.loginBlocked) {
     steps.push({ kind: 'needs-login', ok: false, detail: `${blocked} needs a manual login (\`agents ssh ${row.device} -- ${blocked}\`)` });
+  }
+  // Surface declared secrets bundles as (non-fatal) manual-recreate reminders —
+  // values are keychain-local, never captured or pushed.
+  for (const bundle of row.secretsNeeded) {
+    steps.push({ kind: 'needs-secret', ok: false, detail: `secrets bundle '${bundle}' must exist on ${row.device} (\`agents ssh ${row.device} -- secrets create ${bundle}\`)` });
   }
 
   return { device: row.device, ok, steps };

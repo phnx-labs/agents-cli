@@ -153,3 +153,45 @@ describe('diffFleet', () => {
     expect(plan.actions).toEqual([]);
   });
 });
+
+describe('diffFleet — secrets surfacing', () => {
+  const desired: DeviceDesired[] = [
+    { device: 's1', agents: ['codex@latest'], sync: ['user'], login: 'skip' },
+  ];
+  const converged = new Map<string, DeviceProbe>([
+    ['s1', { device: 's1', reachable: true, platform: 'linux', cliVersion: CLI, installedAgents: ['codex'] }],
+  ]);
+
+  it('surfaces declared bundles as needs-secret (not executable), one per bundle', () => {
+    const plan = diffFleet(desired, converged, {
+      targetCliVersion: CLI,
+      sourceAuth: srcAuth(['codex']),
+      secretsBundles: ['attio', 'ssh-keys'],
+    });
+    const secretActs = plan.actions.filter((a) => a.kind === 'needs-secret');
+    expect(secretActs).toHaveLength(2);
+    expect(plan.devices[0].secretsNeeded).toEqual(['attio', 'ssh-keys']);
+    // sync-config still fires (scopes declared) but there is nothing executable
+    // beyond it — needs-secret must be excluded from the "actions to run" count.
+    const executable = plan.actions.filter((a) => a.kind !== 'needs-login' && a.kind !== 'needs-secret');
+    expect(executable.map((a) => a.kind)).toEqual(['sync-config']);
+  });
+
+  it('emits nothing for secrets when the profile declares no bundles', () => {
+    const plan = diffFleet(desired, converged, { targetCliVersion: CLI, sourceAuth: srcAuth(['codex']) });
+    expect(plan.actions.filter((a) => a.kind === 'needs-secret')).toEqual([]);
+    expect(plan.devices[0].secretsNeeded).toEqual([]);
+  });
+
+  it('does not surface secrets on an unreachable device', () => {
+    const offline = new Map<string, DeviceProbe>([
+      ['s1', { device: 's1', reachable: false, installedAgents: [] }],
+    ]);
+    const plan = diffFleet(desired, offline, {
+      targetCliVersion: CLI,
+      sourceAuth: srcAuth(['codex']),
+      secretsBundles: ['attio'],
+    });
+    expect(plan.devices[0].secretsNeeded).toEqual([]);
+  });
+});
