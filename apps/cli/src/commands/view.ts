@@ -30,7 +30,7 @@ import type { AccountInfo } from '../lib/agents.js';
 import { loginHint } from '../lib/signin-badge.js';
 import type { AgentId } from '../lib/types.js';
 import { machineId } from '../lib/machine-id.js';
-import { formatCheckedAge, readAuthHealth, type AuthVerdict } from '../lib/auth-health.js';
+import { authCacheKey, formatCheckedAge, readAuthHealthCache, type AuthHealth } from '../lib/auth-health.js';
 import {
   agentReportsUsage,
   deriveUsageStatusFromSnapshot,
@@ -338,8 +338,8 @@ function renderHostClisSection(cwd: string): void {
  * hasn't been probed — this is the local "signed in" flag's ground-truth
  * companion: ● live, ○ revoked (re-login), ◐ unverified/limited, plus its age.
  */
-function liveAuthChip(host: string, agentId: AgentId, version: string): string {
-  const h = readAuthHealth(host, agentId, version);
+function liveAuthChip(cache: Record<string, AuthHealth>, host: string, agentId: AgentId, version: string): string {
+  const h = cache[authCacheKey(host, agentId, version)];
   if (!h) return '';
   const glyph = h.verdict === 'live' ? chalk.green('●')
     : h.verdict === 'revoked' ? chalk.red('○')
@@ -387,6 +387,8 @@ async function showInstalledVersions(
   console.log(chalk.bold('Installed Agent CLIs\n'));
 
   const selfHost = machineId();
+  // Read the auth-health cache once (not per version row — see the batching note above).
+  const authCache = readAuthHealthCache();
 
   // Pre-fetch account info for all versions in parallel
   const infoFetches: Promise<{ agentId: AgentId; version: string; home: string; info: AccountInfo }>[] = [];
@@ -619,7 +621,7 @@ async function showInstalledVersions(
         if (runDefaultBits.length > 0) {
           parts.push(chalk.gray(`run ${runDefaultBits.join(' ')}`));
         }
-        const authChip = liveAuthChip(selfHost, agentId, version);
+        const authChip = liveAuthChip(authCache, selfHost, agentId, version);
         if (authChip) parts.push(authChip);
 
         console.log(parts.join('  '));

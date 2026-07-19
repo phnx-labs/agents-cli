@@ -84,6 +84,7 @@ import { sshExec, sshExecAsync } from '../lib/ssh-exec.js';
 import { ALL_AGENT_IDS } from '../lib/agents.js';
 import {
   formatCheckedAge,
+  isDeadVerdict,
   probeLocalFleetAuth,
   summarizeVerdicts,
   verdictLabel,
@@ -430,7 +431,7 @@ async function runFleetPing(opts: { json?: boolean; local?: boolean; verbose?: b
     } else {
       for (const line of renderAuthMatrix([{ host: self, rows }], { verbose: opts.verbose })) console.log(line);
     }
-    if (opts.strict && rows.some((r) => r.health.verdict === 'revoked')) {
+    if (opts.strict && rows.some((r) => isDeadVerdict(r.health.verdict))) {
       process.exitCode = 1;
     }
     return;
@@ -480,7 +481,7 @@ async function runFleetPing(opts: { json?: boolean; local?: boolean; verbose?: b
     for (const line of renderAuthMatrix(results, { verbose: opts.verbose })) console.log(line);
   }
 
-  const anyBad = results.some((r) => r.rows.some((row) => row.health.verdict === 'revoked'));
+  const anyBad = results.some((r) => r.rows.some((row) => isDeadVerdict(row.health.verdict)));
   if (opts.strict && anyBad) process.exitCode = 1;
 }
 
@@ -500,7 +501,7 @@ function renderAuthMatrix(results: FleetPingHostResult[], opts?: { verbose?: boo
   const present = new Set<string>();
   for (const r of results) for (const row of r.rows) present.add(row.agent);
   const agents = ALL_AGENT_IDS.filter((a) => present.has(a));
-  const cellW = 5;
+  const cellW = 6; // 6 disambiguates opencode/openclaw (both 'openc' at 5)
   const nameW = Math.max(6, ...results.map((r) => r.host.length));
 
   const lines: string[] = [chalk.bold('Fleet auth')];
@@ -516,7 +517,7 @@ function renderAuthMatrix(results: FleetPingHostResult[], opts?: { verbose?: boo
     if (r.skipped) note = chalk.dim(`  ${r.skipped}`);
     else if (r.error) note = chalk.red(`  ${r.error}`);
     else {
-      const dead = r.rows.filter((row) => row.health.verdict === 'revoked').length;
+      const dead = r.rows.filter((row) => isDeadVerdict(row.health.verdict)).length;
       if (dead > 0) note = chalk.red(`  ${dead} revoked — re-login`);
     }
     lines.push(`  ${r.host.padEnd(nameW)}  ${cells.join(' ')}${note}`);
@@ -693,7 +694,7 @@ Typical workflow:
     .option('--json', 'output machine-readable JSON')
     .option('--local', 'probe only this host (used internally for fan-out)')
     .option('--verbose', 'show a per-account breakdown, not just the per-host rollup')
-    .option('--strict', 'exit non-zero when any account is revoked or expired')
+    .option('--strict', 'exit non-zero when any account is revoked (expired is soft — it self-refreshes)')
     .action(async (opts: { json?: boolean; local?: boolean; verbose?: boolean; strict?: boolean }) => {
       await runFleetPing(opts);
     });
