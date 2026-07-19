@@ -139,9 +139,11 @@ export function runOnDevice(
  * `agents fleet update` hit trying to reach zion from zion) and doesn't need to —
  * `agents upgrade` etc. runs identically as a local process. Mirrors
  * {@link runOnDevice}'s return shape and never throws. The argv is space-joined
- * and evaluated by a shell, matching how runOnDevice hands the command string to
- * the remote login shell — so PATH-resolved `agents`, quoting, and `;`/`&&` all
- * behave the same locally as remotely.
+ * and evaluated by a shell — matching the POSIX-shell ssh path (so PATH-resolved
+ * `agents`, quoting, and `;`/`&&` behave the same). It does NOT replicate the
+ * powershell-device encoding runOnDevice uses (`connect.ts` base64 path): a
+ * Windows self runs under the default OS shell (cmd.exe), which still resolves
+ * `agents` on PATH for the only self commands that matter (`agents upgrade …`).
  */
 export function runLocalCommand(
   cmd: string[],
