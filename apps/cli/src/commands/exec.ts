@@ -82,6 +82,43 @@ interface ExecCommandActionOptions {
   allowExpired?: boolean; // --allow-expired: skip expiry pre-run abort for secrets
 }
 
+export interface RunAccountPickerRequest {
+  requested: boolean;
+  normalizedAgentSpec: string;
+  valid: boolean;
+}
+
+/** Distinguish a terminal account-picker marker from an explicit @version pin. */
+export function parseRunAccountPickerRequest(agentSpec: string): RunAccountPickerRequest {
+  const requested = agentSpec.endsWith('@');
+  const normalizedAgentSpec = requested ? agentSpec.slice(0, -1) : agentSpec;
+  return {
+    requested,
+    normalizedAgentSpec,
+    valid: !requested || (!!normalizedAgentSpec && !normalizedAgentSpec.includes('@')),
+  };
+}
+
+/** Return every option whose routing semantics conflict with a local account choice. */
+export function runAccountPickerConflicts(options: {
+  resume?: string | boolean;
+  strategy?: string;
+  balanced?: boolean;
+  lease?: string | boolean;
+  host?: string;
+  device?: string;
+  on?: string;
+  computer?: string;
+}): string[] {
+  const conflicts: string[] = [];
+  if (options.resume !== undefined) conflicts.push('--resume');
+  if (options.strategy !== undefined) conflicts.push('--strategy');
+  if (options.balanced) conflicts.push('--balanced');
+  if (options.lease) conflicts.push('--lease');
+  if (options.host || options.device || options.on || options.computer) conflicts.push('--host/--device');
+  return conflicts;
+}
+
 /** Type guard that narrows a string to a known AgentId. */
 function isValidAgent(agent: string): agent is AgentId {
   return agent in AGENTS;
@@ -506,6 +543,9 @@ export function registerRunCommand(program: Command): void {
       # Interactive (TUI) with the pinned default version
       agents run claude
 
+      # Pick a signed-in account/version for only this run
+      agents run claude@
+
       # Pipe JSON events to a parser (--quiet drops the preamble)
       agents run claude "..." --json --quiet | jq
 
@@ -540,6 +580,10 @@ export function registerRunCommand(program: Command): void {
         A version/account is skipped when it is rate-limited right now — any usage window (incl. the 5-hour session window) at 100%, matching the 'agents view' badge.
         --balanced is shorthand for --strategy balanced. Ignored when @version is pinned, when a profile is used, or with --fallback.
 
+      Account picker: append @ with no version (agents run claude@) to choose one
+        installed account for this run. Rows show identity, login state, plan,
+        and available limits; unsafe accounts stay visible but disabled.
+
       Fallback: --fallback codex,gemini retries on rate-limit failure via /continue handoff. Each entry accepts @version.
 
       Resume: --resume <id> continues a prior conversation (full or partial id; omit to pick interactively). claude/codex resume natively; others replay via a /continue first message. Add a prompt to continue headlessly.
@@ -572,6 +616,27 @@ export function registerRunCommand(program: Command): void {
         prompt = undefined;
       }
 
+      // A trailing @ is an explicit request to choose one installed account.
+      // Strip only that terminal marker; concrete agent@version pins retain
+      // their existing meaning in every dispatch path below.
+      const accountPicker = parseRunAccountPickerRequest(agentSpec);
+      const accountPickerRequested = accountPicker.requested;
+      const normalizedAgentSpec = accountPicker.normalizedAgentSpec;
+      if (!accountPicker.valid) {
+        console.error(chalk.red(`Invalid account picker target: ${agentSpec}. Use agents run <agent>@.`));
+        process.exit(1);
+      }
+      if (accountPickerRequested) {
+        const conflicts = runAccountPickerConflicts(options);
+        if (conflicts.length > 0) {
+          console.error(chalk.red(
+            `Account selection with ${agentSpec} cannot be combined with ${conflicts.join(', ')}. ` +
+            'Pick the account locally, or use an explicit agent@version target.',
+          ));
+          process.exit(1);
+        }
+      }
+
       // --lease: invent a disposable cloud box for this run (via crabbox), run
       // the agent there, then tear it down. Unlike --host, nothing is registered.
       if (options.lease) {
@@ -598,7 +663,7 @@ export function registerRunCommand(program: Command): void {
         const { getConfiguredRunStrategy, resolveRunVersion } = await import('../lib/rotate.js');
 
         const detected = await detectSignedInRuntimes();
-        const agentName = agentSpec.split('@')[0];
+        const agentName = normalizedAgentSpec.split('@')[0];
         const leaseCwd = options.cwd ?? process.cwd();
 
         // `--lease` requires a prompt (guarded above), so it is headless by
@@ -793,7 +858,7 @@ export function registerRunCommand(program: Command): void {
           throw e;
         }
         try {
-          const [runAgent, rawRunVersion] = agentSpec.split('@');
+          const [runAgent, rawRunVersion] = normalizedAgentSpec.split('@');
           // Forward the explicit @version pin verbatim. Resolving aliases like
           // @latest locally would check local installs, but the remote host may
           // have versions the laptop does not. The remote agents CLI resolves
@@ -1109,7 +1174,7 @@ export function registerRunCommand(program: Command): void {
 
       const [
         { buildExecCommand, parseExecEnv, execAgent, runWithFallback, normalizeMode, resolveMode, headlessPlanStallCommand, nativeResume, resolveInteractive },
-        { ALL_AGENT_IDS },
+        { ALL_AGENT_IDS, ACCOUNT_INSPECTION_AGENT_IDS, agentLabel, supportsAccountInspection },
         { profileExists, resolveProfileForRun },
         { readAndResolveBundleEnv, describeBundle, assertRemoteBundleFlagsUnsupported, isHeadlessSecretsContext },
         { splitBundleRef, resolveSshTarget, remoteResolveEnv },
@@ -1137,7 +1202,7 @@ export function registerRunCommand(program: Command): void {
       const isValidAgent = (agent: string): agent is AgentId => ALL_AGENT_IDS.includes(agent as AgentId);
 
       // Parse agent@version
-      const [rawAgent, rawVersion] = agentSpec.split('@');
+      const [rawAgent, rawVersion] = normalizedAgentSpec.split('@');
       let agent: AgentId;
       let version: string | undefined = rawVersion || undefined;
       let profileEnv: Record<string, string> | undefined;
@@ -1165,6 +1230,21 @@ export function registerRunCommand(program: Command): void {
       // degenerates to a no-op ("I'll wait for the completion notification").
       let workflowHasSubagents = false;
       const cwd = options.cwd ?? process.cwd();
+
+      if (accountPickerRequested && !isValidAgent(rawAgent)) {
+        if (profileExists(rawAgent)) {
+          console.error(chalk.red(
+            `Account selection is not available for profile '${rawAgent}'. Run its concrete host agent with @ instead.`,
+          ));
+          process.exit(1);
+        }
+        if (resolveWorkflowRef(rawAgent, cwd)) {
+          console.error(chalk.red(
+            `Account selection is not available for workflow '${rawAgent}'. Run a concrete agent with @ instead.`,
+          ));
+          process.exit(1);
+        }
+      }
 
       if (isValidAgent(rawAgent)) {
         agent = rawAgent;
@@ -1396,6 +1476,33 @@ export function registerRunCommand(program: Command): void {
         }
       }
 
+      if (accountPickerRequested) {
+        if (!supportsAccountInspection(agent)) {
+          console.error(chalk.red(
+            `${agentLabel(agent)} does not expose local account state, so agents-cli cannot safely select an account.`,
+          ));
+          console.error(chalk.gray(
+            `Supported account pickers: ${ACCOUNT_INSPECTION_AGENT_IDS.join(', ')}`,
+          ));
+          process.exit(1);
+        }
+        try {
+          const { pickRunAccountCandidate } = await import('./run-account-picker.js');
+          const selected = await pickRunAccountCandidate(agent);
+          if (!selected) return;
+          version = selected.version;
+          if (!options.quiet) {
+            const identity = selected.accountLabel || 'signed-in account';
+            process.stderr.write(chalk.gray(
+              `[agents] selected ${identity} · ${agent}@${selected.version} for this run\n`,
+            ));
+          }
+        } catch (err) {
+          console.error(chalk.red((err as Error).message));
+          process.exit(1);
+        }
+      }
+
       version = resolveVersionAlias(agent, version);
 
       // --resume: resolve a prior conversation and rewrite the run target to
@@ -1524,7 +1631,7 @@ export function registerRunCommand(program: Command): void {
       // the bare primary still resolves through the strategy — otherwise every
       // `agents run claude --fallback codex` run lands on the pinned default
       // account and account rotation silently stops (the gh-monitor heal bug).
-      if (strategy !== 'pinned' || options.balanced || explicitStrategy) {
+      if (!accountPickerRequested && (strategy !== 'pinned' || options.balanced || explicitStrategy)) {
         if (version) {
           process.stderr.write(chalk.yellow(`[agents] strategy ${strategy} ignored: version ${version} is pinned\n`));
         } else if (fromProfile) {
@@ -1602,7 +1709,7 @@ export function registerRunCommand(program: Command): void {
           json: options.json,
           quiet: options.quiet,
           authCheckDisabled: options.authCheck === false || process.env.AGENTS_NO_AUTH_CHECK === '1',
-          rotated: !!rotationResult,
+          rotated: !!rotationResult || accountPickerRequested,
         });
         if (preflight) {
           try {
