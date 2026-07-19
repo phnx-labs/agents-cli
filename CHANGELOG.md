@@ -79,6 +79,17 @@
 
 ### Added
 
+- **`agents run <agent>@` now opens a safe per-run account picker.** The picker
+  shows one row per installed version with account identity, exact version,
+  login state, plan, and available session/weekly/monthly capacity. Logged-out,
+  rate-limited, and out-of-credit rows stay visible but cannot be selected;
+  signed-in rows without provider quota data remain selectable and say `limits
+  unavailable`. The selected version is pinned for that run only. Ambiguous
+  combinations (`--resume`, strategy overrides, leases, remote hosts, profiles,
+  and workflows) fail before dispatch. Source:
+  `apps/cli/src/commands/run-account-picker.ts`,
+  `apps/cli/src/commands/exec.ts`, `apps/cli/src/lib/rotate.ts`.
+
 - **Routine `meta.json` now includes `duration` and `errorMessage` (RUSH-1281).**
   `RunMeta` records wall-clock `duration` in milliseconds and a machine-readable
   `errorMessage` on failure paths (spawn errors, timeouts, loop errors, host-reconcile
