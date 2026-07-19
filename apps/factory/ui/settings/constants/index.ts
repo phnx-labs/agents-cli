@@ -29,7 +29,7 @@ export const SOURCE_BADGES: Record<TaskSource, { label: string; color: string }>
 }
 
 // Reserved agent name prefixes (cannot be used for custom agents)
-export const RESERVED_NAMES = ['CC', 'CX', 'GX', 'OC', 'CR', 'SH']
+export const RESERVED_NAMES = ['CC', 'CX', 'GX', 'OC', 'CR', 'SH', 'AG', 'GK', 'KM', 'DR']
 
 // Swarm agent display labels
 export const SWARM_AGENT_LABELS: Record<SwarmAgentType, string> = {
@@ -53,6 +53,10 @@ export const AGENT_INSTALL_INFO: Record<string, { command?: string; url?: string
   gemini: { command: 'npm install -g @google/gemini-cli', url: 'https://github.com/google-gemini/gemini-cli' },
   opencode: { url: 'https://github.com/opencode-ai/opencode' },
   cursor: { url: 'https://cursor.com' },
+  antigravity: { command: 'curl -fsSL https://antigravity.google/cli/install.sh | bash', url: 'https://antigravity.google' },
+  grok: { command: 'curl -fsSL https://x.ai/cli/install.sh | bash', url: 'https://x.ai' },
+  kimi: { command: 'curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash', url: 'https://code.kimi.com' },
+  droid: { command: 'curl -fsSL https://app.factory.ai/cli | sh', url: 'https://factory.ai' },
 }
 
 // agents-cli package for managing agent configurations
@@ -67,12 +71,20 @@ export const AGENT_TITLE_TO_KEY: Record<string, string> = {
   'OC': 'opencode',
   'CR': 'cursor',
   'SH': 'shell',
+  'AG': 'antigravity',
+  'GK': 'grok',
+  'KM': 'kimi',
+  'DR': 'droid',
   'Claude': 'claude',
   'Codex': 'codex',
   'Gemini': 'gemini',
   'OpenCode': 'opencode',
   'Cursor': 'cursor',
   'Shell': 'shell',
+  'Antigravity': 'antigravity',
+  'Grok': 'grok',
+  'Kimi': 'kimi',
+  'Droid': 'droid',
 }
 
 // Map from key to title (for dropdown)
@@ -82,6 +94,10 @@ export const AGENT_KEY_TO_TITLE: Record<string, string> = {
   'gemini': 'GX',
   'opencode': 'OC',
   'cursor': 'CR',
+  'antigravity': 'AG',
+  'grok': 'GK',
+  'kimi': 'KM',
+  'droid': 'DR',
 }
 
 // Notification-capable agents
@@ -89,6 +105,10 @@ export const NOTIFICATION_AGENTS = [
   { key: 'claude', name: 'Claude', supported: true },
   { key: 'codex', name: 'Codex', supported: false },
   { key: 'gemini', name: 'Gemini', supported: false },
+  { key: 'antigravity', name: 'Antigravity', supported: false },
+  { key: 'grok', name: 'Grok', supported: false },
+  { key: 'kimi', name: 'Kimi', supported: false },
+  { key: 'droid', name: 'Droid', supported: false },
   { key: 'opencode', name: 'OpenCode', supported: false },
   { key: 'cursor', name: 'Cursor', supported: false },
   { key: 'shell', name: 'Shell', supported: false },
@@ -133,11 +153,19 @@ export function createBuiltInAgents(icons: {
   opencode: string
   cursor: ThemedIcon
   shell: string
+  antigravity: string
+  grok: ThemedIcon
+  kimi: string
+  droid: ThemedIcon
 }): BuiltInAgentConfig[] {
   return [
     { key: 'claude', name: 'Claude', icon: icons.claude },
     { key: 'codex', name: 'Codex', icon: icons.codex },
     { key: 'gemini', name: 'Gemini', icon: icons.gemini },
+    { key: 'antigravity', name: 'Antigravity', icon: icons.antigravity },
+    { key: 'grok', name: 'Grok', icon: icons.grok },
+    { key: 'kimi', name: 'Kimi', icon: icons.kimi },
+    { key: 'droid', name: 'Droid', icon: icons.droid },
     { key: 'opencode', name: 'OpenCode', icon: icons.opencode },
     { key: 'cursor', name: 'Cursor', icon: icons.cursor },
     { key: 'shell', name: 'Shell', icon: icons.shell },

@@ -3,7 +3,7 @@ import { agentIdFromPrefix } from './AgentAvatar'
 
 // The feed maps an agent's terminal abbreviation (CC/CX/GX/…) to the agent id that
 // backs its brand logo. Regression guard for the abbreviations added with logo support
-// (AG -> antigravity, GK -> grok) alongside the original set.
+// (AG -> antigravity, GK -> grok, KM -> kimi, DR -> droid) alongside the original set.
 describe('agentIdFromPrefix', () => {
   test('maps the original built-in prefixes', () => {
     expect(agentIdFromPrefix('CC')).toBe('claude')
@@ -17,6 +17,8 @@ describe('agentIdFromPrefix', () => {
   test('maps the logo-support additions', () => {
     expect(agentIdFromPrefix('AG')).toBe('antigravity')
     expect(agentIdFromPrefix('GK')).toBe('grok')
+    expect(agentIdFromPrefix('KM')).toBe('kimi')
+    expect(agentIdFromPrefix('DR')).toBe('droid')
   })
 
   test('returns null for unknown / empty prefixes so the caller can fall back', () => {

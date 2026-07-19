@@ -3,9 +3,10 @@ import { postMessage } from '../../hooks'
 import { getIcon } from '../../utils'
 import type { AgentInventory, AgentInventoryVersion, AgentRunStrategy, IconConfig, RunningCounts } from '../../types'
 
-const ROSTER_ORDER = ['claude', 'codex', 'gemini', 'cursor', 'opencode']
+const ROSTER_ORDER = ['claude', 'codex', 'gemini', 'antigravity', 'grok', 'kimi', 'droid', 'cursor', 'opencode']
 const DISPLAY_NAMES: Record<string, string> = {
-  claude: 'Claude', codex: 'Codex', gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode',
+  claude: 'Claude', codex: 'Codex', gemini: 'Gemini', antigravity: 'Antigravity',
+  grok: 'Grok', kimi: 'Kimi', droid: 'Droid', cursor: 'Cursor', opencode: 'OpenCode',
 }
 const STRATEGIES: AgentRunStrategy[] = ['pinned', 'available', 'balanced']
 

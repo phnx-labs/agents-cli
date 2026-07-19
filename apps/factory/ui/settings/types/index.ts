@@ -180,6 +180,10 @@ export interface AgentSettings {
     opencode: BuiltInAgentSettings
     cursor: BuiltInAgentSettings
     shell: BuiltInAgentSettings
+    antigravity: BuiltInAgentSettings
+    grok: BuiltInAgentSettings
+    kimi: BuiltInAgentSettings
+    droid: BuiltInAgentSettings
   }
   custom: CustomAgentSettings[]
   aliases: CommandAlias[]
@@ -429,7 +433,9 @@ export interface IconConfig {
   shell: string
   github: string
   antigravity: string
-  grok: string
+  grok: ThemedIcon
+  kimi: string
+  droid: ThemedIcon
 }
 
 // Built-in agent config

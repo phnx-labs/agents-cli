@@ -163,7 +163,7 @@ export function parseCloudSummaryIncremental(
   return withTail;
 }
 
-const PREAMBLE_AGENTS = new Set(['claude', 'codex', 'gemini', 'cursor', 'opencode']);
+const PREAMBLE_AGENTS = new Set(['claude', 'codex', 'gemini', 'antigravity', 'grok', 'kimi', 'droid', 'cursor', 'opencode']);
 
 function parsePreambleLine(line: string): PreambleEvent {
   const m = line.match(/^\[t\+(\d+)s\]\s*(.*)$/);

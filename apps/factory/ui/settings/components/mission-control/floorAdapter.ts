@@ -190,8 +190,10 @@ const ABBR_BY_TYPE: Record<string, AgentAbbr> = {
   opencode: 'OC',
   amp: 'AG',
   agents: 'AG',
+  antigravity: 'AG',
   grok: 'GK',
-  kimi: 'GK',
+  kimi: 'KM',
+  droid: 'DR',
 }
 
 type AttachmentLike = Partial<SessionAttachment> & { name?: string; ref?: string } | string

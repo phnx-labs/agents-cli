@@ -35,7 +35,9 @@ function installIcons() {
     shell: 'shell.svg',
     github: 'github.svg',
     antigravity: 'antigravity.svg',
-    grok: 'grok.svg',
+    grok: { dark: 'grok-dark.svg', light: 'grok-light.svg' },
+    kimi: 'kimi.svg',
+    droid: { dark: 'droid-dark.svg', light: 'droid-light.svg' },
   }
 }
 

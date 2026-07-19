@@ -3,7 +3,7 @@ import type { IconConfig } from '../../types'
 import { getIcons } from '../../hooks/useVscodeApi'
 import { getIcon } from '../../utils/icons'
 
-export type AgentId = 'claude' | 'codex' | 'gemini' | 'opencode' | 'cursor' | 'shell' | 'watchdog' | 'antigravity' | 'grok'
+export type AgentId = 'claude' | 'codex' | 'gemini' | 'opencode' | 'cursor' | 'shell' | 'watchdog' | 'antigravity' | 'grok' | 'kimi' | 'droid'
 
 const BG: Record<AgentId, string> = {
   claude: 'var(--claude)',
@@ -13,8 +13,10 @@ const BG: Record<AgentId, string> = {
   cursor: 'var(--cursor)',
   shell: 'var(--shell)',
   watchdog: 'var(--ds-text-dim)',
-  antigravity: 'var(--ds-text-dim)',
-  grok: 'var(--ds-text-dim)',
+  antigravity: 'var(--antigravity, var(--ds-text-dim))',
+  grok: 'var(--grok, var(--ds-text-dim))',
+  kimi: 'var(--kimi, var(--ds-text-dim))',
+  droid: 'var(--droid, var(--ds-text-dim))',
 }
 
 const LETTER: Record<AgentId, string> = {
@@ -27,12 +29,15 @@ const LETTER: Record<AgentId, string> = {
   watchdog: 'W',
   antigravity: 'A',
   grok: 'R',
+  kimi: 'K',
+  droid: 'D',
 }
 
 // Which window.__ICONS__ key backs each agent id (letter fallback for the rest).
 const ICON_KEY: Partial<Record<string, keyof IconConfig>> = {
   claude: 'claude', codex: 'codex', gemini: 'gemini', opencode: 'opencode',
   cursor: 'cursor', shell: 'shell', agents: 'agents', antigravity: 'antigravity', grok: 'grok',
+  kimi: 'kimi', droid: 'droid',
 }
 
 /** Resolve a real brand logo URI for an agent id, honoring the active theme. '' if none. */
@@ -83,6 +88,8 @@ export function agentIdFromPrefix(prefix: string | null | undefined): AgentId | 
     case 'SH': return 'shell'
     case 'AG': return 'antigravity'
     case 'GK': return 'grok'
+    case 'KM': return 'kimi'
+    case 'DR': return 'droid'
     default: return null
   }
 }

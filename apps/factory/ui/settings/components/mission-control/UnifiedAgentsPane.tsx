@@ -138,6 +138,10 @@ const NEW_AGENT_MENU: Array<{ agent: string; name: string; abbr: string; keys: s
   { agent: 'claude', name: 'Claude', abbr: 'CC', keys: ['Cmd', 'Shift', 'A'] },
   { agent: 'codex', name: 'Codex', abbr: 'CX', keys: ['Cmd', 'Shift', 'B'] },
   { agent: 'gemini', name: 'Gemini', abbr: 'GX', keys: ['Cmd', 'Shift', 'X'] },
+  { agent: 'antigravity', name: 'Antigravity', abbr: 'AG', keys: [] },
+  { agent: 'grok', name: 'Grok', abbr: 'GK', keys: [] },
+  { agent: 'kimi', name: 'Kimi', abbr: 'KM', keys: [] },
+  { agent: 'droid', name: 'Droid', abbr: 'DR', keys: [] },
   { agent: 'opencode', name: 'OpenCode', abbr: 'OC', keys: ['Cmd', 'Shift', 'M'] },
   { agent: 'cursor', name: 'Cursor', abbr: 'CR', keys: ['Cmd', 'Shift', 'U'] },
 ]
@@ -1382,6 +1386,10 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
       claude: 'agents.newClaude',
       codex: 'agents.newCodex',
       gemini: 'agents.newGemini',
+      antigravity: 'agents.newAntigravity',
+      grok: 'agents.newGrok',
+      kimi: 'agents.newKimi',
+      droid: 'agents.newDroid',
       opencode: 'agents.newOpencode',
       cursor: 'agents.newCursor',
     }

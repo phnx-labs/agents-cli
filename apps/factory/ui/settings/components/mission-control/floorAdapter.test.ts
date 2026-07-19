@@ -25,6 +25,10 @@ describe('abbrFor', () => {
     expect(abbrFor('gemini')).toBe('GX')
     expect(abbrFor('cursor')).toBe('CR')
     expect(abbrFor('opencode')).toBe('OC')
+    expect(abbrFor('antigravity')).toBe('AG')
+    expect(abbrFor('grok')).toBe('GK')
+    expect(abbrFor('kimi')).toBe('KM')
+    expect(abbrFor('droid')).toBe('DR')
   })
   test('unknown types fall back to Shell', () => {
     expect(abbrFor('mystery')).toBe('SH')

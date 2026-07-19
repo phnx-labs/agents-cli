@@ -10,12 +10,12 @@ export type DispatchProvider = 'rush' | 'codex' | 'factory' | 'local'
 export interface FactoryConfig {
   cloud_priority: DispatchProvider[]
   auto_detect_repo: boolean
-  default_planner_agent: 'claude' | 'codex' | 'gemini' | 'cursor' | 'opencode'
+  default_planner_agent: 'claude' | 'codex' | 'gemini' | 'antigravity' | 'grok' | 'kimi' | 'droid' | 'cursor' | 'opencode'
   supervisor_interval_seconds: number
 }
 
 const ALL_PROVIDERS: DispatchProvider[] = ['rush', 'codex', 'factory', 'local']
-const ALL_AGENTS: FactoryConfig['default_planner_agent'][] = ['claude', 'codex', 'gemini', 'cursor', 'opencode']
+const ALL_AGENTS: FactoryConfig['default_planner_agent'][] = ['claude', 'codex', 'gemini', 'antigravity', 'grok', 'kimi', 'droid', 'cursor', 'opencode']
 
 const PROVIDER_LABEL: Record<DispatchProvider, string> = {
   rush: 'Rush Cloud',

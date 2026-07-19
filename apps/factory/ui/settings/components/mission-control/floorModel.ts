@@ -46,7 +46,7 @@ export type { ProjectRule }
 export type FloorPhase = 'running' | 'idle' | 'waiting' | 'failed' | 'done' | 'stalled'
 
 /** Terminal-tab prefix per agent CLI (ui utils is the reference map). */
-export type AgentAbbr = 'CC' | 'CX' | 'GX' | 'CR' | 'AG' | 'GK' | 'OC' | 'SH'
+export type AgentAbbr = 'CC' | 'CX' | 'GX' | 'CR' | 'AG' | 'GK' | 'KM' | 'DR' | 'OC' | 'SH'
 
 export type StructuredQuestionKind = 'choice' | 'confirm' | 'destructive' | 'retry'
 
