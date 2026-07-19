@@ -5,6 +5,11 @@ cd "$(dirname "$0")/.."
 
 MODE="${1:-debug}"
 
+# Stamp the shipping CLI version into the bundle so `agents computer setup` can
+# tell an installed helper apart by version (the release job sets this to match
+# the tag). Defaults to a dev placeholder.
+HELPER_VERSION="${HELPER_VERSION:-0.1.0}"
+
 if [ "$MODE" = "release" ]; then
     swift build -c release --arch arm64 --arch x86_64
     SRC=".build/apple/Products/Release/ComputerHelper"
@@ -34,7 +39,7 @@ APP="$DEST_DIR/ComputerHelper.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 cp "$SRC" "$APP/Contents/MacOS/ComputerHelper"
-cat > "$APP/Contents/Info.plist" <<'PLIST'
+cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -48,7 +53,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>${HELPER_VERSION}</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>LSUIElement</key>
@@ -130,3 +135,15 @@ echo "  verifying Gatekeeper assessment..."
 spctl --assess --verbose "$APP" 2>&1 | sed 's/^/  /'
 
 echo "notarized: $APP"
+
+# Emit the release artifact: a zip of the STAPLED .app plus its sha256, ready to
+# publish as a GitHub release asset. `agents computer setup` downloads this,
+# verifies the sha256, extracts it, and re-verifies the signature/notarization
+# before install (apps/cli/src/lib/computer/download.ts).
+ASSET_ZIP="$DEST_DIR/ComputerHelper.app.zip"
+rm -f "$ASSET_ZIP" "$ASSET_ZIP.sha256"
+ditto -c -k --keepParent "$APP" "$ASSET_ZIP"
+# sha256sum-format line: "<hex>  ComputerHelper.app.zip" (parsed in download.ts).
+( cd "$DEST_DIR" && shasum -a 256 "ComputerHelper.app.zip" > "ComputerHelper.app.zip.sha256" )
+echo "asset:     $ASSET_ZIP"
+echo "asset sha: $ASSET_ZIP.sha256"

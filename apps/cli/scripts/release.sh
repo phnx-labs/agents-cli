@@ -743,6 +743,26 @@ echo
 
 # ----- Push the tag; restore the working tree to a clean state -----
 git push origin "v$TARGET"
+
+# ----- Publish the signed + notarized macOS computer helper as a release asset
+# for this tag. Best-effort: npm is already published, so a failure here is a
+# warning + a copy-paste retry, never a hard release failure. macOS + Developer
+# ID + notary creds required, so it runs on a Mac (locally, or the sign host). -----
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  bold "Publishing the macOS computer helper asset for v$TARGET..."
+  if command -v agents >/dev/null 2>&1; then
+    agents secrets exec apple.com -- scripts/publish-computer-helper-mac.sh "$TARGET" \
+      || yellow "computer-helper publish failed — retry on a Mac: agents secrets exec apple.com -- scripts/publish-computer-helper-mac.sh $TARGET"
+  else
+    APPLE_ID="${APPLE_ID:-}" scripts/publish-computer-helper-mac.sh "$TARGET" \
+      || yellow "computer-helper publish failed — retry: scripts/publish-computer-helper-mac.sh $TARGET (needs APPLE_ID/APPLE_APP_SPECIFIC_PASSWORD/APPLE_TEAM_ID)"
+  fi
+else
+  yellow "Skipping macOS computer-helper asset (not on macOS)."
+  yellow "  Publish it from a Mac with signing creds:"
+  yellow "    agents secrets exec apple.com -- apps/cli/scripts/publish-computer-helper-mac.sh $TARGET"
+fi
+
 restore_release_tree
 
 green "Released $TARGET"

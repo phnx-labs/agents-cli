@@ -17,7 +17,8 @@ import { createConnection, type Socket } from 'net';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { getHelpersDir, getLogsDir, getUserPermissionsDir, getPermissionsDir } from './state.js';
+import { getHelpersDir, getLogsDir, getUserPermissionsDir, getPermissionsDir, getCacheDir } from './state.js';
+import { getCliVersion } from './version.js';
 
 export interface RPCResponse {
   id: number | null;
@@ -189,8 +190,20 @@ export function resolveHelperExec(): string | null {
   const candidates = [
     // Local build (running from the agents-cli checkout). apps/cli/dist/lib -> repo root (4 up) -> native/computer-mac.
     path.resolve(here, '..', '..', '..', '..', 'native', 'computer-mac', 'dist', 'ComputerHelper.app', 'Contents', 'MacOS', 'ComputerHelper'),
-    // Bundled with the npm package (later: CDN download lands here).
+    // Bundled with the npm package.
     path.resolve(here, '..', 'computer-helper', 'ComputerHelper.app', 'Contents', 'MacOS', 'ComputerHelper'),
+    // Downloaded on demand for this CLI version (agents computer setup / agents
+    // setup computer fetch + verify the signed release asset into here).
+    path.resolve(
+      getCacheDir(),
+      'computer',
+      'mac-helper',
+      `v${getCliVersion()}`,
+      'ComputerHelper.app',
+      'Contents',
+      'MacOS',
+      'ComputerHelper',
+    ),
   ];
   for (const c of candidates) {
     if (fs.existsSync(c)) return c;

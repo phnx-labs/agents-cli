@@ -501,6 +501,178 @@ const HELPER_APP_NAME = 'Computer Helper.app';
 const HELPER_APP_DEST = `/Applications/${HELPER_APP_NAME}`;
 const HELPER_LABEL = HELPER_BUNDLE_ID;
 
+/**
+ * Install the macOS helper locally: resolve (or download + verify) the signed,
+ * notarized .app, copy it to /Applications, verify the destination signature,
+ * and write the LaunchAgent plist (inactive — activation is a separate opt-in
+ * step via `start`). Throws on any failure. Shared by `agents computer setup`
+ * and the unified `agents setup computer` wizard so there is one install path.
+ */
+export async function installComputerHelperMacLocal(): Promise<{ appDest: string; plistPath: string }> {
+  let srcApp = resolveHelperApp();
+  if (!srcApp || !fs.existsSync(srcApp)) {
+    // No local build / bundled copy (the normal case on an npm-installed CLI).
+    // Fetch the signed + notarized helper release asset for this CLI version;
+    // it is sha256- and signature-verified before we touch /Applications.
+    const { ensureMacHelperApp } = await import('../lib/computer/download.js');
+    srcApp = await ensureMacHelperApp();
+    console.log(`helper:  ${srcApp} (downloaded + verified)`);
+  }
+
+  const socketPath = resolveSocketPath();
+  const logPath = resolveLogPath();
+  const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', `${HELPER_LABEL}.plist`);
+
+  console.log(`source:  ${srcApp}`);
+  console.log(`dest:    ${HELPER_APP_DEST}`);
+
+  // 1. Copy to /Applications/ via ditto (preserves xattrs + codesign metadata).
+  if (fs.existsSync(HELPER_APP_DEST)) {
+    try {
+      fs.rmSync(HELPER_APP_DEST, { recursive: true, force: true });
+    } catch (err) {
+      throw new Error(
+        `failed to remove prior install at ${HELPER_APP_DEST}: ${(err as Error).message}. try: sudo rm -rf "${HELPER_APP_DEST}"`,
+      );
+    }
+  }
+  try {
+    execFileSync('/usr/bin/ditto', [srcApp, HELPER_APP_DEST], { stdio: 'inherit' });
+  } catch (err) {
+    throw new Error(`ditto copy failed: ${(err as Error).message}`);
+  }
+  console.log(`copied to ${HELPER_APP_DEST}`);
+
+  // 2. Verify codesign on the destination — TCC needs a valid signature.
+  try {
+    execFileSync('/usr/bin/codesign', ['--verify', '--deep', '--strict', HELPER_APP_DEST], { stdio: 'inherit' });
+    console.log('codesign verify: OK');
+  } catch {
+    throw new Error(
+      `codesign verify FAILED for ${HELPER_APP_DEST}. The destination .app is unsigned or its signature was stripped.`,
+    );
+  }
+
+  // 3. Ensure socket + log parent dirs exist.
+  fs.mkdirSync(path.dirname(socketPath), { recursive: true });
+  fs.mkdirSync(path.dirname(logPath), { recursive: true });
+
+  // 4. Write the LaunchAgent plist but DO NOT bootstrap it (opt-in via `start`).
+  const execInsideApp = path.join(HELPER_APP_DEST, 'Contents', 'MacOS', 'ComputerHelper');
+  const plistContent = renderLaunchAgentPlist({ label: HELPER_LABEL, exec: execInsideApp, socketPath, logPath });
+  fs.mkdirSync(path.dirname(plistPath), { recursive: true });
+  fs.writeFileSync(plistPath, plistContent);
+  console.log(`wrote plist: ${plistPath} (NOT activated)`);
+
+  return { appDest: HELPER_APP_DEST, plistPath };
+}
+
+/**
+ * Activate the local helper daemon via launchd (render policy + peers, bootout
+ * → bootstrap → kickstart, wait for the socket, probe AX trust). Throws on any
+ * failure. Returns the trust status so callers can guide the permission grant.
+ * Shared by `agents computer start` and the `agents setup computer` wizard.
+ */
+export async function activateComputerHelperMacLocal(): Promise<{ trusted: boolean; socketPath: string; logPath: string }> {
+  const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', `${HELPER_LABEL}.plist`);
+  const socketPath = resolveSocketPath();
+  const logPath = resolveLogPath();
+
+  if (!fs.existsSync(plistPath)) throw new Error(`plist not found at ${plistPath}. run: agents computer setup`);
+  if (!fs.existsSync(HELPER_APP_DEST)) throw new Error(`helper app not found at ${HELPER_APP_DEST}. run: agents computer setup`);
+
+  const uid = process.getuid?.();
+  if (typeof uid !== 'number') throw new Error('cannot resolve uid');
+  const domain = `gui/${uid}`;
+
+  // Render the policy file BEFORE bootstrap so the daemon reads a fresh allow
+  // list at startup (fail-safe: missing/unparseable → everything denied).
+  const allowed = loadComputerAllowList();
+  writeComputerPolicy(allowed);
+  console.log(`policy: ${allowed.length} app${allowed.length === 1 ? '' : 's'} allowed (${resolvePolicyPath()})`);
+  if (allowed.length > 0) {
+    const preview = allowed.slice(0, 5).join(', ');
+    const more = allowed.length > 5 ? ` (+${allowed.length - 5} more)` : '';
+    console.log(`        ${preview}${more}`);
+  } else {
+    console.log(`        (no Computer(...) patterns found — everything will be denied)`);
+    console.log(`        add to ~/.agents/permissions/groups/<name>.yaml under allow:`);
+    console.log(`          - "Computer(com.apple.finder)"`);
+  }
+
+  // Peer-auth allow list — which caller executables may connect to the socket.
+  const callers = loadDefaultPeers();
+  writeComputerPeers(callers);
+  console.log(`peers:  ${callers.length} caller${callers.length === 1 ? '' : 's'} allowed (${resolvePeersPath()})`);
+  for (const p of callers) console.log(`        ${p}`);
+
+  // Bootout first to clear any prior registration (best-effort).
+  try {
+    execFileSync('/bin/launchctl', ['bootout', domain, plistPath], { stdio: 'pipe' });
+  } catch {
+    // expected when not previously loaded
+  }
+  try {
+    execFileSync('/bin/launchctl', ['bootstrap', domain, plistPath], { stdio: 'pipe' });
+  } catch (err) {
+    throw new Error(`launchctl bootstrap failed: ${(err as Error).message}`);
+  }
+  // Force restart so we pick up the latest binary.
+  try {
+    execFileSync('/bin/launchctl', ['kickstart', '-k', `${domain}/${HELPER_LABEL}`], { stdio: 'pipe' });
+  } catch (err) {
+    throw new Error(`launchctl kickstart failed: ${(err as Error).message}`);
+  }
+
+  // Wait up to 5s for the socket.
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    if (fs.existsSync(socketPath)) break;
+    await sleep(100);
+  }
+  if (!fs.existsSync(socketPath)) {
+    throw new Error(`socket did not appear at ${socketPath} within 5s. check ${logPath} for helper startup errors`);
+  }
+
+  // Probe trust through the socket.
+  let trusted = false;
+  let trustStr = 'unknown';
+  try {
+    const client = openComputerClient();
+    try {
+      const r = await client.call('trust_status');
+      trusted = Boolean(r.result?.trusted);
+      trustStr = r.error ? `error (${r.error.code})` : (trusted ? 'granted' : 'denied');
+    } finally {
+      await client.close();
+    }
+  } catch (err) {
+    trustStr = `error (${(err as Error).message})`;
+  }
+
+  console.log(`daemon: running`);
+  console.log(`socket: ${socketPath}`);
+  console.log(`trust:  ${trustStr}`);
+  return { trusted, socketPath, logPath };
+}
+
+/** Probe the running daemon's Accessibility trust status without re-activating.
+ * Returns false (never throws) if the socket is down or the RPC errors — used to
+ * poll while the user grants permissions in System Settings. */
+export async function probeComputerTrust(): Promise<boolean> {
+  try {
+    const client = openComputerClient();
+    try {
+      const r = await client.call('trust_status');
+      return Boolean(r.result?.trusted);
+    } finally {
+      await client.close();
+    }
+  } catch {
+    return false;
+  }
+}
+
 function registerSetupCommand(program: Command): void {
   program
     .command('setup')
@@ -522,69 +694,13 @@ function registerSetupCommand(program: Command): void {
         return;
       }
 
-      const srcApp = resolveHelperApp();
-      if (!srcApp || !fs.existsSync(srcApp)) {
-        console.error('helper not built. Run: ./native/computer-mac/scripts/build.sh debug');
-        process.exit(1);
-      }
-
-      const home = os.homedir();
-      const socketPath = resolveSocketPath();
-      const logPath = resolveLogPath();
-      const plistPath = path.join(home, 'Library', 'LaunchAgents', `${HELPER_LABEL}.plist`);
-
-      console.log(`source:  ${srcApp}`);
-      console.log(`dest:    ${HELPER_APP_DEST}`);
-
-      // 1. Copy to /Applications/. Use ditto to preserve xattrs (Gatekeeper
-      // provenance + codesign metadata). Wipe any prior install first.
-      if (fs.existsSync(HELPER_APP_DEST)) {
-        try {
-          fs.rmSync(HELPER_APP_DEST, { recursive: true, force: true });
-          console.log(`removed prior install`);
-        } catch (err) {
-          console.error(`failed to remove prior install at ${HELPER_APP_DEST}: ${(err as Error).message}`);
-          console.error('try: sudo rm -rf "' + HELPER_APP_DEST + '"');
-          process.exit(1);
-        }
-      }
+      let plistPath: string;
       try {
-        execFileSync('/usr/bin/ditto', [srcApp, HELPER_APP_DEST], { stdio: 'inherit' });
+        ({ plistPath } = await installComputerHelperMacLocal());
       } catch (err) {
-        console.error(`ditto copy failed: ${(err as Error).message}`);
+        console.error(`error: ${(err as Error).message}`);
         process.exit(1);
       }
-      console.log(`copied to ${HELPER_APP_DEST}`);
-
-      // 2. Verify codesign on the destination. Fail loud if the copy
-      // somehow stripped the signature — TCC needs a valid signature.
-      try {
-        execFileSync('/usr/bin/codesign', ['--verify', '--deep', '--strict', HELPER_APP_DEST], { stdio: 'inherit' });
-        console.log('codesign verify: OK');
-      } catch {
-        console.error('codesign verify FAILED. The destination .app is unsigned or its signature was stripped.');
-        console.error('rebuild the helper with a Developer ID cert: ./native/computer-mac/scripts/build.sh release');
-        process.exit(1);
-      }
-
-      // 3. Ensure socket + log parent dirs exist.
-      fs.mkdirSync(path.dirname(socketPath), { recursive: true });
-      fs.mkdirSync(path.dirname(logPath), { recursive: true });
-
-      // 4. Write the LaunchAgent plist but DO NOT bootstrap it. The user
-      // explicitly opts into running the daemon via `agents computer start`.
-      // Screen Recording + Accessibility are scary permissions; we don't
-      // want an always-on listener that can drive any app the user could.
-      const execInsideApp = path.join(HELPER_APP_DEST, 'Contents', 'MacOS', 'ComputerHelper');
-      const plistContent = renderLaunchAgentPlist({
-        label: HELPER_LABEL,
-        exec: execInsideApp,
-        socketPath,
-        logPath,
-      });
-      fs.mkdirSync(path.dirname(plistPath), { recursive: true });
-      fs.writeFileSync(plistPath, plistContent);
-      console.log(`wrote plist: ${plistPath} (NOT activated)`);
 
       console.log('');
       console.log('Helper installed (inactive).');
@@ -628,107 +744,14 @@ function registerStartCommand(program: Command): void {
         return;
       }
 
-      const home = os.homedir();
-      const plistPath = path.join(home, 'Library', 'LaunchAgents', `${HELPER_LABEL}.plist`);
-      const socketPath = resolveSocketPath();
-      const logPath = resolveLogPath();
-
-      if (!fs.existsSync(plistPath)) {
-        console.error(`plist not found at ${plistPath}`);
-        console.error('run: agents computer setup');
-        process.exit(1);
-      }
-      if (!fs.existsSync(HELPER_APP_DEST)) {
-        console.error(`helper app not found at ${HELPER_APP_DEST}`);
-        console.error('run: agents computer setup');
-        process.exit(1);
-      }
-
-      const uid = process.getuid?.();
-      if (typeof uid !== 'number') {
-        console.error('cannot resolve uid');
-        process.exit(1);
-      }
-      const domain = `gui/${uid}`;
-
-      // Render the policy file BEFORE launchctl bootstrap so the daemon
-      // reads a fresh allow list at startup. The helper falls back to an
-      // empty allow list (everything denied) if this file is missing or
-      // unparseable — fail-safe.
-      const allowed = loadComputerAllowList();
-      writeComputerPolicy(allowed);
-      console.log(`policy: ${allowed.length} app${allowed.length === 1 ? '' : 's'} allowed (${resolvePolicyPath()})`);
-      if (allowed.length > 0) {
-        const preview = allowed.slice(0, 5).join(', ');
-        const more = allowed.length > 5 ? ` (+${allowed.length - 5} more)` : '';
-        console.log(`        ${preview}${more}`);
-      } else {
-        console.log(`        (no Computer(...) patterns found — everything will be denied)`);
-        console.log(`        add to ~/.agents/permissions/groups/<name>.yaml under allow:`);
-        console.log(`          - "Computer(com.apple.finder)"`);
-      }
-
-      // Peer-auth allow list — which caller executables may connect to
-      // the socket. Default: this CLI's Node binary, plus Rush.app if
-      // installed. A `nc -U socket` from a malicious npm postinstall has
-      // a different exec path and gets refused at accept().
-      const callers = loadDefaultPeers();
-      writeComputerPeers(callers);
-      console.log(`peers:  ${callers.length} caller${callers.length === 1 ? '' : 's'} allowed (${resolvePeersPath()})`);
-      for (const p of callers) console.log(`        ${p}`);
-
-      // Bootout first to clear any prior registration. Best-effort.
+      let trusted: boolean;
       try {
-        execFileSync('/bin/launchctl', ['bootout', domain, plistPath], { stdio: 'pipe' });
-      } catch {
-        // expected when not previously loaded
-      }
-
-      try {
-        execFileSync('/bin/launchctl', ['bootstrap', domain, plistPath], { stdio: 'pipe' });
+        ({ trusted } = await activateComputerHelperMacLocal());
       } catch (err) {
-        console.error(`launchctl bootstrap failed: ${(err as Error).message}`);
+        console.error(`error: ${(err as Error).message}`);
         process.exit(1);
       }
-
-      // Force restart so we pick up the latest binary.
-      try {
-        execFileSync('/bin/launchctl', ['kickstart', '-k', `${domain}/${HELPER_LABEL}`], { stdio: 'pipe' });
-      } catch (err) {
-        console.error(`launchctl kickstart failed: ${(err as Error).message}`);
-        process.exit(1);
-      }
-
-      // Wait up to 5s for the socket.
-      const deadline = Date.now() + 5000;
-      while (Date.now() < deadline) {
-        if (fs.existsSync(socketPath)) break;
-        await sleep(100);
-      }
-      if (!fs.existsSync(socketPath)) {
-        console.error(`socket did not appear at ${socketPath} within 5s`);
-        console.error(`check ${logPath} for helper startup errors`);
-        process.exit(1);
-      }
-
-      // Probe trust through the socket.
-      let trustStr = 'unknown';
-      try {
-        const client = openComputerClient();
-        try {
-          const r = await client.call('trust_status');
-          trustStr = r.error ? `error (${r.error.code})` : (r.result?.trusted ? 'granted' : 'denied');
-        } finally {
-          await client.close();
-        }
-      } catch (err) {
-        trustStr = `error (${(err as Error).message})`;
-      }
-
-      console.log(`daemon: running`);
-      console.log(`socket: ${socketPath}`);
-      console.log(`trust:  ${trustStr}`);
-      if (trustStr === 'denied') {
+      if (!trusted) {
         console.log('');
         console.log('Grant Accessibility + Screen Recording to Computer Helper.app, then run `agents computer start` again.');
       }
