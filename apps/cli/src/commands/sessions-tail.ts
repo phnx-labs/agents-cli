@@ -144,7 +144,6 @@ export async function tailFile(
 
 interface TailOptions {
   latest?: boolean;
-  json?: boolean;
   fromStart?: boolean;
 }
 

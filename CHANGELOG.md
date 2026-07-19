@@ -345,7 +345,9 @@
   `apps/cli/src/commands/fork.ts`.
 - **Removed the dead `--json` flag on `agents sessions tail`.** It was declared but
   never read — output is always raw JSONL — so it advertised a toggle that did
-  nothing. Dropped from the surface; tail output is unchanged. Source:
+  nothing. Dropped from `tail`'s own surface (and its `TailOptions` type); output is
+  unchanged, and a script still passing `--json` is unaffected since the parent
+  `sessions --json` option keeps it a recognized (no-op) flag. Source:
   `apps/cli/src/commands/sessions-tail.ts`.
 
 ## 1.20.58

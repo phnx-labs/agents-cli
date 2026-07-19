@@ -34,7 +34,7 @@ import { formatUsageSection, getUsageInfoForIdentity } from '../lib/usage.js';
 const USAGE_SUPPORTED: ReadonlySet<AgentId> = new Set<AgentId>(['claude', 'codex', 'kimi', 'droid']);
 
 /** One agent's usage snapshot — the unit the text and --json renderers share. */
-interface AgentUsageRecord {
+export interface AgentUsageRecord {
   agent: AgentId;
   label: string;
   status: 'unsupported' | 'no-version' | 'not-signed-in' | 'ok';
@@ -114,7 +114,7 @@ async function collectAgentUsage(agentId: AgentId): Promise<AgentUsageRecord> {
 }
 
 /** Render one usage record as the human table section. */
-function formatAgentUsage(rec: AgentUsageRecord): string {
+export function formatAgentUsage(rec: AgentUsageRecord): string {
   const cfg = AGENTS[rec.agent];
   switch (rec.status) {
     case 'unsupported':
