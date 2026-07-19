@@ -50,23 +50,28 @@ export function registerForkCommand(program: Command): void {
     }
 
     if (matches.length === 0) {
-      console.log(chalk.red(`No session matching "${sessionArg}".`));
-      console.log(chalk.gray('List candidates with: agents sessions'));
+      // Errors go to stderr and set a non-zero exit code so a script chaining on
+      // `agents fork <id> && agents resume <new>` doesn't proceed on a failed fork.
+      console.error(chalk.red(`No session matching "${sessionArg}".`));
+      console.error(chalk.gray('List candidates with: agents sessions'));
+      process.exitCode = 1;
       return;
     }
     if (matches.length > 1) {
-      console.log(chalk.yellow(`"${sessionArg}" is ambiguous — ${matches.length} sessions match. Use a longer id:`));
+      console.error(chalk.yellow(`"${sessionArg}" is ambiguous — ${matches.length} sessions match. Use a longer id:`));
       for (const m of matches.slice(0, 8)) {
-        console.log(chalk.gray(`  ${m.shortId}  ${m.agent}  ${m.label || m.topic || ''}`));
+        console.error(chalk.gray(`  ${m.shortId}  ${m.agent}  ${m.label || m.topic || ''}`));
       }
+      process.exitCode = 1;
       return;
     }
 
     const source = matches[0];
 
     if (!isForkableAgent(source.agent)) {
-      console.log(chalk.yellow(`fork does not support ${source.agent} sessions yet.`));
-      console.log(chalk.gray(`  Supported: ${FORKABLE_AGENTS.join(', ')}.`));
+      console.error(chalk.yellow(`fork does not support ${source.agent} sessions yet.`));
+      console.error(chalk.gray(`  Supported: ${FORKABLE_AGENTS.join(', ')}.`));
+      process.exitCode = 1;
       return;
     }
 
@@ -74,7 +79,8 @@ export function registerForkCommand(program: Command): void {
     try {
       result = forkSession(source, { name: options.name });
     } catch (err) {
-      console.log(chalk.red(`Could not fork ${source.shortId}: ${(err as Error).message}`));
+      console.error(chalk.red(`Could not fork ${source.shortId}: ${(err as Error).message}`));
+      process.exitCode = 1;
       return;
     }
 
