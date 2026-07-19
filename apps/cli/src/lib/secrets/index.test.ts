@@ -257,6 +257,8 @@ describe('computeRekeyPlan', () => {
       'agents-cli.bundles.prod',
       'agents-cli.secrets.prod.API_KEY',
       'agents-cli.anthropic.token',
+      'agents-cli.session.apple.com',
+      'agents-cli.session.index',
     ];
     const values = new Map([
       ['agents-cli.bundles.autobot', JSON.stringify({ tier: 'none', vars: { CRON_TOKEN: 'keychain:CRON_TOKEN' } })],
@@ -264,6 +266,8 @@ describe('computeRekeyPlan', () => {
       ['agents-cli.bundles.prod', JSON.stringify({ tier: 'session', vars: {} })],
       ['agents-cli.secrets.prod.API_KEY', 'sk'],
       ['agents-cli.anthropic.token', 'tok'],
+      ['agents-cli.session.apple.com', JSON.stringify({ env: {}, expiresAt: 0, sleepPersist: false })],
+      ['agents-cli.session.index', JSON.stringify({ bundles: {} })],
     ]);
     const { items, unreadable } = computeRekeyPlan(services, values, key);
     expect(unreadable).toEqual([]);
@@ -273,6 +277,10 @@ describe('computeRekeyPlan', () => {
     expect(byOld['agents-cli.bundles.prod'].noAcl).toBe(false);
     expect(byOld['agents-cli.secrets.prod.API_KEY'].noAcl).toBe(false);
     expect(byOld['agents-cli.anthropic.token'].noAcl).toBe(false);
+    // Correction D: durable session items must stay no-ACL through a rekey, or
+    // their silent (no-Touch-ID) reads break.
+    expect(byOld['agents-cli.session.apple.com'].noAcl).toBe(true);
+    expect(byOld['agents-cli.session.index'].noAcl).toBe(true);
     expect(JSON.parse(byOld['agents-cli.bundles.prod'].payload!).name).toBe('prod');
     expect(byOld['agents-cli.anthropic.token'].newService).toMatch(HASHED_OTHER);
   });

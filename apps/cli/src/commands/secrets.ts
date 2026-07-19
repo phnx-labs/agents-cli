@@ -71,6 +71,7 @@ import {
 } from '../lib/onepassword.js';
 import {
   secretsHoldMs,
+  secretsAgentDurable,
   agentLoad,
   agentLock,
   agentPing,
@@ -80,6 +81,7 @@ import {
   runSecretsAgent,
   uninstallSecretsAgentService,
 } from '../lib/secrets/agent.js';
+import { saveSession, deleteSession, deleteAllSessions } from '../lib/secrets/session-store.js';
 import { getCliVersionFresh } from '../lib/version.js';
 import { readMeta } from '../lib/state.js';
 import { parseDuration } from '../lib/hooks/cache.js';
@@ -1962,9 +1964,10 @@ Examples:
     .command('unlock [names...]')
     .description('Hold a bundle in the secrets-agent after one Touch ID, so concurrent runs read it without re-prompting (macOS). With --host, unlock FILE-backed bundle(s) on a remote (the passphrase prompt surfaces over the SSH TTY); keychain/biometry bundles are GUI-only and can\'t be remote-unlocked.')
     .option('--ttl <duration>', 'How long to hold it (e.g. 30m, 8h, 3d). Default 7d.')
+    .option('--durable', 'Keep the unlock across sleep + reboot too (default: survives upgrade/restart but re-locks on sleep). Set secrets.agent.durable in agents.yaml to make this the default.')
     .option('--all', 'Unlock every configured bundle')
     .option('--host <target>', 'Unlock the bundle(s) on this remote machine over SSH instead of locally (file-backed bundles only — the remote\'s passphrase prompt surfaces on your terminal over a -tt session). Single-valued (NOT variadic) so it never swallows the bundle name: `unlock <name> --host <machine>`.')
-    .action(async (names: string[], opts: { ttl?: string; all?: boolean; host?: string }) => {
+    .action(async (names: string[], opts: { ttl?: string; durable?: boolean; all?: boolean; host?: string }) => {
       // Single-valued (not variadic): a variadic --host greedily consumes the
       // positional bundle name (`unlock --host mac wztest` -> host=[mac,wztest],
       // names=[]). Unlock targets one remote at a time anyway.
@@ -2000,8 +2003,12 @@ Examples:
         return;
       }
       if (process.platform !== 'darwin') {
-        console.error(chalk.red('secrets-agent is macOS-only (no biometry prompt to deduplicate elsewhere).'));
-        process.exit(1);
+        // No broker + no biometry prompt off darwin: secrets already resolve
+        // durably from the OS store (libsecret / Credential Manager) on every
+        // read with no prompt, so an unlock is a friendly no-op — not an error.
+        // Accept --durable as a documented no-op so the command is uniform.
+        console.log(chalk.gray('Nothing to unlock: secrets already persist on this OS — reads never re-prompt.'));
+        return;
       }
       let targets = opts.all ? listBundles().map((b) => b.name) : names;
       if (!targets || targets.length === 0) {
@@ -2035,6 +2042,14 @@ Examples:
           const { bundle, env } = readAndResolveBundleEnv(name, { noAgent: true, caller: 'unlock' });
           if (await agentLoad(name, bundle, env, ttlMs)) {
             loaded++;
+            // Persist a durable session snapshot so the unlock survives a daemon
+            // restart / upgrade (and sleep too, with --durable). session-store.ts.
+            saveSession(name, {
+              bundle,
+              env,
+              expiresAt: Date.now() + ttlMs,
+              sleepPersist: opts.durable ?? secretsAgentDurable(),
+            });
             console.log(`${chalk.green('unlocked')} ${chalk.cyan(name)} ${chalk.gray(`(${Object.keys(env).length} keys, ${humanRemaining(Date.now() + ttlMs)})`)}`);
           } else {
             console.error(chalk.red(`Failed to load '${name}' into the agent.`));
@@ -2058,10 +2073,14 @@ Examples:
       if (process.platform !== 'darwin') return; // nothing to lock off darwin
       if (names && names.length > 0 && !opts.all) {
         let total = 0;
-        for (const name of names) total += await agentLock(name);
+        for (const name of names) {
+          total += await agentLock(name);
+          deleteSession(name); // also drop the durable snapshot, or a restart re-warms it
+        }
         console.log(total > 0 ? chalk.green(`Locked ${total} bundle(s).`) : chalk.gray('Nothing to lock.'));
       } else {
         const wiped = await agentLock();
+        deleteAllSessions();
         console.log(wiped > 0 ? chalk.green(`Locked ${wiped} bundle(s).`) : chalk.gray('Nothing to lock.'));
       }
     });

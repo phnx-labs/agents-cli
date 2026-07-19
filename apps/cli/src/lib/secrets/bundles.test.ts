@@ -19,6 +19,7 @@ import {
   setKeychainToken,
   type KeychainBackend,
 } from './index.js';
+import { saveSession } from './session-store.js';
 
 /**
  * Regression tests for the two least-privilege bypasses on the
@@ -293,5 +294,76 @@ describe('bundles under hashed service names (#316)', () => {
     const item = secretsKeychainItem('prod', 'API_KEY');
     expect(deleteKeychainToken(item)).toBe(true);
     expect(() => readAndResolveBundleEnv('prod', {})).toThrow(/stored item .* not found/);
+  });
+});
+
+// The durable-session read fallback (Correction B): after a restart the broker
+// RAM is empty, so the fast-path misses; a persisted unlock session must satisfy
+// the read silently instead of throwing / re-prompting.
+describe('durable session read fallback', () => {
+  class MemBackend implements KeychainBackend {
+    store = new Map<string, string>();
+    has(item: string) { return this.store.has(item); }
+    get(item: string) {
+      const v = this.store.get(item);
+      if (v === undefined) throw new Error(`missing ${item}`);
+      return v;
+    }
+    set(item: string, value: string) { this.store.set(item, value); }
+    delete(item: string) { return this.store.delete(item); }
+    list(prefix: string) { return [...this.store.keys()].filter((k) => k.startsWith(prefix)); }
+  }
+
+  let mem: MemBackend;
+  let prev: KeychainBackend | null = null;
+  const prevNoAgent = process.env.AGENTS_SECRETS_NO_AGENT;
+  const prevNoUsage = process.env.AGENTS_NO_USAGE_TRACK;
+
+  beforeEach(() => {
+    mem = new MemBackend();
+    prev = setKeychainBackendForTest(mem);
+    // The fallback is gated behind the agent path — do NOT set NO_AGENT here (the
+    // other suite does). There is no broker socket in CI, so agentGetSync misses
+    // and we fall through to the session store.
+    delete process.env.AGENTS_SECRETS_NO_AGENT;
+    process.env.AGENTS_NO_USAGE_TRACK = '1';
+  });
+  afterEach(() => {
+    setKeychainBackendForTest(prev);
+    if (prevNoAgent === undefined) delete process.env.AGENTS_SECRETS_NO_AGENT;
+    else process.env.AGENTS_SECRETS_NO_AGENT = prevNoAgent;
+    if (prevNoUsage === undefined) delete process.env.AGENTS_NO_USAGE_TRACK;
+    else process.env.AGENTS_NO_USAGE_TRACK = prevNoUsage;
+  });
+
+  function seed(name: string, vars: Record<string, string>): { bundle: SecretsBundle; env: Record<string, string> } {
+    const bundle: SecretsBundle = { name, vars: {} };
+    for (const [k, v] of Object.entries(vars)) {
+      setKeychainToken(secretsKeychainItem(name, k), v);
+      bundle.vars[k] = `keychain:${k}`;
+    }
+    writeBundle(bundle);
+    return readAndResolveBundleEnv(name, { noAgent: true, caller: 'seed' });
+  }
+
+  it('a headless read resolves from a live session instead of throwing "not unlocked"', () => {
+    const { bundle, env } = seed('apple.com', { APPLE_TEAM_ID: '2HTP252L87' });
+    // No session yet → the headless (agentOnly) read must throw.
+    expect(() => readAndResolveBundleEnv('apple.com', { agentOnly: true })).toThrow(/not unlocked in the secrets agent/);
+    // Persist an unlock → the SAME headless read now resolves silently.
+    saveSession('apple.com', { bundle, env, expiresAt: Date.now() + 60_000, sleepPersist: false });
+    expect(readAndResolveBundleEnv('apple.com', { agentOnly: true }).env).toEqual({ APPLE_TEAM_ID: '2HTP252L87' });
+  });
+
+  it('honors --keys subset from the session snapshot', () => {
+    const { bundle, env } = seed('multi', { A: '1', B: '2' });
+    saveSession('multi', { bundle, env, expiresAt: Date.now() + 60_000, sleepPersist: true });
+    expect(readAndResolveBundleEnv('multi', { agentOnly: true, keys: ['A'] }).env).toEqual({ A: '1' });
+  });
+
+  it('an expired session does not satisfy the read', () => {
+    const { bundle, env } = seed('stale', { T: 'x' });
+    saveSession('stale', { bundle, env, expiresAt: Date.now() - 1000, sleepPersist: true });
+    expect(() => readAndResolveBundleEnv('stale', { agentOnly: true })).toThrow(/not unlocked/);
   });
 });

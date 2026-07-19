@@ -42,6 +42,7 @@ import { fileStore } from './filestore.js';
 import { emit } from '../events.js';
 import { readMeta } from '../state.js';
 import { agentGetSync, agentAutoLoadSync, agentGetMetaSync, agentAutoLoadMetaSync, agentEvictSync, secretsAgentAutoEnabled, secretsHoldMs } from './agent.js';
+import { loadSession, deleteSession } from './session-store.js';
 import { createHash } from 'node:crypto';
 
 /** Which store carries a bundle's items. */
@@ -483,6 +484,9 @@ export function writeBundle(bundle: SecretsBundle, opts: WriteBundleOptions = {}
   // re-resolves from the keychain instead of serving stale values.
   if (shouldEvictAfterBundleWrite(Boolean(opts.skipBrokerEviction), process.env.AGENTS_SECRETS_NO_AGENT, isKeychainBackendOverridden())) {
     agentEvictSync(bundle.name);
+    // Also drop any durable session snapshot, or a broker restart would rehydrate
+    // the stale env after a rotate/rename (session-store.ts).
+    deleteSession(bundle.name);
   }
 }
 
@@ -493,6 +497,7 @@ export function deleteBundle(name: string): boolean {
     emit('secrets.delete', { module: 'secrets', bundle: name });
     if (shouldEvictAfterBundleWrite(false, process.env.AGENTS_SECRETS_NO_AGENT, isKeychainBackendOverridden())) {
       agentEvictSync(name);
+      deleteSession(name); // a deleted bundle must not be rehydratable
     }
   }
   return deleted;
@@ -961,6 +966,30 @@ export function readAndResolveBundleEnv(
         operation: opts.caller,
         status: 'success',
         source: 'agent',
+        keyCount: Object.keys(filtered.env).length,
+      });
+      return filtered;
+    }
+
+    // Durable-session fallback (Correction B). After a daemon restart / agents-cli
+    // upgrade the broker RAM is empty, so the fast-path above misses — but the
+    // unlock persisted a no-ACL session item (session-store.ts) that reads with NO
+    // Touch ID. Serve from it and re-warm the broker, so a warm bundle stays warm
+    // across restart — this fixes BOTH the interactive re-prompt and the headless
+    // throw below (which now fires only when there is genuinely no session).
+    const session = loadSession(name);
+    if (session) {
+      const filtered = filterAgentHitBySubsetAndExpiry({ bundle: session.bundle, env: session.env }, opts);
+      stampLastUsed(filtered.bundle);
+      // Re-warm the broker with the remaining TTL so later reads hit RAM and
+      // `agents secrets status` is honest. Best-effort; no-ops off darwin.
+      agentAutoLoadSync(name, session.bundle, session.env, Math.max(1, session.expiresAt - Date.now()));
+      emit('secrets.get', {
+        module: 'secrets',
+        bundle: name,
+        operation: opts.caller,
+        status: 'success',
+        source: 'session',
         keyCount: Object.keys(filtered.env).length,
       });
       return filtered;

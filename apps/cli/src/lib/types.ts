@@ -725,12 +725,16 @@ export interface Meta {
    * concurrent runs read silently — set it `false` to force a prompt on every read.
    * `holdMs` caps how long an unlocked/auto-cached bundle is held before the next
    * read re-prompts (default 7 days; e.g. 86400000 for a 24h cap). Clamped to
-   * [1 minute, 30 days]. */
+   * [1 minute, 30 days]. `durable` (default off) makes every `agents secrets
+   * unlock` survive sleep + reboot as well as upgrade/restart — the same effect as
+   * passing `--durable` per unlock; off means the secure split default (survive
+   * upgrade/restart, re-lock on sleep). */
   secrets?: {
     policy?: 'always' | 'daily';
     agent?: {
       auto?: boolean;
       holdMs?: number;
+      durable?: boolean;
     };
   };
   /** Spend guardrails (issue #346). User-global caps; project agents.yaml overrides. */

@@ -36,6 +36,7 @@ import { getKeychainHelperPath } from './install-helper.js';
 import { getCliVersion, getCliVersionFresh } from '../version.js';
 import { getCliLaunch } from '../cli-entry.js';
 import type { SecretsBundle } from './bundles.js';
+import { rehydrateSessions, pruneSessionsOnSleep } from './session-store.js';
 
 /** Bumped when the wire protocol changes; a client that pings a mismatched
  * server kills and respawns it rather than talking a stale dialect. */
@@ -118,6 +119,21 @@ export interface AgentStatusEntry {
 
 function onDarwin(): boolean {
   return process.platform === 'darwin';
+}
+
+/**
+ * Build the broker's in-memory store, REHYDRATED from the durable session store
+ * (session-store.ts) so an unlock survives a daemon restart / agents-cli upgrade.
+ * Expired sessions are dropped; `--durable` and default entries alike come back
+ * (SLEEP already pruned the non-durable ones from the keychain while the broker
+ * was alive). Empty off darwin or when nothing was held.
+ */
+function rehydrateStore(now: number = Date.now()): Map<string, StoredBundle> {
+  const store = new Map<string, StoredBundle>();
+  for (const { name, entry } of rehydrateSessions(now)) {
+    store.set(name, { bundle: entry.bundle, env: entry.env, expiresAt: entry.expiresAt });
+  }
+  return store;
 }
 
 /** Broker runtime dir under the regenerable cache, locked to the user (0700).
@@ -479,7 +495,7 @@ export async function runSecretsAgent(
     }
   }
 
-  const store = new Map<string, StoredBundle>();
+  const store = rehydrateStore();
   // emptySince tracks the last moment the store held something; the sweep exits
   // the process once it's been empty for IDLE_EXIT_MS so no idle broker lingers.
   let emptySince = Date.now();
@@ -616,6 +632,9 @@ export async function runSecretsAgent(
       if (shouldWipeOnWatchEvent(chunk)) {
         store.clear();
         emptySince = Date.now();
+        // Split default: delete non-`--durable` durable sessions too, so a default
+        // unlock re-locks on sleep; `--durable` ones survive (session-store.ts).
+        pruneSessionsOnSleep();
       }
     });
     watcher.on('error', () => { watcher = null; });
@@ -654,7 +673,7 @@ export async function runSecretsAgent(
 export async function startHostedBroker(): Promise<{ close(): void } | null> {
   if (!onDarwin()) return null;
 
-  const store = new Map<string, StoredBundle>();
+  const store = rehydrateStore();
   const sock = socketPath(); // agentDir() creates the 0700 dir as a side effect
 
   const handle = (req: Request): Response => handleAgentRequest(store, req);
@@ -679,7 +698,10 @@ export async function startHostedBroker(): Promise<{ close(): void } | null> {
     watcher = spawn(getKeychainHelperPath(), ['watch-lock'], { stdio: ['ignore', 'pipe', 'ignore'] });
     watcher.stdout?.setEncoding('utf-8');
     watcher.stdout?.on('data', (chunk: string) => {
-      if (shouldWipeOnWatchEvent(chunk)) store.clear();
+      if (shouldWipeOnWatchEvent(chunk)) {
+        store.clear();
+        pruneSessionsOnSleep(); // split default — see runSecretsAgent's handler
+      }
     });
     watcher.on('error', () => { watcher = null; });
   } catch {
@@ -918,6 +940,18 @@ export function secretsAgentAutoEnabled(): boolean {
     return readMeta().secrets?.agent?.auto !== false;
   } catch {
     return true;
+  }
+}
+
+/** Default `sleepPersist` for a new unlock when `--durable` is not passed. OFF by
+ * default (the secure split default: survive restart, re-lock on sleep); set
+ * `secrets.agent.durable: true` in agents.yaml to make every unlock sleep-durable.
+ * Best-effort; an unreadable meta reads as off. */
+export function secretsAgentDurable(): boolean {
+  try {
+    return readMeta().secrets?.agent?.durable === true;
+  } catch {
+    return false;
   }
 }
 

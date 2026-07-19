@@ -587,6 +587,10 @@ export function computeRekeyPlan(
       const dot = rest.lastIndexOf('.');
       if (dot > 0) noAcl = bundleNoAcl(rest.slice(0, dot));
     }
+    // Durable "unlocked session" items (agents-cli.session.*, see session-store.ts)
+    // are always no-ACL — re-wrapping them in a biometry ACL on rekey would break
+    // their silent (no-Touch-ID) reads that the rehydrate/fallback paths depend on.
+    if (service.startsWith('agents-cli.session.')) noAcl = true;
     items.push({ oldService: service, newService: hashedServiceName(service, key), noAcl });
   }
   return { items, unreadable };
