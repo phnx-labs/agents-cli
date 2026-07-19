@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import * as fs from 'fs';
 import * as path from 'path';
 import {
+  buildRemoteFocusCommand,
   mapStatusToPhase,
   normalizeHost,
   resolveSessionHost,
@@ -763,5 +764,24 @@ describe('normalizeActiveSession — todos plan progress (RUSH-1380)', () => {
       FETCHED_AT
     );
     expect(s.todos).toBeUndefined();
+  });
+});
+
+describe('buildRemoteFocusCommand — attach a remote session over SSH', () => {
+  test('ssh -t into the peer and focus the session in-place with --local', () => {
+    const cmd = buildRemoteFocusCommand('abc12345', 'yosemite-s0');
+    expect(cmd.startsWith('ssh -t ')).toBe(true);
+    expect(cmd).toContain(`'yosemite-s0'`); // host is quoted, not dropped
+    expect(cmd).toContain('agents sessions focus');
+    expect(cmd).toContain('abc12345');
+    expect(cmd).toContain('--local');
+  });
+
+  test('single-quotes an injected session id so it can never break out of the arg', () => {
+    const cmd = buildRemoteFocusCommand("a'; echo pwned", 'peer');
+    // The raw quote+semicolon breakout is escaped, never present verbatim...
+    expect(cmd).not.toContain("a'; echo");
+    // ...and the escaped-quote sequence ('\'') is what appears instead.
+    expect(cmd).toContain(`'\\''`);
   });
 });

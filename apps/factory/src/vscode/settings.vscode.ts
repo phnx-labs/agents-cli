@@ -62,7 +62,7 @@ import { buildTaskDispatchPrompt } from '../core/tasks';
 import { draftDispatchPrompt, type DraftTicket } from '../core/draftPrompt';
 import { listRegisteredDevices, fetchDeviceStats, countRunningAgents, resolveSecret, getDeviceSyncStatus } from './deviceHealth.vscode';
 import { inferProjectCandidates } from '../core/projectIndex';
-import { normalizeHost } from '../core/remoteSessions';
+import { normalizeHost, buildRemoteFocusCommand } from '../core/remoteSessions';
 import { rankRepos } from '../core/repoIndex';
 import { detectProjects } from '../core/projectDetect';
 import { getSyncStatus } from '../core/repoSync';
@@ -3054,11 +3054,20 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         }
         break;
       // Focus a session — open/attach a real terminal on it (handles the headless
-      // "open it and step in" case). Delegates to `agents sessions focus <id>`.
+      // "open it and step in" case). Local delegates to `agents sessions focus <id>`
+      // detached (native terminal tab); a session on a REMOTE device gets a VS Code
+      // terminal that ssh's in and focuses it there (mirrors focusRemoteSession).
       case 'focusSession': {
         const sessionId = typeof message.sessionId === 'string' ? message.sessionId.trim() : '';
         if (!sessionId) break;
-        focusSessionInTerminal(sessionId);
+        const host = typeof message.host === 'string' ? message.host : '';
+        if (isLocalDeviceHost(host)) {
+          focusSessionInTerminal(sessionId);
+          break;
+        }
+        const term = vscode.window.createTerminal({ name: `attach ${sessionId.slice(0, 8)}` });
+        term.sendText(buildRemoteFocusCommand(sessionId, host), true);
+        term.show(false);
         break;
       }
       // Stop a background (headless) run by killing its pid — sends it back to parked
