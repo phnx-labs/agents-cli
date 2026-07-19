@@ -33,16 +33,27 @@ import { formatUsageSection, getUsageInfoForIdentity } from '../lib/usage.js';
  */
 const USAGE_SUPPORTED: ReadonlySet<AgentId> = new Set<AgentId>(['claude', 'codex', 'kimi', 'droid']);
 
+/** One agent's usage snapshot — the unit the text and --json renderers share. */
+interface AgentUsageRecord {
+  agent: AgentId;
+  label: string;
+  status: 'unsupported' | 'no-version' | 'not-signed-in' | 'ok';
+  email?: string;
+  usage?: Awaited<ReturnType<typeof getUsageInfoForIdentity>>;
+}
+
 export function registerUsageCommand(program: Command): void {
   addHostOption(program.command('usage [agent]'))
     .description('Show rate-limit / quota usage per agent')
+    .option('--json', 'Emit machine-readable JSON (per-agent usage snapshot) instead of the table')
     .addHelpText('after', `
 Examples:
   agents usage              Show usage for all installed agents
   agents usage claude       Show usage for Claude only
   agents usage codex        Show usage for Codex only
+  agents usage --json       Machine-readable snapshot for scripts
 `)
-    .action(async (agentFilter?: string) => {
+    .action(async (agentFilter: string | undefined, options: { json?: boolean }) => {
       let filter: AgentId | undefined;
       if (agentFilter) {
         const resolved = resolveAgentName(agentFilter);
@@ -57,55 +68,71 @@ Examples:
         : ALL_AGENT_IDS.filter((id) => listInstalledVersions(id).length > 0);
 
       if (targets.length === 0) {
+        if (options.json) {
+          console.log('[]');
+          return;
+        }
         console.log(chalk.gray('No agents installed. Run `agents add <agent>` first.'));
         return;
       }
 
-      const sections = await Promise.all(
-        targets.map(async (agentId) => renderAgentUsage(agentId as AgentId))
+      const records = await Promise.all(
+        targets.map((agentId) => collectAgentUsage(agentId as AgentId))
       );
 
-      console.log(sections.filter(Boolean).join('\n\n'));
+      if (options.json) {
+        console.log(JSON.stringify(records, null, 2));
+        return;
+      }
+
+      console.log(records.map(formatAgentUsage).filter(Boolean).join('\n\n'));
     });
 }
 
-async function renderAgentUsage(agentId: AgentId): Promise<string> {
-  const cfg = AGENTS[agentId];
-  const heading = agentLabel(agentId);
+/** Gather one agent's usage snapshot as structured data (shared by both renderers). */
+async function collectAgentUsage(agentId: AgentId): Promise<AgentUsageRecord> {
+  const label = agentLabel(agentId);
 
   if (!USAGE_SUPPORTED.has(agentId)) {
-    return [
-      `${heading}`,
-      `  ${chalk.dim(`${cfg.name} CLI does not publish usage data.`)}`,
-    ].join('\n');
+    return { agent: agentId, label, status: 'unsupported' };
   }
 
   const versions = listInstalledVersions(agentId);
   const version = getGlobalDefault(agentId) || versions[0];
   if (!version) {
-    return [`${heading}`, `  ${chalk.dim('No version installed.')}`].join('\n');
+    return { agent: agentId, label, status: 'no-version' };
   }
   const home = getVersionHomePath(agentId, version);
 
   const info = await getAccountInfo(agentId, home);
   if (!info.usageKey && !info.accountKey) {
-    return [`${heading}`, `  ${chalk.dim('Not signed in.')}`].join('\n');
+    return { agent: agentId, label, status: 'not-signed-in' };
   }
 
-  const usage = await getUsageInfoForIdentity({
-    agentId,
-    home,
-    info,
-    cliVersion: null,
-  });
+  const usage = await getUsageInfoForIdentity({ agentId, home, info, cliVersion: null });
+  return { agent: agentId, label, status: 'ok', email: info.email ?? undefined, usage };
+}
 
-  const lines = [heading];
-  if (info.email) lines.push(`  ${chalk.dim(info.email)}`);
-  const section = formatUsageSection(usage);
-  if (section.length === 0) {
-    lines.push(`  ${chalk.dim('No usage data available right now.')}`);
-  } else {
-    lines.push(...section);
+/** Render one usage record as the human table section. */
+function formatAgentUsage(rec: AgentUsageRecord): string {
+  const cfg = AGENTS[rec.agent];
+  switch (rec.status) {
+    case 'unsupported':
+      return [rec.label, `  ${chalk.dim(`${cfg.name} CLI does not publish usage data.`)}`].join('\n');
+    case 'no-version':
+      return [rec.label, `  ${chalk.dim('No version installed.')}`].join('\n');
+    case 'not-signed-in':
+      return [rec.label, `  ${chalk.dim('Not signed in.')}`].join('\n');
+    case 'ok': {
+      const lines = [rec.label];
+      if (rec.email) lines.push(`  ${chalk.dim(rec.email)}`);
+      const section = formatUsageSection(rec.usage!);
+      if (section.length === 0) {
+        lines.push(`  ${chalk.dim('No usage data available right now.')}`);
+      } else {
+        lines.push(...section);
+      }
+      return lines.join('\n');
+    }
   }
-  return lines.join('\n');
 }
