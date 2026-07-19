@@ -12,10 +12,11 @@ process.env.HOME = TEST_HOME;
 process.env.AGENTS_REAL_HOME = TEST_HOME;
 
 const { forkSession } = await import('../fork.js');
-const { getSessionById } = await import('../db.js');
+const { closeDB, getSessionById } = await import('../db.js');
 type SessionMeta = import('../types.js').SessionMeta;
 
 afterAll(() => {
+  closeDB();
   fs.rmSync(TEST_HOME, { recursive: true, force: true });
 });
 
