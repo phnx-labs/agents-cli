@@ -56,12 +56,12 @@ import { ensureManagedKnownHostsDir, isHostPinned } from '../lib/devices/known-h
 import { shouldSyncTerminfo, syncTerminfoToDevice, terminfoHostKey } from '../lib/devices/terminfo.js';
 import {
   fanOutDevices,
+  fleetProbeTargets,
   planFleetTargets,
-  remoteFleetTargets,
   runFleet,
   skipLabel,
   upgradeCommand,
-  type FanOutDeviceTarget,
+  type FleetProbeTarget,
   type FleetRunResult,
 } from '../lib/devices/fleet.js';
 import {
@@ -311,10 +311,6 @@ interface RemoteDoctorJson {
   auth?: FleetHealthRow['auth'];
 }
 
-interface FleetStatusTarget extends FanOutDeviceTarget {
-  platform?: string;
-}
-
 function localHealthRow(self: string, stats?: DeviceStats): FleetHealthRow {
   return {
     name: self,
@@ -327,15 +323,15 @@ function localHealthRow(self: string, stats?: DeviceStats): FleetHealthRow {
   };
 }
 
-async function probeRemoteHealth(target: FleetStatusTarget): Promise<Omit<FleetHealthRow, 'name' | 'platform' | 'stats'>> {
+async function probeRemoteHealth(target: FleetProbeTarget): Promise<Omit<FleetHealthRow, 'name' | 'platform' | 'stats'>> {
   const isWin = /^win/i.test((target.platform ?? '').trim());
   const env = isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' };
   const versionCmd = buildRemoteAgentsInvocation(['--version'], undefined, isWin ? 'windows' : undefined, env);
-  const versionRes = await sshExecAsync(target.name, versionCmd, { timeoutMs: 15000, multiplex: true });
+  const versionRes = await sshExecAsync(target.sshTarget, versionCmd, { timeoutMs: 15000, multiplex: true });
   const version = versionRes.code === 0 ? versionRes.stdout.trim().split(/\s+/)[0] || null : null;
 
   const doctorCmd = buildRemoteAgentsInvocation(['doctor', '--json'], undefined, isWin ? 'windows' : undefined, env);
-  const doctorRes = await sshExecAsync(target.name, doctorCmd, { timeoutMs: 30000, multiplex: true });
+  const doctorRes = await sshExecAsync(target.sshTarget, doctorCmd, { timeoutMs: 30000, multiplex: true });
   if (doctorRes.code !== 0) {
     throw new Error(doctorRes.timedOut ? 'timed out' : (doctorRes.stderr.trim() || `exit ${doctorRes.code ?? 'unknown'}`));
   }
@@ -365,12 +361,7 @@ async function runFleetStatus(opts: { json?: boolean; strict?: boolean; stats?: 
     : (await loadFleetStats(probeable, { forceRefresh, selfName: self })).stats;
 
   const rows: FleetHealthRow[] = [localHealthRow(self, statsMap.get(self))];
-  const remoteTargets: FleetStatusTarget[] = remoteFleetTargets(planned, self)
-    .map((t) => ({
-      name: t.device.name,
-      platform: t.device.platform,
-      skip: t.skip,
-    }));
+  const remoteTargets = fleetProbeTargets(planned, self);
   const remote = await fanOutDevices(remoteTargets, probeRemoteHealth);
   for (const result of remote) {
     const profile = reg[result.name];
@@ -423,11 +414,11 @@ interface FleetPingHostResult {
 }
 
 /** SSH into a host and run its local auth probe, returning its rows. */
-async function probeRemoteAuth(target: FleetStatusTarget): Promise<AuthProbeRow[]> {
+async function probeRemoteAuth(target: FleetProbeTarget): Promise<AuthProbeRow[]> {
   const isWin = /^win/i.test((target.platform ?? '').trim());
   const env = isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' };
   const cmd = buildRemoteAgentsInvocation(['devices', 'ping', '--local', '--json'], undefined, isWin ? 'windows' : undefined, env);
-  const res = await sshExecAsync(target.name, cmd, { timeoutMs: 60000, multiplex: true });
+  const res = await sshExecAsync(target.sshTarget, cmd, { timeoutMs: 60000, multiplex: true });
   if (res.code !== 0) {
     throw new Error(res.timedOut ? 'timed out' : (res.stderr.trim() || `exit ${res.code ?? 'unknown'}`));
   }
@@ -463,16 +454,12 @@ async function runFleetPing(opts: { json?: boolean; local?: boolean; verbose?: b
   writeFleetAuthRows(self, localRows);
   results.push({ host: self, rows: localRows });
 
-  const remoteTargets: FleetStatusTarget[] = remoteFleetTargets(planned, self).map((t) => ({
-    name: t.device.name,
-    platform: t.device.platform,
-    skip: t.skip,
-  }));
+  const remoteTargets = fleetProbeTargets(planned, self);
   const probeable = remoteTargets.filter((t) => !t.skip).length;
   const spinner = isInteractiveTerminal() && !opts.json
     ? ora(`Pinging ${probeable} device${probeable === 1 ? '' : 's'}…`).start()
     : undefined;
-  let remote: Awaited<ReturnType<typeof fanOutDevices<AuthProbeRow[], FleetStatusTarget>>>;
+  let remote: Awaited<ReturnType<typeof fanOutDevices<AuthProbeRow[], FleetProbeTarget>>>;
   try {
     remote = await fanOutDevices(remoteTargets, probeRemoteAuth);
   } finally {

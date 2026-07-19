@@ -17,7 +17,7 @@ import { AGENTS, ALL_AGENT_IDS } from '../lib/agents.js';
 import { setHelpSections } from '../lib/help.js';
 import { computeDrift, type SyncStatusRow } from '../lib/drift.js';
 import { loadDevices } from '../lib/devices/registry.js';
-import { fanOutDevices, planFleetTargets, remoteFleetTargets, type FanOutDeviceTarget } from '../lib/devices/fleet.js';
+import { fanOutDevices, fleetProbeTargets, planFleetTargets, type FleetProbeTarget } from '../lib/devices/fleet.js';
 import { machineId } from '../lib/session/sync/config.js';
 import { buildRemoteAgentsInvocation } from '../lib/hosts/remote-cmd.js';
 import { sshExecAsync } from '../lib/ssh-exec.js';
@@ -146,11 +146,7 @@ function checkPayload(device: string, drift: ReturnType<typeof computeDrift>): D
   };
 }
 
-interface CheckFanOutTarget extends FanOutDeviceTarget {
-  platform?: string;
-}
-
-async function probeDeviceCheck(target: CheckFanOutTarget): Promise<DeviceCheckResult> {
+async function probeDeviceCheck(target: FleetProbeTarget): Promise<DeviceCheckResult> {
   const isWin = /^win/i.test((target.platform ?? '').trim());
   const remoteCmd = buildRemoteAgentsInvocation(
     ['check', '--json'],
@@ -158,7 +154,7 @@ async function probeDeviceCheck(target: CheckFanOutTarget): Promise<DeviceCheckR
     isWin ? 'windows' : undefined,
     isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' },
   );
-  const res = await sshExecAsync(target.name, remoteCmd, { timeoutMs: 30000, multiplex: true });
+  const res = await sshExecAsync(target.sshTarget, remoteCmd, { timeoutMs: 30000, multiplex: true });
   if (res.code !== 0 && !res.stdout.trim()) {
     throw new Error(res.timedOut ? 'timed out' : (res.stderr.trim() || `exit ${res.code ?? 'unknown'}`));
   }
@@ -181,12 +177,7 @@ async function runDevicesCheck(opts: CheckOptions, cwd: string): Promise<void> {
   const self = machineId();
   const planned = planFleetTargets(registry);
   const local = checkPayload(self, computeDrift(cwd));
-  const remoteTargets: CheckFanOutTarget[] = remoteFleetTargets(planned, self)
-    .map((t) => ({
-      name: t.device.name,
-      platform: t.device.platform,
-      skip: t.skip,
-    }));
+  const remoteTargets = fleetProbeTargets(planned, self);
   const remote = await fanOutDevices(remoteTargets, probeDeviceCheck);
   const devices: DeviceCheckResult[] = [local];
   for (const result of remote) {

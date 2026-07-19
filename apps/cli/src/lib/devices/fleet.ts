@@ -37,6 +37,24 @@ export interface FanOutDeviceTarget {
   skip?: FleetSkipReason | string;
 }
 
+/**
+ * A remote fleet health/drift probe target: a {@link FanOutDeviceTarget} plus
+ * the device platform and its registry-resolved ssh target. Shared by
+ * `fleet status`, `fleet ping`, and `check --devices`.
+ */
+export interface FleetProbeTarget extends FanOutDeviceTarget {
+  platform?: string;
+  /**
+   * Resolved `user@host` ssh target for this device (from the registry `user`).
+   * Remote probes MUST ssh to this, never the bare `name`: a bare name has no
+   * `user@`, so ssh falls back to the caller's local login user and a device
+   * whose remote OS user differs (macOS caller `taylorgagne` → Linux peer
+   * `taylor`) is reached as the wrong user and rejected by tailscaled. Empty
+   * string for skipped devices, which {@link fanOutDevices} never probes.
+   */
+  sshTarget: string;
+}
+
 export interface FanOutDeviceResult<T> {
   name: string;
   status: 'ok' | 'failed' | 'skipped';
@@ -86,6 +104,24 @@ export function planFleetTargets(reg: DeviceRegistry): FleetTarget[] {
  */
 export function remoteFleetTargets(planned: FleetTarget[], self: string): FleetTarget[] {
   return planned.filter((t) => t.device.name !== self && t.skip !== 'control');
+}
+
+/**
+ * Build the fan-out targets for the fleet health/drift probes — the shared shape
+ * consumed by `fleet status`, `fleet ping`, and `check --devices`. Each carries
+ * the registry-resolved `user@host` ssh target (see {@link FleetProbeTarget.sshTarget})
+ * so the remote probe reaches the device as its configured user, matching the
+ * stats/`agents ssh` path. Skipped devices (offline / no-address / control)
+ * carry an empty `sshTarget`; {@link fanOutDevices} short-circuits them before
+ * any ssh, so `sshTargetFor` is only evaluated where it is known to succeed.
+ */
+export function fleetProbeTargets(planned: FleetTarget[], self: string): FleetProbeTarget[] {
+  return remoteFleetTargets(planned, self).map((t) => ({
+    name: t.device.name,
+    platform: t.device.platform,
+    skip: t.skip,
+    sshTarget: t.skip ? '' : sshTargetFor(t.device),
+  }));
 }
 
 /** Human label for a skip reason. */

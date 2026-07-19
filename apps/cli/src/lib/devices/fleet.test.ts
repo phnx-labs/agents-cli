@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   planFleetTargets,
   remoteFleetTargets,
+  fleetProbeTargets,
   fanOutDevices,
   runFleet,
   skipLabel,
@@ -80,6 +81,41 @@ describe('remoteFleetTargets (fleet health/drift gate targeting)', () => {
     expect(byName.zion).toBeUndefined(); // self is probed in-process, not fanned out
     expect(byName.worker.skip).toBeUndefined(); // a real probe target
     expect(byName.dead.skip).toBe('offline'); // genuine fault — kept, surfaces as unreachable
+  });
+});
+
+describe('fleetProbeTargets (fleet status / ping / check remote probe targets)', () => {
+  it('resolves each device to its registry user@host ssh target, not the bare name', () => {
+    // The regression: fleet status/ping/check used to fan out on the bare device
+    // NAME, so ssh fell back to the caller's local login user — a device whose
+    // remote OS user differs (a Linux peer `taylor` reached from a macOS caller
+    // `taylorgagne`) was probed as the wrong user and reported unreachable, even
+    // though the stats probe (which honors device.user) reached it fine.
+    const reg: DeviceRegistry = {
+      zion: device({ name: 'zion', tailscale: { online: true, direct: true } }), // self
+      mars: device({ name: 'mars', user: 'taylor', tailscale: { online: true, direct: true } }),
+    };
+    const targets = fleetProbeTargets(planFleetTargets(reg), 'zion');
+    expect(targets).toHaveLength(1);
+    expect(targets[0].name).toBe('mars');
+    // user@host — carries the per-device user, so ssh reaches the box correctly.
+    expect(targets[0].sshTarget).toBe('taylor@mars.ts.net');
+    expect(targets[0].platform).toBe('linux');
+  });
+
+  it('leaves skipped devices with an empty sshTarget (never probed) instead of throwing', () => {
+    const reg: DeviceRegistry = {
+      zion: device({ name: 'zion', tailscale: { online: true, direct: true } }), // self
+      offline: device({ name: 'offline', tailscale: { online: false, direct: false, lastSeen: 'y' } }),
+      bare: device({ name: 'bare', address: { via: 'manual' } }), // no-address
+    };
+    const byName = Object.fromEntries(
+      fleetProbeTargets(planFleetTargets(reg), 'zion').map((t) => [t.name, t]),
+    );
+    expect(byName.offline.skip).toBe('offline');
+    expect(byName.offline.sshTarget).toBe('');
+    expect(byName.bare.skip).toBe('no-address');
+    expect(byName.bare.sshTarget).toBe('');
   });
 });
 
