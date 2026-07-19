@@ -9,7 +9,7 @@
  * injection guard.
  */
 import { describe, expect, it } from 'vitest';
-import { buildSshInvocation, sshTargetFor, wrapRemoteCommand, ASKPASS_BUNDLE_ENV, ASKPASS_KEY_ENV } from './connect.js';
+import { buildAskpassShimBody, buildSshInvocation, sshTargetFor, wrapRemoteCommand, ASKPASS_BUNDLE_ENV, ASKPASS_KEY_ENV } from './connect.js';
 import type { DeviceProfile } from './registry.js';
 
 function decodePowerShell(cmd: string): string {
@@ -111,5 +111,42 @@ describe('buildSshInvocation', () => {
     expect(args).toContain('StrictHostKeyChecking=yes');
     expect(args).toContain('UserKnownHostsFile=/managed/kh');
     expect(args).not.toContain('StrictHostKeyChecking=accept-new');
+  });
+});
+
+describe('buildAskpassShimBody', () => {
+  // The bug (#password-auth-on-standalone): the shim used to be hand-rolled from
+  // `[process.execPath, process.argv[1], …]`. On a Bun standalone binary
+  // process.argv[1] is the virtual embedded entry `/$bunfs/root/agents`, so the
+  // shim ran `<binary> /$bunfs/root/agents ssh __askpass`; the CLI saw the
+  // virtual path as a subcommand, died with `unknown command '/$bunfs/root/agents'`,
+  // printed nothing, and handed ssh an EMPTY password -> Permission denied on
+  // every password-auth device. The shim must never carry a /$bunfs path, and
+  // must exec the launch argv resolved by getCliLaunch.
+  it('standalone binary launch: execs the physical binary, never the /$bunfs virtual entry', () => {
+    // getCliLaunch on a standalone build returns { command: <physical binary>, args: ['ssh','__askpass'] }.
+    const body = buildAskpassShimBody({ command: '/opt/agents/bin/agents', args: ['ssh', '__askpass'] });
+    expect(body).not.toContain('/$bunfs');
+    expect(body).toContain("exec /opt/agents/bin/agents ssh __askpass");
+    expect(body.startsWith('#!/bin/sh\n')).toBe(true);
+  });
+
+  it('JS/dev build launch: execs node with the real entry script', () => {
+    // getCliLaunch on a JS install returns { command: node, args: [entry,'ssh','__askpass'] }.
+    const body = buildAskpassShimBody({ command: '/usr/bin/node', args: ['/app/dist/index.js', 'ssh', '__askpass'] });
+    expect(body).not.toContain('/$bunfs');
+    expect(body).toContain("exec /usr/bin/node /app/dist/index.js ssh __askpass");
+  });
+
+  it('shell-quotes every argv element (paths with spaces stay one word)', () => {
+    const body = buildAskpassShimBody({ command: '/opt/my agents/agents', args: ['ssh', '__askpass'] });
+    expect(body).toContain("exec '/opt/my agents/agents' ssh __askpass");
+  });
+
+  it('default (no arg) resolves through getCliLaunch — never leaks a /$bunfs entry', () => {
+    // Whatever the running shape, the real getCliLaunch must not emit a virtual entry.
+    const body = buildAskpassShimBody();
+    expect(body).not.toContain('/$bunfs');
+    expect(body).toMatch(/\bssh __askpass\n$/);
   });
 });
