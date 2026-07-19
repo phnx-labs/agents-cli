@@ -19,10 +19,44 @@ import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { decideCopyCredsGate } from './exec.js';
+import {
+  decideCopyCredsGate,
+  parseRunAccountPickerRequest,
+  runAccountPickerConflicts,
+} from './exec.js';
 import { isHostPinned, recordScannedKeys } from '../lib/devices/known-hosts.js';
 
 const KEY = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI0000000000000000000000000000000000000000000';
+
+describe('trailing-@ account picker request', () => {
+  it('distinguishes a terminal picker marker from a concrete version pin', () => {
+    expect(parseRunAccountPickerRequest('claude@')).toEqual({
+      requested: true,
+      normalizedAgentSpec: 'claude',
+      valid: true,
+    });
+    expect(parseRunAccountPickerRequest('claude@2.1.207')).toEqual({
+      requested: false,
+      normalizedAgentSpec: 'claude@2.1.207',
+      valid: true,
+    });
+    expect(parseRunAccountPickerRequest('claude@@')).toMatchObject({
+      requested: true,
+      valid: false,
+    });
+  });
+
+  it('fails loud for every routing option that would override the selected account', () => {
+    expect(runAccountPickerConflicts({
+      resume: true,
+      strategy: 'balanced',
+      balanced: true,
+      lease: true,
+      device: 'yosemite-s0',
+    })).toEqual(['--resume', '--strategy', '--balanced', '--lease', '--host/--device']);
+    expect(runAccountPickerConflicts({})).toEqual([]);
+  });
+});
 
 /** A fresh, empty managed store in a temp dir; caller cleans up. */
 function mkStore(): { dir: string; file: string } {
