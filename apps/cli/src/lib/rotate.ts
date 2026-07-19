@@ -9,7 +9,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId, RunStrategy } from './types.js';
 import type { FallbackEntry } from './exec.js';
-import { getAccountInfo, type AccountInfo } from './agents.js';
+import { accountDisplayLabel, getAccountInfo, type AccountInfo } from './agents.js';
 import { readMeta, writeMeta, getHelpersDir } from './state.js';
 import { listInstalledVersions, getVersionHomePath, resolveVersion } from './versions.js';
 import { getProjectRunConfigs } from './run-config.js';
@@ -30,6 +30,8 @@ function getRotateDir(): string {
 export interface RotateCandidate {
   agent: AgentId;
   version: string;
+  accountKey: string | null;
+  accountLabel: string;
   email: string | null;
   /**
    * Per-org usage/quota key (e.g. `claude:org=<orgUuid>`) — the unit rate
@@ -40,7 +42,9 @@ export interface RotateCandidate {
   usageKey: string | null;
   usageStatus: AccountInfo['usageStatus'];
   usageSnapshot: UsageSnapshot | null;
-  authValid: boolean;
+  usageError: string | null;
+  plan: string | null;
+  signedIn: boolean;
   lastActive: Date | null;
 }
 
@@ -103,15 +107,11 @@ export function setGlobalRunStrategy(agent: AgentId, strategy: RunStrategy): voi
 }
 
 function isRotationEligible(candidate: RotateCandidate): boolean {
-  return !!candidate.email
-    && candidate.authValid
-    && hasUsageAvailable(candidate);
+  return candidate.signedIn && hasUsageAvailable(candidate);
 }
 
 function isAvailableEligible(candidate: RotateCandidate): boolean {
-  return !!candidate.email
-    && candidate.authValid
-    && hasUsageAvailable(candidate);
+  return isRotationEligible(candidate);
 }
 
 function hasUsageAvailable(candidate: RotateCandidate): boolean {
@@ -138,7 +138,7 @@ function hasUsageAvailable(candidate: RotateCandidate): boolean {
 
 /**
  * Whether a specific account can serve a run right now, and — when it can't —
- * why. `signed_out` covers no-email / invalid-auth; `rate_limited` and
+ * why. `signed_out` covers a missing usable credential; `rate_limited` and
  * `out_of_credits` name the throttle. Used to pre-warn on a version-pinned
  * teammate whose account rotation won't route around (a pin IS the target).
  */
@@ -148,7 +148,7 @@ export type AccountReadiness =
 
 /**
  * Pure decision reusing the router's own eligibility gate (`hasUsageAvailable`
- * + email/auth, i.e. `isRotationEligible`), so a pre-flight warning can NEVER
+ * + canonical signed-in state, i.e. `isRotationEligible`), so a pre-flight warning can NEVER
  * disagree with what rotation would actually do. The `reason` combines the two
  * signals `hasUsageAvailable` reads: the live snapshot (session-inclusive
  * rate-limit) and the coarse cached `usageStatus` (out-of-credits, which a
@@ -157,7 +157,7 @@ export type AccountReadiness =
  * reported while the account is actually serving requests.
  */
 export function readinessFromCandidate(candidate: RotateCandidate): AccountReadiness {
-  if (!candidate.email || !candidate.authValid) {
+  if (!candidate.signedIn) {
     return { ready: false, reason: 'signed_out', email: candidate.email };
   }
   if (hasUsageAvailable(candidate)) {
@@ -217,7 +217,7 @@ function compareCandidates(a: RotateCandidate, b: RotateCandidate): number {
  * key; fall back to email only when no usage identity is available.
  */
 function candidateIdentity(c: RotateCandidate): string {
-  return c.usageKey ?? c.email!;
+  return c.usageKey ?? c.accountKey ?? c.email ?? `${c.agent}@${c.version}`;
 }
 
 function dedupeAndSortCandidates(candidates: RotateCandidate[]): RotateCandidate[] {
@@ -246,17 +246,16 @@ function dedupeAndSortCandidates(candidates: RotateCandidate[]): RotateCandidate
  * headroom, with no stampede on the lowest-usage one. Stateless — parallel
  * callers naturally fan out via the random roll.
  *
- * Eligibility: signed in (email present), auth valid, and not currently
+ * Eligibility: signed in according to AccountInfo and not currently
  * rate-limited — no blocking window (session OR weekly) at 100%, matching the
  * `agents view` badge; or the local cached status is usable when no live
  * snapshot exists. Note the split: eligibility considers the session window
  * (a session-maxed account can't run now), but the capacity *weight* above is
  * driven by weekly headroom so a brief session spike doesn't distort routing.
  *
- * Dedupe: when multiple versions share an email, collapse to one candidate
- * per email (the least-recently-active version). Prevents two parallel pods
- * from "balancing" to different versions but hitting the same Anthropic
- * account and both 429ing.
+ * Dedupe: when multiple versions share a usage/account identity, collapse to
+ * one candidate (the least-recently-active version). The org-scoped usage key
+ * wins over email so same-email personal and Team accounts remain distinct.
  *
  * Returns null if no candidate is eligible — callers fall back to the pinned
  * version so behavior stays predictable.
@@ -340,13 +339,12 @@ export function pickAvailableCandidate(
   return { picked: preferred ?? sorted[0], healthy: sorted, excluded };
 }
 
-async function collectRunCandidates(agent: AgentId): Promise<RotateCandidate[]> {
+export async function collectRunCandidates(agent: AgentId): Promise<RotateCandidate[]> {
   const versions = listInstalledVersions(agent);
   const rows = await Promise.all(
     versions.map(async (version) => {
       const home = getVersionHomePath(agent, version);
       const info = await getAccountInfo(agent, home);
-      // `info.email` (from .claude.json's oauthAccount) is the auth heuristic.
       // We used to additionally call isClaudeAuthValid(home), which reads
       // "Claude Code-credentials-<hash>" from the system keychain. That item is
       // written by Claude Code itself with its own process in the ACL, so our
@@ -354,15 +352,17 @@ async function collectRunCandidates(agent: AgentId): Promise<RotateCandidate[]> 
       // one per installed version, every time `agents run` cold-starts. If
       // claude's stored token has actually expired, the spawned agent detects
       // it at its own startup and re-auths; that's the correct UX.
-      const authValid = info.email != null;
       return {
         agent,
         version,
         home,
         info,
+        accountKey: info.accountKey,
+        accountLabel: accountDisplayLabel(info),
         email: info.email,
         usageStatus: info.usageStatus,
-        authValid,
+        plan: info.plan,
+        signedIn: info.signedIn,
         lastActive: info.lastActive,
       };
     })
@@ -379,10 +379,13 @@ async function collectRunCandidates(agent: AgentId): Promise<RotateCandidate[]> 
 
   return rows.map(({ home: _home, info, ...candidate }) => {
     const usageKey = getUsageLookupKey(info);
-    const usageSnapshot = usageKey
-      ? usageByKey.get(usageKey)?.snapshot ?? null
-      : null;
-    return { ...candidate, usageKey, usageSnapshot };
+    const usage = usageKey ? usageByKey.get(usageKey) : undefined;
+    return {
+      ...candidate,
+      usageKey,
+      usageSnapshot: usage?.snapshot ?? null,
+      usageError: usage?.error ?? null,
+    };
   });
 }
 

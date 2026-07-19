@@ -63,11 +63,15 @@ function cand(overrides: Partial<RotateCandidate>): RotateCandidate {
   return {
     agent: 'claude',
     version: '0.0.0',
+    accountKey: null,
+    accountLabel: 'a@b.com',
     email: 'a@b.com',
     usageKey: null,
     usageStatus: 'available',
     usageSnapshot: null,
-    authValid: true,
+    usageError: null,
+    plan: 'Max',
+    signedIn: true,
     lastActive: new Date('2026-01-01T00:00:00Z'),
     ...overrides,
   };
@@ -76,8 +80,8 @@ function cand(overrides: Partial<RotateCandidate>): RotateCandidate {
 describe('pickBalancedCandidate', () => {
   it('returns null when nothing is signed in', () => {
     const result = pickBalancedCandidate([
-      cand({ version: '1.0.0', email: null }),
-      cand({ version: '2.0.0', email: null }),
+      cand({ version: '1.0.0', email: null, signedIn: false }),
+      cand({ version: '2.0.0', email: null, signedIn: false }),
     ]);
     expect(result).toBeNull();
   });
@@ -115,22 +119,34 @@ describe('pickBalancedCandidate', () => {
 
   it('excludes not-signed-in versions (fresh installs with no auth)', () => {
     const healthy = cand({ version: '2.1.113' });
-    const notAuthed = cand({ version: '2.1.120', email: null, lastActive: null });
+    const notAuthed = cand({ version: '2.1.120', email: null, signedIn: false, lastActive: null });
 
     const result = pickBalancedCandidate([healthy, notAuthed]);
     expect(result!.picked.version).toBe('2.1.113');
     expect(result!.excluded).toHaveLength(1);
   });
 
-  it('excludes accounts with invalid auth tokens', () => {
+  it('excludes accounts whose credential is not signed in', () => {
     const valid = cand({ version: '2.1.110', lastActive: new Date('2026-04-20T10:00:00Z') });
-    const expired = cand({ version: '2.1.112', authValid: false, lastActive: new Date('2026-04-15T00:00:00Z') });
+    const expired = cand({ version: '2.1.112', signedIn: false, lastActive: new Date('2026-04-15T00:00:00Z') });
 
     const result = pickBalancedCandidate([valid, expired]);
     expect(result!.picked.version).toBe('2.1.110');
     expect(result!.healthy).toHaveLength(1);
     expect(result!.excluded).toHaveLength(1);
     expect(result!.excluded[0].version).toBe('2.1.112');
+  });
+
+  it('keeps an opaque signed-in account eligible when it has no email claim', () => {
+    const opaque = cand({
+      agent: 'kimi',
+      version: '1.0.0',
+      accountKey: 'kimi:user=opaque-123',
+      accountLabel: 'id:opaque-123',
+      email: null,
+      signedIn: true,
+    });
+    expect(pickBalancedCandidate([opaque])?.picked.version).toBe('1.0.0');
   });
 
   it('excludes rate-limited accounts from selection', () => {

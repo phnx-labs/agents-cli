@@ -16,18 +16,22 @@ import { runWithFallback } from './exec.js';
 import type { UsageSnapshot, UsageWindowKey } from './usage.js';
 
 /**
- * Build a healthy RotateCandidate (email present, auth valid, no live snapshot
+ * Build a healthy RotateCandidate (signed in, no live snapshot
  * => treated as full capacity). Pass overrides — e.g. `usageStatus:
  * 'rate_limited'` — to make it unhealthy.
  */
 function candidate(over: Partial<RotateCandidate> & { version: string }): RotateCandidate {
   return {
     agent: 'claude',
+    accountKey: `claude:account=${over.version}`,
+    accountLabel: `${over.version}@example.com`,
     email: `${over.version}@example.com`,
     usageKey: `claude:org=${over.version}`,
     usageStatus: 'available',
     usageSnapshot: null,
-    authValid: true,
+    usageError: null,
+    plan: 'Max',
+    signedIn: true,
     lastActive: null,
     ...over,
   };
@@ -328,15 +332,15 @@ describe('readinessFromCandidate (pre-flight warning for version-pinned teammate
     expect(readinessFromCandidate(c)).toEqual({ ready: true });
   });
 
-  it('no email => not ready, reason signed_out (before any usage check)', () => {
+  it('opaque signed-in credential without an email remains ready', () => {
     expect(
       readinessFromCandidate(candidate({ version: '1.0.0', email: null })),
-    ).toEqual({ ready: false, reason: 'signed_out', email: null });
+    ).toEqual({ ready: true });
   });
 
-  it('invalid auth => not ready, reason signed_out even with usage headroom', () => {
+  it('signed-out credential is rejected even with usage headroom', () => {
     expect(
-      readinessFromCandidate(candidate({ version: '1.0.0', authValid: false })),
+      readinessFromCandidate(candidate({ version: '1.0.0', signedIn: false })),
     ).toEqual({ ready: false, reason: 'signed_out', email: '1.0.0@example.com' });
   });
 });
