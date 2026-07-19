@@ -1642,7 +1642,10 @@ export function getConfigSymlinkVersion(agent: AgentId): string | null {
       return null;
     }
 
-    const target = fs.readlinkSync(configPath);
+    // Normalize separators so this matches on Windows too — readlinkSync there
+    // returns backslash paths, which the forward-slash-only regex never matched
+    // (misclassifying an owned symlink as foreign, e.g. in `agents uninstall`).
+    const target = fs.readlinkSync(configPath).replace(/\\/g, '/');
     // Extract version from path like ~/.agents/versions/claude/2.0.65/home/.claude
     const match = target.match(/versions\/[^/]+\/([^/]+)\/home/);
     return match ? match[1] : null;

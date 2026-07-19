@@ -184,6 +184,13 @@ Guarantees:
 - **Recoverable by default.** `~/.agents` (installed versions, session history,
   secrets metadata) is moved to `~/.agents.removed-<timestamp>`, not deleted.
   `--purge` hard-deletes it instead.
+- **`--purge` self-downgrades on error.** If any restore step fails, `--purge` is
+  automatically demoted to the recoverable move-aside — a swallowed error can never
+  take the user's only copy of a config with it. The command says so in its output.
+- **Cross-volume safe.** Restores move data with a rename, falling back to
+  copy-then-remove when `~/.agents` lives on a different filesystem than `$HOME`
+  (`renameSync` would throw `EXDEV`). Resource symlinks that point back into
+  `~/.agents` are stripped from a restored config so nothing dangles post-uninstall.
 - **`--dry-run`** prints the full plan (what is restored, what is left untouched,
   what is removed) without changing anything.
 - `uninstall` is exempt from the setup gate, so it runs even from a broken or

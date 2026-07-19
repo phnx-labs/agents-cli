@@ -84,6 +84,14 @@ function printResult(result: UninstallResult, cleanedPath: boolean): void {
 
   for (const e of result.errors) console.log(chalk.red(`  ! ${e}`));
 
+  if (result.purgeDowngraded) {
+    console.log(
+      chalk.yellow(
+        `\n--purge was downgraded to move-aside because a restore step errored — ${result.agentsDir.path} was kept so nothing is lost. Resolve the errors above, then delete ${result.agentsDir.movedTo} manually.`,
+      ),
+    );
+  }
+
   console.log(chalk.bold('\nFinish by removing the CLI package:'));
   console.log(chalk.gray('  npm uninstall -g @phnx-labs/agents-cli    # or: bun remove -g @phnx-labs/agents-cli'));
   if (cleanedPath) {

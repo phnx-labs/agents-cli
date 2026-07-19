@@ -71,6 +71,8 @@ export interface UninstallResult {
   cleanedRcFiles: string[];
   agentsDir: { path: string; disposition: 'moved' | 'purged' | 'absent'; movedTo?: string };
   legacySymlinkRemoved: boolean;
+  /** True when `--purge` was requested but downgraded to move-aside after errors. */
+  purgeDowngraded: boolean;
   errors: string[];
 }
 
@@ -101,6 +103,49 @@ function symlinkTarget(p: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Move `source` onto `dest` across possibly-different volumes. `renameSync` is
+ * atomic but throws EXDEV when `~/.agents` lives on a different filesystem than
+ * `$HOME`; fall back to copy-then-remove so the restore still completes. The
+ * source (a backup inside `~/.agents`) is removed only after the copy succeeds,
+ * so a mid-copy failure never destroys the sole surviving copy.
+ */
+function moveDirCrossDevice(source: string, dest: string): void {
+  try {
+    fs.renameSync(source, dest);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EXDEV') throw err;
+    fs.cpSync(source, dest, { recursive: true });
+    fs.rmSync(source, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Copy `source` to `dest`, dropping any symlink whose target resolves back into
+ * `~/.agents`. Adoption syncs managed resources (skills/commands) into the
+ * version home as symlinks into `~/.agents`; copying them verbatim would leave
+ * the restored config full of links that dangle the moment `~/.agents` is
+ * disposed. Stripping them yields a clean, self-contained restore.
+ */
+function copyDirStrippingAgentsSymlinks(source: string, dest: string, agentsDir: string): void {
+  const inside = agentsDir + path.sep;
+  fs.cpSync(source, dest, {
+    recursive: true,
+    filter: (src) => {
+      try {
+        const st = fs.lstatSync(src);
+        if (st.isSymbolicLink()) {
+          const tgt = path.resolve(path.dirname(src), fs.readlinkSync(src));
+          if (tgt === agentsDir || tgt.startsWith(inside)) return false;
+        }
+      } catch {
+        /* unreadable entry — let cpSync surface it on the real copy */
+      }
+      return true;
+    },
+  });
 }
 
 /** Classify one agent's config dir without mutating anything. */
@@ -226,6 +271,7 @@ export function executeUninstall(plan: UninstallPlan, opts: { purge?: boolean; t
     cleanedRcFiles: [],
     agentsDir: { path: plan.agentsDir, disposition: 'absent' },
     legacySymlinkRemoved: false,
+    purgeDowngraded: false,
     errors: [],
   };
 
@@ -233,15 +279,21 @@ export function executeUninstall(plan: UninstallPlan, opts: { purge?: boolean; t
   for (const c of plan.configs) {
     try {
       if (c.kind === 'restore-backup') {
-        fs.unlinkSync(c.realPath);
-        fs.renameSync(c.source, c.realPath);
+        // The adopted symlink carries no data (the real dir is the backup); drop
+        // it, then move the backup out of ~/.agents onto the real path — EXDEV-safe
+        // so a cross-volume ~/.agents can't strand the backup mid-restore.
+        fs.rmSync(c.realPath, { force: true });
+        moveDirCrossDevice(c.source, c.realPath);
         result.restoredConfigs.push({ agent: c.agent, realPath: c.realPath });
       } else if (c.kind === 'restore-version-home') {
-        fs.unlinkSync(c.realPath);
-        fs.cpSync(c.source, c.realPath, { recursive: true });
+        // importAgent renamed the real dir INTO the version home; copy it back
+        // (step 6 disposes the original) while stripping resource symlinks that
+        // would dangle once ~/.agents is gone.
+        fs.rmSync(c.realPath, { force: true });
+        copyDirStrippingAgentsSymlinks(c.source, c.realPath, plan.agentsDir);
         result.restoredConfigs.push({ agent: c.agent, realPath: c.realPath });
       } else if (c.kind === 'remove-dangling') {
-        fs.unlinkSync(c.realPath);
+        fs.rmSync(c.realPath, { force: true });
         result.removedDanglingConfigs.push({ agent: c.agent, realPath: c.realPath });
       }
       // leave-real / leave-foreign / absent: intentionally untouched.
@@ -253,7 +305,7 @@ export function executeUninstall(plan: UninstallPlan, opts: { purge?: boolean; t
   // 2. Restore owned home-file symlinks as real files (e.g. ~/.claude.json).
   for (const hf of plan.homeFiles) {
     try {
-      fs.unlinkSync(hf.realPath);
+      fs.rmSync(hf.realPath, { force: true });
       fs.cpSync(hf.source, hf.realPath, { recursive: true });
       result.restoredHomeFiles.push(hf.realPath);
     } catch (err) {
@@ -296,10 +348,14 @@ export function executeUninstall(plan: UninstallPlan, opts: { purge?: boolean; t
     }
   }
 
-  // 6. Dispose of ~/.agents LAST (its backups fed step 1).
+  // 6. Dispose of ~/.agents LAST (its backups fed step 1). If any restore above
+  // failed, downgrade a --purge to a recoverable move-aside: a swallowed restore
+  // error must never let the hard-delete take the user's only copy with it.
   if (fs.existsSync(plan.agentsDir)) {
+    const purge = !!opts.purge && result.errors.length === 0;
+    if (opts.purge && !purge) result.purgeDowngraded = true;
     try {
-      if (opts.purge) {
+      if (purge) {
         fs.rmSync(plan.agentsDir, { recursive: true, force: true });
         result.agentsDir = { path: plan.agentsDir, disposition: 'purged' };
       } else {
