@@ -17,6 +17,7 @@ import {
   filterEvents,
   parseRoleList,
   renderConversationMarkdown,
+  renderJson,
 } from '../render.js';
 import type { SessionEvent } from '../types.js';
 
@@ -212,6 +213,74 @@ describe('renderConversationMarkdown', () => {
     ];
     const out = renderConversationMarkdown(events, { redact: false });
     expect(out).toContain('TOKEN=abc123 deploy');
+  });
+});
+
+// ── renderJson redaction ──────────────────────────────────────────────────────
+// The JSON path is the one an agent scripts against, so it must not be the
+// output format that leaks credentials. It redacts by default.
+
+describe('renderJson redaction', () => {
+  const token = 'sk-' + 'a'.repeat(40);
+  const awsKey = 'AKIA' + '1234567890ABCDEF';
+
+  it('redacts secrets in content, command, and output by default', () => {
+    const events: SessionEvent[] = [
+      { type: 'message', agent: 'claude', timestamp: 't0', role: 'user', content: `my key ${token}` },
+      { type: 'tool_use', agent: 'claude', timestamp: 't1', tool: 'Bash', args: {}, command: 'TOKEN=abc123 deploy' },
+      { type: 'tool_result', agent: 'claude', timestamp: 't2', content: `leaked ${awsKey}`, output: `also ${token}` },
+    ];
+    const out = renderJson(events);
+    expect(out).not.toContain(token);
+    expect(out).not.toContain('AKIA1234567890ABCDEF');
+    expect(out).not.toContain('TOKEN=abc123');
+    expect(out).toContain('[REDACTED_API_KEY]');
+    expect(out).toContain('[REDACTED_AWS_KEY]');
+  });
+
+  it('redacts secrets nested inside tool_use args — the JSON-only leak vector', () => {
+    const events: SessionEvent[] = [
+      { type: 'tool_use', agent: 'claude', timestamp: 't0', tool: 'Http', args: { headers: { authorization: `Bearer ${token}` }, tries: [{ key: token }] } },
+    ];
+    const out = renderJson(events);
+    expect(out).not.toContain(token);
+    expect(out).toContain('[REDACTED_API_KEY]');
+    // structure is preserved, only the secret substring is masked
+    const parsed = JSON.parse(out);
+    expect(parsed[0].args.headers.authorization).toContain('Bearer');
+    expect(Array.isArray(parsed[0].args.tries)).toBe(true);
+  });
+
+  it('leaves secrets intact when redaction is explicitly disabled', () => {
+    const events: SessionEvent[] = [
+      { type: 'tool_use', agent: 'claude', timestamp: 't0', tool: 'Bash', args: { token }, command: 'TOKEN=abc123 deploy' },
+    ];
+    const out = renderJson(events, undefined, { redact: false });
+    expect(out).toContain('TOKEN=abc123 deploy');
+    expect(out).toContain(token);
+  });
+
+  it('wraps events under output.session/events when meta is provided', () => {
+    const events: SessionEvent[] = [
+      { type: 'message', agent: 'claude', timestamp: 't0', role: 'user', content: `key ${token}` },
+    ];
+    const out = renderJson(events, { agent: 'claude', timestamp: 't0' } as any);
+    const parsed = JSON.parse(out);
+    expect(parsed.session.agent).toBe('claude');
+    expect(parsed.events[0].content).not.toContain(token);
+  });
+
+  it('redacts free-text meta fields (topic/plan) — a first-message excerpt leaks otherwise', () => {
+    const events: SessionEvent[] = [
+      { type: 'message', agent: 'claude', timestamp: 't0', role: 'user', content: `use ${awsKey}` },
+    ];
+    const meta = { agent: 'claude', timestamp: 't0', topic: `use ${awsKey} now`, plan: `step: token ${token}` } as any;
+    const out = renderJson(events, meta);
+    expect(out).not.toContain(awsKey);
+    expect(out).not.toContain(token);
+    const parsed = JSON.parse(out);
+    expect(parsed.session.topic).toContain('[REDACTED_AWS_KEY]');
+    expect(parsed.session.plan).toContain('[REDACTED_API_KEY]');
   });
 });
 

@@ -70,7 +70,8 @@ interface SessionsOptions extends SessionFilterOptions {
   sort?: string;
   json?: boolean;
   markdown?: boolean;
-  noRedact?: boolean;
+  /** Commander populates this from `--no-redact`: true by default, false when the flag is passed. */
+  redact?: boolean;
   include?: string;
   exclude?: string;
   first?: string;
@@ -1136,7 +1137,7 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
   // When the user explicitly asks to render (via mode flag), resolve the
   // query globally so sessions outside the default cwd/30d window are found.
   if (wantsRender && searchQuery) {
-    await renderOneSession(searchQuery, mode, { agent: options.agent, project: options.project, filter: filterOpts, noRedact: options.noRedact });
+    await renderOneSession(searchQuery, mode, { agent: options.agent, project: options.project, filter: filterOpts, redact: options.redact });
     return;
   }
 
@@ -1215,7 +1216,7 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
         return;
       }
       if (idMatches.length === 0 && looksLikeSessionId(searchQuery)) {
-        await renderOneSession(searchQuery, mode, { agent: options.agent, project: options.project, filter: filterOpts, noRedact: options.noRedact });
+        await renderOneSession(searchQuery, mode, { agent: options.agent, project: options.project, filter: filterOpts, redact: options.redact });
         return;
       }
     }
@@ -1597,7 +1598,7 @@ async function renderSession(
   session: SessionMeta,
   mode: ViewMode,
   filters: FilterOptions,
-  options: Pick<SessionsOptions, 'noRedact'> = {},
+  options: { redact?: boolean } = {},
 ): Promise<void> {
   // OpenCode stores sessions in SQLite; filePath is "db_path#session_id"
   const realPath = session.filePath.split('#')[0];
@@ -1658,7 +1659,7 @@ async function renderSession(
       (session.account ? chalk.gray(` (${session.account})`) : '')
     );
     console.log(chalk.gray('─'.repeat(60)));
-    process.stdout.write(renderMarkdown(renderConversationMarkdown(events, { redact: options.noRedact !== true })));
+    process.stdout.write(renderMarkdown(renderConversationMarkdown(events, { redact: options.redact !== false })));
     return;
   }
 
@@ -1670,7 +1671,9 @@ async function renderSession(
   // checklist reflects true session state regardless of any `--include` filter;
   // it lets the Factory panel read the CLI's checklist instead of re-parsing.
   const todos = inferSessionState(parsedEvents, { cwd: session.cwd }).todos;
-  process.stdout.write(renderJson(events, todos ? { ...session, todos } : session));
+  process.stdout.write(
+    renderJson(events, todos ? { ...session, todos } : session, { redact: options.redact !== false }),
+  );
 }
 
 function renderTopicCell(
@@ -2360,7 +2363,7 @@ async function renderArtifactsGlobal(
 async function renderOneSession(
   query: string,
   mode: ViewMode,
-  scope: { agent?: string; project?: string; filter: FilterOptions; noRedact?: boolean },
+  scope: { agent?: string; project?: string; filter: FilterOptions; redact?: boolean },
 ): Promise<void> {
   const spinner = ora().start();
   const tracker = createScanProgressTracker(FIND_VERBS, 'session', spinner);
@@ -2430,7 +2433,7 @@ async function renderOneSession(
     }
 
     spinner.stop();
-    await renderSession(session, mode, scope.filter, { noRedact: scope.noRedact });
+    await renderSession(session, mode, scope.filter, { redact: scope.redact });
   } catch (err: any) {
     if (isPromptCancelled(err)) return;
     tracker.stop();
@@ -2462,7 +2465,7 @@ export function registerSessionsCommands(program: Command): void {
     .option('-n, --limit <n>', 'Maximum number of sessions to return', '50')
     .option('--sort <field>', 'Sort the list by: recent (default), cost, or duration')
     .option('--markdown', 'Render the session as markdown (user, assistant, thinking, tool calls)')
-    .option('--no-redact', 'Disable default secret redaction in markdown session output')
+    .option('--no-redact', 'Disable default secret redaction in rendered session output (--markdown and --json)')
     .option('--json', 'Output JSON (session list when browsing, event array when rendering one session)')
     .option('--include <roles>', 'Only include these roles (comma-separated): user, assistant, thinking, tools')
     .option('--exclude <roles>', 'Exclude these roles (comma-separated): user, assistant, thinking, tools')

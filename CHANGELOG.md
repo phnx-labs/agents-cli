@@ -76,6 +76,18 @@
     stage for everyone else.
   - Shared containment helpers `isSafeSegmentName` / `assertWithin` added to
     `apps/cli/src/lib/paths.ts`.
+- **`agents sessions <id> --json` now redacts secrets by default.** The JSON render
+  path emitted raw transcript events with no redaction, while `--markdown` masked
+  them by default — so the output format an agent scripts against was the one that
+  leaked credentials. `renderJson` now runs the whole payload (events *and* the
+  session meta, including `topic`/`plan` — verbatim message excerpts) through the
+  same `redactSecrets` pass as markdown, covering the JSON-only leak vector of raw
+  tool-call `args`. Additionally, `--no-redact` now actually works: it read the
+  wrong Commander property (`options.noRedact`, never populated) so the flag was a
+  dead no-op for **both** formats; it now reads `--no-redact`'s real `redact`
+  property and genuinely disables redaction when passed. Source:
+  `apps/cli/src/lib/session/render.ts` (`renderJson`, `redactDeep`),
+  `apps/cli/src/commands/sessions.ts`.
 
 ### Added
 

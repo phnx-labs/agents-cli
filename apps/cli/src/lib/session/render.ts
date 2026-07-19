@@ -1024,17 +1024,50 @@ export function renderConversationMarkdown(
 }
 
 /**
+ * Deep-redact every string reachable from a JSON value, preserving structure.
+ * `redactSecrets` only rewrites secret-shaped substrings, so non-secret strings
+ * (paths, URLs, ids) and non-strings (numbers, booleans) pass through unchanged.
+ * Applied to the whole `--json` payload so every free-text field — event
+ * `content`/`command`/`output`/`args`, and meta `topic`/`label`/`plan`/`todos`
+ * — is covered, including fields added later.
+ */
+function redactDeep<T>(value: T, sanitize: (text: string) => string): T {
+  if (typeof value === 'string') return sanitize(value) as unknown as T;
+  if (Array.isArray(value)) return value.map((item) => redactDeep(item, sanitize)) as unknown as T;
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(value)) out[key] = redactDeep(val, sanitize);
+    return out as T;
+  }
+  return value;
+}
+
+/**
  * Render one session's JSON output — the shape `agents sessions <id> --json`
  * emits. When `meta` is provided (the standard path), returns a
  * `{ session, events }` wrapper so top-level fields (`plan`, `prUrl`, …) that
  * live on `SessionMeta` are visible without re-parsing events. Legacy
  * callers that pass no meta still get a bare `SessionEvent[]` array.
+ *
+ * Secrets are redacted by default (`opts.redact !== false`), matching
+ * `renderConversationMarkdown` — the JSON path must not be the one output
+ * format that leaks credentials. Redaction covers both events AND the session
+ * meta (e.g. `topic`, a verbatim first-message excerpt). Pass `{ redact: false }`
+ * for `--no-redact`.
  */
-export function renderJson(events: SessionEvent[], meta?: SessionMeta): string {
-  if (!meta) return JSON.stringify(events, null, 2);
+export function renderJson(
+  events: SessionEvent[],
+  meta?: SessionMeta,
+  opts: { redact?: boolean } = {},
+): string {
+  const redact = opts.redact !== false;
+  const sanitize = (text: string): string => redactSecrets(text);
+  const safeEvents = redact ? events.map((event) => redactDeep(event, sanitize)) : events;
+  if (!meta) return JSON.stringify(safeEvents, null, 2);
   // Strip internal-only bookkeeping fields the listing --json path also strips.
-  const { _matchedTerms, _bm25Score, _remote, ...session } = meta;
-  return JSON.stringify({ session, events }, null, 2);
+  const { _matchedTerms, _bm25Score, _remote, ...rest } = meta;
+  const session = redact ? redactDeep(rest, sanitize) : rest;
+  return JSON.stringify({ session, events: safeEvents }, null, 2);
 }
 
 /** Replace the home directory prefix with ~ for trace display. */
