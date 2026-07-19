@@ -332,6 +332,21 @@
   refreshes this host's auth verdicts alongside the stats warm. Source:
   `apps/cli/src/lib/auth-health.ts` (`summarizeHostAuth`),
   `apps/cli/src/lib/devices/health-report.ts`, `apps/cli/src/commands/doctor.ts`.
+- **`agents usage --json`.** `usage` was the only per-account numeric command with
+  no machine-readable output (its siblings `cost`/`budget`/`view`/`doctor`/`models`
+  all have `--json`), forcing a scripting agent to scrape colored text. It now emits
+  a per-agent snapshot array (`{ agent, label, status, email?, usage? }`); the text
+  and JSON renderers share one `collectAgentUsage` data path. Source:
+  `apps/cli/src/commands/usage.ts`.
+- **`agents fork` now exits non-zero on failure.** Every failure path (no match,
+  ambiguous id, unforkable agent, fork error) printed to stdout and returned exit
+  code **0**, so `agents fork <id> && agents resume <new>` proceeded on a *failed*
+  fork. Failures now write to stderr and set exit code 1. Source:
+  `apps/cli/src/commands/fork.ts`.
+- **Removed the dead `--json` flag on `agents sessions tail`.** It was declared but
+  never read — output is always raw JSONL — so it advertised a toggle that did
+  nothing. Dropped from the surface; tail output is unchanged. Source:
+  `apps/cli/src/commands/sessions-tail.ts`.
 
 ## 1.20.58
 
