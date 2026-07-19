@@ -67,8 +67,6 @@ import {
   fleetCapacity,
   fmtBytes,
   headroom,
-  probeLocalStats,
-  probeFleetStats,
   type DeviceStats,
   type Headroom,
 } from '../lib/devices/health.js';
@@ -78,6 +76,7 @@ import {
   renderFleetWarnings,
   type FleetHealthRow,
 } from '../lib/devices/health-report.js';
+import { loadFleetStats, readStatsCache } from '../lib/devices/stats-cache.js';
 import { checkSyncStatus, countOrphans } from '../lib/drift.js';
 import { checkAllClis } from '../lib/teams/agents.js';
 import { buildRemoteAgentsInvocation } from '../lib/hosts/remote-cmd.js';
@@ -87,6 +86,8 @@ import {
   formatCheckedAge,
   isDeadVerdict,
   probeLocalFleetAuth,
+  readAuthHealthCache,
+  summarizeHostAuth,
   summarizeVerdicts,
   verdictLabel,
   writeFleetAuthRows,
@@ -306,6 +307,7 @@ interface RemoteDoctorJson {
   clis?: FleetHealthRow['clis'];
   sync?: FleetHealthRow['sync'];
   orphans?: FleetHealthRow['orphans'];
+  auth?: FleetHealthRow['auth'];
 }
 
 interface FleetStatusTarget extends FanOutDeviceTarget {
@@ -342,20 +344,24 @@ async function probeRemoteHealth(target: FleetStatusTarget): Promise<Omit<FleetH
     clis: parsed.clis ?? {},
     sync: parsed.sync ?? [],
     orphans: parsed.orphans ?? [],
+    // The remote self-reports its own cached auth rollup (fresh via its daemon),
+    // so the Auth column is current without a prior fleet-wide `fleet ping`.
+    // Older remotes that don't emit it fall back to this host's cache below.
+    auth: parsed.auth,
   };
 }
 
-async function runFleetStatus(opts: { json?: boolean; strict?: boolean; stats?: boolean }): Promise<void> {
+async function runFleetStatus(opts: { json?: boolean; strict?: boolean; stats?: boolean; refresh?: boolean; live?: boolean }): Promise<void> {
   const reg = await loadDevices();
   const self = machineId();
+  const forceRefresh = Boolean(opts.refresh || opts.live);
   const planned = planFleetTargets(reg);
   const probeable = planned.filter((t) => !t.skip).map((t) => t.device);
+  // Cache-first: serve remote stats from the daemon-warmed cache (instant),
+  // probe this machine locally, and only ssh out for missing/forced rows.
   const statsMap = opts.stats === false
     ? new Map<string, DeviceStats>()
-    : await probeFleetStats(probeable, { selfName: self });
-  if (opts.stats !== false && !statsMap.has(self)) {
-    statsMap.set(self, await probeLocalStats(self));
-  }
+    : (await loadFleetStats(probeable, { forceRefresh, selfName: self })).stats;
 
   const rows: FleetHealthRow[] = [localHealthRow(self, statsMap.get(self))];
   const remoteTargets: FleetStatusTarget[] = remoteFleetTargets(planned, self)
@@ -386,6 +392,15 @@ async function runFleetStatus(opts: { json?: boolean; strict?: boolean; stats?: 
         orphans: [],
       });
     }
+  }
+
+  // Auth column: remote rows already carry the host's self-reported rollup from
+  // its `doctor --json`. Fill the rest (this machine; older remotes that don't
+  // emit it) from this host's local cache — written by `agents fleet ping` and
+  // the daemon's local refresh. A never-probed host rolls up to "—". No network.
+  const authCache = readAuthHealthCache();
+  for (const row of rows) {
+    if (!row.auth) row.auth = summarizeHostAuth(authCache, row.name);
   }
 
   const report = buildFleetHealthReport(rows);
@@ -643,8 +658,10 @@ Typical workflow:
     .description('List registered devices with platform, address, reachability, and live resource headroom.')
     .option('--json', 'output the registry as a JSON array (for scripts and hooks)')
     .option('--no-stats', 'skip the live resource probe (instant; names/addresses only)')
+    .option('--refresh', 'force a live probe of every device, bypassing the cache')
+    .option('--live', 'alias of --refresh (shorter to type)')
     .option('-f, --full', 'full mode: add per-device core count and free/total memory')
-    .action(async (opts: { json?: boolean; stats?: boolean; full?: boolean }) => {
+    .action(async (opts: { json?: boolean; stats?: boolean; full?: boolean; refresh?: boolean; live?: boolean }) => {
       const reg = await loadDevices();
       const names = Object.keys(reg).sort();
       if (opts.json) {
@@ -657,19 +674,27 @@ Typical workflow:
         return;
       }
       const self = machineId();
+      const forceRefresh = Boolean(opts.refresh || opts.live);
 
       let statsMap: Map<string, DeviceStats> | undefined;
+      let freshness: { oldestFetchedAt: number | null; servedFromCache: boolean } | undefined;
       if (opts.stats !== false) {
-        // Probe only reachable devices, in parallel, bounded by the per-probe
-        // timeout — a slow box degrades to "—", it never hangs the table.
+        // Cache-first: serve remote devices from the daemon-warmed cache
+        // (instant), probe this machine locally, and only ssh out for missing or
+        // forced (--refresh/--live) rows — so a warm read never hangs on a box.
         const probeable = planFleetTargets(reg)
           .filter((t) => !t.skip)
           .map((t) => t.device);
-        const spinner = isInteractiveTerminal()
+        // Only spin when we'll actually ssh (forced, or a cold/partial cache).
+        const cache = readStatsCache();
+        const willSsh = forceRefresh || probeable.some((d) => d.name !== self && !cache[d.name]);
+        const spinner = willSsh && isInteractiveTerminal()
           ? ora(`Probing ${probeable.length} device${probeable.length === 1 ? '' : 's'}…`).start()
           : undefined;
         try {
-          statsMap = await probeFleetStats(probeable, { selfName: self });
+          const res = await loadFleetStats(probeable, { forceRefresh, selfName: self });
+          statsMap = res.stats;
+          freshness = res;
         } finally {
           spinner?.stop();
         }
@@ -677,6 +702,9 @@ Typical workflow:
 
       console.log(chalk.bold(`Devices (${names.length})`));
       for (const line of renderDeviceTable(reg, names, self, statsMap, opts.full)) console.log(line);
+      if (freshness?.servedFromCache && freshness.oldestFetchedAt != null) {
+        console.log(chalk.gray(`  updated ${formatCheckedAge(freshness.oldestFetchedAt)} — pass --refresh (--live) for a live probe`));
+      }
     });
 
   devicesCmd
@@ -685,7 +713,9 @@ Typical workflow:
     .option('--json', 'output machine-readable JSON')
     .option('--strict', 'exit non-zero when any device has drift or is unreachable')
     .option('--no-stats', 'skip the live resource probe')
-    .action(async (opts: { json?: boolean; strict?: boolean; stats?: boolean }) => {
+    .option('--refresh', 'force a live probe of every device, bypassing the cache')
+    .option('--live', 'alias of --refresh (shorter to type)')
+    .action(async (opts: { json?: boolean; strict?: boolean; stats?: boolean; refresh?: boolean; live?: boolean }) => {
       await runFleetStatus(opts);
     });
 

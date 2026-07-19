@@ -296,6 +296,31 @@
   everywhere. Source: `apps/cli/src/lib/devices/terminfo.ts`,
   `apps/cli/src/commands/ssh.ts`.
 
+- **`agents devices list` / `agents fleet status` are cache-first now — instant by
+  default, `--refresh` (alias `--live`) for a live probe.** Both used to live-SSH
+  every registered box for load/mem on every call, so a glance at a dozen-device
+  fleet (a few cold or timing out) hung for seconds. Resource stats now serve from
+  a small on-disk cache (`.fleet-stats.json`) that the daemon warms ~every 3 min;
+  a default read probes only *this* machine (locally, no ssh) plus any device
+  missing from the cache. Pass `--refresh`/`--live` to force a full live probe.
+  Cache-served output carries an "`updated … — pass --refresh (--live)`" age note.
+  `agents view` (usage already stale-while-revalidate cached) gains the same
+  `--live` alias for its `--refresh`. Source: `apps/cli/src/lib/devices/stats-cache.ts`,
+  `apps/cli/src/commands/ssh.ts`, `apps/cli/src/commands/view.ts`,
+  `apps/cli/src/lib/daemon.ts`.
+
+- **`agents fleet status` gains an Auth column — see which accounts are actually
+  logged in, per device.** Reads the shared auth-health cache (no network) and
+  rolls each host up into four honest buckets so it never cries wolf:
+  `●live` (verified), `·present` (signed in but the agent has no live-probe
+  endpoint — codex/grok/antigravity/opencode — benign), `◐degraded`
+  (soft/self-healing: expired/limited/error), `○revoked` (server rejected —
+  re-login now). Remote hosts self-report their rollup through `doctor --json`, so
+  the column is current without a fleet-wide `agents fleet ping`. The daemon also
+  refreshes this host's auth verdicts alongside the stats warm. Source:
+  `apps/cli/src/lib/auth-health.ts` (`summarizeHostAuth`),
+  `apps/cli/src/lib/devices/health-report.ts`, `apps/cli/src/commands/doctor.ts`.
+
 ## 1.20.58
 
 ### Added

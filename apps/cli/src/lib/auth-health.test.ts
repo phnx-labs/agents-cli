@@ -7,10 +7,12 @@ import {
   mergeAuthHealthEntries,
   formatCheckedAge,
   probeDetail,
+  summarizeHostAuth,
   summarizeVerdicts,
   verdictFromProbe,
   verdictGlyph,
   verdictLabel,
+  type AuthHealth,
   type AuthVerdict,
 } from './auth-health.js';
 
@@ -122,6 +124,42 @@ describe('mergeAuthHealthEntries', () => {
   });
   it('an error on a brand-new key is still recorded (nothing prior to keep)', () => {
     expect(mergeAuthHealthEntries({}, { k: { verdict: 'error' as const, checkedAt: 200 } }).k.verdict).toBe('error');
+  });
+});
+
+describe('summarizeHostAuth', () => {
+  const h = (verdict: AuthVerdict, checkedAt: number): AuthHealth => ({ verdict, checkedAt });
+  const cache: Record<string, AuthHealth> = {
+    'zion:claude:1.0.0': h('live', 5000),
+    'zion:claude:1.1.0': h('live', 3000),
+    'zion:codex:0.1.0': h('unverified', 7000),   // signed in, no probe → present
+    'zion:opencode:0.1.0': h('revoked', 4000),   // server rejected → revoked
+    'zion:kimi:0.1.0': h('expired', 6000),        // soft/self-healing → degraded
+    'zion-2:claude:1.0.0': h('revoked', 1000),   // sibling host, must not bleed into 'zion'
+    'yosemite-s1:claude:1.0.0': h('live', 9000),
+  };
+
+  it('splits present/degraded/revoked into distinct buckets and tracks oldest', () => {
+    const r = summarizeHostAuth(cache, 'zion');
+    // 5 zion rows — the 'zion-2' row (a `zion` substring) is excluded.
+    expect(r).toEqual({
+      live: 2,       // two claude
+      present: 1,    // codex unverified — NOT counted as degraded
+      degraded: 1,   // kimi expired (soft)
+      revoked: 1,    // opencode revoked (the only real re-login)
+      total: 5,
+      oldestCheckedAt: 3000, // not zion-2's 1000
+    });
+  });
+
+  it('matches on the host prefix, not a substring (no cross-host bleed)', () => {
+    const r = summarizeHostAuth(cache, 'yosemite-s1');
+    expect(r).toEqual({ live: 1, present: 0, degraded: 0, revoked: 0, total: 1, oldestCheckedAt: 9000 });
+  });
+
+  it('returns an empty summary for a host with no cached rows', () => {
+    const r = summarizeHostAuth(cache, 'never-probed');
+    expect(r).toEqual({ live: 0, present: 0, degraded: 0, revoked: 0, total: 0, oldestCheckedAt: null });
   });
 });
 

@@ -432,13 +432,15 @@ agents sync --host gpu-box              # make the remote machine current
 agents doctor --devices                 # readiness matrix for every registered device
 agents doctor --devices --json          # machine-readable fleet readiness
 agents doctor --device mac-mini         # same matrix, scoped to one device
-agents fleet status                     # warnings rollup + health/sync/version matrix
+agents fleet status                     # warnings rollup + health/sync/version/Auth matrix (cache-first)
+agents fleet status --live              # force a live resource probe (alias of --refresh)
 agents fleet status --json --strict     # scriptable fleet health gate
 agents check --devices                  # CI drift gate across every registered device
 
 # Your Tailscale fleet, auto-discovered
 agents devices sync                     # ingest `tailscale status`
-agents devices list                     # fleet + live headroom: load, mem, idle/busy — which box has room
+agents devices list                     # fleet + headroom: load, mem, idle/busy — which box has room (cache-first)
+agents devices list --live              # force a live probe of every device (alias of --refresh)
 agents devices list --full              # add per-device cores and free/total RAM
 agents devices list --no-stats          # instant: names/addresses only, skip the probe
 agents ssh mac-mini                     # hardened SSH: fails fast if offline,
@@ -453,11 +455,22 @@ agents cloud run "nightly benchmark" --host gpu-box --agent claude   # task in c
 agents routines add nightly -s "0 2 * * *" -a claude -p "run the sweep" --run-on gpu-box
 ```
 
-`agents devices list` probes every reachable box in parallel (bounded timeout, so a
-slow node degrades to `—` instead of hanging) and shows normalized load, memory
-pressure, and an idle/light/busy/loaded headroom badge, plus a fleet-capacity summary
+`agents devices list` shows normalized load, memory pressure, and an
+idle/light/busy/loaded headroom badge, plus a fleet-capacity summary
 (`164 cores · 421G free / 518G RAM`). It answers "which machine has room right now?" —
-the utilization signal the teammate scheduler doesn't yet see.
+the utilization signal the teammate scheduler doesn't yet see. It's **cache-first**:
+reads serve instantly from a stats cache the daemon warms (~every 3 min), probing only
+this machine locally plus any device missing from the cache; pass `--refresh` (or the
+shorter `--live`) to force a full live probe of every box. Cache-served output notes its
+age (`updated 2m ago — pass --refresh (--live) for a live probe`).
+
+`agents fleet status` adds an **Auth column** — which agent accounts are actually
+logged in, per device, read from the auth-health cache (no network). Four buckets keep
+it from crying wolf: `●live` (verified), `·present` (signed in but the agent has no
+live-probe endpoint — e.g. codex/grok — benign), `◐degraded` (soft/self-healing:
+expired-but-refreshing, rate-limited), and `○revoked` (server rejected — re-login now).
+Only `○` means a real re-login is needed. Run `agents fleet ping` to force a live
+re-verification across the fleet.
 
 **Hosts** (`agents hosts`) are git-synced dispatch targets in `agents.yaml`; **devices** (`agents devices`) are your Tailscale machines in a local registry. Both ride SSH and feed one host pool: devices appear in `agents hosts list` and capability routing without a second enrollment. On `--host` runs every `agents run` option is either forwarded (`--effort --env --timeout --loop …`), rejected loud (`--secrets` never crosses SSH implicitly), or consumed locally — nothing silently drops. See [docs/00-concepts.md](apps/cli/docs/00-concepts.md#devices--hosts).
 

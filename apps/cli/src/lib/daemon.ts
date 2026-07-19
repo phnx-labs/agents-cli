@@ -602,6 +602,41 @@ export async function runDaemon(): Promise<void> {
   const launchHealthInterval = setInterval(() => { void runLaunchHealthCheck(); }, 6 * 60 * 60_000);
   const launchHealthKickoff = setTimeout(() => { void runLaunchHealthCheck(); }, 90_000);
 
+  // Fleet cache warm: keep the caches that `agents devices list`, `fleet status`,
+  // and `agents view` read cache-first actually fresh, so a default read never
+  // has to ssh out. Two cheap refreshes: (1) this host's auth-health verdicts
+  // (also feeds the `doctor --json` Auth rollup other hosts read), and (2) the
+  // fleet resource-stats cache (one bounded parallel probe of the tailnet). Both
+  // best-effort + overlap-guarded like the probes above. ~every 3 min, plus once
+  // ~60s after startup (staggered off launch).
+  let warmingFleetCache = false;
+  const runFleetCacheWarm = async () => {
+    if (warmingFleetCache) return;
+    warmingFleetCache = true;
+    try {
+      const { machineId } = await import('./machine-id.js');
+      const self = machineId();
+      const { probeLocalFleetAuth, writeFleetAuthRows } = await import('./auth-health.js');
+      const { getCliVersion } = await import('./version.js');
+      const authRows = await probeLocalFleetAuth({ cliVersion: getCliVersion() });
+      writeFleetAuthRows(self, authRows);
+
+      const { loadDevices } = await import('./devices/registry.js');
+      const { planFleetTargets } = await import('./devices/fleet.js');
+      const { loadFleetStats } = await import('./devices/stats-cache.js');
+      const reg = await loadDevices();
+      const probeable = planFleetTargets(reg).filter((t) => !t.skip).map((t) => t.device);
+      const res = await loadFleetStats(probeable, { forceRefresh: true, selfName: self });
+      log('INFO', `fleet cache warm: ${authRows.length} auth row(s), ${res.stats.size} device stat(s)`);
+    } catch (err) {
+      log('ERROR', `fleet cache warm failed: ${(err as Error).message}`);
+    } finally {
+      warmingFleetCache = false;
+    }
+  };
+  const fleetCacheInterval = setInterval(() => { void runFleetCacheWarm(); }, 3 * 60_000);
+  const fleetCacheKickoff = setTimeout(() => { void runFleetCacheWarm(); }, 60_000);
+
   const handleReload = () => {
     log('INFO', 'Reloading jobs (SIGHUP)');
     scheduler.reloadAll();
@@ -634,6 +669,8 @@ export async function runDaemon(): Promise<void> {
     clearTimeout(tmuxReconcileKickoff);
     clearInterval(launchHealthInterval);
     clearTimeout(launchHealthKickoff);
+    clearInterval(fleetCacheInterval);
+    clearTimeout(fleetCacheKickoff);
     hostedBroker?.close();
     removeDaemonPid();
     removeHeartbeat();

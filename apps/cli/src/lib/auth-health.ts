@@ -5,9 +5,12 @@
  * The rest of the CLI reports "signed in" from a local heuristic — a credential
  * file is present and its email decodes — which cannot distinguish a good token
  * from a revoked-but-unexpired one. This module completes a real request per
- * (agent, account) and records the verdict in a small cache that `agents view`,
- * `agents fleet status`, and the run rotation all read. The daemon and
- * `agents fleet ping` are the writers; everyone else reads.
+ * (agent, account) and records the verdict in a small cache that `agents view`
+ * (per-version chip), `agents fleet status` (the per-host Auth column, via
+ * {@link summarizeHostAuth}), and the run rotation all read. The writers are
+ * the daemon (a periodic local refresh) and `agents fleet ping` (which also
+ * fans out to write remote hosts' rows into the local cache); everyone else
+ * reads.
  *
  * The network probes themselves live in lib/usage.ts (where the per-provider
  * token loaders + endpoints already are); this module classifies their result,
@@ -143,6 +146,65 @@ export function summarizeVerdicts(verdicts: AuthVerdict[]): VerdictSummary {
 /** Verdicts that mean "this token was rejected by the server — re-login required". */
 export function isDeadVerdict(verdict: AuthVerdict): boolean {
   return verdict === 'revoked';
+}
+
+/**
+ * A host's rolled-up auth state for the `fleet status` Auth column.
+ *
+ * The four display buckets are deliberately finer-grained than
+ * {@link VerdictSummary}'s live/bad/warn: they separate "present but this agent
+ * has no live probe" (`unverified`) and "soft, self-healing expiry"
+ * (`expired`/`rate_limited`) from a genuine server rejection (`revoked`). The
+ * old three-bucket rollup lumped all of those into `warn` and the column painted
+ * them one alarming yellow — so a fleet of perfectly logged-in accounts on
+ * codex/grok/etc (which can NEVER be probed live) read as half-degraded. These
+ * buckets let the renderer show `unverified` as neutral and reserve red for the
+ * only verdict that actually means "re-login now" ({@link isDeadVerdict}).
+ */
+export interface HostAuthSummary {
+  /** Live-verified accounts (a real 2xx). */
+  live: number;
+  /** Signed in but this agent has no live-probe endpoint — benign, neutral. */
+  present: number;
+  /** Soft/degraded: expired (self-healing) / rate_limited / error. Mild warning. */
+  degraded: number;
+  /** Server rejected the token — genuinely needs re-login. */
+  revoked: number;
+  /** Total cached rows for this host (0 → the renderer shows "—"). */
+  total: number;
+  /** Oldest `checkedAt` (epoch ms) among this host's cached rows, or null when none. */
+  oldestCheckedAt: number | null;
+}
+
+/**
+ * Roll every cached (agent, version) row for one host into a {@link HostAuthSummary}
+ * plus the age of its stalest entry. Pure — reads the map the caller already
+ * loaded via {@link readAuthHealthCache}, so `fleet status` renders the Auth
+ * column without any network probe. A host with no cached rows yields an empty
+ * summary (total 0), which the renderer shows as "—".
+ *
+ * Keys are `host:agent:version` ({@link authCacheKey}); we match on the `host:`
+ * prefix so agent/version segments can never be mistaken for a host.
+ */
+export function summarizeHostAuth(
+  cache: Record<string, AuthHealth>,
+  host: string,
+): HostAuthSummary {
+  const prefix = `${host}:`;
+  let live = 0, present = 0, degraded = 0, revoked = 0, total = 0;
+  let oldest: number | null = null;
+  for (const [key, health] of Object.entries(cache)) {
+    if (!key.startsWith(prefix)) continue;
+    total++;
+    switch (health.verdict) {
+      case 'live': live++; break;
+      case 'unverified': present++; break;      // signed in, no probe — benign
+      case 'revoked': revoked++; break;          // server said no — re-login
+      default: degraded++; break;                // expired / rate_limited / error — soft
+    }
+    if (oldest === null || health.checkedAt < oldest) oldest = health.checkedAt;
+  }
+  return { live, present, degraded, revoked, total, oldestCheckedAt: oldest };
 }
 
 /** Human "3m ago" style age for a checkedAt timestamp. */

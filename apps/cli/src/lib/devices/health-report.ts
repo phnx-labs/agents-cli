@@ -1,6 +1,7 @@
 import chalk from 'chalk';
 import { padToWidth, terminalWidth, truncateToWidth } from '../session/width.js';
 import { fmtBytes, headroom, type DeviceStats } from './health.js';
+import { formatCheckedAge, type HostAuthSummary } from '../auth-health.js';
 
 export interface FleetCliStatus {
   installed: boolean;
@@ -34,6 +35,9 @@ export interface FleetHealthRow {
   clis: Record<string, FleetCliStatus>;
   sync: FleetSyncStatus[];
   orphans: FleetOrphanStatus[];
+  /** Cached auth-health rollup for this host (the Auth column). Undefined when
+   *  the host has never been probed (`agents fleet ping`) or the cache is cold. */
+  auth?: HostAuthSummary;
 }
 
 export interface FleetWarning {
@@ -171,6 +175,41 @@ function loadLabel(stats: DeviceStats | undefined): string {
   return `${load}/${mem}`;
 }
 
+/**
+ * Compact per-host auth cell. Four buckets, deliberately distinct so the column
+ * doesn't cry wolf on healthy accounts:
+ *   `●{live}`     green  — live-verified
+ *   `·{present}`  gray   — signed in but no live probe (codex/grok/…): benign
+ *   `◐{degraded}` yellow — soft/self-healing (expired/limited/error)
+ *   `○{revoked}`  red    — server rejected the token: re-login now
+ * A host with no cached auth rows shows "—"; an unreachable/skipped row shows
+ * "-" like the other probe columns.
+ */
+function authLabel(row: FleetHealthRow): string {
+  if (row.error || row.skipped) return chalk.gray('-');
+  const s = row.auth;
+  if (!s || s.total === 0) return chalk.gray('—');
+  const parts: string[] = [];
+  if (s.live > 0) parts.push(chalk.green(`●${s.live}`));
+  if (s.present > 0) parts.push(chalk.gray(`·${s.present}`));
+  if (s.degraded > 0) parts.push(chalk.yellow(`◐${s.degraded}`));
+  if (s.revoked > 0) parts.push(chalk.red(`○${s.revoked}`));
+  // All-zero can't happen (total > 0); but if only present/degraded exist we
+  // still lead with them — never show an empty cell for a probed host.
+  return parts.length > 0 ? parts.join(' ') : chalk.gray('—');
+}
+
+/** Oldest epoch-ms timestamp across rows for a field, or null when none present. */
+function oldestAcross(rows: FleetHealthRow[], pick: (r: FleetHealthRow) => number | null | undefined): number | null {
+  let oldest: number | null = null;
+  for (const row of rows) {
+    const t = pick(row);
+    if (t == null) continue;
+    if (oldest === null || t < oldest) oldest = t;
+  }
+  return oldest;
+}
+
 export function renderFleetWarnings(report: FleetHealthReport): string[] {
   if (report.warnings.length === 0) return [chalk.green('Fleet warnings: none')];
   return [
@@ -192,12 +231,13 @@ export function renderFleetMatrix(report: FleetHealthReport): string[] {
   const width = terminalWidth();
   // 4 = leading "  " + the per-row status glyph + its trailing space (rows prefix
   // `  ${statusGlyph} `; the header reserves the same 4 cols so every column lines up).
-  const fixed = 4 + nameW + 2 + 8 + 2 + 9 + 2 + 9 + 2 + versionW + 2 + 9 + 2 + 9;
+  // Columns: Device, OS(8), Health(9), Sync(9), CLI(9), Auth(9), Version, Load/Mem(9), then Note.
+  const fixed = 4 + nameW + 2 + 8 + 2 + 9 + 2 + 9 + 2 + 9 + 2 + 9 + 2 + versionW + 2 + 9;
   const noteW = Math.max(12, width - fixed);
   const lines = [
     chalk.bold('Fleet status'),
     chalk.gray(
-      `    ${padToWidth('Device', nameW)}  ${padToWidth('OS', 8)}  ${padToWidth('Health', 9)}  ${padToWidth('Sync', 9)}  ${padToWidth('CLI', 9)}  ${padToWidth('Version', versionW)}  ${padToWidth('Load/Mem', 9)}  Note`,
+      `    ${padToWidth('Device', nameW)}  ${padToWidth('OS', 8)}  ${padToWidth('Health', 9)}  ${padToWidth('Sync', 9)}  ${padToWidth('CLI', 9)}  ${padToWidth('Auth', 9)}  ${padToWidth('Version', versionW)}  ${padToWidth('Load/Mem', 9)}  Note`,
     ),
   ];
   for (const row of report.devices) {
@@ -208,11 +248,30 @@ export function renderFleetMatrix(report: FleetHealthReport): string[] {
       `${padToWidth(headroomLabel(row), 9)}  ` +
       `${padToWidth(driftLabel(row), 9)}  ` +
       `${padToWidth(cliLabel(row), 9)}  ` +
+      `${padToWidth(authLabel(row), 9)}  ` +
       `${padToWidth(truncateToWidth(row.version ?? '-', versionW), versionW)}  ` +
       `${padToWidth(loadLabel(row.stats), 9)}  ` +
       chalk.gray(truncateToWidth(note || `free ${fmtBytes(row.stats?.memFreeBytes)}`, noteW)),
     );
   }
-  lines.push(chalk.gray('  ● fresh · ◐ drift · ○ unreachable/skipped'));
+  lines.push(chalk.gray('  ● fresh · ◐ drift · ○ unreachable/skipped · Auth ●live ·present ◐degraded ○revoked'));
+  const foot = freshnessFooter(report.devices);
+  if (foot) lines.push(chalk.gray(foot));
   return lines;
+}
+
+/**
+ * "as of …" line so cache-served output is honest about age and points at the
+ * refresh flag. Stats age comes from `stats.fetchedAt`, auth age from the
+ * cached rollup's `oldestCheckedAt`; either may be absent. Returns null when the
+ * table carries no timestamped data at all (nothing to date).
+ */
+export function freshnessFooter(rows: FleetHealthRow[], now: number = Date.now()): string | null {
+  const oldestStats = oldestAcross(rows, (r) => r.stats?.fetchedAt);
+  const oldestAuth = oldestAcross(rows, (r) => r.auth?.oldestCheckedAt);
+  const parts: string[] = [];
+  if (oldestStats != null) parts.push(`stats ${formatCheckedAge(oldestStats, now)}`);
+  if (oldestAuth != null) parts.push(`auth ${formatCheckedAge(oldestAuth, now)}`);
+  if (parts.length === 0) return null;
+  return `  updated ${parts.join(' · ')} — pass --refresh (--live) for a live probe`;
 }

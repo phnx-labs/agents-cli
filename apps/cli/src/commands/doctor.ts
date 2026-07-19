@@ -51,6 +51,7 @@ import {
   type VersionResourceReport,
 } from '../lib/doctor-diff.js';
 import { checkSyncStatus, countOrphans, type SyncStatusRow, type OrphanRow } from '../lib/drift.js';
+import { readAuthHealthCache, summarizeHostAuth } from '../lib/auth-health.js';
 import { unifiedDiff, colorizeUnifiedDiff } from '../lib/diff-text.js';
 import { listCliStatus } from '../lib/cli-resources.js';
 import { setHelpSections } from '../lib/help.js';
@@ -830,6 +831,10 @@ export function registerDoctorCommand(program: Command): void {
           console.log(JSON.stringify({
             clis,
             signIn,
+            // Cached auth-health rollup for THIS host — lets `agents fleet status`
+            // show a live-verified Auth column from the same fan-out it already
+            // runs, without a separate fleet-wide `fleet ping`.
+            auth: summarizeHostAuth(readAuthHealthCache(), machineId()),
             sync: syncRows,
             orphans: orphanRows,
             hostClis: {

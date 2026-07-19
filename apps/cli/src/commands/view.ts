@@ -1699,8 +1699,11 @@ export async function viewAction(
     resources?: string | boolean;
     detailed?: boolean;
     refresh?: boolean;
+    live?: boolean;
   } & ViewSectionFilter,
 ): Promise<void> {
+  // --live is a shorter-to-type alias of --refresh; both force a live probe.
+  const forceRefresh = options?.refresh === true || options?.live === true;
   // --resources / --detailed imply --json (they only shape structured output).
   const explicitResources = options?.detailed === true || options?.resources !== undefined;
   const json = options?.json === true || explicitResources;
@@ -1743,7 +1746,7 @@ export async function viewAction(
       return;
     }
     // No argument: show all installed versions
-    await showInstalledVersions(undefined, { forceRefresh: options?.refresh === true });
+    await showInstalledVersions(undefined, { forceRefresh });
     return;
   }
 
@@ -1805,7 +1808,7 @@ export async function viewAction(
     await showAgentResources(agentId, 'default', filter);
   } else {
     // Just agent name: show versions for that agent
-    await showInstalledVersions(agentId, { forceRefresh: options?.refresh === true });
+    await showInstalledVersions(agentId, { forceRefresh });
   }
 }
 
@@ -1817,6 +1820,7 @@ export function registerViewCommand(program: Command): void {
     .option('--resources [sections]', 'In --json mode, include each version\'s resources: "all" (default) or a comma list (skills,plugins,mcp,commands,workflows,memory,hooks). Implies --json.')
     .option('--detailed', 'Include all resources in --json output (alias for --resources all). Implies --json.')
     .option('-r, --refresh', 'Force a live usage refresh, bypassing the cache (slower). Repopulates the S:/W: limit bars for every account whose token is reachable.')
+    .option('--live', 'Alias of --refresh (shorter to type).')
     .option('--prune', 'Remove older installed versions that share an account with a newer installed version. Skips the global default.')
     .option('--dry-run', 'With --prune, show duplicate versions without deleting')
     .option('-y, --yes', 'Skip the prune confirmation prompt.')
