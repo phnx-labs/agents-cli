@@ -151,6 +151,48 @@ Key behaviors:
 - Subsequent switches just update the symlink target (no new backups)
 - Each version has isolated auth in its `home/` directory
 
+## Uninstalling (reversing adoption)
+
+`agents uninstall` is the reverse of `agents setup`: it completely removes
+agents-cli **and restores the config directories adoption took over**, so the
+machine is left as it was before agents-cli was installed.
+
+The ordering matters — the config backups live inside `~/.agents`, so restore
+runs before disposal:
+
+```
+agents uninstall
+    │
+    ▼
+  1. Restore each adopted ~/.<agent>          (lib/uninstall.ts: planUninstall/executeUninstall)
+       owned symlink? (getConfigSymlinkVersion != null)
+         → newest backup exists  → move backups/<agent>/<ts> back to ~/.<agent>
+         → else (importAgent)     → copy the symlink target (version home) back
+       real, un-adopted dir?      → LEFT UNTOUCHED
+  2. Restore owned home files      (~/.claude.json, ...)
+  3. releaseAdoptedLauncher()      restore native binaries on PATH
+  4. stripShimPathLines()          remove the shim dir from every shell rc file
+  5. dispose ~/.agents             move aside to ~/.agents.removed-<ts> (default)
+                                    or hard-delete with --purge
+  6. print `npm uninstall -g @phnx-labs/agents-cli`   (a CLI can't delete its own binary)
+```
+
+Guarantees:
+- **A `~/.<agent>` that agents-cli never adopted is never touched.** Ownership is
+  decided structurally by `getConfigSymlinkVersion()` (non-null only for a symlink
+  into the versions dir) — the same check `removeVersion()` uses.
+- **Recoverable by default.** `~/.agents` (installed versions, session history,
+  secrets metadata) is moved to `~/.agents.removed-<timestamp>`, not deleted.
+  `--purge` hard-deletes it instead.
+- **`--dry-run`** prints the full plan (what is restored, what is left untouched,
+  what is removed) without changing anything.
+- `uninstall` is exempt from the setup gate, so it runs even from a broken or
+  half-initialized state.
+
+Note: with `--purge`, macOS Keychain items created by `agents secrets` are not
+removed (they are managed by the signed helper app); remove those with
+`agents secrets` before uninstalling if you want them gone.
+
 ## Resource Syncing
 
 `syncResourcesToVersion()` links central `~/.agents/` resources into version homes:

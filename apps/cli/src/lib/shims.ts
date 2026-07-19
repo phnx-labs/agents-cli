@@ -1099,7 +1099,7 @@ export function versionedAliasExists(agent: AgentId, version: string): boolean {
  * Get the path to the agent's config directory in HOME.
  * e.g., ~/.claude for claude, ~/.codex for codex
  */
-function getAgentConfigPath(agent: AgentId): string {
+export function getAgentConfigPath(agent: AgentId): string {
   const agentConfig = AGENTS[agent];
   const home = process.env.AGENTS_REAL_HOME || os.homedir();
   return agentConfig.configDir.replace(os.homedir(), home);
@@ -2309,7 +2309,7 @@ function isShimPathCommandLine(line: string, shimsDir: string): boolean {
   return trimmed.startsWith('export PATH=') || trimmed.startsWith('fish_add_path ');
 }
 
-function stripShimPathLines(content: string, shimsDir: string): string {
+export function stripShimPathLines(content: string, shimsDir: string): string {
   const lines = content.split('\n');
   const kept: string[] = [];
 

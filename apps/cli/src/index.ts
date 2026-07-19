@@ -137,6 +137,7 @@ import {
   loadPush,
   loadRepo,
   loadSetup,
+  loadUninstall,
   loadShare,
   loadFeed,
   loadMailboxes,
@@ -872,6 +873,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadPush);
   await reg(loadRepo);
   await reg(loadSetup);
+  await reg(loadUninstall);
 }
 
 /** Calculate the Levenshtein edit distance between two strings. */
@@ -1013,8 +1015,9 @@ if (firstRun) {
 }
 
 // Every command requires the system repo to be cloned first. `setup` is the
-// only exemption — it's the command that does the cloning.
-const SETUP_EXEMPT_COMMANDS = new Set(['setup', 'help']);
+// command that does the cloning; `uninstall` is its reverse and must run even
+// from a broken/half-setup state (that is exactly when you want to tear down).
+const SETUP_EXEMPT_COMMANDS = new Set(['setup', 'help', 'uninstall']);
 
 // Fold legacy ~/.agents-system/ into ~/.agents/.system/ BEFORE ensureInitialized
 // runs. ensureInitialized checks for .git inside the new path; if the user is

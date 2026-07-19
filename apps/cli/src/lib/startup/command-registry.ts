@@ -91,6 +91,7 @@ export const loadPull: ModuleLoader = async () => (await import('../../commands/
 export const loadPush: ModuleLoader = async () => (await import('../../commands/push.js')).registerPushCommand;
 export const loadRepo: ModuleLoader = async () => (await import('../../commands/repo.js')).registerRepoCommands;
 export const loadSetup: ModuleLoader = async () => (await import('../../commands/setup.js')).registerSetupCommand;
+export const loadUninstall: ModuleLoader = async () => (await import('../../commands/uninstall.js')).registerUninstallCommands;
 export const loadSessions: ModuleLoader = async () => (await import('../../commands/sessions.js')).registerSessionsCommands;
 export const loadTeams: ModuleLoader = async () => (await import('../../commands/teams.js')).registerTeamsCommands;
 export const loadCloud: ModuleLoader = async () => (await import('../../commands/cloud.js')).registerCloudCommands;
@@ -204,6 +205,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   repos: [loadRepo],
   repo: [loadRepo],
   setup: [loadSetup],
+  uninstall: [loadUninstall],
   sessions: [loadSessions],
   teams: [loadTeams],
   cloud: [loadCloud],
