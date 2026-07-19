@@ -419,7 +419,7 @@ async function probeRemoteAuth(target: FleetStatusTarget): Promise<AuthProbeRow[
 
 async function runFleetPing(opts: { json?: boolean; local?: boolean; verbose?: boolean; strict?: boolean }): Promise<void> {
   const self = machineId();
-  const cliVersion = packageJson.version;
+  const cliVersion = getCliVersion();
 
   // --local: probe just this host. Used both directly and as the fan-out worker.
   if (opts.local) {
