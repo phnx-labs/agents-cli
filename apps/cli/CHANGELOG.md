@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.20.70
+
+- **Fix `agents setup computer` / `agents computer setup` refusing to install a
+  valid downloaded helper.** The signature check read `codesign -dv` from stdout,
+  but that command writes its details to **stderr** on success — so the Team-ID
+  check saw an empty string, found no `TeamIdentifier`, and rejected every
+  validly-signed, notarized helper with "signed by unexpected Team (none)". It now
+  reads both streams via `spawnSync`. Verified end-to-end against the real
+  published `v1.20.69` release asset (download → sha256 → extract → codesign +
+  Team `2HTP252L87` + `spctl` notarization → install). Source:
+  `apps/cli/src/lib/computer/download.ts`.
+
+- **The bundled macOS menu-bar helper is now a true universal binary on
+  Xcode-less release hosts.** `menubar/scripts/build.sh release` used
+  `swift build --arch arm64 --arch x86_64` (needs Xcode's xcbuild) and, on a
+  Command-Line-Tools-only host, silently fell back to a **single-arch** build —
+  shipping an arm64-only `MenubarHelper.app` in the tarball that could not run on
+  Intel Macs. It now builds each slice via `--triple` and `lipo`s them into one
+  universal binary, matching the computer helper. Source:
+  `apps/cli/menubar/scripts/build.sh`.
+
 ## 1.20.69
 
 - **Choose a safe account with `agents run <agent>@`.** A trailing `@` opens a
