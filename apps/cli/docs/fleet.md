@@ -43,6 +43,45 @@ fleet:
 `prompt` mode is intentionally not offered — it was removed rather than accepted
 as a silent no-op.)
 
+Two more additive, capture-only fields let a fresh machine reconstruct the whole
+environment — both are **names only, never values**:
+
+| Field | Meaning |
+|---|---|
+| `secrets.bundles` | Secrets-bundle **names** to ensure exist. Values live in the OS keychain and are never captured or pushed; `apply` surfaces missing bundles to recreate manually. |
+| `routines` | Routine **names** that should be active on the fleet (the routine files themselves sync via the repo). |
+
+> Browser profiles are **not** captured into `fleet:` — the central `browser:`
+> block already syncs verbatim via `agents repo push/pull`, and its `ssh://`
+> endpoints can carry `user@host`, which must never be copied into a second
+> location.
+
+## Capturing the profile (`agents fleet capture`)
+
+Hand-authoring `fleet:` is optional — `agents fleet capture` (alias of
+`agents devices capture`) snapshots the live environment into it:
+
+```
+agents fleet capture              # write agents.yaml → fleet:
+agents fleet capture --dry-run    # print the block, write nothing
+agents fleet capture --from-pins  # record per-device agents from devices/<name>/agents.yaml
+```
+
+It records device **names** (the roster), the source machine's own agents as
+`defaults`, secrets-bundle **names**, and routine **names** — and writes them to
+the central, portable `fleet:` block via `updateMeta`. It never touches the
+per-device `agents:` pins, and never writes an IP or username. Source:
+`src/commands/fleet-capture.ts`, `src/lib/fleet/capture.ts`.
+
+**Fresh-machine bootstrap.** The roster (`~/.agents/.history/devices/registry.json`)
+is machine-local and gitignored — so a freshly-cloned `agents.yaml` names devices
+this machine has never registered. `agents apply` handles that: for any device in
+an explicit `devices:` map that isn't in the local registry, it resolves the name
+**live from Tailscale** (`ensureDevicesRegistered`, `src/lib/devices/sync.ts`) and
+registers it before reconciling. So `git clone` + `agents apply` reconstructs the
+fleet with zero committed connection details. Names not on the tailnet are
+reported as unresolved rather than aborting the run.
+
 ## What a reconcile does
 
 For each targeted, reachable device `apply` probes state, then plans the minimal
