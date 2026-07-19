@@ -176,6 +176,80 @@ export async function runDeviceSync(
   }
 }
 
+export interface EnsureDevicesResult {
+  /** Names newly resolved from Tailscale and upserted into the registry. */
+  registered: string[];
+  /** Names that could not be resolved (not on the tailnet / tailscale absent). */
+  unresolved: string[];
+}
+
+/**
+ * Pure decision for `ensureDevicesRegistered`: split the wanted names into those
+ * to resolve+register (missing from the registry, present on the tailnet, not
+ * ignored) vs. unresolved (missing and either off-tailnet or ignored). Already-
+ * registered names need nothing. Pure so the bootstrap's filter matrix is
+ * unit-testable without a tailnet or registry writes.
+ */
+export interface WantedPartition {
+  toRegister: string[];
+  unresolved: string[];
+}
+
+export function partitionWantedDevices(
+  wanted: string[],
+  registered: Set<string>,
+  tailscaleNames: Set<string>,
+  ignored: Set<string>,
+): WantedPartition {
+  const out: WantedPartition = { toRegister: [], unresolved: [] };
+  for (const name of wanted) {
+    if (registered.has(name)) continue;
+    if (tailscaleNames.has(name) && !ignored.has(name)) out.toRegister.push(name);
+    else out.unresolved.push(name);
+  }
+  return out;
+}
+
+/**
+ * Fresh-machine bootstrap for `agents apply`: given the device names a `fleet:`
+ * manifest wants, register any that aren't in the local registry by resolving
+ * them LIVE from Tailscale — so a freshly-cloned `agents.yaml` (which carries
+ * names only, never IPs/usernames) reconstructs its roster with zero committed
+ * connection details. Soft by design: a missing tailscale binary or an offline
+ * name yields `unresolved` rather than throwing, so `apply` degrades to "these
+ * devices aren't reachable yet" instead of aborting. Reuses the same
+ * parse→withDefaultUser→upsert path as `runDeviceSync`, so a bootstrapped device
+ * is identical to a synced one.
+ */
+export async function ensureDevicesRegistered(wantedNames: string[]): Promise<EnsureDevicesResult> {
+  const registryBefore = await loadDevices();
+  const registered = new Set(Object.keys(registryBefore));
+  const missing = wantedNames.filter((n) => !registered.has(n));
+  if (missing.length === 0) return { registered: [], unresolved: [] };
+
+  let nodes: TailscaleNode[];
+  try {
+    nodes = parseTailscaleStatus(tailscaleStatusJson());
+  } catch {
+    // Tailscale absent/unreachable — nothing resolvable; report all missing.
+    return { registered: [], unresolved: missing };
+  }
+
+  const ignored = await loadIgnored();
+  const tailscaleNames = new Set(nodes.map((n) => n.name));
+  const { toRegister, unresolved } = partitionWantedDevices(missing, registered, tailscaleNames, ignored);
+
+  const byName = new Map(nodes.map((n) => [n.name, n]));
+  const localUser = localLoginUser();
+  const done: string[] = [];
+  for (const name of toRegister) {
+    const input = withDefaultUser(nodeToDeviceInput(byName.get(name)!), registryBefore[name]?.user, localUser);
+    await upsertDevice(name, input);
+    done.push(name);
+  }
+  return { registered: done, unresolved };
+}
+
 /**
  * The register/remove/ignore decision for the interactive curation picker.
  * Pure so the highest-risk reconcile logic is unit-testable without a tailnet

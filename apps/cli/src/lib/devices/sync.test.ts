@@ -7,7 +7,7 @@
  *   3. A genuinely-new, non-ignored node IS surfaced.
  */
 import { describe, expect, it } from 'vitest';
-import { computePendingDevices, planDeviceReconciliation, sanitizeLoginUser, selectNodesToUpsert, withDefaultUser } from './sync.js';
+import { computePendingDevices, partitionWantedDevices, planDeviceReconciliation, sanitizeLoginUser, selectNodesToUpsert, withDefaultUser } from './sync.js';
 import type { TailscaleNode } from './tailscale.js';
 import type { DeviceInput } from './registry.js';
 
@@ -133,5 +133,35 @@ describe('planDeviceReconciliation', () => {
     const plan = planDeviceReconciliation(['mac-mini'], [], [], []);
     expect(plan.toRemove).toEqual([]);
     expect(plan.toIgnore).toEqual(['mac-mini']);
+  });
+});
+
+describe('partitionWantedDevices (fresh-machine bootstrap)', () => {
+  const registered = new Set(['zion']);
+  const tailnet = new Set(['zion', 'yosemite-s0', 'yosemite-s1', 'ipad165']);
+  const ignored = new Set(['ipad165']);
+
+  it('registers a wanted name that is on the tailnet but not yet in the registry', () => {
+    const p = partitionWantedDevices(['yosemite-s0'], registered, tailnet, ignored);
+    expect(p.toRegister).toEqual(['yosemite-s0']);
+    expect(p.unresolved).toEqual([]);
+  });
+
+  it('marks a wanted name absent from the tailnet as unresolved (no committed IP to fall back on)', () => {
+    const p = partitionWantedDevices(['ghost-box'], registered, tailnet, ignored);
+    expect(p.toRegister).toEqual([]);
+    expect(p.unresolved).toEqual(['ghost-box']);
+  });
+
+  it('treats an ignored tailnet node as unresolved, never silently re-adding it', () => {
+    const p = partitionWantedDevices(['ipad165'], registered, tailnet, ignored);
+    expect(p.toRegister).toEqual([]);
+    expect(p.unresolved).toEqual(['ipad165']);
+  });
+
+  it('skips names already in the registry (nothing to do)', () => {
+    const p = partitionWantedDevices(['zion', 'yosemite-s1'], registered, tailnet, ignored);
+    expect(p.toRegister).toEqual(['yosemite-s1']);
+    expect(p.unresolved).toEqual([]);
   });
 });
