@@ -11,8 +11,18 @@ MODE="${1:-debug}"
 HELPER_VERSION="${HELPER_VERSION:-0.1.0}"
 
 if [ "$MODE" = "release" ]; then
-    swift build -c release --arch arm64 --arch x86_64
-    SRC=".build/apple/Products/Release/ComputerHelper"
+    # Universal build WITHOUT full Xcode. SwiftPM's `--arch arm64 --arch x86_64`
+    # routes through Xcode's xcbuild, which is absent on Command-Line-Tools-only
+    # hosts (`swift build --arch ...` → "xcbuild ... does not exist"). Build each
+    # slice separately via --triple (works on CLT) and lipo them into one binary,
+    # so the signed/notarized release asset can be produced on any Mac with the
+    # toolchain + signing identity, not only ones with Xcode installed.
+    swift build -c release --triple arm64-apple-macosx14.0
+    swift build -c release --triple x86_64-apple-macosx14.0
+    SRC=".build/ComputerHelper-universal"
+    lipo -create -output "$SRC" \
+        ".build/arm64-apple-macosx/release/ComputerHelper" \
+        ".build/x86_64-apple-macosx/release/ComputerHelper"
 else
     swift build
     SRC=".build/debug/ComputerHelper"
