@@ -209,6 +209,7 @@ The Windows push bridge is `buildWindowsStdinImportCommand` in
 | `secrets unlock [names...]` | Read a bundle once (one Touch ID) and hold it in the secrets-agent so later runs read it silently | `agents secrets unlock prod` |
 | `secrets unlock --all` | Unlock every configured bundle | `agents secrets unlock --all` |
 | `secrets unlock <name> --ttl <dur>` | Hold for a custom lifetime (default 7d) | `agents secrets unlock prod --ttl 30m` |
+| `secrets unlock <name> --durable` | Also survive sleep + reboot (default: survives upgrade/restart, re-locks on sleep) | `agents secrets unlock prod --durable` |
 | `secrets lock [names...]` | Wipe held bundles from the agent (default: all) — next read re-prompts | `agents secrets lock` |
 | `secrets status` | Show which bundles the agent holds and when they lock | `agents secrets status` |
 | `secrets policy <bundle> [policy]` | Show or set a bundle's prompt policy: `daily` (default), `always`, or `never` (silent, no biometry ACL — needs `--i-understand`) | `agents secrets policy signing always` |
@@ -476,7 +477,8 @@ The secrets-agent is the ssh-agent answer:
 
 - `agents secrets unlock <bundle>` reads the bundle from the keychain **once** (one Touch ID) and hands the resolved env to a small local broker that holds it in memory.
 - Every later resolution of that bundle — by any `agents run`, teammate, browser profile, or the routines daemon — is served from the broker over a user-only Unix socket (dir `~/.agents/.cache/helpers/secrets-agent/`, mode `0700`). No prompt.
-- The hold ends when its TTL expires (default 7d, `--ttl` to change), you run `agents secrets lock`, the machine sleeps, or you log out. A bare screen-lock does **not** drop it — the login password already gates a locked screen, and re-prompting after every lock would defeat the ~7-day window. Nothing is ever written to disk.
+- The hold ends when its TTL expires (default 7d, `--ttl` to change), you run `agents secrets lock`, or the machine sleeps. A bare screen-lock does **not** drop it — the login password already gates a locked screen, and re-prompting after every lock would defeat the ~7-day window.
+- **The unlock survives an agents-cli upgrade / daemon restart.** The resolved env is also persisted as a device-local, non-biometry keychain session item that the broker **rehydrates on start** and that reads fall back to silently — so a restart (which empties the broker's memory) no longer forces a re-tap, and a headless read no longer fails with "not unlocked in the secrets agent". It still re-locks on sleep by default; pass **`--durable`** (or set `secrets.agent.durable: true`) to survive sleep + reboot as well. `lock`, rotate, and delete clear the session item. Audit reads served from it tag `"source":"session"`.
 
 It is **opt-in by construction**: if you never run `unlock`, resolution is byte-for-byte today's keychain path. Audit events tag broker-served reads with `"source":"agent"` so you can tell them apart from real keychain reads.
 
@@ -508,7 +510,8 @@ Change the **default** for all bundles globally in `agents.yaml` (`secrets.polic
 secrets:
   policy: daily   # default prompt policy for bundles without an explicit one (this IS the default)
   agent:
-    auto: false   # opt OUT of daily-policy self-caching (on by default)
+    auto: false     # opt OUT of daily-policy self-caching (on by default)
+    durable: true   # make every unlock survive sleep + reboot too (default: survives upgrade/restart, re-locks on sleep)
 ```
 
 Auto-cache is **on by default** and only ever applies to `daily`-policy bundles — an `always` bundle is never auto-held, and a `never` bundle needs no agent at all (it is already silent). The `never` policy (items stored without the biometry ACL for fully silent reads with no broker) is the global downgrade the agent is otherwise designed to avoid, so it stays gated behind an explicit confirmation and a signed helper with the `set-no-acl` write path; see the [security model](#security-model). Tracked in [issue #421](https://github.com/phnx-labs/agents-cli/issues/421).
@@ -517,7 +520,7 @@ Auto-cache is **on by default** and only ever applies to `daily`-policy bundles 
 
 Snapshot semantics: `unlock` stores the **resolved** env, so a bundle's dynamic refs (`exec:`, `env:`, `file:`) are frozen at unlock time until you re-unlock. Keychain and literal values — the overwhelming majority — are unaffected.
 
-Source: `src/lib/secrets/agent.ts`. Auto-lock on sleep uses the signed keychain helper's `watch-lock` mode (`src/lib/secrets/keychain-helper.swift`) — a bare screen-lock does **not** wipe the hold (the login password already gates a locked screen); with an older helper that predates `watch-lock`, the agent degrades to TTL-only locking.
+Source: `src/lib/secrets/agent.ts`, `src/lib/secrets/session-store.ts`. Auto-lock on sleep uses the signed keychain helper's `watch-lock` mode (`src/lib/secrets/keychain-helper.swift`) — a bare screen-lock does **not** wipe the hold (the login password already gates a locked screen); with an older helper that predates `watch-lock`, the agent degrades to TTL-only locking. On SLEEP the broker also deletes non-`--durable` session items so those bundles re-lock; `--durable` items survive. **Durable-unlock security note:** a `--durable` (or `secrets.agent.durable`) session extends the silent-read window from "until the next sleep" to "up to the TTL, across sleeps and reboots" — the same same-user trust boundary the trade-off above describes, held longer. It is off by default for that reason. **Off macOS** this whole layer is a no-op: Linux (libsecret) and Windows (Credential Manager) resolve secrets durably from the OS store on every read with no prompt and no broker, so `agents secrets unlock` there is a friendly no-op and reads never re-prompt.
 
 ## Linux: headless servers and the encrypted-file fallback
 
