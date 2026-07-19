@@ -1071,6 +1071,45 @@ export function accountOrgBadge(
   return null;
 }
 
+/** Agents whose local credential formats expose enough state for account selection. */
+export const ACCOUNT_INSPECTION_AGENT_IDS = [
+  'claude',
+  'codex',
+  'gemini',
+  'grok',
+  'antigravity',
+  'kimi',
+  'droid',
+  'opencode',
+] as const satisfies readonly AgentId[];
+
+const ACCOUNT_INSPECTION_AGENTS = new Set<AgentId>(ACCOUNT_INSPECTION_AGENT_IDS);
+
+/** Whether agents-cli can determine this agent's per-version sign-in state. */
+export function supportsAccountInspection(agentId: AgentId): boolean {
+  return ACCOUNT_INSPECTION_AGENTS.has(agentId);
+}
+
+/**
+ * Human-readable account identity shared by every account-aware surface.
+ * Prefer email, append a multi-seat Claude organization name when present,
+ * then fall back to a non-secret account id or a generic signed-in label.
+ */
+export function accountDisplayLabel(
+  info?: Pick<
+    AccountInfo,
+    'email' | 'accountId' | 'signedIn' | 'organizationType' | 'organizationName'
+  > | null
+): string {
+  if (!info) return '';
+  if (info.email) {
+    const badge = accountOrgBadge(info);
+    return badge ? `${info.email} (${badge})` : info.email;
+  }
+  if (info.signedIn) return info.accountId ? `id:${info.accountId}` : 'signed in';
+  return '';
+}
+
 /** Return the email address associated with the agent's auth config, or null. */
 export async function getAccountEmail(
   agentId: AgentId,

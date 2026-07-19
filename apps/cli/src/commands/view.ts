@@ -18,7 +18,7 @@ import * as yaml from 'yaml';
 import {
   AGENTS,
   ALL_AGENT_IDS,
-  accountOrgBadge,
+  accountDisplayLabel,
   getAllCliStates,
   getAccountInfo,
   resolveAgentName,
@@ -83,37 +83,8 @@ import { confirm } from '@inquirer/prompts';
 import { formatPath, isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { terminalWidth, truncateToWidth, stringWidth } from '../lib/session/width.js';
 
-// Shown in the email column for agents that are signed in but expose no email
-// address locally (Antigravity stores an opaque OAuth grant with no identity).
-const SIGNED_IN_LABEL = 'signed in';
-
-/**
- * Text for the account (email) column. Prefers the real email; otherwise, for a
- * signed-in agent whose credential carries no email but does carry an opaque
- * account id (Kimi's user_id), show `id:<user_id>` so distinct accounts read
- * distinctly instead of a generic "signed in". Falls back to "signed in" when we
- * have neither (Antigravity), and empty when signed out.
- *
- * When the account carries a Claude organizationType, the org badge is appended
- * — "email (Turing Labs · Team)" — so two installs signed into the same email
- * under different orgs (personal Max vs a Team seat) read distinctly. The
- * suffix is plain text inside the label so the existing column-width pass
- * measures and pads it for free.
- */
-export function accountColumnLabel(
-  info?: Pick<
-    AccountInfo,
-    'email' | 'accountId' | 'signedIn' | 'organizationType' | 'organizationName'
-  > | null
-): string {
-  if (!info) return '';
-  if (info.email) {
-    const badge = accountOrgBadge(info);
-    return badge ? `${info.email} (${badge})` : info.email;
-  }
-  if (info.signedIn) return info.accountId ? `id:${info.accountId}` : SIGNED_IN_LABEL;
-  return '';
-}
+/** Shared account identity formatter, re-exported for the view-specific tests. */
+export const accountColumnLabel = accountDisplayLabel;
 
 /**
  * Group profile summaries by their host harness, optionally filtered to a
