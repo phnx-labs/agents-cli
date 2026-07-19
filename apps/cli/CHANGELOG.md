@@ -1,5 +1,50 @@
 # Changelog
 
+## 1.20.69
+
+- **Choose a safe account with `agents run <agent>@`.** A trailing `@` opens a
+  per-run picker showing each installed version's account identity, login state,
+  plan, and available session/weekly/monthly capacity. Logged-out, rate-limited,
+  and out-of-credit accounts remain visible but disabled; signed-in accounts
+  without quota data remain selectable and say `limits unavailable`. Source:
+  `apps/cli/src/commands/run-account-picker.ts`,
+  `apps/cli/src/commands/exec.ts`, `apps/cli/src/lib/rotate.ts`.
+
+- **The macOS `agents computer` helper now ships as a signed + notarized release asset,
+  downloaded on demand.** A fresh `npm i -g @phnx-labs/agents-cli` no longer needs to build
+  the Swift helper from source: `agents computer setup` / `agents setup computer` fetch
+  `ComputerHelper.app.zip` from the matching `v<version>` GitHub release, verify it against
+  the published `.sha256`, and re-check the code signature (Developer ID Team `2HTP252L87`)
+  and notarization (`spctl --assess`) before it is ever copied to /Applications — mirroring
+  the Windows helper's distribution. The download cache is never a trusted resolver source;
+  a cached bundle is only ever read back through the verifying downloader. The helper is
+  version-stamped at build time and the release pipeline publishes the asset automatically.
+  Source: `apps/cli/src/lib/computer/download.ts`, `apps/cli/src/lib/computer-rpc.ts`,
+  `apps/cli/src/commands/computer.ts`, `native/computer-mac/scripts/build.sh`,
+  `apps/cli/scripts/publish-computer-helper-mac.sh`, `apps/cli/scripts/release.sh`.
+
+- **Live fleet auth health (`agents fleet ping`) + `agents view` chip (#1285).** New `agents fleet ping` completes a real authenticated request for every agent account across the fleet — the ground truth the local "signed in" flag can't give (it can't tell a revoked-but-unexpired token from a good one). Claude/Kimi/Droid are network-verified; Codex/Grok are best-effort. `agents view` now shows a live-status chip per version, read from the shared cache the ping writes. The probe hits the usage endpoint (no model tokens, no session created). Source: `apps/cli/src/lib/auth-health.ts`, `apps/cli/src/commands/ssh.ts`, `apps/cli/src/commands/view.ts`.
+
+- **`agents fork` — branch a session into a new independent copy.** Copies a Claude
+  session transcript to a fresh session id (rewriting only the `sessionId` field so the
+  per-message uuid chain stays intact) beside the original, then registers it so it
+  resumes independently from the same cwd and version — the original is left untouched.
+  `--name` labels the fork. Source: `apps/cli/src/lib/session/fork.ts`,
+  `apps/cli/src/commands/fork.ts`.
+
+- **`agents setup` is now a capability hub with guided `browser` / `computer` / `share`
+  subcommands.** Bare `agents setup` still clones the system repo and imports unmanaged
+  agents, but on a TTY it now also offers to set up the optional capabilities a fresh
+  machine needs. Each is also runnable on its own and is idempotent (re-run to change
+  settings): `agents setup browser` detects an installed Chromium-family browser and
+  creates/points the `default` profile; `agents setup share` provisions or joins a
+  Cloudflare share endpoint (reusing `agents share setup`/`join`); `agents setup computer`
+  installs the macOS helper and walks you through the Accessibility + Screen-Recording
+  grants — opening the exact System Settings panes and polling until trust lands. The
+  existing `agents share setup` / `agents computer setup` remain for scripted use. Source:
+  `apps/cli/src/commands/setup.ts`, `setup-browser.ts`, `setup-computer.ts`,
+  `setup-share.ts`, `apps/cli/src/lib/browser/chrome.ts`, `apps/cli/src/commands/share.ts`.
+
 ## 1.20.68
 
 - **MCP resource handler now syncs project-level agent configs alongside user-level configs (RUSH-671).** `McpHandler.sync` previously wrote resolved MCP servers only to the version-home (user-level) config path. It now also writes project-layer MCP servers to each agent CLI's project-level config path (e.g., `.mcp.json` for Claude, `.codex/config.toml` for Codex) so agent CLIs can discover project-scoped MCPs natively. User-level sync is unchanged. Source: `apps/cli/src/lib/resources/mcp.ts`, `apps/cli/src/lib/agents.ts` (`getProjectMcpConfigPath` exported), `apps/cli/src/lib/resources/mcp.test.ts`.
