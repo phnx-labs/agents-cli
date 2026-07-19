@@ -20,6 +20,7 @@ import ora from 'ora';
 import { getCliVersion } from '../lib/version.js';
 import { readAndResolveBundleEnv, isHeadlessSecretsContext } from '../lib/secrets/bundles.js';
 import { machineId } from '../lib/session/sync/config.js';
+import { registerFleetCaptureCommand } from './fleet-capture.js';
 import {
   addIgnored,
   getDevice,
@@ -603,6 +604,9 @@ Typical workflow:
         process.exit(1);
       }
     });
+
+  // `agents fleet capture` — snapshot live state into agents.yaml fleet:.
+  registerFleetCaptureCommand(devicesCmd);
 
   devicesCmd
     .command('register <name>')
