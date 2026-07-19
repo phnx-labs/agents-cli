@@ -36,6 +36,7 @@ const USAGE_SUPPORTED: ReadonlySet<AgentId> = new Set<AgentId>(['claude', 'codex
 /** One agent's usage snapshot — the unit the text and --json renderers share. */
 export interface AgentUsageRecord {
   agent: AgentId;
+  /** Plain agent name (no ANSI) — safe to emit in --json; the text table colorizes it. */
   label: string;
   status: 'unsupported' | 'no-version' | 'not-signed-in' | 'ok';
   email?: string;
@@ -91,7 +92,9 @@ Examples:
 
 /** Gather one agent's usage snapshot as structured data (shared by both renderers). */
 async function collectAgentUsage(agentId: AgentId): Promise<AgentUsageRecord> {
-  const label = agentLabel(agentId);
+  // Plain name — color is applied only at text-render time (formatAgentUsage), so
+  // `--json` never emits ANSI escapes in `label` (e.g. under FORCE_COLOR=1).
+  const label = AGENTS[agentId].name;
 
   if (!USAGE_SUPPORTED.has(agentId)) {
     return { agent: agentId, label, status: 'unsupported' };
@@ -116,15 +119,18 @@ async function collectAgentUsage(agentId: AgentId): Promise<AgentUsageRecord> {
 /** Render one usage record as the human table section. */
 export function formatAgentUsage(rec: AgentUsageRecord): string {
   const cfg = AGENTS[rec.agent];
+  // Colorize the heading here (not in the record) so the plain `label` stays
+  // clean for --json while the text table keeps its per-agent color.
+  const heading = agentLabel(rec.agent);
   switch (rec.status) {
     case 'unsupported':
-      return [rec.label, `  ${chalk.dim(`${cfg.name} CLI does not publish usage data.`)}`].join('\n');
+      return [heading, `  ${chalk.dim(`${cfg.name} CLI does not publish usage data.`)}`].join('\n');
     case 'no-version':
-      return [rec.label, `  ${chalk.dim('No version installed.')}`].join('\n');
+      return [heading, `  ${chalk.dim('No version installed.')}`].join('\n');
     case 'not-signed-in':
-      return [rec.label, `  ${chalk.dim('Not signed in.')}`].join('\n');
+      return [heading, `  ${chalk.dim('Not signed in.')}`].join('\n');
     case 'ok': {
-      const lines = [rec.label];
+      const lines = [heading];
       if (rec.email) lines.push(`  ${chalk.dim(rec.email)}`);
       const section = formatUsageSection(rec.usage!);
       if (section.length === 0) {
