@@ -77,7 +77,27 @@ export function parseFleetManifest(raw: unknown): FleetManifest {
     throw new Error(`fleet: devices must be the string 'all' or a mapping of device -> overrides (got ${JSON.stringify(o.devices)}).`);
   }
 
-  return { defaults, devices };
+  const manifest: FleetManifest = { defaults, devices };
+
+  // Additive, backward-compatible extras (captured by `agents fleet capture`).
+  if (o.secrets !== undefined) {
+    if (typeof o.secrets !== 'object' || o.secrets === null || Array.isArray(o.secrets)) {
+      throw new Error('fleet: secrets must be a mapping with a `bundles:` list.');
+    }
+    const bundles = (o.secrets as Record<string, unknown>).bundles;
+    if (bundles !== undefined && !isStringArray(bundles)) {
+      throw new Error('fleet: secrets.bundles must be a list of bundle names (e.g. [attio]).');
+    }
+    manifest.secrets = { bundles: bundles as string[] | undefined };
+  }
+  if (o.routines !== undefined) {
+    if (!isStringArray(o.routines)) {
+      throw new Error('fleet: routines must be a list of routine names.');
+    }
+    manifest.routines = o.routines;
+  }
+
+  return manifest;
 }
 
 /** Read a YAML file and extract + validate its `fleet:` block. */

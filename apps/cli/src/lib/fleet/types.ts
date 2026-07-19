@@ -46,6 +46,21 @@ export interface FleetDeviceOverride {
 export interface FleetManifest {
   defaults?: FleetDefaults;
   devices: 'all' | Record<string, FleetDeviceOverride>;
+  /**
+   * Fleet-wide extras captured by `agents fleet capture` so a fresh machine can
+   * reconstruct the whole environment, not just installed agents. All additive,
+   * portable, and LEAK-FREE — names only, never connection details.
+   *
+   * (Browser profiles are deliberately NOT captured here: the central `browser:`
+   * block already syncs verbatim via `agents repo push/pull`, so duplicating it
+   * would be redundant — and its ssh:// endpoints can carry `user@host`, which
+   * must never be copied into a second location.)
+   */
+  /** Secrets-bundle NAMES to ensure exist — values live in the keychain and are
+   * never captured or pushed; `apply` surfaces missing bundles to recreate. */
+  secrets?: { bundles?: string[] };
+  /** Routine NAMES that should be active on the fleet (files sync via the repo). */
+  routines?: string[];
 }
 
 /**
@@ -87,7 +102,10 @@ export type FleetActionKind =
   | 'add-agent'
   | 'sync-config'
   | 'push-login'
-  | 'needs-login';
+  | 'needs-login'
+  /** Secrets bundles the profile declares but that can't be pushed (values are
+   * keychain-local) — surfaced as a manual recreate, like `needs-login`. */
+  | 'needs-secret';
 
 export interface FleetAction {
   device: string;
@@ -117,6 +135,9 @@ export interface DeviceDiff {
   /** Agents that must be logged in on the device but can't be propagated
    * (source token is device-bound, e.g. macOS keychain). Surfaced, not faked. */
   loginBlocked: string[];
+  /** Secrets-bundle names the profile declares that must be recreated on the
+   * device (values are keychain-local — never captured or pushed). Surfaced. */
+  secretsNeeded: string[];
 }
 
 /** A portable auth file captured from a source agent home, ready to propagate. */

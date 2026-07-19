@@ -112,3 +112,29 @@ describe('resolveDesired', () => {
     expect(out.map((d) => d.device)).toEqual(['s1']);
   });
 });
+
+describe('parseFleetManifest — additive capture fields', () => {
+  it('accepts secrets.bundles and routines', () => {
+    const m = parseFleetManifest({
+      devices: 'all',
+      secrets: { bundles: ['attio', 'ssh-keys'] },
+      routines: ['review-open-prs'],
+    });
+    expect(m.secrets?.bundles).toEqual(['attio', 'ssh-keys']);
+    expect(m.routines).toEqual(['review-open-prs']);
+  });
+
+  it('is backward-compatible: a manifest with none of the new fields still parses', () => {
+    const m = parseFleetManifest({ defaults: { agents: ['claude@latest'] }, devices: 'all' });
+    expect(m.secrets).toBeUndefined();
+    expect(m.routines).toBeUndefined();
+  });
+
+  it('rejects non-string secrets.bundles', () => {
+    expect(() => parseFleetManifest({ devices: 'all', secrets: { bundles: [1] } })).toThrow(/secrets\.bundles/);
+  });
+
+  it('rejects non-string routines', () => {
+    expect(() => parseFleetManifest({ devices: 'all', routines: [1, 2] })).toThrow(/routines/);
+  });
+});
