@@ -201,13 +201,34 @@ export function readAuthHealth(host: string, agent: AgentId | string, version: s
   return readAuthHealthCache()[authCacheKey(host, agent, version)] ?? null;
 }
 
+/**
+ * Merge entries into the cache. An incoming `error` verdict (a network blip,
+ * not a server rejection) is indeterminate, so it must NOT clobber a prior
+ * known verdict — otherwise one 8s timeout flips a `live` chip to `error`,
+ * exactly the "cry wolf" the verdict model avoids for `expired`. This is the
+ * behaviour promised by the `error` doc on AuthVerdict ("keep the last known
+ * one"). Pure, so it's unit-tested directly. */
+export function mergeAuthHealthEntries(
+  current: Record<string, AuthHealth>,
+  incoming: Record<string, AuthHealth>,
+): Record<string, AuthHealth> {
+  const merged: Record<string, AuthHealth> = { ...current };
+  for (const [key, health] of Object.entries(incoming)) {
+    if (health.verdict === 'error' && merged[key]) continue; // keep last known
+    merged[key] = health;
+  }
+  return merged;
+}
+
 /** Merge one or more entries into the cache (best-effort write). */
 export function writeAuthHealthEntries(entries: Record<string, AuthHealth>): void {
   try {
     const dir = getCacheDir();
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const current = readAuthHealthCache();
-    const merged: AuthHealthCacheFile = { version: 1, entries: { ...current, ...entries } };
+    const merged: AuthHealthCacheFile = {
+      version: 1,
+      entries: mergeAuthHealthEntries(readAuthHealthCache(), entries),
+    };
     fs.writeFileSync(cacheFilePath(), JSON.stringify(merged, null, 2));
   } catch {
     // best-effort; a failed write just means the next reader falls back to heuristics

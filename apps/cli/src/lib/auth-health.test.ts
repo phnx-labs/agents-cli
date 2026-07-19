@@ -4,6 +4,7 @@ import {
   authAccountLabel,
   authCacheKey,
   classifyHttpStatus,
+  mergeAuthHealthEntries,
   formatCheckedAge,
   probeDetail,
   summarizeVerdicts,
@@ -105,6 +106,22 @@ describe('summarizeVerdicts', () => {
     expect(summarizeVerdicts(['live', 'revoked', 'expired', 'unverified'])).toEqual({ live: 1, bad: 1, warn: 2, total: 4 });
     expect(summarizeVerdicts(['rate_limited', 'error'])).toEqual({ live: 0, bad: 0, warn: 2, total: 2 });
     expect(summarizeVerdicts([])).toEqual({ live: 0, bad: 0, warn: 0, total: 0 });
+  });
+});
+
+describe('mergeAuthHealthEntries', () => {
+  it('a fresh error does NOT clobber a prior known verdict (keeps last known)', () => {
+    const current = { 'zion:claude:2.1.170': { verdict: 'live' as const, checkedAt: 100 } };
+    const incoming = { 'zion:claude:2.1.170': { verdict: 'error' as const, checkedAt: 200, detail: 'timeout' } };
+    // the live entry survives the transient error
+    expect(mergeAuthHealthEntries(current, incoming)['zion:claude:2.1.170']).toEqual({ verdict: 'live', checkedAt: 100 });
+  });
+  it('a real verdict (revoked/live) DOES overwrite', () => {
+    const current = { k: { verdict: 'live' as const, checkedAt: 100 } };
+    expect(mergeAuthHealthEntries(current, { k: { verdict: 'revoked' as const, checkedAt: 200 } }).k.verdict).toBe('revoked');
+  });
+  it('an error on a brand-new key is still recorded (nothing prior to keep)', () => {
+    expect(mergeAuthHealthEntries({}, { k: { verdict: 'error' as const, checkedAt: 200 } }).k.verdict).toBe('error');
   });
 });
 
