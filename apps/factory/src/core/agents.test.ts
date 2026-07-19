@@ -28,6 +28,26 @@ describe('BUILT_IN_AGENTS', () => {
     expect(ag!.command).toBe('agy');
   });
 
+  test('kimi is presented with the KM chip and launches the kimi binary', () => {
+    const kimi = BUILT_IN_AGENTS.find(a => a.key === 'kimi');
+    expect(kimi).toBeDefined();
+    expect(kimi!.title).toBe('KM');
+    expect(kimi!.prefix).toBe('km');
+    expect(kimi!.icon).toBe('kimi.png');
+    expect(kimi!.command).toBe(CLI_AGENT_META['kimi'].cliCommand);
+    expect(kimi!.commandId).toBe('agents.newKimi');
+  });
+
+  test('droid is presented with the DR chip and launches the droid binary', () => {
+    const droid = BUILT_IN_AGENTS.find(a => a.key === 'droid');
+    expect(droid).toBeDefined();
+    expect(droid!.title).toBe('DR');
+    expect(droid!.prefix).toBe('dr');
+    expect(droid!.icon).toBe('droid.png');
+    expect(droid!.command).toBe(CLI_AGENT_META['droid'].cliCommand);
+    expect(droid!.commandId).toBe('agents.newDroid');
+  });
+
   test('claude agent has correct properties', () => {
     const claude = BUILT_IN_AGENTS.find(a => a.key === 'claude');
     expect(claude).toBeDefined();

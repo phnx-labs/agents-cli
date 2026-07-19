@@ -10,7 +10,11 @@ export type ThemeMode = 'light' | 'dark';
 // Icons that have light variants (dark logo for light backgrounds)
 const ICONS_WITH_LIGHT_VARIANTS = new Set([
   'chatgpt.png',
-  'cursor.png'
+  'cursor.png',
+  // Grok's and Droid's marks are monochrome white — a dark-on-light variant keeps
+  // them legible on the light/cream terminal tab bar.
+  'grok.png',
+  'droid.png'
 ]);
 
 /**

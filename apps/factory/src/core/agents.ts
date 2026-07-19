@@ -9,7 +9,9 @@ import {
   CURSOR_TITLE,
   SHELL_TITLE,
   ANTIGRAVITY_TITLE,
-  GROK_TITLE
+  GROK_TITLE,
+  KIMI_TITLE,
+  DROID_TITLE
 } from './utils';
 import { CLI_AGENT_META, CliAgentId } from './agents.cli';
 
@@ -46,7 +48,9 @@ const PRESENTED_AGENTS: AgentPresentation[] = [
   { key: 'cursor', title: CURSOR_TITLE, icon: 'cursor.png', prefix: 'cr', commandId: 'agents.newCursor' },
   { key: 'shell', title: SHELL_TITLE, icon: 'agents.png', prefix: 'sh', commandId: 'agents.newShell' },
   { key: 'antigravity', title: ANTIGRAVITY_TITLE, icon: 'antigravity.png', prefix: 'ag', commandId: 'agents.newAntigravity' },
-  { key: 'grok', title: GROK_TITLE, icon: 'grok.png', prefix: 'gk', commandId: 'agents.newGrok' }
+  { key: 'grok', title: GROK_TITLE, icon: 'grok.png', prefix: 'gk', commandId: 'agents.newGrok' },
+  { key: 'kimi', title: KIMI_TITLE, icon: 'kimi.png', prefix: 'km', commandId: 'agents.newKimi' },
+  { key: 'droid', title: DROID_TITLE, icon: 'droid.png', prefix: 'dr', commandId: 'agents.newDroid' }
 ];
 
 export const BUILT_IN_AGENTS: BuiltInAgentDef[] = PRESENTED_AGENTS.map((p) => ({

@@ -1338,7 +1338,11 @@ export function getSettings(context: vscode.ExtensionContext): AgentSettings {
         gemini: { login: autoStart, instances: config.get<number>('geminiCount', 2) },
         opencode: { login: autoStart, instances: 2 },
         cursor: { login: autoStart, instances: config.get<number>('cursorCount', 2) },
-        shell: { login: false, instances: 1 }
+        shell: { login: false, instances: 1 },
+        antigravity: { login: false, instances: 2 },
+        grok: { login: false, instances: 2 },
+        kimi: { login: false, instances: 2 },
+        droid: { login: false, instances: 2 }
       },
       custom: (config.get<{ title: string; command: string; count: number }[]>('customAgents', []) || []).map(a => ({
         name: a.title,
@@ -3491,6 +3495,10 @@ function getWebviewContent(webview: vscode.Webview, extensionUri: vscode.Uri): s
   const githubIcon = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'assets', 'github.png'));
   const antigravityIcon = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'assets', 'antigravity.png'));
   const grokIcon = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'assets', 'grok.png'));
+  const grokIconLight = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'assets', 'grok-light.png'));
+  const kimiIcon = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'assets', 'kimi.png'));
+  const droidIcon = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'assets', 'droid.png'));
+  const droidIconLight = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'assets', 'droid-light.png'));
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -3510,7 +3518,9 @@ function getWebviewContent(webview: vscode.Webview, extensionUri: vscode.Uri): s
       agents: "${agentsIcon}",
       github: "${githubIcon}",
       antigravity: "${antigravityIcon}",
-      grok: "${grokIcon}"
+      grok: { dark: "${grokIcon}", light: "${grokIconLight}" },
+      kimi: "${kimiIcon}",
+      droid: { dark: "${droidIcon}", light: "${droidIconLight}" }
     };
   </script>
 </head>

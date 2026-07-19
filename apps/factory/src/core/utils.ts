@@ -8,12 +8,14 @@ export const CURSOR_TITLE = 'CR';
 export const SHELL_TITLE = 'SH';
 export const ANTIGRAVITY_TITLE = 'AG';
 export const GROK_TITLE = 'GK';
+export const KIMI_TITLE = 'KM';
+export const DROID_TITLE = 'DR';
 export const LABEL_MAX_WORDS = 5;
 
-export const KNOWN_PREFIXES = [CLAUDE_TITLE, CODEX_TITLE, GEMINI_TITLE, OPENCODE_TITLE, CURSOR_TITLE, SHELL_TITLE, ANTIGRAVITY_TITLE, GROK_TITLE];
+export const KNOWN_PREFIXES = [CLAUDE_TITLE, CODEX_TITLE, GEMINI_TITLE, OPENCODE_TITLE, CURSOR_TITLE, SHELL_TITLE, ANTIGRAVITY_TITLE, GROK_TITLE, KIMI_TITLE, DROID_TITLE];
 
 // Agent type for session operations
-export type SessionAgentType = 'claude' | 'codex' | 'gemini' | 'cursor' | 'opencode' | 'antigravity' | 'grok';
+export type SessionAgentType = 'claude' | 'codex' | 'gemini' | 'cursor' | 'opencode' | 'antigravity' | 'grok' | 'kimi' | 'droid';
 
 // Bidirectional prefix mappings (case-insensitive)
 // Canonical: CC, CX, GX, OC, CR, SH (used in terminal names, utils.ts)
@@ -26,7 +28,9 @@ const PREFIX_MAPPINGS: Array<{ canonical: string; config: string; agentType: Ses
   { canonical: CURSOR_TITLE, config: 'cr', agentType: 'cursor' },
   { canonical: SHELL_TITLE, config: 'sh', agentType: null },
   { canonical: ANTIGRAVITY_TITLE, config: 'ag', agentType: 'antigravity' },
-  { canonical: GROK_TITLE, config: 'gk', agentType: 'grok' }
+  { canonical: GROK_TITLE, config: 'gk', agentType: 'grok' },
+  { canonical: KIMI_TITLE, config: 'km', agentType: 'kimi' },
+  { canonical: DROID_TITLE, config: 'dr', agentType: 'droid' }
 ];
 
 // Convert canonical prefix (CC) to config prefix (cl) - case insensitive
@@ -89,7 +93,15 @@ const NAME_TO_PREFIX: Record<string, string> = {
   [GROK_TITLE]: GROK_TITLE,
   'GROK': GROK_TITLE,
   'Grok': GROK_TITLE,
-  'grok': GROK_TITLE
+  'grok': GROK_TITLE,
+  [KIMI_TITLE]: KIMI_TITLE,
+  'KIMI': KIMI_TITLE,
+  'Kimi': KIMI_TITLE,
+  'kimi': KIMI_TITLE,
+  [DROID_TITLE]: DROID_TITLE,
+  'DROID': DROID_TITLE,
+  'Droid': DROID_TITLE,
+  'droid': DROID_TITLE
 };
 
 export interface DisplayPreferences {
@@ -175,6 +187,8 @@ export function getExpandedAgentName(prefix: string): string {
     [SHELL_TITLE]: 'Shell',
     [ANTIGRAVITY_TITLE]: 'Antigravity',
     [GROK_TITLE]: 'Grok',
+    [KIMI_TITLE]: 'Kimi',
+    [DROID_TITLE]: 'Droid',
     // Also map lowercase prefixes from agents.ts
     'cl': 'Claude',
     'cx': 'Codex',
@@ -184,6 +198,8 @@ export function getExpandedAgentName(prefix: string): string {
     'sh': 'Shell',
     'ag': 'Antigravity',
     'gk': 'Grok',
+    'km': 'Kimi',
+    'dr': 'Droid',
     // Allow already-expanded names to pass through
     'claude': 'Claude',
     'codex': 'Codex',
@@ -192,7 +208,9 @@ export function getExpandedAgentName(prefix: string): string {
     'cursor': 'Cursor',
     'shell': 'Shell',
     'antigravity': 'Antigravity',
-    'grok': 'Grok'
+    'grok': 'Grok',
+    'kimi': 'Kimi',
+    'droid': 'Droid'
   };
   return expandedNames[prefix] || prefix;
 }
@@ -243,7 +261,9 @@ const ICON_TO_PREFIX: Record<string, string> = {
   'cursor.png': CURSOR_TITLE,
   'agents.png': SHELL_TITLE,
   'antigravity.png': ANTIGRAVITY_TITLE,
-  'grok.png': GROK_TITLE
+  'grok.png': GROK_TITLE,
+  'kimi.png': KIMI_TITLE,
+  'droid.png': DROID_TITLE
 };
 
 const PREFIX_TO_ICON: Record<string, string> = {
@@ -254,7 +274,9 @@ const PREFIX_TO_ICON: Record<string, string> = {
   [CURSOR_TITLE]: 'cursor.png',
   [SHELL_TITLE]: 'agents.png',
   [ANTIGRAVITY_TITLE]: 'antigravity.png',
-  [GROK_TITLE]: 'grok.png'
+  [GROK_TITLE]: 'grok.png',
+  [KIMI_TITLE]: 'kimi.png',
+  [DROID_TITLE]: 'droid.png'
 };
 
 /**

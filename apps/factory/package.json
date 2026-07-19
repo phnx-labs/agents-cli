@@ -166,8 +166,24 @@
         "command": "agents.newGrok",
         "title": "Agents: New Grok (GK)",
         "icon": {
-          "light": "assets/grok.png",
+          "light": "assets/grok-light.png",
           "dark": "assets/grok.png"
+        }
+      },
+      {
+        "command": "agents.newKimi",
+        "title": "Agents: New Kimi (KM)",
+        "icon": {
+          "light": "assets/kimi.png",
+          "dark": "assets/kimi.png"
+        }
+      },
+      {
+        "command": "agents.newDroid",
+        "title": "Agents: New Droid (DR)",
+        "icon": {
+          "light": "assets/droid.png",
+          "dark": "assets/droid.png"
         }
       },
       {
@@ -683,6 +699,16 @@
         },
         {
           "command": "agents.newGrok",
+          "when": "true",
+          "group": "navigation@2"
+        },
+        {
+          "command": "agents.newKimi",
+          "when": "true",
+          "group": "navigation@2"
+        },
+        {
+          "command": "agents.newDroid",
           "when": "true",
           "group": "navigation@2"
         },

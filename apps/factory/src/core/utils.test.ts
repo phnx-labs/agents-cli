@@ -27,7 +27,9 @@ import {
   GEMINI_TITLE,
   OPENCODE_TITLE,
   CURSOR_TITLE,
-  SHELL_TITLE
+  SHELL_TITLE,
+  KIMI_TITLE,
+  DROID_TITLE
 } from './utils';
 
 describe('parseTerminalName', () => {
@@ -236,6 +238,8 @@ describe('getIconFilename', () => {
     expect(getIconFilename(OPENCODE_TITLE)).toBe('opencode.png');
     expect(getIconFilename(CURSOR_TITLE)).toBe('cursor.png');
     expect(getIconFilename(SHELL_TITLE)).toBe('agents.png');
+    expect(getIconFilename(KIMI_TITLE)).toBe('kimi.png');
+    expect(getIconFilename(DROID_TITLE)).toBe('droid.png');
   });
 
   test('returns null for unknown prefixes', () => {
@@ -252,6 +256,8 @@ describe('getIconFilename reverse lookup', () => {
     expect(getPrefixFromIconFilename('opencode.png')).toBe('OC');
     expect(getPrefixFromIconFilename('cursor.png')).toBe('CR');
     expect(getPrefixFromIconFilename('agents.png')).toBe('SH');
+    expect(getPrefixFromIconFilename('kimi.png')).toBe('KM');
+    expect(getPrefixFromIconFilename('droid.png')).toBe('DR');
   });
 
   test('getPrefixFromIconFilename returns null for unknown icons', () => {

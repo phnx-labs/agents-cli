@@ -379,7 +379,7 @@ export async function getClaudeProjectRoots(homeDir: string = homedir()): Promis
 
 export async function getSessionPathBySessionId(
   sessionId: string,
-  agentType: 'claude' | 'codex' | 'gemini' | 'opencode' | 'cursor' | 'copilot' | 'antigravity' | 'grok',
+  agentType: 'claude' | 'codex' | 'gemini' | 'opencode' | 'cursor' | 'copilot' | 'antigravity' | 'grok' | 'kimi' | 'droid',
   workspacePath?: string,
   homeDir: string = homedir(),
 ): Promise<string | undefined> {

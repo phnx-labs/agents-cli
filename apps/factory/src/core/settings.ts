@@ -127,6 +127,10 @@ export interface AgentSettings {
     opencode: BuiltInAgentConfig;
     cursor: BuiltInAgentConfig;
     shell: BuiltInAgentConfig;
+    antigravity: BuiltInAgentConfig;
+    grok: BuiltInAgentConfig;
+    kimi: BuiltInAgentConfig;
+    droid: BuiltInAgentConfig;
   };
   custom: CustomAgentConfig[];
   aliases: CommandAlias[];
@@ -199,7 +203,11 @@ export const AGENT_MODELS: Record<string, string[]> = {
   gemini: ['gemini-3-flash', 'gemini-3-pro'],
   cursor: ['composer-1'],
   opencode: [],
-  shell: []
+  shell: [],
+  antigravity: [],
+  grok: [],
+  kimi: [],
+  droid: []
 };
 
 export const DEFAULT_QUICK_LAUNCH: QuickLaunchConfig = {
@@ -248,7 +256,11 @@ export function getDefaultSettings(): AgentSettings {
       gemini: { login: false, instances: 2 },
       opencode: { login: false, instances: 2 },
       cursor: { login: false, instances: 2 },
-      shell: { login: false, instances: 1 }
+      shell: { login: false, instances: 1 },
+      antigravity: { login: false, instances: 2 },
+      grok: { login: false, instances: 2 },
+      kimi: { login: false, instances: 2 },
+      droid: { login: false, instances: 2 }
     },
     custom: [],
     aliases: [],
