@@ -333,6 +333,16 @@
   `apps/cli/src/lib/auth-health.ts` (`summarizeHostAuth`),
   `apps/cli/src/lib/devices/health-report.ts`, `apps/cli/src/commands/doctor.ts`.
 
+- **`agents fleet update` / `agents fleet run` now upgrade THIS machine too,
+  instead of failing to ssh to it.** Both fanned out over ssh to every registered
+  device including the current one — and a box usually has no authorized key to
+  itself, so the local machine came back `Permission denied (publickey)` while all
+  the remotes upgraded. `runFleet` now detects the self device (`machineId()`) and
+  runs the command as a local process (`runLocalCommand`), so `fleet update` on a
+  12-device fleet reports `12 ok` rather than `11 ok · 1 failed`. Source:
+  `apps/cli/src/lib/devices/fleet.ts` (`runFleet`, `runLocalCommand`),
+  `apps/cli/src/commands/ssh.ts`.
+
 ## 1.20.58
 
 ### Added

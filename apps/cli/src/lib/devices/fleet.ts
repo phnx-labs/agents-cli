@@ -134,6 +134,40 @@ export function runOnDevice(
 }
 
 /**
+ * Run `cmd` on THIS machine directly — no ssh. Used by {@link runFleet} for the
+ * self target: a box frequently can't ssh to itself (no self-authorized key, as
+ * `agents fleet update` hit trying to reach zion from zion) and doesn't need to —
+ * `agents upgrade` etc. runs identically as a local process. Mirrors
+ * {@link runOnDevice}'s return shape and never throws. The argv is space-joined
+ * and evaluated by a shell, matching how runOnDevice hands the command string to
+ * the remote login shell — so PATH-resolved `agents`, quoting, and `;`/`&&` all
+ * behave the same locally as remotely.
+ */
+export function runLocalCommand(
+  cmd: string[],
+  opts: { timeoutMs?: number } = {},
+): { code: number | null; stdout: string; stderr: string } {
+  try {
+    const res = spawnSync(cmd.join(' '), {
+      shell: true,
+      encoding: 'utf-8',
+      timeout: opts.timeoutMs ?? 600_000,
+    });
+    return {
+      code: res.status,
+      stdout: res.stdout?.toString() ?? '',
+      stderr: (res.stderr?.toString() ?? '') + (res.error ? String(res.error.message) : ''),
+    };
+  } catch (err) {
+    return {
+      code: 1,
+      stdout: '',
+      stderr: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
  * Build `agents upgrade --yes` argv, optionally pinned to a version/dist-tag.
  * Rejects anything that is not a plain npm version/tag token so a version pin
  * cannot inject shell metacharacters into the remote command line.
@@ -150,16 +184,33 @@ export function upgradeCommand(version?: string): string[] {
   return ['agents', 'upgrade', '--yes'];
 }
 
+export interface RunFleetOptions {
+  /**
+   * Name of THIS machine. Its target runs the command **locally** (no ssh) — a
+   * box can't reliably ssh to itself and doesn't need to. Omit to ssh every
+   * target (the old behaviour). Callers pass `machineId()`.
+   */
+  self?: string;
+  /** Injectable ssh runner (tests). */
+  runner?: typeof runOnDevice;
+  /** Injectable local runner (tests). */
+  localRunner?: typeof runLocalCommand;
+}
+
 /**
  * Execute a command across planned targets. Pure orchestration over
- * {@link runOnDevice}; testable by injecting `runner`. Per-device throws from
- * the runner are recorded as `failed` so one bad device never aborts the rest.
+ * {@link runOnDevice} / {@link runLocalCommand}; testable by injecting either.
+ * The `self` target runs locally so `agents fleet update` upgrades this machine
+ * too instead of failing to ssh to itself. Per-device throws from a runner are
+ * recorded as `failed` so one bad device never aborts the rest.
  */
 export function runFleet(
   targets: FleetTarget[],
   cmd: string[],
-  runner: typeof runOnDevice = runOnDevice,
+  opts: RunFleetOptions = {},
 ): FleetRunResult[] {
+  const runner = opts.runner ?? runOnDevice;
+  const localRunner = opts.localRunner ?? runLocalCommand;
   const results: FleetRunResult[] = [];
   for (const t of targets) {
     if (t.skip) {
@@ -172,7 +223,8 @@ export function runFleet(
       continue;
     }
     try {
-      const res = runner(t.device, cmd);
+      const isSelf = opts.self !== undefined && t.device.name === opts.self;
+      const res = isSelf ? localRunner(cmd) : runner(t.device, cmd);
       const ok = res.code === 0;
       const detail = (res.stderr || res.stdout).trim().slice(0, 200);
       results.push({

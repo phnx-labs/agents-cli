@@ -882,7 +882,7 @@ Typical workflow:
         return;
       }
       console.log(chalk.gray(`Running \`${cmd.join(' ')}\` on ${targets.filter((t) => !t.skip).length} online device(s)…`));
-      const results = runFleet(targets, cmd);
+      const results = runFleet(targets, cmd, { self: machineId() });
       printFleetResults(results);
     });
 
@@ -902,7 +902,7 @@ Typical workflow:
         return;
       }
       console.log(chalk.gray(`Running \`${cmd.join(' ')}\` on ${targets.filter((t) => !t.skip).length} online device(s)…`));
-      const results = runFleet(targets, cmd);
+      const results = runFleet(targets, cmd, { self: machineId() });
       printFleetResults(results);
     });
 }

@@ -90,9 +90,11 @@ describe('runFleet', () => {
       { device: device({ name: 'b' }), skip: 'offline' },
       { device: device({ name: 'c' }) },
     ];
-    const results = runFleet(targets, ['agents', 'upgrade', '--yes'], (d) => {
-      if (d.name === 'a') return { code: 0, stdout: 'ok', stderr: '' };
-      return { code: 1, stdout: '', stderr: 'npm ERR' };
+    const results = runFleet(targets, ['agents', 'upgrade', '--yes'], {
+      runner: (d) => {
+        if (d.name === 'a') return { code: 0, stdout: 'ok', stderr: '' };
+        return { code: 1, stdout: '', stderr: 'npm ERR' };
+      },
     });
     expect(results).toEqual([
       { name: 'a', status: 'ok', code: 0, detail: undefined },
@@ -107,12 +109,41 @@ describe('runFleet', () => {
       { device: device({ name: 'b' }) },
       { device: device({ name: 'c' }) },
     ];
-    const results = runFleet(targets, ['true'], (d) => {
-      if (d.name === 'b') throw new Error('password auth but no secrets bundle');
-      return { code: 0, stdout: '', stderr: '' };
+    const results = runFleet(targets, ['true'], {
+      runner: (d) => {
+        if (d.name === 'b') throw new Error('password auth but no secrets bundle');
+        return { code: 0, stdout: '', stderr: '' };
+      },
     });
     expect(results.map((r) => r.status)).toEqual(['ok', 'failed', 'ok']);
     expect(results[1].detail).toMatch(/password auth/);
+  });
+
+  it('runs the self target locally (never ssh) so fleet update upgrades this box too', () => {
+    const targets: FleetTarget[] = [
+      { device: device({ name: 'zion' }) }, // this machine
+      { device: device({ name: 'worker' }) },
+    ];
+    const sshed: string[] = [];
+    const localRan: string[][] = [];
+    const results = runFleet(targets, ['agents', 'upgrade', '--yes'], {
+      self: 'zion',
+      runner: (d) => { sshed.push(d.name); return { code: 0, stdout: '', stderr: '' }; },
+      localRunner: (cmd) => { localRan.push(cmd); return { code: 0, stdout: '', stderr: '' }; },
+    });
+    // self went through the local runner, NOT ssh; the remote box still ssh'd.
+    expect(sshed).toEqual(['worker']);
+    expect(localRan).toEqual([['agents', 'upgrade', '--yes']]);
+    expect(results.map((r) => [r.name, r.status])).toEqual([['zion', 'ok'], ['worker', 'ok']]);
+  });
+
+  it('a failing local self upgrade is reported as failed, not swallowed', () => {
+    const targets: FleetTarget[] = [{ device: device({ name: 'zion' }) }];
+    const results = runFleet(targets, ['agents', 'upgrade', '--yes'], {
+      self: 'zion',
+      localRunner: () => ({ code: 1, stdout: '', stderr: 'network down' }),
+    });
+    expect(results).toEqual([{ name: 'zion', status: 'failed', code: 1, detail: 'network down' }]);
   });
 });
 
