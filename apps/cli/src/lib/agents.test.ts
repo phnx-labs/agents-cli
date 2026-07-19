@@ -7,6 +7,7 @@ import { spawnSync } from 'child_process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   AGENTS,
+  ACCOUNT_INSPECTION_AGENT_IDS,
   ALL_AGENT_IDS,
   __resetAntigravityKeychainCacheForTest,
   accountOrgBadge,
@@ -16,12 +17,32 @@ import {
   getAccountInfo,
   resolveAgentName,
   resolveLastActive,
+  supportsAccountInspection,
   warnAgentDeprecated,
 } from './agents.js';
 import { IS_WINDOWS, execFileShellSpec } from './platform/index.js';
 import type { CapabilityName } from './types.js';
 
 const tempDirs: string[] = [];
+
+describe('account inspection support', () => {
+  it('matches the credential formats getAccountInfo can inspect safely', () => {
+    expect(ACCOUNT_INSPECTION_AGENT_IDS).toEqual([
+      'claude',
+      'codex',
+      'gemini',
+      'grok',
+      'antigravity',
+      'kimi',
+      'droid',
+      'opencode',
+    ]);
+    for (const agent of ACCOUNT_INSPECTION_AGENT_IDS) {
+      expect(supportsAccountInspection(agent)).toBe(true);
+    }
+    expect(supportsAccountInspection('amp')).toBe(false);
+  });
+});
 
 function makeTempDir(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-agents-'));
