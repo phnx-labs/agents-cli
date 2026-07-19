@@ -242,6 +242,33 @@
   `apps/cli/src/commands/sessions-browser.ts` (+ `sessions-browser.test.ts`),
   `apps/cli/src/commands/sessions.ts`.
 
+- **`agents setup` is now a capability hub with guided `browser` / `computer` / `share`
+  subcommands.** Bare `agents setup` still clones the system repo and imports unmanaged
+  agents, but on a TTY it now also offers to set up the optional capabilities a fresh
+  machine needs. Each is also runnable on its own and is idempotent (re-run to change
+  settings): `agents setup browser` detects an installed Chromium-family browser and
+  creates/points the `default` profile; `agents setup share` provisions or joins a
+  Cloudflare share endpoint (reusing `agents share setup`/`join`); `agents setup computer`
+  installs the macOS helper and walks you through the Accessibility + Screen-Recording
+  grants — opening the exact System Settings panes and polling until trust lands. The
+  existing `agents share setup` / `agents computer setup` remain for scripted use. Source:
+  `apps/cli/src/commands/setup.ts`, `setup-browser.ts`, `setup-computer.ts`,
+  `setup-share.ts` (+ `setup.test.ts`), `apps/cli/src/lib/browser/chrome.ts`
+  (`listInstalledBrowsers`), `apps/cli/src/commands/share.ts`.
+
+- **The macOS `agents computer` helper now ships as a signed + notarized release asset,
+  downloaded on demand.** A fresh `npm i -g @phnx-labs/agents-cli` no longer needs to build
+  the Swift helper from source: `agents computer setup` / `agents setup computer` fetch
+  `ComputerHelper.app.zip` from the matching `v<version>` GitHub release, verify it against
+  the published `.sha256`, and re-check the code signature (Developer ID Team `2HTP252L87`)
+  and notarization (`spctl --assess`) before it is ever copied to /Applications — mirroring
+  the Windows helper's distribution. The helper is version-stamped at build time and the
+  release pipeline publishes the asset automatically. Source:
+  `apps/cli/src/lib/computer/download.ts` (+ `download.test.ts`),
+  `apps/cli/src/lib/computer-rpc.ts`, `apps/cli/src/commands/computer.ts`,
+  `native/computer-mac/scripts/build.sh`, `apps/cli/scripts/publish-computer-helper-mac.sh`,
+  `apps/cli/scripts/release.sh`.
+
 ## 1.20.58
 
 ### Added
