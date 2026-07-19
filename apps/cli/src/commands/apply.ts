@@ -179,14 +179,16 @@ async function runApply(opts: ApplyOptions): Promise<void> {
   // validates the roster — so replication needs only the repo, never committed
   // IPs/usernames. `devices: all` needs no bootstrap (it targets what's already
   // registered + online).
+  let unresolved: string[] = [];
   if (manifest.devices !== 'all') {
     const wanted = Object.keys(manifest.devices).filter((n) => n !== source);
     const boot = await ensureDevicesRegistered(wanted);
+    unresolved = boot.unresolved;
     if (boot.registered.length > 0) {
       console.log(chalk.gray(`Registered ${boot.registered.length} device(s) from Tailscale: ${boot.registered.join(', ')}`));
     }
     if (boot.unresolved.length > 0) {
-      console.log(chalk.yellow(`Not resolvable on Tailscale (skipped): ${boot.unresolved.join(', ')}`));
+      console.log(chalk.yellow(`Not resolvable on Tailscale — skipped, reconcile continues for the rest: ${boot.unresolved.join(', ')}`));
     }
   }
 
@@ -198,7 +200,9 @@ async function runApply(opts: ApplyOptions): Promise<void> {
   const online = all.filter((d) => d.tailscale?.online === true).map((d) => d.name);
   const registered = all.map((d) => d.name);
 
-  let desired = resolveDesired(manifest, { onlineDevices: online, registeredDevices: registered, source });
+  // Unresolved names are skipped (surfaced above), never fatal — a manifest
+  // naming an asleep box must not abort the reconcile for every other device.
+  let desired = resolveDesired(manifest, { onlineDevices: online, registeredDevices: registered, source, unresolved });
   if (opts.device) {
     desired = desired.filter((d) => d.device === opts.device);
     if (desired.length === 0) throw new Error(`Device '${opts.device}' is not a target in this manifest.`);

@@ -138,6 +138,12 @@ export interface ResolveContext {
   registeredDevices: string[];
   /** The source machine, always excluded from the target set. */
   source: string;
+  /** Names the bootstrap could not resolve from Tailscale (off-tailnet, ignored,
+   * or a typo). These are SKIPPED with the caller's warning rather than aborting
+   * the whole reconcile — a manifest naming an asleep laptop must not hard-fail
+   * every other device. Without a bootstrap, this is empty and an unregistered
+   * name still throws (genuine misconfig, caught early). */
+  unresolved?: string[];
 }
 
 /**
@@ -158,8 +164,12 @@ export function resolveDesired(manifest: FleetManifest, ctx: ResolveContext): De
     return out;
   }
 
+  const unresolved = new Set(ctx.unresolved ?? []);
   for (const [name, override] of Object.entries(manifest.devices)) {
     if (name === ctx.source) continue;
+    // Bootstrap couldn't register this name (off-tailnet / ignored / typo) —
+    // skip it (the caller already surfaced it) instead of aborting the run.
+    if (unresolved.has(name)) continue;
     if (!ctx.registeredDevices.includes(name)) {
       throw new Error(`fleet: device '${name}' is not a registered device. Run \`agents devices add ${name}\` or fix the manifest.`);
     }
