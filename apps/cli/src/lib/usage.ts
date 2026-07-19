@@ -867,6 +867,100 @@ async function getDroidUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
 }
 
 /**
+ * Live auth probes — the same authenticated GET the usage fetchers above do,
+ * but surfacing the raw HTTP status instead of swallowing 401/expired to null.
+ * These back `agents fleet ping` and the fleet auth-health cache: completing a
+ * real request is the only proof a token is accepted. The local "signed in"
+ * flag cannot tell a revoked-but-unexpired token from a good one. Classification
+ * of the returned status into a verdict lives in lib/auth-health.ts (kept there
+ * so it stays pure/testable and to avoid an import cycle).
+ */
+export interface ProviderProbe {
+  /** HTTP status of the probe request, or null when no request was made (missing/expired token) or the request threw. */
+  status: number | null;
+  /** Local credential state observed before the request. */
+  token: 'present' | 'missing' | 'expired';
+  /** Network/parse error message when status is null but a token was present. */
+  error?: string;
+}
+
+/** Probe Claude's OAuth token against the usage endpoint. Refreshes an expired access token (safe for Claude). */
+export async function probeClaudeStatus(home?: string, cliVersion?: string | null): Promise<ProviderProbe> {
+  const oauth = await loadClaudeOauth(home);
+  if (!oauth?.accessToken) return { status: null, token: 'missing' };
+  let access: string | null = null;
+  try {
+    access = await getClaudeAccessToken(oauth, home);
+  } catch {
+    access = null;
+  }
+  // Fall back to the stored (possibly stale) token so the server returns the
+  // real verdict — a 401 here IS the revoked/expired signal we want to surface.
+  const bearer = access || oauth.accessToken.trim();
+  try {
+    const response = await fetch(CLAUDE_USAGE_URL, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${bearer}`,
+        'Content-Type': 'application/json',
+        'anthropic-beta': CLAUDE_OAUTH_BETA_HEADER,
+        'User-Agent': getClaudeUserAgent(cliVersion),
+      },
+      signal: AbortSignal.timeout(8000),
+    });
+    return { status: response.status, token: 'present' };
+  } catch (err) {
+    return { status: null, token: 'present', error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** Probe Kimi's OAuth token against the /usages endpoint. Never refreshes (single-use rotation — see getKimiUsageInfo). */
+export async function probeKimiStatus(home?: string): Promise<ProviderProbe> {
+  const credPath = resolveKimiCredentialPath(home);
+  if (!credPath) return { status: null, token: 'missing' };
+  let accessToken: string | undefined;
+  let expiresAt: number | null = null;
+  try {
+    const cred = JSON.parse(fs.readFileSync(credPath, 'utf-8'));
+    accessToken = typeof cred?.access_token === 'string' ? cred.access_token : undefined;
+    expiresAt = typeof cred?.expires_at === 'number' ? cred.expires_at : null;
+  } catch {
+    return { status: null, token: 'missing' };
+  }
+  if (!accessToken) return { status: null, token: 'missing' };
+  if (expiresAt !== null && Date.now() / 1000 >= expiresAt) return { status: null, token: 'expired' };
+  try {
+    const response = await fetch(KIMI_USAGES_URL, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+      signal: AbortSignal.timeout(8000),
+    });
+    return { status: response.status, token: 'present' };
+  } catch (err) {
+    return { status: null, token: 'present', error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** Probe Droid's WorkOS token against the billing-limits endpoint. Never refreshes (single-use rotation — see getDroidUsageInfo). */
+export async function probeDroidStatus(home?: string): Promise<ProviderProbe> {
+  const cred = decryptDroidAuthPayload(home || os.homedir());
+  const accessToken = cred?.access_token;
+  if (typeof accessToken !== 'string' || !accessToken) return { status: null, token: 'missing' };
+  const exp = decodeJwtPayload(accessToken)?.exp;
+  if (typeof exp === 'number' && Date.now() / 1000 >= exp) return { status: null, token: 'expired' };
+  try {
+    const response = await fetch(DROID_USAGE_URL, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+      signal: AbortSignal.timeout(8000),
+    });
+    return { status: response.status, token: 'present' };
+  } catch (err) {
+    return { status: null, token: 'present', error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
  * Normalize the Factory billing-limits payload into the common UsageWindow
  * shape. Orgs on the legacy (non token-rate-limit) billing model have no
  * meaningful windows, so they render nothing — mirrors droid's own gate on

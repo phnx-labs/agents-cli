@@ -100,7 +100,12 @@ describe('controlOpts (connection multiplexing)', () => {
   });
 });
 
-describe('sshExecAsync (real spawn via a PATH ssh stub — no mocks)', () => {
+// POSIX-only: the stub is a `#!/bin/sh` script, which Windows cannot exec (the
+// spawn produces no output — `expected '' to contain 'OUT_OK'`). The product code
+// (sshExecAsync) is cross-platform; only this shell-stub harness is not, so the
+// whole suite is skipped on Windows. The full Windows matrix runs only on release
+// PRs, so this surfaced there rather than on a normal PR to main.
+describe.skipIf(process.platform === 'win32')('sshExecAsync (real spawn via a PATH ssh stub — no mocks)', () => {
   // Put a genuine executable named `ssh` first on PATH so sshExecAsync's spawn('ssh')
   // runs it: a real subprocess round-trip that exercises stdout/stderr capture,
   // exit-code propagation, and the timeout -> SIGTERM path — the primitive the fleet

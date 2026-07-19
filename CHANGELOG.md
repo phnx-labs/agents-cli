@@ -268,6 +268,22 @@
   `apps/cli/src/lib/computer-rpc.ts`, `apps/cli/src/commands/computer.ts`,
   `native/computer-mac/scripts/build.sh`, `apps/cli/scripts/publish-computer-helper-mac.sh`,
   `apps/cli/scripts/release.sh`.
+- **`agents ssh` propagates your terminal's terminfo to the remote (RUSH-1811).**
+  Modern terminals (Ghostty, kitty, Alacritty, WezTerm, foot, rio) advertise a
+  custom `TERM` — e.g. `xterm-ghostty` — whose terminfo ships with the terminal,
+  not with the remote host's ncurses. SSH into a box that lacks the entry and the
+  session is subtly broken: wrong backspace, missing colors, a garbled
+  clear/alt-screen. Ghostty's shell integration fixes the bare `ssh` command, but
+  `agents ssh` (spawned directly, Tailscale-relayed) bypassed it. Now, on an
+  interactive POSIX login, `agents ssh` exports the local entry (`infocmp -x`) and
+  compiles it on the remote (`tic -x -`, into the user's `~/.terminfo`, no sudo).
+  It is **fail-safe** — any error, timeout, or missing remote `tic` is swallowed
+  so the login is never blocked or delayed beyond a short push cap — and
+  **cached** per host+`TERM`, so only the first login to each host pays one extra
+  round-trip. Skipped for Windows/PowerShell devices (the console ignores
+  terminfo), non-interactive command runs, and terminfo names ncurses ships
+  everywhere. Source: `apps/cli/src/lib/devices/terminfo.ts`,
+  `apps/cli/src/commands/ssh.ts`.
 
 ## 1.20.58
 

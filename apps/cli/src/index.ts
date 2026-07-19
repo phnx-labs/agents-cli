@@ -95,6 +95,7 @@ import {
   loadRoutines,
   loadMonitors,
   loadRun,
+  loadFork,
   loadDefaults,
   loadModels,
   loadPrune,
@@ -823,6 +824,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadRoutines);
   await reg(loadMonitors);
   await reg(loadRun);
+  await reg(loadFork);
   await reg(loadDefaults);
   await reg(loadModels);
   await reg(loadPrune);
