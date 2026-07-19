@@ -6,16 +6,17 @@ cd "$(dirname "$0")/.."
 MODE="${1:-debug}"
 
 if [ "$MODE" = "release" ]; then
-    # Universal build needs Xcode's xcbuild. Fall back to a native single-arch
-    # release build when only the Command Line Tools are installed, so a release
-    # can still be cut on a machine without full Xcode.
-    if swift build -c release --arch arm64 --arch x86_64 2>/dev/null; then
-        SRC=".build/apple/Products/Release/MenubarHelper"
-    else
-        echo "  universal build unavailable (no Xcode/xcbuild); building native single-arch release"
-        swift build -c release
-        SRC="$(swift build -c release --show-bin-path)/MenubarHelper"
-    fi
+    # SwiftPM's `--arch arm64 --arch x86_64` routes through Xcode's xcbuild, which
+    # is absent on Command-Line-Tools-only hosts. Build each slice separately via
+    # --triple (works on CLT) and lipo them into one universal binary, so a
+    # release cut on a machine without full Xcode still ships a TRUE universal
+    # menu-bar helper (not a silent single-arch fallback that breaks Intel Macs).
+    swift build -c release --triple arm64-apple-macosx14.0
+    swift build -c release --triple x86_64-apple-macosx14.0
+    SRC=".build/MenubarHelper-universal"
+    lipo -create -output "$SRC" \
+        ".build/arm64-apple-macosx/release/MenubarHelper" \
+        ".build/x86_64-apple-macosx/release/MenubarHelper"
 else
     swift build
     SRC=".build/debug/MenubarHelper"
