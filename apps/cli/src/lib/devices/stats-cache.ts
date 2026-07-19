@@ -15,8 +15,8 @@
  * - **`--refresh` / `--live`:** skip the cache and live-probe every device,
  *   rewriting the cache.
  *
- * The daemon's device probe warms this cache (~every 3 min, see
- * `lib/daemon.ts runDeviceProbe`), so in steady state a default read has zero
+ * The daemon warms this cache (~every 3 min, see `lib/daemon.ts
+ * runFleetCacheWarm`), so in steady state a default read has zero
  * remote ssh round-trips and returns immediately with data that is at most a
  * few minutes old — surfaced to the user as an "as of …" freshness note.
  */

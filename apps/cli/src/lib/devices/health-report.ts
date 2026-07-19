@@ -1,5 +1,5 @@
 import chalk from 'chalk';
-import { padToWidth, terminalWidth, truncateToWidth } from '../session/width.js';
+import { padToWidth, stringWidth, terminalWidth, truncateToWidth } from '../session/width.js';
 import { fmtBytes, headroom, type DeviceStats } from './health.js';
 import { formatCheckedAge, type HostAuthSummary } from '../auth-health.js';
 
@@ -228,16 +228,20 @@ export function renderFleetMatrix(report: FleetHealthReport): string[] {
     14,
     Math.max(7, ...report.devices.map((r) => (r.version ?? '-').length)),
   );
+  // Auth cells are variable-length (up to four space-separated buckets, e.g.
+  // `●2 ·3 ◐1 ○1`); size the column to the widest so a mixed-auth row can't
+  // overflow the fixed slot and shove every later column out of alignment.
+  const authW = Math.max(9, ...report.devices.map((r) => stringWidth(authLabel(r))));
   const width = terminalWidth();
   // 4 = leading "  " + the per-row status glyph + its trailing space (rows prefix
   // `  ${statusGlyph} `; the header reserves the same 4 cols so every column lines up).
-  // Columns: Device, OS(8), Health(9), Sync(9), CLI(9), Auth(9), Version, Load/Mem(9), then Note.
-  const fixed = 4 + nameW + 2 + 8 + 2 + 9 + 2 + 9 + 2 + 9 + 2 + 9 + 2 + versionW + 2 + 9;
+  // Columns: Device, OS(8), Health(9), Sync(9), CLI(9), Auth(authW), Version, Load/Mem(9), then Note.
+  const fixed = 4 + nameW + 2 + 8 + 2 + 9 + 2 + 9 + 2 + 9 + 2 + authW + 2 + versionW + 2 + 9;
   const noteW = Math.max(12, width - fixed);
   const lines = [
     chalk.bold('Fleet status'),
     chalk.gray(
-      `    ${padToWidth('Device', nameW)}  ${padToWidth('OS', 8)}  ${padToWidth('Health', 9)}  ${padToWidth('Sync', 9)}  ${padToWidth('CLI', 9)}  ${padToWidth('Auth', 9)}  ${padToWidth('Version', versionW)}  ${padToWidth('Load/Mem', 9)}  Note`,
+      `    ${padToWidth('Device', nameW)}  ${padToWidth('OS', 8)}  ${padToWidth('Health', 9)}  ${padToWidth('Sync', 9)}  ${padToWidth('CLI', 9)}  ${padToWidth('Auth', authW)}  ${padToWidth('Version', versionW)}  ${padToWidth('Load/Mem', 9)}  Note`,
     ),
   ];
   for (const row of report.devices) {
@@ -248,7 +252,7 @@ export function renderFleetMatrix(report: FleetHealthReport): string[] {
       `${padToWidth(headroomLabel(row), 9)}  ` +
       `${padToWidth(driftLabel(row), 9)}  ` +
       `${padToWidth(cliLabel(row), 9)}  ` +
-      `${padToWidth(authLabel(row), 9)}  ` +
+      `${padToWidth(authLabel(row), authW)}  ` +
       `${padToWidth(truncateToWidth(row.version ?? '-', versionW), versionW)}  ` +
       `${padToWidth(loadLabel(row.stats), 9)}  ` +
       chalk.gray(truncateToWidth(note || `free ${fmtBytes(row.stats?.memFreeBytes)}`, noteW)),

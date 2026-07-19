@@ -97,6 +97,21 @@ describe('Auth column + freshness', () => {
     expect(lines.find((l) => l.includes('nocache-box'))).toContain('—');
   });
 
+  it('sizes the Auth column so a wide mixed-auth cell never misaligns later columns', () => {
+    // Regression: a full `●2 ·3 ◐1 ○1` cell (11 display cells) overflowed a
+    // hard-coded 9-wide slot, shoving Version/Load-Mem/Note right on that row.
+    // Same name width + same version → the Version value must start at the same
+    // column in both the wide-auth row and the em-dash row.
+    const report = buildFleetHealthReport([
+      row({ name: 'aaaa', version: '9.9.9', auth: { live: 2, present: 3, degraded: 1, revoked: 1, total: 7, oldestCheckedAt: 1 } }),
+      row({ name: 'bbbb', version: '9.9.9' }), // no auth → '—'
+    ]);
+    const lines = renderFleetMatrix(report).map(stripAnsi);
+    const wide = lines.find((l) => l.includes('aaaa'))!;
+    const narrow = lines.find((l) => l.includes('bbbb'))!;
+    expect(wide.indexOf('9.9.9')).toBe(narrow.indexOf('9.9.9'));
+  });
+
   it('does not paint present (unverified) accounts as degraded ◐', () => {
     // The bug this guards: a fleet of signed-in codex/grok accounts (all
     // `unverified`) must not read as degraded. Only `·` should appear, no `◐`.

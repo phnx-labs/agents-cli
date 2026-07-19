@@ -195,6 +195,10 @@ export function summarizeHostAuth(
   let oldest: number | null = null;
   for (const [key, health] of Object.entries(cache)) {
     if (!key.startsWith(prefix)) continue;
+    // `unconfigured` = no credential at all — not a probed account. Writers
+    // already drop these before they reach the cache; skip here too so a stray
+    // one never counts toward total or the freshness age (belt-and-suspenders).
+    if (health.verdict === 'unconfigured') continue;
     total++;
     switch (health.verdict) {
       case 'live': live++; break;
