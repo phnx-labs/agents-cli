@@ -6,8 +6,30 @@ import {
   MAC_HELPER_APP_NAME,
   macHelperAssetUrls,
   macHelperCacheDir,
+  parseTeamId,
 } from './download.js';
 import { getCacheDir } from '../state.js';
+
+describe('parseTeamId (verifyMacHelper Team-ID extraction)', () => {
+  // `codesign -dv --verbose=4` writes this block to STDERR even on success — the
+  // verifier must read stderr, or every validly-signed helper is falsely rejected.
+  const realOutput = [
+    'Executable=/x/ComputerHelper.app/Contents/MacOS/ComputerHelper',
+    'Identifier=com.phnx-labs.computer-helper',
+    'CodeDirectory v=20500 size=969 flags=0x10000(runtime)',
+    'Authority=Developer ID Application: Muqit Nawaz (2HTP252L87)',
+    'TeamIdentifier=2HTP252L87',
+  ].join('\n');
+
+  it('extracts the Team ID from real codesign -dv output', () => {
+    expect(parseTeamId(realOutput)).toBe('2HTP252L87');
+  });
+
+  it('returns null for ad-hoc / unsigned output (no TeamIdentifier) and for empty input', () => {
+    expect(parseTeamId('Identifier=x\nTeamIdentifier=not set\n')).toBeNull();
+    expect(parseTeamId('')).toBeNull(); // the old bug: reading empty stdout -> null -> false reject
+  });
+});
 
 describe('mac helper release-asset download', () => {
   it('builds asset URLs pinned to the exact v<version> tag', () => {

@@ -14,7 +14,7 @@
  * we extract it with `ditto -x -k` after the checksum passes.
  */
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -46,6 +46,12 @@ export function macHelperAssetUrls(version: string): { zip: string; sha256: stri
   return { zip: `${base}/${MAC_HELPER_ASSET}`, sha256: `${base}/${MAC_HELPER_ASSET}.sha256` };
 }
 
+/** Extract `TeamIdentifier=XXXX` from `codesign -dv --verbose=4` output (which is
+ * emitted on stderr). Returns null when absent (ad-hoc / unsigned). */
+export function parseTeamId(codesignInfo: string): string | null {
+  return codesignInfo.match(/TeamIdentifier=([A-Z0-9]+)/)?.[1] ?? null;
+}
+
 /**
  * Verify a helper `.app` bundle is intact, signed by the expected Developer ID
  * Team, and notarized (Gatekeeper-accepted). Throws with an actionable message
@@ -60,15 +66,13 @@ export function verifyMacHelper(appPath: string): void {
   }
 
   // 2. Team identity — must be our Developer ID, not some other valid signer.
-  let info = '';
-  try {
-    info = execFileSync('/usr/bin/codesign', ['-dv', '--verbose=4', appPath], { stdio: 'pipe' }).toString();
-  } catch (e) {
-    // codesign -dv writes to stderr; capture whatever it emitted.
-    info = ((e as { stderr?: Buffer }).stderr?.toString() ?? '') + ((e as { stdout?: Buffer }).stdout?.toString() ?? '');
-    if (!info) throw new Error(`could not read code signature of ${appPath}: ${(e as Error).message}`);
-  }
-  const team = info.match(/TeamIdentifier=([A-Z0-9]+)/)?.[1];
+  // `codesign -dv` writes its details to STDERR even on success (exit 0), so we
+  // must read stderr, not stdout. spawnSync captures both streams regardless of
+  // exit code; execFileSync would return only (empty) stdout and the Team check
+  // would falsely reject every validly-signed helper.
+  const dv = spawnSync('/usr/bin/codesign', ['-dv', '--verbose=4', appPath], { encoding: 'utf8' });
+  const info = `${dv.stdout ?? ''}${dv.stderr ?? ''}`;
+  const team = parseTeamId(info);
   if (team !== EXPECTED_TEAM_ID) {
     throw new Error(
       `helper signed by unexpected Team (${team ?? 'none'}), expected ${EXPECTED_TEAM_ID}. Refusing to install.`,
