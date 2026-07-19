@@ -237,8 +237,7 @@ export function registerSessionsTailCommand(sessionsCmd: Command): void {
     .command('tail [sessionId]')
     .description('Stream JSONL events from a session file as they are written, one event per line. Long-running: Ctrl+C to stop. Claude and Codex only.')
     .option('--latest', 'Tail the most recent tailable session (claude or codex)')
-    .option('--from-start', 'Emit the full file first, then follow (default: start at EOF)')
-    .option('--json', 'Raw JSONL passthrough (default)');
+    .option('--from-start', 'Emit the full file first, then follow (default: start at EOF)');
 
   setHelpSections(tailCmd, {
     examples: `
