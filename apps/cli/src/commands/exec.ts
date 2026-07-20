@@ -13,6 +13,7 @@ import type { AgentId } from '../lib/types.js';
 import type { DetectedRuntime } from '../lib/crabbox/runtimes.js';
 import type { ResolvedRunDefaults } from '../lib/run-defaults.js';
 import { setHelpSections } from '../lib/help.js';
+import { isInteractiveTerminal, requireInteractiveSelection } from './utils.js';
 import { parseLoopInterval } from '../lib/loop.js';
 import type { RotateResult } from '../lib/rotate.js';
 import { AGENTS } from '../lib/agents.js';
@@ -922,6 +923,21 @@ export function registerRunCommand(program: Command): void {
                     `Make sure the host is reachable over SSH, then re-run with --copy-creds.`,
               ));
               process.exit(1);
+            }
+
+            // --copy-creds ships live credentials to a host, so it deliberately
+            // requires an interactive terminal to pick which signed-in runtimes to
+            // send and to confirm the transfer. Fail clean in a non-TTY/headless
+            // shell instead of hanging on the picker/confirm below — auto-shipping
+            // every signed-in token without consent would defeat the gate's purpose.
+            if (!isInteractiveTerminal()) {
+              // No non-interactive form: --copy-creds must pick which signed-in
+              // runtimes to ship and confirm the transfer, so pass no alternatives
+              // (an empty list prints just the "needs an interactive terminal" line).
+              requireInteractiveSelection(
+                '--copy-creds (it selects which credentials to ship and confirms the transfer)',
+                [],
+              );
             }
 
             const { detectSignedInRuntimes, pickRuntimes, resolveClaudeCredentialsBlob } = await import('../lib/crabbox/runtimes.js');

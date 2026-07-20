@@ -465,6 +465,29 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     expect(fs.lstatSync(codexSymlink).isSymbolicLink()).toBe(true);
   });
 
+  it('refuses to `use` an isolated install as the active version (never repoints the real config)', () => {
+    const home = makeTempHome();
+    tempHomes.push(home);
+    writeFakeManagedVersion(home, 'codex', '0.1.0', 'codex');
+    // Mark it isolated the way `agents add --isolated` does: a `.isolated` marker
+    // in the version dir. `agents use codex@0.1.0` must refuse it rather than
+    // repoint the real ~/.codex at (and carry settings into) an isolated home.
+    fs.writeFileSync(
+      path.join(home, '.agents', '.history', 'versions', 'codex', '0.1.0', '.isolated'),
+      '',
+    );
+
+    const result = runAgents(home, ['use', 'codex@0.1.0']);
+    const codexSymlink = path.join(home, '.codex');
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('isolated install');
+    // The isolation guarantee: the real ~/.codex is never created/repointed and
+    // no default pin is written for the isolated version.
+    expect(fs.existsSync(codexSymlink)).toBe(false);
+    expect(fs.existsSync(devicePinsPath(home))).toBe(false);
+  });
+
   it('does not switch an existing default during non-interactive add', () => {
     const home = makeTempHome();
     tempHomes.push(home);

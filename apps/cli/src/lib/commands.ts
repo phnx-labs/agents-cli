@@ -15,6 +15,7 @@ import { capableAgents, isCapable, supports } from './capabilities.js';
 import { markdownToToml } from './convert.js';
 import { getCommandsDir, getUserCommandsDir, getEnabledExtraRepos, getProjectAgentsDir, getSkillsDir, getTrashCommandsDir } from './state.js';
 import { getEffectiveHome, getVersionHomePath, listInstalledVersions, resolveVersion } from './versions.js';
+import { discoverPlugins } from './plugins.js';
 import type { AgentId, CommandInstallation } from './types.js';
 import {
   commandSkillMatches,
@@ -436,8 +437,26 @@ export interface VersionCommandDiff {
 /**
  * Compare a version home's commands against central. Returns the reconciliation diff.
  */
+/**
+ * Flattened names of plugin-bundled commands (`<plugin>-<command>`), matching
+ * exactly how `syncPluginToVersion` installs a plugin's `commands/<cmd>.md` as a
+ * command-skill (plugins.ts → `installCommandSkillToVersion(agentDir,
+ * `${plugin.name}-${cmd}`, …)`). These are source-managed by their plugin, so
+ * the orphan detector must NOT flag them — else `prune cleanup` proposes
+ * deleting live plugin commands (swarm-plan, code-review, …). Scans user +
+ * system + extra marketplaces (no project layer), matching the trusted sources.
+ */
+export function listPluginCommandNames(): Set<string> {
+  const names = new Set<string>();
+  for (const plugin of discoverPlugins()) {
+    for (const cmd of plugin.commands) names.add(`${plugin.name}-${cmd}`);
+  }
+  return names;
+}
+
 export function diffVersionCommands(agent: AgentId, version: string): VersionCommandDiff {
   const central = new Set(listCentralCommands());
+  const pluginCommands = listPluginCommandNames();
   const installed = new Set(listCommandsInVersionHome(agent, version));
 
   const toAdd: string[] = [];
@@ -461,15 +480,19 @@ export function diffVersionCommands(agent: AgentId, version: string): VersionCom
   }
 
   for (const name of installed) {
-    if (!central.has(name)) {
-      orphans.push(name);
+    if (central.has(name)) {
+      const sourcePath = path.join(getCommandsDir(), `${name}.md`);
+      const metadata = parseCommandMetadata(sourcePath);
+      if (!commandAppliesTo(agent, version, metadata).ok) {
+        toRemove.push(name);
+      }
       continue;
     }
-    const sourcePath = path.join(getCommandsDir(), `${name}.md`);
-    const metadata = parseCommandMetadata(sourcePath);
-    if (!commandAppliesTo(agent, version, metadata).ok) {
-      toRemove.push(name);
-    }
+    // A plugin-bundled command (installed as `<plugin>-<cmd>`) is source-managed
+    // by its plugin — not an orphan. Only a name with no central AND no plugin
+    // source is genuinely unmanaged.
+    if (pluginCommands.has(name)) continue;
+    orphans.push(name);
   }
 
   return {

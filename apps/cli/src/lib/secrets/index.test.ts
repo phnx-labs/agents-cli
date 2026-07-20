@@ -12,6 +12,7 @@ import { randomBytes } from 'node:crypto';
 import {
   assertValueStorable,
   buildAddGenericPasswordArgs,
+  buildAddGenericPasswordSpawnOptions,
   computeRekeyPlan,
   deleteKeychainToken,
   getKeychainToken,
@@ -42,6 +43,26 @@ describe('buildAddGenericPasswordArgs (RUSH-1764: value never in argv)', () => {
     // carries no value, so the secret is still absent from argv.
     expect(args).toEqual(['add-generic-password', '-U', '-a', 'alice', '-s', 'linear-api-key', '-w']);
     expect(args[args.length - 1]).toBe('-w');
+  });
+});
+
+describe('buildAddGenericPasswordSpawnOptions (bare -w write must not prompt an interactive tty)', () => {
+  const opts = buildAddGenericPasswordSpawnOptions('sk-secret-value');
+
+  it('detaches from the controlling terminal so readpassphrase reads piped stdin, not /dev/tty', () => {
+    // Without detached:true, `security -w` prompts the user's terminal in an
+    // interactive shell (e.g. `agents view` refreshing a Claude token) and hangs
+    // to the timeout — verified under a pty. This is the whole fix.
+    expect(opts.detached).toBe(true);
+  });
+
+  it('pipes the value TWICE (bare -w asks enter+confirm; one line stores empty)', () => {
+    expect(opts.input).toBe('sk-secret-value\nsk-secret-value\n');
+  });
+
+  it('keeps a bounded timeout so a context that cannot read the prompt fails loudly, not hangs', () => {
+    expect(opts.timeout).toBeGreaterThan(0);
+    expect(opts.stdio).toEqual(['pipe', 'pipe', 'pipe']);
   });
 });
 

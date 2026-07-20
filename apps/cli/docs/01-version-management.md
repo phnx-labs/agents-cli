@@ -151,6 +151,53 @@ Key behaviors:
 - Subsequent switches just update the symlink target (no new backups)
 - Each version has isolated auth in its `home/` directory
 
+## Isolated Installs
+
+`agents add <agent>@<version> --isolated` installs a fully self-contained copy
+that never touches the user's existing setup. It is the escape hatch for "give me
+a clean, separate <agent> without disturbing my current one."
+
+An isolated install deliberately SKIPS every adopting side effect of a normal
+install:
+
+- No global default is set or offered (`setGlobalDefault()` is never called).
+- No bare `<agent>` shim is created, so nothing on `PATH` is shadowed.
+- The real `~/.<agent>` is never backed up or replaced with a symlink
+  (`switchConfigSymlink()` is never called).
+- No settings carry-over and no resource sync — the copy starts pristine, with
+  its own `home/` config and its own login.
+
+What it DOES create is just enough to launch the copy explicitly:
+
+```
+agents add claude@2.1.112 --isolated
+           │
+           ▼
+  installVersion()                 # same npm install into versions/claude/2.1.112/
+  createVersionedAlias()           # ~/.agents-system/shims/claude@2.1.112
+  markVersionIsolated()            # writes versions/claude/2.1.112/.isolated
+```
+
+Run it with an explicit version selector (PATH-independent):
+
+```
+agents run claude@2.1.112 "your prompt"
+```
+
+The `.isolated` sentinel lives at the version-dir root, so it travels to trash on
+removal and is restored intact. Two consequences follow from the marker:
+
+- `removeVersion()` never auto-promotes an isolated version to the global
+  default; if the only survivors are isolated, it clears the default instead.
+- `agents remove <agent>@<version> --isolated` refuses to remove anything that is
+  NOT an isolated install, and its picker only lists isolated versions — so a
+  normal/default install (and the real `~/.<agent>`) can never be removed by
+  accident. Removal is still a soft-delete to trash, recoverable via
+  `agents trash restore`.
+
+`--isolated` cannot be combined with `--project` (an isolated copy is
+global-but-separate; a project pin selects a shared install for one directory).
+
 ## Resource Syncing
 
 `syncResourcesToVersion()` links central `~/.agents/` resources into version homes:
