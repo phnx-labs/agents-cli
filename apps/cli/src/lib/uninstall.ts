@@ -250,8 +250,10 @@ export function planUninstall(): UninstallPlan {
   const legacy = getLegacySystemAgentsDir();
   let legacySymlink: string | null = null;
   try {
-    fs.lstatSync(legacy);
-    legacySymlink = legacy;
+    // Only claim it if it's actually a link (symlink on POSIX, junction on Windows —
+    // both report isSymbolicLink()); a real directory here is left alone so removeLink
+    // (unlinkSync) is always the correct primitive for what we captured.
+    if (fs.lstatSync(legacy).isSymbolicLink()) legacySymlink = legacy;
   } catch {
     legacySymlink = null;
   }
@@ -352,10 +354,13 @@ export function executeUninstall(plan: UninstallPlan, opts: { purge?: boolean; t
     }
   }
 
-  // 5. Remove the legacy back-compat symlink, if present.
+  // 5. Remove the legacy back-compat symlink, if present. `~/.agents-system` is a
+  // link (junction on Windows — createLink uses 'junction' for a dir source), so it
+  // goes through removeLink for the same reason as the config links: rmSync throws
+  // EFAULT on a Windows reparse point.
   if (plan.legacySymlink) {
     try {
-      fs.rmSync(plan.legacySymlink, { recursive: true, force: true });
+      removeLink(plan.legacySymlink);
       result.legacySymlinkRemoved = true;
     } catch (err) {
       result.errors.push(`legacy ${plan.legacySymlink}: ${(err as Error).message}`);

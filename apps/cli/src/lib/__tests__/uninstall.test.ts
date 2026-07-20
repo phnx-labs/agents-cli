@@ -191,6 +191,34 @@ describe('uninstall restores adopted configs and never touches un-adopted ones',
     expect(result.errors).toEqual([]);
   });
 
+  it('removes the legacy ~/.agents-system back-compat link (junction on Windows) and reports it', () => {
+    const result = runInHome(String.raw`
+      adopt('claude', '.claude', '1.0.0', 'MANAGED');
+      backup('claude', 1700000000000, 'ORIGINAL_CLAUDE');
+      // Plant the legacy back-compat link exactly as foldLegacySystemRepo does:
+      // ~/.agents-system -> the system repo dir, as a junction on win32.
+      const sysTarget = path.join(userDir, '.system');
+      fs.mkdirSync(sysTarget, { recursive: true });
+      fs.writeFileSync(path.join(sysTarget, 'marker'), 'SYSTEM');
+      const legacy = path.join(home, '.agents-system');
+      fs.symlinkSync(sysTarget, legacy, process.platform === 'win32' ? 'junction' : undefined);
+
+      const plan = planUninstall();
+      const res = executeUninstall(plan, { purge: false, timestamp: 8 });
+      console.log(JSON.stringify({
+        plannedLegacy: plan.legacySymlink,
+        legacyRemoved: res.legacySymlinkRemoved,
+        legacyGone: !fs.existsSync(legacy),
+        errors: res.errors,
+      }));
+    `);
+    expect(result.plannedLegacy).toContain('.agents-system');
+    expect(result.legacyRemoved).toBe(true);
+    expect(result.legacyGone).toBe(true);
+    // The critical regression guard: no EFAULT (or any) error on the legacy junction.
+    expect(result.errors).toEqual([]);
+  });
+
   it('is idempotent — a second uninstall run is a safe no-op', () => {
     const result = runInHome(String.raw`
       adopt('claude', '.claude', '1.0.0', 'MANAGED');
