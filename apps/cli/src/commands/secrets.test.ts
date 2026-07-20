@@ -324,6 +324,13 @@ describe('buildRemoteUnlockArgs (unlock --host wiring)', () => {
   it('--all wins over any stray names', () => {
     expect(buildRemoteUnlockArgs(['x'], { all: true })).toEqual(['unlock', '--all']);
   });
+
+  it('forwards --durable so the remote honors it (not silently downgraded)', () => {
+    expect(buildRemoteUnlockArgs(['a'], { durable: true })).toEqual(['unlock', 'a', '--durable']);
+    expect(buildRemoteUnlockArgs([], { all: true, ttl: '2h', durable: true }))
+      .toEqual(['unlock', '--all', '--ttl', '2h', '--durable']);
+    expect(buildRemoteUnlockArgs(['a'], {})).not.toContain('--durable');
+  });
 });
 
 describe('exportBundleToFile / importBundleFromFile file round-trip', () => {

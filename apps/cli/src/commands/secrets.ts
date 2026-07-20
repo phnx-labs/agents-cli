@@ -329,11 +329,14 @@ function maybePrintSyncedHint(name: string): void {
  * defaults). Shared with the command action so the wiring is unit-testable
  * without a live SSH session.
  */
-export function buildRemoteUnlockArgs(names: string[], opts: { all?: boolean; ttl?: string }): string[] {
+export function buildRemoteUnlockArgs(names: string[], opts: { all?: boolean; ttl?: string; durable?: boolean }): string[] {
   return [
     'unlock',
     ...(opts.all ? ['--all'] : names),
     ...(opts.ttl ? ['--ttl', opts.ttl] : []),
+    // Forward --durable so a remote unlock honors it too; without this the remote
+    // silently falls back to its own secrets.agent.durable default (off).
+    ...(opts.durable ? ['--durable'] : []),
   ];
 }
 
