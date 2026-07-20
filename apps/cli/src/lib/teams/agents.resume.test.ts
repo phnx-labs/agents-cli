@@ -176,8 +176,14 @@ describe.skipIf(IS_WINDOWS)('resumeTeammate — launch failure', () => {
     const id = 'claude-agent-relaunch-failure';
     const dir = path.join(base, id);
     const marker = `resume-transaction-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const startedAt = new Date('2026-07-13T12:00:00.000Z');
-    const completedAt = new Date('2026-07-13T12:34:56.000Z');
+    // Recent, not a hardcoded calendar date: the manager's cleanupAgeDays (7)
+    // sweep deletes any teammate dir older than the cutoff during init, so a
+    // fixed past date turns this into a time bomb that starts failing exactly 7
+    // days after it was written (the teammate is reaped before resumeTeammate can
+    // find it → "No teammate with id"). Anchor to `now` so it stays in-window;
+    // the exact values are still asserted for preservation below.
+    const startedAt = new Date(Date.now() - 60 * 60 * 1000);
+    const completedAt = new Date(Date.now() - 30 * 60 * 1000);
     fs.mkdirSync(dir, { recursive: true });
 
     const agent = new AgentProcess(
