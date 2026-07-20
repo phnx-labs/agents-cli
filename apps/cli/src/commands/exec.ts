@@ -931,9 +931,12 @@ export function registerRunCommand(program: Command): void {
             // shell instead of hanging on the picker/confirm below — auto-shipping
             // every signed-in token without consent would defeat the gate's purpose.
             if (!isInteractiveTerminal()) {
+              // No non-interactive form: --copy-creds must pick which signed-in
+              // runtimes to ship and confirm the transfer, so pass no alternatives
+              // (an empty list prints just the "needs an interactive terminal" line).
               requireInteractiveSelection(
-                '--copy-creds (choosing which credentials to ship and confirming the transfer)',
-                [`agents run <agent> --host ${host.name} --copy-creds "..."   # from an interactive terminal`],
+                '--copy-creds (it selects which credentials to ship and confirms the transfer)',
+                [],
               );
             }
 
