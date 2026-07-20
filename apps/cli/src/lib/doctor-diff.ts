@@ -290,6 +290,13 @@ function dirsContentMatch(src: string, dst: string): boolean {
 }
 
 function diffSkills(agent: AgentId, version: string, cwd: string, excludeProject = false): ResourceDiff[] {
+  // Native ~/.agents/skills consumers (Gemini, …) read central skills directly.
+  // The orchestrator DELETES their version-home skills dir (syncResourcesToVersion)
+  // and registers no skills writer, so there is nothing in the version home to
+  // reconcile. Mirror diffVersionSkills' native gate (skills.ts) — without it
+  // every central skill is false-reported `missing` and held as unreconcilable
+  // forever (drift never clears for these agents).
+  if (AGENTS[agent].nativeAgentsSkillsDir) return [];
   const homeDir = getVersionSkillsDir(agent, version);
   const installed = new Set(listSkillsInVersionHome(agent, version));
   const layerBases = buildLayerBases(cwd, 'skills', { excludeProject });

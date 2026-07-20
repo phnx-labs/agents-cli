@@ -170,6 +170,23 @@ describe('diffVersionResources — rules', () => {
   });
 });
 
+describe('diffVersionResources — native ~/.agents/skills agents', () => {
+  // Gemini reads central skills directly; the orchestrator deletes its
+  // version-home skills dir and registers no skills writer. diffSkills must
+  // return no rows, or every central skill is false-reported `missing` and held
+  // as unreconcilable forever (drift never clears).
+  it('reports no skill rows for a nativeAgentsSkillsDir agent even with a central source skill', () => {
+    makeVersionHome('gemini', '1.0.0');
+    // A central source skill that a non-native agent WOULD report as missing.
+    const skillDir = path.join(systemDir, 'skills', 'demo');
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '---\ndescription: demo\n---\nbody\n');
+
+    const report = runDiff(projectDir, 'gemini', '1.0.0', ['skills']);
+    expect(report.kinds.skills).toEqual([]);
+  });
+});
+
 describe('diffVersionResources — command-as-skill agents', () => {
   // Kimi (and Codex >= 0.117, Grok) install commands as SKILL wrappers, not
   // native command files. The diff must compare against the wrapper or it
