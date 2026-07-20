@@ -83,13 +83,18 @@ export function detectProject(dir: string = process.cwd()): string {
 }
 
 /**
- * Notion-style default slug: `<project>-<feature>-<6hex>`. Project scopes the link
+ * Notion-style default slug: `<project>-<feature>-<16hex>`. Project scopes the link
  * to the repo the agent is in; the random tail keeps it unguessable + collision-free.
  * A leading `plan-` on the filename is dropped (it's redundant under the project).
+ *
+ * The tail is 8 random bytes (64-bit, 16 hex chars). Reads are public — the URL is
+ * the only capability — so the nonce must be genuinely infeasible to brute-force,
+ * not merely unlisted; 64 bits puts a blind guess out of reach. (See docs/share.md
+ * §Security for the threat model and `--expire` for sensitive content.)
  */
 export function defaultSlug(filePath: string, dir?: string): string {
   const feature = slugify(filePath).replace(/^plan-/, '') || 'page';
-  return `${detectProject(dir)}-${feature}-${randomBytes(3).toString('hex')}`;
+  return `${detectProject(dir)}-${feature}-${randomBytes(8).toString('hex')}`;
 }
 
 function guessContentType(filePath: string): string {

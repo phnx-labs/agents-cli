@@ -69,12 +69,20 @@ describe('detectProject / defaultSlug', () => {
     expect(detectProject(d)).toBe(expectedProject(d));
   });
 
-  it('builds <project>-<feature>-<6hex> and drops a redundant leading plan-', () => {
+  it('builds <project>-<feature>-<16hex> and drops a redundant leading plan-', () => {
     const d = mkdtempSync(join(tmpdir(), 'projx-'));
     const slug = defaultSlug('/somewhere/plan-fleet-cockpit.html', d);
-    expect(slug).toMatch(/-fleet-cockpit-[0-9a-f]{6}$/);
+    // 16 hex chars = 8 random bytes = 64-bit nonce (hardened from 24-bit, RUSH-1821).
+    expect(slug).toMatch(/-fleet-cockpit-[0-9a-f]{16}$/);
     expect(slug).not.toContain('plan-fleet-cockpit');
     expect(slug.startsWith(expectedProject(d) + '-')).toBe(true);
+  });
+
+  it('the random tail is a full 64-bit (16 hex char) nonce, not the old 24-bit one', () => {
+    const d = mkdtempSync(join(tmpdir(), 'projn-'));
+    const tail = defaultSlug('/x/report.html', d).split('-').pop()!;
+    expect(tail).toMatch(/^[0-9a-f]{16}$/);
+    expect(tail).toHaveLength(16);
   });
 
   it('two publishes of the same file get distinct (hashed) slugs', () => {
