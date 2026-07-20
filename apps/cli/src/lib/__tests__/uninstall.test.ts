@@ -31,12 +31,15 @@ function runInHome(body: string): Record<string, unknown> {
     // Minimal ~/.agents so planUninstall sees an install.
     fs.mkdirSync(shimsDir, { recursive: true });
 
-    // Helper: adopt <agent> — a ~/.<agent> symlink into a version home.
+    // Helper: adopt <agent> — a ~/.<agent> link into a version home. Uses the SAME
+    // link type production does (switchConfigSymlink: 'junction' on win32), which on
+    // Windows also sidesteps the elevated-privilege requirement of directory symlinks.
     function adopt(agent, configDirName, version, managedContent) {
       const versionHome = path.join(versionsRoot, agent, version, 'home', configDirName);
       fs.mkdirSync(versionHome, { recursive: true });
       fs.writeFileSync(path.join(versionHome, 'marker'), managedContent);
-      fs.symlinkSync(versionHome, path.join(home, configDirName));
+      const type = process.platform === 'win32' ? 'junction' : undefined;
+      fs.symlinkSync(versionHome, path.join(home, configDirName), type);
       return versionHome;
     }
     function backup(agent, ts, originalContent) {
@@ -54,7 +57,7 @@ function runInHome(body: string): Record<string, unknown> {
       const versionHome = path.join(versionsRoot, agent, version, 'home', configDirName);
       const linkDir = path.join(versionHome, kind);
       fs.mkdirSync(linkDir, { recursive: true });
-      fs.symlinkSync(central, path.join(linkDir, name));
+      fs.symlinkSync(central, path.join(linkDir, name), process.platform === 'win32' ? 'junction' : undefined);
     }
     ${body}
   `;
@@ -70,14 +73,7 @@ function runInHome(body: string): Record<string, unknown> {
   return JSON.parse(out.trim().split('\n').at(-1) ?? '{}');
 }
 
-// POSIX-gated: the restore round-trip is driven through real config-dir symlinks,
-// which on native Windows are junctions with distinct removal/cross-device semantics
-// this suite doesn't exercise. agents-cli targets macOS/Linux first (Windows via WSL —
-// i.e. the Linux path — is covered here); the production fixes in this change (junction
-// path-separator normalization in getConfigSymlinkVersion, EXDEV-safe restore) still
-// ship. Native-Windows junction uninstall is a tracked follow-up, matching the repo's
-// existing `it.skipIf(process.platform === 'win32')` precedent (versions/ssh-exec/usage).
-describe.skipIf(process.platform === 'win32')('uninstall restores adopted configs and never touches un-adopted ones', () => {
+describe('uninstall restores adopted configs and never touches un-adopted ones', () => {
   it('restores an adopted config from its backup and leaves a real un-adopted dir untouched', () => {
     const result = runInHome(String.raw`
       adopt('claude', '.claude', '1.0.0', 'MANAGED');
@@ -177,7 +173,7 @@ describe.skipIf(process.platform === 'win32')('uninstall restores adopted config
       const foreign = path.join(home, 'my-real-claude');
       fs.mkdirSync(foreign, { recursive: true });
       fs.writeFileSync(path.join(foreign, 'marker'), 'USER_OWNED');
-      fs.symlinkSync(foreign, path.join(home, '.claude'));
+      fs.symlinkSync(foreign, path.join(home, '.claude'), process.platform === 'win32' ? 'junction' : undefined);
       const plan = planUninstall();
       const res = executeUninstall(plan, { purge: false, timestamp: 5 });
       const link = path.join(home, '.claude');

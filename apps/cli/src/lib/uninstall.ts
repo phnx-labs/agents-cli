@@ -106,6 +106,17 @@ function symlinkTarget(p: string): string | null {
 }
 
 /**
+ * Remove a symlink/junction at `p` without following into its target. On POSIX
+ * this is a plain `unlinkSync`; on Windows the same call correctly deletes a
+ * junction or directory-symlink reparse point while leaving the target intact —
+ * verified on a real Windows host, where `fs.rmSync(p, { force: true })` instead
+ * throws `EFAULT` on a reparse point. `rmSync` is deliberately NOT used here.
+ */
+function removeLink(p: string): void {
+  fs.unlinkSync(p);
+}
+
+/**
  * Move `source` onto `dest` across possibly-different volumes. `renameSync` is
  * atomic but throws EXDEV when `~/.agents` lives on a different filesystem than
  * `$HOME`; fall back to copy-then-remove so the restore still completes. The
@@ -279,21 +290,24 @@ export function executeUninstall(plan: UninstallPlan, opts: { purge?: boolean; t
   for (const c of plan.configs) {
     try {
       if (c.kind === 'restore-backup') {
-        // The adopted symlink carries no data (the real dir is the backup); drop
-        // it, then move the backup out of ~/.agents onto the real path — EXDEV-safe
-        // so a cross-volume ~/.agents can't strand the backup mid-restore.
-        fs.rmSync(c.realPath, { force: true });
+        // The adopted link carries no data (the real dir is the backup); drop it,
+        // then move the backup out of ~/.agents onto the real path — EXDEV-safe so a
+        // cross-volume ~/.agents can't strand the backup mid-restore. unlinkSync (not
+        // rmSync) is deliberate: it removes a POSIX symlink AND a Windows junction/
+        // dir-symlink without following into the target, whereas rmSync throws EFAULT
+        // on a Windows reparse point.
+        removeLink(c.realPath);
         moveDirCrossDevice(c.source, c.realPath);
         result.restoredConfigs.push({ agent: c.agent, realPath: c.realPath });
       } else if (c.kind === 'restore-version-home') {
         // importAgent renamed the real dir INTO the version home; copy it back
         // (step 6 disposes the original) while stripping resource symlinks that
         // would dangle once ~/.agents is gone.
-        fs.rmSync(c.realPath, { force: true });
+        removeLink(c.realPath);
         copyDirStrippingAgentsSymlinks(c.source, c.realPath, plan.agentsDir);
         result.restoredConfigs.push({ agent: c.agent, realPath: c.realPath });
       } else if (c.kind === 'remove-dangling') {
-        fs.rmSync(c.realPath, { force: true });
+        removeLink(c.realPath);
         result.removedDanglingConfigs.push({ agent: c.agent, realPath: c.realPath });
       }
       // leave-real / leave-foreign / absent: intentionally untouched.
@@ -305,7 +319,7 @@ export function executeUninstall(plan: UninstallPlan, opts: { purge?: boolean; t
   // 2. Restore owned home-file symlinks as real files (e.g. ~/.claude.json).
   for (const hf of plan.homeFiles) {
     try {
-      fs.rmSync(hf.realPath, { force: true });
+      removeLink(hf.realPath);
       fs.cpSync(hf.source, hf.realPath, { recursive: true });
       result.restoredHomeFiles.push(hf.realPath);
     } catch (err) {
