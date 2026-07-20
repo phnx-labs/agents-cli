@@ -43,6 +43,26 @@ export function sshTargetFor(device: DeviceProfile): string {
 }
 
 /**
+ * The address a fleet fan-out probe should hand to `ssh` for a device: the
+ * registry's known-good Tailscale dnsName/IP (via {@link sshTargetFor}) when
+ * present, else the bare name (an address-less manual device dials by name as
+ * before — never worse than the old behaviour).
+ *
+ * Prefer the registry address so a stale `~/.ssh/config` alias can never shadow
+ * it: dialing the bare device name lets ssh resolve it through the user's config,
+ * where a hand-written `Host <name>` block with a DHCP-drifted LAN IP silently
+ * shadows the correct entry, times out, and makes a reachable box look dead.
+ * Pure/testable.
+ */
+export function fleetDialTarget(device: DeviceProfile): string {
+  try {
+    return sshTargetFor(device);
+  } catch {
+    return device.user ? `${device.user}@${device.name}` : device.name;
+  }
+}
+
+/**
  * Wrap a remote command for the device's shell. Windows devices speak
  * PowerShell, so a bare command is run through `powershell -NoProfile
  * -EncodedCommand`; POSIX devices get the command verbatim (the remote login

@@ -50,7 +50,7 @@ import {
   ASKPASS_BUNDLE_ENV,
   ASKPASS_KEY_ENV,
   buildSshInvocation,
-  sshTargetFor,
+  fleetDialTarget,
   writeAskpassShim,
 } from '../lib/devices/connect.js';
 import { ensureManagedKnownHostsDir, isHostPinned } from '../lib/devices/known-hosts.js';
@@ -324,20 +324,6 @@ interface FleetStatusTarget extends FanOutDeviceTarget {
   dialTarget: string;
 }
 
-/**
- * The address the fleet probes should hand to `ssh` for a device: the registry's
- * known-good Tailscale dnsName/IP when present, else the bare name (a manually
- * added device with no address dials by name as before). Prefer the registry
- * address so a stale `~/.ssh/config` alias can never shadow it. Pure/testable.
- */
-export function fleetDialTarget(device: DeviceProfile): string {
-  try {
-    return sshTargetFor(device);
-  } catch {
-    return device.user ? `${device.user}@${device.name}` : device.name;
-  }
-}
-
 function localHealthRow(self: string, stats?: DeviceStats): FleetHealthRow {
   return {
     name: self,
@@ -398,7 +384,13 @@ async function runFleetStatus(opts: { json?: boolean; strict?: boolean; stats?: 
       // (registry) address. If it came back unreachable, don't spend another
       // 15s+30s on version+doctor — skip straight to an unreachable row so one
       // genuinely-offline device can't stall the whole matrix.
-      ...(statsMap.get(t.device.name)?.reachable === false && !t.skip
+      //
+      // Only trust this on a FRESH probe (`--refresh`/`--live`). loadFleetStats
+      // is cache-first (daemon-warmed ~3min), so a box that came back online
+      // since the last warm would otherwise be skipped to "unreachable" without
+      // a live attempt — a false negative. On a default run we still do the live
+      // probe (fast now that it dials the registry address).
+      ...(forceRefresh && statsMap.get(t.device.name)?.reachable === false && !t.skip
         ? { skip: 'unreachable' }
         : {}),
     }));
