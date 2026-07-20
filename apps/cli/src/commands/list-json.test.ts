@@ -65,4 +65,19 @@ describe('list commands emit valid JSON with --json (not the human table)', () =
     // The regression this guards: a table would start with the "Name" header, not JSON.
     expect(stdout.trimStart().startsWith('[')).toBe(true);
   });
+
+  // The resource commands wired onto the shared showResourceList helper (#1327).
+  // On an empty guarded HOME each yields `[]`; the point is that the flag reaches
+  // the subcommand action (no parent/child shadowing) and stdout is clean JSON.
+  for (const cmd of ['skills', 'commands', 'mcp', 'subagents']) {
+    it(`${cmd} list --json prints a clean JSON array (flag reaches the subcommand)`, () => {
+      guardedHome();
+      const { stdout, status } = run([cmd, 'list', '--json']);
+      expect(status).toBe(0);
+      const parsed = JSON.parse(stdout);
+      expect(Array.isArray(parsed)).toBe(true);
+      expect(stdout.trimStart().startsWith('[')).toBe(true);
+      expect(stdout).not.toContain(ANSI_ESCAPE);
+    });
+  }
 });
