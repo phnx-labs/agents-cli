@@ -1594,6 +1594,15 @@ export async function renderSessionLog(session: SessionMeta, mode: ViewMode = 's
   await renderSession(session, mode, {});
 }
 
+/**
+ * Emit one session exactly as `agents sessions <id> --json` does — the same
+ * redact-by-default `{ session, events }` shape — so `agents logs <id> --json`
+ * shares one machine-readable session contract instead of inventing another.
+ */
+export async function renderSessionLogJson(session: SessionMeta): Promise<void> {
+  await renderSession(session, 'json', {});
+}
+
 async function renderSession(
   session: SessionMeta,
   mode: ViewMode,
