@@ -10,7 +10,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { IS_WINDOWS, isWindowsAbsolutePath } from './platform/index.js';
-import { getPackageLocalPath } from './state.js';
+import { getPackageLocalPath, getDeviceMetaPath } from './state.js';
 import { DEFAULT_SYSTEM_REPO, systemRepoSlug } from './types.js';
 
 /**
@@ -842,11 +842,51 @@ export function displayHomePath(dir: string): string {
  * branch reconciles instead of failing with "Need to specify how to reconcile
  * divergent branches".
  */
+/**
+ * Auto-commit the machine's OWN generated per-device meta file
+ * (`devices/<machineId>/agents.yaml`) if it's the dirty state blocking a pull.
+ *
+ * That file is committed + synced (so every machine can introspect every other
+ * machine's pins), but each box rewrites its own copy whenever a pin changes —
+ * leaving the tree perpetually dirty and wedging `agents repo pull` (which
+ * refuses a dirty tree). This durably commits just that one path (explicit
+ * pathspec) so the pull can proceed; genuine user edits to OTHER files are left
+ * untouched and still (correctly) block the pull. No-op when the meta path isn't
+ * inside `dir` (system/extra repos) or isn't dirty. Returns the committed rel
+ * path, or null. `metaAbs` is injectable for tests; defaults to the live path.
+ */
+export async function commitOwnDeviceMeta(
+  dir: string,
+  metaAbs: string = getDeviceMetaPath(),
+): Promise<string | null> {
+  const resolvedDir = path.resolve(dir);
+  const resolvedMeta = path.resolve(metaAbs);
+  if (resolvedMeta !== resolvedDir && !resolvedMeta.startsWith(resolvedDir + path.sep)) {
+    return null; // meta lives outside this repo — not ours to commit here
+  }
+  const rel = path.relative(resolvedDir, resolvedMeta).split(path.sep).join('/');
+  try {
+    const git = simpleGit(dir);
+    const status = await git.status();
+    const dirty = status.files.some((f) => f.path === rel);
+    if (!dirty) return null;
+    await git.add([rel]);
+    const machine = path.basename(path.dirname(resolvedMeta));
+    await git.commit(`chore(devices): snapshot ${machine} agent pins`, [rel]);
+    return rel;
+  } catch {
+    return null; // best-effort — never let this block the pull path
+  }
+}
+
 export async function pullRepo(
   dir: string,
 ): Promise<{ success: boolean; commit: string; error?: string; branch?: string }> {
   try {
     const git = simpleGit(dir);
+    // Commit this machine's own device-meta first so a per-machine pin change
+    // never wedges the pull. Genuine edits elsewhere still block below.
+    await commitOwnDeviceMeta(dir);
     const status = await git.status();
 
     if (!status.isClean()) {
