@@ -10,6 +10,7 @@ import { spawnSync } from 'child_process';
 import chalk from 'chalk';
 import ora from 'ora';
 import { confirm } from '@inquirer/prompts';
+import type { Command } from 'commander';
 import type { AgentId } from '../lib/types.js';
 import { AGENTS, agentLabel, resolveAgentName } from '../lib/agents.js';
 import {
@@ -58,6 +59,46 @@ export function isPromptCancelled(err: unknown): boolean {
  */
 export function isInteractiveTerminal(): boolean {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
+}
+
+/** The resolved I/O surface for one command invocation — the human/agent split. */
+export interface Surface {
+  /** Machine-readable output was requested (`--json`). */
+  json: boolean;
+  /** Skip confirmation prompts — explicit `--yes`/`-y`, or a non-interactive shell. */
+  assumeYes: boolean;
+  /** Suppress non-essential human chrome (`--quiet`). */
+  quiet: boolean;
+  /**
+   * Safe to show an interactive picker/prompt: a real terminal AND not asking for
+   * `--json` (a JSON consumer is a machine and never wants a picker).
+   */
+  interactive: boolean;
+}
+
+/**
+ * Compute a command's I/O surface once, in one place, instead of each command
+ * re-deriving the human-vs-agent split (and raw-sniffing `process.std*.isTTY`
+ * with inconsistent stream choices — the audit's R4). Reads the merged option
+ * set via `optsWithGlobals()`, so it sees the command's own flags and any
+ * inherited global ones, and folds in the terminal state:
+ *
+ *   - `assumeYes` = explicit `--yes` OR a non-interactive shell (no one to prompt).
+ *   - `interactive` = a real TTY AND not `--json`.
+ *
+ * Adopt incrementally: a command switches its ad-hoc `isTTY`/`options.yes` checks
+ * to a single `const s = resolveSurface(cmd)` without changing its flag surface.
+ */
+export function resolveSurface(cmd: Command): Surface {
+  const opts = cmd.optsWithGlobals() as { json?: boolean; yes?: boolean; quiet?: boolean };
+  const tty = isInteractiveTerminal();
+  const json = opts.json === true;
+  return {
+    json,
+    assumeYes: opts.yes === true || !tty,
+    quiet: opts.quiet === true,
+    interactive: tty && !json,
+  };
 }
 
 /**

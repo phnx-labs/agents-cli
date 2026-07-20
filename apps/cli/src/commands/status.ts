@@ -16,6 +16,7 @@ import { AgentId } from '../lib/types.js';
 import { setHelpSections } from '../lib/help.js';
 import { computeSyncStatus, type AgentVersionStatus } from '../lib/sync-status.js';
 import { promptDriftSync } from '../lib/drift-sync.js';
+import { resolveSurface } from './utils.js';
 
 interface StatusOptions {
   json?: boolean;
@@ -57,10 +58,15 @@ export function registerStatusCommand(program: Command): void {
     `,
   });
 
-  cmd.action(async (opts: StatusOptions) => {
+  cmd.action(async (opts: StatusOptions, command: Command) => {
+    // Centralized surface read (the human/agent split in one place). Note we still
+    // pass the *raw* `opts.yes` to promptDriftSync below — it distinguishes an
+    // explicit `--yes` (act) from a non-TTY shell (report only), so `surface.assumeYes`
+    // (which conflates the two) would wrongly auto-reconcile in a plain pipe.
+    const surface = resolveSurface(command);
     const cwd = opts.cwd ?? process.cwd();
 
-    if (opts.json) {
+    if (surface.json) {
       const status = await computeSyncStatus({ cwd });
       console.log(JSON.stringify(status, null, 2));
       return;
