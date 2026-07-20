@@ -46,7 +46,7 @@ import { discoverPlugins, marketplaceSpecForName } from './plugins.js';
 import type { DiscoveredPlugin } from './types.js';
 import { pluginInstallDir, repairableManifestFields } from './plugin-marketplace.js';
 import { markdownToToml } from './convert.js';
-import { listCommandsInVersionHome, getVersionCommandsDir } from './commands.js';
+import { listCommandsInVersionHome, getVersionCommandsDir, listPluginCommandNames } from './commands.js';
 import { shouldInstallCommandAsSkill, commandSkillMatches, commandSkillName } from './command-skills.js';
 import { gooseCommandMatches, gooseCommandsDir } from './goose-commands.js';
 import { supports } from './capabilities.js';
@@ -241,8 +241,14 @@ function diffCommands(agent: AgentId, version: string, cwd: string, excludeProje
     });
   }
 
+  // Plugin-bundled commands (installed as `<plugin>-<cmd>`) are source-managed by
+  // their plugin, tracked under the `plugins` kind — not extras. Without this,
+  // `agents doctor` shows every plugin command (swarm-plan, code-review, …) as an
+  // unmanaged extra, mirroring the orphan false-positive the prune path had.
+  const pluginCommands = listPluginCommandNames();
   for (const name of installed) {
     if (seen.has(name)) continue;
+    if (pluginCommands.has(name)) continue;
     const extraHome = asSkill
       ? path.join(agentDir, 'skills', commandSkillName(name), 'SKILL.md')
       : agent === 'goose'
