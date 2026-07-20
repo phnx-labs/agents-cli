@@ -50,6 +50,7 @@ import {
   ASKPASS_BUNDLE_ENV,
   ASKPASS_KEY_ENV,
   buildSshInvocation,
+  sshTargetFor,
   writeAskpassShim,
 } from '../lib/devices/connect.js';
 import { ensureManagedKnownHostsDir, isHostPinned } from '../lib/devices/known-hosts.js';
@@ -313,6 +314,28 @@ interface RemoteDoctorJson {
 
 interface FleetStatusTarget extends FanOutDeviceTarget {
   platform?: string;
+  /**
+   * The address to hand `ssh` — the registry's drift-proof Tailscale dnsName/IP
+   * (via {@link fleetDialTarget}), NOT the bare device name. Dialing the bare
+   * name lets ssh resolve it through the user's ~/.ssh/config, where a stale
+   * hand-written `Host <name>` block with a drifted LAN IP silently shadows the
+   * correct entry and makes a reachable box look dead (the 60s fleet-status hang).
+   */
+  dialTarget: string;
+}
+
+/**
+ * The address the fleet probes should hand to `ssh` for a device: the registry's
+ * known-good Tailscale dnsName/IP when present, else the bare name (a manually
+ * added device with no address dials by name as before). Prefer the registry
+ * address so a stale `~/.ssh/config` alias can never shadow it. Pure/testable.
+ */
+export function fleetDialTarget(device: DeviceProfile): string {
+  try {
+    return sshTargetFor(device);
+  } catch {
+    return device.user ? `${device.user}@${device.name}` : device.name;
+  }
 }
 
 function localHealthRow(self: string, stats?: DeviceStats): FleetHealthRow {
@@ -331,11 +354,11 @@ async function probeRemoteHealth(target: FleetStatusTarget): Promise<Omit<FleetH
   const isWin = /^win/i.test((target.platform ?? '').trim());
   const env = isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' };
   const versionCmd = buildRemoteAgentsInvocation(['--version'], undefined, isWin ? 'windows' : undefined, env);
-  const versionRes = await sshExecAsync(target.name, versionCmd, { timeoutMs: 15000, multiplex: true });
+  const versionRes = await sshExecAsync(target.dialTarget, versionCmd, { timeoutMs: 15000, multiplex: true });
   const version = versionRes.code === 0 ? versionRes.stdout.trim().split(/\s+/)[0] || null : null;
 
   const doctorCmd = buildRemoteAgentsInvocation(['doctor', '--json'], undefined, isWin ? 'windows' : undefined, env);
-  const doctorRes = await sshExecAsync(target.name, doctorCmd, { timeoutMs: 30000, multiplex: true });
+  const doctorRes = await sshExecAsync(target.dialTarget, doctorCmd, { timeoutMs: 30000, multiplex: true });
   if (doctorRes.code !== 0) {
     throw new Error(doctorRes.timedOut ? 'timed out' : (doctorRes.stderr.trim() || `exit ${doctorRes.code ?? 'unknown'}`));
   }
@@ -370,6 +393,14 @@ async function runFleetStatus(opts: { json?: boolean; strict?: boolean; stats?: 
       name: t.device.name,
       platform: t.device.platform,
       skip: t.skip,
+      dialTarget: fleetDialTarget(t.device),
+      // Fail fast: the stats probe already tried this box with the same
+      // (registry) address. If it came back unreachable, don't spend another
+      // 15s+30s on version+doctor — skip straight to an unreachable row so one
+      // genuinely-offline device can't stall the whole matrix.
+      ...(statsMap.get(t.device.name)?.reachable === false && !t.skip
+        ? { skip: 'unreachable' }
+        : {}),
     }));
   const remote = await fanOutDevices(remoteTargets, probeRemoteHealth);
   for (const result of remote) {
@@ -427,7 +458,7 @@ async function probeRemoteAuth(target: FleetStatusTarget): Promise<AuthProbeRow[
   const isWin = /^win/i.test((target.platform ?? '').trim());
   const env = isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' };
   const cmd = buildRemoteAgentsInvocation(['devices', 'ping', '--local', '--json'], undefined, isWin ? 'windows' : undefined, env);
-  const res = await sshExecAsync(target.name, cmd, { timeoutMs: 60000, multiplex: true });
+  const res = await sshExecAsync(target.dialTarget, cmd, { timeoutMs: 60000, multiplex: true });
   if (res.code !== 0) {
     throw new Error(res.timedOut ? 'timed out' : (res.stderr.trim() || `exit ${res.code ?? 'unknown'}`));
   }
@@ -467,6 +498,7 @@ async function runFleetPing(opts: { json?: boolean; local?: boolean; verbose?: b
     name: t.device.name,
     platform: t.device.platform,
     skip: t.skip,
+    dialTarget: fleetDialTarget(t.device),
   }));
   const probeable = remoteTargets.filter((t) => !t.skip).length;
   const spinner = isInteractiveTerminal() && !opts.json
