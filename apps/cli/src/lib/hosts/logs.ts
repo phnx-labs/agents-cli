@@ -75,8 +75,13 @@ export async function showHostTaskLog(id: string, follow: boolean, full = false)
 export function hostTaskLogJson(id: string): { found: boolean; task?: HostTask; log?: string | null } {
   const task = loadTask(id);
   if (!task) return { found: false };
-  reconcileTask(task);
-  return { found: true, task, log: readTaskLog(task) };
+  // reconcileTask returns the healed record; it does NOT mutate its argument in
+  // place. Emit the reconciled task so a run that finished between dispatch and
+  // this one-shot read surfaces its terminal status/exitCode, not a stale
+  // 'running'. (The text path can discard the return — it only reads the log by
+  // id — but this JSON payload carries task.status straight to the consumer.)
+  const reconciled = reconcileTask(task);
+  return { found: true, task: reconciled, log: readTaskLog(reconciled) };
 }
 
 /** Read the task's combined-stdout — local mirror first, else fetch+cache remote. */

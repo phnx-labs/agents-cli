@@ -193,6 +193,57 @@ describe.skipIf(!LOCALHOST_SSH)('detached-run log fetch over real ssh (localhost
   });
 });
 
+// hostTaskLogJson must emit the RECONCILED record: a task that finished remotely
+// between dispatch and this one-shot --json read has to surface its terminal
+// status/exitCode, not the stale 'running' it was saved with. Drives a real
+// `ssh localhost cat <.exit>` reconcile, so it's gated on localhost SSH like the
+// fetch tests above.
+describe.skipIf(!LOCALHOST_SSH)('hostTaskLogJson reconciles a finished run before emitting (real ssh)', () => {
+  it('surfaces terminal status + exitCode for a running record whose remote .exit is now set', () => {
+    // A real local file the ssh-localhost `cat` reads as the remote `.exit`.
+    const remoteExitFile = join(CACHE_ROOT, 'remote-recon01.exit');
+    writeFileSync(remoteExitFile, '0\n');
+
+    const task = makeTask({
+      id: 'recon001',
+      status: 'running',
+      target: 'localhost',
+      remoteExit: remoteExitFile,
+    });
+    saveTask(task);
+    writeFileSync(localLogPath(task.id), 'done output\n');
+
+    const res = hostTaskLogJson(task.id);
+
+    expect(res.found).toBe(true);
+    // The bug this guards: emitting the pre-reconcile `task` reports 'running'
+    // with no exitCode even though the run just completed.
+    expect(res.task?.status).toBe('completed');
+    expect(res.task?.exitCode).toBe(0);
+    expect(res.task?.finishedAt).toBeTruthy();
+    expect(res.log).toBe('done output\n');
+  });
+
+  it('leaves a still-running record running when its remote .exit is empty', () => {
+    const remoteExitFile = join(CACHE_ROOT, 'remote-recon02.exit');
+    writeFileSync(remoteExitFile, ''); // no exit code yet — still running
+
+    const task = makeTask({
+      id: 'recon002',
+      status: 'running',
+      target: 'localhost',
+      remoteExit: remoteExitFile,
+    });
+    saveTask(task);
+
+    const res = hostTaskLogJson(task.id);
+
+    expect(res.found).toBe(true);
+    expect(res.task?.status).toBe('running');
+    expect(res.task?.exitCode).toBeUndefined();
+  });
+});
+
 // tailLines is the concise-by-default view for host-task stdout: it must bound
 // the output and never silently drop lines without saying so.
 describe('tailLines', () => {
