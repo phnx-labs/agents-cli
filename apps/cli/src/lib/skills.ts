@@ -16,6 +16,7 @@ import { AGENTS, ensureSkillsDir, agentConfigDirName } from './agents.js';
 import { capableAgents, isCapable } from './capabilities.js';
 import { getAgentsDir, getUserSkillsDir, getSkillsDir as getSystemSkillsDir, getProjectAgentsDir, getEnabledExtraRepos, getTrashSkillsDir } from './state.js';
 import { getEffectiveHome, getVersionHomePath, listInstalledVersions } from './versions.js';
+import { listCommandSkillsInVersion } from './command-skills.js';
 import { emit } from './events.js';
 
 const HOME = os.homedir();
@@ -461,15 +462,26 @@ export function getVersionSkillsDir(agent: AgentId, version: string): string {
 }
 
 /**
- * List skill names installed in a specific version home.
+ * List real skill names installed in a specific version home.
+ *
+ * Command-as-skill WRAPPERS (a `skills/<name>/SKILL.md` carrying the
+ * `agents_command` marker — how command-runtime agents like Codex/Kimi install
+ * commands) are excluded: they are commands, reconciled by the commands diff
+ * against the command source, not skills. Counting them here made the skill
+ * orphan/extra detectors flag every command wrapper (tickets, prune, swarm-plan,
+ * …) as an unmanaged skill — a false positive that `prune cleanup` would delete.
  */
 export function listSkillsInVersionHome(agent: AgentId, version: string): string[] {
   const dir = getVersionSkillsDir(agent, version);
   if (!fs.existsSync(dir)) return [];
+  const commandWrappers = new Set(
+    listCommandSkillsInVersion(path.join(getVersionHomePath(agent, version), agentConfigDirName(agent))),
+  );
   return fs.readdirSync(dir, { withFileTypes: true })
     .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
     .filter((e) => fs.existsSync(path.join(dir, e.name, 'SKILL.md')))
     .map((e) => e.name)
+    .filter((name) => !commandWrappers.has(name))
     .sort();
 }
 
