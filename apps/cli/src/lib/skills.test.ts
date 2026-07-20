@@ -330,6 +330,32 @@ describe('diffVersionSkills — orphan detection', () => {
     expect(result.orphans).toHaveLength(0);
   });
 
+  it('does NOT flag a command-as-skill wrapper (agents_command marker) as a skill orphan', () => {
+    const home = makeTempHome();
+    const agent = 'claude';
+    const version = '2.0.0';
+
+    // A command-runtime install writes commands as skill wrappers carrying the
+    // `agents_command` marker. It is a command (reconciled by the commands diff),
+    // NOT a skill — it must never surface as a skill orphan, or `prune cleanup`
+    // would delete a live command (tickets, swarm-plan, …).
+    const skillsDir = path.join(home, '.agents', '.history', 'versions', agent, version, 'home', `.${agent}`, 'skills');
+    fs.mkdirSync(path.join(skillsDir, 'tickets'), { recursive: true });
+    fs.writeFileSync(
+      path.join(skillsDir, 'tickets', 'SKILL.md'),
+      `---\nname: "tickets"\ndescription: ticket wrapper\nagents_command: "tickets"\n---\n\n# /tickets\n`,
+      'utf-8'
+    );
+
+    const result = runSkills(
+      home,
+      `skills.diffVersionSkills('${agent}', '${version}')`
+    ) as { orphans: string[] };
+
+    expect(result.orphans).not.toContain('tickets');
+    expect(result.orphans).toHaveLength(0);
+  });
+
   it('reports central skills as matched for Goose without a per-version copy', () => {
     const home = makeTempHome();
     const version = '1.43.0';

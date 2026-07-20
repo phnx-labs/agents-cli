@@ -1232,6 +1232,40 @@ export function setGlobalDefault(agent: AgentId, version: string | undefined): v
 }
 
 /**
+ * Path to the sentinel file that marks a version as an isolated install.
+ *
+ * It lives at the version-dir root (a sibling of `home/`), so it is carried
+ * along when `softDeleteVersionDir` moves the whole directory to trash and is
+ * restored intact by `agents trash restore`. Its mere presence is the marker;
+ * the contents are an informational timestamp only.
+ */
+function getIsolatedMarkerPath(agent: AgentId, version: string): string {
+  return path.join(getVersionDir(agent, version), '.isolated');
+}
+
+/**
+ * Mark an installed version as an isolated install (`agents add --isolated`).
+ *
+ * Isolated versions are fully self-contained: they never become the global
+ * default and never own the user's real `~/.<agent>` config directory. This
+ * flag is what keeps every "adopting" code path away from them.
+ */
+export function markVersionIsolated(agent: AgentId, version: string): void {
+  fs.writeFileSync(getIsolatedMarkerPath(agent, version), `${new Date().toISOString()}\n`, { mode: 0o600 });
+}
+
+/**
+ * Whether a version was installed as an isolated install (`agents add --isolated`).
+ *
+ * Used to exclude such versions from global-default promotion and from any
+ * flow that would touch the user's real `~/.<agent>` directory, and to gate the
+ * `--isolated` safety check on `agents remove`.
+ */
+export function isVersionIsolated(agent: AgentId, version: string): boolean {
+  return fs.existsSync(getIsolatedMarkerPath(agent, version));
+}
+
+/**
  * Grok's official installer writes into ~/.grok/downloads, which (because we
  * symlink ~/.grok to the active version home) resolves to the PREVIOUS default
  * home during `agents add grok@<new>`. Move the freshly-downloaded binary and
@@ -1797,13 +1831,19 @@ export function removeVersion(agent: AgentId, version: string): boolean {
   // broke every launcher after removing the pinned default.
   if (getGlobalDefault(agent) === version) {
     const remaining = listInstalledVersions(agent);
-    if (remaining.length > 0) {
-      const newestRemaining = remaining[remaining.length - 1];
+    // Never auto-promote an isolated install to the global default: it was
+    // installed to stay separate from the user's setup, and promoting it would
+    // silently make `<agent>` resolve to it (and let a later `use` adopt its
+    // home into `~/.<agent>`). Prefer the newest NON-isolated survivor; if every
+    // survivor is isolated, clear the default rather than adopt one.
+    const promotable = remaining.filter((v) => !isVersionIsolated(agent, v));
+    if (promotable.length > 0) {
+      const newestRemaining = promotable[promotable.length - 1];
       setGlobalDefault(agent, newestRemaining);
       console.log(chalk.yellow(`Default ${agent} was ${version} (removed); reassigned to ${newestRemaining}. Change it with: agents use ${agent}@<version>`));
     } else {
       setGlobalDefault(agent, undefined);
-      console.log(chalk.yellow(`Removed the last installed ${agent} version and cleared its default. Reinstall with: agents add ${agent}, then set one with: agents use ${agent}@<version>`));
+      console.log(chalk.yellow(`Removed the last non-isolated ${agent} version and cleared its default. Reinstall with: agents add ${agent}, then set one with: agents use ${agent}@<version>`));
     }
   }
 

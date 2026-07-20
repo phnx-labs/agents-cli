@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { isMenubarStale, menubarPlistNeedsRepoint } from './install-menubar.js';
+import { describe, expect, it, vi } from 'vitest';
+import { isMenubarStale, menubarPlistNeedsRepoint, restartMenubarLaunchAgent } from './install-menubar.js';
 
 // Regression guard for the upgrade self-heal: before this, the helper was only
 // (re)installed when no service existed, so `npm update` left the menu bar
@@ -52,5 +52,36 @@ describe('menubarPlistNeedsRepoint', () => {
 
   it('re-points a plist that has no baked entry yet (older install)', () => {
     expect(menubarPlistNeedsRepoint({ plistEntry: null, plistNode: null, activeEntry: bun, activeNode: bunNode })).toBe(true);
+  });
+});
+
+// Regression guard for the auto-heal restart sequence: without a `bootout` first,
+// `bootstrap` fails on modern macOS when the job is already loaded, leaving the
+// helper in a dead state after a WindowServer disconnect.
+describe('restartMenubarLaunchAgent', () => {
+  it('boots out the old job, bootstraps the plist, then kickstarts the service', () => {
+    const calls: Array<{ cmd: string; args: string[] }> = [];
+    const exec = (cmd: string, args: readonly string[]) => {
+      calls.push({ cmd, args: args as string[] });
+      return Buffer.alloc(0);
+    };
+
+    restartMenubarLaunchAgent(501, '/tmp/com.phnx-labs.agents-menubar.plist', exec);
+
+    expect(calls).toHaveLength(3);
+    expect(calls[0]).toEqual({ cmd: 'launchctl', args: ['bootout', 'gui/501/com.phnx-labs.agents-menubar'] });
+    expect(calls[1]).toEqual({ cmd: 'launchctl', args: ['bootstrap', 'gui/501', '/tmp/com.phnx-labs.agents-menubar.plist'] });
+    expect(calls[2]).toEqual({ cmd: 'launchctl', args: ['kickstart', 'gui/501/com.phnx-labs.agents-menubar'] });
+  });
+
+  it('continues through launchctl errors so a partially-loaded job still gets restarted', () => {
+    const calls: Array<{ cmd: string; args: string[] }> = [];
+    const exec = (cmd: string, args: readonly string[]) => {
+      calls.push({ cmd, args: args as string[] });
+      throw new Error('launchctl failed');
+    };
+
+    expect(() => restartMenubarLaunchAgent(501, '/tmp/com.phnx-labs.agents-menubar.plist', exec)).not.toThrow();
+    expect(calls).toHaveLength(3);
   });
 });

@@ -9,7 +9,7 @@
  * injection guard.
  */
 import { describe, expect, it } from 'vitest';
-import { buildAskpassShimBody, buildSshInvocation, sshTargetFor, wrapRemoteCommand, ASKPASS_BUNDLE_ENV, ASKPASS_KEY_ENV } from './connect.js';
+import { buildAskpassShimBody, buildSshInvocation, fleetDialTarget, sshTargetFor, wrapRemoteCommand, ASKPASS_BUNDLE_ENV, ASKPASS_KEY_ENV } from './connect.js';
 import type { DeviceProfile } from './registry.js';
 
 function decodePowerShell(cmd: string): string {
@@ -36,6 +36,26 @@ describe('sshTargetFor', () => {
     expect(sshTargetFor(dev({ name: 'x', user: 'muqsit', address: { via: 'tailscale', dnsName: 'x.ts.net' } }))).toBe('muqsit@x.ts.net');
     expect(sshTargetFor(dev({ name: 'y', address: { via: 'manual', ip: '10.0.0.1' } }))).toBe('10.0.0.1');
     expect(() => sshTargetFor(dev({ name: 'z', address: { via: 'manual' } }))).toThrow(/no address/);
+  });
+});
+
+describe('fleetDialTarget', () => {
+  it('prefers the registry Tailscale dnsName over the bare name (drift-proof)', () => {
+    // The whole point: dialing the bare "yosemite-m1" lets a stale ~/.ssh/config
+    // block win; dialing the dnsName sidesteps it entirely.
+    expect(fleetDialTarget(dev({ name: 'yosemite-m1', user: 'muqsit', address: { via: 'tailscale', dnsName: 'yosemite-m1.ts.net' } })))
+      .toBe('muqsit@yosemite-m1.ts.net');
+  });
+
+  it('uses the IP when there is no dnsName, and omits an absent user', () => {
+    expect(fleetDialTarget(dev({ name: 'm', user: 'muqsit', address: { via: 'manual', ip: '100.74.242.106' } })))
+      .toBe('muqsit@100.74.242.106');
+    expect(fleetDialTarget(dev({ name: 'm', address: { via: 'tailscale', dnsName: 'm.ts.net' } }))).toBe('m.ts.net');
+  });
+
+  it('falls back to the bare name for an address-less manual device (never worse than before)', () => {
+    expect(fleetDialTarget(dev({ name: 'yosemite-m1', user: 'muqsit', address: { via: 'manual' } }))).toBe('muqsit@yosemite-m1');
+    expect(fleetDialTarget(dev({ name: 'yosemite-m1', address: { via: 'manual' } }))).toBe('yosemite-m1');
   });
 });
 

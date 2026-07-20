@@ -60,10 +60,9 @@ export function candidateBrowsers(): string[] {
 }
 
 /** Newest-first Chromium binaries under the Playwright / Puppeteer download caches. */
-function scanCaches(): string[] {
-  const home = os.homedir();
+export function scanCaches(home: string = os.homedir(), platform: NodeJS.Platform = os.platform()): string[] {
   const roots =
-    os.platform() === 'darwin'
+    platform === 'darwin'
       ? [
           path.join(home, 'Library/Caches/ms-playwright'),
           path.join(home, '.cache/ms-playwright'),
@@ -71,13 +70,21 @@ function scanCaches(): string[] {
         ]
       : [path.join(home, '.cache/ms-playwright'), path.join(home, '.cache/puppeteer/chrome')];
   const rel =
-    os.platform() === 'darwin'
+    platform === 'darwin'
       ? [
           'chrome-mac/Chromium.app/Contents/MacOS/Chromium',
           'chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
           'chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
+          // Playwright's newer headless-shell packages (chromium_headless_shell-*) —
+          // a raw binary, not an .app bundle.
+          'chrome-headless-shell-mac-arm64/chrome-headless-shell',
+          'chrome-headless-shell-mac-x64/chrome-headless-shell',
         ]
-      : ['chrome-linux/chrome', 'chrome-linux64/chrome'];
+      : [
+          'chrome-linux/chrome',
+          'chrome-linux64/chrome',
+          'chrome-headless-shell-linux64/chrome-headless-shell',
+        ];
   const found: string[] = [];
   for (const root of roots) {
     let entries: string[];

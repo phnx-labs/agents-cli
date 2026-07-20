@@ -12,7 +12,7 @@ import { sshReachable } from '../ssh-exec.js';
 let CACHE_ROOT: string = mkdtempSync(join(tmpdir(), 'agents-cli-hostlogs-boot-'));
 vi.spyOn(state, 'getCacheDir').mockImplementation(() => CACHE_ROOT);
 
-import { showHostTaskLog, tailLines } from './logs.js';
+import { showHostTaskLog, hostTaskLogJson, tailLines } from './logs.js';
 import { saveTask, localLogPath, type HostTask } from './tasks.js';
 
 // Gate real-SSH tests on localhost being reachable so they pass on dev machines
@@ -98,6 +98,46 @@ describe('showHostTaskLog', () => {
     expect(res.found).toBe(true);
     expect(res.exitCode).toBe(0);
     expect(out).toBe('final output\n');
+  });
+});
+
+// Backs `agents logs <id> --json` for the host-task branch — the structured
+// { found, task, log } an agent parses instead of the text render.
+describe('hostTaskLogJson', () => {
+  it('returns found:false for an unknown id (so callers fall through to sessions)', () => {
+    const res = hostTaskLogJson('nope-not-a-task');
+    expect(res.found).toBe(false);
+    expect(res.task).toBeUndefined();
+    expect(res.log).toBeUndefined();
+    // Pure data — nothing written to stdout, unlike the text path.
+    expect(out).toBe('');
+  });
+
+  it('returns the task record and its captured log for a finished task', () => {
+    const task = makeTask({ id: 'json0001' });
+    saveTask(task);
+    writeFileSync(localLogPath(task.id), 'PONG\n');
+
+    const res = hostTaskLogJson(task.id);
+
+    expect(res.found).toBe(true);
+    expect(res.task?.id).toBe('json0001');
+    expect(res.task?.agent).toBe('claude');
+    expect(res.log).toBe('PONG\n');
+    // The record round-trips through JSON.stringify without throwing.
+    expect(() => JSON.stringify({ kind: 'task', task: res.task, log: res.log })).not.toThrow();
+  });
+
+  it('returns log:null when the task exists but no log was captured', () => {
+    const task = makeTask({ id: 'json0002' });
+    saveTask(task);
+    // No log file written.
+
+    const res = hostTaskLogJson(task.id);
+
+    expect(res.found).toBe(true);
+    expect(res.task?.id).toBe('json0002');
+    expect(res.log).toBeNull();
   });
 });
 

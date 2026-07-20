@@ -26,9 +26,9 @@ import chalk from 'chalk';
 import * as fs from 'fs';
 import type { SessionMeta } from '../lib/session/types.js';
 import { discoverSessions, resolveSessionById } from '../lib/session/discover.js';
-import { parseAgentFilter, renderSessionLog } from './sessions.js';
+import { parseAgentFilter, renderSessionLog, renderSessionLogJson } from './sessions.js';
 import { streamSessionTail, isTailable } from './sessions-tail.js';
-import { showHostTaskLog } from '../lib/hosts/logs.js';
+import { showHostTaskLog, hostTaskLogJson } from '../lib/hosts/logs.js';
 import { listTasks, type HostTask } from '../lib/hosts/tasks.js';
 import { itemPicker } from '../lib/picker.js';
 import {
@@ -43,6 +43,7 @@ interface LogsOptions {
   session?: string;
   follow?: boolean;
   full?: boolean;
+  json?: boolean;
 }
 
 type Candidate =
@@ -64,8 +65,20 @@ function candidateLabel(c: Candidate): string {
   return `${chalk.gray('sess')} ${s.shortId.padEnd(9)} ${(s.agent + ver).padEnd(14)} ${chalk.gray(s.timestamp.slice(0, 16))}  ${title.slice(0, 40)}`;
 }
 
+/** Emit a host-dispatch task's log as JSON: `{ kind, task, log }`. */
+function emitHostTaskJson(id: string): boolean {
+  const hj = hostTaskLogJson(id);
+  if (!hj.found) return false;
+  process.stdout.write(JSON.stringify({ kind: 'task', task: hj.task, log: hj.log ?? null }, null, 2) + '\n');
+  return true;
+}
+
 /** Show a resolved session — follow (tail), concise summary, or (`full`) transcript. */
-async function showSession(session: SessionMeta, follow: boolean, full: boolean): Promise<void> {
+async function showSession(session: SessionMeta, follow: boolean, full: boolean, json = false): Promise<void> {
+  if (json) {
+    await renderSessionLogJson(session);
+    return;
+  }
   if (follow) {
     if (!isTailable(session.agent)) {
       console.error(chalk.red(`Tailing is supported for claude and codex sessions only (got ${session.agent}).`));
@@ -77,17 +90,32 @@ async function showSession(session: SessionMeta, follow: boolean, full: boolean)
   await renderSessionLog(session, full ? 'markdown' : 'summary');
 }
 
-async function showCandidate(c: Candidate, follow: boolean, full: boolean): Promise<void> {
+async function showCandidate(c: Candidate, follow: boolean, full: boolean, json = false): Promise<void> {
   if (c.kind === 'task') {
+    if (json) {
+      emitHostTaskJson(c.task.id);
+      return;
+    }
     const res = await showHostTaskLog(c.task.id, follow, full);
     if (res.exitCode !== undefined) process.exitCode = res.exitCode;
     return;
   }
-  await showSession(c.session, follow, full);
+  await showSession(c.session, follow, full, json);
 }
 
 /** Resolve an explicit id/--session: host task first, then a session. */
-async function showById(id: string, follow: boolean, full: boolean): Promise<void> {
+async function showById(id: string, follow: boolean, full: boolean, json = false): Promise<void> {
+  if (json) {
+    if (emitHostTaskJson(id)) return;
+    const sessions = await discoverSessions({ all: true, limit: 5000 });
+    const matches = resolveSessionById(sessions, id);
+    if (matches.length === 0) {
+      console.error(chalk.red(`No run or session found matching "${id}".`));
+      process.exit(1);
+    }
+    await renderSessionLogJson(matches[0]);
+    return;
+  }
   const hostRes = await showHostTaskLog(id, follow, full);
   if (hostRes.found) {
     if (hostRes.exitCode !== undefined) process.exitCode = hostRes.exitCode;
@@ -108,7 +136,7 @@ async function runLogs(id: string | undefined, opts: LogsOptions): Promise<void>
 
   const directId = opts.session ?? id;
   if (directId) {
-    await showById(directId, follow, full);
+    await showById(directId, follow, full, !!opts.json);
     return;
   }
 
@@ -135,7 +163,7 @@ async function runLogs(id: string | undefined, opts: LogsOptions): Promise<void>
   }
 
   if (candidates.length === 1) {
-    await showCandidate(candidates[0], follow, full);
+    await showCandidate(candidates[0], follow, full, !!opts.json);
     return;
   }
 
@@ -158,7 +186,7 @@ async function runLogs(id: string | undefined, opts: LogsOptions): Promise<void>
     shortIdFor: (c: Candidate) => (c.kind === 'task' ? c.task.id : c.session.shortId),
   });
   if (!picked) return;
-  await showCandidate(picked.item, follow, full);
+  await showCandidate(picked.item, follow, full, !!opts.json);
 }
 
 // ─── Audit subcommand ────────────────────────────────────────────────────────
@@ -384,6 +412,7 @@ export function registerLogsCommand(program: Command): void {
     .option('--session <id>', 'Select a session/run by id (same as the positional id)')
     .option('-f, --follow', 'Follow live output')
     .option('-m, --full', 'Show the full raw transcript / stdout instead of the concise summary')
+    .option('--json', 'Machine-readable JSON: a host task as { kind, task, log }, a session as the redacted { session, events } (same shape as `sessions <id> --json`)')
     .action((id: string | undefined, opts: LogsOptions) => runLogs(id, opts));
 
   logsCmd

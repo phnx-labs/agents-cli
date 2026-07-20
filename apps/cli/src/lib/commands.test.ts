@@ -29,6 +29,7 @@ function runCommandsExpression(home: string, expression: string): unknown {
       diffVersionCommands,
       installCommandToVersion,
       listCommandsInVersionHome,
+      listPluginCommandNames,
       removeCommandFromVersion,
     } from ${JSON.stringify(moduleUrl)};
     const home = ${JSON.stringify(home)};
@@ -157,6 +158,50 @@ Report versions.`);
     };
     expect(diff.toRemove).toEqual(['version']);
     expect(diff.toAdd).not.toContain('version');
+  });
+});
+
+describe('diffVersionCommands — plugin-bundled commands are source-managed', () => {
+  /** Plant a discoverable user-marketplace plugin with one command. */
+  function writePluginCommand(home: string, plugin: string, cmd: string): void {
+    const root = path.join(home, '.agents', 'plugins', plugin);
+    fs.mkdirSync(path.join(root, '.claude-plugin'), { recursive: true });
+    fs.writeFileSync(
+      path.join(root, '.claude-plugin', 'plugin.json'),
+      JSON.stringify({ name: plugin, version: '1.0.0', description: `${plugin} plugin` }),
+    );
+    fs.mkdirSync(path.join(root, 'commands'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'commands', `${cmd}.md`), `# /${plugin}-${cmd}\n`, 'utf-8');
+  }
+
+  it('listPluginCommandNames flattens plugin commands to <plugin>-<command>', () => {
+    const home = makeTempHome();
+    writePluginCommand(home, 'swarm', 'plan');
+    const names = runCommandsExpression(home, '[...listPluginCommandNames()]') as string[];
+    expect(names).toContain('swarm-plan');
+  });
+
+  it('does NOT flag a plugin-provided command-skill as an orphan', () => {
+    const home = makeTempHome();
+    writePluginCommand(home, 'swarm', 'plan');
+    scaffoldInstalledVersion(home, 'codex', '0.117.0');
+
+    // Simulate the plugin command installed as a command-skill wrapper
+    // (syncPluginToVersion writes `${plugin}-${cmd}` with the agents_command marker).
+    const skillDir = path.join(versionHomePath(home, 'codex', '0.117.0'), '.codex', 'skills', 'swarm-plan');
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(skillDir, 'SKILL.md'),
+      `---\nname: "swarm-plan"\ndescription: plan\nagents_command: "swarm-plan"\n---\n\n# /swarm-plan\n`,
+      'utf-8',
+    );
+
+    const listed = runCommandsExpression(home, "listCommandsInVersionHome('codex', '0.117.0')") as string[];
+    const diff = runCommandsExpression(home, "diffVersionCommands('codex', '0.117.0')") as { orphans: string[] };
+    // The wrapper IS present in the version home…
+    expect(listed).toContain('swarm-plan');
+    // …but it is source-managed by the plugin, so it must not be an orphan.
+    expect(diff.orphans).not.toContain('swarm-plan');
   });
 });
 

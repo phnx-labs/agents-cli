@@ -118,11 +118,27 @@ describe('diffVersionResources — hooks ignore project layer', () => {
 });
 
 describe('diffVersionResources — rules', () => {
-  it('compares AGENTS.md byte-for-byte for import-capable agents (claude)', () => {
+  // The instruction file (CLAUDE.md/GEMINI.md/AGENTS.md) is COMPOSED from
+  // `subrules/` for the active preset — the same rendering the rules writer
+  // emits. The diff must compare against that composition, not the raw
+  // `rules/AGENTS.md` whole-repo doc (which a preset composition deliberately
+  // never equals), or a correctly-synced home file is held as drift forever.
+  function seedRules(body: string, extra = 'the whole-repo AGENTS doc, deliberately different\n'): void {
+    const rulesDir = path.join(userDir, 'rules');
+    fs.mkdirSync(path.join(rulesDir, 'subrules'), { recursive: true });
+    // Presence of AGENTS.md makes the row exist and fixes its source layer; its
+    // content is intentionally NOT what the home file is compared against.
+    fs.writeFileSync(path.join(rulesDir, 'AGENTS.md'), extra);
+    fs.writeFileSync(path.join(rulesDir, 'rules.yaml'), 'presets:\n  default:\n    subrules: [core]\n');
+    fs.writeFileSync(path.join(rulesDir, 'subrules', 'core.md'), body);
+  }
+
+  it('reconciles the instruction file against the composed active-preset rules, not raw AGENTS.md (claude)', () => {
     const home = makeVersionHome('claude', '2.0.0');
     const configDir = path.join(home, '.claude');
-    fs.mkdirSync(path.join(userDir, 'rules'), { recursive: true });
-    fs.writeFileSync(path.join(userDir, 'rules', 'AGENTS.md'), 'rules body\n');
+    seedRules('rules body\n');
+    // Home matches the COMPOSED preset (what the writer emits) → ok, even though
+    // it differs from the longer raw AGENTS.md.
     fs.writeFileSync(path.join(configDir, 'CLAUDE.md'), 'rules body\n');
 
     const report = runDiff(projectDir, 'claude', '2.0.0', ['rules']);
@@ -130,28 +146,44 @@ describe('diffVersionResources — rules', () => {
     expect(agents).toMatchObject({ status: 'ok', source: 'user' });
   });
 
-  it('compares AGENTS.md against compiled (header-prefixed) content for non-import agents (codex)', () => {
+  it('flags the instruction file as diff when it does not match the composed preset (claude)', () => {
+    const home = makeVersionHome('claude', '2.0.0');
+    const configDir = path.join(home, '.claude');
+    seedRules('composed body\n');
+    // Stale content matching neither the raw AGENTS.md nor the composition.
+    fs.writeFileSync(path.join(configDir, 'CLAUDE.md'), 'stale body\n');
+
+    const report = runDiff(projectDir, 'claude', '2.0.0', ['rules']);
+    expect(report.kinds.rules.find((r) => r.name === 'AGENTS')?.status).toBe('diff');
+  });
+
+  it('compares against the composed preset for non-import agents too — no compiled header (codex)', () => {
     const home = makeVersionHome('codex', '0.100.0');
     const configDir = path.join(home, '.codex');
-    fs.mkdirSync(path.join(userDir, 'rules'), { recursive: true });
-    fs.writeFileSync(path.join(userDir, 'rules', 'AGENTS.md'), 'plain rules\n');
-
-    // A raw byte copy of the source would be wrong — codex needs the compiled
-    // header. Simulate the bad state to confirm doctor flags it as DIFF.
+    seedRules('plain rules\n');
+    // codex's instruction file is AGENTS.md; the writer composes the SAME bytes
+    // (no compiled header), so a plain composed copy reconciles as ok.
     fs.writeFileSync(path.join(configDir, 'AGENTS.md'), 'plain rules\n');
 
     const report = runDiff(projectDir, 'codex', '0.100.0', ['rules']);
-    const agents = report.kinds.rules.find((r) => r.name === 'AGENTS');
-    expect(agents?.status).toBe('diff');
+    expect(report.kinds.rules.find((r) => r.name === 'AGENTS')?.status).toBe('ok');
+  });
+});
 
-    // With the compiled header in place, status flips to ok.
-    const COMPILED_HEADER =
-      '<!-- Auto-compiled by agents-cli from ~/.agents/rules/AGENTS.md + imports.\n' +
-      '     Edit the source files under ~/.agents/rules/ — edits to this file will be overwritten on next sync. -->\n\n';
-    fs.writeFileSync(path.join(configDir, 'AGENTS.md'), COMPILED_HEADER + 'plain rules\n');
-    const report2 = runDiff(projectDir, 'codex', '0.100.0', ['rules']);
-    const agents2 = report2.kinds.rules.find((r) => r.name === 'AGENTS');
-    expect(agents2?.status).toBe('ok');
+describe('diffVersionResources — native ~/.agents/skills agents', () => {
+  // Gemini reads central skills directly; the orchestrator deletes its
+  // version-home skills dir and registers no skills writer. diffSkills must
+  // return no rows, or every central skill is false-reported `missing` and held
+  // as unreconcilable forever (drift never clears).
+  it('reports no skill rows for a nativeAgentsSkillsDir agent even with a central source skill', () => {
+    makeVersionHome('gemini', '1.0.0');
+    // A central source skill that a non-native agent WOULD report as missing.
+    const skillDir = path.join(systemDir, 'skills', 'demo');
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '---\ndescription: demo\n---\nbody\n');
+
+    const report = runDiff(projectDir, 'gemini', '1.0.0', ['skills']);
+    expect(report.kinds.skills).toEqual([]);
   });
 });
 

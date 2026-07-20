@@ -12,6 +12,7 @@ import { randomBytes } from 'node:crypto';
 import {
   assertValueStorable,
   buildAddGenericPasswordArgs,
+  buildAddGenericPasswordSpawnOptions,
   computeRekeyPlan,
   deleteKeychainToken,
   getKeychainToken,
@@ -42,6 +43,26 @@ describe('buildAddGenericPasswordArgs (RUSH-1764: value never in argv)', () => {
     // carries no value, so the secret is still absent from argv.
     expect(args).toEqual(['add-generic-password', '-U', '-a', 'alice', '-s', 'linear-api-key', '-w']);
     expect(args[args.length - 1]).toBe('-w');
+  });
+});
+
+describe('buildAddGenericPasswordSpawnOptions (bare -w write must not prompt an interactive tty)', () => {
+  const opts = buildAddGenericPasswordSpawnOptions('sk-secret-value');
+
+  it('detaches from the controlling terminal so readpassphrase reads piped stdin, not /dev/tty', () => {
+    // Without detached:true, `security -w` prompts the user's terminal in an
+    // interactive shell (e.g. `agents view` refreshing a Claude token) and hangs
+    // to the timeout — verified under a pty. This is the whole fix.
+    expect(opts.detached).toBe(true);
+  });
+
+  it('pipes the value TWICE (bare -w asks enter+confirm; one line stores empty)', () => {
+    expect(opts.input).toBe('sk-secret-value\nsk-secret-value\n');
+  });
+
+  it('keeps a bounded timeout so a context that cannot read the prompt fails loudly, not hangs', () => {
+    expect(opts.timeout).toBeGreaterThan(0);
+    expect(opts.stdio).toEqual(['pipe', 'pipe', 'pipe']);
   });
 });
 
@@ -257,6 +278,8 @@ describe('computeRekeyPlan', () => {
       'agents-cli.bundles.prod',
       'agents-cli.secrets.prod.API_KEY',
       'agents-cli.anthropic.token',
+      'agents-cli.session.apple.com',
+      'agents-cli.session.index',
     ];
     const values = new Map([
       ['agents-cli.bundles.autobot', JSON.stringify({ tier: 'none', vars: { CRON_TOKEN: 'keychain:CRON_TOKEN' } })],
@@ -264,6 +287,8 @@ describe('computeRekeyPlan', () => {
       ['agents-cli.bundles.prod', JSON.stringify({ tier: 'session', vars: {} })],
       ['agents-cli.secrets.prod.API_KEY', 'sk'],
       ['agents-cli.anthropic.token', 'tok'],
+      ['agents-cli.session.apple.com', JSON.stringify({ env: {}, expiresAt: 0, sleepPersist: false })],
+      ['agents-cli.session.index', JSON.stringify({ bundles: {} })],
     ]);
     const { items, unreadable } = computeRekeyPlan(services, values, key);
     expect(unreadable).toEqual([]);
@@ -273,6 +298,10 @@ describe('computeRekeyPlan', () => {
     expect(byOld['agents-cli.bundles.prod'].noAcl).toBe(false);
     expect(byOld['agents-cli.secrets.prod.API_KEY'].noAcl).toBe(false);
     expect(byOld['agents-cli.anthropic.token'].noAcl).toBe(false);
+    // Correction D: durable session items must stay no-ACL through a rekey, or
+    // their silent (no-Touch-ID) reads break.
+    expect(byOld['agents-cli.session.apple.com'].noAcl).toBe(true);
+    expect(byOld['agents-cli.session.index'].noAcl).toBe(true);
     expect(JSON.parse(byOld['agents-cli.bundles.prod'].payload!).name).toBe('prod');
     expect(byOld['agents-cli.anthropic.token'].newService).toMatch(HASHED_OTHER);
   });

@@ -6,7 +6,7 @@ import * as crypto from 'crypto';
 import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 
-import { getProjectVersion, removeVersion } from '../versions.js';
+import { getProjectVersion, removeVersion, getVersionDir, markVersionIsolated, isVersionIsolated } from '../versions.js';
 import { getVersionsDir, getTrashVersionsDir } from '../state.js';
 import { getDB, updateSessionFilePaths } from '../session/db.js';
 import type { AgentId } from '../types.js';
@@ -321,5 +321,119 @@ describe('updateSessionFilePaths rewrites file_path after soft-delete to trash',
 
     // The file must actually exist at the new path
     expect(fs.existsSync(row!.file_path)).toBe(true);
+  });
+});
+
+// An isolated install (`agents add --isolated`) is tagged with a `.isolated`
+// sentinel at the version-dir root. The marker is what keeps every "adopting"
+// code path away from the copy, so the roundtrip and the unmarked-default case
+// must both be exact.
+describe('isolated install markers', () => {
+  it('marks a version isolated, reads it back, and leaves other versions unmarked', () => {
+    const agent: AgentId = 'claude';
+    const isoVersion = `0.0.0-iso-${crypto.randomBytes(4).toString('hex')}`;
+    const normalVersion = `0.0.0-norm-${crypto.randomBytes(4).toString('hex')}`;
+    const isoDir = getVersionDir(agent, isoVersion);
+    const normalDir = getVersionDir(agent, normalVersion);
+
+    try {
+      fs.mkdirSync(isoDir, { recursive: true });
+      fs.mkdirSync(normalDir, { recursive: true });
+
+      // Absent marker -> not isolated.
+      expect(isVersionIsolated(agent, isoVersion)).toBe(false);
+
+      markVersionIsolated(agent, isoVersion);
+
+      expect(isVersionIsolated(agent, isoVersion)).toBe(true);
+      // A sibling version is unaffected.
+      expect(isVersionIsolated(agent, normalVersion)).toBe(false);
+
+      // The marker sits at the version-dir root so it travels to trash with the
+      // whole dir on soft-delete (and is restored intact).
+      expect(fs.existsSync(path.join(isoDir, '.isolated'))).toBe(true);
+    } finally {
+      fs.rmSync(isoDir, { recursive: true, force: true });
+      fs.rmSync(normalDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// Regression guard: removing the global default must NEVER auto-promote an
+// isolated install to be the new default (that would silently make `<agent>`
+// resolve to the isolated copy and let a later `use` adopt its home into
+// ~/.<agent>). Run in a subprocess with an isolated HOME so the real
+// ~/.agents/agents.yaml default pointer is never touched.
+describe('removeVersion never promotes an isolated install to the global default', () => {
+  // Shared preamble: fake a claude install whose real bin target exists, so
+  // isVersionInstalled/listInstalledVersions recognise it without hitting npm.
+  const preamble = String.raw`
+    import * as fs from 'fs';
+    import * as path from 'path';
+    import { AGENTS } from './src/lib/agents.ts';
+    import {
+      getVersionDir, setGlobalDefault, getGlobalDefault, removeVersion, markVersionIsolated,
+    } from './src/lib/versions.ts';
+
+    function fakeInstall(agent, version) {
+      const cfg = AGENTS[agent];
+      const pkgRoot = path.join(getVersionDir(agent, version), 'node_modules', cfg.npmPackage);
+      fs.mkdirSync(pkgRoot, { recursive: true });
+      fs.writeFileSync(path.join(pkgRoot, 'package.json'), JSON.stringify({ bin: { [cfg.cliCommand]: 'cli.js' } }));
+      fs.writeFileSync(path.join(pkgRoot, 'cli.js'), '#!/usr/bin/env node\n');
+    }
+  `;
+
+  it('clears the default when the only survivor is isolated', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'iso-default-clear-'));
+    try {
+      const script = preamble + String.raw`
+        fakeInstall('claude', '1.0.0');   // normal default
+        fakeInstall('claude', '2.0.0');    // isolated survivor
+        markVersionIsolated('claude', '2.0.0');
+        setGlobalDefault('claude', '1.0.0');
+
+        removeVersion('claude', '1.0.0');
+
+        console.log(JSON.stringify({ afterDefault: getGlobalDefault('claude') }));
+      `;
+      const out = execFileSync('bun', ['--eval', script], {
+        cwd: repoRoot,
+        env: { ...process.env, HOME: home },
+        encoding: 'utf-8',
+      });
+      const result = JSON.parse(out.trim().split('\n').at(-1) ?? '{}') as { afterDefault: string | null };
+      // NOT '2.0.0' — the isolated survivor must not be adopted as the default.
+      expect(result.afterDefault).toBeNull();
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('promotes the newest NON-isolated survivor, skipping a newer isolated one', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'iso-default-skip-'));
+    try {
+      const script = preamble + String.raw`
+        fakeInstall('claude', '1.0.0');   // normal default (to be removed)
+        fakeInstall('claude', '1.5.0');    // normal survivor
+        fakeInstall('claude', '2.0.0');    // isolated survivor (newer)
+        markVersionIsolated('claude', '2.0.0');
+        setGlobalDefault('claude', '1.0.0');
+
+        removeVersion('claude', '1.0.0');
+
+        console.log(JSON.stringify({ afterDefault: getGlobalDefault('claude') }));
+      `;
+      const out = execFileSync('bun', ['--eval', script], {
+        cwd: repoRoot,
+        env: { ...process.env, HOME: home },
+        encoding: 'utf-8',
+      });
+      const result = JSON.parse(out.trim().split('\n').at(-1) ?? '{}') as { afterDefault: string | null };
+      // The newer 2.0.0 is isolated, so the newest promotable version is 1.5.0.
+      expect(result.afterDefault).toBe('1.5.0');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 });

@@ -18,6 +18,7 @@ import {
   assertValidBranchName,
   canonicalGitRemote,
   commitAndPush,
+  commitOwnDeviceMeta,
   displayHomePath,
   parseSource,
   pullRepo,
@@ -219,6 +220,56 @@ describe('displayHomePath', () => {
   it('leaves a path outside the home directory unchanged (bar slash normalization)', () => {
     expect(displayHomePath('/opt/other/repo')).toBe('/opt/other/repo');
     expect(displayHomePath('C:\\some\\win\\path')).toBe('C:/some/win/path');
+  });
+});
+
+describe('commitOwnDeviceMeta (unwedge the pull from per-machine pin drift)', () => {
+  const tmpDirs: string[] = [];
+  afterEach(() => {
+    for (const d of tmpDirs) fs.rmSync(d, { recursive: true, force: true });
+    tmpDirs.length = 0;
+  });
+
+  async function initRepo(): Promise<string> {
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'own-meta-'));
+    tmpDirs.push(repo);
+    const g = simpleGit(repo);
+    await g.init(['-b', 'main']);
+    await g.addConfig('user.email', 'test@example.com');
+    await g.addConfig('user.name', 'Test');
+    await g.addConfig('commit.gpgsign', 'false');
+    fs.mkdirSync(path.join(repo, 'devices', 'zion'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'devices', 'zion', 'agents.yaml'), 'agents:\n  claude: 1.0.0\n');
+    await g.add('-A');
+    await g.commit('init');
+    return repo;
+  }
+
+  it('commits ONLY the dirty device-meta, leaving a real user edit uncommitted (still blocks the pull)', async () => {
+    const repo = await initRepo();
+    const meta = path.join(repo, 'devices', 'zion', 'agents.yaml');
+    fs.writeFileSync(meta, 'agents:\n  claude: 2.0.0\n'); // pin drift
+    fs.writeFileSync(path.join(repo, 'hooks.yaml'), 'a real user edit\n'); // genuine work
+
+    const committed = await commitOwnDeviceMeta(repo, meta);
+    expect(committed).toBe('devices/zion/agents.yaml');
+
+    const st = await simpleGit(repo).status();
+    // device-meta is now clean (committed); the user edit is still dirty.
+    expect(st.files.map((f) => f.path)).toContain('hooks.yaml');
+    expect(st.files.map((f) => f.path)).not.toContain('devices/zion/agents.yaml');
+  });
+
+  it('is a no-op when the device-meta is clean', async () => {
+    const repo = await initRepo();
+    const meta = path.join(repo, 'devices', 'zion', 'agents.yaml');
+    expect(await commitOwnDeviceMeta(repo, meta)).toBeNull();
+  });
+
+  it('is a no-op when the device-meta lives outside the repo (system/extra repos)', async () => {
+    const repo = await initRepo();
+    const outside = path.join(os.tmpdir(), 'somewhere-else', 'devices', 'x', 'agents.yaml');
+    expect(await commitOwnDeviceMeta(repo, outside)).toBeNull();
   });
 });
 

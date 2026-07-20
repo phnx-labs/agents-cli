@@ -45,6 +45,8 @@ import {
   isOldestInstalled,
   getGlobalDefault,
   setGlobalDefault,
+  markVersionIsolated,
+  isVersionIsolated,
   getVersionHomePath,
   getVersionDir,
   syncResourcesToVersion,
@@ -64,6 +66,8 @@ import { carryForwardSettings } from '../lib/settings-manifest.js';
 import {
   createShim,
   createVersionedAlias,
+  supportsIsolatedInstall,
+  CONFIG_ENV_ISOLATED_AGENTS,
   removeShim,
   shimExists,
   getShimsDir,
@@ -161,14 +165,39 @@ function warnIfShimShadowed(agent: AgentId): void {
   console.log(chalk.gray(`  ${result.reloadHint}`));
 }
 
+/**
+ * Install an isolated copy of an agent version: a fully self-contained install
+ * that never touches the user's existing setup.
+ *
+ * Unlike a normal install it does NOT set (or offer to set) the global default,
+ * does NOT create/replace the bare `<agent>` shim, does NOT back up or symlink
+ * the user's real `~/.<agent>`, and does NOT carry over settings or resources.
+ * It only creates the versioned alias (so the copy is launchable) and records
+ * the isolated marker. Invoke the copy explicitly with `agents run <agent>@<v>`.
+ */
+function finalizeIsolatedInstall(agent: AgentId, version: string): void {
+  const agentConfig = AGENTS[agent];
+  const label = agentLabel(agentConfig.id);
+
+  createVersionedAlias(agent, version);
+  markVersionIsolated(agent, version);
+
+  console.log(chalk.green(`  Installed ${label}@${version} as an isolated copy.`));
+  console.log(chalk.gray(`  Your existing ${agentConfig.configDir} and default ${label} are untouched.`));
+  console.log(chalk.gray(`  Run it:     agents run ${agent}@${version} "your prompt"`));
+  console.log(chalk.gray(`  It has its own config and login — sign in the first time you run it.`));
+  console.log(chalk.gray(`  Remove it:  agents remove ${agent}@${version} --isolated`));
+}
+
 type VersionPruneVerb = 'prune' | 'remove';
 
 async function versionPruneAction(
   specs: string[],
-  options: { project?: boolean },
+  options: { project?: boolean; isolated?: boolean },
   commandName: VersionPruneVerb,
 ): Promise<void> {
   const isProject = options.project;
+  const isIsolated = options.isolated;
   const moved: Array<{ agent: AgentId; version: string }> = [];
 
   for (const spec of specs) {
@@ -182,6 +211,13 @@ async function versionPruneAction(
     const { agent, version } = parsed;
     const agentConfig = AGENTS[agent];
 
+    // --isolated only ever applies to agents that can BE installed isolated;
+    // for the rest no isolated version can exist, so say so plainly.
+    if (isIsolated && !supportsIsolatedInstall(agent)) {
+      console.log(chalk.gray(`${agentLabel(agentConfig.id)} has no isolated installs (--isolated is not supported for it).`));
+      continue;
+    }
+
     // Script-installed agents (droid, grok) can have a *literal* `latest`
     // version dir on disk when the post-install version probe failed. An
     // explicit `<agent>@latest` should remove that dir directly rather than
@@ -191,9 +227,14 @@ async function versionPruneAction(
       version === 'latest' && spec.includes('@') && isVersionInstalled(agent, 'latest');
 
     if (!isLiteralLatestInstalled && (version === 'latest' || version === 'oldest' || !spec.includes('@'))) {
-      const versions = listInstalledVersions(agent);
+      // With --isolated, only isolated installs are eligible for the picker, so
+      // a normal/default install can never be selected here by accident.
+      const versions = listInstalledVersions(agent)
+        .filter((v) => !isIsolated || isVersionIsolated(agent, v));
       if (versions.length === 0) {
-        console.log(chalk.gray(`No versions of ${agentLabel(agentConfig.id)} installed`));
+        console.log(chalk.gray(isIsolated
+          ? `No isolated ${agentLabel(agentConfig.id)} installs`
+          : `No versions of ${agentLabel(agentConfig.id)} installed`));
         continue;
       }
 
@@ -235,6 +276,9 @@ async function versionPruneAction(
           }
           fixSessionFilePaths(agent, v, versionDir);
           console.log(chalk.green(`Moved ${agentLabel(agentConfig.id)}@${v} to trash`));
+          if (isIsolated) {
+            console.log(chalk.gray(`  Your real ${agentConfig.configDir} and default ${agentLabel(agentConfig.id)} were untouched.`));
+          }
           moved.push({ agent, version: v });
         }
 
@@ -254,6 +298,12 @@ async function versionPruneAction(
       }
     } else if (!isVersionInstalled(agent, version)) {
       console.log(chalk.gray(`${agentLabel(agentConfig.id)}@${version} not installed`));
+    } else if (isIsolated && !isVersionIsolated(agent, version)) {
+      // Safety guard: `--isolated` refuses to remove a normal/default install,
+      // so an accidental `remove <agent>@<default> --isolated` can never delete
+      // the user's primary version or disturb their real ~/.<agent>.
+      console.log(chalk.yellow(`${agentLabel(agentConfig.id)}@${version} is not an isolated install; refusing to remove it under --isolated.`));
+      console.log(chalk.gray(`  Drop --isolated to remove a normal version: agents ${commandName} ${agent}@${version}`));
     } else {
       const versionDir = getVersionDir(agent, version);
       const removed = removeVersion(agent, version);
@@ -263,6 +313,9 @@ async function versionPruneAction(
       }
       fixSessionFilePaths(agent, version, versionDir);
       console.log(chalk.green(`Moved ${agentLabel(agentConfig.id)}@${version} to trash`));
+      if (isIsolated) {
+        console.log(chalk.gray(`  Your real ${agentConfig.configDir} and default ${agentLabel(agentConfig.id)} were untouched.`));
+      }
       moved.push({ agent, version });
 
       const remaining = listInstalledVersions(agent);
@@ -293,7 +346,8 @@ function configureVersionPruneCommand(cmd: Command, commandName: VersionPruneVer
     .description(isAlias
       ? 'Alias for agents prune. Uninstalls agent CLI versions.'
       : 'Uninstall agent CLI versions. Moves version data to trash for recovery.')
-    .option('-p, --project', 'Also clear the pinned version from .agents/agents.yaml in the current project');
+    .option('-p, --project', 'Also clear the pinned version from .agents/agents.yaml in the current project')
+    .option('--isolated', 'Only act on isolated installs (created with `agents add --isolated`). Refuses to remove a normal/default install and never touches your real ~/.<agent>.');
 
   setHelpSections(cmd, {
     examples: `
@@ -305,11 +359,15 @@ function configureVersionPruneCommand(cmd: Command, commandName: VersionPruneVer
 
       # Prune and also clear the project pin
       agents ${commandName} claude@2.0.50 --project
+
+      # Cleanly remove an isolated copy, leaving your normal install alone
+      agents ${commandName} claude@2.1.112 --isolated
     `,
     notes: `
       - Pruned version directories move to trash with their home/ data intact.
       - Session file paths are rewritten so session history remains readable.
       - Removing the default version unsets the default; run 'agents use' to pick a new one.
+      - --isolated restricts the operation to isolated installs and refuses to remove a normal/default version, so your existing setup is never disturbed.
       - Reinstall any time with 'agents add'.
     `,
   });
@@ -323,6 +381,7 @@ export function registerVersionsCommands(program: Command): void {
     .command('add <specs...>')
     .description('Download and install agent CLI versions. Enables subsidized API usage through managed binaries.')
     .option('-p, --project', 'Lock this version to the current project directory only, stored in project-root agents.yaml')
+    .option('--isolated', 'Install a fully self-contained copy that never touches your existing ~/.<agent> or default. Launch it explicitly with `agents run <agent>@<version>`. Cannot be combined with --project.')
     .option('-y, --yes', 'Auto-accept defaults without prompting (useful for scripts and CI)');
 
   setHelpSections(addCmd, {
@@ -341,17 +400,28 @@ export function registerVersionsCommands(program: Command): void {
 
       # Lock a version to this project only (won't affect global default)
       agents add claude@2.1.100 --project
+
+      # Install a clean, separate copy that leaves your existing setup alone
+      agents add claude@2.1.112 --isolated
     `,
     notes: `
       - The first version you install becomes the default automatically.
       - 'add' does NOT change the default if a default already exists. Use 'agents use' to switch.
       - Multi-account: each installed version has separate auth, so you can install the same agent twice for two accounts.
+      - --isolated installs a self-contained copy: it never sets the default, never creates the bare '<agent>' shim, and never backs up or symlinks your real ~/.<agent>. Run it with 'agents run <agent>@<version>' and remove it with 'agents remove <agent>@<version> --isolated'. Mutually exclusive with --project.
     `,
   });
 
   addCmd.action(async (specs: string[], options) => {
       const isProject = options.project;
+      const isIsolated = options.isolated;
       const skipPrompts = options.yes || !isInteractiveTerminal();
+
+      if (isIsolated && isProject) {
+        console.log(chalk.red('--isolated and --project cannot be combined.'));
+        console.log(chalk.gray('An isolated copy is global-but-separate; a project pin selects a shared install for one directory.'));
+        return;
+      }
 
       for (const spec of specs) {
         const parsed = parseAgentSpec(spec);
@@ -365,6 +435,17 @@ export function registerVersionsCommands(program: Command): void {
         const agentConfig = AGENTS[agent];
 
         warnAgentDeprecated(agent);
+
+        // Isolation relies on a config-dir env var to redirect the copy away
+        // from the user's real ~/.<agent>. Agents without one isolate only by
+        // adopting ~/.<agent> (which --isolated skips), so an isolated copy
+        // would silently read/write the real config. Refuse rather than lie.
+        if (isIsolated && !supportsIsolatedInstall(agent)) {
+          console.log(chalk.red(`${agentLabel(agentConfig.id)} does not support --isolated installs.`));
+          console.log(chalk.gray(`  It has no config-directory env var, so it can only isolate by adopting ${agentConfig.configDir} — which --isolated deliberately avoids.`));
+          console.log(chalk.gray(`  Supported with --isolated: ${CONFIG_ENV_ISOLATED_AGENTS.join(', ')}.`));
+          continue;
+        }
 
         if (!agentConfig.npmPackage && !agentConfig.installScript) {
           console.log(chalk.yellow(`${agentLabel(agentConfig.id)} has no npm package. Install manually.`));
@@ -391,6 +472,19 @@ export function registerVersionsCommands(program: Command): void {
         }
 
         if (alreadyInstalled) {
+          if (isIsolated) {
+            if (!isVersionIsolated(agent, installedAsVersion)) {
+              // A normal and an isolated install of the SAME version share one
+              // on-disk dir, so they can't coexist. Refuse rather than silently
+              // convert the user's existing (possibly default) install.
+              console.log(chalk.yellow(`${agentLabel(agentConfig.id)}@${installedAsVersion} is already installed as a normal (default-eligible) version.`));
+              console.log(chalk.gray(`  Remove it first (agents remove ${agent}@${installedAsVersion}) then re-add with --isolated, or pick a different version.`));
+              continue;
+            }
+            // Already isolated: re-affirm the alias + marker idempotently.
+            finalizeIsolatedInstall(agent, installedAsVersion);
+            continue;
+          }
           console.log(chalk.gray(`${agentLabel(agentConfig.id)}@${installedAsVersion} already installed`));
 
           // Ensure shim exists (in case it was deleted or needs updating)
@@ -405,16 +499,25 @@ export function registerVersionsCommands(program: Command): void {
           if (result.success) {
             spinner.succeed(`Installed ${agentLabel(agentConfig.id)}@${result.installedVersion}`);
 
+            const installedVersion = result.installedVersion || version;
+            // Track the concrete version so a `--project` pin records it instead
+            // of the `latest`/`oldest` alias.
+            installedAsVersion = installedVersion;
+
+            // Isolated installs stop here: no bare shim, no settings carry-over,
+            // no resource sync, no default switch, no PATH edits. Just a
+            // launchable versioned alias + the isolated marker, leaving the
+            // user's real ~/.<agent> and default untouched.
+            if (isIsolated) {
+              finalizeIsolatedInstall(agent, installedVersion);
+              continue;
+            }
+
             // Create shim if first install
             if (!shimExists(agent)) {
               createShim(agent);
               console.log(chalk.gray(`  Created shim: ${getShimsDir()}/${agentConfig.cliCommand}`));
             }
-
-            const installedVersion = result.installedVersion || version;
-            // Track the concrete version so a `--project` pin records it instead
-            // of the `latest`/`oldest` alias.
-            installedAsVersion = installedVersion;
 
             // Seed the fresh version home with user settings from the current
             // default version (settings.json, keybindings, codex config/auth).
@@ -648,8 +751,11 @@ export function registerVersionsCommands(program: Command): void {
         let selectedVersion = version;
 
         if (!version) {
-          // Interactive version picker
-          const versions = listInstalledVersions(agentId);
+          // Interactive version picker. Isolated installs are walled off from the
+          // real ~/.<agent> on purpose, so they must never be selectable here —
+          // setting one as the default would repoint the real config at it. Filter
+          // them out (same as the `remove` picker), leaving only usable versions.
+          const versions = listInstalledVersions(agentId).filter((v) => !isVersionIsolated(agentId, v));
           if (versions.length === 0) {
             console.log(chalk.red(`No versions of ${agentLabel(agentConfig.id)} installed`));
             console.log(chalk.gray(`Run: agents add ${agentId}@latest`));
@@ -721,6 +827,20 @@ export function registerVersionsCommands(program: Command): void {
 
         // selectedVersion is guaranteed to be defined after the check above
         const finalVersion = selectedVersion;
+
+        // An isolated install is deliberately walled off from the real
+        // ~/.<agent>. `agents use` would repoint the real config symlink at it
+        // (switchConfigSymlink) and carry settings forward INTO it
+        // (carryForwardSettings) — a direct breach of the isolation guarantee.
+        // Refuse for both the explicit `use <agent>@<isolated>` path (the picker
+        // above already filters isolated versions out of the interactive path).
+        // Isolated copies are launched explicitly via `agents run <agent>@<v>`.
+        if (isVersionIsolated(agentId, finalVersion)) {
+          console.log(chalk.red(`${agentLabel(agentConfig.id)}@${finalVersion} is an isolated install and can't be set as your active version.`));
+          console.log(chalk.gray(`Isolated copies stay walled off from your real ${agentConfig.configDir}. Run it directly: agents run ${agentId}@${finalVersion}`));
+          console.log(chalk.gray(`To install this version normally: agents add ${agentId}@${finalVersion}`));
+          return;
+        }
 
         if (options.project) {
           // Set in project manifest

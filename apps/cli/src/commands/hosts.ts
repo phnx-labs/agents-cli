@@ -11,6 +11,7 @@ import type { Command } from 'commander';
 import chalk from 'chalk';
 import { terminalWidth, truncateToWidth, stringWidth } from '../lib/session/width.js';
 import { checkbox, confirm } from '@inquirer/prompts';
+import { isInteractiveTerminal } from './utils.js';
 import { assertValidSshTarget } from '../lib/ssh-exec.js';
 import { getProvider, listAllHosts, resolveHost } from '../lib/hosts/registry.js';
 import { getDevice } from '../lib/devices/registry.js';
@@ -56,6 +57,12 @@ async function maybeBootstrap(
   const remoteVer = remoteAgentsVersion(target, os);
   const localVer = localCliVersion();
   if (!remoteVer) {
+    // Non-TTY: this is a best-effort bootstrap prompt, so report and return
+    // instead of hanging on confirm() in a headless/piped shell.
+    if (!isInteractiveTerminal()) {
+      console.log(chalk.gray(`  agents-cli not found on ${hostName} — install it there, then: agents hosts check ${hostName}`));
+      return;
+    }
     const ok = await confirm({ message: `  agents-cli not found on ${hostName}. Install ${localVer ? `v${localVer}` : 'latest'} now?`, default: true });
     if (ok) {
       console.log(chalk.gray('  Installing agents-cli on the host…'));
@@ -66,6 +73,10 @@ async function maybeBootstrap(
   }
   const remoteClean = remoteVer.replace(/^v/, '');
   if (localVer && remoteClean !== localVer) {
+    if (!isInteractiveTerminal()) {
+      console.log(chalk.gray(`  ${hostName} has agents-cli ${remoteClean}, you have ${localVer} — versions differ; upgrade the host to match when convenient.`));
+      return;
+    }
     const ok = await confirm({ message: `  ${hostName} has agents-cli ${remoteClean}, you have ${localVer}. Upgrade to match?`, default: false });
     if (ok) {
       const r = bootstrapAgentsCli(target, localVer, os);

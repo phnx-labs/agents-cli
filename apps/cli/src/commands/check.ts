@@ -18,6 +18,7 @@ import { setHelpSections } from '../lib/help.js';
 import { computeDrift, type SyncStatusRow } from '../lib/drift.js';
 import { loadDevices } from '../lib/devices/registry.js';
 import { fanOutDevices, planFleetTargets, remoteFleetTargets, type FanOutDeviceTarget } from '../lib/devices/fleet.js';
+import { fleetDialTarget } from '../lib/devices/connect.js';
 import { machineId } from '../lib/session/sync/config.js';
 import { buildRemoteAgentsInvocation } from '../lib/hosts/remote-cmd.js';
 import { sshExecAsync } from '../lib/ssh-exec.js';
@@ -148,6 +149,8 @@ function checkPayload(device: string, drift: ReturnType<typeof computeDrift>): D
 
 interface CheckFanOutTarget extends FanOutDeviceTarget {
   platform?: string;
+  /** Registry Tailscale address to dial, not the bare name — see {@link fleetDialTarget}. */
+  dialTarget: string;
 }
 
 async function probeDeviceCheck(target: CheckFanOutTarget): Promise<DeviceCheckResult> {
@@ -158,7 +161,7 @@ async function probeDeviceCheck(target: CheckFanOutTarget): Promise<DeviceCheckR
     isWin ? 'windows' : undefined,
     isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' },
   );
-  const res = await sshExecAsync(target.name, remoteCmd, { timeoutMs: 30000, multiplex: true });
+  const res = await sshExecAsync(target.dialTarget, remoteCmd, { timeoutMs: 30000, multiplex: true });
   if (res.code !== 0 && !res.stdout.trim()) {
     throw new Error(res.timedOut ? 'timed out' : (res.stderr.trim() || `exit ${res.code ?? 'unknown'}`));
   }
@@ -186,6 +189,7 @@ async function runDevicesCheck(opts: CheckOptions, cwd: string): Promise<void> {
       name: t.device.name,
       platform: t.device.platform,
       skip: t.skip,
+      dialTarget: fleetDialTarget(t.device),
     }));
   const remote = await fanOutDevices(remoteTargets, probeDeviceCheck);
   const devices: DeviceCheckResult[] = [local];
