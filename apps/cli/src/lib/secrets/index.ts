@@ -23,7 +23,7 @@
  * rather than the system's cloud-keychain path.
  */
 
-import { execFileSync, spawnSync } from 'child_process';
+import { execFileSync, spawnSync, type SpawnSyncOptions } from 'child_process';
 import { createHmac, randomBytes } from 'node:crypto';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -939,6 +939,28 @@ export function buildAddGenericPasswordArgs(account: string, item: string): stri
   return ['add-generic-password', '-U', '-a', account, '-s', item, '-w'];
 }
 
+/**
+ * spawnSync options for the bare `-w` keychain write. Pure so the two
+ * load-bearing properties are unit-testable without touching the real keychain:
+ *   - `input` pipes the value TWICE (bare `-w` prompts enter+confirm; one line
+ *     fails the confirm and stores an empty secret).
+ *   - `detached: true` runs `security` in a new session with no controlling
+ *     terminal, so readpassphrase(3) falls back to our piped stdin instead of
+ *     prompting the user's `/dev/tty` in an interactive shell (see setKeychainToken).
+ */
+export function buildAddGenericPasswordSpawnOptions(
+  value: string,
+): SpawnSyncOptions & { input: string; detached: boolean } {
+  // `detached` is honored by spawnSync at runtime (libuv setsid) but is not
+  // declared on Node's SpawnSyncOptions type, so widen the return explicitly.
+  return {
+    input: `${value}\n${value}\n`,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    timeout: 10_000,
+    detached: true,
+  };
+}
+
 export function setKeychainToken(item: string, value: string, opts?: { noAcl?: boolean }): void {
   // Validate the CLEARTEXT name (a hashed storage name is always clean), then
   // resolve the storage name.
@@ -971,11 +993,22 @@ export function setKeychainToken(item: string, value: string, opts?: { noAcl?: b
     // (assertValueStorable above), so each line carries the whole secret verbatim
     // (no shell/quoting layer). `timeout` bounds the call so a context that cannot
     // read the prompt fails loudly instead of hanging.
-    const sec = spawnSync('/usr/bin/security', buildAddGenericPasswordArgs(os.userInfo().username, item), {
-      input: `${value}\n${value}\n`,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 10_000,
-    });
+    //
+    // `detached: true` is load-bearing, not an afterthought: readpassphrase(3)
+    // reads from the *controlling terminal* (`/dev/tty`) when one exists, and only
+    // falls back to fd 0 when it cannot open one. So piping over stdin works in a
+    // headless/CI context (no controlling tty) but is IGNORED in an interactive
+    // shell — there `security` prompts the real user ("password data for new
+    // item:") and hangs to the timeout, and any keystroke would be stored AS the
+    // secret. `detached` runs the child in a new session (setsid) with no
+    // controlling terminal, so readpassphrase always falls back to our piped
+    // stdin. Without it, an interactive `agents view` (refreshing+saving a Claude
+    // OAuth token) or `agents secrets add` pops a keychain password sheet.
+    const sec = spawnSync(
+      '/usr/bin/security',
+      buildAddGenericPasswordArgs(os.userInfo().username, item),
+      buildAddGenericPasswordSpawnOptions(value),
+    );
     if (sec.status !== 0) {
       const msg = sec.stderr?.toString().trim();
       throw new Error(msg || `Failed to write keychain item '${item}'.`);
