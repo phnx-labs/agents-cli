@@ -375,6 +375,14 @@
   --json` produces, via a shared renderer, so there's one session JSON contract, not
   two. Source: `apps/cli/src/commands/logs.ts`, `apps/cli/src/commands/sessions.ts`
   (`renderSessionLogJson`), `apps/cli/src/lib/hosts/logs.ts` (`hostTaskLogJson`).
+- **`--json` on resource `list` commands (`skills`/`commands`/`mcp`/`subagents`).**
+  The config-authoring commands were table/picker-only, so an agent enumerating
+  installed resources had to scrape colored text. `--json` is added at the source —
+  the shared `showResourceList` helper (`apps/cli/src/commands/resource-view.ts`)
+  now emits each row's metadata + per-agent-version sync targets as JSON — so every
+  command built on it inherits one machine-readable contract. Wired into `skills`,
+  `commands`, `mcp`, and `subagents` `list`. (`rules`/`permissions`/`hooks`, which
+  render bespoke, follow next.)
 
 ## 1.20.58
 

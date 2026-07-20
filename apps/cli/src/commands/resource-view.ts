@@ -44,10 +44,21 @@ export interface ResourceViewOptions {
   /** When the user specified agent or agent@version, we scope per-agent. */
   filterAgent?: AgentId;
   filterVersion?: string;
+  /** Emit machine-readable JSON instead of the picker/table (for agents/scripts). */
+  json?: boolean;
 }
 
 /** Display a resource list: interactive picker in TTY mode, plain table otherwise. */
 export async function showResourceList(opts: ResourceViewOptions): Promise<void> {
+  if (opts.json) {
+    // Strip the non-serializable buildDetail thunk; emit the row metadata plus
+    // each resource's per-agent-version sync targets. One shared JSON contract
+    // for every resource `list` built on this helper.
+    const rows = opts.rows.map(({ buildDetail, ...row }) => row);
+    console.log(JSON.stringify(rows, null, 2));
+    return;
+  }
+
   if (opts.rows.length === 0) {
     console.log(chalk.gray(opts.emptyMessage));
     return;

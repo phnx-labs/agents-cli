@@ -102,6 +102,7 @@ When to use:
     .command('list [agent]')
     .description('Show which skills are installed and which agent versions they are synced to')
     .option('-a, --agent <agent>', 'Filter to a specific agent (alternative to positional arg)')
+    .option('--json', 'Emit machine-readable JSON instead of the table/picker')
     .action(async (agentArg, options) => {
       const spinner = ora({ text: 'Loading...', isSilent: !process.stdout.isTTY }).start();
 
@@ -136,6 +137,7 @@ When to use:
         centralPath: getSkillsDir(),
         filterAgent,
         filterVersion,
+        json: options.json,
       });
     });
 

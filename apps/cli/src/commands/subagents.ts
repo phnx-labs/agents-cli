@@ -91,7 +91,7 @@ When to use:
 `);
 
   // Shared list implementation, registered as `list` and hidden `view` alias.
-  const runList = async () => {
+  const runList = async (opts?: { json?: boolean }) => {
     const rows = buildSubagentRows();
     await showResourceList({
       resourcePlural: 'subagents',
@@ -100,6 +100,7 @@ When to use:
       rows,
       emptyMessage: 'No subagents in ~/.agents/subagents/. Add one with: agents subagents add gh:user/repo',
       centralPath: getSubagentsDir(),
+      json: opts?.json,
     });
   };
 
@@ -107,6 +108,7 @@ When to use:
   subagentsCmd
     .command('list')
     .description('Show subagents in a table with sync status across agent versions')
+    .option('--json', 'Emit machine-readable JSON instead of the table/picker')
     .addHelpText('after', `
 Examples:
   # Interactive picker (TTY) or sync-status table (piped)

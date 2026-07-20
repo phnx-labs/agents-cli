@@ -99,6 +99,7 @@ When to use:
 
   commandsCmd
     .command('list [agent]')
+    .option('--json', 'Emit machine-readable JSON instead of the table/picker')
     .description('Show which slash commands are installed and which agent versions they are synced to')
     .option('-a, --agent <agent>', 'Filter to a specific agent (alternative to positional arg)')
     .action(async (agentArg, options) => {
@@ -134,6 +135,7 @@ When to use:
         centralPath: getCommandsDir(),
         filterAgent,
         filterVersion,
+        json: options.json,
       });
     });
 
