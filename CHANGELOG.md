@@ -359,6 +359,14 @@
   12-device fleet reports `12 ok` rather than `11 ok · 1 failed`. Source:
   `apps/cli/src/lib/devices/fleet.ts` (`runFleet`, `runLocalCommand`),
   `apps/cli/src/commands/ssh.ts`.
+- **`run --copy-creds` and `hosts add` no longer hang a headless caller.** Both
+  ran an interactive `@inquirer` prompt (a runtime picker + a confirm; a bootstrap
+  install/upgrade confirm) with no TTY guard, so a non-TTY/piped invocation blocked
+  forever on stdin. `run --copy-creds` now fails clean via `requireInteractiveSelection`
+  in a non-TTY shell (it ships live credentials, so it deliberately stays
+  interactive-only rather than auto-selecting), and `hosts add`'s best-effort
+  bootstrap reports the version state and returns instead of prompting. Source:
+  `apps/cli/src/commands/exec.ts`, `apps/cli/src/commands/hosts.ts`.
 
 ## 1.20.58
 
