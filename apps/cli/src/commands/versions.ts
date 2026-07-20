@@ -751,8 +751,11 @@ export function registerVersionsCommands(program: Command): void {
         let selectedVersion = version;
 
         if (!version) {
-          // Interactive version picker
-          const versions = listInstalledVersions(agentId);
+          // Interactive version picker. Isolated installs are walled off from the
+          // real ~/.<agent> on purpose, so they must never be selectable here —
+          // setting one as the default would repoint the real config at it. Filter
+          // them out (same as the `remove` picker), leaving only usable versions.
+          const versions = listInstalledVersions(agentId).filter((v) => !isVersionIsolated(agentId, v));
           if (versions.length === 0) {
             console.log(chalk.red(`No versions of ${agentLabel(agentConfig.id)} installed`));
             console.log(chalk.gray(`Run: agents add ${agentId}@latest`));
@@ -824,6 +827,20 @@ export function registerVersionsCommands(program: Command): void {
 
         // selectedVersion is guaranteed to be defined after the check above
         const finalVersion = selectedVersion;
+
+        // An isolated install is deliberately walled off from the real
+        // ~/.<agent>. `agents use` would repoint the real config symlink at it
+        // (switchConfigSymlink) and carry settings forward INTO it
+        // (carryForwardSettings) — a direct breach of the isolation guarantee.
+        // Refuse for both the explicit `use <agent>@<isolated>` path (the picker
+        // above already filters isolated versions out of the interactive path).
+        // Isolated copies are launched explicitly via `agents run <agent>@<v>`.
+        if (isVersionIsolated(agentId, finalVersion)) {
+          console.log(chalk.red(`${agentLabel(agentConfig.id)}@${finalVersion} is an isolated install and can't be set as your active version.`));
+          console.log(chalk.gray(`Isolated copies stay walled off from your real ${agentConfig.configDir}. Run it directly: agents run ${agentId}@${finalVersion}`));
+          console.log(chalk.gray(`To install this version normally: agents add ${agentId}@${finalVersion}`));
+          return;
+        }
 
         if (options.project) {
           // Set in project manifest
