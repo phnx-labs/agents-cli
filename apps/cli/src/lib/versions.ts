@@ -50,6 +50,7 @@ import { safeJoin } from './paths.js';
 import { installCommandSkillToVersion, listCommandSkillsInVersion, readSkillSourceCommandMarker, shouldInstallCommandAsSkill } from './command-skills.js';
 import { getWriter, getDetector } from './staleness/registry.js';
 import { syncMemoryToVersionHome } from './memory.js';
+import { listPluginSkillNames } from './staleness/writers/sources.js';
 
 /** Promisified exec for running shell commands. */
 const execAsync = promisify(exec);
@@ -281,6 +282,9 @@ export function getAvailableResources(cwd: string = process.cwd()): AvailableRes
   // Plugins (directories with .claude-plugin/plugin.json)
   const allPlugins = discoverPlugins();
   result.plugins = allPlugins.map(p => p.name);
+  for (const name of listPluginSkillNames()) {
+    if (!skillNames.has(name)) result.skills.push(name);
+  }
 
   // Promptcuts — present if either layer exists. Reads merge user + system
   // with user precedence (see readMergedPromptcuts); writes always go to user.
@@ -2568,9 +2572,17 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   // ~/.agents/skills/ (Gemini) are not registered; we clear the version-home
   // skills dir for them so a stale per-version copy never shadows central.
   const skillsWriter = getWriter('skills', agent);
-  let skillsToSync = selection
+  const pluginsWriter = getWriter('plugins', agent);
+  const pluginsToSync = selection
+    ? resolveSelection(selection.plugins, available.plugins)
+    : (pluginsWriter ? available.plugins : []);
+  const pluginSkillsToSync = listPluginSkillNames({ agent, plugins: new Set(pluginsToSync) });
+  const selectedSkillsToSync = selection
     ? resolveSelection(selection.skills, available.skills)
     : available.skills;
+  let skillsToSync = userPassedSelection
+    ? selectedSkillsToSync
+    : Array.from(new Set([...selectedSkillsToSync, ...pluginSkillsToSync]));
   if (commandsAsSkills && commandsToSync.length > 0 && skillsToSync.length > 0) {
     const commandNames = new Set(commandsToSync);
     const skillRoots = [
@@ -2786,11 +2798,6 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   }
 
   // Sync plugins — dispatch through WRITERS.plugins.
-  const pluginsWriter = getWriter('plugins', agent);
-  const pluginsToSync = selection
-    ? resolveSelection(selection.plugins, available.plugins)
-    : (pluginsWriter ? available.plugins : []);
-
   if (pluginsToSync.length > 0 && pluginsWriter) {
     const r = pluginsWriter.write({ version, versionHome, selection: pluginsToSync, cwd });
     result.plugins.push(...r.synced);

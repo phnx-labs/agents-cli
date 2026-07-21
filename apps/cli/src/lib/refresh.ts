@@ -202,14 +202,10 @@ export async function refresh(options: RefreshOptions = {}): Promise<void> {
 
     try {
       let selection: ResourceSelection | undefined;
+      let forceFullSync = false;
 
       if (skipPrompts) {
-        if (!hasAnySynced || hasNewResources(newResources, agentId)) {
-          selection = {
-            commands: 'all', skills: 'all', hooks: 'all', memory: 'all',
-            mcp: 'all', permissions: 'all', subagents: 'all', plugins: 'all',
-          };
-        }
+        forceFullSync = true;
       } else if (!hasAnySynced) {
         console.log(chalk.yellow(`\n${agentLabel(agentId)}@${defaultVer} has no synced resources.`));
         const userSelection = await promptResourceSelection(agentId);
@@ -218,10 +214,17 @@ export async function refresh(options: RefreshOptions = {}): Promise<void> {
         console.log(chalk.cyan(`\n${agentLabel(agentId)}@${defaultVer}:`));
         const userSelection = await promptNewResourceSelection(agentId, newResources, defaultVer);
         if (userSelection) selection = userSelection;
+      } else {
+        forceFullSync = true;
       }
 
-      if (selection && Object.keys(selection).length > 0) {
-        const syncResult = syncResourcesToVersion(agentId, defaultVer, selection);
+      if (forceFullSync || (selection && Object.keys(selection).length > 0)) {
+        const syncResult = syncResourcesToVersion(
+          agentId,
+          defaultVer,
+          selection,
+          forceFullSync ? { force: true } : undefined,
+        );
         const synced: string[] = [];
         if (syncResult.commands) synced.push('commands');
         if (syncResult.skills) synced.push('skills');

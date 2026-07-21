@@ -267,6 +267,12 @@ Behavior rules, per `src/lib/plugins.ts:379` and `src/lib/plugin-marketplace.ts`
    `.user-config.json` so each version sees its resolved values. `${CLAUDE_PLUGIN_ROOT}`
    and `${CLAUDE_PLUGIN_DATA}` are left for Claude to expand at runtime.
 
+   Full refresh also treats trusted plugin `skills/<name>/` directories as
+   authoritative sources for top-level materialized skill homes. That reconciles
+   older homes that still have a legacy `.<agent>/skills/<name>/` copy of a
+   plugin-only skill, and prunes stale top-level skill dirs whose source no
+   longer exists.
+
 3. **Synthetic marketplace per version.** `syncMarketplaceManifest()` writes a
    `marketplace.json` listing every discovered plugin, and
    `registerMarketplace()` adds `agents-cli` to `known_marketplaces.json` so
