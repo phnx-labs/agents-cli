@@ -903,7 +903,7 @@ export interface ProviderProbe {
   error?: string;
 }
 
-/** Probe Claude's OAuth token against the usage endpoint. Refreshes an expired access token (safe for Claude). */
+/** Probe Claude's OAuth token against the usage endpoint. Never refreshes — reports `expired` for a near-expiry token; see the comment below (RUSH-1822). */
 export async function probeClaudeStatus(home?: string, cliVersion?: string | null): Promise<ProviderProbe> {
   const oauth = await loadClaudeOauth(home);
   const accessToken = oauth?.accessToken?.trim();
