@@ -1,0 +1,40 @@
+{
+  "name": "@phnx-labs/agi-cli",
+  "version": "1.20.70",
+  "description": "agi-cli — one CLI for every coding agent. Front-brand alias of @phnx-labs/agents-cli; installs the same tool as agents, ag, and agi.",
+  "type": "module",
+  "bin": {
+    "agents": "bin/cli.js",
+    "ag": "bin/cli.js",
+    "agi": "bin/cli.js"
+  },
+  "dependencies": {
+    "@phnx-labs/agents-cli": "^1.20.70"
+  },
+  "files": [
+    "bin/**",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "agi-cli",
+    "agents-cli",
+    "coding agent",
+    "claude code",
+    "codex",
+    "gemini cli",
+    "cli"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/phnx-labs/agents-cli.git",
+    "directory": "packages/agi-cli"
+  },
+  "homepage": "https://agi-cli.sh",
+  "bugs": {
+    "url": "https://github.com/phnx-labs/agents-cli/issues"
+  }
+}
