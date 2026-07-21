@@ -604,6 +604,7 @@ Bundle skills, commands, hooks, MCP servers, settings, and permissions under a s
 # Install from a git URL or local path
 agents plugins install hivemind@https://github.com/activeloopai/hivemind.git
 agents plugins install ./my-plugin
+agents plugins add ./my-plugin
 
 # Apply to one agent (default version) or all supported
 agents plugins sync rush-toolkit claude
@@ -924,7 +925,7 @@ Two repos with the same shape, different roles:
 
 **Version pinning:** `agents.yaml` at project root pins which agent version to use (like `.nvmrc` for Node).
 
-**Resource resolution:** When syncing resources (commands, skills, rules, hooks, MCP, permissions), the order is **project > user > system**. A `.agents/` directory at project root wins, then `~/.agents/`, then `~/.agents-system/`. Same-named resources higher in the chain override lower ones; everything else unions in.
+**Resource resolution:** When syncing resources (commands, skills, rules, hooks, MCP, permissions), the order is **project > user > system**. A `.agents/` directory at project root wins, then `~/.agents/`, then `~/.agents-system/`. Same-named resources higher in the chain override lower ones; everything else unions in. Run `agents resources --merged` to see the effective skills, commands, MCP servers, hooks, rules, plugins, workflows, and subagents, with each row tagged by its winning layer.
 
 See [docs/00-concepts.md](apps/cli/docs/00-concepts.md) for the full mental model: DotAgents repos, resource kinds, and how resolution works end-to-end.
 

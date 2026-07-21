@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Added
+
+- **`agents resources --merged` shows the effective DotAgents resource surface (RUSH-1770).**
+  The command lists the merged skills, commands, MCP servers, hooks, rules, plugins,
+  workflows, and subagents resolved through project > user > system > extras, with
+  each row tagged by its winning layer. Bare `agents devices` now runs the same list
+  view as `agents devices list`, and `agents plugins add <spec>` aliases
+  `agents plugins install <spec>`. Source: `apps/cli/src/commands/resources.ts`,
+  `apps/cli/src/commands/ssh.ts`, `apps/cli/src/commands/plugins.ts`.
+
 ### Security
 
 - **`agents plugins update` no longer silently executes a compromised upstream (RUSH-1757).**

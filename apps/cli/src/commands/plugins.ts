@@ -584,6 +584,7 @@ Examples:
   // agents plugins install <spec>
   pluginsCmd
     .command('install <spec>')
+    .alias('add')
     .description('Install a plugin from a git URL or local path (format: name@source or source)')
     .option('--allow-exec-surfaces', 'Allow installing plugins that ship executable surfaces')
     .addHelpText('after', `

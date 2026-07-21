@@ -31,6 +31,7 @@ export type ModuleLoader = () => Promise<Registrar>;
 // them into the exact main-branch registration order for the slow path.
 export const loadView: ModuleLoader = async () => (await import('../../commands/view.js')).registerViewCommand;
 export const loadInspect: ModuleLoader = async () => (await import('../../commands/inspect.js')).registerInspectCommand;
+export const loadResources: ModuleLoader = async () => (await import('../../commands/resources.js')).registerResourcesCommand;
 export const loadFeedback: ModuleLoader = async () => (await import('../../commands/feedback.js')).registerFeedbackCommand;
 export const loadCommands: ModuleLoader = async () => (await import('../../commands/commands.js')).registerCommandsCommands;
 export const loadHooks: ModuleLoader = async () => (await import('../../commands/hooks.js')).registerHooksCommands;
@@ -130,6 +131,7 @@ export const LAZY_COMMAND_NAMES: ReadonlySet<string> = new Set(['sessions', 'tea
 export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   view: [loadView],
   inspect: [loadInspect],
+  resources: [loadResources],
   feedback: [loadFeedback],
   commands: [loadCommands],
   hooks: [loadHooks],
