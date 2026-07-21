@@ -12,6 +12,7 @@ import { fileURLToPath } from 'url';
 import * as path from 'path';
 import { getSocketPath, getPtyPidPath, getPtyLogPath, isPtyServerRunning } from './pty-server.js';
 import { backgroundSpawnOptions } from './platform/process.js';
+import { BUN_VIRTUAL_ROOT } from './cli-entry.js';
 
 const CONNECT_TIMEOUT_MS = 5000;
 const RESPONSE_TIMEOUT_MS = 30000;
@@ -108,7 +109,7 @@ async function ensureServer(): Promise<void> {
         lastReadinessError = err instanceof Error ? err : new Error(String(err));
       }
     }
-    if (childError || (childExit && childExit.code !== 0)) break;
+    if (childError || childExit) break;
     await new Promise(r => setTimeout(r, 100));
   }
 
@@ -126,7 +127,7 @@ export function getServerSpawnArgs(
   options: { isStandaloneExecutable?: boolean } = {},
 ): ServerSpawnArgs {
   const isStandaloneExecutable = options.isStandaloneExecutable
-    ?? ((globalThis as { Bun?: { isStandaloneExecutable?: boolean } }).Bun?.isStandaloneExecutable === true);
+    ?? isBunStandaloneExecutable();
   if (isStandaloneExecutable) {
     return { bin: process.execPath, args: ['pty', '_server'] };
   }
@@ -152,6 +153,10 @@ export function getServerSpawnArgs(
   } catch {}
 
   return { bin: 'agents', args: ['pty', '_server'] };
+}
+
+export function isBunStandaloneExecutable(moduleUrl: string = import.meta.url): boolean {
+  return BUN_VIRTUAL_ROOT.test(moduleUrl);
 }
 
 export function readRecentLogLines(logPath: string, maxLines = 20): string[] {

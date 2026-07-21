@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
+import { execFileSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 import {
   buildPtyStartFailureMessage,
   getServerSpawnArgs,
+  isBunStandaloneExecutable,
   readRecentLogLines,
 } from './pty-client.js';
 
@@ -14,6 +17,42 @@ describe('getServerSpawnArgs', () => {
 
     expect(spawn).toEqual({
       bin: process.execPath,
+      args: ['pty', '_server'],
+    });
+  });
+
+  it('detects Bun standalone execution from the embedded module URL', () => {
+    expect(isBunStandaloneExecutable('file:///$bunfs/root/pty-client.ts')).toBe(true);
+    expect(isBunStandaloneExecutable('file:///opt/agents/dist/lib/pty-client.js')).toBe(false);
+  });
+
+  it('auto-detects a real bun build --compile executable', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-pty-standalone-test-'));
+    const fixturePath = path.join(dir, 'standalone-spawn-fixture.ts');
+    const outfile = path.join(dir, process.platform === 'win32' ? 'standalone-spawn-fixture.exe' : 'standalone-spawn-fixture');
+    const ptyClientImport = path.relative(dir, path.join(path.dirname(fileURLToPath(import.meta.url)), 'pty-client.ts'));
+    fs.writeFileSync(fixturePath, [
+      `import { getServerSpawnArgs, isBunStandaloneExecutable } from ${JSON.stringify(ptyClientImport.startsWith('.') ? ptyClientImport : `./${ptyClientImport}`)};`,
+      'const spawn = getServerSpawnArgs();',
+      'console.log(JSON.stringify({ spawn, standalone: isBunStandaloneExecutable(), execPath: process.execPath }));',
+    ].join('\n'), 'utf-8');
+
+    execFileSync('bun', ['build', fixturePath, '--compile', '--outfile', outfile], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const result = spawnSync(outfile, [], { encoding: 'utf-8' });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
+    const payload = JSON.parse(result.stdout.trim()) as {
+      spawn: { bin: string; args: string[] };
+      standalone: boolean;
+      execPath: string;
+    };
+    expect(payload.standalone).toBe(true);
+    expect(payload.spawn).toEqual({
+      bin: payload.execPath,
       args: ['pty', '_server'],
     });
   });
