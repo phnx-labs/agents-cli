@@ -286,6 +286,27 @@ function buildOpenClawDetector(): ResourceDetector {
   };
 }
 
+function buildCopilotDetector(): ResourceDetector {
+  return {
+    kind: 'permissions',
+    agent: 'copilot',
+    list({ versionHome }: DetectArgs): string[] {
+      const configPath = path.join(versionHome, '.copilot', 'permissions-config.json');
+      if (!fs.existsSync(configPath)) return [];
+      try {
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as {
+          locations?: Record<string, { tool_approvals?: unknown[]; allowed_directories?: unknown[] }>;
+        };
+        const locations = config.locations && typeof config.locations === 'object' ? Object.values(config.locations) : [];
+        const hasApprovals = locations.some((location) => Array.isArray(location?.tool_approvals) && location.tool_approvals.length > 0);
+        const hasDirectories = locations.some((location) => Array.isArray(location?.allowed_directories) && location.allowed_directories.length > 0);
+        if (hasApprovals || hasDirectories) return discoverPermissionGroups().map(g => g.name);
+      } catch { /* parse fail */ }
+      return [];
+    },
+  };
+}
+
 function buildForgeDetector(): ResourceDetector {
   return {
     kind: 'permissions',
@@ -338,6 +359,7 @@ const handlers: Partial<Record<AgentId, () => ResourceDetector>> = {
   droid: buildDroidDetector,
   kiro: buildKiroDetector,
   openclaw: buildOpenClawDetector,
+  copilot: buildCopilotDetector,
   forge: buildForgeDetector,
   hermes: buildHermesDetector,
 };

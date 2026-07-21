@@ -95,6 +95,8 @@ function getAgentConfigPath(agent: AgentId, versionHome: string): string | null 
       return path.join(versionHome, '.kiro', 'settings', 'permissions.yaml');
     case 'openclaw':
       return path.join(versionHome, '.openclaw', 'openclaw.json');
+    case 'copilot':
+      return path.join(versionHome, '.copilot', 'permissions-config.json');
     case 'forge':
       return path.join(versionHome, '.forge', 'permissions.yaml');
     case 'hermes':
@@ -213,7 +215,7 @@ export const PermissionsHandler: ResourceHandler<PermissionItem> = {
     }
 
     // Apply to the agent's config file
-    applyPermissionsToVersion(agent, merged, versionHome, true);
+    applyPermissionsToVersion(agent, merged, versionHome, true, cwd);
   },
 
   /**

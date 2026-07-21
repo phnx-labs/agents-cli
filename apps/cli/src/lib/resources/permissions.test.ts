@@ -406,6 +406,39 @@ describe('PermissionsHandler', () => {
       expect(settings.approvals.deny).toEqual(['rm -rf *']);
     });
 
+    it('merges all permissions and writes Copilot permissions-config.json tool approvals', () => {
+      const home = makeTempHome();
+      const versionHome = makeTempHome();
+      const project = makeTempHome();
+
+      fs.mkdirSync(path.join(home, '.agents', '.system'), { recursive: true });
+      fs.mkdirSync(path.join(home, '.agents'), { recursive: true });
+
+      writePermissionYaml(home, path.join('.agents', '.system'), 'base', {
+        name: 'base',
+        allow: ['Bash(git:*)'],
+      });
+
+      writePermissionYaml(home, '.agents', 'extra', {
+        name: 'extra',
+        allow: ['Bash(npm test)', 'Write(**)'],
+        deny: ['Bash(git push)'],
+        additionalDirectories: ['shared'],
+      });
+
+      runPermissionsExpression(home, `PermissionsHandler.sync('copilot', ${JSON.stringify(versionHome)}, ${JSON.stringify(project)})`, project);
+
+      const settingsPath = path.join(versionHome, '.copilot', 'permissions-config.json');
+      expect(fs.existsSync(settingsPath)).toBe(true);
+
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+      expect(settings.locations[project].tool_approvals).toEqual([
+        { kind: 'commands', commandIdentifiers: ['git:*', 'npm test'] },
+        { kind: 'write' },
+      ]);
+      expect(settings.locations[project].allowed_directories).toEqual([path.join(project, 'shared')]);
+    });
+
     it('skips non-permission-capable agents', () => {
       const home = makeTempHome();
       const versionHome = makeTempHome();
@@ -460,6 +493,11 @@ describe('PermissionsHandler', () => {
     it('returns correct path for OpenClaw', () => {
       const result = PermissionsHandler.configPath!('openclaw', '/test/home');
       expect(result).toBe(path.join('/test/home', '.openclaw', 'openclaw.json'));
+    });
+
+    it('returns correct path for Copilot', () => {
+      const result = PermissionsHandler.configPath!('copilot', '/test/home');
+      expect(result).toBe(path.join('/test/home', '.copilot', 'permissions-config.json'));
     });
 
     it('returns correct path for ForgeCode', () => {

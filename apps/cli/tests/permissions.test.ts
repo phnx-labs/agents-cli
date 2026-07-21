@@ -10,6 +10,7 @@ import {
   convertToClaudeFormat,
   convertToOpenCodeFormat,
   convertToCursorFormat,
+  convertToCopilotFormat,
   convertToCodexFormat,
   convertToGeminiFormat,
   convertToAntigravityFormat,
@@ -943,6 +944,44 @@ describe('applyPermissionsToVersion', () => {
     expect(out.permissions.allow).not.toContain('Edit(src/**)');
     expect(out.permissions.deny).toContain('Write(secrets/**)');
     expect(out.permissions.deny).not.toContain('Edit(secrets/**)');
+  });
+
+  it('writes Copilot permissions to .copilot/permissions-config.json for the current location', () => {
+    const versionHome = join(testDir, 'copilot-write');
+    const cwd = join(testDir, 'copilot-project');
+    mkdirSync(versionHome, { recursive: true });
+    mkdirSync(cwd, { recursive: true });
+
+    const set: PermissionSet = {
+      name: 'test',
+      allow: ['Bash(git:*)', 'Bash(npm test)', 'Read(**)', 'Write(**)', 'MCP(github-mcp-server)'],
+      deny: ['Bash(git push)'],
+      additionalDirectories: ['shared'],
+    };
+
+    const result = applyPermissionsToVersion('copilot' as any, set, versionHome, false, cwd);
+    expect(result.success).toBe(true);
+    const configPath = join(versionHome, '.copilot', 'permissions-config.json');
+    const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(config.locations[cwd].tool_approvals).toEqual([
+      { kind: 'commands', commandIdentifiers: ['git:*', 'npm test'] },
+      { kind: 'read' },
+      { kind: 'write' },
+      { kind: 'mcp', serverName: 'github-mcp-server', toolName: null },
+    ]);
+    expect(config.locations[cwd].allowed_directories).toEqual([join(cwd, 'shared')]);
+  });
+
+  it('convertToCopilotFormat keeps persistent Copilot approvals to supported allow rules', () => {
+    const out = convertToCopilotFormat({
+      name: 'test',
+      allow: ['Bash(gh pr:*)', 'Bash(ls *)', 'Read(**)', 'Edit(src/**)'],
+      deny: ['Bash(rm:*)'],
+    }, '/repo');
+    expect(out.locations['/repo'].tool_approvals).toEqual([
+      { kind: 'commands', commandIdentifiers: ['gh pr:*', 'ls:*'] },
+      { kind: 'read' },
+    ]);
   });
 
   it('writes Antigravity permissions to .gemini/antigravity-cli/settings.json', () => {

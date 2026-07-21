@@ -130,6 +130,13 @@ describe('openclaw allowlist', () => {
   });
 });
 
+describe('copilot allowlist', () => {
+  it('is capable of allowlist', () => {
+    expect(supports('copilot', 'allowlist')).toEqual({ ok: true });
+    expect(capableAgents('allowlist')).toContain('copilot');
+  });
+});
+
 describe('forge allowlist', () => {
   it('is capable of allowlist', () => {
     expect(supports('forge', 'allowlist')).toEqual({ ok: true });

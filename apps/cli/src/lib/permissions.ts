@@ -537,6 +537,18 @@ export function convertToCursorFormat(set: PermissionSet): CursorPermissions {
   };
 }
 
+type CopilotToolApproval =
+  | { kind: 'commands'; commandIdentifiers: string[] }
+  | { kind: 'read' | 'write' }
+  | { kind: 'mcp'; serverName: string; toolName: string | null };
+
+export interface CopilotPermissionsConfig {
+  locations: Record<string, {
+    tool_approvals?: CopilotToolApproval[];
+    allowed_directories?: string[];
+  }>;
+}
+
 /**
  * Parse canonical permission pattern to extract tool and pattern.
  * "Bash(git *)" -> { tool: "bash", pattern: "git *" }
@@ -597,6 +609,85 @@ function normalizeBashPattern(pattern: string): string {
   if (pattern === '*' || pattern === '**') return '*';
   if (pattern.endsWith(':*')) return pattern.slice(0, -2) + ' *';
   return pattern;
+}
+
+function canonicalBashToCopilotCommandIdentifier(pattern: string): string | null {
+  if (pattern === '*' || pattern === '**') return null;
+  if (pattern.endsWith(':*')) return pattern;
+  if (pattern.endsWith(' *')) return `${pattern.slice(0, -2)}:*`;
+  return pattern;
+}
+
+function canonicalToCopilotMcpApproval(parsed: { pattern: string }): CopilotToolApproval | null {
+  const parts = parsed.pattern.split(/[.:/]/).filter(Boolean);
+  if (parts.length === 0) return null;
+  const [serverName, toolName] = parts;
+  return { kind: 'mcp', serverName, toolName: toolName ?? null };
+}
+
+function canonicalToCopilotApproval(permission: string): CopilotToolApproval | null {
+  const parsed = parseCanonicalPattern(permission);
+  if (!parsed) return null;
+  if (parsed.tool === 'bash') {
+    const identifier = canonicalBashToCopilotCommandIdentifier(parsed.pattern);
+    return identifier ? { kind: 'commands', commandIdentifiers: [identifier] } : null;
+  }
+  if ((parsed.tool === 'write' || parsed.tool === 'edit') && (parsed.pattern === '*' || parsed.pattern === '**')) {
+    return { kind: 'write' };
+  }
+  if (parsed.tool === 'read' && (parsed.pattern === '*' || parsed.pattern === '**')) {
+    return { kind: 'read' };
+  }
+  if (parsed.tool === 'mcp') {
+    return canonicalToCopilotMcpApproval(parsed);
+  }
+  return null;
+}
+
+function mergeCopilotApprovals(existing: unknown[], incoming: CopilotToolApproval[]): CopilotToolApproval[] {
+  const byKey = new Map<string, CopilotToolApproval>();
+  const add = (approval: CopilotToolApproval): void => {
+    if (approval.kind === 'commands') {
+      const current = byKey.get('commands') as { kind: 'commands'; commandIdentifiers: string[] } | undefined;
+      const commandIdentifiers = new Set([...(current?.commandIdentifiers ?? []), ...approval.commandIdentifiers]);
+      byKey.set('commands', { kind: 'commands', commandIdentifiers: Array.from(commandIdentifiers).sort() });
+      return;
+    }
+    byKey.set(JSON.stringify(approval), approval);
+  };
+
+  for (const approval of existing) {
+    if (!approval || typeof approval !== 'object' || Array.isArray(approval)) continue;
+    const record = approval as Record<string, unknown>;
+    if (record.kind === 'commands' && Array.isArray(record.commandIdentifiers)) {
+      add({ kind: 'commands', commandIdentifiers: record.commandIdentifiers.filter((v): v is string => typeof v === 'string') });
+    } else if (record.kind === 'read' || record.kind === 'write') {
+      add({ kind: record.kind });
+    } else if (record.kind === 'mcp' && typeof record.serverName === 'string' && (typeof record.toolName === 'string' || record.toolName === null)) {
+      add({ kind: 'mcp', serverName: record.serverName, toolName: record.toolName });
+    }
+  }
+  for (const approval of incoming) add(approval);
+  return Array.from(byKey.values());
+}
+
+export function convertToCopilotFormat(set: PermissionSet, location: string): CopilotPermissionsConfig {
+  const approvals: CopilotToolApproval[] = [];
+  for (const permission of set.allow) {
+    const approval = canonicalToCopilotApproval(permission);
+    if (approval) approvals.push(approval);
+  }
+  const allowedDirectories = (set.additionalDirectories ?? [])
+    .filter((dir) => dir.trim().length > 0)
+    .map((dir) => path.isAbsolute(dir) ? dir : path.resolve(location, dir));
+  return {
+    locations: {
+      [location]: {
+        ...(approvals.length > 0 ? { tool_approvals: mergeCopilotApprovals([], approvals) } : {}),
+        ...(allowedDirectories.length > 0 ? { allowed_directories: Array.from(new Set(allowedDirectories)).sort() } : {}),
+      },
+    },
+  };
 }
 
 /** Convert canonical Bash rules into Droid's command arrays. */
@@ -1540,7 +1631,8 @@ export function applyPermissionsToVersion(
   agentId: AgentId,
   set: PermissionSet,
   versionHome: string,
-  merge: boolean = true
+  merge: boolean = true,
+  cwd?: string
 ): { success: boolean; error?: string } {
   const configDir = path.join(versionHome, agentConfigDirName(agentId));
 
@@ -1844,6 +1936,45 @@ export function applyPermissionsToVersion(
         config.commandAllowlist = converted.commandAllowlist;
         config.commandDenylist = converted.commandDenylist;
       }
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+      return { success: true };
+    }
+
+    if (agentId === 'copilot') {
+      const configPath = path.join(versionHome, '.copilot', 'permissions-config.json');
+      let config: CopilotPermissionsConfig = { locations: {} };
+      if (fs.existsSync(configPath)) {
+        config = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as CopilotPermissionsConfig;
+      }
+
+      const location = path.resolve(cwd ?? process.cwd());
+      const converted = convertToCopilotFormat(set, location);
+      const incoming = converted.locations[location]?.tool_approvals ?? [];
+      const incomingDirectories = converted.locations[location]?.allowed_directories ?? [];
+      if (incoming.length === 0 && incomingDirectories.length === 0) return { success: true };
+
+      const locations = (typeof config.locations === 'object' && config.locations !== null && !Array.isArray(config.locations))
+        ? config.locations
+        : {};
+      const existingLocation = (typeof locations[location] === 'object' && locations[location] !== null && !Array.isArray(locations[location]))
+        ? locations[location]
+        : {};
+      const existingApprovals = Array.isArray(existingLocation.tool_approvals) ? existingLocation.tool_approvals : [];
+      const nextApprovals = merge ? mergeCopilotApprovals(existingApprovals, incoming) : incoming;
+      const existingDirectories = Array.isArray(existingLocation.allowed_directories)
+        ? existingLocation.allowed_directories.filter((v): v is string => typeof v === 'string')
+        : [];
+      const nextDirectories = merge
+        ? Array.from(new Set([...existingDirectories, ...incomingDirectories])).sort()
+        : incomingDirectories;
+      locations[location] = {
+        ...existingLocation,
+        ...(nextApprovals.length > 0 ? { tool_approvals: nextApprovals } : {}),
+        ...(nextDirectories.length > 0 ? { allowed_directories: nextDirectories } : {}),
+      };
+      config.locations = locations;
+
       fs.mkdirSync(path.dirname(configPath), { recursive: true });
       fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
       return { success: true };
