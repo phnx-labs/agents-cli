@@ -398,6 +398,29 @@ describe('version resource sync path handling', () => {
     expect(fs.existsSync(path.join(syncedSkillDir, 'secret-link'))).toBe(false);
   });
 
+  it('syncs hook directories through resource discovery', async () => {
+    const home = makeTempHome();
+
+    const hookDir = path.join(home, '.agents', 'hooks', 'tests');
+    fs.mkdirSync(path.join(hookDir, 'fixtures'), { recursive: true });
+    fs.writeFileSync(path.join(hookDir, 'fixtures', 'input.json'), '{"ok":true}\n', 'utf-8');
+
+    const result = runVersionSync(
+      home,
+      "syncResourcesToVersion('claude', '2.1.143', undefined, { cwd: home })"
+    ) as { hooks: boolean };
+
+    const copied = path.join(home, '.agents', '.history', 'versions', 'claude', '2.1.143', 'home', '.claude', 'hooks', 'tests', 'fixtures', 'input.json');
+    expect(result.hooks).toBe(true);
+    expect(fs.readFileSync(copied, 'utf-8')).toBe('{"ok":true}\n');
+
+    const second = runVersionSync(
+      home,
+      "syncResourcesToVersion('claude', '2.1.143', undefined, { cwd: home })"
+    ) as { hooks: boolean };
+    expect(second.hooks).toBe(false);
+  });
+
   it('skips a clean full sync after expanding persisted resource patterns', async () => {
     const home = makeTempHome();
 
@@ -1050,4 +1073,3 @@ describe('removeVersion — default reassignment when removing the pinned defaul
     expect(defaultAfter).toBe(null);
   });
 });
-
