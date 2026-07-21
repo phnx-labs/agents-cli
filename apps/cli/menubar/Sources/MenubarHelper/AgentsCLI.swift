@@ -240,7 +240,7 @@ enum AgentsCLI {
         reproduction path, or at minimum a crisp problem statement. Do NOT over-investigate; \
         a couple of focused reads is enough.
         4. Determine the best delegate agent for this ticket:
-           - The workspace agent roster is: Antigravity, Claude, ChatGPT Codex, Droid, Grok, Kimi, OpenClaw.
+           - The workspace agent roster is: Antigravity, Claude, Codex, Droid, Grok, Kimi, OpenClaw.
            - Run `agents sessions --active` and cross-check the roster against actually active local sessions.
            - Pick the agent whose recent work and strengths best fit the ticket content. Use your own judgment; do not ask the user.
            - If no agent clearly fits better than the others, default to `claude`.
