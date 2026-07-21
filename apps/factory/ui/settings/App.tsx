@@ -38,6 +38,7 @@ import type { TabKey } from './components/mission-control'
 // Tab components (legacy, for Bench and Panel)
 import { BenchTab } from './components/bench'
 import { PanelTab } from './components/panel'
+import { ResourcesTab } from './components/resources'
 import { GuideTab } from './components/tabs/GuideTab'
 import { ApiKeyDialog } from './components/common/OAuthDialog'
 import { ForemanOrb, ForemanCursor } from './components/foreman'
@@ -851,6 +852,10 @@ export default function App() {
           openBenchTaskId={openBenchTaskId}
           onOpenBenchTaskConsumed={() => setOpenBenchTaskId(null)}
         />
+      )}
+
+      {activeTab === 'resources' && (
+        <ResourcesTab />
       )}
 
       {/* Panel (settings - 2-column sidebar layout) */}
