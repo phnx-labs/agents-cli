@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { buildBootstrapScript } from './lease.js';
 import { LEASE_AGENT_MARKER } from './progress.js';
 import type { DetectedRuntime } from './runtimes.js';
@@ -66,6 +69,64 @@ describe('buildBootstrapScript', () => {
       // box body, not teardown — a kept box still loses the token).
       expect(script).toContain('rm -f "$HOME/.claude.json"');
       expect(script).toContain('rm -f "$HOME/.claude/.credentials.json"');
+    }
+  });
+
+  it('materializes a profile-dispatch run without copying Claude OAuth when the profile has its own auth', () => {
+    const script = buildBootstrapScript({
+      agent: 'kimi',
+      prompt: 'hi',
+      runtimes: ['claude'],
+      credentialRuntimes: [],
+      detected,
+      dispatchProfile: {
+        name: 'kimi',
+        agent: 'claude',
+        env: {
+          ANTHROPIC_BASE_URL: 'https://openrouter.ai/api',
+          ANTHROPIC_MODEL: 'moonshotai/kimi-k2.5',
+          ANTHROPIC_AUTH_TOKEN: 'sk-or-profile',
+        },
+        provider: 'openrouter',
+        preset: 'kimi',
+      },
+    });
+    expect(script).toContain("agents add 'claude'");
+    expect(script).toContain('cat > "$HOME/.agents/profiles/kimi.yml" <<');
+    expect(script).toContain('ANTHROPIC_AUTH_TOKEN: sk-or-profile');
+    expect(script).toContain("agents run 'kimi' 'hi' --quiet");
+    expect(script).not.toContain('cat > "$HOME/.claude.json"');
+    expect(script).not.toContain('cat > "$HOME/.claude/.credentials.json"');
+    expect(script).toContain('rm -f "$HOME/.agents/profiles/kimi.yml"');
+  });
+
+  it('copies base runtime credentials for a profile only when requested', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lease-profile-'));
+    const credPath = path.join(tmpDir, 'claude.json');
+    fs.writeFileSync(credPath, '{"oauthAccount":{"emailAddress":"a@b.com"}}');
+    const detectedWithCred: DetectedRuntime[] = [{ ...detected[0], credPath }];
+    const script = buildBootstrapScript({
+      agent: 'internal-claude',
+      prompt: 'hi',
+      runtimes: ['claude'],
+      credentialRuntimes: ['claude'],
+      detected: detectedWithCred,
+      claudeCredentialsJson: '{"claudeAiOauth":{"accessToken":"tok"}}',
+      dispatchProfile: {
+        name: 'internal-claude',
+        agent: 'claude',
+        env: {
+          ANTHROPIC_BASE_URL: 'https://gateway.example.test',
+          ANTHROPIC_MODEL: 'claude-sonnet-4-5',
+        },
+      },
+    });
+    try {
+      expect(script).toContain('cat > "$HOME/.claude/.credentials.json" <<');
+      expect(script).toContain('rm -f "$HOME/.claude/.credentials.json"');
+      expect(script).toContain('rm -f "$HOME/.agents/profiles/internal-claude.yml"');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 

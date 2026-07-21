@@ -659,24 +659,56 @@ export function registerRunCommand(program: Command): void {
           }
         }
 
-        const { detectSignedInRuntimes, resolveClaudeCredentialsBlob, inferLeaseRuntime } = await import('../lib/crabbox/runtimes.js');
+        const { detectSignedInRuntimes, resolveClaudeCredentialsBlob, inferLeaseRuntime, profileNeedsBaseRuntimeCredentials } = await import('../lib/crabbox/runtimes.js');
         const { leaseAndRun } = await import('../lib/crabbox/lease.js');
         const { getConfiguredRunStrategy, resolveRunVersion } = await import('../lib/rotate.js');
+        const { profileExists, readProfile, resolveProfileEnv } = await import('../lib/profiles.js');
 
         const detected = await detectSignedInRuntimes();
-        const agentName = normalizedAgentSpec.split('@')[0];
+        const [agentName, rawLeaseVersion] = normalizedAgentSpec.split('@');
         const leaseCwd = options.cwd ?? process.cwd();
+        let runtime: AgentId | null = null;
+        let credentialRuntimes: AgentId[] = [];
+        let dispatchProfile: import('../lib/crabbox/lease.js').LeaseDispatchProfile | undefined;
 
         // `--lease` requires a prompt (guarded above), so it is headless by
         // contract — never block on an interactive picker. Provision exactly the
         // one runtime this run needs, inferred from the agent, not every
         // signed-in CLI (which would ship unrelated tokens to a throwaway box).
-        const runtime = inferLeaseRuntime(agentName, detected);
+        if (profileExists(agentName)) {
+          try {
+            const profile = readProfile(agentName);
+            const profileEnv = resolveProfileEnv(profile);
+            runtime = profile.host.agent;
+            const profileNeedsCredentials = profileNeedsBaseRuntimeCredentials(runtime, profileEnv);
+            credentialRuntimes = profileNeedsCredentials ? [runtime] : [];
+            dispatchProfile = {
+              name: profile.name,
+              agent: profile.host.agent,
+              version: rawLeaseVersion || profile.host.version,
+              env: profileEnv,
+              description: profile.description,
+              preset: profile.preset,
+              provider: profile.provider,
+              fallbackModel: profile.fallback_model,
+            };
+          } catch (err) {
+            console.error(chalk.red((err as Error).message));
+            process.exit(1);
+          }
+        } else {
+          runtime = inferLeaseRuntime(agentName, detected);
+          if (runtime) credentialRuntimes = [runtime];
+        }
         if (!runtime) {
           console.error(chalk.yellow('No signed-in runtime to provision on the box. Sign into one locally (e.g. run `claude` once) then retry.'));
           process.exit(1);
         }
         const runtimes = [runtime];
+        if (credentialRuntimes.length > 0 && !detected.some((d) => d.id === runtime && d.signedIn && d.credPath)) {
+          console.error(chalk.yellow(`Profile '${agentName}' needs ${runtime} credentials, but ${runtime} is not signed in locally. Sign in locally, then retry.`));
+          process.exit(1);
+        }
 
         // Copy the account the run's OWN strategy would pick (default `balanced`:
         // a healthy, non-rate-limited account weighted by remaining headroom) —
@@ -690,7 +722,7 @@ export function registerRunCommand(program: Command): void {
         // the notice below would name a balanced-picked account that is NOT the one
         // actually shipped. Best-effort: fall back to the default account on error.
         let leaseEmail = detected.find((d) => d.id === runtime)?.email ?? null;
-        if (runtime === 'claude') {
+        if (credentialRuntimes.includes('claude')) {
           try {
             const strategy = getConfiguredRunStrategy(runtime, leaseCwd);
             const { rotation } = await resolveRunVersion(runtime, strategy, leaseCwd);
@@ -704,10 +736,16 @@ export function registerRunCommand(program: Command): void {
         // where — copying an auth token to a cloud box is a credential transfer.
         // The box is destroyed after the run, so the credential's lifetime is
         // bounded by the run.
-        const whatShips = runtime === 'claude' ? 'credentials + Claude OAuth token' : 'credentials';
+        const whatShips = credentialRuntimes.includes('claude')
+          ? `${dispatchProfile ? `profile '${dispatchProfile.name}', ` : ''}${runtime} credentials + Claude OAuth token`
+          : credentialRuntimes.length > 0
+            ? `${dispatchProfile ? `profile '${dispatchProfile.name}', ` : ''}${runtime} credentials`
+            : dispatchProfile
+              ? `profile '${dispatchProfile.name}'`
+              : `${runtime} credentials`;
         console.error(
           chalk.gray(
-            `Leasing a ${backend ?? 'hetzner'} box · shipping ${runtime}${leaseEmail ? ` (${leaseEmail})` : ''} ${whatShips}; the box is destroyed after the run.`,
+            `Leasing a ${backend ?? 'hetzner'} box · shipping ${whatShips}${credentialRuntimes.length > 0 && leaseEmail ? ` (${leaseEmail})` : ''}; the box is destroyed after the run.`,
           ),
         );
 
@@ -716,7 +754,7 @@ export function registerRunCommand(program: Command): void {
         // "Not logged in". `preferEmail` targets the strategy-picked account so the
         // token matches the account this run resolved to.
         let claudeCredentialsJson: string | null = null;
-        if (runtime === 'claude') {
+        if (credentialRuntimes.includes('claude')) {
           claudeCredentialsJson = await resolveClaudeCredentialsBlob({ preferEmail: leaseEmail });
           if (!claudeCredentialsJson) {
             console.error(chalk.yellow('Warning: could not read the local Claude OAuth token — the box may come up "Not logged in".'));
@@ -755,7 +793,9 @@ export function registerRunCommand(program: Command): void {
             model: options.model,
             backend,
             runtimes,
+            credentialRuntimes,
             detected,
+            dispatchProfile,
             claudeCredentialsJson,
             secretsBundle: process.env.AGENTS_LEASE_SECRETS_BUNDLE,
             keep: options.keepBox,

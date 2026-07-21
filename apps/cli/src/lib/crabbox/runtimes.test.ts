@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
-import { buildCredentialScript, pickRuntimes, resolveClaudeCredentialsBlob, inferLeaseRuntime, type DetectedRuntime } from './runtimes.js';
+import { buildCredentialScript, pickRuntimes, resolveClaudeCredentialsBlob, inferLeaseRuntime, profileNeedsBaseRuntimeCredentials, type DetectedRuntime } from './runtimes.js';
 
 describe('inferLeaseRuntime', () => {
   const signedIn = (id: DetectedRuntime['id'], email: string | null): DetectedRuntime => ({
@@ -111,6 +111,29 @@ describe('buildCredentialScript', () => {
     ];
     expect(buildCredentialScript(['claude'], detected)).not.toContain('.credentials.json');
     expect(buildCredentialScript(['claude'], detected, { claudeCredentialsJson: null })).not.toContain('.credentials.json');
+  });
+});
+
+describe('profileNeedsBaseRuntimeCredentials', () => {
+  it('does not require Claude OAuth when a profile carries its own Anthropic-compatible token', () => {
+    expect(profileNeedsBaseRuntimeCredentials('claude', {
+      ANTHROPIC_BASE_URL: 'https://openrouter.ai/api',
+      ANTHROPIC_AUTH_TOKEN: 'sk-or-profile',
+      ANTHROPIC_MODEL: 'moonshotai/kimi-k2.5',
+    })).toBe(false);
+  });
+
+  it('requires base runtime credentials when the profile only changes endpoint/model', () => {
+    expect(profileNeedsBaseRuntimeCredentials('claude', {
+      ANTHROPIC_BASE_URL: 'https://proxy.example.test',
+      ANTHROPIC_MODEL: 'claude-sonnet-4-5',
+    })).toBe(true);
+  });
+
+  it('recognizes host-specific API keys for non-Claude profile hosts', () => {
+    expect(profileNeedsBaseRuntimeCredentials('codex', { OPENAI_API_KEY: 'sk-profile' })).toBe(false);
+    expect(profileNeedsBaseRuntimeCredentials('grok', { XAI_API_KEY: 'xai-profile' })).toBe(false);
+    expect(profileNeedsBaseRuntimeCredentials('gemini', { GOOGLE_API_KEY: 'google-profile' })).toBe(false);
   });
 });
 

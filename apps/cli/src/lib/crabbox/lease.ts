@@ -9,7 +9,8 @@
 
 import type { AgentId } from '../types.js';
 import { crabboxWarmup, crabboxWaitReady, crabboxRunScript, crabboxStop, type CrabboxBox } from './cli.js';
-import { buildCredentialScript, CLAUDE_TOKEN_REMOTE, type DetectedRuntime } from './runtimes.js';
+import * as yaml from 'yaml';
+import { buildCredentialScript, buildHomeFileWriteScript, CLAUDE_TOKEN_REMOTE, type DetectedRuntime } from './runtimes.js';
 import { LEASE_AGENT_MARKER } from './progress.js';
 
 /** Phase signal for a lease run, so the command layer can drive a progress UI. */
@@ -27,9 +28,13 @@ export interface LeaseRunOptions {
   backend?: string;
   boxClass?: string;
   profile?: string;
-  /** Runtimes to install + authenticate on the box (from the picker). */
+  /** Runtimes to install on the box. */
   runtimes: AgentId[];
+  /** Runtime credentials to copy; defaults to `runtimes`. */
+  credentialRuntimes?: AgentId[];
   detected: DetectedRuntime[];
+  /** Profile-dispatch config to materialize on the leased box before the run. */
+  dispatchProfile?: LeaseDispatchProfile;
   /** Secrets bundle providing crabbox's provider token. */
   secretsBundle?: string;
   onData?: (s: string) => void;
@@ -45,6 +50,17 @@ export interface LeaseRunOptions {
   claudeCredentialsJson?: string | null;
 }
 
+export interface LeaseDispatchProfile {
+  name: string;
+  agent: AgentId;
+  version?: string;
+  env: Record<string, string>;
+  description?: string;
+  preset?: string;
+  provider?: string;
+  fallbackModel?: string;
+}
+
 export interface LeaseRunResult {
   box: CrabboxBox;
   exitCode: number | null;
@@ -54,6 +70,26 @@ export interface LeaseRunResult {
 /** POSIX single-quote for safe embedding in the generated bootstrap script. */
 function q(s: string): string {
   return "'" + s.replace(/'/g, "'\\''") + "'";
+}
+
+function profileRemotePath(name: string): string {
+  return `.agents/profiles/${name}.yml`;
+}
+
+function buildProfileScript(profile: LeaseDispatchProfile): string {
+  const body = yaml.stringify({
+    name: profile.name,
+    ...(profile.description ? { description: profile.description } : {}),
+    host: {
+      agent: profile.agent,
+      ...(profile.version ? { version: profile.version } : {}),
+    },
+    env: profile.env,
+    ...(profile.fallbackModel ? { fallback_model: profile.fallbackModel } : {}),
+    ...(profile.preset ? { preset: profile.preset } : {}),
+    ...(profile.provider ? { provider: profile.provider } : {}),
+  });
+  return buildHomeFileWriteScript(profileRemotePath(profile.name), body);
 }
 
 /**
@@ -91,9 +127,11 @@ const ENSURE_AGENTS_CLI = [
  * the credential files. Best-effort install steps never abort the run.
  */
 export function buildBootstrapScript(opts: LeaseRunOptions): string {
-  const credScript = buildCredentialScript(opts.runtimes, opts.detected, {
+  const credentialRuntimes = opts.credentialRuntimes ?? opts.runtimes;
+  const credScript = buildCredentialScript(credentialRuntimes, opts.detected, {
     claudeCredentialsJson: opts.claudeCredentialsJson,
   });
+  const profileScript = opts.dispatchProfile ? buildProfileScript(opts.dispatchProfile) : '';
   const runParts = ['agents', 'run', q(opts.agent), q(opts.prompt), '--quiet'];
   if (opts.mode) runParts.push('--mode', q(opts.mode));
   if (opts.model) runParts.push('--model', q(opts.model));
@@ -101,10 +139,11 @@ export function buildBootstrapScript(opts: LeaseRunOptions): string {
   // Credential files to shred after the run (home-level paths written above).
   // Runs regardless of --keep-box (it's in the box body, not teardown), so a kept
   // box still loses the token after the run — minimizing the credential window.
-  const shredPaths = opts.runtimes.flatMap((id) => {
+  const shredPaths = credentialRuntimes.flatMap((id) => {
     const paths = { claude: ['.claude.json', CLAUDE_TOKEN_REMOTE], codex: ['.codex/auth.json'], gemini: ['.gemini/google_accounts.json'], grok: ['.grok/auth.json'] }[id as string];
     return paths ?? [];
   });
+  if (opts.dispatchProfile) shredPaths.push(profileRemotePath(opts.dispatchProfile.name));
   const shred = shredPaths.map((p) => `rm -f "$HOME/${p}" 2>/dev/null || true`).join('\n');
 
   const installRuntimes = opts.runtimes.map((id) => `agents add ${q(id)} >/dev/null 2>&1 || true`).join('\n');
@@ -114,6 +153,7 @@ export function buildBootstrapScript(opts: LeaseRunOptions): string {
     ENSURE_AGENTS_CLI,
     installRuntimes,
     credScript,
+    profileScript,
     // Marker on its own line: the command layer shows everything before this as
     // setup progress and everything after (the agent's output) verbatim.
     `echo ${q(LEASE_AGENT_MARKER)}`,

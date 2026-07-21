@@ -202,6 +202,18 @@ agents profiles remove kimi
 agents profiles logout openrouter
 ```
 
+### 7. Run a profile on a leased box
+
+```bash
+agents run deepseek "summarize this repo" --lease hetzner
+```
+
+Leased profile runs install the profile's `host.agent` on the disposable box and
+materialize a temporary profile there for the duration of the run. Profiles with
+their own API key, such as OpenRouter-backed `kimi` and `deepseek`, ship that
+profile auth only; the base runtime's local OAuth credential is copied only when
+the profile has no auth env of its own.
+
 ## Demo
 
 <video autoplay loop muted playsinline width="100%" src="../assets/videos/profiles.mp4"></video>

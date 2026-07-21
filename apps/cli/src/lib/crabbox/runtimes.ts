@@ -132,10 +132,41 @@ export function inferLeaseRuntime(agentName: string, detected: DetectedRuntime[]
   return signedIn.find((d) => d.id === 'claude')?.id ?? signedIn[0]?.id ?? null;
 }
 
+const PROFILE_AUTH_ENV_KEYS_BY_RUNTIME: Partial<Record<AgentId, readonly string[]>> = {
+  claude: [
+    'ANTHROPIC_AUTH_TOKEN',
+    'ANTHROPIC_API_KEY',
+    'AWS_ACCESS_KEY_ID',
+    'AWS_PROFILE',
+    'AWS_BEARER_TOKEN_BEDROCK',
+    'GOOGLE_APPLICATION_CREDENTIALS',
+    'GOOGLE_CLOUD_PROJECT',
+  ],
+  codex: ['OPENAI_API_KEY'],
+  gemini: ['GEMINI_API_KEY', 'GOOGLE_API_KEY'],
+  grok: ['XAI_API_KEY', 'GROK_API_KEY'],
+};
+
+/** True when a profile already carries auth for its host runtime via env. */
+export function profileNeedsBaseRuntimeCredentials(agent: AgentId, env: Record<string, string>): boolean {
+  const keys = PROFILE_AUTH_ENV_KEYS_BY_RUNTIME[agent] ?? [];
+  return !keys.some((key) => typeof env[key] === 'string' && env[key].trim() !== '');
+}
+
 // A long random sentinel makes an accidental (or malicious) collision with a
 // token's contents effectively impossible, so the quoted heredoc can never be
 // closed early by the credential body.
 const CRED_EOF = 'AGENTS_LEASE_CRED_EOF_9f3c1a7b5e2d4068';
+
+/** Build a quoted heredoc write to a path under the remote user's home. */
+export function buildHomeFileWriteScript(remote: string, contents: string): string {
+  const dir = path.posix.dirname(remote);
+  const mkdir = dir && dir !== '.' ? `mkdir -p "$HOME/${dir}"\n` : '';
+  return (
+    `${mkdir}cat > "$HOME/${remote}" <<'${CRED_EOF}'\n${contents}${contents.endsWith('\n') ? '' : '\n'}${CRED_EOF}\n` +
+    `chmod 600 "$HOME/${remote}"`
+  );
+}
 
 /**
  * Where Claude Code reads its OAuth token on the box. `.claude.json` (the file
@@ -250,14 +281,6 @@ export function buildCredentialScript(
 ): string {
   const byId = new Map(detected.map((d) => [d.id, d]));
   const parts: string[] = [];
-  const writeFile = (remote: string, contents: string): string => {
-    const dir = path.posix.dirname(remote);
-    const mkdir = dir && dir !== '.' ? `mkdir -p "$HOME/${dir}"\n` : '';
-    return (
-      `${mkdir}cat > "$HOME/${remote}" <<'${CRED_EOF}'\n${contents}${contents.endsWith('\n') ? '' : '\n'}${CRED_EOF}\n` +
-      `chmod 600 "$HOME/${remote}"`
-    );
-  };
   for (const id of picked) {
     const d = byId.get(id);
     const cred = LEASE_RUNTIMES.find((c) => c.id === id);
@@ -268,11 +291,11 @@ export function buildCredentialScript(
     } catch {
       continue;
     }
-    parts.push(writeFile(cred.remote, contents));
+    parts.push(buildHomeFileWriteScript(cred.remote, contents));
     // For claude the file above is config/state only; the OAuth token is a
     // second artifact — without it the box comes up "Not logged in".
     if (id === 'claude' && extras?.claudeCredentialsJson) {
-      parts.push(writeFile(CLAUDE_TOKEN_REMOTE, extras.claudeCredentialsJson));
+      parts.push(buildHomeFileWriteScript(CLAUDE_TOKEN_REMOTE, extras.claudeCredentialsJson));
     }
   }
   return parts.join('\n');
