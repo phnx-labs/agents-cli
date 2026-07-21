@@ -1,1 +1,1 @@
-- Fix `agents add claude@latest` resource sync when bundled hook directories such as `hooks/tests` are present.
+- Fix hook directory sync status so bundled hook directories such as `hooks/tests` copy correctly and no longer appear permanently drifted after sync.
