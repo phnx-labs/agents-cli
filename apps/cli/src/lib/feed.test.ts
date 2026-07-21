@@ -16,6 +16,7 @@ import {
   recordContinued,
   getAnswerRecord,
   isBlockAnswered,
+  listAskStats,
   type OpenBlock,
 } from './feed.js';
 import { loadOperators } from './operator.js';
@@ -198,6 +199,14 @@ describe('feed store', () => {
     expect(listBlocks(path.join(home, '.agents', '.history', 'feed'))).toMatchObject([
       { questions: [{ text: 'Replacement?' }] },
     ]);
+    const stats = listAskStats(path.join(home, '.agents', '.history', 'feed'));
+    expect(stats).toHaveLength(1);
+    expect(stats[0]).toMatchObject({
+      sessionId: 'session-123',
+      mailboxId: 'session-123',
+      totalAskCount: 2,
+    });
+    expect(stats[0].recentAskTimestamps).toHaveLength(2);
   });
 
   it.runIf(hasPython)('real hook publishes waiting notifications with routing identity', () => {

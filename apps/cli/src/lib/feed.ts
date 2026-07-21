@@ -71,7 +71,7 @@ export interface OpenBlock {
   runtime: string;
   ts: string;
   questions: BlockQuestion[];
-  kind?: 'question' | 'notification';
+  kind?: 'question' | 'notification' | 'control';
   notificationType?: string;
   ticket?: string;
   pr?: string;
@@ -91,6 +91,29 @@ export interface OpenBlock {
   safeDefault?: string;
   /** Cost-of-delay for notification routing: low/medium/high. */
   costOfDelay?: 'low' | 'medium' | 'high';
+  /** Number of agents downstream of this blocked agent, when known. */
+  downstreamAgents?: number;
+  /** Computed cost-of-delay rank metadata, stamped by `agents feed`. */
+  delayRank?: {
+    score: number;
+    idleMinutes: number;
+    blastRadius: number;
+    burnUsdPerHour: number;
+    decisionIrreducibility: number;
+  };
+  /** Token/cost runaway signal for synthetic feed control cards. */
+  runaway?: {
+    reason: string;
+    tokPerSec?: number;
+    burnUsdPerHour?: number;
+    relaunchesPerTenMinutes?: number;
+  };
+  /** Chronic-ask signal for synthetic feed control cards. */
+  needy?: {
+    askCountLastHour: number;
+    threshold: number;
+    totalAskCount: number;
+  };
   /** Set once the block has been answered; see `recordAnswer`. */
   answer?: AnswerRecord;
   /** Per-message delivery receipts for answers to this block. */
@@ -103,6 +126,15 @@ export interface OpenBlock {
   defaultedAt?: string;
   /** ISO-8601 timestamp when a decision block was hard-parked. */
   parkedAt?: string;
+}
+
+export interface FeedAskStats {
+  sessionId: string;
+  mailboxId: string;
+  firstAskAt: string;
+  lastAskAt: string;
+  totalAskCount: number;
+  recentAskTimestamps: string[];
 }
 
 /**
@@ -123,6 +155,7 @@ function blockPath(root: string, blockId: string): string {
 
 function answeredDir(root: string): string { return path.join(root, 'answered'); }
 function receiptDir(root: string): string { return path.join(root, 'receipts'); }
+function askStatsDir(root: string): string { return path.join(root, 'asks'); }
 
 function ensureDir(dir: string): void {
   fs.mkdirSync(dir, { recursive: true });
@@ -357,6 +390,31 @@ export function listBlocks(root?: string): OpenBlock[] {
   return blocks;
 }
 
+/** Read per-session ask history written by the feed publish hook. */
+export function listAskStats(root?: string): FeedAskStats[] {
+  const dir = askStatsDir(root ?? getFeedDir());
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const stats: FeedAskStats[] = [];
+  for (const name of names.filter(n => n.endsWith('.json')).sort()) {
+    const parsed = safeReadJson<Partial<FeedAskStats>>(path.join(dir, name));
+    if (!parsed?.sessionId || !parsed.mailboxId || !parsed.lastAskAt) continue;
+    stats.push({
+      sessionId: parsed.sessionId,
+      mailboxId: parsed.mailboxId,
+      firstAskAt: parsed.firstAskAt ?? parsed.lastAskAt,
+      lastAskAt: parsed.lastAskAt,
+      totalAskCount: parsed.totalAskCount ?? parsed.recentAskTimestamps?.length ?? 0,
+      recentAskTimestamps: Array.isArray(parsed.recentAskTimestamps) ? parsed.recentAskTimestamps : [],
+    });
+  }
+  return stats;
+}
+
 /** Remove a block record and its lifecycle sidecars. Returns true if the file was deleted. */
 export function removeBlock(blockId: string, root?: string): boolean {
   const dir = root ?? getFeedDir();
@@ -455,6 +513,7 @@ def main():
     home = os.environ.get("HOME") or os.path.expanduser("~")
     feed_dir = os.path.join(home, ".agents", ".history", "feed")
     answered_dir = os.path.join(feed_dir, "answered")
+    asks_dir = os.path.join(feed_dir, "asks")
     target = os.path.join(feed_dir, f"{block_id}.json")
     hook_event = payload.get("hook_event_name", "PreToolUse")
 
@@ -558,6 +617,25 @@ def main():
         os.environ.get("AGENTS_MAILBOX_DIR", "").rstrip("/")
     ) or session_id
 
+    now_iso = datetime.now(timezone.utc).isoformat()
+    stats_path = os.path.join(asks_dir, f"{safe_session_id}.json")
+    stats = read_json(stats_path) or {}
+    recent = stats.get("recentAskTimestamps") if isinstance(stats, dict) else []
+    if not isinstance(recent, list):
+        recent = []
+    recent.append(now_iso)
+    # Keep enough history for rolling one-hour needy detection without unbounded
+    # per-session files. The TypeScript reader applies the exact time window.
+    recent = recent[-200:]
+    write_json(stats_path, {
+        "sessionId": session_id,
+        "mailboxId": mailbox_id,
+        "firstAskAt": stats.get("firstAskAt") or now_iso,
+        "lastAskAt": now_iso,
+        "totalAskCount": int(stats.get("totalAskCount") or 0) + 1,
+        "recentAskTimestamps": recent,
+    })
+
     hostname = os.environ.get("AGENTS_SYNC_MACHINE_ID") or socket.gethostname()
     host = hostname.split(".")[0].strip().lower()
     host = re.sub(r"[^a-z0-9_-]", "-", host) or "unknown"
@@ -570,7 +648,7 @@ def main():
         "mailboxId": mailbox_id,
         "host": host,
         "runtime": runtime,
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": now_iso,
         "questions": normalized_questions,
         "kind": kind,
     }

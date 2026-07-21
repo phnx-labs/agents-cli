@@ -11,7 +11,7 @@
  */
 import type { Command } from 'commander';
 import chalk from 'chalk';
-import { ensureFeedPublishHook, listBlocks, recordNotified, type OpenBlock } from '../lib/feed.js';
+import { ensureFeedPublishHook, listAskStats, listBlocks, recordNotified, type OpenBlock } from '../lib/feed.js';
 import {
   enrichBlocksFromSessions,
   groupBlocksByOutcome,
@@ -36,6 +36,14 @@ import { isValidMailboxId } from '../lib/mailbox.js';
 import { getActiveSessions } from '../lib/session/active.js';
 import { mailboxIdForActiveSession } from '../lib/mailbox-target.js';
 import { GLYPH, masthead } from '../lib/comms-render.js';
+import { discoverSessions } from '../lib/session/discover.js';
+import { resolveProvider } from '../lib/cloud/registry.js';
+import {
+  buildSessionSignals,
+  rankFeedBlocks,
+  synthesizeControlCards,
+  type FeedSessionSignal,
+} from '../lib/feed-ranking.js';
 
 export const FEED_NO_FANOUT_ENV = 'AGENTS_FEED_LOCAL';
 
@@ -82,6 +90,47 @@ export function mergeFeedBlocks(...groups: OpenBlock[][]): OpenBlock[] {
   return [...byIdentity.values()].sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts));
 }
 
+export type FeedControlAction = 'pause' | 'kill';
+
+function matchesControlTarget(signal: FeedSessionSignal, target: string): boolean {
+  return [
+    signal.mailboxId,
+    signal.sessionId,
+    signal.cloudTaskId,
+    signal.pid !== undefined ? String(signal.pid) : undefined,
+  ].some((value) => value === target);
+}
+
+export async function controlFeedSession(
+  action: FeedControlAction,
+  target: string,
+  signals: FeedSessionSignal[],
+): Promise<string> {
+  const signal = signals.find((s) => matchesControlTarget(s, target));
+  if (!signal) throw new Error(`No live feed session matches '${target}'.`);
+
+  if (signal.cloudProvider && signal.cloudTaskId) {
+    const provider = resolveProvider(signal.cloudProvider);
+    await provider.cancel(signal.cloudTaskId);
+    return `${action === 'pause' ? 'paused' : 'killed'} cloud task ${signal.cloudTaskId}`;
+  }
+
+  if (!signal.pid) {
+    throw new Error(`Session '${target}' has no local pid or cancellable cloud task.`);
+  }
+
+  if (action === 'pause') {
+    if (process.platform === 'win32') {
+      throw new Error('Pause is not supported for local Windows processes; use --kill.');
+    }
+    process.kill(signal.pid, 'SIGSTOP');
+    return `paused pid ${signal.pid}`;
+  }
+
+  process.kill(signal.pid, 'SIGTERM');
+  return `killed pid ${signal.pid}`;
+}
+
 function hostToken(host: string): string {
   return normalizeHost(host.split('@').pop() || host);
 }
@@ -102,13 +151,16 @@ function renderBlock(b: OpenBlock, localHost: string, indent = ''): void {
   const cls = b.blockClass ? chalk.gray(`(${b.blockClass})`) : '';
   const consequence = b.consequence && b.consequence !== 'normal' ? chalk.red(`[${b.consequence}]`) : '';
   const cost = b.costOfDelay ? chalk.gray(`cost:${b.costOfDelay}`) : '';
+  const rank = b.delayRank ? chalk.gray(`rank:${Math.round(b.delayRank.score)}`) : '';
   // Shared fleet-comms glyphs: ▲ open ask, ✓ answered (see comms-render GLYPH).
   const marker = b.answer
     ? chalk.green(GLYPH.delivered)
+    : b.kind === 'control'
+      ? chalk.red('!')
     : !b.parkedAt
       ? chalk.yellow(GLYPH.ask)
       : ' ';
-  console.log(`${indent}${marker} ${chalk.cyan(b.mailboxId)}${host}  ${runtime}  ${age}  ${cls} ${consequence} ${cost}`.trimEnd());
+  console.log(`${indent}${marker} ${chalk.cyan(b.mailboxId)}${host}  ${runtime}  ${age}  ${cls} ${consequence} ${cost} ${rank}`.trimEnd());
   for (const question of b.questions) {
     const header = question.header ? chalk.gray(`[${question.header}] `) : '';
     console.log(`${indent}  ${header}${question.text}`);
@@ -146,8 +198,16 @@ function renderBlock(b: OpenBlock, localHost: string, indent = ''): void {
   if (b.notifiedAt) {
     console.log(`${indent}  ${chalk.dim('notified')} ${relTime(b.notifiedAt)}`);
   }
+  if (b.runaway) {
+    console.log(`${indent}  ${chalk.red('runaway:')} ${b.runaway.reason}`);
+    console.log(`${indent}  ${chalk.dim(`control: ag feed --pause ${b.mailboxId}  ·  ag feed --kill ${b.mailboxId}`)}`);
+  }
+  if (b.needy) {
+    console.log(`${indent}  ${chalk.yellow('needy:')} ${b.needy.askCountLastHour}/${b.needy.threshold} asks in the last hour`);
+    console.log(`${indent}  ${chalk.dim(`inspect: ag sessions ${b.sessionId}`)}`);
+  }
 
-  if (!b.answer && !b.parkedAt) {
+  if (!b.answer && !b.parkedAt && b.kind !== 'control') {
     console.log(`${indent}  ${chalk.dim(formatFeedReplyHint(b.mailboxId))}`);
   }
   console.log();
@@ -209,6 +269,8 @@ export function registerFeedCommand(program: Command): void {
     .option('-H, --host <target...>', 'Scope to remote machine(s) over SSH; repeatable')
     .option('--device <target...>', 'Alias for --host; repeatable')
     .option('--dispatch', 'Run stall suppression + default-on-no-answer policy and urgent notifications')
+    .option('--pause <id>', 'Pause a runaway/needy local process (SIGSTOP) or cancel a cloud task')
+    .option('--kill <id>', 'Kill a runaway/needy local process (SIGTERM) or cancel a cloud task')
     .action(async (opts: {
       json?: boolean;
       flat?: boolean;
@@ -217,6 +279,8 @@ export function registerFeedCommand(program: Command): void {
       host?: string[];
       device?: string[];
       dispatch?: boolean;
+      pause?: string;
+      kill?: string;
     }) => {
       if (opts.device?.length) opts.host = [...(opts.host ?? []), ...opts.device];
       const self = machineId();
@@ -246,6 +310,18 @@ export function registerFeedCommand(program: Command): void {
       if (includeLocal) {
         sessions = await getActiveSessions();
       }
+      const sessionMetas = includeLocal && sessions.length > 0 ? await discoverSessions({ all: true, limit: 5000 }) : [];
+      const localSignals = buildSessionSignals(sessions, sessionMetas);
+
+      if (opts.pause || opts.kill) {
+        if (!includeLocal) {
+          throw new Error('Feed controls run on the local machine. Re-run against the target host with --local.');
+        }
+        const action = opts.pause ? 'pause' : 'kill';
+        const target = opts.pause ?? opts.kill ?? '';
+        console.log(await controlFeedSession(action, target, localSignals));
+        return;
+      }
 
       if (opts.dispatch && includeLocal) {
         // Liveness sweep: drop messages to dead agents and retire stale blocks
@@ -259,7 +335,9 @@ export function registerFeedCommand(program: Command): void {
         }
       }
 
-      const localBlocks = includeLocal ? listBlocks() : [];
+      const localBlocks = includeLocal
+        ? [...listBlocks(), ...synthesizeControlCards(localSignals, listAskStats())]
+        : [];
       let blocks = localBlocks;
       const forceLocal = opts.local === true || process.env[FEED_NO_FANOUT_ENV] === '1';
       if (!forceLocal) {
@@ -291,6 +369,7 @@ export function registerFeedCommand(program: Command): void {
       if (!opts.all) {
         blocks = filter.surfaced;
       }
+      blocks = rankFeedBlocks(blocks, localSignals);
       const digest = suppressionDigest(filter);
       if (digest && !opts.json) {
         console.log(chalk.dim(digest));
@@ -359,7 +438,11 @@ export function registerFeedCommand(program: Command): void {
         return;
       }
 
-      const groups = groupBlocksByOutcome(blocks);
+      const groups = groupBlocksByOutcome(blocks).sort((a, b) => {
+        const ar = Math.max(...a.blocks.map((block) => block.delayRank?.score ?? 0));
+        const br = Math.max(...b.blocks.map((block) => block.delayRank?.score ?? 0));
+        return br - ar;
+      });
       for (const g of groups) renderOutcomeGroup(g, self);
     });
 }

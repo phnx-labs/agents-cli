@@ -258,6 +258,22 @@ hourly-volume sparkline, then one row per box (live dot, pending/total counts,
 last activity, resolved live-session label), then the recency-ordered message
 log.
 
+## Agent feed (`agents feed`)
+
+`agents feed` lists decisions agents need from the operator. The default order is
+cost-of-delay rank, not chronology: idle minutes × downstream blast radius ×
+hourly burn × ask irreducibility. Suppressed stalls and FYIs get zero
+irreducibility, so a fresh cheap ask does not outrank an old critical-path block.
+
+The same poll also synthesizes control cards for sessions that are burning
+abnormally without asking (`runaway`) or asking repeatedly (`needy`). Control
+cards are one row per session, with local controls:
+
+```bash
+agents feed --pause <id>   # SIGSTOP a local process; cloud tasks are cancelled
+agents feed --kill <id>    # SIGTERM a local process; cloud tasks are cancelled
+```
+
 ### Live tail (`--watch`, `-f`) — the money shot
 
 ```bash

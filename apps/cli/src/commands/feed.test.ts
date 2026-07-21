@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { spawn, type ChildProcess } from 'child_process';
 import type { OpenBlock } from '../lib/feed.js';
 import {
+  controlFeedSession,
   formatFeedMastheadRight,
   formatFeedReplyHint,
   formatOutcomeHeader,
@@ -12,6 +14,16 @@ import {
 } from './feed.js';
 import { groupBlocksByOutcome } from '../lib/feed-outcome.js';
 import { GLYPH } from '../lib/comms-render.js';
+
+const children: ChildProcess[] = [];
+
+afterEach(() => {
+  for (const child of children.splice(0)) {
+    if (child.pid && child.exitCode === null) {
+      try { process.kill(child.pid, 'SIGKILL'); } catch { /* already gone */ }
+    }
+  }
+});
 
 function block(id: string, host: string, ts: string, extra?: Partial<OpenBlock>): OpenBlock {
   return {
@@ -113,6 +125,28 @@ describe('formatFeedReplyHint', () => {
     expect(formatFeedReplyHint('agent-1').startsWith('↳')).toBe(true);
     expect(GLYPH.ask).toBe('▲');
     expect(GLYPH.delivered).toBe('✓');
+  });
+});
+
+describe('controlFeedSession', () => {
+  it('kills a real local process by pid', async () => {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+      stdio: 'ignore',
+    });
+    children.push(child);
+    expect(child.pid).toBeTypeOf('number');
+
+    const result = await controlFeedSession('kill', 'runaway-agent', [{
+      sessionId: 'session-runaway',
+      mailboxId: 'runaway-agent',
+      pid: child.pid,
+      runtime: 'headless',
+    }]);
+
+    expect(result).toBe(`killed pid ${child.pid}`);
+    await new Promise((resolve) => child.once('exit', resolve));
+    expect(child.exitCode).toBeNull();
+    expect(child.signalCode).toBe('SIGTERM');
   });
 });
 
