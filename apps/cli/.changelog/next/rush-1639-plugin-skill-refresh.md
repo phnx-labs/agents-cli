@@ -1,0 +1,1 @@
+- **Fix `agents repo refresh` for stale plugin skill shadows.** Full refresh now forces a materialization pass, copies trusted plugin-bundled skills into legacy top-level agent-home skill dirs when those names already matter to the agent, and prunes orphaned top-level skill dirs whose source no longer exists.

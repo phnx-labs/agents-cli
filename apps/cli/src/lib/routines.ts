@@ -83,6 +83,10 @@ export interface GithubJobTrigger {
   repo?: string;
   /** git branch (ref short name) — when set, only payloads for this branch match. */
   branch?: string;
+  /** GitHub webhook action, e.g. `opened`, `synchronize`, or `labeled`. */
+  action?: string;
+  /** Required GitHub label name. For `pull_request.labeled`, this is the added label. */
+  label?: string;
 }
 
 export interface LinearJobTrigger {
@@ -604,6 +608,12 @@ export function validateTrigger(trigger: unknown): string[] {
     }
     if (github.branch !== undefined && typeof github.branch !== 'string') {
       errors.push('trigger.branch must be a string');
+    }
+    if (github.action !== undefined && typeof github.action !== 'string') {
+      errors.push('trigger.action must be a string');
+    }
+    if (github.label !== undefined && typeof github.label !== 'string') {
+      errors.push('trigger.label must be a string');
     }
     return errors;
   }

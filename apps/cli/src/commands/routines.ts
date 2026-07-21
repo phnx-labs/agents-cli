@@ -83,7 +83,11 @@ function fireConditionLabel(job: JobConfig): string {
       const scope = job.trigger.repo
         ? ` (${job.trigger.repo}${job.trigger.branch ? `@${job.trigger.branch}` : ''})`
         : '';
-      return `on github:${job.trigger.event}${scope}`;
+      const filters = [
+        job.trigger.action ? `action=${job.trigger.action}` : null,
+        job.trigger.label ? `label=${job.trigger.label}` : null,
+      ].filter(Boolean).join(', ');
+      return `on github:${job.trigger.event}${scope}${filters ? ` (${filters})` : ''}`;
     }
     const filters = [
       job.trigger.action ? `action=${job.trigger.action}` : null,
@@ -105,6 +109,8 @@ function parseRoutineTrigger(options: Record<string, unknown>): JobTrigger | und
     const trigger: JobTrigger = { type: 'github_event', event };
     if (typeof options.repo === 'string') trigger.repo = options.repo;
     if (typeof options.branch === 'string') trigger.branch = options.branch;
+    if (typeof options.action === 'string') trigger.action = options.action;
+    if (typeof options.label === 'string') trigger.label = options.label;
     return trigger;
   }
   if (sourceMaybe === 'linear') {
@@ -447,9 +453,9 @@ export function registerRoutinesCommands(program: Command): void {
     .option('--on <source:event>', 'Webhook trigger instead of/in addition to a schedule: github:pull_request or linear:Issue')
     .option('--repo <owner/name>', 'GitHub repo filter for --on github:<event>')
     .option('--branch <name>', 'GitHub branch filter for --on github:<event>')
-    .option('--action <name>', 'Linear action filter for --on linear:<event> (e.g. update)')
+    .option('--action <name>', 'Webhook action filter for --on triggers (GitHub: labeled/opened; Linear: update)')
     .option('--team-key <key>', 'Linear team key filter for --on linear:<event> (e.g. RUSH)')
-    .option('--label <name>', 'Linear issue label filter for --on linear:Issue')
+    .option('--label <name>', 'Label filter for --on triggers (GitHub label name or Linear issue label)')
     .option('--end-at <iso>', 'Stop firing on or after this ISO 8601 timestamp (e.g., "2026-12-31T23:59:00Z"); routine auto-disables.')
     .option('--disabled', 'Create the routine but keep it paused (enable later with resume)')
     .option('--resume <sessionId>', 'At fire time, resume this existing session id (via `agents run <agent> --resume`) instead of starting fresh — the actual session reopens with full context and the prompt becomes its next turn. Powers self-scheduled wake-ups (e.g. /hibernate). Requires --agent claude or codex; runs un-sandboxed (the session store lives in the real home, not the job overlay).')

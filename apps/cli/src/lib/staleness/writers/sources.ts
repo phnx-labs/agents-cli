@@ -9,6 +9,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
+import type { AgentId, PluginManifest } from '../../types.js';
 import { getUserAgentsDir, getAgentsDir, getEnabledExtraRepos, getCommandsDir, getSkillsDir, getHooksDir } from '../../state.js';
 import { safeJoin } from '../../paths.js';
 
@@ -39,6 +40,45 @@ function isLiveDir(p: string): boolean {
   }
 }
 
+function readPluginManifest(pluginRoot: string): PluginManifest | null {
+  const manifestPath = path.join(pluginRoot, '.claude-plugin', 'plugin.json');
+  if (!isLiveFile(manifestPath)) return null;
+  try {
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as PluginManifest;
+    if (!manifest.name || !manifest.version) return null;
+    return manifest;
+  } catch {
+    return null;
+  }
+}
+
+function pluginSupportsAgent(manifest: PluginManifest, agent?: AgentId): boolean {
+  if (!agent) return true;
+  return !manifest.agents || manifest.agents.length === 0 || manifest.agents.includes(agent);
+}
+
+function pluginSkillDirs(options: { agent?: AgentId; plugins?: Set<string> } = {}): string[] {
+  const dirs: string[] = [];
+  for (const base of trustedSourceBases()) {
+    const pluginsDir = path.join(base.dir, 'plugins');
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(pluginsDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+      if (options.plugins && !options.plugins.has(entry.name)) continue;
+      const pluginRoot = path.join(pluginsDir, entry.name);
+      const manifest = readPluginManifest(pluginRoot);
+      if (!manifest || !pluginSupportsAgent(manifest, options.agent)) continue;
+      dirs.push(path.join(pluginRoot, 'skills'));
+    }
+  }
+  return dirs;
+}
+
 /** Find the trusted source for a command markdown by name. */
 export function resolveCommandSource(name: string): string | null {
   const candidates = [
@@ -50,13 +90,34 @@ export function resolveCommandSource(name: string): string | null {
 }
 
 /** Find the trusted source directory for a skill by name. */
-export function resolveSkillSource(name: string): string | null {
+export function resolveSkillSource(name: string, options: { agent?: AgentId; plugins?: Set<string> } = {}): string | null {
   const candidates = [
     safeJoin(path.join(getUserAgentsDir(), 'skills'), name),
     safeJoin(getSkillsDir(), name),
     ...getEnabledExtraRepos().map((e) => safeJoin(path.join(e.dir, 'skills'), name)),
+    ...pluginSkillDirs(options).map((skillsDir) => safeJoin(skillsDir, name)),
   ];
   return candidates.find(isLiveDir) ?? null;
+}
+
+/** List trusted plugin-bundled skill names, filtered to an optional plugin/agent scope. */
+export function listPluginSkillNames(options: { agent?: AgentId; plugins?: Set<string> } = {}): string[] {
+  const names = new Set<string>();
+  for (const skillsDir of pluginSkillDirs(options)) {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(skillsDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+      if (isLiveFile(path.join(skillsDir, entry.name, 'SKILL.md'))) {
+        names.add(entry.name);
+      }
+    }
+  }
+  return Array.from(names);
 }
 
 /** Find the trusted source file for a hook by name. */
@@ -75,5 +136,6 @@ export function trustedSkillRoots(): string[] {
     path.join(getUserAgentsDir(), 'skills'),
     getSkillsDir(),
     ...getEnabledExtraRepos().map((e) => path.join(e.dir, 'skills')),
+    ...pluginSkillDirs(),
   ];
 }

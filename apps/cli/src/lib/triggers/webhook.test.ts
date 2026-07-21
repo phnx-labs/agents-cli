@@ -44,6 +44,23 @@ function pullRequestWebhook(repoFullName: string, baseRef = 'main', headRef = 'f
   };
 }
 
+function labeledPullRequestWebhook(repoFullName: string, label: string, action = 'labeled'): IncomingWebhook {
+  return {
+    source: 'github',
+    event: 'pull_request',
+    payload: {
+      action,
+      repository: { full_name: repoFullName },
+      label: { name: label },
+      pull_request: {
+        base: { ref: 'main' },
+        head: { ref: 'feature' },
+        labels: [{ name: label }],
+      },
+    },
+  };
+}
+
 /** A `push` webhook for repo x/y on branch main. */
 function pushWebhook(repoFullName: string, ref = 'refs/heads/main'): IncomingWebhook {
   return {
@@ -122,6 +139,17 @@ describe('matchJobsToWebhook', () => {
     });
     expect(jobMatchesWebhook(mainOnly, pushWebhook('x/y', 'refs/heads/main'))).toBe(true);
     expect(jobMatchesWebhook(mainOnly, pushWebhook('x/y', 'refs/heads/dev'))).toBe(false);
+  });
+
+  it('honors GitHub pull_request action and label filters', () => {
+    const uxApproved = job({
+      name: 'ux-tests',
+      trigger: { type: 'github_event', event: 'pull_request', repo: 'x/y', action: 'labeled', label: 'ux-approved' },
+    });
+
+    expect(jobMatchesWebhook(uxApproved, labeledPullRequestWebhook('x/y', 'ux-approved'))).toBe(true);
+    expect(jobMatchesWebhook(uxApproved, labeledPullRequestWebhook('x/y', 'bug'))).toBe(false);
+    expect(jobMatchesWebhook(uxApproved, labeledPullRequestWebhook('x/y', 'ux-approved', 'opened'))).toBe(false);
   });
 
   it('skips disabled jobs', () => {

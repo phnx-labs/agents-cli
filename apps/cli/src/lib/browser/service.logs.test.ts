@@ -5,6 +5,15 @@ import { tmpdir } from 'os';
 import * as state from '../state.js';
 import * as profiles from './profiles.js';
 
+const { sshExecAsyncMock } = vi.hoisted(() => ({
+  sshExecAsyncMock: vi.fn(),
+}));
+
+vi.mock('../ssh-exec.js', async () => {
+  const actual = await vi.importActual<typeof import('../ssh-exec.js')>('../ssh-exec.js');
+  return { ...actual, sshExecAsync: sshExecAsyncMock };
+});
+
 const TEST_HOME = path.join(tmpdir(), 'agents-cli-browser-logs-test');
 const TEST_AGENTS_DIR = path.join(TEST_HOME, '.agents');
 const TEST_LOG_DIR = path.join(TEST_HOME, 'logs');
@@ -15,8 +24,7 @@ vi.spyOn(state, 'getAgentsDir').mockReturnValue(TEST_AGENTS_DIR);
 // Spy on the single profile lookup we want to override instead of mocking
 // the whole module — the other profiles.js exports (getProfileRuntimeDir,
 // listProfiles, …) keep their real implementations and service.js loads
-// without missing-export errors. This avoids needing vi.hoisted /
-// vi.importActual, neither of which Bun's native test runner supports.
+// without missing-export errors.
 vi.spyOn(profiles, 'getProfile').mockImplementation(async (name: string) => {
   if (name === 'rush-with-logs') {
     return {
@@ -31,6 +39,15 @@ vi.spyOn(profiles, 'getProfile').mockImplementation(async (name: string) => {
       name,
       browser: 'chrome',
       endpoints: ['cdp://localhost:9223'],
+    };
+  }
+  if (name === 'rush-remote-logs') {
+    return {
+      name,
+      browser: 'chrome',
+      endpoints: ['cdp://localhost:9224'],
+      logDir: TEST_LOG_DIR,
+      logHost: 'logger-host',
     };
   }
   return null;
@@ -50,6 +67,7 @@ function reset(): void {
     // ignore
   }
   fs.mkdirSync(TEST_LOG_DIR, { recursive: true });
+  sshExecAsyncMock.mockReset();
 }
 
 function writeJsonl(filename: string, entries: Array<Record<string, unknown>>): void {
@@ -202,5 +220,22 @@ describe('BrowserService.getAppLogs', () => {
     expect(entries).toHaveLength(2);
     expect(entries[0].message).toBe('agent_ready');
     expect(entries[1].message).toBe('drift');
+  });
+
+  it('reads remote logs through sshExecAsync with the hardened SSH baseline', async () => {
+    const line = JSON.stringify({ timestamp: `${APP_DATE}T12:04:00Z`, level: 'info', message: 'remote' });
+    sshExecAsyncMock.mockResolvedValue({ code: 0, stdout: `${line}\n`, stderr: '', timedOut: false });
+    const service = new BrowserService();
+    injectTask(service, 'rush-remote-logs', 't1');
+
+    const entries = await service.getAppLogs('t1', { source: 'rush-app', lines: 1 });
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0].message).toBe('remote');
+    expect(sshExecAsyncMock).toHaveBeenCalledWith(
+      'logger-host',
+      readNewestMatchingRemoteFileCommand(TEST_LOG_DIR, 'rush-app-', 1),
+      { timeoutMs: 10_000 },
+    );
   });
 });

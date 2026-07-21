@@ -233,8 +233,10 @@ is that remote commands are faster and dead connections self-terminate.
 Follow-ups (non-blocking):
 
 - Remove the now-unused `sshReachable` export.
-- Route the remaining specialized direct-`ssh` sites (browser CDP, cloud
-  `ProxyCommand`, drive-sync) through the shared baseline.
+- Keep specialized direct-`ssh` sites (for example `-L`/`-N` tunnels,
+  `ProxyCommand` relays, browser CDP, and drive-sync) composed from
+  `sshConnectOpts(...)` so they inherit the shared baseline while preserving
+  their required extra flags.
 - Consider moving cloud task streaming from bounded polling to the same
   persistent follow protocol once its async event generator can share the
   terminal-frame plumbing.
