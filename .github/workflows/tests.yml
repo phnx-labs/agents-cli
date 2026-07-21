@@ -85,3 +85,41 @@ jobs:
             echo "::error::one or more test shards failed"; exit 1
           fi
           echo "typecheck + all shards green"
+
+  # Smoke-test the COMPILED standalone binary (`bun build --compile`), which the
+  # vitest suite never exercises: on the Bun standalone, process.argv[1] /
+  # process.execPath are the virtual embedded entry (/$bunfs/root/agents), not a
+  # real path -- so an argv-shape regression (e.g. the ssh askpass shim) can pass
+  # every unit test yet break the shipped binary. Build it on Linux and confirm it
+  # actually runs. NOT wired into the required `test` aggregate -- this is a
+  # standalone, non-required check for now; promote it once it has proven stable.
+  compiled-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/cli
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-cache-${{ runner.os }}-${{ hashFiles('apps/cli/bun.lock') }}
+          restore-keys: bun-cache-${{ runner.os }}-
+      - run: bun install --frozen-lockfile
+      - name: Build the standalone binary
+        run: bash scripts/build-bin.sh
+      - name: Run the compiled binary (argv/execPath must resolve on /$bunfs)
+        run: |
+          set -euo pipefail
+          ver=$(./dist/bin/agents --version)
+          echo "compiled binary version: $ver"
+          [ -n "$ver" ] || { echo "::error::--version produced no output"; exit 1; }
+          # Exercises command routing on the standalone (the class of bug that only
+          # surfaces on the compiled binary, e.g. 'unknown command /$bunfs/...').
+          ./dist/bin/agents --help >/dev/null
+          echo "compiled binary runs: version + help OK"
