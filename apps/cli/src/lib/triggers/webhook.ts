@@ -115,9 +115,38 @@ function linearLabels(payload: Record<string, unknown>): string[] {
     .filter((n): n is string => typeof n === 'string' && n.length > 0);
 }
 
+function githubAction(payload: Record<string, unknown>): string | null {
+  return typeof payload.action === 'string' ? payload.action : null;
+}
+
+function githubLabels(payload: Record<string, unknown>): string[] {
+  const names = new Set<string>();
+  const add = (value: unknown) => {
+    if (typeof value === 'string' && value.length > 0) names.add(value);
+  };
+
+  const deliveryLabel = payload.label as { name?: unknown } | undefined;
+  add(deliveryLabel?.name);
+
+  const pr = payload.pull_request as { labels?: unknown } | undefined;
+  const prLabels = Array.isArray(pr?.labels) ? pr.labels : [];
+  for (const label of prLabels) {
+    add((label as { name?: unknown }).name);
+  }
+
+  const issue = payload.issue as { labels?: unknown } | undefined;
+  const issueLabels = Array.isArray(issue?.labels) ? issue.labels : [];
+  for (const label of issueLabels) {
+    add((label as { name?: unknown }).name);
+  }
+
+  return [...names];
+}
+
 function githubTriggerMatches(trigger: GithubJobTrigger, webhook: IncomingWebhook): boolean {
   if (webhook.source !== 'github') return false;
   if (trigger.event !== webhook.event) return false;
+  if (trigger.action && githubAction(webhook.payload) !== trigger.action) return false;
 
   if (trigger.repo) {
     const repo = webhookRepo(webhook.payload);
@@ -127,6 +156,11 @@ function githubTriggerMatches(trigger: GithubJobTrigger, webhook: IncomingWebhoo
   if (trigger.branch) {
     const branches = webhookBranches(webhook.event, webhook.payload);
     if (!branches.some((b) => b === trigger.branch)) return false;
+  }
+
+  if (trigger.label) {
+    const expected = trigger.label.toLowerCase();
+    if (!githubLabels(webhook.payload).some((name) => name.toLowerCase() === expected)) return false;
   }
 
   return true;

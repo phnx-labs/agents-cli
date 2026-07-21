@@ -113,6 +113,21 @@ agents routines add pr-review \
   --prompt "Review the pull request"
 ```
 
+Add `--action` and `--label` when a routine should fire only for a specific
+GitHub webhook action and label, such as a UX test agent after a human adds
+`ux-approved`:
+
+```bash
+agents routines add ux-tests \
+  --on github:pull_request \
+  --repo phnx-labs/agents-cli \
+  --branch main \
+  --action labeled \
+  --label ux-approved \
+  --agent claude \
+  --prompt "Run Playwright E2E and visual regression checks, then comment the results on the PR."
+```
+
 Run the localhost receiver with signing keys from an `agents secrets` bundle:
 
 ```bash

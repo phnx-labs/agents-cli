@@ -33,6 +33,19 @@ function pullRequestPayload(fullName: string, baseRef = 'main'): Record<string, 
   };
 }
 
+function labeledPullRequestPayload(fullName: string, label: string): Record<string, unknown> {
+  return {
+    action: 'labeled',
+    repository: { full_name: fullName },
+    label: { name: label },
+    pull_request: {
+      base: { ref: 'main' },
+      head: { ref: 'feature' },
+      labels: [{ name: label }],
+    },
+  };
+}
+
 /** Provision an isolated ~/.agents HOME with the given routine YAMLs on disk. */
 function makeHome(jobs: Record<string, unknown>[]): string {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-webhook-home-'));
@@ -81,6 +94,21 @@ const nonMatchingJob = {
   schedule: '0 3 * * *',
 };
 
+const uxApprovedJob = {
+  name: 'ux-tests',
+  agent: 'claude',
+  mode: 'plan',
+  prompt: 'Run the UX test agent and post Playwright plus visual regression results to the PR.',
+  sandbox: false,
+  trigger: {
+    type: 'github_event',
+    event: 'pull_request',
+    repo: 'octo/repo',
+    action: 'labeled',
+    label: 'ux-approved',
+  },
+};
+
 describe('agents routines webhook', () => {
   it('dry-run selects the matching trigger routine and leaves the schedule-only one out', () => {
     const home = makeHome([matchingJob, nonMatchingJob]);
@@ -122,6 +150,29 @@ describe('agents routines webhook', () => {
 
       expect(firedMatching).toBe(true);
       expect(firedNonMatching).toBe(false);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('fires a pull_request.labeled routine only for the configured GitHub label', () => {
+    const home = makeHome([uxApprovedJob, nonMatchingJob]);
+    try {
+      const daemonDir = path.join(home, '.agents', '.cache', 'helpers', 'daemon');
+      fs.mkdirSync(daemonDir, { recursive: true });
+      fs.writeFileSync(path.join(daemonDir, 'daemon.pid'), String(process.pid));
+
+      const wrongPayloadPath = path.join(home, 'wrong-label.json');
+      fs.writeFileSync(wrongPayloadPath, JSON.stringify(labeledPullRequestPayload('octo/repo', 'bug')));
+      runWebhook(home, ['--event', 'pull_request', '--file', wrongPayloadPath]);
+      expect(fs.existsSync(path.join(home, '.agents', '.history', 'runs', 'ux-tests'))).toBe(false);
+
+      const payloadPath = path.join(home, 'ux-approved.json');
+      fs.writeFileSync(payloadPath, JSON.stringify(labeledPullRequestPayload('octo/repo', 'ux-approved')));
+      runWebhook(home, ['--event', 'pull_request', '--file', payloadPath]);
+
+      expect(fs.existsSync(path.join(home, '.agents', '.history', 'runs', 'ux-tests'))).toBe(true);
+      expect(fs.existsSync(path.join(home, '.agents', '.history', 'runs', 'nightly'))).toBe(false);
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
