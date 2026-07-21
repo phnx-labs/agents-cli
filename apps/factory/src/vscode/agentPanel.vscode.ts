@@ -33,6 +33,7 @@ import { getSessionPathBySessionId, getSessionPreviewInfo, SessionPreviewInfo, r
 import { extractLinearTicketId } from '../core/utils';
 import { readPrompts } from './settings.vscode';
 import { BUILT_IN_AGENTS } from '../core/agents';
+import { openExternalUrl } from './webviewSecurity';
 import { parseLineForActivity, formatActivity, type TodoProgress } from '../core/session.activity';
 import { getSessionToolStatsViaAgentsCli } from '../core/handoff';
 import {
@@ -244,7 +245,7 @@ class AgentPanelProvider implements vscode.WebviewViewProvider {
         return;
       case 'openUrl':
         if (typeof msg.url === 'string') {
-          vscode.env.openExternal(vscode.Uri.parse(msg.url));
+          openExternalUrl(msg.url);
         }
         return;
       case 'openSourceControl':
@@ -308,7 +309,7 @@ class AgentPanelProvider implements vscode.WebviewViewProvider {
       }
       case 'openPr':
         if (typeof url === 'string') {
-          vscode.env.openExternal(vscode.Uri.parse(url));
+          openExternalUrl(url);
         }
         return;
       case 'diff':

@@ -10,6 +10,7 @@ import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
 import { AgentSettings, getDefaultSettings, CustomAgentConfig, SwarmAgentType, ALL_SWARM_AGENTS, PromptEntry, DEFAULT_DISPLAY_PREFERENCES, DEFAULT_NOTIFICATION_SETTINGS, DEFAULT_TASK_SOURCE_SETTINGS, DEFAULT_QUICK_LAUNCH, QuickLaunchSlot, migrateStaleClaudeQuickLaunch, migrateLegacyQuickLaunchSlots } from '../core/settings';
 import { readPromptsFromPath, writePromptsToPath, DEFAULT_PROMPTS } from '../core/prompts';
+import { openExternalUrl, isAllowedWebviewCommand } from './webviewSecurity';
 import * as terminals from './terminals.vscode';
 import * as swarm from './swarm.vscode';
 import { fetchAllTasks, detectAvailableSources } from './tasks.vscode';
@@ -893,7 +894,7 @@ async function openPlanPreview(pathValue: string, kind: string | undefined, host
   const target = pathValue.trim();
   if (!target) return;
   if (/^https?:\/\//i.test(target)) {
-    await vscode.env.openExternal(vscode.Uri.parse(target));
+    openExternalUrl(target);
     return;
   }
   const remoteHost = host && host !== 'this-mac' ? host : '';
@@ -928,7 +929,7 @@ async function openAttachmentPreview(pathValue: string, host: string | undefined
   const target = pathValue.trim();
   if (!target) return;
   if (/^https?:\/\//i.test(target)) {
-    await vscode.env.openExternal(vscode.Uri.parse(target));
+    openExternalUrl(target);
     return;
   }
   const remoteHost = host && host !== 'this-mac' ? host : '';
@@ -2981,7 +2982,7 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         break;
       }
       case 'executeCommand':
-        if (message.command && typeof message.command === 'string') {
+        if (message.command && typeof message.command === 'string' && isAllowedWebviewCommand(message.command)) {
           await vscode.commands.executeCommand(message.command);
         }
         break;
@@ -3054,7 +3055,7 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         break;
       case 'openExternal':
         if (message.url) {
-          vscode.env.openExternal(vscode.Uri.parse(message.url));
+          openExternalUrl(message.url);
         }
         break;
       // Focus a session — open/attach a real terminal on it (handles the headless
@@ -3105,8 +3106,7 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
             name: `Factory answer - ${message.teamId}`,
             env: buildAgentTerminalEnv(terminals.nextId('SH'), null),
           });
-          const escaped = message.text.replace(/"/g, '\\"').replace(/\$/g, '\\$');
-          term.sendText(`agents factory answer "${message.teamId}" "${escaped}"`, true);
+          term.sendText(`agents factory answer ${shq(message.teamId)} ${shq(message.text)}`, true);
           term.show();
         }
         break;

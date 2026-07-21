@@ -401,12 +401,16 @@ ${selection}
       fs.mkdirSync(assetDir, { recursive: true });
     }
 
+    // `fileName` comes from the webview — strip any directory components so a
+    // crafted name like `../../foo` can't escape the asset directory.
+    const safeName = path.basename(fileName);
+
     // Generate unique filename if file already exists
-    let uniqueFileName = fileName;
+    let uniqueFileName = safeName;
     let counter = 1;
     while (fs.existsSync(path.join(assetDir, uniqueFileName))) {
-      const ext = path.extname(fileName);
-      const base = path.basename(fileName, ext);
+      const ext = path.extname(safeName);
+      const base = path.basename(safeName, ext);
       uniqueFileName = `${base}-${counter}${ext}`;
       counter++;
     }
@@ -579,6 +583,7 @@ ${bodyHtml}
     style-src ${webview.cspSource} 'unsafe-inline';
     script-src 'nonce-${nonce}';
     img-src ${webview.cspSource} https: data:;
+    media-src data:;
     font-src ${webview.cspSource};
     connect-src https:;">
   <link href="${styleUri}" rel="stylesheet">

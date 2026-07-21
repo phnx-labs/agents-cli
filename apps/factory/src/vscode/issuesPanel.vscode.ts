@@ -17,6 +17,7 @@ import * as path from 'path';
 import { fetchAllTasks } from './tasks.vscode';
 import { getSettings } from './settings.vscode';
 import { UnifiedTask, extractRepoNameFromLabels } from '../core/tasks';
+import { openExternalUrl } from './webviewSecurity';
 
 export const ISSUES_PANEL_VIEW_ID = 'agentsPanel.issues';
 
@@ -81,7 +82,7 @@ class IssuesPanelProvider implements vscode.WebviewViewProvider {
         return;
       case 'openUrl':
         if (typeof msg.url === 'string' && msg.url) {
-          vscode.env.openExternal(vscode.Uri.parse(msg.url));
+          openExternalUrl(msg.url);
         }
         return;
     }
