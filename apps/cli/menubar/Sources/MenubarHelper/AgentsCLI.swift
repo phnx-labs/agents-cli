@@ -214,7 +214,7 @@ enum AgentsCLI {
         let attachmentStep: String
         if screenshotPaths.isEmpty {
             shots = "No screenshots were attached; work from the note alone."
-            attachmentStep = "5. No user-provided files were attached; skip attachment handling."
+            attachmentStep = "6. No user-provided files were attached; skip attachment handling."
         } else if screenshotPaths.count == 1 {
             shots = "The user attached this screenshot for the ticket: \(screenshotPaths[0]) — read it first with your image tools."
             attachmentStep = ticketAttachmentStep(linear: linear, paths: screenshotPaths)
@@ -239,18 +239,26 @@ enum AgentsCLI {
         3. Do a brief investigation for real context — name the likely file/area, a \
         reproduction path, or at minimum a crisp problem statement. Do NOT over-investigate; \
         a couple of focused reads is enough.
-        4. File the ticket, piping a proper multi-line description via stdin:
+        4. Determine the best delegate agent for this ticket:
+           - The workspace agent roster is: Antigravity, Claude, ChatGPT Codex, Droid, Grok, Kimi, OpenClaw.
+           - Run `agents sessions --active` and cross-check the roster against actually active local sessions.
+           - Pick the agent whose recent work and strengths best fit the ticket content. Use your own judgment; do not ask the user.
+           - If no agent clearly fits better than the others, default to `claude`.
+           - If delegate resolution fails or produces no available candidate, omit the `--delegate` flag from the next step instead of failing.
+        5. File the ticket, piping a proper multi-line description via stdin:
 
            printf '%s' "<your markdown description>" | \\
              \(linear) create "<crisp imperative title>" \\
                --priority <urgent|high|medium|low> \\
                --project "<Linear project name matching the repo>" \\
                --label "repo:<repo-name>" \\
+               --delegate <agent> \\
                --description-file -
 
            Pick an HONEST priority. Keep the title short and specific.
+           Omit `--delegate <agent>` entirely if delegate resolution in step 4 failed or produced no candidate.
         \(attachmentStep)
-        6. Print the resulting `Created RUSH-###: <title>` line, then on the NEXT line print
+        7. Print the resulting `Created RUSH-###: <title>` line, then on the NEXT line print
         the ticket's Linear URL as `URL: https://linear.app/…` (the `linear create` output or
         `\(linear) tasks <id>` gives it). Nothing else — no commentary.
         """
@@ -260,7 +268,7 @@ enum AgentsCLI {
         let proofArgs = paths.map { "             --proof \(shellQuote($0))" }
             .joined(separator: " \\\n")
         return """
-        5. Make sure every user-provided file is uploaded to the resulting Linear issue — do \
+        6. Make sure every user-provided file is uploaded to the resulting Linear issue — do \
         not merely mention its local filesystem path. Use whatever placement best communicates \
         the issue: description, comment, or another appropriate attachment surface. The reliable \
         CLI default is:
