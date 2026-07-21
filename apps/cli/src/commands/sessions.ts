@@ -60,6 +60,7 @@ interface SessionFilterOptions {
   project?: string;
   all?: boolean;
   teams?: boolean;
+  routine?: boolean;
   since?: string;
   until?: string;
 }
@@ -928,6 +929,7 @@ function canonicalSessionsCommand(query: string | undefined, options: SessionsOp
   const a = ['sessions'];
   if (options.active) a.push('--active');
   if (options.teams) a.push('--teams');
+  if (options.routine) a.push('--routine');
   if (options.agent) a.push('-a', options.agent);
   for (const h of options.host ?? []) a.push('--device', h);
   if (options.project) a.push('--project', options.project);
@@ -1071,6 +1073,7 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
   if (
     useInteractiveBrowser(options) &&
     !query &&
+    !options.routine &&
     !options.flat &&
     !options.tree &&
     !options.markdown &&
@@ -1181,6 +1184,7 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
       since,
       until: options.until,
       sortBy,
+      origin: options.routine ? 'routine' : undefined,
     };
 
     let sessions = await discoverSessions({
@@ -1315,6 +1319,11 @@ function teamTag(session: SessionMeta): string {
   return parts ? `[${parts}] ` : '[team] ';
 }
 
+function originTag(session: SessionMeta): string {
+  if (session.origin !== 'routine') return '';
+  return `[routine${session.routineName ? ` · ${session.routineName}` : ''}] `;
+}
+
 /** Adapt a SessionMeta's persisted signals to the badge renderer's shape. */
 function metaSignals(s: SessionMeta): Parameters<typeof signalBadges>[0] {
   return {
@@ -1334,7 +1343,7 @@ function flatSessionRow(session: SessionMeta, live?: ActiveSession, showTicket =
   const agentColor = colorAgent(session.agent);
   const when = formatRelativeTime(session.lastActivity ?? session.timestamp);
   const project = session.project || '-';
-  const tag = teamTag(session);
+  const tag = originTag(session) || teamTag(session);
   const label = (session as any).label;
   const { glyph, preview } = liveGlyphAndPreview(live);
   // A running session's live preview says what the agent is doing now; a
@@ -1378,7 +1387,7 @@ function flatSessionRow(session: SessionMeta, live?: ActiveSession, showTicket =
 function treeSessionRow(session: SessionMeta, live?: ActiveSession): string {
   const agentColor = colorAgent(session.agent);
   const when = formatRelativeTime(session.lastActivity ?? session.timestamp);
-  const tag = teamTag(session);
+  const tag = originTag(session) || teamTag(session);
   const label = (session as any).label;
   const { glyph, preview } = liveGlyphAndPreview(live);
   const topic = (preview || (tag ? `${tag}${session.topic ?? ''}` : session.topic)) || '-';
@@ -1803,7 +1812,7 @@ export function formatPickerLabel(s: SessionMeta, query: string, cols: PickerCol
   const agentColor = colorAgent(s.agent);
   const when = formatRelativeTime(s.lastActivity ?? s.timestamp);
   const project = s.project || '-';
-  const tag = teamTag(s);
+  const tag = originTag(s) || teamTag(s);
   const label = (s as any).label;
   const topic = tag ? `${tag}${s.topic ?? ''}` : s.topic;
   const versionStr = s.version || '-';
@@ -2468,6 +2477,7 @@ export function registerSessionsCommands(program: Command): void {
     .option('--opencode', 'Shorthand for --agent opencode')
     .option('--all', 'Include sessions from every directory (not just current project)')
     .option('--teams', 'Include team-spawned sessions (hidden by default)')
+    .option('--routine', 'Show only sessions archived from routine runs')
     .option('-p, --project <name>', 'Filter by project name (searches across all directories)')
     .option('--since <time>', 'Only sessions newer than this (e.g., 2h, 7d, 4w, or ISO date)')
     .option('--until <time>', 'Only sessions older than this (ISO timestamp)')
@@ -2518,6 +2528,10 @@ export function registerSessionsCommands(program: Command): void {
       # Search across every directory, not just this project
       agents sessions "topic" --all
 
+      # Show routine-run sessions and open one by routine run id
+      agents sessions --routine --all
+      agents sessions 2026-07-21T10-30-00-000Z
+
       # Export for analysis
       agents sessions --since 30d --limit 200 --json > sessions.json
 
@@ -2534,6 +2548,7 @@ export function registerSessionsCommands(program: Command): void {
       - --first and --last are mutually exclusive.
       - A filter flag (--include/--exclude/--first/--last) without --markdown/--json defaults to --markdown output.
       - --cloud sources from Rush Cloud captured runs instead of local disk.
+      - --routine shows only transcripts archived from routine run directories; routine rows also resolve by run id.
       - Without --teams, team-spawned sessions are hidden by default.
     `,
   });
@@ -2786,5 +2801,3 @@ function formatAbsoluteTime(isoTimestamp: string): string {
   const mm = String(d.getMinutes()).padStart(2, '0');
   return `${months[d.getMonth()]} ${d.getDate()} ${hh}:${mm}`;
 }
-
-

@@ -86,6 +86,12 @@ export interface SessionMeta {
   id: string;
   shortId: string;
   agent: SessionAgentId;
+  /** Where the indexed transcript came from. Routine rows are archived from a run directory. */
+  origin?: 'cli' | 'routine';
+  /** Routine name for transcripts archived from ~/.agents/.history/runs/<name>/<runId>/. */
+  routineName?: string;
+  /** Routine run id for transcripts archived from ~/.agents/.history/runs/<name>/<runId>/. */
+  routineRunId?: string;
   timestamp: string;
   /**
    * Last-activity time (ISO): the last message timestamp when a parser computed

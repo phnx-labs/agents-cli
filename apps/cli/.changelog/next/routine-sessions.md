@@ -1,0 +1,1 @@
+- `agents sessions` now indexes routine-run transcripts from durable run history; use `agents sessions --routine --all` or `agents sessions <run-id>` to inspect a routine run with the existing summary view.
