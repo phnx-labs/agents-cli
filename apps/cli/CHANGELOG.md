@@ -1,5 +1,90 @@
 # Changelog
 
+## 1.20.72
+
+- **Stop `agents doctor` from reporting phantom drift and `agents prune` from
+  deleting source-managed resources.** Three reconciler false positives are
+  fixed: the instruction file (`CLAUDE.md`/`AGENTS.md`) is now compared against
+  the composed active-preset output the rules writer actually emits — not the raw
+  whole-repo `rules/AGENTS.md` — so a correctly-synced home no longer shows as
+  permanent drift; plugin-bundled commands installed as `<plugin>-<command>`
+  command-skills (e.g. `swarm-plan`, `code-review`) are no longer flagged as
+  orphans/extras that `prune cleanup` would delete; and command-as-skill wrappers
+  (the `agents_command` marker) are no longer miscounted as skills and surfaced as
+  deletable skill orphans. Source: `apps/cli/src/lib/staleness/`,
+  `apps/cli/src/lib/commands.ts`, `apps/cli/src/lib/skills.ts`.
+
+- **Capture your whole fleet into `agents.yaml`, then rebuild it anywhere with
+  `agents apply` (#1305).** New `agents fleet capture` (alias `agents devices
+  capture`) snapshots the live environment into the portable `fleet:` block — the
+  device roster (**names only**), the source's agents as `defaults`, secrets-bundle
+  **names**, and routine **names**. It commits **zero** Tailscale IPs or usernames:
+  `agents apply` reconstructs a fresh machine's roster by resolving each device
+  name **live from Tailscale** (`ensureDevicesRegistered`), so `git clone` +
+  `agents apply` replicates the fleet with nothing sensitive in the repo. `apply`
+  now also passes declared `sync:` scopes through to `agents sync <scope>`
+  (previously a bare `sync`) and surfaces declared secrets-bundle names to recreate
+  on each device (values stay keychain-local, never pushed). Browser profiles are
+  intentionally not duplicated into `fleet:` — they already sync via the central
+  `browser:` block. Source: `apps/cli/src/commands/fleet-capture.ts`,
+  `apps/cli/src/lib/fleet/capture.ts`, `apps/cli/src/lib/devices/sync.ts`,
+  `apps/cli/src/lib/fleet/{types,manifest,apply}.ts`.
+
+- **`agents fleet status` no longer hangs on a stale `~/.ssh/config`.** The fleet probes (version / doctor / `fleet ping`) now dial each device at its registry Tailscale address (`dnsName`/IP) instead of the bare host name — so a hand-written `Host <name>` block carrying a drifted LAN IP can no longer shadow the correct entry and make a reachable box look dead. It also fails fast: a device the stats probe already found unreachable is skipped straight to an unreachable row instead of eating a 15s+30s version+doctor timeout. Source: `apps/cli/src/commands/ssh.ts`.
+
+- **No more macOS keychain password prompt from an interactive command.** Writing a non-`agents-cli.` keychain item (e.g. a refreshed Claude OAuth token during `agents view`, or an `agents secrets add`) via `/usr/bin/security add-generic-password -w` piped the value over stdin — but `readpassphrase(3)` reads the *controlling terminal* when one exists, so in an interactive shell `security` prompted the user ("password data for new item:") and hung to the timeout, ignoring the piped value. The write now runs `detached` (a new session with no controlling terminal) so the piped stdin is always used. Verified under a pty. Source: `apps/cli/src/lib/secrets/index.ts`.
+
+- **`agents logs <id> --json` now reports the true final status of a host task.**
+  For a run that finished remotely between dispatch and the one-shot `--json`
+  read, the payload emitted a stale `status: "running"` with no `exitCode` — even
+  though the completed log was already present — because `hostTaskLogJson`
+  discarded the reconciled record `reconcileTask` returns (it heals a new object
+  rather than mutating in place). It now emits the reconciled task, so a polling
+  agent sees `completed`/`failed` + `exitCode` + `finishedAt`. Source:
+  `apps/cli/src/lib/hosts/logs.ts`.
+
+- **Fix the macOS menu-bar auto-heal so upgrades actually restart the helper.**
+  `agents` has an on-startup self-heal that re-copies `MenubarHelper.app` when
+  the CLI version changes, but on modern macOS `launchctl bootstrap` fails when
+  the job is already bootstrapped, and the deprecated `launchctl load -w`
+  fallback plus `kickstart -k` did not recover a job that launchd had stopped
+  respawning after a `WindowServer event port death`. The helper would stay
+  updated on disk but invisible in the menu bar. `enableMenubarService` now
+  boots the old job out, bootstraps the fresh plist, and kickstarts it — the
+  same sequence that reliably restores the icon by hand. Source:
+  `apps/cli/src/lib/menubar/install-menubar.ts`,
+  `apps/cli/src/lib/menubar/install-menubar.test.ts`.
+
+- **`agents repo pull` no longer wedges on per-machine pin drift.** The committed
+  `devices/<machineId>/agents.yaml` (each box's agent version pins) is rewritten
+  whenever a pin changes, leaving the working tree perpetually dirty — so
+  `agents repo pull`, which refuses a dirty tree, kept failing until the file was
+  hand-committed. `pullRepo` now durably commits **just that one path** (explicit
+  pathspec) before pulling, via `commitOwnDeviceMeta`. Genuine uncommitted edits to
+  any other file still (correctly) block the pull. No-op for the system/extra repos
+  that don't own the path. Source: `apps/cli/src/lib/git.ts`.
+
+- **`agents secrets unlock` now stays unlocked across an agents-cli upgrade (and,
+  with `--durable`, across sleep + reboot).** The macOS secrets broker held an
+  unlock only in RAM, so it evaporated every time the daemon restarted (upgrade)
+  or the machine slept — forcing a Touch ID re-tap and breaking headless reads
+  with "not unlocked in the secrets agent". An unlock now also persists a
+  device-local, non-biometry keychain session item that the broker **rehydrates on
+  start** and that reads **fall back to** silently. Split default: it survives
+  upgrade/restart automatically; pass `--durable` (or set `secrets.agent.durable:
+  true`) to also survive sleep/reboot — otherwise a bundle re-locks on sleep as
+  before. `lock` / rotate / delete clear it. On Linux and Windows `unlock` is now a
+  friendly no-op (secrets already resolve durably from the OS store with no
+  prompt), so the command behaves the same on all three platforms. Source:
+  `apps/cli/src/lib/secrets/session-store.ts` (new),
+  `apps/cli/src/lib/secrets/agent.ts`, `apps/cli/src/lib/secrets/bundles.ts`,
+  `apps/cli/src/lib/secrets/index.ts`, `apps/cli/src/commands/secrets.ts`,
+  `apps/cli/src/lib/types.ts`.
+
+- **`agents share` cover capture finds Playwright's `chrome-headless-shell` packages.** `scanCaches()` only knew the classic `chrome-mac/Chromium.app` and `Google Chrome for Testing` layouts, so on machines whose Playwright cache holds only the newer `chromium_headless_shell-*` packages (a raw `chrome-headless-shell` binary, not an `.app` bundle) — and no system Chrome/Brave/Edge — the OG cover capture silently returned null and shared plans published without a preview card. The scan now matches `chrome-headless-shell-mac-arm64`, `chrome-headless-shell-mac-x64`, and `chrome-headless-shell-linux64` layouts alongside the existing ones. Source: `apps/cli/src/lib/share/capture.ts`, `apps/cli/src/lib/share/capture.test.ts`.
+
+- **New `agents uninstall` — cleanly reverse adoption and restore your original setup.** Installing agents-cli *adopts* your agent config: it moves `~/.<agent>` aside and replaces it with a symlink into the version homes, adopts the launcher on `PATH`, and adds the shim dir to your shell rc — but until now nothing put any of that back, so removing the CLI stranded your original config under `~/.agents/.history/backups/` and left `~/.claude` a dangling symlink. `agents uninstall` is the reverse of `agents setup`: it restores every adopted `~/.<agent>` (from the timestamped backup, or the version home for imported installs), restores owned home files, releases adopted launchers, strips the shim dir from every shell rc, then disposes of `~/.agents` — moved aside to `~/.agents.removed-<ts>` (recoverable) by default, or hard-deleted with `--purge`. A config agents-cli never adopted is never touched (ownership is decided structurally by `getConfigSymlinkVersion`, the same check `removeVersion` uses); `--dry-run` prints the full plan without changing anything; and if any restore step errors, `--purge` self-downgrades to the recoverable move-aside so a swallowed error can never take your only copy. Works on macOS, Linux, and Windows (junctions and cross-volume `~/.agents` handled). Source: `apps/cli/src/lib/uninstall.ts`, `apps/cli/src/commands/uninstall.ts`.
+
 ## 1.20.70
 
 - **Fix `agents setup computer` / `agents computer setup` refusing to install a
