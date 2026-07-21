@@ -1,0 +1,1 @@
+- Fix `agents add claude@latest` resource sync when bundled hook directories such as `hooks/tests` are present.

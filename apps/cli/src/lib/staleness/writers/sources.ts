@@ -59,7 +59,7 @@ export function resolveSkillSource(name: string): string | null {
   return candidates.find(isLiveDir) ?? null;
 }
 
-/** Find the trusted source file for a hook by name. */
+/** Find the trusted source file or directory for a hook by name. */
 export function resolveHookSource(name: string): string | null {
   const candidates = [
     safeJoin(path.join(getUserAgentsDir(), 'hooks'), name),

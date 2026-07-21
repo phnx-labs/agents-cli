@@ -1,5 +1,5 @@
 /**
- * Hooks writer — copies trusted hook script files into `{agentDir}/hooks/`.
+ * Hooks writer — copies trusted hook sources into `{agentDir}/hooks/`.
  * Caller filters by `supports(agent, 'hooks', version)` before invoking.
  * Orphan sweep (delete hooks in version-home that aren't in `availableNames`)
  * stays in the orchestrator since it depends on the broader available set.
@@ -15,6 +15,58 @@ import type { ResourceWriter, WriteArgs, WriteResult } from './types.js';
 import { resolveHookSource } from './sources.js';
 import { lazyAgentMap } from './lazy-map.js';
 
+function removePath(target: string): void {
+  try {
+    const stat = fs.lstatSync(target);
+    if (stat.isSymbolicLink() || stat.isFile()) {
+      fs.unlinkSync(target);
+    } else if (stat.isDirectory()) {
+      fs.rmSync(target, { recursive: true, force: true });
+    }
+  } catch {
+    /* already gone */
+  }
+}
+
+function copyDir(src: string, dest: string): void {
+  fs.mkdirSync(dest, { recursive: true });
+  const entries = fs.readdirSync(src, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.isSymbolicLink()) continue;
+    const srcPath = safeJoin(src, entry.name);
+    const destPath = safeJoin(dest, entry.name);
+    if (entry.isDirectory()) {
+      copyDir(srcPath, destPath);
+    } else if (entry.isFile()) {
+      fs.copyFileSync(srcPath, destPath);
+      fs.chmodSync(destPath, fs.statSync(srcPath).mode);
+    }
+  }
+}
+
+function copyHookSource(src: string, dest: string): boolean {
+  let stat: fs.Stats;
+  try {
+    stat = fs.lstatSync(src);
+  } catch {
+    return false;
+  }
+  if (stat.isSymbolicLink()) return false;
+
+  removePath(dest);
+  if (stat.isDirectory()) {
+    copyDir(src, dest);
+    return true;
+  }
+  if (stat.isFile()) {
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(src, dest);
+    fs.chmodSync(dest, 0o755);
+    return true;
+  }
+  return false;
+}
+
 function buildHooksWriter(agent: AgentId): ResourceWriter<string[]> {
   return {
     kind: 'hooks',
@@ -29,9 +81,9 @@ function buildHooksWriter(agent: AgentId): ResourceWriter<string[]> {
         const srcFile = resolveHookSource(hook);
         if (!srcFile) continue;
         const destFile = safeJoin(hooksTarget, hook);
-        fs.copyFileSync(srcFile, destFile);
-        fs.chmodSync(destFile, 0o755);
-        synced.push(hook);
+        if (copyHookSource(srcFile, destFile)) {
+          synced.push(hook);
+        }
       }
 
       // Native hook registration in settings.json/hooks.json. Grok is included
