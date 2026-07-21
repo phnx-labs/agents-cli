@@ -12,6 +12,7 @@ import { extractFileOpsFromBash } from './file_ops.js';
 export type AgentType = 'codex' | 'gemini' | 'cursor' | 'claude' | 'opencode' | 'grok' | 'antigravity' | 'kimi' | 'droid';
 
 const claudeToolUseMap = new Map<string, { tool: string; command?: string; path?: string }>();
+const droidToolUseMap = new Map<string, { tool: string; args: Record<string, any> }>();
 
 /** Normalize a raw JSON event from any agent type into an array of unified event objects. */
 export function normalizeEvents(agentType: AgentType, raw: any): any[] {
@@ -31,14 +32,10 @@ export function normalizeEvents(agentType: AgentType, raw: any): any[] {
     return normalizeAntigravity(raw);
   } else if (agentType === 'kimi') {
     return normalizeKimi(raw);
+  } else if (agentType === 'droid') {
+    return normalizeDroid(raw);
   }
 
-  // droid (Factory AI) intentionally falls through to the generic normalizer
-  // below: its `-o stream-json` JSONL event schema is not yet verified against
-  // a live run (the documented `debug` format differs from stream-json). Events
-  // still stream and render; structured tool/file categorization will be added
-  // once a real `droid exec -o stream-json` sample is captured. Do NOT guess the
-  // schema here — a wrong discriminator silently mislabels every event.
   const timestamp = new Date().toISOString();
   return [{
     type: raw.type || 'unknown',
@@ -1112,6 +1109,233 @@ function normalizeKimi(raw: any): any[] {
     raw: raw,
     timestamp: timestamp,
   }];
+}
+
+// --- Droid parsing ---
+// Droid's `droid exec -o stream-json` stream mirrors the Factory session JSONL
+// envelope: session_start records plus Anthropic-shaped message content blocks.
+// Tool blocks carry the actionable file path / command in `input`; result blocks
+// only carry `tool_use_id`, so keep a small id map just like normalizeClaude.
+function normalizeDroid(raw: any): any[] {
+  const timestamp = typeof raw?.timestamp === 'string' ? raw.timestamp : new Date().toISOString();
+
+  if (!raw || typeof raw !== 'object') {
+    return [{
+      type: 'unknown',
+      agent: 'droid',
+      raw: raw,
+      timestamp: timestamp,
+    }];
+  }
+
+  const eventType = typeof raw.type === 'string' ? raw.type : 'unknown';
+
+  if (eventType === 'session_start') {
+    return [{
+      type: 'init',
+      agent: 'droid',
+      session_id: typeof raw.id === 'string' ? raw.id : null,
+      timestamp: timestamp,
+    }];
+  }
+
+  if (eventType === 'result') {
+    return [{
+      type: 'result',
+      agent: 'droid',
+      status: raw.is_error === true ? 'error' : 'success',
+      message: typeof raw.result === 'string' ? raw.result : undefined,
+      timestamp: timestamp,
+    }];
+  }
+
+  if (eventType !== 'message') {
+    return [{
+      type: eventType,
+      agent: 'droid',
+      raw: raw,
+      timestamp: timestamp,
+    }];
+  }
+
+  const message = raw.message || {};
+  const role = message.role === 'user' ? 'user' : 'assistant';
+  const blocks = message.content;
+
+  if (typeof blocks === 'string') {
+    const content = blocks.trim();
+    if (!content) return [];
+    return role === 'assistant'
+      ? [{ type: 'message', agent: 'droid', content, complete: true, timestamp }]
+      : [{ type: 'user_message', agent: 'droid', content, timestamp }];
+  }
+
+  if (!Array.isArray(blocks)) return [];
+
+  const events: any[] = [];
+  for (const block of blocks) {
+    if (!block || typeof block !== 'object') continue;
+
+    if (block.type === 'text') {
+      const text = typeof block.text === 'string' ? block.text.trim() : '';
+      if (!text) continue;
+      if (role === 'assistant') {
+        events.push({
+          type: 'message',
+          agent: 'droid',
+          content: text,
+          complete: true,
+          timestamp: timestamp,
+        });
+      } else if (!text.startsWith('<system-reminder>') && !text.startsWith('Hook execution:')) {
+        events.push({
+          type: 'user_message',
+          agent: 'droid',
+          content: text,
+          timestamp: timestamp,
+        });
+      }
+      continue;
+    }
+
+    if (block.type === 'thinking') {
+      const thinking = typeof block.thinking === 'string' ? block.thinking.trim() : '';
+      if (thinking) {
+        events.push({
+          type: 'thinking',
+          agent: 'droid',
+          content: thinking,
+          timestamp: timestamp,
+        });
+      }
+      continue;
+    }
+
+    if (block.type === 'tool_use') {
+      events.push(...normalizeDroidToolUse(block, timestamp));
+      continue;
+    }
+
+    if (block.type === 'tool_result') {
+      const toolUseId = typeof block.tool_use_id === 'string' ? block.tool_use_id : null;
+      const toolInfo = toolUseId ? droidToolUseMap.get(toolUseId) : undefined;
+      if (toolUseId) droidToolUseMap.delete(toolUseId);
+
+      const content = extractDroidToolResultContent(block.content);
+      if (block.is_error === true) {
+        events.push({
+          type: 'error',
+          agent: 'droid',
+          tool: toolInfo?.tool,
+          content: content || 'Tool execution failed',
+          timestamp: timestamp,
+        });
+      } else {
+        events.push({
+          type: 'tool_result',
+          agent: 'droid',
+          tool: toolInfo?.tool,
+          tool_call_id: toolUseId,
+          success: true,
+          content: content.length > 500 ? content.slice(0, 497) + '...' : content,
+          timestamp: timestamp,
+        });
+      }
+    }
+  }
+
+  return events;
+}
+
+function normalizeDroidToolUse(block: any, timestamp: string): any[] {
+  const toolName = typeof block.name === 'string' ? block.name : 'unknown';
+  const toolInput = block.input && typeof block.input === 'object' ? block.input : {};
+  if (typeof block.id === 'string') {
+    droidToolUseMap.set(block.id, { tool: toolName, args: toolInput });
+  }
+
+  const filePath = toolInput.file_path || toolInput.path || '';
+  const command = toolInput.command || '';
+
+  if ((toolName === 'Execute' || toolName === 'Bash') && command) {
+    const events: any[] = [{
+      type: 'bash',
+      agent: 'droid',
+      tool: toolName,
+      command: command,
+      timestamp: timestamp,
+    }];
+    const [filesRead, filesWritten, filesDeleted] = extractFileOpsFromBash(command);
+    for (const path of filesRead) {
+      events.push({ type: 'file_read', agent: 'droid', tool: 'bash', path, command, timestamp });
+    }
+    for (const path of filesWritten) {
+      events.push({ type: 'file_write', agent: 'droid', tool: 'bash', path, command, timestamp });
+    }
+    for (const path of filesDeleted) {
+      events.push({ type: 'file_delete', agent: 'droid', tool: 'bash', path, command, timestamp });
+    }
+    return events;
+  }
+
+  if (toolName === 'Read' && filePath) {
+    return [{
+      type: 'file_read',
+      agent: 'droid',
+      tool: toolName,
+      path: filePath,
+      timestamp: timestamp,
+    }];
+  }
+
+  if ((toolName === 'Create' || toolName === 'Write') && filePath) {
+    return [{
+      type: 'file_create',
+      agent: 'droid',
+      tool: toolName,
+      path: filePath,
+      timestamp: timestamp,
+    }];
+  }
+
+  if ((toolName === 'Edit' || toolName === 'MultiEdit') && filePath) {
+    return [{
+      type: 'file_write',
+      agent: 'droid',
+      tool: toolName,
+      path: filePath,
+      timestamp: timestamp,
+    }];
+  }
+
+  if ((toolName === 'Delete' || toolName === 'Remove') && filePath) {
+    return [{
+      type: 'file_delete',
+      agent: 'droid',
+      tool: toolName,
+      path: filePath,
+      timestamp: timestamp,
+    }];
+  }
+
+  return [{
+    type: 'tool_use',
+    agent: 'droid',
+    tool: toolName,
+    args: toolInput,
+    timestamp: timestamp,
+  }];
+}
+
+function extractDroidToolResultContent(content: any): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter((part: any) => part && typeof part === 'object' && part.type === 'text')
+      .map((part: any) => typeof part.text === 'string' ? part.text : '')
+      .join('\n');
+  }
+  return '';
 }
 
 // --- Antigravity parsing ---
