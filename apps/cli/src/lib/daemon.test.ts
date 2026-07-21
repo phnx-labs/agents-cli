@@ -33,6 +33,7 @@ import {
   readDaemonPid,
   writeDaemonPid,
   removeDaemonPid,
+  shouldTakeOverBroker,
 } from './daemon.js';
 import { ipcEndpoint } from './platform/index.js';
 
@@ -665,5 +666,25 @@ describe('ensureDaemonStarted (#415: always-on beyond routines)', () => {
 
     // The pid file still points at the single owning process throughout.
     expect(readDaemonPid()).toBe(process.pid);
+  });
+});
+
+describe('shouldTakeOverBroker (RUSH-1817: daemon self-heals a dead standalone)', () => {
+  it('takes over ONLY when not hosting and no healthy broker answers', () => {
+    // The regression that wedged secrets on zion: the daemon deferred to a
+    // standalone at startup (not hosting) and that standalone later died
+    // (unreachable) — the one state where self-heal must fire.
+    expect(shouldTakeOverBroker(false, false)).toBe(true);
+  });
+
+  it('never takes over while the daemon is already hosting', () => {
+    // Our in-process broker is alive as long as the daemon is; re-hosting would
+    // fight our own socket. True regardless of the ping result.
+    expect(shouldTakeOverBroker(true, false)).toBe(false);
+    expect(shouldTakeOverBroker(true, true)).toBe(false);
+  });
+
+  it('never clobbers a reachable (healthy) standalone broker', () => {
+    expect(shouldTakeOverBroker(false, true)).toBe(false);
   });
 });

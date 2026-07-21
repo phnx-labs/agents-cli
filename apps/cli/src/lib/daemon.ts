@@ -42,6 +42,18 @@ const WEDGE_THRESHOLD_TICKS = 3;
 const DAEMON_OAUTH_BUNDLE = 'claude';
 const DAEMON_OAUTH_KEY = 'CLAUDE_CODE_OAUTH_TOKEN';
 
+/**
+ * RUSH-1817: decide whether the daemon should (re)take over hosting the secrets
+ * broker. The startup host decision is one-shot; this drives the periodic
+ * self-heal re-check. Take over ONLY when the daemon is not already hosting AND
+ * no healthy broker answers a ping — i.e. a standalone the daemon deferred to at
+ * start has since died or crash-looped. Never take over while our in-process
+ * broker is hosting, and never clobber a reachable (healthy) broker.
+ */
+export function shouldTakeOverBroker(isHosting: boolean, brokerReachable: boolean): boolean {
+  return !isHosting && !brokerReachable;
+}
+
 function getDaemonDir(): string {
   const dir = getDaemonDirRoot();
   fs.mkdirSync(dir, { recursive: true });
@@ -637,6 +649,34 @@ export async function runDaemon(): Promise<void> {
   const fleetCacheInterval = setInterval(() => { void runFleetCacheWarm(); }, 3 * 60_000);
   const fleetCacheKickoff = setTimeout(() => { void runFleetCacheWarm(); }, 60_000);
 
+  // RUSH-1817: the startup host decision above is one-shot. If a standalone
+  // broker answered agentPing() at daemon start, the daemon declined to host —
+  // but should that standalone later die or crash-loop, nothing takes over and
+  // every `agents secrets unlock|export|start` fails until a manual restart
+  // (this wedged all keychain-backed secrets on zion and blocked a release).
+  // Re-probe on a cadence: whenever the daemon is NOT itself hosting AND no
+  // healthy broker answers a ping, take over hosting. startHostedBroker binds
+  // the socket only when it is free, so a take-over never races a live broker.
+  let selfHealingBroker = false;
+  const runBrokerSelfHeal = async () => {
+    if (selfHealingBroker) return;
+    selfHealingBroker = true;
+    try {
+      const { agentPing, startHostedBroker } = await import('./secrets/agent.js');
+      const reachable = (await agentPing()).reachable;
+      if (!shouldTakeOverBroker(hostedBroker != null, reachable)) return;
+      hostedBroker = await startHostedBroker();
+      if (hostedBroker) {
+        log('WARN', 'Secrets broker was unreachable; daemon took over hosting (self-heal)');
+      }
+    } catch (err) {
+      log('WARN', `Secrets broker self-heal skipped: ${(err as Error).message}`);
+    } finally {
+      selfHealingBroker = false;
+    }
+  };
+  const brokerSelfHealInterval = setInterval(() => { void runBrokerSelfHeal(); }, 60_000);
+
   const handleReload = () => {
     log('INFO', 'Reloading jobs (SIGHUP)');
     scheduler.reloadAll();
@@ -671,6 +711,7 @@ export async function runDaemon(): Promise<void> {
     clearTimeout(launchHealthKickoff);
     clearInterval(fleetCacheInterval);
     clearTimeout(fleetCacheKickoff);
+    clearInterval(brokerSelfHealInterval);
     hostedBroker?.close();
     removeDaemonPid();
     removeHeartbeat();
