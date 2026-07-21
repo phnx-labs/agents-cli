@@ -33,6 +33,25 @@ const CLAUDE_TOKEN_URL = 'https://platform.claude.com/v1/oauth/token';
 const CLAUDE_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 const CLAUDE_OAUTH_BETA_HEADER = 'oauth-2025-04-20';
 const CLAUDE_REFRESH_LEEWAY_MS = 5 * 60 * 1000;
+
+/**
+ * True when a Claude OAuth access token is within the refresh leeway of expiry
+ * (or already expired) — i.e. it "would need a refresh" before the next use.
+ *
+ * Single source of truth for the expiry gate, shared by the two callers that
+ * must agree on it but act differently: the run/usage hot path
+ * (`getClaudeAccessToken`) refreshes when this is true; the health probe
+ * (`probeClaudeStatus`) must NOT refresh and instead reports the non-fatal
+ * `expired` state (RUSH-1822). A missing `expiresAt` is treated as "still
+ * fresh" (never force a refresh on a token with no known expiry).
+ */
+export function claudeAccessTokenNeedsRefresh(
+  expiresAt: number | null | undefined,
+  nowMs: number = Date.now(),
+): boolean {
+  if (expiresAt == null) return false;
+  return nowMs + CLAUDE_REFRESH_LEEWAY_MS >= expiresAt;
+}
 const CLAUDE_SCOPES = [
   'user:profile',
   'user:inference',
@@ -887,21 +906,25 @@ export interface ProviderProbe {
 /** Probe Claude's OAuth token against the usage endpoint. Refreshes an expired access token (safe for Claude). */
 export async function probeClaudeStatus(home?: string, cliVersion?: string | null): Promise<ProviderProbe> {
   const oauth = await loadClaudeOauth(home);
-  if (!oauth?.accessToken) return { status: null, token: 'missing' };
-  let access: string | null = null;
-  try {
-    access = await getClaudeAccessToken(oauth, home);
-  } catch {
-    access = null;
+  const accessToken = oauth?.accessToken?.trim();
+  if (!accessToken) return { status: null, token: 'missing' };
+  // Never refresh from a health probe. Claude's refresh token is single-use and
+  // rotates on every refresh; with one account signed into several machines the
+  // daemon's every-3-min fleet-cache warm (probeLocalFleetAuth -> here) would
+  // stampede that one rotating token and silently invalidate every other
+  // holder, dropping the fleet to "run /login" (RUSH-1822). Mirror the sibling
+  // Kimi/Droid probes, which never refresh: if the stored token is within the
+  // refresh leeway of expiry, report the non-fatal `expired` state ("would need
+  // a refresh") instead of rotating it, and leave the single legitimate refresh
+  // to the run/usage hot path (getClaudeAccessToken).
+  if (claudeAccessTokenNeedsRefresh(oauth?.expiresAt ?? null)) {
+    return { status: null, token: 'expired' };
   }
-  // Fall back to the stored (possibly stale) token so the server returns the
-  // real verdict — a 401 here IS the revoked/expired signal we want to surface.
-  const bearer = access || oauth.accessToken.trim();
   try {
     const response = await fetch(CLAUDE_USAGE_URL, {
       method: 'GET',
       headers: {
-        Authorization: `Bearer ${bearer}`,
+        Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
         'anthropic-beta': CLAUDE_OAUTH_BETA_HEADER,
         'User-Agent': getClaudeUserAgent(cliVersion),
@@ -1390,8 +1413,7 @@ async function getClaudeAccessToken(oauth: ClaudeOauthCredentials, home?: string
     return null;
   }
 
-  const expiresAt = oauth.expiresAt ?? null;
-  if (expiresAt === null || Date.now() + CLAUDE_REFRESH_LEEWAY_MS < expiresAt) {
+  if (!claudeAccessTokenNeedsRefresh(oauth.expiresAt ?? null)) {
     return accessToken;
   }
 
