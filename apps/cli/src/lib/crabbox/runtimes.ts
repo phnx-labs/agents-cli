@@ -149,6 +149,7 @@ const PROFILE_AUTH_ENV_KEYS_BY_RUNTIME: Partial<Record<AgentId, readonly string[
 
 /** True when a profile already carries auth for its host runtime via env. */
 export function profileNeedsBaseRuntimeCredentials(agent: AgentId, env: Record<string, string>): boolean {
+  if (!LEASE_RUNTIMES.some((c) => c.id === agent)) return false;
   const keys = PROFILE_AUTH_ENV_KEYS_BY_RUNTIME[agent] ?? [];
   return !keys.some((key) => typeof env[key] === 'string' && env[key].trim() !== '');
 }

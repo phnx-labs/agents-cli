@@ -135,6 +135,11 @@ describe('profileNeedsBaseRuntimeCredentials', () => {
     expect(profileNeedsBaseRuntimeCredentials('grok', { XAI_API_KEY: 'xai-profile' })).toBe(false);
     expect(profileNeedsBaseRuntimeCredentials('gemini', { GOOGLE_API_KEY: 'google-profile' })).toBe(false);
   });
+
+  it('does not require base credentials for profile hosts with no lease credential to copy', () => {
+    expect(profileNeedsBaseRuntimeCredentials('opencode', { OPENCODE_API_KEY: 'sk-profile' })).toBe(false);
+    expect(profileNeedsBaseRuntimeCredentials('antigravity', { ANTIGRAVITY_API_KEY: 'ag-profile' })).toBe(false);
+  });
 });
 
 describe('resolveClaudeCredentialsBlob', () => {
