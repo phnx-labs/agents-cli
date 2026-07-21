@@ -848,7 +848,8 @@ function projectResolvedEnv(
   return out;
 }
 
-function canCacheResolvedEnv(selectedKeys: Set<string>, keyMode: ResolveBundleOptions['keyMode']): boolean {
+export function canCacheResolvedEnv(bundle: SecretsBundle, selectedKeys: Set<string>, keyMode: ResolveBundleOptions['keyMode']): boolean {
+  if (selectedKeys.size !== Object.keys(bundle.vars).length) return false;
   if (keyMode === 'storage') return true;
   for (const key of selectedKeys) {
     if (bundleKeyToEnvKey(key) !== key) return false;
@@ -1242,7 +1243,7 @@ export function readAndResolveBundleEnv(
       process.env.AGENTS_SECRETS_NO_AGENT !== '1' &&
       bundlePolicy(bundle) === 'daily' &&
       secretsAgentAutoEnabled() &&
-      canCacheResolvedEnv(selectedKeys, opts.keyMode)
+      canCacheResolvedEnv(bundle, selectedKeys, opts.keyMode)
     ) {
       agentAutoLoadSync(name, bundle, env, secretsHoldMs());
     }

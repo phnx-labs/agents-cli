@@ -1778,12 +1778,12 @@ Examples:
         // terminal stdin, so it is not headless and still prompts.
         const { env } = readAndResolveBundleEnv(resolvedBundleName, {
           caller: `export to shell`,
-          keyMode: opts.format === 'json' ? 'storage' : 'process',
+          keyMode: 'process',
           agentOnly: isHeadlessSecretsContext(),
         });
         if (opts.format === 'json') {
-          // Lossless, machine-readable form consumed by `remoteResolveEnv` over
-          // SSH. Single object of KEY -> value; values verbatim (newlines, quotes).
+          // Machine-readable form consumed by `remoteResolveEnv` over SSH.
+          // Single object of injected env KEY -> value; values verbatim.
           process.stdout.write(JSON.stringify(env));
           return;
         }

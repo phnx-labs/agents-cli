@@ -177,6 +177,41 @@ describe('bundleEnvToDotenv', () => {
   });
 });
 
+describe('secrets export --format json', () => {
+  function runSecrets(home: string, args: string[]): ReturnType<typeof spawnSync> {
+    return spawnSync('node', ['--import', 'tsx', 'src/index.ts', 'secrets', ...args], {
+      cwd: path.resolve(__dirname, '../..'),
+      encoding: 'utf-8',
+      env: {
+        ...process.env,
+        HOME: home,
+        AGENTS_SECRETS_PASSPHRASE: 'rush-668-test',
+        AGENTS_NO_USAGE_TRACK: '1',
+      },
+    });
+  }
+
+  it('prints injected process env keys for account-suffixed bundle keys', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-secrets-json-'));
+    try {
+      fs.mkdirSync(path.join(home, '.agents/.system'), { recursive: true });
+      spawnSync('git', ['init', '--quiet'], {
+        cwd: path.join(home, '.agents/.system'),
+        encoding: 'utf-8',
+      });
+      expect(runSecrets(home, ['create', 'github.com', '--backend', 'file']).status).toBe(0);
+      expect(runSecrets(home, ['add', 'github.com', 'GITHUB_USERNAME.work', '--value', 'workbot']).status).toBe(0);
+
+      const exported = runSecrets(home, ['export', 'github.com', '--plaintext', '--format', 'json']);
+
+      expect(exported.status, exported.stderr).toBe(0);
+      expect(JSON.parse(exported.stdout)).toEqual({ GITHUB_USERNAME: 'workbot' });
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('buildSecretsExecEnv', () => {
   it('strips AGENTS_SECRETS_PASSPHRASE and loader-hijack vars from the child env', () => {
     const parent = {

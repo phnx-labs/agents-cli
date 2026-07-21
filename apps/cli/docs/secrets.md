@@ -141,7 +141,8 @@ swallows the positional bundle name: `unlock <bundle> --host <machine>`.
 
 Source: `src/lib/secrets/remote.ts` (transport + resolve), wired into `list` /
 `view` / `exec` in `src/commands/secrets.ts` and the `--secrets` loop in
-`src/commands/exec.ts`. The lossless wire format is `secrets export --format json`.
+`src/commands/exec.ts`. The machine-readable wire format is
+`secrets export --format json`.
 The Windows push bridge is `buildWindowsStdinImportCommand` in
 `src/lib/hosts/remote-cmd.ts`.
 

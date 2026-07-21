@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import {
   filterAgentHitBySubsetAndExpiry,
   assertRemoteBundleFlagsUnsupported,
+  canCacheResolvedEnv,
   isHeadlessSecretsContext,
   listBundles,
   readAndResolveBundleEnv,
@@ -139,6 +140,28 @@ describe('filterAgentHitBySubsetAndExpiry (agent fast-path gate)', () => {
     );
     const out = filterAgentHitBySubsetAndExpiry(hit, { keys: ['API_KEY'] });
     expect(out.env).toEqual({ API_KEY: 'v-API_KEY' });
+  });
+});
+
+describe('canCacheResolvedEnv (broker cache shape)', () => {
+  const bundle: SecretsBundle = {
+    name: 'github.com',
+    vars: {
+      'GITHUB_USERNAME.personal': 'keychain:GITHUB_USERNAME.personal',
+      'GITHUB_USERNAME.work': 'keychain:GITHUB_USERNAME.work',
+    },
+  };
+
+  it('does not cache partial storage reads because the broker expects a full bundle env', () => {
+    expect(canCacheResolvedEnv(bundle, new Set(['GITHUB_USERNAME.personal']), 'storage')).toBe(false);
+  });
+
+  it('allows a full storage snapshot because later reads can project from exact keys', () => {
+    expect(canCacheResolvedEnv(bundle, new Set(Object.keys(bundle.vars)), 'storage')).toBe(true);
+  });
+
+  it('does not cache process-mode env when account suffixes would be stripped', () => {
+    expect(canCacheResolvedEnv(bundle, new Set(Object.keys(bundle.vars)), 'process')).toBe(false);
   });
 });
 
