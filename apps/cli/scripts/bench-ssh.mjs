@@ -11,7 +11,8 @@
  *
  *   P3  repeated `--host` calls: fresh handshake each vs reused control socket
  *   P2  readiness: old 3 round-trips vs new 1 compound readyProbe
- *   P1  follow loop: old 2 un-muxed calls/cycle vs new 1 muxed combined call
+ *   P1  follow loop: old 2 un-muxed calls/cycle vs current 1 muxed combined
+ *       call/cycle vs one persistent stream for the whole follow
  *
  * Requires a live host reachable over passwordless ssh (needs a real network
  * round-trip to be meaningful — a Tailscale-relayed peer shows the win most
@@ -23,8 +24,9 @@ import { execSync } from 'child_process';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const dist = join(here, '..', 'dist');
-const { sshExec } = await import(join(dist, 'lib', 'ssh-exec.js'));
+const { sshExec, sshExecRawStream } = await import(join(dist, 'lib', 'ssh-exec.js'));
 const { readyProbe } = await import(join(dist, 'lib', 'hosts', 'ready.js'));
+const { buildStreamingFollowCommand, parseStreamingExitFrame } = await import(join(dist, 'lib', 'hosts', 'progress.js'));
 
 const HOST = process.argv[2];
 if (!HOST) {
@@ -75,7 +77,7 @@ console.log(`  new (1 readyProbe)    ${median(newReady).toFixed(0).padStart(6)}m
 console.log(`  => ${(median(oldReady) / median(newReady)).toFixed(1)}x faster, ${(median(oldReady) - median(newReady)).toFixed(0)}ms saved per dispatch\n`);
 
 // P1: follow loop, per-cycle cost + process spawns.
-console.log('P1  follow loop, cost of 20 poll cycles');
+console.log('P1  follow loop, cost of 20 poll cycles vs one persistent stream');
 const CYCLES = 20;
 const log = '$HOME/.agents/.cache/hosts/benchfollow.log';
 const exit = '$HOME/.agents/.cache/hosts/benchfollow.exit';
@@ -89,6 +91,22 @@ clearSockets();
 const newFollow = timeLoop('NEW 1 muxed combined call/cycle', CYCLES, () => {
   sshExec(HOST, `tail -c +1 ${log} 2>/dev/null; printf '\\n@@M@@\\n'; cat ${exit} 2>/dev/null`, { multiplex: true });
 });
+execSync(`ssh ${HOST} ${JSON.stringify('rm -f ~/.agents/.cache/hosts/benchfollow.exit; printf "x\\n" > ~/.agents/.cache/hosts/benchfollow.log; (sleep 0.2; printf "0\\n" > ~/.agents/.cache/hosts/benchfollow.exit) >/dev/null 2>&1 &')}`, { stdio: 'ignore' });
+clearSockets();
+let streamed = 0;
+let t0 = process.hrtime.bigint();
+const stream = await sshExecRawStream(HOST, buildStreamingFollowCommand({
+  remoteLog: log,
+  remoteExit: exit,
+  taskId: 'benchfollow',
+  offset: 0,
+}), {
+  multiplex: true,
+  onStdout: (chunk) => { streamed += chunk.length; },
+});
+const streamFollow = ms(t0);
+const streamExit = parseStreamingExitFrame(stream.stderr, 'benchfollow')?.toString('utf8').trim() ?? '<missing>';
+console.log(`  STREAM 1 ssh for whole follow       ${streamFollow.toFixed(0).padStart(6)}ms total  exit=${streamExit} bytes=${streamed}`);
 execSync(`ssh ${HOST} 'rm -f ~/.agents/.cache/hosts/benchfollow.*'`, { stdio: 'ignore' });
-console.log(`  ssh process spawns:   OLD ${CYCLES * 2}   NEW ${CYCLES}   (50% fewer)`);
-console.log(`  => ${(oldFollow / newFollow).toFixed(1)}x faster wall-clock over ${CYCLES} cycles\n`);
+console.log(`  ssh process spawns:   OLD ${CYCLES * 2}   NEW ${CYCLES}   STREAM 1`);
+console.log(`  => NEW is ${(oldFollow / newFollow).toFixed(1)}x faster than OLD; STREAM removes ${CYCLES - 1}/${CYCLES} per-cycle spawns\n`);

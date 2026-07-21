@@ -1,5 +1,34 @@
-import { describe, it, expect } from 'vitest';
-import { exitMarker, splitProgressBytes, mirrorAliasesSource } from './progress.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mkdirSync, rmSync, mkdtempSync, writeFileSync, readFileSync, appendFileSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import * as state from '../state.js';
+
+let CACHE_ROOT: string = mkdtempSync(join(tmpdir(), 'agents-cli-progress-boot-'));
+vi.spyOn(state, 'getCacheDir').mockImplementation(() => CACHE_ROOT);
+
+const { sshReachable } = await import('../ssh-exec.js');
+const {
+  exitMarker,
+  splitProgressBytes,
+  mirrorAliasesSource,
+  buildStreamingFollowCommand,
+  parseStreamingExitFrame,
+  followHostTask,
+} = await import('./progress.js');
+const { localLogPath } = await import('./tasks.js');
+
+const LOCALHOST_SSH = sshReachable('localhost', 5000);
+
+beforeEach(() => {
+  CACHE_ROOT = mkdtempSync(join(tmpdir(), 'agents-cli-progress-'));
+  mkdirSync(join(CACHE_ROOT, 'hosts'), { recursive: true });
+  mkdirSync(join(CACHE_ROOT, 'ssh'), { recursive: true, mode: 0o700 });
+});
+
+afterEach(() => {
+  rmSync(CACHE_ROOT, { recursive: true, force: true });
+});
 
 describe('exitMarker', () => {
   it('embeds the task id so it cannot collide with generic output', () => {
@@ -85,5 +114,54 @@ describe('mirrorAliasesSource', () => {
     expect(mirrorAliasesSource(null, '2049:9999999')).toBe(false);
     expect(mirrorAliasesSource('66306:1234567', null)).toBe(false);
     expect(mirrorAliasesSource(null, null)).toBe(false);
+  });
+});
+
+describe('streaming follow protocol', () => {
+  it('builds a remote tail stream that sends the exit frame on stderr', () => {
+    const command = buildStreamingFollowCommand({
+      remoteLog: '$HOME/.agents/.cache/hosts/a1b2c3d4.log',
+      remoteExit: '$HOME/.agents/.cache/hosts/a1b2c3d4.exit',
+      taskId: 'a1b2c3d4',
+      offset: 12,
+    });
+
+    expect(command).toContain('tail -c +13 -f $HOME/.agents/.cache/hosts/a1b2c3d4.log');
+    expect(command).toContain('while [ ! -s $HOME/.agents/.cache/hosts/a1b2c3d4.exit ]');
+    expect(command).toContain("printf '\\n@@AGENTS_HOST_EXIT_a1b2c3d4@@\\n' >&2");
+    expect(command).toContain('cat $HOME/.agents/.cache/hosts/a1b2c3d4.exit >&2 2>/dev/null');
+    expect(command).toContain('trap cleanup EXIT HUP INT TERM');
+  });
+
+  it('parses the final stderr frame without treating preceding stderr as log bytes', () => {
+    const stderr = Buffer.from(`ssh warning${exitMarker('a1b2c3d4')}137\n`, 'utf8');
+
+    expect(parseStreamingExitFrame(stderr, 'a1b2c3d4')?.toString('utf8')).toBe('137\n');
+    expect(parseStreamingExitFrame(Buffer.from('ssh warning', 'utf8'), 'a1b2c3d4')).toBeNull();
+  });
+});
+
+describe.skipIf(!LOCALHOST_SSH)('followHostTask streaming over real ssh (localhost)', () => {
+  it('streams log bytes live, mirrors them locally, and returns the remote exit code', async () => {
+    const taskId = 'stream01';
+    const remoteLog = join(CACHE_ROOT, 'remote-stream01.log');
+    const remoteExit = join(CACHE_ROOT, 'remote-stream01.exit');
+    writeFileSync(remoteLog, 'first\n');
+    setTimeout(() => {
+      appendFileSync(remoteLog, 'second\n');
+      writeFileSync(remoteExit, '7\n');
+    }, 250);
+
+    const code = await followHostTask('localhost', {
+      remoteLog,
+      remoteExit,
+      taskId,
+      pollMs: 100,
+      maxPollMs: 200,
+      timeoutMs: 5000,
+    });
+
+    expect(code).toBe(7);
+    expect(readFileSync(localLogPath(taskId), 'utf8')).toBe('first\nsecond\n');
   });
 });

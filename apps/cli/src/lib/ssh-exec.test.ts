@@ -2,7 +2,16 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { assertValidSshTarget, SSH_TARGET_RE, shellQuote, controlOpts, SSH_OPTS, sshConnectOpts, sshExecAsync } from './ssh-exec.js';
+import {
+  assertValidSshTarget,
+  SSH_TARGET_RE,
+  shellQuote,
+  controlOpts,
+  SSH_OPTS,
+  sshConnectOpts,
+  sshExecAsync,
+  sshExecRawStream,
+} from './ssh-exec.js';
 
 describe('assertValidSshTarget', () => {
   it('accepts bare host aliases and user@host', () => {
@@ -154,5 +163,21 @@ describe.skipIf(process.platform === 'win32')('sshExecAsync (real spawn via a PA
     );
     expect(res.timedOut).toBe(false);
     expect(res.code === 0 || res.code === null).toBe(true);
+  });
+
+  it('streams raw stdout chunks and captures stderr without UTF-8 decoding', async () => {
+    const chunks: Buffer[] = [];
+    const res = await withStubSsh(
+      '#!/bin/sh\nprintf "\\303"\nprintf "ERR_OK" 1>&2\nexit 4\n',
+      () => sshExecRawStream('testhost', 'raw', {
+        multiplex: false,
+        onStdout: (chunk) => { chunks.push(chunk); },
+      }),
+    );
+
+    expect(Buffer.concat(chunks)).toEqual(Buffer.from([0xc3]));
+    expect(res.stderr.toString('utf8')).toBe('ERR_OK');
+    expect(res.code).toBe(4);
+    expect(res.timedOut).toBe(false);
   });
 });
