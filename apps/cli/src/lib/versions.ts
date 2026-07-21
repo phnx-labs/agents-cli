@@ -27,6 +27,7 @@ import type { AgentId, VersionResources } from './types.js';
 import { getVersionsDir, getShimsDir, ensureAgentsDir, readMeta, writeMeta, getCommandsDir, getSkillsDir, getHooksDir, getResolvedRulesDir, getUserRulesDir, getPermissionsDir, getSubagentsDir, getVersionResources, recordVersionResources, ensureVersionResourcePatterns, getMcpDir, getProjectAgentsDir, getPromptcutsPath, getUserPromptcutsPath, getEnabledExtraRepos, getAgentsDir, getOptionalUserAgentsDir, getUserAgentsDir, getTrashVersionsDir, getActiveRulesPreset, getHomeDir } from './state.js';
 import { defaultPatterns, expandPatterns } from './resource-patterns.js';
 import { resolveResource, listResources } from './resources.js';
+import { activeRulesPreset, filterNamesForActiveResourceProfile } from './resource-profiles.js';
 // VERSION_RE + compareVersions are owned by the agent-spec engine primitives
 // (single source of truth). Re-exported below so existing importers of
 // `compareVersions` from './versions.js' keep working.
@@ -135,6 +136,10 @@ function getScopedMcpResources(cwd: string): ScopedMcpResource[] {
   return Array.from(resources.values());
 }
 
+function sourceMapFromResources(kind: 'commands' | 'skills' | 'hooks' | 'subagents', cwd: string): Map<string, string> {
+  return new Map(listResources(kind, cwd).map(r => [r.name, r.source]));
+}
+
 /**
  * Get all available resources from ~/.agents/.
  */
@@ -167,7 +172,7 @@ export function getAvailableResources(cwd: string = process.cwd()): AvailableRes
       commandNames.add(name);
     }
   }
-  result.commands = Array.from(commandNames);
+  result.commands = filterNamesForActiveResourceProfile('commands', Array.from(commandNames), sourceMapFromResources('commands', cwd));
 
   // Skills (directories, excluding hidden)
   const skillNames = new Set<string>();
@@ -181,7 +186,7 @@ export function getAvailableResources(cwd: string = process.cwd()): AvailableRes
       skillNames.add(name);
     }
   }
-  result.skills = Array.from(skillNames);
+  result.skills = filterNamesForActiveResourceProfile('skills', Array.from(skillNames), sourceMapFromResources('skills', cwd));
 
   // Hooks (files). A hook is an actual script: known script extension, OR
   // executable bit on a file with a non-data extension. Auxiliary content
@@ -206,7 +211,7 @@ export function getAvailableResources(cwd: string = process.cwd()): AvailableRes
       } catch { /* ignore unreadable */ }
     }
   }
-  result.hooks = Array.from(hookNames);
+  result.hooks = filterNamesForActiveResourceProfile('hooks', Array.from(hookNames), sourceMapFromResources('hooks', cwd));
 
   // Rules — list available presets across layers (project > user > extras > system).
   // The composer selects exactly one preset per sync; this list drives the
@@ -232,9 +237,14 @@ export function getAvailableResources(cwd: string = process.cwd()): AvailableRes
       // malformed rules.yaml — skip silently; the composer will surface the error.
     }
   }
-  result.memory = Array.from(presetNames);
+  result.memory = filterNamesForActiveResourceProfile('memory', Array.from(presetNames));
 
-  result.mcp = getScopedMcpResources(cwd).map(resource => resource.name);
+  const scopedMcp = getScopedMcpResources(cwd);
+  result.mcp = filterNamesForActiveResourceProfile(
+    'mcp',
+    scopedMcp.map(resource => resource.name),
+    new Map(scopedMcp.map(resource => [resource.name, resource.scope])),
+  );
 
   // Permission groups (from permissions/groups/*.yaml)
   const permissionNames = new Set<string>();
@@ -248,7 +258,7 @@ export function getAvailableResources(cwd: string = process.cwd()): AvailableRes
       permissionNames.add(name);
     }
   }
-  result.permissions = Array.from(permissionNames);
+  result.permissions = filterNamesForActiveResourceProfile('permissions', Array.from(permissionNames), new Map(Array.from(permissionNames).map(n => [n, 'system'])));
 
   // Subagents (directories with AGENT.md)
   const subagentNames = new Set<string>();
@@ -262,7 +272,7 @@ export function getAvailableResources(cwd: string = process.cwd()): AvailableRes
       subagentNames.add(name);
     }
   }
-  result.subagents = Array.from(subagentNames);
+  result.subagents = filterNamesForActiveResourceProfile('subagents', Array.from(subagentNames), sourceMapFromResources('subagents', cwd));
 
   // Workflows (directories with WORKFLOW.md)
   const workflowNames = new Set<string>();
@@ -276,11 +286,11 @@ export function getAvailableResources(cwd: string = process.cwd()): AvailableRes
       workflowNames.add(name);
     }
   }
-  result.workflows = Array.from(workflowNames);
+  result.workflows = filterNamesForActiveResourceProfile('workflows', Array.from(workflowNames), new Map(Array.from(workflowNames).map(n => [n, 'user'])));
 
   // Plugins (directories with .claude-plugin/plugin.json)
   const allPlugins = discoverPlugins();
-  result.plugins = allPlugins.map(p => p.name);
+  result.plugins = filterNamesForActiveResourceProfile('plugins', allPlugins.map(p => p.name), new Map(allPlugins.map(p => [p.name, 'user'])));
 
   // Promptcuts — present if either layer exists. Reads merge user + system
   // with user precedence (see readMergedPromptcuts); writes always go to user.
@@ -2662,7 +2672,7 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
       const overridePreset = Array.isArray(selection?.memory) && selection!.memory.length === 1 && selection!.memory[0] !== 'AGENTS'
         ? selection!.memory[0]
         : null;
-      const preset = overridePreset || getActiveRulesPreset(agent, version);
+      const preset = overridePreset || activeRulesPreset() || getActiveRulesPreset(agent, version);
       const r = rulesWriter.write({ version, versionHome, selection: { preset }, cwd });
       result.memory.push(...r.synced);
       // rulesPreset is tracked separately via setActiveRulesPreset.

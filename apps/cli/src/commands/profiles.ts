@@ -31,6 +31,18 @@ import {
 } from '../lib/secrets/profiles.js';
 import { isInteractiveTerminal } from './utils.js';
 import { getAgentsInvocation } from '../lib/daemon.js';
+import {
+  getActiveResourceProfileName,
+  getResourceProfilePreset,
+  listResourceProfileNames,
+  setActiveResourceProfile,
+  upsertResourceProfilePreset,
+  validateResourceProfileName,
+  type PatternedProfileKind,
+} from '../lib/resource-profiles.js';
+import { AGENTS } from '../lib/agents.js';
+import { listInstalledVersions, syncResourcesToVersion } from '../lib/versions.js';
+import type { ResourceProfilePreset } from '../lib/types.js';
 
 /**
  * Pure helper: builds a Profile from collected wizard inputs. Extracted so the
@@ -96,8 +108,146 @@ function renderProfileRow(p: ReturnType<typeof listProfiles>[number]): string {
   return `${chalk.cyan(p.name.padEnd(16))} ${host.padEnd(14)} ${provider.padEnd(12)} ${chalk.gray(model)}`;
 }
 
+function splitList(value: string | undefined): string[] | undefined {
+  if (value === undefined) return undefined;
+  return value.split(',').map((part) => part.trim()).filter(Boolean);
+}
+
+function buildResourceProfileFromOptions(
+  existing: ResourceProfilePreset | null,
+  opts: Record<string, string | undefined>,
+): ResourceProfilePreset {
+  const next: ResourceProfilePreset = { ...(existing ?? {}) };
+  if (opts.description !== undefined) next.description = opts.description || undefined;
+  const keys: PatternedProfileKind[] = ['commands', 'skills', 'hooks', 'subagents', 'plugins', 'workflows', 'permissions', 'mcp'];
+  for (const key of keys) {
+    const parsed = splitList(opts[key]);
+    if (parsed !== undefined) next[key] = parsed;
+  }
+  const secrets = splitList(opts.secrets);
+  if (secrets !== undefined) next.secrets = secrets;
+  if (opts.rules !== undefined) next.rules = opts.rules || undefined;
+  return next;
+}
+
+function printResourceProfile(name: string, preset: ResourceProfilePreset, activeName: string | null): void {
+  const activeMark = activeName === name ? '*' : ' ';
+  const description = preset.description ? `  ${chalk.gray(preset.description)}` : '';
+  console.log(`${activeMark} ${chalk.cyan(name)}${description}`);
+}
+
+function syncInstalledVersionsForActiveProfile(cwd: string): number {
+  let synced = 0;
+  for (const agent of Object.keys(AGENTS) as Array<keyof typeof AGENTS>) {
+    for (const version of listInstalledVersions(agent)) {
+      syncResourcesToVersion(agent, version, undefined, { cwd, force: true });
+      synced++;
+    }
+  }
+  return synced;
+}
+
+function registerResourceProfileCommands(program: Command): void {
+  const cmd = program
+    .command('profile')
+    .description('Activate top-level resource profiles across commands, skills, hooks, rules, MCP, permissions, and secrets.');
+
+  cmd
+    .command('list')
+    .alias('ls')
+    .description('List top-level resource profiles')
+    .action(() => {
+      const names = listResourceProfileNames();
+      if (names.length === 0) {
+        console.log(chalk.gray('No resource profiles configured.'));
+        console.log(chalk.gray('Try: agents profile set work --skills user:code-review --secrets work'));
+        return;
+      }
+      const active = getActiveResourceProfileName();
+      for (const name of names) {
+        printResourceProfile(name, getResourceProfilePreset(name)!, active);
+      }
+    });
+
+  cmd
+    .command('status')
+    .description('Show the active top-level resource profile')
+    .action(() => {
+      const active = getActiveResourceProfileName();
+      if (!active) {
+        console.log(chalk.gray('No resource profile active.'));
+        return;
+      }
+      const preset = getResourceProfilePreset(active);
+      console.log(chalk.bold(active));
+      if (!preset) {
+        console.log(chalk.red('Configured active profile is missing from profiles.presets.'));
+        return;
+      }
+      if (preset.description) console.log(chalk.gray(preset.description));
+      for (const [key, value] of Object.entries(preset)) {
+        if (key === 'description') continue;
+        console.log(`${key}: ${Array.isArray(value) ? value.join(', ') : value}`);
+      }
+    });
+
+  cmd
+    .command('set <name>')
+    .alias('define')
+    .description('Create or update a top-level resource profile')
+    .option('--description <text>', 'Free-form description')
+    .option('--commands <patterns>', 'Comma-separated command selectors, e.g. system:commit,user:*')
+    .option('--skills <patterns>', 'Comma-separated skill selectors')
+    .option('--hooks <patterns>', 'Comma-separated hook selectors')
+    .option('--subagents <patterns>', 'Comma-separated subagent selectors')
+    .option('--plugins <patterns>', 'Comma-separated plugin selectors')
+    .option('--workflows <patterns>', 'Comma-separated workflow selectors')
+    .option('--permissions <patterns>', 'Comma-separated permission group selectors')
+    .option('--mcp <patterns>', 'Comma-separated MCP server selectors')
+    .option('--rules <preset>', 'Rules preset to compose while active')
+    .option('--secrets <names>', 'Comma-separated secrets bundles, or "*"')
+    .action((name: string, opts: Record<string, string | undefined>) => {
+      try {
+        validateResourceProfileName(name);
+        const preset = buildResourceProfileFromOptions(getResourceProfilePreset(name), opts);
+        upsertResourceProfilePreset(name, preset);
+        console.log(chalk.green(`Profile '${name}' saved.`));
+      } catch (err) {
+        console.error(chalk.red((err as Error).message));
+        process.exit(1);
+      }
+    });
+
+  cmd
+    .command('use <name>')
+    .description('Activate a top-level resource profile and reconcile installed versions')
+    .action((name: string) => {
+      try {
+        setActiveResourceProfile(name);
+        const synced = syncInstalledVersionsForActiveProfile(process.cwd());
+        console.log(chalk.green(`Profile '${name}' active.`));
+        console.log(chalk.gray(`Reconciled ${synced} installed version${synced === 1 ? '' : 's'}.`));
+      } catch (err) {
+        console.error(chalk.red((err as Error).message));
+        process.exit(1);
+      }
+    });
+
+  cmd
+    .command('clear')
+    .description('Clear the active top-level resource profile and reconcile installed versions')
+    .action(() => {
+      setActiveResourceProfile(null);
+      const synced = syncInstalledVersionsForActiveProfile(process.cwd());
+      console.log(chalk.green('Resource profile cleared.'));
+      console.log(chalk.gray(`Reconciled ${synced} installed version${synced === 1 ? '' : 's'}.`));
+    });
+}
+
 /** Register the `agents profiles` command tree. */
 export function registerProfilesCommands(program: Command): void {
+  registerResourceProfileCommands(program);
+
   const cmd = program
     .command('profiles')
     .description('Named bundles of (host CLI, endpoint, model, auth) — run Kimi/DeepSeek/Qwen/etc through Claude Code without a proxy.')
@@ -172,6 +322,29 @@ Examples:
   agents profiles logout openrouter
 `,
     );
+
+  cmd
+    .command('use <name>')
+    .description('Alias for `agents profile use <name>`')
+    .action((name: string) => {
+      try {
+        setActiveResourceProfile(name);
+        const synced = syncInstalledVersionsForActiveProfile(process.cwd());
+        console.log(chalk.green(`Profile '${name}' active.`));
+        console.log(chalk.gray(`Reconciled ${synced} installed version${synced === 1 ? '' : 's'}.`));
+      } catch (err) {
+        console.error(chalk.red((err as Error).message));
+        process.exit(1);
+      }
+    });
+
+  cmd
+    .command('status')
+    .description('Alias for `agents profile status`')
+    .action(() => {
+      const active = getActiveResourceProfileName();
+      console.log(active ? active : chalk.gray('No resource profile active.'));
+    });
 
   cmd
     .command('list')
