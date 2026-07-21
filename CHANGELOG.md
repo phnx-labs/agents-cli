@@ -12,13 +12,6 @@
   `agents plugins install <spec>`. Source: `apps/cli/src/commands/resources.ts`,
   `apps/cli/src/commands/ssh.ts`, `apps/cli/src/commands/plugins.ts`.
 
-### Fixed
-
-- **Menu-bar Quick Dispatch attaches selected screenshots after ticket creation (RUSH-1693).**
-  The helper now uploads every selected quick-capture screenshot to the created
-  Linear issue itself after parsing the `Created RUSH-###` result, instead of
-  relying on the ticket agent to run a second proof-upload command from its prompt.
-
 ### Security
 
 - **`agents plugins update` no longer silently executes a compromised upstream (RUSH-1757).**
