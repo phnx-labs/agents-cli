@@ -65,6 +65,12 @@ function readRoutineYaml(home: string, name: string): Record<string, unknown> | 
   return yaml.parse(fs.readFileSync(p, 'utf-8'));
 }
 
+function writeRunMeta(home: string, jobName: string, runId: string, meta: Record<string, unknown>): void {
+  const runDir = path.join(home, '.agents', '.history', 'runs', jobName, runId);
+  fs.mkdirSync(runDir, { recursive: true });
+  fs.writeFileSync(path.join(runDir, 'meta.json'), JSON.stringify(meta));
+}
+
 function daemonPidPath(home: string): string {
   return path.join(home, '.agents', '.cache', 'helpers', 'daemon', 'daemon.pid');
 }
@@ -346,6 +352,34 @@ describe('routines list --json has devices+runsHere, no device', () => {
       expect(entry).toBeDefined();
       expect(entry.devices).toEqual([]);
       expect(entry.runsHere).toBe(true);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('includes latest run exitCode and failureReason', () => {
+    const home = makeHome({ jobs: [baseJob], registry });
+    try {
+      writeRunMeta(home, 'test-job', '2026-07-21T10-00-00-000Z', {
+        jobName: 'test-job',
+        runId: '2026-07-21T10-00-00-000Z',
+        agent: 'claude',
+        pid: null,
+        status: 'failed',
+        startedAt: '2026-07-21T10:00:00.000Z',
+        completedAt: '2026-07-21T10:00:05.000Z',
+        exitCode: 2,
+        errorMessage: 'command exited with code 2',
+      });
+
+      const res = run(home, ['list', '--json']);
+      expect(res.status).toBe(0);
+
+      const parsed = JSON.parse(res.stdout.trim());
+      const entry = parsed.find((j: Record<string, unknown>) => j.name === 'test-job');
+      expect(entry).toBeDefined();
+      expect(entry.exitCode).toBe(2);
+      expect(entry.failureReason).toBe('command exited with code 2');
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }

@@ -14,6 +14,8 @@ struct Routine: Decodable {
     let nextRun: String?
     let nextRunHuman: String?
     let lastStatus: String?            // completed | failed | timeout | running | null
+    let exitCode: Int?
+    let failureReason: String?
     let lastRunStartedAt: String?
     let lastRunCompletedAt: String?
 }

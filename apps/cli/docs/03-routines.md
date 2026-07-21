@@ -488,8 +488,9 @@ agents routines run <name>            # Run immediately in foreground
 agents routines run <name> --host yosemite-s0  # Run on a specific remote device
 agents routines view <name>           # Show job config
 agents routines runs <name>           # View execution history (last 10)
-agents routines logs <name>           # Show stdout from latest run
+agents routines logs <name>           # Show concise summary from latest run
 agents routines logs <name> --run <id>  # Show specific run
+agents routines logs <name> --full    # Show raw stdout from latest run
 agents routines report <name>         # Show report from latest run
 agents routines report <name> --run <id>  # Show specific run report
 

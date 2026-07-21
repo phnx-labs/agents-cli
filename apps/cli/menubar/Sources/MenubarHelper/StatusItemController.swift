@@ -616,7 +616,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             menu.addItem(row)
         }
         for r in failing {
-            let why = r.overdue ? "overdue" : (r.lastStatus ?? "failed")
+            let why = routineFailureSummary(r, max: 48)
             let row = statusRow("✕", fail, "\(r.name)  \(why)")
             row.submenu = routineSubmenu(r)
             menu.addItem(row)
@@ -724,6 +724,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     private func routineSubmenu(_ r: Routine) -> NSMenu {
         let sub = NSMenu()
+        if let failure = routineFailureDetail(r, max: 72) {
+            sub.addItem(disabled(failure))
+            sub.addItem(.separator())
+        }
+
         let run = NSMenuItem(title: "Run now", action: #selector(onRoutineRun(_:)), keyEquivalent: "")
         run.target = self
         run.representedObject = r.name
@@ -748,7 +753,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         for r in routines {
             let mark = r.lastStatus == "failed" || r.lastStatus == "timeout" || r.overdue ? "! "
                 : (r.enabled ? "  " : "· ")
-            let when = r.enabled ? (r.nextRunHuman ?? r.schedule) : "paused"
+            let when = routineFailureDetail(r, max: 52) ?? (r.enabled ? (r.nextRunHuman ?? r.schedule) : "paused")
             let item = NSMenuItem(title: "\(mark)\(r.name)  \(when)", action: nil, keyEquivalent: "")
             item.submenu = routineSubmenu(r)
             sub.addItem(item)
@@ -915,6 +920,22 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private func trim(_ value: String, _ max: Int) -> String {
         if value.count <= max { return value }
         return String(value.prefix(max - 1)) + "…"
+    }
+
+    private func routineFailureSummary(_ r: Routine, max: Int) -> String {
+        if let detail = routineFailureDetail(r, max: max) { return detail }
+        return r.overdue ? "overdue" : (r.lastStatus ?? "failed")
+    }
+
+    private func routineFailureDetail(_ r: Routine, max: Int) -> String? {
+        guard r.lastStatus == "failed" || r.lastStatus == "timeout" || r.overdue else { return nil }
+        if let reason = r.failureReason?.trimmingCharacters(in: .whitespacesAndNewlines), !reason.isEmpty {
+            return trim(reason.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression), max)
+        }
+        if let code = r.exitCode {
+            return "exit \(code)"
+        }
+        return r.overdue ? "overdue" : (r.lastStatus ?? "failed")
     }
 
     // "3m" / "1h 12m" / "2d" — how long a session has been waiting (sentinel mtime).

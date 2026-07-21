@@ -329,6 +329,8 @@ export function registerRoutinesCommands(program: Command): void {
             nextRun: nextRun ? nextRun.toISOString() : null,
             nextRunHuman: humanizeNextRun(nextRun ?? null, nowJson, job.timezone),
             lastStatus: latestRun?.status ?? null,
+            exitCode: latestRun?.exitCode ?? null,
+            failureReason: latestRun?.errorMessage ?? null,
             lastRunStartedAt: latestRun?.startedAt ?? null,
             lastRunCompletedAt: latestRun?.completedAt ?? null,
           };

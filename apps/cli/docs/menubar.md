@@ -84,7 +84,9 @@ One rule shapes the menu: **attention floats up, context groups down.**
   its transcript was written in the last 2 minutes, else *idle*. Rich rows show
   the session's title inline; the row's submenu reveals the working dir.
 - **ROUTINES** — kept glanceable: the next few upcoming plus any failing routine
-  inline (Run now / Pause / Logs in each submenu), `All routines…` for the rest.
+  inline with its failure reason when available (Run now / Pause / Logs in each
+  submenu), `All routines…` for the rest. Logs opens the concise routine summary
+  in a text viewer.
 - **RECENT TICKETS / RECENT** — tickets filed via quick dispatch and recent
   sessions, unchanged dedicated sections.
 - **System** — setup staleness + the auto-nudge watchdog collapsed into one row;

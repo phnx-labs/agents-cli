@@ -113,9 +113,14 @@ enum AgentsCLI {
     static func routinePause(_ name: String) { runDetached(argv(["routines", "pause", name])) }
     static func routineResume(_ name: String) { runDetached(argv(["routines", "resume", name])) }
     static func routineLogs(_ name: String) {
-        let cmd = "\(shellQuote(binary)) routines logs \(shellQuote(name))"
-        let script = "tell application \"Terminal\"\nactivate\ndo script \"\(cmd)\"\nend tell"
-        runDetached(["/usr/bin/osascript", "-e", script])
+        runMonitored(argv(["routines", "logs", name])) { text, ok in
+            let safeName = name.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "-", options: .regularExpression)
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("agents-routine-\(safeName)-logs.txt")
+            let body = ok ? text : (text.isEmpty ? "Unable to load logs for routine '\(name)'.\n" : text)
+            try? body.write(to: url, atomically: true, encoding: .utf8)
+            runDetached(["/usr/bin/open", url.path])
+        }
     }
 
     static func openPath(_ path: String) { runDetached(["/usr/bin/open", path]) }
