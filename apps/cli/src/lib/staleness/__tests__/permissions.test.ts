@@ -5,13 +5,14 @@ import {
   type Fixture,
 } from './_fixtures.js';
 import { execFileSync } from 'child_process';
+import * as fs from 'fs';
 import * as path from 'path';
 
 const HARNESS = path.join(__dirname, '_harness.ts');
 
 // Permissions checker isn't a standard ResourceChecker (no `listNames`), so
-// it isn't exposed through the harness `list` op. We test it indirectly via
-// build + isStale, plus inspect the manifest body.
+// broad coverage goes through build + isStale; detector-specific regressions use
+// a harness op that still runs in an isolated HOME.
 
 function buildRaw(fx: Fixture, env: Record<string, string> = {}): { permissions: { groups: Record<string, unknown>; permissionPreset: string | null } } {
   const out = execFileSync('bun', [HARNESS, JSON.stringify({
@@ -25,6 +26,17 @@ function isStaleEnv(fx: Fixture, env: Record<string, string> = {}): boolean {
     cmd: 'isStale', agent: 'claude', version: '0.0.0-test', cwd: fx.projectRoot
   })], { env: { ...process.env, HOME: fx.home, ...env }, encoding: 'utf-8' });
   return JSON.parse(out).stale;
+}
+
+function detectCopilotPermissions(fx: Fixture, versionHome: string, cwd: string): string[] {
+  const out = execFileSync('bun', [HARNESS, JSON.stringify({
+    cmd: 'detectPermissions',
+    agent: 'copilot',
+    version: '0.0.0-test',
+    versionHome,
+    cwd,
+  })], { env: { ...process.env, HOME: fx.home }, encoding: 'utf-8' });
+  return JSON.parse(out).names;
 }
 
 const yaml = (allow: string[] = []) =>
@@ -93,5 +105,24 @@ describe('staleness e2e: permissions', () => {
     writeFile(fx, 'user', 'permissions/groups/ok.yaml', yaml(['Bash(echo)']));
     const built = buildRaw(fx);
     expect(Object.keys(built.permissions.groups)).toEqual(['ok']);
+  });
+
+  it('Copilot detector only reports permissions for the current project location', () => {
+    writeFile(fx, 'system', 'permissions/groups/copilot-group.yaml', yaml(['Bash(ls)']));
+    const versionHome = path.join(fx.home, 'copilot-home');
+    const projA = path.join(fx.home, 'proj-a');
+    const projB = path.join(fx.home, 'proj-b');
+    const configPath = path.join(versionHome, '.copilot', 'permissions-config.json');
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, JSON.stringify({
+      locations: {
+        [path.resolve(projA)]: {
+          tool_approvals: [{ kind: 'read' }],
+        },
+      },
+    }, null, 2));
+
+    expect(detectCopilotPermissions(fx, versionHome, projA)).toEqual(['copilot-group']);
+    expect(detectCopilotPermissions(fx, versionHome, projB)).toEqual([]);
   });
 });

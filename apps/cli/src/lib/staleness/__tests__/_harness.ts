@@ -26,6 +26,7 @@ import {
   loadManifest,
   isStale,
 } from '../index.js';
+import { getDetector } from '../registry.js';
 
 import { commandsChecker }   from '../checkers/commands.js';
 import { skillsChecker }     from '../checkers/skills.js';
@@ -39,6 +40,7 @@ import type { ResourceChecker } from '../checkers/types.js';
 type Op =
   | { cmd: 'build';   agent: AgentId; version: string; cwd: string }
   | { cmd: 'isStale'; agent: AgentId; version: string; cwd: string }
+  | { cmd: 'detectPermissions'; agent: AgentId; version: string; versionHome: string; cwd: string }
   | { cmd: 'list';    type: string;   cwd: string };
 
 const CHECKERS: Record<string, ResourceChecker> = {
@@ -61,6 +63,14 @@ function run(op: Op): unknown {
     const m = loadManifest(op.agent, op.version);
     if (!m) return { stale: true, exists: false };
     return { stale: isStale(m, op.agent, op.version, op.cwd), exists: true };
+  }
+  if (op.cmd === 'detectPermissions') {
+    const detector = getDetector('permissions', op.agent);
+    return { names: detector?.list({
+      version: op.version,
+      versionHome: op.versionHome,
+      cwd: op.cwd,
+    }) ?? [] };
   }
   if (op.cmd === 'list') {
     const c = CHECKERS[op.type];
