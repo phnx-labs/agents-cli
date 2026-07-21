@@ -104,6 +104,16 @@ enum IssueSelfTest {
         check("no-screenshot prompt has no /tmp path", !noShot.contains("/tmp/"))
         check("no-screenshot prompt has no upload command", !noShot.contains("--proof"))
         check("no-screenshot prompt skips attachment handling", noShot.contains("skip attachment handling"))
+
+        // RUSH-1636: the ticket agent must assign a delegate via linear create --delegate.
+        let delegate = AgentsCLI.ticketAgentPrompt(note: "assign a delegate", screenshotPaths: ["/tmp/a.png"])
+        check("prompt instructs delegate resolution", delegate.contains("agents sessions --active"))
+        check("prompt lists the workspace delegate roster",
+              delegate.contains("Antigravity") && delegate.contains("OpenClaw"))
+        check("prompt templates --delegate on linear create", delegate.contains("--delegate <agent>"))
+        check("prompt defaults to claude when inconclusive", delegate.contains("default to `claude`"))
+        check("prompt omits --delegate on resolution failure",
+              delegate.contains("omit the `--delegate` flag"))
     }
 
     // Once the ticket agent creates an issue, selected screenshots must become a

@@ -75,6 +75,7 @@ import {
   LAZY_COMMAND_NAMES,
   loadView,
   loadInspect,
+  loadResources,
   loadFeedback,
   loadCommands,
   loadHooks,
@@ -253,6 +254,7 @@ Agent versions:
   trash                           Inspect and restore soft-deleted version directories
   view [agent[@version]]          List versions, or inspect one in detail
   inspect <target>                Deep details for one agent+version, or a DotAgents repo (user|system|project|alias|path)
+  resources                       Show merged DotAgents resources with their winning layer
 
 Agent configuration (synced across versions):
   rules                           Instructions given to agents (CLAUDE.md, etc.)
@@ -804,6 +806,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadView);
   await reg(loadShare);
   await reg(loadInspect);
+  await reg(loadResources);
   await reg(loadFeedback);
   await reg(loadCommands);
   await reg(loadHooks);

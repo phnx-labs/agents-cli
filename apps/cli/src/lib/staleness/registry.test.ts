@@ -106,6 +106,16 @@ describe('staleness/registry', () => {
     expect(DETECTORS.permissions.openclaw).toBeDefined();
   });
 
+  it('forge has a permissions writer + detector', () => {
+    expect(WRITERS.permissions.forge).toBeDefined();
+    expect(DETECTORS.permissions.forge).toBeDefined();
+  });
+
+  it('hermes has a permissions writer + detector', () => {
+    expect(WRITERS.permissions.hermes).toBeDefined();
+    expect(DETECTORS.permissions.hermes).toBeDefined();
+  });
+
   it('antigravity has subagents + workflows writers + detectors', () => {
     expect(WRITERS.subagents.antigravity).toBeDefined();
     expect(DETECTORS.subagents.antigravity).toBeDefined();

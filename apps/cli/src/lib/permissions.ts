@@ -676,6 +676,85 @@ export function convertToOpenClawFormat(set: PermissionSet): { alsoAllow: string
   };
 }
 
+export type ForgePermission = 'allow' | 'deny' | 'confirm';
+export type ForgeOperation = 'read' | 'write' | 'command' | 'url';
+export type ForgePolicy = { permission: ForgePermission; rule: Partial<Record<ForgeOperation, string>> };
+
+const FORGE_OPERATION_BY_CANONICAL: Record<string, ForgeOperation | undefined> = {
+  bash: 'command',
+  read: 'read',
+  grep: 'read',
+  glob: 'read',
+  write: 'write',
+  edit: 'write',
+  notebookedit: 'write',
+  webfetch: 'url',
+  websearch: 'url',
+};
+
+function canonicalToForgePolicy(perm: string, permission: ForgePermission): ForgePolicy | null {
+  if (BLANKET_BASH_FORMS.has(perm)) {
+    return { permission, rule: { command: '*' } };
+  }
+  const parsed = parseCanonicalPattern(perm);
+  if (!parsed) return null;
+  const operation = FORGE_OPERATION_BY_CANONICAL[parsed.tool];
+  if (!operation) return null;
+  const pattern = parsed.tool === 'bash'
+    ? normalizeBashPattern(parsed.pattern)
+    : (parsed.tool === 'webfetch' || parsed.tool === 'websearch') && parsed.pattern.startsWith('domain:')
+      ? `${parsed.pattern.slice('domain:'.length)}*`
+      : parsed.pattern === '**'
+        ? '**/*'
+        : parsed.pattern;
+  return { permission, rule: { [operation]: pattern } };
+}
+
+/**
+ * Convert canonical permissions to ForgeCode's permissions.yaml policy list.
+ *
+ * ForgeCode gates built-in tools by operation family (`read`, `write`,
+ * `command`, `url`) plus glob patterns, optionally scoped by `dir`. The policy
+ * file is ignored unless `.forge.toml` has `restricted = true`, and MCP tools
+ * bypass permissions.yaml entirely; agents-cli therefore maps only canonical
+ * built-in allow/deny rules and does not try to express per-named-MCP-tool
+ * grants.
+ */
+export function convertToForgeFormat(set: PermissionSet): { policies: ForgePolicy[] } {
+  const policies: ForgePolicy[] = [];
+  const seen = new Set<string>();
+  const add = (policy: ForgePolicy | null): void => {
+    if (!policy) return;
+    const key = `${policy.permission}|${JSON.stringify(policy.rule)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    policies.push(policy);
+  };
+  for (const perm of set.allow) add(canonicalToForgePolicy(perm, 'allow'));
+  for (const perm of set.deny ?? []) add(canonicalToForgePolicy(perm, 'deny'));
+  return { policies };
+}
+
+export function convertToHermesFormat(set: PermissionSet): { command_allowlist: string[]; approvals: { deny: string[] } } {
+  const commands = (permissions: string[]): string[] => {
+    const out = new Set<string>();
+    for (const perm of permissions) {
+      if (BLANKET_BASH_FORMS.has(perm)) {
+        out.add('*');
+        continue;
+      }
+      const parsed = parseCanonicalPattern(perm);
+      if (parsed?.tool === 'bash') out.add(normalizeBashPattern(parsed.pattern));
+    }
+    return Array.from(out).sort();
+  };
+
+  return {
+    command_allowlist: commands(set.allow),
+    approvals: { deny: commands(set.deny ?? []) },
+  };
+}
+
 /**
  * Convert canonical permission set to Antigravity format.
  * Antigravity reads ~/.gemini/antigravity-cli/settings.json with
@@ -1841,6 +1920,67 @@ export function applyPermissionsToVersion(
 
       fs.mkdirSync(path.dirname(configPath), { recursive: true });
       fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+      return { success: true };
+    }
+
+    if (agentId === 'forge') {
+      const permissionsPath = path.join(versionHome, '.forge', 'permissions.yaml');
+      let config: { policies?: unknown[] } = {};
+      if (fs.existsSync(permissionsPath)) {
+        const parsed = yaml.parse(fs.readFileSync(permissionsPath, 'utf-8'));
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          config = parsed as { policies?: unknown[] };
+        }
+      }
+
+      const newPolicies = convertToForgeFormat(set).policies;
+      if (merge) {
+        const existingPolicies = Array.isArray(config.policies) ? config.policies : [];
+        const seen = new Set<string>();
+        config.policies = [...existingPolicies, ...newPolicies].filter((policy) => {
+          if (!policy || typeof policy !== 'object' || Array.isArray(policy)) return false;
+          const key = JSON.stringify(policy);
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+      } else {
+        config.policies = newPolicies;
+      }
+
+      fs.mkdirSync(path.dirname(permissionsPath), { recursive: true });
+      fs.writeFileSync(permissionsPath, yaml.stringify(config), 'utf-8');
+      return { success: true };
+    }
+
+    if (agentId === 'hermes') {
+      const configPath = path.join(versionHome, '.hermes', 'config.yaml');
+      let config: Record<string, unknown> = {};
+      if (fs.existsSync(configPath)) {
+        const parsed = yaml.parse(fs.readFileSync(configPath, 'utf-8'));
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          config = parsed as Record<string, unknown>;
+        }
+      }
+
+      const converted = convertToHermesFormat(set);
+      const approvals = (typeof config.approvals === 'object' && config.approvals !== null && !Array.isArray(config.approvals))
+        ? config.approvals as Record<string, unknown>
+        : {};
+
+      if (merge) {
+        const existingAllow = Array.isArray(config.command_allowlist) ? config.command_allowlist as string[] : [];
+        const existingDeny = Array.isArray(approvals.deny) ? approvals.deny as string[] : [];
+        config.command_allowlist = Array.from(new Set([...existingAllow, ...converted.command_allowlist])).sort();
+        approvals.deny = Array.from(new Set([...existingDeny, ...converted.approvals.deny])).sort();
+      } else {
+        config.command_allowlist = converted.command_allowlist;
+        approvals.deny = converted.approvals.deny;
+      }
+
+      config.approvals = approvals;
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(configPath, yaml.stringify(config), 'utf-8');
       return { success: true };
     }
 

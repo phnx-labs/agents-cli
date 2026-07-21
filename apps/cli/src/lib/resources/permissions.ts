@@ -95,6 +95,10 @@ function getAgentConfigPath(agent: AgentId, versionHome: string): string | null 
       return path.join(versionHome, '.kiro', 'settings', 'permissions.yaml');
     case 'openclaw':
       return path.join(versionHome, '.openclaw', 'openclaw.json');
+    case 'forge':
+      return path.join(versionHome, '.forge', 'permissions.yaml');
+    case 'hermes':
+      return path.join(versionHome, '.hermes', 'config.yaml');
     case 'goose':
       return path.join(versionHome, '.config', 'goose', 'permission.yaml');
     default:

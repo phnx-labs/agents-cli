@@ -221,6 +221,14 @@ Per-agent conversion is lossy in both directions:
   rules (`Bash(git:*)`, `Write(secrets/**)`, `WebFetch(domain:x)`) have no
   tool-level equivalent and are skipped. The absolute `tools.allow` list is
   never touched, and all other keys (`mcp`, `exec`, `agents`, …) are preserved.
+- Hermes maps canonical Bash allow rules to `~/.hermes/config.yaml`
+  `command_allowlist` and Bash deny rules to `approvals.deny`, preserving
+  sibling YAML keys like `mcp_servers` and `hooks`. Hermes has command-glob
+  persistence only; session-scoped `/tools` toggles are not written.
+- ForgeCode maps canonical built-in tool rules to `~/.forge/permissions.yaml`
+  policies by operation family (`read`, `write`, `command`, `url`). The file is
+  active only when `.forge.toml` has `restricted = true`; MCP tools bypass this
+  policy file entirely, so per-named-MCP-tool grants are skipped.
 
 ## Plugins: Synthetic Marketplace + Exec-Surface Gate
 

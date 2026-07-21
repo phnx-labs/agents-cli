@@ -680,6 +680,54 @@ Typical workflow:
       console.log(chalk.green(`No longer ignoring '${name}'`) + chalk.gray(' — run `agents devices sync` to register it.'));
     });
 
+  const runList = async (opts: { json?: boolean; stats?: boolean; full?: boolean; refresh?: boolean; live?: boolean } = {}) => {
+    const reg = await loadDevices();
+    const names = Object.keys(reg).sort();
+    if (opts.json) {
+      // Registry-only, always fast — the Factory extension polls this path.
+      process.stdout.write(JSON.stringify(names.map((n) => reg[n]), null, 2) + '\n');
+      return;
+    }
+    if (names.length === 0) {
+      console.log(chalk.gray("No devices. Run 'agents devices sync' or 'agents devices add <name> <user@host>'."));
+      return;
+    }
+    const self = machineId();
+    const forceRefresh = Boolean(opts.refresh || opts.live);
+
+    let statsMap: Map<string, DeviceStats> | undefined;
+    let freshness: { oldestFetchedAt: number | null; servedFromCache: boolean } | undefined;
+    if (opts.stats !== false) {
+      // Cache-first: serve remote devices from the daemon-warmed cache
+      // (instant), probe this machine locally, and only ssh out for missing or
+      // forced (--refresh/--live) rows — so a warm read never hangs on a box.
+      const probeable = planFleetTargets(reg)
+        .filter((t) => !t.skip)
+        .map((t) => t.device);
+      // Only spin when we'll actually ssh (forced, or a cold/partial cache).
+      const cache = readStatsCache();
+      const willSsh = forceRefresh || probeable.some((d) => d.name !== self && !cache[d.name]);
+      const spinner = willSsh && isInteractiveTerminal()
+        ? ora(`Probing ${probeable.length} device${probeable.length === 1 ? '' : 's'}…`).start()
+        : undefined;
+      try {
+        const res = await loadFleetStats(probeable, { forceRefresh, selfName: self });
+        statsMap = res.stats;
+        freshness = res;
+      } finally {
+        spinner?.stop();
+      }
+    }
+
+    console.log(chalk.bold(`Devices (${names.length})`));
+    for (const line of renderDeviceTable(reg, names, self, statsMap, opts.full)) console.log(line);
+    if (freshness?.servedFromCache && freshness.oldestFetchedAt != null) {
+      console.log(chalk.gray(`  updated ${formatCheckedAge(freshness.oldestFetchedAt)} — pass --refresh (--live) for a live probe`));
+    }
+  };
+
+  devicesCmd.action(runList);
+
   devicesCmd
     .command('list')
     .alias('ls')
@@ -689,51 +737,7 @@ Typical workflow:
     .option('--refresh', 'force a live probe of every device, bypassing the cache')
     .option('--live', 'alias of --refresh (shorter to type)')
     .option('-f, --full', 'full mode: add per-device core count and free/total memory')
-    .action(async (opts: { json?: boolean; stats?: boolean; full?: boolean; refresh?: boolean; live?: boolean }) => {
-      const reg = await loadDevices();
-      const names = Object.keys(reg).sort();
-      if (opts.json) {
-        // Registry-only, always fast — the Factory extension polls this path.
-        process.stdout.write(JSON.stringify(names.map((n) => reg[n]), null, 2) + '\n');
-        return;
-      }
-      if (names.length === 0) {
-        console.log(chalk.gray("No devices. Run 'agents devices sync' or 'agents devices add <name> <user@host>'."));
-        return;
-      }
-      const self = machineId();
-      const forceRefresh = Boolean(opts.refresh || opts.live);
-
-      let statsMap: Map<string, DeviceStats> | undefined;
-      let freshness: { oldestFetchedAt: number | null; servedFromCache: boolean } | undefined;
-      if (opts.stats !== false) {
-        // Cache-first: serve remote devices from the daemon-warmed cache
-        // (instant), probe this machine locally, and only ssh out for missing or
-        // forced (--refresh/--live) rows — so a warm read never hangs on a box.
-        const probeable = planFleetTargets(reg)
-          .filter((t) => !t.skip)
-          .map((t) => t.device);
-        // Only spin when we'll actually ssh (forced, or a cold/partial cache).
-        const cache = readStatsCache();
-        const willSsh = forceRefresh || probeable.some((d) => d.name !== self && !cache[d.name]);
-        const spinner = willSsh && isInteractiveTerminal()
-          ? ora(`Probing ${probeable.length} device${probeable.length === 1 ? '' : 's'}…`).start()
-          : undefined;
-        try {
-          const res = await loadFleetStats(probeable, { forceRefresh, selfName: self });
-          statsMap = res.stats;
-          freshness = res;
-        } finally {
-          spinner?.stop();
-        }
-      }
-
-      console.log(chalk.bold(`Devices (${names.length})`));
-      for (const line of renderDeviceTable(reg, names, self, statsMap, opts.full)) console.log(line);
-      if (freshness?.servedFromCache && freshness.oldestFetchedAt != null) {
-        console.log(chalk.gray(`  updated ${formatCheckedAge(freshness.oldestFetchedAt)} — pass --refresh (--live) for a live probe`));
-      }
-    });
+    .action(runList);
 
   devicesCmd
     .command('status')

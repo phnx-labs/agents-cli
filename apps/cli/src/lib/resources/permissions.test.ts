@@ -346,6 +346,66 @@ describe('PermissionsHandler', () => {
       expect(settings.tools.deny).toEqual(['write']);
     });
 
+    it('merges all permissions and writes to ForgeCode permissions.yaml policies', () => {
+      const home = makeTempHome();
+      const versionHome = makeTempHome();
+
+      fs.mkdirSync(path.join(home, '.agents', '.system'), { recursive: true });
+      fs.mkdirSync(path.join(home, '.agents'), { recursive: true });
+
+      writePermissionYaml(home, path.join('.agents', '.system'), 'base', {
+        name: 'base',
+        allow: ['Read(**)', 'Bash(git:*)'],
+      });
+
+      writePermissionYaml(home, '.agents', 'extra', {
+        name: 'extra',
+        allow: ['WebFetch(domain:api.github.com)'],
+        deny: ['Write(secrets/**)', 'Bash(rm -rf:*)'],
+      });
+
+      runPermissionsExpression(home, `PermissionsHandler.sync('forge', ${JSON.stringify(versionHome)})`);
+
+      const settingsPath = path.join(versionHome, '.forge', 'permissions.yaml');
+      expect(fs.existsSync(settingsPath)).toBe(true);
+
+      const settings = yaml.parse(fs.readFileSync(settingsPath, 'utf-8'));
+      expect(settings.policies).toEqual([
+        { permission: 'allow', rule: { command: 'git *' } },
+        { permission: 'allow', rule: { read: '**/*' } },
+        { permission: 'allow', rule: { url: 'api.github.com*' } },
+        { permission: 'deny', rule: { command: 'rm -rf *' } },
+        { permission: 'deny', rule: { write: 'secrets/**' } },
+      ]);
+    });
+
+    it('merges all permissions and writes to Hermes config.yaml command allowlist and approvals deny', () => {
+      const home = makeTempHome();
+      const versionHome = makeTempHome();
+
+      fs.mkdirSync(path.join(home, '.agents', '.system'), { recursive: true });
+      fs.mkdirSync(path.join(home, '.agents'), { recursive: true });
+
+      writePermissionYaml(home, path.join('.agents', '.system'), 'base', {
+        name: 'base',
+        allow: ['Bash(git:*)', 'Read(**)'],
+      });
+
+      writePermissionYaml(home, '.agents', 'extra', {
+        name: 'extra',
+        deny: ['Bash(rm -rf:*)', 'Write(secrets/**)'],
+      });
+
+      runPermissionsExpression(home, `PermissionsHandler.sync('hermes', ${JSON.stringify(versionHome)})`);
+
+      const settingsPath = path.join(versionHome, '.hermes', 'config.yaml');
+      expect(fs.existsSync(settingsPath)).toBe(true);
+
+      const settings = yaml.parse(fs.readFileSync(settingsPath, 'utf-8'));
+      expect(settings.command_allowlist).toEqual(['git *']);
+      expect(settings.approvals.deny).toEqual(['rm -rf *']);
+    });
+
     it('skips non-permission-capable agents', () => {
       const home = makeTempHome();
       const versionHome = makeTempHome();
@@ -400,6 +460,16 @@ describe('PermissionsHandler', () => {
     it('returns correct path for OpenClaw', () => {
       const result = PermissionsHandler.configPath!('openclaw', '/test/home');
       expect(result).toBe(path.join('/test/home', '.openclaw', 'openclaw.json'));
+    });
+
+    it('returns correct path for ForgeCode', () => {
+      const result = PermissionsHandler.configPath!('forge', '/test/home');
+      expect(result).toBe(path.join('/test/home', '.forge', 'permissions.yaml'));
+    });
+
+    it('returns correct path for Hermes', () => {
+      const result = PermissionsHandler.configPath!('hermes', '/test/home');
+      expect(result).toBe(path.join('/test/home', '.hermes', 'config.yaml'));
     });
 
     it('returns correct path for Droid', () => {
