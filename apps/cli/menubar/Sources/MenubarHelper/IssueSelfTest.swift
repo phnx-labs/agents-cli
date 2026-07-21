@@ -15,6 +15,7 @@ enum IssueSelfTest {
         testImageFilePick()
         testTicketIDParse()
         testPromptContract()
+        testTicketCompletionAttachesScreenshots()
         testQuickFixContract()
         testQuickDispatchRoster()
         testRecentTicketsMerge()
@@ -77,8 +78,8 @@ enum IssueSelfTest {
     }
 
     // The meta-prompt must carry the user's note and every user-provided file
-    // forward, require that the files reach the issue (with placement left to the
-    // agent), and drop the upload command when there is no attachment.
+    // forward for investigation, but leave the actual upload to the helper's
+    // deterministic post-create step.
     private static func testPromptContract() {
         let oneShot = AgentsCLI.ticketAgentPrompt(note: "cards show raw uuids",
                                                   screenshotPaths: ["/tmp/clip one.png"])
@@ -87,31 +88,57 @@ enum IssueSelfTest {
         check("prompt names the linear create step", oneShot.contains("linear create"))
         check("prompt identifies user-provided ticket material",
               oneShot.contains("user-provided ticket material"))
-        check("prompt requires the file to reach the Linear issue",
-              oneShot.contains("every user-provided file is uploaded"))
-        check("prompt leaves attachment placement to the agent",
-              oneShot.contains("description, comment, or another appropriate attachment surface"))
-        check("prompt gives a shell-safe upload command",
-              oneShot.contains("--proof '/tmp/clip one.png'"))
-
-        let quoted = AgentsCLI.ticketAgentPrompt(note: "quoted path",
-                                                 screenshotPaths: ["/tmp/Muqsit's shot.png"])
-        check("upload command shell-quotes apostrophes",
-              quoted.contains("--proof '/tmp/Muqsit'\\''s shot.png'"))
+        check("prompt says the helper uploads selected files",
+              oneShot.contains("menu-bar helper") && oneShot.contains("uploads every selected file"))
+        check("prompt does not make the agent run a proof upload",
+              !oneShot.contains("--proof"))
 
         let multi = AgentsCLI.ticketAgentPrompt(note: "before/after",
                                                 screenshotPaths: ["/tmp/a.png", "/tmp/b.png"])
         check("multi-shot prompt lists both paths",
               multi.contains("/tmp/a.png") && multi.contains("/tmp/b.png"))
         check("multi-shot prompt states the count", multi.contains("2 screenshots"))
-        check("multi-shot prompt uploads every path",
-              multi.contains("--proof '/tmp/a.png'") && multi.contains("--proof '/tmp/b.png'"))
 
         let noShot = AgentsCLI.ticketAgentPrompt(note: "flaky test", screenshotPaths: [])
         check("no-screenshot prompt says so", noShot.contains("No screenshots"))
         check("no-screenshot prompt has no /tmp path", !noShot.contains("/tmp/"))
         check("no-screenshot prompt has no upload command", !noShot.contains("--proof"))
         check("no-screenshot prompt skips attachment handling", noShot.contains("skip attachment handling"))
+    }
+
+    // Once the ticket agent creates an issue, selected screenshots must become a
+    // real Linear update invocation against that created id, with each path
+    // passed as its own --proof arg so spaces/apostrophes are not shell-parsed.
+    private static func testTicketCompletionAttachesScreenshots() {
+        let output = """
+        Created RUSH-200: Cards show raw uuids
+        URL: https://linear.app/getrush/issue/RUSH-200/cards-show-raw-uuids
+        """
+        let completion = AgentsCLI.ticketCompletion(
+            output: output,
+            screenshotPaths: ["/tmp/clip one.png", "/tmp/Muqsit's shot.png"]
+        )
+        check("ticket completion parses the created id", completion?.id == "RUSH-200")
+        check("ticket completion preserves the Linear URL",
+              completion?.url == "https://linear.app/getrush/issue/RUSH-200/cards-show-raw-uuids")
+        let expected = [
+            AgentsCLI.linearSkillBinary(),
+            "update",
+            "RUSH-200",
+            "--proof",
+            "/tmp/clip one.png",
+            "--proof",
+            "/tmp/Muqsit's shot.png",
+        ]
+        check("created ticket gets every selected screenshot as proof args",
+              completion?.attachmentArgs == expected,
+              detail: (completion?.attachmentArgs ?? []).joined(separator: " "))
+
+        let noShots = AgentsCLI.ticketCompletion(output: output, screenshotPaths: [])
+        check("created ticket with no screenshots skips proof update",
+              noShots?.attachmentArgs == nil)
+        check("no created id yields no completion",
+              AgentsCLI.ticketCompletion(output: "ticket create failed", screenshotPaths: ["/tmp/a.png"]) == nil)
     }
 
     // The autonomous fix path must carry screenshots through and name runs with

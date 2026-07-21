@@ -1,5 +1,11 @@
 import Foundation
 
+struct TicketCompletion {
+    let id: String
+    let url: String?
+    let attachmentArgs: [String]?
+}
+
 // Thin bridge to the `agents` CLI. The helper never owns state or reimplements
 // scheduling — it shells the CLI for data and actions. TS stays the source of
 // truth (see CLAUDE.md: "Swift reads, TS owns truth").
@@ -201,15 +207,20 @@ enum AgentsCLI {
         return found.sorted { $0.mtime > $1.mtime }.prefix(limit).map { $0.path }
     }
 
+    static func linearSkillBinary() -> String {
+        "\(home)/.agents/skills/linear/scripts/linear"
+    }
+
     // The standing brief handed to the ticket agent. It embeds the user's note
-    // and every selected screenshot path as user-provided ticket material; the
-    // agent chooses the clearest placement on the issue, while the prompt's
-    // `linear update --proof` command gives it a reliable upload path. Project
-    // detection + investigation remain agent-owned (Swift pre-computes nothing).
+    // and every selected screenshot path as user-provided ticket material so the
+    // issue body can describe what the user selected. The menu-bar helper owns
+    // the upload after creation; this prompt must not rely on the agent to
+    // remember a second attachment command. Project detection + investigation
+    // remain agent-owned (Swift pre-computes nothing).
     // `linear create` takes a POSITIONAL title, no --json, and prints `Created
     // RUSH-###: <title>` — parsed back in the termination handler.
     static func ticketAgentPrompt(note: String, screenshotPaths: [String]) -> String {
-        let linear = "\(home)/.agents/skills/linear/scripts/linear"
+        let linear = linearSkillBinary()
         let shots: String
         let attachmentStep: String
         if screenshotPaths.isEmpty {
@@ -217,11 +228,11 @@ enum AgentsCLI {
             attachmentStep = "5. No user-provided files were attached; skip attachment handling."
         } else if screenshotPaths.count == 1 {
             shots = "The user attached this screenshot for the ticket: \(screenshotPaths[0]) — read it first with your image tools."
-            attachmentStep = ticketAttachmentStep(linear: linear, paths: screenshotPaths)
+            attachmentStep = ticketAttachmentStep()
         } else {
             let list = screenshotPaths.map { "  - \($0)" }.joined(separator: "\n")
             shots = "The user attached \(screenshotPaths.count) screenshots for the ticket — read each with your image tools:\n\(list)"
-            attachmentStep = ticketAttachmentStep(linear: linear, paths: screenshotPaths)
+            attachmentStep = ticketAttachmentStep()
         }
         return """
         You are filing exactly ONE Linear ticket from a quick capture bar. Do not ask \
@@ -256,20 +267,11 @@ enum AgentsCLI {
         """
     }
 
-    private static func ticketAttachmentStep(linear: String, paths: [String]) -> String {
-        let proofArgs = paths.map { "             --proof \(shellQuote($0))" }
-            .joined(separator: " \\\n")
+    private static func ticketAttachmentStep() -> String {
         return """
-        5. Make sure every user-provided file is uploaded to the resulting Linear issue — do \
-        not merely mention its local filesystem path. Use whatever placement best communicates \
-        the issue: description, comment, or another appropriate attachment surface. The reliable \
-        CLI default is:
-
-           \(linear) update <created-id> \\
-        \(proofArgs)
-
-           An equivalent upload mechanism is fine when you intentionally choose another placement. \
-        Do not finish until every attached path is represented on the issue.
+        5. Include what the attached screenshot(s) show in the issue description. Do not run a \
+        separate upload command: after you print the created ticket id, the menu-bar helper \
+        uploads every selected file to that issue automatically.
         """
     }
 
@@ -315,19 +317,26 @@ enum AgentsCLI {
         let agent = agent ?? env["AGENTS_ISSUE_AGENT"] ?? "claude"
         Notifier.post(title: "Filing ticket…", body: shortenForNotice(note))
         runMonitored(argv(["run", agent, prompt, "--mode", "auto"])) { output, ok in
-            guard ok, let id = parseCreatedTicketID(output) else {
+            guard ok, let completion = ticketCompletion(output: output, screenshotPaths: screenshotPaths) else {
                 Notifier.post(title: "Ticket agent finished",
                               body: ok ? "Could not confirm a ticket was created."
                                        : "The ticket agent exited with an error.")
                 return
             }
-            let url = parseTicketURL(output)
-            // Persist to the ledger so the menu bar's RECENT TICKETS section can
-            // surface it beyond the transient notification.
-            RecentTickets.record(id: id, title: note, url: url,
-                                 createdAt: ISO8601DateFormatter().string(from: Date()))
-            // Attach the ticket URL so the notification is clickable → opens it.
-            Notifier.post(title: "Created \(id)", body: shortenForNotice(note), url: url)
+            let finish: (Bool) -> Void = { attached in
+                // Persist to the ledger so the menu bar's RECENT TICKETS section can
+                // surface it beyond the transient notification.
+                RecentTickets.record(id: completion.id, title: note, url: completion.url,
+                                     createdAt: ISO8601DateFormatter().string(from: Date()))
+                // Attach the ticket URL so the notification is clickable → opens it.
+                let body = attached ? shortenForNotice(note) : "Created ticket, but screenshot upload failed."
+                Notifier.post(title: "Created \(completion.id)", body: body, url: completion.url)
+            }
+            if let attachmentArgs = completion.attachmentArgs {
+                runMonitored(attachmentArgs) { _, attached in finish(attached) }
+            } else {
+                finish(true)
+            }
         }
     }
 
@@ -370,6 +379,24 @@ enum AgentsCLI {
             }
         }
         return nil
+    }
+
+    static func ticketCompletion(output: String, screenshotPaths: [String]) -> TicketCompletion? {
+        guard let id = parseCreatedTicketID(output) else { return nil }
+        return TicketCompletion(id: id,
+                                url: parseTicketURL(output),
+                                attachmentArgs: ticketProofUpdateArgs(ticketID: id,
+                                                                       screenshotPaths: screenshotPaths))
+    }
+
+    static func ticketProofUpdateArgs(ticketID: String, screenshotPaths: [String]) -> [String]? {
+        guard !screenshotPaths.isEmpty else { return nil }
+        var args = [linearSkillBinary(), "update", ticketID]
+        for path in screenshotPaths {
+            args.append("--proof")
+            args.append(path)
+        }
+        return args
     }
 
     private static func shortenForNotice(_ s: String) -> String {
