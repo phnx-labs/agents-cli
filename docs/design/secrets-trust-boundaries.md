@@ -128,8 +128,9 @@ boundary seen from two sides.
   the interactive user's screen. It reads from the broker or fails loudly; it does not
   prompt behind the user's back.
 - **The broker holds resolved env in memory only.** `agents secrets unlock` caches the
-  resolved bundle behind a `0700` Unix socket (`src/lib/secrets/agent.ts`,
-  `session-store.ts`) so Path A stays promptless across concurrent runs — still no
+  resolved bundle behind a Unix socket in a `0700` directory, with the socket file
+  itself chmod'd `0600` (`src/lib/secrets/agent.ts:145`, `:445`; `session-store.ts`) so
+  Path A stays promptless across concurrent runs — still no
   stdout exposure. See [08-secrets-agent-process-model.md](../../apps/cli/docs/08-secrets-agent-process-model.md).
 - **Auto-mode classifiers.** In hosted agent harnesses, an attempt to scan bundles or
   materialize a value (`secrets show`, bulk `--reveal`) is challenged as credential
