@@ -19,6 +19,10 @@ export interface RecentToolCall {
   timestamp?: string;
 }
 
+export type RecentEvent =
+  | { kind: 'tool'; call: RecentToolCall; timestamp?: string }
+  | { kind: 'message' | 'reasoning'; text: string; timestamp?: string };
+
 export interface SessionAttachment {
   path: string;
   label: string;
@@ -33,6 +37,7 @@ export interface SessionQuickDetails {
   recentFileTimes: Record<string, number>;
   recentTools: string[];
   recentToolCalls: RecentToolCall[];
+  recentEvents: RecentEvent[];
   attachments: SessionAttachment[];
   lastFilePath: string | null;
   /**
@@ -45,8 +50,10 @@ export interface SessionQuickDetails {
 }
 
 const MAX_RECENT_TOOL_CALLS = 24;
+const MAX_RECENT_EVENTS = 32;
 const MAX_TOOL_OUTPUT_CHARS = 4000;
 const MAX_NARRATIVE_CHARS = 160;
+const MAX_EVENT_TEXT_CHARS = 220;
 
 type MutableSessionQuickSummary = {
   filesEdited: Set<string>;
@@ -58,6 +65,7 @@ type MutableSessionQuickSummary = {
   recentFileTimes: Record<string, number>;
   recentTools: string[];
   recentToolCalls: RecentToolCall[];
+  recentEvents: RecentEvent[];
   attachments: SessionAttachment[];
   seenAttachments: Set<string>;
   pendingToolCallById: Map<string, RecentToolCall>;
@@ -81,6 +89,7 @@ function initMutableSummary(): MutableSessionQuickSummary {
     recentFileTimes: {},
     recentTools: [],
     recentToolCalls: [],
+    recentEvents: [],
     attachments: [],
     seenAttachments: new Set<string>(),
     pendingToolCallById: new Map<string, RecentToolCall>(),
@@ -115,13 +124,48 @@ function assistantTextFromContent(content: unknown): string {
   return parts.join(' ').trim();
 }
 
+function textFromReasoningSummary(summary: unknown): string {
+  if (typeof summary === 'string') return summary.trim();
+  if (!Array.isArray(summary)) return '';
+  const parts: string[] = [];
+  for (const item of summary) {
+    if (typeof item === 'string') {
+      const text = item.trim();
+      if (text) parts.push(text);
+      continue;
+    }
+    const rec = toRecord(item);
+    if (!rec) continue;
+    const text = toStringValue(rec.text).trim();
+    if (text) parts.push(text);
+  }
+  return parts.join(' ').trim();
+}
+
+function reasoningTextFromBlock(block: Record<string, unknown>): string {
+  return firstString(
+    block.thinking,
+    block.reasoning,
+    block.text,
+    textFromReasoningSummary(block.summary),
+  );
+}
+
 /** Collapse whitespace and truncate to ~160 chars at a word boundary. */
 function truncateNarrative(text: string): string {
+  return truncateText(text, MAX_NARRATIVE_CHARS);
+}
+
+function truncateEventText(text: string): string {
+  return truncateText(text, MAX_EVENT_TEXT_CHARS);
+}
+
+function truncateText(text: string, maxChars: number): string {
   const clean = text.replace(/\s+/g, ' ').trim();
-  if (clean.length <= MAX_NARRATIVE_CHARS) return clean;
-  const slice = clean.slice(0, MAX_NARRATIVE_CHARS);
+  if (clean.length <= maxChars) return clean;
+  const slice = clean.slice(0, maxChars);
   const lastSpace = slice.lastIndexOf(' ');
-  const base = lastSpace > MAX_NARRATIVE_CHARS * 0.6 ? slice.slice(0, lastSpace) : slice;
+  const base = lastSpace > maxChars * 0.6 ? slice.slice(0, lastSpace) : slice;
   return base.replace(/[\s,.;:]+$/, '') + '...';
 }
 
@@ -165,6 +209,7 @@ function stringifyToolResultContent(value: unknown): string {
 
 function pushToolCall(summary: MutableSessionQuickSummary, call: RecentToolCall, id?: string): void {
   summary.recentToolCalls.unshift(call);
+  pushRecentEvent(summary, { kind: 'tool', call, timestamp: call.timestamp });
   if (summary.recentToolCalls.length > MAX_RECENT_TOOL_CALLS) {
     const dropped = summary.recentToolCalls.pop();
     if (dropped) {
@@ -177,6 +222,24 @@ function pushToolCall(summary: MutableSessionQuickSummary, call: RecentToolCall,
     }
   }
   if (id) summary.pendingToolCallById.set(id, call);
+}
+
+function pushRecentEvent(summary: MutableSessionQuickSummary, event: RecentEvent): void {
+  summary.recentEvents.unshift(event);
+  if (summary.recentEvents.length > MAX_RECENT_EVENTS) {
+    summary.recentEvents.pop();
+  }
+}
+
+function pushTextEvent(
+  summary: MutableSessionQuickSummary,
+  kind: 'message' | 'reasoning',
+  text: string,
+  timestamp?: string,
+): void {
+  const truncated = truncateEventText(text);
+  if (!truncated) return;
+  pushRecentEvent(summary, { kind, text: truncated, timestamp });
 }
 
 function attachToolResult(
@@ -408,7 +471,17 @@ function applyClaudeEvent(summary: MutableSessionQuickSummary, event: Record<str
 
     for (const block of content) {
       const blockRecord = toRecord(block);
-      if (!blockRecord || toStringValue(blockRecord.type) !== 'tool_use') continue;
+      if (!blockRecord) continue;
+      const blockType = toStringValue(blockRecord.type);
+      if (blockType === 'text' || blockType === 'output_text' || blockType === 'input_text') {
+        pushTextEvent(summary, 'message', toStringValue(blockRecord.text), eventTimestamp);
+        continue;
+      }
+      if (blockType === 'thinking' || blockType === 'reasoning') {
+        pushTextEvent(summary, 'reasoning', reasoningTextFromBlock(blockRecord), eventTimestamp);
+        continue;
+      }
+      if (blockType !== 'tool_use') continue;
 
       const toolName = toStringValue(blockRecord.name);
       const toolInput = toRecord(blockRecord.input) || {};
@@ -561,6 +634,11 @@ function applyCodexEvent(summary: MutableSessionQuickSummary, event: Record<stri
   if (!payload) return;
   const payloadType = toStringValue(payload.type);
 
+  if (payloadType === 'reasoning') {
+    pushTextEvent(summary, 'reasoning', reasoningTextFromBlock(payload), eventTimestamp);
+    return;
+  }
+
   if (payloadType === 'function_call_output') {
     const callId = toStringValue(payload.call_id) || toStringValue(payload.id);
     if (!callId) return;
@@ -592,6 +670,7 @@ function applyCodexEvent(summary: MutableSessionQuickSummary, event: Record<stri
   if (payloadType === 'message' && toStringValue(payload.role) === 'assistant') {
     const text = assistantTextFromContent(payload.content);
     if (text) summary.lastAssistantText = text;
+    if (text) pushTextEvent(summary, 'message', text, eventTimestamp);
     return;
   }
 
@@ -621,6 +700,16 @@ function applyGeminiEvent(summary: MutableSessionQuickSummary, event: Record<str
     if (role === 'assistant') {
       const text = assistantTextFromContent(event.content) || toStringValue(event.text).trim();
       if (text) summary.lastAssistantText = text;
+      if (text) pushTextEvent(summary, 'message', text, eventTimestamp);
+      const content = Array.isArray(event.content) ? event.content : [];
+      for (const block of content) {
+        const rec = toRecord(block);
+        if (!rec) continue;
+        const type = toStringValue(rec.type);
+        if (type === 'thinking' || type === 'reasoning') {
+          pushTextEvent(summary, 'reasoning', reasoningTextFromBlock(rec), eventTimestamp);
+        }
+      }
     }
     return;
   }
@@ -709,6 +798,7 @@ export function extractSessionQuickDetails(
       recentFileTimes: {},
       recentTools: [],
       recentToolCalls: [],
+      recentEvents: [],
       attachments: [],
       lastFilePath: null,
       narrative: '',
@@ -739,6 +829,7 @@ export function extractSessionQuickDetails(
     recentFileTimes: summary.recentFileTimes,
     recentTools: summary.recentTools.slice(0, 32),
     recentToolCalls: summary.recentToolCalls.slice(0, MAX_RECENT_TOOL_CALLS),
+    recentEvents: summary.recentEvents.slice(0, MAX_RECENT_EVENTS),
     attachments: summary.attachments.slice(0, 24),
     lastFilePath: recentFilesSource[0] || null,
     narrative: truncateNarrative(summary.lastAssistantText),

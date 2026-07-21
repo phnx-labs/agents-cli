@@ -13,10 +13,10 @@
 // (+ DESIGN.md). Field names mirror the prototype's AGENTS / TICKETS mock objects
 // so the port is a 1:1 translation, not a redesign.
 
-import type { UnifiedTask, RecentToolCall } from '../../types'
+import type { UnifiedTask, RecentEvent, RecentToolCall } from '../../types'
 import type { PlanFile } from '../../utils/planDetector'
 
-export type { RecentToolCall }
+export type { RecentEvent, RecentToolCall }
 
 // ---------- project resolution ----------
 //
@@ -174,6 +174,7 @@ export interface FloorAgent {
   todos: TodoItem[]      // task checklist from the latest TodoWrite; empty when none
   summary: string        // the "what is it doing" line (CLI-provided); '' when unknown
   recent: RecentToolCall[] // rolling window of this session's recent tool calls; [] when none
+  recentEvents?: RecentEvent[] // rolling window of detail timeline events; [] when none
   pane?: string          // tmux `%N` pane handle for unique addressing; undefined for non-tmux
   viewingIn?: string     // "Codium tab 3" / "Ghostty tab 2" / "detached"; undefined when unknown
   /**

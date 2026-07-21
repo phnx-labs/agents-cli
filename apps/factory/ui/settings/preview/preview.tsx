@@ -590,6 +590,21 @@ const detailTerminal: TerminalDetail = {
     { name: 'Read', input: { file_path: '/rush/src/db/policy.ts' }, timestamp: new Date(Date.now() - 120_000).toISOString() },
     { name: 'Grep', input: { pattern: 'policy_v1' }, timestamp: new Date(Date.now() - 200_000).toISOString() },
   ],
+  recentEvents: [
+    { kind: 'tool', call: { name: 'Bash', input: { command: 'bun test tests/rls_policy.test.ts' }, timestamp: new Date(Date.now() - 8_000).toISOString() }, timestamp: new Date(Date.now() - 8_000).toISOString() },
+    { kind: 'message', text: 'One service_role policy is still failing; rerunning the focused RLS test after narrowing the predicate.', timestamp: new Date(Date.now() - 16_000).toISOString() },
+    { kind: 'tool', call: { name: 'Edit', input: { file_path: '/rush/supabase/migrations/20260708_policy.sql' }, timestamp: new Date(Date.now() - 30_000).toISOString() }, timestamp: new Date(Date.now() - 30_000).toISOString() },
+    { kind: 'reasoning', text: 'The failing assertion points at the SELECT policy, so the migration predicate should match the old policy_v1 role check.', timestamp: new Date(Date.now() - 45_000).toISOString() },
+    { kind: 'tool', call: { name: 'TodoWrite', input: { todos: [
+      { content: 'Port policy_v1 rules to policy table', status: 'completed' },
+      { content: 'Write the down-migration', status: 'completed' },
+      { content: 'Rewrite the service_role policy', status: 'in_progress' },
+      { content: 'Add RLS regression test', status: 'pending' },
+    ] }, timestamp: new Date(Date.now() - 60_000).toISOString() }, timestamp: new Date(Date.now() - 60_000).toISOString() },
+    { kind: 'message', text: 'Ported the base policies; checking the call sites before touching the down-migration.', timestamp: new Date(Date.now() - 90_000).toISOString() },
+    { kind: 'tool', call: { name: 'Read', input: { file_path: '/rush/src/db/policy.ts' }, timestamp: new Date(Date.now() - 120_000).toISOString() }, timestamp: new Date(Date.now() - 120_000).toISOString() },
+    { kind: 'tool', call: { name: 'Grep', input: { pattern: 'policy_v1' }, timestamp: new Date(Date.now() - 200_000).toISOString() }, timestamp: new Date(Date.now() - 200_000).toISOString() },
+  ],
 } as TerminalDetail
 
 function Detail() {

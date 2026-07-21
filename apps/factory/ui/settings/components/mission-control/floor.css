@@ -700,6 +700,10 @@
 .swarmify-root .vtl li.now .mk { box-shadow: 0 0 0 3px var(--brand-ring); animation: sw-tlpulse 1.3s infinite; }
 .swarmify-root .vtl li .nm { font-family: "Geist Mono", monospace; font-size: 11.5px; color: var(--ds-text); }
 .swarmify-root .vtl li .nm .t { color: var(--status-running); }
+.swarmify-root .vtl li.note { align-items: flex-start; }
+.swarmify-root .vtl li.note .mk { width: 7px; height: 7px; left: -4.5px; top: 6px; background: var(--ds-text-faint); box-shadow: none; }
+.swarmify-root .vtl li.note.reasoning .mk { background: var(--ds-text-dim); }
+.swarmify-root .vtl li.note .msg { min-width: 0; color: var(--ds-text-muted); font-size: 12px; line-height: 1.35; font-style: italic; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .swarmify-root .vtl li .ago { font-family: "Geist Mono", monospace; font-size: 10px; color: var(--ds-text-faint); margin-left: auto; flex: none; }
 .swarmify-root .vtl li.now .nm { font-weight: 650; }
 

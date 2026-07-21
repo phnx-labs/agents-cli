@@ -1945,12 +1945,12 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
                 <TodoChecklist todos={a.todos} />
               </div>
             )}
-            {/* Progress timeline: the recent tool calls as a vertical rail, oldest -> now.
+            {/* Progress timeline: recent transcript events as a vertical rail, oldest -> now.
                 For cloud rows the existing CloudActivityFeed still drives the AgentDetailView. */}
-            {a.recent.length > 0 && (
+            {((a.recentEvents?.length ?? 0) > 0 || a.recent.length > 0) && (
               <div className="sw-unified-detail-section">
-                <div className="sw-section-label">Progress <span className="sw-section-count">{Math.min(a.recent.length, 8)} recent</span></div>
-                <VerticalTimeline recent={a.recent} nowMs={nowMs} />
+                <div className="sw-section-label">Progress <span className="sw-section-count">{Math.min(a.recentEvents?.length || a.recent.length, 8)} recent</span></div>
+                <VerticalTimeline recent={a.recentEvents?.length ? a.recentEvents : a.recent.map((call) => ({ kind: 'tool' as const, call, timestamp: call.timestamp }))} nowMs={nowMs} />
               </div>
             )}
             {/* Streaming Activity feed: the recent assistant messages (markdown), newest at

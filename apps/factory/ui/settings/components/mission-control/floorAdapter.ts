@@ -30,7 +30,7 @@ import {
   type TodoItem,
   type FloorAttachment,
 } from './floorModel'
-import type { UnifiedTask, RecentToolCall, ProjectRule, SessionAttachment } from '../../types'
+import type { UnifiedTask, RecentEvent, RecentToolCall, ProjectRule, SessionAttachment } from '../../types'
 import { detectPlanFiles, extractPlanCandidates, type PlanFile, type PlanFileCandidate } from '../../utils/planDetector'
 
 // Last non-empty todo set per session, so the checklist survives the recent-tool
@@ -97,6 +97,7 @@ export interface UnifiedAgentLike {
     currentActivity?: string
     narrative?: string
     recentToolCalls?: RecentToolCall[]
+    recentEvents?: RecentEvent[]
     recentFiles?: string[]
     attachments?: SessionAttachment[]
   } | null
@@ -533,6 +534,7 @@ export function toFloorAgentFromUnified(
     // (currentActivity) when it hasn't spoken between tool calls yet.
     summary: u.terminal?.narrative || u.terminal?.currentActivity || '',
     recent: u.terminal?.recentToolCalls ?? [],
+    recentEvents: u.terminal?.recentEvents ?? (u.terminal?.recentToolCalls ?? []).map((call) => ({ kind: 'tool', call, timestamp: call.timestamp })),
     // Per-session rate limit (RUSH-1523): CLI flag or detect from last messages.
     rateLimited: detectSessionRateLimited(u.agent?.rateLimited, messages, resp),
   }
@@ -648,9 +650,10 @@ export function toFloorAgentFromRemote(r: RemoteSessionLike, pinned: Set<string>
     // wrote no todo list; the CLI now carries this for remote/device-dispatched agents.
     todos: remoteTodos,
     // Remote = summary only: the sweep carries the session's task line (topic) / last
-    // response but no tool calls yet, so recent stays empty until Tier-2 enrichment.
+    // response but no tool calls yet, so progress stays empty until Tier-2 enrichment.
     summary: r.topic || r.lastResponse || '',
     recent: [],
+    recentEvents: [],
     // tmux %pane handle + where it's being viewed, surfaced on the card.
     pane: r.tmuxPane || undefined,
     viewingIn: r.viewingIn || undefined,

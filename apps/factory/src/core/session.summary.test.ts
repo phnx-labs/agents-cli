@@ -161,6 +161,39 @@ describe('extractSessionQuickSummary', () => {
     expect((bash.input as { command: string }).command).toBe('ls -la');
   });
 
+  test('interleaves Claude prose, thinking, and tool calls into recent events', () => {
+    const lines = [
+      JSON.stringify({
+        type: 'assistant',
+        timestamp: '2026-07-13T08:00:00.000Z',
+        message: {
+          content: [
+            { type: 'text', text: 'Reading the sidebar model before changing the renderer.' },
+            { type: 'thinking', thinking: 'The timeline needs one event stream, not a second prose panel.' },
+            { type: 'tool_use', id: 'tool_read', name: 'Read', input: { file_path: '/repo/Timeline.tsx' } },
+          ],
+        },
+      }),
+    ];
+
+    const details = extractSessionQuickDetails(lines.join('\n'), 'claude');
+    expect(details.recentToolCalls).toHaveLength(1);
+    expect(details.recentEvents.map((event) => event.kind)).toEqual(['tool', 'reasoning', 'message']);
+    expect(details.recentEvents[0]).toMatchObject({
+      kind: 'tool',
+      call: { name: 'Read', input: { file_path: '/repo/Timeline.tsx' } },
+      timestamp: '2026-07-13T08:00:00.000Z',
+    });
+    expect(details.recentEvents[1]).toMatchObject({
+      kind: 'reasoning',
+      text: 'The timeline needs one event stream, not a second prose panel.',
+    });
+    expect(details.recentEvents[2]).toMatchObject({
+      kind: 'message',
+      text: 'Reading the sidebar model before changing the renderer.',
+    });
+  });
+
   test('captures Codex tool calls with outputs by call_id', () => {
     const lines = [
       JSON.stringify({
@@ -186,6 +219,43 @@ describe('extractSessionQuickSummary', () => {
     expect(details.recentToolCalls.length).toBe(1);
     expect(details.recentToolCalls[0].name).toBe('shell');
     expect(details.recentToolCalls[0].output).toBe('hi');
+  });
+
+  test('interleaves Codex reasoning summaries with function calls', () => {
+    const lines = [
+      JSON.stringify({
+        timestamp: '2026-07-13T08:00:00.000Z',
+        type: 'response_item',
+        payload: {
+          type: 'reasoning',
+          summary: [{ type: 'summary_text', text: 'Inspecting how the progress data crosses into React.' }],
+        },
+      }),
+      JSON.stringify({
+        timestamp: '2026-07-13T08:00:05.000Z',
+        type: 'response_item',
+        payload: {
+          type: 'function_call',
+          name: 'read_file',
+          arguments: '{"path":"ui/settings/types/index.ts"}',
+          call_id: 'call_read',
+        },
+      }),
+    ];
+
+    const details = extractSessionQuickDetails(lines.join('\n'), 'codex');
+    expect(details.recentToolCalls).toHaveLength(1);
+    expect(details.recentEvents.map((event) => event.kind)).toEqual(['tool', 'reasoning']);
+    expect(details.recentEvents[0]).toMatchObject({
+      kind: 'tool',
+      call: { name: 'read_file', input: { path: 'ui/settings/types/index.ts' } },
+      timestamp: '2026-07-13T08:00:05.000Z',
+    });
+    expect(details.recentEvents[1]).toMatchObject({
+      kind: 'reasoning',
+      text: 'Inspecting how the progress data crosses into React.',
+      timestamp: '2026-07-13T08:00:00.000Z',
+    });
   });
 
   test('parses Codex custom apply_patch calls into edited files', () => {

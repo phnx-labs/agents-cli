@@ -29,6 +29,7 @@ export function filePillColor(touchedAtMs: number | undefined, now: number): str
 export function TerminalExpandedDetail({ terminal }: { terminal: TerminalInfo }) {
   const now = useNow(5000)
   const todos = latestTodos(terminal.recentToolCalls)
+  const timelineEvents = terminal.recentEvents ?? (terminal.recentToolCalls ?? []).map((call) => ({ kind: 'tool' as const, call, timestamp: call.timestamp }))
   const cwdDisplay = terminal.cwd ? terminal.cwd.replace(/^\/Users\/[^/]+/, '~') : null
   const linkStyle: React.CSSProperties = {
     background: 'transparent',
@@ -103,13 +104,13 @@ export function TerminalExpandedDetail({ terminal }: { terminal: TerminalInfo })
           </div>
         </div>
       )}
-      {/* Progress timeline: the recent tool calls as a vertical rail, oldest -> now —
+      {/* Progress timeline: recent transcript events as a vertical rail, oldest -> now —
           the same VerticalTimeline the headless/cloud detail uses, so terminal, headless
-          and cloud detail panes read identically (was a flat "Recent tools" list). */}
-      {terminal.recentToolCalls && terminal.recentToolCalls.length > 0 && (
+          and cloud detail panes read identically. */}
+      {timelineEvents.length > 0 && (
         <div className="sw-unified-detail-section">
-          <div className="sw-section-label">Progress <span className="sw-section-count">{Math.min(terminal.recentToolCalls.length, 8)} recent</span></div>
-          <VerticalTimeline recent={terminal.recentToolCalls} nowMs={now} />
+          <div className="sw-section-label">Progress <span className="sw-section-count">{Math.min(timelineEvents.length, 8)} recent</span></div>
+          <VerticalTimeline recent={timelineEvents} nowMs={now} />
         </div>
       )}
       {todos.length > 0 && (

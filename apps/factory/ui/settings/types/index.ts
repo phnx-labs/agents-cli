@@ -344,6 +344,10 @@ export interface RecentToolCall {
   timestamp?: string
 }
 
+export type RecentEvent =
+  | { kind: 'tool'; call: RecentToolCall; timestamp?: string }
+  | { kind: 'message' | 'reasoning'; text: string; timestamp?: string }
+
 export interface SessionAttachment {
   path: string
   label: string
@@ -373,6 +377,7 @@ export interface TerminalDetail {
   recentFileTimes?: Record<string, number>
   recentTools?: string[]
   recentToolCalls?: RecentToolCall[]
+  recentEvents?: RecentEvent[]
   attachments?: SessionAttachment[]
   lastFilePath?: string | null
   narrative?: string

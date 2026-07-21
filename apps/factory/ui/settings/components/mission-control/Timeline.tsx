@@ -1,5 +1,5 @@
 import React from 'react'
-import type { RecentToolCall } from './floorModel'
+import type { RecentEvent, RecentToolCall } from './floorModel'
 
 // Progress timeline from a session's recent tool calls. Two affordances share the same
 // step derivation (toolTarget / stepAgo below):
@@ -49,7 +49,7 @@ export function stepAgo(timestamp: string | undefined, nowMs: number): string {
 }
 
 /** Newest-first `recent` -> oldest-first steps, capped to `limit` most-recent calls. */
-function orderedSteps(recent: RecentToolCall[], limit: number): RecentToolCall[] {
+function orderedSteps<T>(recent: T[], limit: number): T[] {
   return recent.slice(0, limit).reverse()
 }
 
@@ -85,27 +85,41 @@ export function MiniTimeline({ recent, nowMs, limit = 4 }: MiniTimelineProps) {
 }
 
 interface VerticalTimelineProps {
-  recent: RecentToolCall[]
+  recent: RecentEvent[]
   nowMs: number
   /** How many recent steps to show (default 8). */
   limit?: number
 }
 
-/** Detail-pane vertical timeline: last ~8 tool steps as a connected rail. */
+function eventTimestamp(event: RecentEvent): string | undefined {
+  return event.kind === 'tool' ? event.call.timestamp : event.timestamp
+}
+
+/** Detail-pane vertical timeline: last ~8 progress events as a connected rail. */
 export function VerticalTimeline({ recent, nowMs, limit = 8 }: VerticalTimelineProps) {
   if (recent.length === 0) return null
   const steps = orderedSteps(recent, limit)
   const lastIndex = steps.length - 1
   return (
     <ul className="vtl">
-      {steps.map((call, i) => {
+      {steps.map((event, i) => {
         const now = i === lastIndex
+        if (event.kind !== 'tool') {
+          return (
+            <li key={`${event.kind}-${event.timestamp || i}-${i}`} className={`${now ? 'now ' : ''}note ${event.kind}`}>
+              <span className="mk" />
+              <span className="msg">{event.text}</span>
+              <span className="ago">{stepAgo(event.timestamp, nowMs)}</span>
+            </li>
+          )
+        }
+        const call = event.call
         const target = toolTarget(call)
         return (
           <li key={`${call.name}-${i}`} className={now ? 'now' : ''}>
             <span className="mk" />
             <span className="nm">{call.name}{target && <span className="t mono"> {target}</span>}</span>
-            <span className="ago">{stepAgo(call.timestamp, nowMs)}</span>
+            <span className="ago">{stepAgo(eventTimestamp(event), nowMs)}</span>
           </li>
         )
       })}
