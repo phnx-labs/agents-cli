@@ -1049,7 +1049,7 @@ export function registerSecretsCommands(program: Command): void {
         // `secrets get` is the scriptable automation primitive ($(agents secrets
         // get bundle KEY)); when embedded in a headless routine/CI script it must
         // not pop an unwatched Touch ID prompt. Interactive use still prompts.
-        const { env } = readAndResolveBundleEnv(item, { caller: 'secrets get', keys: [key], agentOnly: isHeadlessSecretsContext() });
+        const { env } = readAndResolveBundleEnv(item, { caller: 'secrets get', keys: [key], keyMode: 'storage', agentOnly: isHeadlessSecretsContext() });
         if (!(key in env)) {
           console.error(chalk.red(`Key '${key}' not in bundle '${item}'.`));
           process.exit(1);
@@ -1639,7 +1639,7 @@ Examples:
               'Set it for this command, then supply the same value when importing.'
             );
           }
-          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: 'export --to-file', agentOnly: isHeadlessSecretsContext() });
+          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: 'export --to-file', keyMode: 'storage', agentOnly: isHeadlessSecretsContext() });
           exportBundleToFile(env, opts.toFile, passphrase);
           console.log(chalk.green(`Exported ${Object.keys(env).length} key(s) to ${opts.toFile}`));
           return;
@@ -1668,7 +1668,7 @@ Examples:
               );
             }
           }
-          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: `ssh export`, agentOnly: isHeadlessSecretsContext() });
+          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: `ssh export`, keyMode: 'storage', agentOnly: isHeadlessSecretsContext() });
           const dotenv = bundleEnvToDotenv(env);
           const keyCount = Object.keys(env).length;
           // Drive the remote's own `agents secrets import --from -` so the values
@@ -1736,7 +1736,7 @@ Examples:
         if (opts.to1password) {
           assertOpAvailable();
           const vault = await resolveVault(opts.vault);
-          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: `1Password vault ${vault}`, agentOnly: isHeadlessSecretsContext() });
+          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: `1Password vault ${vault}`, keyMode: 'storage', agentOnly: isHeadlessSecretsContext() });
           let created = 0;
           let overwritten = 0;
           let skipped = 0;
@@ -1778,6 +1778,7 @@ Examples:
         // terminal stdin, so it is not headless and still prompts.
         const { env } = readAndResolveBundleEnv(resolvedBundleName, {
           caller: `export to shell`,
+          keyMode: opts.format === 'json' ? 'storage' : 'process',
           agentOnly: isHeadlessSecretsContext(),
         });
         if (opts.format === 'json') {
@@ -2042,7 +2043,7 @@ Examples:
         try {
           // noAgent: read the real keychain (one Touch ID) rather than the
           // agent we're about to populate.
-          const { bundle, env } = readAndResolveBundleEnv(name, { noAgent: true, caller: 'unlock' });
+          const { bundle, env } = readAndResolveBundleEnv(name, { noAgent: true, caller: 'unlock', keyMode: 'storage' });
           if (await agentLoad(name, bundle, env, ttlMs)) {
             loaded++;
             // Persist a durable session snapshot so the unlock survives a daemon

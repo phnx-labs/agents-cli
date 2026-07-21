@@ -74,6 +74,33 @@ describe('filterAgentHitBySubsetAndExpiry (agent fast-path gate)', () => {
     expect(out.env.SLACK_TOKEN).toBeUndefined();
   });
 
+  it('projects a selected account-suffixed key from the cached snapshot', () => {
+    const hit = agentHit({
+      'GITHUB_USERNAME.personal': 'k',
+      'GITHUB_USERNAME.work': 'k',
+    });
+    const out = filterAgentHitBySubsetAndExpiry(hit, { keys: ['GITHUB_USERNAME.personal'] });
+    expect(out.env).toEqual({ GITHUB_USERNAME: 'v-GITHUB_USERNAME.personal' });
+  });
+
+  it('preserves exact account-suffixed keys when storage mode is requested', () => {
+    const hit = agentHit({ 'GITHUB_USERNAME.personal': 'k' });
+    const out = filterAgentHitBySubsetAndExpiry(hit, {
+      keys: ['GITHUB_USERNAME.personal'],
+      keyMode: 'storage',
+    });
+    expect(out.env).toEqual({ 'GITHUB_USERNAME.personal': 'v-GITHUB_USERNAME.personal' });
+  });
+
+  it('fails loudly when cached account variants collide in process env mode', () => {
+    const hit = agentHit({
+      'GITHUB_USERNAME.personal': 'k',
+      'GITHUB_USERNAME.work': 'k',
+    });
+    expect(() => filterAgentHitBySubsetAndExpiry(hit, {}))
+      .toThrow(/maps multiple keys to 'GITHUB_USERNAME'/);
+  });
+
   it('throws a fail-loud error if a requested key is not in the bundle', () => {
     const hit = agentHit({ API_KEY: 'k' });
     expect(() => filterAgentHitBySubsetAndExpiry(hit, { keys: ['GHOST'] }))

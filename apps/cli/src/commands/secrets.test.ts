@@ -164,6 +164,7 @@ describe('bundleEnvToDotenv', () => {
       WITH_SPACES: '  padded value  ',
       WITH_EQUALS: 'key=val=ue',
       WITH_HASH: 'token#frag',
+      'GITHUB_USERNAME.personal': 'muqsit',
       EMPTY: '',
     };
     const dotenv = bundleEnvToDotenv(env);

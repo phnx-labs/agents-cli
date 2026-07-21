@@ -111,7 +111,7 @@ export function resolveSecret(bundle: string, key: string): string {
   }
   // The MCP get_secret tool is typically served by a background/headless agent
   // process; resolve broker-only there so it never raises an unwatched prompt.
-  const { env } = readAndResolveBundleEnv(bundle, { caller: 'secrets-mcp', agentOnly: isHeadlessSecretsContext() });
+  const { env } = readAndResolveBundleEnv(bundle, { caller: 'secrets-mcp', keys: [key], keyMode: 'storage', agentOnly: isHeadlessSecretsContext() });
   const value = env[key];
   if (value === undefined) {
     throw new Error(`Key '${key}' in bundle '${bundle}' could not be resolved.`);

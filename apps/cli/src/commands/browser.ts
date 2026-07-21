@@ -1557,7 +1557,7 @@ function registerTaskCommands(browser: Command): void {
           process.exit(1);
         }
         try {
-          const { env } = readAndResolveBundleEnv(parsed.bundle, { caller: 'browser type', keys: [parsed.key], agentOnly: isHeadlessSecretsContext() });
+          const { env } = readAndResolveBundleEnv(parsed.bundle, { caller: 'browser type', keys: [parsed.key], keyMode: 'storage', agentOnly: isHeadlessSecretsContext() });
           if (!(parsed.key in env)) {
             console.error(`Key "${parsed.key}" not in bundle "${parsed.bundle}".`);
             process.exit(1);

@@ -214,6 +214,7 @@ const LAST_USED_THROTTLE_MS = 60_000;
 
 export const BUNDLE_NAME_PATTERN = /^[a-z0-9][a-z0-9\-_.]{0,48}$/i;
 export const ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+export const BUNDLE_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z0-9_-]+)?$/;
 export const BUNDLE_META_PREFIX = 'agents-cli.bundles.';
 const SECRETS_ITEM_PREFIX = 'agents-cli.secrets.';
 
@@ -229,6 +230,11 @@ export function bundleToEnvPrefix(name: string): string {
 
 export function isReservedEnvName(key: string): boolean {
   return RESERVED_ENV_NAMES.has(key.toUpperCase());
+}
+
+export function bundleKeyToEnvKey(key: string): string {
+  const dot = key.indexOf('.');
+  return dot === -1 ? key : key.slice(0, dot);
 }
 
 export function isLoaderOrInterpreterEnv(name: string): boolean {
@@ -267,10 +273,11 @@ export function validateBundleName(name: string): void {
 }
 
 export function validateEnvKey(key: string): void {
-  if (!ENV_KEY_PATTERN.test(key)) {
-    throw new Error(`Invalid environment variable name '${key}'. Must match [A-Za-z_][A-Za-z0-9_]*.`);
+  if (!BUNDLE_KEY_PATTERN.test(key)) {
+    throw new Error(`Invalid bundle key '${key}'. Must match [A-Za-z_][A-Za-z0-9_]* with optional .account suffix.`);
   }
-  if (isLoaderOrInterpreterEnv(key) || isReservedEnvName(key)) {
+  const envKey = bundleKeyToEnvKey(key);
+  if (isLoaderOrInterpreterEnv(envKey) || isReservedEnvName(envKey)) {
     throw new Error(`Env key "${key}" is reserved — cannot be used in a secrets bundle. Reserved keys include PATH, HOME, USER, and dynamic-loader/interpreter vars (LD_*, DYLD_*, NODE_OPTIONS, etc.).`);
   }
 }
@@ -539,7 +546,7 @@ function parseBundleMeta(nameHint: string | undefined, json: string, backend: Se
   if (typeof parsed.last_used === 'string') bundle.last_used = parsed.last_used;
   if (parsed.meta && typeof parsed.meta === 'object') bundle.meta = parsed.meta;
   for (const key of Object.keys(bundle.vars)) {
-    if (!ENV_KEY_PATTERN.test(key)) return null;
+    if (!BUNDLE_KEY_PATTERN.test(key)) return null;
   }
   return bundle;
 }
@@ -726,6 +733,12 @@ export interface ResolveBundleOptions {
    * bundle-level expiry has passed) aborts the run before Touch ID is popped.
    */
   allowExpired?: boolean;
+  /**
+   * `process` projects dotted account keys like `GITHUB_USERNAME.personal` to
+   * the shell-safe base env name (`GITHUB_USERNAME`). Direct value lookups and
+   * backup/export flows use `storage` to preserve the exact bundle key names.
+   */
+  keyMode?: 'process' | 'storage';
 }
 
 /**
@@ -771,6 +784,78 @@ function selectRequestedKeys(bundle: SecretsBundle, requested: string[] | undefi
   return new Set(req ?? Object.keys(bundle.vars));
 }
 
+function assignResolvedEnvValue(
+  env: Record<string, string>,
+  bundle: SecretsBundle,
+  storageKey: string,
+  value: string,
+  keyMode: ResolveBundleOptions['keyMode'],
+  owners: Map<string, string>,
+): void {
+  const envKey = keyMode === 'storage' ? storageKey : bundleKeyToEnvKey(storageKey);
+  const previous = owners.get(envKey);
+  if (previous && previous !== storageKey) {
+    throw new Error(
+      `Bundle '${bundle.name}' maps multiple keys to '${envKey}': ${previous}, ${storageKey}. ` +
+      `Select one account variant with --keys.`,
+    );
+  }
+  owners.set(envKey, storageKey);
+  env[envKey] = value;
+}
+
+function projectResolvedEnv(
+  bundle: SecretsBundle,
+  env: Record<string, string>,
+  selectedKeys: Set<string>,
+  keyMode: ResolveBundleOptions['keyMode'],
+): Record<string, string> {
+  if (keyMode === 'storage') {
+    const out: Record<string, string> = {};
+    for (const key of selectedKeys) {
+      if (key in env) out[key] = env[key];
+    }
+    return out;
+  }
+
+  let needsProjection = false;
+  const owners = new Map<string, string>();
+  for (const key of selectedKeys) {
+    const envKey = bundleKeyToEnvKey(key);
+    if (envKey !== key) needsProjection = true;
+    const previous = owners.get(envKey);
+    if (previous && previous !== key) {
+      throw new Error(
+        `Bundle '${bundle.name}' maps multiple keys to '${envKey}': ${previous}, ${key}. ` +
+        `Select one account variant with --keys.`,
+      );
+    }
+    owners.set(envKey, key);
+  }
+  if (!needsProjection) {
+    if (selectedKeys.size === Object.keys(env).length) return env;
+    const out: Record<string, string> = {};
+    for (const key of selectedKeys) {
+      if (key in env) out[key] = env[key];
+    }
+    return out;
+  }
+
+  const out: Record<string, string> = {};
+  for (const key of selectedKeys) {
+    if (key in env) out[bundleKeyToEnvKey(key)] = env[key];
+  }
+  return out;
+}
+
+function canCacheResolvedEnv(selectedKeys: Set<string>, keyMode: ResolveBundleOptions['keyMode']): boolean {
+  if (keyMode === 'storage') return true;
+  for (const key of selectedKeys) {
+    if (bundleKeyToEnvKey(key) !== key) return false;
+  }
+  return true;
+}
+
 /**
  * Apply the --keys subset + expiry gate to an already-resolved snapshot from
  * the secrets-agent fast-path. The agent stores the FULL bundle env, so a
@@ -787,13 +872,10 @@ export function filterAgentHitBySubsetAndExpiry(
 ): { bundle: SecretsBundle; env: Record<string, string> } {
   const selectedKeys = selectRequestedKeys(hit.bundle, opts.keys);
   assertNotExpired(hit.bundle, [...selectedKeys], opts.allowExpired ?? false);
-  // When no subset was requested, return the cached env untouched — same
-  // reference the agent handed back, so no per-call allocation on the hot path.
-  if (!opts.keys?.length) return hit;
-  const env: Record<string, string> = {};
-  for (const key of selectedKeys) {
-    if (key in hit.env) env[key] = hit.env[key];
-  }
+  const env = projectResolvedEnv(hit.bundle, hit.env, selectedKeys, opts.keyMode);
+  // When no subset/projection was requested, return the cached env untouched —
+  // same reference the agent handed back, so no per-call allocation on the hot path.
+  if (env === hit.env) return hit;
   return { bundle: hit.bundle, env };
 }
 
@@ -853,11 +935,12 @@ export function resolveBundleEnv(bundle: SecretsBundle, _opts: ResolveBundleOpti
     : new Map<string, string>();
 
   const env: Record<string, string> = {};
+  const owners = new Map<string, string>();
   for (const [key, raw] of Object.entries(bundle.vars)) {
     if (!selectedKeys.has(key)) continue;
     const parsed = parsedByKey.get(key)!;
     if ('literal' in parsed) {
-      env[key] = parsed.literal;
+      assignResolvedEnvValue(env, bundle, key, parsed.literal, _opts.keyMode, owners);
       continue;
     }
     if (parsed.ref.provider === 'keychain') {
@@ -869,14 +952,15 @@ export function resolveBundleEnv(bundle: SecretsBundle, _opts: ResolveBundleOpti
           `Run: agents secrets add ${bundle.name} ${key}`
         );
       }
-      env[key] = value;
+      assignResolvedEnvValue(env, bundle, key, value, _opts.keyMode, owners);
       continue;
     }
     try {
-      env[key] = resolveRef(parsed.ref, {
+      const value = resolveRef(parsed.ref, {
         allowExec: bundle.allow_exec,
         keychainItemFor: (shortId: string) => secretsKeychainItem(bundle.name, shortId),
       });
+      assignResolvedEnvValue(env, bundle, key, value, _opts.keyMode, owners);
     } catch (err) {
       throw new Error(`Bundle '${bundle.name}' key '${key}': ${(err as Error).message}`);
     }
@@ -1110,11 +1194,12 @@ export function readAndResolveBundleEnv(
 
   try {
     const env: Record<string, string> = {};
+    const owners = new Map<string, string>();
     for (const [key] of Object.entries(bundle.vars)) {
       if (!selectedKeys.has(key)) continue;
       const p = parsedByKey.get(key)!;
       if ('literal' in p) {
-        env[key] = p.literal;
+        assignResolvedEnvValue(env, bundle, key, p.literal, opts.keyMode, owners);
         continue;
       }
       if (p.ref.provider === 'keychain') {
@@ -1129,14 +1214,15 @@ export function readAndResolveBundleEnv(
             `Run: agents secrets add ${bundle.name} ${key}`,
           );
         }
-        env[key] = value;
+        assignResolvedEnvValue(env, bundle, key, value, opts.keyMode, owners);
         continue;
       }
       try {
-        env[key] = resolveRef(p.ref, {
+        const value = resolveRef(p.ref, {
           allowExec: bundle.allow_exec,
           keychainItemFor: (shortId: string) => secretsKeychainItem(bundle.name, shortId),
         });
+        assignResolvedEnvValue(env, bundle, key, value, opts.keyMode, owners);
       } catch (err) {
         throw new Error(`Bundle '${bundle.name}' key '${key}': ${(err as Error).message}`);
       }
@@ -1155,7 +1241,8 @@ export function readAndResolveBundleEnv(
       !opts.noAgent &&
       process.env.AGENTS_SECRETS_NO_AGENT !== '1' &&
       bundlePolicy(bundle) === 'daily' &&
-      secretsAgentAutoEnabled()
+      secretsAgentAutoEnabled() &&
+      canCacheResolvedEnv(selectedKeys, opts.keyMode)
     ) {
       agentAutoLoadSync(name, bundle, env, secretsHoldMs());
     }
@@ -1344,7 +1431,7 @@ export function parseDotenv(content: string): Record<string, string> {
     ) {
       value = value.slice(1, -1);
     }
-    if (ENV_KEY_PATTERN.test(key)) {
+    if (BUNDLE_KEY_PATTERN.test(key)) {
       out[key] = value;
     }
   }
