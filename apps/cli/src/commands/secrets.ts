@@ -11,6 +11,8 @@ import chalk from 'chalk';
 import { visibleWidth, padVisible, readStdinSync } from '../lib/format.js';
 import { terminalWidth, truncateToWidth, stringWidth } from '../lib/session/width.js';
 import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { SSH_TARGET_RE, assertValidSshTarget, sshExec, type SshExecResult } from '../lib/ssh-exec.js';
 import { quoteWin32ExecArg, composeWin32CommandLine } from '../lib/platform/index.js';
 import { ensureDaemonStarted, isDaemonRunning } from '../lib/daemon.js';
@@ -1879,6 +1881,60 @@ Examples:
       // process.env. stdout is the JSON-RPC channel — nothing else may print there.
       const { runSecretsMcpServer } = await import('../lib/secrets/mcp.js');
       await runSecretsMcpServer({ version: getCliVersion() });
+    });
+
+  const openclawKeychain = cmd
+    .command('openclaw-keychain')
+    .description('Migrate supported OpenClaw credentials from plaintext config to macOS Keychain-backed SecretRefs');
+
+  openclawKeychain
+    .command('migrate [config]')
+    .description('Rewrite supported OpenClaw plaintext secrets to exec SecretRefs backed by macOS Keychain')
+    .option('--account <name>', 'Keychain account name', 'openclaw')
+    .option('--dry-run', 'Inspect the migration without writing Keychain or config changes')
+    .action(async (configArg: string | undefined, opts: { account: string; dryRun?: boolean }) => {
+      try {
+        const configPath = configArg || path.join(os.homedir(), '.openclaw', 'openclaw.json');
+        const { migrateOpenClawConfigToKeychainRefs, storeOpenClawKeychainServices } = await import('../lib/openclaw-keychain.js');
+        const before = fs.readFileSync(configPath, 'utf-8');
+        const config = JSON.parse(before) as Record<string, unknown>;
+        const result = migrateOpenClawConfigToKeychainRefs(config, { account: opts.account });
+        if (result.unsupportedEnvKeys.length > 0) {
+          throw new Error(
+            `OpenClaw top-level env keys have no supported SecretRef target: ${result.unsupportedEnvKeys.join(', ')}. ` +
+            `Move them to a supported credential field before removing plaintext.`
+          );
+        }
+        if (!opts.dryRun) {
+          storeOpenClawKeychainServices(result.services, opts.account);
+          if (result.changed) fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf-8');
+        }
+        console.log(`OpenClaw Keychain migration ${opts.dryRun ? 'plan' : 'complete'}: ${result.services.length} secret${result.services.length === 1 ? '' : 's'}, ${result.replacedPaths.length} ref${result.replacedPaths.length === 1 ? '' : 's'}, ${result.removedEnvPaths.length} env entr${result.removedEnvPaths.length === 1 ? 'y' : 'ies'} removed.`);
+        for (const p of result.replacedPaths) console.log(`ref ${p}`);
+        for (const p of result.removedEnvPaths) console.log(`removed ${p}`);
+        process.exit(0);
+      } catch (err) {
+        console.error(chalk.red((err as Error).message));
+        process.exit(1);
+      }
+    });
+
+  openclawKeychain
+    .command('resolve')
+    .description('OpenClaw exec SecretRef resolver for Keychain service ids')
+    .option('--account <name>', 'Keychain account name', 'openclaw')
+    .action(async (opts: { account: string }) => {
+      try {
+        const { readOpenClawKeychainService, resolveOpenClawKeychainRequest } = await import('../lib/openclaw-keychain.js');
+        const raw = readStdinSync();
+        const request = raw.trim() ? JSON.parse(raw) : {};
+        const response = resolveOpenClawKeychainRequest(request, (service) => readOpenClawKeychainService(service, opts.account));
+        process.stdout.write(JSON.stringify(response));
+        process.exit(0);
+      } catch {
+        process.stdout.write(JSON.stringify({ protocolVersion: 1, values: {}, errors: { value: { code: 'NOT_FOUND' } } }));
+        process.exit(1);
+      }
     });
 
   cmd

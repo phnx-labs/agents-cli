@@ -241,6 +241,17 @@ See [The secrets-agent](#the-secrets-agent-macos) below for the model and the se
 | `secrets migrate` | Interactively migrate legacy YAML bundles into Keychain | `agents secrets migrate` |
 | `secrets migrate-acl` | Upgrade legacy keychain items to the biometry ACL (macOS) | `agents secrets migrate-acl` |
 | `secrets import-keyring` | Migrate secrets out of the OS keyring / Credential Manager into the encrypted file store (Linux/Windows). Dry-run by default; `--commit` to write | `agents secrets import-keyring --commit` |
+| `secrets openclaw-keychain migrate [config]` | Move supported OpenClaw plaintext credentials into macOS Keychain and rewrite them as exec SecretRefs | `agents secrets openclaw-keychain migrate ~/.openclaw/openclaw.json` |
+
+`secrets openclaw-keychain migrate` targets OpenClaw surfaces that accept
+SecretRefs, including model provider API keys and
+`plugins.entries.acpx.config.mcpServers.*.env.*`. It stores each migrated value
+as a macOS Keychain generic password owned by account `openclaw`, adds an
+OpenClaw `secrets.providers.agents_keychain` exec provider that calls
+`agents secrets openclaw-keychain resolve`, and removes the matching plaintext
+from OpenClaw's top-level `env` only after a supported SecretRef path has been
+rewritten. A top-level env secret with no supported OpenClaw credential target
+fails closed instead of deleting the only runtime source.
 
 ## Configuration Schema
 
