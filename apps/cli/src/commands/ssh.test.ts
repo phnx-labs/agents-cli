@@ -25,12 +25,18 @@ function guardedHome(): void {
   );
 }
 
-function run(args: string[]): { stdout: string; status: number | null } {
+function run(args: string[], extraEnv: Record<string, string> = {}): { stdout: string; stderr: string; status: number | null } {
   const r = spawnSync('bun', [INDEX, ...args], {
     encoding: 'utf-8',
-    env: { ...process.env, HOME: testHome, AGENTS_NO_UPDATE_CHECK: '1' },
+    env: {
+      ...process.env,
+      HOME: testHome,
+      AGENTS_NO_UPDATE_CHECK: '1',
+      AGENTS_NO_USAGE_TRACK: '1',
+      ...extraEnv,
+    },
   });
-  return { stdout: r.stdout ?? '', status: r.status };
+  return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', status: r.status };
 }
 
 describe('devices command', () => {
@@ -41,5 +47,24 @@ describe('devices command', () => {
     expect(status).toBe(0);
     expect(stdout).toContain("No devices. Run 'agents devices sync'");
     expect(stdout).not.toContain('Usage: agents devices');
+  });
+});
+
+describe('ssh askpass', () => {
+  it('resolves an account-suffixed bundle key by exact storage name', () => {
+    guardedHome();
+    const env = { AGENTS_SECRETS_PASSPHRASE: 'rush-668-test' };
+
+    expect(run(['secrets', 'create', 'github.com', '--backend', 'file'], env).status).toBe(0);
+    expect(run(['secrets', 'add', 'github.com', 'password.work', '--value', 'secret-pass'], env).status).toBe(0);
+
+    const askpass = run(['ssh', '__askpass'], {
+      ...env,
+      AGENTS_SSH_BUNDLE: 'github.com',
+      AGENTS_SSH_KEY: 'password.work',
+    });
+
+    expect(askpass.status, askpass.stderr).toBe(0);
+    expect(askpass.stdout).toBe('secret-pass');
   });
 });

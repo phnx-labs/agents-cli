@@ -1029,7 +1029,7 @@ async function runAskpass(): Promise<void> {
     process.exit(1);
   }
   try {
-    const { env } = readAndResolveBundleEnv(bundle, { caller: 'agents ssh', agentOnly: isHeadlessSecretsContext() });
+    const { env } = readAndResolveBundleEnv(bundle, { caller: 'agents ssh', keys: [key], keyMode: 'storage', agentOnly: isHeadlessSecretsContext() });
     const value = env[key];
     if (value === undefined) {
       console.error(`askpass: key '${key}' not found in bundle '${bundle}'`);
