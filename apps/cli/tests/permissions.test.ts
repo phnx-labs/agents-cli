@@ -972,6 +972,41 @@ describe('applyPermissionsToVersion', () => {
     expect(config.locations[cwd].allowed_directories).toEqual([join(cwd, 'shared')]);
   });
 
+  it('merge=false drops stale Copilot location keys when the replacement omits them', () => {
+    const versionHome = join(testDir, 'copilot-replace-drops-empty-kind');
+    const cwd = join(testDir, 'copilot-replace-project');
+    mkdirSync(versionHome, { recursive: true });
+    mkdirSync(cwd, { recursive: true });
+
+    applyPermissionsToVersion('copilot' as any, {
+      name: 'test',
+      allow: ['Bash(git:*)'],
+      deny: [],
+    }, versionHome, false, cwd);
+
+    applyPermissionsToVersion('copilot' as any, {
+      name: 'test',
+      allow: [],
+      deny: [],
+      additionalDirectories: ['docs'],
+    }, versionHome, false, cwd);
+
+    const configPath = join(versionHome, '.copilot', 'permissions-config.json');
+    let config = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(config.locations[cwd].tool_approvals).toBeUndefined();
+    expect(config.locations[cwd].allowed_directories).toEqual([join(cwd, 'docs')]);
+
+    applyPermissionsToVersion('copilot' as any, {
+      name: 'test',
+      allow: ['Read(**)'],
+      deny: [],
+    }, versionHome, false, cwd);
+
+    config = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(config.locations[cwd].tool_approvals).toEqual([{ kind: 'read' }]);
+    expect(config.locations[cwd].allowed_directories).toBeUndefined();
+  });
+
   it('convertToCopilotFormat keeps persistent Copilot approvals to supported allow rules', () => {
     const out = convertToCopilotFormat({
       name: 'test',

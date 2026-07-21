@@ -1952,7 +1952,7 @@ export function applyPermissionsToVersion(
       const converted = convertToCopilotFormat(set, location);
       const incoming = converted.locations[location]?.tool_approvals ?? [];
       const incomingDirectories = converted.locations[location]?.allowed_directories ?? [];
-      if (incoming.length === 0 && incomingDirectories.length === 0) return { success: true };
+      if (merge && incoming.length === 0 && incomingDirectories.length === 0) return { success: true };
 
       const locations = (typeof config.locations === 'object' && config.locations !== null && !Array.isArray(config.locations))
         ? config.locations
@@ -1968,11 +1968,14 @@ export function applyPermissionsToVersion(
       const nextDirectories = merge
         ? Array.from(new Set([...existingDirectories, ...incomingDirectories])).sort()
         : incomingDirectories;
-      locations[location] = {
-        ...existingLocation,
-        ...(nextApprovals.length > 0 ? { tool_approvals: nextApprovals } : {}),
-        ...(nextDirectories.length > 0 ? { allowed_directories: nextDirectories } : {}),
-      };
+      const nextLocation = { ...existingLocation };
+      if (nextApprovals.length > 0) nextLocation.tool_approvals = nextApprovals;
+      else delete nextLocation.tool_approvals;
+      if (nextDirectories.length > 0) nextLocation.allowed_directories = nextDirectories;
+      else delete nextLocation.allowed_directories;
+
+      if (Object.keys(nextLocation).length > 0) locations[location] = nextLocation;
+      else delete locations[location];
       config.locations = locations;
 
       fs.mkdirSync(path.dirname(configPath), { recursive: true });
