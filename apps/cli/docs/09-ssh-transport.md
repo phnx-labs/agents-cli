@@ -216,6 +216,7 @@ is that remote commands are faster and dead connections self-terminate.
 Follow-ups (non-blocking):
 
 - Remove the now-unused `sshReachable` export.
-- Route the remaining specialized direct-`ssh` sites (browser CDP, cloud
-  `ProxyCommand`, drive-sync) through the shared baseline.
+- Keep any future specialized direct-`ssh` sites (for example `-L`/`-N` tunnels
+  or `ProxyCommand` relays) composed from `sshConnectOpts(...)` so they inherit
+  the shared baseline while preserving their required extra flags.
 - Evaluate the persistent `tail -f` streaming follow.

@@ -1,8 +1,6 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
 import {
   BrowserCdpConnectionError,
   CDPClient,
@@ -47,6 +45,7 @@ import {
   uploadViaFileChooser,
 } from './upload.js';
 import { emit } from '../events.js';
+import { sshExecAsync } from '../ssh-exec.js';
 import type { TargetFilter } from './types.js';
 
 export type UploadMode = 'auto' | 'input' | 'drop' | 'chooser';
@@ -185,8 +184,6 @@ export function pickWindowTarget<T extends { type: string; url?: string; title?:
   return pages[0];
 }
 
-const execFileP = promisify(execFile);
-
 /**
  * Parse a `--since`/`--until` value. Accepts ISO-8601 absolute timestamps
  * or relative offsets like `30s`, `5m`, `2h`, `1d`.
@@ -202,11 +199,11 @@ export function parseSinceUntil(s: string): Date {
 }
 
 async function execSSH(host: string, cmd: string): Promise<string> {
-  const { stdout } = await execFileP('ssh', [host, cmd], {
-    timeout: 10_000,
-    maxBuffer: 10_000_000,
-  });
-  return stdout;
+  const res = await sshExecAsync(host, cmd, { timeoutMs: 10_000 });
+  if (res.code !== 0) {
+    throw new Error(`ssh ${host} failed${res.stderr.trim() ? `: ${res.stderr.trim()}` : ''}`);
+  }
+  return res.stdout;
 }
 
 export function readNewestMatchingRemoteFileCommand(

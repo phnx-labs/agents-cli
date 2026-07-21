@@ -290,6 +290,10 @@ describe('raw-ssh spawns reuse SSH_OPTS so unreachable hosts fail fast (#746)', 
     // ConnectTimeout is present and bounds the connect.
     expect(args).toContain('ConnectTimeout=10');
     expect(args).toContain('BatchMode=yes');
+    if (process.platform !== 'win32') {
+      expect(args).toContain('ControlMaster=auto');
+      expect(args).toContain('ControlPersist=60s');
+    }
     // Every hardened option (an `-o` and its value) precedes the target — on
     // BSD getopt (macOS) an option after the target is swallowed into the
     // remote command instead of applied.
@@ -297,6 +301,9 @@ describe('raw-ssh spawns reuse SSH_OPTS so unreachable hosts fail fast (#746)', 
     const batchIdx = args.indexOf('BatchMode=yes');
     expect(optValueIdx).toBeLessThan(targetIdx);
     expect(batchIdx).toBeLessThan(targetIdx);
+    if (process.platform !== 'win32') {
+      expect(args.indexOf('ControlMaster=auto')).toBeLessThan(targetIdx);
+    }
     // The remote command is the LAST arg (after the target).
     expect(targetIdx).toBe(args.length - 2);
   };
