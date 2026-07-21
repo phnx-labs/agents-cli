@@ -1,0 +1,1 @@
+- `agents pty` now starts its sidecar correctly from the standalone CLI binary and includes the spawned command plus recent sidecar log lines when startup fails.

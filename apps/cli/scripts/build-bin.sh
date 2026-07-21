@@ -48,24 +48,6 @@ if (!index.includes(versionBlock)) {
 index = index.replace(versionBlock, `const VERSION = ${JSON.stringify(version)};`);
 fs.writeFileSync(indexPath, index);
 
-const ptyClientPath = path.join(buildDir, 'src', 'lib', 'pty-client.ts');
-let ptyClient = fs.readFileSync(ptyClientPath, 'utf8');
-const spawnBlock = [
-  'function getServerSpawnArgs(): { bin: string; args: string[] } {',
-  '  // Prefer the dist/index.js from the same installation as this code.',
-].join('\n');
-if (!ptyClient.includes(spawnBlock)) {
-  throw new Error('src/lib/pty-client.ts spawn block changed; update scripts/build-bin.sh');
-}
-ptyClient = ptyClient.replace(spawnBlock, [
-  'function getServerSpawnArgs(): { bin: string; args: string[] } {',
-  "  if ((globalThis as any).Bun?.isStandaloneExecutable) {",
-  "    return { bin: process.execPath, args: ['pty', '_server'] };",
-  '  }',
-  '',
-  '  // Prefer the dist/index.js from the same installation as this code.',
-].join('\n'));
-fs.writeFileSync(ptyClientPath, ptyClient);
 NODE
 
 args=(bun build "$BUILD_DIR/src/index.ts" --compile --outfile "$OUT")

@@ -63,6 +63,11 @@ Verify the server is running at any time:
 agents pty server status
 ```
 
+If the sidecar cannot boot, the failing command prints the exact server command,
+the PTY log path, and the recent log tail. The log path is also shown by
+`agents pty server status` and normally lives under
+`~/.agents/.cache/helpers/pty/logs.jsonl`.
+
 ## Command Reference
 
 ### Session lifecycle
