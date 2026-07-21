@@ -52,6 +52,7 @@ import { scanMemoryFiles } from './contextFiles';
 import { fetchAllAgentModels, checkInstalledAgentsViaCli, resolveAlias } from '../core/agentModels';
 import { fetchAgentInventories, writeAgentRunStrategy, AgentRunStrategy, AgentInventory, normalizeRunStrategy } from '../core/agentInventory';
 import { getAgentResources, invalidateAgentResourcesCache } from '../core/agentResources';
+import { listMcpResources, readMcpResource } from '../core/mcpResources';
 import * as workbench from './workbench.vscode';
 import * as theme from './theme.vscode';
 import { buildAgentTerminalEnv } from '../core/terminals';
@@ -1994,6 +1995,39 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         } catch (err) {
           console.error('[SETTINGS] Error fetching agent resources:', err);
           settingsPanel?.webview.postMessage({ type: 'agentResourcesData', repos: [] });
+        }
+        break;
+      }
+      case 'fetchMcpResources': {
+        const wsPath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        try {
+          const result = await listMcpResources(wsPath);
+          settingsPanel?.webview.postMessage({ type: 'mcpResourcesData', ...result });
+        } catch (err) {
+          console.error('[SETTINGS] Error fetching MCP resources:', err);
+          settingsPanel?.webview.postMessage({ type: 'mcpResourcesData', servers: [], resources: [] });
+        }
+        break;
+      }
+      case 'readMcpResource': {
+        const wsPath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        const serverName = typeof message.serverName === 'string' ? message.serverName : '';
+        const uri = typeof message.uri === 'string' ? message.uri : '';
+        if (!serverName || !uri) {
+          settingsPanel?.webview.postMessage({ type: 'mcpResourceReadError', serverName, uri, error: 'Missing server or URI.' });
+          break;
+        }
+        try {
+          const result = await readMcpResource(serverName, uri, wsPath);
+          settingsPanel?.webview.postMessage({ type: 'mcpResourceReadData', ...result });
+        } catch (err) {
+          console.error('[SETTINGS] Error reading MCP resource:', err);
+          settingsPanel?.webview.postMessage({
+            type: 'mcpResourceReadError',
+            serverName,
+            uri,
+            error: err instanceof Error ? err.message : String(err),
+          });
         }
         break;
       }
