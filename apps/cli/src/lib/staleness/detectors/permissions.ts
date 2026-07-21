@@ -286,6 +286,45 @@ function buildOpenClawDetector(): ResourceDetector {
   };
 }
 
+function buildForgeDetector(): ResourceDetector {
+  return {
+    kind: 'permissions',
+    agent: 'forge',
+    list({ versionHome }: DetectArgs): string[] {
+      const permissionsPath = path.join(versionHome, '.forge', 'permissions.yaml');
+      if (!fs.existsSync(permissionsPath)) return [];
+      try {
+        const config = yaml.parse(fs.readFileSync(permissionsPath, 'utf-8')) as { policies?: unknown[] } | null;
+        if (config && Array.isArray(config.policies) && config.policies.length > 0) {
+          return discoverPermissionGroups().map(g => g.name);
+        }
+      } catch { /* parse fail */ }
+      return [];
+    },
+  };
+}
+
+function buildHermesDetector(): ResourceDetector {
+  return {
+    kind: 'permissions',
+    agent: 'hermes',
+    list({ versionHome }: DetectArgs): string[] {
+      const configPath = path.join(versionHome, '.hermes', 'config.yaml');
+      if (!fs.existsSync(configPath)) return [];
+      try {
+        const config = yaml.parse(fs.readFileSync(configPath, 'utf-8')) as {
+          command_allowlist?: unknown[];
+          approvals?: { deny?: unknown[] };
+        } | null;
+        const hasAllow = Array.isArray(config?.command_allowlist) && config.command_allowlist.length > 0;
+        const hasDeny = Array.isArray(config?.approvals?.deny) && config.approvals.deny.length > 0;
+        if (hasAllow || hasDeny) return discoverPermissionGroups().map(g => g.name);
+      } catch { /* parse fail */ }
+      return [];
+    },
+  };
+}
+
 const handlers: Partial<Record<AgentId, () => ResourceDetector>> = {
   claude: buildClaudeDetector,
   codex: buildCodexDetector,
@@ -299,6 +338,8 @@ const handlers: Partial<Record<AgentId, () => ResourceDetector>> = {
   droid: buildDroidDetector,
   kiro: buildKiroDetector,
   openclaw: buildOpenClawDetector,
+  forge: buildForgeDetector,
+  hermes: buildHermesDetector,
 };
 
 export const permissionsDetectors = lazyAgentMap<ResourceDetector>(() => {

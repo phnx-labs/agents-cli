@@ -130,6 +130,20 @@ describe('openclaw allowlist', () => {
   });
 });
 
+describe('forge allowlist', () => {
+  it('is capable of allowlist', () => {
+    expect(supports('forge', 'allowlist')).toEqual({ ok: true });
+    expect(capableAgents('allowlist')).toContain('forge');
+  });
+});
+
+describe('hermes allowlist', () => {
+  it('is capable of allowlist', () => {
+    expect(supports('hermes', 'allowlist')).toEqual({ ok: true });
+    expect(capableAgents('allowlist')).toContain('hermes');
+  });
+});
+
 describe('unsupported agents skip regardless of version', () => {
   it('cursor hooks are supported', () => {
     expect(supports('cursor', 'hooks').ok).toBe(true);

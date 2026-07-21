@@ -161,16 +161,20 @@ contract.
 | Grok | yes | yes | yes | yes | skills ($name) | yes | no | `AGENTS.md` | no |
 | Kimi | yes | yes | yes | yes | no | yes | yes | `AGENTS.md` | yes |
 | Droid | yes | yes | >= 0.57.5 | >= 0.26.0 | yes | yes | yes | `AGENTS.md` | no |
-| Hermes | no | yes | no | yes | no | yes | no | `MEMORY.md` | no |
-| ForgeCode | no | yes | no | yes | yes | no | yes | `AGENTS.md` | no |
+| Hermes | no | yes | yes | yes | no | yes | no | `MEMORY.md` | no |
+| ForgeCode | no | yes | yes | yes | yes | no | yes | `AGENTS.md` | no |
 
 **† Gemini is deprecated.** Google retired the Gemini CLI for free/Pro/Ultra tiers on June 18, 2026 (announced at Google I/O 2026); Antigravity CLI (`antigravity`) is the successor. agents-cli still manages existing Gemini installs but warns on `agents add gemini` / `agents teams add … gemini`.
 
-Permissions sync is gated on the `allowlist` capability (Claude, Codex >= 0.138.0, Gemini, Cursor, OpenCode >= 1.1.1, Antigravity, Grok, Kimi, Kiro 2.8.0+, Goose, Droid >= 0.57.5, and OpenClaw). Workflow sync writes Claude workflow bundles, Kimi `type: flow` skills with an `agents_workflow` ownership marker, Goose recipe YAML, and Antigravity workflow markdown (since 1.0.6). Antigravity workflows are the one non-version-isolated target: `agy` scans a single shared `~/.gemini/config/global_workflows/` at startup (a real HOME directory, never symlinked per version), so agents-cli writes there once for all installed antigravity versions and reads it back the same way — the `agents_workflow` marker guards user-authored files from being overwritten or removed. **Host CLIs** (`agents cli`) are agent-agnostic PATH binaries — not in this matrix. Install paths call `supports(agent, cap, version)` before writing; gated capabilities skip with a clear reason instead of silently ignored config.
+Permissions sync is gated on the `allowlist` capability (Claude, Codex >= 0.138.0, Gemini, Cursor, OpenCode >= 1.1.1, Antigravity, Grok, Kimi, Kiro 2.8.0+, Goose, Droid >= 0.57.5, OpenClaw, Hermes, and ForgeCode). Workflow sync writes Claude workflow bundles, Kimi `type: flow` skills with an `agents_workflow` ownership marker, Goose recipe YAML, and Antigravity workflow markdown (since 1.0.6). Antigravity workflows are the one non-version-isolated target: `agy` scans a single shared `~/.gemini/config/global_workflows/` at startup (a real HOME directory, never symlinked per version), so agents-cli writes there once for all installed antigravity versions and reads it back the same way — the `agents_workflow` marker guards user-authored files from being overwritten or removed. **Host CLIs** (`agents cli`) are agent-agnostic PATH binaries — not in this matrix. Install paths call `supports(agent, cap, version)` before writing; gated capabilities skip with a clear reason instead of silently ignored config.
 
 Gemini permission sync maps canonical Bash rules to its native `ShellTool(...)` entries under `tools.core` / `tools.exclude`. Other canonical permission tools are not representable in Gemini's native allowlist grammar and are skipped.
 
 OpenClaw gates at tool granularity only, so permission sync maps just **blanket** (whole-tool) rules to `~/.openclaw/openclaw.json` `tools.alsoAllow` (allow) / `tools.deny` (deny): `bash → exec`, `read → read`, `write`/`edit → write`, `webfetch → web_fetch`, `websearch → web_search`. Sub-command/path/domain rules (`Bash(git:*)`, `Write(secrets/**)`, `WebFetch(domain:x)`) have no tool-level equivalent and are skipped. The absolute `tools.allow` list is never touched.
+
+Hermes permission sync maps canonical Bash allow rules to `~/.hermes/config.yaml` `command_allowlist` and Bash deny rules to `approvals.deny`. Hermes stores command globs only; session-scoped `/tools` toggles are not config-persistent and are not written.
+
+ForgeCode permission sync writes `~/.forge/permissions.yaml` policies by operation family: `bash → command`, `read`/`grep`/`glob → read`, `write`/`edit → write`, and web rules to `url`. Forge only reads that file when `.forge.toml` has `restricted = true`; MCP tools bypass `permissions.yaml` entirely.
 
 ### Per-command targeting
 

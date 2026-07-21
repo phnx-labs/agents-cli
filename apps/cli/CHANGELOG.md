@@ -2,6 +2,21 @@
 
 ## 1.20.70
 
+- **Wire allowlist support for ForgeCode.** `forge` now declares `allowlist: true`
+  and canonical permissions are written to `~/.forge/permissions.yaml` (or
+  `$FORGE_CONFIG/permissions.yaml`) as an ordered `policies` list keyed by
+  operation family (`read`/`write`/`command`/`url`) with glob patterns. The file is
+  only active when `.forge.toml` sets `restricted = true`, and MCP tools bypass it —
+  so only built-in-tool allow/deny rules are mapped. Source:
+  `apps/cli/src/lib/permissions.ts` (`convertToForgeFormat`), `apps/cli/src/lib/agents.ts`.
+
+- **Wire allowlist support for Hermes.** `hermes` now declares `allowlist: true` and
+  canonical command permissions are written to `~/.hermes/config.yaml` as
+  `command_allowlist` (always-approved command globs) and `approvals.deny`
+  (unconditional command blocks). It is command-glob only — Hermes has no unified
+  per-tool table — so non-command canonical rules are skipped. Source:
+  `apps/cli/src/lib/permissions.ts` (`convertToHermesFormat`), `apps/cli/src/lib/agents.ts`.
+
 - **Fix `agents setup computer` / `agents computer setup` refusing to install a
   valid downloaded helper.** The signature check read `codesign -dv` from stdout,
   but that command writes its details to **stderr** on success — so the Team-ID

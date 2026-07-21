@@ -673,7 +673,11 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       mcp: true,
       mcpHttp: true,
       mcpHeaders: false,
-      allowlist: false,
+      // Permissions: ~/.hermes/config.yaml carries `command_allowlist` for
+      // always-approved command globs and `approvals.deny` for unconditional
+      // command blocks. It is command-glob only; session `/tools` toggles are
+      // intentionally not persisted by agents-cli.
+      allowlist: true,
       skills: true,
       commands: false,
       plugins: true,
@@ -714,7 +718,10 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       mcp: true,
       mcpHttp: true,
       mcpHeaders: false,
-      allowlist: false,
+      // Permissions: ~/.forge/permissions.yaml (or $FORGE_CONFIG/permissions.yaml)
+      // carries ordered operation-family glob policies. It is active only when
+      // `.forge.toml` sets `restricted = true`; MCP tools bypass this file.
+      allowlist: true,
       skills: true,
       commands: true,
       plugins: false,
