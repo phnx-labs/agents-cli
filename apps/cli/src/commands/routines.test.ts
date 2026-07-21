@@ -77,9 +77,9 @@ function readDaemonPid(home: string): number | null {
   return isNaN(pid) ? null : pid;
 }
 
-/** Start the real `agents daemon _run` process against an isolated HOME. */
+/** Start the real scheduler foreground process against an isolated HOME. */
 function startIsolatedDaemon(home: string): { child: ReturnType<typeof spawn>; pidPromise: Promise<number | null> } {
-  const child = spawn('node', ['--import', 'tsx', 'src/index.ts', 'daemon', '_run'], {
+  const child = spawn('node', ['--import', 'tsx', 'src/index.ts', '__daemon-run'], {
     cwd: REPO_ROOT,
     env: {
       ...process.env,

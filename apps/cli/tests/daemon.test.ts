@@ -106,8 +106,7 @@ describe('generateLaunchdPlist', () => {
     const plist = generateLaunchdPlist();
     expect(plist).toContain('<?xml version="1.0"');
     expect(plist).toContain('com.phnx-labs.agents-daemon');
-    expect(plist).toContain('daemon');
-    expect(plist).toContain('_run');
+    expect(plist).toContain('__daemon-run');
     expect(plist).toContain('<key>KeepAlive</key>');
     expect(plist).toContain('<true/>');
   });
@@ -119,7 +118,7 @@ describe('generateSystemdUnit', () => {
     expect(unit).toContain('[Unit]');
     expect(unit).toContain('[Service]');
     expect(unit).toContain('[Install]');
-    expect(unit).toContain('"daemon" "_run"');
+    expect(unit).toContain('"__daemon-run"');
     expect(unit).toContain('Restart=always');
   });
 });

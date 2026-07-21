@@ -1,6 +1,6 @@
 # Routines (Scheduled Jobs)
 
-Scheduled agent execution with sandboxed permissions and daemon-driven cron scheduling.
+Scheduled agent execution with sandboxed permissions and scheduler-driven cron execution.
 
 ## Architecture
 
@@ -13,7 +13,7 @@ Scheduled agent execution with sandboxed permissions and daemon-driven cron sche
     state.json              # Daemon PID, last reload timestamp
 ```
 
-Each job is a YAML file in `~/.agents/routines/`. A background daemon (`agents daemon`) parses cron expressions with [croner](https://github.com/hucsm/croner), spawns agent processes at trigger time, and captures output.
+Each job is a YAML file in `~/.agents/routines/`. A background scheduler parses cron expressions with [croner](https://github.com/hucsm/croner), spawns agent processes at trigger time, and captures output.
 
 ### Project routines (inspection-only)
 
@@ -498,8 +498,6 @@ agents routines start                 # Start the background scheduler
 agents routines stop                  # Stop the scheduler
 agents routines status                # Show scheduler status + upcoming runs
 agents routines scheduler-logs        # Read scheduler log output
-
-# Deprecated (removed in v2.0): `agents daemon start|stop|status|logs`
 ```
 
 ### Non-Interactive Usage
@@ -533,8 +531,6 @@ The scheduler **auto-starts on the first `agents routines add`**, so in most cas
 `agents routines status` reports the scheduler as `running`, `wedged`, or `stopped`. A live PID whose heartbeat is more than three monitor ticks old is `wedged`; the status output includes the restart command. Both `routines list` and `routines status` also finalize orphaned `running` records before rendering. Run metadata records process birth time to reject recycled PIDs, and any run still active after 24 hours is finalized as a timeout.
 
 The status output includes the resolved daemon binary. Startup rejects bun virtual-filesystem paths and warns when the binary lives inside `.agents/worktrees/`, because deleting that worktree would strand the service.
-
-The legacy `agents daemon <cmd>` subcommands still work but print a deprecation warning and will be removed in v2.0.
 
 ## Key Functions
 
