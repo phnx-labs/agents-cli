@@ -833,7 +833,8 @@ function projectResolvedEnv(
     owners.set(envKey, key);
   }
   if (!needsProjection) {
-    if (selectedKeys.size === Object.keys(env).length) return env;
+    const envKeys = Object.keys(env);
+    if (selectedKeys.size === envKeys.length && envKeys.every((key) => selectedKeys.has(key))) return env;
     const out: Record<string, string> = {};
     for (const key of selectedKeys) {
       if (key in env) out[key] = env[key];

@@ -32,6 +32,7 @@ import {
   BUNDLE_NAME_PATTERN,
   BUNDLE_KEY_PATTERN,
   ENV_KEY_PATTERN,
+  bundleKeyToEnvKey,
   bundleExists,
   bundleItemStore,
   bundlePolicy,
@@ -187,7 +188,10 @@ export function importSyncedBundle(
   // these may be purged; a missing or unimportable key's iCloud item is its
   // only copy and must survive.
   const purgeable = new Set<string>();
-  const rejectedByPolicy = (key: string) => isLoaderOrInterpreterEnv(key) || isReservedEnvName(key);
+  const rejectedByPolicy = (key: string) => {
+    const envKey = bundleKeyToEnvKey(key);
+    return isLoaderOrInterpreterEnv(envKey) || isReservedEnvName(envKey);
+  };
 
   // Keys with a synced secret item: re-store the value device-locally.
   for (const key of candidate.keys) {

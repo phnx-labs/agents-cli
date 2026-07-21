@@ -258,6 +258,32 @@ describe('importSyncedBundle', () => {
     ]);
   });
 
+  it('reserved account-suffixed keys are reported unimportable without aborting the bundle', () => {
+    synced.store.set(
+      'agents-cli.bundles.legacy',
+      JSON.stringify({
+        vars: {
+          GOOD_KEY: 'keychain:GOOD_KEY',
+          'PATH.personal': 'keychain:PATH.personal',
+          'NODE_OPTIONS.work': { value: '--require ./evil.js' },
+        },
+      }),
+    );
+    synced.store.set('agents-cli.secrets.legacy.GOOD_KEY', 'good-v');
+    synced.store.set('agents-cli.secrets.legacy.PATH.personal', '/evil/bin');
+    const [candidate] = discoverSyncedBundles();
+
+    const result = importSyncedBundle(candidate, { purge: true });
+    expect(result.added).toBe(1);
+    expect(result.unimportable.sort()).toEqual(['NODE_OPTIONS.work', 'PATH.personal']);
+    expect(readBundle('legacy').vars.GOOD_KEY).toBe('keychain:GOOD_KEY');
+    expect(result.purged).toBe(1);
+    expect([...synced.store.keys()].sort()).toEqual([
+      'agents-cli.bundles.legacy',
+      'agents-cli.secrets.legacy.PATH.personal',
+    ]);
+  });
+
   it('all-plaintext stores values as literals without touching the local keychain', () => {
     synced.store.set('agents-cli.secrets.lit.ONLY_KEY', 'plain');
     const [candidate] = discoverSyncedBundles();

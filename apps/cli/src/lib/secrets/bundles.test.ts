@@ -75,6 +75,13 @@ describe('filterAgentHitBySubsetAndExpiry (agent fast-path gate)', () => {
     expect(out.env.SLACK_TOKEN).toBeUndefined();
   });
 
+  it('does not return a same-size partial cached env for a different requested subset', () => {
+    const hit = agentHit({ API_KEY: 'k', DB_URL: 'k' });
+    hit.env = { API_KEY: 'v-API_KEY' };
+    const out = filterAgentHitBySubsetAndExpiry(hit, { keys: ['DB_URL'] });
+    expect(out.env).toEqual({});
+  });
+
   it('projects a selected account-suffixed key from the cached snapshot', () => {
     const hit = agentHit({
       'GITHUB_USERNAME.personal': 'k',
