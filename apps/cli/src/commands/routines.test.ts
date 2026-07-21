@@ -295,6 +295,8 @@ describe('routines add --on aliases', () => {
         'add', 'pr-job',
         '--on', 'pr',
         '--repo', 'phnx-labs/agents-cli',
+        '--action', 'labeled',
+        '--label', 'ux-approved',
         '--agent', 'claude',
         '--prompt', 'handle pull request',
       ]);
@@ -306,6 +308,8 @@ describe('routines add --on aliases', () => {
         type: 'github_event',
         event: 'pull_request',
         repo: 'phnx-labs/agents-cli',
+        action: 'labeled',
+        label: 'ux-approved',
       });
     } finally {
       if (daemon) await stopIsolatedDaemon(daemon.child);

@@ -1,21 +1,19 @@
 /**
- * Follow a dispatched host run by offset-tailing its remote log.
+ * Follow a dispatched host run by streaming its remote log.
  *
  * The run writes combined output to a log file on the host and its exit code to
- * a sibling `.exit` file. We poll `tail -c +<offset>` (durable, offset-tracked —
- * a dropped connection resumes from the saved offset) and finish when `.exit`
- * appears. Rich transcript-parser rendering is a fast-follow.
+ * a sibling `.exit` file. The primary path opens one long-lived
+ * `ssh ... tail -f` stream (durable, offset-tracked — a dropped connection
+ * reconnects from the saved offset) and finishes when the remote-side watcher
+ * emits the exit sentinel. Rich transcript-parser rendering is a fast-follow.
  *
- * Efficiency: each cycle is a SINGLE ssh round-trip that returns the new log
- * bytes, a per-task sentinel, then the exit-file contents — half the process +
- * handshake cost of the old tail-then-cat pair. It rides the default control
- * socket (multiplex on) that the launch opened, and eases the poll interval off
- * toward `maxPollMs` while the job is idle, so a quiet long-running follow no
- * longer spawns thousands of ssh processes per hour on the laptop.
+ * Efficiency: a healthy follow holds exactly one ssh process/socket for the
+ * whole run instead of spawning once per poll cycle. If the connection drops,
+ * the next stream resumes at the byte offset already flushed locally.
  */
 
 import * as fs from 'fs';
-import { sshExec, sshExecRaw, shellQuote } from '../ssh-exec.js';
+import { sshExec, sshExecRaw, sshExecRawStream } from '../ssh-exec.js';
 import { localLogPath } from './tasks.js';
 
 function sleep(ms: number): Promise<void> {
@@ -75,6 +73,8 @@ export interface FollowOptions {
   /** Idle-backoff ceiling (default 4× the fast interval, min 4000ms). */
   maxPollMs?: number;
 }
+
+const STREAM_EXIT_POLL_SECONDS = 1;
 
 /**
  * Build the per-task sentinel that separates the log tail from the exit-file
@@ -147,6 +147,53 @@ export function fetchProgress(
 }
 
 /**
+ * Remote shell for the persistent follow stream.
+ *
+ * Protocol: stream `tail -c +<offset+1> -f <log>` as raw stdout until `.exit`
+ * becomes non-empty, give tail one more polling interval to flush final bytes,
+ * stop it, then print the same per-task sentinel and `cat` the exit file on
+ * stderr. Keeping the terminal frame off stdout lets log bytes pass through
+ * live without buffering and without confusing agent output for our marker.
+ * `remoteLog`/`remoteExit` are dispatch-generated `$HOME` paths with safe hex
+ * basenames (or absolute paths in localhost integration tests), so they stay
+ * unquoted to preserve `$HOME` expansion just like `fetchProgress`.
+ */
+export function buildStreamingFollowCommand(opts: {
+  remoteLog: string;
+  remoteExit: string;
+  taskId: string;
+  offset: number;
+}): string {
+  const printfArg = exitMarker(opts.taskId).replace(/\n/g, '\\n');
+  return [
+    'set +e',
+    'tail_pid=',
+    'cleanup() { if [ -n "$tail_pid" ]; then kill "$tail_pid" 2>/dev/null || true; wait "$tail_pid" 2>/dev/null || true; fi; }',
+    'trap cleanup EXIT HUP INT TERM',
+    `while [ ! -e ${opts.remoteLog} ] && [ ! -s ${opts.remoteExit} ]; do sleep ${STREAM_EXIT_POLL_SECONDS}; done`,
+    `tail -c +${opts.offset + 1} -f ${opts.remoteLog} 2>/dev/null &`,
+    'tail_pid=$!',
+    `while [ ! -s ${opts.remoteExit} ]; do`,
+    '  if ! kill -0 "$tail_pid" 2>/dev/null; then wait "$tail_pid" 2>/dev/null; exit 86; fi',
+    `  sleep ${STREAM_EXIT_POLL_SECONDS}`,
+    'done',
+    `sleep ${STREAM_EXIT_POLL_SECONDS}`,
+    'cleanup',
+    'tail_pid=',
+    `printf '${printfArg}' >&2`,
+    `cat ${opts.remoteExit} >&2 2>/dev/null`,
+  ].join('\n');
+}
+
+/** Extract the remote watcher frame from stderr, if the stream ended normally. */
+export function parseStreamingExitFrame(stderr: Buffer, taskId: string): Buffer | null {
+  const marker = Buffer.from(exitMarker(taskId), 'utf8');
+  const idx = stderr.lastIndexOf(marker);
+  if (idx === -1) return null;
+  return stderr.subarray(idx + marker.length);
+}
+
+/**
  * File identity (`dev:ino`) of a path on the remote host, or null if it can't be
  * stat'd. GNU (`-c`) then BSD (`-f`) format, so it works on Linux and macOS hosts.
  */
@@ -200,24 +247,47 @@ export async function followHostTask(target: string, opts: FollowOptions): Promi
   };
 
   for (;;) {
-    const r = fetchProgress(target, { remoteLog: opts.remoteLog, remoteExit: opts.remoteExit, taskId: opts.taskId, offset });
-    const gotOutput = r ? flush(r.logChunk) : false;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      process.stderr.write('\n[hosts] follow timed out; the run continues on the host. Reattach with: agents hosts logs ' + opts.taskId + ' -f\n');
+      return -1;
+    }
 
-    if (r && r.exit.trim() !== '') {
-      // Finished — one final fetch catches bytes written between our tail and
-      // the exit file appearing.
-      const tail = fetchProgress(target, { remoteLog: opts.remoteLog, remoteExit: opts.remoteExit, taskId: opts.taskId, offset });
-      if (tail) flush(tail.logChunk);
-      const code = parseInt(r.exit.trim(), 10);
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), remaining);
+    let gotOutput = false;
+    let exitFrame: Buffer | null = null;
+    try {
+      const stream = await sshExecRawStream(
+        target,
+        buildStreamingFollowCommand({ remoteLog: opts.remoteLog, remoteExit: opts.remoteExit, taskId: opts.taskId, offset }),
+        {
+          timeoutMs: remaining,
+          signal: abort.signal,
+          multiplex: true,
+          onStdout: (chunk) => { gotOutput = flush(chunk) || gotOutput; },
+        },
+      );
+      exitFrame = parseStreamingExitFrame(stream.stderr, opts.taskId);
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (exitFrame) {
+      const code = parseInt(exitFrame.toString('utf8').trim(), 10);
       return Number.isFinite(code) ? code : 0;
     }
+
+    // SSH dropped before the remote watcher emitted the exit sentinel. Stdout
+    // chunks were flushed as they arrived, so reconnect from the advanced offset.
+    // If no bytes arrived, back off like the old idle poll.
     if (Date.now() > deadline) {
       process.stderr.write('\n[hosts] follow timed out; the run continues on the host. Reattach with: agents hosts logs ' + opts.taskId + ' -f\n');
       return -1;
     }
 
-    // Fast while output flows; ease toward maxMs when idle so a quiet job isn't
-    // polled needlessly. New output snaps the cadence back to fast.
+    // Reconnect quickly while output flows; ease toward maxMs when the stream
+    // drops without bytes so a flapping idle host does not spin ssh processes.
     waitMs = gotOutput ? fastMs : Math.min(maxMs, Math.round(waitMs * 1.5));
     await sleep(waitMs);
   }

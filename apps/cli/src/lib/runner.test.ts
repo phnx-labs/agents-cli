@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { executeJob, executeJobDetached, monitorRunningJobs } from './runner.js';
+import { archiveRoutineTranscripts, executeJob, executeJobDetached, monitorRunningJobs } from './runner.js';
 import { getRunDir, writeRunMeta } from './routines.js';
 import type { JobConfig, RunMeta } from './routines.js';
 import { saveTask, hostsCacheDir } from './hosts/tasks.js';
@@ -110,6 +110,30 @@ describe('runner host placement', () => {
       fs.rmSync(path.dirname(runDir), { recursive: true, force: true });
       fs.rmSync(path.join(hostsCacheDir(), `${taskId}.json`), { force: true });
     }
+  });
+});
+
+describe('routine transcript archiving', () => {
+  const jobName = 'archive-routine-test';
+  const runId = 'run-archive-1';
+
+  afterEach(() => {
+    cleanupJobRuns(jobName);
+  });
+
+  it('copies sandboxed agent transcripts into the stable run directory', () => {
+    const overlayHome = path.join(getRunDir(jobName, runId), 'overlay-home');
+    const sourceDir = path.join(overlayHome, '.claude', 'projects', 'tmp-project');
+    const sourcePath = path.join(sourceDir, 'sess-archive.jsonl');
+    const runDir = getRunDir(jobName, runId);
+    fs.mkdirSync(sourceDir, { recursive: true });
+    fs.writeFileSync(sourcePath, '{"type":"user","message":{"content":"hi"}}\n', 'utf-8');
+
+    archiveRoutineTranscripts({ jobName, runId, agent: 'claude' }, runDir, overlayHome);
+    fs.rmSync(overlayHome, { recursive: true, force: true });
+
+    const archived = path.join(runDir, 'sessions', 'claude', 'projects', 'tmp-project', 'sess-archive.jsonl');
+    expect(fs.readFileSync(archived, 'utf-8')).toContain('"content":"hi"');
   });
 });
 

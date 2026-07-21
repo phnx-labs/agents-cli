@@ -33,6 +33,7 @@ import type {
   ProviderCapabilities,
   DroidAutonomy,
 } from './types.js';
+import { controlOpts, sshConnectOpts } from '../ssh-exec.js';
 import { MissingTargetError } from './types.js';
 import { getShimsDir } from '../state.js';
 
@@ -127,8 +128,7 @@ export function buildSshArgs(
   const remoteCmd = [remoteBin, ...remoteArgv].map(shellQuote).join(' ');
   const proxy = `ProxyCommand=${opts.droidBin} computer ssh ${computer} --proxy --port %p`;
   return [
-    '-o', proxy,
-    '-o', 'StrictHostKeyChecking=accept-new',
+    ...sshConnectOpts(controlOpts(), ['-o', proxy]),
     '-p', opts.port ?? '22',
     `${opts.user}@${computer}`,
     remoteCmd,

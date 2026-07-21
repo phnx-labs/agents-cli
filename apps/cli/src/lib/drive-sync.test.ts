@@ -172,7 +172,13 @@ describe.skipIf(process.platform === 'win32')('drive sync remote validation', ()
     expect(outcome.ok, outcome.error).toBe(true);
     const log = fs.readFileSync(logPath, 'utf-8');
     // ssh gets the remote as a bare argv element and the mkdir command as a
-    // single positional string — no local shell sees either.
+    // single positional string through sshExec's hardened baseline — no local
+    // shell sees either.
+    expect(log).toContain('ARG:BatchMode=yes');
+    expect(log).toContain('ARG:ConnectTimeout=10');
+    expect(log).toContain('ARG:ServerAliveInterval=15');
+    expect(log).toContain('ARG:ServerAliveCountMax=3');
+    expect(log).toContain('ARG:ControlMaster=auto');
     expect(log).toContain('ARG:user@host');
     expect(log).toContain('ARG:mkdir -p ~/.agents/drive');
     expect(log).toContain('ARG:user@host:~/.agents/drive/');

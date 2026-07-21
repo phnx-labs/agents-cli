@@ -123,26 +123,38 @@ which still use OpenSSH default `~/.ssh/known_hosts`, not the managed store, so
 they neither pin into it nor verify against it. Wiring those call sites onto the
 managed store (so they verify strictly too) is follow-up.
 
-### 3. The follow loop: one round-trip per cycle (P1)
+### 3. The follow loop: one persistent stream (P1)
 
-The old loop made two calls per cycle — `tail -c +offset` for new log bytes, then
-`cat .exit`. Rewritten to a single round-trip:
+The original loop made two calls per cycle — `tail -c +offset` for new log bytes,
+then `cat .exit`. PR #551 first rewrote that to a single round-trip:
 
 ```
 tail -c +<offset> <log>;  printf '<sentinel>';  cat <exit>
 ```
 
-`splitProgressOutput` splits the response on the **last** occurrence of a
+`splitProgressBytes` splits the response on the **last** occurrence of a
 per-task sentinel (`@@AGENTS_HOST_EXIT_<taskId>@@`), so the log tail, an end
 marker, and the exit code come back together and are separated without ever
 miscounting the byte offset (the marker and exit bytes come from `printf`/`cat`,
 never the log). Splitting on the *last* marker means even if the agent's own
 output echoed the token, the real trailing sentinel still wins. The sentinel's
 `printf` format is derived from the same `exitMarker()` the parser uses, so the
-two can never desync. On top of that: **default multiplexing** (each cycle reuses
-the socket the launch opened) and **adaptive backoff** (1.5 s while output flows,
-easing toward 4 s when idle). Net: 50 % fewer process spawns *and* each spawn is a
-socket reuse instead of a handshake.
+two can never desync. That helper remains for non-interactive consumers that need
+a bounded poll.
+
+The interactive follow path now uses one long-lived stream:
+
+```
+tail -c +<offset> -f <log>        # stdout: raw log bytes
+watch <exit>; printf <sentinel>; cat <exit> >&2
+```
+
+Stdout is pure log data, so the local follower can echo and mirror chunks as soon
+as they arrive. The terminal frame rides stderr after the remote watcher sees a
+non-empty `.exit`; the local parser extracts the exit code from that frame. If
+the ssh stream drops before the frame, the follower reconnects from the byte
+offset already flushed locally. A local timeout aborts the ssh process; the
+remote shell traps exit/HUP/TERM and kills its background `tail`.
 
 ### 4. Readiness: three round-trips to one (P2)
 
@@ -168,11 +180,11 @@ concurrent `ssh` processes trade the one resource we are protecting (local
 memory/process pressure) for latency we can tolerate. The serial loop keeps at
 most one `ssh` alive; multiplexing already removes the repeat-handshake cost.
 
-**A persistent `tail -f` stream for follow.** Deferred, not rejected. A single
-long-lived streaming connection would drop per-cycle spawns to zero, but
-complicates offset-resume-on-disconnect and exit capture. The combined-round-trip
-+ multiplexing design captures most of the win at a fraction of the complexity;
-streaming is future work.
+**A persistent `tail -f` stream for follow.** Accepted for interactive follows
+after the PR #551 combined-round-trip change proved the protocol boundary. The
+extra complexity is contained in `progress.ts`: stdout is raw log bytes, stderr
+carries only the terminal frame, and reconnects resume from the saved byte
+offset.
 
 ## Results
 
@@ -183,12 +195,12 @@ across runs. Each number is wall-clock on the laptop:
 |---|---|---|---|
 | P3 · repeated `--host` (per call) | ~444 ms | **~75 ms** | **~6–7×** |
 | P2 · readiness per dispatch | 1.5–1.8 s | **~0.8 s** | **~2×** |
-| P1 · follow loop (per cycle) | ~706 ms | **~33 ms** | **~21–23×**, 50 % fewer spawns |
+| P1 · follow loop (per cycle) | ~706 ms | **~33 ms**, then **1 ssh per follow** | **~21–23×** for bounded polls; persistent follow removes per-cycle spawns |
 
-The P1 figure is the headline: an old cycle paid two fresh handshakes (~706 ms on
-a relayed link); the new cycle rides the reused socket (~33 ms). Over an hour of
-following that is the difference between the laptop grinding through thousands of
-handshakes and holding one socket open.
+The P1 figure is the first-step headline: an old cycle paid two fresh handshakes
+(~706 ms on a relayed link); the combined poll rides the reused socket (~33 ms).
+Interactive follow goes further and holds one socket open for the whole run, so a
+quiet hour-long follow no longer creates one local ssh process per poll cycle.
 
 Reproduce: `bun run build && node scripts/bench-ssh.mjs <host>`.
 
@@ -206,6 +218,11 @@ Reproduce: `bun run build && node scripts/bench-ssh.mjs <host>`.
   assumption shared by every remote call in the codebase). A bash-less remote
   reads as unreachable — the same failure the old code produced, with a clearer
   message.
+- **Streaming follow has up to one remote poll interval of finish latency.** The
+  remote watcher checks `.exit` once per second, then gives `tail -f` one more
+  interval to flush final bytes before emitting the terminal frame. That buys
+  deterministic final-output capture while still removing local per-cycle ssh
+  churn.
 
 ## Rollout and future work
 
@@ -216,6 +233,10 @@ is that remote commands are faster and dead connections self-terminate.
 Follow-ups (non-blocking):
 
 - Remove the now-unused `sshReachable` export.
-- Route the remaining specialized direct-`ssh` sites (browser CDP, cloud
-  `ProxyCommand`, drive-sync) through the shared baseline.
-- Evaluate the persistent `tail -f` streaming follow.
+- Keep specialized direct-`ssh` sites (for example `-L`/`-N` tunnels,
+  `ProxyCommand` relays, browser CDP, and drive-sync) composed from
+  `sshConnectOpts(...)` so they inherit the shared baseline while preserving
+  their required extra flags.
+- Consider moving cloud task streaming from bounded polling to the same
+  persistent follow protocol once its async event generator can share the
+  terminal-frame plumbing.

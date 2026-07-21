@@ -30,7 +30,7 @@ import {
 } from './routines.js';
 import { getRunsDir } from './state.js';
 import type { AgentId } from './types.js';
-import { prepareJobHome, buildSpawnEnv } from './sandbox.js';
+import { prepareJobHome, buildSpawnEnv, getJobHomePath } from './sandbox.js';
 import { resolveModel, buildReasoningFlags } from './models.js';
 import { createTimer, maybeRotate, redactPrompt } from './events.js';
 import {
@@ -46,6 +46,7 @@ import type { LoopDeps } from './loop.js';
 import { loadTask as loadHostTask } from './hosts/tasks.js';
 import { reconcileTask as reconcileHostTask } from './hosts/reconcile.js';
 import { backgroundSpawnOptions } from './platform/process.js';
+import { walkForFiles } from './fs-walk.js';
 import { getBinaryPath, isVersionInstalled, resolveVersion } from './versions.js';
 import {
   getConfiguredRunStrategy,
@@ -68,6 +69,11 @@ const AGENT_COMMANDS: Record<string, string[]> = {
   gemini: ['gemini', '{prompt}', '--output-format', 'stream-json'],
   kimi: ['kimi', '--prompt', '{prompt}', '--output-format', 'stream-json'],
   droid: ['droid', 'exec', '{prompt}', '-o', 'stream-json'],
+};
+
+const ROUTINE_TRANSCRIPT_SPECS: Partial<Record<AgentId, Array<{ root: string[]; ext: string }>>> = {
+  claude: [{ root: ['.claude', 'projects'], ext: '.jsonl' }],
+  codex: [{ root: ['.codex', 'sessions'], ext: '.jsonl' }],
 };
 
 /** Build the full CLI argv for executing a job, applying mode, model, and permission flags. */
@@ -223,6 +229,36 @@ function appendModelAndReasoning(cmd: string[], config: JobConfig): void {
 
 function generateRunId(): string {
   return new Date().toISOString().replace(/[:.]/g, '-');
+}
+
+export function archiveRoutineTranscripts(
+  meta: Pick<RunMeta, 'jobName' | 'runId' | 'agent'>,
+  runDir: string,
+  overlayHome?: string,
+): void {
+  if (!meta.agent) return;
+  const specs = ROUTINE_TRANSCRIPT_SPECS[meta.agent];
+  if (!specs) return;
+
+  const home = overlayHome ?? getJobHomePath(meta.jobName);
+  for (const spec of specs) {
+    const sourceRoot = path.join(home, ...spec.root);
+    if (!fs.existsSync(sourceRoot)) continue;
+    const destRoot = path.join(runDir, 'sessions', meta.agent, spec.root[spec.root.length - 1]);
+    for (const sourcePath of walkForFiles(sourceRoot, spec.ext, 100_000)) {
+      const rel = path.relative(sourceRoot, sourcePath);
+      if (rel.startsWith('..') || path.isAbsolute(rel)) continue;
+      const destPath = path.join(destRoot, rel);
+      fs.mkdirSync(path.dirname(destPath), { recursive: true });
+      try {
+        fs.copyFileSync(sourcePath, destPath);
+        fs.chmodSync(destPath, 0o600);
+      } catch {
+        // The process already reached a terminal state; a concurrently removed
+        // transcript should not rewrite that outcome.
+      }
+    }
+  }
 }
 
 /**
@@ -639,6 +675,7 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
     );
     writeRunMeta(meta);
     timer.end({ status: meta.status, exitCode: meta.exitCode ?? undefined, runId });
+    archiveRoutineTranscripts(meta, runDir, overlayHome);
     return { meta, reportPath: null };
   }
 
@@ -691,6 +728,7 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
       writeRunMeta(meta);
       timer.end({ status: 'timeout', runId });
       const reportPath = extractAndSaveReport(stdoutPath, effectiveAgent, runDir);
+      archiveRoutineTranscripts(meta, runDir, overlayHome);
       return { meta, reportPath };
     }
 
@@ -699,6 +737,7 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
       writeRunMeta(meta);
       timer.end({ status: 'completed', exitCode: 0, runId });
       const reportPath = extractAndSaveReport(stdoutPath, effectiveAgent, runDir);
+      archiveRoutineTranscripts(meta, runDir, overlayHome);
       return { meta, reportPath };
     }
 
@@ -733,6 +772,7 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
       ...(attempt.error ? { error: attempt.error } : {}),
     });
     const reportPath = extractAndSaveReport(stdoutPath, effectiveAgent, runDir);
+    archiveRoutineTranscripts(meta, runDir, overlayHome);
     return { meta, reportPath };
   }
 
@@ -987,10 +1027,28 @@ export async function executeJobDetached(config: JobConfig): Promise<RunMeta> {
     env: spawnEnv,
   });
 
+  let settled = false;
+  const settle = (status: RunMeta['status'], exitCode: number | null, errorMessage?: string) => {
+    if (settled) return;
+    settled = true;
+    finalizeRunMeta(meta, status, exitCode, errorMessage ? { errorMessage } : undefined);
+    writeRunMeta(meta);
+    archiveRoutineTranscripts(meta, runDir, overlayHome);
+    if (status !== 'timeout') extractAndSaveReport(stdoutPath, effectiveAgent, runDir);
+  };
+
+  child.on('exit', (code) => {
+    const inferred = inferFinalStatusFromLog(stdoutPath, effectiveAgent);
+    if (inferred) {
+      settle(inferred.status, inferred.exitCode);
+    } else {
+      settle(code === 0 ? 'completed' : 'failed', code ?? 1);
+    }
+  });
+
   child.on('error', (err) => {
     try { fs.closeSync(stdoutFd); } catch { /* fd already closed */ }
-    finalizeRunMeta(meta, 'failed', 1, { errorMessage: err.message });
-    writeRunMeta(meta);
+    settle('failed', 1, err.message);
     process.stderr.write(`[agents] daemon: spawn failed for job "${config.name}": ${err.message}\n`);
   });
 
@@ -1270,7 +1328,10 @@ export function monitorRunningJobs(): void {
         if (Number.isFinite(wallClockMs) && wallClockMs > MAX_WALL_CLOCK_MS) {
           finalizeRunMeta(meta, 'timeout', null, { errorMessage: 'exceeded max wall clock' });
           writeRunMeta(meta);
-          if (!isCommandRun) extractAndSaveReport(stdoutPath, meta.agent!, runDirPath);
+          if (!isCommandRun) {
+            extractAndSaveReport(stdoutPath, meta.agent!, runDirPath);
+            archiveRoutineTranscripts(meta, runDirPath);
+          }
           continue;
         }
 
@@ -1293,7 +1354,10 @@ export function monitorRunningJobs(): void {
           }
           writeRunMeta(meta);
 
-          if (!isCommandRun) extractAndSaveReport(stdoutPath, meta.agent!, runDirPath);
+          if (!isCommandRun) {
+            extractAndSaveReport(stdoutPath, meta.agent!, runDirPath);
+            archiveRoutineTranscripts(meta, runDirPath);
+          }
         }
       } catch { /* corrupt or unreadable meta.json */ }
     }

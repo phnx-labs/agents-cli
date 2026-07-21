@@ -420,12 +420,13 @@ describe('cursor subagents version gate', () => {
 });
 
 describe('workflow capability gates', () => {
-  it('includes Antigravity, Claude, Goose, and Kimi for workflow sync', () => {
+  it('includes Antigravity, Claude, Goose, Kimi, and OpenClaw for workflow sync', () => {
     expect(supports('claude', 'workflows')).toEqual({ ok: true });
     expect(supports('antigravity', 'workflows')).toEqual({ ok: true });
     expect(supports('goose', 'workflows')).toEqual({ ok: true });
     expect(supports('kimi', 'workflows')).toEqual({ ok: true });
-    expect(capableAgents('workflows').sort()).toEqual(['antigravity', 'claude', 'goose', 'kimi']);
+    expect(supports('openclaw', 'workflows')).toEqual({ ok: true });
+    expect(capableAgents('workflows').sort()).toEqual(['antigravity', 'claude', 'goose', 'kimi', 'openclaw']);
   });
 
   it('gates Antigravity workflows at >= 1.0.6', () => {

@@ -66,6 +66,23 @@ function buildWorkflowsDetector(agent: AgentId): ResourceDetector {
           .map(d => d.name.slice(0, -'.yaml'.length));
       }
 
+      if (agent === 'openclaw') {
+        const dir = path.join(versionHome, '.openclaw', 'workflows');
+        if (!fs.existsSync(dir)) return [];
+        return fs.readdirSync(dir, { withFileTypes: true })
+          .filter(d => d.isFile() && d.name.endsWith('.lobster') && !d.name.startsWith('.'))
+          .filter(d => {
+            try {
+              const parsed = yaml.parse(fs.readFileSync(path.join(dir, d.name), 'utf-8')) as { env?: unknown } | null;
+              const env = parsed && typeof parsed === 'object' && parsed.env && typeof parsed.env === 'object' && !Array.isArray(parsed.env)
+                ? parsed.env as Record<string, unknown>
+                : {};
+              return env.AGENTS_CLI_WORKFLOW === d.name.slice(0, -'.lobster'.length);
+            } catch { return false; }
+          })
+          .map(d => d.name.slice(0, -'.lobster'.length));
+      }
+
       const workflowsDir = path.join(versionHome, 'workflows');
       if (!fs.existsSync(workflowsDir)) return [];
       return fs.readdirSync(workflowsDir, { withFileTypes: true })

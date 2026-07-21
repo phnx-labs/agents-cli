@@ -180,6 +180,8 @@ Examples:
       '--on <event>',
       'Register this run as an event trigger instead of dispatching now: pull_request (pr), push, issue_comment, workflow_run. Persists a trigger-bound routine.',
     )
+    .option('--action <name>', 'GitHub webhook action filter for --on triggers (e.g. labeled)')
+    .option('--label <name>', 'GitHub label filter for --on triggers')
     .option('--name <name>', 'Routine name to register under (with --on). Defaults to a generated name.')
     .option('-p, --prompt <text>', 'Inline prompt (alternative to positional argument)')
     .option('--timeout <duration>', 'Kill after duration (e.g., 30m, 2h)')
@@ -318,6 +320,8 @@ Examples:
         const trigger: JobTrigger = { type: 'github_event', event: event! };
         if (repoValues[0]) trigger.repo = repoValues[0];
         if (options.branch) trigger.branch = options.branch as string;
+        if (options.action) trigger.action = options.action as string;
+        if (options.label) trigger.label = options.label as string;
 
         const triggerErrors = validateTrigger(trigger);
         if (triggerErrors.length > 0) die(`Invalid trigger: ${triggerErrors.join(', ')}`);

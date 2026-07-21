@@ -113,7 +113,14 @@ describe('validateJob — command', () => {
 
 describe('validateTrigger', () => {
   it('accepts a well-formed github_event trigger', () => {
-    expect(validateTrigger({ type: 'github_event', event: 'pull_request', repo: 'x/y', branch: 'main' })).toEqual([]);
+    expect(validateTrigger({
+      type: 'github_event',
+      event: 'pull_request',
+      repo: 'x/y',
+      branch: 'main',
+      action: 'labeled',
+      label: 'ux-approved',
+    })).toEqual([]);
   });
 
   it('accepts a well-formed linear_event trigger', () => {

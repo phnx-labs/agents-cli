@@ -51,6 +51,7 @@ import { safeJoin } from './paths.js';
 import { installCommandSkillToVersion, listCommandSkillsInVersion, readSkillSourceCommandMarker, shouldInstallCommandAsSkill } from './command-skills.js';
 import { getWriter, getDetector } from './staleness/registry.js';
 import { syncMemoryToVersionHome } from './memory.js';
+import { listPluginSkillNames } from './staleness/writers/sources.js';
 
 /** Promisified exec for running shell commands. */
 const execAsync = promisify(exec);
@@ -188,12 +189,12 @@ export function getAvailableResources(cwd: string = process.cwd()): AvailableRes
   }
   result.skills = filterNamesForActiveResourceProfile('skills', Array.from(skillNames), sourceMapFromResources('skills', cwd));
 
-  // Hooks (files). A hook is an actual script: known script extension, OR
-  // executable bit on a file with a non-data extension. Auxiliary content
-  // like `README.md` (docs) or `promptcuts.yaml` (data read directly by the
-  // expand-promptcuts script) lives in hooks/ but is not a hook. Older sync
-  // runs chmod 0o755'd everything they copied, so an exec bit alone can no
-  // longer be trusted as the signal.
+  // Hooks. A hook is either a directory bundle or an actual script file: known
+  // script extension, OR executable bit on a file with a non-data extension.
+  // Auxiliary content like `README.md` (docs) or `promptcuts.yaml` (data read
+  // directly by the expand-promptcuts script) lives in hooks/ but is not a
+  // hook. Older sync runs chmod 0o755'd everything they copied, so an exec bit
+  // alone can no longer be trusted as the signal.
   const NON_SCRIPT_EXTS = new Set(['.md', '.markdown', '.rst', '.txt', '.yaml', '.yml', '.json', '.toml', '.ini', '.conf']);
   const SCRIPT_EXTS     = new Set(['.sh', '.bash', '.zsh', '.py', '.js', '.ts', '.mjs', '.cjs', '.rb', '.pl', '.ps1']);
   const hookNames = new Set<string>();
@@ -203,7 +204,9 @@ export function getAvailableResources(cwd: string = process.cwd()): AvailableRes
     for (const name of fs.readdirSync(hooksDir)) {
       if (name.startsWith('.')) continue;
       try {
-        const stat = fs.statSync(path.join(hooksDir, name));
+        const stat = fs.lstatSync(path.join(hooksDir, name));
+        if (stat.isSymbolicLink()) continue;
+        if (stat.isDirectory()) { hookNames.add(name); continue; }
         if (!stat.isFile()) continue;
         const ext = path.extname(name).toLowerCase();
         if (SCRIPT_EXTS.has(ext)) { hookNames.add(name); continue; }
@@ -291,6 +294,13 @@ export function getAvailableResources(cwd: string = process.cwd()): AvailableRes
   // Plugins (directories with .claude-plugin/plugin.json)
   const allPlugins = discoverPlugins();
   result.plugins = filterNamesForActiveResourceProfile('plugins', allPlugins.map(p => p.name), new Map(allPlugins.map(p => [p.name, 'user'])));
+  const pluginSkillNames = filterNamesForActiveResourceProfile(
+    'skills',
+    listPluginSkillNames({ plugins: new Set(result.plugins) }),
+  );
+  for (const name of pluginSkillNames) {
+    if (!skillNames.has(name)) result.skills.push(name);
+  }
 
   // Promptcuts — present if either layer exists. Reads merge user + system
   // with user precedence (see readMergedPromptcuts); writes always go to user.
@@ -2578,9 +2588,17 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   // ~/.agents/skills/ (Gemini) are not registered; we clear the version-home
   // skills dir for them so a stale per-version copy never shadows central.
   const skillsWriter = getWriter('skills', agent);
-  let skillsToSync = selection
+  const pluginsWriter = getWriter('plugins', agent);
+  const pluginsToSync = selection
+    ? resolveSelection(selection.plugins, available.plugins)
+    : (pluginsWriter ? available.plugins : []);
+  const pluginSkillsToSync = listPluginSkillNames({ agent, plugins: new Set(pluginsToSync) });
+  const selectedSkillsToSync = selection
     ? resolveSelection(selection.skills, available.skills)
     : available.skills;
+  let skillsToSync = userPassedSelection
+    ? selectedSkillsToSync
+    : Array.from(new Set([...selectedSkillsToSync, ...pluginSkillsToSync]));
   if (commandsAsSkills && commandsToSync.length > 0 && skillsToSync.length > 0) {
     const commandNames = new Set(commandsToSync);
     const skillRoots = [
@@ -2796,11 +2814,6 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   }
 
   // Sync plugins — dispatch through WRITERS.plugins.
-  const pluginsWriter = getWriter('plugins', agent);
-  const pluginsToSync = selection
-    ? resolveSelection(selection.plugins, available.plugins)
-    : (pluginsWriter ? available.plugins : []);
-
   if (pluginsToSync.length > 0 && pluginsWriter) {
     const r = pluginsWriter.write({ version, versionHome, selection: pluginsToSync, cwd });
     result.plugins.push(...r.synced);

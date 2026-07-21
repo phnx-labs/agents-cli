@@ -113,6 +113,21 @@ agents routines add pr-review \
   --prompt "Review the pull request"
 ```
 
+Add `--action` and `--label` when a routine should fire only for a specific
+GitHub webhook action and label, such as a UX test agent after a human adds
+`ux-approved`:
+
+```bash
+agents routines add ux-tests \
+  --on github:pull_request \
+  --repo phnx-labs/agents-cli \
+  --branch main \
+  --action labeled \
+  --label ux-approved \
+  --agent claude \
+  --prompt "Run Playwright E2E and visual regression checks, then comment the results on the PR."
+```
+
 Run the localhost receiver with signing keys from an `agents secrets` bundle:
 
 ```bash
@@ -239,7 +254,7 @@ Job 'drain' can only run on: yosemite-s0, mac-mini
 Each job runs with `HOME` set to an overlay directory:
 
 ```
-~/.agents/routines-sandbox/daily-review-<timestamp>/
+~/.agents/routines/daily-review/home/
   .claude/
     settings.json             # Generated with allow.tools permissions
   projects -> ~/projects      # Symlink from allow.dirs
@@ -249,6 +264,19 @@ The agent can only:
 - See directories listed in `allow.dirs`
 - Use tools listed in `allow.tools`
 - Cannot access `~/.ssh`, `~/.gitconfig`, etc.
+
+When an agent routine finishes, agents-cli copies the agent transcript out of
+the overlay before the next run recreates it. The durable copy lives beside the
+run metadata:
+
+```
+~/.agents/.history/runs/<routine>/<run-id>/sessions/<agent>/...
+```
+
+Those archives are indexed by `agents sessions` with `origin: "routine"`,
+`routineName`, and `routineRunId`. Use `agents sessions --routine --all` to list
+them, or `agents sessions <run-id>` to render the existing session summary view
+for a specific routine run.
 
 ### Headless claude auth
 
@@ -492,6 +520,7 @@ agents routines logs <name>           # Show stdout from latest run
 agents routines logs <name> --run <id>  # Show specific run
 agents routines report <name>         # Show report from latest run
 agents routines report <name> --run <id>  # Show specific run report
+agents sessions <run-id>              # Show the archived agent transcript summary
 
 # Scheduler (auto-starts on first `routines add`; these are manual controls)
 agents routines start                 # Start the background scheduler

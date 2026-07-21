@@ -56,7 +56,7 @@ function buildSkillsWriter(agent: AgentId): ResourceWriter<string[]> {
 
       const synced: string[] = [];
       for (const skill of selection) {
-        const srcDir = resolveSkillSource(skill);
+        const srcDir = resolveSkillSource(skill, { agent });
         if (!srcDir) continue;
         const destDir = safeJoin(skillsTarget, skill);
         removePath(destDir);

@@ -8,6 +8,7 @@ import {
   parseComputerList,
   FactoryCloudProvider,
 } from './factory.js';
+import { SSH_OPTS } from '../ssh-exec.js';
 
 describe('resolveAutonomy', () => {
   it('passes through valid levels', () => {
@@ -52,8 +53,17 @@ describe('buildSshArgs', () => {
     // ProxyCommand routes through the relay for the named computer.
     expect(args).toContain('-o');
     expect(args.some((a) => a.startsWith('ProxyCommand=/usr/bin/droid computer ssh cloud-vm-1 --proxy'))).toBe(true);
+    // The relay ssh still composes the canonical hardened baseline.
+    for (const opt of SSH_OPTS) expect(args).toContain(opt);
+    if (process.platform !== 'win32') {
+      expect(args).toContain('ControlMaster=auto');
+      expect(args).toContain('ControlPersist=60s');
+    }
+    const targetIdx = args.indexOf('droid@cloud-vm-1');
+    expect(args.indexOf('ProxyCommand=/usr/bin/droid computer ssh cloud-vm-1 --proxy --port %p')).toBeLessThan(targetIdx);
+    expect(args.indexOf('ConnectTimeout=10')).toBeLessThan(targetIdx);
     // Connects as user@computer.
-    expect(args).toContain('droid@cloud-vm-1');
+    expect(targetIdx).toBeGreaterThanOrEqual(0);
     // The remote command is a single shell-quoted string ending the argv.
     expect(args[args.length - 1]).toBe(
       `'droid' 'exec' '--auto' 'high' '--output-format' 'stream-json' 'do a thing'`,

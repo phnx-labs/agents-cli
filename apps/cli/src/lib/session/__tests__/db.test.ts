@@ -141,7 +141,7 @@ describe('migration v5 -> v6 adds cost/duration columns', () => {
   it('schema_version is recorded as the current version', () => {
     const db = getDB();
     const row = db.prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string };
-    expect(row.value).toBe('12');
+    expect(row.value).toBe('13');
   });
 
   it('v10 unifies name into label — the separate `name` column is dropped', () => {
@@ -170,6 +170,14 @@ describe('migration v5 -> v6 adds cost/duration columns', () => {
     const db = getDB();
     const cols = (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map(c => c.name);
     expect(cols).toContain('plan');
+  });
+
+  it('v13 adds routine-origin linkage columns', () => {
+    const db = getDB();
+    const cols = (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map(c => c.name);
+    expect(cols).toContain('origin');
+    expect(cols).toContain('routine_name');
+    expect(cols).toContain('routine_run_id');
   });
 });
 

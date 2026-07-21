@@ -245,6 +245,74 @@ export function sshExecRaw(target: string, remoteCmd: string, opts: SshExecOptio
   };
 }
 
+export interface SshExecRawStreamOptions extends SshExecOptions {
+  onStdout: (chunk: Buffer) => void;
+  onStderr?: (chunk: Buffer) => void;
+  signal?: AbortSignal;
+}
+
+/**
+ * Stream raw stdout from a long-lived remote command over ssh.
+ *
+ * Unlike {@link sshStream}, this does not inherit local stdio: callers receive
+ * byte-exact stdout chunks and decide how to account for them. That matters for
+ * offset-resumed log following where a UTF-8 decode boundary must not shift the
+ * byte cursor.
+ */
+export function sshExecRawStream(
+  target: string,
+  remoteCmd: string,
+  opts: SshExecRawStreamOptions,
+): Promise<Omit<SshExecRawResult, 'stdout'>> {
+  assertValidSshTarget(target);
+  const mux = opts.multiplex === false ? [] : controlOpts();
+  const args = [...sshConnectOpts(mux, opts.hostKeyOpts), ...(opts.extraSshArgs ?? []), target, remoteCmd];
+  return new Promise((resolve) => {
+    const child = spawn('ssh', args, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    const stderr: Buffer[] = [];
+    let settled = false;
+    let timedOut = false;
+    let aborted = false;
+    const finish = (code: number | null) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      opts.signal?.removeEventListener('abort', abort);
+      resolve({ code, stderr: Buffer.concat(stderr), timedOut });
+    };
+    const abort = () => {
+      aborted = true;
+      child.kill('SIGTERM');
+    };
+    const timer = opts.timeoutMs
+      ? setTimeout(() => {
+          timedOut = true;
+          child.kill('SIGTERM');
+        }, opts.timeoutMs)
+      : null;
+
+    child.stdout.on('data', (chunk: Buffer) => { opts.onStdout(chunk); });
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr.push(chunk);
+      opts.onStderr?.(chunk);
+    });
+    child.stdin.on('error', () => {});
+    child.stdin.end(opts.input ?? '');
+    opts.signal?.addEventListener('abort', abort, { once: true });
+
+    child.on('error', (err) => {
+      stderr.push(Buffer.from(err.message));
+      finish(null);
+    });
+    child.on('close', (code) => {
+      finish(aborted ? null : code);
+    });
+  });
+}
+
 /** True if `target` is reachable over ssh (a passwordless `true` succeeds quickly). */
 export function sshReachable(target: string, timeoutMs = 10000): boolean {
   return sshExec(target, 'true', { timeoutMs, multiplex: true }).code === 0;

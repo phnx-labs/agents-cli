@@ -14,6 +14,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { getDriveDir } from './state.js';
 import { AGENTS } from './agents.js';
+import { sshExec } from './ssh-exec.js';
 import type { AgentId } from './types.js';
 
 const execFileAsync = promisify(execFile);
@@ -117,9 +118,11 @@ export async function push(): Promise<void> {
   const localDir = getDriveDir() + '/';
   const remoteSpec = `${config.remote}:~/.agents/drive/`;
 
-  // Ensure remote directory exists. ssh's command argument is one positional
-  // string; we hand it as a single argv element so no local shell sees it.
-  await execFileAsync('ssh', [config.remote, 'mkdir -p ~/.agents/drive']);
+  // Ensure remote directory exists via the shared hardened SSH primitive.
+  const mkdir = sshExec(config.remote, 'mkdir -p ~/.agents/drive', { timeoutMs: 30_000 });
+  if (mkdir.code !== 0) {
+    throw new Error(`Failed to prepare remote drive directory on ${config.remote}${mkdir.stderr.trim() ? `: ${mkdir.stderr.trim()}` : ''}`);
+  }
   await execFileAsync('rsync', ['-az', '--exclude=config.json', localDir, remoteSpec]);
 
   config.lastPush = new Date().toISOString();
