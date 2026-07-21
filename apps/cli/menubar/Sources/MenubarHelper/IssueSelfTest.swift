@@ -19,6 +19,7 @@ enum IssueSelfTest {
         testQuickDispatchRoster()
         testRecentTicketsMerge()
         testDraftPreservation()
+        testRoutineFailureReason()
         if failures == 0 {
             print("\nALL PASS")
             exit(0)
@@ -227,6 +228,37 @@ enum IssueSelfTest {
               (cleared?.selectedAgents ?? []).isEmpty)
     }
 
+    // Overdue is a current scheduler condition, not proof that the previous run
+    // failed. A last-successful routine with exitCode 0 must render as overdue,
+    // not "exit 0", across summary, submenu header, and all-routines rows.
+    private static func testRoutineFailureReason() {
+        let succeededButOverdue = routine(
+            lastStatus: "completed",
+            exitCode: 0,
+            failureReason: nil,
+            overdue: true
+        )
+        check("overdue successful routine summary says overdue",
+              routineFailureSummary(succeededButOverdue, max: 48) == "overdue",
+              detail: routineFailureSummary(succeededButOverdue, max: 48))
+        check("overdue successful routine detail says overdue",
+              routineFailureDetail(succeededButOverdue, max: 72) == "overdue",
+              detail: routineFailureDetail(succeededButOverdue, max: 72) ?? "nil")
+        check("overdue successful routine all-row detail says overdue",
+              routineFailureDetail(succeededButOverdue, max: 52) == "overdue",
+              detail: routineFailureDetail(succeededButOverdue, max: 52) ?? "nil")
+
+        let failed = routine(
+            lastStatus: "failed",
+            exitCode: 2,
+            failureReason: nil,
+            overdue: false
+        )
+        check("failed routine still falls back to exit code",
+              routineFailureDetail(failed, max: 72) == "exit 2",
+              detail: routineFailureDetail(failed, max: 72) ?? "nil")
+    }
+
     // MARK: helpers
 
     private static func write(_ dir: URL, _ name: String, modified offset: TimeInterval) {
@@ -252,5 +284,30 @@ enum IssueSelfTest {
             .split(separator: ",")
             .map { LocalState.normalizeAgent(String($0).trimmingCharacters(in: .whitespacesAndNewlines)) }
             .filter { visible.contains($0) && seen.insert($0).inserted } ?? []
+    }
+
+    private static func routine(
+        lastStatus: String?,
+        exitCode: Int?,
+        failureReason: String?,
+        overdue: Bool
+    ) -> Routine {
+        Routine(
+            name: "nightly",
+            agent: "claude",
+            workflow: nil,
+            repo: nil,
+            schedule: "0 3 * * *",
+            scheduleHuman: nil,
+            enabled: true,
+            overdue: overdue,
+            nextRun: nil,
+            nextRunHuman: "tomorrow",
+            lastStatus: lastStatus,
+            exitCode: exitCode,
+            failureReason: failureReason,
+            lastRunStartedAt: "2026-07-20T03:00:00.000Z",
+            lastRunCompletedAt: "2026-07-20T03:00:05.000Z"
+        )
     }
 }

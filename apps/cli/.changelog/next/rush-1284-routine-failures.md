@@ -1,1 +1,1 @@
-- Menu bar routines now include latest run `exitCode` and `failureReason` from `agents routines list --json`, show failed routine reasons inline, and open the concise logs summary instead of a raw Terminal dump.
+- Menu bar routines now include latest run `exitCode` and `failureReason` from `agents routines list --json`, show failed routine reasons inline, label healthy-but-overdue routines as `overdue` instead of `exit 0`, and open the concise logs summary instead of a raw Terminal dump.

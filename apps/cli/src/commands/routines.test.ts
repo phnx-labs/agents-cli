@@ -384,6 +384,38 @@ describe('routines list --json has devices+runsHere, no device', () => {
       fs.rmSync(home, { recursive: true, force: true });
     }
   });
+
+  it('can report overdue independently of a completed zero-exit latest run', () => {
+    const home = makeHome({
+      jobs: [{ ...baseJob, schedule: '* * * * *' }],
+      registry,
+    });
+    try {
+      writeRunMeta(home, 'test-job', '2026-07-20T03-00-00-000Z', {
+        jobName: 'test-job',
+        runId: '2026-07-20T03-00-00-000Z',
+        agent: 'claude',
+        pid: null,
+        status: 'completed',
+        startedAt: '2026-07-20T03:00:00.000Z',
+        completedAt: '2026-07-20T03:00:05.000Z',
+        exitCode: 0,
+      });
+
+      const res = run(home, ['list', '--json']);
+      expect(res.status).toBe(0);
+
+      const parsed = JSON.parse(res.stdout.trim());
+      const entry = parsed.find((j: Record<string, unknown>) => j.name === 'test-job');
+      expect(entry).toBeDefined();
+      expect(entry.overdue).toBe(true);
+      expect(entry.lastStatus).toBe('completed');
+      expect(entry.exitCode).toBe(0);
+      expect(entry.failureReason).toBeNull();
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('routines list table has Devices column with bounded ellipsis', () => {

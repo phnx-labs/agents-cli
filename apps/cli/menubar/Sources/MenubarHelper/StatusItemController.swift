@@ -922,22 +922,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         return String(value.prefix(max - 1)) + "…"
     }
 
-    private func routineFailureSummary(_ r: Routine, max: Int) -> String {
-        if let detail = routineFailureDetail(r, max: max) { return detail }
-        return r.overdue ? "overdue" : (r.lastStatus ?? "failed")
-    }
-
-    private func routineFailureDetail(_ r: Routine, max: Int) -> String? {
-        guard r.lastStatus == "failed" || r.lastStatus == "timeout" || r.overdue else { return nil }
-        if let reason = r.failureReason?.trimmingCharacters(in: .whitespacesAndNewlines), !reason.isEmpty {
-            return trim(reason.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression), max)
-        }
-        if let code = r.exitCode {
-            return "exit \(code)"
-        }
-        return r.overdue ? "overdue" : (r.lastStatus ?? "failed")
-    }
-
     // "3m" / "1h 12m" / "2d" — how long a session has been waiting (sentinel mtime).
     private func elapsedShort(_ sinceMs: Double) -> String {
         let mins = max(0, Int((LocalState.nowMs() - sinceMs) / 60_000))
@@ -983,4 +967,26 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             FileHandle.standardError.write("  \(kind)\(sub)\n".data(using: .utf8)!)
         }
     }
+}
+
+func routineFailureSummary(_ r: Routine, max: Int) -> String {
+    if let detail = routineFailureDetail(r, max: max) { return detail }
+    return r.overdue ? "overdue" : (r.lastStatus ?? "failed")
+}
+
+func routineFailureDetail(_ r: Routine, max: Int) -> String? {
+    let lastRunFailed = r.lastStatus == "failed" || r.lastStatus == "timeout"
+    guard lastRunFailed || r.overdue else { return nil }
+    if let reason = r.failureReason?.trimmingCharacters(in: .whitespacesAndNewlines), !reason.isEmpty {
+        return trimText(reason.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression), max)
+    }
+    if lastRunFailed, let code = r.exitCode {
+        return "exit \(code)"
+    }
+    return r.overdue ? "overdue" : (r.lastStatus ?? "failed")
+}
+
+private func trimText(_ value: String, _ max: Int) -> String {
+    if value.count <= max { return value }
+    return String(value.prefix(max - 1)) + "…"
 }
