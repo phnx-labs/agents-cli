@@ -141,6 +141,7 @@ const PROFILE_AUTH_ENV_KEYS_BY_RUNTIME: Partial<Record<AgentId, readonly string[
     'AWS_BEARER_TOKEN_BEDROCK',
     'GOOGLE_APPLICATION_CREDENTIALS',
     'GOOGLE_CLOUD_PROJECT',
+    'ANTHROPIC_FOUNDRY_API_KEY',
   ],
   codex: ['OPENAI_API_KEY'],
   gemini: ['GEMINI_API_KEY', 'GOOGLE_API_KEY'],
@@ -148,8 +149,9 @@ const PROFILE_AUTH_ENV_KEYS_BY_RUNTIME: Partial<Record<AgentId, readonly string[
 };
 
 /** True when a profile already carries auth for its host runtime via env. */
-export function profileNeedsBaseRuntimeCredentials(agent: AgentId, env: Record<string, string>): boolean {
+export function profileNeedsBaseRuntimeCredentials(agent: AgentId, env: Record<string, string>, authEnvVar?: string): boolean {
   if (!LEASE_RUNTIMES.some((c) => c.id === agent)) return false;
+  if (authEnvVar && typeof env[authEnvVar] === 'string' && env[authEnvVar].trim() !== '') return false;
   const keys = PROFILE_AUTH_ENV_KEYS_BY_RUNTIME[agent] ?? [];
   return !keys.some((key) => typeof env[key] === 'string' && env[key].trim() !== '');
 }

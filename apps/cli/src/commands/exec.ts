@@ -680,7 +680,7 @@ export function registerRunCommand(program: Command): void {
             const profile = readProfile(agentName);
             const profileEnv = resolveProfileEnv(profile);
             runtime = profile.host.agent;
-            const profileNeedsCredentials = profileNeedsBaseRuntimeCredentials(runtime, profileEnv);
+            const profileNeedsCredentials = profileNeedsBaseRuntimeCredentials(runtime, profileEnv, profile.auth?.envVar);
             credentialRuntimes = profileNeedsCredentials ? [runtime] : [];
             dispatchProfile = {
               name: profile.name,

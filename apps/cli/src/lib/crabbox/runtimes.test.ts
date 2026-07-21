@@ -3,6 +3,8 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 import { buildCredentialScript, pickRuntimes, resolveClaudeCredentialsBlob, inferLeaseRuntime, profileNeedsBaseRuntimeCredentials, type DetectedRuntime } from './runtimes.js';
+import { getPreset } from '../profiles-presets.js';
+import { profileFromPreset } from '../profiles.js';
 
 describe('inferLeaseRuntime', () => {
   const signedIn = (id: DetectedRuntime['id'], email: string | null): DetectedRuntime => ({
@@ -121,6 +123,19 @@ describe('profileNeedsBaseRuntimeCredentials', () => {
       ANTHROPIC_AUTH_TOKEN: 'sk-or-profile',
       ANTHROPIC_MODEL: 'moonshotai/kimi-k2.5',
     })).toBe(false);
+  });
+
+  it('does not require Claude OAuth for the foundry preset auth env', () => {
+    const preset = getPreset('foundry')!;
+    const profile = profileFromPreset('foundry-work', preset);
+    const env = {
+      ...profile.env,
+      [profile.auth!.envVar]: 'foundry-profile-token',
+    };
+
+    expect(profile.host.agent).toBe('claude');
+    expect(profile.auth!.envVar).toBe('ANTHROPIC_FOUNDRY_API_KEY');
+    expect(profileNeedsBaseRuntimeCredentials(profile.host.agent, env, profile.auth!.envVar)).toBe(false);
   });
 
   it('requires base runtime credentials when the profile only changes endpoint/model', () => {
