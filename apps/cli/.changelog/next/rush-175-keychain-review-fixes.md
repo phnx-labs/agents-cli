@@ -1,0 +1,1 @@
+- Fixed `agents secrets openclaw-keychain migrate` so OpenClaw Keychain writes no longer expose secret values in process argv, and migration now fails closed when matching plaintext credentials disagree.

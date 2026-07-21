@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildOpenClawKeychainStoreInvocation,
   migrateOpenClawConfigToKeychainRefs,
   resolveOpenClawKeychainRequest,
 } from './openclaw-keychain.js';
@@ -123,6 +124,44 @@ describe('migrateOpenClawConfigToKeychainRefs', () => {
     expect(result.services).toEqual([]);
     expect(result.unsupportedEnvKeys).toEqual(['POSTHOG_API_KEY']);
     expect(config).toEqual({ env: { POSTHOG_API_KEY: 'ph_secret' } });
+  });
+
+  it('fails closed when a structural OpenClaw credential differs from the top-level env value', () => {
+    const config: Record<string, unknown> = {
+      env: { LINEAR_API_KEY: 'OLD_STALE_KEY' },
+      plugins: {
+        entries: {
+          acpx: {
+            config: {
+              mcpServers: {
+                linear: {
+                  command: 'node',
+                  env: { LINEAR_API_KEY: 'NEW_ACTIVE_KEY' },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    expect(() => migrateOpenClawConfigToKeychainRefs(config, {
+      account: 'openclaw',
+      agentsBin: '/usr/local/bin/agents',
+    })).toThrow(/value mismatch.*env\.LINEAR_API_KEY.*mcpServers\.linear\.env\.LINEAR_API_KEY/);
+  });
+});
+
+describe('buildOpenClawKeychainStoreInvocation', () => {
+  it('omits the secret value from argv and pipes it over stdin for RUSH-1764', () => {
+    const secret = 'sk-openclaw-secret-value';
+    const invocation = buildOpenClawKeychainStoreInvocation('linear-api-key', secret, 'openclaw');
+
+    expect(invocation.command).toBe('/usr/bin/security');
+    expect(invocation.args).toEqual(['add-generic-password', '-U', '-a', 'openclaw', '-s', 'linear-api-key', '-w']);
+    expect(invocation.args.some((arg) => arg.includes(secret))).toBe(false);
+    expect(invocation.options.input).toBe(`${secret}\n${secret}\n`);
+    expect(invocation.options.detached).toBe(true);
   });
 });
 

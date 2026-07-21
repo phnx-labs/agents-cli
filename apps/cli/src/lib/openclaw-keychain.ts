@@ -1,5 +1,9 @@
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync, type SpawnSyncOptions } from 'child_process';
 import { getCliLaunch } from './cli-entry.js';
+import {
+  buildAddGenericPasswordArgs,
+  buildAddGenericPasswordSpawnOptions,
+} from './secrets/index.js';
 
 export const OPENCLAW_KEYCHAIN_ACCOUNT = 'openclaw';
 export const OPENCLAW_KEYCHAIN_PROVIDER = 'agents_keychain';
@@ -117,7 +121,7 @@ function providerEnvKeyForPath(parts: string[]): string | null {
   return null;
 }
 
-function serviceForSupportedPath(parts: string[], envByValue: Map<string, string>): string | null {
+function serviceForSupportedPath(parts: string[]): string | null {
   const envKey = providerEnvKeyForPath(parts);
   if (envKey) return OPENCLAW_KEYCHAIN_ENV_SERVICES[envKey] ?? null;
 
@@ -126,6 +130,25 @@ function serviceForSupportedPath(parts: string[], envByValue: Map<string, string
   }
 
   return null;
+}
+
+function envKeyForService(service: string): string {
+  return Object.entries(OPENCLAW_KEYCHAIN_ENV_SERVICES).find(([, known]) => known === service)?.[0] ?? service;
+}
+
+function assertSameOpenClawSecretValue(
+  envKey: string,
+  service: string,
+  existingPath: string,
+  existingValue: string,
+  nextPath: string,
+  nextValue: string,
+): void {
+  if (existingValue === nextValue) return;
+  throw new Error(
+    `OpenClaw credential value mismatch for ${envKey} (${service}): ${existingPath} and ${nextPath} differ. ` +
+    `Resolve the plaintext values before migrating to Keychain.`
+  );
 }
 
 function canReplaceByValue(parts: string[]): boolean {
@@ -141,7 +164,9 @@ function replaceSupportedSecrets(
   parts: string[],
   provider: string,
   envByValue: Map<string, string>,
+  env: Map<string, { path: string[]; value: string }>,
   services: Map<string, { envKey: string; service: string; value: string }>,
+  servicePaths: Map<string, string>,
   replacedPaths: string[],
 ): void {
   if (!isRecord(current) && !Array.isArray(current)) return;
@@ -152,17 +177,43 @@ function replaceSupportedSecrets(
   for (const [key, value] of entries) {
     const childParts = [...parts, key];
     if (typeof value === 'string' && value.trim() && canReplaceByValue(childParts)) {
-      const directService = serviceForSupportedPath(childParts, envByValue);
+      const directService = serviceForSupportedPath(childParts);
       const matchedService = directService ?? envByValue.get(value);
       if (matchedService) {
-        const envKey = Object.entries(OPENCLAW_KEYCHAIN_ENV_SERVICES).find(([, service]) => service === matchedService)?.[0] ?? matchedService;
+        const envKey = envKeyForService(matchedService);
+        const childPath = openClawPath(childParts);
+        const existingService = services.get(matchedService);
+        if (existingService) {
+          assertSameOpenClawSecretValue(
+            envKey,
+            matchedService,
+            servicePaths.get(matchedService) ?? matchedService,
+            existingService.value,
+            childPath,
+            value,
+          );
+        }
+        if (directService) {
+          const envEntry = env.get(envKey);
+          if (envEntry) {
+            assertSameOpenClawSecretValue(
+              envKey,
+              matchedService,
+              openClawPath(envEntry.path),
+              envEntry.value,
+              childPath,
+              value,
+            );
+          }
+        }
         services.set(matchedService, { envKey, service: matchedService, value });
+        servicePaths.set(matchedService, childPath);
         (current as Record<string, unknown>)[key] = secretRef(provider, matchedService);
-        replacedPaths.push(openClawPath(childParts));
+        replacedPaths.push(childPath);
         continue;
       }
     }
-    replaceSupportedSecrets(value, childParts, provider, envByValue, services, replacedPaths);
+    replaceSupportedSecrets(value, childParts, provider, envByValue, env, services, servicePaths, replacedPaths);
   }
 }
 
@@ -179,19 +230,27 @@ export function migrateOpenClawConfigToKeychainRefs(
   }
 
   const services = new Map<string, { envKey: string; service: string; value: string }>();
+  const servicePaths = new Map<string, string>();
   const replacedPaths: string[] = [];
-  replaceSupportedSecrets(config, [], provider, envByValue, services, replacedPaths);
+  replaceSupportedSecrets(config, [], provider, envByValue, env, services, servicePaths, replacedPaths);
 
   const removedEnvPaths: string[] = [];
   const unsupportedEnvKeys: string[] = [];
   for (const [envKey, entry] of env) {
     const service = OPENCLAW_KEYCHAIN_ENV_SERVICES[envKey];
-    const wasMapped = [...services.values()].some((s) => s.service === service);
-    if (!wasMapped) {
+    const mappedService = services.get(service);
+    if (!mappedService) {
       unsupportedEnvKeys.push(envKey);
       continue;
     }
-    services.set(service, { envKey, service, value: entry.value });
+    assertSameOpenClawSecretValue(
+      envKey,
+      service,
+      servicePaths.get(service) ?? service,
+      mappedService.value,
+      openClawPath(entry.path),
+      entry.value,
+    );
     if (deletePath(config, entry.path)) removedEnvPaths.push(openClawPath(entry.path));
   }
 
@@ -208,6 +267,18 @@ export function migrateOpenClawConfigToKeychainRefs(
   };
 }
 
+export function buildOpenClawKeychainStoreInvocation(
+  service: string,
+  value: string,
+  account = OPENCLAW_KEYCHAIN_ACCOUNT,
+): { command: string; args: string[]; options: SpawnSyncOptions & { input: string; detached: boolean } } {
+  return {
+    command: '/usr/bin/security',
+    args: buildAddGenericPasswordArgs(account, service),
+    options: buildAddGenericPasswordSpawnOptions(value),
+  };
+}
+
 export function storeOpenClawKeychainServices(
   services: Array<{ service: string; value: string }>,
   account = OPENCLAW_KEYCHAIN_ACCOUNT,
@@ -216,9 +287,12 @@ export function storeOpenClawKeychainServices(
     throw new Error('OpenClaw Keychain migration must run on macOS.');
   }
   for (const { service, value } of services) {
-    execFileSync('/usr/bin/security', ['add-generic-password', '-U', '-s', service, '-a', account, '-w', value], {
-      stdio: 'ignore',
-    });
+    const write = buildOpenClawKeychainStoreInvocation(service, value, account);
+    const result = spawnSync(write.command, write.args, write.options);
+    if (result.status !== 0) {
+      const msg = result.stderr?.toString().trim();
+      throw new Error(msg || `Failed to write OpenClaw Keychain service '${service}'.`);
+    }
   }
 }
 
