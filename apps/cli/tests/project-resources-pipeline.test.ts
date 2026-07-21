@@ -63,6 +63,7 @@ interface FixtureLayout {
 
 function setupFixture(): FixtureLayout {
   TEMP_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'proj-res-'));
+  fs.mkdirSync(path.join(TEMP_ROOT, '.git'), { recursive: true });
   // Recursive copy that preserves symlinks/empty dirs and hidden .agents/.
   // fs.cpSync is cross-platform — the old `cp -R` spawn assumed a POSIX `cp`
   // on PATH, which the windows-latest runner does not provide. Default

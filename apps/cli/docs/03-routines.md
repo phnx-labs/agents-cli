@@ -1,6 +1,6 @@
 # Routines (Scheduled Jobs)
 
-Scheduled agent execution with sandboxed permissions and daemon-driven cron scheduling.
+Scheduled agent execution with sandboxed permissions and scheduler-driven cron execution.
 
 ## Architecture
 
@@ -13,7 +13,7 @@ Scheduled agent execution with sandboxed permissions and daemon-driven cron sche
     state.json              # Daemon PID, last reload timestamp
 ```
 
-Each job is a YAML file in `~/.agents/routines/`. A background daemon (`agents daemon`) parses cron expressions with [croner](https://github.com/hucsm/croner), spawns agent processes at trigger time, and captures output.
+Each job is a YAML file in `~/.agents/routines/`. A background scheduler parses cron expressions with [croner](https://github.com/hucsm/croner), spawns agent processes at trigger time, and captures output.
 
 ### Project routines (inspection-only)
 
@@ -239,7 +239,7 @@ Job 'drain' can only run on: yosemite-s0, mac-mini
 Each job runs with `HOME` set to an overlay directory:
 
 ```
-~/.agents/routines-sandbox/daily-review-<timestamp>/
+~/.agents/routines/daily-review/home/
   .claude/
     settings.json             # Generated with allow.tools permissions
   projects -> ~/projects      # Symlink from allow.dirs
@@ -249,6 +249,19 @@ The agent can only:
 - See directories listed in `allow.dirs`
 - Use tools listed in `allow.tools`
 - Cannot access `~/.ssh`, `~/.gitconfig`, etc.
+
+When an agent routine finishes, agents-cli copies the agent transcript out of
+the overlay before the next run recreates it. The durable copy lives beside the
+run metadata:
+
+```
+~/.agents/.history/runs/<routine>/<run-id>/sessions/<agent>/...
+```
+
+Those archives are indexed by `agents sessions` with `origin: "routine"`,
+`routineName`, and `routineRunId`. Use `agents sessions --routine --all` to list
+them, or `agents sessions <run-id>` to render the existing session summary view
+for a specific routine run.
 
 ### Headless claude auth
 
@@ -492,14 +505,13 @@ agents routines logs <name>           # Show stdout from latest run
 agents routines logs <name> --run <id>  # Show specific run
 agents routines report <name>         # Show report from latest run
 agents routines report <name> --run <id>  # Show specific run report
+agents sessions <run-id>              # Show the archived agent transcript summary
 
 # Scheduler (auto-starts on first `routines add`; these are manual controls)
 agents routines start                 # Start the background scheduler
 agents routines stop                  # Stop the scheduler
 agents routines status                # Show scheduler status + upcoming runs
 agents routines scheduler-logs        # Read scheduler log output
-
-# Deprecated (removed in v2.0): `agents daemon start|stop|status|logs`
 ```
 
 ### Non-Interactive Usage
@@ -533,8 +545,6 @@ The scheduler **auto-starts on the first `agents routines add`**, so in most cas
 `agents routines status` reports the scheduler as `running`, `wedged`, or `stopped`. A live PID whose heartbeat is more than three monitor ticks old is `wedged`; the status output includes the restart command. Both `routines list` and `routines status` also finalize orphaned `running` records before rendering. Run metadata records process birth time to reject recycled PIDs, and any run still active after 24 hours is finalized as a timeout.
 
 The status output includes the resolved daemon binary. Startup rejects bun virtual-filesystem paths and warns when the binary lives inside `.agents/worktrees/`, because deleting that worktree would strand the service.
-
-The legacy `agents daemon <cmd>` subcommands still work but print a deprecation warning and will be removed in v2.0.
 
 ## Key Functions
 

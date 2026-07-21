@@ -108,6 +108,36 @@ describe('file-backed bundle routing', () => {
     expect(env.API_KEY).toBe('shh');
   });
 
+  it('round-trips account-suffixed keys and injects a selected variant as the base env name', () => {
+    createFileBundle('github.com', 'GITHUB_USERNAME.personal', 'muqsit');
+    const exact = readBundle('github.com');
+    expect(exact.vars['GITHUB_USERNAME.personal']).toBe('keychain:GITHUB_USERNAME.personal');
+
+    const { env } = readAndResolveBundleEnv('github.com', {
+      caller: 'test',
+      keys: ['GITHUB_USERNAME.personal'],
+    });
+    expect(env).toEqual({ GITHUB_USERNAME: 'muqsit' });
+
+    const storage = readAndResolveBundleEnv('github.com', {
+      caller: 'test',
+      keys: ['GITHUB_USERNAME.personal'],
+      keyMode: 'storage',
+    });
+    expect(storage.env).toEqual({ 'GITHUB_USERNAME.personal': 'muqsit' });
+  });
+
+  it('rejects injecting multiple account variants that target the same env key', () => {
+    createFileBundle('github.com', 'GITHUB_USERNAME.personal', 'muqsit');
+    const bundle = readBundle('github.com');
+    bundleItemStore('file').set(secretsKeychainItem('github.com', 'GITHUB_USERNAME.work'), 'workbot');
+    bundle.vars['GITHUB_USERNAME.work'] = keychainRef('GITHUB_USERNAME.work');
+    writeBundle(bundle);
+
+    expect(() => readAndResolveBundleEnv('github.com', { caller: 'test' }))
+      .toThrow(/maps multiple keys to 'GITHUB_USERNAME'/);
+  });
+
   it('resolution fails clearly when the passphrase is wrong', () => {
     createFileBundle('rel', 'TOKEN', 'sealed-value');
     process.env.AGENTS_SECRETS_PASSPHRASE = 'wrong';

@@ -17,7 +17,7 @@ const SESSIONS_DIR = getSessionsDir();
 const DB_PATH = getSessionsDbPath();
 
 /** Current schema version; bumped when migrations are added. */
-const SCHEMA_VERSION = 12;
+const SCHEMA_VERSION = 13;
 
 /**
  * Canonicalize a file path for use as a scan_ledger key. The same physical
@@ -48,6 +48,9 @@ CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
   short_id TEXT NOT NULL,
   agent TEXT NOT NULL,
+  origin TEXT DEFAULT 'cli',
+  routine_name TEXT,
+  routine_run_id TEXT,
   version TEXT,
   account TEXT,
   timestamp TEXT NOT NULL,
@@ -110,6 +113,9 @@ export interface SessionRow {
   id: string;
   short_id: string;
   agent: string;
+  origin: string | null;
+  routine_name: string | null;
+  routine_run_id: string | null;
   version: string | null;
   account: string | null;
   timestamp: string;
@@ -147,6 +153,7 @@ export interface ScanStamp {
 export interface QueryOptions {
   agent?: SessionAgentId;
   agents?: SessionAgentId[];
+  origin?: 'cli' | 'routine';
   version?: string;
   cwd?: string;
   /** Match any session whose cwd equals this or is a descendant of it. */
@@ -301,6 +308,18 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     if (!cols.some(c => c.name === 'output_tokens')) db.exec(`ALTER TABLE sessions ADD COLUMN output_tokens INTEGER`);
     db.exec(`DELETE FROM scan_ledger;`);
   }
+
+  if (fromVersion < 13) {
+    // v12 → v13: routine runs archive their sandboxed transcript into the run
+    // directory and get indexed as origin='routine', linked by routine_name and
+    // routine_run_id. Existing rows are normal CLI-origin sessions.
+    const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
+    if (!cols.some(c => c.name === 'origin')) db.exec(`ALTER TABLE sessions ADD COLUMN origin TEXT DEFAULT 'cli'`);
+    if (!cols.some(c => c.name === 'routine_name')) db.exec(`ALTER TABLE sessions ADD COLUMN routine_name TEXT`);
+    if (!cols.some(c => c.name === 'routine_run_id')) db.exec(`ALTER TABLE sessions ADD COLUMN routine_run_id TEXT`);
+    db.exec(`UPDATE sessions SET origin = 'cli' WHERE origin IS NULL OR origin = ''`);
+    db.exec(`DELETE FROM scan_ledger;`);
+  }
 }
 
 /** Open (or return the cached) sessions database, applying migrations as needed. */
@@ -334,6 +353,8 @@ export function getDB(): Database.Database {
   // run. It must NOT live in SCHEMA (executed before migration) or an existing
   // DB would fail the index build on a column it doesn't have yet.
   db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_last_activity ON sessions(last_activity DESC)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_origin ON sessions(origin)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_routine_run_id ON sessions(routine_run_id)`);
 
   // One-shot cleanup of the pre-SQLite JSONL indexes. Safe — nothing reads
   // them anymore. Guarded by a meta flag so we only try once.
@@ -525,13 +546,15 @@ export function recordScans(entries: Array<{ filePath: string; scan: ScanStamp }
 
 const upsertSessionStmt = (db: Database.Database) => db.prepare(`
   INSERT INTO sessions (
-    id, short_id, agent, version, account, timestamp, last_activity,
+    id, short_id, agent, origin, routine_name, routine_run_id,
+    version, account, timestamp, last_activity,
     project, cwd, git_branch, topic, label, message_count, token_count,
     output_tokens, cost_usd, duration_ms,
     file_path, file_mtime_ms, file_size, scanned_at, is_team_origin,
     pr_url, pr_number, worktree_slug, ticket_id, plan
   ) VALUES (
-    @id, @short_id, @agent, @version, @account, @timestamp, @last_activity,
+    @id, @short_id, @agent, @origin, @routine_name, @routine_run_id,
+    @version, @account, @timestamp, @last_activity,
     @project, @cwd, @git_branch, @topic, @label, @message_count, @token_count,
     @output_tokens, @cost_usd, @duration_ms,
     @file_path, @file_mtime_ms, @file_size, @scanned_at, @is_team_origin,
@@ -540,6 +563,9 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
   ON CONFLICT(id) DO UPDATE SET
     short_id = excluded.short_id,
     agent = excluded.agent,
+    origin = excluded.origin,
+    routine_name = excluded.routine_name,
+    routine_run_id = excluded.routine_run_id,
     version = excluded.version,
     account = excluded.account,
     timestamp = excluded.timestamp,
@@ -599,6 +625,9 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
     id: meta.id,
     short_id: meta.shortId,
     agent: meta.agent,
+    origin: meta.origin ?? 'cli',
+    routine_name: meta.routineName ?? null,
+    routine_run_id: meta.routineRunId ?? null,
     version: meta.version ?? null,
     account: meta.account ?? null,
     timestamp: meta.timestamp,
@@ -702,6 +731,9 @@ export function upsertSessionsBatch(
         id: meta.id,
         short_id: meta.shortId,
         agent: meta.agent,
+        origin: meta.origin ?? 'cli',
+        routine_name: meta.routineName ?? null,
+        routine_run_id: meta.routineRunId ?? null,
         version: meta.version ?? null,
         account: meta.account ?? null,
         timestamp: meta.timestamp,
@@ -890,6 +922,9 @@ function rowToMeta(row: SessionRow): SessionMeta {
     id: row.id,
     shortId: row.short_id,
     agent: row.agent as SessionAgentId,
+    origin: (row.origin === 'routine' ? 'routine' : 'cli'),
+    routineName: row.routine_name ?? undefined,
+    routineRunId: row.routine_run_id ?? undefined,
     timestamp: row.timestamp,
     lastActivity: row.last_activity ?? undefined,
     project: row.project ?? undefined,
@@ -981,6 +1016,11 @@ function buildSessionWhere(options: QueryOptions): { clause: string; params: any
     params.push(options.version);
   }
 
+  if (options.origin) {
+    where.push("IFNULL(origin, 'cli') = ?");
+    params.push(options.origin);
+  }
+
   if (options.cwd) {
     where.push('cwd = ?');
     params.push(options.cwd);
@@ -1004,12 +1044,12 @@ function buildSessionWhere(options: QueryOptions): { clause: string; params: any
   // for the same reason. short_id carries its own index (idx_sessions_short_id);
   // id is the PRIMARY KEY.
   if (options.idExact) {
-    where.push('(id = ? COLLATE NOCASE OR short_id = ? COLLATE NOCASE)');
-    params.push(options.idExact, options.idExact);
+    where.push('(id = ? COLLATE NOCASE OR short_id = ? COLLATE NOCASE OR routine_run_id = ? COLLATE NOCASE)');
+    params.push(options.idExact, options.idExact, options.idExact);
   }
   if (options.idPrefix) {
-    where.push('(id LIKE ? OR short_id LIKE ?)');
-    params.push(`${options.idPrefix}%`, `${options.idPrefix}%`);
+    where.push('(id LIKE ? OR short_id LIKE ? OR routine_run_id LIKE ?)');
+    params.push(`${options.idPrefix}%`, `${options.idPrefix}%`, `${options.idPrefix}%`);
   }
 
   if (typeof options.sinceMs === 'number') {

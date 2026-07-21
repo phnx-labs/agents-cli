@@ -17,6 +17,9 @@ Per-agent on-disk session files (not owned by agents-cli, read-only):
 ~/.gemini/tmp/<project>/chats/session-*.json              # Gemini
 ~/.local/share/opencode/project/*/storage/session/...     # OpenCode
 ~/Library/Application Support/OpenClaw/sessions/*.json    # OpenClaw
+
+Routine archives (owned by agents-cli, durable):
+~/.agents/.history/runs/<routine>/<run-id>/sessions/<agent>/...
 ```
 
 ## Discovery Flow
@@ -53,6 +56,9 @@ active sessions get refreshed each call because their mtime keeps advancing.
   "id": "c07ec355-d841-45fc-b2eb-f500355e15c6",
   "shortId": "c07ec355",
   "agent": "claude",
+  "origin": "cli",
+  "routineName": null,
+  "routineRunId": null,
   "version": "2.1.112",
   "account": "you@example.com",
   "timestamp": "2026-04-22T13:37:14.047Z",
@@ -77,6 +83,9 @@ Fields:
 | `id` | Agent-native UUID | Primary key; stable across reloads |
 | `shortId` | First 8 chars of `id` | For human matching in CLI output |
 | `agent` | One of 5 formats | See SessionAgentId union |
+| `origin` | `cli` or `routine` | Routine rows are archived from a run directory and can be filtered with `--routine` |
+| `routineName` | Routine name | Present when `origin` is `routine` |
+| `routineRunId` | Routine run id | Present when `origin` is `routine`; `agents sessions <runId>` resolves it |
 | `timestamp` | Session start | ISO 8601 |
 | `project` | Derived from `cwd` | Basename of the working directory |
 | `cwd` | Recorded at spawn | Normalized absolute path |
@@ -155,6 +164,10 @@ agents sessions "auth refactor"
 
 # Include team-spawned sessions (hidden by default)
 agents sessions --teams
+
+# Show routine-run sessions, then open one by routine run id
+agents sessions --routine --all
+agents sessions 2026-07-21T10-30-00-000Z
 
 # Sort the list by cost or duration (default: recent)
 agents sessions --sort cost --limit 10

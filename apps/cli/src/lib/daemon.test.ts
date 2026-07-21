@@ -212,7 +212,7 @@ describe('generateSystemdUnit', () => {
     process.argv[1] = indexJs;
     try {
       expect(generateSystemdUnit()).toContain(
-        `ExecStart=${[process.execPath, indexJs, 'daemon', '_run'].map(systemdQuote).join(' ')}`,
+        `ExecStart=${[process.execPath, indexJs, '__daemon-run'].map(systemdQuote).join(' ')}`,
       );
     } finally {
       process.argv[1] = savedArgv1;
@@ -271,7 +271,7 @@ describe('buildDetachedDaemonEnv', () => {
 });
 
 describe('getDaemonLaunch', () => {
-  // #556: the detached daemon must be launched as `node <entry> daemon _run`,
+  // #556: the detached daemon must be launched as `node <entry> __daemon-run`,
   // not by executing the entry path directly. Executing a `.js`/shim path relies
   // on a shebang (POSIX) or a console-owning shell wrapper (Windows); on Windows
   // that wrapper's exit closes its console and tears the daemon down ~36ms after
@@ -279,7 +279,7 @@ describe('getDaemonLaunch', () => {
   it('launches a .js entry through the Node runtime', () => {
     const { command, args } = getDaemonLaunch('/opt/agents/dist/index.js');
     expect(command).toBe(process.execPath);
-    expect(args).toEqual(['/opt/agents/dist/index.js', 'daemon', '_run']);
+    expect(args).toEqual(['/opt/agents/dist/index.js', '__daemon-run']);
   });
 
   it('launches .mjs and .cjs entries through the Node runtime too', () => {
@@ -291,7 +291,7 @@ describe('getDaemonLaunch', () => {
   it('runs a non-JS launcher (resolved shim) directly', () => {
     const { command, args } = getDaemonLaunch('/usr/local/bin/agents');
     expect(command).toBe('/usr/local/bin/agents');
-    expect(args).toEqual(['daemon', '_run']);
+    expect(args).toEqual(['__daemon-run']);
   });
 
   // The fleet-wide crash-loop: `bin/agents` is a symlink to `dist/index.js`, so
@@ -306,7 +306,7 @@ describe('getDaemonLaunch', () => {
     try {
       const { command, args } = getDaemonLaunch(link);
       expect(command).toBe(process.execPath);
-      expect(args).toEqual([link, 'daemon', '_run']);
+      expect(args).toEqual([link, '__daemon-run']);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -321,7 +321,7 @@ describe('getDaemonLaunch', () => {
     try {
       const { command, args } = getDaemonLaunch(shim);
       expect(command).toBe(process.execPath);
-      expect(args).toEqual([shim, 'daemon', '_run']);
+      expect(args).toEqual([shim, '__daemon-run']);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -335,7 +335,7 @@ describe('getDaemonLaunch', () => {
     try {
       const { command, args } = getDaemonLaunch(bin);
       expect(command).toBe(bin);
-      expect(args).toEqual(['daemon', '_run']);
+      expect(args).toEqual(['__daemon-run']);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -458,8 +458,7 @@ describe('getAgentsBinPath (sibling shim resolution)', () => {
     plist = generateLaunchdPlist();
     expect(plist).toContain(`<string>${agentsBin}</string>`);
     expect(plist).not.toContain(`<string>${browserBin}</string>`);
-    expect(plist).toContain('<string>daemon</string>');
-    expect(plist).toContain('<string>_run</string>');
+    expect(plist).toContain('<string>__daemon-run</string>');
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 });
@@ -545,7 +544,7 @@ describe('startDetached (integration: daemon stays alive)', () => {
 });
 
 // #414: enforce a single daemon instance and never report a null PID.
-//  - A second concurrent `daemon _run` must exit without clobbering the live
+//  - A second concurrent `__daemon-run` must exit without clobbering the live
 //    daemon's pid file (else two schedulers double-fire every routine).
 //  - A start that produced no OS pid must fail loudly, never surface null.
 describe('daemon single-instance (#414)', () => {
@@ -599,7 +598,7 @@ describe('daemon single-instance (#414)', () => {
       expect(pidA).toBeTruthy();
       expect(await waitFor(() => readPid() === pidA, 20_000)).toBe(true);
 
-      // Daemon B — a second concurrent `daemon _run` — must detect A and exit.
+      // Daemon B — a second concurrent `__daemon-run` — must detect A and exit.
       pidB = startDetached({ agentsBin: DIST_ENTRY, logPath: path.join(tmpHome, 'b.log'), env: childEnv }).pid!;
       expect(pidB).toBeTruthy();
       expect(pidB).not.toBe(pidA);

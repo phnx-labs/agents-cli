@@ -92,7 +92,6 @@ import {
   loadVersions,
   loadImport,
   loadPackages,
-  loadDaemon,
   loadRoutines,
   loadMonitors,
   loadRun,
@@ -163,6 +162,12 @@ if (process.argv[2] === '__shim') {
   const { execShimPassthrough } = await import('./lib/exec.js');
   const code = await execShimPassthrough(agent as AgentId, rawArgs, process.cwd(), pinned || undefined);
   process.exit(code);
+}
+
+if (process.argv[2] === '__daemon-run') {
+  const { runDaemon } = await import('./lib/daemon.js');
+  await runDaemon();
+  process.exit(process.exitCode ?? 0);
 }
 
 const program = new Command();
@@ -824,7 +829,6 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadVersions);
   await reg(loadImport);
   await reg(loadPackages);
-  await reg(loadDaemon);
   await reg(loadRoutines);
   await reg(loadMonitors);
   await reg(loadRun);

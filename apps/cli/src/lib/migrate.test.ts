@@ -477,7 +477,7 @@ describe('v12 device migration CLI startup failure (POSIX)', () => {
   });
 });
 
-describe('v12 device migration daemon _run failure (POSIX)', () => {
+describe('v12 device migration scheduler startup failure (POSIX)', () => {
   function makeLegacyHome(): string {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-migrate-daemon-'));
     tempDirs.push(home);
@@ -502,7 +502,7 @@ describe('v12 device migration daemon _run failure (POSIX)', () => {
   }
 
   function startDaemon(home: string): { child: ReturnType<typeof spawn>; pidPromise: Promise<number | null> } {
-    const child = spawn('node', ['--import', 'tsx', 'src/index.ts', 'daemon', '_run'], {
+    const child = spawn('node', ['--import', 'tsx', 'src/index.ts', '__daemon-run'], {
       cwd: REPO_ROOT,
       env: {
         ...process.env,

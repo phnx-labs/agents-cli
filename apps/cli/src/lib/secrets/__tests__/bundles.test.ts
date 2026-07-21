@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import {
   bundleToEnvPrefix,
+  bundleKeyToEnvKey,
   describeBundle,
   isLoaderOrInterpreterEnv,
   isReservedEnvName,
@@ -35,11 +36,15 @@ describe('validation', () => {
     expect(() => validateBundleName('_bad')).toThrow();
   });
 
-  it('validateEnvKey matches parseExecEnv conventions', () => {
+  it('validateEnvKey accepts env keys and one optional account suffix', () => {
     expect(() => validateEnvKey('MY_KEY')).not.toThrow();
     expect(() => validateEnvKey('_private')).not.toThrow();
+    expect(() => validateEnvKey('GITHUB_USERNAME.personal')).not.toThrow();
+    expect(() => validateEnvKey('GITHUB_USERNAME.work-1')).not.toThrow();
     expect(() => validateEnvKey('1starts_with_digit')).toThrow();
     expect(() => validateEnvKey('KEY-WITH-DASH')).toThrow();
+    expect(() => validateEnvKey('KEY.')).toThrow();
+    expect(() => validateEnvKey('KEY.personal.extra')).toThrow();
   });
 
   it('validateEnvKey rejects reserved loader and interpreter env vars', () => {
@@ -51,6 +56,13 @@ describe('validation', () => {
     expect(() => validateEnvKey('DYLD_INSERT_LIBRARIES')).toThrow(/reserved/);
     expect(() => validateEnvKey('NODE_OPTIONS')).toThrow(/reserved/);
     expect(() => validateEnvKey('path')).toThrow(/reserved/);
+    expect(() => validateEnvKey('PATH.personal')).toThrow(/reserved/);
+    expect(() => validateEnvKey('NODE_OPTIONS.work')).toThrow(/reserved/);
+  });
+
+  it('bundleKeyToEnvKey strips only the account suffix', () => {
+    expect(bundleKeyToEnvKey('GITHUB_USERNAME.personal')).toBe('GITHUB_USERNAME');
+    expect(bundleKeyToEnvKey('API_KEY')).toBe('API_KEY');
   });
 
   it('bundleToEnvPrefix converts bundle names to valid env prefixes', () => {
@@ -80,6 +92,14 @@ describe('parseDotenv', () => {
 
   it('skips comments and blank lines', () => {
     expect(parseDotenv('# comment\n\nA=1\n')).toEqual({ A: '1' });
+  });
+
+  it('parses account-suffixed keys', () => {
+    expect(parseDotenv('GITHUB_USERNAME.personal=muqsit\nGITHUB_USERNAME.work=workbot'))
+      .toEqual({
+        'GITHUB_USERNAME.personal': 'muqsit',
+        'GITHUB_USERNAME.work': 'workbot',
+      });
   });
 
   it('strips matching quotes around values', () => {
@@ -133,6 +153,34 @@ describe('describeBundle + resolveBundleEnv', () => {
     } finally {
       delete process.env.__AGENTS_RESOLVE_TEST;
     }
+  });
+
+  it('projects one selected account-suffixed key to the base env name', () => {
+    const bundle = b({
+      'GITHUB_USERNAME.personal': { value: 'muqsit' },
+      'GITHUB_USERNAME.work': { value: 'workbot' },
+    });
+    expect(resolveBundleEnv(bundle, { keys: ['GITHUB_USERNAME.personal'] }))
+      .toEqual({ GITHUB_USERNAME: 'muqsit' });
+  });
+
+  it('can preserve exact storage keys for direct lookups and backups', () => {
+    const bundle = b({
+      'GITHUB_USERNAME.personal': { value: 'muqsit' },
+    });
+    expect(resolveBundleEnv(bundle, { keys: ['GITHUB_USERNAME.personal'], keyMode: 'storage' }))
+      .toEqual({ 'GITHUB_USERNAME.personal': 'muqsit' });
+  });
+
+  it('fails loudly when multiple selected keys project to the same env name', () => {
+    const bundle = b({
+      'GITHUB_USERNAME.personal': { value: 'muqsit' },
+      'GITHUB_USERNAME.work': { value: 'workbot' },
+    });
+    expect(() => resolveBundleEnv(bundle)).toThrow(/maps multiple keys to 'GITHUB_USERNAME'/);
+    expect(() => resolveBundleEnv(bundle, {
+      keys: ['GITHUB_USERNAME.personal', 'GITHUB_USERNAME.work'],
+    })).toThrow(/Select one account variant with --keys/);
   });
 
   it('keychainItemsForBundle enumerates keychain-backed keys only', () => {

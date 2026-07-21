@@ -48,7 +48,6 @@ export const loadWorktree: ModuleLoader = async () => (await import('../../comma
 export const loadVersions: ModuleLoader = async () => (await import('../../commands/versions.js')).registerVersionsCommands;
 export const loadImport: ModuleLoader = async () => (await import('../../commands/import.js')).registerImportCommand;
 export const loadPackages: ModuleLoader = async () => (await import('../../commands/packages.js')).registerPackagesCommands;
-export const loadDaemon: ModuleLoader = async () => (await import('../../commands/daemon.js')).registerDaemonCommands;
 export const loadRoutines: ModuleLoader = async () => (await import('../../commands/routines.js')).registerRoutinesCommands;
 export const loadMonitors: ModuleLoader = async () => (await import('../../commands/monitors.js')).registerMonitorsCommands;
 export const loadRun: ModuleLoader = async () => (await import('../../commands/exec.js')).registerRunCommand;
@@ -156,7 +155,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   registry: [loadPackages],
   search: [loadPackages],
   install: [loadPackages],
-  daemon: [loadDaemon],
   routines: [loadRoutines],
   monitors: [loadMonitors],
   run: [loadRun],

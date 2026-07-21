@@ -568,6 +568,7 @@ function containsFlowDiagram(content: string): boolean {
 }
 
 const KIMI_WORKFLOW_MARKER = 'agents_workflow';
+const OPENCLAW_WORKFLOW_MARKER_ENV = 'AGENTS_CLI_WORKFLOW';
 
 /** Convert a canonical agents-cli workflow bundle into a Kimi flow skill. */
 export function transformWorkflowForKimi(workflowPath: string, name: string): string {
@@ -607,6 +608,35 @@ export function transformWorkflowForAntigravity(workflowPath: string, name: stri
     [KIMI_WORKFLOW_MARKER]: name,
   }).trim();
   return `---\n${frontmatter}\n---\n\n${body.trim()}\n`;
+}
+
+/** Convert a canonical agents-cli workflow bundle into an OpenClaw Lobster file. */
+export function transformWorkflowForOpenClaw(workflowPath: string, name: string): string {
+  const fm = parseWorkflowFrontmatter(workflowPath);
+  if (!fm) throw new Error(`Invalid WORKFLOW.md in ${workflowPath}`);
+  const body = getWorkflowBody(workflowPath) || fm.description || name;
+  return yaml.stringify({
+    name: fm.name || name,
+    args: {
+      agent: {
+        default: 'main',
+      },
+      prompt: {
+        default: '',
+      },
+    },
+    env: {
+      [OPENCLAW_WORKFLOW_MARKER_ENV]: name,
+      AGENTS_WORKFLOW_DESCRIPTION: fm.description || name,
+      AGENTS_WORKFLOW_BODY: body.trim(),
+    },
+    steps: [
+      {
+        id: 'run_openclaw',
+        command: 'openclaw agent --agent "$LOBSTER_ARG_AGENT" --message "$(printf \'%s\\n\\n%s\\n\' "$AGENTS_WORKFLOW_BODY" "$LOBSTER_ARG_PROMPT")"',
+      },
+    ],
+  });
 }
 
 function expandWorkflowPath(ref: string): string {
@@ -793,6 +823,7 @@ function antigravityWorkflowsDir(): string {
 function workflowTargetRoot(agent: AgentId, versionHome: string): string {
   if (agent === 'kimi') return path.join(versionHome, '.kimi-code', 'skills');
   if (agent === 'antigravity') return antigravityWorkflowsDir();
+  if (agent === 'openclaw') return path.join(versionHome, '.openclaw', 'workflows');
   return path.join(versionHome, 'workflows');
 }
 
@@ -827,6 +858,19 @@ export function listWorkflowsForAgent(agent: AgentId, versionHome: string): stri
       return fs.readdirSync(recipesDir, { withFileTypes: true })
         .filter(d => d.isFile() && d.name.endsWith('.yaml') && !d.name.startsWith('.'))
         .map(d => d.name.slice(0, -'.yaml'.length));
+    } catch {
+      return [];
+    }
+  }
+
+  if (agent === 'openclaw') {
+    const dir = workflowTargetRoot(agent, versionHome);
+    if (!fs.existsSync(dir)) return [];
+    try {
+      return fs.readdirSync(dir, { withFileTypes: true })
+        .filter(d => d.isFile() && d.name.endsWith('.lobster') && !d.name.startsWith('.'))
+        .map(d => d.name.slice(0, -'.lobster'.length))
+        .filter(base => openclawWorkflowMarker(path.join(dir, `${base}.lobster`)) === base);
     } catch {
       return [];
     }
@@ -975,6 +1019,20 @@ export function syncWorkflowToVersion(
       return { success: true };
     }
 
+    if (agent === 'openclaw') {
+      const targetDir = workflowTargetRoot(agent, versionHome);
+      const targetFile = path.join(targetDir, `${name}.lobster`);
+      if (fs.existsSync(targetFile)) {
+        const marker = openclawWorkflowMarker(targetFile);
+        if (marker !== name) {
+          return { success: false, error: `OpenClaw workflow '${name}' already exists and is not managed by agents-cli` };
+        }
+      }
+      fs.mkdirSync(targetDir, { recursive: true });
+      fs.writeFileSync(targetFile, transformWorkflowForOpenClaw(workflowPath, name), 'utf-8');
+      return { success: true };
+    }
+
     const targetDir = path.join(workflowTargetRoot(agent, versionHome), name);
     fs.mkdirSync(workflowTargetRoot(agent, versionHome), { recursive: true });
     if (fs.existsSync(targetDir)) {
@@ -1025,6 +1083,22 @@ export function removeWorkflowFromVersion(
     }
   }
 
+  if (agent === 'openclaw') {
+    const targetFile = path.join(workflowTargetRoot(agent, versionHome), `${name}.lobster`);
+    if (!fs.existsSync(targetFile)) {
+      return { success: false, error: `Workflow '${name}' not synced to ${agent}@${version}` };
+    }
+    if (openclawWorkflowMarker(targetFile) !== name) {
+      return { success: false, error: `OpenClaw workflow '${name}' is not managed by agents-cli` };
+    }
+    try {
+      fs.rmSync(targetFile, { force: true });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  }
+
   const targetPath = path.join(workflowTargetRoot(agent, versionHome), name);
   if (!fs.existsSync(targetPath)) {
     return { success: false, error: `Workflow '${name}' not synced to ${agent}@${version}` };
@@ -1067,6 +1141,19 @@ function antigravityWorkflowMarker(filePath: string): string | null {
   try {
     const fm = parseSkillFrontmatter(filePath) as { agents_workflow?: unknown } | null;
     return typeof fm?.agents_workflow === 'string' ? fm.agents_workflow : null;
+  } catch {
+    return null;
+  }
+}
+
+function openclawWorkflowMarker(filePath: string): string | null {
+  try {
+    const parsed = yaml.parse(fs.readFileSync(filePath, 'utf-8')) as { env?: unknown } | null;
+    if (!parsed || typeof parsed !== 'object' || !parsed.env || typeof parsed.env !== 'object' || Array.isArray(parsed.env)) {
+      return null;
+    }
+    const marker = (parsed.env as Record<string, unknown>)[OPENCLAW_WORKFLOW_MARKER_ENV];
+    return typeof marker === 'string' ? marker : null;
   } catch {
     return null;
   }

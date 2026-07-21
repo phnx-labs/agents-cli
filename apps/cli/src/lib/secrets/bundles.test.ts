@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import {
   filterAgentHitBySubsetAndExpiry,
   assertRemoteBundleFlagsUnsupported,
+  canCacheResolvedEnv,
   isHeadlessSecretsContext,
   listBundles,
   readAndResolveBundleEnv,
@@ -74,6 +75,40 @@ describe('filterAgentHitBySubsetAndExpiry (agent fast-path gate)', () => {
     expect(out.env.SLACK_TOKEN).toBeUndefined();
   });
 
+  it('does not return a same-size partial cached env for a different requested subset', () => {
+    const hit = agentHit({ API_KEY: 'k', DB_URL: 'k' });
+    hit.env = { API_KEY: 'v-API_KEY' };
+    const out = filterAgentHitBySubsetAndExpiry(hit, { keys: ['DB_URL'] });
+    expect(out.env).toEqual({});
+  });
+
+  it('projects a selected account-suffixed key from the cached snapshot', () => {
+    const hit = agentHit({
+      'GITHUB_USERNAME.personal': 'k',
+      'GITHUB_USERNAME.work': 'k',
+    });
+    const out = filterAgentHitBySubsetAndExpiry(hit, { keys: ['GITHUB_USERNAME.personal'] });
+    expect(out.env).toEqual({ GITHUB_USERNAME: 'v-GITHUB_USERNAME.personal' });
+  });
+
+  it('preserves exact account-suffixed keys when storage mode is requested', () => {
+    const hit = agentHit({ 'GITHUB_USERNAME.personal': 'k' });
+    const out = filterAgentHitBySubsetAndExpiry(hit, {
+      keys: ['GITHUB_USERNAME.personal'],
+      keyMode: 'storage',
+    });
+    expect(out.env).toEqual({ 'GITHUB_USERNAME.personal': 'v-GITHUB_USERNAME.personal' });
+  });
+
+  it('fails loudly when cached account variants collide in process env mode', () => {
+    const hit = agentHit({
+      'GITHUB_USERNAME.personal': 'k',
+      'GITHUB_USERNAME.work': 'k',
+    });
+    expect(() => filterAgentHitBySubsetAndExpiry(hit, {}))
+      .toThrow(/maps multiple keys to 'GITHUB_USERNAME'/);
+  });
+
   it('throws a fail-loud error if a requested key is not in the bundle', () => {
     const hit = agentHit({ API_KEY: 'k' });
     expect(() => filterAgentHitBySubsetAndExpiry(hit, { keys: ['GHOST'] }))
@@ -112,6 +147,28 @@ describe('filterAgentHitBySubsetAndExpiry (agent fast-path gate)', () => {
     );
     const out = filterAgentHitBySubsetAndExpiry(hit, { keys: ['API_KEY'] });
     expect(out.env).toEqual({ API_KEY: 'v-API_KEY' });
+  });
+});
+
+describe('canCacheResolvedEnv (broker cache shape)', () => {
+  const bundle: SecretsBundle = {
+    name: 'github.com',
+    vars: {
+      'GITHUB_USERNAME.personal': 'keychain:GITHUB_USERNAME.personal',
+      'GITHUB_USERNAME.work': 'keychain:GITHUB_USERNAME.work',
+    },
+  };
+
+  it('does not cache partial storage reads because the broker expects a full bundle env', () => {
+    expect(canCacheResolvedEnv(bundle, new Set(['GITHUB_USERNAME.personal']), 'storage')).toBe(false);
+  });
+
+  it('allows a full storage snapshot because later reads can project from exact keys', () => {
+    expect(canCacheResolvedEnv(bundle, new Set(Object.keys(bundle.vars)), 'storage')).toBe(true);
+  });
+
+  it('does not cache process-mode env when account suffixes would be stripped', () => {
+    expect(canCacheResolvedEnv(bundle, new Set(Object.keys(bundle.vars)), 'process')).toBe(false);
   });
 });
 

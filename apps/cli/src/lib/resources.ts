@@ -262,10 +262,10 @@ export function getAgentResources(
     }
   }
 
-  // Workflows (claude only)
+  // Workflows
   const workflows: ResourceEntry[] = [];
   if (isCapable(agentId, 'workflows')) {
-    for (const w of WorkflowsHandler.listAll(agentId as 'claude', cwd)) {
+    for (const w of WorkflowsHandler.listAll(agentId as Parameters<typeof WorkflowsHandler.listAll>[0], cwd)) {
       workflows.push({ name: w.name, path: w.path, scope: w.layer === 'project' ? 'project' : 'user' });
     }
   }

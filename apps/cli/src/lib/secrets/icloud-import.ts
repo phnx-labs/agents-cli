@@ -11,8 +11,8 @@
  *
  * The item-name scheme is the same one the modern store uses (see bundles.ts):
  * metadata under `agents-cli.bundles.<name>`, one value per key under
- * `agents-cli.secrets.<bundle>.<key>`. Env keys can never contain a dot
- * (ENV_KEY_PATTERN), so splitting a secret service at its LAST dot recovers
+ * `agents-cli.secrets.<bundle>.<key>`. Legacy env keys never contained a dot,
+ * so metadata-less synced secret services split at their LAST dot to recover
  * the bundle/key boundary even for dotted bundle names like `hetzner.com`.
  */
 
@@ -30,7 +30,9 @@ import {
 import {
   BUNDLE_META_PREFIX,
   BUNDLE_NAME_PATTERN,
+  BUNDLE_KEY_PATTERN,
   ENV_KEY_PATTERN,
+  bundleKeyToEnvKey,
   bundleExists,
   bundleItemStore,
   bundlePolicy,
@@ -186,7 +188,10 @@ export function importSyncedBundle(
   // these may be purged; a missing or unimportable key's iCloud item is its
   // only copy and must survive.
   const purgeable = new Set<string>();
-  const rejectedByPolicy = (key: string) => isLoaderOrInterpreterEnv(key) || isReservedEnvName(key);
+  const rejectedByPolicy = (key: string) => {
+    const envKey = bundleKeyToEnvKey(key);
+    return isLoaderOrInterpreterEnv(envKey) || isReservedEnvName(envKey);
+  };
 
   // Keys with a synced secret item: re-store the value device-locally.
   for (const key of candidate.keys) {
@@ -220,7 +225,7 @@ export function importSyncedBundle(
   // carry everything they need; a keychain ref without its synced item is
   // unrecoverable.
   for (const [key, raw] of Object.entries(metaVars)) {
-    if (!ENV_KEY_PATTERN.test(key)) continue;
+    if (!BUNDLE_KEY_PATTERN.test(key)) continue;
     if (candidate.keys.includes(key)) continue; // the secret item already covered it
     if (rejectedByPolicy(key)) {
       if (!unimportable.includes(key)) unimportable.push(key);

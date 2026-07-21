@@ -334,3 +334,4 @@ prompt = "Review changes and create a commit with a descriptive message."
 | `syncResourcesToVersion()` | versions.ts | Create symlinks in version home |
 | `markdownToToml()` | convert.ts | Convert command format for Gemini |
 | `syncWorkflowToGooseRecipe()` | workflows.ts | Convert workflows into Goose recipes and subrecipes |
+| `transformWorkflowForOpenClaw()` | workflows.ts | Convert workflows into Lobster `.lobster` files |

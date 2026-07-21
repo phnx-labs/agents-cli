@@ -193,9 +193,9 @@ export function isDaemonRunning(): boolean {
 }
 
 /**
- * Single-instance claim for the daemon `_run` entrypoint.
+ * Single-instance claim for the daemon foreground entrypoint.
  *
- * `agents daemon _run` is reachable directly — a manual invocation, or a
+ * `agents __daemon-run` is reachable directly — a manual invocation, or a
  * service-manager restart that races a still-alive predecessor — bypassing the
  * start lock in startDaemon(). Without this guard runDaemon() would call
  * writeDaemonPid() unconditionally, clobber a live daemon's recorded PID, and
@@ -222,7 +222,7 @@ export function claimDaemonInstance(): boolean {
 }
 
 /**
- * Reap stray duplicate daemon processes — a `daemon _run` of THIS install that
+ * Reap stray duplicate daemon processes — a `__daemon-run` of THIS install that
  * isn't this process and isn't the pid-file owner. Mirrors the browser orphan
  * reaper (below): a predecessor that was SIGKILLed/OOM-ed without cleaning up,
  * or a duplicate that lost the pid-file write race, would otherwise keep a
@@ -256,9 +256,9 @@ export function reapStrayDaemons(keepPid: number = process.pid): { reaped: numbe
     const pid = parseInt(m[1], 10);
     const args = m[2];
     if (isNaN(pid) || pid === keepPid || pid === process.pid || pid === ownerPid) continue;
-    // Same install (same launch entry) AND a `daemon _run` command line.
+    // Same install (same launch entry) AND a `__daemon-run` command line.
     if (!args.includes(selfEntry)) continue;
-    if (!/\bdaemon\b.*\b_run\b/.test(args)) continue;
+    if (!/\b__daemon-run\b/.test(args)) continue;
     try {
       process.kill(pid, 'SIGTERM');
       reaped++;
@@ -292,7 +292,7 @@ export function log(level: string, message: string): void {
 
 /** Main daemon loop: load jobs, schedule crons, monitor runs, and handle signals. */
 export async function runDaemon(): Promise<void> {
-  // Single-instance guard: a direct `agents daemon _run` (manual, or a
+  // Single-instance guard: a direct `agents __daemon-run` (manual, or a
   // service-manager restart racing a live predecessor) must not clobber a
   // running daemon's pid file and start a second scheduler.
   if (!claimDaemonInstance()) {
@@ -1005,8 +1005,8 @@ export function buildDetachedDaemonEnv(
 }
 
 /**
- * Resolve how to launch the daemon: `node <entry> daemon _run`, matching the
- * exact form that works under a direct `daemon _run`.
+ * Resolve how to launch the daemon: `node <entry> __daemon-run`, matching the
+ * exact form that works under a direct `__daemon-run`.
  *
  * We spawn the Node runtime (`process.execPath`) with the CLI entry as an
  * argument rather than executing the entry path directly. Executing the `.js`
@@ -1025,7 +1025,7 @@ export function buildDetachedDaemonEnv(
 export function getDaemonLaunch(agentsBin: string = getAgentsBinPath()): { command: string; args: string[] } {
   const { warnings } = validateDaemonBinary(agentsBin);
   for (const w of warnings) process.stderr.write(`[agents] ${w}\n`);
-  return getCliLaunch(['daemon', '_run'], agentsBin);
+  return getCliLaunch(['__daemon-run'], agentsBin);
 }
 
 /**
