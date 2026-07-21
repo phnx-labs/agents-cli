@@ -698,17 +698,28 @@ function applyGeminiEvent(summary: MutableSessionQuickSummary, event: Record<str
   if (eventType === 'message' || eventType === 'assistant') {
     const role = toStringValue(event.role) || 'assistant';
     if (role === 'assistant') {
+      const content = Array.isArray(event.content) ? event.content : [];
       const text = assistantTextFromContent(event.content) || toStringValue(event.text).trim();
       if (text) summary.lastAssistantText = text;
-      if (text) pushTextEvent(summary, 'message', text, eventTimestamp);
-      const content = Array.isArray(event.content) ? event.content : [];
-      for (const block of content) {
-        const rec = toRecord(block);
-        if (!rec) continue;
-        const type = toStringValue(rec.type);
-        if (type === 'thinking' || type === 'reasoning') {
-          pushTextEvent(summary, 'reasoning', reasoningTextFromBlock(rec), eventTimestamp);
+
+      if (content.length > 0) {
+        let sawTextBlock = false;
+        for (const block of content) {
+          const rec = toRecord(block);
+          if (!rec) continue;
+          const type = toStringValue(rec.type);
+          if (type === 'text' || type === 'output_text' || type === 'input_text') {
+            sawTextBlock = true;
+            pushTextEvent(summary, 'message', toStringValue(rec.text), eventTimestamp);
+            continue;
+          }
+          if (type === 'thinking' || type === 'reasoning') {
+            pushTextEvent(summary, 'reasoning', reasoningTextFromBlock(rec), eventTimestamp);
+          }
         }
+        if (!sawTextBlock) pushTextEvent(summary, 'message', toStringValue(event.text), eventTimestamp);
+      } else {
+        pushTextEvent(summary, 'message', text, eventTimestamp);
       }
     }
     return;

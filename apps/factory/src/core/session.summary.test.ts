@@ -258,6 +258,34 @@ describe('extractSessionQuickSummary', () => {
     });
   });
 
+  test('interleaves Gemini reasoning and prose in content order', () => {
+    const lines = [
+      JSON.stringify({
+        timestamp: '2026-07-13T08:00:00.000Z',
+        type: 'message',
+        role: 'assistant',
+        content: [
+          { type: 'thinking', text: 'I should check the timeline renderer before editing it.' },
+          { type: 'text', text: 'Checking the timeline renderer before making changes.' },
+        ],
+      }),
+    ];
+
+    const details = extractSessionQuickDetails(lines.join('\n'), 'gemini');
+    expect(details.recentEvents.map((event) => event.kind)).toEqual(['message', 'reasoning']);
+    expect(details.recentEvents[0]).toMatchObject({
+      kind: 'message',
+      text: 'Checking the timeline renderer before making changes.',
+      timestamp: '2026-07-13T08:00:00.000Z',
+    });
+    expect(details.recentEvents[1]).toMatchObject({
+      kind: 'reasoning',
+      text: 'I should check the timeline renderer before editing it.',
+      timestamp: '2026-07-13T08:00:00.000Z',
+    });
+    expect(details.narrative).toBe('Checking the timeline renderer before making changes.');
+  });
+
   test('parses Codex custom apply_patch calls into edited files', () => {
     const patch = [
       '*** Begin Patch',
