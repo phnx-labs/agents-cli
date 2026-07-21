@@ -630,7 +630,9 @@ describe('routines subcommand --help documents --host and --device once each', (
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
-  }, 30_000);
+    // ~15 subcommands, each a cold `node --import tsx` boot; Windows subprocess
+    // spawn is slow enough to tip the aggregate over the 30s global timeout.
+  }, 90_000);
 });
 
 describe('routines run --host SELF follows the normal local eligibility path', () => {

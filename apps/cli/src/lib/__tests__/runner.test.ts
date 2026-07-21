@@ -157,10 +157,16 @@ describe('executeJobDetached — spawn error handling', () => {
       const meta = await executeJobDetached(config);
       expect(meta.status).toBe('running');
 
-      // Give the async error event time to fire and rewrite meta.json.
-      await new Promise<void>((r) => setTimeout(r, 300));
+      // The spawn error event is async and rewrites meta.json off the event
+      // loop. A fixed sleep flakes on slow Windows CI (the event lands after
+      // the window); poll for the terminal state up to 10s instead.
+      let updated = readRunMeta(config.name, meta.runId);
+      const deadline = Date.now() + 10_000;
+      while ((updated?.status ?? 'running') === 'running' && Date.now() < deadline) {
+        await new Promise<void>((r) => setTimeout(r, 50));
+        updated = readRunMeta(config.name, meta.runId);
+      }
 
-      const updated = readRunMeta(config.name, meta.runId);
       expect(updated).not.toBeNull();
       expect(updated!.status).toBe('failed');
       expect(updated!.exitCode).toBe(1);
