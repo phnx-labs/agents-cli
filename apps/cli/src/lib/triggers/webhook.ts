@@ -104,10 +104,13 @@ function linearTeamKey(payload: Record<string, unknown>): string | null {
 }
 
 function linearLabels(payload: Record<string, unknown>): string[] {
+  // Linear webhook bodies flatten list relations: an Issue event carries
+  // `data.labels` as a flat array of label objects (`[{ id, name, color }]`),
+  // NOT the `{ nodes: [...] }` connection shape returned by the GraphQL API.
+  // Reading `.nodes` here made every `--label` filter match nothing.
   const data = payload.data as Record<string, unknown> | undefined;
-  const labels = data?.labels as { nodes?: unknown } | undefined;
-  const nodes = Array.isArray(labels?.nodes) ? labels.nodes : [];
-  return nodes
+  const labels = Array.isArray(data?.labels) ? (data?.labels as unknown[]) : [];
+  return labels
     .map((n) => (n as { name?: unknown }).name)
     .filter((n): n is string => typeof n === 'string' && n.length > 0);
 }

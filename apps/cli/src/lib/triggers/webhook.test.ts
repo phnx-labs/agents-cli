@@ -63,7 +63,9 @@ function linearIssueWebhook(labels: string[] = ['agent']): IncomingWebhook {
       webhookTimestamp: Date.now(),
       data: {
         identifier: 'RUSH-1459',
-        labels: { nodes: labels.map((name) => ({ name })) },
+        // Real Linear webhook shape: `data.labels` is a flat array of label
+        // objects, NOT the `{ nodes: [...] }` GraphQL connection.
+        labels: labels.map((name) => ({ id: `lbl-${name}`, name })),
       },
     },
   };
@@ -138,6 +140,26 @@ describe('matchJobsToWebhook', () => {
     });
     expect(jobMatchesWebhook(linear, linearIssueWebhook(['agent']))).toBe(true);
     expect(jobMatchesWebhook(linear, linearIssueWebhook(['triage']))).toBe(false);
+  });
+
+  it('reads labels from the flat webhook array, not a {nodes} connection', () => {
+    // Regression: Linear webhook bodies send `data.labels` as a flat array.
+    // Reading `.nodes` (the GraphQL connection shape) made every --label filter
+    // match nothing. Lock the flat-array read and prove the stale shape fails.
+    const linear = job({
+      name: 'linear-agent',
+      trigger: { type: 'linear_event', event: 'Issue', action: 'update', teamKey: 'RUSH', label: 'agent' },
+    });
+    const staleConnectionShape: IncomingWebhook = {
+      source: 'linear',
+      event: 'Issue',
+      payload: {
+        type: 'Issue',
+        action: 'update',
+        data: { identifier: 'RUSH-1459', labels: { nodes: [{ name: 'agent' }] } },
+      },
+    };
+    expect(jobMatchesWebhook(linear, staleConnectionShape)).toBe(false);
   });
 
   it('skips jobs pinned to other devices, keeps jobs pinned here', () => {
