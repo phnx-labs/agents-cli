@@ -364,7 +364,9 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     // tools.alsoAllow (allow) / tools.deny (deny). OpenClaw gates at tool
     // granularity only, so sub-command/path/domain patterns are skipped.
     // OpenClaw is self-updating (no pinned since), so `true` is correct.
-    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: false, plugins: true, subagents: true, rules: { file: 'workspace/AGENTS.md' }, workflows: false, memory: true, modes: ['plan', 'edit', 'skip'] },
+    // Workflows sync as Lobster `.lobster` files under `.openclaw/workflows/`;
+    // the Lobster tool runs them by receiving the file path as `pipeline`.
+    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: false, plugins: true, subagents: true, rules: { file: 'workspace/AGENTS.md' }, workflows: true, memory: true, modes: ['plan', 'edit', 'skip'] },
   },
   copilot: {
     id: 'copilot',

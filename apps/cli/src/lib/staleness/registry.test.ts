@@ -106,6 +106,11 @@ describe('staleness/registry', () => {
     expect(DETECTORS.permissions.openclaw).toBeDefined();
   });
 
+  it('openclaw has a workflows writer + detector', () => {
+    expect(WRITERS.workflows.openclaw).toBeDefined();
+    expect(DETECTORS.workflows.openclaw).toBeDefined();
+  });
+
   it('forge has a permissions writer + detector', () => {
     expect(WRITERS.permissions.forge).toBeDefined();
     expect(DETECTORS.permissions.forge).toBeDefined();

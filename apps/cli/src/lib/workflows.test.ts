@@ -13,6 +13,7 @@ import {
   syncWorkflowToVersion,
   transformWorkflowForKimi,
   transformWorkflowForAntigravity,
+  transformWorkflowForOpenClaw,
 } from './workflows.js';
 
 describe('parseLoopBlock — defensive coercion (issue #332)', () => {
@@ -292,6 +293,51 @@ describe('workflow native projections', () => {
     } finally {
       if (realHome === undefined) delete process.env.HOME; else process.env.HOME = realHome;
       fs.rmSync(fakeHome, { recursive: true, force: true });
+    }
+  });
+
+  it('converts a workflow into an OpenClaw Lobster workflow file', () => {
+    const dir = writeWorkflow('---\nname: OpenClaw Flow\ndescription: Run through Lobster\n---\n\nInspect the repo and report findings.');
+
+    const workflow = yaml.parse(transformWorkflowForOpenClaw(dir, 'openclaw-flow'));
+
+    expect(workflow).toMatchObject({
+      name: 'OpenClaw Flow',
+      args: { agent: { default: 'main' }, prompt: { default: '' } },
+      env: {
+        AGENTS_CLI_WORKFLOW: 'openclaw-flow',
+        AGENTS_WORKFLOW_DESCRIPTION: 'Run through Lobster',
+        AGENTS_WORKFLOW_BODY: 'Inspect the repo and report findings.',
+      },
+      steps: [{
+        id: 'run_openclaw',
+        command: 'openclaw agent --agent "$LOBSTER_ARG_AGENT" --message "$(printf \'%s\\n\\n%s\\n\' "$AGENTS_WORKFLOW_BODY" "$LOBSTER_ARG_PROMPT")"',
+      }],
+    });
+  });
+
+  it('syncs and lists only agents-cli managed OpenClaw Lobster workflow files', () => {
+    const dir = writeWorkflow('---\nname: Lobster Flow\ndescription: Native OpenClaw projection\n---\n\nDo the work.');
+    const openclawHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-openclaw-wf-home-'));
+
+    try {
+      const workflowsDir = path.join(openclawHome, '.openclaw', 'workflows');
+      fs.mkdirSync(workflowsDir, { recursive: true });
+      fs.writeFileSync(path.join(workflowsDir, 'lobster-flow.lobster'), yaml.stringify({
+        name: 'User-owned',
+        env: { SOMETHING_ELSE: 'yes' },
+        steps: [{ id: 'user', command: 'echo user' }],
+      }), 'utf-8');
+      expect(syncWorkflowToVersion(dir, 'lobster-flow', 'openclaw', openclawHome).success).toBe(false);
+      expect(listWorkflowsForAgent('openclaw', openclawHome)).toEqual([]);
+
+      fs.rmSync(path.join(workflowsDir, 'lobster-flow.lobster'), { force: true });
+      expect(syncWorkflowToVersion(dir, 'lobster-flow', 'openclaw', openclawHome).success).toBe(true);
+      expect(fs.existsSync(path.join(workflowsDir, 'lobster-flow.lobster'))).toBe(true);
+      expect(listWorkflowsForAgent('openclaw', openclawHome)).toEqual(['lobster-flow']);
+      expect(syncWorkflowToVersion(dir, 'lobster-flow', 'openclaw', openclawHome).success).toBe(true);
+    } finally {
+      fs.rmSync(openclawHome, { recursive: true, force: true });
     }
   });
 });
