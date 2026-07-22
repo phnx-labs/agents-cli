@@ -1,0 +1,1 @@
+- **Support multiple accounts per secrets bundle (RUSH-668).** Secrets bundle keys now accept `BASE.account` names such as `GITHUB_USERNAME.personal`; selected account variants inject as the base env key and conflicting variants fail loud unless narrowed with `--keys`. Source: `apps/cli/src/lib/secrets/bundles.ts`, `apps/cli/docs/secrets.md`.

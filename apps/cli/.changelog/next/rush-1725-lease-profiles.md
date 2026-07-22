@@ -1,0 +1,1 @@
+- `agents run <profile> --lease` now provisions the profile's host runtime and temporary profile config on the leased box without copying base-runtime OAuth credentials when the profile authenticates with its own API key, including OpenCode and Antigravity-hosted profiles.
