@@ -22,8 +22,17 @@ import {
   enableWorkersDev,
   findZoneId,
 } from '../lib/share/provision.js';
-import { publishFile } from '../lib/share/publish.js';
+import { publishFile, type PublishResult } from '../lib/share/publish.js';
 import { renderWorkerScript } from '../lib/share/worker-template.js';
+
+export function formatSharePublishResult(result: PublishResult, json = false): string {
+  if (json) return JSON.stringify(result, null, 2);
+
+  const lines = [chalk.green(result.url)];
+  if (result.coverUrl) lines.push(chalk.dim(`  cover ${result.coverUrl}`));
+  if (result.expiresAt) lines.push(chalk.dim(`  expires ${new Date(result.expiresAt).toLocaleString()}`));
+  return lines.join('\n');
+}
 
 export function registerShareCommands(program: Command): void {
   const shareCmd = program
@@ -33,7 +42,8 @@ export function registerShareCommands(program: Command): void {
     .option('--slug <slug>', 'custom URL slug (default: <project>-<feature>-<hash>)')
     .option('--expire <spec>', 'auto-expire, e.g. 30d, 12h, or 2026-08-01')
     .option('--no-cover', 'skip the OG preview image (HTML pages get one by default)')
-    .action(async (file: string | undefined, opts: { slug?: string; expire?: string; cover?: boolean }) => {
+    .option('--json', 'emit machine-readable publish result for plan-render hooks and scripts')
+    .action(async (file: string | undefined, opts: { slug?: string; expire?: string; cover?: boolean; json?: boolean }) => {
       if (!file) {
         shareCmd.help();
         return;
@@ -49,9 +59,7 @@ export function registerShareCommands(program: Command): void {
           expire: opts.expire,
           cover: opts.cover,
         });
-        console.log(chalk.green(url));
-        if (coverUrl) console.log(chalk.dim(`  cover ${coverUrl}`));
-        if (expiresAt) console.log(chalk.dim(`  expires ${new Date(expiresAt).toLocaleString()}`));
+        console.log(formatSharePublishResult({ url, expiresAt, coverUrl }, Boolean(opts.json)));
       } catch (e) {
         console.error(chalk.red((e as Error).message));
         process.exitCode = 1;

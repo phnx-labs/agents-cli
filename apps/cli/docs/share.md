@@ -10,6 +10,7 @@ and you open the link to see if it worked.
 ```bash
 agents share setup                              # once: provision on your Cloudflare
 agents share plan.html --slug fleet --expire 30d # → https://<base>/fleet
+agents share plan.html --json                  # machine-readable URL for hooks
 agents share status                             # show the configured endpoint
 ```
 
@@ -44,6 +45,10 @@ agent makes plan.html
   Chromium via the CLI's browser detector, with a managed-Chromium fallback), so there's
   no central render service and no extra cost. No headless browser available → the cover
   is skipped and the plain link still publishes. Opt out with `--no-cover`.
+- **Plan-render automation.** Hooks that render plans can run
+  `agents share <plan.html> --json` after writing the HTML and read the returned
+  `{ "url", "coverUrl", "expiresAt" }` object. The human output still prints the URL on
+  the first line.
 - **Slugs.** With no `--slug`, the default is `<project>-<feature>-<hash>` (e.g.
   `agents-cli-fleet-cockpit-3a6687`): the repo name scopes the link and a short random
   tail keeps it unguessable and collision-free. Pass `--slug` for a stable, exact name.
@@ -63,7 +68,7 @@ Push it to a peer with `agents secrets export share --host <box>`.
 
 | Command | What it does |
 |---|---|
-| `agents share <file> [--slug s] [--expire spec] [--no-cover]` | Publish `<file>`; print the link. HTML pages get an auto OG cover unless `--no-cover`. Default slug `<project>-<feature>-<hash>`. |
+| `agents share <file> [--slug s] [--expire spec] [--no-cover] [--json]` | Publish `<file>`; print the link, or emit `{ url, coverUrl, expiresAt }` for plan-render hooks with `--json`. HTML pages get an auto OG cover unless `--no-cover`. Default slug `<project>-<feature>-<hash>`. |
 | `agents share setup [--token t] [--account id] [--bundle b] [--worker w] [--bucket b] [--domain h]` | Provision an R2 bucket + Worker on your Cloudflare and save the config. |
 | `agents share join <baseUrl>` | Use an existing endpoint (base URL + write token), no provisioning. |
 | `agents share status` | Show the configured endpoint. |
