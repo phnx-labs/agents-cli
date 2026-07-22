@@ -19,7 +19,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import simpleGit from 'simple-git';
-import { confirm, input } from '@inquirer/prompts';
+import { input } from '@inquirer/prompts';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { setHelpSections } from '../lib/help.js';
 import { itemPicker } from '../lib/picker.js';
@@ -967,54 +967,8 @@ export function registerRepoCommands(program: Command): void {
             continue;
           }
         }
-        if (t.alias === 'system') {
+        if (t.alias === 'system' && alias !== 'system') {
           // Skip system repo unless explicitly requested
-          if (alias !== 'system') continue;
-
-          // User explicitly asked for system repo — show status and offer to pull
-          try {
-            const git = simpleGit(t.dir);
-            await git.fetch();
-            const status = await git.status();
-            const behind = status.behind ?? 0;
-            if (behind === 0) {
-              console.log(chalk.green('Up to date'));
-            } else {
-              // Count changed resources by type
-              const diff = await git.diff(['--name-only', 'HEAD..@{upstream}']);
-              const files = diff.split('\n').filter(Boolean);
-              const counts: Record<string, number> = {};
-              for (const f of files) {
-                if (f.startsWith('skills/')) counts['skills'] = (counts['skills'] || 0) + 1;
-                else if (f.startsWith('commands/')) counts['commands'] = (counts['commands'] || 0) + 1;
-                else if (f.startsWith('hooks/')) counts['hooks'] = (counts['hooks'] || 0) + 1;
-                else if (f.startsWith('rules/')) counts['rules'] = (counts['rules'] || 0) + 1;
-                else counts['other'] = (counts['other'] || 0) + 1;
-              }
-              const parts: string[] = [];
-              if (counts['skills']) parts.push(`${counts['skills']} skill${counts['skills'] > 1 ? 's' : ''}`);
-              if (counts['commands']) parts.push(`${counts['commands']} command${counts['commands'] > 1 ? 's' : ''}`);
-              if (counts['hooks']) parts.push(`${counts['hooks']} hook${counts['hooks'] > 1 ? 's' : ''}`);
-              if (counts['rules']) parts.push(`${counts['rules']} rule${counts['rules'] > 1 ? 's' : ''}`);
-              if (counts['other']) parts.push(`${counts['other']} other`);
-              const summary = parts.length > 0 ? parts.join(', ') : `${behind} update${behind > 1 ? 's' : ''}`;
-              console.log(chalk.yellow(`${summary} available`));
-
-              if (isInteractiveTerminal()) {
-                const doPull = await confirm({ message: 'Pull now?', default: true });
-                if (doPull) {
-                  const result = await pullRepo(t.dir);
-                  if (result.success) {
-                    console.log(chalk.green('Updated'));
-                  } else {
-                    console.log(chalk.red(result.error || 'Pull failed'));
-                  }
-                }
-              }
-            }
-          } catch (err) {
-            console.log(chalk.red((err as Error).message));
-          }
           continue;
         }
         const spinner = ora(`Pulling ${formatRepoTarget(t.alias, t.dir)}...`).start();

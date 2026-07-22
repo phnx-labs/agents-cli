@@ -71,12 +71,13 @@ agent makes plan.html
   `{ "url", "coverUrl", "expiresAt" }` object. The human output still prints the URL on
   the first line.
 - **Slugs.** With no `--slug`, the default is `<project>-<feature>-<hash>` (e.g.
-  `agents-cli-fleet-cockpit-3a6687`): the repo name scopes the link and a short random
-  tail keeps the URL collision-free. Note that the tail is **not** a privacy control —
-  every non-expired share under your namespace, random-tail slugs included, is listed on
-  your public `/<github-username>` gallery (your GitHub username is public by
-  definition), so treat anything you `agents share` as publicly discoverable. Pass
-  `--slug` for a stable, exact name under your GitHub-username namespace.
+  `agents-cli-fleet-cockpit-9f3c1a8b7d2e4056`): the repo name scopes the link and a
+  random 64-bit tail (16 hex chars) keeps the direct URL unguessable and collision-free.
+  Note that the tail is **not** a privacy control for the namespace gallery — every
+  non-expired share under your namespace, random-tail slugs included, is listed on your
+  public `/<github-username>` gallery (your GitHub username is public by definition), so
+  treat anything you `agents share` as publicly discoverable. Pass `--slug` for a stable,
+  exact name under your GitHub-username namespace.
 
 ## Where things live
 
@@ -104,11 +105,33 @@ synced config exists and the token is already available.
 
 ## Security
 
-Reads are public by design (share links). Writes require the bearer `WRITE_TOKEN` (held by
-the Worker as an encrypted CF secret; the client sends it from the `share` bundle). The
-Worker's constant-time-ish compare avoids leaking the token by timing. The token is a
-32-byte random hex; rotate by re-running `setup` (mints a new one) — old links keep
-serving until they expire.
+**The security model is _unlisted, not secret_.** A share link is an
+[unguessable-URL capability](https://en.wikipedia.org/wiki/Capability-based_security):
+the URL _is_ the credential. There is no read-side auth — anyone who has (or guesses)
+the link can read the content, and the Worker serves it to them.
+
+- **Reads are public by design.** `GET /<slug>` is unauthenticated. Do not treat a
+  share link as a private channel: if the URL leaks (a forwarded chat, a proxy log, a
+  referrer header, browser history on a shared machine), the content is exposed. Anything
+  that must be _actually_ private should not be published here as-is.
+- **The default slug is hard to guess, not a secret.** The random tail is a 64-bit
+  nonce (`randomBytes(8)`, 16 hex chars) — `~1.8e19` possibilities, infeasible to
+  brute-force. (It was a 24-bit / 6-hex tail before RUSH-1821, only `~1.7e7` — small
+  enough to enumerate; that's now fixed.) The `<project>-<feature>-` prefix is predictable,
+  so the nonce is doing all the work — which is exactly why it needs the full 64 bits.
+- **Use `--expire` for sensitive content.** There is no default expiry. `--expire 30d`
+  (or `12h`, or an absolute `2026-08-01`) bounds the window in which a leaked link is
+  live; the Worker `410`s and lazily deletes past that instant. Shorter is safer.
+- **A true auth-gated read is a future option, not shipped.** For content that must be
+  genuinely private rather than merely unlisted, the intended path is an opt-in,
+  auth-gated read — a bearer token or a signed, short-lived link required to _view_ (not
+  just to publish). That is deliberately not implemented today; until it lands, only
+  publish here what you're comfortable being world-readable-if-the-URL-leaks.
+
+Writes require the bearer `WRITE_TOKEN` (held by the Worker as an encrypted CF secret; the
+client sends it from the `share` bundle). The Worker's constant-time-ish compare avoids
+leaking the token by timing. The token is a 32-byte random hex; rotate by re-running
+`setup` (mints a new one) — old links keep serving until they expire.
 
 Source: `src/commands/share.ts`, `src/lib/share/{worker-template,provision,publish,config,analytics}.ts`,
 `Meta.share` in `src/lib/types.ts`.

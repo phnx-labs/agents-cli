@@ -1,0 +1,1 @@
+- Neutralize residual OSS scrub breadcrumbs by replacing browser/session test fixture hostnames with `remote-host` and removing legacy private product path references from cloud proxy comments.

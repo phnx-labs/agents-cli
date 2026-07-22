@@ -8,7 +8,7 @@
  */
 
 import type { AgentId } from '../types.js';
-import { crabboxWarmup, crabboxWaitReady, crabboxRunScript, crabboxStop, type CrabboxBox } from './cli.js';
+import { crabboxFind, crabboxWarmup, crabboxWaitReady, crabboxRunScript, crabboxStop, type CrabboxBox } from './cli.js';
 import * as yaml from 'yaml';
 import { buildCredentialScript, buildHomeFileWriteScript, CLAUDE_TOKEN_REMOTE, type DetectedRuntime } from './runtimes.js';
 import { LEASE_AGENT_MARKER } from './progress.js';
@@ -16,6 +16,7 @@ import { LEASE_AGENT_MARKER } from './progress.js';
 /** Phase signal for a lease run, so the command layer can drive a progress UI. */
 export type LeasePhase =
   | { kind: 'warmup'; backend?: string }
+  | { kind: 'reuse'; slug: string }
   | { kind: 'ready'; box: CrabboxBox; elapsedMs: number }
   | { kind: 'teardown' };
 
@@ -42,6 +43,8 @@ export interface LeaseRunOptions {
   onPhase?: (phase: LeasePhase) => void;
   /** Keep the box after the run instead of stopping it. */
   keep?: boolean;
+  /** Existing warm crabbox slug to reuse instead of provisioning a new lease. */
+  reuseBox?: string;
   /**
    * Raw wrapped Claude OAuth payload (from `resolveClaudeCredentialsBlob`), written
    * to `~/.claude/.credentials.json` on the box. The command layer resolves it
@@ -177,14 +180,24 @@ export function buildBootstrapScript(opts: LeaseRunOptions): string {
 
 export async function leaseAndRun(opts: LeaseRunOptions): Promise<LeaseRunResult> {
   const startedAt = Date.now();
-  opts.onPhase?.({ kind: 'warmup', backend: opts.backend });
-  const box = await crabboxWarmup({
-    class: opts.boxClass,
-    profile: opts.profile,
-    provider: opts.backend,
-    secretsBundle: opts.secretsBundle,
-  });
-  await crabboxWaitReady(box.slug, { secretsBundle: opts.secretsBundle });
+  let box: CrabboxBox;
+  if (opts.reuseBox) {
+    opts.onPhase?.({ kind: 'reuse', slug: opts.reuseBox });
+    const found = crabboxFind(opts.reuseBox, { secretsBundle: opts.secretsBundle });
+    if (!found) throw new Error(`crabbox box "${opts.reuseBox}" was not found. Check \`crabbox list\` or pass a different --box slug.`);
+    box = found.ready
+      ? found
+      : await crabboxWaitReady(opts.reuseBox, { secretsBundle: opts.secretsBundle });
+  } else {
+    opts.onPhase?.({ kind: 'warmup', backend: opts.backend });
+    box = await crabboxWarmup({
+      class: opts.boxClass,
+      profile: opts.profile,
+      provider: opts.backend,
+      secretsBundle: opts.secretsBundle,
+    });
+    await crabboxWaitReady(box.slug, { secretsBundle: opts.secretsBundle });
+  }
   opts.onPhase?.({ kind: 'ready', box, elapsedMs: Date.now() - startedAt });
 
   const script = buildBootstrapScript(opts);
@@ -197,8 +210,8 @@ export async function leaseAndRun(opts: LeaseRunOptions): Promise<LeaseRunResult
     });
   } finally {
     // Always attempt teardown (bounds credential lifetime to the run) unless the
-    // caller explicitly asked to keep the box.
-    if (!opts.keep) {
+    // caller explicitly asked to keep the box or targeted an existing warm box.
+    if (!opts.keep && !opts.reuseBox) {
       opts.onPhase?.({ kind: 'teardown' });
       toreDown = crabboxStop(box.slug, { secretsBundle: opts.secretsBundle });
     }

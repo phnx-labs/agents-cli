@@ -3,7 +3,8 @@
  *
  * Implements `agents sessions tail` — position-tracked reader on the session
  * JSONL, driven by an fs.watch on the parent directory. Claude and Codex
- * only for v1 (both use append-only JSONL).
+ * only for v1 (both use append-only JSONL). Output is compact by default;
+ * --json keeps the raw JSONL stream.
  */
 import * as fs from 'fs';
 import * as fsp from 'fs/promises';
@@ -13,6 +14,7 @@ import type { Command } from 'commander';
 import type { SessionMeta, SessionAgentId } from '../lib/session/types.js';
 import { discoverSessions, resolveSessionById } from '../lib/session/discover.js';
 import { setHelpSections } from '../lib/help.js';
+import { makeStreamRenderer } from '../lib/session/stream-render.js';
 
 const TAIL_SUPPORTED: SessionAgentId[] = ['claude', 'codex'];
 
@@ -145,6 +147,7 @@ export async function tailFile(
 interface TailOptions {
   latest?: boolean;
   fromStart?: boolean;
+  json?: boolean;
 }
 
 async function findLatestTailable(): Promise<SessionMeta | undefined> {
@@ -195,7 +198,7 @@ async function runTail(sessionId: string | undefined, options: TailOptions): Pro
     session = resolved;
   }
 
-  await streamSessionTail(session, { fromStart: options.fromStart });
+  await streamSessionTail(session, { fromStart: options.fromStart, raw: options.json });
 }
 
 /**
@@ -204,9 +207,10 @@ async function runTail(sessionId: string | undefined, options: TailOptions): Pro
  */
 export async function streamSessionTail(
   session: SessionMeta,
-  options: { fromStart?: boolean } = {},
+  options: { fromStart?: boolean; raw?: boolean } = {},
 ): Promise<void> {
   const filePath = session.filePath.split('#')[0];
+  const render = options.raw ? undefined : makeStreamRenderer(session.agent, session.cwd);
 
   if (process.stderr.isTTY) {
     process.stderr.write(
@@ -222,7 +226,12 @@ export async function streamSessionTail(
 
   try {
     await tailFile(filePath, (line) => {
-      process.stdout.write(line + '\n');
+      if (!render) {
+        process.stdout.write(line + '\n');
+        return;
+      }
+      const out = render(line);
+      if (out) process.stdout.write(out + '\n');
     }, ac, { fromStart: options.fromStart });
   } finally {
     process.off('SIGINT', onSig);
@@ -234,9 +243,10 @@ export async function streamSessionTail(
 export function registerSessionsTailCommand(sessionsCmd: Command): void {
   const tailCmd = sessionsCmd
     .command('tail [sessionId]')
-    .description('Stream JSONL events from a session file as they are written, one event per line. Long-running: Ctrl+C to stop. Claude and Codex only.')
+    .description('Stream compact live lines from a session file as events are written. Long-running: Ctrl+C to stop. Claude and Codex only.')
     .option('--latest', 'Tail the most recent tailable session (claude or codex)')
-    .option('--from-start', 'Emit the full file first, then follow (default: start at EOF)');
+    .option('--from-start', 'Emit the full file first, then follow (default: start at EOF)')
+    .option('--json', 'Emit raw JSONL events instead of compact live lines');
 
   setHelpSections(tailCmd, {
     examples: `
@@ -249,16 +259,17 @@ export function registerSessionsTailCommand(sessionsCmd: Command): void {
       # Replay from the beginning, then follow
       agents sessions tail a1b2c3d4 --from-start
 
-      # Pipe through jq to extract just user messages
-      agents sessions tail --latest | jq 'select(.type == "user")'
+      # Pipe raw events through jq to extract just user messages
+      agents sessions tail --latest --json | jq 'select(.type == "user")'
     `,
     notes: `
       - Only Claude and Codex sessions are tailable — they append JSONL one event per line.
+      - Live tail is compact by default; pass --json for the raw JSONL stream.
       - Gemini, OpenCode, and OpenClaw use formats that rewrite the file or store state elsewhere.
     `,
   });
 
-  tailCmd.action(async (sessionId: string | undefined, options: TailOptions) => {
-    await runTail(sessionId, options);
+  tailCmd.action(async (sessionId: string | undefined, _options: TailOptions, command: Command) => {
+    await runTail(sessionId, command.optsWithGlobals() as TailOptions);
   });
 }

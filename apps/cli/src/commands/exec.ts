@@ -78,6 +78,7 @@ interface ExecCommandActionOptions {
   any?: boolean;
   copyCreds?: boolean;
   lease?: string | boolean; // --lease [backend]: true when bare, backend string when given
+  box?: string; // --box <slug>: reuse an existing warm crabbox box
   keepBox?: boolean; // --keep-box: don't tear down the leased box after the run
   secretsKeys?: string; // --secrets-keys: comma-separated key subset for --secrets bundles
   allowExpired?: boolean; // --allow-expired: skip expiry pre-run abort for secrets
@@ -106,6 +107,7 @@ export function runAccountPickerConflicts(options: {
   strategy?: string;
   balanced?: boolean;
   lease?: string | boolean;
+  box?: string;
   host?: string;
   device?: string;
   on?: string;
@@ -116,6 +118,7 @@ export function runAccountPickerConflicts(options: {
   if (options.strategy !== undefined) conflicts.push('--strategy');
   if (options.balanced) conflicts.push('--balanced');
   if (options.lease) conflicts.push('--lease');
+  if (options.box) conflicts.push('--box');
   if (options.host || options.device || options.on || options.computer) conflicts.push('--host/--device');
   return conflicts;
 }
@@ -520,6 +523,10 @@ export function registerRunCommand(program: Command): void {
       '--lease [backend]',
       'Invent a disposable cloud box for this run and tear it down after (via crabbox). Optional backend selects the cloud (hetzner/aws/do). Unlike --host, no machine is registered.',
     )
+    .option(
+      '--box <slug>',
+      'Reuse an existing warm crabbox box for this run instead of provisioning a disposable --lease box.',
+    )
     .option('--keep-box', 'With --lease, keep the box after the run instead of stopping it.');
 
   // `--on` and `--computer` are hidden aliases of `--host` — same behavior.
@@ -639,10 +646,15 @@ export function registerRunCommand(program: Command): void {
       }
 
       // --lease: invent a disposable cloud box for this run (via crabbox), run
-      // the agent there, then tear it down. Unlike --host, nothing is registered.
-      if (options.lease) {
+      // the agent there, then tear it down. --box: reuse a named warm crabbox
+      // box, run the same bootstrap there, and leave the box running.
+      if (options.lease || options.box) {
         if (prompt === undefined) {
-          console.error(chalk.red('A prompt is required for leased runs: agents run <agent> "<task>" --lease'));
+          console.error(chalk.red(`A prompt is required for crabbox runs: agents run <agent> "<task>" ${options.box ? '--box <slug>' : '--lease'}`));
+          process.exit(1);
+        }
+        if (options.lease && options.box) {
+          console.error(chalk.red('Pass either --lease to provision a disposable box, or --box <slug> to reuse a warm box — not both.'));
           process.exit(1);
         }
         const backend = typeof options.lease === 'string' ? options.lease : undefined;
@@ -650,7 +662,7 @@ export function registerRunCommand(program: Command): void {
         // First-run: no provider credential resolves (no env var, no config, no
         // detectable bundle) → guide the user through one-time setup, then continue.
         const { resolveLeaseBundle } = await import('../lib/crabbox/cli.js');
-        if (!resolveLeaseBundle()) {
+        if (options.lease && !resolveLeaseBundle()) {
           const { runLeaseSetup } = await import('./lease.js');
           const ok = await runLeaseSetup({ provider: backend ?? 'hetzner' });
           if (!ok) {
@@ -743,9 +755,17 @@ export function registerRunCommand(program: Command): void {
             : dispatchProfile
               ? `profile '${dispatchProfile.name}'`
               : `${runtime} credentials`;
+        const boxLifecycle = options.box
+          ? `Reusing crabbox box ${options.box}`
+          : `Leasing a ${backend ?? 'hetzner'} box`;
+        const boxAfterRun = options.box
+          ? 'the box is kept after the run'
+          : options.keepBox
+            ? 'the box is kept after the run'
+            : 'the box is destroyed after the run';
         console.error(
           chalk.gray(
-            `Leasing a ${backend ?? 'hetzner'} box · shipping ${whatShips}${credentialRuntimes.length > 0 && leaseEmail ? ` (${leaseEmail})` : ''}; the box is destroyed after the run.`,
+            `${boxLifecycle} · shipping ${whatShips}${credentialRuntimes.length > 0 && leaseEmail ? ` (${leaseEmail})` : ''}; ${boxAfterRun}.`,
           ),
         );
 
@@ -780,7 +800,7 @@ export function registerRunCommand(program: Command): void {
           onSetupLine: (line) => spinner.update(`Setting up box — ${fit(line)}`),
           onAgentChunk: (chunk) => {
             // First agent byte: stop the setup spinner, THEN stream to stdout.
-            if (spinner.active) spinner.stopAndPersist('✔', chalk.gray(`Box provisioned — ${agentName} output:`));
+            if (spinner.active) spinner.stopAndPersist('✔', chalk.gray(`Box setup complete — ${agentName} output:`));
             process.stdout.write(chunk);
           },
         });
@@ -799,6 +819,7 @@ export function registerRunCommand(program: Command): void {
             claudeCredentialsJson,
             secretsBundle: process.env.AGENTS_LEASE_SECRETS_BUNDLE,
             keep: options.keepBox,
+            reuseBox: options.box,
             onData: (chunk) => router.push(chunk),
             onPhase: (phase) => {
               if (phase.kind === 'warmup') {
@@ -806,6 +827,8 @@ export function registerRunCommand(program: Command): void {
                 spinner.start(`${label}…`);
                 const t0 = Date.now();
                 warmupTimer = setInterval(() => spinner.update(`${label}… (${Math.round((Date.now() - t0) / 1000)}s)`), 1000);
+              } else if (phase.kind === 'reuse') {
+                spinner.start(`Reusing crabbox box ${phase.slug}…`);
               } else if (phase.kind === 'ready') {
                 stopTimer();
                 spinner.stopAndPersist('✔', `Box ${phase.box.slug} ready${phase.box.ip ? ` (${phase.box.ip})` : ''} · ${Math.round(phase.elapsedMs / 1000)}s`);

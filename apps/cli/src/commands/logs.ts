@@ -84,7 +84,7 @@ async function showSession(session: SessionMeta, follow: boolean, full: boolean,
       console.error(chalk.red(`Tailing is supported for claude and codex sessions only (got ${session.agent}).`));
       process.exit(2);
     }
-    await streamSessionTail(session, {});
+    await streamSessionTail(session, { raw: full });
     return;
   }
   await renderSessionLog(session, full ? 'markdown' : 'summary');

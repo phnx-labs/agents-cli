@@ -243,13 +243,16 @@ agents profiles logout openrouter
 
 ```bash
 agents run deepseek "summarize this repo" --lease hetzner
+agents run deepseek "summarize this repo" --box warm-one
 ```
 
 Leased profile runs install the profile's `host.agent` on the disposable box and
 materialize a temporary profile there for the duration of the run. Profiles with
 their own API key, such as OpenRouter-backed `kimi` and `deepseek`, ship that
 profile auth only; the base runtime's local OAuth credential is copied only when
-the profile has no auth env of its own.
+the profile has no auth env of its own. `--box <slug>` targets an existing warm
+crabbox box instead of provisioning a disposable lease, so the same box can serve
+profile runs from different repositories and remains running after the command.
 
 ## Demo
 
