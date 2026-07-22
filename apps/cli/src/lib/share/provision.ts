@@ -1,8 +1,8 @@
 // Cloudflare provisioning for `agents share setup` — plain `fetch` against the CF
-// REST API (the repo has no CF wrapper). Creates the R2 bucket, uploads the Worker
-// (with an R2 binding + the WRITE_TOKEN as an inline secret), enables the free
-// `*.workers.dev` subdomain, configures a lifecycle cleanup rule, and — when the
-// token owns the zone — maps a custom domain.
+// REST API (the repo has no CF wrapper). Creates the R2 bucket, configures its
+// lifecycle, uploads the Worker (with an R2 binding), sets the WRITE_TOKEN secret,
+// enables the free `*.workers.dev` subdomain, and — when the token owns the zone —
+// maps a custom domain.
 
 const CF_API = 'https://api.cloudflare.com/client/v4';
 export const SHARE_LIFECYCLE_RULE_ID = 'agents-share-expire-objects';
@@ -141,14 +141,13 @@ export async function configureBucketLifecycle(
   });
 }
 
-/** Upload the module Worker with an R2 binding (`BUCKET`) + inline `WRITE_TOKEN` secret. */
+/** Upload the module Worker with an R2 binding (`BUCKET`). Secrets are set via the Workers Secrets API. */
 export async function deployWorker(
   apiToken: string,
   accountId: string,
   workerName: string,
   script: string,
   bucketName: string,
-  writeToken: string,
   opts: ProvisionOptions = {},
 ): Promise<void> {
   const request = opts.request ?? defaultCloudflareRequester;
@@ -157,7 +156,6 @@ export async function deployWorker(
     compatibility_date: '2024-11-06',
     bindings: [
       { type: 'r2_bucket', name: 'BUCKET', bucket_name: bucketName },
-      { type: 'secret_text', name: 'WRITE_TOKEN', text: writeToken },
     ],
   };
   const form = new FormData();
@@ -172,6 +170,23 @@ export async function deployWorker(
     method: 'PUT',
     pathname: `/accounts/${accountId}/workers/scripts/${workerName}`,
     form,
+  });
+}
+
+/** Add/update the WRITE_TOKEN binding using Cloudflare's Workers Secrets API. */
+export async function setWorkerSecret(
+  apiToken: string,
+  accountId: string,
+  workerName: string,
+  writeToken: string,
+  opts: ProvisionOptions = {},
+): Promise<void> {
+  const request = opts.request ?? defaultCloudflareRequester;
+  await request({
+    apiToken,
+    method: 'PUT',
+    pathname: `/accounts/${accountId}/workers/scripts/${workerName}/secrets`,
+    body: { name: 'WRITE_TOKEN', text: writeToken, type: 'secret_text' },
   });
 }
 

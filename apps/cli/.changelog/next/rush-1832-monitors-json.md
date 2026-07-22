@@ -1,0 +1,1 @@
+- Add `--json` to `agents monitors view` and `agents monitors test`, and send monitor errors to stderr so JSON stdout stays parseable.

@@ -1,6 +1,6 @@
 /**
  * Template resolution utilities.
- * Ported from agents/halo/cli/pkg/template.
+ * Ported from the legacy agent CLI template helpers.
  *
  * Supports {{artifact.*}} and {{preflight.*}} placeholder patterns used in
  * artifact action input mappings.

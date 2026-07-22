@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as os from 'node:os';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { shouldTapStdout, resolveInteractive, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv, shouldWrapInTmux, buildTmuxAgentCommand, formatPaneTail, type TmuxWrapContext } from './exec.js';
+import { shouldTapStdout, resolveInteractive, inferredInteractiveWithoutTty, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv, shouldWrapInTmux, buildTmuxAgentCommand, formatPaneTail, type TmuxWrapContext } from './exec.js';
 import type { ExecOptions } from './exec.js';
 import { mailboxDir } from './mailbox.js';
 
@@ -248,6 +248,22 @@ describe('resolveInteractive (sanity for the gating inputs above)', () => {
   });
   it('--headless forces non-interactive even without a prompt', () => {
     expect(resolveInteractive({ headless: true, prompt: undefined })).toBe(false);
+  });
+});
+
+describe('inferredInteractiveWithoutTty (RUSH-1829 no-TTY REPL guard)', () => {
+  it('blocks a prompt-less run in a non-TTY shell (the footgun: would hang on dead stdin)', () => {
+    expect(inferredInteractiveWithoutTty({ prompt: undefined }, false)).toBe(true);
+  });
+  it('allows a prompt-less run at a real terminal (a normal interactive launch)', () => {
+    expect(inferredInteractiveWithoutTty({ prompt: undefined }, true)).toBe(false);
+  });
+  it('never blocks a headless run — it has no prompt-less REPL to attach', () => {
+    expect(inferredInteractiveWithoutTty({ prompt: 'do the thing' }, false)).toBe(false);
+    expect(inferredInteractiveWithoutTty({ headless: true, prompt: undefined }, false)).toBe(false);
+  });
+  it('honors an explicit --interactive even without a TTY (caller may drive a PTY we can\'t detect)', () => {
+    expect(inferredInteractiveWithoutTty({ interactive: true, prompt: undefined }, false)).toBe(false);
   });
 });
 

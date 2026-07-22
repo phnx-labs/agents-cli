@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { readShareConfig, readWriteToken } from './config.js';
+import { readShareConfig, readWriteToken, type ShareConfig } from './config.js';
 import { captureCover, OG_WIDTH, OG_HEIGHT, OG_SCALE } from './capture.js';
 import { deriveMeta, injectOgMeta } from './og.js';
 
@@ -32,10 +32,20 @@ export interface PublishOptions {
   contentType?: string;
   /** Generate + attach an OG cover for HTML pages (default true). */
   cover?: boolean;
+  /** DI seam for tests — override the persisted share endpoint config. */
+  config?: ShareConfig;
+  /** DI seam for tests — override the keychain-backed write token. */
+  writeToken?: string;
   /** DI seam for tests — override the real HTTP PUT. */
   uploader?: PutFn;
   /** DI seam for tests — override cover capture (returns a PNG buffer or null). */
   capturer?: (htmlPath: string) => Promise<Buffer | null>;
+}
+
+export interface PublishResult {
+  url: string;
+  expiresAt?: string;
+  coverUrl?: string;
 }
 
 const UNIT_MS: Record<string, number> = { s: 1e3, m: 6e4, h: 36e5, d: 864e5, w: 6048e5 };
@@ -141,14 +151,14 @@ export async function attachOgCover(
 export async function publishFile(
   filePath: string,
   opts: PublishOptions = {},
-): Promise<{ url: string; expiresAt?: string; coverUrl?: string }> {
-  const cfg = readShareConfig();
+): Promise<PublishResult> {
+  const cfg = opts.config ?? readShareConfig();
   if (!cfg) {
     throw new Error(
       "Not set up yet. Run 'agents share setup' (provision your own endpoint) or 'agents share join' (use an existing one).",
     );
   }
-  const token = readWriteToken();
+  const token = opts.writeToken ?? readWriteToken();
   return publishToEndpoint(filePath, { baseUrl: cfg.baseUrl, token }, opts);
 }
 
@@ -156,7 +166,7 @@ export async function publishToEndpoint(
   filePath: string,
   endpoint: PublishEndpoint,
   opts: PublishOptions = {},
-): Promise<{ url: string; expiresAt?: string; coverUrl?: string }> {
+): Promise<PublishResult> {
   const slug = (opts.slug ?? defaultSlug(filePath)).replace(/^\/+/, '');
   const expiresAt = parseExpire(opts.expire);
   const pageUrl = `${endpoint.baseUrl.replace(/\/+$/, '')}/${slug}`;

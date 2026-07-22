@@ -853,18 +853,14 @@ export function registerSecretsCommands(program: Command): void {
     .description('List configured secrets bundles (use --host/--hosts to list bundles on other machines over SSH)')
     .option('--host <target>', 'List bundles on a remote host over SSH (enrolled `agents hosts` name, ssh-config alias, or user@host)')
     .option('--hosts <list>', 'Comma-separated hosts to list in one shot, e.g. yosemite-s0,yosemite-s1')
-    .action(async (opts: { host?: string; hosts?: string }) => {
+    .option('--json', 'Emit machine-readable JSON (bundle metadata only — never secret values) instead of the table')
+    .action(async (opts: { host?: string; hosts?: string; json?: boolean }) => {
       const targets = parseHostsOption(opts);
       if (targets.length > 0) {
-        await browseRemote(targets, ['list'], false);
+        await browseRemote(targets, opts.json ? ['list', '--json'] : ['list'], false);
         return;
       }
       const bundles = listBundles();
-      if (bundles.length === 0) {
-        console.log(chalk.gray('No secrets bundles configured.'));
-        console.log(chalk.gray('Try: agents secrets create <name>'));
-        return;
-      }
       // Cross-reference the secrets-agent so `daily` bundles that are currently
       // held can show "· held Nh". Soft-fails to no hint if the broker is down.
       const held = new Map<string, number>();
@@ -874,6 +870,31 @@ export function registerSecretsCommands(program: Command): void {
         } catch {
           /* broker not running — render policy without the countdown */
         }
+      }
+      if (opts.json) {
+        // Discovery payload for agents: metadata only, no secret values. Gated on
+        // the explicit --json flag (not stdout.isTTY) so piping the human table to
+        // a pager never silently swaps formats.
+        const payload = bundles.map((b) => ({
+          name: b.name,
+          keys: describeBundle(b).length,
+          policy: bundlePolicy(b),
+          backend: b.backend === 'file' ? 'file' : 'keychain',
+          allowExec: Boolean(b.allow_exec),
+          expiringSoon: countExpiringSoon(b.meta),
+          description: b.description ?? null,
+          createdAt: b.created_at ?? null,
+          updatedAt: b.updated_at ?? null,
+          lastUsed: b.last_used ?? null,
+          heldExpiresAt: held.get(b.name) ?? null,
+        }));
+        process.stdout.write(JSON.stringify(payload) + '\n');
+        return;
+      }
+      if (bundles.length === 0) {
+        console.log(chalk.gray('No secrets bundles configured.'));
+        console.log(chalk.gray('Try: agents secrets create <name>'));
+        return;
       }
       const cols = terminalWidth();
       if (cols >= SECRETS_WIDE) {
@@ -896,9 +917,10 @@ export function registerSecretsCommands(program: Command): void {
     .description('Show a bundle. Keychain values are masked by default — pass --reveal to see them.')
     .option('--reveal', 'Print keychain-backed values in the clear (TTY only unless --plaintext)')
     .option('--plaintext', 'Allow --reveal in non-interactive shells (use with care)')
+    .option('--json', 'Emit machine-readable JSON (values masked unless --reveal) instead of the human view')
     .option('--host <target>', 'Show a bundle on a remote host over SSH (enrolled `agents hosts` name, ssh-config alias, or user@host)')
     .option('--hosts <list>', 'Comma-separated hosts to show in one shot, e.g. yosemite-s0,yosemite-s1')
-    .action(async (name: string | undefined, opts: { reveal?: boolean; plaintext?: boolean; host?: string; hosts?: string }) => {
+    .action(async (name: string | undefined, opts: { reveal?: boolean; plaintext?: boolean; json?: boolean; host?: string; hosts?: string }) => {
       try {
         const targets = parseHostsOption(opts);
         if (targets.length > 0) {
@@ -909,6 +931,7 @@ export function registerSecretsCommands(program: Command): void {
           const args = ['view', name];
           if (opts.reveal) args.push('--reveal');
           if (opts.plaintext) args.push('--plaintext');
+          if (opts.json) args.push('--json');
           // With --reveal, force a TTY so the remote keychain prompt can surface
           // (and the remote's "--reveal in a non-TTY needs --plaintext" gate is
           // satisfied) — only when this side is itself interactive.
@@ -926,6 +949,74 @@ export function registerSecretsCommands(program: Command): void {
           process.exit(1);
         }
         const entries = describeBundle(bundle);
+        if (opts.json) {
+          // Machine-readable discovery for agents. Values are null unless --reveal
+          // (which still routes through the same non-TTY/plaintext gate + audit
+          // event as the human path). Gated on the explicit flag, not stdout.isTTY,
+          // so a piped human view never silently swaps formats.
+          const reveal = Boolean(opts.reveal);
+          if (reveal && !isInteractiveTerminal() && !opts.plaintext) {
+            console.error(chalk.red('--reveal in a non-TTY requires --plaintext.'));
+            process.exit(1);
+          }
+          const revealed = new Map<string, string>();
+          if (reveal) {
+            const items = entries
+              .filter((e) => e.kind === 'keychain')
+              .map((e) => secretsKeychainItem(bundle.name, e.detail));
+            try {
+              for (const [item, value] of getKeychainTokens(items)) revealed.set(item, value);
+            } catch {
+              /* cancelled / batch failure — fall through to masked (null) values */
+            }
+            const exposed = revealed.size + entries.filter((e) => e.kind === 'literal').length;
+            if (exposed > 0) {
+              emit('secrets.get', {
+                module: 'secrets',
+                bundle: bundle.name,
+                operation: 'view --reveal --json',
+                source: 'reveal',
+                status: 'success',
+                keyCount: exposed,
+              });
+            }
+          }
+          const keys = entries.map((e) => {
+            const row: { key: string; kind: string; detail: string | null; stored?: boolean; value: string | null } = {
+              key: e.key,
+              kind: e.kind,
+              detail: e.detail || null,
+              value: null,
+            };
+            if (e.kind === 'keychain') {
+              const item = secretsKeychainItem(bundle.name, e.detail);
+              row.stored = hasKeychainToken(item);
+              if (reveal && revealed.has(item)) row.value = revealed.get(item)!;
+            } else if (e.kind === 'literal' && reveal) {
+              const raw = bundle.vars[e.key];
+              row.value =
+                typeof raw === 'string'
+                  ? raw
+                  : (raw && typeof raw === 'object' && 'value' in raw ? (raw as any).value : '');
+            }
+            return row;
+          });
+          process.stdout.write(
+            JSON.stringify({
+              name: bundle.name,
+              description: bundle.description ?? null,
+              policy: bundlePolicy(bundle),
+              backend: bundle.backend === 'file' ? 'file' : 'keychain',
+              allowExec: Boolean(bundle.allow_exec),
+              createdAt: bundle.created_at ?? null,
+              updatedAt: bundle.updated_at ?? null,
+              lastUsed: bundle.last_used ?? null,
+              revealed: reveal,
+              keys,
+            }) + '\n',
+          );
+          return;
+        }
         console.log(chalk.bold(bundle.name));
         if (bundle.description) console.log(chalk.gray(safePrint(bundle.description)));
         if (bundle.allow_exec) console.log(chalk.yellow('allow_exec: true'));

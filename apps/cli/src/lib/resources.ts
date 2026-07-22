@@ -21,6 +21,7 @@ import {
   getSystemAgentsDir,
   getEnabledExtraRepos,
 } from './state.js';
+import { isNameActiveInResourceProfile, type ProfiledResourceKind } from './resource-profiles.js';
 
 // ─── Resource resolver ────────────────────────────────────────────────────────
 
@@ -47,6 +48,28 @@ export interface ResolvedResource {
    * or the alias name (e.g. 'rush') for extra repos registered in agents.yaml.
    */
   source: string;
+}
+
+function profiledKind(kind: ResourceKind): ProfiledResourceKind | null {
+  switch (kind) {
+    case 'commands':
+    case 'skills':
+    case 'hooks':
+    case 'mcp':
+    case 'permissions':
+    case 'subagents':
+    case 'secrets':
+      return kind;
+    case 'rules':
+      return 'memory';
+    default:
+      return null;
+  }
+}
+
+function resourceIsActive(kind: ResourceKind, name: string, source: string): boolean {
+  const activeKind = profiledKind(kind);
+  return activeKind ? isNameActiveInResourceProfile(activeKind, name, source) : true;
 }
 
 /**
@@ -77,14 +100,20 @@ export function resolveResource(
     // Try exact name (for directories like skills/subagents)
     const exactPath = path.join(dir, name);
     if (fs.existsSync(exactPath)) {
-      return { name, path: exactPath, source };
+      if (resourceIsActive(kind, name, source)) {
+        return { name, path: exactPath, source };
+      }
+      continue;
     }
 
     // Try with common file extensions
     for (const ext of ['.md', '.yaml', '.yml']) {
       const withExt = exactPath + ext;
       if (fs.existsSync(withExt)) {
-        return { name, path: withExt, source };
+        if (resourceIsActive(kind, name, source)) {
+          return { name, path: withExt, source };
+        }
+        continue;
       }
     }
   }
@@ -124,6 +153,7 @@ export function listResources(
       if (entry.name.startsWith('.')) continue;
       const rawName = entry.name.replace(/\.(md|yaml|yml)$/, '');
       if (seen.has(rawName)) continue;
+      if (!resourceIsActive(kind, rawName, source)) continue;
       seen.add(rawName);
       results.push({
         name: rawName,

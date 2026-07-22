@@ -52,7 +52,7 @@ describe('buildDispatchBody', () => {
     });
   });
 
-  it('multi-repo omits singular fields so old halo/proxy rejects cleanly', () => {
+  it('multi-repo omits singular fields so the old cloud proxy rejects cleanly', () => {
     const body = buildDispatchBody({
       agent: 'claude',
       prompt: 'refactor',

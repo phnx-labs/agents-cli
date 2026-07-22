@@ -290,6 +290,7 @@ Run and dispatch:
   pty                             Drive interactive terminal programs (REPLs, TUIs) via a persistent PTY session
 
 Credentials and profiles:
+  profile                         Activate resource profiles across skills, MCP, permissions, and secrets
   profiles                        Bundles of (host CLI, endpoint, model, auth)
   secrets                         Keychain-backed env bundles; use 'secrets exec <bundle> -- <cmd>' to inject into a subprocess
 

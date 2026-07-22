@@ -10,6 +10,19 @@ const INDEX = path.join(REPO_ROOT, 'src', 'index.ts');
 
 let testHome = '';
 
+// On macOS, seeding a bundle via `secrets create --backend file` stores its
+// metadata in the Keychain, which needs the signed `Agents CLI.app` helper.
+// GitHub macOS CI can't codesign that helper, so a fresh CLI subprocess fails
+// with "Source Agents CLI.app not found". Skip helper-dependent subprocess
+// tests when the helper bundle is absent (its resolver paths, per
+// install-helper.ts: dist/lib/secrets sibling or <repo>/bin). Linux has no
+// keychain gate; local macOS with the helper installed also runs.
+const keychainHelperAvailable =
+  process.platform !== 'darwin' ||
+  fs.existsSync(path.resolve(__dirname, '../lib/secrets/Agents CLI.app')) ||
+  fs.existsSync(path.resolve(__dirname, '../../bin/Agents CLI.app')) ||
+  fs.existsSync(path.resolve(__dirname, '../../dist/lib/secrets/Agents CLI.app'));
+
 afterEach(() => {
   if (testHome) fs.rmSync(testHome, { recursive: true, force: true });
   testHome = '';
@@ -51,7 +64,13 @@ describe('devices command', () => {
 });
 
 describe('ssh askpass', () => {
-  it('resolves an account-suffixed bundle key by exact storage name', () => {
+  it.skipIf(!keychainHelperAvailable)('resolves an account-suffixed bundle key by exact storage name', ({ skip }) => {
+    // Belt-and-suspenders: the release matrix has shown `it.skipIf` failing to
+    // keep a test off a runner, so also skip explicitly at runtime.
+    if (!keychainHelperAvailable) {
+      skip();
+      return;
+    }
     guardedHome();
     const env = { AGENTS_SECRETS_PASSPHRASE: 'rush-668-test' };
 

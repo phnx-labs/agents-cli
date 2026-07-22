@@ -1,0 +1,1 @@
+- Keep piped CLI output human-readable unless `--json` is passed.

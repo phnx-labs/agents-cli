@@ -20,6 +20,19 @@ import {
 } from './secrets.js';
 import { parseDotenv, type SecretsBundle } from '../lib/secrets/bundles.js';
 
+// On macOS, `secrets create --backend file` still stores bundle METADATA in the
+// Keychain, which requires the signed `Agents CLI.app` helper. GitHub macOS CI
+// runners can't codesign that helper, so a fresh CLI subprocess dies with
+// "Source Agents CLI.app not found". These subprocess tests must therefore skip
+// when the helper bundle is absent — matching install-helper.ts's own resolver
+// paths (dist/lib/secrets sibling, or <repo>/bin). Linux has no keychain gate,
+// so it always runs; local macOS with the helper installed also runs.
+const keychainHelperAvailable =
+  process.platform !== 'darwin' ||
+  fs.existsSync(path.resolve(__dirname, '../lib/secrets/Agents CLI.app')) ||
+  fs.existsSync(path.resolve(__dirname, '../../bin/Agents CLI.app')) ||
+  fs.existsSync(path.resolve(__dirname, '../../dist/lib/secrets/Agents CLI.app'));
+
 describe('parseImportSource', () => {
   it('treats a plain value as a .env path, including stdin', () => {
     expect(parseImportSource({ from: '.env.prod' })).toEqual({ kind: 'dotenv', path: '.env.prod' });
@@ -191,7 +204,13 @@ describe('secrets export --format json', () => {
     });
   }
 
-  it('prints injected process env keys for account-suffixed bundle keys', () => {
+  it.skipIf(!keychainHelperAvailable)('prints injected process env keys for account-suffixed bundle keys', ({ skip }) => {
+    // Belt-and-suspenders: the release matrix has shown `it.skipIf` failing to
+    // keep a test off a runner, so also skip explicitly at runtime.
+    if (!keychainHelperAvailable) {
+      skip();
+      return;
+    }
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-secrets-json-'));
     try {
       fs.mkdirSync(path.join(home, '.agents/.system'), { recursive: true });
@@ -206,6 +225,91 @@ describe('secrets export --format json', () => {
 
       expect(exported.status, exported.stderr).toBe(0);
       expect(JSON.parse(exported.stdout)).toEqual({ GITHUB_USERNAME: 'workbot' });
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('secrets list/view --json (agent discovery, RUSH-1834)', () => {
+  function runSecrets(home: string, args: string[]): ReturnType<typeof spawnSync> {
+    return spawnSync('node', ['--import', 'tsx', 'src/index.ts', 'secrets', ...args], {
+      cwd: path.resolve(__dirname, '../..'),
+      encoding: 'utf-8',
+      env: {
+        ...process.env,
+        HOME: home,
+        AGENTS_SECRETS_PASSPHRASE: 'rush-1834-test',
+        AGENTS_NO_USAGE_TRACK: '1',
+      },
+    });
+  }
+
+  function seed(): string {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-secrets-disc-'));
+    fs.mkdirSync(path.join(home, '.agents/.system'), { recursive: true });
+    spawnSync('git', ['init', '--quiet'], { cwd: path.join(home, '.agents/.system'), encoding: 'utf-8' });
+    expect(runSecrets(home, ['create', 'github.com', '--backend', 'file', '--description', 'gh creds']).status).toBe(0);
+    expect(runSecrets(home, ['add', 'github.com', 'API_TOKEN', '--value', 'sk-live-xyz']).status).toBe(0);
+    return home;
+  }
+
+  it.skipIf(!keychainHelperAvailable)('list --json emits a machine-readable bundle array with metadata but no secret values', ({ skip }) => {
+    if (!keychainHelperAvailable) {
+      skip();
+      return;
+    }
+    const home = seed();
+    try {
+      const res = runSecrets(home, ['list', '--json']);
+      expect(res.status, res.stderr).toBe(0);
+      const arr = JSON.parse(res.stdout);
+      expect(Array.isArray(arr)).toBe(true);
+      const gh = arr.find((b: { name: string }) => b.name === 'github.com');
+      expect(gh).toBeTruthy();
+      expect(gh.keys).toBe(1);
+      expect(gh.backend).toBe('file');
+      expect(gh.description).toBe('gh creds');
+      expect(typeof gh.policy).toBe('string');
+      // The list is a discovery surface — it must never carry the secret value.
+      expect(res.stdout).not.toContain('sk-live-xyz');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(!keychainHelperAvailable)('view --json lists keys with value=null when not revealed (never leaks the secret)', ({ skip }) => {
+    if (!keychainHelperAvailable) {
+      skip();
+      return;
+    }
+    const home = seed();
+    try {
+      const res = runSecrets(home, ['view', 'github.com', '--json']);
+      expect(res.status, res.stderr).toBe(0);
+      const obj = JSON.parse(res.stdout);
+      expect(obj.name).toBe('github.com');
+      expect(obj.revealed).toBe(false);
+      expect(Array.isArray(obj.keys)).toBe(true);
+      const k = obj.keys.find((e: { key: string }) => e.key === 'API_TOKEN');
+      expect(k).toBeTruthy();
+      expect(k.value).toBeNull();
+      expect(res.stdout).not.toContain('sk-live-xyz');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(!keychainHelperAvailable)('view --json --reveal fails fast in a non-TTY without --plaintext (same gate as the human view)', ({ skip }) => {
+    if (!keychainHelperAvailable) {
+      skip();
+      return;
+    }
+    const home = seed();
+    try {
+      const res = runSecrets(home, ['view', 'github.com', '--json', '--reveal']);
+      expect(res.status).toBe(1);
+      expect(res.stderr).toMatch(/--reveal in a non-TTY requires --plaintext/);
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }

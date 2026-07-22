@@ -863,6 +863,7 @@ Sources: a command's stdout (`--watch` / `--poll`), an HTTP endpoint (`--poll-ht
 # Publish an HTML artifact to a public link on your own Cloudflare R2 (~$0).
 agents share setup                                  # once: provision bucket + Worker on your CF
 agents share plan.html --slug fleet --expire 30d    # → https://<base>/fleet
+agents share plan.html --json                       # URL object for plan-render hooks
 agents share status                                 # show the endpoint
 ```
 
@@ -878,6 +879,8 @@ this is effectively free.
 **Fleet mode:** provision one endpoint, then every fleet / cloud / ephemeral agent
 publishes through it with a shared write token — `agents share join <baseUrl>` uses an
 existing endpoint with no provisioning. `--expire 30d|12h|<date>` auto-expires a link.
+`--json` emits `{ url, coverUrl, expiresAt }` so plan-render automation can publish the
+rendered HTML and post the returned link without scraping terminal text.
 See [docs/share.md](apps/cli/docs/share.md).
 
 ---
