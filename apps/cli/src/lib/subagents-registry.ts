@@ -78,6 +78,8 @@ export interface SubagentTarget {
   names(dir: string): string[];
   /** On-disk paths subagent `name` occupies (for removal / soft-delete). */
   occupied(dir: string, name: string): OccupiedEntry[];
+  /** Cross-item files this target owns outside any one subagent's occupied paths. */
+  finalizeOccupied?(dir: string): OccupiedEntry[];
   /** Rich metadata for `name`; `null` skips it from the listing. */
   read(dir: string, name: string): SubagentMeta | null;
   /** Optional post-sync pass over the just-synced subagents (Kimi's parent index). */
@@ -286,6 +288,9 @@ const kimiTarget: SubagentTarget = {
       { path: safeJoin(dir, `${name}.yaml`), kind: 'file' },
       { path: safeJoin(dir, `${name}.system.md`), kind: 'file' },
     ];
+  },
+  finalizeOccupied(dir) {
+    return [{ path: safeJoin(dir, KIMI_SUBAGENTS_PARENT_FILE), kind: 'file' }];
   },
   read(dir, name) {
     const yamlPath = path.join(dir, `${name}.yaml`);

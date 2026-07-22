@@ -48,7 +48,7 @@ export function syncProjectResourcesToAgent(
 
   syncProjectCommands(agent, version, projectAgentsDir, agentRoot, result, next);
   syncProjectSkills(agent, version, projectAgentsDir, agentRoot, result, next);
-  syncProjectSubagents(agent, version, projectAgentsDir, projectRoot, agentRoot, result, next);
+  syncProjectSubagents(agent, version, projectAgentsDir, projectRoot, agentRoot, manifest, result, next);
   syncProjectWorkflows(agent, version, projectAgentsDir, projectRoot, agentRoot, result, next);
 
   if (next.size > 0 || manifest) {
@@ -241,6 +241,7 @@ function syncProjectSubagents(
   projectAgentsDir: string,
   projectRoot: string,
   agentRoot: string,
+  manifest: ProjectManagedManifest | null,
   result: ProjectResourceSyncResult,
   manifestPaths: Set<string>,
 ): void {
@@ -249,6 +250,8 @@ function syncProjectSubagents(
   if (!target) return;
   const all = readProjectSubagents(projectAgentsDir);
   const dir = target.dir(projectRoot);
+  const targetDirRel = path.relative(agentRoot, dir);
+  const hadManagedTarget = manifest?.paths.some((rel) => rel === targetDirRel || rel.startsWith(targetDirRel + path.sep)) ?? false;
 
   for (const sub of all.values()) {
     const occupied = target.occupied(dir, sub.name);
@@ -270,7 +273,12 @@ function syncProjectSubagents(
     .map((name) => name.slice('subagents/'.length))
     .filter((name) => all.has(name))
     .map((name) => all.get(name)!);
-  if (target.finalize && syncedNames.length > 0) target.finalize(dir, syncedNames);
+  if (target.finalize && (syncedNames.length > 0 || hadManagedTarget)) {
+    target.finalize(dir, syncedNames);
+    for (const entry of target.finalizeOccupied?.(dir) ?? []) {
+      manifestPaths.add(path.relative(agentRoot, entry.path));
+    }
+  }
 }
 
 function workflowManagedRelPaths(agent: AgentId, projectRoot: string, name: string): string[] {
