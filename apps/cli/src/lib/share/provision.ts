@@ -125,14 +125,19 @@ export async function configureBucketLifecycle(
   apiToken: string,
   accountId: string,
   bucketName: string,
+  opts: ProvisionOptions = {},
 ): Promise<void> {
-  const lifecycle = await cf<{ rules?: R2LifecycleRule[] }>(
+  const request = opts.request ?? defaultCloudflareRequester;
+  const lifecycle = await request<{ rules?: R2LifecycleRule[] }>({
     apiToken,
-    'GET',
-    `/accounts/${accountId}/r2/buckets/${bucketName}/lifecycle`,
-  );
-  await cf(apiToken, 'PUT', `/accounts/${accountId}/r2/buckets/${bucketName}/lifecycle`, {
-    rules: mergeShareLifecycleRule(lifecycle.rules ?? []),
+    method: 'GET',
+    pathname: `/accounts/${accountId}/r2/buckets/${bucketName}/lifecycle`,
+  });
+  await request({
+    apiToken,
+    method: 'PUT',
+    pathname: `/accounts/${accountId}/r2/buckets/${bucketName}/lifecycle`,
+    body: { rules: mergeShareLifecycleRule(lifecycle.rules ?? []) },
   });
 }
 

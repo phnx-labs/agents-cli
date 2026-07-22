@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   addCustomDomain,
+  configureBucketLifecycle,
   createBucket,
   deployWorker,
   enableWorkersDev,
@@ -124,6 +125,37 @@ describe('share Cloudflare provisioning request shape', () => {
 
     await expect(findZoneId('cf-token', 'share.agents-cli.sh', { request })).resolves.toBe('zone_1');
     expect(paths).toEqual(['/zones?name=share.agents-cli.sh', '/zones?name=agents-cli.sh']);
+  });
+
+  it('reads then writes the bucket lifecycle, merging the managed rule into existing rules', async () => {
+    const seen: CloudflareRequest[] = [];
+    const unrelated = {
+      id: 'keep-logs',
+      enabled: true,
+      conditions: { prefix: 'logs/' },
+      deleteObjectsTransition: { condition: { type: 'Age' as const, maxAge: 30 * 86400 } },
+    };
+    const request: CloudflareRequester = async (req) => {
+      seen.push(req);
+      if (req.method === 'GET') return { rules: [unrelated] };
+      return {};
+    };
+
+    await configureBucketLifecycle('cf-token', 'acct_1', 'agents-share', { request });
+
+    expect(seen).toEqual([
+      {
+        apiToken: 'cf-token',
+        method: 'GET',
+        pathname: '/accounts/acct_1/r2/buckets/agents-share/lifecycle',
+      },
+      {
+        apiToken: 'cf-token',
+        method: 'PUT',
+        pathname: '/accounts/acct_1/r2/buckets/agents-share/lifecycle',
+        body: { rules: [unrelated, buildShareLifecycleRule()] },
+      },
+    ]);
   });
 
   it('maps a custom domain through Workers Custom Domains', async () => {
