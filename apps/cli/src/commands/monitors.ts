@@ -36,7 +36,7 @@ import {
   type MonitorWebhookSource,
 } from '../lib/monitors/config.js';
 import { evaluateMonitorOnce } from '../lib/monitors/engine.js';
-import { listFires, readState } from '../lib/monitors/state.js';
+import { listFires, readState, type MonitorState, type FireRecord } from '../lib/monitors/state.js';
 import { listRuns, getLatestRun, getRunDir } from '../lib/routines.js';
 import { getMonitorsDir } from '../lib/state.js';
 import { IS_WINDOWS } from '../lib/platform/index.js';
@@ -245,6 +245,19 @@ async function pickMonitor(message: string, alternatives: string[] = []): Promis
   }
 }
 
+/**
+ * Shape the `monitors view --json` payload. Pure — takes the already-read config,
+ * watched-state, and fire history so it is unit-testable without touching disk.
+ */
+export function buildMonitorViewJson(
+  name: string,
+  config: MonitorConfig,
+  state: MonitorState | null,
+  fires: FireRecord[],
+): { name: string; config: MonitorConfig; state: MonitorState | null; recentFires: FireRecord[] } {
+  return { name, config, state: state ?? null, recentFires: fires.slice(-5) };
+}
+
 /** Register the `agents monitors` command tree. */
 export function registerMonitorsCommands(program: Command): void {
   const monitorsCmd = program
@@ -414,8 +427,8 @@ export function registerMonitorsCommands(program: Command): void {
 
       const errors = validateMonitor(config);
       if (errors.length > 0) {
-        console.log(chalk.red('Validation errors:'));
-        for (const err of errors) console.log(chalk.red(`  - ${err}`));
+        console.error(chalk.red('Validation errors:'));
+        for (const err of errors) console.error(chalk.red(`  - ${err}`));
         process.exit(1);
       }
 
@@ -478,15 +491,25 @@ export function registerMonitorsCommands(program: Command): void {
   monitorsCmd
     .command('view [name]')
     .description('Show a monitor’s full YAML config plus its current watched-state and recent fires.')
-    .action(async (name: string | undefined) => {
+    .option('--json', 'Emit machine-readable JSON')
+    .action(async (name: string | undefined, options: { json?: boolean }) => {
       if (!name) {
         name = (await pickMonitor('Select monitor to view', ['agents monitors view <name>'])) ?? undefined;
         if (!name) return;
       }
       const monitor = readMonitor(name);
       if (!monitor) {
-        console.log(chalk.red(`Monitor '${name}' not found`));
+        if (options.json) {
+          process.stdout.write(JSON.stringify({ error: `Monitor '${name}' not found` }) + '\n');
+          process.exit(1);
+        }
+        console.error(chalk.red(`Monitor '${name}' not found`));
         process.exit(1);
+      }
+      if (options.json) {
+        const payload = buildMonitorViewJson(name, monitor, readState(name), listFires(name));
+        process.stdout.write(JSON.stringify(payload) + '\n');
+        return;
       }
       console.log(chalk.bold(`Monitor: ${name}\n`));
       console.log(yaml.stringify(monitor));
@@ -510,20 +533,42 @@ export function registerMonitorsCommands(program: Command): void {
   monitorsCmd
     .command('test [name]')
     .description('DRY-RUN: evaluate the source once and print the emitted event + whether it would fire. No action is taken.')
-    .action(async (name: string | undefined) => {
+    .option('--json', 'Emit machine-readable JSON')
+    .action(async (name: string | undefined, options: { json?: boolean }) => {
       if (!name) {
         name = (await pickMonitor('Select monitor to test', ['agents monitors test <name>'])) ?? undefined;
         if (!name) return;
       }
       const monitor = readMonitor(name);
       if (!monitor) {
-        console.log(chalk.red(`Monitor '${name}' not found`));
+        if (options.json) {
+          process.stdout.write(JSON.stringify({ error: `Monitor '${name}' not found` }) + '\n');
+          process.exit(1);
+        }
+        console.error(chalk.red(`Monitor '${name}' not found`));
         process.exit(1);
       }
+
+      const { observation, decision } = await evaluateMonitorOnce(monitor);
+      const wouldFire = Boolean(decision?.fire);
+
+      if (options.json) {
+        const payload = {
+          name,
+          source: monitor.source,
+          condition: monitor.condition,
+          action: monitor.action,
+          observation: observation ? { raw: observation.raw, meta: observation.meta ?? null } : null,
+          wouldFire,
+          event: decision?.event ?? null,
+        };
+        process.stdout.write(JSON.stringify(payload) + '\n');
+        return;
+      }
+
       console.log(chalk.bold(`Dry-run: ${name}\n`));
       console.log(chalk.gray(`  ${sourceLabel(monitor.source)}  ·  [${monitor.condition.mode}]  ·  ${actionLabel(monitor.action)}\n`));
 
-      const { observation, decision } = await evaluateMonitorOnce(monitor);
       if (!observation) {
         console.log(chalk.yellow('No observation — this source is push-only (ws/webhook) or produced nothing this tick.'));
         return;
@@ -532,7 +577,6 @@ export function registerMonitorsCommands(program: Command): void {
       console.log(observation.raw.split('\n').slice(0, 20).map((l) => `  ${l}`).join('\n'));
       if (observation.meta) console.log(chalk.gray(`  meta: ${JSON.stringify(observation.meta)}`));
 
-      const wouldFire = Boolean(decision?.fire);
       console.log('');
       console.log(`Would fire: ${wouldFire ? chalk.green('yes') : chalk.gray('no')}`);
       if (decision?.event) {
