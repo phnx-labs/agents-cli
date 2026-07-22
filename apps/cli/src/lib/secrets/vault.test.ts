@@ -7,6 +7,7 @@ import {
   readAndResolveBundleEnv,
   readBundle,
   writeBundle,
+  writeBundleWithItems,
   type SecretsBundle,
 } from './bundles.js';
 import {
@@ -14,6 +15,9 @@ import {
   type KeychainBackend,
 } from './index.js';
 import {
+  _clearVaultDataCacheForTest,
+  _getVaultAgeOperationCountForTest,
+  _resetVaultAgeOperationCountForTest,
   _setVaultPathForTest,
   cacheVaultKey,
   clearVaultKey,
@@ -21,10 +25,13 @@ import {
   decrypt,
   encrypt,
   getVaultSession,
+  joinVault,
   vaultGetItem,
   vaultPath,
+  vaultSetItem,
   type VaultKey,
 } from './vault.js';
+import { secretsKeychainItem } from './index.js';
 import { _resetFileStoreForTest } from './filestore.js';
 
 interface StoredItem { value: string }
@@ -116,6 +123,33 @@ describe('vault login cache', () => {
   });
 });
 
+describe('vault create and join safety', () => {
+  it('refuses to replace an existing vault on create without overwrite', () => {
+    createVault('first-pw');
+    vaultSetItem('agents-cli.secrets.prod.API_KEY', 'super-secret-prod-value');
+
+    expect(() => createVault('second-pw')).toThrow(/Vault file already exists/);
+    expect(vaultGetItem('agents-cli.secrets.prod.API_KEY')).toBe('super-secret-prod-value');
+  });
+
+  it('refuses to replace an existing vault on join without overwrite', () => {
+    const dest = vaultPath();
+    const source = path.join(tmpDir, 'source-vault.age');
+
+    createVault('dest-pw');
+    vaultSetItem('agents-cli.secrets.prod.API_KEY', 'super-secret-prod-value');
+
+    _setVaultPathForTest(source);
+    createVault('source-pw');
+
+    _setVaultPathForTest(dest);
+    cacheVaultKey({ passphrase: 'dest-pw' });
+
+    expect(() => joinVault('source-pw', source)).toThrow(/Vault file already exists/);
+    expect(vaultGetItem('agents-cli.secrets.prod.API_KEY')).toBe('super-secret-prod-value');
+  });
+});
+
 describe('vault bundle storage', () => {
   it('isolates synced and keychain bundles with the same key name', () => {
     createVault('pw');
@@ -132,13 +166,34 @@ describe('vault bundle storage', () => {
       backend: 'vault',
       vars: { API_KEY: 'keychain:API_KEY' },
     };
-    bundleItemStore('vault').set('agents-cli.secrets.synced.API_KEY', 'from-vault');
-    writeBundle(syncedBundle);
+    writeBundleWithItems(
+      syncedBundle,
+      new Map([[secretsKeychainItem('synced', 'API_KEY'), 'from-vault']]),
+    );
 
     expect(readBundle('local').backend).toBeUndefined();
     expect(readBundle('synced').backend).toBe('vault');
     expect(readAndResolveBundleEnv('local', { keyMode: 'storage' }).env).toEqual({ API_KEY: 'from-keychain' });
     expect(readAndResolveBundleEnv('synced', { keyMode: 'storage' }).env).toEqual({ API_KEY: 'from-vault' });
     expect(fs.existsSync(vaultPath())).toBe(true);
+  });
+
+  it('writes synced bundle metadata and stored keys with one vault read-modify-write', () => {
+    createVault('pw');
+    _clearVaultDataCacheForTest();
+    _resetVaultAgeOperationCountForTest();
+
+    writeBundleWithItems(
+      {
+        name: 'synced',
+        backend: 'vault',
+        vars: { API_KEY: 'keychain:API_KEY' },
+      },
+      new Map([[secretsKeychainItem('synced', 'API_KEY'), 'from-vault']]),
+    );
+
+    expect(_getVaultAgeOperationCountForTest()).toBe(2);
+    expect(readBundle('synced').backend).toBe('vault');
+    expect(readAndResolveBundleEnv('synced', { keyMode: 'storage' }).env).toEqual({ API_KEY: 'from-vault' });
   });
 });

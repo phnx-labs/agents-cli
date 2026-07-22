@@ -64,9 +64,13 @@ export function registerLoginCommands(program: Command): void {
     .description('Unlock synced secrets for this shell session')
     .option('--create', 'Create a new encrypted synced-secrets file at ~/.agents/vault.age')
     .option('--join <path>', 'Copy and unlock an existing vault.age file')
+    .option('--force', 'Replace an existing synced-secrets file when used with --create or --join')
     .option('--password-stdin', 'Read the master password from stdin')
-    .action(async (opts: { create?: boolean; join?: string; passwordStdin?: boolean }) => {
+    .action(async (opts: { create?: boolean; join?: string; force?: boolean; passwordStdin?: boolean }) => {
       try {
+        if (opts.force && !opts.create && !opts.join) {
+          throw new Error('--force can only be used with --create or --join.');
+        }
         if (vaultExists() && !opts.create && !opts.join) {
           const password = await readPassword(opts, 'Master password');
           unlock(password);
@@ -88,13 +92,13 @@ export function registerLoginCommands(program: Command): void {
             });
           }
           const password = await readPassword(opts, 'Master password');
-          joinVault(password, source);
+          joinVault(password, source, { overwrite: opts.force });
           console.log(chalk.green(`Logged in. Copied synced secrets file to ${vaultPath()}.`));
           return;
         }
 
         const password = await readPassword(opts, 'Choose a master password');
-        createVault(password);
+        createVault(password, { overwrite: opts.force });
         console.log(chalk.green(`Logged in. Created synced secrets file at ${vaultPath()}.`));
       } catch (err) {
         if (isPromptCancelled(err)) return;

@@ -30,11 +30,26 @@ interface VaultSession {
   expiresAt: number;
 }
 
+interface VaultFileStat {
+  mtimeMs: number;
+  size: number;
+}
+
+interface VaultDataCache {
+  file: string;
+  passphrase: string;
+  stat: VaultFileStat;
+  data: VaultData;
+}
+
 const VAULT_FILE_NAME = 'vault.age';
 const VAULT_SESSION_ITEM = 'agents-cli.vault.session';
 export const VAULT_SESSION_TTL_MS = 8 * 60 * 60 * 1000;
+export const VAULT_SCRYPT_WORK_FACTOR = 16;
 
 let overrideVaultPath: string | null = null;
+let vaultDataCache: VaultDataCache | null = null;
+let ageOperationCountForTest = 0;
 
 export function vaultPath(): string {
   return overrideVaultPath ?? process.env.AGENTS_VAULT_PATH ?? path.join(getUserAgentsDir(), VAULT_FILE_NAME);
@@ -46,6 +61,19 @@ export function vaultExists(): boolean {
 
 export function _setVaultPathForTest(filePath: string | null): void {
   overrideVaultPath = filePath;
+  clearVaultDataCache();
+}
+
+export function _clearVaultDataCacheForTest(): void {
+  clearVaultDataCache();
+}
+
+export function _resetVaultAgeOperationCountForTest(): void {
+  ageOperationCountForTest = 0;
+}
+
+export function _getVaultAgeOperationCountForTest(): number {
+  return ageOperationCountForTest;
 }
 
 function emptyVault(): VaultData {
@@ -96,6 +124,9 @@ const input = JSON.parse(Buffer.concat(chunks).toString('utf8'));
 try {
   if (input.action === 'encrypt') {
     const encrypter = new Encrypter();
+    if (input.scryptWorkFactor !== undefined) {
+      encrypter.setScryptWorkFactor(input.scryptWorkFactor);
+    }
     encrypter.setPassphrase(input.passphrase);
     const ciphertext = await encrypter.encrypt(input.plaintext);
     process.stdout.write(armor.encode(ciphertext));
@@ -113,7 +144,16 @@ try {
 }
 `;
 
-function runAgeSync(input: Record<string, string>): string {
+interface AgeInput {
+  action: 'encrypt' | 'decrypt';
+  passphrase: string;
+  plaintext?: string;
+  blob?: string;
+  scryptWorkFactor?: number;
+}
+
+function runAgeSync(input: AgeInput): string {
+  ageOperationCountForTest++;
   const child = spawnSync(process.execPath, ['-e', AGE_HELPER], {
     cwd: path.dirname(fileURLToPath(import.meta.url)),
     input: JSON.stringify(input),
@@ -132,6 +172,7 @@ export function encrypt(key: VaultKey, json: VaultData): string {
     action: 'encrypt',
     passphrase: key.passphrase,
     plaintext: JSON.stringify(json),
+    scryptWorkFactor: VAULT_SCRYPT_WORK_FACTOR,
   });
 }
 
@@ -150,27 +191,68 @@ export function decrypt(key: VaultKey, blob: string): VaultData {
   }
 }
 
-export function createVault(password: string): VaultKey {
+function vaultFileStat(file: string): VaultFileStat {
+  const stat = fs.statSync(file);
+  return { mtimeMs: stat.mtimeMs, size: stat.size };
+}
+
+function sameVaultFileStat(a: VaultFileStat, b: VaultFileStat): boolean {
+  return a.mtimeMs === b.mtimeMs && a.size === b.size;
+}
+
+function clearVaultDataCache(): void {
+  vaultDataCache = null;
+}
+
+function cacheVaultData(file: string, key: VaultKey, data: VaultData): void {
+  vaultDataCache = {
+    file,
+    passphrase: key.passphrase,
+    stat: vaultFileStat(file),
+    data,
+  };
+}
+
+function vaultAlreadyExistsError(file: string): Error {
+  return new Error(`Vault file already exists: ${file}. Use --force to replace it.`);
+}
+
+export function createVault(password: string, opts: { overwrite?: boolean } = {}): VaultKey {
   if (!password) throw new Error('Password is required.');
   const file = vaultPath();
+  if (!opts.overwrite && fs.existsSync(file)) throw vaultAlreadyExistsError(file);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const key: VaultKey = { passphrase: password };
-  const blob = encrypt(key, emptyVault());
-  fs.writeFileSync(file, blob, { mode: 0o600 });
+  const data = emptyVault();
+  const blob = encrypt(key, data);
+  try {
+    fs.writeFileSync(file, blob, { mode: 0o600, flag: opts.overwrite ? 'w' : 'wx' });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') throw vaultAlreadyExistsError(file);
+    throw err;
+  }
+  cacheVaultData(file, key, data);
   cacheVaultKey(key);
   return key;
 }
 
-export function joinVault(password: string, sourcePath: string): VaultKey {
+export function joinVault(password: string, sourcePath: string, opts: { overwrite?: boolean } = {}): VaultKey {
   if (!password) throw new Error('Password is required.');
   const source = path.resolve(sourcePath);
+  const dest = vaultPath();
+  if (!opts.overwrite && fs.existsSync(dest)) throw vaultAlreadyExistsError(dest);
   const blob = fs.readFileSync(source, 'utf-8');
   const key: VaultKey = { passphrase: password };
-  decrypt(key, blob);
-  const dest = vaultPath();
+  const data = decrypt(key, blob);
   fs.mkdirSync(path.dirname(dest), { recursive: true });
-  fs.copyFileSync(source, dest);
+  try {
+    fs.copyFileSync(source, dest, opts.overwrite ? 0 : fs.constants.COPYFILE_EXCL);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') throw vaultAlreadyExistsError(dest);
+    throw err;
+  }
   fs.chmodSync(dest, 0o600);
+  cacheVaultData(dest, key, data);
   cacheVaultKey(key);
   return key;
 }
@@ -180,7 +262,8 @@ export function unlock(password: string): VaultKey {
   const file = vaultPath();
   if (!fs.existsSync(file)) throw new Error(`Vault file not found: ${file}`);
   const key: VaultKey = { passphrase: password };
-  decrypt(key, fs.readFileSync(file, 'utf-8'));
+  const data = decrypt(key, fs.readFileSync(file, 'utf-8'));
+  cacheVaultData(file, key, data);
   cacheVaultKey(key);
   return key;
 }
@@ -195,6 +278,7 @@ export function cacheVaultKey(key: VaultKey, ttlMs: number = VAULT_SESSION_TTL_M
 }
 
 export function clearVaultKey(): void {
+  clearVaultDataCache();
   deleteKeychainToken(VAULT_SESSION_ITEM);
 }
 
@@ -249,13 +333,27 @@ function parseVaultItem(item: string): { kind: 'meta'; bundle: string } | { kind
 function readVaultData(): VaultData {
   const file = vaultPath();
   if (!fs.existsSync(file)) return emptyVault();
-  return decrypt(requireVaultKey(), fs.readFileSync(file, 'utf-8'));
+  const key = requireVaultKey();
+  const stat = vaultFileStat(file);
+  if (
+    vaultDataCache &&
+    vaultDataCache.file === file &&
+    vaultDataCache.passphrase === key.passphrase &&
+    sameVaultFileStat(vaultDataCache.stat, stat)
+  ) {
+    return vaultDataCache.data;
+  }
+  const data = decrypt(key, fs.readFileSync(file, 'utf-8'));
+  vaultDataCache = { file, passphrase: key.passphrase, stat, data };
+  return data;
 }
 
 function writeVaultData(data: VaultData): void {
   const file = vaultPath();
+  const key = requireVaultKey();
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, encrypt(requireVaultKey(), data), { mode: 0o600 });
+  fs.writeFileSync(file, encrypt(key, data), { mode: 0o600 });
+  cacheVaultData(file, key, data);
 }
 
 export function vaultHasItem(item: string): boolean {
@@ -277,14 +375,34 @@ export function vaultGetItem(item: string): string {
   return value;
 }
 
-export function vaultSetItem(item: string, value: string): void {
-  const parsed = parseVaultItem(item);
-  if (!parsed) throw new Error(`Vault item '${item}' is invalid.`);
+export function vaultGetItems(items: string[]): Map<string, string> {
   const data = readVaultData();
-  const bundle = data.bundles[parsed.bundle] ?? { keys: {} };
-  if (parsed.kind === 'meta') bundle.metadata = value;
-  else bundle.keys[parsed.key] = value;
-  data.bundles[parsed.bundle] = bundle;
+  const out = new Map<string, string>();
+  for (const item of items) {
+    const parsed = parseVaultItem(item);
+    if (!parsed) continue;
+    const bundle = data.bundles[parsed.bundle];
+    const value = parsed.kind === 'meta' ? bundle?.metadata : bundle?.keys[parsed.key];
+    if (value !== undefined) out.set(item, value);
+  }
+  return out;
+}
+
+export function vaultSetItem(item: string, value: string): void {
+  vaultSetItems(new Map([[item, value]]));
+}
+
+export function vaultSetItems(items: Map<string, string>): void {
+  if (items.size === 0) return;
+  const data = readVaultData();
+  for (const [item, value] of items) {
+    const parsed = parseVaultItem(item);
+    if (!parsed) throw new Error(`Vault item '${item}' is invalid.`);
+    const bundle = data.bundles[parsed.bundle] ?? { keys: {} };
+    if (parsed.kind === 'meta') bundle.metadata = value;
+    else bundle.keys[parsed.key] = value;
+    data.bundles[parsed.bundle] = bundle;
+  }
   writeVaultData(data);
 }
 

@@ -31,7 +31,9 @@ agents logout
 `--synced` is opt-in per bundle. Bundles created without it keep using the
 platform keychain/keyring. There is no built-in transport: copy
 `~/.agents/vault.age` yourself, then run `agents login --join <path>` on another
-machine and enter the same password.
+machine and enter the same password. `agents login --create` and
+`agents login --join <path>` refuse to replace an existing local vault unless
+you pass `--force`.
 
 The synced secrets file is one age-encrypted blob containing bundle metadata and stored
 key values. The bundle metadata still uses the same `keychain:<key>` references

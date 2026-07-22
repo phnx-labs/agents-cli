@@ -48,6 +48,7 @@ import {
   validateExpiresFutureDated,
   validateSecretType,
   writeBundle,
+  writeBundleWithItems,
   type SecretsBackend,
   type SecretsBundle,
   type SecretsPolicy,
@@ -764,7 +765,7 @@ function applyEnvToBundle(
   env: Record<string, string>,
   opts: { force?: boolean; allPlaintext?: boolean }
 ): { added: number; skipped: number } {
-  const store = bundleItemStore(bundle.backend, { noAcl: bundlePolicy(bundle) === 'never' });
+  const storedItems = new Map<string, string>();
   let added = 0;
   let skipped = 0;
   for (const [key, value] of Object.entries(env)) {
@@ -773,12 +774,16 @@ function applyEnvToBundle(
       bundle.vars[key] = { value };
     } else {
       const item = secretsKeychainItem(bundle.name, key);
-      store.set(item, value);
+      storedItems.set(item, value);
       bundle.vars[key] = keychainRef(key);
     }
     added++;
   }
-  writeBundle(bundle);
+  if (storedItems.size > 0) {
+    writeBundleWithItems(bundle, storedItems);
+  } else {
+    writeBundle(bundle);
+  }
   return { added, skipped };
 }
 
@@ -1302,10 +1307,9 @@ export function registerSecretsCommands(program: Command): void {
           secretValue = await promptForSecret(`Enter value for ${resolvedBundleName}.${resolvedKey}`);
         }
         const item = secretsKeychainItem(resolvedBundleName, resolvedKey);
-        bundleItemStore(bundle.backend, { noAcl: bundlePolicy(bundle) === 'never' }).set(item, secretValue);
         bundle.vars[resolvedKey] = keychainRef(resolvedKey);
         applyMeta();
-        writeBundle(bundle);
+        writeBundleWithItems(bundle, new Map([[item, secretValue]]));
         const where = bundle.backend === 'file'
           ? 'encrypted file store'
           : bundle.backend === 'vault'

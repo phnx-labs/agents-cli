@@ -46,9 +46,11 @@ import {
   getVaultSession,
   vaultDeleteItem,
   vaultExists,
+  vaultGetItems,
   vaultGetItem,
   vaultHasItem,
   vaultListItems,
+  vaultSetItems,
   vaultSetItem,
 } from './vault.js';
 import { emit } from '../events.js';
@@ -72,6 +74,7 @@ interface ItemStore {
    * `never` prompt-policy). Backends with no ACL concept (file store, test
    * backend) ignore it. */
   set(item: string, value: string, opts?: { noAcl?: boolean }): void;
+  setBatch(items: Map<string, string>, opts?: { noAcl?: boolean }): void;
   delete(item: string): boolean;
   list(prefix: string): string[];
 }
@@ -81,6 +84,9 @@ const keychainStore: ItemStore = {
   get: getKeychainToken,
   getBatch: getKeychainTokens,
   set: setKeychainToken,
+  setBatch: (items, opts) => {
+    for (const [item, value] of items) setKeychainToken(item, value, opts);
+  },
   delete: deleteKeychainToken,
   list: listKeychainItems,
 };
@@ -108,6 +114,11 @@ const fileItemStore: ItemStore = {
     return out;
   },
   set: (item, value) => fileStore.set(item, value, { allowAutoProvision: FILE_ALLOW_AUTO_PROVISION }),
+  setBatch: (items) => {
+    for (const [item, value] of items) {
+      fileStore.set(item, value, { allowAutoProvision: FILE_ALLOW_AUTO_PROVISION });
+    }
+  },
   delete: (item) => fileStore.delete(item),
   list: (prefix) => fileStore.list(prefix),
 };
@@ -115,19 +126,9 @@ const fileItemStore: ItemStore = {
 const vaultStore: ItemStore = {
   has: vaultHasItem,
   get: vaultGetItem,
-  getBatch: (items) => {
-    const out = new Map<string, string>();
-    for (const item of items) {
-      try {
-        out.set(item, vaultGetItem(item));
-      } catch {
-        // Missing/undecryptable item — absent from the map, mirroring
-        // getKeychainTokens (caller decides whether that's an error).
-      }
-    }
-    return out;
-  },
+  getBatch: vaultGetItems,
   set: (item, value) => vaultSetItem(item, value),
+  setBatch: (items) => vaultSetItems(items),
   delete: vaultDeleteItem,
   list: vaultListItems,
 };
@@ -482,7 +483,13 @@ export function shouldEvictAfterBundleWrite(
   return true;
 }
 
-export function writeBundle(bundle: SecretsBundle, opts: WriteBundleOptions = {}): void {
+interface PreparedBundleWrite {
+  backend: SecretsBackend;
+  metadataItem: string;
+  metadataJson: string;
+}
+
+function prepareBundleWrite(bundle: SecretsBundle): PreparedBundleWrite {
   validateBundleName(bundle.name);
   const backend: SecretsBackend = bundle.backend ?? 'keychain';
   if (backend === 'file') assertFileBackendUsable(bundle.name);
@@ -534,12 +541,14 @@ export function writeBundle(bundle: SecretsBundle, opts: WriteBundleOptions = {}
     vars: bundle.vars,
     meta,
   };
-  const json = JSON.stringify(payload);
-  // A `never` bundle's metadata is stored without the biometry ACL too, so
-  // `view` and the metadata half of a read resolve silently — the whole point
-  // of the tier. On an un-updated pinned helper this write fails loudly (the
-  // no-ACL command is missing) rather than silently landing an ACL'd item.
-  itemStore(backend).set(bundleMetaItem(bundle.name), json, { noAcl: bundle.policy === 'never' });
+  return {
+    backend,
+    metadataItem: bundleMetaItem(bundle.name),
+    metadataJson: JSON.stringify(payload),
+  };
+}
+
+function finishBundleWrite(bundle: SecretsBundle, opts: WriteBundleOptions): void {
   emit('secrets.set', { module: 'secrets', bundle: bundle.name });
   // A broker-held snapshot predates this write; evict it so the next read
   // re-resolves from the keychain instead of serving stale values.
@@ -549,6 +558,28 @@ export function writeBundle(bundle: SecretsBundle, opts: WriteBundleOptions = {}
     // the stale env after a rotate/rename (session-store.ts).
     deleteSession(bundle.name);
   }
+}
+
+export function writeBundle(bundle: SecretsBundle, opts: WriteBundleOptions = {}): void {
+  const prepared = prepareBundleWrite(bundle);
+  // A `never` bundle's metadata is stored without the biometry ACL too, so
+  // `view` and the metadata half of a read resolve silently — the whole point
+  // of the tier. On an un-updated pinned helper this write fails loudly (the
+  // no-ACL command is missing) rather than silently landing an ACL'd item.
+  itemStore(prepared.backend).set(prepared.metadataItem, prepared.metadataJson, { noAcl: bundle.policy === 'never' });
+  finishBundleWrite(bundle, opts);
+}
+
+export function writeBundleWithItems(
+  bundle: SecretsBundle,
+  items: Map<string, string>,
+  opts: WriteBundleOptions = {},
+): void {
+  const prepared = prepareBundleWrite(bundle);
+  const batch = new Map(items);
+  batch.set(prepared.metadataItem, prepared.metadataJson);
+  itemStore(prepared.backend).setBatch(batch, { noAcl: bundle.policy === 'never' });
+  finishBundleWrite(bundle, opts);
 }
 
 export function deleteBundle(name: string): boolean {
