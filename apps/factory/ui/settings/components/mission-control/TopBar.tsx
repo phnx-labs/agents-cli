@@ -2,7 +2,7 @@ import React from 'react'
 import { Icon } from './icons'
 import { ThroughputCounter } from './UnifiedAgentsPane'
 
-export type TabKey = 'floor' | 'bench' | 'resources' | 'logs' | 'panel'
+export type TabKey = 'floor' | 'bench' | 'panel'
 
 interface TopBarProps {
   version?: string
@@ -69,20 +69,6 @@ export function TopBar({
           onClick={() => onTabChange('bench')}
         >
           Bench
-        </button>
-        <button
-          data-foreman-id="tab-resources"
-          className={`sw-tab ${activeTab === 'resources' ? 'active' : ''}`}
-          onClick={() => onTabChange('resources')}
-        >
-          Resources
-        </button>
-        <button
-          data-foreman-id="tab-logs"
-          className={`sw-tab ${activeTab === 'logs' ? 'active' : ''}`}
-          onClick={() => onTabChange('logs')}
-        >
-          Logs
         </button>
         <button
           data-foreman-id="tab-panel"
