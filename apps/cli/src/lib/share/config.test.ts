@@ -24,10 +24,17 @@ const prevHome = process.env.HOME;
 const prevEnvToken = process.env.SHARE_WRITE_TOKEN;
 const prevNoAgent = process.env.AGENTS_SECRETS_NO_AGENT;
 const prevNoUsage = process.env.AGENTS_NO_USAGE_TRACK;
+const prevNoPrompt = process.env.AGENTS_SECRETS_NO_PROMPT;
 
 process.env.HOME = HOME;
 process.env.AGENTS_SECRETS_NO_AGENT = '1';
 process.env.AGENTS_NO_USAGE_TRACK = '1';
+// These tests install an in-memory keychain backend (no real Touch ID) and read
+// it directly. On darwin-headless (the release-gated macOS CI matrix)
+// isHeadlessSecretsContext() would otherwise be true, forcing the agentOnly
+// no-prompt path to throw before the in-memory read. Pin NO_PROMPT=0 so reads go
+// straight to the seeded backend, matching the direct-read intent on every OS.
+process.env.AGENTS_SECRETS_NO_PROMPT = '0';
 
 const {
   secretsKeychainItem,
@@ -181,4 +188,6 @@ afterAll(() => {
   else process.env.AGENTS_SECRETS_NO_AGENT = prevNoAgent;
   if (prevNoUsage === undefined) delete process.env.AGENTS_NO_USAGE_TRACK;
   else process.env.AGENTS_NO_USAGE_TRACK = prevNoUsage;
+  if (prevNoPrompt === undefined) delete process.env.AGENTS_SECRETS_NO_PROMPT;
+  else process.env.AGENTS_SECRETS_NO_PROMPT = prevNoPrompt;
 });

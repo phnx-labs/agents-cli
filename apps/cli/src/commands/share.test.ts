@@ -39,10 +39,17 @@ async function freshShareModules() {
   return { share, config, mem };
 }
 
+let previousNoPrompt: string | undefined;
+
 beforeEach(() => {
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-share-command-'));
   previousHome = process.env.HOME;
   process.env.HOME = tmpHome;
+  // Reads go to a temp HOME with no real keychain/agent; on darwin-headless (the
+  // release-gated macOS CI matrix) isHeadlessSecretsContext() would force the
+  // agentOnly no-prompt throw. Pin NO_PROMPT=0 so the direct read runs on every OS.
+  previousNoPrompt = process.env.AGENTS_SECRETS_NO_PROMPT;
+  process.env.AGENTS_SECRETS_NO_PROMPT = '0';
   vi.spyOn(console, 'log').mockImplementation(() => {});
 });
 
@@ -51,6 +58,8 @@ afterEach(() => {
   vi.resetModules();
   if (previousHome === undefined) delete process.env.HOME;
   else process.env.HOME = previousHome;
+  if (previousNoPrompt === undefined) delete process.env.AGENTS_SECRETS_NO_PROMPT;
+  else process.env.AGENTS_SECRETS_NO_PROMPT = previousNoPrompt;
   fs.rmSync(tmpHome, { recursive: true, force: true });
 });
 
