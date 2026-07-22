@@ -35,7 +35,9 @@ agent makes plan.html
   the agent, because the page is stored in R2, not streamed.
 - **Fleet / central mode.** Provision one endpoint (the owner); every fleet / cloud /
   ephemeral agent then publishes through it with a shared write token — no per-agent
-  Cloudflare. `agents share join <baseUrl>` uses an existing endpoint without provisioning.
+  Cloudflare. `agents share join` uses synced `share:` config plus an injected
+  `SHARE_WRITE_TOKEN`, and `agents share join <baseUrl>` still joins an explicit
+  endpoint without provisioning.
 - **Expiry.** `--expire 30d|12h|2026-08-01` writes `expires-at` into the object's metadata;
   the Worker `410`s and lazily deletes past that instant.
 - **Preview cards (OG images).** Publishing an HTML page screenshots its own hero at
@@ -56,8 +58,11 @@ agents.yaml            share:                         # baseUrl / accountId / wo
 secrets bundle `share` SHARE_WRITE_TOKEN              # the raw write token — keychain-backed, never in config
 ```
 
-Config is safe to sync (no secret); the write token lives only in the `share` bundle.
-Push it to a peer with `agents secrets export share --host <box>`.
+Config is safe to sync (no secret); the write token lives only in the `share` bundle
+or a runtime `SHARE_WRITE_TOKEN` env var injected into an ephemeral agent. Push the
+bundle to a peer with `agents secrets export share --host <box>`; local agent,
+teammate, and supported cloud launches inject the token automatically when the
+synced config exists and the token is already available.
 
 ## Command reference
 
@@ -65,7 +70,7 @@ Push it to a peer with `agents secrets export share --host <box>`.
 |---|---|
 | `agents share <file> [--slug s] [--expire spec] [--no-cover]` | Publish `<file>`; print the link. HTML pages get an auto OG cover unless `--no-cover`. Default slug `<project>-<feature>-<hash>`. |
 | `agents share setup [--token t] [--account id] [--bundle b] [--worker w] [--bucket b] [--domain h]` | Provision an R2 bucket + Worker on your Cloudflare and save the config. |
-| `agents share join <baseUrl>` | Use an existing endpoint (base URL + write token), no provisioning. |
+| `agents share join [baseUrl] [--token t]` | Use an existing endpoint, no provisioning. With no URL, consumes synced `share:` config plus `SHARE_WRITE_TOKEN` / the local `share` bundle. |
 | `agents share status` | Show the configured endpoint. |
 
 ## Security

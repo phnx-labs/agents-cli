@@ -12,6 +12,8 @@ import {
   generateWriteToken,
   readCloudflareCreds,
   readShareConfig,
+  readWriteTokenEnv,
+  readWriteTokenFromBundle,
   storeWriteToken,
   writeShareConfig,
 } from '../lib/share/config.js';
@@ -78,11 +80,12 @@ export function registerShareCommands(program: Command): void {
 
   shareCmd
     .command('join')
-    .description('Use an existing share endpoint (no provisioning) — pass the base URL and paste the write token.')
-    .argument('<baseUrl>', 'base URL of the endpoint, e.g. https://share.agents-cli.sh')
-    .action(async (baseUrl: string) => {
+    .description('Use an existing synced share endpoint and write token (no provisioning).')
+    .argument('[baseUrl]', 'base URL of the endpoint, e.g. https://share.agents-cli.sh')
+    .option('--token <token>', 'write token (else SHARE_WRITE_TOKEN env, existing bundle, or prompt)')
+    .action(async (baseUrl: string | undefined, opts: { token?: string }) => {
       try {
-        await runShareJoin(baseUrl);
+        await runShareJoin(baseUrl, opts);
       } catch (e) {
         console.error(chalk.red((e as Error).message));
         process.exitCode = 1;
@@ -172,18 +175,43 @@ export async function runShareProvision(opts: {
 /** Join an existing share endpoint (no provisioning): prompt for the endpoint
  * details + write token and persist them. Shared by `agents share join` and the
  * unified `agents setup share` wizard. */
-export async function runShareJoin(baseUrl: string): Promise<void> {
+export async function runShareJoin(baseUrl?: string, opts: { token?: string } = {}): Promise<void> {
   const { password, input } = await import('@inquirer/prompts');
-  const clean = baseUrl.replace(/\/+$/, '');
-  const workerName = await input({ message: 'Worker name', default: DEFAULT_WORKER_NAME });
-  const bucketName = await input({ message: 'Bucket name', default: DEFAULT_BUCKET_NAME });
-  const accountId = await input({ message: 'Cloudflare account id' });
-  const token = await password({ message: 'Write token (from the endpoint owner)', mask: true });
+  const existing = readShareConfig();
+  const clean = baseUrl?.replace(/\/+$/, '');
+  if (!clean && !existing) {
+    throw new Error(
+      "No synced share endpoint found. Pull config first with 'agents repo pull', or pass the endpoint URL: agents share join <baseUrl>.",
+    );
+  }
+
+  let cfg: ShareConfig;
+  if (existing && (!clean || clean === existing.baseUrl)) {
+    cfg = existing;
+  } else {
+    if (!clean) throw new Error('Share endpoint URL is required.');
+    const workerName = await input({ message: 'Worker name', default: DEFAULT_WORKER_NAME });
+    const bucketName = await input({ message: 'Bucket name', default: DEFAULT_BUCKET_NAME });
+    const accountId = await input({ message: 'Cloudflare account id' });
+    const domain = clean.startsWith('https://') && !clean.includes('.workers.dev')
+      ? clean.replace(/^https:\/\//, '')
+      : undefined;
+    cfg = { baseUrl: clean, accountId, workerName, bucketName, domain };
+  }
+
+  let token = opts.token?.trim() || readWriteTokenEnv() || '';
+  if (!token) {
+    try {
+      token = readWriteTokenFromBundle();
+    } catch {
+      token = '';
+    }
+  }
+  if (!token) {
+    token = await password({ message: 'Write token (from the endpoint owner)', mask: true });
+  }
   if (!token) throw new Error('A write token is required to join.');
-  const domain = clean.startsWith('https://') && !clean.includes('.workers.dev')
-    ? clean.replace(/^https:\/\//, '')
-    : undefined;
-  writeShareConfig({ baseUrl: clean, accountId, workerName, bucketName, domain });
+  writeShareConfig(cfg);
   storeWriteToken(token);
-  console.log(chalk.green(`Joined ${chalk.bold(clean)} — publish with `) + chalk.cyan('agents share <file>'));
+  console.log(chalk.green(`Joined ${chalk.bold(cfg.baseUrl)} — publish with `) + chalk.cyan('agents share <file>'));
 }

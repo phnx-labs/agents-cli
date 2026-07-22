@@ -10,6 +10,7 @@ import {
   suppressionDigest,
 } from './ask-classifier.js';
 import { blockIdForSession, listBlocks, publishBlock, type OpenBlock } from './feed.js';
+import { drain, mailboxDir } from './mailbox.js';
 
 function makeBlock(sessionId: string, text: string, over?: Partial<OpenBlock>): OpenBlock {
   return {
@@ -73,15 +74,17 @@ describe('filterBlocksForFeed', () => {
 
   it('applies suppression: removes stall from the feed store', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ask-class-'));
+    const mailboxRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ask-class-mailbox-'));
     const stall = makeBlock('stall-1', 'Should I keep going on this?');
     // Use a valid mailbox id (session id shape)
     publishBlock(stall, dir);
     expect(listBlocks(dir)).toHaveLength(1);
 
-    const r = suppressStallBlock(stall, dir);
+    const r = suppressStallBlock(stall, dir, mailboxRoot);
     expect(r.suppressed).toBe(true);
     expect(r.autoAnswer).toMatch(/continue/i);
     expect(listBlocks(dir)).toHaveLength(0);
+    expect(drain(mailboxDir('stall-1', mailboxRoot)).map((m) => m.text)).toEqual(['Yes, continue.']);
   });
 
   it('suppressionDigest summarizes auto-resolved stalls', () => {

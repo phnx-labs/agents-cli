@@ -74,6 +74,22 @@ describe('buildSshArgs', () => {
     const args = buildSshArgs('vm', 'droid', ['exec', `it's fine`], { droidBin: 'droid', user: 'droid' });
     expect(args[args.length - 1]).toContain(`'it'\\''s fine'`);
   });
+
+  it('prefixes runtime env for the remote droid exec command', () => {
+    const args = buildSshArgs(
+      'vm',
+      'droid',
+      ['exec', 'publish'],
+      { droidBin: 'droid', user: 'droid', env: { SHARE_WRITE_TOKEN: `tok'en` } },
+    );
+    expect(args[args.length - 1]).toBe(`SHARE_WRITE_TOKEN='tok'\\''en' 'droid' 'exec' 'publish'`);
+  });
+
+  it('rejects invalid runtime env keys instead of silently dropping them', () => {
+    expect(() =>
+      buildSshArgs('vm', 'droid', ['exec'], { droidBin: 'droid', user: 'droid', env: { 'BAD-KEY': 'x' } }),
+    ).toThrow(/Invalid runtime env key/);
+  });
 });
 
 describe('mapResultStatus', () => {

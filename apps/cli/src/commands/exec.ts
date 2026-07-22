@@ -1241,6 +1241,7 @@ export function registerRunCommand(program: Command): void {
         { resolveRunDefaults },
         { getMcpServersByName, buildWorkflowMcpConfig },
         { supports },
+        { shareRuntimeEnv },
       ] = await Promise.all([
         import('../lib/exec.js'),
         import('../lib/agents.js'),
@@ -1254,6 +1255,7 @@ export function registerRunCommand(program: Command): void {
         import('../lib/run-defaults.js'),
         import('../lib/mcp.js'),
         import('../lib/capabilities.js'),
+        import('../lib/share/config.js'),
       ]);
       const isValidAgent = (agent: string): agent is AgentId => ALL_AGENT_IDS.includes(agent as AgentId);
 
@@ -1926,12 +1928,18 @@ export function registerRunCommand(program: Command): void {
         }
       }
 
-      // Merge order (later wins): profile env < secrets bundles < --env K=V.
+      const autoShareEnv = options.autoSecrets !== false
+        ? shareRuntimeEnv({ agentOnly: isHeadlessSecretsContext() })
+        : undefined;
+
+      // Merge order (later wins): profile env < auto share token < secrets bundles < --env K=V.
       // Profile carries provider auth; secrets bundles carry user-defined
-      // values; --env is the per-invocation override.
-      const hasOverrides = profileEnv || options.secrets.length > 0 || userEnv;
+      // values; --env is the per-invocation override. The share token is
+      // best-effort: if it is not already in env or an unlocked bundle, unrelated
+      // runs keep working, and `agents share` itself still fails loudly on use.
+      const hasOverrides = profileEnv || autoShareEnv || options.secrets.length > 0 || userEnv;
       const env: Record<string, string> | undefined = hasOverrides
-        ? { ...(profileEnv ?? {}), ...secretsEnv, ...(userEnv ?? {}) }
+        ? { ...(profileEnv ?? {}), ...(autoShareEnv ?? {}), ...secretsEnv, ...(userEnv ?? {}) }
         : undefined;
 
       const modelSource = runCmd.getOptionValueSource('model');
