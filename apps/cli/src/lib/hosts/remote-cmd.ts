@@ -131,6 +131,7 @@ export const RUN_OPTION_FORWARDING: Record<string, RunOptionForwarding> = {
   any: 'local-only',
   follow: 'local-only',
   lease: 'local-only',
+  box: 'local-only',
   keepBox: 'local-only',
   copyCreds: 'local-only', // copies creds TO the host before dispatch — local concern only
   authCheck: 'local-only', // --no-auth-check gates the local interactive login preflight; --host runs skip that preflight entirely
