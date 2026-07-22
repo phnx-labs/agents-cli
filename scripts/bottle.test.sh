@@ -12,5 +12,23 @@ grep -q "class AgentsDbg < Formula" "$OUT"
 grep -q 'cask "agents-dbg"' "$OUT"
 grep -q "$SHA" "$OUT"
 
+TAP_REMOTE="$(mktemp -d)"
+TAP_REPO="$(mktemp -d)"
+git init --bare "$TAP_REMOTE" >/dev/null
+git clone "$TAP_REMOTE" "$TAP_REPO" >/dev/null 2>&1
+git -C "$TAP_REPO" config user.email "agents-cli-test@example.com"
+git -C "$TAP_REPO" config user.name "agents-cli test"
+printf "test tap\n" > "$TAP_REPO/README.md"
+git -C "$TAP_REPO" add README.md
+git -C "$TAP_REPO" commit -m "seed tap" >/dev/null
+git -C "$TAP_REPO" push -u origin HEAD >/dev/null 2>&1
+
+bash scripts/bottle.sh 0.1.0 --sha256 "$SHA" --tap-repo "$TAP_REPO" --confirm --push >/dev/null
+FIRST_COMMIT="$(git -C "$TAP_REPO" rev-parse HEAD)"
+bash scripts/bottle.sh 0.1.0 --sha256 "$SHA" --tap-repo "$TAP_REPO" --confirm --push >/dev/null
+SECOND_COMMIT="$(git -C "$TAP_REPO" rev-parse HEAD)"
+[[ "$FIRST_COMMIT" == "$SECOND_COMMIT" ]]
+git -C "$TAP_REPO" diff --quiet
+
 bash -n scripts/bottle.sh
 echo "bottle.test.sh: OK"

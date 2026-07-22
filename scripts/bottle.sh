@@ -118,6 +118,8 @@ echo "  $TAP_REPO/Casks/agents-dbg.rb"
 
 if [[ $PUSH -eq 1 ]]; then
   git -C "$TAP_REPO" add Formula/agents-dbg.rb Casks/agents-dbg.rb
-  git -C "$TAP_REPO" commit Formula/agents-dbg.rb Casks/agents-dbg.rb -m "agents-dbg ${VERSION}"
-  git -C "$TAP_REPO" push
+  if ! git -C "$TAP_REPO" diff --cached --quiet -- Formula/agents-dbg.rb Casks/agents-dbg.rb; then
+    git -C "$TAP_REPO" commit Formula/agents-dbg.rb Casks/agents-dbg.rb -m "agents-dbg ${VERSION}"
+    git -C "$TAP_REPO" push
+  fi
 fi
