@@ -224,7 +224,7 @@ Examples:
       '--upload-account-tokens',
       'Upload Claude OAuth credentials to Rush Cloud on first dispatch (consent recorded for future runs).',
     )
-    .option('--json', 'Structured JSON output')
+    .option('--json', 'Structured JSON output, or when stdout is piped')
     .option('--no-follow', 'Dispatch and exit without streaming output')
     .addHelpText('after', `
 Examples:
@@ -473,7 +473,7 @@ Examples:
     .option('--provider <id>', 'Filter by provider')
     .option('--status <status>', 'Filter by status')
     .option('--limit <n>', 'Max results', '20')
-    .option('--json', 'JSON output')
+    .option('--json', 'JSON output, or when stdout is piped')
     .action(async (options: Record<string, unknown>) => {
       const json = isJsonMode(options as { json?: boolean });
       const providerId = options.provider as CloudProviderId | undefined;
@@ -554,7 +554,7 @@ Examples:
   cloud
     .command('status <id>')
     .description('Show task detail and latest status.')
-    .option('--json', 'JSON output')
+    .option('--json', 'JSON output, or when stdout is piped')
     .action(async (id: string, options: Record<string, unknown>) => {
       const json = isJsonMode(options as { json?: boolean });
 
@@ -598,7 +598,7 @@ Examples:
     .command('logs <id>')
     .description('Stream live output from a cloud task.')
     .option('-f, --follow', 'Follow output (default for running tasks)', true)
-    .option('--json', 'JSON event stream')
+    .option('--json', 'JSON event stream, or when stdout is piped')
     .action(async (id: string, options: Record<string, unknown>) => {
       const json = isJsonMode(options as { json?: boolean });
 
@@ -677,7 +677,7 @@ Examples:
   cloud
     .command('providers')
     .description('List available cloud providers and their status.')
-    .option('--json', 'JSON output')
+    .option('--json', 'JSON output, or when stdout is piped')
     .action((options: Record<string, unknown>) => {
       const json = isJsonMode(options as { json?: boolean });
       const providers = getAllProviders();
@@ -713,7 +713,7 @@ Examples:
     .alias('targets')
     .description('List the pre-provisioned targets (Codex environments / Droid Computers) you can dispatch into.')
     .option('--provider <id>', 'Only this provider (codex, factory, ...)')
-    .option('--json', 'JSON output')
+    .option('--json', 'JSON output, or when stdout is piped')
     .action(async (options: Record<string, unknown>) => {
       const json = isJsonMode(options as { json?: boolean });
       const only = options.provider as CloudProviderId | undefined;
