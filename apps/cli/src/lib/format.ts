@@ -51,7 +51,10 @@ export function formatDie(
  */
 export function die(msg: string, code = 1, opts: DieOptions = {}): never {
   const { stream, text } = formatDie(msg, opts);
-  (stream === 'stdout' ? process.stdout : process.stderr).write(`${text}\n`);
+  // Keep console.* (not process.std*.write): the suite spies on console.error /
+  // console.log to capture command output, and fd-level writes bypass those spies.
+  if (stream === 'stdout') console.log(text);
+  else console.error(text);
   process.exit(code);
 }
 
