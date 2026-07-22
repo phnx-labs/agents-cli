@@ -54,12 +54,12 @@ export function getPolicyPath(root?: string): string {
   return path.join(root ?? getUserAgentsDir(), POLICY_FILE);
 }
 
-function normalizeClassPolicy(raw: unknown): ClassPolicy {
+function normalizeClassPolicy(raw: unknown, fallback: ClassPolicy): ClassPolicy {
   const p = (raw ?? {}) as Partial<ClassPolicy>;
-  const timeout = typeof p.timeoutMinutes === 'number' ? p.timeoutMinutes : DEFAULT_POLICY.approval.timeoutMinutes;
+  const timeout = typeof p.timeoutMinutes === 'number' ? p.timeoutMinutes : fallback.timeoutMinutes;
   return {
     timeoutMinutes: Math.max(1, Math.round(timeout)),
-    safeDefault: typeof p.safeDefault === 'string' ? p.safeDefault : undefined,
+    safeDefault: typeof p.safeDefault === 'string' ? p.safeDefault : fallback.safeDefault,
   };
 }
 
@@ -72,8 +72,8 @@ export function loadPolicy(root?: string): FeedPolicy {
       const p = parsed as Partial<FeedPolicy>;
       const threshold = p.phoneNotifyThreshold;
       return {
-        approval: normalizeClassPolicy(p.approval ?? { timeoutMinutes: DEFAULT_POLICY.approval.timeoutMinutes, safeDefault: DEFAULT_POLICY.approval.safeDefault }),
-        decision: normalizeClassPolicy(p.decision ?? { timeoutMinutes: DEFAULT_POLICY.decision.timeoutMinutes }),
+        approval: normalizeClassPolicy(p.approval, DEFAULT_POLICY.approval),
+        decision: normalizeClassPolicy(p.decision, DEFAULT_POLICY.decision),
         phoneNotifyThreshold: threshold === 'low' || threshold === 'medium' || threshold === 'high' ? threshold : DEFAULT_POLICY.phoneNotifyThreshold,
       };
     }
@@ -99,10 +99,16 @@ export function minutesElapsed(block: OpenBlock, now: Date): number {
   return (now.getTime() - ts) / 60_000;
 }
 
+function timeoutMinutesForBlock(block: OpenBlock, policy: FeedPolicy): number {
+  if (typeof block.timeoutMinutes === 'number' && Number.isFinite(block.timeoutMinutes) && block.timeoutMinutes > 0) {
+    return Math.max(1, Math.round(block.timeoutMinutes));
+  }
+  return policy[blockClass(block)].timeoutMinutes;
+}
+
 export function isTimedOut(block: OpenBlock, policy: FeedPolicy, now: Date): boolean {
-  const cls = blockClass(block);
   const minutes = minutesElapsed(block, now);
-  return minutes >= policy[cls].timeoutMinutes;
+  return minutes >= timeoutMinutesForBlock(block, policy);
 }
 
 export interface PolicyResult {
@@ -120,6 +126,7 @@ export function applyPolicyToBlock(
   policy: FeedPolicy,
   now: Date,
   root?: string,
+  mailboxRoot?: string,
 ): PolicyResult {
   if (block.answer || block.parkedAt || block.defaultedAt) {
     return { blockId: block.blockId, action: 'none' };
@@ -145,7 +152,7 @@ export function applyPolicyToBlock(
       return { blockId: block.blockId, action: 'none' };
     }
 
-    const msgId = enqueue(mailboxDir(block.mailboxId, root ?? undefined), {
+    const msgId = enqueue(mailboxDir(block.mailboxId, mailboxRoot), {
       to: block.mailboxId,
       text: safeDefault,
       from: 'policy',

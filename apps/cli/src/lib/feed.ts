@@ -25,7 +25,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import { getFeedDir, getUserAgentsDir } from './state.js';
-import { isHighConsequenceAllowed } from './operator.js';
+import { isAdmin, isHighConsequenceAllowed, isKnownOperator } from './operator.js';
 
 export interface BlockOption {
   label: string;
@@ -207,11 +207,27 @@ export function recordAnswer(
 
   if (block?.consequence && block.consequence !== 'normal') {
     // Operators live in ~/.agents/operators.yaml — never the feed store root.
-    if (!operatorId || answer.verified !== true || !isHighConsequenceAllowed(block.consequence, operatorId)) {
+    if (!operatorId || answer.verified !== true || !isKnownOperator(operatorId)) {
       return {
         ok: false,
         unauthorized: true,
         reason: `High-consequence block '${block.consequence}' requires a verified, authorized operator.`,
+      };
+    }
+    const allowedByBlock = block.allowedOperators?.includes(operatorId) ?? false;
+    const allowedByCapability = isHighConsequenceAllowed(block.consequence, operatorId);
+    if (!allowedByBlock && !allowedByCapability) {
+      return {
+        ok: false,
+        unauthorized: true,
+        reason: `High-consequence block '${block.consequence}' requires a verified, authorized operator.`,
+      };
+    }
+    if (block.allowedOperators?.length && !allowedByBlock && !isAdmin(operatorId)) {
+      return {
+        ok: false,
+        unauthorized: true,
+        reason: `High-consequence block '${block.consequence}' is restricted to: ${block.allowedOperators.join(', ')}.`,
       };
     }
   }
