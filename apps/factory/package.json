@@ -549,6 +549,270 @@
       {
         "command": "agents.spawnWithContext",
         "title": "Agents: Spawn with Context"
+      },
+      {
+        "command": "agents.newClaudePickHost",
+        "title": "Agents: New Claude (Pick Host)",
+        "icon": {
+          "light": "assets/claude.png",
+          "dark": "assets/claude.png"
+        }
+      },
+      {
+        "command": "agents.newClaudePickVersionHost",
+        "title": "Agents: New Claude (Pick Version & Host)",
+        "icon": {
+          "light": "assets/claude.png",
+          "dark": "assets/claude.png"
+        }
+      },
+      {
+        "command": "agents.newClaudeAutoHost",
+        "title": "Agents: New Claude (Auto Host)",
+        "icon": {
+          "light": "assets/claude.png",
+          "dark": "assets/claude.png"
+        }
+      },
+      {
+        "command": "agents.newCodexPickHost",
+        "title": "Agents: New Codex (Pick Host)",
+        "icon": {
+          "light": "assets/chatgpt.png",
+          "dark": "assets/chatgpt.png"
+        }
+      },
+      {
+        "command": "agents.newCodexPickVersionHost",
+        "title": "Agents: New Codex (Pick Version & Host)",
+        "icon": {
+          "light": "assets/chatgpt.png",
+          "dark": "assets/chatgpt.png"
+        }
+      },
+      {
+        "command": "agents.newCodexAutoHost",
+        "title": "Agents: New Codex (Auto Host)",
+        "icon": {
+          "light": "assets/chatgpt.png",
+          "dark": "assets/chatgpt.png"
+        }
+      },
+      {
+        "command": "agents.newGeminiPickHost",
+        "title": "Agents: New Gemini (Pick Host)",
+        "icon": {
+          "light": "assets/gemini.png",
+          "dark": "assets/gemini.png"
+        }
+      },
+      {
+        "command": "agents.newGeminiPickVersionHost",
+        "title": "Agents: New Gemini (Pick Version & Host)",
+        "icon": {
+          "light": "assets/gemini.png",
+          "dark": "assets/gemini.png"
+        }
+      },
+      {
+        "command": "agents.newGeminiAutoHost",
+        "title": "Agents: New Gemini (Auto Host)",
+        "icon": {
+          "light": "assets/gemini.png",
+          "dark": "assets/gemini.png"
+        }
+      },
+      {
+        "command": "agents.newOpenCodePickHost",
+        "title": "Agents: New OpenCode (Pick Host)",
+        "icon": {
+          "light": "assets/opencode.png",
+          "dark": "assets/opencode.png"
+        }
+      },
+      {
+        "command": "agents.newOpenCodePickVersionHost",
+        "title": "Agents: New OpenCode (Pick Version & Host)",
+        "icon": {
+          "light": "assets/opencode.png",
+          "dark": "assets/opencode.png"
+        }
+      },
+      {
+        "command": "agents.newOpenCodeAutoHost",
+        "title": "Agents: New OpenCode (Auto Host)",
+        "icon": {
+          "light": "assets/opencode.png",
+          "dark": "assets/opencode.png"
+        }
+      },
+      {
+        "command": "agents.newCursorPickHost",
+        "title": "Agents: New Cursor (Pick Host)",
+        "icon": {
+          "light": "assets/cursor.png",
+          "dark": "assets/cursor.png"
+        }
+      },
+      {
+        "command": "agents.newCursorPickVersionHost",
+        "title": "Agents: New Cursor (Pick Version & Host)",
+        "icon": {
+          "light": "assets/cursor.png",
+          "dark": "assets/cursor.png"
+        }
+      },
+      {
+        "command": "agents.newCursorAutoHost",
+        "title": "Agents: New Cursor (Auto Host)",
+        "icon": {
+          "light": "assets/cursor.png",
+          "dark": "assets/cursor.png"
+        }
+      },
+      {
+        "command": "agents.newAntigravityPickHost",
+        "title": "Agents: New Antigravity (Pick Host)",
+        "icon": {
+          "light": "assets/antigravity.png",
+          "dark": "assets/antigravity.png"
+        }
+      },
+      {
+        "command": "agents.newAntigravityPickVersionHost",
+        "title": "Agents: New Antigravity (Pick Version & Host)",
+        "icon": {
+          "light": "assets/antigravity.png",
+          "dark": "assets/antigravity.png"
+        }
+      },
+      {
+        "command": "agents.newAntigravityAutoHost",
+        "title": "Agents: New Antigravity (Auto Host)",
+        "icon": {
+          "light": "assets/antigravity.png",
+          "dark": "assets/antigravity.png"
+        }
+      },
+      {
+        "command": "agents.newGrokPickHost",
+        "title": "Agents: New Grok (Pick Host)",
+        "icon": {
+          "light": "assets/grok.png",
+          "dark": "assets/grok.png"
+        }
+      },
+      {
+        "command": "agents.newGrokPickVersionHost",
+        "title": "Agents: New Grok (Pick Version & Host)",
+        "icon": {
+          "light": "assets/grok.png",
+          "dark": "assets/grok.png"
+        }
+      },
+      {
+        "command": "agents.newGrokAutoHost",
+        "title": "Agents: New Grok (Auto Host)",
+        "icon": {
+          "light": "assets/grok.png",
+          "dark": "assets/grok.png"
+        }
+      },
+      {
+        "command": "agents.newKimiPickHost",
+        "title": "Agents: New Kimi (Pick Host)",
+        "icon": {
+          "light": "assets/kimi.png",
+          "dark": "assets/kimi.png"
+        }
+      },
+      {
+        "command": "agents.newKimiPickVersionHost",
+        "title": "Agents: New Kimi (Pick Version & Host)",
+        "icon": {
+          "light": "assets/kimi.png",
+          "dark": "assets/kimi.png"
+        }
+      },
+      {
+        "command": "agents.newKimiAutoHost",
+        "title": "Agents: New Kimi (Auto Host)",
+        "icon": {
+          "light": "assets/kimi.png",
+          "dark": "assets/kimi.png"
+        }
+      },
+      {
+        "command": "agents.newDroidPickHost",
+        "title": "Agents: New Droid (Pick Host)",
+        "icon": {
+          "light": "assets/droid.png",
+          "dark": "assets/droid.png"
+        }
+      },
+      {
+        "command": "agents.newDroidPickVersionHost",
+        "title": "Agents: New Droid (Pick Version & Host)",
+        "icon": {
+          "light": "assets/droid.png",
+          "dark": "assets/droid.png"
+        }
+      },
+      {
+        "command": "agents.newDroidAutoHost",
+        "title": "Agents: New Droid (Auto Host)",
+        "icon": {
+          "light": "assets/droid.png",
+          "dark": "assets/droid.png"
+        }
+      },
+      {
+        "command": "agents.newAgentPickHost",
+        "title": "Agents: New Agent (Pick Host)"
+      },
+      {
+        "command": "agents.newAgentPickVersionHost",
+        "title": "Agents: New Agent (Pick Version & Host)"
+      },
+      {
+        "command": "agents.quickLaunch0PickHost",
+        "title": "Agents: Quick Launch 0 (Pick Host)"
+      },
+      {
+        "command": "agents.quickLaunch1PickHost",
+        "title": "Agents: Quick Launch 1 (Pick Host)"
+      },
+      {
+        "command": "agents.quickLaunch2PickHost",
+        "title": "Agents: Quick Launch 2 (Pick Host)"
+      },
+      {
+        "command": "agents.quickLaunch3PickHost",
+        "title": "Agents: Quick Launch 3 (Pick Host)"
+      },
+      {
+        "command": "agents.quickLaunch4PickHost",
+        "title": "Agents: Quick Launch 4 (Pick Host)"
+      },
+      {
+        "command": "agents.quickLaunch5PickHost",
+        "title": "Agents: Quick Launch 5 (Pick Host)"
+      },
+      {
+        "command": "agents.quickLaunch6PickHost",
+        "title": "Agents: Quick Launch 6 (Pick Host)"
+      },
+      {
+        "command": "agents.quickLaunch7PickHost",
+        "title": "Agents: Quick Launch 7 (Pick Host)"
+      },
+      {
+        "command": "agents.quickLaunch8PickHost",
+        "title": "Agents: Quick Launch 8 (Pick Host)"
+      },
+      {
+        "command": "agents.quickLaunch9PickHost",
+        "title": "Agents: Quick Launch 9 (Pick Host)"
       }
     ],
     "configuration": {
@@ -936,6 +1200,56 @@
         "command": "agents.cyclePrevTerminal",
         "key": "ctrl+e",
         "mac": "cmd+e"
+      },
+      {
+        "command": "agents.quickLaunch0PickHost",
+        "key": "ctrl+alt+shift+0",
+        "mac": "cmd+alt+shift+0"
+      },
+      {
+        "command": "agents.quickLaunch1PickHost",
+        "key": "ctrl+alt+shift+1",
+        "mac": "cmd+alt+shift+1"
+      },
+      {
+        "command": "agents.quickLaunch2PickHost",
+        "key": "ctrl+alt+shift+2",
+        "mac": "cmd+alt+shift+2"
+      },
+      {
+        "command": "agents.quickLaunch3PickHost",
+        "key": "ctrl+alt+shift+3",
+        "mac": "cmd+alt+shift+3"
+      },
+      {
+        "command": "agents.quickLaunch4PickHost",
+        "key": "ctrl+alt+shift+4",
+        "mac": "cmd+alt+shift+4"
+      },
+      {
+        "command": "agents.quickLaunch5PickHost",
+        "key": "ctrl+alt+shift+5",
+        "mac": "cmd+alt+shift+5"
+      },
+      {
+        "command": "agents.quickLaunch6PickHost",
+        "key": "ctrl+alt+shift+6",
+        "mac": "cmd+alt+shift+6"
+      },
+      {
+        "command": "agents.quickLaunch7PickHost",
+        "key": "ctrl+alt+shift+7",
+        "mac": "cmd+alt+shift+7"
+      },
+      {
+        "command": "agents.quickLaunch8PickHost",
+        "key": "ctrl+alt+shift+8",
+        "mac": "cmd+alt+shift+8"
+      },
+      {
+        "command": "agents.quickLaunch9PickHost",
+        "key": "ctrl+alt+shift+9",
+        "mac": "cmd+alt+shift+9"
       }
     ]
   },

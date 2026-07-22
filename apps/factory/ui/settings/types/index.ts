@@ -27,6 +27,14 @@ export interface QuickLaunchSlot {
   modelAlias?: string
   extraFlags?: string
   label?: string
+  // Where ⌘⇧<n> spawns this agent. Omitted or 'local' = this machine; a device
+  // name = offload onto that host via `agents run --host`; 'balanced' = pick the
+  // least-busy online device at launch (see balancePool). Kept in sync with the
+  // host copy in src/core/settings.ts.
+  runOn?: string
+  // When runOn === 'balanced', restrict the pool to these device names. Empty =
+  // all online devices (minus the local machine).
+  balancePool?: string[]
 }
 
 export interface QuickLaunchConfig {

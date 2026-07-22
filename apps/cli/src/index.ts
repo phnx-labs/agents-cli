@@ -139,6 +139,7 @@ import {
   loadSetup,
   loadUninstall,
   loadShare,
+  loadHq,
   loadFeed,
   loadMailboxes,
   type ModuleLoader,
@@ -279,6 +280,7 @@ Run and dispatch:
   run <agent|profile> [prompt]    Run an agent. Omit prompt for interactive mode.
   defaults                        Configure run defaults by agent/version selector
   teams                           Coordinate multiple agents on shared work
+  hq                              JSON bridge for the interactive Agents HQ floor
   routines                        Run agents on a cron schedule (scheduler auto-starts)
   webhook                         Receive signed GitHub/Linear webhooks for trigger routines
   funnel                          Expose a webhook receiver through Tailscale Funnel
@@ -870,6 +872,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadAudit);
   await reg(loadWebhook);
   await reg(loadFunnel);
+  await reg(loadHq);
   await reg(loadFeed);
   await reg(loadMailboxes);
   await reg(loadSsh);

@@ -21,6 +21,7 @@ class MemBackend implements KeychainBackend {
 
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-share-config-test-'));
 const prevHome = process.env.HOME;
+const prevEnvToken = process.env.SHARE_WRITE_TOKEN;
 const prevNoAgent = process.env.AGENTS_SECRETS_NO_AGENT;
 const prevNoUsage = process.env.AGENTS_NO_USAGE_TRACK;
 
@@ -37,11 +38,14 @@ const {
 const { readAndResolveBundleEnv, writeBundle } = await import('../secrets/bundles.js');
 const {
   DEFAULT_CF_BUNDLE,
+  generateWriteToken,
   readCloudflareCreds,
   readShareConfig,
   readWriteToken,
   SHARE_BUNDLE,
+  SHARE_TOKEN_ENV_KEY,
   SHARE_TOKEN_KEY,
+  shareRuntimeEnv,
   storeWriteToken,
   writeShareConfig,
 } = await import('./config.js');
@@ -55,11 +59,18 @@ describe('share config', () => {
     prevBackend = setKeychainBackendForTest(mem);
     setKeychainServiceHashingForTest(randomBytes(16).toString('hex'));
     fs.rmSync(path.join(HOME, '.agents'), { recursive: true, force: true });
+    delete process.env.SHARE_WRITE_TOKEN;
   });
 
   afterEach(() => {
     setKeychainServiceHashingForTest(null);
     setKeychainBackendForTest(prevBackend);
+    if (prevEnvToken === undefined) delete process.env.SHARE_WRITE_TOKEN;
+    else process.env.SHARE_WRITE_TOKEN = prevEnvToken;
+  });
+
+  it('mints a 32-byte hex write token', () => {
+    expect(generateWriteToken()).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it('persists endpoint config under agents.yaml share and trims the base URL on read', () => {
@@ -89,6 +100,42 @@ describe('share config', () => {
     expect(readAndResolveBundleEnv(SHARE_BUNDLE, { caller: 'test' }).env).toEqual({
       WRITE_TOKEN: 'write-token-1',
     });
+    expect(fs.readFileSync(path.join(HOME, '.agents', 'agents.yaml'), 'utf8')).not.toContain('write-token-1');
+  });
+
+  it('prefers an injected SHARE_WRITE_TOKEN over the local bundle', () => {
+    storeWriteToken('bundle-token');
+    process.env.SHARE_WRITE_TOKEN = 'env-token';
+
+    expect(SHARE_TOKEN_ENV_KEY).toBe('SHARE_WRITE_TOKEN');
+    expect(readWriteToken()).toBe('env-token');
+  });
+
+  it('builds runtime env only when synced share config exists', () => {
+    storeWriteToken('bundle-token');
+
+    expect(shareRuntimeEnv()).toBeUndefined();
+
+    writeShareConfig({
+      baseUrl: 'https://share.example.com',
+      accountId: 'acct',
+      workerName: 'agents-share',
+      bucketName: 'agents-share',
+    });
+
+    expect(shareRuntimeEnv()).toEqual({ SHARE_WRITE_TOKEN: 'bundle-token' });
+  });
+
+  it('uses the injected token for runtime env without touching the bundle', () => {
+    writeShareConfig({
+      baseUrl: 'https://share.example.com',
+      accountId: 'acct',
+      workerName: 'agents-share',
+      bucketName: 'agents-share',
+    });
+    process.env.SHARE_WRITE_TOKEN = 'env-token';
+
+    expect(shareRuntimeEnv({ agentOnly: true })).toEqual({ SHARE_WRITE_TOKEN: 'env-token' });
   });
 
   it('reads Cloudflare provisioning credentials from the cloudflare bundle by default', () => {
@@ -128,6 +175,8 @@ afterAll(() => {
   fs.rmSync(HOME, { recursive: true, force: true });
   if (prevHome === undefined) delete process.env.HOME;
   else process.env.HOME = prevHome;
+  if (prevEnvToken === undefined) delete process.env.SHARE_WRITE_TOKEN;
+  else process.env.SHARE_WRITE_TOKEN = prevEnvToken;
   if (prevNoAgent === undefined) delete process.env.AGENTS_SECRETS_NO_AGENT;
   else process.env.AGENTS_SECRETS_NO_AGENT = prevNoAgent;
   if (prevNoUsage === undefined) delete process.env.AGENTS_NO_USAGE_TRACK;

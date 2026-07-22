@@ -1,8 +1,9 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { parseExpire, slugify, detectProject, defaultSlug, attachOgCover } from './publish.js';
+import { parseExpire, slugify, detectProject, defaultSlug, attachOgCover, publishToEndpoint } from './publish.js';
 import { renderWorkerScript } from './worker-template.js';
 
 describe('attachOgCover', () => {
@@ -56,6 +57,79 @@ describe('attachOgCover', () => {
       }),
     );
     expect(r.coverUrl).toBeUndefined();
+  });
+});
+
+describe('publishToEndpoint', () => {
+  it('PUTs the HTML body to <base>/<slug> with bearer auth, expiry, and content type', async () => {
+    const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-publish-')), 'plan.html');
+    writeFileSync(htmlPath, '<!doctype html><title>Plan</title><main>done</main>');
+
+    let seen: {
+      method?: string;
+      url?: string;
+      authorization?: string;
+      contentType?: string;
+      expiresAt?: string;
+      body?: string;
+    } = {};
+
+    const server = createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+      req.on('end', () => {
+        seen = {
+          method: req.method,
+          url: req.url,
+          authorization: req.headers.authorization,
+          contentType: req.headers['content-type'],
+          expiresAt: req.headers['x-share-expires-at'],
+          body: Buffer.concat(chunks).toString('utf8'),
+        };
+        res.writeHead(201).end('ok');
+      });
+    });
+
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('server did not bind to a TCP port');
+      const baseUrl = `http://127.0.0.1:${address.port}`;
+      const result = await publishToEndpoint(
+        htmlPath,
+        { baseUrl: `${baseUrl}/`, token: 'secret-token' },
+        { slug: '/ticket-plan', expire: '2030-01-01', cover: false },
+      );
+
+      expect(result.url).toBe(`${baseUrl}/ticket-plan`);
+      expect(result.expiresAt).toBe(new Date('2030-01-01').toISOString());
+      expect(seen).toEqual({
+        method: 'PUT',
+        url: '/ticket-plan',
+        authorization: 'Bearer secret-token',
+        contentType: 'text/html; charset=utf-8',
+        expiresAt: new Date('2030-01-01').toISOString(),
+        body: '<!doctype html><title>Plan</title><main>done</main>',
+      });
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+    }
+  });
+
+  it('throws with the failed status when the endpoint rejects the publish', async () => {
+    const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-reject-')), 'plan.html');
+    writeFileSync(htmlPath, '<h1>nope</h1>');
+    await expect(
+      publishToEndpoint(
+        htmlPath,
+        { baseUrl: 'https://share.example.test', token: 'secret-token' },
+        {
+          slug: 'denied',
+          cover: false,
+          uploader: async () => ({ ok: false, status: 403 }),
+        },
+      ),
+    ).rejects.toThrow("Publish failed (403) for https://share.example.test/denied");
   });
 });
 

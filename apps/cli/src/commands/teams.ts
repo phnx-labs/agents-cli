@@ -26,6 +26,7 @@ import { mailboxDir, enqueue } from '../lib/mailbox.js';
 import { resolveProvider } from '../lib/cloud/registry.js';
 import type { CloudProviderId, DispatchOptions } from '../lib/cloud/types.js';
 import { emit } from '../lib/events.js';
+import { shareRuntimeEnv } from '../lib/share/config.js';
 import { runSupervisor } from '../lib/teams/supervisor.js';
 import { debug } from '../lib/teams/debug.js';
 import {
@@ -1567,6 +1568,7 @@ export function registerTeamsCommands(program: Command): void {
             repo: opts.repo,
             branch: opts.branch,
             model: a.model ?? undefined,
+            env: shareRuntimeEnv({ agentOnly: true }),
           };
           const cloudTask = await prov.dispatch(dispatchOpts);
           return { cloudSessionId: cloudTask.id };
@@ -1585,6 +1587,7 @@ export function registerTeamsCommands(program: Command): void {
           repo: opts.repo,
           branch: opts.branch,
           model: opts.model,
+          env: shareRuntimeEnv({ agentOnly: true }),
         };
         try {
           const cloudTask = await prov.dispatch(dispatchOpts);

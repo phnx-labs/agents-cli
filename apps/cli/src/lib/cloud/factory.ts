@@ -123,9 +123,15 @@ export function buildSshArgs(
   computer: string,
   remoteBin: string,
   remoteArgv: string[],
-  opts: { droidBin: string; user: string; port?: string },
+  opts: { droidBin: string; user: string; port?: string; env?: Record<string, string> },
 ): string[] {
-  const remoteCmd = [remoteBin, ...remoteArgv].map(shellQuote).join(' ');
+  const envPrefix = Object.entries(opts.env ?? {}).map(([key, value]) => {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+      throw new Error(`Invalid runtime env key for Factory dispatch: ${key}`);
+    }
+    return `${key}=${shellQuote(value)}`;
+  });
+  const remoteCmd = [...envPrefix, remoteBin, ...remoteArgv].map((part, idx) => idx < envPrefix.length ? part : shellQuote(part)).join(' ');
   const proxy = `ProxyCommand=${opts.droidBin} computer ssh ${computer} --proxy --port %p`;
   return [
     ...sshConnectOpts(controlOpts(), ['-o', proxy]),
@@ -283,7 +289,7 @@ export class FactoryCloudProvider implements CloudProvider {
     const user = (options.providerOptions?.user as string | undefined) ?? 'droid';
 
     const execArgs = buildExecArgs(options.prompt, { autonomy });
-    const sshArgs = buildSshArgs(computer, 'droid', execArgs, { droidBin, user });
+    const sshArgs = buildSshArgs(computer, 'droid', execArgs, { droidBin, user, env: options.env });
 
     const { events, status, summary, sessionId } = await this.runRemote(sshArgs);
 
