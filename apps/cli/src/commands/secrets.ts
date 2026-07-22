@@ -52,6 +52,7 @@ import {
   type SecretsBundle,
   type SecretsPolicy,
   type VarMeta,
+  type BundleEntryInfo,
 } from '../lib/secrets/bundles.js';
 import { encryptForFallback, decryptForFallback, type EncFile } from '../lib/secrets/filestore.js';
 import {
@@ -541,6 +542,93 @@ export function renderPolicyCol(b: SecretsBundle, held?: Map<string, number>): s
   return exp ? chalk.green(`daily · held ${compactRemaining(exp)}`) : chalk.gray('daily');
 }
 
+/** One bundle summary for `secrets list --json`. Metadata only — never a value. */
+export interface SecretsListJsonEntry {
+  name: string;
+  /** Key names in the bundle (no values). */
+  keys: string[];
+  policy: SecretsPolicy;
+  /** Broker hold expiry (epoch-ms) when the secrets-agent is caching this bundle, else null. */
+  expiry: number | null;
+}
+
+/**
+ * Shape the `secrets list --json` payload. Pure — takes the already-read bundles
+ * and the broker `held` map so it is unit-testable. Emits key *names* and policy
+ * metadata only; secret values are never included.
+ */
+export function buildSecretsListJson(
+  bundles: SecretsBundle[],
+  held?: Map<string, number>,
+): SecretsListJsonEntry[] {
+  return bundles.map((b) => ({
+    name: b.name,
+    keys: describeBundle(b).map((e) => e.key),
+    policy: bundlePolicy(b),
+    expiry: held?.get(b.name) ?? null,
+  }));
+}
+
+/** One key's metadata for `secrets view --json` — never a plaintext value unless
+ * `value` is populated by an explicit `--reveal`. */
+export interface SecretsViewJsonKey {
+  name: string;
+  kind: BundleEntryInfo['kind'];
+  /** For keychain-backed keys: whether the item is actually stored. */
+  present: boolean;
+  type?: VarMeta['type'];
+  expires?: VarMeta['expires'];
+  note?: VarMeta['note'];
+  /** Present ONLY when the caller passed --reveal (gated exactly like the human view). */
+  value?: string;
+}
+
+/**
+ * Shape the `secrets view --json` payload. Pure — takes the already-read bundle,
+ * its described entries, a `present` predicate for keychain items, and an
+ * optional map of revealed values (populated only under `--reveal`). Values are
+ * omitted unless explicitly revealed.
+ */
+export function buildSecretsViewJson(
+  bundle: SecretsBundle,
+  entries: BundleEntryInfo[],
+  isPresent: (entry: BundleEntryInfo) => boolean,
+  revealed?: Map<string, string>,
+): {
+  name: string;
+  description?: string;
+  policy: SecretsPolicy;
+  backend: SecretsBackend;
+  created_at?: string;
+  updated_at?: string;
+  last_used?: string;
+  keys: SecretsViewJsonKey[];
+} {
+  const keys: SecretsViewJsonKey[] = entries.map((e) => {
+    const meta = bundle.meta?.[e.key];
+    const key: SecretsViewJsonKey = {
+      name: e.key,
+      kind: e.kind,
+      present: e.kind === 'keychain' ? isPresent(e) : true,
+    };
+    if (meta?.type) key.type = meta.type;
+    if (meta?.expires) key.expires = meta.expires;
+    if (meta?.note) key.note = meta.note;
+    if (revealed?.has(e.key)) key.value = revealed.get(e.key);
+    return key;
+  });
+  return {
+    name: bundle.name,
+    ...(bundle.description ? { description: bundle.description } : {}),
+    policy: bundlePolicy(bundle),
+    backend: bundle.backend ?? 'keychain',
+    ...(bundle.created_at ? { created_at: bundle.created_at } : {}),
+    ...(bundle.updated_at ? { updated_at: bundle.updated_at } : {}),
+    ...(bundle.last_used ? { last_used: bundle.last_used } : {}),
+    keys,
+  };
+}
+
 /** Human-readable hold window for `secrets status`. Sub-hour values render in
  * minutes (so a near-floor `holdMs` never shows a confusing "0 hours"), whole
  * hours up to 2 days, whole days beyond. Pure — unit-tested. */
@@ -853,18 +941,14 @@ export function registerSecretsCommands(program: Command): void {
     .description('List configured secrets bundles (use --host/--hosts to list bundles on other machines over SSH)')
     .option('--host <target>', 'List bundles on a remote host over SSH (enrolled `agents hosts` name, ssh-config alias, or user@host)')
     .option('--hosts <list>', 'Comma-separated hosts to list in one shot, e.g. yosemite-s0,yosemite-s1')
-    .action(async (opts: { host?: string; hosts?: string }) => {
+    .option('--json', 'Emit machine-readable JSON (metadata only — never secret values)')
+    .action(async (opts: { host?: string; hosts?: string; json?: boolean }) => {
       const targets = parseHostsOption(opts);
       if (targets.length > 0) {
         await browseRemote(targets, ['list'], false);
         return;
       }
       const bundles = listBundles();
-      if (bundles.length === 0) {
-        console.log(chalk.gray('No secrets bundles configured.'));
-        console.log(chalk.gray('Try: agents secrets create <name>'));
-        return;
-      }
       // Cross-reference the secrets-agent so `daily` bundles that are currently
       // held can show "· held Nh". Soft-fails to no hint if the broker is down.
       const held = new Map<string, number>();
@@ -874,6 +958,15 @@ export function registerSecretsCommands(program: Command): void {
         } catch {
           /* broker not running — render policy without the countdown */
         }
+      }
+      if (opts.json) {
+        process.stdout.write(JSON.stringify(buildSecretsListJson(bundles, held)) + '\n');
+        return;
+      }
+      if (bundles.length === 0) {
+        console.log(chalk.gray('No secrets bundles configured.'));
+        console.log(chalk.gray('Try: agents secrets create <name>'));
+        return;
       }
       const cols = terminalWidth();
       if (cols >= SECRETS_WIDE) {
@@ -898,7 +991,8 @@ export function registerSecretsCommands(program: Command): void {
     .option('--plaintext', 'Allow --reveal in non-interactive shells (use with care)')
     .option('--host <target>', 'Show a bundle on a remote host over SSH (enrolled `agents hosts` name, ssh-config alias, or user@host)')
     .option('--hosts <list>', 'Comma-separated hosts to show in one shot, e.g. yosemite-s0,yosemite-s1')
-    .action(async (name: string | undefined, opts: { reveal?: boolean; plaintext?: boolean; host?: string; hosts?: string }) => {
+    .option('--json', 'Emit machine-readable JSON (metadata only unless --reveal)')
+    .action(async (name: string | undefined, opts: { reveal?: boolean; plaintext?: boolean; host?: string; hosts?: string; json?: boolean }) => {
       try {
         const targets = parseHostsOption(opts);
         if (targets.length > 0) {
@@ -926,6 +1020,66 @@ export function registerSecretsCommands(program: Command): void {
           process.exit(1);
         }
         const entries = describeBundle(bundle);
+
+        if (opts.json) {
+          const revealJson = Boolean(opts.reveal);
+          if (revealJson && !isInteractiveTerminal() && !opts.plaintext) {
+            process.stdout.write(JSON.stringify({ error: '--reveal in a non-TTY requires --plaintext.' }) + '\n');
+            process.exit(1);
+          }
+          // Map is keyed by bundle key (not keychain item) for the payload builder.
+          const revealedByKey = new Map<string, string>();
+          if (revealJson) {
+            const keychainEntries = entries.filter((e) => e.kind === 'keychain');
+            const itemToKey = new Map<string, string>();
+            const items: string[] = [];
+            for (const e of keychainEntries) {
+              const item = secretsKeychainItem(bundle.name, e.detail);
+              itemToKey.set(item, e.key);
+              items.push(item);
+            }
+            try {
+              for (const [item, value] of getKeychainTokens(items)) {
+                const key = itemToKey.get(item);
+                if (key) revealedByKey.set(key, value);
+              }
+            } catch {
+              /* cancellation / batch failure → omit values, keep metadata */
+            }
+            // Literals are always exposed under --reveal, same as the human view.
+            for (const e of entries) {
+              if (e.kind !== 'literal') continue;
+              const raw = bundle.vars[e.key];
+              revealedByKey.set(
+                e.key,
+                typeof raw === 'string'
+                  ? raw
+                  : (raw && typeof raw === 'object' && 'value' in raw ? (raw as any).value : ''),
+              );
+            }
+            // Same audit chokepoint as the human --reveal path: a reveal exposes
+            // real values and must land in `agents events --module secrets`.
+            if (revealedByKey.size > 0) {
+              emit('secrets.get', {
+                module: 'secrets',
+                bundle: bundle.name,
+                operation: 'view --reveal --json',
+                source: 'reveal',
+                status: 'success',
+                keyCount: revealedByKey.size,
+              });
+            }
+          }
+          const payload = buildSecretsViewJson(
+            bundle,
+            entries,
+            (e) => hasKeychainToken(secretsKeychainItem(bundle.name, e.detail)),
+            revealJson ? revealedByKey : undefined,
+          );
+          process.stdout.write(JSON.stringify(payload) + '\n');
+          return;
+        }
+
         console.log(chalk.bold(bundle.name));
         if (bundle.description) console.log(chalk.gray(safePrint(bundle.description)));
         if (bundle.allow_exec) console.log(chalk.yellow('allow_exec: true'));

@@ -8,6 +8,8 @@ import {
   assertNeverPolicyAcknowledged,
   buildRemoteUnlockArgs,
   buildSecretsExecEnv,
+  buildSecretsListJson,
+  buildSecretsViewJson,
   bundleEnvToDotenv,
   exportBundleToFile,
   formatHoldWindow,
@@ -18,7 +20,7 @@ import {
   readImportDotenv,
   renderPolicyCol,
 } from './secrets.js';
-import { parseDotenv, type SecretsBundle } from '../lib/secrets/bundles.js';
+import { describeBundle, parseDotenv, type SecretsBundle } from '../lib/secrets/bundles.js';
 
 describe('parseImportSource', () => {
   it('treats a plain value as a .env path, including stdin', () => {
@@ -448,5 +450,77 @@ describe('exportBundleToFile / importBundleFromFile file round-trip', () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('buildSecretsListJson', () => {
+  const bundle = (name: string, vars: Record<string, string>, policy?: SecretsBundle['policy']): SecretsBundle => ({
+    name,
+    vars,
+    ...(policy ? { policy } : {}),
+  });
+
+  it('emits key names, policy, and hold expiry — never values', () => {
+    const bundles = [
+      bundle('prod', { API_KEY: 'keychain:API_KEY', REGION: 'us-east-1' }, 'always'),
+      bundle('daily', { TOKEN: 'keychain:TOKEN' }),
+    ];
+    const held = new Map<string, number>([['daily', 123456]]);
+    const json = buildSecretsListJson(bundles, held);
+    expect(json).toEqual([
+      { name: 'prod', keys: ['API_KEY', 'REGION'], policy: 'always', expiry: null },
+      { name: 'daily', keys: ['TOKEN'], policy: 'daily', expiry: 123456 },
+    ]);
+    // The literal value 'us-east-1' must never surface in the payload.
+    expect(JSON.stringify(json)).not.toContain('us-east-1');
+  });
+
+  it('returns an empty array for no bundles', () => {
+    expect(buildSecretsListJson([])).toEqual([]);
+  });
+});
+
+describe('buildSecretsViewJson', () => {
+  const bundle: SecretsBundle = {
+    name: 'prod',
+    description: 'production creds',
+    policy: 'always',
+    created_at: '2026-01-01T00:00:00Z',
+    vars: {
+      API_KEY: 'keychain:API_KEY',
+      MISSING: 'keychain:MISSING',
+      REGION: 'us-east-1',
+    },
+    meta: {
+      API_KEY: { type: 'api_key', expires: '2026-12-31', note: 'rotate me' },
+    },
+  };
+
+  it('emits per-key metadata and presence, never values by default', () => {
+    const entries = describeBundle(bundle);
+    const present = (e: (typeof entries)[number]) => e.detail !== 'MISSING';
+    const json = buildSecretsViewJson(bundle, entries, present);
+    expect(json.name).toBe('prod');
+    expect(json.policy).toBe('always');
+    expect(json.backend).toBe('keychain');
+    expect(json.keys).toEqual([
+      { name: 'API_KEY', kind: 'keychain', present: true, type: 'api_key', expires: '2026-12-31', note: 'rotate me' },
+      { name: 'MISSING', kind: 'keychain', present: false },
+      { name: 'REGION', kind: 'literal', present: true },
+    ]);
+    // No value fields when not revealing.
+    expect(json.keys.every((k) => !('value' in k))).toBe(true);
+    expect(JSON.stringify(json)).not.toContain('us-east-1');
+  });
+
+  it('includes plaintext values only when a revealed map is passed', () => {
+    const entries = describeBundle(bundle);
+    const revealed = new Map<string, string>([['API_KEY', 'sk-secret'], ['REGION', 'us-east-1']]);
+    const json = buildSecretsViewJson(bundle, entries, () => true, revealed);
+    const byName = Object.fromEntries(json.keys.map((k) => [k.name, k]));
+    expect(byName.API_KEY.value).toBe('sk-secret');
+    expect(byName.REGION.value).toBe('us-east-1');
+    // A key with no revealed entry stays value-less.
+    expect('value' in byName.MISSING).toBe(false);
   });
 });
