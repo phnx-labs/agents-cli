@@ -1,6 +1,6 @@
 # Share
 
-Publish an HTML artifact (a plan, a viz, a report) to a public link on **your own**
+Publish an HTML artifact (a plan, a viz, a report, a game) to a public link on **your own**
 Cloudflare R2, behind a tiny Worker — for effectively **$0** (R2 has zero egress and a
 10 GB free tier). The loop `agents share` closes: an agent makes work, publishes it,
 and you open the link to see if it worked.
@@ -8,10 +8,11 @@ and you open the link to see if it worked.
 ## Overview
 
 ```bash
-agents share setup                              # once: provision on your Cloudflare
-agents share plan.html --slug fleet --expire 30d # → https://<base>/fleet
-agents share plan.html --json                  # machine-readable URL for hooks
-agents share status                             # show the configured endpoint
+agents share setup --analytics-token <cf-token>   # once: provision on your Cloudflare
+agents share plan.html --slug fleet --expire 30d  # → https://<base>/<user>/fleet
+agents share plan.html --json                     # machine-readable URL for hooks
+agents share status                               # show endpoint, namespace, analytics
+agents share analytics                            # link to the Web Analytics dashboard
 ```
 
 `setup` reads a Cloudflare API token from your `cloudflare` secrets bundle (or pass
@@ -26,17 +27,25 @@ does an authed `PUT` and prints the link.
 
 ```
 agent makes plan.html
-        │  agents share plan.html         (PUT /<slug>, Authorization: Bearer <token>)
+        │  agents share plan.html         (PUT /<user>/<slug>, Authorization: Bearer <token>)
         ▼
    the Worker  ──(R2 binding).put()──►  R2 bucket (your account)
         ▲
-        │  GET /<slug>   (public, no auth)
+        │  GET /<user>/<slug>   (public, no auth)
    any browser  ◄── streams HTML from R2, 410 + lazy-delete once expired
+        │
+        │  GET /<user>          (public gallery of that user's shares)
 ```
 
 - **The Worker is the ingress.** Writes are bearer-gated *through* it — its R2 binding
   does the `put`, so the client needs **no S3 keys**. Reads are public: the link outlives
   the agent, because the page is stored in R2, not streamed.
+- **Per-user namespaces.** Shares are scoped to the publisher's GitHub username:
+  `https://<base>/<github-username>/<slug>`. The username is resolved from `gh auth login`,
+  `git config --global github.user`, or the `AGENTS_SHARE_GITHUB_USER` env var, and can be
+  overridden per-publish with `--github-user`. Visiting `/<username>` renders a public gallery
+  of that user's shares. Old flat slugs (published before namespaces) still resolve for
+  backward compatibility.
 - **Fleet / central mode.** Provision one endpoint (the owner); every fleet / cloud /
   ephemeral agent then publishes through it with a shared write token — no per-agent
   Cloudflare. `agents share join` uses synced `share:` config plus an injected
@@ -46,6 +55,11 @@ agent makes plan.html
   the Worker `410`s and lazily deletes past that instant. `setup` also installs an R2
   lifecycle rule so old share objects are removed automatically even if nobody opens
   the expired link again.
+- **Usage analytics.** `setup --analytics-token <cf-token>` enables Cloudflare Web Analytics:
+  a cookieless, privacy-first beacon is injected into every published HTML page, so you get
+  per-path pageviews without GA4-style tracking. Opt out per publish with `--no-analytics`.
+  Use `agents share analytics` for the dashboard link; per-path breakdowns are available in
+  the Cloudflare dashboard under `/<github-username>/`.
 - **Preview cards (OG images).** Publishing an HTML page screenshots its own hero at
   1200×630 and attaches it as `og:image` + `twitter:card`, so the link unfurls into a
   rich card in Slack, iMessage, Twitter/X, and Discord. Capture is client-side (headless
@@ -58,12 +72,13 @@ agent makes plan.html
   the first line.
 - **Slugs.** With no `--slug`, the default is `<project>-<feature>-<hash>` (e.g.
   `agents-cli-fleet-cockpit-3a6687`): the repo name scopes the link and a short random
-  tail keeps it unguessable and collision-free. Pass `--slug` for a stable, exact name.
+  tail keeps it unguessable and collision-free. Pass `--slug` for a stable, exact name
+  under your GitHub-username namespace.
 
 ## Where things live
 
 ```
-agents.yaml            share:                         # baseUrl / accountId / worker / bucket / domain
+agents.yaml            share:                         # baseUrl / accountId / worker / bucket / domain / analyticsToken
   (Meta.share)                                        # syncs fleet-wide via `agents repo push/pull`
 secrets bundle `share` WRITE_TOKEN                    # the raw write token — keychain-backed, never in config
 ```
@@ -78,10 +93,11 @@ synced config exists and the token is already available.
 
 | Command | What it does |
 |---|---|
-| `agents share <file> [--slug s] [--expire spec] [--no-cover] [--json]` | Publish `<file>`; print the link, or emit `{ url, coverUrl, expiresAt }` for plan-render hooks with `--json`. HTML pages get an auto OG cover unless `--no-cover`. Default slug `<project>-<feature>-<hash>`. |
-| `agents share setup [--token t] [--account id] [--bundle b] [--worker w] [--bucket b] [--domain h]` | Provision an R2 bucket + Worker on your Cloudflare, map `share.agents-cli.sh` when visible (or `--domain h`), and save the config. |
+| `agents share <file> [--slug s] [--github-user u] [--expire spec] [--no-cover] [--no-analytics] [--json]` | Publish `<file>` under your GitHub-username namespace; print the link, or emit `{ url, coverUrl, expiresAt }` for plan-render hooks with `--json`. HTML pages get an auto OG cover unless `--no-cover` and a CF Web Analytics beacon unless `--no-analytics`. |
+| `agents share setup [--token t] [--account id] [--bundle b] [--worker w] [--bucket b] [--domain h] [--analytics-token token]` | Provision an R2 bucket + Worker on your Cloudflare, map `share.agents-cli.sh` when visible (or `--domain h`), optionally configure a CF Web Analytics token, and save the config. |
 | `agents share join [baseUrl] [--token t]` | Use an existing endpoint, no provisioning. With no URL, consumes synced `share:` config plus `SHARE_WRITE_TOKEN` / the local `share` bundle. |
-| `agents share status` | Show the configured endpoint. |
+| `agents share status` | Show the configured endpoint, namespace, and analytics state. |
+| `agents share analytics` | Show the Web Analytics status and dashboard link. |
 
 ## Security
 
@@ -91,5 +107,5 @@ Worker's constant-time-ish compare avoids leaking the token by timing. The token
 32-byte random hex; rotate by re-running `setup` (mints a new one) — old links keep
 serving until they expire.
 
-Source: `src/commands/share.ts`, `src/lib/share/{worker-template,provision,publish,config}.ts`,
+Source: `src/commands/share.ts`, `src/lib/share/{worker-template,provision,publish,config,analytics}.ts`,
 `Meta.share` in `src/lib/types.ts`.

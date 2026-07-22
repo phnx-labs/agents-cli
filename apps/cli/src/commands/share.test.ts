@@ -174,7 +174,32 @@ describe('runShareProvision custom domain selection', () => {
       hostname: 'share.example.com',
     });
   });
+
+  it('persists --analytics-token in the share config', async () => {
+    const { share, config } = await freshShareModules();
+    const request: CloudflareRequester = async (req) => {
+      if (req.pathname === '/accounts/acct_1/workers/subdomain') return { subdomain: 'acct-sub' };
+      if (req.pathname.startsWith('/zones?name=')) return [];
+      return {};
+    };
+
+    await share.runShareProvision({
+      bundle: 'unused',
+      worker: 'agents-share',
+      bucket: 'agents-share',
+      account: 'acct_1',
+      token: 'cf-token',
+      analyticsToken: 'cf-web-analytics-token',
+      request,
+    });
+
+    expect(config.readShareConfig()).toMatchObject({
+      analyticsToken: 'cf-web-analytics-token',
+    });
+  });
 });
+
+
 
 describe('formatSharePublishResult', () => {
   it('emits stable JSON for plan-render hooks and scripts', () => {

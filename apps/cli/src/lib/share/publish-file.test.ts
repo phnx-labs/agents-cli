@@ -76,6 +76,7 @@ describe('publishFile with injected uploader', () => {
 
     const result = await publish.publishFile(htmlPath, {
       slug: 'rush-1800-report',
+      githubUser: 'octocat',
       expire: '2030-01-01',
       cover: false,
       uploader: async (url, body, headers) => {
@@ -85,13 +86,13 @@ describe('publishFile with injected uploader', () => {
     });
 
     expect(result).toEqual({
-      url: 'https://share.example.com/rush-1800-report',
+      url: 'https://share.example.com/octocat/rush-1800-report',
       expiresAt: new Date('2030-01-01').toISOString(),
       coverUrl: undefined,
     });
     expect(uploads).toEqual([
       {
-        url: 'https://share.example.com/rush-1800-report',
+        url: 'https://share.example.com/octocat/rush-1800-report',
         body: '<!doctype html><title>Report</title>',
         headers: {
           authorization: 'Bearer write-token-1',
@@ -109,6 +110,7 @@ describe('publishFile with injected uploader', () => {
 
     const result = await publish.publishFile(htmlPath, {
       slug: 'cover-page',
+      githubUser: 'octocat',
       uploader: async (url) => {
         uploads.push(url);
         return { ok: true, status: 200, url };
@@ -116,10 +118,10 @@ describe('publishFile with injected uploader', () => {
       capturer: async () => Buffer.from('PNG'),
     });
 
-    expect(result.coverUrl).toBe('https://share.example.com/cover-page.png');
+    expect(result.coverUrl).toBe('https://share.example.com/octocat/cover-page.png');
     expect(uploads).toEqual([
-      'https://share.example.com/cover-page.png',
-      'https://share.example.com/cover-page',
+      'https://share.example.com/octocat/cover-page.png',
+      'https://share.example.com/octocat/cover-page',
     ]);
   });
 });

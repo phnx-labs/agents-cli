@@ -11,6 +11,7 @@ import {
   attachOgCover,
   publishFile,
   publishToEndpoint,
+  buildShareKey,
 } from './publish.js';
 import { renderWorkerScript } from './worker-template.js';
 
@@ -69,7 +70,7 @@ describe('attachOgCover', () => {
 });
 
 describe('publishFile', () => {
-  it('publishes the rendered file and returns the link for hooks', async () => {
+  it('publishes the rendered file under the GitHub username namespace and returns the link for hooks', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'share-publish-'));
     const file = join(dir, 'plan-render-output.html');
     writeFileSync(file, '<!doctype html><title>Plan</title>', 'utf-8');
@@ -77,6 +78,7 @@ describe('publishFile', () => {
 
     const result = await publishFile(file, {
       slug: 'plan-render-output',
+      githubUser: 'octocat',
       expire: '2030-01-01',
       cover: false,
       config: {
@@ -93,13 +95,13 @@ describe('publishFile', () => {
     });
 
     expect(result).toEqual({
-      url: 'https://share.example/plan-render-output',
+      url: 'https://share.example/octocat/plan-render-output',
       expiresAt: '2030-01-01T00:00:00.000Z',
       coverUrl: undefined,
     });
     expect(uploads).toEqual([
       {
-        url: 'https://share.example/plan-render-output',
+        url: 'https://share.example/octocat/plan-render-output',
         body: '<!doctype html><title>Plan</title>',
         headers: {
           authorization: 'Bearer token',
@@ -112,7 +114,7 @@ describe('publishFile', () => {
 });
 
 describe('publishToEndpoint', () => {
-  it('PUTs the HTML body to <base>/<slug> with bearer auth, expiry, and content type', async () => {
+  it('PUTs the HTML body to <base>/<user>/<slug> with bearer auth, expiry, and content type', async () => {
     const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-publish-')), 'plan.html');
     writeFileSync(htmlPath, '<!doctype html><title>Plan</title><main>done</main>');
 
@@ -149,14 +151,14 @@ describe('publishToEndpoint', () => {
       const result = await publishToEndpoint(
         htmlPath,
         { baseUrl: `${baseUrl}/`, token: 'secret-token' },
-        { slug: '/ticket-plan', expire: '2030-01-01', cover: false },
+        { slug: '/ticket-plan', githubUser: 'octocat', expire: '2030-01-01', cover: false },
       );
 
-      expect(result.url).toBe(`${baseUrl}/ticket-plan`);
+      expect(result.url).toBe(`${baseUrl}/octocat/ticket-plan`);
       expect(result.expiresAt).toBe(new Date('2030-01-01').toISOString());
       expect(seen).toEqual({
         method: 'PUT',
-        url: '/ticket-plan',
+        url: '/octocat/ticket-plan',
         authorization: 'Bearer secret-token',
         contentType: 'text/html; charset=utf-8',
         expiresAt: new Date('2030-01-01').toISOString(),
@@ -165,6 +167,55 @@ describe('publishToEndpoint', () => {
     } finally {
       await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
     }
+  });
+
+  it('injects the analytics beacon when a token is provided', async () => {
+    const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-analytics-')), 'plan.html');
+    writeFileSync(htmlPath, '<!doctype html><html><head></head><body>hi</body></html>');
+    let body = '';
+
+    await publishToEndpoint(
+      htmlPath,
+      { baseUrl: 'https://share.example', token: 'secret-token' },
+      {
+        slug: 'tracked',
+        githubUser: 'octocat',
+        cover: false,
+        analyticsToken: 'cf-token-xyz',
+        uploader: async (_url, b) => {
+          body = b.toString('utf8');
+          return { ok: true, status: 200 };
+        },
+      },
+    );
+
+    expect(body).toContain('static.cloudflareinsights.com/beacon.min.js');
+    expect(body).toContain('data-cf-beacon=');
+    expect(body).toContain('cf-token-xyz');
+  });
+
+  it('skips analytics when --no-analytics is set even if a token is configured', async () => {
+    const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-no-analytics-')), 'plan.html');
+    writeFileSync(htmlPath, '<!doctype html><html><head></head><body>hi</body></html>');
+    let body = '';
+
+    await publishToEndpoint(
+      htmlPath,
+      { baseUrl: 'https://share.example', token: 'secret-token' },
+      {
+        slug: 'private',
+        githubUser: 'octocat',
+        cover: false,
+        analyticsToken: 'cf-token-xyz',
+        analytics: false,
+        uploader: async (_url, b) => {
+          body = b.toString('utf8');
+          return { ok: true, status: 200 };
+        },
+      },
+    );
+
+    expect(body).not.toContain('cloudflareinsights.com');
   });
 
   it('throws with the failed status when the endpoint rejects the publish', async () => {
@@ -176,11 +227,12 @@ describe('publishToEndpoint', () => {
         { baseUrl: 'https://share.example.test', token: 'secret-token' },
         {
           slug: 'denied',
+          githubUser: 'octocat',
           cover: false,
           uploader: async () => ({ ok: false, status: 403 }),
         },
       ),
-    ).rejects.toThrow("Publish failed (403) for https://share.example.test/denied");
+    ).rejects.toThrow('Publish failed (403) for https://share.example.test/octocat/denied');
   });
 });
 
@@ -205,6 +257,16 @@ describe('detectProject / defaultSlug', () => {
   it('two publishes of the same file get distinct (hashed) slugs', () => {
     const d = mkdtempSync(join(tmpdir(), 'projy-'));
     expect(defaultSlug('/x/report.html', d)).not.toBe(defaultSlug('/x/report.html', d));
+  });
+});
+
+describe('buildShareKey', () => {
+  it('prefixes the slug with the sanitized GitHub username', () => {
+    expect(buildShareKey('octocat', 'my-game')).toBe('octocat/my-game');
+  });
+
+  it('sanitizes both parts and collapses slashes in the slug', () => {
+    expect(buildShareKey('Octo Cat', 'foo/bar baz')).toBe('octo-cat/foo-bar-baz');
   });
 });
 
@@ -262,6 +324,141 @@ describe('renderWorkerScript', () => {
     expect(src).toContain('async fetch(request, env)');
   });
 
+  it('supports per-user namespaces and renders a gallery at /<user>', async () => {
+    const worker = await import(
+      `data:text/javascript;base64,${Buffer.from(src).toString('base64')}#${Date.now()}`
+    );
+    const store = new Map<string, {
+      body: BodyInit | null;
+      httpMetadata: { contentType?: string };
+      customMetadata: Record<string, string>;
+      uploaded: string;
+    }>();
+    const env = {
+      WRITE_TOKEN: 'secret',
+      BUCKET: {
+        put: async (key: string, body: BodyInit | null, opts: {
+          httpMetadata?: { contentType?: string };
+          customMetadata?: Record<string, string>;
+        }) => {
+          store.set(key, {
+            body,
+            httpMetadata: opts.httpMetadata ?? {},
+            customMetadata: opts.customMetadata ?? {},
+            uploaded: new Date().toISOString(),
+          });
+        },
+        get: async (key: string) => {
+          const item = store.get(key);
+          if (!item) return null;
+          return {
+            body: item.body,
+            customMetadata: item.customMetadata,
+            httpEtag: '"etag"',
+            writeHttpMetadata(headers: Headers) {
+              if (item.httpMetadata.contentType) headers.set('content-type', item.httpMetadata.contentType);
+            },
+          };
+        },
+        delete: async (key: string) => {
+          store.delete(key);
+        },
+        list: async (opts: { prefix?: string; limit?: number }) => {
+          const objects = Array.from(store.entries())
+            .filter(([k]) => !opts.prefix || k.startsWith(opts.prefix))
+            .map(([key, value]) => ({
+              key,
+              uploaded: value.uploaded,
+              httpMetadata: value.httpMetadata,
+              customMetadata: value.customMetadata,
+              size: 0,
+            }));
+          return { objects: opts.limit ? objects.slice(0, opts.limit) : objects };
+        },
+      },
+    };
+
+    const put1 = await worker.default.fetch(new Request('https://share.test/octocat/game-one', {
+      method: 'PUT',
+      headers: { authorization: 'Bearer secret', 'content-type': 'text/html; charset=utf-8' },
+      body: '<h1>game one</h1>',
+    }), env);
+    expect(put1.status).toBe(200);
+
+    const put2 = await worker.default.fetch(new Request('https://share.test/octocat/game-two', {
+      method: 'PUT',
+      headers: { authorization: 'Bearer secret', 'content-type': 'text/html; charset=utf-8' },
+      body: '<h1>game two</h1>',
+    }), env);
+    expect(put2.status).toBe(200);
+
+    const gallery = await worker.default.fetch(new Request('https://share.test/octocat'), env);
+    expect(gallery.status).toBe(200);
+    const galleryHtml = await gallery.text();
+    expect(galleryHtml).toContain('@octocat');
+    expect(galleryHtml).toContain('/octocat/game-one');
+    expect(galleryHtml).toContain('/octocat/game-two');
+
+    const get = await worker.default.fetch(new Request('https://share.test/octocat/game-one'), env);
+    expect(get.status).toBe(200);
+    expect(await get.text()).toContain('game one');
+  });
+
+  it('still resolves legacy flat slugs for backward compatibility', async () => {
+    const worker = await import(
+      `data:text/javascript;base64,${Buffer.from(src).toString('base64')}#${Date.now()}`
+    );
+    const store = new Map<string, {
+      body: BodyInit | null;
+      httpMetadata: { contentType?: string };
+      customMetadata: Record<string, string>;
+      uploaded: string;
+    }>();
+    const env = {
+      WRITE_TOKEN: 'secret',
+      BUCKET: {
+        put: async (key: string, body: BodyInit | null, opts: {
+          httpMetadata?: { contentType?: string };
+          customMetadata?: Record<string, string>;
+        }) => {
+          store.set(key, {
+            body,
+            httpMetadata: opts.httpMetadata ?? {},
+            customMetadata: opts.customMetadata ?? {},
+            uploaded: new Date().toISOString(),
+          });
+        },
+        get: async (key: string) => {
+          const item = store.get(key);
+          if (!item) return null;
+          return {
+            body: item.body,
+            customMetadata: item.customMetadata,
+            httpEtag: '"etag"',
+            writeHttpMetadata(headers: Headers) {
+              if (item.httpMetadata.contentType) headers.set('content-type', item.httpMetadata.contentType);
+            },
+          };
+        },
+        delete: async (key: string) => {
+          store.delete(key);
+        },
+        list: async () => ({ objects: [] }),
+      },
+    };
+
+    const put = await worker.default.fetch(new Request('https://share.test/legacy-flat-slug', {
+      method: 'PUT',
+      headers: { authorization: 'Bearer secret', 'content-type': 'text/html; charset=utf-8' },
+      body: '<h1>legacy</h1>',
+    }), env);
+    expect(put.status).toBe(200);
+
+    const get = await worker.default.fetch(new Request('https://share.test/legacy-flat-slug'), env);
+    expect(get.status).toBe(200);
+    expect(await get.text()).toContain('legacy');
+  });
+
   it('stores expires-at metadata and returns 410 after expiry', async () => {
     vi.useFakeTimers();
     try {
@@ -273,6 +470,7 @@ describe('renderWorkerScript', () => {
         body: BodyInit | null;
         httpMetadata: { contentType?: string };
         customMetadata: Record<string, string>;
+        uploaded: string;
       }>();
       const env = {
         WRITE_TOKEN: 'secret',
@@ -285,6 +483,7 @@ describe('renderWorkerScript', () => {
               body,
               httpMetadata: opts.httpMetadata ?? {},
               customMetadata: opts.customMetadata ?? {},
+              uploaded: new Date().toISOString(),
             });
           },
           get: async (key: string) => {
@@ -302,6 +501,7 @@ describe('renderWorkerScript', () => {
           delete: async (key: string) => {
             store.delete(key);
           },
+          list: async () => ({ objects: [] }),
         },
       };
 

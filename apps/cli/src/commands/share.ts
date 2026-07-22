@@ -30,6 +30,8 @@ import {
 } from '../lib/share/provision.js';
 import { publishFile, type PublishResult } from '../lib/share/publish.js';
 import { renderWorkerScript } from '../lib/share/worker-template.js';
+import { analyticsEnabled } from '../lib/share/analytics.js';
+import { resolveGitHubUsername, resolveGitHubUsernameSync } from '../lib/git.js';
 
 export function formatSharePublishResult(result: PublishResult, json = false): string {
   if (json) return JSON.stringify(result, null, 2);
@@ -45,11 +47,13 @@ export function registerShareCommands(program: Command): void {
     .command('share')
     .description('Publish an HTML file to your own Cloudflare R2 and get a shareable link (~$0).')
     .argument('[file]', 'file to publish (HTML or any static asset)')
-    .option('--slug <slug>', 'custom URL slug (default: <project>-<feature>-<hash>)')
+    .option('--slug <slug>', 'custom URL slug under your namespace (default: <project>-<feature>-<hash>)')
+    .option('--github-user <user>', 'GitHub username for the share namespace (default: resolved from gh/git config)')
     .option('--expire <spec>', 'auto-expire, e.g. 30d, 12h, or 2026-08-01')
     .option('--no-cover', 'skip the OG preview image (HTML pages get one by default)')
+    .option('--no-analytics', 'skip injecting the Cloudflare Web Analytics beacon')
     .option('--json', 'emit machine-readable publish result for plan-render hooks and scripts')
-    .action(async (file: string | undefined, opts: { slug?: string; expire?: string; cover?: boolean; json?: boolean }) => {
+    .action(async (file: string | undefined, opts: { slug?: string; githubUser?: string; expire?: string; cover?: boolean; analytics?: boolean; json?: boolean }) => {
       if (!file) {
         shareCmd.help();
         return;
@@ -62,8 +66,10 @@ export function registerShareCommands(program: Command): void {
       try {
         const { url, expiresAt, coverUrl } = await publishFile(file, {
           slug: opts.slug,
+          githubUser: opts.githubUser,
           expire: opts.expire,
           cover: opts.cover,
+          analytics: opts.analytics,
         });
         console.log(formatSharePublishResult({ url, expiresAt, coverUrl }, Boolean(opts.json)));
       } catch (e) {
@@ -81,7 +87,8 @@ export function registerShareCommands(program: Command): void {
     .option('--account <id>', 'Cloudflare account id (else read from the bundle / prompt)')
     .option('--token <t>', 'Cloudflare API token (else read from the --bundle)')
     .option('--domain <host>', `custom domain to map (default: ${DEFAULT_SHARE_DOMAIN}; workers.dev if zone is not visible)`)
-    .action(async (opts: { bundle: string; worker: string; bucket: string; account?: string; token?: string; domain?: string }) => {
+    .option('--analytics-token <token>', 'Cloudflare Web Analytics token to inject into published HTML pages')
+    .action(async (opts: { bundle: string; worker: string; bucket: string; account?: string; token?: string; domain?: string; analyticsToken?: string }) => {
       try {
         await runShareProvision(opts);
       } catch (e) {
@@ -106,8 +113,8 @@ export function registerShareCommands(program: Command): void {
 
   shareCmd
     .command('status')
-    .description('Show the configured share endpoint.')
-    .action(() => {
+    .description('Show the configured share endpoint and namespace.')
+    .action(async () => {
       const cfg = readShareConfig();
       if (!cfg) {
         console.log(chalk.dim("Not configured. Run 'agents share setup' or 'agents share join'."));
@@ -115,6 +122,35 @@ export function registerShareCommands(program: Command): void {
       }
       console.log(`${chalk.bold('endpoint')}  ${chalk.green(cfg.baseUrl)}`);
       console.log(chalk.dim(`worker ${cfg.workerName} · bucket ${cfg.bucketName} · account ${cfg.accountId}`));
+      const user = resolveGitHubUsernameSync();
+      console.log(`${chalk.bold('namespace')} ${user ? chalk.cyan(`${cfg.baseUrl}/${user}`) : chalk.yellow('unknown — set gh auth or github.user')}`);
+      console.log(`${chalk.bold('analytics')} ${analyticsEnabled(cfg) ? chalk.green('enabled') : chalk.dim('not configured')}`);
+    });
+
+  shareCmd
+    .command('analytics')
+    .description('Show the Cloudflare Web Analytics status for this share endpoint.')
+    .action(async () => {
+      const cfg = readShareConfig();
+      if (!cfg) {
+        console.log(chalk.dim("Not configured. Run 'agents share setup' or 'agents share join'."));
+        return;
+      }
+      if (!analyticsEnabled(cfg)) {
+        console.log(chalk.yellow('Cloudflare Web Analytics is not configured.'));
+        console.log(chalk.dim("Re-run setup with --analytics-token <token> or add analyticsToken to agents.yaml share:."));
+        return;
+      }
+      const dashboard = cfg.domain
+        ? `https://dash.cloudflare.com/${cfg.accountId}/web-analytics/${cfg.domain}`
+        : `https://dash.cloudflare.com/${cfg.accountId}/web-analytics`;
+      console.log(`${chalk.bold('analytics')}  ${chalk.green('enabled')}`);
+      console.log(`${chalk.bold('token')}    ${chalk.dim(cfg.analyticsToken!.slice(0, 8) + '…')}`);
+      console.log(`${chalk.bold('dashboard')} ${chalk.cyan(dashboard)}`);
+      const user = resolveGitHubUsernameSync();
+      if (user) {
+        console.log(chalk.dim(`Per-page breakdown is available under Paths in the dashboard (filter by /${user}/).`));
+      }
     });
 }
 
@@ -128,6 +164,7 @@ export async function runShareProvision(opts: {
   account?: string;
   token?: string;
   domain?: string;
+  analyticsToken?: string;
   request?: CloudflareRequester;
 }): Promise<void> {
   const { default: ora } = await import('ora');
@@ -174,7 +211,7 @@ export async function runShareProvision(opts: {
     }
     spin.succeed('Provisioned');
 
-    const cfg: ShareConfig = { baseUrl, accountId, workerName, bucketName, domain };
+    const cfg: ShareConfig = { baseUrl, accountId, workerName, bucketName, domain, analyticsToken: opts.analyticsToken };
     writeShareConfig(cfg);
     storeWriteToken(token);
 

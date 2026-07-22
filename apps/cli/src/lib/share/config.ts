@@ -31,6 +31,8 @@ export interface ShareConfig {
   bucketName: string;
   /** Custom domain when mapped (e.g. `share.agents-cli.sh`). */
   domain?: string;
+  /** Cloudflare Web Analytics token injected into published HTML pages. */
+  analyticsToken?: string;
 }
 
 export const SHARE_BUNDLE = 'share';
@@ -57,6 +59,7 @@ export function readShareConfig(): ShareConfig | null {
     workerName: s.workerName,
     bucketName: s.bucketName,
     domain: s.domain,
+    analyticsToken: s.analyticsToken,
   };
 }
 

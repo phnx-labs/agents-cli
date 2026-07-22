@@ -8,6 +8,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -23,6 +24,8 @@ import {
   parseSource,
   pullRepo,
   pushOrigin,
+  resolveGitHubUsername,
+  resolveGitHubUsernameSync,
   sameGitRemote,
   syncRepoGit,
 } from './git.js';
@@ -522,5 +525,42 @@ describe('sameGitRemote (adopt-existing repo matching)', () => {
   it('canonicalizes to host/owner/repo', () => {
     expect(canonicalGitRemote('git@github.com:phnx-labs/.agents-extras.git')).toBe('github.com/phnx-labs/.agents-extras');
     expect(canonicalGitRemote('https://github.com/phnx-labs/.agents-extras')).toBe('github.com/phnx-labs/.agents-extras');
+  });
+});
+
+describe('resolveGitHubUsername', () => {
+  let prevEnv: string | undefined;
+  let prevHome: string | undefined;
+  let tmpHome: string;
+
+  beforeEach(() => {
+    prevEnv = process.env.AGENTS_SHARE_GITHUB_USER;
+    delete process.env.AGENTS_SHARE_GITHUB_USER;
+    prevHome = process.env.HOME;
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-git-user-'));
+    process.env.HOME = tmpHome;
+  });
+
+  afterEach(() => {
+    if (prevEnv === undefined) delete process.env.AGENTS_SHARE_GITHUB_USER;
+    else process.env.AGENTS_SHARE_GITHUB_USER = prevEnv;
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it('uses the AGENTS_SHARE_GITHUB_USER env override synchronously', () => {
+    process.env.AGENTS_SHARE_GITHUB_USER = 'env-user';
+    expect(resolveGitHubUsernameSync()).toBe('env-user');
+  });
+
+  it('reads github.user from git config when env is unset', async () => {
+    execFileSync('git', ['config', '--global', 'github.user', 'gitconfig-user']);
+    expect(resolveGitHubUsernameSync()).toBe('gitconfig-user');
+    expect(await resolveGitHubUsername()).toBe('gitconfig-user');
+  });
+
+  it('returns null when no source can resolve the username', () => {
+    expect(resolveGitHubUsernameSync()).toBeNull();
   });
 });

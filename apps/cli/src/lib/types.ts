@@ -840,6 +840,8 @@ export interface Meta {
     workerName?: string;
     bucketName?: string;
     domain?: string;
+    /** Cloudflare Web Analytics token injected into published HTML pages. */
+    analyticsToken?: string;
   };
 }
 

@@ -11,8 +11,10 @@ import { basename } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { readShareConfig, readWriteToken, type ShareConfig } from './config.js';
+import { resolveGitHubUsername } from '../git.js';
 import { captureCover, OG_WIDTH, OG_HEIGHT, OG_SCALE } from './capture.js';
 import { deriveMeta, injectOgMeta } from './og.js';
+import { injectAnalyticsBeacon } from './analytics.js';
 
 export type PutFn = (
   url: string,
@@ -32,6 +34,12 @@ export interface PublishOptions {
   contentType?: string;
   /** Generate + attach an OG cover for HTML pages (default true). */
   cover?: boolean;
+  /** Inject the Cloudflare Web Analytics beacon (default true for HTML). */
+  analytics?: boolean;
+  /** Override the analytics token from share config. */
+  analyticsToken?: string;
+  /** Override the GitHub username used for the URL namespace. */
+  githubUser?: string;
   /** DI seam for tests — override the persisted share endpoint config. */
   config?: ShareConfig;
   /** DI seam for tests — override the keychain-backed write token. */
@@ -148,6 +156,30 @@ export async function attachOgCover(
   return { body: Buffer.from(injected, 'utf8'), coverUrl: ctx.pngUrl };
 }
 
+/** Resolve the publisher's GitHub username, with an explicit override winning first. */
+export async function resolveShareUsername(opts: { githubUser?: string } = {}): Promise<string> {
+  if (opts.githubUser) {
+    const sanitized = sanitizeSlugPart(opts.githubUser);
+    if (sanitized) return sanitized;
+  }
+  const resolved = await resolveGitHubUsername();
+  if (resolved) return sanitizeSlugPart(resolved);
+  throw new Error(
+    "Could not determine your GitHub username for the share URL namespace. " +
+      "Authenticate with `gh auth login`, set `git config --global github.user <user>`, " +
+      "or pass `--github-user <user>`.",
+  );
+}
+
+/** Build the R2 object key from a namespace username and a slug part. */
+export function buildShareKey(username: string, slugPart: string): string {
+  const user = sanitizeSlugPart(username);
+  const part = sanitizeSlugPart(slugPart.replace(/\//g, '-'));
+  if (!user) throw new Error('GitHub username is required for the share URL namespace.');
+  if (!part) throw new Error('Share slug is empty.');
+  return `${user}/${part}`;
+}
+
 export async function publishFile(
   filePath: string,
   opts: PublishOptions = {},
@@ -159,7 +191,13 @@ export async function publishFile(
     );
   }
   const token = opts.writeToken ?? readWriteToken();
-  return publishToEndpoint(filePath, { baseUrl: cfg.baseUrl, token }, opts);
+  const username = await resolveShareUsername(opts);
+  const analyticsToken = opts.analyticsToken ?? cfg.analyticsToken;
+  return publishToEndpoint(filePath, { baseUrl: cfg.baseUrl, token }, {
+    ...opts,
+    githubUser: username,
+    analyticsToken,
+  });
 }
 
 export async function publishToEndpoint(
@@ -167,9 +205,11 @@ export async function publishToEndpoint(
   endpoint: PublishEndpoint,
   opts: PublishOptions = {},
 ): Promise<PublishResult> {
-  const slug = (opts.slug ?? defaultSlug(filePath)).replace(/^\/+/, '');
+  const username = await resolveShareUsername(opts);
+  const slugPart = (opts.slug ?? defaultSlug(filePath)).replace(/^\/+/, '');
+  const key = buildShareKey(username, slugPart);
   const expiresAt = parseExpire(opts.expire);
-  const pageUrl = `${endpoint.baseUrl.replace(/\/+$/, '')}/${slug}`;
+  const pageUrl = `${endpoint.baseUrl.replace(/\/+$/, '')}/${key}`;
 
   const put =
     opts.uploader ??
@@ -185,9 +225,15 @@ export async function publishToEndpoint(
 
   let body: Buffer = readFileSync(filePath);
   let coverUrl: string | undefined;
+  const isHtml = /\.html?$/i.test(filePath);
+
+  // Analytics: cookieless CF Web Analytics beacon, injected for HTML by default.
+  if (isHtml && opts.analytics !== false && opts.analyticsToken) {
+    body = Buffer.from(injectAnalyticsBeacon(body.toString('utf8'), opts.analyticsToken), 'utf8');
+  }
 
   // Cover: screenshot the page's hero → upload <slug>.png → inject og:image meta.
-  if (/\.html?$/i.test(filePath) && opts.cover !== false) {
+  if (isHtml && opts.cover !== false) {
     const res = await attachOgCover(filePath, body, {
       pngUrl: `${pageUrl}.png`,
       pageUrl,

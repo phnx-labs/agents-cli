@@ -6,6 +6,7 @@
  * source parsing for GitHub shorthand, SSH, HTTPS, and local paths.
  */
 import simpleGit, { SimpleGit } from 'simple-git';
+import { execFileSync } from 'node:child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -417,6 +418,47 @@ export async function getGitHubUsername(): Promise<string | null> {
     /* gh CLI not installed or not authenticated */
     return null;
   }
+}
+
+const GITHUB_USER_ENV = 'AGENTS_SHARE_GITHUB_USER';
+
+/** Best-effort sync read of `github.user` from git config. */
+function readGitConfigUser(): string | null {
+  try {
+    return execFileSync('git', ['config', '--global', 'github.user'], { stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString()
+      .trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve the GitHub username synchronously for `agents share`. Order:
+ *   1. `AGENTS_SHARE_GITHUB_USER` env override
+ *   2. `git config --global github.user`
+ * Falls back to null so callers can decide whether to require auth or proceed
+ * without a namespace.
+ */
+export function resolveGitHubUsernameSync(): string | null {
+  const env = process.env[GITHUB_USER_ENV]?.trim();
+  if (env) return env;
+  return readGitConfigUser();
+}
+
+/**
+ * Resolve the GitHub username asynchronously. Order:
+ *   1. `AGENTS_SHARE_GITHUB_USER` env override
+ *   2. `gh api user --jq ".login"`
+ *   3. `git config --global github.user`
+ * Returns null if none succeed.
+ */
+export async function resolveGitHubUsername(): Promise<string | null> {
+  const env = process.env[GITHUB_USER_ENV]?.trim();
+  if (env) return env;
+  const gh = await getGitHubUsername();
+  if (gh) return gh;
+  return readGitConfigUser();
 }
 
 /**
