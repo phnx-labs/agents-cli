@@ -38,6 +38,7 @@ export const SHARE_TOKEN_KEY = 'SHARE_WRITE_TOKEN';
 export const DEFAULT_CF_BUNDLE = 'cloudflare.com';
 export const DEFAULT_WORKER_NAME = 'agents-share';
 export const DEFAULT_BUCKET_NAME = 'agents-share';
+export const DEFAULT_SHARE_DOMAIN = 'share.agents-cli.sh';
 
 /** The write token may be injected ephemerally into fleet/cloud agents. */
 export function readWriteTokenEnv(env: NodeJS.ProcessEnv = process.env): string | null {

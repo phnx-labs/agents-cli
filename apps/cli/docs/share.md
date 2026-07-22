@@ -15,8 +15,10 @@ agents share status                             # show the configured endpoint
 
 `setup` reads a Cloudflare API token from your `cloudflare.com` secrets bundle (or pass
 `--token`), creates an R2 bucket, uploads the Worker, and enables the free
-`*.workers.dev` subdomain. If the token owns a zone, `--domain share.example.com` maps a
-custom domain. Then `agents share <file>` does an authed `PUT` and prints the link.
+`*.workers.dev` subdomain. It maps `share.agents-cli.sh` when the token owns the
+`agents-cli.sh` zone; otherwise it keeps the `*.workers.dev` endpoint. Pass
+`--domain share.example.com` to use a different visible zone. Then `agents share <file>`
+does an authed `PUT` and prints the link.
 
 ## Architecture
 
@@ -69,7 +71,7 @@ synced config exists and the token is already available.
 | Command | What it does |
 |---|---|
 | `agents share <file> [--slug s] [--expire spec] [--no-cover]` | Publish `<file>`; print the link. HTML pages get an auto OG cover unless `--no-cover`. Default slug `<project>-<feature>-<hash>`. |
-| `agents share setup [--token t] [--account id] [--bundle b] [--worker w] [--bucket b] [--domain h]` | Provision an R2 bucket + Worker on your Cloudflare and save the config. |
+| `agents share setup [--token t] [--account id] [--bundle b] [--worker w] [--bucket b] [--domain h]` | Provision an R2 bucket + Worker on your Cloudflare, map `share.agents-cli.sh` when visible (or `--domain h`), and save the config. |
 | `agents share join [baseUrl] [--token t]` | Use an existing endpoint, no provisioning. With no URL, consumes synced `share:` config plus `SHARE_WRITE_TOKEN` / the local `share` bundle. |
 | `agents share status` | Show the configured endpoint. |
 
