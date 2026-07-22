@@ -17,6 +17,7 @@ import {
 } from '../lib/share/config.js';
 import {
   addCustomDomain,
+  configureBucketLifecycle,
   createBucket,
   deployWorker,
   enableWorkersDev,
@@ -133,6 +134,8 @@ export async function runShareProvision(opts: {
   try {
     await createBucket(apiToken, accountId, bucketName);
     spin.text = `R2 bucket '${bucketName}' ready`;
+    await configureBucketLifecycle(apiToken, accountId, bucketName);
+    spin.text = `R2 bucket '${bucketName}' lifecycle ready`;
     await deployWorker(apiToken, accountId, workerName, renderWorkerScript(), bucketName, token);
     spin.text = `Worker '${workerName}' deployed`;
     const subdomain = await enableWorkersDev(apiToken, accountId, workerName);

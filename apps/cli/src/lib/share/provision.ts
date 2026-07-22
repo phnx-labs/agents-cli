@@ -1,13 +1,33 @@
 // Cloudflare provisioning for `agents share setup` — plain `fetch` against the CF
 // REST API (the repo has no CF wrapper). Creates the R2 bucket, uploads the Worker
 // (with an R2 binding + the WRITE_TOKEN as an inline secret), enables the free
-// `*.workers.dev` subdomain, and — when the token owns the zone — maps a custom domain.
+// `*.workers.dev` subdomain, configures a lifecycle cleanup rule, and — when the
+// token owns the zone — maps a custom domain.
 
 const CF_API = 'https://api.cloudflare.com/client/v4';
+export const SHARE_LIFECYCLE_RULE_ID = 'agents-share-expire-objects';
+export const SHARE_LIFECYCLE_RETENTION_DAYS = 366;
+const SECONDS_PER_DAY = 86400;
 
 interface CfError {
   code?: number;
   message?: string;
+}
+
+interface R2LifecycleRule {
+  id: string;
+  enabled: boolean;
+  conditions: { prefix: string };
+  deleteObjectsTransition?: {
+    condition: { type: 'Age'; maxAge: number } | { type: 'Date'; date: string };
+  };
+  abortMultipartUploadsTransition?: {
+    condition?: { type: 'Age'; maxAge: number };
+  };
+  storageClassTransitions?: Array<{
+    condition: { type: 'Age'; maxAge: number } | { type: 'Date'; date: string };
+    storageClass: 'InfrequentAccess';
+  }>;
 }
 
 async function cf<T = unknown>(
@@ -52,6 +72,40 @@ export async function createBucket(apiToken: string, accountId: string, name: st
   } catch (e) {
     if (!isAlreadyExists(e)) throw e;
   }
+}
+
+export function buildShareLifecycleRule(days: number = SHARE_LIFECYCLE_RETENTION_DAYS): R2LifecycleRule {
+  return {
+    id: SHARE_LIFECYCLE_RULE_ID,
+    enabled: true,
+    conditions: { prefix: '' },
+    deleteObjectsTransition: {
+      condition: { type: 'Age', maxAge: days * SECONDS_PER_DAY },
+    },
+  };
+}
+
+export function mergeShareLifecycleRule(
+  existing: R2LifecycleRule[] = [],
+  rule: R2LifecycleRule = buildShareLifecycleRule(),
+): R2LifecycleRule[] {
+  return [...existing.filter((r) => r.id !== SHARE_LIFECYCLE_RULE_ID), rule];
+}
+
+/** Ensure the share bucket self-cleans old objects. Exact per-link expiry is enforced by the Worker. */
+export async function configureBucketLifecycle(
+  apiToken: string,
+  accountId: string,
+  bucketName: string,
+): Promise<void> {
+  const lifecycle = await cf<{ rules?: R2LifecycleRule[] }>(
+    apiToken,
+    'GET',
+    `/accounts/${accountId}/r2/buckets/${bucketName}/lifecycle`,
+  );
+  await cf(apiToken, 'PUT', `/accounts/${accountId}/r2/buckets/${bucketName}/lifecycle`, {
+    rules: mergeShareLifecycleRule(lifecycle.rules ?? []),
+  });
 }
 
 /** Upload the module Worker with an R2 binding (`BUCKET`) + inline `WRITE_TOKEN` secret. */
