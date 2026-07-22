@@ -1,1 +1,0 @@
-- Add GitHub Copilot CLI permission sync, writing supported allow rules to `.copilot/permissions-config.json`.

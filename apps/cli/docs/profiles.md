@@ -10,6 +10,43 @@ Built-in presets cover the top open-weight models via OpenRouter (one shared key
 
 > **Status:** Profiles are experimental, but available by default — no enable step needed.
 
+## Top-level resource profiles
+
+`agents profile use <name>` activates a resource profile from `agents.yaml`.
+This is separate from model-provider profiles (`agents profiles add kimi`):
+resource profiles switch the resolved set of commands, skills, hooks, rules,
+MCP servers, permissions, workflows, plugins, subagents, and secrets.
+
+Create or update one from the CLI:
+
+```sh
+agents profile set work \
+  --skills "system:code-review,user:deploy" \
+  --mcp "user:github" \
+  --permissions "system:default" \
+  --rules work \
+  --secrets "github.com,prod"
+agents profile use work
+```
+
+The same state can be kept directly in `~/.agents/agents.yaml`:
+
+```yaml
+profiles:
+  active: work
+  presets:
+    work:
+      skills: ["system:code-review", "user:deploy"]
+      mcp: ["user:github"]
+      permissions: ["system:default"]
+      rules: work
+      secrets: ["github.com", "prod"]
+```
+
+When a profile is active, omitted resource kinds remain unchanged; listed kinds
+are filtered to the selected names. Secrets outside the active profile are not
+listed and cannot be injected into runs.
+
 ## Architecture
 
 ```

@@ -58,8 +58,8 @@ describe('verifyBrowserIdentity', () => {
   });
 
   it('uses host:port format for non-localhost hosts', () => {
-    expect(() => verifyBrowserIdentity('comet', 'chrome', 9222, 'mac-mini')).toThrow(
-      /mac-mini:9222 is serving "comet"/
+    expect(() => verifyBrowserIdentity('comet', 'chrome', 9222, 'remote-host')).toThrow(
+      /remote-host:9222 is serving "comet"/
     );
   });
 
@@ -122,9 +122,9 @@ describe('discoverBrowserWsUrl', () => {
   });
 
   it('formats non-local Chrome endpoints with host and port', () => {
-    expect(formatBrowserCdpConnectionError(9444, 'remote', 'mac-mini')).toBe(
+    expect(formatBrowserCdpConnectionError(9444, 'remote', 'remote-host')).toBe(
       [
-        'Could not connect to Chrome on mac-mini:9444.',
+        'Could not connect to Chrome on remote-host:9444.',
         '- Is Chrome running with --remote-debugging-port=9444?',
         '- Try: agents browser start --profile remote',
       ].join('\n')

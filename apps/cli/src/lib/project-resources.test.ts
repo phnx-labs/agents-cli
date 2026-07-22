@@ -20,6 +20,30 @@ afterEach(() => {
 });
 
 describe('syncProjectResourcesToAgent', () => {
+  it('syncs project skills into native skill agents project config dirs', () => {
+    const project = makeTempProject();
+    const projectAgentsDir = path.join(project, '.agents');
+    const skillDir = path.join(projectAgentsDir, 'skills', 'myskill');
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), 'Project skill.', 'utf-8');
+
+    const gemini = syncProjectResourcesToAgent('gemini', '0.36.0', projectAgentsDir);
+    const goose = syncProjectResourcesToAgent('goose', '1.25.0', projectAgentsDir);
+
+    expect(gemini.synced).toEqual(['skills/myskill']);
+    expect(gemini.skipped).toEqual([]);
+    expect(goose.synced).toEqual(['skills/myskill']);
+    expect(goose.skipped).toEqual([]);
+
+    expect(fs.readFileSync(path.join(project, '.gemini', 'skills', 'myskill', 'SKILL.md'), 'utf-8')).toBe('Project skill.');
+    expect(fs.readFileSync(path.join(project, '.config', 'goose', 'skills', 'myskill', 'SKILL.md'), 'utf-8')).toBe('Project skill.');
+
+    const geminiManifest = JSON.parse(fs.readFileSync(path.join(project, '.gemini', '.agents-managed.json'), 'utf-8')) as { paths: string[] };
+    const gooseManifest = JSON.parse(fs.readFileSync(path.join(project, '.config', 'goose', '.agents-managed.json'), 'utf-8')) as { paths: string[] };
+    expect(geminiManifest.paths).toEqual(['skills/myskill']);
+    expect(gooseManifest.paths).toEqual(['skills/myskill']);
+  });
+
   it('tracks Goose workflow subrecipes in the manifest from the first sync', () => {
     const project = makeTempProject();
     const projectAgentsDir = path.join(project, '.agents');

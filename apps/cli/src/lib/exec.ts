@@ -245,6 +245,24 @@ export function resolveInteractive(
 }
 
 /**
+ * True when a run resolved to *inferred* interactive intent — no prompt and no
+ * explicit `--interactive` — but there is no terminal to host the REPL. Launching
+ * would attach a TUI to a dead stdin and hang forever, so the caller should fail
+ * fast with the headless alternatives instead (RUSH-1829).
+ *
+ * An explicit `--interactive` is the caller's deliberate choice and is never
+ * blocked (they may be driving a PTY we can't detect). Pure — the TTY state is a
+ * parameter so this is unit-testable without touching `process.std*`.
+ */
+export function inferredInteractiveWithoutTty(
+  options: Pick<ExecOptions, 'interactive' | 'headless' | 'prompt'>,
+  isTty: boolean,
+): boolean {
+  if (options.interactive === true) return false;
+  return resolveInteractive(options) && !isTty;
+}
+
+/**
  * Decide whether spawnAgent must capture (PIPE + tee) the child's stdout so the
  * live budget watcher can parse it (issue #346, FIX 3).
  *

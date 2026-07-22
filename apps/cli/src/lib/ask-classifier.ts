@@ -179,7 +179,7 @@ export interface SuppressResult {
  * Auto-answer + remove a suppressible block so it never renders as a card.
  * Logs the stall as answered by policy:stall-suppression.
  */
-export function suppressStallBlock(block: OpenBlock, root?: string): SuppressResult {
+export function suppressStallBlock(block: OpenBlock, root?: string, mailboxRoot?: string): SuppressResult {
   const c = classifyBlock(block);
   if (!c.suppress || !c.autoAnswer) {
     return { blockId: block.blockId, class: c.class, rule: c.rule, autoAnswer: '', suppressed: false };
@@ -201,7 +201,7 @@ export function suppressStallBlock(block: OpenBlock, root?: string): SuppressRes
 
   try {
     // Mailbox lives under the global mailbox root (not the feed dir).
-    const msgId = enqueue(mailboxDir(block.mailboxId), {
+    const msgId = enqueue(mailboxDir(block.mailboxId, mailboxRoot), {
       to: block.mailboxId,
       text: c.autoAnswer,
       from: 'stall-suppression',
@@ -241,7 +241,7 @@ export interface FeedFilterResult {
  */
 export function filterBlocksForFeed(
   blocks: OpenBlock[],
-  opts?: { apply?: boolean; root?: string },
+  opts?: { apply?: boolean; root?: string; mailboxRoot?: string },
 ): FeedFilterResult {
   const counts: Record<AskClass, number> = {
     decision: 0,
@@ -259,7 +259,7 @@ export function filterBlocksForFeed(
     counts[c.class] += 1;
     if (c.suppress) {
       if (apply) {
-        const r = suppressStallBlock(block, opts?.root);
+        const r = suppressStallBlock(block, opts?.root, opts?.mailboxRoot);
         suppressed.push(r);
         if (!r.suppressed) surfaced.push(block);
       } else {

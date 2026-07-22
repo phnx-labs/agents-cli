@@ -1,8 +1,17 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { parseExpire, slugify, detectProject, defaultSlug, attachOgCover } from './publish.js';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  parseExpire,
+  slugify,
+  detectProject,
+  defaultSlug,
+  attachOgCover,
+  publishFile,
+  publishToEndpoint,
+} from './publish.js';
 import { renderWorkerScript } from './worker-template.js';
 
 describe('attachOgCover', () => {
@@ -56,6 +65,122 @@ describe('attachOgCover', () => {
       }),
     );
     expect(r.coverUrl).toBeUndefined();
+  });
+});
+
+describe('publishFile', () => {
+  it('publishes the rendered file and returns the link for hooks', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'share-publish-'));
+    const file = join(dir, 'plan-render-output.html');
+    writeFileSync(file, '<!doctype html><title>Plan</title>', 'utf-8');
+    const uploads: Array<{ url: string; body: string; headers: Record<string, string> }> = [];
+
+    const result = await publishFile(file, {
+      slug: 'plan-render-output',
+      expire: '2030-01-01',
+      cover: false,
+      config: {
+        baseUrl: 'https://share.example',
+        accountId: 'acct',
+        workerName: 'worker',
+        bucketName: 'bucket',
+      },
+      writeToken: 'token',
+      uploader: async (url, body, headers) => {
+        uploads.push({ url, body: body.toString('utf8'), headers });
+        return { ok: true, status: 200, url };
+      },
+    });
+
+    expect(result).toEqual({
+      url: 'https://share.example/plan-render-output',
+      expiresAt: '2030-01-01T00:00:00.000Z',
+      coverUrl: undefined,
+    });
+    expect(uploads).toEqual([
+      {
+        url: 'https://share.example/plan-render-output',
+        body: '<!doctype html><title>Plan</title>',
+        headers: {
+          authorization: 'Bearer token',
+          'content-type': 'text/html; charset=utf-8',
+          'x-share-expires-at': '2030-01-01T00:00:00.000Z',
+        },
+      },
+    ]);
+  });
+});
+
+describe('publishToEndpoint', () => {
+  it('PUTs the HTML body to <base>/<slug> with bearer auth, expiry, and content type', async () => {
+    const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-publish-')), 'plan.html');
+    writeFileSync(htmlPath, '<!doctype html><title>Plan</title><main>done</main>');
+
+    let seen: {
+      method?: string;
+      url?: string;
+      authorization?: string;
+      contentType?: string;
+      expiresAt?: string;
+      body?: string;
+    } = {};
+
+    const server = createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+      req.on('end', () => {
+        seen = {
+          method: req.method,
+          url: req.url,
+          authorization: req.headers.authorization,
+          contentType: req.headers['content-type'],
+          expiresAt: req.headers['x-share-expires-at'],
+          body: Buffer.concat(chunks).toString('utf8'),
+        };
+        res.writeHead(201).end('ok');
+      });
+    });
+
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('server did not bind to a TCP port');
+      const baseUrl = `http://127.0.0.1:${address.port}`;
+      const result = await publishToEndpoint(
+        htmlPath,
+        { baseUrl: `${baseUrl}/`, token: 'secret-token' },
+        { slug: '/ticket-plan', expire: '2030-01-01', cover: false },
+      );
+
+      expect(result.url).toBe(`${baseUrl}/ticket-plan`);
+      expect(result.expiresAt).toBe(new Date('2030-01-01').toISOString());
+      expect(seen).toEqual({
+        method: 'PUT',
+        url: '/ticket-plan',
+        authorization: 'Bearer secret-token',
+        contentType: 'text/html; charset=utf-8',
+        expiresAt: new Date('2030-01-01').toISOString(),
+        body: '<!doctype html><title>Plan</title><main>done</main>',
+      });
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+    }
+  });
+
+  it('throws with the failed status when the endpoint rejects the publish', async () => {
+    const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-reject-')), 'plan.html');
+    writeFileSync(htmlPath, '<h1>nope</h1>');
+    await expect(
+      publishToEndpoint(
+        htmlPath,
+        { baseUrl: 'https://share.example.test', token: 'secret-token' },
+        {
+          slug: 'denied',
+          cover: false,
+          uploader: async () => ({ ok: false, status: 403 }),
+        },
+      ),
+    ).rejects.toThrow("Publish failed (403) for https://share.example.test/denied");
   });
 });
 
@@ -129,10 +254,76 @@ describe('renderWorkerScript', () => {
   it('enforces expiry with a 410 + lazy delete', () => {
     expect(src).toContain('410');
     expect(src).toContain('env.BUCKET.delete');
+    expect(src).toContain("'expires-at'");
     expect(src).toContain('Date.parse(expiresAt)');
   });
   it('is a module Worker (default export fetch)', () => {
     expect(src).toContain('export default');
     expect(src).toContain('async fetch(request, env)');
+  });
+
+  it('stores expires-at metadata and returns 410 after expiry', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-07-22T00:00:00.000Z'));
+      const worker = await import(
+        `data:text/javascript;base64,${Buffer.from(src).toString('base64')}#${Date.now()}`
+      );
+      const store = new Map<string, {
+        body: BodyInit | null;
+        httpMetadata: { contentType?: string };
+        customMetadata: Record<string, string>;
+      }>();
+      const env = {
+        WRITE_TOKEN: 'secret',
+        BUCKET: {
+          put: async (key: string, body: BodyInit | null, opts: {
+            httpMetadata?: { contentType?: string };
+            customMetadata?: Record<string, string>;
+          }) => {
+            store.set(key, {
+              body,
+              httpMetadata: opts.httpMetadata ?? {},
+              customMetadata: opts.customMetadata ?? {},
+            });
+          },
+          get: async (key: string) => {
+            const item = store.get(key);
+            if (!item) return null;
+            return {
+              body: item.body,
+              customMetadata: item.customMetadata,
+              httpEtag: '"etag"',
+              writeHttpMetadata(headers: Headers) {
+                if (item.httpMetadata.contentType) headers.set('content-type', item.httpMetadata.contentType);
+              },
+            };
+          },
+          delete: async (key: string) => {
+            store.delete(key);
+          },
+        },
+      };
+
+      const put = await worker.default.fetch(new Request('https://share.test/page', {
+        method: 'PUT',
+        headers: {
+          authorization: 'Bearer secret',
+          'content-type': 'text/html; charset=utf-8',
+          'x-share-expires-at': '2026-07-22T00:00:01.000Z',
+        },
+        body: '<h1>hello</h1>',
+      }), env);
+      expect(put.status).toBe(200);
+      expect(store.get('page')?.customMetadata).toEqual({ 'expires-at': '2026-07-22T00:00:01.000Z' });
+
+      vi.setSystemTime(new Date('2026-07-22T00:00:02.000Z'));
+      const get = await worker.default.fetch(new Request('https://share.test/page'), env);
+      expect(get.status).toBe(410);
+      expect(await get.text()).toContain('expired');
+      expect(store.has('page')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

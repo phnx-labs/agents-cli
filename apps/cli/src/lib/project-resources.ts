@@ -203,7 +203,7 @@ function syncProjectSkills(
   result: ProjectResourceSyncResult,
   manifestPaths: Set<string>,
 ): void {
-  if (!supports(agent, 'skills', version).ok || AGENTS[agent].nativeAgentsSkillsDir) return;
+  if (!supports(agent, 'skills', version).ok) return;
   const projectRoot = path.dirname(projectAgentsDir);
   for (const entry of projectEntries(projectAgentsDir, 'skills')) {
     if (!entry.isDirectory()) continue;

@@ -1,16 +1,35 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { ChevronDown, ChevronUp, X } from 'lucide-react'
 import { AgentAvatar } from '../mission-control/AgentAvatar'
-import {
+import { postMessage } from '../../hooks'
+import type {
   AgentInventory,
   AgentSettings,
   BuiltInAgentConfig,
   QuickLaunchSlot,
-  QUICK_LAUNCH_SLOT_KEYS,
   QuickLaunchSlotKey,
+} from '../../types'
+import {
+  QUICK_LAUNCH_SLOT_KEYS,
   getQuickLaunchSlot,
   setQuickLaunchSlotInConfig,
 } from '../../types'
+
+interface FleetDevice { name: string; online: boolean }
+
+const normHost = (s: string) => s.trim().toLowerCase()
+
+// Colored host token shown in a slot's subtitle + badge. Returns null for a
+// local (this-Mac) target so unconfigured slots look exactly as before.
+function hostTokenFor(slot: QuickLaunchSlot): { text: string; color: string } | null {
+  const t = slot.runOn?.trim()
+  if (!t || t === 'local') return null
+  if (t === 'balanced') {
+    const n = slot.balancePool?.length
+    return { text: n ? `⚖ balanced · ${n}` : '⚖ balanced', color: '#a78bfa' }
+  }
+  return { text: `↗ ${t}`, color: '#67e8f9' }
+}
 
 interface LaunchMatrixProps {
   settings: AgentSettings
@@ -35,6 +54,23 @@ export function LaunchMatrix({
   onSaveSettings,
 }: LaunchMatrixProps) {
   const [expanded, setExpanded] = useState<QuickLaunchSlotKey | null>(null)
+  const [devices, setDevices] = useState<FleetDevice[]>([])
+  const [localHost, setLocalHost] = useState<string>('')
+
+  // Cheap fleet fetch (no SSH) so the Run-on picker + balanced pool list are
+  // populated. Same message the Floor uses (listDevices -> devicesData).
+  useEffect(() => {
+    postMessage({ type: 'listDevices' })
+    const onMsg = (e: MessageEvent) => {
+      const m = e.data
+      if (m?.type === 'devicesData' && Array.isArray(m.devices)) {
+        setDevices((m.devices as Array<{ name: string; online?: boolean }>).map(d => ({ name: d.name, online: !!d.online })))
+        if (typeof m.local === 'string' && m.local) setLocalHost(m.local)
+      }
+    }
+    window.addEventListener('message', onMsg)
+    return () => window.removeEventListener('message', onMsg)
+  }, [])
 
   const assignable = builtInAgents.filter(a => a.key !== 'shell')
 
@@ -62,6 +98,7 @@ export function LaunchMatrix({
         const modelOptions = slot?.agent ? (agentModels[slot.agent] || []) : []
         const aliasOptions = slot?.agent === 'claude' ? CLAUDE_ALIASES : []
         const modelLabel = slot?.model || (slot?.modelAlias ? `${slot.modelAlias} (alias)` : '')
+        const hostToken = slot ? hostTokenFor(slot) : null
 
         return (
           <div
@@ -86,10 +123,17 @@ export function LaunchMatrix({
                         ]
                           .filter(Boolean)
                           .join(' · ') || 'auto'}
+                        {hostToken && (
+                          <span style={{ color: hostToken.color }}> · {hostToken.text}</span>
+                        )}
                       </div>
                     </div>
                   </div>
-                  {slot.extraFlags ? (
+                  {hostToken ? (
+                    <span className="sw-launch-flags-badge" style={{ color: hostToken.color }} title={hostToken.text}>
+                      {hostToken.text}
+                    </span>
+                  ) : slot.extraFlags ? (
                     <span className="sw-launch-flags-badge" title={slot.extraFlags}>
                       {slot.extraFlags.length > 24 ? slot.extraFlags.slice(0, 24) + '…' : slot.extraFlags}
                     </span>
@@ -221,6 +265,65 @@ export function LaunchMatrix({
                     onChange={(e) => patchSlot(digit, { label: e.target.value || undefined })}
                   />
                 </label>
+
+                <label className="sw-panel-select" style={{ gridColumn: 'span 2' }}>
+                  <span>Run on</span>
+                  <select
+                    value={slot.runOn && slot.runOn !== 'local' ? slot.runOn : ''}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      patchSlot(digit, {
+                        runOn: v || undefined,
+                        balancePool: v === 'balanced' ? slot.balancePool : undefined,
+                      })
+                    }}
+                  >
+                    <option value="">This Mac</option>
+                    <option value="balanced">⚖ Balanced (least-busy)</option>
+                    {devices.length > 0 && (
+                      <optgroup label="Devices">
+                        {devices.map(d => (
+                          <option key={d.name} value={d.name} disabled={!d.online}>
+                            {d.name}{d.online ? '' : ' (offline)'}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                  </select>
+                </label>
+
+                {slot.runOn === 'balanced' && (
+                  <div className="sw-panel-select" style={{ gridColumn: 'span 2' }}>
+                    <span>Pool <span style={{ opacity: 0.55 }}>— empty = all online</span></span>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 4 }}>
+                      {devices.filter(d => normHost(d.name) !== normHost(localHost)).map(d => {
+                        const checked = slot.balancePool?.includes(d.name) ?? false
+                        return (
+                          <label
+                            key={d.name}
+                            style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, opacity: d.online ? 1 : 0.5 }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              disabled={!d.online}
+                              onChange={(e) => {
+                                const cur = new Set(slot.balancePool || [])
+                                if (e.target.checked) cur.add(d.name)
+                                else cur.delete(d.name)
+                                patchSlot(digit, { balancePool: cur.size ? Array.from(cur) : undefined })
+                              }}
+                            />
+                            {d.name}{d.online ? '' : ' (offline)'}
+                          </label>
+                        )
+                      })}
+                      {devices.filter(d => normHost(d.name) !== normHost(localHost)).length === 0 && (
+                        <span style={{ fontSize: 12, opacity: 0.55 }}>No registered devices</span>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 <div className="sw-launch-editor-foot" style={{ gridColumn: 'span 2' }}>
                   <button

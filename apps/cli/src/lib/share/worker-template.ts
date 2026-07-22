@@ -2,7 +2,8 @@
 //
 // One tiny Worker does both sides:
 //   - PUT  /<slug>  — bearer-gated (WRITE_TOKEN secret); writes the body to R2 via
-//                     the BUCKET binding, storing an optional expiry in object metadata.
+//                     the BUCKET binding, storing an optional expires-at value in
+//                     object metadata.
 //   - GET  /<slug>  — public; streams the object from R2, 410s (and lazily deletes)
 //                     once its expiry has passed. A bucket lifecycle rule is the
 //                     durable sweeper; this is the immediate gate.
@@ -35,7 +36,7 @@ export default {
       const contentType = request.headers.get('content-type') || 'text/html; charset=utf-8';
       await env.BUCKET.put(key, request.body, {
         httpMetadata: { contentType },
-        customMetadata: expiresAt ? { expiresAt } : {},
+        customMetadata: expiresAt ? { 'expires-at': expiresAt } : {},
       });
       return json({ ok: true, url: url.origin + '/' + key, expiresAt: expiresAt || null }, 200);
     }
@@ -43,7 +44,7 @@ export default {
     if (request.method === 'GET' || request.method === 'HEAD') {
       const obj = await env.BUCKET.get(key);
       if (!obj) return new Response('not found', { status: 404, headers: { 'content-type': 'text/plain' } });
-      const expiresAt = obj.customMetadata && obj.customMetadata.expiresAt;
+      const expiresAt = obj.customMetadata && obj.customMetadata['expires-at'];
       if (expiresAt && Date.now() > Date.parse(expiresAt)) {
         await env.BUCKET.delete(key);
         return new Response('gone — this link has expired', { status: 410, headers: { 'content-type': 'text/plain' } });

@@ -1229,7 +1229,7 @@ export function registerRunCommand(program: Command): void {
       }
 
       const [
-        { buildExecCommand, parseExecEnv, execAgent, runWithFallback, normalizeMode, resolveMode, headlessPlanStallCommand, nativeResume, resolveInteractive },
+        { buildExecCommand, parseExecEnv, execAgent, runWithFallback, normalizeMode, resolveMode, headlessPlanStallCommand, nativeResume, resolveInteractive, inferredInteractiveWithoutTty },
         { ALL_AGENT_IDS, ACCOUNT_INSPECTION_AGENT_IDS, agentLabel, supportsAccountInspection },
         { profileExists, resolveProfileForRun },
         { readAndResolveBundleEnv, describeBundle, assertRemoteBundleFlagsUnsupported, isHeadlessSecretsContext },
@@ -1241,6 +1241,7 @@ export function registerRunCommand(program: Command): void {
         { resolveRunDefaults },
         { getMcpServersByName, buildWorkflowMcpConfig },
         { supports },
+        { shareRuntimeEnv },
       ] = await Promise.all([
         import('../lib/exec.js'),
         import('../lib/agents.js'),
@@ -1254,6 +1255,7 @@ export function registerRunCommand(program: Command): void {
         import('../lib/run-defaults.js'),
         import('../lib/mcp.js'),
         import('../lib/capabilities.js'),
+        import('../lib/share/config.js'),
       ]);
       const isValidAgent = (agent: string): agent is AgentId => ALL_AGENT_IDS.includes(agent as AgentId);
 
@@ -1926,12 +1928,18 @@ export function registerRunCommand(program: Command): void {
         }
       }
 
-      // Merge order (later wins): profile env < secrets bundles < --env K=V.
+      const autoShareEnv = options.autoSecrets !== false
+        ? shareRuntimeEnv({ agentOnly: isHeadlessSecretsContext() })
+        : undefined;
+
+      // Merge order (later wins): profile env < auto share token < secrets bundles < --env K=V.
       // Profile carries provider auth; secrets bundles carry user-defined
-      // values; --env is the per-invocation override.
-      const hasOverrides = profileEnv || options.secrets.length > 0 || userEnv;
+      // values; --env is the per-invocation override. The share token is
+      // best-effort: if it is not already in env or an unlocked bundle, unrelated
+      // runs keep working, and `agents share` itself still fails loudly on use.
+      const hasOverrides = profileEnv || autoShareEnv || options.secrets.length > 0 || userEnv;
       const env: Record<string, string> | undefined = hasOverrides
-        ? { ...(profileEnv ?? {}), ...secretsEnv, ...(userEnv ?? {}) }
+        ? { ...(profileEnv ?? {}), ...(autoShareEnv ?? {}), ...secretsEnv, ...(userEnv ?? {}) }
         : undefined;
 
       const modelSource = runCmd.getOptionValueSource('model');
@@ -2262,6 +2270,23 @@ export function registerRunCommand(program: Command): void {
           console.error(chalk.red(`Loop failed for ${agent}: ${(err as Error).message}`));
           process.exit(1);
         }
+      }
+
+      // Agent footgun (RUSH-1829): a run with no prompt and no explicit
+      // --interactive resolves to interactive intent, but in a non-TTY shell
+      // (a headless agent, a pipe, CI) there is no terminal to host the REPL —
+      // the TUI attaches to dead stdin and hangs forever. Fail fast with the
+      // headless alternatives instead of launching a doomed interactive session.
+      if (inferredInteractiveWithoutTty(execOptions, isInteractiveTerminal())) {
+        // Tear down the workflow MCP config + subagents staged above before we
+        // exit — same as every sibling exit path; requireInteractiveSelection
+        // process.exits, so cleanup must happen first or it leaks.
+        cleanupWorkflowMcpConfig();
+        cleanupWorkflowSubagents();
+        requireInteractiveSelection(`Launching ${agent} interactively`, [
+          `agents run ${agent} "<your task>"   # headless: prints the agent's result`,
+          `agents run ${agent} --headless        # headless: reads the prompt from stdin`,
+        ]);
       }
 
       try {
