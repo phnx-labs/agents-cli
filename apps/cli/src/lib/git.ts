@@ -893,13 +893,50 @@ export async function pullRepo(
       return {
         success: false,
         commit: '',
-        error: `Working tree has uncommitted changes. Commit or discard them before pulling.\n\n  cd ${displayHomePath(dir)} && git status`,
+        error: `Blocked by local changes. Commit or discard them before pulling.\n\n  cd ${displayHomePath(dir)} && git status`,
       };
     }
 
     const branch = status.current || 'main';
     await git.fetch('origin');
-    await git.pull('origin', branch, { '--rebase': 'true' });
+
+    // Resolve the upstream ref to fast-forward against. Prefer the local
+    // branch's tracking config; otherwise ask origin for its default branch.
+    let tracking = status.tracking;
+    if (!tracking) {
+      try {
+        await git.raw(['remote', 'set-head', 'origin', '--auto']);
+        const sym = await git.raw(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD']);
+        tracking = sym.trim();
+      } catch {
+        tracking = `origin/${branch}`;
+      }
+    }
+
+    const localRef = await git.revparse(['HEAD']);
+    const remoteRef = await git.revparse([tracking]).catch(() => null);
+    if (!remoteRef) {
+      return { success: false, commit: '', error: `Could not resolve upstream ref ${tracking}` };
+    }
+
+    if (localRef === remoteRef) {
+      const log = await git.log({ maxCount: 1 });
+      return {
+        success: true,
+        commit: log.latest?.hash.slice(0, 8) || 'unknown',
+        branch,
+      };
+    }
+
+    try {
+      await git.merge(['--ff-only', tracking]);
+    } catch {
+      return {
+        success: false,
+        commit: '',
+        error: `Blocked by local commits. Push or reset them before pulling.\n\n  cd ${displayHomePath(dir)} && git log --oneline HEAD...${tracking}`,
+      };
+    }
 
     installGithooksSymlinks(dir);
 

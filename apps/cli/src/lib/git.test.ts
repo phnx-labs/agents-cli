@@ -290,7 +290,7 @@ describe('pullRepo dirty-tree hint', () => {
     const res = await pullRepo(repo);
 
     expect(res.success).toBe(false);
-    expect(res.error).toContain('Working tree has uncommitted changes');
+    expect(res.error).toContain('Blocked by local changes');
     // The hint must reference this repo's own directory ...
     expect(res.error).toContain(path.basename(repo));
     expect(res.error).toContain(`cd ${displayHomePath(repo)} && git status`);
@@ -398,7 +398,7 @@ describe('commitAndPush (clean-but-ahead + dirty)', () => {
   });
 });
 
-describe('pullRepo divergent rebase', () => {
+describe('pullRepo fast-forward only', () => {
   let root: string;
   let remote: string;
   let local: string;
@@ -440,19 +440,45 @@ describe('pullRepo divergent rebase', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  it('rebases local commits onto divergent upstream instead of failing', async () => {
+  it('fast-forwards when the local branch is behind origin', async () => {
+    await commitFile(author, 'up.txt', 'from-author\n', 'author commit');
+    await simpleGit(author).push('origin', 'main');
+
+    const before = await simpleGit(local).revparse(['HEAD']);
+    const res = await pullRepo(local);
+    const after = await simpleGit(local).revparse(['HEAD']);
+
+    expect(res.success).toBe(true);
+    expect(res.branch).toBe('main');
+    expect(res.commit).toMatch(/^[0-9a-f]{7,8}$/);
+    expect(after).not.toBe(before);
+    expect(fs.existsSync(path.join(local, 'up.txt'))).toBe(true);
+  });
+
+  it('reports already up to date when local matches origin', async () => {
+    const before = await simpleGit(local).revparse(['HEAD']);
+    const res = await pullRepo(local);
+    const after = await simpleGit(local).revparse(['HEAD']);
+
+    expect(res.success).toBe(true);
+    expect(res.branch).toBe('main');
+    expect(after).toBe(before);
+  });
+
+  it('refuses to fast-forward when local commits diverge from origin', async () => {
     // Upstream and local each add a different file → diverged histories.
     await commitFile(author, 'up.txt', 'from-author\n', 'author commit');
     await simpleGit(author).push('origin', 'main');
     await commitFile(local, 'down.txt', 'from-local\n', 'local commit');
 
+    const before = await simpleGit(local).revparse(['HEAD']);
     const res = await pullRepo(local);
-    expect(res.success).toBe(true);
-    expect(res.branch).toBe('main');
-    expect(res.commit).toMatch(/^[0-9a-f]{7,8}$/);
-    // Both sides' files present after rebase.
-    expect(fs.existsSync(path.join(local, 'up.txt'))).toBe(true);
-    expect(fs.existsSync(path.join(local, 'down.txt'))).toBe(true);
+    const after = await simpleGit(local).revparse(['HEAD']);
+
+    expect(res.success).toBe(false);
+    expect(res.error).toContain('Blocked by local commits');
+    expect(after).toBe(before);
+    expect(fs.existsSync(path.join(local, 'up.txt'))).toBe(false);
   });
 });
 
