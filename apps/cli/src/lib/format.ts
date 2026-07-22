@@ -10,9 +10,51 @@
 import chalk from 'chalk';
 import { readSync } from 'node:fs';
 
-/** Print `msg` in red to stderr and exit the process with `code`. */
-export function die(msg: string, code = 1): never {
-  console.error(chalk.red(msg));
+/** Options for {@link die} — opt into machine-readable failure output. */
+export interface DieOptions {
+  /**
+   * Emit a machine-readable `{"error", "hint"?}` object to **stdout** instead of
+   * red text on stderr. Pass `isJsonMode(options)` from a `--json` command so an
+   * agent parsing stdout gets a structured reason instead of an empty stream and
+   * a bare nonzero exit (RUSH-1830).
+   */
+  json?: boolean;
+  /** Optional recovery hint — the command to run instead. Included in both modes. */
+  hint?: string;
+}
+
+/**
+ * Render a fatal error to the right stream. Pure — no I/O, no `process.exit` — so
+ * the human-vs-agent split is unit-testable. A `--json` caller gets
+ * `{"error","hint"?}` on **stdout** (where a JSON consumer reads); a human gets
+ * red text (plus a gray hint line) on **stderr**.
+ */
+export function formatDie(
+  msg: string,
+  opts: DieOptions = {},
+): { stream: 'stdout' | 'stderr'; text: string } {
+  if (opts.json) {
+    const payload: { error: string; hint?: string } = { error: msg };
+    if (opts.hint) payload.hint = opts.hint;
+    return { stream: 'stdout', text: JSON.stringify(payload) };
+  }
+  const lines = [chalk.red(msg)];
+  if (opts.hint) lines.push(chalk.gray(opts.hint));
+  return { stream: 'stderr', text: lines.join('\n') };
+}
+
+/**
+ * Print `msg` and exit the process with `code`. Humans get red text on stderr;
+ * a `--json` caller (pass `{ json: true }`) gets `{"error","hint"?}` on stdout so
+ * an agent has a parseable reason. Backward-compatible: `die(msg)` / `die(msg, code)`
+ * keep the original red-stderr behavior.
+ */
+export function die(msg: string, code = 1, opts: DieOptions = {}): never {
+  const { stream, text } = formatDie(msg, opts);
+  // Keep console.* (not process.std*.write): the suite spies on console.error /
+  // console.log to capture command output, and fd-level writes bypass those spies.
+  if (stream === 'stdout') console.log(text);
+  else console.error(text);
   process.exit(code);
 }
 

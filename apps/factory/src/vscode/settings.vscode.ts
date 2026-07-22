@@ -53,7 +53,6 @@ import { scanMemoryFiles } from './contextFiles';
 import { fetchAllAgentModels, checkInstalledAgentsViaCli, resolveAlias } from '../core/agentModels';
 import { fetchAgentInventories, writeAgentRunStrategy, AgentRunStrategy, AgentInventory, normalizeRunStrategy } from '../core/agentInventory';
 import { getAgentResources, invalidateAgentResourcesCache } from '../core/agentResources';
-import { listMcpResources, readMcpResource } from '../core/mcpResources';
 import * as workbench from './workbench.vscode';
 import * as theme from './theme.vscode';
 import { buildAgentTerminalEnv } from '../core/terminals';
@@ -73,11 +72,9 @@ import {
   encodePowershellScript,
   buildDeviceDispatchRemoteCmd,
 } from '../core/deviceDispatchShell';
-import { DebugLogStream, type DebugLogEntry } from '../core/debugLogs';
 
 let foremanSession: ForemanAudioSession | undefined;
 let foremanSessionGen = 0;
-const debugLogStream = new DebugLogStream();
 // Smart-mode (turn-based text brain) rolling history. Capped on assignment
 // (via capHistory, on a safe turn boundary) so a long session doesn't grow the
 // OpenAI context unbounded.
@@ -1595,16 +1592,7 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
 
   settingsPanel.webview.html = getWebviewContent(settingsPanel.webview, context.extensionUri);
 
-  let unsubscribeDebugLogs: (() => void) | undefined;
-  const publishDebugLog = (entry: DebugLogEntry) => {
-    settingsPanel?.webview.postMessage({ type: 'logEntry', entry });
-  };
-
   settingsPanel.webview.onDidReceiveMessage(async (message) => {
-    const rpcMethod = typeof message?.type === 'string' ? message.type : 'unknown';
-    const rpcRequestId = debugLogStream.recordJsonRpcRequest(message);
-    let rpcError: unknown;
-    try {
     switch (message.type) {
       case 'ready':
         // Post the panel's actual visibility once so the webview doesn't have
@@ -1616,11 +1604,6 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
           visible: settingsPanel.visible,
         });
         updateWebview();
-        break;
-      case 'subscribeLogs':
-        unsubscribeDebugLogs?.();
-        settingsPanel?.webview.postMessage({ type: 'logsData', entries: debugLogStream.snapshot() });
-        unsubscribeDebugLogs = debugLogStream.subscribe(publishDebugLog);
         break;
       case 'saveSettings':
         // Compare display prefs to decide if we need to retitle open terminals
@@ -2015,39 +1998,6 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         }
         break;
       }
-      case 'fetchMcpResources': {
-        const wsPath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        try {
-          const result = await listMcpResources(wsPath);
-          settingsPanel?.webview.postMessage({ type: 'mcpResourcesData', ...result });
-        } catch (err) {
-          console.error('[SETTINGS] Error fetching MCP resources:', err);
-          settingsPanel?.webview.postMessage({ type: 'mcpResourcesData', servers: [], resources: [] });
-        }
-        break;
-      }
-      case 'readMcpResource': {
-        const wsPath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        const serverName = typeof message.serverName === 'string' ? message.serverName : '';
-        const uri = typeof message.uri === 'string' ? message.uri : '';
-        if (!serverName || !uri) {
-          settingsPanel?.webview.postMessage({ type: 'mcpResourceReadError', serverName, uri, error: 'Missing server or URI.' });
-          break;
-        }
-        try {
-          const result = await readMcpResource(serverName, uri, wsPath);
-          settingsPanel?.webview.postMessage({ type: 'mcpResourceReadData', ...result });
-        } catch (err) {
-          console.error('[SETTINGS] Error reading MCP resource:', err);
-          settingsPanel?.webview.postMessage({
-            type: 'mcpResourceReadError',
-            serverName,
-            uri,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-        break;
-      }
       case 'getDefaultAgent':
         const defaultAgent = context.globalState.get<string>('agents.defaultAgentTitle', 'CC');
         settingsPanel?.webview.postMessage({
@@ -2107,14 +2057,11 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
       }
 
       case 'checkGitHubAuth': {
-        debugLogStream.recordOAuthStep('github.auth.check', 'pending', { provider: 'github' });
         try {
           const { isGitHubAvailable } = await import('./github.vscode');
           const connected = await isGitHubAvailable(context);
-          debugLogStream.recordOAuthStep('github.auth.check', connected ? 'ok' : 'error', { provider: 'github', connected });
           settingsPanel?.webview.postMessage({ type: 'integrationStatus', provider: 'github', connected });
         } catch (err) {
-          debugLogStream.recordOAuthStep('github.auth.check', 'error', { provider: 'github' }, err);
           settingsPanel?.webview.postMessage({ type: 'integrationStatus', provider: 'github', connected: false });
         }
         break;
@@ -2851,14 +2798,11 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         }
         break;
       case 'checkLinearAuth': {
-        debugLogStream.recordOAuthStep('linear.auth.check', 'pending', { provider: 'linear' });
         try {
           const { isLinearAvailable } = await import('./linear.vscode');
           const connected = await isLinearAvailable(context);
-          debugLogStream.recordOAuthStep('linear.auth.check', connected ? 'ok' : 'error', { provider: 'linear', connected });
           settingsPanel?.webview.postMessage({ type: 'integrationStatus', provider: 'linear', connected });
         } catch (err) {
-          debugLogStream.recordOAuthStep('linear.auth.check', 'error', { provider: 'linear' }, err);
           settingsPanel?.webview.postMessage({ type: 'integrationStatus', provider: 'linear', connected: false });
         }
         break;
@@ -3379,12 +3323,6 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         break;
       }
     }
-    } catch (err) {
-      rpcError = err;
-      throw err;
-    } finally {
-      debugLogStream.recordJsonRpcResponse(rpcRequestId, rpcMethod, rpcError);
-    }
   }, undefined, context.subscriptions);
 
   // Debounce terminal updates to avoid excessive webview messages
@@ -3444,8 +3382,6 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
   });
 
   settingsPanel.onDidDispose(() => {
-    unsubscribeDebugLogs?.();
-    unsubscribeDebugLogs = undefined;
     settingsPanel = undefined;
     terminalListener.dispose();
     terminalCloseListener.dispose();

@@ -322,7 +322,7 @@ export function accountTokensFingerprint(tokens: AccountTokenEntry[]): string {
  * Build the POST body for /api/v1/cloud-runs. Exported so tests can verify
  * the back-compat shape (singular fields + repos[]) without needing real
  * GitHub installations or a live Rush session. `findInstallation` is the
- * only other I/O and it's tested by the halo/proxy integration suite.
+ * only other I/O and it's tested by the cloud proxy integration suite.
  */
 export function buildDispatchBody(input: {
   agent?: string;
