@@ -250,7 +250,7 @@ Examples:
 
       // Resolve prompt: --prompt flag, positional arg, or file
       let prompt = (options.prompt as string) || positionalPrompt;
-      if (!prompt) die('Prompt is required. Pass it as an argument or with --prompt.');
+      if (!prompt) die('Prompt is required. Pass it as an argument or with --prompt.', 1, { json, hint: 'agents cloud run "<task>" --repo <owner/repo>' });
 
       // If prompt is a file path, read it and tell the user
       if (fs.existsSync(prompt) && fs.statSync(prompt).isFile()) {
@@ -267,7 +267,7 @@ Examples:
       // something to the host provider, so it implies --provider host rather
       // than silently riding along to a cloud backend that would ignore it.
       if (options.host && options.provider && options.provider !== 'host') {
-        die(`--host targets your own machines (--provider host), not ${options.provider}. Drop --host, or use --provider host.`);
+        die(`--host targets your own machines (--provider host), not ${options.provider}. Drop --host, or use --provider host.`, 1, { json });
       }
       const explicitProvider = (options.provider as string | undefined) ?? (options.host ? 'host' : undefined);
 
@@ -318,7 +318,7 @@ Examples:
       if (options.on) {
         const event = normalizeTriggerEvent(options.on as string);
         if (!event) {
-          die(`Unknown --on event "${options.on}". Use one of: ${GITHUB_TRIGGER_EVENTS.join(', ')} (aliases: pr, comment, workflow).`);
+          die(`Unknown --on event "${options.on}". Use one of: ${GITHUB_TRIGGER_EVENTS.join(', ')} (aliases: pr, comment, workflow).`, 1, { json });
         }
         const trigger: JobTrigger = { type: 'github_event', event: event! };
         if (repoValues[0]) trigger.repo = repoValues[0];
@@ -327,14 +327,14 @@ Examples:
         if (options.label) trigger.label = options.label as string;
 
         const triggerErrors = validateTrigger(trigger);
-        if (triggerErrors.length > 0) die(`Invalid trigger: ${triggerErrors.join(', ')}`);
+        if (triggerErrors.length > 0) die(`Invalid trigger: ${triggerErrors.join(', ')}`, 1, { json });
 
         dispatchOptions.trigger = trigger;
 
         const routineName = (options.name as string | undefined)
           || `cloud-${event}-${(repoValues[0] || 'any').replace(/[^a-z0-9]+/gi, '-')}`.toLowerCase();
         if (jobExists(routineName)) {
-          die(`A routine named "${routineName}" already exists. Pass --name to register under a different name.`);
+          die(`A routine named "${routineName}" already exists. Pass --name to register under a different name.`, 1, { json });
         }
 
         const routine: JobConfig = {
@@ -376,14 +376,14 @@ Examples:
       const skillIds = Array.isArray(options.skill) ? (options.skill as string[]) : [];
       const caps = provider.capabilities();
       if (imagePaths.length > 0) {
-        if (!caps.images) die(`${provider.name} does not support image attachments.`);
+        if (!caps.images) die(`${provider.name} does not support image attachments.`, 1, { json });
         if (imagePaths.length > MAX_IMAGES_PER_DISPATCH) {
-          die(`Too many images: ${imagePaths.length}. Max is ${MAX_IMAGES_PER_DISPATCH} per dispatch.`);
+          die(`Too many images: ${imagePaths.length}. Max is ${MAX_IMAGES_PER_DISPATCH} per dispatch.`, 1, { json });
         }
         dispatchOptions.images = imagePaths.map(readImageAttachment);
       }
       if (skillIds.length > 0) {
-        if (!caps.skills) die(`${provider.name} does not support ride-along skills.`);
+        if (!caps.skills) die(`${provider.name} does not support ride-along skills.`, 1, { json });
         dispatchOptions.skills = skillIds.map(parseSkillRef);
       }
 
@@ -408,16 +408,16 @@ Examples:
         if (err instanceof MissingTargetError) {
           const picked = await pickMissingTarget(provider, err, json);
           if (!picked) {
-            die(err.guidance ? `${err.message}\n\n${err.guidance}` : err.message);
+            die(err.guidance ? `${err.message}\n\n${err.guidance}` : err.message, 1, { json });
           }
           dispatchOptions.providerOptions![err.kind] = picked;
           try {
             task = await dispatchOnce();
           } catch (err2) {
-            die((err2 as Error).message);
+            die((err2 as Error).message, 1, { json });
           }
         } else {
-          die((err as Error).message);
+          die((err as Error).message, 1, { json });
         }
       }
 
