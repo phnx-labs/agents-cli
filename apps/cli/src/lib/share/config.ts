@@ -11,6 +11,7 @@
 import { randomBytes } from 'node:crypto';
 import { readMeta, updateMeta } from '../state.js';
 import {
+  bundleExists,
   bundleItemStore,
   bundlePolicy,
   isHeadlessSecretsContext,
@@ -37,6 +38,12 @@ export const SHARE_TOKEN_KEY = 'SHARE_WRITE_TOKEN';
 export const DEFAULT_CF_BUNDLE = 'cloudflare.com';
 export const DEFAULT_WORKER_NAME = 'agents-share';
 export const DEFAULT_BUCKET_NAME = 'agents-share';
+
+/** The write token may be injected ephemerally into fleet/cloud agents. */
+export function readWriteTokenEnv(env: NodeJS.ProcessEnv = process.env): string | null {
+  const token = env[SHARE_TOKEN_KEY]?.trim();
+  return token ? token : null;
+}
 
 /** Read the persisted endpoint config, or null if `agents share setup`/`join` never ran. */
 export function readShareConfig(): ShareConfig | null {
@@ -80,9 +87,8 @@ export function storeWriteToken(token: string): void {
   writeBundle(bundle);
 }
 
-/** Read the raw write token from the `share` secrets bundle. Throws with an
- * actionable message if absent (run setup/join first). */
-export function readWriteToken(): string {
+/** Read the raw write token from the `share` secrets bundle. */
+export function readWriteTokenFromBundle(): string {
   const { env } = readAndResolveBundleEnv(SHARE_BUNDLE, {
     caller: 'share',
     agentOnly: isHeadlessSecretsContext(),
@@ -95,6 +101,33 @@ export function readWriteToken(): string {
     );
   }
   return token;
+}
+
+/** Read the raw write token from injected env first, then the local bundle.
+ * Throws with an actionable message if absent (run setup/join first). */
+export function readWriteToken(): string {
+  return readWriteTokenEnv() ?? readWriteTokenFromBundle();
+}
+
+/** Best-effort runtime env for spawned agents. Never throws: a missing/locked
+ * bundle should not block unrelated agent runs, but an already-unlocked bundle
+ * or injected token lets ephemeral agents publish with no local setup. */
+export function shareRuntimeEnv(opts: { agentOnly?: boolean } = {}): Record<string, string> | undefined {
+  if (!readShareConfig()) return undefined;
+  const fromEnv = readWriteTokenEnv();
+  if (fromEnv) return { [SHARE_TOKEN_KEY]: fromEnv };
+  try {
+    if (!bundleExists(SHARE_BUNDLE)) return undefined;
+    const { env } = readAndResolveBundleEnv(SHARE_BUNDLE, {
+      caller: 'share',
+      keys: [SHARE_TOKEN_KEY],
+      agentOnly: opts.agentOnly,
+    });
+    const token = env[SHARE_TOKEN_KEY];
+    return token ? { [SHARE_TOKEN_KEY]: token } : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Cloudflare API credentials for provisioning, read from `cloudflare.com` (or a

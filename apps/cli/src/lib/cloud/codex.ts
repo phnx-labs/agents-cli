@@ -43,12 +43,15 @@ function codexAvailable(): boolean {
 }
 
 /** Spawn the codex CLI with the given arguments and capture its output. */
-function runCodex(args: string[]): Promise<{ stdout: string; stderr: string; code: number }> {
+function runCodex(args: string[], env?: Record<string, string>): Promise<{ stdout: string; stderr: string; code: number }> {
   const bin = findCodexBinary();
   if (!bin) return Promise.resolve({ stdout: '', stderr: 'codex not found', code: 127 });
 
   return new Promise((resolve) => {
-    const proc = spawn(bin, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    const proc = spawn(bin, args, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: env ? { ...process.env, ...env } : process.env,
+    });
     let stdout = '';
     let stderr = '';
     proc.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
@@ -146,7 +149,7 @@ export class CodexCloudProvider implements CloudProvider {
     if (options.branch) args.push('--branch', options.branch);
     args.push(options.prompt);
 
-    const { stdout, stderr, code } = await runCodex(args);
+    const { stdout, stderr, code } = await runCodex(args, options.env);
     if (code !== 0) {
       throw new Error(`codex cloud exec failed: ${stderr || stdout}`);
     }

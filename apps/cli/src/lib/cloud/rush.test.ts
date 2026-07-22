@@ -231,6 +231,24 @@ describe('buildDispatchBody', () => {
     expect(empty.images).toBeUndefined();
   });
 
+  it('includes runtime env when supplied for cloud agent injection', () => {
+    const body = buildDispatchBody({
+      prompt: 'x',
+      resolvedRepos: [{ installation_id: 1, repo_owner: 'a', repo_name: 'b' }],
+      env: { SHARE_WRITE_TOKEN: 'write-token' },
+    });
+    expect(body.env).toEqual({ SHARE_WRITE_TOKEN: 'write-token' });
+  });
+
+  it('omits empty runtime env', () => {
+    const body = buildDispatchBody({
+      prompt: 'x',
+      resolvedRepos: [{ installation_id: 1, repo_owner: 'a', repo_name: 'b' }],
+      env: {},
+    });
+    expect(body.env).toBeUndefined();
+  });
+
   it('advertises skills + images support in capabilities', () => {
     const caps = new RushCloudProvider().capabilities();
     expect(caps.skills).toBe(true);

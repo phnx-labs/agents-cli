@@ -222,6 +222,8 @@ export interface DispatchOptions {
   images?: ImageAttachment[];
   /** Provider-specific options (e.g., codex env ID, factory computer name). */
   providerOptions?: Record<string, unknown>;
+  /** Runtime env vars to inject into the remote agent process when the provider supports it. */
+  env?: Record<string, string>;
 }
 
 /**
