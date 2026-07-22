@@ -6,3 +6,4 @@
   `.subrecipes/` directories are tracked in the ownership manifest from the first
   sync, preventing workflows from being incorrectly skipped on later syncs. Source:
   `apps/cli/src/lib/project-resources.ts`.
+
