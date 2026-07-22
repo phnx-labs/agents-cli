@@ -122,14 +122,32 @@ APP_BUNDLE="${APP_CANDIDATES[0]:-}"
 BUILT_VERSION="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP_BUNDLE/Contents/Info.plist")"
 [[ "$BUILT_VERSION" == "$VERSION" ]] || die "bundle version $BUILT_VERSION != $VERSION"
 
-SIGNATURE="$(codesign -dvv "$APP_BUNDLE" 2>&1 || true)"
-if echo "$SIGNATURE" | grep -q "Developer ID Application"; then
-  echo "$SIGNATURE" | grep -m1 "Authority=" | sed 's/^/signed: /'
-  SPCTL_OUT="$(spctl --assess --type execute -vv "$APP_BUNDLE" 2>&1)"
-  echo "$SPCTL_OUT" | sed 's/^/spctl: /'
-  echo "$SPCTL_OUT" | grep -Eq "accepted|source=Notarized Developer ID" || die "spctl did not accept the notarized app"
+SIGNING_AVAILABLE=0
+if [[ -n "${CSC_NAME:-}${CSC_LINK:-}" ]]; then
+  SIGNING_AVAILABLE=1
+fi
+
+NOTARIZE_AVAILABLE=0
+if [[ -n "${APPLE_ID:-}" && -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" && -n "${APPLE_TEAM_ID:-}" ]]; then
+  NOTARIZE_AVAILABLE=1
+fi
+
+if [[ $SIGNING_AVAILABLE -eq 0 ]]; then
+  warn "Apple signing credentials (CSC_NAME/CSC_LINK) not present; skipping codesign/spctl verification. The published app will be unsigned."
 else
-  die "agents-dbg.app is not signed with Developer ID Application"
+  SIGNATURE="$(codesign -dvv "$APP_BUNDLE" 2>&1 || true)"
+  if echo "$SIGNATURE" | grep -q "Developer ID Application"; then
+    echo "$SIGNATURE" | grep -m1 "Authority=" | sed 's/^/signed: /'
+    if [[ $NOTARIZE_AVAILABLE -eq 1 ]]; then
+      SPCTL_OUT="$(spctl --assess --type execute -vv "$APP_BUNDLE" 2>&1)"
+      echo "$SPCTL_OUT" | sed 's/^/spctl: /'
+      echo "$SPCTL_OUT" | grep -Eq "accepted|source=Notarized Developer ID" || die "spctl did not accept the notarized app"
+    else
+      warn "Notarization credentials (APPLE_ID/APPLE_APP_SPECIFIC_PASSWORD/APPLE_TEAM_ID) not present; skipping spctl verification."
+    fi
+  else
+    die "agents-dbg.app is not signed with Developer ID Application"
+  fi
 fi
 
 ZIP_SHA="$(shasum -a 256 "$ZIP_PATH" | awk '{print $1}')"

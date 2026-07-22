@@ -13,10 +13,10 @@ if ! command -v brew >/dev/null 2>&1; then
 fi
 
 brew tap muqsitnawaz/tap >/dev/null
-brew install muqsitnawaz/tap/agents-dbg
+brew install --cask muqsitnawaz/tap/agents-dbg
 
-if [[ -d "$(brew --prefix agents-dbg)/agents-dbg.app" ]]; then
-  open "$(brew --prefix agents-dbg)/agents-dbg.app"
+if [[ -d "/Applications/agents-dbg.app" ]]; then
+  open "/Applications/agents-dbg.app"
 else
   open -a agents-dbg
 fi

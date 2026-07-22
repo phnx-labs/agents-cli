@@ -8,9 +8,12 @@ SHA="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 OUT="/tmp/agents-dbg-bottle-dry-run.out"
 bash scripts/bottle.sh 0.1.0 --sha256 "$SHA" > "$OUT"
 
-grep -q "class AgentsDbg < Formula" "$OUT"
 grep -q 'cask "agents-dbg"' "$OUT"
 grep -q "$SHA" "$OUT"
+if grep -q "class AgentsDbg < Formula" "$OUT"; then
+  echo "bottle.test.sh: Formula should not be emitted" >&2
+  exit 1
+fi
 
 TAP_REMOTE="$(mktemp -d)"
 TAP_REPO="$(mktemp -d)"

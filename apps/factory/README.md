@@ -32,7 +32,7 @@ This extension turns your IDE into an IAE:
 Install the private Mac app through the Homebrew tap:
 
 ```bash
-brew install muqsitnawaz/tap/agents-dbg
+brew install --cask muqsitnawaz/tap/agents-dbg
 ```
 
 The public install script uses that tap and launches the installed app:

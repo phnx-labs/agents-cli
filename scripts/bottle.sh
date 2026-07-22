@@ -7,7 +7,7 @@
 #   --asset <name>       Zip asset name (default: agents-dbg-<version>-universal.zip)
 #   --repo <owner/repo>  GitHub release repo (default: phnx-labs/agents-cli)
 #   --tap-repo <path>    Existing muqsitnawaz/homebrew-tap checkout
-#   --confirm            Write Formula/ and Casks/ files. Without it, print them.
+#   --confirm            Write Casks/ file. Without it, print it.
 #   --push               Commit and push tap changes after writing.
 
 set -euo pipefail
@@ -47,33 +47,6 @@ ASSET="${ASSET:-agents-dbg-${VERSION}-universal.zip}"
 
 URL="https://github.com/${REPO}/releases/download/agents-dbg-v${VERSION}/${ASSET}"
 
-formula() {
-  cat <<EOF
-class AgentsDbg < Formula
-  desc "Private install-only Mac app for debugging agents work streams"
-  homepage "https://github.com/${REPO}"
-  url "${URL}"
-  sha256 "${SHA256}"
-  version "${VERSION}"
-
-  depends_on :macos
-
-  def install
-    prefix.install "agents-dbg.app"
-    (bin/"agents-dbg").write <<~SH
-      #!/bin/bash
-      exec open "#{prefix}/agents-dbg.app" "\$@"
-    SH
-  end
-
-  test do
-    assert_path_exists prefix/"agents-dbg.app/Contents/MacOS/agents-dbg"
-    assert_match version.to_s, shell_output("/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' #{prefix}/agents-dbg.app/Contents/Info.plist")
-  end
-end
-EOF
-}
-
 cask() {
   cat <<EOF
 cask "agents-dbg" do
@@ -93,9 +66,6 @@ EOF
 }
 
 if [[ $CONFIRM -eq 0 ]]; then
-  echo "Formula/agents-dbg.rb"
-  formula
-  echo
   echo "Casks/agents-dbg.rb"
   cask
   exit 0
@@ -108,18 +78,16 @@ if [[ -z "$TAP_REPO" ]]; then
 fi
 
 [[ -d "$TAP_REPO/.git" ]] || die "tap repo is not a git checkout: $TAP_REPO"
-mkdir -p "$TAP_REPO/Formula" "$TAP_REPO/Casks"
-formula > "$TAP_REPO/Formula/agents-dbg.rb"
+mkdir -p "$TAP_REPO/Casks"
 cask > "$TAP_REPO/Casks/agents-dbg.rb"
 
 echo "Updated tap files:"
-echo "  $TAP_REPO/Formula/agents-dbg.rb"
 echo "  $TAP_REPO/Casks/agents-dbg.rb"
 
 if [[ $PUSH -eq 1 ]]; then
-  git -C "$TAP_REPO" add Formula/agents-dbg.rb Casks/agents-dbg.rb
-  if ! git -C "$TAP_REPO" diff --cached --quiet -- Formula/agents-dbg.rb Casks/agents-dbg.rb; then
-    git -C "$TAP_REPO" commit Formula/agents-dbg.rb Casks/agents-dbg.rb -m "agents-dbg ${VERSION}"
+  git -C "$TAP_REPO" add Casks/agents-dbg.rb
+  if ! git -C "$TAP_REPO" diff --cached --quiet -- Casks/agents-dbg.rb; then
+    git -C "$TAP_REPO" commit Casks/agents-dbg.rb -m "agents-dbg ${VERSION}"
     git -C "$TAP_REPO" push
   fi
 fi
