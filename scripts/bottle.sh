@@ -81,13 +81,21 @@ fi
 mkdir -p "$TAP_REPO/Casks"
 cask > "$TAP_REPO/Casks/agents-dbg.rb"
 
+# Remove any stale Formula that would collide with the Cask name in the same tap.
+if [[ -f "$TAP_REPO/Formula/agents-dbg.rb" ]]; then
+  git -C "$TAP_REPO" rm -f "Formula/agents-dbg.rb"
+  if [[ -d "$TAP_REPO/Formula" && -z "$(ls -A "$TAP_REPO/Formula")" ]]; then
+    rmdir "$TAP_REPO/Formula"
+  fi
+fi
+
 echo "Updated tap files:"
 echo "  $TAP_REPO/Casks/agents-dbg.rb"
 
 if [[ $PUSH -eq 1 ]]; then
   git -C "$TAP_REPO" add Casks/agents-dbg.rb
-  if ! git -C "$TAP_REPO" diff --cached --quiet -- Casks/agents-dbg.rb; then
-    git -C "$TAP_REPO" commit Casks/agents-dbg.rb -m "agents-dbg ${VERSION}"
+  if ! git -C "$TAP_REPO" diff --cached --quiet; then
+    git -C "$TAP_REPO" commit -m "agents-dbg ${VERSION}"
     git -C "$TAP_REPO" push
   fi
 fi
