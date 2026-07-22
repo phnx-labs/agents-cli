@@ -181,7 +181,19 @@ agents sessions c07ec355 --json --last 30
 
 # Role filtering
 agents sessions c07ec355 --json --include tools,assistant --last 20
+
+# Follow a live Claude/Codex session with compact lines by default
+agents sessions tail c07ec355
+
+# Opt in to raw JSONL when piping the live stream
+agents sessions tail c07ec355 --json | jq 'select(.type == "user")'
 ```
+
+`agents sessions tail` and `agents logs -f <id>` render compact live lines by
+default, even when stdout is piped. They show messages, tool calls, elided tool
+results, and errors; thinking, usage, init, and result metadata are hidden. Use
+`agents sessions tail --json` for the raw JSONL stream, or `agents logs -f --full`
+for the raw transcript follow.
 
 ## BM25 Column Weights
 
