@@ -23,7 +23,7 @@ import { promisify } from 'util';
 import chalk from 'chalk';
 import * as TOML from 'smol-toml';
 import { checkbox, select, confirm } from '@inquirer/prompts';
-import type { AgentId, VersionResources } from './types.js';
+import type { AgentId, DiscoveredPlugin, VersionResources } from './types.js';
 import { getVersionsDir, getShimsDir, ensureAgentsDir, readMeta, writeMeta, getCommandsDir, getSkillsDir, getHooksDir, getResolvedRulesDir, getUserRulesDir, getPermissionsDir, getSubagentsDir, getVersionResources, recordVersionResources, ensureVersionResourcePatterns, getMcpDir, getProjectAgentsDir, getPromptcutsPath, getUserPromptcutsPath, getEnabledExtraRepos, getAgentsDir, getOptionalUserAgentsDir, getUserAgentsDir, getTrashVersionsDir, getActiveRulesPreset, getHomeDir } from './state.js';
 import { defaultPatterns, expandPatterns } from './resource-patterns.js';
 import { resolveResource, listResources } from './resources.js';
@@ -43,7 +43,7 @@ import { listInstalledSubagents, transformSubagentForClaude, syncSubagentToOpenc
 import { listInstalledWorkflows, syncWorkflowToVersion } from './workflows.js';
 import { parseHookManifest, registerHooksToSettings, pruneVersionHomeHookEntriesFromSettings } from './hooks.js';
 import { supports, explainSkip, capableAgents } from './capabilities.js';
-import { discoverPlugins, syncPluginToVersion, isPluginSynced, pluginSupportsAgent, cleanOrphanedPluginSkills } from './plugins.js';
+import { discoverPlugins, syncPluginToVersion, isPluginSynced, pluginSupportsAgent, cleanOrphanedPluginSkills, marketplaceSpecForName } from './plugins.js';
 import { composeRulesFromState } from './rules/compose.js';
 import { loadManifest, saveManifest, buildManifest as buildSyncManifest, isStale } from './staleness/index.js';
 import { emit } from './events.js';
@@ -181,6 +181,29 @@ function sourceMapFromWorkflows(cwd: string): Map<string, string> {
   );
 }
 
+function sourceMapFromPluginSkills(plugins: DiscoveredPlugin[], activePluginNames: Set<string>, cwd: string): Map<string, string> {
+  const sourceRank = new Map<string, number>([
+    ['user', 0],
+    ['system', 1],
+    ['project', 3],
+  ]);
+  const entries = plugins
+    .filter(plugin => activePluginNames.has(plugin.name))
+    .map(plugin => {
+      const spec = marketplaceSpecForName(plugin.marketplace, cwd);
+      const source = spec.kind === 'extra' ? spec.alias : spec.kind;
+      return { plugin, source, rank: sourceRank.get(source) ?? 2 };
+    })
+    .sort((a, b) => a.rank - b.rank);
+  const sources = new Map<string, string>();
+  for (const { plugin, source } of entries) {
+    for (const skill of plugin.skills) {
+      if (!sources.has(skill)) sources.set(skill, source);
+    }
+  }
+  return sources;
+}
+
 /**
  * Get all available resources from ~/.agents/.
  */
@@ -314,9 +337,11 @@ export function getAvailableResources(cwd: string = process.cwd()): AvailableRes
   // Plugins (directories with .claude-plugin/plugin.json)
   const allPlugins = discoverPlugins();
   result.plugins = filterNamesForActiveResourceProfile('plugins', allPlugins.map(p => p.name), new Map(allPlugins.map(p => [p.name, 'user'])));
+  const activePlugins = new Set(result.plugins);
   const pluginSkillNames = filterNamesForActiveResourceProfile(
     'skills',
-    listPluginSkillNames({ plugins: new Set(result.plugins) }),
+    listPluginSkillNames({ plugins: activePlugins }),
+    sourceMapFromPluginSkills(allPlugins, activePlugins, cwd),
   );
   for (const name of pluginSkillNames) {
     if (!skillNames.has(name)) result.skills.push(name);

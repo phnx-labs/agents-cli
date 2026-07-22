@@ -8,7 +8,6 @@
 
 import { readMeta, updateMeta } from './state.js';
 import type { ResourcePattern, ResourceProfilePreset } from './types.js';
-import { expandPatterns } from './resource-patterns.js';
 
 export type ProfiledResourceKind =
   | 'commands'
@@ -120,24 +119,35 @@ function filterByPlainPatterns(names: string[], patterns: string[]): string[] {
   );
 }
 
+function sourcePatternMatches(pattern: string, name: string, sourceMap: Map<string, string>): boolean {
+  const colon = pattern.indexOf(':');
+  if (colon === -1) return false;
+  const source = pattern.slice(0, colon);
+  const rawName = pattern.slice(colon + 1);
+  const actualSource = sourceMap.get(name);
+  if (actualSource !== source) return false;
+  const patternNames = rawName === '*' ? ['*'] : rawName.split(',').map((n) => n.trim()).filter(Boolean);
+  return patternNames.some((patternName) => plainPatternMatches(patternName, name));
+}
+
 function expandProfilePatterns(
   names: string[],
   patterns: ResourcePattern[],
   sourceMap?: Map<string, string>,
 ): string[] {
   if (sourceMap) {
-    const sourcePatterns = patterns.filter((p) => {
-      const raw = p.startsWith('!') ? p.slice(1) : p;
-      return raw.includes(':');
-    });
-    const plainPatterns = patterns.filter((p) => {
-      const raw = p.startsWith('!') ? p.slice(1) : p;
-      return !raw.includes(':');
-    });
-    const selected = new Set<string>();
-    for (const name of expandPatterns(sourcePatterns, sourceMap)) selected.add(name);
-    for (const name of filterByPlainPatterns(names, plainPatterns)) selected.add(name);
-    return names.filter((name) => selected.has(name));
+    const included = new Set<string>();
+    const excluded = new Set<string>();
+    for (const pattern of patterns) {
+      const negate = pattern.startsWith('!');
+      const raw = negate ? pattern.slice(1) : pattern;
+      const target = negate ? excluded : included;
+      const matches = raw.includes(':')
+        ? names.filter((name) => sourcePatternMatches(raw, name, sourceMap))
+        : names.filter((name) => plainPatternMatches(raw, name));
+      for (const name of matches) target.add(name);
+    }
+    return names.filter((name) => included.has(name) && !excluded.has(name));
   }
   return filterByPlainPatterns(names, patterns);
 }

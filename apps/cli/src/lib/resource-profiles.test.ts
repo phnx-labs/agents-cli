@@ -74,6 +74,34 @@ describe('resource profiles', () => {
     });
   });
 
+  it('lets source-qualified exclusions remove plain pattern inclusions', () => {
+    const home = makeHome();
+    const result = runProbe(home, `
+      const {
+        filterNamesForActiveResourceProfile,
+        setActiveResourceProfile,
+        upsertResourceProfilePreset,
+      } = await import('./src/lib/resource-profiles.ts');
+
+      upsertResourceProfilePreset('work', {
+        skills: ['*', '!system:debug'],
+      });
+      setActiveResourceProfile('work');
+
+      const sourceMap = new Map([
+        ['keep', 'user'],
+        ['debug', 'system'],
+      ]);
+
+      console.log(JSON.stringify(
+        filterNamesForActiveResourceProfile('skills', ['keep', 'debug'], sourceMap)
+      ));
+    `);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual(['keep']);
+  });
+
   it('filters secrets listing and injection through the active profile', () => {
     const home = makeHome();
     const result = runProbe(home, `
