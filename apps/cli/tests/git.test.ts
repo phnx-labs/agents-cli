@@ -26,6 +26,9 @@ describe('pullRepo', () => {
     // Clone it to local
     mkdirSync(LOCAL_DIR, { recursive: true });
     await simpleGit().clone(REMOTE_DIR, LOCAL_DIR);
+    const localGit = simpleGit(LOCAL_DIR);
+    await localGit.addConfig('user.name', 'Test User');
+    await localGit.addConfig('user.email', 'test@example.com');
   });
 
   afterEach(() => {
