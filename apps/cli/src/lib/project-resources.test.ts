@@ -20,6 +20,52 @@ afterEach(() => {
 });
 
 describe('syncProjectResourcesToAgent', () => {
+  it('tracks Goose workflow subrecipes in the manifest from the first sync', () => {
+    const project = makeTempProject();
+    const projectAgentsDir = path.join(project, '.agents');
+    const workflowDir = path.join(projectAgentsDir, 'workflows', 'review-wf');
+    const subagentsDir = path.join(workflowDir, 'subagents');
+    fs.mkdirSync(subagentsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(workflowDir, 'WORKFLOW.md'),
+      [
+        '---',
+        'name: Review workflow',
+        'description: Review code',
+        'model: claude-sonnet-4',
+        'allowedAgents:',
+        '  - reviewer',
+        '---',
+        'Coordinate the review.',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+    fs.writeFileSync(
+      path.join(subagentsDir, 'reviewer.md'),
+      '---\nname: reviewer\ndescription: Reviews code\n---\n\nInspect code changes.',
+      'utf-8',
+    );
+
+    const first = syncProjectResourcesToAgent('goose', '1.0.0', projectAgentsDir);
+    expect(first.synced).toContain('workflows/review-wf');
+    expect(first.skipped).toEqual([]);
+
+    const recipePath = path.join(project, '.config', 'goose', 'recipes', 'review-wf.yaml');
+    const subrecipesPath = path.join(project, '.config', 'goose', 'recipes', 'review-wf.subrecipes');
+    expect(fs.existsSync(recipePath)).toBe(true);
+    expect(fs.existsSync(subrecipesPath)).toBe(true);
+
+    const manifestPath = path.join(project, '.config', 'goose', '.agents-managed.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as { paths: string[] };
+    expect(manifest.paths).toContain('recipes/review-wf.yaml');
+    expect(manifest.paths).toContain('recipes/review-wf.subrecipes');
+
+    const second = syncProjectResourcesToAgent('goose', '1.0.0', projectAgentsDir);
+    expect(second.synced).toContain('workflows/review-wf');
+    expect(second.skipped).toEqual([]);
+  });
+
   it('clears the Kimi parent subagent index when the last project subagent is removed', () => {
     const project = makeTempProject();
     const projectAgentsDir = path.join(project, '.agents');

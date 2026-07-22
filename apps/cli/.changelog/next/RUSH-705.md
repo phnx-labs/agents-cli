@@ -1,1 +1,2 @@
 - Project-scoped commands, skills, subagents, and workflows now sync into the current workspace's `.<agent>/` directory instead of lingering in global agent version homes.
+- Fixed Goose workflow sync so `.subrecipes/` directories are tracked in the ownership manifest from the first sync, preventing workflows from being incorrectly skipped on later syncs.

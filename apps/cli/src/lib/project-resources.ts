@@ -281,12 +281,18 @@ function syncProjectSubagents(
   }
 }
 
-function workflowManagedRelPaths(agent: AgentId, projectRoot: string, name: string): string[] {
+function workflowManagedRelPaths(agent: AgentId, projectRoot: string, name: string, workflowDir: string): string[] {
   if (agent === 'kimi') return [path.join('.kimi-code', 'skills', name)];
   if (agent === 'goose') {
     const rels = [path.join('.config', 'goose', 'recipes', `${name}.yaml`)];
-    const subrecipes = path.join(projectRoot, '.config', 'goose', 'recipes', `${name}.subrecipes`);
-    if (fs.existsSync(subrecipes)) rels.push(path.join('.config', 'goose', 'recipes', `${name}.subrecipes`));
+    const subagentsDir = path.join(workflowDir, 'subagents');
+    let hasSubagents = false;
+    try {
+      hasSubagents = fs.readdirSync(subagentsDir).some((f) => f.endsWith('.md'));
+    } catch {
+      hasSubagents = false;
+    }
+    if (hasSubagents) rels.push(path.join('.config', 'goose', 'recipes', `${name}.subrecipes`));
     return rels;
   }
   if (agent === 'openclaw') return [path.join('.openclaw', 'workflows', `${name}.lobster`)];
@@ -309,7 +315,7 @@ function syncProjectWorkflows(
     if (!entry.isDirectory()) continue;
     const workflowDir = path.join(projectAgentsDir, 'workflows', entry.name);
     if (!fs.existsSync(path.join(workflowDir, 'WORKFLOW.md'))) continue;
-    const rels = workflowManagedRelPaths(agent, projectRoot, entry.name);
+    const rels = workflowManagedRelPaths(agent, projectRoot, entry.name, workflowDir);
     const existing = rels.map((rel) => path.join(projectRoot, rel)).find((dest) => pathExists(dest));
     if (existing) {
       skip(existing, projectRoot, result);
