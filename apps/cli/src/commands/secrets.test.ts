@@ -20,6 +20,19 @@ import {
 } from './secrets.js';
 import { parseDotenv, type SecretsBundle } from '../lib/secrets/bundles.js';
 
+// On macOS, `secrets create --backend file` still stores bundle METADATA in the
+// Keychain, which requires the signed `Agents CLI.app` helper. GitHub macOS CI
+// runners can't codesign that helper, so a fresh CLI subprocess dies with
+// "Source Agents CLI.app not found". These subprocess tests must therefore skip
+// when the helper bundle is absent — matching install-helper.ts's own resolver
+// paths (dist/lib/secrets sibling, or <repo>/bin). Linux has no keychain gate,
+// so it always runs; local macOS with the helper installed also runs.
+const keychainHelperAvailable =
+  process.platform !== 'darwin' ||
+  fs.existsSync(path.resolve(__dirname, '../lib/secrets/Agents CLI.app')) ||
+  fs.existsSync(path.resolve(__dirname, '../../bin/Agents CLI.app')) ||
+  fs.existsSync(path.resolve(__dirname, '../../dist/lib/secrets/Agents CLI.app'));
+
 describe('parseImportSource', () => {
   it('treats a plain value as a .env path, including stdin', () => {
     expect(parseImportSource({ from: '.env.prod' })).toEqual({ kind: 'dotenv', path: '.env.prod' });
@@ -191,7 +204,13 @@ describe('secrets export --format json', () => {
     });
   }
 
-  it('prints injected process env keys for account-suffixed bundle keys', () => {
+  it.skipIf(!keychainHelperAvailable)('prints injected process env keys for account-suffixed bundle keys', ({ skip }) => {
+    // Belt-and-suspenders: the release matrix has shown `it.skipIf` failing to
+    // keep a test off a runner, so also skip explicitly at runtime.
+    if (!keychainHelperAvailable) {
+      skip();
+      return;
+    }
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-secrets-json-'));
     try {
       fs.mkdirSync(path.join(home, '.agents/.system'), { recursive: true });
@@ -235,7 +254,11 @@ describe('secrets list/view --json (agent discovery, RUSH-1834)', () => {
     return home;
   }
 
-  it('list --json emits a machine-readable bundle array with metadata but no secret values', () => {
+  it.skipIf(!keychainHelperAvailable)('list --json emits a machine-readable bundle array with metadata but no secret values', ({ skip }) => {
+    if (!keychainHelperAvailable) {
+      skip();
+      return;
+    }
     const home = seed();
     try {
       const res = runSecrets(home, ['list', '--json']);
@@ -255,7 +278,11 @@ describe('secrets list/view --json (agent discovery, RUSH-1834)', () => {
     }
   });
 
-  it('view --json lists keys with value=null when not revealed (never leaks the secret)', () => {
+  it.skipIf(!keychainHelperAvailable)('view --json lists keys with value=null when not revealed (never leaks the secret)', ({ skip }) => {
+    if (!keychainHelperAvailable) {
+      skip();
+      return;
+    }
     const home = seed();
     try {
       const res = runSecrets(home, ['view', 'github.com', '--json']);
@@ -273,7 +300,11 @@ describe('secrets list/view --json (agent discovery, RUSH-1834)', () => {
     }
   });
 
-  it('view --json --reveal fails fast in a non-TTY without --plaintext (same gate as the human view)', () => {
+  it.skipIf(!keychainHelperAvailable)('view --json --reveal fails fast in a non-TTY without --plaintext (same gate as the human view)', ({ skip }) => {
+    if (!keychainHelperAvailable) {
+      skip();
+      return;
+    }
     const home = seed();
     try {
       const res = runSecrets(home, ['view', 'github.com', '--json', '--reveal']);
