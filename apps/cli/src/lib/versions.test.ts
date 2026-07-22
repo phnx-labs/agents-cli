@@ -524,6 +524,28 @@ describe('version resource sync path handling', () => {
     expect(settings.mcpServers?.evil).toBeUndefined();
   });
 
+  it('syncs project commands and skills to the project dot-agent dir, not the version home', () => {
+    const home = makeTempHome();
+    const project = path.join(home, 'repo');
+    fs.mkdirSync(path.join(project, '.agents', 'commands'), { recursive: true });
+    fs.mkdirSync(path.join(project, '.agents', 'skills', 'local-skill'), { recursive: true });
+    fs.writeFileSync(path.join(project, '.agents', 'commands', 'local.md'), 'Project command.', 'utf-8');
+    fs.writeFileSync(path.join(project, '.agents', 'skills', 'local-skill', 'SKILL.md'), 'Project skill.', 'utf-8');
+
+    runVersionSync(
+      home,
+      `syncResourcesToVersion('claude', '2.1.143', undefined, { cwd: ${JSON.stringify(project)} })`
+    );
+
+    const versionHome = path.join(home, '.agents', '.history', 'versions', 'claude', '2.1.143', 'home', '.claude');
+    expect(fs.existsSync(path.join(versionHome, 'commands', 'local.md'))).toBe(false);
+    expect(fs.existsSync(path.join(versionHome, 'skills', 'local-skill'))).toBe(false);
+    expect(fs.readFileSync(path.join(project, '.claude', 'commands', 'local.md'), 'utf-8')).toBe('Project command.');
+    expect(fs.readFileSync(path.join(project, '.claude', 'skills', 'local-skill', 'SKILL.md'), 'utf-8')).toBe('Project skill.');
+    const manifest = JSON.parse(fs.readFileSync(path.join(project, '.claude', '.agents-managed.json'), 'utf-8')) as { paths: string[] };
+    expect(manifest.paths.sort()).toEqual(['commands/local.md', 'skills/local-skill'].sort());
+  });
+
   it('writes missing grok AGENTS.md when syncing a partial selection without memory', async () => {
     const home = makeTempHome();
     const rulesDir = path.join(home, '.agents', '.system', 'rules');

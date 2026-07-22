@@ -617,7 +617,7 @@ function runLaunchMode(agent: AgentId, version: string, cwd: string, quiet: bool
 
   const bits: string[] = [];
   if (result.rulesCompiled) bits.push('rules');
-  if (result.workspaceLinks > 0) bits.push(`${result.workspaceLinks} workspace link(s)`);
+  if (result.workspaceLinks > 0) bits.push(`${result.workspaceLinks} project resource(s)`);
   const mpCount = Object.keys(result.marketplaces).length;
   if (mpCount > 0) {
     const pluginCount = Object.values(result.marketplaces).reduce((acc, names) => acc + names.length, 0);

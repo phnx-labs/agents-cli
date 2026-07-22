@@ -249,15 +249,17 @@ global-but-separate; a project pin selects a shared install for one directory).
 
 ## Resource Syncing
 
-`syncResourcesToVersion()` links central `~/.agents/` resources into version homes:
+`syncResourcesToVersion()` copies user/system resources into version homes and
+refreshes project resources into the current workspace's dot-agent directory:
 
 ```
-~/.agents/commands/foo.md  ──symlink──▶  ~/.agents-system/versions/claude/2.0.65/home/.claude/commands/foo.md
-~/.agents/skills/bar/      ──symlink──▶  ~/.agents-system/versions/claude/2.0.65/home/.claude/skills/bar/
-~/.agents/rules/AGENTS.md ──symlink──▶  ~/.agents-system/versions/claude/2.0.65/home/.claude/CLAUDE.md
+~/.agents/commands/foo.md          ──copy──▶  ~/.agents/.history/versions/claude/2.0.65/home/.claude/commands/foo.md
+~/.agents/skills/bar/              ──copy──▶  ~/.agents/.history/versions/claude/2.0.65/home/.claude/skills/bar/
+<project>/.agents/commands/foo.md  ──copy──▶  <project>/.claude/commands/foo.md
+~/.agents/rules/AGENTS.md          ──copy──▶  ~/.agents/.history/versions/claude/2.0.65/home/.claude/CLAUDE.md
 ```
 
-Special case: Gemini requires TOML format, so commands are converted (not symlinked).
+Special case: Gemini requires TOML format, so commands are converted while copying.
 
 ## Shim Process Contract
 

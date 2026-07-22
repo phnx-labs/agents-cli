@@ -82,7 +82,7 @@ describe('runLaunchSync — workspace resource mirror', () => {
   // (NOT a flat .md file). It must be flattened and WRITTEN to
   // cwd/.claude/agents/<name>.md as a regular file — symlinking can't work
   // because a subagent is N source files collapsed into one.
-  it('writes .agents/subagents/<name>/AGENT.md → cwd/.claude/agents/<name>.md (flattened, regular file)', () => {
+  it('writes .agents/subagents/<name>/AGENT.md -> cwd/.claude/agents/<name>.md (flattened, regular file)', () => {
     writeFile(
       path.join(PROJECT_DIR, '.agents', 'subagents', 'probe-agent', 'AGENT.md'),
       '---\nname: probe-agent\ndescription: Probes things\nmodel: sonnet\n---\n\nProbe the codebase carefully.',
@@ -144,10 +144,12 @@ describe('runLaunchSync — workspace resource mirror', () => {
 
     runLaunchSync({ agent: 'claude', version: '1.0.0', cwd: PROJECT_DIR });
 
-    expect(fs.lstatSync(path.join(PROJECT_DIR, '.claude', 'commands', 'deploy.md')).isSymbolicLink()).toBe(true);
-    expect(fs.lstatSync(path.join(PROJECT_DIR, '.claude', 'skills', 'auditor')).isSymbolicLink()).toBe(true);
+    expect(fs.lstatSync(path.join(PROJECT_DIR, '.claude', 'commands', 'deploy.md')).isFile()).toBe(true);
+    expect(fs.lstatSync(path.join(PROJECT_DIR, '.claude', 'skills', 'auditor')).isDirectory()).toBe(true);
     // Critical: cwd/.mcp.json must NOT be auto-linked from the launch path.
     expect(fs.existsSync(path.join(PROJECT_DIR, '.mcp.json'))).toBe(false);
+    const manifest = readJson(path.join(PROJECT_DIR, '.claude', '.agents-managed.json')) as { paths: string[] };
+    expect(manifest.paths.sort()).toEqual(['commands/deploy.md', 'skills/auditor'].sort());
   });
 
   it('does not clobber a hand-authored .claude/agents/foo.md', () => {
@@ -166,7 +168,7 @@ describe('runLaunchSync — workspace resource mirror', () => {
   it('does not clobber a dangling user symlink at the dest path', () => {
     writeFile(path.join(PROJECT_DIR, '.agents', 'subagents', 'foo', 'AGENT.md'), '---\nname: foo\ndescription: from project\n---\n\nGenerated body.');
     fs.mkdirSync(path.join(PROJECT_DIR, '.claude', 'agents'), { recursive: true });
-    const danglingTarget = path.join(os.tmpdir(), 'does-not-exist-pls-keep-this-dangling');
+    const danglingTarget = path.join(TMP_HOME, 'does-not-exist-pls-keep-this-dangling');
     fs.symlinkSync(danglingTarget, path.join(PROJECT_DIR, '.claude', 'agents', 'foo.md'));
 
     const result = runLaunchSync({ agent: 'claude', version: '1.0.0', cwd: PROJECT_DIR });
@@ -178,14 +180,17 @@ describe('runLaunchSync — workspace resource mirror', () => {
     expect(fs.existsSync(dest)).toBe(false);                 // still dangling (target absent)
   });
 
-  it('is a no-op for non-claude agents (v1 scope)', () => {
-    writeFile(path.join(PROJECT_DIR, '.agents', 'subagents', 'foo.md'), '# x');
+  it('syncs project resources to Codex project-local directories', () => {
+    writeFile(path.join(PROJECT_DIR, '.agents', 'commands', 'ship.md'), 'Ship it.');
+    writeFile(path.join(PROJECT_DIR, '.agents', 'subagents', 'reviewer', 'AGENT.md'), '---\nname: reviewer\ndescription: Review code\n---\n\nReview.');
 
-    const result = runLaunchSync({ agent: 'codex', version: '1.0.0', cwd: PROJECT_DIR });
+    const result = runLaunchSync({ agent: 'codex', version: '0.117.0', cwd: PROJECT_DIR });
 
-    expect(result.workspaceLinks).toBe(0);
-    expect(fs.existsSync(path.join(PROJECT_DIR, '.codex'))).toBe(false);
-    expect(fs.existsSync(path.join(PROJECT_DIR, '.claude'))).toBe(false);
+    expect(result.workspaceLinks).toBe(2);
+    expect(fs.existsSync(path.join(PROJECT_DIR, '.codex', 'skills', 'ship', 'SKILL.md'))).toBe(true);
+    expect(fs.existsSync(path.join(PROJECT_DIR, '.codex', 'agents', 'reviewer.toml'))).toBe(true);
+    const manifest = readJson(path.join(PROJECT_DIR, '.codex', '.agents-managed.json')) as { paths: string[] };
+    expect(manifest.paths.sort()).toEqual(['agents/reviewer.toml', 'skills/ship'].sort());
   });
 
   it('is idempotent: running twice does not duplicate links', () => {
@@ -196,6 +201,20 @@ describe('runLaunchSync — workspace resource mirror', () => {
 
     expect(first.workspaceLinks).toBe(second.workspaceLinks);
     expect(fs.readdirSync(path.join(PROJECT_DIR, '.claude', 'agents'))).toEqual(['r.md']);
+  });
+
+  it('removes manifest-owned stale project resources before refreshing', () => {
+    const agentMd = path.join(PROJECT_DIR, '.agents', 'subagents', 'r', 'AGENT.md');
+    writeFile(agentMd, '---\nname: r\ndescription: r\n---\n\nBody.');
+    runLaunchSync({ agent: 'claude', version: '1.0.0', cwd: PROJECT_DIR });
+    expect(fs.existsSync(path.join(PROJECT_DIR, '.claude', 'agents', 'r.md'))).toBe(true);
+
+    fs.rmSync(path.dirname(agentMd), { recursive: true, force: true });
+    runLaunchSync({ agent: 'claude', version: '1.0.0', cwd: PROJECT_DIR });
+
+    expect(fs.existsSync(path.join(PROJECT_DIR, '.claude', 'agents', 'r.md'))).toBe(false);
+    const manifest = readJson(path.join(PROJECT_DIR, '.claude', '.agents-managed.json')) as { paths: string[] };
+    expect(manifest.paths).toEqual([]);
   });
 });
 

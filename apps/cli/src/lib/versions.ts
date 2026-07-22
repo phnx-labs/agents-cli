@@ -51,6 +51,7 @@ import { installCommandSkillToVersion, listCommandSkillsInVersion, readSkillSour
 import { getWriter, getDetector } from './staleness/registry.js';
 import { syncMemoryToVersionHome } from './memory.js';
 import { listPluginSkillNames } from './staleness/writers/sources.js';
+import { syncProjectResourcesToAgent } from './project-resources.js';
 
 /** Promisified exec for running shell commands. */
 const execAsync = promisify(exec);
@@ -2299,6 +2300,7 @@ function resourceSourceMap(kind: SelectableKind, cwd: string, available: Availab
     case 'skills':
     case 'hooks':
     case 'subagents':
+    case 'workflows':
       return new Map(listResources(kind, cwd).map(r => [r.name, r.source]));
     case 'permissions':
       return new Map(available.permissions.map(n => [n, 'system']));
@@ -2306,8 +2308,6 @@ function resourceSourceMap(kind: SelectableKind, cwd: string, available: Availab
       return new Map(getScopedMcpResources(cwd).map(r => [r.name, r.scope]));
     case 'plugins':
       return new Map(available.plugins.map(n => [n, 'user']));
-    case 'workflows':
-      return new Map(available.workflows.map(n => [n, 'user']));
   }
 }
 
@@ -2416,11 +2416,10 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   // only sets fields that aren't already present, preserving user edits).
   {
     const extraAliases = extraRepos.map(e => e.alias);
-    const allLayers = defaultPatterns(extraAliases);
     const noProject = defaultPatterns(extraAliases, false);
     ensureVersionResourcePatterns(agent, version, {
-      commands:    allLayers,
-      skills:      allLayers,
+      commands:    noProject,
+      skills:      noProject,
       hooks:       noProject,     // hooks: no project layer (security)
       subagents:   noProject,
       plugins:     noProject,
@@ -2477,6 +2476,10 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     }
   }
 
+  if (projectAgentsDir) {
+    syncProjectResourcesToAgent(agent, version, projectAgentsDir);
+  }
+
   // Fast guard: skip the entire sync when the caller requested a full sync and
   // nothing has changed since the last full sync. Pattern-derived selections
   // still count as full syncs because they are the persisted intended scope,
@@ -2527,6 +2530,11 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     return [];
   };
 
+  const dropProjectLayer = (kind: SelectableKind, names: string[]): string[] => {
+    const sources = resourceSourceMap(kind, cwd, available);
+    return names.filter((name) => sources.get(name) !== 'project');
+  };
+
   // Sync commands — dispatch through WRITERS.commands. The writer dispatches
   // between native (file copy / TOML conversion) and commands-as-skills
   // (grok, Codex >= 0.117.0) based on `shouldInstallCommandAsSkill`. The
@@ -2534,8 +2542,8 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   // takes the commands-as-skills path — silently dropping every command.
   const commandsWriter = getWriter('commands', agent);
   const commandsToSync = selection
-    ? resolveSelection(selection.commands, available.commands)
-    : available.commands; // No selection = sync all
+    ? dropProjectLayer('commands', resolveSelection(selection.commands, available.commands))
+    : dropProjectLayer('commands', available.commands); // No selection = sync all non-project commands
   const commandsAsSkills = shouldInstallCommandAsSkill(agent, version);
 
   if (commandsToSync.length > 0 && commandsWriter) {
@@ -2580,8 +2588,8 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     : (pluginsWriter ? available.plugins : []);
   const pluginSkillsToSync = listPluginSkillNames({ agent, plugins: new Set(pluginsToSync) });
   const selectedSkillsToSync = selection
-    ? resolveSelection(selection.skills, available.skills)
-    : available.skills;
+    ? dropProjectLayer('skills', resolveSelection(selection.skills, available.skills))
+    : dropProjectLayer('skills', available.skills);
   let skillsToSync = userPassedSelection
     ? selectedSkillsToSync
     : Array.from(new Set([...selectedSkillsToSync, ...pluginSkillsToSync]));
@@ -2768,8 +2776,8 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   const subagentsWriter = getWriter('subagents', agent);
   const subagentsGate = supports(agent, 'subagents', version);
   const subagentsRequested = selection
-    ? resolveSelection(selection.subagents, available.subagents)
-    : (subagentsWriter ? available.subagents : []);
+    ? dropProjectLayer('subagents', resolveSelection(selection.subagents, available.subagents))
+    : (subagentsWriter ? dropProjectLayer('subagents', available.subagents) : []);
   const subagentsToSync = subagentsGate.ok ? subagentsRequested : [];
 
   if (subagentsRequested.length > 0 && !subagentsGate.ok) {
@@ -2809,8 +2817,8 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   const workflowsWriter = getWriter('workflows', agent);
   const workflowsGate = supports(agent, 'workflows', version);
   const workflowsRequested = selection
-    ? resolveSelection(selection.workflows, available.workflows)
-    : (workflowsWriter ? available.workflows : []);
+    ? dropProjectLayer('workflows', resolveSelection(selection.workflows, available.workflows))
+    : (workflowsWriter ? dropProjectLayer('workflows', available.workflows) : []);
   const workflowsToSync = workflowsGate.ok ? workflowsRequested : [];
 
   if (workflowsRequested.length > 0 && !workflowsGate.ok) {

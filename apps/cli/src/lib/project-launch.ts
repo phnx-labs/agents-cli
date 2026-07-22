@@ -8,18 +8,12 @@
  *    (+ per-agent symlinks). Delegates to compileRulesForProject, which is
  *    the same helper management-side `agents sync` uses.
  *
- * 2. Mirror project resources from `<cwd>/.agents/{subagents,commands,skills}`
- *    into the agent's workspace-local discovery dirs (`<cwd>/.claude/agents/`,
- *    `<cwd>/.claude/commands/`, `<cwd>/.claude/skills/`). File-level symlinks
- *    so edits in the source dir are live without re-sync. Skips any dest
- *    entry that already exists and isn't one of our symlinks (don't-clobber).
- *    v1: claude-only. Other agents have varying workspace conventions (amp
- *    uses `~/.config/amp`, antigravity uses `~/.gemini/antigravity-cli`,
- *    codex/gemini/cursor lack subagent support entirely) — they're follow-up
- *    material. NOTE: `.mcp.json` is intentionally NOT auto-symlinked from
- *    the launch path — that's a supply-chain surface (cloning a hostile
- *    repo would auto-register an attacker MCP server). Belongs to full
- *    `agents sync` with explicit opt-in, not the hot path.
+ * 2. Copy project resources from `<cwd>/.agents/{commands,skills,subagents,workflows}`
+ *    into the agent's workspace-local discovery dir (`<cwd>/.claude/`,
+ *    `<cwd>/.codex/`, etc.) with an ownership manifest at
+ *    `<cwd>/.{agent}/.agents-managed.json`. The manifest is the only clobber
+ *    authority: paths it lists are removed and refreshed, pre-existing paths it
+ *    does not list are skipped as user-owned.
  *
  * 3. Synthesize four scope-grouped plugin marketplaces under the version's
  *    `<versionHome>/.{agent}/plugins/marketplaces/` (for plugin-capable agents):
@@ -57,8 +51,8 @@ import {
 } from './state.js';
 import { getVersionHomePath } from './versions.js';
 import { toPortableKey } from './platform/index.js';
-import { transformSubagentForClaude } from './subagents.js';
 import { compileRulesForProject } from './rules/compile.js';
+import { syncProjectResourcesToAgent } from './project-resources.js';
 import { discoverPluginsInDir, hasPluginExecSurfaces, inspectPluginCapabilities } from './plugins.js';
 import type { DiscoveredPlugin } from './types.js';
 import {
@@ -118,9 +112,12 @@ export function runLaunchSync(opts: LaunchSyncOptions): LaunchSyncResult {
   }
 
   // Step 2: workspace resource mirror
-  const mirror = mirrorWorkspaceResources(opts.cwd, opts.agent);
-  result.workspaceLinks = mirror.links;
-  result.workspaceSkipped = mirror.skipped;
+  const projectAgentsDir = getProjectAgentsDir(opts.cwd);
+  if (projectAgentsDir) {
+    const projectResources = syncProjectResourcesToAgent(opts.agent, opts.version, projectAgentsDir);
+    result.workspaceLinks = projectResources.synced.length;
+    result.workspaceSkipped = projectResources.skipped;
+  }
 
   // Step 3: scoped plugin marketplaces
   result.marketplaces = synthesizeScopedMarketplaces(opts.agent, opts.version, opts.cwd);
@@ -161,222 +158,6 @@ function touchLaunchSentinel(agent: AgentId, version: string, cwd: string): void
   } catch {
     // best-effort
   }
-}
-
-// ─── Step 2: workspace resource mirror ────────────────────────────────────────
-
-interface MirrorPlan {
-  /** Source dir under `<cwd>/.agents/`. */
-  srcSubdir: string;
-  /** Dest subdir under `<cwd>/.{agent}/`. */
-  destSubdir: string;
-  /**
-   * How each source entry becomes a dest entry:
-   *  - 'file-symlink':   each *.md FILE is symlinked 1:1 (commands).
-   *  - 'dir-symlink':    each DIRECTORY is symlinked 1:1 (skills — a skill IS a dir).
-   *  - 'subagent-write': each subagent DIRECTORY (containing AGENT.md plus
-   *    optional sibling .md files) is FLATTENED into a single written .md file.
-   *    A subagent has no single file to point a symlink at, so we write the
-   *    transform output instead — see writeProjectSubagents.
-   */
-  mode: 'file-symlink' | 'dir-symlink' | 'subagent-write';
-}
-
-const CLAUDE_MIRROR_PLANS: MirrorPlan[] = [
-  { srcSubdir: 'subagents', destSubdir: 'agents',   mode: 'subagent-write' },
-  { srcSubdir: 'commands',  destSubdir: 'commands', mode: 'file-symlink' },
-  { srcSubdir: 'skills',    destSubdir: 'skills',   mode: 'dir-symlink' },
-];
-
-/**
- * Marker prepended-as-trailing-comment to every subagent file WE generate.
- * It's an HTML comment — invisible to the markdown the agent reads — placed on
- * the last line so it never disturbs the leading `---` frontmatter block.
- *
- * Ownership rule (the one don't-clobber decision for written, non-symlink
- * files): we only overwrite a `.claude/agents/<name>.md` whose content carries
- * this marker. A user-authored file (no marker) or a symlink at the dest is
- * left untouched. A marker beats an mtime/sidecar sentinel because it travels
- * with the file across copies and git, and needs no out-of-band state.
- */
-const GENERATED_SUBAGENT_MARKER = '<!-- agents-cli:generated-subagent';
-
-function mirrorWorkspaceResources(cwd: string, agent: AgentId): { links: number; skipped: string[] } {
-  // v1: claude-only. Other agents have workspace conventions we haven't
-  // mapped (amp: ~/.config/amp; antigravity: ~/.gemini/antigravity-cli;
-  // codex/gemini/cursor: no subagent support per capabilities). Adding them
-  // requires per-agent workspaceDirName + capability gates — follow-up.
-  if (agent !== 'claude') return { links: 0, skipped: [] };
-
-  const projectAgentsDir = getProjectAgentsDir(cwd);
-  if (!projectAgentsDir) return { links: 0, skipped: [] };
-
-  const agentWorkspaceDir = path.join(cwd, '.claude');
-  const projectAgentsResolved = (() => {
-    try { return fs.realpathSync(projectAgentsDir); }
-    catch { return path.resolve(projectAgentsDir); }
-  })();
-
-  let links = 0;
-  const skipped: string[] = [];
-
-  // Mirror subagents / commands / skills. mcp.json is intentionally excluded
-  // — see header doc, it's a supply-chain surface.
-  for (const plan of CLAUDE_MIRROR_PLANS) {
-    const srcDir = path.join(projectAgentsDir, plan.srcSubdir);
-    if (!fs.existsSync(srcDir)) continue;
-
-    const destDir = path.join(agentWorkspaceDir, plan.destSubdir);
-    fs.mkdirSync(destDir, { recursive: true });
-
-    // Subagents flatten N source files into one written .md — not a symlink.
-    if (plan.mode === 'subagent-write') {
-      const r = writeProjectSubagents(srcDir, destDir, cwd);
-      links += r.links;
-      skipped.push(...r.skipped);
-      continue;
-    }
-
-    const entries = fs.readdirSync(srcDir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (entry.name.startsWith('.')) continue;
-      if (plan.mode === 'dir-symlink' && !entry.isDirectory()) continue;
-      if (plan.mode === 'file-symlink' && !entry.isFile() && !entry.isSymbolicLink()) continue;
-
-      const srcPath = path.join(srcDir, entry.name);
-      const destPath = path.join(destDir, entry.name);
-
-      if (replaceWithSymlinkIfOwned(srcPath, destPath, projectAgentsResolved)) {
-        links += 1;
-      } else {
-        skipped.push(path.relative(cwd, destPath));
-      }
-    }
-  }
-
-  return { links, skipped };
-}
-
-/**
- * Mirror project subagents into `<cwd>/.claude/agents/`. The canonical source
- * shape is a DIRECTORY containing AGENT.md (e.g. `.agents/subagents/probe/AGENT.md`)
- * — confirmed by the detector (versions.ts) and lister (subagents.ts). Each
- * such directory is flattened via transformSubagentForClaude (the exact writer
- * the version-home sync uses) into a single `<name>.md`, then written under an
- * ownership marker so a re-launch refreshes our file but never clobbers a
- * user-authored one.
- *
- * Returns the same {links, skipped} shape the symlink path reports, so the
- * caller's accounting is uniform across resource kinds.
- */
-function writeProjectSubagents(srcDir: string, destDir: string, cwd: string): { links: number; skipped: string[] } {
-  let links = 0;
-  const skipped: string[] = [];
-
-  for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
-    if (entry.name.startsWith('.')) continue;
-    if (!entry.isDirectory()) continue;
-
-    const subagentDir = path.join(srcDir, entry.name);
-    if (!fs.existsSync(path.join(subagentDir, 'AGENT.md'))) continue;
-
-    const destPath = path.join(destDir, `${entry.name}.md`);
-    if (writeSubagentIfOwned(subagentDir, destPath)) {
-      links += 1;
-    } else {
-      skipped.push(path.relative(cwd, destPath));
-    }
-  }
-
-  return { links, skipped };
-}
-
-/**
- * Write a flattened subagent file at `destPath`, refusing to clobber user state.
- *
- *   - dest missing            → write fresh.
- *   - dest is our generation  → overwrite (refresh; carries GENERATED_SUBAGENT_MARKER).
- *   - dest is a symlink / any
- *     non-regular file         → SKIP (user state we don't own).
- *   - dest is a regular file
- *     without our marker        → SKIP (hand-authored .claude/agents/<name>.md).
- *
- * Returns true when our file is present (written now or already current),
- * false when we left a user-owned dest alone.
- */
-function writeSubagentIfOwned(subagentDir: string, destPath: string): boolean {
-  let existing: string | null = null;
-  let destLstat: fs.Stats | null = null;
-  try { destLstat = fs.lstatSync(destPath); } catch { /* missing — write fresh */ }
-
-  if (destLstat) {
-    if (!destLstat.isFile()) return false; // symlink/dir/etc. — user state
-    try { existing = fs.readFileSync(destPath, 'utf-8'); } catch { return false; }
-    if (!existing.includes(GENERATED_SUBAGENT_MARKER)) return false; // hand-authored
-  }
-
-  let body: string;
-  try {
-    body = transformSubagentForClaude(subagentDir);
-  } catch {
-    return false; // malformed AGENT.md — don't write a broken file
-  }
-  const content = `${body}\n\n${GENERATED_SUBAGENT_MARKER} — edit .agents/subagents/${path.basename(subagentDir)}/ instead -->\n`;
-
-  // Skip-fast: identical content already on disk → no write (keeps mtime stable).
-  if (existing === content) return true;
-
-  try {
-    fs.mkdirSync(path.dirname(destPath), { recursive: true });
-    fs.writeFileSync(destPath, content);
-  } catch {
-    return false;
-  }
-  return true;
-}
-
-/**
- * Create or refresh a symlink at `destPath` pointing at `srcPath`. Returns
- * true if we wrote (or already had) the link, false if we skipped because
- * the destination is user-owned (regular file, directory, or symlink pointing
- * outside the project's `.agents/` tree, or a dangling symlink — treated as
- * user state we don't yet understand).
- *
- * Skip-fast: if the destination is already a symlink resolving to the
- * project-agents tree AND its target matches srcPath, no write happens.
- */
-function replaceWithSymlinkIfOwned(srcPath: string, destPath: string, projectAgentsResolved: string): boolean {
-  let destLstat: fs.Stats | null = null;
-  try { destLstat = fs.lstatSync(destPath); } catch { /* missing — write fresh */ }
-
-  if (destLstat) {
-    if (!destLstat.isSymbolicLink()) {
-      return false;
-    }
-    let destTargetReal: string | null = null;
-    try { destTargetReal = fs.realpathSync(destPath); } catch { /* dangling */ }
-    // Dangling symlink → user-owned in-progress state; do not clobber.
-    if (destTargetReal === null) {
-      return false;
-    }
-    if (destTargetReal !== projectAgentsResolved && !destTargetReal.startsWith(projectAgentsResolved + path.sep)) {
-      return false;
-    }
-    let srcReal: string | null = null;
-    try { srcReal = fs.realpathSync(srcPath); } catch { /* src vanished mid-launch */ }
-    if (srcReal !== null && destTargetReal === srcReal) {
-      return true; // already correct
-    }
-    try { fs.unlinkSync(destPath); } catch { /* ignore */ }
-  }
-
-  try {
-    fs.mkdirSync(path.dirname(destPath), { recursive: true });
-    fs.symlinkSync(srcPath, destPath);
-  } catch {
-    return false;
-  }
-  return true;
 }
 
 // ─── Step 3: scoped plugin marketplaces ───────────────────────────────────────

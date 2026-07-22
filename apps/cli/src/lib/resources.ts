@@ -34,6 +34,7 @@ export type ResourceKind =
   | 'cli'
   | 'permissions'
   | 'subagents'
+  | 'workflows'
   | 'profiles'
   | 'secrets';
 

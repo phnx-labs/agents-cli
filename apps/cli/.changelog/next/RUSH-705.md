@@ -1,0 +1,1 @@
+- Project-scoped commands, skills, subagents, and workflows now sync into the current workspace's `.<agent>/` directory instead of lingering in global agent version homes.

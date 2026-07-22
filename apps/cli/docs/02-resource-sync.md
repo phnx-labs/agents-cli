@@ -1,15 +1,15 @@
 # Resource Sync
 
-How agents-cli syncs resources (commands, skills, hooks, memory, MCP, permissions) between central storage and version homes.
+How agents-cli syncs resources (commands, skills, hooks, memory, MCP, permissions) between central storage, project workspaces, and version homes.
 
 For the conceptual model — what a DotAgents repo is, what resources are, and how layered resolution works — see [00-concepts.md](00-concepts.md).
 
 ## Resource Types
 
-| Resource | Source layers (resolved project > user > system) | Version Home Location | Sync Method |
+| Resource | Source layers (resolved project > user > system) | Target Location | Sync Method |
 |----------|-----------------|----------------------|-------------|
-| Commands | `<project>/.agents/commands/*.md` › `~/.agents/commands/*.md` › `~/.agents-system/commands/*.md` | `.{agent}/commands/` | Symlink (copy+convert for Gemini) |
-| Skills | `…/.agents/skills/{name}/` (same layering) | `.{agent}/skills/` | Symlink (Gemini/Goose read central `~/.agents/skills/` natively) |
+| Commands | `<project>/.agents/commands/*.md` › `~/.agents/commands/*.md` › `~/.agents-system/commands/*.md` | Project sources: `<project>/.{agent}/{commandsSubdir}/`; user/system: `<version-home>/.{agent}/{commandsSubdir}/` | Copy (TOML conversion for Gemini; command-skill conversion where required) |
+| Skills | `…/.agents/skills/{name}/` (same layering) | Project sources: `<project>/.{agent}/skills/`; user/system: `<version-home>/.{agent}/skills/` | Copy (Gemini reads central `~/.agents/skills/` natively) |
 | Hooks | `…/.agents/hooks/*.sh` (same layering) | `.{agent}/hooks/` | Symlink |
 | Rules | `…/.agents/rules/AGENTS.md` (same layering) | `.{agent}/{instructionsFile}` | Symlink |
 | MCP | `…/.agents/mcp/*.yaml` (same layering) | `.{agent}/settings.json` | Merge into JSON |
@@ -48,8 +48,8 @@ GEMINI.md -> AGENTS.md
 Sync state is derived, not stored. Three set operations over the filesystem:
 
 ```
-available = contents of ~/.agents/{commands,skills,hooks,memory,mcp,permissions}
-synced    = symlinks in <version home> whose target is under ~/.agents/
+available = contents of scoped .agents/{commands,skills,hooks,memory,mcp,permissions}
+synced    = files in <version home> plus project-managed files in <project>/.{agent}/
 new       = available - synced
 ```
 
@@ -85,10 +85,22 @@ agents use claude@2.0.65
 │     └─ "2 commands, 1 memory file available. Sync now?"            │
 │                                                                     │
 │  3. syncResourcesToVersion(claude, 2.0.65)                          │
-│     └─ Creates symlinks in version home                             │
-│     └─ Records synced resources in agents.yaml                      │
+│     └─ Refreshes project resources in <project>/.claude/            │
+│     └─ Copies user/system resources into the version home           │
+│     └─ Records sync manifests for skip-fast staleness checks        │
 └─────────────────────────────────────────────────────────────────────┘
 ```
+
+Project-scope commands, skills, subagents, and workflows are never copied into a
+global version home. They are refreshed into the current workspace's agent
+directory (`.claude/`, `.codex/`, `.cursor/`, `.opencode/`, etc.) with an
+ownership manifest at `.<agent>/.agents-managed.json`. On each refresh,
+agents-cli removes only the paths listed in that manifest, then copies current
+project resources. If a destination exists after manifest-owned paths are
+removed, it is treated as user-owned and left in place with a warning. The
+generated `.<agent>/` directory is intentionally not auto-added to `.gitignore`;
+projects that do not want to commit generated agent resources should ignore it
+themselves.
 
 ## Sync Targets: Version Selectors and Repo Scoping
 
