@@ -20,6 +20,7 @@ import type { JobConfig, JobTrigger } from '../lib/routines.js';
 import { normalizeTriggerEvent, validateTrigger, writeJob, jobExists, GITHUB_TRIGGER_EVENTS } from '../lib/routines.js';
 import { machineId } from '../lib/machine-id.js';
 import { emit } from '../lib/events.js';
+import { shareRuntimeEnv } from '../lib/share/config.js';
 
 /** Map a supported image file extension to its wire mimeType. Rejects anything else. */
 function imageMimeFromPath(file: string): ImageAttachment['mimeType'] {
@@ -294,6 +295,8 @@ Examples:
         model: options.model as string | undefined,
         providerOptions: {},
       };
+      const shareEnv = shareRuntimeEnv({ agentOnly: true });
+      if (shareEnv) dispatchOptions.env = shareEnv;
 
       if (options.env) dispatchOptions.providerOptions!.env = options.env as string;
       if (options.computer) dispatchOptions.providerOptions!.computer = options.computer as string;

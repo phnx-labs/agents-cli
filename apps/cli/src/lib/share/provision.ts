@@ -10,6 +10,16 @@ interface CfError {
   message?: string;
 }
 
+export interface CloudflareRequest {
+  apiToken: string;
+  method: string;
+  pathname: string;
+  body?: unknown;
+  form?: FormData;
+}
+
+export type CloudflareRequester = <T = unknown>(request: CloudflareRequest) => Promise<T>;
+
 async function cf<T = unknown>(
   apiToken: string,
   method: string,
@@ -40,15 +50,33 @@ async function cf<T = unknown>(
   return json.result as T;
 }
 
+const defaultCloudflareRequester: CloudflareRequester = <T = unknown>(request: CloudflareRequest) =>
+  cf<T>(request.apiToken, request.method, request.pathname, request.body, request.form);
+
+interface ProvisionOptions {
+  request?: CloudflareRequester;
+}
+
 /** True if the CF error looks like "the thing already exists" (idempotent create). */
 function isAlreadyExists(e: unknown): boolean {
   return /already exists|duplicate|10004|10014/i.test(String(e));
 }
 
 /** Create the R2 bucket (idempotent). */
-export async function createBucket(apiToken: string, accountId: string, name: string): Promise<void> {
+export async function createBucket(
+  apiToken: string,
+  accountId: string,
+  name: string,
+  opts: ProvisionOptions = {},
+): Promise<void> {
+  const request = opts.request ?? defaultCloudflareRequester;
   try {
-    await cf(apiToken, 'POST', `/accounts/${accountId}/r2/buckets`, { name });
+    await request({
+      apiToken,
+      method: 'POST',
+      pathname: `/accounts/${accountId}/r2/buckets`,
+      body: { name },
+    });
   } catch (e) {
     if (!isAlreadyExists(e)) throw e;
   }
@@ -62,7 +90,9 @@ export async function deployWorker(
   script: string,
   bucketName: string,
   writeToken: string,
+  opts: ProvisionOptions = {},
 ): Promise<void> {
+  const request = opts.request ?? defaultCloudflareRequester;
   const metadata = {
     main_module: 'worker.js',
     compatibility_date: '2024-11-06',
@@ -78,7 +108,12 @@ export async function deployWorker(
     new Blob([script], { type: 'application/javascript+module' }),
     'worker.js',
   );
-  await cf(apiToken, 'PUT', `/accounts/${accountId}/workers/scripts/${workerName}`, undefined, form);
+  await request({
+    apiToken,
+    method: 'PUT',
+    pathname: `/accounts/${accountId}/workers/scripts/${workerName}`,
+    form,
+  });
 }
 
 /** Enable the free `*.workers.dev` route for the script, and return the account subdomain. */
@@ -86,16 +121,23 @@ export async function enableWorkersDev(
   apiToken: string,
   accountId: string,
   workerName: string,
+  opts: ProvisionOptions = {},
 ): Promise<string> {
-  await cf(apiToken, 'POST', `/accounts/${accountId}/workers/scripts/${workerName}/subdomain`, {
-    enabled: true,
-    previews_enabled: false,
-  });
-  const sub = await cf<{ subdomain?: string }>(
+  const request = opts.request ?? defaultCloudflareRequester;
+  await request({
     apiToken,
-    'GET',
-    `/accounts/${accountId}/workers/subdomain`,
-  );
+    method: 'POST',
+    pathname: `/accounts/${accountId}/workers/scripts/${workerName}/subdomain`,
+    body: {
+      enabled: true,
+      previews_enabled: false,
+    },
+  });
+  const sub = await request<{ subdomain?: string }>({
+    apiToken,
+    method: 'GET',
+    pathname: `/accounts/${accountId}/workers/subdomain`,
+  });
   if (!sub?.subdomain) {
     throw new Error(
       'No workers.dev subdomain on this account yet — register one at dash.cloudflare.com → Workers → Subdomain, then re-run.',
@@ -105,15 +147,20 @@ export async function enableWorkersDev(
 }
 
 /** Resolve a zone id for a domain the token can see, or null if not owned/visible. */
-export async function findZoneId(apiToken: string, domain: string): Promise<string | null> {
+export async function findZoneId(
+  apiToken: string,
+  domain: string,
+  opts: ProvisionOptions = {},
+): Promise<string | null> {
+  const request = opts.request ?? defaultCloudflareRequester;
   // Try the exact name, then the registrable parent (share.agents-cli.sh -> agents-cli.sh).
   const candidates = [domain, domain.split('.').slice(-2).join('.')];
   for (const name of candidates) {
-    const zones = await cf<Array<{ id: string; name: string }>>(
+    const zones = await request<Array<{ id: string; name: string }>>({
       apiToken,
-      'GET',
-      `/zones?name=${encodeURIComponent(name)}`,
-    ).catch(() => [] as Array<{ id: string; name: string }>);
+      method: 'GET',
+      pathname: `/zones?name=${encodeURIComponent(name)}`,
+    }).catch(() => [] as Array<{ id: string; name: string }>);
     if (zones?.length) return zones[0].id;
   }
   return null;
@@ -126,13 +173,20 @@ export async function addCustomDomain(
   workerName: string,
   zoneId: string,
   hostname: string,
+  opts: ProvisionOptions = {},
 ): Promise<void> {
+  const request = opts.request ?? defaultCloudflareRequester;
   try {
-    await cf(apiToken, 'PUT', `/accounts/${accountId}/workers/domains`, {
-      zone_id: zoneId,
-      hostname,
-      service: workerName,
-      environment: 'production',
+    await request({
+      apiToken,
+      method: 'PUT',
+      pathname: `/accounts/${accountId}/workers/domains`,
+      body: {
+        zone_id: zoneId,
+        hostname,
+        service: workerName,
+        environment: 'production',
+      },
     });
   } catch (e) {
     if (!isAlreadyExists(e)) throw e;

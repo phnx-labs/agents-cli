@@ -10,7 +10,10 @@ import {
 import * as claudemd from './claudemd.vscode';
 import { AgentsMarkdownEditorProvider, swarmCurrentDocument } from './customEditor';
 import * as git from './git.vscode';
-import { AgentSettings, hasLoginEnabled, PromptEntry, QUICK_LAUNCH_SLOT_KEYS, getQuickLaunchSlot, QuickLaunchSlot } from '../core/settings';
+import { AgentSettings, hasLoginEnabled, PromptEntry, QUICK_LAUNCH_SLOT_KEYS, getQuickLaunchSlot, QuickLaunchSlot, QuickLaunchSlotKey } from '../core/settings';
+import { listRegisteredDevices, countRunningAgents } from './deviceHealth.vscode';
+import { normalizeHost } from '../core/remoteSessions';
+import { pickLeastBusyDevice, resolveBalancePool } from '../core/launchHost';
 import * as settings from './settings.vscode';
 import * as swarm from './swarm.vscode';
 import {
@@ -177,17 +180,30 @@ type LaunchableAgent = 'claude' | 'codex' | 'gemini' | 'opencode' | 'cursor' | '
 // strategy.) The CLI ignores --strategy when an @version is pinned.
 type RunStrategy = 'pinned' | 'available' | 'balanced';
 
+// Shell-quote a token (device names come from the registry; quote defensively so
+// a stray character can never break out of the `agents run … --host <x>` string).
+function shquote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
 function buildAgentLaunchCommand(
-  agentKey: LaunchableAgent,
+  agentKey: string,
   sessionId: string | null,
   defaultModel?: string,
   additionalFlags?: string,
   pinnedVersion?: string,
   strategy?: RunStrategy,
   mode?: AgentLaunchMode,
+  host?: string,
 ): string {
   const agentSpec = pinnedVersion ? `${agentKey}@${pinnedVersion}` : agentKey;
   let command = `agents run ${agentSpec} --interactive`;
+  // Offload onto another machine over SSH — the CLI resolves the device from
+  // `agents devices` and runs interactive-on-host. Emitted for ANY agent so
+  // grok/kimi/droid (which launch as raw binaries locally) get host parity.
+  if (host) {
+    command += ` --host ${shquote(host)}`;
+  }
   if (sessionId && agentKey === 'claude') {
     command += ` --session-id ${sessionId}`;
   }
@@ -275,6 +291,75 @@ function buildClaudeLaunchCommand(
   mode?: AgentLaunchMode,
 ): string {
   return buildAgentLaunchCommand('claude', sessionId, defaultModel, additionalFlags, undefined, undefined, mode);
+}
+
+// --- Fleet-aware launch: host targeting -----------------------------------
+// Sentinel a QuickPick/slot uses to mean "auto-pick the least-busy device".
+const BALANCED_HOST = 'balanced';
+
+// Resolve the least-busy online device for a balanced launch. `pool` restricts
+// the candidate set (undefined/empty = every online device except this machine).
+// Probes running-agent counts behind a progress spinner. Returns undefined when
+// no device is eligible, so the caller falls back to the local machine.
+async function resolveBalancedHost(pool?: string[]): Promise<string | undefined> {
+  const localName = normalizeHost(os.hostname());
+  const devices = await listRegisteredDevices();
+  const fleet = devices.map(d => ({ name: d.name, online: !!d.online, running: 0 }));
+  const online = resolveBalancePool(fleet, { localName, pool }).filter(c => c.online);
+  if (online.length === 0) {
+    vscode.window.showInformationMessage('Balanced launch: no online device available — running locally.');
+    return undefined;
+  }
+  const loaded = await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Window, title: 'Picking least-busy host…' },
+    () => Promise.all(online.map(async c => ({
+      ...c,
+      running: await countRunningAgents(c.name, { isLocal: false }),
+    }))),
+  );
+  return pickLeastBusyDevice(loaded) ?? undefined;
+}
+
+// Resolve a Quick Launch slot's Run-on target to a device name (undefined =
+// local). 'balanced' -> least-busy of the pool; a device name -> that host if
+// still online, else local with a nudge.
+async function resolveSlotHost(slot: QuickLaunchSlot): Promise<string | undefined> {
+  const target = slot.runOn?.trim();
+  if (!target || target === 'local') return undefined;
+  if (target === BALANCED_HOST) return resolveBalancedHost(slot.balancePool);
+  const devices = await listRegisteredDevices();
+  const dev = devices.find(d => normalizeHost(d.name) === normalizeHost(target));
+  if (!dev) {
+    vscode.window.showWarningMessage(`Launch host "${target}" is not a registered device — running locally.`);
+    return undefined;
+  }
+  if (!dev.online) {
+    vscode.window.showWarningMessage(`Launch host "${target}" is offline — running locally.`);
+    return undefined;
+  }
+  return dev.name;
+}
+
+// Interactive host picker (This Mac / a device / Balanced) for the per-agent
+// "(Pick Host)" commands and the ⌘⌥⇧n override. Returns { cancelled } if the
+// user dismissed it; host === undefined means "this Mac".
+async function pickLaunchHost(title = 'Run on…'): Promise<{ host?: string; cancelled: boolean }> {
+  const devices = await listRegisteredDevices();
+  const sorted = [...devices].sort((a, b) => Number(b.online) - Number(a.online));
+  const BALANCE_ID = ' balanced';
+  const items: (vscode.QuickPickItem & { hostId?: string })[] = [
+    { label: '$(vm) This Mac', description: 'Run locally', hostId: undefined },
+    { label: '$(sync) Balanced (least-busy)', description: 'Auto-pick the least-busy online device', hostId: BALANCE_ID },
+    ...sorted.map(d => ({
+      label: `${d.online ? '$(radio-tower)' : '$(circle-slash)'} ${d.name}`,
+      description: d.online ? 'online' : 'offline',
+      hostId: d.name,
+    })),
+  ];
+  const pick = await vscode.window.showQuickPick(items, { placeHolder: title, title });
+  if (!pick) return { cancelled: true };
+  if (pick.hostId === BALANCE_ID) return { host: await resolveBalancedHost(undefined), cancelled: false };
+  return { host: pick.hostId, cancelled: false };
 }
 
 // Terminal readiness detection moved to src/vscode/terminalReadiness.ts.
@@ -1356,6 +1441,70 @@ export async function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  // Register the per-agent HOST launch trio (the host axis, mirroring the
+  // version triad above) for EVERY non-shell agent — full parity across
+  // claude/codex/gemini/opencode/cursor/antigravity/grok/kimi/droid:
+  //   (Pick Host)          -> choose a device (or Balanced), default version
+  //   (Pick Version & Host)-> pick an exact version, then a device
+  //   (Auto Host)          -> least-busy online device, no prompt
+  // All route through openSingleAgent's host path (`agents run --host`).
+  for (const def of BUILT_IN_AGENTS) {
+    if (def.key === 'shell') continue;
+
+    context.subscriptions.push(
+      vscode.commands.registerCommand(`${def.commandId}PickHost`, async () => {
+        const picked = await pickLaunchHost(`New ${def.title} — run on…`);
+        if (picked.cancelled) return;
+        const agentConfig = getBuiltInByTitle(context.extensionPath, def.title);
+        if (agentConfig) openSingleAgent(context, agentConfig, undefined, undefined, undefined, picked.host);
+      })
+    );
+
+    context.subscriptions.push(
+      vscode.commands.registerCommand(`${def.commandId}PickVersionHost`, async () => {
+        const version = await pickAgentVersion(def.key);
+        if (!version) return;
+        const picked = await pickLaunchHost(`New ${def.title} v${version.version} — run on…`);
+        if (picked.cancelled) return;
+        const agentConfig = getBuiltInByTitle(context.extensionPath, def.title);
+        if (agentConfig) openSingleAgent(context, agentConfig, undefined, version.version, undefined, picked.host);
+      })
+    );
+
+    context.subscriptions.push(
+      vscode.commands.registerCommand(`${def.commandId}AutoHost`, async () => {
+        const host = await resolveBalancedHost(undefined);
+        const agentConfig = getBuiltInByTitle(context.extensionPath, def.title);
+        if (agentConfig) openSingleAgent(context, agentConfig, undefined, undefined, undefined, host);
+      })
+    );
+  }
+
+  // Generic host pickers (any agent in one flow).
+  context.subscriptions.push(
+    vscode.commands.registerCommand('agents.newAgentPickHost', async () => {
+      const agentItems = BUILT_IN_AGENTS.filter(d => d.key !== 'shell').map(d => ({ label: d.title, key: d.key, def: d }));
+      const agentPick = await vscode.window.showQuickPick(agentItems, { placeHolder: 'New agent — pick agent, then host', title: 'New Agent (Pick Host)' });
+      if (!agentPick) return;
+      const picked = await pickLaunchHost(`New ${agentPick.def.title} — run on…`);
+      if (picked.cancelled) return;
+      const agentConfig = getBuiltInByTitle(context.extensionPath, agentPick.def.title);
+      if (agentConfig) openSingleAgent(context, agentConfig, undefined, undefined, undefined, picked.host);
+    })
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand('agents.newAgentPickVersionHost', async () => {
+      const result = await pickAnyAgentVersion(context.extensionPath);
+      if (!result) return;
+      const def = getBuiltInByKey(result.agentKey);
+      if (!def) return;
+      const picked = await pickLaunchHost(`New ${def.title} v${result.version} — run on…`);
+      if (picked.cancelled) return;
+      const agentConfig = getBuiltInByTitle(context.extensionPath, def.title);
+      if (agentConfig) openSingleAgent(context, agentConfig, undefined, result.version, undefined, picked.host);
+    })
+  );
+
   // Dynamically register custom agent commands
   const customAgentSettings = settings.getSettings(context);
   for (const custom of customAgentSettings.custom) {
@@ -1444,35 +1593,52 @@ export async function activate(context: vscode.ExtensionContext) {
   // Register quick launch commands (Cmd+Shift+0..9). Always register all ten so
   // keybindings stay valid even before the user assigns a slot — unassigned
   // shortcuts silently no-op.
+  // Launch a configured slot. `forceHostPick` (⌘⌥⇧n) overrides the slot's baked
+  // Run-on target with an interactive host pick for this one launch.
+  const launchQuickSlot = async (digit: QuickLaunchSlotKey, forceHostPick: boolean) => {
+    // Re-read settings on every press so newly saved slots take effect
+    // without reloading the window.
+    const fresh = settings.getSettings(context);
+    const slot: QuickLaunchSlot | undefined = getQuickLaunchSlot(fresh.quickLaunch, digit);
+    if (!slot) return;
+
+    const builtInDef = getBuiltInByKey(slot.agent);
+    if (!builtInDef) return;
+
+    const agentConfig = getBuiltInByTitle(context.extensionPath, builtInDef.title);
+    if (!agentConfig) return;
+
+    let modelId = slot.model;
+    if (!modelId && slot.modelAlias) {
+      modelId = (await resolveAlias(slot.agent, slot.modelAlias)) ?? undefined;
+    }
+
+    const parts: string[] = [];
+    if (modelId) parts.push(`--model ${modelId}`);
+    if (slot.mode) parts.push(`--mode ${slot.mode}`);
+    if (slot.extraFlags && slot.extraFlags.trim()) parts.push(slot.extraFlags.trim());
+    const flags = parts.length ? parts.join(' ') : undefined;
+
+    let host: string | undefined;
+    if (forceHostPick) {
+      const picked = await pickLaunchHost(`Run ${slot.label || builtInDef.title} on…`);
+      if (picked.cancelled) return;
+      host = picked.host;
+    } else {
+      host = await resolveSlotHost(slot);
+    }
+
+    openSingleAgent(context, agentConfig, flags, slot.version || undefined, undefined, host);
+  };
+
   for (const digit of QUICK_LAUNCH_SLOT_KEYS) {
-    const command = `agents.quickLaunch${digit}`;
+    // ⌘⇧n — fire the slot on its baked Run-on target.
     context.subscriptions.push(
-      vscode.commands.registerCommand(command, async () => {
-        // Re-read settings on every press so newly saved slots take effect
-        // without reloading the window.
-        const fresh = settings.getSettings(context);
-        const slot: QuickLaunchSlot | undefined = getQuickLaunchSlot(fresh.quickLaunch, digit);
-        if (!slot) return;
-
-        const builtInDef = getBuiltInByKey(slot.agent);
-        if (!builtInDef) return;
-
-        const agentConfig = getBuiltInByTitle(context.extensionPath, builtInDef.title);
-        if (!agentConfig) return;
-
-        let modelId = slot.model;
-        if (!modelId && slot.modelAlias) {
-          modelId = (await resolveAlias(slot.agent, slot.modelAlias)) ?? undefined;
-        }
-
-        const parts: string[] = [];
-        if (modelId) parts.push(`--model ${modelId}`);
-        if (slot.mode) parts.push(`--mode ${slot.mode}`);
-        if (slot.extraFlags && slot.extraFlags.trim()) parts.push(slot.extraFlags.trim());
-        const flags = parts.length ? parts.join(' ') : undefined;
-
-        openSingleAgent(context, agentConfig, flags, slot.version || undefined);
-      })
+      vscode.commands.registerCommand(`agents.quickLaunch${digit}`, () => launchQuickSlot(digit, false)),
+    );
+    // ⌘⌥⇧n — fire the slot but pick the host this once.
+    context.subscriptions.push(
+      vscode.commands.registerCommand(`agents.quickLaunch${digit}PickHost`, () => launchQuickSlot(digit, true)),
     );
   }
 
@@ -1636,8 +1802,13 @@ async function openSingleAgent(
   agentConfig: Omit<AgentConfig, 'count'>,
   additionalFlags?: string,
   pinnedVersion?: string,
-  strategy?: RunStrategy
+  strategy?: RunStrategy,
+  host?: string
 ) {
+  // A host target ('local'/undefined = this machine) always routes through
+  // `agents run <agent> --host <device>` so the CLI does the SSH offload —
+  // including agents that launch as raw binaries locally.
+  const targetHost = host && host !== 'local' ? host : undefined;
   const config = vscode.workspace.getConfiguration('agents');
   const terminalMode = normalizeTerminalMode(config.get('terminalMode'));
   // 'auto' (default) and 'tmux' both need the availability probe; 'native' skips it.
@@ -1688,12 +1859,17 @@ async function openSingleAgent(
   // Claude's session is generated up-front for the resume flow; other agents
   // detect their session post-spawn.
   const LAUNCHABLE: ReadonlySet<string> = new Set(['claude', 'codex', 'gemini', 'opencode', 'cursor', 'antigravity']);
-  if (agentKey && LAUNCHABLE.has(agentKey)) {
-    if (agentKey === 'claude') {
+  // Local: only LAUNCHABLE agents route through `agents run`; others use their
+  // raw command. Remote (targetHost): ALL agents route through `agents run
+  // --host` so every agent can be offloaded onto a device.
+  if (agentKey && (LAUNCHABLE.has(agentKey) || targetHost)) {
+    // Claude's up-front session id is for the LOCAL resume flow; a remote run
+    // manages its own session on the target host, so skip it when offloading.
+    if (agentKey === 'claude' && !targetHost) {
       sessionId = generateClaudeSessionId();
       console.log(`[SESSION] Claude using on-demand session ID: ${sessionId}`);
     }
-    command = buildAgentLaunchCommand(agentKey as LaunchableAgent, sessionId, defaultModel, additionalFlags, pinnedVersion, strategy);
+    command = buildAgentLaunchCommand(agentKey, sessionId, defaultModel, additionalFlags, pinnedVersion, strategy, undefined, targetHost);
   }
 
   if (tmuxOk) {

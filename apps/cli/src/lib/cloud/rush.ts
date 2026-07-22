@@ -343,6 +343,8 @@ export function buildDispatchBody(input: {
    * MAX_IMAGES_PER_DISPATCH — extras are dropped, never sent. Omitted when empty.
    */
   images?: ImageAttachment[] | null;
+  /** Runtime env vars mounted into the cloud agent process. */
+  env?: Record<string, string> | null;
 }): Record<string, unknown> {
   if (input.resolvedRepos.length === 0) {
     throw new Error('buildDispatchBody: resolvedRepos must have at least one entry');
@@ -371,6 +373,9 @@ export function buildDispatchBody(input: {
   }
   if (input.images && input.images.length > 0) {
     body.images = input.images.slice(0, MAX_IMAGES_PER_DISPATCH);
+  }
+  if (input.env && Object.keys(input.env).length > 0) {
+    body.env = input.env;
   }
   return body;
 }
@@ -454,6 +459,7 @@ export class RushCloudProvider implements CloudProvider {
       strategy,
       skills: options.skills,
       images: options.images,
+      env: options.env,
     });
 
     let res = await api('POST', '/api/v1/cloud-runs', token, body);
@@ -507,6 +513,7 @@ export class RushCloudProvider implements CloudProvider {
           accountTokens,
           skills: options.skills,
           images: options.images,
+          env: options.env,
         });
         res = await api('POST', '/api/v1/cloud-runs', token, retryBody);
 

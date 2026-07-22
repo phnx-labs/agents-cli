@@ -96,6 +96,7 @@ export const loadSessions: ModuleLoader = async () => (await import('../../comma
 export const loadTeams: ModuleLoader = async () => (await import('../../commands/teams.js')).registerTeamsCommands;
 export const loadCloud: ModuleLoader = async () => (await import('../../commands/cloud.js')).registerCloudCommands;
 export const loadMessage: ModuleLoader = async () => (await import('../../commands/message.js')).registerMessageCommand;
+export const loadHq: ModuleLoader = async () => (await import('../../commands/hq.js')).registerHqCommand;
 export const loadFeed: ModuleLoader = async () => (await import('../../commands/feed.js')).registerFeedCommand;
 export const loadMailboxes: ModuleLoader = async () => (await import('../../commands/mailboxes.js')).registerMailboxesCommand;
 export const loadServe: ModuleLoader = async () => (await import('../../commands/serve.js')).registerServeCommand;
@@ -111,7 +112,7 @@ export const loadFunnel: ModuleLoader = async () => (await import('../../command
  * inherit the root's custom help formatter rather than getting the per-command
  * recursive pass. Keeping that ordering preserves their `--help` output exactly.
  */
-export const LAZY_COMMAND_NAMES: ReadonlySet<string> = new Set(['sessions', 'teams', 'cloud', 'message', 'serve']);
+export const LAZY_COMMAND_NAMES: ReadonlySet<string> = new Set(['sessions', 'teams', 'cloud', 'message', 'hq', 'serve']);
 
 /**
  * User-typed top-level command name -> ordered list of module loaders to run.
@@ -210,6 +211,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   teams: [loadTeams],
   cloud: [loadCloud],
   message: [loadMessage],
+  hq: [loadHq],
   feed: [loadFeed],
   mailboxes: [loadMailboxes],
   mailbox: [loadMailboxes],

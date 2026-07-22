@@ -28,7 +28,7 @@ export async function runShareWizard(): Promise<boolean> {
     console.error(
       chalk.red(
         'agents setup share needs an interactive terminal. ' +
-          'Non-interactively, use `agents share setup` (provision) or `agents share join <url>`.',
+          'Non-interactively, use `agents share setup` (provision) or `agents share join [url]`.',
       ),
     );
     return false;
@@ -60,7 +60,7 @@ export async function runShareWizard(): Promise<boolean> {
       {
         name: 'Join an existing endpoint (a teammate already provisioned one)',
         value: 'join' as const,
-        description: 'Paste the base URL + write token from whoever owns the endpoint.',
+        description: 'Use synced config when present, or paste the base URL + write token from the endpoint owner.',
       },
     ],
   });

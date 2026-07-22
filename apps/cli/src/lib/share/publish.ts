@@ -14,11 +14,16 @@ import { readShareConfig, readWriteToken, type ShareConfig } from './config.js';
 import { captureCover, OG_WIDTH, OG_HEIGHT, OG_SCALE } from './capture.js';
 import { deriveMeta, injectOgMeta } from './og.js';
 
-type PutFn = (
+export type PutFn = (
   url: string,
   body: Buffer,
   headers: Record<string, string>,
 ) => Promise<{ ok: boolean; status: number; url?: string }>;
+
+export interface PublishEndpoint {
+  baseUrl: string;
+  token: string;
+}
 
 export interface PublishOptions {
   slug?: string;
@@ -32,11 +37,7 @@ export interface PublishOptions {
   /** DI seam for tests — override the keychain-backed write token. */
   writeToken?: string;
   /** DI seam for tests — override the real HTTP PUT. */
-  uploader?: (
-    url: string,
-    body: Buffer,
-    headers: Record<string, string>,
-  ) => Promise<{ ok: boolean; status: number; url?: string }>;
+  uploader?: PutFn;
   /** DI seam for tests — override cover capture (returns a PNG buffer or null). */
   capturer?: (htmlPath: string) => Promise<Buffer | null>;
 }
@@ -158,9 +159,17 @@ export async function publishFile(
     );
   }
   const token = opts.writeToken ?? readWriteToken();
+  return publishToEndpoint(filePath, { baseUrl: cfg.baseUrl, token }, opts);
+}
+
+export async function publishToEndpoint(
+  filePath: string,
+  endpoint: PublishEndpoint,
+  opts: PublishOptions = {},
+): Promise<PublishResult> {
   const slug = (opts.slug ?? defaultSlug(filePath)).replace(/^\/+/, '');
   const expiresAt = parseExpire(opts.expire);
-  const pageUrl = `${cfg.baseUrl}/${slug}`;
+  const pageUrl = `${endpoint.baseUrl.replace(/\/+$/, '')}/${slug}`;
 
   const put =
     opts.uploader ??
@@ -169,7 +178,7 @@ export async function publishFile(
       return { ok: res.ok, status: res.status, url: u };
     });
   const authHeaders = (contentType: string): Record<string, string> => {
-    const h: Record<string, string> = { authorization: `Bearer ${token}`, 'content-type': contentType };
+    const h: Record<string, string> = { authorization: `Bearer ${endpoint.token}`, 'content-type': contentType };
     if (expiresAt) h['x-share-expires-at'] = expiresAt;
     return h;
   };
