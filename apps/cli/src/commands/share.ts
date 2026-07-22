@@ -31,7 +31,7 @@ import {
 import { publishFile, type PublishResult } from '../lib/share/publish.js';
 import { renderWorkerScript } from '../lib/share/worker-template.js';
 import { analyticsEnabled } from '../lib/share/analytics.js';
-import { resolveGitHubUsername, resolveGitHubUsernameSync } from '../lib/git.js';
+import { resolveGitHubUsername } from '../lib/git.js';
 
 export function formatSharePublishResult(result: PublishResult, json = false): string {
   if (json) return JSON.stringify(result, null, 2);
@@ -122,7 +122,7 @@ export function registerShareCommands(program: Command): void {
       }
       console.log(`${chalk.bold('endpoint')}  ${chalk.green(cfg.baseUrl)}`);
       console.log(chalk.dim(`worker ${cfg.workerName} · bucket ${cfg.bucketName} · account ${cfg.accountId}`));
-      const user = resolveGitHubUsernameSync();
+      const user = await resolveGitHubUsername();
       console.log(`${chalk.bold('namespace')} ${user ? chalk.cyan(`${cfg.baseUrl}/${user}`) : chalk.yellow('unknown — set gh auth or github.user')}`);
       console.log(`${chalk.bold('analytics')} ${analyticsEnabled(cfg) ? chalk.green('enabled') : chalk.dim('not configured')}`);
     });
@@ -147,7 +147,7 @@ export function registerShareCommands(program: Command): void {
       console.log(`${chalk.bold('analytics')}  ${chalk.green('enabled')}`);
       console.log(`${chalk.bold('token')}    ${chalk.dim(cfg.analyticsToken!.slice(0, 8) + '…')}`);
       console.log(`${chalk.bold('dashboard')} ${chalk.cyan(dashboard)}`);
-      const user = resolveGitHubUsernameSync();
+      const user = await resolveGitHubUsername();
       if (user) {
         console.log(chalk.dim(`Per-page breakdown is available under Paths in the dashboard (filter by /${user}/).`));
       }

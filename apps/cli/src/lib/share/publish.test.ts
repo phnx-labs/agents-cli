@@ -404,6 +404,64 @@ describe('renderWorkerScript', () => {
     expect(await get.text()).toContain('game one');
   });
 
+  it('paginates gallery listings and skips expired shares', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-07-22T00:00:00.000Z'));
+      const worker = await import(
+        `data:text/javascript;base64,${Buffer.from(src).toString('base64')}#${Date.now()}`
+      );
+      const store = new Map<string, {
+        body: BodyInit | null;
+        httpMetadata: { contentType?: string };
+        customMetadata: Record<string, string>;
+        uploaded: string;
+      }>([
+        ['octocat/live-one', { body: '<h1>one</h1>', httpMetadata: {}, customMetadata: {}, uploaded: '2026-07-22T00:00:00.000Z' }],
+        ['octocat/live-two', { body: '<h1>two</h1>', httpMetadata: {}, customMetadata: {}, uploaded: '2026-07-22T00:00:00.000Z' }],
+        ['octocat/expired', { body: '<h1>old</h1>', httpMetadata: {}, customMetadata: { 'expires-at': '2026-07-21T00:00:00.000Z' }, uploaded: '2026-07-21T00:00:00.000Z' }],
+        ['octocat/live-one.png', { body: 'png', httpMetadata: {}, customMetadata: {}, uploaded: '2026-07-22T00:00:00.000Z' }],
+      ]);
+      const listCalls: Array<{ prefix?: string; limit?: number; cursor?: string; include?: string[] }> = [];
+      const env = {
+        WRITE_TOKEN: 'secret',
+        BUCKET: {
+          put: async () => {},
+          get: async () => null,
+          delete: async () => {},
+          list: async (opts: { prefix?: string; limit?: number; cursor?: string; include?: string[] }) => {
+            listCalls.push(opts);
+            const all = Array.from(store.entries())
+              .filter(([k]) => !opts.prefix || k.startsWith(opts.prefix))
+              .map(([key, value]) => ({
+                key,
+                uploaded: value.uploaded,
+                httpMetadata: value.httpMetadata,
+                customMetadata: opts.include?.includes('customMetadata') ? value.customMetadata : undefined,
+                size: 0,
+              }));
+            const start = opts.cursor ? Number(opts.cursor) : 0;
+            const pageSize = opts.limit === 1 ? 1 : 2;
+            const page = all.slice(start, start + pageSize);
+            const next = start + pageSize;
+            return { objects: page, truncated: next < all.length, cursor: String(next) };
+          },
+        },
+      };
+
+      const gallery = await worker.default.fetch(new Request('https://share.test/octocat'), env);
+      expect(gallery.status).toBe(200);
+      const galleryHtml = await gallery.text();
+      expect(galleryHtml).toContain('/octocat/live-one');
+      expect(galleryHtml).toContain('/octocat/live-two');
+      expect(galleryHtml).not.toContain('/octocat/expired');
+      expect(galleryHtml).not.toContain('/octocat/live-one.png');
+      expect(listCalls.filter((call) => call.include?.includes('customMetadata')).length).toBeGreaterThan(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('still resolves legacy flat slugs for backward compatibility', async () => {
     const worker = await import(
       `data:text/javascript;base64,${Buffer.from(src).toString('base64')}#${Date.now()}`

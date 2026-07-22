@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { Command } from 'commander';
 import type { KeychainBackend } from '../lib/secrets/index.js';
 import type { CloudflareRequest, CloudflareRequester } from '../lib/share/provision.js';
 import { formatSharePublishResult } from './share.js';
@@ -26,6 +27,8 @@ function makeMemoryBackend(): { backend: KeychainBackend; store: Map<string, Sto
 
 let tmpHome = '';
 let previousHome: string | undefined;
+let previousPath: string | undefined;
+let previousShareGitHubUser: string | undefined;
 
 async function freshShareModules() {
   vi.resetModules();
@@ -45,6 +48,9 @@ beforeEach(() => {
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-share-command-'));
   previousHome = process.env.HOME;
   process.env.HOME = tmpHome;
+  previousPath = process.env.PATH;
+  previousShareGitHubUser = process.env.AGENTS_SHARE_GITHUB_USER;
+  delete process.env.AGENTS_SHARE_GITHUB_USER;
   // Reads go to a temp HOME with no real keychain/agent; on darwin-headless (the
   // release-gated macOS CI matrix) isHeadlessSecretsContext() would force the
   // agentOnly no-prompt throw. Pin NO_PROMPT=0 so the direct read runs on every OS.
@@ -58,10 +64,31 @@ afterEach(() => {
   vi.resetModules();
   if (previousHome === undefined) delete process.env.HOME;
   else process.env.HOME = previousHome;
+  if (previousPath === undefined) delete process.env.PATH;
+  else process.env.PATH = previousPath;
+  if (previousShareGitHubUser === undefined) delete process.env.AGENTS_SHARE_GITHUB_USER;
+  else process.env.AGENTS_SHARE_GITHUB_USER = previousShareGitHubUser;
   if (previousNoPrompt === undefined) delete process.env.AGENTS_SECRETS_NO_PROMPT;
   else process.env.AGENTS_SECRETS_NO_PROMPT = previousNoPrompt;
   fs.rmSync(tmpHome, { recursive: true, force: true });
 });
+
+function installFakeGh(username: string): void {
+  const bin = path.join(tmpHome, 'bin');
+  fs.mkdirSync(bin, { recursive: true });
+  if (process.platform === 'win32') {
+    fs.writeFileSync(path.join(bin, 'gh.cmd'), `@echo off\r\necho ${username}\r\n`);
+  } else {
+    const gh = path.join(bin, 'gh');
+    fs.writeFileSync(gh, `#!/bin/sh\nprintf '%s\\n' ${JSON.stringify(username)}\n`);
+    fs.chmodSync(gh, 0o755);
+  }
+  process.env.PATH = `${bin}${path.delimiter}${process.env.PATH ?? ''}`;
+}
+
+function loggedOutput(): string {
+  return vi.mocked(console.log).mock.calls.map((call) => call.map(String).join(' ')).join('\n');
+}
 
 describe('runShareProvision custom domain selection', () => {
   it('maps share.agents-cli.sh by default when the token can see agents-cli.sh', async () => {
@@ -196,6 +223,48 @@ describe('runShareProvision custom domain selection', () => {
     expect(config.readShareConfig()).toMatchObject({
       analyticsToken: 'cf-web-analytics-token',
     });
+  });
+});
+
+describe('share status and analytics namespace display', () => {
+  it('resolves the status namespace through gh auth when github.user is unset', async () => {
+    const { share, config } = await freshShareModules();
+    config.writeShareConfig({
+      baseUrl: 'https://share.test',
+      accountId: 'acct_1',
+      workerName: 'agents-share',
+      bucketName: 'agents-share',
+    });
+    installFakeGh('gh-only-user');
+
+    const program = new Command();
+    program.exitOverride();
+    share.registerShareCommands(program);
+    await program.parseAsync(['node', 'agents', 'share', 'status']);
+
+    const out = loggedOutput();
+    expect(out).toContain('https://share.test/gh-only-user');
+    expect(out).not.toContain('unknown');
+  });
+
+  it('uses the gh-resolved namespace in the analytics path hint', async () => {
+    const { share, config } = await freshShareModules();
+    config.writeShareConfig({
+      baseUrl: 'https://share.test',
+      accountId: 'acct_1',
+      workerName: 'agents-share',
+      bucketName: 'agents-share',
+      domain: 'share.test',
+      analyticsToken: 'cf-web-analytics-token',
+    });
+    installFakeGh('gh-only-user');
+
+    const program = new Command();
+    program.exitOverride();
+    share.registerShareCommands(program);
+    await program.parseAsync(['node', 'agents', 'share', 'analytics']);
+
+    expect(loggedOutput()).toContain('filter by /gh-only-user/');
   });
 });
 

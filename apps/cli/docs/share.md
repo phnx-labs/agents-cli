@@ -72,8 +72,9 @@ agent makes plan.html
   the first line.
 - **Slugs.** With no `--slug`, the default is `<project>-<feature>-<hash>` (e.g.
   `agents-cli-fleet-cockpit-3a6687`): the repo name scopes the link and a short random
-  tail keeps it unguessable and collision-free. Pass `--slug` for a stable, exact name
-  under your GitHub-username namespace.
+  tail keeps direct URL guessing impractical and collision-free. Namespaced shares are
+  also listed in the public `/<github-username>` gallery until they expire. Pass `--slug`
+  for a stable, exact name under your GitHub-username namespace.
 
 ## Where things live
 

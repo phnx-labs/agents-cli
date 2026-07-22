@@ -81,9 +81,20 @@ export default {
 };
 
 async function renderGallery(bucket, origin, user, method) {
-  const list = await bucket.list({ prefix: user + '/' });
-  const objects = (list.objects || []).filter(o => !o.key.endsWith('.png'));
-  const items = objects.map(o => {
+  const objects = [];
+  let cursor;
+  do {
+    const list = await bucket.list({ prefix: user + '/', limit: 1000, cursor, include: ['customMetadata'] });
+    objects.push(...(list.objects || []));
+    cursor = list.truncated ? list.cursor : undefined;
+  } while (cursor);
+
+  const activeObjects = objects.filter(o => {
+    if (o.key.endsWith('.png')) return false;
+    const expiresAt = o.customMetadata && o.customMetadata['expires-at'];
+    return !(expiresAt && Date.now() > Date.parse(expiresAt));
+  });
+  const items = activeObjects.map(o => {
     const slug = o.key.slice(o.key.indexOf('/') + 1);
     const url = origin + '/' + o.key;
     return { slug, url, updated: o.uploaded };
