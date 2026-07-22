@@ -32,6 +32,14 @@ export interface QuickLaunchSlot {
   modelAlias?: string;    // Agents-cli alias (e.g., "opus", "haiku") — resolved to a concrete id on first launch
   extraFlags?: string;    // Free-form CLI flags appended last (e.g., "--reasoning high")
   label?: string;         // Display label for dashboard
+  // Where ⌘⇧<n> spawns this agent. Omitted or 'local' = this machine (today's
+  // behavior). A registered device name = offload onto that host over SSH via
+  // `agents run --host`. 'balanced' = pick the least-busy online device at
+  // launch time (see balancePool).
+  runOn?: string;
+  // When runOn === 'balanced', restrict the candidate pool to these device
+  // names. Empty/undefined = all online devices (minus the local machine).
+  balancePool?: string[];
 }
 
 // Quick launch slots configuration. New shape uses `slots` keyed by digit "0".."9".
