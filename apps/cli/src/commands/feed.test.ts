@@ -8,6 +8,7 @@ import {
   formatOutcomeHeader,
   mergeFeedBlocks,
   parseRemoteFeed,
+  prepareLocalFeedBlocks,
   remoteFeedHostsToDial,
   sessionHintsFromActive,
   shouldIncludeLocalFeed,
@@ -92,6 +93,34 @@ describe('feed host scoping', () => {
   it('dials every peer by default and removes self from explicit lists', () => {
     expect(remoteFeedHostsToDial(undefined, 'zion')).toBeUndefined();
     expect(remoteFeedHostsToDial(['zion', 'mac-mini'], 'zion')).toEqual(['mac-mini']);
+  });
+});
+
+describe('prepareLocalFeedBlocks', () => {
+  it('does not apply suppression side effects when local feed is excluded', () => {
+    const prepared = prepareLocalFeedBlocks([
+      block('remote-stall', 'mac-mini', '2026-07-13T00:00:00Z', {
+        questions: [{ text: 'Should I continue?' }],
+      }),
+    ], { includeLocal: false });
+
+    expect(prepared.visible).toHaveLength(0);
+    expect(prepared.dispatch).toEqual([]);
+    expect(prepared.filter.suppressed[0]).toMatchObject({
+      blockId: 'block-remote-stall',
+      suppressed: false,
+    });
+  });
+
+  it('keeps suppressed blocks visible in --all while dispatch ignores them', () => {
+    const stall = block('stall-all', 'zion', '2026-07-13T00:00:00Z', {
+      questions: [{ text: 'What next?' }],
+    });
+
+    const prepared = prepareLocalFeedBlocks([stall], { includeLocal: false, all: true });
+
+    expect(prepared.visible.map((b) => b.sessionId)).toEqual(['stall-all']);
+    expect(prepared.dispatch).toEqual([]);
   });
 });
 

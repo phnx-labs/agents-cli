@@ -26,14 +26,14 @@ export interface NotifyResult {
   error?: string;
 }
 
-function formatBlock(block: OpenBlock): string {
+export function formatUrgentBlockMessage(block: OpenBlock): string {
   const q = block.questions[0];
   const header = q?.header ? `[${q.header}] ` : '';
   const text = q?.text ?? 'Agent needs input';
   const host = block.host ? ` on ${block.host}` : '';
   const cls = block.blockClass ?? 'approval';
   const cost = block.costOfDelay ?? 'low';
-  return `🚨 ${cls.toUpperCase()}${host} — ${header}${text} (cost: ${cost}, id: ${block.blockId})`;
+  return `URGENT ${cls.toUpperCase()}${host}: ${header}${text} (cost: ${cost}, id: ${block.blockId})`;
 }
 
 /** Build openclaw argv for urgent notify (exported for tests). */
@@ -77,7 +77,7 @@ export async function notifyUrgentBlock(
     return { ok: false, error: 'openclaw CLI not found on PATH' };
   }
 
-  const text = formatBlock(block);
+  const text = formatUrgentBlockMessage(block);
 
   try {
     await execFileAsync('openclaw', buildOpenClawNotifyArgs(text, options));
