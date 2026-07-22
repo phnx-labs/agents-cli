@@ -100,18 +100,20 @@ export function resolveResource(
     // Try exact name (for directories like skills/subagents)
     const exactPath = path.join(dir, name);
     if (fs.existsSync(exactPath)) {
-      return resourceIsActive(kind, name, source)
-        ? { name, path: exactPath, source }
-        : null;
+      if (resourceIsActive(kind, name, source)) {
+        return { name, path: exactPath, source };
+      }
+      continue;
     }
 
     // Try with common file extensions
     for (const ext of ['.md', '.yaml', '.yml']) {
       const withExt = exactPath + ext;
       if (fs.existsSync(withExt)) {
-        return resourceIsActive(kind, name, source)
-          ? { name, path: withExt, source }
-          : null;
+        if (resourceIsActive(kind, name, source)) {
+          return { name, path: withExt, source };
+        }
+        continue;
       }
     }
   }
