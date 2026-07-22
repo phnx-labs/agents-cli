@@ -27,6 +27,17 @@ import { TerminalExpandedDetail } from '../components/mission-control/TerminalDe
 import { AgentDecision } from '../components/mission-control/AgentDecision'
 import { ticketWorkers, type FloorAgent, type FloorTicket, type StructuredQuestion, type FloorGroupBy, type FloorSort, type TicketGroupBy, type TicketSort, type CenterMode, type ManagedProject, type LinearProjectLite } from '../components/mission-control/floorModel'
 import { RecapPane } from '../components/mission-control/RecapPane'
+import { LaunchMatrix } from '../components/panel/LaunchMatrix'
+import type { BuiltInAgentConfig, AgentInventory, AgentSettings } from '../types'
+
+// The preview harness runs in a bare browser with no VS Code / Electron host, so
+// components that post messages (e.g. LaunchMatrix's device fetch) would throw in
+// resolveBridge. Stub acquireVsCodeApi so the HostBridge resolves to a no-op.
+if (typeof (window as unknown as { acquireVsCodeApi?: unknown }).acquireVsCodeApi === 'undefined') {
+  ;(window as unknown as { acquireVsCodeApi: () => unknown }).acquireVsCodeApi = () => ({
+    postMessage: () => {}, getState: () => undefined, setState: () => {},
+  })
+}
 import { buildRecap } from '../components/mission-control/recapModel'
 import type { RemoteSessionLike } from '../components/mission-control/floorAdapter'
 import type { UnifiedTask, TerminalDetail } from '../types'
@@ -720,11 +731,82 @@ function Recap() {
   return <div className="feed-col"><RecapPane days={days} loading={false} onOpenUrl={noop} /></div>
 }
 
+class PreviewErrorBoundary extends React.Component<{ children: React.ReactNode }, { err: string | null }> {
+  constructor(p: { children: React.ReactNode }) { super(p); this.state = { err: null } }
+  static getDerivedStateFromError(e: unknown) { return { err: (e as Error)?.stack || String(e) } }
+  render() {
+    if (this.state.err) return <pre style={{ color: '#f87171', padding: 20, whiteSpace: 'pre-wrap', fontSize: 12 }}>{this.state.err}</pre>
+    return this.props.children
+  }
+}
+
+// ?view=launch — the fleet-aware Launch Matrix (Panel tab) with mock fleet data.
+function LaunchMatrixPreview() {
+  const LM_AGENTS: BuiltInAgentConfig[] = [
+    { key: 'claude', name: 'Claude', icon: 'claude.png' },
+    { key: 'codex', name: 'Codex', icon: 'chatgpt.png' },
+    { key: 'gemini', name: 'Gemini', icon: 'gemini.png' },
+    { key: 'grok', name: 'Grok', icon: 'grok.png' },
+    { key: 'kimi', name: 'Kimi', icon: 'kimi.png' },
+    { key: 'droid', name: 'Droid', icon: 'droid.png' },
+    { key: 'opencode', name: 'OpenCode', icon: 'opencode.png' },
+  ]
+  const inv = (v: string): AgentInventory => ({
+    agent: 'claude', strategy: 'balanced', defaultVersion: v, defaultAccount: null, defaultPlan: null,
+    signedInCount: 1, healthyCount: 1, canRotate: true,
+    versions: [{ version: v, isDefault: true, signedIn: true, email: null, plan: null, usageStatus: 'available', sessionUsedPercent: 0, lastActive: null, path: '' }],
+  })
+  const seed = {
+    quickLaunch: {
+      slots: {
+        '1': { agent: 'claude', version: '2.1.170', mode: 'edit', modelAlias: 'opus', runOn: 'yosemite-s0', label: 'CC · s0' },
+        '2': { agent: 'claude', modelAlias: 'haiku', runOn: 'balanced', label: 'CC balanced' },
+        '3': { agent: 'grok', runOn: 'balanced', balancePool: ['yosemite-s0', 'yosemite-s1'], label: 'Grok pool' },
+        '4': { agent: 'gemini', mode: 'edit' },
+      },
+    },
+  } as unknown as AgentSettings
+  const [settings, setSettings] = useState<AgentSettings>(seed)
+  React.useEffect(() => {
+    const t = setTimeout(() => window.postMessage({
+      type: 'devicesData', local: 'zion',
+      devices: [
+        { name: 'zion', online: true }, { name: 'yosemite-s0', online: true },
+        { name: 'yosemite-s1', online: true }, { name: 'mac-mini', online: false },
+      ],
+    }, '*'), 60)
+    return () => clearTimeout(t)
+  }, [])
+  return (
+    <div className="feed-col" style={{ maxWidth: 640, padding: 24 }}>
+      <div className="sw-panel-column">
+        <section className="sw-panel-section">
+          <div className="sw-panel-section-head">Launch Matrix</div>
+          <LaunchMatrix
+            settings={settings}
+            builtInAgents={LM_AGENTS}
+            agentModels={{ claude: ['claude-opus-4-7-20260115', 'claude-haiku-4-5-20251001'] }}
+            agentInventories={{ claude: inv('2.1.170'), gemini: inv('1.16.0'), grok: inv('1.0.0'), codex: inv('1.16.0'), kimi: inv('1.0.0'), droid: inv('1.0.0'), opencode: inv('1.16.0') }}
+            onSaveSettings={setSettings}
+          />
+        </section>
+      </div>
+    </div>
+  )
+}
+
 function Preview() {
   const params = new URLSearchParams(location.search)
   const theme = params.get('theme') === 'light' ? 'theme-light' : 'theme-dark'
   const view = params.get('view') ?? 'feed'
   const [dispatchOpen] = useState(view === 'dispatch')
+  if (view === 'launch') {
+    return (
+      <div className={`swarmify-root ${theme}`} style={{ minHeight: '100vh' }}>
+        <div className="sw-floor-dashboard"><PreviewErrorBoundary><LaunchMatrixPreview /></PreviewErrorBoundary></div>
+      </div>
+    )
+  }
   return (
     <div className={`swarmify-root ${theme}`} style={{ minHeight: '100vh' }}>
       <div className="sw-floor-dashboard" style={{ padding: 0 }}>

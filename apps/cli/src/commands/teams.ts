@@ -26,6 +26,7 @@ import { mailboxDir, enqueue } from '../lib/mailbox.js';
 import { resolveProvider } from '../lib/cloud/registry.js';
 import type { CloudProviderId, DispatchOptions } from '../lib/cloud/types.js';
 import { emit } from '../lib/events.js';
+import { shareRuntimeEnv } from '../lib/share/config.js';
 import { runSupervisor } from '../lib/teams/supervisor.js';
 import { debug } from '../lib/teams/debug.js';
 import {
@@ -109,8 +110,6 @@ const VALID_CLOUD_PROVIDERS = ['rush', 'codex', 'factory'] as const satisfies re
 type Mode = (typeof VALID_MODES)[number];
 type Effort = (typeof VALID_EFFORTS)[number];
 
-// Auto-enable JSON mode when piped / not a TTY so AI agent consumers get
-// parseable output by default.
 function statusColor(status: string): (s: string) => string {
   switch (status) {
     case 'pending': return chalk.blue;
@@ -1567,6 +1566,7 @@ export function registerTeamsCommands(program: Command): void {
             repo: opts.repo,
             branch: opts.branch,
             model: a.model ?? undefined,
+            env: shareRuntimeEnv({ agentOnly: true }),
           };
           const cloudTask = await prov.dispatch(dispatchOpts);
           return { cloudSessionId: cloudTask.id };
@@ -1585,6 +1585,7 @@ export function registerTeamsCommands(program: Command): void {
           repo: opts.repo,
           branch: opts.branch,
           model: opts.model,
+          env: shareRuntimeEnv({ agentOnly: true }),
         };
         try {
           const cloudTask = await prov.dispatch(dispatchOpts);

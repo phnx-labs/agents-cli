@@ -43,9 +43,9 @@ export function ensureLockTarget(filePath: string, initialContent = '', dirMode?
  * Writes content to filePath via a temp file + rename so readers never see a
  * partial write. On POSIX, rename(2) is atomic.
  */
-export function atomicWriteFileSync(filePath: string, content: string): void {
+export function atomicWriteFileSync(filePath: string, content: string, options: fs.WriteFileOptions = 'utf-8'): void {
   const tmpPath = `${filePath}.tmp-${process.pid}-${randomBytes(8).toString('hex')}`;
-  fs.writeFileSync(tmpPath, content, 'utf-8');
+  fs.writeFileSync(tmpPath, content, options);
   try {
     fs.renameSync(tmpPath, filePath);
   } catch (err) {
@@ -60,13 +60,20 @@ export function atomicWriteFileSync(filePath: string, content: string): void {
  * is acquired or LOCK_ACQUIRE_TIMEOUT_MS elapses. Breaks stale locks older than
  * LOCK_STALE_MS, so a crashed holder never blocks past the stale window.
  */
-export function withFileLock<T>(filePath: string, fn: () => T): T {
+export interface FileLockOptions {
+  staleMs?: number;
+  acquireTimeoutMs?: number;
+}
+
+export function withFileLock<T>(filePath: string, fn: () => T, opts: FileLockOptions = {}): T {
   let release: (() => void) | null = null;
   let lastError: unknown;
-  const deadline = Date.now() + LOCK_ACQUIRE_TIMEOUT_MS;
+  const staleMs = opts.staleMs ?? LOCK_STALE_MS;
+  const acquireTimeoutMs = opts.acquireTimeoutMs ?? LOCK_ACQUIRE_TIMEOUT_MS;
+  const deadline = Date.now() + acquireTimeoutMs;
   for (let attempt = 0; ; attempt++) {
     try {
-      release = lockfile.lockSync(filePath, { stale: LOCK_STALE_MS });
+      release = lockfile.lockSync(filePath, { stale: staleMs });
       break;
     } catch (err) {
       lastError = err;
@@ -78,7 +85,7 @@ export function withFileLock<T>(filePath: string, fn: () => T): T {
   if (!release) {
     const message = lastError instanceof Error ? lastError.message : String(lastError);
     throw new Error(
-      `Could not acquire lock for ${filePath} after ${LOCK_ACQUIRE_TIMEOUT_MS}ms: ${message}`,
+      `Could not acquire lock for ${filePath} after ${acquireTimeoutMs}ms: ${message}`,
     );
   }
   try {

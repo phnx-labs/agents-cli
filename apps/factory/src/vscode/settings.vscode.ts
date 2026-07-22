@@ -2061,7 +2061,7 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
           const { isGitHubAvailable } = await import('./github.vscode');
           const connected = await isGitHubAvailable(context);
           settingsPanel?.webview.postMessage({ type: 'integrationStatus', provider: 'github', connected });
-        } catch {
+        } catch (err) {
           settingsPanel?.webview.postMessage({ type: 'integrationStatus', provider: 'github', connected: false });
         }
         break;
@@ -2802,7 +2802,7 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
           const { isLinearAvailable } = await import('./linear.vscode');
           const connected = await isLinearAvailable(context);
           settingsPanel?.webview.postMessage({ type: 'integrationStatus', provider: 'linear', connected });
-        } catch {
+        } catch (err) {
           settingsPanel?.webview.postMessage({ type: 'integrationStatus', provider: 'linear', connected: false });
         }
         break;

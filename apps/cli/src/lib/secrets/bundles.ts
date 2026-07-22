@@ -55,6 +55,7 @@ import {
 } from './vault.js';
 import { emit } from '../events.js';
 import { readMeta } from '../state.js';
+import { assertNameActiveInResourceProfile, filterNamesForActiveResourceProfile } from '../resource-profiles.js';
 import { agentGetSync, agentAutoLoadSync, agentGetMetaSync, agentAutoLoadMetaSync, agentEvictSync, secretsAgentAutoEnabled, secretsHoldMs } from './agent.js';
 import { loadSession, deleteSession } from './session-store.js';
 import { createHash } from 'node:crypto';
@@ -759,7 +760,8 @@ export function listBundles(): SecretsBundle[] {
     }
   }
 
-  return out.sort((a, b) => a.name.localeCompare(b.name));
+  const activeNames = new Set(filterNamesForActiveResourceProfile('secrets', out.map((b) => b.name)));
+  return out.filter((bundle) => activeNames.has(bundle.name)).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 // Classify each var for UI rendering.
@@ -1135,6 +1137,7 @@ export function readAndResolveBundleEnv(
   opts: ResolveBundleOptions = {},
 ): { bundle: SecretsBundle; env: Record<string, string> } {
   validateBundleName(name);
+  assertNameActiveInResourceProfile('secrets', name);
 
   const backend = bundleBackend(name);
 

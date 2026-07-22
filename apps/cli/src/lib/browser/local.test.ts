@@ -110,7 +110,7 @@ describe('connectLocal', () => {
     const profile = makeProfile({ browser: 'comet', endpoints: ['cdp://127.0.0.1:9200'] });
 
     vi.mocked(getPortOccupant).mockReturnValue({ pid: 40117, command: 'ssh' });
-    // discoverBrowserWsUrl WOULD succeed (mac-mini's Comet/Chrome responds
+    // discoverBrowserWsUrl WOULD succeed (remote-host's Comet/Chrome responds
     // through the tunnel) — make sure we bail before we even ask.
     vi.mocked(discoverBrowserWsUrl).mockResolvedValue({
       wsUrl: 'ws://localhost:9200/devtools/browser/abc',

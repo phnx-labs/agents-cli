@@ -11,6 +11,7 @@ import {
   applyPolicyToBlock,
 } from './feed-policy.js';
 import { publishBlock, readBlock, listBlocks, blockIdForSession, type OpenBlock } from './feed.js';
+import { drain, mailboxDir } from './mailbox.js';
 
 function tmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agents-policy-test-'));
@@ -50,6 +51,16 @@ phoneNotifyThreshold: high
     expect(p.phoneNotifyThreshold).toBe('high');
   });
 
+  it('uses class-specific defaults for partial policy sections', () => {
+    const dir = tmpDir();
+    fs.writeFileSync(path.join(dir, 'feed-policy.yaml'), 'decision: {}\n', 'utf-8');
+
+    const p = loadPolicy(dir);
+
+    expect(p.approval).toEqual(DEFAULT_POLICY.approval);
+    expect(p.decision).toEqual(DEFAULT_POLICY.decision);
+  });
+
   it('classifies blocks', () => {
     expect(blockClass(makeBlock('a', { blockClass: 'approval' }))).toBe('approval');
     expect(blockClass(makeBlock('a', { blockClass: 'decision' }))).toBe('decision');
@@ -73,17 +84,37 @@ phoneNotifyThreshold: high
 
   it('auto-defaults an approval block after timeout', () => {
     const dir = tmpDir();
+    const mailboxRoot = tmpDir();
     const ts = '2026-01-01T00:00:00.000Z';
     publishBlock(makeBlock('a', { blockClass: 'approval', safeDefault: 'deny', ts }), dir);
     const policy = DEFAULT_POLICY;
     const now = new Date('2026-01-01T00:35:00.000Z');
 
-    const result = applyPolicyToBlock(readBlock(blockIdForSession('a'), dir)!, policy, now, dir);
+    const result = applyPolicyToBlock(readBlock(blockIdForSession('a'), dir)!, policy, now, dir, mailboxRoot);
 
     expect(result.action).toBe('defaulted');
     const updated = readBlock(blockIdForSession('a'), dir)!;
     expect(updated.answer?.answeredFrom).toBe('policy');
     expect(updated.defaultedAt).toBeTruthy();
+    expect(drain(mailboxDir('a', mailboxRoot)).map((m) => m.text)).toEqual(['deny']);
+    expect(fs.existsSync(path.join(dir, 'a'))).toBe(false);
+  });
+
+  it('honors a block-level timeout before the global policy timeout', () => {
+    const dir = tmpDir();
+    const mailboxRoot = tmpDir();
+    publishBlock(makeBlock('fast', {
+      blockClass: 'approval',
+      safeDefault: 'No',
+      timeoutMinutes: 5,
+      ts: '2026-01-01T00:00:00.000Z',
+    }), dir);
+    const now = new Date('2026-01-01T00:06:00.000Z');
+
+    const result = applyPolicyToBlock(readBlock(blockIdForSession('fast'), dir)!, DEFAULT_POLICY, now, dir, mailboxRoot);
+
+    expect(result.action).toBe('defaulted');
+    expect(drain(mailboxDir('fast', mailboxRoot)).map((m) => m.text)).toEqual(['No']);
   });
 
   it('hard-parks a decision block after timeout', () => {

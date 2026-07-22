@@ -1,14 +1,44 @@
 // Cloudflare provisioning for `agents share setup` — plain `fetch` against the CF
-// REST API (the repo has no CF wrapper). Creates the R2 bucket, uploads the Worker
-// (with an R2 binding + the WRITE_TOKEN as an inline secret), enables the free
-// `*.workers.dev` subdomain, and — when the token owns the zone — maps a custom domain.
+// REST API (the repo has no CF wrapper). Creates the R2 bucket, configures its
+// lifecycle, uploads the Worker (with an R2 binding), sets the WRITE_TOKEN secret,
+// enables the free `*.workers.dev` subdomain, and — when the token owns the zone —
+// maps a custom domain.
 
 const CF_API = 'https://api.cloudflare.com/client/v4';
+export const SHARE_LIFECYCLE_RULE_ID = 'agents-share-expire-objects';
+export const SHARE_LIFECYCLE_RETENTION_DAYS = 366;
+const SECONDS_PER_DAY = 86400;
 
 interface CfError {
   code?: number;
   message?: string;
 }
+
+interface R2LifecycleRule {
+  id: string;
+  enabled: boolean;
+  conditions: { prefix: string };
+  deleteObjectsTransition?: {
+    condition: { type: 'Age'; maxAge: number } | { type: 'Date'; date: string };
+  };
+  abortMultipartUploadsTransition?: {
+    condition?: { type: 'Age'; maxAge: number };
+  };
+  storageClassTransitions?: Array<{
+    condition: { type: 'Age'; maxAge: number } | { type: 'Date'; date: string };
+    storageClass: 'InfrequentAccess';
+  }>;
+}
+
+export interface CloudflareRequest {
+  apiToken: string;
+  method: string;
+  pathname: string;
+  body?: unknown;
+  form?: FormData;
+}
+
+export type CloudflareRequester = <T = unknown>(request: CloudflareRequest) => Promise<T>;
 
 async function cf<T = unknown>(
   apiToken: string,
@@ -40,35 +70,92 @@ async function cf<T = unknown>(
   return json.result as T;
 }
 
+const defaultCloudflareRequester: CloudflareRequester = <T = unknown>(request: CloudflareRequest) =>
+  cf<T>(request.apiToken, request.method, request.pathname, request.body, request.form);
+
+interface ProvisionOptions {
+  request?: CloudflareRequester;
+}
+
 /** True if the CF error looks like "the thing already exists" (idempotent create). */
 function isAlreadyExists(e: unknown): boolean {
   return /already exists|duplicate|10004|10014/i.test(String(e));
 }
 
 /** Create the R2 bucket (idempotent). */
-export async function createBucket(apiToken: string, accountId: string, name: string): Promise<void> {
+export async function createBucket(
+  apiToken: string,
+  accountId: string,
+  name: string,
+  opts: ProvisionOptions = {},
+): Promise<void> {
+  const request = opts.request ?? defaultCloudflareRequester;
   try {
-    await cf(apiToken, 'POST', `/accounts/${accountId}/r2/buckets`, { name });
+    await request({
+      apiToken,
+      method: 'POST',
+      pathname: `/accounts/${accountId}/r2/buckets`,
+      body: { name },
+    });
   } catch (e) {
     if (!isAlreadyExists(e)) throw e;
   }
 }
 
-/** Upload the module Worker with an R2 binding (`BUCKET`) + inline `WRITE_TOKEN` secret. */
+export function buildShareLifecycleRule(days: number = SHARE_LIFECYCLE_RETENTION_DAYS): R2LifecycleRule {
+  return {
+    id: SHARE_LIFECYCLE_RULE_ID,
+    enabled: true,
+    conditions: { prefix: '' },
+    deleteObjectsTransition: {
+      condition: { type: 'Age', maxAge: days * SECONDS_PER_DAY },
+    },
+  };
+}
+
+export function mergeShareLifecycleRule(
+  existing: R2LifecycleRule[] = [],
+  rule: R2LifecycleRule = buildShareLifecycleRule(),
+): R2LifecycleRule[] {
+  return [...existing.filter((r) => r.id !== SHARE_LIFECYCLE_RULE_ID), rule];
+}
+
+/** Ensure the share bucket self-cleans old objects. Exact per-link expiry is enforced by the Worker. */
+export async function configureBucketLifecycle(
+  apiToken: string,
+  accountId: string,
+  bucketName: string,
+  opts: ProvisionOptions = {},
+): Promise<void> {
+  const request = opts.request ?? defaultCloudflareRequester;
+  const lifecycle = await request<{ rules?: R2LifecycleRule[] }>({
+    apiToken,
+    method: 'GET',
+    pathname: `/accounts/${accountId}/r2/buckets/${bucketName}/lifecycle`,
+  });
+  await request({
+    apiToken,
+    method: 'PUT',
+    pathname: `/accounts/${accountId}/r2/buckets/${bucketName}/lifecycle`,
+    body: { rules: mergeShareLifecycleRule(lifecycle.rules ?? []) },
+  });
+}
+
+/** Upload the module Worker with an R2 binding (`BUCKET`). Secrets are set via the Workers Secrets API. */
 export async function deployWorker(
   apiToken: string,
   accountId: string,
   workerName: string,
   script: string,
   bucketName: string,
-  writeToken: string,
+  opts: ProvisionOptions = {},
 ): Promise<void> {
+  const request = opts.request ?? defaultCloudflareRequester;
   const metadata = {
     main_module: 'worker.js',
     compatibility_date: '2024-11-06',
     bindings: [
       { type: 'r2_bucket', name: 'BUCKET', bucket_name: bucketName },
-      { type: 'secret_text', name: 'WRITE_TOKEN', text: writeToken },
     ],
   };
   const form = new FormData();
@@ -78,7 +165,29 @@ export async function deployWorker(
     new Blob([script], { type: 'application/javascript+module' }),
     'worker.js',
   );
-  await cf(apiToken, 'PUT', `/accounts/${accountId}/workers/scripts/${workerName}`, undefined, form);
+  await request({
+    apiToken,
+    method: 'PUT',
+    pathname: `/accounts/${accountId}/workers/scripts/${workerName}`,
+    form,
+  });
+}
+
+/** Add/update the WRITE_TOKEN binding using Cloudflare's Workers Secrets API. */
+export async function setWorkerSecret(
+  apiToken: string,
+  accountId: string,
+  workerName: string,
+  writeToken: string,
+  opts: ProvisionOptions = {},
+): Promise<void> {
+  const request = opts.request ?? defaultCloudflareRequester;
+  await request({
+    apiToken,
+    method: 'PUT',
+    pathname: `/accounts/${accountId}/workers/scripts/${workerName}/secrets`,
+    body: { name: 'WRITE_TOKEN', text: writeToken, type: 'secret_text' },
+  });
 }
 
 /** Enable the free `*.workers.dev` route for the script, and return the account subdomain. */
@@ -86,16 +195,23 @@ export async function enableWorkersDev(
   apiToken: string,
   accountId: string,
   workerName: string,
+  opts: ProvisionOptions = {},
 ): Promise<string> {
-  await cf(apiToken, 'POST', `/accounts/${accountId}/workers/scripts/${workerName}/subdomain`, {
-    enabled: true,
-    previews_enabled: false,
-  });
-  const sub = await cf<{ subdomain?: string }>(
+  const request = opts.request ?? defaultCloudflareRequester;
+  await request({
     apiToken,
-    'GET',
-    `/accounts/${accountId}/workers/subdomain`,
-  );
+    method: 'POST',
+    pathname: `/accounts/${accountId}/workers/scripts/${workerName}/subdomain`,
+    body: {
+      enabled: true,
+      previews_enabled: false,
+    },
+  });
+  const sub = await request<{ subdomain?: string }>({
+    apiToken,
+    method: 'GET',
+    pathname: `/accounts/${accountId}/workers/subdomain`,
+  });
   if (!sub?.subdomain) {
     throw new Error(
       'No workers.dev subdomain on this account yet — register one at dash.cloudflare.com → Workers → Subdomain, then re-run.',
@@ -105,15 +221,20 @@ export async function enableWorkersDev(
 }
 
 /** Resolve a zone id for a domain the token can see, or null if not owned/visible. */
-export async function findZoneId(apiToken: string, domain: string): Promise<string | null> {
+export async function findZoneId(
+  apiToken: string,
+  domain: string,
+  opts: ProvisionOptions = {},
+): Promise<string | null> {
+  const request = opts.request ?? defaultCloudflareRequester;
   // Try the exact name, then the registrable parent (share.agents-cli.sh -> agents-cli.sh).
   const candidates = [domain, domain.split('.').slice(-2).join('.')];
   for (const name of candidates) {
-    const zones = await cf<Array<{ id: string; name: string }>>(
+    const zones = await request<Array<{ id: string; name: string }>>({
       apiToken,
-      'GET',
-      `/zones?name=${encodeURIComponent(name)}`,
-    ).catch(() => [] as Array<{ id: string; name: string }>);
+      method: 'GET',
+      pathname: `/zones?name=${encodeURIComponent(name)}`,
+    }).catch(() => [] as Array<{ id: string; name: string }>);
     if (zones?.length) return zones[0].id;
   }
   return null;
@@ -126,13 +247,20 @@ export async function addCustomDomain(
   workerName: string,
   zoneId: string,
   hostname: string,
+  opts: ProvisionOptions = {},
 ): Promise<void> {
+  const request = opts.request ?? defaultCloudflareRequester;
   try {
-    await cf(apiToken, 'PUT', `/accounts/${accountId}/workers/domains`, {
-      zone_id: zoneId,
-      hostname,
-      service: workerName,
-      environment: 'production',
+    await request({
+      apiToken,
+      method: 'PUT',
+      pathname: `/accounts/${accountId}/workers/domains`,
+      body: {
+        zone_id: zoneId,
+        hostname,
+        service: workerName,
+        environment: 'production',
+      },
     });
   } catch (e) {
     if (!isAlreadyExists(e)) throw e;

@@ -19,6 +19,16 @@ afterEach(() => {
   }
 });
 
+function nodeExecPath(): string {
+  if (!('bun' in process.versions)) return process.execPath;
+  const binary = process.platform === 'win32' ? 'node.exe' : 'node';
+  for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
+    const candidate = path.join(dir, binary);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return binary;
+}
+
 function runVersionSync(home: string, expression: string): unknown {
   // tsx (Node) — not bun. The CLI ships against Node, and `versions.ts`
   // transitively imports the SQLite layer that this test exercises.
@@ -28,7 +38,7 @@ function runVersionSync(home: string, expression: string): unknown {
   // routing the multi-line `-e` script through cmd.exe would mangle it. node is an
   // .exe everywhere, so this is shell-free and cross-platform.
   const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
-  const child = spawnSync(process.execPath, [tsxBin, '-e', `
+  const child = spawnSync(nodeExecPath(), [tsxBin, '-e', `
     import { listInstalledVersions, syncResourcesToVersion, buildRepoScopedSelection } from ${JSON.stringify(moduleUrl)};
     const home = ${JSON.stringify(home)};
     const result = ${expression};
@@ -51,7 +61,7 @@ function runReconcile(home: string, agent: string, installedVersion: string): st
   // routing the multi-line `-e` script through cmd.exe would mangle it. node is an
   // .exe everywhere, so this is shell-free and cross-platform.
   const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
-  const child = spawnSync(process.execPath, [tsxBin, '-e', `
+  const child = spawnSync(nodeExecPath(), [tsxBin, '-e', `
     import { reconcileStaleLatestDir } from ${JSON.stringify(moduleUrl)};
     (async () => {
       const result = await reconcileStaleLatestDir(${JSON.stringify(agent)}, ${JSON.stringify(installedVersion)});
@@ -125,7 +135,7 @@ describe('reconcileStaleLatestDir', () => {
 function runReconcileForAgent(home: string, agent: string, fakeBinDir: string): void {
   const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
   const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
-  const child = spawnSync(process.execPath, [tsxBin, '-e', `
+  const child = spawnSync(nodeExecPath(), [tsxBin, '-e', `
     import { reconcileStaleLatestForAgent } from ${JSON.stringify(moduleUrl)};
     (async () => { await reconcileStaleLatestForAgent(${JSON.stringify(agent)}); })();
   `], {
@@ -201,7 +211,7 @@ function runPredicates(expression: string): unknown {
   const versionsUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
   const agentsUrl = pathToFileURL(path.resolve('src/lib/agents.ts')).href;
   const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
-  const child = spawnSync(process.execPath, [tsxBin, '-e', `
+  const child = spawnSync(nodeExecPath(), [tsxBin, '-e', `
     import { isGlobalBinaryAgent } from ${JSON.stringify(versionsUrl)};
     import { isSelfUpdatingAgent } from ${JSON.stringify(agentsUrl)};
     console.log(JSON.stringify(${expression}));
@@ -494,6 +504,133 @@ describe('version resource sync path handling', () => {
     expect(fs.existsSync(marketplaceSkill)).toBe(true);
   });
 
+  it('filters plugin-bundled skills through the active resource profile', () => {
+    const home = makeTempHome();
+    const makePluginSkill = (plugin: string, skill: string): void => {
+      const pluginRoot = path.join(home, '.agents', 'plugins', plugin);
+      fs.mkdirSync(path.join(pluginRoot, '.claude-plugin'), { recursive: true });
+      fs.writeFileSync(
+        path.join(pluginRoot, '.claude-plugin', 'plugin.json'),
+        JSON.stringify({ name: plugin, version: '1.0.0', description: 'Fixture plugin' }),
+        'utf-8'
+      );
+      fs.mkdirSync(path.join(pluginRoot, 'skills', skill), { recursive: true });
+      fs.writeFileSync(path.join(pluginRoot, 'skills', skill, 'SKILL.md'), `${skill} body\n`, 'utf-8');
+    };
+
+    makePluginSkill('agents', 'routines');
+    makePluginSkill('agents', 'debug');
+    makePluginSkill('blocked', 'secret');
+
+    const versionsUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
+    const profilesUrl = pathToFileURL(path.resolve('src/lib/resource-profiles.ts')).href;
+    const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
+    const child = spawnSync(nodeExecPath(), [tsxBin, '-e', `
+      import { getAvailableResources } from ${JSON.stringify(versionsUrl)};
+      import { setActiveResourceProfile, upsertResourceProfilePreset } from ${JSON.stringify(profilesUrl)};
+      const home = ${JSON.stringify(home)};
+      upsertResourceProfilePreset('work', { plugins: ['agents'], skills: ['*', '!debug'] });
+      setActiveResourceProfile('work');
+      console.log(JSON.stringify(getAvailableResources(home)));
+    `], { env: { ...process.env, HOME: home }, encoding: 'utf-8' });
+
+    expect(child.status, child.stderr).toBe(0);
+    const result = JSON.parse(child.stdout.trim()) as { plugins: string[]; skills: string[] };
+    expect(result.plugins).toEqual(['agents']);
+    expect(result.skills).toEqual(['routines']);
+  });
+
+  it('filters plugin-bundled skills through source-qualified resource profile selectors', () => {
+    const home = makeTempHome();
+    const pluginRoot = path.join(home, '.agents', 'plugins', 'agents');
+    fs.mkdirSync(path.join(pluginRoot, '.claude-plugin'), { recursive: true });
+    fs.writeFileSync(
+      path.join(pluginRoot, '.claude-plugin', 'plugin.json'),
+      JSON.stringify({ name: 'agents', version: '1.0.0', description: 'Fixture plugin' }),
+      'utf-8'
+    );
+    fs.mkdirSync(path.join(pluginRoot, 'skills', 'routines'), { recursive: true });
+    fs.writeFileSync(path.join(pluginRoot, 'skills', 'routines', 'SKILL.md'), 'routines body\n', 'utf-8');
+
+    const versionsUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
+    const profilesUrl = pathToFileURL(path.resolve('src/lib/resource-profiles.ts')).href;
+    const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
+    const child = spawnSync(nodeExecPath(), [tsxBin, '-e', `
+      import { getAvailableResources } from ${JSON.stringify(versionsUrl)};
+      import { setActiveResourceProfile, upsertResourceProfilePreset } from ${JSON.stringify(profilesUrl)};
+      upsertResourceProfilePreset('work', { plugins: ['agents'], skills: ['user:routines'] });
+      setActiveResourceProfile('work');
+      console.log(JSON.stringify(getAvailableResources(${JSON.stringify(home)})));
+    `], { env: { ...process.env, HOME: home }, encoding: 'utf-8' });
+
+    expect(child.status, child.stderr).toBe(0);
+    const result = JSON.parse(child.stdout.trim()) as { plugins: string[]; skills: string[] };
+    expect(result.plugins).toEqual(['agents']);
+    expect(result.skills).toEqual(['routines']);
+  });
+
+  it('attributes permission groups and workflows to their real layers under resource profiles', () => {
+    const home = makeTempHome();
+    const project = path.join(home, 'repo');
+
+    const writePermissionGroup = (base: string, name: string): void => {
+      const dir = path.join(base, 'permissions', 'groups');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, `${name}.yaml`), 'allow: []\ndeny: []\n', 'utf-8');
+    };
+    const writeWorkflow = (base: string, name: string): void => {
+      const dir = path.join(base, 'workflows', name);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'WORKFLOW.md'), '---\ndescription: fixture\n---\nRun fixture.\n', 'utf-8');
+    };
+
+    const projectAgents = path.join(project, '.agents');
+    const userAgents = path.join(home, '.agents');
+    const systemAgents = path.join(home, '.agents', '.system');
+
+    writePermissionGroup(projectAgents, 'project-perm');
+    writePermissionGroup(userAgents, 'user-perm');
+    writePermissionGroup(systemAgents, 'system-perm');
+    writeWorkflow(projectAgents, 'project-flow');
+    writeWorkflow(userAgents, 'user-flow');
+    writeWorkflow(systemAgents, 'system-flow');
+
+    const versionsUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
+    const profilesUrl = pathToFileURL(path.resolve('src/lib/resource-profiles.ts')).href;
+    const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
+    const child = spawnSync(nodeExecPath(), [tsxBin, '-e', `
+      import { getAvailableResources } from ${JSON.stringify(versionsUrl)};
+      import { setActiveResourceProfile, upsertResourceProfilePreset } from ${JSON.stringify(profilesUrl)};
+      const project = ${JSON.stringify(project)};
+
+      upsertResourceProfilePreset('exact', {
+        permissions: ['project:project-perm', 'user:user-perm', 'system:system-perm'],
+        workflows: ['project:project-flow', 'user:user-flow', 'system:system-flow'],
+      });
+      setActiveResourceProfile('exact');
+      const exact = getAvailableResources(project);
+
+      upsertResourceProfilePreset('wildcard', {
+        permissions: ['system:*'],
+        workflows: ['user:*'],
+      });
+      setActiveResourceProfile('wildcard');
+      const wildcard = getAvailableResources(project);
+
+      console.log(JSON.stringify({ exact, wildcard }));
+    `], { env: { ...process.env, HOME: home }, encoding: 'utf-8' });
+
+    expect(child.status, child.stderr).toBe(0);
+    const result = JSON.parse(child.stdout.trim()) as {
+      exact: { permissions: string[]; workflows: string[] };
+      wildcard: { permissions: string[]; workflows: string[] };
+    };
+    expect(result.exact.permissions).toEqual(['project-perm', 'user-perm', 'system-perm']);
+    expect(result.exact.workflows).toEqual(['project-flow', 'user-flow', 'system-flow']);
+    expect(result.wildcard.permissions).toEqual(['system-perm']);
+    expect(result.wildcard.workflows).toEqual(['user-flow']);
+  });
+
   it('does not sync project MCP servers under the default user-only MCP policy', async () => {
     const home = makeTempHome();
     const project = path.join(home, 'repo');
@@ -578,7 +715,7 @@ function runInstallVersion(home: string, agent: string, version: string, extraPa
   // routing the multi-line `-e` script through cmd.exe would mangle it. node is an
   // .exe everywhere, so this is shell-free and cross-platform.
   const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
-  const child = spawnSync(process.execPath, [tsxBin, '-e', `
+  const child = spawnSync(nodeExecPath(), [tsxBin, '-e', `
     import { installVersion } from ${JSON.stringify(moduleUrl)};
     (async () => {
       try {
@@ -655,7 +792,7 @@ function runInstallVersionWithScript(
   const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
   const agentsUrl = pathToFileURL(path.resolve('src/lib/agents.ts')).href;
   const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
-  const child = spawnSync(process.execPath, [tsxBin, '-e', `
+  const child = spawnSync(nodeExecPath(), [tsxBin, '-e', `
     import { installVersion } from ${JSON.stringify(moduleUrl)};
     import { AGENTS } from ${JSON.stringify(agentsUrl)};
     (async () => {
@@ -727,7 +864,7 @@ function runResolveAlias(home: string, agent: string, raw: string | undefined): 
   // routing the multi-line `-e` script through cmd.exe would mangle it. node is an
   // .exe everywhere, so this is shell-free and cross-platform.
   const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
-  const child = spawnSync(process.execPath, [tsxBin, '-e', `
+  const child = spawnSync(nodeExecPath(), [tsxBin, '-e', `
     import { resolveVersionAlias } from ${JSON.stringify(moduleUrl)};
     const r = resolveVersionAlias(${JSON.stringify(agent)}, ${JSON.stringify(raw ?? null)});
     console.log(JSON.stringify({ v: r === undefined ? null : r }));
@@ -837,7 +974,7 @@ describe('buildRepoScopedSelection — agents sync <agent> --repo <name>', () =>
   function runBuildScoped(home: string, repo: string): { skills?: string[]; memory?: string[] | 'all' } {
     const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
     const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
-    const child = spawnSync(process.execPath, [tsxBin, '-e', `
+    const child = spawnSync(nodeExecPath(), [tsxBin, '-e', `
       import { buildRepoScopedSelection } from ${JSON.stringify(moduleUrl)};
       const home = ${JSON.stringify(home)};
       console.log(JSON.stringify(buildRepoScopedSelection(${JSON.stringify(repo)}, home)));
@@ -915,7 +1052,7 @@ describe('unionResourceSelections + mergeRepoScopedSelections — interactive mu
   function evalExpr(home: string, expr: string): any {
     const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
     const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
-    const child = spawnSync(process.execPath, [tsxBin, '-e', `
+    const child = spawnSync(nodeExecPath(), [tsxBin, '-e', `
       import * as V from ${JSON.stringify(moduleUrl)};
       const home = ${JSON.stringify(home)};
       console.log(JSON.stringify(${expr}));
@@ -1007,7 +1144,7 @@ function makeClaudeVersion(home: string, version: string, opts: { realBinary: bo
 function runNamedExport(home: string, importName: string, callExpr: string): unknown {
   const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
   const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
-  const child = spawnSync(process.execPath, [tsxBin, '-e', `
+  const child = spawnSync(nodeExecPath(), [tsxBin, '-e', `
     import { ${importName} } from ${JSON.stringify(moduleUrl)};
     const home = ${JSON.stringify(home)};
     console.log(JSON.stringify(${callExpr}));
@@ -1084,7 +1221,7 @@ describe('removeVersion — default reassignment when removing the pinned defaul
   function runRemoveScenario(home: string, defaultVersion: string, versionToRemove: string): { removed: boolean; defaultAfter: string | null } {
     const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
     const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
-    const child = spawnSync(process.execPath, [tsxBin, '-e', `
+    const child = spawnSync(nodeExecPath(), [tsxBin, '-e', `
       import { setGlobalDefault, getGlobalDefault, removeVersion } from ${JSON.stringify(moduleUrl)};
       setGlobalDefault('claude', ${JSON.stringify(defaultVersion)});
       const removed = removeVersion('claude', ${JSON.stringify(versionToRemove)});

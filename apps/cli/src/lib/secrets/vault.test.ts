@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -57,6 +58,63 @@ let tmpDir: string;
 let restoreBackend: KeychainBackend | null;
 let keychainStore: Map<string, StoredItem>;
 let prevNoUsageTrack: string | undefined;
+
+function waitForFile(file: string, timeoutMs: number): void {
+  const deadline = Date.now() + timeoutMs;
+  while (!fs.existsSync(file)) {
+    if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${file}`);
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+  }
+}
+
+function concurrentVaultWriterScript(args: {
+  vaultFile: string;
+  passphrase: string;
+  readyFile: string;
+  goFile: string;
+  item: string;
+  value: string;
+}): string {
+  return `
+    import * as fs from 'fs';
+    import { _setVaultAgeHelperLaunchForTest, _setVaultPathForTest, cacheVaultKey, vaultSetItem } from './src/lib/secrets/vault.ts';
+    import { setKeychainBackendForTest } from './src/lib/secrets/index.ts';
+
+    const keychain = new Map();
+    setKeychainBackendForTest({
+      has: (item) => keychain.has(item),
+      get: (item) => {
+        const value = keychain.get(item);
+        if (value === undefined) throw new Error(\`Keychain item '\${item}' not found.\`);
+        return value;
+      },
+      set: (item, value) => { keychain.set(item, value); },
+      delete: (item) => keychain.delete(item),
+      list: (prefix) => [...keychain.keys()].filter((item) => item.startsWith(prefix)),
+    });
+    _setVaultPathForTest(${JSON.stringify(args.vaultFile)});
+    _setVaultAgeHelperLaunchForTest({ command: 'bun', args: ['src/index.ts', '__vault-age-helper'] });
+    cacheVaultKey({ passphrase: ${JSON.stringify(args.passphrase)} });
+    fs.writeFileSync(${JSON.stringify(args.readyFile)}, 'ready');
+    const sleep = new Int32Array(new SharedArrayBuffer(4));
+    while (!fs.existsSync(${JSON.stringify(args.goFile)})) Atomics.wait(sleep, 0, 0, 50);
+    vaultSetItem(${JSON.stringify(args.item)}, ${JSON.stringify(args.value)});
+  `;
+}
+
+async function waitForChild(child: ReturnType<typeof spawn>): Promise<void> {
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (chunk) => { stdout += String(chunk); });
+  child.stderr.on('data', (chunk) => { stderr += String(chunk); });
+  await new Promise<void>((resolve, reject) => {
+    child.on('error', reject);
+    child.on('exit', (code, signal) => {
+      if (code === 0) resolve();
+      else reject(new Error(`child exited code=${code} signal=${signal}\nstdout:\n${stdout}\nstderr:\n${stderr}`));
+    });
+  });
+}
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-vault-test-'));
@@ -177,6 +235,40 @@ describe('vault create and join safety', () => {
     expect(() => vaultGetItem('agents-cli.secrets.prod.API_KEY'))
       .toThrow(/Vault file is missing/);
   });
+
+  it('preserves both writes from concurrent synced vault writers', async () => {
+    createVault('pw');
+    const goFile = path.join(tmpDir, 'go');
+    const firstReady = path.join(tmpDir, 'first.ready');
+    const secondReady = path.join(tmpDir, 'second.ready');
+    const childEnv = { ...process.env, AGENTS_NO_USAGE_TRACK: '1' };
+    const first = spawn(process.execPath, ['--import', 'tsx', '--eval', concurrentVaultWriterScript({
+      vaultFile: vaultPath(),
+      passphrase: 'pw',
+      readyFile: firstReady,
+      goFile,
+      item: 'agents-cli.secrets.prod.FIRST',
+      value: 'first-value',
+    })], { cwd: process.cwd(), env: childEnv });
+    const second = spawn(process.execPath, ['--import', 'tsx', '--eval', concurrentVaultWriterScript({
+      vaultFile: vaultPath(),
+      passphrase: 'pw',
+      readyFile: secondReady,
+      goFile,
+      item: 'agents-cli.secrets.prod.SECOND',
+      value: 'second-value',
+    })], { cwd: process.cwd(), env: childEnv });
+
+    waitForFile(firstReady, 10_000);
+    waitForFile(secondReady, 10_000);
+    fs.writeFileSync(goFile, 'go');
+    await Promise.all([waitForChild(first), waitForChild(second)]);
+
+    _clearVaultDataCacheForTest();
+    expect(vaultGetItem('agents-cli.secrets.prod.FIRST')).toBe('first-value');
+    expect(vaultGetItem('agents-cli.secrets.prod.SECOND')).toBe('second-value');
+    expect((fs.statSync(vaultPath()).mode & 0o777)).toBe(0o600);
+  }, 90_000);
 
   it('refuses to replace an existing vault on join without overwrite', () => {
     const dest = vaultPath();

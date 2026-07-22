@@ -4,6 +4,7 @@ import { spawnSync } from 'child_process';
 import { armor } from 'age-encryption';
 import { getUserAgentsDir } from '../state.js';
 import { getCliLaunch } from '../cli-entry.js';
+import { atomicWriteFileSync, withFileLock } from '../fs-atomic.js';
 import {
   deleteKeychainToken,
   getKeychainToken,
@@ -46,6 +47,8 @@ const VAULT_FILE_NAME = 'vault.age';
 const VAULT_SESSION_ITEM = 'agents-cli.vault.session';
 export const VAULT_SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 export const VAULT_SCRYPT_WORK_FACTOR = 18;
+const VAULT_LOCK_STALE_MS = 120_000;
+const VAULT_LOCK_ACQUIRE_TIMEOUT_MS = 180_000;
 
 let overrideVaultPath: string | null = null;
 let vaultDataCache: VaultDataCache | null = null;
@@ -343,8 +346,20 @@ function writeVaultData(data: VaultData): void {
   const file = vaultPath();
   const key = requireVaultKey();
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, encrypt(key, data), { mode: 0o600 });
+  atomicWriteFileSync(file, encrypt(key, data), { encoding: 'utf-8', mode: 0o600 });
   cacheVaultData(file, key, data);
+}
+
+function withVaultMutation<T>(mutate: (data: VaultData) => { changed: boolean; result: T }): T {
+  const file = vaultPath();
+  requireVaultKey();
+  if (!fs.existsSync(file)) throw vaultMissingError(file);
+  return withFileLock(file, () => {
+    const data = readVaultData();
+    const { changed, result } = mutate(data);
+    if (changed) writeVaultData(data);
+    return result;
+  }, { staleMs: VAULT_LOCK_STALE_MS, acquireTimeoutMs: VAULT_LOCK_ACQUIRE_TIMEOUT_MS });
 }
 
 export function vaultHasItem(item: string): boolean {
@@ -385,37 +400,38 @@ export function vaultSetItem(item: string, value: string): void {
 
 export function vaultSetItems(items: Map<string, string>): void {
   if (items.size === 0) return;
-  const data = readVaultData();
-  for (const [item, value] of items) {
-    const parsed = parseVaultItem(item);
-    if (!parsed) throw new Error(`Vault item '${item}' is invalid.`);
-    const bundle = data.bundles[parsed.bundle] ?? { keys: {} };
-    if (parsed.kind === 'meta') bundle.metadata = value;
-    else bundle.keys[parsed.key] = value;
-    data.bundles[parsed.bundle] = bundle;
-  }
-  writeVaultData(data);
+  withVaultMutation((data) => {
+    for (const [item, value] of items) {
+      const parsed = parseVaultItem(item);
+      if (!parsed) throw new Error(`Vault item '${item}' is invalid.`);
+      const bundle = data.bundles[parsed.bundle] ?? { keys: {} };
+      if (parsed.kind === 'meta') bundle.metadata = value;
+      else bundle.keys[parsed.key] = value;
+      data.bundles[parsed.bundle] = bundle;
+    }
+    return { changed: true, result: undefined };
+  });
 }
 
 export function vaultDeleteItem(item: string): boolean {
   const parsed = parseVaultItem(item);
   if (!parsed) return false;
-  const data = readVaultData();
-  const bundle = data.bundles[parsed.bundle];
-  if (!bundle) return false;
-  let deleted = false;
-  if (parsed.kind === 'meta') {
-    deleted = bundle.metadata !== undefined;
-    delete bundle.metadata;
-  } else {
-    deleted = parsed.key in bundle.keys;
-    delete bundle.keys[parsed.key];
-  }
-  if (bundle.metadata === undefined && Object.keys(bundle.keys).length === 0) {
-    delete data.bundles[parsed.bundle];
-  }
-  if (deleted) writeVaultData(data);
-  return deleted;
+  return withVaultMutation((data) => {
+    const bundle = data.bundles[parsed.bundle];
+    if (!bundle) return { changed: false, result: false };
+    let deleted = false;
+    if (parsed.kind === 'meta') {
+      deleted = bundle.metadata !== undefined;
+      delete bundle.metadata;
+    } else {
+      deleted = parsed.key in bundle.keys;
+      delete bundle.keys[parsed.key];
+    }
+    if (bundle.metadata === undefined && Object.keys(bundle.keys).length === 0) {
+      delete data.bundles[parsed.bundle];
+    }
+    return { changed: deleted, result: deleted };
+  });
 }
 
 export function vaultListItems(prefix: string): string[] {

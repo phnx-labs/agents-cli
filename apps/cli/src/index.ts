@@ -147,6 +147,7 @@ import {
   loadSetup,
   loadUninstall,
   loadShare,
+  loadHq,
   loadFeed,
   loadMailboxes,
   type ModuleLoader,
@@ -287,6 +288,7 @@ Run and dispatch:
   run <agent|profile> [prompt]    Run an agent. Omit prompt for interactive mode.
   defaults                        Configure run defaults by agent/version selector
   teams                           Coordinate multiple agents on shared work
+  hq                              JSON bridge for the interactive Agents HQ floor
   routines                        Run agents on a cron schedule (scheduler auto-starts)
   webhook                         Receive signed GitHub/Linear webhooks for trigger routines
   funnel                          Expose a webhook receiver through Tailscale Funnel
@@ -296,6 +298,7 @@ Run and dispatch:
   pty                             Drive interactive terminal programs (REPLs, TUIs) via a persistent PTY session
 
 Credentials and profiles:
+  profile                         Activate resource profiles across skills, MCP, permissions, and secrets
   profiles                        Bundles of (host CLI, endpoint, model, auth)
   secrets                         Keychain-backed env bundles; use 'secrets exec <bundle> -- <cmd>' to inject into a subprocess
 
@@ -879,6 +882,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadAudit);
   await reg(loadWebhook);
   await reg(loadFunnel);
+  await reg(loadHq);
   await reg(loadFeed);
   await reg(loadMailboxes);
   await reg(loadSsh);

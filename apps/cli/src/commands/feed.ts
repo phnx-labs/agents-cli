@@ -144,6 +144,20 @@ export function remoteFeedHostsToDial(hosts: string[] | undefined, self: string)
   return hosts.filter((host) => hostToken(host) !== self);
 }
 
+export function prepareLocalFeedBlocks(
+  localBlocks: OpenBlock[],
+  opts: { includeLocal: boolean; all?: boolean; dispatch?: boolean },
+): { visible: OpenBlock[]; dispatch: OpenBlock[]; filter: ReturnType<typeof filterBlocksForFeed> } {
+  const filter = filterBlocksForFeed(localBlocks, {
+    apply: opts.includeLocal && (!opts.all || opts.dispatch === true),
+  });
+  return {
+    visible: opts.all ? localBlocks : filter.surfaced,
+    dispatch: filter.surfaced,
+    filter,
+  };
+}
+
 function renderBlock(b: OpenBlock, localHost: string, indent = ''): void {
   const host = b.host !== localHost ? chalk.yellow(` [${b.host}]`) : '';
   const runtime = chalk.gray(b.runtime);
@@ -335,10 +349,29 @@ export function registerFeedCommand(program: Command): void {
         }
       }
 
-      const localBlocks = includeLocal
+      let localBlocks = includeLocal
         ? [...listBlocks(), ...synthesizeControlCards(localSignals, listAskStats())]
         : [];
-      let blocks = localBlocks;
+
+      // Fill missing ticket/PR/worktree from live session meta before local
+      // policy mutates the store, so outcome keys land even when the publish
+      // hook had no deliverable stamp.
+      if (sessions.length > 0) {
+        localBlocks = enrichBlocksFromSessions(localBlocks, sessionHintsFromActive(sessions));
+      }
+
+      // Stall suppression (RUSH-1477) must only mutate blocks owned by this
+      // machine. Remote peers run their own `feed --json`; never enqueue a
+      // policy answer into a local mailbox for a remote agent.
+      const preparedLocal = prepareLocalFeedBlocks(localBlocks, {
+        includeLocal,
+        all: opts.all,
+        dispatch: opts.dispatch,
+      });
+      const visibleLocalBlocks = preparedLocal.visible;
+      const dispatchBlocks = preparedLocal.dispatch;
+
+      let blocks = visibleLocalBlocks;
       const forceLocal = opts.local === true || process.env[FEED_NO_FANOUT_ENV] === '1';
       if (!forceLocal) {
         const remoteHosts = remoteFeedHostsToDial(opts.host, self);
@@ -350,27 +383,12 @@ export function registerFeedCommand(program: Command): void {
             hosts: remoteHosts,
             parse: parseRemoteFeed,
           });
-          blocks = mergeFeedBlocks(localBlocks, remote.items);
+          blocks = mergeFeedBlocks(visibleLocalBlocks, remote.items);
         }
       }
 
-      // Fill missing ticket/PR/worktree from live session meta so outcome keys
-      // land even when the publish hook had no deliverable stamp.
-      if (sessions.length > 0) {
-        blocks = enrichBlocksFromSessions(blocks, sessionHintsFromActive(sessions));
-      }
-
-      // Stall suppression (RUSH-1477): auto-answer "should I…?" / "what's next?"
-      // so they never render. Applied on every feed read unless --all; --dispatch
-      // also applies so unattended ticks drain the stall backlog.
-      const filter = filterBlocksForFeed(blocks, {
-        apply: !opts.all || opts.dispatch === true,
-      });
-      if (!opts.all) {
-        blocks = filter.surfaced;
-      }
       blocks = rankFeedBlocks(blocks, localSignals);
-      const digest = suppressionDigest(filter);
+      const digest = suppressionDigest(preparedLocal.filter);
       if (digest && !opts.json) {
         console.log(chalk.dim(digest));
       }
@@ -378,7 +396,7 @@ export function registerFeedCommand(program: Command): void {
       if (opts.dispatch) {
         const policy = loadPolicy();
         const now = new Date();
-        for (const b of blocks) {
+        for (const b of dispatchBlocks) {
           // Wrap per-block policy so one malformed block (e.g. a crafted
           // mailboxId that throws in mailboxDir) can't abort the whole loop and
           // strand every remaining block's dispatch.
