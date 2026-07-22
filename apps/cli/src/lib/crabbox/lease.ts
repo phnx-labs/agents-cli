@@ -92,6 +92,13 @@ function buildProfileScript(profile: LeaseDispatchProfile): string {
   return buildHomeFileWriteScript(profileRemotePath(profile.name), body);
 }
 
+function runtimeInstallSpec(id: AgentId, dispatchProfile?: LeaseDispatchProfile): string {
+  if (dispatchProfile?.agent === id && dispatchProfile.version) {
+    return `${id}@${dispatchProfile.version}`;
+  }
+  return id;
+}
+
 /**
  * Bash snippet that guarantees `agents` is runnable on the box. Fresh crabbox
  * images ship without node, and the box user may not own the global npm prefix,
@@ -146,7 +153,9 @@ export function buildBootstrapScript(opts: LeaseRunOptions): string {
   if (opts.dispatchProfile) shredPaths.push(profileRemotePath(opts.dispatchProfile.name));
   const shred = shredPaths.map((p) => `rm -f "$HOME/${p}" 2>/dev/null || true`).join('\n');
 
-  const installRuntimes = opts.runtimes.map((id) => `agents add ${q(id)} >/dev/null 2>&1 || true`).join('\n');
+  const installRuntimes = opts.runtimes
+    .map((id) => `agents add ${q(runtimeInstallSpec(id, opts.dispatchProfile))} >/dev/null 2>&1 || true`)
+    .join('\n');
 
   return [
     'set -uo pipefail',

@@ -100,6 +100,32 @@ describe('buildBootstrapScript', () => {
     expect(script).toContain('rm -f "$HOME/.agents/profiles/kimi.yml"');
   });
 
+  it('installs the pinned base runtime version for a profile-dispatch run', () => {
+    const script = buildBootstrapScript({
+      agent: 'kimi',
+      prompt: 'hi',
+      runtimes: ['claude'],
+      credentialRuntimes: [],
+      detected,
+      dispatchProfile: {
+        name: 'kimi',
+        agent: 'claude',
+        version: '2.1.113',
+        env: {
+          ANTHROPIC_BASE_URL: 'https://openrouter.ai/api',
+          ANTHROPIC_MODEL: 'moonshotai/kimi-k2.5',
+          ANTHROPIC_AUTH_TOKEN: 'sk-or-profile',
+        },
+      },
+    });
+    expect(script).toContain("agents add 'claude@2.1.113'");
+    expect(script).toContain('version: 2.1.113');
+    expect(script.indexOf("agents add 'claude@2.1.113'")).toBeLessThan(
+      script.indexOf('cat > "$HOME/.agents/profiles/kimi.yml"'),
+    );
+    expect(script).toContain("agents run 'kimi' 'hi' --quiet");
+  });
+
   it('copies base runtime credentials for a profile only when requested', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lease-profile-'));
     const credPath = path.join(tmpDir, 'claude.json');
