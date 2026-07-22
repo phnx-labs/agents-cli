@@ -50,7 +50,7 @@ import { safeJoin } from './paths.js';
 import { installCommandSkillToVersion, listCommandSkillsInVersion, readSkillSourceCommandMarker, shouldInstallCommandAsSkill } from './command-skills.js';
 import { getWriter, getDetector } from './staleness/registry.js';
 import { syncMemoryToVersionHome } from './memory.js';
-import { listPluginSkillNames } from './staleness/writers/sources.js';
+import { listPluginSkillNames, resolveCommandSource, resolveSkillSource } from './staleness/writers/sources.js';
 import { syncProjectResourcesToAgent } from './project-resources.js';
 
 /** Promisified exec for running shell commands. */
@@ -2530,10 +2530,7 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     return [];
   };
 
-  const dropProjectLayer = (kind: SelectableKind, names: string[]): string[] => {
-    const sources = resourceSourceMap(kind, cwd, available);
-    return names.filter((name) => sources.get(name) !== 'project');
-  };
+  const trustedCommandNames = (names: string[]): string[] => names.filter((name) => resolveCommandSource(name) !== null);
 
   // Sync commands — dispatch through WRITERS.commands. The writer dispatches
   // between native (file copy / TOML conversion) and commands-as-skills
@@ -2542,8 +2539,8 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   // takes the commands-as-skills path — silently dropping every command.
   const commandsWriter = getWriter('commands', agent);
   const commandsToSync = selection
-    ? dropProjectLayer('commands', resolveSelection(selection.commands, available.commands))
-    : dropProjectLayer('commands', available.commands); // No selection = sync all non-project commands
+    ? trustedCommandNames(resolveSelection(selection.commands, available.commands))
+    : trustedCommandNames(available.commands); // No selection = sync all trusted commands, excluding project-only commands
   const commandsAsSkills = shouldInstallCommandAsSkill(agent, version);
 
   if (commandsToSync.length > 0 && commandsWriter) {
@@ -2587,9 +2584,11 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     ? resolveSelection(selection.plugins, available.plugins)
     : (pluginsWriter ? available.plugins : []);
   const pluginSkillsToSync = listPluginSkillNames({ agent, plugins: new Set(pluginsToSync) });
+  const trustedSkillNames = (names: string[]): string[] =>
+    names.filter((name) => resolveSkillSource(name, { agent, plugins: new Set(pluginsToSync) }) !== null);
   const selectedSkillsToSync = selection
-    ? dropProjectLayer('skills', resolveSelection(selection.skills, available.skills))
-    : dropProjectLayer('skills', available.skills);
+    ? trustedSkillNames(resolveSelection(selection.skills, available.skills))
+    : trustedSkillNames(available.skills);
   let skillsToSync = userPassedSelection
     ? selectedSkillsToSync
     : Array.from(new Set([...selectedSkillsToSync, ...pluginSkillsToSync]));
@@ -2775,9 +2774,11 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   // as commands/skills/hooks).
   const subagentsWriter = getWriter('subagents', agent);
   const subagentsGate = supports(agent, 'subagents', version);
+  const installedSubagentNames = new Set(listInstalledSubagents().map((subagent) => subagent.name));
+  const trustedSubagentNames = (names: string[]): string[] => names.filter((name) => installedSubagentNames.has(name));
   const subagentsRequested = selection
-    ? dropProjectLayer('subagents', resolveSelection(selection.subagents, available.subagents))
-    : (subagentsWriter ? dropProjectLayer('subagents', available.subagents) : []);
+    ? trustedSubagentNames(resolveSelection(selection.subagents, available.subagents))
+    : (subagentsWriter ? trustedSubagentNames(available.subagents) : []);
   const subagentsToSync = subagentsGate.ok ? subagentsRequested : [];
 
   if (subagentsRequested.length > 0 && !subagentsGate.ok) {
@@ -2816,9 +2817,14 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   // Sync workflows — dispatch through WRITERS.workflows.
   const workflowsWriter = getWriter('workflows', agent);
   const workflowsGate = supports(agent, 'workflows', version);
+  const trustedWorkflowNames = (names: string[]): string[] => {
+    if (names.length === 0) return [];
+    const installedWorkflowNames = new Set(listInstalledWorkflows().keys());
+    return names.filter((name) => installedWorkflowNames.has(name));
+  };
   const workflowsRequested = selection
-    ? dropProjectLayer('workflows', resolveSelection(selection.workflows, available.workflows))
-    : (workflowsWriter ? dropProjectLayer('workflows', available.workflows) : []);
+    ? trustedWorkflowNames(resolveSelection(selection.workflows, available.workflows))
+    : (workflowsWriter ? trustedWorkflowNames(available.workflows) : []);
   const workflowsToSync = workflowsGate.ok ? workflowsRequested : [];
 
   if (workflowsRequested.length > 0 && !workflowsGate.ok) {
