@@ -490,13 +490,27 @@ export function removePermissionSet(name: string): { success: boolean; error?: s
 // ============================================================================
 
 /**
+ * Map a canonical rule to Claude settings.json syntax.
+ * Claude's file-permission checks only match Edit(path) rules — an Edit rule
+ * covers every file-editing tool (Write, Edit, NotebookEdit) — and Claude
+ * warns at startup about unmatched Write(path) rules. Canonical Write(path)
+ * stays for other agents' converters; for Claude it is emitted as Edit(path).
+ */
+function canonicalToClaudeRule(perm: string): string {
+  if (perm.startsWith('Write(')) {
+    return perm.replace(/^Write/, 'Edit');
+  }
+  return perm;
+}
+
+/**
  * Convert canonical permission set to Claude format.
  * Claude uses: { permissions: { allow: ["Bash(*)", "Read(**)"], deny: [] } }
  */
 export function convertToClaudeFormat(set: PermissionSet): ClaudePermissions {
   const permissions: ClaudePermissions['permissions'] = {
-    allow: [...set.allow],
-    deny: set.deny ? [...set.deny] : [],
+    allow: [...new Set(set.allow.map(canonicalToClaudeRule))],
+    deny: set.deny ? [...new Set(set.deny.map(canonicalToClaudeRule))] : [],
   };
   if (set.additionalDirectories?.length) {
     permissions.additionalDirectories = [...set.additionalDirectories];
@@ -1452,8 +1466,9 @@ export function applyClaudePermissions(
 
     if (merge && config.permissions) {
       const existing = config.permissions as { allow?: string[]; deny?: string[] };
-      const mergedAllow = new Set([...(existing.allow || []), ...newPermissions.permissions.allow]);
-      const mergedDeny = new Set([...(existing.deny || []), ...newPermissions.permissions.deny]);
+      // Rewrite stale Write(path) rules already installed in settings.json too.
+      const mergedAllow = new Set([...(existing.allow || []).map(canonicalToClaudeRule), ...newPermissions.permissions.allow]);
+      const mergedDeny = new Set([...(existing.deny || []).map(canonicalToClaudeRule), ...newPermissions.permissions.deny]);
       config.permissions = {
         allow: [...mergedAllow],
         deny: [...mergedDeny],
@@ -1650,8 +1665,9 @@ export function applyPermissionsToVersion(
 
       if (merge && config.permissions) {
         const existing = config.permissions as { allow?: string[]; deny?: string[]; additionalDirectories?: string[] };
-        const mergedAllow = new Set([...(existing.allow || []), ...newPermissions.permissions.allow]);
-        const mergedDeny = new Set([...(existing.deny || []), ...newPermissions.permissions.deny]);
+        // Rewrite stale Write(path) rules already installed in settings.json too.
+        const mergedAllow = new Set([...(existing.allow || []).map(canonicalToClaudeRule), ...newPermissions.permissions.allow]);
+        const mergedDeny = new Set([...(existing.deny || []).map(canonicalToClaudeRule), ...newPermissions.permissions.deny]);
         const mergedDirs = new Set([...(existing.additionalDirectories || []), ...(newPermissions.permissions.additionalDirectories || [])]);
         const perms: Record<string, unknown> = {
           allow: [...mergedAllow],

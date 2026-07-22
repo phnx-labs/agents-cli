@@ -249,7 +249,9 @@ describe('PermissionsHandler', () => {
       expect(config.permissions.allow).toContain('Read(**)');
       expect(config.permissions.allow).toContain('Bash(git *)');
       expect(config.permissions.allow).toContain('Bash(npm *)');
-      expect(config.permissions.allow).toContain('Write(**)');
+      // Claude only matches Edit(path) rules; canonical Write(path) is emitted as Edit(path).
+      expect(config.permissions.allow).toContain('Edit(**)');
+      expect(config.permissions.allow).not.toContain('Write(**)');
       expect(config.permissions.deny).toContain('Bash(rm -rf *)');
     });
 

@@ -172,6 +172,18 @@ describe('convertToClaudeFormat', () => {
     expect(result.permissions.allow).toEqual(['Bash(git *)']);
     expect(result.permissions.deny).toEqual([]);
   });
+
+  it('rewrites Write(path) rules to Edit(path) and dedupes against Edit twins', () => {
+    const set: PermissionSet = {
+      name: 'test',
+      allow: ['Write(~/.claude/**)', 'Edit(~/.claude/**)', 'Write(/tmp/*)', 'Write'],
+      deny: ['Write(~/.ssh/**)', 'Edit(~/.ssh/**)'],
+    };
+
+    const result = convertToClaudeFormat(set);
+    expect(result.permissions.allow).toEqual(['Edit(~/.claude/**)', 'Edit(/tmp/*)', 'Write']);
+    expect(result.permissions.deny).toEqual(['Edit(~/.ssh/**)']);
+  });
 });
 
 describe('convertToOpenCodeFormat', () => {
@@ -695,6 +707,32 @@ describe('applyPermissionsToVersion', () => {
     expect(settings.permissions.allow).toContain('Bash(git *)'); // new
     expect(settings.permissions.deny).toContain('Bash(rm *)');
     expect(settings.otherSetting).toBe('preserved');
+  });
+
+  it('migrates stale Write(path) rules in existing Claude settings on merge', () => {
+    const versionHome = join(testDir, 'claude-version-migrate');
+    const claudeDir = join(versionHome, '.claude');
+    mkdirSync(claudeDir, { recursive: true });
+
+    const existing = {
+      permissions: {
+        allow: ['Write(~/.claude/**)', 'Edit(~/.claude/**)'],
+        deny: ['Write(~/.ssh/**)', 'Edit(~/.ssh/**)'],
+      },
+    };
+    writeFileSync(join(claudeDir, 'settings.json'), JSON.stringify(existing, null, 2));
+
+    const set: PermissionSet = {
+      name: 'test',
+      allow: ['Bash(git *)'],
+    };
+
+    const result = applyPermissionsToVersion('claude', set, versionHome, true);
+    expect(result.success).toBe(true);
+
+    const settings = JSON.parse(readFileSync(join(claudeDir, 'settings.json'), 'utf-8'));
+    expect(settings.permissions.allow).toEqual(['Edit(~/.claude/**)', 'Bash(git *)']);
+    expect(settings.permissions.deny).toEqual(['Edit(~/.ssh/**)']);
   });
 
   it('preserves env, hooks, mcpServers, and custom top-level keys (regression #137)', () => {
