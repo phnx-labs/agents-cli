@@ -160,6 +160,24 @@ describe('vault create and join safety', () => {
     expect(vaultGetItem('agents-cli.secrets.prod.API_KEY')).toBe('super-secret-prod-value');
   });
 
+  it('refuses to write when the vault file is missing while logged in', () => {
+    createVault('pw');
+    vaultSetItem('agents-cli.secrets.prod.API_KEY', 'super-secret-prod-value');
+
+    // Simulate a sync conflict / accidental delete: the file is gone but the
+    // session is still cached (still "logged in").
+    fs.rmSync(vaultPath());
+    _clearVaultDataCacheForTest();
+    expect(getVaultSession().loggedIn).toBe(true);
+
+    // A write must not silently start from an empty vault and persist it.
+    expect(() => vaultSetItem('agents-cli.secrets.other.KEY', 'value'))
+      .toThrow(/Vault file is missing/);
+    // And a read of the missing vault must not report an empty vault.
+    expect(() => vaultGetItem('agents-cli.secrets.prod.API_KEY'))
+      .toThrow(/Vault file is missing/);
+  });
+
   it('refuses to replace an existing vault on join without overwrite', () => {
     const dest = vaultPath();
     const source = path.join(tmpDir, 'source-vault.age');

@@ -307,9 +307,23 @@ function parseVaultItem(item: string): { kind: 'meta'; bundle: string } | { kind
   return null;
 }
 
+function vaultMissingError(file: string): Error {
+  return new Error(
+    `Vault file is missing: ${file}. A vault was created but the file is gone` +
+      ' (a sync conflict, an undownloaded placeholder, or an accidental move/delete).' +
+      ' Restore it before writing, or run: agents login --create --force to start over.',
+  );
+}
+
 function readVaultData(): VaultData {
   const file = vaultPath();
-  if (!fs.existsSync(file)) return emptyVault();
+  if (!fs.existsSync(file)) {
+    // A live session means a vault was created/joined/unlocked, so the file
+    // must exist. If it is gone, refuse rather than silently starting from an
+    // empty vault (which a subsequent write would persist, destroying data).
+    if (getVaultSession().loggedIn) throw vaultMissingError(file);
+    return emptyVault();
+  }
   const key = requireVaultKey();
   const stat = vaultFileStat(file);
   if (
