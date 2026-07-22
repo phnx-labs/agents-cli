@@ -73,6 +73,11 @@ describe('isJsonMode', () => {
   it('is true when json flag is set', () => {
     expect(isJsonMode({ json: true })).toBe(true);
   });
+
+  it('is false without --json even when stdout is not a TTY', () => {
+    expect(process.stdout.isTTY).not.toBe(true);
+    expect(isJsonMode({})).toBe(false);
+  });
 });
 
 describe('termLink', () => {
