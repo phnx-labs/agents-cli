@@ -7,6 +7,7 @@ import chalk from 'chalk';
 import {
   DEFAULT_BUCKET_NAME,
   DEFAULT_CF_BUNDLE,
+  DEFAULT_SHARE_DOMAIN,
   DEFAULT_WORKER_NAME,
   type ShareConfig,
   generateWriteToken,
@@ -24,6 +25,7 @@ import {
   deployWorker,
   enableWorkersDev,
   findZoneId,
+  type CloudflareRequester,
   setWorkerSecret,
 } from '../lib/share/provision.js';
 import { publishFile, type PublishResult } from '../lib/share/publish.js';
@@ -78,7 +80,7 @@ export function registerShareCommands(program: Command): void {
     .option('--bucket <name>', 'R2 bucket name', DEFAULT_BUCKET_NAME)
     .option('--account <id>', 'Cloudflare account id (else read from the bundle / prompt)')
     .option('--token <t>', 'Cloudflare API token (else read from the --bundle)')
-    .option('--domain <host>', 'also map a custom domain (e.g. share.agents-cli.sh) if the token owns the zone')
+    .option('--domain <host>', `custom domain to map (default: ${DEFAULT_SHARE_DOMAIN}; workers.dev if zone is not visible)`)
     .action(async (opts: { bundle: string; worker: string; bucket: string; account?: string; token?: string; domain?: string }) => {
       try {
         await runShareProvision(opts);
@@ -126,6 +128,7 @@ export async function runShareProvision(opts: {
   account?: string;
   token?: string;
   domain?: string;
+  request?: CloudflareRequester;
 }): Promise<void> {
   const { default: ora } = await import('ora');
   const { input } = await import('@inquirer/prompts');
@@ -141,30 +144,32 @@ export async function runShareProvision(opts: {
   const workerName = opts.worker;
   const bucketName = opts.bucket;
   const token = generateWriteToken();
+  const requestedDomain = cleanHostname(opts.domain) ?? DEFAULT_SHARE_DOMAIN;
 
   const spin = ora('Provisioning on Cloudflare…').start();
   try {
-    await createBucket(apiToken, accountId, bucketName);
+    const provisionOpts = opts.request ? { request: opts.request } : {};
+    await createBucket(apiToken, accountId, bucketName, provisionOpts);
     spin.text = `R2 bucket '${bucketName}' ready`;
-    await configureBucketLifecycle(apiToken, accountId, bucketName);
+    await configureBucketLifecycle(apiToken, accountId, bucketName, provisionOpts);
     spin.text = `R2 bucket '${bucketName}' lifecycle ready`;
-    await deployWorker(apiToken, accountId, workerName, renderWorkerScript(), bucketName);
+    await deployWorker(apiToken, accountId, workerName, renderWorkerScript(), bucketName, provisionOpts);
     spin.text = `Worker '${workerName}' deployed`;
-    await setWorkerSecret(apiToken, accountId, workerName, token);
+    await setWorkerSecret(apiToken, accountId, workerName, token, provisionOpts);
     spin.text = `Worker '${workerName}' write token set`;
-    const subdomain = await enableWorkersDev(apiToken, accountId, workerName);
+    const subdomain = await enableWorkersDev(apiToken, accountId, workerName, provisionOpts);
     let baseUrl = `https://${workerName}.${subdomain}.workers.dev`;
     let domain: string | undefined;
 
-    if (opts.domain) {
-      spin.text = `Mapping ${opts.domain}…`;
-      const zoneId = await findZoneId(apiToken, opts.domain);
+    if (requestedDomain) {
+      spin.text = `Mapping ${requestedDomain}…`;
+      const zoneId = await findZoneId(apiToken, requestedDomain, provisionOpts);
       if (zoneId) {
-        await addCustomDomain(apiToken, accountId, workerName, zoneId, opts.domain);
-        baseUrl = `https://${opts.domain}`;
-        domain = opts.domain;
+        await addCustomDomain(apiToken, accountId, workerName, zoneId, requestedDomain, provisionOpts);
+        baseUrl = `https://${requestedDomain}`;
+        domain = requestedDomain;
       } else {
-        spin.warn(`Zone for ${opts.domain} not visible to this token — staying on workers.dev`);
+        spin.warn(`Zone for ${requestedDomain} not visible to this token — staying on workers.dev`);
       }
     }
     spin.succeed('Provisioned');
@@ -183,6 +188,17 @@ export async function runShareProvision(opts: {
   } catch (e) {
     spin.fail('Provisioning failed');
     throw e;
+  }
+}
+
+function cleanHostname(domain: string | undefined): string | undefined {
+  const raw = domain?.trim().replace(/\/+$/, '');
+  if (!raw) return undefined;
+  try {
+    const url = new URL(raw.includes('://') ? raw : `https://${raw}`);
+    return url.hostname || undefined;
+  } catch {
+    return raw;
   }
 }
 

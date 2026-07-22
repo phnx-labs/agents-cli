@@ -168,6 +168,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   apply: [loadApply],
   check: [loadCheck],
   status: [loadStatus],
+  profile: [loadProfiles],
   profiles: [loadProfiles],
   secrets: [loadSecrets],
   wallet: [loadWallet],

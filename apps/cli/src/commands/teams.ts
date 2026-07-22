@@ -110,8 +110,6 @@ const VALID_CLOUD_PROVIDERS = ['rush', 'codex', 'factory'] as const satisfies re
 type Mode = (typeof VALID_MODES)[number];
 type Effort = (typeof VALID_EFFORTS)[number];
 
-// Auto-enable JSON mode when piped / not a TTY so AI agent consumers get
-// parseable output by default.
 function statusColor(status: string): (s: string) => string {
   switch (status) {
     case 'pending': return chalk.blue;

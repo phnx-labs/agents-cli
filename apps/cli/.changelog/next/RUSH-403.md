@@ -1,1 +1,0 @@
-- **Remove the deprecated `agents daemon` command tree (RUSH-403).** The legacy `agents daemon start|stop|status|logs` aliases are gone for v2.0; use `agents routines start|stop|status|scheduler-logs` for scheduler controls. Source: `apps/cli/src/lib/startup/command-registry.ts`, `apps/cli/src/index.ts`, `apps/cli/src/lib/daemon.ts`, `apps/cli/docs/03-routines.md`.

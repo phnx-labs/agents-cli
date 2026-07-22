@@ -6,7 +6,7 @@
 // - The raw write token lives in the `share` secrets bundle (keychain-backed,
 //   fleet-injectable) — never on disk in plaintext.
 // - The Cloudflare API token (for provisioning) is read from the user's existing
-//   `cloudflare.com` bundle.
+//   `cloudflare` bundle.
 
 import { randomBytes } from 'node:crypto';
 import { readMeta, updateMeta } from '../state.js';
@@ -34,14 +34,16 @@ export interface ShareConfig {
 }
 
 export const SHARE_BUNDLE = 'share';
-export const SHARE_TOKEN_KEY = 'SHARE_WRITE_TOKEN';
-export const DEFAULT_CF_BUNDLE = 'cloudflare.com';
+export const SHARE_TOKEN_KEY = 'WRITE_TOKEN';
+export const SHARE_TOKEN_ENV_KEY = 'SHARE_WRITE_TOKEN';
+export const DEFAULT_CF_BUNDLE = 'cloudflare';
 export const DEFAULT_WORKER_NAME = 'agents-share';
 export const DEFAULT_BUCKET_NAME = 'agents-share';
+export const DEFAULT_SHARE_DOMAIN = 'share.agents-cli.sh';
 
 /** The write token may be injected ephemerally into fleet/cloud agents. */
 export function readWriteTokenEnv(env: NodeJS.ProcessEnv = process.env): string | null {
-  const token = env[SHARE_TOKEN_KEY]?.trim();
+  const token = env[SHARE_TOKEN_ENV_KEY]?.trim();
   return token ? token : null;
 }
 
@@ -115,7 +117,7 @@ export function readWriteToken(): string {
 export function shareRuntimeEnv(opts: { agentOnly?: boolean } = {}): Record<string, string> | undefined {
   if (!readShareConfig()) return undefined;
   const fromEnv = readWriteTokenEnv();
-  if (fromEnv) return { [SHARE_TOKEN_KEY]: fromEnv };
+  if (fromEnv) return { [SHARE_TOKEN_ENV_KEY]: fromEnv };
   try {
     if (!bundleExists(SHARE_BUNDLE)) return undefined;
     const { env } = readAndResolveBundleEnv(SHARE_BUNDLE, {
@@ -124,13 +126,13 @@ export function shareRuntimeEnv(opts: { agentOnly?: boolean } = {}): Record<stri
       agentOnly: opts.agentOnly,
     });
     const token = env[SHARE_TOKEN_KEY];
-    return token ? { [SHARE_TOKEN_KEY]: token } : undefined;
+    return token ? { [SHARE_TOKEN_ENV_KEY]: token } : undefined;
   } catch {
     return undefined;
   }
 }
 
-/** Cloudflare API credentials for provisioning, read from `cloudflare.com` (or a
+/** Cloudflare API credentials for provisioning, read from `cloudflare` (or a
  * user-named bundle). Fuzzy-matches key names so it works across bundle layouts. */
 export function readCloudflareCreds(
   bundle = DEFAULT_CF_BUNDLE,

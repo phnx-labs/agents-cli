@@ -40,7 +40,7 @@ import {
   checkJobDeviceEligibility,
   normalizeTriggerEvent,
 } from '../lib/routines.js';
-import type { JobConfig, JobTrigger, LinearTriggerEvent } from '../lib/routines.js';
+import type { JobConfig, JobTrigger, LinearTriggerEvent, RunMeta } from '../lib/routines.js';
 import { fireWebhookJobs, matchJobsToWebhook, type IncomingWebhook, type WebhookSource } from '../lib/triggers/webhook.js';
 import { getRoutinesDir } from '../lib/state.js';
 import { IS_WINDOWS } from '../lib/platform/index.js';
@@ -123,15 +123,19 @@ function parseRoutineTrigger(options: Record<string, unknown>): JobTrigger | und
   throw new Error('--on source must be github or linear');
 }
 
-/** Start or reload the background scheduler so newly-added jobs fire on time. */
-function ensureSchedulerRunning(options: { stderr?: boolean } = {}): void {
-  const log = options.stderr ? console.error : console.log;
+/**
+ * Start or reload the background scheduler so newly-added jobs fire on time.
+ * `quiet` suppresses human status lines for JSON callers.
+ */
+function ensureSchedulerRunning(opts: { quiet?: boolean; stderr?: boolean } = {}): void {
+  const log = opts.stderr ? console.error : console.log;
   if (isDaemonRunning()) {
     signalDaemonReload();
-    log(chalk.gray('Scheduler reloaded'));
+    if (!opts.quiet) log(chalk.gray('Scheduler reloaded'));
     return;
   }
   const result = startDaemon();
+  if (opts.quiet) return;
   if (result.pid) {
     log(chalk.green(`Scheduler started (PID: ${result.pid}). It will run in the background and fire routines on schedule.`));
     log(chalk.gray(`Stop anytime with: agents routines stop`));
@@ -144,7 +148,7 @@ function writeJson(payload: unknown): void {
   process.stdout.write(JSON.stringify(payload) + '\n');
 }
 
-function runMetaJson(run: ReturnType<typeof listRuns>[number]): Record<string, unknown> {
+function runMetaJson(run: RunMeta): Record<string, unknown> {
   return {
     jobId: run.jobName,
     jobName: run.jobName,
@@ -155,6 +159,10 @@ function runMetaJson(run: ReturnType<typeof listRuns>[number]): Record<string, u
     exitCode: run.exitCode,
     errorMessage: run.errorMessage ?? null,
   };
+}
+
+export function buildRunsJson(runs: RunMeta[]): Record<string, unknown>[] {
+  return runs.map(runMetaJson);
 }
 
 /** Detect Ctrl+C or premature stream close during an interactive prompt. */
@@ -582,8 +590,10 @@ export function registerRoutinesCommands(program: Command): void {
 
         writeJob(config);
         if (options.json) {
-          ensureSchedulerRunning({ stderr: true });
           writeJson({
+            ok: true,
+            added: nameOrPath,
+            job: config,
             jobId: config.name,
             name: config.name,
             status: 'added',
@@ -591,14 +601,15 @@ export function registerRoutinesCommands(program: Command): void {
             schedule: config.schedule ?? null,
             trigger: config.trigger ?? null,
           });
-        } else {
-          console.log(chalk.green(`Job '${nameOrPath}' added`));
-          if (runOnce) {
-            console.log(chalk.gray(`One-shot job scheduled for: ${options.at}`));
-          }
-
-          ensureSchedulerRunning();
+          ensureSchedulerRunning({ quiet: true });
+          return;
         }
+        console.log(chalk.green(`Job '${nameOrPath}' added`));
+        if (runOnce) {
+          console.log(chalk.gray(`One-shot job scheduled for: ${options.at}`));
+        }
+
+        ensureSchedulerRunning();
       } else {
         // File mode: load from YAML file
         if (!nameOrPath) {
@@ -652,8 +663,10 @@ export function registerRoutinesCommands(program: Command): void {
 
         writeJob(config);
         if (options.json) {
-          ensureSchedulerRunning({ stderr: true });
           writeJson({
+            ok: true,
+            added: name,
+            job: config,
             jobId: config.name,
             name: config.name,
             status: 'added',
@@ -661,11 +674,12 @@ export function registerRoutinesCommands(program: Command): void {
             schedule: config.schedule ?? null,
             trigger: config.trigger ?? null,
           });
-        } else {
-          console.log(chalk.green(`Job '${name}' added`));
-
-          ensureSchedulerRunning();
+          ensureSchedulerRunning({ quiet: true });
+          return;
         }
+        console.log(chalk.green(`Job '${name}' added`));
+
+        ensureSchedulerRunning();
       }
     });
 
@@ -785,7 +799,7 @@ export function registerRoutinesCommands(program: Command): void {
         writeJson({
           jobId: name,
           name,
-          runs: runs.slice(-10).map(runMetaJson),
+          runs: buildRunsJson(runs.slice(-10)),
         });
         return;
       }
@@ -823,49 +837,65 @@ export function registerRoutinesCommands(program: Command): void {
       // the trusted user layer.
       const job = readJob(name);
       if (!job) {
+        if (options.json) {
+          writeJson({ error: `Job '${name}' not found` });
+          process.exit(1);
+        }
         console.error(chalk.red(`Job '${name}' not found`));
         process.exit(1);
       }
 
       const eligibility = checkJobDeviceEligibility(job);
       if (eligibility) {
+        if (options.json) {
+          writeJson({ error: eligibility.message, hint: eligibility.suggestion });
+          process.exit(1);
+        }
         console.error(chalk.red(eligibility.message));
         console.error(chalk.gray(`  ${eligibility.suggestion}`));
         process.exit(1);
       }
 
       const runLabel = job.command ? 'command' : job.workflow ? `workflow: ${job.workflow}` : `agent: ${job.agent}`;
-      if (!options.json) console.log(chalk.bold(`Running job '${name}' (${runLabel}, mode: ${job.mode})\n`));
+      // A spinner writes to stderr but its human framing is noise for a JSON consumer.
       const spinner = options.json ? null : ora('Executing...').start();
+      if (!options.json) console.log(chalk.bold(`Running job '${name}' (${runLabel}, mode: ${job.mode})\n`));
 
       try {
         const result = await executeJob(job);
         const logPath = `${getRunDir(name, result.meta.runId)}/stdout.log`;
         if (options.json) {
           writeJson({
+            ok: true,
+            job: name,
+            logDir: getRunDir(name, result.meta.runId),
             ...runMetaJson(result.meta),
             logPath,
             reportPath: result.reportPath ?? null,
           });
+          return;
+        }
+        if (result.meta.status === 'completed') {
+          spinner!.succeed(`Job completed (exit code: ${result.meta.exitCode})`);
+        } else if (result.meta.status === 'timeout') {
+          spinner!.warn(`Job timed out after ${job.timeout}`);
         } else {
-          if (result.meta.status === 'completed') {
-            spinner!.succeed(`Job completed (exit code: ${result.meta.exitCode})`);
-          } else if (result.meta.status === 'timeout') {
-            spinner!.warn(`Job timed out after ${job.timeout}`);
-          } else {
-            spinner!.fail(`Job failed (exit code: ${result.meta.exitCode})`);
-          }
+          spinner!.fail(`Job failed (exit code: ${result.meta.exitCode})`);
+        }
 
-          console.log(chalk.gray(`  Run: ${result.meta.runId}`));
-          console.log(chalk.gray(`  Log: ${logPath}`));
+        console.log(chalk.gray(`  Run: ${result.meta.runId}`));
+        console.log(chalk.gray(`  Log: ${logPath}`));
 
-          if (result.reportPath) {
-            console.log(chalk.bold('\nReport:\n'));
-            console.log(fs.readFileSync(result.reportPath, 'utf-8'));
-          }
+        if (result.reportPath) {
+          console.log(chalk.bold('\nReport:\n'));
+          console.log(fs.readFileSync(result.reportPath, 'utf-8'));
         }
       } catch (err) {
-        spinner?.fail('Execution failed');
+        if (options.json) {
+          writeJson({ error: (err as Error).message });
+          process.exit(1);
+        }
+        spinner!.fail('Execution failed');
         console.error(chalk.red((err as Error).message));
         process.exit(1);
       }

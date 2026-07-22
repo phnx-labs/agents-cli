@@ -117,9 +117,9 @@ export function padVisible(s: string, width: number): string {
   return w >= width ? s : s + ' '.repeat(width - w);
 }
 
-/** True when `--json` was passed or stdout is not a TTY. */
+/** True when `--json` was passed. Piped stdout stays human-readable unless requested. */
 export function isJsonMode(opts: { json?: boolean }): boolean {
-  return Boolean(opts.json) || !process.stdout.isTTY;
+  return Boolean(opts.json);
 }
 
 /** Read all of stdin synchronously and return it UTF-8 decoded and trimmed. */

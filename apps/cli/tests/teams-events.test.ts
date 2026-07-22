@@ -94,7 +94,7 @@ describe('team lifecycle audit events', () => {
 
   it('does NOT emit teams.disband when the team does not exist', () => {
     const home = makeTempHome();
-    const res = runCli(home, ['teams', 'disband', 'never-existed']);
+    const res = runCli(home, ['teams', 'disband', 'never-existed', '--json']);
     // The command reports existed:false (no real removal), so no semantic
     // teams.disband event fires — only the generic command.* pair.
     expect(res.stdout).toContain('"existed": false');

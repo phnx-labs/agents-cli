@@ -14,6 +14,7 @@ let tmpDir: string;
 const keychain = new Map<string, string>();
 let originalHome: string | undefined;
 let originalNoAgent: string | undefined;
+let originalNoPrompt: string | undefined;
 let restoreKeychain: KeychainBackend | null;
 
 beforeAll(async () => {
@@ -22,8 +23,14 @@ beforeAll(async () => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-share-publish-files-'));
   originalHome = process.env.HOME;
   originalNoAgent = process.env.AGENTS_SECRETS_NO_AGENT;
+  originalNoPrompt = process.env.AGENTS_SECRETS_NO_PROMPT;
   process.env.HOME = tmpHome;
   process.env.AGENTS_SECRETS_NO_AGENT = '1';
+  // The token is read from an in-memory keychain backend (installed below), which
+  // never prompts Touch ID. On darwin-headless (the release-gated macOS CI matrix)
+  // isHeadlessSecretsContext() would otherwise force the agentOnly no-prompt path
+  // to throw before the direct read. Pin NO_PROMPT=0 so the read runs on every OS.
+  process.env.AGENTS_SECRETS_NO_PROMPT = '0';
   const secrets = await import('../secrets/index.js');
   restoreKeychain = secrets.setKeychainBackendForTest({
     has: (item) => keychain.has(item),
@@ -54,6 +61,8 @@ afterAll(async () => {
   else process.env.HOME = originalHome;
   if (originalNoAgent === undefined) delete process.env.AGENTS_SECRETS_NO_AGENT;
   else process.env.AGENTS_SECRETS_NO_AGENT = originalNoAgent;
+  if (originalNoPrompt === undefined) delete process.env.AGENTS_SECRETS_NO_PROMPT;
+  else process.env.AGENTS_SECRETS_NO_PROMPT = originalNoPrompt;
   vi.resetModules();
   fs.rmSync(tmpHome, { recursive: true, force: true });
   fs.rmSync(tmpDir, { recursive: true, force: true });

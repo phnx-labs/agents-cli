@@ -46,6 +46,14 @@ import { loadDevices } from '../lib/devices/registry.js';
 import { setHelpSections } from '../lib/help.js';
 import { isInteractiveTerminal, requireInteractiveSelection } from './utils.js';
 
+function stdoutJson(payload: unknown): void {
+  process.stdout.write(JSON.stringify(payload) + '\n');
+}
+
+function stderrLine(message: string): void {
+  process.stderr.write(message + '\n');
+}
+
 /** A one-line human label for what a monitor watches. */
 function sourceLabel(source: MonitorSource): string {
   switch (source.type) {
@@ -94,7 +102,7 @@ function ownerLabel(monitor: MonitorConfig): string {
 function ensureDaemonRunning(): void {
   if (isDaemonRunning()) {
     signalDaemonReload();
-    console.log(chalk.gray('Daemon reloaded'));
+    stderrLine(chalk.gray('Daemon reloaded'));
     return;
   }
   const result = startDaemon();
@@ -102,7 +110,7 @@ function ensureDaemonRunning(): void {
     console.log(chalk.green(`Daemon started (PID: ${result.pid}). It will watch monitors in the background.`));
     console.log(chalk.gray('Stop anytime with: agents routines stop'));
   } else {
-    console.log(chalk.yellow('Could not start the daemon. Start it manually with: agents routines start'));
+    stderrLine(chalk.yellow('Could not start the daemon. Start it manually with: agents routines start'));
   }
 }
 
@@ -110,15 +118,15 @@ function ensureDaemonRunning(): void {
 async function validateDevice(name: string): Promise<string> {
   const normalized = normalizeHost(name.trim());
   if (!normalized) {
-    console.log(chalk.red('device name must be non-empty'));
+    stderrLine(chalk.red('device name must be non-empty'));
     process.exit(1);
   }
   const registry = await loadDevices();
   const registered = new Set(Object.keys(registry).map((k) => normalizeHost(k)));
   if (!registered.has(normalized)) {
-    console.log(chalk.red(`Unknown device: ${normalized}`));
-    console.log(chalk.gray(`Registered: ${[...registered].sort().join(', ') || '(none)'}`));
-    console.log(chalk.gray('Enroll devices with: agents devices sync'));
+    stderrLine(chalk.red(`Unknown device: ${normalized}`));
+    stderrLine(chalk.gray(`Registered: ${[...registered].sort().join(', ') || '(none)'}`));
+    stderrLine(chalk.gray('Enroll devices with: agents devices sync'));
     process.exit(1);
   }
   return normalized;
@@ -148,7 +156,7 @@ function buildSource(options: Record<string, any>): MonitorSource {
     const raw = String(options.on);
     const [src, event] = raw.includes(':') ? raw.split(':', 2) : ['github', raw];
     if (src !== 'github' && src !== 'linear') {
-      console.log(chalk.red('--on source must be github or linear'));
+      stderrLine(chalk.red('--on source must be github or linear'));
       process.exit(1);
     }
     const webhook: MonitorWebhookSource = { source: src, event };
@@ -161,11 +169,11 @@ function buildSource(options: Record<string, any>): MonitorSource {
   }
 
   if (chosen.length === 0) {
-    console.log(chalk.red('A source is required: --watch, --poll, --poll-http, --ws, --watch-file, --watch-device, or --on'));
+    stderrLine(chalk.red('A source is required: --watch, --poll, --poll-http, --ws, --watch-file, --watch-device, or --on'));
     process.exit(1);
   }
   if (chosen.length > 1) {
-    console.log(chalk.red(`Exactly one source is allowed; got ${chosen.map((c) => c.type).join(', ')}`));
+    stderrLine(chalk.red(`Exactly one source is allowed; got ${chosen.map((c) => c.type).join(', ')}`));
     process.exit(1);
   }
   return chosen[0].source;
@@ -178,7 +186,7 @@ function buildCondition(options: Record<string, any>): MonitorCondition {
   if (options.match) modes.push('match');
   if (options.every) modes.push('every');
   if (modes.length > 1) {
-    console.log(chalk.red('--on-change, --match, and --every are mutually exclusive'));
+    stderrLine(chalk.red('--on-change, --match, and --every are mutually exclusive'));
     process.exit(1);
   }
   const mode: MonitorCondition['mode'] = modes[0] ?? (options.match ? 'match' : 'on-change');
@@ -207,11 +215,11 @@ function buildAction(options: Record<string, any>): ActionConfig {
   if (options.webhookOut) chosen.push({ type: 'webhook-out', url: options.webhookOut });
 
   if (chosen.length === 0) {
-    console.log(chalk.red('An action is required: --run <agent> --prompt, --routine, --notify, or --webhook-out'));
+    stderrLine(chalk.red('An action is required: --run <agent> --prompt, --routine, --notify, or --webhook-out'));
     process.exit(1);
   }
   if (chosen.length > 1) {
-    console.log(chalk.red(`Exactly one action is allowed; got ${chosen.map((c) => c.type).join(', ')}`));
+    stderrLine(chalk.red(`Exactly one action is allowed; got ${chosen.map((c) => c.type).join(', ')}`));
     process.exit(1);
   }
   return chosen[0];
@@ -221,7 +229,7 @@ function buildAction(options: Record<string, any>): ActionConfig {
 async function pickMonitor(message: string, alternatives: string[] = []): Promise<string | null> {
   const monitors = listMonitors();
   if (monitors.length === 0) {
-    console.log(chalk.yellow('No monitors configured'));
+    stderrLine(chalk.yellow('No monitors configured'));
     return null;
   }
   if (!isInteractiveTerminal()) {
@@ -238,7 +246,7 @@ async function pickMonitor(message: string, alternatives: string[] = []): Promis
     });
   } catch (err) {
     if (err instanceof Error && (err.name === 'ExitPromptError' || err.message.includes('User force closed'))) {
-      console.log(chalk.gray('Cancelled'));
+      stderrLine(chalk.gray('Cancelled'));
       return null;
     }
     throw err;
@@ -337,15 +345,15 @@ export function registerMonitorsCommands(program: Command): void {
         try {
           parsed = yaml.parse(fs.readFileSync(resolved, 'utf-8'));
         } catch (err) {
-          console.log(chalk.red(`Invalid YAML: ${(err as Error).message}`));
+          stderrLine(chalk.red(`Invalid YAML: ${(err as Error).message}`));
           process.exit(1);
         }
         const name = parsed?.name || path.basename(resolved).replace(/\.ya?ml$/, '');
         const config: MonitorConfig = { enabled: true, ...parsed, name } as MonitorConfig;
         const errors = validateMonitor(config);
         if (errors.length > 0) {
-          console.log(chalk.red('Validation errors:'));
-          for (const err of errors) console.log(chalk.red(`  - ${err}`));
+          stderrLine(chalk.red('Validation errors:'));
+          for (const err of errors) stderrLine(chalk.red(`  - ${err}`));
           process.exit(1);
         }
         writeMonitor(config);
@@ -355,8 +363,8 @@ export function registerMonitorsCommands(program: Command): void {
       }
 
       if (!nameOrPath) {
-        console.log(chalk.red('Monitor name is required'));
-        console.log(chalk.gray('Usage: agents monitors add <name> --poll "<cmd>" 30s --match fail --run claude --prompt "..."'));
+        stderrLine(chalk.red('Monitor name is required'));
+        stderrLine(chalk.gray('Usage: agents monitors add <name> --poll "<cmd>" 30s --match fail --run claude --prompt "..."'));
         process.exit(1);
       }
 
@@ -374,7 +382,7 @@ export function registerMonitorsCommands(program: Command): void {
       let device: string | undefined;
       let devices: string[] | undefined;
       if (options.device && options.devices) {
-        console.log(chalk.red('--device (single owner) and --devices (allowlist) are mutually exclusive'));
+        stderrLine(chalk.red('--device (single owner) and --devices (allowlist) are mutually exclusive'));
         process.exit(1);
       }
       if (options.device) device = await validateDevice(options.device);
@@ -387,14 +395,14 @@ export function registerMonitorsCommands(program: Command): void {
       // --run-on with no owner pin would fire from every daemon → duplicate actions.
       if (options.runOn && !device && !devices) {
         device = machineId();
-        console.log(chalk.gray(`--run-on set with no --device/--devices: pinned owner to this machine (${device}).`));
+        stderrLine(chalk.gray(`--run-on set with no --device/--devices: pinned owner to this machine (${device}).`));
       }
 
       let rateLimit: MonitorConfig['rateLimit'];
       if (options.rateLimit) {
         const m = String(options.rateLimit).match(/^(\d+)\/(.+)$/);
         if (!m) {
-          console.log(chalk.red('--rate-limit must be N/<interval>, e.g. 5/1m'));
+          stderrLine(chalk.red('--rate-limit must be N/<interval>, e.g. 5/1m'));
           process.exit(1);
         }
         rateLimit = { max: parseInt(m[1], 10), per: m[2] };
@@ -414,15 +422,15 @@ export function registerMonitorsCommands(program: Command): void {
 
       const errors = validateMonitor(config);
       if (errors.length > 0) {
-        console.log(chalk.red('Validation errors:'));
-        for (const err of errors) console.log(chalk.red(`  - ${err}`));
+        stderrLine(chalk.red('Validation errors:'));
+        for (const err of errors) stderrLine(chalk.red(`  - ${err}`));
         process.exit(1);
       }
 
       // Coverage lint (Anthropic's "silence is not success"): warn when a --match
       // names only a success-shaped token with no failure branch.
       if (condition.mode === 'match' && condition.match && /^(issued|success|ok|pass(ed)?|done|ready)$/i.test(condition.match)) {
-        console.log(chalk.yellow(`  Note: --match '${condition.match}' only fires on success — it stays silent if the source breaks or never matches.`));
+        stderrLine(chalk.yellow(`  Note: --match '${condition.match}' only fires on success — it stays silent if the source breaks or never matches.`));
       }
 
       writeMonitor(config);
@@ -453,7 +461,7 @@ export function registerMonitorsCommands(program: Command): void {
             lastFiredAt: state?.lastFiredAt ?? null,
           };
         });
-        process.stdout.write(JSON.stringify(payload) + '\n');
+        stdoutJson(payload);
         return;
       }
       if (monitors.length === 0) {
@@ -478,29 +486,41 @@ export function registerMonitorsCommands(program: Command): void {
   monitorsCmd
     .command('view [name]')
     .description('Show a monitor’s full YAML config plus its current watched-state and recent fires.')
-    .action(async (name: string | undefined) => {
+    .option('--json', 'Emit machine-readable JSON')
+    .action(async (name: string | undefined, options: { json?: boolean }) => {
       if (!name) {
         name = (await pickMonitor('Select monitor to view', ['agents monitors view <name>'])) ?? undefined;
         if (!name) return;
       }
       const monitor = readMonitor(name);
       if (!monitor) {
-        console.log(chalk.red(`Monitor '${name}' not found`));
+        stderrLine(chalk.red(`Monitor '${name}' not found`));
         process.exit(1);
+      }
+      const state = readState(name);
+      const recentFires = listFires(name).slice(-5);
+      if (options.json) {
+        stdoutJson({
+          name,
+          monitor,
+          owner: ownerLabel(monitor),
+          runsHere: monitorRunsOnThisDevice(monitor),
+          state,
+          recentFires,
+        });
+        return;
       }
       console.log(chalk.bold(`Monitor: ${name}\n`));
       console.log(yaml.stringify(monitor));
-      const state = readState(name);
       if (state) {
         console.log(chalk.bold('Watched state'));
         console.log(chalk.gray(`  last seen:  ${state.lastSeenAt}`));
         if (state.lastFiredAt) console.log(chalk.gray(`  last fired: ${state.lastFiredAt}`));
         console.log(chalk.gray(`  last value: ${state.lastValue.replace(/\s+/g, ' ').slice(0, 120)}`));
       }
-      const fires = listFires(name).slice(-5);
-      if (fires.length > 0) {
+      if (recentFires.length > 0) {
         console.log(chalk.bold('\nRecent fires'));
-        for (const f of fires) {
+        for (const f of recentFires) {
           console.log(`  ${chalk.gray(f.firedAt)}  ${f.action ?? '?'}  ${f.ok === false ? chalk.red('failed') : chalk.green('ok')}`);
         }
       }
@@ -510,20 +530,33 @@ export function registerMonitorsCommands(program: Command): void {
   monitorsCmd
     .command('test [name]')
     .description('DRY-RUN: evaluate the source once and print the emitted event + whether it would fire. No action is taken.')
-    .action(async (name: string | undefined) => {
+    .option('--json', 'Emit machine-readable JSON')
+    .action(async (name: string | undefined, options: { json?: boolean }) => {
       if (!name) {
         name = (await pickMonitor('Select monitor to test', ['agents monitors test <name>'])) ?? undefined;
         if (!name) return;
       }
       const monitor = readMonitor(name);
       if (!monitor) {
-        console.log(chalk.red(`Monitor '${name}' not found`));
+        stderrLine(chalk.red(`Monitor '${name}' not found`));
         process.exit(1);
+      }
+      const { observation, decision } = await evaluateMonitorOnce(monitor);
+      const wouldFire = Boolean(decision?.fire);
+      if (options.json) {
+        stdoutJson({
+          name,
+          dryRun: true,
+          monitor,
+          observation,
+          decision,
+          wouldFire,
+        });
+        return;
       }
       console.log(chalk.bold(`Dry-run: ${name}\n`));
       console.log(chalk.gray(`  ${sourceLabel(monitor.source)}  ·  [${monitor.condition.mode}]  ·  ${actionLabel(monitor.action)}\n`));
 
-      const { observation, decision } = await evaluateMonitorOnce(monitor);
       if (!observation) {
         console.log(chalk.yellow('No observation — this source is push-only (ws/webhook) or produced nothing this tick.'));
         return;
@@ -532,7 +565,6 @@ export function registerMonitorsCommands(program: Command): void {
       console.log(observation.raw.split('\n').slice(0, 20).map((l) => `  ${l}`).join('\n'));
       if (observation.meta) console.log(chalk.gray(`  meta: ${JSON.stringify(observation.meta)}`));
 
-      const wouldFire = Boolean(decision?.fire);
       console.log('');
       console.log(`Would fire: ${wouldFire ? chalk.green('yes') : chalk.gray('no')}`);
       if (decision?.event) {
@@ -578,13 +610,13 @@ export function registerMonitorsCommands(program: Command): void {
         if (!monitor) return;
         const errors = validateMonitor(monitor);
         if (errors.length > 0) {
-          console.log(chalk.yellow('\nWarning: monitor has validation errors:'));
-          for (const err of errors) console.log(chalk.yellow(`  - ${err}`));
+          stderrLine(chalk.yellow('\nWarning: monitor has validation errors:'));
+          for (const err of errors) stderrLine(chalk.yellow(`  - ${err}`));
         } else {
           console.log(chalk.green(`\nMonitor '${name}' saved`));
           if (isDaemonRunning()) {
             signalDaemonReload();
-            console.log(chalk.gray('Daemon reloaded'));
+            stderrLine(chalk.gray('Daemon reloaded'));
           }
         }
       });
@@ -603,14 +635,14 @@ export function registerMonitorsCommands(program: Command): void {
       }
       const run = options.run ? listRuns(name).find((r) => r.runId === options.run) : getLatestRun(name);
       if (!run) {
-        console.log(chalk.yellow(`No action runs found for monitor '${name}'`));
-        console.log(chalk.gray('  (notify / webhook-out actions have no run log — see: agents monitors runs)'));
+        stderrLine(chalk.yellow(`No action runs found for monitor '${name}'`));
+        stderrLine(chalk.gray('  (notify / webhook-out actions have no run log — see: agents monitors runs)'));
         return;
       }
       const logPath = path.join(getRunDir(name, run.runId), 'stdout.log');
       if (options.full) {
         if (!fs.existsSync(logPath)) {
-          console.log(chalk.yellow(`Log not found: ${logPath}`));
+          stderrLine(chalk.yellow(`Log not found: ${logPath}`));
           return;
         }
         console.log(chalk.gray(`Run: ${run.runId}\n`));
@@ -642,7 +674,7 @@ export function registerMonitorsCommands(program: Command): void {
       }
       const fires = listFires(name);
       if (fires.length === 0) {
-        console.log(chalk.yellow(`No fires recorded for monitor '${name}'`));
+        stderrLine(chalk.yellow(`No fires recorded for monitor '${name}'`));
         return;
       }
       console.log(chalk.bold(`Fire history: ${name}\n`));
@@ -668,7 +700,7 @@ export function registerMonitorsCommands(program: Command): void {
         console.log(chalk.green(`Monitor '${name}' paused`));
         if (isDaemonRunning()) signalDaemonReload();
       } catch (err) {
-        console.log(chalk.red((err as Error).message));
+        stderrLine(chalk.red((err as Error).message));
         process.exit(1);
       }
     });
@@ -686,7 +718,7 @@ export function registerMonitorsCommands(program: Command): void {
         console.log(chalk.green(`Monitor '${name}' resumed`));
         if (isDaemonRunning()) signalDaemonReload();
       } catch (err) {
-        console.log(chalk.red((err as Error).message));
+        stderrLine(chalk.red((err as Error).message));
         process.exit(1);
       }
     });
@@ -699,7 +731,7 @@ export function registerMonitorsCommands(program: Command): void {
     .option('--clear', 'Remove the owner pin so the monitor runs on every device')
     .action(async (name: string | undefined, options: { set?: string; clear?: boolean }) => {
       if (options.set !== undefined && options.clear) {
-        console.log(chalk.red('--set and --clear are mutually exclusive'));
+        stderrLine(chalk.red('--set and --clear are mutually exclusive'));
         process.exit(1);
       }
       if (!name) {
@@ -708,7 +740,7 @@ export function registerMonitorsCommands(program: Command): void {
       }
       const monitor = readMonitor(name);
       if (!monitor) {
-        console.log(chalk.red(`Monitor '${name}' not found`));
+        stderrLine(chalk.red(`Monitor '${name}' not found`));
         process.exit(1);
       }
       if (options.clear) {
@@ -745,10 +777,10 @@ export function registerMonitorsCommands(program: Command): void {
         console.log(chalk.green(`Monitor '${name}' removed`));
         if (isDaemonRunning()) {
           signalDaemonReload();
-          console.log(chalk.gray('Daemon reloaded'));
+          stderrLine(chalk.gray('Daemon reloaded'));
         }
       } else {
-        console.log(chalk.red(`Monitor '${name}' not found`));
+        stderrLine(chalk.red(`Monitor '${name}' not found`));
         process.exit(1);
       }
     });

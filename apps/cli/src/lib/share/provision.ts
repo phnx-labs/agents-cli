@@ -1,16 +1,33 @@
 // Cloudflare provisioning for `agents share setup` — plain `fetch` against the CF
 // REST API (the repo has no CF wrapper). Creates the R2 bucket, configures its
 // lifecycle, uploads the Worker (with an R2 binding), sets the WRITE_TOKEN secret,
-// enables the free
-// `*.workers.dev` subdomain, and — when the token owns the zone — maps a custom domain.
+// enables the free `*.workers.dev` subdomain, and — when the token owns the zone —
+// maps a custom domain.
 
 const CF_API = 'https://api.cloudflare.com/client/v4';
-export const SHARE_LIFECYCLE_RULE_ID = 'agents-share-expire-90d';
-export const SHARE_LIFECYCLE_DELETE_AFTER_SECONDS = 90 * 24 * 60 * 60;
+export const SHARE_LIFECYCLE_RULE_ID = 'agents-share-expire-objects';
+export const SHARE_LIFECYCLE_RETENTION_DAYS = 366;
+const SECONDS_PER_DAY = 86400;
 
 interface CfError {
   code?: number;
   message?: string;
+}
+
+interface R2LifecycleRule {
+  id: string;
+  enabled: boolean;
+  conditions: { prefix: string };
+  deleteObjectsTransition?: {
+    condition: { type: 'Age'; maxAge: number } | { type: 'Date'; date: string };
+  };
+  abortMultipartUploadsTransition?: {
+    condition?: { type: 'Age'; maxAge: number };
+  };
+  storageClassTransitions?: Array<{
+    condition: { type: 'Age'; maxAge: number } | { type: 'Date'; date: string };
+    storageClass: 'InfrequentAccess';
+  }>;
 }
 
 export interface CloudflareRequest {
@@ -60,18 +77,6 @@ interface ProvisionOptions {
   request?: CloudflareRequester;
 }
 
-interface R2LifecycleRule {
-  id: string;
-  conditions: { prefix: string };
-  enabled: boolean;
-  abortMultipartUploadsTransition?: { condition?: { maxAge: number; type: 'Age' } };
-  deleteObjectsTransition?: { condition?: { maxAge: number; type: 'Age' } | { date: string; type: 'Date' } };
-  storageClassTransitions?: Array<{
-    condition: { maxAge: number; type: 'Age' } | { date: string; type: 'Date' };
-    storageClass: 'InfrequentAccess';
-  }>;
-}
-
 /** True if the CF error looks like "the thing already exists" (idempotent create). */
 function isAlreadyExists(e: unknown): boolean {
   return /already exists|duplicate|10004|10014/i.test(String(e));
@@ -97,7 +102,25 @@ export async function createBucket(
   }
 }
 
-/** Add/update the share bucket lifecycle rule while preserving unrelated rules. */
+export function buildShareLifecycleRule(days: number = SHARE_LIFECYCLE_RETENTION_DAYS): R2LifecycleRule {
+  return {
+    id: SHARE_LIFECYCLE_RULE_ID,
+    enabled: true,
+    conditions: { prefix: '' },
+    deleteObjectsTransition: {
+      condition: { type: 'Age', maxAge: days * SECONDS_PER_DAY },
+    },
+  };
+}
+
+export function mergeShareLifecycleRule(
+  existing: R2LifecycleRule[] = [],
+  rule: R2LifecycleRule = buildShareLifecycleRule(),
+): R2LifecycleRule[] {
+  return [...existing.filter((r) => r.id !== SHARE_LIFECYCLE_RULE_ID), rule];
+}
+
+/** Ensure the share bucket self-cleans old objects. Exact per-link expiry is enforced by the Worker. */
 export async function configureBucketLifecycle(
   apiToken: string,
   accountId: string,
@@ -105,28 +128,16 @@ export async function configureBucketLifecycle(
   opts: ProvisionOptions = {},
 ): Promise<void> {
   const request = opts.request ?? defaultCloudflareRequester;
-  const existing = await request<{ rules?: R2LifecycleRule[] }>({
+  const lifecycle = await request<{ rules?: R2LifecycleRule[] }>({
     apiToken,
     method: 'GET',
     pathname: `/accounts/${accountId}/r2/buckets/${bucketName}/lifecycle`,
   });
-  const shareRule: R2LifecycleRule = {
-    id: SHARE_LIFECYCLE_RULE_ID,
-    conditions: { prefix: '' },
-    enabled: true,
-    deleteObjectsTransition: {
-      condition: { type: 'Age', maxAge: SHARE_LIFECYCLE_DELETE_AFTER_SECONDS },
-    },
-  };
-  const rules = [
-    ...(existing.rules ?? []).filter((rule) => rule.id !== SHARE_LIFECYCLE_RULE_ID),
-    shareRule,
-  ];
   await request({
     apiToken,
     method: 'PUT',
     pathname: `/accounts/${accountId}/r2/buckets/${bucketName}/lifecycle`,
-    body: { rules },
+    body: { rules: mergeShareLifecycleRule(lifecycle.rules ?? []) },
   });
 }
 

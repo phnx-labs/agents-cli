@@ -12,6 +12,8 @@ import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import { fileURLToPath } from 'url';
+import { buildRunsJson } from './routines.js';
+import type { RunMeta } from '../lib/routines.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -353,7 +355,7 @@ describe('routines add --json', () => {
       });
       expect(parsed.trigger).toBeNull();
       expect(res.stdout.trim().split('\n')).toHaveLength(1);
-      expect(res.stderr).toContain('Scheduler reloaded');
+      expect(res.stderr).not.toContain('Scheduler reloaded');
 
       const doc = readRoutineYaml(home, 'json-job');
       expect(doc).not.toBeNull();
@@ -859,5 +861,50 @@ describe('routines run --json', () => {
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
+  });
+});
+
+describe('buildRunsJson', () => {
+  const meta = (runId: string, status: RunMeta['status'], startedAt: string): RunMeta => ({
+    jobName: 'test-job',
+    runId,
+    pid: null,
+    status,
+    startedAt,
+    completedAt: null,
+    exitCode: null,
+  });
+
+  it('projects each run to the rich JSON fields used by routines runs --json', () => {
+    const runs = [
+      meta('r1', 'completed', '2026-07-20T00:00:00Z'),
+      meta('r2', 'failed', '2026-07-21T00:00:00Z'),
+    ];
+    expect(buildRunsJson(runs)).toEqual([
+      {
+        jobId: 'test-job',
+        jobName: 'test-job',
+        runId: 'r1',
+        status: 'completed',
+        startedAt: '2026-07-20T00:00:00Z',
+        completedAt: null,
+        exitCode: null,
+        errorMessage: null,
+      },
+      {
+        jobId: 'test-job',
+        jobName: 'test-job',
+        runId: 'r2',
+        status: 'failed',
+        startedAt: '2026-07-21T00:00:00Z',
+        completedAt: null,
+        exitCode: null,
+        errorMessage: null,
+      },
+    ]);
+  });
+
+  it('returns an empty array for no runs', () => {
+    expect(buildRunsJson([])).toEqual([]);
   });
 });

@@ -6,12 +6,47 @@ import {
   deployWorker,
   enableWorkersDev,
   findZoneId,
-  setWorkerSecret,
-  SHARE_LIFECYCLE_DELETE_AFTER_SECONDS,
+  SHARE_LIFECYCLE_RETENTION_DAYS,
   SHARE_LIFECYCLE_RULE_ID,
+  buildShareLifecycleRule,
+  mergeShareLifecycleRule,
+  setWorkerSecret,
   type CloudflareRequest,
   type CloudflareRequester,
 } from './provision.js';
+
+describe('share bucket lifecycle', () => {
+  it('builds the Cloudflare R2 lifecycle rule that deletes old share objects', () => {
+    expect(buildShareLifecycleRule()).toEqual({
+      id: SHARE_LIFECYCLE_RULE_ID,
+      enabled: true,
+      conditions: { prefix: '' },
+      deleteObjectsTransition: {
+        condition: { type: 'Age', maxAge: SHARE_LIFECYCLE_RETENTION_DAYS * 86400 },
+      },
+    });
+  });
+
+  it('preserves unrelated lifecycle rules and replaces the managed share rule', () => {
+    const unrelated = {
+      id: 'keep-logs',
+      enabled: true,
+      conditions: { prefix: 'logs/' },
+      deleteObjectsTransition: { condition: { type: 'Age' as const, maxAge: 30 * 86400 } },
+    };
+    const staleShareRule = {
+      id: SHARE_LIFECYCLE_RULE_ID,
+      enabled: false,
+      conditions: { prefix: '' },
+      deleteObjectsTransition: { condition: { type: 'Age' as const, maxAge: 7 * 86400 } },
+    };
+
+    expect(mergeShareLifecycleRule([unrelated, staleShareRule])).toEqual([
+      unrelated,
+      buildShareLifecycleRule(),
+    ]);
+  });
+});
 
 describe('share Cloudflare provisioning request shape', () => {
   it('creates the R2 bucket with account scope and bucket name', async () => {
@@ -78,7 +113,7 @@ describe('share Cloudflare provisioning request shape', () => {
               conditions: { prefix: '' },
               enabled: true,
               deleteObjectsTransition: {
-                condition: { type: 'Age', maxAge: SHARE_LIFECYCLE_DELETE_AFTER_SECONDS },
+                condition: { type: 'Age', maxAge: SHARE_LIFECYCLE_RETENTION_DAYS * 86400 },
               },
             },
           ],
@@ -163,6 +198,37 @@ describe('share Cloudflare provisioning request shape', () => {
 
     await expect(findZoneId('cf-token', 'share.agents-cli.sh', { request })).resolves.toBe('zone_1');
     expect(paths).toEqual(['/zones?name=share.agents-cli.sh', '/zones?name=agents-cli.sh']);
+  });
+
+  it('reads then writes the bucket lifecycle, merging the managed rule into existing rules', async () => {
+    const seen: CloudflareRequest[] = [];
+    const unrelated = {
+      id: 'keep-logs',
+      enabled: true,
+      conditions: { prefix: 'logs/' },
+      deleteObjectsTransition: { condition: { type: 'Age' as const, maxAge: 30 * 86400 } },
+    };
+    const request: CloudflareRequester = async (req) => {
+      seen.push(req);
+      if (req.method === 'GET') return { rules: [unrelated] };
+      return {};
+    };
+
+    await configureBucketLifecycle('cf-token', 'acct_1', 'agents-share', { request });
+
+    expect(seen).toEqual([
+      {
+        apiToken: 'cf-token',
+        method: 'GET',
+        pathname: '/accounts/acct_1/r2/buckets/agents-share/lifecycle',
+      },
+      {
+        apiToken: 'cf-token',
+        method: 'PUT',
+        pathname: '/accounts/acct_1/r2/buckets/agents-share/lifecycle',
+        body: { rules: [unrelated, buildShareLifecycleRule()] },
+      },
+    ]);
   });
 
   it('maps a custom domain through Workers Custom Domains', async () => {

@@ -1,1 +1,0 @@
-- Fix hook directory sync status so bundled hook directories such as `hooks/tests` copy correctly and no longer appear permanently drifted after sync.

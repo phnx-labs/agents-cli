@@ -23,10 +23,11 @@ import { promisify } from 'util';
 import chalk from 'chalk';
 import * as TOML from 'smol-toml';
 import { checkbox, select, confirm } from '@inquirer/prompts';
-import type { AgentId, VersionResources } from './types.js';
+import type { AgentId, DiscoveredPlugin, VersionResources } from './types.js';
 import { getVersionsDir, getShimsDir, ensureAgentsDir, readMeta, writeMeta, getCommandsDir, getSkillsDir, getHooksDir, getResolvedRulesDir, getUserRulesDir, getPermissionsDir, getSubagentsDir, getVersionResources, recordVersionResources, ensureVersionResourcePatterns, getMcpDir, getProjectAgentsDir, getPromptcutsPath, getUserPromptcutsPath, getEnabledExtraRepos, getAgentsDir, getOptionalUserAgentsDir, getUserAgentsDir, getTrashVersionsDir, getActiveRulesPreset, getHomeDir } from './state.js';
 import { defaultPatterns, expandPatterns } from './resource-patterns.js';
 import { resolveResource, listResources } from './resources.js';
+import { activeRulesPreset, filterNamesForActiveResourceProfile } from './resource-profiles.js';
 // VERSION_RE + compareVersions are owned by the agent-spec engine primitives
 // (single source of truth). Re-exported below so existing importers of
 // `compareVersions` from './versions.js' keep working.
@@ -42,7 +43,7 @@ import { listInstalledSubagents, transformSubagentForClaude, syncSubagentToOpenc
 import { listInstalledWorkflows, syncWorkflowToVersion } from './workflows.js';
 import { parseHookManifest, registerHooksToSettings, pruneVersionHomeHookEntriesFromSettings } from './hooks.js';
 import { supports, explainSkip, capableAgents } from './capabilities.js';
-import { discoverPlugins, syncPluginToVersion, isPluginSynced, pluginSupportsAgent, cleanOrphanedPluginSkills } from './plugins.js';
+import { discoverPlugins, syncPluginToVersion, isPluginSynced, pluginSupportsAgent, cleanOrphanedPluginSkills, marketplaceSpecForName } from './plugins.js';
 import { composeRulesFromState } from './rules/compose.js';
 import { loadManifest, saveManifest, buildManifest as buildSyncManifest, isStale } from './staleness/index.js';
 import { emit } from './events.js';
@@ -100,23 +101,31 @@ export interface AvailableResources {
   promptcuts: boolean;
 }
 
+type LayeredResourceBase = { source: string; base: string };
 type ResourceBase = { scope: 'project' | 'user'; base: string };
 type ScopedMcpResource = { name: string; scope: 'project' | 'user' };
 
-function getResourceBases(cwd: string): ResourceBase[] {
+function getLayeredResourceBases(cwd: string): LayeredResourceBase[] {
   const projectAgentsDir = getProjectAgentsDir(cwd);
   const userBase = getUserAgentsDir();
   const systemBase = getAgentsDir();
-  const resourceBases: ResourceBase[] = [];
+  const resourceBases: LayeredResourceBase[] = [];
   if (projectAgentsDir) {
-    resourceBases.push({ scope: 'project', base: projectAgentsDir });
+    resourceBases.push({ source: 'project', base: projectAgentsDir });
   }
-  resourceBases.push({ scope: 'user', base: userBase });
-  resourceBases.push({ scope: 'user', base: systemBase });
+  resourceBases.push({ source: 'user', base: userBase });
+  resourceBases.push({ source: 'system', base: systemBase });
   for (const extra of getEnabledExtraRepos()) {
-    resourceBases.push({ scope: 'user', base: extra.dir });
+    resourceBases.push({ source: extra.alias, base: extra.dir });
   }
   return resourceBases;
+}
+
+function getResourceBases(cwd: string): ResourceBase[] {
+  return getLayeredResourceBases(cwd).map(({ base, source }) => ({
+    base,
+    scope: source === 'project' ? 'project' : 'user',
+  }));
 }
 
 function getScopedMcpResources(cwd: string): ScopedMcpResource[] {
@@ -134,6 +143,65 @@ function getScopedMcpResources(cwd: string): ScopedMcpResource[] {
     }
   }
   return Array.from(resources.values());
+}
+
+function sourceMapFromResources(kind: 'commands' | 'skills' | 'hooks' | 'subagents', cwd: string): Map<string, string> {
+  return new Map(listResources(kind, cwd).map(r => [r.name, r.source]));
+}
+
+function sourceMapFromLayeredDirectory(cwd: string, relativePath: string[], listNames: (dir: string) => string[]): Map<string, string> {
+  const resources = new Map<string, string>();
+  for (const { base, source } of getLayeredResourceBases(cwd)) {
+    const dir = path.join(base, ...relativePath);
+    if (!fs.existsSync(dir)) continue;
+    for (const name of listNames(dir)) {
+      if (!resources.has(name)) resources.set(name, source);
+    }
+  }
+  return resources;
+}
+
+function sourceMapFromPermissionGroups(cwd: string): Map<string, string> {
+  return sourceMapFromLayeredDirectory(
+    cwd,
+    ['permissions', 'groups'],
+    (dir) => fs.readdirSync(dir)
+      .filter(f => f.endsWith('.yaml') || f.endsWith('.yml'))
+      .map(f => f.replace(/\.(yaml|yml)$/, '')),
+  );
+}
+
+function sourceMapFromWorkflows(cwd: string): Map<string, string> {
+  return sourceMapFromLayeredDirectory(
+    cwd,
+    ['workflows'],
+    (dir) => fs.readdirSync(dir, { withFileTypes: true })
+      .filter(d => d.isDirectory() && fs.existsSync(path.join(dir, d.name, 'WORKFLOW.md')))
+      .map(d => d.name),
+  );
+}
+
+function sourceMapFromPluginSkills(plugins: DiscoveredPlugin[], activePluginNames: Set<string>, cwd: string): Map<string, string> {
+  const sourceRank = new Map<string, number>([
+    ['user', 0],
+    ['system', 1],
+    ['project', 3],
+  ]);
+  const entries = plugins
+    .filter(plugin => activePluginNames.has(plugin.name))
+    .map(plugin => {
+      const spec = marketplaceSpecForName(plugin.marketplace, cwd);
+      const source = spec.kind === 'extra' ? spec.alias : spec.kind;
+      return { plugin, source, rank: sourceRank.get(source) ?? 2 };
+    })
+    .sort((a, b) => a.rank - b.rank);
+  const sources = new Map<string, string>();
+  for (const { plugin, source } of entries) {
+    for (const skill of plugin.skills) {
+      if (!sources.has(skill)) sources.set(skill, source);
+    }
+  }
+  return sources;
 }
 
 /**
@@ -168,7 +236,7 @@ export function getAvailableResources(cwd: string = process.cwd()): AvailableRes
       commandNames.add(name);
     }
   }
-  result.commands = Array.from(commandNames);
+  result.commands = filterNamesForActiveResourceProfile('commands', Array.from(commandNames), sourceMapFromResources('commands', cwd));
 
   // Skills (directories, excluding hidden)
   const skillNames = new Set<string>();
@@ -182,7 +250,7 @@ export function getAvailableResources(cwd: string = process.cwd()): AvailableRes
       skillNames.add(name);
     }
   }
-  result.skills = Array.from(skillNames);
+  result.skills = filterNamesForActiveResourceProfile('skills', Array.from(skillNames), sourceMapFromResources('skills', cwd));
 
   // Hooks. A hook is either a directory bundle or an actual script file: known
   // script extension, OR executable bit on a file with a non-data extension.
@@ -209,7 +277,7 @@ export function getAvailableResources(cwd: string = process.cwd()): AvailableRes
       } catch { /* ignore unreadable */ }
     }
   }
-  result.hooks = Array.from(hookNames);
+  result.hooks = filterNamesForActiveResourceProfile('hooks', Array.from(hookNames), sourceMapFromResources('hooks', cwd));
 
   // Rules — list available presets across layers (project > user > extras > system).
   // The composer selects exactly one preset per sync; this list drives the
@@ -235,23 +303,18 @@ export function getAvailableResources(cwd: string = process.cwd()): AvailableRes
       // malformed rules.yaml — skip silently; the composer will surface the error.
     }
   }
-  result.memory = Array.from(presetNames);
+  result.memory = filterNamesForActiveResourceProfile('memory', Array.from(presetNames));
 
-  result.mcp = getScopedMcpResources(cwd).map(resource => resource.name);
+  const scopedMcp = getScopedMcpResources(cwd);
+  result.mcp = filterNamesForActiveResourceProfile(
+    'mcp',
+    scopedMcp.map(resource => resource.name),
+    new Map(scopedMcp.map(resource => [resource.name, resource.scope])),
+  );
 
   // Permission groups (from permissions/groups/*.yaml)
-  const permissionNames = new Set<string>();
-  for (const { base } of resourceBases) {
-    const permsGroupsDir = path.join(base, 'permissions', 'groups');
-    if (!fs.existsSync(permsGroupsDir)) continue;
-    const names = fs.readdirSync(permsGroupsDir)
-      .filter(f => f.endsWith('.yaml') || f.endsWith('.yml'))
-      .map(f => f.replace(/\.(yaml|yml)$/, ''));
-    for (const name of names) {
-      permissionNames.add(name);
-    }
-  }
-  result.permissions = Array.from(permissionNames);
+  const permissionSources = sourceMapFromPermissionGroups(cwd);
+  result.permissions = filterNamesForActiveResourceProfile('permissions', Array.from(permissionSources.keys()), permissionSources);
 
   // Subagents (directories with AGENT.md)
   const subagentNames = new Set<string>();
@@ -265,26 +328,22 @@ export function getAvailableResources(cwd: string = process.cwd()): AvailableRes
       subagentNames.add(name);
     }
   }
-  result.subagents = Array.from(subagentNames);
+  result.subagents = filterNamesForActiveResourceProfile('subagents', Array.from(subagentNames), sourceMapFromResources('subagents', cwd));
 
   // Workflows (directories with WORKFLOW.md)
-  const workflowNames = new Set<string>();
-  for (const { base } of resourceBases) {
-    const workflowsDir = path.join(base, 'workflows');
-    if (!fs.existsSync(workflowsDir)) continue;
-    const names = fs.readdirSync(workflowsDir, { withFileTypes: true })
-      .filter(d => d.isDirectory() && fs.existsSync(path.join(workflowsDir, d.name, 'WORKFLOW.md')))
-      .map(d => d.name);
-    for (const name of names) {
-      workflowNames.add(name);
-    }
-  }
-  result.workflows = Array.from(workflowNames);
+  const workflowSources = sourceMapFromWorkflows(cwd);
+  result.workflows = filterNamesForActiveResourceProfile('workflows', Array.from(workflowSources.keys()), workflowSources);
 
   // Plugins (directories with .claude-plugin/plugin.json)
   const allPlugins = discoverPlugins();
-  result.plugins = allPlugins.map(p => p.name);
-  for (const name of listPluginSkillNames()) {
+  result.plugins = filterNamesForActiveResourceProfile('plugins', allPlugins.map(p => p.name), new Map(allPlugins.map(p => [p.name, 'user'])));
+  const activePlugins = new Set(result.plugins);
+  const pluginSkillNames = filterNamesForActiveResourceProfile(
+    'skills',
+    listPluginSkillNames({ plugins: activePlugins }),
+    sourceMapFromPluginSkills(allPlugins, activePlugins, cwd),
+  );
+  for (const name of pluginSkillNames) {
     if (!skillNames.has(name)) result.skills.push(name);
   }
 
@@ -2287,9 +2346,10 @@ type SelectableKind = 'commands' | 'skills' | 'hooks' | 'subagents' | 'permissio
  * `expandPatterns` matches `source:*` patterns against. This is the single
  * source of truth for how each kind attributes its source layer:
  *   - commands/skills/hooks/subagents → real layer from `listResources`
- *   - permissions                     → always the system repo
+ *   - permissions                     → real layer from permissions/groups
  *   - mcp                             → project vs user scope preserved
- *   - plugins/workflows               → user repo
+ *   - plugins                         → user repo
+ *   - workflows                       → real layer from workflow directories
  * Both the persisted-pattern sync path and `buildRepoScopedSelection` use it
  * so the attribution can't drift between the two.
  */
@@ -2300,14 +2360,24 @@ function resourceSourceMap(kind: SelectableKind, cwd: string, available: Availab
     case 'hooks':
     case 'subagents':
       return new Map(listResources(kind, cwd).map(r => [r.name, r.source]));
-    case 'permissions':
-      return new Map(available.permissions.map(n => [n, 'system']));
+    case 'permissions': {
+      const sources = sourceMapFromPermissionGroups(cwd);
+      return new Map(available.permissions.flatMap((n) => {
+        const source = sources.get(n);
+        return source ? [[n, source] as [string, string]] : [];
+      }));
+    }
     case 'mcp':
       return new Map(getScopedMcpResources(cwd).map(r => [r.name, r.scope]));
     case 'plugins':
       return new Map(available.plugins.map(n => [n, 'user']));
-    case 'workflows':
-      return new Map(available.workflows.map(n => [n, 'user']));
+    case 'workflows': {
+      const sources = sourceMapFromWorkflows(cwd);
+      return new Map(available.workflows.flatMap((n) => {
+        const source = sources.get(n);
+        return source ? [[n, source] as [string, string]] : [];
+      }));
+    }
   }
 }
 
@@ -2676,7 +2746,7 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
       const overridePreset = Array.isArray(selection?.memory) && selection!.memory.length === 1 && selection!.memory[0] !== 'AGENTS'
         ? selection!.memory[0]
         : null;
-      const preset = overridePreset || getActiveRulesPreset(agent, version);
+      const preset = overridePreset || activeRulesPreset() || getActiveRulesPreset(agent, version);
       const r = rulesWriter.write({ version, versionHome, selection: { preset }, cwd });
       result.memory.push(...r.synced);
       // rulesPreset is tracked separately via setActiveRulesPreset.

@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   parseExpire,
   slugify,
@@ -254,10 +254,76 @@ describe('renderWorkerScript', () => {
   it('enforces expiry with a 410 + lazy delete', () => {
     expect(src).toContain('410');
     expect(src).toContain('env.BUCKET.delete');
+    expect(src).toContain("'expires-at'");
     expect(src).toContain('Date.parse(expiresAt)');
   });
   it('is a module Worker (default export fetch)', () => {
     expect(src).toContain('export default');
     expect(src).toContain('async fetch(request, env)');
+  });
+
+  it('stores expires-at metadata and returns 410 after expiry', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-07-22T00:00:00.000Z'));
+      const worker = await import(
+        `data:text/javascript;base64,${Buffer.from(src).toString('base64')}#${Date.now()}`
+      );
+      const store = new Map<string, {
+        body: BodyInit | null;
+        httpMetadata: { contentType?: string };
+        customMetadata: Record<string, string>;
+      }>();
+      const env = {
+        WRITE_TOKEN: 'secret',
+        BUCKET: {
+          put: async (key: string, body: BodyInit | null, opts: {
+            httpMetadata?: { contentType?: string };
+            customMetadata?: Record<string, string>;
+          }) => {
+            store.set(key, {
+              body,
+              httpMetadata: opts.httpMetadata ?? {},
+              customMetadata: opts.customMetadata ?? {},
+            });
+          },
+          get: async (key: string) => {
+            const item = store.get(key);
+            if (!item) return null;
+            return {
+              body: item.body,
+              customMetadata: item.customMetadata,
+              httpEtag: '"etag"',
+              writeHttpMetadata(headers: Headers) {
+                if (item.httpMetadata.contentType) headers.set('content-type', item.httpMetadata.contentType);
+              },
+            };
+          },
+          delete: async (key: string) => {
+            store.delete(key);
+          },
+        },
+      };
+
+      const put = await worker.default.fetch(new Request('https://share.test/page', {
+        method: 'PUT',
+        headers: {
+          authorization: 'Bearer secret',
+          'content-type': 'text/html; charset=utf-8',
+          'x-share-expires-at': '2026-07-22T00:00:01.000Z',
+        },
+        body: '<h1>hello</h1>',
+      }), env);
+      expect(put.status).toBe(200);
+      expect(store.get('page')?.customMetadata).toEqual({ 'expires-at': '2026-07-22T00:00:01.000Z' });
+
+      vi.setSystemTime(new Date('2026-07-22T00:00:02.000Z'));
+      const get = await worker.default.fetch(new Request('https://share.test/page'), env);
+      expect(get.status).toBe(410);
+      expect(await get.text()).toContain('expired');
+      expect(store.has('page')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
