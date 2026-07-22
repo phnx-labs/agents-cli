@@ -19,10 +19,12 @@ import {
 } from '../lib/share/config.js';
 import {
   addCustomDomain,
+  configureBucketLifecycle,
   createBucket,
   deployWorker,
   enableWorkersDev,
   findZoneId,
+  setWorkerSecret,
 } from '../lib/share/provision.js';
 import { publishFile } from '../lib/share/publish.js';
 import { renderWorkerScript } from '../lib/share/worker-template.js';
@@ -136,8 +138,12 @@ export async function runShareProvision(opts: {
   try {
     await createBucket(apiToken, accountId, bucketName);
     spin.text = `R2 bucket '${bucketName}' ready`;
-    await deployWorker(apiToken, accountId, workerName, renderWorkerScript(), bucketName, token);
+    await configureBucketLifecycle(apiToken, accountId, bucketName);
+    spin.text = `R2 bucket '${bucketName}' lifecycle ready`;
+    await deployWorker(apiToken, accountId, workerName, renderWorkerScript(), bucketName);
     spin.text = `Worker '${workerName}' deployed`;
+    await setWorkerSecret(apiToken, accountId, workerName, token);
+    spin.text = `Worker '${workerName}' write token set`;
     const subdomain = await enableWorkersDev(apiToken, accountId, workerName);
     let baseUrl = `https://${workerName}.${subdomain}.workers.dev`;
     let domain: string | undefined;

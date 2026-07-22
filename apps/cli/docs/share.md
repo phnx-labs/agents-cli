@@ -14,7 +14,8 @@ agents share status                             # show the configured endpoint
 ```
 
 `setup` reads a Cloudflare API token from your `cloudflare.com` secrets bundle (or pass
-`--token`), creates an R2 bucket, uploads the Worker, and enables the free
+`--token`), creates an R2 bucket, installs the share lifecycle rule, uploads the Worker, sets
+the `WRITE_TOKEN` Worker secret, and enables the free
 `*.workers.dev` subdomain. If the token owns a zone, `--domain share.example.com` maps a
 custom domain. Then `agents share <file>` does an authed `PUT` and prints the link.
 
@@ -39,7 +40,8 @@ agent makes plan.html
   `SHARE_WRITE_TOKEN`, and `agents share join <baseUrl>` still joins an explicit
   endpoint without provisioning.
 - **Expiry.** `--expire 30d|12h|2026-08-01` writes `expires-at` into the object's metadata;
-  the Worker `410`s and lazily deletes past that instant.
+  the Worker `410`s and lazily deletes past that instant. Setup also installs a bucket
+  lifecycle rule that deletes share objects after 90 days as the durable cleanup floor.
 - **Preview cards (OG images).** Publishing an HTML page screenshots its own hero at
   1200×630 and attaches it as `og:image` + `twitter:card`, so the link unfurls into a
   rich card in Slack, iMessage, Twitter/X, and Discord. Capture is client-side (headless
