@@ -6,7 +6,7 @@
 // - The raw write token lives in the `share` secrets bundle (keychain-backed,
 //   fleet-injectable) — never on disk in plaintext.
 // - The Cloudflare API token (for provisioning) is read from the user's existing
-//   `cloudflare.com` bundle.
+//   `cloudflare` bundle.
 
 import { randomBytes } from 'node:crypto';
 import { readMeta, updateMeta } from '../state.js';
@@ -33,8 +33,8 @@ export interface ShareConfig {
 }
 
 export const SHARE_BUNDLE = 'share';
-export const SHARE_TOKEN_KEY = 'SHARE_WRITE_TOKEN';
-export const DEFAULT_CF_BUNDLE = 'cloudflare.com';
+export const SHARE_TOKEN_KEY = 'WRITE_TOKEN';
+export const DEFAULT_CF_BUNDLE = 'cloudflare';
 export const DEFAULT_WORKER_NAME = 'agents-share';
 export const DEFAULT_BUCKET_NAME = 'agents-share';
 
@@ -97,7 +97,7 @@ export function readWriteToken(): string {
   return token;
 }
 
-/** Cloudflare API credentials for provisioning, read from `cloudflare.com` (or a
+/** Cloudflare API credentials for provisioning, read from `cloudflare` (or a
  * user-named bundle). Fuzzy-matches key names so it works across bundle layouts. */
 export function readCloudflareCreds(
   bundle = DEFAULT_CF_BUNDLE,

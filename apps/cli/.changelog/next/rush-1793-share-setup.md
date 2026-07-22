@@ -1,0 +1,1 @@
+- `agents share setup` and `agents setup share` now read Cloudflare provisioning credentials from the `cloudflare` secrets bundle and persist the Worker write token as `WRITE_TOKEN` in the `share` bundle, matching the setup/onboarding contract while keeping endpoint config in `agents.yaml` under `share:`.

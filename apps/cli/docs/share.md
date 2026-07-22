@@ -13,7 +13,7 @@ agents share plan.html --slug fleet --expire 30d # → https://<base>/fleet
 agents share status                             # show the configured endpoint
 ```
 
-`setup` reads a Cloudflare API token from your `cloudflare.com` secrets bundle (or pass
+`setup` reads a Cloudflare API token from your `cloudflare` secrets bundle (or pass
 `--token`), creates an R2 bucket, uploads the Worker, and enables the free
 `*.workers.dev` subdomain. If the token owns a zone, `--domain share.example.com` maps a
 custom domain. Then `agents share <file>` does an authed `PUT` and prints the link.
@@ -53,7 +53,7 @@ agent makes plan.html
 ```
 agents.yaml            share:                         # baseUrl / accountId / worker / bucket / domain
   (Meta.share)                                        # syncs fleet-wide via `agents repo push/pull`
-secrets bundle `share` SHARE_WRITE_TOKEN              # the raw write token — keychain-backed, never in config
+secrets bundle `share` WRITE_TOKEN                    # the raw write token — keychain-backed, never in config
 ```
 
 Config is safe to sync (no secret); the write token lives only in the `share` bundle.
