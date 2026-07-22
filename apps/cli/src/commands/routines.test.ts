@@ -12,26 +12,42 @@ import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
 import { buildRunsJson } from './routines.js';
 import type { RunMeta } from '../lib/routines.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const require = createRequire(import.meta.url);
+const TSX_IMPORT = require.resolve('tsx');
+const CLI_ENTRYPOINT = path.join(REPO_ROOT, 'src', 'index.ts');
 
 /** Provision an isolated HOME with agents.yaml, .system/.git, and optional routines + device registry. */
 function makeHome(opts: {
   jobs?: Record<string, unknown>[];
+  projectJobs?: Record<string, unknown>[];
   registry?: Record<string, unknown>;
 } = {}): string {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-routines-test-'));
   const agentsDir = path.join(home, '.agents');
   const routinesDir = path.join(agentsDir, 'routines');
+  const projectDir = path.join(home, 'project');
+  const projectRoutinesDir = path.join(projectDir, '.agents', 'routines');
   fs.mkdirSync(routinesDir, { recursive: true });
+  fs.mkdirSync(projectRoutinesDir, { recursive: true });
+  fs.mkdirSync(path.join(projectDir, '.git'), { recursive: true });
   fs.writeFileSync(path.join(agentsDir, 'agents.yaml'), 'agents: {}\n');
   fs.mkdirSync(path.join(agentsDir, '.system', '.git'), { recursive: true });
 
   for (const job of opts.jobs ?? []) {
     fs.writeFileSync(
       path.join(routinesDir, `${job.name}.yml`),
+      yaml.stringify(job),
+    );
+  }
+
+  for (const job of opts.projectJobs ?? []) {
+    fs.writeFileSync(
+      path.join(projectRoutinesDir, `${job.name}.yml`),
       yaml.stringify(job),
     );
   }
@@ -46,9 +62,14 @@ function makeHome(opts: {
 }
 
 /** Run `agents routines <args>` against an isolated HOME. */
-function run(home: string, args: string[], extraEnv: Record<string, string> = {}): ReturnType<typeof spawnSync> {
-  return spawnSync('node', ['--import', 'tsx', 'src/index.ts', 'routines', ...args], {
-    cwd: REPO_ROOT,
+function run(
+  home: string,
+  args: string[],
+  extraEnv: Record<string, string> = {},
+  cwd: string = REPO_ROOT,
+): ReturnType<typeof spawnSync> {
+  return spawnSync('node', ['--import', TSX_IMPORT, CLI_ENTRYPOINT, 'routines', ...args], {
+    cwd,
     env: {
       ...process.env,
       HOME: home,
@@ -383,6 +404,50 @@ describe('routines list --json has devices+runsHere, no device', () => {
       expect(typeof entry.runsHere).toBe('boolean');
       expect(entry.runsHere).toBe(true);
       expect('device' in entry).toBe(false);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('honors user-layer devices when a repo-bound project routine shadows the same name', () => {
+    const userJob = {
+      ...baseJob,
+      repo: 'phnx-labs/agents-cli',
+      devices: ['zion'],
+      prompt: 'user noop',
+    };
+    const projectJob = {
+      ...baseJob,
+      repo: 'phnx-labs/agents-cli',
+      prompt: 'project noop',
+    };
+    const home = makeHome({ jobs: [userJob], projectJobs: [projectJob], registry });
+    const projectDir = path.join(home, 'project');
+    try {
+      const remoteRes = run(home, ['list', '--json'], { AGENTS_SYNC_MACHINE_ID: 'yosemite-s0' }, projectDir);
+      expect(remoteRes.status).toBe(0);
+      const remoteParsed = JSON.parse(remoteRes.stdout.trim());
+      const remoteEntry = remoteParsed.find((j: Record<string, unknown>) => j.name === 'test-job');
+      expect(remoteEntry).toBeDefined();
+      expect(remoteEntry.repo).toBe('phnx-labs/agents-cli');
+      expect(remoteEntry.devices).toEqual(['zion']);
+      expect(remoteEntry.runsHere).toBe(false);
+      expect(remoteEntry.nextRun).toBeNull();
+
+      const localRes = run(home, ['list', '--json'], { AGENTS_SYNC_MACHINE_ID: 'zion' }, projectDir);
+      expect(localRes.status).toBe(0);
+      const localParsed = JSON.parse(localRes.stdout.trim());
+      const localEntry = localParsed.find((j: Record<string, unknown>) => j.name === 'test-job');
+      expect(localEntry).toBeDefined();
+      expect(localEntry.devices).toEqual(['zion']);
+      expect(localEntry.runsHere).toBe(true);
+      expect(localEntry.nextRun).not.toBeNull();
+
+      const viewRes = run(home, ['view', 'test-job'], { AGENTS_SYNC_MACHINE_ID: 'zion' }, projectDir);
+      expect(viewRes.status).toBe(0);
+      const viewDoc = yaml.parse(viewRes.stdout.replace(/^Job: test-job\s*/m, ''));
+      expect(viewDoc.prompt).toBe('project noop');
+      expect(viewDoc.devices).toEqual(['zion']);
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }

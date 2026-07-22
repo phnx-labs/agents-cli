@@ -274,11 +274,26 @@ const JOB_DEFAULTS: Partial<JobConfig> = {
   enabled: true,
 };
 
+function overlayUserRoutineDevices(job: JobConfig, userJob: JobConfig | null): JobConfig {
+  if (!userJob) return job;
+  const merged = { ...job };
+  if (userJob.devices && userJob.devices.length > 0) {
+    merged.devices = userJob.devices;
+  } else {
+    delete merged.devices;
+  }
+  return merged;
+}
+
 /**
  * List all job configs, scanning project > user > system routine dirs.
  * Higher layers shadow lower ones of the same name (first-seen wins): a project
  * routine shadows a user routine, and a user routine shadows a built-in system
  * routine (`~/.agents/.system/routines/`, shipped via gh:phnx-labs/.agents-system).
+ * The user-layer `devices` allowlist is operational state written by
+ * `routines devices --set`; when a same-name project routine wins for
+ * inspection, that allowlist is overlaid so CWD project discovery cannot hide a
+ * fleet pin.
  * Project discovery is opt-in via `cwd`; the daemon (which calls `listJobs()`
  * with no argument) sees user + system routines, so a built-in routine fires for
  * every install unless the user overrides or disables it by name.
@@ -288,20 +303,24 @@ export function listJobs(cwd?: string): JobConfig[] {
   const seen = new Set<string>();
   const jobs: JobConfig[] = [];
 
-  const dirs: string[] = [];
+  const userDir = getRoutinesDir();
+  const dirs: Array<{ scope: 'project' | 'user' | 'system'; path: string }> = [];
   if (cwd) {
     const projectDir = getProjectRoutinesDir(cwd);
-    if (projectDir) dirs.push(projectDir);
+    if (projectDir) dirs.push({ scope: 'project', path: projectDir });
   }
-  dirs.push(getRoutinesDir());
-  dirs.push(getSystemRoutinesDir());
+  dirs.push({ scope: 'user', path: userDir });
+  dirs.push({ scope: 'system', path: getSystemRoutinesDir() });
 
-  for (const dir of dirs) {
+  for (const { scope, path: dir } of dirs) {
     if (!fs.existsSync(dir)) continue;
     const files = fs.readdirSync(dir).filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'));
     for (const file of files) {
-      const job = readJobFile(path.join(dir, file));
+      let job = readJobFile(path.join(dir, file));
       if (!job) continue;
+      if (scope === 'project') {
+        job = overlayUserRoutineDevices(job, readJobFromDir(userDir, job.name));
+      }
       if (seen.has(job.name)) continue;
       seen.add(job.name);
       jobs.push(job);
@@ -312,26 +331,39 @@ export function listJobs(cwd?: string): JobConfig[] {
 
 /**
  * Read a single job config by name, checking project > user > system.
+ * Same-name project routines keep the user-layer `devices` allowlist for the
+ * same reason as listJobs(): device pins are managed state, not routine body
+ * content.
  * Project discovery is opt-in via `cwd`; daemon callers pass no argument and
  * resolve user + system routines (a user routine of the same name shadows a
  * built-in system routine).
  */
 export function readJob(name: string, cwd?: string): JobConfig | null {
   ensureAgentsDir();
-  const dirs: string[] = [];
+  const userDir = getRoutinesDir();
+  const dirs: Array<{ scope: 'project' | 'user' | 'system'; path: string }> = [];
   if (cwd) {
     const projectDir = getProjectRoutinesDir(cwd);
-    if (projectDir) dirs.push(projectDir);
+    if (projectDir) dirs.push({ scope: 'project', path: projectDir });
   }
-  dirs.push(getRoutinesDir());
-  dirs.push(getSystemRoutinesDir());
+  dirs.push({ scope: 'user', path: userDir });
+  dirs.push({ scope: 'system', path: getSystemRoutinesDir() });
 
-  for (const dir of dirs) {
-    for (const ext of ['.yml', '.yaml']) {
-      const filePath = safeJoin(dir, name + ext);
-      if (fs.existsSync(filePath)) {
-        return readJobFile(filePath);
-      }
+  for (const { scope, path: dir } of dirs) {
+    const job = readJobFromDir(dir, name);
+    if (job) {
+      if (scope === 'project') return overlayUserRoutineDevices(job, readJobFromDir(userDir, name));
+      return job;
+    }
+  }
+  return null;
+}
+
+function readJobFromDir(dir: string, name: string): JobConfig | null {
+  for (const ext of ['.yml', '.yaml']) {
+    const filePath = safeJoin(dir, name + ext);
+    if (fs.existsSync(filePath)) {
+      return readJobFile(filePath);
     }
   }
   return null;

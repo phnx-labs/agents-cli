@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as yaml from 'yaml';
 import * as state from '../state.js';
 import { listJobs, readJob } from '../routines.js';
 
@@ -13,10 +14,7 @@ let systemRoutinesDir = '';
 
 function writeRoutine(dir: string, name: string, body: Record<string, unknown>): void {
   fs.mkdirSync(dir, { recursive: true });
-  const yaml = Object.entries(body)
-    .map(([k, v]) => `${k}: ${typeof v === 'string' ? JSON.stringify(v) : v}`)
-    .join('\n');
-  fs.writeFileSync(path.join(dir, `${name}.yml`), yaml, 'utf-8');
+  fs.writeFileSync(path.join(dir, `${name}.yml`), yaml.stringify(body), 'utf-8');
 }
 
 beforeEach(() => {
@@ -103,6 +101,27 @@ describe('listJobs project discovery', () => {
     expect(jobs).toHaveLength(1);
     expect(jobs[0].prompt).toBe('project-version');
   });
+
+  it('keeps a user-layer devices allowlist when a repo-bound project routine has the same name', () => {
+    writeRoutine(userRoutinesDir, 'shared', {
+      schedule: '0 9 * * *',
+      agent: 'claude',
+      prompt: 'user-version',
+      repo: 'phnx-labs/agents-cli',
+      devices: ['zion'],
+    });
+    writeRoutine(projectRoutinesDir, 'shared', {
+      schedule: '0 10 * * *',
+      agent: 'claude',
+      prompt: 'project-version',
+      repo: 'phnx-labs/agents-cli',
+    });
+
+    const jobs = listJobs(projectDir);
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].prompt).toBe('project-version');
+    expect(jobs[0].devices).toEqual(['zion']);
+  });
 });
 
 describe('readJob project discovery', () => {
@@ -133,6 +152,27 @@ describe('readJob project discovery', () => {
     const job = readJob('shared', projectDir);
     expect(job).not.toBeNull();
     expect(job!.prompt).toBe('project-version');
+  });
+
+  it('overlays user-layer devices onto a project routine of the same name', () => {
+    writeRoutine(userRoutinesDir, 'shared', {
+      schedule: '0 9 * * *',
+      agent: 'claude',
+      prompt: 'user-version',
+      repo: 'phnx-labs/agents-cli',
+      devices: ['zion'],
+    });
+    writeRoutine(projectRoutinesDir, 'shared', {
+      schedule: '0 10 * * *',
+      agent: 'claude',
+      prompt: 'project-version',
+      repo: 'phnx-labs/agents-cli',
+    });
+
+    const job = readJob('shared', projectDir);
+    expect(job).not.toBeNull();
+    expect(job!.prompt).toBe('project-version');
+    expect(job!.devices).toEqual(['zion']);
   });
 
   it('returns null when neither layer has the routine', () => {
