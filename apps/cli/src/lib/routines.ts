@@ -275,6 +275,7 @@ const JOB_DEFAULTS: Partial<JobConfig> = {
 };
 
 function overlayUserRoutineDevices(job: JobConfig, userJob: JobConfig | null): JobConfig {
+  if (job.devices !== undefined) return job;
   if (!userJob) return job;
   const merged = { ...job };
   if (userJob.devices && userJob.devices.length > 0) {
@@ -290,10 +291,10 @@ function overlayUserRoutineDevices(job: JobConfig, userJob: JobConfig | null): J
  * Higher layers shadow lower ones of the same name (first-seen wins): a project
  * routine shadows a user routine, and a user routine shadows a built-in system
  * routine (`~/.agents/.system/routines/`, shipped via gh:phnx-labs/.agents-system).
- * The user-layer `devices` allowlist is operational state written by
- * `routines devices --set`; when a same-name project routine wins for
- * inspection, that allowlist is overlaid so CWD project discovery cannot hide a
- * fleet pin.
+ * When a same-name project routine wins for inspection, the user-layer
+ * `devices` allowlist is overlaid only if the project routine does not declare
+ * its own allowlist, so CWD project discovery cannot hide an operational fleet
+ * pin or erase a project-authored one.
  * Project discovery is opt-in via `cwd`; the daemon (which calls `listJobs()`
  * with no argument) sees user + system routines, so a built-in routine fires for
  * every install unless the user overrides or disables it by name.
@@ -331,9 +332,9 @@ export function listJobs(cwd?: string): JobConfig[] {
 
 /**
  * Read a single job config by name, checking project > user > system.
- * Same-name project routines keep the user-layer `devices` allowlist for the
- * same reason as listJobs(): device pins are managed state, not routine body
- * content.
+ * Same-name project routines keep the user-layer `devices` allowlist only when
+ * the project routine does not declare its own allowlist, for the same reason
+ * as listJobs().
  * Project discovery is opt-in via `cwd`; daemon callers pass no argument and
  * resolve user + system routines (a user routine of the same name shadows a
  * built-in system routine).

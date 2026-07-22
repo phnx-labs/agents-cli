@@ -122,6 +122,25 @@ describe('listJobs project discovery', () => {
     expect(jobs[0].prompt).toBe('project-version');
     expect(jobs[0].devices).toEqual(['zion']);
   });
+
+  it('keeps project-layer devices when same-name user routine has no devices', () => {
+    writeRoutine(userRoutinesDir, 'shared', {
+      schedule: '0 9 * * *',
+      agent: 'claude',
+      prompt: 'user-version',
+    });
+    writeRoutine(projectRoutinesDir, 'shared', {
+      schedule: '0 10 * * *',
+      agent: 'claude',
+      prompt: 'project-version',
+      devices: ['ci-runner'],
+    });
+
+    const jobs = listJobs(projectDir);
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].prompt).toBe('project-version');
+    expect(jobs[0].devices).toEqual(['ci-runner']);
+  });
 });
 
 describe('readJob project discovery', () => {
@@ -173,6 +192,25 @@ describe('readJob project discovery', () => {
     expect(job).not.toBeNull();
     expect(job!.prompt).toBe('project-version');
     expect(job!.devices).toEqual(['zion']);
+  });
+
+  it('keeps project-layer devices when same-name user routine has no devices', () => {
+    writeRoutine(userRoutinesDir, 'shared', {
+      schedule: '0 9 * * *',
+      agent: 'claude',
+      prompt: 'user-version',
+    });
+    writeRoutine(projectRoutinesDir, 'shared', {
+      schedule: '0 10 * * *',
+      agent: 'claude',
+      prompt: 'project-version',
+      devices: ['ci-runner'],
+    });
+
+    const job = readJob('shared', projectDir);
+    expect(job).not.toBeNull();
+    expect(job!.prompt).toBe('project-version');
+    expect(job!.devices).toEqual(['ci-runner']);
   });
 
   it('returns null when neither layer has the routine', () => {
