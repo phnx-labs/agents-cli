@@ -1,17 +1,18 @@
 #!/bin/bash
-# Build the Factory app for distribution.
+# Build agents-dbg for distribution.
 #
 # Usage: ./scripts/build.sh [version] [flags]
 #
 # Examples:
 #   ./scripts/build.sh              # build at package.json version, host platform
 #   ./scripts/build.sh 0.1.0        # build v0.1.0
-#   ./scripts/build.sh 0.1.0 --platform mac
+#   ./scripts/build.sh 0.1.0 --platform mac --arch universal
 #   ./scripts/build.sh --skip-tests
 #
 # Flags:
-#   --platform <mac|linux|win>  Target platform (default: host)
-#   --skip-tests                Skip the typecheck gate
+#   --platform <mac|linux|win>       Target platform (default: host)
+#   --arch <arm64|x64|universal>     macOS arch (default: universal)
+#   --skip-tests                     Skip the typecheck gate
 #
 # Steps: 1) typecheck  2) build UI + host  3) package (electron-builder)  4) verify.
 # Signs + notarizes when Apple creds are available (agents secrets `apple.com` or
@@ -33,10 +34,12 @@ cd "$APP_DIR"
 # --- args ---
 VERSION=""
 PLATFORM=""
+ARCH="universal"
 SKIP_TESTS="false"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --platform)   PLATFORM="$2"; shift 2 ;;
+    --arch)       ARCH="$2"; shift 2 ;;
     --skip-tests) SKIP_TESTS="true"; shift ;;
     --*)          error "Unknown flag: $1" ;;
     *)            VERSION="$1"; shift ;;
@@ -52,6 +55,7 @@ if [[ -z "$PLATFORM" ]]; then
   esac
 fi
 case "$PLATFORM" in mac|linux|win) ;; *) error "Invalid platform: $PLATFORM" ;; esac
+case "$ARCH" in arm64|x64|universal) ;; *) error "Invalid arch: $ARCH" ;; esac
 
 # Default version from package.json.
 if [[ -z "$VERSION" ]]; then
@@ -62,7 +66,9 @@ if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.]+)?$ ]]; then
   error "Invalid version: $VERSION (expected x.y.z)"
 fi
 
-info "Building Factory v${VERSION} (platform: ${PLATFORM})"
+BUILD_LABEL="platform: ${PLATFORM}"
+[[ "$PLATFORM" == "mac" ]] && BUILD_LABEL="${BUILD_LABEL}, arch: ${ARCH}"
+info "Building agents-dbg v${VERSION} (${BUILD_LABEL})"
 echo ""
 
 # --- deps (app + the bundled UI) ---
@@ -97,10 +103,12 @@ if [[ "$PLATFORM" == "mac" ]]; then
       node -e "const p=require('./package.json'); p.build.mac.notarize=true; require('fs').writeFileSync('./package.json', JSON.stringify(p,null,2)+'\n')"
       echo "  Notarization: enabled (Team ID ${APPLE_TEAM_ID})"
     else
+      node -e "const p=require('./package.json'); p.build.mac.notarize=false; require('fs').writeFileSync('./package.json', JSON.stringify(p,null,2)+'\n')"
       warn "  Notarization creds incomplete — building signed but NOT notarized"
     fi
   else
-    warn "  No Apple signing identity — building UNSIGNED (Gatekeeper will warn). Set CSC_NAME or add an agents secrets 'apple.com' bundle to sign."
+    node -e "const p=require('./package.json'); p.build.mac.notarize=false; p.build.mac.identity=null; p.build.mac.hardenedRuntime=false; require('fs').writeFileSync('./package.json', JSON.stringify(p,null,2)+'\n')"
+    warn "  No Apple signing identity — building UNSIGNED (Gatekeeper will warn). Set CSC_NAME/CSC_LINK or add an agents secrets 'apple.com' bundle to sign."
   fi
 fi
 
@@ -112,7 +120,7 @@ echo ""
 # --- Step 3: package ---
 info "Step 3: package (electron-builder, ${PLATFORM})..."
 case "$PLATFORM" in
-  mac)   bun run dist -- --mac --publish never ;;
+  mac)   bun run dist -- --mac "--${ARCH}" --publish never ;;
   linux) bun run dist -- --linux --publish never ;;
   win)   bun run dist -- --win --publish never ;;
 esac
@@ -125,25 +133,37 @@ echo "  OK: UI bundle present"
 
 REL="$APP_DIR/release"
 if [[ "$PLATFORM" == "mac" ]]; then
-  APP_BUNDLE="$(find "$REL" -maxdepth 2 -name 'Factory.app' -type d 2>/dev/null | head -1)"
-  [[ -n "$APP_BUNDLE" ]] || error "Factory.app not found in $REL"
+  shopt -s nullglob
+  APP_CANDIDATES=("$REL"/mac*/agents-dbg.app "$REL"/agents-dbg.app)
+  shopt -u nullglob
+  APP_BUNDLE="${APP_CANDIDATES[0]:-}"
+  [[ -n "$APP_BUNDLE" ]] || error "agents-dbg.app not found in $REL"
   BUILT="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || echo UNKNOWN)"
-  [[ "$BUILT" == "$VERSION" ]] || error "Factory.app version '$BUILT' != requested '$VERSION'"
-  echo "  OK: Factory.app version = $BUILT"
+  [[ "$BUILT" == "$VERSION" ]] || error "agents-dbg.app version '$BUILT' != requested '$VERSION'"
+  echo "  OK: agents-dbg.app version = $BUILT"
   SIGN="$(codesign -dvv "$APP_BUNDLE" 2>&1 || true)"
   if echo "$SIGN" | grep -q "Developer ID Application"; then
     echo "  SIGNED: $(echo "$SIGN" | grep -m1 'Authority=')"
+    if [[ -n "${APPLE_ID:-}" && -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" && -n "${APPLE_TEAM_ID:-}" ]]; then
+      spctl --assess --type execute -vv "$APP_BUNDLE" 2>&1 | sed 's/^/  /'
+    fi
   else
     warn "  UNSIGNED (Gatekeeper will warn)"
   fi
-  DMG="$(find "$REL" -maxdepth 1 -name "*${VERSION}*.dmg" -type f 2>/dev/null | head -1)"
+  shopt -s nullglob
+  DMGS=("$REL"/*"${VERSION}"*.dmg)
+  shopt -u nullglob
+  DMG="${DMGS[0]:-}"
   [[ -n "$DMG" ]] && echo "  OK: dmg = $(basename "$DMG")"
 else
-  ART="$(find "$REL" -maxdepth 1 -type f \( -name "*.AppImage" -o -name "*.exe" \) 2>/dev/null | head -1)"
+  shopt -s nullglob
+  ARTS=("$REL"/*.AppImage "$REL"/*.exe)
+  shopt -u nullglob
+  ART="${ARTS[0]:-}"
   [[ -n "$ART" ]] || error "No installable artifact found in $REL"
   echo "  OK: artifact = $(basename "$ART")"
 fi
 echo ""
 
-info "Build complete: Factory v${VERSION}"
+info "Build complete: agents-dbg v${VERSION}"
 ls -lh "$REL"/*.dmg "$REL"/*.zip "$REL"/*.AppImage "$REL"/*.exe 2>/dev/null || true

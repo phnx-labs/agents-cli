@@ -1,5 +1,5 @@
 #!/bin/bash
-# Install the Factory app's dependencies (the app package + the UI it bundles).
+# Install the agents-dbg app's dependencies (the app package + the UI it bundles).
 #
 # Usage: ./scripts/install.sh
 
@@ -11,7 +11,7 @@ APP_DIR="$(dirname "$SCRIPT_DIR")"
 GREEN='\033[0;32m'; NC='\033[0m'
 info() { echo -e "${GREEN}$1${NC}"; }
 
-info "Installing Factory app deps..."
+info "Installing agents-dbg app deps..."
 (cd "$APP_DIR" && bun install)
 
 info "Installing bundled UI deps..."

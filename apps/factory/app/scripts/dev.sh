@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run the Factory app locally: build the UI + host, then launch Electron.
+# Run agents-dbg locally: build the UI + host, then launch Electron.
 #
 # Usage: ./scripts/dev.sh
 
@@ -17,5 +17,5 @@ cd "$APP_DIR"
 info "Building UI + host..."
 bun run build
 
-info "Launching Factory..."
+info "Launching agents-dbg..."
 exec bun run start

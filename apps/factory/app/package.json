@@ -1,8 +1,9 @@
 {
-  "name": "swarm-app",
-  "version": "0.0.1",
+  "name": "agents-dbg",
+  "version": "0.1.0",
   "private": true,
-  "description": "Standalone Electron app for the Factory work stream",
+  "description": "Private install-only Mac app for debugging agents work streams",
+  "author": "Muqsit Nawaz <dev@muqsitnawaz.com>",
   "main": "dist/main.js",
   "scripts": {
     "build:ui": "cd ../ui && bunx vite build --config vite.standalone.config.ts",
@@ -13,11 +14,12 @@
     "start": "electron ./dist/main.js"
   },
   "build": {
-    "appId": "com.swarmify.factory",
-    "productName": "Factory",
+    "appId": "com.phnxlabs.agents-dbg",
+    "productName": "agents-dbg",
     "directories": {
       "output": "release"
     },
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
     "files": [
       "dist/**/*",
       "package.json"
@@ -30,7 +32,10 @@
       "target": ["dmg", "zip"],
       "icon": "../assets/agents.png",
       "category": "public.app-category.developer-tools",
-      "notarize": false
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.inherit.plist",
+      "notarize": true
     },
     "linux": {
       "target": ["AppImage"],

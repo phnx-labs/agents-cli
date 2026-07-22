@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "swarm-app",
+      "name": "agents-dbg",
       "devDependencies": {
         "electron": "^34.2.0",
         "electron-builder": "^25.1.8",

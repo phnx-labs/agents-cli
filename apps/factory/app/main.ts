@@ -88,7 +88,7 @@ function createWindow(): void {
   win = new BrowserWindow({
     width: 1440,
     height: 900,
-    title: 'Factory',
+    title: 'agents-dbg',
     backgroundColor: '#000000',
     webPreferences: {
       preload: PRELOAD,

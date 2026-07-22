@@ -27,6 +27,20 @@ This extension turns your IDE into an IAE:
 2. Press `Cmd+Shift+A` to spawn your first agent
 3. Open Dashboard (`Cmd+Shift+D`) to configure auto-start
 
+### agents-dbg Mac App
+
+Install the private Mac app through the Homebrew tap:
+
+```bash
+brew install muqsitnawaz/tap/agents-dbg
+```
+
+The public install script uses that tap and launches the installed app:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/phnx-labs/agents-cli/main/scripts/install-agents-dbg.sh | sh
+```
+
 ## Navigation
 
 | Shortcut | Action |

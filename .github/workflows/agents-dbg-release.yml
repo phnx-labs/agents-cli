@@ -1,0 +1,59 @@
+name: agents-dbg release
+
+on:
+  push:
+    tags:
+      - 'agents-dbg-v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: agents-dbg version to release
+        required: true
+        type: string
+
+jobs:
+  release:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    env:
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+      GH_TOKEN: ${{ github.token }}
+      HOMEBREW_TAP_REPO: ${{ github.workspace }}/homebrew-tap
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: muqsitnawaz/homebrew-tap
+          path: homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Configure tap git identity
+        run: |
+          git -C "$HOMEBREW_TAP_REPO" config user.name "github-actions[bot]"
+          git -C "$HOMEBREW_TAP_REPO" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Install agents-dbg dependencies
+        run: bash apps/factory/app/scripts/install.sh
+
+      - name: Release agents-dbg
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            version="${{ inputs.version }}"
+          else
+            version="${GITHUB_REF_NAME#agents-dbg-v}"
+          fi
+          bash scripts/release.sh "$version" --confirm --tap-repo "$HOMEBREW_TAP_REPO"
