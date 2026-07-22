@@ -10,11 +10,13 @@ and you open the link to see if it worked.
 ```bash
 agents share setup                              # once: provision on your Cloudflare
 agents share plan.html --slug fleet --expire 30d # → https://<base>/fleet
+agents share plan.html --json                  # machine-readable URL for hooks
 agents share status                             # show the configured endpoint
 ```
 
 `setup` reads a Cloudflare API token from your `cloudflare` secrets bundle (or pass
-`--token`), creates an R2 bucket, uploads the Worker, and enables the free
+`--token`), creates an R2 bucket, installs the share lifecycle rule, uploads the Worker, sets
+the `WRITE_TOKEN` Worker secret, and enables the free
 `*.workers.dev` subdomain. If the token owns a zone, `--domain share.example.com` maps a
 custom domain. Then `agents share <file>` does an authed `PUT` and prints the link.
 
@@ -39,13 +41,18 @@ agent makes plan.html
   `SHARE_WRITE_TOKEN`, and `agents share join <baseUrl>` still joins an explicit
   endpoint without provisioning.
 - **Expiry.** `--expire 30d|12h|2026-08-01` writes `expires-at` into the object's metadata;
-  the Worker `410`s and lazily deletes past that instant.
+  the Worker `410`s and lazily deletes past that instant. Setup also installs a bucket
+  lifecycle rule that deletes share objects after 90 days as the durable cleanup floor.
 - **Preview cards (OG images).** Publishing an HTML page screenshots its own hero at
   1200×630 and attaches it as `og:image` + `twitter:card`, so the link unfurls into a
   rich card in Slack, iMessage, Twitter/X, and Discord. Capture is client-side (headless
   Chromium via the CLI's browser detector, with a managed-Chromium fallback), so there's
   no central render service and no extra cost. No headless browser available → the cover
   is skipped and the plain link still publishes. Opt out with `--no-cover`.
+- **Plan-render automation.** Hooks that render plans can run
+  `agents share <plan.html> --json` after writing the HTML and read the returned
+  `{ "url", "coverUrl", "expiresAt" }` object. The human output still prints the URL on
+  the first line.
 - **Slugs.** With no `--slug`, the default is `<project>-<feature>-<hash>` (e.g.
   `agents-cli-fleet-cockpit-3a6687`): the repo name scopes the link and a short random
   tail keeps it unguessable and collision-free. Pass `--slug` for a stable, exact name.
@@ -68,7 +75,7 @@ synced config exists and the token is already available.
 
 | Command | What it does |
 |---|---|
-| `agents share <file> [--slug s] [--expire spec] [--no-cover]` | Publish `<file>`; print the link. HTML pages get an auto OG cover unless `--no-cover`. Default slug `<project>-<feature>-<hash>`. |
+| `agents share <file> [--slug s] [--expire spec] [--no-cover] [--json]` | Publish `<file>`; print the link, or emit `{ url, coverUrl, expiresAt }` for plan-render hooks with `--json`. HTML pages get an auto OG cover unless `--no-cover`. Default slug `<project>-<feature>-<hash>`. |
 | `agents share setup [--token t] [--account id] [--bundle b] [--worker w] [--bucket b] [--domain h]` | Provision an R2 bucket + Worker on your Cloudflare and save the config. |
 | `agents share join [baseUrl] [--token t]` | Use an existing endpoint, no provisioning. With no URL, consumes synced `share:` config plus `SHARE_WRITE_TOKEN` / the local `share` bundle. |
 | `agents share status` | Show the configured endpoint. |

@@ -3,7 +3,15 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { parseExpire, slugify, detectProject, defaultSlug, attachOgCover, publishToEndpoint } from './publish.js';
+import {
+  parseExpire,
+  slugify,
+  detectProject,
+  defaultSlug,
+  attachOgCover,
+  publishFile,
+  publishToEndpoint,
+} from './publish.js';
 import { renderWorkerScript } from './worker-template.js';
 
 describe('attachOgCover', () => {
@@ -57,6 +65,49 @@ describe('attachOgCover', () => {
       }),
     );
     expect(r.coverUrl).toBeUndefined();
+  });
+});
+
+describe('publishFile', () => {
+  it('publishes the rendered file and returns the link for hooks', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'share-publish-'));
+    const file = join(dir, 'plan-render-output.html');
+    writeFileSync(file, '<!doctype html><title>Plan</title>', 'utf-8');
+    const uploads: Array<{ url: string; body: string; headers: Record<string, string> }> = [];
+
+    const result = await publishFile(file, {
+      slug: 'plan-render-output',
+      expire: '2030-01-01',
+      cover: false,
+      config: {
+        baseUrl: 'https://share.example',
+        accountId: 'acct',
+        workerName: 'worker',
+        bucketName: 'bucket',
+      },
+      writeToken: 'token',
+      uploader: async (url, body, headers) => {
+        uploads.push({ url, body: body.toString('utf8'), headers });
+        return { ok: true, status: 200, url };
+      },
+    });
+
+    expect(result).toEqual({
+      url: 'https://share.example/plan-render-output',
+      expiresAt: '2030-01-01T00:00:00.000Z',
+      coverUrl: undefined,
+    });
+    expect(uploads).toEqual([
+      {
+        url: 'https://share.example/plan-render-output',
+        body: '<!doctype html><title>Plan</title>',
+        headers: {
+          authorization: 'Bearer token',
+          'content-type': 'text/html; charset=utf-8',
+          'x-share-expires-at': '2030-01-01T00:00:00.000Z',
+        },
+      },
+    ]);
   });
 });
 

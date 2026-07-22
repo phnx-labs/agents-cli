@@ -1,9 +1,12 @@
 // Cloudflare provisioning for `agents share setup` — plain `fetch` against the CF
-// REST API (the repo has no CF wrapper). Creates the R2 bucket, uploads the Worker
-// (with an R2 binding + the WRITE_TOKEN as an inline secret), enables the free
+// REST API (the repo has no CF wrapper). Creates the R2 bucket, configures its
+// lifecycle, uploads the Worker (with an R2 binding), sets the WRITE_TOKEN secret,
+// enables the free
 // `*.workers.dev` subdomain, and — when the token owns the zone — maps a custom domain.
 
 const CF_API = 'https://api.cloudflare.com/client/v4';
+export const SHARE_LIFECYCLE_RULE_ID = 'agents-share-expire-90d';
+export const SHARE_LIFECYCLE_DELETE_AFTER_SECONDS = 90 * 24 * 60 * 60;
 
 interface CfError {
   code?: number;
@@ -57,6 +60,18 @@ interface ProvisionOptions {
   request?: CloudflareRequester;
 }
 
+interface R2LifecycleRule {
+  id: string;
+  conditions: { prefix: string };
+  enabled: boolean;
+  abortMultipartUploadsTransition?: { condition?: { maxAge: number; type: 'Age' } };
+  deleteObjectsTransition?: { condition?: { maxAge: number; type: 'Age' } | { date: string; type: 'Date' } };
+  storageClassTransitions?: Array<{
+    condition: { maxAge: number; type: 'Age' } | { date: string; type: 'Date' };
+    storageClass: 'InfrequentAccess';
+  }>;
+}
+
 /** True if the CF error looks like "the thing already exists" (idempotent create). */
 function isAlreadyExists(e: unknown): boolean {
   return /already exists|duplicate|10004|10014/i.test(String(e));
@@ -82,14 +97,46 @@ export async function createBucket(
   }
 }
 
-/** Upload the module Worker with an R2 binding (`BUCKET`) + inline `WRITE_TOKEN` secret. */
+/** Add/update the share bucket lifecycle rule while preserving unrelated rules. */
+export async function configureBucketLifecycle(
+  apiToken: string,
+  accountId: string,
+  bucketName: string,
+  opts: ProvisionOptions = {},
+): Promise<void> {
+  const request = opts.request ?? defaultCloudflareRequester;
+  const existing = await request<{ rules?: R2LifecycleRule[] }>({
+    apiToken,
+    method: 'GET',
+    pathname: `/accounts/${accountId}/r2/buckets/${bucketName}/lifecycle`,
+  });
+  const shareRule: R2LifecycleRule = {
+    id: SHARE_LIFECYCLE_RULE_ID,
+    conditions: { prefix: '' },
+    enabled: true,
+    deleteObjectsTransition: {
+      condition: { type: 'Age', maxAge: SHARE_LIFECYCLE_DELETE_AFTER_SECONDS },
+    },
+  };
+  const rules = [
+    ...(existing.rules ?? []).filter((rule) => rule.id !== SHARE_LIFECYCLE_RULE_ID),
+    shareRule,
+  ];
+  await request({
+    apiToken,
+    method: 'PUT',
+    pathname: `/accounts/${accountId}/r2/buckets/${bucketName}/lifecycle`,
+    body: { rules },
+  });
+}
+
+/** Upload the module Worker with an R2 binding (`BUCKET`). Secrets are set via the Workers Secrets API. */
 export async function deployWorker(
   apiToken: string,
   accountId: string,
   workerName: string,
   script: string,
   bucketName: string,
-  writeToken: string,
   opts: ProvisionOptions = {},
 ): Promise<void> {
   const request = opts.request ?? defaultCloudflareRequester;
@@ -98,7 +145,6 @@ export async function deployWorker(
     compatibility_date: '2024-11-06',
     bindings: [
       { type: 'r2_bucket', name: 'BUCKET', bucket_name: bucketName },
-      { type: 'secret_text', name: 'WRITE_TOKEN', text: writeToken },
     ],
   };
   const form = new FormData();
@@ -113,6 +159,23 @@ export async function deployWorker(
     method: 'PUT',
     pathname: `/accounts/${accountId}/workers/scripts/${workerName}`,
     form,
+  });
+}
+
+/** Add/update the WRITE_TOKEN binding using Cloudflare's Workers Secrets API. */
+export async function setWorkerSecret(
+  apiToken: string,
+  accountId: string,
+  workerName: string,
+  writeToken: string,
+  opts: ProvisionOptions = {},
+): Promise<void> {
+  const request = opts.request ?? defaultCloudflareRequester;
+  await request({
+    apiToken,
+    method: 'PUT',
+    pathname: `/accounts/${accountId}/workers/scripts/${workerName}/secrets`,
+    body: { name: 'WRITE_TOKEN', text: writeToken, type: 'secret_text' },
   });
 }
 

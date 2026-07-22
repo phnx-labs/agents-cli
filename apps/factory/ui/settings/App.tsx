@@ -38,11 +38,9 @@ import type { TabKey } from './components/mission-control'
 // Tab components (legacy, for Bench and Panel)
 import { BenchTab } from './components/bench'
 import { PanelTab } from './components/panel'
-import { ResourcesTab } from './components/resources'
 import { GuideTab } from './components/tabs/GuideTab'
 import { ApiKeyDialog } from './components/common/OAuthDialog'
 import { ForemanOrb, ForemanCursor } from './components/foreman'
-import { LogsPanel, type LogEntry } from './components/logs'
 
 const vscode = getVsCodeApi()
 const icons = getIcons() as IconConfig
@@ -158,8 +156,6 @@ export default function App() {
   const [watchdogEnabled, setWatchdogEnabled] = useState(false)
   const [watchdogEvents, setWatchdogEvents] = useState<import('./components/mission-control/UnifiedAgentsPane').WatchdogEventUI[]>([])
   const [watchdogPlaybookStatus, setWatchdogPlaybookStatus] = useState<WatchdogPlaybookStatus | null>(null)
-  const [logEntries, setLogEntries] = useState<LogEntry[]>([])
-  const [totalLogEntryCount, setTotalLogEntryCount] = useState(0)
 
   // Workspace config state
   const [workspaceConfig, setWorkspaceConfig] = useState<WorkspaceConfig | null>(null)
@@ -336,16 +332,6 @@ export default function App() {
         case 'watchdogPlaybookStatus':
           if (message.status) setWatchdogPlaybookStatus(message.status)
           break
-        case 'logsData':
-          setLogEntries(Array.isArray(message.entries) ? message.entries.slice(-500) : [])
-          setTotalLogEntryCount(Array.isArray(message.entries) ? message.entries.length : 0)
-          break
-        case 'logEntry':
-          if (message.entry) {
-            setLogEntries((prev) => [...prev.slice(-499), message.entry])
-            setTotalLogEntryCount((count) => count + 1)
-          }
-          break
         case 'workspaceConfigData':
           setWorkspaceConfig(message.config)
           setWorkspaceConfigExists(message.exists)
@@ -381,7 +367,6 @@ export default function App() {
     vscode.postMessage({ type: 'getSecondaryAgent' })
     vscode.postMessage({ type: 'getWatchdogStatus' })
     vscode.postMessage({ type: 'getWatchdogPlaybookStatus' })
-    vscode.postMessage({ type: 'subscribeLogs' })
     vscode.postMessage({ type: 'getPrewarmStatus' })
     vscode.postMessage({ type: 'getWorkspaceConfig' })
     vscode.postMessage({ type: 'fetchAllTerminals' })
@@ -866,15 +851,6 @@ export default function App() {
           openBenchTaskId={openBenchTaskId}
           onOpenBenchTaskConsumed={() => setOpenBenchTaskId(null)}
         />
-      )}
-
-      {activeTab === 'resources' && (
-        <ResourcesTab />
-      )}
-
-      {/* Logs (dockable live JSON-RPC/OAuth panel) */}
-      {activeTab === 'logs' && (
-        <LogsPanel entries={logEntries} totalEntryCount={totalLogEntryCount} />
       )}
 
       {/* Panel (settings - 2-column sidebar layout) */}

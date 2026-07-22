@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   addCustomDomain,
+  configureBucketLifecycle,
   createBucket,
   deployWorker,
   enableWorkersDev,
   findZoneId,
+  setWorkerSecret,
+  SHARE_LIFECYCLE_DELETE_AFTER_SECONDS,
+  SHARE_LIFECYCLE_RULE_ID,
   type CloudflareRequest,
   type CloudflareRequester,
 } from './provision.js';
@@ -29,9 +33,63 @@ describe('share Cloudflare provisioning request shape', () => {
     ]);
   });
 
-  it('deploys a module worker with R2 and WRITE_TOKEN bindings', async () => {
+  it('merges the share lifecycle rule without dropping existing bucket rules', async () => {
+    const seen: CloudflareRequest[] = [];
+    const existingRule = {
+      id: 'keep-logs',
+      conditions: { prefix: 'logs/' },
+      enabled: true,
+      deleteObjectsTransition: { condition: { type: 'Age' as const, maxAge: 7 * 24 * 60 * 60 } },
+    };
+    const request: CloudflareRequester = async (req) => {
+      seen.push(req);
+      if (req.method === 'GET') {
+        return {
+          rules: [
+            existingRule,
+            {
+              id: SHARE_LIFECYCLE_RULE_ID,
+              conditions: { prefix: '' },
+              enabled: false,
+            },
+          ],
+        };
+      }
+      return {};
+    };
+
+    await configureBucketLifecycle('cf-token', 'acct_1', 'agents-share', { request });
+
+    expect(seen).toEqual([
+      {
+        apiToken: 'cf-token',
+        method: 'GET',
+        pathname: '/accounts/acct_1/r2/buckets/agents-share/lifecycle',
+      },
+      {
+        apiToken: 'cf-token',
+        method: 'PUT',
+        pathname: '/accounts/acct_1/r2/buckets/agents-share/lifecycle',
+        body: {
+          rules: [
+            existingRule,
+            {
+              id: SHARE_LIFECYCLE_RULE_ID,
+              conditions: { prefix: '' },
+              enabled: true,
+              deleteObjectsTransition: {
+                condition: { type: 'Age', maxAge: SHARE_LIFECYCLE_DELETE_AFTER_SECONDS },
+              },
+            },
+          ],
+        },
+      },
+    ]);
+  });
+
+  it('deploys a module worker with the R2 bucket binding', async () => {
     let upload: CloudflareRequest | undefined;
-    await deployWorker('cf-token', 'acct_1', 'worker-one', 'export default {}', 'bucket-one', 'write-token', {
+    await deployWorker('cf-token', 'acct_1', 'worker-one', 'export default {}', 'bucket-one', {
       request: async (req) => {
         upload = req;
         return {};
@@ -47,10 +105,28 @@ describe('share Cloudflare provisioning request shape', () => {
       compatibility_date: '2024-11-06',
       bindings: [
         { type: 'r2_bucket', name: 'BUCKET', bucket_name: 'bucket-one' },
-        { type: 'secret_text', name: 'WRITE_TOKEN', text: 'write-token' },
       ],
     });
     expect(await (upload?.form?.get('worker.js') as File).text()).toBe('export default {}');
+  });
+
+  it('sets WRITE_TOKEN through the Workers Secrets API', async () => {
+    const seen: CloudflareRequest[] = [];
+    await setWorkerSecret('cf-token', 'acct_1', 'worker-one', 'write-token', {
+      request: async (req) => {
+        seen.push(req);
+        return {};
+      },
+    });
+
+    expect(seen).toEqual([
+      {
+        apiToken: 'cf-token',
+        method: 'PUT',
+        pathname: '/accounts/acct_1/workers/scripts/worker-one/secrets',
+        body: { name: 'WRITE_TOKEN', text: 'write-token', type: 'secret_text' },
+      },
+    ]);
   });
 
   it('enables workers.dev and returns the account subdomain', async () => {

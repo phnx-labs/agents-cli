@@ -44,7 +44,7 @@ describe('extractConfiguredPort', () => {
   });
 
   it('extracts explicit port from ssh://', () => {
-    expect(extractConfiguredPort(profile(['ssh://mac-mini:9444']))).toBe(9444);
+    expect(extractConfiguredPort(profile(['ssh://remote-host:9444']))).toBe(9444);
   });
 
   it('defaults to 9222 for cdp:// without explicit port', () => {
@@ -52,7 +52,7 @@ describe('extractConfiguredPort', () => {
   });
 
   it('defaults to 9222 for ssh:// without explicit port', () => {
-    expect(extractConfiguredPort(profile(['ssh://mac-mini']))).toBe(9222);
+    expect(extractConfiguredPort(profile(['ssh://remote-host']))).toBe(9222);
   });
 
   it('extracts port from ws:// and wss://', () => {
@@ -95,15 +95,15 @@ describe('extractConfiguredEndpoint', () => {
   });
 
   it('preserves remote host for ssh://', () => {
-    expect(extractConfiguredEndpoint(profile(['ssh://mac-mini:9222']))).toEqual({
-      host: 'mac-mini',
+    expect(extractConfiguredEndpoint(profile(['ssh://remote-host:9222']))).toEqual({
+      host: 'remote-host',
       port: 9222,
     });
   });
 
   it('strips username from ssh://user@host:port', () => {
-    expect(extractConfiguredEndpoint(profile(['ssh://user@mac-mini:9222']))).toEqual({
-      host: 'mac-mini',
+    expect(extractConfiguredEndpoint(profile(['ssh://user@remote-host:9222']))).toEqual({
+      host: 'remote-host',
       port: 9222,
     });
   });
@@ -113,8 +113,8 @@ describe('extractConfiguredEndpoint', () => {
       host: '127.0.0.1',
       port: 9222,
     });
-    expect(extractConfiguredEndpoint(profile(['ssh://mac-mini']))).toEqual({
-      host: 'mac-mini',
+    expect(extractConfiguredEndpoint(profile(['ssh://remote-host']))).toEqual({
+      host: 'remote-host',
       port: 9222,
     });
   });
@@ -164,12 +164,12 @@ describe('extractConfiguredEndpoint', () => {
         profileMap(
           {
             local: { target: 'cdp://127.0.0.1:9001' },
-            remote: { target: 'ssh://mac-mini:9222' },
+            remote: { target: 'ssh://remote-host:9222' },
           },
           'remote'
         )
       )
-    ).toEqual({ host: 'mac-mini', port: 9222 });
+    ).toEqual({ host: 'remote-host', port: 9222 });
   });
 
   it('falls back to first entry when defaultEndpoint references unknown preset', () => {
@@ -195,26 +195,26 @@ describe('extractConfiguredEndpoint', () => {
     // only — `url.port` is empty. Without the searchParams fallback every
     // `?port=`-style profile silently collapses to 9222.
     expect(
-      extractConfiguredEndpoint(profile(['ssh://mac-mini?port=18805']))
-    ).toEqual({ host: 'mac-mini', port: 18805 });
+      extractConfiguredEndpoint(profile(['ssh://remote-host?port=18805']))
+    ).toEqual({ host: 'remote-host', port: 18805 });
   });
 
   it('reads ssh://user@host?port=N (query-string form with username)', () => {
     expect(
-      extractConfiguredEndpoint(profile(['ssh://user@mac-mini?port=18805']))
-    ).toEqual({ host: 'mac-mini', port: 18805 });
+      extractConfiguredEndpoint(profile(['ssh://user@remote-host?port=18805']))
+    ).toEqual({ host: 'remote-host', port: 18805 });
   });
 
   it('prefers explicit :port over ?port= when both are present', () => {
     expect(
-      extractConfiguredEndpoint(profile(['ssh://mac-mini:9300?port=18805']))
-    ).toEqual({ host: 'mac-mini', port: 9300 });
+      extractConfiguredEndpoint(profile(['ssh://remote-host:9300?port=18805']))
+    ).toEqual({ host: 'remote-host', port: 9300 });
   });
 
   it('rejects non-numeric ?port= value and falls back to ssh default', () => {
     expect(
-      extractConfiguredEndpoint(profile(['ssh://mac-mini?port=abc']))
-    ).toEqual({ host: 'mac-mini', port: 9222 });
+      extractConfiguredEndpoint(profile(['ssh://remote-host?port=abc']))
+    ).toEqual({ host: 'remote-host', port: 9222 });
   });
 
   it('returns the same port for cdp://localhost and cdp://127.0.0.1 (collision detection)', () => {
@@ -301,7 +301,7 @@ describe('profile YAML round-trip', () => {
         name: 'remote-comet',
         browser: 'custom',
         binary: '/Applications/Comet Beta.app/Contents/MacOS/Comet Beta',
-        endpoints: ['ssh://mac-mini:9222'],
+        endpoints: ['ssh://remote-host:9222'],
       })
     ).resolves.toBeUndefined();
     expect(store.browser['remote-comet'].binary).toBe('/Applications/Comet Beta.app/Contents/MacOS/Comet Beta');
@@ -334,7 +334,7 @@ describe('profile YAML round-trip', () => {
         name: 'remote-bad',
         browser: 'custom',
         binary: '/Applications/Comet.app/Contents/MacOS/Comet; touch /tmp/pwned',
-        endpoints: ['ssh://mac-mini:9222'],
+        endpoints: ['ssh://remote-host:9222'],
       })
     ).rejects.toThrow(/Remote browser binary contains shell metacharacters/);
   });
@@ -349,7 +349,7 @@ describe('profile YAML round-trip', () => {
         browser: 'custom',
         endpoints: {
           remote: {
-            target: 'ssh://mac-mini:9222',
+            target: 'ssh://remote-host:9222',
             binary: '/Applications/Comet.app/Contents/MacOS/Comet && say bad',
           },
         },
@@ -493,12 +493,12 @@ describe('findFreeProfilePort', () => {
   });
 
   it('treats SSH profile ports as occupied locally now that tunnels bind on the same port', async () => {
-    // SSH profile points at 9222 on mac-mini, but our tunnel will bind
-    // local 9222 → mac-mini:9222, so the local port is claimed and the
+    // SSH profile points at 9222 on remote-host, but our tunnel will bind
+    // local 9222 → remote-host:9222, so the local port is claimed and the
     // allocator must skip it.
     vi.mocked(readMeta).mockReturnValue({
       browser: {
-        'ssh-remote': { browser: 'comet', endpoints: ['ssh://mac-mini:9222'] },
+        'ssh-remote': { browser: 'comet', endpoints: ['ssh://remote-host:9222'] },
       },
     } as any);
     vi.mocked(isPortInUse).mockReturnValue(false);
@@ -530,13 +530,13 @@ describe('createProfile port collision (local-port-scoped)', () => {
     ).rejects.toThrow(/Local port 9222 is already used by profile "existing"/);
   });
 
-  it('rejects cdp://127.0.0.1:9222 against ssh://mac-mini:9222 because the SSH tunnel binds locally', async () => {
+  it('rejects cdp://127.0.0.1:9222 against ssh://remote-host:9222 because the SSH tunnel binds locally', async () => {
     // After the SSH-tunnel-port change, ssh://host?port=N binds local N too,
     // so cdp://127.0.0.1:N and ssh://host?port=N do collide locally even
     // though their (host, port) tuples differ.
     const store: { browser: Record<string, BrowserProfileConfig> } = {
       browser: {
-        remote: { browser: 'comet', endpoints: ['ssh://mac-mini:9222'] },
+        remote: { browser: 'comet', endpoints: ['ssh://remote-host:9222'] },
       },
     };
     vi.mocked(readMeta).mockImplementation(() => store as any);
@@ -551,11 +551,11 @@ describe('createProfile port collision (local-port-scoped)', () => {
   });
 
   it('rejects two ssh:// profiles on the same port even across different hosts', async () => {
-    // mac-mini's 9222 tunnel binds local 9222; mac-studio's tunnel would
+    // remote-host's 9222 tunnel binds local 9222; mac-studio's tunnel would
     // want local 9222 too. Local resource, single owner.
     const store: { browser: Record<string, BrowserProfileConfig> } = {
       browser: {
-        mini: { browser: 'comet', endpoints: ['ssh://mac-mini:9222'] },
+        mini: { browser: 'comet', endpoints: ['ssh://remote-host:9222'] },
       },
     };
     vi.mocked(readMeta).mockImplementation(() => store as any);
@@ -572,7 +572,7 @@ describe('createProfile port collision (local-port-scoped)', () => {
   it('allows ssh:// profiles on different ports to the same host', async () => {
     const store: { browser: Record<string, BrowserProfileConfig> } = {
       browser: {
-        first: { browser: 'comet', endpoints: ['ssh://mac-mini?port=9222'] },
+        first: { browser: 'comet', endpoints: ['ssh://remote-host?port=9222'] },
       },
     };
     vi.mocked(readMeta).mockImplementation(() => store as any);
@@ -584,7 +584,7 @@ describe('createProfile port collision (local-port-scoped)', () => {
       createProfile({
         name: 'second',
         browser: 'comet',
-        endpoints: ['ssh://mac-mini?port=9300'],
+        endpoints: ['ssh://remote-host?port=9300'],
       })
     ).resolves.toBeUndefined();
     expect(store.browser['second']).toBeTruthy();
@@ -593,7 +593,7 @@ describe('createProfile port collision (local-port-scoped)', () => {
   it('rejects two ssh:// profiles on the same remote host:port', async () => {
     const store: { browser: Record<string, BrowserProfileConfig> } = {
       browser: {
-        first: { browser: 'comet', endpoints: ['ssh://mac-mini:9222'] },
+        first: { browser: 'comet', endpoints: ['ssh://remote-host:9222'] },
       },
     };
     vi.mocked(readMeta).mockImplementation(() => store as any);
@@ -602,7 +602,7 @@ describe('createProfile port collision (local-port-scoped)', () => {
       createProfile({
         name: 'second',
         browser: 'comet',
-        endpoints: ['ssh://mac-mini:9222'],
+        endpoints: ['ssh://remote-host:9222'],
       })
     ).rejects.toThrow(/Local port 9222 is already used by profile "first"/);
   });

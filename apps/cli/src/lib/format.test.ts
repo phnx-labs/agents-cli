@@ -8,6 +8,7 @@ import {
   padVisible,
   isJsonMode,
   termLink,
+  formatDie,
 } from './format.js';
 
 describe('truncate', () => {
@@ -81,5 +82,39 @@ describe('termLink', () => {
   });
   it('returns plain text when filePath is empty', () => {
     expect(termLink('label', '')).toBe('label');
+  });
+});
+
+describe('formatDie (RUSH-1830 — machine-readable failures for --json callers)', () => {
+  it('emits a parseable {"error"} on stdout in json mode', () => {
+    const out = formatDie('Prompt is required.', { json: true });
+    expect(out.stream).toBe('stdout');
+    expect(JSON.parse(out.text)).toEqual({ error: 'Prompt is required.' });
+  });
+
+  it('includes the hint in the json payload when provided', () => {
+    const out = formatDie('Prompt is required.', { json: true, hint: 'agents cloud run "<task>"' });
+    expect(out.stream).toBe('stdout');
+    expect(JSON.parse(out.text)).toEqual({ error: 'Prompt is required.', hint: 'agents cloud run "<task>"' });
+  });
+
+  it('writes red text to stderr for humans (default, no json)', () => {
+    const out = formatDie('Boom');
+    expect(out.stream).toBe('stderr');
+    // chalk may be disabled in CI (no color) — assert the message survives either way.
+    expect(out.text).toContain('Boom');
+  });
+
+  it('appends the hint as a second stderr line for humans', () => {
+    const out = formatDie('Boom', { hint: 'try --help' });
+    expect(out.stream).toBe('stderr');
+    expect(out.text).toContain('Boom');
+    expect(out.text).toContain('try --help');
+    expect(out.text.split('\n')).toHaveLength(2);
+  });
+
+  it('omits an absent hint from the json payload (no null/undefined key)', () => {
+    const out = formatDie('nope', { json: true });
+    expect(out.text).not.toContain('hint');
   });
 });

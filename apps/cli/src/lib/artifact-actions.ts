@@ -1,6 +1,6 @@
 /**
  * Artifact action types and validation.
- * Ported from agents/halo/cli/pkg/config.
+ * Ported from the legacy agent CLI config helpers.
  *
  * Artifact actions map tool invocations to artifact labels, allowing agents to
  * trigger tools automatically when specific artifacts are produced.

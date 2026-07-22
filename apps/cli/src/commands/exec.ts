@@ -1229,7 +1229,7 @@ export function registerRunCommand(program: Command): void {
       }
 
       const [
-        { buildExecCommand, parseExecEnv, execAgent, runWithFallback, normalizeMode, resolveMode, headlessPlanStallCommand, nativeResume, resolveInteractive },
+        { buildExecCommand, parseExecEnv, execAgent, runWithFallback, normalizeMode, resolveMode, headlessPlanStallCommand, nativeResume, resolveInteractive, inferredInteractiveWithoutTty },
         { ALL_AGENT_IDS, ACCOUNT_INSPECTION_AGENT_IDS, agentLabel, supportsAccountInspection },
         { profileExists, resolveProfileForRun },
         { readAndResolveBundleEnv, describeBundle, assertRemoteBundleFlagsUnsupported, isHeadlessSecretsContext },
@@ -2270,6 +2270,23 @@ export function registerRunCommand(program: Command): void {
           console.error(chalk.red(`Loop failed for ${agent}: ${(err as Error).message}`));
           process.exit(1);
         }
+      }
+
+      // Agent footgun (RUSH-1829): a run with no prompt and no explicit
+      // --interactive resolves to interactive intent, but in a non-TTY shell
+      // (a headless agent, a pipe, CI) there is no terminal to host the REPL —
+      // the TUI attaches to dead stdin and hangs forever. Fail fast with the
+      // headless alternatives instead of launching a doomed interactive session.
+      if (inferredInteractiveWithoutTty(execOptions, isInteractiveTerminal())) {
+        // Tear down the workflow MCP config + subagents staged above before we
+        // exit — same as every sibling exit path; requireInteractiveSelection
+        // process.exits, so cleanup must happen first or it leaks.
+        cleanupWorkflowMcpConfig();
+        cleanupWorkflowSubagents();
+        requireInteractiveSelection(`Launching ${agent} interactively`, [
+          `agents run ${agent} "<your task>"   # headless: prints the agent's result`,
+          `agents run ${agent} --headless        # headless: reads the prompt from stdin`,
+        ]);
       }
 
       try {
