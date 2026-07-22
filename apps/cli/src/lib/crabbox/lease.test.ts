@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { buildBootstrapScript } from './lease.js';
+import { buildBootstrapScript, leaseAndRun } from './lease.js';
 import { LEASE_AGENT_MARKER } from './progress.js';
 import type { DetectedRuntime } from './runtimes.js';
 
@@ -177,5 +177,107 @@ describe('buildBootstrapScript', () => {
     });
     // The dangerous prompt is fully contained in a single-quoted argument.
     expect(script).toContain("'don'\\''t break; rm -rf /'");
+  });
+});
+
+describe('leaseAndRun reused crabbox boxes', () => {
+  const detected: DetectedRuntime[] = [
+    { id: 'claude', label: 'Claude Code', email: 'a@b.com', signedIn: true, credPath: null },
+  ];
+
+  function writeFakeCrabbox(tmpDir: string): { log: string; script: string; list: string } {
+    const bin = path.join(tmpDir, 'crabbox');
+    const log = path.join(tmpDir, 'crabbox.log');
+    const script = path.join(tmpDir, 'remote.sh');
+    const list = path.join(tmpDir, 'boxes.json');
+    fs.writeFileSync(
+      list,
+      JSON.stringify([
+        {
+          name: 'crabbox-warm-one',
+          status: 'running',
+          labels: {
+            slug: 'warm-one',
+            lease: 'cbx_warmone',
+            state: 'ready',
+            keep: 'true',
+            created_at: '1800000000',
+            expires_at: '1800003600',
+            last_touched_at: '1800000100',
+            idle_timeout_secs: '1800',
+          },
+          public_net: { ipv4: { ip: '203.0.113.10' } },
+        },
+      ]),
+      'utf-8',
+    );
+    fs.writeFileSync(
+      bin,
+      [
+        '#!/bin/sh',
+        'printf "%s\\n" "$*" >> "$CRABBOX_LOG"',
+        'case "$1" in',
+        '  --help) exit 0 ;;',
+        '  list) cat "$CRABBOX_LIST"; exit 0 ;;',
+        '  run) cat > "$CRABBOX_SCRIPT"; printf "%s\\nagent ok\\n" "' + LEASE_AGENT_MARKER + '"; exit 7 ;;',
+        '  warmup) echo "unexpected warmup" >&2; exit 55 ;;',
+        '  stop) echo "unexpected stop" >&2; exit 66 ;;',
+        '  *) echo "unexpected command: $*" >&2; exit 1 ;;',
+        'esac',
+      ].join('\n'),
+      'utf-8',
+    );
+    fs.chmodSync(bin, 0o755);
+    return { log, script, list };
+  }
+
+  it('finds an existing warm box, runs the bootstrap script, and never warms or stops it', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lease-reuse-'));
+    const fake = writeFakeCrabbox(tmpDir);
+    const oldEnv = {
+      PATH: process.env.PATH,
+      CRABBOX_LOG: process.env.CRABBOX_LOG,
+      CRABBOX_LIST: process.env.CRABBOX_LIST,
+      CRABBOX_SCRIPT: process.env.CRABBOX_SCRIPT,
+    };
+    process.env.PATH = `${tmpDir}${path.delimiter}${oldEnv.PATH ?? ''}`;
+    process.env.CRABBOX_LOG = fake.log;
+    process.env.CRABBOX_LIST = fake.list;
+    process.env.CRABBOX_SCRIPT = fake.script;
+    const phases: string[] = [];
+    let output = '';
+
+    try {
+      const result = await leaseAndRun({
+        agent: 'claude',
+        prompt: 'reuse the box',
+        runtimes: ['claude'],
+        detected,
+        reuseBox: 'warm-one',
+        onData: (chunk) => { output += chunk; },
+        onPhase: (phase) => { phases.push(phase.kind); },
+      });
+
+      expect(result.box.slug).toBe('warm-one');
+      expect(result.exitCode).toBe(7);
+      expect(result.toreDown).toBe(false);
+      expect(phases).toEqual(['reuse', 'ready']);
+      expect(output).toContain('agent ok');
+
+      const calls = fs.readFileSync(fake.log, 'utf-8').trim().split('\n');
+      expect(calls).toContain('list --json');
+      expect(calls).toContain('run --id warm-one --reclaim --script-stdin');
+      expect(calls.some((line) => line.startsWith('warmup'))).toBe(false);
+      expect(calls.some((line) => line.startsWith('stop'))).toBe(false);
+
+      const remoteScript = fs.readFileSync(fake.script, 'utf-8');
+      expect(remoteScript).toContain("agents run 'claude' 'reuse the box' --quiet");
+    } finally {
+      for (const [key, value] of Object.entries(oldEnv)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });

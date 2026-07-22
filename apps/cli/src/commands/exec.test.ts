@@ -52,8 +52,9 @@ describe('trailing-@ account picker request', () => {
       strategy: 'balanced',
       balanced: true,
       lease: true,
+      box: 'warm-one',
       device: 'yosemite-s0',
-    })).toEqual(['--resume', '--strategy', '--balanced', '--lease', '--host/--device']);
+    })).toEqual(['--resume', '--strategy', '--balanced', '--lease', '--box', '--host/--device']);
     expect(runAccountPickerConflicts({})).toEqual([]);
   });
 });
