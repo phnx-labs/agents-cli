@@ -114,12 +114,22 @@ export function notifyOverdue(jobs: OverdueJob[]): void {
         ['-e', `display notification "${safeBody}" with title "${safeTitle}"`],
         { detached: true, stdio: 'ignore' }
       );
+      // A missing binary surfaces as an async 'error' event, NOT a synchronous
+      // throw the try/catch would catch. Without a listener Node re-throws it as
+      // an uncaught exception and takes the whole daemon down. Swallow it — the
+      // notification is best-effort.
+      child.on('error', () => {});
       child.unref();
     } else if (platform === 'linux') {
       const child = spawn('notify-send', [title, body], {
         detached: true,
         stdio: 'ignore',
       });
+      // Headless Linux boxes have no `notify-send` (libnotify-bin); its ENOENT
+      // arrives as an async 'error' event, not a throw. Without this listener
+      // the daemon crashes on every overdue routine and systemd restart-loops it
+      // (which also tears down the browser IPC socket). Swallow — best-effort.
+      child.on('error', () => {});
       child.unref();
     }
   } catch {
