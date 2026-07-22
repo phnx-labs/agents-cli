@@ -1077,7 +1077,7 @@ export function registerTeamsCommands(program: Command): void {
     .option('--since <time>', 'Filter: teams active after this time (e.g. "2h", "7d", or ISO date)')
     .option('--until <time>', 'Filter: teams active before this time (e.g. "30d", or ISO date)')
     .option('-n, --limit <n>', 'Show at most this many teams (default: 20)', '20')
-    .option('--json', 'Output machine-readable JSON instead of formatted table')
+    .option('--json', 'Output machine-readable JSON instead of formatted table, or when stdout is piped')
     .action(async (query: string | undefined, opts: {
       agent?: string; status?: string; since?: string; until?: string;
       limit: string; json?: boolean;
@@ -1203,7 +1203,7 @@ export function registerTeamsCommands(program: Command): void {
     .option('--devices <list>', 'Pool of machines this team may run teammates on (comma-separated). Enables distributed auto-scheduling.')
     .option('--hosts <list>', 'Alias for --devices.')
     .option('--repo <urlOrPath>', 'How each remote (--device) teammate gets the code — ONE git URL/path for the whole team (existing checkout reused, else cloned). A team is single-repo; for work across repos, make one team per repo. Defaults to this checkout origin.')
-    .option('--json', 'Output machine-readable JSON')
+    .option('--json', 'Output machine-readable JSON, or when stdout is piped')
     .action(async (team: string, opts: { description?: string; enableWorktrees?: boolean; useWorktree?: string; devices?: string; hosts?: string; repo?: string; json?: boolean }) => {
       try {
         // --devices / --hosts are aliases; commander can't express a two-name
@@ -1298,7 +1298,7 @@ export function registerTeamsCommands(program: Command): void {
     .option('--repo <owner/repo>', 'GitHub repository (required for --cloud rush)')
     .option('--branch <name>', 'Target git branch for cloud dispatch')
     .option('--force', "Skip the advisory 'may not be signed in' / 'account throttled' warnings")
-    .option('--json', 'Output machine-readable JSON')
+    .option('--json', 'Output machine-readable JSON, or when stdout is piped')
     .action(async (team: string, teammate: string, task: string, opts: {
       name?: string; mode: string; effort: string; model?: string; env: string[];
       cwd?: string; worktree?: string; after?: string; json?: boolean;
@@ -1690,7 +1690,7 @@ export function registerTeamsCommands(program: Command): void {
     .option('-s, --since <iso>', 'Cursor from a previous status call; only show updates after this timestamp (enables efficient polling)')
     .option('--agent-id <id>', 'Show only this one teammate (by UUID or UUID prefix)')
     .option('-v, --verbose', 'Emit the full per-teammate detail (prompt, all file paths, all messages). Default is a compact summary.')
-    .option('--json', 'Output machine-readable JSON')
+    .option('--json', 'Output machine-readable JSON, or when stdout is piped')
     .action(async (team: string | undefined, opts: {
       filter: string; since?: string; agentId?: string; json?: boolean; verbose?: boolean;
     }) => {
@@ -1742,7 +1742,7 @@ export function registerTeamsCommands(program: Command): void {
   teams
     .command('active')
     .description('List every teammate running right now, across all teams (PID-alive check).')
-    .option('--json', 'Output machine-readable JSON')
+    .option('--json', 'Output machine-readable JSON, or when stdout is piped')
     .action(async (opts: { json?: boolean }) => {
       const mgr = mkManager();
       const running = await mgr.listRunning();
@@ -1793,7 +1793,7 @@ export function registerTeamsCommands(program: Command): void {
   // start — fire any staged teammates whose --after deps have all completed
   addHostOption(teams.command('start [team]'))
     .description('Launch any pending teammates whose --after dependencies are satisfied. Use --watch to keep draining the DAG as teammates finish and as new tasks are added mid-flight.')
-    .option('--json', 'Output machine-readable JSON')
+    .option('--json', 'Output machine-readable JSON, or when stdout is piped')
     .option('--watch', 'Keep running: poll every --interval seconds, fire new waves, exit when the DAG drains.')
     .option('--interval <seconds>', 'Seconds between waves in --watch mode (default 8)', '8')
     .option('--max-waves <n>', 'Safety cap on waves in --watch mode (default 1000)', '1000')
@@ -1991,7 +1991,7 @@ export function registerTeamsCommands(program: Command): void {
   // stop
   addHostOption(teams.command('stop [team] [teammate]'))
     .description('Stop a running teammate. Resume it later with `agents teams resume`. Cleans up worktree if no uncommitted changes.')
-    .option('--json', 'Output machine-readable JSON')
+    .option('--json', 'Output machine-readable JSON, or when stdout is piped')
     .action(async (team: string | undefined, ref: string | undefined, opts: { json?: boolean }) => {
       const mgr = mkManager();
 
@@ -2157,7 +2157,7 @@ export function registerTeamsCommands(program: Command): void {
   addHostOption(teams.command('message <team> <teammate> <message>'))
     .description('Send a follow-up message to a teammate. A running teammate is steered via its mailbox; a stopped one is resumed — re-entering its own session with the message.')
     .option('--from <who>', 'Label recorded as the sender of this message')
-    .option('--json', 'Output machine-readable JSON')
+    .option('--json', 'Output machine-readable JSON, or when stdout is piped')
     .action(async (team: string, ref: string, message: string, opts: { json?: boolean; from?: string }) => {
       await teamMessageAction(team, ref, message, opts);
     });
@@ -2165,7 +2165,7 @@ export function registerTeamsCommands(program: Command): void {
   addHostOption(teams.command('resume <team> <teammate> [message]'))
     .description("Resume a stopped teammate (completed/failed/stopped) by re-entering its own session with a message as the next user turn. If the teammate is still running, the message is steered via its mailbox instead.")
     .option('--from <who>', 'Label recorded as the sender of this message')
-    .option('--json', 'Output machine-readable JSON')
+    .option('--json', 'Output machine-readable JSON, or when stdout is piped')
     .action(async (team: string, ref: string, message: string | undefined, opts: { json?: boolean; from?: string }) => {
       await teamMessageAction(team, ref, message, opts);
     });
@@ -2176,7 +2176,7 @@ export function registerTeamsCommands(program: Command): void {
     .alias('rm')
     .description("Remove a stopped teammate's logs and metadata. Use 'stop' first to end a running teammate.")
     .option('--keep-logs', 'Keep their log files on disk (default: delete them)')
-    .option('--json', 'Output machine-readable JSON')
+    .option('--json', 'Output machine-readable JSON, or when stdout is piped')
     .action(async (team: string | undefined, ref: string | undefined, opts: { keepLogs?: boolean; json?: boolean }) => {
       const mgr = mkManager();
 
@@ -2243,7 +2243,7 @@ export function registerTeamsCommands(program: Command): void {
     .alias('d')
     .description('Disband the team. Stops all teammates cleanly and removes the team registry entry.')
     .option('--keep-logs', 'Keep all teammate logs on disk (default: delete them)')
-    .option('--json', 'Output machine-readable JSON')
+    .option('--json', 'Output machine-readable JSON, or when stdout is piped')
     .action(async (team: string | undefined, opts: { keepLogs?: boolean; json?: boolean }) => {
       const mgr = mkManager();
 
@@ -2392,7 +2392,7 @@ export function registerTeamsCommands(program: Command): void {
     .command('doctor')
     .alias('dr')
     .description('Check which agents are installed and available to join a team. Verifies CLI paths and shows an advisory sign-in hint.')
-    .option('--json', 'Output machine-readable JSON')
+    .option('--json', 'Output machine-readable JSON, or when stdout is piped')
     .action(async (opts: { json?: boolean }) => {
       const data = await collectTeamsDoctorData();
 
