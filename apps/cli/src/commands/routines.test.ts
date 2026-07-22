@@ -12,6 +12,8 @@ import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import { fileURLToPath } from 'url';
+import { buildRunsJson } from './routines.js';
+import type { RunMeta } from '../lib/routines.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -720,5 +722,32 @@ describe('routines run --host SELF follows the normal local eligibility path', (
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
+  });
+});
+
+describe('buildRunsJson', () => {
+  const meta = (runId: string, status: RunMeta['status'], startedAt: string): RunMeta => ({
+    jobName: 'test-job',
+    runId,
+    pid: null,
+    status,
+    startedAt,
+    completedAt: null,
+    exitCode: null,
+  });
+
+  it('projects each run to the same fields the human table row shows', () => {
+    const runs = [
+      meta('r1', 'completed', '2026-07-20T00:00:00Z'),
+      meta('r2', 'failed', '2026-07-21T00:00:00Z'),
+    ];
+    expect(buildRunsJson(runs)).toEqual([
+      { runId: 'r1', status: 'completed', startedAt: '2026-07-20T00:00:00Z' },
+      { runId: 'r2', status: 'failed', startedAt: '2026-07-21T00:00:00Z' },
+    ]);
+  });
+
+  it('returns an empty array for no runs', () => {
+    expect(buildRunsJson([])).toEqual([]);
   });
 });
