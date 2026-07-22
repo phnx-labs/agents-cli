@@ -40,7 +40,7 @@ import {
   checkJobDeviceEligibility,
   normalizeTriggerEvent,
 } from '../lib/routines.js';
-import type { JobConfig, JobTrigger, LinearTriggerEvent } from '../lib/routines.js';
+import type { JobConfig, JobTrigger, LinearTriggerEvent, RunMeta } from '../lib/routines.js';
 import { fireWebhookJobs, matchJobsToWebhook, type IncomingWebhook, type WebhookSource } from '../lib/triggers/webhook.js';
 import { getRoutinesDir } from '../lib/state.js';
 import { IS_WINDOWS } from '../lib/platform/index.js';
@@ -124,13 +124,16 @@ function parseRoutineTrigger(options: Record<string, unknown>): JobTrigger | und
 }
 
 /** Start or reload the background scheduler so newly-added jobs fire on time. */
-function ensureSchedulerRunning(): void {
+// `quiet` suppresses the human status lines (used by --json callers so the
+// scheduler-start banner never pollutes the machine-readable stdout stream).
+function ensureSchedulerRunning(opts: { quiet?: boolean } = {}): void {
   if (isDaemonRunning()) {
     signalDaemonReload();
-    console.log(chalk.gray('Scheduler reloaded'));
+    if (!opts.quiet) console.log(chalk.gray('Scheduler reloaded'));
     return;
   }
   const result = startDaemon();
+  if (opts.quiet) return;
   if (result.pid) {
     console.log(chalk.green(`Scheduler started (PID: ${result.pid}). It will run in the background and fire routines on schedule.`));
     console.log(chalk.gray(`Stop anytime with: agents routines stop`));
@@ -219,6 +222,15 @@ async function parseAndValidateDevices(raw: string): Promise<string[]> {
     process.exit(1);
   }
   return names;
+}
+
+/**
+ * Shape the `routines runs --json` payload from a job's run history. Pure — takes
+ * the already-read {@link RunMeta} list so it is unit-testable without disk I/O.
+ * Mirrors the human table row: run id, status, and start time.
+ */
+export function buildRunsJson(runs: RunMeta[]): Array<{ runId: string; status: RunMeta['status']; startedAt: string }> {
+  return runs.map((r) => ({ runId: r.runId, status: r.status, startedAt: r.startedAt }));
 }
 
 /** Register the `agents routines` command tree. */
@@ -461,6 +473,7 @@ export function registerRoutinesCommands(program: Command): void {
     .option('--end-at <iso>', 'Stop firing on or after this ISO 8601 timestamp (e.g., "2026-12-31T23:59:00Z"); routine auto-disables.')
     .option('--disabled', 'Create the routine but keep it paused (enable later with resume)')
     .option('--resume <sessionId>', 'At fire time, resume this existing session id (via `agents run <agent> --resume`) instead of starting fresh — the actual session reopens with full context and the prompt becomes its next turn. Powers self-scheduled wake-ups (e.g. /hibernate). Requires --agent claude or codex; runs un-sandboxed (the session store lives in the real home, not the job overlay).')
+    .option('--json', 'Emit machine-readable JSON')
     .action(async (nameOrPath: string | undefined, options) => {
       // Check if inline mode (has flags) or file mode
       const hasInlineFlags = options.schedule || options.agent || options.workflow || options.command || options.prompt || options.at || options.on;
@@ -468,14 +481,14 @@ export function registerRoutinesCommands(program: Command): void {
       if (hasInlineFlags) {
         // Inline mode: create job from flags
         if (!nameOrPath) {
-          console.log(chalk.red('Job name is required'));
-          console.log(chalk.gray('Usage: agents routines add <name> --schedule "..." --agent <agent> --prompt "..."'));
+          console.error(chalk.red('Job name is required'));
+          console.error(chalk.gray('Usage: agents routines add <name> --schedule "..." --agent <agent> --prompt "..."'));
           process.exit(1);
         }
 
         // Validate mutually exclusive --agent / --workflow / --command
         if ([options.agent, options.workflow, options.command].filter(Boolean).length > 1) {
-          console.log(chalk.red('--agent, --workflow, and --command are mutually exclusive; specify exactly one'));
+          console.error(chalk.red('--agent, --workflow, and --command are mutually exclusive; specify exactly one'));
           process.exit(1);
         }
 
@@ -485,7 +498,7 @@ export function registerRoutinesCommands(program: Command): void {
         try {
           trigger = parseRoutineTrigger(options);
         } catch (err) {
-          console.log(chalk.red((err as Error).message));
+          console.error(chalk.red((err as Error).message));
           process.exit(1);
         }
 
@@ -493,8 +506,8 @@ export function registerRoutinesCommands(program: Command): void {
         if (options.at) {
           const parsed = parseAtTime(options.at);
           if (!parsed) {
-            console.log(chalk.red(`Invalid --at format: ${options.at}`));
-            console.log(chalk.gray('Supported formats: "14:30" or "2026-02-24 09:00"'));
+            console.error(chalk.red(`Invalid --at format: ${options.at}`));
+            console.error(chalk.gray('Supported formats: "14:30" or "2026-02-24 09:00"'));
             process.exit(1);
           }
           schedule = parsed.schedule;
@@ -502,18 +515,18 @@ export function registerRoutinesCommands(program: Command): void {
         }
 
         if (!schedule && !trigger) {
-          console.log(chalk.red('Schedule or trigger is required (use --schedule, --at, or --on)'));
+          console.error(chalk.red('Schedule or trigger is required (use --schedule, --at, or --on)'));
           process.exit(1);
         }
 
         if (!options.agent && !options.workflow && !options.command) {
-          console.log(chalk.red('An agent, workflow, or command is required (use --agent, --workflow, or --command)'));
+          console.error(chalk.red('An agent, workflow, or command is required (use --agent, --workflow, or --command)'));
           process.exit(1);
         }
 
         // Command routines run a plain shell and take no prompt; agent/workflow routines require one.
         if (!options.command && !options.prompt) {
-          console.log(chalk.red('Prompt is required (use --prompt)'));
+          console.error(chalk.red('Prompt is required (use --prompt)'));
           process.exit(1);
         }
 
@@ -554,14 +567,19 @@ export function registerRoutinesCommands(program: Command): void {
 
         const errors = validateJob(config);
         if (errors.length > 0) {
-          console.log(chalk.red('Validation errors:'));
+          console.error(chalk.red('Validation errors:'));
           for (const err of errors) {
-            console.log(chalk.red(`  - ${err}`));
+            console.error(chalk.red(`  - ${err}`));
           }
           process.exit(1);
         }
 
         writeJob(config);
+        if (options.json) {
+          process.stdout.write(JSON.stringify({ ok: true, added: nameOrPath, job: config }) + '\n');
+          ensureSchedulerRunning({ quiet: true });
+          return;
+        }
         console.log(chalk.green(`Job '${nameOrPath}' added`));
         if (runOnce) {
           console.log(chalk.gray(`One-shot job scheduled for: ${options.at}`));
@@ -571,15 +589,15 @@ export function registerRoutinesCommands(program: Command): void {
       } else {
         // File mode: load from YAML file
         if (!nameOrPath) {
-          console.log(chalk.red('File path or job name with flags is required'));
-          console.log(chalk.gray('Usage: agents routines add <path-to-job.yml>'));
-          console.log(chalk.gray('   or: agents routines add <name> --schedule "..." --agent <agent> --prompt "..."'));
+          console.error(chalk.red('File path or job name with flags is required'));
+          console.error(chalk.gray('Usage: agents routines add <path-to-job.yml>'));
+          console.error(chalk.gray('   or: agents routines add <name> --schedule "..." --agent <agent> --prompt "..."'));
           process.exit(1);
         }
 
         const resolved = path.resolve(nameOrPath);
         if (!fs.existsSync(resolved)) {
-          console.log(chalk.red(`File not found: ${resolved}`));
+          console.error(chalk.red(`File not found: ${resolved}`));
           process.exit(1);
         }
 
@@ -588,7 +606,7 @@ export function registerRoutinesCommands(program: Command): void {
         try {
           parsed = yaml.parse(content);
         } catch (err) {
-          console.log(chalk.red(`Invalid YAML: ${(err as Error).message}`));
+          console.error(chalk.red(`Invalid YAML: ${(err as Error).message}`));
           process.exit(1);
         }
 
@@ -597,9 +615,9 @@ export function registerRoutinesCommands(program: Command): void {
 
         const errors = validateJob(parsed);
         if (errors.length > 0) {
-          console.log(chalk.red('Validation errors:'));
+          console.error(chalk.red('Validation errors:'));
           for (const err of errors) {
-            console.log(chalk.red(`  - ${err}`));
+            console.error(chalk.red(`  - ${err}`));
           }
           process.exit(1);
         }
@@ -620,6 +638,11 @@ export function registerRoutinesCommands(program: Command): void {
         }
 
         writeJob(config);
+        if (options.json) {
+          process.stdout.write(JSON.stringify({ ok: true, added: name, job: config }) + '\n');
+          ensureSchedulerRunning({ quiet: true });
+          return;
+        }
         console.log(chalk.green(`Job '${name}' added`));
 
         ensureSchedulerRunning();
@@ -730,13 +753,18 @@ export function registerRoutinesCommands(program: Command): void {
   routinesCmd
     .command('runs [name]')
     .description('See execution history: run IDs, completion status, and start times (up to last 10 runs)')
-    .action(async (name: string | undefined) => {
+    .option('--json', 'Emit machine-readable JSON')
+    .action(async (name: string | undefined, options: { json?: boolean }) => {
       if (!name) {
         name = await pickJob('Select job to view runs', undefined, ['agents routines runs <name>']) ?? undefined;
         if (!name) return;
       }
 
       const runs = listRuns(name);
+      if (options.json) {
+        process.stdout.write(JSON.stringify(buildRunsJson(runs.slice(-10))) + '\n');
+        return;
+      }
       if (runs.length === 0) {
         console.log(chalk.yellow(`No runs found for job '${name}'`));
         return;
@@ -756,7 +784,8 @@ export function registerRoutinesCommands(program: Command): void {
   routinesCmd
     .command('run [name]')
     .description('Execute a routine right now in the foreground. Ignores the schedule; useful for testing before enabling.')
-    .action(async (name: string | undefined) => {
+    .option('--json', 'Emit machine-readable JSON')
+    .action(async (name: string | undefined, options: { json?: boolean }) => {
       if (!name) {
         name = await pickJob('Select job to run', undefined, ['agents routines run <name>']) ?? undefined;
         if (!name) return;
@@ -770,29 +799,47 @@ export function registerRoutinesCommands(program: Command): void {
       // the trusted user layer.
       const job = readJob(name);
       if (!job) {
-        console.log(chalk.red(`Job '${name}' not found`));
+        if (options.json) {
+          process.stdout.write(JSON.stringify({ error: `Job '${name}' not found` }) + '\n');
+          process.exit(1);
+        }
+        console.error(chalk.red(`Job '${name}' not found`));
         process.exit(1);
       }
 
       const eligibility = checkJobDeviceEligibility(job);
       if (eligibility) {
-        console.log(chalk.red(eligibility.message));
-        console.log(chalk.gray(`  ${eligibility.suggestion}`));
+        if (options.json) {
+          process.stdout.write(JSON.stringify({ error: eligibility.message, hint: eligibility.suggestion }) + '\n');
+          process.exit(1);
+        }
+        console.error(chalk.red(eligibility.message));
+        console.error(chalk.gray(`  ${eligibility.suggestion}`));
         process.exit(1);
       }
 
       const runLabel = job.command ? 'command' : job.workflow ? `workflow: ${job.workflow}` : `agent: ${job.agent}`;
-      console.log(chalk.bold(`Running job '${name}' (${runLabel}, mode: ${job.mode})\n`));
-      const spinner = ora('Executing...').start();
+      // A spinner writes to stderr but its human framing is noise for a JSON consumer.
+      const spinner = options.json ? null : ora('Executing...').start();
+      if (!options.json) console.log(chalk.bold(`Running job '${name}' (${runLabel}, mode: ${job.mode})\n`));
 
       try {
         const result = await executeJob(job);
+        if (options.json) {
+          process.stdout.write(JSON.stringify({
+            ok: true,
+            job: name,
+            runId: result.meta.runId,
+            logDir: getRunDir(name, result.meta.runId),
+          }) + '\n');
+          return;
+        }
         if (result.meta.status === 'completed') {
-          spinner.succeed(`Job completed (exit code: ${result.meta.exitCode})`);
+          spinner!.succeed(`Job completed (exit code: ${result.meta.exitCode})`);
         } else if (result.meta.status === 'timeout') {
-          spinner.warn(`Job timed out after ${job.timeout}`);
+          spinner!.warn(`Job timed out after ${job.timeout}`);
         } else {
-          spinner.fail(`Job failed (exit code: ${result.meta.exitCode})`);
+          spinner!.fail(`Job failed (exit code: ${result.meta.exitCode})`);
         }
 
         console.log(chalk.gray(`  Run: ${result.meta.runId}`));
@@ -803,7 +850,11 @@ export function registerRoutinesCommands(program: Command): void {
           console.log(fs.readFileSync(result.reportPath, 'utf-8'));
         }
       } catch (err) {
-        spinner.fail('Execution failed');
+        if (options.json) {
+          process.stdout.write(JSON.stringify({ error: (err as Error).message }) + '\n');
+          process.exit(1);
+        }
+        spinner!.fail('Execution failed');
         console.error(chalk.red((err as Error).message));
         process.exit(1);
       }
