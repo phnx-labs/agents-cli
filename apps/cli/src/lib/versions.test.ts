@@ -530,6 +530,68 @@ describe('version resource sync path handling', () => {
     expect(result.skills).toEqual(['routines']);
   });
 
+  it('attributes permission groups and workflows to their real layers under resource profiles', () => {
+    const home = makeTempHome();
+    const project = path.join(home, 'repo');
+
+    const writePermissionGroup = (base: string, name: string): void => {
+      const dir = path.join(base, 'permissions', 'groups');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, `${name}.yaml`), 'allow: []\ndeny: []\n', 'utf-8');
+    };
+    const writeWorkflow = (base: string, name: string): void => {
+      const dir = path.join(base, 'workflows', name);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'WORKFLOW.md'), '---\ndescription: fixture\n---\nRun fixture.\n', 'utf-8');
+    };
+
+    const projectAgents = path.join(project, '.agents');
+    const userAgents = path.join(home, '.agents');
+    const systemAgents = path.join(home, '.agents', '.system');
+
+    writePermissionGroup(projectAgents, 'project-perm');
+    writePermissionGroup(userAgents, 'user-perm');
+    writePermissionGroup(systemAgents, 'system-perm');
+    writeWorkflow(projectAgents, 'project-flow');
+    writeWorkflow(userAgents, 'user-flow');
+    writeWorkflow(systemAgents, 'system-flow');
+
+    const versionsUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
+    const profilesUrl = pathToFileURL(path.resolve('src/lib/resource-profiles.ts')).href;
+    const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
+    const child = spawnSync(process.execPath, [tsxBin, '-e', `
+      import { getAvailableResources } from ${JSON.stringify(versionsUrl)};
+      import { setActiveResourceProfile, upsertResourceProfilePreset } from ${JSON.stringify(profilesUrl)};
+      const project = ${JSON.stringify(project)};
+
+      upsertResourceProfilePreset('exact', {
+        permissions: ['project:project-perm', 'user:user-perm', 'system:system-perm'],
+        workflows: ['project:project-flow', 'user:user-flow', 'system:system-flow'],
+      });
+      setActiveResourceProfile('exact');
+      const exact = getAvailableResources(project);
+
+      upsertResourceProfilePreset('wildcard', {
+        permissions: ['system:*'],
+        workflows: ['user:*'],
+      });
+      setActiveResourceProfile('wildcard');
+      const wildcard = getAvailableResources(project);
+
+      console.log(JSON.stringify({ exact, wildcard }));
+    `], { env: { ...process.env, HOME: home }, encoding: 'utf-8' });
+
+    expect(child.status, child.stderr).toBe(0);
+    const result = JSON.parse(child.stdout.trim()) as {
+      exact: { permissions: string[]; workflows: string[] };
+      wildcard: { permissions: string[]; workflows: string[] };
+    };
+    expect(result.exact.permissions).toEqual(['project-perm', 'user-perm', 'system-perm']);
+    expect(result.exact.workflows).toEqual(['project-flow', 'user-flow', 'system-flow']);
+    expect(result.wildcard.permissions).toEqual(['system-perm']);
+    expect(result.wildcard.workflows).toEqual(['user-flow']);
+  });
+
   it('does not sync project MCP servers under the default user-only MCP policy', async () => {
     const home = makeTempHome();
     const project = path.join(home, 'repo');

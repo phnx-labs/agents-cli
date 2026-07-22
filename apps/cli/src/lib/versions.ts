@@ -101,23 +101,31 @@ export interface AvailableResources {
   promptcuts: boolean;
 }
 
+type LayeredResourceBase = { source: string; base: string };
 type ResourceBase = { scope: 'project' | 'user'; base: string };
 type ScopedMcpResource = { name: string; scope: 'project' | 'user' };
 
-function getResourceBases(cwd: string): ResourceBase[] {
+function getLayeredResourceBases(cwd: string): LayeredResourceBase[] {
   const projectAgentsDir = getProjectAgentsDir(cwd);
   const userBase = getUserAgentsDir();
   const systemBase = getAgentsDir();
-  const resourceBases: ResourceBase[] = [];
+  const resourceBases: LayeredResourceBase[] = [];
   if (projectAgentsDir) {
-    resourceBases.push({ scope: 'project', base: projectAgentsDir });
+    resourceBases.push({ source: 'project', base: projectAgentsDir });
   }
-  resourceBases.push({ scope: 'user', base: userBase });
-  resourceBases.push({ scope: 'user', base: systemBase });
+  resourceBases.push({ source: 'user', base: userBase });
+  resourceBases.push({ source: 'system', base: systemBase });
   for (const extra of getEnabledExtraRepos()) {
-    resourceBases.push({ scope: 'user', base: extra.dir });
+    resourceBases.push({ source: extra.alias, base: extra.dir });
   }
   return resourceBases;
+}
+
+function getResourceBases(cwd: string): ResourceBase[] {
+  return getLayeredResourceBases(cwd).map(({ base, source }) => ({
+    base,
+    scope: source === 'project' ? 'project' : 'user',
+  }));
 }
 
 function getScopedMcpResources(cwd: string): ScopedMcpResource[] {
@@ -139,6 +147,38 @@ function getScopedMcpResources(cwd: string): ScopedMcpResource[] {
 
 function sourceMapFromResources(kind: 'commands' | 'skills' | 'hooks' | 'subagents', cwd: string): Map<string, string> {
   return new Map(listResources(kind, cwd).map(r => [r.name, r.source]));
+}
+
+function sourceMapFromLayeredDirectory(cwd: string, relativePath: string[], listNames: (dir: string) => string[]): Map<string, string> {
+  const resources = new Map<string, string>();
+  for (const { base, source } of getLayeredResourceBases(cwd)) {
+    const dir = path.join(base, ...relativePath);
+    if (!fs.existsSync(dir)) continue;
+    for (const name of listNames(dir)) {
+      if (!resources.has(name)) resources.set(name, source);
+    }
+  }
+  return resources;
+}
+
+function sourceMapFromPermissionGroups(cwd: string): Map<string, string> {
+  return sourceMapFromLayeredDirectory(
+    cwd,
+    ['permissions', 'groups'],
+    (dir) => fs.readdirSync(dir)
+      .filter(f => f.endsWith('.yaml') || f.endsWith('.yml'))
+      .map(f => f.replace(/\.(yaml|yml)$/, '')),
+  );
+}
+
+function sourceMapFromWorkflows(cwd: string): Map<string, string> {
+  return sourceMapFromLayeredDirectory(
+    cwd,
+    ['workflows'],
+    (dir) => fs.readdirSync(dir, { withFileTypes: true })
+      .filter(d => d.isDirectory() && fs.existsSync(path.join(dir, d.name, 'WORKFLOW.md')))
+      .map(d => d.name),
+  );
 }
 
 /**
@@ -250,18 +290,8 @@ export function getAvailableResources(cwd: string = process.cwd()): AvailableRes
   );
 
   // Permission groups (from permissions/groups/*.yaml)
-  const permissionNames = new Set<string>();
-  for (const { base } of resourceBases) {
-    const permsGroupsDir = path.join(base, 'permissions', 'groups');
-    if (!fs.existsSync(permsGroupsDir)) continue;
-    const names = fs.readdirSync(permsGroupsDir)
-      .filter(f => f.endsWith('.yaml') || f.endsWith('.yml'))
-      .map(f => f.replace(/\.(yaml|yml)$/, ''));
-    for (const name of names) {
-      permissionNames.add(name);
-    }
-  }
-  result.permissions = filterNamesForActiveResourceProfile('permissions', Array.from(permissionNames), new Map(Array.from(permissionNames).map(n => [n, 'system'])));
+  const permissionSources = sourceMapFromPermissionGroups(cwd);
+  result.permissions = filterNamesForActiveResourceProfile('permissions', Array.from(permissionSources.keys()), permissionSources);
 
   // Subagents (directories with AGENT.md)
   const subagentNames = new Set<string>();
@@ -278,18 +308,8 @@ export function getAvailableResources(cwd: string = process.cwd()): AvailableRes
   result.subagents = filterNamesForActiveResourceProfile('subagents', Array.from(subagentNames), sourceMapFromResources('subagents', cwd));
 
   // Workflows (directories with WORKFLOW.md)
-  const workflowNames = new Set<string>();
-  for (const { base } of resourceBases) {
-    const workflowsDir = path.join(base, 'workflows');
-    if (!fs.existsSync(workflowsDir)) continue;
-    const names = fs.readdirSync(workflowsDir, { withFileTypes: true })
-      .filter(d => d.isDirectory() && fs.existsSync(path.join(workflowsDir, d.name, 'WORKFLOW.md')))
-      .map(d => d.name);
-    for (const name of names) {
-      workflowNames.add(name);
-    }
-  }
-  result.workflows = filterNamesForActiveResourceProfile('workflows', Array.from(workflowNames), new Map(Array.from(workflowNames).map(n => [n, 'user'])));
+  const workflowSources = sourceMapFromWorkflows(cwd);
+  result.workflows = filterNamesForActiveResourceProfile('workflows', Array.from(workflowSources.keys()), workflowSources);
 
   // Plugins (directories with .claude-plugin/plugin.json)
   const allPlugins = discoverPlugins();
@@ -2301,9 +2321,10 @@ type SelectableKind = 'commands' | 'skills' | 'hooks' | 'subagents' | 'permissio
  * `expandPatterns` matches `source:*` patterns against. This is the single
  * source of truth for how each kind attributes its source layer:
  *   - commands/skills/hooks/subagents → real layer from `listResources`
- *   - permissions                     → always the system repo
+ *   - permissions                     → real layer from permissions/groups
  *   - mcp                             → project vs user scope preserved
- *   - plugins/workflows               → user repo
+ *   - plugins                         → user repo
+ *   - workflows                       → real layer from workflow directories
  * Both the persisted-pattern sync path and `buildRepoScopedSelection` use it
  * so the attribution can't drift between the two.
  */
@@ -2314,14 +2335,24 @@ function resourceSourceMap(kind: SelectableKind, cwd: string, available: Availab
     case 'hooks':
     case 'subagents':
       return new Map(listResources(kind, cwd).map(r => [r.name, r.source]));
-    case 'permissions':
-      return new Map(available.permissions.map(n => [n, 'system']));
+    case 'permissions': {
+      const sources = sourceMapFromPermissionGroups(cwd);
+      return new Map(available.permissions.flatMap((n) => {
+        const source = sources.get(n);
+        return source ? [[n, source] as [string, string]] : [];
+      }));
+    }
     case 'mcp':
       return new Map(getScopedMcpResources(cwd).map(r => [r.name, r.scope]));
     case 'plugins':
       return new Map(available.plugins.map(n => [n, 'user']));
-    case 'workflows':
-      return new Map(available.workflows.map(n => [n, 'user']));
+    case 'workflows': {
+      const sources = sourceMapFromWorkflows(cwd);
+      return new Map(available.workflows.flatMap((n) => {
+        const source = sources.get(n);
+        return source ? [[n, source] as [string, string]] : [];
+      }));
+    }
   }
 }
 
