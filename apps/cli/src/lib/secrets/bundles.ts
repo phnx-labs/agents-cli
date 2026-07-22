@@ -1089,7 +1089,12 @@ export function readAndResolveBundleEnv(
   // the broker ever holds. A file-backed bundle resolves via passphrase with no
   // prompt, so agentOnly must never block it — the broker never holds file
   // bundles, so the throw would fire unconditionally and break a legitimate read.
-  if (opts.agentOnly && backend === 'keychain') {
+  // When the keychain backend is test-overridden (setKeychainBackendForTest), the
+  // "real keychain" that agentOnly guards against does not exist — reads hit an
+  // in-memory store that never prompts Touch ID — so the guard must not fire, or
+  // headless-on-macOS test runs (the release-gated CI matrix) throw spuriously.
+  // Production never overrides the backend, so this is a no-op there.
+  if (opts.agentOnly && backend === 'keychain' && !isKeychainBackendOverridden()) {
     throw new Error(
       `Secrets bundle '${name}' is not unlocked in the secrets agent, and this is a ` +
       `headless/background process that must not raise a Touch ID prompt on the ` +
