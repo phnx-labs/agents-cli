@@ -1,0 +1,1 @@
+Added `agents hq floor --json`, a machine-readable Agents HQ bridge that joins live sessions, teams, feed blocks, room placement, ambient events, and command-backed floor actions for managing agent orgs from the HQ UI.

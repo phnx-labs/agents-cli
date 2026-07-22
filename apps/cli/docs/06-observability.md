@@ -120,6 +120,31 @@ External tools (dashboards, voice assistants, CI runners, monitoring) can read
 fleet state via three canonical `--json` sources. No direct DB access, no re-parsing
 of agent-specific formats, no auth to manage.
 
+## Agents HQ Floor (`agents hq floor`)
+
+`agents hq floor --json` is the management bridge for the Agents HQ office view.
+It joins the same live sources used elsewhere (`sessions --active`, `teams list`,
+team status, and feed blocks) into one floor-shaped payload:
+
+- `rooms` — team rooms first, then machine rooms for standalone agents.
+- `agents` — live occupants with mood (`working`, `waiting`, `blocked`,
+  `celebrating`, `idle`), machine/team placement, preview text, and action cards.
+- `ambientEvents` — animation triggers for needs-input, blocked, PR, active-team,
+  and idle-room scenes.
+- `actions` — runnable `agents` argv arrays for floor-level actions such as
+  creating a team room.
+
+Per-agent and per-room actions are command-backed instead of inventing a second
+write API. Agents HQ can render them as buttons and execute the returned argv:
+
+```bash
+agents hq floor --json | jq '.agents[0].actions'
+```
+
+Typical action commands are `agents message <mailbox> ... --surface hq`,
+`agents feed --kill <mailbox>`, `agents teams stop <team> <teammate>`,
+`agents sessions <id> --markdown`, and `agents teams add <team> ...`.
+
 ## Three Sources, One Fleet
 
 ```
