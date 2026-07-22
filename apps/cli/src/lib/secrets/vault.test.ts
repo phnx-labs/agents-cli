@@ -18,6 +18,7 @@ import {
   _clearVaultDataCacheForTest,
   _getVaultAgeOperationCountForTest,
   _resetVaultAgeOperationCountForTest,
+  _setVaultAgeHelperLaunchForTest,
   _setVaultPathForTest,
   cacheVaultKey,
   clearVaultKey,
@@ -60,6 +61,7 @@ let prevNoUsageTrack: string | undefined;
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-vault-test-'));
   _setVaultPathForTest(path.join(tmpDir, 'vault.age'));
+  _setVaultAgeHelperLaunchForTest({ command: 'bun', args: ['src/index.ts', '__vault-age-helper'] });
   _resetFileStoreForTest({ fileDir: path.join(tmpDir, 'file-store') });
   const memory = makeMemoryBackend();
   keychainStore = memory.store;
@@ -71,6 +73,7 @@ beforeEach(() => {
 afterEach(() => {
   clearVaultKey();
   setKeychainBackendForTest(restoreBackend);
+  _setVaultAgeHelperLaunchForTest(null);
   _setVaultPathForTest(null);
   _resetFileStoreForTest();
   fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -93,6 +96,31 @@ describe('vault encryption', () => {
 
     const opened = decrypt(key, blob);
     expect(opened.bundles.prod.keys.API_KEY).toBe('secret-value');
+  });
+
+  it('does not depend on process.execPath being an eval-capable runtime', () => {
+    const originalExecPath = process.execPath;
+    Object.defineProperty(process, 'execPath', {
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: path.join(tmpDir, 'compiled-agents-binary'),
+    });
+    try {
+      const blob = encrypt({ passphrase: 'pw' }, {
+        v: 1,
+        bundles: { synced: { keys: { API_KEY: 'from-vault' } } },
+      });
+
+      expect(decrypt({ passphrase: 'pw' }, blob).bundles.synced.keys.API_KEY).toBe('from-vault');
+    } finally {
+      Object.defineProperty(process, 'execPath', {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: originalExecPath,
+      });
+    }
   });
 
   it('rejects the wrong password', () => {

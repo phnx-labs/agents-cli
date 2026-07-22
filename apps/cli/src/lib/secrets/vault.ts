@@ -1,9 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
-import { fileURLToPath } from 'url';
 import { armor } from 'age-encryption';
 import { getUserAgentsDir } from '../state.js';
+import { getCliLaunch } from '../cli-entry.js';
 import {
   deleteKeychainToken,
   getKeychainToken,
@@ -45,11 +45,12 @@ interface VaultDataCache {
 const VAULT_FILE_NAME = 'vault.age';
 const VAULT_SESSION_ITEM = 'agents-cli.vault.session';
 export const VAULT_SESSION_TTL_MS = 8 * 60 * 60 * 1000;
-export const VAULT_SCRYPT_WORK_FACTOR = 16;
+export const VAULT_SCRYPT_WORK_FACTOR = 18;
 
 let overrideVaultPath: string | null = null;
 let vaultDataCache: VaultDataCache | null = null;
 let ageOperationCountForTest = 0;
+let ageHelperLaunchForTest: { command: string; args: string[] } | null = null;
 
 export function vaultPath(): string {
   return overrideVaultPath ?? process.env.AGENTS_VAULT_PATH ?? path.join(getUserAgentsDir(), VAULT_FILE_NAME);
@@ -74,6 +75,10 @@ export function _resetVaultAgeOperationCountForTest(): void {
 
 export function _getVaultAgeOperationCountForTest(): number {
   return ageOperationCountForTest;
+}
+
+export function _setVaultAgeHelperLaunchForTest(launch: { command: string; args: string[] } | null): void {
+  ageHelperLaunchForTest = launch;
 }
 
 function emptyVault(): VaultData {
@@ -116,34 +121,6 @@ function parseVault(raw: string): VaultData {
   return { v: 1, bundles };
 }
 
-const AGE_HELPER = `
-import { Decrypter, Encrypter, armor } from 'age-encryption';
-const chunks = [];
-for await (const chunk of process.stdin) chunks.push(chunk);
-const input = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-try {
-  if (input.action === 'encrypt') {
-    const encrypter = new Encrypter();
-    if (input.scryptWorkFactor !== undefined) {
-      encrypter.setScryptWorkFactor(input.scryptWorkFactor);
-    }
-    encrypter.setPassphrase(input.passphrase);
-    const ciphertext = await encrypter.encrypt(input.plaintext);
-    process.stdout.write(armor.encode(ciphertext));
-  } else if (input.action === 'decrypt') {
-    const decrypter = new Decrypter();
-    decrypter.addPassphrase(input.passphrase);
-    const plaintext = await decrypter.decrypt(armor.decode(input.blob), 'text');
-    process.stdout.write(plaintext);
-  } else {
-    throw new Error('unknown action');
-  }
-} catch (err) {
-  console.error(err instanceof Error ? err.message : String(err));
-  process.exit(1);
-}
-`;
-
 interface AgeInput {
   action: 'encrypt' | 'decrypt';
   passphrase: string;
@@ -154,15 +131,15 @@ interface AgeInput {
 
 function runAgeSync(input: AgeInput): string {
   ageOperationCountForTest++;
-  const child = spawnSync(process.execPath, ['-e', AGE_HELPER], {
-    cwd: path.dirname(fileURLToPath(import.meta.url)),
+  const launch = ageHelperLaunchForTest ?? getCliLaunch(['__vault-age-helper']);
+  const child = spawnSync(launch.command, launch.args, {
     input: JSON.stringify(input),
     encoding: 'utf-8',
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   if (child.status !== 0) {
     const msg = child.stderr.trim();
-    throw new Error(msg || 'age operation failed');
+    throw new Error(msg || child.error?.message || 'age operation failed');
   }
   return child.stdout;
 }

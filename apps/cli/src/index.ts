@@ -32,6 +32,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageJsonPath = path.join(__dirname, '..', 'package.json');
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
 const VERSION = packageJson.version;
+
+if (process.argv[2] === '__vault-age-helper') {
+  const { runVaultAgeHelperCli } = await import('./lib/secrets/vault-age-helper.js');
+  await runVaultAgeHelperCli();
+  process.exit(process.exitCode ?? 0);
+}
+
 import {
   NPM_PACKAGE_NAME,
   deriveGlobalPrefix,
