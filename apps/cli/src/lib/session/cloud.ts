@@ -1,10 +1,10 @@
 /**
  * Rush Cloud session source.
  *
- * Fetches cloud-captured sessions from halo/proxy (api.prix.dev) and caches
+ * Fetches cloud-captured sessions from the cloud proxy (api.prix.dev) and caches
  * them locally so the existing filesystem-based parse pipeline works unchanged.
  *
- * Endpoints consumed (implemented in halo/proxy/src/cloud-runs.ts):
+ * Endpoints consumed by the cloud proxy:
  *   GET /api/v1/cloud-runs                  → list executions
  *   GET /api/v1/cloud-runs/:id              → get one (used for meta)
  *   GET /api/v1/cloud-runs/:id/session.jsonl → raw captured jsonl

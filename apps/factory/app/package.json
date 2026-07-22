@@ -4,6 +4,11 @@
   "private": true,
   "description": "Private install-only Mac app for debugging agents work streams",
   "author": "Muqsit Nawaz <dev@muqsitnawaz.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/phnx-labs/agents-cli",
+    "directory": "apps/factory/app"
+  },
   "main": "dist/main.js",
   "scripts": {
     "build:ui": "cd ../ui && bunx vite build --config vite.standalone.config.ts",

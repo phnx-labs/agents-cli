@@ -568,6 +568,31 @@ export interface VersionResources {
   mcp?:         ResourcePattern[];
 }
 
+/** Resource-kind selectors controlled by top-level resource profiles. */
+export interface ResourceProfilePreset {
+  description?: string;
+  commands?: ResourcePattern[];
+  skills?: ResourcePattern[];
+  hooks?: ResourcePattern[];
+  subagents?: ResourcePattern[];
+  plugins?: ResourcePattern[];
+  workflows?: ResourcePattern[];
+  permissions?: ResourcePattern[];
+  mcp?: ResourcePattern[];
+  /** Rule preset name to compose while this profile is active. */
+  rules?: string;
+  /** Alias for rules, accepted so YAML can mirror VersionResources naming. */
+  rulesPreset?: string;
+  /** Secrets bundle names, or "*" for every bundle. */
+  secrets?: string[];
+}
+
+/** Top-level profiles/presets that switch the resolved resource view. */
+export interface ResourceProfilesConfig {
+  active?: string;
+  presets?: Record<string, ResourceProfilePreset>;
+}
+
 /** A userConfig field declared in a plugin manifest. */
 export interface PluginUserConfigField {
   key: string;
@@ -743,6 +768,12 @@ export interface Meta {
     enabled?: BetaFeatureName[];
   };
   registries?: Record<RegistryType, Record<string, RegistryConfig>>;
+  /**
+   * Top-level resource profiles. Activating one filters the resolved resource
+   * set across commands, skills, hooks, rules, MCP, permissions, and secrets.
+   * Model-provider run profiles are separate YAML files under profiles/.
+   */
+  profiles?: ResourceProfilesConfig;
   // Per-version resource tracking
   versions?: Partial<Record<AgentId, Record<string, VersionResources>>>;
   // Git remote source URL (when ~/.agents/.system/ is a git repo)

@@ -1,13 +1,33 @@
 // Cloudflare provisioning for `agents share setup` — plain `fetch` against the CF
-// REST API (the repo has no CF wrapper). Creates the R2 bucket, uploads the Worker
-// (with an R2 binding + the WRITE_TOKEN as an inline secret), enables the free
-// `*.workers.dev` subdomain, and — when the token owns the zone — maps a custom domain.
+// REST API (the repo has no CF wrapper). Creates the R2 bucket, configures its
+// lifecycle, uploads the Worker (with an R2 binding), sets the WRITE_TOKEN secret,
+// enables the free `*.workers.dev` subdomain, and — when the token owns the zone —
+// maps a custom domain.
 
 const CF_API = 'https://api.cloudflare.com/client/v4';
+export const SHARE_LIFECYCLE_RULE_ID = 'agents-share-expire-objects';
+export const SHARE_LIFECYCLE_RETENTION_DAYS = 366;
+const SECONDS_PER_DAY = 86400;
 
 interface CfError {
   code?: number;
   message?: string;
+}
+
+interface R2LifecycleRule {
+  id: string;
+  enabled: boolean;
+  conditions: { prefix: string };
+  deleteObjectsTransition?: {
+    condition: { type: 'Age'; maxAge: number } | { type: 'Date'; date: string };
+  };
+  abortMultipartUploadsTransition?: {
+    condition?: { type: 'Age'; maxAge: number };
+  };
+  storageClassTransitions?: Array<{
+    condition: { type: 'Age'; maxAge: number } | { type: 'Date'; date: string };
+    storageClass: 'InfrequentAccess';
+  }>;
 }
 
 export interface CloudflareRequest {
@@ -82,14 +102,52 @@ export async function createBucket(
   }
 }
 
-/** Upload the module Worker with an R2 binding (`BUCKET`) + inline `WRITE_TOKEN` secret. */
+export function buildShareLifecycleRule(days: number = SHARE_LIFECYCLE_RETENTION_DAYS): R2LifecycleRule {
+  return {
+    id: SHARE_LIFECYCLE_RULE_ID,
+    enabled: true,
+    conditions: { prefix: '' },
+    deleteObjectsTransition: {
+      condition: { type: 'Age', maxAge: days * SECONDS_PER_DAY },
+    },
+  };
+}
+
+export function mergeShareLifecycleRule(
+  existing: R2LifecycleRule[] = [],
+  rule: R2LifecycleRule = buildShareLifecycleRule(),
+): R2LifecycleRule[] {
+  return [...existing.filter((r) => r.id !== SHARE_LIFECYCLE_RULE_ID), rule];
+}
+
+/** Ensure the share bucket self-cleans old objects. Exact per-link expiry is enforced by the Worker. */
+export async function configureBucketLifecycle(
+  apiToken: string,
+  accountId: string,
+  bucketName: string,
+  opts: ProvisionOptions = {},
+): Promise<void> {
+  const request = opts.request ?? defaultCloudflareRequester;
+  const lifecycle = await request<{ rules?: R2LifecycleRule[] }>({
+    apiToken,
+    method: 'GET',
+    pathname: `/accounts/${accountId}/r2/buckets/${bucketName}/lifecycle`,
+  });
+  await request({
+    apiToken,
+    method: 'PUT',
+    pathname: `/accounts/${accountId}/r2/buckets/${bucketName}/lifecycle`,
+    body: { rules: mergeShareLifecycleRule(lifecycle.rules ?? []) },
+  });
+}
+
+/** Upload the module Worker with an R2 binding (`BUCKET`). Secrets are set via the Workers Secrets API. */
 export async function deployWorker(
   apiToken: string,
   accountId: string,
   workerName: string,
   script: string,
   bucketName: string,
-  writeToken: string,
   opts: ProvisionOptions = {},
 ): Promise<void> {
   const request = opts.request ?? defaultCloudflareRequester;
@@ -98,7 +156,6 @@ export async function deployWorker(
     compatibility_date: '2024-11-06',
     bindings: [
       { type: 'r2_bucket', name: 'BUCKET', bucket_name: bucketName },
-      { type: 'secret_text', name: 'WRITE_TOKEN', text: writeToken },
     ],
   };
   const form = new FormData();
@@ -113,6 +170,23 @@ export async function deployWorker(
     method: 'PUT',
     pathname: `/accounts/${accountId}/workers/scripts/${workerName}`,
     form,
+  });
+}
+
+/** Add/update the WRITE_TOKEN binding using Cloudflare's Workers Secrets API. */
+export async function setWorkerSecret(
+  apiToken: string,
+  accountId: string,
+  workerName: string,
+  writeToken: string,
+  opts: ProvisionOptions = {},
+): Promise<void> {
+  const request = opts.request ?? defaultCloudflareRequester;
+  await request({
+    apiToken,
+    method: 'PUT',
+    pathname: `/accounts/${accountId}/workers/scripts/${workerName}/secrets`,
+    body: { name: 'WRITE_TOKEN', text: writeToken, type: 'secret_text' },
   });
 }
 

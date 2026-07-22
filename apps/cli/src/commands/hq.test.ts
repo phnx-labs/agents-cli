@@ -14,7 +14,43 @@ const PACKAGE_VERSION = (JSON.parse(
 let testHome = '';
 let ambientAgent: ChildProcess | undefined;
 let ambientBinDir = '';
-const ambientProcessIt = process.platform === 'win32' ? it.skip : it;
+
+/**
+ * The ambient-process test seeds a process by symlinking `/bin/sleep` as
+ * `codex` and asserts it shows up in `ps -o comm=` (both in the test's own
+ * `waitForProcess` gate and in the CLI's floor snapshot). That only works where
+ * `ps comm=` reports the bare invocation *basename*. On macOS `ps -o comm=`
+ * reports the full symlink path (e.g. `/tmp/xxx/codex`), not `codex`, so the
+ * test's `waitForProcess` gate can never match and the process can't be
+ * observed by bare name. (The prod detector in session/active.ts basenames
+ * `comm` before matching, so prod is unaffected — this is a test-harness
+ * assumption, not a prod bug.) Probe once at load time and skip when the
+ * assumption doesn't hold, so the test still runs on Linux CI.
+ */
+function ambientProcessObservableByBareName(): boolean {
+  if (process.platform === 'win32') return false;
+  let dir = '';
+  try {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-hq-probe-'));
+    const link = path.join(dir, 'codex');
+    fs.symlinkSync('/bin/sleep', link);
+    const child = spawn(link, ['5'], { stdio: 'ignore' });
+    if (!child.pid) return false;
+    try {
+      const r = spawnSync('ps', ['-p', String(child.pid), '-o', 'comm='], { encoding: 'utf-8' });
+      return r.stdout.trim() === 'codex';
+    } finally {
+      child.kill();
+    }
+  } catch {
+    return false;
+  } finally {
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const ambientObservable = ambientProcessObservableByBareName();
+const ambientProcessIt = ambientObservable ? it : it.skip;
 
 afterEach(() => {
   if (ambientAgent?.pid && !ambientAgent.killed) ambientAgent.kill();
@@ -109,7 +145,13 @@ describe('hq command', () => {
     ]);
   });
 
-  ambientProcessIt('keeps the real CLI parser hermetic with ambient agent processes', async () => {
+  ambientProcessIt('keeps the real CLI parser hermetic with ambient agent processes', async ({ skip }) => {
+    // Belt-and-suspenders: the release matrix has shown the it/it.skip selector
+    // failing to keep a test off a runner, so also skip explicitly at runtime.
+    if (!ambientObservable) {
+      skip();
+      return;
+    }
     const pid = await startAmbientAgentProcess();
     const result = runHqFloor();
 

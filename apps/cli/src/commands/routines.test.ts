@@ -12,6 +12,8 @@ import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import { fileURLToPath } from 'url';
+import { buildRunsJson } from './routines.js';
+import type { RunMeta } from '../lib/routines.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -325,6 +327,47 @@ describe('routines add --on aliases', () => {
   });
 });
 
+describe('routines add --json', () => {
+  it('emits only the created routine id and status on stdout', async () => {
+    const home = makeHome({ registry });
+    let daemon: ReturnType<typeof startIsolatedDaemon> | undefined;
+    let pid: number | null = null;
+    try {
+      daemon = startIsolatedDaemon(home);
+      pid = await daemon.pidPromise;
+      expect(pid).not.toBeNull();
+
+      const res = run(home, [
+        'add', 'json-job',
+        '--schedule', '0 3 * * *',
+        '--command', 'printf ok',
+        '--json',
+      ]);
+      expect(res.status).toBe(0);
+
+      const parsed = JSON.parse(res.stdout.trim());
+      expect(parsed).toMatchObject({
+        jobId: 'json-job',
+        name: 'json-job',
+        status: 'added',
+        enabled: true,
+        schedule: '0 3 * * *',
+      });
+      expect(parsed.trigger).toBeNull();
+      expect(res.stdout.trim().split('\n')).toHaveLength(1);
+      expect(res.stderr).not.toContain('Scheduler reloaded');
+
+      const doc = readRoutineYaml(home, 'json-job');
+      expect(doc).not.toBeNull();
+      expect(doc!.command).toBe('printf ok');
+    } finally {
+      if (daemon) await stopIsolatedDaemon(daemon.child);
+      if (typeof pid === 'number') expect(isProcessAlive(pid)).toBe(false);
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('routines list --json has devices+runsHere, no device', () => {
   it('includes devices array and runsHere, excludes singular device key', () => {
     const job = { ...baseJob, devices: ['yosemite-s0', 'mac-mini'] };
@@ -416,6 +459,57 @@ describe('routines list --json has devices+runsHere, no device', () => {
       expect(entry.lastStatus).toBe('completed');
       expect(entry.exitCode).toBe(0);
       expect(entry.failureReason).toBeNull();
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('routines runs --json', () => {
+  it('emits run ids and statuses for the requested routine', () => {
+    const home = makeHome({ jobs: [baseJob], registry });
+    try {
+      writeRunMeta(home, 'test-job', '2026-07-21T10-00-00-000Z', {
+        jobName: 'test-job',
+        runId: '2026-07-21T10-00-00-000Z',
+        agent: 'claude',
+        pid: null,
+        status: 'completed',
+        startedAt: '2026-07-21T10:00:00.000Z',
+        completedAt: '2026-07-21T10:00:05.000Z',
+        exitCode: 0,
+      });
+      writeRunMeta(home, 'test-job', '2026-07-21T11-00-00-000Z', {
+        jobName: 'test-job',
+        runId: '2026-07-21T11-00-00-000Z',
+        agent: 'claude',
+        pid: null,
+        status: 'failed',
+        startedAt: '2026-07-21T11:00:00.000Z',
+        completedAt: '2026-07-21T11:00:05.000Z',
+        exitCode: 1,
+        errorMessage: 'command exited with code 1',
+      });
+
+      const res = run(home, ['runs', 'test-job', '--json']);
+      expect(res.status).toBe(0);
+
+      const parsed = JSON.parse(res.stdout.trim());
+      expect(parsed.jobId).toBe('test-job');
+      expect(parsed.runs).toHaveLength(2);
+      expect(parsed.runs[0]).toMatchObject({
+        jobId: 'test-job',
+        runId: '2026-07-21T10-00-00-000Z',
+        status: 'completed',
+        exitCode: 0,
+      });
+      expect(parsed.runs[1]).toMatchObject({
+        jobId: 'test-job',
+        runId: '2026-07-21T11-00-00-000Z',
+        status: 'failed',
+        exitCode: 1,
+        errorMessage: 'command exited with code 1',
+      });
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
@@ -720,5 +814,97 @@ describe('routines run --host SELF follows the normal local eligibility path', (
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
+  });
+});
+
+describe('routines run --json', () => {
+  it('emits the real run id and status for a command routine', () => {
+    const home = makeHome({
+      jobs: [{
+        name: 'command-job',
+        schedule: '0 3 * * *',
+        command: 'printf ok',
+        mode: 'auto',
+        effort: 'auto',
+        timeout: '10m',
+        enabled: true,
+        prompt: '',
+      }],
+      registry,
+    });
+    try {
+      const res = run(home, ['run', 'command-job', '--json']);
+      expect(res.status).toBe(0);
+
+      const parsed = JSON.parse(res.stdout.trim());
+      expect(parsed).toMatchObject({
+        jobId: 'command-job',
+        jobName: 'command-job',
+        status: 'completed',
+        exitCode: 0,
+        errorMessage: null,
+      });
+      expect(typeof parsed.runId).toBe('string');
+      expect(parsed.runId.length).toBeGreaterThan(0);
+      expect(parsed.logPath).toContain(parsed.runId);
+      expect(parsed.reportPath).toBeNull();
+
+      const runsRes = run(home, ['runs', 'command-job', '--json']);
+      expect(runsRes.status).toBe(0);
+      const runs = JSON.parse(runsRes.stdout.trim());
+      expect(runs.runs).toHaveLength(1);
+      expect(runs.runs[0]).toMatchObject({
+        runId: parsed.runId,
+        status: 'completed',
+        exitCode: 0,
+      });
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('buildRunsJson', () => {
+  const meta = (runId: string, status: RunMeta['status'], startedAt: string): RunMeta => ({
+    jobName: 'test-job',
+    runId,
+    pid: null,
+    status,
+    startedAt,
+    completedAt: null,
+    exitCode: null,
+  });
+
+  it('projects each run to the rich JSON fields used by routines runs --json', () => {
+    const runs = [
+      meta('r1', 'completed', '2026-07-20T00:00:00Z'),
+      meta('r2', 'failed', '2026-07-21T00:00:00Z'),
+    ];
+    expect(buildRunsJson(runs)).toEqual([
+      {
+        jobId: 'test-job',
+        jobName: 'test-job',
+        runId: 'r1',
+        status: 'completed',
+        startedAt: '2026-07-20T00:00:00Z',
+        completedAt: null,
+        exitCode: null,
+        errorMessage: null,
+      },
+      {
+        jobId: 'test-job',
+        jobName: 'test-job',
+        runId: 'r2',
+        status: 'failed',
+        startedAt: '2026-07-21T00:00:00Z',
+        completedAt: null,
+        exitCode: null,
+        errorMessage: null,
+      },
+    ]);
+  });
+
+  it('returns an empty array for no runs', () => {
+    expect(buildRunsJson([])).toEqual([]);
   });
 });
