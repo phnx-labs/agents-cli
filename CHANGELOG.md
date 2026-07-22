@@ -11,6 +11,19 @@
   view as `agents devices list`, and `agents plugins add <spec>` aliases
   `agents plugins install <spec>`. Source: `apps/cli/src/commands/resources.ts`,
   `apps/cli/src/commands/ssh.ts`, `apps/cli/src/commands/plugins.ts`.
+- **Factory: fleet-aware Launch Matrix — spawn a Quick Launch agent on a specific
+  device or balanced across the fleet.** Each Quick Launch slot (⌘⇧0–9) gains a
+  **Run on** target: this Mac (default), a registered device (offloaded over SSH via
+  `agents run --host`), or ⚖ Balanced — auto-pick the least-busy online device, with
+  an optional pool restriction. The collapsed row shows the target (`↗ <device>` /
+  `⚖ balanced`). New optional chord **⌘⌥⇧0–9** fires a slot but prompts for the host
+  once. Every non-shell agent (Claude, Codex, Gemini, OpenCode, Cursor, Antigravity,
+  Grok, Kimi, Droid) also gains palette commands mirroring the version triad on a
+  host axis: **(Pick Host)**, **(Pick Version & Host)**, **(Auto Host)**, plus generic
+  `New Agent (Pick Host)` / `(Pick Version & Host)`. Balanced picks by fewest running
+  agents, excluding the local interactive machine. Source: `apps/factory/src/core/settings.ts`,
+  `apps/factory/src/core/launchHost.ts`, `apps/factory/src/vscode/extension.ts`,
+  `apps/factory/ui/settings/components/panel/LaunchMatrix.tsx`, `apps/factory/package.json`.
 
 ### Security
 
