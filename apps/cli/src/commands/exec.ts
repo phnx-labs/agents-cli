@@ -2278,6 +2278,11 @@ export function registerRunCommand(program: Command): void {
       // the TUI attaches to dead stdin and hangs forever. Fail fast with the
       // headless alternatives instead of launching a doomed interactive session.
       if (inferredInteractiveWithoutTty(execOptions, isInteractiveTerminal())) {
+        // Tear down the workflow MCP config + subagents staged above before we
+        // exit — same as every sibling exit path; requireInteractiveSelection
+        // process.exits, so cleanup must happen first or it leaks.
+        cleanupWorkflowMcpConfig();
+        cleanupWorkflowSubagents();
         requireInteractiveSelection(`Launching ${agent} interactively`, [
           `agents run ${agent} "<your task>"   # headless: prints the agent's result`,
           `agents run ${agent} --headless        # headless: reads the prompt from stdin`,
