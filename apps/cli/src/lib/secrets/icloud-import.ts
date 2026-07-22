@@ -154,7 +154,7 @@ export function importSyncedBundle(
   } else {
     bundle = {
       name: candidate.name,
-      backend: opts.backend === 'file' ? 'file' : undefined,
+      backend: opts.backend === 'keychain' ? undefined : opts.backend,
       vars: {},
     };
   }

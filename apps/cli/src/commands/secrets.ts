@@ -95,6 +95,7 @@ import {
   importSyncedBundle,
   type SyncedBundleCandidate,
 } from '../lib/secrets/icloud-import.js';
+import { getVaultSession, vaultExists } from '../lib/secrets/vault.js';
 import { registerSecretsSyncCommands } from './secrets-sync.js';
 import { registerSecretsMigrateAclCommand } from './secrets-migrate.js';
 import { registerSecretsImportKeyringCommand } from './secrets-import.js';
@@ -254,7 +255,7 @@ export function parseImportSource(opts: {
  */
 async function importFromICloud(
   bundleName: string | undefined,
-  opts: { force?: boolean; allPlaintext?: boolean; backend?: 'file'; purge?: boolean },
+  opts: { force?: boolean; allPlaintext?: boolean; backend?: 'file' | 'vault'; purge?: boolean },
 ): Promise<void> {
   if (process.platform !== 'darwin') {
     throw new Error('--from icloud reads the macOS iCloud Keychain and is only available on macOS.');
@@ -584,8 +585,12 @@ function renderBundleRow(b: SecretsBundle, held?: Map<string, number>, cols = te
     `${padVisible(created, 9)} ` +
     `${padVisible(updated, 9)} ` +
     `${padVisible(used, 7)}`;
-  // Mark file-backed bundles so `list` distinguishes them from keychain ones.
-  const tag = b.backend === 'file' ? chalk.magenta('[file] ') : '';
+  // Mark non-keychain bundles so `list` distinguishes storage at a glance.
+  const tag = b.backend === 'file'
+    ? chalk.magenta('[file] ')
+    : b.backend === 'vault'
+      ? chalk.blue('[synced] ')
+      : '';
   // Cap the free-form description to whatever space is left on the line so a long
   // description can't push the row to 200+ chars and wrap into a smear.
   const budget = cols - stringWidth(head) - 1 - stringWidth(tag);
@@ -600,7 +605,11 @@ function renderBundleRow(b: SecretsBundle, held?: Map<string, number>, cols = te
 function renderBundleCard(b: SecretsBundle, held: Map<string, number> | undefined, cols: number): string {
   const keys = describeBundle(b).length;
   const used = b.last_used ? relativeAge(b.last_used) : (b.created_at ? 'never' : '?');
-  const tag = b.backend === 'file' ? chalk.magenta(' [file]') : '';
+  const tag = b.backend === 'file'
+    ? chalk.magenta(' [file]')
+    : b.backend === 'vault'
+      ? chalk.blue(' [synced]')
+      : '';
   const meta = chalk.gray(`${keys} key${keys === 1 ? '' : 's'} · `) + renderPolicyCol(b, held) + chalk.gray(` · used ${used}`);
   const line1 = `${chalk.cyan(b.name)}  ${meta}${tag}`;
   if (!b.description) return line1;
@@ -730,19 +739,19 @@ function countExpiringSoon(meta: Record<string, VarMeta> | undefined): number {
  * keychain-backed bundle to `file` — shared by every `import` source so the
  * guard can't drift between them.
  */
-function resolveImportBundle(name: string, backendOpt: string | undefined): SecretsBundle {
-  const requestedBackend = parseBackendOpt(backendOpt);
+function resolveImportBundle(name: string, backendOpt: string | undefined, synced = false): SecretsBundle {
+  const requestedBackend = synced ? 'vault' : parseBackendOpt(backendOpt);
   if (bundleExists(name)) {
     const bundle = readBundle(name);
-    if (requestedBackend === 'file' && bundle.backend !== 'file') {
+    if (requestedBackend !== 'keychain' && bundle.backend !== requestedBackend) {
       throw new Error(
-        `Bundle '${name}' already exists with a keychain backend; ` +
-        `--backend file cannot change it. Delete it first to recreate as file-backed.`
+        `Bundle '${name}' already exists with a different backend; ` +
+        `delete it first to recreate it as ${requestedBackend === 'vault' ? 'synced' : `${requestedBackend}-backed`}.`
       );
     }
     return bundle;
   }
-  return { name, backend: requestedBackend === 'file' ? 'file' : undefined, vars: {} };
+  return { name, backend: requestedBackend === 'keychain' ? undefined : requestedBackend, vars: {} };
 }
 
 /**
@@ -930,6 +939,7 @@ export function registerSecretsCommands(program: Command): void {
         if (bundle.description) console.log(chalk.gray(safePrint(bundle.description)));
         if (bundle.allow_exec) console.log(chalk.yellow('allow_exec: true'));
         if (bundle.backend === 'file') console.log(chalk.gray('backend: file (passphrase-encrypted; reads need AGENTS_SECRETS_PASSPHRASE, no Touch ID)'));
+        if (bundle.backend === 'vault') console.log(chalk.gray('storage: synced (age-encrypted ~/.agents/vault.age; needs agents login)'));
         if (bundlePolicy(bundle) === 'never') {
           console.log(chalk.red.bold('policy: never — NO biometry ACL; reads are silent (no Touch ID, no user-presence check). Automation-only.'));
         } else {
@@ -952,15 +962,18 @@ export function registerSecretsCommands(program: Command): void {
           console.error(chalk.red('--reveal in a non-TTY requires --plaintext.'));
           process.exit(1);
         }
-        // Batch every keychain read into one helper call so --reveal pops
-        // Touch ID once for the whole bundle instead of once per key.
+        // Batch every backend read into one helper call where supported, so
+        // keychain --reveal pops Touch ID once and synced/file bundles use
+        // their declared storage.
         const revealedValues = new Map<string, string>();
         if (reveal) {
           const items = entries
             .filter((e) => e.kind === 'keychain')
             .map((e) => secretsKeychainItem(bundle.name, e.detail));
           try {
-            const fetched = getKeychainTokens(items);
+            const fetched = bundle.backend
+              ? new Map(items.map((item) => [item, bundleItemStore(bundle.backend).get(item)]))
+              : getKeychainTokens(items);
             for (const [item, value] of fetched) revealedValues.set(item, value);
           } catch {
             // Fall through to masked output on cancellation / batch failure.
@@ -989,7 +1002,7 @@ export function registerSecretsCommands(program: Command): void {
         for (const e of entries) {
           if (e.kind === 'keychain') {
             const item = secretsKeychainItem(bundle.name, e.detail);
-            const stored = hasKeychainToken(item);
+            const stored = bundleItemStore(bundle.backend).has(item);
             const marker = stored ? chalk.green('stored') : chalk.red('missing');
             let valueCol = `[keychain:${e.detail}] ${marker}`;
             if (reveal && revealedValues.has(item)) {
@@ -1044,7 +1057,7 @@ export function registerSecretsCommands(program: Command): void {
       // Ungated like the raw path (it IS the automation primitive); the
       // `secrets.get` audit event is emitted inside readAndResolveBundleEnv.
       try {
-        if (!bundleExists(item)) {
+        if (!bundleExists(item) && !(vaultExists() && !getVaultSession().loggedIn)) {
           console.error(chalk.red(`Secrets bundle '${item}' not found.`));
           process.exit(1);
         }
@@ -1102,9 +1115,10 @@ export function registerSecretsCommands(program: Command): void {
     .option('--policy <policy>', 'prompt policy: daily (default, ask once a week), always (ask every time), or never (silent, NO biometry ACL — needs --i-understand)')
     .addOption(new Option('--tier <policy>', 'deprecated alias for --policy').hideHelp())
     .option('--i-understand', 'Confirm creating a "never"-policy bundle (no biometry ACL) without an interactive prompt')
-    .option('--backend <backend>', 'storage backend: keychain (default) or file (passphrase-encrypted, headless-readable)', 'keychain')
+    .option('--backend <backend>', 'storage backend: keychain (default) or file (passphrase-encrypted)', 'keychain')
+    .option('--synced', 'Store this bundle in the age-encrypted synced secrets file for user-managed cross-machine file sync')
     .option('--force', 'Overwrite an existing bundle')
-    .action(async (name: string | undefined, opts: { description?: string; allowExec?: boolean; policy?: string; tier?: string; iUnderstand?: boolean; backend?: string; force?: boolean }) => {
+    .action(async (name: string | undefined, opts: { description?: string; allowExec?: boolean; policy?: string; tier?: string; iUnderstand?: boolean; backend?: string; synced?: boolean; force?: boolean }) => {
       try {
         const resolvedName = name ?? (await promptBundleName());
         validateBundleName(resolvedName);
@@ -1112,7 +1126,7 @@ export function registerSecretsCommands(program: Command): void {
         // inherits the configured default (`daily`) instead of being pinned.
         const policyOpt = opts.policy ?? opts.tier;
         const policy = policyOpt ? parsePolicyOpt(policyOpt) : undefined;
-        const backend = parseBackendOpt(opts.backend);
+        const backend = opts.synced ? 'vault' : parseBackendOpt(opts.backend);
         if (bundleExists(resolvedName) && !opts.force) {
           console.error(chalk.red(`Bundle '${resolvedName}' already exists. Use --force to overwrite.`));
           process.exit(1);
@@ -1128,7 +1142,7 @@ export function registerSecretsCommands(program: Command): void {
           name: resolvedName,
           description: opts.description,
           allow_exec: opts.allowExec,
-          backend: backend === 'file' ? 'file' : undefined,
+          backend: backend === 'keychain' ? undefined : backend,
           policy,
           vars: {},
         };
@@ -1138,13 +1152,20 @@ export function registerSecretsCommands(program: Command): void {
           : bundlePolicy(bundle) === 'always'
             ? 'policy: always ask'
             : 'policy: never (NO biometry ACL)';
-        const tags = [policyTag, backend === 'file' ? 'backend: file' : null].filter(Boolean);
+        const tags = [
+          policyTag,
+          backend === 'file' ? 'backend: file' : null,
+          backend === 'vault' ? 'synced' : null,
+        ].filter(Boolean);
         console.log(chalk.green(`Bundle '${resolvedName}' created (${tags.join(', ')}).`));
         if (bundlePolicy(bundle) === 'never') {
           console.log(chalk.red('Stored without biometry protection — reads are silent. Automation-only; rotate anything sensitive out of it.'));
         }
         if (backend === 'file') {
           console.log(chalk.gray('File-backed: items are AES-256-GCM encrypted under AGENTS_SECRETS_PASSPHRASE (no Touch ID).'));
+        }
+        if (backend === 'vault') {
+          console.log(chalk.gray('Synced: items are encrypted in ~/.agents/vault.age. Copy that file with your sync tool of choice.'));
         }
         console.log(chalk.gray(`Try: agents secrets add ${resolvedName} MY_KEY`));
       } catch (err) {
@@ -1285,7 +1306,11 @@ export function registerSecretsCommands(program: Command): void {
         bundle.vars[resolvedKey] = keychainRef(resolvedKey);
         applyMeta();
         writeBundle(bundle);
-        const where = bundle.backend === 'file' ? 'encrypted file store' : 'keychain';
+        const where = bundle.backend === 'file'
+          ? 'encrypted file store'
+          : bundle.backend === 'vault'
+            ? 'synced secrets file'
+            : 'keychain';
         console.log(chalk.green(`${resolvedBundleName}.${resolvedKey} stored in ${where} (${item}).`));
       } catch (err) {
         if (isPromptCancelled(err)) return;
@@ -1349,7 +1374,8 @@ Examples:
           clearMeta: opts.clearMeta,
           meta: metaPatch,
         });
-        console.log(chalk.green(`${resolvedBundleName}.${resolvedKey} rotated in keychain.`));
+        const where = bundle.backend === 'vault' ? 'synced secrets file' : bundle.backend === 'file' ? 'encrypted file store' : 'keychain';
+        console.log(chalk.green(`${resolvedBundleName}.${resolvedKey} rotated in ${where}.`));
       } catch (err) {
         if (isPromptCancelled(err)) return;
         console.error(chalk.red((err as Error).message));
@@ -1397,7 +1423,11 @@ Examples:
           const item = secretsKeychainItem(resolvedBundleName, raw.slice('keychain:'.length));
           const removed = bundleItemStore(bundle.backend).delete(item);
           if (removed) {
-            const where = bundle.backend === 'file' ? 'encrypted file item' : 'keychain item';
+            const where = bundle.backend === 'file'
+              ? 'encrypted file item'
+              : bundle.backend === 'vault'
+                ? 'synced secrets item'
+                : 'keychain item';
             console.log(chalk.green(`Removed ${resolvedBundleName}.${resolvedKey} and purged ${where}.`));
             return;
           }
@@ -1497,7 +1527,8 @@ Examples:
     .addOption(new Option('--from-1password', 'deprecated alias for --from 1password:<vault>').hideHelp())
     .addOption(new Option('--vault <name>', 'deprecated: name the vault in --from 1password:<vault>').hideHelp())
     .option('--all-plaintext', 'Store every imported value as a literal in the bundle metadata (skip keychain item creation)')
-    .option('--backend <backend>', 'When creating the bundle: keychain (default) or file (passphrase-encrypted, headless-readable)', 'keychain')
+    .option('--backend <backend>', 'When creating the bundle: keychain (default) or file (passphrase-encrypted)', 'keychain')
+    .option('--synced', 'When creating the bundle, store it in the age-encrypted synced secrets file')
     .option('--force', 'Overwrite an existing key in the bundle')
     .option('--purge', 'With --from icloud: delete the iCloud copies after a successful import (iCloud propagates the deletion to your other devices)')
     .option('--from-file <path>', 'Import from an AES-256-GCM encrypted offline bundle file (needs AGENTS_SECRETS_PASSPHRASE; symmetric counterpart of export --to-file)')
@@ -1509,6 +1540,7 @@ Examples:
       vault?: string;
       allPlaintext?: boolean;
       backend?: string;
+      synced?: boolean;
       force?: boolean;
       purge?: boolean;
       fromFile?: string;
@@ -1537,7 +1569,7 @@ Examples:
           }
           const env = importBundleFromFile(opts.fromFile, passphrase);
           const resolvedBundleName = bundleName ?? (await pickBundleName('import into'));
-          const bundle = resolveImportBundle(resolvedBundleName, opts.backend);
+          const bundle = resolveImportBundle(resolvedBundleName, opts.backend, opts.synced);
           const { added, skipped } = applyEnvToBundle(bundle, env, opts);
           console.log(chalk.green(`Imported ${added} key(s) from file${skipped ? `, skipped ${skipped} (already set, pass --force)` : ''}.`));
           return;
@@ -1551,7 +1583,7 @@ Examples:
           const resolvedBundleName = bundleName ?? (await pickBundleName('import into'));
           const target = await resolveSshTarget(opts.host);
           const env = await remoteResolveEnv(target, resolvedBundleName, { osLookupName: opts.host });
-          const bundle = resolveImportBundle(resolvedBundleName, opts.backend);
+          const bundle = resolveImportBundle(resolvedBundleName, opts.backend, opts.synced);
           const { added, skipped } = applyEnvToBundle(bundle, env, opts);
           console.log(chalk.green(`Imported ${added} key(s) from ${opts.host}${skipped ? `, skipped ${skipped} (already set, pass --force)` : ''}.`));
           return;
@@ -1564,13 +1596,13 @@ Examples:
         if (opts.from1password) {
           console.log(chalk.yellow('--from-1password is deprecated; use --from 1password:<vault>.'));
         }
-        const requestedBackend = parseBackendOpt(opts.backend);
+        const requestedBackend = opts.synced ? 'vault' : parseBackendOpt(opts.backend);
 
         if (source.kind === 'icloud') {
           await importFromICloud(bundleName, {
             force: opts.force,
             allPlaintext: opts.allPlaintext,
-            backend: requestedBackend === 'file' ? 'file' : undefined,
+            backend: requestedBackend === 'keychain' ? undefined : requestedBackend,
             purge: opts.purge,
           });
           return;
@@ -1581,7 +1613,7 @@ Examples:
         // to downgrade keychain -> file) or creates it with the requested backend
         // so a single `import --backend file` works (what `export --host ...
         // --remote-backend file` drives on the remote).
-        const bundle = resolveImportBundle(resolvedBundleName, opts.backend);
+        const bundle = resolveImportBundle(resolvedBundleName, opts.backend, opts.synced);
 
         if (source.kind === '1password') {
           assertOpAvailable();
@@ -2337,7 +2369,7 @@ async function confirmNeverPolicyInteractive(bundleName: string): Promise<boolea
 function parseBackendOpt(raw: string | undefined): SecretsBackend {
   const v = (raw ?? 'keychain').toLowerCase();
   if (v === 'keychain' || v === 'file') return v;
-  console.error(chalk.red(`Invalid --backend '${raw}'. Use 'keychain' or 'file'.`));
+  console.error(chalk.red(`Invalid --backend '${raw}'. Use 'keychain' or 'file'. For cross-machine file sync, pass --synced.`));
   process.exit(1);
 }
 

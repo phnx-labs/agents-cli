@@ -13,9 +13,12 @@
  *    SSH). The item-name scheme is identical, so the only difference is where
  *    bytes land. A file-backed bundle is discovered by the presence of its
  *    metadata item in the file store.
+ *  - `vault`: a single age-encrypted ~/.agents/vault.age file unlocked by
+ *    `agents login`; intended for user-managed cross-machine file sync.
  *
- * Cross-machine sync is handled by src/lib/secrets/sync.ts via an explicit
- * encrypted export/import flow; the bundle layer is sync-agnostic.
+ * Server-backed cross-machine sync is handled by src/lib/secrets/sync.ts via
+ * an explicit encrypted export/import flow; the bundle layer also supports the
+ * local vault backend for user-managed file sync.
  */
 
 import * as fs from 'fs';
@@ -39,6 +42,15 @@ import {
   type SecretRef,
 } from './index.js';
 import { fileStore } from './filestore.js';
+import {
+  getVaultSession,
+  vaultDeleteItem,
+  vaultExists,
+  vaultGetItem,
+  vaultHasItem,
+  vaultListItems,
+  vaultSetItem,
+} from './vault.js';
 import { emit } from '../events.js';
 import { readMeta } from '../state.js';
 import { agentGetSync, agentAutoLoadSync, agentGetMetaSync, agentAutoLoadMetaSync, agentEvictSync, secretsAgentAutoEnabled, secretsHoldMs } from './agent.js';
@@ -46,7 +58,7 @@ import { loadSession, deleteSession } from './session-store.js';
 import { createHash } from 'node:crypto';
 
 /** Which store carries a bundle's items. */
-export type SecretsBackend = 'keychain' | 'file';
+export type SecretsBackend = 'keychain' | 'file' | 'vault';
 
 /**
  * Uniform read/write surface over a secret store, so the bundle functions
@@ -100,8 +112,30 @@ const fileItemStore: ItemStore = {
   list: (prefix) => fileStore.list(prefix),
 };
 
+const vaultStore: ItemStore = {
+  has: vaultHasItem,
+  get: vaultGetItem,
+  getBatch: (items) => {
+    const out = new Map<string, string>();
+    for (const item of items) {
+      try {
+        out.set(item, vaultGetItem(item));
+      } catch {
+        // Missing/undecryptable item — absent from the map, mirroring
+        // getKeychainTokens (caller decides whether that's an error).
+      }
+    }
+    return out;
+  },
+  set: (item, value) => vaultSetItem(item, value),
+  delete: vaultDeleteItem,
+  list: vaultListItems,
+};
+
 function itemStore(backend: SecretsBackend): ItemStore {
-  return backend === 'file' ? fileItemStore : keychainStore;
+  if (backend === 'file') return fileItemStore;
+  if (backend === 'vault') return vaultStore;
+  return keychainStore;
 }
 
 /**
@@ -111,7 +145,17 @@ function itemStore(backend: SecretsBackend): ItemStore {
  * "read metadata to learn where metadata lives." Absent ⇒ keychain.
  */
 export function bundleBackend(name: string): SecretsBackend {
-  return fileStore.has(BUNDLE_META_PREFIX + name) ? 'file' : 'keychain';
+  const item = BUNDLE_META_PREFIX + name;
+  if (fileStore.has(item)) return 'file';
+  if (vaultExists() && getVaultSession().loggedIn) {
+    try {
+      if (vaultHasItem(item)) return 'vault';
+    } catch {
+      // A vault problem should not hide a keychain/file bundle that already
+      // resolved above; exact vault reads surface the decrypt/login error.
+    }
+  }
+  return 'keychain';
 }
 
 /**
@@ -130,6 +174,11 @@ function assertFileBackendUsable(name: string): void {
     `(no biometry prompt is available headlessly). Set it for this run, e.g.\n` +
     `  AGENTS_SECRETS_PASSPHRASE=… agents secrets exec ${name} -- <command>`
   );
+}
+
+function assertVaultBackendUsable(name: string): void {
+  if (getVaultSession().loggedIn) return;
+  throw new Error(`Synced bundle '${name}' needs an active login. Run: agents login`);
 }
 
 /** Allowed values for a secret's `type` metadata field. */
@@ -318,6 +367,7 @@ export function readBundle(name: string): SecretsBundle {
   validateBundleName(name);
   const backend = bundleBackend(name);
   if (backend === 'file') assertFileBackendUsable(name);
+  if (backend === 'vault') assertVaultBackendUsable(name);
   let json: string;
   try {
     json = itemStore(backend).get(bundleMetaItem(name));
@@ -328,6 +378,9 @@ export function readBundle(name: string): SecretsBundle {
       throw new Error(
         `Bundle '${name}': failed to decrypt — wrong AGENTS_SECRETS_PASSPHRASE or tampered file store. (${(err as Error).message})`,
       );
+    }
+    if (vaultExists() && !getVaultSession().loggedIn) {
+      throw new Error(`Synced secrets are locked. Run: agents login`);
     }
     throw new Error(`Secrets bundle '${name}' not found.`);
   }
@@ -347,9 +400,9 @@ export function readBundle(name: string): SecretsBundle {
     name,
     description: parsed.description,
     allow_exec: Boolean(parsed.allow_exec),
-    // Absent ⇒ keychain; only set when file-backed so a keychain bundle
+    // Absent ⇒ keychain; only set when non-keychain so a keychain bundle
     // round-trips byte-for-byte.
-    backend: backend === 'file' ? 'file' : undefined,
+    backend: backend === 'keychain' ? undefined : backend,
     // Legacy wire key: the policy is persisted under `tier` (`session` == `daily`).
     policy: parsePolicy((parsed as { tier?: unknown }).tier),
     vars: parsed.vars && typeof parsed.vars === 'object' ? parsed.vars : {},
@@ -433,6 +486,7 @@ export function writeBundle(bundle: SecretsBundle, opts: WriteBundleOptions = {}
   validateBundleName(bundle.name);
   const backend: SecretsBackend = bundle.backend ?? 'keychain';
   if (backend === 'file') assertFileBackendUsable(bundle.name);
+  if (backend === 'vault') assertVaultBackendUsable(bundle.name);
   for (const key of Object.keys(bundle.vars)) {
     validateEnvKey(key);
   }
@@ -463,7 +517,7 @@ export function writeBundle(bundle: SecretsBundle, opts: WriteBundleOptions = {}
     name: bundle.name,
     description: bundle.description,
     allow_exec: bundle.allow_exec ? true : undefined,
-    backend: backend === 'file' ? 'file' : undefined,
+    backend: backend === 'keychain' ? undefined : backend,
     // Wire format: persist the policy under the legacy `tier` token so older CLI
     // versions on other synced machines keep reading it — `daily`⇒`session`,
     // explicit `always`⇒`biometry`, `never`⇒`none`. An absent policy omits the
@@ -536,7 +590,7 @@ function parseBundleMeta(nameHint: string | undefined, json: string, backend: Se
     name,
     description: parsed.description,
     allow_exec: Boolean(parsed.allow_exec),
-    backend: backend === 'file' ? 'file' : undefined,
+    backend: backend === 'keychain' ? undefined : backend,
     // Legacy wire key: the policy is persisted under `tier` (`session` == `daily`).
     policy: parsePolicy((parsed as { tier?: unknown }).tier),
     vars: parsed.vars && typeof parsed.vars === 'object' ? parsed.vars : {},
@@ -650,6 +704,28 @@ export function listBundles(): SecretsBundle[] {
     }
     const bundle = parseBundleMeta(name, json, 'file');
     if (bundle) out.push(bundle);
+  }
+
+  if (getVaultSession().loggedIn && vaultExists()) {
+    let vaultServices: string[] = [];
+    try {
+      vaultServices = vaultListItems(BUNDLE_META_PREFIX);
+    } catch {
+      vaultServices = [];
+    }
+    for (const service of vaultServices) {
+      const name = service.slice(BUNDLE_META_PREFIX.length);
+      if (!BUNDLE_NAME_PATTERN.test(name)) continue;
+      let json: string;
+      try {
+        json = vaultStore.get(bundleMetaItem(name));
+      } catch {
+        out.push({ name, backend: 'vault', vars: {} });
+        continue;
+      }
+      const bundle = parseBundleMeta(name, json, 'vault');
+      if (bundle) out.push(bundle);
+    }
   }
 
   return out.sort((a, b) => a.name.localeCompare(b.name));
@@ -1096,6 +1172,7 @@ export function readAndResolveBundleEnv(
   }
 
   if (backend === 'file') assertFileBackendUsable(name);
+  if (backend === 'vault') assertVaultBackendUsable(name);
   const store = itemStore(backend);
 
   const metaItem = bundleMetaItem(name);
@@ -1129,6 +1206,9 @@ export function readAndResolveBundleEnv(
         `Bundle '${name}': failed to decrypt — wrong AGENTS_SECRETS_PASSPHRASE or tampered file store.`,
       );
     }
+    if (vaultExists() && !getVaultSession().loggedIn) {
+      throw new Error(`Synced secrets are locked. Run: agents login`);
+    }
     throw new Error(`Secrets bundle '${name}' not found.`);
   }
   let parsed: Partial<SecretsBundle>;
@@ -1144,7 +1224,7 @@ export function readAndResolveBundleEnv(
     name,
     description: parsed.description,
     allow_exec: Boolean(parsed.allow_exec),
-    backend: backend === 'file' ? 'file' : undefined,
+    backend: backend === 'keychain' ? undefined : backend,
     // Legacy wire key: the policy is persisted under `tier` (`session` == `daily`).
     policy: parsePolicy((parsed as { tier?: unknown }).tier),
     vars: parsed.vars && typeof parsed.vars === 'object' ? parsed.vars : {},

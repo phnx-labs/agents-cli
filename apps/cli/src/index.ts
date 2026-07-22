@@ -107,6 +107,7 @@ import {
   loadStatus,
   loadProfiles,
   loadSecrets,
+  loadLogin,
   loadWallet,
   loadHelper,
   loadMenubar,
@@ -845,6 +846,7 @@ async function registerAllEagerCommands(): Promise<void> {
   registerExecAliasCommand(program);
   await reg(loadProfiles);
   await reg(loadSecrets);
+  await reg(loadLogin);
   await reg(loadWallet);
   await reg(loadHelper);
   await reg(loadMenubar);
