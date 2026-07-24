@@ -86,6 +86,60 @@ describe.skipIf(process.platform === 'win32')('runSelfHeal — shims/shadowing/p
   });
 });
 
+describe.skipIf(process.platform === 'win32')('runSelfHeal — isolated-only installs', () => {
+  let home: string;
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'self-heal-isolated-'));
+    const versionDir = path.join(home, '.agents', '.history', 'versions', 'codex', '0.145.0');
+    fs.mkdirSync(path.join(versionDir, 'home'), { recursive: true });
+    const binPath = path.join(versionDir, 'node_modules', '.bin', 'codex');
+    fs.mkdirSync(path.dirname(binPath), { recursive: true });
+    fs.writeFileSync(binPath, '#!/bin/sh\nexit 0\n');
+    fs.chmodSync(binPath, 0o755);
+    fs.writeFileSync(path.join(versionDir, '.isolated'), `${new Date().toISOString()}\n`);
+  });
+  afterEach(() => { fs.rmSync(home, { recursive: true, force: true }); });
+
+  it('keeps isolated versions explicit and does not install bare shims or PATH entries', () => {
+    const modulePath = path.resolve(process.cwd(), 'src/lib/self-heal/registry.ts');
+    const statePath = path.resolve(process.cwd(), 'src/lib/state.ts');
+    const script = `
+      import { runSelfHeal } from ${JSON.stringify(modulePath)};
+      import { getShimsDir } from ${JSON.stringify(statePath)};
+      import fs from 'node:fs';
+      import path from 'node:path';
+      const report = await runSelfHeal({ checks: ['shims', 'path'], mode: 'safe' });
+      const shims = getShimsDir();
+      console.log(JSON.stringify({
+        report,
+        bareShim: fs.existsSync(path.join(shims, 'codex')),
+        versionedAlias: fs.existsSync(path.join(shims, 'codex@0.145.0')),
+        bashrc: fs.existsSync(${JSON.stringify(path.join(home, '.bashrc'))})
+          ? fs.readFileSync(${JSON.stringify(path.join(home, '.bashrc'))}, 'utf-8')
+          : '',
+      }));
+    `;
+    const out = execFileSync('bun', ['-e', script], {
+      cwd: process.cwd(),
+      env: { ...process.env, HOME: home, SHELL: '/bin/bash' },
+      stdio: ['ignore', 'pipe', 'inherit'],
+    }).toString('utf-8');
+    const result = JSON.parse(out) as {
+      report: Report;
+      bareShim: boolean;
+      versionedAlias: boolean;
+      bashrc: string;
+    };
+    const checks = byId(result.report);
+
+    expect(result.bareShim).toBe(false);
+    expect(result.versionedAlias).toBe(true);
+    expect(result.bashrc).not.toContain('.agents/.cache/shims');
+    expect(checks.path.fixed).toEqual([]);
+  });
+});
+
 interface CheckR { fixed: string[]; needsAttention: string[]; ok: boolean }
 interface Report { checks: { id: string; result: CheckR | null; error?: string }[] }
 

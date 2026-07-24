@@ -2517,6 +2517,27 @@ export function listAgentsWithInstalledVersions(): AgentId[] {
     .filter((agent) => fs.readdirSync(path.join(versionsDir, agent), { withFileTypes: true }).some((entry) => entry.isDirectory()));
 }
 
+function isInstalledVersionIsolated(agent: AgentId, version: string): boolean {
+  return fs.existsSync(path.join(getVersionsDir(), agent, version, '.isolated'));
+}
+
+export function listAgentsWithNonIsolatedInstalledVersions(): AgentId[] {
+  const versionsDir = getVersionsDir();
+  if (!fs.existsSync(versionsDir)) {
+    return [];
+  }
+
+  const entries = fs.readdirSync(versionsDir, { withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isDirectory() && AGENTS[entry.name as AgentId])
+    .map((entry) => entry.name as AgentId)
+    .filter((agent) => {
+      const agentVersionsDir = path.join(versionsDir, agent);
+      return fs.readdirSync(agentVersionsDir, { withFileTypes: true })
+        .some((entry) => entry.isDirectory() && !isInstalledVersionIsolated(agent, entry.name));
+    });
+}
+
 /**
  * Create shims for all installed agents.
  */
@@ -2532,7 +2553,7 @@ function ensureAllShims(): void {
       const agent = entry.name as AgentId;
       const agentVersionsDir = path.join(versionsDir, agent);
       const versions = fs.readdirSync(agentVersionsDir, { withFileTypes: true })
-        .filter((e) => e.isDirectory());
+        .filter((e) => e.isDirectory() && !isInstalledVersionIsolated(agent, e.name));
 
       if (versions.length > 0 && !shimExists(agent)) {
         createShim(agent);

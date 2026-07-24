@@ -8,13 +8,14 @@
 
 import type { HealCheck, HealCtx, CheckResult } from '../types.js';
 import { resultOf } from '../types.js';
-import { isShimsInPath, addShimsToPath } from '../../shims.js';
+import { isShimsInPath, addShimsToPath, listAgentsWithNonIsolatedInstalledVersions } from '../../shims.js';
 
 export const pathCheck: HealCheck = {
   id: 'path',
   title: 'Shims directory on PATH',
   cadence: 'startup',
   async run(ctx: HealCtx): Promise<CheckResult> {
+    if (listAgentsWithNonIsolatedInstalledVersions().length === 0) return resultOf([], []);
     if (isShimsInPath()) return resultOf([], []);
     if (ctx.dryRun) return resultOf(['add shims dir to PATH'], []);
 

@@ -12,9 +12,12 @@ import {
   ensureVersionedAliasCurrent,
   isShimCurrent,
   isVersionedAliasCurrent,
+  removeShim,
+  shimExists,
   shimPointsAtLiveInstall,
   removeLegacyUserShim,
   listAgentsWithInstalledVersions,
+  listAgentsWithNonIsolatedInstalledVersions,
   listShimFileNames,
   pruneOrphanedCommandShim,
 } from '../../shims.js';
@@ -26,19 +29,25 @@ export const shimsCheck: HealCheck = {
   cadence: 'frequent',
   async run(ctx: HealCtx): Promise<CheckResult> {
     const fixed: string[] = [];
+    const agentsWithBareShims = new Set(listAgentsWithNonIsolatedInstalledVersions());
 
     for (const agent of listAgentsWithInstalledVersions()) {
       const cmd = AGENTS[agent].cliCommand;
 
-      if (!isShimCurrent(agent)) {
-        if (!ctx.dryRun) ensureShimCurrent(agent);
-        fixed.push(`${cmd} shim`);
-      } else if (!shimPointsAtLiveInstall(agent)) {
-        // Schema is current but the baked AGENTS_BIN points at a different, removed
-        // install (dev build, old npm-global, rotated version dir). ensureShimCurrent
-        // would no-op on a schema-current shim, so force a rewrite to the current install.
-        if (!ctx.dryRun) createShim(agent);
-        fixed.push(`${cmd} shim (repointed to current install)`);
+      if (agentsWithBareShims.has(agent)) {
+        if (!isShimCurrent(agent)) {
+          if (!ctx.dryRun) ensureShimCurrent(agent);
+          fixed.push(`${cmd} shim`);
+        } else if (!shimPointsAtLiveInstall(agent)) {
+          // Schema is current but the baked AGENTS_BIN points at a different, removed
+          // install (dev build, old npm-global, rotated version dir). ensureShimCurrent
+          // would no-op on a schema-current shim, so force a rewrite to the current install.
+          if (!ctx.dryRun) createShim(agent);
+          fixed.push(`${cmd} shim (repointed to current install)`);
+        }
+      } else if (shimExists(agent)) {
+        if (!ctx.dryRun) removeShim(agent);
+        fixed.push(`removed ${cmd} shim (isolated-only)`);
       }
 
       for (const version of listInstalledVersions(agent)) {
