@@ -125,9 +125,21 @@ describe('generateShimScript — config-dir env vars', () => {
 
   it('exports CODEX_HOME for codex so the versioned config/rules are read', () => {
     const script = generateShimScript('codex');
-    expect(script).toContain('export CODEX_HOME=');
-    expect(script).toContain('"$VERSION_DIR/home/.codex"');
+    expect(script).toContain('export CODEX_HOME');
+    expect(script).toContain('CODEX_HOME="$VERSION_DIR/home/.codex"');
     expect(script).not.toContain('export CLAUDE_CONFIG_DIR=');
+  });
+
+  // RUSH-1866: the deep versioned CODEX_HOME overflows macOS's 104-byte
+  // SUN_LEN cap for codex's app-server control socket, breaking every codex
+  // spawn. The shim must guard on Darwin + overflow and relocate to a short
+  // home, while still honoring a caller-set CODEX_HOME.
+  it('guards CODEX_HOME against the macOS SUN_LEN limit', () => {
+    const script = generateShimScript('codex');
+    expect(script).toContain('if [ -z "${CODEX_HOME:-}" ]; then');
+    expect(script).toContain('$(uname -s)" = "Darwin"');
+    expect(script).toContain('${#CODEX_HOME} + 43 ))" -gt 104');
+    expect(script).toContain('$AGENTS_USER_DIR/.codex-homes/$VERSION/.codex');
   });
 
   it('exports KIMI_CODE_HOME for kimi so config/sessions/skills are versioned', () => {
