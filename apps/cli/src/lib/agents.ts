@@ -335,7 +335,9 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     skillsDir: path.join(HOME, '.opencode', 'skills'),
     // Plugins: TS/JS modules auto-loaded from ~/.config/opencode/plugins/ (global)
     // and .opencode/plugins/ (project). Not Claude marketplace format — see
-    // installOpenCodePlugin in plugins.ts. No native shell hooks (plugins only).
+    // installOpenCodePlugin in plugins.ts. OpenCode v1.18.4 exposes lifecycle
+    // hooks through plugin modules (event/tool/etc. functions), not a native
+    // opencode.json shell-command hooks block.
     hooksDir: 'hooks',
     instructionsFile: 'AGENTS.md',
     format: 'markdown',

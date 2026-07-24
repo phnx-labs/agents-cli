@@ -350,6 +350,12 @@ describe('grok subagents (Claude-compatible agent defs)', () => {
 
 
 describe('opencode allowlist (permission in opencode.jsonc)', () => {
+  it('does not advertise native shell hooks because OpenCode hooks are plugin modules', () => {
+    expect(capableAgents('hooks')).not.toContain('opencode');
+    expect(AGENTS.opencode.supportsHooks).toBe(false);
+    expect(AGENTS.opencode.capabilities.hooks).toBe(false);
+  });
+
   it('is capable of allowlist since 1.1.1', () => {
     expect(capableAgents('allowlist')).toContain('opencode');
     expect(supports('opencode', 'allowlist', '1.1.0').ok).toBe(false);
