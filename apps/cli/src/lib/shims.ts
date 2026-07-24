@@ -18,6 +18,7 @@ import { IS_WINDOWS, prependToWindowsUserPath } from './platform/index.js';
 import { getShimsDir, getVersionsDir, getBackupsDir, getHistoryDir, ensureAgentsDir } from './state.js';
 export { getShimsDir };
 import { AGENTS, agentConfigDirName, readAuthAccountIdentity } from './agents.js';
+import { codexHomeShimBash } from './codex-home.js';
 
 /**
  * Files and directories to always skip during conflict detection and migration.
@@ -294,12 +295,10 @@ if [ "\$(uname -s)" = "Linux" ] && [ -z "\${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -
 fi
 `
     : agent === 'codex'
-      ? `
-# Codex reads its config (approval_policy, sandbox_mode, MCP servers, rules)
-# from CODEX_HOME. Point it at the versioned home so permissions/rules
-# written by agents-cli actually take effect.
-export CODEX_HOME="$VERSION_DIR/home/${configDirName}"
-`
+      ? codexHomeShimBash(
+          `$VERSION_DIR/home/${configDirName}`,
+          `$AGENTS_USER_DIR/.codex-homes/$VERSION`,
+        )
       : agent === 'copilot'
         ? `
 # GitHub Copilot CLI honors COPILOT_HOME to relocate its config and state
@@ -878,12 +877,10 @@ export CLAUDE_CONFIG_DIR="$HOME/.agents/.history/versions/${agent}/${version}/ho
 export DISABLE_AUTOUPDATER="\${DISABLE_AUTOUPDATER:-1}"
 `
     : agent === 'codex'
-      ? `
-# Codex reads its config (approval_policy, sandbox_mode, MCP servers, rules)
-# from CODEX_HOME. Point direct aliases at the versioned home so permissions
-# and rules written by agents-cli actually take effect.
-export CODEX_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home/${configDirName}"
-`
+      ? codexHomeShimBash(
+          `$HOME/.agents/.history/versions/${agent}/${version}/home/${configDirName}`,
+          `$HOME/.agents/.codex-homes/${version}`,
+        )
       : agent === 'copilot'
         ? `
 # Copilot honors COPILOT_HOME to relocate ~/.copilot (settings, mcp-config.json,

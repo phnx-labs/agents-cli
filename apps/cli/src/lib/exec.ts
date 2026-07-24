@@ -16,7 +16,8 @@ import { getBinaryPath, getVersionHomePath, isVersionInstalled, resolveVersion }
 import { resolveModel, buildReasoningFlags } from './models.js';
 import { emitStart, maybeRotate, createTimer, redactPrompt, redactArgs } from './events.js';
 import { sanitizeProcessEnv } from './secrets/bundles.js';
-import { getShimsDir } from './state.js';
+import { getShimsDir, getHistoryDir } from './state.js';
+import { resolveCodexHome } from './codex-home.js';
 import { readCodexConfiguredModel } from './shims.js';
 import { writePidSessionEntry, extractSessionIdArg } from './session/pid-registry.js';
 import { recordRunName } from './session/run-names.js';
@@ -357,7 +358,12 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
       ? resolvedVersion
       : (resolvedVersion && isVersionInstalled('codex', resolvedVersion) ? resolvedVersion : null);
     if (version) {
-      result.CODEX_HOME = path.join(getVersionHomePath('codex', version), '.codex');
+      // On macOS the deep versioned home overflows the Unix-socket SUN_LEN
+      // limit for codex's app-server control socket; resolve to a short,
+      // SUN_LEN-safe home (migrating once if needed). See codex-home.ts.
+      const versionedHome = path.join(getVersionHomePath('codex', version), '.codex');
+      const agentsUserDir = path.dirname(getHistoryDir());
+      result.CODEX_HOME = resolveCodexHome(versionedHome, agentsUserDir, version);
     }
     delete result.CLAUDE_CONFIG_DIR;
     delete result.COPILOT_HOME;
