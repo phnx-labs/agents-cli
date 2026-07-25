@@ -22,6 +22,7 @@ import { spawnSync } from 'child_process';
 import * as yaml from 'yaml';
 import { listResources, resolveResource } from './resources.js';
 import { composeWin32CommandLine } from './platform/index.js';
+import { localBinDir } from './platform/posixpath.js';
 
 // ─── Validation primitives ───────────────────────────────────────────────────
 
@@ -428,6 +429,56 @@ export interface InstallResult {
   error?: string;
 }
 
+/** Env var that overrides where `binary` installs write their downloaded file(s). */
+const BIN_DIR_ENV = 'AGENTS_CLI_BIN_DIR';
+
+/** Historical default install dir — kept only as a last-resort fallback. */
+const LEGACY_BIN_DIR = '/usr/local/bin';
+
+function isWritableDir(dir: string, opts: { create: boolean }): boolean {
+  try {
+    if (opts.create) fs.mkdirSync(dir, { recursive: true });
+    fs.accessSync(dir, fs.constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Resolve the directory a `binary` install method downloads/extracts into.
+ *
+ * `/usr/local/bin` used to be hardcoded here, which fails on Apple Silicon
+ * Macs where that directory is root-owned and not user-writable (Homebrew
+ * moved on to /opt/homebrew but left /usr/local/bin behind). Resolution
+ * order:
+ *  1. `AGENTS_CLI_BIN_DIR` — explicit override, used as-is when set.
+ *  2. `~/.local/bin` — the XDG user-bin dir already used for shims (see
+ *     posixpath.ts / shims.ts); created with mkdir -p if missing.
+ *  3. `/usr/local/bin` — last resort, for hosts where it's still writable.
+ *     When it isn't either, throw an actionable error naming the env var and
+ *     ~/.local/bin instead of letting curl/tar fail with a bare EACCES.
+ *
+ * Called once per install/dry-run so the same directory is used everywhere
+ * that method is described or executed.
+ */
+export function resolveBinDir(): string {
+  const override = process.env[BIN_DIR_ENV];
+  if (override && override.trim()) return override.trim();
+
+  const local = localBinDir();
+  if (isWritableDir(local, { create: true })) return local;
+
+  if (isWritableDir(LEGACY_BIN_DIR, { create: false })) return LEGACY_BIN_DIR;
+
+  throw new Error(
+    `${LEGACY_BIN_DIR} is not writable (EACCES) and ~/.local/bin could not be created or ` +
+      `written to either. Set ${BIN_DIR_ENV} to a writable directory, e.g.:\n` +
+      `  export ${BIN_DIR_ENV}="$HOME/.local/bin"\n` +
+      `then re-run the install.`,
+  );
+}
+
 /**
  * Display-only rendering of how a method would be run, for `--dry-run` and
  * status output. Not used by installCli — execution goes through runInstallMethod
@@ -444,9 +495,10 @@ export function buildInstallCommand(method: InstallMethod): string {
   const key = `${process.platform}-${process.arch}`;
   const spec = method.binary[key];
   if (!spec) return 'binary download';
+  const binDir = resolveBinDir();
   return spec.extract
-    ? `curl -fsSL ${spec.url} -o /tmp/agents-cli-bin.tgz && tar -xzf /tmp/agents-cli-bin.tgz -C /usr/local/bin ${spec.extract}`
-    : `curl -fsSL ${spec.url} -o /usr/local/bin/agents-cli-downloaded`;
+    ? `curl -fsSL ${spec.url} -o /tmp/agents-cli-bin.tgz && tar -xzf /tmp/agents-cli-bin.tgz -C ${binDir} ${spec.extract}`
+    : `curl -fsSL ${spec.url} -o ${path.join(binDir, 'agents-cli-downloaded')}`;
 }
 
 /**
@@ -504,6 +556,7 @@ function runInstallMethod(method: InstallMethod): void {
     const spec = method.binary[key];
     if (!spec) throw new Error(`no binary declared for ${key}`);
     assertHttpsUrl(spec.url);
+    const binDir = resolveBinDir();
     if (spec.extract) {
       assertSafePathSegment(spec.extract);
       const tmp = path.join(os.tmpdir(), `agents-cli-bin-${process.pid}-${Date.now()}.tgz`);
@@ -512,7 +565,7 @@ function runInstallMethod(method: InstallMethod): void {
         if (dl.status !== 0) {
           throw new Error(`binary download failed (status ${dl.status ?? 'unknown'})`);
         }
-        const x = spawnSync('tar', ['-xzf', tmp, '-C', '/usr/local/bin', spec.extract], {
+        const x = spawnSync('tar', ['-xzf', tmp, '-C', binDir, spec.extract], {
           stdio: 'inherit',
         });
         if (x.status !== 0) {
@@ -524,7 +577,7 @@ function runInstallMethod(method: InstallMethod): void {
     } else {
       const r = spawnSync(
         'curl',
-        ['-fsSL', spec.url, '-o', '/usr/local/bin/agents-cli-downloaded'],
+        ['-fsSL', spec.url, '-o', path.join(binDir, 'agents-cli-downloaded')],
         { stdio: 'inherit' },
       );
       if (r.status !== 0) {
