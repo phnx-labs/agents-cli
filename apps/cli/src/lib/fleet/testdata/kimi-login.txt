@@ -1,0 +1,5 @@
+  kimi-code
+
+  /login
+
+  Select a platform and authenticate
