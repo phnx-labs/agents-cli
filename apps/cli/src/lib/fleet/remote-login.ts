@@ -471,24 +471,33 @@ export async function driveRemoteLogin(
   const timeoutMs = opts.timeoutMs ?? 90000;
 
   const id = await driver.start();
-  await driver.exec(id, buildRemoteLoginSshCommand(target, flow));
-  await sleep(initialDelayMs);
+  // Everything past start() must tear the session down on a mid-flight throw —
+  // otherwise the caller never receives a sessionId and the PTY (and the
+  // `ssh -tt` process it drives) leaks until the sidecar's idle reaper. On the
+  // normal return paths the caller owns stop() via the returned sessionId.
+  try {
+    await driver.exec(id, buildRemoteLoginSshCommand(target, flow));
+    await sleep(initialDelayMs);
 
-  if (flow.deviceCodeSelect) {
-    await driver.write(id, flow.deviceCodeSelect);
-  }
+    if (flow.deviceCodeSelect) {
+      await driver.write(id, flow.deviceCodeSelect);
+    }
 
-  const deadline = Date.now() + timeoutMs;
-  let last: ScrapedLogin = {};
-  for (;;) {
-    const { screen, exited } = await driver.screen(id);
-    const scraped = scrapeLogin(screen, flow);
-    if (scraped.url) last.url = scraped.url;
-    if (scraped.code) last.code = scraped.code;
-    if (last.url && last.code) return { ...last, exited, sessionId: id };
-    if (exited) return { ...last, exited: true, sessionId: id };
-    if (Date.now() >= deadline) return { ...last, exited: false, sessionId: id };
-    await sleep(pollMs);
+    const deadline = Date.now() + timeoutMs;
+    let last: ScrapedLogin = {};
+    for (;;) {
+      const { screen, exited } = await driver.screen(id);
+      const scraped = scrapeLogin(screen, flow);
+      if (scraped.url) last.url = scraped.url;
+      if (scraped.code) last.code = scraped.code;
+      if (last.url && last.code) return { ...last, exited, sessionId: id };
+      if (exited) return { ...last, exited: true, sessionId: id };
+      if (Date.now() >= deadline) return { ...last, exited: false, sessionId: id };
+      await sleep(pollMs);
+    }
+  } catch (e) {
+    await driver.stop(id).catch(() => {});
+    throw e;
   }
 }
 

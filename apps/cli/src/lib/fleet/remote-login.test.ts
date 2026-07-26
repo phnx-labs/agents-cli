@@ -238,4 +238,20 @@ describe('driveRemoteLogin', () => {
     expect(r.exited).toBe(true);
     expect(r.code).toBeUndefined();
   });
+
+  it('stops the session (no PTY/ssh leak) when a call throws after start()', async () => {
+    // The sidecar drops mid-poll: screen() rejects after start()/exec() succeeded.
+    // driveRemoteLogin must tear the session down before rethrowing, else the
+    // caller never gets a sessionId and the ssh -tt process leaks until the reaper.
+    const stops: string[] = [];
+    const driver: PtyDriver = {
+      async start() { return 'sess1'; },
+      async exec() { /* ok */ },
+      async write() { /* ok */ },
+      async screen() { throw new Error('sidecar connection dropped'); },
+      async stop(id) { stops.push(id); },
+    };
+    await expect(driveRemoteLogin('box-a', droid, driver, fast)).rejects.toThrow('sidecar connection dropped');
+    expect(stops).toEqual(['sess1']);
+  });
 });
