@@ -198,12 +198,19 @@ export function selectLoginTargets(
  */
 export function buildRemoteLoginSshCommand(target: string, flow: LoginFlow): string {
   assertValidSshTarget(target);
+  // The agent CLIs (kimi/droid/codex/…) are agents-cli shims that live in
+  // ~/.agents/.cache/shims and are only on PATH in an interactive/login shell.
+  // `ssh <box> <cmd>` runs a NON-login shell, so a bare `kimi` is "command not
+  // found" and the login program never launches (the scrape then times out).
+  // Prepend the shim dir — resolved on the REMOTE via $HOME, single-quoted so
+  // $HOME/$PATH expand on the box, not locally — so the login command resolves.
+  const remoteCmd = `PATH="$HOME/.agents/.cache/shims:$PATH" ${flow.loginCommand}`;
   return [
     'ssh', '-tt',
     '-o', 'StrictHostKeyChecking=accept-new',
     '-o', 'ConnectTimeout=10',
     shellQuote(target),
-    shellQuote(flow.loginCommand),
+    shellQuote(remoteCmd),
   ].join(' ');
 }
 

@@ -89,6 +89,8 @@
 
 - **Fix the PTY sidecar (`agents pty`, interactive `agents teams`, `agents fleet login`) on the macOS standalone binary.** Since the macOS release became a `bun --compile` standalone (#315), the sidecar was spawned AS that binary (`process.execPath pty _server`) — but a Bun standalone cannot `require()` a native addon, so node-pty's `pty.node` failed to load (`Cannot require module ../build/Debug/pty.node`) and every PTY-backed command died with "PTY server failed to start within 5 seconds." `getServerSpawnArgs` now detects the standalone case and runs the sidecar via a real `node` executing the `dist/index.js` that ships beside the binary (where the prebuilt `pty.node` loads from disk), falling back to the binary only when no node / no dist is found. Verified end-to-end against a real compiled Mach-O standalone. Source: `apps/cli/src/lib/pty-client.ts`.
 
+- **`agents fleet login` now finds the agent CLIs on the remote box.** The remote drive ran the login command over a non-login SSH shell (`ssh <box> kimi`), where the agents-cli shims (`~/.agents/.cache/shims`) are not on PATH — so `kimi`/`droid`/`codex` were "command not found" and the device-code scrape always timed out. The remote command now prepends the shim dir (resolved on the box via `$HOME`) to PATH so the login program launches. Source: `apps/cli/src/lib/fleet/remote-login.ts`.
+
 ## 1.20.70
 
 - **Fix `agents setup computer` / `agents computer setup` refusing to install a

@@ -152,12 +152,18 @@ describe('selectLoginTargets', () => {
 });
 
 describe('buildRemoteLoginSshCommand', () => {
-  it('builds an ssh -tt invocation with the quoted target and login command', () => {
+  it('builds an ssh -tt invocation that puts the shim dir on the remote PATH so the login command resolves in a non-login shell', () => {
     const cmd = buildRemoteLoginSshCommand('user@box', codex);
     expect(cmd).toContain('ssh -tt');
     expect(cmd).toContain('StrictHostKeyChecking=accept-new');
     expect(cmd).toContain('user@box');
-    expect(cmd).toContain("'codex login'"); // spaces force shell-quoting
+    // The agent CLI is a shim not on the non-login PATH; the remote command must
+    // prepend the shim dir (expanded on the box via $HOME) and still run the
+    // login command. The whole remote command is single-quoted for the local shell.
+    expect(cmd).toContain('.agents/.cache/shims');
+    expect(cmd).toContain('$HOME');
+    expect(cmd).toContain('codex login');
+    expect(cmd).toContain('PATH="$HOME/.agents/.cache/shims:$PATH" codex login');
   });
 
   it('rejects an injection-shaped target', () => {
