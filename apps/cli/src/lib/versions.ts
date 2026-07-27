@@ -1799,9 +1799,12 @@ async function reconcileGlobalBinaryVersions(agent: AgentId): Promise<void> {
 
   if (foldedAny) {
     invalidateInstalledVersionsCache(agent);
-    // Keep the recorded default pointing at a dir that still exists on disk.
+    // Keep the recorded default pointing at a dir that still exists on disk —
+    // but never promote an isolated copy into the default slot (same rule as the
+    // post-removal promotion filter and `agents use`). Leaving it unset is right:
+    // an isolated-only agent has no default by design.
     const def = getGlobalDefault(agent);
-    if (!def || !fs.existsSync(getVersionDir(agent, def))) {
+    if ((!def || !fs.existsSync(getVersionDir(agent, def))) && !isVersionIsolated(agent, survivor)) {
       setGlobalDefault(agent, survivor);
     }
   }

@@ -10,7 +10,7 @@ import { AGENTS } from '../../agents.js';
 import {
   getPathShadowingExecutable,
   adoptShadowingLauncher,
-  listAgentsWithInstalledVersions,
+  listAgentsWithNonIsolatedInstalledVersions,
 } from '../../shims.js';
 import { getGlobalDefault } from '../../versions.js';
 
@@ -23,7 +23,15 @@ export const shadowingCheck: HealCheck = {
     const fixed: string[] = [];
     const needsAttention: string[] = [];
 
-    for (const agent of listAgentsWithInstalledVersions()) {
+    // Isolated-only agents are skipped outright. Adoption repoints the user's OWN
+    // launcher (e.g. the npm symlink ~/.npm-global/bin/codex) at our shim — the most
+    // invasive thing self-heal does, and the exact opposite of what `--isolated`
+    // promises. The `getGlobalDefault` guard below already blocked this in practice,
+    // since an isolated install never sets a default; but that made the boundary
+    // depend on an invariant enforced elsewhere. Any path that pins a default from
+    // an isolated copy would silently re-arm the adoption. Gate on the installs
+    // themselves so it cannot happen regardless of how a default got recorded.
+    for (const agent of listAgentsWithNonIsolatedInstalledVersions()) {
       if (!getGlobalDefault(agent)) continue; // only default agents, like the interactive flow
       const cmd = AGENTS[agent].cliCommand;
       const shadowedBy = getPathShadowingExecutable(agent);
