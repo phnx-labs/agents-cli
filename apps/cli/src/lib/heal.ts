@@ -28,6 +28,7 @@ import type { AgentId } from './types.js';
 import {
   syncResourcesToVersion,
   listInstalledVersions,
+  isVersionIsolated,
   getVersionHomePath,
   getActuallySyncedResources,
   compareVersions,
@@ -377,9 +378,17 @@ export async function heal(opts: HealOptions): Promise<HealResult> {
     ...refreshed.map((r) => r.plugin),
   ]);
 
+  // Isolated copies are excluded from every SWEEP. `agents add --isolated`
+  // promises "no settings carry-over, no resource sync", and this engine runs
+  // unattended from the daemon (~30s after start, then every ~6h) — a sweep that
+  // walked into an isolated home would quietly refill it with shared commands,
+  // skills, hooks, MCP config and permissions. Explicitly NAMED versions
+  // (`agents doctor <agent>@<version> --fix`) are honoured as-is: naming the
+  // version is the operator's consent.
+  const sweep = (a: AgentId) => listInstalledVersions(a).filter((v) => !isVersionIsolated(a, v));
   const targets: Array<{ agent: AgentId; versions: string[] }> = opts.agent
-    ? [{ agent: opts.agent, versions: opts.versions ?? listInstalledVersions(opts.agent) }]
-    : ALL_AGENT_IDS.map((a) => ({ agent: a, versions: listInstalledVersions(a) }));
+    ? [{ agent: opts.agent, versions: opts.versions ?? sweep(opts.agent) }]
+    : ALL_AGENT_IDS.map((a) => ({ agent: a, versions: sweep(a) }));
 
   const versions: VersionHealResult[] = [];
   for (const t of targets) {

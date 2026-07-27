@@ -140,6 +140,75 @@ describe.skipIf(process.platform === 'win32')('runSelfHeal — isolated-only ins
   });
 });
 
+// The `resources` check runs UNATTENDED from the daemon (~30s after start, then every
+// ~6h) and reconciles every installed version home against the shared DotAgents
+// definitions. `agents add --isolated` promises the opposite — "no settings carry-over,
+// no resource sync" — so the sweep must walk straight past an isolated home while still
+// healing the normal one beside it.
+describe.skipIf(process.platform === 'win32')('runSelfHeal — resources never sync into isolated homes', () => {
+  let home: string;
+
+  const versionHome = (version: string) =>
+    path.join(home, '.agents', '.history', 'versions', 'claude', version, 'home');
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'self-heal-iso-resources-'));
+    for (const version of ['9.9.1', '9.9.2']) {
+      const versionDir = path.join(home, '.agents', '.history', 'versions', 'claude', version);
+      const binPath = path.join(versionDir, 'node_modules', '.bin', 'claude');
+      fs.mkdirSync(path.dirname(binPath), { recursive: true });
+      fs.writeFileSync(binPath, '#!/bin/sh\nexit 0\n');
+      fs.chmodSync(binPath, 0o755);
+      // A real version home with the agent config dir already materialized, so the
+      // only thing separating the two is the marker.
+      fs.mkdirSync(path.join(versionDir, 'home', '.claude'), { recursive: true });
+    }
+    fs.writeFileSync(
+      path.join(home, '.agents', '.history', 'versions', 'claude', '9.9.2', '.isolated'),
+      `${new Date().toISOString()}\n`,
+    );
+  });
+  afterEach(() => { fs.rmSync(home, { recursive: true, force: true }); });
+
+  it('heals the normal version home and leaves the isolated one empty', () => {
+    const modulePath = path.resolve(process.cwd(), 'src/lib/self-heal/registry.ts');
+    const statePath = path.resolve(process.cwd(), 'src/lib/state.ts');
+    const script = `
+      import { runSelfHeal } from ${JSON.stringify(modulePath)};
+      import { getCommandsDir } from ${JSON.stringify(statePath)};
+      import fs from 'node:fs';
+      import path from 'node:path';
+      // A shared command present centrally but in NEITHER version home.
+      const commands = getCommandsDir();
+      fs.mkdirSync(commands, { recursive: true });
+      fs.writeFileSync(path.join(commands, 'leak-probe.md'), '# leak-probe\\n\\nshared\\n');
+      const report = await runSelfHeal({ checks: ['resources'], mode: 'safe' });
+      const cmd = (v) => path.join(${JSON.stringify(path.join(home, '.agents', '.history', 'versions', 'claude'))},
+        v, 'home', '.claude', 'commands', 'leak-probe.md');
+      console.log('__RESULT__' + JSON.stringify({
+        report,
+        normalHealed: fs.existsSync(cmd('9.9.1')),
+        isolatedHealed: fs.existsSync(cmd('9.9.2')),
+      }));
+    `;
+    const out = execFileSync('bun', ['-e', script], {
+      cwd: process.cwd(),
+      env: { ...process.env, HOME: home },
+      stdio: ['ignore', 'pipe', 'inherit'],
+    }).toString('utf-8');
+    const result = JSON.parse(out.split('__RESULT__')[1]) as {
+      report: Report; normalHealed: boolean; isolatedHealed: boolean;
+    };
+
+    // The sweep still does its job on normal installs…
+    expect(result.normalHealed).toBe(true);
+    expect(byId(result.report).resources.fixed.join(' ')).toContain('resource');
+    // …and never crosses the isolation boundary.
+    expect(result.isolatedHealed).toBe(false);
+    expect(fs.readdirSync(versionHome('9.9.2'), { recursive: true })).toEqual(['.claude']);
+  }, 120_000);
+});
+
 interface CheckR { fixed: string[]; needsAttention: string[]; ok: boolean }
 interface Report { checks: { id: string; result: CheckR | null; error?: string }[] }
 
