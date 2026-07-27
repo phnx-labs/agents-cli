@@ -647,6 +647,32 @@ Plugins live in the user repo (`~/.agents/plugins/`), not inside any single vers
 
 ---
 
+## Make it yours
+
+White-label the CLI. `agents setup mine` mints a **personally-named binary** — `jack` instead of `agents` — that _is_ agents-cli: same tool, your name, running the exact feature set you choose. Anyone can mint their own; Jack and Pranjal each get an independent brand.
+
+```bash
+agents setup mine                      # wizard: pick a name, check off what to disable
+agents mine init jack --disable teams cloud   # or non-interactively
+
+jack run claude "hello"                # every agents verb, under your name
+jack --help                            # help, version, and errors all read "jack"
+```
+
+Manage brands with `agents mine list | toggle | remove`:
+
+```bash
+agents mine toggle jack --disable-plugin rush --disable-skill deploy
+agents mine toggle jack --enable teams
+agents mine remove jack --purge
+```
+
+Under the hood, `init` drops a pure pass-through shim in `~/.agents/.cache/shims/<name>` (already on `PATH`) that sets `AGENTS_BRAND` and forwards every argument to the same binary — nothing is copied or forked. The brand's config lives in `~/.agents/agents.yaml` (`brands.<name>`), so it rides `agents repo push/pull` across your fleet. Disabling a command hides it **only** under that brand; plain `agents` / `ag` keep every command. Curated skills/plugins/MCP ride a per-brand [resource profile](apps/cli/docs/profiles.md). Full reference: [Make it yours](apps/cli/docs/mine.md).
+
+> Personal use is free and Apache-2.0. Redistributing a branded build commercially will require a license in a future release.
+
+---
+
 ## Browser
 
 <p align="center">
