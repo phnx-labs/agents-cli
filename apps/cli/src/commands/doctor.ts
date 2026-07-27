@@ -432,6 +432,9 @@ async function runDevicesDoctor(opts: DoctorOptions): Promise<void> {
 interface ResolvedTarget {
   agent: AgentId;
   versions: string[];
+  /** Did the user name a concrete VERSION (`codex@1.2.3`), or just the agent?
+   *  Only the former is explicit consent to heal an isolated copy — see runFix. */
+  versionExplicit: boolean;
 }
 
 function parseTargetArg(arg: string): ResolvedTarget | { error: string } {
@@ -445,13 +448,13 @@ function parseTargetArg(arg: string): ResolvedTarget | { error: string } {
   if (!versionPart) {
     const versions = listInstalledVersions(agent);
     if (versions.length === 0) return { error: `${AGENTS[agent].name} has no installed versions. Run \`agents add ${agent}@<version>\` first.` };
-    return { agent, versions };
+    return { agent, versions, versionExplicit: false };
   }
 
   if (versionPart === 'default') {
     const def = getGlobalDefault(agent);
     if (!def) return { error: `${AGENTS[agent].name} has no default version pinned. Run \`agents use ${agent}@<version>\`.` };
-    return { agent, versions: [def] };
+    return { agent, versions: [def], versionExplicit: true };
   }
 
   const spec = parseAgentSpec(`${agent}@${versionPart}`);
@@ -459,7 +462,7 @@ function parseTargetArg(arg: string): ResolvedTarget | { error: string } {
   if (!isVersionInstalled(agent, versionPart)) {
     return { error: `${AGENTS[agent].name}@${versionPart} is not installed. Installed: ${listInstalledVersions(agent).join(', ') || '(none)'}` };
   }
-  return { agent, versions: [versionPart] };
+  return { agent, versions: [versionPart], versionExplicit: true };
 }
 
 function parseKindFilter(arg: string | undefined): DoctorKind[] | { error: string } {
@@ -682,14 +685,18 @@ function renderHealText(result: HealResult): void {
   }
 }
 
-async function runFix(parsed: { agent: AgentId; versions: string[] } | null, opts: DoctorOptions): Promise<void> {
+async function runFix(parsed: ResolvedTarget | null, opts: DoctorOptions): Promise<void> {
   // Heal targets the global install — project layer is irrelevant, so cwd is
   // left to heal's neutral default rather than process.cwd().
   if (!opts.json) console.log(chalk.bold('Healing…'));
+  // `agents doctor <agent> --fix` is a SWEEP, same as the bare form — leave the
+  // version list to heal() so it applies its isolated-copy filter. Passing the
+  // enumerated list here would smuggle isolated versions past that filter.
+  // A named version (`<agent>@<version>`) is explicit consent and is passed through.
   const result = await heal({
     mode: 'full',
     agent: parsed?.agent,
-    versions: parsed?.versions,
+    versions: parsed?.versionExplicit ? parsed.versions : undefined,
   });
   if (opts.json) {
     console.log(JSON.stringify(result, null, 2));
@@ -794,7 +801,7 @@ export function registerDoctorCommand(program: Command): void {
       // --fix turns the read-only diagnosis into a heal. With no target it heals
       // every installed version; with a target it scopes to that agent.
       if (opts.fix) {
-        let scope: { agent: AgentId; versions: string[] } | null = null;
+        let scope: ResolvedTarget | null = null;
         if (target) {
           const parsed = parseTargetArg(target);
           if ('error' in parsed) {

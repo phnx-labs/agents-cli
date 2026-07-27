@@ -1754,7 +1754,14 @@ export function registerRunCommand(program: Command): void {
             options.quiet ? undefined : (m) => process.stderr.write(chalk.yellow(`[agents] ${m}\n`)),
           );
           if (healed === null) {
-            console.error(chalk.red(`agents: ${agent}@${launchTarget} is not runnable and could not be repaired. Try: agents add ${agent}@latest`));
+            // An isolated copy is never repaired by adopting another version, so
+            // `add <agent>@latest` would build an unrelated NORMAL install rather
+            // than fix what the user asked to run. Point at the isolated re-add.
+            const { isVersionIsolated } = await import('../lib/versions.js');
+            const hint = isVersionIsolated(agent, launchTarget)
+              ? `agents add ${agent}@${launchTarget} --isolated`
+              : `agents add ${agent}@latest`;
+            console.error(chalk.red(`agents: ${agent}@${launchTarget} is not runnable and could not be repaired. Try: ${hint}`));
             process.exit(1);
           }
           // Always adopt the healed version explicitly. In the version-undefined

@@ -2287,9 +2287,29 @@ export async function ensureAgentRunnable(
   }
 
   // Nothing runnable installed → last resort: install latest and pin it.
+  //
+  // …unless `latest` is a version the user already holds as an ISOLATED copy. A
+  // normal and an isolated install of the same version share one on-disk dir
+  // (see the coexistence refusal in commands/versions.ts), so installing would
+  // commandeer that copy and pinning it would hand an isolated install the
+  // global default — the same breach the candidate filter above prevents.
+  // Resolved BEFORE installing so the isolated copy is not even rebuilt.
+  const latestVersion = await getLatestNpmVersion(agent);
+  if (latestVersion && isVersionIsolated(agent, latestVersion)) {
+    log?.(`no runnable ${cfg.name} version installed — ${cfg.name}@${latestVersion} is the latest, but you hold it as an isolated copy, so it can't become your default.`);
+    log?.(`install one explicitly: agents add ${agent}@latest`);
+    return null;
+  }
+
   log?.(`no runnable ${cfg.name} version installed — installing ${cfg.name}@latest…`);
   const latest = await installVersion(agent, 'latest', undefined, { clean: true });
   if (latest.success) {
+    // Belt-and-braces: `latest` could have moved between the probe above and the
+    // install. Never pin an isolated version, whatever the resolution said.
+    if (isVersionIsolated(agent, latest.installedVersion)) {
+      log?.(`${cfg.name}@${latest.installedVersion} is an isolated copy and can't be set as your default.`);
+      return null;
+    }
     setGlobalDefault(agent, latest.installedVersion);
     log?.(`installed ${cfg.name}@${latest.installedVersion} and set it as the default.`);
     return latest.installedVersion;

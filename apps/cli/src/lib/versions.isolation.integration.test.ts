@@ -109,4 +109,30 @@ describe.skipIf(process.platform === 'win32')('ensureAgentRunnable — isolation
     // The isolated copy is untouched and still isolated.
     expect(r.stillIsolated).toBe(true);
   }, 180_000);
+
+  // The last-resort step ("install latest and pin it") reuses the version dir of
+  // whatever `latest` resolves to. If the user already holds THAT version as an
+  // isolated copy, installing would commandeer it and pinning would hand an
+  // isolated install the global default — the leak the candidate filter above
+  // blocks, arriving through a different door.
+  it('refuses to pin `latest` when the user holds that exact version as an isolated copy', () => {
+    const versionsPath = path.resolve(process.cwd(), 'src/lib/versions.ts');
+    const latest = execFileSync('npm', ['view', '@openai/codex', 'version'], { encoding: 'utf-8' }).trim();
+    expect(latest).toMatch(/^\d+\.\d+\.\d+/);
+
+    plant('9.9.1', { runnable: false });        // broken normal default
+    plant(latest, { runnable: true, isolated: true }); // the ONLY other install — isolated
+    fs.writeFileSync(path.join(home, '.agents', 'agents.yaml'), 'agents:\n  codex: "9.9.1"\n');
+
+    const before = fs.readFileSync(path.join(versionDir(latest), '.isolated'), 'utf-8');
+    const r = runEnsure('9.9.1', latest);
+
+    // No default is better than an isolated default; the caller reports the failure.
+    expect(r.healed).toBeNull();
+    expect(r.defaultAfter).toBe('9.9.1');
+    expect(r.defaultAfter).not.toBe(latest);
+    // Resolved before installing, so the isolated copy was not even rebuilt.
+    expect(r.stillIsolated).toBe(true);
+    expect(fs.readFileSync(path.join(versionDir(latest), '.isolated'), 'utf-8')).toBe(before);
+  }, 300_000);
 });
