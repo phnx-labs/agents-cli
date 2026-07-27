@@ -129,6 +129,7 @@ import {
   loadOutput,
   loadBudget,
   loadAlias,
+  loadMine,
   loadPty,
   loadTmux,
   loadWatchdog,
@@ -180,10 +181,15 @@ if (process.argv[2] === '__daemon-run') {
   process.exit(process.exitCode ?? 0);
 }
 
+// White-label: the shim for a brand (e.g. `jack`) exports AGENTS_BRAND, so the
+// CLI presents its own name/help/errors as the brand. Unbranded (AGENTS_BRAND
+// unset) resolves to 'agents' and everything below is byte-identical to before.
+const BRAND = resolveBrandName();
+
 const program = new Command();
 
 program
-  .name('agents')
+  .name(BRAND)
   .description('Environment manager for AI agents')
   .version(VERSION)
   .option('--verbose', 'Show startup self-heal details on stderr')
@@ -201,7 +207,7 @@ program
 function auditCommandPath(cmd: Command): string[] {
   const parts: string[] = [];
   let c: Command | null | undefined = cmd;
-  while (c && c.name() && c.name() !== 'agents') {
+  while (c && c.name() && c.name() !== BRAND) {
     parts.unshift(c.name());
     c = c.parent;
   }
@@ -244,11 +250,37 @@ program.hook('postAction', (_thisCommand, actionCommand) => {
   }
 });
 
+/**
+ * Skin the static root help for a brand: rewrite the visible `agents` command
+ * examples to the brand name and drop lines for commands this brand disabled.
+ * A no-op for the unbranded `agents` CLI with nothing disabled.
+ */
+function brandRootHelp(raw: string): string {
+  let text = raw;
+  if (BRAND !== 'agents') {
+    text = text
+      .replace(/Usage: agents /g, `Usage: ${BRAND} `)
+      .replace(/^ {2}agents /gm, `  ${BRAND} `)
+      .replace(/Run 'agents /g, `Run '${BRAND} `);
+  }
+  const disabled = disabledCommandsForActiveBrand();
+  if (disabled.size > 0) {
+    text = text
+      .split('\n')
+      .filter((line) => {
+        const m = line.match(/^ {2}([a-z][\w-]*)/);
+        return !(m && disabled.has(m[1]));
+      })
+      .join('\n');
+  }
+  return text;
+}
+
 // Custom help for the main program only
 const originalHelpInformation = program.helpInformation.bind(program);
 program.helpInformation = function () {
-  if (this.name() === 'agents' && !this.parent) {
-    return `Usage: agents [command] [options]
+  if (this.name() === BRAND && !this.parent) {
+    return brandRootHelp(`Usage: agents [command] [options]
 
 Install, configure, run, and dispatch AI coding agents from one place.
 Works with Claude, Codex, Gemini, Cursor, OpenCode, OpenClaw, and Droid.
@@ -331,7 +363,7 @@ Options:
   --verbose                       Show startup self-heal details on stderr
 
 System config lives in ~/.agents/.system/. Run 'agents <command> --help' for details.
-`;
+`);
   }
   return originalHelpInformation();
 };
@@ -370,6 +402,7 @@ async function showWhatsNew(fromVersion: string, toVersion: string): Promise<voi
 
 const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 import { getUpdateCheckPath, getMigratedSentinelPath, getUserAgentsDir, getRuntimeStateDir } from './lib/state.js';
+import { resolveBrandName, disabledCommandsForActiveBrand } from './lib/brand.js';
 import {
   readUpdateCache,
   saveUpdateCheck,
@@ -873,6 +906,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadOutput);
   await reg(loadBudget);
   await reg(loadAlias);
+  await reg(loadMine);
   await reg(loadPty);
   await reg(loadTmux);
   await reg(loadWatchdog);
@@ -959,13 +993,20 @@ const helpOrVersionRequested = passedArgs.some(
   (arg) => arg === '--help' || arg === '-h' || arg === '--version' || arg === '-V',
 );
 
+// White-label: a brand can hide built-in top-level commands. A hidden command
+// must behave as if it doesn't exist under this brand (unknown-command +
+// spellcheck), while `agents` itself is unaffected. `brandDisabled` is empty for
+// the unbranded CLI, so all of this is a no-op there.
+const brandDisabled = disabledCommandsForActiveBrand();
+const requestedIsDisabled = requestedCommand !== undefined && brandDisabled.has(requestedCommand);
+
 // `--host` passthrough: run this invocation on a remote machine over SSH instead
 // of locally. Handled before any local command registration / update check /
 // background sync — a remote run needs none of that. Only the allowlisted
 // read-only + config + teams commands route here; `run`/`sessions` are absent
 // from the table and fall through to their own richer `--host` handling below.
 // `--help`/`--version` stay local (docs must work without a reachable host).
-if (requestedCommand !== undefined && !helpOrVersionRequested) {
+if (requestedCommand !== undefined && !helpOrVersionRequested && !requestedIsDisabled) {
   const { maybeRunOnHost } = await import('./lib/hosts/passthrough.js');
   if (await maybeRunOnHost(requestedCommand, passedArgs)) {
     process.exit(process.exitCode ?? 0);
@@ -975,7 +1016,12 @@ if (requestedCommand !== undefined && !helpOrVersionRequested) {
 // Register only the command(s) this invocation actually uses. Lazy commands
 // (sessions/teams/cloud) are handled after applyGlobalHelpConventions below.
 const isLazyRequest = requestedCommand !== undefined && LAZY_COMMAND_NAMES.has(requestedCommand);
-if (requestedCommand !== undefined && !isLazyRequest) {
+if (requestedIsDisabled) {
+  // The brand turned this command off: register the full tree so the "did you
+  // mean" picker still works, then strip the disabled commands below so the
+  // request resolves as unknown.
+  await registerAllEagerCommands();
+} else if (requestedCommand !== undefined && !isLazyRequest) {
   const known = await registerEagerForRequest(requestedCommand);
   if (!known) {
     // Unknown top-level command: register the full tree so the "did you mean"
@@ -995,8 +1041,18 @@ applyGlobalHelpConventions(program);
 
 // Lazy commands pull in the SQLite-backed session/cloud stack; register them
 // only when explicitly requested, keeping lightweight commands off that path.
-if (isLazyRequest) {
+if (isLazyRequest && !requestedIsDisabled) {
   for (const loader of COMMAND_LOADERS[requestedCommand!]) await reg(loader);
+}
+
+// White-label: remove any commands this brand disabled so they resolve as
+// unknown (the command:* handler then reports "unknown command"). Unbranded or
+// nothing-disabled → no-op. Done after all registration paths above.
+if (brandDisabled.size > 0) {
+  const kept = program.commands.filter((c) => !brandDisabled.has(c.name()));
+  if (kept.length !== program.commands.length) {
+    (program as unknown as { commands: typeof program.commands }).commands = kept;
+  }
 }
 
 // Pure documentation paths (--version / --help / -h) return immediately: skip

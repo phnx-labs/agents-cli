@@ -7,6 +7,7 @@
  */
 
 import { readMeta, updateMeta } from './state.js';
+import { brandProfileName } from './brand.js';
 import type { ResourcePattern, ResourceProfilePreset } from './types.js';
 
 export type ProfiledResourceKind =
@@ -56,12 +57,18 @@ export function getResourceProfilePreset(name: string): ResourceProfilePreset | 
 }
 
 export function getActiveResourceProfileName(): string | null {
+  // A white-label brand pins its own profile; when running under a brand
+  // (AGENTS_BRAND set) that preset wins over the global `profiles.active`, so
+  // every resource filter that keys off the active profile becomes brand-scoped.
+  // See lib/brand.ts.
+  const branded = brandProfileName();
+  if (branded) return branded;
   return readMeta().profiles?.active ?? null;
 }
 
 export function getActiveResourceProfile(): ActiveResourceProfile | null {
   const meta = readMeta();
-  const name = meta.profiles?.active;
+  const name = getActiveResourceProfileName();
   if (!name) return null;
   const preset = meta.profiles?.presets?.[name];
   return preset ? { name, preset } : null;
