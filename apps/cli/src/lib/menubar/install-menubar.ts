@@ -107,12 +107,17 @@ function sourceAppPath(): string | null {
   } catch {
     /* import.meta.url unavailable */
   }
-  const layout = resolveInstalledLayout();
-  if (layout) {
-    candidates.push(path.join(layout.distDir, 'lib', 'menubar', APP_BUNDLE_NAME));
-  }
   for (const c of candidates) {
     if (fs.existsSync(c)) return c;
+  }
+  // Candidate 4 — only reached when the sibling candidates miss (the Bun
+  // single-file binary, whose `import.meta.url` is a virtual `/$bunfs/` path).
+  // Resolve the launcher symlink lazily so the common Node path pays no extra
+  // filesystem probe.
+  const layout = resolveInstalledLayout();
+  if (layout) {
+    const p = path.join(layout.distDir, 'lib', 'menubar', APP_BUNDLE_NAME);
+    if (fs.existsSync(p)) return p;
   }
   return null;
 }
