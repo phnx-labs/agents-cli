@@ -72,5 +72,10 @@ agents --help        # unchanged — every command still there
   and can't collide with `agents`, `ag`, or an installed agent CLI (`claude`, `codex`, …).
 - **`agents` is never affected** — disabling a command for a brand hides it only
   under that brand; the plain CLI keeps every command.
+- **Brand curation is a foreground view.** The background auto-sync always
+  reconciles the full resource set into your shared agent homes, so a brand never
+  silently strips skills/plugins for the plain `agents` user. Note that running
+  `<brand> sync` explicitly will materialize the brand's curated set into the
+  shared homes — run `agents sync` to restore the full set.
 - **Commercial white-label** (redistributing a branded build to customers) will
   require a license in a future release; personal use is free.

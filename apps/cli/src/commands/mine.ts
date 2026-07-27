@@ -239,11 +239,12 @@ export function registerMineCommand(program: Command): void {
     .description('Remove a brand (its shim + config)')
     .option('--purge', "Also delete the brand's resource profile preset")
     .action((name: string, options: { purge?: boolean }) => {
-      if (!getBrandConfig(name) && !removeBrandShim(name)) {
+      const existed = getBrandConfig(name) !== undefined;
+      const shimRemoved = removeBrandShim(name);
+      if (!existed && !shimRemoved) {
         console.error(chalk.red(`No brand named "${name}".`));
         process.exit(1);
       }
-      removeBrandShim(name);
       removeBrand(name, options.purge === true);
       console.log(`${chalk.yellow('Removed')} brand ${chalk.bold(name)}`);
     });

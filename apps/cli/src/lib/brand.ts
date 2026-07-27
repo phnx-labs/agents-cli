@@ -76,11 +76,17 @@ export function getBrandConfig(name: string): BrandConfig | undefined {
   return listBrands()[name];
 }
 
-/** The active brand's config (from AGENTS_BRAND), or null when unbranded. */
+/**
+ * The active brand's config (from AGENTS_BRAND), or null when unbranded or when
+ * the brand is explicitly disabled (`enabled: false`) — a disabled brand's shim
+ * still works as a plain pass-through but applies no command/resource curation.
+ */
 export function getActiveBrandConfig(): BrandConfig | null {
   const name = activeBrandName();
   if (!name) return null;
-  return getBrandConfig(name) ?? null;
+  const cfg = getBrandConfig(name);
+  if (!cfg || cfg.enabled === false) return null;
+  return cfg;
 }
 
 /**
