@@ -147,6 +147,7 @@ import {
   loadSetup,
   loadUninstall,
   loadShare,
+  loadSend,
   loadHq,
   loadFeed,
   loadMailboxes,
@@ -821,6 +822,7 @@ async function registerEagerForRequest(name: string): Promise<boolean> {
 async function registerAllEagerCommands(): Promise<void> {
   await reg(loadView);
   await reg(loadShare);
+  await reg(loadSend);
   await reg(loadInspect);
   await reg(loadResources);
   await reg(loadFeedback);
