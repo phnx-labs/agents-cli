@@ -49,13 +49,43 @@ function bunStandaloneCompileWorks(): boolean {
 const standaloneCompileWorks = bunStandaloneCompileWorks();
 
 describe('getServerSpawnArgs', () => {
-  it('runs the compiled standalone binary as the CLI, not as a script interpreter', () => {
-    const spawn = getServerSpawnArgs({ isStandaloneExecutable: true });
+  it('runs the co-shipped dist/index.js under real node when standalone (native addons load there, not in the bun binary)', () => {
+    // #315 regression: a Bun --compile standalone can't require() node-pty's
+    // pty.node, so the sidecar must run via a real node + the dist/index.js that
+    // ships beside the binary.
+    const spawn = getServerSpawnArgs({
+      isStandaloneExecutable: true,
+      execPath: '/opt/agents/dist/bin/agents',
+      resolveNode: () => '/usr/local/bin/node',
+      fileExists: (p) => p === '/opt/agents/dist/index.js',
+    });
 
     expect(spawn).toEqual({
-      bin: process.execPath,
-      args: ['pty', '_server'],
+      bin: '/usr/local/bin/node',
+      args: ['/opt/agents/dist/index.js', 'pty', '_server'],
     });
+  });
+
+  it('falls back to running the standalone binary itself when no node is found', () => {
+    const spawn = getServerSpawnArgs({
+      isStandaloneExecutable: true,
+      execPath: '/opt/agents/dist/bin/agents',
+      resolveNode: () => undefined,
+      fileExists: () => true,
+    });
+
+    expect(spawn).toEqual({ bin: process.execPath, args: ['pty', '_server'] });
+  });
+
+  it('falls back to the binary when node exists but no co-shipped dist/index.js', () => {
+    const spawn = getServerSpawnArgs({
+      isStandaloneExecutable: true,
+      execPath: '/opt/agents/dist/bin/agents',
+      resolveNode: () => '/usr/local/bin/node',
+      fileExists: () => false,
+    });
+
+    expect(spawn).toEqual({ bin: process.execPath, args: ['pty', '_server'] });
   });
 
   it('detects Bun standalone execution from the embedded module URL', () => {
