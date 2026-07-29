@@ -101,6 +101,7 @@ export const loadMessage: ModuleLoader = async () => (await import('../../comman
 export const loadSend: ModuleLoader = async () => (await import('../../commands/send.js')).registerSendCommand;
 export const loadHq: ModuleLoader = async () => (await import('../../commands/hq.js')).registerHqCommand;
 export const loadFeed: ModuleLoader = async () => (await import('../../commands/feed.js')).registerFeedCommand;
+export const loadActivity: ModuleLoader = async () => (await import('../../commands/activity.js')).registerActivityCommand;
 export const loadMailboxes: ModuleLoader = async () => (await import('../../commands/mailboxes.js')).registerMailboxesCommand;
 export const loadServe: ModuleLoader = async () => (await import('../../commands/serve.js')).registerServeCommand;
 export const loadShare: ModuleLoader = async () => (await import('../../commands/share.js')).registerShareCommands;
@@ -223,6 +224,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   notify: [loadSend],
   hq: [loadHq],
   feed: [loadFeed],
+  activity: [loadActivity],
   mailboxes: [loadMailboxes],
   mailbox: [loadMailboxes],
   serve: [loadServe],

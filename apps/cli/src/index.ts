@@ -151,6 +151,7 @@ import {
   loadSend,
   loadHq,
   loadFeed,
+  loadActivity,
   loadMailboxes,
   type ModuleLoader,
 } from './lib/startup/command-registry.js';
@@ -920,6 +921,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadFunnel);
   await reg(loadHq);
   await reg(loadFeed);
+  await reg(loadActivity);
   await reg(loadMailboxes);
   await reg(loadSsh);
   registerJobsCronAliasCommand(program, 'jobs');
