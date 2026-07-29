@@ -15,6 +15,7 @@ import {
   deprecationNotice,
   formatClaudeOrgLabel,
   getAccountInfo,
+  isClaudeCredentialFileBlank,
   resolveAgentName,
   resolveLastActive,
   supportsAccountInspection,
@@ -750,6 +751,112 @@ describe('getAccountInfo — OpenCode provider credentials', () => {
     const info = await getAccountInfo('opencode', home);
     expect(info.signedIn).toBe(false);
   });
+});
+
+describe('getAccountInfo — claude credential floor (blanked .credentials.json)', () => {
+  // A failed OAuth refresh rewrites .claude/.credentials.json with empty
+  // accessToken/refreshToken and expiresAt 0, keeping only the descriptive
+  // fields — while .claude.json keeps a full oauthAccount. Before the floor,
+  // that home reported signedIn:true with usage bars, and balanced rotation kept
+  // routing runs into it; each spawn died on "OAuth session expired and could
+  // not be refreshed".
+  function writeClaudeHome(
+    home: string,
+    oauth: Record<string, unknown> | null,
+  ): void {
+    fs.writeFileSync(
+      path.join(home, '.claude.json'),
+      JSON.stringify({
+        oauthAccount: {
+          emailAddress: 'dev@example.com',
+          accountUuid: 'acct-1',
+          organizationUuid: 'org-1',
+          organizationType: 'claude_max',
+        },
+      }),
+      'utf-8',
+    );
+    if (!oauth) return;
+    fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(home, '.claude', '.credentials.json'),
+      JSON.stringify({ claudeAiOauth: oauth }),
+      'utf-8',
+    );
+  }
+
+  const blanked = {
+    accessToken: '',
+    refreshToken: '',
+    expiresAt: 0,
+    scopes: ['user:inference'],
+    subscriptionType: 'max',
+    rateLimitTier: 'default_claude_max_20x',
+    refreshTokenExpiresAt: 1787558041028,
+  };
+
+  it('treats an emptied token pair as signed out off macOS', () => {
+    const home = makeTempDir();
+    writeClaudeHome(home, blanked);
+    expect(isClaudeCredentialFileBlank(home, 'linux')).toBe(true);
+  });
+
+  it('keeps a home with real tokens usable', () => {
+    const home = makeTempDir();
+    writeClaudeHome(home, { ...blanked, accessToken: 'at-real', refreshToken: 'rt-real', expiresAt: 1 });
+    expect(isClaudeCredentialFileBlank(home, 'linux')).toBe(false);
+  });
+
+  it('keeps a home usable when only the refresh token survives, so a refresh can still recover it', () => {
+    const home = makeTempDir();
+    writeClaudeHome(home, { ...blanked, refreshToken: 'rt-real' });
+    expect(isClaudeCredentialFileBlank(home, 'linux')).toBe(false);
+  });
+
+  it('stays silent when there is no credential file to judge', () => {
+    const home = makeTempDir();
+    writeClaudeHome(home, null);
+    expect(isClaudeCredentialFileBlank(home, 'linux')).toBe(false);
+  });
+
+  it('never judges from the file on macOS, where the login Keychain is canonical', () => {
+    const home = makeTempDir();
+    writeClaudeHome(home, blanked);
+    expect(isClaudeCredentialFileBlank(home, 'darwin')).toBe(false);
+  });
+
+  it('does not mistake a corrupt credential file for a blank one', () => {
+    const home = makeTempDir();
+    writeClaudeHome(home, blanked);
+    fs.writeFileSync(path.join(home, '.claude', '.credentials.json'), '{not json', 'utf-8');
+    expect(isClaudeCredentialFileBlank(home, 'linux')).toBe(false);
+  });
+
+  it('surfaces the account for a home whose tokens are intact', async () => {
+    const home = makeTempDir();
+    writeClaudeHome(home, { ...blanked, accessToken: 'at-real', refreshToken: 'rt-real', expiresAt: 1 });
+
+    const info = await getAccountInfo('claude', home);
+    expect(info.signedIn).toBe(true);
+    expect(info.email).toBe('dev@example.com');
+  });
+
+  // The wiring assertion is only meaningful where the file is the authoritative
+  // store; on macOS getAccountInfo deliberately declines to judge from it.
+  it.skipIf(process.platform === 'darwin')(
+    'reports a blanked home as signed out, so rotation cannot pick it',
+    async () => {
+      const home = makeTempDir();
+      writeClaudeHome(home, blanked);
+
+      const info = await getAccountInfo('claude', home);
+      expect(info.signedIn).toBe(false);
+      // email is what rotation reads as `authValid` — it must not survive.
+      expect(info.email).toBeNull();
+      expect(info.plan).toBeNull();
+      expect(info.usageStatus).toBeNull();
+    },
+  );
 });
 
 describe('agent deprecation warnings', () => {

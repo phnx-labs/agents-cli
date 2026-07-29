@@ -1417,6 +1417,51 @@ function isValidOpenCodeCredential(value: unknown): boolean {
   }
 }
 
+/**
+ * Whether a Claude version home's credential file is present but carries no
+ * token — the "must have a real credential" floor (see
+ * `isValidOpenCodeCredential`) applied to claude.
+ *
+ * A FAILED OAuth refresh leaves exactly this state behind: Claude Code rewrites
+ * `.claude/.credentials.json` with `accessToken: ""`, `refreshToken: ""` and
+ * `expiresAt: 0`, keeping only the descriptive fields (`subscriptionType`,
+ * `rateLimitTier`, `refreshTokenExpiresAt`). Everything we derive from
+ * `.claude.json` — email, plan — still looks healthy, so the install reported
+ * `signedIn: true`, `agents view` drew usage bars for it, and balanced rotation
+ * (whose `authValid` is just "email present") kept picking it — every pick dying
+ * at spawn on "OAuth session expired and could not be refreshed".
+ *
+ * Only decidable off macOS: there the login Keychain is the canonical store and
+ * this file is not authoritative, and probing the Keychain would raise an
+ * authorization sheet per installed version on every `agents run` — the reason
+ * rotation stopped calling `isClaudeAuthValid` at all. Off macOS the file IS the
+ * only store, so a token-less file is proof of signed-out. `platform` is a
+ * parameter so both branches are testable on any host.
+ *
+ * Sync, no Keychain, no network — safe on the `agents run` hot path.
+ */
+export function isClaudeCredentialFileBlank(
+  base: string,
+  platform: NodeJS.Platform = process.platform
+): boolean {
+  if (platform === 'darwin') return false;
+  try {
+    const raw = fs.readFileSync(path.join(base, '.claude', '.credentials.json'), 'utf-8');
+    const oauth = (JSON.parse(raw) as {
+      claudeAiOauth?: { accessToken?: unknown; refreshToken?: unknown };
+    }).claudeAiOauth;
+    if (!oauth) return false;
+    const nonEmpty = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0;
+    return !nonEmpty(oauth.accessToken) && !nonEmpty(oauth.refreshToken);
+  } catch {
+    // No file (a Keychain-backed home, or never logged in here) or an
+    // unreadable/corrupt one: not positive evidence of a blank credential, so
+    // leave the existing signal alone rather than declaring a working install
+    // signed out.
+    return false;
+  }
+}
+
 export async function getAccountInfo(
   agentId: AgentId,
   home?: string
@@ -1458,6 +1503,15 @@ export async function getAccountInfo(
         const accountId = normalizeIdentityPart(oa?.accountUuid);
         const organizationId = normalizeIdentityPart(oa?.organizationUuid);
         const email = oa?.emailAddress || null;
+
+        // Credential floor: a blanked credential file means this home cannot
+        // authenticate, whatever `.claude.json` still says. Report it signed out
+        // so `agents view` prompts a re-login and rotation routes around it,
+        // instead of handing runs to an install that dies at spawn.
+        if (email && isClaudeCredentialFileBlank(base)) {
+          return { ...empty, lastActive };
+        }
+
         const accountKey = buildIdentityKey(agentId, [
           ['account', accountId],
           ['org', organizationId],
