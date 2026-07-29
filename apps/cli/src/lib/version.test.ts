@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import * as path from 'path';
 import { getCliVersion, getCliVersionFresh, installLayoutFromBin } from './version.js';
 
 describe('version', () => {
@@ -32,10 +33,13 @@ describe('installLayoutFromBin', () => {
     const bin =
       '/Users/me/.nvm/versions/node/v24.15.0/lib/node_modules/@phnx-labs/agents-cli/dist/bin/agents';
     const pkg = '/Users/me/.nvm/versions/node/v24.15.0/lib/node_modules/@phnx-labs/agents-cli';
+    // distDir rides path.dirname, which preserves the input's separators, but
+    // entry/pkgJson ride path.join, which emits native ones — so derive the
+    // expectations the same way rather than hardcoding POSIX.
     expect(installLayoutFromBin(bin)).toEqual({
       distDir: `${pkg}/dist`,
-      entryPath: `${pkg}/dist/index.js`,
-      pkgJsonPath: `${pkg}/package.json`,
+      entryPath: path.join(`${pkg}/dist`, 'index.js'),
+      pkgJsonPath: path.join(`${pkg}/dist`, '..', 'package.json'),
     });
   });
 
@@ -44,8 +48,8 @@ describe('installLayoutFromBin', () => {
     const pkg = '/Users/me/.bun/install/global/node_modules/@phnx-labs/agents-cli';
     expect(installLayoutFromBin(bin)).toEqual({
       distDir: `${pkg}/dist`,
-      entryPath: `${pkg}/dist/index.js`,
-      pkgJsonPath: `${pkg}/package.json`,
+      entryPath: path.join(`${pkg}/dist`, 'index.js'),
+      pkgJsonPath: path.join(`${pkg}/dist`, '..', 'package.json'),
     });
   });
 });

@@ -157,12 +157,16 @@ describe('resolveBinDir', () => {
   const key = `${process.platform}-${process.arch}`;
   const savedBinDirEnv = process.env.AGENTS_CLI_BIN_DIR;
   const savedHome = process.env.HOME;
+  // os.homedir() reads USERPROFILE on Windows and HOME elsewhere, so pinning
+  // only HOME leaves resolveBinDir() pointing at the runner's real profile.
+  const savedUserProfile = process.env.USERPROFILE;
   let tmpHome: string;
 
   beforeEach(() => {
     tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-bindir-'));
     delete process.env.AGENTS_CLI_BIN_DIR;
     process.env.HOME = tmpHome;
+    process.env.USERPROFILE = tmpHome;
   });
 
   afterEach(() => {
@@ -170,6 +174,8 @@ describe('resolveBinDir', () => {
     else process.env.AGENTS_CLI_BIN_DIR = savedBinDirEnv;
     if (savedHome === undefined) delete process.env.HOME;
     else process.env.HOME = savedHome;
+    if (savedUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = savedUserProfile;
     fs.rmSync(tmpHome, { recursive: true, force: true });
   });
 
