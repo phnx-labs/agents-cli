@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { buildBootstrapScript, leaseAndRun } from './lease.js';
-import { LEASE_AGENT_MARKER } from './progress.js';
+import { LEASE_AGENT_MARKER, leasePhaseSentinel } from './progress.js';
 import type { DetectedRuntime } from './runtimes.js';
 
 describe('buildBootstrapScript', () => {
@@ -166,6 +166,40 @@ describe('buildBootstrapScript', () => {
       detected,
     });
     expect(script).toContain("agents run 'codex' 'fix it' --quiet --mode 'edit' --model 'gpt-5'");
+  });
+
+  it('emits ordered phase sentinels around each setup block', () => {
+    const script = buildBootstrapScript({ agent: 'claude', prompt: 'hi', runtimes: ['claude'], detected });
+    const order = ['sync', 'install', 'runtime', 'creds', 'copy-setup'].map((n) =>
+      script.indexOf(`echo '${leasePhaseSentinel(n)}'`),
+    );
+    for (const at of order) expect(at).toBeGreaterThan(-1);
+    // Strictly increasing — sentinels appear in block order.
+    for (let i = 1; i < order.length; i++) expect(order[i]).toBeGreaterThan(order[i - 1]);
+    // install sentinel precedes the node bootstrap; creds precedes the marker.
+    expect(script.indexOf(`echo '${leasePhaseSentinel('install')}'`)).toBeLessThan(script.indexOf('command -v node'));
+    expect(script.indexOf(`echo '${leasePhaseSentinel('copy-setup')}'`)).toBeLessThan(
+      script.indexOf(`echo '${LEASE_AGENT_MARKER}'`),
+    );
+  });
+
+  it('omits the copy-setup sentinel when copySetup is false (--bare)', () => {
+    const script = buildBootstrapScript({ agent: 'claude', prompt: 'hi', runtimes: ['claude'], detected, copySetup: false });
+    expect(script).not.toContain(`echo '${leasePhaseSentinel('copy-setup')}'`);
+    // The other sentinels still fire.
+    expect(script).toContain(`echo '${leasePhaseSentinel('sync')}'`);
+    expect(script).toContain(`echo '${leasePhaseSentinel('creds')}'`);
+  });
+
+  it('emits the joined-tailnet sentinel only for a tailscale lease', () => {
+    const pub = buildBootstrapScript({ agent: 'claude', prompt: 'hi', runtimes: ['claude'], detected });
+    expect(pub).not.toContain(`echo '${leasePhaseSentinel('joined-tailnet')}'`);
+    const ts = buildBootstrapScript({ agent: 'claude', prompt: 'hi', runtimes: ['claude'], detected, netMode: 'tailscale' });
+    expect(ts).toContain(`echo '${leasePhaseSentinel('joined-tailnet')}'`);
+    // It sits before the install block (the box joined during warmup).
+    expect(ts.indexOf(`echo '${leasePhaseSentinel('joined-tailnet')}'`)).toBeLessThan(
+      ts.indexOf(`echo '${leasePhaseSentinel('install')}'`),
+    );
   });
 
   it('single-quote-escapes a prompt containing quotes (no argv injection)', () => {

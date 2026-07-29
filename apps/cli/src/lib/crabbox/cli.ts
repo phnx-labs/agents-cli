@@ -30,6 +30,10 @@ export interface CrabboxBox {
   state: string;
   /** Public IPv4, when the provider exposes one. */
   ip?: string;
+  /** Tailnet IPv4 (100.x), when the box was leased with `--network tailscale`. */
+  tailscaleIPv4?: string;
+  /** Tailnet MagicDNS FQDN, when the box joined the tailnet. */
+  tailscaleFQDN?: string;
   profile?: string;
   class?: string;
   /** True when running + bootstrap-complete. */
@@ -81,6 +85,37 @@ export function pickLeaseBundleFromList(bundles: SecretsBundle[]): string | unde
     if (Object.keys(b.vars ?? {}).some((k) => LEASE_PROVIDER_TOKEN_KEYS.includes(k))) return b.name;
   }
   return undefined;
+}
+
+/**
+ * Env keys a bundle may use for a Tailscale auth key. crabbox reads
+ * `CRABBOX_TAILSCALE_AUTH_KEY` to join a leased box to the tailnet; we accept the
+ * common alternate names too and rename to that canonical key on injection.
+ */
+export const TAILSCALE_AUTH_KEY_NAMES = ['CRABBOX_TAILSCALE_AUTH_KEY', 'TAILSCALE_AUTH_KEY', 'TS_AUTHKEY'];
+
+/** The first bundle + key that declares a Tailscale auth key, or undefined. Pure over `bundles`. */
+export function pickTailscaleBundleFromList(bundles: SecretsBundle[]): { name: string; key: string } | undefined {
+  for (const b of bundles) {
+    const key = Object.keys(b.vars ?? {}).find((k) => TAILSCALE_AUTH_KEY_NAMES.includes(k));
+    if (key) return { name: b.name, key };
+  }
+  return undefined;
+}
+
+/** Process-lifetime memo so the tailscale bundle `listBundles()` scan runs at most once. */
+let tailscaleBundleMemo: { value: { name: string; key: string } | undefined } | undefined;
+function resolveTailscaleBundleMemo(): { name: string; key: string } | undefined {
+  if (!tailscaleBundleMemo) {
+    let value: { name: string; key: string } | undefined;
+    try {
+      value = pickTailscaleBundleFromList(listBundles());
+    } catch {
+      /* secrets unreadable — no auto-detect */
+    }
+    tailscaleBundleMemo = { value };
+  }
+  return tailscaleBundleMemo.value;
 }
 
 /** A resolved lease bundle: its name, plus (auto-detect only) the exact keys to inject. */
@@ -143,30 +178,57 @@ export function setLeaseSecretsBundle(name: string): void {
 
 /** Build the child env for crabbox, injecting a secrets bundle when configured. */
 export function crabboxEnv(opts: CrabboxOptions): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = { ...process.env };
+
   const resolved: ResolvedLeaseBundle | undefined = opts.secretsBundle
     ? { name: opts.secretsBundle }
     : resolveLeaseBundleMemo();
-  if (!resolved) return process.env;
-  try {
-    // Auto-detected bundle → inject ONLY the provider token key(s) (least
-    // privilege; an unrelated bundle can't leak its other secrets into crabbox).
-    // An explicitly-named bundle (env/config or `opts.secretsBundle`) injects
-    // whole — the user chose it. Same resolver `agents secrets exec` uses.
-    const { env } = readAndResolveBundleEnv(resolved.name, {
-      caller: 'agents run --lease (crabbox)',
-      keys: resolved.keys,
-      // --lease is headless by contract and crabboxEnv is called several times
-      // per run (list/wait/spawn/stop) — resolve broker-only so a keychain bundle
-      // can't pop repeated unwatched Touch ID sheets mid-lease.
-      agentOnly: isHeadlessSecretsContext(),
-    });
-    return { ...process.env, ...env };
-  } catch (e) {
-    throw new Error(
-      `Could not load secrets bundle "${resolved.name}" for crabbox: ${(e as Error).message}. ` +
-        `Fix the bundle (agents secrets view ${resolved.name}) or unset lease.secretsBundle to use crabbox's own login.`,
-    );
+  if (resolved) {
+    try {
+      // Auto-detected bundle → inject ONLY the provider token key(s) (least
+      // privilege; an unrelated bundle can't leak its other secrets into crabbox).
+      // An explicitly-named bundle (env/config or `opts.secretsBundle`) injects
+      // whole — the user chose it. Same resolver `agents secrets exec` uses.
+      const { env } = readAndResolveBundleEnv(resolved.name, {
+        caller: 'agents run --lease (crabbox)',
+        keys: resolved.keys,
+        // --lease is headless by contract and crabboxEnv is called several times
+        // per run (list/wait/spawn/stop) — resolve broker-only so a keychain bundle
+        // can't pop repeated unwatched Touch ID sheets mid-lease.
+        agentOnly: isHeadlessSecretsContext(),
+      });
+      Object.assign(out, env);
+    } catch (e) {
+      throw new Error(
+        `Could not load secrets bundle "${resolved.name}" for crabbox: ${(e as Error).message}. ` +
+          `Fix the bundle (agents secrets view ${resolved.name}) or unset lease.secretsBundle to use crabbox's own login.`,
+      );
+    }
   }
+
+  // Tailscale plumbing (F5): inject CRABBOX_TAILSCALE_AUTH_KEY from a bundle that
+  // declares a tailscale auth key, when the ambient env doesn't already set one.
+  // Best-effort and opt-in — a missing/unreadable tailscale bundle never fails a
+  // public-network lease; `crabboxWarmup({ netMode: 'tailscale' })` is what decides
+  // whether the key is actually used.
+  if (!out.CRABBOX_TAILSCALE_AUTH_KEY) {
+    const ts = resolveTailscaleBundleMemo();
+    if (ts) {
+      try {
+        const { env } = readAndResolveBundleEnv(ts.name, {
+          caller: 'agents run --lease (crabbox tailscale)',
+          keys: [ts.key],
+          agentOnly: isHeadlessSecretsContext(),
+        });
+        const value = env[ts.key];
+        if (value) out.CRABBOX_TAILSCALE_AUTH_KEY = value;
+      } catch {
+        /* best-effort — tailscale is opt-in plumbing, never blocks a public lease */
+      }
+    }
+  }
+
+  return out;
 }
 
 function normalizeBox(raw: Record<string, unknown>): CrabboxBox | null {
@@ -188,6 +250,8 @@ function normalizeBox(raw: Record<string, unknown>): CrabboxBox | null {
     lease: labels.lease ?? '',
     state,
     ip: publicNet.ipv4?.ip || undefined,
+    tailscaleIPv4: labels.tailscale_ipv4 || undefined,
+    tailscaleFQDN: labels.tailscale_fqdn || undefined,
     profile: labels.profile,
     class: labels.class,
     ready: status === 'running' && state === 'ready',
@@ -228,6 +292,13 @@ export interface WarmupOptions extends CrabboxOptions {
   code?: boolean;
   /** Cloud backend override (crabbox provider id, e.g. hetzner/aws/do). */
   provider?: string;
+  /**
+   * Network mode for the leased box. `'public'` (default) leases with a public
+   * IP; `'tailscale'` joins the box to the tailnet (`--network tailscale`,
+   * tagged `tag:crabbox`) so it is reachable only over Tailscale. The caller
+   * (command layer) decides WHEN to enable this — F5 here is plumbing only.
+   */
+  netMode?: 'public' | 'tailscale';
 }
 
 /**
@@ -247,6 +318,9 @@ export async function crabboxWarmup(opts: WarmupOptions = {}): Promise<CrabboxBo
   if (opts.profile) args.push('--profile', opts.profile);
   if (opts.provider) args.push('--provider', opts.provider);
   if (opts.code) args.push('--code');
+  // Tailscale plumbing (F5): join the box to the tailnet, tagged tag:crabbox.
+  // The auth key rides the child env as CRABBOX_TAILSCALE_AUTH_KEY (see crabboxEnv).
+  if (opts.netMode === 'tailscale') args.push('--network', 'tailscale', '-tailscale-tags', 'tag:crabbox');
 
   // Async spawn (not spawnSync): provisioning takes 30-90s and a blocking call
   // would freeze any caller's progress spinner. Output is captured, not streamed.

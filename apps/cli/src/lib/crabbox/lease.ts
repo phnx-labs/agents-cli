@@ -5,13 +5,31 @@
  * credentials → run the agent on the box (via `crabbox run`, which owns the
  * SSH) → tear the box down. The whole box-side sequence rides a single
  * `--script-stdin` body so the token contents never touch argv.
+ *
+ * ── Command-layer contract (RUSH-1920/1921/1924) ─────────────────────────────
+ * Exports the commands layer (exec.ts / lease.ts / ssh.ts) consumes:
+ *   • `buildBootstrapScript(opts)` — `opts.copySetup` (default TRUE; clear for
+ *     --bare) gates the `copy-setup` progress sentinel; `opts.netMode`
+ *     ('public' | 'tailscale', default 'public') adds the `joined-tailnet` step.
+ *   • `LeaseRunOptions.copySetup` / `LeaseRunOptions.netMode` — forwarded by
+ *     `leaseAndRun` (netMode → `crabboxWarmup`).
+ *   • `crabboxWarmup(opts.netMode)` — 'tailscale' leases onto the tailnet
+ *     (`--network tailscale -tailscale-tags tag:crabbox`); auth key rides the
+ *     child env as `CRABBOX_TAILSCALE_AUTH_KEY` (crabboxEnv, cli.ts).
+ *   • `CrabboxBox.tailscaleIPv4` / `CrabboxBox.tailscaleFQDN` — populated from
+ *     the box labels by `normalizeBox` (cli.ts).
+ *   • Step stream (progress.ts): `type LeaseStep`, the `onStep` router option,
+ *     and the self-contained `renderStepLine(step)` helper (the lib never prints).
+ *   • Setup-copy (setup-copy.ts): `copySetupToBox({ host, user?, port?,
+ *     secretsBundle?, userAgentsDir?, onData? }): Promise<CopySetupResult>` — the
+ *     push-from-local the command layer runs before the box run.
  */
 
 import type { AgentId } from '../types.js';
 import { crabboxFind, crabboxWarmup, crabboxWaitReady, crabboxRunScript, crabboxStop, type CrabboxBox } from './cli.js';
 import * as yaml from 'yaml';
 import { buildCredentialScript, buildHomeFileWriteScript, CLAUDE_TOKEN_REMOTE, type DetectedRuntime } from './runtimes.js';
-import { LEASE_AGENT_MARKER } from './progress.js';
+import { LEASE_AGENT_MARKER, leasePhaseSentinel } from './progress.js';
 
 /** Phase signal for a lease run, so the command layer can drive a progress UI. */
 export type LeasePhase =
@@ -38,6 +56,20 @@ export interface LeaseRunOptions {
   dispatchProfile?: LeaseDispatchProfile;
   /** Secrets bundle providing crabbox's provider token. */
   secretsBundle?: string;
+  /**
+   * Push the git-tracked subset of the local `~/.agents` onto the box before the
+   * run (default TRUE). The command layer sets `false` for `--bare`. When true,
+   * `buildBootstrapScript` emits the `copy-setup` progress sentinel; the actual
+   * push-from-local is `copySetupToBox` (setup-copy.ts), which the command layer
+   * runs before the box run.
+   */
+  copySetup?: boolean;
+  /**
+   * Network mode threaded to `crabboxWarmup` (default `'public'`). `'tailscale'`
+   * leases the box onto the tailnet and adds a `joined-tailnet` progress step.
+   * The command layer decides WHEN to enable it — this is plumbing only.
+   */
+  netMode?: 'public' | 'tailscale';
   onData?: (s: string) => void;
   /** Progress phases (warmup → ready → teardown) for a command-layer spinner. */
   onPhase?: (phase: LeasePhase) => void;
@@ -160,12 +192,30 @@ export function buildBootstrapScript(opts: LeaseRunOptions): string {
     .map((id) => `agents add ${q(runtimeInstallSpec(id, opts.dispatchProfile))} >/dev/null 2>&1 || true`)
     .join('\n');
 
+  // `echo`-ed phase sentinels (progress.ts) let the command layer drive a
+  // step-by-step UI. `createLeaseOutputRouter` swallows these lines and surfaces
+  // them as a structured step stream — they never appear as setup noise.
+  const step = (name: string) => `echo ${q(leasePhaseSentinel(name))}`;
+  const copySetup = opts.copySetup !== false; // default TRUE
+
   return [
     'set -uo pipefail',
+    // crabbox has finished its workspace resync by the time this script runs;
+    // the sync sentinel marks the transition out of that (crabbox-driven) phase.
+    step('sync'),
+    // Only meaningful on a tailnet lease — the box already joined during warmup.
+    opts.netMode === 'tailscale' ? step('joined-tailnet') : '',
+    step('install'),
     ENSURE_AGENTS_CLI,
+    step('runtime'),
     installRuntimes,
+    step('creds'),
     credScript,
     profileScript,
+    // copy-setup is a push-from-local (copySetupToBox), performed by the command
+    // layer before the box run; this sentinel marks its slot in the progress
+    // stream. Gated by copySetup (the command layer clears it for --bare).
+    copySetup ? step('copy-setup') : '',
     // Marker on its own line: the command layer shows everything before this as
     // setup progress and everything after (the agent's output) verbatim.
     `echo ${q(LEASE_AGENT_MARKER)}`,
@@ -195,6 +245,7 @@ export async function leaseAndRun(opts: LeaseRunOptions): Promise<LeaseRunResult
       profile: opts.profile,
       provider: opts.backend,
       secretsBundle: opts.secretsBundle,
+      netMode: opts.netMode,
     });
     await crabboxWaitReady(box.slug, { secretsBundle: opts.secretsBundle });
   }
