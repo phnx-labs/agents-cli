@@ -35,7 +35,9 @@ describe('codex-home SUN_LEN helpers', () => {
 
   it('derives a short, per-version home under ~/.agents/.codex-homes', () => {
     const short = shortCodexHome('/Users/muqsit/.agents', '0.143.0');
-    expect(short).toBe('/Users/muqsit/.agents/.codex-homes/0.143.0/.codex');
+    // path.join is platform-native (backslashes on Windows), so compare against
+    // the same join rather than a hardcoded POSIX literal.
+    expect(short).toBe(path.join('/Users/muqsit/.agents', '.codex-homes', '0.143.0', '.codex'));
     expect(codexHomeOverflowsSunLen(short)).toBe(false);
   });
 });
@@ -77,7 +79,12 @@ describe('resolveCodexHome', () => {
     expect(out).toBe(shortHome);
   });
 
-  it('migrates an overflowing home to a short real dir and symlinks the old path', () => {
+  // Skipped on Windows: this asserts the migrated short home fits under SUN_LEN,
+  // which assumes a short tmp base — true on macOS/Linux CI, but Windows runners
+  // use a long `D:\a\_temp\...` prefix that itself overflows. SUN_LEN is a
+  // macOS-only Unix-socket constraint and resolveCodexHome no-ops off darwin, so
+  // there is nothing Windows-specific to cover here.
+  it.skipIf(process.platform === 'win32')('migrates an overflowing home to a short real dir and symlinks the old path', () => {
     const out = resolveCodexHome(versionedHome, agentsUserDir, '0.143.0', 'darwin');
     const expectedShort = shortCodexHome(agentsUserDir, '0.143.0');
 
