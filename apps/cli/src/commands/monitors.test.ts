@@ -73,14 +73,14 @@ function run(home: string, args: string[]): ReturnType<typeof spawnSync> {
       // os.homedir() reads USERPROFILE on Windows, so HOME alone leaves the
       // spawned CLI resolving the real profile ('agents-cli is not set up').
       USERPROFILE: home,
-      // The pinned PATH keeps the run hermetic on POSIX; the running node's own
-      // directory is prepended so monitor fixtures can shell out to `node`
-      // (nvm installs it outside the pinned dirs). It cannot be applied on
+      // The pinned PATH keeps the run hermetic on POSIX — it must NOT be
+      // widened to include the running node's dir, because that also exposes a
+      // second globally-installed `agents` (e.g. /opt/homebrew/bin) and the CLI
+      // then prints "Multiple agents-cli installs detected" on stderr. Fixtures
+      // that need node spell it absolutely instead. The pin can't apply on
       // Windows, where those directories don't exist and the child would lose
-      // node/git entirely (the failure showed as empty stderr).
-      PATH: process.platform === 'win32'
-        ? (process.env.PATH ?? '')
-        : `${path.dirname(process.execPath)}:/usr/local/bin:/usr/bin:/bin`,
+      // node/git entirely (that failure showed as empty stderr).
+      PATH: process.platform === 'win32' ? (process.env.PATH ?? '') : '/usr/local/bin:/usr/bin:/bin',
       AGENTS_SKIP_MIGRATION: '1',
       FORCE_COLOR: '0',
       NO_COLOR: '1',
@@ -132,7 +132,16 @@ describe('monitors inspection JSON and stderr', () => {
       // Unquoted: on Windows the quotes survive into the argument and node
       // looks for a path with literal quote characters in it. mkdtemp paths
       // carry no spaces on either platform, so they aren't needed.
-      source: { type: 'command', command: `node ${emitter}` },
+      //
+      // POSIX spells node absolutely because the pinned PATH above deliberately
+      // excludes it. Windows can't: process.execPath there is
+      // "C:\Program Files\nodejs\node.exe" and cmd.exe mangles a command line
+      // opening with a quoted path containing spaces — but PATH is inherited on
+      // Windows, so the bare name resolves.
+      source: {
+        type: 'command',
+        command: process.platform === 'win32' ? `node ${emitter}` : `${process.execPath} ${emitter}`,
+      },
       condition: { mode: 'match', match: 'fail' },
       action: { type: 'notify', notifyChannel: 'telegram' },
     });
