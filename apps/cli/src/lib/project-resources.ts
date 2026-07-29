@@ -289,7 +289,10 @@ function syncProjectSubagents(
   if (target.finalize && (syncedNames.length > 0 || hadManagedTarget)) {
     target.finalize(dir, syncedNames);
     for (const entry of target.finalizeOccupied?.(dir) ?? []) {
-      manifestPaths.add(path.relative(agentRoot, entry.path));
+      // Same normalization as record(): this is the one manifest write that
+      // doesn't funnel through it (the parent subagent index, e.g. Kimi's
+      // agents/_agents-cli.yaml).
+      manifestPaths.add(toPosixRel(path.relative(agentRoot, entry.path)));
     }
   }
 }

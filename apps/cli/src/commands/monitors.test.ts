@@ -70,8 +70,13 @@ function run(home: string, args: string[]): ReturnType<typeof spawnSync> {
     env: {
       ...process.env,
       HOME: home,
+      // os.homedir() reads USERPROFILE on Windows, so HOME alone leaves the
+      // spawned CLI resolving the real profile ('agents-cli is not set up').
       USERPROFILE: home,
-      PATH: '/usr/local/bin:/usr/bin:/bin',
+      // The pinned PATH keeps the run hermetic on POSIX. It cannot be applied
+      // on Windows, where those directories don't exist and the child would
+      // lose node/git entirely (the failure showed as empty stderr).
+      PATH: process.platform === 'win32' ? (process.env.PATH ?? '') : '/usr/local/bin:/usr/bin:/bin',
       AGENTS_SKIP_MIGRATION: '1',
       FORCE_COLOR: '0',
       NO_COLOR: '1',
