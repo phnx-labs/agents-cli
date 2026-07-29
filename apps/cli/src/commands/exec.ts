@@ -14,7 +14,7 @@ import type { DetectedRuntime } from '../lib/crabbox/runtimes.js';
 import type { ResolvedRunDefaults } from '../lib/run-defaults.js';
 import { setHelpSections } from '../lib/help.js';
 import { isInteractiveTerminal, isPromptCancelled, requireInteractiveSelection } from './utils.js';
-import { getSystemAgentsDir } from '../lib/state.js';
+import { getUserAgentsDir } from '../lib/state.js';
 import type { CrabboxBox } from '../lib/crabbox/cli.js';
 import { parseLoopInterval } from '../lib/loop.js';
 import type { RotateResult } from '../lib/rotate.js';
@@ -202,9 +202,9 @@ export function addAlwaysFreshRepo(repos: string[], repoRoot: string): string[] 
   return repos.includes(repoRoot) ? repos : [...repos, repoRoot];
 }
 
-/** Path to the always-fresh state file under the system agents dir. */
+/** Path to the always-fresh state file under the USER agents dir (CLI-written per-user preference, never the maintainer-owned `.system` repo). */
 export function leaseFreshReposPath(): string {
-  return path.join(getSystemAgentsDir(), 'lease-fresh-repos.json');
+  return path.join(getUserAgentsDir(), 'lease-fresh-repos.json');
 }
 
 /** Read the remembered always-fresh repo roots (empty on any read/parse error). */
