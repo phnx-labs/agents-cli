@@ -129,7 +129,10 @@ describe('monitors inspection JSON and stderr', () => {
     writeMonitor(home, {
       name: 'ci',
       enabled: true,
-      source: { type: 'command', command: `node "${emitter}"` },
+      // Unquoted: on Windows the quotes survive into the argument and node
+      // looks for a path with literal quote characters in it. mkdtemp paths
+      // carry no spaces on either platform, so they aren't needed.
+      source: { type: 'command', command: `node ${emitter}` },
       condition: { mode: 'match', match: 'fail' },
       action: { type: 'notify', notifyChannel: 'telegram' },
     });
