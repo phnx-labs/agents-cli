@@ -228,7 +228,9 @@ describe('buildBootstrapScript', () => {
   });
 });
 
-describe('leaseAndRun reused crabbox boxes', () => {
+// POSIX-only: stands up a `#!/bin/sh` fake crabbox on PATH, which Windows can
+// neither resolve nor execute (see crabbox/cli.test.ts for the same pattern).
+describe.skipIf(process.platform === 'win32')('leaseAndRun reused crabbox boxes', () => {
   const detected: DetectedRuntime[] = [
     { id: 'claude', label: 'Claude Code', email: 'a@b.com', signedIn: true, credPath: null },
   ];

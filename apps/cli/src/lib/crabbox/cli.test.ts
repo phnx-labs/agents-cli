@@ -15,6 +15,13 @@ import {
 } from './cli.js';
 import type { SecretsBundle } from '../secrets/bundles.js';
 
+// Suites that stand up a fake `crabbox` on PATH are POSIX-only: the fake is a
+// `#!/bin/sh` script with no .cmd/.exe extension, which Windows can neither
+// resolve nor execute, so findCrabbox (cli.ts:74) throws "crabbox is not
+// installed or not on PATH" before the behavior under test runs. The
+// pure-function suites in this file still run everywhere.
+const describePosix = describe.skipIf(process.platform === 'win32');
+
 describe('pickLeaseBundleFromList', () => {
   const bundle = (name: string, keys: string[]): SecretsBundle =>
     ({ name, vars: Object.fromEntries(keys.map((k) => [k, 'x'])) }) as SecretsBundle;
@@ -128,7 +135,7 @@ describe('reapSafeOrphans', () => {
   });
 });
 
-describe('normalizeBox tailscale fields (via crabboxList)', () => {
+describePosix('normalizeBox tailscale fields (via crabboxList)', () => {
   function withFakeCrabbox(listJson: unknown, fn: (dir: string) => void) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crabbox-ts-'));
     const listPath = path.join(dir, 'boxes.json');
@@ -191,7 +198,7 @@ describe('normalizeBox tailscale fields (via crabboxList)', () => {
   });
 });
 
-describe('crabboxList timeout — a slow provider never hangs an ambient command', () => {
+describePosix('crabboxList timeout — a slow provider never hangs an ambient command', () => {
   it('throws (does not hang) when `crabbox list` exceeds timeoutMs', () => {
     // Fake crabbox: --help is instant (findCrabbox passes), `list` blocks 30s.
     // With timeoutMs=400 the spawn is killed and we throw a clear message fast —
@@ -217,7 +224,7 @@ describe('crabboxList timeout — a slow provider never hangs an ambient command
   });
 });
 
-describe('crabboxWarmup netMode', () => {
+describePosix('crabboxWarmup netMode', () => {
   // A fake crabbox that records argv for `warmup` and returns a fresh box on `list`.
   function withRecordingCrabbox(fn: (log: string) => Promise<void>): Promise<void> {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crabbox-warm-'));
