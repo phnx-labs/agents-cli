@@ -309,6 +309,7 @@ import os
 import re
 import sys
 import json
+import shlex
 import socket
 from datetime import datetime, timezone
 
@@ -343,23 +344,51 @@ def first_line(text, limit=140):
     return ""
 
 
+def _subcommand(tokens, tool):
+    """First non-flag token after \`tool\`, i.e. its subcommand (skips -C <path>,
+    -c <cfg>, and other leading flags). None if \`tool\` isn't the invoked command."""
+    try:
+        i = tokens.index(tool) + 1
+    except ValueError:
+        return None, []
+    while i < len(tokens):
+        t = tokens[i]
+        if t in ("-C", "-c", "--git-dir", "--work-tree"):
+            i += 2  # flag that consumes the next token
+            continue
+        if t.startswith("-"):
+            i += 1
+            continue
+        return t, tokens[i + 1:]
+    return None, []
+
+
 def classify_bash(command):
-    """Return (event, url_hint_group) for a milestone Bash command, else None."""
-    c = command or ""
-    # Order matters: check the most specific patterns first.
-    # Allow flags between the verb and subcommand (e.g. \`git -C /repo worktree add\`).
-    if re.search(r"\\bgh\\b.*\\bpr\\s+create\\b", c):
-        return "pr.opened"
-    if re.search(r"\\bgh\\b.*\\bpr\\s+merge\\b", c):
-        return "pr.merged"
-    if re.search(r"\\bgit\\b.*\\bworktree\\s+add\\b", c):
-        return "worktree.created"
-    if re.search(r"\\bgit\\b.*\\bworktree\\s+remove\\b", c):
-        return "worktree.removed"
-    if re.search(r"\\bgit\\b.*\\bcommit\\b", c):
+    """Return the milestone event for a git/gh command, else None. Tokenizes so a
+    path like \`git diff -- src/commit.ts\` is not mistaken for a commit."""
+    try:
+        tokens = shlex.split(command or "")
+    except Exception:
+        tokens = (command or "").split()
+
+    verb, rest = _subcommand(tokens, "git")
+    if verb == "worktree":
+        sub = rest[0] if rest else ""
+        if sub == "add":
+            return "worktree.created"
+        if sub == "remove":
+            return "worktree.removed"
+    elif verb == "commit":
         return "commit.created"
-    if re.search(r"\\bgit\\b.*\\bpush\\b", c):
+    elif verb == "push":
         return "pushed"
+
+    verb, rest = _subcommand(tokens, "gh")
+    if verb == "pr" and rest:
+        if rest[0] == "create":
+            return "pr.opened"
+        if rest[0] == "merge":
+            return "pr.merged"
     return None
 
 

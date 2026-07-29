@@ -216,6 +216,22 @@ describe('real activity-log hook (Python)', () => {
     expect(readSessionActivity('sess-6', activityDirFor(home))).toHaveLength(0);
   });
 
+  it.runIf(hasPython)('does not mistake a path for a git subcommand (tokenized classify)', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-fp-'));
+    // A path containing "commit"/"push" must NOT trigger commit.created/pushed.
+    runHook(home, {
+      session_id: 'fp', hook_event_name: 'PostToolUse', tool_name: 'Bash',
+      tool_input: { command: 'git diff -- src/commit.ts src/push.ts' }, tool_response: {},
+    });
+    expect(readSessionActivity('fp', activityDirFor(home))).toHaveLength(0);
+    // But a real `git -C <path> commit` (leading flags) is still detected.
+    runHook(home, {
+      session_id: 'fp', hook_event_name: 'PostToolUse', tool_name: 'Bash',
+      tool_input: { command: 'git -C /repo commit -m "fix"' }, tool_response: {},
+    });
+    expect(readSessionActivity('fp', activityDirFor(home)).map((e) => e.event)).toEqual(['commit.created']);
+  });
+
   it.runIf(hasPython)('skips sub-agent tool calls (agent_type gate)', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-subagent-'));
     runHook(home, {
