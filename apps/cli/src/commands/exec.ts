@@ -18,6 +18,7 @@ import { parseLoopInterval } from '../lib/loop.js';
 import type { RotateResult } from '../lib/rotate.js';
 import { AGENTS } from '../lib/agents.js';
 import { recordDispatchedRun } from '../lib/audit/log.js';
+import { maybeShowStarNudge } from '../lib/star-nudge.js';
 import { warnUnpushedWork, shouldWarnUnpushed } from '../lib/warn-unpushed.js';
 import { isHostPinned, pinHostKey, managedKnownHostsPath } from '../lib/devices/known-hosts.js';
 import { sshResolve, type SshGResult } from '../lib/hosts/ssh-config.js';
@@ -2376,6 +2377,9 @@ export function registerRunCommand(program: Command): void {
         // Governance chokepoint (#347): every dispatched run finalizes here.
         // ONE tamper-evident audit record per run — non-fatal by contract.
         recordDispatchedRun({ agent: ranAgent, version: ranVersion ?? 'unknown', mode, cwd, exitCode });
+        // First-successful-run star nudge (one-time, non-nagging). Only on a
+        // clean run, and never when output is machine-readable/quiet.
+        if (exitCode === 0) maybeShowStarNudge({ quiet: options.json || options.quiet });
         process.exit(exitCode);
       } catch (err) {
         cleanupWorkflowMcpConfig();

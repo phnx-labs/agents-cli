@@ -26,6 +26,7 @@ import { mailboxDir, enqueue } from '../lib/mailbox.js';
 import { resolveProvider } from '../lib/cloud/registry.js';
 import type { CloudProviderId, DispatchOptions } from '../lib/cloud/types.js';
 import { emit } from '../lib/events.js';
+import { maybeShowStarNudge } from '../lib/star-nudge.js';
 import { shareRuntimeEnv } from '../lib/share/config.js';
 import { runSupervisor } from '../lib/teams/supervisor.js';
 import { debug } from '../lib/teams/debug.js';
@@ -1864,6 +1865,8 @@ export function registerTeamsCommands(program: Command): void {
 
       if (result.stoppedBy === 'drained') {
         console.log(chalk.green(`Factory drained in ${elapsed}s (${result.waves} waves).`));
+        // First-successful-team star nudge (one-time, non-nagging).
+        maybeShowStarNudge({ quiet: opts.json });
       } else if (result.stoppedBy === 'max-waves') {
         console.error(chalk.yellow(`Hit --max-waves=${maxWaves}; stopping. Re-run to continue.`));
       } else if (result.stoppedBy === 'signal') {
