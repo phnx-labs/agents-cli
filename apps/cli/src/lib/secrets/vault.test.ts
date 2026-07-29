@@ -267,7 +267,11 @@ describe('vault create and join safety', () => {
     _clearVaultDataCacheForTest();
     expect(vaultGetItem('agents-cli.secrets.prod.FIRST')).toBe('first-value');
     expect(vaultGetItem('agents-cli.secrets.prod.SECOND')).toBe('second-value');
-    expect((fs.statSync(vaultPath()).mode & 0o777)).toBe(0o600);
+    // POSIX mode bits only: Windows reports 0o666 regardless of the chmod, so
+    // the 0600 guarantee is asserted where it is actually enforced.
+    if (process.platform !== 'win32') {
+      expect((fs.statSync(vaultPath()).mode & 0o777)).toBe(0o600);
+    }
   }, 90_000);
 
   it('refuses to replace an existing vault on join without overwrite', () => {
