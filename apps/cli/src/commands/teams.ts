@@ -1865,8 +1865,13 @@ export function registerTeamsCommands(program: Command): void {
 
       if (result.stoppedBy === 'drained') {
         console.log(chalk.green(`Factory drained in ${elapsed}s (${result.waves} waves).`));
-        // First-successful-team star nudge (one-time, non-nagging).
-        maybeShowStarNudge({ quiet: opts.json });
+        // First-successful-team star nudge (one-time, non-nagging). "drained"
+        // only means nothing is pending/running — teammates may have failed — so
+        // gate on a clean drain (failed === 0). A team where every teammate
+        // failed is not the success this nudge celebrates.
+        if ((result.failed ?? 0) === 0) {
+          maybeShowStarNudge({ quiet: opts.json });
+        }
       } else if (result.stoppedBy === 'max-waves') {
         console.error(chalk.yellow(`Hit --max-waves=${maxWaves}; stopping. Re-run to continue.`));
       } else if (result.stoppedBy === 'signal') {

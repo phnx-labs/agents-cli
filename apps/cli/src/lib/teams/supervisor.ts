@@ -54,6 +54,13 @@ export interface SupervisorResult {
   waves: number;
   stoppedBy: 'drained' | 'max-waves' | 'signal' | 'callback' | 'budget';
   elapsed_ms: number;
+  /**
+   * Number of teammates in the `failed` state when the team drained. Only set
+   * for `stoppedBy === 'drained'`. A drained DAG means nothing is pending or
+   * running — NOT that everything succeeded — so callers that treat "drained"
+   * as success (e.g. a completion nudge) must check `failed === 0` first.
+   */
+  failed?: number;
   /** Set when `stoppedBy === 'budget'` — the breach that terminated the team. */
   budgetBreach?: BreachInfo;
 }
@@ -145,7 +152,8 @@ export async function runSupervisor(
         (a) => a.status === 'pending' || a.status === 'running'
       );
       if (!stillLive) {
-        return { waves: wave, stoppedBy: 'drained', elapsed_ms: Date.now() - startedAt };
+        const failed = afterCallback.filter((a) => a.status === 'failed').length;
+        return { waves: wave, stoppedBy: 'drained', failed, elapsed_ms: Date.now() - startedAt };
       }
       if (stopSignal) {
         return { waves: wave, stoppedBy: 'signal', elapsed_ms: Date.now() - startedAt };
