@@ -117,7 +117,14 @@ describe('monitors inspection JSON and stderr', () => {
     writeMonitor(home, {
       name: 'ci',
       enabled: true,
-      source: { type: 'command', command: "printf 'build fail\\nnext\\n'" },
+      // Emit via node rather than printf: the command runs through the host
+      // shell, and cmd.exe has no printf — it failed with "'printf' is not
+      // recognized". Spell node as process.execPath so it resolves under the
+      // pinned hermetic PATH above too (which omits nvm's bin dir).
+      source: {
+        type: 'command',
+        command: `"${process.execPath}" -e "process.stdout.write('build fail\\nnext\\n')"`,
+      },
       condition: { mode: 'match', match: 'fail' },
       action: { type: 'notify', notifyChannel: 'telegram' },
     });
