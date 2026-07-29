@@ -119,6 +119,19 @@ export type EventType =
   // Sessions
   | 'session.start'
   | 'session.end'
+  // Agent activity (emitted at hook time; see lib/activity.ts). These share the
+  // one event vocabulary so operational and agent-semantic events read as a
+  // single stream via lib/event-stream.ts.
+  | 'plan.created'
+  | 'pr.opened'
+  | 'pr.merged'
+  | 'worktree.created'
+  | 'worktree.removed'
+  | 'commit.created'
+  | 'pushed'
+  | 'subagent.spawned'
+  | 'artifact.created'
+  | 'file.edited'
   // Generic
   | 'error'
   | 'warn'

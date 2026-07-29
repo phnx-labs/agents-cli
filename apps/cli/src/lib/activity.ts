@@ -23,6 +23,9 @@ import * as yaml from 'yaml';
 import chalk from 'chalk';
 import { relTime, truncate } from './format.js';
 import { getActivityDir, getUserAgentsDir } from './state.js';
+// Type-only import: no runtime dependency on events.ts, so no import cycle
+// (events.ts / event-stream.ts import THIS module at runtime).
+import type { EventRecord } from './events.js';
 
 /** Recognizable milestone events, ordered first in any activity lane. */
 export type MilestoneEvent =
@@ -245,6 +248,48 @@ export function collapseActivity(events: ActivityEvent[]): CollapsedActivity {
     }
   }
   return { milestones, counts, subagentCount };
+}
+
+// ---------------------------------------------------------------------------
+// Bridge into the unified event stream (lib/event-stream.ts)
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalize one activity event into the shared {@link EventRecord} shape so the
+ * agent-semantic stream reads through the same reader as operational events.
+ * `module` is stamped `activity` so `--module` filters partition the two cleanly.
+ */
+export function activityEventToRecord(ev: ActivityEvent): EventRecord {
+  return {
+    ts: ev.ts,
+    tz: '',
+    tzName: '',
+    hostname: ev.host,
+    platform: process.platform,
+    arch: process.arch,
+    pid: 0,
+    ppid: 0,
+    event: ev.event as EventRecord['event'],
+    level: 'info',
+    caller: 'hook',
+    session: ev.sessionId,
+    osUser: ev.agent ?? 'agent',
+    transport: 'local',
+    // payload
+    agent: ev.agent,
+    sessionId: ev.sessionId,
+    cwd: ev.cwd,
+    module: 'activity',
+    tool: ev.tool,
+    detail: ev.detail,
+    url: ev.url,
+    tier: ev.tier,
+  } as EventRecord;
+}
+
+/** Read recent activity across sessions as unified {@link EventRecord}s. */
+export function readActivityAsEventRecords(opts: RecentActivityOptions = {}): EventRecord[] {
+  return readRecentActivity(opts).map(activityEventToRecord);
 }
 
 // ---------------------------------------------------------------------------
