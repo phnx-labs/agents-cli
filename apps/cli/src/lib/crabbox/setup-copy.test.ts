@@ -102,7 +102,12 @@ describe('buildSetupRsyncArgs', () => {
   });
 });
 
-describe('copySetupToBox', () => {
+// Skipped on Windows: the fake transport below is a set of `#!/bin/sh` scripts
+// dropped on PATH without a .cmd/.exe extension, which Windows cannot execute or
+// resolve — every case fails with "crabbox is not installed or not on PATH"
+// before it reaches the behavior under test. copySetupToBox drives rsync/ssh,
+// which are POSIX-only on this path anyway.
+describe.skipIf(process.platform === 'win32')('copySetupToBox', () => {
   /**
    * Install a fake `crabbox` (emits the ssh command for `ssh --id`), `rsync`, and
    * `ssh` on PATH — matching the real transport: copySetupToBox first asks crabbox
