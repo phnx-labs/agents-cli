@@ -19,8 +19,10 @@ import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { execFileSync } from 'child_process';
 import {
   decideCopyCredsGate,
+  isInsideGitWorkTree,
   parseRunAccountPickerRequest,
   runAccountPickerConflicts,
 } from './exec.js';
@@ -183,6 +185,29 @@ describe('decideCopyCredsGate — allows after the self-pin path pins the alias'
       );
       expect(decision).toEqual({ allowed: true, pinTarget: '10.0.0.5', selfPinned: false });
       expect(selfPinCalls).toBe(0); // already pinned → no scan
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('isInsideGitWorkTree — the --lease/--box pre-flight sync guard', () => {
+  it('is true inside a real git work tree', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lease-git-'));
+    try {
+      execFileSync('git', ['-C', dir, 'init', '-q']);
+      expect(isInsideGitWorkTree(dir)).toBe(true);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('is false in a plain directory that is not a git repo', () => {
+    // crabbox builds its sync file list with `git ls-files`, which exits 128
+    // here; the guard must catch that before a box is provisioned and billed.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lease-nogit-'));
+    try {
+      expect(isInsideGitWorkTree(dir)).toBe(false);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

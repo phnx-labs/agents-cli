@@ -25,6 +25,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { randomUUID } from 'crypto';
+import { spawnSync } from 'child_process';
 
 interface ExecCommandActionOptions {
   mode: ExecMode;
@@ -143,6 +144,22 @@ export interface CopyCredsGateHost {
   address?: string;
   /** `devices` = registered Tailscale fleet host; `local` = ssh-config/inline. */
   provider?: string;
+}
+
+/**
+ * Whether `cwd` is inside a git work tree.
+ *
+ * `--lease` / `--box` sync the working directory to the box through crabbox,
+ * which enumerates the files to copy with `git ls-files`. Outside a git repo
+ * that exits 128 (`fatal: not a git repository`) and the whole run dies at
+ * "build sync file list: exit status 128" — AFTER the box is provisioned and
+ * billed. Checking this up front lets the caller fail fast, before provisioning.
+ */
+export function isInsideGitWorkTree(cwd: string): boolean {
+  const r = spawnSync('git', ['-C', cwd, 'rev-parse', '--is-inside-work-tree'], {
+    encoding: 'utf-8',
+  });
+  return r.status === 0 && r.stdout.trim() === 'true';
 }
 
 /** Outcome of the `--copy-creds` security gate (RUSH-1767). */
@@ -659,6 +676,20 @@ export function registerRunCommand(program: Command): void {
         }
         const backend = typeof options.lease === 'string' ? options.lease : undefined;
 
+        // crabbox syncs this directory to the box via `git ls-files`; outside a
+        // git repo that fails with "build sync file list: exit status 128" — but
+        // only AFTER the box is provisioned and billed. Fail fast here instead.
+        const leaseCwd = options.cwd ?? process.cwd();
+        if (!isInsideGitWorkTree(leaseCwd)) {
+          console.error(
+            chalk.red(
+              `${options.box ? '--box' : '--lease'} syncs the working directory to the box, but ${leaseCwd} is not a git repository.`,
+            ),
+          );
+          console.error(chalk.yellow(`Run from inside a git repo, or initialize one: (cd ${leaseCwd} && git init)`));
+          process.exit(1);
+        }
+
         // First-run: no provider credential resolves (no env var, no config, no
         // detectable bundle) → guide the user through one-time setup, then continue.
         const { resolveLeaseBundle } = await import('../lib/crabbox/cli.js');
@@ -678,7 +709,6 @@ export function registerRunCommand(program: Command): void {
 
         const detected = await detectSignedInRuntimes();
         const [agentName, rawLeaseVersion] = normalizedAgentSpec.split('@');
-        const leaseCwd = options.cwd ?? process.cwd();
         let runtime: AgentId | null = null;
         let credentialRuntimes: AgentId[] = [];
         let dispatchProfile: import('../lib/crabbox/lease.js').LeaseDispatchProfile | undefined;
