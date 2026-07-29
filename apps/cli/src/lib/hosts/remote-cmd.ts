@@ -133,6 +133,9 @@ export const RUN_OPTION_FORWARDING: Record<string, RunOptionForwarding> = {
   lease: 'local-only',
   box: 'local-only',
   keepBox: 'local-only',
+  reuse: 'local-only', // reuse-picker choice for --lease; the lease path is always local
+  bare: 'local-only', // skips the local setup-copy push; lease-only concern
+  tailscale: 'local-only', // --tailscale/--no-tailscale gate the lease net mode; never forwarded
   copyCreds: 'local-only', // copies creds TO the host before dispatch — local concern only
   authCheck: 'local-only', // --no-auth-check gates the local interactive login preflight; --host runs skip that preflight entirely
 };
