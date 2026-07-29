@@ -83,8 +83,11 @@ import { loadFleetStats, readStatsCache } from '../lib/devices/stats-cache.js';
 import { checkSyncStatus, countOrphans } from '../lib/drift.js';
 import { checkAllClis } from '../lib/teams/agents.js';
 import { buildRemoteAgentsInvocation } from '../lib/hosts/remote-cmd.js';
-import { sshExec, sshExecAsync } from '../lib/ssh-exec.js';
+import { sshExec, sshExecAsync, SSH_OPTS } from '../lib/ssh-exec.js';
 import { ALL_AGENT_IDS } from '../lib/agents.js';
+import { crabboxList, crabboxFind, type CrabboxBox } from '../lib/crabbox/cli.js';
+import { CRABBOX_SSH_USER, CRABBOX_SSH_PORT } from '../lib/crabbox/setup-copy.js';
+import { boxAddress, boxStatus, fmtIdleShort, fmtExpiresShort } from './lease.js';
 import {
   formatCheckedAge,
   isDeadVerdict,
@@ -200,6 +203,77 @@ function renderDeviceTable(
     );
   }
   return lines;
+}
+
+/**
+ * Live "Leased boxes" section for `agents devices` (F4, RUSH-1923), computed
+ * from `crabboxList()` — these are ephemeral crabbox leases, NEVER written into
+ * the device registry. Returns [] when crabbox is unavailable / has no creds /
+ * reports no boxes, so the section is simply omitted. `nowSecs` is injected so
+ * the row formatting is deterministic in tests.
+ */
+export function renderLeasedBoxesSection(boxes: CrabboxBox[], nowSecs: number): string[] {
+  if (boxes.length === 0) return [];
+  const lines: string[] = [];
+  lines.push('');
+  lines.push(chalk.bold('Leased boxes') + chalk.gray(' (ephemeral · via crabbox)'));
+  lines.push(
+    '  ' +
+      chalk.gray('box'.padEnd(16)) +
+      chalk.gray('class'.padEnd(10)) +
+      chalk.gray('address'.padEnd(24)) +
+      chalk.gray('status'.padEnd(9)) +
+      chalk.gray('idle'.padEnd(12)) +
+      chalk.gray('expires'),
+  );
+  for (const b of boxes) {
+    const addr = boxAddress(b) ?? '—';
+    lines.push(
+      '  ' +
+        chalk.cyan(b.slug.padEnd(16)) +
+        (b.class ?? '?').padEnd(10) +
+        addr.padEnd(24) +
+        boxStatus(b).padEnd(9) +
+        chalk.gray(fmtIdleShort(b, nowSecs).padEnd(12)) +
+        chalk.gray(fmtExpiresShort(b, nowSecs)),
+    );
+  }
+  lines.push(chalk.gray('  Reuse a box with `agents run --box <slug>` · stop with `agents lease stop <slug>`'));
+  return lines;
+}
+
+/** The leased-box rows for the devices list, or [] when crabbox can't be read. */
+function loadLeasedBoxesSection(): string[] {
+  try {
+    const boxes = crabboxList({ secretsBundle: process.env.AGENTS_LEASE_SECRETS_BUNDLE });
+    return renderLeasedBoxesSection(boxes, Math.floor(Date.now() / 1000));
+  } catch {
+    return []; // crabbox not installed / no provider creds — omit the section
+  }
+}
+
+/**
+ * `agents ssh <slug>` targeting a leased crabbox box: ssh to the box's tailnet
+ * address (or public IP) as `crabbox@…` on port 2222, reusing the hardened
+ * SSH_OPTS baseline. Returns false when `name` is not a known crabbox slug so
+ * the caller can fall through to the normal "Unknown device" error.
+ */
+function trySshLeasedBox(name: string, cmd: string[]): boolean {
+  let box: CrabboxBox | null;
+  try {
+    box = crabboxFind(name, { secretsBundle: process.env.AGENTS_LEASE_SECRETS_BUNDLE });
+  } catch {
+    return false; // crabbox unavailable — not a leased-box target
+  }
+  if (!box) return false;
+  const addr = boxAddress(box);
+  if (!addr) {
+    console.error(chalk.red(`Leased box '${name}' has no reachable address yet (status: ${boxStatus(box)}).`));
+    process.exit(1);
+  }
+  const args = [...SSH_OPTS, '-p', String(CRABBOX_SSH_PORT), `${CRABBOX_SSH_USER}@${addr}`, ...cmd];
+  const res = spawnSync('ssh', args, { stdio: 'inherit' });
+  process.exit(res.status ?? 1);
 }
 
 /** Resolve a device or exit with a clear error. */
@@ -759,6 +833,9 @@ Typical workflow:
     if (freshness?.servedFromCache && freshness.oldestFetchedAt != null) {
       console.log(chalk.gray(`  updated ${formatCheckedAge(freshness.oldestFetchedAt)} — pass --refresh (--live) for a live probe`));
     }
+    // Ephemeral crabbox leases live alongside the registered fleet but are never
+    // written into the registry — surface them as their own live section.
+    for (const line of loadLeasedBoxesSection()) console.log(line);
   };
 
   devicesCmd.action(runList);
@@ -1026,6 +1103,9 @@ secrets bundle via an askpass shim — the password never touches argv.
       // A bare unregistered alias still errors as "Unknown device".
       const device = resolveDeviceTarget(name, await loadDevices());
       if (!device) {
+        // Not a registered device — it may be a leased crabbox box slug. ssh into
+        // it directly (crabbox@<tailnet|ip>:2222) before giving up.
+        trySshLeasedBox(name, cmd); // exits the process on a match
         console.error(chalk.red(`Unknown device '${name}'. See 'agents devices list'.`));
         process.exit(1);
       }

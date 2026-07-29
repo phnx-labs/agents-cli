@@ -11,7 +11,7 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { openUrl } from '../lib/open-url.js';
-import { crabboxList, reapSafeOrphans, reapOrphans, setLeaseSecretsBundle, type CrabboxBox } from '../lib/crabbox/cli.js';
+import { crabboxList, crabboxStop, reapSafeOrphans, reapOrphans, setLeaseSecretsBundle, type CrabboxBox } from '../lib/crabbox/cli.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { bundleExists, readBundle, writeBundle, keychainRef, bundleItemStore } from '../lib/secrets/bundles.js';
 import { secretsKeychainItem } from '../lib/secrets/index.js';
@@ -23,9 +23,112 @@ function fmtIdle(box: CrabboxBox): string {
   return `idle since ${iso}Z`;
 }
 
+// ── Shared box helpers (consumed by exec.ts's reuse picker + ssh.ts's devices
+// section, so the reuse/format logic lives in exactly one place) ─────────────
+
+/** Compact human duration: "45s", "12m", "2h", "1h 5m". Clamps negatives to 0. */
+export function fmtDurationShort(secs: number): string {
+  const s = Math.max(0, Math.round(secs));
+  if (s < 60) return `${s}s`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  const rem = m % 60;
+  return rem ? `${h}h ${rem}m` : `${h}h`;
+}
+
+/** Idle time since the box was last touched, e.g. "idle 5m" / "idle ?". */
+export function fmtIdleShort(box: CrabboxBox, nowSecs: number): string {
+  if (box.lastTouchedAt === null) return 'idle ?';
+  return `idle ${fmtDurationShort(nowSecs - box.lastTouchedAt)}`;
+}
+
+/** Time until the lease expires, e.g. "expires 42m" / "expires ?" / "expired". */
+export function fmtExpiresShort(box: CrabboxBox, nowSecs: number): string {
+  if (box.expiresAt === null) return 'expires ?';
+  const left = box.expiresAt - nowSecs;
+  return left <= 0 ? 'expired' : `expires ${fmtDurationShort(left)}`;
+}
+
+/** Reachable address for a leased box: tailnet FQDN/IP first, else public IP. */
+export function boxAddress(box: CrabboxBox): string | undefined {
+  return box.tailscaleFQDN || box.tailscaleIPv4 || box.ip || undefined;
+}
+
+/** Human status: "ready" when usable, else the raw bootstrap state/status. */
+export function boxStatus(box: CrabboxBox): string {
+  return box.ready ? 'ready' : box.state || box.status || 'pending';
+}
+
+/**
+ * Warm boxes eligible for reuse: `ready` and the lease has not expired.
+ * Sorted most-recently-touched first so `--reuse` / the auto-pick lands on the
+ * freshest box (an untouched `lastTouchedAt` sorts last).
+ */
+export function reusableBoxes(boxes: CrabboxBox[], nowSecs: number): CrabboxBox[] {
+  return boxes
+    .filter((b) => b.ready && (b.expiresAt === null || b.expiresAt > nowSecs))
+    .sort((a, b) => (b.lastTouchedAt ?? 0) - (a.lastTouchedAt ?? 0));
+}
+
+/** One aligned row for the reuse picker / `agents lease list`. */
+export function formatBoxRow(box: CrabboxBox, nowSecs: number): string {
+  const slug = box.slug.padEnd(16);
+  const cls = (box.class ?? '?').padEnd(10);
+  const addr = (boxAddress(box) ?? '—').padEnd(24);
+  const status = boxStatus(box).padEnd(8);
+  const idle = fmtIdleShort(box, nowSecs).padEnd(12);
+  return `${slug} ${cls} ${addr} ${status} ${idle} ${fmtExpiresShort(box, nowSecs)}`;
+}
+
 const HETZNER_BUNDLE = 'hetzner.com';
 const HCLOUD_KEY = 'HCLOUD_TOKEN';
 const HETZNER_CONSOLE_URL = 'https://console.hetzner.cloud/';
+
+const TAILSCALE_BUNDLE = 'tailscale.com';
+const TAILSCALE_KEY = 'CRABBOX_TAILSCALE_AUTH_KEY';
+const TAILSCALE_KEYS_URL = 'https://login.tailscale.com/admin/settings/keys';
+
+/**
+ * Optional Tailscale setup for private-network leases (`--tailscale`). Collects
+ * an EPHEMERAL, pre-authorized, `tag:crabbox` auth key and stores it in the
+ * `tailscale.com` keychain bundle under `CRABBOX_TAILSCALE_AUTH_KEY` (the exact
+ * key `crabboxEnv` auto-injects). Blank input skips — public-IP leases still
+ * work with no Tailscale key. Never throws for cancel; mirrors the Hetzner
+ * capture above but does no live validation (Tailscale has no cheap probe).
+ */
+async function captureTailscaleAuthKey(): Promise<void> {
+  console.error(chalk.bold('\nOptional: private-network leases over Tailscale'));
+  console.error(chalk.dim('Mint an EPHEMERAL, pre-authorized auth key tagged `tag:crabbox` in the Tailscale admin,'));
+  console.error(chalk.dim('then paste it to reach leased boxes only over your tailnet (`--tailscale`). Leave blank to skip.\n'));
+
+  const { password } = await import('@inquirer/prompts');
+  let key: string;
+  try {
+    openUrl(TAILSCALE_KEYS_URL);
+    key = (await password({ message: 'Paste a Tailscale auth key (blank to skip):', mask: true })).trim();
+  } catch (e) {
+    if (isPromptCancelled(e)) {
+      console.error(chalk.yellow('Skipped Tailscale setup.'));
+      return;
+    }
+    throw e;
+  }
+  if (!key) {
+    console.error(chalk.dim('Skipped Tailscale setup — public-IP leases only.'));
+    return;
+  }
+
+  const bundle: SecretsBundle = bundleExists(TAILSCALE_BUNDLE)
+    ? readBundle(TAILSCALE_BUNDLE)
+    : { name: TAILSCALE_BUNDLE, description: 'Tailscale ephemeral auth key for crabbox tailnet leases', vars: {} };
+  const store = bundleItemStore(bundle.backend);
+  store.set(secretsKeychainItem(TAILSCALE_BUNDLE, TAILSCALE_KEY), key);
+  bundle.vars[TAILSCALE_KEY] = keychainRef(TAILSCALE_KEY);
+  writeBundle(bundle);
+  console.error(chalk.green(`✔ Stored Tailscale auth key in keychain bundle '${TAILSCALE_BUNDLE}'.`));
+  console.error(chalk.dim('  Add --tailscale to a lease (reuse defaults to it) to reach the box over your tailnet.'));
+}
 
 /** Validate a Hetzner token against the live API. Exported for unit tests (fetch injectable). */
 export async function validateHetznerToken(
@@ -104,6 +207,9 @@ export async function runLeaseSetup(opts: { provider?: string } = {}): Promise<b
       setLeaseSecretsBundle(HETZNER_BUNDLE);
       console.error(chalk.green(`\n✔ Stored in keychain bundle '${HETZNER_BUNDLE}' and set as the default lease provider.`));
       console.error(chalk.dim('  Run `agents run <agent> "…" --lease` — no env var, no flag needed.'));
+
+      // Also offer to capture a Tailscale auth key for private-network leases.
+      await captureTailscaleAuthKey();
       return true;
     }
     console.error(chalk.yellow('lease setup: no valid token after 3 attempts — aborted.'));
@@ -128,6 +234,48 @@ export function registerLeaseCommand(program: Command): void {
     .option('--provider <name>', 'Cloud provider (only hetzner today)', 'hetzner')
     .action(async (opts: { provider?: string }) => {
       const ok = await runLeaseSetup({ provider: opts.provider });
+      process.exit(ok ? 0 : 1);
+    });
+
+  lease
+    .command('list')
+    .alias('ls')
+    .description('List warm crabbox boxes you can reuse with `agents run --box <slug>`.')
+    .option('--json', 'Output JSON', false)
+    .action((opts: { json?: boolean }) => {
+      const boxOpts = { secretsBundle: process.env.AGENTS_LEASE_SECRETS_BUNDLE };
+      let boxes: CrabboxBox[];
+      try {
+        boxes = crabboxList(boxOpts);
+      } catch (e) {
+        console.error(chalk.red(`lease list: ${(e as Error).message}`));
+        process.exit(1);
+        return;
+      }
+      if (opts.json) {
+        console.log(JSON.stringify(boxes, null, 2));
+        return;
+      }
+      if (boxes.length === 0) {
+        console.error(chalk.gray('No crabbox boxes. `agents run <agent> "…" --lease` provisions one.'));
+        return;
+      }
+      const nowSecs = Math.floor(Date.now() / 1000);
+      console.log(chalk.bold(`Warm boxes (${boxes.length})`));
+      for (const b of boxes) console.log('  ' + formatBoxRow(b, nowSecs));
+      console.log(
+        chalk.gray('  Reuse: agents run <agent> "…" --box <slug>   ·   Stop: agents lease stop <slug>'),
+      );
+    });
+
+  lease
+    .command('stop <slug>')
+    .description('Stop (release) a leased crabbox box now.')
+    .action((slug: string) => {
+      const boxOpts = { secretsBundle: process.env.AGENTS_LEASE_SECRETS_BUNDLE };
+      const ok = crabboxStop(slug, boxOpts);
+      if (ok) console.error(chalk.green(`Stopped box ${slug}.`));
+      else console.error(chalk.red(`Could not stop box ${slug} (already gone, or crabbox is unavailable).`));
       process.exit(ok ? 0 : 1);
     });
 

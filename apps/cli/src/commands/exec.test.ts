@@ -21,7 +21,11 @@ import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import {
+  addAlwaysFreshRepo,
+  computeNetMode,
   decideCopyCredsGate,
+  gitToplevel,
+  isAlwaysFreshRepo,
   isInsideGitWorkTree,
   parseRunAccountPickerRequest,
   runAccountPickerConflicts,
@@ -211,5 +215,61 @@ describe('isInsideGitWorkTree — the --lease/--box pre-flight sync guard', () =
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('gitToplevel — always-fresh repo keying', () => {
+  it('returns the absolute toplevel of a real repo, null outside one', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lease-top-'));
+    try {
+      execFileSync('git', ['-C', dir, 'init', '-q']);
+      const top = gitToplevel(dir);
+      expect(top).not.toBeNull();
+      // macOS /tmp symlinks to /private/tmp, so compare via realpath.
+      expect(fs.realpathSync(top!)).toBe(fs.realpathSync(dir));
+      const nogit = fs.mkdtempSync(path.join(os.tmpdir(), 'lease-notop-'));
+      try {
+        expect(gitToplevel(nogit)).toBeNull();
+      } finally {
+        fs.rmSync(nogit, { recursive: true, force: true });
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('computeNetMode — F5 tailscale vs public (RUSH-1924)', () => {
+  it('a solo one-shot --lease (no reuse context) stays public', () => {
+    expect(computeNetMode({ tailscale: undefined, reuseContext: false })).toBe('public');
+  });
+
+  it('a reuse context (--reuse/--box/picked box) defaults to the tailnet', () => {
+    expect(computeNetMode({ tailscale: undefined, reuseContext: true })).toBe('tailscale');
+  });
+
+  it('--tailscale forces the tailnet even without a reuse context', () => {
+    expect(computeNetMode({ tailscale: true, reuseContext: false })).toBe('tailscale');
+  });
+
+  it('--no-tailscale forces public even in a reuse context', () => {
+    expect(computeNetMode({ tailscale: false, reuseContext: true })).toBe('public');
+  });
+});
+
+describe('always-fresh repo set (F3 picker "remember for this repo")', () => {
+  it('membership check is exact-path', () => {
+    expect(isAlwaysFreshRepo(['/a/b'], '/a/b')).toBe(true);
+    expect(isAlwaysFreshRepo(['/a/b'], '/a/c')).toBe(false);
+    expect(isAlwaysFreshRepo([], '/a/b')).toBe(false);
+  });
+
+  it('add is idempotent and immutable', () => {
+    const base = ['/repo/one'];
+    const added = addAlwaysFreshRepo(base, '/repo/two');
+    expect(added).toEqual(['/repo/one', '/repo/two']);
+    expect(base).toEqual(['/repo/one']); // original untouched
+    // Re-adding returns the SAME array reference (no duplicate).
+    expect(addAlwaysFreshRepo(added, '/repo/two')).toBe(added);
   });
 });

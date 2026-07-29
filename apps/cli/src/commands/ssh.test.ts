@@ -4,6 +4,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
+import { renderLeasedBoxesSection } from './ssh.js';
+import type { CrabboxBox } from '../lib/crabbox/cli.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const INDEX = path.join(REPO_ROOT, 'src', 'index.ts');
@@ -85,5 +87,43 @@ describe('ssh askpass', () => {
 
     expect(askpass.status, askpass.stderr).toBe(0);
     expect(askpass.stdout).toBe('secret-pass');
+  });
+});
+
+describe('renderLeasedBoxesSection — F4 devices "Leased boxes" (RUSH-1923)', () => {
+  const NOW = 1_700_000_000;
+  const box = (over: Partial<CrabboxBox> = {}): CrabboxBox => ({
+    name: 'crabbox-x',
+    status: 'running',
+    slug: 'x',
+    lease: 'cbx_x',
+    state: 'ready',
+    ready: true,
+    keep: false,
+    createdAt: NOW - 600,
+    expiresAt: NOW + 600,
+    lastTouchedAt: NOW - 60,
+    idleTimeoutSecs: 1800,
+    ...over,
+  });
+
+  it('is empty when there are no boxes (section omitted entirely)', () => {
+    expect(renderLeasedBoxesSection([], NOW)).toEqual([]);
+  });
+
+  it('renders a header, one row per box (tailnet address), and reuse/stop hints', () => {
+    const lines = renderLeasedBoxesSection(
+      [box({ slug: 'blue-hermit', class: 'cpu-4', tailscaleFQDN: 'bh.ts.net', ip: '203.0.113.9' })],
+      NOW,
+    );
+    const flat = lines.join('\n');
+    expect(flat).toContain('Leased boxes');
+    expect(flat).toContain('ephemeral · via crabbox');
+    expect(flat).toContain('blue-hermit');
+    expect(flat).toContain('cpu-4');
+    expect(flat).toContain('bh.ts.net'); // tailnet FQDN preferred over public IP
+    expect(flat).not.toContain('203.0.113.9');
+    expect(flat).toContain('agents run --box <slug>');
+    expect(flat).toContain('agents lease stop <slug>');
   });
 });

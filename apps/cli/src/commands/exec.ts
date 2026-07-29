@@ -13,7 +13,9 @@ import type { AgentId } from '../lib/types.js';
 import type { DetectedRuntime } from '../lib/crabbox/runtimes.js';
 import type { ResolvedRunDefaults } from '../lib/run-defaults.js';
 import { setHelpSections } from '../lib/help.js';
-import { isInteractiveTerminal, requireInteractiveSelection } from './utils.js';
+import { isInteractiveTerminal, isPromptCancelled, requireInteractiveSelection } from './utils.js';
+import { getSystemAgentsDir } from '../lib/state.js';
+import type { CrabboxBox } from '../lib/crabbox/cli.js';
 import { parseLoopInterval } from '../lib/loop.js';
 import type { RotateResult } from '../lib/rotate.js';
 import { AGENTS } from '../lib/agents.js';
@@ -82,6 +84,9 @@ interface ExecCommandActionOptions {
   lease?: string | boolean; // --lease [backend]: true when bare, backend string when given
   box?: string; // --box <slug>: reuse an existing warm crabbox box
   keepBox?: boolean; // --keep-box: don't tear down the leased box after the run
+  reuse?: boolean; // --reuse: reuse the most-recently-used warm box if one exists
+  bare?: boolean; // --bare: skip copying the local ~/.agents setup onto the box
+  tailscale?: boolean; // --tailscale / --no-tailscale: tri-state net-mode override
   secretsKeys?: string; // --secrets-keys: comma-separated key subset for --secrets bundles
   allowExpired?: boolean; // --allow-expired: skip expiry pre-run abort for secrets
 }
@@ -161,6 +166,66 @@ export function isInsideGitWorkTree(cwd: string): boolean {
     encoding: 'utf-8',
   });
   return r.status === 0 && r.stdout.trim() === 'true';
+}
+
+/** Absolute git toplevel for `cwd`, or null when it is not a git repo. */
+export function gitToplevel(cwd: string): string | null {
+  const r = spawnSync('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], { encoding: 'utf-8' });
+  return r.status === 0 ? r.stdout.trim() : null;
+}
+
+/**
+ * Network mode for a `--lease` run (F5, RUSH-1924). `--tailscale` forces the
+ * tailnet, `--no-tailscale` forces public, and neither (undefined) defaults to
+ * the tailnet ONLY in a reuse context (`--reuse`, `--box`, or a picked warm
+ * box) — a one-shot solo `--lease` stays public. Pure so it is unit-testable;
+ * the caller downgrades to `'public'` when no auth key is configured.
+ */
+export function computeNetMode(opts: { tailscale?: boolean; reuseContext: boolean }): 'public' | 'tailscale' {
+  if (opts.tailscale === false) return 'public'; // --no-tailscale wins
+  if (opts.tailscale === true) return 'tailscale'; // explicit --tailscale
+  return opts.reuseContext ? 'tailscale' : 'public';
+}
+
+// ── "Always provision fresh" per-repo memory (F3, RUSH-1922) ─────────────────
+// The picker's "Always provision fresh (remember for this repo)" choice is
+// persisted as a list of git-toplevel paths in a small state file, so a repo
+// that opted out of the reuse picker is never prompted again.
+
+/** True when `repoRoot` is in the remembered always-fresh set. Pure. */
+export function isAlwaysFreshRepo(repos: string[], repoRoot: string): boolean {
+  return repos.includes(repoRoot);
+}
+
+/** Add `repoRoot` to the always-fresh set (idempotent). Pure. */
+export function addAlwaysFreshRepo(repos: string[], repoRoot: string): string[] {
+  return repos.includes(repoRoot) ? repos : [...repos, repoRoot];
+}
+
+/** Path to the always-fresh state file under the system agents dir. */
+export function leaseFreshReposPath(): string {
+  return path.join(getSystemAgentsDir(), 'lease-fresh-repos.json');
+}
+
+/** Read the remembered always-fresh repo roots (empty on any read/parse error). */
+export function readAlwaysFreshRepos(): string[] {
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(leaseFreshReposPath(), 'utf-8'));
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Persist the always-fresh repo roots. Best-effort — never throws. */
+export function writeAlwaysFreshRepos(repos: string[]): void {
+  try {
+    const p = leaseFreshReposPath();
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, JSON.stringify(repos, null, 2));
+  } catch {
+    /* best-effort — losing the preference just means the picker shows next time */
+  }
 }
 
 /** Outcome of the `--copy-creds` security gate (RUSH-1767). */
@@ -545,7 +610,14 @@ export function registerRunCommand(program: Command): void {
       '--box <slug>',
       'Reuse an existing warm crabbox box for this run instead of provisioning a disposable --lease box.',
     )
-    .option('--keep-box', 'With --lease, keep the box after the run instead of stopping it.');
+    .option('--keep-box', 'With --lease, keep the box after the run instead of stopping it.')
+    .option(
+      '--reuse',
+      'With --lease, reuse the most-recently-used warm box if one exists (else provision fresh). The scriptable form of the interactive reuse picker.',
+    )
+    .option('--bare', 'With --lease, skip copying your local ~/.agents setup (skills/hooks/commands/MCP) onto the box.')
+    .option('--tailscale', 'Lease the box onto your tailnet (reachable only over Tailscale) rather than a public IP.')
+    .option('--no-tailscale', 'Force a public-IP lease even when a reuse context would default to Tailscale.');
 
   // `--on` and `--computer` are hidden aliases of `--host` — same behavior.
   runCmd.addOption(new Option('--on <name>', 'Alias of --host.').hideHelp());
@@ -703,8 +775,91 @@ export function registerRunCommand(program: Command): void {
           }
         }
 
+        // ── F3 reuse (RUSH-1922) + F5 net-mode (RUSH-1924) ───────────────────
+        // Resolve which box this run targets and how it is networked BEFORE any
+        // provisioning. `--box` is an explicit reuse; otherwise, on an
+        // interactive tty, offer the warm boxes as a reuse picker (headless /
+        // --json never blocks — it provisions fresh unless --reuse/--box).
+        const leaseSecretsBundle = process.env.AGENTS_LEASE_SECRETS_BUNDLE;
+        const nowSecs = Math.floor(Date.now() / 1000);
+        let reuseSlug: string | undefined = options.box;
+
+        if (options.lease && !reuseSlug) {
+          const { crabboxList } = await import('../lib/crabbox/cli.js');
+          const { reusableBoxes, formatBoxRow } = await import('./lease.js');
+          let warm: CrabboxBox[] = [];
+          try {
+            warm = reusableBoxes(crabboxList({ secretsBundle: leaseSecretsBundle }), nowSecs);
+          } catch {
+            warm = []; // crabbox unavailable / no creds → just provision fresh
+          }
+
+          const repoRoot = gitToplevel(leaseCwd);
+          const alwaysFresh = repoRoot ? isAlwaysFreshRepo(readAlwaysFreshRepos(), repoRoot) : false;
+
+          if (warm.length > 0 && !alwaysFresh) {
+            if (options.reuse) {
+              reuseSlug = warm[0].slug; // scriptable: most-recently-touched warm box
+            } else if (isInteractiveTerminal() && options.json !== true) {
+              const { select } = await import('@inquirer/prompts');
+              try {
+                const choice = await select({
+                  message: 'Reuse a warm box, or provision a fresh one?',
+                  choices: [
+                    ...warm.map((b) => ({ name: formatBoxRow(b, nowSecs), value: b.slug })),
+                    { name: 'Provision a fresh box', value: '__fresh__' },
+                    { name: 'Always provision fresh (remember for this repo)', value: '__always_fresh__' },
+                  ],
+                });
+                if (choice === '__always_fresh__') {
+                  if (repoRoot) {
+                    writeAlwaysFreshRepos(addAlwaysFreshRepo(readAlwaysFreshRepos(), repoRoot));
+                    console.error(chalk.dim(`Will always provision fresh for ${repoRoot} (edit ${leaseFreshReposPath()} to undo).`));
+                  }
+                } else if (choice !== '__fresh__') {
+                  reuseSlug = choice;
+                }
+              } catch (e) {
+                if (!isPromptCancelled(e)) throw e;
+                console.error(chalk.yellow('Selection cancelled — provisioning a fresh box.'));
+              }
+            }
+            // Headless with no --reuse falls through here → provision fresh.
+          } else if (options.reuse && warm.length > 0) {
+            // --reuse still honors a warm box even when the picker is suppressed.
+            reuseSlug = warm[0].slug;
+          }
+        }
+
+        // reuseContext: an existing box (picked, --box, or --reuse) defaults the
+        // network to the tailnet; a solo one-shot --lease stays public.
+        const reuseContext = !!reuseSlug || !!options.reuse;
+        let netMode = computeNetMode({ tailscale: options.tailscale, reuseContext });
+        const copySetup = !options.bare;
+
+        // Tailscale requested but no auth key configured → downgrade to public
+        // with an actionable hint instead of hard-failing the run (F5).
+        if (netMode === 'tailscale') {
+          const { pickTailscaleBundleFromList } = await import('../lib/crabbox/cli.js');
+          const { listBundles } = await import('../lib/secrets/bundles.js');
+          let hasKey = !!process.env.CRABBOX_TAILSCALE_AUTH_KEY;
+          if (!hasKey) {
+            try {
+              hasKey = !!pickTailscaleBundleFromList(listBundles());
+            } catch {
+              hasKey = false;
+            }
+          }
+          if (!hasKey) {
+            console.error(chalk.yellow('Tailscale requested but no auth key is configured — falling back to a public-IP lease.'));
+            console.error(chalk.gray('Set one up with `agents lease setup` (mint an EPHEMERAL, pre-authorized, tag:crabbox key), or store CRABBOX_TAILSCALE_AUTH_KEY in a secrets bundle.'));
+            netMode = 'public';
+          }
+        }
+
         const { detectSignedInRuntimes, resolveClaudeCredentialsBlob, inferLeaseRuntime, profileNeedsBaseRuntimeCredentials } = await import('../lib/crabbox/runtimes.js');
         const { leaseAndRun } = await import('../lib/crabbox/lease.js');
+        const { boxAddress } = await import('./lease.js');
         const { getConfiguredRunStrategy, resolveRunVersion } = await import('../lib/rotate.js');
         const { profileExists, readProfile, resolveProfileEnv } = await import('../lib/profiles.js');
 
@@ -786,10 +941,10 @@ export function registerRunCommand(program: Command): void {
             : dispatchProfile
               ? `profile '${dispatchProfile.name}'`
               : `${runtime} credentials`;
-        const boxLifecycle = options.box
-          ? `Reusing crabbox box ${options.box}`
-          : `Leasing a ${backend ?? 'hetzner'} box`;
-        const boxAfterRun = options.box
+        const boxLifecycle = reuseSlug
+          ? `Reusing crabbox box ${reuseSlug}`
+          : `Leasing a ${backend ?? 'hetzner'} box${netMode === 'tailscale' ? ' on your tailnet' : ''}`;
+        const boxAfterRun = reuseSlug
           ? 'the box is kept after the run'
           : options.keepBox
             ? 'the box is kept after the run'
@@ -812,26 +967,49 @@ export function registerRunCommand(program: Command): void {
           }
         }
 
-        // Progress UI. A self-throttled spinner (NOT ora — see progress.ts) covers
-        // the otherwise-silent provisioning + box-setup phases; the agent's own
-        // output then prints verbatim. The router splits the crabbox stream at the
-        // box-side marker. Rule: only ONE spinner phase is active at a time, and no
-        // other output is written to stderr while it spins — so it can never storm.
-        const { createLeaseOutputRouter, createSpinner } = await import('../lib/crabbox/progress.js');
+        // Progress UI (F2, RUSH-1921). A self-throttled spinner (NOT ora — see
+        // progress.ts) covers provisioning; the box-side bootstrap then streams a
+        // structured step stream (sync → install → runtime → creds → …) via the
+        // router's `onStep`, and each step renders as a checklist line through the
+        // lib's `renderStepLine` (✔ <Step> — <detail> (<elapsed>)). The agent's own
+        // output prints verbatim after the box-side marker. Rule: only ONE spinner
+        // phase is active at a time, so it can never storm.
+        const { createLeaseOutputRouter, createSpinner, renderStepLine } = await import('../lib/crabbox/progress.js');
         const spinner = createSpinner({ stream: process.stderr });
         let warmupTimer: ReturnType<typeof setInterval> | undefined;
         const stopTimer = () => { if (warmupTimer) { clearInterval(warmupTimer); warmupTimer = undefined; } };
-        const fit = (s: string) => {
-          const w = Math.max(20, (process.stderr.columns || 80) - 24);
-          return s.length > w ? s.slice(0, w - 1) + '…' : s;
+
+        const jsonMode = options.json === true;
+        const stepsTty = Boolean(process.stderr.isTTY) && !jsonMode;
+        // The step currently in flight (its label spins on a TTY). It is persisted
+        // as a ✔ line when the NEXT step arrives (whose elapsedMs measures how long
+        // THIS step's block took) — or, for the last step, when agent output or
+        // teardown begins.
+        let activeStep: import('../lib/crabbox/progress.js').LeaseStep | null = null;
+        const flushStep = (elapsedMs?: number) => {
+          if (!activeStep) return;
+          const done = activeStep;
+          activeStep = null;
+          if (jsonMode) {
+            process.stdout.write(JSON.stringify({ phase: 'setup', name: done.name, elapsedMs: elapsedMs ?? null }) + '\n');
+          } else {
+            spinner.stopAndPersist('✔', renderStepLine({ ...done, elapsedMs }));
+          }
         };
         const router = createLeaseOutputRouter({
-          // Setup lines only ever update spinner text (no direct stderr writes),
-          // so the spinner stays the single writer during the setup phase.
-          onSetupLine: (line) => spinner.update(`Setting up box — ${fit(line)}`),
+          now: () => Date.now(),
+          // Raw setup lines stay captured for a failure dump (router.setupLines());
+          // the structured step stream drives the visible checklist, so plain lines
+          // are not shown (they would fight the step spinner).
+          onSetupLine: () => {},
+          onStep: (step) => {
+            flushStep(step.elapsedMs); // persist the previous step, timed by this one
+            activeStep = step;
+            if (stepsTty) spinner.start(renderStepLine(step));
+          },
           onAgentChunk: (chunk) => {
-            // First agent byte: stop the setup spinner, THEN stream to stdout.
-            if (spinner.active) spinner.stopAndPersist('✔', chalk.gray(`Box setup complete — ${agentName} output:`));
+            flushStep(); // last setup step done (no following sentinel to time it)
+            if (spinner.active) spinner.stop();
             process.stdout.write(chunk);
           },
         });
@@ -848,13 +1026,15 @@ export function registerRunCommand(program: Command): void {
             detected,
             dispatchProfile,
             claudeCredentialsJson,
-            secretsBundle: process.env.AGENTS_LEASE_SECRETS_BUNDLE,
+            secretsBundle: leaseSecretsBundle,
             keep: options.keepBox,
-            reuseBox: options.box,
+            reuseBox: reuseSlug,
+            copySetup,
+            netMode,
             onData: (chunk) => router.push(chunk),
             onPhase: (phase) => {
               if (phase.kind === 'warmup') {
-                const label = `Leasing a ${phase.backend ?? 'hetzner'} box`;
+                const label = `Leasing a ${phase.backend ?? 'hetzner'} box${netMode === 'tailscale' ? ' (tailnet)' : ''}`;
                 spinner.start(`${label}…`);
                 const t0 = Date.now();
                 warmupTimer = setInterval(() => spinner.update(`${label}… (${Math.round((Date.now() - t0) / 1000)}s)`), 1000);
@@ -862,14 +1042,17 @@ export function registerRunCommand(program: Command): void {
                 spinner.start(`Reusing crabbox box ${phase.slug}…`);
               } else if (phase.kind === 'ready') {
                 stopTimer();
-                spinner.stopAndPersist('✔', `Box ${phase.box.slug} ready${phase.box.ip ? ` (${phase.box.ip})` : ''} · ${Math.round(phase.elapsedMs / 1000)}s`);
-                spinner.start('Setting up box…');
+                const addr = boxAddress(phase.box);
+                // Steps drive the spinner from here — no generic "Setting up box…".
+                spinner.stopAndPersist('✔', `Box ${phase.box.slug} ready${addr ? ` (${addr})` : ''} · ${Math.round(phase.elapsedMs / 1000)}s`);
               } else if (phase.kind === 'teardown') {
+                flushStep();
                 if (spinner.active) spinner.stop();
               }
             },
           });
           router.end();
+          flushStep();
           stopTimer();
           if (spinner.active) spinner.stop();
           // Safety net: if setup failed before the agent ever ran, the setup log
@@ -879,10 +1062,12 @@ export function registerRunCommand(program: Command): void {
             const log = router.setupLines();
             if (log.length) process.stderr.write(chalk.dim(log.join('\n')) + '\n');
           }
-          console.error(chalk.gray(toreDown ? `Box ${box.slug} destroyed.` : `Box ${box.slug} kept${box.ip ? ` (${box.ip})` : ''}. Stop it: crabbox stop ${box.slug}`));
+          const keptAddr = boxAddress(box);
+          console.error(chalk.gray(toreDown ? `Box ${box.slug} destroyed.` : `Box ${box.slug} kept${keptAddr ? ` (${keptAddr})` : ''}. Stop it: agents lease stop ${box.slug}`));
           process.exit(exitCode === null ? 1 : exitCode);
         } catch (err) {
           stopTimer();
+          flushStep();
           if (spinner.active) spinner.stopAndPersist('✖', chalk.red('Lease failed'));
           const log = router.setupLines();
           if (log.length && !router.sawAgent()) process.stderr.write(chalk.dim(log.join('\n')) + '\n');
