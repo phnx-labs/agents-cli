@@ -124,11 +124,39 @@ async function ensureServer(): Promise<void> {
 }
 
 export function getServerSpawnArgs(
-  options: { isStandaloneExecutable?: boolean } = {},
+  options: {
+    isStandaloneExecutable?: boolean;
+    /** Physical binary path (test seam). Defaults to `process.execPath`. */
+    execPath?: string;
+    /** Locate a real `node` (test seam). Defaults to `which/where node`. */
+    resolveNode?: () => string | undefined;
+    /** File-existence check (test seam). Defaults to `fs.existsSync`. */
+    fileExists?: (p: string) => boolean;
+  } = {},
 ): ServerSpawnArgs {
   const isStandaloneExecutable = options.isStandaloneExecutable
     ?? isBunStandaloneExecutable();
   if (isStandaloneExecutable) {
+    // A Bun `--compile` standalone binary cannot `require()` a native addon, so
+    // running the PTY sidecar AS this binary fails to load node-pty's pty.node
+    // (fatal on macOS; see #315). Prefer a real `node` running the dist/index.js
+    // that ships beside the binary — there node-pty loads from the on-disk
+    // prebuild. We can't do `<binary> dist/index.js` (the standalone misparses a
+    // script arg as a subcommand), so a genuine `node` is required. Fall back to
+    // the binary itself only when no node / no dist is found (a bare standalone
+    // install with no Node — PTY may then be unavailable, but nothing else can
+    // load the addon anyway).
+    const node = (options.resolveNode ?? resolveNodeExecutable)();
+    const exists = options.fileExists ?? fs.existsSync;
+    const execPath = options.execPath ?? process.execPath;
+    if (node) {
+      try {
+        const distIndex = path.join(path.dirname(execPath), '..', 'index.js');
+        if (exists(distIndex)) {
+          return { bin: node, args: [distIndex, 'pty', '_server'] };
+        }
+      } catch {}
+    }
     return { bin: process.execPath, args: ['pty', '_server'] };
   }
 
@@ -157,6 +185,20 @@ export function getServerSpawnArgs(
 
 export function isBunStandaloneExecutable(moduleUrl: string = import.meta.url): boolean {
   return BUN_VIRTUAL_ROOT.test(moduleUrl);
+}
+
+/**
+ * Locate a real `node` on PATH for running the sidecar's dist/index.js from a
+ * Bun standalone binary (which cannot itself load native addons). Returns
+ * undefined when no node is found — the caller then falls back to the binary.
+ */
+function resolveNodeExecutable(): string | undefined {
+  try {
+    const lookup = IS_WINDOWS ? 'where node' : 'which node';
+    const node = execSync(lookup, { encoding: 'utf-8' }).split(/\r?\n/)[0].trim();
+    if (node && fs.existsSync(node)) return node;
+  } catch {}
+  return undefined;
 }
 
 export function readRecentLogLines(logPath: string, maxLines = 20): string[] {

@@ -21,7 +21,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { getRuntimeStateDir, getHelpersDir } from '../state.js';
-import { getCliVersion } from '../version.js';
+import { getCliVersion, resolveAgentsBin, resolveInstalledLayout } from '../version.js';
 
 const APP_BUNDLE_NAME = 'MenubarHelper.app';
 const INSTALL_DIR_NAME = 'agents-cli';
@@ -90,6 +90,10 @@ export function menubarServiceInstalled(): boolean {
  *   1. dist/lib/menubar/MenubarHelper.app — npm install layout (sibling of this file)
  *   2. <repo>/bin/MenubarHelper.app       — raw working tree (tsx/dev)
  *   3. apps/cli/menubar/dist/MenubarHelper.app — fresh local build
+ *   4. <on-disk install>/dist/lib/menubar/MenubarHelper.app — Bun single-file
+ *      binary: `import.meta.url` is a virtual `/$bunfs/` path, so the sibling
+ *      candidates above can't see the on-disk bundle; recover it via the
+ *      `agents` launcher symlink.
  */
 function sourceAppPath(): string | null {
   const candidates: string[] = [];
@@ -106,25 +110,14 @@ function sourceAppPath(): string | null {
   for (const c of candidates) {
     if (fs.existsSync(c)) return c;
   }
-  return null;
-}
-
-/** Resolve the `agents` launcher binary on PATH-less GUI processes. */
-function resolveAgentsBin(): string | null {
-  const home = os.homedir();
-  const candidates = [
-    path.join(home, '.local', 'bin', 'agents'),
-    '/opt/homebrew/bin/agents',
-    '/usr/local/bin/agents',
-    path.join(home, '.npm-global', 'bin', 'agents'),
-  ];
-  for (const c of candidates) {
-    try {
-      fs.accessSync(c, fs.constants.X_OK);
-      return c;
-    } catch {
-      /* try next */
-    }
+  // Candidate 4 — only reached when the sibling candidates miss (the Bun
+  // single-file binary, whose `import.meta.url` is a virtual `/$bunfs/` path).
+  // Resolve the launcher symlink lazily so the common Node path pays no extra
+  // filesystem probe.
+  const layout = resolveInstalledLayout();
+  if (layout) {
+    const p = path.join(layout.distDir, 'lib', 'menubar', APP_BUNDLE_NAME);
+    if (fs.existsSync(p)) return p;
   }
   return null;
 }

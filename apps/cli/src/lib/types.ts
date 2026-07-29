@@ -730,6 +730,29 @@ export interface ExtraRepoConfig {
   enabled: boolean;
 }
 
+/**
+ * A white-label brand — a personally-named CLI (e.g. `jack`) that IS agents-cli,
+ * minted by `agents setup mine` / `agents mine`. The brand's shim exports
+ * `AGENTS_BRAND=<name>`; the entrypoint reads it to present under this name and
+ * apply the customization below. Portable user config — rides `agents repo
+ * push/pull`. See lib/brand.ts.
+ */
+export interface BrandConfig {
+  /** The brand name; also the binary name on PATH. */
+  name: string;
+  /** Built-in top-level commands this brand hides/disables (e.g. `["teams"]`). */
+  disabledCommands?: string[];
+  /**
+   * Resource-profile preset this brand pins (a key in `profiles.presets`). When
+   * the CLI runs under this brand, that preset becomes the active profile, so
+   * skills/plugins/mcp/hooks/etc. filter to the brand's curated set. Defaults to
+   * `mine-<name>`.
+   */
+  profile?: string;
+  /** False to keep the config but stop minting/using the brand. */
+  enabled: boolean;
+}
+
 /** Top-level structure of ~/.agents/.system/agents.yaml -- the CLI's persistent state. */
 export interface Meta {
   agents?: Partial<Record<AgentId, string>>;
@@ -791,6 +814,12 @@ export interface Meta {
    */
   extraRepos?: Record<string, ExtraRepoConfig>;
   /**
+   * White-label brands keyed by name. Each mints a personally-named binary
+   * (e.g. `jack`) that runs agents-cli under that name with its own disabled
+   * commands + curated resource profile. See lib/brand.ts.
+   */
+  brands?: Record<string, BrandConfig>;
+  /**
    * Keys like `skill.hermes` — registries seeded from SEEDED_REGISTRIES exactly
    * once. Tracked so a user `registry remove` won't silently re-seed.
    */
@@ -842,6 +871,17 @@ export interface Meta {
     domain?: string;
     /** Cloudflare Web Analytics token injected into published HTML pages. */
     analyticsToken?: string;
+  };
+  /**
+   * Owner/channel notification config for `agents send` / `agents notify`.
+   * `owner` is the default recipient for `agents notify` (channel + target).
+   * `transports` maps a user-facing channel name to the provider that actually
+   * delivers it — explicit, one provider per channel, no fallback. Omitted keys
+   * default to name-identity (channel `slack` -> provider `slack`).
+   */
+  notify?: {
+    owner?: { channel: string; to: string };
+    transports?: Record<string, string>;
   };
 }
 

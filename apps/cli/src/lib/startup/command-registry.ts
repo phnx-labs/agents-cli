@@ -78,6 +78,7 @@ export const loadCost: ModuleLoader = async () => (await import('../../commands/
 export const loadOutput: ModuleLoader = async () => (await import('../../commands/output.js')).registerOutputCommand;
 export const loadBudget: ModuleLoader = async () => (await import('../../commands/budget.js')).registerBudgetCommand;
 export const loadAlias: ModuleLoader = async () => (await import('../../commands/alias.js')).registerAliasCommand;
+export const loadMine: ModuleLoader = async () => (await import('../../commands/mine.js')).registerMineCommand;
 export const loadPty: ModuleLoader = async () => (await import('../../commands/pty.js')).registerPtyCommands;
 export const loadTmux: ModuleLoader = async () => (await import('../../commands/tmux.js')).registerTmuxCommands;
 export const loadWatchdog: ModuleLoader = async () => (await import('../../commands/watchdog.js')).registerWatchdogCommand;
@@ -97,8 +98,10 @@ export const loadSessions: ModuleLoader = async () => (await import('../../comma
 export const loadTeams: ModuleLoader = async () => (await import('../../commands/teams.js')).registerTeamsCommands;
 export const loadCloud: ModuleLoader = async () => (await import('../../commands/cloud.js')).registerCloudCommands;
 export const loadMessage: ModuleLoader = async () => (await import('../../commands/message.js')).registerMessageCommand;
+export const loadSend: ModuleLoader = async () => (await import('../../commands/send.js')).registerSendCommand;
 export const loadHq: ModuleLoader = async () => (await import('../../commands/hq.js')).registerHqCommand;
 export const loadFeed: ModuleLoader = async () => (await import('../../commands/feed.js')).registerFeedCommand;
+export const loadActivity: ModuleLoader = async () => (await import('../../commands/activity.js')).registerActivityCommand;
 export const loadMailboxes: ModuleLoader = async () => (await import('../../commands/mailboxes.js')).registerMailboxesCommand;
 export const loadServe: ModuleLoader = async () => (await import('../../commands/serve.js')).registerServeCommand;
 export const loadShare: ModuleLoader = async () => (await import('../../commands/share.js')).registerShareCommands;
@@ -189,6 +192,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   output: [loadOutput],
   budget: [loadBudget],
   alias: [loadAlias],
+  mine: [loadMine],
   pty: [loadPty],
   tmux: [loadTmux],
   watchdog: [loadWatchdog],
@@ -216,8 +220,11 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   teams: [loadTeams],
   cloud: [loadCloud],
   message: [loadMessage],
+  send: [loadSend],
+  notify: [loadSend],
   hq: [loadHq],
   feed: [loadFeed],
+  activity: [loadActivity],
   mailboxes: [loadMailboxes],
   mailbox: [loadMailboxes],
   serve: [loadServe],

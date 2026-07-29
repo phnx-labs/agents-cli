@@ -1,13 +1,14 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   parseCliManifest,
   selectInstallMethod,
   describeMethod,
   buildInstallCommand,
+  resolveBinDir,
   hasCommand,
   isCliInstalled,
   type CliManifest,
@@ -149,6 +150,82 @@ describe('buildInstallCommand', () => {
       .toBe('npm install -g @higgsfield/cli@latest');
     expect(buildInstallCommand({ brew: 'higgsfield' }))
       .toBe('brew install higgsfield');
+  });
+});
+
+describe('resolveBinDir', () => {
+  const key = `${process.platform}-${process.arch}`;
+  const savedBinDirEnv = process.env.AGENTS_CLI_BIN_DIR;
+  const savedHome = process.env.HOME;
+  let tmpHome: string;
+
+  beforeEach(() => {
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-bindir-'));
+    delete process.env.AGENTS_CLI_BIN_DIR;
+    process.env.HOME = tmpHome;
+  });
+
+  afterEach(() => {
+    if (savedBinDirEnv === undefined) delete process.env.AGENTS_CLI_BIN_DIR;
+    else process.env.AGENTS_CLI_BIN_DIR = savedBinDirEnv;
+    if (savedHome === undefined) delete process.env.HOME;
+    else process.env.HOME = savedHome;
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it('honors AGENTS_CLI_BIN_DIR when set, without touching the filesystem', () => {
+    const override = path.join(tmpHome, 'custom-bin-dir');
+    process.env.AGENTS_CLI_BIN_DIR = override;
+    expect(resolveBinDir()).toBe(override);
+    expect(fs.existsSync(override)).toBe(false);
+  });
+
+  it('creates and prefers ~/.local/bin over /usr/local/bin when it is writable', () => {
+    const expected = path.join(tmpHome, '.local', 'bin');
+    expect(fs.existsSync(expected)).toBe(false);
+    expect(resolveBinDir()).toBe(expected);
+    expect(fs.statSync(expected).isDirectory()).toBe(true);
+  });
+
+  it('falls back off ~/.local/bin when it cannot be created (e.g. path is a file)', () => {
+    // Force `mkdirSync(~/.local/bin, { recursive: true })` to fail with ENOTDIR
+    // by making ~/.local a regular file instead of a directory. tmpHome already
+    // exists (mkdtempSync created it above).
+    fs.writeFileSync(path.join(tmpHome, '.local'), 'not a directory');
+
+    let usrLocalBinWritable = true;
+    try {
+      fs.accessSync('/usr/local/bin', fs.constants.W_OK);
+    } catch {
+      usrLocalBinWritable = false;
+    }
+
+    if (usrLocalBinWritable) {
+      expect(resolveBinDir()).toBe('/usr/local/bin');
+    } else {
+      // Matches the reported bug: /usr/local/bin not user-writable (e.g. on
+      // Apple Silicon Macs). The failure must be an actionable error, not a
+      // raw EACCES surfaced later from curl/tar.
+      expect(() => resolveBinDir()).toThrow(/AGENTS_CLI_BIN_DIR/);
+      expect(() => resolveBinDir()).toThrow(/\.local\/bin/);
+    }
+  });
+
+  it('buildInstallCommand embeds the same resolved directory for tar and curl', () => {
+    const method: InstallMethod = {
+      binary: { [key]: { url: 'https://example.com/x-bin.tgz', extract: 'x' } },
+    };
+    const binDir = resolveBinDir();
+    expect(buildInstallCommand(method)).toBe(
+      `curl -fsSL https://example.com/x-bin.tgz -o /tmp/agents-cli-bin.tgz && tar -xzf /tmp/agents-cli-bin.tgz -C ${binDir} x`,
+    );
+
+    const flatMethod: InstallMethod = {
+      binary: { [key]: { url: 'https://example.com/x-bin' } },
+    };
+    expect(buildInstallCommand(flatMethod)).toBe(
+      `curl -fsSL https://example.com/x-bin -o ${path.join(binDir, 'agents-cli-downloaded')}`,
+    );
   });
 });
 

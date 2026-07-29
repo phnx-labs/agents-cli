@@ -46,6 +46,7 @@ How agents-cli is laid out on disk and how it decides what to load.
 
 | Doc | What it covers |
 |---|---|
+| [Make it yours](mine.md) | White-label the CLI: `agents setup mine` mints your own personally-named binary (e.g. `jack`) with the commands you disable hidden and a curated per-brand resource profile. |
 | [Plugins](plugins.md) | Distributable bundles of skills + hooks + permissions. Exec-surface consent gate. |
 | [Workflows](workflows.md) | `WORKFLOW.md` multi-agent pipelines, auto-secrets, allowed-agents allow-list. |
 | [Subagents](subagents.md) | Focused agent definitions that parent agents can spawn via `Task()`. |

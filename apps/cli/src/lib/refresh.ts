@@ -27,6 +27,7 @@ import type { AgentId } from './types.js';
 import {
   installVersion,
   listInstalledVersions,
+  isVersionIsolated,
   getGlobalDefault,
   setGlobalDefault,
   getVersionHomePath,
@@ -297,7 +298,11 @@ export async function refresh(options: RefreshOptions = {}): Promise<void> {
     const selectedVersions: Array<{ agentId: AgentId; version: string }> = [];
 
     for (const agentId of agentsNeedingDefault) {
-      const versions = listInstalledVersions(agentId);
+      // Isolated copies are not default-eligible — `agents use` refuses them and
+      // setting one here would also switch the config symlink, pointing the user's
+      // real ~/.<agent> at an isolated home. Keep them out of the picker entirely.
+      const versions = listInstalledVersions(agentId).filter((v) => !isVersionIsolated(agentId, v));
+      if (versions.length === 0) continue;
       const agent = AGENTS[agentId];
 
       const shouldSwitch = await select({

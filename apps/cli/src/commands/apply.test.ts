@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { stripPad } from './apply.js';
+import { Command } from 'commander';
+import { stripPad, registerApplyCommand, registerFleetApplyAlias } from './apply.js';
 
 // A real SGR-wrapped cell as chalk emits it: ESC `[32m` ... ESC `[39m`.
 const ESC = '\x1b';
@@ -22,5 +23,23 @@ describe('stripPad', () => {
 
   it('always adds at least one trailing space, even when already at/over width', () => {
     expect(stripPad('toolong', 4)).toBe('toolong ');
+  });
+});
+
+describe('fleet apply alias', () => {
+  it('registers `apply` under the fleet/devices tree with options identical to top-level `agents apply`', () => {
+    const program = new Command();
+    registerApplyCommand(program);
+    const top = program.commands.find((c) => c.name() === 'apply');
+    expect(top).toBeDefined();
+
+    const devices = program.command('devices');
+    registerFleetApplyAlias(devices);
+    const sub = devices.commands.find((c) => c.name() === 'apply');
+    expect(sub).toBeDefined();
+
+    // The alias must never drift from the real command — same flags, same engine.
+    const longFlags = (c: Command) => c.options.map((o) => o.long).sort();
+    expect(longFlags(sub!)).toEqual(longFlags(top!));
   });
 });

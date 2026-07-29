@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getCliVersion, getCliVersionFresh } from './version.js';
+import { getCliVersion, getCliVersionFresh, installLayoutFromBin } from './version.js';
 
 describe('version', () => {
   it('getCliVersion returns a non-empty version string', () => {
@@ -20,5 +20,32 @@ describe('version', () => {
     const b = getCliVersionFresh();
     expect(a).toBe(b);
     expect(a).not.toBe('');
+  });
+});
+
+// Regression guard for the Bun single-file binary: `import.meta.url` is a virtual
+// `/$bunfs/` path there, so version + menu-bar-bundle resolution must fall back to
+// the on-disk install found via the `agents` launcher symlink. This locks the
+// dirname chain (`<pkg>/dist/bin/agents` -> `<pkg>/dist`) that the fallback rides.
+describe('installLayoutFromBin', () => {
+  it('derives dist/, entry, and package.json from an nvm launcher path', () => {
+    const bin =
+      '/Users/me/.nvm/versions/node/v24.15.0/lib/node_modules/@phnx-labs/agents-cli/dist/bin/agents';
+    const pkg = '/Users/me/.nvm/versions/node/v24.15.0/lib/node_modules/@phnx-labs/agents-cli';
+    expect(installLayoutFromBin(bin)).toEqual({
+      distDir: `${pkg}/dist`,
+      entryPath: `${pkg}/dist/index.js`,
+      pkgJsonPath: `${pkg}/package.json`,
+    });
+  });
+
+  it('derives the layout from a bun-global launcher path', () => {
+    const bin = '/Users/me/.bun/install/global/node_modules/@phnx-labs/agents-cli/dist/bin/agents';
+    const pkg = '/Users/me/.bun/install/global/node_modules/@phnx-labs/agents-cli';
+    expect(installLayoutFromBin(bin)).toEqual({
+      distDir: `${pkg}/dist`,
+      entryPath: `${pkg}/dist/index.js`,
+      pkgJsonPath: `${pkg}/package.json`,
+    });
   });
 });

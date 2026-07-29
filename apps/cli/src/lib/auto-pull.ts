@@ -52,10 +52,17 @@ export function spawnDetachedSync(): void {
   if (!fs.existsSync(workerPath)) return;
 
   try {
+    // Scrub AGENTS_BRAND so the background sync always reconciles the FULL
+    // resource set into the shared agent homes. Otherwise a branded foreground
+    // invocation (e.g. `jack …`) would leak its curated/reduced profile into the
+    // detached sync and silently strip skills/plugins for the plain `agents`
+    // user (last-writer-wins on shared homes). Brand curation must stay a
+    // foreground, in-process view — never a background mutation of shared state.
+    const { AGENTS_BRAND: _brand, ...unbrandedEnv } = process.env;
     const child = spawn(process.execPath, [workerPath], {
       ...backgroundSpawnOptions(),
       stdio: 'ignore',
-      env: process.env,
+      env: unbrandedEnv,
     });
     child.unref();
   } catch {

@@ -12,13 +12,13 @@ const { registerSetupCommand } = await import('./setup.js');
 const { listInstalledBrowsers } = await import('../lib/browser/chrome.js');
 
 describe('agents setup command group', () => {
-  it('registers the browser/computer/share capability subcommands', () => {
+  it('registers the browser/computer/share/mine capability subcommands', () => {
     const program = new Command();
     registerSetupCommand(program);
     const setup = program.commands.find((c) => c.name() === 'setup');
     expect(setup).toBeDefined();
     const subs = setup!.commands.map((c) => c.name()).sort();
-    expect(subs).toEqual(['browser', 'computer', 'share']);
+    expect(subs).toEqual(['browser', 'computer', 'mine', 'share']);
   });
 
   it('keeps the bare `setup` command with its force / no-system-repo flags', () => {

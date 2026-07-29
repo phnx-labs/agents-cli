@@ -9,8 +9,8 @@
  */
 
 import type { Command } from 'commander';
-import { spawn } from 'child_process';
 import chalk from 'chalk';
+import { openUrl } from '../lib/open-url.js';
 import { crabboxList, reapSafeOrphans, reapOrphans, setLeaseSecretsBundle, type CrabboxBox } from '../lib/crabbox/cli.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { bundleExists, readBundle, writeBundle, keychainRef, bundleItemStore } from '../lib/secrets/bundles.js';
@@ -26,19 +26,6 @@ function fmtIdle(box: CrabboxBox): string {
 const HETZNER_BUNDLE = 'hetzner.com';
 const HCLOUD_KEY = 'HCLOUD_TOKEN';
 const HETZNER_CONSOLE_URL = 'https://console.hetzner.cloud/';
-
-/** Best-effort: open a URL in the user's default browser. Never throws. */
-function openUrl(url: string): void {
-  const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'cmd' : 'xdg-open';
-  const args = process.platform === 'win32' ? ['/c', 'start', '', url] : [url];
-  try {
-    const p = spawn(cmd, args, { stdio: 'ignore', detached: true });
-    p.on('error', () => {});
-    p.unref();
-  } catch {
-    /* best-effort */
-  }
-}
 
 /** Validate a Hetzner token against the live API. Exported for unit tests (fetch injectable). */
 export async function validateHetznerToken(

@@ -1671,16 +1671,24 @@ export async function installVersion(
   }
 }
 
+// Version-dir entries that are STATE, not install output, and so must survive a
+// clean reinstall: `home/`, and the `.isolated` marker that is the single source
+// of truth for "this copy is walled off". Losing the marker would silently demote
+// an isolated copy to a normal one on its first repair — after which shim
+// self-heal would hand it a bare `<agent>` shim and a PATH entry.
+const PRESERVED_ON_CLEAN_REINSTALL = new Set(['home', '.isolated']);
+
 /**
  * Remove install artifacts from a version directory, preserving `home/` which
  * contains the user's conversation history, sessions, history.jsonl, tasks,
- * todos, file-history, etc. Used by the install pipeline (NOT by removeVersion)
- * to clean up staging artifacts when a fresh install collides with an existing
- * dir. removeVersion uses soft-delete instead.
+ * todos, file-history, etc. (and the `.isolated` marker — see
+ * PRESERVED_ON_CLEAN_REINSTALL). Used by the install pipeline (NOT by
+ * removeVersion) to clean up staging artifacts when a fresh install collides
+ * with an existing dir. removeVersion uses soft-delete instead.
  */
 function removeInstallArtifacts(versionDir: string): void {
   for (const entry of fs.readdirSync(versionDir)) {
-    if (entry === 'home') continue;
+    if (PRESERVED_ON_CLEAN_REINSTALL.has(entry)) continue;
     fs.rmSync(path.join(versionDir, entry), { recursive: true, force: true });
   }
 }
@@ -1791,9 +1799,12 @@ async function reconcileGlobalBinaryVersions(agent: AgentId): Promise<void> {
 
   if (foldedAny) {
     invalidateInstalledVersionsCache(agent);
-    // Keep the recorded default pointing at a dir that still exists on disk.
+    // Keep the recorded default pointing at a dir that still exists on disk —
+    // but never promote an isolated copy into the default slot (same rule as the
+    // post-removal promotion filter and `agents use`). Leaving it unset is right:
+    // an isolated-only agent has no default by design.
     const def = getGlobalDefault(agent);
-    if (!def || !fs.existsSync(getVersionDir(agent, def))) {
+    if ((!def || !fs.existsSync(getVersionDir(agent, def))) && !isVersionIsolated(agent, survivor)) {
       setGlobalDefault(agent, survivor);
     }
   }
@@ -2219,6 +2230,17 @@ export async function verifyInstalledBinaryLaunches(
  *   4. Nothing runnable installed → install `latest`, pin it, return it.
  *   5. Give up → return null (caller surfaces a clear error).
  *
+ * Isolation boundary (both directions — steps 3/4 are the only mutating ones):
+ *   - An ISOLATED target gets step 2 and nothing else. Falling back would let
+ *     `agents run <agent>@<isolated>` silently repoint the user's NORMAL default,
+ *     and installing `latest` would materialize a version they never asked for.
+ *     A failed repair returns null so the caller says so plainly.
+ *   - An isolated version is never a fallback CANDIDATE either, whatever the
+ *     target is: promoting one to the global default is exactly what `agents use`
+ *     refuses and what removeVersion's promotion filter excludes, so it must not
+ *     happen here by the back door (the daemon's launch-health pass calls this
+ *     unattended every ~6h).
+ *
  * Gated to npm-package agents: their native binary ships as an optional per-arch
  * dependency whose tarball can extract partially (interrupted/raced install) —
  * the exact failure this repairs. Agents with a global/native binary (grok,
@@ -2234,6 +2256,10 @@ export async function ensureAgentRunnable(
 
   if ((await verifyInstalledBinaryLaunches(agent, version)).ok) return version;
 
+  // Read the marker BEFORE the repair: the reinstall rewrites the version dir,
+  // so isolation must be decided from the pre-repair state, not re-read after.
+  const targetIsolated = isVersionIsolated(agent, version);
+
   log?.(`${cfg.name}@${version} is broken (platform binary missing) — repairing…`);
   const repair = await installVersion(agent, version, undefined, { clean: true });
   if (repair.success && (await verifyInstalledBinaryLaunches(agent, version)).ok) {
@@ -2241,8 +2267,20 @@ export async function ensureAgentRunnable(
     return version;
   }
 
+  // An isolated copy is walled off from the rest of the setup: repairing it in
+  // place is the ONLY thing we may do. No fallback, no install, no default
+  // switch — surface the failure and let the caller tell the user.
+  if (targetIsolated) {
+    log?.(`${cfg.name}@${version} is an isolated install and could not be repaired — leaving your default ${cfg.name} untouched.`);
+    return null;
+  }
+
   // In-place repair failed → adopt another installed version that launches.
-  const others = listInstalledVersions(agent).filter(v => v !== version).sort(compareVersions).reverse();
+  // Isolated copies are excluded: they are deliberately not promotable.
+  const others = listInstalledVersions(agent)
+    .filter(v => v !== version && !isVersionIsolated(agent, v))
+    .sort(compareVersions)
+    .reverse();
   for (const cand of others) {
     if ((await verifyInstalledBinaryLaunches(agent, cand)).ok) {
       setGlobalDefault(agent, cand);
@@ -2252,9 +2290,29 @@ export async function ensureAgentRunnable(
   }
 
   // Nothing runnable installed → last resort: install latest and pin it.
+  //
+  // …unless `latest` is a version the user already holds as an ISOLATED copy. A
+  // normal and an isolated install of the same version share one on-disk dir
+  // (see the coexistence refusal in commands/versions.ts), so installing would
+  // commandeer that copy and pinning it would hand an isolated install the
+  // global default — the same breach the candidate filter above prevents.
+  // Resolved BEFORE installing so the isolated copy is not even rebuilt.
+  const latestVersion = await getLatestNpmVersion(agent);
+  if (latestVersion && isVersionIsolated(agent, latestVersion)) {
+    log?.(`no runnable ${cfg.name} version installed — ${cfg.name}@${latestVersion} is the latest, but you hold it as an isolated copy, so it can't become your default.`);
+    log?.(`install one explicitly: agents add ${agent}@latest`);
+    return null;
+  }
+
   log?.(`no runnable ${cfg.name} version installed — installing ${cfg.name}@latest…`);
   const latest = await installVersion(agent, 'latest', undefined, { clean: true });
   if (latest.success) {
+    // Belt-and-braces: `latest` could have moved between the probe above and the
+    // install. Never pin an isolated version, whatever the resolution said.
+    if (isVersionIsolated(agent, latest.installedVersion)) {
+      log?.(`${cfg.name}@${latest.installedVersion} is an isolated copy and can't be set as your default.`);
+      return null;
+    }
     setGlobalDefault(agent, latest.installedVersion);
     log?.(`installed ${cfg.name}@${latest.installedVersion} and set it as the default.`);
     return latest.installedVersion;

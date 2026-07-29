@@ -24,6 +24,7 @@ import { setHelpSections } from '../lib/help.js';
 import { registerSetupBrowserCommand, runBrowserWizard } from './setup-browser.js';
 import { registerSetupComputerCommand, runComputerWizard } from './setup-computer.js';
 import { registerSetupShareCommand, runShareWizard } from './setup-share.js';
+import { registerSetupMineCommand } from './setup-mine.js';
 
 const HOME = os.homedir();
 
@@ -297,10 +298,11 @@ export function registerSetupCommand(program: Command): void {
     .option('-f, --force', 'Re-run setup even if ~/.agents/.system/ already exists (use with caution)')
     .option('--no-system-repo', 'Skip cloning the system repo (you must populate ~/.agents/.system/ yourself)');
 
-  // Capability subcommands: `agents setup browser|computer|share`.
+  // Capability subcommands: `agents setup browser|computer|share|mine`.
   registerSetupBrowserCommand(setupCmd);
   registerSetupComputerCommand(setupCmd);
   registerSetupShareCommand(setupCmd);
+  registerSetupMineCommand(setupCmd);
 
   setHelpSections(setupCmd, {
     examples: `
