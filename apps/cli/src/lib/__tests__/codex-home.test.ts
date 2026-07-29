@@ -47,6 +47,14 @@ describe('resolveCodexHome', () => {
   let agentsUserDir: string;
   let versionedHome: string;
 
+  // A short tmp base so shortCodexHome() paths stay under SUN_LEN in-test. Unlike
+  // os.tmpdir() — long on macOS/Windows CI (/var/folders/… , D:\a\_temp\…), long
+  // enough that even the migrated "short" home overflows — /tmp keeps the derived
+  // socket path under the 104-byte cap, matching a real short ~/.agents. POSIX-only:
+  // SUN_LEN is a darwin constraint and Windows has no comparably short base, so the
+  // callers skip win32.
+  const shortTmpRoot = () => fs.mkdtempSync(path.join('/tmp', 'cx-'));
+
   beforeEach(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-home-'));
     agentsUserDir = path.join(root, '.agents');
@@ -72,36 +80,47 @@ describe('resolveCodexHome', () => {
     expect(fs.lstatSync(versionedHome).isSymbolicLink()).toBe(false);
   });
 
-  it('leaves a short-enough home untouched even on darwin', () => {
-    // Deliberately NOT derived from os.tmpdir(): macOS hands out a ~66-char
-    // `/var/folders/<hash>/T/...` prefix that overflows SUN_LEN on its own, so a
-    // tmp-based "short" home isn't short. resolveCodexHome returns before it
-    // touches the filesystem when the home fits, so a synthetic path exercises
-    // the same branch without needing to exist on disk.
-    const shortHome = path.join(path.sep, 'tmp', 'c', '.codex');
-    expect(codexHomeOverflowsSunLen(shortHome)).toBe(false);
-    const out = resolveCodexHome(shortHome, agentsUserDir, '0.143.0', 'darwin');
-    expect(out).toBe(shortHome);
+  it.skipIf(process.platform === 'win32')('leaves a short-enough home untouched even on darwin', () => {
+    const shortRoot = shortTmpRoot();
+    try {
+      const shortHome = path.join(shortRoot, '.codex');
+      fs.mkdirSync(shortHome, { recursive: true });
+      expect(codexHomeOverflowsSunLen(shortHome)).toBe(false); // the base really is short
+      const out = resolveCodexHome(shortHome, path.join(shortRoot, '.agents'), '0.143.0', 'darwin');
+      expect(out).toBe(shortHome);
+    } finally {
+      fs.rmSync(shortRoot, { recursive: true, force: true });
+    }
   });
 
-  // Skipped on Windows: the migration leaves a symlink behind, which needs
-  // elevated privileges (or developer mode) on Windows runners. SUN_LEN is a
-  // macOS-only Unix-socket constraint and resolveCodexHome no-ops off darwin, so
-  // there is nothing Windows-specific to cover here.
+  // Skipped on Windows: SUN_LEN is a macOS-only Unix-socket constraint and
+  // resolveCodexHome no-ops off darwin, so there is nothing Windows-specific to
+  // cover. Uses a short tmp base (shortTmpRoot) because os.tmpdir() on macOS/Windows
+  // CI is itself long enough that the migrated "short" home would still overflow —
+  // a test-env artifact, not a resolver bug.
   it.skipIf(process.platform === 'win32')('migrates an overflowing home to a short real dir and symlinks the old path', () => {
-    const out = resolveCodexHome(versionedHome, agentsUserDir, '0.143.0', 'darwin');
-    const expectedShort = shortCodexHome(agentsUserDir, '0.143.0');
+    const shortRoot = shortTmpRoot();
+    try {
+      const userDir = path.join(shortRoot, '.agents');
+      const vHome = path.join(userDir, '.history/versions/codex/0.143.0', 'p'.repeat(80), 'home/.codex');
+      fs.mkdirSync(vHome, { recursive: true });
+      fs.writeFileSync(path.join(vHome, 'auth.json'), '{"token":"real"}');
 
-    expect(out).toBe(expectedShort);
-    // That the derived short home fits under SUN_LEN is asserted against a real
-    // ~/.agents dir in the helper suite above; it cannot hold under a long
-    // /var/folders tmp base, so don't re-assert it here.
-    expect(fs.lstatSync(expectedShort).isDirectory()).toBe(true);
-    expect(fs.existsSync(path.join(expectedShort, 'auth.json'))).toBe(true);
-    expect(fs.readFileSync(path.join(expectedShort, 'auth.json'), 'utf8')).toContain('real');
-    // The versioned path is now a symlink to the short real home.
-    expect(fs.lstatSync(versionedHome).isSymbolicLink()).toBe(true);
-    expect(fs.realpathSync(versionedHome)).toBe(fs.realpathSync(expectedShort));
+      const out = resolveCodexHome(vHome, userDir, '0.143.0', 'darwin');
+      const expectedShort = shortCodexHome(userDir, '0.143.0');
+
+      expect(out).toBe(expectedShort);
+      expect(codexHomeOverflowsSunLen(out)).toBe(false);
+      // The real home moved; its socket dir will now bind under SUN_LEN.
+      expect(fs.lstatSync(expectedShort).isDirectory()).toBe(true);
+      expect(fs.existsSync(path.join(expectedShort, 'auth.json'))).toBe(true);
+      expect(fs.readFileSync(path.join(expectedShort, 'auth.json'), 'utf8')).toContain('real');
+      // The versioned path is now a symlink to the short real home.
+      expect(fs.lstatSync(vHome).isSymbolicLink()).toBe(true);
+      expect(fs.realpathSync(vHome)).toBe(fs.realpathSync(expectedShort));
+    } finally {
+      fs.rmSync(shortRoot, { recursive: true, force: true });
+    }
   });
 
   it('is idempotent: a second call returns the short home without error', () => {

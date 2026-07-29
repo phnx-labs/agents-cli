@@ -3,12 +3,14 @@ import { describe, it, expect } from 'vitest';
 import {
   authAccountLabel,
   authCacheKey,
+  authCellColor,
   classifyHttpStatus,
   mergeAuthHealthEntries,
   formatCheckedAge,
   probeDetail,
   summarizeHostAuth,
   summarizeVerdicts,
+  verdictColor,
   verdictFromProbe,
   verdictGlyph,
   verdictLabel,
@@ -102,12 +104,50 @@ describe('authCacheKey', () => {
 });
 
 describe('summarizeVerdicts', () => {
-  it('counts live, bad (revoked/expired), and warn (everything else)', () => {
-    expect(summarizeVerdicts(['live', 'live', 'live', 'live'])).toEqual({ live: 4, bad: 0, warn: 0, total: 4 });
-    // only revoked is "bad"; expired is soft (kimi/droid self-refresh on launch) -> warn
-    expect(summarizeVerdicts(['live', 'revoked', 'expired', 'unverified'])).toEqual({ live: 1, bad: 1, warn: 2, total: 4 });
-    expect(summarizeVerdicts(['rate_limited', 'error'])).toEqual({ live: 0, bad: 0, warn: 2, total: 2 });
-    expect(summarizeVerdicts([])).toEqual({ live: 0, bad: 0, warn: 0, total: 0 });
+  it('counts live, present (unverified), bad (revoked), and warn (soft)', () => {
+    expect(summarizeVerdicts(['live', 'live', 'live', 'live'])).toEqual({ live: 4, present: 0, bad: 0, warn: 0, total: 4 });
+    // only revoked is "bad"; expired is soft -> warn; unverified is benign signed-in -> present
+    expect(summarizeVerdicts(['live', 'revoked', 'expired', 'unverified'])).toEqual({ live: 1, present: 1, bad: 1, warn: 1, total: 4 });
+    // unverified (codex/grok signed in, no probe) must NOT land in warn — it's `present`
+    expect(summarizeVerdicts(['unverified', 'unverified'])).toEqual({ live: 0, present: 2, bad: 0, warn: 0, total: 2 });
+    expect(summarizeVerdicts(['rate_limited', 'error'])).toEqual({ live: 0, present: 0, bad: 0, warn: 2, total: 2 });
+    expect(summarizeVerdicts([])).toEqual({ live: 0, present: 0, bad: 0, warn: 0, total: 0 });
+  });
+});
+
+describe('verdictColor', () => {
+  it('reserves red for revoked; expired is soft yellow, never red', () => {
+    // the exact regression: the ping verbose list painted `expired` red (lumped with revoked)
+    expect(verdictColor('revoked')).toBe('red');
+    expect(verdictColor('expired')).toBe('yellow');
+    expect(verdictColor('rate_limited')).toBe('yellow');
+    expect(verdictColor('error')).toBe('yellow');
+  });
+  it('unverified (signed in, no probe) is neutral gray, not an alarm', () => {
+    expect(verdictColor('unverified')).toBe('gray');
+    expect(verdictColor('live')).toBe('green');
+    expect(verdictColor('unconfigured')).toBe('dim');
+  });
+});
+
+describe('authCellColor', () => {
+  const s = (o: Partial<ReturnType<typeof summarizeVerdicts>>) =>
+    ({ live: 0, present: 0, bad: 0, warn: 0, total: 0, ...o });
+  it('red only when a token is genuinely revoked', () => {
+    expect(authCellColor(s({ bad: 1, total: 1 }))).toBe('red');
+    // revoked wins even alongside live accounts
+    expect(authCellColor(s({ live: 2, bad: 1, total: 3 }))).toBe('red');
+  });
+  it('expired-only cell is soft yellow, NOT red (kimi/droid self-refresh)', () => {
+    expect(authCellColor(s({ warn: 1, total: 1 }))).toBe('yellow');
+  });
+  it('all-unverified cell (codex/grok signed in) is neutral gray, NOT yellow', () => {
+    // this is the "cry wolf" fix: a fully-logged-in codex fleet must not read as degraded
+    expect(authCellColor(s({ present: 1, total: 1 }))).toBe('gray');
+  });
+  it('all-live cell is green; empty cell is dim', () => {
+    expect(authCellColor(s({ live: 3, total: 3 }))).toBe('green');
+    expect(authCellColor(s({ total: 0 }))).toBe('dim');
   });
 });
 

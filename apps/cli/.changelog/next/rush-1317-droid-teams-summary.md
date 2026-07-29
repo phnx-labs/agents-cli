@@ -1,1 +1,0 @@
-- Show Droid teammate activity in `agents teams collect` by normalizing stream-json tools, file edits, and final messages.
