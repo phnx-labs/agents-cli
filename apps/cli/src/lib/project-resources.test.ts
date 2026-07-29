@@ -44,6 +44,33 @@ describe('syncProjectResourcesToAgent', () => {
     expect(gooseManifest.paths).toEqual(['skills/myskill']);
   });
 
+  it('cleans up a manifest written on Windows, with backslash-separated paths', () => {
+    // .agents-managed.json travels with the version-controlled project dir, so
+    // a manifest minted by a Windows build (or by a pre-fix version of this
+    // code) can be read on POSIX. Its entries must still match, or the cleanup
+    // pass silently leaves previously managed files behind.
+    const project = makeTempProject();
+    const projectAgentsDir = path.join(project, '.agents');
+    fs.mkdirSync(projectAgentsDir, { recursive: true });
+
+    // A file this manifest claims to manage, which is no longer backed by any
+    // project resource — the next sync must remove it.
+    const geminiRoot = path.join(project, '.gemini');
+    const stale = path.join(geminiRoot, 'skills', 'gone');
+    fs.mkdirSync(stale, { recursive: true });
+    fs.writeFileSync(path.join(stale, 'SKILL.md'), 'stale', 'utf-8');
+    fs.writeFileSync(
+      path.join(geminiRoot, '.agents-managed.json'),
+      // Backslashes exactly as a Windows run would have persisted them.
+      JSON.stringify({ v: 1, paths: ['skills\\gone'] }),
+      'utf-8',
+    );
+
+    syncProjectResourcesToAgent('gemini', '0.36.0', projectAgentsDir);
+
+    expect(fs.existsSync(stale)).toBe(false);
+  });
+
   it('tracks Goose workflow subrecipes in the manifest from the first sync', () => {
     const project = makeTempProject();
     const projectAgentsDir = path.join(project, '.agents');
