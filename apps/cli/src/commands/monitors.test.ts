@@ -118,20 +118,18 @@ describe('monitors inspection JSON and stderr', () => {
 
   it('test --json evaluates once, prints the dry-run decision as JSON, and writes no state', () => {
     const home = makeHome();
+    // The monitor command runs through the host shell, so it has to be
+    // shell-portable. printf doesn't exist on cmd.exe, and node -e "..." loses
+    // its quoting there (node received a literal leading quote and threw
+    // SyntaxError). A script file sidesteps shell quoting entirely: the command
+    // doesn't open with a quote, and run() puts the running node's directory on
+    // PATH so the bare name resolves on both platforms.
+    const emitter = path.join(home, 'emit-fixture.cjs');
+    fs.writeFileSync(emitter, "process.stdout.write('build fail\\nnext\\n');\n");
     writeMonitor(home, {
       name: 'ci',
       enabled: true,
-      // Emit via node rather than printf: the command runs through the host
-      // shell, and cmd.exe has no printf — it failed with "'printf' is not
-      // recognized". Spelled bare rather than as process.execPath, because
-      // cmd.exe mangles a command line that opens with a quoted path
-      // containing spaces ("C:\Program Files\nodejs\node.exe"). run() puts the
-      // running node's own directory on PATH so the bare name resolves on both
-      // platforms.
-      source: {
-        type: 'command',
-        command: `node -e "process.stdout.write('build fail\\nnext\\n')"`,
-      },
+      source: { type: 'command', command: `node "${emitter}"` },
       condition: { mode: 'match', match: 'fail' },
       action: { type: 'notify', notifyChannel: 'telegram' },
     });
