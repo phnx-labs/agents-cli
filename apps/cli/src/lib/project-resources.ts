@@ -63,7 +63,7 @@ function loadProjectManifest(agentRoot: string): ProjectManagedManifest | null {
     const raw = JSON.parse(fs.readFileSync(path.join(agentRoot, MANIFEST_FILE), 'utf-8')) as ProjectManagedManifest;
     if (raw.v !== MANIFEST_VERSION || !Array.isArray(raw.paths)) return null;
     if (!raw.paths.every((p) => typeof p === 'string' && p.length > 0)) return null;
-    return raw;
+    return { ...raw, paths: raw.paths.map(toPosixRel) };
   } catch {
     return null;
   }
@@ -124,6 +124,19 @@ function projectEntries(projectAgentsDir: string, kind: ProjectKind): fs.Dirent[
   }
 }
 
+/**
+ * Manifest paths are persisted to `.agents-managed.json`, which lives in the
+ * version-controlled project dir and therefore travels between machines. Store
+ * them POSIX-style: `path.join` yields `skills\myskill` on Windows, and a
+ * manifest carrying that would silently fail to match — and so fail to clean up
+ * its managed files — when the same project is synced on macOS or Linux.
+ * Normalizing on both write and read also repairs manifests written by earlier
+ * Windows builds.
+ */
+function toPosixRel(rel: string): string {
+  return rel.replace(/\\/g, '/');
+}
+
 function record(
   kind: ProjectKind,
   name: string,
@@ -132,7 +145,7 @@ function record(
   manifestPaths: Set<string>,
 ): void {
   result.synced.push(`${kind}/${name}`);
-  for (const rel of relPaths) manifestPaths.add(rel);
+  for (const rel of relPaths) manifestPaths.add(toPosixRel(rel));
 }
 
 function skip(dest: string, projectRoot: string, result: ProjectResourceSyncResult): void {
@@ -250,8 +263,8 @@ function syncProjectSubagents(
   if (!target) return;
   const all = readProjectSubagents(projectAgentsDir);
   const dir = target.dir(projectRoot);
-  const targetDirRel = path.relative(agentRoot, dir);
-  const hadManagedTarget = manifest?.paths.some((rel) => rel === targetDirRel || rel.startsWith(targetDirRel + path.sep)) ?? false;
+  const targetDirRel = toPosixRel(path.relative(agentRoot, dir));
+  const hadManagedTarget = manifest?.paths.some((rel) => rel === targetDirRel || rel.startsWith(targetDirRel + '/')) ?? false;
 
   for (const sub of all.values()) {
     const occupied = target.occupied(dir, sub.name);
