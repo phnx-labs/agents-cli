@@ -118,6 +118,7 @@ const BACKUPS_DIR = path.join(HISTORY_DIR, 'backups');
 const TRASH_DIR = path.join(HISTORY_DIR, 'trash');
 const MAILBOX_DIR = path.join(HISTORY_DIR, 'mailbox');
 const FEED_DIR = path.join(HISTORY_DIR, 'feed');
+const ACTIVITY_DIR = path.join(HISTORY_DIR, 'activity');
 
 // Cache bucket (regenerable).
 const SHIMS_DIR = path.join(CACHE_DIR, 'shims');
@@ -394,6 +395,9 @@ export function getMailboxRootDir(): string { return MAILBOX_DIR; }
 
 /** Root for open-block feed records (~/.agents/.history/feed/). */
 export function getFeedDir(): string { return FEED_DIR; }
+
+/** Append-only per-session agent-activity event logs (~/.agents/.history/activity/). */
+export function getActivityDir(): string { return ACTIVITY_DIR; }
 
 /** Path to installed agent CLI binaries (~/.agents/.history/versions/). */
 export function getVersionsDir(): string { return VERSIONS_DIR; }
