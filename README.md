@@ -35,6 +35,16 @@
 
 https://agents-cli.sh/demo.mp4
 
+## Quickstart
+
+```bash
+curl -fsSL agi-cli.sh | sh          # install (or: npm i -g @phnx-labs/agents-cli)
+agents setup                        # first-time setup -- config + pick your agents
+agents run claude "explain this repo"   # run any agent on your existing subscription
+```
+
+`agents setup` is interactive and idempotent -- safe to re-run on a new machine.
+
 ```bash
 npm install -g @phnx-labs/agents-cli
 # or
