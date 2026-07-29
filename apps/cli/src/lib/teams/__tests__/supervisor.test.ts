@@ -207,6 +207,33 @@ describe('runSupervisor', () => {
     expect(seenNames.has('seed')).toBe(true);
   });
 
+  it('reports failed count on drain: a failed teammate drains with failed >= 1', async () => {
+    // A "drained" DAG only means nothing is pending/running — a failed teammate
+    // still drains. The result must surface that so callers (e.g. the star
+    // nudge) can distinguish a clean drain from a failed one.
+    await plantAgent('mixed', { name: 'ok', status: AgentStatus.COMPLETED, taskType: 'implement' });
+    await plantAgent('mixed', { name: 'boom', status: AgentStatus.FAILED, taskType: 'implement' });
+    const result = await runSupervisor(mgr, {
+      team: 'mixed',
+      intervalMs: 50,
+      onWave: () => {},
+    });
+    expect(result.stoppedBy).toBe('drained');
+    expect(result.failed).toBe(1);
+  });
+
+  it('a fully-successful drain reports failed === 0', async () => {
+    await plantAgent('allok', { name: 'a', status: AgentStatus.COMPLETED, taskType: 'implement' });
+    await plantAgent('allok', { name: 'b', status: AgentStatus.COMPLETED, taskType: 'test', after: ['a'] });
+    const result = await runSupervisor(mgr, {
+      team: 'allok',
+      intervalMs: 50,
+      onWave: () => {},
+    });
+    expect(result.stoppedBy).toBe('drained');
+    expect(result.failed).toBe(0);
+  });
+
   it('stops at --max-waves if the DAG never drains', async () => {
     await plantAgent('t1', { name: 'running', status: AgentStatus.RUNNING, taskType: 'implement' });
     const result = await runSupervisor(mgr, {
