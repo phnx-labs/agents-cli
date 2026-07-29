@@ -58,6 +58,13 @@ export interface CrabboxOptions {
    * `crabbox login` credentials.
    */
   secretsBundle?: string;
+  /**
+   * Hard cap (ms) on a single crabbox invocation that hits the provider API
+   * (`list`). Prevents a slow/unreachable provider from hanging an ambient
+   * command like `agents devices`. Defaults to 8s; callers on a fast/interactive
+   * path (devices list, `agents ssh` fall-through) pass a shorter bound.
+   */
+  timeoutMs?: number;
 }
 
 /** Locate the crabbox binary, or throw an actionable error. */
@@ -266,7 +273,11 @@ function normalizeBox(raw: Record<string, unknown>): CrabboxBox | null {
 /** All crabbox machines the broker knows about. */
 export function crabboxList(opts: CrabboxOptions = {}): CrabboxBox[] {
   findCrabbox();
-  const r = spawnSync('crabbox', ['list', '--json'], { encoding: 'utf-8', env: crabboxEnv(opts) });
+  const timeoutMs = opts.timeoutMs ?? 8000;
+  const r = spawnSync('crabbox', ['list', '--json'], { encoding: 'utf-8', env: crabboxEnv(opts), timeout: timeoutMs });
+  if (r.error && (r.error as NodeJS.ErrnoException).code === 'ETIMEDOUT') {
+    throw new Error(`crabbox list timed out after ${Math.round(timeoutMs / 1000)}s (provider slow or unreachable)`);
+  }
   if (r.status !== 0) {
     throw new Error(`crabbox list failed: ${(r.stderr || r.stdout || '').trim() || 'unknown error'}`);
   }

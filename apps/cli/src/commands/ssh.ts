@@ -245,7 +245,7 @@ export function renderLeasedBoxesSection(boxes: CrabboxBox[], nowSecs: number): 
 /** The leased-box rows for the devices list, or [] when crabbox can't be read. */
 function loadLeasedBoxesSection(): string[] {
   try {
-    const boxes = crabboxList({ secretsBundle: process.env.AGENTS_LEASE_SECRETS_BUNDLE });
+    const boxes = crabboxList({ secretsBundle: process.env.AGENTS_LEASE_SECRETS_BUNDLE, timeoutMs: 5000 });
     return renderLeasedBoxesSection(boxes, Math.floor(Date.now() / 1000));
   } catch {
     return []; // crabbox not installed / no provider creds — omit the section
@@ -261,7 +261,7 @@ function loadLeasedBoxesSection(): string[] {
 function trySshLeasedBox(name: string, cmd: string[]): boolean {
   let box: CrabboxBox | null;
   try {
-    box = crabboxFind(name, { secretsBundle: process.env.AGENTS_LEASE_SECRETS_BUNDLE });
+    box = crabboxFind(name, { secretsBundle: process.env.AGENTS_LEASE_SECRETS_BUNDLE, timeoutMs: 5000 });
   } catch {
     return false; // crabbox unavailable — not a leased-box target
   }
@@ -834,8 +834,12 @@ Typical workflow:
       console.log(chalk.gray(`  updated ${formatCheckedAge(freshness.oldestFetchedAt)} — pass --refresh (--live) for a live probe`));
     }
     // Ephemeral crabbox leases live alongside the registered fleet but are never
-    // written into the registry — surface them as their own live section.
-    for (const line of loadLeasedBoxesSection()) console.log(line);
+    // written into the registry — surface them as their own live section. This is
+    // a live provider call, so honor --no-stats (the explicit "instant, no probes"
+    // opt-out) and bound it so a slow provider can't hang `agents devices`.
+    if (opts.stats !== false) {
+      for (const line of loadLeasedBoxesSection()) console.log(line);
+    }
   };
 
   devicesCmd.action(runList);

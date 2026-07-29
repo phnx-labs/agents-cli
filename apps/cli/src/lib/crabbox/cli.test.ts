@@ -190,6 +190,32 @@ describe('normalizeBox tailscale fields (via crabboxList)', () => {
   });
 });
 
+describe('crabboxList timeout — a slow provider never hangs an ambient command', () => {
+  it('throws (does not hang) when `crabbox list` exceeds timeoutMs', () => {
+    // Fake crabbox: --help is instant (findCrabbox passes), `list` blocks 30s.
+    // With timeoutMs=400 the spawn is killed and we throw a clear message fast —
+    // this is what keeps `agents devices` / `agents ssh <typo>` from blocking on
+    // a slow/unreachable provider API.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crabbox-slow-'));
+    fs.writeFileSync(
+      path.join(dir, 'crabbox'),
+      ['#!/bin/sh', 'case "$1" in', '  --help) exit 0 ;;', '  list) sleep 30 ;;', '  *) exit 1 ;;', 'esac'].join('\n'),
+      'utf-8',
+    );
+    fs.chmodSync(path.join(dir, 'crabbox'), 0o755);
+    const oldPath = process.env.PATH;
+    process.env.PATH = `${dir}${path.delimiter}${oldPath ?? ''}`;
+    const startedAt = Date.now();
+    try {
+      expect(() => crabboxList({ timeoutMs: 400 })).toThrow(/timed out/);
+      expect(Date.now() - startedAt).toBeLessThan(5000); // killed near the bound, not after 30s
+    } finally {
+      process.env.PATH = oldPath;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('crabboxWarmup netMode', () => {
   // A fake crabbox that records argv for `warmup` and returns a fresh box on `list`.
   function withRecordingCrabbox(fn: (log: string) => Promise<void>): Promise<void> {
