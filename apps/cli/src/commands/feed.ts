@@ -12,6 +12,7 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { ensureFeedPublishHook, listAskStats, listBlocks, recordNotified, type OpenBlock } from '../lib/feed.js';
+import { ensureActivityLogHook, readRecentActivity, formatActivityLine } from '../lib/activity.js';
 import {
   enrichBlocksFromSessions,
   groupBlocksByOutcome,
@@ -302,6 +303,10 @@ export function registerFeedCommand(program: Command): void {
       const setupWarnings: string[] = [];
       if (includeLocal) {
         const hookInstall = ensureFeedPublishHook();
+        // Wire the activity-log hooks into agents.yaml before parsing the
+        // manifest below, so the same registerHooksToSettings pass installs them.
+        const activityInstall = ensureActivityLogHook();
+        if (activityInstall.error) setupWarnings.push(activityInstall.error);
         if (hookInstall.error) {
           setupWarnings.push(hookInstall.error);
         } else {
@@ -437,6 +442,7 @@ export function registerFeedCommand(program: Command): void {
 
       if (blocks.length === 0) {
         console.log(chalk.gray(digest ? 'No open blocks after stall suppression.' : 'No open blocks.'));
+        if (includeLocal) renderActivityLane();
         return;
       }
 
@@ -462,5 +468,20 @@ export function registerFeedCommand(program: Command): void {
         return br - ar;
       });
       for (const g of groups) renderOutcomeGroup(g, self);
+      if (includeLocal) renderActivityLane();
     });
+}
+
+/**
+ * Print a compact "recent activity" lane under the feed: the last few milestone
+ * events (plans, PRs, worktrees, sub-agents) from the append-only activity logs.
+ * Read-only tail of the logs -- no transcript re-parsing. Silent when empty.
+ */
+function renderActivityLane(): void {
+  const events = readRecentActivity({ sinceMs: Date.now() - 24 * 60 * 60 * 1000, limit: 6 })
+    .filter((e) => e.tier === 'milestone');
+  if (events.length === 0) return;
+  console.log(chalk.bold('\n  recent activity'));
+  for (const ev of events) console.log(formatActivityLine(ev, { showHost: true }));
+  console.log(chalk.gray('  → agents activity  for the full stream'));
 }
