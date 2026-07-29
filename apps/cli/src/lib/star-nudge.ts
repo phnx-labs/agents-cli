@@ -79,11 +79,20 @@ export function maybeShowStarNudge(opts: { quiet?: boolean } = {}): void {
     });
     if (!show) return;
 
-    // Write the sentinel BEFORE printing so two runs finishing at once still
-    // show the hint at most once.
+    // Claim the one-time slot with an ATOMIC exclusive create (O_EXCL). The
+    // hasShownStarNudge() check above is only a cheap fast-path; the existsSync
+    // + write pair is a TOCTOU race across processes, and `agents teams` spawns
+    // many at once. The `wx` flag makes the create itself the arbiter: exactly
+    // one process succeeds, every other gets EEXIST and stays silent — so the
+    // hint prints at most once even under concurrent completions.
     const sentinel = nudgeSentinelPath();
     fs.mkdirSync(path.dirname(sentinel), { recursive: true });
-    fs.writeFileSync(sentinel, new Date().toISOString());
+    try {
+      fs.writeFileSync(sentinel, new Date().toISOString(), { flag: 'wx' });
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'EEXIST') return; // another process won the race
+      throw e; // real write failure -> caught by the outer best-effort guard
+    }
 
     console.log(
       '\n' +
