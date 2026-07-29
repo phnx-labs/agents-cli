@@ -302,14 +302,14 @@ export function registerFeedCommand(program: Command): void {
       const includeLocal = shouldIncludeLocalFeed(opts.host, self);
       const setupWarnings: string[] = [];
       if (includeLocal) {
+        // Feed and activity hooks are independent -- install both, and register
+        // the manifest as long as at least one wrote its entries (don't couple
+        // activity registration to the feed hook succeeding).
         const hookInstall = ensureFeedPublishHook();
-        // Wire the activity-log hooks into agents.yaml before parsing the
-        // manifest below, so the same registerHooksToSettings pass installs them.
         const activityInstall = ensureActivityLogHook();
+        if (hookInstall.error) setupWarnings.push(hookInstall.error);
         if (activityInstall.error) setupWarnings.push(activityInstall.error);
-        if (hookInstall.error) {
-          setupWarnings.push(hookInstall.error);
-        } else {
+        if (!hookInstall.error || !activityInstall.error) {
           const [{ iterHooksCapableVersions, parseHookManifest, registerHooksToSettings }, { getVersionHomePath }] = await Promise.all([
             import('../lib/hooks.js'),
             import('../lib/versions.js'),
