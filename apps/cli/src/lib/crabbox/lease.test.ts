@@ -302,6 +302,11 @@ describe('leaseAndRun reused crabbox boxes', () => {
         runtimes: ['claude'],
         detected,
         reuseBox: 'warm-one',
+        // This test exercises box-reuse + bootstrap-script generation, NOT the
+        // push-from-local copy (covered by the buildBootstrapScript F1 test). Keep
+        // it off so leaseAndRun never spawns a real `rsync -e ssh` to the fake
+        // TEST-NET box address — that would hang on ConnectTimeout in CI.
+        copySetup: false,
         onData: (chunk) => { output += chunk; },
         onPhase: (phase) => { phases.push(phase.kind); },
       });
