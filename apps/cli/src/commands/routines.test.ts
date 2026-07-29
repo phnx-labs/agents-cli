@@ -11,14 +11,18 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { createRequire } from 'module';
 import { buildRunsJson } from './routines.js';
 import type { RunMeta } from '../lib/routines.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const require = createRequire(import.meta.url);
-const TSX_IMPORT = require.resolve('tsx');
+// `--import` takes a module specifier, not a path: a bare Windows path like
+// `D:\a\...\tsx\dist\loader.mjs` is parsed as a URL with protocol 'd:' and the
+// child dies with ERR_UNSUPPORTED_ESM_URL_SCHEME before running the CLI. Same
+// pattern as sessions.test.ts:21.
+const TSX_IMPORT = pathToFileURL(require.resolve('tsx')).href;
 const CLI_ENTRYPOINT = path.join(REPO_ROOT, 'src', 'index.ts');
 
 /** Provision an isolated HOME with agents.yaml, .system/.git, and optional routines + device registry. */
