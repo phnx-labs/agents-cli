@@ -191,6 +191,20 @@ describe('buildBootstrapScript', () => {
     expect(script).toContain(`echo '${leasePhaseSentinel('creds')}'`);
   });
 
+  it('materializes the pushed config with `agents repo refresh` at the copy-setup step (F1 wiring)', () => {
+    // The host rsyncs ~/.agents before the box run (leaseAndRun); the box then
+    // refreshes it into the runtime home — but only after the install step has
+    // put agents-cli on PATH, and only when copySetup is on.
+    const on = buildBootstrapScript({ agent: 'claude', prompt: 'hi', runtimes: ['claude'], detected });
+    expect(on).toContain('agents repo refresh');
+    // Refresh runs after the runtime install (agents-cli present) and before the agent marker.
+    expect(on.indexOf('agents repo refresh')).toBeGreaterThan(on.indexOf(`echo '${leasePhaseSentinel('install')}'`));
+    expect(on.indexOf('agents repo refresh')).toBeLessThan(on.indexOf(LEASE_AGENT_MARKER));
+    // --bare drops the refresh with the sentinel.
+    const bare = buildBootstrapScript({ agent: 'claude', prompt: 'hi', runtimes: ['claude'], detected, copySetup: false });
+    expect(bare).not.toContain('agents repo refresh');
+  });
+
   it('emits the joined-tailnet sentinel only for a tailscale lease', () => {
     const pub = buildBootstrapScript({ agent: 'claude', prompt: 'hi', runtimes: ['claude'], detected });
     expect(pub).not.toContain(`echo '${leasePhaseSentinel('joined-tailnet')}'`);

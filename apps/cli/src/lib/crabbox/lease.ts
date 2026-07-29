@@ -30,6 +30,7 @@ import { crabboxFind, crabboxWarmup, crabboxWaitReady, crabboxRunScript, crabbox
 import * as yaml from 'yaml';
 import { buildCredentialScript, buildHomeFileWriteScript, CLAUDE_TOKEN_REMOTE, type DetectedRuntime } from './runtimes.js';
 import { LEASE_AGENT_MARKER, leasePhaseSentinel } from './progress.js';
+import { copySetupToBox } from './setup-copy.js';
 
 /** Phase signal for a lease run, so the command layer can drive a progress UI. */
 export type LeasePhase =
@@ -212,10 +213,11 @@ export function buildBootstrapScript(opts: LeaseRunOptions): string {
     step('creds'),
     credScript,
     profileScript,
-    // copy-setup is a push-from-local (copySetupToBox), performed by the command
-    // layer before the box run; this sentinel marks its slot in the progress
-    // stream. Gated by copySetup (the command layer clears it for --bare).
-    copySetup ? step('copy-setup') : '',
+    // copy-setup: the host already rsync'd the git-tracked ~/.agents onto the box
+    // (leaseAndRun, before this script). Here — after ENSURE_AGENTS_CLI installed
+    // the CLI — we materialize that config into the runtime home. Gated by
+    // copySetup (cleared for --bare). Best-effort; a refresh failure never aborts.
+    copySetup ? [step('copy-setup'), 'agents repo refresh >/dev/null 2>&1 || true'].join('\n') : '',
     // Marker on its own line: the command layer shows everything before this as
     // setup progress and everything after (the agent's output) verbatim.
     `echo ${q(LEASE_AGENT_MARKER)}`,
@@ -250,6 +252,27 @@ export async function leaseAndRun(opts: LeaseRunOptions): Promise<LeaseRunResult
     await crabboxWaitReady(box.slug, { secretsBundle: opts.secretsBundle });
   }
   opts.onPhase?.({ kind: 'ready', box, elapsedMs: Date.now() - startedAt });
+
+  // Setup-copy (F1, RUSH-1920): push the git-tracked ~/.agents config onto the
+  // box from the host. rsync only here — the box has no agents-cli yet, so the
+  // matching `agents repo refresh` runs inside the bootstrap script, after the
+  // install step. Prefer the tailnet address when the box joined one. Best-effort:
+  // a copy failure never aborts the run (the agent just runs without the config).
+  if (opts.copySetup !== false) {
+    const setupHost = box.tailscaleFQDN ?? box.tailscaleIPv4 ?? box.ip;
+    if (setupHost) {
+      try {
+        await copySetupToBox({
+          host: setupHost,
+          secretsBundle: opts.secretsBundle,
+          onData: opts.onData,
+          refresh: false,
+        });
+      } catch {
+        /* best-effort — never block the run on a config-copy failure */
+      }
+    }
+  }
 
   const script = buildBootstrapScript(opts);
   let exitCode: number | null = null;

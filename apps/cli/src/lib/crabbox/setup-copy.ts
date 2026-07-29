@@ -58,6 +58,14 @@ export interface CopySetupOptions extends CopySetupTarget {
   userAgentsDir?: string;
   /** Receives combined stdout/stderr of the rsync + refresh, if set. */
   onData?: (chunk: string) => void;
+  /**
+   * Run `agents repo refresh` on the box after the push (default `true`). Set
+   * `false` when the caller runs the refresh itself in the box bootstrap — the
+   * lease path does this so the refresh runs AFTER the box installs agents-cli
+   * (this host-side push happens before the box boots agents-cli, so a host-side
+   * refresh here could not find the CLI).
+   */
+  refresh?: boolean;
 }
 
 export interface CopySetupResult {
@@ -156,7 +164,7 @@ export async function copySetupToBox(opts: CopySetupOptions): Promise<CopySetupR
     const pushExitCode = await runStreaming('rsync', rsyncArgs, env, opts.onData);
 
     let refreshExitCode: number | null = null;
-    if (pushExitCode === 0) {
+    if (pushExitCode === 0 && opts.refresh !== false) {
       const sshArgs = buildSetupSshArgs(opts, 'agents repo refresh');
       refreshExitCode = await runStreaming('ssh', sshArgs, env, opts.onData);
     }
