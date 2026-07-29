@@ -1,1 +1,0 @@
-- Fix `agents routines list` and `agents routines view` so a project-layer routine with the same name no longer hides the user-layer `devices` allowlist written by `agents routines devices --set`.
