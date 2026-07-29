@@ -1,7 +1,7 @@
 {
   "name": "@phnx-labs/agi-cli",
   "version": "1.20.70",
-  "description": "agi-cli — one CLI for every coding agent. Front-brand alias of @phnx-labs/agents-cli; installs the same tool as agents, ag, and agi.",
+  "description": "DEPRECATED alias — install @phnx-labs/agents-cli instead. This package only re-exports the canonical @phnx-labs/agents-cli CLI (commands: agents, ag, agi) and is no longer the recommended install.",
   "type": "module",
   "bin": {
     "agents": "bin/cli.js",

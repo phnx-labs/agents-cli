@@ -1,7 +1,7 @@
 {
   "name": "@companion/agents-cli",
   "version": "1.14.0",
-  "description": "This package has moved to @phnx-labs/agents-cli. Install that instead.",
+  "description": "DEPRECATED redirect — this package moved to @phnx-labs/agents-cli. Install the canonical @phnx-labs/agents-cli instead; this stub only re-exports it for legacy @companion/agents-cli users.",
   "dependencies": {
     "@phnx-labs/agents-cli": ">=1.13.4"
   },
