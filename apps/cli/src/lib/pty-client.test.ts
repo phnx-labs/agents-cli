@@ -53,16 +53,20 @@ describe('getServerSpawnArgs', () => {
     // #315 regression: a Bun --compile standalone can't require() node-pty's
     // pty.node, so the sidecar must run via a real node + the dist/index.js that
     // ships beside the binary.
+    // getServerSpawnArgs builds the sidecar path with path.join, which emits
+    // native separators — derive the fixture the same way so the fileExists
+    // seam and the assertion match on Windows too.
+    const distIndex = path.join('/opt/agents/dist/bin', '..', 'index.js');
     const spawn = getServerSpawnArgs({
       isStandaloneExecutable: true,
       execPath: '/opt/agents/dist/bin/agents',
       resolveNode: () => '/usr/local/bin/node',
-      fileExists: (p) => p === '/opt/agents/dist/index.js',
+      fileExists: (p) => p === distIndex,
     });
 
     expect(spawn).toEqual({
       bin: '/usr/local/bin/node',
-      args: ['/opt/agents/dist/index.js', 'pty', '_server'],
+      args: [distIndex, 'pty', '_server'],
     });
   });
 

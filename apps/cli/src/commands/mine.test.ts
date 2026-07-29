@@ -51,14 +51,25 @@ describe('mine command (white-label)', () => {
     const { out } = run(home, ['mine', 'init', 'jack', '--disable', 'teams']);
     expect(out).toContain('Minted');
 
+    // createBrandShim mints per shimTargetsFor(): a 755 bash shim on POSIX, a
+    // .cmd pass-through on Windows — assert whichever this platform actually
+    // produces rather than the POSIX one unconditionally.
     const shim = path.join(home, '.agents', '.cache', 'shims', 'jack');
-    expect(fs.existsSync(shim)).toBe(true);
-    // Executable bit set.
-    expect(fs.statSync(shim).mode & 0o111).not.toBe(0);
-    const body = fs.readFileSync(shim, 'utf-8');
-    // Pure pass-through: sets the brand and forwards argv with no injected verb.
-    expect(body).toContain('export AGENTS_BRAND=jack');
-    expect(body).toContain('exec "$AGENTS_BIN" "$@"');
+    if (process.platform === 'win32') {
+      expect(fs.existsSync(`${shim}.cmd`)).toBe(true);
+      const body = fs.readFileSync(`${shim}.cmd`, 'utf-8');
+      // Pure pass-through: sets the brand and forwards argv with no injected verb.
+      expect(body).toContain('set AGENTS_BRAND=jack');
+      expect(body).toContain('%*');
+    } else {
+      expect(fs.existsSync(shim)).toBe(true);
+      // Executable bit set.
+      expect(fs.statSync(shim).mode & 0o111).not.toBe(0);
+      const body = fs.readFileSync(shim, 'utf-8');
+      // Pure pass-through: sets the brand and forwards argv with no injected verb.
+      expect(body).toContain('export AGENTS_BRAND=jack');
+      expect(body).toContain('exec "$AGENTS_BIN" "$@"');
+    }
 
     const yaml = readYaml(home);
     expect(yaml).toContain('brands:');

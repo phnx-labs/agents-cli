@@ -225,8 +225,11 @@ describe('gitToplevel — always-fresh repo keying', () => {
       execFileSync('git', ['-C', dir, 'init', '-q']);
       const top = gitToplevel(dir);
       expect(top).not.toBeNull();
-      // macOS /tmp symlinks to /private/tmp, so compare via realpath.
-      expect(fs.realpathSync(top!)).toBe(fs.realpathSync(dir));
+      // macOS /tmp symlinks to /private/tmp, and on Windows os.tmpdir() hands
+      // back the 8.3 short form (C:\Users\RUNNER~1\...) while git reports the
+      // long one — realpathSync.native normalizes both, plain realpathSync
+      // only the symlink.
+      expect(fs.realpathSync.native(top!)).toBe(fs.realpathSync.native(dir));
       const nogit = fs.mkdtempSync(path.join(os.tmpdir(), 'lease-notop-'));
       try {
         expect(gitToplevel(nogit)).toBeNull();
