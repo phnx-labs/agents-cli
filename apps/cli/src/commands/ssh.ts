@@ -85,8 +85,7 @@ import { checkAllClis } from '../lib/teams/agents.js';
 import { buildRemoteAgentsInvocation } from '../lib/hosts/remote-cmd.js';
 import { sshExec, sshExecAsync, SSH_OPTS } from '../lib/ssh-exec.js';
 import { ALL_AGENT_IDS } from '../lib/agents.js';
-import { crabboxList, crabboxFind, type CrabboxBox } from '../lib/crabbox/cli.js';
-import { CRABBOX_SSH_USER, CRABBOX_SSH_PORT } from '../lib/crabbox/setup-copy.js';
+import { crabboxList, crabboxFind, crabboxSshArgv, type CrabboxBox } from '../lib/crabbox/cli.js';
 import { boxAddress, boxStatus, fmtIdleShort, fmtExpiresShort } from './lease.js';
 import {
   formatCheckedAge,
@@ -253,10 +252,11 @@ function loadLeasedBoxesSection(): string[] {
 }
 
 /**
- * `agents ssh <slug>` targeting a leased crabbox box: ssh to the box's tailnet
- * address (or public IP) as `crabbox@…` on port 2222, reusing the hardened
- * SSH_OPTS baseline. Returns false when `name` is not a known crabbox slug so
- * the caller can fall through to the normal "Unknown device" error.
+ * `agents ssh <slug>` targeting a leased crabbox box. crabbox provisions a
+ * per-lease identity key, so we ssh via crabbox's OWN emitted invocation
+ * (`crabboxSshArgv`) — a raw `ssh crabbox@ip` fails publickey. Returns false when
+ * `name` is not a known crabbox slug so the caller can fall through to the normal
+ * "Unknown device" error.
  */
 function trySshLeasedBox(name: string, cmd: string[]): boolean {
   let box: CrabboxBox | null;
@@ -266,13 +266,12 @@ function trySshLeasedBox(name: string, cmd: string[]): boolean {
     return false; // crabbox unavailable — not a leased-box target
   }
   if (!box) return false;
-  const addr = boxAddress(box);
-  if (!addr) {
-    console.error(chalk.red(`Leased box '${name}' has no reachable address yet (status: ${boxStatus(box)}).`));
+  const sshArgv = crabboxSshArgv(name, { secretsBundle: process.env.AGENTS_LEASE_SECRETS_BUNDLE, timeoutMs: 8000 });
+  if (!sshArgv) {
+    console.error(chalk.red(`Leased box '${name}' is not reachable yet (status: ${boxStatus(box)}).`));
     process.exit(1);
   }
-  const args = [...SSH_OPTS, '-p', String(CRABBOX_SSH_PORT), `${CRABBOX_SSH_USER}@${addr}`, ...cmd];
-  const res = spawnSync('ssh', args, { stdio: 'inherit' });
+  const res = spawnSync(sshArgv[0], [...sshArgv.slice(1), ...cmd], { stdio: 'inherit' });
   process.exit(res.status ?? 1);
 }
 

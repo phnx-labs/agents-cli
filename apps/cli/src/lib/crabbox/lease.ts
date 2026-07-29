@@ -254,23 +254,21 @@ export async function leaseAndRun(opts: LeaseRunOptions): Promise<LeaseRunResult
   opts.onPhase?.({ kind: 'ready', box, elapsedMs: Date.now() - startedAt });
 
   // Setup-copy (F1, RUSH-1920): push the git-tracked ~/.agents config onto the
-  // box from the host. rsync only here — the box has no agents-cli yet, so the
-  // matching `agents repo refresh` runs inside the bootstrap script, after the
-  // install step. Prefer the tailnet address when the box joined one. Best-effort:
-  // a copy failure never aborts the run (the agent just runs without the config).
+  // box from the host, over crabbox's own per-lease ssh (a raw ssh fails
+  // publickey). rsync only here — the box has no agents-cli yet, so the matching
+  // `agents repo refresh` runs inside the bootstrap script, after the install
+  // step. Best-effort: a copy failure never aborts the run (the agent just runs
+  // without the config).
   if (opts.copySetup !== false) {
-    const setupHost = box.tailscaleFQDN ?? box.tailscaleIPv4 ?? box.ip;
-    if (setupHost) {
-      try {
-        await copySetupToBox({
-          host: setupHost,
-          secretsBundle: opts.secretsBundle,
-          onData: opts.onData,
-          refresh: false,
-        });
-      } catch {
-        /* best-effort — never block the run on a config-copy failure */
-      }
+    try {
+      await copySetupToBox({
+        slug: box.slug,
+        secretsBundle: opts.secretsBundle,
+        onData: opts.onData,
+        refresh: false,
+      });
+    } catch {
+      /* best-effort — never block the run on a config-copy failure */
     }
   }
 

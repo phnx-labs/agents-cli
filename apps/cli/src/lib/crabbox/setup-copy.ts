@@ -9,9 +9,9 @@
  *      the safety boundary: it excludes `.history/`, `.cache/`, `.system/` and
  *      any keychain-backed secrets by construction (those are gitignored), so no
  *      credential material is ever pushed.
- *   2. `rsync` that exact file set over ssh to `~/.agents` on the box (crabbox
- *      user, port 2222; the same hardened `SSH_OPTS` baseline the rest of the CLI
- *      uses for fresh hosts).
+ *   2. `rsync` that exact file set to `~/.agents` on the box over crabbox's OWN
+ *      ssh invocation (`crabboxSshArgv`) — crabbox provisions a per-lease identity
+ *      key, so a raw `ssh crabbox@ip` fails publickey; only crabbox's key works.
  *   3. `agents repo refresh` on the box so the copied config takes effect.
  *
  * NEVER copies `~/.claude` / `~/.claude.json` — they live in `$HOME`, not
@@ -28,30 +28,17 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { getUserAgentsDir } from '../state.js';
-import { SSH_OPTS } from '../ssh-exec.js';
-import { crabboxEnv } from './cli.js';
+import { crabboxEnv, crabboxSshArgv } from './cli.js';
 
-/** Default ssh user on a crabbox box. */
-export const CRABBOX_SSH_USER = 'crabbox';
-/** Default ssh port crabbox exposes. */
-export const CRABBOX_SSH_PORT = 2222;
 /** Remote path (relative to the box user's home) the tracked config lands in. */
 export const REMOTE_AGENTS_DIR = '.agents/';
 
 /** Top-level paths that must never be pushed, even if somehow tracked. */
 const NEVER_COPY = new Set(['.claude', '.claude.json']);
 
-/** The crabbox ssh endpoint to push to. */
-export interface CopySetupTarget {
-  /** Box host to ssh into — public IPv4, or the tailnet IP/FQDN. */
-  host: string;
-  /** SSH user (default `crabbox`). */
-  user?: string;
-  /** SSH port (default `2222`). */
-  port?: number;
-}
-
-export interface CopySetupOptions extends CopySetupTarget {
+export interface CopySetupOptions {
+  /** crabbox box slug to push to — its per-lease ssh key does the auth. */
+  slug: string;
   /** Secrets bundle whose env the ssh/rsync children inherit (crabbox parity). */
   secretsBundle?: string;
   /** Override the local `~/.agents` dir (defaults to `getUserAgentsDir()`). */
@@ -94,30 +81,32 @@ export function enumerateTrackedFiles(dir: string): string[] {
     });
 }
 
-/** The ssh connection args for a crabbox box (hardened baseline + port). */
-export function buildSetupSshArgs(target: CopySetupTarget, remoteCmd: string): string[] {
-  const user = target.user ?? CRABBOX_SSH_USER;
-  const port = target.port ?? CRABBOX_SSH_PORT;
-  return [...SSH_OPTS, '-p', String(port), `${user}@${target.host}`, 'bash', '-lc', remoteCmd];
+/**
+ * Split crabbox's ssh argv (`['ssh', …opts, 'crabbox@host']`) into the `-e`
+ * transport string (`ssh …opts`) and the `crabbox@host` endpoint. This is what
+ * carries the per-lease identity key + known_hosts a raw ssh lacks.
+ */
+export function sshTransportFromArgv(sshArgv: string[]): { rsh: string; host: string } {
+  const host = sshArgv[sshArgv.length - 1];
+  const rsh = sshArgv.slice(0, -1).join(' '); // 'ssh -i <key> -o … -p 2222'
+  return { rsh, host };
 }
 
 /**
  * rsync argv to push the tracked file set to `~/.agents` on the box. Reads the
  * NUL-separated list at `filesFrom` (`--from0`, matching `ls-files -z`) so paths
- * with spaces survive, and tunnels over the hardened ssh baseline.
+ * with spaces survive, and tunnels over crabbox's own ssh (`rsh`).
  */
 export function buildSetupRsyncArgs(opts: {
-  target: CopySetupTarget;
+  rsh: string;
+  host: string;
   filesFrom: string;
   source: string;
   remoteDir?: string;
 }): string[] {
-  const user = opts.target.user ?? CRABBOX_SSH_USER;
-  const port = opts.target.port ?? CRABBOX_SSH_PORT;
-  const sshCmd = ['ssh', ...SSH_OPTS, '-p', String(port)].join(' ');
-  const remote = `${user}@${opts.target.host}:${opts.remoteDir ?? REMOTE_AGENTS_DIR}`;
+  const remote = `${opts.host}:${opts.remoteDir ?? REMOTE_AGENTS_DIR}`;
   const source = opts.source.endsWith('/') ? opts.source : `${opts.source}/`;
-  return ['-az', '--files-from', opts.filesFrom, '--from0', '-e', sshCmd, source, remote];
+  return ['-az', '--files-from', opts.filesFrom, '--from0', '-e', opts.rsh, source, remote];
 }
 
 function runStreaming(
@@ -154,19 +143,28 @@ export async function copySetupToBox(opts: CopySetupOptions): Promise<CopySetupR
     return { files, pushExitCode: null, refreshExitCode: null };
   }
 
+  // crabbox provisions a per-lease ssh key; a raw `ssh crabbox@ip` fails publickey.
+  // Ask crabbox for its exact ssh invocation and tunnel rsync through it.
+  const sshArgv = crabboxSshArgv(opts.slug, { secretsBundle: opts.secretsBundle });
+  if (!sshArgv) {
+    return { files, pushExitCode: null, refreshExitCode: null };
+  }
+  const { rsh, host } = sshTransportFromArgv(sshArgv);
+
   const env = crabboxEnv({ secretsBundle: opts.secretsBundle });
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-setup-copy-'));
   const listPath = path.join(tmp, 'files.lst');
   try {
     // NUL-separated list, matching `buildSetupRsyncArgs`'s `--from0`.
     fs.writeFileSync(listPath, files.join('\0'), 'utf-8');
-    const rsyncArgs = buildSetupRsyncArgs({ target: opts, filesFrom: listPath, source: dir });
+    const rsyncArgs = buildSetupRsyncArgs({ rsh, host, filesFrom: listPath, source: dir });
     const pushExitCode = await runStreaming('rsync', rsyncArgs, env, opts.onData);
 
     let refreshExitCode: number | null = null;
     if (pushExitCode === 0 && opts.refresh !== false) {
-      const sshArgs = buildSetupSshArgs(opts, 'agents repo refresh');
-      refreshExitCode = await runStreaming('ssh', sshArgs, env, opts.onData);
+      // ssh <opts> crabbox@host bash -lc 'agents repo refresh'
+      const refreshArgs = [...sshArgv.slice(1), 'bash', '-lc', 'agents repo refresh'];
+      refreshExitCode = await runStreaming('ssh', refreshArgs, env, opts.onData);
     }
     return { files, pushExitCode, refreshExitCode };
   } finally {

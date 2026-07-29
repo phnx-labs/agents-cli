@@ -10,6 +10,7 @@ import {
   pickTailscaleBundleFromList,
   crabboxList,
   crabboxWarmup,
+  parseCrabboxSshArgv,
   type CrabboxBox,
 } from './cli.js';
 import type { SecretsBundle } from '../secrets/bundles.js';
@@ -276,5 +277,19 @@ describe('crabboxWarmup netMode', () => {
       const warmupLine = fs.readFileSync(log, 'utf-8').split('\n').find((l) => l.startsWith('warmup'));
       expect(warmupLine).not.toContain('tailscale');
     });
+  });
+});
+
+describe('parseCrabboxSshArgv', () => {
+  it('parses the shell-quoted ssh command crabbox emits (key + endpoint)', () => {
+    const out = `lease cbx_x is claimed\n'ssh' '-i' '/home/u/.config/crabbox/testboxes/cbx_x/id_ed25519' '-o' 'IdentitiesOnly=yes' '-p' '2222' 'crabbox@157.90.242.199'\n`;
+    const argv = parseCrabboxSshArgv(out);
+    expect(argv?.[0]).toBe('ssh');
+    expect(argv).toContain('/home/u/.config/crabbox/testboxes/cbx_x/id_ed25519');
+    expect(argv?.[argv.length - 1]).toBe('crabbox@157.90.242.199');
+  });
+
+  it('returns null when no ssh command line is present', () => {
+    expect(parseCrabboxSshArgv('lease not found\nsome error\n')).toBeNull();
   });
 });

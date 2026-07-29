@@ -475,6 +475,40 @@ export function crabboxRunScript(slug: string, script: string, opts: CrabboxRunO
   });
 }
 
+/**
+ * Parse crabbox's shell-quoted `ssh` command (`'ssh' '-i' '<key>' … 'crabbox@ip'`)
+ * into an argv array. Exported for testing.
+ */
+export function parseCrabboxSshArgv(stdout: string): string[] | null {
+  for (const raw of stdout.split('\n')) {
+    const line = raw.trim();
+    if (!line.startsWith("'ssh'") && !line.startsWith('ssh ')) continue;
+    const toks = [...line.matchAll(/'([^']*)'|(\S+)/g)].map((m) => m[1] ?? m[2]);
+    if (toks[0] === 'ssh' && toks.length >= 3) return toks;
+  }
+  return null;
+}
+
+/**
+ * The concrete `ssh` argv crabbox uses to reach box `slug` — including the
+ * per-lease identity key and known_hosts crabbox provisions under its own config
+ * dir. A raw `ssh crabbox@ip` fails `publickey`; this is the only auth that works.
+ * `crabbox ssh --id` PRINTS the command (it doesn't connect — that's `crabbox
+ * connect`), and `--reclaim` makes it resolve regardless of which repo holds the
+ * lease claim (matching `crabboxRunScript`). Returns null when crabbox can't
+ * resolve the box (caller treats setup-copy / `agents ssh` as best-effort).
+ */
+export function crabboxSshArgv(slug: string, opts: CrabboxOptions = {}): string[] | null {
+  findCrabbox();
+  const r = spawnSync('crabbox', ['ssh', '--id', slug, '--reclaim'], {
+    encoding: 'utf-8',
+    env: crabboxEnv(opts),
+    timeout: opts.timeoutMs ?? 15000,
+  });
+  if (r.status !== 0 || !r.stdout) return null;
+  return parseCrabboxSshArgv(r.stdout);
+}
+
 /** Release the lease / delete the box. Best-effort; never throws. */
 export function crabboxStop(slug: string, opts: CrabboxOptions = {}): boolean {
   try {
