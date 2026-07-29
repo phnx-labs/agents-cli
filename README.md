@@ -43,13 +43,7 @@ agents setup                           # first-time setup -- config + pick your 
 agents run claude "explain this repo"  # run any agent on your existing subscription
 ```
 
-`agents setup` is interactive and idempotent -- safe to re-run on a new machine. The `agi-cli.sh` one-liner installs this same canonical `@phnx-labs/agents-cli` package.
-
-```bash
-npm install -g @phnx-labs/agents-cli
-# or
-bun install -g @phnx-labs/agents-cli
-```
+`agents setup` is interactive and idempotent -- safe to re-run on a new machine. The `agi-cli.sh` one-liner installs this same canonical `@phnx-labs/agents-cli` package. Prefer bun? `bun install -g @phnx-labs/agents-cli` works too.
 
 Already installed? `agents upgrade` updates agents-cli itself to the latest version (`agents upgrade 1.2.3` for a specific version or dist-tag, `-y` to skip the confirm prompt). The command is `upgrade` on every platform -- there is no `agents update` (on macOS, `agents helper update` is a different command that reinstalls the keychain helper, not agents-cli).
 
@@ -1190,6 +1184,8 @@ The installer tries Bun first (faster), falls back to npm. Node 22.5+ required a
 Yes -- `agents run` is non-interactive by default. `--yes` auto-accepts prompts, `--json` for structured output. Pass explicit names and IDs instead of relying on interactive pickers.
 
 The auto-update prompt is suppressed automatically when stdin or stdout isn't a TTY. For headless environments where TTY detection misfires (k8s pods that allocate a PTY for stdout, cloud sandbox factories), set `AGENTS_CLI_DISABLE_AUTO_UPDATE=1` to skip the update check entirely -- no prompt, no network call.
+
+agents-cli also prints a one-time "star us on GitHub" line after your first successful `agents run`/`agents teams`. It's already skipped in CI, non-TTY, `--json`, and `--quiet` runs; set `AGENTS_NO_NUDGE=1` to suppress it everywhere.
 
 To update on demand instead of waiting for the prompt, run `agents upgrade` (add `-y` to skip the confirmation, or pass a version/dist-tag to install something other than latest).
 
