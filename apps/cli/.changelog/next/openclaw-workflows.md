@@ -1,1 +1,0 @@
-- Add OpenClaw workflow sync by projecting agents-cli workflows into Lobster `.lobster` files under `.openclaw/workflows/`.
