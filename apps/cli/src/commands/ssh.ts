@@ -88,14 +88,17 @@ import { ALL_AGENT_IDS } from '../lib/agents.js';
 import { crabboxList, crabboxFind, crabboxSshArgv, type CrabboxBox } from '../lib/crabbox/cli.js';
 import { boxAddress, boxStatus, fmtIdleShort, fmtExpiresShort } from './lease.js';
 import {
+  authCellColor,
   formatCheckedAge,
   isDeadVerdict,
   probeLocalFleetAuth,
   readAuthHealthCache,
   summarizeHostAuth,
   summarizeVerdicts,
+  verdictColor,
   verdictLabel,
   writeFleetAuthRows,
+  type AuthCellColor,
   type AuthProbeRow,
   type VerdictSummary,
 } from '../lib/auth-health.js';
@@ -601,14 +604,28 @@ async function runFleetPing(opts: { json?: boolean; local?: boolean; verbose?: b
   if (opts.strict && anyBad) process.exitCode = 1;
 }
 
-/** Color a per-host×agent cell: green all-live, red any revoked/expired, yellow degraded. */
+/** Resolve an {@link AuthCellColor} to a chalk painter. Single map for cells + labels. */
+const CELL_PAINT: Record<AuthCellColor, (s: string) => string> = {
+  green: chalk.green,
+  yellow: chalk.yellow,
+  red: chalk.red,
+  gray: chalk.gray,
+  dim: chalk.dim,
+};
+
+/**
+ * Color a per-host×agent cell. The numerator counts accounts that are usable
+ * right now — live-verified PLUS signed-in-but-unverifiable (codex/grok) — over
+ * the total, so a logged-in codex fleet reads "1/1", not a scary "0/1". Color is
+ * the shared {@link authCellColor}: red only for revoked (re-login), yellow for
+ * soft/expired (self-refreshes), gray for present-but-unverifiable, green when
+ * all live.
+ */
 function authCell(summary: VerdictSummary, width: number): string {
   if (summary.total === 0) return chalk.dim('·'.padEnd(width));
-  const text = `${summary.live}/${summary.total}`;
-  const padded = text.padEnd(width);
-  if (summary.bad > 0) return chalk.red(padded);
-  if (summary.warn > 0) return chalk.yellow(padded);
-  return chalk.green(padded);
+  const ok = summary.live + summary.present;
+  const padded = `${ok}/${summary.total}`.padEnd(width);
+  return CELL_PAINT[authCellColor(summary)](padded);
 }
 
 /** Render the fleet auth matrix (device rows × agent columns) plus an optional per-account breakdown. */
@@ -640,7 +657,7 @@ function renderAuthMatrix(results: FleetPingHostResult[], opts?: { verbose?: boo
   }
 
   lines.push('');
-  lines.push(chalk.gray('  cell = live/total accounts · green all live · red revoked (re-login) · yellow expired/unverified/limited'));
+  lines.push(chalk.gray('  cell = signed-in/total accounts · green live · gray signed-in (unverifiable: codex/grok) · yellow expired (self-refreshes) · red revoked (re-login)'));
 
   if (opts?.verbose) {
     lines.push('');
@@ -649,9 +666,7 @@ function renderAuthMatrix(results: FleetPingHostResult[], opts?: { verbose?: boo
       if (r.rows.length === 0) continue;
       for (const row of r.rows.slice().sort((x, y) => (x.agent + x.version).localeCompare(y.agent + y.version))) {
         const v = row.health.verdict;
-        const label = v === 'live' ? chalk.green(verdictLabel(v))
-          : (v === 'revoked' || v === 'expired') ? chalk.red(verdictLabel(v))
-          : chalk.yellow(verdictLabel(v));
+        const label = CELL_PAINT[verdictColor(v)](verdictLabel(v));
         const acctRaw = row.account ?? '—';
         const acct = row.account ? chalk.cyan(acctRaw.padEnd(28)) : chalk.dim(acctRaw.padEnd(28));
         const detail = row.health.detail ? chalk.dim(` ${row.health.detail}`) : '';
@@ -873,8 +888,14 @@ Typical workflow:
     .option('--local', 'probe only this host (used internally for fan-out)')
     .option('--verbose', 'show a per-account breakdown, not just the per-host rollup')
     .option('--strict', 'exit non-zero when any account is revoked (expired is soft — it self-refreshes)')
-    .action(async (opts: { json?: boolean; local?: boolean; verbose?: boolean; strict?: boolean }) => {
-      await runFleetPing(opts);
+    .action(async (opts: { json?: boolean; local?: boolean; verbose?: boolean; strict?: boolean }, cmd: Command) => {
+      // The root program also defines a global `--verbose` (startup self-heal
+      // detail), and commander binds a shared long flag to the program, not the
+      // leaf — so `fleet ping --verbose` never set opts.verbose and the
+      // per-account breakdown was silently unreachable. Read the effective value
+      // from the merged globals so the flag works at either level.
+      const verbose = opts.verbose ?? Boolean(cmd.optsWithGlobals().verbose);
+      await runFleetPing({ ...opts, verbose });
     });
 
   devicesCmd

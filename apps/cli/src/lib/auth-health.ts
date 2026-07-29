@@ -119,13 +119,21 @@ export function verdictLabel(verdict: AuthVerdict): string {
 /** Roll a set of verdicts (one host×agent's installs) into counts for a matrix cell. */
 export interface VerdictSummary {
   live: number;
+  /**
+   * unverified — signed in, but this agent has no in-repo live-probe endpoint
+   * (codex/grok). A benign, neutral state: the account is present and usable, we
+   * just can't complete a 2xx to prove it. It must NOT be lumped with the soft
+   * `warn` bucket, or a fully-logged-in codex/grok fleet reads as half-degraded
+   * (the exact "cry wolf" the ping matrix used to produce).
+   */
+  present: number;
   /** revoked — the server rejected the token (401/403). Genuinely needs re-login. */
   bad: number;
   /**
-   * expired / rate_limited / unverified / error — degraded or unknown, but NOT
-   * "re-login now". `expired` is soft for kimi/droid (their CLIs refresh the
-   * token on next launch; we don't refresh on the read path), so it must not be
-   * lumped with revoked or we'd cry wolf on a self-healing token.
+   * expired / rate_limited / error — degraded or unknown, but NOT "re-login now".
+   * `expired` is soft for kimi/droid (their CLIs refresh the token on next launch;
+   * we don't refresh on the read path), so it must not be lumped with revoked or
+   * we'd cry wolf on a self-healing token.
    */
   warn: number;
   total: number;
@@ -133,14 +141,53 @@ export interface VerdictSummary {
 
 export function summarizeVerdicts(verdicts: AuthVerdict[]): VerdictSummary {
   let live = 0;
+  let present = 0;
   let bad = 0;
   let warn = 0;
   for (const v of verdicts) {
     if (v === 'live') live++;
+    else if (v === 'unverified') present++;
     else if (v === 'revoked') bad++;
     else warn++;
   }
-  return { live, bad, warn, total: verdicts.length };
+  return { live, present, bad, warn, total: verdicts.length };
+}
+
+/** A resolved display color; the caller maps it to chalk. Pure, so it's unit-tested. */
+export type AuthCellColor = 'green' | 'yellow' | 'red' | 'gray' | 'dim';
+
+/**
+ * Color for a single verdict in the per-account (`--verbose`) breakdown. This is
+ * the one source of truth shared with {@link authCellColor} so the matrix and the
+ * account list can never drift — they did: the matrix painted `expired` yellow
+ * while the verbose list painted it *red* (lumped with revoked), directly against
+ * the {@link VerdictSummary} contract. Red is reserved for `revoked` (the only
+ * "re-login now"); `unverified` is a neutral signed-in state (gray);
+ * `expired`/`rate_limited`/`error` are soft (yellow).
+ */
+export function verdictColor(verdict: AuthVerdict): AuthCellColor {
+  switch (verdict) {
+    case 'live': return 'green';
+    case 'revoked': return 'red';
+    case 'unverified': return 'gray';
+    case 'unconfigured': return 'dim';
+    default: return 'yellow'; // expired / rate_limited / error — soft, self-healing/indeterminate
+  }
+}
+
+/**
+ * Color for a matrix cell that rolls up several accounts. Red only when a token
+ * was genuinely rejected (`revoked`); yellow for soft/expired; green when at least
+ * one account is live-verified and none are soft/revoked; gray when accounts are
+ * present but unverifiable (codex/grok) — never the alarming yellow the old
+ * renderer used, which made a fully-logged-in fleet read as half-broken.
+ */
+export function authCellColor(summary: VerdictSummary): AuthCellColor {
+  if (summary.total === 0) return 'dim';
+  if (summary.bad > 0) return 'red';
+  if (summary.warn > 0) return 'yellow';
+  if (summary.live > 0) return 'green';
+  return 'gray'; // all present/unverifiable — signed in, neutral
 }
 
 /** Verdicts that mean "this token was rejected by the server — re-login required". */
