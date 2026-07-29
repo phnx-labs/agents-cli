@@ -102,12 +102,16 @@ describe('buildSetupRsyncArgs', () => {
   });
 });
 
-// Skipped on Windows: the fake transport below is a set of `#!/bin/sh` scripts
-// dropped on PATH without a .cmd/.exe extension, which Windows cannot execute or
-// resolve — every case fails with "crabbox is not installed or not on PATH"
-// before it reaches the behavior under test. copySetupToBox drives rsync/ssh,
-// which are POSIX-only on this path anyway.
-describe.skipIf(process.platform === 'win32')('copySetupToBox', () => {
+describe('copySetupToBox', () => {
+  // The fake transport below is a set of `#!/bin/sh` scripts dropped on PATH
+  // without a .cmd/.exe extension, which Windows can neither resolve nor
+  // execute: any case that actually reaches the transport dies in findCrabbox
+  // (cli.ts:74) with "crabbox is not installed or not on PATH" before testing
+  // the behavior it claims to. Those cases carry `itPosix`. Cases that return
+  // before the transport (the empty-file-set early return, setup-copy.ts:141)
+  // still run everywhere — don't widen this to the whole suite.
+  const itPosix = it.skipIf(process.platform === 'win32');
+
   /**
    * Install a fake `crabbox` (emits the ssh command for `ssh --id`), `rsync`, and
    * `ssh` on PATH — matching the real transport: copySetupToBox first asks crabbox
@@ -156,7 +160,7 @@ describe.skipIf(process.platform === 'win32')('copySetupToBox', () => {
     });
   }
 
-  it('enumerates tracked files, rsyncs them over crabbox ssh, then refreshes on the box', async () => {
+  itPosix('enumerates tracked files, rsyncs them over crabbox ssh, then refreshes on the box', async () => {
     const repo = makeGitRepo({ 'skills/a.md': 'x', 'commands/b.md': 'y' });
     spawnSync('git', ['-C', repo, 'add', '-A']);
     try {
@@ -176,7 +180,7 @@ describe.skipIf(process.platform === 'win32')('copySetupToBox', () => {
     }
   });
 
-  it('refresh=false leaves the box refresh to the bootstrap (no ssh)', async () => {
+  itPosix('refresh=false leaves the box refresh to the bootstrap (no ssh)', async () => {
     const repo = makeGitRepo({ 'skills/a.md': 'x' });
     spawnSync('git', ['-C', repo, 'add', '-A']);
     try {
@@ -191,7 +195,7 @@ describe.skipIf(process.platform === 'win32')('copySetupToBox', () => {
     }
   });
 
-  it('skips the refresh when the rsync push fails', async () => {
+  itPosix('skips the refresh when the rsync push fails', async () => {
     const repo = makeGitRepo({ 'skills/a.md': 'x' });
     spawnSync('git', ['-C', repo, 'add', '-A']);
     try {
@@ -206,7 +210,7 @@ describe.skipIf(process.platform === 'win32')('copySetupToBox', () => {
     }
   });
 
-  it('no-ops when crabbox cannot resolve the box (best-effort)', async () => {
+  itPosix('no-ops when crabbox cannot resolve the box (best-effort)', async () => {
     const repo = makeGitRepo({ 'skills/a.md': 'x' });
     spawnSync('git', ['-C', repo, 'add', '-A']);
     try {
