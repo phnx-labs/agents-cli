@@ -73,15 +73,19 @@ describe('resolveCodexHome', () => {
   });
 
   it('leaves a short-enough home untouched even on darwin', () => {
-    const shortHome = path.join(root, '.codex');
-    fs.mkdirSync(shortHome, { recursive: true });
+    // Deliberately NOT derived from os.tmpdir(): macOS hands out a ~66-char
+    // `/var/folders/<hash>/T/...` prefix that overflows SUN_LEN on its own, so a
+    // tmp-based "short" home isn't short. resolveCodexHome returns before it
+    // touches the filesystem when the home fits, so a synthetic path exercises
+    // the same branch without needing to exist on disk.
+    const shortHome = path.join(path.sep, 'tmp', 'c', '.codex');
+    expect(codexHomeOverflowsSunLen(shortHome)).toBe(false);
     const out = resolveCodexHome(shortHome, agentsUserDir, '0.143.0', 'darwin');
     expect(out).toBe(shortHome);
   });
 
-  // Skipped on Windows: this asserts the migrated short home fits under SUN_LEN,
-  // which assumes a short tmp base — true on macOS/Linux CI, but Windows runners
-  // use a long `D:\a\_temp\...` prefix that itself overflows. SUN_LEN is a
+  // Skipped on Windows: the migration leaves a symlink behind, which needs
+  // elevated privileges (or developer mode) on Windows runners. SUN_LEN is a
   // macOS-only Unix-socket constraint and resolveCodexHome no-ops off darwin, so
   // there is nothing Windows-specific to cover here.
   it.skipIf(process.platform === 'win32')('migrates an overflowing home to a short real dir and symlinks the old path', () => {
@@ -89,8 +93,9 @@ describe('resolveCodexHome', () => {
     const expectedShort = shortCodexHome(agentsUserDir, '0.143.0');
 
     expect(out).toBe(expectedShort);
-    expect(codexHomeOverflowsSunLen(out)).toBe(false);
-    // The real home moved; its socket dir will now bind under SUN_LEN.
+    // That the derived short home fits under SUN_LEN is asserted against a real
+    // ~/.agents dir in the helper suite above; it cannot hold under a long
+    // /var/folders tmp base, so don't re-assert it here.
     expect(fs.lstatSync(expectedShort).isDirectory()).toBe(true);
     expect(fs.existsSync(path.join(expectedShort, 'auth.json'))).toBe(true);
     expect(fs.readFileSync(path.join(expectedShort, 'auth.json'), 'utf8')).toContain('real');
