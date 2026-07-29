@@ -1,22 +1,24 @@
 /**
- * `agents events` — read the structured audit/event log.
+ * `agents events` — read the unified event stream.
  *
- * The event log (`~/.agents/events.jsonl`) records every
- * `agents <module> <cmd>` invocation plus richer typed events (secrets access,
- * version installs, ...), each stamped with who ran it and from where (OS user,
- * local vs SSH, remote client IP). This command reads it back — the audit trail
- * for "who accessed a secret / created a team / started an agent, and from which
- * host?".
+ * One stream over BOTH operational events (`~/.agents/events.jsonl`: every
+ * `agents <module> <cmd>` invocation plus typed events like secrets access,
+ * version installs) AND agent-semantic events (the per-session activity logs:
+ * plans, PRs, worktrees, sub-agents, artifacts). Each is stamped with who ran
+ * it and from where. This is the audit trail for "who accessed a secret /
+ * created a team" AND the activity trail for "what did the agents just do".
  *
- * Filter by `--module` (top-level group, e.g. teams), `--command` (path prefix,
- * e.g. "teams create"), `--event` (typed event), `--agent`, and `--since`.
- * `--follow` tails today's log live.
+ * Filter by `--module` (top-level group, e.g. teams; `activity` for agent
+ * events), `--command` (path prefix), `--event` (typed event), `--agent`, and
+ * `--since`. `--audit` restricts to operational events only. `--follow` tails
+ * today's operational log live.
  */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import * as fs from 'fs';
-import { query, getLogsPath, type EventRecord, type EventType } from '../lib/events.js';
+import { getLogsPath, type EventRecord, type EventType } from '../lib/events.js';
+import { readUnifiedEvents } from '../lib/event-stream.js';
 
 interface EventsOptions {
   module?: string;
@@ -27,6 +29,7 @@ interface EventsOptions {
   limit?: string;
   json?: boolean;
   follow?: boolean;
+  audit?: boolean;
 }
 
 /** Parse `--since`: relative offsets (30s/5m/2h/7d/4w) or an ISO/absolute date. */
@@ -56,6 +59,9 @@ function originLabel(r: EventRecord): string {
 function detailFor(r: EventRecord): string {
   if (r.command) return r.command;
   const bits: string[] = [];
+  // Agent-semantic (activity) events carry detail/url instead of a command.
+  if (typeof r.detail === 'string') bits.push(r.detail);
+  if (typeof r.url === 'string') bits.push(chalk.gray(r.url));
   if (typeof r.team === 'string') bits.push(`team=${r.team}`);
   if (typeof r.bundle === 'string') bits.push(`bundle=${r.bundle}`);
   if (typeof r.skill === 'string') bits.push(`skill=${r.skill}`);
@@ -76,23 +82,24 @@ function renderRow(r: EventRecord): string {
 export function registerEventsCommand(program: Command): void {
   program
     .command('events')
-    .description('Read the structured audit/event log (who ran what, from where)')
-    .option('--module <name>', 'Only events from this command group (e.g. teams, secrets)')
+    .description('Read the unified event stream (operational + agent activity)')
+    .option('--module <name>', 'Only events from this group (e.g. teams, secrets, activity)')
     .option('--command <path>', 'Only this command path — prefix match (e.g. "teams create")')
-    .option('--event <type>', 'Only this typed event (repeatable, e.g. secrets.get)', collect, [])
+    .option('--event <type>', 'Only this typed event (repeatable, e.g. secrets.get, pr.opened)', collect, [])
     .option('--agent <name>', 'Only events tagged with this agent')
     .option('--since <time>', 'Only events newer than this (e.g. 2h, 7d, or ISO date)')
+    .option('--audit', 'Operational events only (skip agent activity)')
     .option('--limit <n>', 'Max records to show (default 50)', '50')
     .option('--json', 'Output raw records as JSON')
-    .option('-f, --follow', "Tail today's log live")
+    .option('-f, --follow', "Tail today's operational log live")
     .addHelpText('after', `
 Examples:
-  agents events                          Recent activity across everything
-  agents events --module teams           Team lifecycle (create / add / disband)
+  agents events                          Everything — ops + agent activity
+  agents events --module activity        Agent activity only (plans / PRs / worktrees)
+  agents events --audit                  Operational events only (secrets / teams / ...)
+  agents events --event pr.opened --since 7d
   agents events --module secrets         Every secret accessed or revealed
-  agents events --command "teams create" Just team creations
-  agents events --event secrets.get --since 7d --json
-  agents events -f                       Live tail`)
+  agents events -f                       Live tail (operational)`)
     .action(async (options: EventsOptions) => {
       if (options.follow) {
         await followLog();
@@ -108,13 +115,14 @@ Examples:
         process.exit(2);
       }
 
-      const records = query({
+      const records = readUnifiedEvents({
         startDate,
         eventTypes: options.event && options.event.length ? (options.event as EventType[]) : undefined,
         agent: options.agent,
         command: options.command,
         module: options.module,
         limit,
+        includeActivity: !options.audit,
       });
 
       if (options.json) {
