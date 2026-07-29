@@ -301,9 +301,13 @@ function reportResults(results: DeviceApplyResult[]): void {
   console.log(chalk.green('Fleet reconciled.'));
 }
 
-export function registerApplyCommand(program: Command): void {
-  const applyCmd = program
-    .command('apply')
+/**
+ * Attach the reconcile options + action to a command node. Shared by the
+ * top-level `agents apply` and its `agents fleet apply` alias so the two can
+ * never drift — identical flags, identical engine.
+ */
+export function configureApplyCommand(cmd: Command): Command {
+  return cmd
     .description('Reconcile the fleet to a declared profile: install agents, sync config, propagate login.')
     .option('-f, --file <path>', 'Manifest file carrying a fleet: block (default: agents.yaml)')
     .option('--plan', 'Show the reconcile plan and exit (no changes)')
@@ -325,7 +329,10 @@ export function registerApplyCommand(program: Command): void {
         process.exit(1);
       }
     });
+}
 
+export function registerApplyCommand(program: Command): void {
+  const applyCmd = configureApplyCommand(program.command('apply'));
   setHelpSections(applyCmd, {
     examples: `
       # Preview what would change across the fleet
@@ -336,6 +343,25 @@ export function registerApplyCommand(program: Command): void {
 
       # One device only
       agents apply --device yosemite-s1 -y
+    `,
+  });
+}
+
+/**
+ * Surface `agents apply` under the fleet command tree as `agents fleet apply`
+ * (and `agents devices apply`). Same reconcile engine as the top-level command —
+ * a discoverability alias for users who reach for `fleet` as the verb. Kept in
+ * lockstep via {@link configureApplyCommand}.
+ */
+export function registerFleetApplyAlias(devicesCmd: Command): void {
+  const sub = configureApplyCommand(devicesCmd.command('apply'));
+  setHelpSections(sub, {
+    examples: `
+      # Preview the fleet reconcile
+      agents fleet apply --plan
+
+      # Reconcile every device to the profile
+      agents fleet apply -y
     `,
   });
 }

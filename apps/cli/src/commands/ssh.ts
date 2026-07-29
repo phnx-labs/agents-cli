@@ -21,6 +21,7 @@ import { getCliVersion } from '../lib/version.js';
 import { readAndResolveBundleEnv, isHeadlessSecretsContext } from '../lib/secrets/bundles.js';
 import { machineId } from '../lib/session/sync/config.js';
 import { registerFleetCaptureCommand } from './fleet-capture.js';
+import { registerFleetApplyAlias } from './apply.js';
 import {
   addIgnored,
   getDevice,
@@ -661,6 +662,10 @@ Typical workflow:
 
   // `agents fleet capture` — snapshot live state into agents.yaml fleet:.
   registerFleetCaptureCommand(devicesCmd);
+
+  // `agents fleet apply` — same reconcile engine as the top-level `agents apply`,
+  // surfaced under the fleet tree for discoverability.
+  registerFleetApplyAlias(devicesCmd);
 
   devicesCmd
     .command('register <name>')
