@@ -73,10 +73,14 @@ function run(home: string, args: string[]): ReturnType<typeof spawnSync> {
       // os.homedir() reads USERPROFILE on Windows, so HOME alone leaves the
       // spawned CLI resolving the real profile ('agents-cli is not set up').
       USERPROFILE: home,
-      // The pinned PATH keeps the run hermetic on POSIX. It cannot be applied
-      // on Windows, where those directories don't exist and the child would
-      // lose node/git entirely (the failure showed as empty stderr).
-      PATH: process.platform === 'win32' ? (process.env.PATH ?? '') : '/usr/local/bin:/usr/bin:/bin',
+      // The pinned PATH keeps the run hermetic on POSIX; the running node's own
+      // directory is prepended so monitor fixtures can shell out to `node`
+      // (nvm installs it outside the pinned dirs). It cannot be applied on
+      // Windows, where those directories don't exist and the child would lose
+      // node/git entirely (the failure showed as empty stderr).
+      PATH: process.platform === 'win32'
+        ? (process.env.PATH ?? '')
+        : `${path.dirname(process.execPath)}:/usr/local/bin:/usr/bin:/bin`,
       AGENTS_SKIP_MIGRATION: '1',
       FORCE_COLOR: '0',
       NO_COLOR: '1',
@@ -119,11 +123,14 @@ describe('monitors inspection JSON and stderr', () => {
       enabled: true,
       // Emit via node rather than printf: the command runs through the host
       // shell, and cmd.exe has no printf — it failed with "'printf' is not
-      // recognized". Spell node as process.execPath so it resolves under the
-      // pinned hermetic PATH above too (which omits nvm's bin dir).
+      // recognized". Spelled bare rather than as process.execPath, because
+      // cmd.exe mangles a command line that opens with a quoted path
+      // containing spaces ("C:\Program Files\nodejs\node.exe"). run() puts the
+      // running node's own directory on PATH so the bare name resolves on both
+      // platforms.
       source: {
         type: 'command',
-        command: `"${process.execPath}" -e "process.stdout.write('build fail\\nnext\\n')"`,
+        command: `node -e "process.stdout.write('build fail\\nnext\\n')"`,
       },
       condition: { mode: 'match', match: 'fail' },
       action: { type: 'notify', notifyChannel: 'telegram' },
