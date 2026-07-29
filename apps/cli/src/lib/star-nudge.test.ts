@@ -2,6 +2,8 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { spawn } from 'child_process';
+import { fileURLToPath } from 'url';
 
 // star-nudge.ts -> state.ts resolves HOME at import time, so pin HOME to a
 // throwaway dir BEFORE the module is ever loaded. Done at top-level module
@@ -90,4 +92,42 @@ describe('maybeShowStarNudge one-time behavior', () => {
     // Sentinel really landed under the pinned throwaway HOME.
     expect(fs.existsSync(path.join(TMP_HOME, '.agents', '.cache', 'state', 'star-nudge-shown'))).toBe(true);
   });
+});
+
+// The real reason the guard uses an atomic O_EXCL create: `agents teams` spawns
+// many processes that finish near-simultaneously, and an existsSync+write pair
+// is a cross-process TOCTOU race (a reviewer saw 3 of 5 procs double-print). An
+// in-process test can't reproduce that — it needs genuinely concurrent
+// processes — so we spawn N children against one shared HOME and assert the
+// nudge is printed exactly once. Skipped on Windows (subprocess/tsx-shim churn).
+describe('maybeShowStarNudge is race-safe across concurrent processes', () => {
+  const tsxBin = fileURLToPath(new URL('../../node_modules/.bin/tsx', import.meta.url));
+  const starNudgeSrc = fileURLToPath(new URL('./star-nudge.ts', import.meta.url));
+  const runnable = process.platform !== 'win32' && fs.existsSync(tsxBin);
+
+  it.skipIf(!runnable)('prints exactly once when 8 processes finish at once', async () => {
+    const raceHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-nudge-race-'));
+    const fixture = path.join(raceHome, 'child.mts');
+    fs.writeFileSync(
+      fixture,
+      `import { maybeShowStarNudge } from ${JSON.stringify(starNudgeSrc)};\n` +
+        `Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });\n` +
+        `maybeShowStarNudge();\n`,
+    );
+
+    const runChild = () =>
+      new Promise<string>((resolve, reject) => {
+        const child = spawn(tsxBin, [fixture], {
+          env: { ...process.env, HOME: raceHome, CI: '', AGENTS_NO_NUDGE: '' },
+        });
+        let out = '';
+        child.stdout.on('data', (d) => { out += d.toString(); });
+        child.on('error', reject);
+        child.on('close', () => resolve(out));
+      });
+
+    const outputs = await Promise.all(Array.from({ length: 8 }, runChild));
+    const prints = outputs.filter((o) => o.includes('Give it a star')).length;
+    expect(prints).toBe(1);
+  }, 30000);
 });
