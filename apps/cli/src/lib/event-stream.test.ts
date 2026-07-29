@@ -34,18 +34,19 @@ function setup(): { activityRoot: string } {
 describe('readUnifiedEvents', () => {
   it('merges operational and agent-semantic events into one newest-first stream', () => {
     const { activityRoot } = setup();
-    emit('secrets.get', { module: 'secrets', command: 'secrets get', item: 'prod' });
+    // Activity event 5s in the past; the ops event is stamped ~now by emit().
     appendActivityEvent(
-      { ts: new Date(Date.now() + 1000).toISOString(), event: 'pr.opened', sessionId: 's1', mailboxId: 's1', host: 'zion', runtime: 'headless', agent: 'claude', detail: 'gh pr create', url: 'https://x/pull/1' },
+      { ts: new Date(Date.now() - 5000).toISOString(), event: 'pr.opened', sessionId: 's1', mailboxId: 's1', host: 'zion', runtime: 'headless', agent: 'claude', detail: 'gh pr create', url: 'https://x/pull/1' },
       activityRoot,
     );
+    emit('secrets.get', { module: 'secrets', command: 'secrets get', item: 'prod' });
 
     const events = readUnifiedEvents({ activityRoot, limit: 50 });
     const kinds = events.map((e) => e.event);
     expect(kinds).toContain('secrets.get');
     expect(kinds).toContain('pr.opened');
-    // Newest-first: the activity event is stamped 1s in the future.
-    expect(events[0].event).toBe('pr.opened');
+    // Newest-first: the just-emitted ops event leads the older activity event.
+    expect(events[0].event).toBe('secrets.get');
     // Timestamps are monotonically non-increasing.
     const ts = events.map((e) => Date.parse(e.ts));
     expect(ts).toEqual([...ts].sort((a, b) => b - a));
@@ -55,7 +56,7 @@ describe('readUnifiedEvents', () => {
     const { activityRoot } = setup();
     emit('secrets.get', { module: 'secrets', command: 'secrets get' });
     appendActivityEvent(
-      { ts: new Date().toISOString(), event: 'pr.opened', sessionId: 's1', mailboxId: 's1', host: 'h', runtime: 'headless' },
+      { ts: new Date(Date.now() - 1000).toISOString(), event: 'pr.opened', sessionId: 's1', mailboxId: 's1', host: 'h', runtime: 'headless' },
       activityRoot,
     );
     const events = readUnifiedEvents({ activityRoot, includeActivity: false });
@@ -67,7 +68,7 @@ describe('readUnifiedEvents', () => {
     const { activityRoot } = setup();
     emit('secrets.get', { module: 'secrets', command: 'secrets get' });
     appendActivityEvent(
-      { ts: new Date().toISOString(), event: 'worktree.created', sessionId: 's1', mailboxId: 's1', host: 'h', runtime: 'headless' },
+      { ts: new Date(Date.now() - 1000).toISOString(), event: 'worktree.created', sessionId: 's1', mailboxId: 's1', host: 'h', runtime: 'headless' },
       activityRoot,
     );
     expect(readUnifiedEvents({ activityRoot, module: 'activity' }).map((e) => e.event)).toEqual(['worktree.created']);
@@ -78,7 +79,7 @@ describe('readUnifiedEvents', () => {
     const { activityRoot } = setup();
     for (const [event, agent] of [['pr.opened', 'claude'], ['commit.created', 'codex']] as const) {
       appendActivityEvent(
-        { ts: new Date().toISOString(), event, sessionId: `s-${event}`, mailboxId: 's', host: 'h', runtime: 'headless', agent },
+        { ts: new Date(Date.now() - 1000).toISOString(), event, sessionId: `s-${event}`, mailboxId: 's', host: 'h', runtime: 'headless', agent },
         activityRoot,
       );
     }
@@ -91,7 +92,7 @@ describe('readUnifiedEvents', () => {
     emit('info', { module: 'test' });
     for (let i = 0; i < 5; i++) {
       appendActivityEvent(
-        { ts: new Date(Date.now() + i * 1000).toISOString(), event: 'file.edited', sessionId: `s${i}`, mailboxId: 's', host: 'h', runtime: 'headless' },
+        { ts: new Date(Date.now() - i * 1000).toISOString(), event: 'file.edited', sessionId: `s${i}`, mailboxId: 's', host: 'h', runtime: 'headless' },
         activityRoot,
       );
     }

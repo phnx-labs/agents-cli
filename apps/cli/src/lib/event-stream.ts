@@ -33,8 +33,11 @@ export interface UnifiedQuery {
 /** Apply the same filters query() applies, to an activity-derived record. */
 function matches(r: EventRecord, q: UnifiedQuery): boolean {
   const ms = Date.parse(r.ts);
+  // Mirror query()'s default upper bound (endDate = now) so both sources drop
+  // future-dated records identically -- keeps the two in exact filter parity.
+  const endMs = (q.endDate ?? new Date()).getTime();
   if (q.startDate && !Number.isNaN(ms) && ms < q.startDate.getTime()) return false;
-  if (q.endDate && !Number.isNaN(ms) && ms > q.endDate.getTime()) return false;
+  if (!Number.isNaN(ms) && ms > endMs) return false;
   if (q.eventTypes && !q.eventTypes.includes(r.event)) return false;
   if (q.level && (r.level ?? levelFor(r.event)) !== q.level) return false;
   if (q.agent && r.agent !== q.agent) return false;
