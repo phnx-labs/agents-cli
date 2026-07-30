@@ -1,5 +1,101 @@
 # Changelog
 
+## 1.20.74
+
+- **Project resource manifests are now portable across Windows and POSIX.** The
+  managed-resource manifest `.agents-managed.json` recorded its paths with the
+  host's native separator, so a sync run on Windows wrote entries like
+  `skills\myskill`. That file lives in the version-controlled project `.agents`
+  dir and travels between machines, and the cleanup pass matches manifest entries
+  with `path.sep` — so a manifest written on Windows silently failed to match on
+  macOS or Linux and left previously managed files behind on the next sync (and
+  vice versa). Manifest paths are now normalized to POSIX separators on write and
+  on read, which also repairs manifests written by earlier Windows builds. Source:
+  `apps/cli/src/lib/project-resources.ts`.
+
+- **`agents import <agent> --isolated` — bring your existing setup into a sandbox.**
+  Isolation was a cold start: a new isolated copy began empty, and the only way to get
+  settings into it was by hand. A plain `agents import` is the opposite of what is
+  wanted here — it *adopts*, moving `~/.<agent>` into a version home, symlinking the
+  original away, setting the global default and creating a shim (and is now refused
+  outright for an isolated-only agent). `--isolated` copies instead: your settings land
+  in the isolated home, your real config stays exactly where it is, and the version is
+  finalized the way `agents add --isolated` does — versioned alias and marker, no
+  default, no bare shim, no config symlink. Credentials are skipped by default and
+  named in the output rather than silently included, since an isolated copy signs in as
+  its own principal; `--with-auth` opts in. Symlinks into `~/.agents` are dropped so the
+  copy does not depend on the CLI's tree. Source: `apps/cli/src/lib/import.ts`,
+  `apps/cli/src/commands/import.ts`.
+
+- **`agents use <agent>@<isolated>` now works, and a bare `agents run <agent>` reaches
+  your isolated copy.** Isolated installs were unreachable by name: `resolveVersion`
+  ended at the global default, and an isolated install deliberately never becomes one —
+  so `agents use` refused, and an isolated-only user had to type the full
+  `agents run codex@0.144.6` every time while a bare `agents run codex` fell through to
+  whatever `codex` meant on PATH. `use` now records an **isolated default** instead of
+  refusing, and resolution falls back to it (`project pin -> global default -> isolated
+  default`). Strictly a fallback, so nothing changes for anyone who has a global
+  default. The pointer lives in `isolatedAgents:` in `agents.yaml`, never in the global
+  `agents:` map — that separation is what keeps `getGlobalDefault` incapable of
+  returning an isolated version, and with it the launcher, bare shim, config symlink and
+  self-heal `shadowing` check all stay out of reach. It is verified on read and
+  re-pointed (or cleared) on removal, so it can never resolve to a version that is gone.
+  `agents view` labels it `(isolated default)`. Source: `apps/cli/src/lib/versions.ts`,
+  `apps/cli/src/commands/versions.ts`, `apps/cli/src/commands/view.ts`.
+
+- **`agents export <agent>[@<version>]` — take an isolated install's config with you.**
+  `--isolated` was a one-way door: it builds a self-contained home under the version
+  dir and nothing ever brings that work back, so a user who configured a sandboxed copy
+  for a week had to copy files by hand to promote it — or to leave. Export is additive
+  by default: it copies only paths you don't already have, and a collision is **not**
+  silently skipped — the incoming file is written beside yours as
+  `<name>.from-agents-cli` so you can `--diff` it and take the parts you want. Your
+  files are never modified. `--replace` promotes a sandbox wholesale (yours is moved to
+  `backups/<agent>/<ts>`, and it is the only mode that asks for confirmation);
+  `--staged` dumps the tree into `~/.<agent>/.agents-export-<ts>/` and activates
+  nothing. Every mode strips symlinks pointing back into `~/.agents` so the result
+  keeps working after agents-cli is gone, keeps your own symlinks, and writes a receipt
+  to `~/.<agent>/.agents-cli-export.json` recording exactly what came from the export —
+  which makes "which of these files are mine?" answerable and the whole thing
+  reversible. A `~/.<agent>` that agents-cli already adopted is refused, since writing
+  there would mutate that version's home rather than your config. File *contents* are
+  never auto-merged: the TOML parser here drops comments across parse+stringify, so
+  unioning keys would silently delete them. Source: `apps/cli/src/lib/export.ts`,
+  `apps/cli/src/commands/export.ts`, `apps/cli/src/lib/config-transfer.ts`.
+
+- **An isolated-only agent can no longer be adopted by anything.** `--isolated` used to
+  be defined by what it *doesn't* do — no global default, no bare shim, no config
+  symlink, no PATH edit — which meant every code path that could adopt an agent had to
+  remember to check first. It leaked three times that way. Protection is now derived
+  from the `.isolated` markers on disk (`isIsolationProtected`: at least one installed
+  version, and every one isolated) and enforced inside the five primitives that can
+  cross the boundary — `setGlobalDefault`, `createShim`, `switchConfigSymlink`,
+  `switchHomeFileSymlinks`, `adoptShadowingLauncher` — so refusal is a property of the
+  code rather than a convention. There is no mode to set and none to forget: installing
+  with `--isolated` *is* the opt-in, it is per-agent, and the escape hatch is inherent
+  (remove the isolated copies and the agent is ordinary again). `agents add`,
+  `agents import` and `doctor --adopt` refuse with guidance rather than a stack trace —
+  `import` is additionally checked at its entry point, because it registers the adopted
+  install as a normal version *before* adopting, which would otherwise un-protect the
+  agent underneath the primitive gate. Clearing a global default stays allowed, since
+  removal legitimately clears one as an agent becomes isolated-only. A completeness test
+  pins the primitive list and scans for any new ungated mutator. Source:
+  `apps/cli/src/lib/shims.ts`, `apps/cli/src/lib/versions.ts`,
+  `apps/cli/src/lib/isolation-boundary-report.ts`.
+
+- **`agents view` no longer hides your own CLI behind an isolated install.** The listing
+  was either/or per agent: any managed version at all suppressed the "Not Managed by
+  Agents CLI" block, so a single `agents add <agent>@<v> --isolated` made the user's
+  globally-installed CLI disappear from the one command they'd run to confirm
+  `--isolated` had left it alone. Nothing on disk was ever touched — the isolation
+  boundary holds — but the report read exactly like the damage it was supposed to rule
+  out. Isolated copies now render alongside the global install and are tagged
+  `9.9.4 (isolated)`; a normal (non-isolated) version still takes the launcher over and
+  still suppresses the global row, since that row would just be our own shim. The global
+  row is also resolved from PATH now (`getUnmanagedCliState`) instead of from the version
+  dirs, which could otherwise report an isolated copy — deliberately unreachable from
+  PATH — as `(global)`. Source: `apps/cli/src/commands/view.ts`, `apps/cli/src/lib/agents.ts`.
+
 ## 1.20.73
 
 - **`agents cli install <binary-cli>` no longer hardcodes `/usr/local/bin` (#1103).**
