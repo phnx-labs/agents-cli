@@ -98,7 +98,15 @@ export function setRegistry(
     meta.registries[type] = {};
   }
 
-  const existing = meta.registries[type][name] || DEFAULT_REGISTRIES[type]?.[name];
+  // Seeded presets are resolved in memory and never materialized in agents.yaml
+  // (see offeredSeeds), so a partial update — `registry disable`, `enable`, or
+  // `config --api-key` — has nothing stored to merge with. Without the
+  // SEEDED_REGISTRIES fallback it would persist only the changed fields and drop
+  // `url`, and because userRegs wins over the in-memory seed in getRegistries the
+  // preset would stay broken even after re-enabling.
+  const existing = meta.registries[type][name]
+    || DEFAULT_REGISTRIES[type]?.[name]
+    || SEEDED_REGISTRIES[type]?.[name];
   meta.registries[type][name] = { ...existing, ...config } as RegistryConfig;
   writeMeta(meta);
 }

@@ -85,6 +85,24 @@ describe('seeded registry presets', () => {
     expect(getRegistries('skill').hermes?.enabled).toBe(true);
   });
 
+  it('keeps the preset url when a partial update disables it', async () => {
+    // A seeded preset has no stored entry to merge with, so setRegistry must fall
+    // back to SEEDED_REGISTRIES. Without that, `registry disable` persisted only
+    // {enabled:false}, dropping url — and since a stored entry outranks the
+    // in-memory seed, the preset stayed broken even after re-enabling.
+    writeMetaFile('registries:\n  mcp: {}\n  skill: {}\n');
+
+    const { getRegistries, setRegistry } = await freshRegistry();
+    const url = getRegistries('skill').hermes?.url;
+    expect(url).toContain('hermes-agent.nousresearch.com');
+
+    setRegistry('skill', 'hermes', { enabled: false });
+    expect(getRegistries('skill').hermes).toEqual({ url, enabled: false });
+
+    setRegistry('skill', 'hermes', { enabled: true });
+    expect(getRegistries('skill').hermes).toEqual({ url, enabled: true });
+  });
+
   it('lets a user override the preset config without being overwritten', async () => {
     writeMetaFile([
       'registries:',

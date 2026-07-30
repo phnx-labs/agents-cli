@@ -15,6 +15,9 @@
   records the key and the preset stops being offered, which is the behaviour the marker
   existed to protect. Files seeded by the old code carry both the tombstone and an explicit
   entry in their own `registries:` block, and the explicit entry still wins, so upgrading
-  changes nothing for them. Source: `apps/cli/src/lib/registry.ts`,
+  changes nothing for them. `setRegistry` also falls back to
+  `SEEDED_REGISTRIES` when merging a partial update, so `registry disable/enable/config`
+  on a never-materialized preset can no longer persist a stripped entry that drops `url`.
+  Source: `apps/cli/src/lib/registry.ts`,
   `apps/cli/src/lib/state.ts`, `apps/cli/src/lib/registry.seeds.test.ts`,
   `apps/cli/src/lib/state.test.ts`.
