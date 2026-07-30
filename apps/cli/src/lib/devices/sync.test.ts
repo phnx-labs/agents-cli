@@ -7,13 +7,24 @@
  *   3. A genuinely-new, non-ignored node IS surfaced.
  */
 import { describe, expect, it } from 'vitest';
-import { computePendingDevices, partitionWantedDevices, planDeviceReconciliation, sanitizeLoginUser, selectNodesToUpsert, withDefaultUser } from './sync.js';
+import { computePendingDevices, discoverableNodes, partitionWantedDevices, planDeviceReconciliation, sanitizeLoginUser, selectNodesToUpsert, withDefaultUser } from './sync.js';
 import type { TailscaleNode } from './tailscale.js';
 import type { DeviceInput } from './registry.js';
 
 function node(name: string): TailscaleNode {
-  return { name, platform: 'linux', online: true, direct: true };
+  return { name, platform: 'linux', online: true, direct: true, sharee: false };
 }
+
+describe('discoverableNodes', () => {
+  it('drops sharee nodes so a machine shared into the tailnet is never auto-registered or suggested', () => {
+    // Regression: a `funnel-ingress-node` shared by another user (ShareeNode)
+    // was bootstrap-registered by `agents devices sync` as if it were the
+    // operator's own box, and showed up in `fleet ls`.
+    const shared: TailscaleNode = { ...node('funnel-ingress-node'), sharee: true };
+    const nodes = [node('zion'), shared, node('win-mini')];
+    expect(discoverableNodes(nodes).map((n) => n.name)).toEqual(['zion', 'win-mini']);
+  });
+});
 
 describe('withDefaultUser', () => {
   const base: DeviceInput = { platform: 'linux', address: { via: 'tailscale', dnsName: 'mac-mini.tail.ts.net' } };

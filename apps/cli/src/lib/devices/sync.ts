@@ -98,6 +98,18 @@ export interface DeviceSyncResult {
 }
 
 /**
+ * The nodes automatic discovery is allowed to see: sharee nodes (shared INTO
+ * the tailnet by another user, e.g. a funnel ingress relay) are not the
+ * operator's machines, so they must never be bootstrap-registered nor surfaced
+ * as pending. Explicit paths (`devices register <name>`, `devices add`, the
+ * `fleet:` manifest bootstrap) are deliberate user actions and stay unfiltered.
+ * Pure so the policy is unit-testable without a tailnet.
+ */
+export function discoverableNodes(nodes: TailscaleNode[]): TailscaleNode[] {
+  return nodes.filter((n) => !n.sharee);
+}
+
+/**
  * Node names present on the tailnet but neither already in the registry nor on
  * the ignore-list — i.e. genuinely new devices worth surfacing. Pure so the
  * flag matrix is unit-testable without a live tailnet.
@@ -150,7 +162,7 @@ export async function runDeviceSync(
   // the same host at once) would otherwise abort the whole `agents sync`. The
   // whole body is inside the guard so the "never a sync failure" promise holds.
   try {
-    const nodes = parseTailscaleStatus(tailscaleStatusJson());
+    const nodes = discoverableNodes(parseTailscaleStatus(tailscaleStatusJson()));
     const [registeredBefore, ignored] = await Promise.all([loadDevices(), loadIgnored()]);
     const registered = new Set(Object.keys(registeredBefore));
     const pendingNames = computePendingDevices(nodes, registered, ignored);

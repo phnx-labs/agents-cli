@@ -26,6 +26,9 @@ export interface TailscaleNode {
   direct: boolean;
   relay?: string;
   lastSeen?: string;
+  /** True for a node another user shared INTO this tailnet — not the operator's
+   * own machine, so discovery must never auto-register or suggest it. */
+  sharee: boolean;
 }
 
 /** Shape of the bits of a `tailscale status --json` peer/self entry we read. */
@@ -38,6 +41,7 @@ interface RawTsNode {
   Relay?: string;
   CurAddr?: string;
   LastSeen?: string;
+  ShareeNode?: boolean;
 }
 
 interface RawTsStatus {
@@ -102,6 +106,7 @@ function toNode(raw: RawTsNode): TailscaleNode | null {
     direct,
     relay: raw.Relay || undefined,
     lastSeen: raw.LastSeen,
+    sharee: Boolean(raw.ShareeNode),
   };
 }
 

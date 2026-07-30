@@ -40,6 +40,10 @@ const FIXTURE = JSON.stringify({
     nodekey4: { HostName: 'localhost', DNSName: 'iphone182.tail1a85a1.ts.net.', OS: 'iOS', Online: true, CurAddr: '1.2.3.4:2' },
     // macOS name with spaces + apostrophe: DNS label is the clean slug.
     nodekey5: { HostName: "Bisma's MacBook Pro", DNSName: 'bismas-macbook-pro.tail1a85a1.ts.net.', OS: 'macOS', Online: false },
+    // A node shared INTO this tailnet by another user (e.g. a funnel ingress
+    // relay). Parse keeps it — flagged — so sync can exclude it from discovery
+    // while explicit `devices register <name>` can still reach it.
+    nodekey6: { HostName: 'funnel-ingress-node', DNSName: 'funnel-ingress-node.tail99.ts.net.', Online: true, ShareeNode: true },
   },
 });
 
@@ -50,6 +54,7 @@ describe('parseTailscaleStatus', () => {
     // the nameless node is dropped; macOS spaces/apostrophe become a slug.
     expect(nodes.map((n) => n.name).sort()).toEqual([
       'bismas-macbook-pro',
+      'funnel-ingress-node',
       'ipad165',
       'iphone182',
       'win-mini',
@@ -71,6 +76,15 @@ describe('parseTailscaleStatus', () => {
     // Empty CurAddr + Relay → relayed, not direct.
     expect(win.direct).toBe(false);
     expect(win.relay).toBe('sfo');
+  });
+
+  it('flags sharee nodes (shared into the tailnet by another user) and no one else', () => {
+    const nodes = parseTailscaleStatus(FIXTURE);
+    const shared = nodes.find((n) => n.name === 'funnel-ingress-node')!;
+    expect(shared.sharee).toBe(true);
+    for (const n of nodes.filter((x) => x.name !== 'funnel-ingress-node')) {
+      expect(n.sharee).toBe(false);
+    }
   });
 
   it('throws on malformed JSON', () => {
