@@ -7,7 +7,7 @@
  *   3. A genuinely-new, non-ignored node IS surfaced.
  */
 import { describe, expect, it } from 'vitest';
-import { computePendingDevices, discoverableNodes, partitionWantedDevices, planDeviceReconciliation, sanitizeLoginUser, selectNodesToUpsert, withDefaultUser } from './sync.js';
+import { computePendingDevices, defaultPickerChecked, discoverableNodes, partitionWantedDevices, planDeviceReconciliation, sanitizeLoginUser, selectNodesToUpsert, withDefaultUser } from './sync.js';
 import type { TailscaleNode } from './tailscale.js';
 import type { DeviceInput } from './registry.js';
 
@@ -23,6 +23,27 @@ describe('discoverableNodes', () => {
     const shared: TailscaleNode = { ...node('funnel-ingress-node'), sharee: true };
     const nodes = [node('zion'), shared, node('win-mini')];
     expect(discoverableNodes(nodes).map((n) => n.name)).toEqual(['zion', 'win-mini']);
+  });
+});
+
+describe('defaultPickerChecked', () => {
+  const shared: TailscaleNode = { ...node('funnel-ingress-node'), sharee: true };
+
+  it('pre-checks an owned, non-dismissed node (Enter keeps the fleet as-is)', () => {
+    expect(defaultPickerChecked(node('zion'), new Set(), new Set())).toBe(true);
+  });
+
+  it('leaves a sharee node unchecked so the default Enter never registers it', () => {
+    expect(defaultPickerChecked(shared, new Set(), new Set())).toBe(false);
+  });
+
+  it('keeps a deliberately-registered sharee node checked (Enter must not remove it)', () => {
+    expect(defaultPickerChecked(shared, new Set(['funnel-ingress-node']), new Set())).toBe(true);
+  });
+
+  it('never pre-checks a dismissed node, sharee or not', () => {
+    expect(defaultPickerChecked(node('ipad165'), new Set(), new Set(['ipad165']))).toBe(false);
+    expect(defaultPickerChecked(shared, new Set(), new Set(['funnel-ingress-node']))).toBe(false);
   });
 });
 

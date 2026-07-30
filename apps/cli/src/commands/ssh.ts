@@ -42,7 +42,7 @@ import {
   parseTailscaleStatus,
   tailscaleStatusJson,
 } from '../lib/devices/tailscale.js';
-import { localLoginUser, planDeviceReconciliation, runDeviceSync, withDefaultUser } from '../lib/devices/sync.js';
+import { defaultPickerChecked, localLoginUser, planDeviceReconciliation, runDeviceSync, withDefaultUser } from '../lib/devices/sync.js';
 import { resolveDeviceTarget, splitUserHost } from '../lib/devices/resolve-target.js';
 import { clearPendingSentinel } from '../lib/devices/pending.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
@@ -321,13 +321,16 @@ async function runInteractiveDeviceSync(): Promise<void> {
       // Everything not already dismissed starts checked, so pressing Enter keeps
       // the fleet as-is (matching what auto-sync would register). Unchecking a
       // device removes it AND dismisses it so auto-sync never re-adds it.
+      // Sharee nodes (shared in by another user) start unchecked unless already
+      // registered — registering one must be a deliberate check, never the
+      // default Enter.
       message: 'Your fleet — uncheck a device to remove and stop suggesting it:',
       pageSize: Math.min(nodes.length, 20),
       choices: nodes.map((n) => {
-        const flags = [n.platform, n.online ? undefined : 'offline', ignored.has(n.name) ? 'ignored' : undefined]
+        const flags = [n.platform, n.online ? undefined : 'offline', n.sharee ? 'shared' : undefined, ignored.has(n.name) ? 'ignored' : undefined]
           .filter(Boolean)
           .join(', ');
-        return { value: n.name, name: `${n.name}  ${chalk.gray(`(${flags})`)}`, checked: !ignored.has(n.name) };
+        return { value: n.name, name: `${n.name}  ${chalk.gray(`(${flags})`)}`, checked: defaultPickerChecked(n, registered, ignored) };
       }),
     });
   } catch (err) {

@@ -110,6 +110,22 @@ export function discoverableNodes(nodes: TailscaleNode[]): TailscaleNode[] {
 }
 
 /**
+ * Default checked-state for a node in the interactive sync picker. Pressing
+ * Enter registers every checked node, so "checked" must mean "auto-sync would
+ * register this": not dismissed, and not a sharee node — unless the user
+ * already deliberately registered that sharee node, in which case Enter must
+ * keep the fleet as-is. Pure so the default matrix is unit-testable without a
+ * prompt.
+ */
+export function defaultPickerChecked(
+  node: TailscaleNode,
+  registered: Set<string>,
+  ignored: Set<string>,
+): boolean {
+  return !ignored.has(node.name) && (!node.sharee || registered.has(node.name));
+}
+
+/**
  * Node names present on the tailnet but neither already in the registry nor on
  * the ignore-list — i.e. genuinely new devices worth surfacing. Pure so the
  * flag matrix is unit-testable without a live tailnet.
