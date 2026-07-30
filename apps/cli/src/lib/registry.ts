@@ -10,6 +10,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { createHash } from 'crypto';
 import type {
+  Meta,
   RegistryType,
   RegistryConfig,
   McpServerEntry,
@@ -18,7 +19,7 @@ import type {
   RegistrySearchResult,
   ResolvedPackage,
 } from './types.js';
-import { DEFAULT_REGISTRIES } from './types.js';
+import { DEFAULT_REGISTRIES, SEEDED_REGISTRIES } from './types.js';
 import { readMeta, writeMeta } from './state.js';
 import { discoverSkillsFromRepo } from './skills.js';
 
@@ -40,6 +41,31 @@ export function validatedPyPISpec(spec: string): string {
   return spec;
 }
 
+/**
+ * Seeded presets offered for `type`, minus any the user has removed.
+ *
+ * These are resolved here rather than written into agents.yaml. Seeding used to
+ * happen on the state READ path and persisted the entry — but agents.yaml is
+ * git-tracked in the user's DotAgents repo, so that write left the working tree
+ * dirty and every `agents repo pull` aborted with "Working tree has uncommitted
+ * changes", naming neither the file nor the cause. Since every `agents`
+ * invocation reads state, the dirt returned the instant it was cleared, and the
+ * loop could not be escaped through the CLI at all (RUSH-1925).
+ *
+ * `seededPresets` is the removal tombstone: a key listed there means the user
+ * removed that preset, so it is not offered again. Users who were seeded under
+ * the old behaviour have the key listed *and* the entry in their own
+ * `registries:` block, which still wins below — so nothing disappears for them.
+ */
+function offeredSeeds(type: RegistryType, meta: Meta): Record<string, RegistryConfig> {
+  const removed = new Set(meta.seededPresets || []);
+  const offered: Record<string, RegistryConfig> = {};
+  for (const [name, config] of Object.entries(SEEDED_REGISTRIES[type] || {})) {
+    if (!removed.has(`${type}.${name}`)) offered[name] = { ...config };
+  }
+  return offered;
+}
+
 /** Get all registries of a given type, merging defaults with user overrides. */
 export function getRegistries(type: RegistryType): Record<string, RegistryConfig> {
   const meta = readMeta();
@@ -47,7 +73,7 @@ export function getRegistries(type: RegistryType): Record<string, RegistryConfig
   const userRegs = meta.registries?.[type] || {};
 
   // Merge defaults with user config (user overrides defaults)
-  return { ...defaultRegs, ...userRegs };
+  return { ...defaultRegs, ...offeredSeeds(type, meta), ...userRegs };
 }
 
 /** Get only the enabled registries of a given type. */
@@ -77,15 +103,21 @@ export function setRegistry(
   writeMeta(meta);
 }
 
-/** Remove a user-configured registry. Returns false if it did not exist. */
+/** Remove a user-configured or seeded registry. Returns false if it did not exist. */
 export function removeRegistry(type: RegistryType, name: string): boolean {
   const meta = readMeta();
-  if (meta.registries?.[type]?.[name]) {
-    delete meta.registries[type][name];
-    writeMeta(meta);
-    return true;
+  const inUserConfig = !!meta.registries?.[type]?.[name];
+  // A seeded preset has no entry in agents.yaml until the user edits it, so
+  // removal is recorded as a tombstone in seededPresets instead of a deletion.
+  const isOfferedSeed = !!offeredSeeds(type, meta)[name];
+  if (!inUserConfig && !isOfferedSeed) return false;
+
+  if (inUserConfig) delete meta.registries![type][name];
+  if (SEEDED_REGISTRIES[type]?.[name]) {
+    meta.seededPresets = [...new Set([...(meta.seededPresets || []), `${type}.${name}`])];
   }
-  return false;
+  writeMeta(meta);
+  return true;
 }
 
 /**

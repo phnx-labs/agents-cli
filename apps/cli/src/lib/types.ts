@@ -820,8 +820,17 @@ export interface Meta {
    */
   brands?: Record<string, BrandConfig>;
   /**
-   * Keys like `skill.hermes` — registries seeded from SEEDED_REGISTRIES exactly
-   * once. Tracked so a user `registry remove` won't silently re-seed.
+   * Removal tombstones for SEEDED_REGISTRIES presets, keyed like `skill.hermes`.
+   *
+   * Seeded presets are resolved in memory by `getRegistries` (see
+   * `offeredSeeds`) rather than written into agents.yaml — persisting them from
+   * the read path dirtied this git-tracked file and deadlocked
+   * `agents repo pull` (RUSH-1925). A key listed here means the user ran
+   * `registry remove` on that preset, so it is no longer offered.
+   *
+   * Entries written by the pre-RUSH-1925 seeding also appear here; those files
+   * carry the registry in their own `registries:` block too, which takes
+   * precedence, so the preset stays exactly as configured.
    */
   seededPresets?: string[];
   /**

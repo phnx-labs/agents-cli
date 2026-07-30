@@ -29,7 +29,6 @@ import * as os from 'os';
 import * as yaml from 'yaml';
 import { ensureLockTarget, atomicWriteFileSync, withFileLock } from './fs-atomic.js';
 import type { Meta, RegistryType } from './types.js';
-import { SEEDED_REGISTRIES } from './types.js';
 import { machineId } from './machine-id.js';
 
 const HOME = process.env.HOME ?? os.homedir();
@@ -752,29 +751,6 @@ function overlayMachineLocal(meta: Meta): Meta {
   return meta;
 }
 
-function applyRegistrySeeds(meta: Meta): boolean {
-  const seeded = new Set(meta.seededPresets || []);
-  let changed = false;
-
-  for (const [type, presets] of Object.entries(SEEDED_REGISTRIES) as Array<[RegistryType, Record<string, any>]>) {
-    for (const [name, config] of Object.entries(presets)) {
-      const key = `${type}.${name}`;
-      if (seeded.has(key)) continue;
-
-      if (!meta.registries) meta.registries = { mcp: {}, skill: {} };
-      if (!meta.registries[type]) meta.registries[type] = {};
-      if (!meta.registries[type][name]) {
-        meta.registries[type][name] = { ...config };
-      }
-      seeded.add(key);
-      changed = true;
-    }
-  }
-
-  if (changed) meta.seededPresets = [...seeded];
-  return changed;
-}
-
 /**
  * One-shot migration: move agents.yaml from system repo to user repo.
  * Idempotent — no-ops if user file already exists or system file absent.
@@ -888,18 +864,11 @@ export function readMeta(): Meta {
     }
 
     overlayMachineLocal(meta);
-    if (applyRegistrySeeds(meta)) {
-      writeMeta(meta);
-      return rememberMeta(meta);
-    }
     return rememberMeta(meta);
   }
 
   const meta = createDefaultMeta();
   overlayMachineLocal(meta);
-  if (applyRegistrySeeds(meta)) {
-    writeMeta(meta);
-  }
   return rememberMeta(meta);
 }
 

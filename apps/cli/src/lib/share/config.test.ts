@@ -107,7 +107,13 @@ describe('share config', () => {
     expect(readAndResolveBundleEnv(SHARE_BUNDLE, { caller: 'test' }).env).toEqual({
       WRITE_TOKEN: 'write-token-1',
     });
-    expect(fs.readFileSync(path.join(HOME, '.agents', 'agents.yaml'), 'utf8')).not.toContain('write-token-1');
+    // The token must never reach agents.yaml — it belongs in the keychain bundle.
+    // Reading state no longer creates that file (RUSH-1925), and a file that does
+    // not exist trivially satisfies the requirement, so treat absent as empty
+    // rather than crashing on ENOENT.
+    const metaPath = path.join(HOME, '.agents', 'agents.yaml');
+    const metaText = fs.existsSync(metaPath) ? fs.readFileSync(metaPath, 'utf8') : '';
+    expect(metaText).not.toContain('write-token-1');
   });
 
   it('prefers an injected SHARE_WRITE_TOKEN over the local bundle', () => {

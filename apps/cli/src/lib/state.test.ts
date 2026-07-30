@@ -21,6 +21,14 @@ function devicePath() {
   return path.join(TMP, '.agents', 'devices', 'testbox', 'agents.yaml');
 }
 
+// agents.yaml is git-tracked in the user's DotAgents repo, so a read that
+// rewrites it dirties the working tree and blocks `agents repo pull`
+// ("Working tree has uncommitted changes"). Reads must not write.
+function writeCentral(yamlText: string) {
+  fs.mkdirSync(path.join(TMP, '.agents'), { recursive: true });
+  fs.writeFileSync(centralPath(), yamlText);
+}
+
 describe('defaultBrowserProfile is device-local', () => {
   beforeEach(() => {
     TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-state-test-'));
@@ -60,5 +68,42 @@ describe('defaultBrowserProfile is device-local', () => {
     expect(readMeta().defaultBrowserProfile).toBeUndefined();
     const device = fs.readFileSync(devicePath(), 'utf-8');
     expect(device).not.toContain('defaultBrowserProfile');
+  });
+});
+
+describe('reading state never writes a tracked agents.yaml (RUSH-1925)', () => {
+  beforeEach(() => {
+    TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-state-seed-'));
+    process.env.HOME = TMP;
+    process.env.AGENTS_SYNC_MACHINE_ID = 'testbox';
+  });
+  afterEach(() => {
+    delete process.env.AGENTS_SYNC_MACHINE_ID;
+    try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* best-effort */ }
+  });
+
+  it('leaves the file byte-identical across repeated reads', async () => {
+    // The committed state that deadlocked zion: no hermes entry, so the old
+    // read path inserted one and wrote, dirtying a git-tracked file.
+    writeCentral('registries:\n  mcp: {}\n  skill: {}\nseededPresets: []\n');
+    const before = fs.readFileSync(centralPath(), 'utf-8');
+
+    const { readMeta } = await freshState();
+    readMeta();
+    readMeta();
+    expect(fs.readFileSync(centralPath(), 'utf-8')).toBe(before);
+  });
+
+  it('does not resurrect the seed through an unrelated write', async () => {
+    // A write for another reason must not flush a seeded registry into the file
+    // — that is how the in-memory-only first attempt at this fix still leaked.
+    writeCentral('registries:\n  mcp: {}\n  skill: {}\n');
+
+    const { updateMeta } = await freshState();
+    updateMeta((m) => ({ ...m, defaultAgent: 'claude' }));
+
+    const after = fs.readFileSync(centralPath(), 'utf-8');
+    expect(after).toContain('defaultAgent: claude');
+    expect(after).not.toContain('hermes-agent.nousresearch.com');
   });
 });
