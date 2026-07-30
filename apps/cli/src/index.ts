@@ -410,6 +410,7 @@ import {
   dismissUpdateVersion,
   shouldPromptUpgrade,
   findAgentsCliInstalls,
+  resolveRunningPackageRoot,
   type UpdateCheckCache,
 } from './lib/self-update.js';
 const UPDATE_CHECK_FILE = getUpdateCheckPath();
@@ -424,7 +425,15 @@ const UPDATE_CHECK_FILE = getUpdateCheckPath();
  */
 function maybeWarnMultiInstall(): void {
   const sentinel = path.join(getRuntimeStateDir(), 'multi-install-warned');
-  const runningRoot = path.resolve(__dirname, '..');
+  let runningRoot: string;
+  try {
+    runningRoot = resolveRunningPackageRoot(__dirname);
+  } catch {
+    // Without a real root for the running copy there is nothing to compare
+    // against, and a guess here is exactly what produced the phantom
+    // "/$bunfs" install. This warning is advisory — stay silent instead.
+    return;
+  }
   const byRoot = new Map<string, { version: string; note: string }>();
   byRoot.set(runningRoot, { version: VERSION, note: 'running' });
   for (const install of findAgentsCliInstalls(process.env.PATH || '')) {
@@ -495,7 +504,7 @@ function printResolvedPackage(metadata: NpmPackageMetadata): void {
 }
 
 async function installResolvedPackage(metadata: NpmPackageMetadata): Promise<void> {
-  const packageRoot = path.resolve(__dirname, '..');
+  const packageRoot = resolveRunningPackageRoot(__dirname);
   // Download the published tarball and prove its bytes match the registry
   // integrity BEFORE installing anything. A `name@version` spec would let the
   // package manager fetch and install whatever the registry serves with no

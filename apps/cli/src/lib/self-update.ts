@@ -135,6 +135,75 @@ export function shouldPromptUpgrade(cache: UpdateCheckCache | null, currentVersi
 }
 
 /**
+ * Whether `p` is Bun's embedded virtual filesystem — where a standalone
+ * executable exposes its bundled sources. Nothing there exists on disk: it
+ * cannot be stat'd, installed into, or compared against a real install path.
+ *
+ * Matches the root itself (`/$bunfs`) as well as paths under it, because
+ * `<__dirname>/..` from the embedded entry produces exactly that bare root.
+ * daemon.ts carries a narrower under-the-root-only guard for deciding what may
+ * be supervised; the two are deliberately not shared.
+ */
+function isBunVirtualPath(p: string): boolean {
+  return /(^|[/\\])\$bunfs([/\\]|$)/.test(p);
+}
+
+/** Whether `dir` is the root of an installed copy of this package. */
+function isPackageRoot(dir: string): boolean {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf-8'));
+    return pkg.name === NPM_PACKAGE_NAME;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The on-disk package root of the copy that is currently running.
+ *
+ * For a plain JS install this is just `<__dirname>/..`. Under the compiled
+ * standalone binary (shipped since 1.20.53) it is not: Bun sets `__dirname` to
+ * its embedded virtual FS, so `<__dirname>/..` yields `/$bunfs` — a path that
+ * exists nowhere. That phantom value was reported as a second install by the
+ * multi-install check, and rejected by deriveGlobalPrefix as "not an
+ * npm-managed install", so every self-upgrade from a compiled copy failed.
+ *
+ * The physical executable is `process.execPath`, which ships inside the
+ * package (`<packageRoot>/dist/bin/agents`). Walk up from it to the directory
+ * whose package.json actually names this package rather than assuming a fixed
+ * depth, so a change to the dist layout surfaces as a clear throw here instead
+ * of a wrong prefix that npm would happily install into.
+ */
+export function resolveRunningPackageRoot(
+  dirname: string,
+  execPath: string = process.execPath,
+): string {
+  const fromDirname = path.resolve(dirname, '..');
+  if (!isBunVirtualPath(fromDirname)) return fromDirname;
+
+  if (!execPath || isBunVirtualPath(execPath)) {
+    throw new Error(
+      `Cannot locate the running agents-cli install: __dirname is the Bun virtual path ${fromDirname} ` +
+        `and process.execPath (${execPath || '(empty)'}) is not a real file. ` +
+        `Reinstall with: npm install -g ${NPM_PACKAGE_NAME}`,
+    );
+  }
+
+  let dir = path.dirname(path.resolve(execPath));
+  for (;;) {
+    if (isPackageRoot(dir)) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) {
+      throw new Error(
+        `Cannot locate the running agents-cli install: no ${NPM_PACKAGE_NAME} package.json above ` +
+          `${execPath}. Reinstall with: npm install -g ${NPM_PACKAGE_NAME}`,
+      );
+    }
+    dir = parent;
+  }
+}
+
+/**
  * Derive the npm global prefix that owns the install at `packageRoot`.
  *
  * npm's global layout for a scoped package:
@@ -285,6 +354,27 @@ export function refreshAliasShims(packageRoot: string): void {
   });
 }
 
+/**
+ * The package root a resolved `agents` entrypoint belongs to, or null when the
+ * path is not an agents-cli entry at all. Two shipped shapes:
+ *   <packageRoot>/dist/index.js    — the JS entry npm links as `agents`
+ *   <packageRoot>/dist/bin/agents  — the compiled standalone executable
+ */
+function packageRootForEntry(real: string): string | null {
+  const distDir = path.dirname(real);
+  if (path.basename(real) === 'index.js' && path.basename(distDir) === 'dist') {
+    return path.dirname(distDir);
+  }
+  if (
+    path.basename(real) === 'agents' &&
+    path.basename(distDir) === 'bin' &&
+    path.basename(path.dirname(distDir)) === 'dist'
+  ) {
+    return path.dirname(path.dirname(distDir));
+  }
+  return null;
+}
+
 export interface AgentsCliInstall {
   /** The PATH entry (`<dir>/agents`) that resolves to this install. */
   binPath: string;
@@ -301,8 +391,12 @@ export interface AgentsCliInstall {
  *
  * npm bin entries are symlinks that resolve to `<packageRoot>/dist/index.js`
  * (the dev install's `~/.local/bin/agents` chains through the dev prefix to
- * the same shape). Anything that doesn't resolve to a dist/index.js inside a
- * package named @phnx-labs/agents-cli is some other tool and is skipped.
+ * the same shape). A shim pointed at the compiled standalone binary resolves
+ * to `<packageRoot>/dist/bin/agents` instead; that shape counts too, otherwise
+ * the copy that actually runs — the compiled one is typically first on PATH —
+ * is invisible to this scan and its root looks like a separate install.
+ * Anything that resolves to neither shape inside a package named
+ * @phnx-labs/agents-cli is some other tool and is skipped.
  * POSIX-only: Windows npm bins are .cmd wrappers, not symlinks.
  */
 export function findAgentsCliInstalls(pathEnv: string): AgentsCliInstall[] {
@@ -317,10 +411,8 @@ export function findAgentsCliInstalls(pathEnv: string): AgentsCliInstall[] {
     } catch {
       continue; // missing or dangling symlink
     }
-    if (path.basename(real) !== 'index.js' || path.basename(path.dirname(real)) !== 'dist') {
-      continue;
-    }
-    const packageRoot = path.dirname(path.dirname(real));
+    const packageRoot = packageRootForEntry(real);
+    if (!packageRoot) continue;
     if (seenRoots.has(packageRoot)) continue;
     let pkg: { name?: unknown; version?: unknown };
     try {

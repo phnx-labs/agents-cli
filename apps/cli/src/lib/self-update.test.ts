@@ -16,6 +16,7 @@ import {
   installPackageIntoPrefix,
   readInstalledVersion,
   readUpdateCache,
+  resolveRunningPackageRoot,
   saveUpdateCheck,
   shouldPromptUpgrade,
   verifyInstalledVersion,
@@ -34,6 +35,62 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+describe('resolveRunningPackageRoot', () => {
+  /** An npm-global-shaped install carrying both shipped entrypoints. */
+  function makeCompiledInstall(label: string) {
+    // realpath the base: on macOS the tmpdir lives under /var -> /private/var,
+    // and resolveRunningPackageRoot resolves without canonicalizing symlinks.
+    const base = fs.realpathSync(makeTempDir(label));
+    const packageRoot = path.join(base, 'lib', 'node_modules', '@phnx-labs', 'agents-cli');
+    fs.mkdirSync(path.join(packageRoot, 'dist', 'bin'), { recursive: true });
+    fs.writeFileSync(
+      path.join(packageRoot, 'package.json'),
+      JSON.stringify({ name: '@phnx-labs/agents-cli', version: '1.20.73' }),
+    );
+    fs.writeFileSync(path.join(packageRoot, 'dist', 'index.js'), '// entrypoint\n');
+    const execPath = path.join(packageRoot, 'dist', 'bin', 'agents');
+    fs.writeFileSync(execPath, 'MZ-not-really\n', { mode: 0o755 });
+    return { packageRoot: fs.realpathSync(packageRoot), execPath };
+  }
+
+  it('returns the parent of __dirname for an ordinary JS install', () => {
+    // dist/index.js runs with __dirname = <packageRoot>/dist.
+    const { packageRoot } = makeCompiledInstall('js-install');
+    expect(resolveRunningPackageRoot(path.join(packageRoot, 'dist'), '/usr/local/bin/node')).toBe(
+      packageRoot,
+    );
+  });
+
+  it('maps the Bun virtual __dirname to the real root via process.execPath', () => {
+    // The reported bug: under the compiled standalone binary Bun sets
+    // __dirname to /$bunfs/root, so <__dirname>/.. was "/$bunfs" — a path that
+    // exists nowhere. It was then reported as a phantom second install and
+    // rejected by deriveGlobalPrefix, so every self-upgrade failed.
+    const { packageRoot, execPath } = makeCompiledInstall('bunfs');
+
+    const resolved = resolveRunningPackageRoot('/$bunfs/root', execPath);
+
+    expect(resolved).toBe(packageRoot);
+    // The whole point: the result is a real, installable npm prefix.
+    expect(fs.existsSync(resolved)).toBe(true);
+    expect(() => deriveGlobalPrefix(resolved)).not.toThrow();
+  });
+
+  it('throws when execPath is itself virtual rather than guessing a prefix', () => {
+    expect(() => resolveRunningPackageRoot('/$bunfs/root', '/$bunfs/root/agents')).toThrow(
+      /Cannot locate the running agents-cli install/,
+    );
+  });
+
+  it('throws when no agents-cli package.json sits above execPath', () => {
+    const stray = path.join(makeTempDir('stray'), 'agents');
+    fs.writeFileSync(stray, 'binary\n', { mode: 0o755 });
+    expect(() => resolveRunningPackageRoot('/$bunfs/root', stray)).toThrow(
+      /no @phnx-labs\/agents-cli package.json above/,
+    );
+  });
 });
 
 describe('deriveGlobalPrefix', () => {
@@ -357,6 +414,33 @@ describe.skipIf(process.platform === 'win32')('findAgentsCliInstalls', () => {
     expect(installs).toHaveLength(1);
     expect(installs[0].packageRoot).toBe(real.packageRoot);
     expect(installs[0].version).toBe('0.0.0-dev.abc123');
+  });
+
+  it('resolves a shim pointing at the compiled binary to the same root as the JS entry', () => {
+    // The reported false positive: ~/.local/bin/agents -> dist/bin/agents is
+    // first on PATH and is the copy that runs, but the scan only recognized
+    // dist/index.js. The running copy was invisible here while its sibling
+    // npm bin was reported — one install looked like two.
+    const base = makeTempDir('compiled');
+    const real = makeInstall(base, 'npm-prefix', '1.20.73');
+    const compiled = path.join(real.packageRoot, 'dist', 'bin', 'agents');
+    fs.mkdirSync(path.dirname(compiled), { recursive: true });
+    fs.writeFileSync(compiled, 'compiled standalone\n', { mode: 0o755 });
+    const localBin = path.join(base, 'local-bin');
+    fs.mkdirSync(localBin, { recursive: true });
+    fs.symlinkSync(compiled, path.join(localBin, 'agents'));
+
+    // A compiled shim on its own must resolve — before the fix this was [],
+    // i.e. the copy that actually runs was invisible to the scan entirely.
+    const compiledOnly = findAgentsCliInstalls(localBin);
+    expect(compiledOnly).toHaveLength(1);
+    expect(compiledOnly[0].packageRoot).toBe(real.packageRoot);
+    expect(compiledOnly[0].version).toBe('1.20.73');
+
+    // And alongside the sibling npm bin it dedups to one install, not two.
+    const both = findAgentsCliInstalls([localBin, real.binDir].join(path.delimiter));
+    expect(both).toHaveLength(1);
+    expect(both[0].binPath).toBe(path.join(localBin, 'agents'));
   });
 
   it('skips unrelated binaries, foreign packages, and missing entries', () => {
