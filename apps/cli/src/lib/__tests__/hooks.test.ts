@@ -595,6 +595,39 @@ describe('registerHooksToSettings - OpenCode', () => {
       .toThrow('capture failed with exit code 7: rejected');
   });
 
+  it('executes lifecycle hooks even when the manifest entry also has a tool matcher', () => {
+    const outputPath = path.join(tmpDir, 'lifecycle-input.json');
+    const scriptPath = path.join(agentsDir, 'hooks', 'capture-lifecycle.js');
+    fs.writeFileSync(scriptPath, `#!/usr/bin/env node\nrequire("fs").writeFileSync(${JSON.stringify(outputPath)}, require("fs").readFileSync(0))\n`, 'utf-8');
+    fs.chmodSync(scriptPath, 0o755);
+    const versionHome = path.join(tmpDir, 'home');
+    registerHooksToSettings('opencode', versionHome, {
+      captureLifecycle: {
+        script: 'capture-lifecycle.js',
+        events: ['SessionStart', 'Stop'],
+        matcher: 'Bash|bash',
+      },
+    }, agentsDir);
+    const pluginPath = path.join(
+      versionHome, '.config', 'opencode', 'plugins', 'agents-cli-hooks.ts'
+    );
+    const runnerPath = path.join(tmpDir, 'run-lifecycle-plugin.ts');
+    fs.writeFileSync(runnerPath, `
+      import { $ } from "bun"
+      import { AgentsCliHooks } from ${JSON.stringify(pluginPath)}
+      const plugin = await AgentsCliHooks({ $ })
+      await plugin.event({ event: { type: "session.created", properties: { info: { id: "lifecycle" } } } })
+    `, 'utf-8');
+
+    execFileSync('bun', [runnerPath]);
+
+    expect(JSON.parse(fs.readFileSync(outputPath, 'utf-8'))).toMatchObject({
+      hook_event_name: 'session.created',
+      type: 'session.created',
+      properties: { info: { id: 'lifecycle' } },
+    });
+  });
+
   it('enforces the manifest timeout', async () => {
     const homeScopedDir = fs.mkdtempSync(path.join(os.homedir(), '.opencode-hook-test-'));
     const homeAgentsDir = path.join(homeScopedDir, '.agents');

@@ -1258,9 +1258,9 @@ function matches(hook, tool) {
   }
 }
 
-async function runHooks(hooks, payload, $) {
+async function runHooks(hooks, payload, $, matchTool = false) {
   for (const hook of hooks ?? []) {
-    if (!matches(hook, payload.tool_name ?? "")) continue
+    if (matchTool && !matches(hook, payload.tool_name ?? "")) continue
     const input = JSON.stringify(payload)
     const home = Bun.env.HOME ?? Bun.env.USERPROFILE ?? ""
     const command = hook.command.startsWith("~/")
@@ -1309,10 +1309,10 @@ export const AgentsCliHooks = async ({ $ }) => ({
     await runHooks(directHooks["chat.message"], { hook_event_name: "UserPromptSubmit", ...input, ...output }, $)
   },
   "tool.execute.before": async (input, output) => {
-    await runHooks(directHooks["tool.execute.before"], { hook_event_name: "PreToolUse", tool_name: input.tool, tool_input: output.args, ...input }, $)
+    await runHooks(directHooks["tool.execute.before"], { hook_event_name: "PreToolUse", tool_name: input.tool, tool_input: output.args, ...input }, $, true)
   },
   "tool.execute.after": async (input, output) => {
-    await runHooks(directHooks["tool.execute.after"], { hook_event_name: "PostToolUse", tool_name: input.tool, tool_input: input.args, tool_response: output, ...input }, $)
+    await runHooks(directHooks["tool.execute.after"], { hook_event_name: "PostToolUse", tool_name: input.tool, tool_input: input.args, tool_response: output, ...input }, $, true)
   },
 })
 `;
