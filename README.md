@@ -276,6 +276,10 @@ On a terminal, `agents sessions --active` (and a bare `agents sessions`) open th
 
 Filters **stack** (they AND together), the active set shows in the header, and the highlighted row **previews below by default** (`tab` hides it) — prompt, activity, last response, plus a links line where the worked-on ticket and the PR the session opened are **clickable** (OSC 8 hyperlinks: the ticket jumps to Linear, the `PR#` to GitHub, in terminals that support them). The Linear workspace is resolved from `LINEAR_WORKSPACE` or the linear-cli config, so tickets stay plain text when it's unknown. Because every hotkey has a flag, the view you build by hand is a real command: press `y` (or run `--print-cmd`) to get the exact `ag sessions …` line — explore interactively, hand the line to an agent. Piped output, `--json`, or `--no-interactive` keep the plain listing for scripts. Peek without opening the pager with `agents sessions <id> --preview`.
 
+| before — preview hidden | after — preview open + clickable links |
+| --- | --- |
+| ![sessions browser, preview hidden](assets/demos/sessions-preview-before.png) | ![sessions browser, preview open with a links line](assets/demos/sessions-preview-after.png) |
+
 Each live session resolves to `working`, `waiting_input` (with why -- a question, a plan review, or a permission prompt), or `idle`, alongside badges for the PR it opened, the worktree it sits in, and the ticket it's working. `agents sessions focus [id]` attaches the live pane in place -- the tmux split locally or over SSH, or its Ghostty tab -- and falls back to a fresh tab + resume when the terminal is gone.
 
 Landing on a session cold? `agents sessions <id>` prints a catch-up digest: an inferred title, files changed grouped by directory (created / modified / deleted), a histogram of which tools did the work, and the last test verdict -- the signals to reload a task in seconds.
