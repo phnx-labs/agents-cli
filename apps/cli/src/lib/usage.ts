@@ -572,6 +572,29 @@ async function getCodexUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
   }
 }
 
+/**
+ * The access token to use for a READ-ONLY Claude usage fetch, or null when the
+ * stored token is within the refresh leeway.
+ *
+ * Returns null instead of refreshing on purpose. Claude's refresh token is
+ * single-use and rotates server-side on every refresh; with one account signed
+ * into several machines, refreshing here would stampede that one token and
+ * silently invalidate every other holder — the RUSH-1822 failure, except in the
+ * usage path (fired in the background by the SWR cache and by `agents run`'s
+ * default "balanced" rotation on every unpinned run) rather than the health
+ * probe. So a usage read must never rotate: a near-expiry token yields "no usage
+ * right now" instead of a fleet-wide logout. Mirrors {@link probeClaudeStatus};
+ * the single legitimate refresh belongs to the actual claude run, never a read.
+ * Pure — unit-tested.
+ */
+export function claudeUsageAccessTokenNoRefresh(
+  oauth: Pick<ClaudeOauthCredentials, 'accessToken' | 'expiresAt'>,
+): string | null {
+  if (claudeAccessTokenNeedsRefresh(oauth.expiresAt ?? null)) return null;
+  const token = oauth.accessToken?.trim();
+  return token ? token : null;
+}
+
 /** Fetch Claude usage via the Anthropic OAuth usage API. */
 async function getClaudeUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
   try {
@@ -586,7 +609,8 @@ async function getClaudeUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
       return { snapshot: null, error: null };
     }
 
-    const accessToken = await getClaudeAccessToken(oauth, options?.home);
+    // Read-only: never refresh a single-use token just to read usage (RUSH-1822).
+    const accessToken = claudeUsageAccessTokenNoRefresh(oauth);
     if (!accessToken) {
       return { snapshot: null, error: null };
     }
