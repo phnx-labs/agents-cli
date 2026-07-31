@@ -54,7 +54,10 @@ cross-package imports except the CLI resolving the native helpers by relative pa
   it reviews every PR to `main` and posts its verdict as the **`prix-cloud`** comment. That
   is the non-author review: rely on it and merge on green, don't spawn a redundant subagent
   reviewer. Review manually only if `prix-cloud` hasn't posted after CI settles or flags
-  something to dig into. (It's a Rush Cloud app, not a `.github/workflows/` Action.)
+  something to dig into. (It's a Rush Cloud app, not a `.github/workflows/` Action.) The
+  reviewer reads this file before every review and enforces the conventions in
+  [§Code review conventions](#code-review-conventions-the-reviewer-must-enforce-these) —
+  that block is what it checks the diff against, not just prose for humans.
 - **The default branch is untouchable.** Every change is a git worktree + PR — never
   edit or commit on `main`. Worktrees live under `.agents/worktrees/<slug>/`.
 - **VS Code publish identity is frozen.** `apps/factory` publishes as publisher
@@ -62,6 +65,51 @@ cross-package imports except the CLI resolving the native helpers by relative pa
   Never change these — it would orphan the Marketplace listing. The product is called
   **Factory**; the CLI is **agents-cli**. (There is no "Agency.Li" — that was a
   dictation artifact.)
+
+## Code review conventions (the reviewer must enforce these)
+
+`prix/code-reviewer` reads this section on every PR and flags any violation with a
+`file:line` reference. These are blocking unless the PR description explicitly justifies
+the exception.
+
+- **No stubs, placeholders, or unimplemented paths.** A function that returns a canned
+  value, `throw new Error("not implemented")`, an empty body where behavior is expected, a
+  hardcoded mock standing in for a real call, or a `// TODO`/`// FIXME` that defers the
+  actual work — none of these merge. Flag every one with `file:line` and the concrete
+  behavior that's missing. Real implementation or nothing; a stub is a bug the diff is
+  hiding, not progress. (If work genuinely must be deferred, it carries a linked tracking
+  ticket in the comment and the PR says so — an intent-only `// TODO` with no ticket does
+  not qualify.)
+- **Harness parity for cross-agent features.** The CLI integrates many agent harnesses —
+  Claude, Codex, Gemini, Cursor, OpenCode, OpenClaw, Grok, Droid, Copilot, Kiro, Goose,
+  Antigravity, Kimi, Forge. When a change adds or extends a capability that applies across
+  harnesses (subagents, hooks, MCP, allowlists, config sync, skills, workflows), it should
+  cover **every** harness the capability applies to — or the PR states which are out of
+  scope and why. Flag a diff that wires up two or three agents and silently skips the rest.
+  The registry-driven integrations are the pattern to follow (one table entry, e.g.
+  `SUBAGENT_TARGETS` in `apps/cli/src/lib/subagents-registry.ts`, gated by
+  `capableAgents(...)` — not near-identical `else if (agent === '...')` arms), and the
+  completeness tests that pin the registry to the capability list must still pass.
+- **Docs stay in sync with behavior.** A change to a flag, command, config key, or
+  user-visible behavior updates the docs that cover it — the relevant component
+  `AGENTS.md`, its `README.md`, and `apps/cli/docs/`. Flag a diff that adds or changes a
+  surface but leaves the docs describing the old behavior, and flag examples/command names
+  in docs that the change has made stale. Exempt: pure internal refactors, test-only
+  changes, self-evident renames.
+- **README / feature list for core features.** A new core capability (a new top-level
+  command or a substantial subsystem) updates the README and any feature/command index so
+  it's discoverable — shipping it code-only, invisible to users, is incomplete.
+- **CHANGELOG for user-visible changes.** `apps/cli` ships as the published
+  `@phnx-labs/agents-cli` npm package. A change to a flag, command, or behavior adds a
+  CHANGELOG entry under the next version. Same exemptions as docs.
+- **No fallback band-aids.** Reject "just in case" branches, defensive lookups that paper
+  over a data-shape inconsistency, or a second code path added to tolerate bad input.
+  Standardize at the source — every fallback is a bug being hidden.
+- **No dead or commented-out code.** Removed logic is deleted, not commented out "for
+  later." git history is the archive.
+- **Tests exercise the real path.** New behavior ships with a test that hits the actual
+  critical path (no mocking — see the repo-wide rule above); a bugfix ships with a test
+  that reproduces the bug. Flag new behavior or a fix that lands without one.
 
 ## Security
 
