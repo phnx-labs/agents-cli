@@ -1051,42 +1051,124 @@ export function parseAntigravity(dbPath: string): SessionEvent[] {
  * Messages have role (user/assistant) and metadata.
  * Parts contain the actual content: text, tool, reasoning, patch, step-start/finish.
  */
+/**
+ * Parse a Grok (xAI CLI) session into normalized events.
+ *
+ * A Grok session dir holds several files; the conversation transcript is
+ * `chat_history.jsonl`, one JSON object per line with a `type`:
+ *   - `system`       — the system prompt (skipped; not conversational)
+ *   - `user`         — `content` is an array of `{ type: 'text', text }` blocks
+ *   - `assistant`    — `content` is a string, plus a `tool_calls[]` array of
+ *                      `{ id, name, arguments }` (arguments is a JSON string)
+ *   - `reasoning`    — chain-of-thought; text (when present) lives in `summary`
+ *   - `tool_result`  — `{ tool_call_id, content }`, correlated back to the call
+ *
+ * The scanner records `summary.json` as the session's filePath (see
+ * `readGrokMeta` in discover.ts), so resolve `chat_history.jsonl` from the same
+ * dir; also accept being handed the transcript file directly. Per-line
+ * timestamps aren't stored, so every event carries the session's `created_at`
+ * (from summary.json), falling back to the transcript's mtime.
+ */
 export function parseGrok(filePath: string): SessionEvent[] {
-  // Grok sessions are rich (summary.json + events.jsonl + chat_history.jsonl + updates.jsonl)
-  // This is a minimal stub for now so grok appears in `agents sessions`.
-  // Full parser (with subagents, tool calls, etc.) can be expanded later.
+  const sessionDir = path.dirname(filePath);
+  const historyPath = filePath.endsWith('chat_history.jsonl')
+    ? filePath
+    : path.join(sessionDir, 'chat_history.jsonl');
+  if (!fs.existsSync(historyPath)) return [];
+
+  let timestamp: string | undefined;
   try {
-    const content = fs.readFileSync(filePath, 'utf-8');
-    // If it's a summary.json, create a basic event
-    if (filePath.endsWith('summary.json')) {
-      const summary = JSON.parse(content);
-      return [{
-        timestamp: summary.created_at || new Date().toISOString(),
-        type: 'session_start',
-        content: summary.session_summary || 'Grok session',
-        agent: 'grok',
-        metadata: { sessionId: summary.id, cwd: summary.cwd },
-      } as any];
+    const summaryPath = filePath.endsWith('summary.json')
+      ? filePath
+      : path.join(sessionDir, 'summary.json');
+    if (fs.existsSync(summaryPath)) {
+      const summary = JSON.parse(fs.readFileSync(summaryPath, 'utf-8'));
+      if (typeof summary?.created_at === 'string') timestamp = summary.created_at;
     }
-    // For JSONL files (events, chat_history, updates), return basic parsed lines
-    if (filePath.endsWith('.jsonl')) {
-      const lines = content.trim().split('\n').filter(Boolean);
-      return lines.slice(0, 50).map((line, i) => {
-        try {
-          const obj = JSON.parse(line);
-          return {
-            timestamp: obj.timestamp || obj.ts || new Date().toISOString(),
-            type: obj.type || obj.method || 'grok_event',
-            content: typeof obj.content === 'string' ? obj.content : JSON.stringify(obj).slice(0, 200),
-            agent: 'grok',
-          } as any;
-        } catch {
-          return { timestamp: new Date().toISOString(), type: 'raw', content: line.slice(0, 200), agent: 'grok' } as any;
+  } catch { /* fall back to mtime below */ }
+  if (!timestamp) {
+    let mtime: Date | null = null;
+    try { mtime = fs.statSync(historyPath).mtime; } catch { mtime = null; }
+    timestamp = (mtime ?? new Date()).toISOString();
+  }
+
+  const content = safeReadSessionFile(historyPath);
+  const lines = content.split('\n').filter(l => l.trim());
+  const events: SessionEvent[] = [];
+  const toolCallMap = new Map<string, string>();
+
+  // Grok text is either a plain string (assistant) or an array of typed blocks
+  // (user: `{ type: 'text', text }`; reasoning summary: `{ text | summary_text }`).
+  const extractText = (raw: any): string => {
+    if (typeof raw === 'string') return raw.trim();
+    if (Array.isArray(raw)) {
+      return raw
+        .map((part: any) =>
+          typeof part?.text === 'string'
+            ? part.text
+            : typeof part?.summary_text === 'string'
+              ? part.summary_text
+              : '')
+        .join('')
+        .trim();
+    }
+    return '';
+  };
+
+  for (const line of lines) {
+    let msg: any;
+    try { msg = JSON.parse(line); } catch { continue; }
+    const type = msg?.type;
+
+    if (type === 'user') {
+      const text = extractText(msg.content);
+      if (text) events.push({ type: 'message', agent: 'grok', timestamp, role: 'user', content: text });
+    } else if (type === 'assistant') {
+      const text = extractText(msg.content);
+      if (text) events.push({ type: 'message', agent: 'grok', timestamp, role: 'assistant', content: text });
+
+      const calls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
+      for (const call of calls) {
+        const toolName = typeof call?.name === 'string' ? call.name : 'unknown';
+        let args: Record<string, any> = {};
+        if (call?.arguments && typeof call.arguments === 'object') {
+          args = call.arguments;
+        } else if (typeof call?.arguments === 'string') {
+          try { args = JSON.parse(call.arguments); } catch { args = { _raw: call.arguments }; }
         }
+        if (typeof call?.id === 'string') toolCallMap.set(call.id, toolName);
+        events.push({
+          type: 'tool_use',
+          agent: 'grok',
+          timestamp,
+          tool: toolName,
+          args,
+          path: args.path || args.file_path || undefined,
+          command: typeof args.command === 'string' ? args.command : undefined,
+        });
+      }
+    } else if (type === 'reasoning') {
+      const text = extractText(msg.summary);
+      if (text) events.push({ type: 'thinking', agent: 'grok', timestamp, content: text });
+    } else if (type === 'tool_result') {
+      const callId = typeof msg.tool_call_id === 'string' ? msg.tool_call_id : undefined;
+      const toolName = (callId && toolCallMap.get(callId)) || 'unknown';
+      const output = typeof msg.content === 'string' ? msg.content : extractText(msg.content);
+      const isError = typeof output === 'string' && output.startsWith('Error:');
+      events.push({
+        type: isError ? 'error' : 'tool_result',
+        agent: 'grok',
+        timestamp,
+        tool: toolName,
+        success: !isError,
+        output: output.length > 500 ? output.slice(0, 497) + '...' : output,
       });
+      if (callId) toolCallMap.delete(callId);
     }
-  } catch {}
-  return [];
+    // `system` lines are the system prompt — intentionally skipped.
+  }
+
+  return events;
 }
 
 export function parseOpenCode(filePath: string): SessionEvent[] {
