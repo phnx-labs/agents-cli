@@ -11,7 +11,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import type { AgentId } from './types.js';
-import { capableAgents } from './capabilities.js';
+import { capableAgents, supports } from './capabilities.js';
 import {
   getProjectAgentsDir,
   getSystemWorkflowsDir,
@@ -639,6 +639,70 @@ export function transformWorkflowForOpenClaw(workflowPath: string, name: string)
   });
 }
 
+/** Marker comment prefix written into agents-cli-managed Grok `.rhai` files. */
+export const GROK_WORKFLOW_MARKER = 'agents_workflow';
+
+/** Escape a string for embedding inside a Rhai double-quoted literal. */
+function escapeRhaiString(s: string): string {
+  return s
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\r\n/g, '\\n')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\n');
+}
+
+/**
+ * Convert a canonical agents-cli workflow bundle into a Grok native Rhai
+ * workflow script. Grok discovers saved workflows as
+ * `~/.grok/workflows/<name>.rhai` (and project `.grok/workflows/`) and exposes
+ * each as a `/<name>` slash command (enabled by default since v0.2.111).
+ *
+ * The projection is a single-agent orchestrator that feeds the WORKFLOW.md
+ * body as the agent prompt plus the caller's `args.prompt` (or string args).
+ * Multi-phase fan-out is left to hand-authored Rhai — agents-cli's job is to
+ * land the orchestrator instructions in the native path.
+ */
+export function transformWorkflowForGrok(workflowPath: string, name: string): string {
+  const fm = parseWorkflowFrontmatter(workflowPath);
+  if (!fm) throw new Error(`Invalid WORKFLOW.md in ${workflowPath}`);
+  const body = getWorkflowBody(workflowPath);
+  const description = (fm.description || name).trim();
+  const instructions = (body || description).trim();
+
+  return [
+    `// ${GROK_WORKFLOW_MARKER}: ${name}`,
+    `// Managed by agents-cli — re-sync from ~/.agents/workflows/${name}/; do not edit by hand.`,
+    `let meta = #{`,
+    `    name: "${escapeRhaiString(name)}",`,
+    `    description: "${escapeRhaiString(description)}",`,
+    `    phases: [ #{ title: "Run", detail: "orchestrator" } ],`,
+    `};`,
+    ``,
+    `let user_prompt = if args == () { () } else if type_of(args) == "string" { args } else { args.prompt };`,
+    `if user_prompt == () { pause("verification", "Pass a prompt as args.prompt or a string arg."); }`,
+    ``,
+    `phase("Run");`,
+    `let instructions = "${escapeRhaiString(instructions)}";`,
+    `let prompt = instructions + "\\n\\n---\\n\\nUser request:\\n" + user_prompt;`,
+    `let r = agent(prompt, #{ label: "orchestrator", capability_mode: "all" });`,
+    `if r != () && r.success { complete(r.output); }`,
+    `complete(#{ summary: "workflow failed", error: if r == () { "no result" } else { "agent failed" } });`,
+    ``,
+  ].join('\n');
+}
+
+/** Read the agents_workflow marker from a Grok `.rhai` file, if present. */
+export function grokWorkflowMarker(filePath: string): string | null {
+  try {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const match = content.match(new RegExp(`^//\\s*${GROK_WORKFLOW_MARKER}:\\s*(\\S+)`, 'm'));
+    return match?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function expandWorkflowPath(ref: string): string {
   if (ref === '~') return process.env.HOME ?? ref;
   if (ref.startsWith('~/')) {
@@ -824,6 +888,7 @@ function workflowTargetRoot(agent: AgentId, versionHome: string): string {
   if (agent === 'kimi') return path.join(versionHome, '.kimi-code', 'skills');
   if (agent === 'antigravity') return antigravityWorkflowsDir();
   if (agent === 'openclaw') return path.join(versionHome, '.openclaw', 'workflows');
+  if (agent === 'grok') return path.join(versionHome, '.grok', 'workflows');
   return path.join(versionHome, 'workflows');
 }
 
@@ -871,6 +936,19 @@ export function listWorkflowsForAgent(agent: AgentId, versionHome: string): stri
         .filter(d => d.isFile() && d.name.endsWith('.lobster') && !d.name.startsWith('.'))
         .map(d => d.name.slice(0, -'.lobster'.length))
         .filter(base => openclawWorkflowMarker(path.join(dir, `${base}.lobster`)) === base);
+    } catch {
+      return [];
+    }
+  }
+
+  if (agent === 'grok') {
+    const dir = workflowTargetRoot(agent, versionHome);
+    if (!fs.existsSync(dir)) return [];
+    try {
+      return fs.readdirSync(dir, { withFileTypes: true })
+        .filter(d => d.isFile() && d.name.endsWith('.rhai') && !d.name.startsWith('.'))
+        .map(d => d.name.slice(0, -'.rhai'.length))
+        .filter(base => grokWorkflowMarker(path.join(dir, `${base}.rhai`)) === base);
     } catch {
       return [];
     }
@@ -1033,6 +1111,20 @@ export function syncWorkflowToVersion(
       return { success: true };
     }
 
+    if (agent === 'grok') {
+      const targetDir = workflowTargetRoot(agent, versionHome);
+      const targetFile = path.join(targetDir, `${name}.rhai`);
+      if (fs.existsSync(targetFile)) {
+        const marker = grokWorkflowMarker(targetFile);
+        if (marker !== name) {
+          return { success: false, error: `Grok workflow '${name}' already exists and is not managed by agents-cli` };
+        }
+      }
+      fs.mkdirSync(targetDir, { recursive: true });
+      fs.writeFileSync(targetFile, transformWorkflowForGrok(workflowPath, name), 'utf-8');
+      return { success: true };
+    }
+
     const targetDir = path.join(workflowTargetRoot(agent, versionHome), name);
     fs.mkdirSync(workflowTargetRoot(agent, versionHome), { recursive: true });
     if (fs.existsSync(targetDir)) {
@@ -1090,6 +1182,22 @@ export function removeWorkflowFromVersion(
     }
     if (openclawWorkflowMarker(targetFile) !== name) {
       return { success: false, error: `OpenClaw workflow '${name}' is not managed by agents-cli` };
+    }
+    try {
+      fs.rmSync(targetFile, { force: true });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  }
+
+  if (agent === 'grok') {
+    const targetFile = path.join(workflowTargetRoot(agent, versionHome), `${name}.rhai`);
+    if (!fs.existsSync(targetFile)) {
+      return { success: false, error: `Workflow '${name}' not synced to ${agent}@${version}` };
+    }
+    if (grokWorkflowMarker(targetFile) !== name) {
+      return { success: false, error: `Grok workflow '${name}' is not managed by agents-cli` };
     }
     try {
       fs.rmSync(targetFile, { force: true });
@@ -1167,6 +1275,8 @@ export function iterWorkflowsCapableVersions(filter?: { agent?: AgentId; version
     const versions = listInstalledVersions(agentId);
     for (const version of versions) {
       if (filter?.version && filter.version !== version) continue;
+      // Honour version floors (e.g. grok workflows since 0.2.111).
+      if (!supports(agentId, 'workflows', version).ok) continue;
       result.push({ agent: agentId, version });
     }
   }

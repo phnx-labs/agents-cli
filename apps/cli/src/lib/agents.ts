@@ -502,6 +502,8 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
   // ~/.grok/hooks/ (+ project .grok/hooks/) — events PreToolUse, PostToolUse, etc.
   // Plugins live in ~/.grok/plugins/ with marketplaces. Permissions: --allow/--deny
   // CLI flags or [permission] TOML block in ~/.grok/config.toml.
+  // Workflows (native Rhai orchestration) enabled by default as of v0.2.111 —
+  // projected into ~/.grok/workflows/<name>.rhai (under GROK_HOME isolation).
   grok: {
     id: 'grok',
     name: 'Grok',
@@ -529,7 +531,9 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       plugins: true,
       subagents: true, // ~/.grok/agents/*.md (Claude-compatible agent defs)
       rules: { file: 'AGENTS.md' },
-      workflows: false,
+      // Native workflows (`.rhai` under ~/.grok/workflows/) shipped on-by-default
+      // in v0.2.111 (2026-07-22). See transformWorkflowForGrok in workflows.ts.
+      workflows: { since: '0.2.111' },
       memory: true,
       modes: ['plan', 'edit', 'skip'],
       // grok's `--permission-mode plan` silently stalls a headless `-p` run at
