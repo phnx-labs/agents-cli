@@ -1268,7 +1268,7 @@ async function runHooks(hooks, payload, $) {
         : hook.command
       const process = Bun.spawn([command], {
         stdin: new Response(input),
-        stdout: "pipe",
+        stdout: "ignore",
         stderr: "pipe",
       })
       const timer = setTimeout(() => process.kill(), hook.timeout * 1000)
