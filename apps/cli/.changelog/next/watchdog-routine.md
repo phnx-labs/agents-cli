@@ -8,5 +8,7 @@
   `agents routines list`. `disable` pauses that routine; `status` reports whether it is
   enabled. The Swift menu-bar toggle and `watchdog status --json` are unchanged. Bare
   `agents watchdog` (dry) and `agents watchdog --watch` (now dry unless `--nudge`) still work
-  for ad-hoc runs. Source: `apps/cli/src/lib/watchdog/routine.ts`,
-  `apps/cli/src/commands/watchdog.ts`.
+  for ad-hoc runs. If you had already opted in under the old build, a one-shot migration
+  folds that state forward — you stay enabled, now as the routine. Source:
+  `apps/cli/src/lib/watchdog/routine.ts`, `apps/cli/src/commands/watchdog.ts`,
+  `apps/cli/src/lib/migrate.ts`.
