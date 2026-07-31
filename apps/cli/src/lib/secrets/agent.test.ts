@@ -249,6 +249,12 @@ describe.skipIf(process.platform !== 'darwin')('agentEvictSync (real socket roun
         await new Promise((r) => setTimeout(r, 25));
       }
       await runAgentLockSync('prod');
+      // An empty name must NOT reach the wire: the broker reads a nameless lock
+      // as lock-ALL. Asserted here rather than against a makeConnectionHandler
+      // server, because that server's auth gate rejects before the handler runs
+      // — so "the handler saw nothing" would hold even with the guard deleted.
+      // This broker records the raw line, so absence is real evidence.
+      await runAgentLockSync('');
       const received = fs.readFileSync(out, 'utf-8').trim().split('\n').map((l) => JSON.parse(l) as Request);
       expect(received).toEqual([{ cmd: 'lock', name: 'prod' }]);
     } finally {
@@ -614,9 +620,12 @@ describe('isRequestAuthorized (RUSH-1760: authorization gate)', () => {
  * old code still "worked" (returned null) and no test noticed.
  */
 describe('sync broker clients launch correctly on both install shapes', () => {
-  // These MUST be the tokens production actually spawns (agent.ts syncClient
-  // call sites). syncClientLaunch passes `sub` through, so feeding this list
-  // anything else makes the assertions tautological and the guard worthless.
+  // getCliLaunch appends `sub` verbatim, so the `args.slice(-sub.length)` check
+  // below holds for ANY input — it is not a token guard, and nothing here would
+  // fail if production spawned different tokens. That job belongs to the shared
+  // sync-commands.ts bindings (drift is a type error) and to the seam test.
+  // What these DO pin is the part that actually broke: no '-e', and never a
+  // $bunfs path as command or argv, on either install shape.
   const subs = [
     [SYNC_GET_CMD, 'prod'],
     [SYNC_PING_CMD],
@@ -680,7 +689,7 @@ describe('lastLine', () => {
  * Spawns `bun src/index.ts` so it needs no build step, matching the pattern
  * vault.test.ts already uses for __vault-age-helper.
  */
-describe.skipIf(process.platform !== 'darwin')('__secrets-* entrypoint seam', () => {
+(process.platform === 'win32' ? describe.skip : describe)('__secrets-* entrypoint seam', () => {
   function runCli(args: string[], dir: string): Promise<{ code: number | null; stdout: string }> {
     return new Promise((resolve) => {
       const child = spawn('bun', ['src/index.ts', ...args], {
@@ -747,11 +756,11 @@ describe.skipIf(process.platform !== 'darwin')('__secrets-* entrypoint seam', ()
  */
 describe('index.ts intercepts __secrets-* before the startup statements', () => {
   it('places the intercept above checkForUpdates() and spawnDetachedSync()', () => {
-    const src = fs.readFileSync('src/index.ts', 'utf-8');
+    const src = fs.readFileSync(new URL('../../index.ts', import.meta.url), 'utf-8');
     // Match the STATEMENTS, not prose: the comment above the intercept names
     // both functions, so a bare indexOf would find the comment and invert the
     // comparison. Anchor on indentation + the call's trailing semicolon.
-    const intercept = src.indexOf(`  process.argv[2] === '${SYNC_GET_CMD}' ||`);
+    const intercept = src.indexOf('  process.argv[2] === SYNC_GET_CMD ||');
     const updateCheck = src.indexOf('\n  await checkForUpdates();');
     const detachedSync = src.indexOf('\n  spawnDetachedSync();');
     expect(intercept).toBeGreaterThan(-1);
@@ -762,45 +771,19 @@ describe('index.ts intercepts __secrets-* before the startup statements', () => 
   });
 });
 
-describe('index.ts dispatches on the same tokens the clients spawn', () => {
-  // The clients build argv from SYNC_*_CMD; index.ts holds the tokens as
-  // literals (importing agent.js at the top of the entrypoint would pull the
-  // secrets graph into every invocation). That's the one place the two can
-  // drift, and drift is silent: the CLI answers "unknown command", the client
-  // reads a non-zero exit as "broker down", and every read falls back to a
-  // keychain prompt -- exactly the bug this PR fixes.
-  it('contains a dispatch literal for each spawned token', () => {
-    const src = fs.readFileSync('src/index.ts', 'utf-8');
-    for (const token of [SYNC_GET_CMD, SYNC_PING_CMD, SYNC_LOCK_CMD]) {
-      expect(src).toContain(`process.argv[2] === '${token}'`);
-    }
-  });
-});
-
 describe('runAgentLockSync refuses a nameless lock', () => {
-  // The broker reads a missing name as lock-ALL, so a bare `__secrets-lock`
-  // would wipe every held bundle and re-prompt Touch ID for each. Unreachable
-  // when this was an inline node -e string; as a top-level argv token it is one
-  // typo away, and agentEvictSync only ever locks by name.
-  it('exits 3 without contacting the broker when the name is empty', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-lockguard-'));
-    const prevDir = process.env.AGENTS_SECRETS_AGENT_DIR;
-    process.env.AGENTS_SECRETS_AGENT_DIR = dir;
-    const sock = path.join(dir, 'agent.sock');
-    const seen: Request[] = [];
-    const server = net.createServer(makeConnectionHandler(
-      (req) => { seen.push(req); return handleAgentRequest(freshStore(), req); },
-      () => null,
-    ));
-    await new Promise<void>((res) => server.listen(sock, () => res()));
-    try {
-      expect(await runAgentLockSync('')).toBe(3);
-      expect(seen).toEqual([]); // never reached the wire, so nothing was wiped
-    } finally {
-      server.close();
-      if (prevDir === undefined) delete process.env.AGENTS_SECRETS_AGENT_DIR;
-      else process.env.AGENTS_SECRETS_AGENT_DIR = prevDir;
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
+  // The broker reads a missing name as lock-ALL (handleAgentRequest's
+  // `if (req.name)`), so a bare `__secrets-lock` would wipe every held bundle
+  // and re-prompt Touch ID for each. Unreachable when this was an inline
+  // node -e string; as a top-level argv token it is one typo away, and
+  // agentEvictSync only ever locks by name. index.ts defaults a missing
+  // argv[3] to '', which is exactly what this refuses.
+  //
+  // No socket here on purpose: the guard returns before any I/O, so a server
+  // would be dead weight — and with an auth gate in front of the handler, a
+  // "nothing reached the broker" assertion would hold even if the guard were
+  // deleted. The wire-level proof lives in the RECORDING_BROKER test above.
+  it('returns 3 for an empty name without contacting the broker', async () => {
+    expect(await runAgentLockSync('')).toBe(3);
   });
 });
