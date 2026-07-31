@@ -1062,12 +1062,20 @@ async function scanCodexIncremental(onProgress?: (p: ScanProgress) => void): Pro
   const changed = filterChangedFiles(filePaths);
 
   // Codex keeps human-readable titles (`thread_name`) in `session_index.jsonl`,
-  // which updates independently of the rollout files — apply them by id on every
-  // scan so a title that lands after a session was first indexed still surfaces.
+  // which updates independently of the rollout files. Stat each index against the
+  // ledger *without reading it*; only read + re-apply titles when the index (or a
+  // rollout) actually changed. On a fully unchanged scan this collapses to a
+  // couple of stat() calls instead of a full read + a `syncTopics` DB pass.
+  const titleIndex = diffCodexTitleIndexes();
+
+  if (changed.length === 0 && !titleIndex.changed) return;
+
   const titles = readCodexThreadNames();
 
   if (changed.length === 0) {
+    // No rollouts changed, but the title index did — apply the new titles.
     syncTopics(titles);
+    recordScans(titleIndex.stamps);
     return;
   }
 
@@ -1098,9 +1106,11 @@ async function scanCodexIncremental(onProgress?: (p: ScanProgress) => void): Pro
 
   upsertSessionsBatch(entries);
   recordScans(touched);
-  // Catch sessions whose rollout file was unchanged but gained a title since the
-  // last scan (the index changed, the transcript did not).
-  syncTopics(titles);
+  // Only when the title index changed can an *unchanged* rollout have gained a
+  // title since the last scan; the inline titles applied above already cover
+  // every changed session, so skip the extra sync when the index is untouched.
+  if (titleIndex.changed) syncTopics(titles);
+  recordScans(titleIndex.stamps);
 }
 
 /** Parse the lines of a Codex `session_index.jsonl` into a session id -> title map. */
@@ -1118,6 +1128,35 @@ export function parseCodexThreadNameIndex(raw: string): Map<string, string> {
     }
   }
   return titles;
+}
+
+/**
+ * Stat every Codex `session_index.jsonl` and diff it against the scan ledger
+ * *without reading it*. Returns the fresh stamps (persisted only after a
+ * successful title sync) and whether any index changed since the last scan — the
+ * signal that lets a no-op scan skip the file read + `syncTopics` entirely.
+ *
+ * The index path is a sibling of `sessions/` (never inside it), so it is never
+ * walked as a rollout and its ledger row can't collide with a transcript's.
+ */
+function diffCodexTitleIndexes(): {
+  stamps: Array<{ filePath: string; scan: ScanStamp }>;
+  changed: boolean;
+} {
+  const stamps: Array<{ filePath: string; scan: ScanStamp }> = [];
+  let changed = false;
+  for (const sessionsDir of getAgentSessionDirs('codex', 'sessions')) {
+    const indexPath = path.join(path.dirname(sessionsDir), 'session_index.jsonl');
+    const stat = safeStatSync(indexPath);
+    if (!stat) continue; // no index in this home
+    const scan: ScanStamp = { fileMtimeMs: Math.floor(stat.mtimeMs), fileSize: stat.size };
+    const prev = getScanStampByPath(indexPath);
+    if (!prev || prev.fileMtimeMs !== scan.fileMtimeMs || prev.fileSize !== scan.fileSize) {
+      changed = true;
+    }
+    stamps.push({ filePath: indexPath, scan });
+  }
+  return { stamps, changed };
 }
 
 /**
