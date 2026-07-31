@@ -75,14 +75,22 @@ One rule shapes the menu: **attention floats up, context groups down.**
 ```
 
 - **⚠ NEEDS YOU** — the triage strip, pinned on top and never nested in a project
-  group. Blocked sessions sorted by wait-time (most-stalled first, regardless of
-  repo), each showing the actual question it's waiting on (attention-sentinel
-  content) and elapsed wait (sentinel mtime). Failed / overdue routines and a
-  stopped scheduler append here. Empty when nothing needs attention.
+  group. Blocked sessions are grouped by (agent, repo): a group of 1 renders
+  inline with the actual question it's waiting on (or bare when the Notification
+  hook wrote no message); a group of 2+ collapses to one
+  `<Agent> · <repo> · N waiting · oldest <elapsed> ›` row with a submenu that
+  lists each session (oldest first). Groups themselves sort by their oldest
+  wait. Failed / overdue routines and a stopped scheduler append here. Empty
+  when nothing needs attention.
 - **New Session** — launches `agents run <agent>` in a new Terminal window.
 - **ACTIVE · \<repo\>** — live work grouped by repo. A session is *running* if
   its transcript was written in the last 2 minutes, else *idle*. Rich rows show
-  the session's title inline; the row's submenu reveals the working dir.
+  the session's title inline; the row's submenu reveals the working dir. Idle
+  rows cap at 3 per repo; if the cap hides any, a `+ N more idle ›` row exposes
+  the hidden count and opens the rest in a submenu — the header count always
+  matches what's visible + explicit hidden. The `"other"` bucket (sessions with
+  no repo — a dumping-ground group whose rows carry no per-row signal) collapses
+  to a single `ACTIVE · other · N idle ›` row + submenu when it's idle-only.
 - **ROUTINES** — kept glanceable: the next few upcoming plus any failed, timed-out,
   or overdue routine inline. Failed and timed-out routines include the latest
   failure reason when available; overdue routines are labeled `overdue` even when
@@ -122,7 +130,7 @@ The helper assembles the menu by reading these directly — no CLI, no re-index:
 | Active sessions | `agents sessions --active --local --json` (warm cache, 30s TTL) | every local session (tmux / IDE / headless) with running-vs-idle — feeds triage + ACTIVE once loaded |
 | Teams | `~/.agents/.history/teams/agents/<id>/meta.json` | running teammate agents |
 | Cloud | `~/.agents/.cache/cloud/tasks.db` (SQLite) | cloud tasks, incl. `input_required` or `needs_review` → "awaiting input" |
-| Attention sentinels | `~/.agents/.cache/state/attention/<sessionId>` | terminal sessions awaiting input — mtime = wait start, content = the awaiting message (written by the Notification hook; empty content renders "awaiting input") |
+| Attention sentinels | `~/.agents/.cache/state/attention/<sessionId>` | terminal sessions awaiting input — mtime = wait start, content = the awaiting message (written by the Notification hook). On read, sentinels whose sessionId is not in the current live-terminals set are unlinked as orphans (defense against sessions killed hard, hookless Claude versions, or sessionId mismatches). |
 | Installed agents | `~/.agents/.history/versions/<agent>/` | the agent roster |
 
 Liveness is a `kill(pid, 0)` check; running-vs-idle is the transcript file's
