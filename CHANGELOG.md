@@ -4,6 +4,21 @@
 
 ### Added
 
+- **The configured model now shows wherever an agent is displayed.** `agents view`,
+  `agents view <agent>@<version>`, `agents use`, `agents add`, `agents status`, and
+  `agents inspect` now surface the model a given agent+version is actually set to run
+  with — placed right beside the version at the same priority (no `model:` label, no
+  parentheses), forming the identity cluster `agent · version · model · account`. The
+  model is resolved with clear precedence: the agents.yaml `run.defaults`, then the
+  agent's own native `settings.json` model, then the CLI's built-in default (the
+  catalog's flagged default, or the literal `default` for agents like Claude whose
+  runtime picks its own). `agents view --json` gains a `configuredModel { model, source }`
+  field — the only surface that exposes the resolution `source`. New shared helpers
+  `resolveConfiguredModel` / `formatAgentIdentity` in `apps/cli/src/lib/models.ts` keep
+  every surface consistent. Source: `apps/cli/src/lib/models.ts`,
+  `apps/cli/src/commands/view.ts`, `apps/cli/src/commands/versions.ts`,
+  `apps/cli/src/commands/status.ts`, `apps/cli/src/commands/inspect.ts`.
+
 - **Interactive session browser: preview-by-default with clickable ticket + PR links.**
   The `agents sessions` / `--active` browser now shows the highlighted row's preview
   pane **open by default** (matching the static picker) instead of hiding it behind
