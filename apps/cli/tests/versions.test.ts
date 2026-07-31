@@ -133,7 +133,8 @@ vi.mock('../src/lib/subagents.js', () => ({
 }));
 
 vi.mock('../src/lib/hooks.js', () => ({
-  parseHookManifest: () => null,
+  parseHookManifest: () => ({}),
+  selectHookManifest: (manifest: object) => manifest,
   registerHooksToSettings: () => {},
 }));
 
