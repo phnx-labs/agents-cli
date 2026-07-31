@@ -12,8 +12,11 @@ import * as path from 'path';
 import * as os from 'os';
 import { execFileSync } from 'child_process';
 import type { AgentId } from './types.js';
-import { getVersionDir } from './versions.js';
+import chalk from 'chalk';
+import { getVersionDir, getVersionHomePath } from './versions.js';
 import { getModelsCachePath } from './state.js';
+import { agentConfigDirName } from './agents.js';
+import { resolveRunDefaults } from './run-defaults.js';
 
 /** Model identifiers per cloud provider (used by Claude's multi-cloud routing). */
 export interface ModelPerCloud {
@@ -950,6 +953,72 @@ export function resolveEffectiveModel(
   if (!catalog) return null;
   const def = catalog.models.find((m) => m.isDefault);
   return def?.id ?? null;
+}
+
+/** Where the model a given agent+version will actually run with came from. */
+export type ConfiguredModelSource = 'run-default' | 'config' | 'cli-default';
+
+export interface ConfiguredModel {
+  /** The model id the agent will run with (e.g. `opus`, `gpt-5-codex`). */
+  model: string;
+  source: ConfiguredModelSource;
+}
+
+/**
+ * The model a given agent+version is actually configured to use right now, with
+ * where that selection comes from. First hit wins:
+ *   1. run-default — the user's agents-cli `run.defaults` in agents.yaml
+ *   2. config      — the agent's OWN native settings.json `model` field
+ *   3. cli-default — the CLI's built-in default: the catalog's `isDefault` model
+ *                    if one is flagged (e.g. Kimi), otherwise the literal
+ *                    `default` for a model-capable agent whose runtime picks its
+ *                    own default (Claude/Codex don't flag one — Claude's own UI
+ *                    calls this "Default").
+ * Each layer is a real source the agent consults; `version` must be concrete.
+ * Returns null only when the agent exposes no model catalog at all.
+ */
+export function resolveConfiguredModel(agent: AgentId, version: string): ConfiguredModel | null {
+  const runModel = resolveRunDefaults(agent, version).model;
+  if (runModel && runModel.trim() !== '') return { model: runModel, source: 'run-default' };
+
+  const nativeModel = readNativeConfigModel(agent, version);
+  if (nativeModel) return { model: nativeModel, source: 'config' };
+
+  const catalog = getModelCatalog(agent, version);
+  if (catalog) {
+    const flagged = catalog.models.find((m) => m.isDefault);
+    return { model: flagged?.id ?? 'default', source: 'cli-default' };
+  }
+
+  return null;
+}
+
+/**
+ * Best-effort read of the agent's own `model` from its native settings.json
+ * (e.g. `~/.agents/.history/versions/claude/<ver>/home/.claude/settings.json`).
+ * A missing/malformed file is a fall-through, not an error.
+ */
+function readNativeConfigModel(agent: AgentId, version: string): string | null {
+  try {
+    const settingsPath = path.join(
+      getVersionHomePath(agent, version),
+      agentConfigDirName(agent),
+      'settings.json',
+    );
+    const parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf8')) as { model?: unknown };
+    return typeof parsed.model === 'string' && parsed.model.trim() !== '' ? parsed.model : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Join the identity cluster — `agent@version · model · account` — with a dim
+ * separator, dropping empty pieces. Pieces are pre-colored by the caller so the
+ * same cluster reads identically across `view`, `use`, `add`, and `status`.
+ */
+export function formatAgentIdentity(...parts: Array<string | null | undefined>): string {
+  return parts.filter((p): p is string => !!p && p.length > 0).join(` ${chalk.gray('·')} `);
 }
 
 /** Find the closest matching model ids/aliases using edit distance. */
