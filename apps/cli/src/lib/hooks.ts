@@ -1270,15 +1270,23 @@ async function runHooks(hooks, payload, $) {
     if (!shell) throw new Error(\`\${hook.name} requires bash or sh\`)
     const execArgs = [shell, "-c", 'exec "$1"', "agents-hook", command]
     if (hook.timeout !== undefined) {
-      const process = Bun.spawn(execArgs, {
+      const child = Bun.spawn(execArgs, {
         stdin: new Response(input),
         stdout: "ignore",
         stderr: "pipe",
       })
-      const timer = setTimeout(() => process.kill(), hook.timeout * 1000)
-      const exitCode = await process.exited.finally(() => clearTimeout(timer))
-      const stderr = await new Response(process.stderr).text()
-      if (exitCode === 128 + 15 || exitCode === 128 + 9) {
+      let timedOut = false
+      const timer = setTimeout(() => {
+        timedOut = true
+        if (process.platform === "win32") {
+          Bun.spawnSync(["taskkill", "/PID", String(child.pid), "/T", "/F"])
+        } else {
+          child.kill()
+        }
+      }, hook.timeout * 1000)
+      const exitCode = await child.exited.finally(() => clearTimeout(timer))
+      const stderr = await new Response(child.stderr).text()
+      if (timedOut) {
         throw new Error(\`\${hook.name} timed out after \${hook.timeout} seconds\`)
       }
       if (exitCode !== 0) {
