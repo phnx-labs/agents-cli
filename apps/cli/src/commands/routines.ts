@@ -876,8 +876,10 @@ export function registerRoutinesCommands(program: Command): void {
           });
           // A failed run must exit non-zero so cron wrappers, `&&` chains, and
           // `--json` consumers actually see the failure (a logged-out agent used
-          // to exit 0 with ok:true, hiding the whole auth-failure epidemic).
-          if (!succeeded) process.exit(1);
+          // to exit 0 with ok:true, hiding the whole auth-failure epidemic). Set
+          // exitCode rather than process.exit() so the JSON payload is fully
+          // flushed to a pipe before the process ends.
+          if (!succeeded) process.exitCode = 1;
           return;
         }
         if (succeeded) {
@@ -899,7 +901,7 @@ export function registerRoutinesCommands(program: Command): void {
           console.log(fs.readFileSync(result.reportPath, 'utf-8'));
         }
 
-        if (!succeeded) process.exit(1);
+        if (!succeeded) process.exitCode = 1;
       } catch (err) {
         if (options.json) {
           writeJson({ error: (err as Error).message });

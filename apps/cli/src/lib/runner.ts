@@ -39,7 +39,7 @@ import {
   buildExecEnv,
   detectRateLimit,
   detectAuthFailure,
-  detectAuthFailureEvent,
+  isAuthFailureFromLog,
   authFailureReason,
   type ExecOptions,
   type ExecEffort,
@@ -760,6 +760,21 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
     }
 
     if (attempt.status === 'completed') {
+      // Exit code alone is unreliable for auth: a logged-out Claude can exit 0
+      // with a `result` event carrying is_error:true (terminal_reason
+      // "completed"). Consult the SAME structural signal the detached path uses
+      // so both paths agree — raw text is deliberately NOT used here, so a
+      // genuinely-completed run that merely mentions an auth phrase stays a
+      // success (processFailed:false).
+      if (isAuthFailureFromLog(attempt.logText, effectiveAgent, { processFailed: false })) {
+        const reason = authFailureReason(attempt.logText) ?? 'authentication_failed';
+        finalizeRunMeta(meta, 'failed', attempt.exitCode ?? 1, { errorMessage: `auth_failed: ${reason}` });
+        writeRunMeta(meta);
+        timer.end({ status: 'failed', exitCode: meta.exitCode ?? undefined, runId, error: `auth_failed: ${reason}` });
+        // Never persist the login-error text as the report.
+        archiveRoutineTranscripts(meta, runDir, overlayHome);
+        return { meta, reportPath: null };
+      }
       finalizeRunMeta(meta, 'completed', 0);
       writeRunMeta(meta);
       timer.end({ status: 'completed', exitCode: 0, runId });
@@ -790,8 +805,7 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
     // auth only when NOT rate-limited. Classified so the failure is visible and,
     // critically, so the login-error text is never persisted as the report.
     const authFailed = !rateLimited && (
-      detectAuthFailureEvent(attempt.logText, effectiveAgent) ||
-      detectAuthFailure(attempt.logText) ||
+      isAuthFailureFromLog(attempt.logText, effectiveAgent, { processFailed: true }) ||
       (attempt.error ? detectAuthFailure(attempt.error) : false)
     );
 
@@ -1093,7 +1107,10 @@ export async function executeJobDetached(config: JobConfig): Promise<RunMeta> {
   child.on('exit', (code) => {
     let logText = '';
     try { logText = fs.readFileSync(stdoutPath, 'utf-8'); } catch { /* log unreadable */ }
-    if (detectAuthFailureEvent(logText, effectiveAgent) || detectAuthFailure(logText)) {
+    // processFailed gates the raw-text fallback so a COMPLETED run (exit 0) that
+    // merely mentions an auth phrase is never misclassified; the structural
+    // marker still catches an exit-0 auth failure on its own.
+    if (isAuthFailureFromLog(logText, effectiveAgent, { processFailed: (code ?? 1) !== 0 })) {
       const reason = authFailureReason(logText) ?? 'authentication_failed';
       settle('failed', code ?? 1, `auth_failed: ${reason}`);
       return;

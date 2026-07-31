@@ -1648,6 +1648,30 @@ export function authFailureReason(text: string): string | null {
   return null;
 }
 
+/**
+ * Decide whether a run's stream-json log is an authentication failure. The
+ * single source of truth for both the foreground and detached run paths.
+ *
+ * The structural marker (`detectAuthFailureEvent`, gated on `is_error:true`) is
+ * authoritative and safe on ANY exit — it catches a logged-out Claude that exits
+ * 0 (its `result` event carries `is_error:true` while `terminal_reason` is
+ * "completed"). The raw user-visible string (`detectAuthFailure`) is only
+ * consulted when the process actually FAILED, as a fallback for a run that died
+ * mid-stream before emitting a `result` event. That gate is what prevents a
+ * genuinely-completed run whose output merely *mentions* an auth phrase (e.g. a
+ * routine documenting a login flow) from being misclassified and having its
+ * legitimate report suppressed.
+ */
+export function isAuthFailureFromLog(
+  logText: string,
+  agent: AgentId,
+  opts: { processFailed: boolean },
+): boolean {
+  if (detectAuthFailureEvent(logText, agent)) return true;
+  if (opts.processFailed && detectAuthFailure(logText)) return true;
+  return false;
+}
+
 /** An agent (with optional pinned version) in a fallback chain. */
 export interface FallbackEntry {
   agent: AgentId;

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as os from 'node:os';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { shouldTapStdout, resolveInteractive, inferredInteractiveWithoutTty, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv, shouldWrapInTmux, buildTmuxAgentCommand, formatPaneTail, detectRateLimit, detectAuthFailure, detectAuthFailureEvent, authFailureReason, type TmuxWrapContext } from './exec.js';
+import { shouldTapStdout, resolveInteractive, inferredInteractiveWithoutTty, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv, shouldWrapInTmux, buildTmuxAgentCommand, formatPaneTail, detectRateLimit, detectAuthFailure, detectAuthFailureEvent, authFailureReason, isAuthFailureFromLog, type TmuxWrapContext } from './exec.js';
 import type { ExecOptions } from './exec.js';
 import { mailboxDir } from './mailbox.js';
 
@@ -82,6 +82,30 @@ describe('rate-limit vs auth precedence', () => {
   it('a logged-out log is auth true, rate-limit false', () => {
     expect(detectAuthFailureEvent(LOGGED_OUT_CLAUDE_LOG, 'claude')).toBe(true);
     expect(detectRateLimit(LOGGED_OUT_CLAUDE_LOG)).toBe(false);
+  });
+});
+
+describe('isAuthFailureFromLog — the shared foreground/detached decision', () => {
+  it('classifies a real logged-out log regardless of process exit code', () => {
+    // Structural marker is authoritative even on a clean (exit 0) process.
+    expect(isAuthFailureFromLog(LOGGED_OUT_CLAUDE_LOG, 'claude', { processFailed: false })).toBe(true);
+    expect(isAuthFailureFromLog(LOGGED_OUT_CLAUDE_LOG, 'claude', { processFailed: true })).toBe(true);
+  });
+
+  it('does NOT classify a completed run that merely mentions an auth phrase (the false-positive bug)', () => {
+    // is_error:false → structural false; and processFailed:false → raw text is
+    // not consulted. This is the exact case that used to suppress a good report.
+    expect(isAuthFailureFromLog(HEALTHY_LOG_MENTIONING_LOGIN, 'claude', { processFailed: false })).toBe(false);
+  });
+
+  it('falls back to raw text ONLY when the process actually failed (died mid-stream, no result event)', () => {
+    const midStreamDeath = '{"type":"assistant","message":{"content":[{"type":"text","text":"Failed to authenticate. API Error: 401 OAuth access token has been revoked."}]}}';
+    expect(isAuthFailureFromLog(midStreamDeath, 'claude', { processFailed: false })).toBe(false);
+    expect(isAuthFailureFromLog(midStreamDeath, 'claude', { processFailed: true })).toBe(true);
+  });
+
+  it('never classifies a rate-limit failure as auth', () => {
+    expect(isAuthFailureFromLog(RATE_LIMITED_CLAUDE_LOG, 'claude', { processFailed: true })).toBe(false);
   });
 });
 

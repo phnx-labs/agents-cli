@@ -8,10 +8,11 @@
   is `"completed"` on a logged-out run. Rate-limit still classifies first, so a 429 keeps
   triggering failover rather than being mistaken for an auth failure. Source:
   `apps/cli/src/lib/exec.ts`, `apps/cli/src/lib/runner.ts`, `apps/cli/src/lib/routines.ts`.
-- **`agents routines run` now exits non-zero on failure.** A failed run (including an auth
-  failure) returns exit code 1 and `--json { "ok": false, … }` with the reason, instead of
-  exiting 0 with `ok:true` — so cron wrappers, `&&` chains, and `--json` consumers actually
-  see the failure. Source: `apps/cli/src/commands/routines.ts`.
+- **`agents routines run` now exits non-zero when a run doesn't complete.** A run that ends
+  in `failed`, `timeout`, or an auth failure returns exit code 1 and `--json { "ok": false, … }`
+  with the reason, instead of exiting 0 with `ok:true` — so cron wrappers, `&&` chains, and
+  `--json` consumers actually see the failure. (Exit code is set via `process.exitCode` so the
+  JSON payload flushes fully to a pipe first.) Source: `apps/cli/src/commands/routines.ts`.
 - **Auth preflight before dispatch.** A routine whose (agent, version) has a cached
   `revoked` auth verdict fails fast with `auth_preflight: revoked` without spawning a
   doomed agent. Fails open on any other verdict, so a stale/absent probe or a network blip
