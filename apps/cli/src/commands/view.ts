@@ -82,6 +82,7 @@ import { getCentralRulesFileName } from '../lib/rules/rules.js';
 import { composeRulesFromState, type ComposedSubrule } from '../lib/rules/compose.js';
 import { getConfiguredRunStrategy } from '../lib/rotate.js';
 import { resolveRunDefaults } from '../lib/run-defaults.js';
+import { resolveConfiguredModel, type ConfiguredModelSource } from '../lib/models.js';
 import { listProfiles, profileSummary, type ProfileSummary } from '../lib/profiles.js';
 import { loadManifest, isStale } from '../lib/staleness/index.js';
 import { confirm } from '@inquirer/prompts';
@@ -528,6 +529,10 @@ async function showInstalledVersions(
     let maxPlanWidth = 3;
     let maxUsageWidth = 0;
     let maxStatusWidth = 0;
+    // The configured model sits right after the version, at the same priority.
+    // Resolve once here (fs + catalog reads) and reuse in the render loop.
+    let maxModelWidth = 0;
+    const modelByKey = new Map<string, string>();
     for (const agentId of versionManaged) {
       const versions = listInstalledVersions(agentId);
       const globalDefault = getGlobalDefault(agentId);
@@ -538,6 +543,11 @@ async function showInstalledVersions(
         const accountLabel = accountColumnLabel(info);
         if (accountLabel) maxEmail = Math.max(maxEmail, accountLabel.length);
         if (info?.plan) maxPlanWidth = Math.max(maxPlanWidth, info.plan.length);
+        const model = resolveConfiguredModel(agentId, v)?.model;
+        if (model) {
+          modelByKey.set(`${agentId}:${v}`, model);
+          maxModelWidth = Math.max(maxModelWidth, model.length);
+        }
       }
       // Profile rows share these columns with version rows so they line up.
       for (const profile of profilesByAgent.get(agentId) ?? []) {
@@ -609,6 +619,11 @@ async function showInstalledVersions(
 
         // Build columns, trimming trailing whitespace when columns are empty
         const parts = [`    ${label}`];
+        // Configured model — same priority as the version, right beside it.
+        if (maxModelWidth > 0) {
+          const model = modelByKey.get(`${agentId}:${version}`) ?? '';
+          parts.push(chalk.yellow(model.padEnd(maxModelWidth)));
+        }
         const hasEmail = !!vInfo?.email;
         const signedIn = !!vInfo?.signedIn;
         const usageUnavailable = agentReportsUsage(agentId) && signedIn && !usageInfo?.snapshot;
@@ -618,10 +633,10 @@ async function showInstalledVersions(
         // Otherwise it reflects install time (misleading "just now" for fresh installs).
         const activeStr = vInfo && hasEmail ? formatLastActive(vInfo.lastActive) : '';
         const hasActive = activeStr.length > 0;
+        // The model now has its own column above; keep only the run mode here.
         const runDefaults = resolveRunDefaults(agentId, version);
         const runDefaultBits: string[] = [];
         if (runDefaults.mode) runDefaultBits.push(`mode:${runDefaults.mode}`);
-        if (runDefaults.model) runDefaultBits.push(`model:${runDefaults.model}`);
 
         if (!hasEmail && !hasUsage && !signedIn) {
           // Installed but never signed in
@@ -663,10 +678,12 @@ async function showInstalledVersions(
       // No status badge, no last-active — profiles don't accumulate usage state.
       for (const profile of profilesByAgent.get(agentId) ?? []) {
         const nameCol = chalk.cyan(profile.name.padEnd(maxVerLabel));
+        // Pad the model column so profile rows line up with version rows.
+        const modelPad = maxModelWidth > 0 ? `${' '.repeat(maxModelWidth)}  ` : '';
         const authCol = chalk.gray(profile.auth.padEnd(maxEmail));
         const usageEquivalent = profileKindAndModel(profile.model, maxPlanWidth);
         const usagePad = ' '.repeat(Math.max(0, maxUsageWidth - visibleWidth(usageEquivalent)));
-        console.log(`    ${nameCol}  ${authCol}  ${chalk.gray(usageEquivalent + usagePad)}`);
+        console.log(`    ${nameCol}  ${modelPad}${authCol}  ${chalk.gray(usageEquivalent + usagePad)}`);
         if (showPaths) {
           console.log(chalk.gray(`      ${profile.path}`));
         }
@@ -1035,9 +1052,12 @@ async function showAgentResources(
     const accountLabel = accountColumnLabel(accountInfo);
     const emailStr = accountLabel ? chalk.cyan(`  ${accountLabel}`) : '';
     const status = chalk.green(version);
+    // Configured model sits right beside the version, same priority (no label).
+    const configuredModel = resolveConfiguredModel(agentId, version);
+    const modelStr = configuredModel ? chalk.yellow(`  ${configuredModel.model}`) : '';
     const usageStr = formatUsageSummary(usageInfo.snapshot?.plan ?? accountInfo.plan, null);
     const usagePart = usageStr ? `  ${usageStr}` : '';
-    console.log(`  ${colorAgent(agentId)(AGENTS[agentId].name.padEnd(14))} ${status}${emailStr}${usagePart}`);
+    console.log(`  ${colorAgent(agentId)(AGENTS[agentId].name.padEnd(14))} ${status}${modelStr}${emailStr}${usagePart}`);
 
     const usageLines = formatUsageSection(usageInfo);
     if (usageLines.length > 0) {
@@ -1203,6 +1223,10 @@ export interface ViewJsonVersion {
   }>;
   lastActive: string | null;
   path: string;
+  // The model this version is actually configured to run with, and where that
+  // selection comes from. Optional for backward compatibility with older
+  // consumers; null when the agent has no resolvable model.
+  configuredModel?: { model: string; source: ConfiguredModelSource } | null;
   /** Present only when --resources / --detailed (or --json with a section
    *  flag) is passed: this version's resource inventory with git sync-state. */
   resources?: VersionResourcesJson;
@@ -1471,6 +1495,7 @@ async function collectAgentsJson(filterAgentId?: AgentId, resourceSections?: Set
         : [],
       lastActive: info.lastActive ? info.lastActive.toISOString() : null,
       path: getVersionDir(agentId, version),
+      configuredModel: resolveConfiguredModel(agentId, version),
     };
 
     if (wantResources && resourceSync) {
