@@ -278,10 +278,18 @@ describe('capableAgents()', () => {
     expect(agents).toContain('hermes');
   });
 
-  it('excludes opencode/amp for hooks', () => {
+  it('includes OpenCode hooks through its plugin API and excludes amp', () => {
     const agents = capableAgents('hooks');
-    expect(agents).not.toContain('opencode');
+    expect(agents).toContain('opencode');
     expect(agents).not.toContain('amp');
+  });
+});
+
+describe('opencode hooks version gate', () => {
+  it('gates versions below 0.3.130 and passes the plugin-shell release', () => {
+    expect(supports('opencode', 'hooks', '0.3.129').ok).toBe(false);
+    expect(supports('opencode', 'hooks', '0.3.130')).toEqual({ ok: true });
+    expect(supports('opencode', 'hooks', '1.18.4')).toEqual({ ok: true });
   });
 });
 

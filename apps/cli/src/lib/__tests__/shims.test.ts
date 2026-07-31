@@ -97,7 +97,7 @@ describe('addShimsToPath', () => {
 
 describe('SHIM_SCHEMA_VERSION', () => {
   it('is 26 (grok resolves from the versioned home before global ~/.grok/downloads)', () => {
-    expect(SHIM_SCHEMA_VERSION).toBe(26);
+    expect(SHIM_SCHEMA_VERSION).toBe(27);
   });
 });
 
@@ -181,6 +181,17 @@ describe('generateVersionedAliasScript', () => {
   it('resolves npm-packaged agents from node_modules/.bin', () => {
     const script = generateVersionedAliasScript('codex', '0.125.0');
     expect(script).toContain('node_modules/.bin/codex');
+  });
+
+  it('points OpenCode at its versioned plugin/config directory', () => {
+    const alias = generateVersionedAliasScript('opencode', '1.18.4');
+    const shim = generateShimScript('opencode');
+    expect(alias).toContain(
+      'export OPENCODE_CONFIG_DIR="$HOME/.agents/.history/versions/opencode/1.18.4/home/.config/opencode"'
+    );
+    expect(shim).toContain(
+      'export OPENCODE_CONFIG_DIR="$VERSION_DIR/home/.config/opencode"'
+    );
   });
 
   it('resolves droid from ~/.local/bin/droid, not node_modules', () => {

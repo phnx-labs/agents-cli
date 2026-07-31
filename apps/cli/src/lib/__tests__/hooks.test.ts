@@ -483,7 +483,7 @@ describe('CODEX_HOOKS_MIN_VERSION constant', () => {
   });
 });
 
-describe('registerHooksToSettings - returns empty for unsupported agents', () => {
+describe('registerHooksToSettings - OpenCode', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hooks-test-'));
     agentsDir = path.join(tmpDir, '.agents');
@@ -494,13 +494,60 @@ describe('registerHooksToSettings - returns empty for unsupported agents', () =>
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('returns no-op for agents other than claude/codex/gemini/antigravity', () => {
+  it('generates a plugin that maps canonical events and executes scripts through Bun shell', () => {
+    makeScript('lifecycle.sh');
     const manifest: Record<string, ManifestHook> = {
-      'on-prompt': { script: 'on-prompt.sh', events: ['UserPromptSubmit'] },
+      lifecycle: {
+        script: 'lifecycle.sh',
+        events: ['PreToolUse', 'PostToolUse', 'SessionStart', 'Stop'],
+        matcher: 'Bash|bash',
+      },
+    };
+    const versionHome = path.join(tmpDir, 'home');
+    const result = registerHooksToSettings('opencode', versionHome, manifest, agentsDir);
+    expect(result.errors).toHaveLength(0);
+    expect(result.registered).toEqual([
+      'lifecycle -> tool.execute.before',
+      'lifecycle -> tool.execute.after',
+      'lifecycle -> session.created',
+      'lifecycle -> session.idle',
+      'lifecycle -> session.error',
+    ]);
+
+    const pluginPath = path.join(
+      versionHome, '.config', 'opencode', 'plugins', 'agents-cli-hooks.ts'
+    );
+    const plugin = fs.readFileSync(pluginPath, 'utf-8');
+    expect(plugin).toContain('export const AgentsCliHooks = async ({ $ })');
+    expect(plugin).toContain('"tool.execute.before": async (input, output)');
+    expect(plugin).toContain('"tool.execute.after": async (input, output)');
+    expect(plugin).toContain('"session.created"');
+    expect(plugin).toContain('"session.idle"');
+    expect(plugin).toContain('"session.error"');
+    expect(plugin).toContain('const input = new Response(JSON.stringify(payload))');
+    expect(plugin).toContain('await $`${hook.command} < ${input}`.nothrow().quiet()');
+    expect(plugin).toContain('"matcher": "Bash|bash"');
+  });
+
+  it('reports missing scripts without registering an event', () => {
+    const manifest: Record<string, ManifestHook> = {
+      missing: { script: 'missing.sh', events: ['SessionStart'] },
     };
     const result = registerHooksToSettings('opencode', path.join(tmpDir, 'home'), manifest, agentsDir);
-    expect(result.registered).toHaveLength(0);
-    expect(result.errors).toHaveLength(0);
+    expect(result.registered).toEqual([]);
+    expect(result.errors).toEqual(['missing: script not found']);
+  });
+});
+
+describe('registerHooksToSettings - Grok', () => {
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hooks-test-'));
+    agentsDir = path.join(tmpDir, '.agents');
+    fs.mkdirSync(path.join(agentsDir, 'hooks'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
   it('writes grok hook JSON files for PreToolUse events', () => {

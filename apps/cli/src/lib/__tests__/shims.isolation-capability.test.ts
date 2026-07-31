@@ -17,6 +17,7 @@ const CONFIG_ENV_BY_AGENT: Record<(typeof CONFIG_ENV_ISOLATED_AGENTS)[number], s
   copilot: 'COPILOT_HOME',
   grok: 'GROK_HOME',
   kimi: 'KIMI_CODE_HOME',
+  opencode: 'OPENCODE_CONFIG_DIR',
 };
 const ALL_CONFIG_ENVS = Object.values(CONFIG_ENV_BY_AGENT);
 
