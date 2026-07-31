@@ -699,6 +699,11 @@ describe('lastLine', () => {
       let stdout = '';
       child.stdout.setEncoding('utf-8');
       child.stdout.on('data', (d: string) => { stdout += d; });
+      // Without this, a spawn failure (bun missing from PATH) emits an
+      // unhandled 'error' that kills the vitest worker instead of failing the
+      // assertion. This suite runs on the required Linux check, so a confusing
+      // worker crash there would be far worse than a clean red.
+      child.on('error', () => resolve({ code: -1, stdout }));
       child.on('close', (code) => resolve({ code, stdout }));
     });
   }
