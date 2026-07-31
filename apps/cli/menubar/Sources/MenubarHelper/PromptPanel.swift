@@ -521,8 +521,10 @@ enum Notifier {
     private static let delegate = NotifierDelegate()
     private static var wired = false
 
-    // `url`, when present, is opened on click (the created ticket).
-    static func post(title: String, body: String, url: String? = nil) {
+    // `url`, when present, is opened on click (the created ticket). `image`
+    // is shown as the notification icon so the banner carries the agents-cli
+    // branding even when the bundle icon lookup is slow.
+    static func post(title: String, body: String, url: String? = nil, image: NSImage? = nil) {
         if !wired {
             NSUserNotificationCenter.default.delegate = delegate
             wired = true
@@ -535,6 +537,15 @@ enum Notifier {
             note.hasActionButton = true
             note.actionButtonTitle = "Open"
         }
+        if let image {
+            note.contentImage = image
+        }
         NSUserNotificationCenter.default.deliver(note)
+    }
+
+    // Load the bundled app icon as an NSImage, if one exists.
+    private static func appIconImage() -> NSImage? {
+        guard let iconPath = Bundle.main.path(forResource: "AppIcon", ofType: "icns") else { return nil }
+        return NSImage(contentsOfFile: iconPath)
     }
 }
