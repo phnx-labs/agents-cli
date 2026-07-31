@@ -30,11 +30,13 @@ import {
   removeDevice,
   removeIgnored,
   upsertDevice,
+  writeReachability,
   type DeviceAuthMethod,
   type DevicePlatform,
   type DeviceProfile,
   type DeviceRegistry,
 } from '../lib/devices/registry.js';
+import { collectReachabilityWriteBacks, deviceOnlineState } from '../lib/devices/reachability.js';
 import { addControlToken } from '../lib/serve/token.js';
 import { DEFAULT_SERVE_PORT } from '../lib/serve/server.js';
 import {
@@ -106,14 +108,18 @@ import { runFleetLogin, type LoginStatus } from '../lib/fleet/remote-login.js';
 
 /** One-line summary of a device for `list`. `isSelf` marks the machine this
  * command is running on so it stands out from the rest of the tailnet. */
-function deviceSummary(d: DeviceProfile, isSelf = false): string {
+function deviceSummary(d: DeviceProfile, isSelf = false, stats?: DeviceStats): string {
   const addr = hostNameFor(d) ?? chalk.gray('no address');
-  const online = d.tailscale
-    ? d.tailscale.online
+  // Prefer a fresh live verdict (this run's probe, else the written-back
+  // reachability) over the stale tailscale.online snapshot (RUSH-1965).
+  const state = deviceOnlineState(d, stats);
+  const online =
+    state === 'online'
       ? chalk.green('online')
-      : chalk.gray('offline')
-    : chalk.gray('unknown');
-  const reach = d.tailscale?.online && !d.tailscale.direct ? chalk.yellow(' (relayed)') : '';
+      : state === 'offline'
+        ? chalk.gray('offline')
+        : chalk.gray('unknown');
+  const reach = state === 'online' && d.tailscale && !d.tailscale.direct ? chalk.yellow(' (relayed)') : '';
   const marker = isSelf ? chalk.cyan('▸ ') : '  ';
   const name = isSelf ? chalk.bold.cyan(d.name.padEnd(16)) : chalk.bold(d.name.padEnd(16));
   const here = isSelf ? chalk.cyan('  ← this machine') : '';
@@ -173,8 +179,11 @@ function renderDeviceTable(
     const marker = isSelf ? chalk.cyan('▸ ') : '  ';
     const label = isSelf ? chalk.bold.cyan(name.padEnd(16)) : chalk.bold(name.padEnd(16));
     const plat = String(d.platform).padEnd(8);
-    const offline = d.tailscale && !d.tailscale.online;
     const stats = statsMap.get(name);
+    // Prefer this run's live probe, then the written-back verdict, over the
+    // stale tailscale.online snapshot — so a reachable box never renders
+    // "offline" while its live load/mem sit one column over (RUSH-1965).
+    const offline = deviceOnlineState(d, stats) === 'offline';
     if (offline) {
       lines.push(`${marker}${label}${plat} ${chalk.gray('offline')}`);
       continue;
@@ -450,6 +459,11 @@ async function runFleetStatus(opts: { json?: boolean; strict?: boolean; stats?: 
   const statsMap = opts.stats === false
     ? new Map<string, DeviceStats>()
     : (await loadFleetStats(probeable, { forceRefresh, selfName: self })).stats;
+
+  // Persist the live probe's reachability verdict so the online/offline word is
+  // read from a fresh probe, not a stale tailscale snapshot (RUSH-1965).
+  // Best-effort: a registry write must never break the status render.
+  await writeReachability(collectReachabilityWriteBacks(reg, statsMap)).catch(() => {});
 
   const rows: FleetHealthRow[] = [localHealthRow(self, statsMap.get(self))];
   const remoteTargets: FleetStatusTarget[] = remoteFleetTargets(planned, self)
@@ -840,6 +854,9 @@ Typical workflow:
       } finally {
         spinner?.stop();
       }
+      // Write the live verdict back so this and every other consumer read one
+      // reachability truth instead of the stale tailscale snapshot (RUSH-1965).
+      if (statsMap) await writeReachability(collectReachabilityWriteBacks(reg, statsMap)).catch(() => {});
     }
 
     console.log(chalk.bold(`Devices (${names.length})`));
