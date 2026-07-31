@@ -351,7 +351,7 @@ describe('version resource sync path handling', () => {
     expect(skill).toContain('Recap the conversation so far.');
   });
 
-  it('keeps grok command-generated skills authoritative over marker-bearing source skills', async () => {
+  it('syncs grok commands and skills to separate native paths', async () => {
     const home = makeTempHome();
     const commandPath = path.join(home, '.agents', 'commands', 'debug.md');
     const sourceSkillPath = path.join(home, '.agents', 'skills', 'debug', 'SKILL.md');
@@ -367,7 +367,7 @@ describe('version resource sync path handling', () => {
     );
     fs.writeFileSync(
       sourceSkillPath,
-      ['---', 'name: "debug"', 'description: "old generated command"', 'agents_command: "debug"', '---', '', 'old source skill body'].join('\n'),
+      ['---', 'name: "debug"', 'description: "debug skill"', '---', '', 'skill body'].join('\n'),
       'utf-8'
     );
     fs.writeFileSync(binaryPath, '#!/bin/sh\nexit 0\n', 'utf-8');
@@ -378,12 +378,14 @@ describe('version resource sync path handling', () => {
       "syncResourcesToVersion('grok', '0.2.33', { commands: ['debug'], skills: ['debug'] }, { cwd: home })"
     ) as { commands: boolean; skills: boolean };
 
+    const syncedCommandPath = path.join(home, '.agents', '.history', 'versions', 'grok', '0.2.33', 'home', '.agents', 'commands', 'debug.md');
     const syncedSkillPath = path.join(home, '.agents', '.history', 'versions', 'grok', '0.2.33', 'home', '.grok', 'skills', 'debug', 'SKILL.md');
-    const syncedSkill = fs.readFileSync(syncedSkillPath, 'utf-8');
     expect(result.commands).toBe(true);
-    expect(result.skills).toBe(false);
-    expect(syncedSkill).toContain('fresh command body');
-    expect(syncedSkill).not.toContain('old source skill body');
+    expect(result.skills).toBe(true);
+    expect(fs.existsSync(syncedCommandPath)).toBe(true);
+    expect(fs.readFileSync(syncedCommandPath, 'utf-8')).toContain('fresh command body');
+    expect(fs.existsSync(syncedSkillPath)).toBe(true);
+    expect(fs.readFileSync(syncedSkillPath, 'utf-8')).toContain('skill body');
     expect(fs.existsSync(binaryPath)).toBe(true);
   });
 

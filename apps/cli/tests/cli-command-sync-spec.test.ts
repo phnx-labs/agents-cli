@@ -269,7 +269,7 @@ describe('CLI command sync: sync-pipeline invariants', () => {
     expect(supports('copilot', 'commands', '1.0.56').ok).toBe(false);
   });
 
-  it('grok uses commands-as-skills (per docs: skills format, no commands/ dir)', () => {
-    expect(shouldInstallCommandAsSkill('grok', '0.2.32')).toBe(true);
+  it('grok uses native command files (per docs: ~/.agents/commands/)', () => {
+    expect(shouldInstallCommandAsSkill('grok', '0.2.111')).toBe(false);
   });
 });

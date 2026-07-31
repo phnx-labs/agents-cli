@@ -265,6 +265,29 @@ describe('ForgeCode native command install', () => {
   });
 });
 
+describe('Grok native command install', () => {
+  it('installs a native .md command to ~/.agents/commands/ (not command-as-skill)', () => {
+    const home = makeTempHome();
+    // grok: format=markdown, commands: true, commandsSubdir='../.agents/commands' => native .md,
+    // NOT the command-as-skill path (which fires only when commands is unsupported).
+    writeSystemCommand(home, 'my-cmd', '---\ndescription: Test command\n---\nDo something.');
+    scaffoldInstalledVersion(home, 'grok', '0.2.111');
+
+    const installed = runCommandsExpression(home, "installCommandToVersion('grok', '0.2.111', 'my-cmd', 'copy')") as { success: boolean };
+    expect(installed.success).toBe(true);
+
+    // Native command file lands under the version home's .agents/commands/ because
+    // Grok discovers file-based slash commands from the cross-agent ~/.agents/commands/ dir.
+    const commandsDir = path.join(versionHomePath(home, 'grok', '0.2.111'), '.agents', 'commands');
+    expect(fs.existsSync(path.join(commandsDir, 'my-cmd.md'))).toBe(true);
+    // It must be a plain command file, not a SKILL.md wrapper.
+    expect(fs.existsSync(path.join(versionHomePath(home, 'grok', '0.2.111'), '.grok', 'skills', 'my-cmd', 'SKILL.md'))).toBe(false);
+
+    const listed = runCommandsExpression(home, "listCommandsInVersionHome('grok', '0.2.111')") as string[];
+    expect(listed).toEqual(['my-cmd']);
+  });
+});
+
 describe('Goose recipe command install (end-to-end via installCommandToVersion)', () => {
   it('installs a command as a Goose recipe YAML + config.yaml slash_commands entry', () => {
     const home = makeTempHome();

@@ -59,10 +59,12 @@ describe('staleness/registry', () => {
     expect(DETECTORS.rules.grok).toBeDefined();
   });
 
-  it('grok has a commands writer for commands-as-skills', () => {
-    // grok.capabilities.commands === false, but the commands writer is
-    // registered because it ALSO handles commands-as-skills via the
-    // shouldInstallCommandAsSkill path.
+  it('grok has a commands writer for native command files', () => {
+    // grok.capabilities.commands === true and commandsSubdir points at the
+    // cross-agent ~/.agents/commands/ dir, so the writer/detector register for
+    // native command files, not the commands-as-skills fallback.
+    expect(AGENTS.grok.capabilities.commands).toBe(true);
+    expect(AGENTS.grok.commandsSubdir).toBe(path.join('..', '.agents', 'commands'));
     expect(WRITERS.commands.grok).toBeDefined();
     expect(DETECTORS.commands.grok).toBeDefined();
   });

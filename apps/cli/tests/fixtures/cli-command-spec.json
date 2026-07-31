@@ -229,14 +229,20 @@
   "grok": {
     "supported": true,
     "docs": {
-      "url_codersera": "https://codersera.com/blog/xai-grok-build-skills-connectors-guide-2026/",
-      "url_aimadetools": "https://www.aimadetools.com/blog/grok-build-skills-plugins-guide/",
-      "url_xai": "https://x.ai/news/grok-build-cli",
+      "url_xai": "https://docs.x.ai/build/features/skills-plugins-marketplaces",
       "quote_compat": "Grok is fully compatible with Claude Code with zero configuration needed.",
-      "quote_format": "Most Skills written for Claude Code — a SKILL.md with YAML frontmatter and a markdown body — load into Grok with no edits.",
-      "_confidence": "MODERATE — xai docs at x.ai/docs do not have a public skills page; quotes are from secondary sources citing official docs."
+      "quote_commands": "discovers user-level skills and commands from: ~/.agents/skills/ ~/.agents/commands/",
+      "quote_skills": "Most Skills written for Claude Code — a SKILL.md with YAML frontmatter and a markdown body — load into Grok with no edits.",
+      "_confidence": "HIGH — command-discovery path quoted verbatim from docs.x.ai; skills format from secondary sources citing official docs."
     },
     "formats": [
+      {
+        "kind": "markdown-flat",
+        "path_template": "{HOME}/.agents/commands/{name}.md",
+        "_critical_note": "Grok reads the cross-agent ~/.agents/commands/ dir directly. agents-cli writes there so per-agent installs and the central repo stay in sync.",
+        "frontmatter": { "required": [], "recommended": ["description"], "allowed": ["name","description"] },
+        "name_from": "filename"
+      },
       {
         "kind": "skill-dir",
         "path_template": "{HOME}/.grok/skills/{name}/SKILL.md",
@@ -244,8 +250,7 @@
         "frontmatter": { "required": ["name","description"], "optional": ["disable-model-invocation"] },
         "name_from": "dirname"
       }
-    ],
-    "registry_divergence": "agents-cli writes an `agents_command:` marker key to the skill frontmatter. This key is NOT documented by xAI Grok — Grok uses the standard Anthropic skills format. The marker is a no-op (harmless) but the test should assert that name + description are present, and SHOULD NOT require agents_command:."
+    ]
   },
 
   "goose": {
