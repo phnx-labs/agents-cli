@@ -1,9 +1,17 @@
 import Foundation
 
+struct TicketDraft: Codable {
+    let title: String
+    let description: String
+    let priority: String
+    let project: String
+    let label: String
+    let delegate: String?
+}
+
 struct TicketCompletion {
     let id: String
     let url: String?
-    let attachmentArgs: [String]?
 }
 
 // Thin bridge to the `agents` CLI. The helper never owns state or reimplements
@@ -218,26 +226,20 @@ enum AgentsCLI {
 
     // The standing brief handed to the ticket agent. It embeds the user's note
     // and every selected screenshot path as user-provided ticket material so the
-    // issue body can describe what the user selected. The menu-bar helper owns
-    // the upload after creation; this prompt must not rely on the agent to
-    // remember a second attachment command. Project detection + investigation
-    // remain agent-owned (Swift pre-computes nothing).
-    // `linear create` takes a POSITIONAL title, no --json, and prints `Created
-    // RUSH-###: <title>` — parsed back in the termination handler.
+    // agent can inspect them. The menu-bar helper owns the actual `linear create`
+    // invocation and appends `--image <path>` argv deterministically, so the agent
+    // must NOT run `linear create` itself and must NOT put screenshot paths in the
+    // description. Project detection + investigation remain agent-owned (Swift
+    // pre-computes nothing).
     static func ticketAgentPrompt(note: String, screenshotPaths: [String]) -> String {
-        let linear = linearSkillBinary()
         let shots: String
-        let attachmentStep: String
         if screenshotPaths.isEmpty {
             shots = "No screenshots were attached; work from the note alone."
-            attachmentStep = "6. No user-provided files were attached; skip attachment handling."
         } else if screenshotPaths.count == 1 {
             shots = "The user attached this screenshot for the ticket: \(screenshotPaths[0]) — read it first with your image tools."
-            attachmentStep = ticketAttachmentStep()
         } else {
             let list = screenshotPaths.map { "  - \($0)" }.joined(separator: "\n")
             shots = "The user attached \(screenshotPaths.count) screenshots for the ticket — read each with your image tools:\n\(list)"
-            attachmentStep = ticketAttachmentStep()
         }
         return """
         You are filing exactly ONE Linear ticket from a quick capture bar. Do not ask \
@@ -260,31 +262,23 @@ enum AgentsCLI {
            - Run `agents sessions --active` and cross-check the roster against actually active local sessions.
            - Pick the agent whose recent work and strengths best fit the ticket content. Use your own judgment; do not ask the user.
            - If no agent clearly fits better than the others, default to `claude`.
-           - If delegate resolution fails or produces no available candidate, omit the `--delegate` flag from the next step instead of failing.
-        5. File the ticket, piping a proper multi-line description via stdin:
+           - If delegate resolution fails or produces no available candidate, set delegate to null.
+        5. Return ONLY a JSON object with exactly these keys:
 
-           printf '%s' "<your markdown description>" | \\
-             \(linear) create "<crisp imperative title>" \\
-               --priority <urgent|high|medium|low> \\
-               --project "<Linear project name matching the repo>" \\
-               --label "repo:<repo-name>" \\
-               --delegate <agent> \\
-               --description-file -
+           {
+             "title": "<crisp imperative title>",
+             "description": "<your markdown description; do NOT mention the screenshot paths here>",
+             "priority": "<urgent|high|medium|low>",
+             "project": "<Linear project name matching the repo>",
+             "label": "repo:<repo-name>",
+             "delegate": "<agent>" | null
+           }
 
            Pick an HONEST priority. Keep the title short and specific.
-           Omit `--delegate <agent>` entirely if delegate resolution in step 4 failed or produced no candidate.
-        \(attachmentStep)
-        7. Print the resulting `Created RUSH-###: <title>` line, then on the NEXT line print
-        the ticket's Linear URL as `URL: https://linear.app/…` (the `linear create` output or
-        `\(linear) tasks <id>` gives it). Nothing else — no commentary.
-        """
-    }
+           Do NOT run `linear create` and do NOT run any upload command. The menu-bar helper \
+           creates the ticket and uploads every selected screenshot deterministically via `--image`.
 
-    private static func ticketAttachmentStep() -> String {
-        return """
-        6. Include what the attached screenshot(s) show in the issue description. Do not run a \
-        separate upload command: after you print the created ticket id, the menu-bar helper \
-        uploads every selected file to that issue automatically.
+        Print nothing before or after the JSON object.
         """
     }
 
@@ -317,38 +311,64 @@ enum AgentsCLI {
         """
     }
 
+    // Build the deterministic `linear create` argv for a parsed ticket draft,
+    // appending every selected screenshot as `--image <path>` so paths pass
+    // through Swift argv (safe for spaces/`@` in CleanShot filenames).
+    static func ticketCreateArgs(draft: TicketDraft, screenshotPaths: [String]) -> [String] {
+        var args = [linearSkillBinary(), "create", draft.title,
+                    "--priority", draft.priority,
+                    "--project", draft.project,
+                    "--label", draft.label,
+                    "--description-file", "-"]
+        if let delegate = draft.delegate, !delegate.isEmpty {
+            args.append("--delegate")
+            args.append(delegate)
+        }
+        for path in screenshotPaths {
+            args.append("--image")
+            args.append(path)
+        }
+        return args
+    }
+
     // Dispatch the ticket agent for a captured note (+ optional screenshot). This
     // is the SINGLE isolation point: swapping to a cloud pod later (uploading the
     // screenshot, serializing session context) changes only this function. The
-    // agent runs headless in `auto` mode so it may read files, run `agents
-    // sessions`, investigate, and call `linear create` — but genuinely
-    // destructive ops still gate. It runs as a MONITORED async process (not fully
-    // detached) so its `Created RUSH-###` line drives a real completion
-    // notification without blocking the panel/UI.
+    // agent runs headless in `auto` mode to investigate and return ticket fields
+    // as JSON; the helper itself runs `linear create --image ...` so screenshot
+    // paths never pass through an LLM shell string. It runs as a MONITORED async
+    // process (not fully detached) so completion drives a real notification
+    // without blocking the panel/UI.
     static func dispatchTicketAgent(note: String, screenshotPaths: [String], agent: String? = nil) {
         let prompt = ticketAgentPrompt(note: note, screenshotPaths: screenshotPaths)
         let agent = agent ?? env["AGENTS_ISSUE_AGENT"] ?? "claude"
         Notifier.post(title: "Filing ticket…", body: shortenForNotice(note))
         runMonitored(argv(["run", agent, prompt, "--mode", "auto"])) { output, ok in
-            guard ok, let completion = ticketCompletion(output: output, screenshotPaths: screenshotPaths) else {
+            guard ok, let draft = parseTicketDraft(output) else {
                 Notifier.post(title: "Ticket agent finished",
-                              body: ok ? "Could not confirm a ticket was created."
+                              body: ok ? "Could not parse ticket draft from agent output."
                                        : "The ticket agent exited with an error.")
                 return
             }
-            let finish: (Bool) -> Void = { attached in
+            let args = ticketCreateArgs(draft: draft, screenshotPaths: screenshotPaths)
+            guard let descriptionData = draft.description.data(using: .utf8) else {
+                Notifier.post(title: "Ticket agent finished", body: "Could not encode description.")
+                return
+            }
+            Notifier.post(title: "Creating ticket…", body: shortenForNotice(note))
+            runMonitoredWithInput(args, input: descriptionData) { createOutput, createOk in
+                guard createOk, let completion = ticketCompletion(output: createOutput) else {
+                    Notifier.post(title: "Ticket creation failed",
+                                  body: createOk ? "Could not confirm a ticket was created."
+                                               : "linear create exited with an error.")
+                    return
+                }
                 // Persist to the ledger so the menu bar's RECENT TICKETS section can
                 // surface it beyond the transient notification.
                 RecentTickets.record(id: completion.id, title: note, url: completion.url,
                                      createdAt: ISO8601DateFormatter().string(from: Date()))
                 // Attach the ticket URL so the notification is clickable → opens it.
-                let body = attached ? shortenForNotice(note) : "Created ticket, but screenshot upload failed."
-                Notifier.post(title: "Created \(completion.id)", body: body, url: completion.url)
-            }
-            if let attachmentArgs = completion.attachmentArgs {
-                runMonitored(attachmentArgs) { _, attached in finish(attached) }
-            } else {
-                finish(true)
+                Notifier.post(title: "Created \(completion.id)", body: shortenForNotice(note), url: completion.url)
             }
         }
     }
@@ -394,22 +414,19 @@ enum AgentsCLI {
         return nil
     }
 
-    static func ticketCompletion(output: String, screenshotPaths: [String]) -> TicketCompletion? {
-        guard let id = parseCreatedTicketID(output) else { return nil }
-        return TicketCompletion(id: id,
-                                url: parseTicketURL(output),
-                                attachmentArgs: ticketProofUpdateArgs(ticketID: id,
-                                                                       screenshotPaths: screenshotPaths))
+    // Extract the ticket draft JSON the agent was asked to emit. Tolerates
+    // surrounding chatter by taking the outermost JSON object.
+    static func parseTicketDraft(_ output: String) -> TicketDraft? {
+        guard let start = output.firstIndex(of: "{"),
+              let end = output.lastIndex(of: "}") else { return nil }
+        let json = String(output[start...end])
+        guard let data = json.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(TicketDraft.self, from: data)
     }
 
-    static func ticketProofUpdateArgs(ticketID: String, screenshotPaths: [String]) -> [String]? {
-        guard !screenshotPaths.isEmpty else { return nil }
-        var args = [linearSkillBinary(), "update", ticketID]
-        for path in screenshotPaths {
-            args.append("--proof")
-            args.append(path)
-        }
-        return args
+    static func ticketCompletion(output: String) -> TicketCompletion? {
+        guard let id = parseCreatedTicketID(output) else { return nil }
+        return TicketCompletion(id: id, url: parseTicketURL(output))
     }
 
     private static func shortenForNotice(_ s: String) -> String {
@@ -478,6 +495,37 @@ enum AgentsCLI {
         do {
             try p.run()
             monitored.append(p)
+        } catch {
+            DispatchQueue.main.async { onFinish("", false) }
+        }
+    }
+
+    // Async monitored process with stdin data, used to pipe the description into
+    // `linear create --description-file -` while keeping `--image` paths in argv.
+    private static func runMonitoredWithInput(_ argv: [String], input: Data,
+                                               onFinish: @escaping (String, Bool) -> Void) {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: argv[0])
+        p.arguments = Array(argv.dropFirst())
+        let out = Pipe()
+        let inPipe = Pipe()
+        p.standardOutput = out
+        p.standardInput = inPipe
+        p.standardError = FileHandle.nullDevice
+        p.terminationHandler = { proc in
+            let data = out.fileHandleForReading.readDataToEndOfFile()
+            let text = String(data: data, encoding: .utf8) ?? ""
+            let ok = proc.terminationStatus == 0
+            DispatchQueue.main.async {
+                monitored.removeAll { $0 === proc }
+                onFinish(text, ok)
+            }
+        }
+        do {
+            try p.run()
+            monitored.append(p)
+            inPipe.fileHandleForWriting.write(input)
+            inPipe.fileHandleForWriting.closeFile()
         } catch {
             DispatchQueue.main.async { onFinish("", false) }
         }
