@@ -16,6 +16,10 @@
  * hand-copied reader in apps/factory/src/core/liveSession.ts. It only READS the
  * existing dir/schema; it never writes or moves anything, so it is safe across a
  * fleet where old hooks and a new CLI coexist.
+ *
+ * The whole state dir is scanned ONCE per active-scan into an index (the listing
+ * path polls every ~3s), and every lookup keys the pre-built maps — never a
+ * re-scan per candidate.
  */
 import fs from 'fs';
 import path from 'path';
@@ -30,6 +34,13 @@ export interface HookSessionRecord {
   launch_id?: string;
   terminal_id?: string;
   ts?: number;
+}
+
+/** Pre-built lookup maps over one scan of the hook state dir. */
+export interface HookSessionIndex {
+  byLaunchId: Map<string, HookSessionRecord>;
+  byTerminalId: Map<string, HookSessionRecord>;
+  byPid: Map<number, HookSessionRecord>;
 }
 
 function hookSessionsDir(): string {
@@ -50,57 +61,92 @@ function parseRecord(raw: string): HookSessionRecord | undefined {
   return undefined;
 }
 
-/** Read the hook record written under a specific pid. Undefined if absent/corrupt. */
-export function readHookSessionByPid(pid: number): HookSessionRecord | undefined {
-  if (!pid || pid < 1) return undefined;
-  try {
-    return parseRecord(fs.readFileSync(path.join(hookSessionsDir(), `${pid}.json`), 'utf8'));
-  } catch {
-    return undefined;
-  }
+/** Keep the newest record (by `ts`) when two collide on the same key. */
+function keepNewest(map: Map<string | number, HookSessionRecord>, key: string | number, rec: HookSessionRecord): void {
+  const prev = map.get(key);
+  if (!prev || (rec.ts ?? 0) >= (prev.ts ?? 0)) map.set(key, rec);
 }
 
-function scanAll(): HookSessionRecord[] {
+/**
+ * Scan the hook state dir once and index every record by launch_id, terminal_id,
+ * and pid. Returns empty maps if the dir is absent. Newest-by-`ts` wins a key
+ * collision (pid reuse, or a launch id lingering from a since-dead process).
+ */
+export function loadHookSessionIndex(): HookSessionIndex {
+  const byLaunchId = new Map<string, HookSessionRecord>();
+  const byTerminalId = new Map<string, HookSessionRecord>();
+  const byPid = new Map<number, HookSessionRecord>();
   let files: string[];
   try {
     files = fs.readdirSync(hookSessionsDir()).filter(f => f.endsWith('.json'));
   } catch {
-    return [];
+    return { byLaunchId, byTerminalId, byPid };
   }
-  const out: HookSessionRecord[] = [];
   for (const f of files) {
+    let rec: HookSessionRecord | undefined;
     try {
-      const r = parseRecord(fs.readFileSync(path.join(hookSessionsDir(), f), 'utf8'));
-      if (r) out.push(r);
+      rec = parseRecord(fs.readFileSync(path.join(hookSessionsDir(), f), 'utf8'));
     } catch {
       /* raced with the hook / pruner — skip */
     }
+    if (!rec) continue;
+    if (typeof rec.pid === 'number') keepNewest(byPid as Map<string | number, HookSessionRecord>, rec.pid, rec);
+    if (rec.launch_id) keepNewest(byLaunchId as Map<string | number, HookSessionRecord>, rec.launch_id, rec);
+    if (rec.terminal_id) keepNewest(byTerminalId as Map<string | number, HookSessionRecord>, rec.terminal_id, rec);
   }
-  return out;
-}
-
-function newestMatching(pred: (r: HookSessionRecord) => boolean): HookSessionRecord | undefined {
-  let best: HookSessionRecord | undefined;
-  for (const r of scanAll()) {
-    if (!pred(r)) continue;
-    if (!best || (r.ts ?? 0) > (best.ts ?? 0)) best = r;
-  }
-  return best;
+  return { byLaunchId, byTerminalId, byPid };
 }
 
 /**
- * The join key. Matches the hook record whose `launch_id` equals the launchId
- * `ag run` minted for this launch — reconciles across pid divergence (the hook
- * runs under the agent pid, our pid-registry entry may sit on a tmux pane leaf
- * or a cmd.exe wrapper). Newest-by-`ts` on the rare pid-reuse collision.
+ * True if a hook record's `agent` is compatible with a `ps`-detected kind. Guards
+ * the weak pid/children lookups against a STALE file at a reused pid (a dead
+ * hooked agent's `<pid>.json` inherited by a live hookless agent at the same pid).
+ * Permissive when the record's agent is absent/legacy-`unknown` (never reject on
+ * missing metadata). Normalizes the one known naming gap: `ps` reports Cursor as
+ * `cursor-agent`, the hook records it as `cursor`.
  */
-export function findHookSessionByLaunchId(launchId: string): HookSessionRecord | undefined {
-  if (!launchId) return undefined;
-  return newestMatching(r => r.launch_id === launchId);
+function kindMatches(recordAgent: string | undefined, kind: string): boolean {
+  if (!recordAgent || recordAgent === 'unknown') return true;
+  const norm = (k: string) => (k === 'cursor-agent' ? 'cursor' : k);
+  return norm(recordAgent) === norm(kind);
 }
 
-/** Secondary join key: a Factory VS Code tab's `AGENT_TERMINAL_ID`. */
-export function findHookSessionByTerminalId(terminalId: string): HookSessionRecord | undefined {
-  if (!terminalId) return undefined;
-  return newestMatching(r => r.terminal_id === terminalId);
+export interface ResolveOpts {
+  pid: number;
+  kind: string;
+  launchId?: string;
+  terminalId?: string;
+  /** Immediate child pids of `pid` — the hook records under the agent pid, which
+   *  for a wrapper/shell pid we recorded is a child. */
+  childPids?: number[];
+}
+
+/**
+ * Resolve an agent's OWN authoritative session id from the hook index. Priority
+ * mirrors the session-tracker's getLiveSession: launchId join (survives pid
+ * divergence — the hook runs under the agent pid, our registry entry may sit on a
+ * tmux pane leaf or cmd.exe wrapper) → terminalId join → direct pid → children.
+ * Every hit is kind-guarded so a stale file at a reused pid can't cross agents.
+ * Undefined until the hook lands (it can lag the spawn) or for hookless harnesses.
+ */
+export function resolveHookSessionId(index: HookSessionIndex, opts: ResolveOpts): string | undefined {
+  const { pid, kind, launchId, terminalId, childPids } = opts;
+  const take = (rec: HookSessionRecord | undefined): string | undefined =>
+    rec?.session_id && kindMatches(rec.agent, kind) ? rec.session_id : undefined;
+
+  if (launchId) {
+    const hit = take(index.byLaunchId.get(launchId));
+    if (hit) return hit;
+  }
+  if (terminalId) {
+    const hit = take(index.byTerminalId.get(terminalId));
+    if (hit) return hit;
+  }
+  const direct = take(index.byPid.get(pid));
+  if (direct) return direct;
+  for (const c of childPids ?? []) {
+    const hit = take(index.byPid.get(c));
+    if (hit) return hit;
+  }
+  return undefined;
 }
