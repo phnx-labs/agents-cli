@@ -8,19 +8,31 @@
  *
  *   agents watchdog                    one tick, dry — prints what it WOULD nudge/skip and why
  *   agents watchdog --nudge            one tick, actually injects (explicit opt-in)
- *   agents watchdog --watch            daemon loop (poll every --interval)
+ *   agents watchdog --watch            manual poll loop (dry unless --nudge)
  *   agents watchdog --json             machine-readable tick output (for the menu-bar)
- *   agents watchdog enable|disable     flip the global auto-nudge sentinel (default OFF)
+ *   agents watchdog enable|disable     turn the always-on watchdog routine on/off
  *   agents watchdog policy <id> <p>    per-session policy: off | keep | handsoff
+ *
+ * The always-on watchdog is a daemon-fired ROUTINE, not a private sentinel + a
+ * hand-rolled loop: `enable` creates/enables a `watchdog` command routine
+ * (`agents watchdog --nudge` every couple of minutes) and reloads the daemon;
+ * `disable` pauses it. See ../lib/watchdog/routine.ts.
  */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
-import * as fs from 'fs';
 import * as path from 'path';
 import { setHelpSections } from '../lib/help.js';
 import { parseDuration } from '../lib/hooks/cache.js';
 import { getRuntimeStateDir } from '../lib/state.js';
+import { setJobEnabled } from '../lib/routines.js';
+import {
+  ensureWatchdogRoutine,
+  isWatchdogRoutineEnabled,
+  watchdogRoutineExists,
+  WATCHDOG_ROUTINE_NAME,
+  WATCHDOG_ROUTINE_SCHEDULE,
+} from '../lib/watchdog/routine.js';
 import {
   runWatchdogTick,
   writePolicySentinel,
@@ -36,21 +48,18 @@ function stateDir(): string {
   return path.join(getRuntimeStateDir(), 'watchdog');
 }
 
-/** Global auto-nudge sentinel — present = enabled. Default OFF (opt-in). */
-function enabledSentinelPath(): string {
-  return path.join(stateDir(), 'enabled');
-}
-function isGloballyEnabled(): boolean {
-  return fs.existsSync(enabledSentinelPath());
-}
-function setGloballyEnabled(on: boolean): void {
-  const p = enabledSentinelPath();
-  if (on) {
-    fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, 'enabled\n');
-  } else {
-    try { fs.rmSync(p); } catch { /* already off */ }
+/**
+ * (Re)load the daemon so a just-changed routine takes effect without a restart.
+ * Best-effort: enabling starts the daemon if it is not running, then SIGHUPs it.
+ * Dynamic import keeps daemon.ts's heavy deps off the watchdog command's load path.
+ */
+async function reloadDaemonForRoutine(startIfStopped: boolean): Promise<void> {
+  const { isDaemonRunning, ensureDaemonStarted, signalDaemonReload } = await import('../lib/daemon.js');
+  if (isDaemonRunning()) {
+    signalDaemonReload();
+    return;
   }
+  if (startIfStopped) ensureDaemonStarted();
 }
 
 /** Parse a duration flag ("60s", "5m", "1h") to ms, or fall back to `fallbackMs`. */
@@ -124,13 +133,11 @@ export function registerWatchdogCommand(program: Command): void {
         cooldownMs: durationMsOr(opts.cooldown, DEFAULT_THRESHOLDS.cooldownMs),
         dormantMs: durationMsOr(opts.dormant, DEFAULT_THRESHOLDS.dormantMs),
       };
-      // Injection gate: --nudge is the explicit per-run opt-in; the global sentinel
-      // enables the automatic daemon. Default OFF: bare `agents watchdog` is dry.
-      // Re-read the sentinel every tick so a running `--watch` daemon reflects a
-      // later `agents watchdog enable`/`disable` (or the Swift menu-bar toggle)
-      // from another shell without a restart.
-      const computeWillInject = (): boolean =>
-        opts.nudge === true || (opts.watch === true && isGloballyEnabled());
+      // Injection gate: --nudge is the explicit opt-in to actually inject. Bare
+      // `agents watchdog` (and `--watch` without `--nudge`) is dry. The always-on
+      // path is the daemon routine, which runs `agents watchdog --nudge` — so the
+      // routine's enabled state IS the on/off switch, not a flag read here.
+      const computeWillInject = (): boolean => opts.nudge === true;
 
       const tickOnce = async (willInject: boolean): Promise<WatchdogTickResult> =>
         runWatchdogTick({
@@ -151,12 +158,12 @@ export function registerWatchdogCommand(program: Command): void {
         return;
       }
 
-      // Daemon loop.
+      // Manual poll loop (for ad-hoc use; the always-on path is `enable`'s routine).
       const intervalMs = durationMsOr(opts.interval, 30_000);
       if (!computeWillInject() && !opts.json) {
         console.log(chalk.yellow(
-          `watchdog --watch is DETECT-ONLY (global auto-nudge is ${isGloballyEnabled() ? 'on' : 'off'}). ` +
-          `Pass --nudge or run 'agents watchdog enable' to inject.`,
+          `watchdog --watch is DETECT-ONLY. Pass --nudge to inject, ` +
+          `or run 'agents watchdog enable' for the always-on daemon routine.`,
         ));
       }
       // eslint-disable-next-line no-constant-condition
@@ -178,13 +185,13 @@ export function registerWatchdogCommand(program: Command): void {
       # One tick, actually inject "Continue." into stalled+addressable splits
       agents watchdog --nudge
 
-      # Watch loop every 30s, tighter stall threshold
-      agents watchdog --watch --interval 30s --stall 60s --cooldown 5m
+      # Manual watch loop every 30s, tighter stall threshold (ad-hoc; dry unless --nudge)
+      agents watchdog --watch --nudge --interval 30s --stall 60s --cooldown 5m
 
       # Machine-readable for the menu-bar
       agents watchdog --json
 
-      # Turn on the global auto-nudge (so --watch injects without --nudge)
+      # Turn on the ALWAYS-ON watchdog (a daemon-fired routine)
       agents watchdog enable
 
       # Leave one session detected-but-untouched
@@ -201,31 +208,41 @@ export function registerWatchdogCommand(program: Command): void {
       (e.g. Ghostty with no tmux) are flagged for the menu-bar and SKIPPED — never
       a guessed or frontmost target.
 
-      Policy: global auto-nudge defaults OFF (opt-in via 'enable' or --nudge).
-      Per-session: off (ignore), keep (default), handsoff (detect + flag, never inject).
+      Always-on: 'agents watchdog enable' creates + enables a 'watchdog' command
+      routine ('${WATCHDOG_ROUTINE_SCHEDULE}' -> agents watchdog --nudge) and reloads the
+      daemon; 'disable' pauses it. Inspect it with 'agents routines list'. Defaults
+      OFF. Per-session policy: off (ignore), keep (default), handsoff (detect + flag).
 
       State (tray-readable): ${path.join('~/.agents/.cache/state/watchdog', '{nudges,flags,last-tick}.json')}
     `,
   });
 
-  // --- global enable/disable/status -----------------------------------------
+  // --- always-on enable/disable/status (backed by the daemon routine) --------
 
   cmd.command('enable')
-    .description('Turn ON global auto-nudge (so `agents watchdog --watch` injects without --nudge).')
-    .action(() => {
-      setGloballyEnabled(true);
-      console.log(chalk.green('watchdog: global auto-nudge ENABLED'));
+    .description('Turn ON the always-on watchdog: create/enable the `watchdog` routine and (re)load the daemon.')
+    .action(async () => {
+      ensureWatchdogRoutine(true);
+      await reloadDaemonForRoutine(true);
+      console.log(chalk.green(
+        `watchdog: ENABLED — routine '${WATCHDOG_ROUTINE_NAME}' fires ${WATCHDOG_ROUTINE_SCHEDULE} (agents watchdog --nudge)`,
+      ));
     });
 
   cmd.command('disable')
-    .description('Turn OFF global auto-nudge (back to detect-only unless --nudge is passed).')
-    .action(() => {
-      setGloballyEnabled(false);
-      console.log(chalk.yellow('watchdog: global auto-nudge DISABLED'));
+    .description('Turn OFF the always-on watchdog (pause the `watchdog` routine).')
+    .action(async () => {
+      if (!watchdogRoutineExists()) {
+        console.log(chalk.dim('watchdog: already off (no routine)'));
+        return;
+      }
+      setJobEnabled(WATCHDOG_ROUTINE_NAME, false);
+      await reloadDaemonForRoutine(false);
+      console.log(chalk.yellow('watchdog: DISABLED (routine paused)'));
     });
 
   cmd.command('status')
-    .description('Show whether global auto-nudge is on and where state is written.')
+    .description('Show whether the always-on watchdog routine is enabled and where state is written.')
     .option('--json', 'Emit status as JSON (for the menu-bar / scripts)')
     .action((_opts, command) => {
       // The parent `watchdog` command also declares --json and greedily parses it
@@ -233,12 +250,12 @@ export function registerWatchdogCommand(program: Command): void {
       // parent, not this subcommand. optsWithGlobals() merges both levels, so we
       // read it correctly regardless of which command commander bound it to.
       const json = command.optsWithGlobals().json === true;
-      const on = isGloballyEnabled();
+      const on = isWatchdogRoutineEnabled();
       if (json) {
-        console.log(JSON.stringify({ enabled: on, stateDir: stateDir() }));
+        console.log(JSON.stringify({ enabled: on, routine: WATCHDOG_ROUTINE_NAME, stateDir: stateDir() }));
         return;
       }
-      console.log(`global auto-nudge: ${on ? chalk.green('ON') : chalk.dim('off')}`);
+      console.log(`always-on watchdog: ${on ? chalk.green('ON') : chalk.dim('off')} (routine '${WATCHDOG_ROUTINE_NAME}')`);
       console.log(`state dir: ${chalk.dim(stateDir())}`);
     });
 

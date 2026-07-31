@@ -47,7 +47,7 @@ describe('watchdog status --json', () => {
     const lines = await runWatchdog(['status']);
     expect(lines.length).toBeGreaterThanOrEqual(1);
     // The human path is two lines starting with the enable-state label.
-    expect(lines[0]).toContain('global auto-nudge');
+    expect(lines[0]).toContain('always-on watchdog');
     expect(() => JSON.parse(lines[0])).toThrow();
   });
 });
