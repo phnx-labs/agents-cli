@@ -3,12 +3,18 @@ import {
   planFleetTargets,
   remoteFleetTargets,
   fanOutDevices,
+  fleetHealthSkip,
   runFleet,
   skipLabel,
   upgradeCommand,
   type FleetTarget,
 } from './fleet.js';
 import type { DeviceProfile, DeviceRegistry } from './registry.js';
+import type { DeviceStats } from './health.js';
+
+function stats(host: string, reachable: boolean): DeviceStats {
+  return { host, reachable, fetchedAt: 0 };
+}
 
 function device(overrides: Partial<DeviceProfile> & { name: string }): DeviceProfile {
   const now = '2026-07-14T00:00:00.000Z';
@@ -80,6 +86,49 @@ describe('remoteFleetTargets (fleet health/drift gate targeting)', () => {
     expect(byName.zion).toBeUndefined(); // self is probed in-process, not fanned out
     expect(byName.worker.skip).toBeUndefined(); // a real probe target
     expect(byName.dead.skip).toBe('offline'); // genuine fault — kept, surfaces as unreachable
+  });
+});
+
+describe('fleetHealthSkip (gate version+doctor dials on the reachability verdict)', () => {
+  it('skips a box the stats probe found unreachable — on the DEFAULT path, no --refresh', () => {
+    // The regression this pins: before RUSH-1964 the skip was gated behind
+    // --refresh, so a default `fleet status` still spent 15s+30s per offline box.
+    expect(fleetHealthSkip(undefined, stats('dead', false))).toBe('unreachable');
+  });
+
+  it('does not skip a reachable box — it still gets its version/doctor dial', () => {
+    expect(fleetHealthSkip(undefined, stats('alive', true))).toBeUndefined();
+  });
+
+  it('leaves a box with no stats (never probed) to be dialed live', () => {
+    expect(fleetHealthSkip(undefined, undefined)).toBeUndefined();
+  });
+
+  it('keeps a pre-classified skip (offline/no-address/control) untouched', () => {
+    expect(fleetHealthSkip('offline', stats('x', true))).toBe('offline');
+    expect(fleetHealthSkip('no-address', undefined)).toBe('no-address');
+    // Even if the stats probe reached it, an existing skip reason wins.
+    expect(fleetHealthSkip('control', stats('cockpit', true))).toBe('control');
+  });
+
+  it('an unreachable-planned target never triggers a version/doctor probe', async () => {
+    // Full chain: fleetHealthSkip marks the row skip, fanOutDevices then returns
+    // it as skipped WITHOUT invoking the probe — so no ssh dial happens for a box
+    // already known unreachable (the 45s-per-box hang is never paid).
+    const dialed: string[] = [];
+    const targets = [
+      { name: 'alive', skip: fleetHealthSkip(undefined, stats('alive', true)) },
+      { name: 'dead', skip: fleetHealthSkip(undefined, stats('dead', false)) },
+    ];
+    const results = await fanOutDevices(targets, async (t) => {
+      dialed.push(t.name); // stands in for the version+doctor round-trips
+      return t.name;
+    });
+    expect(dialed).toEqual(['alive']); // 'dead' was never dialed
+    expect(results.map((r) => [r.name, r.status, r.reason])).toEqual([
+      ['alive', 'ok', undefined],
+      ['dead', 'skipped', 'unreachable'],
+    ]);
   });
 });
 

@@ -61,6 +61,7 @@ import { ensureManagedKnownHostsDir, isHostPinned } from '../lib/devices/known-h
 import { shouldSyncTerminfo, syncTerminfoToDevice, terminfoHostKey } from '../lib/devices/terminfo.js';
 import {
   fanOutDevices,
+  fleetHealthSkip,
   planFleetTargets,
   remoteFleetTargets,
   runFleet,
@@ -474,21 +475,14 @@ async function runFleetStatus(opts: { json?: boolean; strict?: boolean; stats?: 
     .map((t) => ({
       name: t.device.name,
       platform: t.device.platform,
-      skip: t.skip,
+      // Fail fast: gate the expensive version+doctor dials on the reachability
+      // verdict the cheap stats probe already computed one step earlier. A box
+      // it found unreachable skips straight to an `unreachable` row instead of
+      // burning 15s+30s per box — so one genuinely-offline device can't stall
+      // the matrix for ~60s (RUSH-1964). See {@link fleetHealthSkip} for why
+      // this is trusted on the default path, not just under `--refresh`.
+      skip: fleetHealthSkip(t.skip, statsMap.get(t.device.name)),
       dialTarget: fleetDialTarget(t.device),
-      // Fail fast: the stats probe already tried this box with the same
-      // (registry) address. If it came back unreachable, don't spend another
-      // 15s+30s on version+doctor — skip straight to an unreachable row so one
-      // genuinely-offline device can't stall the whole matrix.
-      //
-      // Only trust this on a FRESH probe (`--refresh`/`--live`). loadFleetStats
-      // is cache-first (daemon-warmed ~3min), so a box that came back online
-      // since the last warm would otherwise be skipped to "unreachable" without
-      // a live attempt — a false negative. On a default run we still do the live
-      // probe (fast now that it dials the registry address).
-      ...(forceRefresh && statsMap.get(t.device.name)?.reachable === false && !t.skip
-        ? { skip: 'unreachable' }
-        : {}),
     }));
   const remote = await fanOutDevices(remoteTargets, probeRemoteHealth);
   for (const result of remote) {

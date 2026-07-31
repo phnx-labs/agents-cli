@@ -11,6 +11,7 @@
 import { spawnSync } from 'child_process';
 import { isControlDevice, type DeviceProfile, type DeviceRegistry } from './registry.js';
 import { buildSshInvocation, sshTargetFor, writeAskpassShim } from './connect.js';
+import type { DeviceStats } from './health.js';
 
 export type FleetSkipReason = 'offline' | 'no-address' | 'control';
 
@@ -86,6 +87,34 @@ export function planFleetTargets(reg: DeviceRegistry): FleetTarget[] {
  */
 export function remoteFleetTargets(planned: FleetTarget[], self: string): FleetTarget[] {
   return planned.filter((t) => t.device.name !== self && t.skip !== 'control');
+}
+
+/**
+ * Decide whether a fleet-health target should skip the expensive version+doctor
+ * dials (`agents fleet status`). The cheap stats probe (~2.5s, same registry
+ * address) has already tried this box one step earlier. If it came back
+ * unreachable, dialing `agents --version` (15s) + `agents doctor --json` (30s)
+ * would almost certainly fail the same way — just 45s slower — so one
+ * genuinely-offline box would stall the whole matrix (the ~60s hang, RUSH-1964).
+ *
+ * We trust the stats verdict on the DEFAULT path, not only under
+ * `--refresh`/`--live`: `probeDeviceStats` and the version/doctor dials share
+ * one ssh path (`fleetDialTarget`), so reachability is not per-probe. The
+ * verdict is either freshly probed this run or daemon-warmed (~3min) with the
+ * live write-back from RUSH-1965, so a box that came online in the last few
+ * minutes is the only false-negative window — it renders `unreachable` until the
+ * next stats warm, which beats letting it hang the status glance for 45s.
+ *
+ * An existing skip (control/offline/no-address from {@link planFleetTargets})
+ * always wins — those are classified before any probe.
+ */
+export function fleetHealthSkip(
+  currentSkip: FleetSkipReason | string | undefined,
+  stats: DeviceStats | undefined,
+): FleetSkipReason | string | undefined {
+  if (currentSkip) return currentSkip;
+  if (stats?.reachable === false) return 'unreachable';
+  return undefined;
 }
 
 /** Human label for a skip reason. */
