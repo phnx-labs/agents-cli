@@ -2,6 +2,18 @@
 
 ## 1.20.74
 
+- **`agents fleet status` no longer hangs on an unreachable box (RUSH-1964).** The
+  cheap stats probe (~2.5s) already learns whether each box is reachable, but the
+  dead-box skip that spares the expensive `agents --version` (15s) + `agents doctor
+  --json` (30s) dials was gated behind `--refresh` — so a default run still spent up
+  to 45s per genuinely-unreachable box, and one down box could stall the whole
+  matrix. The default path now gates those dials on the same reachability verdict: a
+  box the stats probe found unreachable short-circuits straight to an `unreachable`
+  row with zero further SSH round-trips. Measured on a single blackholed target,
+  `fleet status` dropped from 22.8s to 2.8s. (VPN-first transport and SSH key
+  provisioning remain deferred.) Source: `apps/cli/src/lib/devices/fleet.ts`
+  (`fleetHealthSkip`), `apps/cli/src/commands/ssh.ts` (`runFleetStatus`).
+
 - **Project resource manifests are now portable across Windows and POSIX.** The
   managed-resource manifest `.agents-managed.json` recorded its paths with the
   host's native separator, so a sync run on Windows wrote entries like
