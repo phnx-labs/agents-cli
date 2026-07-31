@@ -399,21 +399,46 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     // Returns true if anything was rendered (caller adds the trailing separator).
-    // Triage strip: blocked sessions sorted by wait-time (most-stalled first,
-    // regardless of repo), each carrying the actual question it's waiting on
-    // plus how long it's been waiting. Waiting first, then failed.
+    // Triage strip: blocked sessions grouped by (agent, repo). A group with 2+
+    // blocked sessions collapses to one row + submenu — walls of identical
+    // "Claude · muqsitnawaz — Claude is waiting for your input" rows were the
+    // single biggest source of noise. Groups of 1 render inline as before; the
+    // generic "awaiting input" filler drops when the Notification message is
+    // empty (the ⚠ glyph + section header already convey it). Failing routines
+    // follow.
     private func addNeedsAttention(_ menu: NSMenu, sessions: [Session],
                                    routines: [Routine], daemonPid: Int?, rich: Bool) -> Bool {
         var rows: [(String, NSColor, String, NSMenu?)] = []   // glyph, color, text, submenu
 
-        let blocked = sessions.filter { $0.status == .attention }.sorted {
-            ($0.attentionSinceMs ?? .greatestFiniteMagnitude) < ($1.attentionSinceMs ?? .greatestFiniteMagnitude)
+        let blocked = sessions.filter { $0.status == .attention }
+        let groups = Dictionary(grouping: blocked) { s in "\(s.agent)\u{0000}\(s.repo)" }
+        // Sort each group oldest-first, then order groups by their oldest wait.
+        let sortedGroups = groups.values.map { group -> [Session] in
+            group.sorted { ($0.attentionSinceMs ?? .greatestFiniteMagnitude) < ($1.attentionSinceMs ?? .greatestFiniteMagnitude) }
+        }.sorted { (a, b) in
+            (a.first?.attentionSinceMs ?? .greatestFiniteMagnitude) < (b.first?.attentionSinceMs ?? .greatestFiniteMagnitude)
         }
-        for s in blocked {
-            let q = s.question.isEmpty ? "awaiting input" : trim(s.question, rich ? 48 : 34)
-            var text = "\(LocalState.agentLabel(s.agent)) · \(s.repo) — \(q)"
-            if let since = s.attentionSinceMs { text += "  ·  \(elapsedShort(since))" }
-            rows.append(("⚠", wait, text, s.cwd.map { revealSubmenu($0) }))
+
+        for group in sortedGroups {
+            guard let first = group.first else { continue }
+            let agentLabel = LocalState.agentLabel(first.agent)
+            let repo = first.repo
+            if group.count == 1 {
+                // Inline: skip the generic filler when the hook wrote no message.
+                var text = "\(agentLabel) · \(repo)"
+                if !first.question.isEmpty {
+                    text += " — \(trim(first.question, rich ? 48 : 34))"
+                }
+                if let since = first.attentionSinceMs { text += "  ·  \(elapsedShort(since))" }
+                rows.append(("⚠", wait, text, first.cwd.map { revealSubmenu($0) }))
+            } else {
+                // Collapsed: N waiting · oldest elapsed. Submenu lists each session.
+                var text = "\(agentLabel) · \(repo) · \(group.count) waiting"
+                if let since = first.attentionSinceMs {
+                    text += "  ·  oldest \(elapsedShort(since))"
+                }
+                rows.append(("⚠", wait, text, groupedWaitersSubmenu(group)))
+            }
         }
 
         if daemonPid == nil && !routines.isEmpty {
@@ -436,13 +461,40 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
 
         if rows.isEmpty { return false }
-        addSectionTitle(menu, "⚠ NEEDS YOU (\(rows.count))", color: wait)
+        // Title carries both the group count and the true blocked-session count so
+        // the badge / header math stays legible when grouping is in play.
+        let blockedTotal = blocked.count
+        let groupCount = sortedGroups.count
+        let title: String
+        if groupCount == blockedTotal {
+            title = "⚠ NEEDS YOU (\(rows.count))"
+        } else {
+            title = "⚠ NEEDS YOU (\(groupCount) groups · \(blockedTotal) sessions)"
+        }
+        addSectionTitle(menu, title, color: wait)
         for (glyph, color, text, sub) in rows {
             let it = statusRow(glyph, color, text)
             it.submenu = sub
             menu.addItem(it)
         }
         return true
+    }
+
+    // Submenu listing every blocked session in a grouped (agent, repo) waiter.
+    // Sorted oldest-first (most stalled at the top). Row = session title (or a
+    // "session" fallback when no title) with the elapsed wait as the trailing chip.
+    private func groupedWaitersSubmenu(_ group: [Session]) -> NSMenu {
+        let sub = NSMenu()
+        for s in group {
+            let label = s.title.isEmpty ? "session" : trim(s.title, 36)
+            var text = label
+            if !s.question.isEmpty { text += " — \(trim(s.question, 34))" }
+            if let since = s.attentionSinceMs { text += "  ·  \(elapsedShort(since))" }
+            let it = statusRow("⚠", wait, text)
+            if let cwd = s.cwd { it.submenu = revealSubmenu(cwd) }
+            sub.addItem(it)
+        }
+        return sub
     }
 
     // Returns true if anything was rendered (caller adds the trailing separator).
@@ -485,11 +537,33 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     // Live work grouped by repo: one `ACTIVE · <repo>` header per project, the
     // repo's sessions clustered under it. Rich rows carry the session's own
     // title inline (the repo lives in the header, so rows don't repeat it).
+    //
+    // Two rendering rules keep the section from walling the menu:
+    //   • The "other" bucket (sessions with no repo) collapses to a single
+    //     clickable section header + submenu when it's idle-only. That's a
+    //     dumping-ground group whose individual rows don't repay their space.
+    //   • Idle rows cap at 3 per repo, but the 4th+ never disappears silently:
+    //     an explicit "+ N more idle" row shows the count with a submenu of
+    //     the rest, so the header count always matches what's on screen.
+    private let idlePerRepoCap = 3
+
     private func addActive(_ menu: NSMenu, live: [Session], browserTasks: [BrowserTask], rich: Bool) {
         let groups = Dictionary(grouping: live) { $0.repo.isEmpty ? "other" : $0.repo }
         for (repo, group) in groups.sorted(by: { $0.key.lowercased() < $1.key.lowercased() }) {
             let running = group.filter { $0.status == .running }.count
             let idle = group.count - running
+
+            // Collapsed "other" bucket: idle-only groups render as one
+            // interactive section header. No fake ◐ session row — the header
+            // itself carries the count and opens the submenu.
+            if repo == "other" && running == 0 && idle > 0 {
+                let title = "ACTIVE · other  ·  \(idle) idle"
+                let item = statusRow("", .secondaryLabelColor, title)
+                item.submenu = collapsedIdleSubmenu(group, rich: rich)
+                menu.addItem(item)
+                continue
+            }
+
             var title = "ACTIVE · \(repo)"
             var counts: [String] = []
             if running > 0 { counts.append("\(running) running") }
@@ -497,16 +571,20 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             if !counts.isEmpty { title += "  ·  " + counts.joined(separator: " · ") }
             addSectionTitle(menu, title, color: .secondaryLabelColor)
 
-            // Running rows always render; idle rows cap at 3 per repo (the
-            // header carries the true counts) so a big idle fleet can't wall
-            // the menu.
+            // Running rows always render; idle rows cap at idlePerRepoCap. If
+            // the cap hides any, an explicit "+ N more idle" row exposes the
+            // hidden count and opens the rest in a submenu.
             let ordered = group.sorted { a, b in
                 (a.status == .running ? 0 : 1) < (b.status == .running ? 0 : 1)
             }
             var idleShown = 0
+            var hiddenIdle: [Session] = []
             for s in ordered {
                 if s.status != .running {
-                    if idleShown >= 3 { continue }
+                    if idleShown >= idlePerRepoCap {
+                        hiddenIdle.append(s)
+                        continue
+                    }
                     idleShown += 1
                 }
                 let glyph = s.status == .running ? "●" : "◐"
@@ -515,6 +593,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                 let row = statusRow(glyph, color, "\(LocalState.agentLabel(s.agent))\(detail)")
                 if let cwd = s.cwd { row.submenu = revealSubmenu(cwd) }
                 menu.addItem(row)
+            }
+            if !hiddenIdle.isEmpty {
+                let moreLabel = "+ \(hiddenIdle.count) more idle"
+                let more = statusRow("", info, moreLabel)
+                more.submenu = collapsedIdleSubmenu(hiddenIdle, rich: rich)
+                menu.addItem(more)
             }
         }
         if !browserTasks.isEmpty {
@@ -526,6 +610,19 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                 menu.addItem(row)
             }
         }
+    }
+
+    // Submenu for the "+N more idle" row and the collapsed "other" section
+    // header — every hidden session gets a row with agent · title.
+    private func collapsedIdleSubmenu(_ sessions: [Session], rich: Bool) -> NSMenu {
+        let sub = NSMenu()
+        for s in sessions {
+            let detail = (rich && !s.title.isEmpty) ? " — \(trim(s.title, 36))" : ""
+            let row = statusRow("◐", idleC, "\(LocalState.agentLabel(s.agent))\(detail)")
+            if let cwd = s.cwd { row.submenu = revealSubmenu(cwd) }
+            sub.addItem(row)
+        }
+        return sub
     }
 
     private func addRecent(_ menu: NSMenu, recentSessions: [RecentSession], rich: Bool) {
