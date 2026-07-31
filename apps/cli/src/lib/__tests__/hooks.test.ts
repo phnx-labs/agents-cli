@@ -526,7 +526,7 @@ describe('registerHooksToSettings - OpenCode', () => {
     expect(plugin).toContain('"session.idle"');
     expect(plugin).toContain('"session.error"');
     expect(plugin).toContain('const input = JSON.stringify(payload)');
-    expect(plugin).toContain('await $`${hook.command} < ${new Response(input)}`.nothrow().quiet()');
+    expect(plugin).toContain('await $`${shell} ${command} < ${new Response(input)}`.nothrow().quiet()');
     expect(plugin).toContain('"matcher": "Bash|bash"');
   });
 

@@ -1262,11 +1262,14 @@ async function runHooks(hooks, payload, $) {
   for (const hook of hooks ?? []) {
     if (!matches(hook, payload.tool_name ?? "")) continue
     const input = JSON.stringify(payload)
+    const home = Bun.env.HOME ?? Bun.env.USERPROFILE ?? ""
+    const command = hook.command.startsWith("~/")
+      ? \`\${home}/\${hook.command.slice(2)}\`
+      : hook.command
+    const shell = Bun.which("bash") ?? Bun.which("sh")
+    if (!shell) throw new Error(\`\${hook.name} requires bash or sh\`)
     if (hook.timeout !== undefined) {
-      const command = hook.command.startsWith("~/")
-        ? \`\${Bun.env.HOME}/\${hook.command.slice(2)}\`
-        : hook.command
-      const process = Bun.spawn([command], {
+      const process = Bun.spawn([shell, command], {
         stdin: new Response(input),
         stdout: "ignore",
         stderr: "pipe",
@@ -1282,7 +1285,7 @@ async function runHooks(hooks, payload, $) {
       }
       continue
     }
-    const result = await $\`\${hook.command} < \${new Response(input)}\`.nothrow().quiet()
+    const result = await $\`\${shell} \${command} < \${new Response(input)}\`.nothrow().quiet()
     if (result.exitCode !== 0) {
       throw new Error(\`\${hook.name} failed with exit code \${result.exitCode}: \${result.stderr.toString().trim()}\`)
     }
