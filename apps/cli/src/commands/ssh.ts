@@ -1125,7 +1125,7 @@ secrets bundle via an askpass shim — the password never touches argv.
       // `user@device` (same device, login user overridden — dialed via its
       // Tailscale route, not LAN DNS), or an ad-hoc `user@host`/`host` literal.
       // A bare unregistered alias still errors as "Unknown device".
-      const device = resolveDeviceTarget(name, await loadDevices());
+      const device = await resolveDeviceTarget(name);
       if (!device) {
         // Not a registered device — it may be a leased crabbox box slug. ssh into
         // it directly (crabbox@<tailnet|ip>:2222) before giving up.
