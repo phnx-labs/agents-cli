@@ -2,6 +2,7 @@ import chalk from 'chalk';
 import { padToWidth, stringWidth, terminalWidth, truncateToWidth } from '../session/width.js';
 import { fmtBytes, headroom, type DeviceStats } from './health.js';
 import { formatCheckedAge, type HostAuthSummary } from '../auth-health.js';
+import type { OnlineState } from './reachability.js';
 
 export interface FleetCliStatus {
   installed: boolean;
@@ -38,6 +39,13 @@ export interface FleetHealthRow {
   /** Cached auth-health rollup for this host (the Auth column). Undefined when
    *  the host has never been probed (`agents fleet ping`) or the cache is cold. */
   auth?: HostAuthSummary;
+  /** Resolved online/offline verdict (from {@link deviceOnlineState}). Populated
+   *  by `runFleetStatus` for the summary view; undefined in the raw grid. */
+  online?: OnlineState;
+  /** When this box was last seen reachable (ISO), for the "last seen …" note on
+   *  an offline row. Sourced from the registry's tailscale snapshot / reachability
+   *  verdict. Undefined when never recorded. */
+  lastSeen?: string;
 }
 
 export interface FleetWarning {
@@ -278,4 +286,234 @@ export function freshnessFooter(rows: FleetHealthRow[], now: number = Date.now()
   if (oldestAuth != null) parts.push(`auth ${formatCheckedAge(oldestAuth, now)}`);
   if (parts.length === 0) return null;
   return `  updated ${parts.join(' · ')} — pass --refresh (--live) for a live probe`;
+}
+
+// ---------------------------------------------------------------------------
+// Summary view (default): rollup + NEEDS ATTENTION + OS groups + footer.
+// The full grid above is kept for `--verbose`. (RUSH-1966)
+// ---------------------------------------------------------------------------
+
+/** Collapse a long dev build (`0.0.0-dev.<sha>[-dirty]`) to `dev`/`dev-dirty`;
+ *  released semver is shown verbatim. Keeps the version column narrow and stops
+ *  a single dev box from widening every row. */
+export function shortVersion(version: string | null | undefined): string {
+  if (!version) return '—';
+  const m = version.match(/-dev\b/);
+  if (m) return /dirty/.test(version) ? 'dev-dirty' : 'dev';
+  return version;
+}
+
+/** OS bucket label for grouping. Anything unrecognized falls under "Other". */
+export function platformGroupLabel(platform: string | undefined): 'macOS' | 'Linux' | 'Windows' | 'Other' {
+  const p = (platform ?? '').toLowerCase();
+  if (p === 'macos' || p === 'darwin') return 'macOS';
+  if (p === 'linux') return 'Linux';
+  if (p.startsWith('win')) return 'Windows';
+  return 'Other';
+}
+
+const GROUP_ORDER: Array<'macOS' | 'Linux' | 'Windows' | 'Other'> = ['macOS', 'Linux', 'Windows', 'Other'];
+
+/** Non-fresh sync rows for the ACTIVE (default) version only — the drift that a
+ *  running install actually feels, not stale/cold counts across old orphans. */
+function activeDriftRows(row: FleetHealthRow): FleetSyncStatus[] {
+  return row.sync.filter((s) => s.isDefault && s.status !== 'fresh');
+}
+
+function isOffline(row: FleetHealthRow): boolean {
+  // Prefer the resolved verdict; fall back to a probe error/skip when the caller
+  // didn't populate it (e.g. a raw report). Only a positive 'online' is "up".
+  if (row.online) return row.online !== 'online';
+  return Boolean(row.error || row.skipped);
+}
+
+/** A box with a real offline verdict — as opposed to `unknown` (registered but
+ *  never addressed/probed). Only a genuine offline is a "check the box" item;
+ *  an unknown box is unconfigured, not down. */
+function isGenuinelyOffline(row: FleetHealthRow): boolean {
+  return row.online === 'offline' || (!row.online && Boolean(row.error || row.skipped));
+}
+
+/** A CLI count is only worth flagging when it's stark — the box is missing more
+ *  than two-thirds of the known agent CLIs (e.g. 1/9), which signals a
+ *  broken/half-set-up box. A normal partial install (a box that just doesn't run
+ *  every agent) is not a problem, so this deliberately does NOT fire at 4/9 or
+ *  6/9. The full count stays visible under `--verbose`. */
+function starkCliGap(row: FleetHealthRow): { installed: number; total: number } | null {
+  const { installed, total } = installedCliCount(row);
+  return total > 0 && installed * 3 < total ? { installed, total } : null;
+}
+
+export interface FleetAttentionItem {
+  /** Leading mark: `○` offline, `⚠` config/CLI/version issue. */
+  glyph: 'offline' | 'warn';
+  subject: string;
+  detail: string;
+  /** The exact command (or instruction) that fixes it. */
+  fix: string;
+}
+
+/**
+ * The actionable problems only — each with the command that fixes it. Order:
+ * offline boxes, CLI gaps, active-version config drift, then version skew.
+ * A healthy fleet returns `[]` (the caller prints an all-clear line).
+ */
+export function buildFleetAttentionItems(report: FleetHealthReport, now: number = Date.now()): FleetAttentionItem[] {
+  const items: FleetAttentionItem[] = [];
+  // 1) Genuinely-offline boxes (not `unknown`/unconfigured), each individually.
+  for (const row of report.devices) {
+    if (!isGenuinelyOffline(row)) continue;
+    const seen = row.lastSeen ? ` · last seen ${formatCheckedAge(Date.parse(row.lastSeen), now)}` : '';
+    items.push({ glyph: 'offline', subject: row.name, detail: `offline${seen}`, fix: 'check the box' });
+  }
+  // 2) Boxes that need `agents apply` — merge config drift and a stark CLI gap
+  // into ONE item per box (both are fixed by the same command, so don't
+  // double-list). An offline box's config/CLI is unknowable, so skip it.
+  for (const row of report.devices) {
+    if (isOffline(row)) continue;
+    const reasons: string[] = [];
+    if (activeDriftRows(row).length > 0) reasons.push('config drift');
+    const stark = starkCliGap(row);
+    if (stark) reasons.push(`only ${stark.installed} of ${stark.total} agent CLIs installed`);
+    if (reasons.length > 0) {
+      items.push({ glyph: 'warn', subject: row.name, detail: reasons.join(' · '), fix: `agents apply ${row.name}` });
+    }
+  }
+  // 3) Version skew across the fleet — one line.
+  const skew = report.warnings.find((w) => w.kind === 'version-skew');
+  if (skew) {
+    const counts = new Map<string, number>();
+    for (const row of report.devices) {
+      if (!row.version) continue;
+      const v = shortVersion(row.version);
+      counts.set(v, (counts.get(v) ?? 0) + 1);
+    }
+    const summary = Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([v, n]) => `${n}× ${v}`)
+      .join(' · ');
+    items.push({ glyph: 'warn', subject: 'version skew', detail: summary, fix: 'agents upgrade --fleet' });
+  }
+  return items;
+}
+
+/** Right-aligned `<content>` on the same line as `left`, clamped so it never
+ *  overlaps the left text on a narrow terminal. */
+function alignRight(left: string, right: string, width: number): string {
+  const gap = width - stringWidth(left) - stringWidth(right);
+  return gap > 1 ? `${left}${' '.repeat(gap)}${right}` : `${left}  ${right}`;
+}
+
+function headroomWord(row: FleetHealthRow): string {
+  if (isOffline(row)) return chalk.gray(row.online === 'unknown' ? 'unknown' : 'offline');
+  return headroomLabel(row);
+}
+
+function loadMemCell(row: FleetHealthRow): string {
+  if (isOffline(row) || !row.stats?.reachable) return chalk.gray('—');
+  const load = row.stats.loadPercent === undefined ? '—' : `${Math.round(row.stats.loadPercent)}%`;
+  const mem = row.stats.memPercent === undefined ? '—' : `${Math.round(row.stats.memPercent)}%`;
+  return `${load} / ${mem}`;
+}
+
+function versionCell(row: FleetHealthRow): string {
+  if (isOffline(row)) return chalk.gray('—');
+  return shortVersion(row.version);
+}
+
+/**
+ * The default `agents fleet status` view (RUSH-1966): a one-line rollup, a
+ * NEEDS ATTENTION list of only the actionable problems (each with its fix
+ * command), quiet per-device rows grouped by OS, and an honest footer. The full
+ * auth/CLI/sync grid moves behind `--verbose` ({@link renderFleetMatrix}).
+ */
+export function renderFleetSummary(
+  report: FleetHealthReport,
+  opts: { self?: string; now?: number } = {},
+): string[] {
+  const now = opts.now ?? Date.now();
+  const width = terminalWidth();
+  const rows = report.devices;
+  if (rows.length === 0) return [chalk.gray('No registered devices. Run `agents devices` to register some.')];
+
+  const online = rows.filter((r) => !isOffline(r)).length;
+  const offline = rows.length - online;
+  const oldestStats = oldestAcross(rows, (r) => r.stats?.fetchedAt);
+  const cachedAge = oldestStats != null ? `cached ${formatCheckedAge(oldestStats, now)}` : null;
+  const rollupRight = [opts.self, cachedAge].filter(Boolean).join(' · ');
+  const rollupLeft = `${chalk.bold('Fleet')}   ${chalk.green('●')} ${online} online   ${chalk.gray('○')} ${offline} offline`;
+  const lines: string[] = [rollupRight ? alignRight(rollupLeft, chalk.gray(rollupRight), width) : rollupLeft, ''];
+
+  const items = buildFleetAttentionItems(report, now);
+  if (items.length === 0) {
+    lines.push(chalk.green('Everything looks healthy.'), '');
+  } else {
+    lines.push(chalk.bold(`NEEDS ATTENTION (${items.length})`));
+    const subjW = Math.max(...items.map((i) => i.subject.length));
+    const detailW = Math.max(...items.map((i) => stringWidth(i.detail)));
+    for (const it of items) {
+      const glyph = it.glyph === 'offline' ? chalk.gray('○') : chalk.yellow('⚠');
+      const subject = it.glyph === 'offline' ? chalk.gray(it.subject) : it.subject;
+      lines.push(
+        `  ${glyph}  ${padToWidth(subject, subjW)}   ${padToWidth(it.detail, detailW)}   ${chalk.cyan(`→ ${it.fix}`)}`,
+      );
+    }
+    lines.push('');
+  }
+
+  // Per-device rows, grouped by OS. Within a group, this machine floats to the
+  // top; the rest stay alphabetical.
+  const nameW = Math.min(18, Math.max(6, ...rows.map((r) => r.name.length)));
+  const headW = Math.max(...rows.map((r) => stringWidth(headroomWord(r))));
+  const loadW = Math.max(...rows.map((r) => stringWidth(loadMemCell(r))));
+  const verW = Math.max(7, ...rows.map((r) => stringWidth(versionCell(r))));
+  const grouped = new Map<string, FleetHealthRow[]>();
+  for (const r of rows) {
+    const g = platformGroupLabel(r.platform);
+    (grouped.get(g) ?? grouped.set(g, []).get(g)!).push(r);
+  }
+  for (const group of GROUP_ORDER) {
+    const members = grouped.get(group);
+    if (!members || members.length === 0) continue;
+    members.sort((a, b) =>
+      (a.name === opts.self ? -1 : b.name === opts.self ? 1 : 0) || a.name.localeCompare(b.name),
+    );
+    lines.push(chalk.bold(group));
+    for (const row of members) {
+      const isSelf = row.name === opts.self;
+      const prefix = isSelf ? chalk.cyan('▸') : ' ';
+      const marks: string[] = [];
+      if (!isOffline(row)) {
+        const stark = starkCliGap(row);
+        if (stark) marks.push(chalk.yellow(`⚠ CLIs ${stark.installed}/${stark.total}`));
+      } else if (isGenuinelyOffline(row) && row.lastSeen) {
+        marks.push(chalk.gray(`last seen ${formatCheckedAge(Date.parse(row.lastSeen), now)}`));
+      }
+      if (isSelf) marks.push(chalk.cyan('← this machine'));
+      const note = marks.length ? `   ${marks.join('   ')}` : '';
+      lines.push(
+        ` ${prefix} ${padToWidth(truncateToWidth(row.name, nameW), nameW)}  ` +
+        `${padToWidth(headroomWord(row), headW)}  ` +
+        `${padToWidth(loadMemCell(row), loadW)}  ` +
+        `${padToWidth(versionCell(row), verW)}` +
+        note,
+      );
+    }
+    lines.push('');
+  }
+
+  // Footer: orphan-version nudge (a `prune` concern, not drift), then an honest
+  // freshness line naming the cache age and what --live/--verbose add.
+  const orphaned = rows.filter((r) => r.orphans.length > 0).length;
+  if (orphaned > 0) {
+    const subject = orphaned === 1 ? '1 device carries' : `${orphaned} devices carry`;
+    lines.push(chalk.gray(`${subject} orphaned versions · run  ${chalk.cyan('agents prune')}  to reclaim disk`));
+  }
+  const freshBits = [
+    cachedAge,
+    'pass --live to re-probe auth + reachability',
+    'pass --verbose for the auth/CLI/sync columns',
+  ].filter(Boolean);
+  lines.push(chalk.gray(freshBits.join(' · ')));
+  return lines;
 }

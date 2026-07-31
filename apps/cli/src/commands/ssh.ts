@@ -79,6 +79,7 @@ import {
 import {
   buildFleetHealthReport,
   renderFleetMatrix,
+  renderFleetSummary,
   renderFleetWarnings,
   type FleetHealthRow,
 } from '../lib/devices/health-report.js';
@@ -452,7 +453,7 @@ async function probeRemoteHealth(target: FleetStatusTarget): Promise<Omit<FleetH
   };
 }
 
-async function runFleetStatus(opts: { json?: boolean; strict?: boolean; stats?: boolean; refresh?: boolean; live?: boolean }): Promise<void> {
+async function runFleetStatus(opts: { json?: boolean; strict?: boolean; stats?: boolean; refresh?: boolean; live?: boolean; verbose?: boolean }): Promise<void> {
   const reg = await loadDevices();
   const self = machineId();
   const forceRefresh = Boolean(opts.refresh || opts.live);
@@ -521,15 +522,27 @@ async function runFleetStatus(opts: { json?: boolean; strict?: boolean; stats?: 
   const authCache = readAuthHealthCache();
   for (const row of rows) {
     if (!row.auth) row.auth = summarizeHostAuth(authCache, row.name);
+    // Resolve the online/offline verdict and last-seen once (RUSH-1966) so the
+    // summary view reads one truth — the same `deviceOnlineState` ordering the
+    // registry write-back uses — instead of re-deriving it from error/skipped.
+    const profile = reg[row.name];
+    if (profile) {
+      row.online = deviceOnlineState(profile, statsMap.get(row.name));
+      row.lastSeen = profile.tailscale?.lastSeen ?? profile.reachability?.checkedAt;
+    }
   }
 
   const report = buildFleetHealthReport(rows);
   if (opts.json) {
     console.log(JSON.stringify(report, null, 2));
-  } else {
+  } else if (opts.verbose) {
+    // Full grid: the auth/CLI/sync/version columns and the warnings rollup.
     for (const line of renderFleetWarnings(report)) console.log(line);
     console.log();
     for (const line of renderFleetMatrix(report)) console.log(line);
+  } else {
+    // Default: rollup + NEEDS ATTENTION + OS-grouped quiet rows + footer.
+    for (const line of renderFleetSummary(report, { self })) console.log(line);
   }
   if (opts.strict && report.hasWarnings) process.exitCode = 1;
 }
@@ -892,14 +905,20 @@ Typical workflow:
 
   devicesCmd
     .command('status')
-    .description('Show fleet health: warnings rollup, per-device sync drift, CLI readiness, version skew, and resource headroom.')
+    .description('Fleet health at a glance: online/offline rollup, a NEEDS ATTENTION list (each with its fix command), and quiet per-device rows grouped by OS. Use --verbose for the full auth/CLI/sync grid.')
     .option('--json', 'output machine-readable JSON')
     .option('--strict', 'exit non-zero when any device has drift or is unreachable')
     .option('--no-stats', 'skip the live resource probe')
     .option('--refresh', 'force a live probe of every device, bypassing the cache')
     .option('--live', 'alias of --refresh (shorter to type)')
-    .action(async (opts: { json?: boolean; strict?: boolean; stats?: boolean; refresh?: boolean; live?: boolean }) => {
-      await runFleetStatus(opts);
+    .option('--verbose', 'show the full per-device auth/CLI/sync/version grid instead of the summary')
+    .action(async (opts: { json?: boolean; strict?: boolean; stats?: boolean; refresh?: boolean; live?: boolean; verbose?: boolean }, cmd: Command) => {
+      // The root program also defines a global `--verbose`; commander binds a
+      // shared long flag to the program, not the leaf. Read the effective value
+      // from the merged globals so `fleet status --verbose` works at either level
+      // (same pattern as `fleet ping --verbose`).
+      const verbose = opts.verbose ?? Boolean(cmd.optsWithGlobals().verbose);
+      await runFleetStatus({ ...opts, verbose });
     });
 
   devicesCmd
