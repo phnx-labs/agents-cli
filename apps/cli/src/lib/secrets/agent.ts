@@ -70,14 +70,16 @@ const SWEEP_INTERVAL_MS = 30 * 1000;
  * Timeouts for the three synchronous broker clients, split across the process
  * boundary they now straddle.
  *
- * `SOCKET_*` bound the socket round-trip inside the spawned `secrets _agent-*`
+ * `SOCKET_*` bound the socket round-trip inside the spawned `__secrets-*`
  * child, and carry over unchanged from the inline `node -e` programs these
  * replaced. `SYNC_*` bound the parent's `spawnSync` and must additionally cover
- * the child's CLI boot (~180ms for the bun-compiled binary on an M-series Mac,
- * measured), so each is its socket budget plus ~2s of headroom. A parent
- * timeout that fired before the child's own timer would report "broker down"
- * for a broker that is merely slow, which costs a Touch ID prompt — so the
- * parent budget is deliberately the looser of the two.
+ * the child's boot (~110ms for the bun-compiled binary on an M-series Mac,
+ * measured, against ~80ms for the `node -e` it replaces — the index.ts
+ * intercept keeps this off the normal command path, which costs ~180ms and
+ * forks a detached sync), so each is its socket budget plus ~2s of headroom. A
+ * parent timeout that fired before the child's own timer would report "broker
+ * down" for a broker that is merely slow, which costs a Touch ID prompt — so
+ * the parent budget is deliberately the looser of the two.
  */
 const SOCKET_GET_TIMEOUT_MS = 2000;
 const SOCKET_PING_TIMEOUT_MS = 700;
@@ -796,8 +798,15 @@ export function agentSocketExists(): boolean {
  * Same defect class as the broker-launch bug fixed in 1.20.56 (see cliSpawn's
  * doc comment); these three sites were simply never converted. Routing them
  * through `getCliLaunch` fixes both install shapes at once and keeps a single
- * code path — the CLI's own commands are lazily registered, so a hidden
- * subcommand only pulls in the secrets module, not every command.
+ * code path.
+ *
+ * The subcommands are top-level `__secrets-*` tokens intercepted in index.ts
+ * BEFORE commander and before the CLI's startup work, exactly like
+ * `__daemon-run` and `__vault-age-helper`. That is load-bearing, not cosmetic:
+ * a normal command path runs `checkForUpdates()` and `spawnDetachedSync()` on
+ * every invocation (index.ts), so registering these as ordinary hidden
+ * subcommands would fire an update check and spawn a detached background sync
+ * on every cache hit — turning the hot read path into a process fork storm.
  */
 export function syncClientLaunch(sub: string[], agentsBin?: string): { command: string; args: string[] } {
   return agentsBin ? getCliLaunch(sub, agentsBin) : getCliLaunch(sub);
@@ -815,7 +824,7 @@ function syncClient(sub: string[], timeout: number): SpawnSyncReturns<string> {
  */
 export function agentGetSync(name: string): { bundle: SecretsBundle; env: Record<string, string> } | null {
   if (!agentSocketExists()) return null;
-  const r = syncClient(['secrets', '_agent-get', name], SYNC_GET_TIMEOUT_MS);
+  const r = syncClient(['__secrets-get', name], SYNC_GET_TIMEOUT_MS);
   if (r.status !== 0 || !r.stdout) return null;
   try {
     const o = JSON.parse(lastLine(r.stdout)) as { bundle: SecretsBundle; env: Record<string, string> };
@@ -859,7 +868,7 @@ export function lastLine(stdout: string): string {
 export function agentReachableSync(): boolean {
   if (!onDarwin()) return false;
   if (!agentSocketExists()) return false;
-  const r = syncClient(['secrets', '_agent-ping'], SYNC_PING_TIMEOUT_MS);
+  const r = syncClient(['__secrets-ping'], SYNC_PING_TIMEOUT_MS);
   return r.status === 0 && !r.error;
 }
 
@@ -875,7 +884,7 @@ export function agentEvictSync(name: string): void {
   if (!onDarwin()) return;
   if (!agentSocketExists()) return;
   try {
-    syncClient(['secrets', '_agent-lock', name], SYNC_LOCK_TIMEOUT_MS);
+    syncClient(['__secrets-lock', name], SYNC_LOCK_TIMEOUT_MS);
   } catch { /* best-effort */ }
 }
 
@@ -890,8 +899,16 @@ export async function runAgentGetSync(name: string): Promise<number> {
   const r = await request({ cmd: 'get', name }, SOCKET_GET_TIMEOUT_MS);
   if (r?.ok === true && r.cmd === 'get' && r.hit) {
     // Trailing newline: the parent reads the LAST line (see lastLine), so the
-    // payload must terminate the stream even if startup chatter precedes it.
-    process.stdout.write(JSON.stringify({ bundle: r.bundle, env: r.env }) + '\n');
+    // payload must terminate the stream even if anything ever precedes it.
+    //
+    // Awaited on the write callback, not fire-and-forget: stdout is a pipe here
+    // (the parent captures it), pipe writes are asynchronous, and the caller
+    // exits the process the moment this resolves. An unflushed write would be
+    // truncated on exit — the parent would see a partial or empty payload, treat
+    // it as a miss, and fall through to a keychain read, silently costing the
+    // Touch ID prompt this whole path exists to avoid.
+    const payload = JSON.stringify({ bundle: r.bundle, env: r.env }) + '\n';
+    await new Promise<void>((resolve) => { process.stdout.write(payload, () => resolve()); });
     return 0;
   }
   return 3;

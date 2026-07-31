@@ -81,9 +81,6 @@ import {
   agentStatus,
   ensureAgentRunning,
   runAgentLoadFromStdin,
-  runAgentGetSync,
-  runAgentLockSync,
-  runAgentPingSync,
   runSecretsAgent,
   uninstallSecretsAgentService,
 } from '../lib/secrets/agent.js';
@@ -2406,32 +2403,6 @@ Examples:
     .description('Detached auto-cache worker: load a bundle from stdin into the broker (internal)')
     .action(async () => {
       await runAgentLoadFromStdin();
-    });
-
-  // The three synchronous broker clients. `readAndResolveBundleEnv` and
-  // `writeBundle` are synchronous all the way down, so they can't await a
-  // socket round-trip — they spawn one of these and read its exit code
-  // (0 = hit/alive, 3 = miss/down). Kept hidden and argument-minimal: they are
-  // an internal calling convention, not a user surface.
-  cmd
-    .command('_agent-get <name>', { hidden: true })
-    .description('Sync broker read: print a held bundle as JSON, exit 3 on miss (internal)')
-    .action(async (name: string) => {
-      process.exitCode = await runAgentGetSync(name);
-    });
-
-  cmd
-    .command('_agent-ping', { hidden: true })
-    .description('Sync broker liveness probe: exit 0 if a broker is answering (internal)')
-    .action(async () => {
-      process.exitCode = await runAgentPingSync();
-    });
-
-  cmd
-    .command('_agent-lock <name>', { hidden: true })
-    .description('Sync broker evict: drop one bundle from the hot cache (internal)')
-    .action(async (name: string) => {
-      process.exitCode = await runAgentLockSync(name);
     });
 
   registerSecretsSyncCommands(cmd);

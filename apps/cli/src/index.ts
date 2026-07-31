@@ -39,6 +39,32 @@ if (process.argv[2] === '__vault-age-helper') {
   process.exit(process.exitCode ?? 0);
 }
 
+// Synchronous secrets-broker clients (src/lib/secrets/agent.ts). These are the
+// hot read path: `readAndResolveBundleEnv` is synchronous all the way down, so
+// it can't await a socket round-trip — it spawns one of these and reads the
+// exit code (0 = hit/alive, 3 = miss/down).
+//
+// Intercepted HERE, before commander and before any startup work, for the same
+// reason as __daemon-run and __vault-age-helper above. Everything below this
+// point runs `checkForUpdates()` and `spawnDetachedSync()` on every non-help
+// invocation — so registering these as ordinary hidden subcommands would fire
+// an update check and fork a detached background sync on *every cache hit*,
+// which is both a fork storm on the hot path and a source of stdout writes that
+// could corrupt the JSON payload. Keep them above the line.
+if (
+  process.argv[2] === '__secrets-get' ||
+  process.argv[2] === '__secrets-ping' ||
+  process.argv[2] === '__secrets-lock'
+) {
+  const { runAgentGetSync, runAgentPingSync, runAgentLockSync } = await import('./lib/secrets/agent.js');
+  const name = process.argv[3] ?? '';
+  const code =
+    process.argv[2] === '__secrets-get' ? await runAgentGetSync(name)
+    : process.argv[2] === '__secrets-ping' ? await runAgentPingSync()
+    : await runAgentLockSync(name);
+  process.exit(code);
+}
+
 import {
   NPM_PACKAGE_NAME,
   deriveGlobalPrefix,
