@@ -5,7 +5,7 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { describe, it, expect } from 'vitest';
 import type { SecretsBundle } from './bundles.js';
-import { handleAgentRequest, isRequestAuthorized, makeConnectionHandler, shouldSelfHealForUpgrade, shouldTeardownVersionSkewedBroker, realBundleCount, shouldWipeOnWatchEvent, agentEvictSync, startHostedBroker, runSecretsAgent, agentPing, secretsAgentServiceInstalled, retireLegacySecretsAgentService, clampHoldMs, DEFAULT_TTL_MS, MIN_HOLD_MS, MAX_HOLD_MS, META_CACHE_PREFIX, type StoredBundle, type Response, type Request } from './agent.js';
+import { handleAgentRequest, isRequestAuthorized, makeConnectionHandler, shouldSelfHealForUpgrade, shouldTeardownVersionSkewedBroker, realBundleCount, shouldWipeOnWatchEvent, agentEvictSync, startHostedBroker, runSecretsAgent, agentPing, secretsAgentServiceInstalled, retireLegacySecretsAgentService, clampHoldMs, syncClientLaunch, lastLine, runAgentLockSync, DEFAULT_TTL_MS, MIN_HOLD_MS, MAX_HOLD_MS, META_CACHE_PREFIX, type StoredBundle, type Response, type Request } from './agent.js';
 
 /**
  * These tests target the broker's store semantics — the part with real bug
@@ -224,6 +224,17 @@ net.createServer((c) => {
 `;
 
 describe.skipIf(process.platform !== 'darwin')('agentEvictSync (real socket round-trip)', () => {
+  // The bug surface here is the REQUEST SHAPE: a lock-by-name, never a
+  // name-less lock (which wipes every held bundle and re-prompts Touch ID for
+  // all of them). This drives `runAgentLockSync` — the exact body the spawned
+  // `secrets _agent-lock` subcommand runs — against a real recording broker
+  // over a real socket, so the framing and the shape are genuinely exercised.
+  //
+  // It deliberately does not go through `agentEvictSync`'s spawn hop: that
+  // spawns the `agents` CLI, and under vitest `getAgentsBinPath()` resolves
+  // process.argv[1] to the vitest runner rather than the CLI, so the child
+  // could never answer. The spawn hop is covered instead by the launch-shape
+  // tests below, which assert the argv the old `-e` code got wrong.
   it('sends one lock-by-name request to the broker socket', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-evict-test-'));
     const prevDir = process.env.AGENTS_SECRETS_AGENT_DIR;
@@ -237,7 +248,7 @@ describe.skipIf(process.platform !== 'darwin')('agentEvictSync (real socket roun
         if (Date.now() > deadline) throw new Error('recording broker never bound its socket');
         await new Promise((r) => setTimeout(r, 25));
       }
-      agentEvictSync('prod');
+      await runAgentLockSync('prod');
       const received = fs.readFileSync(out, 'utf-8').trim().split('\n').map((l) => JSON.parse(l) as Request);
       expect(received).toEqual([{ cmd: 'lock', name: 'prod' }]);
     } finally {
@@ -586,3 +597,69 @@ describe('isRequestAuthorized (RUSH-1760: authorization gate)', () => {
     });
   },
 );
+
+/**
+ * Regression guard for the Touch-ID-on-every-read bug.
+ *
+ * The three synchronous broker clients (agentGetSync / agentReachableSync /
+ * agentEvictSync) used to spawn `process.execPath -e <inline node program>`.
+ * That is only valid when `process.execPath` is node. On the bun-compiled
+ * standalone binary shipped since 1.20.53 it resolves to the CLI itself, so the
+ * spawn became `agents -e …`, commander rejected it with `unknown option '-e'`,
+ * and every client took its failure path — which reads as "broker down". The
+ * cache was therefore never hit on the shipped binary, the `daily` policy's
+ * one-prompt-per-7d never applied, and every bundle read re-popped Touch ID.
+ *
+ * These assert the launch shape directly, because the failure was silent: the
+ * old code still "worked" (returned null) and no test noticed.
+ */
+describe('sync broker clients launch correctly on both install shapes', () => {
+  const subs = [
+    ['secrets', '_agent-get', 'prod'],
+    ['secrets', '_agent-ping'],
+    ['secrets', '_agent-lock', 'prod'],
+  ];
+
+  it('never spawns with -e on the bun standalone binary', () => {
+    for (const sub of subs) {
+      const { command, args } = syncClientLaunch(sub, '/$bunfs/root/agents');
+      // The exact bug: '-e' as argv[0] of the child, which commander rejects.
+      expect(args).not.toContain('-e');
+      // The bunfs virtual path is not exec-able and must never be command or argv.
+      expect(command.includes('$bunfs')).toBe(false);
+      expect(args.some((a) => a.includes('$bunfs'))).toBe(false);
+      // The subcommand must arrive intact, or the child can't answer.
+      expect(args.slice(-sub.length)).toEqual(sub);
+    }
+  });
+
+  it('never spawns with -e on a plain JS install', () => {
+    for (const sub of subs) {
+      const { args } = syncClientLaunch(sub, '/usr/local/lib/agents-cli/dist/index.js');
+      expect(args).not.toContain('-e');
+      expect(args.slice(-sub.length)).toEqual(sub);
+    }
+  });
+});
+
+describe('lastLine', () => {
+  // The child is now the full CLI, so startup chatter can share stdout with the
+  // payload. Parsing the whole stream would throw and silently degrade every
+  // cache hit into a miss — i.e. reintroduce the bug above.
+  it('returns the payload line even when startup chatter precedes it', () => {
+    const payload = '{"bundle":{"name":"prod"},"env":{"K":"v"}}';
+    expect(lastLine(`agents-cli: ~/.agents/ is 4 commits behind origin/main\n${payload}\n`)).toBe(payload);
+    expect(JSON.parse(lastLine(`some notice\n\n${payload}\n\n`))).toMatchObject({ env: { K: 'v' } });
+  });
+
+  it('returns the payload when it is the only line, with or without a trailing newline', () => {
+    const payload = '{"env":{}}';
+    expect(lastLine(payload)).toBe(payload);
+    expect(lastLine(`${payload}\n`)).toBe(payload);
+  });
+
+  it('returns empty string for empty or whitespace-only stdout', () => {
+    expect(lastLine('')).toBe('');
+    expect(lastLine('\n  \n')).toBe('');
+  });
+});
