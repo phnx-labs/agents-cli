@@ -98,7 +98,7 @@ export const commandsWriters = lazyAgentMap<ResourceWriter<string[]>>(() => {
     const cfg = AGENTS[id];
     if (cfg.capabilities.commands === false && (!cfg.skillsDir || cfg.skillsDir === '')) continue;
     // Skills-capable agent with no native command-file dir: convert commands to
-    // skills by default (grok, kimi, …). Opt out only agents with their own
+    // skills by default (kimi, …). Opt out only agents with their own
     // slash-command runtime (openclaw).
     if (cfg.capabilities.commands === false && (!cfg.commandsSubdir || cfg.commandsSubdir === '')) {
       if (cfg.nativeCommandRuntime) continue;
