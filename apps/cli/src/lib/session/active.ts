@@ -924,19 +924,25 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
   // of one simultaneous system-wide burst that behavioral EDR flags as recon.
   const cwds = await resolveCwds(kept.map(c => c.pid));
 
-  // Invert the ppid map once so the hook resolver can check a recorded pid's
-  // immediate children (the hook records under the agent pid; a wrapper/shell pid
-  // we recorded has the agent as a child).
-  const childrenByParent = new Map<number, number[]>();
-  for (const [childPid, parentPid] of ppidMap) {
-    const arr = childrenByParent.get(parentPid);
-    if (arr) arr.push(childPid);
-    else childrenByParent.set(parentPid, [childPid]);
-  }
-  // The hook state dir is scanned at most ONCE per active-scan (built lazily, only
-  // when a candidate lacks an exact launch-time id — skipped entirely for an
-  // all-Claude set). The ~3s poll must not re-read the dir per candidate.
+  // The hook state dir is scanned at most ONCE per active-scan, and the ppid map
+  // is inverted at most once — both built lazily on the first candidate that
+  // lacks an exact launch-time id, so an all-Claude set does neither. The ~3s
+  // poll must not re-read the dir (or re-invert the map) per candidate.
   let hookIndex: HookSessionIndex | undefined;
+  let childrenByParent: Map<number, number[]> | undefined;
+  const ensureChildren = (): Map<number, number[]> => {
+    if (childrenByParent) return childrenByParent;
+    const m = new Map<number, number[]>();
+    // The hook records under the agent pid; a wrapper/shell pid we recorded has
+    // the agent as a child, so we resolve via a recorded pid's immediate children.
+    for (const [childPid, parentPid] of ppidMap) {
+      const arr = m.get(parentPid);
+      if (arr) arr.push(childPid);
+      else m.set(parentPid, [childPid]);
+    }
+    childrenByParent = m;
+    return m;
+  };
 
   const out: ActiveSession[] = [];
   for (let i = 0; i < kept.length; i++) {
@@ -960,7 +966,7 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
         kind,
         launchId: entry?.launchId,
         terminalId: entry?.terminalId,
-        childPids: childrenByParent.get(pid),
+        childPids: ensureChildren().get(pid),
       });
     }
     const cwd = cwds[i] ?? entry?.cwd ?? undefined;

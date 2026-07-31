@@ -61,10 +61,11 @@ function parseRecord(raw: string): HookSessionRecord | undefined {
   return undefined;
 }
 
-/** Keep the newest record (by `ts`) when two collide on the same key. */
+/** Keep the newest record (by `ts`) when two collide on the same key. Uses the
+ *  same strict `>` tie-break as the session-tracker's own reader (reader.ts). */
 function keepNewest(map: Map<string | number, HookSessionRecord>, key: string | number, rec: HookSessionRecord): void {
   const prev = map.get(key);
-  if (!prev || (rec.ts ?? 0) >= (prev.ts ?? 0)) map.set(key, rec);
+  if (!prev || (rec.ts ?? 0) > (prev.ts ?? 0)) map.set(key, rec);
 }
 
 /**

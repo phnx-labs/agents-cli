@@ -31,7 +31,8 @@ export interface PidSessionEntry {
    * `AGENT_LAUNCH_ID`. The agent's SessionStart hook records the SAME id in its
    * own state file (`terminals/sessions/<pid>.json`, `launch_id`), so the two
    * records reconcile by this key even when the hook runs under a DIFFERENT pid
-   * (tmux pane leaf, cmd.exe wrapper) — see readHookSessionId in active.ts. This
+   * (tmux pane leaf, cmd.exe wrapper) — see resolveHookSessionId in
+   * session/hook-sessions.ts. This
    * is how a non-Claude launch (whose id we don't know at spawn) gets an exact
    * session id at listing time instead of the newest-jsonl heuristic.
    */
