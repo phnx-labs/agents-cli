@@ -912,6 +912,18 @@ export function parseHookManifest(opts: { warn?: boolean } = {}): Record<string,
   return merged;
 }
 
+export function selectHookManifest(
+  manifest: Record<string, ManifestHook>,
+  selected: string[]
+): Record<string, ManifestHook> {
+  const selectedHooks = new Set(selected);
+  return Object.fromEntries(
+    Object.entries(manifest).filter(([name, hook]) =>
+      selectedHooks.has(name) || selectedHooks.has(path.basename(hook.script))
+    )
+  );
+}
+
 /**
  * Hook script files present on disk that no manifest entry declares — "dead"
  * hooks. The registrar only wires manifest-declared hooks into an agent's
@@ -1064,6 +1076,14 @@ export function registerHooksToSettings(
 ): { registered: string[]; errors: string[] } {
   const manifest = hookManifest || parseHookManifest();
   if (Object.keys(manifest).length === 0) {
+    if (agentId === 'opencode') {
+      const pluginPath = path.join(versionHome, '.config', 'opencode', 'plugins', 'agents-cli-hooks.ts');
+      try {
+        fs.rmSync(pluginPath, { force: true });
+      } catch (e) {
+        return { registered: [], errors: [`Failed to remove agents-cli-hooks.ts: ${(e as Error).message}`] };
+      }
+    }
     return { registered: [], errors: [] };
   }
   sweepOrphanShims(manifest);
@@ -1170,6 +1190,7 @@ const OPENCODE_LIFECYCLE_EVENT_MAP: Record<string, string[]> = {
 type OpenCodeGeneratedHook = {
   name: string;
   command: string;
+  timeout: number;
   matcher?: string;
 };
 
@@ -1199,7 +1220,12 @@ function registerHooksForOpenCode(
       errors.push(`${name}: script not found`);
       continue;
     }
-    const generated = { name, command, ...(hookDef.matcher ? { matcher: hookDef.matcher } : {}) };
+    const generated = {
+      name,
+      command,
+      timeout: hookDef.timeout ?? 30,
+      ...(hookDef.matcher ? { matcher: hookDef.matcher } : {}),
+    };
     for (const event of hookDef.events) {
       const directEvent = OPENCODE_DIRECT_EVENT_MAP[event];
       if (directEvent) {
@@ -1236,7 +1262,12 @@ async function runHooks(hooks, payload, $) {
   for (const hook of hooks ?? []) {
     if (!matches(hook, payload.tool_name ?? "")) continue
     const input = new Response(JSON.stringify(payload))
-    const result = await $\`\${hook.command} < \${input}\`.nothrow().quiet()
+    const command = $\`\${hook.command} < \${input}\`.nothrow().quiet()
+    let timer
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(\`\${hook.name} timed out after \${hook.timeout} seconds\`)), hook.timeout * 1000)
+    })
+    const result = await Promise.race([command, timeout]).finally(() => clearTimeout(timer))
     if (result.exitCode !== 0) {
       throw new Error(\`\${hook.name} failed with exit code \${result.exitCode}: \${result.stderr.toString().trim()}\`)
     }

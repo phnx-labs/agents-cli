@@ -2,8 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { $ } from 'bun';
 
-import { registerHooksToSettings, unmanagedHookNames, computeCodexHookTrustHash, toPortableCommand, pruneVersionHomeHookEntriesFromSettings } from '../hooks.js';
+import { registerHooksToSettings, selectHookManifest, unmanagedHookNames, computeCodexHookTrustHash, toPortableCommand, pruneVersionHomeHookEntriesFromSettings } from '../hooks.js';
 import * as TOML from 'smol-toml';
 import * as yaml from 'yaml';
 import { CODEX_HOOKS_MIN_VERSION } from '../agents.js';
@@ -525,8 +526,85 @@ describe('registerHooksToSettings - OpenCode', () => {
     expect(plugin).toContain('"session.idle"');
     expect(plugin).toContain('"session.error"');
     expect(plugin).toContain('const input = new Response(JSON.stringify(payload))');
-    expect(plugin).toContain('await $`${hook.command} < ${input}`.nothrow().quiet()');
+    expect(plugin).toContain('const command = $`${hook.command} < ${input}`.nothrow().quiet()');
+    expect(plugin).toContain('"timeout": 30');
     expect(plugin).toContain('"matcher": "Bash|bash"');
+  });
+
+  it('compiles only the explicitly selected hook script', () => {
+    const selected = selectHookManifest({
+      first: { script: 'first.sh', events: ['SessionStart'] },
+      differentlyNamed: { script: 'second.sh', events: ['SessionStart'] },
+    }, ['second.sh']);
+
+    expect(selected).toEqual({
+      differentlyNamed: { script: 'second.sh', events: ['SessionStart'] },
+    });
+  });
+
+  it('removes its generated plugin when the selected manifest becomes empty', () => {
+    makeScript('lifecycle.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    registerHooksToSettings('opencode', versionHome, {
+      lifecycle: { script: 'lifecycle.sh', events: ['SessionStart'] },
+    }, agentsDir);
+    const pluginPath = path.join(
+      versionHome, '.config', 'opencode', 'plugins', 'agents-cli-hooks.ts'
+    );
+    expect(fs.existsSync(pluginPath)).toBe(true);
+
+    const result = registerHooksToSettings('opencode', versionHome, {}, agentsDir);
+    expect(result).toEqual({ registered: [], errors: [] });
+    expect(fs.existsSync(pluginPath)).toBe(false);
+  });
+
+  it('executes matching hooks, skips non-matches, and surfaces nonzero exits', async () => {
+    const outputPath = path.join(tmpDir, 'hook-input.json');
+    const scriptPath = path.join(agentsDir, 'hooks', 'capture.sh');
+    fs.writeFileSync(scriptPath, `#!/bin/sh\ncat > ${JSON.stringify(outputPath)}\n`, 'utf-8');
+    fs.chmodSync(scriptPath, 0o755);
+    const versionHome = path.join(tmpDir, 'home');
+    registerHooksToSettings('opencode', versionHome, {
+      capture: { script: 'capture.sh', events: ['PreToolUse'], matcher: '^bash$' },
+    }, agentsDir);
+    const pluginPath = path.join(
+      versionHome, '.config', 'opencode', 'plugins', 'agents-cli-hooks.ts'
+    );
+    const { AgentsCliHooks } = await import(`${pluginPath}?run=${Date.now()}`);
+    const plugin = await AgentsCliHooks({ $ });
+
+    await plugin['tool.execute.before']({ tool: 'read', sessionID: 'skip' }, { args: {} });
+    expect(fs.existsSync(outputPath)).toBe(false);
+    await plugin['tool.execute.before']({ tool: 'bash', sessionID: 'run' }, { args: { command: 'true' } });
+    expect(JSON.parse(fs.readFileSync(outputPath, 'utf-8'))).toMatchObject({
+      hook_event_name: 'PreToolUse',
+      tool_name: 'bash',
+      sessionID: 'run',
+    });
+
+    fs.writeFileSync(scriptPath, '#!/bin/sh\necho rejected >&2\nexit 7\n', 'utf-8');
+    await expect(
+      plugin['tool.execute.before']({ tool: 'bash', sessionID: 'fail' }, { args: {} })
+    ).rejects.toThrow('capture failed with exit code 7: rejected');
+  });
+
+  it('enforces the manifest timeout', async () => {
+    const scriptPath = path.join(agentsDir, 'hooks', 'slow.sh');
+    fs.writeFileSync(scriptPath, '#!/bin/sh\nsleep 1\n', 'utf-8');
+    fs.chmodSync(scriptPath, 0o755);
+    const versionHome = path.join(tmpDir, 'home');
+    registerHooksToSettings('opencode', versionHome, {
+      slow: { script: 'slow.sh', events: ['SessionStart'], timeout: 0.01 },
+    }, agentsDir);
+    const pluginPath = path.join(
+      versionHome, '.config', 'opencode', 'plugins', 'agents-cli-hooks.ts'
+    );
+    const { AgentsCliHooks } = await import(`${pluginPath}?timeout=${Date.now()}`);
+    const plugin = await AgentsCliHooks({ $ });
+
+    await expect(plugin.event({
+      event: { type: 'session.created', properties: { info: { id: 'timeout' } } },
+    })).rejects.toThrow('slow timed out after 0.01 seconds');
   });
 
   it('reports missing scripts without registering an event', () => {

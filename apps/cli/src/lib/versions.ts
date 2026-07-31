@@ -48,7 +48,7 @@ import { importInstallScriptBinary } from './import.js';
 import { IS_WINDOWS, composeWin32CommandLine } from './platform/index.js';
 import { listInstalledSubagents, transformSubagentForClaude, syncSubagentToOpenclaw } from './subagents.js';
 import { listInstalledWorkflows, syncWorkflowToVersion } from './workflows.js';
-import { parseHookManifest, registerHooksToSettings, pruneVersionHomeHookEntriesFromSettings } from './hooks.js';
+import { parseHookManifest, registerHooksToSettings, selectHookManifest, pruneVersionHomeHookEntriesFromSettings } from './hooks.js';
 import { supports, explainSkip, capableAgents } from './capabilities.js';
 import { discoverPlugins, syncPluginToVersion, isPluginSynced, pluginSupportsAgent, cleanOrphanedPluginSkills, marketplaceSpecForName } from './plugins.js';
 import { composeRulesFromState } from './rules/compose.js';
@@ -2844,6 +2844,7 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
         ? resolveSelection(selection.hooks, available.hooks)
         : available.hooks;
 
+      let hookManifest: ReturnType<typeof parseHookManifest> = {};
       if (hooksToSync.length > 0) {
         const r = hooksWriter.write({ version, versionHome, selection: hooksToSync, cwd });
         // Remove orphan files from version home. The trusted set is the
@@ -2861,9 +2862,10 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
           }
         }
         result.hooks = r.synced.length > 0;
-        if (result.hooks && agent === 'opencode') {
-          registerHooksToSettings(agent, versionHome, parseHookManifest());
-        }
+        hookManifest = selectHookManifest(parseHookManifest(), hooksToSync);
+      }
+      if (agent === 'opencode') {
+        registerHooksToSettings(agent, versionHome, hookManifest);
       }
     }
   }
