@@ -4,7 +4,7 @@ Named multi-agent pipeline bundles that agents-cli resolves and dispatches via `
 
 ## Overview
 
-A workflow is a directory containing a `WORKFLOW.md` file with YAML frontmatter and an orchestrator system prompt. Optionally, the directory includes `subagents/`, `skills/`, and `plugins/` subdirectories composed at runtime. Workflows are stored in `~/.agents/workflows/` (user) or `.agents/workflows/` (project) and synced to agent version homes. Claude, Kimi, Goose, Antigravity, and OpenClaw are workflow-capable (`capableAgents('workflows')` in `src/lib/agents.ts`).
+A workflow is a directory containing a `WORKFLOW.md` file with YAML frontmatter and an orchestrator system prompt. Optionally, the directory includes `subagents/`, `skills/`, and `plugins/` subdirectories composed at runtime. Workflows are stored in `~/.agents/workflows/` (user) or `.agents/workflows/` (project) and synced to agent version homes. Claude, Kimi, Goose, Antigravity, OpenClaw, and Grok ≥ 0.2.111 are workflow-capable (`capableAgents('workflows')` in `src/lib/agents.ts`). Grok receives a native Rhai projection at `{versionHome}/.grok/workflows/<name>.rhai` (under `GROK_HOME`), exposed as `/<name>` slash commands.
 
 Run a workflow with `agents run <workflow-name> [prompt]`. The workflow name replaces the agent argument in the normal `agents run` invocation. The frontmatter controls which model is used, which tools are available, which MCP servers are connected, and which secrets are injected. If the workflow writes files or posts comments, pass `--mode edit` or `--mode full` — the default `--mode plan` will deadlock at `ExitPlanMode`.
 

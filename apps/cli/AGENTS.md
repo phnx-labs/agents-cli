@@ -99,7 +99,7 @@ Antigravity CLI, Grok CLI, OpenCode — features target these six first.
 | ★ Codex CLI | `codex` | ≥0.116 | ✓ | — | ✓ | <0.117 | ≥0.128 | ≥0.117 | — |
 | ★ Kimi CLI | `kimi` | ✓ | ✓ | ✓ | ✓ | — | ✓ | ✓ | ✓ |
 | ★ Antigravity CLI | `antigravity` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ≥1.0.16 | ≥1.0.6 |
-| ★ Grok CLI | `grok` | ✓ | ✓ | ✓ | ✓ | — | ✓ | ✓ | — |
+| ★ Grok CLI | `grok` | ✓ | ✓ | ✓ | ✓ | — | ✓ | ✓ | ≥0.2.111 |
 | ★ OpenCode | `opencode` | — | ✓ | ≥1.1.1 | ✓ | ✓ | ✓ | — | — |
 | Gemini † | `gemini` | ≥0.26 | ✓ | ✓ | ✓ | ✓ | ≥0.8 | ≥0.36 | — |
 | Cursor | `cursor` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ≥2026.1.22 | — |
@@ -114,7 +114,7 @@ Antigravity CLI, Grok CLI, OpenCode — features target these six first.
 ✓ = supported · — = not · version cell = only within that range (out-of-range =
 skipped silently). [`src/lib/agents.ts`](src/lib/agents.ts) is canonical — keep this
 snapshot in sync. `workflows` is `claude`/`kimi`/`goose`/`antigravity` (≥1.0.6, written to the
-shared HOME-global `~/.gemini/config/global_workflows/`, not a per-version home), and `openclaw` (Lobster `.lobster` files under `.openclaw/workflows/`); `mcp` is universal; `allowlist` is
+shared HOME-global `~/.gemini/config/global_workflows/`, not a per-version home), `openclaw` (Lobster `.lobster` files under `.openclaw/workflows/`), and `grok` (≥0.2.111, native Rhai under `.grok/workflows/`); `mcp` is universal; `allowlist` is
 `claude`/`gemini`/`cursor`/`opencode`/`antigravity`/`grok`/`kimi`/`kiro`/`droid`/`goose`/`openclaw`/`copilot` (Copilot writes per-location approvals to `~/.copilot/permissions-config.json`; OpenClaw is tool-level only —
 blanket rules map to `~/.openclaw/openclaw.json` `tools.alsoAllow`/`tools.deny`, sub-command patterns skipped); `subagents` is `claude`/`codex`/`kiro`/`kimi`/`grok`/`openclaw`/`droid`/`copilot`/`antigravity`/`gemini`/`cursor` (≥2026.1.22).
 **† Gemini is deprecated by Google** (retired June 18 2026); Antigravity is the
