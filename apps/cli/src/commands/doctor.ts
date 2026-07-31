@@ -59,6 +59,7 @@ import { listCliStatus } from '../lib/cli-resources.js';
 import { setHelpSections } from '../lib/help.js';
 import { heal, healChangedAnything, type HealResult } from '../lib/heal.js';
 import { blocksLocalScripts, getEffectiveExecutionPolicy } from '../lib/platform/winpath.js';
+import { scanUserRcFiles, rcSecretWarningLines } from '../lib/secrets/rc-hygiene.js';
 import { terminalWidth, truncateToWidth, stringWidth, padToWidth } from '../lib/session/width.js';
 import * as fs from 'fs';
 
@@ -232,6 +233,11 @@ function renderOverviewText(
   // generated `agents.ps1` launcher — postinstall diagnoses it interactively,
   // but a non-interactive install never sees that. Surface it here too.
   renderExecPolicyAdvisory();
+
+  // Credentials exported from a shell rc file leak into every process's
+  // environment (readable via /proc/<pid>/environ) — the RUSH-1968 class. Flag
+  // them here so the master passphrase never silently lives in `~/.zshenv` again.
+  renderRcHygieneAdvisory();
 }
 
 // ─── windows execution-policy advisory ─────────────────────────────────────────
@@ -253,6 +259,19 @@ export function execPolicyWarningLines(platform: NodeJS.Platform, policy: string
     'Fix: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned',
     'The agents.cmd shim still works regardless of the policy.',
   ];
+}
+
+function renderRcHygieneAdvisory(): void {
+  const findings = scanUserRcFiles();
+  const lines = rcSecretWarningLines(findings);
+  if (lines.length === 0) return;
+  console.log();
+  console.log(chalk.bold('Secrets in shell config'));
+  const [headline, ...rest] = lines;
+  console.log(`  ${chalk.yellow('warn ')}  ${headline}`);
+  for (const line of rest) {
+    console.log(chalk.gray(`           ${line}`));
+  }
 }
 
 function renderExecPolicyAdvisory(): void {
