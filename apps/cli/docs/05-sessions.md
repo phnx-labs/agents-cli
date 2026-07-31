@@ -1,12 +1,14 @@
 # Sessions
 
 Unified discovery, search, and rendering of agent conversation transcripts across
-Claude, Codex, Gemini, OpenCode, and OpenClaw.
+the session-discoverable harnesses — Claude, Codex, Gemini, Antigravity, OpenCode,
+OpenClaw, Rush, Hermes, Grok, Kimi, and Droid (the `SESSION_AGENTS` set in
+`src/lib/session/types.ts`).
 
 ## Architecture
 
 ```
-~/.agents/
+~/.agents/.history/
   sessions/
     sessions.db                 # SQLite + FTS5 index
     sessions.db-wal             # Write-ahead log (WAL mode)
@@ -82,7 +84,7 @@ Fields:
 |---|---|---|
 | `id` | Agent-native UUID | Primary key; stable across reloads |
 | `shortId` | First 8 chars of `id` | For human matching in CLI output |
-| `agent` | One of 5 formats | See SessionAgentId union |
+| `agent` | One of 11 formats | See the `SessionAgentId` / `SESSION_AGENTS` union |
 | `origin` | `cli` or `routine` | Routine rows are archived from a run directory and can be filtered with `--routine` |
 | `routineName` | Routine name | Present when `origin` is `routine` |
 | `routineRunId` | Routine run id | Present when `origin` is `routine`; `agents sessions <runId>` resolves it |
@@ -416,10 +418,14 @@ generating the encryption key if absent.
 
 ## Schema Version
 
-Schema version is currently `6`. Migrations run on connection open; old DBs
-get upgraded in place. The `meta` table tracks `schema_version`. The `v5 → v6`
-migration adds the `cost_usd` and `duration_ms` columns and forces a full
-rescan so every existing session is re-priced.
+Schema version is currently `13` (`SCHEMA_VERSION` in
+[`src/lib/session/db.ts`](../src/lib/session/db.ts)). Migrations run on connection
+open; old DBs get upgraded in place. The `meta` table tracks `schema_version`.
+Later migrations added, among others, `cost_usd` / `duration_ms` (pricing), the
+work-signal columns `pr_url` / `pr_number` / `worktree_slug` / `ticket_id`, the
+`plan` markdown, `output_tokens`, and `is_team_origin`. A migration that changes how
+a column is derived forces a full rescan so every existing session is re-derived
+(as the pricing columns once did).
 
 ## Related
 

@@ -170,7 +170,7 @@ Each source answers a different question:
 
 | Source | Question | Coverage | Misses |
 |---|---|---|---|
-| `agents sessions --json` | What local CLI and team-spawned agents have run recently? | Claude, Codex, Gemini, OpenCode, OpenClaw on this laptop | Pure-cloud runs with no local file |
+| `agents sessions --json` | What local CLI and team-spawned agents have run recently? | The `SESSION_AGENTS` harnesses on this laptop (Claude, Codex, Gemini, Antigravity, OpenCode, OpenClaw, Rush, Hermes, Grok, Kimi, Droid) | Pure-cloud runs with no local file |
 | `agents cloud list --json` | What am I running on remote VMs right now? | Rush Cloud, Codex Cloud, Factory | Local sessions |
 | `agents teams list --json` | What multi-agent DAGs are active? | All team-coordinated runs | Standalone agents |
 
@@ -350,7 +350,7 @@ dumps the edge list, and `--watch` streams NDJSON.
 
 Every session is priced at scan time: `cost_usd = Σ tokens × per-model price`
 and `duration_ms = lastTs − firstTs` are persisted on the session row (schema
-v6). The price table is offline and versioned — no API calls, no telemetry —
+v13). The price table is offline and versioned — no API calls, no telemetry —
 covering current Claude, OpenAI, and Gemini models. Unknown/unpriced models
 contribute `$0`, never `NaN`.
 
