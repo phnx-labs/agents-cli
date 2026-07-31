@@ -19,6 +19,28 @@ PROFILE="$REPO_ROOT/bin/embedded.provisionprofile"
 ENTITLEMENTS="$REPO_ROOT/scripts/keychain-entitlements.plist"
 APP="$REPO_ROOT/bin/Agents CLI.app"
 BIN="$APP/Contents/MacOS/Agents CLI"
+LOGO="$REPO_ROOT/../assets/logo.png"
+
+# Build an .icns from the master logo. Runs on macOS only (sips + iconutil).
+generate_app_icon() {
+    local src="$1"
+    local dst="$2"
+    local iconset="${dst%.icns}.iconset"
+    rm -rf "$iconset" "$dst"
+    mkdir -p "$iconset"
+    sips -z 16 16     "$src" --out "$iconset/icon_16x16.png"     >/dev/null 2>&1
+    sips -z 32 32     "$src" --out "$iconset/icon_16x16@2x.png"  >/dev/null 2>&1
+    sips -z 32 32     "$src" --out "$iconset/icon_32x32.png"     >/dev/null 2>&1
+    sips -z 64 64     "$src" --out "$iconset/icon_32x32@2x.png"  >/dev/null 2>&1
+    sips -z 128 128   "$src" --out "$iconset/icon_128x128.png"   >/dev/null 2>&1
+    sips -z 256 256   "$src" --out "$iconset/icon_128x128@2x.png" >/dev/null 2>&1
+    sips -z 256 256   "$src" --out "$iconset/icon_256x256.png"   >/dev/null 2>&1
+    sips -z 512 512   "$src" --out "$iconset/icon_256x256@2x.png" >/dev/null 2>&1
+    sips -z 512 512   "$src" --out "$iconset/icon_512x512.png"   >/dev/null 2>&1
+    sips -z 1024 1024 "$src" --out "$iconset/icon_512x512@2x.png" >/dev/null 2>&1
+    iconutil -c icns "$iconset" -o "$dst"
+    rm -rf "$iconset"
+}
 
 : "${APPLE_ID:?APPLE_ID not set}"
 : "${APPLE_APP_SPECIFIC_PASSWORD:?APPLE_APP_SPECIFIC_PASSWORD not set}"
@@ -30,6 +52,10 @@ SIGN_IDENTITY="Developer ID Application: Muqit Nawaz ($APPLE_TEAM_ID)"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/Resources"
+
+echo "Generating icon..."
+generate_app_icon "$LOGO" "$APP/Contents/Resources/AppIcon.icns"
 
 echo "Compiling arm64..."
 swiftc -O -target arm64-apple-macos12 "$SOURCE" -o /tmp/agents-keychain-arm64
@@ -52,6 +78,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <string>Agents CLI</string>
   <key>CFBundleDisplayName</key>
   <string>Agents CLI</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
   <key>CFBundleExecutable</key>
   <string>Agents CLI</string>
   <key>CFBundlePackageType</key>
