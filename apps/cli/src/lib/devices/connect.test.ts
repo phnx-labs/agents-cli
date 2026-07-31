@@ -9,7 +9,7 @@
  * injection guard.
  */
 import { describe, expect, it } from 'vitest';
-import { buildAskpassShimBody, buildSshInvocation, fleetDialTarget, sshTargetFor, wrapRemoteCommand, ASKPASS_BUNDLE_ENV, ASKPASS_KEY_ENV } from './connect.js';
+import { buildAskpassShimBody, buildSshInvocation, fleetDialTarget, sshTargetFor, wrapRemoteCommand, ASKPASS_BUNDLE_ENV, ASKPASS_KEY_ENV, ASKPASS_AGENT_ONLY_ENV } from './connect.js';
 import type { DeviceProfile } from './registry.js';
 
 function decodePowerShell(cmd: string): string {
@@ -92,6 +92,40 @@ describe('buildSshInvocation', () => {
     expect(args).toContain('PubkeyAuthentication=no');
     expect(args).toContain('NumberOfPasswordPrompts=1');
     expect(args).not.toContain('BatchMode=yes');
+    // A normal (non-probe) connect must NOT force broker-only: an interactive
+    // `agents ssh` still resolves the password via the usual TTY/headless path.
+    expect(env[ASKPASS_AGENT_ONLY_ENV]).toBeUndefined();
+  });
+
+  // RUSH-1970: a read-only stats probe (the load/mem columns of `agents devices`)
+  // must resolve a password bundle broker-only, so it never pops a Touch ID sheet
+  // just to render a row. probeDeviceStats (health.ts) calls buildSshInvocation with
+  // agentOnly:true; the askpass subprocess reads ASKPASS_AGENT_ONLY_ENV and forces
+  // a broker-only resolve regardless of TTY.
+  it('agentOnly stats probe of a password device forces a broker-only askpass resolve', () => {
+    const { env } = buildSshInvocation(
+      dev({ name: 'pinnacles', user: 'muqsit', auth: { method: 'password', bundle: 'muqsit', bundleKey: 'password' } }),
+      ['uptime'],
+      '/shim/askpass.sh',
+      {},
+      { agentOnly: true },
+    );
+    expect(env[ASKPASS_AGENT_ONLY_ENV]).toBe('1');
+    // still the normal password wiring — the probe just adds the broker-only flag
+    expect(env[ASKPASS_BUNDLE_ENV]).toBe('muqsit');
+    expect(env.SSH_ASKPASS).toBe('/shim/askpass.sh');
+  });
+
+  it('agentOnly on a key-auth device is a no-op (no bundle, no broker flag)', () => {
+    const { env } = buildSshInvocation(
+      dev({ name: 'k', user: 'me', auth: { method: 'key' } }),
+      ['uptime'],
+      '/shim',
+      {},
+      { agentOnly: true },
+    );
+    expect(env[ASKPASS_AGENT_ONLY_ENV]).toBeUndefined();
+    expect(env.SSH_ASKPASS).toBeUndefined();
   });
 
   it('Windows password device wraps the command AND keeps the shim', () => {

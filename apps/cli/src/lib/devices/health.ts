@@ -221,7 +221,10 @@ export function probeDeviceStats(
     // remote login shell, which evaluates the snippet's `;`/`||` directly — no
     // `sh -c` wrapper needed (and a wrapper would only re-quote the first token).
     // For powershell devices it base64-encodes the snippet instead.
-    ({ args, env } = buildSshInvocation(device, [isWin ? WIN_PROBE_SNIPPET : PROBE_SNIPPET], shim));
+    // agentOnly: this is a read-only stats probe. A password-auth device must
+    // resolve its bundle broker-only — never force a foreground Touch ID sheet
+    // just to render the load/mem columns of `agents devices` (RUSH-1970).
+    ({ args, env } = buildSshInvocation(device, [isWin ? WIN_PROBE_SNIPPET : PROBE_SNIPPET], shim, {}, { agentOnly: true }));
   } catch {
     return Promise.resolve({ host, reachable: false, fetchedAt });
   }

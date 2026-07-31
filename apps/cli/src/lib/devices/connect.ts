@@ -27,6 +27,14 @@ import { type DeviceProfile } from './registry.js';
 export const ASKPASS_BUNDLE_ENV = 'AGENTS_SSH_BUNDLE';
 /** Env var the askpass shim reads to know which key in the bundle is the password. */
 export const ASKPASS_KEY_ENV = 'AGENTS_SSH_KEY';
+/**
+ * Env var that forces the askpass bundle resolve to be broker-only (`agentOnly`)
+ * regardless of TTY. A read-only stats probe (`agents devices` load/mem columns)
+ * sets this so an uncached password-auth device resolves from the already-unlocked
+ * secrets broker or degrades to an unreachable row — never a foreground Touch ID
+ * sheet. See {@link buildSshInvocation}'s `agentOnly` option and `runAskpass`. (RUSH-1970)
+ */
+export const ASKPASS_AGENT_ONLY_ENV = 'AGENTS_SSH_AGENT_ONLY';
 
 /**
  * Build the `user@host` (or bare `host`) ssh target for a device and validate
@@ -101,12 +109,17 @@ export interface SshHostKeyOptions {
  * Host-key checking runs against the CLI-managed known_hosts store (never the
  * user's `~/.ssh/known_hosts`): strict once `hostKey.pinned` is set, else
  * `accept-new` to learn+pin the key on first connect (RUSH-1767).
+ *
+ * `opts.agentOnly` marks the connection as a read-only probe: for password auth
+ * it sets {@link ASKPASS_AGENT_ONLY_ENV} in the overlay so the askpass resolve
+ * stays broker-only and never pops a foreground biometric (RUSH-1970).
  */
 export function buildSshInvocation(
   device: DeviceProfile,
   cmd: string[],
   askpassShimPath: string,
   hostKey: SshHostKeyOptions = {},
+  opts: { agentOnly?: boolean } = {},
 ): { args: string[]; env: Record<string, string> } {
   const target = sshTargetFor(device);
   const remote = wrapRemoteCommand(device, cmd);
@@ -124,6 +137,7 @@ export function buildSshInvocation(
     env.SSH_ASKPASS_REQUIRE = 'force';
     env[ASKPASS_BUNDLE_ENV] = device.auth.bundle;
     env[ASKPASS_KEY_ENV] = device.auth.bundleKey ?? 'password';
+    if (opts.agentOnly) env[ASKPASS_AGENT_ONLY_ENV] = '1';
     args.push('-o', 'PreferredAuthentications=password', '-o', 'PubkeyAuthentication=no', '-o', 'NumberOfPasswordPrompts=1');
   } else {
     args.push('-o', 'BatchMode=yes');
