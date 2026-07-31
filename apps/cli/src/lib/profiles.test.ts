@@ -145,6 +145,18 @@ describe('resolveProfileEnv honors authOptional', () => {
     expect(env.OPENCODE_MODEL).toBe('meta/muse-spark-1.1');
     expect(env.OPENCODE_API_KEY).toBeUndefined();
   });
+
+  it('STILL throws for REQUIRED auth with a missing token (the load-bearing safety property)', () => {
+    // authOptional omitted (required). A missing keychain item must hard-fail —
+    // the authOptional skip must never leak into the required-auth path.
+    const p: Profile = {
+      name: 'corp',
+      host: { agent: 'claude' },
+      env: { ANTHROPIC_MODEL: 'gpt-x' },
+      auth: { envVar: 'ANTHROPIC_AUTH_TOKEN', keychainItem: 'agents-cli.no-such-provider-xyz.token' },
+    };
+    expect(() => resolveProfileEnv(p)).toThrow(/not found/i);
+  });
 });
 
 describe('resolveProfileForRun surfaces fallback_model as an env-swap', () => {
