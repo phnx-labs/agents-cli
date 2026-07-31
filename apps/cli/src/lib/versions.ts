@@ -2318,7 +2318,18 @@ export async function ensureAgentRunnable(
   agent: AgentId,
   version: string,
   log?: (message: string) => void,
+  opts?: { allowDefaultSwitch?: boolean },
 ): Promise<string | null> {
+  // Whether this heal may REPOINT the global default (adopt another version, or
+  // install `latest` and pin it). Interactive callers (`agents run`, `agents
+  // add`) allow it. The daemon's unattended 6-hourly launch-health pass sets
+  // this false: a background pass that silently switches the default installs a
+  // fresh version home → a fresh, empty Claude credential scope (macOS keychain
+  // keyed off CLAUDE_CONFIG_DIR; Linux per-version token file), i.e. an
+  // "unprovoked logout" at a time uncorrelated with anything the user did. In
+  // refuse-mode we still repair the CURRENT default in place (no scope change),
+  // but never repoint — we return null so the caller can alert instead.
+  const allowDefaultSwitch = opts?.allowDefaultSwitch ?? true;
   const cfg = AGENTS[agent];
   if (!cfg?.npmPackage) return version;
 
@@ -2340,6 +2351,15 @@ export async function ensureAgentRunnable(
   // switch — surface the failure and let the caller tell the user.
   if (targetIsolated) {
     log?.(`${cfg.name}@${version} is an isolated install and could not be repaired — leaving your default ${cfg.name} untouched.`);
+    return null;
+  }
+
+  // In-place repair failed → normally adopt another installed version and repoint
+  // the default. When default-switching is disallowed (unattended daemon pass),
+  // refuse: repointing would swap the live credential scope out from under the
+  // user with no signal. Surface it so the caller can notify.
+  if (!allowDefaultSwitch) {
+    log?.(`${cfg.name}@${version} won't launch and could not be repaired in place — NOT repointing your default ${cfg.name} unattended. Run \`agents use ${agent} <version>\` or \`agents add ${agent}@latest\` to choose one.`);
     return null;
   }
 
@@ -2402,8 +2422,12 @@ export async function ensureAgentRunnable(
 const failedRepairAt = new Map<string, number>();
 const REPAIR_COOLDOWN_MS = 24 * 60 * 60_000;
 
-export async function healBrokenDefaultLaunches(log?: (m: string) => void): Promise<string[]> {
+export async function healBrokenDefaultLaunches(
+  log?: (m: string) => void,
+  opts?: { allowDefaultSwitch?: boolean },
+): Promise<{ repaired: string[]; unhealed: string[] }> {
   const repaired: string[] = [];
+  const unhealed: string[] = [];
   for (const agent of Object.keys(AGENTS) as AgentId[]) {
     if (!AGENTS[agent].npmPackage) continue; // native/global agents have no gutted-tarball failure mode
     const version = getGlobalDefault(agent);
@@ -2420,15 +2444,16 @@ export async function healBrokenDefaultLaunches(log?: (m: string) => void): Prom
       continue;
     }
     log?.(`${AGENTS[agent].name}@${version} won't launch — repairing…`);
-    const healed = await ensureAgentRunnable(agent, version, log);
+    const healed = await ensureAgentRunnable(agent, version, log, opts);
     if (healed) {
       failedRepairAt.delete(key);
       repaired.push(`${agent}@${version}${healed === version ? '' : `→${healed}`}`);
     } else {
       failedRepairAt.set(key, Date.now());
+      unhealed.push(key);
     }
   }
-  return repaired;
+  return { repaired, unhealed };
 }
 
 async function getCliVersionFromPath(agent: AgentId): Promise<string | null> {

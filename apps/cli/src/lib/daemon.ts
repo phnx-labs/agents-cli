@@ -603,8 +603,18 @@ export async function runDaemon(): Promise<void> {
     checkingLaunchHealth = true;
     try {
       const { healBrokenDefaultLaunches } = await import('./versions.js');
-      const repaired = await healBrokenDefaultLaunches((m) => log('INFO', `launch-health: ${m}`));
+      // Unattended pass: repair the current default in place, but NEVER repoint
+      // the global default (allowDefaultSwitch: false). A background default
+      // switch installs a fresh version home → a fresh empty Claude credential
+      // scope, i.e. a silent logout uncorrelated with anything the user did.
+      const { repaired, unhealed } = await healBrokenDefaultLaunches(
+        (m) => log('INFO', `launch-health: ${m}`),
+        { allowDefaultSwitch: false },
+      );
       if (repaired.length) log('INFO', `launch-health: repaired ${repaired.join(', ')}`);
+      if (unhealed.length) {
+        log('WARN', `launch-health: ${unhealed.join(', ')} won't launch and was NOT auto-switched — choose a version with \`agents use <agent> <version>\` or \`agents add <agent>@latest\``);
+      }
     } catch (err) {
       log('ERROR', `launch-health check failed: ${(err as Error).message}`);
     } finally {

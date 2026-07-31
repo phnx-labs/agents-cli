@@ -45,13 +45,18 @@ describe.skipIf(process.platform === 'win32')('ensureAgentRunnable — isolation
     stillIsolated: boolean;
   }
 
-  function runEnsure(target: string, probeIsolationOf: string): Outcome {
+  function runEnsure(
+    target: string,
+    probeIsolationOf: string,
+    opts?: { allowDefaultSwitch?: boolean },
+  ): Outcome {
     const versionsPath = path.resolve(process.cwd(), 'src/lib/versions.ts');
+    const optsArg = opts ? `, undefined, ${JSON.stringify(opts)}` : '';
     const script = `
       import {
         ensureAgentRunnable, getGlobalDefault, listInstalledVersions, isVersionIsolated,
       } from ${JSON.stringify(versionsPath)};
-      const healed = await ensureAgentRunnable('codex', ${JSON.stringify(target)});
+      const healed = await ensureAgentRunnable('codex', ${JSON.stringify(target)}${optsArg});
       console.log('__RESULT__' + JSON.stringify({
         healed,
         defaultAfter: getGlobalDefault('codex'),
@@ -108,6 +113,42 @@ describe.skipIf(process.platform === 'win32')('ensureAgentRunnable — isolation
     expect(r.defaultAfter).not.toBe('9.9.9');
     // The isolated copy is untouched and still isolated.
     expect(r.stillIsolated).toBe(true);
+  }, 180_000);
+
+  // The daemon's unattended 6-hourly launch-health pass runs with
+  // allowDefaultSwitch:false. A broken default that can't be repaired IN PLACE
+  // must NOT be silently swapped to another installed version — repointing the
+  // default installs/points at a different version home, which for Claude is a
+  // fresh empty credential scope (the "unprovoked logout"). It must fail closed
+  // and leave the default for the user to choose.
+  it('does not repoint the default in unattended mode (allowDefaultSwitch: false)', () => {
+    plant('9.9.1', { runnable: false });   // broken normal default
+    plant('9.9.3', { runnable: true });    // a healthy normal version it COULD adopt
+    fs.writeFileSync(path.join(home, '.agents', 'agents.yaml'), 'agents:\n  codex: "9.9.1"\n');
+
+    const r = runEnsure('9.9.1', '9.9.3', { allowDefaultSwitch: false });
+
+    // In-place repair fails (synthetic 9.9.1 → npm 404) and, crucially, the
+    // healthy 9.9.3 is NOT adopted: the default pointer stays put and the failure
+    // is surfaced (null) so the daemon can alert instead of silently switching.
+    // (The failed clean-reinstall guts 9.9.1's node_modules so it drops off the
+    // installed list — orthogonal to the point here, which is the DEFAULT pointer.)
+    expect(r.healed).toBeNull();
+    expect(r.defaultAfter).toBe('9.9.1');
+    expect(r.defaultAfter).not.toBe('9.9.3');
+  }, 180_000);
+
+  // Control: the SAME broken default, with the default (interactive) behavior,
+  // DOES adopt the healthy version — proving the flag is what changes it.
+  it('still repoints the default in interactive mode (default behavior unchanged)', () => {
+    plant('9.9.1', { runnable: false });   // broken normal default
+    plant('9.9.3', { runnable: true });    // a healthy normal version
+    fs.writeFileSync(path.join(home, '.agents', 'agents.yaml'), 'agents:\n  codex: "9.9.1"\n');
+
+    const r = runEnsure('9.9.1', '9.9.3');
+
+    expect(r.healed).toBe('9.9.3');
+    expect(r.defaultAfter).toBe('9.9.3');
   }, 180_000);
 
   // The last-resort step ("install latest and pin it") reuses the version dir of
