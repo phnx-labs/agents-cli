@@ -82,8 +82,8 @@ sequenceDiagram
   participant Launcher as ag run / shim (CLI)
   participant Agent as the agent process
   participant Hook as SessionStart hook
-  participant ByPid as terminals/by-pid/&lt;pid&gt;.json
-  participant Sess as terminals/sessions/&lt;pid&gt;.json
+  participant ByPid as terminals/by-pid/[pid].json
+  participant Sess as terminals/sessions/[pid].json
   Launcher->>ByPid: write pid + cwd (+ id if known) at spawn
   Note over Launcher,ByPid: claude: id known up front (we mint the UUID)
   Launcher->>Agent: exec the harness
