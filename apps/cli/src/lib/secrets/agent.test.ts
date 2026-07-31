@@ -5,7 +5,7 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { describe, it, expect } from 'vitest';
 import type { SecretsBundle } from './bundles.js';
-import { handleAgentRequest, isRequestAuthorized, makeConnectionHandler, shouldSelfHealForUpgrade, shouldTeardownVersionSkewedBroker, realBundleCount, shouldWipeOnWatchEvent, agentEvictSync, startHostedBroker, runSecretsAgent, agentPing, secretsAgentServiceInstalled, retireLegacySecretsAgentService, clampHoldMs, syncClientLaunch, lastLine, runAgentLockSync, DEFAULT_TTL_MS, MIN_HOLD_MS, MAX_HOLD_MS, META_CACHE_PREFIX, type StoredBundle, type Response, type Request } from './agent.js';
+import { handleAgentRequest, isRequestAuthorized, makeConnectionHandler, shouldSelfHealForUpgrade, shouldTeardownVersionSkewedBroker, realBundleCount, shouldWipeOnWatchEvent, agentEvictSync, startHostedBroker, runSecretsAgent, agentPing, secretsAgentServiceInstalled, retireLegacySecretsAgentService, clampHoldMs, syncClientLaunch, lastLine, runAgentLockSync, SYNC_GET_CMD, SYNC_PING_CMD, SYNC_LOCK_CMD, DEFAULT_TTL_MS, MIN_HOLD_MS, MAX_HOLD_MS, META_CACHE_PREFIX, type StoredBundle, type Response, type Request } from './agent.js';
 
 /**
  * These tests target the broker's store semantics — the part with real bug
@@ -614,10 +614,13 @@ describe('isRequestAuthorized (RUSH-1760: authorization gate)', () => {
  * old code still "worked" (returned null) and no test noticed.
  */
 describe('sync broker clients launch correctly on both install shapes', () => {
+  // These MUST be the tokens production actually spawns (agent.ts syncClient
+  // call sites). syncClientLaunch passes `sub` through, so feeding this list
+  // anything else makes the assertions tautological and the guard worthless.
   const subs = [
-    ['secrets', '_agent-get', 'prod'],
-    ['secrets', '_agent-ping'],
-    ['secrets', '_agent-lock', 'prod'],
+    [SYNC_GET_CMD, 'prod'],
+    [SYNC_PING_CMD],
+    [SYNC_LOCK_CMD, 'prod'],
   ];
 
   it('never spawns with -e on the bun standalone binary', () => {
@@ -704,15 +707,15 @@ describe.skipIf(process.platform !== 'darwin')('__secrets-* entrypoint seam', ()
     const server = net.createServer(makeConnectionHandler((req) => handleAgentRequest(store, req), () => token));
     await new Promise<void>((res) => server.listen(sock, () => res()));
     try {
-      const hit = await runCli(['__secrets-get', 'prod'], dir);
+      const hit = await runCli([SYNC_GET_CMD, 'prod'], dir);
       expect(hit.code).toBe(0);
       // Parsed the same way agentGetSync parses it — payload must survive the pipe.
       expect(JSON.parse(lastLine(hit.stdout))).toMatchObject({ env: { K: 'v' } });
 
       // A miss must be exit 3, or the parent would treat garbage as a hit.
-      expect((await runCli(['__secrets-get', 'nope'], dir)).code).toBe(3);
-      expect((await runCli(['__secrets-ping'], dir)).code).toBe(0);
-      expect((await runCli(['__secrets-lock', 'prod'], dir)).code).toBe(0);
+      expect((await runCli([SYNC_GET_CMD, 'nope'], dir)).code).toBe(3);
+      expect((await runCli([SYNC_PING_CMD], dir)).code).toBe(0);
+      expect((await runCli([SYNC_LOCK_CMD, 'prod'], dir)).code).toBe(0);
       // lock actually evicted, proving the request reached the broker.
       expect(handleAgentRequest(store, { cmd: 'get', name: 'prod' }, Date.now())).toMatchObject({ hit: false });
     } finally {
@@ -724,10 +727,80 @@ describe.skipIf(process.platform !== 'darwin')('__secrets-* entrypoint seam', ()
   it('exits 3 rather than hanging when no broker is listening', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-seam-dead-'));
     try {
-      expect((await runCli(['__secrets-ping'], dir)).code).toBe(3);
-      expect((await runCli(['__secrets-get', 'prod'], dir)).code).toBe(3);
+      expect((await runCli([SYNC_PING_CMD], dir)).code).toBe(3);
+      expect((await runCli([SYNC_GET_CMD, 'prod'], dir)).code).toBe(3);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   }, 30_000);
+});
+
+/**
+ * Position guard for the index.ts intercept.
+ *
+ * The seam test above proves the tokens are routed; it does NOT notice if the
+ * intercept block slides below the startup statements — that variant still
+ * answers correctly, just after running checkForUpdates() and forking a
+ * detached sync on every cache hit (measured ~165ms vs ~96ms, plus a fork per
+ * read). A timing assertion would be flaky in CI, so assert the source ordering
+ * directly: deterministic, and it fails loudly the moment the block moves.
+ */
+describe('index.ts intercepts __secrets-* before the startup statements', () => {
+  it('places the intercept above checkForUpdates() and spawnDetachedSync()', () => {
+    const src = fs.readFileSync('src/index.ts', 'utf-8');
+    // Match the STATEMENTS, not prose: the comment above the intercept names
+    // both functions, so a bare indexOf would find the comment and invert the
+    // comparison. Anchor on indentation + the call's trailing semicolon.
+    const intercept = src.indexOf(`  process.argv[2] === '${SYNC_GET_CMD}' ||`);
+    const updateCheck = src.indexOf('\n  await checkForUpdates();');
+    const detachedSync = src.indexOf('\n  spawnDetachedSync();');
+    expect(intercept).toBeGreaterThan(-1);
+    expect(updateCheck).toBeGreaterThan(-1);
+    expect(detachedSync).toBeGreaterThan(-1);
+    expect(intercept).toBeLessThan(updateCheck);
+    expect(intercept).toBeLessThan(detachedSync);
+  });
+});
+
+describe('index.ts dispatches on the same tokens the clients spawn', () => {
+  // The clients build argv from SYNC_*_CMD; index.ts holds the tokens as
+  // literals (importing agent.js at the top of the entrypoint would pull the
+  // secrets graph into every invocation). That's the one place the two can
+  // drift, and drift is silent: the CLI answers "unknown command", the client
+  // reads a non-zero exit as "broker down", and every read falls back to a
+  // keychain prompt -- exactly the bug this PR fixes.
+  it('contains a dispatch literal for each spawned token', () => {
+    const src = fs.readFileSync('src/index.ts', 'utf-8');
+    for (const token of [SYNC_GET_CMD, SYNC_PING_CMD, SYNC_LOCK_CMD]) {
+      expect(src).toContain(`process.argv[2] === '${token}'`);
+    }
+  });
+});
+
+describe('runAgentLockSync refuses a nameless lock', () => {
+  // The broker reads a missing name as lock-ALL, so a bare `__secrets-lock`
+  // would wipe every held bundle and re-prompt Touch ID for each. Unreachable
+  // when this was an inline node -e string; as a top-level argv token it is one
+  // typo away, and agentEvictSync only ever locks by name.
+  it('exits 3 without contacting the broker when the name is empty', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-lockguard-'));
+    const prevDir = process.env.AGENTS_SECRETS_AGENT_DIR;
+    process.env.AGENTS_SECRETS_AGENT_DIR = dir;
+    const sock = path.join(dir, 'agent.sock');
+    const seen: Request[] = [];
+    const server = net.createServer(makeConnectionHandler(
+      (req) => { seen.push(req); return handleAgentRequest(freshStore(), req); },
+      () => null,
+    ));
+    await new Promise<void>((res) => server.listen(sock, () => res()));
+    try {
+      expect(await runAgentLockSync('')).toBe(3);
+      expect(seen).toEqual([]); // never reached the wire, so nothing was wiped
+    } finally {
+      server.close();
+      if (prevDir === undefined) delete process.env.AGENTS_SECRETS_AGENT_DIR;
+      else process.env.AGENTS_SECRETS_AGENT_DIR = prevDir;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
