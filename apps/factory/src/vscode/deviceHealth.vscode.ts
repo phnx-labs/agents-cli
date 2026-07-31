@@ -4,7 +4,7 @@ import * as path from 'path';
 import { createHash } from 'crypto';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { DeviceStats, parseUptime, parseVmStat, parseLinuxMemInfo } from '../core/deviceHealth';
+import { DeviceStats, parseUptime, parseVmStat, parseLinuxMemInfo, isDeviceOnline } from '../core/deviceHealth';
 import { RepoSyncStatus, classifySync } from '../core/repoSync';
 import { resolveAgentsBin, bootstrapPath } from '../core/agentsBin';
 
@@ -33,8 +33,9 @@ interface AgentsDeviceEntry {
 
 // Source the device fleet from the canonical agents-cli registry
 // (`agents devices`, self-populated from Tailscale) rather than a hand-rolled
-// file. Online status comes from tailscale.online, the credential bundle from
-// auth.bundle, and the SSH address from address.dnsName.
+// file. Online status is derived by isDeviceOnline (matching the CLI: a missing
+// tailscale block is NOT offline), the credential bundle from auth.bundle, and the
+// SSH address from address.dnsName.
 export async function listRegisteredDevices(): Promise<Device[]> {
   try {
     const bin = await resolveAgentsBin();
@@ -50,7 +51,7 @@ export async function listRegisteredDevices(): Promise<Device[]> {
       user: d.user,
       secretRef: d.auth?.bundle,
       platform: d.platform,
-      online: d.tailscale?.online ?? false,
+      online: isDeviceOnline(d.tailscale),
       registeredAt: d.createdAt ? Date.parse(d.createdAt) || 0 : 0,
     }));
   } catch {

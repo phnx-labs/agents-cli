@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { parseUptime, parseVmStat, parseLinuxMemInfo } from './deviceHealth';
+import { parseUptime, parseVmStat, parseLinuxMemInfo, isDeviceOnline } from './deviceHealth';
 import { probeReachable } from '../vscode/deviceHealth.vscode';
 
 const UPTIME_MACOS = ` 2:49  up 1 day, 15:25, 24 users, load averages: 7.33 6.84 6.96
@@ -102,5 +102,23 @@ describe('parseLinuxMemInfo', () => {
 describe('probeReachable', () => {
   test('treats this-mac as reachable', async () => {
     expect(await probeReachable('this-mac')).toBe(true);
+  });
+});
+
+describe('isDeviceOnline', () => {
+  // Regression: a reachable box (manually registered, or on the sync ignore-list)
+  // has no tailscale block. The old `?? false` forced it offline in the picker while
+  // the CLI showed it online. It must be treated as online, matching the CLI.
+  test('missing tailscale block is online (matches CLI), not offline', () => {
+    expect(isDeviceOnline(undefined)).toBe(true);
+  });
+  test('tailscale online:true is online', () => {
+    expect(isDeviceOnline({ online: true })).toBe(true);
+  });
+  test('tailscale online:false is the only offline case', () => {
+    expect(isDeviceOnline({ online: false })).toBe(false);
+  });
+  test('present block with undefined online is offline (matches CLI truthiness)', () => {
+    expect(isDeviceOnline({})).toBe(false);
   });
 });
