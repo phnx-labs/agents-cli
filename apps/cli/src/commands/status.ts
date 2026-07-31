@@ -16,6 +16,7 @@ import { AgentId } from '../lib/types.js';
 import { setHelpSections } from '../lib/help.js';
 import { computeSyncStatus, type AgentVersionStatus } from '../lib/sync-status.js';
 import { promptDriftSync } from '../lib/drift-sync.js';
+import { resolveConfiguredModel } from '../lib/models.js';
 import { resolveSurface } from './utils.js';
 
 interface StatusOptions {
@@ -89,8 +90,15 @@ export function registerStatusCommand(program: Command): void {
       console.log(chalk.gray('  (no installed agent versions)'));
     }
     for (const v of status.agents) {
-      const label = `${agentName(v.agent)}@${v.version}${v.isDefault ? chalk.gray(' (default)') : ''}`;
-      console.log(`  ${label.padEnd(28)} ${versionSummary(v)}`);
+      // Model sits right beside the version, same priority (no label).
+      const model = resolveConfiguredModel(v.agent, v.version)?.model;
+      const defaultTag = v.isDefault ? ' (default)' : '';
+      const plain = `${agentName(v.agent)}@${v.version}${model ? ` · ${model}` : ''}${defaultTag}`;
+      const shown = `${agentName(v.agent)}@${v.version}`
+        + (model ? ` ${chalk.gray('·')} ${chalk.yellow(model)}` : '')
+        + (v.isDefault ? chalk.gray(' (default)') : '');
+      const pad = ' '.repeat(Math.max(1, 34 - plain.length));
+      console.log(`  ${shown}${pad}${versionSummary(v)}`);
     }
     if (status.totals.orphan > 0) {
       console.log(

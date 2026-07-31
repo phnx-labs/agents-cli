@@ -33,6 +33,7 @@ import {
   getUsageLookupKey,
 } from '../lib/usage.js';
 import { viewAction } from './view.js';
+import { resolveConfiguredModel, formatAgentIdentity } from '../lib/models.js';
 import type { AgentId } from '../lib/types.js';
 import { readManifest, writeManifest, createDefaultManifest } from '../lib/manifest.js';
 import {
@@ -514,7 +515,13 @@ export function registerVersionsCommands(program: Command): void {
           });
 
           if (result.success) {
-            spinner.succeed(`Installed ${agentLabel(agentConfig.id)}@${result.installedVersion}`);
+            const installedVer = result.installedVersion || version;
+            const installedModel = resolveConfiguredModel(agentConfig.id, installedVer)?.model;
+            const installedIdentity = formatAgentIdentity(
+              `${agentLabel(agentConfig.id)}@${result.installedVersion}`,
+              installedModel ? chalk.yellow(installedModel) : null,
+            );
+            spinner.succeed(`Installed ${installedIdentity}`);
 
             const installedVersion = result.installedVersion || version;
             // Track the concrete version so a `--project` pin records it instead
@@ -893,8 +900,13 @@ export function registerVersionsCommands(program: Command): void {
 
           writeManifest(process.cwd(), manifest);
           const projEmail = await getAccountEmail(agentId, getVersionHomePath(agentId, finalVersion));
-          const projEmailStr = projEmail ? chalk.cyan(` (${projEmail})`) : '';
-          console.log(chalk.green(`Set ${agentLabel(agentConfig.id)}@${finalVersion} for this project`) + projEmailStr);
+          const projModel = resolveConfiguredModel(agentId, finalVersion)?.model;
+          const projIdentity = formatAgentIdentity(
+            chalk.green(`${agentLabel(agentConfig.id)}@${finalVersion}`),
+            projModel ? chalk.yellow(projModel) : null,
+            projEmail ? chalk.cyan(projEmail) : null,
+          );
+          console.log(`Set ${projIdentity} for this project`);
         } else {
           // Smart resource detection: compare available vs ACTUALLY synced (source of truth: files, not tracking)
           const available = getAvailableResources();
@@ -1021,14 +1033,18 @@ export function registerVersionsCommands(program: Command): void {
           warnIfShimShadowed(agentId);
 
           const useEmail = await getAccountEmail(agentId, getVersionHomePath(agentId, finalVersion));
-          const useEmailStr = useEmail ? chalk.cyan(` (${useEmail})`) : '';
+          const useModel = resolveConfiguredModel(agentId, finalVersion)?.model;
+          const useModelStr = useModel ? chalk.yellow(useModel) : null;
+          const useAcctStr = useEmail ? chalk.cyan(useEmail) : null;
           // Self-updating agents are one binary; `use` only swaps the config
           // symlink (the profile), it does not change which binary runs — so say
           // "profile", not "version", to match what actually happened.
           if (isSelfUpdatingAgent(agentId)) {
-            console.log(chalk.green(`Switched ${agentLabel(agentConfig.id)} to config profile ${finalVersion}`) + useEmailStr);
+            const identity = formatAgentIdentity(chalk.green(agentLabel(agentConfig.id)), useModelStr, useAcctStr);
+            console.log(`Switched ${identity} to config profile ${chalk.green(finalVersion)}`);
           } else {
-            console.log(chalk.green(`Set ${agentLabel(agentConfig.id)}@${finalVersion} as global default`) + useEmailStr);
+            const identity = formatAgentIdentity(chalk.green(`${agentLabel(agentConfig.id)}@${finalVersion}`), useModelStr, useAcctStr);
+            console.log(`Set ${identity} as global default`);
           }
         }
       } catch (err) {

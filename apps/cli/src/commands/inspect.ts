@@ -24,6 +24,7 @@ import * as yaml from 'yaml';
 import type { AgentId, CapabilityName, DiscoveredPlugin, ManifestHook, HookMatches, HookCache } from '../lib/types.js';
 import { AGENTS, getCliState, resolveAgentName } from '../lib/agents.js';
 import { supports } from '../lib/capabilities.js';
+import { resolveConfiguredModel } from '../lib/models.js';
 import { resolveSingleAgentTarget, AgentSpecError } from '../lib/agent-spec/index.js';
 import {
   readMeta,
@@ -671,8 +672,10 @@ async function renderSummary(agent: AgentId, version: string, versionHome: strin
     return;
   }
 
-  // Plain text
-  const head = `${chalk.bold(agent)} ${chalk.gray('@')} ${chalk.cyan(version)}${isDefault ? '  ' + chalk.green('[default]') : ''}`;
+  // Plain text — model sits right beside the version, same priority (no label).
+  const configuredModel = resolveConfiguredModel(agent, version)?.model;
+  const modelPart = configuredModel ? '  ' + chalk.yellow(configuredModel) : '';
+  const head = `${chalk.bold(agent)} ${chalk.gray('@')} ${chalk.cyan(version)}${modelPart}${isDefault ? '  ' + chalk.green('[default]') : ''}`;
   console.log('\n' + head + '\n');
 
   const rows: Array<[string, string]> = [
