@@ -6,8 +6,8 @@ Drive native macOS apps from AI agents via the Accessibility API.
 
 `agents computer` controls macOS applications through the Accessibility
 (`AXUIElement`) framework, ScreenCaptureKit, and HID-tap event synthesis. It
-requires a separate helper app (`Computer Helper.app`) installed in
-`/Applications/` with two macOS TCC grants: Accessibility and Screen Recording.
+requires a separate helper app (Agents Computer) installed in
+`/Applications/Computer Helper.app` with two macOS TCC grants: Accessibility and Screen Recording.
 
 The helper runs as a launchd user agent, listening on a UNIX socket. Agents
 send JSON-RPC calls through the CLI; the helper translates them into AX
@@ -36,7 +36,7 @@ agent process
      │  Fallback: spawn helper binary as child process
      │            (for dev builds without setup)
      ▼
-  Computer Helper.app
+  Agents Computer
   /Applications/Computer Helper.app
   [launchd: com.phnx-labs.computer-helper]
      │
@@ -67,7 +67,7 @@ different process.
 agents computer setup        # alias: install-helper
 ```
 
-This copies `Computer Helper.app` to `/Applications/Computer Helper.app`,
+This installs the helper at `/Applications/Computer Helper.app`,
 verifies its codesign signature, writes a LaunchAgent plist at
 `~/Library/LaunchAgents/com.phnx-labs.computer-helper.plist`, and prints
 the next steps. It does **not** start the daemon.
@@ -77,8 +77,8 @@ the next steps. It does **not** start the daemon.
 Open System Settings on macOS:
 
 ```
-System Settings > Privacy & Security > Accessibility   — add Computer Helper.app
-System Settings > Privacy & Security > Screen Recording — add Computer Helper.app
+System Settings > Privacy & Security > Accessibility   — add Agents Computer
+System Settings > Privacy & Security > Screen Recording — add Agents Computer
 ```
 
 These grants are keyed to the app's signed bundle identity at
@@ -210,7 +210,7 @@ agents computer type-text --bundle <id> --text "..." --require-frontmost
 
 | Field | Description |
 |-------|-------------|
-| `installed` | Whether `/Applications/Computer Helper.app` exists |
+| `installed` | Whether Agents Computer (`/Applications/Computer Helper.app`) exists |
 | `daemon` | Socket up (running) or down (stopped) |
 | `policy` | Count and names of allowed apps from the policy file |
 | `peers` | Count of caller executables allowed to connect |

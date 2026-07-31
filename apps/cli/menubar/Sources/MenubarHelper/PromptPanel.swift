@@ -524,7 +524,7 @@ enum Notifier {
     // `url`, when present, is opened on click (the created ticket). `image`
     // is shown as the notification icon so the banner carries the agents-cli
     // branding even when the bundle icon lookup is slow.
-    static func post(title: String, body: String, url: String? = nil, image: NSImage? = nil) {
+    static func post(title: String, body: String, url: String? = nil, image: NSImage? = appIconImage()) {
         if !wired {
             NSUserNotificationCenter.default.delegate = delegate
             wired = true

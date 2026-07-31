@@ -19,7 +19,7 @@ PROFILE="$REPO_ROOT/bin/embedded.provisionprofile"
 ENTITLEMENTS="$REPO_ROOT/scripts/keychain-entitlements.plist"
 APP="$REPO_ROOT/bin/Agents CLI.app"
 BIN="$APP/Contents/MacOS/Agents CLI"
-LOGO="$REPO_ROOT/../assets/logo.png"
+LOGO="$REPO_ROOT/../../assets/logo.png"
 
 # Build an .icns from the master logo. Runs on macOS only (sips + iconutil).
 generate_app_icon() {

@@ -710,8 +710,8 @@ function registerSetupCommand(program: Command): void {
       console.log('');
       console.log('Next steps:');
       console.log('  1. Grant TCC permissions (one-time):');
-      console.log('     System Settings > Privacy & Security > Accessibility       — add Computer Helper.app');
-      console.log('     System Settings > Privacy & Security > Screen Recording    — add Computer Helper.app');
+      console.log('     System Settings > Privacy & Security > Accessibility       — add Agents Computer');
+      console.log('     System Settings > Privacy & Security > Screen Recording    — add Agents Computer');
       console.log('  2. Whitelist the apps the daemon may drive. Add a YAML under ~/.agents/permissions/groups/:');
       console.log('       name: computer');
       console.log('       allow:');
@@ -753,7 +753,7 @@ function registerStartCommand(program: Command): void {
       }
       if (!trusted) {
         console.log('');
-        console.log('Grant Accessibility + Screen Recording to Computer Helper.app, then run `agents computer start` again.');
+        console.log('Grant Accessibility + Screen Recording to Agents Computer, then run `agents computer start` again.');
       }
     });
 }
