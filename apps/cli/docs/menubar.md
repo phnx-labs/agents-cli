@@ -23,9 +23,11 @@ optionally attach recent screenshots from the thumbnail strip, then pick one
 agent for **File Ticket** or one or more agents for **Fix**.
 
 - **File Ticket** sends the note and selected screenshots to the selected ticket
-  agent, which investigates and files one Linear ticket. Selected screenshot
-  paths are identified as user-provided ticket material, and after the ticket is
-  created the helper uploads every selected file to the Linear issue.
+  agent, which investigates and returns ticket fields as JSON. The helper then
+  runs `linear create` itself, appending `--image <path>` for every selected
+  screenshot so the image bytes are uploaded at create time and embedded in the
+  issue description — screenshot paths never pass through an LLM-authored shell
+  string.
 - **Fix** fans out to every selected agent with `agents run <agent> --mode auto
   --name quick-<agent>-<timestamp>`, so the resulting sessions appear in normal
   `agents sessions` and menu-bar surfaces instead of as opaque background work.
