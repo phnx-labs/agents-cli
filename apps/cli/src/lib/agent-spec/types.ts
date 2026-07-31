@@ -5,6 +5,7 @@ export type VersionSource =
   | 'explicit'                // @x.y.z or a concrete pass-through
   | 'project-pin'             // a project-root agents.yaml pin
   | 'global-default'          // the configured global default (bare spec)
+  | 'isolated-default'        // the preferred ISOLATED copy, when there is no global default
   | 'global-default(@pinned)' // @pinned / @default asked for the global default explicitly
   | 'sole-installed'          // no pin/default, exactly one installed
   | 'newest-installed'        // bare + ambiguous, onAmbiguous:'newest' picked the newest
@@ -59,6 +60,14 @@ export interface VersionProvider {
   getProjectVersion(agent: AgentId, cwd: string): string | null;
   /** The configured global default version, or null. */
   getGlobalDefault(agent: AgentId): string | null;
+  /**
+   * The preferred isolated copy. Kept separate from getGlobalDefault on purpose: a
+   * global default owns the launcher, the bare shim and the real ~/.<agent> config
+   * symlink, and an isolated version must never acquire any of those. Folding the
+   * two together here would hand an isolated version back to every caller that
+   * reasonably assumes a global default means "the one that owns the launcher".
+   */
+  getIsolatedDefault(agent: AgentId): string | null;
   /** Whether an exact version is installed. */
   isInstalled(agent: AgentId, version: string): boolean;
 }

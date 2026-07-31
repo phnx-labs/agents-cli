@@ -37,7 +37,8 @@ import { runRemoteSessions, buildForwardedArgs, ensureWholeIndex } from '../lib/
 import { formatRelativeTime } from '../lib/session/relative-time.js';
 import { renderConversationMarkdown, renderSummary, renderSummaryHeader, computeSummaryStats, renderJson, filterEvents, parseRoleList, type FilterOptions } from '../lib/session/render.js';
 import { renderMarkdown } from '../lib/markdown.js';
-import { colorAgent, resolveAgentName } from '../lib/agents.js';
+import { AGENTS, colorAgent, resolveAgentName } from '../lib/agents.js';
+import { getShimsDir } from '../lib/state.js';
 import { fuzzyMatch, FUZZY_PRESETS } from '../lib/fuzzy.js';
 import { resolveVersionAliasLoose } from '../lib/versions.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
@@ -1983,11 +1984,17 @@ export async function resumeSessionInPlace(session: SessionMeta): Promise<void> 
   // spawnResumeCommand), a missing command exits non-zero rather than emitting
   // an ENOENT `error` event — so detect a removed version here instead of
   // relying on that event, keeping the /continue fallback working on every OS.
-  if (!findExecutable(resume[0]) && session.version) {
+  // `resume[0]` is an absolute alias path when one exists on disk, so only a bare
+  // name still needs a PATH lookup. Checking existsSync first is what keeps an
+  // isolated install (shims deliberately off PATH) out of the fallback.
+  const launcherFound = path.isAbsolute(resume[0])
+    ? fs.existsSync(resume[0])
+    : !!findExecutable(resume[0]);
+  if (!launcherFound && session.version) {
     const fallback = buildFallbackCommand(session);
     if (fallback) {
       console.log(chalk.gray(
-        `Version ${session.version} is not installed. Falling back to current version via /continue...`
+        `Version ${session.version} is not installed. Resuming with the current version instead...`
       ));
       await spawnResumeCommand(fallback, cwd);
       return;
@@ -2071,16 +2078,56 @@ function spawnResumeCommand(cmd: string[], cwd: string): Promise<void> {
  * If the versioned binary is missing (version was removed), the ENOENT
  * handler in handlePickedSession retries via buildFallbackCommand.
  */
+/**
+ * The agent's own resume invocation, given whichever launcher we resolved.
+ * Keeping the verb in one place is what lets the version-pinned and fallback
+ * paths stay in agreement — they previously drifted into `/continue`, which is
+ * not a command either CLI has.
+ */
+function resumeArgv(agent: SessionMeta['agent'], id: string, launcher: string): string[] | null {
+  switch (agent) {
+    case 'claude': return [launcher, '--resume', id];
+    case 'codex': return [launcher, 'resume', id];
+    case 'opencode': return [launcher, '--session', id];
+    default: return null;
+  }
+}
+
+/**
+ * Absolute path of the on-disk versioned alias, or null when it isn't there.
+ *
+ * Resume must not resolve `<cli>@<version>` by bare name. The shims directory is
+ * deliberately absent from PATH for an isolated install — that is precisely what
+ * `--isolated` promises — so a PATH lookup can never find the alias, and resume
+ * degraded to the fallback 100% of the time for isolated copies. Mirrors the
+ * resolution `buildExecCommand` already does for `agents run`.
+ */
+function versionedAliasIfPresent(agent: SessionMeta['agent'], version: string): string | null {
+  const cli = AGENTS[agent as AgentId]?.cliCommand ?? agent;
+  const base = path.join(getShimsDir(), `${cli}@${version}`);
+  if (process.platform === 'win32' && fs.existsSync(`${base}.cmd`)) return `${base}.cmd`;
+  if (fs.existsSync(base)) return base;
+  return null;
+}
+
 export function buildResumeCommand(session: SessionMeta): string[] | null {
   switch (session.agent) {
-    case 'claude':
-      if (session.version) return [`claude@${session.version}`, '--resume', session.id];
-      return ['claude', '--resume', session.id];
-    case 'codex':
-      if (session.version) return [`codex@${session.version}`, 'resume', session.id];
-      return ['codex', 'resume', session.id];
+    // opencode sessions are shared across versions, so resume is deliberately NOT
+    // version-pinned — it always goes through the plain launcher.
     case 'opencode':
-      return ['opencode', '--session', session.id];
+      return resumeArgv('opencode', session.id, 'opencode');
+
+    case 'claude':
+    case 'codex': {
+      const cli = AGENTS[session.agent as AgentId]?.cliCommand ?? session.agent;
+      if (session.version) {
+        const alias = versionedAliasIfPresent(session.agent, session.version);
+        // Absolute path when the alias exists; otherwise the bare versioned name,
+        // which still resolves for a non-isolated install whose shims are on PATH.
+        return resumeArgv(session.agent, session.id, alias ?? `${cli}@${session.version}`);
+      }
+      return resumeArgv(session.agent, session.id, cli);
+    }
     case 'gemini':
     case 'antigravity':
     case 'openclaw':
@@ -2094,13 +2141,18 @@ export function buildResumeCommand(session: SessionMeta): string[] | null {
   }
 }
 
-/** Fallback resume command when the versioned binary is unavailable (ENOENT). */
+/**
+ * Fallback when the pinned version really is gone: the same resume invocation
+ * against the current version.
+ *
+ * This used to spawn `<cli> "/continue <id>"`, feeding a slash command into the
+ * TUI as a prompt. Neither CLI has `/continue` — codex documents `/resume` — so
+ * the agent received an unrecognised command and the session was not resumed at
+ * all. Reusing resumeArgv keeps the two paths from drifting apart again.
+ */
 function buildFallbackCommand(session: SessionMeta): string[] | null {
-  switch (session.agent) {
-    case 'claude': return ['claude', `/continue ${session.id}`];
-    case 'codex':  return ['codex', `/continue ${session.id}`];
-    default: return null;
-  }
+  const cli = AGENTS[session.agent as AgentId]?.cliCommand ?? session.agent;
+  return resumeArgv(session.agent, session.id, cli);
 }
 
 // ---------------------------------------------------------------------------

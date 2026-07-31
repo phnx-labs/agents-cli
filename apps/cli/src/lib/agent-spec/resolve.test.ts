@@ -9,17 +9,53 @@ function providerOf(state: {
   installed?: Partial<Record<string, string[]>>;
   project?: Partial<Record<string, string>>;
   global?: Partial<Record<string, string>>;
+  isolated?: Partial<Record<string, string>>;
 }): VersionProvider {
   const installed = state.installed ?? {};
   return {
     listInstalled: (a) => (installed[a] ?? []).slice().sort(compareVersions),
     getProjectVersion: (a) => state.project?.[a] ?? null,
     getGlobalDefault: (a) => state.global?.[a] ?? null,
+    getIsolatedDefault: (a) => state.isolated?.[a] ?? null,
     isInstalled: (a, v) => (installed[a] ?? []).includes(v),
   };
 }
 
 const CLAUDE = 'claude' as AgentId;
+
+describe('isolated default', () => {
+  // An isolated-only agent never has a global default — that is what --isolated
+  // guarantees — so the chain has to keep going or `--agents codex` throws at a user
+  // who has explicitly run `agents use`. resolveVersion already did this; the two
+  // resolvers had drifted, and only this one still threw.
+  it('bare resolves to the isolated default when there is no global one', () => {
+    const p = providerOf({ installed: { claude: ['2.1.0', '2.1.1'] }, isolated: { claude: '2.1.0' } });
+    expect(resolveSingleAgentTarget('claude', p)).toEqual({ agent: CLAUDE, version: '2.1.0', source: 'isolated-default' });
+  });
+
+  it('a global default still wins — the isolated one is only a fallback', () => {
+    const p = providerOf({ installed: { claude: ['2.1.0', '2.1.1'] }, global: { claude: '2.1.1' }, isolated: { claude: '2.1.0' } });
+    expect(resolveSingleAgentTarget('claude', p).version).toBe('2.1.1');
+  });
+
+  it('a project pin still wins over both', () => {
+    const p = providerOf({ installed: { claude: ['2.1.0', '2.1.1'] }, project: { claude: '2.1.1' }, isolated: { claude: '2.1.0' } });
+    expect(resolveSingleAgentTarget('claude', p).source).toBe('project-pin');
+  });
+
+  it('@default and @pinned reach it too, and report it as isolated', () => {
+    const p = providerOf({ installed: { claude: ['2.1.0'] }, isolated: { claude: '2.1.0' } });
+    for (const spec of ['claude@default', 'claude@pinned']) {
+      expect(resolveSingleAgentTarget(spec, p)).toEqual({ agent: CLAUDE, version: '2.1.0', source: 'isolated-default' });
+    }
+  });
+
+  it('ambiguity is resolved by the isolated default rather than throwing', () => {
+    // Two isolated copies and no global default used to be a hard error.
+    const p = providerOf({ installed: { claude: ['2.1.0', '2.1.1'] }, isolated: { claude: '2.1.1' } });
+    expect(() => resolveSingleAgentTarget('claude', p)).not.toThrow();
+  });
+});
 
 describe('bare resolution chain', () => {
   it('project pin wins over global default', () => {

@@ -81,6 +81,12 @@ export function resolveAgentTargets(
       if (proj) { push(agent, proj, 'project-pin'); continue; }
       const glob = provider.getGlobalDefault(agent);
       if (glob) { push(agent, glob, 'global-default'); continue; }
+      // An isolated-only agent never has a global default — that is the point — so
+      // without this step `--agents codex` threw "No default version set" at a user
+      // who had explicitly run `agents use codex@<v>`. resolveVersion already had
+      // this fallback; the two resolvers had drifted apart.
+      const iso = provider.getIsolatedDefault(agent);
+      if (iso) { push(agent, iso, 'isolated-default'); continue; }
       const installed = provider.listInstalled(agent);
       if (installed.length === 0) { push(agent, null, 'none'); continue; }
       if (installed.length === 1) { push(agent, installed[0], 'sole-installed'); continue; }
@@ -91,16 +97,20 @@ export function resolveAgentTargets(
       );
     }
 
-    // ----- @pinned / @default: the configured global default -----
+    // ----- @pinned / @default: the configured default (global, else isolated) -----
     if (qualifier === 'pinned' || qualifier === 'default') {
-      const def = provider.getGlobalDefault(agent);
+      const glob = provider.getGlobalDefault(agent);
+      // Report which kind it was: an isolated default owns none of the launcher /
+      // shim / config-symlink machinery a global default does, and callers that log
+      // the source shouldn't claim otherwise.
+      const def = glob ?? provider.getIsolatedDefault(agent);
       if (!def) {
         throw new AgentSpecError(
           `No default version set for ${name}. Run: agents use ${agent}@<version>`,
           'no-default', agent, provider.listInstalled(agent),
         );
       }
-      push(agent, def, 'global-default(@pinned)');
+      push(agent, def, glob ? 'global-default(@pinned)' : 'isolated-default');
       continue;
     }
 
@@ -197,6 +207,8 @@ export function resolveListFilter(
 ): string | undefined {
   const q = qualifier?.trim();
   if (!q || q === 'any') return undefined;
-  if (q === 'default' || q === 'pinned') return provider.getGlobalDefault(agent) ?? undefined;
+  if (q === 'default' || q === 'pinned') {
+    return provider.getGlobalDefault(agent) ?? provider.getIsolatedDefault(agent) ?? undefined;
+  }
   return resolveSingleAgentTarget(`${agent}@${q}`, provider, { ...opts, availableAgents: [agent] }).version;
 }
