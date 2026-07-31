@@ -127,9 +127,9 @@ describe('buildExecCommand', () => {
     });
 
     it('antigravity plan degrades to edit (no read-only mode)', () => {
-      // Explicit headless so --print is emitted (printFlags require headless:true).
-      const planCmd = buildExecCommand(opts({ agent: 'antigravity', mode: 'plan', headless: true }));
-      const editCmd = buildExecCommand(opts({ agent: 'antigravity', mode: 'edit', headless: true }));
+      // A prompt is present (opts default), so both runs resolve headless and emit --print.
+      const planCmd = buildExecCommand(opts({ agent: 'antigravity', mode: 'plan' }));
+      const editCmd = buildExecCommand(opts({ agent: 'antigravity', mode: 'edit' }));
       // plan and edit must build the same argv once plan degrades.
       expect(planCmd).toEqual(editCmd);
       expect(planCmd).toEqual(['agy', '--print', 'do the thing']);
@@ -354,9 +354,18 @@ describe('buildExecCommand', () => {
       expect(cmd).toContain('--print');
     });
 
-    it('claude headless=false omits --print', () => {
-      const cmd = buildExecCommand(opts({ agent: 'claude', headless: false }));
+    it('claude interactive (no prompt) omits --print', () => {
+      const cmd = buildExecCommand(opts({ agent: 'claude', headless: false, prompt: undefined }));
       expect(cmd).not.toContain('--print');
+    });
+
+    it('antigravity infers headless from a prompt alone (adds --print, no explicit --headless)', () => {
+      // Regression: --headless defaults to false at the CLI layer, so a bare
+      // `agents run antigravity "..."` must still emit --print via the resolved
+      // headless state — otherwise `agy <prompt>` opens the TUI and dies on
+      // /dev/tty in a non-terminal shell.
+      const cmd = buildExecCommand(opts({ agent: 'antigravity', mode: 'edit' }));
+      expect(cmd).toEqual(['agy', '--print', 'do the thing']);
     });
 
     it('codex headless adds nothing (no printFlags)', () => {
@@ -394,7 +403,8 @@ describe('buildExecCommand', () => {
     });
 
     it('prompt without interactive behaves as headless (adds --print)', () => {
-      const cmd = buildExecCommand(opts({ agent: 'claude', prompt: 'fix auth', headless: true }));
+      // No explicit --headless: headless is inferred purely from prompt presence.
+      const cmd = buildExecCommand(opts({ agent: 'claude', prompt: 'fix auth' }));
       expect(cmd).toContain('--print');
     });
 
@@ -1017,6 +1027,7 @@ describe('buildExecCommand', () => {
         'claude',
         '--effort', 'high',
         '--dangerously-skip-permissions',
+        '--print',
         '-p', 'fix the bug',
       ]);
     });

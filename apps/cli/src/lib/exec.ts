@@ -799,10 +799,16 @@ export function buildExecCommand(options: ExecOptions): string[] {
     cmd.push(...modeFlags);
   }
 
-  // Add print/headless flags only when a prompt is provided. Without a prompt
-  // the caller wants an interactive REPL -- passing --print would immediately
-  // wait on stdin and never render the TUI.
-  if (!interactive && options.headless && template.printFlags) {
+  // Add print/headless flags whenever the run RESOLVED headless -- gate on the
+  // resolved state (`!interactive`), not the raw `--headless` flag. Headless is
+  // inferred from prompt presence (resolveInteractive), and `--headless` defaults
+  // to `false` at the CLI layer, so gating on `options.headless` skipped these
+  // flags for a bare `agents run <agent> "prompt"`. For antigravity that meant
+  // `agy <prompt>` with no `--print`, launching the TUI and dying on `/dev/tty`
+  // in any non-terminal shell. `!interactive` is true for both an explicit
+  // `--headless` and a prompt-inferred headless run; an interactive run (no
+  // prompt, or `--interactive`) still skips them so the CLI opens its REPL.
+  if (!interactive && template.printFlags) {
     cmd.push(...template.printFlags);
   }
 
