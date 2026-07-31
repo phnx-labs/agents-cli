@@ -1268,8 +1268,9 @@ async function runHooks(hooks, payload, $) {
       : hook.command
     const shell = Bun.which("bash") ?? Bun.which("sh")
     if (!shell) throw new Error(\`\${hook.name} requires bash or sh\`)
+    const execArgs = [shell, "-c", 'exec "$1"', "agents-hook", command]
     if (hook.timeout !== undefined) {
-      const process = Bun.spawn([shell, command], {
+      const process = Bun.spawn(execArgs, {
         stdin: new Response(input),
         stdout: "ignore",
         stderr: "pipe",
@@ -1285,7 +1286,7 @@ async function runHooks(hooks, payload, $) {
       }
       continue
     }
-    const result = await $\`\${shell} \${command} < \${new Response(input)}\`.nothrow().quiet()
+    const result = await $\`\${shell} -c \${'exec "$1"'} \${"agents-hook"} \${command} < \${new Response(input)}\`.nothrow().quiet()
     if (result.exitCode !== 0) {
       throw new Error(\`\${hook.name} failed with exit code \${result.exitCode}: \${result.stderr.toString().trim()}\`)
     }

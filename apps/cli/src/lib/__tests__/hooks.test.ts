@@ -526,7 +526,7 @@ describe('registerHooksToSettings - OpenCode', () => {
     expect(plugin).toContain('"session.idle"');
     expect(plugin).toContain('"session.error"');
     expect(plugin).toContain('const input = JSON.stringify(payload)');
-    expect(plugin).toContain('await $`${shell} ${command} < ${new Response(input)}`.nothrow().quiet()');
+    expect(plugin).toContain('await $`${shell} -c ${\'exec "$1"\'} ${"agents-hook"} ${command} < ${new Response(input)}`.nothrow().quiet()');
     expect(plugin).toContain('"matcher": "Bash|bash"');
   });
 
@@ -559,12 +559,12 @@ describe('registerHooksToSettings - OpenCode', () => {
 
   it('executes matching hooks, skips non-matches, and surfaces nonzero exits', async () => {
     const outputPath = path.join(tmpDir, 'hook-input.json');
-    const scriptPath = path.join(agentsDir, 'hooks', 'capture.sh');
-    fs.writeFileSync(scriptPath, `#!/bin/sh\ncat > ${JSON.stringify(outputPath)}\n`, 'utf-8');
+    const scriptPath = path.join(agentsDir, 'hooks', 'capture.js');
+    fs.writeFileSync(scriptPath, `#!/usr/bin/env node\nrequire("fs").writeFileSync(${JSON.stringify(outputPath)}, require("fs").readFileSync(0))\n`, 'utf-8');
     fs.chmodSync(scriptPath, 0o755);
     const versionHome = path.join(tmpDir, 'home');
     registerHooksToSettings('opencode', versionHome, {
-      capture: { script: 'capture.sh', events: ['PreToolUse'], matcher: '^bash$' },
+      capture: { script: 'capture.js', events: ['PreToolUse'], matcher: '^bash$' },
     }, agentsDir);
     const pluginPath = path.join(
       versionHome, '.config', 'opencode', 'plugins', 'agents-cli-hooks.ts'
@@ -590,7 +590,7 @@ describe('registerHooksToSettings - OpenCode', () => {
       sessionID: 'run',
     });
 
-    fs.writeFileSync(scriptPath, '#!/bin/sh\necho rejected >&2\nexit 7\n', 'utf-8');
+    fs.writeFileSync(scriptPath, '#!/usr/bin/env node\nconsole.error("rejected")\nprocess.exit(7)\n', 'utf-8');
     expect(() => execFileSync('bun', [runnerPath], { encoding: 'utf-8', stdio: 'pipe' }))
       .toThrow('capture failed with exit code 7: rejected');
   });
@@ -599,13 +599,13 @@ describe('registerHooksToSettings - OpenCode', () => {
     const homeScopedDir = fs.mkdtempSync(path.join(os.homedir(), '.opencode-hook-test-'));
     const homeAgentsDir = path.join(homeScopedDir, '.agents');
     fs.mkdirSync(path.join(homeAgentsDir, 'hooks'), { recursive: true });
-    const scriptPath = path.join(homeAgentsDir, 'hooks', 'slow.sh');
+    const scriptPath = path.join(homeAgentsDir, 'hooks', 'slow.js');
     const sideEffectPath = path.join(tmpDir, 'too-late');
-    fs.writeFileSync(scriptPath, `#!/bin/sh\nsleep 0.2\ntouch ${JSON.stringify(sideEffectPath)}\n`, 'utf-8');
+    fs.writeFileSync(scriptPath, `#!/usr/bin/env node\nsetTimeout(() => require("fs").writeFileSync(${JSON.stringify(sideEffectPath)}, ""), 200)\n`, 'utf-8');
     fs.chmodSync(scriptPath, 0o755);
     const versionHome = path.join(tmpDir, 'home');
     registerHooksToSettings('opencode', versionHome, {
-      slow: { script: 'slow.sh', events: ['SessionStart'], timeout: 0.01 },
+      slow: { script: 'slow.js', events: ['SessionStart'], timeout: 0.01 },
     }, homeAgentsDir);
     const pluginPath = path.join(
       versionHome, '.config', 'opencode', 'plugins', 'agents-cli-hooks.ts'
