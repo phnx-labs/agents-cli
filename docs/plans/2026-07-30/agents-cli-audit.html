@@ -438,13 +438,13 @@
       <b>duplicate <code>/etc/machine-id</code> is real and still present</b>:
       <pre style="margin:8px 0"><span class="c">$</span> ssh yosemite-s0 'hostname; cat /etc/machine-id; ip -4 addr show tailscale0'
 <span class="g">yosemite-s0</span>
-<span class="r">7af66f30966a49b6886e00e2fce4b42f</span>
-inet <span class="g">100.125.135.113</span>
+<span class="r">[redacted-machine-id]</span>
+inet <span class="g">100.x.x.x</span>
 
 <span class="c">$</span> ssh yosemite-s1 '…'
 <span class="g">yosemite-s1</span>
-<span class="r">7af66f30966a49b6886e00e2fce4b42f</span>   <span class="c">← identical</span>
-inet <span class="g">100.93.177.123</span></pre>
+<span class="r">[redacted-machine-id]</span>   <span class="c">← identical</span>
+inet <span class="g">100.x.x.x</span></pre>
       So the clone origin is confirmed and the SSH-misrouting symptom is not current — either it was transient or
       it has since been fixed. <b>The live defect is anything that keys on machine-id conflating the two boxes</b>
       (the session index carries a machine identity per transcript — see <code>machineForSessionFile</code>).
