@@ -15,7 +15,7 @@ enum IssueSelfTest {
         testImageFilePick()
         testTicketIDParse()
         testPromptContract()
-        testTicketCompletionAttachesScreenshots()
+        testTicketCreateArgsAndParsing()
         testQuickFixContract()
         testQuickDispatchRoster()
         testRecentTicketsMerge()
@@ -79,18 +79,20 @@ enum IssueSelfTest {
     }
 
     // The meta-prompt must carry the user's note and every user-provided file
-    // forward for investigation, but leave the actual upload to the helper's
-    // deterministic post-create step.
+    // forward for investigation, but must NOT tell the agent to run `linear create`
+    // or to embed screenshot paths in the description — the helper owns both.
     private static func testPromptContract() {
         let oneShot = AgentsCLI.ticketAgentPrompt(note: "cards show raw uuids",
                                                   screenshotPaths: ["/tmp/clip one.png"])
         check("prompt embeds the note", oneShot.contains("cards show raw uuids"))
         check("prompt embeds the screenshot path", oneShot.contains("/tmp/clip one.png"))
-        check("prompt names the linear create step", oneShot.contains("linear create"))
+        check("prompt asks for JSON output", oneShot.contains("JSON object"))
         check("prompt identifies user-provided ticket material",
               oneShot.contains("user-provided ticket material"))
-        check("prompt says the helper uploads selected files",
-              oneShot.contains("menu-bar helper") && oneShot.contains("uploads every selected file"))
+        check("prompt forbids agent from running linear create",
+              oneShot.contains("Do NOT run `linear create`"))
+        check("prompt forbids screenshot paths in description",
+              oneShot.contains("do NOT mention the screenshot paths here"))
         check("prompt does not make the agent run a proof upload",
               !oneShot.contains("--proof"))
 
@@ -104,52 +106,70 @@ enum IssueSelfTest {
         check("no-screenshot prompt says so", noShot.contains("No screenshots"))
         check("no-screenshot prompt has no /tmp path", !noShot.contains("/tmp/"))
         check("no-screenshot prompt has no upload command", !noShot.contains("--proof"))
-        check("no-screenshot prompt skips attachment handling", noShot.contains("skip attachment handling"))
 
-        // RUSH-1636: the ticket agent must assign a delegate via linear create --delegate.
+        // RUSH-1636: the ticket agent must resolve a delegate and return it in JSON.
         let delegate = AgentsCLI.ticketAgentPrompt(note: "assign a delegate", screenshotPaths: ["/tmp/a.png"])
         check("prompt instructs delegate resolution", delegate.contains("agents sessions --active"))
         check("prompt lists the workspace delegate roster",
               delegate.contains("Antigravity") && delegate.contains("OpenClaw"))
-        check("prompt templates --delegate on linear create", delegate.contains("--delegate <agent>"))
+        check("prompt returns delegate as JSON key", delegate.contains("\"delegate\""))
         check("prompt defaults to claude when inconclusive", delegate.contains("default to `claude`"))
-        check("prompt omits --delegate on resolution failure",
-              delegate.contains("omit the `--delegate` flag"))
     }
 
-    // Once the ticket agent creates an issue, selected screenshots must become a
-    // real Linear update invocation against that created id, with each path
-    // passed as its own --proof arg so spaces/apostrophes are not shell-parsed.
-    private static func testTicketCompletionAttachesScreenshots() {
-        let output = """
+    // The helper parses the agent's JSON draft, builds `linear create` argv with
+    // every selected screenshot as its own `--image` arg, and parses the created
+    // ticket back from `linear create` stdout.
+    private static func testTicketCreateArgsAndParsing() {
+        let draft = TicketDraft(title: "Cards show raw uuids",
+                                description: "The cards render raw uuids.",
+                                priority: "high",
+                                project: "Agents CLI",
+                                label: "repo:agents-cli",
+                                delegate: "claude")
+        let args = AgentsCLI.ticketCreateArgs(
+            draft: draft,
+            screenshotPaths: ["/tmp/clip one.png", "/tmp/Muqsit's shot.png"]
+        )
+        let linear = AgentsCLI.linearSkillBinary()
+        let expected = [
+            linear, "create", "Cards show raw uuids",
+            "--priority", "high",
+            "--project", "Agents CLI",
+            "--label", "repo:agents-cli",
+            "--description-file", "-",
+            "--delegate", "claude",
+            "--image", "/tmp/clip one.png",
+            "--image", "/tmp/Muqsit's shot.png",
+        ]
+        check("create argv includes every selected screenshot as --image",
+              args == expected,
+              detail: args.joined(separator: " "))
+
+        let noDelegate = TicketDraft(title: "T", description: "D", priority: "low",
+                                     project: "P", label: "repo:x", delegate: nil)
+        let noDelegateArgs = AgentsCLI.ticketCreateArgs(draft: noDelegate, screenshotPaths: [])
+        check("nil delegate omits --delegate",
+              !noDelegateArgs.contains("--delegate"),
+              detail: noDelegateArgs.joined(separator: " "))
+
+        let json = """
+        Some reasoning here.
+        {"title": "Fix it", "description": "Broken", "priority": "medium", "project": "P", "label": "repo:x", "delegate": null}
+        """
+        let parsed = AgentsCLI.parseTicketDraft(json)
+        check("parseTicketDraft extracts JSON from surrounding text", parsed?.title == "Fix it")
+        check("parseTicketDraft preserves null delegate", parsed?.delegate == nil)
+
+        let createOutput = """
         Created RUSH-200: Cards show raw uuids
         URL: https://linear.app/getrush/issue/RUSH-200/cards-show-raw-uuids
         """
-        let completion = AgentsCLI.ticketCompletion(
-            output: output,
-            screenshotPaths: ["/tmp/clip one.png", "/tmp/Muqsit's shot.png"]
-        )
+        let completion = AgentsCLI.ticketCompletion(output: createOutput)
         check("ticket completion parses the created id", completion?.id == "RUSH-200")
         check("ticket completion preserves the Linear URL",
               completion?.url == "https://linear.app/getrush/issue/RUSH-200/cards-show-raw-uuids")
-        let expected = [
-            AgentsCLI.linearSkillBinary(),
-            "update",
-            "RUSH-200",
-            "--proof",
-            "/tmp/clip one.png",
-            "--proof",
-            "/tmp/Muqsit's shot.png",
-        ]
-        check("created ticket gets every selected screenshot as proof args",
-              completion?.attachmentArgs == expected,
-              detail: (completion?.attachmentArgs ?? []).joined(separator: " "))
-
-        let noShots = AgentsCLI.ticketCompletion(output: output, screenshotPaths: [])
-        check("created ticket with no screenshots skips proof update",
-              noShots?.attachmentArgs == nil)
         check("no created id yields no completion",
-              AgentsCLI.ticketCompletion(output: "ticket create failed", screenshotPaths: ["/tmp/a.png"]) == nil)
+              AgentsCLI.ticketCompletion(output: "ticket create failed") == nil)
     }
 
     // The autonomous fix path must carry screenshots through and name runs with
