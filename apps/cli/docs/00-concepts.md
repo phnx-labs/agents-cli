@@ -158,7 +158,7 @@ contract.
 | Goose | >= 1.34.0 | yes | yes | >= 1.25.0 | yes | yes | yes | `AGENTS.md` | yes |
 | Roo Code | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | Antigravity | yes | yes | yes | yes | yes | yes | >= 1.0.16 | `AGENTS.md` | >= 1.0.6 |
-| Grok | yes | yes | yes | yes | skills ($name) | yes | no | `AGENTS.md` | no |
+| Grok | yes | yes | yes | yes | skills ($name) | yes | no | `AGENTS.md` | >= 0.2.111 |
 | Kimi | yes | yes | yes | yes | no | yes | yes | `AGENTS.md` | yes |
 | Droid | yes | yes | >= 0.57.5 | >= 0.26.0 | yes | yes | yes | `AGENTS.md` | no |
 | Hermes | no | yes | yes | yes | no | yes | no | `MEMORY.md` | no |

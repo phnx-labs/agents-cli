@@ -1,6 +1,8 @@
 /**
- * Workflows writer — copies each workflow directory into
- * `<versionHome>/workflows/<name>/` via `syncWorkflowToVersion`.
+ * Workflows writer — copies each selected workflow into the agent-specific
+ * on-disk layout via `syncWorkflowToVersion` (Claude: WORKFLOW.md tree under
+ * `{versionHome}/workflows/`; Grok: native `.rhai` under
+ * `{versionHome}/.grok/workflows/`).
  */
 import type { AgentId } from '../../types.js';
 import { capableAgents } from '../../capabilities.js';

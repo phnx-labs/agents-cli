@@ -1,6 +1,7 @@
 /**
- * Workflows detector — scans `{versionHome}/workflows/` for subdirectories
- * containing WORKFLOW.md. Mirrors versions.ts:551-558.
+ * Workflows detector — scans the agent-specific on-disk layout for synced
+ * workflow names (Claude WORKFLOW.md trees, Kimi flow skills, Antigravity
+ * global_workflows, Goose recipes, OpenClaw Lobster, Grok Rhai).
  */
 import * as fs from 'fs';
 import * as os from 'os';
@@ -8,6 +9,7 @@ import * as path from 'path';
 import * as yaml from 'yaml';
 import type { AgentId } from '../../types.js';
 import { capableAgents } from '../../capabilities.js';
+import { grokWorkflowMarker } from '../../workflows.js';
 import type { ResourceDetector, DetectArgs } from './types.js';
 import { lazyAgentMap } from '../writers/lazy-map.js';
 
@@ -81,6 +83,15 @@ function buildWorkflowsDetector(agent: AgentId): ResourceDetector {
             } catch { return false; }
           })
           .map(d => d.name.slice(0, -'.lobster'.length));
+      }
+
+      if (agent === 'grok') {
+        const workflowsDir = path.join(versionHome, '.grok', 'workflows');
+        if (!fs.existsSync(workflowsDir)) return [];
+        return fs.readdirSync(workflowsDir, { withFileTypes: true })
+          .filter(d => d.isFile() && d.name.endsWith('.rhai') && !d.name.startsWith('.'))
+          .filter(d => grokWorkflowMarker(path.join(workflowsDir, d.name)) === d.name.slice(0, -'.rhai'.length))
+          .map(d => d.name.slice(0, -'.rhai'.length));
       }
 
       const workflowsDir = path.join(versionHome, 'workflows');

@@ -427,13 +427,14 @@ describe('cursor subagents version gate', () => {
 });
 
 describe('workflow capability gates', () => {
-  it('includes Antigravity, Claude, Goose, Kimi, and OpenClaw for workflow sync', () => {
+  it('includes Antigravity, Claude, Goose, Grok, Kimi, and OpenClaw for workflow sync', () => {
     expect(supports('claude', 'workflows')).toEqual({ ok: true });
     expect(supports('antigravity', 'workflows')).toEqual({ ok: true });
     expect(supports('goose', 'workflows')).toEqual({ ok: true });
+    expect(supports('grok', 'workflows')).toEqual({ ok: true });
     expect(supports('kimi', 'workflows')).toEqual({ ok: true });
     expect(supports('openclaw', 'workflows')).toEqual({ ok: true });
-    expect(capableAgents('workflows').sort()).toEqual(['antigravity', 'claude', 'goose', 'kimi', 'openclaw']);
+    expect(capableAgents('workflows').sort()).toEqual(['antigravity', 'claude', 'goose', 'grok', 'kimi', 'openclaw']);
   });
 
   it('gates Antigravity workflows at >= 1.0.6', () => {
@@ -459,3 +460,21 @@ describe('explainSkip()', () => {
     expect(explainSkip('claude', 'hooks', { ok: true })).toBe('');
   });
 });
+
+describe('grok workflows version gate', () => {
+  it('gates versions below 0.2.111 as too_old', () => {
+    const result = supports('grok', 'workflows', '0.2.110');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('too_old');
+      expect(result.need).toBe('>= 0.2.111');
+    }
+  });
+
+  it('passes 0.2.111 and above', () => {
+    expect(supports('grok', 'workflows', '0.2.111')).toEqual({ ok: true });
+    expect(supports('grok', 'workflows', '0.2.120')).toEqual({ ok: true });
+  });
+
+});
+

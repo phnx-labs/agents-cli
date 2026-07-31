@@ -47,6 +47,7 @@ import {
 import { isPromptCancelled, isInteractiveTerminal } from './utils.js';
 
 interface ImportOptions {
+  all?: boolean;
   /** Version label to import as. Named `--as`, not `--version`: see registerImportCommand. */
   as?: string;
   isolated?: boolean;
@@ -193,7 +194,7 @@ async function runImport(agentArg: string, opts: ImportOptions): Promise<void> {
   const versionDir = getVersionDir(agentId, version);
   const fromLabel = useDirectBinaryImport ? (installScriptBinary as string) : (globalPath as string);
 
-  console.log(chalk.bold(`\nImport ${agentLabel(agentId)} v${version}`));
+  console.log(chalk.bold(`\nImport ${agentLabel(agentId)} v${version}${opts.isolated ? ' (isolated copy)' : ''}`));
   console.log(`  from: ${chalk.gray(fromLabel)}`);
   console.log(`  into: ${chalk.gray(versionDir)}`);
 
@@ -204,6 +205,15 @@ async function runImport(agentArg: string, opts: ImportOptions): Promise<void> {
     if (stat.isSymbolicLink()) {
       configAlreadyManaged = true;
       console.log(`  config: ${chalk.gray(`${agent.configDir} (already managed — will skip)`)}`);
+    } else if (opts.isolated) {
+      // This summary is printed BEFORE the branch that does the work, so it has to
+      // describe the mode it is actually about to run. Saying "will be moved" under
+      // --isolated announced the exact adoption the flag exists to prevent — a
+      // confirmation prompt that misdescribes the operation is worse than none.
+      console.log(`  config: ${chalk.gray(`${agent.configDir} (will be COPIED — your original stays put)`)}`);
+      if (!opts.withAuth) {
+        console.log(`          ${chalk.gray('credentials are skipped; pass --with-auth to include them')}`);
+      }
     } else {
       console.log(`  config: ${chalk.gray(`${agent.configDir} (will be moved into version home)`)}`);
     }
@@ -214,7 +224,9 @@ async function runImport(agentArg: string, opts: ImportOptions): Promise<void> {
   if (!opts.yes && isInteractiveTerminal()) {
     console.log();
     const proceed = await confirm({
-      message: `Import ${agentLabel(agentId)} v${version} into agents-cli?`,
+      message: opts.isolated
+        ? `Import ${agentLabel(agentId)} v${version} as an isolated copy?`
+        : `Import ${agentLabel(agentId)} v${version} into agents-cli?`,
       default: true,
     }).catch((err) => {
       if (isPromptCancelled(err)) return false;
@@ -231,16 +243,21 @@ async function runImport(agentArg: string, opts: ImportOptions): Promise<void> {
   // want a stranded symlink farm. Binary registration is cheap and reversible
   // — if it fails after config, the next `agents import` call retries cleanly.
   const willImportConfig = configDirExists && !configAlreadyManaged && !opts.isolated;
-  if (opts.isolated && configDirExists) {
+  if (opts.isolated && configDirExists && configAlreadyManaged) {
+    console.log(chalk.gray(`  Skipping config copy: ${agent.configDir} is a managed symlink, not your real settings.`));
+  } else if (opts.isolated && configDirExists) {
     // COPY the user's settings in; never move, never symlink. The original stays
     // exactly where it is — that is what separates this from adoption.
     const seedSpinner = ora(`Copying ${agent.configDir} into the isolated copy...`).start();
-    const seed = seedIsolatedConfigFromLocal(agentId, version, { withAuth: opts.withAuth });
+    const seed = seedIsolatedConfigFromLocal(agentId, version, { withAuth: opts.withAuth, all: opts.all });
     if (seed.error) {
       seedSpinner.fail(`Config: ${seed.error}`);
       process.exit(1);
     } else if (seed.seeded) {
       seedSpinner.succeed(`Settings copied (${seed.from} -> ${seed.to}); your original is untouched`);
+      if (seed.skippedRuntime.length > 0) {
+        console.log(chalk.gray(`  Runtime state NOT copied: ${seed.skippedRuntime.join(', ')} (regenerated as you use it; --all to include)`));
+      }
       if (seed.skippedAuth.length > 0) {
         console.log(chalk.gray(`  Credentials NOT copied: ${seed.skippedAuth.join(', ')}`));
         console.log(chalk.gray('  The copy signs in separately. Use --with-auth to copy them too.'));
@@ -332,6 +349,7 @@ export function registerImportCommand(program: Command): void {
     .option('--from-path <path>', 'Path to the npm package dir (otherwise auto-detected from PATH)')
     .option('--isolated', 'Copy the install into a self-contained isolated version instead of adopting it')
     .option('--with-auth', 'With --isolated, also copy credentials into the sandbox (skipped by default)')
+    .option('--all', 'With --isolated, also copy session history, logs and caches (skipped by default)')
     .option('-y, --yes', 'Skip the confirmation prompt')
     .addHelpText('after', `
 Examples:
