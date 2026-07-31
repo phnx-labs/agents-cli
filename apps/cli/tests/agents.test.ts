@@ -59,9 +59,14 @@ describe('droid (Factory AI)', () => {
     expect(capableAgents('hooks')).toContain('droid');
     expect(capableAgents('plugins')).toContain('droid');
     expect(capableAgents('skills')).toContain('droid');
-    // No Droid equivalent for workflows — keep it false so the registry
-    // assertion doesn't demand a writer we can't provide.
+    // RUSH-1864: Factory Missions (`/missions`, `droid exec --mission`) are a
+    // real multi-step orchestrator, but they are invoke-only. There is no
+    // auto-discovered install dir for named mission templates (cold install has
+    // no ~/.factory/missions/; that path is per-session runtime state only).
+    // Keep workflows:false so the registry never demands a writer we can't
+    // provide — do not fabricate a discovery dir.
     expect(capableAgents('workflows')).not.toContain('droid');
+    expect(AGENTS.droid.capabilities.workflows).toBe(false);
   });
 
   it('resolves MCP config to ~/.factory/mcp.json and parses the written shape back', () => {
