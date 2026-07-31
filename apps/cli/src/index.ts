@@ -33,6 +33,8 @@ const packageJsonPath = path.join(__dirname, '..', 'package.json');
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
 const VERSION = packageJson.version;
 
+import { SYNC_GET_CMD, SYNC_PING_CMD, SYNC_LOCK_CMD } from './lib/secrets/sync-commands.js';
+
 if (process.argv[2] === '__vault-age-helper') {
   const { runVaultAgeHelperCli } = await import('./lib/secrets/vault-age-helper.js');
   await runVaultAgeHelperCli();
@@ -53,20 +55,29 @@ if (process.argv[2] === '__vault-age-helper') {
 // writes that could corrupt the JSON payload. Keep them above the line;
 // agent.test.ts asserts this ordering so the block can't drift downward.
 //
+// The tokens are imported from the leaf module sync-commands.ts — the SAME
+// bindings the clients spawn with, so this dispatch and those spawns cannot
+// drift apart. It is a leaf precisely so binding them here is free: importing
+// agent.js would pull the whole secrets graph into every invocation. Matching
+// string literals were the earlier design; a text-scanning test could not
+// reliably catch their divergence, and the divergence is silent — the CLI says
+// "unknown command", the client reads that as "broker down", and every read
+// falls back to a Touch ID prompt.
+//
 // "Before the startup statements", not "before all code": ESM hoists the
 // imports below, so those module bodies evaluate first. They are side-effect
 // free today (no top-level stdout write or spawn) — which is what makes this
 // safe, and worth preserving.
 if (
-  process.argv[2] === '__secrets-get' ||
-  process.argv[2] === '__secrets-ping' ||
-  process.argv[2] === '__secrets-lock'
+  process.argv[2] === SYNC_GET_CMD ||
+  process.argv[2] === SYNC_PING_CMD ||
+  process.argv[2] === SYNC_LOCK_CMD
 ) {
   const { runAgentGetSync, runAgentPingSync, runAgentLockSync } = await import('./lib/secrets/agent.js');
   const name = process.argv[3] ?? '';
   const code =
-    process.argv[2] === '__secrets-get' ? await runAgentGetSync(name)
-    : process.argv[2] === '__secrets-ping' ? await runAgentPingSync()
+    process.argv[2] === SYNC_GET_CMD ? await runAgentGetSync(name)
+    : process.argv[2] === SYNC_PING_CMD ? await runAgentPingSync()
     : await runAgentLockSync(name);
   process.exit(code);
 }

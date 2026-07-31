@@ -37,6 +37,7 @@ import { getCliVersion, getCliVersionFresh } from '../version.js';
 import { getCliLaunch } from '../cli-entry.js';
 import type { SecretsBundle } from './bundles.js';
 import { rehydrateSessions, pruneSessionsOnSleep } from './session-store.js';
+import { SYNC_GET_CMD, SYNC_PING_CMD, SYNC_LOCK_CMD } from './sync-commands.js';
 
 /** Bumped when the wire protocol changes; a client that pings a mismatched
  * server kills and respawns it rather than talking a stale dialect. */
@@ -90,20 +91,11 @@ const SYNC_GET_TIMEOUT_MS = 4000;
 const SYNC_PING_TIMEOUT_MS = 2500;
 const SYNC_LOCK_TIMEOUT_MS = 4000;
 
-/**
- * The argv tokens the sync clients spawn, and that index.ts dispatches on.
- *
- * Exported and used by BOTH the spawn sites below and the tests, so the two can
- * never describe different tokens — a test that hardcoded its own copy would
- * pass while production spawned something the CLI doesn't answer, which is a
- * silent return to a keychain read on every hit. index.ts holds these as
- * literals on purpose (importing this module at the top of the entrypoint would
- * pull the secrets graph into every invocation); agent.test.ts asserts the
- * entrypoint's literals still match these constants.
- */
-export const SYNC_GET_CMD = '__secrets-get';
-export const SYNC_PING_CMD = '__secrets-ping';
-export const SYNC_LOCK_CMD = '__secrets-lock';
+// The argv tokens live in a leaf module so index.ts can bind the SAME values
+// without importing this one. Re-exported here for callers already reaching for
+// agent.js. See sync-commands.ts for why a shared binding rather than matching
+// literals: the drift it prevents is silent and costs a Touch ID prompt per read.
+export { SYNC_GET_CMD, SYNC_PING_CMD, SYNC_LOCK_CMD } from './sync-commands.js';
 
 /**
  * Decide whether a persistent broker should self-heal onto freshly-installed
@@ -831,11 +823,12 @@ export function syncClientLaunch(sub: string[], agentsBin?: string): { command: 
 
 function syncClient(sub: string[], timeout: number): SpawnSyncReturns<string> | null {
   // Soft on every failure: bundles.ts's fast path promises "any failure falls
-  // through to the real keychain read below". spawnSync itself never throws (it
-  // reports via r.error), but getCliLaunch/getAgentsBinPath DO throw on a
-  // broken install — a bunfs entry whose execPath is gone, or a browser/computer
-  // shim with no sibling index.js. Without this catch those turn a graceful
-  // fallback into a crash, and only on already-degraded installs.
+  // through to the real keychain read below". spawnSync reports most failures
+  // via r.error rather than throwing, but getCliLaunch/getAgentsBinPath DO
+  // throw on a broken install — a bunfs entry whose execPath is gone, or a
+  // browser/computer shim with no sibling index.js. Without this catch those
+  // turn a graceful fallback into a crash, and only on already-degraded
+  // installs, which is the worst time for it.
   try {
     const { command, args } = syncClientLaunch(sub);
     return spawnSync(command, args, { encoding: 'utf-8', timeout });
@@ -910,16 +903,16 @@ export function agentReachableSync(): boolean {
 export function agentEvictSync(name: string): void {
   if (!onDarwin()) return;
   if (!agentSocketExists()) return;
-  try {
-    syncClient([SYNC_LOCK_CMD, name], SYNC_LOCK_TIMEOUT_MS);
-  } catch { /* best-effort */ }
+  // No try/catch: syncClient swallows its own failures and returns null.
+  syncClient([SYNC_LOCK_CMD, name], SYNC_LOCK_TIMEOUT_MS);
 }
 
 // ─── Top-level `__secrets-*` sync-client entrypoints ────────────────────────
 // The bodies behind the three spawns above. Each does one socket round-trip and
 // signals the parent through its exit code, mirroring the inline `node -e`
-// programs these replaced: 0 = hit/alive, 3 = miss/down. Lock is the one
-// deviation — it reports 0 even when no broker answers (see runAgentLockSync).
+// programs these replaced: 0 = hit/alive, 3 = miss/down. Lock deviates twice:
+// it reports 0 even when no broker answers, and 3 for an empty name, which it
+// refuses rather than forwarding as a lock-ALL (see runAgentLockSync).
 // Dispatched from index.ts BEFORE commander and before the startup statements,
 // so a cache hit never runs checkForUpdates() or forks a detached sync.
 
