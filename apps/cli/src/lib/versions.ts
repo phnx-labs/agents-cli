@@ -2861,6 +2861,9 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
           }
         }
         result.hooks = r.synced.length > 0;
+        if (result.hooks && agent === 'opencode') {
+          registerHooksToSettings(agent, versionHome, parseHookManifest());
+        }
       }
     }
   }
