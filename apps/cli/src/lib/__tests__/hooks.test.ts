@@ -574,8 +574,13 @@ describe('registerHooksToSettings - OpenCode', () => {
       import { $ } from "bun"
       import { AgentsCliHooks } from ${JSON.stringify(pluginPath)}
       const plugin = await AgentsCliHooks({ $ })
-      await plugin["tool.execute.before"]({ tool: "read", sessionID: "skip" }, { args: {} })
-      await plugin["tool.execute.before"]({ tool: "bash", sessionID: "run" }, { args: { command: "true" } })
+      try {
+        await plugin["tool.execute.before"]({ tool: "read", sessionID: "skip" }, { args: {} })
+        await plugin["tool.execute.before"]({ tool: "bash", sessionID: "run" }, { args: { command: "true" } })
+      } catch (error) {
+        console.error(error.message)
+        process.exit(1)
+      }
       process.exit(0)
     `, 'utf-8');
     execFileSync('bun', [runnerPath]);
