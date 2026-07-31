@@ -4,6 +4,18 @@
 
 ### Added
 
+- **Interactive session browser: preview-by-default with clickable ticket + PR links.**
+  The `agents sessions` / `--active` browser now shows the highlighted row's preview
+  pane **open by default** (matching the static picker) instead of hiding it behind
+  `tab` — arrow through rows and read prompt/activity/last-response inline; `tab`
+  toggles it off. The preview gains a **links line**: the worked-on ticket and the PR
+  the session opened render as **OSC 8 hyperlinks** (clickable in supporting
+  terminals) — the ticket to Linear, the `PR#` to GitHub. The Linear workspace slug is
+  resolved config-first (`LINEAR_WORKSPACE` env, else the linear-cli config's
+  `workspaceUrlKey`), never hardcoded, so tickets stay plain text when it's unknown.
+  Source: `apps/cli/src/lib/picker.ts`, `apps/cli/src/commands/sessions-picker.ts`,
+  `apps/cli/src/commands/sessions-browser.ts`, `apps/cli/src/lib/session/render.ts`,
+  `apps/cli/src/lib/session/linear.ts`.
 - **`agents resources --merged` shows the effective DotAgents resource surface (RUSH-1770).**
   The command lists the merged skills, commands, MCP servers, hooks, rules, plugins,
   workflows, and subagents resolved through project > user > system > extras, with

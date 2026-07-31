@@ -11,7 +11,8 @@ import { truncate, humanDuration } from '../lib/format.js';
 import type { SessionEvent, SessionMeta } from '../lib/session/types.js';
 import { parseSession, sanitizeForTerminal } from '../lib/session/parse.js';
 import { cleanSessionPrompt, extractSessionTopic } from '../lib/session/prompt.js';
-import { linkPath, relativeToCwd } from '../lib/session/render.js';
+import { linkPath, linkUrl, relativeToCwd } from '../lib/session/render.js';
+import { linearIssueUrl } from '../lib/session/linear.js';
 import { renderMarkdown } from '../lib/markdown.js';
 import { itemPicker } from '../lib/picker.js';
 import { classifyFileChanges, changeCounts, toolHistogram, detectTestResult } from '../lib/session/digest.js';
@@ -44,6 +45,8 @@ function sanitizeMeta(s: SessionMeta): SessionMeta {
     account: clean(s.account),
     topic: clean(s.topic),
     label: clean(s.label),
+    ticketId: clean(s.ticketId),
+    prUrl: clean(s.prUrl),
   };
 }
 
@@ -152,10 +155,23 @@ function formatHeader(session: SessionMeta, events: SessionEvent[]): string {
   if (session.label) line3.push(chalk.white(session.label));
   line3.push(chalk.gray(linkPath(session.filePath, session.id)));
 
+  // Line 4: ticket + PR — clickable when a URL is resolvable (OSC 8 hyperlink),
+  // plain text otherwise. Only rendered when the session carries either.
+  const line4: string[] = [];
+  if (session.ticketId) {
+    const url = linearIssueUrl(session.ticketId);
+    line4.push(chalk.blue(url ? linkUrl(url, session.ticketId) : session.ticketId));
+  }
+  if (session.prUrl) {
+    const label = session.prNumber ? `PR#${session.prNumber}` : 'PR';
+    line4.push(chalk.blue(linkUrl(session.prUrl, label)));
+  }
+
   return [
     line1.join(DOT),
     line2.join(DOT),
     line3.join(DOT),
+    ...(line4.length ? [line4.join(DOT)] : []),
   ].join('\n');
 }
 

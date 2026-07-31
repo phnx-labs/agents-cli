@@ -263,7 +263,7 @@ function helpFor(_f: BrowserFilter, mode: 'nav' | 'search'): string {
   if (mode === 'search') {
     return 'type to filter · ↑↓ navigate · esc exit search · ⏎ resume';
   }
-  return 's search · r running · c teams · a agent · d device · p project · w window · y copy-cmd · ⏎ resume · esc quit';
+  return 's search · r running · c teams · a agent · d device · p project · w window · tab preview · y copy-cmd · ⏎ resume · esc quit';
 }
 
 /**

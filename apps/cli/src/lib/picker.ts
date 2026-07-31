@@ -493,7 +493,10 @@ export function dynamicPicker<T, F>(config: DynamicPickerConfig<T, F>): Promise<
     const [loading, setLoading] = useState(true);
     const [query, setQuery] = useState('');
     const [mode, setMode] = useState<'nav' | 'search'>('nav');
-    const [previewOpen, setPreviewOpen] = useState(false);
+    // Default the preview pane open when the caller supplies a preview builder —
+    // matches the static `itemPicker`, so the session browser shows a live preview
+    // as you arrow through rows instead of hiding it behind `tab`.
+    const [previewOpen, setPreviewOpen] = useState(Boolean(cfg.buildPreview));
     const [active, setActive] = useState(0);
     const [flash, setFlash] = useState('');
     const prefix = usePrefix({ status, theme });

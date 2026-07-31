@@ -33,21 +33,36 @@ export function relativeToCwd(absPath: string, cwd?: string): string {
   return absPath;
 }
 
+/** Best-effort feature-detect for OSC 8 hyperlink support in the current TTY. */
+function supportsHyperlinks(): boolean {
+  return Boolean(
+    process.stdout.isTTY &&
+      (process.env.TERM_PROGRAM ||
+        process.env.WT_SESSION ||
+        process.env.KITTY_WINDOW_ID ||
+        process.env.WEZTERM_PANE),
+  );
+}
+
+/** Wrap `label` in an OSC 8 hyperlink to `target`. Callers gate on {@link supportsHyperlinks}. */
+function osc8(target: string, label: string): string {
+  return `\x1b]8;;${target}\x1b\\${label}\x1b]8;;\x1b\\`;
+}
+
 /**
- * Wrap label in an OSC 8 hyperlink when the terminal supports it.
- * Degrades to plain label otherwise.
+ * Wrap a filesystem path label in an OSC 8 `file://` hyperlink when the terminal
+ * supports it. Degrades to the plain label otherwise.
  */
 export function linkPath(absPath: string, label: string): string {
-  if (
-    process.stdout.isTTY &&
-    (process.env.TERM_PROGRAM ||
-      process.env.WT_SESSION ||
-      process.env.KITTY_WINDOW_ID ||
-      process.env.WEZTERM_PANE)
-  ) {
-    return `\x1b]8;;file://${absPath}\x1b\\${label}\x1b]8;;\x1b\\`;
-  }
-  return label;
+  return supportsHyperlinks() ? osc8(`file://${absPath}`, label) : label;
+}
+
+/**
+ * Wrap a label in an OSC 8 hyperlink to an arbitrary URL (a PR on GitHub, a Linear
+ * issue, …) when the terminal supports it. Degrades to the plain label otherwise.
+ */
+export function linkUrl(url: string, label: string): string {
+  return supportsHyperlinks() ? osc8(url, label) : label;
 }
 
 // ── Command grouping ──────────────────────────────────────────────────────────
