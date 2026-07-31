@@ -1219,7 +1219,7 @@ Agents are defined in [src/lib/agents.ts](apps/cli/src/lib/agents.ts) -- each is
 | [`apps/cli`](apps/cli) | **The CLI** (this README) — version management, config sync, sessions, teams, cloud, browser, computer, secrets. |
 | [`apps/factory`](apps/factory) | **Factory** — a VS Code extension that spawns agent terminals as tabs and adds the Factory Floor dashboard. A separate product with its own publish identity. |
 | [`native/computer-mac`](native/computer-mac) · [`native/computer-win`](native/computer-win) | Native backends behind `agents computer` — Swift (macOS Accessibility + screen capture) and C#/.NET (Windows UI Automation). |
-| [`packages/session-tracker`](packages/session-tracker) | The `SessionStart` hook that writes live-session state the CLI reads back. |
+| [`packages/session-tracker`](packages/session-tracker) | The `SessionStart` hook that writes live-session state the **Factory extension** reads back (`apps/factory/src/core/liveSession.ts`) — not the CLI, which reads transcripts. |
 
 ## Contributing
 

@@ -87,10 +87,11 @@ it is NOT a global-binary agent and is left uncollapsed. (RUSH-1321)
 
 ## Supported harnesses
 
-14 harnesses ship support today. The full id list is `AgentId`
-([`src/lib/types.ts`](src/lib/types.ts)); per-harness config + capabilities live in the
-`AGENTS` registry ([`src/lib/agents.ts`](src/lib/agents.ts)) and are gated through
-`supports()`. **Prioritized (first-class):** Claude Code, Codex CLI, Kimi CLI,
+The supported harnesses are the entries in the `AGENTS` registry
+([`src/lib/agents.ts`](src/lib/agents.ts)) — the canonical list, gated through
+`supports()`; the full id union is `AgentId` ([`src/lib/types.ts`](src/lib/types.ts)).
+The table below is a snapshot of their per-harness capabilities — keep it in sync
+with the registry. **Prioritized (first-class):** Claude Code, Codex CLI, Kimi CLI,
 Antigravity CLI, Grok CLI, OpenCode — features target these six first.
 
 | Harness | `id` | hooks | mcp | allowlist | skills | commands | plugins | subagents | workflows |
@@ -286,5 +287,7 @@ Bumping it would un-deprecate a retired package.
 
 ## Detailed design
 
-[`../../docs/`](../../docs/README.md) is source-grounded reference. Start with
-[`00-concepts.md`](../../docs/00-concepts.md) for the full mental model.
+[`docs/`](docs/README.md) is the source-grounded reference. Start with
+[`architecture.md`](docs/architecture.md) for the CLI/extension layering and the
+session mechanisms, then [`00-concepts.md`](docs/00-concepts.md) for the resource
+model.

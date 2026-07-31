@@ -24,7 +24,7 @@ native/
 packages/
   session-tracker/  @agents/session-tracker — SessionStart hook that WRITES live-session state
   swarmify-mirror/  legacy npm-redirect stub (@companion/agents-cli → @phnx-labs/agents-cli)
-docs/         Source-grounded design reference (start: docs/00-concepts.md)
+docs/         Repo-root design notes (docs/design/); the full CLI design reference is apps/cli/docs/ (start: apps/cli/docs/architecture.md)
 assets/ demo/ website/   Brand, launch demo, landing (repo-root, not shipped in any tarball)
 ```
 
@@ -101,6 +101,7 @@ and reread this block.
 
 ## Detailed design
 
-[`docs/`](docs/README.md) is source-grounded reference. Start with
-[`00-concepts.md`](docs/00-concepts.md) for the full mental model and resolution
-semantics of the CLI.
+[`apps/cli/docs/`](apps/cli/docs/README.md) is the source-grounded reference. Start
+with [`architecture.md`](apps/cli/docs/architecture.md) for the CLI/extension layering
+and the session mechanisms, then [`00-concepts.md`](apps/cli/docs/00-concepts.md) for
+the resource model and resolution semantics of the CLI.
