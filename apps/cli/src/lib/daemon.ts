@@ -613,7 +613,7 @@ export async function runDaemon(): Promise<void> {
       );
       if (repaired.length) log('INFO', `launch-health: repaired ${repaired.join(', ')}`);
       if (unhealed.length) {
-        log('WARN', `launch-health: ${unhealed.join(', ')} won't launch and was NOT auto-switched — choose a version with \`agents use <agent> <version>\` or \`agents add <agent>@latest\``);
+        log('WARN', `launch-health: ${unhealed.join(', ')} won't launch and will not be auto-switched — choose a version with \`agents use <agent> <version>\` or \`agents add <agent>@latest\``);
       }
     } catch (err) {
       log('ERROR', `launch-health check failed: ${(err as Error).message}`);

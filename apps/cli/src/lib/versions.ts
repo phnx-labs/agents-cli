@@ -2415,9 +2415,12 @@ export async function ensureAgentRunnable(
  * `agents run` hits a raw ENOENT — the run-time heal (ensureAgentRunnable) only
  * fires once a run is already starting; this catches it in the background.
  *
- * Returns a label (`agent@broken→healed`) for each version actually repaired, so
- * the daemon can log/notify. A version that already launches costs one cheap
- * `--version` probe and is left untouched.
+ * Returns `{ repaired, unhealed }`: `repaired` is a label (`agent@broken→healed`)
+ * for each version actually fixed; `unhealed` is `agent@version` for each broken
+ * default that could not be fixed (including, under `allowDefaultSwitch:false`,
+ * one that was deliberately not repointed), so the daemon can log/notify. A
+ * version that already launches costs one cheap `--version` probe and is left
+ * untouched.
  */
 const failedRepairAt = new Map<string, number>();
 const REPAIR_COOLDOWN_MS = 24 * 60 * 60_000;
