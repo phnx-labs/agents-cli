@@ -461,17 +461,13 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
 
         if rows.isEmpty { return false }
-        // Title carries both the group count and the true blocked-session count so
-        // the badge / header math stays legible when grouping is in play.
-        let blockedTotal = blocked.count
-        let groupCount = sortedGroups.count
-        let title: String
-        if groupCount == blockedTotal {
-            title = "⚠ NEEDS YOU (\(rows.count))"
-        } else {
-            title = "⚠ NEEDS YOU (\(groupCount) groups · \(blockedTotal) sessions)"
-        }
-        addSectionTitle(menu, title, color: wait)
+        // Title reflects the count of rendered rows in this section — always.
+        // Any grouped-session count lives in the row text itself ("N waiting"),
+        // so the header stays a simple 1:1 with what's visible below. This keeps
+        // it consistent with the ACTIVE section's "header count = visible rows"
+        // invariant, and never drops the failing-routines / scheduler-stopped
+        // rows from the header count when grouping is in play.
+        addSectionTitle(menu, "⚠ NEEDS YOU (\(rows.count))", color: wait)
         for (glyph, color, text, sub) in rows {
             let it = statusRow(glyph, color, text)
             it.submenu = sub
