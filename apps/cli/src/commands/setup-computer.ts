@@ -51,7 +51,7 @@ export async function runComputerWizard(): Promise<boolean> {
   }
 
   // 1. Download + verify + install the signed, notarized helper.
-  console.log(chalk.bold('Installing the Computer Helper...'));
+  console.log(chalk.bold('Installing the Agents Computer helper...'));
   try {
     await installComputerHelperMacLocal();
   } catch (err) {
@@ -71,7 +71,7 @@ export async function runComputerWizard(): Promise<boolean> {
 
   // 3. Guide the two permission grants if not already trusted.
   if (!trusted) {
-    console.log(chalk.bold('\nGrant two permissions to "Computer Helper" (one-time):'));
+    console.log(chalk.bold('\nGrant two permissions to "Agents Computer" (one-time):'));
     console.log('  1. ' + chalk.cyan('Accessibility') + chalk.dim('     — lets it click/type'));
     console.log('  2. ' + chalk.cyan('Screen Recording') + chalk.dim('  — lets it screenshot windows'));
     console.log(chalk.dim('\nOpening System Settings > Privacy & Security ...'));

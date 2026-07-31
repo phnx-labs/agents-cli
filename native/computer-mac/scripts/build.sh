@@ -3,7 +3,29 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+REPO_ROOT="$PWD/../.."
 MODE="${1:-debug}"
+
+# Build an .icns from the master logo. Runs on macOS only (sips + iconutil).
+generate_app_icon() {
+    local src="$1"
+    local dst="$2"
+    local iconset="${dst%.icns}.iconset"
+    rm -rf "$iconset" "$dst"
+    mkdir -p "$iconset"
+    sips -z 16 16     "$src" --out "$iconset/icon_16x16.png"     >/dev/null 2>&1
+    sips -z 32 32     "$src" --out "$iconset/icon_16x16@2x.png"  >/dev/null 2>&1
+    sips -z 32 32     "$src" --out "$iconset/icon_32x32.png"     >/dev/null 2>&1
+    sips -z 64 64     "$src" --out "$iconset/icon_32x32@2x.png"  >/dev/null 2>&1
+    sips -z 128 128   "$src" --out "$iconset/icon_128x128.png"   >/dev/null 2>&1
+    sips -z 256 256   "$src" --out "$iconset/icon_128x128@2x.png" >/dev/null 2>&1
+    sips -z 256 256   "$src" --out "$iconset/icon_256x256.png"   >/dev/null 2>&1
+    sips -z 512 512   "$src" --out "$iconset/icon_256x256@2x.png" >/dev/null 2>&1
+    sips -z 512 512   "$src" --out "$iconset/icon_512x512.png"   >/dev/null 2>&1
+    sips -z 1024 1024 "$src" --out "$iconset/icon_512x512@2x.png" >/dev/null 2>&1
+    iconutil -c icns "$iconset" -o "$dst"
+    rm -rf "$iconset"
+}
 
 # Stamp the shipping CLI version into the bundle so `agents computer setup` can
 # tell an installed helper apart by version (the release job sets this to match
@@ -48,7 +70,9 @@ APP="$DEST_DIR/ComputerHelper.app"
 # until the whole system can't launch new apps (Activity Monitor, Messages).
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/Resources"
 cp "$SRC" "$APP/Contents/MacOS/ComputerHelper"
+generate_app_icon "$REPO_ROOT/assets/logo.png" "$APP/Contents/Resources/AppIcon.icns"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -59,7 +83,11 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleIdentifier</key>
     <string>com.phnx-labs.computer-helper</string>
     <key>CFBundleName</key>
-    <string>Computer Helper</string>
+    <string>Agents Computer</string>
+    <key>CFBundleDisplayName</key>
+    <string>Agents Computer</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
