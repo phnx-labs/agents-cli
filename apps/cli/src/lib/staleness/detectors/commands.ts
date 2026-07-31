@@ -1,7 +1,7 @@
 /**
  * Commands detector — mirrors versions.ts:343-357. Inspects the version home,
  * returns command names. Honors the commands-as-skills marker for skills-only
- * agents (grok, kimi, Codex >= 0.117.0, …); falls back to scanning
+ * agents (kimi, Codex >= 0.117.0, …); falls back to scanning
  * `{agentDir}/<commandsSubdir>/` for the native path.
  */
 import * as fs from 'fs';
