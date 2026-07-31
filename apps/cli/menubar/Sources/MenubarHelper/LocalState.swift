@@ -123,12 +123,24 @@ enum LocalState {
     // name = sessionId, mtime = when flagged, content = the notification message
     // (newer hooks write it; empty for the touch-only contract). One stat + one
     // tiny read per blocked session — stays cheap on the badge poll path.
-    static func attentionMarks() -> [String: AttentionMark] {
+    //
+    // liveSessionIds prunes orphans on read: a sentinel whose sessionId is not in
+    // the caller's live set (pid alive) gets unlinked. The write-side hook already
+    // clears on Stop/UserPromptSubmit, but it leaks when the terminal is killed
+    // hard, a Claude version has no hook installed, or the sessionId doesn't
+    // round-trip. The reader is the only layer with ground truth (pidAlive), so
+    // it's the choke point that keeps NEEDS YOU honest. When nil, keep the old
+    // behavior (no prune) — that's the callers that don't yet know a live set.
+    static func attentionMarks(liveSessionIds: Set<String>? = nil) -> [String: AttentionMark] {
         let dir = "\(home)/.agents/.cache/state/attention"
         let names = (try? fm.contentsOfDirectory(atPath: dir)) ?? []
         var out: [String: AttentionMark] = [:]
         for name in names where !name.hasPrefix(".") {
             let path = "\(dir)/\(name)"
+            if let live = liveSessionIds, !live.contains(name) {
+                try? fm.removeItem(atPath: path)
+                continue
+            }
             let attrs = try? fm.attributesOfItem(atPath: path)
             let since = (attrs?[.modificationDate] as? Date).map { $0.timeIntervalSince1970 * 1000 }
             let raw = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
@@ -136,6 +148,24 @@ enum LocalState {
                                       text: raw.trimmingCharacters(in: .whitespacesAndNewlines))
         }
         return out
+    }
+
+    // Live terminal sessionIds — pid-alive, non-empty. Used to prune orphan
+    // attention sentinels on the cheap poll path.
+    private static func liveTerminalSessionIds() -> Set<String> {
+        let path = "\(home)/.agents/.cache/terminals/live-terminals.json"
+        guard let data = fm.contents(atPath: path),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [] }
+        var ids: Set<String> = []
+        for (_, window) in root {
+            guard let w = window as? [String: Any],
+                  let entries = w["entries"] as? [[String: Any]] else { continue }
+            for e in entries {
+                guard let pid = e["pid"] as? Int, pidAlive(pid) else { continue }
+                if let sid = e["sessionId"] as? String, !sid.isEmpty { ids.insert(sid) }
+            }
+        }
+        return ids
     }
 
     // MARK: Pending devices (written by the daemon device probe)
@@ -158,7 +188,8 @@ enum LocalState {
     // local files still contribute what the engine payload lacks: the terminal
     // label (title) and the attention sentinel (question + wait-start).
     static func sessions(fromActive active: [ActiveSession]) -> [Session] {
-        let attention = attentionMarks()
+        let liveIds = Set(active.compactMap { $0.sessionId }.filter { !$0.isEmpty })
+        let attention = attentionMarks(liveSessionIds: liveIds)
         let titles = terminalTitles()
         var out: [Session] = []
         for a in active {
@@ -204,7 +235,8 @@ enum LocalState {
     // scanning it every few seconds is too costly. Terminals + cloud + attention
     // are cheap. The full scan (with teams) runs only when the menu opens.
     static func sessions(includeTeams: Bool = true) -> [Session] {
-        let attention = attentionMarks()
+        let liveIds = liveTerminalSessionIds()
+        let attention = attentionMarks(liveSessionIds: liveIds)
         var all = terminals(attention: attention) + cloud()
         if includeTeams { all += teams() }
         return all
