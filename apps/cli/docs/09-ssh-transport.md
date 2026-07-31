@@ -123,6 +123,40 @@ which still use OpenSSH default `~/.ssh/known_hosts`, not the managed store, so
 they neither pin into it nor verify against it. Wiring those call sites onto the
 managed store (so they verify strictly too) is follow-up.
 
+### 2c. One resolver: a token → the same target string everywhere (RUSH-1967)
+
+Multiplexing (§2) only reuses a socket when two calls hand `ssh` the **same
+target string** — `%C` hashes local-host/remote/port/user, so `mac-mini`,
+`muqsit@mac-mini.<tailnet>.ts.net`, and a stale `~/.ssh/config` LAN IP for the
+same box each hash to a different `cm-%C` socket and never share the master. A
+`--host`/`--device` token therefore has to resolve to one canonical target no
+matter which subcommand typed it.
+
+It used to resolve through **two** disagreeing chains: a local-provider-first
+`resolveHost` (`run --host`, the generic passthrough, teams placement, doctor,
+funnel, remote secrets) and a devices-only `resolveSshTarget` (`sessions --host`,
+session bundles, `agents ssh`). They emitted different strings for the same
+machine — `resolveHost` let an ssh-config stanza win and dialed its bare name,
+while the devices chain dialed the Tailscale `user@dnsName` — so the two never
+shared a `%C` socket and could even dial two different boxes.
+
+Both are now one core, [`matchHost`](../src/lib/hosts/registry.ts). It merges the
+directories **per-field** instead of letting one provider shadow the other:
+
+| Field | Source of truth |
+|---|---|
+| address, OS, presence, dispatchable | the live **devices** registry |
+| capability tags, OS hint (when the device platform is unknown) | the agents.yaml **overlay** |
+| a host Tailscale never saw | **ssh_config** (dial the bare name; ssh applies the stanza) |
+
+One grammar for every caller — `name`, `user@name`, a tailnet FQDN, an ssh_config
+alias, and a literal `user@host` all resolve identically. `resolveHost` (dispatch),
+`resolveExplicitTargets` (fan-out), and `resolveDeviceTarget` (`agents ssh`) are
+thin wrappers that differ only in the shape they return and which literal
+fallbacks they permit. Because the address always comes from the live registry,
+`agents devices sync` takes effect without re-enrolling, and a password-auth
+device can't be made dispatchable by shadowing it with an inline entry.
+
 ### 3. The follow loop: one persistent stream (P1)
 
 The original loop made two calls per cycle — `tail -c +offset` for new log bytes,

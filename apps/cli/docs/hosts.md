@@ -201,7 +201,8 @@ is a fast-follow `HostProvider`, opt-in when logged in — not a v1 dependency.
 ```
 agents run <agent> ["<task>"] --host <host>
   │
-  ├─ resolveHost(name)         registry lookup in agents.yaml → {address,user,caps} [Phase 1]
+  ├─ resolveHost(name)         one merged lookup (devices registry ∪ agents.yaml
+  │                            overlay ∪ ssh_config) → {address,user,caps,os,…}   [Phase 1]
   │
   ├─ ensureHostReady(name)     lazy SSH probe (online?) + config + agent + branch  [Phase 1]
   │
@@ -312,9 +313,25 @@ agent routing a GPU eval to a host tagged `gpu`).
 - `agents hosts remove <name>` / `agents hosts import --from-tailscale` (opt-in:
   prefill entries from `tailscale status` names; reads only, connects to nothing).
 
-Resolution for an address: `hosts.<name>.address`, else error with the list of
-known names. (No tailnet lookup, no DNS guessing — a name is either registered or
-it isn't.)
+Resolution for an address goes through **one** resolver,
+[`matchHost`](../src/lib/hosts/registry.ts) (RUSH-1967), shared by every caller —
+`run --host`, the `sessions --host` fan-out, and `agents ssh` alike, so a token
+can never dial two different boxes depending on which subcommand typed it. It
+merges three directories **per-field**, it does not let one shadow another:
+
+- the **devices** registry (`agents devices`) supplies address, OS, and presence
+  — so the address is always live (`agents devices sync` takes effect without
+  re-enrolling) and a stale enrolled snapshot can't freeze the route;
+- the **agents.yaml** `hosts` overlay supplies capability tags and hints;
+- **`~/.ssh/config`** supplies hosts Tailscale has never seen (dialed by their
+  bare name, so ssh applies the stanza).
+
+One grammar for every caller: `name`, `user@name` (login user overridden, same
+box), a tailnet FQDN, an ssh_config alias, and an ad-hoc `user@host` all resolve
+identically. `dispatchable` follows the device's auth method, so a password-auth
+device can't be made dispatchable by shadowing it with an inline entry. A bare
+unknown name resolves to nothing, which keeps capability-tag routing
+(`--host gpu`) and the `agents ssh` "Unknown device" verdict reachable.
 
 ### 2. Transport — plain SSH (reuse, don't reinvent)
 
