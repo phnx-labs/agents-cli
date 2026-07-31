@@ -223,6 +223,23 @@ describe('resolveRoutineLaunch (RUSH-1016 — pin + failover chain)', () => {
     expect(plan.chain).toEqual([]);
     expect(plan.pinned).toBe(false);
   });
+
+  it('an explicit version pin wins over an account pin (most specific)', async () => {
+    const plan = await resolveRoutineLaunch(
+      baseJob({ name: 'both-pins', version: '2.1.0', account: 'muqsit@trp.so', agent: 'claude' }),
+    );
+    expect(plan.pinned).toBe(true);
+    expect(plan.chain).toEqual([{ agent: 'claude', version: '2.1.0' }]);
+  });
+
+  it('an account pin that is not signed in on this box falls through unpinned, not stalled', async () => {
+    // No box has this identity signed in, so account resolution returns null and
+    // the routine still runs (via the configured strategy) rather than refusing.
+    const plan = await resolveRoutineLaunch(
+      baseJob({ name: 'ghost-account', account: 'nobody@nowhere.invalid', agent: 'claude' }),
+    );
+    expect(plan.pinned).toBe(false);
+  });
 });
 
 describe('buildRoutineSpawnEnv', () => {

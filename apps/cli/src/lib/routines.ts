@@ -157,6 +157,25 @@ export interface JobConfig {
   allow?: JobAllowConfig;
   config?: Record<string, unknown>;
   version?: string;
+  /**
+   * Pin this routine to a signed-in account by identity (its login email, or its
+   * account key) instead of rotating. At launch it resolves to whichever
+   * installed version currently holds that account and runs pinned — no
+   * `balanced` rotation, no usage-read refresh, no failover onto other accounts.
+   *
+   * This is the durable way to keep concurrent unattended routines off a *shared*
+   * Claude OAuth credential: the refresh token is single-use and rotates
+   * server-side on every refresh, so two routines running the same account
+   * concurrently (on one box or across the fleet) mutually revoke each other —
+   * the `401 OAuth access token has been revoked` storm (RUSH-1957). Give each
+   * routine (or each device's routines) a distinct account and no run rotates a
+   * credential out from under another.
+   *
+   * Prefer this over `version:`, which pins a version *number* that is GC'd on
+   * the next agent upgrade — when the pinned version disappears the routine
+   * silently falls back to `balanced` and the stampede returns.
+   */
+  account?: string;
   runOnce?: boolean;
   // RFC3339 timestamp; routine auto-disables at the next fire on/after this time.
   endAt?: string;

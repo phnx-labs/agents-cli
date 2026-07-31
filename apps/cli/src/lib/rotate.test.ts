@@ -8,6 +8,7 @@ import {
   DEFAULT_ROTATION_FAILOVER_LIMIT,
   pickBalancedCandidate,
   readinessFromCandidate,
+  matchAccountVersion,
   type RotateCandidate,
   type RotateResult,
   type FailoverArmingContext,
@@ -41,6 +42,33 @@ function candidate(over: Partial<RotateCandidate> & { version: string }): Rotate
 function rotation(healthy: RotateCandidate[], pickedIdx = 0): RotateResult {
   return { picked: healthy[pickedIdx], healthy, excluded: [] };
 }
+
+describe('matchAccountVersion (RUSH-1957 — pin a routine to an account by identity)', () => {
+  const gmail = candidate({ version: '2.1.186', email: 'muqsitnawaz@gmail.com' });
+  const trp = candidate({ version: '2.1.207', email: 'muqsit@trp.so' });
+  const signedOut = candidate({ version: '2.1.180', email: 'stale@example.com', signedIn: false });
+  const pool = [gmail, trp, signedOut];
+
+  it('resolves a login email to its installed version slot (case-insensitive)', () => {
+    expect(matchAccountVersion(pool, 'muqsit@trp.so')).toBe('2.1.207');
+    expect(matchAccountVersion(pool, 'MUQSIT@TRP.SO')).toBe('2.1.207');
+    expect(matchAccountVersion(pool, '  muqsitnawaz@gmail.com  ')).toBe('2.1.186');
+  });
+
+  it('resolves an account key as well as an email', () => {
+    expect(matchAccountVersion(pool, 'claude:account=2.1.207')).toBe('2.1.207');
+  });
+
+  it('never returns a signed-out slot even when its identity matches', () => {
+    expect(matchAccountVersion(pool, 'stale@example.com')).toBeNull();
+  });
+
+  it('returns null for an unknown account or an empty string, so the caller falls back and warns', () => {
+    expect(matchAccountVersion(pool, 'nobody@nowhere.dev')).toBeNull();
+    expect(matchAccountVersion(pool, '   ')).toBeNull();
+    expect(matchAccountVersion([], 'muqsit@trp.so')).toBeNull();
+  });
+});
 
 describe('rotationFailoverChain (#348 — synthesize a same-agent failover chain)', () => {
   it('turns the other healthy accounts into fallback entries, skipping the picked one', () => {

@@ -390,6 +390,44 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
 }
 
 /**
+ * Resolve an account identity to the installed version slot that holds it, over
+ * an already-collected candidate list. Pure — no I/O — so it is unit-tested
+ * directly. Matches, case-insensitively, against a candidate's login `email`
+ * (the usual form) or its `accountKey`, and only ever returns a signed-in slot.
+ * Returns null when nothing matches, so the caller can fall back and warn.
+ */
+export function matchAccountVersion(
+  candidates: RotateCandidate[],
+  account: string,
+): string | null {
+  const needle = account.trim().toLowerCase();
+  if (!needle) return null;
+  const match = candidates.find(
+    (c) =>
+      c.signedIn &&
+      (c.email?.toLowerCase() === needle || c.accountKey?.toLowerCase() === needle),
+  );
+  return match?.version ?? null;
+}
+
+/**
+ * Resolve a routine's `account:` pin (login email or account key) to the
+ * installed version currently holding that account. Thin I/O wrapper over
+ * {@link collectRunCandidates} + {@link matchAccountVersion}; returns null when
+ * no signed-in version matches. Pinning a routine to a distinct account is the
+ * durable cure for the shared-single-use-refresh-token revocation storm
+ * (RUSH-1957): the pinned run never rotates and never lands on another
+ * routine's credential.
+ */
+export async function resolveAccountVersion(
+  agent: AgentId,
+  account: string,
+): Promise<string | null> {
+  const candidates = await collectRunCandidates(agent);
+  return matchAccountVersion(candidates, account);
+}
+
+/**
  * Pick a healthy version for `agent` using weighted random by remaining
  * capacity. See `pickBalancedCandidate` for algorithm details.
  *

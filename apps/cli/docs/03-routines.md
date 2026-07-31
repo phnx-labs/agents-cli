@@ -43,7 +43,8 @@ agents routines add cleanup --schedule "0 3 * * *" --agent claude \
 name: daily-review
 schedule: "0 9 * * *"         # 9am daily (cron syntax)
 agent: claude
-version: 2.0.65               # Optional, uses global default if omitted
+account: muqsit@trp.so        # Optional: pin to a signed-in account by identity (see "Pinning an account")
+version: 2.0.65               # Optional: pin to an exact version; uses global default if omitted
 mode: auto                    # auto (default), plan (read-only), edit, or skip
 effort: default               # fast, default, or detailed
 timeout: 10m
@@ -317,6 +318,43 @@ agents secrets set claude CLAUDE_CODE_OAUTH_TOKEN <token>
 # Restart the daemon so the updated token is baked into its environment:
 agents routines stop && agents routines start
 ```
+
+### Pinning an account (avoid the OAuth-rotation revocation storm)
+
+Left unpinned, a `claude` routine selects its account by the default `balanced`
+strategy — a stateless weighted-random roll (`rotate.ts`) that can land two
+concurrent runs, on one box or across the fleet, on the *same* account. Claude's
+OAuth refresh token is **single-use and rotates server-side on every refresh**, so
+when a second run refreshes an account the first is still holding, the first run's
+token is revoked mid-flight and the run dies with:
+
+```
+Failed to authenticate. API Error: 401 OAuth access token has been revoked.
+```
+
+Multiplied across ~20 unpinned routines that all wake in the same morning window,
+this is a self-inflicted logout storm (RUSH-1957).
+
+**The durable cure: give each routine (or each device's routines) its own
+account.** Pin by identity with `account:` — the login email, resolved at launch
+to whichever installed version holds that account, run pinned with no rotation and
+no failover onto other accounts:
+
+```yaml
+name: drain-prix
+schedule: "15,45 * * * *"
+agent: claude
+devices: [yosemite-s1]
+account: muqsit@trp.so      # this box's routines all refresh ONE account, no one else's
+```
+
+Prefer `account:` over `version:`: a `version:` pin names a version *number* that
+is garbage-collected on the next `claude` upgrade, after which the routine
+silently falls back to `balanced` and the storm returns. Pinning by account
+identity survives version churn. If the named account is not signed in on the box
+at fire time, the run warns and falls back to the strategy rather than refusing —
+so a stale pin degrades to "unpinned", never to "dead". List signed-in accounts
+with `agents view`.
 
 ## Execution Flow
 

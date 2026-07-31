@@ -54,6 +54,7 @@ import { getBinaryPath, isVersionInstalled, resolveVersion } from './versions.js
 import {
   getConfiguredRunStrategy,
   resolveRunVersion,
+  resolveAccountVersion,
   rotationFailoverChain,
   readinessFromCandidate,
   type RotateResult,
@@ -351,6 +352,22 @@ export async function resolveRoutineLaunch(
       rotation: null,
       pinned: true,
     };
+  }
+
+  // Account pin: resolve the login identity to the version slot that holds it and
+  // run pinned — no rotation, no failover onto other accounts — so concurrent
+  // unattended routines never share (and mutually revoke) one single-use OAuth
+  // credential (RUSH-1957). Falls through to the strategy only when the account
+  // is not signed in on this box, with a loud warning rather than a silent stall.
+  if (config.account) {
+    const version = await resolveAccountVersion(agent, config.account);
+    if (version) {
+      return { chain: [{ agent, version }], rotation: null, pinned: true };
+    }
+    process.stderr.write(
+      `[agents] routine ${config.name}: account '${config.account}' is not signed in for ${agent}; ` +
+        `falling back to strategy — pin a signed-in account to stop OAuth-rotation revocation\n`,
+    );
   }
 
   const strategy = getConfiguredRunStrategy(agent, cwd);
