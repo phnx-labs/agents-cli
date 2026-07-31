@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan · Inspect version picker</title>
+<style>
+  :root{
+    --bg:#0a0a0a; --panel:#111312; --panel2:#161a18; --ink:#e7ece8; --dim:#8b938c;
+    --line:#26302a; --accent:#a3e635; --amber:#f5c451; --red:#ff6b6b; --cyan:#5ad6c0;
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  }
+  :root[data-theme="light"]{
+    --bg:#faf9f6; --panel:#ffffff; --panel2:#f2f4f0; --ink:#1a1c1a; --dim:#5c655c;
+    --line:#e2e6df; --accent:#4d7c0f; --amber:#b45309; --red:#dc2626; --cyan:#0e7490;
+  }
+  :root[data-theme="light"] .fig{background:#0e120f;border-color:#26302a}
+  :root[data-theme="light"] .fig figcaption{color:#8b938c}
+  :root[data-theme="light"] .fig figcaption b{color:#e7ece8}
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1000px;margin:0 auto;padding:56px 28px 120px}
+  header.hero{border-bottom:1px solid var(--line);padding-bottom:28px;margin-bottom:40px}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--accent);margin:0 0 14px}
+  h1{font-size:34px;line-height:1.15;margin:0 0 12px;font-weight:700;letter-spacing:-.01em}
+  h1 .accent{color:var(--accent)}
+  .sub{color:var(--dim);font-size:17px;max-width:70ch;margin:0}
+  .meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+  .chip{font-family:var(--mono);font-size:11.5px;color:var(--dim);border:1px solid var(--line);
+    border-radius:999px;padding:4px 11px;background:var(--panel)}
+  .chip b{color:var(--ink);font-weight:500}
+  h2{font-size:23px;margin:52px 0 8px;letter-spacing:-.01em;scroll-margin-top:20px}
+  h2 .n{font-family:var(--mono);color:var(--accent);font-size:15px;margin-right:10px;opacity:.85}
+  p{margin:10px 0}
+  .lead{color:var(--dim)}
+  code{font-family:var(--mono);font-size:.88em;background:var(--panel2);border:1px solid var(--line);
+    border-radius:5px;padding:1.5px 6px;color:var(--cyan)}
+  a{color:var(--accent);text-decoration:none}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:18px 0}
+  .fig{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:26px 22px 18px;margin:22px 0;overflow-x:auto}
+  .fig figcaption{font-family:var(--mono);font-size:12px;color:var(--dim);margin-top:14px;text-align:center}
+  .fig figcaption b{color:var(--ink)}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);font-weight:500}
+  .tag{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:6px;font-weight:600}
+  .tag.a{background:rgba(163,230,53,.12);color:var(--accent);border:1px solid rgba(163,230,53,.3)}
+  .tag.b{background:rgba(90,214,192,.1);color:var(--cyan);border:1px solid rgba(90,214,192,.28)}
+  ul{margin:10px 0;padding-left:22px}li{margin:6px 0}
+  .callout{border-left:3px solid var(--accent);background:var(--panel2);border-radius:0 10px 10px 0;
+    padding:14px 18px;margin:18px 0}
+  .callout.warn{border-left-color:var(--amber)}
+  .callout .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--accent);display:block;margin-bottom:5px}
+  .callout.warn .lbl{color:var(--amber)}
+  .toc{font-family:var(--mono);font-size:13px;display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:18px}
+  .toc a{color:var(--dim);border:0}
+  pre{font-family:var(--mono);font-size:13px;background:#0c0f0d;border:1px solid var(--line);
+    border-radius:12px;padding:16px 18px;overflow-x:auto;line-height:1.55;color:#e7ece8}
+  pre .c{color:#8b938c}pre .k{color:#a3e635}pre .s{color:#5ad6c0}
+  .foot{margin-top:60px;padding-top:22px;border-top:1px solid var(--line);color:var(--dim);
+    font-family:var(--mono);font-size:12px}
+  .themebtn{position:fixed;top:16px;right:16px;z-index:9;font-family:var(--mono);font-size:12px;
+    color:var(--dim);background:var(--panel);border:1px solid var(--line);border-radius:999px;
+    padding:6px 13px;cursor:pointer}
+</style>
+</head>
+<body>
+<button class="themebtn" onclick="tt()" id="tb">◐ light</button>
+<script>
+  var r=document.documentElement;
+  function set(t){r.setAttribute('data-theme',t);document.getElementById('tb').textContent=(t==='light'?'◑ dark':'◐ light')}
+  set(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');
+  function tt(){set(r.getAttribute('data-theme')==='light'?'dark':'light')}
+</script>
+<div class="wrap">
+<header class="hero">
+  <p class="kicker">agents-cli · plan mode · inspect UX</p>
+  <h1>Ask which version to<br><span class="accent">inspect</span> when many are installed</h1>
+  <p class="sub">Bare <code>agents inspect kimi</code> silently opens the configured default. On a TTY with multiple installs, show an interactive menu of version + account context.</p>
+  <div class="meta">
+    <span class="chip"><b>7</b>&nbsp;files touched</span>
+    <span class="chip"><b>1</b>&nbsp;new helper</span>
+    <span class="chip">status: <b>awaiting go</b></span>
+  </div>
+  <nav class="toc">
+    <a href="#s1">01 · problem</a>
+    <a href="#s2">02 · behavior</a>
+    <a href="#s3">03 · design</a>
+    <a href="#s4">04 · files</a>
+    <a href="#s5">05 · verify</a>
+  </nav>
+</header>
+<h2 id="s1"><span class="n">01</span>Problem</h2>
+<p class="lead">Screenshot: <code>agents inspect kimi</code> lands on <code>kimi 0.19.2 [default]</code> with no choice.</p>
+<div class="callout"><span class="lbl">Root cause</span>
+<code>resolveSingleAgentTarget</code> bare path is project pin → global default → sole. Correct for run/sync; wrong for exploratory detail.
+</div>
+<figure class="fig">
+  <svg viewBox="0 0 920 280" xmlns="http://www.w3.org/2000/svg" role="img">
+    <defs><marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8b938c"/></marker></defs>
+    <text x="20" y="28" fill="#f5c451" font-family="monospace" font-size="13">BEFORE</text>
+    <rect x="20" y="44" width="160" height="44" rx="8" fill="#161a18" stroke="#26302a"/>
+    <text x="100" y="71" text-anchor="middle" fill="#e7ece8" font-family="monospace" font-size="12">inspect kimi</text>
+    <line x1="180" y1="66" x2="220" y2="66" stroke="#8b938c" stroke-width="1.5" marker-end="url(#arr)"/>
+    <rect x="224" y="44" width="200" height="44" rx="8" fill="#161a18" stroke="#26302a"/>
+    <text x="324" y="71" text-anchor="middle" fill="#5ad6c0" font-family="monospace" font-size="11">resolve → default</text>
+    <line x1="424" y1="66" x2="464" y2="66" stroke="#8b938c" stroke-width="1.5" marker-end="url(#arr)"/>
+    <rect x="468" y="44" width="220" height="44" rx="8" fill="#1a1210" stroke="#ff6b6b"/>
+    <text x="578" y="71" text-anchor="middle" fill="#ff6b6b" font-family="monospace" font-size="11">0.19.2 [default] only</text>
+    <text x="20" y="148" fill="#a3e635" font-family="monospace" font-size="13">AFTER</text>
+    <rect x="20" y="164" width="160" height="44" rx="8" fill="#161a18" stroke="#26302a"/>
+    <text x="100" y="191" text-anchor="middle" fill="#e7ece8" font-family="monospace" font-size="12">inspect kimi</text>
+    <line x1="180" y1="186" x2="220" y2="186" stroke="#8b938c" stroke-width="1.5" marker-end="url(#arr)"/>
+    <rect x="224" y="150" width="240" height="72" rx="8" fill="#121a12" stroke="#a3e635"/>
+    <text x="344" y="178" text-anchor="middle" fill="#a3e635" font-family="monospace" font-size="12">pickInstalledVersion</text>
+    <text x="344" y="198" text-anchor="middle" fill="#8b938c" font-family="monospace" font-size="11">TTY · multi · account rows</text>
+    <line x1="464" y1="186" x2="504" y2="186" stroke="#8b938c" stroke-width="1.5" marker-end="url(#arr)"/>
+    <rect x="508" y="164" width="220" height="44" rx="8" fill="#121a12" stroke="#a3e635"/>
+    <text x="618" y="191" text-anchor="middle" fill="#a3e635" font-family="monospace" font-size="11">chosen version summary</text>
+  </svg>
+  <figcaption><b>Decision gate</b> — only bare multi-version TTY detail commands open the picker</figcaption>
+</figure>
+<h2 id="s2"><span class="n">02</span>Desired behavior</h2>
+<table>
+  <thead><tr><th>Input</th><th>TTY + multi</th><th>Otherwise</th></tr></thead>
+  <tbody>
+    <tr><td><code>agents inspect kimi</code></td><td>Picker</td><td>Default / sole</td></tr>
+    <tr><td><code>agents inspect kimi@x.y.z</code></td><td>No picker</td><td>Explicit</td></tr>
+    <tr><td><code>agents view kimi</code></td><td>Unchanged list-all</td><td>Unchanged</td></tr>
+    <tr><td><code>agents view kimi --skills</code></td><td>Picker</td><td>Default</td></tr>
+  </tbody>
+</table>
+<div class="panel">
+  <strong>Row shape:</strong> version <code>(default)</code> · account · logged in/out · plan.
+  Default sorted first, labeled, not auto-selected. Logged-out rows stay selectable.
+</div>
+<h2 id="s3"><span class="n">03</span>Design</h2>
+<p>New <code>commands/version-picker.ts</code> — do not change agent-spec bare resolution for run/sync.</p>
+<pre><span class="k">export async function</span> pickInstalledVersion(agent): Promise&lt;string | null&gt;
+<span class="c">// inspect: bare + TTY + multi → pick; else resolveSingleAgentTarget</span>
+</pre>
+<div class="callout warn"><span class="lbl">Non-TTY</span>Keep default resolution so scripts never hang.</div>
+<h2 id="s4"><span class="n">04</span>Files</h2>
+<table>
+  <thead><tr><th>Tag</th><th>Path</th><th>Change</th></tr></thead>
+  <tbody>
+    <tr><td><span class="tag a">new</span></td><td><code>version-picker.ts</code></td><td>Shared picker</td></tr>
+    <tr><td><span class="tag b">edit</span></td><td><code>inspect.ts</code></td><td>Bare multi TTY → picker</td></tr>
+    <tr><td><span class="tag b">edit</span></td><td><code>view.ts</code></td><td>Section-filter bare multi</td></tr>
+    <tr><td><span class="tag b">edit</span></td><td>tests, docs, CHANGELOG</td><td>Coverage + ship notes</td></tr>
+  </tbody>
+</table>
+<h2 id="s5"><span class="n">05</span>Verify</h2>
+<pre>agents inspect kimi            <span class="c"># menu on TTY multi</span>
+agents inspect kimi@0.19.2     <span class="c"># no menu</span>
+agents view kimi               <span class="c"># list-all</span>
+agents inspect kimi &lt;/dev/null <span class="c"># default, no hang</span>
+</pre>
+<div class="foot">agents-cli · inspect version picker · next: go / reshape</div>
+</div>
+</body>
+</html>

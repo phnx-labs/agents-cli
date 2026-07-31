@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agents-cli — measured</title>
+<style>
+  :root{
+    --bg:#0a0a0a; --panel:#111211; --panel-2:#161816; --ink:#e8ebe6; --ink-dim:#9aa295;
+    --line:#242724; --lime:#a3e635; --lime-dim:#6f9e26; --amber:#f4bf4f; --red:#ff6b5e;
+    --cyan:#5ec7d6; --violet:#b08cff; --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+    --sans:'Inter',ui-sans-serif,system-ui,-apple-system,sans-serif;
+    --code-bg:#0d0f0d; --chip:#1a1d19; --shadow:0 1px 0 rgba(255,255,255,.03),0 8px 30px rgba(0,0,0,.5);
+  }
+  html[data-theme="light"]{
+    --bg:#f6f7f4; --panel:#ffffff; --panel-2:#fbfcfa; --ink:#16180f; --ink-dim:#5c6356;
+    --line:#e2e6dc; --lime:#5c8a13; --lime-dim:#7fae2c; --amber:#9a6a00; --red:#c23b2e;
+    --cyan:#0f7d8c; --violet:#6d45c9; --code-bg:#f1f3ec; --chip:#eef1e8; --shadow:0 1px 0 rgba(0,0,0,.02),0 10px 30px rgba(0,0,0,.08);
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.62;
+    font-size:16px;-webkit-font-smoothing:antialiased}
+  a{color:var(--lime);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,kbd,.mono{font-family:var(--mono)}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+
+  .topbar{position:sticky;top:0;z-index:30;background:color-mix(in srgb,var(--bg) 88%,transparent);
+    backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  .topbar .wrap{display:flex;align-items:center;justify-content:space-between;height:56px}
+  .brand{font-family:var(--mono);font-weight:700;letter-spacing:.02em;font-size:15px}
+  .brand .dot{color:var(--lime)}
+  .toggle{font-family:var(--mono);font-size:13px;color:var(--ink-dim);background:var(--chip);
+    border:1px solid var(--line);border-radius:8px;padding:6px 12px;cursor:pointer}
+  .toggle:hover{color:var(--ink);border-color:var(--lime-dim)}
+
+  .hero{padding:64px 0 40px;border-bottom:1px solid var(--line)}
+  .kicker{font-family:var(--mono);font-size:12.5px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--lime);margin-bottom:18px}
+  h1{font-size:clamp(30px,4.6vw,50px);line-height:1.06;margin:0 0 20px;letter-spacing:-.02em;font-weight:800}
+  h1 .g{color:var(--lime)}
+  h1 .r{color:var(--red)}
+  .lede{font-size:19px;color:var(--ink-dim);max-width:790px;margin:0 0 26px}
+  .lede b{color:var(--ink);font-weight:600}
+  .chips{display:flex;flex-wrap:wrap;gap:9px;margin-bottom:8px}
+  .chip{font-family:var(--mono);font-size:12px;color:var(--ink-dim);background:var(--chip);
+    border:1px solid var(--line);border-radius:999px;padding:5px 12px}
+  .chip b{color:var(--lime);font-weight:600}
+  .chip.hot b{color:var(--red)}
+
+  .toc{margin:30px 0 0;padding:18px 20px;background:var(--panel);border:1px solid var(--line);
+    border-radius:14px;box-shadow:var(--shadow)}
+  .toc h4{margin:0 0 12px;font-family:var(--mono);font-size:12px;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--ink-dim)}
+  .toc ol{margin:0;padding:0;list-style:none;display:grid;grid-template-columns:1fr 1fr;gap:6px 26px;
+    counter-reset:toc}
+  .toc li{counter-increment:toc;font-size:14.5px;display:flex;gap:10px;align-items:baseline}
+  .toc li::before{content:counter(toc,decimal-leading-zero);font-family:var(--mono);font-size:12px;
+    color:var(--lime-dim);min-width:22px}
+  @media(max-width:720px){.toc ol{grid-template-columns:1fr}}
+
+  section{padding:52px 0;border-bottom:1px solid var(--line)}
+  .sec-num{font-family:var(--mono);font-size:13px;color:var(--lime);letter-spacing:.1em}
+  h2{font-size:clamp(22px,3vw,30px);margin:8px 0 6px;letter-spacing:-.015em;font-weight:750}
+  h3{font-size:18px;margin:30px 0 8px;font-weight:650}
+  .sub{color:var(--ink-dim);font-size:15.5px;max-width:840px}
+  p{max-width:840px}
+  ul.tight{max-width:840px;padding-left:18px}
+  ul.tight li{margin:6px 0}
+  .fl{font-family:var(--mono);font-size:12.5px;color:var(--cyan);background:var(--code-bg);
+    border:1px solid var(--line);border-radius:5px;padding:1px 6px;white-space:nowrap}
+  b.k{color:var(--lime)}
+
+  .call{margin:22px 0;padding:16px 18px 16px 20px;border-radius:12px;border:1px solid var(--line);
+    background:var(--panel);position:relative;box-shadow:var(--shadow)}
+  .call::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;border-radius:12px 0 0 12px}
+  .call.correct::before{background:var(--lime)}
+  .call.warn::before{background:var(--amber)}
+  .call.hot::before{background:var(--red)}
+  .call .tag{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+    font-weight:700;margin-bottom:6px;display:block}
+  .call.correct .tag{color:var(--lime)}
+  .call.warn .tag{color:var(--amber)}
+  .call.hot .tag{color:var(--red)}
+  .call p{margin:2px 0;max-width:none}
+
+  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:10px;padding:14px 16px;
+    overflow:auto;font-family:var(--mono);font-size:12.7px;line-height:1.6;box-shadow:var(--shadow)}
+  pre .c{color:var(--ink-dim)}
+  pre .g{color:var(--lime)}
+  pre .a{color:var(--amber)}
+  pre .r{color:var(--red)}
+  pre .cy{color:var(--cyan)}
+
+  .scroller{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;margin:20px 0;font-size:14px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--ink-dim);font-weight:600}
+  td.n{font-family:var(--mono);text-align:right;white-space:nowrap}
+  td.n.bad{color:var(--red)}
+  td.n.good{color:var(--lime)}
+  tr.sum td{font-weight:700;border-bottom:2px solid var(--line)}
+  td .fl{white-space:normal}
+
+  figure{margin:26px 0}
+  figure svg{width:100%;height:auto;display:block;background:var(--panel);border:1px solid var(--line);
+    border-radius:14px;box-shadow:var(--shadow)}
+  figcaption{font-size:13px;color:var(--ink-dim);margin-top:10px;font-family:var(--mono)}
+  .svg-l{font-family:var(--mono);font-size:12px;fill:var(--ink)}
+  .svg-s{font-family:var(--mono);font-size:10.5px;fill:var(--ink-dim)}
+  .svg-t{font-family:var(--mono);font-size:11px;fill:var(--ink-dim)}
+  .box{fill:var(--panel-2);stroke:var(--line);stroke-width:1.2}
+  .box-hot{fill:var(--panel-2);stroke:var(--red);stroke-width:1.6}
+  .box-lime{fill:var(--panel-2);stroke:var(--lime-dim);stroke-width:1.4}
+
+  .bn{margin:20px 0;padding:18px 20px;background:var(--panel);border:1px solid var(--line);
+    border-radius:12px;box-shadow:var(--shadow)}
+  .bn h4{margin:0 0 8px;font-size:17px;display:flex;align-items:center;gap:2px}
+  .rank{display:inline-flex;align-items:center;justify-content:center;font-family:var(--mono);
+    font-weight:700;font-size:13px;width:26px;height:26px;border-radius:7px;margin-right:10px;flex:none}
+  .rank.p1{background:var(--red);color:#160a08}
+  .rank.p2{background:var(--amber);color:#1a1200}
+  .rank.p3{background:var(--lime);color:#0c1400}
+  .bn .ev{font-family:var(--mono);font-size:12px;color:var(--ink-dim);margin:8px 0}
+  .bn .fix{border-top:1px dashed var(--line);margin-top:12px;padding-top:10px;font-size:14.5px}
+  .bn .fix b{color:var(--lime)}
+  .was{font-family:var(--mono);font-size:11px;padding:2px 9px;border-radius:999px;
+    border:1px solid var(--line);color:var(--ink-dim);margin-left:auto;font-weight:400;flex:none}
+
+  .foot{padding:40px 0 70px;color:var(--ink-dim);font-size:13px;font-family:var(--mono)}
+</style>
+</head>
+<body>
+<div class="topbar"><div class="wrap">
+  <div class="brand">agents<span class="dot">·</span>cli <span style="color:var(--ink-dim)">/ measured</span></div>
+  <button class="toggle" id="tg">◐ theme</button>
+</div></div>
+
+<div class="wrap">
+<header class="hero">
+  <div class="kicker">Third pass · numbers, not reasoning</div>
+  <h1>The bottleneck isn't the poll. It's <span class="r">80 GB</span> of data nothing ever deletes.</h1>
+  <p class="lede">Both previous passes reasoned about performance from source. This one <b>measures</b> it — and the
+  measurements reorder the whole list. The database is <b>1 ms</b>. Cold start is <b>0.09 s</b>. Neither is the
+  problem. Meanwhile <b>505 MB</b> of the index is a copy of text that is written and never read, <b>68%</b> of
+  the index rows are dead, and <code>~/.agents</code> has grown to <b>80 GB</b> with no retention policy anywhere.</p>
+  <div class="chips">
+    <span class="chip">measured on <b>zion</b> · 2026-07-30</span>
+    <span class="chip">sessions.db <b>813 MB</b></span>
+    <span class="chip hot">~/.agents <b>80 GB</b></span>
+    <span class="chip">index rows <b>12,180</b></span>
+    <span class="chip hot">dead rows <b>68%</b></span>
+  </div>
+
+  <nav class="toc">
+    <h4>What's inside</h4>
+    <ol>
+      <li><a href="#s1">The measurements</a></li>
+      <li><a href="#s2">Where 813 MB actually went</a></li>
+      <li><a href="#s3">The 80 GB — and why it's immortal</a></li>
+      <li><a href="#s4">Bottlenecks, re-ranked by measurement</a></li>
+      <li><a href="#s5">Where the report is mis-aimed</a></li>
+      <li><a href="#s6">The architecture call</a></li>
+      <li><a href="#s7">What I could not determine</a></li>
+    </ol>
+  </nav>
+</header>
+
+<!-- 1 -->
+<section id="s1">
+  <div class="sec-num">01</div>
+  <h2>The measurements</h2>
+  <p class="sub">Every number below was produced on this machine, just now. The bisect is the important part:
+  each row isolates one more layer.</p>
+
+  <div class="scroller">
+  <table>
+    <tr><th>What</th><th>Measured</th><th>Reading</th></tr>
+    <tr><td><code>agents --version</code></td><td class="n good">0.09 s</td>
+        <td>Binary cold start. The installed CLI is a <b>Bun-compiled single-file binary</b> (<code>__BUN</code> segment), not Node — so “Node cold-start” is not a cost that exists here.</td></tr>
+    <tr><td><code>sessions --roots --json</code></td><td class="n good">0.14 s</td>
+        <td>Start + roots resolution, no DB touched.</td></tr>
+    <tr><td>raw <code>node:sqlite</code> open of the 813 MB db</td><td class="n good">~0 ms</td>
+        <td>Opening it is free. WAL + page cache; nothing is read on open.</td></tr>
+    <tr><td>raw query <code>SELECT … LIMIT 1</code></td><td class="n good">1 ms</td><td>The database is not slow. At all.</td></tr>
+    <tr><td><code>sessions --local --limit 1 --json</code></td><td class="n bad">0.56 s</td>
+        <td rowspan="2"><b>The key result.</b> Identical cost for 1 row and 500 rows → the ~0.42 s is a <b>fixed per-invocation cost</b>, not per-row work, and not the database.</td></tr>
+    <tr><td><code>sessions --local --limit 500 --json</code></td><td class="n bad">0.58 s</td></tr>
+    <tr class="sum"><td><code>sessions --active --json --local</code></td><td class="n bad">1.04–1.17 s</td>
+        <td>The 3-second poll. <b>151 MB peak RSS</b>, 4,111 involuntary context switches, 21 live rows returned.</td></tr>
+  </table>
+  </div>
+
+  <div class="call hot"><span class="tag">Attribution, corrected</span>
+    <p>The report attributes the poll cost to “Node cold-start + <code>discoverSessions</code> scan.” Measured, the
+    binary starts in <b>0.09 s</b> and SQLite answers in <b>1 ms</b>. Roughly <b>0.45 s of fixed setup</b> and
+    <b>~0.6 s of active-specific work</b> account for essentially all of it. Building a daemon to avoid a
+    0.09 s cold start would be optimizing the one part that is already fast.</p></div>
+
+  <p>For scale: at a 3 s poll, 1.1 s of work is a <b>~35% duty cycle of one core, per host, per window</b>, plus
+  151 MB resident each cycle. That is the real steady-state cost — and it is worth fixing. But the fix follows
+  from what the 0.45 s <em>is</em>, which nobody has profiled yet (§07).</p>
+</section>
+
+<!-- 2 -->
+<section id="s2">
+  <div class="sec-num">02</div>
+  <h2>Where 813 MB actually went</h2>
+  <p class="sub">The report says the index holds “metadata only.” Per-table <code>dbstat</code> says otherwise.</p>
+
+  <pre><span class="c">SELECT name, SUM(pgsize) FROM dbstat GROUP BY name ORDER BY 2 DESC</span>
+
+<span class="r">  504.9 MB</span>   session_text_content    <span class="c">← FTS5's stored copy of the text</span>
+<span class="a">  255.8 MB</span>   session_text_data       <span class="c">← the inverted index (this is the feature)</span>
+<span class="g">    7.6 MB</span>   sessions                <span class="c">← the actual metadata</span>
+      2.0 MB   idx_sessions_file_path
+      0.8 MB   scan_ledger  ·  0.8 MB session_text_idx  ·  &lt;1 MB each: 8 more indexes</pre>
+
+  <p><b class="k">99% of the database is the search feature, and 62% of it is a second copy of text that already
+  exists on disk in the transcripts.</b></p>
+
+  <h3>That copy is write-only</h3>
+  <p>FTS5 stores the source text by default so you can <code>SELECT</code> it back for
+  <code>snippet()</code>/<code>highlight()</code>. This codebase never does:</p>
+  <pre><span class="c">// the ONLY write — db.ts:598</span>
+INSERT INTO session_text (session_id, label, topic, project, <span class="r">content</span>) VALUES (?,?,?,?,?)
+
+<span class="c">// the ONLY read — db.ts:1313-1319</span>
+SELECT <span class="g">session_id</span>, <span class="g">bm25</span>(session_text, 5.0, 2.0, 1.5, 1.0) AS rank
+FROM session_text WHERE session_text <span class="g">MATCH</span> ? ORDER BY rank ASC LIMIT ?
+
+<span class="c">// no snippet(), no highlight(), no SELECT content — anywhere</span></pre>
+
+  <div class="call correct"><span class="tag">Highest value per line changed in the codebase</span>
+    <p>Declare the FTS table <code>content=''</code> (contentless) with <code>contentless_delete=1</code>.
+    Ranking, <code>MATCH</code>, and BM25 weights behave identically — the only thing you lose is the ability to
+    select the text back, which nothing does. <b>−505 MB, ~62% smaller database</b>, plus faster inserts and a far
+    cheaper <code>VACUUM</code>. <code>contentless_delete</code> needs SQLite ≥ 3.43; this machine reports
+    <b>3.53.2</b>, and the existing <code>DELETE FROM session_text WHERE session_id = ?</code> (db.ts:596) keeps
+    working with it. It's a schema-version bump (already at 13) and a rebuild.</p></div>
+</section>
+
+<!-- 3 -->
+<section id="s3">
+  <div class="sec-num">03</div>
+  <h2>The 80 GB — and the line of code that makes it immortal</h2>
+  <p class="sub">This is the finding neither pass had, and it dwarfs everything else.</p>
+
+  <pre><span class="c">du -sh ~/.agents</span>                          <span class="r">80 GB</span>
+  ~/.agents/.history/trash               <span class="r">46 GB</span>   <span class="c">← soft-deleted agent version homes</span>
+  ~/.agents/.history/versions            <span class="a">12 GB</span>   <span class="c">← live version homes (13 claude, 4 codex, 5 grok…)</span>
+  ~/.agents/.history/sessions            <span class="a">790 MB</span>  <span class="c">← the index</span>
+  ~/.agents/.history/backups             346 MB
+
+<span class="c">individual claude version homes:</span>
+  2.1.187/home/.claude/projects          <span class="r">1.3 GB</span>
+  2.1.207/…                              679 MB      2.1.181/… 638 MB      2.1.220/… 354 MB</pre>
+
+  <p>Every agent version upgrade snapshots a <b>complete home directory, transcripts included</b>. Thirteen live
+  claude homes and twelve trashed ones, each carrying its own copy of that version's session history. Nothing
+  reaps them — there is no retention policy in the codebase for either <code>versions/</code> or
+  <code>trash/</code>.</p>
+
+  <h3>Why the index rows are immortal too</h3>
+  <p>When a version is removed, <span class="fl">db.ts:1349</span> <code>updateSessionFilePaths</code> repoints
+  its sessions at the trash copy so reads keep working — and, in the same transaction, <b>deletes their
+  <code>scan_ledger</code> entry</b>:</p>
+  <pre>UPDATE sessions SET file_path = ? WHERE id = ?            <span class="c">// → …/.history/trash/…</span>
+<span class="r">DELETE FROM scan_ledger WHERE file_path = ?</span>               <span class="c">// db.ts:1367</span></pre>
+  <p>The intent is sound (“session reads still work from the trash path”). The consequence is not: trash is not a
+  scan root, so those rows are never revisited, never refreshed, and never removed. Each version removal
+  permanently deposits its sessions into the index.</p>
+
+  <h3>The index, audited row by row</h3>
+  <div class="scroller">
+  <table>
+    <tr><th>Bucket</th><th>Rows</th><th>Share</th><th>Meaning</th></tr>
+    <tr><td>points into <code>.history/trash/</code></td><td class="n bad">4,426</td><td class="n">36%</td><td>readable, but in a graveyard nothing scans</td></tr>
+    <tr><td>points into a version home</td><td class="n">2,327</td><td class="n">19%</td><td>duplicated history from old installs</td></tr>
+    <tr><td>points at a live agent home</td><td class="n good">4,890</td><td class="n">40%</td><td>the sessions you actually have</td></tr>
+    <tr><td>backups mirror / other</td><td class="n">447</td><td class="n">4%</td><td>fleet sync</td></tr>
+    <tr><td><code>file_path = ''</code></td><td class="n bad">90</td><td class="n">1%</td><td>claude rows that can never be opened — a data-quality bug</td></tr>
+    <tr class="sum"><td>total</td><td class="n">12,180</td><td class="n">100%</td><td></td></tr>
+  </table>
+  </div>
+
+  <p>Cross-checked against the filesystem, independent of bucket:</p>
+  <ul class="tight">
+    <li><b class="k">4,853 rows (40%) point at a file that no longer exists.</b> Nothing ever garbage-collects them.</li>
+    <li><b class="k">Only 3,753 of 12,090 paths (31%) have a <code>scan_ledger</code> entry</b> — so the
+      incremental mtime/size skip, which the report presents as the reason scans are cheap, covers under a third
+      of the index.</li>
+    <li>Of the existing-but-unledgered files, a sampled check found 331 were realpath aliases (a false alarm I
+      ruled out) and <b>3,421 genuinely unledgered</b> — all in trashed version homes, exactly as the
+      <code>updateSessionFilePaths</code> path predicts.</li>
+  </ul>
+
+  <div class="call hot"><span class="tag">Net</span>
+    <p>Roughly <b>68% of the index is dead weight</b> — gone or trashed. Every BM25 query ranks against it, every
+    list carries it, and it is holding a proportional share of that 505 MB of write-only text.</p></div>
+</section>
+
+<!-- DIAGRAM -->
+<figure>
+<svg viewBox="0 0 1040 300" role="img" aria-label="database composition today vs after">
+  <text x="20" y="26" class="svg-l" fill="var(--red)">TODAY — 813 MB</text>
+  <text x="560" y="26" class="svg-l" fill="var(--lime)">AFTER contentless FTS + GC — ~95 MB</text>
+  <line x1="530" y1="40" x2="530" y2="280" stroke="var(--line)" stroke-width="1.2" stroke-dasharray="4 4"/>
+
+  <!-- today bar -->
+  <rect x="20" y="60" width="300" height="46" rx="6" class="box-hot"/>
+  <text x="170" y="80" text-anchor="middle" class="svg-s">session_text_content</text>
+  <text x="170" y="96" text-anchor="middle" class="svg-s">504.9 MB · never read back</text>
+
+  <rect x="20" y="116" width="152" height="46" rx="6" class="box"/>
+  <text x="96" y="136" text-anchor="middle" class="svg-s">session_text_data</text>
+  <text x="96" y="152" text-anchor="middle" class="svg-s">255.8 MB</text>
+
+  <rect x="20" y="172" width="30" height="46" rx="6" class="box-lime"/>
+  <text x="60" y="192" class="svg-s">sessions — 7.6 MB</text>
+  <text x="60" y="208" class="svg-s">the actual metadata</text>
+
+  <text x="20" y="252" class="svg-s" fill="var(--red)">62% is a duplicate of text already on disk</text>
+  <text x="20" y="270" class="svg-s" fill="var(--red)">68% of rows describe files that are gone or trashed</text>
+
+  <!-- after bar -->
+  <rect x="560" y="60" width="96" height="46" rx="6" class="box-lime"/>
+  <text x="608" y="80" text-anchor="middle" class="svg-s">fts index</text>
+  <text x="608" y="96" text-anchor="middle" class="svg-s">~82 MB</text>
+
+  <rect x="560" y="116" width="14" height="46" rx="4" class="box-lime"/>
+  <text x="584" y="136" class="svg-s">sessions — ~2.5 MB (live rows only)</text>
+  <text x="584" y="152" class="svg-s">+ indexes</text>
+
+  <text x="560" y="200" class="svg-s" fill="var(--lime)">content='' + contentless_delete=1  →  −505 MB</text>
+  <text x="560" y="218" class="svg-s" fill="var(--lime)">GC dead rows (68%)                 →  −~215 MB more</text>
+  <text x="560" y="236" class="svg-s" fill="var(--lime)">retention on trash/versions        →  −46 GB on disk</text>
+  <text x="560" y="270" class="svg-s">no feature removed · no architecture changed</text>
+</svg>
+<figcaption>Fig 1 — the size problem is two config changes and a reaper, not a redesign. Post-GC figures are projections from the measured composition, not measurements.</figcaption>
+</figure>
+
+<!-- 4 -->
+<section id="s4">
+  <div class="sec-num">04</div>
+  <h2>Bottlenecks, re-ranked by measurement</h2>
+  <p class="sub">The badge on the right is where the original report ranked each one.</p>
+
+  <div class="bn">
+    <h4><span class="rank p1">1</span>505 MB of write-only text in the index <span class="was">report: unlisted</span></h4>
+    <p class="ev">dbstat: <code>session_text_content</code> 504.9 MB. Written at db.ts:598, read nowhere — the sole FTS query selects <code>session_id</code> and <code>bm25()</code> only (db.ts:1313).</p>
+    <div class="fix"><b>Fix:</b> <code>content=''</code> + <code>contentless_delete=1</code>. Identical search behavior, −62% database. One DDL change plus a schema-version bump. Do this first — it is the cheapest large win available.</div>
+  </div>
+
+  <div class="bn">
+    <h4><span class="rank p1">2</span>No retention policy anywhere — 46 GB of trash, 12 GB of version homes <span class="was">report: unlisted</span></h4>
+    <p class="ev">Measured <code>du</code>: 80 GB total under <code>~/.agents</code>. Individual claude version homes at 1.3 GB / 679 MB / 638 MB. No prune/reap/retention code path exists for <code>versions/</code> or <code>trash/</code>.</p>
+    <div class="fix"><b>Fix:</b> a reaper with an explicit policy — keep N most-recent version homes and M days of trash; on eviction, delete the directory <em>and</em> its index rows. Ship it with an <code>agents doctor</code> line that reports the number so it can't silently regrow. Note the real design question underneath: a version home does not need to carry transcripts at all — separating “the agent install” from “the conversations it produced” removes the duplication at the source.</div>
+  </div>
+
+  <div class="bn">
+    <h4><span class="rank p1">3</span>68% of index rows are dead; the ledger covers 31% <span class="was">report: partially, as #4</span></h4>
+    <p class="ev">4,853 of 12,090 paths do not exist on disk; 4,426 point into trash; 3,753 have a ledger entry; 90 rows have <code>file_path = ''</code>. <code>updateSessionFilePaths</code> (db.ts:1349) deletes the ledger entry by design, and nothing re-creates it.</p>
+    <div class="fix"><b>Fix:</b> a GC pass (drop rows whose file is gone, unless deliberately retained), and stop treating <code>file_path</code> as both the identity and the location. Once a session has a stable ref independent of which copy of the file you happened to scan, the trash-repoint hack and the empty-path rows both stop existing.</div>
+  </div>
+
+  <div class="bn">
+    <h4><span class="rank p2">4</span>~0.45 s of fixed per-invocation cost that is neither startup nor SQL <span class="was">report: #1, mis-attributed</span></h4>
+    <p class="ev">Bisect: start 0.09 s · roots 0.14 s · <code>--limit 1</code> 0.56 s · <code>--limit 500</code> 0.58 s · raw DB open+query ~1 ms. Cost is flat in row count, so it is setup, not query.</p>
+    <div class="fix"><b>Fix:</b> <em>profile it before designing around it.</em> Flat-in-N and non-SQL points at module-graph init, roots resolution across 13+ version homes, or the scan-claim path. If it is the version-home walk, fixing #2 fixes this too. Removing 0.45 s from every invocation takes the 3 s poll from ~35% to ~20% duty cycle without any new architecture.</div>
+  </div>
+
+  <div class="bn">
+    <h4><span class="rank p2">5</span>The 3 s poll itself — 1.1 s and 151 MB, × windows × hosts <span class="was">report: #1</span></h4>
+    <p class="ev">Measured 1.04–1.17 s wall, 151 MB peak RSS, for 21 live rows.</p>
+    <div class="fix"><b>Fix:</b> still real, still worth fixing — but it is <em>fourth</em>, and the honest sequence is: fix #4 first, re-measure, then decide between a streaming fan-out and a full daemon. If #4 takes <code>--active</code> to ~0.3 s, a long-lived stream is plenty and the daemon never needs to be built.</div>
+  </div>
+
+  <div class="bn">
+    <h4><span class="rank p3">6</span>Four parsers / four location tables / two SQLite drivers <span class="was">report: #3</span></h4>
+    <p class="ev">Carried over from the previous pass; unchanged and still verified.</p>
+    <div class="fix"><b>Fix:</b> as before — one manifest with a <code>locate()</code>, four storage-shape readers, one SQLite package. This is a correctness and maintenance win, not a performance one; rank it accordingly.</div>
+  </div>
+</section>
+
+<!-- 5 -->
+<section id="s5">
+  <div class="sec-num">05</div>
+  <h2>Where the report is mis-aimed</h2>
+  <ul class="tight">
+    <li><b class="k">“Node cold-start.”</b> The shipped binary is Bun-compiled and starts in 0.09 s. This cost does
+      not exist, and it is the stated justification for the daemon.</li>
+    <li><b class="k">“The index holds metadata only.”</b> The metadata table is 7.6 MB of an 813 MB file. The other
+      99% is search, and most of that is redundant.</li>
+    <li><b class="k">“scan_ledger means only changed files are re-read.”</b> True for the 31% of rows that have a
+      ledger entry. The mechanism is right; its coverage is not.</li>
+    <li><b class="k">Bottleneck #5, “back the event stream with SQLite.”</b> Measured, <code>events.jsonl</code> is
+      1.9 MB / 5,431 lines. A linear scan of that is sub-millisecond. Migrating it to a database is not a
+      performance fix — argue for it on the subscribe surface if you want it, not on speed.</li>
+    <li><b class="k">Bottleneck #6, “full-transcript render reads the whole file.”</b> Correct, and it matters more
+      than the ranking suggests now that we know claude transcripts total 354 MB in the live home alone — but the
+      live path (<code>readSessionTailWithRaw</code>, tail.ts) is already bounded to a 128 KB
+      <code>pread</code> tail. That part is well built; leave it alone.</li>
+  </ul>
+  <div class="call correct"><span class="tag">Credit where due</span>
+    <p>The bounded tail read, the WAL + ledger design, the <code>launchDetached</code> single-implementation rule,
+    and the argv-level coupling between <code>run</code> and <code>teams</code> are all genuinely good. The problems
+    found here are accumulation and bookkeeping problems, not design failures in the hot path.</p></div>
+</section>
+
+<!-- 6 -->
+<section id="s6">
+  <div class="sec-num">06</div>
+  <h2>The architecture call</h2>
+  <p class="sub">You asked for “highly performant, best architecture.” On the evidence, the best architecture here
+  is mostly <em>less</em>, not more.</p>
+  <ul class="tight">
+    <li><b class="k">Do first — two config changes and a reaper.</b> Contentless FTS (−505 MB), a GC pass for dead
+      rows (−68% of the index), a retention policy for <code>trash/</code> and <code>versions/</code> (−46 GB).
+      No architecture changes, no new components, no new failure modes. This is the entire size problem.</li>
+    <li><b class="k">Then profile the 0.45 s.</b> It is the only unexplained cost left, it is on every single
+      invocation, and it is very likely tied to walking 13+ version homes — i.e. the same root cause as the
+      retention problem. Measure, then decide.</li>
+    <li><b class="k">Then, and only then, consider the transport.</b> If <code>--active</code> lands near 0.3 s, a
+      long-lived <code>--watch</code> stream over the existing ControlMaster channel is sufficient and adds no
+      daemon lifecycle. Build the emit → DB → subscribe bus only if the numbers still justify it after the above.</li>
+    <li><b class="k">Fix identity as the enabler, not as cleanup.</b> A <code>SessionRef</code> that is stable
+      across copies is what makes the GC safe, makes the trash-repoint hack unnecessary, and makes the harness
+      manifest expressible. It is small, and three other fixes depend on it.</li>
+    <li><b class="k">Question the version-home snapshot.</b> The deepest fix: an agent version home should not
+      contain the conversations. If transcripts lived in one canonical store and version homes carried only
+      config, there would be no 46 GB, no duplicate indexing, no trash-repointing, and no ledger gap. That is the
+      one change worth calling architectural.</li>
+  </ul>
+</section>
+
+<!-- 7 -->
+<section id="s7">
+  <div class="sec-num">07</div>
+  <h2>What I could not determine</h2>
+  <ul class="tight">
+    <li><b>The composition of the 0.45 s fixed cost.</b> I bisected to it but could not profile inside it — the
+      installed binary is a Bun single-file executable, so <code>node --cpu-prof</code> does not apply and DTrace
+      is blocked by SIP on this machine. To get it: build from source and run
+      <code>bun --inspect apps/cli/src/index.ts sessions --local --limit 1</code>, or add a
+      <code>--timing</code> flag that stamps the phase boundaries. That is the single highest-value next
+      measurement.</li>
+    <li><b>Whether these ratios hold on other fleet hosts.</b> Everything here is zion, which has 13 claude
+      version homes and 12,180 indexed sessions. A worker box with two versions and 400 sessions will show a very
+      different balance — worth running the same bisect on <code>yosemite-s0</code> before committing to the
+      ordering.</li>
+    <li><b>Post-fix sizes are projections.</b> The ~95 MB figure in Fig 1 is arithmetic from the measured
+      composition, not a rebuilt database. Verify by building the contentless schema against a copy.</li>
+  </ul>
+</section>
+
+<div class="foot wrap">
+  Measured on zion, 2026-07-30, against agents-cli @ 827565549 and the live ~/.agents on this machine.
+  Timings are wall-clock from <code>/usr/bin/time</code>; sizes from <code>du</code> and SQLite <code>dbstat</code>.
+</div>
+</div>
+
+<script>
+  (function(){
+    var root=document.documentElement, btn=document.getElementById('tg');
+    try{var pref=window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches;
+      root.setAttribute('data-theme', pref?'light':'dark');}catch(e){}
+    btn.addEventListener('click',function(){
+      root.setAttribute('data-theme', root.getAttribute('data-theme')==='dark'?'light':'dark');
+    });
+  })();
+</script>
+</body>
+</html>

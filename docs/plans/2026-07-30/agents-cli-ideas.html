@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agents-cli — six architectural moves</title>
+<style>
+  :root{
+    --bg:#0a0a0a; --panel:#111211; --panel-2:#161816; --ink:#e8ebe6; --ink-dim:#9aa295;
+    --line:#242724; --lime:#a3e635; --lime-dim:#6f9e26; --amber:#f4bf4f; --red:#ff6b5e;
+    --cyan:#5ec7d6; --violet:#b08cff; --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+    --sans:'Inter',ui-sans-serif,system-ui,-apple-system,sans-serif;
+    --code-bg:#0d0f0d; --chip:#1a1d19; --shadow:0 1px 0 rgba(255,255,255,.03),0 8px 30px rgba(0,0,0,.5);
+  }
+  html[data-theme="light"]{
+    --bg:#f6f7f4; --panel:#ffffff; --panel-2:#fbfcfa; --ink:#16180f; --ink-dim:#5c6356;
+    --line:#e2e6dc; --lime:#5c8a13; --lime-dim:#7fae2c; --amber:#9a6a00; --red:#c23b2e;
+    --cyan:#0f7d8c; --violet:#6d45c9; --code-bg:#f1f3ec; --chip:#eef1e8; --shadow:0 1px 0 rgba(0,0,0,.02),0 10px 30px rgba(0,0,0,.08);
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.62;
+    font-size:16px;-webkit-font-smoothing:antialiased}
+  a{color:var(--lime);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,kbd,.mono{font-family:var(--mono)}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+
+  .topbar{position:sticky;top:0;z-index:30;background:color-mix(in srgb,var(--bg) 88%,transparent);
+    backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  .topbar .wrap{display:flex;align-items:center;justify-content:space-between;height:56px}
+  .brand{font-family:var(--mono);font-weight:700;letter-spacing:.02em;font-size:15px}
+  .brand .dot{color:var(--lime)}
+  .toggle{font-family:var(--mono);font-size:13px;color:var(--ink-dim);background:var(--chip);
+    border:1px solid var(--line);border-radius:8px;padding:6px 12px;cursor:pointer}
+  .toggle:hover{color:var(--ink);border-color:var(--lime-dim)}
+
+  .hero{padding:64px 0 40px;border-bottom:1px solid var(--line)}
+  .kicker{font-family:var(--mono);font-size:12.5px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--lime);margin-bottom:18px}
+  h1{font-size:clamp(30px,4.6vw,50px);line-height:1.06;margin:0 0 20px;letter-spacing:-.02em;font-weight:800}
+  h1 .g{color:var(--lime)}
+  .lede{font-size:19px;color:var(--ink-dim);max-width:780px;margin:0 0 26px}
+  .lede b{color:var(--ink);font-weight:600}
+  .chips{display:flex;flex-wrap:wrap;gap:9px;margin-bottom:8px}
+  .chip{font-family:var(--mono);font-size:12px;color:var(--ink-dim);background:var(--chip);
+    border:1px solid var(--line);border-radius:999px;padding:5px 12px}
+  .chip b{color:var(--lime);font-weight:600}
+
+  .toc{margin:30px 0 0;padding:18px 20px;background:var(--panel);border:1px solid var(--line);
+    border-radius:14px;box-shadow:var(--shadow)}
+  .toc h4{margin:0 0 12px;font-family:var(--mono);font-size:12px;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--ink-dim)}
+  .toc ol{margin:0;padding:0;list-style:none;display:grid;grid-template-columns:1fr 1fr;gap:6px 26px;
+    counter-reset:toc}
+  .toc li{counter-increment:toc;font-size:14.5px;display:flex;gap:10px;align-items:baseline}
+  .toc li::before{content:counter(toc,decimal-leading-zero);font-family:var(--mono);font-size:12px;
+    color:var(--lime-dim);min-width:22px}
+  @media(max-width:720px){.toc ol{grid-template-columns:1fr}}
+
+  section{padding:52px 0;border-bottom:1px solid var(--line)}
+  .sec-num{font-family:var(--mono);font-size:13px;color:var(--lime);letter-spacing:.1em}
+  h2{font-size:clamp(22px,3vw,30px);margin:8px 0 6px;letter-spacing:-.015em;font-weight:750}
+  h3{font-size:18px;margin:30px 0 8px;font-weight:650}
+  .sub{color:var(--ink-dim);font-size:15.5px;max-width:840px}
+  p{max-width:840px}
+  ul.tight{max-width:840px;padding-left:18px}
+  ul.tight li{margin:6px 0}
+  .fl{font-family:var(--mono);font-size:12.5px;color:var(--cyan);background:var(--code-bg);
+    border:1px solid var(--line);border-radius:5px;padding:1px 6px;white-space:nowrap}
+  b.k{color:var(--lime)}
+
+  .call{margin:22px 0;padding:16px 18px 16px 20px;border-radius:12px;border:1px solid var(--line);
+    background:var(--panel);position:relative;box-shadow:var(--shadow)}
+  .call::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;border-radius:12px 0 0 12px}
+  .call.correct::before{background:var(--lime)}
+  .call.warn::before{background:var(--amber)}
+  .call.hot::before{background:var(--red)}
+  .call .tag{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+    font-weight:700;margin-bottom:6px;display:block}
+  .call.correct .tag{color:var(--lime)}
+  .call.warn .tag{color:var(--amber)}
+  .call.hot .tag{color:var(--red)}
+  .call p{margin:2px 0;max-width:none}
+
+  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:10px;padding:14px 16px;
+    overflow:auto;font-family:var(--mono);font-size:12.7px;line-height:1.6;box-shadow:var(--shadow)}
+  pre .c{color:var(--ink-dim)}
+  pre .g{color:var(--lime)}
+  pre .a{color:var(--amber)}
+  pre .r{color:var(--red)}
+  pre .cy{color:var(--cyan)}
+
+  .scroller{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;margin:20px 0;font-size:14px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--ink-dim);font-weight:600}
+  td .fl{white-space:normal}
+  .yes{color:var(--lime);font-family:var(--mono)}
+  .no{color:var(--red);font-family:var(--mono)}
+  .na{color:var(--ink-dim);font-family:var(--mono)}
+
+  figure{margin:26px 0}
+  figure svg{width:100%;height:auto;display:block;background:var(--panel);border:1px solid var(--line);
+    border-radius:14px;box-shadow:var(--shadow)}
+  figcaption{font-size:13px;color:var(--ink-dim);margin-top:10px;font-family:var(--mono)}
+  .svg-l{font-family:var(--mono);font-size:12px;fill:var(--ink)}
+  .svg-s{font-family:var(--mono);font-size:10.5px;fill:var(--ink-dim)}
+  .svg-t{font-family:var(--mono);font-size:11px;fill:var(--ink-dim)}
+  .box{fill:var(--panel-2);stroke:var(--line);stroke-width:1.2}
+  .box-hot{fill:var(--panel-2);stroke:var(--red);stroke-width:1.6}
+  .box-lime{fill:var(--panel-2);stroke:var(--lime-dim);stroke-width:1.4}
+  .edge{stroke:var(--ink-dim);stroke-width:1.4;fill:none}
+  .edge-hot{stroke:var(--red);stroke-width:1.8;fill:none}
+  .edge-lime{stroke:var(--lime);stroke-width:1.6;fill:none}
+
+  .idea{margin:22px 0;padding:18px 20px;background:var(--panel);border:1px solid var(--line);
+    border-radius:12px;box-shadow:var(--shadow)}
+  .idea h4{margin:0 0 8px;font-size:17px;display:flex;align-items:center}
+  .num{display:inline-flex;align-items:center;justify-content:center;font-family:var(--mono);
+    font-weight:700;font-size:13px;width:26px;height:26px;border-radius:7px;margin-right:10px;
+    background:var(--lime);color:#0c1400}
+  .idea .row{border-top:1px dashed var(--line);margin-top:12px;padding-top:10px;font-size:14.5px}
+  .idea .row b{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase}
+  .idea .row.up b{color:var(--lime)}
+  .idea .row.down b{color:var(--amber)}
+  .effort{font-family:var(--mono);font-size:11px;padding:2px 9px;border-radius:999px;
+    border:1px solid var(--line);color:var(--ink-dim);margin-left:auto;font-weight:400}
+
+  .foot{padding:40px 0 70px;color:var(--ink-dim);font-size:13px;font-family:var(--mono)}
+</style>
+</head>
+<body>
+<div class="topbar"><div class="wrap">
+  <div class="brand">agents<span class="dot">·</span>cli <span style="color:var(--ink-dim)">/ ideas</span></div>
+  <button class="toggle" id="tg">◐ theme</button>
+</div></div>
+
+<div class="wrap">
+<header class="hero">
+  <div class="kicker">Companion to “the distributed core” · brainstorm, verified</div>
+  <h1>Six moves — and three things the <span class="g">report</span> got vague or wrong</h1>
+  <p class="lede">The original report's headline (poll → push) is right but it's the <b>expensive</b> fix.
+    Underneath it sits a cheaper, more damaging problem the report only gestures at: <b>nobody agrees where a
+    transcript lives.</b> Four separate tables answer that question, they cover different agent sets, and for
+    OpenCode all three answers are different paths. That is the bug factory, and it's a week of typing, not an
+    architecture rewrite.</p>
+  <div class="chips">
+    <span class="chip">verified @ <b>827565549</b></span>
+    <span class="chip">every claim re-read from <b>source</b></span>
+    <span class="chip">4 location tables · <b>11</b> session agents</span>
+    <span class="chip">2 SQLite libraries in <b>one monorepo</b></span>
+  </div>
+
+  <nav class="toc">
+    <h4>What's inside</h4>
+    <ol>
+      <li><a href="#s0">Your three questions, answered from source</a></li>
+      <li><a href="#s1">The location-table drift (the real bug factory)</a></li>
+      <li><a href="#s2">Move 1 — one harness manifest, with a <code>locate()</code></a></li>
+      <li><a href="#s3">Move 2 — four storage shapes, not eleven harnesses</a></li>
+      <li><a href="#s4">Move 3 — one SQLite, in <code>packages/</code></a></li>
+      <li><a href="#s5">Move 4 — the extension stops touching transcripts</a></li>
+      <li><a href="#s6">Move 5 — stream the SSH fan-out before building a daemon</a></li>
+      <li><a href="#s7">Move 6 — session identity isn't a file path</a></li>
+      <li><a href="#s8">Order of operations</a></li>
+    </ol>
+  </nav>
+</header>
+
+<!-- 0 -->
+<section id="s0">
+  <div class="sec-num">00</div>
+  <h2>Your three questions, answered from source</h2>
+
+  <h3>“Why does the report say <em>stack</em>?”</h3>
+  <p>Because at that point the report was hand-waving. §1(b) says transcripts are “parsed by a completely
+  separate stack” and never names it. Concretely, that “stack” is:</p>
+  <ul class="tight">
+    <li><b class="k">Indexer</b> — <span class="fl">apps/cli/src/lib/session/discover.ts</span> (3038 lines), one
+      <code>scan&lt;Harness&gt;Incremental</code> per agent, dispatched by a switch at <span class="fl">discover.ts:234</span>.</li>
+    <li><b class="k">Full parser</b> — <span class="fl">apps/cli/src/lib/session/parse.ts</span> (1653 lines), on-demand, whole-file.</li>
+    <li><b class="k">Factory head parser</b> — <span class="fl">apps/factory/src/monitor/sessionParse.ts</span> (240 lines), first 100 lines only.</li>
+    <li><b class="k">Factory preview parser</b> — <span class="fl">apps/factory/src/vscode/sessions.vscode.ts</span> (800 lines), including its own SQLite reader.</li>
+  </ul>
+  <p>Four parsers, two apps, no shared interface. “Stack” was doing a lot of work in that sentence.</p>
+
+  <h3>“Are different packages or libraries being used?”</h3>
+  <p><b>Yes — two different SQLite implementations in the same monorepo.</b></p>
+  <pre><span class="c">// CLI — deliberately no native addon, no prebuild</span>
+apps/cli/src/lib/sqlite.ts:22   <span class="g">bun:sqlite</span> under Bun · <span class="g">node:sqlite</span> under Node ≥22.5
+                                <span class="c">"Avoids the native better-sqlite3 addon entirely"</span>
+
+<span class="c">// Factory — WebAssembly SQLite, a separate npm dependency</span>
+apps/factory/package.json:1278  <span class="a">"sql.js": "^1.13.0"</span>
+sessions.vscode.ts:18           <span class="a">initSqlJs()</span>  → reads Cursor's store.db
+sessions.vscode.ts:731          <span class="r">await fs.readFile(dbPath)</span>  <span class="c">// entire DB into a Buffer</span></pre>
+  <div class="call warn"><span class="tag">But it isn't arbitrary</span>
+    <p>The split is defensible: the VS Code extension host pins its own Node, may predate <code>node:sqlite</code>
+    (needs ≥22.5), and can't ship a native addon across platforms. <b>sql.js was the right call for that constraint.</b>
+    The problem is that it's an <em>undeclared</em> fork — nothing says “extension host uses the WASM driver,”
+    so the two will drift on schema, BLOB handling, and error semantics. And <code>readFile</code>-the-whole-DB is
+    fine for a Cursor chat, fatal the day it points at OpenCode's global <code>opencode.db</code>.</p></div>
+
+  <h3>“Session transcripts have no standardized place”</h3>
+  <p>Correct, and it's worse than “no standard” — it's <b>four tables that disagree</b>. See §01.</p>
+</section>
+
+<!-- 1 -->
+<section id="s1">
+  <div class="sec-num">01</div>
+  <h2>The location-table drift — the actual bug factory</h2>
+  <p class="sub">“Where does agent X keep its transcripts” is answered independently in four places, over three
+  different agent sets. None of them is complete.</p>
+
+  <div class="scroller">
+  <table>
+    <tr><th>Table</th><th>File:line</th><th>Agents covered</th><th>Consumers</th></tr>
+    <tr><td><b class="k">SESSION_ROOT_SPECS</b><br><span class="na">claims to be “the single source of truth”</span></td>
+        <td><span class="fl">discover.ts:479</span></td>
+        <td class="mono">claude · codex · gemini · antigravity · droid · kimi <span class="no">(6 of 11)</span></td>
+        <td><code>agents sessions --roots --json</code></td></tr>
+    <tr><td><b class="k">getSessionDir</b></td>
+        <td><span class="fl">agents.ts:1783</span></td>
+        <td class="mono">claude · codex · gemini · grok · copilot · droid <span class="no">(different 6)</span></td>
+        <td>agent freshness / session counts</td></tr>
+    <tr><td><b class="k">agentSessionRoots</b></td>
+        <td><span class="fl">sessionParse.ts:146</span></td>
+        <td class="mono">claude · codex · gemini · opencode · cursor <span class="no">(5, incl. one the CLI has never heard of)</span></td>
+        <td>factory fast-path + locate</td></tr>
+    <tr><td><b class="k">watcherRoots</b></td>
+        <td><span class="fl">sessionParse.ts:170</span></td>
+        <td class="mono">claude · codex · gemini · opencode <span class="no">(4)</span></td>
+        <td>fs.watch fallback</td></tr>
+  </table>
+  </div>
+
+  <p>And there's a fifth: <code>SESSION_AGENTS</code> (<span class="fl">types.ts:14</span>) declares <b>11</b>
+  session agents — claude, codex, gemini, antigravity, opencode, openclaw, rush, hermes, grok, kimi, droid. The
+  “source of truth” table publishes six of them. Rush and Hermes get hardcoded constants of their own
+  (<span class="fl">discover.ts:60–61</span>), OpenCode gets a global-DB constant
+  (<span class="fl">discover.ts:1451</span>).</p>
+
+  <h3>OpenCode is the proof</h3>
+  <pre><span class="c">// three answers, same repo, same agent</span>
+discover.ts:1451       <span class="cy">~/.local/share/opencode/opencode.db</span>        <span class="c">// CLI: a global SQLite DB</span>
+sessionParse.ts:155    <span class="a">~/.local/share/opencode/storage/message</span>    <span class="c">// factory fast-path</span>
+sessionParse.ts:179    <span class="r">~/.local/share/opencode/storage/session</span>    <span class="c">// factory watcher</span></pre>
+
+  <div class="call hot"><span class="tag">The report is wrong here</span>
+    <p>The comment at <span class="fl">sessionParse.ts:~196</span> justifies the hardcoded OpenCode path with
+    “<em>the CLI does not scan opencode transcripts, so it never appears in --roots</em>.” It does —
+    <code>scanOpenCodeIncremental()</code> is dispatched at <span class="fl">discover.ts:240</span> and reads
+    <span class="fl">opencode.db</span>. OpenCode is absent from <code>--roots</code> not because it's unscanned
+    but because <code>SESSION_ROOT_SPECS</code> only models <em>directory</em> roots and OpenCode is a
+    <em>file</em>. The extension then worked around a wrong diagnosis with two more wrong paths.</p></div>
+
+  <div class="call warn"><span class="tag">This class already bit you once</span>
+    <p>The source records it: “<em>the hardcoded list kept watching ~/.gemini/sessions after gemini moved its
+    transcripts to ~/.gemini/tmp</em>” (<span class="fl">sessionParse.ts:~193</span>). That's the whole failure
+    mode — a vendor moves a directory, one table learns, three don't, and a surface goes quietly blind. The fix
+    (<code>watcherRootsFromCli()</code>) was right in shape and incomplete in coverage.</p></div>
+</section>
+
+<!-- DIAGRAM -->
+<figure>
+<svg viewBox="0 0 1040 360" role="img" aria-label="location tables today vs one manifest">
+  <text x="20" y="26" class="svg-l" fill="var(--red)">TODAY — four tables, three agent sets, no arbiter</text>
+  <text x="560" y="26" class="svg-l" fill="var(--lime)">PROPOSED — one manifest, published, everyone reads it</text>
+  <line x1="530" y1="40" x2="530" y2="340" stroke="var(--line)" stroke-width="1.2" stroke-dasharray="4 4"/>
+
+  <!-- today -->
+  <rect x="20" y="56" width="220" height="42" rx="8" class="box-hot"/>
+  <text x="130" y="73" text-anchor="middle" class="svg-s">SESSION_ROOT_SPECS · 6</text>
+  <text x="130" y="88" text-anchor="middle" class="svg-s">discover.ts:479</text>
+
+  <rect x="270" y="56" width="220" height="42" rx="8" class="box-hot"/>
+  <text x="380" y="73" text-anchor="middle" class="svg-s">getSessionDir · 6 (other 6)</text>
+  <text x="380" y="88" text-anchor="middle" class="svg-s">agents.ts:1783</text>
+
+  <rect x="20" y="118" width="220" height="42" rx="8" class="box-hot"/>
+  <text x="130" y="135" text-anchor="middle" class="svg-s">agentSessionRoots · 5</text>
+  <text x="130" y="150" text-anchor="middle" class="svg-s">sessionParse.ts:146</text>
+
+  <rect x="270" y="118" width="220" height="42" rx="8" class="box-hot"/>
+  <text x="380" y="135" text-anchor="middle" class="svg-s">watcherRoots · 4</text>
+  <text x="380" y="150" text-anchor="middle" class="svg-s">sessionParse.ts:170</text>
+
+  <rect x="145" y="210" width="220" height="42" rx="8" class="box"/>
+  <text x="255" y="227" text-anchor="middle" class="svg-s">SESSION_AGENTS · 11</text>
+  <text x="255" y="242" text-anchor="middle" class="svg-s">types.ts:14 — the real set</text>
+
+  <path class="edge-hot" d="M130,98 L130,116"/>
+  <path class="edge-hot" d="M380,98 L380,116"/>
+  <path class="edge-hot" d="M130,160 L130,190 L255,190 L255,208"/>
+  <path class="edge-hot" d="M380,160 L380,190 L255,190"/>
+  <text x="120" y="290" class="svg-s" fill="var(--red)">5 of 11 agents are invisible to --roots</text>
+  <text x="120" y="308" class="svg-s" fill="var(--red)">opencode has 3 different paths</text>
+
+  <!-- proposed -->
+  <rect x="560" y="56" width="290" height="60" rx="8" class="box-lime"/>
+  <text x="705" y="78" text-anchor="middle" class="svg-s">HARNESSES[] — one manifest</text>
+  <text x="705" y="94" text-anchor="middle" class="svg-s">{ id, shape, locate(), fields }</text>
+  <text x="705" y="109" text-anchor="middle" class="svg-s">all 11 + cursor</text>
+
+  <rect x="560" y="146" width="290" height="42" rx="8" class="box-lime"/>
+  <text x="705" y="163" text-anchor="middle" class="svg-s">agents sessions --roots --json</text>
+  <text x="705" y="178" text-anchor="middle" class="svg-s">versioned · the only publisher</text>
+
+  <rect x="560" y="222" width="130" height="42" rx="8" class="box"/>
+  <text x="625" y="248" text-anchor="middle" class="svg-s">indexer</text>
+  <rect x="705" y="222" width="130" height="42" rx="8" class="box"/>
+  <text x="770" y="248" text-anchor="middle" class="svg-s">watcher</text>
+  <rect x="850" y="222" width="140" height="42" rx="8" class="box"/>
+  <text x="920" y="248" text-anchor="middle" class="svg-s">extension</text>
+
+  <path class="edge-lime" d="M705,116 L705,144"/>
+  <path class="edge-lime" d="M705,188 L705,206 L625,206 L625,220"/>
+  <path class="edge-lime" d="M705,188 L705,206 L770,206 L770,220"/>
+  <path class="edge-lime" d="M705,188 L705,206 L920,206 L920,220"/>
+  <text x="600" y="298" class="svg-s" fill="var(--lime)">a vendor moves a directory → one line changes → every surface follows</text>
+</svg>
+<figcaption>Fig 1 — the drift, and the shape that removes it. Not a rewrite: one table plus a publisher.</figcaption>
+</figure>
+
+<!-- 2 -->
+<section id="s2">
+  <div class="sec-num">02</div>
+  <h2>The six moves</h2>
+  <p class="sub">Each with what it buys and — more usefully — what it costs. Ordered by leverage-per-risk, not by ambition.</p>
+
+  <div class="idea" id="s2i">
+    <h4><span class="num">1</span>One harness manifest — but it needs a <code>locate()</code>, not a path string
+      <span class="effort">small · high leverage</span></h4>
+    <p>Collapse the four tables into one <code>HARNESSES[]</code> entry per agent, covering all 11 (+ cursor), and
+    make <code>agents sessions --roots --json</code> the only publisher. The plumbing already exists —
+    <code>watcherRootsFromCli()</code> proved the pattern; it just reads from a table that's missing half the agents.</p>
+    <div class="row up"><b>Buys</b> — the gemini-moved-directory bug becomes structurally impossible. Adding a
+      harness becomes one entry instead of four edits in two apps. <code>--roots</code> stops lying by omission.</div>
+    <div class="row down"><b>Costs / watch out</b> — a naive <code>{agent, subdir}</code> manifest is exactly what
+      exists today and it's <em>why</em> OpenCode fell out: it can't express “one global DB file,” “one
+      <code>.db</code> per trajectory” (antigravity), “dir-per-session with messages.jsonl” (rush), or claude's
+      project-hashed dirs. Model it as a small <code>locate()</code> capability returning
+      <code>{kind: 'dir'|'file'|'glob', path}[]</code>. If you ship a path-string manifest plus five exceptions,
+      you've rebuilt today's problem with more ceremony.</div>
+  </div>
+
+  <div class="idea">
+    <h4><span class="num">2</span>Four storage shapes, not eleven harnesses
+      <span class="effort">medium · kills the 4× parser dup</span></h4>
+    <p>The report proposes one <code>HarnessAdapter</code> per harness. Go one level more abstract first: there are
+    only about <b>four physical shapes</b> in play.</p>
+    <ul class="tight">
+      <li><b class="k">Append-only NDJSON</b> — claude, codex, droid, grok, copilot, rush/<code>messages.jsonl</code></li>
+      <li><b class="k">One JSON doc per session</b> — gemini</li>
+      <li><b class="k">SQLite, one DB per session</b> — antigravity (<code>conversations/&lt;uuid&gt;.db</code>), cursor (<code>store.db</code>)</li>
+      <li><b class="k">SQLite, one global DB</b> — opencode</li>
+    </ul>
+    <p>Write four readers. A harness then declares <code>(shape, locate, fieldMap)</code> — data, not code.</p>
+    <div class="row up"><b>Buys</b> — new harness = a data entry, reviewed in a minute. The tail-read, head-read
+      and full-read strategies get written once per shape instead of once per harness per call site (today: ~4× × 11).</div>
+    <div class="row down"><b>Costs / watch out</b> — two real limits. (a) <b>Field mapping is lossy</b>; keep a raw
+      passthrough on every normalized event or you'll silently drop the harness-specific detail some surface
+      depends on. (b) <b>SQLite sources can't be tailed like NDJSON</b> — WAL page writes don't map onto
+      “bytes appended since offset,” so incremental reads need <code>data_version</code>/rowid watermarks, not
+      byte offsets. Your unification will have a seam there no matter what; name it deliberately rather than
+      discovering it at implementation time.</div>
+  </div>
+
+  <div class="idea">
+    <h4><span class="num">3</span>One SQLite surface, hoisted into <code>packages/</code>
+      <span class="effort">small · removes a silent fork</span></h4>
+    <p>Move <span class="fl">apps/cli/src/lib/sqlite.ts</span> into a shared package and add a third backend:
+    <code>bun:sqlite</code> → <code>node:sqlite</code> → <code>sql.js</code>. Factory imports the package instead
+    of <code>sql.js</code> directly.</p>
+    <div class="row up"><b>Buys</b> — one BLOB/param/error contract instead of two that will drift. Factory gets
+      the fast native path automatically when the extension host's Node is ≥22.5, and keeps working when it isn't.
+      Also fixes the load-whole-DB-into-a-Buffer read at <span class="fl">sessions.vscode.ts:731</span> for free
+      on the native path.</div>
+    <div class="row down"><b>Costs / watch out</b> — <code>sql.js</code> genuinely can't do everything the native
+      drivers can (no incremental BLOB I/O, no real WAL, whole-file-in-memory). A “unified” shim that pretends
+      otherwise is worse than two honest ones. Make the capability explicit —
+      <code>db.capabilities.streaming</code> — and let callers degrade, rather than papering over it.</div>
+  </div>
+
+  <div class="idea">
+    <h4><span class="num">4</span>The extension stops touching transcripts at all
+      <span class="effort">medium · the biggest dup deletion</span></h4>
+    <p>Today factory has its own roots tables, its own head parser, its own activity parser, and its own SQLite
+    reader — while <em>also</em> shelling out to the CLI every 3s. Pick one. Make the CLI the only thing that
+    knows a transcript format; the extension becomes a pure consumer of normalized rows.</p>
+    <div class="row up"><b>Buys</b> — deletes ~2 of the 4 parsers and 2 of the 4 roots tables outright. The whole
+      class of “factory sees a different set of sessions than the CLI does” disappears. It also makes move 5
+      trivial, because there's then exactly one producer to stream from.</div>
+    <div class="row down"><b>Costs / watch out</b> — this hard-couples the extension to a compatible agents-cli
+      version, and <code>agents use</code> switches version homes underneath it. You need (a) a declared protocol
+      version on <code>--roots</code>/<code>--active</code> output and (b) a degraded mode when the CLI is absent
+      or too old — <code>watcherRootsFromCli()</code>'s try/fallback is the right pattern, generalize it rather
+      than dropping it. Do <b>not</b> delete the fallback in the name of purity; a VS Code extension that
+      hard-fails on a stale CLI is a worse product than one that shows less.</div>
+  </div>
+
+  <div class="idea">
+    <h4><span class="num">5</span>Stream the fan-out before you build a daemon
+      <span class="effort">small · ~80% of the daemon's win</span></h4>
+    <p>The report's headline is “resident daemon + push bus.” Right direction, but there's a much cheaper step
+    that captures most of it: keep the SSH fan-out, make the remote side <b>long-lived</b> —
+    <code>agents sessions --active --watch --json</code> streaming NDJSON deltas over a single ControlMaster
+    channel (<span class="fl">ssh-exec.ts:76</span>) that stays open.</p>
+    <div class="row up"><b>Buys</b> — kills the per-poll Node cold start and rescan on every peer, which is the
+      dominant cost the report identifies (bottlenecks 1 and 2) — <em>without</em> inventing daemon lifecycle,
+      leader election, or inbound connectivity. One process per host per subscriber, not one per host per 3s.</div>
+    <div class="row down"><b>Costs / watch out</b> — long-lived SSH channels need reconnect/backoff and orphan
+      reaping (a dropped VS Code window must not leave a watcher running on yosemite-s0). And it moves cost from
+      CPU to open FDs and idle processes across the fleet. Still far less new state than a daemon. The real
+      argument for doing this <em>first</em> is that it forces you to define the delta format — which is the
+      daemon's actual hard part, learned cheaply.</div>
+  </div>
+
+  <div class="idea">
+    <h4><span class="num">6</span>Session identity is not a file path
+      <span class="effort">small · unblocks moves 1–2</span></h4>
+    <p>The index is keyed on <code>file_path</code> (<span class="fl">db.ts:103</span> <code>scan_ledger</code>),
+    which assumes one file per session. Row-backed harnesses already break it — OpenCode sessions get a synthetic
+    <code>opencode.db#&lt;id&gt;</code> composite key (<span class="fl">discover.ts:1587</span>). And
+    <code>canonicalLedgerKey</code> (<span class="fl">db.ts:28</span>) exists purely to realpath version-home
+    symlinks so <code>agents use</code> doesn't bust the cache — a second identity patch on the same assumption.</p>
+    <div class="row up"><b>Buys</b> — a real <code>SessionRef {harness, sessionId, source}</code> makes SQLite
+      harnesses first-class instead of hacks, and makes the “where do transcripts live” question answerable
+      uniformly across dir-, file-, and row-backed sources. Both existing patches collapse into it.</div>
+    <div class="row down"><b>Costs / watch out</b> — this is a schema migration on a live DB
+      (<code>SCHEMA_VERSION</code> is already at 13, so the machinery exists, but every machine on the fleet
+      re-indexes on upgrade — a visible one-time stall). Do it <em>before</em> moves 1–2 or you'll build the
+      manifest against an identity model that can't hold it.</div>
+  </div>
+</section>
+
+<!-- 3 -->
+<section id="s8">
+  <div class="sec-num">03</div>
+  <h2>Order of operations</h2>
+  <p class="sub">If you only do part of this, do the top half — it's most of the value at a fraction of the risk.</p>
+  <ul class="tight">
+    <li><b class="k">First</b> — move 6 (identity), then move 1 (manifest). Small, mechanical, and they delete a
+      live class of bug rather than optimizing a hot path.</li>
+    <li><b class="k">Then</b> — move 3 (one SQLite package) and move 4 (extension stops parsing). These are the
+      dup deletions; they get easier once the manifest exists.</li>
+    <li><b class="k">Then</b> — move 5 (streaming fan-out). Measure after this. It may well be enough.</li>
+    <li><b class="k">Only then</b> — the daemon + event bus the report proposes. It's the right end state, but it
+      introduces lifecycle, leader election, crash recovery, and version-skew problems that the current
+      zero-background-state design deliberately avoids. Build it as an <em>optional accelerator</em> with the
+      poll path retained as the fallback, so a dead daemon degrades to “slower” rather than “blind.”</li>
+  </ul>
+  <div class="call correct"><span class="tag">Note</span>
+    <p>Nothing here touches §7 of the report — the teams / SSH / detached-launch layering. That part is genuinely
+    well-factored (<code>launchDetached</code> “lives in exactly one place”), and the argv-level coupling between
+    <code>run</code> and <code>teams</code> is a feature, not debt. Leave it alone.</p>
+  </div>
+</section>
+
+<div class="foot wrap">
+  Verified against agents-cli @ 827565549 — apps/cli, apps/factory, packages/session-tracker.
+  Every file:line above was re-read from source, not carried over from the original report.
+</div>
+</div>
+
+<script>
+  (function(){
+    var root=document.documentElement, btn=document.getElementById('tg');
+    try{var pref=window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches;
+      root.setAttribute('data-theme', pref?'light':'dark');}catch(e){}
+    btn.addEventListener('click',function(){
+      root.setAttribute('data-theme', root.getAttribute('data-theme')==='dark'?'light':'dark');
+    });
+  })();
+</script>
+</body>
+</html>

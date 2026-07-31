@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agents-cli — where the milliseconds go</title>
+<style>
+  :root{
+    --bg:#0a0a0a; --panel:#111211; --panel-2:#161816; --ink:#e8ebe6; --ink-dim:#9aa295;
+    --line:#242724; --lime:#a3e635; --lime-dim:#6f9e26; --amber:#f4bf4f; --red:#ff6b5e;
+    --cyan:#5ec7d6; --violet:#b08cff; --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+    --sans:'Inter',ui-sans-serif,system-ui,-apple-system,sans-serif;
+    --code-bg:#0d0f0d; --chip:#1a1d19; --shadow:0 1px 0 rgba(255,255,255,.03),0 8px 30px rgba(0,0,0,.5);
+  }
+  html[data-theme="light"]{
+    --bg:#f6f7f4; --panel:#ffffff; --panel-2:#fbfcfa; --ink:#16180f; --ink-dim:#5c6356;
+    --line:#e2e6dc; --lime:#5c8a13; --lime-dim:#7fae2c; --amber:#9a6a00; --red:#c23b2e;
+    --cyan:#0f7d8c; --violet:#6d45c9; --code-bg:#f1f3ec; --chip:#eef1e8; --shadow:0 1px 0 rgba(0,0,0,.02),0 10px 30px rgba(0,0,0,.08);
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.62;
+    font-size:16px;-webkit-font-smoothing:antialiased}
+  a{color:var(--lime);text-decoration:none}
+  code,kbd,.mono{font-family:var(--mono)}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+
+  .topbar{position:sticky;top:0;z-index:30;background:color-mix(in srgb,var(--bg) 88%,transparent);
+    backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  .topbar .wrap{display:flex;align-items:center;justify-content:space-between;height:56px}
+  .brand{font-family:var(--mono);font-weight:700;letter-spacing:.02em;font-size:15px}
+  .brand .dot{color:var(--lime)}
+  .toggle{font-family:var(--mono);font-size:13px;color:var(--ink-dim);background:var(--chip);
+    border:1px solid var(--line);border-radius:8px;padding:6px 12px;cursor:pointer}
+
+  .hero{padding:60px 0 38px;border-bottom:1px solid var(--line)}
+  .kicker{font-family:var(--mono);font-size:12.5px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--lime);margin-bottom:18px}
+  h1{font-size:clamp(28px,4.4vw,46px);line-height:1.07;margin:0 0 20px;letter-spacing:-.02em;font-weight:800}
+  h1 .g{color:var(--lime)} h1 .r{color:var(--red)}
+  .lede{font-size:19px;color:var(--ink-dim);max-width:800px;margin:0 0 24px}
+  .lede b{color:var(--ink);font-weight:600}
+  .chips{display:flex;flex-wrap:wrap;gap:9px}
+  .chip{font-family:var(--mono);font-size:12px;color:var(--ink-dim);background:var(--chip);
+    border:1px solid var(--line);border-radius:999px;padding:5px 12px}
+  .chip b{color:var(--lime);font-weight:600}
+  .chip.hot b{color:var(--red)}
+
+  section{padding:48px 0;border-bottom:1px solid var(--line)}
+  .sec-num{font-family:var(--mono);font-size:13px;color:var(--lime);letter-spacing:.1em}
+  h2{font-size:clamp(21px,2.9vw,29px);margin:8px 0 6px;letter-spacing:-.015em;font-weight:750}
+  h3{font-size:17.5px;margin:28px 0 8px;font-weight:650}
+  .sub{color:var(--ink-dim);font-size:15.5px;max-width:850px}
+  p{max-width:850px}
+  ul.tight{max-width:850px;padding-left:18px}
+  ul.tight li{margin:6px 0}
+  .fl{font-family:var(--mono);font-size:12.5px;color:var(--cyan);background:var(--code-bg);
+    border:1px solid var(--line);border-radius:5px;padding:1px 6px;white-space:nowrap}
+  b.k{color:var(--lime)}
+
+  .call{margin:22px 0;padding:16px 18px 16px 20px;border-radius:12px;border:1px solid var(--line);
+    background:var(--panel);position:relative;box-shadow:var(--shadow)}
+  .call::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;border-radius:12px 0 0 12px}
+  .call.correct::before{background:var(--lime)}
+  .call.warn::before{background:var(--amber)}
+  .call.hot::before{background:var(--red)}
+  .call .tag{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+    font-weight:700;margin-bottom:6px;display:block}
+  .call.correct .tag{color:var(--lime)}
+  .call.warn .tag{color:var(--amber)}
+  .call.hot .tag{color:var(--red)}
+  .call p{margin:2px 0;max-width:none}
+
+  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:10px;padding:14px 16px;
+    overflow:auto;font-family:var(--mono);font-size:12.7px;line-height:1.6;box-shadow:var(--shadow)}
+  pre .c{color:var(--ink-dim)} pre .g{color:var(--lime)} pre .a{color:var(--amber)}
+  pre .r{color:var(--red)} pre .cy{color:var(--cyan)}
+
+  .scroller{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;margin:18px 0;font-size:14px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--ink-dim);font-weight:600}
+  td.n{font-family:var(--mono);text-align:right;white-space:nowrap}
+  td.n.bad{color:var(--red)} td.n.good{color:var(--lime)} td.n.mid{color:var(--amber)}
+  tr.sum td{font-weight:700;border-bottom:2px solid var(--line)}
+
+  figure{margin:26px 0}
+  figure svg{width:100%;height:auto;display:block;background:var(--panel);border:1px solid var(--line);
+    border-radius:14px;box-shadow:var(--shadow)}
+  figcaption{font-size:13px;color:var(--ink-dim);margin-top:10px;font-family:var(--mono)}
+  .svg-l{font-family:var(--mono);font-size:12px;fill:var(--ink)}
+  .svg-s{font-family:var(--mono);font-size:10.5px;fill:var(--ink-dim)}
+  .svg-t{font-family:var(--mono);font-size:11px;fill:var(--ink-dim)}
+  .box{fill:var(--panel-2);stroke:var(--line);stroke-width:1.2}
+  .box-hot{fill:var(--panel-2);stroke:var(--red);stroke-width:1.6}
+  .box-lime{fill:var(--panel-2);stroke:var(--lime-dim);stroke-width:1.4}
+  .edge{stroke:var(--ink-dim);stroke-width:1.3;fill:none}
+  .edge-hot{stroke:var(--red);stroke-width:1.7;fill:none}
+  .edge-lime{stroke:var(--lime);stroke-width:1.5;fill:none}
+  .bar-imp{fill:var(--red)} .bar-walk{fill:var(--amber)} .bar-db{fill:var(--lime)}
+  .bar-work{fill:var(--violet)} .bar-idle{fill:var(--line)}
+
+  .foot{padding:36px 0 70px;color:var(--ink-dim);font-size:13px;font-family:var(--mono)}
+</style>
+</head>
+<body>
+<div class="topbar"><div class="wrap">
+  <div class="brand">agents<span class="dot">·</span>cli <span style="color:var(--ink-dim)">/ milliseconds</span></div>
+  <button class="toggle" id="tg">◐ theme</button>
+</div></div>
+
+<div class="wrap">
+<header class="hero">
+  <div class="kicker">Fourth pass · the latency path, profiled</div>
+  <h1>No, it is <span class="g">not</span> re-parsing your sessions. It spends <span class="r">271 ms</span> loading code and <span class="r">127 ms</span> asking where files live.</h1>
+  <p class="lede">Profiled from source, phase by phase. <code>sessions --active</code> costs <b>1.04–1.17 s</b>.
+  The database is <b>3.5 ms</b> of that. It never calls <code>discoverSessions</code> and never re-parses the
+  corpus — it reads a bounded <b>128 KB</b> tail per live session. The time is going somewhere much dumber:
+  <b>module loading</b> and <b>statting 26 directory roots</b>, 14 of which are copies from old version homes.</p>
+  <div class="chips">
+    <span class="chip">profiled with <b>bun</b> from source</span>
+    <span class="chip hot">fixed cost <b>428 ms</b></span>
+    <span class="chip">db <b>3.5 ms</b></span>
+    <span class="chip hot">watch roots <b>26</b></span>
+    <span class="chip hot">search returns <b>0 of 1,247</b></span>
+  </div>
+</header>
+
+<!-- 1 -->
+<section id="s1">
+  <div class="sec-num">01</div>
+  <h2>Where the milliseconds go</h2>
+  <p class="sub">Phase timings, measured by importing the real modules from source and stamping
+  <code>performance.now()</code> between them.</p>
+
+  <pre><span class="c">$ bun prof.ts   # imports the real apps/cli/src/lib/session modules</span>
+<span class="r">    120.1 ms</span>  import db.ts
+<span class="r">    122.5 ms</span>  import discover.ts        <span class="c">// 3,038 lines</span>
+<span class="a">     28.5 ms</span>  import active.ts
+<span class="g">      3.5 ms</span>  getDB()  open + migrate   <span class="c">// the 813 MB database</span>
+<span class="r">    127.0 ms</span>  getSessionRoots()         <span class="c">// stat every version home</span>
+<span class="a">     26.7 ms</span>  ftsSearch('login')
+    --------
+    <b>428.3 ms</b>  TOTAL — matches the measured fixed cost exactly</pre>
+
+  <figure>
+  <svg viewBox="0 0 1040 300" role="img" aria-label="latency waterfall for sessions --active">
+    <text x="20" y="24" class="svg-l">One <tspan class="mono">agents sessions --active --local</tspan> invocation — 1,100 ms</text>
+
+    <!-- axis -->
+    <line x1="20" y1="250" x2="1000" y2="250" stroke="var(--line)"/>
+    <g class="svg-s" fill="var(--ink-dim)">
+      <text x="20" y="268">0</text><text x="196" y="268">200 ms</text><text x="374" y="268">400</text>
+      <text x="552" y="268">600</text><text x="730" y="268">800</text><text x="908" y="268">1000</text>
+    </g>
+    <!-- 0.89 px per ms; x0=20 -->
+    <line x1="20" y1="46" x2="20" y2="250" stroke="var(--line)" stroke-dasharray="2 3"/>
+    <line x1="401" y1="46" x2="401" y2="250" stroke="var(--red)" stroke-dasharray="3 3"/>
+    <text x="406" y="60" class="svg-s" fill="var(--red)">428 ms gone before any session is looked at</text>
+
+    <!-- bars -->
+    <rect x="20"  y="76"  width="107" height="26" rx="4" class="bar-imp"/>
+    <text x="133" y="94" class="svg-s">import db.ts — 120 ms</text>
+
+    <rect x="127" y="108" width="109" height="26" rx="4" class="bar-imp"/>
+    <text x="242" y="126" class="svg-s">import discover.ts — 123 ms  (3,038 lines, not used by --active)</text>
+
+    <rect x="236" y="140" width="25" height="26" rx="4" class="bar-imp"/>
+    <text x="267" y="158" class="svg-s">import active.ts — 29 ms</text>
+
+    <rect x="261" y="172" width="3" height="26" rx="1" class="bar-db"/>
+    <text x="270" y="190" class="svg-s" fill="var(--lime)">getDB() — 3.5 ms   ← the database is not the problem</text>
+
+    <rect x="264" y="204" width="113" height="26" rx="4" class="bar-walk"/>
+    <text x="383" y="222" class="svg-s">getSessionRoots() — 127 ms  (stat 26 roots across 13 version homes)</text>
+
+    <rect x="401" y="76" width="598" height="26" rx="4" class="bar-work"/>
+    <text x="700" y="94" text-anchor="middle" class="svg-s" fill="#fff">actual work — ~600 ms: process table, 21 × 128 KB tails, teams + cloud state</text>
+  </svg>
+  <figcaption>Fig 1 — the waterfall. Red = module import. Amber = directory statting. Green = SQLite. Violet = the work you actually asked for.</figcaption>
+  </figure>
+
+  <div class="call correct"><span class="tag">Your question, answered</span>
+    <p><b>“Is it re-parsing all sessions?” No.</b> <span class="fl">active.ts</span> does not import
+    <code>discoverSessions</code> — I checked its import list. It reads a bounded tail per live session:
+    <code>readSessionTailWithRaw</code> (<span class="fl">tail.ts:69</span>) does a <code>pread</code> of the last
+    <b>128 KB</b> and keeps the last <b>60 events</b>. On this machine that is 21 sessions × 128 KB ≈ 2.7 MB.
+    That part is well built. The “loading sessions” you see is the <b>428 ms of setup before it starts</b>.</p></div>
+
+  <div class="call hot"><span class="tag">The dumbest 123 ms</span>
+    <p><code>--active</code> pays <b>123 ms to import <span class="fl">discover.ts</span></b> — 3,038 lines of
+    incremental-scanner code it never calls. It is pulled in transitively for
+    <code>buildClaudeLabelMap</code> (<span class="fl">active.ts:29</span>), a 28-line function that reads four
+    small JSON files. Splitting that one function out of the module is a <b>~123 ms</b> win on every
+    <code>--active</code>, for a one-line import change.</p></div>
+</section>
+
+<!-- 2 -->
+<section id="s2">
+  <div class="sec-num">02</div>
+  <h2>The 127 ms: asking where files live, 26 times</h2>
+  <p class="sub">This is where the version-home sprawl stops being a disk-space story and becomes a latency story.</p>
+
+  <pre><span class="c">$ agents sessions --roots --json</span>
+  16  claude          <span class="c">← 1 live home + 15 version-home copies</span>
+   4  codex
+   2  gemini · 1 antigravity · 1 droid · 2 kimi
+  --
+  <b>26</b>  total recursive fs.watch roots on this machine
+  <b>14</b>  of them are version-home copies</pre>
+
+  <p>Each root is a real directory that <code>getSessionRoots()</code> must <code>stat</code> on every CLI
+  invocation — hence 127 ms. And each is also a root that the Factory monitor mounts a
+  <b>recursive <code>fs.watch</code></b> on, which on macOS is an FSEvents stream over the whole subtree. The
+  claude version homes are <b>1.3 GB, 679 MB, 638 MB, 354 MB</b>. You are running FSEvents over multiple
+  gigabytes of transcripts that no one will ever open again.</p>
+
+  <div class="call warn"><span class="tag">Same root cause, different symptom</span>
+    <p>I framed version homes as an 80 GB disk problem last pass and you were right to push back — disk is cheap.
+    But the same sprawl is what makes <code>getSessionRoots()</code> cost <b>127 ms per invocation</b> and what
+    multiplies your FSEvents watchers from 12 to 26. <b>Pruning version homes is a latency fix.</b> That is the
+    argument I should have made.</p></div>
+</section>
+
+<!-- 3 -->
+<section id="s3">
+  <div class="sec-num">03</div>
+  <h2>The monitors — how many, and what happens with 10 agents</h2>
+  <p class="sub">You asked how many file monitors are connected. The good news: this layer is the best-engineered
+  part of the system. Watchers scale with <b>roots</b>, not with agents.</p>
+
+  <figure>
+  <svg viewBox="0 0 1040 470" role="img" aria-label="watcher and poll topology across a fleet">
+    <text x="20" y="24" class="svg-l">Data collection topology — 10 agents across 3 machines</text>
+
+    <!-- machine A -->
+    <rect x="20" y="44" width="320" height="250" rx="10" class="box"/>
+    <text x="180" y="66" text-anchor="middle" class="svg-l">zion (interactive)</text>
+    <text x="180" y="82" text-anchor="middle" class="svg-s">4 agents · 2 VS Code windows</text>
+
+    <rect x="40" y="96" width="130" height="34" rx="6" class="box"/>
+    <text x="105" y="112" text-anchor="middle" class="svg-s">agent 1..4</text>
+    <text x="105" y="125" text-anchor="middle" class="svg-s">write jsonl</text>
+
+    <rect x="190" y="96" width="130" height="34" rx="6" class="box"/>
+    <text x="255" y="112" text-anchor="middle" class="svg-s">SessionStart hook</text>
+    <text x="255" y="125" text-anchor="middle" class="svg-s">pid → id</text>
+
+    <rect x="40" y="148" width="280" height="44" rx="6" class="box-hot"/>
+    <text x="180" y="166" text-anchor="middle" class="svg-s">26 recursive fs.watch roots (FSEvents)</text>
+    <text x="180" y="181" text-anchor="middle" class="svg-s">1 leader · refcounted singletons · 14 are stale version homes</text>
+
+    <rect x="40" y="204" width="130" height="38" rx="6" class="box-lime"/>
+    <text x="105" y="220" text-anchor="middle" class="svg-s">leader window</text>
+    <text x="105" y="234" text-anchor="middle" class="svg-s">broadcasts</text>
+
+    <rect x="190" y="204" width="130" height="38" rx="6" class="box"/>
+    <text x="255" y="220" text-anchor="middle" class="svg-s">follower windows</text>
+    <text x="255" y="234" text-anchor="middle" class="svg-s">subscribe, no watch</text>
+
+    <rect x="40" y="252" width="280" height="30" rx="6" class="box-hot"/>
+    <text x="180" y="271" text-anchor="middle" class="svg-s">every 3 s: spawn `agents sessions --active` — 1.1 s, 151 MB</text>
+
+    <path class="edge" d="M105,130 L105,146"/>
+    <path class="edge" d="M255,130 L255,146"/>
+    <path class="edge-lime" d="M105,192 L105,202"/>
+    <path class="edge-lime" d="M170,223 L188,223"/>
+
+    <!-- remote machines -->
+    <rect x="380" y="44" width="250" height="180" rx="10" class="box"/>
+    <text x="505" y="66" text-anchor="middle" class="svg-l">yosemite-s0</text>
+    <text x="505" y="82" text-anchor="middle" class="svg-s">3 agents · headless</text>
+    <rect x="400" y="96" width="210" height="34" rx="6" class="box-hot"/>
+    <text x="505" y="112" text-anchor="middle" class="svg-s">its own ~26 fs.watch roots</text>
+    <text x="505" y="125" text-anchor="middle" class="svg-s">nobody subscribes to them</text>
+    <rect x="400" y="146" width="210" height="56" rx="6" class="box-hot"/>
+    <text x="505" y="166" text-anchor="middle" class="svg-s">per poll: a FRESH</text>
+    <text x="505" y="180" text-anchor="middle" class="svg-s">`agents sessions --local`</text>
+    <text x="505" y="194" text-anchor="middle" class="svg-s">428 ms setup + work, then exits</text>
+
+    <rect x="670" y="44" width="250" height="180" rx="10" class="box"/>
+    <text x="795" y="66" text-anchor="middle" class="svg-l">mac-mini</text>
+    <text x="795" y="82" text-anchor="middle" class="svg-s">3 agents · headless</text>
+    <rect x="690" y="96" width="210" height="34" rx="6" class="box-hot"/>
+    <text x="795" y="112" text-anchor="middle" class="svg-s">its own ~26 fs.watch roots</text>
+    <text x="795" y="125" text-anchor="middle" class="svg-s">nobody subscribes to them</text>
+    <rect x="690" y="146" width="210" height="56" rx="6" class="box-hot"/>
+    <text x="795" y="166" text-anchor="middle" class="svg-s">per poll: a FRESH</text>
+    <text x="795" y="180" text-anchor="middle" class="svg-s">`agents sessions --local`</text>
+    <text x="795" y="194" text-anchor="middle" class="svg-s">428 ms setup + work, then exits</text>
+
+    <!-- ssh edges -->
+    <path class="edge-hot" d="M320,267 C360,267 380,220 460,204"/>
+    <path class="edge-hot" d="M320,267 C400,290 640,250 700,204"/>
+    <text x="360" y="310" class="svg-s" fill="var(--red)">SSH fan-out — one fresh subprocess per host, per 3 s tick</text>
+
+    <!-- the asymmetry callout -->
+    <rect x="20" y="330" width="900" height="106" rx="10" class="box-lime"/>
+    <text x="40" y="354" class="svg-l" fill="var(--lime)">The asymmetry</text>
+    <text x="40" y="378" class="svg-s">Every machine already runs a full push-based watcher tree — leader-elected, deduped, refcounted, correct.</text>
+    <text x="40" y="396" class="svg-s">It is consumed ONLY by the local VS Code windows. The fleet view never subscribes to it.</text>
+    <text x="40" y="414" class="svg-s" fill="var(--lime)">The push infrastructure you need already exists on every box. It just has no remote subscriber.</text>
+  </svg>
+  <figcaption>Fig 2 — watchers scale with roots per machine (~26), not with agents. The cost that scales with the fleet is the 3-second SSH subprocess fan-out.</figcaption>
+  </figure>
+
+  <h3>The counting rules</h3>
+  <div class="scroller">
+  <table>
+    <tr><th>Dimension</th><th>Watchers</th><th>Why</th></tr>
+    <tr><td>+1 agent on the same machine</td><td class="n good">+0</td><td>Roots are shared. <span class="fl">terminalReadiness.ts:73</span> refcounts a singleton per root — added precisely because “with 20+ terminals open, the duplication caused observable system load.”</td></tr>
+    <tr><td>+1 VS Code window</td><td class="n good">+0</td><td>Leader election: one leader watches, followers subscribe (<span class="fl">monitor/follower.ts:3</span>).</td></tr>
+    <tr><td>+1 agent <em>version</em> installed</td><td class="n bad">+1 or more</td><td>Each version home is a new root. <b>This is the only thing that actually grows the watcher count.</b></td></tr>
+    <tr><td>+1 machine in the fleet</td><td class="n mid">+26 (on that box)</td><td>Plus one fresh subprocess per 3 s poll from every watching window.</td></tr>
+    <tr class="sum"><td>10 agents, 3 machines, today</td><td class="n bad">~78</td><td>≈26 per box — of which ~42 fleet-wide are stale version homes.</td></tr>
+  </table>
+  </div>
+
+  <div class="call correct"><span class="tag">Credit</span>
+    <p>The dedup, refcounting, and leader election here are genuinely well done — someone already found and fixed
+    the N-terminals-N-watchers bug. The watcher layer is not your problem. <b>The problem is that this good push
+    layer stops at the machine boundary</b>, so cross-machine state falls back to spawning a process every 3 s.</p></div>
+
+  <h3>But watching 10 agents is the cheap half</h3>
+  <p>Everything above is the cost of <em>observing</em> agents. The cost of <b>running</b> them is separate, and
+  it is worse — because it is paid per spawn, serially, before any agent does any work.</p>
+
+  <pre><span class="c">$ agents run --help        # prints help text. Starts no agent. Does no I/O.</span>
+  <span class="r">0.57 – 0.97 s</span>
+
+<span class="c">$ agents --version         # early-exits before the module graph loads</span>
+  <span class="g">0.09 s</span>  <span class="c">(clean box)</span></pre>
+
+  <p>Printing a help string costs <b>6–10×</b> what <code>--version</code> costs. Nothing in
+  <code>run --help</code> touches the database, the roots, or the disk — so that gap is <b>eager module loading
+  at CLI startup, before argument dispatch</b>. It is the same 271 ms of imports from §01, plus the
+  <code>teams</code>/<code>exec</code>/<code>hosts</code> graph, paid on <em>every</em> invocation of
+  <em>every</em> subcommand.</p>
+
+  <div class="call hot"><span class="tag">The execution-path multiplier</span>
+    <p>That overhead is per <code>agents run</code>. Spinning up a 10-teammate team means the orchestrator
+    assembles and launches ten <code>agents run</code> argv lines
+    (<span class="fl">teams/agents.ts:2219</span> <code>buildRunArgv</code> → <span class="fl">:1799</span>
+    <code>launchProcess</code>), so you pay it <b>ten times</b> — and for remote teammates it is paid <em>on the
+    remote box</em>, after the SSH round-trip, inside the detached launch. Roughly <b>6–10 s of pure harness
+    overhead</b> before the first token of real work, growing linearly with team size.</p></div>
+
+  <p>The fix is §05 item 5, and it pays off far more here than on the status path: <b>lazy-load the command
+  modules</b> so a subcommand imports only what it uses — resolve the subcommand first, then dynamic
+  <code>import()</code> its handler. That turns a 10-teammate spin-up from ~10 × 0.9 s of import tax into
+  ~10 × 0.1 s.</p>
+
+  <div class="call warn"><span class="tag">Measurement caveat — read this</span>
+    <p>The <code>run --help</code> numbers above, and a <b>7.55 s</b> reading for <code>agents devices</code>,
+    were taken while this machine sat at <b>load average 27</b> — my own five background audits saturated it.
+    Treat those absolutes as inflated upper bounds. The <em>ratio</em> to <code>--version</code> under identical
+    load is still the real signal, and <code>devices</code> being an order of magnitude slower than every other
+    subcommand deserves a re-measure on a quiet box — it is the command you run to see your fleet, and it should
+    be instant. The §01 waterfall was taken before the audits started and is independently corroborated by the
+    limit-1 vs limit-500 bisect, so it stands.</p></div>
+</section>
+
+<!-- 4 -->
+<section id="s4">
+  <div class="sec-num">04</div>
+  <h2>Search is broken — and it is a one-line bug</h2>
+  <p class="sub">Found while scoping the session audit. This one probably costs you more daily friction than the
+  latency does.</p>
+
+  <pre><span class="c">// at the SQL layer, the index is perfect:</span>
+SELECT COUNT(*) FROM session_text WHERE session_text MATCH 'login'   → <span class="g">1,247 hits</span>
+                                                          'logged'   → <span class="g">  950 hits</span>
+                                                          'auth'     → <span class="g">1,845 hits</span>
+11,685 rows carry content · average <span class="g">42.7 KB</span> each
+
+<span class="c">// at the CLI:</span>
+$ agents sessions "login" --all --teams --limit 3
+<span class="r">0 sessions.</span></pre>
+
+  <p>The break is in <span class="fl">discover.ts:351</span> <code>searchContentIndex</code>:</p>
+  <pre>export function searchContentIndex(sessions: SessionMeta[], query: string) {
+  const hits = <span class="g">ftsSearch(query)</span>;            <span class="c">// top 200 by BM25, across all 12,180 rows</span>
+  const byId = new Map(sessions.map(s =&gt; [s.id, s]));  <span class="c">// ← the ALREADY-FILTERED, ALREADY-LIMITED page</span>
+  for (const hit of hits) {
+    const session = byId.get(hit.sessionId);
+    <span class="r">if (!session) continue;</span>                     <span class="c">// ← silently dropped</span>
+  }
+}</pre>
+
+  <p>Search results are <b>intersected with a page that was computed independently</b>. <code>ftsSearch</code>
+  ranks the top 200 across the whole corpus; if none of those 200 happen to be in the current window, you get zero
+  — even though 1,247 sessions match. <b>The direction is backwards:</b> the query should drive the result set
+  (push the filter into the SQL and page the FTS output), not be filtered by a page chosen before the search ran.</p>
+
+  <div class="call hot"><span class="tag">Consequence</span>
+    <p>You are carrying a <b>760 MB</b> full-text index (505 MB stored content + 256 MB inverted index) that
+    answers correctly in SQL and returns nothing through the CLI. Fixing the intersection is a small change and
+    turns a dead 760 MB into the feature it was supposed to be.</p></div>
+</section>
+
+<!-- 5 -->
+<section id="s5">
+  <div class="sec-num">05</div>
+  <h2>The ms-ordered fix list</h2>
+  <div class="scroller">
+  <table>
+    <tr><th>#</th><th>Fix</th><th>Saves</th><th>Size</th></tr>
+    <tr><td>1</td><td>Move <code>buildClaudeLabelMap</code> out of <code>discover.ts</code> so <code>--active</code> stops importing 3,038 unused lines</td><td class="n good">~123 ms<br>every call</td><td>one import</td></tr>
+    <tr><td>2</td><td>Cache <code>getSessionRoots()</code> — the answer changes on install/upgrade, not per invocation. Memoize to a cache file keyed on the versions dir mtime.</td><td class="n good">~127 ms<br>every call</td><td>small</td></tr>
+    <tr><td>3</td><td>Fix <code>searchContentIndex</code> — push filters into SQL, let search drive the page</td><td class="n good">unlocks<br>760 MB</td><td>small</td></tr>
+    <tr><td>4</td><td>Prune version homes → 26 roots down to ~12. Fewer stats, fewer FSEvents streams over multi-GB trees.</td><td class="n good">~60 ms<br>+ watcher load</td><td>a reaper</td></tr>
+    <tr><td>5</td><td>Lazy-load <code>db.ts</code> (120 ms) — only commands that touch the DB should pay for it</td><td class="n mid">~120 ms<br>on non-DB cmds</td><td>medium</td></tr>
+    <tr class="sum"><td></td><td>1+2+4 together</td><td class="n good">1.1 s → ~0.4 s</td><td>no new components</td></tr>
+  </table>
+  </div>
+  <p>Only after that does the transport question deserve an answer. At ~0.4 s per poll the 3-second cycle costs
+  ~13% of a core instead of ~35%, and the honest next step is a long-lived <code>--watch</code> stream over the
+  ControlMaster channel you already have — <b>giving the good local push layer a remote subscriber</b> — rather
+  than a new daemon with its own lifecycle, election, and failure modes.</p>
+  <div class="call warn"><span class="tag">Still open</span>
+    <p>Five audits are running right now against the real session corpus — auth/logout failures, routine
+    failures, fleet onboarding friction, teams spin-up failures, and the auth architecture in source. Those
+    target the problems you actually named. This page is the latency half only.</p></div>
+</section>
+
+<div class="foot wrap">
+  Measured on zion, 2026-07-30, against agents-cli @ 827565549. Phase timings from `bun` importing the real
+  source modules; watcher counts from `agents sessions --roots --json`; FTS counts from direct SQL against the live index.
+</div>
+</div>
+<script>
+  (function(){
+    var root=document.documentElement, btn=document.getElementById('tg');
+    try{var pref=window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches;
+      root.setAttribute('data-theme', pref?'light':'dark');}catch(e){}
+    btn.addEventListener('click',function(){
+      root.setAttribute('data-theme', root.getAttribute('data-theme')==='dark'?'light':'dark');
+    });
+  })();
+</script>
+</body>
+</html>

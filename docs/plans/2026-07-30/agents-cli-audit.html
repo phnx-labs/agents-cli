@@ -1,0 +1,561 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agents-cli — the real audit</title>
+<style>
+  :root{
+    --bg:#0a0a0a; --panel:#111211; --panel-2:#161816; --ink:#e8ebe6; --ink-dim:#9aa295;
+    --line:#242724; --lime:#a3e635; --lime-dim:#6f9e26; --amber:#f4bf4f; --red:#ff6b5e;
+    --cyan:#5ec7d6; --violet:#b08cff; --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+    --sans:'Inter',ui-sans-serif,system-ui,-apple-system,sans-serif;
+    --code-bg:#0d0f0d; --chip:#1a1d19; --shadow:0 1px 0 rgba(255,255,255,.03),0 8px 30px rgba(0,0,0,.5);
+  }
+  html[data-theme="light"]{
+    --bg:#f6f7f4; --panel:#ffffff; --panel-2:#fbfcfa; --ink:#16180f; --ink-dim:#5c6356;
+    --line:#e2e6dc; --lime:#5c8a13; --lime-dim:#7fae2c; --amber:#9a6a00; --red:#c23b2e;
+    --cyan:#0f7d8c; --violet:#6d45c9; --code-bg:#f1f3ec; --chip:#eef1e8; --shadow:0 1px 0 rgba(0,0,0,.02),0 10px 30px rgba(0,0,0,.08);
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.62;
+    font-size:16px;-webkit-font-smoothing:antialiased}
+  a{color:var(--lime);text-decoration:none}
+  code,kbd,.mono{font-family:var(--mono)}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+
+  .topbar{position:sticky;top:0;z-index:30;background:color-mix(in srgb,var(--bg) 88%,transparent);
+    backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  .topbar .wrap{display:flex;align-items:center;justify-content:space-between;height:56px}
+  .brand{font-family:var(--mono);font-weight:700;letter-spacing:.02em;font-size:15px}
+  .brand .dot{color:var(--lime)}
+  .toggle{font-family:var(--mono);font-size:13px;color:var(--ink-dim);background:var(--chip);
+    border:1px solid var(--line);border-radius:8px;padding:6px 12px;cursor:pointer}
+
+  .hero{padding:58px 0 36px;border-bottom:1px solid var(--line)}
+  .kicker{font-family:var(--mono);font-size:12.5px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--lime);margin-bottom:18px}
+  h1{font-size:clamp(28px,4.3vw,46px);line-height:1.07;margin:0 0 20px;letter-spacing:-.02em;font-weight:800}
+  h1 .g{color:var(--lime)} h1 .r{color:var(--red)}
+  .lede{font-size:19px;color:var(--ink-dim);max-width:810px;margin:0 0 24px}
+  .lede b{color:var(--ink);font-weight:600}
+  .chips{display:flex;flex-wrap:wrap;gap:9px}
+  .chip{font-family:var(--mono);font-size:12px;color:var(--ink-dim);background:var(--chip);
+    border:1px solid var(--line);border-radius:999px;padding:5px 12px}
+  .chip b{color:var(--lime);font-weight:600}
+  .chip.hot b{color:var(--red)}
+
+  .alert{margin:28px 0 0;padding:20px 22px;border-radius:14px;border:1.5px solid var(--red);
+    background:color-mix(in srgb,var(--red) 8%,var(--panel));box-shadow:var(--shadow)}
+  .alert .tag{font-family:var(--mono);font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;
+    font-weight:700;color:var(--red);display:block;margin-bottom:8px}
+  .alert h3{margin:0 0 8px;font-size:19px}
+  .alert p{margin:6px 0;max-width:none}
+
+  section{padding:48px 0;border-bottom:1px solid var(--line)}
+  .sec-num{font-family:var(--mono);font-size:13px;color:var(--lime);letter-spacing:.1em}
+  h2{font-size:clamp(21px,2.9vw,29px);margin:8px 0 6px;letter-spacing:-.015em;font-weight:750}
+  h3{font-size:17.5px;margin:26px 0 8px;font-weight:650}
+  .sub{color:var(--ink-dim);font-size:15.5px;max-width:850px}
+  p{max-width:850px}
+  ul.tight{max-width:850px;padding-left:18px}
+  ul.tight li{margin:7px 0}
+  .fl{font-family:var(--mono);font-size:12.5px;color:var(--cyan);background:var(--code-bg);
+    border:1px solid var(--line);border-radius:5px;padding:1px 6px;white-space:nowrap}
+  b.k{color:var(--lime)}
+
+  .call{margin:22px 0;padding:16px 18px 16px 20px;border-radius:12px;border:1px solid var(--line);
+    background:var(--panel);position:relative;box-shadow:var(--shadow)}
+  .call::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;border-radius:12px 0 0 12px}
+  .call.correct::before{background:var(--lime)}
+  .call.warn::before{background:var(--amber)}
+  .call.hot::before{background:var(--red)}
+  .call .tag{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+    font-weight:700;margin-bottom:6px;display:block}
+  .call.correct .tag{color:var(--lime)}
+  .call.warn .tag{color:var(--amber)}
+  .call.hot .tag{color:var(--red)}
+  .call p{margin:2px 0;max-width:none}
+
+  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:10px;padding:14px 16px;
+    overflow:auto;font-family:var(--mono);font-size:12.6px;line-height:1.6;box-shadow:var(--shadow)}
+  pre .c{color:var(--ink-dim)} pre .g{color:var(--lime)} pre .a{color:var(--amber)}
+  pre .r{color:var(--red)} pre .cy{color:var(--cyan)}
+
+  .scroller{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;margin:18px 0;font-size:14px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--ink-dim);font-weight:600}
+  td.n{font-family:var(--mono);text-align:right;white-space:nowrap}
+  td.n.bad{color:var(--red)} td.n.good{color:var(--lime)} td.n.mid{color:var(--amber)}
+  tr.sum td{font-weight:700;border-bottom:2px solid var(--line)}
+
+  figure{margin:26px 0}
+  figure svg{width:100%;height:auto;display:block;background:var(--panel);border:1px solid var(--line);
+    border-radius:14px;box-shadow:var(--shadow)}
+  figcaption{font-size:13px;color:var(--ink-dim);margin-top:10px;font-family:var(--mono)}
+  .svg-l{font-family:var(--mono);font-size:12px;fill:var(--ink)}
+  .svg-s{font-family:var(--mono);font-size:10.5px;fill:var(--ink-dim)}
+  .box{fill:var(--panel-2);stroke:var(--line);stroke-width:1.2}
+  .box-hot{fill:var(--panel-2);stroke:var(--red);stroke-width:1.6}
+  .box-lime{fill:var(--panel-2);stroke:var(--lime-dim);stroke-width:1.4}
+  .edge-hot{stroke:var(--red);stroke-width:1.8;fill:none}
+
+  .fix{margin:16px 0;padding:16px 18px;background:var(--panel);border:1px solid var(--line);
+    border-radius:12px;box-shadow:var(--shadow)}
+  .fix h4{margin:0 0 6px;font-size:16.5px;display:flex;align-items:center;gap:10px}
+  .num{display:inline-flex;align-items:center;justify-content:center;font-family:var(--mono);
+    font-weight:700;font-size:13px;width:26px;height:26px;border-radius:7px;flex:none}
+  .num.a{background:var(--red);color:#160a08}
+  .num.b{background:var(--amber);color:#1a1200}
+  .num.c{background:var(--lime);color:#0c1400}
+  .fix .why{font-size:14px;color:var(--ink-dim);margin:6px 0 0}
+
+  .foot{padding:36px 0 70px;color:var(--ink-dim);font-size:13px;font-family:var(--mono)}
+</style>
+</head>
+<body>
+<div class="topbar"><div class="wrap">
+  <div class="brand">agents<span class="dot">·</span>cli <span style="color:var(--ink-dim)">/ the real audit</span></div>
+  <button class="toggle" id="tg">◐ theme</button>
+</div></div>
+
+<div class="wrap">
+<header class="hero">
+  <div class="kicker">Five parallel audits · 5,204 runs · 1,256 transcripts · all four hosts</div>
+  <h1><span class="r">44.1%</span> of your routine runs fail. <span class="r">80.6%</span> of those failures are one thing: auth.</h1>
+  <p class="lede">You said routines fail because agents aren't logged in on other computers. That is confirmed,
+  counted, and <b>understated</b>. Across 5,204 runs on four hosts, <b>2,297 failed</b> — and
+  <b>1,742 of them (75.8%)</b> are an agent unauthenticated on a machine you don't sit at. mac-mini fails
+  <b>93.6%</b> of its runs. It fired again today at 15:00 and 16:00. <b>Nothing told you.</b></p>
+  <div class="chips">
+    <span class="chip hot">routine failures <b>2,297 / 5,204</b></span>
+    <span class="chip hot">auth share <b>80.6%</b></span>
+    <span class="chip hot">mac-mini <b>93.6% fail</b></span>
+    <span class="chip">teammate records lost <b>93.8%</b></span>
+    <span class="chip">retry logic <b>none</b></span>
+  </div>
+
+  <div class="alert">
+    <span class="tag">Live right now — verified on this machine</span>
+    <h3>Your running daemon has no Claude token. Every routine it fires today will fail.</h3>
+    <pre style="margin:10px 0 6px"><span class="c">$</span> rg -c "Loaded Claude OAuth token" ~/.agents/.cache/helpers/daemon/logs.jsonl
+<span class="r">0</span>
+<span class="c">$</span> ps -eo pid,lstart,command | grep __daemon-run
+<span class="a">24971  Thu Jul 30 17:06:44 2026  …/agents __daemon-run</span>
+<span class="c">$</span> agents secrets list | grep '^claude '
+<span class="g">claude   1   never · no prompt   2w   2h</span>   <span class="c">← the token exists. It was never loaded.</span></pre>
+    <p>The daemon reads that bundle <b>best-effort and never blocks</b> (<span class="fl">daemon.ts:315-321</span>).
+    On macOS the read “resolves broker-only from an unlocked secrets-agent and is otherwise absent”
+    (<span class="fl">daemon.ts:311-314</span>) — so a locked keychain at daemon start silently produces a
+    token-less daemon, and <b>every routine it spawns for the rest of the day dies</b> with
+    <code>"apiKeySource":"none"</code>. Restarting the daemon with the keychain unlocked is the immediate
+    unblock.</p>
+  </div>
+
+  <div class="alert" style="border-color:var(--amber);background:color-mix(in srgb,var(--amber) 8%,var(--panel))">
+    <span class="tag" style="color:var(--amber)">Needs your action — verified first-hand, keys not reproduced here</span>
+    <h3>Three live Linear API keys are sitting in 67 transcript files, on at least two machines.</h3>
+    <pre style="margin:10px 0 6px"><span class="c">$</span> rg -uu -l 'lin_api_[A-Za-z0-9_-]{20,60}' ~/.agents ~/.claude ~/.codex | wc -l
+<span class="r">67</span>      <span class="c">3 distinct keys, 48 chars each — none match PLACEHOLDER/EXAMPLE/REDACT</span>
+
+  48  .agents/.history/<b>trash</b>/versions/claude/…      <span class="c">← deleted versions, retained forever</span>
+  10  .agents/.history/versions/claude/2.1.187/…    <span class="c">← LIVE home</span>
+   3  .agents/.history/versions/claude/2.1.181/…    <span class="c">← LIVE home</span>
+   2  .agents/.history/versions/claude/2.1.207/…    <span class="c">← LIVE home</span>
+   1  .agents/.history/trash/versions/codex/…
+   1  .agents/.history/backups/claude/<b>yosemite-s1</b>/…  <span class="c">← replicated to another host</span></pre>
+    <p><b>Rotate all three in Linear.</b> That is your call, not something I should do unilaterally — and note the
+    keys are already replicated to yosemite-s1's mirror, so deleting them locally is not sufficient.</p>
+    <p style="margin-top:10px"><b class="k">This reframes the retention finding.</b> I opened this audit talking
+    about 46 GB of trash and you correctly told me storage is cheap. It is. But <b>48 of those 67 exposures are in
+    trash</b> — version homes that were deleted months ago and still hold live credentials, because nothing ever
+    reaps them. Retention is not a disk-space feature. It is a <b>credential-lifetime</b> feature.</p>
+  </div>
+</header>
+
+<!-- 1 -->
+<section id="s1">
+  <div class="sec-num">01</div>
+  <h2>The number, per host</h2>
+  <p class="sub">Every <code>meta.json</code> under <code>~/.agents/.history/runs/</code>, aggregated locally and
+  over <code>agents ssh</code> on all four scheduler hosts.</p>
+  <div class="scroller">
+  <table>
+    <tr><th>Host</th><th>Runs</th><th>Completed</th><th>Failed</th><th>Fail rate</th><th>Of failures, auth</th></tr>
+    <tr><td>mac-mini</td><td class="n">264</td><td class="n">17</td><td class="n bad">247</td><td class="n bad">93.6%</td><td class="n bad">61.1%</td></tr>
+    <tr><td>yosemite-s0</td><td class="n">2,723</td><td class="n">1,264</td><td class="n bad">1,453</td><td class="n bad">53.4%</td><td class="n bad">91.0%</td></tr>
+    <tr><td>zion (your laptop)</td><td class="n">553</td><td class="n">323</td><td class="n mid">226</td><td class="n mid">40.9%</td><td class="n mid">48.7%</td></tr>
+    <tr><td>yosemite-s1</td><td class="n">1,664</td><td class="n">1,289</td><td class="n mid">371</td><td class="n mid">22.3%</td><td class="n bad">72.5%</td></tr>
+    <tr class="sum"><td>fleet</td><td class="n">5,204</td><td class="n">2,893</td><td class="n bad">2,297</td><td class="n bad">44.1%</td><td class="n bad">80.6%</td></tr>
+  </table>
+  </div>
+
+  <h3>What the 2,297 failures actually say</h3>
+  <pre><span class="r">1002</span>  Failed to authenticate. API Error: 401 OAuth access token has been revoked.   <span class="c">43.6%</span>
+<span class="r"> 422</span>  Not logged in · Please run /login                                            <span class="c">18.4%</span>
+<span class="r"> 354</span>  Failed to authenticate. API Error: 401 Invalid authentication credentials    <span class="c">15.4%</span>
+<span class="r">  57</span>  Failed to authenticate: OAuth session expired and could not be refreshed      <span class="c"> 2.5%</span>
+<span class="r">  17</span>  Your organization has disabled Claude subscription access                     <span class="c"> 0.7%</span>
+      <b>AUTH SUBTOTAL 1852 — 80.6% of all failures</b>
+<span class="a"> 193</span>  You've hit your weekly limit                                                  <span class="c"> 8.4%</span>
+  ~52  connection closed / ECONNRESET / 500 / 529                                     <span class="c"> 2.3%</span>
+   38  no version of claude configured · version not installed · entrypoint missing   <span class="c"> 1.7%</span></pre>
+
+  <p>They fire in <b>synchronized bursts</b> — every routine scheduled in a given minute dying identically:</p>
+  <pre>2026-07-22T16-00-00  review-open-prs           exit 1
+2026-07-22T16-00-00  harness-capability-watch  exit 1
+2026-07-22T16-00-00  git-hygiene               exit 1
+2026-07-22T16-00-00  linkedin-scout            exit 1</pre>
+  <p>66 of zion's 107 login failures happened since 2026-07-20. It is getting worse.</p>
+</section>
+
+<!-- 2 -->
+<section id="s2">
+  <div class="sec-num">02</div>
+  <h2>The causal chain</h2>
+  <p class="sub">Four independent design gaps compose. Any one of them alone would be survivable.</p>
+
+  <figure>
+  <svg viewBox="0 0 1040 380" role="img" aria-label="the auth failure chain">
+    <text x="20" y="26" class="svg-l" fill="var(--red)">How one logged-out box becomes 1,742 silent failures</text>
+
+    <rect x="20" y="50" width="228" height="70" rx="9" class="box-hot"/>
+    <text x="134" y="74" text-anchor="middle" class="svg-s">1 · CREDENTIAL IS SCOPED</text>
+    <text x="134" y="90" text-anchor="middle" class="svg-s">CLAUDE_CONFIG_DIR per version</text>
+    <text x="134" y="105" text-anchor="middle" class="svg-s">→ hashed Keychain item</text>
+
+    <rect x="272" y="50" width="228" height="70" rx="9" class="box-hot"/>
+    <text x="386" y="74" text-anchor="middle" class="svg-s">2 · NOTHING CARRIES IT</text>
+    <text x="386" y="90" text-anchor="middle" class="svg-s">carryForwardAuthFiles skips claude</text>
+    <text x="386" y="105" text-anchor="middle" class="svg-s">shims.ts never touches Keychain</text>
+
+    <rect x="524" y="50" width="228" height="70" rx="9" class="box-hot"/>
+    <text x="638" y="74" text-anchor="middle" class="svg-s">3 · NO PREFLIGHT</text>
+    <text x="638" y="90" text-anchor="middle" class="svg-s">no dispatch path imports</text>
+    <text x="638" y="105" text-anchor="middle" class="svg-s">auth-health — ever</text>
+
+    <rect x="776" y="50" width="228" height="70" rx="9" class="box-hot"/>
+    <text x="890" y="74" text-anchor="middle" class="svg-s">4 · NO DETECTION</text>
+    <text x="890" y="90" text-anchor="middle" class="svg-s">runner/scheduler match</text>
+    <text x="890" y="105" text-anchor="middle" class="svg-s">zero on /login|auth/</text>
+
+    <path class="edge-hot" d="M248,85 L270,85"/>
+    <path class="edge-hot" d="M500,85 L522,85"/>
+    <path class="edge-hot" d="M752,85 L774,85"/>
+
+    <rect x="272" y="160" width="480" height="58" rx="9" class="box"/>
+    <text x="512" y="182" text-anchor="middle" class="svg-s">the agent DOES emit a machine-readable marker:</text>
+    <text x="512" y="200" text-anchor="middle" class="svg-l" fill="var(--amber)">"error":"authentication_failed"  ·  "terminal_reason":"api_error"</text>
+    <path class="edge-hot" d="M890,120 L890,190 L754,190"/>
+    <text x="770" y="150" class="svg-s" fill="var(--red)">discarded</text>
+
+    <rect x="272" y="248" width="480" height="46" rx="9" class="box-hot"/>
+    <text x="512" y="268" text-anchor="middle" class="svg-s">status = exitCode === 0 ? 'completed' : 'failed'   (runner.ts:539)</text>
+    <text x="512" y="284" text-anchor="middle" class="svg-s">a logged-out agent is byte-identical to a crash</text>
+    <path class="edge-hot" d="M512,218 L512,246"/>
+
+    <rect x="180" y="322" width="300" height="42" rx="9" class="box-hot"/>
+    <text x="330" y="342" text-anchor="middle" class="svg-s">no retry exists — anywhere</text>
+    <text x="330" y="357" text-anchor="middle" class="svg-s">only a rate-limit cascade, foreground-only</text>
+    <rect x="544" y="322" width="300" height="42" rx="9" class="box-hot"/>
+    <text x="694" y="342" text-anchor="middle" class="svg-s">no alert — daemon logs only 'spawned'</text>
+    <text x="694" y="357" text-anchor="middle" class="svg-s">1 failure line in a 1.9 MB log, from May</text>
+    <path class="edge-hot" d="M420,294 L330,320"/>
+    <path class="edge-hot" d="M604,294 L694,320"/>
+  </svg>
+  <figcaption>Fig 1 — the chain. The agent reports its own auth failure in structured form; the runner throws it away and records an exit code.</figcaption>
+  </figure>
+
+  <h3>Gap 1+2 — why the credential vanishes</h3>
+  <p><span class="fl">shims.ts:281-284</span> scopes <code>CLAUDE_CONFIG_DIR</code> to the selected version home,
+  deliberately, "so switching versions also switches the live Claude account."
+  <span class="fl">usage.ts:1259-1267</span> then derives the Keychain service by hashing that directory:
+  <code>Claude Code-credentials-&lt;sha256(configDir)[0:8]&gt;</code>. And
+  <span class="fl">shims.ts:1326-1328</span> <code>carryForwardAuthFiles</code> only acts on agents declaring
+  <code>authFiles</code> — antigravity, kimi, droid. <b>Claude is not one</b>, asserted by its own test
+  (<span class="fl">shims.auth-carry.test.ts:309-315</span>). <code>shims.ts</code> never touches the Keychain at all.</p>
+  <div class="call hot"><span class="tag">The unprovoked logouts</span>
+    <p><span class="fl">versions.ts:2254-2261</span>: when the health check finds no runnable version it installs
+    <code>latest</code> and calls <code>setGlobalDefault</code>. That runs unattended <b>every 6 hours</b>
+    (<span class="fl">daemon.ts:614-615</span>). New version dir → new empty home → new Keychain scope. You get
+    logged out by a background process at a time uncorrelated with anything you did.</p></div>
+
+  <h3>Gap 3 — the sandbox has no credential to give</h3>
+  <p>Routines run in a sandbox overlay HOME by default (<span class="fl">runner.ts:612</span>). Building it,
+  <code>generateClaudeConfig</code> (<span class="fl">sandbox.ts:174-251</span>) writes <b>only</b>
+  <code>settings.json</code> — no <code>.credentials.json</code>, no <code>oauthAccount</code>. <code>HOME</code>
+  is replaced (<span class="fl">sandbox.ts:74-76</span>) and the env is stripped to an allowlist whose single
+  credential entry is <code>CLAUDE_CODE_OAUTH_TOKEN</code> (<span class="fl">sandbox.ts:50-55</span>) — the token
+  your daemon never loaded. <b>22 of your 27 zion routine YAMLs now carry <code>sandbox: false</code></b> as a
+  workaround, which inherits the same problem plus the expiry the source itself names.</p>
+
+  <h3>It is not only Claude — the same mechanism in three more CLIs</h3>
+  <p>The fifth audit found the identical <b>single-use refresh-token rotation</b> failure outside Claude, which
+  makes it a systemic pattern rather than a Claude quirk:</p>
+  <ul class="tight">
+    <li><b class="k">Codex</b>, mac-mini — <code>"Your refresh token has already been used to generate a new
+      access token." code: refresh_token_reused</code>, which broke every hourly OpenClaw cron. With a telling
+      nuance on recurrence: <em>"standalone codex CLI auth is healthy… openclaw's own codex auth is broken — it
+      uses a separate codex auth inside the openclaw home."</em> Same credential, two homes, one rotates the
+      other out.</li>
+    <li><b class="k">Droid</b>, zion, <b>still open</b> — <code>WorkOS token refresh failed permanently …
+      {"error":"invalid_grant","error_description":"Refresh token already exchanged."}</code></li>
+    <li><b class="k">Grok and Kimi are logged out on m1–m6 and mac-mini</b> — <code>Waiting for
+      authorization...</code> and <code>No model configured. Run `kimi` and use /login</code>. These keep no
+      transcripts of their own, so their failures are recorded in the <em>dispatching</em> Claude session — which
+      is why a naive search of <code>~/.grok</code> and <code>~/.kimi-code</code> finds nothing and reads as
+      "clean." The audit caught and corrected that error in its own earlier pass.</li>
+    <li><b class="k">68 <code>Claude Code-credentials-&lt;hash&gt;</code> keychain slots exist; 22 of 73
+      host×agent×version slots are currently expired.</b> That is the per-version scoping problem from Gap 1,
+      measured directly.</li>
+  </ul>
+  <div class="call warn"><span class="tag">Adjacent, currently broken, worth knowing</span>
+    <p><code>npm whoami</code> fails on <b>all four hosts</b> (<code>ENEEDAUTH</code> on zion/s0/s1,
+    <code>E401</code> on mac-mini) with <code>agents secrets list</code> showing <code>npmjs.com 0 keys</code> —
+    the bundle whose passphrase was lost. <code>~/.rush/user.yaml</code> had an <code>expires_at</code> ~51
+    minutes in the past with no auto-refresh, while <code>rush daemon status</code> still reported <em>"running,
+    uptime 11h 42m, DB ok"</em> — the same healthy-while-dead reporting pattern as §03. And <b>hivemind fired
+    4,230 times and failed every one</b>; <code>hivemind login</code> was never executed once in the entire
+    archive.</p></div>
+  <div class="call correct"><span class="tag">Two fixes that provably worked headlessly — reuse these</span>
+    <p><code>agents secrets exec github.com --keys GH_TOKEN -- … | gh auth login --with-token</code> per host
+    fixed <code>gh</code> across m0–m6. And <code>agents apply --only login -f fleet_droid.yaml -y</code>
+    produced <em>"10/10 raw-droid PONG"</em>. Both are headless, no biometric — evidence that the fleet auth
+    problem is largely automatable with tools that already exist.</p></div>
+
+  <h3>Gap 4 — nothing looks</h3>
+  <p><code>rg -i -E "login|auth" lib/runner.ts lib/scheduler.ts lib/overdue.ts</code> returns <b>zero hits</b>.
+  The only stdout scan on failure is <code>detectRateLimit</code>. And no dispatch path — <code>exec.ts</code>,
+  <code>hosts/*</code>, <code>teams/*</code>, <code>runner.ts</code> — imports <code>auth-health</code> at all.
+  The remote gate (<span class="fl">ready.ts:155-158</span>) checks the agent is <em>installed</em> with a bare
+  <code>new RegExp(\`\\b${agent}\\b\`,'i')</code> against <code>agents view</code> output. It reads the word
+  “claude”, not its sign-in state.</p>
+</section>
+
+<!-- 3 -->
+<section id="s3">
+  <div class="sec-num">03</div>
+  <h2>Why you never found out</h2>
+  <ul class="tight">
+    <li><b class="k">The daemon never logs a failed run.</b> One failure line in a 1.9 MB log, a spawn
+      <code>ENOEXEC</code> from May. <span class="fl">daemon.ts:361-367</span> wraps only the spawn. No feed
+      entry, no mailbox, no notification — <code>lib/feed.ts</code> is not imported by <code>runner.ts</code>,
+      <code>routines.ts</code>, <code>scheduler.ts</code>, or <code>daemon.ts</code>.</li>
+    <li><b class="k"><code>agents routines run</code> exits 0 on failure</b>
+      (<span class="fl">commands/routines.ts:878-892</span>), and <code>--json</code> returns
+      <code>ok: true</code> regardless (<span class="fl">:867-875</span>).</li>
+    <li><b class="k">The one visible signal reads the wrong machine.</b> The <code>Last Status</code> column comes
+      from <code>getLatestRun</code> → <code>getJobRunsDir</code> → <b>the local archive only</b>
+      (<span class="fl">routines.ts:769-772, 802</span>). Proven divergence in both directions: zion shows
+      <code>security-sweep … failed</code> while its real last run on yosemite-s0 completed with exit 0; and
+      <code>review-open-prs</code> genuinely failed on yosemite-s0 at 16:00 today — invisible from zion.</li>
+    <li><b class="k">The failure becomes the report, then the next prompt.</b>
+      <code>extractAndSaveReport</code> runs on the failure branch too (<span class="fl">runner.ts:774</span>) and
+      takes the last assistant text unconditionally, never checking <code>is_error</code>
+      (<span class="fl">:1156-1199</span>). <b>107 zion <code>report.md</code> files literally contain
+      “Not logged in · Please run /login” as the routine's report</b> — and that string is then substituted into
+      the <em>next</em> run's prompt via <code>{last_report}</code> (<span class="fl">routines.ts:712-723</span>)
+      with no status gate.</li>
+    <li><b class="k">No retry, and catchup can't help.</b> The only cascade is rate-limit-gated and
+      foreground-only (<span class="fl">runner.ts:744-748</span>); the detached daemon path says so outright
+      (<span class="fl">:969-971</span>). Catchup compares <code>startedAt</code> only and never reads
+      <code>status</code> (<span class="fl">overdue.ts:79-83</span>) — a run that started and died counts as “ran”.</li>
+  </ul>
+  <div class="call warn"><span class="tag">You already built the missing piece</span>
+    <p>mac-mini output contains <code>[watchdog] PROBLEM doc-gaps-agents: last run FAILED on yosemite-s0</code>
+    — a hand-rolled watchdog doing the alerting the CLI does not do. That is the feature request, already
+    specified by you, in production.</p></div>
+</section>
+
+<!-- 4 -->
+<section id="s4">
+  <div class="sec-num">04</div>
+  <h2>Teams: the agents work, the bookkeeping loses them</h2>
+  <p class="sub">Teammates are not the problem — <b>87% reach a clean terminal state</b>. The orchestration layer
+  destroys the record of it.</p>
+  <ul class="tight">
+    <li><b class="k">93.8% of teammate records are zero bytes</b> — 152 of 162 <code>meta.json</code>. And
+      meta.json is newer than stdout.log in <b>152 of 152</b> cases, so truncation happens on the <em>read</em>
+      path, after the work finished. The only 3 non-empty records were written by the auditor's own
+      <code>agents teams status</code> calls. <b>The record exists only while you are looking at it.</b></li>
+    <li>It cascades: <span class="fl">agents.ts:1477-1478</span> skips cleanup for a null record (86 MB accreted,
+      median age 56 days against a 7-day policy); 17 of 20 teams render <code>(no teammates yet)</code>; and the
+      scheduler's load counter reads 0.</li>
+    <li><b class="k">Completion is stamped when you look, not when it happens.</b>
+      <span class="fl">tasks.ts:89-95</span> sets <code>finishedAt</code> at reconcile time — <b>214 dispatches
+      all “finished” in the same minute</b>, top-10 minutes = 71.4% of all finishes.
+      <span class="fl">reconcile.ts:4-11</span> documents the bug in its own header.</li>
+    <li><b class="k">17 zombie records</b>, up to 18.2 days; 5 probed, all dead. Your live
+      <code>agentscli-w1</code> reports <b>RUNNING · 13,257 minutes</b> with <code>pid = None</code>.</li>
+    <li><b class="k">71.5% of teams declare no device pool</b> → <span class="fl">scheduler.ts:87</span> returns
+      local → they run on your laptop. When a pool exists, <code>pickLeastLoaded</code> counts roster entries
+      (which load as null), so load reads 0 and <code>devices[0]</code> wins repeatedly. No interactive-device
+      exclusion exists.</li>
+    <li><b class="k">Spin-up is strictly sequential</b> — <span class="fl">agents.ts:2151/2173</span> awaits a
+      full SSH chain per teammate. Measured launch gaps <b>24.5s–1,680s</b>; median start → first PR
+      <b>21 minutes</b>; <b>17.9 <code>teams status</code> polls per run</b>, babysitting up to 21.2 hours.</li>
+    <li>Of 63 classifiable remote dispatch failures, <b>24 (38.1%) died on credentials, not the task</b>.</li>
+  </ul>
+  <div class="call correct"><span class="tag">Three of my own premises were wrong</span>
+    <p>The “11 teammates, all PRs unmerged” incident <b>does not exist</b> — every hit was your own CLAUDE.md
+    rule text being injected into sessions. Stranded PRs are a <em>single-agent</em> problem (32 Stop-hook fires
+    across 9 sessions, none of which ran a teams command; 3 still open). Worktree collisions are 1 in 182.
+    Teams merge fine: <b>65 MERGED / 1 OPEN</b> of 77 PRs in one cut, 159/0 in another.</p></div>
+</section>
+
+<!-- 5 -->
+<section id="s5">
+  <div class="sec-num">05</div>
+  <h2>Fleet: registered ≠ reachable ≠ usable</h2>
+  <ul class="tight">
+    <li><b class="k">A healthy box can be a hole in the fleet.</b> <code>yosemite-s1</code> showed claude
+      <code>0/4</code> while <code>up 38 days, load average 0.20</code>. Not down — <b>logged out</b>. Blast
+      radius: 15 routines showing <code>failed</code>, appearing intermittent only because the pool
+      round-robins. <code>m1</code>–<code>m6</code> carry exactly one working harness (codex); claude was never
+      configured on any of them.</li>
+    <li><b class="k">The cost is irreducible and large.</b> <span class="fl">remote-login.ts:4-7</span>: copying
+      one OAuth file across N boxes is <em>“fatal — a shared refresh token rotates server-side on first refresh
+      and invalidates the other copies (droid collapsed 10 boxes → 1 overnight)”</em>. So the real requirement is
+      one interactive login per <b>(agent × box)</b> — up to 63 for the yosemite subset.</li>
+    <li><b class="k">The command that makes that bearable is invisible.</b> <code>agents devices login</code>
+      drives every box's device-code flow over SSH and collects the codes into one browser page. It has
+      <b>0 uses across 1,256 transcripts</b>, because <code>agents --help</code> lists none of
+      <code>devices</code>/<code>ssh</code>/<code>hosts</code>/<code>apply</code>. The <code>fleet:onboard</code>
+      skill's first instruction is “read <code>agents --help</code>” — a map with no onboarding command on it.</li>
+    <li><b class="k">Actively harmful path:</b> droid is in <code>FLEET_AUTH_FILES</code>
+      (<span class="fl">auth-sync.ts:39-42</span>) but absent from <code>apply.ts</code> — so
+      <code>agents apply</code> will copy the exact credential class that collapsed 10 boxes. Filed RUSH-1958.</li>
+    <li><b class="k">Never automated, though it could be:</b> SSH key push (no <code>authorized_keys</code> code
+      anywhere in <code>apps/cli/src</code>; 86 failures across 40 sessions on 30 consecutive days) and config
+      drift (detected 407 times across 160 sessions, up to 304 commits behind, acted on never — your
+      <code>~/.agents</code> is 4 commits behind as I write this).</li>
+    <li><b class="k">Duplicate machine-id — verified, but narrower than the audit claimed.</b> I probed both boxes
+      directly. The audit's headline (“<code>ssh yosemite-s0</code> lands on s1 — you never leave s1”)
+      <b>does not reproduce today</b>: hostnames and Tailscale IPs are distinct and SSH routes correctly. But the
+      <b>duplicate <code>/etc/machine-id</code> is real and still present</b>:
+      <pre style="margin:8px 0"><span class="c">$</span> ssh yosemite-s0 'hostname; cat /etc/machine-id; ip -4 addr show tailscale0'
+<span class="g">yosemite-s0</span>
+<span class="r">7af66f30966a49b6886e00e2fce4b42f</span>
+inet <span class="g">100.125.135.113</span>
+
+<span class="c">$</span> ssh yosemite-s1 '…'
+<span class="g">yosemite-s1</span>
+<span class="r">7af66f30966a49b6886e00e2fce4b42f</span>   <span class="c">← identical</span>
+inet <span class="g">100.93.177.123</span></pre>
+      So the clone origin is confirmed and the SSH-misrouting symptom is not current — either it was transient or
+      it has since been fixed. <b>The live defect is anything that keys on machine-id conflating the two boxes</b>
+      (the session index carries a machine identity per transcript — see <code>machineForSessionFile</code>).
+      Worth a <code>systemd-machine-id-setup --commit</code> on one of them regardless.</li>
+    <li><b class="k">Reachability is genuinely flaky, independently observed.</b> Your session-start context listed
+      <code>yosemite-s1</code> as <b>offline</b>, and my first blocking SSH probe timed out on both boxes past
+      2 minutes — yet a bounded retry minutes later reached both instantly. That intermittency is itself the
+      mechanism that makes routine failures look random.</li>
+  </ul>
+</section>
+
+<!-- 6 -->
+<section id="s6">
+  <div class="sec-num">06</div>
+  <h2>Performance, correctly ranked</h2>
+  <p class="sub">You were right that I started on the wrong axis. Here is the latency work, in its proper place —
+  real, worth fixing, and second to correctness.</p>
+  <div class="scroller">
+  <table>
+    <tr><th>Finding</th><th>Measured</th><th>Fix</th></tr>
+    <tr><td><code>--active</code> is <b>not</b> re-parsing your corpus</td><td class="n good">128 KB<br>tail/session</td><td>none needed — <code>tail.ts:69</code> is well built</td></tr>
+    <tr><td><code>--active</code> imports <code>discover.ts</code> (3,038 lines) it never calls, for one 28-line helper</td><td class="n bad">123 ms<br>every call</td><td>move <code>buildClaudeLabelMap</code> out — one import</td></tr>
+    <tr><td><code>getSessionRoots()</code> stats 26 roots, 14 of them stale version homes</td><td class="n bad">127 ms<br>every call</td><td>memoize on versions-dir mtime</td></tr>
+    <tr><td>Eager module load before argv dispatch — <code>run --help</code> prints a string</td><td class="n bad">0.57–0.97 s<br>per spawn</td><td>lazy <code>import()</code> per subcommand</td></tr>
+    <tr><td>SQLite</td><td class="n good">3.5 ms</td><td>not a problem — stop blaming it</td></tr>
+    <tr><td>Search returns nothing: <code>MATCH 'login'</code> = 1,247 hits in SQL, 0 through the CLI</td><td class="n bad">760 MB<br>index, dead</td><td><code>searchContentIndex</code> (<code>discover.ts:351</code>) intersects with a pre-computed page — let search drive the query</td></tr>
+  </table>
+  </div>
+  <p>Note the convergence: version-home sprawl causes the 127 ms roots walk, the 26 FSEvents watchers,
+  <em>and</em> the Keychain-scope logout. And the daemon's 6-hourly auto-install <b>creates more version homes</b>.
+  The performance problem and the auth problem are the same root cause feeding each other.</p>
+</section>
+
+<!-- 7 -->
+<section id="s7">
+  <div class="sec-num">07</div>
+  <h2>What to fix, in order</h2>
+
+  <div class="fix"><h4><span class="num a">0</span>Rotate the three exposed Linear keys — then make retention a security control</h4>
+    <p class="why">67 files, two machines, 48 of them in trash that nothing reaps. Rotation is yours to do.
+    The systemic fix is the reaper I argued for on disk-space grounds and should have argued for here: a
+    retention policy on <code>trash/</code> and <code>versions/</code> bounds how long a leaked credential
+    survives. Consider also a secret-scrub on transcript write — the agent's own output is the leak vector.</p></div>
+
+  <div class="fix"><h4><span class="num a">1</span>Restart the daemon with the keychain unlocked</h4>
+    <p class="why">Today, one command. Your routines are failing right now for this reason. Then make it
+    non-silent: if <code>readDaemonClaudeOAuthToken()</code> returns nothing, <b>log an ERROR and notify</b>
+    rather than starting a daemon that will fail every job it launches.</p></div>
+
+  <div class="fix"><h4><span class="num a">2</span>Detect auth failure — the agent already tells you</h4>
+    <p class="why">The runner receives <code>"error":"authentication_failed"</code> and
+    <code>"terminal_reason":"api_error"</code> and discards both. Classify them next to
+    <code>detectRateLimit</code>, mark the run <code>failed:auth</code>, and <b>stop writing the login prompt into
+    <code>report.md</code> and the next run's prompt</b>. Smallest change with the largest blast radius.</p></div>
+
+  <div class="fix"><h4><span class="num a">3</span>Auth preflight before dispatch</h4>
+    <p class="why">Add a gate to <code>ensureHostReady</code> — the remote
+    <code>agents fleet ping --local --json</code> already returns exactly the rows needed
+    (<code>commands/ssh.ts:467-472</code>), and <code>ready.ts</code> already makes an SSH round-trip. Fail loudly
+    on <code>revoked</code>. Extend to teams dispatch and routines, and remove the <code>!hostName</code> skip at
+    <code>teams.ts:1437</code>. This converts 1,742 silent failures into one actionable message.</p></div>
+
+  <div class="fix"><h4><span class="num b">4</span>Alert on failure, and read the right machine's status</h4>
+    <p class="why">Wire <code>feed.ts</code> (or your Telegram path) into the failure branch, and make
+    <code>Last Status</code> query the host the routine actually ran on rather than the local archive. You already
+    hand-rolled this watchdog on mac-mini — promote it into the product.</p></div>
+
+  <div class="fix"><h4><span class="num b">5</span>One Claude credential scope per account, not per version</h4>
+    <p class="why">Either stop scoping <code>CLAUDE_CONFIG_DIR</code> per version for the <em>credential</em>
+    (keep per-version config, share one credential scope — the correct model), or add a Keychain carry beside
+    <code>carryForwardAuthFiles</code>. And delete the <code>latest</code> auto-install branch at
+    <code>versions.ts:2254-2261</code> so a background heal can never re-point your default.</p></div>
+
+  <div class="fix"><h4><span class="num b">6</span>Fix the teammate record write, then the placement</h4>
+    <p class="why">The zero-byte truncation on the read path invalidates cleanup, display, <em>and</em> the
+    scheduler's load counter. Fixing it fixes three symptoms. Then add an interactive-device exclusion so 71.5%
+    of teams stop landing on your laptop.</p></div>
+
+  <div class="fix"><h4><span class="num c">7</span>Surface the fleet commands, then the latency work</h4>
+    <p class="why"><code>devices</code>/<code>ssh</code>/<code>hosts</code>/<code>apply</code> in
+    <code>agents --help</code> — a command with 0 uses in 1,256 transcripts is a discoverability bug, not a
+    missing feature. Then §06: the two import fixes, the roots memoization, and the search intersection.</p></div>
+</section>
+
+<div class="foot wrap">
+  Five parallel audits against the live system on zion, 2026-07-30, agents-cli @ 827565549.
+  5,204 routine runs across four hosts · 1,256 transcripts · 162 teammate records · 77 PRs state-checked.
+  <b>Where the audits disagree, and a methodology warning.</b> The routines audit counts terminal signals in run
+  <code>meta.json</code> across four hosts (422 <code>Not logged in</code> of 2,297 failures = 18.4%). The
+  session-mining audit counts deduped <em>sessions</em> over the transcript corpus (387 sessions, 118 routine
+  runs, "51% of routine failures"). Those denominators are not the same population and should not be blended —
+  prefer the run-archive figure for fleet failure <em>rate</em>, the session figure for how often you
+  <em>encountered</em> it. Both agree on the cause. Separately:
+  <code>~/.agents/.gitignore</code> contains <code>.history/</code>, and ripgrep honors it even with no
+  <code>.git</code> present — so any search of <code>~/.agents</code> without <code>-uu</code> silently skips the
+  entire corpus and returns a confident zero. That trap produced a wrong "0 exposed keys" in my own first-pass
+  verification before I caught it. It applies to the CLI's own tooling too.
+  All five audits reported.
+  The s0/s1 machine-id duplication in §05 was verified first-hand; the audit's stronger SSH-misrouting claim did
+  not reproduce and has been corrected in place.
+</div>
+</div>
+<script>
+  (function(){
+    var root=document.documentElement, btn=document.getElementById('tg');
+    try{var pref=window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches;
+      root.setAttribute('data-theme', pref?'light':'dark');}catch(e){}
+    btn.addEventListener('click',function(){
+      root.setAttribute('data-theme', root.getAttribute('data-theme')==='dark'?'light':'dark');
+    });
+  })();
+</script>
+</body>
+</html>

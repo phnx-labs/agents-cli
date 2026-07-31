@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agents-cli — credential subsystem remediation plan</title>
+<style>
+  :root{
+    --bg:#0a0a0a; --panel:#111211; --panel-2:#161816; --ink:#e8ebe6; --ink-dim:#9aa295;
+    --line:#242724; --lime:#a3e635; --lime-dim:#6f9e26; --amber:#f4bf4f; --red:#ff6b5e;
+    --cyan:#5ec7d6; --violet:#b08cff; --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+    --sans:'Inter',ui-sans-serif,system-ui,-apple-system,sans-serif;
+    --code-bg:#0d0f0d; --chip:#1a1d19; --shadow:0 1px 0 rgba(255,255,255,.03),0 8px 30px rgba(0,0,0,.5);
+  }
+  html[data-theme="light"]{
+    --bg:#f6f7f4; --panel:#ffffff; --panel-2:#fbfcfa; --ink:#16180f; --ink-dim:#5c6356;
+    --line:#e2e6dc; --lime:#5c8a13; --lime-dim:#7fae2c; --amber:#9a6a00; --red:#c23b2e;
+    --cyan:#0f7d8c; --violet:#6d45c9; --code-bg:#f1f3ec; --chip:#eef1e8; --shadow:0 1px 0 rgba(0,0,0,.02),0 10px 30px rgba(0,0,0,.08);
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.62;
+    font-size:16px;-webkit-font-smoothing:antialiased}
+  a{color:var(--lime);text-decoration:none}
+  code,kbd,.mono{font-family:var(--mono)}
+  .wrap{max-width:1100px;margin:0 auto;padding:0 24px}
+
+  .topbar{position:sticky;top:0;z-index:30;background:color-mix(in srgb,var(--bg) 88%,transparent);
+    backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  .topbar .wrap{display:flex;align-items:center;justify-content:space-between;height:56px}
+  .brand{font-family:var(--mono);font-weight:700;letter-spacing:.02em;font-size:15px}
+  .brand .dot{color:var(--lime)}
+  .toggle{font-family:var(--mono);font-size:13px;color:var(--ink-dim);background:var(--chip);
+    border:1px solid var(--line);border-radius:8px;padding:6px 12px;cursor:pointer}
+
+  .hero{padding:58px 0 34px;border-bottom:1px solid var(--line)}
+  .kicker{font-family:var(--mono);font-size:12.5px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--lime);margin-bottom:18px}
+  h1{font-size:clamp(28px,4.2vw,44px);line-height:1.08;margin:0 0 18px;letter-spacing:-.02em;font-weight:800}
+  h1 .g{color:var(--lime)} h1 .r{color:var(--red)}
+  .lede{font-size:18.5px;color:var(--ink-dim);max-width:840px;margin:0 0 22px}
+  .lede b{color:var(--ink);font-weight:600}
+  .chips{display:flex;flex-wrap:wrap;gap:9px}
+  .chip{font-family:var(--mono);font-size:12px;color:var(--ink-dim);background:var(--chip);
+    border:1px solid var(--line);border-radius:999px;padding:5px 12px}
+  .chip b{color:var(--lime);font-weight:600}
+  .chip.hot b{color:var(--red)}
+
+  section{padding:46px 0;border-bottom:1px solid var(--line)}
+  .sec-num{font-family:var(--mono);font-size:13px;color:var(--lime);letter-spacing:.1em}
+  h2{font-size:clamp(21px,2.8vw,28px);margin:8px 0 6px;letter-spacing:-.015em;font-weight:750}
+  h3{font-size:17px;margin:26px 0 8px;font-weight:650}
+  .sub{color:var(--ink-dim);font-size:15.5px;max-width:860px}
+  p{max-width:860px}
+  ul.tight{max-width:860px;padding-left:18px}
+  ul.tight li{margin:7px 0}
+  .fl{font-family:var(--mono);font-size:12.5px;color:var(--cyan);background:var(--code-bg);
+    border:1px solid var(--line);border-radius:5px;padding:1px 6px;white-space:nowrap}
+  b.k{color:var(--lime)}
+
+  .call{margin:20px 0;padding:16px 18px 16px 20px;border-radius:12px;border:1px solid var(--line);
+    background:var(--panel);position:relative;box-shadow:var(--shadow)}
+  .call::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;border-radius:12px 0 0 12px}
+  .call.correct::before{background:var(--lime)}
+  .call.warn::before{background:var(--amber)}
+  .call.hot::before{background:var(--red)}
+  .call .tag{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+    font-weight:700;margin-bottom:6px;display:block}
+  .call.correct .tag{color:var(--lime)}
+  .call.warn .tag{color:var(--amber)}
+  .call.hot .tag{color:var(--red)}
+  .call p{margin:2px 0;max-width:none}
+
+  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:10px;padding:14px 16px;
+    overflow:auto;font-family:var(--mono);font-size:12.6px;line-height:1.6;box-shadow:var(--shadow)}
+  pre .c{color:var(--ink-dim)} pre .g{color:var(--lime)} pre .a{color:var(--amber)}
+  pre .r{color:var(--red)} pre .cy{color:var(--cyan)}
+
+  .scroller{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;margin:18px 0;font-size:13.6px}
+  th,td{text-align:left;padding:9px 11px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--ink-dim);font-weight:600}
+  td.n{font-family:var(--mono);text-align:right;white-space:nowrap}
+  .v-proven{color:var(--lime);font-family:var(--mono);font-size:11.5px;font-weight:700}
+  .v-retract{color:var(--red);font-family:var(--mono);font-size:11.5px;font-weight:700}
+  .v-untested{color:var(--amber);font-family:var(--mono);font-size:11.5px;font-weight:700}
+
+  figure{margin:26px 0}
+  figure svg{width:100%;height:auto;display:block;background:var(--panel);border:1px solid var(--line);
+    border-radius:14px;box-shadow:var(--shadow)}
+  figcaption{font-size:13px;color:var(--ink-dim);margin-top:10px;font-family:var(--mono)}
+  .svg-l{font-family:var(--mono);font-size:12px;fill:var(--ink)}
+  .svg-s{font-family:var(--mono);font-size:10.5px;fill:var(--ink-dim)}
+  .box{fill:var(--panel-2);stroke:var(--line);stroke-width:1.2}
+  .box-hot{fill:var(--panel-2);stroke:var(--red);stroke-width:1.6}
+  .box-lime{fill:var(--panel-2);stroke:var(--lime-dim);stroke-width:1.4}
+  .edge{stroke:var(--ink-dim);stroke-width:1.3;fill:none}
+  .edge-hot{stroke:var(--red);stroke-width:1.8;fill:none}
+  .edge-lime{stroke:var(--lime);stroke-width:1.6;fill:none}
+
+  .fix{margin:16px 0;padding:16px 18px;background:var(--panel);border:1px solid var(--line);
+    border-radius:12px;box-shadow:var(--shadow)}
+  .fix h4{margin:0 0 6px;font-size:16px;display:flex;align-items:center;gap:10px}
+  .num{display:inline-flex;align-items:center;justify-content:center;font-family:var(--mono);
+    font-weight:700;font-size:13px;width:26px;height:26px;border-radius:7px;flex:none}
+  .num.a{background:var(--red);color:#160a08}
+  .num.b{background:var(--amber);color:#1a1200}
+  .num.c{background:var(--lime);color:#0c1400}
+  .fix .why{font-size:14px;color:var(--ink-dim);margin:6px 0 0;max-width:none}
+
+  .ask{border:1.5px solid var(--violet);background:color-mix(in srgb,var(--violet) 8%,var(--panel));
+    border-radius:14px;padding:18px 20px;margin:18px 0;box-shadow:var(--shadow)}
+  .ask h4{margin:0 0 6px;font-size:16.5px;color:var(--violet)}
+  .ask p{margin:4px 0;max-width:none}
+
+  .foot{padding:36px 0 70px;color:var(--ink-dim);font-size:13px;font-family:var(--mono)}
+</style>
+</head>
+<body>
+<div class="topbar"><div class="wrap">
+  <div class="brand">agents<span class="dot">·</span>cli <span style="color:var(--ink-dim)">/ credential subsystem — remediation plan</span></div>
+  <button class="toggle" id="tg">◐ theme</button>
+</div></div>
+
+<div class="wrap">
+<header class="hero">
+  <div class="kicker">Remediation plan · every claim carries the command that proves it</div>
+  <h1>Three independent defects, one symptom cluster — and the remediations are <span class="g">two PRs you already wrote</span></h1>
+  <p class="lede">The reported symptoms — repeated Touch ID authorization, fleet-wide logout, and a
+  <b>44.1%</b> routine failure rate — are not one fault. They are three defects in the credential path with
+  distinct mechanisms, distinct blast radii, and distinct fixes. Two are addressed by open pull requests
+  authored by you (<b>#1457</b>, <b>#1449</b>). The third is an unconditional probe loop. Critically:
+  <b>every prior remediation attempt amplified the fault</b>, because the two remedies applied — minting a new
+  token and propagating a credential file — are themselves the failure mechanism.</p>
+  <div class="chips">
+    <span class="chip hot">routine failure rate <b>44.1%</b></span>
+    <span class="chip hot">auth share of failures <b>80.6%</b></span>
+    <span class="chip">PR <b>#1457</b> open</span>
+    <span class="chip">PR <b>#1449</b> open</span>
+    <span class="chip">fleet-cache warms logged <b>3,244</b></span>
+  </div>
+</header>
+
+<!-- 0 · VERIFICATION LEDGER -->
+<section id="s0">
+  <div class="sec-num">00</div>
+  <h2>Verification ledger</h2>
+  <p class="sub">A prior agent's remediation degraded the system. Accordingly, every assertion below is labelled
+  with its evidentiary status and the exact command or source location that establishes it. Assertions marked
+  <span class="v-untested">UNTESTED</span> must not be acted on without executing the stated check first.</p>
+
+  <div class="scroller">
+  <table>
+    <tr><th>Assertion</th><th>Status</th><th>Evidence</th></tr>
+    <tr><td>The synchronous secrets-broker clients fail on the shipped macOS binary</td>
+        <td><span class="v-proven">PROVEN</span></td>
+        <td><code>agents -e 'console.log(1)'</code> → <code>error: unknown option '-e'</code>, executed on this host</td></tr>
+    <tr><td>Three call sites are affected</td><td><span class="v-proven">PROVEN</span></td>
+        <td><span class="fl">lib/secrets/agent.ts:799 · :849 · :893</span> — <code>spawnSync(process.execPath, ['-e', …])</code></td></tr>
+    <tr><td>PR #1457 targets exactly this defect</td><td><span class="v-proven">PROVEN</span></td>
+        <td><code>gh pr view 1457</code> → <code>OPEN</code>, <code>mergedAt: null</code></td></tr>
+    <tr><td>Reading Claude usage rotates the refresh token</td><td><span class="v-proven">PROVEN</span></td>
+        <td><span class="fl">usage.ts:589</span> → <span class="fl">:1416</span> refresh predicate → <span class="fl">:1424</span> token POST → <span class="fl">:1430</span> persist</td></tr>
+    <tr><td>PR #1449 targets exactly this defect</td><td><span class="v-proven">PROVEN</span></td>
+        <td><code>gh pr view 1449</code> → <code>OPEN</code>, <code>mergedAt: null</code></td></tr>
+    <tr><td>The 3-minute fleet-auth probe <em>no longer</em> rotates the token</td><td><span class="v-proven">PROVEN</span></td>
+        <td>#1335 is an ancestor of HEAD; <span class="fl">usage.ts:920-922</span> returns <code>expired</code> before any refresh</td></tr>
+    <tr><td>3,244 fleet-cache warm cycles have executed</td><td><span class="v-proven">PROVEN</span></td>
+        <td><code>rg -uu -c "fleet cache warm" …/daemon/logs.jsonl</code> → 3244</td></tr>
+    <tr><td>The daemon currently holds no Claude OAuth token</td><td><span class="v-proven">PROVEN</span></td>
+        <td><code>rg -c "Loaded Claude OAuth token"</code> → 0; daemon PID 24971</td></tr>
+    <tr><td>73 keychain items; 11 resolve to an extant home; 62 orphaned; <code>$HOME</code> has none</td>
+        <td><span class="v-proven">PROVEN</span></td>
+        <td><code>security dump-keychain</code> (metadata only) + recomputed <code>sha256(home + '/.claude')</code></td></tr>
+    <tr><td>Prior remediations minted tokens / propagated credential files</td><td><span class="v-proven">PROVEN</span></td>
+        <td>transcript commands with timestamps: 06-24, 07-13, 07-19, 07-20, 07-21</td></tr>
+    <tr><td>The Jul 17 revocation originated server-side, not from a local mutation</td>
+        <td><span class="v-proven">PROVEN</span></td>
+        <td>7,705 tool invocations scanned across the Jul 16–17 window; zero auth-mutating commands</td></tr>
+    <tr><td>The daemon token gap caused the Jul 17 cliff</td><td><span class="v-retract">RETRACTED</span></td>
+        <td>First <code>401 revoked</code> (Jul 17 00:13) precedes the routine cliff (14:03). I asserted this earlier; the ordering refutes it</td></tr>
+    <tr><td>Any remediation below restores the pre-July baseline</td><td><span class="v-untested">UNTESTED</span></td>
+        <td>No remedy has been executed or measured. §05 is the gate</td></tr>
+  </table>
+  </div>
+</section>
+
+<!-- 1 · DEFECT A -->
+<section id="s1">
+  <div class="sec-num">01</div>
+  <h2>Defect A — broker cache bypass causes unconditional Touch ID authorization</h2>
+  <p class="sub">Mechanism: an ABI assumption invalidated by a build-system change, with a swallowed failure and a
+  fallback that reaches the Keychain directly.</p>
+
+  <p>The secrets broker exists so that a bundle read is served from a cached, agent-held unlock rather than a
+  Keychain access. Its three synchronous clients spawn an inline Node program:</p>
+
+  <pre><span class="c">// lib/secrets/agent.ts:799 · :849 · :893</span>
+spawnSync(process.execPath, [<span class="r">'-e'</span>, SYNC_GET_PROGRAM,  socketPath(), name, tokenPath()])
+spawnSync(process.execPath, [<span class="r">'-e'</span>, SYNC_PING_PROGRAM, socketPath()])
+spawnSync(process.execPath, [<span class="r">'-e'</span>, SYNC_LOCK_PROGRAM, socketPath(), name, tokenPath()])</pre>
+
+  <p><code>process.execPath</code> resolves to the Node executable <em>only when the CLI runs as a Node script</em>.
+  Since <b>1.20.53</b> the macOS <code>agents</code> artifact is a Bun-compiled Mach-O executable, so
+  <code>process.execPath</code> is the CLI itself and the invocation degenerates to <code>agents -e …</code>,
+  which Commander rejects. Reproduced on this host:</p>
+
+  <pre><span class="c">$</span> agents -e 'console.log(1)'
+<span class="r">error: unknown option '-e'</span></pre>
+
+  <p><code>agentGetSync</code> returns <code>null</code> on non-zero exit; <code>agentReachableSync</code> returns
+  <code>false</code>; <code>agentEvictSync</code> no-ops. Each caller interprets those return values as
+  <em>“broker unavailable”</em> and falls through to a direct Keychain read — which raises an authorization
+  sheet. The <code>daily</code> policy's one-authorization-per-interval guarantee is therefore never in effect.</p>
+
+  <figure>
+  <svg viewBox="0 0 1040 300" role="img" aria-label="broker cache bypass path">
+    <text x="20" y="26" class="svg-l">Intended path (Node entry) vs. actual path (Bun-compiled Mach-O)</text>
+    <line x1="520" y1="42" x2="520" y2="282" stroke="var(--line)" stroke-width="1.2" stroke-dasharray="4 4"/>
+    <text x="20" y="60" class="svg-s" fill="var(--lime)">INTENDED — process.execPath === node</text>
+    <text x="540" y="60" class="svg-s" fill="var(--red)">ACTUAL — process.execPath === agents (Mach-O)</text>
+
+    <rect x="20" y="74" width="200" height="40" rx="7" class="box"/>
+    <text x="120" y="99" text-anchor="middle" class="svg-s">bundle read requested</text>
+    <rect x="20" y="130" width="200" height="46" rx="7" class="box-lime"/>
+    <text x="120" y="150" text-anchor="middle" class="svg-s">spawn node -e SYNC_GET</text>
+    <text x="120" y="166" text-anchor="middle" class="svg-s">→ unix socket → broker</text>
+    <rect x="20" y="192" width="200" height="46" rx="7" class="box-lime"/>
+    <text x="120" y="212" text-anchor="middle" class="svg-s">cached unlock returned</text>
+    <text x="120" y="228" text-anchor="middle" class="svg-s">no authorization sheet</text>
+    <path class="edge-lime" d="M120,114 L120,128"/>
+    <path class="edge-lime" d="M120,176 L120,190"/>
+    <text x="20" y="264" class="svg-s" fill="var(--lime)">1 authorization per policy interval</text>
+
+    <rect x="540" y="74" width="200" height="40" rx="7" class="box"/>
+    <text x="640" y="99" text-anchor="middle" class="svg-s">bundle read requested</text>
+    <rect x="540" y="130" width="240" height="46" rx="7" class="box-hot"/>
+    <text x="660" y="150" text-anchor="middle" class="svg-s">spawn agents -e SYNC_GET</text>
+    <text x="660" y="166" text-anchor="middle" class="svg-s">exit ≠ 0 · error swallowed</text>
+    <rect x="540" y="192" width="240" height="46" rx="7" class="box-hot"/>
+    <text x="660" y="212" text-anchor="middle" class="svg-s">interpreted as "broker down"</text>
+    <text x="660" y="228" text-anchor="middle" class="svg-s">→ direct Keychain read</text>
+    <path class="edge-hot" d="M640,114 L640,128"/>
+    <path class="edge-hot" d="M660,176 L660,190"/>
+
+    <rect x="812" y="192" width="200" height="46" rx="7" class="box-hot"/>
+    <text x="912" y="212" text-anchor="middle" class="svg-l" fill="var(--red)">Touch ID sheet</text>
+    <text x="912" y="228" text-anchor="middle" class="svg-s">every read, every bundle</text>
+    <path class="edge-hot" d="M780,215 L810,215"/>
+    <text x="540" y="264" class="svg-s" fill="var(--red)">cache never hit → policy never applied</text>
+  </svg>
+  <figcaption>Fig 1 — Defect A. The failure is silent: a non-zero exit is indistinguishable from a genuinely unavailable broker, so the fallback is taken rather than an error raised.</figcaption>
+  </figure>
+
+  <div class="call warn"><span class="tag">Class defect, not instance defect</span>
+    <p>A helper that resolves this correctly already exists — <span class="fl">lib/cli-entry.ts:111-123</span>
+    <code>getCliLaunch()</code>, which branches on <code>isNodeScriptEntry(bin)</code> and returns either
+    <code>{node, [script, …]}</code> or <code>{bin, […]}</code>. The three broker clients were never migrated
+    onto it. Remediating only these three call sites leaves the class open.</p></div>
+</section>
+
+<!-- 2 · DEFECT B -->
+<section id="s2">
+  <div class="sec-num">02</div>
+  <h2>Defect B — unconditional fleet-auth probe on a wall-clock interval</h2>
+  <p class="sub">Mechanism: a cache warmed on a metronome rather than on cache-miss, with no TTL in the auth path.</p>
+
+  <pre><span class="c">// lib/daemon.ts:649-650</span>
+setInterval(() =&gt; { void runFleetCacheWarm(); }, <span class="a">3 * 60_000</span>);
+setTimeout (() =&gt; { void runFleetCacheWarm(); }, 60_000);
+
+<span class="c">// each cycle: probeLocalFleetAuth() enumerates every installed (agent, version) on THIS host</span>
+<span class="c">// measured: </span>rg -uu -c "fleet cache warm" …/daemon/logs.jsonl  →  <span class="a">3244</span></pre>
+
+  <p>Each enumerated tuple performs a Keychain read and an authenticated HTTPS request. Two consequences follow,
+  and they must be stated separately because they have different severities:</p>
+  <ul class="tight">
+    <li><b class="k">It multiplies Defect A.</b> While the broker cache is bypassed, every probe cycle is a
+      further set of direct Keychain accesses. Defect B is an <em>amplifier</em> of the Touch ID symptom, not its
+      cause.</li>
+    <li><b class="k">It does not, at present, rotate the token.</b> This corrects an assertion made by one of my
+      own investigations. <span class="fl">usage.ts:920-922</span> returns <code>{ token: 'expired' }</code>
+      before reaching any refresh, per PR #1335, which is an ancestor of HEAD. Any analysis claiming the
+      3-minute timer is currently rotating credentials describes the pre-#1335 state.</li>
+  </ul>
+
+  <div class="call warn"><span class="tag">Design defect beneath the bug</span>
+    <p>The warm loop was introduced to make <code>agents devices list</code> render instantly. That is a
+    reasonable objective, but the implementation inverts the cost model: the probe cost is now paid
+    unconditionally rather than on read. A cache should be refreshed <b>on cache-miss by an arriving reader,
+    governed by a TTL enforced inside the probe</b>, so that no call site can bypass it. The usage cache has a
+    TTL; the auth path has none.</p></div>
+</section>
+
+<!-- 3 · DEFECT C -->
+<section id="s3">
+  <div class="sec-num">03</div>
+  <h2>Defect C — refresh-token rotation stampede</h2>
+  <p class="sub">Mechanism: a single-use, server-rotating refresh token held concurrently by N processes across M
+  hosts, with no mutual exclusion around the refresh operation.</p>
+
+  <p>Anthropic's OAuth refresh token is single-use: exchanging it invalidates it and issues a replacement.
+  <code>getClaudeAccessToken</code> (<span class="fl">usage.ts:1410-1433</span>) exchanges whenever the access
+  token is within the refresh leeway, then persists the result. It is reached from
+  <code>getClaudeUsageInfo</code> at <span class="fl">usage.ts:589</span> — i.e. from usage rendering and from
+  <code>agents run</code> balanced rotation on every unpinned invocation.</p>
+
+  <figure>
+  <svg viewBox="0 0 1040 320" role="img" aria-label="refresh token rotation stampede">
+    <text x="20" y="26" class="svg-l">Single-use refresh token, four concurrent holders</text>
+
+    <rect x="420" y="52" width="200" height="46" rx="8" class="box"/>
+    <text x="520" y="72" text-anchor="middle" class="svg-s">Anthropic token endpoint</text>
+    <text x="520" y="88" text-anchor="middle" class="svg-s">refresh_token = R₀</text>
+
+    <rect x="30"  y="180" width="180" height="52" rx="8" class="box"/>
+    <text x="120" y="200" text-anchor="middle" class="svg-s">zion</text>
+    <text x="120" y="216" text-anchor="middle" class="svg-s">holds R₀</text>
+    <rect x="240" y="180" width="180" height="52" rx="8" class="box"/>
+    <text x="330" y="200" text-anchor="middle" class="svg-s">mac-mini</text>
+    <text x="330" y="216" text-anchor="middle" class="svg-s">holds R₀</text>
+    <rect x="450" y="180" width="180" height="52" rx="8" class="box"/>
+    <text x="540" y="200" text-anchor="middle" class="svg-s">yosemite-s0</text>
+    <text x="540" y="216" text-anchor="middle" class="svg-s">holds R₀</text>
+    <rect x="660" y="180" width="180" height="52" rx="8" class="box"/>
+    <text x="750" y="200" text-anchor="middle" class="svg-s">yosemite-s1</text>
+    <text x="750" y="216" text-anchor="middle" class="svg-s">holds R₀</text>
+
+    <path class="edge-lime" d="M120,178 C120,140 420,120 470,98"/>
+    <text x="150" y="140" class="svg-s" fill="var(--lime)">1. exchange R₀ → R₁  ✓ wins</text>
+    <path class="edge-hot" d="M330,178 C330,150 460,120 500,98"/>
+    <path class="edge-hot" d="M540,178 C540,150 545,120 545,98"/>
+    <path class="edge-hot" d="M750,178 C750,150 600,120 570,98"/>
+    <text x="600" y="150" class="svg-s" fill="var(--red)">2. exchange R₀ → 401 invalid_grant</text>
+
+    <rect x="240" y="256" width="600" height="46" rx="8" class="box-hot"/>
+    <text x="540" y="276" text-anchor="middle" class="svg-s">three holders now carry a dead R₀ · next run reports "Not logged in · Please run /login"</text>
+    <text x="540" y="292" text-anchor="middle" class="svg-s">no error surfaces at rotation time — the failure is observed only at next use</text>
+
+    <text x="30" y="292" class="svg-s" fill="var(--lime)">1 winner</text>
+  </svg>
+  <figcaption>Fig 2 — Defect C. Any operation that triggers a refresh on one host invalidates every other host's stored credential. Concurrency, not correctness, is the fault.</figcaption>
+  </figure>
+
+  <p>The invariant that prevents this — <em>refresh only from the single legitimate path</em> — is presently
+  maintained by convention, not by construction. There is no mutual exclusion:
+  <code>proper-lockfile</code> is already a dependency (<span class="fl">fs-atomic.ts:4</span>) but
+  <code>usage.ts</code> does not import it; <span class="fl">lib/lock.ts</span> is a manifest hasher, not a
+  mutex; the only deduplication is an in-process <code>Map</code> (<span class="fl">usage.ts:303</span>)
+  covering the background SWR path exclusively.</p>
+</section>
+
+<!-- 4 · WHY PRIOR REMEDIATIONS FAILED -->
+<section id="s4">
+  <div class="sec-num">04</div>
+  <h2>Why prior remediations amplified the fault</h2>
+  <p class="sub">This section is the most operationally important in the document. Each item is a remediation that
+  was actually applied and is documented degrading the system.</p>
+
+  <div class="call hot"><span class="tag">The controlling observation</span>
+    <p>The fleet auth-health monitor — <code>8c80c522</code>, <code>9d5a8fe0</code>, <code>893f80d9</code>,
+    <code>6e6b6a94</code> (2026-07-18) — <b>was itself an agent's remediation for the logout fault</b>. Three days
+    later your own <code>1a4d5693</code> had to disable its refresh behavior, stating:
+    <em>“This was the dominant amplifier of the fleet-logout loop.”</em> <b>The diagnostic caused the condition it
+    was built to diagnose.</b></p></div>
+
+  <h3>Prohibited operations</h3>
+  <ol class="tight">
+    <li><b class="k">Do not execute or recommend <code>claude setup-token</code>.</b> It mints a credential and
+      rotates the shared refresh token. Prescribed 2026-06-24, 07-13, 07-20, 07-21; the failure rate increased
+      monotonically across all four. One agent characterised it as <em>“safe, additive… does not log out or
+      invalidate your existing accounts”</em> — directly contradicted by <code>1a4d5693</code>.</li>
+    <li><b class="k">Do not execute <code>agents apply</code> with <code>login: sync</code>,
+      <code>--only …,login</code>, or <code>--copy-creds</code>.</b>
+      <span class="fl">fleet/remote-login.ts:4-6</span>: <em>“copying one OAuth credential file across N boxes is
+      fatal — droid collapsed 10 boxes → 1 overnight.”</em> Executed 2026-07-19 against win-mini
+      (<code>✓ push-login</code>).</li>
+    <li><b class="k">Do not introduce any periodic process that <em>refreshes</em> a Claude token</b> — health
+      check, canary, ping, usage-bar warmer. A non-refreshing read is acceptable; an exchange is not.</li>
+    <li><b class="k">Do not widen the set of hosts holding this account</b> until Defect C is remediated
+      fleet-wide. On 2026-07-30 an agent set eight routines to <code>--set yosemite-s0,yosemite-s1</code>,
+      adding two additional refreshers to the stampede.</li>
+    <li><b class="k">Do not remove and re-add an agent CLI as an auth remedy</b> — it discards the credential it
+      is intended to repair.</li>
+    <li><b class="k">Do not invoke an interactive login on a headless host</b> — the OAuth URL was dispatched to
+      <code>xdg-open</code> and opened in LibreOffice, leaving orphaned processes on yosemite-s0.</li>
+    <li><b class="k"><code>agents fleet login</code> cannot remediate Claude</b> — <code>CHANGELOG.md:88</code>
+      classifies claude as non-remotable; only device-code flows (droid, codex, kimi) are drivable.</li>
+  </ol>
+</section>
+
+<!-- 5 · REMEDIATION -->
+<section id="s5">
+  <div class="sec-num">05</div>
+  <h2>Remediation sequence</h2>
+  <p class="sub">Ordered by blast-radius reduction per unit of risk. Each step lands independently and is
+  independently revertible. No step mutates a credential.</p>
+
+  <div class="fix"><h4><span class="num a">1</span>Capture a pre-change baseline</h4>
+    <p class="why">Required so that "worse" is measurable rather than anecdotal — the failure mode of every prior
+    attempt. Record: per-day routine outcome distribution from
+    <code>~/.agents/.history/runs/*/*/meta.json</code>; the Keychain item inventory (73 items, metadata only);
+    <code>rg -c "Loaded Claude OAuth token"</code>; and the current fleet-warm count (3,244).</p></div>
+
+  <div class="fix"><h4><span class="num a">2</span>Merge PR #1457 — terminates Defect A</h4>
+    <p class="why">Restores the broker cache, which restores the <code>daily</code> policy's
+    one-authorization-per-interval guarantee. This is the remediation for the Touch ID symptom.
+    <b>Then eliminate the class:</b> migrate the three clients at
+    <span class="fl">lib/secrets/agent.ts:799 · :849 · :893</span> onto the existing
+    <code>getCliLaunch()</code> (<span class="fl">cli-entry.ts:111</span>), and add a lint or unit test
+    prohibiting bare <code>process.execPath</code> self-spawns.</p></div>
+
+  <div class="fix"><h4><span class="num a">3</span>Merge PR #1449, then propagate to every host — terminates Defect C</h4>
+    <p class="why">Removes the token exchange from the usage/run hot path.
+    <b>Propagation is the step that determines success or failure:</b> a partially-upgraded fleet still
+    stampedes, because a single un-upgraded host continues to invalidate the upgraded ones. All four hosts
+    running <code>agents run</code> against this account must be upgraded — zion, mac-mini, yosemite-s0,
+    yosemite-s1.</p></div>
+
+  <div class="fix"><h4><span class="num b">4</span>Establish mutual exclusion around refresh — makes Defect C structurally impossible</h4>
+    <p class="why">Route every refresh through one function guarded by a cross-process lock
+    (<code>proper-lockfile</code>, already a dependency at <span class="fl">fs-atomic.ts:4</span>). Make
+    <code>saveClaudeOauth</code> (<span class="fl">usage.ts:1221-1248</span>) atomic — it currently performs a
+    read-modify-delete-write, so a losing racer can overwrite the winner's live credential with a dead one. Add a
+    test asserting no call site outside that function invokes <code>refreshClaudeToken</code>.</p></div>
+
+  <div class="fix"><h4><span class="num b">5</span>Convert the fleet-auth cache to read-triggered — terminates Defect B</h4>
+    <p class="why">Remove <span class="fl">daemon.ts:649-650</span>. Refresh on cache-miss by an arriving reader,
+    with a TTL enforced <em>inside</em> <code>probeLocalFleetAuth</code> so no caller can bypass it. Separate
+    "is this credential valid" (local, cheap, no network) from "is this agent reachable" (explicit, on demand) —
+    they are currently conflated under one label.</p></div>
+
+  <div class="fix"><h4><span class="num c">6</span>Restore failure detection</h4>
+    <p class="why">On 2026-06-24 an agent created an <code>auth-canary</code> routine and removed it 94 seconds
+    later; it would have detected the July 17 cliff on the day it occurred rather than twelve days later.
+    Reinstate a canary that <em>reads without refreshing</em> (mirroring the guard at
+    <span class="fl">usage.ts:920-922</span>) and alerts out-of-band. Separately, add the missing failure branch
+    at <span class="fl">daemon.ts:315-321</span>, where a null token read currently produces no log line — the
+    reason this condition persisted undetected.</p></div>
+
+  <h3>Explicitly out of scope</h3>
+  <ul class="tight">
+    <li>Reverting <code>1e910372</code>. Removing a plaintext credential from the service manifest is correct.</li>
+    <li>The 62 orphaned Keychain items and the absent <code>$HOME</code> item. Real, but folding them in would
+      confound measurement of whether the stampede remediation succeeded.</li>
+    <li>Any credential mutation whatsoever during diagnosis.</li>
+  </ul>
+</section>
+
+<!-- 6 · VERIFICATION -->
+<section id="s6">
+  <div class="sec-num">06</div>
+  <h2>Verification protocol</h2>
+  <p class="sub">Remediation efficacy is currently unestablished. This protocol is the acceptance gate.</p>
+  <ol class="tight">
+    <li><b>Defect A, direct:</b> after #1457, execute a bundle read and assert the broker socket is contacted and
+      no authorization sheet is raised. Then execute a second read within the policy interval and assert the same.</li>
+    <li><b>Defect C, mechanism-level, before any code change:</b> on one host, with an access token inside the
+      refresh leeway, render a usage bar and observe whether the stored credential's <code>expiresAt</code>
+      changes. This converts the rotation from inferred to observed.</li>
+    <li><b>Defect C, post-change:</b> repeat (2) on all four upgraded hosts and assert the stored credential is
+      unchanged by a usage read.</li>
+    <li><b>System-level, 48 h:</b> zion's daily routine failure rate should return toward its pre-July-17
+      baseline of 11–33%, not 75–100%. mac-mini, at 93.6% failure, is the highest-signal host.</li>
+    <li><b>Defect B:</b> assert the fleet-warm counter stops advancing and that <code>agents devices list</code>
+      still renders within an acceptable latency budget from a read-triggered refresh.</li>
+    <li><b>Rollback discipline:</b> one change at a time. If the failure rate degrades after any single change,
+      revert that change before proceeding to the next.</li>
+  </ol>
+</section>
+
+<!-- 7 · DECISIONS -->
+<section id="s7">
+  <div class="sec-num">07</div>
+  <h2>Decisions required from you</h2>
+  <p class="sub">These are not implementation details. Each is a judgement I should not make unilaterally.</p>
+
+  <div class="ask"><h4>1 · Authorization to merge two of your own open PRs</h4>
+    <p>#1457 (Defect A) and #1449 (Defect C) are open, authored by you, and each targets a defect verified above.
+    Merging is an outward-facing action on your repository. Confirm before I proceed, and confirm whether the
+    fleet-wide upgrade that must follow #1449 is in scope for me.</p></div>
+
+  <div class="ask"><h4>2 · Should the auth probe ever contact the network unattended?</h4>
+    <p>Defect B's remediation depends on this. If the answer is "only on explicit <code>fleet ping</code> or
+    immediately prior to a dispatch," the timer is deleted outright. If unattended freshness has a real
+    requirement I am not seeing, the remediation becomes a TTL rather than a removal.</p></div>
+
+  <div class="ask"><h4>3 · Is a single Anthropic identity across the fleet intentional?</h4>
+    <p>Defect C's stampede scales with the number of concurrent holders of one refresh token. Per-machine
+    credentials would eliminate it structurally rather than by mutual exclusion —
+    <span class="fl">remote-login.ts:4-10</span> already reaches this conclusion:
+    <em>“The durable fix is a per-machine credential: an interactive login per (agent × box).”</em> This is an
+    account-topology decision with cost and administrative implications that are yours.</p></div>
+
+  <div class="ask"><h4>4 · Three exposed Linear API keys remain unrotated</h4>
+    <p>Verified: 67 files, three distinct 48-character keys, replicated to yosemite-s1's mirror. Rotation is
+    yours to perform. Independent of the auth work above, but unresolved.</p></div>
+</section>
+
+<div class="foot wrap">
+  Verified against agents-cli @ 82756554 and the live system on zion. Timings and counts from the run archive,
+  the daemon log, and <code>security dump-keychain</code> metadata. Two assertions from subordinate
+  investigations were tested and rejected; one earlier assertion of my own is marked RETRACTED in §00.
+</div>
+</div>
+<script>
+  (function(){
+    var root=document.documentElement, btn=document.getElementById('tg');
+    try{var pref=window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches;
+      root.setAttribute('data-theme', pref?'light':'dark');}catch(e){}
+    btn.addEventListener('click',function(){
+      root.setAttribute('data-theme', root.getAttribute('data-theme')==='dark'?'light':'dark');
+    });
+  })();
+</script>
+</body>
+</html>

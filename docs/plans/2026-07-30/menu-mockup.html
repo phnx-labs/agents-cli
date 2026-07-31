@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Menu Bar · Before / After (v3, interactive)</title>
+<style>
+  :root{
+    --page:#1e1f22; --page2:#111312; --ink:#e7ece8; --dim:#8b938c;
+    --menu-bg:rgba(46,48,52,0.98); --menu-line:rgba(255,255,255,0.08);
+    --menu-hl:#1163cf; --menu-hl-ink:#ffffff;
+    --accent:#a3e635; --amber:#f5c451; --red:#ff6b6b; --cyan:#5ad6c0; --blue:#5aa6ff;
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif;
+  }
+  :root[data-theme="light"]{
+    --page:#faf9f6; --page2:#ffffff; --ink:#1a1c1a; --dim:#5c655c;
+    --menu-bg:rgba(245,245,245,0.98); --menu-line:rgba(0,0,0,0.08);
+    --menu-hl:#0064e0; --menu-hl-ink:#ffffff;
+    --accent:#4d7c0f; --amber:#b45309; --red:#dc2626; --cyan:#0e7490; --blue:#0064e0;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--page);color:var(--ink);font-family:var(--sans);
+    font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1300px;margin:0 auto;padding:40px 24px 100px}
+  h1{font-size:26px;margin:0 0 8px;font-weight:700;letter-spacing:-.01em}
+  h1 .accent{color:var(--accent)}
+  .sub{color:var(--dim);margin:0 0 26px;max-width:78ch}
+  .hint{font-family:var(--mono);font-size:11px;color:var(--blue);margin:0 0 26px;
+    display:inline-block;padding:6px 12px;border:1px dashed var(--blue);border-radius:6px}
+
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:44px;align-items:start}
+  @media(max-width:1000px){.grid{grid-template-columns:1fr}}
+  .col h2{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--dim);margin:0 0 12px}
+  .col.before h2{color:var(--red)}
+  .col.after h2{color:var(--accent)}
+  .stat{font-family:var(--mono);font-size:11px;color:var(--dim);margin-bottom:14px;line-height:1.7}
+  .stat b.red{color:var(--red)}
+  .stat b.grn{color:var(--accent)}
+
+  .menu-wrap{position:relative}
+  .menu{width:340px;background:var(--menu-bg);border:0.5px solid var(--menu-line);
+    border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,0.5),0 0 0 0.5px rgba(255,255,255,0.05) inset;
+    padding:6px 0;font-size:13px;backdrop-filter:blur(30px);position:relative;z-index:2}
+  :root[data-theme="light"] .menu{box-shadow:0 12px 40px rgba(0,0,0,0.18)}
+
+  /* Section header (title, non-interactive) */
+  .sec{font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;color:var(--dim);
+    padding:8px 14px 4px;font-weight:500;display:flex;justify-content:space-between;align-items:center}
+  .sec.warn{color:var(--amber)}
+  .sec.info{color:var(--blue)}
+
+  /* Interactive section header — the collapsed "other" pattern.
+     Same font size/weight as a plain .sec so it doesn't masquerade as a row. */
+  .sec-btn{font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;color:var(--dim);
+    padding:8px 14px;font-weight:500;display:flex;justify-content:space-between;align-items:center;
+    cursor:default;border-radius:5px;margin:0 6px}
+  .sec-btn:hover, .sec-btn.hi{background:var(--menu-hl);color:#fff}
+  .sec-btn .chev{opacity:.65}
+  .sec-btn:hover .chev, .sec-btn.hi .chev{opacity:1}
+
+  .row{padding:5px 14px;display:flex;align-items:center;gap:9px;line-height:1.35;
+    font-size:13px;position:relative;cursor:default}
+  .row .g{font-family:var(--mono);width:14px;text-align:center;display:inline-block;flex-shrink:0}
+  .row .t{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .row .r{color:var(--dim);font-family:var(--mono);font-size:11px;flex-shrink:0;margin-left:6px}
+  .row .chev{color:var(--dim);margin-left:6px;font-size:11px}
+  .row.hi, .row:hover{background:var(--menu-hl);color:var(--menu-hl-ink);border-radius:5px;margin:0 6px;padding:5px 8px}
+  .row.hi .r, .row:hover .r{color:rgba(255,255,255,0.75)}
+  .row.hi .g, .row:hover .g{color:#ffffff}
+  .row.hi .chev, .row:hover .chev{color:rgba(255,255,255,0.75)}
+  .row .g.warn{color:var(--amber)}
+  .row .g.run{color:var(--accent)}
+  .row .g.idle{color:var(--dim)}
+  .row .g.fail{color:var(--red)}
+  .row .g.info{color:var(--blue)}
+  .row.dead .g,.row.dead .t{color:var(--red);opacity:.7}
+  .row.more{color:var(--blue)}
+  .row.more .g{color:var(--blue)}
+  .row.no-hover:hover{background:transparent;color:inherit;margin:0;padding:5px 14px}
+  .row.no-hover:hover .g,.row.no-hover:hover .r,.row.no-hover:hover .chev{color:inherit}
+  .row.no-hover:hover .g.run{color:var(--accent)}
+  .row.no-hover:hover .g.idle{color:var(--dim)}
+  .row.no-hover:hover .g.warn{color:var(--amber)}
+  .row.no-hover:hover .g.info{color:var(--blue)}
+  .row.no-hover:hover .g.fail{color:var(--red)}
+
+  .sep{height:1px;background:var(--menu-line);margin:6px 10px}
+  .new{padding:5px 14px;font-size:13px;display:flex;justify-content:space-between;align-items:center;
+    cursor:default;border-radius:5px;margin:0 6px}
+  .new:hover{background:var(--menu-hl);color:#fff}
+  .new:hover .chev{color:rgba(255,255,255,0.75)}
+  .head-row{padding:0 14px 6px;font-family:var(--mono);font-size:10.5px;
+    color:var(--dim);letter-spacing:.04em;display:flex;justify-content:space-between}
+
+  /* Submenu popover — appears on hover of a row/section-btn with data-sub */
+  .popover{position:absolute;left:calc(100% + 6px);width:280px;
+    background:var(--menu-bg);border:0.5px solid var(--menu-line);border-radius:10px;
+    box-shadow:0 12px 40px rgba(0,0,0,0.5);padding:6px 0;font-size:13px;backdrop-filter:blur(30px);
+    display:none;z-index:3}
+  :root[data-theme="light"] .popover{box-shadow:0 12px 40px rgba(0,0,0,0.18)}
+  .popover.show{display:block}
+
+  /* Cross-check math cards */
+  .math{margin-top:36px;background:var(--page2);border:1px solid var(--menu-line);border-radius:10px;
+    padding:16px 18px;font-family:var(--mono);font-size:12.5px;color:var(--dim);line-height:1.9}
+  .math .k{color:var(--ink);font-weight:600}
+  .math .grn{color:var(--accent)}
+  .math .red{color:var(--red)}
+  .math .cyan{color:var(--cyan)}
+
+  .callout{background:var(--page2);border:1px solid var(--menu-line);border-radius:10px;
+    padding:14px 18px;margin-top:26px}
+  .callout .lbl{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--accent);display:block;margin-bottom:6px}
+  code{font-family:var(--mono);font-size:.86em;background:var(--page2);border:1px solid var(--menu-line);
+    border-radius:5px;padding:1px 6px;color:var(--cyan)}
+  .themebtn{position:fixed;top:16px;right:16px;z-index:9;font-family:var(--mono);font-size:12px;
+    color:var(--dim);background:var(--page2);border:1px solid var(--menu-line);border-radius:999px;
+    padding:6px 13px;cursor:pointer}
+
+  .rules{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:36px}
+  @media(max-width:900px){.rules{grid-template-columns:1fr}}
+  .rule{border:1px solid var(--menu-line);border-radius:12px;padding:16px 18px;background:var(--page2)}
+  .rule .n{font-family:var(--mono);font-size:11px;color:var(--accent);letter-spacing:.1em}
+  .rule h3{margin:6px 0 8px;font-size:15.5px}
+  .rule p{margin:0;color:var(--dim);font-size:14px}
+  .rule code{color:var(--cyan)}
+
+  .glossary{margin-top:36px}
+  .glossary table{width:100%;border-collapse:collapse;font-size:13.5px}
+  .glossary td,.glossary th{padding:9px 12px;border-bottom:1px solid var(--menu-line);
+    text-align:left;vertical-align:top}
+  .glossary th{font-family:var(--mono);font-size:10.5px;text-transform:uppercase;color:var(--dim);
+    letter-spacing:.06em;font-weight:500}
+  .glyph-b{font-family:var(--mono);font-size:16px;width:22px;display:inline-block;text-align:center}
+  .glyph-b.run{color:var(--accent)}
+  .glyph-b.idle{color:var(--dim)}
+  .glyph-b.attn{color:var(--amber)}
+  .glyph-b.gone{color:var(--red);opacity:.6}
+</style>
+</head>
+<body>
+<button class="themebtn" onclick="tt()" id="tb">◐ light</button>
+<script>
+  var r=document.documentElement;
+  function set(t){r.setAttribute('data-theme',t);document.getElementById('tb').textContent=(t==='light'?'◑ dark':'◐ light')}
+  set(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');
+  function tt(){set(r.getAttribute('data-theme')==='light'?'dark':'light')}
+</script>
+<div class="wrap">
+  <h1>Menu bar — <span class="accent">before &amp; after (v3, interactive)</span></h1>
+  <p class="sub">Fixed two things you flagged: the collapsed <code>ACTIVE · other</code> is now a proper section header
+    (no fake <code>◐</code> glyph), and submenus actually open — hover any row with a <code>›</code>.
+    Math cross-check at the bottom of each column.</p>
+  <p class="hint">→ hover a row or section header with <b>›</b> to open its submenu</p>
+
+<div class="grid">
+
+  <!-- ============ BEFORE ============ -->
+  <div class="col before">
+    <h2>Before — today, mac-mini</h2>
+    <div class="stat">
+      NEEDS YOU (12) · 11 <b class="red">identical</b> "waiting for your input" rows<br>
+      ACTIVE · muqsitnawaz · <b class="red">4 idle</b> advertised → <b class="red">3</b> shown, 1 silently dropped<br>
+      ACTIVE · other · <b class="red">21 idle</b> → 3 shown, 18 silently dropped (some with dead pids)
+    </div>
+    <div class="menu-wrap">
+    <div class="menu">
+      <div class="head-row"><span>agents-cli</span><span style="color:var(--amber)">⚠ 12 needs you</span></div>
+      <div class="sep"></div>
+
+      <div class="sec warn">⚠ NEEDS YOU (12)</div>
+      <div class="row"><span class="g warn">⚠</span><span class="t">Claude · muqsitnawaz — Claude is waiting for your input</span><span class="r">1d</span></div>
+      <div class="row"><span class="g warn">⚠</span><span class="t">Claude · muqsitnawaz — Claude is waiting for your input</span><span class="r">1d</span></div>
+      <div class="row"><span class="g warn">⚠</span><span class="t">Claude · muqsitnawaz — Claude is waiting for your input</span><span class="r">3h 16m</span></div>
+      <div class="row"><span class="g warn">⚠</span><span class="t">Claude · muqsitnawaz — Claude is waiting for your input</span><span class="r">2h 15m</span></div>
+      <div class="row"><span class="g warn">⚠</span><span class="t">Claude · muqsitnawaz — Claude is waiting for your input</span><span class="r">2h 5m</span></div>
+      <div class="row"><span class="g warn">⚠</span><span class="t">Claude · muqsitnawaz — Claude is waiting for your input</span><span class="r">1h 45m</span></div>
+      <div class="row"><span class="g warn">⚠</span><span class="t">Claude · muqsitnawaz — Claude is waiting for your input</span><span class="r">1h 42m</span></div>
+      <div class="row"><span class="g warn">⚠</span><span class="t">Claude · muqsitnawaz — Claude is waiting for your input</span><span class="r">1h 17m</span></div>
+      <div class="row"><span class="g warn">⚠</span><span class="t">Claude · muqsitnawaz — Claude is waiting for your input</span><span class="r">54m</span></div>
+      <div class="row"><span class="g warn">⚠</span><span class="t">Claude · muqsitnawaz — Claude is waiting for your input</span><span class="r">49m</span></div>
+      <div class="row"><span class="g warn">⚠</span><span class="t">Claude · muqsitnawaz — Claude is waiting for your input</span><span class="r">8m</span></div>
+      <div class="row"><span class="g fail">✕</span><span class="t">15 routines failing</span><span class="chev">›</span></div>
+
+      <div class="sep"></div>
+      <div class="sec info">◆ NEW DEVICES (1)</div>
+      <div class="row"><span class="g info">◆</span><span class="t">pinnacles — macos</span><span class="chev">›</span></div>
+
+      <div class="sep"></div>
+      <div class="new">New Session<span class="chev">›</span></div>
+
+      <div class="sep"></div>
+      <div class="sec">ACTIVE · muqsitnawaz &nbsp;·&nbsp; 4 idle</div>
+      <div class="row no-hover"><span class="g idle">◐</span><span class="t">Claude — muqsitnawaz-e0</span></div>
+      <div class="row no-hover"><span class="g idle">◐</span><span class="t">Claude — Disambiguate Duplicate Session…</span></div>
+      <div class="row no-hover"><span class="g idle">◐</span><span class="t">Claude — muqsitnawaz-03</span></div>
+      <div class="row no-hover" style="color:var(--red);font-style:italic;opacity:.8"><span class="g" style="opacity:0">·</span><span class="t">✕ 4th idle row: silently dropped</span></div>
+
+      <div class="sec">ACTIVE · other &nbsp;·&nbsp; 21 idle</div>
+      <div class="row dead no-hover"><span class="g">✕</span><span class="t">Claude (dead pid)</span></div>
+      <div class="row dead no-hover"><span class="g">✕</span><span class="t">Claude (dead pid)</span></div>
+      <div class="row dead no-hover"><span class="g">✕</span><span class="t">Claude (dead pid)</span></div>
+      <div class="row no-hover" style="color:var(--red);font-style:italic;opacity:.8"><span class="g" style="opacity:0">·</span><span class="t">✕ 18 more: silently dropped</span></div>
+
+      <div class="sep"></div>
+      <div class="sec">ACTIVE · Browser</div>
+      <div class="row"><span class="g run">●</span><span class="t">phx-proto — comet-local · 1 tab</span><span class="chev">›</span></div>
+    </div>
+    </div>
+
+    <div class="math">
+      <span class="k">math check — ACTIVE · muqsitnawaz</span><br>
+      header: <span class="red">4 idle</span> &nbsp;/&nbsp; visible: <span class="red">3</span> &nbsp;/&nbsp; hidden: <span class="red">1</span> &nbsp;→&nbsp; <span class="red">MISMATCH</span> (no "+N more" indicator)<br><br>
+      <span class="k">math check — ACTIVE · other</span><br>
+      header: <span class="red">21 idle</span> &nbsp;/&nbsp; visible: <span class="red">3</span> (of which some are dead pids) &nbsp;/&nbsp; hidden: <span class="red">18</span> &nbsp;→&nbsp; <span class="red">MISMATCH</span>
+    </div>
+  </div>
+
+  <!-- ============ AFTER ============ -->
+  <div class="col after">
+    <h2>After — with all four rules applied</h2>
+    <div class="stat">
+      NEEDS YOU · <b class="grn">grouped by (agent, repo)</b> · filler dropped · specific questions kept inline<br>
+      ACTIVE · muqsitnawaz · header <b class="grn">1 running · 4 idle</b> · visible: 1 <b class="grn">●</b> + 3 <b class="grn">◐</b> + <b class="grn">+ 1 more idle ›</b> = 5<br>
+      ACTIVE · other · rendered as its own <b class="grn">section header</b>, not a fake session row
+    </div>
+    <div class="menu-wrap">
+    <div class="menu">
+      <div class="head-row"><span>agents-cli</span><span style="color:var(--amber)">⚠ 6 needs you</span></div>
+      <div class="sep"></div>
+
+      <div class="sec warn">⚠ NEEDS YOU (2 groups · 6 total)</div>
+
+      <!-- grouped, hoverable → opens submenu #g1 -->
+      <div class="row" data-sub="g1"><span class="g warn">⚠</span><span class="t">Claude · muqsitnawaz · 5 waiting</span><span class="r">oldest 49m</span><span class="chev">›</span></div>
+
+      <!-- single blocked session with a specific question → inline -->
+      <div class="row"><span class="g warn">⚠</span><span class="t">Claude · agents-cli — approve tool: Bash</span><span class="r">3m</span></div>
+
+      <div class="row" data-sub="g2"><span class="g fail">✕</span><span class="t">15 routines failing</span><span class="chev">›</span></div>
+
+      <div class="sep"></div>
+      <div class="sec info">◆ NEW DEVICES (1)</div>
+      <div class="row" data-sub="g3"><span class="g info">◆</span><span class="t">pinnacles — macos</span><span class="chev">›</span></div>
+
+      <div class="sep"></div>
+      <div class="new" data-sub="g4">New Session<span class="chev">›</span></div>
+
+      <div class="sep"></div>
+      <div class="sec">ACTIVE · muqsitnawaz &nbsp;·&nbsp; 1 running · 4 idle</div>
+      <div class="row no-hover"><span class="g run">●</span><span class="t">Claude — muqsitnawaz-e0</span></div>
+      <div class="row no-hover"><span class="g idle">◐</span><span class="t">Claude — Disambiguate Duplicate Session…</span></div>
+      <div class="row no-hover"><span class="g idle">◐</span><span class="t">Claude — muqsitnawaz-03</span></div>
+      <div class="row no-hover"><span class="g idle">◐</span><span class="t">Claude — dep-graph-cleanup</span></div>
+      <!-- explicit +N more, hoverable → opens submenu #g5 -->
+      <div class="row more" data-sub="g5"><span class="g">+</span><span class="t">1 more idle</span><span class="chev">›</span></div>
+
+      <div class="sep"></div>
+      <!-- COLLAPSED SECTION — rendered as an interactive section header, NOT a fake row.
+           Section-header font weight, no session glyph. -->
+      <div class="sec-btn" data-sub="g6"><span>ACTIVE · other  ·  3 idle</span><span class="chev">›</span></div>
+
+      <div class="sep"></div>
+      <div class="sec">ACTIVE · Browser</div>
+      <div class="row" data-sub="g7"><span class="g run">●</span><span class="t">phx-proto — comet-local · 1 tab</span><span class="chev">›</span></div>
+
+      <div class="sep"></div>
+      <div class="sec">ROUTINES 26 · next Mon 8:00 AM · 2 paused</div>
+      <div class="row no-hover"><span class="g idle">◔</span><span class="t">sandbox-tests</span><span class="r">tomorrow 7:00 AM</span></div>
+    </div>
+
+    <!-- Interactive submenus — hidden until hover -->
+    <div class="popover" id="g1">
+      <div class="sec">Claude · muqsitnawaz · 5 waiting</div>
+      <div class="row"><span class="g warn">⚠</span><span class="t">session e0</span><span class="r">49m</span></div>
+      <div class="row"><span class="g warn">⚠</span><span class="t">session 03</span><span class="r">54m</span></div>
+      <div class="row"><span class="g warn">⚠</span><span class="t">session 8a</span><span class="r">1h 17m</span></div>
+      <div class="row"><span class="g warn">⚠</span><span class="t">session 12</span><span class="r">1h 42m</span></div>
+      <div class="row"><span class="g warn">⚠</span><span class="t">session c4</span><span class="r">2h 5m</span></div>
+    </div>
+    <div class="popover" id="g2">
+      <div class="sec">Failed routines (15)</div>
+      <div class="row"><span class="g fail">✕</span><span class="t">agents-cli-update</span></div>
+      <div class="row"><span class="g fail">✕</span><span class="t">crm-pipeline-brief</span></div>
+      <div class="row"><span class="g fail">✕</span><span class="t">doc-gaps-agents-cli</span></div>
+      <div class="row"><span class="g fail">✕</span><span class="t">... 12 more</span></div>
+    </div>
+    <div class="popover" id="g3">
+      <div class="sec">pinnacles — macos</div>
+      <div class="row"><span class="t">Register</span></div>
+      <div class="row"><span class="t">Ignore</span></div>
+    </div>
+    <div class="popover" id="g4">
+      <div class="sec">New Session</div>
+      <div class="row"><span class="t">Claude</span></div>
+      <div class="row"><span class="t">Codex</span></div>
+      <div class="row"><span class="t">Grok-Cli</span></div>
+      <div class="row"><span class="t">Kimi-Cli</span></div>
+      <div class="row"><span class="t">Antigravity</span></div>
+      <div class="row"><span class="t">Droid</span></div>
+      <div class="row"><span class="t">OpenCode</span></div>
+    </div>
+    <div class="popover" id="g5">
+      <div class="sec">Idle sessions · muqsitnawaz · 1 more</div>
+      <div class="row"><span class="g idle">◐</span><span class="t">Claude — feature-x-followup</span></div>
+    </div>
+    <div class="popover" id="g6">
+      <div class="sec">ACTIVE · other · 3 idle</div>
+      <div class="row"><span class="g idle">◐</span><span class="t">Claude — /tmp scratch</span></div>
+      <div class="row"><span class="g idle">◐</span><span class="t">Claude — home-dir session</span></div>
+      <div class="row"><span class="g idle">◐</span><span class="t">Claude — ~ shell session</span></div>
+    </div>
+    <div class="popover" id="g7">
+      <div class="sec">phx-proto — comet-local</div>
+      <div class="row"><span class="t">Focus tab</span></div>
+      <div class="row"><span class="t">Close browser</span></div>
+    </div>
+    </div>
+
+    <div class="math">
+      <span class="k">math check — NEEDS YOU</span><br>
+      badge: <span class="grn">6 needs you</span> = 5 (grouped muqsitnawaz) + 1 (inline agents-cli) &nbsp;→&nbsp; <span class="grn">MATCHES</span><br>
+      section: <span class="cyan">2 groups · 6 total</span> = both counts explicit<br><br>
+      <span class="k">math check — ACTIVE · muqsitnawaz</span><br>
+      header: <span class="grn">1 running · 4 idle</span> = 5 sessions<br>
+      visible: 1 <span class="grn">●</span> + 3 <span class="grn">◐</span> + "+ 1 more idle" = 5 &nbsp;→&nbsp; <span class="grn">MATCHES</span><br><br>
+      <span class="k">math check — ACTIVE · other</span><br>
+      header: <span class="grn">3 idle</span> (in the section-header line itself)<br>
+      visible in main menu: 0 &nbsp;→&nbsp; submenu carries all 3 &nbsp;→&nbsp; <span class="grn">MATCHES</span>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // Hover-to-open submenu. Each element with data-sub="ID" reveals #ID
+  // to its right, and hides it on leave. Simple, no library.
+  var subs = {};
+  document.querySelectorAll('.popover').forEach(function(p){ subs[p.id] = p; });
+
+  document.querySelectorAll('[data-sub]').forEach(function(el){
+    var pop = subs[el.getAttribute('data-sub')];
+    if (!pop) return;
+
+    function show(){
+      // Hide all others first
+      Object.values(subs).forEach(function(o){ o.classList.remove('show'); });
+      // Position vertically to align with the hovered element's top,
+      // relative to the .menu-wrap container.
+      var wrap = el.closest('.menu-wrap');
+      if (!wrap) return;
+      var wrapBox = wrap.getBoundingClientRect();
+      var elBox = el.getBoundingClientRect();
+      pop.style.top = (elBox.top - wrapBox.top - 6) + 'px';
+      pop.classList.add('show');
+    }
+    function hide(){ pop.classList.remove('show'); }
+
+    el.addEventListener('mouseenter', show);
+    el.addEventListener('mouseleave', function(e){
+      // If moving into the popover itself, keep it open
+      var to = e.relatedTarget;
+      if (to && (to === pop || pop.contains(to))) return;
+      setTimeout(function(){
+        if (!pop.matches(':hover') && !el.matches(':hover')) hide();
+      }, 100);
+    });
+    pop.addEventListener('mouseleave', function(e){
+      var to = e.relatedTarget;
+      if (to && (to === el || el.contains(to))) return;
+      hide();
+    });
+  });
+</script>
+
+<div class="callout">
+  <span class="lbl">what changed vs. v2</span>
+  <b>1. `ACTIVE · other` is now a section HEADER, not a row.</b> No fake <code>◐</code> glyph pretending to be a session.
+  The header itself is clickable (uppercased mono font matching every other section title) and shows its count inline.
+  Math is now unambiguous: no row = no addition. &nbsp;
+  <b>2. Submenus actually open.</b> Hover any element with <code>›</code> — the grouped waiter, the +N more, the
+  collapsed section, even routines failing, New Session, and the Browser row all pop out their real submenu to the right.
+</div>
+
+<h2 style="margin-top:44px;font-size:18px">The four design rules</h2>
+<div class="rules">
+  <div class="rule"><div class="n">RULE 01 · reader-side</div>
+    <h3>Prune orphan sentinels on read</h3>
+    <p>Cross-check attention sentinels against the live session set. Unlink orphans found during the read.
+      Kills the 1d / 2h / 1h ghost rows at the source.</p>
+  </div>
+  <div class="rule"><div class="n">RULE 02 · rendering</div>
+    <h3>Collapse "ACTIVE · other" as a section header</h3>
+    <p>When the <code>"other"</code> group is idle-only, render it as an interactive <em>section header</em>
+      (not a row with a session glyph). Header carries the count; submenu carries the sessions.</p>
+  </div>
+  <div class="rule"><div class="n">RULE 03 · rendering</div>
+    <h3>Group NEEDS YOU by (agent, repo); drop generic filler</h3>
+    <p>Multiple waiters in one repo → one row + submenu. Rows with a specific Notification message stay inline.
+      Drop the generic <code>— Claude is waiting for your input</code> tail entirely.</p>
+  </div>
+  <div class="rule"><div class="n">RULE 04 · rendering</div>
+    <h3>Explicit truncation, never silent</h3>
+    <p>Header count = visible glyphs + explicit "+N more" count. If the 3-cap hides idle rows, render
+      <code>+ N more idle ›</code> with a submenu. "N running · M idle" both show when non-zero.</p>
+  </div>
+</div>
+
+<div class="glossary">
+  <h2 style="font-size:16px;margin:0 0 10px">Row-glyph legend — the single answer to "running vs idle"</h2>
+  <table>
+    <thead><tr><th>Glyph</th><th>State</th><th>Definition (pid alive assumed)</th></tr></thead>
+    <tbody>
+      <tr><td><span class="glyph-b run">●</span></td><td><b>Running</b></td>
+        <td>Transcript mtime &lt; 2 min. Agent is producing output right now.</td></tr>
+      <tr><td><span class="glyph-b idle">◐</span></td><td><b>Idle</b></td>
+        <td>Transcript mtime ≥ 2 min AND no attention sentinel. Turn is complete — sitting at the prompt.</td></tr>
+      <tr><td><span class="glyph-b attn">⚠</span></td><td><b>Awaiting input</b></td>
+        <td>Attention sentinel present. Notification hook fired — progress halted until you answer.</td></tr>
+      <tr><td><span class="glyph-b gone">✕</span></td><td><b>Closed</b> (hidden)</td>
+        <td>pid dead. Never rendered. Extending today's <code>pidAlive</code> guard to the attention path removes
+          the ✕ rows from the BEFORE column.</td></tr>
+    </tbody>
+  </table>
+</div>
+
+</div>
+</body>
+</html>

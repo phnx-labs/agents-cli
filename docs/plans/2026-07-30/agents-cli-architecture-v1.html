@@ -1,0 +1,543 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agents-cli — system design (v1)</title>
+<style>
+  :root{
+    --bg:#0a0a0a; --panel:#111211; --panel-2:#161816; --ink:#e8ebe6; --ink-dim:#9aa295;
+    --line:#242724; --lime:#a3e635; --lime-dim:#6f9e26; --amber:#f4bf4f; --red:#ff6b5e;
+    --cyan:#5ec7d6; --violet:#b08cff; --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+    --sans:'Inter',ui-sans-serif,system-ui,-apple-system,sans-serif;
+    --code-bg:#0d0f0d; --chip:#1a1d19; --shadow:0 1px 0 rgba(255,255,255,.03),0 8px 30px rgba(0,0,0,.5);
+  }
+  html[data-theme="light"]{
+    --bg:#f6f7f4; --panel:#ffffff; --panel-2:#fbfcfa; --ink:#16180f; --ink-dim:#5c6356;
+    --line:#e2e6dc; --lime:#5c8a13; --lime-dim:#7fae2c; --amber:#9a6a00; --red:#c23b2e;
+    --cyan:#0f7d8c; --violet:#6d45c9; --code-bg:#f1f3ec; --chip:#eef1e8; --shadow:0 1px 0 rgba(0,0,0,.02),0 10px 30px rgba(0,0,0,.08);
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.62;font-size:16px;-webkit-font-smoothing:antialiased}
+  a{color:var(--lime);text-decoration:none}a:hover{text-decoration:underline}
+  code,kbd,.mono{font-family:var(--mono)}
+  .wrap{max-width:1120px;margin:0 auto;padding:0 24px}
+  .topbar{position:sticky;top:0;z-index:30;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  .topbar .wrap{display:flex;align-items:center;justify-content:space-between;height:56px}
+  .brand{font-family:var(--mono);font-weight:700;letter-spacing:.02em;font-size:15px}
+  .brand .dot{color:var(--lime)}
+  .vtag{font-family:var(--mono);font-size:11px;color:var(--amber);border:1px solid var(--amber);border-radius:5px;padding:1px 7px;margin-left:8px}
+  .toggle{font-family:var(--mono);font-size:13px;color:var(--ink-dim);background:var(--chip);border:1px solid var(--line);border-radius:8px;padding:6px 12px;cursor:pointer}
+  .toggle:hover{color:var(--ink);border-color:var(--lime-dim)}
+  .hero{padding:60px 0 38px;border-bottom:1px solid var(--line)}
+  .kicker{font-family:var(--mono);font-size:12.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--lime);margin-bottom:18px}
+  h1{font-size:clamp(30px,4.4vw,48px);line-height:1.07;margin:0 0 18px;letter-spacing:-.02em;font-weight:800}
+  h1 .g{color:var(--lime)}
+  .lede{font-size:18.5px;color:var(--ink-dim);max-width:820px;margin:0 0 24px}
+  .lede b{color:var(--ink);font-weight:600}
+  .chips{display:flex;flex-wrap:wrap;gap:9px}
+  .chip{font-family:var(--mono);font-size:12px;color:var(--ink-dim);background:var(--chip);border:1px solid var(--line);border-radius:999px;padding:5px 12px}
+  .chip b{color:var(--lime);font-weight:600}
+  .toc{margin:30px 0 0;padding:18px 20px;background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
+  .toc h4{margin:0 0 12px;font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-dim)}
+  .toc ol{margin:0;padding:0;list-style:none;display:grid;grid-template-columns:1fr 1fr;gap:6px 26px;counter-reset:toc}
+  .toc li{counter-increment:toc;font-size:14.5px;display:flex;gap:10px;align-items:baseline}
+  .toc li::before{content:counter(toc,decimal-leading-zero);font-family:var(--mono);font-size:12px;color:var(--lime-dim);min-width:22px}
+  @media(max-width:720px){.toc ol{grid-template-columns:1fr}}
+  section{padding:50px 0;border-bottom:1px solid var(--line)}
+  .sec-num{font-family:var(--mono);font-size:13px;color:var(--lime);letter-spacing:.1em}
+  h2{font-size:clamp(21px,2.9vw,29px);margin:8px 0 6px;letter-spacing:-.015em;font-weight:750}
+  h3{font-size:17.5px;margin:28px 0 8px;font-weight:650}
+  .sub{color:var(--ink-dim);font-size:15.5px;max-width:850px}
+  p{max-width:850px}
+  ul.tight{max-width:850px;padding-left:18px}ul.tight li{margin:6px 0}
+  .fl{font-family:var(--mono);font-size:12.5px;color:var(--cyan);background:var(--code-bg);border:1px solid var(--line);border-radius:5px;padding:1px 6px;white-space:nowrap}
+  b.k{color:var(--lime)}
+  .badge{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.06em;padding:2px 7px;border-radius:5px;vertical-align:middle;margin-left:8px;border:1px solid;white-space:nowrap}
+  .badge.cli{color:var(--lime);border-color:var(--lime-dim)}
+  .badge.ext{color:var(--violet);border-color:var(--violet)}
+  .badge.hook{color:var(--amber);border-color:var(--amber)}
+  h2 .badge{font-size:11px}
+  .call{margin:22px 0;padding:16px 18px 16px 20px;border-radius:12px;border:1px solid var(--line);background:var(--panel);position:relative;box-shadow:var(--shadow)}
+  .call::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;border-radius:12px 0 0 12px}
+  .call.correct::before{background:var(--lime)}.call.warn::before{background:var(--amber)}.call.hot::before{background:var(--red)}
+  .call .tag{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;font-weight:700;margin-bottom:6px;display:block}
+  .call.correct .tag{color:var(--lime)}.call.warn .tag{color:var(--amber)}.call.hot .tag{color:var(--red)}
+  .call p{margin:2px 0;max-width:none}
+  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto;font-family:var(--mono);font-size:12.7px;line-height:1.6;box-shadow:var(--shadow)}
+  pre .c{color:var(--ink-dim)}pre .g{color:var(--lime)}pre .a{color:var(--amber)}pre .cy{color:var(--cyan)}pre .kw{color:var(--violet)}pre .r{color:var(--red)}
+  table{width:100%;border-collapse:collapse;margin:18px 0;font-size:13.6px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-dim);font-weight:600}
+  td code{font-size:12px;color:var(--cyan)}
+  figure{margin:24px 0}
+  figure svg{width:100%;height:auto;display:block;background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
+  figcaption{font-size:12.5px;color:var(--ink-dim);margin-top:10px;font-family:var(--mono)}
+  /* system-design svg vocabulary */
+  .s-l{font-family:var(--mono);font-size:12px;fill:var(--ink)}
+  .s-s{font-family:var(--mono);font-size:10.3px;fill:var(--ink-dim)}
+  .s-t{font-family:var(--mono);font-size:10.5px;fill:var(--ink-dim)}
+  .stereo{font-family:var(--mono);font-size:9px;fill:var(--ink-dim);letter-spacing:.04em}
+  .actor{fill:var(--panel-2);stroke:var(--ink);stroke-width:1.4}
+  .sysbound{fill:none;stroke:var(--lime-dim);stroke-width:1.4;stroke-dasharray:6 4}
+  .comp{fill:var(--panel-2);stroke:var(--lime-dim);stroke-width:1.3}
+  .ext{fill:var(--panel);stroke:var(--ink-dim);stroke-width:1.2;stroke-dasharray:2 2}
+  .node{fill:none;stroke:var(--cyan);stroke-width:1.4}
+  .proc{fill:var(--panel-2);stroke:var(--ink-dim);stroke-width:1.2}
+  .ds-t{fill:var(--panel-2);stroke:var(--cyan);stroke-width:1.4}
+  .ds-b{fill:var(--panel-2);stroke:var(--cyan);stroke-width:1.4}
+  .life{stroke:var(--line);stroke-width:1.2;stroke-dasharray:3 3}
+  .act{fill:var(--panel-2);stroke:var(--lime-dim);stroke-width:1}
+  .frag{fill:none;stroke:var(--amber);stroke-width:1;stroke-dasharray:4 3}
+  .msg{stroke:var(--ink);stroke-width:1.3;fill:none}
+  .msg-a{stroke:var(--ink-dim);stroke-width:1.2;fill:none;stroke-dasharray:5 3}
+  .flow{stroke:var(--ink-dim);stroke-width:1.4;fill:none}
+  .flow-hot{stroke:var(--red);stroke-width:1.7;fill:none}
+  .flow-lime{stroke:var(--lime);stroke-width:1.6;fill:none}
+  .foot{padding:38px 0 70px;color:var(--ink-dim);font-size:13px;font-family:var(--mono)}
+</style>
+</head>
+<body>
+<div class="topbar"><div class="wrap">
+  <div class="brand">agents<span class="dot">·</span>cli <span style="color:var(--ink-dim)">/ system design</span><span class="vtag">v1</span></div>
+  <button class="toggle" id="tg">◐ theme</button>
+</div></div>
+
+<div class="wrap">
+<header class="hero">
+  <div class="kicker">Design doc · the whole system, not just sessions</div>
+  <h1>What <span class="g">agents-cli</span> is, what it must do, and how it's built</h1>
+  <p class="lede">A technical overview for someone reviewing the design cold: <b>what the system is</b> and the
+    problem it solves, its <b>core features</b>, the <b>requirements</b> it has to meet, the <b>execution scenarios</b>
+    it supports (interactive · headless · teams · across machines · cloud), and then the internals — the
+    <b>distributed execution engine</b> and the <b>session subsystem</b> — with the slow spots and the fix. Diagrams use
+    standard notation (C4 context/component, deployment, UML sequence). Every claim points at a file and line.</p>
+  <div class="chips">
+    <span class="chip">repo <b>agents-cli</b> @ dfe9f011</span>
+    <span class="chip">two programs: <b>CLI</b> + <b>Factory extension</b></span>
+    <span class="chip">supersedes <b>v0</b> (session-focused)</span>
+    <span class="chip">read from source</span>
+  </div>
+  <nav class="toc">
+    <h4>Contents</h4>
+    <ol>
+      <li><a href="#s1">What agents-cli is (system context)</a></li>
+      <li><a href="#s2">Core features</a></li>
+      <li><a href="#s3">Requirements &amp; design goals</a></li>
+      <li><a href="#s4">Execution scenarios</a></li>
+      <li><a href="#s5">Two programs + the CLI's components</a></li>
+      <li><a href="#s6">Distributed execution (topology + sequence)</a></li>
+      <li><a href="#s7">Session identity (three writers)</a></li>
+      <li><a href="#s8">Storage model</a></li>
+      <li><a href="#s9">Reading &amp; indexing: three walkthroughs</a></li>
+      <li><a href="#s10">Live status &amp; the event logs</a></li>
+      <li><a href="#s11">Slow spots &amp; the fix</a></li>
+      <li><a href="#s12">Scope of this doc</a></li>
+    </ol>
+  </nav>
+</header>
+
+<!-- 1 · WHAT IT IS -->
+<section id="s1">
+  <div class="sec-num">01</div>
+  <h2>What agents-cli is</h2>
+  <p class="sub">One command-line program to <b>install, configure, run, and orchestrate many AI coding agents</b>
+  (Claude, Codex, Gemini, Cursor, OpenCode, Grok, Droid, …) — on one machine or across a fleet — plus a separate
+  VS Code extension (Factory) that drives the same engine through a GUI.</p>
+
+<figure>
+<svg viewBox="0 0 1080 470" role="img" aria-label="system context diagram">
+  <defs><marker id="a1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="var(--ink-dim)"/></marker></defs>
+  <text x="24" y="26" class="stereo">C4 — SYSTEM CONTEXT</text>
+
+  <!-- actor -->
+  <circle cx="90" cy="150" r="16" class="actor"/><line x1="90" y1="166" x2="90" y2="200" class="actor"/><line x1="70" y1="180" x2="110" y2="180" class="actor"/><line x1="90" y1="200" x2="74" y2="222" class="actor"/><line x1="90" y1="200" x2="106" y2="222" class="actor"/>
+  <text x="90" y="244" text-anchor="middle" class="s-l">Developer</text>
+  <text x="90" y="260" text-anchor="middle" class="s-s">terminal · IDE</text>
+
+  <!-- system boundary -->
+  <rect x="360" y="60" width="360" height="350" rx="16" class="sysbound"/>
+  <text x="540" y="86" text-anchor="middle" class="stereo">«system»</text>
+  <text x="540" y="104" text-anchor="middle" class="s-l" style="font-size:14px">agents-cli</text>
+  <rect x="392" y="124" width="296" height="52" rx="8" class="comp"/><text x="540" y="146" text-anchor="middle" class="s-l">agents CLI</text><text x="540" y="162" text-anchor="middle" class="s-s">the engine — run, sessions, teams…</text>
+  <rect x="392" y="188" width="296" height="46" rx="8" class="ext"/><text x="540" y="208" text-anchor="middle" class="s-l">Factory VS Code extension</text><text x="540" y="223" text-anchor="middle" class="s-s">separate app · runs the CLI as a subprocess</text>
+  <rect x="392" y="246" width="142" height="44" rx="8" class="comp"/><text x="463" y="266" text-anchor="middle" class="s-s">SessionStart hook</text><text x="463" y="280" text-anchor="middle" class="s-s">installed shell script</text>
+  <rect x="546" y="246" width="142" height="44" rx="8" class="comp"/><text x="617" y="266" text-anchor="middle" class="s-s">local stores</text><text x="617" y="280" text-anchor="middle" class="s-s">sqlite · logs · cache</text>
+  <text x="540" y="326" text-anchor="middle" class="s-s">one machine of a fleet →</text>
+  <text x="540" y="342" text-anchor="middle" class="s-s">each peer runs its own agents-cli</text>
+
+  <!-- external systems -->
+  <rect x="792" y="70" width="264" height="52" rx="8" class="ext"/><text x="924" y="90" text-anchor="middle" class="stereo">«external»</text><text x="924" y="106" text-anchor="middle" class="s-l">Agent harnesses (Claude/Codex/…)</text>
+  <rect x="792" y="134" width="264" height="52" rx="8" class="ext"/><text x="924" y="154" text-anchor="middle" class="stereo">«external»</text><text x="924" y="170" text-anchor="middle" class="s-l">Other machines (the fleet)</text>
+  <rect x="792" y="198" width="264" height="52" rx="8" class="ext"/><text x="924" y="218" text-anchor="middle" class="stereo">«external»</text><text x="924" y="234" text-anchor="middle" class="s-l">Cloud (Rush / Codex / Factory)</text>
+  <rect x="792" y="262" width="264" height="52" rx="8" class="ext"/><text x="924" y="282" text-anchor="middle" class="stereo">«external»</text><text x="924" y="298" text-anchor="middle" class="s-l">GitHub · Linear</text>
+  <rect x="792" y="326" width="264" height="52" rx="8" class="ext"/><text x="924" y="346" text-anchor="middle" class="stereo">«external»</text><text x="924" y="362" text-anchor="middle" class="s-l">OS Keychain (secrets)</text>
+
+  <!-- edges -->
+  <path class="flow" marker-end="url(#a1)" d="M118,180 C240,180 250,150 358,150"/><text x="238" y="142" text-anchor="middle" class="s-t">runs commands</text>
+  <path class="flow" marker-end="url(#a1)" d="M688,150 C740,150 745,96 790,96"/><text x="742" y="128" class="s-t">spawn (subprocess)</text>
+  <path class="flow" marker-end="url(#a1)" d="M688,170 C742,170 748,160 790,160"/><text x="748" y="184" class="s-t">SSH / Tailscale</text>
+  <path class="flow" marker-end="url(#a1)" d="M688,220 C742,222 748,224 790,224"/><text x="742" y="216" class="s-t">dispatch (API)</text>
+  <path class="flow" marker-end="url(#a1)" d="M688,262 C742,275 748,286 790,288"/><text x="742" y="258" class="s-t">PRs · tickets</text>
+  <path class="flow" marker-end="url(#a1)" d="M688,300 C742,330 748,348 790,350"/><text x="742" y="322" class="s-t">get/set (keychain)</text>
+</svg>
+<figcaption>Fig 1 — system context. The developer (or the Factory extension) drives the agents CLI; the CLI drives agent harnesses as subprocesses, reaches other machines over SSH/Tailscale, dispatches to cloud providers, and reads secrets from the OS keychain.</figcaption>
+</figure>
+</section>
+
+<!-- 2 · CORE FEATURES -->
+<section id="s2">
+  <div class="sec-num">02</div>
+  <h2>Core features</h2>
+  <p class="sub">The command surface groups into eight capabilities. All are one CLI over many agent harnesses.</p>
+  <table>
+    <tr><th>Capability</th><th>What it does</th><th>Commands</th></tr>
+    <tr><td><b class="k">Install &amp; versions</b></td><td>install agent CLIs, pin/switch versions, isolated per-version homes, sync config across the fleet</td><td><code>setup</code> · <code>versions</code> · <code>use</code> · <code>upgrade</code> · <code>pull</code>/<code>push</code>/<code>sync</code> · <code>plugins</code> · <code>mcp</code></td></tr>
+    <tr><td><b class="k">Run one agent</b></td><td>launch any harness — interactive or headless — with mode/effort/model, rate-limit fallback, tmux wrap</td><td><code>run</code> · <code>exec</code> · <code>go</code> · <code>profiles</code> · <code>models</code></td></tr>
+    <tr><td><b class="k">Sessions</b></td><td>index + full-text search transcripts, inspect one, live <code>--active</code> status, cross-machine, fork/resume</td><td><code>sessions</code> (+ <code>-tail</code>/<code>-resume</code>/<code>-export</code>/…) · <code>fork</code> · <code>focus</code></td></tr>
+    <tr><td><b class="k">Teams</b></td><td>orchestrate many agents on a dependency DAG, in waves — local, remote, or cloud teammates</td><td><code>teams</code></td></tr>
+    <tr><td><b class="k">Distributed / fleet</b></td><td>run on other machines over SSH/Tailscale; register devices; leases &amp; locks for coordination</td><td><code>ssh</code> · <code>hosts</code> · <code>fleet-capture</code> · <code>lease</code> · <code>lock</code> · <code>serve</code></td></tr>
+    <tr><td><b class="k">Cloud dispatch</b></td><td>hand a task to a cloud provider that clones, works, and opens a PR</td><td><code>cloud</code> · <code>factory</code></td></tr>
+    <tr><td><b class="k">Secrets</b></td><td>OS-keychain-backed bundles, never on disk, injectable into runs across the fleet</td><td><code>secrets</code> (+ <code>-import</code>/<code>-migrate</code>/<code>-sync</code>)</td></tr>
+    <tr><td><b class="k">Automation &amp; observability</b></td><td>drive a browser / native app; event + activity logs; monitors; cost/usage; nudge stuck agents</td><td><code>browser</code> · <code>computer</code> · <code>pty</code> · <code>events</code>/<code>feed</code>/<code>activity</code> · <code>monitors</code> · <code>watchdog</code> · <code>output</code>/<code>cost</code></td></tr>
+  </table>
+</section>
+
+<!-- 3 · REQUIREMENTS -->
+<section id="s3">
+  <div class="sec-num">03</div>
+  <h2>Requirements &amp; design goals</h2>
+  <p class="sub">What the framework has to satisfy — and where it does (all met, except showing live status cheaply — the last row).</p>
+  <table>
+    <tr><th>Requirement</th><th>How it's met</th><th>Status</th></tr>
+    <tr><td><b class="k">Unified interface</b> — one CLI to launch any agent (Claude, Codex, Gemini, …)</td><td>a single table maps each agent to how it's launched, so the command is the same whichever agent you pick (<span class="fl">exec.ts:463</span> <code>AGENT_COMMANDS</code>)</td><td>met</td></tr>
+    <tr><td><b class="k">Same run path everywhere</b> — interactive, headless, teams, remote</td><td>everything funnels through the <code>agents run</code> argv; teams &amp; remote build the same command line (<span class="fl">teams/agents.ts:2219</span>)</td><td>met</td></tr>
+    <tr><td><b class="k">Distributed by default</b> — a fleet, not one box</td><td>one reused SSH connection; detached remote launch with log+exit mirroring (<span class="fl">hosts/dispatch.ts:202</span>, <span class="fl">ssh-exec.ts:76</span>)</td><td>met</td></tr>
+    <tr><td><b class="k">Cross-platform</b> — macOS, Linux, Windows</td><td>POSIX exec vs Windows <code>.cmd</code> shim path split (<span class="fl">exec.ts:947</span>); native computer helpers per-OS</td><td>met</td></tr>
+    <tr><td><b class="k">Isolated config per version</b></td><td>per-agent config dirs pinned in the run env (<span class="fl">exec.ts:325</span>); <code>import --isolated</code> sandboxes a setup</td><td>met</td></tr>
+    <tr><td><b class="k">Secure secrets</b> — never on disk</td><td>OS-keychain-backed bundles, metadata only in config (<span class="fl">share/config.ts:78</span>, <code>secrets</code>)</td><td>met</td></tr>
+    <tr><td><b class="k">Observable</b> — what ran, what's running</td><td>indexed session history (SQLite+FTS5) + append-only event/activity logs</td><td>met</td></tr>
+    <tr><td><b class="k">Checking "what's running" must be cheap</b></td><td>today it isn't: every time you ask, the CLI re-reads and re-parses the session files from scratch, instead of computing the answer once and reusing it (§11)</td><td style="color:var(--red)">unmet — §11</td></tr>
+  </table>
+</section>
+
+<!-- 4 · SCENARIOS -->
+<section id="s4">
+  <div class="sec-num">04</div>
+  <h2>Execution scenarios</h2>
+  <p class="sub">Five ways an agent gets launched. They all reduce to the same <code>agents run</code> core, wrapped differently.</p>
+<figure>
+<svg viewBox="0 0 1080 300" role="img" aria-label="scenario routing">
+  <defs><marker id="a4" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="var(--ink-dim)"/></marker></defs>
+  <text x="24" y="24" class="stereo">HOW EACH SCENARIO REACHES THE SHARED CORE</text>
+  <!-- scenarios left -->
+  <rect x="20" y="44" width="230" height="40" rx="8" class="proc"/><text x="34" y="69" class="s-s">① interactive — the shim / <tspan class="s-l">agents run</tspan></text>
+  <rect x="20" y="92" width="230" height="40" rx="8" class="proc"/><text x="34" y="117" class="s-s">② headless — <tspan class="s-l">run --headless</tspan></text>
+  <rect x="20" y="140" width="230" height="40" rx="8" class="proc"/><text x="34" y="165" class="s-s">③ teams — <tspan class="s-l">teams start</tspan> (DAG)</text>
+  <rect x="20" y="188" width="230" height="40" rx="8" class="proc"/><text x="34" y="213" class="s-s">④ remote — <tspan class="s-l">--host</tspan> / a peer teammate</text>
+  <rect x="20" y="236" width="230" height="40" rx="8" class="proc"/><text x="34" y="261" class="s-s">⑤ cloud — <tspan class="s-l">cloud run</tspan></text>
+  <!-- middle: build argv -->
+  <rect x="410" y="120" width="220" height="72" rx="10" class="comp"/><text x="520" y="150" text-anchor="middle" class="s-l">buildRunArgv()</text><text x="520" y="167" text-anchor="middle" class="s-s">agents run &lt;agent&gt; …</text><text x="520" y="182" text-anchor="middle" class="s-s">teams/agents.ts:2219</text>
+  <!-- right: exec -->
+  <rect x="790" y="120" width="230" height="72" rx="10" class="comp"/><text x="905" y="150" text-anchor="middle" class="s-l">spawnAgent()</text><text x="905" y="167" text-anchor="middle" class="s-s">buildExecCommand + spawn</text><text x="905" y="182" text-anchor="middle" class="s-s">exec.ts:1268</text>
+  <!-- edges ①② go straight to spawn; ③④ via argv; ⑤ diverges -->
+  <path class="flow" marker-end="url(#a4)" d="M250,64 C620,64 700,140 788,150"/>
+  <path class="flow" marker-end="url(#a4)" d="M250,112 C500,112 640,150 788,156"/>
+  <path class="flow" marker-end="url(#a4)" d="M250,160 L408,158"/>
+  <path class="flow" marker-end="url(#a4)" d="M250,208 C330,208 340,175 408,172"/>
+  <path class="flow" marker-end="url(#a4)" d="M630,158 L788,158"/>
+  <path class="flow-lime" marker-end="url(#a4)" d="M250,256 C560,256 900,256 905,196"/>
+  <text x="470" y="250" class="s-t" fill="var(--lime)">⑤ cloud diverges — provider API, not local spawn</text>
+  <text x="300" y="150" class="s-t">③④ build the same argv</text>
+</svg>
+<figcaption>Fig 2 — scenario routing. ①–④ all end at the same local spawn via the shared <code>agents run</code> argv (teams/remote wrap it detached); only ⑤ cloud leaves the machine to a provider API.</figcaption>
+</figure>
+  <table>
+    <tr><th>Scenario</th><th>Wrapper</th><th>Where it runs</th><th>How it's tracked</th></tr>
+    <tr><td>① interactive</td><td>foreground TTY (opt. tmux)</td><td>this machine</td><td>pid-registry + hook (§7)</td></tr>
+    <tr><td>② headless</td><td>detached, one-shot</td><td>this machine</td><td>pid-registry + session file</td></tr>
+    <tr><td>③ teams</td><td>sentinel-wrapped <code>/bin/sh</code>, in DAG waves</td><td>this machine</td><td><code>&lt;uuid&gt;/meta.json</code> + <code>.exit</code></td></tr>
+    <tr><td>④ remote</td><td>SSH → detached <code>nohup</code></td><td>a peer</td><td>remote <code>.log</code>/<code>.exit</code>, byte-tailed</td></tr>
+    <tr><td>⑤ cloud</td><td>provider API</td><td>the provider</td><td>provider task id → PR</td></tr>
+  </table>
+</section>
+
+<!-- 5 · TWO PROGRAMS + COMPONENTS -->
+<section id="s5">
+  <div class="sec-num">05</div>
+  <h2>Two programs, and the CLI's components <span class="badge cli">CLI</span> <span class="badge ext">EXT</span></h2>
+  <p class="sub">agents-cli is <b>two separate programs</b>: the <code>agents</code> CLI (<code>apps/cli</code>) and the Factory
+  VS Code extension (<code>apps/factory</code>). They share no memory and no code — the extension runs the CLI as a
+  <b>subprocess</b> and parses its JSON. The <b>hook</b> is a shell script the CLI installs into each agent's config.
+  This doc is about the CLI.</p>
+<figure>
+<svg viewBox="0 0 1080 430" role="img" aria-label="component diagram">
+  <defs><marker id="a5" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="var(--ink-dim)"/></marker></defs>
+  <text x="24" y="24" class="stereo">C4 — COMPONENTS (apps/cli)</text>
+
+  <!-- extension container (left) -->
+  <rect x="20" y="70" width="180" height="120" rx="12" class="ext"/><text x="110" y="92" text-anchor="middle" class="stereo">«separate app»</text><text x="110" y="110" text-anchor="middle" class="s-l">Factory extension</text><text x="110" y="132" text-anchor="middle" class="s-s">watcher · webview</text><text x="110" y="150" text-anchor="middle" class="s-s">runs the CLI as</text><text x="110" y="165" text-anchor="middle" class="s-s">a subprocess</text>
+
+  <!-- CLI boundary -->
+  <rect x="250" y="52" width="600" height="330" rx="14" class="sysbound"/><text x="550" y="74" text-anchor="middle" class="stereo">«process» agents CLI</text>
+  <rect x="272" y="90" width="556" height="34" rx="7" class="comp"/><text x="550" y="112" text-anchor="middle" class="s-l">command router (index.ts)</text>
+
+  <rect x="272" y="140" width="172" height="66" rx="8" class="comp"/><text x="358" y="164" text-anchor="middle" class="s-l">exec engine</text><text x="358" y="180" text-anchor="middle" class="s-s">run · shim · env</text><text x="358" y="195" text-anchor="middle" class="s-s">exec.ts</text>
+  <rect x="454" y="140" width="172" height="66" rx="8" class="comp"/><text x="540" y="164" text-anchor="middle" class="s-l">teams orchestrator</text><text x="540" y="180" text-anchor="middle" class="s-s">DAG · scheduler</text><text x="540" y="195" text-anchor="middle" class="s-s">teams/agents.ts</text>
+  <rect x="636" y="140" width="192" height="66" rx="8" class="comp"/><text x="732" y="164" text-anchor="middle" class="s-l">SSH layer</text><text x="732" y="180" text-anchor="middle" class="s-s">mux · dispatch</text><text x="732" y="195" text-anchor="middle" class="s-s">ssh-exec · dispatch</text>
+
+  <rect x="272" y="220" width="172" height="66" rx="8" class="comp"/><text x="358" y="244" text-anchor="middle" class="s-l">sessions engine</text><text x="358" y="260" text-anchor="middle" class="s-s">discover·parse·active</text><text x="358" y="275" text-anchor="middle" class="s-s">lib/session/*</text>
+  <rect x="454" y="220" width="172" height="66" rx="8" class="comp"/><text x="540" y="244" text-anchor="middle" class="s-l">event bus</text><text x="540" y="260" text-anchor="middle" class="s-s">events + activity</text><text x="540" y="275" text-anchor="middle" class="s-s">events.ts</text>
+  <rect x="636" y="220" width="192" height="66" rx="8" class="comp"/><text x="732" y="244" text-anchor="middle" class="s-l">secrets · cloud</text><text x="732" y="260" text-anchor="middle" class="s-s">keychain · providers</text>
+
+  <!-- datastores row -->
+  <g transform="translate(300,312)"><ellipse cx="34" cy="10" rx="34" ry="8" class="ds-t"/><path d="M0,10 v34 a34,8 0 0 0 68,0 v-34" class="ds-b"/><text x="34" y="30" text-anchor="middle" class="s-s">sessions.db</text></g>
+  <rect x="410" y="316" width="130" height="42" rx="6" class="proc"/><text x="475" y="342" text-anchor="middle" class="s-s">events / activity</text>
+  <rect x="556" y="316" width="150" height="42" rx="6" class="proc" stroke-dasharray="4 3"/><text x="631" y="342" text-anchor="middle" class="s-s">pid files (cache)</text>
+
+  <!-- external harnesses (right) -->
+  <rect x="892" y="140" width="168" height="66" rx="8" class="ext"/><text x="976" y="166" text-anchor="middle" class="stereo">«external»</text><text x="976" y="184" text-anchor="middle" class="s-s">agent harness procs</text>
+
+  <!-- edges -->
+  <path class="flow" marker-end="url(#a5)" d="M200,130 C230,130 240,106 270,106"/><text x="205" y="120" class="s-t">exec()</text>
+  <path class="flow" marker-end="url(#a5)" d="M444,173 L452,173"/>
+  <path class="flow" marker-end="url(#a5)" d="M626,173 L634,173"/>
+  <path class="flow" marker-end="url(#a5)" d="M828,173 L890,173"/><text x="838" y="164" class="s-t">spawn</text>
+  <path class="flow" marker-end="url(#a5)" d="M358,286 L350,310"/>
+  <path class="flow" marker-end="url(#a5)" d="M470,286 C475,296 475,300 476,314"/>
+</svg>
+<figcaption>Fig 3 — the CLI's components. The router dispatches to the exec engine (which owns all harness knowledge), the teams orchestrator, the SSH layer, the sessions engine, the event bus, and secrets/cloud. Datastores are the SQLite index, the flat event logs, and the temporary pid files.</figcaption>
+</figure>
+</section>
+
+<!-- 6 · DISTRIBUTED EXECUTION -->
+<section id="s6">
+  <div class="sec-num">06</div>
+  <h2>Distributed execution <span class="badge cli">CLI</span></h2>
+  <p class="sub">The design's real spine: run agents on any machine in the fleet, without holding a live connection.
+  Three shared primitives — <code>buildRunArgv</code> (the command), <code>ssh-exec</code> (transport), <code>launchDetached</code>
+  (fire-and-forget) — carry every remote run and every remote teammate.</p>
+
+  <h3>Topology — how work spreads across the fleet</h3>
+<figure>
+<svg viewBox="0 0 1080 380" role="img" aria-label="deployment topology">
+  <defs><marker id="a6" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="var(--cyan)"/></marker></defs>
+  <text x="24" y="24" class="stereo">DEPLOYMENT — the fleet over one Tailscale network</text>
+  <rect x="20" y="40" width="1040" height="320" rx="14" class="frag" stroke="var(--violet)"/>
+  <text x="40" y="60" class="stereo" fill="var(--violet)">«network» Tailscale · SSH (ControlMaster reused)</text>
+
+  <!-- orchestrator node -->
+  <rect x="50" y="90" width="250" height="230" rx="10" class="node"/><text x="175" y="112" text-anchor="middle" class="stereo">«device» zion (interactive)</text>
+  <rect x="72" y="130" width="206" height="46" rx="7" class="comp"/><text x="175" y="150" text-anchor="middle" class="s-l">orchestrator</text><text x="175" y="165" text-anchor="middle" class="s-s">AgentManager · supervisor</text>
+  <rect x="72" y="188" width="206" height="40" rx="7" class="proc"/><text x="175" y="212" text-anchor="middle" class="s-s">local teammate (foreground)</text>
+  <g transform="translate(120,244)"><ellipse cx="28" cy="8" rx="28" ry="6" class="ds-t"/><path d="M0,8 v22 a28,6 0 0 0 56,0 v-22" class="ds-b"/><text x="28" y="24" text-anchor="middle" class="s-s">local mirror</text></g>
+
+  <!-- worker node A -->
+  <rect x="410" y="90" width="290" height="230" rx="10" class="node"/><text x="555" y="112" text-anchor="middle" class="stereo">«device» yosemite-s0 (worker)</text>
+  <rect x="432" y="132" width="246" height="42" rx="7" class="proc"/><text x="555" y="150" text-anchor="middle" class="s-s">detached: nohup agents run …</text><text x="555" y="165" text-anchor="middle" class="s-s">stdio → files, no live conn</text>
+  <rect x="432" y="186" width="118" height="40" rx="6" class="proc" stroke-dasharray="4 3"/><text x="491" y="210" text-anchor="middle" class="s-s">&lt;id&gt;.log</text>
+  <rect x="560" y="186" width="118" height="40" rx="6" class="proc" stroke-dasharray="4 3"/><text x="619" y="210" text-anchor="middle" class="s-s">&lt;id&gt;.exit</text>
+  <rect x="432" y="238" width="246" height="40" rx="7" class="ext"/><text x="555" y="262" text-anchor="middle" class="s-s">agent harness (its own agents-cli)</text>
+
+  <!-- worker node B -->
+  <rect x="770" y="90" width="270" height="230" rx="10" class="node"/><text x="905" y="112" text-anchor="middle" class="stereo">«device» mac-mini (worker)</text>
+  <rect x="792" y="132" width="226" height="42" rx="7" class="proc"/><text x="905" y="150" text-anchor="middle" class="s-s">detached teammate</text><text x="905" y="165" text-anchor="middle" class="s-s">+ .log / .exit</text>
+  <rect x="792" y="238" width="226" height="40" rx="7" class="ext"/><text x="905" y="262" text-anchor="middle" class="s-s">agent harness</text>
+
+  <!-- ssh edges -->
+  <path class="node" marker-end="url(#a6)" d="M278,150 C360,150 360,150 430,150"/><text x="330" y="142" text-anchor="middle" class="s-t" fill="var(--cyan)">launch (1 SSH)</text>
+  <path class="node" stroke-dasharray="4 3" marker-end="url(#a6)" d="M430,206 C360,206 360,206 300,200"/><text x="360" y="222" text-anchor="middle" class="s-t" fill="var(--cyan)">poll: tail log + read exit</text>
+  <path class="node" marker-end="url(#a6)" d="M278,160 C520,90 700,110 792,150"/>
+</svg>
+<figcaption>Fig 4 — deployment. The orchestrator on zion launches a detached process on each worker with <em>one</em> SSH call, then polls by copying new log bytes + reading the <code>.exit</code> sentinel. No live SSH is held open. Every device runs its own agents-cli.</figcaption>
+</figure>
+
+  <h3>Sequence — a remote teammate, start to done</h3>
+<figure>
+<svg viewBox="0 0 1080 400" role="img" aria-label="uml sequence remote dispatch">
+  <defs><marker id="am" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="var(--ink)"/></marker>
+    <marker id="amd" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="var(--ink-dim)"/></marker></defs>
+  <text x="24" y="22" class="stereo">UML — SEQUENCE (teams remote teammate)</text>
+  <!-- lifelines -->
+  <g class="s-s">
+    <rect x="40" y="40" width="120" height="34" rx="6" class="comp"/><text x="100" y="61" text-anchor="middle" class="s-l">Developer</text><line x1="100" y1="74" x2="100" y2="370" class="life"/>
+    <rect x="230" y="40" width="140" height="34" rx="6" class="comp"/><text x="300" y="61" text-anchor="middle" class="s-l">AgentManager</text><line x1="300" y1="74" x2="300" y2="370" class="life"/>
+    <rect x="470" y="40" width="120" height="34" rx="6" class="comp"/><text x="530" y="61" text-anchor="middle" class="s-l">ssh-exec</text><line x1="530" y1="74" x2="530" y2="370" class="life"/>
+    <rect x="690" y="40" width="150" height="34" rx="6" class="comp"/><text x="765" y="61" text-anchor="middle" class="s-l">remote host</text><line x1="765" y1="74" x2="765" y2="370" class="life"/>
+    <rect x="930" y="40" width="120" height="34" rx="6" class="ext"/><text x="990" y="61" text-anchor="middle" class="s-l">agent proc</text><line x1="990" y1="74" x2="990" y2="370" class="life"/>
+  </g>
+  <!-- messages -->
+  <path class="msg" marker-end="url(#am)" d="M100,96 L298,96"/><text x="120" y="90" class="s-t">teams start</text>
+  <rect x="296" y="96" width="8" height="250" class="act"/>
+  <path class="msg" marker-end="url(#am)" d="M304,120 L528,120"/><text x="330" y="114" class="s-t">launchDetached(argv)</text>
+  <path class="msg" marker-end="url(#am)" d="M530,140 L763,140"/><text x="560" y="134" class="s-t">nohup agents run … &gt; .log; echo $? &gt; .exit</text>
+  <path class="msg" marker-end="url(#am)" d="M765,160 L988,160"/><text x="790" y="154" class="s-t">spawn harness</text>
+  <path class="msg-a" marker-end="url(#amd)" d="M763,180 L306,180"/><text x="430" y="174" class="s-t">pgid pid (returns immediately)</text>
+  <!-- loop fragment -->
+  <rect x="270" y="200" width="540" height="120" rx="6" class="frag"/><text x="286" y="216" class="stereo" fill="var(--amber)">loop [each supervisor wave, until .exit is set]</text>
+  <path class="msg" marker-end="url(#am)" d="M304,240 L528,240"/><text x="330" y="234" class="s-t">tail .log (byte offset) + read .exit</text>
+  <path class="msg-a" marker-end="url(#amd)" d="M528,262 L306,262"/><text x="360" y="256" class="s-t">new bytes → local mirror</text>
+  <path class="msg" marker-end="url(#am)" d="M304,292 L528,292"/><text x="330" y="286" class="s-t">prefetchRemoteStatus: kill -0, one SSH/host</text>
+  <!-- completion -->
+  <path class="msg-a" marker-end="url(#amd)" d="M763,344 L306,344"/><text x="420" y="338" class="s-t" fill="var(--lime)">.exit = 0 → COMPLETED → startReady next wave</text>
+</svg>
+<figcaption>Fig 5 — the remote teammate lifecycle. Launch returns immediately (the process is detached); the supervisor polls each wave by tailing the log and reading the exit sentinel, batching liveness to one SSH per host. A parsed exit code flips the status and releases the next DAG wave.</figcaption>
+</figure>
+
+  <ul class="tight">
+    <li><b class="k">Shared command</b> — teams &amp; <code>--host</code> both build an <code>agents run …</code> argv (<span class="fl">teams/agents.ts:2219</span>); teams never call the internal spawn.</li>
+    <li><b class="k">Shared transport</b> — one SSH primitive with connection reuse (<span class="fl">ssh-exec.ts:76</span>), one detached-launch helper for both <code>run --host</code> and teams (<span class="fl">hosts/dispatch.ts:189</span>, "lives in exactly one place").</li>
+    <li><b class="k">Placement</b> — pin → pool-of-one → fewest-running-teammates → local (<span class="fl">scheduler.ts:76</span>). <span style="color:var(--amber)">Counts teammates, not real CPU/mem</span> — a known gap.</li>
+  </ul>
+</section>
+
+<!-- 7 · SESSION IDENTITY (carried, condensed) -->
+<section id="s7">
+  <div class="sec-num">07</div>
+  <h2>Session identity — three writers <span class="badge cli">CLI</span> <span class="badge hook">HOOK</span></h2>
+  <p class="sub">"Which running process is which session?" A pid → session-id pointer, written to a file (never the DB — a pid is reused, so a saved row goes stale; <span class="fl">reader.ts:113</span>). Three things can write it, at different moments.</p>
+<figure>
+<svg viewBox="0 0 1080 250" role="img" aria-label="identity writers">
+  <defs><marker id="a7" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="var(--ink-dim)"/></marker></defs>
+  <text x="24" y="22" class="stereo">WRITERS → FILES → READERS</text>
+  <rect x="20" y="40" width="300" height="44" rx="8" class="comp"/><text x="34" y="60" class="s-l">① ag run — generates UUID (Claude)</text><text x="34" y="76" class="s-s">at launch · exact · exec.ts:1193</text>
+  <rect x="20" y="96" width="300" height="44" rx="8" class="comp"/><text x="34" y="116" class="s-l">② shim — captures passed --session-id</text><text x="34" y="132" class="s-s">at launch · if present · exec.ts:1011</text>
+  <rect x="20" y="164" width="300" height="44" rx="8" class="proc"/><text x="34" y="184" class="s-l">③ SessionStart hook</text><text x="34" y="200" class="s-s">after boot · agent's own payload · hook.sh</text>
+  <rect x="470" y="66" width="220" height="50" rx="8" class="proc" stroke-dasharray="4 3" stroke="var(--lime-dim)"/><text x="580" y="88" text-anchor="middle" class="s-l">by-pid/&lt;pid&gt;.json</text><text x="580" y="104" text-anchor="middle" class="s-s">the CLI's file</text>
+  <rect x="470" y="150" width="220" height="50" rx="8" class="proc" stroke-dasharray="4 3"/><text x="580" y="172" text-anchor="middle" class="s-l">terminals/sessions/&lt;pid&gt;.json</text><text x="580" y="188" text-anchor="middle" class="s-s">the extension's file</text>
+  <rect x="820" y="66" width="200" height="50" rx="8" class="comp"/><text x="920" y="88" text-anchor="middle" class="s-l">CLI · sessions --active</text><text x="920" y="104" text-anchor="middle" class="s-s">active.ts:28</text>
+  <rect x="820" y="150" width="200" height="50" rx="8" class="ext"/><text x="920" y="172" text-anchor="middle" class="s-l">the extension</text><text x="920" y="188" text-anchor="middle" class="s-s">factory/core/liveSession.ts</text>
+  <path class="flow-lime" marker-end="url(#a7)" d="M320,62 C400,62 410,86 468,88"/>
+  <path class="flow-lime" marker-end="url(#a7)" d="M320,118 C400,118 410,98 468,96"/>
+  <path class="flow" marker-end="url(#a7)" d="M320,186 C400,186 410,178 468,176"/>
+  <path class="flow" marker-end="url(#a7)" d="M690,90 L818,90"/>
+  <path class="flow" marker-end="url(#a7)" d="M690,175 L818,175"/>
+</svg>
+<figcaption>Fig 6 — three writers, two files, two programs. ①② (CLI, immediate, exact only for Claude) write the CLI's file; ③ (the agent's own hook, delayed but authoritative, and the only one that sees agents we didn't launch) writes the extension's file.</figcaption>
+</figure>
+  <p><b class="k">Who assigns the id differs per harness:</b> Claude — we do (generate a UUID, pass <code>--session-id</code>, exact at launch). Codex/Cursor/Grok — the agent does; we learn it from its hook (stdin JSON, or env for Grok). Gemini/Antigravity — best-effort. OpenCode/others — no hook; discovered from the file. <b>In teams,</b> a Claude teammate's <code>agent_id</code> <em>is</em> its session id (<span class="fl">agents.ts:1610</span>); others stay split until discovered. <b>Headless</b> uses the same path. The two files hold the same data and could be one (two writers, one file) — joined by <code>terminal_id</code>/<code>launch_id</code>.</p>
+</section>
+
+<!-- 8 · STORAGE -->
+<section id="s8">
+  <div class="sec-num">08</div>
+  <h2>Storage model <span class="badge cli">CLI</span></h2>
+  <p class="sub">Five kinds of store, chosen by how long the data must live, who writes it, and how it's read. Box shape = kind.</p>
+<figure>
+<svg viewBox="0 0 1080 300" role="img" aria-label="storage map">
+  <g transform="translate(24,14)">
+    <ellipse cx="10" cy="8" rx="10" ry="4" class="ds-t"/><path d="M0,8 v10 a10,4 0 0 0 20,0 v-10" class="ds-b"/><text x="26" y="15" class="s-s">SQLite</text>
+    <rect x="110" y="2" width="18" height="15" rx="2" class="proc" stroke="var(--amber)"/><text x="134" y="15" class="s-s">flat log/json</text>
+    <rect x="270" y="2" width="18" height="15" rx="2" class="proc" stroke-dasharray="4 3"/><text x="294" y="15" class="s-s">temp (per-pid)</text>
+    <rect x="430" y="2" width="18" height="15" rx="8" class="proc" stroke="var(--violet)"/><text x="454" y="15" class="s-s">socket</text>
+  </g>
+  <text x="24" y="52" class="stereo" fill="var(--lime)">KEPT — survives reboot</text>
+  <g transform="translate(24,64)"><ellipse cx="110" cy="14" rx="110" ry="13" class="ds-t"/><path d="M0,14 v78 a110,13 0 0 0 220,0 v-78" class="ds-b"/><text x="110" y="10" text-anchor="middle" class="s-l">sessions.db</text><text x="110" y="40" text-anchor="middle" class="s-s">sessions · session_text(fts5)</text><text x="110" y="56" text-anchor="middle" class="s-s">scan_ledger · meta</text><text x="110" y="76" text-anchor="middle" class="s-s">~/.agents/.history/sessions/</text></g>
+  <path d="M270,74 h50 l9,11 h101 v78 h-160 z" class="proc" stroke="var(--lime-dim)"/><text x="350" y="104" text-anchor="middle" class="s-l">transcripts</text><text x="350" y="122" text-anchor="middle" class="s-s">~/.claude, ~/.codex, …</text><text x="350" y="138" text-anchor="middle" class="s-s">read on demand</text>
+  <rect x="500" y="76" width="150" height="46" rx="6" class="proc" stroke="var(--amber)"/><text x="575" y="98" text-anchor="middle" class="s-l">events.jsonl</text><text x="575" y="114" text-anchor="middle" class="s-s">one shared · locked</text>
+  <path d="M672,80 h34 l7,9 h61 v40 h-102 z" class="proc" stroke="var(--amber)"/><text x="723" y="104" text-anchor="middle" class="s-s">activity/&lt;id&gt;.jsonl</text><text x="723" y="120" text-anchor="middle" class="s-s">per session · lock-free</text>
+  <ellipse cx="905" cy="90" rx="70" ry="12" class="ds-t"/><path d="M835,90 v34 a70,12 0 0 0 140,0 v-34" class="ds-b"/><text x="905" y="88" text-anchor="middle" class="s-s">opencode.db · antigravity.db</text>
+
+  <text x="24" y="182" class="stereo">TEMPORARY — ~/.agents/.cache · dies with the pid</text>
+  <rect x="24" y="194" width="210" height="44" rx="6" class="proc" stroke-dasharray="4 3"/><text x="129" y="214" text-anchor="middle" class="s-s">by-pid/&lt;pid&gt;.json (CLI)</text><text x="129" y="230" text-anchor="middle" class="s-s">terminals/sessions/ (ext)</text>
+  <rect x="250" y="194" width="200" height="44" rx="6" class="proc" stroke-dasharray="4 3"/><text x="350" y="214" text-anchor="middle" class="s-s">agents/&lt;uuid&gt;/meta.json</text><text x="350" y="230" text-anchor="middle" class="s-s">one per teammate</text>
+  <rect x="466" y="194" width="210" height="44" rx="6" class="proc" stroke-dasharray="4 3"/><text x="571" y="214" text-anchor="middle" class="s-s">hosts/&lt;id&gt;.log + .exit</text><text x="571" y="230" text-anchor="middle" class="s-s">remote output + exit code</text>
+  <rect x="692" y="194" width="210" height="44" rx="14" class="proc" stroke="var(--violet)"/><text x="797" y="214" text-anchor="middle" class="s-s">watchdog.sock</text><text x="797" y="230" text-anchor="middle" class="s-s">live nudges (extension)</text>
+  <text x="24" y="272" class="s-s">Rule: keep &amp; search → SQLite · a shared growing log → flat file · tied to one process → temp file · a live poke → socket.</text>
+</svg>
+<figcaption>Fig 7 — storage map. Durable, searchable data is SQLite; append-only streams are flat files; per-process runtime state is temporary cache files; live pokes go over a socket.</figcaption>
+</figure>
+</section>
+
+<!-- 9 · WALKTHROUGHS -->
+<section id="s9">
+  <div class="sec-num">09</div>
+  <h2>Reading &amp; indexing: three walkthroughs <span class="badge cli">CLI</span></h2>
+  <p class="sub">The three things you do most. The chip on the right answers "re-parse a file, or just read the database?"</p>
+  <ul class="tight">
+    <li><b class="k">List / search</b> — a SQLite read; only files whose size/mtime changed get re-scanned (<span class="fl">db.ts:103</span> <code>scan_ledger</code>). Not a re-parse.</li>
+    <li><b class="k"><code>sessions --active</code></b> — scans <code>ps</code> for live agents, maps pid→session, then <b>re-reads the tail</b> of each to infer working/waiting + tokens/sec (<span class="fl">active.ts:389</span>). Per <em>machine</em>, not per session; SSH fan-out for the fleet.</li>
+    <li><b class="k"><code>sessions &lt;id&gt;</code></b> — DB lookup for the file path, then a <b>full parse</b> of the whole transcript (<span class="fl">sessions.ts:1634</span>). The DB never stores the body.</li>
+  </ul>
+  <div class="call correct"><span class="tag">The exact answer</span>
+    <p>Listing = indexed DB read. Live status = re-parse the tail, per machine, every call. Reading one session = full re-parse. Only the last two touch a raw file.</p></div>
+</section>
+
+<!-- 10 · LIVE + EVENTS -->
+<section id="s10">
+  <div class="sec-num">10</div>
+  <h2>Live status &amp; the event logs <span class="badge cli">CLI</span></h2>
+  <p class="sub">Two ways the CLI records "what's happening" — and neither is how the live "is it working / waiting?" view is produced (that's the on-demand re-parse in §9 / §11).</p>
+  <table>
+    <tr><th></th><th>events.ts</th><th>activity.ts</th></tr>
+    <tr><td>records</td><td>things the <b>tool</b> does (ran a command, made a team)</td><td>things the <b>agent</b> does (made a plan, opened a PR)</td></tr>
+    <tr><td>where</td><td>one shared <code>events.jsonl</code></td><td>one file per session <code>activity/&lt;id&gt;.jsonl</code></td></tr>
+    <tr><td>volume / lock</td><td>low · <b>locked</b></td><td>high · <b>lock-free</b> (one writer per file)</td></tr>
+  </table>
+  <p><b class="k">activity is events</b> — same record shape, read together by <span class="fl">event-stream.ts:57</span>. The split is only to avoid lock contention. Key point: activity is <em>already a push feed</em> written at hook time — yet the live view (<code>--active</code>) ignores it and re-parses tails instead.</p>
+</section>
+
+<!-- 11 · BOTTLENECKS + FIX -->
+<section id="s11">
+  <div class="sec-num">11</div>
+  <h2>Slow spots &amp; the fix <span class="badge cli">CLI</span></h2>
+  <p class="sub">The distributed and session engines are well-factored. The cost is in <b>producing the live "what's running" view</b> — the code behind <code>sessions --active</code> — and it's in the CLI itself.</p>
+  <table>
+    <tr><th>#</th><th>Slow spot</th><th>Fix</th></tr>
+    <tr><td>1</td><td>the CLI recomputes live state on every call — and the extension polls it every 3s, per machine, spawning a fresh process each time (<span class="fl">active.ts:389</span>, <span class="fl">remoteSessions.vscode.ts:211</span>)</td><td>a resident CLI process holds state and pushes changes; consumers subscribe</td></tr>
+    <tr><td>2</td><td>fleet <code>--active</code> spawns a fresh process on each peer per tick</td><td>each peer pushes deltas; caller subscribes once</td></tr>
+    <tr><td>3</td><td>the same harness-parsing logic is written in ~5 places</td><td>one adapter per harness, used everywhere</td></tr>
+    <tr><td>4</td><td>the index only updates when asked, behind one lock, up to 5s late</td><td>let the watcher update the index on file change</td></tr>
+    <tr><td>5</td><td>the event logs have no DB and nothing pushes them</td><td>back them with SQLite + a change feed</td></tr>
+  </table>
+<figure>
+<svg viewBox="0 0 1080 250" role="img" aria-label="before after">
+  <defs><marker id="a11" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="var(--lime)"/></marker></defs>
+  <text x="24" y="24" class="stereo" fill="var(--red)">NOW — ask, re-parse, discard · every 3s, per machine</text>
+  <text x="560" y="24" class="stereo" fill="var(--lime)">FIX — parse once, push changes, subscribe</text>
+  <line x1="530" y1="36" x2="530" y2="240" class="life"/>
+  <rect x="24" y="50" width="150" height="40" rx="7" class="proc"/><text x="99" y="74" text-anchor="middle" class="s-s">session files</text>
+  <rect x="24" y="120" width="150" height="42" rx="7" class="proc" stroke="var(--red)"/><text x="99" y="140" text-anchor="middle" class="s-s">fresh CLI process</text><text x="99" y="155" text-anchor="middle" class="s-s">(start-up + scan)</text>
+  <rect x="24" y="190" width="150" height="40" rx="7" class="proc"/><text x="99" y="214" text-anchor="middle" class="s-s">the UI</text>
+  <rect x="230" y="120" width="160" height="42" rx="7" class="proc" stroke="var(--red)"/><text x="310" y="140" text-anchor="middle" class="s-s">peers × SSH</text><text x="310" y="155" text-anchor="middle" class="s-s">(fresh proc each)</text>
+  <path class="flow" d="M99,90 L99,118"/><path class="flow-hot" marker-end="url(#a11)" d="M99,162 L99,188"/><path class="flow-hot" marker-end="url(#a11)" d="M174,141 L228,141"/>
+  <text x="60" y="248" class="s-t" fill="var(--red)">many short-lived processes × 3s</text>
+  <rect x="560" y="50" width="150" height="40" rx="7" class="proc"/><text x="635" y="74" text-anchor="middle" class="s-s">session files</text>
+  <rect x="560" y="108" width="190" height="42" rx="7" class="comp"/><text x="655" y="128" text-anchor="middle" class="s-s">one watcher process</text><text x="655" y="143" text-anchor="middle" class="s-s">parse once, emit changes</text>
+  <g transform="translate(560,172)"><ellipse cx="95" cy="10" rx="95" ry="9" class="ds-t"/><path d="M0,10 v22 a95,9 0 0 0 190,0 v-22" class="ds-b"/><text x="95" y="28" text-anchor="middle" class="s-s">store + change feed (SQLite)</text></g>
+  <rect x="790" y="60" width="120" height="34" rx="6" class="proc"/><text x="850" y="82" text-anchor="middle" class="s-s">CLI</text>
+  <rect x="790" y="104" width="120" height="34" rx="6" class="proc"/><text x="850" y="126" text-anchor="middle" class="s-s">extension</text>
+  <rect x="790" y="148" width="120" height="34" rx="6" class="proc"/><text x="850" y="170" text-anchor="middle" class="s-s">other machines</text>
+  <rect x="930" y="104" width="126" height="42" rx="7" class="comp"/><text x="993" y="124" text-anchor="middle" class="s-s">harness adapter</text><text x="993" y="139" text-anchor="middle" class="s-s">(format lives here)</text>
+  <path class="flow-lime" marker-end="url(#a11)" d="M635,90 L650,106"/><path class="flow-lime" marker-end="url(#a11)" d="M655,150 L655,170"/>
+  <path class="flow-lime" marker-end="url(#a11)" d="M750,188 L770,188 L850,142 L850,140"/>
+  <path class="flow-lime" marker-end="url(#a11)" d="M750,188 L770,188 L850,96 L850,96"/>
+  <path class="flow-lime" marker-end="url(#a11)" d="M750,190 L850,190 L850,184"/>
+  <path class="flow-lime" marker-end="url(#a11)" d="M930,125 L752,125"/>
+  <text x="600" y="238" class="s-t" fill="var(--lime)">parse once · readers get only what changed</text>
+</svg>
+<figcaption>Fig 8 — the fix. One long-running process parses each file once and writes changes to a store others subscribe to; per-harness format lives in one adapter. Two of the five "what's happening" paths (poll + event log) collapse into one.</figcaption>
+</figure>
+</section>
+
+<!-- 12 · SCOPE -->
+<section id="s12">
+  <div class="sec-num">12</div>
+  <h2>Scope of this doc</h2>
+  <ul class="tight">
+    <li><b class="k">Covered in depth:</b> the distributed execution engine (§6), session identity/storage/reading (§7–9), and the live-status + event system with its bottlenecks (§10–11) — the parts that carry the "run agents anywhere, see what they're doing" promise.</li>
+    <li><b class="k">Overviewed:</b> version management, config sync, secrets, cloud dispatch, browser/computer automation (§2) — named and placed, not traced line-by-line.</li>
+    <li><b class="k">Deliberately out of scope:</b> the Factory extension's internal UI, and the agent harnesses themselves (external systems in Fig 1).</li>
+  </ul>
+</section>
+
+<div class="foot wrap">agents-cli @ dfe9f011 · v1 (system design) · supersedes v0 (session-focused) · every file:line read from source.</div>
+</div>
+<script>
+  (function(){var root=document.documentElement,btn=document.getElementById('tg');
+    try{var p=window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches;root.setAttribute('data-theme',p?'light':'dark');}catch(e){}
+    btn.addEventListener('click',function(){root.setAttribute('data-theme',root.getAttribute('data-theme')==='dark'?'light':'dark');});})();
+</script>
+</body>
+</html>

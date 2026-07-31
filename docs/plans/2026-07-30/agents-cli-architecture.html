@@ -1,0 +1,854 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agents-cli — the distributed core</title>
+<style>
+  :root{
+    --bg:#0a0a0a; --panel:#111211; --panel-2:#161816; --ink:#e8ebe6; --ink-dim:#9aa295;
+    --line:#242724; --lime:#a3e635; --lime-dim:#6f9e26; --amber:#f4bf4f; --red:#ff6b5e;
+    --cyan:#5ec7d6; --violet:#b08cff; --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+    --sans:'Inter',ui-sans-serif,system-ui,-apple-system,sans-serif;
+    --code-bg:#0d0f0d; --chip:#1a1d19; --shadow:0 1px 0 rgba(255,255,255,.03),0 8px 30px rgba(0,0,0,.5);
+  }
+  html[data-theme="light"]{
+    --bg:#f6f7f4; --panel:#ffffff; --panel-2:#fbfcfa; --ink:#16180f; --ink-dim:#5c6356;
+    --line:#e2e6dc; --lime:#5c8a13; --lime-dim:#7fae2c; --amber:#9a6a00; --red:#c23b2e;
+    --cyan:#0f7d8c; --violet:#6d45c9; --code-bg:#f1f3ec; --chip:#eef1e8; --shadow:0 1px 0 rgba(0,0,0,.02),0 10px 30px rgba(0,0,0,.08);
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.62;
+    font-size:16px;-webkit-font-smoothing:antialiased}
+  a{color:var(--lime);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,kbd,.mono{font-family:var(--mono)}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+
+  .topbar{position:sticky;top:0;z-index:30;background:color-mix(in srgb,var(--bg) 88%,transparent);
+    backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  .topbar .wrap{display:flex;align-items:center;justify-content:space-between;height:56px}
+  .brand{font-family:var(--mono);font-weight:700;letter-spacing:.02em;font-size:15px}
+  .brand .dot{color:var(--lime)}
+  .toggle{font-family:var(--mono);font-size:13px;color:var(--ink-dim);background:var(--chip);
+    border:1px solid var(--line);border-radius:8px;padding:6px 12px;cursor:pointer}
+  .toggle:hover{color:var(--ink);border-color:var(--lime-dim)}
+
+  .hero{padding:64px 0 40px;border-bottom:1px solid var(--line)}
+  .kicker{font-family:var(--mono);font-size:12.5px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--lime);margin-bottom:18px}
+  h1{font-size:clamp(30px,4.6vw,50px);line-height:1.06;margin:0 0 20px;letter-spacing:-.02em;font-weight:800}
+  h1 .g{color:var(--lime)}
+  .lede{font-size:19px;color:var(--ink-dim);max-width:770px;margin:0 0 26px}
+  .lede b{color:var(--ink);font-weight:600}
+  .chips{display:flex;flex-wrap:wrap;gap:9px;margin-bottom:8px}
+  .chip{font-family:var(--mono);font-size:12px;color:var(--ink-dim);background:var(--chip);
+    border:1px solid var(--line);border-radius:999px;padding:5px 12px}
+  .chip b{color:var(--lime);font-weight:600}
+
+  .toc{margin:30px 0 0;padding:18px 20px;background:var(--panel);border:1px solid var(--line);
+    border-radius:14px;box-shadow:var(--shadow)}
+  .toc h4{margin:0 0 12px;font-family:var(--mono);font-size:12px;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--ink-dim)}
+  .toc ol{margin:0;padding:0;list-style:none;display:grid;grid-template-columns:1fr 1fr;gap:6px 26px;
+    counter-reset:toc}
+  .toc li{counter-increment:toc;font-size:14.5px;display:flex;gap:10px;align-items:baseline}
+  .toc li::before{content:counter(toc,decimal-leading-zero);font-family:var(--mono);font-size:12px;
+    color:var(--lime-dim);min-width:22px}
+  @media(max-width:720px){.toc ol{grid-template-columns:1fr}}
+
+  section{padding:52px 0;border-bottom:1px solid var(--line)}
+  .sec-num{font-family:var(--mono);font-size:13px;color:var(--lime);letter-spacing:.1em}
+  h2{font-size:clamp(22px,3vw,30px);margin:8px 0 6px;letter-spacing:-.015em;font-weight:750}
+  h3{font-size:18px;margin:30px 0 8px;font-weight:650}
+  .sub{color:var(--ink-dim);font-size:15.5px;max-width:830px}
+  p{max-width:830px}
+  ul.tight{max-width:830px;padding-left:18px}
+  ul.tight li{margin:6px 0}
+  .fl{font-family:var(--mono);font-size:12.5px;color:var(--cyan);background:var(--code-bg);
+    border:1px solid var(--line);border-radius:5px;padding:1px 6px;white-space:nowrap}
+  b.k{color:var(--lime)}
+
+  .call{margin:22px 0;padding:16px 18px 16px 20px;border-radius:12px;border:1px solid var(--line);
+    background:var(--panel);position:relative;box-shadow:var(--shadow)}
+  .call::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;border-radius:12px 0 0 12px}
+  .call.correct::before{background:var(--lime)}
+  .call.warn::before{background:var(--amber)}
+  .call.hot::before{background:var(--red)}
+  .call .tag{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+    font-weight:700;margin-bottom:6px;display:block}
+  .call.correct .tag{color:var(--lime)}
+  .call.warn .tag{color:var(--amber)}
+  .call.hot .tag{color:var(--red)}
+  .call p{margin:2px 0;max-width:none}
+
+  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:10px;padding:14px 16px;
+    overflow:auto;font-family:var(--mono);font-size:12.7px;line-height:1.6;box-shadow:var(--shadow)}
+  pre b.cap{display:block;color:var(--ink-dim);font-weight:400;font-size:11.5px;margin-bottom:8px;
+    letter-spacing:.04em;border-bottom:1px dashed var(--line);padding-bottom:6px}
+  pre b.cap .t{color:var(--amber)}
+  pre b.cap .s{color:var(--lime)}
+  pre .c{color:var(--ink-dim)}
+  pre .g{color:var(--lime)}
+  pre .a{color:var(--amber)}
+  pre .r{color:var(--red)}
+  pre .cy{color:var(--cyan)}
+  pre .kw{color:var(--violet)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:820px){.grid2{grid-template-columns:1fr}}
+
+  table{width:100%;border-collapse:collapse;margin:20px 0;font-size:13.6px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--ink-dim);font-weight:600}
+  td .fl{white-space:normal}
+  td code{font-size:12px;color:var(--cyan)}
+  .tagp{font-family:var(--mono);font-size:10.5px;padding:1px 7px;border-radius:999px;border:1px solid var(--line);color:var(--amber);border-color:var(--amber)}
+
+  figure{margin:26px 0}
+  figure svg{width:100%;height:auto;display:block;background:var(--panel);border:1px solid var(--line);
+    border-radius:14px;box-shadow:var(--shadow)}
+  figcaption{font-size:13px;color:var(--ink-dim);margin-top:10px;font-family:var(--mono)}
+  .svg-l{font-family:var(--mono);font-size:12px;fill:var(--ink)}
+  .svg-s{font-family:var(--mono);font-size:10.5px;fill:var(--ink-dim)}
+  .svg-t{font-family:var(--mono);font-size:11px;fill:var(--ink-dim)}
+  .box{fill:var(--panel-2);stroke:var(--line);stroke-width:1.2}
+  .box-hot{fill:var(--panel-2);stroke:var(--red);stroke-width:1.6}
+  .box-lime{fill:var(--panel-2);stroke:var(--lime-dim);stroke-width:1.4}
+  .edge{stroke:var(--ink-dim);stroke-width:1.4;fill:none}
+  .edge-hot{stroke:var(--red);stroke-width:1.8;fill:none}
+  .edge-lime{stroke:var(--lime);stroke-width:1.6;fill:none}
+  .cyl-top{fill:var(--panel-2);stroke:var(--cyan);stroke-width:1.5}
+  .cyl-body{fill:var(--panel-2);stroke:var(--cyan);stroke-width:1.5}
+  .cyl-line{stroke:var(--cyan);stroke-width:1.1;opacity:.5}
+  .file{fill:var(--panel-2);stroke:var(--amber);stroke-width:1.4}
+  .file-eph{fill:var(--panel-2);stroke:var(--ink-dim);stroke-width:1.3;stroke-dasharray:5 3}
+  .folder{fill:var(--panel-2);stroke:var(--lime-dim);stroke-width:1.4}
+  .sock{fill:var(--panel-2);stroke:var(--violet);stroke-width:1.5}
+  .arrow{stroke:var(--ink-dim);stroke-width:1.4;fill:none;marker-end:url(#ah)}
+
+  .rank{display:inline-flex;align-items:center;justify-content:center;font-family:var(--mono);
+    font-weight:700;font-size:13px;width:26px;height:26px;border-radius:7px;margin-right:10px}
+  .rank.p1{background:var(--red);color:#160a08}
+  .rank.p2{background:var(--amber);color:#1a1200}
+  .rank.p3{background:var(--lime);color:#0c1400}
+  .bn{margin:18px 0;padding:16px 18px;background:var(--panel);border:1px solid var(--line);
+    border-radius:12px;box-shadow:var(--shadow)}
+  .bn h4{margin:0 0 6px;font-size:16.5px;display:flex;align-items:center}
+  .bn .ev{font-family:var(--mono);font-size:12px;color:var(--ink-dim);margin:8px 0}
+  .bn .fix{border-top:1px dashed var(--line);margin-top:12px;padding-top:10px;font-size:14.5px}
+  .bn .fix b{color:var(--lime)}
+
+  .foot{padding:40px 0 70px;color:var(--ink-dim);font-size:13px;font-family:var(--mono)}
+
+  .badge{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.06em;padding:2px 7px;
+    border-radius:5px;vertical-align:middle;margin-left:10px;border:1px solid;white-space:nowrap}
+  .badge.cli{color:var(--lime);border-color:var(--lime-dim)}
+  .badge.ext{color:var(--violet);border-color:var(--violet)}
+  .badge.hook{color:var(--amber);border-color:var(--amber)}
+  h2 .badge{font-size:11px}
+  .boundary{margin:24px 0 0;display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:720px){.boundary{grid-template-columns:1fr}}
+  .boundary .col{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;
+    box-shadow:var(--shadow)}
+  .boundary .col.cli{border-left:4px solid var(--lime)}
+  .boundary .col.ext{border-left:4px solid var(--violet)}
+  .boundary h5{margin:0 0 8px;font-family:var(--mono);font-size:12px;letter-spacing:.06em}
+  .boundary .col.cli h5{color:var(--lime)}
+  .boundary .col.ext h5{color:var(--violet)}
+  .boundary ul{margin:0;padding-left:16px;font-size:13.5px}
+  .boundary li{margin:4px 0}
+  .boundary .foc{font-family:var(--mono);font-size:10.5px;color:var(--ink-dim);float:right}
+</style>
+</head>
+<body>
+<div class="topbar"><div class="wrap">
+  <div class="brand">agents<span class="dot">·</span>cli <span style="color:var(--ink-dim)">/ architecture</span></div>
+  <button class="toggle" id="tg">◐ theme</button>
+</div></div>
+
+<div class="wrap">
+<header class="hero">
+  <div class="kicker">Codebase onboarding · the distributed core</div>
+  <h1>How <span class="g">agents-cli</span> runs, watches, and shows agents across a fleet</h1>
+  <p class="lede">A plain-language tour of the parts that matter for scale — every claim points at the exact
+    file and line: the <b>data structures</b>, <b>session ids per harness</b>, <b>where things are stored</b>,
+    <b>what actually runs</b> on the common commands, and <b>teams / running agents on other machines</b>.
+    Then the slow spots, and the one change that fixes most of them.</p>
+  <div class="chips">
+    <span class="chip">repo <b>agents-cli</b> @ dfe9f011</span>
+    <span class="chip">apps <b>cli</b> · <b>factory</b></span>
+    <span class="chip">pkg <b>session-tracker</b></span>
+    <span class="chip">every claim has a <b>file:line</b></span>
+    <span class="chip">read from source, not guessed</span>
+  </div>
+
+  <p style="font-size:14.5px;color:var(--ink-dim);margin:22px 0 4px">agents-cli is <b style="color:var(--ink)">two
+    separate programs</b>, not one: the <code>agents</code> command-line tool (<code>apps/cli</code>) and the Factory
+    VS Code extension (<code>apps/factory</code>). They share no memory and no code — the extension launches the CLI
+    as a <b style="color:var(--ink)">subprocess</b> and parses its JSON output. A third piece, the <b style="color:var(--ink)">hook</b>,
+    is a shell script the CLI installs into each agent's own config; it runs inside the agent process. This doc is about the CLI.</p>
+  <div class="boundary">
+    <div class="col cli">
+      <h5>CLI <span class="foc">apps/cli — the focus</span></h5>
+      <ul>
+        <li>the index + parsers (<code>db.ts</code>, <code>discover.ts</code>, <code>parse.ts</code>)</li>
+        <li>live state on demand (<code>active.ts</code>, <code>sessions --active</code>)</li>
+        <li>its own pid→id file (<code>pid-registry</code>, <code>by-pid/</code>)</li>
+        <li>the event + activity logs; <code>agents feed</code></li>
+        <li>teams, <code>run</code>, SSH to other machines</li>
+      </ul>
+    </div>
+    <div class="col ext">
+      <h5>EXTENSION <span class="foc">apps/factory — runs the CLI as a subprocess</span></h5>
+      <ul>
+        <li>polls <code>agents sessions --active --json</code> every 3s</li>
+        <li>the machine-wide file-watcher + "which window" matching</li>
+        <li>its own pid→id read (<code>session-tracker</code>, <code>terminals/sessions/</code>)</li>
+        <li>the watchdog socket (nudges)</li>
+        <li>reshapes CLI JSON into the Floor UI — no data models of its own</li>
+      </ul>
+    </div>
+  </div>
+  <p style="font-size:13.5px;color:var(--ink-dim);margin-top:12px">Every heading below is tagged
+    <span class="badge cli">CLI</span> <span class="badge ext">EXT</span> or <span class="badge hook">HOOK</span>
+    so it's clear which program writes or reads it. If you're optimizing, the CLI is where it counts — the extension
+    is just a client that calls it.</p>
+
+  <nav class="toc">
+    <h4>What's inside</h4>
+    <ol>
+      <li><a href="#s1">Session identity: who assigns the id, who records it</a></li>
+      <li><a href="#s2">The data structures (3 CLI, 1 extension)</a></li>
+      <li><a href="#s3">Session ids, per harness</a></li>
+      <li><a href="#s4">Where each thing is stored</a></li>
+      <li><a href="#s5">Listing = a SQLite index, updated only for changed files</a></li>
+      <li><a href="#s6">Three walkthroughs: what actually runs</a></li>
+      <li><a href="#s7">The extension asks the CLI every 3s; it doesn't get pushed to</a></li>
+      <li><a href="#s8">One file-watcher for the whole machine</a></li>
+      <li><a href="#s9">events vs activity: two logs, one shape</a></li>
+      <li><a href="#s10">Teams &amp; running agents on other machines</a></li>
+      <li><a href="#s11">"What's happening": 3 CLI channels + 2 extension</a></li>
+      <li><a href="#s12">The slow spots, ranked</a></li>
+      <li><a href="#s13">The fix: compute once, hand it out</a></li>
+    </ol>
+  </nav>
+</header>
+
+<!-- 1 -->
+<section id="s1">
+  <div class="sec-num">01</div>
+  <h2>Session identity: who assigns the id, who records it, when <span class="badge cli">CLI</span> <span class="badge hook">HOOK</span> <span class="badge ext">EXT</span></h2>
+  <p class="sub">"Session" means two things. A <b>transcript</b> (the conversation on disk — everything from §2 on) and an
+  <b>identity</b> (which running process is which session). This section is the identity half, because it's the part
+  people find confusing — three different things can write "pid → session id", and which one fires depends on the
+  harness and how the agent was launched.</p>
+
+  <h3>Start here: an agent is a process, and we need to name it</h3>
+  <p>An agent is one OS process with a pid. To say "this terminal is running session <code>4d…</code>" something has to
+  map that pid to a session id, and store it in a file named after the pid (never the database — a pid is an
+  OS-recycled number, so a saved <code>pid 1234 → session-abc</code> row becomes a lie the moment 1234 is reused; a file
+  named <code>1234.json</code> is overwritten by the next agent and deleted when the pid dies — <span class="fl">reader.ts:113</span>).
+  The twist: <b>the id doesn't come from one place.</b> Depending on the harness, either <em>we</em> pick it, or the
+  <em>agent</em> picks it and we find out later.</p>
+
+  <h3>Three writers put "pid → id" on disk — and they fire at different moments</h3>
+<figure>
+<svg viewBox="0 0 1040 340" role="img" aria-label="session identity write paths">
+  <defs>
+    <marker id="ah2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="var(--ink-dim)"/></marker>
+  </defs>
+  <text x="20" y="26" class="svg-t">WRITERS (when they fire)</text>
+  <text x="470" y="26" class="svg-t">FILES</text>
+  <text x="820" y="26" class="svg-t">READERS</text>
+
+  <!-- writers -->
+  <rect x="20" y="42" width="300" height="52" rx="8" class="box-lime"/>
+  <text x="34" y="63" class="svg-l">① ag run — generates a UUID (Claude)</text>
+  <text x="34" y="81" class="svg-s">at launch · exact · exec.ts:1276,1193</text>
+  <rect x="20" y="106" width="300" height="52" rx="8" class="box-lime"/>
+  <text x="34" y="127" class="svg-l">② the shim — captures a passed --session-id</text>
+  <text x="34" y="145" class="svg-s">at launch · if present · exec.ts:1011</text>
+  <rect x="20" y="182" width="300" height="52" rx="8" class="box"/>
+  <text x="34" y="203" class="svg-l">③ the agent's SessionStart hook</text>
+  <text x="34" y="221" class="svg-s">after start · reads the agent's payload · hook.sh</text>
+
+  <!-- files -->
+  <rect x="470" y="70" width="230" height="60" rx="8" class="file-eph" stroke="var(--lime-dim)"/>
+  <text x="585" y="94" text-anchor="middle" class="svg-l">pid-registry</text>
+  <text x="585" y="112" text-anchor="middle" class="svg-s">by-pid/&lt;pid&gt;.json</text>
+  <rect x="470" y="176" width="230" height="60" rx="8" class="file-eph"/>
+  <text x="585" y="200" text-anchor="middle" class="svg-l">session-tracker</text>
+  <text x="585" y="218" text-anchor="middle" class="svg-s">terminals/sessions/&lt;pid&gt;.json</text>
+
+  <!-- readers -->
+  <rect x="820" y="70" width="200" height="60" rx="8" class="box"/>
+  <text x="920" y="94" text-anchor="middle" class="svg-l">CLI</text>
+  <text x="920" y="112" text-anchor="middle" class="svg-s">sessions --active · active.ts:28</text>
+  <rect x="820" y="176" width="200" height="60" rx="8" class="box"/>
+  <text x="920" y="200" text-anchor="middle" class="svg-l">the extension</text>
+  <text x="920" y="218" text-anchor="middle" class="svg-s">factory/core/liveSession.ts</text>
+
+  <!-- edges writers->files -->
+  <path d="M320,68 C400,68 410,96 468,98" class="edge-lime" marker-end="url(#ah2)"/>
+  <path d="M320,132 C400,132 410,112 468,110" class="edge-lime" marker-end="url(#ah2)"/>
+  <path d="M320,208 L468,206" class="edge" marker-end="url(#ah2)"/>
+  <!-- files->readers -->
+  <path d="M700,100 L818,100" class="edge" marker-end="url(#ah2)"/>
+  <path d="M700,206 L818,206" class="edge" marker-end="url(#ah2)"/>
+
+  <text x="360" y="270" class="svg-s"><tspan fill="var(--lime)">①②</tspan> write the CLI's file the instant the process spawns.  <tspan fill="var(--ink-dim)">③</tspan> writes the extension's file once the agent boots and emits its hook.</text>
+  <text x="360" y="288" class="svg-s">Same data (pid → id), two files, two programs. The join key already exists: the hook records terminal_id / launch_id (env the launcher sets).</text>
+</svg>
+<figcaption>Fig 2 — three writers, two files, two readers. ①② are the CLI's launcher/shim (immediate, exact-only-for-Claude); ③ is the agent's own hook (delayed, authoritative, covers agents we never launched).</figcaption>
+</figure>
+  <ul class="tight">
+    <li><b class="k">① <code>ag run</code></b> <span class="badge cli">CLI</span> — for Claude it <em>generates</em> the id (a UUID) and passes <code>--session-id</code>, which Claude uses to create the session with exactly that id (<span class="fl">exec.ts:1276</span>, <span class="fl">:821</span>). So the id is known before the process runs → written immediately, exact (<span class="fl">exec.ts:1193</span>).</li>
+    <li><b class="k">② the shim</b> <span class="badge cli">CLI</span> — the transparent wrapper (<code>execShimPassthrough</code>, <span class="fl">exec.ts:976</span>) forwards raw args untouched. It doesn't invent an id, but if a caller (Claude Code background jobs, an IDE) passed <code>--session-id</code>, it records that exact id via <code>extractSessionIdArg</code> (<span class="fl">exec.ts:1014</span>). Vital on Windows, where there's no <code>lsof</code> to recover a process's cwd afterwards.</li>
+    <li><b class="k">③ the SessionStart hook</b> <span class="badge hook">HOOK</span> — a polyglot shell hook installed in each agent's own config. It reads the id from the agent's own payload and writes the extension's file, <em>after</em> the agent boots. It's the only writer that sees agents <b>we never launched</b> (you typing <code>claude</code> in a terminal) — but only for harnesses that expose a hook, and only after a short lag (<code>trackSpawn</code> polls up to 5s — <span class="fl">index.ts:40</span>).</li>
+  </ul>
+
+  <h3>Who assigns the id — it differs per harness</h3>
+  <p>This is the crux of "why isn't it uniform." The dividing line is <b>who names the session</b>:</p>
+  <table>
+    <tr><th>Harness</th><th>Who assigns the id</th><th>How the CLI knows it at launch</th><th>Hook payload (③)</th></tr>
+    <tr><td><b class="k">claude</b></td><td><b>we do</b> — generate a UUID, pass <code>--session-id</code></td><td><b>exact, immediately</b> (pid-registry)</td><td>stdin JSON <code>session_id</code></td></tr>
+    <tr><td><b class="k">codex</b></td><td>the agent</td><td>not known at launch → learned from ③ or the file (id is <em>inside</em> the <code>rollout-…</code> file)</td><td>stdin JSON <code>session_id</code></td></tr>
+    <tr><td><b class="k">cursor</b></td><td>the agent</td><td>from ③</td><td>stdin JSON <code>session_id</code> / <code>conversation_id</code></td></tr>
+    <tr><td><b class="k">grok</b></td><td>the agent</td><td>from ③</td><td><b>env</b> <code>GROK_SESSION_ID</code> (method <code>hook-env</code>)</td></tr>
+    <tr><td><b class="k">gemini · antigravity</b></td><td>the agent</td><td>best-effort ③, else the file scan</td><td>stdin JSON, best-effort (payload TBD upstream)</td></tr>
+    <tr><td><b class="k">opencode · others</b></td><td>the agent</td><td>only from the file scan; cwd-correlation until then</td><td><b>no hook</b> — <code>hook.sh</code> exits</td></tr>
+  </table>
+  <p>So Claude is the only harness where the id is <em>ours</em> and known up front. For everyone else the agent owns the
+  id and we discover it — via its hook (if it has one) or by reading it out of the transcript later. That's why the
+  pid-registry's <code>sessionId</code> is often empty for non-Claude at launch: the entry still records pid + cwd + agent
+  so <code>--active</code> can correlate by folder until the real id shows up.</p>
+
+  <h3>The two files, and can it be one?</h3>
+  <table>
+    <tr><th></th><th>pid-registry <span class="badge cli">CLI</span></th><th>session-tracker <span class="badge hook">HOOK</span>→<span class="badge ext">EXT</span></th></tr>
+    <tr><td><b>Written by</b></td><td>① <code>ag run</code> / ② the shim</td><td>③ the agent's hook</td></tr>
+    <tr><td><b>When</b></td><td>at launch (immediate)</td><td>after the agent boots (delayed)</td></tr>
+    <tr><td><b>Covers</b></td><td>only launches <b>we</b> make</td><td><b>any</b> start, incl. user-typed / IDE — if the harness has a hook</td></tr>
+    <tr><td><b>Exact id?</b></td><td>only when known at launch (Claude, or a passed <code>--session-id</code>)</td><td>authoritative, from the agent's own payload</td></tr>
+    <tr><td><b>Read by</b></td><td>the CLI (<span class="fl">active.ts:28</span>)</td><td>the extension (<span class="fl">factory/core/liveSession.ts</span>)</td></tr>
+  </table>
+  <div class="call warn"><span class="tag">Can we collapse to one? — yes</span>
+    <p>Neither file subsumes the other today (immediate-but-our-launches-only vs delayed-but-any-launch), which is why
+    both exist. But they hold the <b>same</b> data and can be merged: <b>one <code>pid → id</code> file, two writers</b> — the
+    launcher writes it at spawn (pid + cwd + any id it knows), the hook fills in the authoritative id once the agent
+    emits it. The join already exists — the hook records <code>terminal_id</code> / <code>launch_id</code> from env
+    (<code>AGENT_TERMINAL_ID</code> set by the extension, <code>AGENT_LAUNCH_ID</code> by the launcher). Both the CLI and the
+    extension then read the one file. This is the real "one file, two writers" fix — not "put it in the database."</p></div>
+
+  <h3>In teams and headless runs</h3>
+  <ul class="tight">
+    <li><b class="k">Teams · Claude teammate</b> — the team generates one UUID as the teammate's <code>agentId</code> and passes it as <code>--session-id</code>, so <b>the agent_id and the Claude session id are the same string</b> (one identity for the teammate) — <span class="fl">agents.ts:1610</span>, <span class="fl">:2288</span>.</li>
+    <li><b class="k">Teams · non-Claude teammate</b> — "other agents don't expose a launch-time" id (<span class="fl">agents.ts:1668</span>), so the <code>agentId</code> and the session id stay separate until ③ / the file reveals it.</li>
+    <li><b class="k">Teams · remote teammate</b> — the teammate runs <code>agents run …</code> over SSH, so its pid-registry entry lives on the <b>remote</b> box. The supervisor doesn't use it — it tracks completion via the <code>.log</code>/<code>.exit</code> files (§6C, §10).</li>
+    <li><b class="k">Headless</b> (<code>ag run --headless</code>) — same run path as interactive: still writes the pid-registry (<span class="fl">exec.ts:1373</span>), Claude still gets a generated <code>--session-id</code>, and ③ still fires if the harness supports it. Only the TTY is missing.</li>
+  </ul>
+
+  <h3>The other meaning: a session's <em>transcript</em></h3>
+  <p>Everything from §2 on is about the other "session" — the conversation on disk (one file or DB row per session):
+  its id format, indexing, storage, and reading.</p>
+</section>
+
+<!-- 2 · DATA MODELS -->
+<section id="s2">
+  <div class="sec-num">02</div>
+  <h2>The data structures <span class="badge cli">CLI</span></h2>
+  <p class="sub">Four record types. <b>Three belong to the CLI</b> (the DB row, the CLI's pid→id, the event log).
+  The fourth, <code>SessionState</code>, is the <b>extension's</b> pid→id — I include it so the pair is complete, but
+  the extension owns no models beyond it; it reshapes the CLI's JSON into a view. Two are temporary (deleted when the
+  process exits); two are saved to disk.</p>
+
+  <div class="grid2">
+    <pre><b class="cap"><span class="t">TEMPORARY · EXTENSION reads this</span> · session-tracker/src/types.ts:29</b><span class="kw">interface</span> SessionState {   <span class="c">// pid → session id (hook writes; extension reads)</span>
+  session_id: <span class="cy">string</span>;
+  agent: <span class="cy">'claude'|'codex'|'gemini'|'cursor'</span>
+       <span class="cy">|'grok'|'antigravity'|'opencode'</span>;
+  cwd: <span class="cy">string</span>;
+  pid: <span class="cy">number</span>;
+  terminal_id?: <span class="cy">string</span>;   <span class="c">// VS Code tab</span>
+  launch_id?: <span class="cy">string</span>;     <span class="c">// ag run tag</span>
+  ts: <span class="cy">number</span>;
+  method: <span class="cy">'hook-stdin'|'hook-env'</span>
+        <span class="cy">|'fs-watch'|'stdout-banner'</span>;
+}</pre>
+    <pre><b class="cap"><span class="t">TEMPORARY · the CLI's pid→id</span> · pid-registry.ts:23</b><span class="kw">interface</span> PidSessionEntry {  <span class="c">// ag run's exact map</span>
+  pid: <span class="cy">number</span>;
+  agent: <span class="cy">string</span>;
+  sessionId?: <span class="cy">string</span>;  <span class="c">// exact, from --session-id</span>
+  cwd?: <span class="cy">string</span>;
+  tmuxPane?: <span class="cy">string</span>; <span class="c">// diagnostics only</span>
+  startedAtMs: <span class="cy">number</span>;
+}</pre>
+  </div>
+
+  <pre><b class="cap"><span class="s">SAVED ON DISK</span> · lib/session/db.ts:47 — the `sessions` table (SQLite), one row per transcript</b><span class="g">CREATE TABLE sessions</span> (
+  id <span class="a">TEXT PRIMARY KEY</span>,     <span class="c">-- the session id (each harness names it differently — see §3)</span>
+  short_id TEXT, agent TEXT, origin TEXT <span class="c">DEFAULT 'cli'</span>,  routine_name, routine_run_id,
+  version, account, timestamp TEXT, last_activity TEXT,
+  project, cwd, git_branch, topic, label,                <span class="c">-- who / where / what it's called</span>
+  message_count, token_count, output_tokens, cost_usd, duration_ms,   <span class="c">-- counts</span>
+  file_path <span class="a">TEXT NOT NULL</span>, file_mtime_ms, file_size, scanned_at,   <span class="c">-- where the file is + when we last read it</span>
+  is_team_origin, pr_url, pr_number, worktree_slug, ticket_id, plan   <span class="c">-- work it produced</span>
+);
+<span class="c">-- fast lookups on: timestamp · cwd · agent · file_path · short_id</span>
+<span class="g">CREATE VIRTUAL TABLE session_text USING fts5</span>(session_id, label, topic, project, content);  <span class="c">-- text search</span></pre>
+
+  <pre><b class="cap"><span class="s">SAVED ON DISK</span> · events.ts:160 — one log line = EventMeta &amp; EventPayload</b><span class="kw">interface</span> EventMeta {   <span class="c">// stamped on every line automatically</span>
+  ts, tz, tzName, hostname, platform, arch, pid, ppid,
+  event: <span class="cy">EventType</span>, level: <span class="cy">'audit'|'warn'|'info'|'debug'</span>,
+  caller, session?, osUser, transport: <span class="cy">'local'|'ssh'</span>, sshClientIp?
+}
+<span class="kw">interface</span> EventPayload {   <span class="c">// varies by event</span>
+  agent?, version?, sessionId?, cwd?, module?, command?, args?,
+  input?, output?, <span class="r">prompt_length? / prompt_sha256?</span>  <span class="c">// the raw prompt is NEVER saved — people paste secrets into it</span>,
+  durationMs?, startupMs?, exitCode?, status?, error?, errorStack?
+}</pre>
+  <p>The two temporary records are named by <b>pid</b>. The saved row is named by <b>session id</b> and found by
+  <b>file path</b> — there is no pid column. A pid never reaches permanent storage, for the reuse reason in §1.</p>
+</section>
+
+<!-- 3 · SESSION IDENTITY -->
+<section id="s3">
+  <div class="sec-num">03</div>
+  <h2>Session ids, per harness <span class="badge cli">CLI</span></h2>
+  <p class="sub">Every harness names its sessions differently. In the database, <code>id</code> is whatever that harness
+  uses; <code>short_id</code> is the first 8 characters, for typing. Two harnesses add a prefix — and for Codex the
+  file name and the id are not the same string.</p>
+  <table>
+    <tr><th>Harness</th><th>What <code>id</code> is</th><th>Where it lives · format</th><th>short_id</th></tr>
+    <tr><td><b class="k">claude</b></td><td>the file name (a UUID)</td><td><code>~/.claude/projects/&lt;slug&gt;/&lt;uuid&gt;.jsonl</code></td><td><code>id.slice(0,8)</code></td></tr>
+    <tr><td><b class="k">codex</b> <span class="tagp">prefix</span></td><td>a UUID from <b>inside</b> the file (<code>session_meta.payload.id</code>) — <span class="fl">discover.ts:2536</span></td><td><code>~/.codex/sessions/YYYY/MM/DD/</code><br><code>rollout-&lt;timestamp&gt;-&lt;uuid&gt;.jsonl</code></td><td><code>id.slice(0,8)</code> — <span class="fl">:1053</span></td></tr>
+    <tr><td><b class="k">opencode</b> <span class="tagp">prefix</span></td><td><code>ses_&lt;…&gt;</code>, stored in a SQLite file</td><td><code>opencode.db#ses_&lt;id&gt;</code> (made-up path pointing into the db)</td><td>strip <code>ses_</code>, then first 8 — <span class="fl">:1581</span></td></tr>
+    <tr><td><b class="k">gemini</b></td><td>a <code>sessionId</code> inside the JSON</td><td><code>~/.gemini/tmp/&lt;projectHash&gt;/…</code></td><td><code>id.slice(0,8)</code></td></tr>
+    <tr><td><b class="k">antigravity</b></td><td>the file name minus <code>.db</code> — <span class="fl">:1414</span></td><td><code>…/conversations/&lt;id&gt;.db</code> — a SQLite file, protobuf inside</td><td><code>id.slice(0,8)</code></td></tr>
+    <tr><td><b class="k">droid</b> (Factory)</td><td>the file name (a UUID) — <span class="fl">:2056</span></td><td><code>…/sessions/&lt;uuid&gt;.jsonl</code> + a <code>.settings.json</code> next to it</td><td><code>id.slice(0,8)</code></td></tr>
+    <tr><td><b class="k">kimi</b></td><td>the <em>folder</em> name — <span class="fl">:2932</span></td><td><code>…/sessions/&lt;id&gt;/agents/main/wire.jsonl</code></td><td><code>id.slice(0,8)</code></td></tr>
+    <tr><td><b class="k">grok · rush · hermes · openclaw</b></td><td>a folder or file id</td><td>mixed JSON/JSONL bundles</td><td><code>id.slice(0,8)</code></td></tr>
+  </table>
+  <div class="call warn"><span class="tag">The two that trip people up</span>
+    <p><b>Codex:</b> the file is called <code>rollout-&lt;timestamp&gt;-&lt;uuid&gt;.jsonl</code>, but the id is <em>not</em> that
+    file name — it's a separate UUID read from the first record inside the file. <b>OpenCode:</b> ids start with
+    <code>ses_</code> and live in a SQLite database, pointed at by a made-up path <code>opencode.db#&lt;id&gt;</code>.
+    The full list of 11 harnesses is <span class="fl">SESSION_AGENTS</span> in <span class="fl">types.ts:14</span>.</p></div>
+</section>
+
+<!-- 4 · STORAGE MAP -->
+<section id="s4">
+  <div class="sec-num">04</div>
+  <h2>Where each thing is stored <span class="badge cli">CLI</span> <span class="badge ext">EXT</span></h2>
+  <p class="sub">Five different places, each chosen for three reasons: how long it must live, who writes it, and how
+  it's read back. The shape of each box tells you the kind of store; almost everything here is <b>CLI-owned</b> — the
+  only extension-specific store is <code>terminals/sessions/</code> (the extension's pid→id, §1).</p>
+
+<figure>
+<svg viewBox="0 0 1040 560" role="img" aria-label="storage map">
+  <g transform="translate(20,16)">
+    <ellipse cx="10" cy="8" rx="10" ry="4" class="cyl-top"/><path d="M0,8 v10 a10,4 0 0 0 20,0 v-10" class="cyl-body"/><text x="26" y="16" class="svg-s">SQLite database</text>
+    <rect x="140" y="2" width="20" height="16" rx="2" class="file"/><path d="M154,2 v6 h6" fill="none" stroke="var(--amber)" stroke-width="1.2"/><text x="166" y="16" class="svg-s">flat file (a growing log / json)</text>
+    <rect x="380" y="2" width="20" height="16" rx="2" class="file-eph"/><text x="406" y="16" class="svg-s">temporary file (deleted with the pid)</text>
+    <path d="M642,4 h9 l3,4 h9 v10 h-21 z" class="folder"/><text x="666" y="16" class="svg-s">folder of transcripts</text>
+    <rect x="820" y="2" width="20" height="16" rx="8" class="sock"/><text x="846" y="16" class="svg-s">socket</text>
+  </g>
+  <line x1="20" y1="42" x2="1020" y2="42" stroke="var(--line)"/>
+
+  <text x="20" y="70" class="svg-t" fill="var(--lime)">KEPT — survives a reboot (~/.agents/.history and the agent home dirs)</text>
+
+  <g transform="translate(30,86)">
+    <ellipse cx="120" cy="14" rx="120" ry="14" class="cyl-top"/>
+    <path d="M0,14 v104 a120,14 0 0 0 240,0 v-104" class="cyl-body"/>
+    <text x="120" y="10" text-anchor="middle" class="svg-l">sessions.db</text>
+    <text x="120" y="40" text-anchor="middle" class="svg-s">~/.agents/.history/sessions/</text>
+    <line x1="18" y1="52" x2="222" y2="52" class="cyl-line"/>
+    <text x="120" y="70" text-anchor="middle" class="svg-s">sessions  (one row per transcript)</text>
+    <text x="120" y="88" text-anchor="middle" class="svg-s">session_text  (text search)</text>
+    <text x="120" y="106" text-anchor="middle" class="svg-s">scan_ledger  (file mtime/size)</text>
+    <text x="120" y="124" text-anchor="middle" class="svg-s">meta  (schema version, scan lock)</text>
+  </g>
+
+  <g transform="translate(300,86)">
+    <path d="M0,10 h60 l10,12 h130 v118 h-200 z" class="folder"/>
+    <text x="100" y="40" text-anchor="middle" class="svg-l">the transcripts</text>
+    <text x="100" y="62" text-anchor="middle" class="svg-s">~/.claude/projects/**.jsonl</text>
+    <text x="100" y="80" text-anchor="middle" class="svg-s">~/.codex/sessions/**rollout-*.jsonl</text>
+    <text x="100" y="98" text-anchor="middle" class="svg-s">~/.gemini/tmp/&lt;hash&gt;/…</text>
+    <text x="100" y="116" text-anchor="middle" class="svg-s">the raw truth · read on demand</text>
+  </g>
+
+  <g transform="translate(540,90)">
+    <ellipse cx="70" cy="12" rx="70" ry="11" class="cyl-top"/><path d="M0,12 v42 a70,11 0 0 0 140,0 v-42" class="cyl-body"/>
+    <text x="70" y="9" text-anchor="middle" class="svg-l">opencode.db</text>
+    <text x="70" y="40" text-anchor="middle" class="svg-s">ses_ ids inside</text>
+  </g>
+  <g transform="translate(540,158)">
+    <ellipse cx="70" cy="12" rx="70" ry="11" class="cyl-top"/><path d="M0,12 v34 a70,11 0 0 0 140,0 v-34" class="cyl-body"/>
+    <text x="70" y="9" text-anchor="middle" class="svg-l">antigravity .db</text>
+    <text x="70" y="36" text-anchor="middle" class="svg-s">one per session</text>
+  </g>
+
+  <g transform="translate(710,90)">
+    <rect x="0" y="0" width="150" height="52" rx="6" class="file"/><path d="M138,0 v8 h12" fill="none" stroke="var(--amber)" stroke-width="1.3"/>
+    <text x="75" y="24" text-anchor="middle" class="svg-l">teams/registry.json</text>
+    <text x="75" y="42" text-anchor="middle" class="svg-s">team name · devices · repo</text>
+  </g>
+  <g transform="translate(710,158)">
+    <rect x="0" y="0" width="150" height="46" rx="6" class="file"/><path d="M138,0 v8 h12" fill="none" stroke="var(--amber)" stroke-width="1.3"/>
+    <text x="75" y="22" text-anchor="middle" class="svg-l">events.jsonl</text>
+    <text x="75" y="38" text-anchor="middle" class="svg-s">one shared log · locked</text>
+  </g>
+  <g transform="translate(875,90)">
+    <path d="M0,10 h40 l8,10 h72 v34 h-120 z" class="folder" stroke="var(--amber)"/>
+    <text x="60" y="34" text-anchor="middle" class="svg-l" font-size="11">activity/&lt;id&gt;.jsonl</text>
+    <text x="60" y="50" text-anchor="middle" class="svg-s">one per session</text>
+  </g>
+
+  <line x1="20" y1="240" x2="1020" y2="240" stroke="var(--line)" stroke-dasharray="3 3"/>
+  <text x="20" y="268" class="svg-t" fill="var(--ink-dim)">TEMPORARY — under ~/.agents/.cache · deleted when the process (or the machine) restarts</text>
+
+  <g transform="translate(30,284)">
+    <rect x="0" y="0" width="220" height="60" rx="6" class="file-eph"/>
+    <text x="110" y="24" text-anchor="middle" class="svg-l">terminals/sessions/&lt;pid&gt;.json</text>
+    <text x="110" y="44" text-anchor="middle" class="svg-s">pid → id · written by the hook</text>
+  </g>
+  <g transform="translate(270,284)">
+    <rect x="0" y="0" width="220" height="60" rx="6" class="file-eph"/>
+    <text x="110" y="24" text-anchor="middle" class="svg-l">terminals/by-pid/&lt;pid&gt;.json</text>
+    <text x="110" y="44" text-anchor="middle" class="svg-s">pid → id · written by ag run</text>
+  </g>
+  <g transform="translate(510,284)">
+    <rect x="0" y="0" width="220" height="60" rx="6" class="file-eph"/>
+    <text x="110" y="24" text-anchor="middle" class="svg-l">agents/&lt;uuid&gt;/meta.json</text>
+    <text x="110" y="44" text-anchor="middle" class="svg-s">one per teammate in a team</text>
+  </g>
+  <g transform="translate(750,284)">
+    <rect x="0" y="0" width="220" height="60" rx="6" class="file-eph"/>
+    <text x="110" y="24" text-anchor="middle" class="svg-l">hosts/&lt;id&gt;.log + .exit</text>
+    <text x="110" y="44" text-anchor="middle" class="svg-s">a remote agent's output + exit code</text>
+  </g>
+
+  <line x1="20" y1="370" x2="1020" y2="370" stroke="var(--line)" stroke-dasharray="3 3"/>
+  <text x="20" y="398" class="svg-t" fill="var(--violet)">LIVE — in memory, one process talking to another</text>
+  <g transform="translate(30,414)">
+    <rect x="0" y="0" width="260" height="52" rx="14" class="sock"/>
+    <text x="130" y="24" text-anchor="middle" class="svg-l">~/.agents/.tmp/watchdog.sock</text>
+    <text x="130" y="42" text-anchor="middle" class="svg-s">poke an agent: nudge / message</text>
+  </g>
+  <g transform="translate(310,414)">
+    <rect x="0" y="0" width="300" height="52" rx="8" class="box"/>
+    <text x="150" y="24" text-anchor="middle" class="svg-l">SSH (one connection, reused)</text>
+    <text x="150" y="42" text-anchor="middle" class="svg-s">run --host · teams · asking peers</text>
+  </g>
+  <g transform="translate(630,414)">
+    <rect x="0" y="0" width="300" height="52" rx="8" class="box"/>
+    <text x="150" y="24" text-anchor="middle" class="svg-l">in-app messages</text>
+    <text x="150" y="42" text-anchor="middle" class="svg-s">watcher → windows · host → React UI</text>
+  </g>
+
+  <text x="20" y="512" class="svg-s">Picking one: need to keep it and search it → SQLite. A growing log many processes append to → a flat file.</text>
+  <text x="20" y="528" class="svg-s">Tied to one running process → a temporary file named by its pid. A live poke to another process → a socket.</text>
+</svg>
+<figcaption>Fig 3 — where each thing lives. The box shape is the kind of store: cylinder = SQLite, folded corner = flat log/json, dashed = temporary file, folder = transcripts, rounded pill = socket.</figcaption>
+</figure>
+</section>
+
+<!-- 5 -->
+<section id="s5">
+  <div class="sec-num">05</div>
+  <h2>Listing sessions reads a SQLite index — and only re-reads files that changed <span class="badge cli">CLI</span></h2>
+  <p class="sub">A fair worry: agents write to their transcript fast, so does listing them re-read everything each time? No.</p>
+  <ul class="tight">
+    <li>A table called <b class="k">scan_ledger</b> (<span class="fl">db.ts:103</span>) remembers each file's size and modified-time. On a scan, a file is only re-read if those changed. <code>agents sessions</code> then reads rows from the database, not the raw files.</li>
+    <li>The scanners (<span class="fl">discover.ts:2227</span>, <span class="fl">:2458</span>) read a changed file line by line and pull out <em>metadata only</em> (topic, counts, PR url) — never the full conversation.</li>
+  </ul>
+  <div class="call correct"><span class="tag">So, to be exact</span>
+    <p>Listing and searching = a database read, and only changed files get re-read into it. The <b>only</b> time the
+    whole conversation is parsed is when you open one specific session to read it (§6, walkthrough B).</p></div>
+</section>
+
+<!-- 6 · WALKTHROUGHS -->
+<section id="s6">
+  <div class="sec-num">06</div>
+  <h2>Three walkthroughs: what actually runs <span class="badge cli">CLI</span></h2>
+  <p class="sub">All three are CLI commands (the extension just calls the first one). The chip on the right answers
+  "does it re-parse, or just read the database?"</p>
+
+<figure>
+<svg viewBox="0 0 1040 470" role="img" aria-label="three workflows">
+  <defs>
+    <marker id="ah" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 z" fill="var(--ink-dim)"/>
+    </marker>
+  </defs>
+
+  <!-- Row A -->
+  <text x="20" y="30" class="svg-l" fill="var(--ink)">A · agents sessions --active</text>
+  <text x="20" y="48" class="svg-s">"which agents are running, and are they working or waiting?"</text>
+  <g font-family="var(--mono)">
+    <rect x="20" y="60" width="132" height="48" rx="8" class="box"/><text x="86" y="80" text-anchor="middle" class="svg-s">scan `ps` for</text><text x="86" y="95" text-anchor="middle" class="svg-s">agent processes</text>
+    <path class="arrow" d="M154,84 H186"/>
+    <rect x="188" y="60" width="132" height="48" rx="8" class="box"/><text x="254" y="80" text-anchor="middle" class="svg-s">pid → session id</text><text x="254" y="95" text-anchor="middle" class="svg-s">(pid file, else cwd)</text>
+    <path class="arrow" d="M322,84 H354"/>
+    <rect x="356" y="60" width="150" height="48" rx="8" class="box-hot"/><text x="431" y="80" text-anchor="middle" class="svg-s">read the TAIL of</text><text x="431" y="95" text-anchor="middle" class="svg-s">each transcript</text>
+    <path class="arrow" d="M508,84 H540"/>
+    <rect x="542" y="60" width="150" height="48" rx="8" class="box"/><text x="617" y="80" text-anchor="middle" class="svg-s">working/waiting/idle</text><text x="617" y="95" text-anchor="middle" class="svg-s">+ tokens/sec</text>
+    <path class="arrow" d="M694,84 H726"/>
+    <rect x="728" y="60" width="120" height="48" rx="8" class="box"/><text x="788" y="80" text-anchor="middle" class="svg-s">SSH each peer,</text><text x="788" y="95" text-anchor="middle" class="svg-s">same command</text>
+    <path class="arrow" d="M850,84 H882"/>
+    <rect x="884" y="60" width="120" height="48" rx="8" class="box"/><text x="944" y="87" text-anchor="middle" class="svg-s">print / to UI</text>
+  </g>
+  <rect x="20" y="118" width="360" height="22" rx="11" fill="none" stroke="var(--red)" stroke-width="1.2"/>
+  <text x="30" y="133" class="svg-s" fill="var(--red)">re-parses the tail of every live session, every call</text>
+  <text x="410" y="133" class="svg-s">DB used only to find a file for a folder (active.ts:389)</text>
+
+  <line x1="20" y1="158" x2="1020" y2="158" stroke="var(--line)" stroke-dasharray="3 3"/>
+
+  <!-- Row B -->
+  <text x="20" y="188" class="svg-l" fill="var(--ink)">B · agents sessions &lt;id&gt;</text>
+  <text x="20" y="206" class="svg-s">"show me this one conversation"</text>
+  <g font-family="var(--mono)">
+    <rect x="20" y="218" width="170" height="48" rx="8" class="box"/><text x="105" y="238" text-anchor="middle" class="svg-s">quick scan (skips</text><text x="105" y="253" text-anchor="middle" class="svg-s">unchanged files)</text>
+    <path class="arrow" d="M192,242 H224"/>
+    <rect x="226" y="218" width="210" height="48" rx="8" class="box-lime"/><text x="331" y="238" text-anchor="middle" class="svg-s">DB: id → file path + metadata</text><text x="331" y="253" text-anchor="middle" class="svg-s">(topic, tokens, cwd…)</text>
+    <path class="arrow" d="M438,242 H470"/>
+    <rect x="472" y="218" width="210" height="48" rx="8" class="box-hot"/><text x="577" y="238" text-anchor="middle" class="svg-s">open the file, FULLY parse</text><text x="577" y="253" text-anchor="middle" class="svg-s">the whole conversation</text>
+    <path class="arrow" d="M684,242 H716"/>
+    <rect x="718" y="218" width="150" height="48" rx="8" class="box"/><text x="793" y="245" text-anchor="middle" class="svg-s">render markdown</text>
+  </g>
+  <rect x="20" y="276" width="470" height="22" rx="11" fill="none" stroke="var(--amber)" stroke-width="1.2"/>
+  <text x="30" y="291" class="svg-s" fill="var(--amber)">the DB locates it; the conversation body is re-parsed from the raw file in full</text>
+  <text x="510" y="291" class="svg-s">the DB never stores the body — only prompt text, for search (sessions.ts:1634)</text>
+
+  <line x1="20" y1="318" x2="1020" y2="318" stroke="var(--line)" stroke-dasharray="3 3"/>
+
+  <!-- Row C -->
+  <text x="20" y="348" class="svg-l" fill="var(--ink)">C · a teammate in a team finishes</text>
+  <text x="20" y="366" class="svg-s">"how does the team know a step is done, and start the next?"</text>
+  <g font-family="var(--mono)">
+    <rect x="20" y="378" width="200" height="48" rx="8" class="box"/><text x="120" y="398" text-anchor="middle" class="svg-s">teammate runs as:</text><text x="120" y="413" text-anchor="middle" class="svg-s">cmd; echo $? &gt; .exit</text>
+    <path class="arrow" d="M222,402 H254"/>
+    <rect x="256" y="378" width="190" height="48" rx="8" class="box"/><text x="351" y="398" text-anchor="middle" class="svg-s">supervisor poll reads</text><text x="351" y="413" text-anchor="middle" class="svg-s">.exit (local / over SSH)</text>
+    <path class="arrow" d="M448,402 H480"/>
+    <rect x="482" y="378" width="210" height="48" rx="8" class="box-lime"/><text x="587" y="398" text-anchor="middle" class="svg-s">exit code present →</text><text x="587" y="413" text-anchor="middle" class="svg-s">COMPLETED / FAILED</text>
+    <path class="arrow" d="M694,402 H726"/>
+    <rect x="728" y="378" width="140" height="48" rx="8" class="box"/><text x="798" y="398" text-anchor="middle" class="svg-s">startReady: launch</text><text x="798" y="413" text-anchor="middle" class="svg-s">the next wave</text>
+    <path class="arrow" d="M870,402 H902"/>
+    <rect x="904" y="378" width="110" height="48" rx="8" class="box"/><text x="959" y="398" text-anchor="middle" class="svg-s">DAG empty →</text><text x="959" y="413" text-anchor="middle" class="svg-s">teams.complete</text>
+  </g>
+  <rect x="20" y="436" width="420" height="22" rx="11" fill="none" stroke="var(--lime-dim)" stroke-width="1.2"/>
+  <text x="30" y="451" class="svg-s" fill="var(--lime)">the signal is a file with the exit code — no live connection is held</text>
+  <text x="460" y="451" class="svg-s">remote checks batched to one SSH call per host (agents.ts:861)</text>
+</svg>
+<figcaption>Fig 4 — the three common paths. Red step = re-parses a file. Green step = a plain database or file read.</figcaption>
+</figure>
+
+  <ul class="tight">
+    <li><b class="k">A (--active)</b> re-reads the tail of every live session on each call — <span class="fl">active.ts:389</span> <code>readSessionTailWithRaw</code>, state from <span class="fl">state.ts</span>, tokens/sec from <span class="fl">throughput.ts</span>. Other machines: one SSH per peer running the same command with <code>--local</code>.</li>
+    <li><b class="k">B (one session)</b> looks the id up in the DB for the file path, then fully parses that file — <span class="fl">sessions.ts:1634</span> <code>parseSession</code> → <span class="fl">render.ts</span>. Reading the same session twice parses it twice.</li>
+    <li><b class="k">C (teammate done)</b> each teammate writes its exit code to a <code>.exit</code> file; the supervisor reads it (locally via <code>reapProcess</code>, remotely by tailing the log + reading the remote <code>.exit</code>, batched one SSH per host), flips the status, then <code>startReady</code> launches whatever was waiting on it — <span class="fl">agents.ts:180</span>, <span class="fl">:861</span>, <span class="fl">teams.ts:361</span>.</li>
+  </ul>
+</section>
+
+<!-- 7 -->
+<section id="s7">
+  <div class="sec-num">07</div>
+  <h2>The Factory extension asks the CLI every 3 seconds — nothing pushes to it <span class="badge ext">EXT</span></h2>
+  <p class="sub">This is the extension's behavior — but note the root cause is the CLI's: <code>sessions --active</code>
+  recomputes state on every call (§6A), so any poller pays for it. The extension just multiplies that cost. Fix it at
+  the CLI and every consumer benefits.</p>
+  <pre><span class="c">// apps/factory/src/vscode/remoteSessions.vscode.ts</span>
+runs <span class="g">agents sessions --active --json</span> as a subprocess  <span class="c">// :211</span>
+<span class="a">every ~3 seconds</span> (:55) · three modes: this machine only · every machine over SSH · one machine on demand (:281)
+<span class="c">// then reshapes the JSON and hands it to the React UI</span></pre>
+  <div class="call hot"><span class="tag">The expensive path</span>
+    <p>Every 3 seconds, <b>for each machine</b>, the extension starts a whole new <code>agents</code> process,
+    which does the scan and re-parses the tails (walkthrough A), prints JSON, and exits. That work is thrown away
+    and redone 3 seconds later. It <b>never reads the event logs</b> — the ready-made stream of "what happened"
+    (§9) is sitting right there, unused by the live view.</p></div>
+</section>
+
+<!-- 8 -->
+<section id="s8">
+  <div class="sec-num">08</div>
+  <h2>One file-watcher for the whole machine <span class="badge ext">EXT</span></h2>
+  <p class="sub">This one is <b>entirely in the extension</b> (the CLI has no resident watcher — it scans on demand, §5).
+  Inside Factory, one process is elected "leader" and watches all the session folders so each editor window doesn't have to.</p>
+  <ul class="tight">
+    <li><span class="fl">monitor/sessionWatcher.ts:70</span> sets up <b class="k">one recursive watch per session folder</b>, waits 300ms after a change, reads only the first 100 lines to figure out which window a new file belongs to, and tells the windows.</li>
+    <li>It asks the CLI where the folders are — <code>agents sessions --roots --json</code> (<span class="fl">sessionParse.ts:202</span>) — so it stays in sync when a harness moves its files.</li>
+  </ul>
+</section>
+
+<!-- 9 · EVENTS VS ACTIVITY -->
+<section id="s9">
+  <div class="sec-num">09</div>
+  <h2>events vs activity: two logs, one shape, no database <span class="badge cli">CLI</span></h2>
+  <p class="sub">You asked why both exist. They're the same idea — a log of "X happened at time T" — split only by <b>who writes it</b> and <b>how often</b>.</p>
+  <table>
+    <tr><th></th><th>events.ts</th><th>activity.ts</th></tr>
+    <tr><td><b>What it records</b></td><td>things the <b>tool</b> does: ran a command, made a team, fetched a secret</td><td>things the <b>agent</b> does: made a plan, opened a PR, edited a file</td></tr>
+    <tr><td><b>Where</b></td><td>one shared file <code>~/.agents/events.jsonl</code></td><td>one file per session <code>activity/&lt;id&gt;.jsonl</code></td></tr>
+    <tr><td><b>How often</b></td><td>rarely (low volume)</td><td>constantly (high volume)</td></tr>
+    <tr><td><b>Locking</b></td><td><b>locked</b> — many processes share one file</td><td><b>no lock</b> — each session owns its own file</td></tr>
+    <tr><td><b>Written by</b></td><td><code>emit()</code> in the CLI — <span class="fl">events.ts:464</span></td><td>the agent's hook (and <code>appendActivityEvent</code>) — <span class="fl">activity.ts:108</span></td></tr>
+  </table>
+  <p><b class="k">So: activity <em>is</em> events.</b> Same record names (<code>plan.created</code>, <code>pr.opened</code>,
+  <code>file.edited</code>), read back together by one function, <span class="fl">event-stream.ts:57</span> <code>readUnifiedEvents</code>.
+  The split exists for one reason: if every high-frequency agent event also went into the single locked file, agents
+  would fight over that lock constantly. Per-session files remove the fight.</p>
+  <div class="call warn"><span class="tag">The part that matters for your optimization</span>
+    <p>The activity log is <b>already a push feed</b> — the hook writes "made a plan / opened a PR" the moment it
+    happens, and <code>agents feed</code> shows it <em>without re-parsing any transcript</em>. But walkthrough A
+    (<code>--active</code>) ignores this and re-parses tails anyway. There's no database behind these logs and nothing
+    pushes them to the live UI — that's the gap your "one stream → database → adapters" idea closes.</p></div>
+</section>
+
+<!-- 10 -->
+<section id="s10">
+  <div class="sec-num">10</div>
+  <h2>Teams &amp; running agents on other machines <span class="badge cli">CLI</span></h2>
+  <p class="sub">The well-built part. <code>run</code> and <code>teams</code> share code through the <code>agents run</code> command line, not a shared function — on purpose.</p>
+  <table>
+    <tr><th>Layer</th><th>What it does</th><th>Key file:line</th></tr>
+    <tr><td><b class="k">agents run</b></td><td>knows how to start every harness; sets its env; starts it</td><td><span class="fl">exec.ts:463</span> the command table · <span class="fl">:1268</span> spawnAgent</td></tr>
+    <tr><td><b class="k">AgentManager</b></td><td>builds an <code>agents run</code> command line; runs teammates in dependency order; local, remote, or cloud</td><td><span class="fl">teams/agents.ts:2219</span> buildRunArgv · <span class="fl">:2143</span> startReady</td></tr>
+    <tr><td><b class="k">SSH helper</b></td><td>one reused SSH connection for all remote calls; blocks bad hostnames</td><td><span class="fl">ssh-exec.ts:76</span> · <span class="fl">:24</span></td></tr>
+    <tr><td><b class="k">detached launch</b></td><td>start-and-forget on a host, write output + exit code to files (shared by <code>run --host</code> and teams)</td><td><span class="fl">hosts/dispatch.ts:202</span> launchDetached</td></tr>
+  </table>
+  <ul class="tight">
+    <li><b>Teams don't call the internal start function.</b> They build an <code>agents run …</code> command line and run it — locally as a background shell, remotely over SSH. So any new <code>run</code> flag works in teams for free.</li>
+    <li>The supervisor reads a remote teammate's output by copying new bytes from its log file over SSH (<span class="fl">agents.ts:819</span>), and checks all teammates on a host in one SSH call.</li>
+    <li>Picking a machine (<span class="fl">scheduler.ts:76</span>): a pinned one → the only one in the pool → the one running the fewest teammates (<b>a count, not real CPU/memory</b>) → this machine.</li>
+  </ul>
+  <div class="call warn"><span class="tag">Small duplications</span>
+    <p><code>resolveMode()</code> is written twice (<span class="fl">exec.ts:100</span> vs <span class="fl">teams/agents.ts:319</span>); the "write the exit code to a file" trick is written twice (<span class="fl">agents.ts:180</span>, <span class="fl">dispatch.ts:218</span>).</p></div>
+</section>
+
+<!-- 11 -->
+<section id="s11">
+  <div class="sec-num">11</div>
+  <h2>Ways the system reports "what's happening" — 3 in the CLI, 2 in the extension <span class="badge cli">CLI</span> <span class="badge ext">EXT</span></h2>
+  <p class="sub">The core issue, and it's <b>inside the CLI itself</b>: even in just the CLI there are three separate ways to
+  answer "what's happening" that don't share a channel. The extension then adds two more.</p>
+  <table>
+    <tr><th>#</th><th>Layer</th><th>Channel</th><th>How it works</th></tr>
+    <tr><td>1</td><td><span class="badge cli">CLI</span></td><td><b class="k">poll + re-parse</b></td><td><code>sessions --active</code> re-derives state on demand (the extension is what polls it)</td></tr>
+    <tr><td>2</td><td><span class="badge cli">CLI</span></td><td><b class="k">the event logs</b></td><td>shared <code>events.jsonl</code> + per-session <code>activity</code> files → <code>agents events</code></td></tr>
+    <tr><td>3</td><td><span class="badge cli">CLI</span></td><td><b class="k">the mailbox</b></td><td>"this agent is waiting on you" → <code>agents feed</code> (<span class="fl">feed.ts</span>)</td></tr>
+    <tr><td>4</td><td><span class="badge ext">EXT</span></td><td><b class="k">the watchdog</b></td><td>notices a stuck agent, pokes it over the socket (<span class="fl">watchdog-server.ts:11</span>)</td></tr>
+    <tr><td>5</td><td><span class="badge ext">EXT</span></td><td><b class="k">the file-watcher</b></td><td>notices new session files, tells the editor windows</td></tr>
+  </table>
+  <p>Focus on the CLI's three: <b>1 recomputes on demand, 2 is a written-down log, 3 is a mailbox</b> — three answers
+  to one question, no shared channel. Fixing that at the CLI (§13) is what makes the extension's job trivial.</p>
+</section>
+
+<!-- BEFORE/AFTER DIAGRAM -->
+<figure>
+<svg viewBox="0 0 1040 400" role="img" aria-label="current vs proposed">
+  <text x="20" y="26" class="svg-l" fill="var(--red)">NOW — ask, re-parse, throw away · every 3s, per machine</text>
+  <text x="540" y="26" class="svg-l" fill="var(--lime)">BETTER — write it down once, everyone reads</text>
+  <line x1="510" y1="40" x2="510" y2="380" stroke="var(--line)" stroke-width="1.2" stroke-dasharray="4 4"/>
+  <rect x="20" y="50" width="150" height="46" rx="8" class="box"/><text x="95" y="78" text-anchor="middle" class="svg-s">session files</text>
+  <rect x="20" y="150" width="150" height="46" rx="8" class="box-hot"/><text x="95" y="170" text-anchor="middle" class="svg-s">new CLI process</text><text x="95" y="185" text-anchor="middle" class="svg-s">(start-up + scan)</text>
+  <rect x="20" y="250" width="150" height="46" rx="8" class="box"/><text x="95" y="278" text-anchor="middle" class="svg-s">the UI</text>
+  <rect x="300" y="150" width="170" height="46" rx="8" class="box-hot"/><text x="385" y="170" text-anchor="middle" class="svg-s">each peer over SSH</text><text x="385" y="185" text-anchor="middle" class="svg-s">(its own new process)</text>
+  <path class="edge" d="M95,96 L95,148"/>
+  <path class="edge-hot" d="M95,196 L95,248"/>
+  <path class="edge-hot" d="M170,173 L298,173"/>
+  <text x="55" y="322" class="svg-s" fill="var(--red)">many new processes × every 3s</text>
+  <rect x="545" y="50" width="150" height="46" rx="8" class="box"/><text x="620" y="78" text-anchor="middle" class="svg-s">session files</text>
+  <rect x="545" y="120" width="200" height="46" rx="8" class="box-lime"/><text x="645" y="140" text-anchor="middle" class="svg-s">one watcher process</text><text x="645" y="155" text-anchor="middle" class="svg-s">parse once, write changes</text>
+  <rect x="545" y="196" width="200" height="46" rx="8" class="box-lime"/><text x="645" y="216" text-anchor="middle" class="svg-s">one store (SQLite)</text><text x="645" y="231" text-anchor="middle" class="svg-s">with a "what changed" feed</text>
+  <rect x="545" y="272" width="130" height="46" rx="8" class="box"/><text x="610" y="300" text-anchor="middle" class="svg-s">CLI</text>
+  <rect x="695" y="272" width="130" height="46" rx="8" class="box"/><text x="760" y="300" text-anchor="middle" class="svg-s">extension</text>
+  <rect x="845" y="272" width="130" height="46" rx="8" class="box"/><text x="910" y="300" text-anchor="middle" class="svg-s">other machines</text>
+  <path class="edge-lime" d="M620,96 L640,118"/>
+  <path class="edge-lime" d="M645,166 L645,194"/>
+  <path class="edge-lime" d="M645,242 L645,258 L610,258 L610,270"/>
+  <path class="edge-lime" d="M645,242 L645,258 L760,258 L760,270"/>
+  <path class="edge-lime" d="M645,242 L645,258 L910,258 L910,270"/>
+  <text x="600" y="352" class="svg-s" fill="var(--lime)">parse once · readers get only what changed · no per-poll processes</text>
+  <rect x="775" y="120" width="200" height="46" rx="8" class="box-lime"/><text x="875" y="140" text-anchor="middle" class="svg-s">one adapter per harness</text><text x="875" y="155" text-anchor="middle" class="svg-s">(where the format lives)</text>
+  <path class="edge-lime" d="M775,143 L747,143"/>
+</svg>
+<figcaption>Fig 5 — the fix. One long-running process parses each file once and writes changes to a store others subscribe to. Each harness's format lives in one adapter.</figcaption>
+</figure>
+
+<!-- 12 -->
+<section id="s12">
+  <div class="sec-num">12</div>
+  <h2>The slow spots, ranked</h2>
+  <p class="sub">Each one points at the code above. Ordered by how much it costs.</p>
+
+  <div class="bn">
+    <h4><span class="rank p1">1</span>The CLI recomputes live state on every call — and the poller does it every 3s <span class="badge cli">CLI</span> <span class="badge ext">EXT</span></h4>
+    <p class="ev">Root cause is <span class="badge cli">CLI</span>: <code>sessions --active</code> re-derives everything from scratch each call (re-parses tails, §6A) — there's no resident state. Multiplier is <span class="badge ext">EXT</span>: <span class="fl">remoteSessions.vscode.ts:211</span> runs it every ~3s (<span class="fl">:55</span>), so a whole new process pays start-up + scan + parse, then exits.</p>
+    <p>Even without the extension — just you running <code>agents sessions --active</code> in a terminal — you pay the recompute every time. Several windows and machines only multiply it.</p>
+    <div class="fix"><b>Fix (at the CLI):</b> a resident CLI process holds current state in memory and emits what changed; every consumer (a terminal, the extension, another machine) reads that instead of triggering a fresh recompute.</div>
+  </div>
+  <div class="bn">
+    <h4><span class="rank p1">2</span>Asking the fleet starts one process per machine, per poll</h4>
+    <p class="ev">Where: <span class="fl">sessions.ts:28–36</span>; each peer runs its own full <code>agents sessions --local</code>. The reused SSH connection (<span class="fl">ssh-exec.ts:76</span>) saves the handshake but not the remote start-up + scan.</p>
+    <div class="fix"><b>Fix:</b> each machine runs a small resident process that pushes only changes; the caller subscribes once instead of starting a process per poll.</div>
+  </div>
+  <div class="bn">
+    <h4><span class="rank p2">3</span>The same parsing logic is written in five places</h4>
+    <p class="ev">Where: full parser <span class="fl">parse.ts:143</span>; the index scanner <span class="fl">discover.ts:2227/2458</span>; the Factory "which window" parser <span class="fl">sessionParse.ts:46</span>; the Factory activity-line parser <span class="fl">session.activity.ts:93</span>; the live tail renderer <span class="fl">stream-render.ts:116</span>. Each knows the harness formats separately.</p>
+    <div class="fix"><b>Fix:</b> one adapter per harness — <code>{ where the files are, parse the head, parse it all, read the id }</code> — used by all five. Adding a harness (or fixing the Codex file-vs-id split) becomes one file, not five.</div>
+  </div>
+  <div class="bn">
+    <h4><span class="rank p2">4</span>The index only updates when someone asks, behind one lock, up to 5s late</h4>
+    <p class="ev">Where: the scan runs on every <code>agents sessions</code> call, and only one process may scan at a time; a still-writing session's index can be up to 5s behind (<span class="fl">discover.ts:65</span>).</p>
+    <div class="fix"><b>Fix:</b> let the watcher (§8) update the index the moment a file changes, so reads are just database reads.</div>
+  </div>
+  <div class="bn">
+    <h4><span class="rank p3">5</span>The event logs have no database and nothing pushes them</h4>
+    <p class="ev">Where: <span class="fl">event-stream.ts:57</span> reads and sorts the file in memory; the shared log takes a lock on every write (<span class="fl">events.ts:464</span>).</p>
+    <div class="fix"><b>Fix:</b> put the events in SQLite (same trick as sessions) with a "what changed" feed. Now you get time-range queries, a subscribe channel, and no shared write lock.</div>
+  </div>
+  <div class="bn">
+    <h4><span class="rank p3">6</span>Two pid files, whole-file reads, and small copy-pastes</h4>
+    <p class="ev">Where: the pid→id pointer is written twice (§1); <span class="fl">parse.ts:130</span> reads whole files; <code>resolveMode</code> and the exit-file trick are each written twice (§10).</p>
+    <div class="fix"><b>Fix:</b> one pid file with two writers; read transcripts in pages instead of whole; move the duplicated helpers into one place.</div>
+  </div>
+</section>
+
+<!-- 13 -->
+<section id="s13">
+  <div class="sec-num">13</div>
+  <h2>The fix: compute once, hand it out — in the CLI <span class="badge cli">CLI</span></h2>
+  <p class="sub">Slow spots 1, 2, 4 and 5 are one problem: the live data is fetched and recomputed on every request,
+  instead of computed once and handed to whoever asks. <b>The fix belongs in the CLI</b> — once the CLI can produce and
+  push state, the extension "just groups and displays," which is the easy part.</p>
+  <ul class="tight">
+    <li><b class="k">One process parses each file once.</b> The machine-wide watcher (§8) already watches every folder — let it be the one that reads and understands the files, and let the CLI use it too (today they're separate).</li>
+    <li><b class="k">Write the result to one store others can subscribe to.</b> Use the same SQLite trick sessions already use, with a "what changed" feed. The event names (<span class="fl">events.ts:68</span>) are already the vocabulary.</li>
+    <li><b class="k">Readers subscribe; they don't start a process.</b> The CLI, the extension, and other machines all read the same feed. The 3-second poll and the per-machine process both go away.</li>
+    <li><b class="k">Each harness's format lives in one adapter.</b> The store stays format-agnostic; one adapter per harness feeds it — your "different adapters per harness" — which also removes the five-places duplication and the Codex/OpenCode id quirks.</li>
+  </ul>
+  <div class="call correct"><span class="tag">What it buys</span>
+    <p>Cost drops from "many short-lived processes re-parsing, per window, per machine, every 3s" to "parse once, then
+    everyone reads what changed." Channels 1 and 2 (§11) become one. Teams and SSH (§10) don't change — they're already fine.</p></div>
+</section>
+
+<div class="foot wrap">
+  From agents-cli @ dfe9f011 · apps/cli · apps/factory · packages/session-tracker. Every file:line was read, not guessed.
+</div>
+</div>
+
+<script>
+  (function(){
+    var root=document.documentElement, btn=document.getElementById('tg');
+    try{var pref=window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches;
+      root.setAttribute('data-theme', pref?'light':'dark');}catch(e){}
+    btn.addEventListener('click',function(){
+      root.setAttribute('data-theme', root.getAttribute('data-theme')==='dark'?'light':'dark');
+    });
+  })();
+</script>
+</body>
+</html>

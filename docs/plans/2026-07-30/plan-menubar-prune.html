@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan · Menu-bar: prune ghost sentinels + collapse the "other" bucket</title>
+<style>
+  :root{
+    --bg:#0a0a0a; --panel:#111312; --panel2:#161a18; --ink:#e7ece8; --dim:#8b938c;
+    --line:#26302a; --accent:#a3e635; --amber:#f5c451; --red:#ff6b6b; --cyan:#5ad6c0;
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  }
+  :root[data-theme="light"]{
+    --bg:#faf9f6; --panel:#ffffff; --panel2:#f2f4f0; --ink:#1a1c1a; --dim:#5c655c;
+    --line:#e2e6df; --accent:#4d7c0f; --amber:#b45309; --red:#dc2626; --cyan:#0e7490;
+  }
+  :root[data-theme="light"] .fig{background:#0e120f;border-color:#26302a}
+  :root[data-theme="light"] .fig figcaption{color:#8b938c}
+  :root[data-theme="light"] .fig figcaption b{color:#e7ece8}
+
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1000px;margin:0 auto;padding:56px 28px 120px}
+  header.hero{border-bottom:1px solid var(--line);padding-bottom:28px;margin-bottom:40px}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--accent);margin:0 0 14px}
+  h1{font-size:34px;line-height:1.15;margin:0 0 12px;font-weight:700;letter-spacing:-.01em}
+  h1 .accent{color:var(--accent)}
+  .sub{color:var(--dim);font-size:17px;max-width:70ch;margin:0}
+  .meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+  .chip{font-family:var(--mono);font-size:11.5px;color:var(--dim);border:1px solid var(--line);
+    border-radius:999px;padding:4px 11px;background:var(--panel)}
+  .chip b{color:var(--ink);font-weight:500}
+  h2{font-size:23px;margin:52px 0 8px;letter-spacing:-.01em;scroll-margin-top:20px}
+  h2 .n{font-family:var(--mono);color:var(--accent);font-size:15px;margin-right:10px;opacity:.85}
+  h3{font-size:16.5px;margin:26px 0 8px;color:var(--ink)}
+  p{margin:10px 0}
+  .lead{color:var(--dim)}
+  code{font-family:var(--mono);font-size:.88em;background:var(--panel2);border:1px solid var(--line);
+    border-radius:5px;padding:1.5px 6px;color:var(--cyan)}
+  a{color:var(--accent);text-decoration:none;border-bottom:1px solid transparent}
+  a:hover{border-bottom-color:var(--accent)}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:18px 0}
+  .fig{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:26px 22px 18px;margin:22px 0;overflow-x:auto}
+  .fig figcaption{font-family:var(--mono);font-size:12px;color:var(--dim);margin-top:14px;text-align:center}
+  .fig figcaption b{color:var(--ink)}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:760px){.grid2{grid-template-columns:1fr}}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);font-weight:500}
+  td code{font-size:.85em}
+  .tag{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:6px;font-weight:600}
+  .tag.a{background:rgba(163,230,53,.12);color:var(--accent);border:1px solid rgba(163,230,53,.3)}
+  .tag.b{background:rgba(90,214,192,.1);color:var(--cyan);border:1px solid rgba(90,214,192,.28)}
+  .tag.c{background:rgba(245,196,81,.1);color:var(--amber);border:1px solid rgba(245,196,81,.28)}
+  ul{margin:10px 0;padding-left:22px}li{margin:6px 0}
+  .callout{border-left:3px solid var(--accent);background:var(--panel2);border-radius:0 10px 10px 0;
+    padding:14px 18px;margin:18px 0}
+  .callout.warn{border-left-color:var(--amber)}
+  .callout .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--accent);display:block;margin-bottom:5px}
+  .callout.warn .lbl{color:var(--amber)}
+  .toc{font-family:var(--mono);font-size:13px;display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:18px}
+  .toc a{color:var(--dim);border:0}.toc a:hover{color:var(--accent)}
+  pre{font-family:var(--mono);font-size:13px;background:#0c0f0d;border:1px solid var(--line);
+    border-radius:12px;padding:16px 18px;overflow-x:auto;line-height:1.55;color:#e7ece8}
+  pre .c{color:#8b938c}pre .k{color:#a3e635}pre .s{color:#5ad6c0}pre .r{color:#ff6b6b}
+  .foot{margin-top:60px;padding-top:22px;border-top:1px solid var(--line);color:var(--dim);
+    font-family:var(--mono);font-size:12px}
+  .themebtn{position:fixed;top:16px;right:16px;z-index:9;font-family:var(--mono);font-size:12px;
+    color:var(--dim);background:var(--panel);border:1px solid var(--line);border-radius:999px;
+    padding:6px 13px;cursor:pointer}
+  .themebtn:hover{color:var(--accent);border-color:var(--accent)}
+  .state-row{display:flex;align-items:center;gap:14px;padding:12px 14px;border:1px solid var(--line);
+    border-radius:10px;background:var(--panel2);margin:8px 0}
+  .state-row .glyph{font-family:var(--mono);font-size:18px;width:22px;text-align:center}
+  .state-row .name{font-family:var(--mono);font-size:13px;color:var(--ink);width:130px}
+  .state-row .def{color:var(--dim);font-size:14px;flex:1}
+  .glyph.run{color:var(--accent)}
+  .glyph.idle{color:var(--dim)}
+  .glyph.attn{color:var(--amber)}
+  .glyph.closed{color:var(--red);opacity:.55}
+</style>
+</head>
+<body>
+<button class="themebtn" onclick="tt()" id="tb">◐ light</button>
+<script>
+  var r=document.documentElement;
+  function set(t){r.setAttribute('data-theme',t);document.getElementById('tb').textContent=(t==='light'?'◑ dark':'◐ light')}
+  set(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');
+  function tt(){set(r.getAttribute('data-theme')==='light'?'dark':'light')}
+</script>
+<div class="wrap">
+
+<header class="hero">
+  <p class="kicker">AGENTS-CLI · plan mode · MENUBAR HELPER</p>
+  <h1>Prune ghost sentinels,<br><span class="accent">collapse the "other" bucket</span></h1>
+  <p class="sub">The menu-bar dropdown shows "NEEDS YOU (11)" with entries aged 1d / 2h25m / 1h51m — ghosts from
+    sessions closed days ago whose attention sentinels never got cleaned up. Add reader-side liveness pruning,
+    collapse the noisy "ACTIVE · other" bucket, and clarify the state model at 3 states (not 4).</p>
+  <div class="meta">
+    <span class="chip"><b>2</b>&nbsp;Swift files touched</span>
+    <span class="chip"><b>1</b>&nbsp;doc + changelog</span>
+    <span class="chip"><b>0</b>&nbsp;new states</span>
+    <span class="chip">status: <b>awaiting go</b></span>
+  </div>
+  <nav class="toc">
+    <a href="#s1">01 · why the menu is unusable</a>
+    <a href="#s2">02 · state model (3, not 4)</a>
+    <a href="#s3">03 · what to change</a>
+    <a href="#s4">04 · files</a>
+    <a href="#s5">05 · verification</a>
+    <a href="#s6">06 · non-goals</a>
+  </nav>
+</header>
+
+<!-- ============ 01 ============ -->
+<h2 id="s1"><span class="n">01</span>Why the menu is unusable</h2>
+<p class="lead">Two root causes, both grounded in the code and the running filesystem on this machine.</p>
+
+<figure class="fig">
+<svg viewBox="0 0 900 260" role="img" aria-label="Sentinel write path with leak points">
+  <defs>
+    <marker id="ar" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0 L9 5 L0 10 z" fill="#a3e635"/></marker>
+    <marker id="rr" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0 L9 5 L0 10 z" fill="#ff6b6b"/></marker>
+  </defs>
+
+  <text x="450" y="24" fill="#8b938c" font-size="12" text-anchor="middle" font-family="var(--mono)">write path (works)                                                    clear paths (fragile)</text>
+
+  <rect x="30" y="60" width="180" height="52" rx="8" fill="#12160f" stroke="#a3e635"/>
+  <text x="120" y="82" fill="#a3e635" font-size="12.5" text-anchor="middle" font-family="var(--mono)">Notification hook</text>
+  <text x="120" y="100" fill="#8b938c" font-size="11" text-anchor="middle" font-family="var(--mono)">06-attention-sentinel.sh</text>
+
+  <path d="M210 86 L320 86" stroke="#a3e635" fill="none" marker-end="url(#ar)"/>
+
+  <rect x="320" y="60" width="230" height="52" rx="8" fill="#161a18" stroke="#26302a"/>
+  <text x="435" y="80" fill="#e7ece8" font-size="12.5" text-anchor="middle" font-family="var(--mono)">state/attention/&lt;sid&gt;</text>
+  <text x="435" y="100" fill="#8b938c" font-size="11" text-anchor="middle" font-family="var(--mono)">mtime = flagged at · body = question</text>
+
+  <path d="M550 86 L680 86" stroke="#a3e635" fill="none" marker-end="url(#ar)"/>
+
+  <rect x="680" y="60" width="200" height="52" rx="8" fill="#12160f" stroke="#a3e635"/>
+  <text x="780" y="82" fill="#a3e635" font-size="12.5" text-anchor="middle" font-family="var(--mono)">menu bar reads</text>
+  <text x="780" y="100" fill="#8b938c" font-size="11" text-anchor="middle" font-family="var(--mono)">LocalState.attentionMarks</text>
+
+  <path d="M435 112 L435 170" stroke="#ff6b6b" fill="none" stroke-dasharray="4 3" marker-end="url(#rr)"/>
+  <text x="450" y="140" fill="#ff6b6b" font-size="11" font-family="var(--mono)">Stop / UserPromptSubmit → rm</text>
+  <text x="450" y="156" fill="#ff6b6b" font-size="11" font-family="var(--mono)">but fires only if...</text>
+
+  <rect x="60" y="180" width="230" height="60" rx="8" fill="#1a1010" stroke="#ff6b6b"/>
+  <text x="175" y="202" fill="#ff6b6b" font-size="12" text-anchor="middle" font-family="var(--mono)">terminal killed hard</text>
+  <text x="175" y="220" fill="#8b938c" font-size="11" text-anchor="middle" font-family="var(--mono)">Stop never runs → leak</text>
+
+  <rect x="335" y="180" width="230" height="60" rx="8" fill="#1a1010" stroke="#ff6b6b"/>
+  <text x="450" y="202" fill="#ff6b6b" font-size="12" text-anchor="middle" font-family="var(--mono)">version has no hook</text>
+  <text x="450" y="220" fill="#8b938c" font-size="11" text-anchor="middle" font-family="var(--mono)">Claude versions differ → leak</text>
+
+  <rect x="610" y="180" width="230" height="60" rx="8" fill="#1a1010" stroke="#ff6b6b"/>
+  <text x="725" y="202" fill="#ff6b6b" font-size="12" text-anchor="middle" font-family="var(--mono)">sessionId mismatch</text>
+  <text x="725" y="220" fill="#8b938c" font-size="11" text-anchor="middle" font-family="var(--mono)">write-id ≠ clear-id → leak</text>
+</svg>
+<figcaption><b>The write path works; three failure modes leak sentinels the reader trusts blindly.</b></figcaption>
+</figure>
+
+<div class="callout warn">
+  <span class="lbl">live evidence · mac-mini today</span>
+  <code>ls -la ~/.agents/.cache/state/attention/</code> returns <b>6 files</b> dated Jul 8, Jul 9, Jul 15, Jul 24,
+  Jul 27, Jul 29 — today is Jul 30. Those are the "1d / 2h / 1h51m" rows in the screenshot.
+</div>
+
+<p>Plus a third pain point in rendering: <code>addActive</code> in <code>StatusItemController.swift:488-490</code>
+buckets any session with an empty <code>repo</code> under <code>"other"</code>, advertises the full "21 idle" count in the
+header, then still renders up to 3 rows inline — big, misleading, and drowning the useful sections below.</p>
+
+<!-- ============ 02 ============ -->
+<h2 id="s2"><span class="n">02</span>State model — keep 3, don't add a 4th</h2>
+<p class="lead">The current enum (<code>running / idle / attention / queued</code>) is fine.
+  What was fuzzy is <em>what each means</em>. Documenting the exact semantics; no new cases.</p>
+
+<div class="state-row"><span class="glyph run">●</span><span class="name">running</span>
+  <span class="def">pid alive AND transcript mtime &lt; 2 min. Agent is actively producing output.</span></div>
+<div class="state-row"><span class="glyph idle">◐</span><span class="name">idle</span>
+  <span class="def">pid alive AND transcript mtime ≥ 2 min AND no attention sentinel. Turn is complete — terminal sitting at the prompt with nothing blocking. Non-urgent; you can send another message anytime.</span></div>
+<div class="state-row"><span class="glyph attn">⚠</span><span class="name">awaiting input</span>
+  <span class="def">pid alive AND attention sentinel present. Notification hook fired — permission / plan / tool-block halting progress until you answer.</span></div>
+<div class="state-row"><span class="glyph closed">✕</span><span class="name">closed</span>
+  <span class="def"><em>Not a visible state.</em> pid dead = hidden from the menu. That's how it works today for terminals (<code>LocalState.swift:245</code>); we extend the same guard to the attention path.</span></div>
+
+<div class="callout">
+  <span class="lbl">the takeaway</span>
+  <b>Idle ≠ awaiting input.</b> Idle = agent finished its turn, no blocker. Awaiting-input = the harness explicitly said
+  "I'm stuck, answer me." If that distinction doesn't hold in practice, the menu bar's <code>⚠ NEEDS YOU</code> badge is meaningless.
+</div>
+
+<!-- ============ 03 ============ -->
+<h2 id="s3"><span class="n">03</span>What to change</h2>
+
+<h3>3.1 &nbsp;Cross-check sentinels against live sessions in the reader</h3>
+<p><code>LocalState.attentionMarks()</code> (<code>LocalState.swift:126-139</code>) returns every sentinel on disk regardless of
+  whether its sessionId maps to a live process. Change it to accept an optional live-id set and drop marks whose id
+  isn't in it. Both call sites already know the live set:</p>
+<ul>
+  <li><code>terminals(attention:)</code> (<code>:234-263</code>) iterates <code>live-terminals.json</code> and already filters by
+    <code>pidAlive(pid)</code> — collect sessionIds while iterating, pass them in.</li>
+  <li><code>sessions(fromActive:)</code> (<code>:160-179</code>) iterates <code>[ActiveSession]</code> from
+    <code>agents sessions --active --local --json</code> — that IS the live set.</li>
+</ul>
+<p>Side effect: <code>unlink</code> orphan sentinels found during the read (wrap in <code>try?</code>). Called every 10s (badge)
+  and on every menu open — orphan cleanup happens without a separate cron.</p>
+
+<pre><span class="c">// LocalState.swift — attentionMarks with liveness cross-check</span>
+<span class="k">static func</span> attentionMarks(liveSessionIds: <span class="s">Set&lt;String&gt;?</span> = nil) -&gt; [String: AttentionMark] {
+  <span class="k">let</span> dir = <span class="s">"\(home)/.agents/.cache/state/attention"</span>
+  <span class="k">let</span> names = (<span class="k">try?</span> fm.contentsOfDirectory(atPath: dir)) ?? []
+  <span class="k">var</span> out: [String: AttentionMark] = [:]
+  <span class="k">for</span> name <span class="k">in</span> names <span class="k">where</span> !name.hasPrefix(<span class="s">"."</span>) {
+    <span class="k">let</span> path = <span class="s">"\(dir)/\(name)"</span>
+    <span class="c">// prune orphan: sentinel exists but sessionId isn't in the live set</span>
+    <span class="k">if let</span> live = liveSessionIds, !live.contains(name) {
+      <span class="k">try?</span> fm.removeItem(atPath: path); <span class="k">continue</span>
+    }
+    <span class="k">let</span> attrs = <span class="k">try?</span> fm.attributesOfItem(atPath: path)
+    <span class="k">let</span> since = (attrs?[.modificationDate] <span class="k">as?</span> Date).map { $0.timeIntervalSince1970 * 1000 }
+    <span class="k">let</span> raw = (<span class="k">try?</span> String(contentsOfFile: path, encoding: .utf8)) ?? <span class="s">""</span>
+    out[name] = AttentionMark(sinceMs: since, text: raw.trimmingCharacters(in: .whitespacesAndNewlines))
+  }
+  <span class="k">return</span> out
+}</pre>
+
+<h3>3.2 &nbsp;Collapse <code>ACTIVE · other</code> when idle-only</h3>
+<p><code>addActive</code> (<code>StatusItemController.swift:488-519</code>) groups by <code>repo</code>. If the
+  <code>"other"</code> group has <code>running == 0</code> and no attention rows, render a single collapsed line —
+  <code>ACTIVE · other · N idle ▸</code> with a submenu carrying the inline rows. Real repos keep today's rendering
+  (their idle sessions are load-bearing signal).</p>
+
+<figure class="fig">
+<svg viewBox="0 0 900 220" role="img" aria-label="Before and after menu layout for the other bucket">
+  <rect x="30" y="20" width="380" height="180" rx="10" fill="#161a18" stroke="#26302a"/>
+  <text x="220" y="42" fill="#8b938c" font-size="11" text-anchor="middle" font-family="var(--mono)">BEFORE — walls the menu</text>
+  <text x="46" y="70" fill="#e7ece8" font-size="12" font-family="var(--mono)">ACTIVE · other · 21 idle</text>
+  <text x="46" y="90" fill="#8b938c" font-size="12" font-family="var(--mono)">◐ Claude</text>
+  <text x="46" y="106" fill="#8b938c" font-size="12" font-family="var(--mono)">◐ Claude</text>
+  <text x="46" y="122" fill="#8b938c" font-size="12" font-family="var(--mono)">◐ Claude</text>
+  <text x="46" y="140" fill="#ff6b6b" font-size="11" font-family="var(--mono)">✕ Claude (dead pid, shows anyway)</text>
+  <text x="46" y="156" fill="#ff6b6b" font-size="11" font-family="var(--mono)">✕ Claude (dead pid, shows anyway)</text>
+  <text x="46" y="180" fill="#8b938c" font-size="11" font-family="var(--mono)">... 16 more truncated silently</text>
+
+  <rect x="490" y="20" width="380" height="180" rx="10" fill="#12160f" stroke="#a3e635"/>
+  <text x="680" y="42" fill="#a3e635" font-size="11" text-anchor="middle" font-family="var(--mono)">AFTER — one line, on-demand drill</text>
+  <text x="506" y="70" fill="#e7ece8" font-size="12" font-family="var(--mono)">ACTIVE · other · 3 idle ▸</text>
+  <text x="506" y="100" fill="#8b938c" font-size="11" font-family="var(--mono)">(count reflects live sessions only —</text>
+  <text x="506" y="116" fill="#8b938c" font-size="11" font-family="var(--mono)">orphan sentinels pruned by 3.1)</text>
+  <text x="506" y="150" fill="#a3e635" font-size="12" font-family="var(--mono)">→ real repos still render inline</text>
+  <text x="506" y="166" fill="#8b938c" font-size="11" font-family="var(--mono)">ACTIVE · agents-cli · 2 running</text>
+  <text x="506" y="182" fill="#8b938c" font-size="11" font-family="var(--mono)">ACTIVE · rush · 1 running · 1 idle</text>
+</svg>
+<figcaption><b>Before / after.</b> The "other" bucket collapses to a submenu when idle-only; real repos are untouched.</figcaption>
+</figure>
+
+<h3>3.3 &nbsp;Nothing on the state model</h3>
+<ul>
+  <li>Do <b>not</b> introduce a <code>.closed</code> case.</li>
+  <li>Do <b>not</b> add a "Recently closed" section.</li>
+  <li>Do document the three states in <code>apps/cli/docs/menubar.md</code>.</li>
+</ul>
+
+<!-- ============ 04 ============ -->
+<h2 id="s4"><span class="n">04</span>Files</h2>
+<table>
+  <thead><tr><th>Change</th><th>Path</th><th>What</th></tr></thead>
+  <tbody>
+    <tr><td><span class="tag b">edit</span></td>
+      <td><code>apps/cli/menubar/Sources/MenubarHelper/LocalState.swift</code></td>
+      <td><code>attentionMarks(liveSessionIds:)</code> optional set; prune orphans on read. Both callers pass their live set.</td></tr>
+    <tr><td><span class="tag b">edit</span></td>
+      <td><code>apps/cli/menubar/Sources/MenubarHelper/StatusItemController.swift</code></td>
+      <td><code>addActive</code> collapses <code>"other"</code> when idle-only into a one-line row with a submenu.</td></tr>
+    <tr><td><span class="tag c">docs</span></td>
+      <td><code>apps/cli/docs/menubar.md</code></td>
+      <td>3-state semantics table (running / idle / awaiting-input); note orphan-sentinel pruning.</td></tr>
+    <tr><td><span class="tag c">docs</span></td>
+      <td><code>apps/cli/.changelog/&lt;next&gt;.md</code></td>
+      <td>One line: "menu-bar: prune orphan attention sentinels; collapse ACTIVE · other."</td></tr>
+    <tr><td><span class="tag a">keep</span></td>
+      <td><code>~/.claude/hooks/06-attention-sentinel.sh</code></td>
+      <td><b>Unchanged.</b> Writer handles the happy path; failure modes are outside its control.</td></tr>
+    <tr><td><span class="tag a">keep</span></td>
+      <td><code>packages/session-tracker/</code></td>
+      <td><b>Unchanged.</b> Sentinel writing isn't its job.</td></tr>
+  </tbody>
+</table>
+
+<!-- ============ 05 ============ -->
+<h2 id="s5"><span class="n">05</span>Verification</h2>
+<ol>
+  <li><b>Baseline.</b> Photograph "NEEDS YOU" count; snapshot <code>ls -la ~/.agents/.cache/state/attention/</code>
+    — record today's 6 known ghosts (<code>05b17677…</code>, <code>0de88f4e…</code>, <code>2103d37c…</code>,
+    <code>61cf3f89…</code>, <code>7731a825…</code>, <code>f411d7e8…</code>).</li>
+  <li><b>Build in a worktree.</b> <code>agents-cli/.agents/worktrees/&lt;slug&gt;</code>, off <code>origin/main</code>.
+    <code>cd apps/cli/menubar && swift build</code>. Install the new MenubarHelper via the app's install script —
+    verify the <em>installed</em> binary carries the change (core-hard-lines #1), not the build dir.</li>
+  <li><b>Prune verification.</b> Restart the helper. Within one 10s badge tick,
+    <code>ls ~/.agents/.cache/state/attention/</code> should drop to only sentinels whose sessionId appears in
+    <code>agents sessions --active --local --json</code>.</li>
+  <li><b>UI verification.</b> Reopen the menu. Trigger a real permission prompt in a live Claude session; confirm
+    it appears in <code>⚠ NEEDS YOU</code>. Answer it; confirm it disappears within the next poll cycle. Screenshot
+    before/after and attach to the PR.</li>
+  <li><b>Collapse check.</b> Confirm <code>ACTIVE · other</code> renders as a single line with a submenu when idle-only;
+    real repos (<code>ACTIVE · agents-cli</code>, <code>ACTIVE · rush</code>) still inline.</li>
+  <li><b>No regression.</b> Attention rows for genuinely-blocked live sessions still surface at the top; routines /
+    new-devices / browser sections unchanged.</li>
+</ol>
+<div class="callout">
+  <span class="lbl">success criteria</span>
+  "NEEDS YOU" count on mac-mini drops from <b>11 → 0–2</b> (whatever's genuinely blocked right now). Menu fits on-screen without a scroll indicator.
+</div>
+
+<!-- ============ 06 ============ -->
+<h2 id="s6"><span class="n">06</span>Non-goals</h2>
+<ul>
+  <li>Not rewriting the snapshot model into an event bus. The bug is orphan data, not the transport.</li>
+  <li>Not filtering by user or by agent-cli version. All Claude versions on the machine keep contributing.</li>
+  <li>Not touching routines / new-devices / browser sections.</li>
+  <li>Not introducing a <code>.closed</code> state. Closed = hidden.</li>
+</ul>
+
+<div class="foot">
+  agents-cli · plan mode · rendered by plan-render &nbsp;·&nbsp; next: <span style="color:var(--accent)">go / reshape</span>
+</div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agents fleet status — redesign</title>
+<style>
+  :root{
+    --bg:#0b0e14; --panel:#11151f; --panel2:#0d1119; --ink:#e6e9ef; --muted:#8a93a6;
+    --line:#212838; --accent:#7cc4ff; --green:#54d18c; --yellow:#f0c674; --red:#f07178;
+    --gray:#5b6675; --mono:"SF Mono",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+  }
+  html[data-theme="light"]{
+    --bg:#f6f7f9; --panel:#ffffff; --panel2:#f0f2f5; --ink:#1a1f2b; --muted:#5c6675;
+    --line:#e3e7ee; --accent:#2f6fed; --green:#1a9d5a; --yellow:#a9791b; --red:#c8384a; --gray:#8a93a6;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1180px;margin:0 auto;padding:40px 28px 96px}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);margin:0 0 10px}
+  h1{font-size:30px;line-height:1.15;margin:0 0 12px;letter-spacing:-.02em}
+  .lede{color:var(--muted);font-size:16px;max-width:70ch;margin:0 0 20px}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 8px}
+  .chip{font-family:var(--mono);font-size:12px;padding:5px 10px;border:1px solid var(--line);border-radius:999px;color:var(--muted);background:var(--panel)}
+  .toggle{position:fixed;top:16px;right:16px;z-index:10;font-family:var(--mono);font-size:13px;padding:7px 12px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);cursor:pointer}
+  h2{font-size:20px;margin:44px 0 6px;letter-spacing:-.01em;display:flex;align-items:center;gap:10px}
+  h2 .n{font-family:var(--mono);font-size:13px;color:var(--accent);border:1px solid var(--line);border-radius:6px;padding:2px 8px}
+  h3{font-size:15px;margin:24px 0 8px;color:var(--ink)}
+  p{color:var(--muted)}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:14px}
+  @media(max-width:900px){.grid{grid-template-columns:1fr}}
+  .term{background:var(--panel2);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .term .bar{display:flex;align-items:center;gap:8px;padding:9px 13px;border-bottom:1px solid var(--line);background:var(--panel)}
+  .dot{width:11px;height:11px;border-radius:50%}
+  .dot.r{background:#ff5f56}.dot.y{background:#ffbd2e}.dot.g{background:#27c93f}
+  .term .lbl{font-family:var(--mono);font-size:11px;color:var(--muted);margin-left:6px}
+  pre{margin:0;padding:15px 16px;font-family:var(--mono);font-size:12px;line-height:1.55;white-space:pre;overflow-x:auto;color:var(--ink)}
+  .g{color:var(--green)}.y{color:var(--yellow)}.r{color:var(--red)}.m{color:var(--muted)}.a{color:var(--accent)}.gr{color:var(--gray)}
+  .b{font-weight:700}
+  .tag{display:inline-block;font-family:var(--mono);font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;vertical-align:middle;margin-right:8px}
+  .tag.before{background:rgba(240,113,120,.15);color:var(--red);border:1px solid rgba(240,113,120,.35)}
+  .tag.after{background:rgba(84,209,140,.15);color:var(--green);border:1px solid rgba(84,209,140,.35)}
+  .note{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 10px 10px 0;padding:14px 16px;margin:16px 0}
+  .note .h{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin-bottom:6px}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+  td code,p code,li code{font-family:var(--mono);font-size:12px;background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:1px 6px;color:var(--ink)}
+  td .why{color:var(--muted);font-size:13px}
+  ul{color:var(--muted);padding-left:20px}li{margin:5px 0}
+  .decision{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:12px 0}
+  .decision .q{font-weight:700;color:var(--ink);margin-bottom:4px}
+  .decision .rec{color:var(--green);font-family:var(--mono);font-size:12px;margin-top:6px}
+  .rule{height:1px;background:var(--line);border:0;margin:40px 0}
+  .ticketcard{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin:12px 0}
+  .ticketcard .id{font-family:var(--mono);font-size:12px;color:var(--accent)}
+  .ticketcard h4{margin:6px 0 8px;font-size:16px}
+  .foot{color:var(--muted);font-size:13px;margin-top:8px}
+  svg{max-width:100%;height:auto}
+</style>
+</head>
+<body>
+<button class="toggle" onclick="var h=document.documentElement;h.dataset.theme=h.dataset.theme==='dark'?'light':'dark'">◐ theme</button>
+<div class="wrap">
+
+  <p class="kicker">agents-cli · fleet UX + performance</p>
+  <h1><code style="font-size:.8em">agents fleet status</code> — legible in a glance, fast by default</h1>
+  <p class="lede">The command tries to answer "is my fleet OK?" but buries the answer under duplicated columns, glyph soup, jargon (<code>stale</code>/<code>cold</code>), and a ~60&nbsp;second live-SSH hang it doesn't admit to. This is the before/after and the reasoning behind every change — for your approval before I file.</p>
+  <div class="chips">
+    <span class="chip">12 devices</span>
+    <span class="chip">~60s → instant (cache-first)</span>
+    <span class="chip">9 columns → quiet-when-healthy</span>
+    <span class="chip">no dupe in Linear</span>
+  </div>
+
+  <h2><span class="n">1</span> The two problems, side by side</h2>
+
+  <h3><span class="tag before">BEFORE</span>what you ran tonight</h3>
+  <div class="term">
+    <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lbl">muqsit@zion — agents fleet status — ~60s to render</span></div>
+<pre><span class="b">Fleet warnings (3)</span>
+  <span class="y">drift</span>        12 devices have sync drift <span class="m">(zion, mac-mini, win-mini, yosemite-m0, yosemite-m1,</span>
+  <span class="m">yosemite-m2, yosemite-m3, yosemite-m4, yosemite-m5, yosemite-m6, yosemite-s0, yosemite-s1)</span>
+  <span class="y">cli</span>          11 devices are missing one or more agent CLIs <span class="m">(zion, mac-mini, win-mini,</span>
+  <span class="m">yosemite-m0, yosemite-m1, yosemite-m2, yosemite-m3, yosemite-m4, yosemite-m5, yosemite-m6, yosemite-s1)</span>
+  <span class="y">version-skew</span> agents-cli version skew: 0.0.0-dev.867dea00-dirty, 1.20.73, 1.20.74 <span class="m">(...)</span>
+
+<span class="b">Fleet status</span>
+   <span class="m">Device        OS       Health   Sync            CLI     Auth       Version    Load/Mem  Note</span>
+ <span class="y">◐</span> <span class="b">zion</span>          macos    <span class="y">busy</span>     8 stale · 3 cold  7/9   <span class="g">●5</span> <span class="m">·8</span> <span class="y">◐3</span>    1.20.74    23%/49%   <span class="m">12 orphaned versions</span>
+ <span class="y">◐</span> mac-mini      macos    <span class="y">busy</span>     6 stale · 6 cold  7/9   <span class="m">·4</span> <span class="y">◐4</span>       1.20.73    27%/57%   <span class="m">10 orphaned versions</span>
+ <span class="y">◐</span> win-mini      windows  <span class="y">busy</span>     4 cold            1/9   —          1.20.73    1%/54%    <span class="m">4 orphaned versions</span>
+ <span class="y">◐</span> yosemite-m0   linux    <span class="g">idle</span>     1 stale · 10 cold 6/9   <span class="m">·3</span> <span class="y">◐4</span>       1.20.74    5%/15%    <span class="m">10 orphaned versions</span>
+ <span class="y">◐</span> yosemite-m1   linux    <span class="g">idle</span>     6 stale · 5 cold  6/9   <span class="m">·2</span> <span class="y">◐2</span>       1.20.73    0%/7%     <span class="m">11 orphaned versions</span>
+ <span class="y">◐</span> yosemite-m2   linux    <span class="g">idle</span>     5 cold            6/9   <span class="m">·3</span> <span class="y">◐1</span>       1.20.73    0%/9%     <span class="m">11 orphaned versions</span>
+ <span class="m">...  (m3–m6 identical)</span>
+ <span class="y">◐</span> yosemite-s0   linux    <span class="g">light</span>    4 stale · 1 cold  9/9   <span class="g">●4</span> <span class="m">·6</span> <span class="y">◐3</span>    0.0.0-dev.867…  3%/20% <span class="m">9 orphaned versions</span>
+ <span class="y">◐</span> yosemite-s1   linux    <span class="g">light</span>    3 stale · 4 cold  7/9   <span class="g">●3</span> <span class="m">·5</span> <span class="y">◐3</span>    1.20.73    1%/16%    <span class="m">11 orphaned versions</span>
+ <span class="m">● fresh · ◐ drift · ○ unreachable/skipped · Auth ●live ·present ◐degraded ○revoked</span>
+ <span class="m">updated stats 2m ago · auth 7d ago — pass --refresh (--live) for a live probe</span></pre>
+  </div>
+
+  <div class="note">
+    <div class="h">the tells</div>
+    <ul style="margin:0">
+      <li><span class="r b">"Health" = busy/idle</span> is not health — it's the <em>same load/mem numbers</em> two columns over, relabelled. <code>health.ts:194</code></li>
+      <li><span class="r b">"8 stale · 3 cold"</span> counts <em>every</em> installed version incl. old orphans; your active install is likely fine. <code>drift.ts:59</code></li>
+      <li><span class="r b">Auth <code>●5 ·8 ◐3</code></span> — the biggest number (<code>·8</code>) is the <em>most benign</em> state (present, not probed). <code>auth-health.ts:189</code></li>
+      <li><span class="r b">Warnings re-list all 12 devices</span> three times — if everything drifts, the list carries no signal.</li>
+      <li><span class="r b">"orphaned versions"</span> owns the rightmost column but is a <code>prune</code> housekeeping stat, not a health signal. <code>drift.ts:126</code></li>
+      <li><span class="r b">~60s hang</span> — SSHes every box live even though the footer implies cached; dead boxes aren't skipped. <code>ssh.ts:394,398</code></li>
+    </ul>
+  </div>
+
+  <h3><span class="tag after">AFTER</span>proposed — cache-first, quiet-when-healthy, grouped by OS</h3>
+  <div class="term">
+    <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lbl">muqsit@zion — agents fleet status — instant (served from cache)</span></div>
+<pre><span class="b">Fleet</span>   <span class="g">● 11 online</span>   <span class="gr">○ 1 offline</span>                          <span class="m">zion · cached 2m ago</span>
+
+<span class="y b">NEEDS ATTENTION (3)</span>
+  <span class="gr">○</span>  yosemite-s1    <span class="gr">offline</span> · last seen 3d ago            <span class="m">→ check the box</span>
+  <span class="y">⚠</span>  win-mini       only <span class="y">1 of 9</span> agent CLIs installed       <span class="m">→ agents apply win-mini</span>
+  <span class="y">⚠</span>  version skew   9× 1.20.73 · 2× 1.20.74 · zion dev  <span class="m">→ agents upgrade --fleet</span>
+
+<span class="m">macOS</span>
+ <span class="a b">▸ zion</span>         <span class="y">busy</span>     23% / 49%    1.20.74                <span class="a">← this machine</span>
+   mac-mini     <span class="y">busy</span>     27% / 57%    1.20.73
+
+<span class="m">Linux</span>
+   yosemite-m0  <span class="g">idle</span>      5% / 15%    1.20.74
+   yosemite-m1  <span class="g">idle</span>      0% /  7%    1.20.73
+   yosemite-m2  <span class="g">idle</span>      0% /  9%    1.20.73
+   yosemite-m3  <span class="g">idle</span>      2% /  7%    1.20.73
+   yosemite-m4  <span class="g">idle</span>      0% /  6%    1.20.73
+   yosemite-m5  <span class="g">idle</span>      0% /  6%    1.20.73
+   yosemite-m6  <span class="g">idle</span>      1% /  5%    1.20.73
+   yosemite-s0  <span class="g">light</span>     3% / 20%    <span class="m">dev-dirty</span>
+   yosemite-s1  <span class="gr">offline</span>     —           —           <span class="m">last seen 3d ago</span>
+
+<span class="m">Windows</span>
+   win-mini     <span class="y">busy</span>      1% / 54%    1.20.73    <span class="y">⚠ CLIs 1/9</span>
+
+<span class="m">9 devices carry orphaned versions · run  </span><span class="a">agents prune</span><span class="m">  to reclaim disk</span>
+<span class="m">cached 2m ago · </span><span class="a">--live</span><span class="m"> to re-probe auth + reachability · </span><span class="a">--verbose</span><span class="m"> for auth/CLI/sync columns</span></pre>
+  </div>
+
+  <div class="note">
+    <div class="h">the idea in one line</div>
+    <p style="margin:0;color:var(--ink)">A healthy device is <strong>quiet</strong> — name, capacity, version, done. Everything that needs your hands is pulled up into <strong>NEEDS ATTENTION</strong> with the exact command to fix it. You read the top three lines and you're done.</p>
+  </div>
+
+  <h2><span class="n">2</span> Every change, and why</h2>
+  <table>
+    <tr><th>Change</th><th>Before → After</th><th>Why</th></tr>
+    <tr>
+      <td class="b">Kill the "Health" column</td>
+      <td><code>Health: busy</code> + <code>Load/Mem: 23%/49%</code> → one <code>Capacity</code> cell: <code>busy 23% / 49%</code></td>
+      <td class="why">"Health" was headroom = the worst of load%/mem% — the identical numbers shown twice. One column, one truth.</td>
+    </tr>
+    <tr>
+      <td class="b">Retire <code>stale</code>/<code>cold</code> jargon</td>
+      <td><code>8 stale · 3 cold</code> (all versions) → drift on the <em>active</em> version only, surfaced in NEEDS ATTENTION as <code>config drift → agents apply</code></td>
+      <td class="why">Counting every old orphaned version manufactures scary numbers. Users care whether the install they run is in sync.</td>
+    </tr>
+    <tr>
+      <td class="b">De-glyph Auth</td>
+      <td><code>●5 ·8 ◐3</code> → <code>auth ok</code>, or <code class="y">⚠ 3 degraded</code> / <code class="r">✗ 2 revoked</code> only when it's real</td>
+      <td class="why">"present but unprobed" is benign; showing it as a big number reads as a problem. Show exceptions, not inventory.</td>
+    </tr>
+    <tr>
+      <td class="b">Lead with a rollup + NEEDS ATTENTION</td>
+      <td>3 warnings that re-list all 12 devices → one status line + a short actionable list, each with the fix command</td>
+      <td class="why">"12 devices have drift (list of 12)" is noise. Tell me what's wrong and what to type.</td>
+    </tr>
+    <tr>
+      <td class="b">Group by OS, highlight this machine</td>
+      <td>flat alphabetical → <code>macOS / Linux / Windows</code> sections; <code class="a">▸ zion ← this machine</code></td>
+      <td class="why">Matches how you reason about the fleet; fixes the "OS is just a string" flatness. Parity with <code>agents devices</code> self-marker.</td>
+    </tr>
+    <tr>
+      <td class="b">Demote "orphaned versions"</td>
+      <td>rightmost column on every row → one footer nudge to <code>agents prune</code></td>
+      <td class="why">The code itself says orphans are a prune concern, not drift. It doesn't belong in the health matrix.</td>
+    </tr>
+    <tr>
+      <td class="b">Cache-first, fast by default</td>
+      <td>~60s live SSH every run → instant from cache; <code>--live</code> re-probes; dead boxes always skipped</td>
+      <td class="why">The matrix should mirror the stats cache (already warmed every 3&nbsp;min by the daemon). SSH only on demand.</td>
+    </tr>
+    <tr>
+      <td class="b">Honest freshness footer</td>
+      <td>"updated stats 2m ago" (implies whole view is 2m) → states cache age <em>and</em> that auth/reachability need <code>--live</code></td>
+      <td class="why">Today the footer describes only the stats cache while the matrix silently blocks on live SSH.</td>
+    </tr>
+  </table>
+
+  <h2><span class="n">3</span> Where the render pipeline changes</h2>
+  <div class="term" style="margin-top:8px">
+    <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lbl">data path — file:line from tonight's investigation</span></div>
+<pre><span class="a">runFleetStatus</span>            <span class="m">apps/cli/src/commands/ssh.ts:365</span>   entry
+  <span class="r">└ fanOutDevices(probeRemoteHealth)  ssh.ts:398</span>   <span class="r">← SSH every box, UNGATED  (the hang)</span>
+  <span class="r">└ dead-box skip gated on forceRefresh  ssh.ts:394</span>  <span class="r">← so offline boxes still time out</span>
+<span class="a">buildFleetHealthReport</span>    <span class="m">lib/devices/health-report.ts:69</span>   warnings + skew
+<span class="a">renderFleetMatrix</span>         <span class="m">lib/devices/health-report.ts:242</span>  table + legend
+  <span class="y">├ headroomLabel (=="Health")     health-report.ts:135  → merge into Capacity</span>
+  <span class="y">├ driftLabel (stale/cold)        health-report.ts:151  → active-version only</span>
+  <span class="y">├ authLabel (glyph soup)         health-report.ts:188  → ok / ⚠N / ✗N</span>
+  <span class="y">└ Note = orphaned versions       health-report.ts:248  → footer nudge</span></pre>
+  </div>
+
+  <h2><span class="n">4</span> Three calls I made — flag any you'd flip</h2>
+
+  <div class="decision">
+    <div class="q">A · Keep <code>fleet status</code> and <code>devices</code> separate?</div>
+    <p style="margin:4px 0 0">They overlap (both show device/OS/load/mem). <code>devices</code> = "live capacity right now"; <code>fleet status</code> = "is the fleet healthy + in sync." I'd keep them separate but make <code>fleet status</code> cache-first so both are fast.</p>
+    <div class="rec">▸ recommend: keep separate, share the cache</div>
+  </div>
+
+  <div class="decision">
+    <div class="q">B · Quiet-when-healthy, or always show every column?</div>
+    <p style="margin:4px 0 0">Proposal hides <code>auth ok</code> / <code>CLIs 9/9</code> on healthy rows and only marks exceptions. Some people like an explicit wall of green for reassurance.</p>
+    <div class="rec">▸ recommend: quiet by default, <code>--verbose</code> brings every column back</div>
+  </div>
+
+  <div class="decision">
+    <div class="q">C · Add a live "sessions running" count per device?</div>
+    <p style="margin:4px 0 0">You mentioned wanting "how many agents are running." That's a genuinely new signal (the current command never shows it) — would answer "where's my capacity actually being used."</p>
+    <div class="rec">▸ recommend: yes, but as a fast-follow ticket — needs a session-count source</div>
+  </div>
+
+  <hr class="rule">
+
+  <h2><span class="n">5</span> The "offline" lie — and a unified transport</h2>
+  <p>You SSH into <code>yosemite-s1</code> every day, yet <code>fleet status</code> calls it offline. I probed it live tonight — it's fine. This is a whole class of bug, and it exposes that there's no real connection protocol underneath.</p>
+
+  <div class="note">
+    <div class="h">proof — yosemite-s1 is online right now</div>
+    <ul style="margin:0">
+      <li><code>ssh yosemite-s1</code> → <code class="g">OK from yosemite-s1</code>, tailscale <code>1.98.4</code> installed</li>
+      <li><code>tailscale status</code> → <code class="g">yosemite-s1 ... active; direct 192.168.1.80</code></li>
+      <li>cached <code>registry.json</code> entry: <code>via:"manual"</code>, <code class="r">no tailscale field</code>, <code>updatedAt</code> = 9 days ago</li>
+    </ul>
+  </div>
+
+  <table>
+    <tr><th>What's actually wrong</th><th>Evidence</th></tr>
+    <tr>
+      <td class="b">Online = a stale cache, not live truth</td>
+      <td class="why">The label reads the cached <code>tailscale.online</code> field only. A live SSH probe runs (<code>health.ts:207</code>, 2.5s) — that's the "1% load" the snapshot showed — but it's <strong>display-only and never writes back</strong>. So a reachable box shows offline. That's the contradiction: "offline · 1% load / 16% mem."</td>
+    </tr>
+    <tr>
+      <td class="b">Manual devices never get a tailscale field</td>
+      <td class="why"><code>via:"manual"</code> entries are added without <code>tailscale.online</code>, and refresh-mode sync skips nodes it doesn't already track (<code>sync.ts:130</code>). So they stay "offline forever" until a manual <code>agents devices sync</code>.</td>
+    </tr>
+    <tr>
+      <td class="b"><code>--host</code> and <code>--device</code> are the same flag</td>
+      <td class="why"><code>--device</code> is a documented alias of <code>--host</code> (<code>exec.ts:508</code>). And <code>--device(s)</code> is <em>also</em> used for "config scope" in <code>routines/monitors/apply/doctor</code> — same word, two meanings.</td>
+    </tr>
+    <tr>
+      <td class="b">No VPN-first transport, no key provisioning</td>
+      <td class="why">Tailscale is <strong>probe-only</strong> — it just supplies the <code>.ts.net</code> address + a liveness snapshot. All execution is raw SSH (<code>ssh-exec.ts</code>). No <code>ssh-copy-id</code> anywhere; <code>auth.method:"key"</code> assumes keys were authorized out-of-band.</td>
+    </tr>
+  </table>
+
+  <h3>Proposed: one <code>connect(device)</code> layer — VPN-first, keyed-SSH fallback, provision if missing</h3>
+  <div class="term" style="margin-top:8px">
+    <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lbl">connection protocol — resolved once, used by every command</span></div>
+    <svg viewBox="0 0 860 300" xmlns="http://www.w3.org/2000/svg" style="display:block;padding:14px">
+      <defs>
+        <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#8a93a6"/></marker>
+      </defs>
+      <style>
+        .bx{fill:#11151f;stroke:#212838;stroke-width:1.5;rx:10}
+        .lb{font-family:var(--mono, monospace);font-size:13px;fill:#e6e9ef}
+        .sm{font-family:var(--mono, monospace);font-size:11px;fill:#8a93a6}
+        .ok{fill:#54d18c}.warn{fill:#f0c674}.bad{fill:#f07178}.ac{fill:#7cc4ff}
+        .ln{stroke:#8a93a6;stroke-width:1.5;fill:none;marker-end:url(#ar)}
+      </style>
+      <rect class="bx" x="20" y="120" width="150" height="54" rx="10"/>
+      <text class="lb" x="95" y="143" text-anchor="middle">connect(device)</text>
+      <text class="sm" x="95" y="161" text-anchor="middle">any command</text>
+
+      <path class="ln" d="M170,147 L215,147"/>
+
+      <rect class="bx" x="220" y="40" width="220" height="60" rx="10"/>
+      <text class="lb ac" x="330" y="64" text-anchor="middle">1 · Tailscale (VPN)</text>
+      <text class="sm" x="330" y="83" text-anchor="middle">peer active? → *.ts.net, encrypted</text>
+
+      <rect class="bx" x="220" y="120" width="220" height="60" rx="10"/>
+      <text class="lb" x="330" y="144" text-anchor="middle">2 · Keyed SSH (LAN/manual)</text>
+      <text class="sm" x="330" y="163" text-anchor="middle">no peer? → direct ip, BatchMode key</text>
+
+      <rect class="bx" x="220" y="200" width="220" height="60" rx="10"/>
+      <text class="lb warn" x="330" y="224" text-anchor="middle">3 · Provision key</text>
+      <text class="sm" x="330" y="243" text-anchor="middle">auth fails? → ssh-copy-id, retry</text>
+
+      <path class="ln" d="M215,140 L215,70 L218,70"/>
+      <path class="ln" d="M215,150 L215,150"/>
+      <path class="ln" d="M440,70 L470,70 L470,147 L505,147"/>
+      <path class="ln" d="M440,150 L505,150"/>
+      <path class="ln" d="M440,230 L470,230 L470,153 L505,153"/>
+
+      <rect class="bx" x="510" y="120" width="150" height="54" rx="10"/>
+      <text class="lb g" x="585" y="143" text-anchor="middle">live probe</text>
+      <text class="sm" x="585" y="161" text-anchor="middle">reachable = truth</text>
+
+      <path class="ln" d="M660,147 L700,147"/>
+      <rect class="bx" x="705" y="120" width="135" height="54" rx="10"/>
+      <text class="lb" x="772" y="143" text-anchor="middle">write back</text>
+      <text class="sm" x="772" y="161" text-anchor="middle">→ registry.online</text>
+    </svg>
+  </div>
+  <ul>
+    <li><span class="b" style="color:var(--ink)">Reachability = live truth.</span> Prefer the live probe over the cached flag; write the result back to the registry so "offline" is never a 9-day-old guess. Fixes the whole class, not just s1.</li>
+    <li><span class="b" style="color:var(--ink)">VPN-first.</span> If the tailscale peer is up, go over the encrypted <code>.ts.net</code> path; else fall back to direct keyed SSH; else provision the key and retry — one ordered policy, at the resolver seam.</li>
+    <li><span class="b" style="color:var(--ink)">Real provisioning.</span> <code>agents devices add/provision</code> runs an <code>ssh-copy-id</code> equivalent so <code>auth.method:"key"</code> is set up by the tool, not by hand.</li>
+    <li><span class="b" style="color:var(--ink)">Collapse the flags.</span> One addressing flag (keep <code>--device</code> as the alias); rename the config-scope <code>--device(s)</code> collision to <code>--on</code>/<code>--scope</code>.</li>
+  </ul>
+
+  <hr class="rule">
+
+  <h2><span class="n">6</span> How I'd file it — four tickets</h2>
+  <p>Each has an isolated root cause and is independently mergeable. The two bugs can ship fast; the redesign and the transport layer are spec-driven.</p>
+
+  <div class="ticketcard">
+    <div class="id">RUSH-XXXX · Bug · repo:agents-cli · High</div>
+    <h4>Reachable devices render "offline" — online is a stale cache the live probe never corrects</h4>
+    <p style="margin:0">Prefer the live SSH/tailscale probe over the cached <code>tailscale.online</code> and write it back to the registry; give <code>via:"manual"</code> entries a tailscale field on sync. Repro: <code>yosemite-s1</code> shows offline while SSH + <code>tailscale status</code> confirm it's active. Root cause <code>health.ts:207</code> (probe never writes back), <code>sync.ts:130</code> (refresh skips untracked).</p>
+  </div>
+
+  <div class="ticketcard">
+    <div class="id">RUSH-XXXX · Bug · repo:agents-cli · High</div>
+    <h4><code>fleet status</code> hangs ~60s: live-SSHes every device on the default path</h4>
+    <p style="margin:0">Gate the <code>probeRemoteHealth</code> fan-out behind <code>--live</code>/<code>--refresh</code> (mirror the stats cache); always skip cache-known-dead boxes; shrink default timeouts; fix the footer to state real freshness. Root cause <code>ssh.ts:394,398</code>.</p>
+  </div>
+
+  <div class="ticketcard">
+    <div class="id">RUSH-XXXX · Feature · repo:agents-cli · Medium</div>
+    <h4>Redesign <code>fleet status</code> output: rollup + NEEDS ATTENTION, OS grouping, drop glyph soup</h4>
+    <p style="margin:0">The spec above — kill the Health column, retire stale/cold, de-glyph auth, group by OS, highlight this machine, demote orphans to a footer, quiet-when-healthy + <code>--verbose</code>. Before/after in this doc is the acceptance target. Depends on the reachability fix so "offline" in NEEDS ATTENTION is trustworthy.</p>
+  </div>
+
+  <div class="ticketcard">
+    <div class="id">RUSH-XXXX · Feature / Epic · repo:agents-cli · Medium</div>
+    <h4>Unified fleet connection protocol: VPN-first, keyed-SSH fallback, key provisioning</h4>
+    <p style="margin:0">One <code>connect(device)</code> policy at the resolver seam (<code>hostNameFor</code>/<code>resolveHost</code> + <code>ssh-exec.ts</code>): prefer Tailscale, fall back to direct keyed SSH, provision the key if auth fails. Collapse <code>--host</code>/<code>--device</code>; rename the config-scope <code>--device(s)</code> collision. The larger architectural change the other three lean on.</p>
+  </div>
+
+  <p class="foot">Still nothing filed. Confirm the connection-protocol shape (the diagram) and the 4-ticket split — flip anything — and I'll file them with this spec + file:line evidence attached.</p>
+
+</div>
+</body>
+</html>

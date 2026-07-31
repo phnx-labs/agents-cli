@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan · Show the configured model everywhere agents-cli shows an agent</title>
+<style>
+  :root{
+    --bg:#0a0a0a; --panel:#111211; --panel-2:#161816; --ink:#e7e9e4; --muted:#9aa196;
+    --line:#26291f; --lime:#a3e635; --lime-dim:#7fb52a; --amber:#f5c451; --red:#f27c7c;
+    --cyan:#63b3d6; --code-bg:#0c0d0b; --chip:#1b1e17;
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+    --sans:'Inter',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  }
+  html[data-theme="light"]{
+    --bg:#f7f8f4; --panel:#ffffff; --panel-2:#f1f3ec; --ink:#1b1d18; --muted:#5c6357;
+    --line:#e0e4d6; --lime:#5f8a12; --lime-dim:#6f9a1e; --amber:#a9791a; --red:#c0392b;
+    --cyan:#2b6d8c; --code-bg:#f2f4ea; --chip:#eaeee0;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    line-height:1.6;-webkit-font-smoothing:antialiased;}
+  a{color:var(--lime);text-decoration:none}
+  .wrap{max-width:860px;margin:0 auto;padding:48px 24px 96px}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.22em;text-transform:uppercase;
+    color:var(--lime);margin:0 0 14px}
+  h1{font-size:34px;line-height:1.18;margin:0 0 18px;letter-spacing:-.01em;font-weight:700}
+  .lede{font-size:17px;color:var(--muted);margin:0 0 26px;max-width:70ch}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 30px}
+  .chip{font-family:var(--mono);font-size:11.5px;background:var(--chip);border:1px solid var(--line);
+    color:var(--ink);padding:5px 10px;border-radius:6px}
+  .chip b{color:var(--lime);font-weight:600}
+  .toc{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 20px;margin:0 0 42px}
+  .toc h4{margin:0 0 10px;font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted)}
+  .toc ol{margin:0;padding-left:20px;columns:2;column-gap:32px}
+  .toc li{margin:4px 0;font-size:14px}
+  section{margin:0 0 40px}
+  h2{font-size:13px;font-family:var(--mono);letter-spacing:.12em;text-transform:uppercase;
+    color:var(--lime);border-bottom:1px solid var(--line);padding-bottom:8px;margin:0 0 18px}
+  h2 .n{color:var(--muted);margin-right:10px}
+  h3{font-size:16px;margin:26px 0 8px}
+  p{margin:0 0 14px}
+  code{font-family:var(--mono);font-size:12.5px;background:var(--code-bg);border:1px solid var(--line);
+    padding:1.5px 6px;border-radius:5px;color:var(--ink)}
+  pre{font-family:var(--mono);font-size:12.5px;background:var(--code-bg);border:1px solid var(--line);
+    border-radius:10px;padding:16px 18px;overflow:auto;margin:0 0 18px;line-height:1.5}
+  pre code{background:none;border:none;padding:0}
+  .cmt{color:var(--muted)}
+  .kw{color:var(--lime)}
+  .str{color:var(--amber)}
+  .callout{border:1px solid var(--line);border-left:3px solid var(--lime);background:var(--panel);
+    border-radius:8px;padding:14px 18px;margin:0 0 18px}
+  .callout.warn{border-left-color:var(--amber)}
+  .callout .t{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--muted);margin:0 0 6px}
+  table{width:100%;border-collapse:collapse;margin:0 0 18px;font-size:13.5px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+  td code{font-size:11.5px}
+  .tag{font-family:var(--mono);font-size:10.5px;padding:2px 7px;border-radius:20px;border:1px solid var(--line)}
+  .tag.new{color:var(--lime);border-color:var(--lime-dim)}
+  .tag.edit{color:var(--amber);border-color:var(--amber)}
+  .src{font-family:var(--mono);color:var(--muted)}
+  .diagram{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:24px;margin:0 0 20px}
+  .theme-toggle{position:fixed;top:18px;right:18px;font-family:var(--mono);font-size:18px;
+    background:var(--panel);border:1px solid var(--line);color:var(--ink);width:40px;height:40px;
+    border-radius:50%;cursor:pointer;line-height:1;display:flex;align-items:center;justify-content:center}
+  .foot{color:var(--muted);font-size:12.5px;font-family:var(--mono);border-top:1px solid var(--line);
+    padding-top:18px;margin-top:48px}
+  ul.tight{margin:0 0 14px;padding-left:20px} ul.tight li{margin:5px 0}
+  .out{color:var(--muted)} .out .m{color:var(--lime)} .out .s{color:var(--amber)}
+  /* terminal mockups */
+  .term{background:var(--code-bg);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin:0 0 4px}
+  .term .bar{display:flex;align-items:center;gap:6px;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--panel-2)}
+  .term .bar i{width:11px;height:11px;border-radius:50%;display:inline-block}
+  .term .bar .r{background:var(--red)} .term .bar .y{background:var(--amber)} .term .bar .g{background:var(--lime)}
+  .term .bar span{font-family:var(--mono);font-size:11px;color:var(--muted);margin-left:6px}
+  .term pre{background:none;border:none;border-radius:0;margin:0;padding:14px 16px;font-size:12px;line-height:1.7;white-space:pre}
+  .ba{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:0 0 8px}
+  @media(max-width:760px){.ba{grid-template-columns:1fr}}
+  .lbl{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}
+  .lbl.aft{color:var(--lime)}
+  .v{color:var(--lime)} .e{color:var(--cyan)} .g2{color:var(--muted)} .pct{color:var(--amber)}
+  .mdl{color:var(--lime)} .add{color:var(--lime);font-weight:600} .prompt{color:var(--muted)}
+</style>
+</head>
+<body>
+<button class="theme-toggle" onclick="(function(){var h=document.documentElement;h.dataset.theme=h.dataset.theme==='dark'?'light':'dark';})()">◐</button>
+<div class="wrap">
+
+  <p class="kicker">agents-cli · implementation plan</p>
+  <h1>Show the configured model wherever <code>agents</code> displays an agent</h1>
+  <p class="lede">Every place we already surface an agent+version — <code>agents view</code>,
+  the <code>agent@version</code> detail, <code>use</code>, <code>add</code>, <code>status</code>,
+  <code>inspect</code> — should tell the user <em>which model that agent is set to use right now</em>,
+  with a short label saying where the selection comes from. Usage/limit windows already look good and
+  stay exactly as they are.</p>
+
+  <div class="chips">
+    <span class="chip">scope · <b>configured model only</b></span>
+    <span class="chip">limits · <b>unchanged</b></span>
+    <span class="chip">surfaces · <b>6</b></span>
+    <span class="chip">new helper · <b>resolveConfiguredModel()</b></span>
+    <span class="chip">files · <b>5</b></span>
+    <span class="chip">repo · <b>phnx-labs/agents-cli</b></span>
+  </div>
+
+  <div class="toc">
+    <h4>Contents</h4>
+    <ol>
+      <li><a href="#ctx">The gap today</a></li>
+      <li><a href="#look">What it will look like</a></li>
+      <li><a href="#resolve">One shared resolver</a></li>
+      <li><a href="#surfaces">Wiring the surfaces</a></li>
+      <li><a href="#files">Files &amp; tests</a></li>
+      <li><a href="#verify">Verification</a></li>
+    </ol>
+  </div>
+
+  <section id="ctx">
+    <h2><span class="n">01</span>The gap today</h2>
+    <p>A user inspecting an agent sees version, account, and usage windows — but the model is
+    effectively invisible. The only model hint is a gray <code>run model:&lt;x&gt;</code> suffix on
+    <code>agents view</code> rows, and it appears <b>only if</b> the user manually set an
+    <code>agents.yaml</code> <code>run.defaults</code> entry (<span class="src">view.ts:621-651</span>).
+    The <code>agent@version</code> detail view shows <b>no model at all</b>
+    (<span class="src">view.ts:1026-1049</span>). Yet the agent always runs with <em>some</em>
+    model — its native <code>settings.json</code> model, or the CLI's built-in default.</p>
+
+    <div class="callout">
+      <p class="t">Outcome the user wants</p>
+      <p style="margin:0">"The user is trying to see what an agent has." One glance answers
+      <em>what model is this agent+version set to, and why.</em></p>
+    </div>
+
+    <div class="diagram">
+      <svg viewBox="0 0 760 250" width="100%" role="img" aria-label="Model resolution precedence">
+        <defs>
+          <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+            <path d="M0,0 L7,3 L0,6 Z" fill="#a3e635"/>
+          </marker>
+          <style>
+            .bx{fill:#161816;stroke:#26291f} .lb{fill:#e7e9e4;font-family:'JetBrains Mono',monospace;font-size:12px}
+            .sub{fill:#9aa196;font-family:'JetBrains Mono',monospace;font-size:10.5px}
+            .hd{fill:#a3e635;font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.1em}
+            .fl{stroke:#a3e635;stroke-width:1.4;fill:none}
+          </style>
+        </defs>
+        <text x="0" y="16" class="hd">RESOLVE CONFIGURED MODEL — FIRST HIT WINS</text>
+
+        <rect x="0" y="36" width="210" height="60" rx="8" class="bx"/>
+        <text x="16" y="62" class="lb">1 · run default</text>
+        <text x="16" y="80" class="sub">agents.yaml run.defaults</text>
+
+        <rect x="0" y="106" width="210" height="60" rx="8" class="bx"/>
+        <text x="16" y="132" class="lb">2 · config</text>
+        <text x="16" y="150" class="sub">agent's settings.json "model"</text>
+
+        <rect x="0" y="176" width="210" height="60" rx="8" class="bx"/>
+        <text x="16" y="202" class="lb">3 · cli default</text>
+        <text x="16" y="220" class="sub">catalog isDefault (binary)</text>
+
+        <path class="fl" d="M210,66 C300,66 300,133 360,133" marker-end="url(#ar)"/>
+        <path class="fl" d="M210,136 L360,133" marker-end="url(#ar)"/>
+        <path class="fl" d="M210,206 C300,206 300,133 360,133" marker-end="url(#ar)"/>
+
+        <rect x="362" y="103" width="200" height="60" rx="8" class="bx" style="stroke:#a3e635"/>
+        <text x="378" y="129" class="lb">ConfiguredModel</text>
+        <text x="378" y="147" class="sub">{ model, source }</text>
+
+        <path class="fl" d="M562,133 L610,133" marker-end="url(#ar)"/>
+        <rect x="612" y="103" width="148" height="60" rx="8" class="bx"/>
+        <text x="628" y="126" class="lb" style="fill:#a3e635">opus</text>
+        <text x="628" y="147" class="sub">(run default)</text>
+      </svg>
+    </div>
+  </section>
+
+  <section id="look">
+    <h2><span class="n">02</span>What it will look like</h2>
+    <div class="callout">
+      <p class="t">Design principle</p>
+      <p style="margin:0">The model gets the <b>same treatment and priority as the version</b> —
+      it sits <em>right next to it</em>, everywhere, and is <b>never its own row or label</b>.
+      Wherever a version shows, the model shows beside it: <b>agent · version · model · account</b>.
+      The source (<code>run default</code> / <code>config</code> / <code>cli default</code>) is
+      resolved but kept out of the human views — it's available in <code>agents view --json</code>.
+      Usage windows are untouched.</p>
+    </div>
+
+    <h3>A · <code>agents view claude</code> — the version list</h3>
+    <div class="ba">
+      <div>
+        <p class="lbl">before</p>
+        <div class="term"><div class="bar"><i class="r"></i><i class="y"></i><i class="g"></i><span>agents view claude</span></div><pre><span class="g2">Installed Agent CLIs</span>
+
+  <span style="font-weight:600">Claude</span> <span class="g2">(balanced)</span>
+    <span class="v">2.1.186 (default)</span>  <span class="e">you@rush.dev</span>   <span class="g2">S</span> ███░░ <span class="pct">58%</span>  <span class="g2">W</span> █░░░░ <span class="pct">12%</span>   <span class="g2">2h ago</span>
+    <span class="v">2.1.112</span>            <span class="e">you@rush.dev</span>   <span class="g2">S</span> █░░░░ <span class="pct"> 9%</span>              <span class="g2">1d ago</span></pre></div>
+      </div>
+      <div>
+        <p class="lbl aft">after</p>
+        <div class="term"><div class="bar"><i class="r"></i><i class="y"></i><i class="g"></i><span>agents view claude</span></div><pre><span class="g2">Installed Agent CLIs</span>
+
+  <span style="font-weight:600">Claude</span> <span class="g2">(balanced)</span>
+    <span class="v">2.1.186 (default)</span>  <span class="mdl add">opus  </span>  <span class="e">you@rush.dev</span>   <span class="g2">S</span> ███░░ <span class="pct">58%</span>  <span class="g2">W</span> █░░░░ <span class="pct">12%</span>   <span class="g2">2h ago</span>
+    <span class="v">2.1.112</span>            <span class="mdl add">sonnet</span>  <span class="e">you@rush.dev</span>   <span class="g2">S</span> █░░░░ <span class="pct"> 9%</span>              <span class="g2">1d ago</span></pre></div>
+      </div>
+    </div>
+    <p class="lbl" style="margin-top:2px">the new column is the only difference — bare model id, aligned right after the version</p>
+
+    <h3>B · <code>agents view claude@2.1.186</code> — the detail view</h3>
+    <div class="ba">
+      <div>
+        <p class="lbl">before</p>
+        <div class="term"><div class="bar"><i class="r"></i><i class="y"></i><i class="g"></i><span>agents view claude@2.1.186</span></div><pre><span class="g2">Agent CLIs</span>
+
+  <span style="font-weight:600">Claude</span>          <span class="v">2.1.186</span>  <span class="e">you@rush.dev</span>  <span class="g2">Pro</span>
+
+  <span class="g2">Usage</span>
+
+    <span style="font-weight:600">Current session</span>       ███░░ <span class="pct">58%</span> used
+    <span class="g2">Resets in 3 hours</span>
+    <span style="font-weight:600">Current week (all)</span>    █░░░░ <span class="pct">12%</span> used
+    <span class="g2">Resets in 6 days</span></pre></div>
+      </div>
+      <div>
+        <p class="lbl aft">after</p>
+        <div class="term"><div class="bar"><i class="r"></i><i class="y"></i><i class="g"></i><span>agents view claude@2.1.186</span></div><pre><span class="g2">Agent CLIs</span>
+
+  <span style="font-weight:600">Claude</span>          <span class="v">2.1.186</span>  <span class="mdl add">opus</span>  <span class="e">you@rush.dev</span>  <span class="g2">Pro</span>
+
+  <span class="g2">Usage</span>
+
+    <span style="font-weight:600">Current session</span>       ███░░ <span class="pct">58%</span> used
+    <span class="g2">Resets in 3 hours</span>
+    <span style="font-weight:600">Current week (all)</span>    █░░░░ <span class="pct">12%</span> used
+    <span class="g2">Resets in 6 days</span></pre></div>
+      </div>
+    </div>
+    <p class="lbl" style="margin-top:2px">model folds into the header line between version and account — no separate line, no "Model" label</p>
+
+    <h3>C · Confirmations &amp; status — one identity cluster</h3>
+    <p><code>agent@version · model · account</code> from the shared formatter. No "model" keyword.</p>
+    <div class="term"><div class="bar"><i class="r"></i><i class="y"></i><i class="g"></i><span>after</span></div><pre><span class="prompt">$</span> agents use claude@2.1.186
+Set <span class="v">Claude@2.1.186</span> <span class="g2">·</span> <span class="mdl">opus</span> <span class="g2">·</span> <span class="e">you@rush.dev</span> as global default
+
+<span class="prompt">$</span> agents add claude@2.1.187
+Installed <span class="v">Claude@2.1.187</span> <span class="g2">·</span> <span class="mdl">opus</span> <span class="g2">·</span> <span class="e">you@rush.dev</span>
+
+<span class="prompt">$</span> agents status
+  <span class="v">claude@2.1.186</span> <span class="g2">·</span> <span class="mdl">opus</span> <span class="g2">·</span> <span class="e">you@rush.dev</span>   <span class="g2">(default)   in sync</span></pre></div>
+
+    <h3>D · <code>agents inspect</code> — model sits with the version in the header</h3>
+    <div class="ba">
+      <div>
+        <p class="lbl">before</p>
+        <div class="term"><div class="bar"><i class="r"></i><i class="y"></i><i class="g"></i><span>agents inspect claude@2.1.186</span></div><pre><span style="font-weight:600">claude</span> <span class="g2">@</span> <span class="v">2.1.186</span>  <span style="color:var(--lime)">[default]</span>
+
+  <span class="g2">install </span>  ~/.agents/.history/versions/claude/2.1.186/home
+  <span class="g2">config  </span>  ~/.claude
+  <span class="g2">strategy</span>  balanced</pre></div>
+      </div>
+      <div>
+        <p class="lbl aft">after</p>
+        <div class="term"><div class="bar"><i class="r"></i><i class="y"></i><i class="g"></i><span>agents inspect claude@2.1.186</span></div><pre><span style="font-weight:600">claude</span> <span class="g2">@</span> <span class="v">2.1.186</span>  <span class="mdl add">opus</span>  <span style="color:var(--lime)">[default]</span>
+
+  <span class="g2">install </span>  ~/.agents/.history/versions/claude/2.1.186/home
+  <span class="g2">config  </span>  ~/.claude
+  <span class="g2">strategy</span>  balanced</pre></div>
+      </div>
+    </div>
+    <p class="lbl" style="margin-top:2px">model joins the header beside the version — no new row, no "model" label</p>
+  </section>
+
+  <section id="resolve">
+    <h2><span class="n">03</span>One shared resolver</h2>
+    <p>Add <code>resolveConfiguredModel(agent, version)</code> to
+    <code>apps/cli/src/lib/models.ts</code>, beside the existing <code>resolveEffectiveModel</code>
+    and <code>getModelCatalog</code>. Every surface calls this one function, so the display can
+    never drift between commands.</p>
+
+    <pre><code><span class="kw">export type</span> ConfiguredModelSource = <span class="str">'run-default'</span> | <span class="str">'config'</span> | <span class="str">'cli-default'</span>;
+
+<span class="kw">export interface</span> ConfiguredModel { model: <span class="kw">string</span>; source: ConfiguredModelSource; }
+
+<span class="kw">export function</span> resolveConfiguredModel(agent, version): ConfiguredModel | <span class="kw">null</span> {
+  <span class="cmt">// 1 · run default — resolveRunDefaults(agent, version).model      (lib/run-defaults.ts)</span>
+  <span class="cmt">// 2 · config      — read getVersionHomePath()/agentConfigDirName()/settings.json ."model"</span>
+  <span class="cmt">// 3 · cli default — resolveEffectiveModel(agent, version)          (catalog isDefault)</span>
+}</code></pre>
+
+    <table>
+      <thead><tr><th>Layer</th><th>Source of truth</th><th>Existing helper reused</th></tr></thead>
+      <tbody>
+        <tr><td><b>run-default</b></td><td><code>agents.yaml → run.defaults</code></td><td><code>resolveRunDefaults()</code> <span class="src">run-defaults.ts:178</span></td></tr>
+        <tr><td><b>config</b></td><td>agent-native <code>settings.json "model"</code></td><td><code>getVersionHomePath()</code> <span class="src">versions.ts:1054</span> · <code>agentConfigDirName()</code> <span class="src">agents.ts:1025</span></td></tr>
+        <tr><td><b>cli-default</b></td><td>catalog <code>isDefault</code> (from binary)</td><td><code>resolveEffectiveModel()</code> <span class="src">models.ts:940</span></td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout warn">
+      <p class="t">Honest layering, not a fallback band-aid</p>
+      <p style="margin:0">Each layer is a real, distinct source the agent genuinely consults. The
+      config read is best-effort (Claude's <code>settings.json</code> has a top-level <code>"model"</code>;
+      agents without one fall through). A missing/malformed file is a fall-through, not a swallowed error.
+      Returns <code>null</code> only when the agent isn't model-capable. Callers holding
+      <code>'default'</code> resolve a concrete version first via <code>resolveVersion()</code>.</p>
+    </div>
+
+    <p>Two sibling formatters keep every surface consistent:</p>
+    <ul class="tight">
+      <li><code>formatAgentIdentity(agent, ver, {model, account})</code> → the cluster
+      <span class="out"><span class="v" style="color:var(--lime)">Claude@2.1.186</span> · <span class="m">opus</span> · <span class="e" style="color:var(--cyan)">you@rush.dev</span></span>,
+      reused by the view detail header and the use / add / status confirmations.</li>
+      <li><code>formatModelSource(source)</code> → <code>run default</code> / <code>config</code> /
+      <code>cli default</code>, emitted only in <code>agents view --json</code> (<code>configuredModel.source</code>).</li>
+    </ul>
+    <p>The bare model id (<code>opus</code>) comes straight off
+    <code>resolveConfiguredModel(...).model</code> and is placed beside the version; the source
+    word never appears in a human view.</p>
+  </section>
+
+  <section id="surfaces">
+    <h2><span class="n">04</span>Wiring the surfaces</h2>
+    <p>Same tiny pattern each place: resolve, then print one gray <code>model</code> bit. No emojis;
+    matches the existing subdued-metadata style.</p>
+    <table>
+      <thead><tr><th>Surface</th><th>Location</th><th>Change</th><th></th></tr></thead>
+      <tbody>
+        <tr><td><code>agents view</code> rows<br><span class="sub src">(&amp; <code>view &lt;agent&gt;</code>)</span></td><td><span class="src">view.ts:598-660</span></td><td>Insert an aligned <b>model column</b> right after the version (bare id, no source)</td><td><span class="tag edit">edit</span></td></tr>
+        <tr><td><code>agents view &lt;agent&gt;@&lt;ver&gt;</code></td><td><span class="src">view.ts:1040</span></td><td>Fold model <b>into</b> the header line, between version and account — no label</td><td><span class="tag edit">edit</span></td></tr>
+        <tr><td><code>agents use</code></td><td><span class="src">versions.ts:1028, 897</span></td><td>Rebuild line around <code>formatAgentIdentity()</code> (account moves into cluster)</td><td><span class="tag edit">edit</span></td></tr>
+        <tr><td><code>agents add</code></td><td><span class="src">versions.ts:517</span></td><td><code>Installed &lt;identity cluster&gt;</code></td><td><span class="tag edit">edit</span></td></tr>
+        <tr><td><code>agents status</code></td><td><span class="src">status.ts:91-93</span></td><td>Swap bare <code>agent@ver</code> for the identity cluster</td><td><span class="tag edit">edit</span></td></tr>
+        <tr><td><code>agents inspect</code></td><td><span class="src">inspect.ts:675</span></td><td>Add model to the <b>header</b> beside the version (no new row)</td><td><span class="tag edit">edit</span></td></tr>
+      </tbody>
+    </table>
+    <p>Optional JSON parity: add <code>configuredModel:{model,source}</code> to the per-version shape
+    in <code>collectAgentsJson</code> so <code>agents view --json</code> stays in sync.</p>
+  </section>
+
+  <section id="files">
+    <h2><span class="n">05</span>Files &amp; tests</h2>
+    <ul class="tight">
+      <li><code>lib/models.ts</code> <span class="tag new">new fns</span> — <code>resolveConfiguredModel</code> + <code>formatConfiguredModel</code></li>
+      <li><code>commands/view.ts</code> <span class="tag edit">edit</span> — overview rows + detail header (+ optional <code>--json</code>)</li>
+      <li><code>commands/versions.ts</code> <span class="tag edit">edit</span> — <code>use</code> + <code>add</code> confirmations</li>
+      <li><code>commands/status.ts</code> <span class="tag edit">edit</span> — per-version row</li>
+      <li><code>commands/inspect.ts</code> <span class="tag edit">edit</span> — rows array</li>
+    </ul>
+    <div class="callout">
+      <p class="t">Tests — real files, no mocking</p>
+      <p style="margin:0"><code>models.test.ts</code>: precedence over a temp <code>~/.agents</code> fixture —
+      (a) run default → <code>run-default</code>; (b) native <code>settings.json</code> only → <code>config</code>;
+      (c) neither → <code>cli-default</code>; (d) non-model-capable → <code>null</code>.
+      Extend <code>view.resources.test.ts</code> to assert the detail view prints the <code>Model</code> line.</p>
+    </div>
+  </section>
+
+  <section id="verify">
+    <h2><span class="n">06</span>Verification — run the real binary</h2>
+    <pre><code><span class="cmt"># build, then drive this machine's actual installed agents</span>
+cd apps/cli && bun run build
+
+node dist/index.js view claude              <span class="cmt"># each row → model:… (source)</span>
+node dist/index.js view claude@2.1.186      <span class="cmt"># new Model line; Usage section unchanged below</span>
+node dist/index.js defaults run set claude:* --model opus
+node dist/index.js view claude              <span class="cmt"># that version now → model:opus (run default)</span>
+node dist/index.js use claude@2.1.186       <span class="cmt"># confirmation echoes effective model</span>
+node dist/index.js status ; node dist/index.js inspect claude@2.1.186</code></pre>
+    <div class="callout">
+      <p class="t">Proof the limits stayed untouched</p>
+      <p style="margin:0">Diff the <code>Usage</code> section before/after — it must be byte-identical.
+      The change only <em>adds</em> a model line; it never edits usage-window rendering.</p>
+    </div>
+  </section>
+
+  <p class="foot">agents-cli · Phoenix Labs OSS · plan rendered for review — not yet executed</p>
+</div>
+<script>
+  (function(){var m=window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches;
+   if(m)document.documentElement.dataset.theme='light';})();
+</script>
+</body>
+</html>
