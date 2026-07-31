@@ -1565,6 +1565,89 @@ export function detectRateLimit(text: string): boolean {
   return RATE_LIMIT_PATTERNS.some(pattern => pattern.test(text));
 }
 
+/**
+ * Patterns that indicate an authentication failure — the agent is logged out,
+ * its token was revoked, or the session expired. These are the user-visible
+ * strings a logged-out agent surfaces (observed across the routine-run corpus).
+ * Unlike a rate limit, an auth failure is NOT self-healing by failover — every
+ * chain entry on the same account fails identically — so it is classified
+ * separately and never triggers a fallback attempt.
+ *
+ * The bare `401` is deliberately paired with an auth keyword: a plain "401" can
+ * appear in legitimate output (an HTTP-status table, a log line), so it only
+ * counts when it co-occurs with OAuth/authentication/credentials/Unauthorized.
+ */
+export const AUTH_FAILURE_PATTERNS: RegExp[] = [
+  /OAuth (?:access token has been revoked|session expired)/i,
+  /(?:Please run|run) \/login/i,
+  /\bNot logged in\b/i,
+  /Invalid authentication credentials/i,
+  /Failed to authenticate/i,
+  /organization has (?:disabled|revoked) .*(?:subscription|access)/i,
+  /401\b[^\n]*(?:OAuth|authenticat|credential|Unauthorized)/i,
+];
+
+/**
+ * Return true if the text contains any known authentication-failure indicator.
+ * Agent-agnostic: matches the user-visible error string wherever it surfaces
+ * (stdout tail, a captured error message, a plain-text agent's output).
+ */
+export function detectAuthFailure(text: string): boolean {
+  return AUTH_FAILURE_PATTERNS.some(pattern => pattern.test(text));
+}
+
+/**
+ * Return true if a stream-json log carries the structural markers of an auth
+ * failure. This is the authoritative signal for Claude: a logged-out run emits
+ *   {"type":"system","subtype":"api_retry","error":"authentication_failed",…}
+ *   {"type":"assistant",…,"error":"authentication_failed"}
+ *   {"type":"result","is_error":true,"result":"Failed to authenticate…"}
+ * Note `terminal_reason` is "completed" on such a run, so exit-code / terminal-
+ * reason logic can never catch it — the `error:"authentication_failed"` marker
+ * and the `result`+`is_error` text are the reliable signals.
+ *
+ * Gated on the Claude stream-json shape; other agents don't emit these fields,
+ * so callers pass their agent and this returns false for non-claude.
+ */
+export function detectAuthFailureEvent(logText: string, agent: AgentId): boolean {
+  if (agent !== 'claude') return false;
+  const lines = logText.split('\n');
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed[0] !== '{') continue;
+    let parsed: any;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    if (parsed?.error === 'authentication_failed') return true;
+    if (
+      parsed?.type === 'result' &&
+      parsed?.is_error === true &&
+      typeof parsed?.result === 'string' &&
+      detectAuthFailure(parsed.result)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Return the first human-readable auth-failure phrase found in the text, for use
+ * as a stable, short run `errorMessage` reason. Falls back to null when the only
+ * signal was the structural `error:"authentication_failed"` marker with no
+ * user-visible string.
+ */
+export function authFailureReason(text: string): string | null {
+  for (const pattern of AUTH_FAILURE_PATTERNS) {
+    const m = text.match(pattern);
+    if (m) return m[0];
+  }
+  return null;
+}
+
 /** An agent (with optional pinned version) in a fallback chain. */
 export interface FallbackEntry {
   agent: AgentId;

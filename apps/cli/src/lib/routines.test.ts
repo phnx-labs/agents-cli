@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
-import { validateJob, validateTrigger, normalizeTriggerEvent, writeJob, readJob, deleteJob, listJobs, jobRunsOnThisDevice, checkJobDeviceEligibility, getJobRunsDir, getRunDir, finalizeRunMeta, type JobConfig, type RunMeta } from './routines.js';
+import { validateJob, validateTrigger, normalizeTriggerEvent, writeJob, readJob, deleteJob, listJobs, jobRunsOnThisDevice, checkJobDeviceEligibility, getJobRunsDir, getRunDir, finalizeRunMeta, writeRunMeta, resolveJobPrompt, getLatestCompletedRun, type JobConfig, type RunMeta } from './routines.js';
 import { getRoutinesDir, getSystemRoutinesDir, getRunsDir, ensureAgentsDir } from './state.js';
 
 /** Minimal valid schedule-based job. */
@@ -571,5 +571,66 @@ describe('finalizeRunMeta', () => {
     const meta = makeMeta('not-a-date');
     finalizeRunMeta(meta, 'failed', 1);
     expect(meta.duration).toBe(0);
+  });
+});
+
+describe('getLatestCompletedRun / {last_report} poison-stop', () => {
+  // Unique job name under the real runs dir; cleaned up after each test. runIds
+  // are chosen so the FAILED run sorts LAST (most recent) — the exact shape that
+  // used to poison the next prompt.
+  const jobName = `__authtest_poison_${process.pid}`;
+
+  function seedRun(runId: string, status: RunMeta['status'], report: string): void {
+    const meta: RunMeta = {
+      jobName,
+      runId,
+      agent: 'claude',
+      pid: null,
+      status,
+      startedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      exitCode: status === 'completed' ? 0 : 1,
+      ...(status !== 'completed' ? { errorMessage: 'auth_failed: Failed to authenticate' } : {}),
+    };
+    writeRunMeta(meta);
+    fs.writeFileSync(path.join(getRunDir(jobName, runId), 'report.md'), report, 'utf-8');
+  }
+
+  afterEach(() => {
+    fs.rmSync(getJobRunsDir(jobName), { recursive: true, force: true });
+  });
+
+  it('returns the latest COMPLETED run, skipping a later failed run', () => {
+    seedRun('2026-01-01T00-00-00-000Z', 'completed', 'GOOD REPORT');
+    seedRun('2026-01-02T00-00-00-000Z', 'failed', 'Not logged in · Please run /login');
+
+    const latest = getLatestCompletedRun(jobName);
+    expect(latest?.runId).toBe('2026-01-01T00-00-00-000Z');
+  });
+
+  it('returns null when no run has completed', () => {
+    seedRun('2026-01-01T00-00-00-000Z', 'failed', 'Failed to authenticate');
+    expect(getLatestCompletedRun(jobName)).toBeNull();
+  });
+
+  it('{last_report} injects the completed report, never the failed auth text', () => {
+    seedRun('2026-01-01T00-00-00-000Z', 'completed', 'GOOD REPORT');
+    seedRun('2026-01-02T00-00-00-000Z', 'failed', 'Not logged in · Please run /login');
+
+    const config = {
+      name: jobName,
+      agent: 'claude',
+      schedule: '0 3 * * *',
+      prompt: 'Previous: {last_report}',
+      mode: 'auto',
+      effort: 'auto',
+      timeout: '10m',
+      enabled: true,
+    } as JobConfig;
+
+    const resolved = resolveJobPrompt(config);
+    expect(resolved).toContain('GOOD REPORT');
+    expect(resolved).not.toContain('Not logged in');
+    expect(resolved).not.toContain('/login');
   });
 });

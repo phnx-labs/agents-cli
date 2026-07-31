@@ -708,8 +708,11 @@ export function resolveJobPrompt(config: JobConfig): string {
     }
   }
 
-  // Last report (special handling)
-  const latestRun = getLatestRun(config.name);
+  // Last report (special handling). Only a COMPLETED run's report is injected —
+  // a failed run's report.md is the agent's error text (e.g. a login prompt on
+  // an auth failure), and feeding that into the next prompt poisons every
+  // subsequent run until a human intervenes.
+  const latestRun = getLatestCompletedRun(config.name);
   if (latestRun) {
     const reportPath = path.join(getJobRunsDir(config.name), latestRun.runId, 'report.md');
     if (fs.existsSync(reportPath)) {
@@ -769,6 +772,20 @@ export function listRuns(jobName: string): RunMeta[] {
 export function getLatestRun(jobName: string): RunMeta | null {
   const runs = listRuns(jobName);
   return runs.length > 0 ? runs[runs.length - 1] : null;
+}
+
+/**
+ * Get the most recent COMPLETED run for a job, or null if none has completed.
+ * Used to resolve `{last_report}` so a failed run's error text (e.g. an auth
+ * login prompt written into report.md) can never be injected into the next
+ * run's prompt.
+ */
+export function getLatestCompletedRun(jobName: string): RunMeta | null {
+  const runs = listRuns(jobName);
+  for (let i = runs.length - 1; i >= 0; i--) {
+    if (runs[i].status === 'completed') return runs[i];
+  }
+  return null;
 }
 
 /** Persist run metadata to its run directory as meta.json. */

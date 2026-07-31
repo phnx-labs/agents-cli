@@ -90,20 +90,12 @@ export function detectOverdueJobs(now: Date = new Date()): OverdueJob[] {
   return overdue;
 }
 
-/** Fire a native desktop notification listing the overdue jobs. Best-effort —
- *  failures (missing `osascript`/`notify-send`, no display) are swallowed. */
-export function notifyOverdue(jobs: OverdueJob[]): void {
-  if (jobs.length === 0) return;
-
-  const title =
-    jobs.length === 1
-      ? `Routine overdue: ${jobs[0].name}`
-      : `${jobs.length} routines overdue`;
-  const body =
-    jobs.length === 1
-      ? `Missed ${jobs[0].expectedAt.toLocaleString()}. Run: agents routines catchup`
-      : `${jobs.map((j) => j.name).join(', ')} — agents routines catchup`;
-
+/**
+ * Fire a native desktop notification. Best-effort — failures (missing
+ * `osascript`/`notify-send`, no display, headless box) are swallowed so a
+ * notification attempt can never take the daemon down.
+ */
+export function notifyDesktop(title: string, body: string): void {
   const platform = os.platform();
   try {
     if (platform === 'darwin') {
@@ -135,4 +127,20 @@ export function notifyOverdue(jobs: OverdueJob[]): void {
   } catch {
     // Notification is best-effort; nothing to do.
   }
+}
+
+/** Fire a native desktop notification listing the overdue jobs. Best-effort. */
+export function notifyOverdue(jobs: OverdueJob[]): void {
+  if (jobs.length === 0) return;
+
+  const title =
+    jobs.length === 1
+      ? `Routine overdue: ${jobs[0].name}`
+      : `${jobs.length} routines overdue`;
+  const body =
+    jobs.length === 1
+      ? `Missed ${jobs[0].expectedAt.toLocaleString()}. Run: agents routines catchup`
+      : `${jobs.map((j) => j.name).join(', ')} — agents routines catchup`;
+
+  notifyDesktop(title, body);
 }

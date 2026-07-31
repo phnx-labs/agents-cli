@@ -38,6 +38,9 @@ import {
   resolveHeadlessMode,
   buildExecEnv,
   detectRateLimit,
+  detectAuthFailure,
+  detectAuthFailureEvent,
+  authFailureReason,
   type ExecOptions,
   type ExecEffort,
   type FallbackEntry,
@@ -55,6 +58,8 @@ import {
   readinessFromCandidate,
   type RotateResult,
 } from './rotate.js';
+import { readAuthHealth, isDeadVerdict } from './auth-health.js';
+import { machineId } from './machine-id.js';
 
 /** Result of a completed job execution, including metadata and optional report. */
 export interface RunResult {
@@ -638,6 +643,28 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
   };
   writeRunMeta(meta);
 
+  // Auth preflight: if the last live probe rejected this (agent, version)'s
+  // token (verdict `revoked`), the run is guaranteed to fail auth — fail fast
+  // before spawning instead of producing a doomed run + poisoned report. Cache-
+  // only (the daemon refreshes it periodically); fail OPEN on any non-revoked or
+  // missing verdict so a stale/absent probe or a network blip never blocks a
+  // run, and agents with no live probe (codex/gemini/grok) are never blocked.
+  const preflightVersion = launch.chain[0]?.version;
+  if (preflightVersion) {
+    const health = readAuthHealth(machineId(), effectiveAgent, preflightVersion);
+    if (health && isDeadVerdict(health.verdict)) {
+      const reason = `auth_preflight: ${health.verdict}`;
+      process.stderr.write(
+        `[agents] routine ${config.name}: ${effectiveAgent}@${preflightVersion} token ${health.verdict} — skipping run (re-login required)\n`,
+      );
+      finalizeRunMeta(meta, 'failed', 1, { errorMessage: reason });
+      writeRunMeta(meta);
+      timer.end({ status: 'failed', exitCode: 1, runId, error: reason });
+      archiveRoutineTranscripts(meta, runDir, overlayHome);
+      return { meta, reportPath: null };
+    }
+  }
+
   const timeoutMs = parseTimeout(config.timeout) || 10 * 60 * 1000;
 
   // Loop path: delegate to runLoop (same driver as `agents run --loop` / workflow loop:).
@@ -757,21 +784,44 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
       continue;
     }
 
+    // Auth failure — the agent is logged out / token revoked. Unlike a rate
+    // limit it is not self-healing by failover (every chain entry on the same
+    // account fails identically), so rate-limit is classified first (above) and
+    // auth only when NOT rate-limited. Classified so the failure is visible and,
+    // critically, so the login-error text is never persisted as the report.
+    const authFailed = !rateLimited && (
+      detectAuthFailureEvent(attempt.logText, effectiveAgent) ||
+      detectAuthFailure(attempt.logText) ||
+      (attempt.error ? detectAuthFailure(attempt.error) : false)
+    );
+
     if (attempt.error) {
       process.stderr.write(
         `[agents] routine ${config.name}: spawn failed for ${label}: ${attempt.error}\n`,
       );
     }
 
-    finalizeRunMeta(meta, 'failed', attempt.exitCode ?? 1, attempt.error ? { errorMessage: attempt.error } : undefined);
+    const authReason = authFailed
+      ? (authFailureReason(attempt.logText)
+          ?? (attempt.error ? authFailureReason(attempt.error) : null)
+          ?? 'authentication_failed')
+      : null;
+    const failureErrorMessage = authReason
+      ? `auth_failed: ${authReason}`
+      : (attempt.error ?? undefined);
+
+    finalizeRunMeta(meta, 'failed', attempt.exitCode ?? 1, failureErrorMessage ? { errorMessage: failureErrorMessage } : undefined);
     writeRunMeta(meta);
     timer.end({
       status: 'failed',
       exitCode: meta.exitCode ?? undefined,
       runId,
-      ...(attempt.error ? { error: attempt.error } : {}),
+      ...(failureErrorMessage ? { error: failureErrorMessage } : {}),
     });
-    const reportPath = extractAndSaveReport(stdoutPath, effectiveAgent, runDir);
+    // On auth failure the last assistant text IS the login error — never persist
+    // it as report.md; it would otherwise be injected into the next run's prompt
+    // via {last_report}.
+    const reportPath = authFailed ? null : extractAndSaveReport(stdoutPath, effectiveAgent, runDir);
     archiveRoutineTranscripts(meta, runDir, overlayHome);
     return { meta, reportPath };
   }
@@ -1034,10 +1084,20 @@ export async function executeJobDetached(config: JobConfig): Promise<RunMeta> {
     finalizeRunMeta(meta, status, exitCode, errorMessage ? { errorMessage } : undefined);
     writeRunMeta(meta);
     archiveRoutineTranscripts(meta, runDir, overlayHome);
-    if (status !== 'timeout') extractAndSaveReport(stdoutPath, effectiveAgent, runDir);
+    // Never persist the report on an auth failure — the last assistant text is
+    // the login error, which would poison the next run's {last_report} prompt.
+    const isAuthFailure = !!errorMessage && errorMessage.startsWith('auth_failed:');
+    if (status !== 'timeout' && !isAuthFailure) extractAndSaveReport(stdoutPath, effectiveAgent, runDir);
   };
 
   child.on('exit', (code) => {
+    let logText = '';
+    try { logText = fs.readFileSync(stdoutPath, 'utf-8'); } catch { /* log unreadable */ }
+    if (detectAuthFailureEvent(logText, effectiveAgent) || detectAuthFailure(logText)) {
+      const reason = authFailureReason(logText) ?? 'authentication_failed';
+      settle('failed', code ?? 1, `auth_failed: ${reason}`);
+      return;
+    }
     const inferred = inferFinalStatusFromLog(stdoutPath, effectiveAgent);
     if (inferred) {
       settle(inferred.status, inferred.exitCode);

@@ -2,9 +2,100 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as os from 'node:os';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { shouldTapStdout, resolveInteractive, inferredInteractiveWithoutTty, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv, shouldWrapInTmux, buildTmuxAgentCommand, formatPaneTail, type TmuxWrapContext } from './exec.js';
+import { shouldTapStdout, resolveInteractive, inferredInteractiveWithoutTty, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv, shouldWrapInTmux, buildTmuxAgentCommand, formatPaneTail, detectRateLimit, detectAuthFailure, detectAuthFailureEvent, authFailureReason, type TmuxWrapContext } from './exec.js';
 import type { ExecOptions } from './exec.js';
 import { mailboxDir } from './mailbox.js';
+
+// Real logged-out Claude stream-json tail, captured from an actual failed
+// routine run on disk (drain-linear-cli, 2026-07-27). Ground truth: `terminal_reason`
+// is "completed", so only the `error:"authentication_failed"` marker and the
+// `result`+`is_error` text can classify it.
+const LOGGED_OUT_CLAUDE_LOG = [
+  '{"type":"system","subtype":"init","session_id":"x"}',
+  '{"type":"system","subtype":"api_retry","attempt":1,"max_retries":10,"error_status":401,"error":"authentication_failed","session_id":"x"}',
+  '{"type":"assistant","message":{"content":[{"type":"text","text":""}]},"error":"authentication_failed","session_id":"x"}',
+  '{"type":"result","subtype":"success","is_error":true,"api_error_status":401,"terminal_reason":"completed","result":"Failed to authenticate. API Error: 401 OAuth access token has been revoked.","num_turns":1}',
+].join('\n');
+
+const RATE_LIMITED_CLAUDE_LOG = [
+  '{"type":"system","subtype":"init","session_id":"x"}',
+  '{"type":"result","subtype":"error","is_error":true,"result":"You have hit your 5-hour limit. Try again later.","num_turns":1}',
+].join('\n');
+
+// A COMPLETED run whose report text merely mentions the phrase "Not logged in"
+// (e.g. a routine summarizing an auth doc). Must NOT be classified as an auth
+// failure — the structural signal is is_error:false.
+const HEALTHY_LOG_MENTIONING_LOGIN = [
+  '{"type":"assistant","message":{"content":[{"type":"text","text":"The onboarding doc explains what to do when Not logged in appears."}]},"session_id":"x"}',
+  '{"type":"result","subtype":"success","is_error":false,"terminal_reason":"completed","result":"Documented the Not logged in flow. Please run /login is covered.","num_turns":3}',
+].join('\n');
+
+describe('detectAuthFailure — user-visible auth strings', () => {
+  it('matches every observed corpus phrase', () => {
+    for (const s of [
+      'Failed to authenticate. API Error: 401 OAuth access token has been revoked.',
+      'Not logged in · Please run /login',
+      'API Error: 401 Invalid authentication credentials',
+      'OAuth session expired and could not be refreshed',
+      "Your organization has disabled Claude subscription access",
+    ]) {
+      expect(detectAuthFailure(s)).toBe(true);
+    }
+  });
+
+  it('does not match ordinary text or a bare 401 without an auth keyword', () => {
+    expect(detectAuthFailure('the server returned 401 rows from the query')).toBe(false);
+    expect(detectAuthFailure('completed the refactor, all tests pass')).toBe(false);
+  });
+
+  it('does not match rate-limit text (kept a separate class)', () => {
+    expect(detectAuthFailure('You have hit your 5-hour limit')).toBe(false);
+  });
+});
+
+describe('detectAuthFailureEvent — Claude stream-json structural signal', () => {
+  it('is true for a real logged-out Claude log', () => {
+    expect(detectAuthFailureEvent(LOGGED_OUT_CLAUDE_LOG, 'claude')).toBe(true);
+  });
+
+  it('is false for a completed run that merely mentions the phrase', () => {
+    expect(detectAuthFailureEvent(HEALTHY_LOG_MENTIONING_LOGIN, 'claude')).toBe(false);
+  });
+
+  it('is false for a rate-limit failure', () => {
+    expect(detectAuthFailureEvent(RATE_LIMITED_CLAUDE_LOG, 'claude')).toBe(false);
+  });
+
+  it('is false for non-claude agents (they do not emit these markers)', () => {
+    expect(detectAuthFailureEvent(LOGGED_OUT_CLAUDE_LOG, 'codex')).toBe(false);
+    expect(detectAuthFailureEvent(LOGGED_OUT_CLAUDE_LOG, 'gemini')).toBe(false);
+  });
+});
+
+describe('rate-limit vs auth precedence', () => {
+  it('a rate-limited log is rate-limit true, auth false — failover, not an auth failure', () => {
+    expect(detectRateLimit(RATE_LIMITED_CLAUDE_LOG)).toBe(true);
+    expect(detectAuthFailureEvent(RATE_LIMITED_CLAUDE_LOG, 'claude')).toBe(false);
+    expect(detectAuthFailure(RATE_LIMITED_CLAUDE_LOG)).toBe(false);
+  });
+
+  it('a logged-out log is auth true, rate-limit false', () => {
+    expect(detectAuthFailureEvent(LOGGED_OUT_CLAUDE_LOG, 'claude')).toBe(true);
+    expect(detectRateLimit(LOGGED_OUT_CLAUDE_LOG)).toBe(false);
+  });
+});
+
+describe('authFailureReason', () => {
+  it('extracts a short human phrase from the log (most specific match wins)', () => {
+    // The log contains both "Failed to authenticate" and "OAuth access token has
+    // been revoked"; the more specific revoked phrase is preferred (pattern order).
+    expect(authFailureReason(LOGGED_OUT_CLAUDE_LOG)).toBe('OAuth access token has been revoked');
+  });
+
+  it('returns null when no user-visible phrase is present', () => {
+    expect(authFailureReason('all good here')).toBeNull();
+  });
+});
 
 /** Minimal ExecOptions with required fields, overridable per test. */
 function execOpts(over: Partial<ExecOptions> & { agent: ExecOptions['agent'] }): ExecOptions {

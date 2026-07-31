@@ -17,7 +17,7 @@ import { listJobs as listAllJobs } from './routines.js';
 import { JobScheduler } from './scheduler.js';
 import { MonitorEngine } from './monitors/engine.js';
 import { executeJobDetached, monitorRunningJobs } from './runner.js';
-import { detectOverdueJobs, notifyOverdue } from './overdue.js';
+import { detectOverdueJobs, notifyOverdue, notifyDesktop } from './overdue.js';
 import { BrowserService } from './browser/service.js';
 import { BrowserIPCServer } from './browser/ipc.js';
 import { readAndResolveBundleEnv } from './secrets/bundles.js';
@@ -317,6 +317,20 @@ export async function runDaemon(): Promise<void> {
     if (oauthToken) {
       process.env.CLAUDE_CODE_OAUTH_TOKEN = oauthToken;
       log('INFO', 'Loaded Claude OAuth token from secrets bundle for routine runs');
+    } else {
+      // No token available (e.g. a headless macOS daemon whose keychain was
+      // locked at start resolves broker-only and gets nothing). Historically
+      // this was silent, so every Claude routine the daemon spawned failed auth
+      // with no signal. Make it loud: WARN in the log and fire a desktop alert.
+      log(
+        'WARN',
+        'No Claude OAuth token available — Claude routine runs will fail auth on this host. ' +
+          'Restart the daemon with the keychain unlocked, or unlock the `claude` secrets bundle.',
+      );
+      notifyDesktop(
+        'agents daemon: no Claude credential',
+        'Claude routines will fail auth on this host. Restart the daemon with the keychain unlocked.',
+      );
     }
   }
 

@@ -864,18 +864,23 @@ export function registerRoutinesCommands(program: Command): void {
       try {
         const result = await executeJob(job);
         const logPath = `${getRunDir(name, result.meta.runId)}/stdout.log`;
+        const succeeded = result.meta.status === 'completed';
         if (options.json) {
           writeJson({
-            ok: true,
+            ok: succeeded,
             job: name,
             logDir: getRunDir(name, result.meta.runId),
             ...runMetaJson(result.meta),
             logPath,
             reportPath: result.reportPath ?? null,
           });
+          // A failed run must exit non-zero so cron wrappers, `&&` chains, and
+          // `--json` consumers actually see the failure (a logged-out agent used
+          // to exit 0 with ok:true, hiding the whole auth-failure epidemic).
+          if (!succeeded) process.exit(1);
           return;
         }
-        if (result.meta.status === 'completed') {
+        if (succeeded) {
           spinner!.succeed(`Job completed (exit code: ${result.meta.exitCode})`);
         } else if (result.meta.status === 'timeout') {
           spinner!.warn(`Job timed out after ${job.timeout}`);
@@ -885,11 +890,16 @@ export function registerRoutinesCommands(program: Command): void {
 
         console.log(chalk.gray(`  Run: ${result.meta.runId}`));
         console.log(chalk.gray(`  Log: ${logPath}`));
+        if (result.meta.errorMessage) {
+          console.log(chalk.gray(`  Reason: ${result.meta.errorMessage}`));
+        }
 
         if (result.reportPath) {
           console.log(chalk.bold('\nReport:\n'));
           console.log(fs.readFileSync(result.reportPath, 'utf-8'));
         }
+
+        if (!succeeded) process.exit(1);
       } catch (err) {
         if (options.json) {
           writeJson({ error: (err as Error).message });
