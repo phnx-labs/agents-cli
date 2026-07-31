@@ -96,6 +96,19 @@
   dirs, which could otherwise report an isolated copy — deliberately unreachable from
   PATH — as `(global)`. Source: `apps/cli/src/commands/view.ts`, `apps/cli/src/lib/agents.ts`.
 
+- **`agents sessions --active` now resolves the exact session id for non-Claude and
+  user-typed agents.** Previously only Claude (launched with a known `--session-id`) got an
+  exact id; every other agent fell back to "newest `.jsonl` in the cwd", which collapses
+  co-located agents onto one row. `ag run` now mints a launch id and exports it as
+  `AGENT_LAUNCH_ID` on every launch path (bare spawn, tmux, and the Windows shim); the
+  agent's own SessionStart hook already records that id, so the active-scan reconciles a
+  `ps`-discovered process to the hook's authoritative session id by `launchId` (robust even
+  when the hook runs under a different pid — a tmux pane leaf or `cmd.exe` wrapper), falling
+  back to `terminalId` and pid. This also attributes agents `ag run` never launched (you
+  typing `claude` in a terminal). No on-disk directory moved — the CLI reads the existing
+  hook state files read-only, so old installed hooks and a new CLI coexist safely. Source:
+  `apps/cli/src/lib/exec.ts`, `apps/cli/src/lib/session/{pid-registry,hook-sessions,active}.ts`.
+
 ## 1.20.73
 
 - **`agents cli install <binary-cli>` no longer hardcodes `/usr/local/bin` (#1103).**

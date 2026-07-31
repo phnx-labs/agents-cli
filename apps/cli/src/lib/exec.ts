@@ -994,9 +994,15 @@ export async function execShimPassthrough(
 
   // The only flag the bash shim injects (codex); everything else is transparent.
   const launchArgs = agent === 'codex' ? ['-c', 'check_for_update_on_startup=false'] : [];
+  // Mint a launch id and export it as AGENT_LAUNCH_ID so the agent's SessionStart
+  // hook records the same id — the join key that maps this launch to its exact
+  // session even though the recorded pid here is the cmd.exe wrapper (Windows) or
+  // a shell, while the hook runs under the agent descendant. This is the primary
+  // attribution path on Windows (no lsof), so the launchId join matters most here.
+  const launchId = randomUUID();
   // mode/effort are required by ExecOptions but unused by buildExecEnv (which only
   // derives the per-version config-dir env); pass the agent's default to satisfy the type.
-  const env = buildExecEnv({ agent, version, cwd, mode: defaultModeFor(agent), effort: 'auto' });
+  const env = buildExecEnv({ agent, version, cwd, mode: defaultModeFor(agent), effort: 'auto', env: { AGENT_LAUNCH_ID: launchId } });
   const { command, args, shell } = resolveShimSpawn(process.platform, binary, [...launchArgs, ...rawArgs]);
 
   return new Promise((resolve) => {
@@ -1013,6 +1019,8 @@ export async function execShimPassthrough(
         agent,
         sessionId: extractSessionIdArg(rawArgs),
         cwd,
+        launchId,
+        terminalId: process.env.AGENT_TERMINAL_ID,
         startedAtMs: Date.now(),
       });
     }
@@ -1195,6 +1203,12 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
       agent: options.agent,
       sessionId: options.sessionId,
       cwd,
+      // spawnAgent injected AGENT_LAUNCH_ID into options.env before delegating
+      // here; record the same id so the hook (running under the pane-leaf agent
+      // pid) reconciles by launchId. This pane's pid usually IS the agent pid,
+      // but the launchId join is robust even when it isn't.
+      launchId: options.env?.AGENT_LAUNCH_ID,
+      terminalId: process.env.AGENT_TERMINAL_ID,
       tmuxPane: pane,
       startedAtMs: Date.now(),
     });
@@ -1295,7 +1309,17 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
   // timeout. Spend is recorded to the shared ledger in the close handler. The
   // watcher is dormant (and zero-cost) when no caps are configured.
   const cwd = options.cwd || process.cwd();
-  const runId = randomUUID();
+  // Mint the launch id once. It doubles as the budget watcher's run id AND is
+  // exported to the child as AGENT_LAUNCH_ID, so the agent's SessionStart hook
+  // records the SAME id in its own state file (terminals/sessions/<pid>.json).
+  // That id is the join key that reconciles this launch's pid-registry entry
+  // with the hook's authoritative session id even when the hook runs under a
+  // different pid (tmux pane leaf / cmd.exe wrapper) — see pid-registry.ts and
+  // session/hook-sessions.ts. Injected into options.env so every downstream env
+  // build (the bare spawn below AND the tmux env prefix in runInTmux) carries it.
+  const launchId = randomUUID();
+  const runId = launchId;
+  options = { ...options, env: { ...options.env, AGENT_LAUNCH_ID: launchId } };
   const watcherState = await setupBudgetWatcher(options, cwd, runId);
 
   maybeRotate();
@@ -1375,6 +1399,8 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
       agent: options.agent,
       sessionId: options.sessionId,
       cwd: options.cwd || process.cwd(),
+      launchId,
+      terminalId: process.env.AGENT_TERMINAL_ID,
       tmuxPane: process.env.TMUX_PANE,
       startedAtMs: Date.now(),
     });

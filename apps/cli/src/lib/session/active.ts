@@ -26,6 +26,7 @@ import type { CloudTaskStatus } from '../cloud/types.js';
 import { AgentManager } from '../teams/agents.js';
 import { getTerminalsDir } from '../state.js';
 import { readPidSessionEntry, prunePidSessionRegistry, type PidSessionEntry } from './pid-registry.js';
+import { readHookSessionByPid, findHookSessionByLaunchId, findHookSessionByTerminalId } from './hook-sessions.js';
 import { buildClaudeLabelMap } from './discover.js';
 import { buildRunNameMap } from './run-names.js';
 import { latestSessionFileForCwd } from './db.js';
@@ -896,6 +897,43 @@ export function foldSubordinateAgents(
  * helper, terminal-app, or multiplexer) means `terminal`; nothing of the
  * sort means `headless` (daemon, launchd-spawned, orphan).
  */
+/**
+ * Resolve an agent's OWN authoritative session id from the SessionStart hook's
+ * state files (`terminals/sessions/<pid>.json`, written by @agents/session-tracker).
+ * This is how a pid whose launch-time id we DON'T know — every non-Claude agent,
+ * and anything we didn't launch (you typing `claude`) — gets an exact id at
+ * listing time instead of the newest-jsonl heuristic.
+ *
+ * Priority mirrors the session-tracker's own getLiveSession: launchId join
+ * (survives pid divergence — the hook runs under the agent pid, our registry
+ * entry may sit on a tmux pane leaf or cmd.exe wrapper) → terminalId join →
+ * direct pid → the recorded pid's immediate children (the hook records under its
+ * $PPID, so for a wrapper/shell pid the agent is a child). Undefined until the
+ * hook lands (it can lag the spawn by a few seconds) or for hookless harnesses.
+ */
+function readHookSessionId(
+  pid: number,
+  entry: PidSessionEntry | undefined,
+  ppidMap: Map<number, number>,
+): string | undefined {
+  if (entry?.launchId) {
+    const r = findHookSessionByLaunchId(entry.launchId);
+    if (r?.session_id) return r.session_id;
+  }
+  if (entry?.terminalId) {
+    const r = findHookSessionByTerminalId(entry.terminalId);
+    if (r?.session_id) return r.session_id;
+  }
+  const direct = readHookSessionByPid(pid);
+  if (direct?.session_id) return direct.session_id;
+  for (const [childPid, parentPid] of ppidMap) {
+    if (parentPid !== pid) continue;
+    const r = readHookSessionByPid(childPid);
+    if (r?.session_id) return r.session_id;
+  }
+  return undefined;
+}
+
 export async function listUnattributedActive(attributed: Set<number>): Promise<ActiveSession[]> {
   const table = await readProcessTable();
   const procByPid = new Map<number, ProcRow>();
@@ -932,8 +970,15 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
     // .jsonl. The shim's entry may sit on a wrapper ancestor (Windows .cmd
     // path). Absent entirely (direct launch outside agents-cli) → heuristic.
     const entry = readPidSessionEntry(pid) ?? readAncestorSessionEntry(pid, ppidMap, kind);
+    // Exact session id, in priority: (1) the id we recorded at launch (Claude,
+    // known up front via --session-id); (2) the agent's OWN SessionStart hook —
+    // authoritative for non-Claude AND for agents we didn't launch — joined by
+    // launchId/terminalId/pid; (3) the newest-jsonl heuristic (sessionIdFromFile,
+    // below). Skip the hook scan when we already have an exact id (the Claude case).
+    const hookSessionId = entry?.sessionId ? undefined : readHookSessionId(pid, entry, ppidMap);
+    const exactId = entry?.sessionId ?? hookSessionId;
     const cwd = cwds[i] ?? entry?.cwd ?? undefined;
-    const sessionFile = findSessionFileForKind(kind, cwd, entry?.sessionId);
+    const sessionFile = findSessionFileForKind(kind, cwd, exactId);
     const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
     const host = detectHost(pid, procByPid);
     const context: ActiveContext = host && UI_HOSTS.has(host) ? 'terminal' : 'headless';
@@ -945,7 +990,7 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
       tty: procByPid.get(pid)?.tty,
       pid,
       cwd,
-      sessionId: entry?.sessionId ?? sessionIdFromFile(sessionFile),
+      sessionId: exactId ?? sessionIdFromFile(sessionFile),
       topic,
       tokPerSec,
       sessionFile,

@@ -12,12 +12,14 @@ afterEach(() => {
 });
 
 describe('pid session registry', () => {
-  it('round-trips a written entry with its exact session id', () => {
+  it('round-trips a written entry with its exact session id and join keys', () => {
     writePidSessionEntry({
       pid: FAKE_PID,
       agent: 'claude',
       sessionId: 'abc-123-uuid',
       cwd: '/home/x/repo',
+      launchId: 'launch-abc',
+      terminalId: 'CL-1700000000000-1',
       tmuxPane: '%18',
       startedAtMs: 1_700_000_000_000,
     });
@@ -25,6 +27,10 @@ describe('pid session registry', () => {
     expect(got?.sessionId).toBe('abc-123-uuid');
     expect(got?.agent).toBe('claude');
     expect(got?.cwd).toBe('/home/x/repo');
+    // The join keys must survive the round-trip — active.ts reconciles the hook's
+    // authoritative id to this entry via launchId (and terminalId).
+    expect(got?.launchId).toBe('launch-abc');
+    expect(got?.terminalId).toBe('CL-1700000000000-1');
     expect(got?.tmuxPane).toBe('%18');
   });
 

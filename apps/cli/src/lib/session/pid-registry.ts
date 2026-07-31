@@ -27,6 +27,22 @@ export interface PidSessionEntry {
   sessionId?: string;
   cwd?: string;
   /**
+   * The launch id minted by `ag run` and exported to the child as
+   * `AGENT_LAUNCH_ID`. The agent's SessionStart hook records the SAME id in its
+   * own state file (`terminals/sessions/<pid>.json`, `launch_id`), so the two
+   * records reconcile by this key even when the hook runs under a DIFFERENT pid
+   * (tmux pane leaf, cmd.exe wrapper) — see readHookSessionId in active.ts. This
+   * is how a non-Claude launch (whose id we don't know at spawn) gets an exact
+   * session id at listing time instead of the newest-jsonl heuristic.
+   */
+  launchId?: string;
+  /**
+   * `AGENT_TERMINAL_ID` when the launch inherited one (a Factory VS Code tab).
+   * A secondary join key to the hook's `terminal_id`, for agents the extension
+   * spawned. Best-effort — undefined outside the extension.
+   */
+  terminalId?: string;
+  /**
    * `$TMUX_PANE` at launch — stored for diagnostics and possible future
    * disambiguation. NOT currently consulted on read: the listing path keys
    * purely on pid (stale entries are pruned when the pid dies), so this is
