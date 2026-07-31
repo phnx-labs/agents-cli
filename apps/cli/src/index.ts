@@ -159,6 +159,7 @@ import { applyGlobalHelpConventions } from './lib/help.js';
 import { renderWhatsNew } from './lib/whats-new.js';
 import type { AgentId } from './lib/types.js';
 import { IS_WINDOWS } from './lib/platform/index.js';
+import { getCliLaunch } from './lib/cli-entry.js';
 import { emit, redactArgs } from './lib/events.js';
 
 // Transparent shim delegate: the generated Windows `.cmd` shims invoke
@@ -602,9 +603,11 @@ async function promptUpgrade(latestVersion: string): Promise<void> {
       console.log();
       // Re-exec the verified install's entrypoint and exit. PATH lookup of
       // `agents` could resolve a different copy (dev build, another prefix)
-      // than the one that was just upgraded.
-      const entrypoint = path.resolve(__dirname, '..', 'dist', 'index.js');
-      const result = spawnSync(process.execPath, [entrypoint, ...process.argv.slice(2)], {
+      // than the one that was just upgraded. getCliLaunch resolves the JS-vs-
+      // standalone shape — never hand-roll `[process.execPath, entrypoint]`,
+      // which hands the bun virtual entry to a compiled binary as a bogus arg.
+      const { command, args } = getCliLaunch(process.argv.slice(2));
+      const result = spawnSync(command, args, {
         stdio: 'inherit',
         shell: false,
       });
