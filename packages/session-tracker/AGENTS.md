@@ -39,6 +39,14 @@ tests/scenarios/     cold-spawn (50×, ≥99%) + kill-restart (20×, stale-entry
 - **`STATE_DIR` is declared in two places** that must agree: `src/state-file.ts`
   (`STATE_DIR`) and `src/hook.sh` (`STATE_DIR="$HOME/.agents/.cache/terminals/sessions"`).
   Change one → change both.
+- **The CLI keeps its own sibling pid→id registry** at
+  `~/.agents/.cache/terminals/by-pid/<pid>.json`
+  (`apps/cli/src/lib/session/pid-registry.ts`, `writePidSessionEntry`), written by
+  `ag run` / the shim **at spawn**. It is the immediate, our-launches-only counterpart
+  to this package's hook-written `sessions/<pid>.json` (delayed, any-launch,
+  authoritative). Same pid→id data, two writers — the CLI reads `by-pid/`, the
+  extension reads `sessions/`. The full picture is in
+  [`apps/cli/docs/architecture.md`](../../apps/cli/docs/architecture.md).
 - **Files are keyed by the agent PID** (`<pid>.json`). Lookups from a terminal walk
   the descendant-pid tree from the shell pid to find the agent pid.
 - **Stale entries** — the spawn-time id goes stale after the user exits + reruns in
