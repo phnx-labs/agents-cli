@@ -44,13 +44,19 @@ if (process.argv[2] === '__vault-age-helper') {
 // it can't await a socket round-trip — it spawns one of these and reads the
 // exit code (0 = hit/alive, 3 = miss/down).
 //
-// Intercepted HERE, before commander and before any startup work, for the same
-// reason as __daemon-run and __vault-age-helper above. Everything below this
-// point runs `checkForUpdates()` and `spawnDetachedSync()` on every non-help
-// invocation — so registering these as ordinary hidden subcommands would fire
-// an update check and fork a detached background sync on *every cache hit*,
-// which is both a fork storm on the hot path and a source of stdout writes that
-// could corrupt the JSON payload. Keep them above the line.
+// Intercepted HERE, before commander and before the startup STATEMENTS, for the
+// same reason as __daemon-run and __vault-age-helper above. Everything below
+// this point runs `checkForUpdates()` and `spawnDetachedSync()` on every
+// non-help invocation — so registering these as ordinary hidden subcommands
+// would fire an update check and fork a detached background sync on *every
+// cache hit*, which is both a fork storm on the hot path and a source of stdout
+// writes that could corrupt the JSON payload. Keep them above the line;
+// agent.test.ts asserts this ordering so the block can't drift downward.
+//
+// "Before the startup statements", not "before all code": ESM hoists the
+// imports below, so those module bodies evaluate first. They are side-effect
+// free today (no top-level stdout write or spawn) — which is what makes this
+// safe, and worth preserving.
 if (
   process.argv[2] === '__secrets-get' ||
   process.argv[2] === '__secrets-ping' ||

@@ -73,13 +73,15 @@ const SWEEP_INTERVAL_MS = 30 * 1000;
  * `SOCKET_*` bound the socket round-trip inside the spawned `__secrets-*`
  * child, and carry over unchanged from the inline `node -e` programs these
  * replaced. `SYNC_*` bound the parent's `spawnSync` and must additionally cover
- * the child's boot (~110ms for the bun-compiled binary on an M-series Mac,
- * measured, against ~80ms for the `node -e` it replaces — the index.ts
- * intercept keeps this off the normal command path, which costs ~180ms and
- * forks a detached sync), so each is its socket budget plus ~2s of headroom. A
- * parent timeout that fired before the child's own timer would report "broker
- * down" for a broker that is merely slow, which costs a Touch ID prompt — so
- * the parent budget is deliberately the looser of the two.
+ * the child's boot, so each is its socket budget plus ~2s of headroom. A parent
+ * timeout that fired before the child's own timer would report "broker down"
+ * for a broker that is merely slow, which costs a Touch ID prompt — so the
+ * parent budget is deliberately the looser of the two.
+ *
+ * Boot cost, measured on the bun-compiled binary on an M-series Mac (median of
+ * 15, against a live broker): ~96ms via the index.ts intercept, ~165ms if the
+ * intercept is moved below the startup statements, ~44ms for the `node -e` this
+ * replaces. The intercept is what keeps the regression modest; see index.ts.
  */
 const SOCKET_GET_TIMEOUT_MS = 2000;
 const SOCKET_PING_TIMEOUT_MS = 700;
@@ -87,6 +89,21 @@ const SOCKET_LOCK_TIMEOUT_MS = 2000;
 const SYNC_GET_TIMEOUT_MS = 4000;
 const SYNC_PING_TIMEOUT_MS = 2500;
 const SYNC_LOCK_TIMEOUT_MS = 4000;
+
+/**
+ * The argv tokens the sync clients spawn, and that index.ts dispatches on.
+ *
+ * Exported and used by BOTH the spawn sites below and the tests, so the two can
+ * never describe different tokens — a test that hardcoded its own copy would
+ * pass while production spawned something the CLI doesn't answer, which is a
+ * silent return to a keychain read on every hit. index.ts holds these as
+ * literals on purpose (importing this module at the top of the entrypoint would
+ * pull the secrets graph into every invocation); agent.test.ts asserts the
+ * entrypoint's literals still match these constants.
+ */
+export const SYNC_GET_CMD = '__secrets-get';
+export const SYNC_PING_CMD = '__secrets-ping';
+export const SYNC_LOCK_CMD = '__secrets-lock';
 
 /**
  * Decide whether a persistent broker should self-heal onto freshly-installed
@@ -812,9 +829,19 @@ export function syncClientLaunch(sub: string[], agentsBin?: string): { command: 
   return agentsBin ? getCliLaunch(sub, agentsBin) : getCliLaunch(sub);
 }
 
-function syncClient(sub: string[], timeout: number): SpawnSyncReturns<string> {
-  const { command, args } = syncClientLaunch(sub);
-  return spawnSync(command, args, { encoding: 'utf-8', timeout });
+function syncClient(sub: string[], timeout: number): SpawnSyncReturns<string> | null {
+  // Soft on every failure: bundles.ts's fast path promises "any failure falls
+  // through to the real keychain read below". spawnSync itself never throws (it
+  // reports via r.error), but getCliLaunch/getAgentsBinPath DO throw on a
+  // broken install — a bunfs entry whose execPath is gone, or a browser/computer
+  // shim with no sibling index.js. Without this catch those turn a graceful
+  // fallback into a crash, and only on already-degraded installs.
+  try {
+    const { command, args } = syncClientLaunch(sub);
+    return spawnSync(command, args, { encoding: 'utf-8', timeout });
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -824,8 +851,8 @@ function syncClient(sub: string[], timeout: number): SpawnSyncReturns<string> {
  */
 export function agentGetSync(name: string): { bundle: SecretsBundle; env: Record<string, string> } | null {
   if (!agentSocketExists()) return null;
-  const r = syncClient(['__secrets-get', name], SYNC_GET_TIMEOUT_MS);
-  if (r.status !== 0 || !r.stdout) return null;
+  const r = syncClient([SYNC_GET_CMD, name], SYNC_GET_TIMEOUT_MS);
+  if (!r || r.status !== 0 || !r.stdout) return null;
   try {
     const o = JSON.parse(lastLine(r.stdout)) as { bundle: SecretsBundle; env: Record<string, string> };
     if (!o || typeof o !== 'object' || !o.env) return null;
@@ -868,8 +895,8 @@ export function lastLine(stdout: string): string {
 export function agentReachableSync(): boolean {
   if (!onDarwin()) return false;
   if (!agentSocketExists()) return false;
-  const r = syncClient(['__secrets-ping'], SYNC_PING_TIMEOUT_MS);
-  return r.status === 0 && !r.error;
+  const r = syncClient([SYNC_PING_CMD], SYNC_PING_TIMEOUT_MS);
+  return r !== null && r.status === 0 && !r.error;
 }
 
 /**
@@ -884,16 +911,19 @@ export function agentEvictSync(name: string): void {
   if (!onDarwin()) return;
   if (!agentSocketExists()) return;
   try {
-    syncClient(['__secrets-lock', name], SYNC_LOCK_TIMEOUT_MS);
+    syncClient([SYNC_LOCK_CMD, name], SYNC_LOCK_TIMEOUT_MS);
   } catch { /* best-effort */ }
 }
 
-// ─── Hidden `secrets _agent-*` sync-client entrypoints ───────────────────────
+// ─── Top-level `__secrets-*` sync-client entrypoints ────────────────────────
 // The bodies behind the three spawns above. Each does one socket round-trip and
-// signals the parent through its exit code, mirroring the exit contract of the
-// inline `node -e` programs these replaced: 0 = hit/alive, 3 = miss/down.
+// signals the parent through its exit code, mirroring the inline `node -e`
+// programs these replaced: 0 = hit/alive, 3 = miss/down. Lock is the one
+// deviation — it reports 0 even when no broker answers (see runAgentLockSync).
+// Dispatched from index.ts BEFORE commander and before the startup statements,
+// so a cache hit never runs checkForUpdates() or forks a detached sync.
 
-/** Body of `secrets _agent-get <name>`. Prints `{bundle, env}` as JSON on a
+/** Body of `__secrets-get <name>`. Prints `{bundle, env}` as JSON on a
  * cache hit. Exit 0 = hit, 3 = miss or broker down. */
 export async function runAgentGetSync(name: string): Promise<number> {
   const r = await request({ cmd: 'get', name }, SOCKET_GET_TIMEOUT_MS);
@@ -914,7 +944,7 @@ export async function runAgentGetSync(name: string): Promise<number> {
   return 3;
 }
 
-/** Body of `secrets _agent-ping`. Exit 0 = a broker is listening and speaking
+/** Body of `__secrets-ping`. Exit 0 = a broker is listening and speaking
  * our protocol, 3 = nothing there. Deliberately does NOT gate on
  * PROTOCOL_VERSION: this only decides whether the auto-cache may take the
  * synchronous warm path, and a version-skewed broker still answers reads. That
@@ -924,9 +954,17 @@ export async function runAgentPingSync(): Promise<number> {
   return r?.ok === true && r.cmd === 'ping' ? 0 : 3;
 }
 
-/** Body of `secrets _agent-lock <name>`. Best-effort evict; always exit 0 so a
- * missing broker never fails the mutating write that triggered it. */
+/** Body of `__secrets-lock <name>`. Best-effort evict; exit 0 even when no
+ * broker answers, so a missing broker never fails the mutating write that
+ * triggered it (agentEvictSync discards this either way).
+ *
+ * An empty name is refused rather than forwarded: the broker treats a nameless
+ * lock as lock-ALL (handleAgentRequest), so a bare `__secrets-lock` would wipe
+ * every held bundle and re-prompt Touch ID for each. That was unreachable while
+ * this was an inline `node -e` string; as a top-level argv token it is one typo
+ * away, and agentEvictSync only ever locks by name. */
 export async function runAgentLockSync(name: string): Promise<number> {
+  if (!name) return 3;
   await request({ cmd: 'lock', name }, SOCKET_LOCK_TIMEOUT_MS);
   return 0;
 }
