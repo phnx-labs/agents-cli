@@ -798,7 +798,7 @@ export function agentSocketExists(): boolean {
 }
 
 /**
- * Spawn one of the hidden `secrets _agent-*` sync clients and return its result.
+ * Spawn one of the `__secrets-*` sync clients and return its result.
  *
  * These three call sites used to hand-roll `spawnSync(process.execPath, ['-e',
  * <inline node program>, …])`. That is correct only for a JS install, where

@@ -227,7 +227,7 @@ describe.skipIf(process.platform !== 'darwin')('agentEvictSync (real socket roun
   // The bug surface here is the REQUEST SHAPE: a lock-by-name, never a
   // name-less lock (which wipes every held bundle and re-prompts Touch ID for
   // all of them). This drives `runAgentLockSync` — the exact body the spawned
-  // `secrets _agent-lock` subcommand runs — against a real recording broker
+  // `__secrets-lock` entrypoint runs — against a real recording broker
   // over a real socket, so the framing and the shape are genuinely exercised.
   //
   // It deliberately does not go through `agentEvictSync`'s spawn hop: that
