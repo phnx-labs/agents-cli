@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { expandPreset, getPreset, listProviders } from './profiles-presets.js';
+import { PRESETS, expandPreset, getPreset, listProviders } from './profiles-presets.js';
 
 describe('profiles-presets', () => {
   it('truefoundry preset carries Bedrock-strict-validation env vars', () => {
@@ -58,6 +58,19 @@ describe('profiles-presets', () => {
   it('grok presets have verified 2026 model IDs', () => {
     expect(getPreset('grok-fast')?.env.GROK_MODEL).toBe('grok-build-0.1');
     expect(getPreset('grok-heavy')?.env.GROK_MODEL).toBe('grok-4.3');
+  });
+
+  it('spark presets carry the live Muse Spark id (meta/muse-spark-1.1)', () => {
+    expect(getPreset('claude-spark')?.env.ANTHROPIC_MODEL).toBe('meta/muse-spark-1.1');
+    expect(getPreset('opencode-spark')?.env.OPENCODE_MODEL).toBe('meta/muse-spark-1.1');
+  });
+
+  it('no preset references the never-served meta/claude-spark-1.1 id', () => {
+    const stale = PRESETS.filter((p) =>
+      Object.values(p.env).some((v) => v.includes('claude-spark-1.1')) ||
+      p.description.includes('claude-spark-1.1'),
+    );
+    expect(stale.map((p) => p.name)).toEqual([]);
   });
 
   it('proxy preset is on claude host with two prompts', () => {

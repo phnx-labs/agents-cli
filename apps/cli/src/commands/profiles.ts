@@ -18,11 +18,15 @@ import {
   deleteProfile,
   profileExists,
   profileFromPreset,
+  profileFromHostModel,
+  baseUrlEnvKeyForHost,
+  authEnvKeyForHost,
   validateProfileName,
   getPresetForProfile,
   type Profile,
 } from '../lib/profiles.js';
 import { getPreset, listPresets, expandPreset, type Preset } from '../lib/profiles-presets.js';
+import type { AgentId } from '../lib/types.js';
 import {
   hasKeychainToken,
   keychainItemName,
@@ -40,7 +44,7 @@ import {
   validateResourceProfileName,
   type PatternedProfileKind,
 } from '../lib/resource-profiles.js';
-import { AGENTS } from '../lib/agents.js';
+import { AGENTS, ALL_AGENT_IDS } from '../lib/agents.js';
 import { listInstalledVersions, syncResourcesToVersion } from '../lib/versions.js';
 import type { ResourceProfilePreset } from '../lib/types.js';
 
@@ -63,6 +67,7 @@ export function buildProfileFromCollection(
       envVar: preset.authEnvVar,
       keychainItem: keychainItemName(preset.provider),
     },
+    authOptional: preset.authOptional,
     description: preset.description,
     preset: preset.name,
     provider: preset.provider,
@@ -98,6 +103,85 @@ async function ensureProviderToken(provider: string, signupUrl?: string, fromStd
   }
   setKeychainToken(item, token);
   console.log(chalk.green(`Stored in keychain: ${item}`));
+}
+
+/** Options accepted by {@link addProfile} — shared by `agents profiles add` and `agents harness add`. */
+export interface AddProfileOptions {
+  preset?: string;
+  host?: string;
+  model?: string;
+  baseUrl?: string;
+  authProvider?: string;
+  version?: string;
+  keyStdin?: boolean;
+  force?: boolean;
+}
+
+/**
+ * Create a profile ("custom harness"). Two paths:
+ *  - `--host <agent> --model <id>`: one-shot custom harness from a host + model
+ *    (no preset needed). This is what makes a model like Muse Spark a named,
+ *    runnable harness.
+ *  - otherwise: apply a built-in preset (existing behavior).
+ * `label` only tunes the success wording (Profile vs Harness). Throws on error.
+ */
+export async function addProfile(name: string, opts: AddProfileOptions, label: 'Profile' | 'Harness' = 'Profile'): Promise<void> {
+  validateProfileName(name);
+  if (profileExists(name) && !opts.force) {
+    throw new Error(`${label} '${name}' already exists. Use --force to overwrite.`);
+  }
+
+  // One-shot host + model → custom harness, no preset required.
+  if (opts.host || opts.model) {
+    if (!opts.host || !opts.model) {
+      throw new Error('Both --host <agent> and --model <id> are required to build a harness from a host + model.');
+    }
+    if (!ALL_AGENT_IDS.includes(opts.host as AgentId)) {
+      throw new Error(`Unknown host '${opts.host}'. Valid hosts: ${ALL_AGENT_IDS.join(', ')}`);
+    }
+    const host = opts.host as AgentId;
+    if (opts.baseUrl && !baseUrlEnvKeyForHost(host)) {
+      console.error(chalk.yellow(`Note: --base-url has no known env var for host '${host}'; ignoring it.`));
+    }
+
+    let authEnvVar: string | undefined;
+    if (opts.authProvider) {
+      const key = authEnvKeyForHost(host);
+      if (!key) {
+        throw new Error(`--auth-provider is set but host '${host}' has no known auth env var. Use a preset or a hand-written profile YAML.`);
+      }
+      authEnvVar = key;
+      await ensureProviderToken(opts.authProvider, undefined, opts.keyStdin);
+    }
+
+    const profile = profileFromHostModel(name, host, opts.model, {
+      version: opts.version,
+      baseUrl: opts.baseUrl,
+      provider: opts.authProvider,
+      authEnvVar,
+    });
+    writeProfile(profile);
+    console.log(chalk.green(`${label} '${name}' added — ${host} + ${opts.model}.`));
+    console.log(chalk.gray(`Try: agents run ${name} "hello"`));
+    return;
+  }
+
+  // Preset path.
+  const presetName = opts.preset || name;
+  const preset = getPreset(presetName);
+  if (!preset) {
+    throw new Error(
+      `No preset '${presetName}'.\nAvailable presets: ${listPresets().map((p) => p.name).join(', ')}\n` +
+        'Or build a custom harness: --host <agent> --model <id>.',
+    );
+  }
+  if (!preset.authOptional) {
+    await ensureProviderToken(preset.provider, preset.signupUrl, opts.keyStdin);
+  }
+  const profile = profileFromPreset(name, preset, opts.version);
+  writeProfile(profile);
+  console.log(chalk.green(`${label} '${name}' added.`));
+  console.log(chalk.gray(`Try: agents run ${name} "hello"`));
 }
 
 /** Format a single profile as a table row for the `profiles list` output. */
@@ -524,30 +608,13 @@ Examples:
     .option('--version <version>', 'Pin the host CLI version (e.g., 2.1.113)')
     .option('--key-stdin', 'Read API key from stdin instead of prompting (for scripts/CI)')
     .option('--force', 'Overwrite an existing profile with the same name')
-    .action(async (name: string, opts: { preset?: string; version?: string; keyStdin?: boolean; force?: boolean }) => {
+    .addHelpText('after', '\nTo build a custom harness from a host CLI + model in one shot, use `agents harness add`.\n')
+    .action(async (name: string, opts: AddProfileOptions) => {
+      // Preset-only surface here — `--host` on `profiles` is reserved for remote
+      // device routing (see lib/hosts/passthrough.ts). The host+model one-shot
+      // lives on `agents harness add`, which owns its own `--host`.
       try {
-        if (profileExists(name) && !opts.force) {
-          console.error(chalk.red(`Profile '${name}' already exists. Use --force to overwrite.`));
-          process.exit(1);
-        }
-
-        const presetName = opts.preset || name;
-        const preset = getPreset(presetName);
-        if (!preset) {
-          console.error(chalk.red(`No preset '${presetName}'.`));
-          console.error(chalk.gray('Available presets: ' + listPresets().map((p) => p.name).join(', ')));
-          console.error(chalk.gray('Or pass --preset <name> to pick explicitly.'));
-          process.exit(1);
-        }
-
-        if (!preset.authOptional) {
-          await ensureProviderToken(preset.provider, preset.signupUrl, opts.keyStdin);
-        }
-
-        const profile = profileFromPreset(name, preset, opts.version);
-        writeProfile(profile);
-        console.log(chalk.green(`Profile '${name}' added.`));
-        console.log(chalk.gray(`Try: agents run ${name} "hello"`));
+        await addProfile(name, { preset: opts.preset, version: opts.version, keyStdin: opts.keyStdin, force: opts.force }, 'Profile');
       } catch (err) {
         console.error(chalk.red((err as Error).message));
         process.exit(1);

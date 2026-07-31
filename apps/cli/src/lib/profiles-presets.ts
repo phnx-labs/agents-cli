@@ -37,7 +37,9 @@ export interface Preset {
   docPath?: string;
 }
 
-// Model IDs verified against openrouter.ai/api/v1/models on 2026-04-20.
+// Model IDs verified against openrouter.ai/api/v1/models on 2026-07-31
+// (spark presets corrected from the never-served meta/claude-spark-1.1 to the
+// live meta/muse-spark-1.1, confirmed on both OpenRouter and OpenCode id:meta).
 // Presets target the top-ranked open-source model per provider based on
 // SWE-bench Verified, LiveCodeBench, HumanEval, and Chatbot Arena rankings.
 //
@@ -135,18 +137,18 @@ export const PRESETS: Preset[] = [
   },
   {
     name: 'claude-spark',
-    description: 'Meta Claude Spark 1.1 via OpenRouter inside Claude Code (open alternative). Model: meta/claude-spark-1.1 — free via opencode, now usable in Claude Code UI. HEADLESS-SAFE. For open-claude spark usage.',
+    description: 'Meta Muse Spark 1.1 via OpenRouter inside Claude Code (open alternative). Model: meta/muse-spark-1.1 — now usable in the Claude Code UI. HEADLESS-SAFE. For open-claude spark usage.',
     ...OPENROUTER_AUTH,
     env: {
       ANTHROPIC_BASE_URL: OPENROUTER_BASE,
-      ANTHROPIC_MODEL: 'meta/claude-spark-1.1',
-      ANTHROPIC_SMALL_FAST_MODEL: 'meta/claude-spark-1.1',
+      ANTHROPIC_MODEL: 'meta/muse-spark-1.1',
+      ANTHROPIC_SMALL_FAST_MODEL: 'meta/muse-spark-1.1',
     },
   },
   // ----- OpenCode CLI (open-claude harness) -----
   {
     name: 'opencode',
-    description: 'OpenCode default — uses your configured model via opencode auth. Run `opencode auth` to login, then `agents run opencode --model meta/claude-spark-1.1 "prompt"` for spark usage.',
+    description: 'OpenCode default — uses your configured model via opencode auth. Run `opencode auth` to login, then `agents run opencode --model meta/muse-spark-1.1 "prompt"` for spark usage.',
     provider: 'opencode',
     host: 'opencode',
     authEnvVar: 'OPENCODE_API_KEY',
@@ -155,13 +157,13 @@ export const PRESETS: Preset[] = [
   },
   {
     name: 'opencode-spark',
-    description: 'Meta Claude Spark 1.1 via OpenCode (free, headless-safe). Pinned to meta/claude-spark-1.1 — best for open-claude usage with opencode harness.',
+    description: 'Meta Muse Spark 1.1 via OpenCode (free, headless-safe). Pinned to meta/muse-spark-1.1 — best for open-claude usage with opencode harness.',
     provider: 'opencode',
     host: 'opencode',
     authEnvVar: 'OPENCODE_API_KEY',
     authOptional: true,
     env: {
-      OPENCODE_MODEL: 'meta/claude-spark-1.1',
+      OPENCODE_MODEL: 'meta/muse-spark-1.1',
     },
   },
   {

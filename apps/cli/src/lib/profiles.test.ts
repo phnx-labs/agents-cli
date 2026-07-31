@@ -5,6 +5,9 @@ import * as path from 'path';
 import * as state from './state.js';
 import {
   profileModelEnvKey,
+  profileFromHostModel,
+  modelEnvKeyForHost,
+  resolveProfileEnv,
   readProfile,
   resolveProfileForRun,
   writeProfile,
@@ -96,6 +99,51 @@ describe('profileModelEnvKey', () => {
       env: { ANTHROPIC_BASE_URL: 'https://x' },
     };
     expect(profileModelEnvKey(p)).toBeNull();
+  });
+});
+
+describe('profileFromHostModel (custom harness from host + model)', () => {
+  it('pins the model on the host-appropriate env key', () => {
+    expect(modelEnvKeyForHost('opencode')).toBe('OPENCODE_MODEL');
+    expect(modelEnvKeyForHost('claude')).toBe('ANTHROPIC_MODEL');
+    expect(modelEnvKeyForHost('grok')).toBe('GROK_MODEL');
+
+    const spark = profileFromHostModel('spark', 'opencode', 'meta/muse-spark-1.1');
+    expect(spark.host.agent).toBe('opencode');
+    expect(spark.env.OPENCODE_MODEL).toBe('meta/muse-spark-1.1');
+    // No provider/authEnvVar → no auth block; the host uses its own login.
+    expect(spark.auth).toBeUndefined();
+  });
+
+  it('sets ANTHROPIC_BASE_URL for a claude host when --base-url is given', () => {
+    const p = profileFromHostModel('corp', 'claude', 'gpt-x', { baseUrl: 'https://gw.corp/v1' });
+    expect(p.env.ANTHROPIC_MODEL).toBe('gpt-x');
+    expect(p.env.ANTHROPIC_BASE_URL).toBe('https://gw.corp/v1');
+  });
+
+  it('attaches a keychain auth block only when provider + authEnvVar are supplied', () => {
+    const p = profileFromHostModel('corp', 'claude', 'gpt-x', {
+      provider: 'corp',
+      authEnvVar: 'ANTHROPIC_AUTH_TOKEN',
+    });
+    expect(p.auth?.envVar).toBe('ANTHROPIC_AUTH_TOKEN');
+    expect(p.auth?.keychainItem).toContain('corp');
+    expect(p.authOptional).toBe(false);
+  });
+});
+
+describe('resolveProfileEnv honors authOptional', () => {
+  it('does not throw and injects no auth env when auth is optional and no token is stored', () => {
+    const p: Profile = {
+      name: 'spark',
+      host: { agent: 'opencode' },
+      env: { OPENCODE_MODEL: 'meta/muse-spark-1.1' },
+      auth: { envVar: 'OPENCODE_API_KEY', keychainItem: 'agents-cli.no-such-provider-xyz.token' },
+      authOptional: true,
+    };
+    const env = resolveProfileEnv(p);
+    expect(env.OPENCODE_MODEL).toBe('meta/muse-spark-1.1');
+    expect(env.OPENCODE_API_KEY).toBeUndefined();
   });
 });
 

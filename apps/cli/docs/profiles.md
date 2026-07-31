@@ -10,6 +10,28 @@ Built-in presets cover the top open-weight models via OpenRouter (one shared key
 
 > **Status:** Profiles are experimental, but available by default — no enable step needed.
 
+## Custom harnesses (`agents harness`)
+
+A custom harness is a profile you create from a host CLI + model in one command, so a model like Meta Muse Spark 1.1 runs like a native agent type:
+
+```sh
+# OpenCode pinned to Muse Spark, named `spark`
+agents harness add spark --host opencode --model meta/muse-spark-1.1
+agents run spark "refactor api/handlers/checkout.py"
+
+# per-run model override still wins over the profile
+agents run spark --model opencode/big-pickle "quick pass"
+
+# private OpenAI/Anthropic-compatible endpoint with a keychain-backed key
+agents harness add corp --host claude --model gpt-x --base-url https://gw.corp/v1 --auth-provider corp
+```
+
+The model is written to the host's model env var — `OPENCODE_MODEL` for opencode, `ANTHROPIC_MODEL` for claude, `GROK_MODEL` for grok, `GEMINI_MODEL` for gemini. Hosts that manage their own login (e.g. opencode) need no `--auth-provider`; omit it and no auth block is written.
+
+`agents harness list` shows three groups: your custom harnesses, the addable built-in presets, and the native harness registry. `agents harness view <name>` and `agents harness remove <name>` round it out.
+
+A harness *is* a profile — same `~/.agents/profiles/<name>.yml`, same `agents run` resolution, same device sync via `agents repo push user`. The difference from `agents profiles add`: `harness add` takes the host+model one-shot (no preset needed) and owns its own `--host` flag, whereas `agents profiles --host <device>` is reserved for running the profiles command on a remote device.
+
 ## Top-level resource profiles
 
 `agents profile use <name>` activates a resource profile from `agents.yaml`.

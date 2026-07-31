@@ -112,6 +112,8 @@ const REMOTE_PASSTHROUGH: Record<string, RemoteSpec> = {
 const OWN_HOST_COMMANDS = new Set([
   'run',
   'exec', // deprecated alias of run
+  'harness', // `--host <agent>` names the host CLI to run under, not a remote device
+  'harnesses',
   'sessions',
   'feed',
   'computer',

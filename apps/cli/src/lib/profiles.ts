@@ -26,6 +26,13 @@ export interface Profile {
     envVar: string;
     keychainItem: string;
   };
+  /**
+   * When true, the host manages its own login and the keychain token named by
+   * `auth` is optional: if it is not stored, no auth env var is injected and the
+   * run proceeds on the host's own credentials (e.g. `opencode auth`). Without
+   * this flag a missing keychain item is a hard error at exec time.
+   */
+  authOptional?: boolean;
   description?: string;
   preset?: string;
   provider?: string;
@@ -277,10 +284,92 @@ export function profileFromPreset(profileName: string, preset: Preset, version?:
       envVar: preset.authEnvVar,
       keychainItem: keychainItemName(preset.provider),
     },
+    authOptional: preset.authOptional,
     description: preset.description,
     preset: preset.name,
     provider: preset.provider,
   };
+}
+
+/**
+ * Env var each host CLI reads to override its model. Mirror of the read-side
+ * `MODEL_ENV_KEYS` above, keyed by host so a one-shot `--host <agent> --model
+ * <id>` writes the model onto the var that host actually honors.
+ */
+const MODEL_ENV_KEY_BY_HOST: Partial<Record<AgentId, string>> = {
+  claude: 'ANTHROPIC_MODEL',
+  opencode: 'OPENCODE_MODEL',
+  grok: 'GROK_MODEL',
+  gemini: 'GEMINI_MODEL',
+  codex: 'OPENAI_MODEL',
+};
+
+/** Base-URL env var per host, for the OpenAI/Anthropic-compatible hosts where it applies. */
+const BASE_URL_ENV_KEY_BY_HOST: Partial<Record<AgentId, string>> = {
+  claude: 'ANTHROPIC_BASE_URL',
+  codex: 'OPENAI_BASE_URL',
+};
+
+/** Return the model-override env var for a host (known hosts mapped; else `<HOST>_MODEL`). */
+export function modelEnvKeyForHost(host: AgentId): string {
+  return MODEL_ENV_KEY_BY_HOST[host] ?? `${host.toUpperCase()}_MODEL`;
+}
+
+/** Return the base-URL env var for a host, or null when the host has no known override var. */
+export function baseUrlEnvKeyForHost(host: AgentId): string | null {
+  return BASE_URL_ENV_KEY_BY_HOST[host] ?? null;
+}
+
+/** Env var each host reads its auth token from, for custom-endpoint (`--auth-provider`) harnesses. */
+const AUTH_ENV_KEY_BY_HOST: Partial<Record<AgentId, string>> = {
+  claude: 'ANTHROPIC_AUTH_TOKEN',
+  codex: 'OPENAI_API_KEY',
+  gemini: 'GEMINI_API_KEY',
+  grok: 'XAI_API_KEY',
+  opencode: 'OPENCODE_API_KEY',
+};
+
+/** Return the auth-token env var for a host, or null when unknown. */
+export function authEnvKeyForHost(host: AgentId): string | null {
+  return AUTH_ENV_KEY_BY_HOST[host] ?? null;
+}
+
+/** Options for {@link profileFromHostModel}. */
+export interface HostModelOptions {
+  version?: string;
+  /** Base URL for OpenAI/Anthropic-compatible hosts (claude, codex). Ignored for hosts without a known var. */
+  baseUrl?: string;
+  /** Provider label + keychain namespace; only needed when the host requires a token. */
+  provider?: string;
+  /** Env var the host reads its auth token from; pair with `provider` to attach keychain auth. */
+  authEnvVar?: string;
+  description?: string;
+}
+
+/**
+ * Build a custom-harness profile from a host CLI + model in one shot, without a
+ * preset. The model lands on the host's model env var ({@link modelEnvKeyForHost});
+ * auth is attached only when both `provider` and `authEnvVar` are supplied
+ * (hosts that manage their own login — e.g. opencode — need neither).
+ */
+export function profileFromHostModel(name: string, host: AgentId, model: string, opts: HostModelOptions = {}): Profile {
+  const env: Record<string, string> = { [modelEnvKeyForHost(host)]: model };
+  if (opts.baseUrl) {
+    const key = baseUrlEnvKeyForHost(host);
+    if (key) env[key] = opts.baseUrl;
+  }
+  const profile: Profile = {
+    name,
+    host: { agent: host, version: opts.version },
+    env,
+    description: opts.description ?? `Custom harness: ${host} + ${model}`,
+    provider: opts.provider ?? host,
+  };
+  if (opts.provider && opts.authEnvVar) {
+    profile.auth = { envVar: opts.authEnvVar, keychainItem: keychainItemName(opts.provider) };
+    profile.authOptional = false;
+  }
+  return profile;
 }
 
 /**
@@ -291,6 +380,12 @@ export function profileFromPreset(profileName: string, preset: Preset, version?:
 export function resolveProfileEnv(profile: Profile): Record<string, string> {
   const env: Record<string, string> = { ...profile.env };
   if (profile.auth) {
+    // Optional auth (host manages its own login) with no stored token: inject
+    // nothing and let the host use its own credentials. Only required auth
+    // hard-fails on a missing keychain item.
+    if (profile.authOptional && !hasKeychainToken(profile.auth.keychainItem)) {
+      return env;
+    }
     const token = getKeychainToken(profile.auth.keychainItem);
     env[profile.auth.envVar] = token;
   }
