@@ -1,35 +1,65 @@
 /**
- * A `--host`/`--device` token must resolve to the SAME ssh target the
- * auto-discovery sweep uses — through the device registry — so an explicit host
- * and the fleet sweep never dial two different routes for one box. These tests
- * pin that: a bare alias dials the device's registry address (not the literal
- * alias), while a raw `user@host` stays literal.
+ * The fan-out (`resolveExplicitTargets`) and `agents ssh` (`resolveDeviceTarget`)
+ * adapters now share ONE core with `run --host` (RUSH-1967). These tests pin,
+ * against a REAL registry / overlay / ssh_config (no mocks — repo convention):
+ *   - a `--host` token dials the device's live Tailscale route, not the literal;
+ *   - the same token resolves to the SAME target string through `resolveHost`
+ *     (dispatch) and `resolveExplicitTargets` (fan-out) — one row per divergence
+ *     in the ticket table;
+ *   - an ssh_config-only alias is now visible to the fan-out;
+ *   - `agents ssh` keeps its stricter grammar (devices + literals only).
  */
-import { describe, it, expect } from 'vitest';
-import { resolveSshTarget, resolveDeviceTarget } from '../resolve-target.js';
-import type { DeviceRegistry, DeviceProfile } from '../registry.js';
+import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
-function device(overrides: Partial<DeviceProfile>): DeviceProfile {
-  return {
-    name: 'yosemite-s0',
-    platform: 'linux',
-    shell: 'posix',
-    user: 'muqsit',
-    address: { via: 'tailscale', dnsName: 'yosemite-s0.tail1a85a1.ts.net' },
-    auth: { method: 'key' },
-    createdAt: '2026-01-01T00:00:00.000Z',
-    updatedAt: '2026-01-01T00:00:00.000Z',
-    ...overrides,
-  } as DeviceProfile;
+// HOME must be set before state.ts loads so the device registry, the agents.yaml
+// overlay, and ~/.ssh/config all resolve under the temp root.
+const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-resolve-target-test-'));
+process.env.HOME = TEST_HOME;
+
+const { resolveExplicitTargets, resolveDeviceTarget } = await import('../resolve-target.js');
+const { resolveHost } = await import('../../hosts/registry.js');
+const { sshTargetFor } = await import('../../hosts/types.js');
+const { upsertDevice } = await import('../registry.js');
+
+function registryPath(): string {
+  return path.join(TEST_HOME, '.agents', '.history', 'devices', 'registry.json');
+}
+function metaPath(): string {
+  return path.join(TEST_HOME, '.agents', 'agents.yaml');
+}
+function writeSshConfig(text: string): void {
+  fs.mkdirSync(path.join(TEST_HOME, '.ssh'), { recursive: true });
+  fs.writeFileSync(path.join(TEST_HOME, '.ssh', 'config'), text);
 }
 
-const reg: DeviceRegistry = { 'yosemite-s0': device({}) };
+beforeEach(() => {
+  fs.rmSync(registryPath(), { force: true });
+  fs.rmSync(`${registryPath()}.lock`, { recursive: true, force: true });
+  fs.rmSync(metaPath(), { force: true });
+  fs.rmSync(path.join(TEST_HOME, '.ssh', 'config'), { force: true });
+});
 
-describe('resolveSshTarget', () => {
-  it('resolves a bare alias to the registry address, not the literal alias', () => {
-    const r = resolveSshTarget('yosemite-s0', reg);
-    // The bug: without this, target would be the bare `yosemite-s0` (a different
-    // route than the sweep's registry address, breaking socket reuse).
+afterAll(() => {
+  fs.rmSync(TEST_HOME, { recursive: true, force: true });
+});
+
+async function addDevice(name: string, over: Partial<Parameters<typeof upsertDevice>[1]> = {}): Promise<void> {
+  await upsertDevice(name, {
+    platform: 'linux',
+    user: 'muqsit',
+    address: { via: 'tailscale', dnsName: `${name}.tail1a85a1.ts.net` },
+    auth: { method: 'key' },
+    ...over,
+  });
+}
+
+describe('resolveExplicitTargets — fan-out through the unified core', () => {
+  it('dials a bare device name via its live Tailscale route, not the literal alias', async () => {
+    await addDevice('yosemite-s0');
+    const [r] = await resolveExplicitTargets(['yosemite-s0']);
     expect(r).toEqual({
       target: 'muqsit@yosemite-s0.tail1a85a1.ts.net',
       machine: 'yosemite-s0',
@@ -38,80 +68,125 @@ describe('resolveSshTarget', () => {
     });
   });
 
-  it('matches case/domain-insensitively via normalizeHost', () => {
-    expect(resolveSshTarget('YOSEMITE-S0.local', reg)?.target).toBe('muqsit@yosemite-s0.tail1a85a1.ts.net');
+  it('matches a tailnet FQDN / different case to the same device (normalized)', async () => {
+    await addDevice('yosemite-s0');
+    expect((await resolveExplicitTargets(['YOSEMITE-S0.tail1a85a1.ts.net']))[0]?.target).toBe(
+      'muqsit@yosemite-s0.tail1a85a1.ts.net',
+    );
   });
 
-  it('resolves user@device through the registry, overriding only the login user', () => {
-    // The fix: a `user@device` is the same box as `device` — it must dial the
-    // registry (Tailscale) route, NOT a bare `ssh root@yosemite-s0` (LAN DNS).
-    const r = resolveSshTarget('root@yosemite-s0', reg);
+  it('overrides only the login user for user@device (still the Tailscale route)', async () => {
+    await addDevice('yosemite-s0');
+    const [r] = await resolveExplicitTargets(['root@yosemite-s0']);
     expect(r?.target).toBe('root@yosemite-s0.tail1a85a1.ts.net');
     expect(r?.machine).toBe('yosemite-s0');
   });
 
-  it('keeps a user@host literal when the host matches no device', () => {
-    const r = resolveSshTarget('root@some-box', {});
+  it('keeps a user@host literal when the host matches no device', async () => {
+    const [r] = await resolveExplicitTargets(['root@some-box']);
     expect(r?.target).toBe('root@some-box');
     expect(r?.machine).toBe('some-box');
   });
 
-  it('falls back to a literal target for an unregistered host', () => {
-    const r = resolveSshTarget('some-box', {});
-    expect(r?.target).toBe('some-box');
-    expect(r?.machine).toBe('some-box');
+  it('makes an ssh_config-only alias visible to the fan-out (divergence #2)', async () => {
+    writeSshConfig('Host only-in-ssh\n  HostName 10.0.0.9\n');
+    const [r] = await resolveExplicitTargets(['only-in-ssh']);
+    expect(r?.target).toBe('only-in-ssh'); // bare name → ssh applies the stanza
+    expect(r?.machine).toBe('only-in-ssh');
   });
 
-  it('falls back to the literal token when the matched device has no address', () => {
-    const addressless: DeviceRegistry = { 'no-addr': device({ name: 'no-addr', address: { via: 'manual' } }) };
-    const r = resolveSshTarget('no-addr', addressless);
-    // sshTargetFor throws with no dnsName/ip — resolver degrades to the literal.
-    expect(r?.target).toBe('no-addr');
-    expect(r?.machine).toBe('no-addr');
+  it('skips an addressless device with a note rather than dialing a bad literal', async () => {
+    await addDevice('no-addr', { address: { via: 'manual' } });
+    expect(await resolveExplicitTargets(['no-addr'])).toEqual([]);
   });
 
-  it('returns undefined for a token that fails the ssh-target injection guard', () => {
-    expect(resolveSshTarget('bad;rm -rf', reg)).toBeUndefined();
+  it('skips a bare unknown word (a typo is not a literal to dial)', async () => {
+    expect(await resolveExplicitTargets(['definitely-not-here'])).toEqual([]);
+  });
+
+  it('skips an injection-unsafe token', async () => {
+    expect(await resolveExplicitTargets(['bad;rm -rf'])).toEqual([]);
   });
 });
 
-describe('resolveDeviceTarget', () => {
-  it('returns the full profile for a bare device name', () => {
-    const r = resolveDeviceTarget('yosemite-s0', reg);
+describe('run --host and sessions --host resolve to the SAME target (divergence table)', () => {
+  async function bothTargets(token: string): Promise<{ dispatch?: string; fanout?: string }> {
+    const host = await resolveHost(token);
+    const dispatch = host ? sshTargetFor(host) : undefined;
+    const fanout = (await resolveExplicitTargets([token]))[0]?.target;
+    return { dispatch, fanout };
+  }
+
+  it('#1 name in BOTH ssh_config and the device registry → device route wins for both', async () => {
+    await addDevice('mac-mini', { platform: 'macos', address: { via: 'tailscale', dnsName: 'mac-mini.tail1a85a1.ts.net' } });
+    writeSshConfig('Host mac-mini\n  HostName 192.168.1.50\n'); // a stale LAN stanza
+    const { dispatch, fanout } = await bothTargets('mac-mini');
+    expect(dispatch).toBe('muqsit@mac-mini.tail1a85a1.ts.net');
+    expect(fanout).toBe(dispatch);
+  });
+
+  it('#3 user@device → both dial the Tailscale route with the user overridden', async () => {
+    await addDevice('mac-mini', { platform: 'macos', address: { via: 'tailscale', dnsName: 'mac-mini.tail1a85a1.ts.net' } });
+    const { dispatch, fanout } = await bothTargets('muqsit@mac-mini');
+    expect(dispatch).toBe('muqsit@mac-mini.tail1a85a1.ts.net');
+    expect(fanout).toBe(dispatch);
+  });
+
+  it('#4 tailnet FQDN → both resolve to the same device route', async () => {
+    await addDevice('yosemite-s0');
+    const { dispatch, fanout } = await bothTargets('yosemite-s0.tail1a85a1.ts.net');
+    expect(dispatch).toBe('muqsit@yosemite-s0.tail1a85a1.ts.net');
+    expect(fanout).toBe(dispatch);
+  });
+
+  it('ad-hoc user@host → identical literal target for both', async () => {
+    const { dispatch, fanout } = await bothTargets('ubuntu@203.0.113.9');
+    expect(dispatch).toBe('ubuntu@203.0.113.9');
+    expect(fanout).toBe(dispatch);
+  });
+});
+
+describe('resolveDeviceTarget — agents ssh grammar', () => {
+  it('returns the full profile for a bare device name', async () => {
+    await addDevice('yosemite-s0');
+    const r = await resolveDeviceTarget('yosemite-s0');
     expect(r?.name).toBe('yosemite-s0');
     expect(r?.user).toBe('muqsit');
     expect(r?.address.dnsName).toBe('yosemite-s0.tail1a85a1.ts.net');
   });
 
-  it('overrides only the login user for user@device (same profile + Tailscale route)', () => {
-    const r = resolveDeviceTarget('root@yosemite-s0', reg);
+  it('overrides only the login user for user@device', async () => {
+    await addDevice('yosemite-s0');
+    const r = await resolveDeviceTarget('root@yosemite-s0');
     expect(r?.name).toBe('yosemite-s0');
-    expect(r?.user).toBe('root'); // overridden
-    expect(r?.address.dnsName).toBe('yosemite-s0.tail1a85a1.ts.net'); // still the registry address
+    expect(r?.user).toBe('root');
+    expect(r?.address.dnsName).toBe('yosemite-s0.tail1a85a1.ts.net');
     expect(r?.auth.method).toBe('key');
   });
 
-  it('synthesizes an ad-hoc profile for a user@host literal (unregistered)', () => {
-    const r = resolveDeviceTarget('ubuntu@203.0.113.9', {});
+  it('synthesizes an ad-hoc profile for a user@ip literal', async () => {
+    const r = await resolveDeviceTarget('ubuntu@203.0.113.9');
     expect(r?.user).toBe('ubuntu');
     expect(r?.address.ip).toBe('203.0.113.9');
     expect(r?.address.dnsName).toBeUndefined();
-    expect(r?.auth.method).toBe('key');
   });
 
-  it('synthesizes an ad-hoc profile for a dotted hostname literal', () => {
-    const r = resolveDeviceTarget('box.example.com', {});
+  it('synthesizes an ad-hoc profile for a dotted hostname literal', async () => {
+    const r = await resolveDeviceTarget('box.example.com');
     expect(r?.address.dnsName).toBe('box.example.com');
     expect(r?.user).toBeUndefined();
   });
 
-  it('returns undefined for a bare unregistered alias (so the caller says "Unknown device")', () => {
-    // A bare word with no @/dot is a typo, not an ad-hoc host — must NOT be dialed
-    // as a literal `foo`, preserving the strict "Unknown device" behaviour.
-    expect(resolveDeviceTarget('not-a-device', reg)).toBeUndefined();
+  it('returns undefined for a bare unregistered alias ("Unknown device")', async () => {
+    expect(await resolveDeviceTarget('not-a-device')).toBeUndefined();
   });
 
-  it('returns undefined for an injection-unsafe token', () => {
-    expect(resolveDeviceTarget('bad;rm -rf', reg)).toBeUndefined();
+  it('returns undefined for an ssh_config-only alias (agents ssh stays devices+literals only)', async () => {
+    writeSshConfig('Host only-in-ssh\n  HostName 10.0.0.9\n');
+    expect(await resolveDeviceTarget('only-in-ssh')).toBeUndefined();
+  });
+
+  it('returns undefined for an injection-unsafe token', async () => {
+    expect(await resolveDeviceTarget('bad;rm -rf')).toBeUndefined();
   });
 });

@@ -30,7 +30,7 @@ vi.mock('../events.js', () => ({ emit: emitMock }));
 import {
   parseHostsOption,
   splitBundleRef,
-  resolveSshTarget,
+  resolveHostSshTarget,
   remoteSecretsRaw,
   remoteResolveEnv,
   isDangerousRemoteEnvKey,
@@ -84,20 +84,20 @@ describe('splitBundleRef', () => {
   });
 });
 
-describe('resolveSshTarget', () => {
+describe('resolveHostSshTarget', () => {
   it('resolves an enrolled host through the registry', async () => {
     resolveHostMock.mockResolvedValue({ source: 'ssh-config', name: 'yosemite-s1' });
-    expect(await resolveSshTarget('Y1')).toBe('yosemite-s1');
+    expect(await resolveHostSshTarget('Y1')).toBe('yosemite-s1');
   });
 
   it('falls back to a raw ssh target when the registry misses', async () => {
     resolveHostMock.mockResolvedValue(null);
-    expect(await resolveSshTarget('muqsit@box')).toBe('muqsit@box');
+    expect(await resolveHostSshTarget('muqsit@box')).toBe('muqsit@box');
   });
 
   it('rejects an injection-shaped raw target', async () => {
     resolveHostMock.mockResolvedValue(null);
-    await expect(resolveSshTarget('a;rm -rf /')).rejects.toThrow();
+    await expect(resolveHostSshTarget('a;rm -rf /')).rejects.toThrow();
   });
 });
 
