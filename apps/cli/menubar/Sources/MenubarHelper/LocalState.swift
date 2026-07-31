@@ -124,13 +124,14 @@ enum LocalState {
     // (newer hooks write it; empty for the touch-only contract). One stat + one
     // tiny read per blocked session — stays cheap on the badge poll path.
     //
-    // liveSessionIds prunes orphans on read: a sentinel whose sessionId is not in
-    // the caller's live set (pid alive) gets unlinked. The write-side hook already
-    // clears on Stop/UserPromptSubmit, but it leaks when the terminal is killed
-    // hard, a Claude version has no hook installed, or the sessionId doesn't
-    // round-trip. The reader is the only layer with ground truth (pidAlive), so
-    // it's the choke point that keeps NEEDS YOU honest. When nil, keep the old
-    // behavior (no prune) — that's the callers that don't yet know a live set.
+    // liveSessionIds prunes orphans on read: a sentinel whose sessionId is not
+    // in the caller's live set (pid alive) gets unlinked. The write-side hook
+    // already clears on Stop/UserPromptSubmit, but it leaks when the terminal
+    // is killed hard, a Claude version has no hook installed, or the sessionId
+    // doesn't round-trip. When nil, keep sentinels intact — pruning against a
+    // partial live set (e.g. IDE-extension terminals only) would wipe live
+    // headless/tmux/SSH sentinels within one poll. Only the engine's full
+    // active-list (sessions(fromActive:)) is broad enough to safely prune.
     static func attentionMarks(liveSessionIds: Set<String>? = nil) -> [String: AttentionMark] {
         let dir = "\(home)/.agents/.cache/state/attention"
         let names = (try? fm.contentsOfDirectory(atPath: dir)) ?? []
@@ -148,24 +149,6 @@ enum LocalState {
                                       text: raw.trimmingCharacters(in: .whitespacesAndNewlines))
         }
         return out
-    }
-
-    // Live terminal sessionIds — pid-alive, non-empty. Used to prune orphan
-    // attention sentinels on the cheap poll path.
-    private static func liveTerminalSessionIds() -> Set<String> {
-        let path = "\(home)/.agents/.cache/terminals/live-terminals.json"
-        guard let data = fm.contents(atPath: path),
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [] }
-        var ids: Set<String> = []
-        for (_, window) in root {
-            guard let w = window as? [String: Any],
-                  let entries = w["entries"] as? [[String: Any]] else { continue }
-            for e in entries {
-                guard let pid = e["pid"] as? Int, pidAlive(pid) else { continue }
-                if let sid = e["sessionId"] as? String, !sid.isEmpty { ids.insert(sid) }
-            }
-        }
-        return ids
     }
 
     // MARK: Pending devices (written by the daemon device probe)
@@ -235,8 +218,15 @@ enum LocalState {
     // scanning it every few seconds is too costly. Terminals + cloud + attention
     // are cheap. The full scan (with teams) runs only when the menu opens.
     static func sessions(includeTeams: Bool = true) -> [Session] {
-        let liveIds = liveTerminalSessionIds()
-        let attention = attentionMarks(liveSessionIds: liveIds)
+        // Cheap path: read attention sentinels WITHOUT pruning. live-terminals.json
+        // only carries IDE-extension terminals (VS Code / Cursor / Codium via the
+        // agents-cli extension) — a strict subset of live sessions. A pid-alive
+        // Claude in a plain Terminal / tmux / SSH shell isn't in it, so pruning
+        // against this narrow set would delete live, genuinely-waiting sentinels
+        // within one badge tick (10s). Pruning only happens on the warm-cache
+        // path (sessions(fromActive:)) where the engine active-list gives full
+        // coverage across tmux / IDE / headless.
+        let attention = attentionMarks()
         var all = terminals(attention: attention) + cloud()
         if includeTeams { all += teams() }
         return all
