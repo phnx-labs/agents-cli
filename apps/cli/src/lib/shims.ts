@@ -251,7 +251,7 @@ async function promptConflictStrategy(
 //        The old dispatcher checked only the global dir, so a pinned grok that
 //        installed into the versioned home fell through to the "not installed"
 //        error.
-export const SHIM_SCHEMA_VERSION = 26;
+export const SHIM_SCHEMA_VERSION = 27;
 
 /** Internal marker string used to embed the schema version in shim scripts. */
 const SHIM_VERSION_MARKER = 'agents-shim-version:';
@@ -313,6 +313,13 @@ export COPILOT_HOME="$VERSION_DIR/home/${configDirName}"
 # (skills, hooks, plugins, agents, memory, sessions, config.toml, MCP, etc.).
 # This gives agents-cli full versioned isolation + resource sync for grok.
 export GROK_HOME="$VERSION_DIR/home/.grok"
+`
+          : agent === 'opencode'
+            ? `
+# OpenCode reads plugins, agents, commands, and other config-directory
+# resources from OPENCODE_CONFIG_DIR. Point it at the versioned global config
+# tree where agents-cli syncs OpenCode resources.
+export OPENCODE_CONFIG_DIR="$VERSION_DIR/home/.config/opencode"
 `
           : agent === 'kimi'
             ? `
@@ -924,7 +931,7 @@ function assertSafeVersion(version: string): void {
  * KEEP IN SYNC with the `managedEnv` switch in `generateVersionedAliasScript`.
  * The colocated test `shims.isolation-capability.test.ts` enforces this.
  */
-export const CONFIG_ENV_ISOLATED_AGENTS: readonly AgentId[] = ['claude', 'codex', 'copilot', 'grok', 'kimi'];
+export const CONFIG_ENV_ISOLATED_AGENTS: readonly AgentId[] = ['claude', 'codex', 'copilot', 'grok', 'kimi', 'opencode'];
 
 /**
  * Whether an agent supports a clean `--isolated` install — i.e. its config
@@ -973,6 +980,13 @@ export COPILOT_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home/${
 # hooks, plugins, agents, memory, sessions, config.toml, MCP). Point direct
 # aliases at the versioned home for isolation parity with the main shim.
 export GROK_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home/${configDirName}"
+`
+          : agent === 'opencode'
+            ? `
+# OpenCode reads plugins, agents, commands, and other config-directory
+# resources from OPENCODE_CONFIG_DIR. Point direct aliases at the versioned
+# global config tree where agents-cli syncs OpenCode resources.
+export OPENCODE_CONFIG_DIR="$HOME/.agents/.history/versions/${agent}/${version}/home/.config/opencode"
 `
           : agent === 'kimi'
             ? `
