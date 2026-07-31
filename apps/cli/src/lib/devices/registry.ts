@@ -69,6 +69,25 @@ export interface DeviceTailscale {
   lastSeen?: string;
 }
 
+/**
+ * Verdict of the last live SSH reachability probe (RUSH-1965).
+ *
+ * The live `agents devices` probe already learns whether a box answered right
+ * now; this persists that answer so the online/offline word is read from a
+ * fresh probe instead of the potentially-stale {@link DeviceTailscale.online}
+ * snapshot (which only `agents devices sync` / the daemon ever writes). A
+ * `via:"manual"` device — which never gets a tailscale peer entry — gets a
+ * reachability verdict this way too, so it stops rendering "offline forever".
+ */
+export interface DeviceReachability {
+  /** Whether the last live probe reached the device. */
+  reachable: boolean;
+  /** Transport the verdict came through — the address kind used to dial it. */
+  via?: DeviceAddress['via'];
+  /** ISO-8601 timestamp of the probe that produced this verdict. */
+  checkedAt: string;
+}
+
 /** A single registered device. */
 export interface DeviceProfile {
   name: string;
@@ -78,6 +97,10 @@ export interface DeviceProfile {
   address: DeviceAddress;
   auth: DeviceAuth;
   tailscale?: DeviceTailscale;
+  /** Last live SSH-probe reachability verdict (RUSH-1965). Preferred over the
+   * cached {@link DeviceTailscale.online} snapshot when rendering online/offline,
+   * because the live probe reflects whether the box answered right now. */
+  reachability?: DeviceReachability;
   /** What the device is for. Absent means `worker` (see {@link DeviceRole}). */
   role?: DeviceRole;
   createdAt: string;
@@ -241,6 +264,7 @@ export interface DeviceInput {
   address?: DeviceAddress;
   auth?: DeviceAuth;
   tailscale?: DeviceTailscale;
+  reachability?: DeviceReachability;
   role?: DeviceRole;
 }
 
@@ -265,6 +289,7 @@ export async function upsertDevice(name: string, input: DeviceInput): Promise<De
       address: input.address ?? prev?.address ?? { via: 'manual' },
       auth: input.auth ?? prev?.auth ?? { method: 'key' },
       tailscale: input.tailscale ?? prev?.tailscale,
+      reachability: input.reachability ?? prev?.reachability,
       role: input.role ?? prev?.role,
       createdAt: prev?.createdAt ?? now,
       updatedAt: now,
@@ -272,6 +297,44 @@ export async function upsertDevice(name: string, input: DeviceInput): Promise<De
     reg[name] = merged;
     await saveDevices(reg);
     return merged;
+  });
+}
+
+/**
+ * Persist live reachability verdicts for many devices in one locked pass
+ * (RUSH-1965). A no-op verdict (same `reachable` and not newer than what's
+ * stored) is skipped, so a cache-served `agents devices` render doesn't churn
+ * the registry every call; only a flip or a fresher probe writes. Unlike
+ * {@link upsertDevice} this does NOT bump `updatedAt` — reachability is
+ * transient liveness (like the tailscale snapshot), not a profile edit. Unknown
+ * device names are ignored. Returns the names actually updated.
+ */
+export async function writeReachability(
+  updates: Record<string, DeviceReachability>,
+): Promise<string[]> {
+  const names = Object.keys(updates);
+  if (names.length === 0) return [];
+  const p = registryPath();
+  return withRegistryLock(p, async () => {
+    const reg = await loadDevices();
+    const changed: string[] = [];
+    for (const name of names) {
+      const prev = reg[name];
+      if (!prev) continue; // never resurrect a device the user removed
+      const next = updates[name];
+      const cur = prev.reachability;
+      if (
+        cur &&
+        cur.reachable === next.reachable &&
+        Date.parse(cur.checkedAt) >= Date.parse(next.checkedAt)
+      ) {
+        continue; // unchanged verdict, no fresher timestamp — skip the write
+      }
+      reg[name] = { ...prev, reachability: next };
+      changed.push(name);
+    }
+    if (changed.length > 0) await saveDevices(reg);
+    return changed;
   });
 }
 
