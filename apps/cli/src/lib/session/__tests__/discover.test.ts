@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import Database from '../../sqlite.js';
 import { buildFtsQuery, getDB } from '../db.js';
-import { scanClaudeSession, parseCodexThreadNameIndex, shouldDeferRecentAppend, machineForSessionFile, discoverSessions, resolveSessionById } from '../discover.js';
+import { scanClaudeSession, parseCodexThreadNameIndex, shouldDeferRecentAppend, machineForSessionFile, discoverSessions, resolveSessionById, readGrokMeta } from '../discover.js';
 import { machineId } from '../sync/config.js';
 import { getHistoryDir } from '../../state.js';
 
@@ -287,5 +287,80 @@ describe('shouldDeferRecentAppend', () => {
       fileMtimeMs: now - 500,
       fileSize: 1_000,
     }, now, 5_000)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Grok stores one directory per session with a structured summary.json. The
+// scanner reads that (not the JSONL event streams) for metadata. Fixture shape
+// mirrors a real ~/.grok/sessions/<enc-cwd>/<uuid>/summary.json.
+// ---------------------------------------------------------------------------
+
+describe('readGrokMeta', () => {
+  let dir: string;
+  const uuid = '019f86cf-9d1d-7621-b80a-1e6d801904ce';
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-grok-'));
+    fs.mkdirSync(path.join(dir, uuid), { recursive: true });
+  });
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  function writeSummary(summary: object): string {
+    const fp = path.join(dir, uuid, 'summary.json');
+    fs.writeFileSync(fp, JSON.stringify(summary));
+    return fp;
+  }
+
+  it('maps id, cwd, title, timestamps, message count and version from summary.json', () => {
+    const fp = writeSummary({
+      info: { id: uuid, cwd: '/Users/muqsit/src/github.com/muqsitnawaz' },
+      session_summary: 'a summary',
+      generated_title: 'Minecraft Installation and Play',
+      created_at: '2026-07-21T22:33:01.057529Z',
+      updated_at: '2026-07-21T22:44:05.605009Z',
+      last_active_at: '2026-07-21T22:44:05.605009Z',
+      num_messages: 152,
+      num_chat_messages: 51,
+      grok_home: '/Users/muqsit/.agents/.history/versions/grok/0.2.101/home/.grok',
+    });
+    const r = readGrokMeta(fp);
+    expect(r).not.toBeNull();
+    expect(r!.meta.id).toBe(uuid);
+    expect(r!.meta.agent).toBe('grok');
+    expect(r!.meta.topic).toBe('Minecraft Installation and Play'); // generated_title wins over session_summary
+    expect(r!.meta.cwd).toBe('/Users/muqsit/src/github.com/muqsitnawaz');
+    expect(r!.meta.project).toBe('muqsitnawaz');
+    expect(r!.meta.timestamp).toBe('2026-07-21T22:33:01.057529Z'); // created_at = start
+    expect(r!.meta.lastActivity).toBe('2026-07-21T22:44:05.605009Z'); // last_active_at
+    expect(r!.meta.messageCount).toBe(51); // num_chat_messages preferred over num_messages
+    expect(r!.meta.version).toBe('0.2.101'); // parsed from grok_home path
+    expect(r!.meta.shortId).toBe(uuid.slice(0, 8));
+  });
+
+  it('falls back to session_summary when no generated_title, and to the dir uuid when info.id is absent', () => {
+    const fp = writeSummary({
+      info: { cwd: '/tmp/x' },
+      session_summary: 'fallback topic',
+      created_at: '2026-07-21T00:00:00.000Z',
+    });
+    const r = readGrokMeta(fp);
+    expect(r!.meta.id).toBe(uuid); // recovered from the directory name
+    expect(r!.meta.topic).toBe('fallback topic');
+  });
+
+  it('coerces a missing timestamp to the file mtime (NOT NULL column safety)', () => {
+    const fp = writeSummary({ info: { id: uuid, cwd: '/tmp/x' } });
+    const r = readGrokMeta(fp);
+    expect(r!.meta.timestamp).toBeTruthy();
+    expect(() => new Date(r!.meta.timestamp).toISOString()).not.toThrow();
+  });
+
+  it('returns null for malformed json', () => {
+    const fp = path.join(dir, uuid, 'summary.json');
+    fs.writeFileSync(fp, '{ not valid json');
+    expect(readGrokMeta(fp)).toBeNull();
   });
 });

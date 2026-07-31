@@ -300,6 +300,7 @@ function dispatchAgentScan(
     case 'hermes': return scanHermesIncremental(onProgress);
     case 'kimi': return scanKimiIncremental(onProgress);
     case 'droid': return scanDroidIncremental(onProgress);
+    case 'grok': return scanGrokIncremental(onProgress);
     default: return Promise.resolve();
   }
 }
@@ -593,6 +594,7 @@ const SESSION_ROOT_SPECS: ReadonlyArray<{ agent: SessionAgentId; subdir: string 
   { agent: 'antigravity', subdir: 'conversations' },
   { agent: 'droid', subdir: 'sessions' },
   { agent: 'kimi', subdir: 'sessions' },
+  { agent: 'grok', subdir: 'sessions' },
 ];
 
 function sessionRootSubdir(agent: SessionAgentId): string | null {
@@ -3163,6 +3165,140 @@ function parseKimiWireMetrics(sessionDir: string): { messageCount: number; token
   }
 
   return { messageCount, tokenCount, outputTokens };
+}
+
+/**
+ * Scan Grok sessions. Grok stores one directory per session under
+ * ~/.grok/sessions/<url-encoded-cwd>/<uuid>/, each holding a summary.json with
+ * structured metadata (id, cwd, title, timestamps, message count). Same
+ * dir-per-session (L3) shape as Kimi, so it walks two levels and gates the
+ * summary.json read through the scan ledger. Before this, Grok had a type slot
+ * and a placeholder parser but no scanner, so `agents sessions` never indexed it.
+ */
+async function scanGrokIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
+  const currentVersion = await getCurrentAgentVersion('grok');
+
+  const filePaths: string[] = [];
+  for (const sessionsDir of getAgentSessionDirs('grok', 'sessions')) {
+    if (!fs.existsSync(sessionsDir)) continue;
+    let cwdDirNames: string[];
+    try {
+      cwdDirNames = fs.readdirSync(sessionsDir);
+    } catch {
+      continue;
+    }
+    for (const cwdDirName of cwdDirNames) {
+      const cwdDir = path.join(sessionsDir, cwdDirName);
+      const stat = safeStatSync(cwdDir);
+      if (!stat?.isDirectory()) continue;
+      let sessionNames: string[];
+      try {
+        sessionNames = fs.readdirSync(cwdDir);
+      } catch {
+        continue;
+      }
+      for (const sessionName of sessionNames) {
+        const summaryPath = path.join(cwdDir, sessionName, 'summary.json');
+        if (!fs.existsSync(summaryPath)) continue;
+        filePaths.push(summaryPath);
+      }
+    }
+  }
+
+  const changed = filterChangedFiles(filePaths);
+  if (changed.length === 0) return;
+
+  onProgress?.({ agent: 'grok', parsed: 0, total: changed.length });
+
+  const scanEntries: ScanEntry[] = [];
+  const touched: Array<{ filePath: string; scan: ScanStamp }> = [];
+  const seen = new Set<string>();
+  let parsed = 0;
+  for (const { filePath, scan } of changed) {
+    try {
+      const result = readGrokMeta(filePath, currentVersion);
+      if (result && !seen.has(result.meta.id)) {
+        seen.add(result.meta.id);
+        scanEntries.push({ meta: result.meta, content: result.content, scan });
+      } else {
+        touched.push({ filePath, scan });
+      }
+    } catch {
+      touched.push({ filePath, scan });
+    }
+    parsed++;
+    onProgress?.({ agent: 'grok', parsed, total: changed.length });
+  }
+
+  upsertSessionsBatch(scanEntries);
+  recordScans(touched);
+}
+
+/** Parse a single Grok session summary.json into session metadata. */
+export function readGrokMeta(
+  filePath: string,
+  currentVersion?: string,
+): { meta: SessionMeta; content: string } | null {
+  let summary: any;
+  try {
+    summary = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+  } catch {
+    return null;
+  }
+
+  const sessionDir = path.dirname(filePath);
+  // The uuid directory name is the canonical id; summary.info.id mirrors it.
+  const sessionId =
+    (typeof summary?.info?.id === 'string' && summary.info.id) || path.basename(sessionDir);
+  if (!sessionId) return null;
+
+  const cwd = normalizeCwd(typeof summary?.info?.cwd === 'string' ? summary.info.cwd : '');
+  const topic =
+    (typeof summary?.generated_title === 'string' && summary.generated_title.trim()) ||
+    (typeof summary?.session_summary === 'string' && summary.session_summary.trim()) ||
+    undefined;
+
+  // created_at is the session start; last_active_at/updated_at is the latest
+  // activity. Coerce timestamp to never-null (NOT NULL column) via the file mtime,
+  // matching how the other dir-per-session parsers (Kimi) fall back.
+  const createdAt = typeof summary?.created_at === 'string' ? summary.created_at : undefined;
+  const lastActivity =
+    (typeof summary?.last_active_at === 'string' && summary.last_active_at) ||
+    (typeof summary?.updated_at === 'string' && summary.updated_at) ||
+    undefined;
+  const stat = safeStatSync(filePath);
+  const timestamp =
+    createdAt || lastActivity || (stat ? stat.mtime.toISOString() : new Date().toISOString());
+
+  const messageCount =
+    typeof summary?.num_chat_messages === 'number'
+      ? summary.num_chat_messages
+      : typeof summary?.num_messages === 'number'
+        ? summary.num_messages
+        : undefined;
+
+  // Grok records its managed home in summary.grok_home
+  // (…/versions/grok/<version>/home/.grok) — recover the version from it.
+  let embeddedVersion: string | undefined;
+  if (typeof summary?.grok_home === 'string') {
+    embeddedVersion = summary.grok_home.match(/versions\/grok\/([^/]+)\//)?.[1];
+  }
+
+  const meta: SessionMeta = {
+    id: sessionId,
+    shortId: sessionId.slice(0, 8),
+    agent: 'grok',
+    timestamp,
+    lastActivity,
+    project: cwd ? path.basename(cwd) : undefined,
+    cwd: cwd || undefined,
+    filePath,
+    version: resolveSessionVersion('grok', filePath, embeddedVersion, currentVersion),
+    topic,
+    messageCount,
+  };
+
+  return { meta, content: topic || '' };
 }
 
 /** Parse a time filter string (relative like '7d' or ISO timestamp) into epoch milliseconds. */
