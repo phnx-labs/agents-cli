@@ -510,8 +510,12 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     npmPackage: '',
     installScript: 'curl -fsSL https://x.ai/cli/install.sh | bash',
     configDir: path.join(HOME, '.grok'),
-    commandsDir: '', // Grok primarily uses skills + slash commands from skills
-    commandsSubdir: '',
+    // Grok discovers file-based slash commands from ~/.agents/commands/ (the
+    // cross-agent compat dir it mirrors from Claude Code) as well as the legacy
+    // ~/.claude/commands/ symlink. We write there directly so the per-agent
+    // install path and the central user repo stay in sync.
+    commandsDir: path.join(HOME, '.agents', 'commands'),
+    commandsSubdir: path.join('..', '.agents', 'commands'),
     skillsDir: path.join(HOME, '.grok', 'skills'),
     hooksDir: path.join(HOME, '.grok', 'hooks'),
     instructionsFile: 'AGENTS.md',
@@ -525,7 +529,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       mcpHeaders: false,
       allowlist: true, // maps to Grok's granular Bash/Edit/Write/Read/Grep/WebFetch/MCPTool rules
       skills: true,
-      commands: false, // covered by skills
+      commands: true, // Grok >= 0.2.111: file-based slash commands from ~/.agents/commands/ (docs) + ~/.claude/commands/ (Claude Code compat)
       plugins: true,
       subagents: true, // ~/.grok/agents/*.md (Claude-compatible agent defs)
       rules: { file: 'AGENTS.md' },
@@ -606,24 +610,6 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
   // `.factory-plugin/` (it also reads `.claude-plugin/` for compatibility) — set
   // pluginManifestDir so syncPluginToVersion mirrors the manifest into it, the
   // same pattern codex uses with `.codex-plugin`.
-  //
-  // Workflows / Factory Missions (RUSH-1864, probed droid v0.177.0; ticket cited
-  // v0.161.0 — self-updating, no pinnable semver): Factory ships genuine multi-
-  // step orchestration ("Missions") via `/missions` (interactive) and
-  // `droid exec --mission` (headless; optional `-f <prompt.md>` is a *prompt*
-  // file, not a named mission template). Docs:
-  // https://docs.factory.ai/cli/features/missions and
-  // https://docs.factory.ai/docs/droid-exec/overview (Mission Mode).
-  //
-  // Mission state may land under `~/.factory/missions/<sessionId>/` at runtime
-  // (`getMissionsDir` = join(home, ".factory", "missions") + per-session
-  // mission.md / features.json / progress_log.jsonl) — that is **session
-  // runtime state**, not a discovery directory of installable named workflows.
-  // There is no discoverMission / template registry, and a cold install has no
-  // `~/.factory/missions/` until a mission is run. agents-cli's workflows
-  // capability means "sync WORKFLOW.md into an auto-discovered dir" — Droid
-  // has no such dir, so workflows stays false (invoke-only; do not fabricate a
-  // writer target).
   droid: {
     id: 'droid',
     name: 'Droid',
@@ -656,7 +642,6 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       plugins: true,
       subagents: true,
       rules: { file: 'AGENTS.md' },
-      // Factory Missions are invoke-only — no installable discovery dir (RUSH-1864).
       workflows: false,
       memory: false,
       modes: ['plan', 'edit', 'auto', 'skip'],
