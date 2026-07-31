@@ -663,3 +663,71 @@ describe('lastLine', () => {
     expect(lastLine('\n  \n')).toBe('');
   });
 });
+
+/**
+ * The seam: does the real CLI entrypoint actually route `__secrets-*` to these
+ * handlers, before its startup work, and hand back the right exit code and
+ * payload?
+ *
+ * The launch-shape tests above prove the parent builds correct argv; they
+ * cannot prove the child answers it. Without this, renaming a token or moving
+ * the index.ts intercept below `checkForUpdates()` would silently restore the
+ * Touch-ID-on-every-read bug with a fully green suite.
+ *
+ * Spawns `bun src/index.ts` so it needs no build step, matching the pattern
+ * vault.test.ts already uses for __vault-age-helper.
+ */
+describe.skipIf(process.platform !== 'darwin')('__secrets-* entrypoint seam', () => {
+  function runCli(args: string[], dir: string): Promise<{ code: number | null; stdout: string }> {
+    return new Promise((resolve) => {
+      const child = spawn('bun', ['src/index.ts', ...args], {
+        env: { ...process.env, AGENTS_SECRETS_AGENT_DIR: dir },
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      let stdout = '';
+      child.stdout.setEncoding('utf-8');
+      child.stdout.on('data', (d: string) => { stdout += d; });
+      child.on('close', (code) => resolve({ code, stdout }));
+    });
+  }
+
+  it('routes get/ping/lock to the broker and returns the hit payload and exit codes', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-seam-'));
+    const sock = path.join(dir, 'agent.sock');
+    // A real capability token: isRequestAuthorized fails closed for every
+    // non-ping command when the broker has no token, so this also proves the
+    // child reads agent.token from the agent dir and attaches it.
+    const token = 'seam-test-token';
+    fs.writeFileSync(path.join(dir, 'agent.token'), token, { mode: 0o600 });
+    const store = freshStore();
+    handleAgentRequest(store, loadReq('prod', { K: 'v' }, 60_000), Date.now());
+    const server = net.createServer(makeConnectionHandler((req) => handleAgentRequest(store, req), () => token));
+    await new Promise<void>((res) => server.listen(sock, () => res()));
+    try {
+      const hit = await runCli(['__secrets-get', 'prod'], dir);
+      expect(hit.code).toBe(0);
+      // Parsed the same way agentGetSync parses it — payload must survive the pipe.
+      expect(JSON.parse(lastLine(hit.stdout))).toMatchObject({ env: { K: 'v' } });
+
+      // A miss must be exit 3, or the parent would treat garbage as a hit.
+      expect((await runCli(['__secrets-get', 'nope'], dir)).code).toBe(3);
+      expect((await runCli(['__secrets-ping'], dir)).code).toBe(0);
+      expect((await runCli(['__secrets-lock', 'prod'], dir)).code).toBe(0);
+      // lock actually evicted, proving the request reached the broker.
+      expect(handleAgentRequest(store, { cmd: 'get', name: 'prod' }, Date.now())).toMatchObject({ hit: false });
+    } finally {
+      server.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it('exits 3 rather than hanging when no broker is listening', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-seam-dead-'));
+    try {
+      expect((await runCli(['__secrets-ping'], dir)).code).toBe(3);
+      expect((await runCli(['__secrets-get', 'prod'], dir)).code).toBe(3);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+});
