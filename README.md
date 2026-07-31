@@ -441,7 +441,8 @@ agents sync --host gpu-box              # make the remote machine current
 agents doctor --devices                 # readiness matrix for every registered device
 agents doctor --devices --json          # machine-readable fleet readiness
 agents doctor --device mac-mini         # same matrix, scoped to one device
-agents fleet status                     # warnings rollup + health/sync/version/Auth matrix (cache-first)
+agents fleet status                     # online/offline rollup + NEEDS ATTENTION + OS-grouped rows (cache-first)
+agents fleet status --verbose           # full per-device auth/CLI/sync/version grid
 agents fleet status --live              # force a live resource probe (alias of --refresh)
 agents fleet status --json --strict     # scriptable fleet health gate
 agents check --devices                  # CI drift gate across every registered device
@@ -473,13 +474,21 @@ this machine locally plus any device missing from the cache; pass `--refresh` (o
 shorter `--live`) to force a full live probe of every box. Cache-served output notes its
 age (`updated 2m ago — pass --refresh (--live) for a live probe`).
 
-`agents fleet status` adds an **Auth column** — which agent accounts are actually
-logged in, per device, read from the auth-health cache (no network). Four buckets keep
-it from crying wolf: `●live` (verified), `·present` (signed in but the agent has no
-live-probe endpoint — e.g. codex/grok — benign), `◐degraded` (soft/self-healing:
-expired-but-refreshing, rate-limited), and `○revoked` (server rejected — re-login now).
-Only `○` means a real re-login is needed. Run `agents fleet ping` to force a live
-re-verification across the fleet.
+`agents fleet status` answers "is my fleet OK?" at a glance: a one-line rollup
+(`● N online · ○ M offline`), a short **NEEDS ATTENTION** list where every item names
+the command that fixes it (offline → `check the box`, config drift or a stark CLI gap →
+`agents apply <box>`, version skew → `agents upgrade --fleet`), then quiet per-device
+rows grouped by OS (macOS / Linux / Windows) showing just `name · capacity · load/mem ·
+version`, with this machine flagged `▸ … ← this machine`. A healthy fleet reads in a few
+lines; orphaned versions are demoted to a one-line `agents prune` nudge in the footer.
+
+Pass `--verbose` for the full per-device grid — the **Auth column** (which agent accounts
+are actually logged in, per device, read from the auth-health cache — no network), plus
+the CLI-readiness and sync-drift columns. The Auth column has four buckets so it never
+cries wolf: `●live` (verified), `·present` (signed in but the agent has no live-probe
+endpoint — e.g. codex/grok — benign), `◐degraded` (soft/self-healing: expired-but-refreshing,
+rate-limited), and `○revoked` (server rejected — re-login now). Only `○` means a real
+re-login is needed. Run `agents fleet ping` to force a live re-verification across the fleet.
 
 **Hosts** (`agents hosts`) are git-synced dispatch targets in `agents.yaml`; **devices** (`agents devices`) are your Tailscale machines in a local registry. Both ride SSH and feed one host pool: devices appear in `agents hosts list` and capability routing without a second enrollment. On `--host` runs every `agents run` option is either forwarded (`--effort --env --timeout --loop …`), rejected loud (`--secrets` never crosses SSH implicitly), or consumed locally — nothing silently drops. See [docs/00-concepts.md](apps/cli/docs/00-concepts.md#devices--hosts).
 

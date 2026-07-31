@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildFleetAttentionItems,
   buildFleetHealthReport,
   freshnessFooter,
+  platformGroupLabel,
   renderFleetMatrix,
+  renderFleetSummary,
   renderFleetWarnings,
+  shortVersion,
   type FleetHealthRow,
 } from './health-report.js';
 import { stripAnsi } from '../session/width.js';
@@ -24,7 +28,18 @@ function row(overrides: Partial<FleetHealthRow> & { name: string }): FleetHealth
     ],
     orphans: overrides.orphans ?? [],
     auth: overrides.auth,
+    online: overrides.online,
+    lastSeen: overrides.lastSeen,
   };
+}
+
+/** N of the known CLIs installed, out of `total` — for stark-gap tests. */
+function clis(installed: number, total: number): FleetHealthRow['clis'] {
+  const out: FleetHealthRow['clis'] = {};
+  for (let i = 0; i < total; i++) {
+    out[`agent${i}`] = { installed: i < installed, path: i < installed ? '/bin/x' : null, error: null };
+  }
+  return out;
 }
 
 describe('buildFleetHealthReport', () => {
@@ -137,5 +152,125 @@ describe('Auth column + freshness', () => {
 
   it('freshnessFooter returns null when no row carries a timestamp', () => {
     expect(freshnessFooter([row({ name: 'a' })])).toBeNull();
+  });
+});
+
+describe('summary view helpers (RUSH-1966)', () => {
+  it('shortVersion collapses dev builds and passes released semver through', () => {
+    expect(shortVersion('0.0.0-dev.867dea00-dirty')).toBe('dev-dirty');
+    expect(shortVersion('0.0.0-dev.867dea00')).toBe('dev');
+    expect(shortVersion('1.20.74')).toBe('1.20.74');
+    expect(shortVersion(null)).toBe('—');
+    expect(shortVersion(undefined)).toBe('—');
+  });
+
+  it('platformGroupLabel buckets by OS family', () => {
+    expect(platformGroupLabel('macos')).toBe('macOS');
+    expect(platformGroupLabel('darwin')).toBe('macOS');
+    expect(platformGroupLabel('linux')).toBe('Linux');
+    expect(platformGroupLabel('windows')).toBe('Windows');
+    expect(platformGroupLabel('win32')).toBe('Windows');
+    expect(platformGroupLabel(undefined)).toBe('Other');
+  });
+});
+
+describe('buildFleetAttentionItems (only real, actionable problems)', () => {
+  const stale = [{ agent: 'codex', version: '0.1.0', status: 'stale' as const, isDefault: true }];
+
+  it('flags a genuinely-offline box, but NOT an unknown/unconfigured one', () => {
+    const report = buildFleetHealthReport([
+      row({ name: 'down', online: 'offline', lastSeen: '2026-07-28T00:00:00.000Z' }),
+      row({ name: 'never-set-up', online: 'unknown' }), // registered, never addressed
+      row({ name: 'up', online: 'online' }),
+    ]);
+    const items = buildFleetAttentionItems(report, Date.parse('2026-07-31T00:00:00.000Z'));
+    const offline = items.filter((i) => i.glyph === 'offline');
+    expect(offline.map((i) => i.subject)).toEqual(['down']); // not 'never-set-up', not 'up'
+    expect(offline[0].detail).toContain('last seen');
+    expect(offline[0].fix).toBe('check the box');
+  });
+
+  it('merges config drift and a stark CLI gap into one `agents apply` item per box', () => {
+    const report = buildFleetHealthReport([
+      row({ name: 'multi', online: 'online', sync: stale, clis: clis(1, 9) }),
+    ]);
+    const items = buildFleetAttentionItems(report);
+    const apply = items.filter((i) => i.fix === 'agents apply multi');
+    expect(apply).toHaveLength(1); // one line, not two
+    expect(apply[0].detail).toContain('config drift');
+    expect(apply[0].detail).toContain('only 1 of 9');
+  });
+
+  it('does not flag a normal partial CLI install (6 of 9) — only a stark gap', () => {
+    const report = buildFleetHealthReport([
+      row({ name: 'normal', online: 'online', clis: clis(6, 9) }), // no drift, benign CLI count
+    ]);
+    expect(buildFleetAttentionItems(report)).toEqual([]);
+  });
+
+  it('summarizes version skew as one line with per-version counts', () => {
+    const report = buildFleetHealthReport([
+      row({ name: 'a', online: 'online', version: '1.20.73' }),
+      row({ name: 'b', online: 'online', version: '1.20.73' }),
+      row({ name: 'c', online: 'online', version: '1.20.74' }),
+    ]);
+    const skew = buildFleetAttentionItems(report).find((i) => i.subject === 'version skew')!;
+    expect(skew.detail).toBe('2× 1.20.73 · 1× 1.20.74');
+    expect(skew.fix).toBe('agents upgrade --fleet');
+  });
+
+  it('a fully-healthy fleet has zero attention items', () => {
+    const report = buildFleetHealthReport([
+      row({ name: 'a', online: 'online', version: '1.20.74', clis: clis(9, 9) }),
+      row({ name: 'b', online: 'online', version: '1.20.74', clis: clis(9, 9) }),
+    ]);
+    expect(buildFleetAttentionItems(report)).toEqual([]);
+  });
+});
+
+describe('renderFleetSummary (default view)', () => {
+  it('leads with the online/offline rollup and groups rows by OS, highlighting this machine', () => {
+    const report = buildFleetHealthReport([
+      row({ name: 'zion', platform: 'macos', online: 'online', version: '1.20.74',
+        stats: { host: 'zion', reachable: true, loadPercent: 23, memPercent: 49, fetchedAt: 1000 } as never }),
+      row({ name: 'linux-box', platform: 'linux', online: 'online', version: '1.20.74',
+        stats: { host: 'linux-box', reachable: true, loadPercent: 2, memPercent: 15, fetchedAt: 1000 } as never }),
+      row({ name: 'down', platform: 'linux', online: 'offline', version: '1.20.74', lastSeen: '2026-07-28T00:00:00.000Z' }),
+    ]);
+    const lines = renderFleetSummary(report, { self: 'zion', now: 2000 }).map(stripAnsi);
+    const text = lines.join('\n');
+    expect(text).toContain('2 online');
+    expect(text).toContain('1 offline');
+    expect(text).toContain('macOS');
+    expect(text).toContain('Linux');
+    // this machine's row is prefixed and annotated (not the rollup line, which
+    // also names self in its right-aligned suffix)
+    const selfLine = lines.find((l) => l.includes('← this machine'))!;
+    expect(selfLine).toContain('▸');
+    expect(selfLine).toContain('zion');
+    // an offline row shows a dash for load/mem and version, and its last-seen
+    const downLine = lines.find((l) => l.includes('down'))!;
+    expect(downLine).toContain('offline');
+    expect(downLine).toContain('last seen');
+    // footer nudges toward --verbose for the full grid
+    expect(text).toContain('--verbose');
+  });
+
+  it('a healthy fleet reads short: rollup + an all-clear line, no NEEDS ATTENTION block', () => {
+    const report = buildFleetHealthReport([
+      row({ name: 'a', online: 'online', version: '1.20.74', clis: clis(9, 9) }),
+    ]);
+    const text = renderFleetSummary(report, { self: 'a' }).map(stripAnsi).join('\n');
+    expect(text).toContain('Everything looks healthy.');
+    expect(text).not.toContain('NEEDS ATTENTION');
+  });
+
+  it('demotes orphaned versions to a single footer nudge toward prune, not a per-row column', () => {
+    const report = buildFleetHealthReport([
+      row({ name: 'a', online: 'online', orphans: [{ agent: 'codex', version: '0.1.0', commands: 1, skills: 0, hooks: 0 }] }),
+    ]);
+    const text = renderFleetSummary(report, {}).map(stripAnsi).join('\n');
+    expect(text).toContain('1 device carries orphaned versions');
+    expect(text).toContain('agents prune');
   });
 });
