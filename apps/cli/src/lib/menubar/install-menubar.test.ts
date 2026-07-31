@@ -1,5 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
-import { isMenubarStale, menubarPlistNeedsRepoint, restartMenubarLaunchAgent } from './install-menubar.js';
+import { spawnSync } from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import {
+  codesignVerifies,
+  ensureValidSignature,
+  isMenubarStale,
+  menubarPlistNeedsRepoint,
+  restartMenubarLaunchAgent,
+} from './install-menubar.js';
 
 // Regression guard for the upgrade self-heal: before this, the helper was only
 // (re)installed when no service existed, so `npm update` left the menu bar
@@ -83,5 +93,41 @@ describe('restartMenubarLaunchAgent', () => {
 
     expect(() => restartMenubarLaunchAgent(501, '/tmp/com.phnx-labs.agents-menubar.plist', exec)).not.toThrow();
     expect(calls).toHaveLength(3);
+  });
+});
+
+// Regression guard for the crash loop: npm strips the ad-hoc signature the
+// release bakes into MenubarHelper.app, leaving it "not signed at all" — which
+// macOS 26+ SIGKILLs on launch, spinning the launchd KeepAlive service forever.
+// ensureValidSignature must re-sign the copied bundle so codesign verifies.
+// Exercises the real `codesign` binary (no mocking), so it only runs on macOS.
+const darwinOnly = process.platform === 'darwin' ? describe : describe.skip;
+darwinOnly('ensureValidSignature (real codesign)', () => {
+  function makeUnsignedBundle(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'menubar-sig-'));
+    const app = path.join(dir, 'MenubarHelper.app');
+    fs.mkdirSync(path.join(app, 'Contents', 'MacOS'), { recursive: true });
+    // A real Mach-O so codesign has something to sign; /bin/echo is stable.
+    fs.copyFileSync('/bin/echo', path.join(app, 'Contents', 'MacOS', 'MenubarHelper'));
+    // Strip the inherited system signature -> "not signed at all", the exact
+    // state npm's tarball round-trip leaves the shipped ad-hoc bundle in.
+    spawnSync('codesign', ['--remove-signature', app], { stdio: 'ignore' });
+    return app;
+  }
+
+  it('heals an unsigned bundle so it passes codesign --verify', () => {
+    const app = makeUnsignedBundle();
+    expect(codesignVerifies(app)).toBe(false);
+    expect(ensureValidSignature(app)).toBe(true);
+    expect(codesignVerifies(app)).toBe(true);
+    fs.rmSync(path.dirname(app), { recursive: true, force: true });
+  });
+
+  it('leaves an already-valid signature untouched (idempotent)', () => {
+    const app = makeUnsignedBundle();
+    ensureValidSignature(app);
+    expect(ensureValidSignature(app)).toBe(true);
+    expect(codesignVerifies(app)).toBe(true);
+    fs.rmSync(path.dirname(app), { recursive: true, force: true });
   });
 });

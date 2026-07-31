@@ -146,6 +146,42 @@ function copyAppBundle(src: string, dest: string): void {
   }
 }
 
+/** True when the bundle carries a signature the kernel will accept at launch. */
+export function codesignVerifies(appPath: string): boolean {
+  const r = spawnSync('codesign', ['--verify', '--strict', appPath], { stdio: ['ignore', 'ignore', 'ignore'] });
+  return r.status === 0;
+}
+
+/**
+ * Guarantee the installed bundle has a valid signature on THIS machine.
+ *
+ * npm's pack/extract strips the ad-hoc/linker signature the release baked into
+ * the helper, leaving `code object is not signed at all`. On macOS 26+ the
+ * kernel's code-signing monitor SIGKILLs an unsigned/invalid binary at launch
+ * (`SIGKILL (Code Signature Invalid)`), so under the launchd `KeepAlive` service
+ * an ad-hoc release helper crash-loops forever and its unstable identity makes
+ * the Accessibility grant (needed for the clip→paste keystroke in Clip.swift)
+ * re-prompt every time. A fresh ad-hoc re-sign gives the on-disk bytes a
+ * matching cdhash, which the kernel accepts.
+ *
+ * A Developer-ID-signed helper survives npm untouched — its embedded signature
+ * still verifies — so we leave it alone and only re-sign when verification
+ * fails. Returns whether the bundle ends up validly signed. No-op cost on the
+ * common (already-valid) path is a single `codesign --verify`.
+ */
+export function ensureValidSignature(appPath: string): boolean {
+  if (codesignVerifies(appPath)) return true;
+  // Drop any quarantine/xattrs the tarball round-trip added (they can break
+  // codesign), then re-sign ad-hoc under the helper's stable bundle identifier.
+  spawnSync('xattr', ['-cr', appPath], { stdio: ['ignore', 'ignore', 'ignore'] });
+  spawnSync(
+    'codesign',
+    ['--force', '--sign', '-', '--identifier', SERVICE_LABEL, appPath],
+    { stdio: ['ignore', 'ignore', 'ignore'] }
+  );
+  return codesignVerifies(appPath);
+}
+
 /**
  * Copy the bundled `.app` to the stable user path (idempotent unless forced).
  * Returns the installed executable path, or null if no source bundle ships
@@ -156,8 +192,14 @@ export function ensureMenubarAppInstalled(opts: { forceReinstall?: boolean } = {
   const src = sourceAppPath();
   if (!src) return null;
   const dest = installedAppPath();
-  if (!opts.forceReinstall && fs.existsSync(dest)) return installedExecutablePath();
+  if (!opts.forceReinstall && fs.existsSync(dest)) {
+    // Self-heal an already-installed bundle whose signature npm stripped on a
+    // prior upgrade (macOS 26+ SIGKILLs it otherwise) without a forced recopy.
+    ensureValidSignature(dest);
+    return installedExecutablePath();
+  }
   copyAppBundle(src, dest);
+  ensureValidSignature(dest);
   return installedExecutablePath();
 }
 
@@ -248,6 +290,17 @@ export function enableMenubarService(opts: { clearOptOut?: boolean } = { clearOp
   if (!onDarwin()) return false;
   const exec = ensureMenubarAppInstalled({ forceReinstall: true });
   if (!exec) return false;
+
+  // Never bootstrap a helper the kernel will kill on launch: an invalid
+  // signature under launchd KeepAlive is an infinite crash loop. If the bundle
+  // can't be made valid (re-sign already attempted in ensureMenubarAppInstalled),
+  // skip the service rather than spin the loop.
+  if (!codesignVerifies(installedAppPath())) {
+    process.stderr.write(
+      'agents: menu-bar helper has no valid code signature; skipping launch to avoid a crash loop.\n'
+    );
+    return false;
+  }
 
   if (opts.clearOptOut) {
     try { fs.rmSync(disabledSentinelPath(), { force: true }); } catch { /* already gone */ }

@@ -30,9 +30,13 @@ DEST="$DEST_DIR/menubar-helper-mac"
 cp "$SRC" "$DEST"
 
 # .app bundle. LSUIElement=true keeps it out of the Dock and the ⌘-Tab
-# switcher — it lives only in the menu bar. Unlike the computer helper, the
-# status item needs no TCC grant, so ad-hoc signing is fine and we skip
-# notarization entirely.
+# switcher — it lives only in the menu bar. We skip notarization (a status item
+# has no Keychain ACL), but the helper DOES need a stable code identity: its
+# clip→paste feature (Clip.swift) synthesizes a ⌘-V keystroke, which requires an
+# Accessibility (TCC) grant, and macOS 26+ SIGKILLs an unsigned/invalid binary
+# at launch. Prefer a Developer ID identity — it survives npm's tarball
+# round-trip (an ad-hoc/linker signature gets stripped to "not signed at all",
+# which the install-time re-sign in install-menubar.ts then heals per machine).
 APP="$DEST_DIR/MenubarHelper.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
@@ -64,7 +68,13 @@ SIGN_ID="${MENUBAR_HELPER_SIGN_ID:-}"
 if [ -z "$SIGN_ID" ]; then
     SIGN_ID=$(security find-identity -v -p codesigning 2>/dev/null | grep -oE '"Developer ID Application: [^"]+"' | head -1 | tr -d '"')
 fi
-[ -z "$SIGN_ID" ] && SIGN_ID="-"
+if [ -z "$SIGN_ID" ]; then
+    SIGN_ID="-"
+    echo "  WARNING: no Developer ID identity found — signing ad-hoc." >&2
+    echo "  npm will strip this signature; machines self-heal via install-menubar.ts" >&2
+    echo "  but the Accessibility grant re-prompts each upgrade. Sign on a host with" >&2
+    echo "  the Developer ID cert (see remote-sign-mac.sh) for a stable identity." >&2
+fi
 echo "  signing with: $SIGN_ID"
 codesign --force --options runtime --sign "$SIGN_ID" --identifier com.phnx-labs.agents-menubar "$APP" 2>&1 | sed 's/^/  /'
 codesign --force --options runtime --sign "$SIGN_ID" --identifier com.phnx-labs.agents-menubar "$DEST" 2>&1 | sed 's/^/  /'
