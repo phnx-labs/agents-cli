@@ -91,6 +91,11 @@ describe('staleness/registry', () => {
     expect(DETECTORS.permissions.grok).toBeDefined();
   });
 
+  it('grok has a workflows writer + detector (native .rhai projection)', () => {
+    expect(WRITERS.workflows.grok).toBeDefined();
+    expect(DETECTORS.workflows.grok).toBeDefined();
+  });
+
   it('antigravity has a permissions writer + detector', () => {
     expect(WRITERS.permissions.antigravity).toBeDefined();
     expect(DETECTORS.permissions.antigravity).toBeDefined();

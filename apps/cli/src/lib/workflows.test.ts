@@ -14,6 +14,9 @@ import {
   transformWorkflowForKimi,
   transformWorkflowForAntigravity,
   transformWorkflowForOpenClaw,
+  transformWorkflowForGrok,
+  grokWorkflowMarker,
+  GROK_WORKFLOW_MARKER,
 } from './workflows.js';
 
 describe('parseLoopBlock — defensive coercion (issue #332)', () => {
@@ -409,3 +412,69 @@ describe('Goose workflow recipe sync', () => {
     }
   });
 });
+
+describe('workflow native projections (grok)', () => {
+  function writeWorkflow(body: string): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-wf-grok-'));
+    fs.writeFileSync(path.join(dir, 'WORKFLOW.md'), body, 'utf-8');
+    return dir;
+  }
+
+  it('converts a workflow into a Grok Rhai script with agents_workflow marker', () => {
+    const dir = writeWorkflow(
+      '---\nname: Review Flow\ndescription: Review code\n---\n\nCheck the diff and report findings.',
+    );
+
+    const rhai = transformWorkflowForGrok(dir, 'review-flow');
+
+    expect(rhai).toContain(`// ${GROK_WORKFLOW_MARKER}: review-flow`);
+    expect(rhai).toContain('name: "review-flow"');
+    expect(rhai).toContain('description: "Review code"');
+    expect(rhai).toContain('Check the diff and report findings.');
+    expect(rhai).toContain('phase("Run")');
+    expect(rhai).toContain('agent(prompt');
+    expect(rhai).toContain('complete(');
+  });
+
+  it('escapes quotes and newlines in the embedded orchestrator body', () => {
+    const dir = writeWorkflow(
+      '---\nname: Quoted\ndescription: Has "quotes"\n---\n\nSay "hello"\nand goodbye.',
+    );
+
+    const rhai = transformWorkflowForGrok(dir, 'quoted');
+    expect(rhai).toContain('\\"quotes\\"');
+    expect(rhai).toContain('Say \\"hello\\"\\nand goodbye.');
+  });
+
+  it('syncs and lists only agents-cli managed Grok workflow destinations', () => {
+    const dir = writeWorkflow(
+      '---\nname: Native Flow\ndescription: Native projection\n---\n\nDo the work.',
+    );
+    const grokHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-grok-wf-home-'));
+
+    try {
+      const workflowsDir = path.join(grokHome, '.grok', 'workflows');
+      fs.mkdirSync(workflowsDir, { recursive: true });
+      const userOwned = path.join(workflowsDir, 'native-flow.rhai');
+      fs.writeFileSync(
+        userOwned,
+        'let meta = #{ name: "native-flow", description: "user owned" };\ncomplete(#{ ok: true });\n',
+      );
+      expect(syncWorkflowToVersion(dir, 'native-flow', 'grok', grokHome).success).toBe(false);
+      expect(listWorkflowsForAgent('grok', grokHome)).toEqual([]);
+      expect(grokWorkflowMarker(userOwned)).toBeNull();
+
+      fs.unlinkSync(userOwned);
+      const result = syncWorkflowToVersion(dir, 'native-flow', 'grok', grokHome);
+      expect(result.success).toBe(true);
+      const target = path.join(workflowsDir, 'native-flow.rhai');
+      expect(fs.existsSync(target)).toBe(true);
+      expect(grokWorkflowMarker(target)).toBe('native-flow');
+      expect(listWorkflowsForAgent('grok', grokHome)).toEqual(['native-flow']);
+      expect(syncWorkflowToVersion(dir, 'native-flow', 'grok', grokHome).success).toBe(true);
+    } finally {
+      fs.rmSync(grokHome, { recursive: true, force: true });
+    }
+  });
+});
+

@@ -459,3 +459,26 @@ describe('explainSkip()', () => {
     expect(explainSkip('claude', 'hooks', { ok: true })).toBe('');
   });
 });
+
+describe('grok workflows version gate', () => {
+  it('gates versions below 0.2.111 as too_old', () => {
+    const result = supports('grok', 'workflows', '0.2.110');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('too_old');
+      expect(result.need).toBe('>= 0.2.111');
+    }
+  });
+
+  it('passes 0.2.111 and above', () => {
+    expect(supports('grok', 'workflows', '0.2.111')).toEqual({ ok: true });
+    expect(supports('grok', 'workflows', '0.2.120')).toEqual({ ok: true });
+  });
+
+  it('includes grok in capableAgents(workflows) alongside claude', () => {
+    const agents = capableAgents('workflows');
+    expect(agents).toContain('claude');
+    expect(agents).toContain('grok');
+  });
+});
+
