@@ -576,6 +576,7 @@ describe('registerHooksToSettings - OpenCode', () => {
       const plugin = await AgentsCliHooks({ $ })
       await plugin["tool.execute.before"]({ tool: "read", sessionID: "skip" }, { args: {} })
       await plugin["tool.execute.before"]({ tool: "bash", sessionID: "run" }, { args: { command: "true" } })
+      process.exit(0)
     `, 'utf-8');
     execFileSync('bun', [runnerPath]);
     expect(JSON.parse(fs.readFileSync(outputPath, 'utf-8'))).toMatchObject({
@@ -621,6 +622,7 @@ describe('registerHooksToSettings - OpenCode', () => {
       }
       await Bun.sleep(300)
       await Bun.write(${JSON.stringify(resultPath)}, JSON.stringify({ error, sideEffect: await Bun.file(${JSON.stringify(sideEffectPath)}).exists() }))
+      process.exit(0)
     `, 'utf-8');
     execFileSync('bun', [runnerPath]);
     expect(JSON.parse(fs.readFileSync(resultPath, 'utf-8'))).toEqual({
