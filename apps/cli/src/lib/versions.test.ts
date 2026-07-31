@@ -39,7 +39,8 @@ function runVersionSync(home: string, expression: string): unknown {
   // .exe everywhere, so this is shell-free and cross-platform.
   const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
   const child = spawnSync(nodeExecPath(), [tsxBin, '-e', `
-    import { listInstalledVersions, syncResourcesToVersion, buildRepoScopedSelection } from ${JSON.stringify(moduleUrl)};
+    import { listInstalledVersions, syncResourcesToVersion, buildRepoScopedSelection, getVersionHomePath } from ${JSON.stringify(moduleUrl)};
+    import { registerHooksToSettings } from ${JSON.stringify(pathToFileURL(path.resolve('src/lib/hooks.ts')).href)};
     const home = ${JSON.stringify(home)};
     const result = ${expression};
     console.log(JSON.stringify(result));
@@ -299,6 +300,47 @@ describe('self-updating single-binary agents (RUSH-1321)', () => {
 });
 
 describe('version resource sync path handling', () => {
+  it('keeps the generated OpenCode hooks plugin during an unrelated scoped sync', () => {
+    const home = makeTempHome();
+    const hooksDir = path.join(home, '.agents', 'hooks');
+    fs.mkdirSync(hooksDir, { recursive: true });
+    fs.writeFileSync(path.join(hooksDir, 'keep.sh'), '#!/bin/sh\nexit 0\n', 'utf-8');
+    fs.chmodSync(path.join(hooksDir, 'keep.sh'), 0o755);
+
+    runVersionSync(
+      home,
+      `(() => {
+        const versionHome = getVersionHomePath('opencode', '1.18.4');
+        registerHooksToSettings(
+          'opencode',
+          versionHome,
+          { keep: { script: 'keep.sh', events: ['SessionStart'] } },
+          ${JSON.stringify(path.join(home, '.agents'))}
+        );
+        return syncResourcesToVersion(
+          'opencode',
+          '1.18.4',
+          { commands: [] },
+          { cwd: home }
+        );
+      })()`
+    );
+
+    expect(fs.existsSync(path.join(
+      home,
+      '.agents',
+      '.history',
+      'versions',
+      'opencode',
+      '1.18.4',
+      'home',
+      '.config',
+      'opencode',
+      'plugins',
+      'agents-cli-hooks.ts'
+    ))).toBe(true);
+  });
+
   it('intersects explicit resource selections with discovered resources before syncing', async () => {
     const home = makeTempHome();
 

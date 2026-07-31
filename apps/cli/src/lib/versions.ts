@@ -2864,7 +2864,8 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
         result.hooks = r.synced.length > 0;
         hookManifest = selectHookManifest(parseHookManifest(), hooksToSync);
       }
-      if (agent === 'opencode') {
+      const hooksInScope = !userPassedSelection || selection?.hooks !== undefined;
+      if (agent === 'opencode' && hooksInScope) {
         registerHooksToSettings(agent, versionHome, hookManifest);
       }
     }
