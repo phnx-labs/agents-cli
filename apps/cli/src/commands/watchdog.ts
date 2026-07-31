@@ -117,7 +117,7 @@ export function registerWatchdogCommand(program: Command): void {
     .command('watchdog')
     .description('Auto-nudge stalled agent terminals: detect stalls, resolve the exact split, inject "Continue." — no menu-bar needed.')
     .option('--nudge', 'Actually inject (default is a dry run that only reports what it would do)')
-    .option('--watch', 'Daemon loop: run a tick every --interval until interrupted')
+    .option('--watch', 'Manual poll loop: run a tick every --interval (dry unless --nudge; the always-on path is `watchdog enable`)')
     .option('--interval <dur>', 'Poll interval in --watch mode (e.g. 30s, 1m)', '30s')
     .option('--stall <dur>', 'Idle time before a session counts as stalled', humanMs(DEFAULT_THRESHOLDS.stallMs))
     .option('--cooldown <dur>', 'Minimum time between nudges to the same session', humanMs(DEFAULT_THRESHOLDS.cooldownMs))
