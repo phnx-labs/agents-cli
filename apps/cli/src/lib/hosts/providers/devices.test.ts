@@ -91,7 +91,7 @@ describe('DevicesHostProvider.list', () => {
 });
 
 describe('devices in the unified pool', () => {
-  it('listAllHosts includes devices; a same-name enrolled host shadows the device', async () => {
+  it('listAllHosts merges a same-name enrolled host with the device, per-field', async () => {
     await upsertDevice('shared-name', {
       platform: 'linux',
       user: 'device-user',
@@ -106,9 +106,16 @@ describe('devices in the unified pool', () => {
     const all = await listAllHosts();
     const rows = all.filter((h) => h.name === 'shared-name');
     expect(rows).toHaveLength(1);
-    // local registers before devices — the enrolled entry wins.
+    // `local` registers first, so the enrolled overlay is still the BASE row —
+    // it keeps provider/source/caps/addedAt.
     expect(rows[0].provider).toBe('local');
-    expect(rows[0].address).toBe('10.0.0.9');
+    // …but the device owns the connection fields (RUSH-1967). This assertion used
+    // to expect the overlay's '10.0.0.9', which encoded the frozen-route bug as a
+    // contract: `agents devices sync` could move a device and the stale enrolled
+    // address would keep winning — and `resolveHostByCap` hands this very row to
+    // dispatch, so `--host <cap>` dialed the dead address.
+    expect(rows[0].address).toBe('shared.tail.ts.net');
+    expect(rows[0].user).toBe('device-user');
   });
 
   it('cap routing reaches a device enrolled with a tag (the hosts-add-from-device path)', async () => {
