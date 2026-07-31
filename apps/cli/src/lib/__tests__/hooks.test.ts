@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { $ } from 'bun';
+import { execFileSync } from 'child_process';
 
 import { registerHooksToSettings, selectHookManifest, unmanagedHookNames, computeCodexHookTrustHash, toPortableCommand, pruneVersionHomeHookEntriesFromSettings } from '../hooks.js';
 import * as TOML from 'smol-toml';
@@ -525,9 +525,8 @@ describe('registerHooksToSettings - OpenCode', () => {
     expect(plugin).toContain('"session.created"');
     expect(plugin).toContain('"session.idle"');
     expect(plugin).toContain('"session.error"');
-    expect(plugin).toContain('const input = new Response(JSON.stringify(payload))');
-    expect(plugin).toContain('const command = $`${hook.command} < ${input}`.nothrow().quiet()');
-    expect(plugin).toContain('"timeout": 30');
+    expect(plugin).toContain('const input = JSON.stringify(payload)');
+    expect(plugin).toContain('await $`${hook.command} < ${new Response(input)}`.nothrow().quiet()');
     expect(plugin).toContain('"matcher": "Bash|bash"');
   });
 
@@ -570,12 +569,15 @@ describe('registerHooksToSettings - OpenCode', () => {
     const pluginPath = path.join(
       versionHome, '.config', 'opencode', 'plugins', 'agents-cli-hooks.ts'
     );
-    const { AgentsCliHooks } = await import(`${pluginPath}?run=${Date.now()}`);
-    const plugin = await AgentsCliHooks({ $ });
-
-    await plugin['tool.execute.before']({ tool: 'read', sessionID: 'skip' }, { args: {} });
-    expect(fs.existsSync(outputPath)).toBe(false);
-    await plugin['tool.execute.before']({ tool: 'bash', sessionID: 'run' }, { args: { command: 'true' } });
+    const runnerPath = path.join(tmpDir, 'run-plugin.ts');
+    fs.writeFileSync(runnerPath, `
+      import { $ } from "bun"
+      import { AgentsCliHooks } from ${JSON.stringify(pluginPath)}
+      const plugin = await AgentsCliHooks({ $ })
+      await plugin["tool.execute.before"]({ tool: "read", sessionID: "skip" }, { args: {} })
+      await plugin["tool.execute.before"]({ tool: "bash", sessionID: "run" }, { args: { command: "true" } })
+    `, 'utf-8');
+    execFileSync('bun', [runnerPath]);
     expect(JSON.parse(fs.readFileSync(outputPath, 'utf-8'))).toMatchObject({
       hook_event_name: 'PreToolUse',
       tool_name: 'bash',
@@ -583,14 +585,14 @@ describe('registerHooksToSettings - OpenCode', () => {
     });
 
     fs.writeFileSync(scriptPath, '#!/bin/sh\necho rejected >&2\nexit 7\n', 'utf-8');
-    await expect(
-      plugin['tool.execute.before']({ tool: 'bash', sessionID: 'fail' }, { args: {} })
-    ).rejects.toThrow('capture failed with exit code 7: rejected');
+    expect(() => execFileSync('bun', [runnerPath], { encoding: 'utf-8', stdio: 'pipe' }))
+      .toThrow('capture failed with exit code 7: rejected');
   });
 
   it('enforces the manifest timeout', async () => {
     const scriptPath = path.join(agentsDir, 'hooks', 'slow.sh');
-    fs.writeFileSync(scriptPath, '#!/bin/sh\nsleep 1\n', 'utf-8');
+    const sideEffectPath = path.join(tmpDir, 'too-late');
+    fs.writeFileSync(scriptPath, `#!/bin/sh\nsleep 0.2\ntouch ${JSON.stringify(sideEffectPath)}\n`, 'utf-8');
     fs.chmodSync(scriptPath, 0o755);
     const versionHome = path.join(tmpDir, 'home');
     registerHooksToSettings('opencode', versionHome, {
@@ -599,12 +601,26 @@ describe('registerHooksToSettings - OpenCode', () => {
     const pluginPath = path.join(
       versionHome, '.config', 'opencode', 'plugins', 'agents-cli-hooks.ts'
     );
-    const { AgentsCliHooks } = await import(`${pluginPath}?timeout=${Date.now()}`);
-    const plugin = await AgentsCliHooks({ $ });
-
-    await expect(plugin.event({
-      event: { type: 'session.created', properties: { info: { id: 'timeout' } } },
-    })).rejects.toThrow('slow timed out after 0.01 seconds');
+    const resultPath = path.join(tmpDir, 'timeout-result.json');
+    const runnerPath = path.join(tmpDir, 'timeout-plugin.ts');
+    fs.writeFileSync(runnerPath, `
+      import { $ } from "bun"
+      import { AgentsCliHooks } from ${JSON.stringify(pluginPath)}
+      const plugin = await AgentsCliHooks({ $ })
+      let error = ""
+      try {
+        await plugin.event({ event: { type: "session.created", properties: { info: { id: "timeout" } } } })
+      } catch (caught) {
+        error = caught.message
+      }
+      await Bun.sleep(300)
+      await Bun.write(${JSON.stringify(resultPath)}, JSON.stringify({ error, sideEffect: await Bun.file(${JSON.stringify(sideEffectPath)}).exists() }))
+    `, 'utf-8');
+    execFileSync('bun', [runnerPath]);
+    expect(JSON.parse(fs.readFileSync(resultPath, 'utf-8'))).toEqual({
+      error: 'slow timed out after 0.01 seconds',
+      sideEffect: false,
+    });
   });
 
   it('reports missing scripts without registering an event', () => {

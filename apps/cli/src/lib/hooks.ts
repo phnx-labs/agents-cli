@@ -1190,7 +1190,7 @@ const OPENCODE_LIFECYCLE_EVENT_MAP: Record<string, string[]> = {
 type OpenCodeGeneratedHook = {
   name: string;
   command: string;
-  timeout: number;
+  timeout?: number;
   matcher?: string;
 };
 
@@ -1223,7 +1223,7 @@ function registerHooksForOpenCode(
     const generated = {
       name,
       command,
-      timeout: hookDef.timeout ?? 30,
+      ...(hookDef.timeout !== undefined ? { timeout: hookDef.timeout } : {}),
       ...(hookDef.matcher ? { matcher: hookDef.matcher } : {}),
     };
     for (const event of hookDef.events) {
@@ -1261,13 +1261,25 @@ function matches(hook, tool) {
 async function runHooks(hooks, payload, $) {
   for (const hook of hooks ?? []) {
     if (!matches(hook, payload.tool_name ?? "")) continue
-    const input = new Response(JSON.stringify(payload))
-    const command = $\`\${hook.command} < \${input}\`.nothrow().quiet()
-    let timer
-    const timeout = new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new Error(\`\${hook.name} timed out after \${hook.timeout} seconds\`)), hook.timeout * 1000)
-    })
-    const result = await Promise.race([command, timeout]).finally(() => clearTimeout(timer))
+    const input = JSON.stringify(payload)
+    if (hook.timeout !== undefined) {
+      const process = Bun.spawn([hook.command], {
+        stdin: new Response(input),
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+      const timer = setTimeout(() => process.kill(), hook.timeout * 1000)
+      const exitCode = await process.exited.finally(() => clearTimeout(timer))
+      const stderr = await new Response(process.stderr).text()
+      if (exitCode === 128 + 15 || exitCode === 128 + 9) {
+        throw new Error(\`\${hook.name} timed out after \${hook.timeout} seconds\`)
+      }
+      if (exitCode !== 0) {
+        throw new Error(\`\${hook.name} failed with exit code \${exitCode}: \${stderr.trim()}\`)
+      }
+      continue
+    }
+    const result = await $\`\${hook.command} < \${new Response(input)}\`.nothrow().quiet()
     if (result.exitCode !== 0) {
       throw new Error(\`\${hook.name} failed with exit code \${result.exitCode}: \${result.stderr.toString().trim()}\`)
     }
