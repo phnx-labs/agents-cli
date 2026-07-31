@@ -15,6 +15,7 @@ import type { AgentId } from './types.js';
 import { machineId } from './machine-id.js';
 import { AGENTS, agentConfigDirName, findInPath } from './agents.js';
 import { createLink } from './platform/index.js';
+import { ensureWatchdogRoutine } from './watchdog/routine.js';
 
 const HOME = process.env.HOME ?? os.homedir();
 const USER_DIR = path.join(HOME, '.agents');
@@ -1834,6 +1835,38 @@ export function migrateRoutineDeviceToDevices(routinesDir?: string): void {
   }
 }
 
+/**
+ * Fold the legacy watchdog enable sentinel into the watchdog routine.
+ *
+ * The always-on watchdog used to be gated by a presence sentinel at
+ * `<runtime-state>/watchdog/enabled`; it is now a daemon routine. A user who had
+ * run `agents watchdog enable` under the old build has that file on disk — without
+ * this, upgrading would silently drop them back to OFF (the always-on nudge just
+ * stops), the worst failure mode for a "survives reboots" feature. If the sentinel
+ * exists, ensure the `watchdog` routine exists AND is enabled, then delete the
+ * sentinel so this runs exactly once. If ensuring the routine fails, the sentinel
+ * is left in place so a later run retries rather than silently losing the opt-in.
+ *
+ * Both seams are injectable so the migration is unit-testable without touching the
+ * real routines dir (and without racing the routine module's own tests).
+ */
+export function migrateWatchdogSentinelToRoutine(
+  sentinelPath: string = path.join(CACHE_DIR, 'state', 'watchdog', 'enabled'),
+  ensure: (enabled: boolean) => void = ensureWatchdogRoutine,
+): void {
+  if (!fs.existsSync(sentinelPath)) return;
+  try {
+    ensure(true);
+  } catch (err) {
+    console.error(
+      `watchdog sentinel migration: could not create the routine (${(err as Error).message}); leaving the sentinel for a later retry`,
+    );
+    return;
+  }
+  try { fs.rmSync(sentinelPath); } catch { /* already gone */ }
+  console.error('Migrated watchdog: legacy enable sentinel → watchdog routine (kept enabled)');
+}
+
 /** Run all idempotent migrations. Safe to call multiple times. */
 export async function runMigration(): Promise<void> {
   // MUST run first: every other migrator reads SYSTEM_DIR (the new path).
@@ -1895,6 +1928,11 @@ export async function runMigration(): Promise<void> {
 
   // Rewrite routine YAML files: singular `device:` -> plural `devices: []`.
   migrateRoutineDeviceToDevices();
+
+  // Fold the legacy watchdog enable sentinel into the watchdog routine so a user
+  // who opted in under the old build stays opted in after upgrading. After the
+  // routine rewrites above so the routines dir is in its canonical shape.
+  migrateWatchdogSentinelToRoutine();
 
   // Symlink repair runs LAST so it can find the post-move version homes.
   repairAgentConfigSymlinks();
