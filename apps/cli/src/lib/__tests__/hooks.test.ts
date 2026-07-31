@@ -590,16 +590,22 @@ describe('registerHooksToSettings - OpenCode', () => {
   });
 
   it('enforces the manifest timeout', async () => {
-    const scriptPath = path.join(agentsDir, 'hooks', 'slow.sh');
+    const homeScopedDir = fs.mkdtempSync(path.join(os.homedir(), '.opencode-hook-test-'));
+    const homeAgentsDir = path.join(homeScopedDir, '.agents');
+    fs.mkdirSync(path.join(homeAgentsDir, 'hooks'), { recursive: true });
+    const scriptPath = path.join(homeAgentsDir, 'hooks', 'slow.sh');
     const sideEffectPath = path.join(tmpDir, 'too-late');
     fs.writeFileSync(scriptPath, `#!/bin/sh\nsleep 0.2\ntouch ${JSON.stringify(sideEffectPath)}\n`, 'utf-8');
     fs.chmodSync(scriptPath, 0o755);
     const versionHome = path.join(tmpDir, 'home');
     registerHooksToSettings('opencode', versionHome, {
       slow: { script: 'slow.sh', events: ['SessionStart'], timeout: 0.01 },
-    }, agentsDir);
+    }, homeAgentsDir);
     const pluginPath = path.join(
       versionHome, '.config', 'opencode', 'plugins', 'agents-cli-hooks.ts'
+    );
+    expect(fs.readFileSync(pluginPath, 'utf-8')).toContain(
+      `"command": "~/${path.relative(os.homedir(), scriptPath).split(path.sep).join('/')}"`
     );
     const resultPath = path.join(tmpDir, 'timeout-result.json');
     const runnerPath = path.join(tmpDir, 'timeout-plugin.ts');
@@ -621,6 +627,7 @@ describe('registerHooksToSettings - OpenCode', () => {
       error: 'slow timed out after 0.01 seconds',
       sideEffect: false,
     });
+    fs.rmSync(homeScopedDir, { recursive: true, force: true });
   });
 
   it('reports missing scripts without registering an event', () => {

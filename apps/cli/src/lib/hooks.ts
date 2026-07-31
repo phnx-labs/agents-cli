@@ -1263,7 +1263,10 @@ async function runHooks(hooks, payload, $) {
     if (!matches(hook, payload.tool_name ?? "")) continue
     const input = JSON.stringify(payload)
     if (hook.timeout !== undefined) {
-      const process = Bun.spawn([hook.command], {
+      const command = hook.command.startsWith("~/")
+        ? \`\${Bun.env.HOME}/\${hook.command.slice(2)}\`
+        : hook.command
+      const process = Bun.spawn([command], {
         stdin: new Response(input),
         stdout: "pipe",
         stderr: "pipe",
