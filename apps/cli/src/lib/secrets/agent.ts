@@ -29,7 +29,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { randomBytes } from 'crypto';
-import { spawn, spawnSync, execFileSync, type ChildProcess } from 'child_process';
+import { spawn, spawnSync, execFileSync, type ChildProcess, type SpawnSyncReturns } from 'child_process';
 import { getHelpersDir, readMeta } from '../state.js';
 import { isAlive } from '../platform/process.js';
 import { getKeychainHelperPath } from './install-helper.js';
@@ -65,6 +65,26 @@ const IDLE_EXIT_MS = 5 * 60 * 1000; // 5m
 
 /** How often the broker sweeps expired entries. */
 const SWEEP_INTERVAL_MS = 30 * 1000;
+
+/**
+ * Timeouts for the three synchronous broker clients, split across the process
+ * boundary they now straddle.
+ *
+ * `SOCKET_*` bound the socket round-trip inside the spawned `secrets _agent-*`
+ * child, and carry over unchanged from the inline `node -e` programs these
+ * replaced. `SYNC_*` bound the parent's `spawnSync` and must additionally cover
+ * the child's CLI boot (~180ms for the bun-compiled binary on an M-series Mac,
+ * measured), so each is its socket budget plus ~2s of headroom. A parent
+ * timeout that fired before the child's own timer would report "broker down"
+ * for a broker that is merely slow, which costs a Touch ID prompt — so the
+ * parent budget is deliberately the looser of the two.
+ */
+const SOCKET_GET_TIMEOUT_MS = 2000;
+const SOCKET_PING_TIMEOUT_MS = 700;
+const SOCKET_LOCK_TIMEOUT_MS = 2000;
+const SYNC_GET_TIMEOUT_MS = 4000;
+const SYNC_PING_TIMEOUT_MS = 2500;
+const SYNC_LOCK_TIMEOUT_MS = 4000;
 
 /**
  * Decide whether a persistent broker should self-heal onto freshly-installed
@@ -759,35 +779,34 @@ export function agentSocketExists(): boolean {
 }
 
 /**
- * Inline node program for the synchronous read fast-path. `readAndResolveBundleEnv`
- * is synchronous and called synchronously everywhere, so we can't await a socket
- * round-trip — but spawning the full CLI to do it would load every command. This
- * minimal `node -e` client connects, asks for one bundle, prints the resolved
- * {bundle, env} as JSON, and exits 0 (hit) / 3 (miss or agent down). argv after
- * -e: [execPath, <socket>, <name>].
+ * Spawn one of the hidden `secrets _agent-*` sync clients and return its result.
+ *
+ * These three call sites used to hand-roll `spawnSync(process.execPath, ['-e',
+ * <inline node program>, …])`. That is correct only for a JS install, where
+ * `process.execPath` is `node`. Since 1.20.53 the shipped macOS `agents` is a
+ * **bun-compiled Mach-O**, where `process.execPath` is the CLI binary itself —
+ * so the spawn became `agents -e <program> …`, which commander rejects with
+ * `error: unknown option '-e'` and a non-zero exit. Every sync client then took
+ * its own failure path (`agentGetSync` → null, `agentReachableSync` → false,
+ * `agentEvictSync` → no-op), which reads as "broker down" and falls through to
+ * a real keychain read. Net effect on the standalone binary: the broker cache
+ * was never hit, so the `daily` policy's one-prompt-per-7d never applied and
+ * every bundle read re-popped Touch ID.
+ *
+ * Same defect class as the broker-launch bug fixed in 1.20.56 (see cliSpawn's
+ * doc comment); these three sites were simply never converted. Routing them
+ * through `getCliLaunch` fixes both install shapes at once and keeps a single
+ * code path — the CLI's own commands are lazily registered, so a hidden
+ * subcommand only pulls in the secrets module, not every command.
  */
-const SYNC_GET_PROGRAM = `
-const net = require('net'), fs = require('fs');
-const sock = process.argv[1], name = process.argv[2], tokenPath = process.argv[3];
-let token; try { token = fs.readFileSync(tokenPath, 'utf-8').trim() || undefined; } catch (e) {}
-const c = net.createConnection(sock);
-let buf = '';
-const miss = () => { try { c.destroy(); } catch (e) {} process.exit(3); };
-const timer = setTimeout(miss, 2000);
-c.on('error', miss);
-c.on('connect', () => c.write(JSON.stringify({ cmd: 'get', name, token }) + '\\n'));
-c.setEncoding('utf-8');
-c.on('data', (d) => {
-  buf += d;
-  const nl = buf.indexOf('\\n');
-  if (nl < 0) return;
-  clearTimeout(timer);
-  let r; try { r = JSON.parse(buf.slice(0, nl)); } catch (e) { return miss(); }
-  try { c.destroy(); } catch (e) {}
-  if (r && r.ok && r.hit) { process.stdout.write(JSON.stringify({ bundle: r.bundle, env: r.env })); process.exit(0); }
-  process.exit(3);
-});
-`;
+export function syncClientLaunch(sub: string[], agentsBin?: string): { command: string; args: string[] } {
+  return agentsBin ? getCliLaunch(sub, agentsBin) : getCliLaunch(sub);
+}
+
+function syncClient(sub: string[], timeout: number): SpawnSyncReturns<string> {
+  const { command, args } = syncClientLaunch(sub);
+  return spawnSync(command, args, { encoding: 'utf-8', timeout });
+}
 
 /**
  * Synchronous read for the hot path. Returns the cached resolved bundle, or
@@ -796,13 +815,10 @@ c.on('data', (d) => {
  */
 export function agentGetSync(name: string): { bundle: SecretsBundle; env: Record<string, string> } | null {
   if (!agentSocketExists()) return null;
-  const r = spawnSync(process.execPath, ['-e', SYNC_GET_PROGRAM, socketPath(), name, tokenPath()], {
-    encoding: 'utf-8',
-    timeout: 3000,
-  });
+  const r = syncClient(['secrets', '_agent-get', name], SYNC_GET_TIMEOUT_MS);
   if (r.status !== 0 || !r.stdout) return null;
   try {
-    const o = JSON.parse(r.stdout) as { bundle: SecretsBundle; env: Record<string, string> };
+    const o = JSON.parse(lastLine(r.stdout)) as { bundle: SecretsBundle; env: Record<string, string> };
     if (!o || typeof o !== 'object' || !o.env) return null;
     return { bundle: o.bundle, env: o.env };
   } catch {
@@ -810,30 +826,27 @@ export function agentGetSync(name: string): { bundle: SecretsBundle; env: Record
   }
 }
 
-/** Inline node program for a synchronous liveness ping. Connects, sends one
- * `{cmd:'ping'}`, exits 0 iff a valid ping response comes back, else 3. A stale
- * socket file with no listener refuses the connection immediately, so this
- * fast-fails without riding any cold-start logic. argv after -e: [execPath, <socket>]. */
-const SYNC_PING_PROGRAM = `
-const net = require('net');
-const sock = process.argv[1];
-const c = net.createConnection(sock);
-let buf = '';
-const dead = () => { try { c.destroy(); } catch (e) {} process.exit(3); };
-const timer = setTimeout(dead, 700);
-c.on('error', dead);
-c.on('connect', () => c.write(JSON.stringify({ cmd: 'ping' }) + '\\n'));
-c.setEncoding('utf-8');
-c.on('data', (d) => {
-  buf += d;
-  const nl = buf.indexOf('\\n');
-  if (nl < 0) return;
-  clearTimeout(timer);
-  let r; try { r = JSON.parse(buf.slice(0, nl)); } catch (e) { return dead(); }
-  try { c.destroy(); } catch (e) {}
-  process.exit(r && r.ok && r.cmd === 'ping' ? 0 : 3);
-});
-`;
+/**
+ * Last non-empty line of a child's stdout — the payload line.
+ *
+ * The inline `node -e` client this replaced was a bare node process that could
+ * only ever emit its own JSON. The replacement boots the real CLI, so anything
+ * the CLI prints on the way up shares that stream. Today the known chatter (the
+ * `~/.agents/ is N commits behind` notice) correctly goes to stderr, but a
+ * single future stdout write anywhere in startup would make `JSON.parse` throw
+ * and turn every cache hit back into a silent miss — i.e. quietly reintroduce
+ * the Touch-ID-on-every-read bug this fix closes, with no failing test to catch
+ * it. Anchoring on the last line makes the payload the terminator of the
+ * stream rather than the whole of it, so preceding chatter is inert.
+ */
+export function lastLine(stdout: string): string {
+  const lines = stdout.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const t = lines[i].trim();
+    if (t) return t;
+  }
+  return '';
+}
 
 /**
  * Synchronous liveness check: is a broker actually LISTENING and answering (not
@@ -846,37 +859,9 @@ c.on('data', (d) => {
 export function agentReachableSync(): boolean {
   if (!onDarwin()) return false;
   if (!agentSocketExists()) return false;
-  const r = spawnSync(process.execPath, ['-e', SYNC_PING_PROGRAM, socketPath()], { timeout: 1500 });
+  const r = syncClient(['secrets', '_agent-ping'], SYNC_PING_TIMEOUT_MS);
   return r.status === 0 && !r.error;
 }
-
-/**
- * Inline node program for the synchronous evict path. Mirrors SYNC_GET_PROGRAM:
- * writeBundle is synchronous and called synchronously everywhere, so a stale
- * broker entry must be evicted without awaiting a socket round-trip. Sends one
- * {cmd:'lock', name} and exits 0 (evicted or nothing held) / 3 (agent down).
- * argv after -e: [execPath, <socket>, <name>].
- */
-const SYNC_LOCK_PROGRAM = `
-const net = require('net'), fs = require('fs');
-const sock = process.argv[1], name = process.argv[2], tokenPath = process.argv[3];
-let token; try { token = fs.readFileSync(tokenPath, 'utf-8').trim() || undefined; } catch (e) {}
-const c = net.createConnection(sock);
-let buf = '';
-const down = () => { try { c.destroy(); } catch (e) {} process.exit(3); };
-const timer = setTimeout(down, 2000);
-c.on('error', down);
-c.on('connect', () => c.write(JSON.stringify({ cmd: 'lock', name, token }) + '\\n'));
-c.setEncoding('utf-8');
-c.on('data', (d) => {
-  buf += d;
-  const nl = buf.indexOf('\\n');
-  if (nl < 0) return;
-  clearTimeout(timer);
-  try { c.destroy(); } catch (e) {}
-  process.exit(0);
-});
-`;
 
 /**
  * Synchronously evict one bundle from the broker. Called after a mutating
@@ -890,8 +875,43 @@ export function agentEvictSync(name: string): void {
   if (!onDarwin()) return;
   if (!agentSocketExists()) return;
   try {
-    spawnSync(process.execPath, ['-e', SYNC_LOCK_PROGRAM, socketPath(), name, tokenPath()], { timeout: 3000 });
+    syncClient(['secrets', '_agent-lock', name], SYNC_LOCK_TIMEOUT_MS);
   } catch { /* best-effort */ }
+}
+
+// ─── Hidden `secrets _agent-*` sync-client entrypoints ───────────────────────
+// The bodies behind the three spawns above. Each does one socket round-trip and
+// signals the parent through its exit code, mirroring the exit contract of the
+// inline `node -e` programs these replaced: 0 = hit/alive, 3 = miss/down.
+
+/** Body of `secrets _agent-get <name>`. Prints `{bundle, env}` as JSON on a
+ * cache hit. Exit 0 = hit, 3 = miss or broker down. */
+export async function runAgentGetSync(name: string): Promise<number> {
+  const r = await request({ cmd: 'get', name }, SOCKET_GET_TIMEOUT_MS);
+  if (r?.ok === true && r.cmd === 'get' && r.hit) {
+    // Trailing newline: the parent reads the LAST line (see lastLine), so the
+    // payload must terminate the stream even if startup chatter precedes it.
+    process.stdout.write(JSON.stringify({ bundle: r.bundle, env: r.env }) + '\n');
+    return 0;
+  }
+  return 3;
+}
+
+/** Body of `secrets _agent-ping`. Exit 0 = a broker is listening and speaking
+ * our protocol, 3 = nothing there. Deliberately does NOT gate on
+ * PROTOCOL_VERSION: this only decides whether the auto-cache may take the
+ * synchronous warm path, and a version-skewed broker still answers reads. That
+ * matches the inline program this replaced. */
+export async function runAgentPingSync(): Promise<number> {
+  const r = await request({ cmd: 'ping' }, SOCKET_PING_TIMEOUT_MS);
+  return r?.ok === true && r.cmd === 'ping' ? 0 : 3;
+}
+
+/** Body of `secrets _agent-lock <name>`. Best-effort evict; always exit 0 so a
+ * missing broker never fails the mutating write that triggered it. */
+export async function runAgentLockSync(name: string): Promise<number> {
+  await request({ cmd: 'lock', name }, SOCKET_LOCK_TIMEOUT_MS);
+  return 0;
 }
 
 // Key inside the cached entry's env that holds the JSON metadata snapshot.
