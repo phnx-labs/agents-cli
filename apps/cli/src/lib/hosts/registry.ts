@@ -240,15 +240,20 @@ export async function listAllHosts(): Promise<Host[]> {
         continue;
       }
       // Same name from a later provider (a device behind an enrolled overlay):
-      // keep the overlay's caps/source but adopt the device's live presence,
-      // dispatchable bit, address, and OS so an enrolled device doesn't lose them.
+      // `prev` is the local/overlay row (`local` registers first), `host` is the
+      // live device row. Keep the overlay's caps/source/addedAt as the base, but
+      // the DEVICE wins every field it owns — address, user, OS, presence and
+      // dispatchable — so this matches `deviceHost()`'s per-field precedence and
+      // an enrolled device can never serve a frozen address. Getting this
+      // backwards reintroduced the frozen route through `resolveHostByCap`,
+      // which hands a `listAllHosts()` row straight to dispatch.
       byName.set(host.name, {
         ...prev,
-        address: prev.address ?? host.address,
-        user: prev.user ?? host.user,
-        os: prev.os ?? host.os,
-        status: prev.status ?? host.status,
-        dispatchable: prev.dispatchable ?? host.dispatchable,
+        address: host.address ?? prev.address,
+        user: host.user ?? prev.user,
+        os: host.os ?? prev.os,
+        status: host.status ?? prev.status,
+        dispatchable: host.dispatchable ?? prev.dispatchable,
       });
     }
   }

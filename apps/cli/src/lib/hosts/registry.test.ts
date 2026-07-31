@@ -228,4 +228,44 @@ describe('listAllHosts — merge same-name rows (RUSH-1967)', () => {
     const row = (await listAllHosts()).find((h) => h.name === 'winbox');
     expect(row?.dispatchable).toBe(false);
   });
+
+  it('the LIVE device address wins over a stale enrolled overlay address', async () => {
+    // The frozen-route bug, via listAllHosts rather than resolveHost: enrol a
+    // device to tag it, then let `agents devices sync` move its address. The
+    // overlay keeps the OLD address forever (nothing rewrites it), so a merge
+    // that prefers the overlay serves a dead route. This matters beyond display
+    // because resolveHostByCap hands a listAllHosts() row straight to dispatch.
+    await upsertDevice('mac-mini', {
+      platform: 'macos',
+      user: 'muqsit',
+      address: { via: 'tailscale', dnsName: 'mac-mini.NEW.ts.net' },
+      auth: { method: 'key' },
+      tailscale: { online: true, direct: true },
+    });
+    updateMeta((m) => ({
+      ...m,
+      hosts: { 'mac-mini': { source: 'inline', address: 'mac-mini.OLD.ts.net', user: 'muqsit', caps: ['gpu'] } },
+    }));
+
+    const row = (await listAllHosts()).find((h) => h.name === 'mac-mini');
+    expect(row?.address).toBe('mac-mini.NEW.ts.net'); // live registry, not the snapshot
+    expect(row?.caps).toEqual(['gpu']); // overlay still owns capability tags
+  });
+
+  it('cap-tag routing dispatches to the live device address, not the stale overlay', async () => {
+    await upsertDevice('mac-mini', {
+      platform: 'macos',
+      user: 'muqsit',
+      address: { via: 'tailscale', dnsName: 'mac-mini.NEW.ts.net' },
+      auth: { method: 'key' },
+      tailscale: { online: true, direct: true },
+    });
+    updateMeta((m) => ({
+      ...m,
+      hosts: { 'mac-mini': { source: 'inline', address: 'mac-mini.OLD.ts.net', user: 'muqsit', caps: ['gpu'] } },
+    }));
+
+    const { resolveHostByCap } = await import('./registry.js');
+    expect(sshTargetFor(await resolveHostByCap('gpu'))).toBe('muqsit@mac-mini.NEW.ts.net');
+  });
 });
