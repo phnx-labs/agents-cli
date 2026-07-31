@@ -60,11 +60,14 @@ function osForTarget(target: string, lookupName?: string): string | undefined {
 }
 
 /**
- * Resolve a `--host` value to an ssh target string. Tries the `agents hosts`
- * registry first (enrolled name → ssh-config alias / `user@host`); on a miss,
- * treats the value as a raw ssh target and validates it against injection.
+ * Resolve a `--host` value to an ssh target STRING for the remote-secrets path.
+ * Delegates to the single host/device resolver (`resolveHost`, RUSH-1967) so a
+ * name here dials the exact same box `run --host` does; on a miss, treats the
+ * value as a raw ssh target and validates it against injection. Named distinctly
+ * from `../devices/resolve-target.ts` (which returns richer shapes) so importing
+ * the wrong one can't silently change which machine you dial.
  */
-export async function resolveSshTarget(nameOrAlias: string): Promise<string> {
+export async function resolveHostSshTarget(nameOrAlias: string): Promise<string> {
   const host = await resolveHost(nameOrAlias);
   if (host) return sshTargetFor(host);
   assertValidSshTarget(nameOrAlias);

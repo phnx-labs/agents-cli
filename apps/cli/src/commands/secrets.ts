@@ -21,7 +21,7 @@ import {
   remoteResolveEnv,
   remoteSecretsRaw,
   remoteSecretsStream,
-  resolveSshTarget,
+  resolveHostSshTarget,
 } from '../lib/secrets/remote.js';
 import { remoteShellFor, buildWindowsStdinImportCommand } from '../lib/hosts/remote-cmd.js';
 import { resolveRemoteOsSync } from '../lib/hosts/remote-os.js';
@@ -480,11 +480,11 @@ async function browseRemote(targets: string[], args: string[], tty: boolean): Pr
   };
   if (tty) {
     for (const t of targets) {
-      const target = await resolveSshTarget(t);
+      const target = await resolveHostSshTarget(t);
       render(t, remoteSecretsRaw(target, args, { tty: true, osLookupName: t }));
     }
   } else {
-    const resolved = await Promise.all(targets.map(async (t) => ({ name: t, target: await resolveSshTarget(t) })));
+    const resolved = await Promise.all(targets.map(async (t) => ({ name: t, target: await resolveHostSshTarget(t) })));
     const results = resolved.map(({ name, target }) => remoteSecretsRaw(target, args, { osLookupName: name }));
     targets.forEach((t, i) => render(t, results[i]));
   }
@@ -1676,7 +1676,7 @@ Examples:
           }
           assertValidSshTarget(opts.host);
           const resolvedBundleName = bundleName ?? (await pickBundleName('import into'));
-          const target = await resolveSshTarget(opts.host);
+          const target = await resolveHostSshTarget(opts.host);
           const env = await remoteResolveEnv(target, resolvedBundleName, { osLookupName: opts.host });
           const bundle = resolveImportBundle(resolvedBundleName, opts.backend, opts.synced);
           const { added, skipped } = applyEnvToBundle(bundle, env, opts);
@@ -1960,7 +1960,7 @@ Examples:
             { keys: keysSubset, allowExpired: execOpts.allowExpired },
             { keysFlag: '--keys', allowExpiredFlag: '--allow-expired' },
           );
-          secretEnv = await remoteResolveEnv(await resolveSshTarget(execOpts.host), bundleName, { osLookupName: execOpts.host });
+          secretEnv = await remoteResolveEnv(await resolveHostSshTarget(execOpts.host), bundleName, { osLookupName: execOpts.host });
         } else {
           const { readAndResolveBundleEnv } = await import('../lib/secrets/bundles.js');
           secretEnv = readAndResolveBundleEnv(bundleName, {
@@ -2172,7 +2172,7 @@ Examples:
         const unlockArgs = buildRemoteUnlockArgs(names, opts);
         let failures = 0;
         for (const h of hosts) {
-          const target = await resolveSshTarget(h);
+          const target = await resolveHostSshTarget(h);
           // FOREGROUND stream (stdio inherited), NOT the piped remoteSecretsRaw:
           // the remote's passphrase prompt only surfaces if the remote process
           // sees a real TTY, which requires our local terminal to pass straight

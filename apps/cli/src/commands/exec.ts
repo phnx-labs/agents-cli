@@ -1472,7 +1472,7 @@ export function registerRunCommand(program: Command): void {
         { ALL_AGENT_IDS, ACCOUNT_INSPECTION_AGENT_IDS, agentLabel, supportsAccountInspection },
         { profileExists, resolveProfileForRun },
         { readAndResolveBundleEnv, describeBundle, assertRemoteBundleFlagsUnsupported, isHeadlessSecretsContext },
-        { splitBundleRef, resolveSshTarget, remoteResolveEnv },
+        { splitBundleRef, resolveHostSshTarget, remoteResolveEnv },
         { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, rotationFailoverChain, shouldArmRotationFailover, RUN_STRATEGIES },
         { getGlobalDefault, getVersionHomePath, resolveVersion, resolveVersionAlias, ensureAgentRunnable },
         { buildDiscoveredPlugin, loadPluginManifest, syncPluginToVersion },
@@ -2145,7 +2145,7 @@ export function registerRunCommand(program: Command): void {
             );
             // Remote bundle (`bundle@host`): resolve over SSH and inject
             // ephemerally — values never touch this machine's keychain or disk.
-            const target = await resolveSshTarget(host);
+            const target = await resolveHostSshTarget(host);
             const bundleEnv = await remoteResolveEnv(target, bundleName, { osLookupName: host });
             console.log(chalk.gray(`[secrets] Resolved ${bundleName}@${host}: ${Object.keys(bundleEnv).length} keys (remote, ephemeral)`));
             secretsEnv = { ...secretsEnv, ...bundleEnv };
