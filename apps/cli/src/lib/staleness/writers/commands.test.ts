@@ -48,7 +48,7 @@ function runCommandsWriterFixture(scriptBody: string, agent = 'grok', configDirN
 }
 
 describe('commands writer', () => {
-  it('rewrites marker-bearing command skills that collide with source skills', () => {
+  it('rewrites marker-bearing command skills that collide with source skills (kimi commands-as-skills)', () => {
     const result = runCommandsWriterFixture(`
       writeUser('commands/debug.md', ['---', 'description: Fresh debug', '---', '', 'fresh body'].join('\\n'));
       writeUser('skills/debug/SKILL.md', ['---', 'name: "debug"', 'description: "old"', 'agents_command: "debug"', '---', '', 'old body'].join('\\n'));
@@ -61,7 +61,7 @@ describe('commands writer', () => {
         synced: writeResult.synced,
         content: fs.readFileSync(skillPath, 'utf-8'),
       }));
-    `) as { synced: string[]; content: string };
+    `, 'kimi', '.kimi-code') as { synced: string[]; content: string };
 
     expect(result.synced).toEqual(['debug']);
     expect(result.content).toContain('agents_command: "debug"');
@@ -69,7 +69,7 @@ describe('commands writer', () => {
     expect(result.content).not.toContain('STALE');
   });
 
-  it('reports genuine source-skill collisions as synced no-ops', () => {
+  it('reports genuine source-skill collisions as synced no-ops (kimi commands-as-skills)', () => {
     const result = runCommandsWriterFixture(`
       writeUser('commands/plan.md', ['---', 'description: Plan', '---', '', 'plan body'].join('\\n'));
       writeUser('skills/plan/SKILL.md', ['---', 'name: "plan"', 'description: "real skill"', '---', '', 'real skill body'].join('\\n'));
@@ -80,7 +80,7 @@ describe('commands writer', () => {
         synced: writeResult.synced,
         exists: fs.existsSync(skillPath),
       }));
-    `) as { synced: string[]; exists: boolean };
+    `, 'kimi', '.kimi-code') as { synced: string[]; exists: boolean };
 
     expect(result.synced).toEqual(['plan']);
     expect(result.exists).toBe(false);
