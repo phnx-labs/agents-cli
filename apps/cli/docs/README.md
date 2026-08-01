@@ -16,7 +16,7 @@ How agents-cli is laid out on disk and how it decides what to load.
 | [Version management](01-version-management.md) | Installing, pinning, switching, and isolating agent CLI versions. |
 | [Self-healing installs](self-healing.md) | Detect, surface, and repair a broken agent binary (gutted install / `ENOENT`) instead of dying cryptically. |
 | [Resource sync](02-resource-sync.md) | How rules, commands, skills, hooks, etc. land in each version home. |
-| [Sessions](05-sessions.md) | Unified transcript discovery across Claude, Codex, Gemini, OpenCode. |
+| [Sessions](05-sessions.md) | Unified transcript discovery across Claude, Codex, Gemini, OpenCode; resume, export/import, and migrate a live session across machines. |
 | [Observability](06-observability.md) | The three `--json` sources (sessions / cloud / teams) as a fleet view, plus `agents mailboxes` fleet comms. |
 | [SSH transport](09-ssh-transport.md) | The one multiplexed engine every `--host` command rides — default connection reuse, keepalive, one-round-trip follow. |
 | [Optimizations](99-optimizations.md) | Sync manifest, SSH transport, startup profiling, hot-path notes. |

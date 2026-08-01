@@ -4,6 +4,25 @@
 
 ### Added
 
+- **`agents sessions migrate` (alias `detach`) relocates a RUNNING session onto another
+  machine, then stops the source here (RUSH-1977).** Move the live agent — not just its
+  transcript — off the interactive laptop and onto a fleet worker, a registered device, or
+  a warm/fresh ephemeral crabbox box, so the interactive machine reclaims its compute. With
+  no `[session-id]` it resolves the session in THIS tmux pane (`$TMUX_PANE` matched against
+  `provenance.mux.pane`); `--auto` scores the fleet (reachable + dispatchable + not this
+  machine/source, ranked by platform-match, warm-worker-over-fresh-box, then live headroom),
+  `--host <name>` names a target, and `--lease` provisions a fresh box. It wraps up a dirty
+  working tree into a draft WIP PR (or, with `--agent-wrapup`, delegates that to the running
+  agent), ships the transcript over the same `sessions export --stdout | sessions import -`
+  pipeline, resumes on the target via the same `sessions resume --host` path, and only then
+  kills the source (`--keep` copies instead of moving). `--mode resume|rehydrate` picks a
+  faithful `--resume` vs a fresh agent reading the transcript; the non-resumable agents
+  (gemini, antigravity, openclaw, rush, hermes, grok, kimi, droid) transparently fall to
+  `rehydrate` — never a silent skip. Invariant: the source is never stopped before the
+  transcript + branch are confirmed on the target. Source:
+  `apps/cli/src/commands/sessions-migrate.ts`, `apps/cli/src/lib/session/migrate-targets.ts`,
+  `apps/cli/src/commands/sessions.ts`, `apps/cli/docs/05-sessions.md`.
+
 - **The configured model now shows wherever an agent is displayed.** `agents view`,
   `agents view <agent>@<version>`, `agents use`, `agents add`, `agents status`, and
   `agents inspect` now surface the model a given agent+version is actually set to run

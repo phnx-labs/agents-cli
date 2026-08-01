@@ -327,6 +327,65 @@ disk is skipped; a file that differs is a conflict, kept local unless `--overwri
 Source: `src/lib/session/bundle.ts`, `src/lib/session/remote-bundle.ts`,
 `src/commands/sessions-export.ts`, `src/commands/sessions-import.ts`.
 
+## Migration (relocate a live session)
+
+`agents sessions migrate` (alias `detach`) **moves a RUNNING session onto another
+machine** — a fleet worker, a registered device, or a warm/fresh ephemeral crabbox
+box — then stops the source so the interactive machine reclaims its compute. Where
+export/import carry a *transcript* between machines, migrate carries the *live agent*:
+it ships the transcript, resumes the agent on the target, confirms its prompt is live,
+and only then kills the source.
+
+```bash
+# Move the session in THIS tmux pane onto the least-busy fleet worker
+agents sessions migrate --auto
+
+# Move a specific session onto a named host / device / warm box slug
+agents sessions migrate a1b2c3d4 --host yosemite-s1
+
+# Provision a fresh ephemeral box and move onto it
+agents sessions migrate --lease
+
+# Copy (don't stop the source), and let the running agent wrap up its own dirty tree
+agents sessions migrate --host box-a --keep --agent-wrapup
+```
+
+The flow reuses existing primitives rather than reinventing transport or resume:
+
+1. **Resolve the source.** With no `[session-id]`, migrate matches the current tmux
+   pane (`$TMUX_PANE`) against a live session's `provenance.mux.pane` via
+   `getActiveSessions()`. Pass an explicit id when you're not inside the session's pane.
+2. **Resolve the target.** `--auto` picks the best machine with the pure scorer
+   (`src/lib/session/migrate-targets.ts`): eligible = reachable, dispatchable, not this
+   machine and not the source; ranked by platform-match-with-source, then a warm fleet
+   worker over a fresh box, then live headroom (idle > light > busy > loaded, from the
+   `agents devices` stats cache). `--host <name>` names one; `--lease` provisions a
+   fresh box (`crabboxWarmup`).
+3. **Verify + bootstrap.** `readyProbe()` checks the target can run the session's
+   agent+version; a missing agents-cli is bootstrapped (`bootstrapAgentsCli`).
+4. **Wrap up the working tree.** Dirty → commit to a branch, push, open a **draft
+   (WIP) PR** (mechanical by default). `--agent-wrapup` instead injects a wrap-up turn
+   into the running agent (same tmux reply rail as `sessions inject`). Clean-but-ahead → push.
+5. **Ship the transcript** with the same bundle pipeline as
+   `sessions export --stdout | sessions import -`, over SSH.
+6. **Resume on the target** through the same host path as `sessions resume --host`
+   (`openSurfaces({ backend: 'tmux', host })`). For an ephemeral box, migrate git-clones
+   the repo and checks out the (WIP) branch first so the cwd resolves.
+7. **Stop the source** (`killSession`) — but only after the target's prompt is confirmed
+   live. `--keep` skips this (copy, not move).
+
+**`--mode resume | rehydrate`** (default `resume`) chooses between a faithful
+`--resume` and a fresh agent that reads the transcript. **Harness parity:**
+`buildResumeCommand` returns null for the non-resumable agents (gemini, antigravity,
+openclaw, rush, hermes, grok, kimi, droid) — for those a faithful resume is impossible,
+so migrate transparently falls to `rehydrate` and prints a notice (it never silently
+skips an agent). The same fallback applies when the requested agent isn't installed on
+the target.
+
+**Invariant:** the source is never killed before the transcript + branch are confirmed
+on the target. Source: `src/commands/sessions-migrate.ts`,
+`src/lib/session/migrate-targets.ts`.
+
 ## Cross-machine sync (R2 + CRDT)
 
 > **Opt-in beta, off by default — a backup fabric, not the primary recall path.**
