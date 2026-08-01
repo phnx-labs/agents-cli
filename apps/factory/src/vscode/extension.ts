@@ -3690,8 +3690,22 @@ function startAutoLabelPollerForTerminal(terminal: vscode.Terminal, context: vsc
 
   terminals.startAutoLabelPoller(terminal, async () => {
     const autoLabel = await fetchAndSetAutoLabel(terminal, entry);
-    if (autoLabel && vscode.window.activeTerminal === terminal) {
-      updateStatusBarForTerminal(terminal, context.extensionPath);
+    if (!autoLabel || vscode.window.activeTerminal !== terminal) return;
+    updateStatusBarForTerminal(terminal, context.extensionPath);
+    // Refresh the tab title too, not just the status bar — otherwise a label
+    // that resolves while you're sitting on the tab never shows until the next
+    // focus change. Renaming briefly activates the terminal, so this is gated
+    // on the terminal already being active (same focus-safe guard as
+    // tryFetchLabelOnFocus).
+    const display = getDisplayPrefs(context);
+    if (display.showLabelsInTitles && display.autoLabelInTabTitles && entry.agentConfig) {
+      const newTitle = buildTerminalTitle(
+        entry.agentConfig.title,
+        autoLabel,
+        context,
+        entry.sessionId
+      );
+      await terminals.renameTerminal(terminal, newTitle);
     }
   });
 }
