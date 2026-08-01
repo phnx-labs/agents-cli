@@ -3,8 +3,9 @@
  *
  * Picks `bun:sqlite` under Bun and `node:sqlite` under Node (>=22.5). Avoids
  * the native `better-sqlite3` addon entirely so there is no prebuild compile
- * and no Node/Bun ABI mismatch when the same source runs in tests (Bun) and
- * production (Node).
+ * and no Node/Bun ABI mismatch. Both runtimes are production: `dist/index.js`
+ * runs under Node, while the signed standalone `dist/bin/agents` (what the
+ * shims exec) embeds Bun.
  *
  * Exposes the small better-sqlite3-shaped surface area the rest of the
  * codebase already uses: `prepare/exec/pragma/transaction/close` on the DB,
@@ -23,9 +24,20 @@ const sqliteMod = isBun
   : require('node:sqlite');
 
 // bun:sqlite exports `Database`; node:sqlite exports `DatabaseSync`.
-const NativeDatabase: new (filename: string) => NativeDb =
+const NativeDatabase: new (filename: string, options?: { strict: boolean }) => NativeDb =
   (sqliteMod as { Database?: unknown; DatabaseSync?: unknown }).Database as never
   ?? (sqliteMod as { DatabaseSync?: unknown }).DatabaseSync as never;
+
+/**
+ * bun:sqlite binds a named-parameter object ONLY when its keys carry the SQL
+ * sigil (`{ '@id': … }` for `VALUES (@id)`); bare keys (`{ id: … }`) match
+ * nothing and every parameter stays NULL, so the first NOT NULL column raises a
+ * constraint error and the write is lost. node:sqlite accepts the bare keys.
+ * `strict: true` makes bun accept them too, so one call shape works on both
+ * runtimes. node:sqlite has no such option and rejects a second argument that
+ * isn't an object, so the argument list is built per runtime.
+ */
+const NATIVE_ARGS: [] | [{ strict: boolean }] = isBun ? [{ strict: true }] : [];
 
 interface NativeStmt {
   run(...args: unknown[]): RunResult;
@@ -46,7 +58,8 @@ export interface RunResult {
 
 function bindArgs(params: unknown[]): unknown[] {
   // Both bindings accept positional `(a, b, c)` and named `({ a, b, c })`
-  // forms. Pass an object through unchanged so callers using named binds work.
+  // forms — bun only under `strict: true` (see NATIVE_ARGS). Pass an object
+  // through unchanged so callers using named binds work.
   if (
     params.length === 1 &&
     params[0] !== null &&
@@ -79,7 +92,7 @@ class Database {
   private readonly inner: NativeDb;
 
   constructor(filename: string) {
-    this.inner = new NativeDatabase(filename);
+    this.inner = new NativeDatabase(filename, ...NATIVE_ARGS);
   }
 
   prepare<T = unknown>(sql: string): StatementImpl<T> {
