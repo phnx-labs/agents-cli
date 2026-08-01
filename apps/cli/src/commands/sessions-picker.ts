@@ -14,7 +14,7 @@ import { parseSession, sanitizeForTerminal } from '../lib/session/parse.js';
 import { cleanSessionPrompt, extractSessionTopic } from '../lib/session/prompt.js';
 import { linkPath, linkUrl, relativeToCwd } from '../lib/session/render.js';
 import { linearIssueUrl } from '../lib/session/linear.js';
-import { extractTodoProgress } from '../lib/session/state.js';
+import { extractTodoProgress, WORKTREE_RE } from '../lib/session/state.js';
 import { renderMarkdown } from '../lib/markdown.js';
 import { itemPicker } from '../lib/picker.js';
 import { classifyFileChanges, changeCounts, toolHistogram, detectTestResult } from '../lib/session/digest.js';
@@ -446,7 +446,7 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
  * Prefer `session.dirsTouched` when the parser teammate has populated it;
  * otherwise derive from file-change + tool paths already available here.
  */
-function directoriesTouched(
+export function directoriesTouched(
   session: SessionMetaWithDirs,
   events: SessionEvent[],
   changes: ReturnType<typeof classifyFileChanges>,
@@ -477,13 +477,48 @@ function directoriesTouched(
     .slice(0, DIRS_TOUCHED_MAX);
 }
 
+/**
+ * Claude encodes a session's cwd into its `~/.claude/projects/<slug>` dir name by
+ * replacing every `/` with `-`, so a path like `/Users/me/src/app` becomes the
+ * slug `-Users-me-src-app`. That slug then leaks into transcript paths verbatim.
+ * Decode the KNOWN root prefix (`-Users-<user>-` / `-home-<user>-` / `-var-…`)
+ * back to an absolute path so it can be relativized like any other. The rest of
+ * the slug is left with its `-` intact — real dir names can contain `-`, so a
+ * blanket `-`→`/` would corrupt them; best-effort by design. Returns the input
+ * unchanged when it isn't a recognizable slug.
+ */
+function decodeClaudeSlug(dir: string): string {
+  if (!dir.startsWith('-')) return dir;
+  // The slug is the LEADING path segment; a leaked form can carry real subdirs
+  // after it (`<slug>/<id>/scratchpad`), so decode only that first segment and
+  // keep the rest verbatim.
+  const slash = dir.indexOf('/');
+  const head = slash === -1 ? dir : dir.slice(0, slash);
+  const tail = slash === -1 ? '' : dir.slice(slash); // includes the leading `/`
+  const m = head.match(/^-(Users|home)-([^-]+)-(.*)$/);
+  if (m) return `/${m[1]}/${m[2]}/${m[3].replace(/-/g, '/')}${tail}`;
+  const mv = head.match(/^-(var|opt|tmp|srv|mnt)-(.*)$/);
+  if (mv) return `/${mv[1]}/${mv[2].replace(/-/g, '/')}${tail}`;
+  return dir;
+}
+
 /** Relativize a file path to its parent dir, short enough for one preview line. */
-function relativizeDir(filePath: string, cwd?: string): string | undefined {
+export function relativizeDir(filePath: string, cwd?: string): string | undefined {
   const norm = filePath.replace(/\\/g, '/');
   if (!norm || norm.includes('node_modules') || norm.includes('/.git/') || norm.includes('/plans/')) {
     return undefined;
   }
   let dir = path.posix.dirname(norm);
+  // Decode a Claude project-slug (`-Users-me-…`) into an absolute path first so the
+  // cwd/home/trim logic below can simplify it like any real path.
+  dir = decodeClaudeSlug(dir);
+  // Inside a git worktree, show the worktree NAME + the in-worktree remainder,
+  // not the noisy `.agents/worktrees/<slug>/` prefix.
+  const wt = dir.match(WORKTREE_RE);
+  if (wt) {
+    const after = dir.slice(dir.indexOf(wt[0]) + wt[0].length).replace(/^\//, '');
+    return after ? `⧉ ${wt[1]}/${after}` : `⧉ ${wt[1]}`;
+  }
   if (cwd) {
     const base = cwd.replace(/\\/g, '/').replace(/\/$/, '');
     if (dir === base) return '.';
@@ -492,6 +527,12 @@ function relativizeDir(filePath: string, cwd?: string): string | undefined {
   // Collapse home prefix.
   const home = (process.env.HOME || '').replace(/\\/g, '/');
   if (home && dir.startsWith(home + '/')) dir = '~' + dir.slice(home.length);
+  // A slug we couldn't decode to an absolute path is still one giant `-`-joined
+  // segment; trim it to its last 3 `-` groups so it stops rendering in full.
+  if (dir.startsWith('-') && !dir.includes('/')) {
+    const segs = dir.split('-').filter(Boolean);
+    if (segs.length > 3) dir = segs.slice(-3).join('/');
+  }
   // Drop ultra-deep absolute noise; keep last 3 segments.
   const parts = dir.split('/').filter(Boolean);
   if (parts.length > 3 && dir.startsWith('/')) dir = parts.slice(-3).join('/');

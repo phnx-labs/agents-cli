@@ -301,7 +301,7 @@ const TICKET_BRANCH_RE = /(?:^|[/_-])([a-z]{2,6})-(\d{2,6})(?=[/_-]|$)/;
 const TICKET_DENYLIST = new Set(['UTF', 'SHA', 'ISO', 'RFC', 'IPV', 'X86', 'ARM', 'MP', 'H']);
 
 const PR_URL_RE = /https:\/\/github\.com\/[^\s"'()<>]+\/pull\/(\d+)/;
-const WORKTREE_RE = /\/\.agents\/worktrees\/([^/]+)/;
+export const WORKTREE_RE = /\/\.agents\/worktrees\/([^/]+)/;
 /** gh invocations that create/open a PR. */
 const GH_PR_CREATE_RE = /\bgh\s+pr\s+(?:create|new)\b/;
 /** gh invocation that opens an issue — the created number is read from its result. */
