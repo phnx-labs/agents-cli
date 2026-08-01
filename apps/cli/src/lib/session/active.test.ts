@@ -2,8 +2,9 @@ import { describe, it, expect, afterAll } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { resolveCwds, LSOF_CONCURRENCY, agentKindFromComm, activeStatusFromCloudStatus, resolveFallbackStatus, resolvePaneIdentity } from './active.js';
+import { resolveCwds, LSOF_CONCURRENCY, agentKindFromComm, activeStatusFromCloudStatus, resolveFallbackStatus, resolvePaneIdentity, matchOriginDevice } from './active.js';
 import type { HookSessionIndex } from './hook-sessions.js';
+import type { DeviceProfile, DeviceRegistry } from '../devices/registry.js';
 
 describe('resolvePaneIdentity (per-pane attribution for the authoritative tmux source)', () => {
   const emptyHook = (): HookSessionIndex => ({ byLaunchId: new Map(), byTerminalId: new Map(), byPid: new Map() });
@@ -171,5 +172,43 @@ describe('resolveCwds', () => {
     };
     const cwds = await resolveCwds(pids, probe);
     expect(cwds).toEqual(['cwd-5', 'cwd-4', 'cwd-3', 'cwd-2', 'cwd-1']);
+  });
+});
+
+describe('matchOriginDevice (resolve an ssh client IP to the initiating device)', () => {
+  const device = (name: string, over: Partial<DeviceProfile> = {}): DeviceProfile => ({
+    name,
+    platform: 'macos',
+    shell: 'posix',
+    address: { via: 'tailscale', ip: '100.0.0.1', dnsName: `${name}.tailnet.ts.net` },
+    auth: { method: 'key' },
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    ...over,
+  });
+
+  const reg: DeviceRegistry = {
+    zion: device('zion', { user: 'muqsit', address: { via: 'tailscale', ip: '100.126.152.114', dnsName: 'zion.tailnet.ts.net' } }),
+    'yosemite-s0': device('yosemite-s0', { address: { via: 'tailscale', ip: '100.125.135.113' } }),
+    // A manually-added device with no resolvable IP must never match.
+    'no-ip': device('no-ip', { address: { via: 'manual' } }),
+  };
+
+  it('resolves a client IP to its device + ssh login user', () => {
+    expect(matchOriginDevice('100.126.152.114', reg)).toEqual({ device: 'zion', user: 'muqsit' });
+  });
+
+  it('omits user when the device has none', () => {
+    expect(matchOriginDevice('100.125.135.113', reg)).toEqual({ device: 'yosemite-s0' });
+  });
+
+  it('returns undefined for an IP that matches no device', () => {
+    expect(matchOriginDevice('10.0.0.99', reg)).toBeUndefined();
+  });
+
+  it('skips a device that has no IP address', () => {
+    // '' would falsely match a device whose address.ip is undefined if the guard
+    // were missing; assert the no-ip device is never returned.
+    expect(matchOriginDevice('', reg)).toBeUndefined();
   });
 });
