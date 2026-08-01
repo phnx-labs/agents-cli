@@ -39,8 +39,23 @@ import {
   jobRunsOnThisDevice,
   checkJobDeviceEligibility,
   normalizeTriggerEvent,
+  parseHostStrategy,
+  resolveHostStrategy,
+  placementRequiresFiringPin,
+  HOST_STRATEGIES,
 } from '../lib/routines.js';
-import type { JobConfig, JobTrigger, LinearTriggerEvent, RunMeta } from '../lib/routines.js';
+import type { JobConfig, JobTrigger, LinearTriggerEvent, RunMeta, HostStrategy } from '../lib/routines.js';
+import {
+  discoverProjectRoutinesAt,
+  enableProjectRoutines,
+  disableProjectRoutines,
+  syncProjectRoutines,
+  syncAllProjectRoutines,
+  listEnabledProjectRoots,
+  resolveProjectRoot,
+  displayProjectPath,
+  listProjectRoutineFiles,
+} from '../lib/routines-project.js';
 import { fireWebhookJobs, matchJobsToWebhook, type IncomingWebhook, type WebhookSource } from '../lib/triggers/webhook.js';
 import { getRoutinesDir } from '../lib/state.js';
 import { IS_WINDOWS } from '../lib/platform/index.js';
@@ -146,6 +161,31 @@ function ensureSchedulerRunning(opts: { quiet?: boolean; stderr?: boolean } = {}
 
 function writeJson(payload: unknown): void {
   process.stdout.write(JSON.stringify(payload) + '\n');
+}
+
+function printSyncResult(sync: {
+  projectRoot: string;
+  synced: string[];
+  skipped: Array<{ name: string; reason: string }>;
+  removed: string[];
+  errors: Array<{ name: string; error: string }>;
+}): void {
+  console.log(chalk.bold(displayProjectPath(sync.projectRoot)));
+  if (sync.synced.length === 0 && sync.skipped.length === 0 && sync.removed.length === 0 && sync.errors.length === 0) {
+    console.log(chalk.gray('  (no project routines)'));
+  }
+  if (sync.synced.length > 0) {
+    console.log(chalk.green(`  synced: ${sync.synced.join(', ')}`));
+  }
+  if (sync.removed.length > 0) {
+    console.log(chalk.gray(`  removed: ${sync.removed.join(', ')}`));
+  }
+  for (const s of sync.skipped) {
+    console.log(chalk.yellow(`  skipped ${s.name}: ${s.reason}`));
+  }
+  for (const e of sync.errors) {
+    console.log(chalk.red(`  error ${e.name}: ${e.error}`));
+  }
 }
 
 function runMetaJson(run: RunMeta): Record<string, unknown> {
@@ -266,6 +306,14 @@ export function registerRoutinesCommands(program: Command): void {
       # Create from YAML (for complex routines with multiple settings)
       agents routines add weekly-report.yml
 
+      # Place the job body on a fleet device / cloud / named host (not --host)
+      agents routines add drain --schedule "0 3 * * *" --agent claude --placement fleet --prompt "Drain queue"
+      agents routines add review --schedule "0 9 * * 1" --agent claude --placement cloud --prompt "Review open PRs"
+
+      # Opt a project's .agents/routines/*.yml into daemon firing (never auto)
+      agents routines enable-project --yes
+      agents routines sync
+
       # List all routines and their next run times
       agents routines list
 
@@ -355,6 +403,10 @@ export function registerRoutinesCommands(program: Command): void {
             timezone: job.timezone ?? null,
             devices: job.devices ?? [],
             host: job.host ?? null,
+            hostStrategy: resolveHostStrategy(job),
+            source: job.source ?? null,
+            sourceRepo: job.source?.repo ?? job.repo ?? null,
+            sourceBranch: job.source?.branch ?? null,
             runsHere: jobRunsOnThisDevice(job),
             enabled: job.enabled,
             overdue: overdueSet.has(job.name),
@@ -409,7 +461,12 @@ export function registerRoutinesCommands(program: Command): void {
         const latestRun = getLatestRun(job.name);
         const lastStatus = latestRun?.status || '-';
 
-        const repoInfo = formatRepoLink(job.repo);
+        // Prefer project-source repo (with optional @branch) over bare job.repo.
+        const sourceRepo = job.source?.repo ?? job.repo;
+        const sourceLabel = sourceRepo
+          ? (job.source?.branch ? `${sourceRepo}@${job.source.branch}` : sourceRepo)
+          : null;
+        const repoInfo = formatRepoLink(sourceLabel ?? job.repo);
         const repoCell = link(repoInfo.display, repoInfo.href);
         // Pad based on the display string, not the raw cell (which may include escape codes).
         const repoPadding = Math.max(0, REPO_W - repoInfo.display.length);
@@ -419,8 +476,16 @@ export function registerRoutinesCommands(program: Command): void {
         const enabledWord = job.enabled ? 'yes' : 'no';
         const enabledPad = Math.max(0, ENABLED_W - enabledWord.length);
 
-        // Placement (`→host`) rides in the Devices cell: eligibility →execution.
-        const deviceFull = [job.devices?.join(',') ?? '', job.host ? `→${job.host}` : '']
+        // Placement rides in the Devices cell: eligibility →execution strategy.
+        const strategy = resolveHostStrategy(job);
+        const placementTag = strategy === 'local'
+          ? (job.host ? `→${job.host}` : '')
+          : strategy === 'host'
+            ? `→${job.host ?? '?'}`
+            : strategy === 'fleet'
+              ? '→fleet'
+              : '→cloud';
+        const deviceFull = [job.devices?.join(',') ?? '', placementTag]
           .filter(Boolean)
           .join(' ');
         const deviceWord = deviceFull.length === 0
@@ -475,7 +540,8 @@ export function registerRoutinesCommands(program: Command): void {
     .option('-t, --timeout <timeout>', 'Kill the agent if it runs longer than this (e.g., 10m, 2h, 3d, 1w; max 1w)', '10m')
     .option('--timezone <tz>', 'Interpret schedule in this timezone (e.g., America/Los_Angeles)')
     .option('--devices <names>', 'Fleet allowlist (comma-separated): only listed devices schedule and fire this routine. Omit for unrestricted.')
-    .option('--run-on <name>', 'Execute the job body on this machine over SSH (a registered host, device, capability tag, or user@host). Placement, not eligibility — see --devices. Auto-pins devices to THIS machine unless --devices is given.')
+    .option('--run-on <name>', 'Execute the job body on this machine over SSH (a registered host, device, capability tag, or user@host). Sets hostStrategy=host. Placement, not eligibility — see --devices. Auto-pins devices to THIS machine unless --devices is given.')
+    .option('--placement <strategy>', `Where the job body runs: ${HOST_STRATEGIES.join('|')} (default: local, or host when --run-on is set). Not the same as --host (which manages routines on a remote machine).`)
     .option('--run-cwd <dir>', 'Working directory on the --run-on host (--remote-cwd is taken by the remote-management passthrough)')
     .option('--at <time>', 'One-shot mode: run once at this time (e.g., "14:30" or "2026-02-24 09:00"), then disable')
     .option('--on <source:event>', 'Webhook trigger instead of/in addition to a schedule: github:pull_request or linear:Issue')
@@ -550,12 +616,30 @@ export function registerRoutinesCommands(program: Command): void {
           devices = await parseAndValidateDevices(options.devices);
         }
 
-        // --run-on without a --devices pin would fire on EVERY daemon in the
-        // fleet, each dispatching to the same host — duplicate runs. Pin to
-        // this machine unless the user chose an explicit eligibility set.
-        if (options.runOn && !devices) {
+        let hostStrategy: HostStrategy | undefined;
+        try {
+          hostStrategy = parseHostStrategy(options.placement) ?? undefined;
+        } catch (err) {
+          console.error(chalk.red((err as Error).message));
+          process.exit(1);
+        }
+        // --run-on implies host strategy when the user didn't pick one.
+        if (options.runOn && !hostStrategy) hostStrategy = 'host';
+        if (hostStrategy === 'host' && !options.runOn) {
+          console.error(chalk.red('--placement host requires --run-on <name>'));
+          process.exit(1);
+        }
+
+        // Off-box placement without a --devices pin would fire on EVERY daemon
+        // in the fleet, each dispatching once — duplicate runs (RUSH-1980).
+        // Pin to this machine unless the user chose an explicit eligibility set.
+        const strategyForPin: HostStrategy = hostStrategy
+          ?? (options.runOn ? 'host' : 'local');
+        if (placementRequiresFiringPin(strategyForPin) && !devices) {
           devices = [machineId()];
-          console.error(chalk.gray(`--run-on set with no --devices: pinned firing to this machine (${devices[0]}).`));
+          console.error(chalk.gray(
+            `--placement ${strategyForPin} with no --devices: pinned firing to this machine (${devices[0]}).`,
+          ));
         }
 
         const config: JobConfig = {
@@ -573,6 +657,7 @@ export function registerRoutinesCommands(program: Command): void {
           timezone: options.timezone,
           ...(devices ? { devices } : {}),
           ...(options.runOn ? { host: options.runOn } : {}),
+          ...(hostStrategy ? { hostStrategy } : {}),
           ...(options.runCwd ? { remoteCwd: options.runCwd } : {}),
           ...(runOnce ? { runOnce: true } : {}),
           ...(options.endAt ? { endAt: options.endAt } : {}),
@@ -654,11 +739,14 @@ export function registerRoutinesCommands(program: Command): void {
           ...parsed,
         } as JobConfig;
 
-        // Same duplicate-fire guard as the --run-on flag: a host-placed routine
+        // Same duplicate-fire guard as --placement/--run-on: off-box placement
         // with no eligibility pin would fire from every daemon in the fleet.
-        if (config.host && (!config.devices || config.devices.length === 0)) {
+        const fileStrategy = resolveHostStrategy(config);
+        if (placementRequiresFiringPin(fileStrategy) && (!config.devices || config.devices.length === 0)) {
           config.devices = [machineId()];
-          console.error(chalk.gray(`host: set with no devices pin: pinned firing to this machine (${config.devices[0]}).`));
+          console.error(chalk.gray(
+            `${fileStrategy} placement with no devices pin: pinned firing to this machine (${config.devices[0]}).`,
+          ));
         }
 
         writeJob(config);
@@ -1347,6 +1435,191 @@ export function registerRoutinesCommands(program: Command): void {
       } else if (!status.running && jobs.length > 0) {
         console.log(chalk.gray('\n  Start the scheduler to begin firing routines: agents routines start'));
       }
+    });
+
+  routinesCmd
+    .command('enable-project [path]')
+    .description('Opt a project\'s .agents/routines/*.yml into daemon firing. Requires explicit approval — project routines never auto-fire from a cloned repo. Materialises copies into ~/.agents/routines/ with source provenance.')
+    .option('--yes', 'Skip the interactive confirmation prompt')
+    .option('--json', 'Emit machine-readable JSON')
+    .action(async (projectPath: string | undefined, options: { yes?: boolean; json?: boolean }) => {
+      const root = projectPath
+        ? path.resolve(projectPath)
+        : resolveProjectRoot(process.cwd());
+      if (!root) {
+        console.error(chalk.red('No project .agents/ directory found from the current directory.'));
+        console.error(chalk.gray('Run from inside a project, or pass the project path: agents routines enable-project /path/to/repo'));
+        process.exit(1);
+      }
+      const files = listProjectRoutineFiles(root);
+      if (files.length === 0) {
+        console.error(chalk.red(`No routines found under ${path.join(root, '.agents', 'routines')}`));
+        process.exit(1);
+      }
+
+      if (!options.yes && !options.json) {
+        if (!isInteractiveTerminal()) {
+          console.error(chalk.red('Refusing to enable project routines non-interactively without --yes.'));
+          console.error(chalk.gray(`Found ${files.length} routine(s) in ${displayProjectPath(root)}. Re-run with --yes to confirm.`));
+          process.exit(1);
+        }
+        try {
+          const { confirm } = await import('@inquirer/prompts');
+          const ok = await confirm({
+            message: `Enable daemon firing for ${files.length} project routine(s) in ${displayProjectPath(root)}?`,
+            default: false,
+          });
+          if (!ok) {
+            console.log(chalk.gray('Cancelled'));
+            return;
+          }
+        } catch (err) {
+          if (isPromptCancelled(err)) {
+            console.log(chalk.gray('Cancelled'));
+            return;
+          }
+          throw err;
+        }
+      }
+
+      const newly = enableProjectRoutines(root);
+      const sync = syncProjectRoutines(root);
+      if (isDaemonRunning()) signalDaemonReload();
+
+      if (options.json) {
+        writeJson({
+          ok: true,
+          projectRoot: root,
+          newlyEnabled: newly,
+          synced: sync.synced,
+          skipped: sync.skipped,
+          removed: sync.removed,
+          errors: sync.errors,
+        });
+        return;
+      }
+
+      console.log(chalk.green(
+        newly
+          ? `Enabled project routines for ${displayProjectPath(root)}`
+          : `Project routines already enabled for ${displayProjectPath(root)}`,
+      ));
+      if (sync.synced.length > 0) {
+        console.log(chalk.gray(`  Synced: ${sync.synced.join(', ')}`));
+      }
+      for (const s of sync.skipped) {
+        console.log(chalk.yellow(`  Skipped ${s.name}: ${s.reason}`));
+      }
+      for (const e of sync.errors) {
+        console.log(chalk.red(`  Error ${e.name}: ${e.error}`));
+      }
+      console.log(chalk.gray('Daemon will fire these after reload. Re-sync later with: agents routines sync'));
+    });
+
+  routinesCmd
+    .command('disable-project [path]')
+    .description('Remove a project from the project-routines allowlist. Use --remove-synced to also delete the user-layer copies.')
+    .option('--remove-synced', 'Delete user-layer routines that were materialised from this project')
+    .option('--json', 'Emit machine-readable JSON')
+    .action(async (projectPath: string | undefined, options: { removeSynced?: boolean; json?: boolean }) => {
+      const root = projectPath
+        ? path.resolve(projectPath)
+        : resolveProjectRoot(process.cwd());
+      if (!root) {
+        console.error(chalk.red('No project .agents/ directory found from the current directory.'));
+        process.exit(1);
+      }
+      const result = disableProjectRoutines(root, { removeSynced: options.removeSynced });
+      if (isDaemonRunning()) signalDaemonReload();
+      if (options.json) {
+        writeJson({ ok: true, projectRoot: root, ...result });
+        return;
+      }
+      if (!result.removed) {
+        console.log(chalk.gray(`Project ${displayProjectPath(root)} was not on the allowlist`));
+      } else {
+        console.log(chalk.green(`Disabled project routines for ${displayProjectPath(root)}`));
+      }
+      if (result.deletedJobs.length > 0) {
+        console.log(chalk.gray(`  Removed user-layer copies: ${result.deletedJobs.join(', ')}`));
+      }
+    });
+
+  routinesCmd
+    .command('sync [path]')
+    .description('Refresh user-layer copies of opted-in project routines from their .agents/routines/*.yml sources. With no path, syncs every enabled project. Also runs automatically on daemon reload (SIGHUP).')
+    .option('--json', 'Emit machine-readable JSON')
+    .action(async (projectPath: string | undefined, options: { json?: boolean }) => {
+      if (projectPath) {
+        const root = path.resolve(projectPath);
+        const isEnabled = listEnabledProjectRoots().some((p) => p === root);
+        if (!isEnabled) {
+          console.error(chalk.red(
+            `Project ${displayProjectPath(root)} is not enabled. Run: agents routines enable-project ${root}`,
+          ));
+          process.exit(1);
+        }
+        const sync = syncProjectRoutines(root);
+        if (isDaemonRunning()) signalDaemonReload();
+        if (options.json) {
+          writeJson({ ok: true, ...sync });
+          return;
+        }
+        printSyncResult(sync);
+        return;
+      }
+
+      const all = syncAllProjectRoutines();
+      if (isDaemonRunning()) signalDaemonReload();
+      if (options.json) {
+        writeJson({ ok: true, ...all });
+        return;
+      }
+      if (all.projects.length === 0 && all.missing.length === 0) {
+        console.log(chalk.gray('No project roots on the routines allowlist.'));
+        console.log(chalk.gray('  Enable one with: agents routines enable-project'));
+        return;
+      }
+      for (const p of all.projects) printSyncResult(p);
+      for (const m of all.missing) {
+        console.log(chalk.yellow(`Missing project root (still on allowlist): ${displayProjectPath(m)}`));
+      }
+    });
+
+  routinesCmd
+    .command('projects')
+    .description('List project roots opted into daemon-fired project routines')
+    .option('--json', 'Emit machine-readable JSON')
+    .action((options: { json?: boolean }) => {
+      const roots = listEnabledProjectRoots();
+      if (options.json) {
+        writeJson(roots.map((r) => ({
+          path: r,
+          display: displayProjectPath(r),
+          routines: listProjectRoutineFiles(r).map((f) => f.name),
+        })));
+        return;
+      }
+      if (roots.length === 0) {
+        console.log(chalk.gray('No projects enabled. Use: agents routines enable-project'));
+        // Offer a discovery hint for the current project.
+        const discovered = discoverProjectRoutinesAt(process.cwd());
+        if (discovered) {
+          console.log(chalk.gray(
+            `  Found ${discovered.files.length} routine(s) in ${displayProjectPath(discovered.projectRoot)} — enable with: agents routines enable-project`,
+          ));
+        }
+        return;
+      }
+      console.log(chalk.bold('Enabled project routines\n'));
+      for (const r of roots) {
+        const files = listProjectRoutineFiles(r);
+        console.log(`  ${chalk.cyan(displayProjectPath(r))}  ${chalk.gray(`(${files.length} routine${files.length === 1 ? '' : 's'})`)}`);
+        for (const f of files) {
+          console.log(chalk.gray(`    - ${f.name}`));
+        }
+      }
+      console.log();
     });
 
   routinesCmd
