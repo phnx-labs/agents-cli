@@ -422,8 +422,18 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
   // iterations share one inbox.
   if (options.sessionId && isValidMailboxId(options.sessionId)) {
     result.AGENTS_MAILBOX_DIR = mailboxDir(options.sessionId);
+    // Full session id for agent-callable tools (`agents feed post`, etc.).
+    result.AGENT_SESSION_ID = options.sessionId;
+    result.AGENTS_SESSION_ID = options.sessionId;
   }
   result.AGENTS_RUNTIME = resolveInteractive(options) ? 'terminal' : 'headless';
+  // So activity / feed posts stamp the right harness without re-detecting.
+  if (options.agent) {
+    result.AGENTS_AGENT_NAME = options.agent;
+  }
+  if (options.cwd) {
+    result.AGENTS_CWD = options.cwd;
+  }
 
   // Export the run's durable name (companion to AGENT_SESSION_ID) so a
   // SessionStart hook / the agent can associate its transcript with the handle

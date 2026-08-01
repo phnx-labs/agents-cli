@@ -1,6 +1,7 @@
 /**
- * `agents feed` -- list open blocks (decisions agents are waiting on).
+ * `agents feed` -- operator inbox + agent status posts.
  *
+ * Default (`agents feed`): list open blocks (decisions agents are waiting on).
  * Aggregates block records from the local feed store and, with --host, from
  * reachable remote hosts via SSH passthrough. Each block carries enough
  * identity for `agents message` to route a reply back to the right agent.
@@ -8,11 +9,17 @@
  * Default view groups by **outcome** (ticket / PR / worktree / Unassigned) so
  * an operator sees dozens of deliverables, not ~1,100 agents. Pass `--flat`
  * for the legacy per-agent list.
+ *
+ * `agents feed post`: agent-callable free-text progress into the activity
+ * stream (milestone `status.posted`). Session/agent/host/runtime/pid identity
+ * is auto-stamped from env + the pid registry — no domain-specific flags.
+ * Humans watch via the feed activity lane / `agents activity`.
  */
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { ensureFeedPublishHook, listAskStats, listBlocks, recordNotified, type OpenBlock } from '../lib/feed.js';
 import { ensureActivityLogHook, readRecentActivity, formatActivityLine } from '../lib/activity.js';
+import { postFeedStatus } from '../lib/feed-post.js';
 import {
   enrichBlocksFromSessions,
   groupBlocksByOutcome,
@@ -274,9 +281,9 @@ export function sessionHintsFromActive(
 }
 
 export function registerFeedCommand(program: Command): void {
-  program
+  const feed = program
     .command('feed')
-    .description('List open blocks -- decisions agents are waiting on (grouped by outcome)')
+    .description('Open blocks (needs you) + agent status posts (feed post)')
     .option('--json', 'Output as JSON (each block stamped with its outcome + ask class)')
     .option('--flat', 'List one block per agent instead of grouping by outcome')
     .option('--all', 'Include stalls/FYIs that policy would suppress (default: hide them)')
@@ -285,8 +292,55 @@ export function registerFeedCommand(program: Command): void {
     .option('--device <target...>', 'Alias for --host; repeatable')
     .option('--dispatch', 'Run stall suppression + default-on-no-answer policy and urgent notifications')
     .option('--pause <id>', 'Pause a runaway/needy local process (SIGSTOP) or cancel a cloud task')
-    .option('--kill <id>', 'Kill a runaway/needy local process (SIGTERM) or cancel a cloud task')
-    .action(async (opts: {
+    .option('--kill <id>', 'Kill a runaway/needy local process (SIGTERM) or cancel a cloud task');
+
+  feed
+    .command('post')
+    .description('Post a status update to the fleet activity stream (for agents)')
+    .argument('<text...>', 'What just happened — one short human line')
+    .option('--session <id>', 'Session id escape hatch (default: auto from env / pid registry)')
+    .option('--json', 'Emit the written event as JSON')
+    .addHelpText('after', `
+Examples:
+  # Inside an agents-cli run (session identity is already in the env):
+  agents feed post "CHANGELOG pushed; watching CI and mac-mini E2E"
+  agents feed post "ready for review" --json
+
+  # Outside a run, pass the session explicitly:
+  agents feed post "manual note" --session 00998b0e-2d15-4d2f-a58b-974a886c9b47
+
+Identity (session, agent, host, runtime, pid, launchId) is stamped automatically.
+Domain facts (tickets, PRs) are not CLI flags — join them on the session at read time.
+`)
+    .action((
+      textParts: string[],
+      opts: { session?: string; json?: boolean },
+      cmd?: { opts: () => { session?: string; json?: boolean }; parent?: { opts: () => { json?: boolean } } },
+    ) => {
+      // Parent `feed` also declares `--json` (for the list view). Commander
+      // binds the flag on the parent, so a `feed post … --json` lands on
+      // parent.opts().json — not the child. Read both.
+      const flags = {
+        session: opts?.session ?? cmd?.opts?.()?.session,
+        json: Boolean(opts?.json ?? cmd?.opts?.()?.json ?? cmd?.parent?.opts?.()?.json),
+      };
+      try {
+        const { event } = postFeedStatus({
+          text: Array.isArray(textParts) ? textParts.join(' ') : String(textParts ?? ''),
+          sessionId: flags.session,
+        });
+        if (flags.json) {
+          console.log(JSON.stringify(event, null, 2));
+          return;
+        }
+        console.log(formatActivityLine(event, { showHost: true }).trimStart());
+      } catch (err) {
+        console.error(chalk.red((err as Error).message));
+        process.exitCode = 1;
+      }
+    });
+
+  feed.action(async (opts: {
       json?: boolean;
       flat?: boolean;
       all?: boolean;

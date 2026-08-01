@@ -131,6 +131,7 @@ export type EventType =
   | 'pushed'
   | 'subagent.spawned'
   | 'artifact.created'
+  | 'status.posted'
   | 'file.edited'
   // Generic
   | 'error'

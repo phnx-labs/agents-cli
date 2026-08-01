@@ -136,11 +136,16 @@ describe('buildExecEnv — AGENTS_MAILBOX_DIR wiring (mailbox loop-closer)', () 
     const sid = '96aa7271-0c8f-4ed7-8811-1ad1d305e46e';
     const env = buildExecEnv(execOpts({ agent: 'claude', sessionId: sid }));
     expect(env.AGENTS_MAILBOX_DIR).toBe(mailboxDir(sid));
+    // Session id is exported so agent tools (`agents feed post`) auto-attribute.
+    expect(env.AGENT_SESSION_ID).toBe(sid);
+    expect(env.AGENTS_SESSION_ID).toBe(sid);
+    expect(env.AGENTS_AGENT_NAME).toBe('claude');
   });
 
   it('sets nothing when there is no session id (nothing to key a box on)', () => {
     const env = buildExecEnv(execOpts({ agent: 'claude' }));
     expect(env.AGENTS_MAILBOX_DIR).toBeUndefined();
+    expect(env.AGENT_SESSION_ID).toBeUndefined();
   });
 
   it('lets a caller override the box via options.env (how the loop pins the run-level box)', () => {

@@ -80,8 +80,38 @@ describe('activity log store (TS)', () => {
   it('classifies tiers correctly', () => {
     expect(tierForEvent('pr.opened')).toBe('milestone');
     expect(tierForEvent('subagent.spawned')).toBe('milestone');
+    expect(tierForEvent('status.posted')).toBe('milestone');
     expect(tierForEvent('file.edited')).toBe('activity');
     expect(tierForEvent('unknown.thing')).toBe('activity');
+  });
+
+  it('round-trips status.posted identity fields through the activity log', () => {
+    const dir = tmpActivityDir();
+    appendActivityEvent({
+      ts: '2026-07-31T12:00:00.000Z',
+      event: 'status.posted',
+      sessionId: 's-status',
+      mailboxId: 's-status',
+      host: 'zion',
+      runtime: 'teams',
+      agent: 'grok',
+      tool: 'feed.post',
+      detail: 'halfway',
+      pid: 99,
+      launchId: 'L1',
+      tmuxPane: '%2',
+    }, dir);
+    const events = readSessionActivity('s-status', dir);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      event: 'status.posted',
+      tier: 'milestone',
+      detail: 'halfway',
+      pid: 99,
+      launchId: 'L1',
+      tmuxPane: '%2',
+      agent: 'grok',
+    });
   });
 });
 

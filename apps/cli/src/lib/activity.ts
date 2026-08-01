@@ -37,7 +37,9 @@ export type MilestoneEvent =
   | 'commit.created'
   | 'pushed'
   | 'subagent.spawned'
-  | 'artifact.created';
+  | 'artifact.created'
+  /** Deliberate agent-authored progress post (`agents feed post`). */
+  | 'status.posted';
 
 /** Routine activity events, collapsed to counts by readers. */
 export type ActivityKind = 'file.edited';
@@ -57,6 +59,7 @@ export const MILESTONE_EVENTS: readonly MilestoneEvent[] = [
   'pushed',
   'subagent.spawned',
   'artifact.created',
+  'status.posted',
 ];
 
 const MILESTONE_SET = new Set<string>(MILESTONE_EVENTS);
@@ -86,12 +89,20 @@ export interface ActivityEvent {
   cwd?: string;
   /** Agent that produced the event (claude, codex, ...). */
   agent?: string;
-  /** Tool that triggered the event (Bash, Task, ExitPlanMode, ...). */
+  /** Tool that triggered the event (Bash, Task, ExitPlanMode, feed.post, ...). */
   tool?: string;
-  /** One-line human summary (plan title, PR command, sub-agent role). */
+  /** One-line human summary (plan title, PR command, sub-agent role, status text). */
   detail?: string;
   /** Extracted URL when the event has one (e.g. the opened PR). */
   url?: string;
+  /** Auto-stamped process identity for deliberate posts (from pid registry / env). */
+  pid?: number;
+  /** Spawn-time join key (`AGENT_LAUNCH_ID`) when known. */
+  launchId?: string;
+  /** Factory terminal id when the launch inherited one. */
+  terminalId?: string;
+  /** `$TMUX_PANE` at launch when recorded. */
+  tmuxPane?: string;
 }
 
 function activityPath(root: string, sessionId: string): string {
@@ -139,6 +150,10 @@ function parseLine(line: string): ActivityEvent | undefined {
       tool: parsed.tool,
       detail: parsed.detail,
       url: parsed.url,
+      pid: typeof parsed.pid === 'number' ? parsed.pid : undefined,
+      launchId: parsed.launchId,
+      terminalId: parsed.terminalId,
+      tmuxPane: parsed.tmuxPane,
     };
   } catch {
     return undefined; // skip corrupt / partial lines (fail-open reader)
@@ -267,11 +282,11 @@ export function activityEventToRecord(ev: ActivityEvent): EventRecord {
     hostname: ev.host,
     platform: process.platform,
     arch: process.arch,
-    pid: 0,
+    pid: ev.pid ?? 0,
     ppid: 0,
     event: ev.event as EventRecord['event'],
     level: 'info',
-    caller: 'hook',
+    caller: ev.tool === 'feed.post' ? 'agent' : 'hook',
     session: ev.sessionId,
     osUser: ev.agent ?? 'agent',
     transport: 'local',
@@ -284,6 +299,9 @@ export function activityEventToRecord(ev: ActivityEvent): EventRecord {
     detail: ev.detail,
     url: ev.url,
     tier: ev.tier,
+    ...(ev.launchId ? { launchId: ev.launchId } : {}),
+    ...(ev.terminalId ? { terminalId: ev.terminalId } : {}),
+    ...(ev.tmuxPane ? { tmuxPane: ev.tmuxPane } : {}),
   } as EventRecord;
 }
 
@@ -307,6 +325,7 @@ export const EVENT_STYLE: Record<string, { glyph: string; color: (s: string) => 
   'pushed': { glyph: '↥', color: chalk.yellow, label: 'pushed' },
   'subagent.spawned': { glyph: '⑂', color: chalk.magenta, label: 'sub-agent spawned' },
   'artifact.created': { glyph: '▤', color: chalk.cyan, label: 'artifact' },
+  'status.posted': { glyph: '▸', color: chalk.white, label: 'status' },
   'file.edited': { glyph: '·', color: chalk.gray, label: 'file edited' },
 };
 
@@ -319,10 +338,13 @@ export function formatActivityLine(ev: ActivityEvent, opts: { showHost?: boolean
   const s = styleForEvent(ev.event);
   const host = opts.showHost && ev.host && ev.host !== 'unknown' ? chalk.gray(`[${ev.host}] `) : '';
   const label = s.color(`${s.glyph} ${s.label}`);
-  const detail = ev.detail ? ` ${truncate(ev.detail, 60)}` : '';
+  // Status posts are the message; allow a longer snippet than tool-derived detail.
+  const detailLimit = ev.event === 'status.posted' ? 100 : 60;
+  const detail = ev.detail ? ` ${truncate(ev.detail, detailLimit)}` : '';
   const url = ev.url ? chalk.gray(` ${ev.url}`) : '';
+  const agent = ev.event === 'status.posted' && ev.agent ? chalk.gray(` · ${ev.agent}`) : '';
   const when = chalk.gray(relTime(ev.ts).padStart(7));
-  return `  ${when}  ${host}${label}${detail}${url}`;
+  return `  ${when}  ${host}${label}${detail}${agent}${url}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -362,7 +384,7 @@ MAX_LOG_BYTES = 5 * 1024 * 1024  # cap a pathological session's log
 MILESTONE_EVENTS = {
     "plan.created", "pr.opened", "pr.merged", "worktree.created",
     "worktree.removed", "commit.created", "pushed", "subagent.spawned",
-    "artifact.created",
+    "artifact.created", "status.posted",
 }
 
 # Deliverable file types + locations -- a Write here is a recognizable artifact

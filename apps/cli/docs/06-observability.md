@@ -305,6 +305,32 @@ agents feed --pause <id>   # SIGSTOP a local process; cloud tasks are cancelled
 agents feed --kill <id>    # SIGTERM a local process; cloud tasks are cancelled
 ```
 
+### Status posts (`agents feed post`) — agent progress, not “needs you”
+
+Agents can deliberately announce progress without opening a feed block. The
+command is free-text and domain-agnostic; session/agent/host/runtime/pid
+identity is stamped automatically from the process env and the per-pid launch
+registry (`lib/session/pid-registry.ts`).
+
+```bash
+# Inside an agents-cli run (AGENT_SESSION_ID / AGENTS_MAILBOX_DIR already set):
+agents feed post "CHANGELOG pushed; watching CI and mac-mini E2E"
+agents feed post "ready for review" --json
+
+# Escape hatch when not in a managed run:
+agents feed post "note" --session <session-id>
+```
+
+Each post appends a `status.posted` **milestone** to
+`~/.agents/.history/activity/<sessionId>.jsonl` — the same activity stream
+`agents activity` and the feed’s recent-activity lane already read. It does
+**not** create a feed block. Domain facts (tickets, PRs) are not CLI flags;
+join them from the session index / live session enrichment at read time.
+
+Identity resolution order: `--session` → `AGENT_SESSION_ID` /
+`AGENTS_SESSION_ID` / mailbox basename → `AGENT_LAUNCH_ID` match in the pid
+registry → parent-pid walk through `by-pid/<pid>.json`.
+
 ### Live tail (`--watch`, `-f`) — the money shot
 
 ```bash
