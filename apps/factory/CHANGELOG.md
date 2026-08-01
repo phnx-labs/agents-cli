@@ -6,6 +6,25 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **A dropped SSH connection no longer destroys running agents (reconnect
+  resilience).** Agents run in detached tmux sessions on the shared socket, so
+  they survive a network drop — but on a Remote-SSH teardown VS Code fires
+  `onDidCloseTerminal` for every editor terminal, and the old cleanup
+  unconditionally ran `agents tmux kill`, killing healthy agents just because
+  the client blinked. `cleanupTmuxTerminal` now queries the shared server first
+  and kills ONLY on a true agent exit (session gone or every pane dead); a live
+  pane is treated as a client/network detach and left alive for re-attach. The
+  terminal↔tmux mapping (session/socket/pane/pid) is persisted so it survives an
+  extension reload, and on reconnect (window regains focus, or the extension
+  reactivates) every mapped session that is still live but has no attached
+  client is re-attached via `agents tmux attach` — never a new session, so the
+  agent is never restarted — with bounded-backoff retry on transient SSH
+  failures. The Factory Floor grid re-arms its polling on reconnect so it no
+  longer looks frozen. Source: `apps/factory/src/vscode/tmux.ts`,
+  `apps/factory/src/vscode/reconnect.ts`, `apps/factory/src/vscode/extension.ts`,
+  `apps/factory/src/core/sessions.persist.ts`,
+  `apps/factory/src/vscode/settings.vscode.ts`.
+
 - **agents-dbg now has a 0.1.0 Mac release pipeline (RUSH-1015).** The standalone
   Electron app packages as `agents-dbg.app` with the `com.phnxlabs.agents-dbg`
   bundle id, hardened-runtime entitlements, Developer ID signing, and
