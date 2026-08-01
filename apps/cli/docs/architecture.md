@@ -95,7 +95,11 @@ sequenceDiagram
 - **CLI pid-registry — `terminals/by-pid/<pid>.json`.** Written by `ag run` / the
   shim at spawn ([`src/lib/session/pid-registry.ts`](../src/lib/session/pid-registry.ts),
   `writePidSessionEntry`, interface `PidSessionEntry`). Immediate, but covers only
-  launches **we** make, and the id is exact only when known at launch (see §4).
+  launches **we** make, and the id is exact only when known at launch (see §4). Each
+  entry also records the `$TMUX_PANE` it launched into, which is what lets the
+  authoritative tmux source attribute a pane it did NOT wrap — an agent bare-spawned
+  into a split of an existing session — to its own launch (`resolvePaneIdentity` in
+  `src/lib/session/active.ts`) instead of dropping it to the `ps`-scan fallback.
 - **session-tracker — `terminals/sessions/<pid>.json`.** Written by the polyglot
   `SessionStart` hook after the agent boots
   ([`packages/session-tracker`](../../../packages/session-tracker), `STATE_DIR` in
