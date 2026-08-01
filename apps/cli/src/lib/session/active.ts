@@ -36,6 +36,7 @@ import { computeTokPerSec } from './throughput.js';
 import { inferSessionState, type SessionState, type SessionActivity, type AwaitingReason, type StructuredQuestion, type TodoProgress, type DetectedPr, type DetectedWorktree, type DetectedTicket } from './state.js';
 import type { SessionAttachment } from './types.js';
 import { detectProvenance, type SessionProvenance } from './provenance.js';
+import { presenceFromStore, type Presence } from './detached.js';
 import { mapBounded } from '../concurrency.js';
 
 const execFileAsync = promisify(execFile);
@@ -138,6 +139,16 @@ export interface ActiveSession {
    */
   lastActivityMs?: number;
   status: ActiveStatus;
+  /**
+   * Foreground/background presence for the detach/attach model:
+   *   `attached`   — live interactive TUI you're watching;
+   *   `background` — detached: running headless, unattended (via `agents detach`);
+   *   `parked`     — the headless continuation has exited; the transcript is durable.
+   * Absent for ad-hoc headless runs and cloud/team rows, which aren't on the
+   * foreground/background axis. Folded on at the end of {@link getActiveSessions}
+   * from the detach store — never asserted by a source.
+   */
+  presence?: Presence;
   /** How many live PIDs resolve to this same session (subagents/forks). 1 unless collapsed. */
   pidCount?: number;
   /**
@@ -1258,7 +1269,23 @@ export async function getActiveSessions(opts: ActiveQueryOptions = {}): Promise<
 
   const merged = dedupeBySession([...tmuxAgents, ...teams, ...terminals, ...cloud, ...unattributed]);
   await enrichProvenance(merged);
+  foldPresence(merged);
   return merged;
+}
+
+/**
+ * Fold detach/attach presence onto each row from the detach store. A stored
+ * record wins (`background`/`parked`); otherwise a live terminal session is
+ * `attached`. Ad-hoc headless runs and cloud/team rows stay unmarked — they are
+ * not on the foreground/background axis.
+ */
+function foldPresence(rows: ActiveSession[]): void {
+  for (const s of rows) {
+    if (!s.sessionId) continue;
+    const stored = presenceFromStore(s.sessionId);
+    if (stored) s.presence = stored;
+    else if (s.context === 'terminal') s.presence = 'attached';
+  }
 }
 
 /**
