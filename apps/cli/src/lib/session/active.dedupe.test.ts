@@ -1,0 +1,75 @@
+import { describe, it, expect } from 'vitest';
+import { dedupeBySession } from './active.js';
+import type { ActiveSession } from './active.js';
+
+// Regression for the "Factory Floor is flooded with identical .openclaw rows" bug.
+// An OpenClaw gateway on mac-mini spawns N `codex` worker processes. The process
+// scan (listUnattributedActive) picks each one up, but none carries a session id,
+// transcript file, or cloud handle — so every worker used to skip dedupe entirely
+// and render as its own row: N copies of ".openclaw · bg · 0s ago". At the time
+// this was reported there were ~40 of them, burying every real session.
+
+const worker = (pid: number, cwd = '/Users/muqsit/.agents/openclaw/home/.openclaw'): ActiveSession => ({
+  context: 'headless',
+  kind: 'codex',
+  pid,
+  cwd,
+  status: 'idle',
+} as ActiveSession);
+
+describe('dedupeBySession', () => {
+  it('collapses indistinguishable worker processes into one row with a pidCount', () => {
+    const out = dedupeBySession([worker(1), worker(2), worker(3), worker(4)]);
+
+    expect(out).toHaveLength(1);
+    expect(out[0].pidCount).toBe(4);
+    expect(out[0].pid).toBe(1); // first row wins
+  });
+
+  it('keeps workers in different working directories apart', () => {
+    const out = dedupeBySession([
+      worker(1, '/Users/muqsit/.agents/openclaw/home/.openclaw'),
+      worker(2, '/Users/muqsit/src/github.com/muqsitnawaz'),
+    ]);
+
+    expect(out).toHaveLength(2);
+    expect(out.map((s) => s.pidCount)).toEqual([1, 1]);
+  });
+
+  it('keeps different agent binaries in one directory apart', () => {
+    const a = worker(1);
+    const b = { ...worker(2), kind: 'claude' };
+    expect(dedupeBySession([a, b])).toHaveLength(2);
+  });
+
+  it('still folds fork pids of one real session onto its session id', () => {
+    const forks = [1, 2, 3].map((pid) => ({
+      context: 'terminal',
+      kind: 'claude',
+      pid,
+      sessionId: 'abc-123',
+      cwd: '/repo',
+    })) as ActiveSession[];
+
+    const out = dedupeBySession(forks);
+    expect(out).toHaveLength(1);
+    expect(out[0].pidCount).toBe(3);
+  });
+
+  it('never folds two distinct cloud tasks that share a working directory', () => {
+    const cloud = (id: string): ActiveSession => ({
+      context: 'cloud',
+      kind: 'claude',
+      cwd: '/repo',
+      cloudTaskId: id,
+    } as ActiveSession);
+
+    expect(dedupeBySession([cloud('task-a'), cloud('task-b')])).toHaveLength(2);
+  });
+
+  it('passes through a row with no identity at all rather than folding it', () => {
+    const bare = { context: 'headless', kind: 'codex', pid: 9 } as ActiveSession;
+    const out = dedupeBySession([bare, { ...bare, pid: 10 }]);
+    expect(out).toHaveLength(2);
+  });
+});

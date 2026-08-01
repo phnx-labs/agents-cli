@@ -1189,17 +1189,33 @@ async function enrichProvenance(sessions: ActiveSession[]): Promise<void> {
 }
 
 /**
+ * Identity for a row the scan could not tie to a session: a daemon's worker
+ * processes (an OpenClaw gateway spawning `codex`, a supervisor pool) have no
+ * session id, no transcript file, and no cloud/run handle — nothing tells two of
+ * them apart, because nothing distinguishes them. Same binary + same working
+ * directory + same context IS the identity, so N indistinguishable workers
+ * collapse to one row carrying `pidCount: N`.
+ *
+ * Returns undefined with no cwd: without it there is no stable identity, and
+ * keying on kind alone would fold unrelated agents onto one row.
+ */
+function anonymousWorkerKey(s: ActiveSession): string | undefined {
+  if (!s.cwd) return undefined;
+  return `anon\0${s.kind}\0${s.context}\0${s.cwd}`;
+}
+
+/**
  * Collapse rows that resolve to the *same* session — a session with many
  * subagent/fork PIDs (all matched to one transcript file) would otherwise print
- * dozens of identical rows. Keyed by session id (falling back to the file), the
- * first row wins and carries a `pidCount`. Rows with no session identity (cloud,
- * unresolved headless) pass through untouched.
+ * dozens of identical rows. Keyed by session id, falling back to the transcript
+ * file, then the cloud/run handle, then {@link anonymousWorkerKey}. The first row
+ * wins and carries a `pidCount`.
  */
-function dedupeBySession(sessions: ActiveSession[]): ActiveSession[] {
+export function dedupeBySession(sessions: ActiveSession[]): ActiveSession[] {
   const out: ActiveSession[] = [];
   const byKey = new Map<string, ActiveSession>();
   for (const s of sessions) {
-    const key = s.sessionId || s.sessionFile;
+    const key = s.sessionId || s.sessionFile || s.cloudTaskId || s.agentId || anonymousWorkerKey(s);
     if (!key) { out.push(s); continue; }
     const existing = byKey.get(key);
     if (existing) {
