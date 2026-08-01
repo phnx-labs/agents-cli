@@ -742,6 +742,14 @@ def _claude_task_state(transcript_path, exclude_task_id=None):
             if task_id in state:
                 state[task_id]["status"] = status
 
+    # Drop tasks removed from the checklist (deleted/cancelled): they are gone
+    # from the user-visible list, so they must not count toward the N/M total.
+    for task_id in list(state.keys()):
+        if task_id.startswith("__"):
+            continue
+        if state[task_id].get("status") in ("deleted", "cancelled", "canceled", "removed"):
+            del state[task_id]
+
     # Drop internal bookkeeping.
     state.pop("__pending_subject", None)
     return state

@@ -510,6 +510,42 @@ describe('real activity-log hook (Python)', () => {
     expect(updateEvents[1].detail).toBe('Build the spine 1/1 done');
   });
 
+  it.runIf(hasPython)('excludes deleted tasks from the N/M total on a TaskUpdate completion', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-task-deleted-'));
+    const sessionId = 'sess-task-deleted';
+    const transcript = path.join(home, `${sessionId}.jsonl`);
+    const create = (id: string, subject: string) => [
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: `tc-${id}`, name: 'TaskCreate', input: { subject } }] } }),
+      JSON.stringify({ type: 'user', toolUseResult: { task: { id, subject } }, tool_use_id: `tc-${id}` }),
+    ];
+    const update = (id: string, to: string) => [
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: `tu-${id}-${to}`, name: 'TaskUpdate', input: { taskId: id, status: to } }] } }),
+      JSON.stringify({ type: 'user', toolUseResult: { success: true, taskId: id, statusChange: { from: 'pending', to } }, tool_use_id: `tu-${id}-${to}` }),
+    ];
+    fs.writeFileSync(
+      transcript,
+      [
+        ...create('1', 'A1'), ...create('2', 'A2'), ...create('3', 'A3'),
+        ...update('1', 'completed'),
+        ...update('3', 'deleted'),
+        ...update('2', 'completed'),
+      ].join('\n') + '\n',
+    );
+    runHook(home, {
+      session_id: sessionId,
+      hook_event_name: 'PostToolUse',
+      tool_name: 'TaskUpdate',
+      tool_input: { taskId: '2', status: 'completed' },
+      tool_response: { success: true, taskId: '2', statusChange: { from: 'pending', to: 'completed' } },
+      tool_use_id: 'tu-2-completed',
+      transcript_path: transcript,
+    });
+    const events = readSessionActivity(sessionId, activityDirFor(home));
+    expect(events.map((e) => e.event)).toEqual(['task.completed']);
+    // 3 created, 1 deleted -> total is 2 (not 3); this completion is the 2nd of 2.
+    expect(events[0].detail).toBe('A2 2/2 done');
+  });
+
   it.runIf(hasPython)('is fail-open when transcript_path is missing', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-todo-failopen-'));
     const sessionId = 'sess-todo-failopen';
