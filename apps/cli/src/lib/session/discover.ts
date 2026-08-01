@@ -19,7 +19,7 @@ import { getAgentsDir, getUserAgentsDir, getHistoryDir, getRunsDir } from '../st
 import { shortCodexHome } from '../codex-home.js';
 
 const execFileAsync = promisify(execFile);
-import type { SessionAgentId, SessionMeta } from './types.js';
+import type { SessionAgentId, SessionEvent, SessionMeta, TodoProgress } from './types.js';
 import type { AgentId } from '../types.js';
 import { AGENTS, agentConfigDirName, getCliVersion } from '../agents.js';
 import { walkForFilesWithStat } from '../fs-walk.js';
@@ -28,7 +28,7 @@ import { SESSION_AGENTS } from './types.js';
 import { deriveShortId } from './short-id.js';
 import { extractSessionTopic } from './prompt.js';
 import { parseAntigravity } from './parse.js';
-import { extractPrUrl, detectWorktree, detectTicket, isPrCreateCommand, detectSpawnedTeam, isTicketCreateTool, extractCreatedTicket } from './state.js';
+import { extractPrUrl, detectWorktree, detectTicket, isPrCreateCommand, detectSpawnedTeam, isTicketCreateTool, extractCreatedTicket, extractRecentDirectoriesTouched, extractTodoProgressFromEvents } from './state.js';
 import { costOfUsage } from '../pricing/index.js';
 import { machineId } from './sync/config.js';
 import { mapBounded } from '../concurrency.js';
@@ -172,6 +172,8 @@ interface ClaudeSessionScan {
   spawnedTeam?: string;
   /** Plan markdown from the last ExitPlanMode tool call (Claude sessions only). */
   plan?: string;
+  todos?: TodoProgress;
+  recentDirectoriesTouched?: string[];
 }
 
 /** Lightweight metadata extracted from a Codex JSONL file during incremental scan. */
@@ -196,6 +198,8 @@ interface CodexSessionScan {
   ticketId?: string;
   createdTickets?: string[];
   spawnedTeam?: string;
+  todos?: TodoProgress;
+  recentDirectoriesTouched?: string[];
 }
 
 const cachedAgentVersions = new Map<SessionAgentId, Promise<string | undefined>>();
@@ -1270,6 +1274,8 @@ async function readClaudeMeta(
       createdTickets: scan.createdTickets,
       spawnedTeam: scan.spawnedTeam,
       plan: scan.plan,
+      todos: scan.todos,
+      recentDirectoriesTouched: scan.recentDirectoriesTouched,
     };
   } else {
     const stat = safeStatSync(filePath);
@@ -1296,6 +1302,8 @@ async function readClaudeMeta(
       createdTickets: scan.createdTickets,
       spawnedTeam: scan.spawnedTeam,
       plan: scan.plan,
+      todos: scan.todos,
+      recentDirectoriesTouched: scan.recentDirectoriesTouched,
     };
   }
 
@@ -1612,6 +1620,8 @@ export async function readCodexMeta(
     ticketId: scan.ticketId,
     createdTickets: scan.createdTickets,
     spawnedTeam: scan.spawnedTeam,
+    todos: scan.todos,
+    recentDirectoriesTouched: scan.recentDirectoriesTouched,
   };
   return {
     meta,
@@ -2812,6 +2822,8 @@ export interface ClaudeParseState {
   // The LAST ExitPlanMode plan wins so a re-planned session surfaces its most
   // recent plan, matching the semantic the extension's re-parser relied on.
   plan?: string;
+  checklistEvents: SessionEvent[];
+  recentDirectoriesTouched: string[];
 }
 
 /** Zero-value accumulator for a fresh (from-byte-0) Claude parse. */
@@ -2842,7 +2854,27 @@ export function initClaudeParseState(): ClaudeParseState {
     pendingTicketTools: new Set<string>(),
     spawnedTeam: undefined,
     plan: undefined,
+    checklistEvents: [],
+    recentDirectoriesTouched: [],
   };
+}
+
+const CHECKLIST_TOOLS = new Set(['TodoWrite', 'todo_write', 'update_plan', 'TaskCreate', 'TaskUpdate']);
+const DIRECTORY_TOOLS = new Set(['Edit', 'Write', 'edit_file', 'write_file', 'create_file', 'edit', 'write', 'Bash', 'exec_command', 'run_shell_command', 'shell', 'Execute']);
+
+function foldDerivedToolState(
+  state: { checklistEvents: SessionEvent[]; recentDirectoriesTouched: string[]; cwd?: string },
+  event: SessionEvent,
+): void {
+  if (CHECKLIST_TOOLS.has(event.tool ?? '')) state.checklistEvents.push(event);
+  if (!DIRECTORY_TOOLS.has(event.tool ?? '')) return;
+  const next = extractRecentDirectoriesTouched([event], state.cwd);
+  for (const dir of next ?? []) {
+    const old = state.recentDirectoriesTouched.indexOf(dir);
+    if (old >= 0) state.recentDirectoriesTouched.splice(old, 1);
+    state.recentDirectoriesTouched.push(dir);
+  }
+  if (state.recentDirectoriesTouched.length > 10) state.recentDirectoriesTouched.splice(0, state.recentDirectoriesTouched.length - 10);
 }
 
 /**
@@ -2878,6 +2910,10 @@ export function applyClaudeLine(state: ClaudeParseState, parsed: any): void {
         const p = b.input.plan.trim();
         if (p) state.plan = b.input.plan;
       }
+      foldDerivedToolState(state, {
+        type: 'tool_use', agent: 'claude', timestamp: parsed.timestamp || '', tool: b?.name, args: b?.input || {},
+        path: b?.input?.file_path || b?.input?.path, command: b?.input?.command,
+      });
     }
   }
   if (state.pendingTicketTools.size > 0 && parsed.type === 'user' && Array.isArray(parsed.message?.content)) {
@@ -3027,6 +3063,8 @@ export function finalizeClaudeScan(state: ClaudeParseState): ClaudeSessionScan {
     createdTickets: state.createdTickets.size > 0 ? [...state.createdTickets] : undefined,
     spawnedTeam: state.spawnedTeam,
     plan: state.plan,
+    todos: extractTodoProgressFromEvents(state.checklistEvents),
+    recentDirectoriesTouched: state.recentDirectoriesTouched.length ? state.recentDirectoriesTouched : undefined,
   };
 }
 
@@ -3099,6 +3137,8 @@ export interface ClaudeParserState {
   spawnedTeam?: string;
   ticketId?: string;
   contentText?: string;
+  checklistEvents: SessionEvent[];
+  recentDirectoriesTouched: string[];
 }
 
 /** Cap on the FIFO window of recent assistant ids persisted in the continuation. */
@@ -3149,6 +3189,8 @@ export function serializeClaudeParserState(state: ClaudeParseState, offset: numb
     // not be persisted.
     ticketId: ticket?.id,
     contentText: state.userTexts.length > 0 ? state.userTexts.join('\n') : undefined,
+    checklistEvents: state.checklistEvents,
+    recentDirectoriesTouched: state.recentDirectoriesTouched,
   };
 }
 
@@ -3202,6 +3244,8 @@ export function hydrateClaudeParseState(prior: ClaudeParserState): ClaudeParseSt
     pendingTicketTools: new Set<string>(prior.pendingTicketTools),
     spawnedTeam: prior.spawnedTeam,
     plan: prior.plan,
+    checklistEvents: prior.checklistEvents ?? [],
+    recentDirectoriesTouched: prior.recentDirectoriesTouched ?? [],
   };
 }
 
@@ -3432,6 +3476,8 @@ export interface CodexParseState {
   createdTickets: Set<string>;
   pendingTicketTools: Set<string>;
   spawnedTeam?: string;
+  checklistEvents: SessionEvent[];
+  recentDirectoriesTouched: string[];
 }
 
 /** Zero-value accumulator for a fresh (from-byte-0) Codex parse. */
@@ -3456,6 +3502,8 @@ export function initCodexParseState(): CodexParseState {
     createdTickets: new Set<string>(),
     pendingTicketTools: new Set<string>(),
     spawnedTeam: undefined,
+    checklistEvents: [],
+    recentDirectoriesTouched: [],
   };
 }
 
@@ -3472,10 +3520,15 @@ export function applyCodexLine(state: CodexParseState, parsed: any): void {
     const p = parsed.payload || {};
     if (p.type === 'function_call') {
       let cmd = '';
+      let args: Record<string, any> = {};
       try {
-        const args = typeof p.arguments === 'string' ? JSON.parse(p.arguments) : (p.arguments || {});
+        args = typeof p.arguments === 'string' ? JSON.parse(p.arguments) : (p.arguments || {});
         cmd = String(args.command || args.cmd || '');
       } catch { /* non-JSON args */ }
+      foldDerivedToolState(state, {
+        type: 'tool_use', agent: 'codex', timestamp: parsed.timestamp || '', tool: p.name, args,
+        path: args.file_path || args.path, command: cmd || undefined,
+      });
       if (!state.prUrl && !state.sawPrCreate && isPrCreateCommand(cmd)) state.sawPrCreate = true;
       if (!state.spawnedTeam) {
         const team = detectSpawnedTeam(cmd);
@@ -3592,6 +3645,8 @@ export function finalizeCodexScan(state: CodexParseState): CodexSessionScan {
     ticketId: ticket?.id,
     createdTickets: state.createdTickets.size > 0 ? [...state.createdTickets] : undefined,
     spawnedTeam: state.spawnedTeam,
+    todos: extractTodoProgressFromEvents(state.checklistEvents),
+    recentDirectoriesTouched: state.recentDirectoriesTouched.length ? state.recentDirectoriesTouched : undefined,
   };
 }
 
@@ -3657,6 +3712,8 @@ export interface CodexParserState {
   spawnedTeam?: string;
   ticketId?: string;
   contentText?: string;
+  checklistEvents: SessionEvent[];
+  recentDirectoriesTouched: string[];
 }
 
 /**
@@ -3693,6 +3750,8 @@ export function serializeCodexParserState(state: CodexParseState, offset: number
     // be persisted.
     ticketId: ticket?.id,
     contentText: state.userTexts.length > 0 ? state.userTexts.join('\n') : undefined,
+    checklistEvents: state.checklistEvents,
+    recentDirectoriesTouched: state.recentDirectoriesTouched,
   };
 }
 
@@ -3727,6 +3786,8 @@ export function hydrateCodexParseState(prior: CodexParserState): CodexParseState
     createdTickets: new Set<string>(prior.createdTickets),
     pendingTicketTools: new Set<string>(prior.pendingTicketTools),
     spawnedTeam: prior.spawnedTeam,
+    checklistEvents: prior.checklistEvents ?? [],
+    recentDirectoriesTouched: prior.recentDirectoriesTouched ?? [],
   };
 }
 

@@ -401,7 +401,7 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     if (!cols.some(c => c.name === 'recent_directories_touched')) db.exec(`ALTER TABLE sessions ADD COLUMN recent_directories_touched TEXT`);
     if (!cols.some(c => c.name === 'linear_project')) db.exec(`ALTER TABLE sessions ADD COLUMN linear_project TEXT`);
     if (!cols.some(c => c.name === 'linear_project_url')) db.exec(`ALTER TABLE sessions ADD COLUMN linear_project_url TEXT`);
-    db.exec(`DELETE FROM scan_ledger;`);
+    db.exec(`DELETE FROM scan_ledger; DELETE FROM dir_ledger;`);
   }
 }
 
@@ -999,6 +999,11 @@ export function upsertSessionsBatch(
       .filter(e => e.scan && e.meta.filePath)
       .map(e => [canonicalLedgerKey(e.meta.filePath), e]),
   );
+  const enrichedEntries = entries.map(entry =>
+    entry.meta.agent === 'claude' || entry.meta.agent === 'codex'
+      ? entry
+      : { ...entry, meta: enrichCachedSessionMeta(entry.meta) },
+  );
 
   const txn = db.transaction((items: typeof entries) => {
     // Re-read the ledger now that we hold the write lock. Any file committed
@@ -1020,8 +1025,7 @@ export function upsertSessionsBatch(
       }
     }
 
-    for (const { meta: rawMeta, content, scan, parserState, contentText } of items) {
-      const meta = enrichCachedSessionMeta(rawMeta);
+    for (const { meta, content, scan, parserState, contentText } of items) {
       if (alreadyIndexed.has(meta.id)) continue;
       // Per-row guard: one malformed session (e.g. a required field that resolves to
       // NULL) must not abort the whole batch and take down the entire `agents sessions`
@@ -1094,7 +1098,7 @@ export function upsertSessionsBatch(
       }
     }
   });
-  txn(entries);
+  txn(enrichedEntries);
 }
 
 /**

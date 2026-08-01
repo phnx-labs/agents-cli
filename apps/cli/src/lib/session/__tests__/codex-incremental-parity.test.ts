@@ -77,7 +77,7 @@ function expectScanParity(inc: any, full: any) {
     'sessionId', 'timestamp', 'cwd', 'gitBranch', 'version', 'topic',
     'messageCount', 'tokenCount', 'outputTokens', 'costUsd', 'durationMs',
     'lastActivity', 'contentText', 'prUrl', 'prNumber', 'worktreeSlug',
-    'ticketId', 'createdTickets', 'spawnedTeam',
+    'ticketId', 'createdTickets', 'spawnedTeam', 'todos', 'recentDirectoriesTouched',
   ];
   for (const f of fields) {
     expect(inc[f], `field ${f}`).toEqual(full[f]);
@@ -91,6 +91,8 @@ function richLines(): object[] {
     { type: 'session_meta', timestamp: '2026-06-28T00:00:00.000Z', payload: { id: 'sess-1', timestamp: '2026-06-28T00:00:00.000Z', cwd: '/home/u/repo', git: { branch: 'RUSH-42-fix' }, cli_version: '0.9.0', model: 'gpt-5-codex' } },
     { type: 'response_item', timestamp: '2026-06-28T00:00:30.000Z', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'investigate the flaky exec test' }] } },
     { type: 'response_item', timestamp: '2026-06-28T00:01:00.000Z', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'looking into it' }] } },
+    { type: 'response_item', timestamp: '2026-06-28T00:01:01.000Z', payload: { type: 'function_call', name: 'update_plan', call_id: 'plan-1', arguments: JSON.stringify({ plan: [{ step: 'Inspect', status: 'completed' }, { step: 'Build', status: 'in_progress' }] }) } },
+    { type: 'response_item', timestamp: '2026-06-28T00:01:02.000Z', payload: { type: 'function_call', name: 'exec_command', call_id: 'exec-1', arguments: JSON.stringify({ cmd: 'bun test', workdir: '/home/u/repo/tests' }) } },
     { type: 'event_msg', timestamp: '2026-06-28T00:01:05.000Z', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 100, cached_input_tokens: 5, output_tokens: 20, reasoning_output_tokens: 4 } } } },
     { type: 'response_item', timestamp: '2026-06-28T00:02:00.000Z', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'yes go ahead' }] } },
     { type: 'response_item', timestamp: '2026-06-28T00:03:00.000Z', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'done' }] } },

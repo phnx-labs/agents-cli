@@ -9,6 +9,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { parseKimi, detectAgent, parseSession } from '../parse.js';
 import { readKimiMeta } from '../discover.js';
+import { extractTodoProgressFromEvents } from '../state.js';
 
 /** A Kimi session dir whose state.json omits BOTH createdAt and updatedAt. */
 function makeKimiStateNoTimestamps(): string {
@@ -114,6 +115,7 @@ describe('parseKimi', () => {
     }));
 
     const events = parseKimi(statePath);
+    expect(extractTodoProgressFromEvents(events)).toBeUndefined();
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({
       type: 'message',

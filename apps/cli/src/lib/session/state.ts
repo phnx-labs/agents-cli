@@ -278,7 +278,7 @@ export function extractRecentDirectoriesTouched(events: SessionEvent[], cwd?: st
     if (['Edit', 'Write', 'edit_file', 'write_file', 'create_file', 'edit', 'write'].includes(tool)) {
       add(args.file_path ?? args.filePath ?? args.path ?? event.path, true);
     } else if (['Bash', 'exec_command', 'run_shell_command', 'shell', 'Execute'].includes(tool)) {
-      add(args.cwd ?? args.workdir ?? args.working_directory ?? cwd);
+      add(args.cwd ?? args.Cwd ?? args.workdir ?? args.working_directory ?? cwd);
     }
   }
   return dirs.length ? dirs.slice(-10) : undefined;
