@@ -299,4 +299,57 @@ describe('isLikelyTrulyBlocked', () => {
       })
     ).toBe(false);
   });
+
+  // Precedence fix (watchdog-brain-v2): the 15m FORCE_REVIEW short-circuit used to
+  // fire BEFORE the waiting/completion checks, so a long-idle OPEN QUESTION was
+  // blindly force-nudged. Now waiting/completion win and it defers.
+  it('a long-idle (>15m) WAITING-on-user session is NOT force-nudged (defers, was a bug)', () => {
+    expect(
+      isLikelyTrulyBlocked({
+        terminalId: 'CC-1',
+        agentType: 'claude',
+        stalledForMs: 20 * 60_000, // 20m — past FORCE_REVIEW_STALL_MS
+        tailLines: ['{"type":"assistant","message":{"content":[{"type":"text","text":"Waiting on user to choose an option."}]}}'],
+      })
+    ).toBe(false);
+  });
+
+  it('a long-idle (>15m) COMPLETED session is NOT force-nudged (defers, was a bug)', () => {
+    expect(
+      isLikelyTrulyBlocked({
+        terminalId: 'CC-1',
+        agentType: 'claude',
+        stalledForMs: 20 * 60_000,
+        tailLines: ['{"type":"assistant","message":{"content":[{"type":"text","text":"All done, the task is finished."}]}}'],
+      })
+    ).toBe(false);
+  });
+
+  it('a long-idle (>15m) session with a neutral tail still force-reviews as blocked', () => {
+    expect(
+      isLikelyTrulyBlocked({
+        terminalId: 'CC-1',
+        agentType: 'claude',
+        stalledForMs: 20 * 60_000,
+        tailLines: ['{"type":"assistant","message":{"content":[{"type":"text","text":"thinking about the approach"}]}}'],
+      })
+    ).toBe(true);
+  });
+});
+
+describe('WATCHDOG_SYSTEM_PROMPT — drive-to-completion judgment', () => {
+  it('instructs NUDGE on needless questions and SKIP on genuine human-only cases', () => {
+    const p = WATCHDOG_SYSTEM_PROMPT;
+    // Drive-forward framing.
+    expect(p).toMatch(/NUDGE/);
+    expect(p).toMatch(/best judgment/i);
+    expect(p).toMatch(/should I proceed/i);
+    expect(p).toMatch(/end-to-end/i);
+    // Leave-for-human framing.
+    expect(p).toMatch(/SKIP/);
+    expect(p).toMatch(/credentials|2fa|biometric/i);
+    expect(p).toMatch(/publish\/release|force-push|irreversible/i);
+    // The verdict shape parseWatchdogResponse consumes is still specified.
+    expect(p).toContain('"action":"nudge"|"skip"');
+  });
 });

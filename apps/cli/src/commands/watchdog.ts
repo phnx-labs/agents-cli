@@ -198,15 +198,24 @@ export function registerWatchdogCommand(program: Command): void {
       agents watchdog policy <sessionId> handsoff
     `,
     notes: `
-      Decision path (default, deterministic): a session is nudged only when its
-      transcript tail shows it ANNOUNCED an action but no tool call followed
-      (promise-without-toolcall) AND it is not waiting on the user. Completions and
-      open questions are skipped.
+      Decision path: a cheap deterministic pre-filter resolves the obvious cases
+      (clearly complete -> skip; a clear promise-without-toolcall -> nudge) and
+      ESCALATES the judgment-heavy cases -- a session parked on a question, or an
+      ambiguous stall -- to a smart brain. The brain drives the agent to finish
+      end-to-end when it asked a needless / already-authorized question or paused
+      with work left, and leaves it for the human on genuine cases (credentials,
+      an irreversible or outward-facing action, a real ambiguous decision, or a
+      completed task). The brain is a customizable 'watchdog' workflow (drop a
+      WORKFLOW.md in project/user workflows/ to override the prompt + model);
+      absent one, the built-in prompt runs via 'agents run --mode plan'. Pass
+      --smart to force every stalled candidate through the brain.
 
-      Safety gate: a nudge is delivered ONLY when the resolver can name the EXACT
-      split the agent lives in (tmux / iTerm / IDE terminal). Un-addressable stalls
-      (e.g. Ghostty with no tmux) are flagged for the menu-bar and SKIPPED — never
-      a guessed or frontmost target.
+      Delivery (answer-router): a running agent is steered via its mailbox; a
+      parked-on-question agent is answered into its EXACT split -- tmux / iTerm /
+      an IDE integrated terminal (VS Codium / Cursor / VS Code) -- or re-entered
+      via resume when headless. A parked agent with no addressable rail (e.g.
+      Ghostty with no tmux) is flagged for the menu-bar and SKIPPED -- never a
+      guessed or frontmost target.
 
       Always-on: 'agents watchdog enable' creates + enables a 'watchdog' command
       routine ('${WATCHDOG_ROUTINE_SCHEDULE}' -> agents watchdog --nudge) and reloads the

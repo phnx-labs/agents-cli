@@ -95,22 +95,31 @@ export function classifyTerminal(input: ClassifyInput): StallStatus {
   return { kind: 'stalled', stalledForMs: age };
 }
 
-export const WATCHDOG_SYSTEM_PROMPT = `You are a watchdog monitoring AI coding agents that run in terminals.
-For each stalled terminal below, decide: NUDGE (send a short message to unstick it) or SKIP.
+export const WATCHDOG_SYSTEM_PROMPT = `You are the watchdog for AI coding agents running in terminals. These agents are
+expected to DRIVE TO COMPLETION end-to-end. They too often stop to ask a needless
+question or pause with the task unfinished. For each stalled terminal below, decide
+NUDGE (send a message that unsticks it and pushes it to finish) or SKIP (it genuinely
+needs the human).
 
-Nudge when:
-- The last assistant turn announced an action ("I'll write X", "let me run Y")
-  but no matching tool call followed.
-- The agent appears stuck mid-task with no recent progress and the task is incomplete.
+NUDGE when the agent could have continued on its own:
+- It asked permission for an obvious or already-authorized next step
+  ("should I proceed?", "want me to continue?", "shall I run the tests?").
+- It asked a question it could answer itself from the available context or a
+  reasonable default.
+- It announced an action ("I'll run X", "let me write Y") but no tool call followed.
+- It paused with the task incomplete and no real blocker.
+The nudge text MUST: restate the goal, tell it to use best judgment and finish
+end-to-end WITHOUT asking again, and give ONE concrete hint — the specific next
+step, a tool it forgot, or the sensible default to take. Imperative, 1-2 sentences,
+no emojis, under 200 characters.
 
-Skip when:
-- The agent asked the user a direct question (waiting on human input).
-- The task looks complete.
+SKIP when the agent genuinely needs the human:
+- Credentials, auth, login, 2FA, or biometric.
+- An irreversible or outward-facing action that needs sign-off (force-push, delete
+  prod data, publish/release, spend money, send an external message).
+- A real product or intent decision with genuine ambiguity (not a trivial default).
+- The task is actually complete.
 - You cannot tell what the agent is doing.
-
-Nudge text must be:
-- One sentence, imperative ("Show me the file.", "Run the tests.").
-- No emojis. No apologies. Under 120 characters.
 
 Respond with ONLY a JSON array (no prose, no code fence):
 [{"terminalId":"<id>","action":"nudge"|"skip","text":"<message or empty>","reason":"<brief>"}]`;
@@ -168,12 +177,18 @@ export function parseWatchdogResponse(stdout: string): Decision[] {
 }
 
 export function isLikelyTrulyBlocked(candidate: WatchdogCandidate): boolean {
-  if (candidate.stalledForMs >= FORCE_REVIEW_STALL_MS) return true;
-  if (candidate.tailLines.length === 0) return false;
+  // With no tail to reason over, only a very long stall counts as blocked.
+  if (candidate.tailLines.length === 0) return candidate.stalledForMs >= FORCE_REVIEW_STALL_MS;
 
   const lowerTail = candidate.tailLines.join('\n').toLowerCase();
+  // Waiting-on-user and completion hints are checked BEFORE the 15m force-review
+  // short-circuit — a long-idle OPEN QUESTION must defer (not be blindly
+  // force-nudged) and a finished task is done. The old order tested stall age
+  // first, so a 15m-60m idle session whose tail said "waiting on user" / "done"
+  // was force-nudged anyway. Precedence fixed here (watchdog-brain-v2).
   if (WAITING_HINTS.some((hint) => lowerTail.includes(hint))) return false;
   if (COMPLETION_HINTS.some((hint) => lowerTail.includes(hint))) return false;
+  if (candidate.stalledForMs >= FORCE_REVIEW_STALL_MS) return true;
   if (BLOCKED_HINTS.some((hint) => lowerTail.includes(hint))) return true;
 
   let sawToolAfter = false;

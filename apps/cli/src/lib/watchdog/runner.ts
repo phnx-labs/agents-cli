@@ -35,10 +35,9 @@ import type { ActiveSession } from '../session/active.js';
 import { getActiveSessions } from '../session/active.js';
 import {
   resolveInjectTargetForSession,
-  type InjectResolution,
   type InjectRail,
 } from '../terminal/resolve.js';
-import { injectIntoTerminal, type InjectResult } from '../terminal/inject.js';
+import { injectIntoTerminal, type InjectResult, type InjectTarget } from '../terminal/inject.js';
 import {
   classifyTerminal,
   isLikelyTrulyBlocked,
@@ -55,6 +54,13 @@ import {
   WATCHDOG_TAIL_LINES,
 } from './read.js';
 import { getRuntimeStateDir } from '../state.js';
+import { withFileLock, atomicWriteFileSync, ensureLockTarget } from '../fs-atomic.js';
+import { resolveAnswerRoute, isOpenQuestionBlock } from '../answer-router.js';
+import { enqueue, mailboxDir } from '../mailbox.js';
+import { mailboxIdForActiveSession } from '../mailbox-target.js';
+import { readBlock, blockIdForSession, type OpenBlock } from '../feed.js';
+import { summarizeWatchdogTail } from './watchdogTail.js';
+import { appendWatchdogEvents, type WatchdogEvent } from './log.js';
 
 /** Per-session policy sentinel. `keep` is the default (watchdog may nudge). */
 export type WatchdogPolicy = 'off' | 'keep' | 'handsoff';
@@ -81,12 +87,15 @@ export interface WatchdogTickOptions {
   /** Nudge text delivered into the terminal. Default "Continue." */
   nudgeText?: string;
   /**
-   * Use the LLM decider (`agents run`) to decide + choose nudge text instead of
-   * the deterministic promise-without-toolcall path. Default false so ticks are
-   * reproducible. Best-effort: a decider failure falls back to skip.
+   * Force the LLM decider (`agents run`) on EVERY stalled candidate instead of the
+   * hybrid path. Default false. Even when false the tick still ESCALATES the
+   * judgment-heavy cases (parked-on-question, ambiguous stalls) to the smart brain
+   * — `smart: true` additionally routes the obvious promise-without-toolcall
+   * nudges through it. Non-reproducible; the deterministic pre-filter is the
+   * reproducible default.
    */
   smart?: boolean;
-  /** Agent the smart decider runs as. Default 'claude'. */
+  /** Agent the smart decider runs as (and the built-in fallback prompt). Default 'claude'. */
   smartAgent?: string;
   /** Threshold overrides. Missing fields fall back to DEFAULT_THRESHOLDS. */
   thresholds?: Partial<WatchdogThresholds>;
@@ -108,7 +117,24 @@ export interface WatchdogTickOptions {
   tailFor?: (s: ActiveSession) => string[];
   /** Per-session policy. Default = the on-disk sentinel. */
   policyFor?: (s: ActiveSession) => WatchdogPolicy;
+  /**
+   * The smart brain: given a stalled candidate, decide drive-forward vs
+   * leave-for-human and craft the message. Default resolves a `watchdog` workflow
+   * (repo/user override + `model:` frontmatter) and, failing that, the improved
+   * built-in prompt — both via `agents run … --mode plan`. Tests inject a
+   * synthetic decider so escalation is exercised without shelling out.
+   */
+  smartDecider?: SmartDecider;
+  /** Open feed block for a session (parked-on-question detection). Default reads the feed. */
+  openBlockFor?: (s: ActiveSession) => OpenBlock | null;
+  /** Inject primitive. Default injectIntoTerminal — tests capture the resolved target. */
+  injectFn?: (target: InjectTarget, text: string, opts: { dryRun?: boolean }) => Promise<InjectResult>;
+  /** Override the canonical watchdog.log path (tests point at a tmp file). */
+  logPath?: string;
 }
+
+/** The smart brain seam: a stalled candidate in, a nudge decision out. */
+export type SmartDecider = (session: ActiveSession, candidate: WatchdogCandidate) => Promise<NudgeDecision>;
 
 /** What the tick decided for a single session — the row `--json` / the tray reads. */
 export interface SessionOutcome {
@@ -124,15 +150,20 @@ export interface SessionOutcome {
   policy: WatchdogPolicy;
   decision: 'nudge' | 'skip';
   reason: string;
-  /** The resolved rail, when addressable. */
+  /** The resolved rail, when delivered by injecting into a terminal split. */
   rail?: InjectRail;
+  /** How the nudge was (or would be) delivered: inject | mailbox | resume. */
+  via?: NudgeVia;
   /** True when resolveInjectTarget said addressable (only meaningful once we'd nudge). */
   addressable?: boolean;
-  /** True when a nudge was actually delivered this tick. */
+  /** True when a nudge was actually delivered this tick (any mechanism). */
   injected?: boolean;
   /** The text that was (or would be) delivered. */
   nudgeText?: string;
 }
+
+/** Delivery mechanism the answer-router picked for a nudge. */
+export type NudgeVia = 'inject' | 'mailbox' | 'resume';
 
 export interface WatchdogTickResult {
   atMs: number;
@@ -212,27 +243,31 @@ function defaultLastActivity(s: ActiveSession): number | undefined {
   return s.startedAtMs;
 }
 
-/**
- * The deterministic v1 decision: nudge only when the tail shows a
- * promise-without-toolcall (isLikelyTrulyBlocked) AND the session is not waiting
- * on the user. isLikelyTrulyBlocked already refuses on WAITING/COMPLETION hints;
- * the state engine's `waiting_input` activity is an extra, stronger guard against
- * typing over an open AskUserQuestion.
- */
 /** A decide result shared by the deterministic and smart paths. `text` overrides the default nudge text. */
-interface NudgeDecision {
+export interface NudgeDecision {
   nudge: boolean;
   reason: string;
   text?: string;
 }
 
 /**
- * Minimal local mirror of COMPLETION_HINTS in watchdog.ts:42-47. We cannot lean
- * on isLikelyTrulyBlocked to screen completions out: its FORCE_REVIEW_STALL_MS
- * short-circuit (watchdog.ts:171 — `stalledForMs >= 15m` returns true) fires
- * BEFORE its own COMPLETION_HINTS check (watchdog.ts:176), so a session idle
- * 15m-60m whose tail says "done"/"finished" would be reported as blocked. Keep
- * this list in sync with the core.
+ * The deterministic PRE-FILTER outcome. It resolves only the two obvious cases
+ * cheaply — a clearly-complete session (`skip`) and a clear promise-without-
+ * toolcall stall (`nudge`) — and ESCALATES the judgment-heavy cases (parked on a
+ * question, or an ambiguous stall) to the smart brain, which decides drive-forward
+ * vs leave-for-human and crafts the message. This is the shift Muqsit asked for:
+ * a parked-on-question is no longer hard-skipped, it is evaluated.
+ */
+type DetOutcome =
+  | { kind: 'nudge'; reason: string }
+  | { kind: 'skip'; reason: string }
+  | { kind: 'escalate'; reason: string };
+
+/**
+ * COMPLETION_HINTS mirror of watchdog.ts. The deterministic pre-filter screens
+ * completions to `skip` before the promise check so a finished-but-idle session
+ * is never nudged. (isLikelyTrulyBlocked also guards completion now that its 15m
+ * precedence is fixed; this explicit check keeps the pre-filter self-contained.)
  */
 const COMPLETION_HINTS = ['done', 'completed', 'all set', 'finished'];
 
@@ -245,48 +280,149 @@ function tailShowsCompletion(candidate: WatchdogCandidate): boolean {
 function deterministicDecision(
   session: ActiveSession,
   candidate: WatchdogCandidate,
-): NudgeDecision {
+): DetOutcome {
+  // Parked on a question — the case Muqsit cares about most. Do NOT drop it:
+  // escalate to the brain, which decides drive-forward vs leave-for-human.
   if (session.activity === 'waiting_input') {
-    return { nudge: false, reason: `waiting on user${session.awaitingReason ? ` (${session.awaitingReason})` : ''}` };
+    return {
+      kind: 'escalate',
+      reason: `parked on a question${session.awaitingReason ? ` (${session.awaitingReason})` : ''} — escalate to the brain`,
+    };
   }
-  // Completion is checked EXPLICITLY here — never nudge a finished session, even
-  // past the 15m force-review window where isLikelyTrulyBlocked would return true
-  // before reaching its completion check (see COMPLETION_HINTS note above).
+  // Clearly complete — cheap skip, no LLM.
   if (tailShowsCompletion(candidate)) {
-    return { nudge: false, reason: 'tail shows completion (done / finished / all set) — skip regardless of stall age' };
+    return { kind: 'skip', reason: 'tail shows completion (done / finished / all set) — skip' };
   }
+  // Clear promise-without-toolcall — cheap nudge, no LLM.
   if (isLikelyTrulyBlocked(candidate)) {
-    return { nudge: true, reason: 'stalled after announcing an action with no follow-through' };
+    return { kind: 'nudge', reason: 'stalled after announcing an action with no follow-through' };
   }
-  return { nudge: false, reason: 'no promise-without-toolcall signal in tail (completion / question / unclear)' };
+  // Ambiguous stall — let the brain judge rather than blindly skip.
+  return { kind: 'escalate', reason: 'ambiguous stall — escalate to the brain' };
 }
 
 /**
- * The optional LLM decider. Shells out to `agents run <agent>` with the watchdog
- * prompt and parses its JSON verdict. Best-effort and NON-deterministic — the
- * default path is deterministicDecision. Isolated here so the tick stays pure
- * over its seams; the command layer opts in with --smart.
+ * The smart brain. Resolves a `watchdog` workflow for the session's cwd
+ * (project > user > system precedence, via resolveWorkflowRef) so a repo/user
+ * override AND `model:` frontmatter come for free; when a workflow resolves it
+ * runs `agents run watchdog --mode plan <prompt>`, else it falls back to the
+ * improved built-in prompt via `agents run <agent> --mode plan <prompt>`. Plan
+ * mode keeps the decider read-only. Best-effort and NON-deterministic: any
+ * failure (decider unavailable, no verdict) returns a SAFE skip — a parked
+ * question we cannot judge is left for the human, never blindly nudged.
  */
-async function smartDecision(
-  candidate: WatchdogCandidate,
-  agent: string,
-): Promise<NudgeDecision> {
-  const prompt = renderWatchdogPrompt([candidate]);
+export function makeDefaultSmartDecider(agent: string): SmartDecider {
+  return async (session, candidate) => {
+    const prompt = renderWatchdogPrompt([candidate]);
+    try {
+      const [{ resolveWorkflowRef }, { execFile }, { promisify }] = await Promise.all([
+        import('../workflows.js'),
+        import('child_process'),
+        import('util'),
+      ]);
+      const cwd = session.cwd || process.cwd();
+      const workflowPath = resolveWorkflowRef('watchdog', cwd);
+      // A resolved `watchdog` workflow runs by name so its WORKFLOW.md body + model
+      // frontmatter apply; otherwise the bare agent runs the built-in prompt.
+      const runTarget = workflowPath ? 'watchdog' : agent;
+      const execFileAsync = promisify(execFile);
+      const { stdout } = await execFileAsync('agents', ['run', runTarget, '--mode', 'plan', prompt], {
+        encoding: 'utf8',
+        maxBuffer: 4 * 1024 * 1024,
+        timeout: 120_000,
+      });
+      const decisions = parseWatchdogResponse(stdout);
+      const d = decisions.find((x) => x.terminalId === candidate.terminalId) ?? decisions[0];
+      if (!d) return { nudge: false, reason: 'smart decider returned no verdict' };
+      return { nudge: d.action === 'nudge', reason: d.reason || `smart: ${d.action}`, text: d.text || undefined };
+    } catch (err) {
+      return { nudge: false, reason: `smart decider unavailable: ${err instanceof Error ? err.message : String(err)}` };
+    }
+  };
+}
+
+// --- delivery planning ------------------------------------------------------
+
+/**
+ * How a decided nudge should be delivered. The four outcomes mirror the
+ * answer-router contract: a running/looping agent gets the message in its mailbox
+ * (seen at the next tool call); a parked-on-question agent gets it typed into the
+ * EXACT split (inject) or, when headless, re-entered via resume; and a parked
+ * agent with no addressable rail is refused (flagged, never a guessed target).
+ */
+type DeliveryPlan =
+  | { via: 'inject'; rail: InjectRail; target: InjectTarget }
+  | { via: 'resume' }
+  | { via: 'mailbox'; mailboxId: string }
+  | { via: 'refuse'; reason: string };
+
+/**
+ * Pick the delivery mechanism. resolveAnswerRoute (answer-router.ts) chooses
+ * mailbox vs resume vs refuse; resolveInjectTargetForSession (resolve.ts) supplies
+ * the precise inject target — CRUCIALLY it handles the vscodium rail that the
+ * answer-router's own resolver cannot, so an IDE-terminal (VS Codium / Cursor /
+ * VS Code) session parked on a question is injected into its exact terminal rather
+ * than being downgraded to resume/refuse. When a precise rail exists it wins
+ * (that includes a stalled non-parked agent, so the v1 terminal-inject path is
+ * preserved and no nudge is stranded in a mailbox the agent will never poll).
+ */
+function planDelivery(
+  session: ActiveSession,
+  chosenText: string,
+  block: OpenBlock | null,
+  allowGhosttyFocus: boolean | undefined,
+): DeliveryPlan {
+  const sessionId = session.sessionId ?? '';
+  const mailboxId = mailboxIdForActiveSession(session) ?? sessionId;
+  const resolution = resolveInjectTargetForSession(session, { allowGhosttyFocus });
+  const route = resolveAnswerRoute({ mailboxId, answer: chosenText, session, block });
+
+  // A precise split (tmux / iTerm / vscodium / pty) is the authoritative target.
+  if (resolution.addressable) {
+    return { via: 'inject', rail: resolution.rail, target: resolution.target };
+  }
+  // No precise rail: honor the answer-router's parked-agent decision.
+  if (route.kind === 'resume') return { via: 'resume' };
+  // Mailbox is correct ONLY for a still-looping agent that has an OPEN question
+  // block — it is seen at the next tool call. A stalled agent that simply stopped
+  // (no open block) would never poll the mailbox, so it is flagged instead of
+  // silently dropping a nudge into a spool it will never read.
+  if (route.kind === 'mailbox' && isOpenQuestionBlock(block)) return { via: 'mailbox', mailboxId };
+  return { via: 'refuse', reason: route.kind === 'refuse' ? route.reason : resolution.reason };
+}
+
+/** Default open-block reader — the same lookup `agents message` uses. */
+function defaultOpenBlockFor(session: ActiveSession): OpenBlock | null {
+  const id = mailboxIdForActiveSession(session) ?? session.sessionId;
+  if (!id) return null;
+  const direct = readBlock(blockIdForSession(id));
+  if (direct && direct.mailboxId === id) return direct;
+  return null;
+}
+
+/** Enqueue a nudge into a session's mailbox (running agent, seen at next tool call). */
+function deliverViaMailbox(mailboxId: string, text: string, block: OpenBlock | null): void {
+  enqueue(mailboxDir(mailboxId), { to: mailboxId, text, from: 'watchdog', blockId: block?.blockId });
+}
+
+/** Re-enter a parked headless agent with the nudge as its next user turn. */
+async function deliverViaResume(session: ActiveSession, text: string): Promise<{ ok: boolean; error?: string }> {
+  const sid = session.sessionId;
+  if (!sid) return { ok: false, error: 'no session id to resume' };
   try {
-    const { execFile } = await import('child_process');
-    const { promisify } = await import('util');
-    const execFileAsync = promisify(execFile);
-    const { stdout } = await execFileAsync('agents', ['run', agent, '--mode', 'plan', prompt], {
-      encoding: 'utf8',
-      maxBuffer: 4 * 1024 * 1024,
-      timeout: 120_000,
+    const [{ getAgentsInvocation }, { spawn }] = await Promise.all([
+      import('../daemon.js'),
+      import('child_process'),
+    ]);
+    const inv = getAgentsInvocation(['run', session.kind, '--resume', sid, '--', text]);
+    const code: number = await new Promise((resolve) => {
+      const child = spawn(inv.command, inv.args, { stdio: 'ignore', env: process.env, detached: false });
+      child.on('exit', (c) => resolve(c ?? 1));
+      child.on('error', () => resolve(1));
     });
-    const decisions = parseWatchdogResponse(stdout);
-    const d = decisions.find((x) => x.terminalId === candidate.terminalId) ?? decisions[0];
-    if (!d) return { nudge: false, reason: 'smart decider returned no verdict' };
-    return { nudge: d.action === 'nudge', reason: d.reason || `smart: ${d.action}`, text: d.text || undefined };
+    return code === 0 ? { ok: true } : { ok: false, error: `resume exited ${code}` };
   } catch (err) {
-    return { nudge: false, reason: `smart decider unavailable: ${err instanceof Error ? err.message : String(err)}` };
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
 
@@ -306,11 +442,20 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
   const lastActivityFor = opts.lastActivityFor ?? defaultLastActivity;
   const tailFor = opts.tailFor ?? ((s) => (s.sessionId ? readWatchdogTail(s.sessionId, s.kind, WATCHDOG_TAIL_LINES) : []));
   const policyFor = opts.policyFor ?? ((s) => (s.sessionId ? readPolicySentinel(dir, s.sessionId) : 'keep'));
+  const smartDecider = opts.smartDecider ?? makeDefaultSmartDecider(opts.smartAgent ?? 'claude');
+  const openBlockFor = opts.openBlockFor ?? defaultOpenBlockFor;
+  const injectFn = opts.injectFn ?? injectIntoTerminal;
 
   const sessions = opts.sessions ?? (await getActiveSessions());
   const ledger = readNudgeLedger(dir);
+  // Cooldown timestamps this tick decided to (re)start — merged into the ledger
+  // under a lock at the end so a concurrent tick's updates are never lost.
+  const ledgerUpdates: Record<string, number> = {};
   const flags: Record<string, { reason: string; host?: string; atMs: number }> = {};
   const outcomes: SessionOutcome[] = [];
+  const logEvents: WatchdogEvent[] = [];
+  const viaLabel = (plan: DeliveryPlan): string =>
+    plan.via === 'inject' ? `inject (${plan.rail})` : plan.via;
 
   for (const session of sessions) {
     const policy = policyFor(session);
@@ -378,43 +523,70 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
       stalledForMs: status.stalledForMs,
     };
 
-    const decision: NudgeDecision = opts.smart
-      ? await smartDecision(candidate, opts.smartAgent ?? 'claude')
-      : deterministicDecision(session, candidate);
+    // The brain. The cheap deterministic pre-filter resolves the obvious cases;
+    // parked-on-question and ambiguous stalls ESCALATE to the smart brain. `smart`
+    // forces every stalled candidate through the brain.
+    let decision: NudgeDecision;
+    if (opts.smart) {
+      decision = await smartDecider(session, candidate);
+    } else {
+      const det = deterministicDecision(session, candidate);
+      decision = det.kind === 'escalate'
+        ? await smartDecider(session, candidate)
+        : { nudge: det.kind === 'nudge', reason: det.reason };
+    }
     const chosenText = decision.text ?? nudgeText;
+
+    // Log the decision for the Factory watchdog card.
+    const summary = summarizeWatchdogTail(tailLines, candidate.agentType);
+    logEvents.push({
+      ts: nowMs,
+      kind: 'decision',
+      terminalId: session.sessionId,
+      agentType: candidate.agentType,
+      message: decision.reason,
+      reason: decision.reason,
+      stalledForMs: status.stalledForMs,
+      tailLines,
+      nudgeText: decision.nudge ? chosenText : undefined,
+      lastUserMessage: summary.lastUserMessage,
+      lastAssistantMessage: summary.lastAssistantMessage,
+    });
 
     if (!decision.nudge) {
       outcomes.push({ ...base, decision: 'skip', reason: decision.reason });
       continue;
     }
 
-    // A nudge is warranted — run it past the safety gate BEFORE any delivery.
-    const resolution: InjectResolution = resolveInjectTargetForSession(session, {
-      allowGhosttyFocus: opts.allowGhosttyFocus,
-    });
+    // A nudge is warranted — plan delivery (answer-router picks mailbox/resume/
+    // refuse; resolveInjectTargetForSession supplies the vscodium-aware inject
+    // target) BEFORE any side effect.
+    const block = openBlockFor(session);
+    const plan = planDelivery(session, chosenText, block, opts.allowGhosttyFocus);
+    const rail = plan.via === 'inject' ? plan.rail : undefined;
+    const addressable = plan.via === 'inject' ? true : undefined;
 
-    if (!resolution.addressable) {
-      // Flag the un-addressable stall for the tray; NEVER guess a target.
-      flags[session.sessionId] = { reason: resolution.reason, host: session.host, atMs: nowMs };
+    if (plan.via === 'refuse') {
+      // No addressable rail and not headless-resumable — flag, NEVER guess.
+      flags[session.sessionId] = { reason: plan.reason, host: session.host, atMs: nowMs };
       outcomes.push({
         ...base, decision: 'skip', addressable: false,
-        reason: `nudge-worthy but un-addressable — ${resolution.reason}`,
+        reason: `nudge-worthy but un-addressable — ${plan.reason}`,
         nudgeText: chosenText,
       });
       continue;
     }
 
-    // handsoff = detect + flag, but never inject. Record a flag so the tray can
-    // surface "would-nudge but hands-off" alongside the un-addressable flags.
+    // handsoff = detect + flag, but never deliver.
     if (policy === 'handsoff') {
       flags[session.sessionId] = {
-        reason: `handsoff: would nudge via ${resolution.rail} but policy is hands-off`,
+        reason: `handsoff: would nudge via ${viaLabel(plan)} but policy is hands-off`,
         host: session.host,
         atMs: nowMs,
       };
       outcomes.push({
-        ...base, decision: 'nudge', addressable: true, rail: resolution.rail, injected: false,
-        reason: `handsoff: flagged, not injected (would nudge via ${resolution.rail})`,
+        ...base, decision: 'nudge', addressable, rail, via: plan.via, injected: false,
+        reason: `handsoff: flagged, not delivered (would nudge via ${viaLabel(plan)})`,
         nudgeText: chosenText,
       });
       continue;
@@ -423,39 +595,71 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
     // Dry status (no --nudge): report what WOULD happen, deliver nothing.
     if (!opts.nudge) {
       outcomes.push({
-        ...base, decision: 'nudge', addressable: true, rail: resolution.rail, injected: false,
-        reason: `would nudge via ${resolution.rail} (dry — pass --nudge to inject)`,
+        ...base, decision: 'nudge', addressable, rail, via: plan.via, injected: false,
+        reason: `would nudge via ${viaLabel(plan)} (dry — pass --nudge)`,
         nudgeText: chosenText,
       });
       continue;
     }
 
-    // Deliver into the EXACT resolved split.
-    let result: InjectResult;
-    try {
-      result = await injectIntoTerminal(resolution.target, chosenText, { dryRun: opts.injectDryRun });
-    } catch (err) {
-      result = { ok: false, backend: resolution.target.backend, writes: 0, error: err instanceof Error ? err.message : String(err) };
+    // Deliver. injectDryRun exercises the path without a real side effect: inject
+    // still calls injectFn (which honors dryRun), mailbox/resume are short-circuited.
+    let delivered: { ok: boolean; error?: string };
+    if (plan.via === 'inject') {
+      try {
+        const r = await injectFn(plan.target, chosenText, { dryRun: opts.injectDryRun });
+        delivered = { ok: r.ok, error: r.error };
+      } catch (err) {
+        delivered = { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    } else if (plan.via === 'mailbox') {
+      if (opts.injectDryRun) {
+        delivered = { ok: true };
+      } else {
+        try { deliverViaMailbox(plan.mailboxId, chosenText, block); delivered = { ok: true }; }
+        catch (err) { delivered = { ok: false, error: err instanceof Error ? err.message : String(err) }; }
+      }
+    } else {
+      delivered = opts.injectDryRun ? { ok: true } : await deliverViaResume(session, chosenText);
     }
 
-    if (result.ok) {
-      ledger[session.sessionId] = nowMs; // start the cooldown clock
+    if (delivered.ok) {
+      ledgerUpdates[session.sessionId] = nowMs; // start the cooldown clock
+      logEvents.push({
+        ts: nowMs, kind: 'nudge', terminalId: session.sessionId, agentType: candidate.agentType,
+        message: `nudged via ${viaLabel(plan)}`, reason: decision.reason, nudgeText: chosenText,
+      });
       outcomes.push({
-        ...base, decision: 'nudge', addressable: true, rail: resolution.rail, injected: true,
-        reason: `nudged via ${resolution.rail}`,
+        ...base, decision: 'nudge', addressable, rail, via: plan.via, injected: true,
+        reason: `nudged via ${viaLabel(plan)}`,
         nudgeText: chosenText,
       });
     } else {
       outcomes.push({
-        ...base, decision: 'skip', addressable: true, rail: resolution.rail, injected: false,
-        reason: `inject failed via ${resolution.rail}: ${result.error ?? 'unknown error'}`,
+        ...base, decision: 'skip', addressable, rail, via: plan.via, injected: false,
+        reason: `nudge via ${viaLabel(plan)} failed: ${delivered.error ?? 'unknown error'}`,
         nudgeText: chosenText,
       });
     }
   }
 
-  // Persist the tray-readable state.
-  writeJsonFile(path.join(dir, 'nudges.json'), ledger);
+  // Persist the cooldown ledger under a lock: fresh-read + merge this tick's
+  // updates + atomic write, so a concurrent tick's timestamps are never lost
+  // (the old unlocked read-at-start / write-at-end was a lost-update race).
+  if (Object.keys(ledgerUpdates).length > 0) {
+    const nudgesPath = path.join(dir, 'nudges.json');
+    const ledgerLock = path.join(dir, '.ledger.lock');
+    try {
+      ensureLockTarget(ledgerLock);
+      withFileLock(ledgerLock, () => {
+        const current = readNudgeLedger(dir);
+        for (const [sid, ts] of Object.entries(ledgerUpdates)) current[sid] = ts;
+        atomicWriteFileSync(nudgesPath, JSON.stringify(current, null, 2));
+      });
+    } catch {
+      /* best-effort: a lock failure must not throw out of a tick */
+    }
+  }
   writeJsonFile(path.join(dir, 'flags.json'), flags);
 
   const counts = {
@@ -467,5 +671,15 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
   };
   const result: WatchdogTickResult = { atMs: nowMs, didNudge: opts.nudge === true, outcomes, counts };
   writeJsonFile(path.join(dir, 'last-tick.json'), result);
+
+  // Heartbeat + decision/nudge events to the canonical watchdog.log the Factory
+  // Floor reads. Best-effort; never throws into the tick.
+  logEvents.push({
+    ts: nowMs,
+    kind: 'tick',
+    message: `${counts.total} live · ${counts.stalled} stalled · ${counts.nudged} nudged · ${counts.unaddressable} un-addressable`,
+  });
+  appendWatchdogEvents(logEvents, { logPath: opts.logPath });
+
   return result;
 }
