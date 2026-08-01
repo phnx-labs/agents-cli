@@ -2560,48 +2560,274 @@ function extractDroidMessageText(content: any): string {
     .trim();
 }
 
+/**
+ * Mutable accumulator for the Claude transcript reducer. One field per local
+ * that {@link scanClaudeSession} previously declared inline — the reducer
+ * mutates `state.*` instead of closure locals so the exact same logic can drive
+ * both a full parse and a resumable incremental parse (see
+ * {@link scanClaudeSessionIncremental}).
+ */
+export interface ClaudeParseState {
+  timestamp?: string;
+  cwd?: string;
+  gitBranch?: string;
+  version?: string;
+  topic?: string;
+  // Explicit session titles: `/rename` writes a `custom-title` event; Claude
+  // auto-generates an `ai-title`. Both can repeat across the file — last wins.
+  customTitle?: string;
+  aiTitle?: string;
+  entrypoint?: string;
+  messageCount: number;
+  tokenCount: number;
+  outputTokens: number;
+  sawTokenCount: boolean;
+  costUsd: number;
+  sawCost: boolean;
+  // Track the first and last timestamped event to derive wall-clock duration.
+  firstTsMs?: number;
+  lastTsMs?: number;
+  seenAssistantIds: Set<string>;
+  userTexts: string[];
+  // Durable PR signal: set only when an actual `gh pr create` Bash *command*
+  // runs (structural — the command field, not any prose mentioning it), then
+  // capture the pull URL from a later tool_result's output.
+  sawPrCreate: boolean;
+  prUrl?: string;
+  prNumber?: number;
+  // Artifacts the session PRODUCED: tracker refs it created and any team it spawned.
+  // Ticket creation spans two events — a create_issue tool_use, then the tool_result
+  // carrying the new id — so we hold the pending tool_use ids until their result lands.
+  createdTickets: Set<string>;
+  pendingTicketTools: Set<string>;
+  spawnedTeam?: string;
+  // The LAST ExitPlanMode plan wins so a re-planned session surfaces its most
+  // recent plan, matching the semantic the extension's re-parser relied on.
+  plan?: string;
+}
+
+/** Zero-value accumulator for a fresh (from-byte-0) Claude parse. */
+export function initClaudeParseState(): ClaudeParseState {
+  return {
+    timestamp: undefined,
+    cwd: undefined,
+    gitBranch: undefined,
+    version: undefined,
+    topic: undefined,
+    customTitle: undefined,
+    aiTitle: undefined,
+    entrypoint: undefined,
+    messageCount: 0,
+    tokenCount: 0,
+    outputTokens: 0,
+    sawTokenCount: false,
+    costUsd: 0,
+    sawCost: false,
+    firstTsMs: undefined,
+    lastTsMs: undefined,
+    seenAssistantIds: new Set<string>(),
+    userTexts: [],
+    sawPrCreate: false,
+    prUrl: undefined,
+    prNumber: undefined,
+    createdTickets: new Set<string>(),
+    pendingTicketTools: new Set<string>(),
+    spawnedTeam: undefined,
+    plan: undefined,
+  };
+}
+
+/**
+ * Fold one parsed transcript line into the accumulator. This is the exact loop
+ * body {@link scanClaudeSession} used to run inline — extracted verbatim,
+ * mutating `state.*` in place. `parsed` is the already-`JSON.parse`d line (the
+ * malformed-line skip happens in the caller, as before).
+ */
+export function applyClaudeLine(state: ClaudeParseState, parsed: any): void {
+  // entrypoint ships on the first envelope event (attachment/user/assistant)
+  // and is the clean structural signal for "was this a team spawn?"
+  if (!state.entrypoint && typeof parsed.entrypoint === 'string') {
+    state.entrypoint = parsed.entrypoint;
+  }
+
+  // Produced-artifact signals, structurally (independent of the PR gate below):
+  //   - a Bash `agents teams create/add` command → the team it spawned
+  //   - a Linear create_issue / `gh issue create` tool_use → its result carries
+  //     the new ticket ref, read from the matching tool_result.
+  if (parsed.type === 'assistant' && Array.isArray(parsed.message?.content)) {
+    for (const b of parsed.message.content) {
+      if (b?.type !== 'tool_use') continue;
+      if (!state.spawnedTeam && typeof b?.input?.command === 'string') {
+        const team = detectSpawnedTeam(b.input.command);
+        if (team) state.spawnedTeam = team;
+      }
+      if (typeof b?.id === 'string' && isTicketCreateTool(b?.name, b?.input?.command)) {
+        state.pendingTicketTools.add(b.id);
+      }
+      // ExitPlanMode plan markdown — last one wins so a re-planned session
+      // reports its most recent plan.
+      if (b?.name === 'ExitPlanMode' && typeof b?.input?.plan === 'string') {
+        const p = b.input.plan.trim();
+        if (p) state.plan = b.input.plan;
+      }
+    }
+  }
+  if (state.pendingTicketTools.size > 0 && parsed.type === 'user' && Array.isArray(parsed.message?.content)) {
+    for (const b of parsed.message.content) {
+      if (b?.type !== 'tool_result' || typeof b?.tool_use_id !== 'string') continue;
+      if (!state.pendingTicketTools.has(b.tool_use_id)) continue;
+      state.pendingTicketTools.delete(b.tool_use_id);
+      const text = typeof b.content === 'string'
+        ? b.content
+        : Array.isArray(b.content) ? b.content.map((c: any) => c?.text || '').join('\n') : '';
+      const t = extractCreatedTicket(text);
+      if (t) state.createdTickets.add(t);
+    }
+  }
+
+  // PR signal, structurally: a Bash tool_use whose command is `gh pr create`
+  // marks intent; the pull URL is then read from a tool_result's output.
+  if (!state.prUrl) {
+    if (!state.sawPrCreate && parsed.type === 'assistant' && Array.isArray(parsed.message?.content)) {
+      for (const b of parsed.message.content) {
+        if (b?.type === 'tool_use' && typeof b?.input?.command === 'string' && isPrCreateCommand(b.input.command)) {
+          state.sawPrCreate = true;
+        }
+      }
+    }
+    if (state.sawPrCreate && parsed.type === 'user' && Array.isArray(parsed.message?.content)) {
+      for (const b of parsed.message.content) {
+        if (b?.type !== 'tool_result') continue;
+        const text = typeof b.content === 'string'
+          ? b.content
+          : Array.isArray(b.content) ? b.content.map((c: any) => c?.text || '').join('\n') : '';
+        const pr = extractPrUrl(text);
+        if (pr) { state.prUrl = pr.url; state.prNumber = pr.number; }
+      }
+    }
+  }
+
+  // Track duration across every timestamped event, not just the first.
+  if (typeof parsed.timestamp === 'string') {
+    const ms = new Date(parsed.timestamp).getTime();
+    if (!Number.isNaN(ms)) {
+      if (state.firstTsMs === undefined || ms < state.firstTsMs) state.firstTsMs = ms;
+      if (state.lastTsMs === undefined || ms > state.lastTsMs) state.lastTsMs = ms;
+    }
+  }
+
+  if (!state.timestamp && (parsed.type === 'user' || parsed.type === 'assistant') && parsed.timestamp) {
+    state.timestamp = parsed.timestamp;
+    state.cwd = parsed.cwd || '';
+    state.gitBranch = parsed.gitBranch || undefined;
+    state.version = parsed.version || undefined;
+  }
+
+  if (parsed.type === 'custom-title') {
+    const t = typeof parsed.customTitle === 'string' ? parsed.customTitle.trim() : '';
+    if (t) state.customTitle = t;
+    return;
+  }
+  if (parsed.type === 'ai-title') {
+    const t = typeof parsed.aiTitle === 'string' ? parsed.aiTitle.trim() : '';
+    if (t) state.aiTitle = t;
+    return;
+  }
+
+  if (parsed.type === 'user') {
+    const text = extractClaudeUserText(parsed);
+    if (text) {
+      state.messageCount++;
+      state.userTexts.push(text);
+      if (!state.topic) state.topic = extractSessionTopic(text);
+    }
+    return;
+  }
+
+  if (parsed.type !== 'assistant') return;
+
+  const assistantId = typeof parsed.message?.id === 'string'
+    ? parsed.message.id
+    : typeof parsed.uuid === 'string'
+      ? parsed.uuid
+      : undefined;
+
+  const logicalId = assistantId || `${parsed.timestamp || ''}:${state.seenAssistantIds.size}`;
+  if (state.seenAssistantIds.has(logicalId)) return;
+  state.seenAssistantIds.add(logicalId);
+  state.messageCount++;
+
+  const usageObj = parsed.message?.usage || parsed.usage;
+  const usage = getClaudeUsageTotal(usageObj);
+  if (usage !== null) {
+    state.tokenCount += usage;
+    state.sawTokenCount = true;
+  }
+  if (typeof usageObj?.output_tokens === 'number') state.outputTokens += usageObj.output_tokens;
+  // Per-assistant-message cost: each event carries its own model, so we
+  // multiply that event's raw token directions by that model's price.
+  const model = parsed.message?.model;
+  if (model && usageObj && typeof usageObj === 'object') {
+    const eventCost = costOfUsage({
+      model,
+      inputTokens: usageObj.input_tokens,
+      outputTokens: usageObj.output_tokens,
+      cacheReadTokens: usageObj.cache_read_input_tokens,
+      cacheCreationTokens: usageObj.cache_creation_input_tokens,
+    });
+    if (eventCost > 0) {
+      state.costUsd += eventCost;
+      state.sawCost = true;
+    }
+  }
+}
+
+/**
+ * Build the {@link ClaudeSessionScan} return object from an accumulator. This is
+ * the exact return-building {@link scanClaudeSession} used to run inline.
+ */
+export function finalizeClaudeScan(state: ClaudeParseState): ClaudeSessionScan {
+  const durationMs =
+    state.firstTsMs !== undefined && state.lastTsMs !== undefined && state.lastTsMs > state.firstTsMs
+      ? state.lastTsMs - state.firstTsMs
+      : undefined;
+
+  // Prefer an explicit session title (user `/rename` > Claude auto-title) over
+  // the first-prompt topic.
+  const resolvedTopic = state.customTitle || state.aiTitle || state.topic;
+  const worktree = detectWorktree(state.cwd, state.gitBranch);
+  const ticket = detectTicket(state.userTexts.join('\n') || undefined, state.gitBranch);
+
+  return {
+    timestamp: state.timestamp,
+    cwd: state.cwd,
+    gitBranch: state.gitBranch,
+    version: state.version,
+    topic: resolvedTopic,
+    entrypoint: state.entrypoint,
+    messageCount: state.messageCount,
+    tokenCount: state.sawTokenCount ? state.tokenCount : undefined,
+    outputTokens: state.sawTokenCount ? state.outputTokens : undefined,
+    costUsd: state.sawCost ? state.costUsd : undefined,
+    durationMs,
+    lastActivity: state.lastTsMs !== undefined ? new Date(state.lastTsMs).toISOString() : undefined,
+    contentText: state.userTexts.length > 0 ? state.userTexts.join('\n') : undefined,
+    prUrl: state.prUrl,
+    prNumber: state.prNumber,
+    worktreeSlug: worktree?.slug,
+    ticketId: ticket?.id,
+    createdTickets: state.createdTickets.size > 0 ? [...state.createdTickets] : undefined,
+    spawnedTeam: state.spawnedTeam,
+    plan: state.plan,
+  };
+}
+
 /** Stream a Claude JSONL file and extract scan-level metadata (timestamp, cwd, topic, tokens). */
 export async function scanClaudeSession(filePath: string): Promise<ClaudeSessionScan> {
   const stream = fs.createReadStream(filePath, { encoding: 'utf-8' });
   const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
 
-  let timestamp: string | undefined;
-  let cwd: string | undefined;
-  let gitBranch: string | undefined;
-  let version: string | undefined;
-  let topic: string | undefined;
-  // Explicit session titles: `/rename` writes a `custom-title` event; Claude
-  // auto-generates an `ai-title`. Both can repeat across the file — last wins.
-  let customTitle: string | undefined;
-  let aiTitle: string | undefined;
-  let entrypoint: string | undefined;
-  let messageCount = 0;
-  let tokenCount = 0;
-  let outputTokens = 0;
-  let sawTokenCount = false;
-  let costUsd = 0;
-  let sawCost = false;
-  // Track the first and last timestamped event to derive wall-clock duration.
-  let firstTsMs: number | undefined;
-  let lastTsMs: number | undefined;
-  const seenAssistantIds = new Set<string>();
-  const userTexts: string[] = [];
-  // Durable PR signal: set only when an actual `gh pr create` Bash *command*
-  // runs (structural — the command field, not any prose mentioning it), then
-  // capture the pull URL from a later tool_result's output.
-  let sawPrCreate = false;
-  let prUrl: string | undefined;
-  let prNumber: number | undefined;
-
-  // Artifacts the session PRODUCED: tracker refs it created and any team it spawned.
-  // Ticket creation spans two events — a create_issue tool_use, then the tool_result
-  // carrying the new id — so we hold the pending tool_use ids until their result lands.
-  const createdTickets = new Set<string>();
-  const pendingTicketTools = new Set<string>();
-  let spawnedTeam: string | undefined;
-  // The LAST ExitPlanMode plan wins so a re-planned session surfaces its most
-  // recent plan, matching the semantic the extension's re-parser relied on.
-  let plan: string | undefined;
+  const state = initClaudeParseState();
 
   try {
     for await (const line of rl) {
@@ -2614,180 +2840,223 @@ export async function scanClaudeSession(filePath: string): Promise<ClaudeSession
         continue;
       }
 
-      // entrypoint ships on the first envelope event (attachment/user/assistant)
-      // and is the clean structural signal for "was this a team spawn?"
-      if (!entrypoint && typeof parsed.entrypoint === 'string') {
-        entrypoint = parsed.entrypoint;
-      }
-
-      // Produced-artifact signals, structurally (independent of the PR gate below):
-      //   - a Bash `agents teams create/add` command → the team it spawned
-      //   - a Linear create_issue / `gh issue create` tool_use → its result carries
-      //     the new ticket ref, read from the matching tool_result.
-      if (parsed.type === 'assistant' && Array.isArray(parsed.message?.content)) {
-        for (const b of parsed.message.content) {
-          if (b?.type !== 'tool_use') continue;
-          if (!spawnedTeam && typeof b?.input?.command === 'string') {
-            const team = detectSpawnedTeam(b.input.command);
-            if (team) spawnedTeam = team;
-          }
-          if (typeof b?.id === 'string' && isTicketCreateTool(b?.name, b?.input?.command)) {
-            pendingTicketTools.add(b.id);
-          }
-          // ExitPlanMode plan markdown — last one wins so a re-planned session
-          // reports its most recent plan.
-          if (b?.name === 'ExitPlanMode' && typeof b?.input?.plan === 'string') {
-            const p = b.input.plan.trim();
-            if (p) plan = b.input.plan;
-          }
-        }
-      }
-      if (pendingTicketTools.size > 0 && parsed.type === 'user' && Array.isArray(parsed.message?.content)) {
-        for (const b of parsed.message.content) {
-          if (b?.type !== 'tool_result' || typeof b?.tool_use_id !== 'string') continue;
-          if (!pendingTicketTools.has(b.tool_use_id)) continue;
-          pendingTicketTools.delete(b.tool_use_id);
-          const text = typeof b.content === 'string'
-            ? b.content
-            : Array.isArray(b.content) ? b.content.map((c: any) => c?.text || '').join('\n') : '';
-          const t = extractCreatedTicket(text);
-          if (t) createdTickets.add(t);
-        }
-      }
-
-      // PR signal, structurally: a Bash tool_use whose command is `gh pr create`
-      // marks intent; the pull URL is then read from a tool_result's output.
-      if (!prUrl) {
-        if (!sawPrCreate && parsed.type === 'assistant' && Array.isArray(parsed.message?.content)) {
-          for (const b of parsed.message.content) {
-            if (b?.type === 'tool_use' && typeof b?.input?.command === 'string' && isPrCreateCommand(b.input.command)) {
-              sawPrCreate = true;
-            }
-          }
-        }
-        if (sawPrCreate && parsed.type === 'user' && Array.isArray(parsed.message?.content)) {
-          for (const b of parsed.message.content) {
-            if (b?.type !== 'tool_result') continue;
-            const text = typeof b.content === 'string'
-              ? b.content
-              : Array.isArray(b.content) ? b.content.map((c: any) => c?.text || '').join('\n') : '';
-            const pr = extractPrUrl(text);
-            if (pr) { prUrl = pr.url; prNumber = pr.number; }
-          }
-        }
-      }
-
-      // Track duration across every timestamped event, not just the first.
-      if (typeof parsed.timestamp === 'string') {
-        const ms = new Date(parsed.timestamp).getTime();
-        if (!Number.isNaN(ms)) {
-          if (firstTsMs === undefined || ms < firstTsMs) firstTsMs = ms;
-          if (lastTsMs === undefined || ms > lastTsMs) lastTsMs = ms;
-        }
-      }
-
-      if (!timestamp && (parsed.type === 'user' || parsed.type === 'assistant') && parsed.timestamp) {
-        timestamp = parsed.timestamp;
-        cwd = parsed.cwd || '';
-        gitBranch = parsed.gitBranch || undefined;
-        version = parsed.version || undefined;
-      }
-
-      if (parsed.type === 'custom-title') {
-        const t = typeof parsed.customTitle === 'string' ? parsed.customTitle.trim() : '';
-        if (t) customTitle = t;
-        continue;
-      }
-      if (parsed.type === 'ai-title') {
-        const t = typeof parsed.aiTitle === 'string' ? parsed.aiTitle.trim() : '';
-        if (t) aiTitle = t;
-        continue;
-      }
-
-      if (parsed.type === 'user') {
-        const text = extractClaudeUserText(parsed);
-        if (text) {
-          messageCount++;
-          userTexts.push(text);
-          if (!topic) topic = extractSessionTopic(text);
-        }
-        continue;
-      }
-
-      if (parsed.type !== 'assistant') continue;
-
-      const assistantId = typeof parsed.message?.id === 'string'
-        ? parsed.message.id
-        : typeof parsed.uuid === 'string'
-          ? parsed.uuid
-          : undefined;
-
-      const logicalId = assistantId || `${parsed.timestamp || ''}:${seenAssistantIds.size}`;
-      if (seenAssistantIds.has(logicalId)) continue;
-      seenAssistantIds.add(logicalId);
-      messageCount++;
-
-      const usageObj = parsed.message?.usage || parsed.usage;
-      const usage = getClaudeUsageTotal(usageObj);
-      if (usage !== null) {
-        tokenCount += usage;
-        sawTokenCount = true;
-      }
-      if (typeof usageObj?.output_tokens === 'number') outputTokens += usageObj.output_tokens;
-      // Per-assistant-message cost: each event carries its own model, so we
-      // multiply that event's raw token directions by that model's price.
-      const model = parsed.message?.model;
-      if (model && usageObj && typeof usageObj === 'object') {
-        const eventCost = costOfUsage({
-          model,
-          inputTokens: usageObj.input_tokens,
-          outputTokens: usageObj.output_tokens,
-          cacheReadTokens: usageObj.cache_read_input_tokens,
-          cacheCreationTokens: usageObj.cache_creation_input_tokens,
-        });
-        if (eventCost > 0) {
-          costUsd += eventCost;
-          sawCost = true;
-        }
-      }
+      applyClaudeLine(state, parsed);
     }
   } finally {
     rl.close();
     stream.destroy();
   }
 
-  const durationMs =
-    firstTsMs !== undefined && lastTsMs !== undefined && lastTsMs > firstTsMs
-      ? lastTsMs - firstTsMs
-      : undefined;
+  return finalizeClaudeScan(state);
+}
 
-  // Prefer an explicit session title (user `/rename` > Claude auto-title) over
-  // the first-prompt topic.
-  const resolvedTopic = customTitle || aiTitle || topic;
-  const worktree = detectWorktree(cwd, gitBranch);
-  const ticket = detectTicket(userTexts.join('\n') || undefined, gitBranch);
+/**
+ * SERIALIZED continuation blob persisted in `scan_ledger.parser_state`. Carries
+ * everything {@link hydrateClaudeParseState} needs to resume a parse from
+ * `offset` such that resuming + applying the appended lines is byte-for-byte
+ * identical to a full parse of the whole file.
+ *
+ * `seenAssistantIds` is persisted as a size counter plus a bounded FIFO window
+ * of the most-recent ids: the fallback logical id `${ts}:${seenAssistantIds.size}`
+ * (see {@link applyClaudeLine}) depends on the set's *size*, so the size must be
+ * exact even when the recent window is smaller than the true count.
+ */
+export interface ClaudeParserState {
+  v: 1;
+  offset: number;
+  timestamp?: string;
+  cwd?: string;
+  gitBranch?: string;
+  version?: string;
+  entrypoint?: string;
+  firstTsMs?: number;
+  topic?: string;
+  customTitle?: string;
+  aiTitle?: string;
+  plan?: string;
+  lastTsMs?: number;
+  messageCount: number;
+  tokenCount: number;
+  outputTokens: number;
+  sawTokenCount: boolean;
+  sawCost: boolean;
+  costUsd: number;
+  seenIdsSize: number;
+  seenIdsRecent: string[];
+  sawPrCreate: boolean;
+  prUrl?: string;
+  prNumber?: number;
+  pendingTicketTools: string[];
+  createdTickets: string[];
+  spawnedTeam?: string;
+  ticketId?: string;
+  contentText?: string;
+}
 
+/** Cap on the FIFO window of recent assistant ids persisted in the continuation. */
+const SEEN_IDS_RECENT_CAP = 256;
+
+/**
+ * Snapshot a live {@link ClaudeParseState} into its serializable form at
+ * `offset` bytes consumed. Round-trips through {@link hydrateClaudeParseState}
+ * so incremental replay equals a full parse.
+ */
+export function serializeClaudeParserState(state: ClaudeParseState, offset: number): ClaudeParserState {
+  const allIds = [...state.seenAssistantIds];
+  const seenIdsRecent = allIds.length > SEEN_IDS_RECENT_CAP
+    ? allIds.slice(allIds.length - SEEN_IDS_RECENT_CAP)
+    : allIds;
+  const ticket = detectTicket(state.userTexts.join('\n') || undefined, state.gitBranch);
   return {
-    timestamp,
-    cwd,
-    gitBranch,
-    version,
-    topic: resolvedTopic,
-    entrypoint,
-    messageCount,
-    tokenCount: sawTokenCount ? tokenCount : undefined,
-    outputTokens: sawTokenCount ? outputTokens : undefined,
-    costUsd: sawCost ? costUsd : undefined,
-    durationMs,
-    lastActivity: lastTsMs !== undefined ? new Date(lastTsMs).toISOString() : undefined,
-    contentText: userTexts.length > 0 ? userTexts.join('\n') : undefined,
-    prUrl,
-    prNumber,
-    worktreeSlug: worktree?.slug,
+    v: 1,
+    offset,
+    timestamp: state.timestamp,
+    cwd: state.cwd,
+    gitBranch: state.gitBranch,
+    version: state.version,
+    entrypoint: state.entrypoint,
+    firstTsMs: state.firstTsMs,
+    topic: state.topic,
+    customTitle: state.customTitle,
+    aiTitle: state.aiTitle,
+    plan: state.plan,
+    lastTsMs: state.lastTsMs,
+    messageCount: state.messageCount,
+    tokenCount: state.tokenCount,
+    outputTokens: state.outputTokens,
+    sawTokenCount: state.sawTokenCount,
+    sawCost: state.sawCost,
+    costUsd: state.costUsd,
+    seenIdsSize: state.seenAssistantIds.size,
+    seenIdsRecent,
+    sawPrCreate: state.sawPrCreate,
+    prUrl: state.prUrl,
+    prNumber: state.prNumber,
+    pendingTicketTools: [...state.pendingTicketTools],
+    createdTickets: [...state.createdTickets],
+    spawnedTeam: state.spawnedTeam,
+    // ticketId is derived at finalize time; persist it (and content_text) so a
+    // consumer (B-2) can rebuild the row + FTS doc on append without re-reading
+    // the whole file. worktreeSlug is re-derived from cwd/gitBranch, so it need
+    // not be persisted.
     ticketId: ticket?.id,
-    createdTickets: createdTickets.size > 0 ? [...createdTickets] : undefined,
-    spawnedTeam,
-    plan,
+    contentText: state.userTexts.length > 0 ? state.userTexts.join('\n') : undefined,
+  };
+}
+
+/**
+ * Rebuild a live {@link ClaudeParseState} from a persisted continuation so that
+ * applying the appended lines yields the same accumulator a full parse would.
+ *
+ * `seenAssistantIds` is rehydrated from the recent-id FIFO window, then padded
+ * with unique sentinel entries so its `.size` matches the true prior count
+ * (`seenIdsSize`) — the fallback id `${ts}:${size}` must line up with the full
+ * parse even when the window dropped older ids. Padding sentinels can never
+ * collide with a real logical id (real ids are message ids/uuids or
+ * `${ts}:${n}`; the sentinel prefix is not JSON-line-derived).
+ *
+ * `userTexts` is rehydrated as a single joined blob from `contentText`: only
+ * `userTexts.join('\n')` (detectTicket + contentText) and `userTexts.length > 0`
+ * are ever read downstream, and both are preserved by a one-element array
+ * holding the joined content.
+ */
+export function hydrateClaudeParseState(prior: ClaudeParserState): ClaudeParseState {
+  const seen = new Set<string>(prior.seenIdsRecent);
+  // Pad to the true prior size so `seenAssistantIds.size` (which feeds the
+  // fallback logical id) is exact even when older ids fell out of the window.
+  let pad = 0;
+  while (seen.size < prior.seenIdsSize) {
+    seen.add(` pad:${pad++}`);
+  }
+  return {
+    timestamp: prior.timestamp,
+    cwd: prior.cwd,
+    gitBranch: prior.gitBranch,
+    version: prior.version,
+    topic: prior.topic,
+    customTitle: prior.customTitle,
+    aiTitle: prior.aiTitle,
+    entrypoint: prior.entrypoint,
+    messageCount: prior.messageCount,
+    tokenCount: prior.tokenCount,
+    outputTokens: prior.outputTokens,
+    sawTokenCount: prior.sawTokenCount,
+    costUsd: prior.costUsd,
+    sawCost: prior.sawCost,
+    firstTsMs: prior.firstTsMs,
+    lastTsMs: prior.lastTsMs,
+    seenAssistantIds: seen,
+    userTexts: prior.contentText !== undefined && prior.contentText.length > 0 ? [prior.contentText] : [],
+    sawPrCreate: prior.sawPrCreate,
+    prUrl: prior.prUrl,
+    prNumber: prior.prNumber,
+    createdTickets: new Set<string>(prior.createdTickets),
+    pendingTicketTools: new Set<string>(prior.pendingTicketTools),
+    spawnedTeam: prior.spawnedTeam,
+    plan: prior.plan,
+  };
+}
+
+/**
+ * Resume a Claude parse from `fromOffset` bytes into the file, folding only the
+ * newly-appended lines into `prior`. Returns the finalized scan, the next
+ * serialized continuation, and the byte offset to resume from next time —
+ * `newOffset` stops at the last `'\n'` seen so a half-written trailing record is
+ * re-read (not lost) on the next append.
+ *
+ * NOT wired into the live scan path yet (that is B-2); {@link scanClaudeSession}
+ * remains the only caller-facing entry point. This exists so the parity harness
+ * can prove full === hydrate(state@k) + apply(k+1..n).
+ */
+export async function scanClaudeSessionIncremental(
+  filePath: string,
+  fromOffset: number,
+  prior: ClaudeParserState,
+): Promise<{ scan: ClaudeSessionScan; newState: ClaudeParserState; newOffset: number }> {
+  const state = hydrateClaudeParseState(prior);
+
+  // Count bytes UP TO AND INCLUDING the last newline consumed, so a partial
+  // trailing line (no terminating '\n') is re-read on the next append rather
+  // than parsed against a truncated record.
+  let bytesToLastNewline = 0;
+  let pendingBytes = 0;
+  const stream = fs.createReadStream(filePath, { start: fromOffset, encoding: 'utf-8' });
+  stream.on('data', (chunk: string | Buffer) => {
+    const buf = typeof chunk === 'string' ? Buffer.from(chunk, 'utf-8') : chunk;
+    // Walk the raw bytes; every 0x0A advances the committed offset to include it.
+    for (let i = 0; i < buf.length; i++) {
+      pendingBytes++;
+      if (buf[i] === 0x0a) {
+        bytesToLastNewline += pendingBytes;
+        pendingBytes = 0;
+      }
+    }
+  });
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+  try {
+    for await (const line of rl) {
+      if (!line.trim()) continue;
+
+      let parsed: any;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        continue;
+      }
+
+      applyClaudeLine(state, parsed);
+    }
+  } finally {
+    rl.close();
+    stream.destroy();
+  }
+
+  const newOffset = fromOffset + bytesToLastNewline;
+  return {
+    scan: finalizeClaudeScan(state),
+    newState: serializeClaudeParserState(state, newOffset),
+    newOffset,
   };
 }
 
