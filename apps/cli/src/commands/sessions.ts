@@ -30,7 +30,7 @@ import { gatherRemoteList, runOnPeer } from '../lib/session/remote-list.js';
 import { stringWidth, truncateToWidth, padToWidth, terminalWidth } from '../lib/session/width.js';
 import type { SessionActivity, AwaitingReason } from '../lib/session/state.js';
 import { inferSessionState } from '../lib/session/state.js';
-import { discoverSessions, countSessionsInScope, resolveSessionById, isCompleteSessionId, searchContentIndex, parseTimeFilter, getSessionRoots, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
+import { discoverSessions, countSessionsInScope, resolveSessionById, isCompleteSessionId, looksLikeSessionId, searchContentIndex, parseTimeFilter, getSessionRoots, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
 import { findSessionsById } from '../lib/session/db.js';
 import { filterTeamSessions } from '../lib/session/team-filter.js';
 import { parseSession } from '../lib/session/parse.js';
@@ -1423,16 +1423,6 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
     console.error(chalk.red(`Failed to discover sessions: ${err.message}`));
     process.exit(1);
   }
-}
-
-/** Whether a query should route to the single-session render rather than the
- * listing. The hex-ish test catches a bare id prefix; `isCompleteSessionId`
- * additionally catches the prefixed whole ids (`session_…`, `ses_…`) that the
- * hex test rejects — without it those never reach the id-only resolution and
- * still content-search. */
-function looksLikeSessionId(query: string): boolean {
-  const trimmed = query.trim();
-  return /^[0-9a-f-]{6,}$/i.test(trimmed) || isCompleteSessionId(trimmed);
 }
 
 function teamTag(session: SessionMeta): string {

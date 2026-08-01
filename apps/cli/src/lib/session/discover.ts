@@ -563,6 +563,24 @@ export function isCompleteSessionId(query: string): boolean {
 }
 
 /**
+ * Whether a query should be treated as a session id rather than a search phrase
+ * — the one canonical id-shaped test, shared by every session-id resolver.
+ *
+ * True for a complete id (`isCompleteSessionId`) AND for a bare hex short-id or
+ * prefix (`d3470b57`), which the complete-id check rejects. Any id-shaped query
+ * resolves by id ONLY (exact -> prefix -> `findSessionsById` index) and must
+ * never fall back to fuzzy content search: a short id like `d3470b57` otherwise
+ * surfaces every transcript that merely MENTIONS the string (a resume prompt
+ * echoes the parent id into the body of many later sessions). The hex test
+ * catches the bare short-id/prefix; `isCompleteSessionId` additionally catches
+ * the prefixed whole ids (`session_…`, `ses_…`) that the hex test rejects.
+ */
+export function looksLikeSessionId(query: string): boolean {
+  const trimmed = query.trim();
+  return /^[0-9a-f-]{6,}$/i.test(trimmed) || isCompleteSessionId(trimmed);
+}
+
+/**
  * Resolve a session by full or short ID. Accepts a pre-loaded session list
  * (fast path from discoverSessions) and falls back to a DB lookup for the
  * "I only know the id" case.
