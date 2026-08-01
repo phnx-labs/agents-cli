@@ -577,6 +577,78 @@ export function getScanStampsForPaths(filePaths: string[]): Map<string, ScanStam
 }
 
 /**
+ * A file's persisted resumable-parse continuation, read back from scan_ledger.
+ * `parserState` is the serialized {@link ClaudeParserState} JSON blob (offset +
+ * accumulator snapshot); `contentText` is the accumulated user doc. Both are
+ * written by the Claude scan (B-2) and consumed on the next scan to decide
+ * full-vs-incremental and to hydrate the resume.
+ */
+export interface ParserStateRow {
+  parserState: string | null;
+  contentText: string | null;
+  fileMtimeMs: number;
+  fileSize: number;
+  scannedAt: number;
+}
+
+/**
+ * Bulk-load the resumable-parse continuation (parser_state + content_text) plus
+ * the stamp for a set of file paths in a single chunked query. Mirrors
+ * {@link getScanStampsForPaths}: keys by canonical path and fans results back to
+ * every original alias so callers can `.get(filePath)` with the path they passed.
+ * The Claude incremental scan uses this to fetch each changed file's prior
+ * continuation without an N+1 of {@link getScanStampByPath}.
+ */
+export function getParserStatesForPaths(filePaths: string[]): Map<string, ParserStateRow> {
+  const result = new Map<string, ParserStateRow>();
+  if (filePaths.length === 0) return result;
+  const db = getDB();
+
+  const canonicalToOriginals = new Map<string, string[]>();
+  for (const fp of filePaths) {
+    const canonical = canonicalLedgerKey(fp);
+    const aliases = canonicalToOriginals.get(canonical);
+    if (aliases) aliases.push(fp);
+    else canonicalToOriginals.set(canonical, [fp]);
+  }
+
+  const canonicalKeys = [...canonicalToOriginals.keys()];
+  const CHUNK = 500;
+  for (let i = 0; i < canonicalKeys.length; i += CHUNK) {
+    const chunk = canonicalKeys.slice(i, i + CHUNK);
+    const placeholders = chunk.map(() => '?').join(',');
+    const rows = db
+      .prepare(`
+        SELECT file_path, file_mtime_ms, file_size, scanned_at, parser_state, content_text
+        FROM scan_ledger
+        WHERE file_path IN (${placeholders})
+      `)
+      .all(...chunk) as Array<{
+        file_path: string;
+        file_mtime_ms: number;
+        file_size: number;
+        scanned_at: number;
+        parser_state: string | null;
+        content_text: string | null;
+      }>;
+
+    for (const row of rows) {
+      const state: ParserStateRow = {
+        parserState: row.parser_state,
+        contentText: row.content_text,
+        fileMtimeMs: row.file_mtime_ms,
+        fileSize: row.file_size,
+        scannedAt: row.scanned_at,
+      };
+      for (const original of canonicalToOriginals.get(row.file_path) || []) {
+        result.set(original, state);
+      }
+    }
+  }
+  return result;
+}
+
+/**
  * Record scan stamps for files we've looked at. Covers both files that produced
  * a session and files we looked at but chose not to index (e.g. malformed).
  */
@@ -830,19 +902,26 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
 
 /** Batch-upsert sessions with their FTS5 content and scan stamps in a single transaction. */
 export function upsertSessionsBatch(
-  entries: Array<{ meta: SessionMeta; content: string; scan?: ScanStamp }>,
+  entries: Array<{ meta: SessionMeta; content: string; scan?: ScanStamp; parserState?: string; contentText?: string }>,
 ): void {
   if (entries.length === 0) return;
   const db = getDB();
   const { upsert, delText, insText, readLabel } = stmts(db);
   const now = Date.now();
+  // Persist the Claude resumable-parse continuation (parser_state + content_text)
+  // alongside the stamp. On a full/incremental Claude parse the caller passes the
+  // serialized newState + accumulated user doc so the NEXT scan can resume from
+  // the persisted offset (B-2). Other scanners pass neither, leaving both columns
+  // NULL exactly as before — their ledger rows are unaffected.
   const ledger = db.prepare(`
-    INSERT INTO scan_ledger (file_path, file_mtime_ms, file_size, scanned_at)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO scan_ledger (file_path, file_mtime_ms, file_size, scanned_at, parser_state, content_text)
+    VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(file_path) DO UPDATE SET
       file_mtime_ms = excluded.file_mtime_ms,
       file_size = excluded.file_size,
-      scanned_at = excluded.scanned_at
+      scanned_at = excluded.scanned_at,
+      parser_state = excluded.parser_state,
+      content_text = excluded.content_text
   `);
 
   // Build a lookup from canonical file path → entry, used inside the write
@@ -877,7 +956,7 @@ export function upsertSessionsBatch(
       }
     }
 
-    for (const { meta, content, scan } of items) {
+    for (const { meta, content, scan, parserState, contentText } of items) {
       if (alreadyIndexed.has(meta.id)) continue;
       // Per-row guard: one malformed session (e.g. a required field that resolves to
       // NULL) must not abort the whole batch and take down the entire `agents sessions`
@@ -930,7 +1009,14 @@ export function upsertSessionsBatch(
         content ?? '',
       );
       if (scan && meta.filePath) {
-        ledger.run(canonicalLedgerKey(meta.filePath), scan.fileMtimeMs, scan.fileSize, now);
+        ledger.run(
+          canonicalLedgerKey(meta.filePath),
+          scan.fileMtimeMs,
+          scan.fileSize,
+          now,
+          parserState ?? null,
+          contentText ?? null,
+        );
       }
       } catch (err) {
         if (process.stderr.isTTY) {
