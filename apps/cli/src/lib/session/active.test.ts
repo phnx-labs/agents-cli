@@ -7,13 +7,14 @@ import type { HookSessionIndex } from './hook-sessions.js';
 
 describe('resolvePaneIdentity (per-pane attribution for the authoritative tmux source)', () => {
   const emptyHook = (): HookSessionIndex => ({ byLaunchId: new Map(), byTerminalId: new Map(), byPid: new Map() });
-  const meta = (labels: Record<string, string>, source = 'cli') => ({ labels, source });
+  const meta = (labels: Record<string, string>, extra: { source?: string; pane?: string } = {}) => ({ labels, source: extra.source ?? 'cli', pane: extra.pane });
 
   it('the per-pane launch registry WINS over the session meta label (a split into an existing session)', () => {
     // The session was originally a wrapped claude, but THIS pane hosts a gemini
     // bare-spawned into a split — it must be attributed to its own launch.
     const id = resolvePaneIdentity(
-      meta({ agent: 'claude', sessionId: 'origin-id' }),
+      '%2',
+      meta({ agent: 'claude', sessionId: 'origin-id' }, { pane: '%1' }),
       { pid: 5, agent: 'gemini', sessionId: 'gem-id', startedAtMs: 1 },
       emptyHook,
     );
@@ -26,18 +27,31 @@ describe('resolvePaneIdentity (per-pane attribution for the authoritative tmux s
       byTerminalId: new Map(),
       byPid: new Map(),
     };
-    const id = resolvePaneIdentity(null, { pid: 5, agent: 'gemini', launchId: 'L1', startedAtMs: 1 }, () => idx);
+    const id = resolvePaneIdentity('%2', null, { pid: 5, agent: 'gemini', launchId: 'L1', startedAtMs: 1 }, () => idx);
     expect(id).toEqual({ agent: 'gemini', sessionId: 'hook-id', pid: 5 });
   });
 
-  it('falls back to session-meta labels when the pane has no live launch entry (wrapped origin / legacy)', () => {
-    const id = resolvePaneIdentity(meta({ agent: 'claude', sessionId: 'meta-id' }), undefined, emptyHook);
+  it('falls back to session-meta labels on the ORIGIN pane when it has no live launch entry (legacy)', () => {
+    const id = resolvePaneIdentity('%1', meta({ agent: 'claude', sessionId: 'meta-id' }, { pane: '%1' }), undefined, emptyHook);
+    expect(id).toEqual({ agent: 'claude', sessionId: 'meta-id' });
+  });
+
+  it('does NOT mis-attribute the wrapped agent to a non-origin shell split pane', () => {
+    // A split shell pane (%2) of a labeled session, no registry entry: must be
+    // skipped so the origin pane (%1) is the only one that emits the wrapped agent.
+    const id = resolvePaneIdentity('%2', meta({ agent: 'claude', sessionId: 'meta-id' }, { pane: '%1' }), undefined, emptyHook);
+    expect(id).toBeUndefined();
+  });
+
+  it('accepts any labeled pane when meta.pane is unknown (attach-existing sessions)', () => {
+    const id = resolvePaneIdentity('%9', meta({ agent: 'claude', sessionId: 'meta-id' }), undefined, emptyHook);
     expect(id).toEqual({ agent: 'claude', sessionId: 'meta-id' });
   });
 
   it('skips a teams pane (teammates come from listTeamsActive, never double-counted here)', () => {
     const id = resolvePaneIdentity(
-      meta({ agent: 'claude', sessionId: 'x' }, 'teams'),
+      '%1',
+      meta({ agent: 'claude', sessionId: 'x' }, { source: 'teams' }),
       { pid: 5, agent: 'claude', sessionId: 'x', startedAtMs: 1 },
       emptyHook,
     );
@@ -45,8 +59,8 @@ describe('resolvePaneIdentity (per-pane attribution for the authoritative tmux s
   });
 
   it('returns undefined for an unlabeled pane with no launch entry (a plain shell split)', () => {
-    expect(resolvePaneIdentity(null, undefined, emptyHook)).toBeUndefined();
-    expect(resolvePaneIdentity(meta({}), undefined, emptyHook)).toBeUndefined();
+    expect(resolvePaneIdentity('%1', null, undefined, emptyHook)).toBeUndefined();
+    expect(resolvePaneIdentity('%1', meta({}), undefined, emptyHook)).toBeUndefined();
   });
 });
 

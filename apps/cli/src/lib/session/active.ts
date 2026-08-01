@@ -1088,11 +1088,16 @@ export interface PaneIdentity {
  * dropped by this source and left to the weaker ps-scan fallback. Session-meta
  * labels remain the fallback for the wrapped origin pane of a session whose
  * registry entry is absent (a failed best-effort write, or a legacy session that
- * predates the registry's `tmuxPane` field). `source: 'teams'` panes are skipped —
- * teammates are surfaced by listTeamsActive. Pure so it is unit-tested without tmux.
+ * predates the registry's `tmuxPane` field) — and ONLY for that origin pane
+ * (`meta.pane`), so a split shell pane of a labeled session isn't mis-attributed
+ * the wrapped agent. When `meta.pane` is unknown (attach-existing sessions), any
+ * labeled pane is accepted and the caller's per-session dedupe keeps one.
+ * `source: 'teams'` panes are skipped — teammates are surfaced by listTeamsActive.
+ * Pure so it is unit-tested without tmux.
  */
 export function resolvePaneIdentity(
-  meta: { labels?: Record<string, string>; source?: string } | null,
+  pane: string,
+  meta: { labels?: Record<string, string>; source?: string; pane?: string } | null,
   liveEntry: PidSessionEntry | undefined,
   getHookIndex: () => HookSessionIndex,
 ): PaneIdentity | undefined {
@@ -1112,7 +1117,7 @@ export function resolvePaneIdentity(
   }
   const agent = meta?.labels?.agent;
   const sessionId = meta?.labels?.sessionId;
-  if (agent && sessionId) return { agent, sessionId };
+  if (agent && sessionId && (meta?.pane == null || meta.pane === pane)) return { agent, sessionId };
   return undefined;
 }
 
@@ -1168,7 +1173,7 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
     if (!pane || !sessName) continue;
     const meta = readSessionMeta(sessName);
     const liveEntry = liveByPane.get(pane);
-    const id = resolvePaneIdentity(meta, liveEntry, getHookIndex);
+    const id = resolvePaneIdentity(pane, meta, liveEntry, getHookIndex);
     if (!id) continue;
     // Dedupe by resolved session id; an as-yet-unresolved id (a hookless/lagging
     // split) keys on the unique pane so it still surfaces as its own row.
