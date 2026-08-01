@@ -4,6 +4,7 @@ import {
   notableSnippet,
   routineKind,
   routineStartNotification,
+  routineStartFailedNotification,
   routineFinishNotification,
 } from './routine-notify.js';
 import type { JobConfig, RunMeta } from './routines.js';
@@ -93,6 +94,32 @@ describe('routineStartNotification — threshold', () => {
     expect(
       routineStartNotification(agentConfig({ agent: undefined, command: 'git pull' })),
     ).toBeNull();
+  });
+});
+
+// RUSH-2030: the daemon fires the START ping unconditionally, so a pre-spawn
+// failure (executeJobDetached throws before spawning) must emit a matching
+// failure banner from the daemon catch block — otherwise the user is left with
+// an orphaned "Routine started" and no finish, breaking "exactly one start +
+// one finish". This is the builder the catch path calls.
+describe('routineStartFailedNotification — closes the orphaned-start gap', () => {
+  it('emits a failure banner carrying the error reason and the runs-folder action', () => {
+    const n = routineStartFailedNotification(agentConfig(), 'prepareJobHome: ENOSPC');
+    expect(n).toMatchObject({
+      title: 'Routine failed',
+      subtitle: 'nightly',
+      action: 'routines:list',
+    });
+    expect(n.body).toBe('Failed to start: prepareJobHome: ENOSPC');
+  });
+
+  it('is never suppressed — even a command housekeeping routine gets the failure ping', () => {
+    const n = routineStartFailedNotification(
+      agentConfig({ agent: undefined, command: 'git pull' }),
+      'spawn EACCES',
+    );
+    expect(n).toMatchObject({ title: 'Routine failed', subtitle: 'nightly' });
+    expect(n.body).toBe('Failed to start: spawn EACCES');
   });
 });
 

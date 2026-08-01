@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import chalk from 'chalk';
 import { ticketLabel, machineLabeler, formatPickerLabel, formatPickerTip } from '../sessions.js';
 import type { SessionMeta } from '../../lib/session/types.js';
 
@@ -86,6 +87,39 @@ describe('formatPickerLabel', () => {
 
     const off = strip(formatPickerLabel(meta({ machine: 'yosemite-s0' }), '', { showMachine: false }));
     expect(off).not.toContain('s0');
+  });
+
+  it('tags the row with ssh←<device> when the live session was launched over ssh', () => {
+    const row = strip(formatPickerLabel(meta(), '', {}, { device: 'zion' }));
+    expect(row).toContain('ssh←zion');
+  });
+
+  it('renders the ssh←<device> tag in red, not folded into the whitened topic', () => {
+    // Regression: the tag used to be concatenated into the topic string, which
+    // renderTopicCell strips of ANSI and re-wraps in white — silently dropping
+    // the red. Force colour on so the assertion is deterministic across CI/TTY.
+    const prev = chalk.level;
+    chalk.level = Math.max(prev, 1) as 0 | 1 | 2 | 3;
+    try {
+      const raw = formatPickerLabel(meta(), '', {}, { device: 'zion' });
+      // chalk.red opens with \x1b[31m; it must sit immediately on the tag text,
+      // not be replaced by the topic cell's white (\x1b[37m).
+      expect(raw).toContain('\x1b[31mssh←zion');
+      expect(strip(raw)).toContain('ssh←zion');
+    } finally {
+      chalk.level = prev;
+    }
+  });
+
+  it('shows a bare ssh tag when the origin IP did not match a registered device', () => {
+    const row = strip(formatPickerLabel(meta(), '', {}, {}));
+    expect(row).toContain('ssh');
+    expect(row).not.toContain('ssh←');
+  });
+
+  it('adds no ssh tag for a local (non-ssh) session', () => {
+    const row = strip(formatPickerLabel(meta(), '', {}));
+    expect(row).not.toContain('ssh');
   });
 });
 

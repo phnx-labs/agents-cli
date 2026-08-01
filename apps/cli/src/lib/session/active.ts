@@ -36,6 +36,7 @@ import { computeTokPerSec } from './throughput.js';
 import { inferSessionState, type SessionState, type SessionActivity, type AwaitingReason, type StructuredQuestion, type TodoProgress, type DetectedPr, type DetectedWorktree, type DetectedTicket } from './state.js';
 import type { SessionAttachment } from './types.js';
 import { detectProvenance, type SessionProvenance } from './provenance.js';
+import { loadDevices, type DeviceRegistry } from '../devices/registry.js';
 import { presenceFromStore, type Presence } from './detached.js';
 import { mapBounded } from '../concurrency.js';
 
@@ -1271,8 +1272,11 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
     const pidAlive = pid ? isPidAlive(pid, liveEntry?.startedAtMs) : true;
     const { state, tokPerSec } = computeLiveSignals(id.agent, sessionFile, cwd, pidAlive);
     const { birthtimeMs, mtimeMs } = sessionFileTimes(sessionFile);
-    // Provenance is known exactly here (the pane IS a tmux pane) — set it so
-    // enrichProvenance skips it and the locator/reply rails resolve off the pane.
+    // The mux/reply rails are known exactly here (the pane IS a tmux pane), so we
+    // stamp them off the pane. `transport:'local'` is only a placeholder: the pane
+    // can't reveal how the shell above it was reached. enrichProvenance later reads
+    // the pane process's env and upgrades this to 'ssh' (with the real origin) when
+    // SSH_CONNECTION is present, while preserving this mux/reply.
     const provenance: SessionProvenance = {
       host: os.hostname(),
       transport: 'local',
@@ -1323,6 +1327,7 @@ export async function getActiveSessions(opts: ActiveQueryOptions = {}): Promise<
 
   const merged = dedupeBySession([...tmuxAgents, ...teams, ...terminals, ...cloud, ...unattributed]);
   await enrichProvenance(merged);
+  await resolveOrigins(merged);
   foldPresence(merged);
   return merged;
 }
@@ -1348,14 +1353,72 @@ function foldPresence(rows: ActiveSession[]): void {
  * each session once, not once per fork pid. Probes run in parallel — each is a
  * single /proc read (Linux) or `ps` call (macOS); failures leave `provenance`
  * undefined rather than blocking the listing.
+ *
+ * A row that already carries provenance (the tmux path, which knows its exact
+ * mux/reply from the pane) is not skipped — it is probe-and-MERGED. The tmux
+ * path can only stamp a `transport:'local'` placeholder because the pane alone
+ * doesn't reveal how the shell above it was reached; the process env does. So we
+ * still read the env and fill in the real SSH origin/term, while preserving the
+ * authoritative mux/reply the pane already gave us. Skipping this (the old
+ * behavior) is exactly why ssh-launched tmux sessions rendered as local.
  */
 async function enrichProvenance(sessions: ActiveSession[]): Promise<void> {
   await Promise.all(
     sessions.map(async (s) => {
-      if (s.provenance || !s.pid) return;
-      s.provenance = await detectProvenance(s.pid);
+      if (!s.pid) return;
+      const probed = await detectProvenance(s.pid);
+      if (!probed) return;
+      if (!s.provenance) {
+        s.provenance = probed;
+        return;
+      }
+      // Row already carries exact mux/reply (the tmux path). Fill only what a
+      // pre-set provenance can't know from the pane alone: the real launch origin.
+      if (probed.transport === 'ssh' && !s.provenance.ssh) {
+        s.provenance.transport = 'ssh';
+        s.provenance.ssh = probed.ssh;
+      }
+      if (probed.term && !s.provenance.term) s.provenance.term = probed.term;
     }),
   );
+}
+
+/**
+ * Match an SSH client IP to a registered device (pure — testable with a plain
+ * registry object). Returns the device name + ssh login user when the IP is a
+ * known device address.
+ */
+export function matchOriginDevice(
+  clientIp: string,
+  reg: DeviceRegistry,
+): { device: string; user?: string } | undefined {
+  for (const d of Object.values(reg)) {
+    if (d.address?.ip && d.address.ip === clientIp) {
+      return { device: d.name, ...(d.user ? { user: d.user } : {}) };
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Resolve the initiating device for every ssh-transport session by matching its
+ * `ssh.clientIp` against the device registry. Read-only and best-effort: a
+ * registry that can't be loaded, or an IP that matches no device, leaves
+ * `origin` undefined (the raw client IP is still on `ssh`). Mutates in place.
+ */
+async function resolveOrigins(sessions: ActiveSession[]): Promise<void> {
+  const needing = sessions.filter((s) => s.provenance?.ssh && !s.provenance.origin);
+  if (needing.length === 0) return;
+  let reg: DeviceRegistry;
+  try {
+    reg = await loadDevices();
+  } catch {
+    return;
+  }
+  for (const s of needing) {
+    const match = matchOriginDevice(s.provenance!.ssh!.clientIp, reg);
+    if (match) s.provenance!.origin = match;
+  }
 }
 
 /**

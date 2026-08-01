@@ -21,6 +21,7 @@ import {
   hashedServiceName,
   HMAC_KEY_ITEM,
   keychainServiceAlias,
+  keychainOperationPrompt,
   listKeychainItems,
   parseOrphanMigrationOutput,
   rekeyServiceNames,
@@ -30,6 +31,17 @@ import {
   withRawKeychainServiceNames,
   type KeychainBackend,
 } from './index.js';
+
+describe('keychainOperationPrompt', () => {
+  it('names the harness, bundle, reason, and duration', () => {
+    expect(keychainOperationPrompt({
+      agent: 'Claude',
+      bundle: 'prod',
+      reason: 'to deploy the API',
+      duration: '7 days',
+    })).toBe("Claude is requesting to unlock the 'prod' bundle for 7 days to deploy the API.");
+  });
+});
 
 describe('buildAddGenericPasswordArgs (RUSH-1764: value never in argv)', () => {
   it('omits the secret value from argv — it travels over stdin instead', () => {

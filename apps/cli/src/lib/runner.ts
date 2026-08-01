@@ -52,6 +52,7 @@ import { backgroundSpawnOptions } from './platform/process.js';
 import { walkForFiles } from './fs-walk.js';
 import { getBinaryPath, getVersionHomePath, isVersionInstalled, resolveVersion } from './versions.js';
 import { claudeHomeHasOwnCredential } from './agents.js';
+import { resolveAccountSetupToken } from './secrets/account-token.js';
 import {
   getConfiguredRunStrategy,
   resolveRunVersion,
@@ -485,20 +486,27 @@ export function buildRoutineSpawnEnv(
   for (const [k, v] of Object.entries(execEnv)) {
     if (v !== undefined) out[k] = v;
   }
-  // RUSH-1979: the daemon injects one ambient CLAUDE_CODE_OAUTH_TOKEN (RUSH-1759)
-  // so a token-less default account still authenticates. When balanced rotation
-  // pins THIS spawn to a specific account's CLAUDE_CONFIG_DIR that holds its own
-  // credential, that ambient token would shadow the account (Claude and the Linux
-  // shim both prefer the env var) — making the pool inert and 401ing on the one
-  // stale token. Drop it here so the pinned account authenticates itself; keep it
-  // when the account has no on-disk credential (the RUSH-1759 default).
-  if (
-    agent === 'claude' &&
-    version &&
-    out.CLAUDE_CONFIG_DIR &&
-    claudeHomeHasOwnCredential(getVersionHomePath('claude', version))
-  ) {
-    delete out.CLAUDE_CODE_OAUTH_TOKEN;
+  // A headless routine should authenticate the rotation-pinned account via its
+  // long-lived, NON-rotating setup-token, not the interactive OAuth session.
+  // Claude Code's interactive session uses single-use rotating refresh tokens: one
+  // fleet machine refreshing invalidates that account on every other machine, so
+  // they 401 and log out (Claude Code #25609 / #56339) — the fleet-wide daily
+  // logout. If the daemon injected this account's per-account
+  // CLAUDE_CODE_OAUTH_TOKEN_<slug> (from a headless-readable no-ACL bundle), use it;
+  // that also works on macOS, where the drop path below is inert
+  // (claudeHomeHasOwnCredential is false on darwin, agents.ts).
+  //
+  // Fallback (RUSH-1979): with no per-account token, keep the prior behavior — drop
+  // the single ambient CLAUDE_CODE_OAUTH_TOKEN when the pinned account has its own
+  // on-disk credential (Linux) so it isn't shadowed; keep it otherwise.
+  if (agent === 'claude' && version && out.CLAUDE_CONFIG_DIR) {
+    const home = getVersionHomePath('claude', version);
+    const accountToken = resolveAccountSetupToken(baseEnv, home);
+    if (accountToken) {
+      out.CLAUDE_CODE_OAUTH_TOKEN = accountToken;
+    } else if (claudeHomeHasOwnCredential(home)) {
+      delete out.CLAUDE_CODE_OAUTH_TOKEN;
+    }
   }
   if (timezone) out.TZ = timezone;
   return out;
@@ -612,11 +620,19 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
   if (eligibility) {
     throw new Error(eligibility.message);
   }
-  // `host:` placement — the job body runs on another machine over SSH; local
-  // version selection / sandbox / spawn do not apply. Sync callers (manual
-  // `routines run`, catchup) follow the remote run to completion.
-  if (config.host) {
-    return executeJobOnHost(config, { detached: false });
+  // Placement (hostStrategy / bare host:) — body may run on another machine
+  // over SSH or in the cloud; local version selection / sandbox / spawn then
+  // do not apply. Sync callers (manual `routines run`, catchup) follow the
+  // remote run to completion when possible.
+  {
+    const { resolvePlacementTarget } = await import('./routines-placement.js');
+    const target = resolvePlacementTarget(config);
+    if (target.mode === 'host') {
+      return executeJobOnHost({ ...config, host: target.host }, { detached: false });
+    }
+    if (target.mode === 'cloud') {
+      return executeJobOnCloud(config, { detached: false });
+    }
   }
 
   // Command-mode: run a plain shell command directly (no agent, no rotation,
@@ -880,6 +896,88 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
   return { meta, reportPath: null };
 }
 
+/**
+ * Dispatch a routine to the agent's native cloud provider (or the configured
+ * default). Writes a local run record with `cloudTaskId` so list/runs still
+ * work; does not wait for cloud completion on the detached path.
+ */
+async function executeJobOnCloud(config: JobConfig, opts: { detached: boolean }): Promise<RunResult> {
+  if (config.workflow) {
+    throw new Error(`Routine '${config.name}' runs a workflow bundle, which can't execute in the cloud yet — remove 'hostStrategy: cloud' or 'workflow:'.`);
+  }
+  if (config.loop) {
+    throw new Error(`Routine '${config.name}' uses 'loop:', which can't execute in the cloud yet — remove 'hostStrategy: cloud' or 'loop:'.`);
+  }
+  if (config.command) {
+    throw new Error(`Routine '${config.name}' uses 'command:', which can't execute in the cloud yet — remove 'hostStrategy: cloud' or 'command:'.`);
+  }
+  if (!config.agent) {
+    throw new Error(`Routine '${config.name}' hostStrategy: cloud requires an agent`);
+  }
+
+  const { resolveProvider } = await import('./cloud/registry.js');
+  const { insertTask } = await import('./cloud/store.js');
+  const provider = resolveProvider(undefined, config.agent);
+
+  const timer = createTimer('agent.run', {
+    agent: config.agent,
+    jobName: config.name,
+    mode: config.mode,
+    placement: 'cloud',
+    ...redactPrompt(config.prompt),
+    schedule: config.schedule,
+  });
+
+  const runId = generateRunId();
+  const runDir = getRunDir(config.name, runId);
+  fs.mkdirSync(runDir, { recursive: true });
+
+  const meta: RunMeta = {
+    jobName: config.name,
+    runId,
+    agent: config.agent,
+    pid: null,
+    spawnedAt: Date.now(),
+    status: 'running',
+    startedAt: new Date().toISOString(),
+    completedAt: null,
+    exitCode: null,
+  };
+  writeRunMeta(meta);
+
+  try {
+    const task = await provider.dispatch({
+      prompt: resolveJobPrompt(config),
+      agent: config.agent,
+      repo: config.repo,
+      timeout: config.timeout,
+      model: config.config?.model as string | undefined,
+    });
+    try { insertTask(task); } catch { /* store is best-effort */ }
+    meta.cloudTaskId = task.id;
+    meta.cloudProvider = task.provider;
+
+    // Terminal cloud responses (e.g. antigravity) finalize immediately.
+    // Async providers leave the run `running` with the cloud task id for
+    // the user to follow via `agents cloud status`.
+    if (task.status === 'completed') {
+      finalizeRunMeta(meta, 'completed', 0);
+    } else if (task.status === 'failed' || task.status === 'cancelled') {
+      finalizeRunMeta(meta, 'failed', 1, { errorMessage: task.summary ?? `cloud ${task.status}` });
+    }
+    // Non-terminal statuses stay `running` for both detached and sync paths;
+    // the user follows via `agents cloud status <id>`.
+    writeRunMeta(meta);
+    timer.end({ status: meta.status, exitCode: meta.exitCode ?? undefined, runId });
+    return { meta, reportPath: null };
+  } catch (err) {
+    finalizeRunMeta(meta, 'failed', 1, { errorMessage: (err as Error).message });
+    writeRunMeta(meta);
+    timer.end({ status: 'failed', exitCode: 1, runId, error: (err as Error).message });
+    throw err;
+  }
+}
+
 async function executeJobOnHost(config: JobConfig, opts: { detached: boolean }): Promise<RunResult> {
   if (config.workflow) {
     throw new Error(`Routine '${config.name}' runs a workflow bundle, which can't execute on a host yet — remove 'host:' or 'workflow:'.`);
@@ -1066,11 +1164,22 @@ export async function executeJobDetached(config: JobConfig, hooks?: RoutineHooks
     process.stderr.write(`[agents] daemon: skipping '${config.name}' — ${eligibility.message}\n`);
     throw new Error(eligibility.message);
   }
-  // `host:` placement — dispatch over SSH and return; the monitor finalizes the
-  // run later, so the in-process onFinish hook does not fire for host routines.
-  if (config.host) {
-    const { meta } = await executeJobOnHost(config, { detached: true });
-    return meta;
+  // Placement (hostStrategy / bare host:) — dispatch off-box and return; the
+  // monitor finalizes host: runs, cloud runs stay terminal when dispatch ends.
+  // Either way the in-process onFinish hook does not fire for off-box routines
+  // (the monitor tick observes an already-finalized record), so notify-desktop
+  // sends the finish notification only for local detached runs below (RUSH-2030).
+  {
+    const { resolvePlacementTarget } = await import('./routines-placement.js');
+    const target = resolvePlacementTarget(config);
+    if (target.mode === 'host') {
+      const { meta } = await executeJobOnHost({ ...config, host: target.host }, { detached: true });
+      return meta;
+    }
+    if (target.mode === 'cloud') {
+      const { meta } = await executeJobOnCloud(config, { detached: true });
+      return meta;
+    }
   }
 
   // Command-mode: fire a plain shell command detached (no agent, no rotation,

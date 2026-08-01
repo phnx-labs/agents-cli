@@ -175,17 +175,43 @@ export function buildRemoteAgentsInvocation(
   }
   const inner = ['agents', ...forwardedArgs].map(shellQuote).join(' ');
   const withCwd = remoteCwd ? `cd ${shellQuote(remoteCwd)} && ${inner}` : inner;
-  if (!env || Object.keys(env).length === 0) {
-    return `bash -lc ${shellQuote(withCwd)}`;
-  }
   // Prepend env exports so the remote command sees the shims dir even when the
   // login shell hasn't sourced the interactive rc files that usually add it.
-  // Values are double-quoted (not single-quoted) so remote variables like
-  // $HOME and $PATH are expanded by the login shell.
-  const exports = Object.entries(env)
-    .map(([k, v]) => `export ${shellQuote(k)}="${v.replace(/[\\"]/g, '\\$&')}"`)
-    .join('; ');
+  const exports = posixEnvExports(env);
+  if (!exports) {
+    return `bash -lc ${shellQuote(withCwd)}`;
+  }
   return `bash -lc ${shellQuote(`${exports}; ${withCwd}`)}`;
+}
+
+/**
+ * Keys whose values are trusted-static and legitimately need remote shell
+ * expansion — `PATH` references the remote `$HOME`/`$PATH`. Every other key is
+ * rendered as a shell literal, so an attacker-influenceable value (notably actor
+ * provenance, whose name/email can come from a tailnet peer's whois or an
+ * unvalidated `AGENTS_ACTOR_*` env var) can never inject shell into a dispatch.
+ */
+const EXPAND_KEYS = new Set(['PATH']);
+
+/**
+ * Build a POSIX `export K=V; …` prefix from an env map — empty string when the
+ * map is missing or empty. Values are rendered as shell LITERALS by default
+ * (single-quoted via {@link shellQuote}), so a `$(...)` or backtick in a value
+ * can never execute on the SSH target. Only {@link EXPAND_KEYS} (`PATH`) keep the
+ * expanding double-quote form (`\` and `"` escaped) so the remote `$HOME`/`$PATH`
+ * still resolve. Shared by {@link buildRemoteAgentsInvocation} and the
+ * detached/interactive dispatch builders (dispatch.ts) so every remote path
+ * exports env identically.
+ */
+export function posixEnvExports(env?: Record<string, string>): string {
+  if (!env || Object.keys(env).length === 0) return '';
+  return Object.entries(env)
+    .map(([k, v]) =>
+      EXPAND_KEYS.has(k)
+        ? `export ${shellQuote(k)}="${v.replace(/[\\"]/g, '\\$&')}"`
+        : `export ${shellQuote(k)}=${shellQuote(v)}`,
+    )
+    .join('; ');
 }
 
 /** The two remote shell dialects we build commands for. */

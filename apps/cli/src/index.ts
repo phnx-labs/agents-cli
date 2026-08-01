@@ -75,8 +75,9 @@ if (
 ) {
   const { runAgentGetSync, runAgentPingSync, runAgentLockSync } = await import('./lib/secrets/agent.js');
   const name = process.argv[3] ?? '';
+  const harness = process.argv[4] ?? 'cli';
   const code =
-    process.argv[2] === SYNC_GET_CMD ? await runAgentGetSync(name)
+    process.argv[2] === SYNC_GET_CMD ? await runAgentGetSync(name, harness)
     : process.argv[2] === SYNC_PING_CMD ? await runAgentPingSync()
     : await runAgentLockSync(name);
   process.exit(code);

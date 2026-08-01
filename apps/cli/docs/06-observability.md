@@ -36,6 +36,15 @@ So "was this agent started on the host by a remote user?" is answerable for any
 event, not just runs. The write is a synchronous single-line append (durable
 before the action proceeds); `AGENTS_DISABLE_EVENT_LOG=1` turns it off.
 
+`agents sessions --active` carries the same SSH origin on each live session's
+`provenance` (including tmux-hosted panes, whose launch env is read from the pane
+process) and resolves the client IP against the device registry into
+`provenance.origin` (`{ device, user? }`). The row then reads `ssh←<device>`
+(e.g. `ssh←zion`) instead of a bare `ssh`, so "which box launched this session"
+is answerable without scraping `ps`/`who`/`tailscale`. An IP that matches no
+registered device stays bare `ssh` — the raw `provenance.ssh.clientIp` is still
+present.
+
 ### Actor provenance — which *human* is behind a run
 
 `osUser` answers "which OS account", but on a shared fleet that is one account for
@@ -48,6 +57,12 @@ everyone. The **actor** layer ([`src/lib/actor.ts`](../src/lib/actor.ts)) answer
   no personal identity rather than guessing the box owner.
 - **Inherited** — a child spawn trusts the `AGENTS_ACTOR*` env its parent stamped
   instead of re-resolving, so the whole spawn tree shares one actor.
+- **Dispatched over SSH (outbound)** — when the CLI runs an agent on another host
+  (`agents run --host`, `agents ssh <host>`, or a remote teammate), the resolved actor is
+  forwarded into the remote invocation's env, so the remote box inherits it instead of
+  re-resolving. Without this the actor is dropped at the SSH hop and the remote
+  `tailscale whois`es the *originating* box's IP — mis-crediting the shared fleet account
+  rather than the human who launched the run.
 
 The resolved actor rides the agent's process env (`AGENTS_ACTOR`,
 `AGENTS_ACTOR_KIND`, and `AGENTS_ACTOR_NAME`/`_EMAIL`/`_GITHUB` when known). For a

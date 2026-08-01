@@ -4,6 +4,8 @@ import {
   KeychainBackend,
   setKeychainBackendForTest,
   setKeychainServiceHashingForTest,
+  setKeychainToken,
+  hasKeychainToken,
 } from './index.js';
 import type { SecretsBundle } from './bundles.js';
 import {
@@ -16,11 +18,14 @@ import {
   loadSession,
   deleteSession,
   deleteAllSessions,
+  deleteBundleSessions,
   rehydrateSessions,
   pruneSessionsOnSleep,
   readIndex,
   type SessionIndex,
   type SessionEntry,
+  SESSION_INDEX_ITEM,
+  SESSION_ITEM_PREFIX,
 } from './session-store.js';
 
 const FAR = 10 * 24 * 60 * 60 * 1000; // 10 days out
@@ -108,7 +113,34 @@ describe.each([
     expect(got?.env.TOKEN).toBe('secret-apple.com');
     expect(got?.bundle.name).toBe('apple.com');
     // index reflects the hold
-    expect(Object.keys(readIndex().bundles)).toEqual(['apple.com']);
+    expect(Object.keys(readIndex().bundles)).toEqual(['cli:apple.com']);
+  });
+
+  it('does not reuse a persisted grant across harness types', () => {
+    saveSession('prod', { ...entry('prod', FAR + Date.now(), false), harness: 'claude' });
+    expect(loadSession('prod', Date.now(), 'claude')?.env.TOKEN).toBe('secret-prod');
+    expect(loadSession('prod', Date.now(), 'codex')).toBeNull();
+  });
+
+  it('bundle lock removes every harness grant', () => {
+    saveSession('prod', { ...entry('prod', FAR + Date.now(), false), harness: 'claude' });
+    saveSession('prod', { ...entry('prod', FAR + Date.now(), false), harness: 'codex' });
+    deleteBundleSessions('prod');
+    expect(loadSession('prod', Date.now(), 'claude')).toBeNull();
+    expect(loadSession('prod', Date.now(), 'codex')).toBeNull();
+  });
+
+  it('migrates a pre-harness durable grant into the cli scope', () => {
+    const expiresAt = FAR + Date.now();
+    const legacy = entry('legacy', expiresAt, false);
+    setKeychainToken(`${SESSION_ITEM_PREFIX}legacy`, JSON.stringify(legacy), { noAcl: true });
+    setKeychainToken(SESSION_INDEX_ITEM, JSON.stringify({
+      bundles: { legacy: { expiresAt, sleepPersist: false } },
+    }), { noAcl: true });
+    const restored = rehydrateSessions();
+    expect(restored[0]?.entry.harness).toBe('cli');
+    expect(loadSession('legacy', Date.now(), 'cli')?.env.TOKEN).toBe('secret-legacy');
+    expect(hasKeychainToken(`${SESSION_ITEM_PREFIX}legacy`)).toBe(false);
   });
 
   it('delete removes both the blob and the index entry', () => {
@@ -142,7 +174,7 @@ describe.each([
     pruneSessionsOnSleep();
     expect(loadSession('def')).toBeNull();
     expect(loadSession('dur')?.bundle.name).toBe('dur');
-    expect(Object.keys(readIndex().bundles)).toEqual(['dur']);
+    expect(Object.keys(readIndex().bundles)).toEqual(['cli:dur']);
   });
 
   it('deleteAllSessions clears everything', () => {
@@ -152,6 +184,16 @@ describe.each([
     expect(readIndex().bundles).toEqual({});
     expect(loadSession('a')).toBeNull();
     expect(loadSession('b')).toBeNull();
+  });
+
+  it('deleteAllSessions removes a pre-harness legacy blob', () => {
+    const expiresAt = FAR + Date.now();
+    setKeychainToken(`${SESSION_ITEM_PREFIX}legacy-all`, JSON.stringify(entry('legacy-all', expiresAt, false)), { noAcl: true });
+    setKeychainToken(SESSION_INDEX_ITEM, JSON.stringify({
+      bundles: { 'legacy-all': { expiresAt, sleepPersist: false } },
+    }), { noAcl: true });
+    deleteAllSessions();
+    expect(hasKeychainToken(`${SESSION_ITEM_PREFIX}legacy-all`)).toBe(false);
   });
 });
 

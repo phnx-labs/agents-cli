@@ -5,6 +5,7 @@ import {
   buildRemoteAgentsInvocation,
   buildWindowsAgentsCommand,
   buildWindowsStdinImportCommand,
+  posixEnvExports,
   remoteShellFor,
   powershellQuote,
   decodePowershell,
@@ -293,5 +294,40 @@ describe('buildWindowsStdinImportCommand', () => {
     expect(finallyIdx).toBeGreaterThan(writeIdx);
     // The finally guards on $tmp so a GetTempFileName that itself throws is safe.
     expect(script).toContain('if ($tmp) { Remove-Item -LiteralPath $tmp -Force');
+  });
+});
+
+describe('posixEnvExports — actor values are shell-literal, PATH still expands', () => {
+  // Actor provenance carries attacker-influenceable strings (a tailnet peer's
+  // whois display name, or an unvalidated AGENTS_ACTOR_* env). They ride the same
+  // export prefix that sends PATH to the remote, so a `$(...)`/backtick in a value
+  // must NOT execute. These run the exact `bash -lc "<exports>; …"` shape the
+  // dispatch builders send over SSH, against the real shell — no mocks.
+  const runExports = (env: Record<string, string>, tail: string) =>
+    spawnSync('bash', ['-lc', `${posixEnvExports(env)}; ${tail}`], { encoding: 'utf-8' });
+
+  it('does NOT execute a $(...) command substitution smuggled through an actor value', () => {
+    const marker = spawnSync('mktemp', ['-u'], { encoding: 'utf-8' }).stdout.trim();
+    const res = runExports(
+      { AGENTS_ACTOR_NAME: `$(touch ${marker})`, AGENTS_ACTOR_EMAIL: 'x@y.z' },
+      'printf %s "$AGENTS_ACTOR_NAME"',
+    );
+    // The payload survives verbatim as data, and the file was never created.
+    expect(res.stdout).toBe(`$(touch ${marker})`);
+    expect(spawnSync('test', ['-e', marker]).status).not.toBe(0);
+  });
+
+  it('does NOT execute a backtick command substitution smuggled through an actor value', () => {
+    const marker = spawnSync('mktemp', ['-u'], { encoding: 'utf-8' }).stdout.trim();
+    const res = runExports({ GIT_AUTHOR_NAME: '`touch ' + marker + '`' }, 'printf %s "$GIT_AUTHOR_NAME"');
+    expect(res.stdout).toBe('`touch ' + marker + '`');
+    expect(spawnSync('test', ['-e', marker]).status).not.toBe(0);
+  });
+
+  it('still expands $HOME/$PATH for the PATH key so `agents` resolves on the remote', () => {
+    const res = runExports({ PATH: '$HOME/.agents/.cache/shims:$PATH' }, 'printf %s "$PATH"');
+    // $HOME expanded (no literal "$HOME" left) and the shim dir is present.
+    expect(res.stdout).toContain('/.agents/.cache/shims:');
+    expect(res.stdout).not.toContain('$HOME');
   });
 });

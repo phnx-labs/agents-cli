@@ -18,11 +18,13 @@ component-specific — this file deliberately stays shallow.
 apps/
   cli/        @phnx-labs/agents-cli — the `agents`/`ag` CLI (the published npm package)
   factory/    Factory — the VS Code extension + its React UI + Electron app (publisher: swarmify, swarm-ext)
+  ios/        Fleet Cockpit — iOS/iPadOS control-plane app (AnchorKit SwiftPM lib + Cockpit SwiftUI); steers the fleet, never a compute worker
 native/
   computer-mac/   Swift daemon behind `agents computer` (Accessibility + screen capture)
   computer-win/   C#/.NET daemon behind `agents computer` on Windows (UI Automation)
 packages/
   session-tracker/  @agents/session-tracker — SessionStart hook that WRITES live-session state
+  agi-cli/          @phnx-labs/agi-cli — DEPRECATED alias; re-exports the canonical @phnx-labs/agents-cli
   swarmify-mirror/  legacy npm-redirect stub (@companion/agents-cli → @phnx-labs/agents-cli)
 docs/         Repo-root design notes (docs/design/); the full CLI design reference is apps/cli/docs/ (start: apps/cli/docs/architecture.md)
 assets/ demo/ website/   Brand, launch demo, landing (repo-root, not shipped in any tarball)
@@ -32,15 +34,55 @@ assets/ demo/ website/   Brand, launch demo, landing (repo-root, not shipped in 
 |---|---|---|
 | [`apps/cli`](apps/cli) | The CLI — version mgmt, config sync, sessions, teams, cloud, browser, computer, secrets | [AGENTS.md](apps/cli/AGENTS.md) · [README.md](apps/cli/README.md) |
 | [`apps/factory`](apps/factory) | Factory VS Code extension — spawns agent terminals as tabs, Factory Floor dashboard, dispatch | [AGENTS.md](apps/factory/AGENTS.md) · [README.md](apps/factory/README.md) |
+| [`apps/ios`](apps/ios) | Fleet Cockpit — iOS/iPadOS control-plane app over the anchor (`agents serve --control`) | [AGENTS.md](apps/ios/AGENTS.md) · [README.md](apps/ios/README.md) |
 | [`native/computer-mac`](native/computer-mac) | macOS `agents computer` backend (Swift) | [AGENTS.md](native/computer-mac/AGENTS.md) · [README.md](native/computer-mac/README.md) |
 | [`native/computer-win`](native/computer-win) | Windows `agents computer` backend (C#/.NET) | [AGENTS.md](native/computer-win/AGENTS.md) · [README.md](native/computer-win/README.md) |
 | [`packages/session-tracker`](packages/session-tracker) | Live-session **writer** (SessionStart hook) | [AGENTS.md](packages/session-tracker/AGENTS.md) · [README.md](packages/session-tracker/README.md) |
+| [`packages/agi-cli`](packages/agi-cli) | Deprecated alias — re-exports the canonical CLI | [README.md](packages/agi-cli/README.md) |
 | [`packages/swarmify-mirror`](packages/swarmify-mirror) | Deprecated npm-redirect stub | [README.md](packages/swarmify-mirror/README.md) |
 
 **No JS workspaces.** Each package self-installs (`bun install` inside it). There is
 deliberately no root `workspaces` field — adding one changed bun's hoisting and broke
 `@inquirer/core` resolution under `--frozen-lockfile`. Don't add it back. There are no
 cross-package imports except the CLI resolving the native helpers by relative path.
+
+## Entry points — always build and release through the scripts
+
+Never hand-roll a build or a release. A bare `tsc` / `bun run build` / `npm publish` /
+`vsce publish` skips the version stamping, gates (tests + semver + CHANGELOG), and
+sign/notarize + tap/marketplace steps these scripts own — a green local compile that
+ships broken. Each component's `scripts/` dir is the contract (see
+[`.agents/skills/scripts`](.agents/skills/scripts/SKILL.md)); add a `scripts/<verb>.sh`
+rather than a one-off command in a PR.
+
+| Task | Script | Contract |
+|---|---|---|
+| CLI build | [`apps/cli/scripts/build.sh`](apps/cli/scripts/build.sh) `[<version>] [--clean]` | builds into `apps/cli/dist` |
+| CLI dev install | [`apps/cli/scripts/install.sh`](apps/cli/scripts/install.sh) | side-by-side dev build at `~/.local/agents-cli-dev`, exposed via `~/.local/bin/agents`; does not touch the registry install |
+| CLI tests | `bun run test:remote` (in `apps/cli`) | full vitest suite offloaded to a remote crabbox via [`sandbox.sh`](apps/cli/scripts/sandbox.sh) — the laptop-safe path |
+| CLI release | [`apps/cli/scripts/release.sh`](apps/cli/scripts/release.sh) `<version>` | publishes `@phnx-labs/agents-cli` to npm (legacy `@swarmify` shim built for reference, not published) |
+| Factory build / release | [`apps/factory/scripts/build.sh`](apps/factory/scripts/build.sh) `<version>` · [`release.sh`](apps/factory/scripts/release.sh) `<x.y.z> [--confirm]` | ships `swarmify.swarm-ext` to VS Code Marketplace + Open VSX (dry-run without `--confirm`) |
+| agents-dbg app release | [`scripts/release.sh`](scripts/release.sh) `<version> [--confirm]` | root — builds/signs/notarizes the debug Mac app, uploads the GitHub release, updates the Homebrew tap |
+| computer-mac build | [`native/computer-mac/scripts/build.sh`](native/computer-mac/scripts/build.sh) | Swift daemon |
+
+## The `.agents/` workspace
+
+The repo's own `.agents/` dir is where agent working files go — use it instead of `/tmp`
+or the repo root so the tree stays clean. What's committed vs gitignored is deliberate
+([`.gitignore`](.gitignore)):
+
+| Path | Git | For |
+|---|---|---|
+| `.agents/worktrees/<slug>/` | ignored | PR-bound worktrees, one per change (see [§Conventions](#conventions-repo-wide)) |
+| `.agents/scratch/` | ignored | throwaway working files |
+| `.agents/plans/` | ignored | internal implementation plans (not shipped) |
+| `.agents/artifacts/` | ignored | generated outputs, incl. a scratch rendered HTML plan |
+| `.agents/skills/`, `.agents/commands/` | committed | project skills + slash commands |
+| `.agents/reports/` | committed | durable reports meant to be kept/shared |
+
+Rule of thumb: **ephemeral → the gitignored dirs; durable + shareable → `.agents/reports/`.**
+A rendered HTML plan you want to keep goes in `reports/` (committed); a throwaway render
+goes in `artifacts/`. Never scatter scratch in `/tmp` or the repo root.
 
 ## Conventions (repo-wide)
 
@@ -90,6 +132,17 @@ the exception.
   `SUBAGENT_TARGETS` in `apps/cli/src/lib/subagents-registry.ts`, gated by
   `capableAgents(...)` — not near-identical `else if (agent === '...')` arms), and the
   completeness tests that pin the registry to the capability list must still pass.
+- **Surface parity for propagation / cross-cutting features.** When a change adds data
+  that must ride the exec env or a spawn — actor/provenance, identity, session lineage,
+  credentials — it must be wired through **every** exec boundary that data is meant to
+  reach: the local spawn (`buildExecEnv`), `--host` SSH dispatch, `agents ssh`
+  passthrough, teams (local **and** remote teammates), and routines/cron — or the PR
+  states which boundaries are out of scope and why. The tell is an **absence** at a
+  remote call site (no `SetEnv`/`--env` forwarding across the SSH hop), so check the
+  remote dispatch builders (`apps/cli/src/lib/hosts/dispatch.ts`, `hosts/remote-cmd.ts`),
+  not just the changed files — a diff that wires only the local path and silently drops
+  the data at the first SSH boundary is incomplete. (RUSH-2028 fixed exactly this gap for
+  actor provenance, which PR #1525 shipped local-only.)
 - **Docs stay in sync with behavior.** A change to a flag, command, config key, or
   user-visible behavior updates the docs that cover it — the relevant component
   `AGENTS.md`, its `README.md`, and `apps/cli/docs/`. Flag a diff that adds or changes a
@@ -140,9 +193,17 @@ When working on this repo or the sibling `agent-cli-web` landing:
   sections (Rush-only). Override destination to `~/Phoenix/agents-cli/launches/` and use
   this repo's color/type tokens.
 
-Note: `apps/factory` (the Factory extension) is a **different product** with its own
-`swarmify`/Factory identity — the Phoenix "no Rush brand" rule governs the CLI, assets,
-demo, and website; Factory keeps its own brand and publish identity (frozen, above).
+Note: what is separate about `apps/factory` (Factory) is its **brand + publish
+identity** — the `swarmify` publisher, `swarm-ext`, the Factory product name (frozen,
+above) — and the Phoenix "no Rush brand" rule that governs the CLI, assets, demo, and
+website. That is the *only* sense in which Factory is a "different product." It is **not
+architecturally separate**: Factory is the **VS Code UI layer of agi-cli**, not a
+distinct codebase or product line. The `agents` CLI is the engine (`agents tmux`,
+`agents sessions attach`, detached-tmux sessions); Factory is the IDE frontend that
+drives it. So a capability like SSH-drop reconnect spans both (CLI engine + Factory UI),
+Factory's own changelog lives at `apps/factory/CHANGELOG.md`, and **`agi-cli-web` is
+Factory's website too** — do not read "different product" as "agi-cli-web isn't where
+Factory features get documented."
 
 If any agent starts pulling Rush styling, paths, or voice into agents-cli work, stop
 and reread this block.

@@ -61,8 +61,8 @@ describe('handleAgentRequest', () => {
     handleAgentRequest(store, loadReq('b', { K: '2' }, 60_000), 0);
     const r = handleAgentRequest(store, { cmd: 'lock', name: 'a' }, 0);
     expect(r).toEqual({ ok: true, cmd: 'lock', wiped: 1 });
-    expect(store.has('a')).toBe(false);
-    expect(store.has('b')).toBe(true);
+    expect(store.has('cli:a')).toBe(false);
+    expect(store.has('cli:b')).toBe(true);
   });
 
   it('lock with no name wipes everything and reports the count', () => {
@@ -86,7 +86,7 @@ describe('handleAgentRequest', () => {
     const r = handleAgentRequest(store, { cmd: 'status' }, 5_000);
     expect(r.ok).toBe(true);
     if (r.ok && r.cmd === 'status') {
-      expect(r.entries).toEqual([{ name: 'live', expiresAt: 10_000, keyCount: 2 }]);
+      expect(r.entries).toEqual([{ name: 'live', expiresAt: 10_000, keyCount: 2, harness: 'cli' }]);
     }
   });
 
@@ -97,6 +97,13 @@ describe('handleAgentRequest', () => {
     // Past the original TTL but inside the new one → still a hit with the new value.
     const r = handleAgentRequest(store, { cmd: 'get', name: 'prod' }, 2_000);
     expect(r).toMatchObject({ hit: true, env: { K: 'new' } });
+  });
+
+  it('does not reuse an unlock across harness types', () => {
+    const store = freshStore();
+    handleAgentRequest(store, { ...loadReq('prod', { K: 'v' }, 60_000), harness: 'claude' }, 0);
+    expect(handleAgentRequest(store, { cmd: 'get', name: 'prod', harness: 'claude' }, 1)).toMatchObject({ ok: true, hit: true });
+    expect(handleAgentRequest(store, { cmd: 'get', name: 'prod', harness: 'codex' }, 1)).toEqual({ ok: true, cmd: 'get', hit: false });
   });
 
   it('ping reports the protocol version and the running CLI version', () => {
@@ -577,7 +584,7 @@ describe('isRequestAuthorized (RUSH-1760: authorization gate)', () => {
         // Correct token: load lands, and an authorized get reads it back.
         expect(await roundtrip(sock, { cmd: 'load', name: 'prod', bundle: bundle('prod'), env: { K: 'v' }, ttlMs: 60_000, token: TOKEN }))
           .toEqual({ ok: true, cmd: 'load' });
-        expect(store.has('prod')).toBe(true);
+        expect(store.has('cli:prod')).toBe(true);
         expect(await roundtrip(sock, { cmd: 'get', name: 'prod', token: TOKEN }))
           .toMatchObject({ ok: true, cmd: 'get', hit: true, env: { K: 'v' } });
       } finally {

@@ -140,4 +140,26 @@ describe('actorEnv', () => {
     };
     expect(computeActor(actorEnv(actor))).toEqual(actor);
   });
+
+  // RUSH-2017/2028: two distinct origin identities must forward two distinct
+  // git-author credits across the SSH hop. Before the dispatch fix both runs
+  // re-resolved on the remote from the shared box's SSH_CONNECTION and collapsed
+  // to one actor — this pins that they stay separate through actorEnv.
+  it('two different resolved actors produce two different forwarded git identities', () => {
+    const alice = actorEnv(computeActor({
+      AGENTS_ACTOR: 'alice@example.com', AGENTS_ACTOR_KIND: 'human',
+      AGENTS_ACTOR_NAME: 'Alice', AGENTS_ACTOR_EMAIL: 'alice@example.com',
+    }));
+    const bob = actorEnv(computeActor({
+      AGENTS_ACTOR: 'bob@example.com', AGENTS_ACTOR_KIND: 'human',
+      AGENTS_ACTOR_NAME: 'Bob', AGENTS_ACTOR_EMAIL: 'bob@example.com',
+    }));
+    expect(alice.AGENTS_ACTOR).toBe('alice@example.com');
+    expect(alice.GIT_AUTHOR_NAME).toBe('Alice');
+    expect(alice.GIT_AUTHOR_EMAIL).toBe('alice@example.com');
+    expect(bob.AGENTS_ACTOR).toBe('bob@example.com');
+    expect(bob.GIT_AUTHOR_NAME).toBe('Bob');
+    expect(bob.GIT_AUTHOR_EMAIL).toBe('bob@example.com');
+    expect(alice.GIT_AUTHOR_EMAIL).not.toBe(bob.GIT_AUTHOR_EMAIL);
+  });
 });

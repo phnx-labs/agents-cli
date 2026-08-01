@@ -449,7 +449,9 @@ function signalBadges(s: Pick<ActiveSession, 'awaitingReason' | 'pr' | 'worktree
 function locatorBadge(s: ActiveSession): string {
   const p = s.provenance;
   const parts: string[] = [];
-  if (p?.transport === 'ssh') parts.push(chalk.red('ssh'));
+  // An ssh-launched session shows where it was launched FROM when the client IP
+  // resolves to a registered device (`ssh←zion`); bare `ssh` when it doesn't.
+  if (p?.transport === 'ssh') parts.push(chalk.red(p.origin ? `ssh←${p.origin.device}` : 'ssh'));
   if (p?.mux?.kind === 'tmux' && (s.tmuxTarget || p.mux.pane)) {
     parts.push(chalk.green(s.tmuxTarget ?? p.mux.pane!));
     // For a tmux-hosted session, say which app+tab is looking at it right now
@@ -1793,6 +1795,13 @@ function renderTopicCell(
 }
 
 /** Column-visibility flags for the picker row, computed once over the whole pool. */
+/** The SSH-launch origin for a picker row, resolved from the live session's
+ * provenance (transport 'ssh'). `device` is set when the client IP matched a
+ * registered device; absent for an unresolved IP (renders a bare `ssh`). */
+export interface SshOriginTag {
+  device?: string;
+}
+
 export interface PickerColumns {
   /** Render the machine column (only when the pool spans more than one machine). */
   showMachine?: boolean;
@@ -1863,10 +1872,23 @@ export function pickerColumnsFor(sessions: SessionMeta[]): PickerColumns {
   };
 }
 
-export function formatPickerLabel(s: SessionMeta, query: string, cols: PickerColumns = {}): string {
+export function formatPickerLabel(
+  s: SessionMeta,
+  query: string,
+  cols: PickerColumns = {},
+  ssh?: SshOriginTag,
+): string {
   const agentColor = colorAgent(s.agent);
   const when = formatRelativeTime(s.lastActivity ?? s.timestamp);
   const project = s.project || '-';
+  // SSH-launch origin (live rows only): mirrors the flat listing's `ssh←<device>`
+  // badge. Rendered as its OWN red segment before the topic cell — folding it into
+  // the topic string loses the colour, because renderTopicCell strips ANSI and
+  // re-whitens every slice. Its width is reserved from the topic budget below
+  // (exactly like `wt`), so the fixed-width columns stay aligned.
+  const sshPlain = ssh ? (ssh.device ? `ssh←${ssh.device} ` : 'ssh ') : '';
+  const sshSeg = sshPlain ? chalk.red(sshPlain) : '';
+  const sshW = sshPlain ? stringWidth(sshPlain) : 0;
   const tag = originTag(s) || teamTag(s);
   const label = (s as any).label;
   const topic = tag ? `${tag}${s.topic ?? ''}` : s.topic;
@@ -1892,7 +1914,7 @@ export function formatPickerLabel(s: SessionMeta, query: string, cols: PickerCol
   const wtW = wt ? stringWidth(wt) + 1 : 0;
   const topicW = Math.max(
     16,
-    terminalWidth() - gutter - (10 + 9 + 8 + 16) - machineColW - ticketW - wtW - stringWidth(when) - 1,
+    terminalWidth() - gutter - (10 + 9 + 8 + 16) - machineColW - ticketW - wtW - sshW - stringWidth(when) - 1,
   );
 
   return (
@@ -1901,6 +1923,7 @@ export function formatPickerLabel(s: SessionMeta, query: string, cols: PickerCol
     chalk.yellow(padRight(truncate(versionStr, 7), 8)) +
     machineCell +
     chalk.cyan(padRight(truncate(project, 14), 16)) +
+    sshSeg +
     renderTopicCell(label, topic, query, topicW, topicW) +
     ticketCell +
     (wt ? wt + ' ' : '') +
@@ -2330,9 +2353,10 @@ export interface SessionQueryResolution {
 /**
  * The single entry point for turning a `sessions <query>` argument into rows.
  *
- * A complete session id resolves by id alone. Anything else keeps the existing
- * ladder: id lookup first (so a short id still wins), then the ranked
- * metadata+content search.
+ * An id-shaped query — a complete id OR a hex short-id/prefix (looksLikeSessionId)
+ * — resolves by id alone, through the index, and never falls back to content
+ * search (a bare id must not surface every transcript that merely mentions it).
+ * A genuine search phrase keeps the ranked metadata+content search.
  */
 export function resolveSessionQuery(pool: SessionMeta[], query: string): SessionQueryResolution {
   // Normalize ONCE here. isCompleteSessionId trims but resolveSessionById does
@@ -2344,12 +2368,16 @@ export function resolveSessionQuery(pool: SessionMeta[], query: string): Session
   const byIdMatches = resolveSessionById(pool, normalized);
   if (byIdMatches.length > 0) return { matches: byIdMatches, byId: true, completeId };
 
-  if (completeId) {
-    // The pool is only what discoverSessions walked — a minority of the index
-    // (measured: 2,798 of 7,614 rows), because it re-reads live agent homes and
-    // skips whole classes of indexed session. Declaring absence from the pool
-    // alone denied 1,315 sessions whose transcript is on this disk right now.
-    // Ask the index itself, the same authoritative lookup `fork` and `exec` use.
+  if (looksLikeSessionId(normalized)) {
+    // Any id-shaped query — a complete id OR a bare hex short-id/prefix —
+    // resolves by id ONLY, never by content. The pool is a minority of the
+    // index (measured: 2,798 of 7,614 rows) because it re-reads live agent homes
+    // and skips whole classes of indexed session, so a pool miss isn't absence:
+    // ask the index directly, the same authoritative lookup `fork` and `exec`
+    // use. And an id that resolves to nothing must report "no session with that
+    // id" — NOT fall back to fuzzy content search. A short id like "d3470b57"
+    // otherwise surfaces every transcript that merely MENTIONS the string (a
+    // resume prompt echoes the parent id into the body of many later sessions).
     return { matches: findSessionsById(normalized), byId: true, completeId };
   }
   return { matches: filterSessionsByQuery(pool, normalized), byId: false, completeId };
@@ -2520,7 +2548,7 @@ async function renderArtifactsGlobal(
 
     if (queryMatches.length === 0) {
       spinner.stop();
-      if (completeId) notFoundByIdMessage(query).forEach(l => console.error(l));
+      if (byId) notFoundByIdMessage(query).forEach(l => console.error(l));
       else console.error(chalk.red(`No session found matching: ${query}`));
       process.exit(1);
     }
@@ -2570,11 +2598,14 @@ async function renderOneSession(
     let byId = resolution.byId;
     const completeId = resolution.completeId;
 
-    // Widen to the transcript content index only for a genuine search phrase. A
-    // complete id is unique, so widening could only ever surface a DIFFERENT
-    // session that happens to mention the id — which is what made `sessions
-    // <uuid>` render an unrelated transcript.
-    if (queryMatches.length === 0 && !completeId) {
+    // Widen to the transcript content index only for a genuine search phrase.
+    // ANY id-shaped query (a complete id OR a hex short-id/prefix) names a
+    // specific session; widening could only surface a DIFFERENT session that
+    // happens to MENTION the id — which is what made `sessions <uuid>` render an
+    // unrelated transcript and `sessions <shortid>` list every session that
+    // echoes the id in a resume prompt. Gate on looksLikeSessionId, not just
+    // completeId, so a short id resolves to "no match" rather than fuzzy content.
+    if (queryMatches.length === 0 && !looksLikeSessionId(query)) {
       const contentResults = searchContentIndex(allSessions, query);
       if (contentResults.size > 0) {
         const matchedSessions = Array.from(contentResults.values())
@@ -2599,7 +2630,7 @@ async function renderOneSession(
           renderClaudeHistoryOnlyId(query, historyEntry, allSessions);
           process.exit(1);
         }
-      } else if (completeId) {
+      } else if (byId) {
         notFoundByIdMessage(query).forEach(l => console.error(l));
         process.exit(1);
       } else {

@@ -22,7 +22,7 @@ import * as path from 'path';
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-run-target-test-'));
 process.env.HOME = TEST_HOME;
 
-const { resolveHostRunTarget, HostResolutionError } = await import('./run-target.js');
+const { resolveHostRunTarget, resolveHostSessionId, HostResolutionError } = await import('./run-target.js');
 const { DeviceOffloadUnsupportedError } = await import('./registry.js');
 const { sshTargetFor } = await import('./types.js');
 const { upsertDevice } = await import('../devices/registry.js');
@@ -121,5 +121,22 @@ describe('resolveHostRunTarget — password-auth device', () => {
     const err = await resolveHostRunTarget('win-mini').catch((e) => e as Error);
     expect(err).toBeInstanceOf(DeviceOffloadUnsupportedError);
     expect(err.name).toBe('DeviceOffloadUnsupportedError');
+  });
+});
+
+describe('resolveHostSessionId', () => {
+  const explicitId = '11111111-2222-4333-8444-555555555555';
+
+  it('adopts an explicit id for a fresh Claude host run', () => {
+    expect(resolveHostSessionId('claude', undefined, explicitId)).toBe(explicitId);
+  });
+
+  it('mints an id when a fresh Claude host run has no explicit id', () => {
+    expect(resolveHostSessionId('claude')).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it('does not force an id for resume or an agent that creates its own id', () => {
+    expect(resolveHostSessionId('claude', explicitId, 'ignored')).toBeUndefined();
+    expect(resolveHostSessionId('codex', undefined, explicitId)).toBeUndefined();
   });
 });

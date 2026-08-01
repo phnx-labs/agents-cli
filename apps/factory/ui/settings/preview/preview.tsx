@@ -279,6 +279,8 @@ function Feed() {
   const [grp, setGrp] = useState<FloorGroupBy | 'none'>('project')
   const [subgrp, setSubgrp] = useState<FloorGroupBy | 'none'>('host')
   const [srt, setSrt] = useState<'needs' | 'recent' | 'tok' | 'name'>('needs')
+  const [showBackground, setShowBackground] = useState(false)
+  const visibleRunning = showBackground ? running : running.filter((a) => a.context !== 'headless')
   return (
     <div className="feed">
       <FloorControls
@@ -303,6 +305,19 @@ function Feed() {
         onApply={noop}
         onSave={noop}
         onDelete={noop}
+        feedFilters={{
+          group: grp,
+          onGroup: setGrp,
+          subgroup: subgrp,
+          onSubgroup: setSubgrp,
+          status: [],
+          onToggleStatus: noop,
+          abbrs: [],
+          availableAbbrs: ['CC', 'CX', 'GX'],
+          onToggleAbbr: noop,
+          showBackground,
+          onToggleBackground: () => setShowBackground((current) => !current),
+        }}
       />
 
       <div className="feed-sec attn">
@@ -315,10 +330,10 @@ function Feed() {
       <FeedItem agent={askAgent} selected={false} plain={false} {...feedHandlers} />
       <FeedItem agent={reviewAgent} selected={false} plain={false} {...feedHandlers} />
 
-      <div className="feed-sec">RUNNING · {running.length}<span className="ln" />
+      <div className="feed-sec">RUNNING · {visibleRunning.length}<span className="ln" />
         <span className="fresh"><span className="rot"><Icon name="refresh" size={11} /></span>hosts synced 4s ago</span>
       </div>
-      {running.map((a) => (
+      {visibleRunning.map((a) => (
         <FeedItem key={a.id} agent={a} selected={false} plain={false} {...feedHandlers} />
       ))}
 

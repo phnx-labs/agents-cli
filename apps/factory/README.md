@@ -71,7 +71,7 @@ Every open agent terminal is fully restorable. Session ID, icon, and custom labe
 
 ### Factory Floor
 
-The dashboard's mission control. A live grid of every agent on the floor — local IDE tabs, background teams, and cloud dispatches — beside your Linear cycle. Compose and dispatch work with the Cmd+K composer, drag issue cards onto agents, or send a ticket straight to the cloud.
+The dashboard's mission control. A live grid of interactive agents and cloud dispatches beside your Linear cycle. Background/headless runs are hidden by default; use the **Background** feed toggle when you need them. Compose and dispatch work with the Cmd+K composer, drag issue cards onto agents, or send a ticket straight to the cloud.
 
 Agent cards surface outputs such as PRs, spawned teams, created tickets, and plan
 artifacts. `.html` and `ref-*.md` plans detected in session output, worktree

@@ -31,7 +31,8 @@ export interface DesktopNotification {
   /**
    * Deep-link the companion app runs when the notification is clicked. Encoded
    * as `<verb>:<arg>` — `open:/abs/path` opens a file (a run report or log) in the
-   * default app; `routines:list` shells `agents routines list`. Best-effort and
+   * default app; `routines:list` opens the runs folder (~/.agents/.history/runs)
+   * in Finder. Best-effort and
    * macOS-only (osascript / notify-send have no click target). See routine-notify.ts.
    */
   action?: string;

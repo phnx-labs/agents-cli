@@ -11,14 +11,17 @@
 #   - bin/MenubarHelper.app — the menu-bar status item (swift build → codesign,
 #                            NO notarization). See menubar/scripts/build.sh.
 #
-# This script rsyncs the exact build INPUTS from THIS worktree to a dedicated
-# sign host ("mac-mini"), runs the two Mac build scripts there under the
-# appliance's headless signing creds, then pulls the signed bundles back into
-# THIS worktree's apps/cli/bin/ so `bun run build` (now presence-gated, not
-# uname-gated) can package them and `npm publish` can run anywhere.
+# This script rsyncs the exact build INPUTS from THIS worktree to an
+# auto-selected macOS sign host (see SIGN_HOST below), runs the two Mac build
+# scripts there under the appliance's headless signing creds, then pulls the
+# signed bundles back into THIS worktree's apps/cli/bin/ so `bun run build` (now
+# presence-gated, not uname-gated) can package them and `npm publish` can run
+# anywhere.
 #
 # Env knobs:
-#   SIGN_HOST        sign host (default: mac-mini) — must be ssh/scp reachable.
+#   SIGN_HOST        sign host, must be ssh/scp reachable. When unset it is
+#                    auto-discovered from `agents devices list` in preference
+#                    order mac-mini -> zion -> any other online macOS device.
 #   SIGN_HOST_REPO   agents-cli checkout on the sign host. $HOME is resolved on
 #                    the REMOTE side (default: $HOME/src/github.com/muqsitnawaz/agents-cli).
 #
@@ -31,8 +34,12 @@
 # Usage: scripts/remote-sign-mac.sh
 set -euo pipefail
 
-SIGN_HOST="${SIGN_HOST:-mac-mini}"
+# SIGN_HOST is resolved just below: an explicit env override wins, otherwise it
+# is auto-discovered from the fleet so a Linux release never hard-depends on one
+# hardcoded Mac. Preference order when unset: mac-mini (headless sign appliance),
+# then zion (the interactive Mac), then any other reachable macOS device.
 SIGN_HOST_REPO="${SIGN_HOST_REPO:-\$HOME/src/github.com/muqsitnawaz/agents-cli}"
+PREFERRED_SIGN_HOSTS=(mac-mini zion)
 
 # apps/cli in THIS worktree (script lives in apps/cli/scripts/).
 LOCAL_CLI="$(cd "$(dirname "$0")/.." && pwd)"
@@ -44,7 +51,44 @@ die()  { printf '\033[31m[remote-sign] error:\033[0m %s\n' "$*" >&2; exit 1; }
 command -v ssh   >/dev/null || die "ssh not found"
 command -v rsync >/dev/null || die "rsync not found"
 
-log "sign host:        $SIGN_HOST"
+# Live reachability probe — a direct ssh, not the registry's cached flag.
+reachable() { ssh -o BatchMode=yes -o ConnectTimeout=8 "$1" true >/dev/null 2>&1; }
+
+# Resolve the sign host. An explicit SIGN_HOST always wins. Otherwise ask the
+# fleet registry (agents devices list --json) for macOS boxes that look online,
+# order them mac-mini -> zion -> the rest, and pick the first that answers ssh
+# right now. Falls back to the static preference list when the registry or jq is
+# unavailable, so the script still works off-fleet.
+select_sign_host() {
+  if [[ -n "${SIGN_HOST:-}" ]]; then printf '%s' "$SIGN_HOST"; return 0; fi
+  local candidates=() macos=() p m c seen name
+  if command -v agents >/dev/null && command -v jq >/dev/null; then
+    mapfile -t macos < <(agents devices list --json 2>/dev/null \
+      | jq -r '.[] | select(.platform=="macos")
+                   | select((.reachability.reachable==true) or (.tailscale.online==true))
+                   | .name' 2>/dev/null)
+    for p in "${PREFERRED_SIGN_HOSTS[@]}"; do
+      for m in "${macos[@]}"; do [[ "$m" == "$p" ]] && candidates+=("$m"); done
+    done
+    for m in "${macos[@]}"; do
+      seen=0; for c in "${candidates[@]}"; do [[ "$c" == "$m" ]] && seen=1; done
+      [[ $seen -eq 0 ]] && candidates+=("$m")
+    done
+  fi
+  [[ ${#candidates[@]} -gt 0 ]] || candidates=("${PREFERRED_SIGN_HOSTS[@]}")
+  for name in "${candidates[@]}"; do
+    if reachable "$name"; then printf '%s' "$name"; return 0; fi
+  done
+  return 1
+}
+
+[[ -n "${SIGN_HOST:-}" ]] && SIGN_HOST_SRC="from SIGN_HOST" || SIGN_HOST_SRC="auto-selected"
+if ! SIGN_HOST="$(select_sign_host)"; then
+  die "no reachable macOS sign host found (tried, in order: ${PREFERRED_SIGN_HOSTS[*]} plus any online macOS device in 'agents devices list'). Bring one online, or set SIGN_HOST=<host> to a Mac that holds the Developer ID signing keychain."
+fi
+export SIGN_HOST
+
+log "sign host:        $SIGN_HOST ($SIGN_HOST_SRC)"
 log "local apps/cli:   $LOCAL_CLI"
 
 # Resolve the remote build workspace. SIGN_HOST_REPO carries a literal '$HOME'

@@ -12,6 +12,7 @@ import {
   writeBundle,
   writeBundleWithItems,
   healKeychainBundleMetadata,
+  humanUnlockDuration,
   type SecretsBundle,
 } from './bundles.js';
 import {
@@ -23,6 +24,14 @@ import {
   type KeychainBackend,
 } from './index.js';
 import { saveSession } from './session-store.js';
+
+describe('humanUnlockDuration', () => {
+  it('renders the actual configured hold for prompt text', () => {
+    expect(humanUnlockDuration(2 * 60 * 60 * 1000)).toBe('2 hours');
+    expect(humanUnlockDuration(3 * 24 * 60 * 60 * 1000)).toBe('3 days');
+    expect(humanUnlockDuration(60 * 1000)).toBe('1 minute');
+  });
+});
 
 /**
  * Regression tests for the two least-privilege bypasses on the
@@ -175,35 +184,118 @@ describe('canCacheResolvedEnv (broker cache shape)', () => {
 });
 
 describe('readAndResolveBundleEnv agent-only reads', () => {
-  it('fails before touching Keychain when the broker has no unlocked snapshot', () => {
-    let keychainCalls = 0;
-    const fail = () => { keychainCalls++; throw new Error('keychain must not be read'); };
-    const backend: KeychainBackend = {
-      has: fail,
-      get: fail,
-      set: fail,
-      delete: fail,
-      list: fail,
-    };
-    const previousBackend = setKeychainBackendForTest(backend);
-    const previousNoAgent = process.env.AGENTS_SECRETS_NO_AGENT;
-    process.env.AGENTS_SECRETS_NO_AGENT = '1';
-    try {
-      expect(() => readAndResolveBundleEnv('claude', { caller: 'daemon', agentOnly: true }))
-        .toThrow("Secrets bundle 'claude' is not unlocked in the secrets agent");
-      expect(keychainCalls).toBe(0);
-    } finally {
-      setKeychainBackendForTest(previousBackend);
-      if (previousNoAgent === undefined) delete process.env.AGENTS_SECRETS_NO_AGENT;
-      else process.env.AGENTS_SECRETS_NO_AGENT = previousNoAgent;
+  class MemBackend implements KeychainBackend {
+    store = new Map<string, string>();
+    has(item: string) { return this.store.has(item); }
+    get(item: string) {
+      const v = this.store.get(item);
+      if (v === undefined) throw new Error(`missing ${item}`);
+      return v;
     }
+    set(item: string, value: string) { this.store.set(item, value); }
+    delete(item: string) { return this.store.delete(item); }
+    list(prefix: string) { return [...this.store.keys()].filter((k) => k.startsWith(prefix)); }
+  }
+  let mem: MemBackend;
+  let prevBackend: KeychainBackend;
+  let prevNoAgent: string | undefined;
+  beforeEach(() => {
+    mem = new MemBackend();
+    prevBackend = setKeychainBackendForTest(mem);
+    prevNoAgent = process.env.AGENTS_SECRETS_NO_AGENT;
+    process.env.AGENTS_SECRETS_NO_AGENT = '1'; // disable the broker fast-path
+  });
+  afterEach(() => {
+    setKeychainBackendForTest(prevBackend);
+    if (prevNoAgent === undefined) delete process.env.AGENTS_SECRETS_NO_AGENT;
+    else process.env.AGENTS_SECRETS_NO_AGENT = prevNoAgent;
+  });
+
+  // REVERSED deliberately, and this is a NARROWING of RUSH-2032 rather than a bug
+  // fix: interactiveUnlock defaulting to true whenever an agent name was present
+  // was that feature's spec (b99796f8, 4eeada68), not an oversight. It is unwanted
+  // here — opening an agent terminal is not a request to authenticate, and each
+  // keychain read is its own helper process, so one launch raised several sheets.
+  // An agent-initiated read now fails fast with an actionable message instead.
+  it('refuses an agent-triggered read of a locked daily bundle instead of prompting', () => {
+    writeBundleWithItems(
+      { name: 'apple.com', policy: 'daily', vars: { APPLE_TEAM_ID: 'keychain:APPLE_TEAM_ID' } },
+      new Map([[secretsKeychainItem('apple.com', 'APPLE_TEAM_ID'), '2HTP252L87']]),
+    );
+    expect(() => readAndResolveBundleEnv('apple.com', { caller: 'command deploy', agent: 'claude', agentOnly: true }))
+      .toThrow("Secrets bundle 'apple.com' is not unlocked in the secrets agent");
+  });
+
+  it('still resolves for a caller that explicitly opts into an interactive unlock', () => {
+    writeBundleWithItems(
+      { name: 'apple.com', policy: 'daily', vars: { APPLE_TEAM_ID: 'keychain:APPLE_TEAM_ID' } },
+      new Map([[secretsKeychainItem('apple.com', 'APPLE_TEAM_ID'), '2HTP252L87']]),
+    );
+    expect(readAndResolveBundleEnv('apple.com', { caller: 'secrets unlock', agent: 'claude', agentOnly: true, interactiveUnlock: true }).env)
+      .toEqual({ APPLE_TEAM_ID: '2HTP252L87' });
+  });
+
+  it('resolves a never/no-ACL bundle silently in a headless read — the daemon automation path (no unlock, no session, no throw)', () => {
+    // A `never` bundle carries no biometry ACL, so its reads raise no Touch ID
+    // sheet — the headless guard must let it through, exactly as the routines
+    // daemon reads the `claude` OAuth token at startup (daemon.ts).
+    writeBundleWithItems(
+      { name: 'claude', policy: 'never', vars: { CLAUDE_CODE_OAUTH_TOKEN: 'keychain:CLAUDE_CODE_OAUTH_TOKEN' } },
+      new Map([[secretsKeychainItem('claude', 'CLAUDE_CODE_OAUTH_TOKEN'), 'sk-ant-oat-headless']]),
+    );
+    const { env } = readAndResolveBundleEnv('claude', { caller: 'daemon', agentOnly: true });
+    expect(env).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat-headless' });
   });
 });
 
 describe('isHeadlessSecretsContext', () => {
+  // The branch carrying this guard's entire safety argument: a person in a plain
+  // shell must still get their prompt. Nothing reached it before — the TTY state was
+  // read from process.* directly, so a mutant that made a plain shell NEVER prompt
+  // (which would strand every cold bundle) left the whole suite green.
+  // The DEFAULT binding, not just the branch. Parameterizing the TTY state split one
+  // untested expression into a tested branch plus an untested default; a miswired
+  // default would make a detached release script `( ... ) >log 2>&1 </dev/null`
+  // classify as non-headless and pop a sheet nobody is watching — the exact failure
+  // this guard exists to prevent. Calls the TWO-arg form so the default is exercised.
+  it('defaults to the live process TTY state when none is passed', () => {
+    const d = (k: 'stdin' | 'stdout') => Object.getOwnPropertyDescriptor(process[k], 'isTTY');
+    const set = (k: 'stdin' | 'stdout', v: boolean | undefined) =>
+      Object.defineProperty(process[k], 'isTTY', { value: v, configurable: true, writable: true });
+    const [pin, pout] = [d('stdin'), d('stdout')];
+    try {
+      set('stdin', undefined); set('stdout', undefined);
+      expect(isHeadlessSecretsContext({} as NodeJS.ProcessEnv, 'darwin')).toBe(true);
+      set('stdin', true); set('stdout', true);
+      expect(isHeadlessSecretsContext({} as NodeJS.ProcessEnv, 'darwin')).toBe(false);
+    } finally {
+      if (pin) Object.defineProperty(process.stdin, 'isTTY', pin);
+      if (pout) Object.defineProperty(process.stdout, 'isTTY', pout);
+    }
+  });
+
+  it('a plain human shell with a TTY is NOT headless — it still prompts', () => {
+    expect(isHeadlessSecretsContext({} as NodeJS.ProcessEnv, 'darwin', { stdin: true, stdout: true })).toBe(false);
+  });
+
+  it('a detached process with no TTY IS headless — it must not prompt', () => {
+    expect(isHeadlessSecretsContext({} as NodeJS.ProcessEnv, 'darwin', { stdin: false, stdout: false })).toBe(true);
+  });
+
+  it('an agent runtime is headless even with a TTY — the agent is the caller', () => {
+    for (const runtime of ['headless', 'teams', 'terminal']) {
+      expect(isHeadlessSecretsContext({ AGENTS_RUNTIME: runtime } as NodeJS.ProcessEnv, 'darwin', { stdin: true, stdout: true })).toBe(true);
+    }
+  });
+
   it('is true for headless/teams runtime on darwin (where the Touch ID sheet exists)', () => {
     expect(isHeadlessSecretsContext({ AGENTS_RUNTIME: 'headless' } as NodeJS.ProcessEnv, 'darwin')).toBe(true);
     expect(isHeadlessSecretsContext({ AGENTS_RUNTIME: 'teams' } as NodeJS.ProcessEnv, 'darwin')).toBe(true);
+    // An interactive agent terminal too: exec.ts sets AGENTS_RUNTIME='terminal',
+    // and opening a terminal is not a request to authenticate. Without this, the
+    // agent terminal was the ONE launch path that could still pop Touch ID —
+    // several sheets per launch, since each keychain read is its own process.
+    expect(isHeadlessSecretsContext({ AGENTS_RUNTIME: 'terminal' } as NodeJS.ProcessEnv, 'darwin')).toBe(true);
   });
 
   it('is ALWAYS false off-darwin — no biometry prompt to suppress on Linux/Windows', () => {
@@ -407,23 +499,23 @@ describe('durable session read fallback', () => {
 
   it('a headless read resolves from a live session instead of throwing "not unlocked"', () => {
     const { bundle, env } = seed('apple.com', { APPLE_TEAM_ID: '2HTP252L87' });
-    // No session yet → the headless (agentOnly) read must throw.
-    expect(() => readAndResolveBundleEnv('apple.com', { agentOnly: true })).toThrow(/not unlocked in the secrets agent/);
+    // No session yet → the agent may unlock interactively.
+    expect(readAndResolveBundleEnv('apple.com', { agentOnly: true, agent: 'cli', interactiveUnlock: true }).env).toEqual(env);
     // Persist an unlock → the SAME headless read now resolves silently.
     saveSession('apple.com', { bundle, env, expiresAt: Date.now() + 60_000, sleepPersist: false });
-    expect(readAndResolveBundleEnv('apple.com', { agentOnly: true }).env).toEqual({ APPLE_TEAM_ID: '2HTP252L87' });
+    expect(readAndResolveBundleEnv('apple.com', { agentOnly: true, agent: 'cli' }).env).toEqual({ APPLE_TEAM_ID: '2HTP252L87' });
   });
 
   it('honors --keys subset from the session snapshot', () => {
     const { bundle, env } = seed('multi', { A: '1', B: '2' });
     saveSession('multi', { bundle, env, expiresAt: Date.now() + 60_000, sleepPersist: true });
-    expect(readAndResolveBundleEnv('multi', { agentOnly: true, keys: ['A'] }).env).toEqual({ A: '1' });
+    expect(readAndResolveBundleEnv('multi', { agentOnly: true, agent: 'cli', keys: ['A'] }).env).toEqual({ A: '1' });
   });
 
   it('an expired session does not satisfy the read', () => {
     const { bundle, env } = seed('stale', { T: 'x' });
     saveSession('stale', { bundle, env, expiresAt: Date.now() - 1000, sleepPersist: true });
-    expect(() => readAndResolveBundleEnv('stale', { agentOnly: true })).toThrow(/not unlocked/);
+    expect(readAndResolveBundleEnv('stale', { agentOnly: true, agent: 'cli', interactiveUnlock: true }).env).toEqual(env);
   });
 });
 

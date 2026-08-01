@@ -465,15 +465,38 @@ function firstNonEmpty(...values: Array<string | null | undefined>): string | un
  * rail so no surface re-derives it or renders blank. Fallback chain: the ORIGINAL
  * task (prompt / first user message — the durable anchor), then the CLI summary /
  * live preview, then the last response, then the worktree slug or branch (a task
- * label when there's no narrative — e.g. "headless-secrets-shadow"). Returns '' when
- * the agent carries no task signal at all; callers that need an absolute fallback add
- * `|| a.name` (the card already shows the name separately, so it omits that).
+ * label when there's no narrative — e.g. "headless-secrets-shadow"). Returns the
+ * explicit "No topic" placeholder when the agent carries no task signal at all.
  *
  * prompt is preferred first so a card anchors to what the agent was ASKED to do, not
  * whatever it last said — the last message drifts as work progresses, the task doesn't.
  */
 export function sessionTaskLine(a: FloorAgent): string {
-  return firstNonEmpty(a.prompt, a.summary, a.resp, a.worktreeSlug, a.branch) ?? ''
+  return firstNonEmpty(a.prompt, a.summary, a.resp, a.worktreeSlug, a.branch) ?? 'No topic'
+}
+
+/** Background/headless runs stay available through an explicit toggle, but do
+ * not crowd out interactive operator work on the floor by default. */
+export function visibleFloorAgents(agents: FloorAgent[], showBackground: boolean): FloorAgent[] {
+  return showBackground ? agents : agents.filter((a) => a.context !== 'headless')
+}
+
+/** Partition every visible card exactly once so rendered sections and counts
+ * consume the same collections. */
+export function partitionFloorAgents(agents: FloorAgent[]): {
+  needs: FloorAgent[]
+  active: FloorAgent[]
+  done: FloorAgent[]
+} {
+  const needs: FloorAgent[] = []
+  const active: FloorAgent[] = []
+  const done: FloorAgent[] = []
+  for (const agent of agents) {
+    if (agent.needs) needs.push(agent)
+    else if (agent.phase === 'done') done.push(agent)
+    else active.push(agent)
+  }
+  return { needs, active, done }
 }
 
 /**

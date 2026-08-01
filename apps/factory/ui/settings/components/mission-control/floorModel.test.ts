@@ -23,6 +23,8 @@ import {
   projectRollups,
   resolveProject,
   sessionTaskLine,
+  partitionFloorAgents,
+  visibleFloorAgents,
   todosWithFallback,
   linearIssueLabel,
   linearIssueUrl,
@@ -896,8 +898,31 @@ describe('sessionTaskLine — prompt anchors the card ahead of the drifting last
     expect(sessionTaskLine(makeAgent({ prompt: '   ', summary: 'real work' }))).toBe('real work')
   })
 
-  test('returns empty string when the agent carries no task signal at all', () => {
-    expect(sessionTaskLine(makeAgent({ prompt: undefined, summary: '', resp: '', worktreeSlug: '', branch: '' }))).toBe('')
+  test('returns a clear placeholder when the agent carries no task signal at all', () => {
+    expect(sessionTaskLine(makeAgent({ prompt: undefined, summary: '', resp: '', worktreeSlug: '', branch: '' }))).toBe('No topic')
+  })
+})
+
+describe('floor visibility and section counts', () => {
+  test('background agents are hidden by default and available through the toggle', () => {
+    const foreground = makeAgent({ id: 'foreground', context: 'terminal' })
+    const background = makeAgent({ id: 'background', context: 'headless' })
+    expect(visibleFloorAgents([foreground, background], false).map((a) => a.id)).toEqual(['foreground'])
+    expect(visibleFloorAgents([foreground, background], true).map((a) => a.id)).toEqual(['foreground', 'background'])
+  })
+
+  test('every rendered card belongs to exactly one counted section', () => {
+    const agents = [
+      makeAgent({ id: 'needs', needs: true, phase: 'waiting' }),
+      makeAgent({ id: 'running', phase: 'running' }),
+      makeAgent({ id: 'idle', phase: 'idle' }),
+      makeAgent({ id: 'done', phase: 'done' }),
+    ]
+    const sections = partitionFloorAgents(agents)
+    expect(sections.needs.map((a) => a.id)).toEqual(['needs'])
+    expect(sections.active.map((a) => a.id)).toEqual(['running', 'idle'])
+    expect(sections.done.map((a) => a.id)).toEqual(['done'])
+    expect(sections.needs.length + sections.active.length + sections.done.length).toBe(agents.length)
   })
 })
 

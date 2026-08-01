@@ -45,9 +45,11 @@ import {
   clusterByQuestion,
   sortAgents,
   groupAgents,
+  partitionFloorAgents,
   sessionTaskLine,
   ticketWorkers,
   projectRollups,
+  visibleFloorAgents,
   type FloorAgent,
   type FloorAttachment,
   type FloorTicket,
@@ -669,6 +671,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   const [hostPins, setHostPins] = useState<string[] | null>(floorPrefs0.hostPins)
   const [statusChips, setStatusChips] = useState<StatusChip[]>([])
   const [abbrChips, setAbbrChips] = useState<AgentAbbr[]>([])
+  const [showBackground, setShowBackground] = useState(false)
   const [savedViews, setSavedViews] = useState<SavedView[]>(() => loadSavedViews())
 
   const activeViewName = useMemo(() => {
@@ -1512,7 +1515,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
 
   // Center list scoped by project filter + host filter + status/agent chips + search.
   const scopedAgents = useMemo(() => {
-    let list = floorAgents
+    let list = visibleFloorAgents(floorAgents, showBackground)
     if (projFilter) list = list.filter((a) => a.project === projFilter)
     if (hostFilter) list = list.filter((a) => (a.hostLabel ?? a.host) === hostFilter)
     if (statusChips.length) list = list.filter((a) => statusChips.some((c) => (c === 'needs' ? a.needs : a.phase === c)))
@@ -1520,7 +1523,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
     const q = floorSearch.trim().toLowerCase()
     if (q) list = list.filter((a) => `${a.name} ${a.branch} ${a.verb} ${a.target} ${a.project} ${a.host} ${a.hostLabel ?? ''}`.toLowerCase().includes(q))
     return list
-  }, [floorAgents, projFilter, hostFilter, statusChips, abbrChips, floorSearch])
+  }, [floorAgents, showBackground, projFilter, hostFilter, statusChips, abbrChips, floorSearch])
 
   // Empty host filter -> show that host's recent sessions instead of a blank pane.
   // Fetch once per host (lazily), then adapt through the SAME card path as live agents.
@@ -1554,7 +1557,8 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
     return buildRecap(recapSessions, liveIds, Date.now())
   }, [recapSessions, floorAgents])
 
-  const needsAgents = useMemo(() => scopedAgents.filter((a) => a.needs), [scopedAgents])
+  const feedPartition = useMemo(() => partitionFloorAgents(scopedAgents), [scopedAgents])
+  const needsAgents = feedPartition.needs
   const waitingAgents = useMemo(() => needsAgents.filter((a) => a.phase === 'waiting'), [needsAgents])
   const failedAgents = useMemo(() => needsAgents.filter((a) => a.phase === 'failed'), [needsAgents])
   const questionClusters = useMemo(() => clusterByQuestion(waitingAgents), [waitingAgents])
@@ -1570,13 +1574,14 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   // lane; done (without an unreviewed PR — those are NEEDS YOU) is the terminal
   // lane. idle is no longer dropped from the feed.
   const runningFeed = useMemo(
-    () => sortAgents(scopedAgents.filter((a) => !a.needs && (a.phase === 'running' || a.phase === 'idle')), floorSort),
-    [scopedAgents, floorSort]
+    () => sortAgents(feedPartition.active, floorSort),
+    [feedPartition, floorSort]
   )
   const doneFeed = useMemo(
-    () => sortAgents(scopedAgents.filter((a) => !a.needs && a.phase === 'done'), floorSort),
-    [scopedAgents, floorSort]
+    () => sortAgents(feedPartition.done, floorSort),
+    [feedPartition, floorSort]
   )
+  const groupedFeed = useMemo(() => [...runningFeed, ...doneFeed], [runningFeed, doneFeed])
 
   const floorRunning = useMemo(() => floorAgents.filter((a) => a.phase === 'running').length, [floorAgents])
   const floorTok = useMemo(() => floorAgents.reduce((s, a) => s + a.tok, 0) + liveThroughput, [floorAgents, liveThroughput])
@@ -2086,6 +2091,8 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
           onToggleAbbr: (a) => setAbbrChips((cur) => (
             cur.includes(a) ? cur.filter((c) => c !== a) : [...cur, a]
           )),
+          showBackground,
+          onToggleBackground: () => setShowBackground((current) => !current),
         }}
       />
       {(needsAgents.length > 0 || pendingPlans.length > 0) && (
@@ -2149,7 +2156,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
         </>
       )}
 
-      <div className="feed-sec">{floorGroup === 'none' ? `RUNNING · ${runningFeed.length}` : `GROUPED BY ${floorGroup.toUpperCase()}${floorSubgroup !== 'none' && floorSubgroup !== floorGroup ? ` / ${floorSubgroup.toUpperCase()}` : ''} · ${runningFeed.length + doneFeed.length}`}<span className="ln" />
+      <div className="feed-sec">{floorGroup === 'none' ? `RUNNING · ${runningFeed.length}` : `GROUPED BY ${floorGroup.toUpperCase()}${floorSubgroup !== 'none' && floorSubgroup !== floorGroup ? ` / ${floorSubgroup.toUpperCase()}` : ''} · ${groupedFeed.length}`}<span className="ln" />
         <span
           className={`fresh${syncingHosts ? ' syncing' : ''}${!syncingHosts && lastRemoteSync > 0 && nowMs - lastRemoteSync > 2 * REMOTE_POLL_MS ? ' stale' : ''}`}
           title="Last cross-host sync. Click to refresh now."
@@ -2179,7 +2186,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               onOpenTerminal={openTerminalForAgent}
             />
           ))
-        : [...groupAgents([...runningFeed, ...doneFeed], floorGroup).entries()].map(([k, arr]) => {
+        : [...groupAgents(groupedFeed, floorGroup).entries()].map(([k, arr]) => {
             // When grouped by project, enrich the header: "N agents" + a Linear project
             // link pill (mockup: "agents-cli · 8 agents · RUSH · Agents CLI").
             const projectPill = (axis: FloorGroupBy | 'none', key: string) => (

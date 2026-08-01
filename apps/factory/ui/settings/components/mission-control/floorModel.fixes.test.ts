@@ -5,7 +5,9 @@ import {
   toFloorTicket,
   groupTickets,
   groupAgents,
+  partitionFloorAgents,
   sessionTaskLine,
+  visibleFloorAgents,
   worktreeSlugOf,
   type FloorAgent,
 } from './floorModel'
@@ -60,7 +62,15 @@ describe('issue 2 — one task-line seam', () => {
     expect(sessionTaskLine(agent({ resp: 'R', worktreeSlug: 'W' }))).toBe('R')
     expect(sessionTaskLine(agent({ worktreeSlug: 'headless-secrets-shadow', branch: 'b' }))).toBe('headless-secrets-shadow')
     expect(sessionTaskLine(agent({ branch: 'my/branch' }))).toBe('my/branch')
-    expect(sessionTaskLine(agent({}))).toBe('')
+    expect(sessionTaskLine(agent({}))).toBe('No topic')
+  })
+
+  test('background visibility is opt-in and section counts cover every visible card', () => {
+    const foreground = agent({ id: 'fg' })
+    const background = agent({ id: 'bg', context: 'headless' })
+    expect(visibleFloorAgents([foreground, background], false)).toEqual([foreground])
+    const partition = partitionFloorAgents([foreground])
+    expect(partition.needs.length + partition.active.length + partition.done.length).toBe(1)
   })
 
   test('worktreeSlugOf extracts the slug under .agents/worktrees/', () => {

@@ -92,8 +92,8 @@ export function detectOverdueJobs(now: Date = new Date()): OverdueJob[] {
 /**
  * Fire a branded desktop notification listing the overdue jobs. Routed through
  * the MenubarHelper companion (notify-desktop.ts) so it carries the agents-cli
- * mark; clicking opens `agents routines list`. Best-effort — a missing notifier
- * or absent display is swallowed and never crashes the daemon.
+ * mark; clicking opens the runs folder (~/.agents/.history/runs). Best-effort —
+ * a missing notifier or absent display is swallowed and never crashes the daemon.
  */
 export function notifyOverdue(jobs: OverdueJob[]): void {
   if (jobs.length === 0) return;

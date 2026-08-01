@@ -583,9 +583,14 @@ export function toFloorAgentFromRemote(r: RemoteSessionLike, pinned: Set<string>
   }
   const id = `remote-${r.host}-${r.sessionId}`
   const name = humanRemoteSessionName(r)
-  // Remote (Tier-1) sessions have no enriched last-response yet — fall back to the
-  // session's task line (topic) so the card shows what it's working on, not blank.
-  const resp = r.lastResponse || r.topic || ''
+  const taskAnchor = firstNonEmptyStr(
+    r.topic,
+    r.label,
+    r.worktreeSlug ? cleanWorktreeSlug(r.worktreeSlug) : undefined,
+    r.branch,
+    cleanWorktreeSlug(r.cwd),
+  )
+  const resp = r.lastResponse || ''
   // Cloud tasks run in a provider sandbox, not on the dispatching machine — the CLI
   // attributes them to the querier ('zion') for reply routing, but they should NOT
   // fold under that local host in the feed. Give them their own "Cloud" category.
@@ -639,7 +644,7 @@ export function toFloorAgentFromRemote(r: RemoteSessionLike, pinned: Set<string>
     resp,
     // Remote (Tier-1) has no first-user-message enrichment yet — the session's task line
     // (topic) is the closest durable anchor for the original task.
-    prompt: r.topic || undefined,
+    prompt: taskAnchor,
     // Prefer the last few assistant turns from the CLI (context feed); fall back to the
     // single last response when the CLI supplied no tail.
     messages: r.tail && r.tail.length ? r.tail : r.lastResponse ? [r.lastResponse] : [],
@@ -652,7 +657,7 @@ export function toFloorAgentFromRemote(r: RemoteSessionLike, pinned: Set<string>
     todos: remoteTodos,
     // Remote = summary only: the sweep carries the session's task line (topic) / last
     // response but no tool calls yet, so progress stays empty until Tier-2 enrichment.
-    summary: r.topic || r.lastResponse || '',
+    summary: taskAnchor || r.lastResponse || 'No topic',
     recent: [],
     recentEvents: [],
     // tmux %pane handle + where it's being viewed, surfaced on the card.

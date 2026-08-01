@@ -1,6 +1,11 @@
 import Foundation
 import Security
 import LocalAuthentication
+
+var operationPrompt = ProcessInfo.processInfo.environment["AGENTS_KEYCHAIN_PROMPT"] ?? "Unlock agents-cli secrets"
+let operationPromptWithoutDuration = ProcessInfo.processInfo.environment["AGENTS_KEYCHAIN_PROMPT_BASE"] ?? operationPrompt
+let defaultBundlePolicy = ProcessInfo.processInfo.environment["AGENTS_KEYCHAIN_DEFAULT_POLICY"] ?? "daily"
+let forcePromptDuration = ProcessInfo.processInfo.environment["AGENTS_KEYCHAIN_FORCE_DURATION"] == "1"
 import AppKit
 
 func writeStderr(_ message: String) {
@@ -171,7 +176,7 @@ func readItem(service: String, account: String) -> ReadOutcome {
     dpQuery[kSecMatchLimit] = kSecMatchLimitOne
     dpQuery[kSecUseAuthenticationContext] = authContext
     dpQuery[kSecUseAuthenticationUI] = kSecUseAuthenticationUIAllow
-    dpQuery[kSecUseOperationPrompt] = "Unlock agents-cli secrets" as CFString
+    dpQuery[kSecUseOperationPrompt] = operationPrompt as CFString
     var dpResult: AnyObject?
     let dpStatus = SecItemCopyMatching(dpQuery as CFDictionary, &dpResult)
     if dpStatus == errSecSuccess,
@@ -194,7 +199,7 @@ func readItem(service: String, account: String) -> ReadOutcome {
     orphanQuery[kSecMatchLimit] = kSecMatchLimitOne
     orphanQuery[kSecUseAuthenticationContext] = authContext
     orphanQuery[kSecUseAuthenticationUI] = kSecUseAuthenticationUIAllow
-    orphanQuery[kSecUseOperationPrompt] = "Unlock agents-cli secrets" as CFString
+    orphanQuery[kSecUseOperationPrompt] = operationPrompt as CFString
     var orphanResult: AnyObject?
     let orphanStatus = SecItemCopyMatching(orphanQuery as CFDictionary, &orphanResult)
     if orphanStatus == errSecSuccess,
@@ -213,7 +218,7 @@ func readItem(service: String, account: String) -> ReadOutcome {
     fileQuery[kSecMatchLimit] = kSecMatchLimitOne
     fileQuery[kSecUseAuthenticationContext] = authContext
     fileQuery[kSecUseAuthenticationUI] = kSecUseAuthenticationUIAllow
-    fileQuery[kSecUseOperationPrompt] = "Unlock agents-cli secrets" as CFString
+    fileQuery[kSecUseOperationPrompt] = operationPrompt as CFString
     var fileResult: AnyObject?
     let fileStatus = SecItemCopyMatching(fileQuery as CFDictionary, &fileResult)
     guard fileStatus == errSecSuccess,
@@ -484,6 +489,18 @@ case "get-batch":
         let outcome = readItem(service: service, account: account)
         dieIfCancelled(outcome.status)
         if let value = outcome.value {
+            // Bundle metadata is the first batch item and is no-ACL, so it can
+            // refine the prompt before the first protected value triggers UI.
+            // Only daily bundles are auto-held; always/never reads must not
+            // claim a duration that does not exist.
+            if let data = value.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                let tier = json["tier"] as? String
+                let daily = tier == "daily" || tier == "session" || (tier == nil && defaultBundlePolicy == "daily")
+                if !forcePromptDuration && !daily {
+                    operationPrompt = operationPromptWithoutDuration
+                }
+            }
             if service.hasPrefix("agents-cli.") {
                 if outcome.needsMigration {
                     migrateInline(service: service, account: account, value: value)

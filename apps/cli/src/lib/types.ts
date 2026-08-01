@@ -930,6 +930,16 @@ export interface Meta {
     owner?: { channel: string; to: string };
     transports?: Record<string, string>;
   };
+  /**
+   * Routines daemon settings. `projects` is the allowlist of project roots
+   * whose `.agents/routines/*.yml` may be synced into `~/.agents/routines/`
+   * and fired by the daemon — never auto-discovered from a cloned public
+   * repo without an explicit opt-in (`agents routines enable-project`).
+   * Paths are stored absolute (or home-relative `~/…`).
+   */
+  routines?: {
+    projects?: string[];
+  };
 }
 
 /** Persisted agent-host entry in agents.yaml (overlay or inline). */

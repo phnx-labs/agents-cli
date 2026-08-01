@@ -84,6 +84,17 @@ export function buildSpawnEnv(overlayHome: string, extraEnv?: Record<string, str
     }
   }
 
+  // Per-account Claude setup-tokens: the daemon injects a CLAUDE_CODE_OAUTH_TOKEN_<slug>
+  // for each account so a routine authenticates its rotation-pinned account via a
+  // long-lived, non-rotating token (see runner.ts buildRoutineSpawnEnv). Forward every
+  // such key by prefix — same trust tier as CLAUDE_CODE_OAUTH_TOKEN above; still no API
+  // keys or other provider secrets.
+  for (const key of Object.keys(process.env)) {
+    if (key.startsWith('CLAUDE_CODE_OAUTH_TOKEN_') && process.env[key]) {
+      env[key] = process.env[key]!;
+    }
+  }
+
   if (extraEnv) {
     Object.assign(env, extraEnv);
   }

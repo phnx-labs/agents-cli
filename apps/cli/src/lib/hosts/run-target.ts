@@ -68,6 +68,8 @@ export interface HostPromptRun {
   name?: string;
   /** Resume an existing session on the host by concrete id. */
   resume?: string;
+  /** Explicit id for a new Claude session. */
+  sessionId?: string;
   /** Working directory on the host, already made remote-portable by the caller. */
   remoteCwd?: string;
   /** Stream progress and block until completion (default true). */
@@ -98,6 +100,11 @@ export interface HostPromptRun {
   copyCreds?: HostCredentials;
 }
 
+/** Resolve the id the remote host will adopt for a fresh Claude session. */
+export function resolveHostSessionId(agent: string, resume?: string, sessionId?: string): string | undefined {
+  return agent === 'claude' && !resume ? sessionId ?? randomUUID() : undefined;
+}
+
 /**
  * Dispatch a headless prompt run onto a resolved host, then relate the run's
  * session id back to this launcher for EVERY agent — not just Claude.
@@ -114,7 +121,7 @@ export interface HostPromptRun {
  * while the run continues).
  */
 export async function dispatchPromptToHost(host: Host, opts: HostPromptRun): Promise<DispatchResult> {
-  const forcedSessionId = opts.agent === 'claude' && !opts.resume ? randomUUID() : undefined;
+  const forcedSessionId = resolveHostSessionId(opts.agent, opts.resume, opts.sessionId);
   // Ask the remote to print its resolved id whenever we did NOT force one (every
   // non-Claude agent, and Claude-on-resume where the id is already known). No-op
   // when the run isn't followed — nothing tails the log to catch the marker.

@@ -14,8 +14,9 @@ import { sshExec, sshStream, shellQuote } from '../ssh-exec.js';
 import type { Host } from './types.js';
 import { sshTargetFor } from './types.js';
 import { ensureHostReady } from './ready.js';
-import { remoteShellFor } from './remote-cmd.js';
+import { remoteShellFor, posixEnvExports } from './remote-cmd.js';
 import { resolveRemoteOsSync } from './remote-os.js';
+import { resolveActor, actorEnv } from '../actor.js';
 import { saveTask, updateTask, terminalPatch, type HostTask } from './tasks.js';
 import { followHostTask } from './progress.js';
 import { wrapHostCommandWithCredentials, type HostCredentials } from './credentials.js';
@@ -54,6 +55,18 @@ export function remoteCdPrefix(remoteCwd?: string): string {
   if (rest === '') return 'cd "$HOME" && ';
   if (rest !== null) return `cd "$HOME"/${shellQuote(rest)} && `;
   return `cd ${shellQuote(remoteCwd)} && `;
+}
+
+/**
+ * Merge the resolved actor's provenance env UNDER a caller-supplied env, so every
+ * remote `agents …` invocation forwards `AGENTS_ACTOR*` / `GIT_*` across the SSH
+ * hop. Without it the remote re-resolves the actor from the ORIGINATING box's
+ * `SSH_CONNECTION` (the wrong IP) and mis-credits the run to the shared machine or
+ * `UNRESOLVED@<host>` (RUSH-2028). A caller-supplied value wins on any key
+ * collision, mirroring `buildExecEnv`'s `...options.env` precedence (exec.ts).
+ */
+export function withActorEnv(env?: Record<string, string>): Record<string, string> {
+  return { ...actorEnv(resolveActor()), ...(env ?? {}) };
 }
 
 /**
@@ -212,10 +225,14 @@ async function launchDetached(host: Host, target: string, opts: LaunchOptions): 
   const remoteLog = `${REMOTE_DIR}/${id}.log`;
   const remoteExit = `${REMOTE_DIR}/${id}.exit`;
 
-  // Inner command run under a login shell so PATH resolves `agents`.
+  // Inner command run under a login shell so PATH resolves `agents`. Export the
+  // resolved actor provenance first so the detached remote run inherits it
+  // instead of re-resolving from this box's SSH_CONNECTION (RUSH-2028).
   const invocation = ['agents', ...opts.forwardedArgs].map(shellQuote).join(' ');
   const cwd = remoteCdPrefix(opts.remoteCwd);
-  let inner = `${cwd}${invocation} > ${remoteLog} 2>&1; echo $? > ${remoteExit}`;
+  const actorExports = posixEnvExports(withActorEnv());
+  const prelude = actorExports ? `${actorExports}; ` : '';
+  let inner = `${prelude}${cwd}${invocation} > ${remoteLog} 2>&1; echo $? > ${remoteExit}`;
   if (opts.copyCreds) {
     inner = wrapHostCommandWithCredentials(inner, opts.copyCreds);
   }
@@ -478,7 +495,11 @@ export async function runInteractiveOnHost(host: Host, opts: InteractiveDispatch
 
   const invocation = ['agents', ...buildInteractiveRunForwardedArgs(opts)].map(shellQuote).join(' ');
   const cwd = remoteCdPrefix(opts.remoteCwd);
-  let remoteCmd = `${cwd}${invocation}`;
+  // Forward actor provenance so the interactive remote run inherits it rather
+  // than re-resolving from this box's SSH_CONNECTION (RUSH-2028).
+  const actorExports = posixEnvExports(withActorEnv());
+  const prelude = actorExports ? `${actorExports}; ` : '';
+  let remoteCmd = `${prelude}${cwd}${invocation}`;
   if (opts.copyCreds) {
     remoteCmd = wrapHostCommandWithCredentials(remoteCmd, opts.copyCreds);
   }

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import * as os from 'os';
 import { randomUUID } from 'crypto';
 import { shellQuote, sshExec } from '../ssh-exec.js';
@@ -9,7 +9,10 @@ import {
   buildStopRemoteCommand,
   remoteCdPrefix,
   terminateDispatchedTask,
+  withActorEnv,
 } from './dispatch.js';
+import { buildRemoteAgentsInvocation, posixEnvExports } from './remote-cmd.js';
+import { resetActorCache } from '../actor.js';
 import type { HostTask } from './tasks.js';
 
 const LOCAL_HOME = process.env.HOME ?? os.homedir();
@@ -327,5 +330,93 @@ describe.skipIf(!remoteTarget)('terminateDispatchedTask — real remote process'
         { timeoutMs: 10000, multiplex: true },
       );
     }
+  });
+});
+
+describe('withActorEnv — forward actor provenance across the SSH hop (RUSH-2028)', () => {
+  const SAVE = { ...process.env };
+  const ACTOR_KEYS = [
+    'AGENTS_ACTOR', 'AGENTS_ACTOR_KIND', 'AGENTS_ACTOR_NAME',
+    'AGENTS_ACTOR_EMAIL', 'AGENTS_ACTOR_GITHUB', 'SSH_CONNECTION',
+  ];
+  // Force an INHERITED actor so resolveActor() is deterministic (computeActor
+  // reads AGENTS_ACTOR straight from the env — no tailscale shell-out).
+  function setActor(env: Record<string, string>): void {
+    for (const k of ACTOR_KEYS) delete process.env[k];
+    Object.assign(process.env, env);
+    resetActorCache();
+  }
+  afterEach(() => {
+    for (const k of Object.keys(process.env)) if (!(k in SAVE)) delete process.env[k];
+    Object.assign(process.env, SAVE);
+    resetActorCache();
+  });
+
+  it('carries AGENTS_ACTOR + GIT_AUTHOR_*/GIT_COMMITTER_* into the remote command when a human resolves', () => {
+    setActor({
+      AGENTS_ACTOR: 'muqsit@example.com',
+      AGENTS_ACTOR_KIND: 'human',
+      AGENTS_ACTOR_NAME: 'Muqsit',
+      AGENTS_ACTOR_EMAIL: 'muqsit@example.com',
+    });
+    const env = withActorEnv();
+    expect(env.AGENTS_ACTOR).toBe('muqsit@example.com');
+    expect(env.GIT_AUTHOR_NAME).toBe('Muqsit');
+    expect(env.GIT_AUTHOR_EMAIL).toBe('muqsit@example.com');
+    expect(env.GIT_COMMITTER_NAME).toBe('Muqsit');
+    expect(env.GIT_COMMITTER_EMAIL).toBe('muqsit@example.com');
+
+    // ...and they land in the actual remote command string maybeRunOnHost ships.
+    const cmd = buildRemoteAgentsInvocation(['view', 'claude'], undefined, undefined, env);
+    // Values are rendered as shell literals (unquoted when safe), NOT an
+    // expanding double-quote context — see the posixEnvExports injection tests in
+    // remote-cmd.test.ts for why (untrusted actor names must not run as shell).
+    expect(cmd).toContain('export AGENTS_ACTOR=muqsit@example.com');
+    expect(cmd).toContain('export GIT_AUTHOR_EMAIL=muqsit@example.com');
+    expect(cmd).toContain('export GIT_COMMITTER_NAME=Muqsit');
+    // The detached (run/teams) + interactive dispatch builders export via the
+    // same helper, so this prefix is exactly what they prepend too.
+    expect(posixEnvExports(env)).toContain('export AGENTS_ACTOR=muqsit@example.com');
+  });
+
+  it('merges the actor UNDER a caller env — the caller value wins, the doctor PATH coexists', () => {
+    setActor({ AGENTS_ACTOR: 'muqsit@example.com', AGENTS_ACTOR_KIND: 'human' });
+    const env = withActorEnv({
+      PATH: '$HOME/.agents/.cache/shims:$PATH',
+      AGENTS_ACTOR: 'override@example.com',
+    });
+    expect(env.AGENTS_ACTOR).toBe('override@example.com'); // caller wins (mirrors exec.ts precedence)
+    expect(env.PATH).toBe('$HOME/.agents/.cache/shims:$PATH');
+  });
+
+  it('two DIFFERENT origin actors forward two DIFFERENT identities (RUSH-2017 acceptance gap)', () => {
+    setActor({
+      AGENTS_ACTOR: 'alice@example.com', AGENTS_ACTOR_KIND: 'human',
+      AGENTS_ACTOR_NAME: 'Alice', AGENTS_ACTOR_EMAIL: 'alice@example.com',
+    });
+    const a = buildRemoteAgentsInvocation(['run', 'claude', 'hi', '--quiet'], undefined, undefined, withActorEnv());
+
+    setActor({
+      AGENTS_ACTOR: 'bob@example.com', AGENTS_ACTOR_KIND: 'human',
+      AGENTS_ACTOR_NAME: 'Bob', AGENTS_ACTOR_EMAIL: 'bob@example.com',
+    });
+    const b = buildRemoteAgentsInvocation(['run', 'claude', 'hi', '--quiet'], undefined, undefined, withActorEnv());
+
+    expect(a).toContain('export AGENTS_ACTOR=alice@example.com');
+    expect(a).toContain('export GIT_AUTHOR_NAME=Alice');
+    expect(b).toContain('export AGENTS_ACTOR=bob@example.com');
+    expect(b).toContain('export GIT_AUTHOR_NAME=Bob');
+    expect(a).not.toBe(b);
+    expect(a).not.toContain('bob@example.com');
+    expect(b).not.toContain('alice@example.com');
+  });
+
+  it('an UNRESOLVED origin stamps its own id — never leaves the remote to re-resolve from SSH_CONNECTION', () => {
+    setActor({}); // no inherited actor, no SSH_CONNECTION -> UNRESOLVED@<host>
+    const env = withActorEnv();
+    expect(env.AGENTS_ACTOR).toMatch(/^UNRESOLVED@/);
+    expect(env.GIT_AUTHOR_NAME).toBeUndefined();
+    const cmd = buildRemoteAgentsInvocation(['view'], undefined, undefined, env);
+    expect(cmd).toContain('export AGENTS_ACTOR=UNRESOLVED@');
   });
 });

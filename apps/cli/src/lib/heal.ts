@@ -162,8 +162,9 @@ export function summarizeHeal(r: HealResult): string {
 /**
  * Fire a branded desktop notification when a background heal did something
  * noteworthy. Routed through the MenubarHelper companion (notify-desktop.ts) so
- * it carries the agents-cli mark; clicking opens `agents doctor` (via the
- * routines list action the companion understands). Best-effort — a missing
+ * it carries the agents-cli mark; clicking opens the runs folder
+ * (~/.agents/.history/runs, via the `routines:list` action the companion
+ * understands). Best-effort — a missing
  * notifier or no display is swallowed. Silent when the pass auto-fixed everything
  * and nothing needs the operator (no point pinging them for routine self-healing).
  */

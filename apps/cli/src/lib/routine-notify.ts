@@ -80,7 +80,8 @@ function openAction(filePath: string | null | undefined): string | undefined {
 
 /**
  * Notification for a routine START, or null when the threshold suppresses it
- * (command-mode housekeeping). Clicking opens `agents routines list`.
+ * (command-mode housekeeping). Clicking opens the runs folder
+ * (~/.agents/.history/runs).
  */
 export function routineStartNotification(
   config: Pick<JobConfig, 'name' | 'agent' | 'workflow' | 'command'>,
@@ -95,10 +96,33 @@ export function routineStartNotification(
 }
 
 /**
+ * Notification for a routine that failed to even START — `executeJobDetached`
+ * threw before the child was spawned, so no run record and no finish will ever
+ * exist. The daemon fires the START notification unconditionally, so this closes
+ * the "exactly one start + one finish" invariant: the orphaned start gets its
+ * matching failure banner (RUSH-2030). Unlike a green finish this is never
+ * suppressed — a broken start is worth a ping for every routine kind, including
+ * command housekeeping. Clicking opens the runs folder (~/.agents/.history/runs)
+ * since there is no run report to open.
+ */
+export function routineStartFailedNotification(
+  config: Pick<JobConfig, 'name' | 'agent' | 'workflow' | 'command'>,
+  error: string,
+): DesktopNotification {
+  return {
+    title: 'Routine failed',
+    subtitle: config.name,
+    body: `Failed to start: ${error}`,
+    action: 'routines:list',
+  };
+}
+
+/**
  * Notification for a routine FINISH, or null when the threshold suppresses it
  * (a successful command-mode housekeeping run). Success carries the report's
  * first line when present (the notable output); failure carries the reason.
- * Clicking opens the run report/log when one is available, else the routines list.
+ * Clicking opens the run report/log when one is available, else the runs folder
+ * (~/.agents/.history/runs).
  */
 export function routineFinishNotification(
   meta: Pick<RunMeta, 'jobName' | 'status' | 'exitCode' | 'errorMessage' | 'duration' | 'agent' | 'workflow' | 'command'>,
@@ -163,6 +187,15 @@ function loadRunArtifacts(meta: Pick<RunMeta, 'jobName' | 'runId'>): {
 export function notifyRoutineStart(config: JobConfig): void {
   const n = routineStartNotification(config);
   if (n) notifyDesktop(n);
+}
+
+/**
+ * Daemon glue: fire the "failed to start" notification when a routine trigger
+ * threw before spawning a child. Pairs with the unconditional START ping so a
+ * pre-spawn failure never leaves an orphaned "Routine started". Best-effort.
+ */
+export function notifyRoutineStartFailed(config: JobConfig, error: string): void {
+  notifyDesktop(routineStartFailedNotification(config, error));
 }
 
 /** Daemon glue: fire the FINISH notification for a completed run. Best-effort. */

@@ -230,7 +230,7 @@ host), it invokes [`scripts/remote-sign-mac.sh`](scripts/remote-sign-mac.sh), wh
 rsyncs the build inputs (the full `src/` tree + `package.json`/`bun.lock`,
 keychain-helper.swift, entitlements, the build/sign scripts, the `menubar/` Swift
 package, and — if present — `bin/embedded.provisionprofile`)
-to `${SIGN_HOST:-mac-mini}`, runs the Mac build scripts there under the appliance's
+to an **auto-selected** sign host, runs the Mac build scripts there under its
 headless signing creds (unlock `rush-signing.keychain-db`; Apple notary creds via
 the `apple.com` secrets bundle), then pulls the signed `bin/*.app` +
 `bin/agents-macos` back and re-verifies both sha pins locally. `bun run build` copies the helpers into
@@ -241,6 +241,17 @@ Developer ID identity in `rush-signing.keychain-db`, the `kcpass` + `secrets.pas
 files under `~/Library/Application Support/rush/`, the `apple.com` secrets bundle,
 and `bin/embedded.provisionprofile` (for the notarized keychain helper). Override
 the checkout with `SIGN_HOST_REPO` (`$HOME` resolves on the remote side).
+
+**Sign-host selection (no hardcoded Mac).** With `SIGN_HOST` unset,
+`remote-sign-mac.sh` discovers one at runtime: it reads `agents devices list
+--json`, keeps the reachable/online macOS boxes, and picks the first that answers
+`ssh` in preference order **`mac-mini` → `zion` → any other online Mac** — so a
+Linux-driven release still proceeds when the usual appliance is offline, without an
+agent hardcoding a host (or triggering a Touch ID prompt on a box nobody is sitting
+at). `SIGN_HOST=<host>` pins one explicitly and skips discovery; if no reachable Mac
+has the signing keychain, the script fails with the list it tried. `mac-mini` is
+preferred because it signs headlessly; `zion` (the interactive Mac) is the
+fallback.
 
 **Why not CI?** The tarball bundles `dist/lib/secrets/Agents CLI.app` — a native
 keychain helper compiled with `swiftc`, codesigned (Developer ID), and notarized

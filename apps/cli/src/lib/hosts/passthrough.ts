@@ -21,7 +21,7 @@ import chalk from 'chalk';
 import { assertValidSshTarget, sshStream } from '../ssh-exec.js';
 import { resolveHost, resolveHostByCap } from './registry.js';
 import { sshTargetFor, type Host } from './types.js';
-import { dispatchAgentsCommand } from './dispatch.js';
+import { dispatchAgentsCommand, withActorEnv } from './dispatch.js';
 import {
   stripRoutingFlags,
   buildRemoteAgentsInvocation,
@@ -291,9 +291,14 @@ export async function maybeRunOnHost(command: string, allArgs: string[]): Promis
   const isDoctorCommand =
     command === 'doctor' || (command === 'teams' && forwarded[1] === 'doctor');
   const remoteOs = resolveRemoteOsSync(host.name);
-  const env = isDoctorCommand && !/^win/i.test((remoteOs ?? '').trim())
+  const doctorPath = isDoctorCommand && !/^win/i.test((remoteOs ?? '').trim())
     ? { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' }
     : undefined;
+  // Forward actor provenance (AGENTS_ACTOR*/GIT_*) across the SSH hop, merged
+  // UNDER the doctor PATH so that PATH still wins — without this the remote
+  // re-resolves the actor from THIS box's SSH_CONNECTION and mis-credits it
+  // (RUSH-2028). Flows to both POSIX (export) and Windows ($env:) dialects.
+  const env = withActorEnv(doctorPath);
   const remoteCmd = buildRemoteAgentsInvocation(forwarded, remoteCwd, remoteOs, env);
   const code = sshStream(target, remoteCmd, { tty: interactive, multiplex: true });
   if (code === 255) {
