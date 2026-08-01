@@ -1450,6 +1450,22 @@ export function openPanelAndFocusQuickSpawn(context: vscode.ExtensionContext): v
   }, alreadyOpen ? 0 : 500);
 }
 
+// Kick the Floor grid back into polling after a reconnect. The webview gates
+// its local/remote session sweeps on the last panelVisibility it received
+// (usePanelVisibility). onDidChangeViewState only fires on a view-state
+// TRANSITION, so a Remote-SSH drop where the panel stayed visible the whole
+// time never re-arms the poll — the grid looks frozen until the user hides and
+// re-reveals the tab. Re-posting the panel's real visibility on reconnect
+// unfreezes it. No-op when the panel is closed. Reuses the same message the
+// visibility listener posts — no new webview contract.
+export function resumeFloorPolling(): void {
+  if (!settingsPanel) return;
+  settingsPanel.webview.postMessage({
+    type: 'panelVisibility',
+    visible: settingsPanel.visible,
+  });
+}
+
 // Cache for agent inventories. agents view --json takes 4-6s because it hits
 // vendor APIs for usage stats. Within the TTL, repeat calls are instant.
 // Strategy mutations bust the cache so the UI reflects the new state.

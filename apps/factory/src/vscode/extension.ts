@@ -82,10 +82,12 @@ import {
   getTmuxState,
   isTmuxTerminal,
   registerTmuxCleanup,
+  reattachTmuxTerminal,
   tmuxSplitH,
   tmuxSplitV,
   isTmuxAvailable
 } from './tmux';
+import { registerReconnect, type ReattachTarget, type ReconnectDeps } from './reconnect';
 import { normalizeTerminalMode, resolveTerminalMode } from '../core/terminalMode';
 import { DEFAULT_DISPLAY_PREFERENCES } from '../core/settings';
 import * as readiness from './terminalReadiness';
@@ -816,6 +818,15 @@ export async function activate(context: vscode.ExtensionContext) {
   agentStatusBarItem.show();
   context.subscriptions.push(agentStatusBarItem);
 
+  // Snapshot the durable terminal↔tmux mapping BEFORE restore clears it, so the
+  // reconnect scan (below) can re-attach to sessions that were live at the last
+  // reload. This is the reload/crash arm of reconnect resilience; the
+  // window-focus arm reads the live in-window mappings.
+  const reconnectWorkspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const persistedAtActivation = reconnectWorkspacePath
+    ? terminals.loadPersistedSessions(reconnectWorkspacePath)
+    : [];
+
   // Scan existing terminals in the editor area to register any agent terminals
   // Then restore persisted sessions with proper icons/titles
   terminals.scanExisting(
@@ -832,6 +843,12 @@ export async function activate(context: vscode.ExtensionContext) {
           armShellAdoptionForTerminal(entry.terminal, context);
         }
       }
+    })
+    .then(() => {
+      // Reconnect resilience: after the terminal scan/restore has settled (so
+      // trackedTerminalIds is populated and we never double-attach a tab VS Code
+      // restored), wire the reconnect triggers and run the activation pass.
+      registerReconnect(context, buildReconnectDeps(context, persistedAtActivation));
     })
     .catch(err => {
       console.error('[EXTENSION] Error scanning/restoring terminals:', err);
@@ -4385,6 +4402,85 @@ async function restoreAgentTerminals(context: vscode.ExtensionContext): Promise<
 
   terminals.clearPersistedSessions(workspacePath);
   console.log(`[RESTORE] Restored ${toRestore.length} agent terminal(s)`);
+}
+
+// Assemble the deps the reconnect orchestrator (reconnect.ts) needs from the
+// extension host. `persistedAtActivation` is the on-disk mapping snapshot taken
+// before restore cleared it — the durable reload arm. On every pass we also
+// fold in the LIVE in-window mappings (buildPersistedSessions, always fresh,
+// carries tmux coords), deduped by terminalId, so a window-focus reconnect
+// re-attaches sessions whose client died mid-session too.
+function buildReconnectDeps(
+  context: vscode.ExtensionContext,
+  persistedAtActivation: import('./terminals.vscode').PersistedSession[],
+): ReconnectDeps {
+  return {
+    loadPersisted: () => {
+      const byId = new Map<string, import('./terminals.vscode').PersistedSession>();
+      for (const s of persistedAtActivation) byId.set(s.terminalId, s);
+      // Live in-window mappings win on conflict — they carry the current pid.
+      for (const s of terminals.buildPersistedSessions()) byId.set(s.terminalId, s);
+      return Array.from(byId.values());
+    },
+    trackedTerminalIds: () => new Set(terminals.getAllTerminals().map((e) => e.id)),
+    reattachOne: (target) => reattachSession(context, target),
+    resumePanelPolling: () => settings.resumeFloorPolling(),
+  };
+}
+
+// Re-attach to ONE still-live detached tmux session after a reconnect. Rebuilds
+// the agent's icon/title from the persisted prefix, spawns a terminal that runs
+// only the attach chain (reattachTmuxTerminal — never a new session, so the
+// agent is not restarted), and registers it marked `restored:true` (the agent
+// is already up; don't probe for boot). Throws on spawn failure so the caller's
+// bounded-backoff retry can re-try a transient SSH/attach error.
+async function reattachSession(
+  context: vscode.ExtensionContext,
+  target: ReattachTarget,
+): Promise<void> {
+  const session = target.session;
+  let agentConfig: Omit<import('./agents.vscode').AgentConfig, 'count'>;
+  let displayTitle: string;
+
+  if (session.prefix.toLowerCase() === 'sh') {
+    agentConfig = createAgentConfig(context.extensionPath, 'SH', '', 'agents.png', 'sh');
+    displayTitle = 'SH';
+  } else {
+    const def = getBuiltInByPrefix(session.prefix);
+    if (!def) throw new Error(`unknown prefix for reattach: ${session.prefix}`);
+    agentConfig = createAgentConfig(context.extensionPath, def.title, def.command, def.icon, def.prefix);
+    displayTitle = def.title;
+  }
+
+  const title = buildTerminalTitle(displayTitle, session.label, context, session.sessionId || null);
+  const agentType = session.agentType ?? prefixToAgentType(session.prefix) ?? displayTitle;
+
+  const terminal = reattachTmuxTerminal(
+    title,
+    agentType,
+    target.tmuxSession,
+    target.tmuxSocket,
+    { iconPath: agentConfig.iconPath as vscode.Uri, viewColumn: vscode.ViewColumn.Active },
+  );
+
+  const pid = await terminal.processId;
+  terminals.register(terminal, session.terminalId, agentConfig, pid, context, session.label);
+  // The agent is already running in the session we just attached to — mark all
+  // readiness events fired so nothing probes it as if it were booting.
+  readiness.registerTerminal(terminal, { restored: true });
+
+  if (session.version) terminals.setVersion(terminal, session.version);
+  if (session.agentType) {
+    terminals.setAgentType(terminal, session.agentType as SessionAgentType);
+    if (session.sessionId) {
+      terminals.setSessionId(terminal, session.sessionId);
+      startAutoLabelPollerForTerminal(terminal, context);
+    }
+  }
+  if (session.prefix.toLowerCase() === 'sh') {
+    armShellAdoptionForTerminal(terminal, context);
+  }
+  console.log(`[RECONNECT] re-attached ${target.tmuxSession} (${session.terminalId})`);
 }
 
 async function reopenLastClosedSession(context: vscode.ExtensionContext): Promise<void> {
