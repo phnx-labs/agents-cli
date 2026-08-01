@@ -8,6 +8,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 // captures HOME at load). Dynamic import below evaluates it under the temp home.
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'detach-store-'));
 const savedHome = process.env.HOME;
+process.env.AGENTS_TEST_HOME = TMP;
 process.env.HOME = TMP;
 
 const {

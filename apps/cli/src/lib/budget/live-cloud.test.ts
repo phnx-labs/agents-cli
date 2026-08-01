@@ -18,6 +18,7 @@ import * as path from 'path';
 
 // Pin HOME BEFORE any state.ts import so getHistoryDir() points at a temp dir.
 const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'live-cloud-home-'));
+process.env.AGENTS_TEST_HOME = fakeHome;
 process.env.HOME = fakeHome;
 fs.mkdirSync(path.join(fakeHome, '.agents'), { recursive: true });
 

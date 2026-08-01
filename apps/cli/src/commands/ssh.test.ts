@@ -45,6 +45,7 @@ function run(args: string[], extraEnv: Record<string, string> = {}): { stdout: s
     encoding: 'utf-8',
     env: {
       ...process.env,
+      AGENTS_TEST_HOME: testHome,
       HOME: testHome,
       // os.homedir() reads USERPROFILE on Windows, so HOME alone leaves the
       // spawned CLI resolving the real profile ('agents-cli is not set up').

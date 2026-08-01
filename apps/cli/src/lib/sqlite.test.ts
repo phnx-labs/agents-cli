@@ -90,7 +90,7 @@ describe('sqlite shim named-parameter binds', () => {
       // ignores HOME on Windows. With only HOME set, state.ts writes the index
       // under the temp home while the transcript scan reads the runner's real
       // profile, so the session is never found.
-      env: { ...process.env, HOME: home, USERPROFILE: home, AGENTS_REAL_HOME: home },
+      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home, USERPROFILE: home, AGENTS_REAL_HOME: home },
       stdio: ['ignore', 'pipe', 'inherit'],
     }).toString('utf-8');
     expect(JSON.parse(out).map((s: { id: string }) => s.id)).toContain(sessionId);

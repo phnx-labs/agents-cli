@@ -14,12 +14,13 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// HOME must be set before state.ts loads so the device registry, the agents.yaml
-// overlay, and ~/.ssh/config all resolve under the temp root.
-// USERPROFILE too: os.homedir() ignores HOME on Windows, and ssh-config.ts
-// builds ~/.ssh from os.homedir() — with only HOME set, the stanza written
-// below is invisible there and every lookup falls through.
+// AGENTS_TEST_HOME must be set before any import so state.ts's module-level HOME
+// constant resolves into this test's private temp tree. USERPROFILE too: os.homedir()
+// ignores HOME on Windows, and ssh-config.ts builds ~/.ssh from os.homedir() — with
+// only AGENTS_TEST_HOME set, the stanza written below is invisible there and every
+// lookup falls through. HOME is set so subprocesses also land in the temp root.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-resolve-target-test-'));
+process.env.AGENTS_TEST_HOME = TEST_HOME;
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 

@@ -65,7 +65,7 @@ function seedHome(): { commandSrc: string } {
 function syncSnapshot(): void {
   execFileSync('bun', [INDEX, 'sync', 'claude@2.0.0', '-y', '--cwd', projectDir], {
     cwd: REPO_ROOT,
-    env: { ...process.env, HOME: testHome },
+    env: { ...process.env, AGENTS_TEST_HOME: testHome, HOME: testHome },
     stdio: 'ignore',
   });
 }
@@ -73,7 +73,7 @@ function syncSnapshot(): void {
 function runCheck(...args: string[]): { status: number | null; stdout: string; stderr: string } {
   const r = spawnSync('bun', [INDEX, 'check', '--cwd', projectDir, ...args], {
     cwd: REPO_ROOT,
-    env: { ...process.env, HOME: testHome },
+    env: { ...process.env, AGENTS_TEST_HOME: testHome, HOME: testHome },
     encoding: 'utf-8',
   });
   return { status: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };

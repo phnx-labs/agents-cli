@@ -31,7 +31,16 @@ import { ensureLockTarget, atomicWriteFileSync, withFileLock } from './fs-atomic
 import type { Meta, RegistryType } from './types.js';
 import { machineId } from './machine-id.js';
 
-const HOME = process.env.HOME ?? os.homedir();
+// AGENTS_TEST_HOME pins the home root for the entire vitest fork before any
+// import runs (set by tests/setup.ts). It takes precedence over HOME so that
+// paths derived here — including the device registry, sessions dir, and every
+// other ~/.agents/* path — resolve into the hermetic temp tree, not the real
+// user home. Individual test files that need their own isolated root set this
+// env var to their own mkdtemp before doing a dynamic import of any state
+// consumer. Never set AGENTS_TEST_HOME in production code; it is a test-only
+// escape hatch that mirrors the AGENTS_EVENTS_PATH / AGENTS_SECRETS_AGENT_DIR
+// pattern established in #910.
+const HOME = process.env.AGENTS_TEST_HOME ?? process.env.HOME ?? os.homedir();
 
 /**
  * Compare two filesystem paths for identity, resolving symlinks and (on

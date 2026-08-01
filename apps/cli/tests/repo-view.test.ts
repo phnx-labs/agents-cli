@@ -47,7 +47,7 @@ function makeTempHome(): string {
 function runAgents(home: string, args: string[], extraEnv: Record<string, string> = {}) {
   return spawnSync('node', ['--import', 'tsx', 'src/index.ts', ...args], {
     cwd: REPO_ROOT,
-    env: { ...process.env, HOME: home, SHELL: '/bin/zsh', ...extraEnv },
+    env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home, SHELL: '/bin/zsh', ...extraEnv },
     encoding: 'utf-8',
   });
 }

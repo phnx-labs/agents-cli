@@ -8,6 +8,7 @@ import * as path from 'path';
 // in-process under vitest uses node:sqlite; the shipped standalone binary runs
 // bun:sqlite, whose named binds are covered by src/lib/sqlite.test.ts.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'fork-test-'));
+process.env.AGENTS_TEST_HOME = TEST_HOME;
 process.env.HOME = TEST_HOME;
 process.env.AGENTS_REAL_HOME = TEST_HOME;
 

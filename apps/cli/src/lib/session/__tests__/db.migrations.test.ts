@@ -6,6 +6,7 @@ import * as path from 'path';
 // Set HOME before db.js loads so its module-level DB path picks up the override.
 // (Plain top-level statements run before the dynamic `await import` below.)
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-db-migrations-'));
+process.env.AGENTS_TEST_HOME = TEST_HOME;
 process.env.HOME = TEST_HOME;
 
 const { getDB, closeDB, upsertSession, getSessionById } = await import('../db.js');

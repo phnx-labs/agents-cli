@@ -38,7 +38,7 @@ function makeHome(): string {
 function runCli(home: string, args: string[]): { stdout: string; stderr: string; status: number | null } {
   const r = spawnSync('bun', [INDEX, ...args], {
     encoding: 'utf-8',
-    env: { ...process.env, HOME: home, AGENTS_NO_UPDATE_CHECK: '1' },
+    env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home, AGENTS_NO_UPDATE_CHECK: '1' },
   });
   return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', status: r.status };
 }

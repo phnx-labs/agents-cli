@@ -12,7 +12,7 @@ describe('writeManifest concurrent safety', () => {
   function runManifestScript(home: string, script: string): string {
     return execFileSync('bun', ['-e', script], {
       cwd: process.cwd(),
-      env: { ...process.env, HOME: home },
+      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
       stdio: 'pipe',
       encoding: 'utf8',
     }).trim();
@@ -35,7 +35,7 @@ describe('writeManifest concurrent safety', () => {
     return new Promise((resolve, reject) => {
       const child = spawn('bun', ['-e', script], {
         cwd: process.cwd(),
-        env: { ...process.env, HOME: testDir },
+        env: { ...process.env, AGENTS_TEST_HOME: testDir, HOME: testDir },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       let stderr = '';

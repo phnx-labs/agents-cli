@@ -18,9 +18,10 @@ import * as os from 'os';
 import * as path from 'path';
 import type { DeviceStats } from './health.js';
 
-// Set HOME before state.ts loads so its module-level root picks up the override.
+// Set AGENTS_TEST_HOME before any import so state.ts's module-level HOME
+// constant resolves into this test's private temp tree, not the real ~/.agents.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-reachability-test-'));
-process.env.HOME = TEST_HOME;
+process.env.AGENTS_TEST_HOME = TEST_HOME;
 
 const { upsertDevice, loadDevices, getDevice, writeReachability } = await import('./registry.js');
 const { deviceOnlineState, reachabilityFromStats, collectReachabilityWriteBacks } = await import(

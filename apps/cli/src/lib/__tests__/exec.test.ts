@@ -33,11 +33,12 @@ function opts(overrides: Partial<ExecOptions>): ExecOptions {
 
 const ALL_AGENTS = Object.keys(AGENT_COMMANDS) as AgentId[];
 
-// Mirror the source's home resolution (src/lib/state.ts: `process.env.HOME ?? os.homedir()`).
+// Mirror the source's home resolution (src/lib/state.ts: `process.env.AGENTS_TEST_HOME ?? process.env.HOME ?? os.homedir()`).
+// AGENTS_TEST_HOME takes precedence when set by tests/setup.ts (RUSH-2042).
 // On Windows process.env.HOME is unset, so a bare `process.env.HOME!` is undefined and
 // `path.join(undefined, …)` throws — these assertions must resolve home the same way the
 // version-home builder does so the expected path matches on every OS.
-const HOME = process.env.HOME ?? os.homedir();
+const HOME = process.env.AGENTS_TEST_HOME ?? process.env.HOME ?? os.homedir();
 
 describe('buildExecCommand', () => {
   it('launches kiro with --v3 so standalone hooks load (RUSH-1612)', () => {

@@ -55,7 +55,7 @@ describe.skipIf(process.platform === 'win32')('agents sessions — managed-only 
       // compiled dist and tsx both do), so bun would make this test assert nothing.
       return execFileSync('node', ['--import', 'tsx', path.resolve(process.cwd(), 'src/index.ts'), 'sessions', ...args], {
         cwd: process.cwd(),
-        env: { ...process.env, HOME: home, AGENTS_REAL_HOME: home, SHELL: '/bin/bash', AGENTS_NO_NUDGE: '1', FORCE_COLOR: '0' },
+        env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home, AGENTS_REAL_HOME: home, SHELL: '/bin/bash', AGENTS_NO_NUDGE: '1', FORCE_COLOR: '0' },
         stdio: ['ignore', 'pipe', 'pipe'],
       }).toString('utf-8');
     } catch (e) {

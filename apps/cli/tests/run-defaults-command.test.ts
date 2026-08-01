@@ -71,6 +71,7 @@ describe('agents run defaults', () => {
       cwd: repoRoot,
       env: {
         ...process.env,
+        AGENTS_TEST_HOME: home,
         HOME: home,
         PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}`,
         AGENTS_NO_AUTOPULL: '1',
@@ -106,6 +107,7 @@ describe('agents run defaults', () => {
       cwd: projectDir,
       env: {
         ...process.env,
+        AGENTS_TEST_HOME: home,
         HOME: home,
         PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}`,
         AGENTS_NO_AUTOPULL: '1',

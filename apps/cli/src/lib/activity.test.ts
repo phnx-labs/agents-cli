@@ -23,7 +23,7 @@ function tmpActivityDir(): string {
 function runHook(home: string, payload: Record<string, unknown>, env: Record<string, string> = {}) {
   return spawnSync('python3', ['-c', ACTIVITY_LOG_HOOK_SCRIPT], {
     input: JSON.stringify(payload),
-    env: { ...process.env, HOME: home, ...env },
+    env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home, ...env },
     encoding: 'utf-8',
   });
 }

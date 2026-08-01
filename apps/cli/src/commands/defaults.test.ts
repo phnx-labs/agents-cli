@@ -12,6 +12,7 @@ function runAgents(home: string, args: string[]): string {
     cwd: repoRoot,
     env: {
       ...process.env,
+      AGENTS_TEST_HOME: home,
       HOME: home,
       AGENTS_NO_AUTOPULL: '1',
       AGENTS_SKIP_MIGRATION: '1',

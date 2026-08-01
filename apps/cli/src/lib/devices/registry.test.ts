@@ -16,10 +16,13 @@ import * as fsp from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 
-// Set HOME before state.ts loads so its module-level root picks up the
-// override. Top-level statements run before the dynamic `await import` below.
+// Set AGENTS_TEST_HOME before any import so state.ts's module-level HOME
+// constant resolves into this test's private temp tree, not the real ~/.agents.
+// state.ts reads AGENTS_TEST_HOME first (over HOME), so this is safe even when
+// state.ts was already evaluated by setup.ts with the fork-wide hermetic root.
+// Top-level statements run before the dynamic `await import` below.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-devices-registry-test-'));
-process.env.HOME = TEST_HOME;
+process.env.AGENTS_TEST_HOME = TEST_HOME;
 
 const { upsertDevice, loadDevices, getDevice, removeDevice, deviceRole, isControlDevice } =
   await import('./registry.js');

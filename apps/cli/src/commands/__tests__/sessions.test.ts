@@ -265,6 +265,7 @@ function runAgents(args: string[], cwd: string, home: string) {
     cwd,
     env: {
       ...process.env,
+      AGENTS_TEST_HOME: home,
       HOME: home,
       // os.homedir() (used via homeDir() in discovery) reads USERPROFILE on
       // Windows and ignores HOME, so set both to redirect the home to tempHome.

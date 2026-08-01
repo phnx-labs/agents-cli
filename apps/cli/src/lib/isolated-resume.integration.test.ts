@@ -45,7 +45,7 @@ describe.skipIf(process.platform === 'win32')('resuming an isolated session', ()
     `;
     const out = execFileSync('bun', ['-e', script], {
       cwd: process.cwd(),
-      env: { ...process.env, HOME: home, AGENTS_REAL_HOME: home, SHELL: '/bin/bash' },
+      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home, AGENTS_REAL_HOME: home, SHELL: '/bin/bash' },
       stdio: ['ignore', 'pipe', 'inherit'],
     }).toString();
     return JSON.parse(out.split('__R__')[1]);

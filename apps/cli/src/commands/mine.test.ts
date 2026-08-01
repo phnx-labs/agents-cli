@@ -14,6 +14,7 @@ function run(home: string, args: string[], brand?: string): { out: string; code:
       cwd: repoRoot,
       env: {
         ...process.env,
+        AGENTS_TEST_HOME: home,
         HOME: home,
         ...(brand ? { AGENTS_BRAND: brand } : {}),
         AGENTS_NO_AUTOPULL: '1',

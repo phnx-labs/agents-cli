@@ -25,6 +25,7 @@ import * as path from 'path';
 // test runner).
 const tmpBase = process.platform === 'darwin' ? '/tmp' : os.tmpdir();
 const TEST_HOME = fs.mkdtempSync(path.join(tmpBase, 'agents-pty-test-'));
+process.env.AGENTS_TEST_HOME = TEST_HOME;
 process.env.HOME = TEST_HOME;
 
 const { runPtyServer, captureProcessStartTime, getSocketPath, derivePtyEndpoint, buildSentinelCommand } = await import('../pty-server.js');

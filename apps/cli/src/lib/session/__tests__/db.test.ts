@@ -8,6 +8,7 @@ import * as path from 'path';
 // below, so vi.hoisted is not needed (and is also not supported by Bun's
 // native test runner).
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-db-test-'));
+process.env.AGENTS_TEST_HOME = TEST_HOME;
 process.env.HOME = TEST_HOME;
 
 const {

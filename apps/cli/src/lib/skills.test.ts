@@ -36,7 +36,7 @@ function runSkills(home: string, expression: string): unknown {
       console.log(JSON.stringify(result));
     }
   `], {
-    env: { ...process.env, HOME: home },
+    env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
     encoding: 'utf-8',
   });
 

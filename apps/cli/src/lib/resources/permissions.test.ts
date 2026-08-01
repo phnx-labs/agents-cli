@@ -37,7 +37,7 @@ function runPermissionsExpression(home: string, expression: string, cwd?: string
     const result = ${expression};
     console.log(JSON.stringify(result === undefined ? null : result));
   `], {
-    env: { ...process.env, HOME: home },
+    env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
     cwd: cwd || process.cwd(),
     encoding: 'utf-8',
   });

@@ -33,6 +33,7 @@ describe.skipIf(process.platform === 'win32')('agents view — isolated installs
       cwd: process.cwd(),
       env: {
         ...process.env,
+        AGENTS_TEST_HOME: home,
         HOME: home,
         PATH: `${path.join(home, 'npm-global', 'bin')}:${process.env.PATH}`,
         SHELL: '/bin/bash',

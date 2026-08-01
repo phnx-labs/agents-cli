@@ -33,7 +33,7 @@ describe.skipIf(process.platform === 'win32')('isolation boundary', () => {
       const out = execFileSync('bun', [path.resolve(process.cwd(), 'src/index.ts'), ...args], {
         cwd: process.cwd(),
         env: {
-          ...process.env, HOME: home, AGENTS_REAL_HOME: home, SHELL: '/bin/bash',
+          ...process.env, AGENTS_TEST_HOME: home, HOME: home, AGENTS_REAL_HOME: home, SHELL: '/bin/bash',
           AGENTS_NO_NUDGE: '1', FORCE_COLOR: '0',
           PATH: `${path.join(home, 'npm-global', 'bin')}:${process.env.PATH}`,
         },

@@ -176,7 +176,7 @@ describe('feed store', () => {
           ],
         },
       }),
-      env: { ...process.env, HOME: home, AGENTS_MAILBOX_DIR: mailbox, AGENTS_RUNTIME: 'teams' },
+      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home, AGENTS_MAILBOX_DIR: mailbox, AGENTS_RUNTIME: 'teams' },
       encoding: 'utf-8',
     });
     expect(result.status).toBe(0);
@@ -192,7 +192,7 @@ describe('feed store', () => {
         session_id: 'session-123',
         tool_input: { questions: [{ question: 'Replacement?', header: 'New' }] },
       }),
-      env: { ...process.env, HOME: home, AGENTS_MAILBOX_DIR: mailbox, AGENTS_RUNTIME: 'teams' },
+      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home, AGENTS_MAILBOX_DIR: mailbox, AGENTS_RUNTIME: 'teams' },
       encoding: 'utf-8',
     });
     expect(replace.status).toBe(0);
@@ -220,7 +220,7 @@ describe('feed store', () => {
         title: 'Permission needed',
         message: 'Claude needs permission to use Bash',
       }),
-      env: { ...process.env, HOME: home, AGENTS_MAILBOX_DIR: mailbox, AGENTS_RUNTIME: 'headless' },
+      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home, AGENTS_MAILBOX_DIR: mailbox, AGENTS_RUNTIME: 'headless' },
       encoding: 'utf-8',
     });
     expect(result.status).toBe(0);
@@ -257,7 +257,7 @@ describe('feed store', () => {
           }],
         },
       }),
-      env: { ...process.env, HOME: home },
+      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
       encoding: 'utf-8',
     });
     expect(question.status).toBe(0);
@@ -270,7 +270,7 @@ describe('feed store', () => {
         title: 'Permission Prompt',
         message: 'Claude needs your permission',
       }),
-      env: { ...process.env, HOME: home },
+      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
       encoding: 'utf-8',
     });
     expect(notification.status).toBe(0);
@@ -296,7 +296,7 @@ describe('feed store', () => {
         notification_type: 'auth_success',
         message: 'Authentication succeeded',
       }),
-      env: { ...process.env, HOME: home },
+      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
       encoding: 'utf-8',
     });
     expect(result.status).toBe(0);
@@ -312,7 +312,7 @@ describe('feed store', () => {
         hook_event_name: 'PreToolUse',
         tool_input: { questions: [{ question: 'Choose?', options: [{ label: 'A' }] }] },
       }),
-      env: { ...process.env, HOME: home },
+      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
       encoding: 'utf-8',
     });
     expect(publish.status).toBe(0);
@@ -324,7 +324,7 @@ describe('feed store', () => {
         hook_event_name: 'PostToolUse',
         tool_name: 'AskUserQuestion',
       }),
-      env: { ...process.env, HOME: home },
+      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
       encoding: 'utf-8',
     });
     expect(clear.status).toBe(0);
@@ -341,7 +341,7 @@ describe('feed store', () => {
         notification_type: 'idle_prompt',
         message: 'Claude is waiting for your next prompt',
       }),
-      env: { ...process.env, HOME: home },
+      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
       encoding: 'utf-8',
     });
     expect(publish.status).toBe(0);
@@ -349,7 +349,7 @@ describe('feed store', () => {
 
     const clear = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
       input: JSON.stringify({ session_id: 'session-idle', hook_event_name: 'UserPromptSubmit' }),
-      env: { ...process.env, HOME: home },
+      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
       encoding: 'utf-8',
     });
     expect(clear.status).toBe(0);
@@ -372,7 +372,7 @@ describe('feed store', () => {
           costOfDelay: 'high',
         },
       }),
-      env: { ...process.env, HOME: home },
+      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
       encoding: 'utf-8',
     });
     expect(result.status).toBe(0);
@@ -396,7 +396,7 @@ describe('feed store', () => {
         agent_type: 'Explore',
         tool_input: { questions: [{ question: 'Should not publish?' }] },
       }),
-      env: { ...process.env, HOME: home },
+      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
       encoding: 'utf-8',
     });
     expect(result.status).toBe(0);
@@ -543,7 +543,7 @@ describe('feed store', () => {
         hook_event_name: 'PreToolUse',
         tool_input: { questions: [{ question: 'Choose?', options: [{ label: 'A' }] }] },
       }),
-      env: { ...process.env, HOME: home },
+      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
       encoding: 'utf-8',
     });
     expect(publish.status).toBe(0);
@@ -551,7 +551,7 @@ describe('feed store', () => {
 
     const answer = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
       input: JSON.stringify({ session_id: 'session-terminal', hook_event_name: 'UserPromptSubmit' }),
-      env: { ...process.env, HOME: home },
+      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
       encoding: 'utf-8',
     });
     expect(answer.status).toBe(0);
@@ -572,14 +572,14 @@ describe('feed store', () => {
         hook_event_name: 'PreToolUse',
         tool_input: { questions: [{ question: 'First?' }] },
       }),
-      env: { ...process.env, HOME: home },
+      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
       encoding: 'utf-8',
     });
     expect(publish.status).toBe(0);
 
     const answer = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
       input: JSON.stringify({ session_id: sessionId, hook_event_name: 'UserPromptSubmit' }),
-      env: { ...process.env, HOME: home },
+      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
       encoding: 'utf-8',
     });
     expect(answer.status).toBe(0);
@@ -591,7 +591,7 @@ describe('feed store', () => {
         hook_event_name: 'PreToolUse',
         tool_input: { questions: [{ question: 'Second?' }] },
       }),
-      env: { ...process.env, HOME: home },
+      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
       encoding: 'utf-8',
     });
     expect(republish.status).toBe(0);

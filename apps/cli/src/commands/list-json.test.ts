@@ -41,7 +41,7 @@ function guardedHome(): void {
 function run(args: string[]): { stdout: string; status: number | null } {
   const r = spawnSync('bun', [INDEX, ...args], {
     encoding: 'utf-8',
-    env: { ...process.env, HOME: testHome, AGENTS_NO_UPDATE_CHECK: '1' },
+    env: { ...process.env, AGENTS_TEST_HOME: testHome, HOME: testHome, AGENTS_NO_UPDATE_CHECK: '1' },
   });
   return { stdout: r.stdout ?? '', status: r.status };
 }

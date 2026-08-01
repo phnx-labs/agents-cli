@@ -126,7 +126,7 @@ describe('MCP sync execution', () => {
       const result = installMcpServers('codex', ${JSON.stringify(version)}, ${JSON.stringify(versionHome)});
       console.log(JSON.stringify(result));
     `], {
-      env: { ...process.env, HOME: home, LOG_PATH: logPath },
+      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home, LOG_PATH: logPath },
       encoding: 'utf-8',
     });
 
@@ -185,7 +185,7 @@ describe('project MCP trust gate (RUSH-1776)', () => {
     const child = spawnSync(process.execPath, ['--input-type=module', '-e', `
       import * as mcp from ${JSON.stringify(moduleUrl)};
       ${body}
-    `], { env: { ...process.env, HOME: home }, encoding: 'utf-8' });
+    `], { env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home }, encoding: 'utf-8' });
     if (child.status !== 0) throw new Error(child.stderr || 'probe failed');
     return JSON.parse(child.stdout.trim());
   }
@@ -315,7 +315,7 @@ describe('MCP argv construction', () => {
       const result = installMcpServers(${JSON.stringify(agent)}, ${JSON.stringify(version)}, ${JSON.stringify(versionHome)});
       console.log(JSON.stringify(result));
     `], {
-      env: { ...process.env, HOME: home, LOG_PATH: logPath },
+      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home, LOG_PATH: logPath },
       encoding: 'utf-8',
     });
   }
@@ -388,7 +388,7 @@ describe('MCP argv construction', () => {
       );
       console.log(JSON.stringify(result));
     `], {
-      env: { ...process.env, HOME: home, LOG_PATH: logPath },
+      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home, LOG_PATH: logPath },
       encoding: 'utf-8',
     });
     expect(child.status, child.stderr).toBe(0);
@@ -428,7 +428,7 @@ describe('installMcpServers project-level config', () => {
       const result = installMcpServers('cursor', ${JSON.stringify(version)}, ${JSON.stringify(versionHome)}, undefined, { cwd: ${JSON.stringify(projectRoot)} });
       console.log(JSON.stringify(result));
     `], {
-      env: { ...process.env, HOME: home },
+      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
       encoding: 'utf-8',
     });
 
@@ -474,7 +474,7 @@ describe('installMcpServers project-level config', () => {
       const result = installMcpServers('cursor', ${JSON.stringify(version)}, ${JSON.stringify(versionHome)}, undefined, { cwd: ${JSON.stringify(projectRoot)} });
       console.log(JSON.stringify(result));
     `], {
-      env: { ...process.env, HOME: home },
+      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
       encoding: 'utf-8',
     });
 
@@ -506,7 +506,7 @@ describe('writeMcpConfig OpenClaw format', () => {
       }], 'overwrite');
       console.log('ok');
     `], {
-      env: { ...process.env, HOME: home },
+      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
       encoding: 'utf-8',
     });
 
@@ -539,7 +539,7 @@ describe('writeMcpConfig OpenClaw format', () => {
       }], 'merge');
       console.log('ok');
     `], {
-      env: { ...process.env, HOME: home },
+      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
       encoding: 'utf-8',
     });
 
@@ -578,7 +578,7 @@ describe('installMcpServers grok user-level config', () => {
       const result = installMcpServers('grok', ${JSON.stringify(version)}, ${JSON.stringify(versionHome)});
       console.log(JSON.stringify(result));
     `], {
-      env: { ...process.env, HOME: home },
+      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
       encoding: 'utf-8',
     });
 
@@ -621,7 +621,7 @@ describe('installMcpServers handled-agent tracking', () => {
       const result = installMcpServers('openclaw', ${JSON.stringify(version)}, ${JSON.stringify(versionHome)});
       console.log(JSON.stringify(result));
     `], {
-      env: { ...process.env, HOME: home },
+      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
       encoding: 'utf-8',
     });
 
@@ -655,7 +655,7 @@ describe('installMcpServers handled-agent tracking', () => {
       const result = installMcpServers('copilot', ${JSON.stringify(version)}, ${JSON.stringify(versionHome)});
       console.log(JSON.stringify(result));
     `], {
-      env: { ...process.env, HOME: home },
+      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
       encoding: 'utf-8',
     });
 

@@ -83,6 +83,7 @@ describe.skipIf(process.platform === 'win32')('isolated-only usage never disturb
       cwd: process.cwd(),
       env: {
         ...process.env,
+        AGENTS_TEST_HOME: home,
         HOME: home,
         // The user's own launcher is FIRST on PATH — the shadowing condition.
         PATH: `${path.join(home, 'npm-global', 'bin')}:${process.env.PATH}`,

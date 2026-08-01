@@ -263,7 +263,7 @@ describe('staleness/registry', () => {
 
       execFileSync('bun', ['--eval', script], {
         cwd: repoRoot,
-        env: { ...process.env, HOME: home },
+        env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
         encoding: 'utf-8',
         stdio: ['ignore', 'pipe', 'pipe'],
       });

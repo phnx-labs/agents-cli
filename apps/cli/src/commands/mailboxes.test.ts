@@ -13,6 +13,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-mailboxes-cmd-test-'));
+process.env.AGENTS_TEST_HOME = TEST_HOME;
 process.env.HOME = TEST_HOME;
 
 const { Command } = await import('commander');

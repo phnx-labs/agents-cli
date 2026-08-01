@@ -12,6 +12,7 @@ import type { CloudTask } from './types.js';
 // (which runs after it), so both DBs resolve under TEST_HOME. Same hermetic
 // pattern as session/__tests__/db.test.ts.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-cloudstore-'));
+process.env.AGENTS_TEST_HOME = TEST_HOME;
 process.env.HOME = TEST_HOME;
 
 const { insertTask, updateTaskStatus, getTaskById, closeStore } = await import('./store.js');

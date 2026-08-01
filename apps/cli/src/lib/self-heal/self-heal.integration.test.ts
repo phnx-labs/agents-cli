@@ -54,7 +54,7 @@ describe.skipIf(process.platform === 'win32')('runSelfHeal — shims/shadowing/p
     // shims dir (HOME/.agents/.cache/shims) is deliberately NOT on PATH; binDir is first.
     const out = execFileSync('bun', ['-e', script], {
       cwd: process.cwd(),
-      env: { ...process.env, HOME: home, PATH: `${binDir}:${process.env.PATH}`, SHELL: '/bin/bash' },
+      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home, PATH: `${binDir}:${process.env.PATH}`, SHELL: '/bin/bash' },
       stdio: ['ignore', 'pipe', 'inherit'],
     }).toString('utf-8');
     return JSON.parse(out);
@@ -122,7 +122,7 @@ describe.skipIf(process.platform === 'win32')('runSelfHeal — isolated-only ins
     `;
     const out = execFileSync('bun', ['-e', script], {
       cwd: process.cwd(),
-      env: { ...process.env, HOME: home, SHELL: '/bin/bash' },
+      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home, SHELL: '/bin/bash' },
       stdio: ['ignore', 'pipe', 'inherit'],
     }).toString('utf-8');
     const result = JSON.parse(out) as {
@@ -193,7 +193,7 @@ describe.skipIf(process.platform === 'win32')('runSelfHeal — resources never s
     `;
     const out = execFileSync('bun', ['-e', script], {
       cwd: process.cwd(),
-      env: { ...process.env, HOME: home },
+      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
       stdio: ['ignore', 'pipe', 'inherit'],
     }).toString('utf-8');
     const result = JSON.parse(out.split('__RESULT__')[1]) as {

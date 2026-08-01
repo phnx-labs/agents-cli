@@ -117,6 +117,7 @@ function runAgents(home: string, args: string[], extraEnv: Record<string, string
     cwd: REPO_ROOT,
     env: {
       ...process.env,
+      AGENTS_TEST_HOME: home,
       HOME: home,
       SHELL: '/bin/zsh',
       AGENTS_SYNC_MACHINE_ID: DEVICE_ID,
@@ -131,6 +132,7 @@ function runSessionDbScript(home: string, body: string): string {
     cwd: REPO_ROOT,
     env: {
       ...process.env,
+      AGENTS_TEST_HOME: home,
       HOME: home,
       SHELL: '/bin/zsh',
     },

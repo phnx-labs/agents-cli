@@ -32,6 +32,9 @@ function writeCentral(yamlText: string) {
 describe('defaultBrowserProfile is device-local', () => {
   beforeEach(() => {
     TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-state-test-'));
+    // AGENTS_TEST_HOME takes precedence over HOME in state.ts (see RUSH-2042).
+    // Must be set before freshState() re-imports state.ts.
+    process.env.AGENTS_TEST_HOME = TMP;
     process.env.HOME = TMP;
     process.env.AGENTS_SYNC_MACHINE_ID = 'testbox';
   });
@@ -74,6 +77,9 @@ describe('defaultBrowserProfile is device-local', () => {
 describe('reading state never writes a tracked agents.yaml (RUSH-1925)', () => {
   beforeEach(() => {
     TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-state-seed-'));
+    // AGENTS_TEST_HOME takes precedence over HOME in state.ts (see RUSH-2042).
+    // Must be set before freshState() re-imports state.ts.
+    process.env.AGENTS_TEST_HOME = TMP;
     process.env.HOME = TMP;
     process.env.AGENTS_SYNC_MACHINE_ID = 'testbox';
   });

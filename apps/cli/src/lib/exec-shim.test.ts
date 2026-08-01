@@ -6,6 +6,7 @@ import * as path from 'path';
 // Isolate HOME so resolveVersion finds no default — must run before importing
 // the module under test (which resolves paths from HOME at call time).
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-shim-test-'));
+process.env.AGENTS_TEST_HOME = TEST_HOME;
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 

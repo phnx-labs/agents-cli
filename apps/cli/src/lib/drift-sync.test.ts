@@ -44,7 +44,7 @@ function runYesApply(): { result: string; drifted: string; missingPresent: boole
   // heal resolves against the HOME dir; point HOME at the fixture.
   execFileSync('bun', ['-e', script], {
     cwd: process.cwd(),
-    env: { ...process.env, HOME: testHome },
+    env: { ...process.env, AGENTS_TEST_HOME: testHome, HOME: testHome },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
   return {

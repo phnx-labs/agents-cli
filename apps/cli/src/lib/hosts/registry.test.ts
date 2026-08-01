@@ -18,12 +18,13 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Set HOME before state.ts loads so its module-level root picks up the override
-// (both the devices registry and the hosts providers resolve paths from it).
+// Set AGENTS_TEST_HOME before any import so state.ts's module-level HOME
+// constant resolves into this test's private temp tree, not the real ~/.agents.
 // USERPROFILE too: os.homedir() ignores HOME on Windows, and ssh-config.ts
-// builds ~/.ssh from os.homedir() — with only HOME set, the stanza written
-// below is invisible there and every lookup falls through.
+// builds ~/.ssh from os.homedir() — with only AGENTS_TEST_HOME set, the stanza
+// written below is invisible there and every lookup falls through.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-host-resolve-test-'));
+process.env.AGENTS_TEST_HOME = TEST_HOME;
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 

@@ -5,6 +5,7 @@ import * as path from 'path';
 
 // Isolate HOME before importing modules that capture path constants at import.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-setup-test-'));
+process.env.AGENTS_TEST_HOME = TEST_HOME;
 process.env.HOME = TEST_HOME;
 
 const { Command } = await import('commander');

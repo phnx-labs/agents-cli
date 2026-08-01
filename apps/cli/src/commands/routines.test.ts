@@ -76,6 +76,7 @@ function run(
     cwd,
     env: {
       ...process.env,
+      AGENTS_TEST_HOME: home,
       HOME: home,
       USERPROFILE: home,
       AGENTS_SKIP_MIGRATION: '1',
@@ -116,6 +117,7 @@ function startIsolatedDaemon(home: string): { child: ReturnType<typeof spawn>; p
     cwd: REPO_ROOT,
     env: {
       ...process.env,
+      AGENTS_TEST_HOME: home,
       HOME: home,
       USERPROFILE: home,
       AGENTS_SKIP_MIGRATION: '1',

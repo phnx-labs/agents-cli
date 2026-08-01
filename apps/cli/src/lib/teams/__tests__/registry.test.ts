@@ -16,12 +16,12 @@ import * as fsp from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 
-// Set HOME before persistence.ts loads so its module-level root picks up the
-// override. Plain top-level statements run before the dynamic `await import`
-// below, so vi.hoisted is not needed (and is also not supported by Bun's
-// native test runner).
+// Set AGENTS_TEST_HOME before any import so state.ts's module-level HOME
+// constant resolves into this test's private temp tree (RUSH-2042). Plain
+// top-level statements run before the dynamic `await import` below, so
+// vi.hoisted is not needed (and is also not supported by Bun's native runner).
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-teams-registry-test-'));
-process.env.HOME = TEST_HOME;
+process.env.AGENTS_TEST_HOME = TEST_HOME;
 
 const { createTeam, loadTeams } = await import('../registry.js');
 

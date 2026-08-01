@@ -69,6 +69,7 @@ function run(home: string, args: string[]): ReturnType<typeof spawnSync> {
     cwd: REPO_ROOT,
     env: {
       ...process.env,
+      AGENTS_TEST_HOME: home,
       HOME: home,
       // os.homedir() reads USERPROFILE on Windows, so HOME alone leaves the
       // spawned CLI resolving the real profile ('agents-cli is not set up').

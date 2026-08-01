@@ -37,7 +37,7 @@ function runCli(home: string, args: string[]) {
     // AGENTS_EVENTS_PATH is inherited from the hermetic fork default
     // (tests/setup.ts); blank it so the child resolves the canonical
     // HOME-derived log this suite asserts on ('' is falsy in the resolver).
-    env: { ...process.env, HOME: home, SHELL: '/bin/zsh', SSH_CONNECTION: '', AGENTS_EVENTS_PATH: '' },
+    env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home, SHELL: '/bin/zsh', SSH_CONNECTION: '', AGENTS_EVENTS_PATH: '' },
     encoding: 'utf-8',
   });
 }

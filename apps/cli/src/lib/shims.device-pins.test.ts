@@ -54,7 +54,7 @@ describe('shim resolves the PER-DEVICE default pin', () => {
     fs.chmodSync(shimPath, 0o755);
 
     const out = execFileSync('bash', [shimPath, '--hi'], {
-      env: { ...process.env, AGENTS_USER_DIR: userDir, HOME: work, PATH: '/usr/bin:/bin' },
+      env: { ...process.env, AGENTS_USER_DIR: userDir, AGENTS_TEST_HOME: work, HOME: work, PATH: '/usr/bin:/bin' },
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
     });

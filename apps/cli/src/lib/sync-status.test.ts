@@ -73,7 +73,7 @@ function runStatus(kinds?: string[]): Status {
   `;
   const out = execFileSync('bun', ['-e', script], {
     cwd: process.cwd(),
-    env: { ...process.env, HOME: testHome },
+    env: { ...process.env, AGENTS_TEST_HOME: testHome, HOME: testHome },
     stdio: ['ignore', 'pipe', 'inherit'],
   }).toString('utf-8');
   return JSON.parse(out);
