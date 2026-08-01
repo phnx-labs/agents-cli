@@ -19,7 +19,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { execFile } from 'child_process';
+import { execFile, execFileSync } from 'child_process';
 import { promisify } from 'util';
 import { listActiveTasks } from '../cloud/store.js';
 import type { CloudTaskStatus } from '../cloud/types.js';
@@ -275,14 +275,68 @@ export function agentKindFromComm(commRaw: string): string | undefined {
   return AGENT_CLI_NAMES[key];
 }
 
-function isPidAlive(pid: number): boolean {
+/**
+ * A process that began more than this long AFTER a session's recorded
+ * `startedAtMs` cannot be that session's process — the OS handed its pid to
+ * something newer. The window absorbs clock granularity (`ps -o lstart=` reports
+ * whole seconds) and the gap between a process spawning and the SessionStart
+ * hook recording `startedAtMs`; it is far below the minutes-to-hours it takes the
+ * pid space to wrap and actually recycle a pid, so it never false-kills a live
+ * session.
+ */
+const PID_REUSE_TOLERANCE_MS = 60_000;
+
+/**
+ * Epoch-ms start time of the process at `pid`, or null if unknowable.
+ *
+ * Distinct from teams/agents.ts's `captureProcessStartTime`, which returns an
+ * opaque token only meaningful for equality against a prior capture of the SAME
+ * pid. Here we need a value comparable to a session's `startedAtMs`, so we read
+ * `ps -o lstart=` — a ctime string on both macOS and Linux — and parse it to
+ * epoch ms. Windows and any exec/parse failure return null, so the caller falls
+ * back to a bare existence check (never worse than before).
+ */
+function processStartMs(pid: number): number | null {
+  if (process.platform === 'win32') return null;
+  try {
+    const out = execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    if (!out) return null;
+    const ms = Date.parse(out);
+    return Number.isFinite(ms) ? ms : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True when `pid` names a live process AND — when a session's recorded
+ * `startedAtMs` is supplied — that process is plausibly the SAME one, not a later
+ * process that recycled the pid. The OS reuses pids, so a bare
+ * `process.kill(pid, 0)` existence check reports a dead session as alive (a
+ * "zombie") once its pid is handed to an unrelated process. A genuine session
+ * process starts at or before its own recorded start, so a process that began
+ * meaningfully AFTER `startedAtMs` is a reused pid and the session is dead. When
+ * the start time can't be read, we keep the existence answer.
+ */
+export function isPidAlive(pid: number, startedAtMs?: number): boolean {
   if (!pid || pid < 1) return false;
   try {
     process.kill(pid, 0);
-    return true;
   } catch (err: any) {
-    return err?.code === 'EPERM';
+    // EPERM means the pid exists but is owned by another user — still "alive",
+    // fall through to the identity check. Any other error means no such process.
+    if (err?.code !== 'EPERM') return false;
   }
+  if (startedAtMs && startedAtMs > 0) {
+    const procStartMs = processStartMs(pid);
+    if (procStartMs !== null && procStartMs > startedAtMs + PID_REUSE_TOLERANCE_MS) {
+      return false; // pid recycled by a newer process — this session is gone
+    }
+  }
+  return true;
 }
 
 interface LiveTerminalEntry {
@@ -315,7 +369,7 @@ function readLiveTerminals(): LiveTerminalEntry[] {
   const merged = new Map<string, LiveTerminalEntry>();
   for (const [windowId, slice] of Object.entries(parsed) as [string, any][]) {
     for (const e of (slice?.entries ?? []) as LiveTerminalEntry[]) {
-      if (!e?.sessionId || !isPidAlive(e.pid)) continue;
+      if (!e?.sessionId || !isPidAlive(e.pid, e.startedAtMs)) continue;
       merged.set(e.sessionId, { ...e, windowId });
     }
   }
@@ -631,7 +685,7 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
     const name = resolvedId ? runNameMap.get(resolvedId) ?? undefined : undefined;
     // Extract topic from session file (first meaningful user message)
     const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
-    const pidAlive = isPidAlive(t.pid);
+    const pidAlive = isPidAlive(t.pid, t.startedAtMs);
     const { state, tokPerSec } = computeLiveSignals(t.kind, sessionFile, t.cwd ?? undefined, pidAlive);
     return applyState({
       context: 'terminal',
@@ -1182,7 +1236,7 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
   // only live pids count — a dead agent's stale entry can't light up its old pane.
   const liveByPane = new Map<string, PidSessionEntry>();
   for (const e of listPidSessionEntries()) {
-    if (!e.tmuxPane || !isPidAlive(e.pid)) continue;
+    if (!e.tmuxPane || !isPidAlive(e.pid, e.startedAtMs)) continue;
     const prev = liveByPane.get(e.tmuxPane);
     if (!prev || e.startedAtMs > prev.startedAtMs) liveByPane.set(e.tmuxPane, e);
   }
@@ -1214,7 +1268,7 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
     const cwd = liveEntry?.cwd ?? meta?.cwd ?? (curPath || undefined);
     const sessionFile = findSessionFileForKind(id.agent, cwd, id.sessionId);
     const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
-    const pidAlive = pid ? isPidAlive(pid) : true;
+    const pidAlive = pid ? isPidAlive(pid, liveEntry?.startedAtMs) : true;
     const { state, tokPerSec } = computeLiveSignals(id.agent, sessionFile, cwd, pidAlive);
     const { birthtimeMs, mtimeMs } = sessionFileTimes(sessionFile);
     // Provenance is known exactly here (the pane IS a tmux pane) — set it so

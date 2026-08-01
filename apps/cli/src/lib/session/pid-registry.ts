@@ -141,8 +141,15 @@ export function listPidSessionEntries(): PidSessionEntry[] {
   return out;
 }
 
-/** Remove entries whose pid is no longer alive. Best-effort housekeeping. */
-export function prunePidSessionRegistry(isAlive: (pid: number) => boolean): void {
+/**
+ * Remove entries whose pid is no longer alive. Best-effort housekeeping.
+ *
+ * `isAlive` receives the entry's recorded `startedAtMs` so it can reject a pid
+ * that a newer process recycled (a "zombie" registry entry), not just one that
+ * no longer exists. An unreadable/corrupt entry falls back to the pid-only
+ * check.
+ */
+export function prunePidSessionRegistry(isAlive: (pid: number, startedAtMs?: number) => boolean): void {
   let files: string[];
   try {
     files = fs.readdirSync(pidRegistryDir()).filter(f => f.endsWith('.json'));
@@ -151,7 +158,15 @@ export function prunePidSessionRegistry(isAlive: (pid: number) => boolean): void
   }
   for (const f of files) {
     const pid = Number(f.slice(0, -'.json'.length));
-    if (!Number.isInteger(pid) || isAlive(pid)) continue;
+    if (!Number.isInteger(pid)) continue;
+    let startedAtMs: number | undefined;
+    try {
+      const parsed = JSON.parse(fs.readFileSync(path.join(pidRegistryDir(), f), 'utf8'));
+      if (typeof parsed?.startedAtMs === 'number') startedAtMs = parsed.startedAtMs;
+    } catch {
+      /* unreadable/corrupt — fall back to the pid-only liveness check */
+    }
+    if (isAlive(pid, startedAtMs)) continue;
     try {
       fs.unlinkSync(path.join(pidRegistryDir(), f));
     } catch {
