@@ -449,7 +449,9 @@ function signalBadges(s: Pick<ActiveSession, 'awaitingReason' | 'pr' | 'worktree
 function locatorBadge(s: ActiveSession): string {
   const p = s.provenance;
   const parts: string[] = [];
-  if (p?.transport === 'ssh') parts.push(chalk.red('ssh'));
+  // An ssh-launched session shows where it was launched FROM when the client IP
+  // resolves to a registered device (`ssh←zion`); bare `ssh` when it doesn't.
+  if (p?.transport === 'ssh') parts.push(chalk.red(p.origin ? `ssh←${p.origin.device}` : 'ssh'));
   if (p?.mux?.kind === 'tmux' && (s.tmuxTarget || p.mux.pane)) {
     parts.push(chalk.green(s.tmuxTarget ?? p.mux.pane!));
     // For a tmux-hosted session, say which app+tab is looking at it right now
