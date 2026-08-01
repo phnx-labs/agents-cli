@@ -192,14 +192,24 @@ export function detectAgentKeyFromArgs(args: string): AgentLauncherKey | null {
 }
 
 /**
- * Extract a session UUID from agent CLI args. Recognizes:
- *   --session-id <uuid>
+ * Extract the LIVE session UUID from an agent CLI arg string. Recognizes:
+ *   --session-id <uuid>   (claude CREATES a fresh conversation with this id)
  *   --session-id=<uuid>
- *   --session <uuid>
+ *   --session <uuid>      (alternate flag)
+ *   --resume <uuid>       (claude's native resume — the id it CONTINUES)
+ *   --resume=<uuid>
+ *
+ * `--resume` is included deliberately: agents-cli resumes claude with
+ * `--resume <id>` (see apps/cli `buildExecCommand`), not `--session-id`, so a
+ * resumed pane's live session only shows up under `--resume`. Without it, a
+ * resumed claude yields no id from argv and callers fall back to a
+ * mtime-nearest session-file guess that can bind the wrong (sibling) session.
+ * `--session-id` and `--resume` are mutually exclusive at the CLI, so there is
+ * no ambiguity between the two.
  */
 export function extractSessionIdFromArgs(args: string): string | undefined {
   const m = args.match(
-    /--session(?:-id)?[\s=]([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i
+    /--(?:session(?:-id)?|resume)[\s=]([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i
   );
   return m?.[1];
 }

@@ -7,6 +7,7 @@ import * as fs from 'fs/promises';
 import { AgentConfig } from './agents.vscode';
 
 import { fetchGitInfo } from '../monitor/snapshotDetector';
+import { findAgentInTree, SHELL_ADOPTION_TREE_DEPTH } from '../monitor/readinessDetector';
 import { PanelSnapshotPayload, SnapshotWatch } from '../monitor/protocol';
 import { generateTerminalId, resolveRestoredVersion, RunningCounts } from '../core/terminals';
 import * as sessionsPersist from '../core/sessions.persist';
@@ -704,6 +705,34 @@ export async function scanExisting(
       setAgentType(terminal, agentType);
     }
     let sessionId = identOpts.sessionId;
+
+    // Strategy 0 (authoritative): ask the process ACTUALLY running in this
+    // pane. env (AGENT_SESSION_ID), the tab-name chunk, and the persisted
+    // store are all captured at spawn time and go stale the moment the live
+    // session changes (a /continue or a resume/rotate switches the running
+    // session id) — and VS Code frequently drops `creationOptions.env` across
+    // a Remote-SSH window reload, forcing the recency-based fallbacks below.
+    // Those fallbacks match only by agent prefix + "most recent", so on reload
+    // a tab can be bound to a SIBLING session (wrong id, account, and version)
+    // that merely looks newest. The live process's own `--session-id`/`--resume`
+    // arg is the only signal tied to THIS pane, so it wins over every heuristic.
+    if (pid !== undefined && agentType) {
+      try {
+        const live = await findAgentInTree(pid, SHELL_ADOPTION_TREE_DEPTH);
+        if (live?.sessionId) {
+          if (live.sessionId !== sessionId) {
+            console.log(
+              `[TERMINALS] Live-process sessionId ${live.sessionId} (pid=${pid}) ` +
+                `overrides ${sessionId ?? 'none'} from env`
+            );
+          }
+          sessionId = live.sessionId;
+        }
+      } catch {
+        // Process may have exited or the probe failed; fall through to the
+        // best-effort heuristics below.
+      }
+    }
 
     // Strategy 1: Try to recover from sessionChunk in terminal name
     if (!sessionId && info.sessionChunk && agentType) {

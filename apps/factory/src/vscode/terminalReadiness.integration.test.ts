@@ -143,12 +143,32 @@ describe('shell adoption — extractSessionIdFromArgs', () => {
     expect(extractSessionIdFromArgs(`gemini --session ${uuid}`)).toBe(uuid);
   });
 
+  // A resumed claude carries its live session id under `--resume`, not
+  // `--session-id` (agents-cli buildExecCommand). Recovering it here is what
+  // lets scanExisting bind a reloaded Remote-SSH pane to the session actually
+  // running in it, instead of a mtime-nearest sibling.
+  test('--resume space-separated (claude native resume)', () => {
+    expect(extractSessionIdFromArgs(`claude --resume ${uuid}`)).toBe(uuid);
+  });
+
+  test('--resume equals-separated', () => {
+    expect(extractSessionIdFromArgs(`claude --resume=${uuid}`)).toBe(uuid);
+  });
+
+  test('resume id wins for a real `agents run claude --resume` argv', () => {
+    const args = `node /path/agents run claude --resume ${uuid} --model opus`;
+    expect(extractSessionIdFromArgs(args)).toBe(uuid);
+  });
+
   test('returns undefined when no session flag present', () => {
     expect(extractSessionIdFromArgs('claude --foo bar')).toBeUndefined();
     expect(extractSessionIdFromArgs('')).toBeUndefined();
+    // `--continue` (resume most-recent, no id) carries no UUID to extract.
+    expect(extractSessionIdFromArgs('claude --continue')).toBeUndefined();
   });
 
   test('ignores non-UUID values', () => {
     expect(extractSessionIdFromArgs('claude --session-id not-a-uuid')).toBeUndefined();
+    expect(extractSessionIdFromArgs('claude --resume not-a-uuid')).toBeUndefined();
   });
 });

@@ -24,6 +24,26 @@ All notable changes to the Factory extension are documented here. Format follows
 - **Native-mode agent terminal tabs now close automatically when the agent exits (RUSH-2026).** In native (non-tmux) terminal mode, the launch command is now prefixed with `exec` so the shell process replaces itself with the agent runner. When the agent exits the terminal process exits too and VS Code closes the tab automatically — no manual close needed. This mirrors the existing tmux pane-died behaviour. Shell tabs (the SH agent type) and tmux-mode terminals are unaffected. Remote `--host` launches get the same treatment: the local SSH wrapper exits with the remote session. Source: `apps/factory/src/core/agents.ts` (`wrapNativeAgentCommand`), `apps/factory/src/vscode/extension.ts` (`openSingleAgent`).
 
 - **Interactive agent launches now default to `--mode auto` instead of stalling in read-only plan mode (RUSH-2038).** Launching Codex, Claude, Gemini, Cursor, OpenCode, or Antigravity from Factory without explicitly choosing a mode now runs in `auto` (writable-but-gated), so the agent can edit files immediately. Previously the CLI default of `plan` was inherited, causing Codex to start with `--sandbox read-only` and wait indefinitely for approval. `buildAgentLaunchCommand` is now in `src/core/agents.ts` so it is unit-testable without a VS Code harness. Source: `apps/factory/src/core/agents.ts`, `apps/factory/src/vscode/extension.ts`.
+- **A reloaded terminal tab no longer gets bound to the wrong session (wrong id,
+  account, and version).** On a window reload — especially a Remote-SSH
+  reconnect, where VS Code drops `terminal.creationOptions.env` — `scanExisting`
+  lost the tab's `AGENT_SESSION_ID` and its name chunk, then fell back to
+  matching the persisted store by agent prefix + "most recently created". That
+  heuristic has no tie to the pane, so a Claude tab actually running one session
+  could be shown as a sibling session that merely looked newest (observed: status
+  bar read `ffa1f432… 2.1.220 <gmail>` while `/status` in the same pane reported
+  `e2030c92… 2.1.186 <getrush>`). Reload now first asks the process actually
+  running in the pane: it walks the tab's live process tree (`findAgentInTree`),
+  gated to the tab's own agent, and reads the running agent's own
+  `--session-id`/`--resume` arg, which wins over every env/name/persisted
+  heuristic. `extractSessionIdFromArgs` also learned to recognize
+  `--resume <uuid>` (claude's native resume form) — previously only
+  `--session-id` was parsed, so a resumed pane's live id was invisible and the
+  shell-adoption path fell to a mtime-nearest session-file guess. Source:
+  `apps/factory/src/vscode/terminals.vscode.ts` (`scanExisting`),
+  `apps/factory/src/monitor/readinessDetector.ts` (`findAgentInTree`,
+  `selectAgentFromCandidates`),
+  `apps/factory/src/core/terminalReadiness.ts` (`extractSessionIdFromArgs`).
 
 - **Stuck Claude tab labels self-heal, and an existing session name is reused
   before summarizing.** Two follow-ups to the derived-label fix: (1) On reload,
@@ -122,7 +142,6 @@ All notable changes to the Factory extension are documented here. Format follows
   CLI's `presence` (`attached` / `background` / `parked`). Source:
   `apps/factory/src/vscode/extension.ts`, `apps/factory/src/core/remoteSessions.ts`,
   `apps/factory/package.json`.
-
 - **agents-dbg now has a 0.1.0 Mac release pipeline (RUSH-1015).** The standalone
   Electron app packages as `agents-dbg.app` with the `com.phnxlabs.agents-dbg`
   bundle id, hardened-runtime entitlements, Developer ID signing, and
