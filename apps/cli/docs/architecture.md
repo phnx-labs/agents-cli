@@ -195,6 +195,30 @@ resident cache: each call pays the recompute, and the Factory extension polls it
 (local sessions ~3s, remote peers ~45s, `apps/factory/ui/.../UnifiedAgentsPane.tsx`).
 Other machines are reached by running the same command over SSH per peer.
 
+### Coarse status is honest, not guessed
+
+The rich `SessionActivity` maps to a coarse `ActiveStatus` the renderer and counts
+use: `working → running`, `waiting_input → input_required`, `idle → idle`. A rich
+tail is only parsed for **Claude and Codex** (`readSessionTailWithRaw` early-returns
+for every other kind, and `findSessionFileForKind` resolves a transcript only for
+those two). Every other case — a live gemini / droid / cursor / opencode, or a
+Claude/Codex tail that was empty or unreadable — has no rich state, so one canonical
+function, `resolveFallbackStatus(sessionFile, pidAlive)`, decides the status:
+
+| Situation | Status | Why |
+|---|---|---|
+| Transcript resolvable, mtime within 2 min | `running` | measured freshness — the file is being written |
+| Transcript resolvable, mtime older | `idle` | positive "not mid-turn" from a real signal |
+| Transcript `stat` throws (vanished / permission) | `unknown` | we genuinely cannot tell — never an optimistic `running` |
+| **No** parseable transcript, process **alive** | `unknown` | alive but opaque (a harness we don't parse) — NOT a fabricated `idle` |
+| No transcript, process not known alive | `idle` | nothing to report |
+
+`unknown` is the explicit "we can't introspect this live process" state — it renders
+as `◌` (magenta), distinct from the `○` idle it used to be silently faked as, so a
+busy non-Claude/Codex agent is never mistaken for a finished one. This is why the
+status is trustworthy uniformly across harnesses: where the truth is unknowable, the
+CLI reports `unknown` rather than inferring a wrong `idle`/`running`.
+
 This is deliberately simple and correct; the "compute once, subscribe" direction (a
 resident process that parses each file once and emits only what changed) is the
 optimization pattern tracked in [99-optimizations.md](99-optimizations.md). Describe
