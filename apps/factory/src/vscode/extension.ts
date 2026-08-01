@@ -274,9 +274,9 @@ export function runHeadlessAgent(
 // background/headless run reopens in a new tab and resumes; a live terminal session is
 // attached). It auto-resolves the surface (no interactive picker), so it's safe to run
 // detached from the extension host.
-// Send the active agent terminal to the background: `agents detach <id>` stops its
-// interactive process and continues it headless, then we close the tab. When the
-// active terminal isn't an agent, fall back to a picker over the live agent tabs.
+// Send the active agent terminal to the background: `agents sessions detach <id>`
+// stops its interactive process and continues it headless, then we close the tab.
+// When the active terminal isn't an agent, fall back to a picker over the live agent tabs.
 async function detachAgentToBackground(): Promise<void> {
   const active = vscode.window.activeTerminal;
   let sessionId: string | undefined;
@@ -308,7 +308,7 @@ async function detachAgentToBackground(): Promise<void> {
     void vscode.window.showWarningMessage('That agent has no resolved session id yet — try again once it has started.');
     return;
   }
-  const child = spawn('agents', ['detach', sessionId], {
+  const child = spawn('agents', ['sessions', 'detach', sessionId], {
     detached: true,
     stdio: 'ignore',
     env: agentsSpawnEnv(),
@@ -322,7 +322,7 @@ async function detachAgentToBackground(): Promise<void> {
 
 // Bring a backgrounded/parked agent to the foreground: pick from the CLI's
 // active-session list (presence background/parked) and open a terminal running
-// `agents attach <id>`, which resumes the session interactively in that tab.
+// `agents sessions attach <id>`, which resumes the session interactively in that tab.
 async function attachAgentFromBackground(): Promise<void> {
   const { sessions } = await fetchLocalSessions();
   const backgrounded = sessions.filter((s) => s.presence === 'background' || s.presence === 'parked');
@@ -342,7 +342,7 @@ async function attachAgentFromBackground(): Promise<void> {
   if (!pick?.sessionId) return;
   const term = vscode.window.createTerminal({ name: `attach ${pick.sessionId.slice(0, 8)}`, env: agentsSpawnEnv() });
   term.show();
-  term.sendText(`agents attach ${pick.sessionId}`);
+  term.sendText(`agents sessions attach ${pick.sessionId}`);
 }
 
 export function focusSessionInTerminal(sessionId: string): void {

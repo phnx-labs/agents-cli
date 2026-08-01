@@ -49,11 +49,11 @@ All notable changes to the Factory extension are documented here. Format follows
 - **Detach / Attach — send a running agent to the background from the editor.**
   Two commands: **Agents: Detach (Send to Background)** (`agents.detach`,
   `cmd+k cmd+b` on a focused agent terminal, also in the terminal right-click menu)
-  sends the active agent's session to the background via `agents detach <id>` —
+  sends the active agent's session to the background via `agents sessions detach <id>` —
   the interactive process stops, the tab closes, and the agent keeps working
   headless. **Agents: Attach (Bring to Foreground)** (`agents.attach`,
   `cmd+k cmd+a`) picks a backgrounded/parked agent and resumes it interactively in
-  a new terminal via `agents attach <id>`. The Floor session model now carries the
+  a new terminal via `agents sessions attach <id>`. The Floor session model now carries the
   CLI's `presence` (`attached` / `background` / `parked`). Source:
   `apps/factory/src/vscode/extension.ts`, `apps/factory/src/core/remoteSessions.ts`,
   `apps/factory/package.json`.
