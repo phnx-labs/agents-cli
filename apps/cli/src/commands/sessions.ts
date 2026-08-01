@@ -933,19 +933,20 @@ export function remoteHostsToDial(hosts: string[] | undefined, self: string): st
 }
 
 /**
- * Render the unified active-session view, grouped by machine. With no `--host`,
- * local sessions come from `getActiveSessions()` and (unless `--local`) the
- * registered online devices from `ag devices` are folded in over SSH. An
- * explicit `--host`/`--device` list SCOPES the view to exactly those machines —
- * the local machine is included only when it is itself named — so `--host` is a
- * filter, not an addition (matching the non-`--active` listing path). A tip is
- * shown when there are no other machines to include.
+ * The fleet-wide live-session set behind every `--active` surface. Local sessions
+ * come from `getActiveSessions()` and (unless `--local`) the registered online
+ * devices from `ag devices` are folded in over SSH. An explicit `--host`/`--device`
+ * list SCOPES the sweep to exactly those machines — the local machine is included
+ * only when it is itself named — so `--host` is a filter, not an addition.
+ *
+ * This is the single gather: the static renderer AND the interactive browser both
+ * call it, so the browser can never disagree with `--active --json` about which
+ * sessions are live (it used to call the local-only `getActiveSessions()` directly
+ * and silently hid every remote session).
  */
-async function renderActiveSessions(
-  asJson: boolean,
-  waitingOnly = false,
+export async function gatherActiveSessions(
   opts: { local?: boolean; hosts?: string[] } = {},
-): Promise<void> {
+): Promise<{ sessions: ActiveSession[]; remoteDeviceCount: number }> {
   const self = machineId();
   // An explicit --host/--device list scopes the view: seed local sessions only
   // when no hosts are named, or when this machine is one of the named targets.
@@ -964,6 +965,22 @@ async function renderActiveSessions(
       merged = dedupeByMachineSession([...local, ...remote.sessions]);
     }
   }
+  return { sessions: merged, remoteDeviceCount };
+}
+
+/**
+ * Render the unified active-session view, grouped by machine. Scoping and the
+ * fleet sweep live in {@link gatherActiveSessions}; this owns the presentation
+ * (the `--waiting` gate, JSON, and the grouped table). A tip is shown when there
+ * are no other machines to include.
+ */
+async function renderActiveSessions(
+  asJson: boolean,
+  waitingOnly = false,
+  opts: { local?: boolean; hosts?: string[] } = {},
+): Promise<void> {
+  const self = machineId();
+  const { sessions: merged, remoteDeviceCount } = await gatherActiveSessions(opts);
 
   // --waiting: only sessions blocked on the user. Exits non-zero when any are
   // present so a supervising agent or hook can poll it as a gate.
@@ -1892,6 +1909,13 @@ export interface PickerColumns {
   /** Render the ticket/PR column (only when at least one row carries a ref). */
   showTicket?: boolean;
   /**
+   * Render the host-program column — which terminal/editor the session is running
+   * in (`ghostty`, `codium`, `tmux→ghostty`, …). Live-only: it comes from the
+   * active-session scan, so it is set by the running-filtered browser and stays
+   * off for a plain transcript listing, where no row has a host.
+   */
+  showHost?: boolean;
+  /**
    * Cells the picker prepends before each row: 2 for the single-select cursor
    * ('> '), 6 for the multi-select cursor + checkbox ('> [x] '). Reserved from
    * the topic width so rows never wrap. Defaults to 2.
@@ -1951,11 +1975,29 @@ export function pickerColumnsFor(sessions: SessionMeta[]): PickerColumns {
   };
 }
 
+/** Width of the host-program column (`tmux→ghostty` is the long realistic case). */
+const PICKER_HOST_W = 14;
+
+/**
+ * Which program a live session is running in, for the picker's host column: the
+ * immediate host app (`codium`, `ghostty`, `tmux`, `iterm`, …) and — when a tmux
+ * session is currently being watched through a different app — the app it is
+ * viewed in, as `tmux→ghostty`. A tmux session with no attached client stays a
+ * bare `tmux`, which is exactly "running detached". Empty when the session has no
+ * resolvable host (cloud rows, an unreadable process env).
+ */
+export function liveHostLabel(a: ActiveSession | undefined): string {
+  if (!a?.host) return '';
+  const viewer = a.viewingIn?.app;
+  return viewer && viewer !== a.host ? `${a.host}→${viewer}` : a.host;
+}
+
 export function formatPickerLabel(
   s: SessionMeta,
   query: string,
   cols: PickerColumns = {},
   ssh?: SshOriginTag,
+  host = '',
 ): string {
   const agentColor = colorAgent(s.agent);
   const when = formatRelativeTime(s.lastActivity ?? s.timestamp);
@@ -1984,23 +2026,34 @@ export function formatPickerLabel(
     ? chalk.blue(padRight(truncate(ticketLabel(s) || '-', TICKET_W), TICKET_W + 1))
     : '';
 
+  // Which terminal/editor the session runs in — a tab in Ghostty vs a VS Code
+  // panel vs a detached tmux pane is the thing you need to know to go find it.
+  const hostCell = cols.showHost
+    ? chalk.gray(padRight(truncate(host || '-', PICKER_HOST_W - 1), PICKER_HOST_W))
+    : '';
+
   // The picker prepends a gutter (cursor, plus a checkbox in multi-select mode);
   // reserve it, plus the conditional columns, so the topic shrinks to fit and
   // rows never wrap.
   const gutter = cols.gutter ?? 2;
   const machineColW = cols.showMachine ? machineW : 0;
   const ticketW = cols.showTicket ? TICKET_W + 1 : 0;
+  const hostW = cols.showHost ? PICKER_HOST_W : 0;
   const wtW = wt ? stringWidth(wt) + 1 : 0;
   const topicW = Math.max(
     16,
-    terminalWidth() - gutter - (10 + 9 + 8 + 16) - machineColW - ticketW - wtW - sshW - stringWidth(when) - 1,
+    terminalWidth() - gutter - (10 + 9 + 8 + 16) - machineColW - hostW - ticketW - wtW - sshW - stringWidth(when) - 1,
   );
 
   return (
-    chalk.white(padRight(s.shortId, 10)) +
+    // Truncated, not just padded: an indexed shortId is always 8 chars, but a
+    // live row with no session id is named by its pid or cloud task, which can
+    // run past the column and shunt every later column out of alignment.
+    chalk.white(padRight(truncate(s.shortId, 9), 10)) +
     agentColor(padRight(truncate(s.agent, 8), 9)) +
     chalk.yellow(padRight(truncate(versionStr, 7), 8)) +
     machineCell +
+    hostCell +
     chalk.cyan(padRight(truncate(project, 14), 16)) +
     sshSeg +
     renderTopicCell(label, topic, query, topicW, topicW) +
@@ -2076,7 +2129,27 @@ function warnNoPeerTarget(machine: string, session: SessionMeta): void {
   console.log(chalk.gray(`Register/wake it (ag devices), or run there: agents ssh ${machine}`));
 }
 
+/**
+ * Row-id prefix for a live session whose agent has not reported a session id yet
+ * (a booting harness, a queued teammate). The browser lists these so nothing live
+ * is hidden, but they address no transcript — {@link isIdlessLiveRow} is what the
+ * pick handler checks before trying to read or resume one.
+ */
+export const LIVE_ROW_PREFIX = 'live:';
+
+export function isIdlessLiveRow(s: SessionMeta): boolean {
+  return s.id.startsWith(LIVE_ROW_PREFIX);
+}
+
 export async function handlePickedSession(picked: PickedSession): Promise<void> {
+  // A live row with no session id has no transcript to open and no id to resume
+  // by; say where the process is instead of dead-ending on an unreadable path.
+  if (isIdlessLiveRow(picked.session)) {
+    const where = picked.session.machine ? ` on ${picked.session.machine}` : '';
+    console.log(chalk.yellow(`This session hasn't reported a session id yet — nothing to open${where}.`));
+    console.log(chalk.gray(`Watch for it with: agents sessions --active${picked.session.machine ? ` --host ${picked.session.machine}` : ''}`));
+    return;
+  }
   // A session on another machine is read/resumed ON that machine over SSH — its
   // transcript and agent binary live there. Both actions execute on the peer
   // (not a local `--host` hop, which would discover locally and dead-end for a

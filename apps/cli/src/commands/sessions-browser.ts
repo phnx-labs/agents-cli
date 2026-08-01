@@ -10,11 +10,12 @@
  * preview, resume dispatch) is reused from the existing sessions plumbing.
  */
 
+import path from 'path';
 import { spawnSync } from 'child_process';
 import chalk from 'chalk';
 import { dynamicPicker } from '../lib/picker.js';
-import type { SessionMeta } from '../lib/session/types.js';
-import { getActiveSessions, type ActiveSession } from '../lib/session/active.js';
+import { isSessionTrackedAgent, type SessionMeta } from '../lib/session/types.js';
+import type { ActiveSession } from '../lib/session/active.js';
 import { discoverSessions } from '../lib/session/discover.js';
 import { gatherRemoteList } from '../lib/session/remote-list.js';
 import { machineId, normalizeHost } from '../lib/session/sync/config.js';
@@ -25,7 +26,10 @@ import {
   type SshOriginTag,
   ticketLabel,
   mergeLocalFirst,
-  indexActiveBySessionId,
+  gatherActiveSessions,
+  liveHostLabel,
+  LIVE_ROW_PREFIX,
+  cleanPreview,
   handlePickedSession,
   shouldIncludeLocal,
   remoteHostsToDial,
@@ -230,6 +234,92 @@ async function fetchRawPool(
   return { key: `${since ?? 'all'}|${f.teams}`, rows };
 }
 
+/**
+ * A live session's stable row key: its session id when the agent reported one,
+ * else a per-machine handle so an id-less live session (a just-booted harness, a
+ * cloud task) still gets exactly one row instead of being dropped. Cloud rows key
+ * on the task id because they have no pid — keying them all on the machine alone
+ * would collapse two cloud tasks into one row, the same silent-drop this whole
+ * change exists to remove.
+ */
+export function liveRowKey(a: ActiveSession, self: string): string {
+  if (a.sessionId) return a.sessionId;
+  const handle = a.cloudTaskId ?? (a.pid != null ? String(a.pid) : 'unknown');
+  return `${LIVE_ROW_PREFIX}${a.machine ?? self}:${handle}`;
+}
+
+/** Index live sessions by {@link liveRowKey} — the join key between the live scan
+ *  and the transcript pool. Id-carrying rows key on the session id, so a live row
+ *  and its transcript row collapse to one. */
+export function indexLiveRows(rows: ActiveSession[], self: string): Map<string, ActiveSession> {
+  const byKey = new Map<string, ActiveSession>();
+  for (const a of rows) byKey.set(liveRowKey(a, self), a);
+  return byKey;
+}
+
+/**
+ * Project a live session onto the picker's row shape, for a session the transcript
+ * pool doesn't carry — a peer's session, a transcript outside the current window,
+ * or an agent that has not written one yet. `filePath` is the live transcript path
+ * when the scan resolved one and empty otherwise, which is what
+ * {@link handlePickedSession} keys "there is nothing to open yet" off.
+ */
+export function liveSessionToMeta(a: ActiveSession, self: string): SessionMeta {
+  const machine = a.machine ?? self;
+  const started = a.startedAtMs ?? a.lastActivityMs;
+  const topic = a.topic ?? a.preview;
+  return {
+    id: liveRowKey(a, self),
+    // No session id to short — name the row by what it IS (a cloud task, a pid),
+    // so the id column still identifies the process you'd go looking for.
+    shortId: a.sessionId
+      ? a.sessionId.slice(0, 8)
+      : a.cloudTaskId
+        ? a.cloudTaskId.slice(0, 8)
+        : `p:${a.pid ?? '?'}`,
+    agent: isSessionTrackedAgent(a.kind) ? a.kind : 'claude',
+    timestamp: new Date(started ?? Date.now()).toISOString(),
+    lastActivity: a.lastActivityMs ? new Date(a.lastActivityMs).toISOString() : undefined,
+    project: a.cwd ? path.basename(a.cwd) : undefined,
+    cwd: a.cwd,
+    filePath: a.sessionFile ?? '',
+    // A live topic is raw transcript text: a newline in it would break the row
+    // into two and misalign every column after it. Indexed rows are already
+    // cleaned at scan time, so this puts projected rows on the same footing.
+    topic: topic ? cleanPreview(topic) : undefined,
+    label: a.label ? cleanPreview(a.label) : undefined,
+    machine,
+    // Reading/resuming a peer's session hops back over SSH — same contract the
+    // cross-machine listing sets, so handlePickedSession routes it correctly.
+    _remote: machine !== self,
+    prUrl: a.pr?.url,
+    prNumber: a.pr?.number,
+    ticketId: a.ticket?.id,
+    worktreeSlug: a.worktree?.slug,
+  };
+}
+
+/**
+ * Fold the live scan INTO the transcript pool. The running filter used to be a
+ * pure intersection (`pool ∩ live`), which meant a session had to already be in
+ * the pool to be shown as running — so every session on another machine, and
+ * every local one outside the pool's window, was invisible in the browser while
+ * `--active --json` listed it. Live sessions the pool lacks are appended as their
+ * own rows, then the whole set is grouped local-machine-first.
+ */
+export function mergeLiveIntoPool(
+  rows: SessionMeta[],
+  live: Map<string, ActiveSession>,
+  self: string,
+): SessionMeta[] {
+  const known = new Set(rows.map((r) => r.id));
+  const extra: SessionMeta[] = [];
+  for (const [key, a] of live) {
+    if (!known.has(key)) extra.push(liveSessionToMeta(a, self));
+  }
+  return extra.length === 0 ? rows : mergeLocalFirst([...rows, ...extra], self);
+}
+
 /** Apply the cheap in-memory filters (agent / device / project / running). */
 function applyFilters(
   rows: SessionMeta[],
@@ -325,11 +415,14 @@ export async function runSessionBrowser(
       if (myGen !== loadGen) return []; // superseded — don't touch shared state
       pool = fetched;
     }
-    // Only pay for the live scan when the running filter needs it.
+    // Only pay for the live scan when the running filter needs it. Same fleet
+    // sweep the static `--active` view uses, so the two never disagree about
+    // what is running.
     let live = liveCache;
     if (f.running && !live) {
       try {
-        live = indexActiveBySessionId(await getActiveSessions());
+        const { sessions } = await gatherActiveSessions({ local, hosts });
+        live = indexLiveRows(sessions, self);
       } catch {
         live = new Map();
       }
@@ -339,10 +432,16 @@ export async function runSessionBrowser(
     // no newer load can interleave between these writes).
     rawCache = pool;
     if (live) liveCache = live;
-    agentsInPool = distinct(pool.rows.map((r) => r.agent));
-    devicesInPool = distinct(pool.rows.map((r) => r.machine ?? self));
-    const filtered = applyFilters(pool.rows, live ?? new Map(), f, self);
+    // Live sessions the transcript pool lacks become rows of their own, so the
+    // running view lists every active session, not just the ones already indexed.
+    const rows = f.running && live ? mergeLiveIntoPool(pool.rows, live, self) : pool.rows;
+    agentsInPool = distinct(rows.map((r) => r.agent));
+    devicesInPool = distinct(rows.map((r) => r.machine ?? self));
+    const filtered = applyFilters(rows, live ?? new Map(), f, self);
     cols = pickerColumnsFor(filtered);
+    // The host-program column is live-only: show it whenever any visible row
+    // resolved one, so a plain transcript listing keeps its current width.
+    cols.showHost = !!live && filtered.some((r) => liveHostLabel(live.get(r.id)) !== '');
     return filtered;
   };
 
@@ -351,7 +450,8 @@ export async function runSessionBrowser(
     initialFilter,
     load,
     keyFor: (s) => s.id,
-    labelFor: (s, q) => formatPickerLabel(s, q, cols, sshOriginTagFor(liveCache, s.id)),
+    labelFor: (s, q) =>
+      formatPickerLabel(s, q, cols, sshOriginTagFor(liveCache, s.id), liveHostLabel(liveCache?.get(s.id))),
     matches: sessionMatchesQuery,
     buildPreview,
     headerFor,

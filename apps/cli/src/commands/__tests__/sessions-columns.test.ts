@@ -121,6 +121,32 @@ describe('formatPickerLabel', () => {
     const row = strip(formatPickerLabel(meta(), '', {}));
     expect(row).not.toContain('ssh');
   });
+
+  // The browser rendered transcript metadata only, which carries no host — so a
+  // running session never said whether it was a Ghostty tab, a VS Code panel, or
+  // a detached tmux pane. The live scan knows; this is the column that shows it.
+  it('renders the host program when the host column is on', () => {
+    const row = strip(formatPickerLabel(meta(), '', { showHost: true }, undefined, 'tmux\u2192ghostty'));
+    expect(row).toContain('tmux\u2192ghostty');
+  });
+
+  it('holds the column with a placeholder for a row whose host is unknown', () => {
+    const row = strip(formatPickerLabel(meta(), '', { showHost: true }, undefined, ''));
+    expect(row).toContain('-');
+  });
+
+  it('keeps the id column aligned when a live row is named by a long pid', () => {
+    // A 7-digit Linux pid overflowed the 10-wide id column and pushed every
+    // later column right, so the whole table lost its alignment.
+    const row = strip(formatPickerLabel(meta({ shortId: 'pid:2813139' }), '', {}));
+    expect(row.slice(0, 10)).toHaveLength(10);
+    expect(row.startsWith('pid:2813\u2026')).toBe(true);
+  });
+
+  it('omits the host column entirely when it is off', () => {
+    const row = strip(formatPickerLabel(meta(), '', { showHost: false }, undefined, 'ghostty'));
+    expect(row).not.toContain('ghostty');
+  });
 });
 
 describe('formatPickerLabel width fits the gutter (no wrap)', () => {

@@ -244,6 +244,37 @@ results, and errors; thinking, usage, init, and result metadata are hidden. Use
 `agents sessions tail --json` for the raw JSONL stream, or `agents logs -f --full`
 for the raw transcript follow.
 
+## Live sessions (`--active`) and the interactive browser
+
+`agents sessions --active` answers "what is running right now, everywhere". It sweeps
+the local machine (`getActiveSessions`) and, unless `--local`, every registered online
+device over SSH, through one shared gather — `gatherActiveSessions` in
+`src/commands/sessions.ts`. `--host`/`--device` **scopes** that sweep to the named
+machines rather than adding to it.
+
+On a TTY it opens the interactive browser seeded to running-only; `--json`,
+`--waiting`, and `--no-interactive` print the static grouped view instead. Both read
+the same gather, so they always agree on what is live.
+
+Two properties of the running view are worth stating, because a session missing from
+it is indistinguishable from a session that isn't running:
+
+- **Running is a source of rows, not a filter over the transcript index.** A live
+  session the local index doesn't carry — one on a peer, one older than the browser's
+  window, one whose agent hasn't written a transcript yet — is listed as its own row
+  (`mergeLiveIntoPool`, `src/commands/sessions-browser.ts`). Rows keyed by session id
+  merge with their indexed row; a session with no id yet is keyed by cloud task id or
+  `machine:pid`, so two of them never collapse into one.
+- **The host column names the program the session runs in** — `codium`, `ghostty`,
+  `tmux`, and `tmux→ghostty` when a tmux session is currently being watched through
+  another app. A tmux row with no attached client stays a bare `tmux`, which is what
+  running detached looks like. It comes from the live scan (`ActiveSession.host` /
+  `viewingIn`), so it appears only in the running view — transcript metadata has no
+  host.
+
+A row with no session id addresses no transcript: picking it reports where the process
+is instead of failing to open a file that does not exist.
+
 ## BM25 Column Weights
 
 FTS5 ranks search hits across four columns with these weights:
