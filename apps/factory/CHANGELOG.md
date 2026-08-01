@@ -6,6 +6,8 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.9.299] - 2026-08-01
+
 - **The extension no longer runs its own stall-detection/nudge injector — the
   agents-cli daemon watchdog is the sole injector.** The extension's autonomous
   watchdog tick used to `fs.stat` each agent session file, call a Claude Haiku
