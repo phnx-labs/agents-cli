@@ -6,6 +6,20 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **Stuck Claude tab labels self-heal, and an existing session name is reused
+  before summarizing.** Two follow-ups to the derived-label fix: (1) On reload,
+  a tab already reading `CC - muqsitnawaz-91` had that derived placeholder
+  re-adopted as a sticky manual label, which blocked the auto-label poller
+  forever. The label paths (poller-arm and focus) now detect a label that is
+  EXACTLY the session's own derived name and clear it so a real name/topic
+  resolves — matched against the session file, so a genuine label (e.g.
+  "Daemon Creds") or an old-CLI name is never touched. It only clears a label +
+  its store entry; the tmux session and agent are never affected. (2) The
+  auto-label path now reuses Claude's persisted `/status` title as soon as one
+  exists — even before a first user message is captured — and only summarizes
+  with the LLM when there is no existing name. New `readClaudeSessionNameInfo`
+  exposes the session's name + source for the heal check.
+
 ## [0.9.299] - 2026-08-01
 
 - **The extension no longer runs its own stall-detection/nudge injector — the
