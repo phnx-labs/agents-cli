@@ -1,5 +1,5 @@
 /**
- * `agents sessions migrate` (alias `detach`) — relocate a RUNNING agent session
+ * `agents sessions migrate` (alias `relocate`) — relocate a RUNNING agent session
  * from this machine onto another (a fleet worker, a registered device, or a warm
  * ephemeral crabbox box), then stop the source so the interactive machine
  * reclaims its compute (RUSH-1977).

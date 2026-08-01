@@ -413,7 +413,7 @@ Source: `src/lib/session/bundle.ts`, `src/lib/session/remote-bundle.ts`,
 
 ## Migration (relocate a live session)
 
-`agents sessions migrate` (alias `detach`) **moves a RUNNING session onto another
+`agents sessions migrate` (alias `relocate`) **moves a RUNNING session onto another
 machine** — a fleet worker, a registered device, or a warm/fresh ephemeral crabbox
 box — then stops the source so the interactive machine reclaims its compute. Where
 export/import carry a *transcript* between machines, migrate carries the *live agent*:
