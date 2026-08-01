@@ -4527,7 +4527,25 @@ async function reattachSession(
     agentType,
     target.tmuxSession,
     target.tmuxSocket,
-    { iconPath: agentConfig.iconPath as vscode.Uri, viewColumn: vscode.ViewColumn.Active },
+    {
+      iconPath: agentConfig.iconPath as vscode.Uri,
+      viewColumn: vscode.ViewColumn.Active,
+      // Carry the persisted terminal id (+ kind/session/version) in the terminal
+      // env, exactly like every other spawn site (createTmuxTerminal /
+      // restoreAgentTerminals). Without it, onDidOpenTerminal — which fires for
+      // this terminal and name-parses it as an agent — would register it under a
+      // FRESH nextId() (the await terminal.processId below gives that async
+      // handler room to win), drifting the durable terminalId↔tmux identity this
+      // whole feature keys on. With the id present, that handler derives the SAME
+      // id and register()'s duplicate guard makes the race harmless.
+      env: buildAgentTerminalEnv(
+        session.terminalId,
+        session.sessionId ?? null,
+        undefined,
+        session.version,
+        { kind: session.prefix.toLowerCase() === 'sh' ? 'shell' : 'agent' },
+      ),
+    },
   );
 
   const pid = await terminal.processId;

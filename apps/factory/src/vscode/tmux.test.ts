@@ -161,6 +161,36 @@ describe('shouldKillOnClose fail-safe', () => {
   });
 });
 
+// reattachSession passes AGENT_TERMINAL_ID (+ session/kind) via `env` so that if
+// onDidOpenTerminal wins the register race it derives the SAME id, keeping the
+// durable terminalId↔tmux identity stable. reattachTmuxTerminal must forward that
+// env into createTerminal (alongside TMUX_AGENT_SESSION), not drop it.
+describe('reattachTmuxTerminal forwards the caller env (terminalId identity)', () => {
+  test('AGENT_TERMINAL_ID from the caller lands in the created terminal env, with TMUX_AGENT_SESSION', () => {
+    lastCreateTerminalOptions = undefined;
+    reattachTmuxTerminal(
+      'Claude - refactor auth',
+      'claude',
+      'agents-1712345678901',
+      '/tmp/server.sock',
+      {
+        env: {
+          AGENT_TERMINAL_ID: 'CL-persisted-7',
+          AGENT_TERMINAL_KIND: 'agent',
+          AGENT_SESSION_ID: 'sess-xyz',
+        },
+      },
+    );
+    expect(lastCreateTerminalOptions).toBeDefined();
+    expect(lastCreateTerminalOptions.env.AGENT_TERMINAL_ID).toBe('CL-persisted-7');
+    expect(lastCreateTerminalOptions.env.AGENT_TERMINAL_KIND).toBe('agent');
+    expect(lastCreateTerminalOptions.env.AGENT_SESSION_ID).toBe('sess-xyz');
+    // The tmux attach target is still set too — the two must coexist.
+    expect(lastCreateTerminalOptions.env.TMUX_AGENT_SESSION).toBe('agents-1712345678901');
+    expect(lastCreateTerminalOptions.isTransient).toBe(true);
+  });
+});
+
 function newSocket(): string {
   const socket = path.join(os.tmpdir(), `factory-tmux-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.sock`);
   sockets.push(socket);
