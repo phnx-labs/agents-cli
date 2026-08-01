@@ -586,8 +586,14 @@ export interface LeafDir {
 export interface LeafDirScan {
   /** Files whose (mtime, size) changed vs the ledger — the parse set. */
   changed: Array<{ filePath: string; scan: ScanStamp }>;
-  /** Every transcript file seen across all leaf dirs (changed or not). */
-  allFiles: string[];
+  /**
+   * Every transcript file seen across all leaf dirs (changed or not), in
+   * live-root-first order, each tagged with whether its dir is a live root.
+   * Lets a caller restore cross-root, session-id precedence (prefer the live
+   * copy of a session over a frozen backup copy) independent of which copy
+   * happened to be flagged "changed" this run.
+   */
+  allFiles: Array<{ filePath: string; isLiveRoot: boolean }>;
 }
 
 /**
@@ -620,7 +626,7 @@ export function collectChangedFilesInLeafDirs(
 
   // Files whose per-file stat we still need to ledger-compare this run.
   const toCompare: PreStatEntry[] = [];
-  const allFiles: string[] = [];
+  const allFiles: Array<{ filePath: string; isLiveRoot: boolean }> = [];
   const dirScansToRecord: Array<{ dirPath: string; dirMtimeMs: number; entryCount: number }> = [];
 
   for (const { dirPath, isLiveRoot } of leafDirs) {
@@ -634,7 +640,7 @@ export function collectChangedFilesInLeafDirs(
       continue;
     }
     const files = names.map(f => path.join(dirPath, f));
-    allFiles.push(...files);
+    for (const filePath of files) allFiles.push({ filePath, isLiveRoot });
 
     const dirMtimeMs = Math.floor(dirStat.mtimeMs);
     const entryCount = names.length;
@@ -1017,19 +1023,29 @@ async function scanClaudeIncremental(onProgress?: (p: ScanProgress) => void): Pr
     }
   });
 
-  const { changed: changedAll } = collectChangedFilesInLeafDirs(leafDirs, '.jsonl');
-  // De-dup by sessionId across roots, keeping the first occurrence. leafDirs is
-  // ordered live-root-first, so a session present in both the live root and a
-  // backup/version home is scanned from its live path — the same precedence the
-  // pre-A-2 `seen` set gave, so `file_path` stays stable.
-  const seenSession = new Set<string>();
-  const changed: Array<{ filePath: string; scan: ScanStamp }> = [];
-  for (const entry of changedAll) {
-    const sessionId = path.basename(entry.filePath).replace('.jsonl', '');
-    if (seenSession.has(sessionId)) continue;
-    seenSession.add(sessionId);
-    changed.push(entry);
+  const { changed: changedAll, allFiles } = collectChangedFilesInLeafDirs(leafDirs, '.jsonl');
+  // Restore the pre-A-2 cross-root precedence: a session id present in multiple
+  // roots is ALWAYS served from its live path, never a frozen backup/version
+  // copy. Pre-A-2, dedup happened at enumeration time via a live-first `seen`
+  // set, so a non-live copy was never even stat'd when a live copy existed. This
+  // PR must not regress that to "whichever copy changed this run wins" — a cold
+  // (unchanged) live copy paired with a freshly-written backup snapshot would
+  // otherwise flip the row's file_path to the backup path.
+  //
+  // allFiles is every transcript file across all roots in live-first order, so
+  // the FIRST occurrence of each session id is its live (or highest-precedence)
+  // path — the durable winner, independent of which copy was flagged changed.
+  const sessionIdOf = (fp: string) => path.basename(fp).replace('.jsonl', '');
+  const winnerBySession = new Map<string, string>();
+  for (const { filePath } of allFiles) {
+    const id = sessionIdOf(filePath);
+    if (!winnerBySession.has(id)) winnerBySession.set(id, filePath);
   }
+  // Keep a changed entry only if it is its session's winner. A changed non-live
+  // copy is dropped whenever a live copy exists anywhere; the winning path is
+  // parsed only when it itself changed (a cold winner needs no re-parse — its DB
+  // row already points at the live path).
+  const changed = changedAll.filter(e => winnerBySession.get(sessionIdOf(e.filePath)) === e.filePath);
 
   if (changed.length > 0) {
     onProgress?.({ agent: 'claude', parsed: 0, total: changed.length });

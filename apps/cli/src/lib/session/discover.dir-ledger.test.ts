@@ -263,4 +263,57 @@ describe('dir_ledger short-circuit (A-2)', () => {
     // ...and the results are identical to the short-circuited run.
     expect(withKill).toEqual(warm);
   });
+
+  it('cross-root precedence: a NEW backup snapshot of a COLD live session never flips file_path off the live copy', async () => {
+    // The live copy of a session is indexed and then goes cold (unchanged).
+    const liveDir = path.join(LIVE_PROJECTS, '-xroot');
+    const liveFp = writeSession(liveDir, 'xroot-1', '2026-07-08T00:00:00Z', '/proj/xr', 'the live session');
+
+    let sessions = await discoverAll();
+    let row = sessions.find(s => s.id === 'xroot-1');
+    expect(row).toBeDefined();
+    expect(row!.filePath).toBe(liveFp);
+
+    // A backup snapshot of that same session id is written to a fresh backup dir
+    // (new leaf dir -> full walk -> the backup copy is "changed" this run). The
+    // live copy is COLD: its content is untouched, so it is NOT in the changed
+    // set. Pre-fix, the backup copy would win the dedup and overwrite the row's
+    // file_path with the frozen backup path.
+    const backupDir = path.join(BACKUP_PROJECTS, '-xroot');
+    const backupFp = writeSession(backupDir, 'xroot-1', '2026-07-08T00:00:00Z', '/proj/xr', 'the live session');
+    expect(backupFp).not.toBe(liveFp);
+
+    sessions = await discoverAll();
+    row = sessions.find(s => s.id === 'xroot-1');
+    // (a) still surfaces, (b) file_path is the LIVE path (never the backup),
+    // (c) not dropped.
+    expect(row).toBeDefined();
+    expect(row!.filePath).toBe(liveFp);
+    expect(fs.existsSync(row!.filePath)).toBe(true);
+  });
+
+  it('cross-root precedence: when BOTH the live and backup copies change, the live path still wins', async () => {
+    const liveDir = path.join(LIVE_PROJECTS, '-xroot2');
+    const backupDir = path.join(BACKUP_PROJECTS, '-xroot2');
+    const liveFp = writeSession(liveDir, 'xroot-2', '2026-07-09T00:00:00Z', '/proj/xr2', 'live v1');
+    const backupFp = writeSession(backupDir, 'xroot-2', '2026-07-09T00:00:00Z', '/proj/xr2', 'backup v1');
+
+    let sessions = await discoverAll();
+    expect(sessions.find(s => s.id === 'xroot-2')?.filePath).toBe(liveFp);
+
+    // Both copies grow (dir mtime + count unchanged, but the files change) and
+    // both fall outside the append debounce.
+    fs.appendFileSync(liveFp, claudeLine('2026-07-09T00:05:00Z', '/proj/xr2', 'live v2') + '\n', 'utf-8');
+    fs.appendFileSync(backupFp, claudeLine('2026-07-09T00:05:00Z', '/proj/xr2', 'backup v2') + '\n', 'utf-8');
+    const future = Math.floor(Date.now() / 1000) + 30;
+    bumpMtime(liveFp, future);
+    bumpMtime(backupFp, future);
+    db.getDB().prepare('UPDATE scan_ledger SET scanned_at = 0').run();
+
+    sessions = await discoverAll();
+    const row = sessions.find(s => s.id === 'xroot-2');
+    // Even with both copies in the changed set, the live path wins (winner is the
+    // first occurrence in live-first order).
+    expect(row?.filePath).toBe(liveFp);
+  });
 });
