@@ -72,19 +72,40 @@ describe('relativizeDir — readable Dirs line', () => {
     expect(relativizeDir('/home/me/repo/index.ts', '/home/me/repo')).toBe('.');
   });
 
-  it('(b) collapses a worktree path to ⧉ <slug>/<remainder>', () => {
+  it('(b) collapses a worktree path to ⧉ <slug>/<remainder> when NOT under cwd', () => {
+    // cwd unrelated to the worktree → collapse applies for disambiguation.
     expect(
       relativizeDir(
         '/home/me/repo/.agents/worktrees/fix-crabbox-touchid-storm/apps/cli/src/lib/crabbox/x.ts',
-        '/home/me/repo',
+        '/home/me/other',
       ),
     ).toBe('⧉ fix-crabbox-touchid-storm/apps/cli/src/lib/crabbox');
   });
 
   it('(b) collapses to bare ⧉ <slug> when nothing follows the worktree root', () => {
     expect(
-      relativizeDir('/home/me/repo/.agents/worktrees/my-slug/README.md', '/home/me/repo'),
+      relativizeDir('/home/me/repo/.agents/worktrees/my-slug/README.md', '/home/me/other'),
     ).toBe('⧉ my-slug');
+  });
+
+  it('(A) cwd INSIDE the worktree, file under cwd → concise cwd-relative, NOT ⧉ (regression)', () => {
+    // The dominant case in this repo: the session edits its own worktree. cwd-relative
+    // must win so paths stay concise (`src/lib`), never longer `⧉ <slug>/apps/cli/src/lib`.
+    const cwd = '/home/me/repo/.agents/worktrees/fix-session-dirs/apps/cli';
+    const out = relativizeDir(`${cwd}/src/lib/foo.ts`, cwd);
+    expect(out).toBe('src/lib');
+    expect(out).not.toContain('⧉');
+  });
+
+  it('(B) cwd in worktree X, file in a DIFFERENT worktree Y → ⧉ Y/<remainder>', () => {
+    // Touched dir is a genuinely different worktree than the session cwd, so the
+    // collapse still applies (it disambiguates the other worktree).
+    expect(
+      relativizeDir(
+        '/home/me/repo/.agents/worktrees/worktree-y/apps/cli/src/lib/bar.ts',
+        '/home/me/repo/.agents/worktrees/worktree-x/apps/cli',
+      ),
+    ).toBe('⧉ worktree-y/apps/cli/src/lib');
   });
 
   it('(c1) collapses a `--`/dot-dir worktree slug to ⧉ <name> (never a lossy // path)', () => {

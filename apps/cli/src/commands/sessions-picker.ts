@@ -510,35 +510,40 @@ export function relativizeDir(filePath: string, cwd?: string): string | undefine
   if (dir.startsWith('-')) {
     const slash = dir.indexOf('/');
     const slug = slash === -1 ? dir : dir.slice(0, slash);
-    // A worktree encodes its `/.agents/worktrees/<name>` marker as
-    // `--agents-worktrees-<name>` — collapse to the worktree name, same display
-    // as a real worktree path. (The name may contain `-`; we can't losslessly
-    // re-split it, so show the whole encoded remainder — readable and honest.)
+    // CWD FIRST: if the slug is (or is under) this session's own cwd, the leaked
+    // path is Claude's internal projects-storage scratch (`<id>/scratchpad`) —
+    // not a meaningful code dir — so drop it like node_modules. Precedence over
+    // the worktree collapse so a session editing its OWN worktree isn't relabeled.
+    if (cwd) {
+      const cwdSlug = encodeClaudeSlug(cwd.replace(/\\/g, '/').replace(/\/$/, ''));
+      if (slug === cwdSlug || slug.startsWith(cwdSlug + '-')) return undefined;
+    }
+    // Only a DIFFERENT worktree than cwd reaches here: a worktree encodes its
+    // `/.agents/worktrees/<name>` marker as `--agents-worktrees-<name>`, so
+    // collapse to the worktree name to disambiguate. (The name may contain `-`;
+    // we can't losslessly re-split it, so show the whole encoded remainder.)
     const wtSlug = slug.match(SLUG_WORKTREE_RE);
     if (wtSlug) return `⧉ ${wtSlug[1]}`;
-    // Not a worktree: if the slug is this session's own cwd, the leaked path is
-    // Claude's internal projects-storage scratch (`<id>/scratchpad`) — not a
-    // meaningful code dir, so drop it like node_modules.
-    if (cwd && slug === encodeClaudeSlug(cwd.replace(/\\/g, '/').replace(/\/$/, ''))) {
-      return undefined;
-    }
     // An unattributable slug: don't invent a `/`-joined fake path. Show only the
     // trailing `-`-group as a minimal, honest token.
     const segs = slug.split('-').filter(Boolean);
     return segs.length ? segs[segs.length - 1] : undefined;
   }
 
-  // Inside a git worktree, show the worktree NAME + the in-worktree remainder,
-  // not the noisy `.agents/worktrees/<slug>/` prefix.
+  // CWD FIRST for real paths too: strip the session-cwd prefix so a session
+  // editing its OWN worktree renders the concise relative remainder (`src/lib`),
+  // not the longer `⧉ <slug>/…` collapse.
+  if (cwd) {
+    const base = cwd.replace(/\\/g, '/').replace(/\/$/, '');
+    if (dir === base) return '.';
+    if (dir.startsWith(base + '/')) return dir.slice(base.length + 1);
+  }
+  // No cwd match. If the dir is in a (different) git worktree, collapse to the
+  // worktree NAME + in-worktree remainder to disambiguate; else home→`~` + trim.
   const wt = dir.match(WORKTREE_RE);
   if (wt) {
     const after = dir.slice(dir.indexOf(wt[0]) + wt[0].length).replace(/^\//, '');
     return after ? `⧉ ${wt[1]}/${after}` : `⧉ ${wt[1]}`;
-  }
-  if (cwd) {
-    const base = cwd.replace(/\\/g, '/').replace(/\/$/, '');
-    if (dir === base) return '.';
-    if (dir.startsWith(base + '/')) dir = dir.slice(base.length + 1);
   }
   // Collapse home prefix.
   const home = (process.env.HOME || '').replace(/\\/g, '/');
