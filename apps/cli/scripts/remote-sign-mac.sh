@@ -11,14 +11,17 @@
 #   - bin/MenubarHelper.app — the menu-bar status item (swift build → codesign,
 #                            NO notarization). See menubar/scripts/build.sh.
 #
-# This script rsyncs the exact build INPUTS from THIS worktree to a dedicated
-# sign host ("mac-mini"), runs the two Mac build scripts there under the
-# appliance's headless signing creds, then pulls the signed bundles back into
-# THIS worktree's apps/cli/bin/ so `bun run build` (now presence-gated, not
-# uname-gated) can package them and `npm publish` can run anywhere.
+# This script rsyncs the exact build INPUTS from THIS worktree to an
+# auto-selected macOS sign host (see SIGN_HOST below), runs the two Mac build
+# scripts there under the appliance's headless signing creds, then pulls the
+# signed bundles back into THIS worktree's apps/cli/bin/ so `bun run build` (now
+# presence-gated, not uname-gated) can package them and `npm publish` can run
+# anywhere.
 #
 # Env knobs:
-#   SIGN_HOST        sign host (default: mac-mini) — must be ssh/scp reachable.
+#   SIGN_HOST        sign host, must be ssh/scp reachable. When unset it is
+#                    auto-discovered from `agents devices list` in preference
+#                    order mac-mini -> zion -> any other online macOS device.
 #   SIGN_HOST_REPO   agents-cli checkout on the sign host. $HOME is resolved on
 #                    the REMOTE side (default: $HOME/src/github.com/muqsitnawaz/agents-cli).
 #
