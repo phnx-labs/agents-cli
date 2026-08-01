@@ -4,17 +4,24 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
+// Captures the options passed to the mocked vscode.window.createTerminal so the
+// reattach test can assert the env forwarded through reattachTmuxTerminal.
+let lastCreateTerminalOptions: any;
+
 mock.module('vscode', () => ({
   ViewColumn: { Active: 1 },
   window: {
-    createTerminal: () => ({
-      processId: Promise.resolve(0),
-      sendText: () => {},
-    }),
+    createTerminal: (opts: any) => {
+      lastCreateTerminalOptions = opts;
+      return {
+        processId: Promise.resolve(0),
+        sendText: () => {},
+      };
+    },
   },
 }));
 
-const { __factoryPaneDiedHookForTests, queryTmuxSessionState, shouldKillOnClose } = await import('./tmux');
+const { __factoryPaneDiedHookForTests, queryTmuxSessionState, shouldKillOnClose, reattachTmuxTerminal } = await import('./tmux');
 
 const tmuxPath = spawnSync('sh', ['-c', 'command -v tmux'], { encoding: 'utf8' }).stdout.trim();
 const realTmuxTest = tmuxPath ? test : test.skip;
