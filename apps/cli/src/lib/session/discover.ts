@@ -3015,27 +3015,37 @@ export async function scanClaudeSessionIncremental(
 ): Promise<{ scan: ClaudeSessionScan; newState: ClaudeParserState; newOffset: number }> {
   const state = hydrateClaudeParseState(prior);
 
-  // Count bytes UP TO AND INCLUDING the last newline consumed, so a partial
-  // trailing line (no terminating '\n') is re-read on the next append rather
-  // than parsed against a truncated record.
-  let bytesToLastNewline = 0;
-  let pendingBytes = 0;
-  const stream = fs.createReadStream(filePath, { start: fromOffset, encoding: 'utf-8' });
-  stream.on('data', (chunk: string | Buffer) => {
-    const buf = typeof chunk === 'string' ? Buffer.from(chunk, 'utf-8') : chunk;
-    // Walk the raw bytes; every 0x0A advances the committed offset to include it.
-    for (let i = 0; i < buf.length; i++) {
-      pendingBytes++;
-      if (buf[i] === 0x0a) {
-        bytesToLastNewline += pendingBytes;
-        pendingBytes = 0;
-      }
-    }
-  });
-  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
-
+  // Read the appended byte range and apply ONLY newline-terminated lines. The
+  // applied lines and `newOffset` MUST stay consistent: readline (like the full
+  // parse) would emit a trailing UNTERMINATED final line at EOF, but `newOffset`
+  // stops before it — so the next pass, after that record's '\n' is flushed,
+  // would re-read and re-apply the same line and double-count it (user events
+  // have no dedup, unlike assistant `seenAssistantIds`). A record written
+  // non-atomically — bytes first, then '\n' in a second write — is exactly this
+  // case. So we slice at the last '\n' ourselves: everything up to and including
+  // it is a run of complete lines we apply and commit; any tail after it
+  // (syntactically broken OR complete-but-not-yet-terminated) is a still-being-
+  // written record we DEFER to the next pass, once its '\n' lands.
+  const chunks: Buffer[] = [];
+  const stream = fs.createReadStream(filePath, { start: fromOffset });
   try {
-    for await (const line of rl) {
+    for await (const chunk of stream) {
+      chunks.push(typeof chunk === 'string' ? Buffer.from(chunk, 'utf-8') : chunk as Buffer);
+    }
+  } finally {
+    stream.destroy();
+  }
+  const appended = Buffer.concat(chunks);
+
+  // Bytes up to AND INCLUDING the last '\n' are the committed, complete-line run.
+  const lastNl = appended.lastIndexOf(0x0a);
+  const consumedBytes = lastNl === -1 ? 0 : lastNl + 1;
+
+  if (consumedBytes > 0) {
+    // split('\n') on the committed run: the element after the final '\n' is ''
+    // (skipped by the trim guard). A stray '\r' from CRLF is tolerated by the
+    // JSON.parse below exactly as the full parse tolerates it.
+    for (const line of appended.subarray(0, consumedBytes).toString('utf-8').split('\n')) {
       if (!line.trim()) continue;
 
       let parsed: any;
@@ -3047,12 +3057,9 @@ export async function scanClaudeSessionIncremental(
 
       applyClaudeLine(state, parsed);
     }
-  } finally {
-    rl.close();
-    stream.destroy();
   }
 
-  const newOffset = fromOffset + bytesToLastNewline;
+  const newOffset = fromOffset + consumedBytes;
   return {
     scan: finalizeClaudeScan(state),
     newState: serializeClaudeParserState(state, newOffset),

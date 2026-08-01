@@ -316,4 +316,40 @@ describe('incremental parity — partial trailing line', () => {
     expectScanParity(step3.scan, full);
     expect(step3.scan.messageCount).toBe(2);
   });
+
+  it('a COMPLETE record missing only its trailing newline is deferred, then counted EXACTLY once', async () => {
+    // The non-atomic-append case prix-cloud caught: a writer appends a full,
+    // valid record and only later appends its '\n'. readline emits that
+    // unterminated line at EOF, so a naive pass applies it while the offset
+    // stops before it → the next pass re-reads and re-applies the SAME record.
+    // User events have no dedup (no seenAssistantIds), so the double-apply shows
+    // up as messageCount 2→3 and contentText carrying the second message twice.
+    const fp = path.join(dir, 'complete-unterminated.jsonl');
+    const l1 = JSON.stringify({ type: 'user', timestamp: '2026-06-28T00:00:00.000Z', cwd: '/x', message: { role: 'user', content: 'first message' } });
+    fs.writeFileSync(fp, l1 + '\n');
+    const step1 = await scanClaudeSessionIncremental(fp, 0, serializeClaudeParserState(initClaudeParseState(), 0));
+    expect(step1.scan.messageCount).toBe(1);
+    expect(step1.scan.contentText).toBe('first message');
+    expect(step1.newOffset).toBe(Buffer.byteLength(l1 + '\n', 'utf-8'));
+
+    // Append a COMPLETE, valid second record — but WITHOUT its trailing '\n' yet.
+    const l2 = JSON.stringify({ type: 'user', timestamp: '2026-06-28T00:01:00.000Z', message: { role: 'user', content: 'second message' } });
+    fs.appendFileSync(fp, l2);
+    const step2 = await scanClaudeSessionIncremental(fp, step1.newOffset, step1.newState);
+    // Deferred: the offset does NOT advance, and line2 is NOT yet counted.
+    expect(step2.newOffset).toBe(step1.newOffset);
+    expect(step2.scan.messageCount).toBe(1);
+    expect(step2.scan.contentText).toBe('first message');
+
+    // Now the writer flushes the terminating '\n'.
+    fs.appendFileSync(fp, '\n');
+    const step3 = await scanClaudeSessionIncremental(fp, step2.newOffset, step2.newState);
+    // Counted EXACTLY once — not twice.
+    expect(step3.scan.messageCount).toBe(2);
+    expect(step3.scan.contentText).toBe('first message\nsecond message');
+    expect(step3.newOffset).toBe(Buffer.byteLength(fs.readFileSync(fp)));
+
+    const full = await scanClaudeSession(fp);
+    expectScanParity(step3.scan, full);
+  });
 });
