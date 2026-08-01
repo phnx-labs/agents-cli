@@ -25,8 +25,8 @@ import { listActiveTasks } from '../cloud/store.js';
 import type { CloudTaskStatus } from '../cloud/types.js';
 import { AgentManager } from '../teams/agents.js';
 import { getTerminalsDir } from '../state.js';
-import { readPidSessionEntry, prunePidSessionRegistry, type PidSessionEntry } from './pid-registry.js';
-import { loadHookSessionIndex, resolveHookSessionId, type HookSessionIndex } from './hook-sessions.js';
+import { readPidSessionEntry, listPidSessionEntries, prunePidSessionRegistry, type PidSessionEntry } from './pid-registry.js';
+import { loadHookSessionIndex, resolveHookSessionRecord, type HookSessionIndex, type HookSessionRecord } from './hook-sessions.js';
 import { buildClaudeLabelMap } from './discover.js';
 import { buildRunNameMap } from './run-names.js';
 import { latestSessionFileForCwd } from './db.js';
@@ -36,6 +36,7 @@ import { computeTokPerSec } from './throughput.js';
 import { inferSessionState, type SessionState, type SessionActivity, type AwaitingReason, type StructuredQuestion, type TodoProgress, type DetectedPr, type DetectedWorktree, type DetectedTicket } from './state.js';
 import type { SessionAttachment } from './types.js';
 import { detectProvenance, type SessionProvenance } from './provenance.js';
+import { presenceFromStore, type Presence } from './detached.js';
 import { mapBounded } from '../concurrency.js';
 
 const execFileAsync = promisify(execFile);
@@ -49,9 +50,27 @@ const execFileAsync = promisify(execFile);
 export const LSOF_CONCURRENCY = 4;
 const LSOF_STAGGER_MS = 10;
 
+/**
+ * Hard ceilings on the two syscalls the status path shells out to. Without them
+ * a single hung probe (a wedged NFS `lsof`, an EDR that stalls the `ps` snapshot)
+ * pins a bounded worker slot forever and silently drops live sessions to a
+ * fallback status. On timeout the call rejects, is caught, and the row degrades
+ * honestly (unknown / empty table) instead of the sweep hanging.
+ */
+const LSOF_TIMEOUT_MS = 5_000;
+const PS_SNAPSHOT_TIMEOUT_MS = 10_000;
+
 export type ActiveContext = 'terminal' | 'teams' | 'cloud' | 'headless';
 
-export type ActiveStatus = 'running' | 'idle' | 'queued' | 'input_required';
+/**
+ * `unknown` = the process is alive but we cannot introspect what it is doing —
+ * a live harness whose transcript format we do not parse (everything but
+ * claude/codex), or a resolvable transcript whose `stat` momentarily failed. It
+ * is NOT a synonym for idle: idle is a positive "not mid-turn, not waiting on
+ * you" conclusion drawn from a readable transcript; unknown is the honest "we
+ * can't tell", which we refuse to fake as idle.
+ */
+export type ActiveStatus = 'running' | 'idle' | 'queued' | 'input_required' | 'unknown';
 
 export interface ActiveSession {
   context: ActiveContext;
@@ -112,7 +131,24 @@ export interface ActiveSession {
   attachments?: SessionAttachment[];
   sessionFile?: string;
   startedAtMs?: number;
+  /**
+   * Last-activity epoch — the transcript's last write (mtime). Distinct from
+   * {@link startedAtMs} (session START): a session begun 3h ago but last touched
+   * 20s ago has an old start and a fresh last-activity. The Floor renders "Xs ago"
+   * off this so an idle-but-old session doesn't read as freshly active.
+   */
+  lastActivityMs?: number;
   status: ActiveStatus;
+  /**
+   * Foreground/background presence for the detach/attach model:
+   *   `attached`   — live interactive TUI you're watching;
+   *   `background` — detached: running headless, unattended (via `agents detach`);
+   *   `parked`     — the headless continuation has exited; the transcript is durable.
+   * Absent for ad-hoc headless runs and cloud/team rows, which aren't on the
+   * foreground/background axis. Folded on at the end of {@link getActiveSessions}
+   * from the detach store — never asserted by a source.
+   */
+  presence?: Presence;
   /** How many live PIDs resolve to this same session (subagents/forks). 1 unless collapsed. */
   pidCount?: number;
   /**
@@ -336,17 +372,46 @@ export function pickSessionFile(projectDir: string, sessionId?: string): string 
   return best?.path;
 }
 
-function classifyActivity(sessionFile: string | undefined): 'running' | 'idle' {
-  // No resolvable transcript is NOT evidence of activity — default to idle. (Before
-  // the no-borrow fix in pickSessionFile this rarely fired because every terminal
-  // borrowed the newest file; now a session with an unresolved id lands here, and
-  // "running" would wrongly light it up.)
-  if (!sessionFile) return 'idle';
+/**
+ * One `stat` → the transcript's creation (≈ session start) and last-write (≈ last
+ * activity) epochs. Both `undefined` when the file can't be stat'd (vanished /
+ * unresolved). `birthtimeMs` can be 0 on filesystems without creation time — coerce
+ * that to `undefined` so callers fall through to a real signal instead of epoch 0.
+ */
+export function sessionFileTimes(sessionFile: string | undefined): { birthtimeMs?: number; mtimeMs?: number } {
+  if (!sessionFile) return {};
+  try {
+    const st = fs.statSync(sessionFile);
+    return { birthtimeMs: st.birthtimeMs || undefined, mtimeMs: st.mtimeMs || undefined };
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * The ONE place a fallback status is decided when no rich transcript state is
+ * available — a non-Claude/Codex kind we cannot parse, or a Claude/Codex tail
+ * that was empty or unreadable. Honest by construction: it never asserts a status
+ * it cannot justify from a measured signal.
+ *
+ *   - Resolvable transcript, readable mtime → the MEASURED freshness signal:
+ *     written within ACTIVE_MTIME_WINDOW_MS ⇒ `running`, else `idle`.
+ *   - Resolvable transcript whose `stat` throws (file vanished / permission) → we
+ *     genuinely cannot tell ⇒ `unknown`. (This branch previously returned
+ *     `running`, which contradicted the `idle` default one branch up.)
+ *   - No resolvable transcript but the process is alive → alive-but-opaque ⇒
+ *     `unknown`. This is the truthful answer for a live gemini / droid / cursor /
+ *     opencode whose format we don't parse — NOT a fabricated `idle` (which the
+ *     UI reads as "done and waiting"), and it never lies as `running` either.
+ *   - No transcript and the process is not known alive → nothing to report ⇒ `idle`.
+ */
+export function resolveFallbackStatus(sessionFile: string | undefined, pidAlive: boolean): ActiveStatus {
+  if (!sessionFile) return pidAlive ? 'unknown' : 'idle';
   try {
     const mtimeMs = fs.statSync(sessionFile).mtimeMs;
     return Date.now() - mtimeMs < ACTIVE_MTIME_WINDOW_MS ? 'running' : 'idle';
   } catch {
-    return 'running';
+    return 'unknown';
   }
 }
 
@@ -404,10 +469,12 @@ function statusFromActivity(activity: SessionActivity): ActiveStatus {
 /**
  * Fold a computed SessionState onto an active-session row: rich status +
  * preview + PR/worktree/ticket badges. With no state (unreadable/non-Claude/
- * Codex file) it degrades to the mtime-only classification.
+ * Codex file) it degrades to {@link resolveFallbackStatus}, which needs
+ * `pidAlive` to tell an alive-but-opaque process (`unknown`) from a dead one
+ * (`idle`).
  */
-function applyState(base: Omit<ActiveSession, 'status'>, state: SessionState | undefined, fallbackFile: string | undefined): ActiveSession {
-  if (!state) return { ...base, status: classifyActivity(fallbackFile) };
+function applyState(base: Omit<ActiveSession, 'status'>, state: SessionState | undefined, fallbackFile: string | undefined, pidAlive: boolean): ActiveSession {
+  if (!state) return { ...base, status: resolveFallbackStatus(fallbackFile, pidAlive) };
   return {
     ...base,
     status: statusFromActivity(state.activity),
@@ -510,7 +577,8 @@ export async function listTeamsActive(): Promise<ActiveSession[]> {
     const sessionId = a.parentSessionId ?? a.remoteSessionId ?? undefined;
     const sessionFile = findSessionFileForKind(a.agentType, a.cwd ?? undefined, sessionId ?? undefined);
     const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
-    const { state, tokPerSec } = computeLiveSignals(a.agentType, sessionFile, a.cwd ?? undefined, a.pid ? isPidAlive(a.pid) : true);
+    const pidAlive = a.pid ? isPidAlive(a.pid) : true;
+    const { state, tokPerSec } = computeLiveSignals(a.agentType, sessionFile, a.cwd ?? undefined, pidAlive);
     return applyState({
       context: 'teams',
       kind: a.agentType,
@@ -522,9 +590,10 @@ export async function listTeamsActive(): Promise<ActiveSession[]> {
       tokPerSec,
       sessionFile,
       startedAtMs: a.startedAt.getTime(),
+      lastActivityMs: sessionFileTimes(sessionFile).mtimeMs,
       teamName: a.taskName,
       agentId: a.agentId,
-    }, state, sessionFile);
+    }, state, sessionFile, pidAlive);
   });
 }
 
@@ -562,7 +631,8 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
     const name = resolvedId ? runNameMap.get(resolvedId) ?? undefined : undefined;
     // Extract topic from session file (first meaningful user message)
     const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
-    const { state, tokPerSec } = computeLiveSignals(t.kind, sessionFile, t.cwd ?? undefined, isPidAlive(t.pid));
+    const pidAlive = isPidAlive(t.pid);
+    const { state, tokPerSec } = computeLiveSignals(t.kind, sessionFile, t.cwd ?? undefined, pidAlive);
     return applyState({
       context: 'terminal',
       kind: t.kind,
@@ -577,8 +647,9 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
       tokPerSec,
       sessionFile,
       startedAtMs: t.startedAtMs,
+      lastActivityMs: sessionFileTimes(sessionFile).mtimeMs,
       windowId: t.windowId,
-    }, state, sessionFile);
+    }, state, sessionFile, pidAlive);
   });
 }
 
@@ -639,7 +710,7 @@ async function readProcessTable(): Promise<ProcRow[]> {
   if (process.platform === 'win32') return readProcessTableWin32();
   let out: string;
   try {
-    ({ stdout: out } = await execFileAsync('ps', ['-A', '-o', 'pid=,ppid=,tty=,comm='], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }));
+    ({ stdout: out } = await execFileAsync('ps', ['-A', '-o', 'pid=,ppid=,tty=,comm='], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: PS_SNAPSHOT_TIMEOUT_MS }));
   } catch {
     return [];
   }
@@ -671,7 +742,7 @@ async function readProcessTableWin32(): Promise<ProcRow[]> {
     ({ stdout: out } = await execFileAsync('powershell.exe', [
       '-NoProfile', '-NonInteractive', '-Command',
       'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name | ConvertTo-Csv -NoTypeInformation',
-    ], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, windowsHide: true }));
+    ], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, windowsHide: true, timeout: PS_SNAPSHOT_TIMEOUT_MS }));
   } catch {
     return [];
   }
@@ -735,6 +806,7 @@ async function getCwdForPid(pid: number): Promise<string | undefined> {
   try {
     const res = await execFileAsync('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'], {
       encoding: 'utf8',
+      timeout: LSOF_TIMEOUT_MS,
     });
     out = res.stdout;
   } catch {
@@ -930,6 +1002,11 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
   // poll must not re-read the dir (or re-invert the map) per candidate.
   let hookIndex: HookSessionIndex | undefined;
   let childrenByParent: Map<number, number[]> | undefined;
+  // Durable `agents run --name` handles keyed by session id — the same source the
+  // terminal path uses to name a row. Headless agents have no live-terminals
+  // label and no /rename, so without this a `--name`d headless run would surface
+  // with only a topic and no tab title. Built once per scan.
+  const runNameMap = buildRunNameMap();
   const ensureChildren = (): Map<number, number[]> => {
     if (childrenByParent) return childrenByParent;
     const m = new Map<number, number[]>();
@@ -959,22 +1036,39 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
     // launchId/terminalId/pid and kind-guarded against a stale reused-pid file;
     // (3) the newest-jsonl heuristic (sessionIdFromFile, below).
     let exactId = entry?.sessionId;
+    // The hook record (when we fall to it) also carries the SessionStart `ts` — the
+    // real session-start epoch. Capture it so terminal/headless rows get a
+    // `startedAtMs` instead of rendering "0s ago" (they set none before this).
+    let hookRec: HookSessionRecord | undefined;
     if (!exactId) {
       hookIndex ??= loadHookSessionIndex();
-      exactId = resolveHookSessionId(hookIndex, {
+      hookRec = resolveHookSessionRecord(hookIndex, {
         pid,
         kind,
         launchId: entry?.launchId,
         terminalId: entry?.terminalId,
         childPids: ensureChildren().get(pid),
       });
+      exactId = hookRec?.session_id;
     }
     const cwd = cwds[i] ?? entry?.cwd ?? undefined;
     const sessionFile = findSessionFileForKind(kind, cwd, exactId);
     const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
     const host = detectHost(pid, procByPid);
     const context: ActiveContext = host && UI_HOSTS.has(host) ? 'terminal' : 'headless';
+    // pidAlive is true by construction: this pid was just enumerated from the
+    // live process table, so an opaque (non-parseable) kind resolves to
+    // `unknown`, not a fake `idle`.
     const { state, tokPerSec } = computeLiveSignals(kind, sessionFile, cwd, true);
+    const { birthtimeMs, mtimeMs } = sessionFileTimes(sessionFile);
+    // Durable run name from `agents run --name`, resolved by the run's session id
+    // — the tab-title handle for a run we launched by name. A headless row carries
+    // no /rename label and no live-terminals label, so this handle IS its label
+    // (mirrors listTeamsActive `label: a.name`). Absent a `--name`, label stays
+    // undefined and the display falls back to the topic on its own — no band-aid.
+    const resolvedId = exactId ?? sessionIdFromFile(sessionFile);
+    const name = resolvedId ? runNameMap.get(resolvedId) ?? undefined : undefined;
+    const label = name;
     out.push(applyState({
       context,
       kind,
@@ -982,26 +1076,87 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
       tty: procByPid.get(pid)?.tty,
       pid,
       cwd,
-      sessionId: exactId ?? sessionIdFromFile(sessionFile),
+      sessionId: resolvedId,
+      label,
+      name,
       topic,
       tokPerSec,
       sessionFile,
+      // Session start: the hook's authoritative SessionStart `ts`, else the
+      // transcript's creation time. Last activity: the transcript's last write.
+      startedAtMs: hookRec?.ts ?? birthtimeMs,
+      lastActivityMs: mtimeMs,
       pidCount: 1 + (foldedByRoot.get(pid) ?? 0),
-    }, state, sessionFile));
+    }, state, sessionFile, true));
   }
   // Housekeeping: drop registry files for pids that have since died.
   prunePidSessionRegistry(isPidAlive);
   return out;
 }
 
+/** One tmux pane's resolved agent identity for the authoritative source. */
+export interface PaneIdentity {
+  agent: string;
+  /** Exact session id when resolvable (launch registry, or the hook join). */
+  sessionId?: string;
+  /** The agent's OS pid from the launch registry (may differ from `pane_pid`). */
+  pid?: number;
+}
+
+/**
+ * Attribute a single tmux pane to the agent actually running in it.
+ *
+ * The launch registry — written per bare-spawn AND per wrap, each stamped with the
+ * `tmuxPane` it targeted (see src/lib/exec.ts) — is the EXACT, per-pane source of
+ * truth. So an agent spawned into an EXISTING pane (a split, where `$TMUX` is
+ * already set so no new session meta is stamped) is attributed to its OWN launch,
+ * not the session's original agent — closing the gap where such an agent was
+ * dropped by this source and left to the weaker ps-scan fallback. Session-meta
+ * labels remain the fallback for the wrapped origin pane of a session whose
+ * registry entry is absent (a failed best-effort write, or a legacy session that
+ * predates the registry's `tmuxPane` field) — and ONLY for that origin pane
+ * (`meta.pane`), so a split shell pane of a labeled session isn't mis-attributed
+ * the wrapped agent. When `meta.pane` is unknown (attach-existing sessions), any
+ * labeled pane is accepted and the caller's per-session dedupe keeps one.
+ * `source: 'teams'` panes are skipped — teammates are surfaced by listTeamsActive.
+ * Pure so it is unit-tested without tmux.
+ */
+export function resolvePaneIdentity(
+  pane: string,
+  meta: { labels?: Record<string, string>; source?: string; pane?: string } | null,
+  liveEntry: PidSessionEntry | undefined,
+  getHookIndex: () => HookSessionIndex,
+): PaneIdentity | undefined {
+  if (meta?.source === 'teams') return undefined;
+  if (liveEntry) {
+    // Exact id: the id recorded at launch (Claude), else the agent's own
+    // SessionStart hook joined by launchId/terminalId (non-Claude, or agents we
+    // didn't launch) — kind-guarded against a stale reused-pid file.
+    const sessionId = liveEntry.sessionId
+      ?? resolveHookSessionRecord(getHookIndex(), {
+        pid: liveEntry.pid,
+        kind: liveEntry.agent,
+        launchId: liveEntry.launchId,
+        terminalId: liveEntry.terminalId,
+      })?.session_id;
+    return { agent: liveEntry.agent, sessionId, pid: liveEntry.pid };
+  }
+  const agent = meta?.labels?.agent;
+  const sessionId = meta?.labels?.sessionId;
+  if (agent && sessionId && (meta?.pane == null || meta.pane === pane)) return { agent, sessionId };
+  return undefined;
+}
+
 /**
  * Agents hosted in the shared-socket tmux server — the authoritative source for
- * tmux-wrapped interactive spawns (see src/lib/exec.ts `runInTmux`). Enumerates
- * every pane on the shared socket and keeps those whose session meta was stamped
- * with `labels.agent` + `labels.sessionId` by the spawn-wrap. Because tmux (not a
- * per-window `live-terminals.json`) is the source of truth, a tmux-hosted agent is
- * ALWAYS captured with its exact `%pane` even when the extension registry is stale
- * or absent. `source: 'teams'` is skipped — teammates are surfaced by listTeamsActive.
+ * tmux-hosted interactive spawns (see src/lib/exec.ts `runInTmux`). Enumerates
+ * every pane on the shared socket and attributes each to the agent running in it
+ * via {@link resolvePaneIdentity}: the per-pane launch registry (exact) first, the
+ * session-meta labels as fallback. Because tmux (not a per-window
+ * `live-terminals.json`) is the source of truth, a tmux-hosted agent is captured
+ * with its exact `%pane` even when the extension registry is stale — INCLUDING an
+ * agent bare-spawned into a split of an existing session, which older logic dropped
+ * (it kept only the first pane per session meta). `source: 'teams'` is skipped.
  */
 export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
   const { getDefaultSocketPath } = await import('../tmux/paths.js');
@@ -1022,6 +1177,20 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
   }
   if (res.code !== 0) return [];
 
+  // Index live launches by the pane they target, so a pane we did NOT wrap (a
+  // split) resolves to its own agent. Newest launch wins a pane (pid reuse), and
+  // only live pids count — a dead agent's stale entry can't light up its old pane.
+  const liveByPane = new Map<string, PidSessionEntry>();
+  for (const e of listPidSessionEntries()) {
+    if (!e.tmuxPane || !isPidAlive(e.pid)) continue;
+    const prev = liveByPane.get(e.tmuxPane);
+    if (!prev || e.startedAtMs > prev.startedAtMs) liveByPane.set(e.tmuxPane, e);
+  }
+  // Hook index is scanned lazily — only when a live launch lacks a recorded id
+  // (a non-Claude split) and needs the SessionStart-hook join.
+  let hookIndex: HookSessionIndex | undefined;
+  const getHookIndex = (): HookSessionIndex => (hookIndex ??= loadHookSessionIndex());
+
   const out: ActiveSession[] = [];
   const seen = new Set<string>();
   for (const line of res.stdout.split('\n')) {
@@ -1029,18 +1198,25 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
     const [pane, sessName, pidRaw, curPath] = line.split('\t');
     if (!pane || !sessName) continue;
     const meta = readSessionMeta(sessName);
-    const agent = meta?.labels?.agent;
-    const sessionId = meta?.labels?.sessionId;
-    if (!agent || !sessionId) continue;      // only our stamped agent sessions
-    if (meta?.source === 'teams') continue;  // teammates come from listTeamsActive
-    if (seen.has(sessionId)) continue;       // first pane per session wins
-    seen.add(sessionId);
+    const liveEntry = liveByPane.get(pane);
+    const id = resolvePaneIdentity(pane, meta, liveEntry, getHookIndex);
+    if (!id) continue;
+    // Dedupe by resolved session id; an as-yet-unresolved id (a hookless/lagging
+    // split) keys on the unique pane so it still surfaces as its own row.
+    const dedupKey = id.sessionId ?? pane;
+    if (seen.has(dedupKey)) continue;
+    seen.add(dedupKey);
 
-    const pid = parseInt(pidRaw, 10) || undefined;
-    const cwd = meta?.cwd ?? (curPath || undefined);
-    const sessionFile = findSessionFileForKind(agent, cwd, sessionId);
+    // Prefer the registry pid (the agent), falling back to the pane leaf pid. A
+    // pid we emit here goes into getActiveSessions' attributed set, so the ps-scan
+    // does NOT also surface this agent as a duplicate headless row.
+    const pid = id.pid ?? (parseInt(pidRaw, 10) || undefined);
+    const cwd = liveEntry?.cwd ?? meta?.cwd ?? (curPath || undefined);
+    const sessionFile = findSessionFileForKind(id.agent, cwd, id.sessionId);
     const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
-    const { state, tokPerSec } = computeLiveSignals(agent, sessionFile, cwd, pid ? isPidAlive(pid) : true);
+    const pidAlive = pid ? isPidAlive(pid) : true;
+    const { state, tokPerSec } = computeLiveSignals(id.agent, sessionFile, cwd, pidAlive);
+    const { birthtimeMs, mtimeMs } = sessionFileTimes(sessionFile);
     // Provenance is known exactly here (the pane IS a tmux pane) — set it so
     // enrichProvenance skips it and the locator/reply rails resolve off the pane.
     const provenance: SessionProvenance = {
@@ -1051,16 +1227,20 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
     };
     out.push(applyState({
       context: 'terminal',
-      kind: agent,
+      kind: id.agent,
       host: 'tmux',
       pid,
-      sessionId,
+      sessionId: id.sessionId ?? sessionIdFromFile(sessionFile),
       cwd,
       topic,
       tokPerSec,
       sessionFile,
+      // tmux panes carry no start timestamp; derive both from the transcript
+      // (creation ≈ start, last write ≈ last activity).
+      startedAtMs: birthtimeMs,
+      lastActivityMs: mtimeMs,
       provenance,
-    }, state, sessionFile));
+    }, state, sessionFile, pidAlive));
   }
   return out;
 }
@@ -1089,7 +1269,23 @@ export async function getActiveSessions(opts: ActiveQueryOptions = {}): Promise<
 
   const merged = dedupeBySession([...tmuxAgents, ...teams, ...terminals, ...cloud, ...unattributed]);
   await enrichProvenance(merged);
+  foldPresence(merged);
   return merged;
+}
+
+/**
+ * Fold detach/attach presence onto each row from the detach store. A stored
+ * record wins (`background`/`parked`); otherwise a live terminal session is
+ * `attached`. Ad-hoc headless runs and cloud/team rows stay unmarked — they are
+ * not on the foreground/background axis.
+ */
+function foldPresence(rows: ActiveSession[]): void {
+  for (const s of rows) {
+    if (!s.sessionId) continue;
+    const stored = presenceFromStore(s.sessionId);
+    if (stored) s.presence = stored;
+    else if (s.context === 'terminal') s.presence = 'attached';
+  }
 }
 
 /**
@@ -1109,17 +1305,33 @@ async function enrichProvenance(sessions: ActiveSession[]): Promise<void> {
 }
 
 /**
+ * Identity for a row the scan could not tie to a session: a daemon's worker
+ * processes (an OpenClaw gateway spawning `codex`, a supervisor pool) have no
+ * session id, no transcript file, and no cloud/run handle — nothing tells two of
+ * them apart, because nothing distinguishes them. Same binary + same working
+ * directory + same context IS the identity, so N indistinguishable workers
+ * collapse to one row carrying `pidCount: N`.
+ *
+ * Returns undefined with no cwd: without it there is no stable identity, and
+ * keying on kind alone would fold unrelated agents onto one row.
+ */
+function anonymousWorkerKey(s: ActiveSession): string | undefined {
+  if (!s.cwd) return undefined;
+  return `anon\0${s.kind}\0${s.context}\0${s.cwd}`;
+}
+
+/**
  * Collapse rows that resolve to the *same* session — a session with many
  * subagent/fork PIDs (all matched to one transcript file) would otherwise print
- * dozens of identical rows. Keyed by session id (falling back to the file), the
- * first row wins and carries a `pidCount`. Rows with no session identity (cloud,
- * unresolved headless) pass through untouched.
+ * dozens of identical rows. Keyed by session id, falling back to the transcript
+ * file, then the cloud/run handle, then {@link anonymousWorkerKey}. The first row
+ * wins and carries a `pidCount`.
  */
-function dedupeBySession(sessions: ActiveSession[]): ActiveSession[] {
+export function dedupeBySession(sessions: ActiveSession[]): ActiveSession[] {
   const out: ActiveSession[] = [];
   const byKey = new Map<string, ActiveSession>();
   for (const s of sessions) {
-    const key = s.sessionId || s.sessionFile;
+    const key = s.sessionId || s.sessionFile || s.cloudTaskId || s.agentId || anonymousWorkerKey(s);
     if (!key) { out.push(s); continue; }
     const existing = byKey.get(key);
     if (existing) {

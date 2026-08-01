@@ -17,7 +17,7 @@ const SESSIONS_DIR = getSessionsDir();
 const DB_PATH = getSessionsDbPath();
 
 /** Current schema version; bumped when migrations are added. */
-const SCHEMA_VERSION = 13;
+const SCHEMA_VERSION = 15;
 
 /**
  * Canonicalize a file path for use as a scan_ledger key. The same physical
@@ -104,6 +104,27 @@ CREATE TABLE IF NOT EXISTS scan_ledger (
   file_path TEXT PRIMARY KEY,
   file_mtime_ms INTEGER NOT NULL,
   file_size INTEGER NOT NULL,
+  scanned_at INTEGER NOT NULL,
+  -- Resumable-parse cursor + continuation (B-1). parser_state is a JSON
+  -- ClaudeParserState blob (offset + accumulator snapshot) so a scan can pick
+  -- up where the last one stopped; content_text caches the accumulated user
+  -- doc so detectTicket + FTS can rebuild on append without re-reading the file.
+  -- Written by B-2; B-1 only defines + round-trips them.
+  parser_state TEXT,
+  content_text TEXT
+);
+
+-- Tracks the mtime + entry-count of every LEAF directory that directly holds
+-- transcripts (a Claude project dir, a Gemini chats dir). A dir's mtime bumps
+-- on create/delete/rename of its entries but NOT on an in-place append, so a
+-- match here means the dir gained/lost/renamed no files: we can skip the
+-- readdir + per-file stat and serve unchanged files from the DB (append-safety
+-- is preserved by re-stat'ing only the "hot set" — see discover.ts). Keyed by
+-- canonicalLedgerKey, same as scan_ledger.
+CREATE TABLE IF NOT EXISTS dir_ledger (
+  dir_path TEXT PRIMARY KEY,
+  dir_mtime_ms INTEGER NOT NULL,
+  entry_count INTEGER NOT NULL,
   scanned_at INTEGER NOT NULL
 );
 `;
@@ -320,6 +341,36 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     db.exec(`UPDATE sessions SET origin = 'cli' WHERE origin IS NULL OR origin = ''`);
     db.exec(`DELETE FROM scan_ledger;`);
   }
+
+  if (fromVersion < 14) {
+    // v13 → v14: the discovery scan now short-circuits the readdir + per-file
+    // stat of leaf transcript dirs whose (mtime, entry_count) is unchanged,
+    // caching that snapshot in the new `dir_ledger` table. Create it, and clear
+    // scan_ledger so the first post-upgrade scan does a clean full walk — that
+    // walk seeds BOTH ledgers correctly, so a cold/empty dir_ledger degrades to
+    // today's full behavior.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS dir_ledger (
+        dir_path TEXT PRIMARY KEY,
+        dir_mtime_ms INTEGER NOT NULL,
+        entry_count INTEGER NOT NULL,
+        scanned_at INTEGER NOT NULL
+      );
+      DELETE FROM scan_ledger;
+    `);
+  }
+
+  if (fromVersion < 15) {
+    // v14 → v15: the Claude scan becomes resumable (B-1). scan_ledger gains a
+    // `parser_state` continuation blob (offset + accumulator snapshot) and a
+    // `content_text` cache of the accumulated user doc. Add both columns, then
+    // clear scan_ledger so the first post-upgrade scan does a clean full walk
+    // that reseeds the cursor from byte 0.
+    const cols = db.prepare(`PRAGMA table_info(scan_ledger)`).all() as Array<{ name: string }>;
+    if (!cols.some(c => c.name === 'parser_state')) db.exec(`ALTER TABLE scan_ledger ADD COLUMN parser_state TEXT`);
+    if (!cols.some(c => c.name === 'content_text')) db.exec(`ALTER TABLE scan_ledger ADD COLUMN content_text TEXT`);
+    db.exec(`DELETE FROM scan_ledger;`);
+  }
 }
 
 /** Open (or return the cached) sessions database, applying migrations as needed. */
@@ -379,6 +430,11 @@ export function closeDB(): void {
   if (dbInstance) {
     dbInstance.close();
     dbInstance = null;
+    // Closing the connection finalizes every prepared statement it owns. Drop
+    // the cached upsert/FTS statements too, so the next getDB() rebuilds them
+    // against the fresh connection instead of re-running a finalized statement
+    // (which throws "statement has been finalized" on the first upsert).
+    cachedStmts = {};
   }
 }
 
@@ -521,6 +577,78 @@ export function getScanStampsForPaths(filePaths: string[]): Map<string, ScanStam
 }
 
 /**
+ * A file's persisted resumable-parse continuation, read back from scan_ledger.
+ * `parserState` is the serialized {@link ClaudeParserState} JSON blob (offset +
+ * accumulator snapshot); `contentText` is the accumulated user doc. Both are
+ * written by the Claude scan (B-2) and consumed on the next scan to decide
+ * full-vs-incremental and to hydrate the resume.
+ */
+export interface ParserStateRow {
+  parserState: string | null;
+  contentText: string | null;
+  fileMtimeMs: number;
+  fileSize: number;
+  scannedAt: number;
+}
+
+/**
+ * Bulk-load the resumable-parse continuation (parser_state + content_text) plus
+ * the stamp for a set of file paths in a single chunked query. Mirrors
+ * {@link getScanStampsForPaths}: keys by canonical path and fans results back to
+ * every original alias so callers can `.get(filePath)` with the path they passed.
+ * The Claude incremental scan uses this to fetch each changed file's prior
+ * continuation without an N+1 of {@link getScanStampByPath}.
+ */
+export function getParserStatesForPaths(filePaths: string[]): Map<string, ParserStateRow> {
+  const result = new Map<string, ParserStateRow>();
+  if (filePaths.length === 0) return result;
+  const db = getDB();
+
+  const canonicalToOriginals = new Map<string, string[]>();
+  for (const fp of filePaths) {
+    const canonical = canonicalLedgerKey(fp);
+    const aliases = canonicalToOriginals.get(canonical);
+    if (aliases) aliases.push(fp);
+    else canonicalToOriginals.set(canonical, [fp]);
+  }
+
+  const canonicalKeys = [...canonicalToOriginals.keys()];
+  const CHUNK = 500;
+  for (let i = 0; i < canonicalKeys.length; i += CHUNK) {
+    const chunk = canonicalKeys.slice(i, i + CHUNK);
+    const placeholders = chunk.map(() => '?').join(',');
+    const rows = db
+      .prepare(`
+        SELECT file_path, file_mtime_ms, file_size, scanned_at, parser_state, content_text
+        FROM scan_ledger
+        WHERE file_path IN (${placeholders})
+      `)
+      .all(...chunk) as Array<{
+        file_path: string;
+        file_mtime_ms: number;
+        file_size: number;
+        scanned_at: number;
+        parser_state: string | null;
+        content_text: string | null;
+      }>;
+
+    for (const row of rows) {
+      const state: ParserStateRow = {
+        parserState: row.parser_state,
+        contentText: row.content_text,
+        fileMtimeMs: row.file_mtime_ms,
+        fileSize: row.file_size,
+        scannedAt: row.scanned_at,
+      };
+      for (const original of canonicalToOriginals.get(row.file_path) || []) {
+        result.set(original, state);
+      }
+    }
+  }
+  return result;
+}
+
+/**
  * Record scan stamps for files we've looked at. Covers both files that produced
  * a session and files we looked at but chose not to index (e.g. malformed).
  */
@@ -539,6 +667,82 @@ export function recordScans(entries: Array<{ filePath: string; scan: ScanStamp }
   const txn = db.transaction((items: typeof entries) => {
     for (const { filePath, scan } of items) {
       stmt.run(canonicalLedgerKey(filePath), scan.fileMtimeMs, scan.fileSize, now);
+    }
+  });
+  txn(entries);
+}
+
+/** Snapshot of a leaf transcript directory used to detect create/delete/rename. */
+export interface DirStamp {
+  dirMtimeMs: number;
+  entryCount: number;
+}
+
+/**
+ * Bulk-load the dir ledger for a set of leaf directories in a single SQL query.
+ * Mirrors {@link getScanStampsForPaths}: keys by canonical path (so a dir
+ * reachable via a symlinked version home and its realpath collapse to one row)
+ * and fans the result back out to every original alias so callers can
+ * `.get(dirPath)` with the path they passed in.
+ */
+export function getDirLedgerForPaths(dirs: string[]): Map<string, DirStamp> {
+  const result = new Map<string, DirStamp>();
+  if (dirs.length === 0) return result;
+  const db = getDB();
+
+  const canonicalToOriginals = new Map<string, string[]>();
+  for (const d of dirs) {
+    const canonical = canonicalLedgerKey(d);
+    const aliases = canonicalToOriginals.get(canonical);
+    if (aliases) aliases.push(d);
+    else canonicalToOriginals.set(canonical, [d]);
+  }
+
+  const canonicalKeys = [...canonicalToOriginals.keys()];
+  const CHUNK = 500;
+  for (let i = 0; i < canonicalKeys.length; i += CHUNK) {
+    const chunk = canonicalKeys.slice(i, i + CHUNK);
+    const placeholders = chunk.map(() => '?').join(',');
+    const rows = db
+      .prepare(`
+        SELECT dir_path, dir_mtime_ms, entry_count
+        FROM dir_ledger
+        WHERE dir_path IN (${placeholders})
+      `)
+      .all(...chunk) as Array<{ dir_path: string; dir_mtime_ms: number; entry_count: number }>;
+
+    for (const row of rows) {
+      const stamp: DirStamp = { dirMtimeMs: row.dir_mtime_ms, entryCount: row.entry_count };
+      for (const original of canonicalToOriginals.get(row.dir_path) || []) {
+        result.set(original, stamp);
+      }
+    }
+  }
+  return result;
+}
+
+/**
+ * Upsert dir-scan stamps. Recorded after a full readdir of a leaf transcript
+ * dir so the next scan can skip that dir when its (mtime, entry_count) is
+ * unchanged. Mirrors {@link recordScans}.
+ */
+export function recordDirScans(
+  entries: Array<{ dirPath: string; dirMtimeMs: number; entryCount: number }>,
+): void {
+  if (entries.length === 0) return;
+  const db = getDB();
+  const stmt = db.prepare(`
+    INSERT INTO dir_ledger (dir_path, dir_mtime_ms, entry_count, scanned_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(dir_path) DO UPDATE SET
+      dir_mtime_ms = excluded.dir_mtime_ms,
+      entry_count = excluded.entry_count,
+      scanned_at = excluded.scanned_at
+  `);
+  const now = Date.now();
+  const txn = db.transaction((items: typeof entries) => {
+    for (const { dirPath, dirMtimeMs, entryCount } of items) {
+      stmt.run(canonicalLedgerKey(dirPath), dirMtimeMs, entryCount, now);
     }
   });
   txn(entries);
@@ -574,7 +778,15 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     cwd = excluded.cwd,
     git_branch = excluded.git_branch,
     topic = excluded.topic,
-    label = excluded.label,
+    -- Never let an empty/placeholder incoming label clobber a good stored one.
+    -- A real incoming label (non-empty after trim) still wins; a blank one keeps
+    -- the label seeded by --name (seedLabelsFromNames) or refined by an agent
+    -- title / rename (syncLabels). A bare rescan carries no label, so it must
+    -- preserve, not erase, the good one already stored.
+    label = CASE
+      WHEN excluded.label IS NULL OR trim(excluded.label) = '' THEN sessions.label
+      ELSE excluded.label
+    END,
     message_count = excluded.message_count,
     token_count = excluded.token_count,
     output_tokens = excluded.output_tokens,
@@ -596,11 +808,17 @@ const deleteTextStmt = (db: Database.Database) =>
   db.prepare(`DELETE FROM session_text WHERE session_id = ?`);
 const insertTextStmt = (db: Database.Database) =>
   db.prepare(`INSERT INTO session_text (session_id, label, topic, project, content) VALUES (?, ?, ?, ?, ?)`);
+// Read back the label the upsert actually stored (which may be the preserved
+// one, not the incoming blank) so the FTS label column stays consistent with
+// sessions.label after a bare rescan.
+const readLabelStmt = (db: Database.Database) =>
+  db.prepare(`SELECT label FROM sessions WHERE id = ?`);
 
 let cachedStmts: {
   upsert?: Database.Statement<SessionRow>;
   delText?: Database.Statement<unknown[]>;
   insText?: Database.Statement<unknown[]>;
+  readLabel?: Database.Statement<unknown[]>;
 } = {};
 
 function stmts(db: Database.Database) {
@@ -609,9 +827,21 @@ function stmts(db: Database.Database) {
       upsert: upsertSessionStmt(db) as Database.Statement<SessionRow>,
       delText: deleteTextStmt(db),
       insText: insertTextStmt(db),
+      readLabel: readLabelStmt(db),
     };
   }
   return cachedStmts as Required<typeof cachedStmts>;
+}
+
+/**
+ * Return the label stored for a session, as text for the FTS index (never NULL).
+ * Called inside the upsert transaction, AFTER the row upsert, so it reflects the
+ * preserve-non-empty-label rule in the ON CONFLICT clause rather than the raw
+ * incoming label.
+ */
+function storedFtsLabel(readLabel: Database.Statement<unknown[]>, id: string): string {
+  const row = readLabel.get(id) as { label: string | null } | undefined;
+  return row?.label ?? '';
 }
 
 /**
@@ -620,7 +850,7 @@ function stmts(db: Database.Database) {
  */
 export function upsertSession(meta: SessionMeta, content: string, scan?: ScanStamp): void {
   const db = getDB();
-  const { upsert, delText, insText } = stmts(db);
+  const { upsert, delText, insText, readLabel } = stmts(db);
   const row: SessionRow = {
     id: meta.id,
     short_id: meta.shortId,
@@ -659,7 +889,9 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
     delText.run(meta.id);
     insText.run(
       meta.id,
-      meta.label ?? '',
+      // Use the label the upsert actually stored (preserve-non-empty rule),
+      // not the raw incoming one, so FTS label ranking survives a bare rescan.
+      storedFtsLabel(readLabel, meta.id),
       meta.topic ?? '',
       meta.project ?? '',
       content ?? '',
@@ -670,19 +902,26 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
 
 /** Batch-upsert sessions with their FTS5 content and scan stamps in a single transaction. */
 export function upsertSessionsBatch(
-  entries: Array<{ meta: SessionMeta; content: string; scan?: ScanStamp }>,
+  entries: Array<{ meta: SessionMeta; content: string; scan?: ScanStamp; parserState?: string; contentText?: string }>,
 ): void {
   if (entries.length === 0) return;
   const db = getDB();
-  const { upsert, delText, insText } = stmts(db);
+  const { upsert, delText, insText, readLabel } = stmts(db);
   const now = Date.now();
+  // Persist the Claude resumable-parse continuation (parser_state + content_text)
+  // alongside the stamp. On a full/incremental Claude parse the caller passes the
+  // serialized newState + accumulated user doc so the NEXT scan can resume from
+  // the persisted offset (B-2). Other scanners pass neither, leaving both columns
+  // NULL exactly as before — their ledger rows are unaffected.
   const ledger = db.prepare(`
-    INSERT INTO scan_ledger (file_path, file_mtime_ms, file_size, scanned_at)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO scan_ledger (file_path, file_mtime_ms, file_size, scanned_at, parser_state, content_text)
+    VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(file_path) DO UPDATE SET
       file_mtime_ms = excluded.file_mtime_ms,
       file_size = excluded.file_size,
-      scanned_at = excluded.scanned_at
+      scanned_at = excluded.scanned_at,
+      parser_state = excluded.parser_state,
+      content_text = excluded.content_text
   `);
 
   // Build a lookup from canonical file path → entry, used inside the write
@@ -717,7 +956,7 @@ export function upsertSessionsBatch(
       }
     }
 
-    for (const { meta, content, scan } of items) {
+    for (const { meta, content, scan, parserState, contentText } of items) {
       if (alreadyIndexed.has(meta.id)) continue;
       // Per-row guard: one malformed session (e.g. a required field that resolves to
       // NULL) must not abort the whole batch and take down the entire `agents sessions`
@@ -762,13 +1001,22 @@ export function upsertSessionsBatch(
       delText.run(meta.id);
       insText.run(
         meta.id,
-        meta.label ?? '',
+        // Mirror upsertSession: index the label the upsert actually stored
+        // (preserve-non-empty rule), not the raw incoming one.
+        storedFtsLabel(readLabel, meta.id),
         meta.topic ?? '',
         meta.project ?? '',
         content ?? '',
       );
       if (scan && meta.filePath) {
-        ledger.run(canonicalLedgerKey(meta.filePath), scan.fileMtimeMs, scan.fileSize, now);
+        ledger.run(
+          canonicalLedgerKey(meta.filePath),
+          scan.fileMtimeMs,
+          scan.fileSize,
+          now,
+          parserState ?? null,
+          contentText ?? null,
+        );
       }
       } catch (err) {
         if (process.stderr.isTTY) {

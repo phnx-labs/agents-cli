@@ -65,6 +65,12 @@ describe('liveGlyphAndPreview', () => {
     expect(liveGlyphAndPreview(mk({ status: 'idle' })).glyph).toContain('○');
   });
 
+  it('unknown → ◌ (a distinct glyph, never the ○ idle it used to be faked as)', () => {
+    const glyph = liveGlyphAndPreview(mk({ status: 'unknown' })).glyph;
+    expect(glyph).toContain('◌');
+    expect(glyph).not.toContain('○');
+  });
+
   it('preview falls back to label then topic when there is no live preview', () => {
     expect(liveGlyphAndPreview(mk({ status: 'running', label: 'my-task' })).preview).toBe('my-task');
     expect(liveGlyphAndPreview(mk({ status: 'running', topic: 'first prompt' })).preview).toBe('first prompt');

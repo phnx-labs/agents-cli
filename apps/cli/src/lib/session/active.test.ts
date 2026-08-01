@@ -1,5 +1,110 @@
-import { describe, it, expect } from 'vitest';
-import { resolveCwds, LSOF_CONCURRENCY, agentKindFromComm, activeStatusFromCloudStatus } from './active.js';
+import { describe, it, expect, afterAll } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { resolveCwds, LSOF_CONCURRENCY, agentKindFromComm, activeStatusFromCloudStatus, resolveFallbackStatus, resolvePaneIdentity } from './active.js';
+import type { HookSessionIndex } from './hook-sessions.js';
+
+describe('resolvePaneIdentity (per-pane attribution for the authoritative tmux source)', () => {
+  const emptyHook = (): HookSessionIndex => ({ byLaunchId: new Map(), byTerminalId: new Map(), byPid: new Map() });
+  const meta = (labels: Record<string, string>, extra: { source?: string; pane?: string } = {}) => ({ labels, source: extra.source ?? 'cli', pane: extra.pane });
+
+  it('the per-pane launch registry WINS over the session meta label (a split into an existing session)', () => {
+    // The session was originally a wrapped claude, but THIS pane hosts a gemini
+    // bare-spawned into a split — it must be attributed to its own launch.
+    const id = resolvePaneIdentity(
+      '%2',
+      meta({ agent: 'claude', sessionId: 'origin-id' }, { pane: '%1' }),
+      { pid: 5, agent: 'gemini', sessionId: 'gem-id', startedAtMs: 1 },
+      emptyHook,
+    );
+    expect(id).toEqual({ agent: 'gemini', sessionId: 'gem-id', pid: 5 });
+  });
+
+  it('a registry entry with no recorded id joins the SessionStart hook by launchId (non-Claude split)', () => {
+    const idx: HookSessionIndex = {
+      byLaunchId: new Map([['L1', { session_id: 'hook-id', agent: 'gemini', pid: 5 }]]),
+      byTerminalId: new Map(),
+      byPid: new Map(),
+    };
+    const id = resolvePaneIdentity('%2', null, { pid: 5, agent: 'gemini', launchId: 'L1', startedAtMs: 1 }, () => idx);
+    expect(id).toEqual({ agent: 'gemini', sessionId: 'hook-id', pid: 5 });
+  });
+
+  it('falls back to session-meta labels on the ORIGIN pane when it has no live launch entry (legacy)', () => {
+    const id = resolvePaneIdentity('%1', meta({ agent: 'claude', sessionId: 'meta-id' }, { pane: '%1' }), undefined, emptyHook);
+    expect(id).toEqual({ agent: 'claude', sessionId: 'meta-id' });
+  });
+
+  it('does NOT mis-attribute the wrapped agent to a non-origin shell split pane', () => {
+    // A split shell pane (%2) of a labeled session, no registry entry: must be
+    // skipped so the origin pane (%1) is the only one that emits the wrapped agent.
+    const id = resolvePaneIdentity('%2', meta({ agent: 'claude', sessionId: 'meta-id' }, { pane: '%1' }), undefined, emptyHook);
+    expect(id).toBeUndefined();
+  });
+
+  it('accepts any labeled pane when meta.pane is unknown (attach-existing sessions)', () => {
+    const id = resolvePaneIdentity('%9', meta({ agent: 'claude', sessionId: 'meta-id' }), undefined, emptyHook);
+    expect(id).toEqual({ agent: 'claude', sessionId: 'meta-id' });
+  });
+
+  it('skips a teams pane (teammates come from listTeamsActive, never double-counted here)', () => {
+    const id = resolvePaneIdentity(
+      '%1',
+      meta({ agent: 'claude', sessionId: 'x' }, { source: 'teams' }),
+      { pid: 5, agent: 'claude', sessionId: 'x', startedAtMs: 1 },
+      emptyHook,
+    );
+    expect(id).toBeUndefined();
+  });
+
+  it('returns undefined for an unlabeled pane with no launch entry (a plain shell split)', () => {
+    expect(resolvePaneIdentity('%1', null, undefined, emptyHook)).toBeUndefined();
+    expect(resolvePaneIdentity('%1', meta({}), undefined, emptyHook)).toBeUndefined();
+  });
+});
+
+describe('resolveFallbackStatus (honest status when no rich transcript state)', () => {
+  const tmp: string[] = [];
+  const mkfile = (ageMs: number): string => {
+    const p = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'agents-fallback-')), 'sess.jsonl');
+    fs.writeFileSync(p, '{}\n');
+    const when = new Date(Date.now() - ageMs);
+    fs.utimesSync(p, when, when);
+    tmp.push(p);
+    return p;
+  };
+
+  it('no transcript + a LIVE process ⇒ unknown, NOT a fabricated idle', () => {
+    // The truthful answer for a live gemini/droid/cursor/opencode whose format we
+    // do not parse: alive, but we cannot see what it is doing.
+    expect(resolveFallbackStatus(undefined, true)).toBe('unknown');
+  });
+
+  it('no transcript + a process not known alive ⇒ idle (nothing to report)', () => {
+    expect(resolveFallbackStatus(undefined, false)).toBe('idle');
+  });
+
+  it('a transcript written within the active window ⇒ running (measured freshness)', () => {
+    expect(resolveFallbackStatus(mkfile(10_000), true)).toBe('running');
+  });
+
+  it('a transcript stale past the active window ⇒ idle', () => {
+    // 5 min old — beyond ACTIVE_MTIME_WINDOW_MS (2 min).
+    expect(resolveFallbackStatus(mkfile(5 * 60_000), true)).toBe('idle');
+  });
+
+  it('a named transcript whose stat throws (vanished) ⇒ unknown, never an optimistic running', () => {
+    // This branch previously returned running, contradicting the idle default.
+    const gone = path.join(os.tmpdir(), `agents-fallback-missing-${process.pid}.jsonl`);
+    try { fs.unlinkSync(gone); } catch { /* already absent */ }
+    expect(resolveFallbackStatus(gone, true)).toBe('unknown');
+  });
+
+  afterAll(() => {
+    for (const p of tmp) { try { fs.rmSync(path.dirname(p), { recursive: true, force: true }); } catch { /* best-effort */ } }
+  });
+});
 
 describe('agentKindFromComm', () => {
   it('matches a real agent CLI by basename (absolute path or bare name)', () => {

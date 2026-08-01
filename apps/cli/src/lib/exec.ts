@@ -20,6 +20,8 @@ import { getShimsDir, getHistoryDir } from './state.js';
 import { resolveCodexHome } from './codex-home.js';
 import { readCodexConfiguredModel } from './shims.js';
 import { writePidSessionEntry, extractSessionIdArg } from './session/pid-registry.js';
+import { loadHookSessionIndex, resolveHookSessionId } from './session/hook-sessions.js';
+import { sessionIdMarkerLine } from './hosts/session-marker.js';
 import { recordRunName } from './session/run-names.js';
 import { mailboxDir, isValidMailboxId } from './mailbox.js';
 import { composeWin32CommandLine } from './platform/index.js';
@@ -223,6 +225,15 @@ export interface ExecOptions {
    * (output is mirrored to the parent's stdout exactly like stdio:'inherit').
    */
   captureStdoutTail?: boolean;
+  /**
+   * Print the run's resolved session id to stdout as a one-line sentinel once the
+   * child exits (see hosts/session-marker.ts). Set by the `--host` dispatch so the
+   * LAUNCHER can relate the remote-created session back to itself — Claude's id is
+   * forced up front, but every other agent coins its own id on the remote box, and
+   * this marker is how that id rides the followed log home. Headless-only and inert
+   * for interactive runs (no combined log to parse).
+   */
+  emitSessionId?: boolean;
   /**
    * Escape hatch for the interactive tmux spawn-wrap (see shouldWrapInTmux):
    * when true, spawn the agent directly instead of inside a shared-socket tmux
@@ -1276,6 +1287,35 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
 }
 
 /**
+ * Print the run's resolved session id as a one-line stdout sentinel so a `--host`
+ * launcher can relate the remote-created session back to itself (see the
+ * `emitSessionId` option and hosts/session-marker.ts).
+ *
+ * For Claude the id was forced up front (`options.sessionId`, wired as
+ * `--session-id`), so it's authoritative with no lookup. Every other agent coined
+ * its OWN id, which its SessionStart hook recorded under this run's launchId — the
+ * exact join key `agents sessions --active` uses — so we read it back from the hook
+ * index by launchId (falling back to the child pid the hook may have recorded
+ * under). Nothing to emit when the hook hasn't landed an id (hookless harness):
+ * the launcher simply keeps the un-mapped task, never a fabricated id.
+ */
+function emitResolvedSessionId(options: ExecOptions, launchId: string, childPid: number | undefined): void {
+  let sessionId = options.sessionId;
+  if (!sessionId) {
+    try {
+      sessionId = resolveHookSessionId(loadHookSessionIndex(), {
+        pid: childPid ?? 0,
+        kind: options.agent,
+        launchId,
+      });
+    } catch {
+      /* hook index unreadable — emit nothing rather than a guess */
+    }
+  }
+  if (sessionId) process.stdout.write(sessionIdMarkerLine(sessionId));
+}
+
+/**
  * Spawn an agent process and return its exit code plus a tee'd copy of stderr.
  *
  * Stderr is always piped so the caller can inspect it (e.g., for rate-limit
@@ -1488,6 +1528,11 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
       // Budget kill resolves with a DISTINCT non-zero exit so CI/headless and
       // teams/cloud can tell a budget termination apart from a normal failure.
       const exitCode = budgetKilled ? BUDGET_KILL_EXIT_CODE : (code ?? 0);
+      // Relate the session id back to a `--host` launcher (see the emitSessionId
+      // doc). Claude's id is the one we forced; every other agent coined its own,
+      // which the SessionStart hook recorded under this run's launchId — resolve
+      // and print it as a one-line sentinel that rides the followed log home.
+      if (options.emitSessionId) emitResolvedSessionId(options, launchId, child.pid);
       timer.end({ exitCode, status: budgetKilled ? 'budget_killed' : code === 0 ? 'success' : 'failed' });
       resolve({ exitCode, stderr: stderrBuffer, stdout: stdoutTail });
     });

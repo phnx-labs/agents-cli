@@ -95,13 +95,13 @@ describe('scanAgentsBounded (mitigation 3 — no simultaneous multi-dotfile burs
 });
 
 describe('getSessionRoots (the `agents sessions --roots --json` payload, issue #741)', () => {
-  const KNOWN_AGENTS = new Set(['claude', 'codex', 'gemini', 'antigravity', 'droid', 'kimi']);
+  const KNOWN_AGENTS = new Set(['claude', 'codex', 'gemini', 'antigravity', 'droid', 'kimi', 'grok']);
   // The subdir each agent's roots must end with — the discovery contract external
   // watchers depend on. A drift here (e.g. gemini → 'sessions' instead of 'tmp')
   // would silently point the extension's fs.watch at the wrong directory.
   const EXPECTED_SUBDIR: Record<string, string> = {
     claude: 'projects', codex: 'sessions', gemini: 'tmp',
-    antigravity: 'conversations', droid: 'sessions', kimi: 'sessions',
+    antigravity: 'conversations', droid: 'sessions', kimi: 'sessions', grok: 'sessions',
   };
 
   it('never throws and returns a well-formed SessionRoots[]', () => {

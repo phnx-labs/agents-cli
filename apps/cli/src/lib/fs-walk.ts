@@ -8,7 +8,7 @@ import * as path from 'path';
  * directories are classified for free. On large session trees this roughly
  * halves the syscall count versus stat-per-entry.
  */
-function walkEntries(dir: string, ext: string, onFile: (filePath: string, mtimeMs: number) => void): void {
+function walkEntries(dir: string, ext: string, onFile: (filePath: string, mtimeMs: number, size: number) => void): void {
   function walk(d: string, depth: number) {
     if (depth > 5) return;
     let entries: fs.Dirent[];
@@ -35,7 +35,7 @@ function walkEntries(dir: string, ext: string, onFile: (filePath: string, mtimeM
         walk(full, depth + 1);
       } else if (entry.name.endsWith(ext)) {
         const stat = safeStatSync(full);
-        if (stat) onFile(full, stat.mtimeMs);
+        if (stat) onFile(full, stat.mtimeMs, stat.size);
       }
     }
   }
@@ -43,15 +43,32 @@ function walkEntries(dir: string, ext: string, onFile: (filePath: string, mtimeM
   walk(dir, 0);
 }
 
-/** Walk a directory recursively for files with a given extension, newest first. */
-export function walkForFiles(dir: string, ext: string, limit: number): string[] {
-  const results: { path: string; mtime: number }[] = [];
-  walkEntries(dir, ext, (filePath, mtimeMs) => {
-    results.push({ path: filePath, mtime: mtimeMs });
+/** A file surfaced by the walk, carrying the mtime+size from the walk's own stat. */
+export interface WalkedFile {
+  path: string;
+  mtimeMs: number;
+  size: number;
+}
+
+/**
+ * Walk a directory recursively for files with a given extension, newest first,
+ * keeping each match's mtime and size from the walk's own stat. Callers that
+ * then compare against the scan ledger reuse these instead of re-stat'ing every
+ * path — eliminating a second stat per file on the Codex/Droid/routine scans.
+ */
+export function walkForFilesWithStat(dir: string, ext: string, limit: number): WalkedFile[] {
+  const results: WalkedFile[] = [];
+  walkEntries(dir, ext, (filePath, mtimeMs, size) => {
+    results.push({ path: filePath, mtimeMs, size });
   });
 
-  results.sort((a, b) => b.mtime - a.mtime);
-  return results.slice(0, limit).map(r => r.path);
+  results.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return results.slice(0, limit);
+}
+
+/** Walk a directory recursively for files with a given extension, newest first. */
+export function walkForFiles(dir: string, ext: string, limit: number): string[] {
+  return walkForFilesWithStat(dir, ext, limit).map(r => r.path);
 }
 
 /**

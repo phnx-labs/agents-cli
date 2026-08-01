@@ -154,8 +154,21 @@ export class CodexCloudProvider implements CloudProvider {
       throw new Error(`codex cloud exec failed: ${stderr || stdout}`);
     }
 
-    // Parse task ID from output. Codex typically prints the task ID.
-    const taskId = extractTaskId(stdout) ?? `codex-${Date.now()}`;
+    // The task id is the ONLY handle to the just-created execution — status,
+    // list, and the session-index reconcile all key on it. Codex prints it to
+    // stdout (JSON or a task_/id: line); some builds route it to stderr, so scan
+    // both. A synthetic `codex-<ts>` id was the old fallback here — it can never
+    // match the real execution, so it silently broke every follow-up. If the id
+    // genuinely can't be parsed, fail loudly and point at `agents cloud list`
+    // (which recovers the newest execution) rather than persist a bogus id.
+    const taskId = extractTaskId(stdout) ?? extractTaskId(stderr);
+    if (!taskId) {
+      throw new Error(
+        'codex cloud exec did not report a task id — the run may have dispatched, but ' +
+          'without the id it cannot be tracked. Find it with `agents cloud list --provider codex`, ' +
+          `then \`agents cloud status <id>\`.\nRaw output: ${(stdout || stderr).trim().slice(0, 400)}`,
+      );
+    }
     const now = new Date().toISOString();
 
     return {
@@ -268,7 +281,7 @@ export class CodexCloudProvider implements CloudProvider {
 }
 
 /** Extract a task ID from codex CLI output (JSON field, key:value line, or UUID pattern). */
-function extractTaskId(output: string): string | undefined {
+export function extractTaskId(output: string): string | undefined {
   // Try JSON first
   try {
     const data = JSON.parse(output);

@@ -30,10 +30,14 @@ export interface HostTask {
    */
   name?: string;
   /**
-   * The agent session id the remote run was launched with (Claude only — the
-   * only agent that accepts `--session-id` to force a NEW session's id). Lets
-   * `agents sessions`/resume-by-id map a discovered session back to the host it
-   * lives on. Absent for agents that don't take an explicit session id.
+   * The remote run's agent session id, so `agents sessions`/resume-by-id can map
+   * a discovered session back to the host it lives on. Two sources: for Claude
+   * (the only agent that accepts `--session-id`) it's the id we FORCED at
+   * dispatch; for every other agent it's the id the remote COINED, captured from
+   * the run's stdout sentinel (`--emit-session-id`, see session-marker.ts) once
+   * the follow returns and stamped on the record via `captureRemoteSessionId`.
+   * Absent only until that capture lands — e.g. an unfollowed (`--no-follow`)
+   * non-Claude run whose id the reconcile path fills in later.
    */
   sessionId?: string;
   /** Remote paths (under the host's ~/.agents/.cache/hosts/). */

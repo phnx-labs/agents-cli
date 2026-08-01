@@ -34,10 +34,16 @@ agents sessions [query] [--json] [--since 1h] [--all]
 │  1. Open ~/.agents/.history/sessions/sessions.db (cached connection)       │
 │                                                                     │
 │  2. Parallel incremental scan per agent:                            │
-│     For each on-disk session file:                                  │
-│       stat() -> (mtime, size)                                       │
-│       If unchanged since last scan -> skip (DB row is fresh)        │
-│       Else -> parse file, upsert sessions row + FTS5 content row    │
+│     For each leaf transcript dir:                                   │
+│       stat() the dir -> (mtime, entry_count)                        │
+│       If it matches the dir_ledger -> no create/delete/rename;      │
+│         skip the per-file stat, serve unchanged files from the DB   │
+│         (only "hot" files are re-stat'd — see below)                │
+│       Else -> readdir + stat each file:                             │
+│         If unchanged since last scan -> skip (DB row is fresh)      │
+│         Else -> parse file, upsert sessions row + FTS5 content row  │
+│           (Claude: resume from the saved byte offset & parse only   │
+│            the appended lines when the file merely grew)            │
 │                                                                     │
 │  3. SQL query with filters (agent, cwd, since, project, limit)      │
 │     FTS5 search if [query] given, BM25 ranked                       │
@@ -46,8 +52,32 @@ agents sessions [query] [--json] [--since 1h] [--all]
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-Cold run re-parses everything. Warm run is mostly DB-only with a stat() per file;
-active sessions get refreshed each call because their mtime keeps advancing.
+Cold run re-parses everything. Warm run is mostly DB-only; a directory whose
+`(mtime, entry_count)` matches the `dir_ledger` is served entirely from the DB
+without stat'ing its files, so the immutable version-home and backup roots — which
+dominate a heavy user's tree — cost one dir stat each instead of hundreds of
+per-file stats. Active sessions still refresh: a file is "hot" (always re-stat'd,
+even in an unchanged dir) when it lives under the agent's live `~/.<agent>` root or
+was scanned within the last 10 minutes, so an in-place append is never missed. A
+create / delete / rename bumps the dir mtime and forces a full re-walk of that dir.
+Set `AGENTS_SESSIONS_NO_DIR_LEDGER=1` to disable the short-circuit and force the old
+full per-file walk.
+
+When a **Claude** transcript that already has an index row grows, the scan does
+not re-read it from the top. The `scan_ledger` stores a resumable continuation
+(`parser_state` — a byte offset plus an accumulator snapshot — and `content_text`,
+the accumulated user doc); the next scan resumes from that offset and folds in only
+the newly-appended lines. It falls back to a **full reparse from byte 0** when the
+file has no prior continuation (cold start), shrank at or below the saved offset
+(truncation / rewrite), its mtime went backwards (clock rewind / restore), or it
+grew but its re-derived first-event identity no longer matches the prior
+continuation — an in-place rewrite or restore that dropped a different session at
+the same path, which size + mtime alone cannot tell from an append. Full
+and incremental parses run through the same reducer, so the indexed row an append
+produces — token counts, cost, duration, topic/title, PR + ticket refs, FTS content
+— is identical to a from-scratch full reparse, even when a signal straddles two
+scans. Only the Claude scanner is incremental today; the other agents still full-parse
+each changed file.
 
 ## SessionMeta (list output)
 
@@ -281,6 +311,49 @@ Scope: v1 supports **Claude** (single-file transcript, native `--resume`). Codex
 agents (opencode) need per-agent handling and are refused up front with a clear
 message.
 
+## Background & foreground (detach / attach)
+
+`agents detach <id>` sends a live agent session to the background; `agents attach <id>`
+brings it back. They are the foreground/background axis over a session, and route
+through the same version-pinned `agents run --resume` path everything else uses — so
+they are agent-agnostic (native resume for Claude/Codex, `/continue` replay for the
+rest), not a per-agent special case.
+
+- **detach**: stop the interactive process (kill the tmux session when tmux-hosted,
+  else SIGTERM the pid) and **wait for it to actually exit** before spawning a
+  detached, version-pinned `agents run <agent> --resume <id> --headless "<nudge>"`,
+  so the two never race over the same transcript. The nudge tells the now-unwatched
+  agent it is headless and to drive its task to completion rather than stall on a
+  confirmation nobody can answer. The continuation runs until the task is done, then
+  exits; its output is written to `~/.agents/.cache/logs/detach-<shortid>.log`
+  (printed on detach) so a background run that crashes leaves a trail.
+  - **Remote sessions** (matched via the cross-host sweep) are detached **on their
+    own host over SSH** — `agents detach <id> --local` runs there — since a pid and
+    tmux socket only mean something on the machine the session runs on. Use `--local`
+    to skip the sweep and only consider this machine.
+  - **Cloud and team sessions are refused**: cloud runs have their own lifecycle, and
+    a `teams` session must be stopped through `agents teams` so the team supervisor's
+    PID-reuse-safe stop path and bookkeeping stay in sync — `detach` won't SIGTERM a
+    teammate out from under it.
+- **attach**: stop the headless continuation (if any), then `resumeSessionInPlace`
+  the session interactively in the current terminal — the same session, full history,
+  including whatever the background run did.
+
+The record `detach` writes (`~/.agents/.system/detached/<id>.json`, one file per
+session; see `lib/session/detached.ts`) is the source of truth for **presence**, which
+`getActiveSessions` folds onto every row and `agents sessions --active --json` emits:
+
+| presence | meaning |
+| --- | --- |
+| `attached` | live interactive TUI you're watching |
+| `background` | detached: the headless continuation is running (its pid is alive) |
+| `parked` | the headless continuation has exited; the transcript is durable, `attach` resumes it |
+
+Presence is **derived, never asserted**: a record only says "this session was detached";
+whether it is `background` or `parked` is decided live from the recorded pid plus its
+start-time fingerprint (which defeats PID reuse). Ad-hoc headless runs and cloud/team
+rows carry no presence — they are not on this axis.
+
 ## Export / Import (portable bundles)
 
 `agents sessions export` bundles selected sessions into a portable, self-describing
@@ -326,6 +399,78 @@ disk is skipped; a file that differs is a conflict, kept local unless `--overwri
 (`resolveExplicitTargets` + `ssh-exec`) — no second transport, no R2, no daemon.
 Source: `src/lib/session/bundle.ts`, `src/lib/session/remote-bundle.ts`,
 `src/commands/sessions-export.ts`, `src/commands/sessions-import.ts`.
+
+## Migration (relocate a live session)
+
+`agents sessions migrate` (alias `detach`) **moves a RUNNING session onto another
+machine** — a fleet worker, a registered device, or a warm/fresh ephemeral crabbox
+box — then stops the source so the interactive machine reclaims its compute. Where
+export/import carry a *transcript* between machines, migrate carries the *live agent*:
+it ships the transcript, resumes the agent on the target, confirms its prompt is live,
+and only then kills the source.
+
+```bash
+# Move the session in THIS tmux pane onto the least-busy fleet worker
+agents sessions migrate --auto
+
+# Move a specific session onto a named host / device / warm box slug
+agents sessions migrate a1b2c3d4 --host yosemite-s1
+
+# Provision a fresh ephemeral box and move onto it
+agents sessions migrate --lease
+
+# Copy (don't stop the source), and let the running agent wrap up its own dirty tree
+agents sessions migrate --host box-a --keep --agent-wrapup
+```
+
+The flow reuses existing primitives rather than reinventing transport or resume:
+
+1. **Resolve the source.** With no `[session-id]`, migrate matches the current tmux
+   pane (`$TMUX_PANE`) against a live session's `provenance.mux.pane` via
+   `getActiveSessions()`. Pass an explicit id when you're not inside the session's pane.
+2. **Resolve the target.** `--auto` picks the best machine with the pure scorer
+   (`src/lib/session/migrate-targets.ts`): eligible = reachable, dispatchable, not this
+   machine and not the source; ranked by platform-match-with-source, then a warm fleet
+   worker over a fresh box, then live headroom (idle > light > busy > loaded, from the
+   `agents devices` stats cache). `--host <name>` names one; `--lease` provisions a
+   fresh box (`crabboxWarmup`).
+3. **Verify + bootstrap.** `readyProbe()` checks the target can run the session's
+   agent+version; a missing agents-cli is bootstrapped (`bootstrapAgentsCli`).
+4. **Wrap up the working tree.** Dirty → commit to a branch, push, open a **draft
+   (WIP) PR** (mechanical by default). `--agent-wrapup` instead injects a wrap-up turn
+   into the running agent (same tmux reply rail as `sessions inject`). Clean-but-ahead → push.
+5. **Ship the transcript** to the target's live agent dir: the transcript file is copied
+   to the same path on the target (identical under the shared fleet `$HOME`), streamed
+   over the same `sshExec` transport, so the agent finds it where it reads sessions.
+   (`sessions import` lands bundles in the browsable history mirror — right for reading a
+   transcript elsewhere, wrong for continuing it.)
+6. **Resume on the target** in a detached tmux session (`tmux new-session -d`, which
+   starts the server a fresh worker/box lacks — the generic `new-window` backend needs a
+   live server), then confirm the pane is *live* (not merely created) before proceeding.
+   For an ephemeral box, migrate git-clones the repo and checks out the (WIP) branch first
+   so the cwd resolves.
+7. **Stop the source** (`killSession`) — but only after the target session is confirmed
+   live. `--keep` skips this (copy, not move).
+
+**`--mode rehydrate | resume`** (default `rehydrate`). Rehydrate ships the transcript and
+starts the agent on the target with a prompt telling it to read the session
+(`agents sessions <id>` — its own judgment on `--last`/`--include` so large tool output
+can't blow context) and continue; robust across every harness. `--mode resume` attempts a
+native `<agent> --resume` — faithful, but best-effort: the target agent must have the
+session registered, so migrate falls back to rehydrate when it can't. **Harness parity:**
+`buildResumeCommand` returns null for the non-resumable agents (gemini, antigravity,
+openclaw, rush, hermes, grok, kimi, droid); a resume request for those transparently
+becomes rehydrate with a printed notice — never a silent skip.
+
+**Invariant:** the source is never killed before the transcript is on the target and its
+session is confirmed live.
+
+**Tracking handoffs.** Every migrate appends to an append-only ledger at
+`~/.agents/.history/migrations.jsonl` (synced with the rest of `.history`, so source and
+target converge). `agents sessions migrations` prints it — the border tracker showing each
+session's `from → to`, mode, move-vs-copy, and status; a session that hops A→B→C leaves
+three lines, its lineage. Source: `src/commands/sessions-migrate.ts`,
+`src/lib/session/migrate-targets.ts`, `src/lib/session/migrations.ts`.
 
 ## Cross-machine sync (R2 + CRDT)
 

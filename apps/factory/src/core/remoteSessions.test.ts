@@ -219,6 +219,22 @@ describe('normalizeActiveSession — question + tail passthrough', () => {
   });
 });
 
+describe('normalizeActiveSession — presence passthrough (Attach picker)', () => {
+  test('carries the CLI presence value onto the RemoteSession', () => {
+    const base = ACTIVE.find((r) => r.context === 'terminal')!;
+    for (const presence of ['background', 'parked', 'attached']) {
+      const raw = { ...base, presence } as unknown as RawActiveSession;
+      const s = normalizeActiveSession(raw, 'this-mac', FETCHED_AT);
+      expect(s.presence).toBe(presence);
+    }
+  });
+  test('presence is "" when the CLI supplied none (not undefined — the extension filters on ===)', () => {
+    const base = ACTIVE.find((r) => r.context === 'terminal')!;
+    const s = normalizeActiveSession(base, 'this-mac', FETCHED_AT);
+    expect(s.presence).toBe('');
+  });
+});
+
 describe('normalizeActiveSession', () => {
   test('uses the queried host, not the payload host field', () => {
     // The terminal record carries host:"ghostty" (the emulator). Identity must

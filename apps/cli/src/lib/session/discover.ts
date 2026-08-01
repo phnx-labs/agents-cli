@@ -22,9 +22,10 @@ const execFileAsync = promisify(execFile);
 import type { SessionAgentId, SessionMeta } from './types.js';
 import type { AgentId } from '../types.js';
 import { AGENTS, agentConfigDirName, getCliVersion } from '../agents.js';
-import { walkForFiles } from '../fs-walk.js';
+import { walkForFilesWithStat } from '../fs-walk.js';
 import { getConfigSymlinkVersion } from '../shims.js';
 import { SESSION_AGENTS } from './types.js';
+import { deriveShortId } from './short-id.js';
 import { extractSessionTopic } from './prompt.js';
 import { parseAntigravity } from './parse.js';
 import { extractPrUrl, detectWorktree, detectTicket, isPrCreateCommand, detectSpawnedTeam, isTicketCreateTool, extractCreatedTicket } from './state.js';
@@ -35,6 +36,9 @@ import {
   getDB,
   getScanStampByPath,
   getScanStampsForPaths,
+  getParserStatesForPaths,
+  getDirLedgerForPaths,
+  recordDirScans,
   recordScans,
   syncLabels,
   seedLabelsFromNames,
@@ -46,6 +50,7 @@ import {
   tryClaimScan,
   releaseScan,
   type ScanStamp,
+  type DirStamp,
   type QueryOptions,
 } from './db.js';
 import { buildRunNameMap } from './run-names.js';
@@ -64,6 +69,28 @@ const HERMES_SESSIONS_DIR = path.join(HOME, '.hermes', 'sessions');
 /** How long OpenClaw channel/cron snapshots stay valid before we re-shell-out. */
 const OPENCLAW_TTL_MS = 60_000;
 const ACTIVE_APPEND_RESCAN_DEBOUNCE_MS = 5_000;
+
+/**
+ * How recently a file must have been scanned to be treated as "hot" — a
+ * candidate for an in-place append even when its parent dir's mtime hasn't
+ * moved. A dir-ledger match lets us skip the per-file stat of everything in a
+ * leaf dir EXCEPT its hot set; a file is hot if it lives under the agent's live
+ * `~/.<agent>` root (the only tree an agent appends to live) or was scanned
+ * within this window. 10 minutes comfortably covers a session that paused
+ * between `agents sessions` calls but is still being written to.
+ */
+const HOT_FILE_WINDOW_MS = 600_000;
+
+/**
+ * Kill-switch: set `AGENTS_SESSIONS_NO_DIR_LEDGER=1` to force the old full-walk
+ * path (readdir + per-file stat every dir, every run — the pre-A-2 behavior),
+ * skipping the dir_ledger short-circuit entirely. One env var reverts a field
+ * regression to today's behavior.
+ */
+function dirLedgerDisabled(): boolean {
+  const v = process.env.AGENTS_SESSIONS_NO_DIR_LEDGER;
+  return v === '1' || v === 'true';
+}
 
 let cachedOpenClawWorkspaces: Map<string, string> | null = null;
 
@@ -176,6 +203,15 @@ interface ScanEntry {
   meta: SessionMeta;
   content: string;
   scan: ScanStamp;
+  /**
+   * Serialized {@link ClaudeParserState} continuation to persist in
+   * scan_ledger.parser_state (Claude only). Carries the offset + accumulator so
+   * the NEXT scan of this file resumes from where this parse stopped. Absent for
+   * non-Claude scanners, which leave the column NULL.
+   */
+  parserState?: string;
+  /** Accumulated user doc to persist in scan_ledger.content_text for the next hydrate (Claude only). */
+  contentText?: string;
 }
 
 /**
@@ -481,27 +517,50 @@ export function searchContentIndex(
  * growing transcript over and over. The cached row is good enough for a few
  * seconds; once writes settle or the debounce expires, the file is parsed once.
  */
-function filterChangedFiles(
+export function filterChangedFiles(
   filePaths: string[],
 ): Array<{ filePath: string; scan: ScanStamp }> {
-  const ledger = getScanStampsForPaths(filePaths);
-  const out: Array<{ filePath: string; scan: ScanStamp }> = [];
-  const now = Date.now();
+  const entries: PreStatEntry[] = [];
   for (const filePath of filePaths) {
     const stat = safeStatSync(filePath);
     if (!stat) continue;
+    entries.push({ filePath, fileMtimeMs: stat.mtimeMs, fileSize: stat.size });
+  }
+  return filterChangedEntries(entries);
+}
+
+/** A path already stat'd by the walk — mtime is the raw (unfloored) fs value. */
+export interface PreStatEntry {
+  filePath: string;
+  fileMtimeMs: number;
+  fileSize: number;
+}
+
+/**
+ * Ledger-compare pre-stat'd entries (from the walk's own stat) without a second
+ * stat. Same debounce and change-detection as filterChangedFiles; the raw
+ * mtime is floored here so warm files match the ledger exactly as the stat path
+ * does (Math.floor(stat.mtimeMs)).
+ */
+export function filterChangedEntries(
+  entries: PreStatEntry[],
+): Array<{ filePath: string; scan: ScanStamp }> {
+  const ledger = getScanStampsForPaths(entries.map(e => e.filePath));
+  const out: Array<{ filePath: string; scan: ScanStamp }> = [];
+  const now = Date.now();
+  for (const entry of entries) {
     const scan: ScanStamp = {
-      fileMtimeMs: Math.floor(stat.mtimeMs),
-      fileSize: stat.size,
+      fileMtimeMs: Math.floor(entry.fileMtimeMs),
+      fileSize: entry.fileSize,
     };
-    const prev = ledger.get(filePath);
+    const prev = ledger.get(entry.filePath);
     if (prev && prev.fileMtimeMs === scan.fileMtimeMs && prev.fileSize === scan.fileSize) {
       continue;
     }
     if (prev && shouldDeferRecentAppend(prev, scan, now)) {
       continue;
     }
-    out.push({ filePath, scan });
+    out.push({ filePath: entry.filePath, scan });
   }
   return out;
 }
@@ -516,6 +575,128 @@ export function shouldDeferRecentAppend(
   if (current.fileSize <= prev.fileSize) return false;
   if (current.fileMtimeMs < prev.fileMtimeMs) return false;
   return nowMs - prev.scannedAt < debounceMs;
+}
+
+// ---------------------------------------------------------------------------
+// Directory-ledger short-circuit (A-2)
+// ---------------------------------------------------------------------------
+
+/** One leaf directory of transcripts to change-detect, plus its live-root flag. */
+export interface LeafDir {
+  /** Absolute path to the directory that directly holds transcript files. */
+  dirPath: string;
+  /**
+   * True if this dir is under the agent's LIVE `~/.<agent>` root — the only tree
+   * an agent process appends to live. Every file in such a dir is treated as
+   * hot (always re-stat'd), so an in-place append is never missed there.
+   */
+  isLiveRoot: boolean;
+}
+
+/** The changed files a leaf-dir walk surfaced, ready to parse + upsert. */
+export interface LeafDirScan {
+  /** Files whose (mtime, size) changed vs the ledger — the parse set. */
+  changed: Array<{ filePath: string; scan: ScanStamp }>;
+  /**
+   * Every transcript file seen across all leaf dirs (changed or not), in
+   * live-root-first order, each tagged with whether its dir is a live root.
+   * Lets a caller restore cross-root, session-id precedence (prefer the live
+   * copy of a session over a frozen backup copy) independent of which copy
+   * happened to be flagged "changed" this run.
+   */
+  allFiles: Array<{ filePath: string; isLiveRoot: boolean }>;
+}
+
+/**
+ * Walk a set of leaf transcript directories and return the files that changed,
+ * skipping the per-file `stat` of directories whose (mtime, entry_count) matches
+ * the dir_ledger.
+ *
+ * Per leaf dir:
+ *   - `stat` the dir once and `readdir` it (one cheap syscall) to get the entry
+ *     count and the file list.
+ *   - If the dir matches the dir_ledger (floored mtime AND entry_count), no file
+ *     was created / deleted / renamed since we last walked it. We then stat ONLY
+ *     the hot files (live-root files, or files scanned within HOT_FILE_WINDOW_MS)
+ *     and run just those through the ledger compare — so an in-place append to a
+ *     still-live session is still caught, while immutable backup/version dirs
+ *     collapse to a single dir stat and zero per-file stats.
+ *   - Else (changed dir, or no ledger row) we stat every file (today's full
+ *     walk) and record the fresh dir stamp so the next run can short-circuit.
+ *
+ * The kill-switch (`AGENTS_SESSIONS_NO_DIR_LEDGER=1`) forces the full-walk branch
+ * for every dir and never consults or records the dir_ledger.
+ */
+export function collectChangedFilesInLeafDirs(
+  leafDirs: LeafDir[],
+  ext: string,
+): LeafDirScan {
+  const disabled = dirLedgerDisabled();
+  const dirStamps = disabled ? new Map<string, DirStamp>() : getDirLedgerForPaths(leafDirs.map(d => d.dirPath));
+  const now = Date.now();
+
+  // Files whose per-file stat we still need to ledger-compare this run.
+  const toCompare: PreStatEntry[] = [];
+  const allFiles: Array<{ filePath: string; isLiveRoot: boolean }> = [];
+  const dirScansToRecord: Array<{ dirPath: string; dirMtimeMs: number; entryCount: number }> = [];
+
+  for (const { dirPath, isLiveRoot } of leafDirs) {
+    const dirStat = safeStatSync(dirPath);
+    if (!dirStat?.isDirectory()) continue;
+
+    let names: string[];
+    try {
+      names = fs.readdirSync(dirPath).filter(f => f.endsWith(ext));
+    } catch {
+      continue;
+    }
+    const files = names.map(f => path.join(dirPath, f));
+    for (const filePath of files) allFiles.push({ filePath, isLiveRoot });
+
+    const dirMtimeMs = Math.floor(dirStat.mtimeMs);
+    const entryCount = names.length;
+    const prevDir = dirStamps.get(dirPath);
+    const dirUnchanged =
+      !disabled && prevDir !== undefined && prevDir.dirMtimeMs === dirMtimeMs && prevDir.entryCount === entryCount;
+
+    if (dirUnchanged) {
+      // Contents did not change (no create/delete/rename). Stat only the hot
+      // files; the rest are served from the DB with no stat. An immutable backup
+      // dir (not a live root, nothing recently scanned) does zero per-file stats.
+      //
+      // A live-root dir treats every file as hot — that is the tree an agent
+      // appends to live, and an append does NOT bump the parent-dir mtime, so
+      // without this a growing session would be silently skipped. A non-live
+      // file is hot only if it was scanned within HOT_FILE_WINDOW_MS (bulk ledger
+      // lookup), covering a session under a version/backup path that is somehow
+      // still being written.
+      const stamps = isLiveRoot ? null : getScanStampsForPaths(files);
+      for (const filePath of files) {
+        let hot = isLiveRoot;
+        if (!hot && stamps) {
+          const s = stamps.get(filePath);
+          hot = s?.scannedAt !== undefined && now - s.scannedAt <= HOT_FILE_WINDOW_MS;
+        }
+        if (!hot) continue;
+        const stat = safeStatSync(filePath);
+        if (!stat) continue;
+        toCompare.push({ filePath, fileMtimeMs: stat.mtimeMs, fileSize: stat.size });
+      }
+      // No dir stamp to record — nothing about the dir changed.
+    } else {
+      // Changed dir (or cold ledger): full per-file stat, exactly as today.
+      for (const filePath of files) {
+        const stat = safeStatSync(filePath);
+        if (!stat) continue;
+        toCompare.push({ filePath, fileMtimeMs: stat.mtimeMs, fileSize: stat.size });
+      }
+      if (!disabled) dirScansToRecord.push({ dirPath, dirMtimeMs, entryCount });
+    }
+  }
+
+  const changed = filterChangedEntries(toCompare);
+  if (dirScansToRecord.length > 0) recordDirScans(dirScansToRecord);
+  return { changed, allFiles };
 }
 
 // ---------------------------------------------------------------------------
@@ -686,7 +867,13 @@ async function readRoutineArchiveMeta(
 
   if (agent === 'claude') {
     const sessionId = path.basename(filePath).replace(/\.jsonl$/, '');
-    const result = await readClaudeMeta(filePath, sessionId);
+    // Routine archives are finalized, immutable transcripts — no live append, so
+    // no continuation to resume. A FULL parse (undefined prior) is correct here;
+    // the returned continuation is unused by this archive path.
+    const stat = safeStatSync(filePath);
+    if (!stat) return null;
+    const scanStamp: ScanStamp = { fileMtimeMs: Math.floor(stat.mtimeMs), fileSize: stat.size };
+    const result = await readClaudeMeta(filePath, sessionId, scanStamp, undefined);
     return result ? { ...result, meta: decorateRoutineSession(result.meta, info) } : null;
   }
 
@@ -706,12 +893,14 @@ async function scanRoutineArchivesIncremental(
   if (!subdir) return;
 
   const ext = agent === 'gemini' ? '.json' : '.jsonl';
-  const filePaths: string[] = [];
+  const prestat: PreStatEntry[] = [];
   for (const sessionsDir of getRoutineArchiveSessionDirs(agent, subdir)) {
-    for (const fp of walkForFiles(sessionsDir, ext, 100_000)) filePaths.push(fp);
+    for (const f of walkForFilesWithStat(sessionsDir, ext, 100_000)) {
+      prestat.push({ filePath: f.path, fileMtimeMs: f.mtimeMs, fileSize: f.size });
+    }
   }
 
-  const changed = filterChangedFiles(filePaths);
+  const changed = filterChangedEntries(prestat);
   if (changed.length === 0) return;
 
   onProgress?.({ agent, parsed: 0, total: changed.length });
@@ -825,42 +1014,65 @@ export function buildClaudeLabelMap(): Map<string, string | null> {
 async function scanClaudeIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
   const account = getClaudeAccount();
   const labelMap = buildClaudeLabelMap();
-  const filePaths: string[] = [];
-  const seen = new Set<string>();
 
-  for (const projectsDir of getAgentSessionDirs('claude', 'projects')) {
+  // Enumerate every leaf project dir across all Claude roots. The FIRST root
+  // returned by getAgentSessionDirs is the agent's live `~/.claude/projects` —
+  // the only tree Claude appends to in place, so its project dirs are live roots
+  // (every file hot). Version-home + backup roots are immutable: their dirs
+  // short-circuit to a single dir stat when unchanged.
+  const roots = getAgentSessionDirs('claude', 'projects');
+  const leafDirs: LeafDir[] = [];
+  const seenLeaf = new Set<string>();
+  roots.forEach((projectsDir, rootIdx) => {
+    const isLiveRoot = rootIdx === 0;
     let projectDirs: string[];
     try {
       projectDirs = fs.readdirSync(projectsDir);
     } catch {
-      continue;
+      return;
     }
-
     for (const dirName of projectDirs) {
       const dirPath = path.join(projectsDir, dirName);
-      const stat = safeStatSync(dirPath);
-      if (!stat?.isDirectory()) continue;
-
-      let files: string[];
-      try {
-        files = fs.readdirSync(dirPath).filter(f => f.endsWith('.jsonl'));
-      } catch {
-        continue;
-      }
-
-      for (const file of files) {
-        const sessionId = file.replace('.jsonl', '');
-        if (seen.has(sessionId)) continue;
-        seen.add(sessionId);
-        filePaths.push(path.join(dirPath, file));
-      }
+      const key = safeRealpathSync(dirPath) || dirPath;
+      if (seenLeaf.has(key)) continue;
+      seenLeaf.add(key);
+      leafDirs.push({ dirPath, isLiveRoot });
     }
-  }
+  });
 
-  const changed = filterChangedFiles(filePaths);
+  const { changed: changedAll, allFiles } = collectChangedFilesInLeafDirs(leafDirs, '.jsonl');
+  // Restore the pre-A-2 cross-root precedence: a session id present in multiple
+  // roots is ALWAYS served from its live path, never a frozen backup/version
+  // copy. Pre-A-2, dedup happened at enumeration time via a live-first `seen`
+  // set, so a non-live copy was never even stat'd when a live copy existed. This
+  // PR must not regress that to "whichever copy changed this run wins" — a cold
+  // (unchanged) live copy paired with a freshly-written backup snapshot would
+  // otherwise flip the row's file_path to the backup path.
+  //
+  // allFiles is every transcript file across all roots in live-first order, so
+  // the FIRST occurrence of each session id is its live (or highest-precedence)
+  // path — the durable winner, independent of which copy was flagged changed.
+  const sessionIdOf = (fp: string) => path.basename(fp).replace('.jsonl', '');
+  const winnerBySession = new Map<string, string>();
+  for (const { filePath } of allFiles) {
+    const id = sessionIdOf(filePath);
+    if (!winnerBySession.has(id)) winnerBySession.set(id, filePath);
+  }
+  // Keep a changed entry only if it is its session's winner. A changed non-live
+  // copy is dropped whenever a live copy exists anywhere; the winning path is
+  // parsed only when it itself changed (a cold winner needs no re-parse — its DB
+  // row already points at the live path).
+  const changed = changedAll.filter(e => winnerBySession.get(sessionIdOf(e.filePath)) === e.filePath);
 
   if (changed.length > 0) {
     onProgress?.({ agent: 'claude', parsed: 0, total: changed.length });
+
+    // Bulk-fetch each changed file's prior resumable continuation. A file with a
+    // usable prior state + growth goes incremental (re-parse only the appended
+    // bytes); everything else does a FULL from-offset-0 parse. The decision + the
+    // parse both live in scanClaudeSessionResumable so full and incremental share
+    // one reducer and produce identical rows.
+    const priorStates = getParserStatesForPaths(changed.map(c => c.filePath));
 
     const entries: ScanEntry[] = [];
     const touched: Array<{ filePath: string; scan: ScanStamp }> = [];
@@ -869,9 +1081,16 @@ async function scanClaudeIncremental(onProgress?: (p: ScanProgress) => void): Pr
       try {
         const sessionId = path.basename(filePath).replace('.jsonl', '');
         const label = labelMap.get(sessionId) ?? undefined;
-        const result = await readClaudeMeta(filePath, sessionId, account, label);
+        const priorRow = priorStates.get(filePath);
+        const result = await readClaudeMeta(filePath, sessionId, scan, priorRow, account, label);
         if (result) {
-          entries.push({ meta: result.meta, content: result.content, scan });
+          entries.push({
+            meta: result.meta,
+            content: result.content,
+            scan,
+            parserState: result.parserState,
+            contentText: result.contentText,
+          });
         } else {
           touched.push({ filePath, scan });
         }
@@ -891,14 +1110,31 @@ async function scanClaudeIncremental(onProgress?: (p: ScanProgress) => void): Pr
   if (labelMap.size > 0) syncLabels(labelMap);
 }
 
-/** Stream-parse a single Claude JSONL file to extract session metadata. */
+/**
+ * Stream-parse a single Claude JSONL file to extract session metadata, resuming
+ * from the persisted continuation when the file merely grew (see
+ * {@link scanClaudeSessionResumable}). Returns the row's meta + FTS content plus
+ * the serialized continuation (parser_state + content_text) to persist for the
+ * next scan.
+ */
 async function readClaudeMeta(
   filePath: string,
   sessionId: string,
+  scanStamp: ScanStamp,
+  priorRow: { parserState: string | null; fileMtimeMs: number } | undefined,
   account?: string,
   label?: string,
-): Promise<{ meta: SessionMeta; content: string } | null> {
-  const scan = await scanClaudeSession(filePath);
+): Promise<{ meta: SessionMeta; content: string; parserState: string; contentText?: string } | null> {
+  const prior = parsePriorClaudeState(priorRow);
+  const { scan, newState, mode } = await scanClaudeSessionResumable(
+    filePath,
+    prior,
+    scanStamp.fileMtimeMs,
+    scanStamp.fileSize,
+    priorRow?.fileMtimeMs,
+  );
+  if (mode === 'incremental') claudeIncrementalScanCount++;
+  else claudeFullScanCount++;
   const isTeamOrigin = scan.entrypoint === 'sdk-cli';
 
   let meta: SessionMeta;
@@ -906,7 +1142,7 @@ async function readClaudeMeta(
     const cwd = normalizeCwd(scan.cwd || '');
     meta = {
       id: sessionId,
-      shortId: sessionId.slice(0, 8),
+      shortId: deriveShortId(sessionId),
       agent: 'claude',
       timestamp: scan.timestamp,
       lastActivity: scan.lastActivity,
@@ -936,7 +1172,7 @@ async function readClaudeMeta(
     const stat = safeStatSync(filePath);
     meta = {
       id: sessionId,
-      shortId: sessionId.slice(0, 8),
+      shortId: deriveShortId(sessionId),
       agent: 'claude',
       timestamp: stat ? stat.mtime.toISOString() : new Date().toISOString(),
       lastActivity: scan.lastActivity,
@@ -960,7 +1196,15 @@ async function readClaudeMeta(
     };
   }
 
-  return { meta, content: scan.contentText || '' };
+  return {
+    meta,
+    content: scan.contentText || '',
+    // Persist the continuation so the next scan of this file can resume from the
+    // offset instead of a full reparse. content_text is the same accumulated user
+    // doc, cached so the resume can hydrate userTexts without re-reading the file.
+    parserState: JSON.stringify(newState),
+    contentText: newState.contentText,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1053,15 +1297,16 @@ async function scanCodexIncremental(onProgress?: (p: ScanProgress) => void): Pro
   // so a no-op scan (changed.length === 0) never touches the credential file.
   const currentVersion = await getCurrentAgentVersion('codex');
 
-  const filePaths: string[] = [];
+  const prestat: PreStatEntry[] = [];
   for (const sessionsDir of getAgentSessionDirs('codex', 'sessions')) {
-    // High limit: we only stat files here, parsing is gated by ledger match.
-    for (const fp of walkForFiles(sessionsDir, '.jsonl', 100_000)) {
-      filePaths.push(fp);
+    // High limit: the walk stats each file once here; parsing is gated by the
+    // ledger match below, which reuses that stat instead of re-stat'ing.
+    for (const f of walkForFilesWithStat(sessionsDir, '.jsonl', 100_000)) {
+      prestat.push({ filePath: f.path, fileMtimeMs: f.mtimeMs, fileSize: f.size });
     }
   }
 
-  const changed = filterChangedFiles(filePaths);
+  const changed = filterChangedEntries(prestat);
 
   // Codex keeps human-readable titles (`thread_name`) in `session_index.jsonl`,
   // which updates independently of the rollout files. Stat each index against the
@@ -1199,7 +1444,7 @@ export async function readCodexMeta(
   const cwd = normalizeCwd(scan.cwd || '');
   const meta: SessionMeta = {
     id: sessionId,
-    shortId: sessionId.slice(0, 8),
+    shortId: deriveShortId(sessionId),
     agent: 'codex',
     // Codex `session_meta` only carries the start time; use file mtime when
     // it's newer so long-running sessions register as recently active.
@@ -1257,34 +1502,32 @@ async function scanGeminiIncremental(onProgress?: (p: ScanProgress) => void): Pr
   const currentVersion = await getCurrentAgentVersion('gemini');
   const projectMap = buildGeminiProjectMap();
 
-  const filePaths: Array<{ filePath: string; hashDir: string }> = [];
-  for (const tmpDir of getAgentSessionDirs('gemini', 'tmp')) {
+  // Each `<tmpDir>/<hashDir>/chats` is a leaf dir of Gemini transcripts. The
+  // FIRST tmp root is the live `~/.gemini/tmp` — its chats dirs are live roots;
+  // version-home + backup roots are immutable and short-circuit when unchanged.
+  const tmpRoots = getAgentSessionDirs('gemini', 'tmp');
+  const leafDirs: LeafDir[] = [];
+  const seenLeaf = new Set<string>();
+  tmpRoots.forEach((tmpDir, rootIdx) => {
+    const isLiveRoot = rootIdx === 0;
     let hashDirs: string[];
     try {
       hashDirs = fs.readdirSync(tmpDir);
     } catch {
-      continue;
+      return;
     }
-
     for (const hashDir of hashDirs) {
       const chatsDir = path.join(tmpDir, hashDir, 'chats');
       if (!fs.existsSync(chatsDir)) continue;
-
-      let chatFiles: string[];
-      try {
-        chatFiles = fs.readdirSync(chatsDir).filter(f => f.endsWith('.json'));
-      } catch {
-        continue;
-      }
-
-      for (const file of chatFiles) {
-        filePaths.push({ filePath: path.join(chatsDir, file), hashDir });
-      }
+      const key = safeRealpathSync(chatsDir) || chatsDir;
+      if (seenLeaf.has(key)) continue;
+      seenLeaf.add(key);
+      leafDirs.push({ dirPath: chatsDir, isLiveRoot });
     }
-  }
+  });
 
-  const changedPaths = filterChangedFiles(filePaths.map(f => f.filePath));
-  const changedByPath = new Map(changedPaths.map(c => [c.filePath, c.scan]));
+  const { changed } = collectChangedFilesInLeafDirs(leafDirs, '.json');
+  const changedByPath = new Map(changed.map(c => [c.filePath, c.scan]));
   if (changedByPath.size === 0) return;
 
   onProgress?.({ agent: 'gemini', parsed: 0, total: changedByPath.size });
@@ -1293,9 +1536,9 @@ async function scanGeminiIncremental(onProgress?: (p: ScanProgress) => void): Pr
   const touched: Array<{ filePath: string; scan: ScanStamp }> = [];
   const seen = new Set<string>();
   let parsed = 0;
-  for (const { filePath, hashDir } of filePaths) {
-    const scan = changedByPath.get(filePath);
-    if (!scan) continue;
+  for (const { filePath, scan } of changed) {
+    // The hashDir is the directory two levels up: <hashDir>/chats/<file>.json.
+    const hashDir = path.basename(path.dirname(path.dirname(filePath)));
     try {
       const result = readGeminiMeta(filePath, hashDir, projectMap, currentVersion);
       if (result && !seen.has(result.meta.id)) {
@@ -1426,7 +1669,7 @@ function readGeminiMeta(
 
   const meta: SessionMeta = {
     id: sessionId,
-    shortId: sessionId.slice(0, 8),
+    shortId: deriveShortId(sessionId),
     agent: 'gemini',
     timestamp: startTime || (stat ? stat.mtime.toISOString() : new Date().toISOString()),
     lastActivity: lastTsMs !== undefined ? new Date(lastTsMs).toISOString() : undefined,
@@ -1580,7 +1823,7 @@ function readAntigravityMeta(
   const stat = safeStatSync(filePath);
   const meta: SessionMeta = {
     id: sessionId,
-    shortId: sessionId.slice(0, 8),
+    shortId: deriveShortId(sessionId),
     agent: 'antigravity',
     timestamp: stat ? stat.mtime.toISOString() : new Date().toISOString(),
     project: normalizedCwd ? path.basename(normalizedCwd) : undefined,
@@ -1727,7 +1970,7 @@ async function scanOpenCodeIncremental(): Promise<void> {
 
       const meta: SessionMeta = {
         id,
-        shortId: id.replace(/^ses_/, '').slice(0, 8),
+        shortId: deriveShortId(id, /^ses_/),
         agent: 'opencode',
         timestamp,
         lastActivity,
@@ -1798,7 +2041,7 @@ async function scanOpenClawIncremental(): Promise<void> {
       entries.push({
         meta: {
           id: `openclaw-${agentId}`,
-          shortId: agentId.slice(0, 8),
+          shortId: deriveShortId(agentId),
           agent: 'openclaw',
           timestamp: new Date().toISOString(),
           project: name,
@@ -1836,7 +2079,7 @@ async function scanOpenClawIncremental(): Promise<void> {
       entries.push({
         meta: {
           id: `openclaw-cron-${jobId}`,
-          shortId: jobId.slice(0, 8),
+          shortId: deriveShortId(jobId),
           agent: 'openclaw',
           timestamp: new Date().toISOString(),
           project: `${jobName} (${agentId || 'unknown'})`,
@@ -1933,7 +2176,7 @@ async function readRushMeta(
   const timestamp = scan.timestamp
     || (stat ? stat.mtime.toISOString() : new Date().toISOString());
 
-  const shortId = sessionId.replace(/^session_/, '').slice(0, 8);
+  const shortId = deriveShortId(sessionId, /^session_/);
 
   const meta: SessionMeta = {
     id: sessionId,
@@ -2099,7 +2342,7 @@ function readHermesMeta(filePath: string): { meta: SessionMeta; content: string 
       ? session.session_start
       : stat ? stat.mtime.toISOString() : new Date().toISOString();
 
-  const shortId = sessionId.replace(/^api-/, '').slice(0, 8);
+  const shortId = deriveShortId(sessionId, /^api-/);
   const model = typeof session.model === 'string' ? session.model : undefined;
   const platform = typeof session.platform === 'string' ? session.platform : undefined;
 
@@ -2158,15 +2401,16 @@ interface DroidSessionScan {
 async function scanDroidIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
   const currentVersion = await getCurrentAgentVersion('droid');
 
-  const filePaths: string[] = [];
+  const prestat: PreStatEntry[] = [];
   for (const sessionsDir of getAgentSessionDirs('droid', 'sessions')) {
-    // High limit: we only stat files here, parsing is gated by ledger match.
-    for (const fp of walkForFiles(sessionsDir, '.jsonl', 100_000)) {
-      filePaths.push(fp);
+    // High limit: the walk stats each file once here; parsing is gated by the
+    // ledger match below, which reuses that stat instead of re-stat'ing.
+    for (const f of walkForFilesWithStat(sessionsDir, '.jsonl', 100_000)) {
+      prestat.push({ filePath: f.path, fileMtimeMs: f.mtimeMs, fileSize: f.size });
     }
   }
 
-  const changed = filterChangedFiles(filePaths);
+  const changed = filterChangedEntries(prestat);
   if (changed.length === 0) return;
 
   onProgress?.({ agent: 'droid', parsed: 0, total: changed.length });
@@ -2223,7 +2467,7 @@ async function readDroidMeta(
   const cwd = normalizeCwd(scan.cwd || '');
   const meta: SessionMeta = {
     id: sessionId,
-    shortId: sessionId.slice(0, 8),
+    shortId: deriveShortId(sessionId),
     agent: 'droid',
     timestamp: scan.timestamp || (stat ? stat.mtime.toISOString() : new Date().toISOString()),
     lastActivity: scan.lastActivity,
@@ -2372,48 +2616,274 @@ function extractDroidMessageText(content: any): string {
     .trim();
 }
 
+/**
+ * Mutable accumulator for the Claude transcript reducer. One field per local
+ * that {@link scanClaudeSession} previously declared inline — the reducer
+ * mutates `state.*` instead of closure locals so the exact same logic can drive
+ * both a full parse and a resumable incremental parse (see
+ * {@link scanClaudeSessionIncremental}).
+ */
+export interface ClaudeParseState {
+  timestamp?: string;
+  cwd?: string;
+  gitBranch?: string;
+  version?: string;
+  topic?: string;
+  // Explicit session titles: `/rename` writes a `custom-title` event; Claude
+  // auto-generates an `ai-title`. Both can repeat across the file — last wins.
+  customTitle?: string;
+  aiTitle?: string;
+  entrypoint?: string;
+  messageCount: number;
+  tokenCount: number;
+  outputTokens: number;
+  sawTokenCount: boolean;
+  costUsd: number;
+  sawCost: boolean;
+  // Track the first and last timestamped event to derive wall-clock duration.
+  firstTsMs?: number;
+  lastTsMs?: number;
+  seenAssistantIds: Set<string>;
+  userTexts: string[];
+  // Durable PR signal: set only when an actual `gh pr create` Bash *command*
+  // runs (structural — the command field, not any prose mentioning it), then
+  // capture the pull URL from a later tool_result's output.
+  sawPrCreate: boolean;
+  prUrl?: string;
+  prNumber?: number;
+  // Artifacts the session PRODUCED: tracker refs it created and any team it spawned.
+  // Ticket creation spans two events — a create_issue tool_use, then the tool_result
+  // carrying the new id — so we hold the pending tool_use ids until their result lands.
+  createdTickets: Set<string>;
+  pendingTicketTools: Set<string>;
+  spawnedTeam?: string;
+  // The LAST ExitPlanMode plan wins so a re-planned session surfaces its most
+  // recent plan, matching the semantic the extension's re-parser relied on.
+  plan?: string;
+}
+
+/** Zero-value accumulator for a fresh (from-byte-0) Claude parse. */
+export function initClaudeParseState(): ClaudeParseState {
+  return {
+    timestamp: undefined,
+    cwd: undefined,
+    gitBranch: undefined,
+    version: undefined,
+    topic: undefined,
+    customTitle: undefined,
+    aiTitle: undefined,
+    entrypoint: undefined,
+    messageCount: 0,
+    tokenCount: 0,
+    outputTokens: 0,
+    sawTokenCount: false,
+    costUsd: 0,
+    sawCost: false,
+    firstTsMs: undefined,
+    lastTsMs: undefined,
+    seenAssistantIds: new Set<string>(),
+    userTexts: [],
+    sawPrCreate: false,
+    prUrl: undefined,
+    prNumber: undefined,
+    createdTickets: new Set<string>(),
+    pendingTicketTools: new Set<string>(),
+    spawnedTeam: undefined,
+    plan: undefined,
+  };
+}
+
+/**
+ * Fold one parsed transcript line into the accumulator. This is the exact loop
+ * body {@link scanClaudeSession} used to run inline — extracted verbatim,
+ * mutating `state.*` in place. `parsed` is the already-`JSON.parse`d line (the
+ * malformed-line skip happens in the caller, as before).
+ */
+export function applyClaudeLine(state: ClaudeParseState, parsed: any): void {
+  // entrypoint ships on the first envelope event (attachment/user/assistant)
+  // and is the clean structural signal for "was this a team spawn?"
+  if (!state.entrypoint && typeof parsed.entrypoint === 'string') {
+    state.entrypoint = parsed.entrypoint;
+  }
+
+  // Produced-artifact signals, structurally (independent of the PR gate below):
+  //   - a Bash `agents teams create/add` command → the team it spawned
+  //   - a Linear create_issue / `gh issue create` tool_use → its result carries
+  //     the new ticket ref, read from the matching tool_result.
+  if (parsed.type === 'assistant' && Array.isArray(parsed.message?.content)) {
+    for (const b of parsed.message.content) {
+      if (b?.type !== 'tool_use') continue;
+      if (!state.spawnedTeam && typeof b?.input?.command === 'string') {
+        const team = detectSpawnedTeam(b.input.command);
+        if (team) state.spawnedTeam = team;
+      }
+      if (typeof b?.id === 'string' && isTicketCreateTool(b?.name, b?.input?.command)) {
+        state.pendingTicketTools.add(b.id);
+      }
+      // ExitPlanMode plan markdown — last one wins so a re-planned session
+      // reports its most recent plan.
+      if (b?.name === 'ExitPlanMode' && typeof b?.input?.plan === 'string') {
+        const p = b.input.plan.trim();
+        if (p) state.plan = b.input.plan;
+      }
+    }
+  }
+  if (state.pendingTicketTools.size > 0 && parsed.type === 'user' && Array.isArray(parsed.message?.content)) {
+    for (const b of parsed.message.content) {
+      if (b?.type !== 'tool_result' || typeof b?.tool_use_id !== 'string') continue;
+      if (!state.pendingTicketTools.has(b.tool_use_id)) continue;
+      state.pendingTicketTools.delete(b.tool_use_id);
+      const text = typeof b.content === 'string'
+        ? b.content
+        : Array.isArray(b.content) ? b.content.map((c: any) => c?.text || '').join('\n') : '';
+      const t = extractCreatedTicket(text);
+      if (t) state.createdTickets.add(t);
+    }
+  }
+
+  // PR signal, structurally: a Bash tool_use whose command is `gh pr create`
+  // marks intent; the pull URL is then read from a tool_result's output.
+  if (!state.prUrl) {
+    if (!state.sawPrCreate && parsed.type === 'assistant' && Array.isArray(parsed.message?.content)) {
+      for (const b of parsed.message.content) {
+        if (b?.type === 'tool_use' && typeof b?.input?.command === 'string' && isPrCreateCommand(b.input.command)) {
+          state.sawPrCreate = true;
+        }
+      }
+    }
+    if (state.sawPrCreate && parsed.type === 'user' && Array.isArray(parsed.message?.content)) {
+      for (const b of parsed.message.content) {
+        if (b?.type !== 'tool_result') continue;
+        const text = typeof b.content === 'string'
+          ? b.content
+          : Array.isArray(b.content) ? b.content.map((c: any) => c?.text || '').join('\n') : '';
+        const pr = extractPrUrl(text);
+        if (pr) { state.prUrl = pr.url; state.prNumber = pr.number; }
+      }
+    }
+  }
+
+  // Track duration across every timestamped event, not just the first.
+  if (typeof parsed.timestamp === 'string') {
+    const ms = new Date(parsed.timestamp).getTime();
+    if (!Number.isNaN(ms)) {
+      if (state.firstTsMs === undefined || ms < state.firstTsMs) state.firstTsMs = ms;
+      if (state.lastTsMs === undefined || ms > state.lastTsMs) state.lastTsMs = ms;
+    }
+  }
+
+  if (!state.timestamp && (parsed.type === 'user' || parsed.type === 'assistant') && parsed.timestamp) {
+    state.timestamp = parsed.timestamp;
+    state.cwd = parsed.cwd || '';
+    state.gitBranch = parsed.gitBranch || undefined;
+    state.version = parsed.version || undefined;
+  }
+
+  if (parsed.type === 'custom-title') {
+    const t = typeof parsed.customTitle === 'string' ? parsed.customTitle.trim() : '';
+    if (t) state.customTitle = t;
+    return;
+  }
+  if (parsed.type === 'ai-title') {
+    const t = typeof parsed.aiTitle === 'string' ? parsed.aiTitle.trim() : '';
+    if (t) state.aiTitle = t;
+    return;
+  }
+
+  if (parsed.type === 'user') {
+    const text = extractClaudeUserText(parsed);
+    if (text) {
+      state.messageCount++;
+      state.userTexts.push(text);
+      if (!state.topic) state.topic = extractSessionTopic(text);
+    }
+    return;
+  }
+
+  if (parsed.type !== 'assistant') return;
+
+  const assistantId = typeof parsed.message?.id === 'string'
+    ? parsed.message.id
+    : typeof parsed.uuid === 'string'
+      ? parsed.uuid
+      : undefined;
+
+  const logicalId = assistantId || `${parsed.timestamp || ''}:${state.seenAssistantIds.size}`;
+  if (state.seenAssistantIds.has(logicalId)) return;
+  state.seenAssistantIds.add(logicalId);
+  state.messageCount++;
+
+  const usageObj = parsed.message?.usage || parsed.usage;
+  const usage = getClaudeUsageTotal(usageObj);
+  if (usage !== null) {
+    state.tokenCount += usage;
+    state.sawTokenCount = true;
+  }
+  if (typeof usageObj?.output_tokens === 'number') state.outputTokens += usageObj.output_tokens;
+  // Per-assistant-message cost: each event carries its own model, so we
+  // multiply that event's raw token directions by that model's price.
+  const model = parsed.message?.model;
+  if (model && usageObj && typeof usageObj === 'object') {
+    const eventCost = costOfUsage({
+      model,
+      inputTokens: usageObj.input_tokens,
+      outputTokens: usageObj.output_tokens,
+      cacheReadTokens: usageObj.cache_read_input_tokens,
+      cacheCreationTokens: usageObj.cache_creation_input_tokens,
+    });
+    if (eventCost > 0) {
+      state.costUsd += eventCost;
+      state.sawCost = true;
+    }
+  }
+}
+
+/**
+ * Build the {@link ClaudeSessionScan} return object from an accumulator. This is
+ * the exact return-building {@link scanClaudeSession} used to run inline.
+ */
+export function finalizeClaudeScan(state: ClaudeParseState): ClaudeSessionScan {
+  const durationMs =
+    state.firstTsMs !== undefined && state.lastTsMs !== undefined && state.lastTsMs > state.firstTsMs
+      ? state.lastTsMs - state.firstTsMs
+      : undefined;
+
+  // Prefer an explicit session title (user `/rename` > Claude auto-title) over
+  // the first-prompt topic.
+  const resolvedTopic = state.customTitle || state.aiTitle || state.topic;
+  const worktree = detectWorktree(state.cwd, state.gitBranch);
+  const ticket = detectTicket(state.userTexts.join('\n') || undefined, state.gitBranch);
+
+  return {
+    timestamp: state.timestamp,
+    cwd: state.cwd,
+    gitBranch: state.gitBranch,
+    version: state.version,
+    topic: resolvedTopic,
+    entrypoint: state.entrypoint,
+    messageCount: state.messageCount,
+    tokenCount: state.sawTokenCount ? state.tokenCount : undefined,
+    outputTokens: state.sawTokenCount ? state.outputTokens : undefined,
+    costUsd: state.sawCost ? state.costUsd : undefined,
+    durationMs,
+    lastActivity: state.lastTsMs !== undefined ? new Date(state.lastTsMs).toISOString() : undefined,
+    contentText: state.userTexts.length > 0 ? state.userTexts.join('\n') : undefined,
+    prUrl: state.prUrl,
+    prNumber: state.prNumber,
+    worktreeSlug: worktree?.slug,
+    ticketId: ticket?.id,
+    createdTickets: state.createdTickets.size > 0 ? [...state.createdTickets] : undefined,
+    spawnedTeam: state.spawnedTeam,
+    plan: state.plan,
+  };
+}
+
 /** Stream a Claude JSONL file and extract scan-level metadata (timestamp, cwd, topic, tokens). */
 export async function scanClaudeSession(filePath: string): Promise<ClaudeSessionScan> {
   const stream = fs.createReadStream(filePath, { encoding: 'utf-8' });
   const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
 
-  let timestamp: string | undefined;
-  let cwd: string | undefined;
-  let gitBranch: string | undefined;
-  let version: string | undefined;
-  let topic: string | undefined;
-  // Explicit session titles: `/rename` writes a `custom-title` event; Claude
-  // auto-generates an `ai-title`. Both can repeat across the file — last wins.
-  let customTitle: string | undefined;
-  let aiTitle: string | undefined;
-  let entrypoint: string | undefined;
-  let messageCount = 0;
-  let tokenCount = 0;
-  let outputTokens = 0;
-  let sawTokenCount = false;
-  let costUsd = 0;
-  let sawCost = false;
-  // Track the first and last timestamped event to derive wall-clock duration.
-  let firstTsMs: number | undefined;
-  let lastTsMs: number | undefined;
-  const seenAssistantIds = new Set<string>();
-  const userTexts: string[] = [];
-  // Durable PR signal: set only when an actual `gh pr create` Bash *command*
-  // runs (structural — the command field, not any prose mentioning it), then
-  // capture the pull URL from a later tool_result's output.
-  let sawPrCreate = false;
-  let prUrl: string | undefined;
-  let prNumber: number | undefined;
-
-  // Artifacts the session PRODUCED: tracker refs it created and any team it spawned.
-  // Ticket creation spans two events — a create_issue tool_use, then the tool_result
-  // carrying the new id — so we hold the pending tool_use ids until their result lands.
-  const createdTickets = new Set<string>();
-  const pendingTicketTools = new Set<string>();
-  let spawnedTeam: string | undefined;
-  // The LAST ExitPlanMode plan wins so a re-planned session surfaces its most
-  // recent plan, matching the semantic the extension's re-parser relied on.
-  let plan: string | undefined;
+  const state = initClaudeParseState();
 
   try {
     for await (const line of rl) {
@@ -2426,181 +2896,354 @@ export async function scanClaudeSession(filePath: string): Promise<ClaudeSession
         continue;
       }
 
-      // entrypoint ships on the first envelope event (attachment/user/assistant)
-      // and is the clean structural signal for "was this a team spawn?"
-      if (!entrypoint && typeof parsed.entrypoint === 'string') {
-        entrypoint = parsed.entrypoint;
-      }
-
-      // Produced-artifact signals, structurally (independent of the PR gate below):
-      //   - a Bash `agents teams create/add` command → the team it spawned
-      //   - a Linear create_issue / `gh issue create` tool_use → its result carries
-      //     the new ticket ref, read from the matching tool_result.
-      if (parsed.type === 'assistant' && Array.isArray(parsed.message?.content)) {
-        for (const b of parsed.message.content) {
-          if (b?.type !== 'tool_use') continue;
-          if (!spawnedTeam && typeof b?.input?.command === 'string') {
-            const team = detectSpawnedTeam(b.input.command);
-            if (team) spawnedTeam = team;
-          }
-          if (typeof b?.id === 'string' && isTicketCreateTool(b?.name, b?.input?.command)) {
-            pendingTicketTools.add(b.id);
-          }
-          // ExitPlanMode plan markdown — last one wins so a re-planned session
-          // reports its most recent plan.
-          if (b?.name === 'ExitPlanMode' && typeof b?.input?.plan === 'string') {
-            const p = b.input.plan.trim();
-            if (p) plan = b.input.plan;
-          }
-        }
-      }
-      if (pendingTicketTools.size > 0 && parsed.type === 'user' && Array.isArray(parsed.message?.content)) {
-        for (const b of parsed.message.content) {
-          if (b?.type !== 'tool_result' || typeof b?.tool_use_id !== 'string') continue;
-          if (!pendingTicketTools.has(b.tool_use_id)) continue;
-          pendingTicketTools.delete(b.tool_use_id);
-          const text = typeof b.content === 'string'
-            ? b.content
-            : Array.isArray(b.content) ? b.content.map((c: any) => c?.text || '').join('\n') : '';
-          const t = extractCreatedTicket(text);
-          if (t) createdTickets.add(t);
-        }
-      }
-
-      // PR signal, structurally: a Bash tool_use whose command is `gh pr create`
-      // marks intent; the pull URL is then read from a tool_result's output.
-      if (!prUrl) {
-        if (!sawPrCreate && parsed.type === 'assistant' && Array.isArray(parsed.message?.content)) {
-          for (const b of parsed.message.content) {
-            if (b?.type === 'tool_use' && typeof b?.input?.command === 'string' && isPrCreateCommand(b.input.command)) {
-              sawPrCreate = true;
-            }
-          }
-        }
-        if (sawPrCreate && parsed.type === 'user' && Array.isArray(parsed.message?.content)) {
-          for (const b of parsed.message.content) {
-            if (b?.type !== 'tool_result') continue;
-            const text = typeof b.content === 'string'
-              ? b.content
-              : Array.isArray(b.content) ? b.content.map((c: any) => c?.text || '').join('\n') : '';
-            const pr = extractPrUrl(text);
-            if (pr) { prUrl = pr.url; prNumber = pr.number; }
-          }
-        }
-      }
-
-      // Track duration across every timestamped event, not just the first.
-      if (typeof parsed.timestamp === 'string') {
-        const ms = new Date(parsed.timestamp).getTime();
-        if (!Number.isNaN(ms)) {
-          if (firstTsMs === undefined || ms < firstTsMs) firstTsMs = ms;
-          if (lastTsMs === undefined || ms > lastTsMs) lastTsMs = ms;
-        }
-      }
-
-      if (!timestamp && (parsed.type === 'user' || parsed.type === 'assistant') && parsed.timestamp) {
-        timestamp = parsed.timestamp;
-        cwd = parsed.cwd || '';
-        gitBranch = parsed.gitBranch || undefined;
-        version = parsed.version || undefined;
-      }
-
-      if (parsed.type === 'custom-title') {
-        const t = typeof parsed.customTitle === 'string' ? parsed.customTitle.trim() : '';
-        if (t) customTitle = t;
-        continue;
-      }
-      if (parsed.type === 'ai-title') {
-        const t = typeof parsed.aiTitle === 'string' ? parsed.aiTitle.trim() : '';
-        if (t) aiTitle = t;
-        continue;
-      }
-
-      if (parsed.type === 'user') {
-        const text = extractClaudeUserText(parsed);
-        if (text) {
-          messageCount++;
-          userTexts.push(text);
-          if (!topic) topic = extractSessionTopic(text);
-        }
-        continue;
-      }
-
-      if (parsed.type !== 'assistant') continue;
-
-      const assistantId = typeof parsed.message?.id === 'string'
-        ? parsed.message.id
-        : typeof parsed.uuid === 'string'
-          ? parsed.uuid
-          : undefined;
-
-      const logicalId = assistantId || `${parsed.timestamp || ''}:${seenAssistantIds.size}`;
-      if (seenAssistantIds.has(logicalId)) continue;
-      seenAssistantIds.add(logicalId);
-      messageCount++;
-
-      const usageObj = parsed.message?.usage || parsed.usage;
-      const usage = getClaudeUsageTotal(usageObj);
-      if (usage !== null) {
-        tokenCount += usage;
-        sawTokenCount = true;
-      }
-      if (typeof usageObj?.output_tokens === 'number') outputTokens += usageObj.output_tokens;
-      // Per-assistant-message cost: each event carries its own model, so we
-      // multiply that event's raw token directions by that model's price.
-      const model = parsed.message?.model;
-      if (model && usageObj && typeof usageObj === 'object') {
-        const eventCost = costOfUsage({
-          model,
-          inputTokens: usageObj.input_tokens,
-          outputTokens: usageObj.output_tokens,
-          cacheReadTokens: usageObj.cache_read_input_tokens,
-          cacheCreationTokens: usageObj.cache_creation_input_tokens,
-        });
-        if (eventCost > 0) {
-          costUsd += eventCost;
-          sawCost = true;
-        }
-      }
+      applyClaudeLine(state, parsed);
     }
   } finally {
     rl.close();
     stream.destroy();
   }
 
-  const durationMs =
-    firstTsMs !== undefined && lastTsMs !== undefined && lastTsMs > firstTsMs
-      ? lastTsMs - firstTsMs
-      : undefined;
+  return finalizeClaudeScan(state);
+}
 
-  // Prefer an explicit session title (user `/rename` > Claude auto-title) over
-  // the first-prompt topic.
-  const resolvedTopic = customTitle || aiTitle || topic;
-  const worktree = detectWorktree(cwd, gitBranch);
-  const ticket = detectTicket(userTexts.join('\n') || undefined, gitBranch);
+/**
+ * SERIALIZED continuation blob persisted in `scan_ledger.parser_state`. Carries
+ * everything {@link hydrateClaudeParseState} needs to resume a parse from
+ * `offset` such that resuming + applying the appended lines is byte-for-byte
+ * identical to a full parse of the whole file.
+ *
+ * `seenAssistantIds` is persisted as a size counter plus a bounded FIFO window
+ * of the most-recent ids: the fallback logical id `${ts}:${seenAssistantIds.size}`
+ * (see {@link applyClaudeLine}) depends on the set's *size*, so the size must be
+ * exact even when the recent window is smaller than the true count.
+ */
+export interface ClaudeParserState {
+  v: 1;
+  offset: number;
+  timestamp?: string;
+  cwd?: string;
+  gitBranch?: string;
+  version?: string;
+  entrypoint?: string;
+  firstTsMs?: number;
+  topic?: string;
+  customTitle?: string;
+  aiTitle?: string;
+  plan?: string;
+  lastTsMs?: number;
+  messageCount: number;
+  tokenCount: number;
+  outputTokens: number;
+  sawTokenCount: boolean;
+  sawCost: boolean;
+  costUsd: number;
+  seenIdsSize: number;
+  seenIdsRecent: string[];
+  sawPrCreate: boolean;
+  prUrl?: string;
+  prNumber?: number;
+  pendingTicketTools: string[];
+  createdTickets: string[];
+  spawnedTeam?: string;
+  ticketId?: string;
+  contentText?: string;
+}
 
+/** Cap on the FIFO window of recent assistant ids persisted in the continuation. */
+const SEEN_IDS_RECENT_CAP = 256;
+
+/**
+ * Snapshot a live {@link ClaudeParseState} into its serializable form at
+ * `offset` bytes consumed. Round-trips through {@link hydrateClaudeParseState}
+ * so incremental replay equals a full parse.
+ */
+export function serializeClaudeParserState(state: ClaudeParseState, offset: number): ClaudeParserState {
+  const allIds = [...state.seenAssistantIds];
+  const seenIdsRecent = allIds.length > SEEN_IDS_RECENT_CAP
+    ? allIds.slice(allIds.length - SEEN_IDS_RECENT_CAP)
+    : allIds;
+  const ticket = detectTicket(state.userTexts.join('\n') || undefined, state.gitBranch);
   return {
-    timestamp,
-    cwd,
-    gitBranch,
-    version,
-    topic: resolvedTopic,
-    entrypoint,
-    messageCount,
-    tokenCount: sawTokenCount ? tokenCount : undefined,
-    outputTokens: sawTokenCount ? outputTokens : undefined,
-    costUsd: sawCost ? costUsd : undefined,
-    durationMs,
-    lastActivity: lastTsMs !== undefined ? new Date(lastTsMs).toISOString() : undefined,
-    contentText: userTexts.length > 0 ? userTexts.join('\n') : undefined,
-    prUrl,
-    prNumber,
-    worktreeSlug: worktree?.slug,
+    v: 1,
+    offset,
+    timestamp: state.timestamp,
+    cwd: state.cwd,
+    gitBranch: state.gitBranch,
+    version: state.version,
+    entrypoint: state.entrypoint,
+    firstTsMs: state.firstTsMs,
+    topic: state.topic,
+    customTitle: state.customTitle,
+    aiTitle: state.aiTitle,
+    plan: state.plan,
+    lastTsMs: state.lastTsMs,
+    messageCount: state.messageCount,
+    tokenCount: state.tokenCount,
+    outputTokens: state.outputTokens,
+    sawTokenCount: state.sawTokenCount,
+    sawCost: state.sawCost,
+    costUsd: state.costUsd,
+    seenIdsSize: state.seenAssistantIds.size,
+    seenIdsRecent,
+    sawPrCreate: state.sawPrCreate,
+    prUrl: state.prUrl,
+    prNumber: state.prNumber,
+    pendingTicketTools: [...state.pendingTicketTools],
+    createdTickets: [...state.createdTickets],
+    spawnedTeam: state.spawnedTeam,
+    // ticketId is derived at finalize time; persist it (and content_text) so a
+    // consumer (B-2) can rebuild the row + FTS doc on append without re-reading
+    // the whole file. worktreeSlug is re-derived from cwd/gitBranch, so it need
+    // not be persisted.
     ticketId: ticket?.id,
-    createdTickets: createdTickets.size > 0 ? [...createdTickets] : undefined,
-    spawnedTeam,
-    plan,
+    contentText: state.userTexts.length > 0 ? state.userTexts.join('\n') : undefined,
   };
+}
+
+/**
+ * Rebuild a live {@link ClaudeParseState} from a persisted continuation so that
+ * applying the appended lines yields the same accumulator a full parse would.
+ *
+ * `seenAssistantIds` is rehydrated from the recent-id FIFO window, then padded
+ * with unique sentinel entries so its `.size` matches the true prior count
+ * (`seenIdsSize`) — the fallback id `${ts}:${size}` must line up with the full
+ * parse even when the window dropped older ids. Padding sentinels can never
+ * collide with a real logical id (real ids are message ids/uuids or
+ * `${ts}:${n}`; the sentinel prefix is not JSON-line-derived).
+ *
+ * `userTexts` is rehydrated as a single joined blob from `contentText`: only
+ * `userTexts.join('\n')` (detectTicket + contentText) and `userTexts.length > 0`
+ * are ever read downstream, and both are preserved by a one-element array
+ * holding the joined content.
+ */
+export function hydrateClaudeParseState(prior: ClaudeParserState): ClaudeParseState {
+  const seen = new Set<string>(prior.seenIdsRecent);
+  // Pad to the true prior size so `seenAssistantIds.size` (which feeds the
+  // fallback logical id) is exact even when older ids fell out of the window.
+  let pad = 0;
+  while (seen.size < prior.seenIdsSize) {
+    seen.add(` pad:${pad++}`);
+  }
+  return {
+    timestamp: prior.timestamp,
+    cwd: prior.cwd,
+    gitBranch: prior.gitBranch,
+    version: prior.version,
+    topic: prior.topic,
+    customTitle: prior.customTitle,
+    aiTitle: prior.aiTitle,
+    entrypoint: prior.entrypoint,
+    messageCount: prior.messageCount,
+    tokenCount: prior.tokenCount,
+    outputTokens: prior.outputTokens,
+    sawTokenCount: prior.sawTokenCount,
+    costUsd: prior.costUsd,
+    sawCost: prior.sawCost,
+    firstTsMs: prior.firstTsMs,
+    lastTsMs: prior.lastTsMs,
+    seenAssistantIds: seen,
+    userTexts: prior.contentText !== undefined && prior.contentText.length > 0 ? [prior.contentText] : [],
+    sawPrCreate: prior.sawPrCreate,
+    prUrl: prior.prUrl,
+    prNumber: prior.prNumber,
+    createdTickets: new Set<string>(prior.createdTickets),
+    pendingTicketTools: new Set<string>(prior.pendingTicketTools),
+    spawnedTeam: prior.spawnedTeam,
+    plan: prior.plan,
+  };
+}
+
+/**
+ * Resume a Claude parse from `fromOffset` bytes into the file, folding only the
+ * newly-appended lines into `prior`. Returns the finalized scan, the next
+ * serialized continuation, and the byte offset to resume from next time —
+ * `newOffset` stops at the last `'\n'` seen so a half-written trailing record is
+ * re-read (not lost) on the next append.
+ *
+ * NOT wired into the live scan path yet (that is B-2); {@link scanClaudeSession}
+ * remains the only caller-facing entry point. This exists so the parity harness
+ * can prove full === hydrate(state@k) + apply(k+1..n).
+ */
+export async function scanClaudeSessionIncremental(
+  filePath: string,
+  fromOffset: number,
+  prior: ClaudeParserState,
+): Promise<{ scan: ClaudeSessionScan; newState: ClaudeParserState; newOffset: number }> {
+  const state = hydrateClaudeParseState(prior);
+
+  // Read the appended byte range and apply ONLY newline-terminated lines. The
+  // applied lines and `newOffset` MUST stay consistent: readline (like the full
+  // parse) would emit a trailing UNTERMINATED final line at EOF, but `newOffset`
+  // stops before it — so the next pass, after that record's '\n' is flushed,
+  // would re-read and re-apply the same line and double-count it (user events
+  // have no dedup, unlike assistant `seenAssistantIds`). A record written
+  // non-atomically — bytes first, then '\n' in a second write — is exactly this
+  // case. So we slice at the last '\n' ourselves: everything up to and including
+  // it is a run of complete lines we apply and commit; any tail after it
+  // (syntactically broken OR complete-but-not-yet-terminated) is a still-being-
+  // written record we DEFER to the next pass, once its '\n' lands.
+  const chunks: Buffer[] = [];
+  const stream = fs.createReadStream(filePath, { start: fromOffset });
+  try {
+    for await (const chunk of stream) {
+      chunks.push(typeof chunk === 'string' ? Buffer.from(chunk, 'utf-8') : chunk as Buffer);
+    }
+  } finally {
+    stream.destroy();
+  }
+  const appended = Buffer.concat(chunks);
+
+  // Bytes up to AND INCLUDING the last '\n' are the committed, complete-line run.
+  const lastNl = appended.lastIndexOf(0x0a);
+  const consumedBytes = lastNl === -1 ? 0 : lastNl + 1;
+
+  if (consumedBytes > 0) {
+    // split('\n') on the committed run: the element after the final '\n' is ''
+    // (skipped by the trim guard). A stray '\r' from CRLF is tolerated by the
+    // JSON.parse below exactly as the full parse tolerates it.
+    for (const line of appended.subarray(0, consumedBytes).toString('utf-8').split('\n')) {
+      if (!line.trim()) continue;
+
+      let parsed: any;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        continue;
+      }
+
+      applyClaudeLine(state, parsed);
+    }
+  }
+
+  const newOffset = fromOffset + consumedBytes;
+  return {
+    scan: finalizeClaudeScan(state),
+    newState: serializeClaudeParserState(state, newOffset),
+    newOffset,
+  };
+}
+
+/** Serialized zero-value continuation: a fresh accumulator at offset 0, used to drive a FULL parse from the start through the same resumable path. */
+function freshClaudeParserState(): ClaudeParserState {
+  return serializeClaudeParserState(initClaudeParseState(), 0);
+}
+
+/**
+ * Decide full-vs-incremental for one Claude file and parse it uniformly, always
+ * returning a finalized scan plus the continuation to persist. Both branches run
+ * through the SAME reducer (via {@link scanClaudeSessionIncremental}), so the row
+ * an append produces is identical to a from-scratch full reparse by construction
+ * (the B-1 parity harness proves this at the function level).
+ *
+ * INCREMENTAL when a prior continuation exists AND the file grew past the
+ * persisted offset AND its mtime did not go backwards — an in-place append.
+ * FULL (from byte 0, fresh state) otherwise: cold start (no prior), truncation /
+ * rewrite (size shrank to at or below the offset), or a clock rewind / restore
+ * (mtime older than the last parse). A FULL parse still produces a continuation,
+ * so the file's very next append can go incremental.
+ *
+ * `mode` is returned so the caller (and tests) can confirm which branch ran.
+ */
+async function scanClaudeSessionResumable(
+  filePath: string,
+  prior: ClaudeParserState | null,
+  currentFileMtimeMs: number,
+  currentFileSize: number,
+  priorFileMtimeMs?: number,
+): Promise<{ scan: ClaudeSessionScan; newState: ClaudeParserState; newOffset: number; mode: 'full' | 'incremental' }> {
+  // File size + mtime cannot distinguish an APPEND from an in-place rewrite or a
+  // restore that dropped DIFFERENT, larger content at the same path: both grow
+  // the file and move mtime forward. Resuming from the stored offset across that
+  // boundary would fold the new file's bytes into an accumulator hydrated from
+  // the OLD session, so the persisted row silently diverges from a full reparse.
+  // So the metadata gate below only makes a file ELIGIBLE; before trusting the
+  // offset we re-read the transcript's first user/assistant timestamp and require
+  // it to still match the prior continuation's. An append keeps that identity
+  // byte-for-byte; a rewrite/restore of a different session changes it. A
+  // mismatch — or an identity we cannot derive — falls back to a FULL parse,
+  // which is always correct. (A shrink is already handled: currentFileSize is not
+  // > prior.offset, so it takes the FULL branch.)
+  let canIncrement = false;
+  if (
+    prior !== null &&
+    currentFileSize > prior.offset &&
+    (priorFileMtimeMs === undefined || currentFileMtimeMs >= priorFileMtimeMs) &&
+    prior.timestamp !== undefined
+  ) {
+    canIncrement = (await claudeSessionIdentityAt(filePath)) === prior.timestamp;
+  }
+
+  if (canIncrement && prior !== null) {
+    const result = await scanClaudeSessionIncremental(filePath, prior.offset, prior);
+    return { ...result, mode: 'incremental' };
+  }
+
+  const result = await scanClaudeSessionIncremental(filePath, 0, freshClaudeParserState());
+  return { ...result, mode: 'full' };
+}
+
+/**
+ * Cheaply derive a Claude transcript's session identity — the first
+ * user/assistant event `timestamp` — by streaming only the START of the file
+ * (at most `maxBytes`) and stopping at the first such event. Used by
+ * {@link scanClaudeSessionResumable} to confirm a grown file is still the SAME
+ * session before resuming from a stored parse offset. Returns undefined when no
+ * user/assistant event appears within the budget, which forces a FULL parse.
+ */
+async function claudeSessionIdentityAt(filePath: string, maxBytes = 1_048_576): Promise<string | undefined> {
+  const state = initClaudeParseState();
+  const stream = fs.createReadStream(filePath, { start: 0, end: maxBytes - 1, encoding: 'utf-8' });
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  try {
+    for await (const line of rl) {
+      if (!line.trim()) continue;
+      let parsed: any;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      applyClaudeLine(state, parsed);
+      if (state.timestamp !== undefined) break;
+    }
+  } finally {
+    rl.close();
+    stream.destroy();
+  }
+  return state.timestamp;
+}
+
+/**
+ * Parse the prior continuation blob for a changed file into a usable
+ * {@link ClaudeParserState}, or null when there is none / it is unusable. A blob
+ * from a different serialization version is treated as absent so the file falls
+ * back to a clean FULL parse rather than resuming against a stale shape.
+ */
+function parsePriorClaudeState(row: { parserState: string | null } | undefined): ClaudeParserState | null {
+  if (!row?.parserState) return null;
+  try {
+    const parsed = JSON.parse(row.parserState) as ClaudeParserState;
+    if (parsed?.v !== 1 || typeof parsed.offset !== 'number') return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/** Test seam: how many times the incremental (append-resume) branch was taken since the last reset. */
+let claudeIncrementalScanCount = 0;
+/** Test seam: how many times a full (from-offset-0) Claude parse ran since the last reset. */
+let claudeFullScanCount = 0;
+
+/** Test seam: read the (incremental, full) Claude parse counters. */
+export function __claudeScanBranchCountsForTest(): { incremental: number; full: number } {
+  return { incremental: claudeIncrementalScanCount, full: claudeFullScanCount };
+}
+
+/** Test seam: reset the Claude parse-branch counters to observe a scan from a clean slate. */
+export function __resetClaudeScanBranchCountsForTest(): void {
+  claudeIncrementalScanCount = 0;
+  claudeFullScanCount = 0;
 }
 
 /** Stream a Codex JSONL file and extract scan-level metadata (session ID, cwd, topic, tokens). */
@@ -3096,7 +3739,7 @@ export function readKimiMeta(filePath: string): { meta: SessionMeta; content: st
   const timestamp = updatedAt || createdAt
     || (stat ? stat.mtime.toISOString() : new Date().toISOString());
 
-  const shortId = sessionId.replace(/^session_/, '').slice(0, 8);
+  const shortId = deriveShortId(sessionId, /^session_/);
 
   // Try to infer project from session directory path
   // ~/.kimi-code/sessions/<workdir_hash>/session_<uuid>/
@@ -3286,7 +3929,7 @@ export function readGrokMeta(
 
   const meta: SessionMeta = {
     id: sessionId,
-    shortId: sessionId.slice(0, 8),
+    shortId: deriveShortId(sessionId),
     agent: 'grok',
     timestamp,
     lastActivity,

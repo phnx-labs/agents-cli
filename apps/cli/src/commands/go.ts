@@ -22,6 +22,7 @@ import { promisify } from 'util';
 import { getActiveSessions, findSessionFileForKind, type ActiveSession } from '../lib/session/active.js';
 import { gatherRemoteActive } from '../lib/session/remote-active.js';
 import { discoverSessions } from '../lib/session/discover.js';
+import { deriveShortId } from '../lib/session/short-id.js';
 import type { SessionMeta, SessionAgentId } from '../lib/session/types.js';
 import { dedupeByMachineSession, mergeLocalFirst, pickSessionInteractive } from './sessions.js';
 import { focusAction } from './focus.js';
@@ -45,8 +46,16 @@ export function registerGoCommand(program: Command): void {
     });
 }
 
-/** Live jump targets (local + remote), keyed by session id. Cloud excluded (no pid). */
-export async function gatherLiveTargets(local: boolean): Promise<{ self: string; activeById: Map<string, ActiveSession> }> {
+/**
+ * Live jump targets (local + remote), keyed by session id. Cloud is excluded by
+ * default (it has no local pid to attach), but `detach` opts in with
+ * `includeCloud` so it can resolve a cloud id and refuse it with a clear message
+ * instead of a bare "no live session".
+ */
+export async function gatherLiveTargets(
+  local: boolean,
+  opts: { includeCloud?: boolean } = {},
+): Promise<{ self: string; activeById: Map<string, ActiveSession> }> {
   const self = machineId();
   const localActive = await getActiveSessions();
   for (const s of localActive) if (!s.machine) s.machine = self;
@@ -58,7 +67,11 @@ export async function gatherLiveTargets(local: boolean): Promise<{ self: string;
     } catch { /* remote sweep is best-effort */ }
   }
   const activeById = new Map<string, ActiveSession>();
-  for (const s of active) if (s.context !== 'cloud' && s.sessionId) activeById.set(s.sessionId, s);
+  for (const s of active) {
+    if (!s.sessionId) continue;
+    if (s.context === 'cloud' && !opts.includeCloud) continue;
+    activeById.set(s.sessionId, s);
+  }
   return { self, activeById };
 }
 
@@ -104,7 +117,7 @@ function synthMeta(s: ActiveSession, self: string): SessionMeta {
   const filePath = remote ? '' : (findSessionFileForKind(s.kind, s.cwd, s.sessionId) ?? '');
   return {
     id: s.sessionId!,
-    shortId: s.sessionId!.slice(0, 8),
+    shortId: deriveShortId(s.sessionId!),
     agent: s.kind as SessionAgentId,
     timestamp: new Date(s.startedAtMs ?? Date.now()).toISOString(),
     filePath,

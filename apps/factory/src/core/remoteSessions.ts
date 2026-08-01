@@ -218,6 +218,10 @@ export interface RemoteSession {
   /** The CLI record's `context` ('terminal' | 'cloud' | 'teams' | ...). Lets the
    *  webview treat cloud rows differently from terminal-backed agents. */
   context: string;
+  /** Foreground/background presence from the CLI (`attached` | `background` |
+   *  `parked`), absent when the session isn't on that axis (cloud/team/ad-hoc
+   *  headless). Drives the detach/attach affordances. */
+  presence?: string;
   /** Cloud task id (`agents cloud message <id> <text>` is the reply channel for
    *  cloud rows). Empty for non-cloud sessions. */
   cloudTaskId: string;
@@ -288,6 +292,7 @@ export interface HostInfo {
  */
 export interface RawActiveSession {
   context?: string;
+  presence?: string;
   kind?: string;
   pid?: number;
   sessionId?: string;
@@ -296,6 +301,8 @@ export interface RawActiveSession {
   topic?: string;
   sessionFile?: string;
   startedAtMs?: number;
+  /** Transcript last-write epoch (ms) stamped by the CLI — the real activity signal. */
+  lastActivityMs?: number;
   status?: string;
   teamName?: string;
   agentId?: string;
@@ -586,13 +593,16 @@ export function normalizeActiveSession(
     worktreePath: asStr(raw.worktree?.path) || (worktreeSlug ? cwd : ''),
     sinceMs: startedAtMs > 0 ? Math.max(0, fetchedAt - startedAtMs) : 0,
     startedAtMs,
-    // 0 = no activity signal yet; the fan-out sets the real file mtime for file-backed
-    // sessions. Deliberately NOT startedAtMs — start time is not activity.
-    lastActivityMs: 0,
+    // The CLI stamps the transcript's last-write epoch (`active.ts` sessionFileTimes)
+    // on every file-backed session — the real activity signal, present for remote
+    // hosts too. The local fan-out still re-stats as a fallback. Deliberately NOT
+    // startedAtMs — start time is not activity.
+    lastActivityMs: typeof raw.lastActivityMs === 'number' ? raw.lastActivityMs : 0,
     topic: asStr(raw.topic) || asStr(raw.label),
     label: asStr(raw.label),
     sessionFile: asStr(raw.sessionFile),
     context: asStr(raw.context),
+    presence: asStr(raw.presence),
     cloudTaskId: raw.cloudTaskId || '',
     cloudProvider: raw.cloudProvider || '',
     teamName: raw.teamName || '',

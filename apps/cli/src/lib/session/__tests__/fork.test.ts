@@ -5,8 +5,8 @@ import * as path from 'path';
 
 // Set HOME (and AGENTS_REAL_HOME) before db.js / fork.js load so their
 // module-level base dirs resolve inside an isolated temp HOME. Running
-// in-process under vitest uses the same node:sqlite driver as the real CLI
-// (a `bun --eval` subprocess would use bun:sqlite, which binds differently).
+// in-process under vitest uses node:sqlite; the shipped standalone binary runs
+// bun:sqlite, whose named binds are covered by src/lib/sqlite.test.ts.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'fork-test-'));
 process.env.HOME = TEST_HOME;
 process.env.AGENTS_REAL_HOME = TEST_HOME;

@@ -21,6 +21,7 @@ import * as path from 'path';
 import type { SessionMeta } from './types.js';
 import { upsertSession } from './db.js';
 import { recordRunName } from './run-names.js';
+import { deriveShortId } from './short-id.js';
 
 /** Agents that `fork` can branch today (see the module doc for why). */
 export const FORKABLE_AGENTS = ['claude'] as const;
@@ -85,7 +86,7 @@ export function forkSession(source: SessionMeta, opts: { name?: string; now?: st
   }
 
   const newId = randomUUID();
-  const shortId = newId.slice(0, 8);
+  const shortId = deriveShortId(newId);
   const dir = path.dirname(source.filePath);
   const filePath = path.join(dir, `${newId}.jsonl`);
 

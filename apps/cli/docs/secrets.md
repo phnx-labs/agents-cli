@@ -69,7 +69,7 @@ Variable kinds (stored in bundle metadata, resolved at inject time):
 
 Source: `src/lib/secrets/index.ts:43` (`REF_PATTERN`), `src/lib/secrets/bundles.ts:57-71` (`SecretsBundle`).
 
-The batch-read design means `agents secrets list` pops Touch ID once for all bundles, not once per bundle. Source: `src/lib/secrets/bundles.ts:269-271`.
+Bundle metadata (names, descriptions, variable names + references, and any non-sensitive `--value` literals) is stored WITHOUT the biometry ACL — it is non-sensitive by contract, since real secret values live in the separate `agents-cli.secrets.*` items that keep the bundle's policy ACL. So enumerating bundles is fully silent: `agents secrets list` — and every internal metadata scan, including crabbox's `agents devices list` at session start — reads with no Touch ID prompt. Only reading a bundle's actual values (injection, `view --reveal`) pops the prompt. Source: `src/lib/secrets/bundles.ts` (`writeBundle` / `writeBundleWithItems`).
 
 ## File-backed bundles (headless / remote)
 

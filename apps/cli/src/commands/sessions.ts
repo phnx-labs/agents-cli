@@ -52,6 +52,7 @@ import { registerFocusCommand } from './focus.js';
 import { registerSessionsInjectCommand } from './sessions-inject.js';
 import { registerSessionsExportCommand } from './sessions-export.js';
 import { registerSessionsImportCommand } from './sessions-import.js';
+import { registerSessionsMigrateCommand, registerSessionsMigrationsCommand } from './sessions-migrate.js';
 import { runBrowserSessions } from '../lib/browser/sessions-list.js';
 
 const SESSION_AGENT_FILTER_HELP = `Filter by agent, e.g. claude, codex, claude@2.0.65`;
@@ -285,6 +286,9 @@ function statusColor(status: ActiveSession['status']): (s: string) => string {
     case 'idle': return chalk.gray;
     case 'queued': return chalk.blue;
     case 'input_required': return chalk.yellow;
+    // Alive but un-introspectable (a harness whose transcript we can't parse).
+    // Magenta so it never reads as the gray "idle" it used to be faked as.
+    case 'unknown': return chalk.magenta;
   }
 }
 
@@ -381,7 +385,10 @@ export function liveGlyphAndPreview(a: ActiveSession | undefined): { glyph: stri
   if (!a) return { glyph: '', preview: '' };
   const waiting = a.status === 'input_required' || a.activity === 'waiting_input';
   const running = a.status === 'running' || a.activity === 'working';
-  const shape = waiting ? '◐' : running ? '●' : '○';
+  // `◌` (dotted) = alive but un-introspectable — visually distinct from `○` idle
+  // so an opaque harness is never mistaken for a finished one.
+  const unknown = a.status === 'unknown';
+  const shape = waiting ? '◐' : running ? '●' : unknown ? '◌' : '○';
   return { glyph: statusColor(a.status)(shape), preview: buildSessionDescription(a) };
 }
 
@@ -392,6 +399,25 @@ export function liveGlyphAndPreview(a: ActiveSession | undefined): { glyph: stri
  */
 export function ticketLabel(s: Pick<SessionMeta, 'ticketId' | 'prNumber'>): string {
   return s.ticketId ?? (s.prNumber ? `PR#${s.prNumber}` : '');
+}
+
+/**
+ * The row shape `agents sessions --active --json` emits. RUSH-1981: a watcher
+ * joins active sessions on ticketId + project, but the raw ActiveSession nests
+ * the ticket (`ticket.id`) and carries no `project` at all — so a naive join
+ * silently drops every row. Emit both as flat, always-present top-level keys
+ * (null when unknown) alongside the raw fields, so every active row is joinable.
+ * `project` uses the same derivation SessionMeta does — basename(cwd) (see
+ * discover.ts) — so the active view and the history view join identically.
+ */
+export function serializeActiveSessionsForJson(
+  sessions: ActiveSession[],
+): Array<ActiveSession & { ticketId: string | null; project: string | null }> {
+  return sessions.map((s) => ({
+    ...s,
+    ticketId: s.ticket?.id ?? null,
+    project: s.cwd ? path.basename(s.cwd) : null,
+  }));
 }
 
 /**
@@ -693,20 +719,24 @@ async function runRemoteSessionsJson(hosts: string[]): Promise<void> {
 }
 
 /**
- * `running N · idle N · waiting N · queued N` for a bucket of sessions (zero
- * buckets omitted). Same bucketing as the grand-total summary so per-group
- * counts reconcile with the `(total)` beside the header. Empty when nothing.
+ * `running N · idle N · waiting N · queued N · unknown N` for a bucket of
+ * sessions (zero buckets omitted). Same bucketing as the grand-total summary so
+ * per-group counts reconcile with the `(total)` beside the header — the `unknown`
+ * bucket is what keeps an alive-but-opaque row from silently vanishing from the
+ * tally. Empty when nothing.
  */
 function groupTally(sessions: ActiveSession[]): string {
   const running = sessions.filter(s => s.status === 'running').length;
   const idle = sessions.filter(s => s.status === 'idle').length;
   const waiting = sessions.filter(s => s.status === 'input_required').length;
   const queued = sessions.filter(s => s.status === 'queued').length;
+  const unknown = sessions.filter(s => s.status === 'unknown').length;
   const parts: string[] = [];
   if (running) parts.push(`${running} running`);
   if (idle) parts.push(`${idle} idle`);
   if (waiting) parts.push(`${waiting} waiting`);
   if (queued) parts.push(`${queued} queued`);
+  if (unknown) parts.push(`${unknown} unknown`);
   return parts.join(' · ');
 }
 
@@ -868,7 +898,7 @@ async function renderActiveSessions(
   const sessions = waitingOnly ? merged.filter(s => s.status === 'input_required') : merged;
 
   if (asJson) {
-    process.stdout.write(JSON.stringify(sessions, null, 2) + '\n');
+    process.stdout.write(JSON.stringify(serializeActiveSessionsForJson(sessions), null, 2) + '\n');
     if (waitingOnly && sessions.length > 0) process.exitCode = 1;
     return;
   }
@@ -2635,6 +2665,8 @@ export function registerSessionsCommands(program: Command): void {
   registerSessionsInjectCommand(sessionsCmd);
   registerSessionsExportCommand(sessionsCmd);
   registerSessionsImportCommand(sessionsCmd);
+  registerSessionsMigrateCommand(sessionsCmd);
+  registerSessionsMigrationsCommand(sessionsCmd);
 }
 
 function formatNoSessionsMessage(

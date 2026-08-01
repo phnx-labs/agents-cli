@@ -500,8 +500,12 @@ export function inferActivity(events: SessionEvent[], ctx: StateContext = {}): S
     // A prose question takes a free-text reply (no select-list), so no options/keys.
     // Unlike the structural plan/ask signals above, the prose heuristic DECAYS: a
     // question nobody answered within PROSE_QUESTION_FRESH_MS is a session that
-    // ended, not one that needs you (RUSH-1522). Unknown mtime keeps the question.
-    const questionFresh = ctx.mtimeMs == null || Date.now() - ctx.mtimeMs < PROSE_QUESTION_FRESH_MS;
+    // ended, not one that needs you (RUSH-1522). A prose "?" is only "waiting on
+    // you" while the file is DEMONSTRABLY fresh — with no mtime signal at all we
+    // cannot assert freshness, so the heuristic must not fire (an unknown-age
+    // prose question is a session that ended, closing RUSH-1522's null-mtime hole
+    // where a null mtime kept the question forever).
+    const questionFresh = ctx.mtimeMs != null && Date.now() - ctx.mtimeMs < PROSE_QUESTION_FRESH_MS;
     if (questionFresh && looksLikeQuestion(last.content ?? '')) {
       const text = oneLine(last.content ?? '');
       return { ...base, activity: 'waiting_input', awaitingReason: 'question', question: { text, reason: 'question' } };

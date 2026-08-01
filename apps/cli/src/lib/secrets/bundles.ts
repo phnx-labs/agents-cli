@@ -54,7 +54,7 @@ import {
   vaultSetItem,
 } from './vault.js';
 import { emit } from '../events.js';
-import { readMeta } from '../state.js';
+import { readMeta, getHelpersDir } from '../state.js';
 import { assertNameActiveInResourceProfile, filterNamesForActiveResourceProfile } from '../resource-profiles.js';
 import { agentGetSync, agentAutoLoadSync, agentGetMetaSync, agentAutoLoadMetaSync, agentEvictSync, secretsAgentAutoEnabled, secretsHoldMs } from './agent.js';
 import { loadSession, deleteSession } from './session-store.js';
@@ -563,11 +563,15 @@ function finishBundleWrite(bundle: SecretsBundle, opts: WriteBundleOptions): voi
 
 export function writeBundle(bundle: SecretsBundle, opts: WriteBundleOptions = {}): void {
   const prepared = prepareBundleWrite(bundle);
-  // A `never` bundle's metadata is stored without the biometry ACL too, so
-  // `view` and the metadata half of a read resolve silently — the whole point
-  // of the tier. On an un-updated pinned helper this write fails loudly (the
-  // no-ACL command is missing) rather than silently landing an ACL'd item.
-  itemStore(prepared.backend).set(prepared.metadataItem, prepared.metadataJson, { noAcl: bundle.policy === 'never' });
+  // Bundle metadata (name, description, policy, var names + refs, and any
+  // non-sensitive `--value` literals) is stored WITHOUT the biometry ACL at
+  // EVERY tier. It is non-sensitive by contract — the real secret values live in
+  // separate agents-cli.secrets.* items that keep the bundle's policy ACL — so a
+  // no-ACL metadata item is what lets `secrets list` and crabbox's `agents
+  // devices list` enumerate bundles with no Touch ID prompt (RUSH-1759). On an
+  // un-updated pinned helper this write fails loudly (the no-ACL command is
+  // missing) rather than silently landing an ACL'd item.
+  itemStore(prepared.backend).set(prepared.metadataItem, prepared.metadataJson, { noAcl: true });
   finishBundleWrite(bundle, opts);
 }
 
@@ -577,9 +581,26 @@ export function writeBundleWithItems(
   opts: WriteBundleOptions = {},
 ): void {
   const prepared = prepareBundleWrite(bundle);
-  const batch = new Map(items);
-  batch.set(prepared.metadataItem, prepared.metadataJson);
-  itemStore(prepared.backend).setBatch(batch, { noAcl: bundle.policy === 'never' });
+  const store = itemStore(prepared.backend);
+  if (prepared.backend === 'keychain') {
+    // Only the keychain backend has a biometry ACL. Secret VALUE items carry the
+    // bundle's policy ACL (`never` ⇒ no-ACL); the metadata item is ALWAYS no-ACL
+    // (see writeBundle). The two must NOT ride one batch flag — a single noAcl
+    // over both would either strip biometry off the real secrets or re-ACL the
+    // metadata. Write the values first, then the metadata last: bundle discovery
+    // keys on the metadata item's presence, so metadata-last means a partial
+    // write reads as "no bundle yet", never as a bundle with missing values.
+    if (items.size > 0) {
+      store.setBatch(new Map(items), { noAcl: bundle.policy === 'never' });
+    }
+    store.set(prepared.metadataItem, prepared.metadataJson, { noAcl: true });
+  } else {
+    // file / vault: no ACL concept (noAcl is ignored), so one batched write is
+    // both correct and cheaper — e.g. a single age re-encrypt for the vault.
+    const batch = new Map(items);
+    batch.set(prepared.metadataItem, prepared.metadataJson);
+    store.setBatch(batch, { noAcl: bundle.policy === 'never' });
+  }
   finishBundleWrite(bundle, opts);
 }
 
@@ -637,6 +658,76 @@ function parseBundleMeta(nameHint: string | undefined, json: string, backend: Se
   return bundle;
 }
 
+// Sentinel marking the one-time RUSH-1759 metadata-ACL heal as done. Lives under
+// the regenerable helpers dir (same tree as the secrets-agent runtime state), so
+// a cache wipe just re-runs the heal — harmless, since it is idempotent.
+const METADATA_NOACL_SENTINEL = 'bundles-metadata-noacl-healed';
+
+function metadataNoAclSentinelPath(): string {
+  return path.join(getHelpersDir(), 'secrets-agent', METADATA_NOACL_SENTINEL);
+}
+
+function bundleMetadataAclHealed(): boolean {
+  try {
+    return fs.existsSync(metadataNoAclSentinelPath());
+  } catch {
+    return false;
+  }
+}
+
+function markBundleMetadataAclHealed(): void {
+  try {
+    const file = metadataNoAclSentinelPath();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, '', 'utf8');
+  } catch {
+    // Best effort — a missing sentinel just means the (idempotent) heal re-runs
+    // on the next broker-miss listing.
+  }
+}
+
+/**
+ * Re-write already-read keychain bundle metadata items WITHOUT the biometry ACL.
+ * `metaJsonByName` maps bundle name → the exact metadata JSON listBundles just
+ * batch-read, so writing it back only flips the ACL (via the helper's
+ * delete-then-add `set-no-acl`) — contents and updated_at are preserved and no
+ * extra keychain read is issued. Exported for tests. Returns the count healed.
+ */
+export function healKeychainBundleMetadata(metaJsonByName: Map<string, string>): number {
+  let healed = 0;
+  for (const [name, json] of metaJsonByName) {
+    try {
+      // Cleartext meta-item name → hashed by keychainStore.set (#316) to the same
+      // service the read enumerated, so this overwrites the existing item in
+      // place, no-ACL. A per-item failure (e.g. a pinned helper without
+      // set-no-acl) must not abort the rest.
+      keychainStore.set(bundleMetaItem(name), json, { noAcl: true });
+      healed++;
+    } catch {
+      /* keep healing the remaining items */
+    }
+  }
+  return healed;
+}
+
+/**
+ * One-time driver around healKeychainBundleMetadata (RUSH-1759). macOS + real
+ * keychain only — libsecret/CredMan have no biometry ACL to shed, and a test
+ * backend has no real keychain — and gated by a sentinel so it runs at most
+ * once. Best-effort: a heal failure never breaks bundle listing.
+ */
+function healKeychainBundleMetadataAclOnce(metaJsonByName: Map<string, string>): void {
+  if (metaJsonByName.size === 0) return;
+  if (process.platform !== 'darwin') return;
+  if (isKeychainBackendOverridden()) return;
+  if (bundleMetadataAclHealed()) return;
+  try {
+    if (healKeychainBundleMetadata(metaJsonByName) > 0) markBundleMetadataAclHealed();
+  } catch {
+    /* never let a heal failure break `secrets list` */
+  }
+}
+
 export function listBundles(): SecretsBundle[] {
   const out: SecretsBundle[] = [];
 
@@ -691,6 +782,7 @@ export function listBundles(): SecretsBundle[] {
       } else {
         const fetched = getKeychainTokens(keychainServices);
         const keychainBundles: SecretsBundle[] = [];
+        const metaJsonByName = new Map<string, string>();
         for (const service of keychainServices) {
           const json = fetched.get(service);
           if (json === undefined) continue;
@@ -698,7 +790,10 @@ export function listBundles(): SecretsBundle[] {
             ? service.slice(BUNDLE_META_PREFIX.length)
             : undefined;
           const bundle = parseBundleMeta(nameHint, json, 'keychain');
-          if (bundle) keychainBundles.push(bundle);
+          if (bundle) {
+            keychainBundles.push(bundle);
+            metaJsonByName.set(bundle.name, json);
+          }
         }
         for (const bundle of keychainBundles) out.push(bundle);
         // Populate the broker for the rest of the hold window (fire-and-forget).
@@ -708,6 +803,13 @@ export function listBundles(): SecretsBundle[] {
         if (useAgent && keychainBundles.length > 0) {
           agentAutoLoadMetaSync(nameSetHash, keychainBundles, secretsHoldMs());
         }
+        // One-time RUSH-1759 heal: bundles written before the metadata-no-ACL
+        // change carry an ACL'd metadata item, so this fresh read (a broker miss)
+        // popped Touch ID just to enumerate them. Re-home each metadata item
+        // no-ACL now — reusing the JSON we just read, so the heal adds no extra
+        // prompt — and every later enumeration is silent. Runs at most once (a
+        // sentinel under the regenerable helpers dir).
+        healKeychainBundleMetadataAclOnce(metaJsonByName);
       }
     }
   }

@@ -89,6 +89,7 @@ interface ExecCommandActionOptions {
   tailscale?: boolean; // --tailscale / --no-tailscale: tri-state net-mode override
   secretsKeys?: string; // --secrets-keys: comma-separated key subset for --secrets bundles
   allowExpired?: boolean; // --allow-expired: skip expiry pre-run abort for secrets
+  emitSessionId?: boolean; // internal: forwarded by --host dispatch so the remote run prints its session id (hosts/session-marker.ts)
 }
 
 export interface RunAccountPickerRequest {
@@ -622,6 +623,12 @@ export function registerRunCommand(program: Command): void {
   // `--on` and `--computer` are hidden aliases of `--host` — same behavior.
   runCmd.addOption(new Option('--on <name>', 'Alias of --host.').hideHelp());
   runCmd.addOption(new Option('--computer <name>', 'Alias of --host.').hideHelp());
+
+  // Internal: the `--host` dispatch forwards this so the REMOTE run prints its
+  // resolved session id as a one-line stdout sentinel (hosts/session-marker.ts),
+  // letting the launcher relate the remote-created session back to itself for
+  // every agent — not just Claude, whose id it forces up front.
+  runCmd.addOption(new Option('--emit-session-id', 'internal: print the resolved session id for a --host launcher to capture').hideHelp());
 
   // Required for the documented `agents run <agent> [prompt] -- <native flags>`
   // passthrough: commander >=13 rejects excess operands by default, so any
@@ -2219,6 +2226,10 @@ export function registerRunCommand(program: Command): void {
         toolsRestrict: workflowToolsRestrict,
         mcpConfigPath: workflowMcpConfigPath,
         passthroughArgs,
+        // Set only on the REMOTE side of a `--host` dispatch (the launcher
+        // forwards `--emit-session-id`): print the resolved session id as a
+        // stdout sentinel so the launcher captures the id this run coined.
+        emitSessionId: options.emitSessionId === true,
       };
 
       if (options.interactive && options.headless) {

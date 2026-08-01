@@ -107,6 +107,7 @@ export const RUN_OPTION_FORWARDING: Record<string, RunOptionForwarding> = {
   yes: 'forward', // a detached remote run can't answer the budget-confirm prompt
   acp: 'forward', // the remote CLI routes through ACP on ITS side of the wire
   autoSecrets: 'forward', // workflow frontmatter secrets resolve on the REMOTE keychain
+  emitSessionId: 'forward', // remote prints its session id as a stdout sentinel the launcher captures (session-marker.ts)
 
   // rejected — cannot cross the SSH boundary; fail loud, never degrade
   secrets: 'reject',

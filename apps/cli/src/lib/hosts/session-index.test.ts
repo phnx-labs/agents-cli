@@ -1,18 +1,34 @@
-import { describe, it, expect } from 'vitest';
+import { afterAll, describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { hostSessionMeta, registerHostSession, registerInteractiveHostSession } from './session-index.js';
-import { findSessionsById, querySessions, closeDB } from '../session/db.js';
 import type { HostTask } from './tasks.js';
 
-// Isolate the sessions DB under a temp HOME. db.js reads its base dir lazily
-// (at getDB() time), so setting HOME here — before any test calls getDB — is
-// enough. Use STATIC imports, matching session/__tests__/db.test.ts: a dynamic
-// `await import()` of the native better-sqlite3 addon mis-binds named params
-// under bun (every insert lands NULLs → NOT NULL constraint failures).
+// Isolate the sessions DB under a temp HOME. state.js freezes its base dir at
+// module load (state.ts:34,107 — `HOME = process.env.HOME ?? os.homedir()`,
+// then `SESSIONS_DIR = ...`), and db.js binds DB_PATH from it at db.ts:15-16,
+// both at *import* time — not lazily. Static top-level imports are hoisted, so
+// they would run the state.js/db.js module bodies BEFORE the HOME assignment
+// below and bind DB_PATH to the runner's real HOME, breaking isolation under
+// CI sharding. So set HOME with a plain statement first, then pull in the
+// modules via a top-level `await import` (which runs after it) — the same
+// hermetic pattern as session/__tests__/db.test.ts.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-hostsession-'));
 process.env.HOME = TEST_HOME;
+
+const { hostSessionMeta, registerHostSession, registerInteractiveHostSession, captureRemoteSessionId } =
+  await import('./session-index.js');
+const { findSessionsById, querySessions, closeDB } = await import('../session/db.js');
+const { saveTask, loadTask, localLogPath, hostsCacheDir } = await import('./tasks.js');
+const { sessionIdMarkerLine } = await import('./session-marker.js');
+
+// Close the DB singleton and tear down the temp HOME exactly once, at the end —
+// not scattered mid-file inside individual `it` blocks, which order-couples the
+// tests. Matches the single-teardown shape of db.test.ts:100-102.
+afterAll(() => {
+  closeDB();
+  fs.rmSync(TEST_HOME, { recursive: true, force: true });
+});
 
 function task(overrides: Partial<HostTask> = {}): HostTask {
   return {
@@ -100,7 +116,48 @@ describe('registerHostSession', () => {
     // real local session with a missing file would be dropped here.
     const all = querySessions({ idPrefix: 'aaaaaaaa' });
     expect(all).toHaveLength(1);
+  });
+});
 
-    closeDB();
+describe('captureRemoteSessionId', () => {
+  // The full non-Claude host path: a run that took no forced --session-id, whose
+  // remote coined its own id and printed it via --emit-session-id into the log.
+  function writeLog(id: string, marker: string): void {
+    fs.mkdirSync(hostsCacheDir(), { recursive: true });
+    fs.writeFileSync(localLogPath(id), `booting codex...\ndid the work\n${marker}exited 0\n`);
+  }
+
+  it('captures the remote-coined id from the followed log and stamps it on the task', () => {
+    const t = task({ id: 'feed0001', agent: 'codex', sessionId: undefined });
+    saveTask(t);
+    writeLog('feed0001', sessionIdMarkerLine('codex-real-9f3a'));
+
+    const updated = captureRemoteSessionId(t);
+    expect(updated).not.toBeNull();
+    expect(updated!.sessionId).toBe('codex-real-9f3a');
+    // Persisted, not just returned — so findTaskBySessionId works after this.
+    expect(loadTask('feed0001')!.sessionId).toBe('codex-real-9f3a');
+
+    // And the captured id makes the run registerable + resolvable by id.
+    registerHostSession(updated!, { cwd: '/home/me/proj', prompt: 'do it' });
+    expect(findSessionsById('codex-real-9f3a')).toHaveLength(1);
+  });
+
+  it('is a no-op when the task already carries a forced id (never overwrites Claude/resume)', () => {
+    const t = task({ id: 'feed0002', agent: 'claude', sessionId: 'forced-claude-id' });
+    saveTask(t);
+    // Even if a stray marker sat in the log, the authoritative forced id wins.
+    writeLog('feed0002', sessionIdMarkerLine('should-be-ignored'));
+    expect(captureRemoteSessionId(t)).toBeNull();
+    expect(loadTask('feed0002')!.sessionId).toBe('forced-claude-id');
+  });
+
+  it('returns null when the log carries no marker (hookless remote agent)', () => {
+    const t = task({ id: 'feed0003', agent: 'codex', sessionId: undefined });
+    saveTask(t);
+    fs.mkdirSync(hostsCacheDir(), { recursive: true });
+    fs.writeFileSync(localLogPath('feed0003'), 'ran, but printed no session marker\n');
+    expect(captureRemoteSessionId(t)).toBeNull();
+    expect(loadTask('feed0003')!.sessionId).toBeUndefined();
   });
 });

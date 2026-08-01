@@ -130,10 +130,10 @@ export interface ResolveOpts {
  * Every hit is kind-guarded so a stale file at a reused pid can't cross agents.
  * Undefined until the hook lands (it can lag the spawn) or for hookless harnesses.
  */
-export function resolveHookSessionId(index: HookSessionIndex, opts: ResolveOpts): string | undefined {
+export function resolveHookSessionRecord(index: HookSessionIndex, opts: ResolveOpts): HookSessionRecord | undefined {
   const { pid, kind, launchId, terminalId, childPids } = opts;
-  const take = (rec: HookSessionRecord | undefined): string | undefined =>
-    rec?.session_id && kindMatches(rec.agent, kind) ? rec.session_id : undefined;
+  const take = (rec: HookSessionRecord | undefined): HookSessionRecord | undefined =>
+    rec?.session_id && kindMatches(rec.agent, kind) ? rec : undefined;
 
   if (launchId) {
     const hit = take(index.byLaunchId.get(launchId));
@@ -150,4 +150,10 @@ export function resolveHookSessionId(index: HookSessionIndex, opts: ResolveOpts)
     if (hit) return hit;
   }
   return undefined;
+}
+
+/** The session id alone — see {@link resolveHookSessionRecord} for the full record
+ *  (which also carries the SessionStart `ts` used to stamp `startedAtMs`). */
+export function resolveHookSessionId(index: HookSessionIndex, opts: ResolveOpts): string | undefined {
+  return resolveHookSessionRecord(index, opts)?.session_id;
 }

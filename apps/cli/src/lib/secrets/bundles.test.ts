@@ -10,6 +10,8 @@ import {
   readBundle,
   shouldEvictAfterBundleWrite,
   writeBundle,
+  writeBundleWithItems,
+  healKeychainBundleMetadata,
   type SecretsBundle,
 } from './bundles.js';
 import {
@@ -422,5 +424,88 @@ describe('durable session read fallback', () => {
     const { bundle, env } = seed('stale', { T: 'x' });
     saveSession('stale', { bundle, env, expiresAt: Date.now() - 1000, sleepPersist: true });
     expect(() => readAndResolveBundleEnv('stale', { agentOnly: true })).toThrow(/not unlocked/);
+  });
+});
+
+// RUSH-1759: bundle metadata (names, policy, refs, non-sensitive literals) is
+// non-sensitive by contract, so it is written WITHOUT the biometry ACL at every
+// tier — that is what lets `secrets list` / crabbox's `agents devices list`
+// enumerate bundles with no Touch ID. Real secret VALUE items still carry the
+// bundle's policy ACL. These tests pin that split at the write path, plus the
+// one-time heal for metadata that predates the change.
+describe('metadata is stored no-ACL at every tier (RUSH-1759)', () => {
+  class RecordingBackend implements KeychainBackend {
+    store = new Map<string, string>();
+    /** Per item: did its last write take the no-ACL (`set-no-acl`) path? */
+    noAcl = new Map<string, boolean>();
+    has(item: string) { return this.store.has(item); }
+    get(item: string) {
+      const v = this.store.get(item);
+      if (v === undefined) throw new Error(`missing ${item}`);
+      return v;
+    }
+    set(item: string, value: string, opts?: { noAcl?: boolean }) {
+      this.store.set(item, value);
+      this.noAcl.set(item, Boolean(opts?.noAcl));
+    }
+    delete(item: string) { this.noAcl.delete(item); return this.store.delete(item); }
+    list(prefix: string) { return [...this.store.keys()].filter((k) => k.startsWith(prefix)); }
+  }
+
+  let mem: RecordingBackend;
+  let prev: KeychainBackend | null = null;
+  const prevNoAgent = process.env.AGENTS_SECRETS_NO_AGENT;
+  const prevNoUsage = process.env.AGENTS_NO_USAGE_TRACK;
+  const META = (name: string) => `agents-cli.bundles.${name}`;
+
+  beforeEach(() => {
+    mem = new RecordingBackend();
+    // Cleartext names (no hashing seam) so items are asserted by their plain name.
+    prev = setKeychainBackendForTest(mem);
+    process.env.AGENTS_SECRETS_NO_AGENT = '1';
+    process.env.AGENTS_NO_USAGE_TRACK = '1';
+  });
+  afterEach(() => {
+    setKeychainBackendForTest(prev);
+    if (prevNoAgent === undefined) delete process.env.AGENTS_SECRETS_NO_AGENT;
+    else process.env.AGENTS_SECRETS_NO_AGENT = prevNoAgent;
+    if (prevNoUsage === undefined) delete process.env.AGENTS_NO_USAGE_TRACK;
+    else process.env.AGENTS_NO_USAGE_TRACK = prevNoUsage;
+  });
+
+  it("writeBundle stores a daily/always bundle's metadata without the biometry ACL", () => {
+    writeBundle({ name: 'prod', policy: 'always', vars: { NOTE: { value: 'hello' } } });
+    expect(mem.noAcl.get(META('prod'))).toBe(true);
+  });
+
+  it('writeBundleWithItems: metadata always no-ACL; value items keep their per-policy ACL', () => {
+    writeBundleWithItems(
+      { name: 'prod', policy: 'daily', vars: { API_KEY: 'keychain:API_KEY' } },
+      new Map([[secretsKeychainItem('prod', 'API_KEY'), 'sk-1']]),
+    );
+    expect(mem.noAcl.get(META('prod'))).toBe(true); // metadata: no-ACL
+    expect(mem.noAcl.get(secretsKeychainItem('prod', 'API_KEY'))).toBe(false); // value: ACL'd (daily)
+
+    writeBundleWithItems(
+      { name: 'cron', policy: 'never', vars: { TOKEN: 'keychain:TOKEN' } },
+      new Map([[secretsKeychainItem('cron', 'TOKEN'), 't']]),
+    );
+    expect(mem.noAcl.get(META('cron'))).toBe(true); // metadata: no-ACL
+    expect(mem.noAcl.get(secretsKeychainItem('cron', 'TOKEN'))).toBe(true); // value: no-ACL (never)
+  });
+
+  it('healKeychainBundleMetadata re-homes each legacy metadata item no-ACL', () => {
+    // Simulate metadata written ACL'd by an older CLI.
+    for (const name of ['old1', 'old2']) {
+      mem.store.set(META(name), JSON.stringify({ name, vars: {} }));
+      mem.noAcl.set(META(name), false);
+    }
+    const healed = healKeychainBundleMetadata(new Map([
+      ['old1', mem.get(META('old1'))],
+      ['old2', mem.get(META('old2'))],
+    ]));
+    expect(healed).toBe(2);
+    expect(mem.noAcl.get(META('old1'))).toBe(true);
+    expect(mem.noAcl.get(META('old2'))).toBe(true);
   });
 });

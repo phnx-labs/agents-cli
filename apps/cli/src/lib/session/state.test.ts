@@ -86,6 +86,14 @@ describe('inferActivity — waiting signals', () => {
     expect(s.activity).toBe('idle');
   });
 
+  it('a prose trailing question with NO mtime signal does NOT fire (RUSH-1522 null-mtime hole)', () => {
+    // Freshness can't be asserted without an mtime, so the prose heuristic must
+    // NOT claim "waiting on you" — previously a null mtime kept the question
+    // forever, the exact ended-vs-waiting ambiguity the decay was meant to fix.
+    const s = inferActivity([msg('assistant', 'All done. Anything else you need?')], { pidAlive: true });
+    expect(s.activity).toBe('idle');
+  });
+
   it('a structural AskUserQuestion never decays: hours-old, still waiting', () => {
     const ancient = now - 2 * 60 * 60_000;
     const s = inferActivity([msg('user', 'go'), tool('AskUserQuestion')], { pidAlive: true, mtimeMs: ancient });

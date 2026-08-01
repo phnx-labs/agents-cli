@@ -59,13 +59,18 @@ describe('--name seeds the unified session label', () => {
     expect(ftsSearch('my-seed').some(h => h.score >= 800_000)).toBe(false);
   });
 
-  it('the seed shows until a title exists, and re-applies across a bare rescan', () => {
+  it('the seed shows until a title exists, and survives a bare rescan', () => {
     upsertSession(meta('run-persist'), '');
     seedLabelsFromNames(new Map([['run-persist', 'keep-me']]));
     expect(getSessionById('run-persist')?.label).toBe('keep-me');
-    // A bare rescan re-upserts with no label (label = excluded.label clears it)...
+    // A bare rescan re-upserts with an EMPTY label. The upsert now PRESERVES the
+    // stored non-empty label instead of clearing it, so the handle stays
+    // resolvable even before the seed pass re-runs.
     upsertSession(meta('run-persist'), 'rescanned preview');
-    // ...and the seed pass restores it every scan, so the handle stays resolvable.
+    expect(getSessionById('run-persist')?.label).toBe('keep-me');
+    // The FTS label column stays consistent too — search still resolves the run.
+    expect(ftsSearch('keep-me')[0]?.sessionId).toBe('run-persist');
+    // The seed pass re-running is a harmless no-op (label already non-empty).
     seedLabelsFromNames(new Map([['run-persist', 'keep-me']]));
     expect(getSessionById('run-persist')?.label).toBe('keep-me');
     expect(ftsSearch('keep-me')[0]?.sessionId).toBe('run-persist');
@@ -75,5 +80,50 @@ describe('--name seeds the unified session label', () => {
     upsertSession(meta('run-plain'), '');
     expect(getSessionById('run-plain')?.label).toBeUndefined();
     expect(ftsSearch('run-plain').some(h => h.score >= 800_000)).toBe(false);
+  });
+});
+
+describe('upsertSession preserves a good label; a real one still wins (clobber fix)', () => {
+  it('an EMPTY incoming label does NOT overwrite a stored non-empty label', () => {
+    upsertSession(meta('clobber-empty'), '');
+    // Seed a good label (the --name seed path).
+    seedLabelsFromNames(new Map([['clobber-empty', 'good-label']]));
+    expect(getSessionById('clobber-empty')?.label).toBe('good-label');
+    // A later scan re-upserts with no label at all — must NOT erase the good one.
+    upsertSession(meta('clobber-empty'), 'preview text');
+    expect(getSessionById('clobber-empty')?.label).toBe('good-label');
+    // A whitespace-only incoming label counts as empty and must not clobber either.
+    upsertSession(meta('clobber-empty', { label: '   ' }), 'more preview');
+    expect(getSessionById('clobber-empty')?.label).toBe('good-label');
+    // FTS label stayed consistent through both blank rescans.
+    expect(ftsSearch('good-label')[0]?.sessionId).toBe('clobber-empty');
+  });
+
+  it('a REAL incoming label DOES win over the stored one', () => {
+    upsertSession(meta('clobber-real'), '');
+    seedLabelsFromNames(new Map([['clobber-real', 'old-label']]));
+    expect(getSessionById('clobber-real')?.label).toBe('old-label');
+    // An upsert carrying a genuine (non-empty) label overwrites — the /rename and
+    // agent-title paths that flow a real label through upsert must still change it.
+    upsertSession(meta('clobber-real', { label: 'new-real-label' }), '');
+    expect(getSessionById('clobber-real')?.label).toBe('new-real-label');
+    // The FTS index moved to the new label and dropped the old one.
+    expect(ftsSearch('new-real-label')[0]?.sessionId).toBe('clobber-real');
+    expect(ftsSearch('old-label').some(h => h.score >= 800_000)).toBe(false);
+  });
+
+  it('syncLabels can still CHANGE a label after the preserve fix', () => {
+    upsertSession(meta('sync-change', { label: 'first' }), '');
+    expect(getSessionById('sync-change')?.label).toBe('first');
+    // The agent-title / `/rename` diff path replaces the label outright.
+    syncLabels(new Map([['sync-change', 'renamed']]));
+    expect(getSessionById('sync-change')?.label).toBe('renamed');
+    expect(ftsSearch('renamed')[0]?.sessionId).toBe('sync-change');
+  });
+
+  it('the first upsert still sets a real label (INSERT path unaffected)', () => {
+    upsertSession(meta('first-real', { label: 'born-with-a-label' }), '');
+    expect(getSessionById('first-real')?.label).toBe('born-with-a-label');
+    expect(ftsSearch('born-with-a-label')[0]?.sessionId).toBe('first-real');
   });
 });

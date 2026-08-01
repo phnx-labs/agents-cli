@@ -1503,6 +1503,45 @@ export function isClaudeCredentialFileBlank(
   }
 }
 
+/**
+ * Whether a Claude version home holds its OWN on-disk credential — a non-blank
+ * `.claude/.credentials.json` (the store Claude Code writes on login off macOS)
+ * or a `.claude/.oauth_token` file (the keychain-less shim fallback, shims.ts).
+ *
+ * RUSH-1979: the routines daemon injects one ambient `CLAUDE_CODE_OAUTH_TOKEN`
+ * (RUSH-1759) so a token-less default account still authenticates. But Claude —
+ * and the Linux shim's own `-z CLAUDE_CODE_OAUTH_TOKEN` guard — both prefer that
+ * env var over a pinned account's config dir, so when balanced rotation pins a
+ * specific account's `CLAUDE_CONFIG_DIR` the ambient token shadows it: the pool
+ * is inert and every fire 401s on the one stale token. A routine spawn drops the
+ * ambient token when the pinned account has its own credential (this returns
+ * true) so the account authenticates itself; when it does not (the RUSH-1759
+ * default), the injected token is kept.
+ *
+ * Off-darwin only, mirroring {@link isClaudeCredentialFileBlank}: on macOS the
+ * login Keychain is the canonical store and probing it raises an auth sheet, and
+ * there the daemon injects no token to shadow (broker-only, usually absent), so
+ * returning false changes nothing. Sync, no Keychain, no network.
+ */
+export function claudeHomeHasOwnCredential(
+  base: string,
+  platform: NodeJS.Platform = process.platform
+): boolean {
+  if (platform === 'darwin') return false;
+  if (fs.existsSync(path.join(base, '.claude', '.oauth_token'))) return true;
+  try {
+    const raw = fs.readFileSync(path.join(base, '.claude', '.credentials.json'), 'utf-8');
+    const oauth = (JSON.parse(raw) as {
+      claudeAiOauth?: { accessToken?: unknown; refreshToken?: unknown };
+    }).claudeAiOauth;
+    if (!oauth) return false;
+    const nonEmpty = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0;
+    return nonEmpty(oauth.accessToken) || nonEmpty(oauth.refreshToken);
+  } catch {
+    return false;
+  }
+}
+
 export async function getAccountInfo(
   agentId: AgentId,
   home?: string

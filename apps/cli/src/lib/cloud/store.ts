@@ -12,6 +12,7 @@ import * as os from 'os';
 import Database from '../sqlite.js';
 import type { CloudTask, CloudProviderId, CloudTaskStatus } from './types.js';
 import { getCloudDir } from '../state.js';
+import { registerCloudSession } from './session-index.js';
 
 const CLOUD_DIR = getCloudDir();
 const DB_PATH = path.join(CLOUD_DIR, 'tasks.db');
@@ -66,6 +67,11 @@ export function insertTask(task: CloudTask): void {
     task.createdAt,
     task.updatedAt,
   );
+  // Every cloud dispatch flows through here, so this is the one chokepoint that
+  // reconciles the cloud store with the session index: register a session row
+  // keyed by the real execution id so the launch is mappable to a session
+  // immediately, not only after a later proxy discovery (see session-index.ts).
+  registerCloudSession(task);
 }
 
 /** Update a task's status and optionally patch summary, PR URL, or branch. */
@@ -89,6 +95,12 @@ export function updateTaskStatus(id: string, status: CloudTaskStatus, extra?: Pa
   params.push(id);
 
   db().prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+  // Keep the session index in lockstep with the store on every poll: refresh the
+  // row so its `[cloud/<status>]` label tracks the task's lifecycle (and picks up
+  // a newly-opened PR url). Reads the just-written row so the label reflects the
+  // update we just made, not a stale snapshot.
+  const updated = getTaskById(id);
+  if (updated) registerCloudSession(updated);
 }
 
 /** Fetch a single task by its provider-assigned ID, or null if not found locally. */

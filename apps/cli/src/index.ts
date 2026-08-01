@@ -176,6 +176,8 @@ import {
   loadAlias,
   loadMine,
   loadPty,
+  loadDetach,
+  loadAttach,
   loadTmux,
   loadWatchdog,
   loadBrowser,
@@ -968,6 +970,8 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadAlias);
   await reg(loadMine);
   await reg(loadPty);
+  await reg(loadDetach);
+  await reg(loadAttach);
   await reg(loadTmux);
   await reg(loadWatchdog);
   await reg(loadBrowser);

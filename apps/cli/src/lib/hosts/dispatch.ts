@@ -335,6 +335,13 @@ export interface DispatchOptions {
   name?: string;
   /** Resume an existing session on the host by id (via `agents run --resume`). */
   resume?: string;
+  /**
+   * Forward `--emit-session-id` so the remote run prints its resolved session id
+   * as a stdout sentinel (hosts/session-marker.ts). The launcher parses that id
+   * out of the followed log and stamps it on the task — the join that maps a
+   * remote-created session back home for agents that don't take `--session-id`.
+   */
+  emitSessionId?: boolean;
   /** Stream progress and block until completion (default true). */
   follow?: boolean;
   timeoutMs?: number;
@@ -378,6 +385,7 @@ export function buildRunForwardedArgs(opts: DispatchOptions): string[] {
   if (opts.name) args.push('--name', opts.name);
   if (opts.resume) args.push('--resume', opts.resume);
   else if (opts.sessionId) args.push('--session-id', opts.sessionId);
+  if (opts.emitSessionId) args.push('--emit-session-id');
   if (opts.passthroughArgs && opts.passthroughArgs.length > 0) args.push('--', ...opts.passthroughArgs);
   return args;
 }

@@ -20,7 +20,7 @@ import type { Host } from './types.js';
 import { resolveHost, resolveHostByCap } from './registry.js';
 import { dispatchToHost } from './dispatch.js';
 import type { DispatchResult } from './dispatch.js';
-import { registerHostSession } from './session-index.js';
+import { registerHostSession, captureRemoteSessionId } from './session-index.js';
 import type { HostCredentials } from './credentials.js';
 
 /**
@@ -99,14 +99,26 @@ export interface HostPromptRun {
 }
 
 /**
- * Dispatch a headless prompt run onto a resolved host: mint the forced session
- * id (Claude is the only agent that accepts `--session-id`; on resume the
- * remote session keeps its id), launch detached over SSH, and register the run
- * in the LOCAL session index. Returns the task record and the remote exit code
- * (`-1` = follow window closed while the run continues).
+ * Dispatch a headless prompt run onto a resolved host, then relate the run's
+ * session id back to this launcher for EVERY agent — not just Claude.
+ *
+ * Claude is the only agent that accepts a forced `--session-id`, so we mint one
+ * up front and know it immediately. For every other agent the remote run coins
+ * its OWN id; we forward `--emit-session-id` so the remote prints that id as a
+ * stdout sentinel (hosts/session-marker.ts), and once the follow returns we parse
+ * it out of the mirrored local log and stamp it on the task before registering —
+ * so `agents sessions`/resume-by-id can map the discovered session home. On
+ * resume the remote session keeps its existing id (passed through, no capture).
+ *
+ * Returns the task record and the remote exit code (`-1` = follow window closed
+ * while the run continues).
  */
 export async function dispatchPromptToHost(host: Host, opts: HostPromptRun): Promise<DispatchResult> {
-  const sessionId = opts.agent === 'claude' && !opts.resume ? randomUUID() : undefined;
+  const forcedSessionId = opts.agent === 'claude' && !opts.resume ? randomUUID() : undefined;
+  // Ask the remote to print its resolved id whenever we did NOT force one (every
+  // non-Claude agent, and Claude-on-resume where the id is already known). No-op
+  // when the run isn't followed — nothing tails the log to catch the marker.
+  const emitSessionId = !forcedSessionId && !opts.resume && opts.follow !== false;
   const result = await dispatchToHost(host, {
     agent: opts.agent,
     prompt: opts.prompt,
@@ -114,7 +126,8 @@ export async function dispatchPromptToHost(host: Host, opts: HostPromptRun): Pro
     mode: opts.mode,
     model: opts.model,
     remoteCwd: opts.remoteCwd,
-    sessionId,
+    sessionId: forcedSessionId,
+    emitSessionId,
     name: opts.name,
     resume: opts.resume,
     follow: opts.follow !== false,
@@ -139,6 +152,9 @@ export async function dispatchPromptToHost(host: Host, opts: HostPromptRun): Pro
     passthroughArgs: opts.passthroughArgs,
     copyCreds: opts.copyCreds,
   });
-  registerHostSession(result.task, { cwd: opts.cwd ?? process.cwd(), prompt: opts.prompt });
-  return result;
+  // Capture the remote-coined id from the followed log (non-Claude); harmlessly a
+  // no-op when the task already carries a forced/resumed id or no marker landed.
+  const task = emitSessionId ? captureRemoteSessionId(result.task) ?? result.task : result.task;
+  registerHostSession(task, { cwd: opts.cwd ?? process.cwd(), prompt: opts.prompt });
+  return { ...result, task };
 }

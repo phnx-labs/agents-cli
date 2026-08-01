@@ -60,9 +60,16 @@ confusion in this codebase.
 
 The **transcript** side is a SQLite index (`~/.agents/.history/sessions/sessions.db`,
 `SCHEMA_VERSION` in [`src/lib/session/db.ts`](../src/lib/session/db.ts)) with a
-`scan_ledger` that re-reads a file only when its `mtime`/`size` changed, plus a
-`session_text` FTS5 table for search. Listing is a DB read; only opening one session
-fully re-parses its transcript. Detail in [05-sessions.md](05-sessions.md).
+`scan_ledger` that re-reads a file only when its `mtime`/`size` changed, a
+`dir_ledger` that skips the per-file `stat` of a leaf transcript directory whose
+`(mtime, entry_count)` is unchanged, plus a `session_text` FTS5 table for search.
+For **Claude**, a changed file that merely grew is parsed **incrementally**: the
+`scan_ledger` also stores a resumable continuation (`parser_state` + `content_text`)
+so the next scan resumes from the saved byte offset and folds in only the appended
+lines — falling back to a full reparse on a truncation / rewrite or a clock rewind.
+Both paths share one reducer, so the incremental row is identical to a full reparse.
+Listing is a DB read; only opening one session fully re-parses its transcript.
+Detail in [05-sessions.md](05-sessions.md).
 
 The **live identity** side is the rest of this document.
 
@@ -95,7 +102,11 @@ sequenceDiagram
 - **CLI pid-registry — `terminals/by-pid/<pid>.json`.** Written by `ag run` / the
   shim at spawn ([`src/lib/session/pid-registry.ts`](../src/lib/session/pid-registry.ts),
   `writePidSessionEntry`, interface `PidSessionEntry`). Immediate, but covers only
-  launches **we** make, and the id is exact only when known at launch (see §4).
+  launches **we** make, and the id is exact only when known at launch (see §4). Each
+  entry also records the `$TMUX_PANE` it launched into, which is what lets the
+  authoritative tmux source attribute a pane it did NOT wrap — an agent bare-spawned
+  into a split of an existing session — to its own launch (`resolvePaneIdentity` in
+  `src/lib/session/active.ts`) instead of dropping it to the `ps`-scan fallback.
 - **session-tracker — `terminals/sessions/<pid>.json`.** Written by the polyglot
   `SessionStart` hook after the agent boots
   ([`packages/session-tracker`](../../../packages/session-tracker), `STATE_DIR` in
@@ -194,6 +205,30 @@ tokens/sec ([`src/lib/session/active.ts`](../src/lib/session/active.ts),
 resident cache: each call pays the recompute, and the Factory extension polls it
 (local sessions ~3s, remote peers ~45s, `apps/factory/ui/.../UnifiedAgentsPane.tsx`).
 Other machines are reached by running the same command over SSH per peer.
+
+### Coarse status is honest, not guessed
+
+The rich `SessionActivity` maps to a coarse `ActiveStatus` the renderer and counts
+use: `working → running`, `waiting_input → input_required`, `idle → idle`. A rich
+tail is only parsed for **Claude and Codex** (`readSessionTailWithRaw` early-returns
+for every other kind, and `findSessionFileForKind` resolves a transcript only for
+those two). Every other case — a live gemini / droid / cursor / opencode, or a
+Claude/Codex tail that was empty or unreadable — has no rich state, so one canonical
+function, `resolveFallbackStatus(sessionFile, pidAlive)`, decides the status:
+
+| Situation | Status | Why |
+|---|---|---|
+| Transcript resolvable, mtime within 2 min | `running` | measured freshness — the file is being written |
+| Transcript resolvable, mtime older | `idle` | positive "not mid-turn" from a real signal |
+| Transcript `stat` throws (vanished / permission) | `unknown` | we genuinely cannot tell — never an optimistic `running` |
+| **No** parseable transcript, process **alive** | `unknown` | alive but opaque (a harness we don't parse) — NOT a fabricated `idle` |
+| No transcript, process not known alive | `idle` | nothing to report |
+
+`unknown` is the explicit "we can't introspect this live process" state — it renders
+as `◌` (magenta), distinct from the `○` idle it used to be silently faked as, so a
+busy non-Claude/Codex agent is never mistaken for a finished one. This is why the
+status is trustworthy uniformly across harnesses: where the truth is unknowable, the
+CLI reports `unknown` rather than inferring a wrong `idle`/`running`.
 
 This is deliberately simple and correct; the "compute once, subscribe" direction (a
 resident process that parses each file once and emits only what changed) is the

@@ -297,6 +297,17 @@ agents sessions resume --host zion --tmux  # resume on another machine over SSH
 
 `agents sessions resume` reopens sessions in whatever terminal you're in -- auto-detected across iTerm, Ghostty, tmux, and the VSCodium agent-terminal, or forced with `--iterm` / `--ghostty` / `--tmux` / `--vscodium`. Back them with **tmux** and the runs turn durable: detach, close your editor, reboot the GUI -- the session is still alive to `agents tmux attach`. The whole `agents tmux` subsystem (persistent multiplexer sessions that survive editor restarts and can be shared with other tools) sits underneath.
 
+### Send an agent to the background — and bring it back
+
+Running 30 agents and drowning in terminal tabs? `agents detach <id>` stops a session's interactive process and keeps it working **headless** in the background -- it drives its task to done unattended, no tab, lower cost. `agents attach <id>` brings it back: version-pinned resume into a live TUI, the same session and full history (including whatever it did while backgrounded).
+
+```
+agents detach a1b2c3d4     # go headless in the background, keep working
+agents attach a1b2c3d4     # resume it interactively, right here
+```
+
+Both are agent-agnostic -- they route through the same `agents run --resume` path (native resume for Claude/Codex, `/continue` replay for the rest). `agents sessions --active` marks each session's `presence` -- `attached` (you're watching it), `background` (running headless), or `parked` (its background run finished) -- so the menu bar and Factory show where every agent is.
+
 ---
 
 ## Control the fleet

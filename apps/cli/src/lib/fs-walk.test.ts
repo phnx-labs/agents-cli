@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { walkForFiles, latestFileMtimeMs } from './fs-walk.js';
+import { walkForFiles, walkForFilesWithStat, latestFileMtimeMs } from './fs-walk.js';
 
 const tempDirs: string[] = [];
 
@@ -63,6 +63,40 @@ describe('walkForFiles', () => {
 
     const found = walkForFiles(dir, '.jsonl', 10).map((p) => path.basename(p));
     expect(found).toEqual(['reachable.jsonl']);
+  });
+});
+
+describe('walkForFilesWithStat', () => {
+  it('returns the same paths in the same order as walkForFiles', () => {
+    const dir = makeTempDir();
+    writeFileAt(path.join(dir, 'a', 'old.jsonl'), 1_000);
+    writeFileAt(path.join(dir, 'b', 'newest.jsonl'), 3_000);
+    writeFileAt(path.join(dir, 'mid.jsonl'), 2_000);
+    writeFileAt(path.join(dir, 'ignored.txt'), 4_000);
+
+    const paths = walkForFiles(dir, '.jsonl', 10);
+    const withStat = walkForFilesWithStat(dir, '.jsonl', 10);
+    expect(withStat.map((r) => r.path)).toEqual(paths);
+
+    // The limit applies to the same newest-first ordering.
+    const limitedPaths = walkForFiles(dir, '.jsonl', 2);
+    const limitedWithStat = walkForFilesWithStat(dir, '.jsonl', 2);
+    expect(limitedWithStat.map((r) => r.path)).toEqual(limitedPaths);
+  });
+
+  it('reports each entry mtime and size matching a fresh statSync', () => {
+    const dir = makeTempDir();
+    fs.mkdirSync(path.join(dir, 'p'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'p', 'one.jsonl'), 'hello world', 'utf-8');
+    fs.utimesSync(path.join(dir, 'p', 'one.jsonl'), 1_000, 1_000);
+    fs.writeFileSync(path.join(dir, 'two.jsonl'), 'x', 'utf-8');
+    fs.utimesSync(path.join(dir, 'two.jsonl'), 2_000, 2_000);
+
+    for (const entry of walkForFilesWithStat(dir, '.jsonl', 10)) {
+      const fresh = fs.statSync(entry.path);
+      expect(entry.mtimeMs).toBe(fresh.mtimeMs);
+      expect(entry.size).toBe(fresh.size);
+    }
   });
 });
 
