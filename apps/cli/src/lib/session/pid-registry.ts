@@ -113,6 +113,34 @@ export function readPidSessionEntry(pid: number): PidSessionEntry | undefined {
   return undefined;
 }
 
+/**
+ * Every recorded launch, one entry per live-or-dead pid. Used to index launches
+ * by their `tmuxPane` so the authoritative tmux source can attribute a pane it did
+ * NOT wrap (an agent bare-spawned into an existing pane) to its exact launch —
+ * the caller filters to live pids. Best-effort: unreadable/corrupt files are
+ * skipped, a missing dir yields `[]`.
+ */
+export function listPidSessionEntries(): PidSessionEntry[] {
+  let files: string[];
+  try {
+    files = fs.readdirSync(pidRegistryDir()).filter(f => f.endsWith('.json'));
+  } catch {
+    return [];
+  }
+  const out: PidSessionEntry[] = [];
+  for (const f of files) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(path.join(pidRegistryDir(), f), 'utf8'));
+      if (parsed && typeof parsed === 'object' && typeof parsed.pid === 'number') {
+        out.push(parsed as PidSessionEntry);
+      }
+    } catch {
+      /* raced with a writer/pruner, or corrupt — skip */
+    }
+  }
+  return out;
+}
+
 /** Remove entries whose pid is no longer alive. Best-effort housekeeping. */
 export function prunePidSessionRegistry(isAlive: (pid: number) => boolean): void {
   let files: string[];

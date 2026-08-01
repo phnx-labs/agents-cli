@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { writePidSessionEntry, readPidSessionEntry, prunePidSessionRegistry, extractSessionIdArg } from './pid-registry.js';
+import { writePidSessionEntry, readPidSessionEntry, listPidSessionEntries, prunePidSessionRegistry, extractSessionIdArg } from './pid-registry.js';
 
 // A pid far above any real process on this box, so the test never clobbers a
 // live `ag run` entry and never collides with a real process's registry file.
@@ -56,6 +56,15 @@ describe('pid session registry', () => {
     const got = readPidSessionEntry(FAKE_PID);
     expect(got?.agent).toBe('grok');
     expect(got?.sessionId).toBeUndefined();
+  });
+
+  it('listPidSessionEntries surfaces a written entry (the tmux source indexes these by pane)', () => {
+    writePidSessionEntry({ pid: FAKE_PID, agent: 'gemini', cwd: '/repo', tmuxPane: '%42', launchId: 'lz', startedAtMs: 9 });
+    const mine = listPidSessionEntries().filter(e => e.pid === FAKE_PID);
+    expect(mine).toHaveLength(1);
+    expect(mine[0].tmuxPane).toBe('%42');
+    expect(mine[0].agent).toBe('gemini');
+    expect(mine[0].launchId).toBe('lz');
   });
 });
 
