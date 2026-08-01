@@ -51,13 +51,10 @@ import {
   type DoctorKind,
   type ResourceDiff,
   type VersionResourceReport,
-  type SourceLayerBehind,
 } from '../lib/doctor-diff.js';
 import { checkVersionHookWiring, registerHooksToSettings, type HookWiringReport } from '../lib/hooks.js';
 import { isVersionIsolated } from '../lib/versions.js';
-import { commitsBehindUpstream } from '../lib/git.js';
-import { getUserAgentsDir, getSystemAgentsDir, getEnabledExtraRepos } from '../lib/state.js';
-import { checkSyncStatus, countOrphans, type SyncStatusRow, type OrphanRow } from '../lib/drift.js';
+import { checkSyncStatus, countOrphans, computeSourceBehind, type SyncStatusRow, type OrphanRow } from '../lib/drift.js';
 import { readAuthHealthCache, summarizeHostAuth } from '../lib/auth-health.js';
 import { unifiedDiff, colorizeUnifiedDiff } from '../lib/diff-text.js';
 import { listCliStatus } from '../lib/cli-resources.js';
@@ -128,6 +125,7 @@ function renderOverviewText(
   orphanRows: OrphanRow[],
   hostClis: ReturnType<typeof listCliStatus>,
   signIn: Record<string, Pick<AccountInfo, 'signedIn' | 'email' | 'accountId'>>,
+  sourceBehind: ReturnType<typeof computeSourceBehind>,
 ): void {
   console.log(chalk.bold('Agent CLIs'));
   // Show the fleet you actually run — agents that are ready in PATH, plus any
@@ -165,17 +163,23 @@ function renderOverviewText(
     for (const row of syncRows) {
       const tag = row.isDefault ? chalk.gray(' (default)') : '';
       const label = `${AGENT_NAMES[row.agent] || row.agent}@${row.version}${tag}`;
-      if (row.status === 'fresh') {
+      const unwired = (row.unwiredHooks ?? 0) > 0;
+      if (row.status === 'fresh' && !unwired) {
         console.log(`  ${chalk.green('fresh')}  ${label}`);
-      } else if (row.status === 'stale') {
-        anyOutOfSync = true;
+        continue;
+      }
+      anyOutOfSync = true;
+      if (row.status === 'stale') {
         console.log(`  ${chalk.yellow('stale')}  ${label}  ${chalk.gray('— sources changed since last sync')}`);
-        for (const line of row.divergence ?? []) {
-          console.log(chalk.gray(`           ${line}`));
-        }
-      } else {
-        anyOutOfSync = true;
+      } else if (row.status === 'never-synced') {
         console.log(`  ${chalk.gray('cold ')}  ${label}  ${chalk.gray('— never synced')}`);
+      } else {
+        // Manifest-fresh but a declared hook is present-on-disk yet not wired into
+        // settings.json — it never fires (the yosemite-s1 blind spot).
+        console.log(`  ${chalk.red('unwired')} ${label}  ${chalk.gray('— hooks present but not wired into settings.json')}`);
+      }
+      for (const line of row.divergence ?? []) {
+        console.log(chalk.gray(`           ${line}`));
       }
     }
     // Launching does NOT reconcile a version home — the shim hot path only
@@ -187,6 +191,17 @@ function renderOverviewText(
     }
   }
   console.log();
+
+  // Source layers behind origin — every version home built off a stale source is
+  // reconciled against out-of-date truth. `--fix` does not heal this; `agents repo
+  // pull` does, so this section leads with that remediation.
+  if (sourceBehind.length > 0) {
+    console.log(chalk.bold('Source layers'));
+    for (const b of sourceBehind) {
+      console.log(`  ${chalk.red('behind')}  ${b.label}  ${chalk.gray(`${b.behind} commit${b.behind === 1 ? '' : 's'} behind ${b.branch} — run \`agents repo pull ${b.alias}\``)}`);
+    }
+    console.log();
+  }
 
   console.log(chalk.bold('Orphans (installed versions)'));
   if (orphanRows.length === 0) {
@@ -609,24 +624,6 @@ function readExpectedForDiff(kind: DoctorKind, row: ResourceDiff): string | null
 // Claude-style settings.json (matches checkVersionHookWiring's supported set).
 const HOOK_WIRING_FIX_AGENTS: AgentId[] = ['claude', 'droid'];
 
-/**
- * Probe each source layer (user, system, enabled extras) for how far it trails
- * its upstream, using the last-fetched remote-tracking ref (no network). A layer
- * behind origin means every version home is reconciled against stale truth — a
- * loud unhealthy signal, not a buried preamble. Returns only the behind layers.
- */
-function computeSourceBehind(): SourceLayerBehind[] {
-  const out: SourceLayerBehind[] = [];
-  const probe = (layer: SourceLayerBehind['layer'], dir: string, label: string, alias: string): void => {
-    const r = commitsBehindUpstream(dir);
-    if (r && r.behind > 0) out.push({ layer, label, alias, behind: r.behind, branch: r.branch });
-  };
-  probe('user', getUserAgentsDir(), '~/.agents', 'user');
-  probe('system', getSystemAgentsDir(), '~/.agents/.system', 'system');
-  for (const e of getEnabledExtraRepos()) probe('extra', e.dir, e.alias, e.alias);
-  return out;
-}
-
 export interface VerdictIssue {
   text: string;
   color: 'yellow' | 'red' | 'magenta';
@@ -691,7 +688,8 @@ function renderHookWiringRows(w: HookWiringReport): void {
   }
   for (const u of w.unwired) {
     const name = padToWidth(truncateToWidth(u.name, 28), 28);
-    console.log(`    ${chalk.red('UNWIRED')}  ${name} ${chalk.gray(`event=${u.event}`)}`);
+    const scope = u.matcher ? `event=${u.event} matcher=${u.matcher}` : `event=${u.event}`;
+    console.log(`    ${chalk.red('UNWIRED')}  ${name} ${chalk.gray(scope)}`);
   }
 }
 
@@ -748,11 +746,20 @@ function renderTargetText(report: VersionResourceReport, options: { showDiff: bo
   } else {
     const colored = verdict.issues.map((i) => chalk[i.color](i.text));
     console.log(`  Verdict: ${colored.join(', ')}.`);
-    printWrappedLine('  ', `Run \`agents doctor ${report.agent}@${report.version} --fix\` to heal, or \`agents prune cleanup\` to drop extras.`);
-    for (const b of report.sourceBehind ?? []) {
-      if (b.behind > 0) {
-        printWrappedLine('  ', `Source ${b.label} is behind ${b.branch} — run \`agents repo pull ${b.alias}\` to reconcile against current sources.`);
-      }
+    // Lead with the remediation that matches the problem. A source layer behind
+    // origin is NOT healed by `--fix` (only `agents repo pull` reconciles it), so
+    // in the sourceBehind-only case the repo-pull hint must lead and the `--fix`
+    // hint is suppressed — it would mislead.
+    const behind = (report.sourceBehind ?? []).filter((b) => b.behind > 0);
+    for (const b of behind) {
+      printWrappedLine('  ', `Source ${b.label} is behind ${b.branch} — run \`agents repo pull ${b.alias}\` to reconcile against current sources.`);
+    }
+    const w = report.hookWiring;
+    const fixable =
+      report.summary.diff > 0 || report.summary.missing > 0 || report.summary.extra > 0 ||
+      (w != null && (w.unwired.length > 0 || !!w.settingsMissing || !!w.settingsUnparseable));
+    if (fixable) {
+      printWrappedLine('  ', `Run \`agents doctor ${report.agent}@${report.version} --fix\` to heal, or \`agents prune cleanup\` to drop extras.`);
     }
   }
 }
@@ -1004,6 +1011,7 @@ export function registerDoctorCommand(program: Command): void {
         const clis = checkAllClis();
         const syncRows = checkSyncStatus(cwd);
         const orphanRows = countOrphans();
+        const sourceBehind = computeSourceBehind();
         const hostClis = listCliStatus(cwd);
         // Advisory login state per installed agent (file-based getAccountInfo,
         // no home → the account-global/active credential). Best-effort: a probe
@@ -1029,6 +1037,7 @@ export function registerDoctorCommand(program: Command): void {
             // runs, without a separate fleet-wide `fleet ping`.
             auth: summarizeHostAuth(readAuthHealthCache(), machineId()),
             sync: syncRows,
+            sourceBehind,
             orphans: orphanRows,
             hostClis: {
               statuses: hostClis.statuses.map((s) => ({
@@ -1042,11 +1051,12 @@ export function registerDoctorCommand(program: Command): void {
           }, null, 2));
           return;
         }
-        renderOverviewText(clis, syncRows, orphanRows, hostClis, signIn);
+        renderOverviewText(clis, syncRows, orphanRows, hostClis, signIn, sourceBehind);
         // Point at the interactive reconcile when anything is out of sync — the
         // report shouldn't be a dead end. `agents status` runs the unified
         // home-reading engine and offers to sync (opt-in, never auto-fires here).
-        if (syncRows.some((r) => r.status !== 'fresh')) {
+        // Unwired hooks and a behind-origin source layer count as out-of-sync too.
+        if (syncRows.some((r) => r.status !== 'fresh' || (r.unwiredHooks ?? 0) > 0) || sourceBehind.length > 0) {
           console.log(chalk.gray('\nRun `agents status` to review and sync what has drifted.'));
         }
         return;

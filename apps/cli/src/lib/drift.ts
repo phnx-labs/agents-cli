@@ -11,18 +11,26 @@ import type { AgentId } from './types.js';
 import { ALL_AGENT_IDS } from './agents.js';
 import { getGlobalDefault, listInstalledVersions } from './versions.js';
 import { loadManifest, isStale } from './staleness/index.js';
-import { diffVersionResources, type VersionResourceReport } from './doctor-diff.js';
+import { diffVersionResources, type VersionResourceReport, type SourceLayerBehind } from './doctor-diff.js';
 import { diffVersionCommands, iterCommandsCapableVersions } from './commands.js';
 import { diffVersionSkills, iterSkillsCapableVersions } from './skills.js';
-import { iterHooksCapableVersions, listUnmanagedHooksInVersionHome } from './hooks.js';
+import { iterHooksCapableVersions, listUnmanagedHooksInVersionHome, checkVersionHookWiring } from './hooks.js';
+import { commitsBehindUpstream } from './git.js';
+import { getUserAgentsDir, getSystemAgentsDir, getEnabledExtraRepos } from './state.js';
 
 export interface SyncStatusRow {
   agent: AgentId;
   version: string;
   status: 'fresh' | 'stale' | 'never-synced';
   isDefault: boolean;
-  /** For stale rows: prioritized lines naming exactly what diverged (plugins first). */
+  /** For stale rows: prioritized lines naming exactly what diverged (plugins first).
+   *  Also carries hook-wiring divergence for a version whose hooks are present but
+   *  not wired into settings.json — independent of manifest staleness. */
   divergence?: string[];
+  /** Count of hooks present on disk but NOT wired into the version's settings.json
+   *  (claude/droid). A non-zero value makes the version out-of-sync even when the
+   *  manifest reads fresh — the yosemite-s1 blind spot the CI gate must catch. */
+  unwiredHooks?: number;
 }
 
 export interface OrphanRow {
@@ -70,13 +78,34 @@ export function checkSyncStatus(cwd: string): SyncStatusRow[] {
         ? 'never-synced'
         : isStale(manifest, agent, version, cwd) ? 'stale' : 'fresh';
       const row: SyncStatusRow = { agent, version, status, isDefault: version === def };
+      const divergence: string[] = [];
       if (status === 'stale') {
         // Resolve the specifics against non-project layers (the global home is
         // never reconciled against per-cwd project resources).
         const report = diffVersionResources(agent, version, { cwd, excludeProject: true });
-        const lines = divergenceLines(report);
-        if (lines.length) row.divergence = lines;
+        divergence.push(...divergenceLines(report));
       }
+      // Hook WIRING is independent of manifest staleness: a hook file can be
+      // byte-identical to source (fresh) yet absent from settings.json, so it
+      // never fires. Surface that for every version, fresh or stale, so overview
+      // AND `agents check` flag it (claude/droid; other agents report unsupported).
+      const wiring = checkVersionHookWiring(agent, version);
+      if (wiring.supported) {
+        const expected = wiring.expected ?? 0;
+        if (wiring.settingsMissing && expected > 0) {
+          row.unwiredHooks = expected;
+          divergence.push(`hooks       settings.json missing — ${expected} declared hook(s) never fire`);
+        } else if (wiring.settingsUnparseable) {
+          row.unwiredHooks = Math.max(1, expected);
+          divergence.push(`hooks       settings.json unparseable — wiring cannot be verified`);
+        } else if (wiring.unwired.length > 0) {
+          row.unwiredHooks = wiring.unwired.length;
+          const names = wiring.unwired.map((u) => u.name);
+          const shown = names.slice(0, 3).join(', ');
+          divergence.push(`hooks       ${wiring.unwired.length} unwired (${shown}${names.length > 3 ? ', …' : ''})`);
+        }
+      }
+      if (divergence.length) row.divergence = divergence;
       rows.push(row);
     }
   }
@@ -116,6 +145,25 @@ export function countOrphans(): OrphanRow[] {
   return Array.from(byKey.values()).filter((r) => r.commands + r.skills + r.hooks > 0);
 }
 
+/**
+ * Probe each source layer (user, system, enabled extras) for how far it trails
+ * its upstream, from the LAST-FETCHED remote-tracking ref (no network). A layer
+ * behind origin means every version home is reconciled against stale truth — a
+ * drift signal `agents check` must fail on, not a buried preamble. Returns only
+ * the behind layers. Canonical home for both `agents doctor` and `agents check`.
+ */
+export function computeSourceBehind(): SourceLayerBehind[] {
+  const out: SourceLayerBehind[] = [];
+  const probe = (layer: SourceLayerBehind['layer'], dir: string, label: string, alias: string): void => {
+    const r = commitsBehindUpstream(dir);
+    if (r && r.behind > 0) out.push({ layer, label, alias, behind: r.behind, branch: r.branch });
+  };
+  probe('user', getUserAgentsDir(), '~/.agents', 'user');
+  probe('system', getSystemAgentsDir(), '~/.agents/.system', 'system');
+  for (const e of getEnabledExtraRepos()) probe('extra', e.dir, e.alias, e.alias);
+  return out;
+}
+
 export interface DriftSummary {
   syncRows: SyncStatusRow[];
   orphanRows: OrphanRow[];
@@ -125,11 +173,17 @@ export interface DriftSummary {
   neverSyncedCount: number;
   /** Versions carrying orphan resources (informational — not a drift signal). */
   orphanVersionCount: number;
+  /** Versions with hooks present on disk but not wired into settings.json. */
+  unwiredHookVersions: number;
+  /** Source layers behind their upstream (reconciled against stale truth). */
+  sourceBehind: SourceLayerBehind[];
   /**
-   * True when any installed version is stale or never-synced — the exact signal
-   * `agents doctor` surfaces as "run `agents status` to review what has drifted".
-   * Orphans are a `prune` concern, not sync drift, so they do NOT set this flag
-   * (mirrors the sync-status engine: an orphan alone never flags needsSync).
+   * True when the install is out of sync: any installed version is stale,
+   * never-synced, or carries unwired hooks, OR a source layer is behind origin.
+   * `agents doctor` surfaces it as "run `agents status`"; `agents check` maps it
+   * to a non-zero exit. Orphans are a `prune` concern, not sync drift, so they do
+   * NOT set this flag (mirrors the sync-status engine: an orphan alone never
+   * flags needsSync).
    */
   hasDrift: boolean;
 }
@@ -144,12 +198,19 @@ export function computeDrift(cwd: string): DriftSummary {
   const orphanRows = countOrphans();
   const staleCount = syncRows.filter((r) => r.status === 'stale').length;
   const neverSyncedCount = syncRows.filter((r) => r.status === 'never-synced').length;
+  const unwiredHookVersions = syncRows.filter((r) => (r.unwiredHooks ?? 0) > 0).length;
+  const sourceBehind = computeSourceBehind();
   return {
     syncRows,
     orphanRows,
     staleCount,
     neverSyncedCount,
     orphanVersionCount: orphanRows.length,
-    hasDrift: syncRows.some((r) => r.status !== 'fresh'),
+    unwiredHookVersions,
+    sourceBehind,
+    hasDrift:
+      syncRows.some((r) => r.status !== 'fresh') ||
+      unwiredHookVersions > 0 ||
+      sourceBehind.length > 0,
   };
 }

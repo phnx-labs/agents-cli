@@ -88,12 +88,15 @@ export function registerCheckCommand(program: Command): void {
         hasDrift: drift.hasDrift,
         stale: drift.staleCount,
         neverSynced: drift.neverSyncedCount,
+        unwiredHookVersions: drift.unwiredHookVersions,
         orphanVersions: drift.orphanVersionCount,
+        sourceBehind: drift.sourceBehind,
         versions: drift.syncRows.map((r) => ({
           agent: r.agent,
           version: r.version,
           status: r.status,
           isDefault: r.isDefault,
+          unwiredHooks: r.unwiredHooks ?? 0,
           divergence: r.divergence ?? [],
         })),
       }, null, 2));
@@ -119,18 +122,31 @@ export function registerCheckCommand(program: Command): void {
     const parts: string[] = [];
     if (drift.staleCount > 0) parts.push(`${drift.staleCount} stale`);
     if (drift.neverSyncedCount > 0) parts.push(`${drift.neverSyncedCount} never-synced`);
-    console.error(`${chalk.red('drift')}  ${parts.join(', ')} of ${drift.syncRows.length} version(s)`);
+    if (drift.unwiredHookVersions > 0) parts.push(`${drift.unwiredHookVersions} with unwired hooks`);
+    if (drift.sourceBehind.length > 0) parts.push(`${drift.sourceBehind.length} source layer(s) behind origin`);
+    console.error(`${chalk.red('drift')}  ${parts.join(', ')}`);
 
     if (!opts.quiet) {
       for (const row of drift.syncRows) {
-        if (row.status === 'fresh') continue;
-        const tag = row.status === 'stale' ? chalk.yellow('stale') : chalk.gray('cold ');
+        const unwired = (row.unwiredHooks ?? 0) > 0;
+        if (row.status === 'fresh' && !unwired) continue;
+        const tag = row.status === 'stale' ? chalk.yellow('stale')
+          : row.status === 'never-synced' ? chalk.gray('cold ')
+          : chalk.red('unwired'); // fresh but hooks not wired into settings.json
         console.error(`  ${tag}  ${label(row)}`);
         for (const line of row.divergence ?? []) {
           console.error(chalk.gray(`           ${line}`));
         }
       }
-      console.error(chalk.gray('\nReconcile with `agents doctor --fix` (or `agents doctor <agent>@<version> --fix`).'));
+      for (const b of drift.sourceBehind) {
+        console.error(`  ${chalk.red('behind')} source ${b.label}  ${chalk.gray(`${b.behind} commit${b.behind === 1 ? '' : 's'} behind ${b.branch}`)}`);
+      }
+      const hints: string[] = [];
+      if (drift.staleCount > 0 || drift.neverSyncedCount > 0 || drift.unwiredHookVersions > 0) {
+        hints.push('`agents doctor --fix` (or `agents doctor <agent>@<version> --fix`)');
+      }
+      if (drift.sourceBehind.length > 0) hints.push('`agents repo pull <alias>` for a source layer behind origin');
+      console.error(chalk.gray(`\nReconcile with ${hints.join('; ')}.`));
     }
 
     process.exit(1);
