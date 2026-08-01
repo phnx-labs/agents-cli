@@ -27,7 +27,6 @@ import { sshResolve, type SshGResult } from '../lib/hosts/ssh-config.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { randomUUID } from 'crypto';
 import { spawnSync } from 'child_process';
 
 interface ExecCommandActionOptions {
@@ -1111,7 +1110,7 @@ export function registerRunCommand(program: Command): void {
           process.exit(1);
         }
         const hostName = hostGiven[0];
-        const { resolveHostRunTarget, dispatchPromptToHost, HostResolutionError } = await import('../lib/hosts/run-target.js');
+        const { resolveHostRunTarget, resolveHostSessionId, dispatchPromptToHost, HostResolutionError } = await import('../lib/hosts/run-target.js');
         const { runInteractiveOnHost } = await import('../lib/hosts/dispatch.js');
         const { registerInteractiveHostSession } = await import('../lib/hosts/session-index.js');
         const { RUN_OPTION_REJECT_MESSAGES } = await import('../lib/hosts/remote-cmd.js');
@@ -1282,10 +1281,10 @@ export function registerRunCommand(program: Command): void {
               process.exit(1);
             }
             // Mirror the local path (lib/exec.ts): only Claude accepts a forced
-            // `--session-id`. Generating it here lets us register the run in the
-            // local index and makes it resumable by id. On resume the remote
-            // session keeps its existing id — don't mint a new one.
-            const hostSessionId = runAgent === 'claude' && !resumeId ? randomUUID() : undefined;
+            // `--session-id`. Adopt the caller's id when present; otherwise mint
+            // one here. Registering that same id keeps the local index aligned
+            // with the remote agent. On resume, don't mint a new one.
+            const hostSessionId = resolveHostSessionId(runAgent, resumeId, options.sessionId);
             if (hostSessionId) {
               registerInteractiveHostSession({
                 cwd: process.cwd(),
@@ -1377,6 +1376,7 @@ export function registerRunCommand(program: Command): void {
             remoteCwd: hostCwd,
             name: options.name,
             resume: resumeId,
+            sessionId: options.sessionId,
             follow: options.follow !== false,
             passthroughArgs,
             copyCreds: hostCopyCreds,
