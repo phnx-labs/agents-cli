@@ -1,18 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- **`agents sessions <id>` with a short/partial id resolves by id only — no more
-  "Multiple sessions match" from fuzzy content.** `resolveSessionQuery` only sent
-  *complete* UUIDs down the id-only path (`isCompleteSessionId`); a bare hex
-  short-id like `d3470b57` fell through to the ranked content search and surfaced
-  every transcript that merely MENTIONED the string (a resume prompt echoes the
-  parent id into the body of many later sessions), so a real view id returned a
-  list of unrelated sessions. Any id-shaped query — complete id OR hex
-  short-id/prefix (`looksLikeSessionId`) — now resolves through the index by id
-  and reports "no session with that id" when nothing matches, instead of falling
-  back to content search. Source: `apps/cli/src/commands/sessions.ts`.
-
 ## 1.20.76
 
 - **The routines daemon can read a `never`/no-ACL secrets bundle headlessly again — fixes a false "no Claude credential" alert.** The headless secrets guard (`readAndResolveBundleEnv`'s `agentOnly` branch) threw for every keychain-backed bundle absent from the broker, but a `never`/no-ACL bundle carries no biometry ACL — its reads raise no Touch ID sheet, so blocking it served no purpose. That wrongly blocked the automation-only `claude` bundle the routines daemon reads at startup (`readDaemonClaudeOAuthToken`), leaving every scheduled Claude routine token-less, and — on the new auth-failure alert path — firing "no Claude credential" on each daemon start even when the bundle was configured correctly. The guard now exempts `never`/no-ACL bundles (policy learned via a prompt-less metadata read), matching the existing file-backend exemption. Source: `apps/cli/src/lib/secrets/bundles.ts`.
