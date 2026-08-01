@@ -285,6 +285,9 @@ function statusColor(status: ActiveSession['status']): (s: string) => string {
     case 'idle': return chalk.gray;
     case 'queued': return chalk.blue;
     case 'input_required': return chalk.yellow;
+    // Alive but un-introspectable (a harness whose transcript we can't parse).
+    // Magenta so it never reads as the gray "idle" it used to be faked as.
+    case 'unknown': return chalk.magenta;
   }
 }
 
@@ -381,7 +384,10 @@ export function liveGlyphAndPreview(a: ActiveSession | undefined): { glyph: stri
   if (!a) return { glyph: '', preview: '' };
   const waiting = a.status === 'input_required' || a.activity === 'waiting_input';
   const running = a.status === 'running' || a.activity === 'working';
-  const shape = waiting ? '◐' : running ? '●' : '○';
+  // `◌` (dotted) = alive but un-introspectable — visually distinct from `○` idle
+  // so an opaque harness is never mistaken for a finished one.
+  const unknown = a.status === 'unknown';
+  const shape = waiting ? '◐' : running ? '●' : unknown ? '◌' : '○';
   return { glyph: statusColor(a.status)(shape), preview: buildSessionDescription(a) };
 }
 
@@ -693,20 +699,24 @@ async function runRemoteSessionsJson(hosts: string[]): Promise<void> {
 }
 
 /**
- * `running N · idle N · waiting N · queued N` for a bucket of sessions (zero
- * buckets omitted). Same bucketing as the grand-total summary so per-group
- * counts reconcile with the `(total)` beside the header. Empty when nothing.
+ * `running N · idle N · waiting N · queued N · unknown N` for a bucket of
+ * sessions (zero buckets omitted). Same bucketing as the grand-total summary so
+ * per-group counts reconcile with the `(total)` beside the header — the `unknown`
+ * bucket is what keeps an alive-but-opaque row from silently vanishing from the
+ * tally. Empty when nothing.
  */
 function groupTally(sessions: ActiveSession[]): string {
   const running = sessions.filter(s => s.status === 'running').length;
   const idle = sessions.filter(s => s.status === 'idle').length;
   const waiting = sessions.filter(s => s.status === 'input_required').length;
   const queued = sessions.filter(s => s.status === 'queued').length;
+  const unknown = sessions.filter(s => s.status === 'unknown').length;
   const parts: string[] = [];
   if (running) parts.push(`${running} running`);
   if (idle) parts.push(`${idle} idle`);
   if (waiting) parts.push(`${waiting} waiting`);
   if (queued) parts.push(`${queued} queued`);
+  if (unknown) parts.push(`${unknown} unknown`);
   return parts.join(' · ');
 }
 
