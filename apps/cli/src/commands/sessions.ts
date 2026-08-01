@@ -1882,9 +1882,14 @@ export function formatPickerLabel(
   const when = formatRelativeTime(s.lastActivity ?? s.timestamp);
   const project = s.project || '-';
   // SSH-launch origin (live rows only): mirrors the flat listing's `ssh←<device>`
-  // token — prepended as a topic tag so the width-budgeted columns stay aligned.
-  const sshTag = ssh ? chalk.red(ssh.device ? `ssh←${ssh.device} ` : 'ssh ') : '';
-  const tag = `${sshTag}${originTag(s) || teamTag(s)}`;
+  // badge. Rendered as its OWN red segment before the topic cell — folding it into
+  // the topic string loses the colour, because renderTopicCell strips ANSI and
+  // re-whitens every slice. Its width is reserved from the topic budget below
+  // (exactly like `wt`), so the fixed-width columns stay aligned.
+  const sshPlain = ssh ? (ssh.device ? `ssh←${ssh.device} ` : 'ssh ') : '';
+  const sshSeg = sshPlain ? chalk.red(sshPlain) : '';
+  const sshW = sshPlain ? stringWidth(sshPlain) : 0;
+  const tag = originTag(s) || teamTag(s);
   const label = (s as any).label;
   const topic = tag ? `${tag}${s.topic ?? ''}` : s.topic;
   const versionStr = s.version || '-';
@@ -1909,7 +1914,7 @@ export function formatPickerLabel(
   const wtW = wt ? stringWidth(wt) + 1 : 0;
   const topicW = Math.max(
     16,
-    terminalWidth() - gutter - (10 + 9 + 8 + 16) - machineColW - ticketW - wtW - stringWidth(when) - 1,
+    terminalWidth() - gutter - (10 + 9 + 8 + 16) - machineColW - ticketW - wtW - sshW - stringWidth(when) - 1,
   );
 
   return (
@@ -1918,6 +1923,7 @@ export function formatPickerLabel(
     chalk.yellow(padRight(truncate(versionStr, 7), 8)) +
     machineCell +
     chalk.cyan(padRight(truncate(project, 14), 16)) +
+    sshSeg +
     renderTopicCell(label, topic, query, topicW, topicW) +
     ticketCell +
     (wt ? wt + ' ' : '') +
