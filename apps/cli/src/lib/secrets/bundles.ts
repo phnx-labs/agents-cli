@@ -365,6 +365,26 @@ export function bundleExists(name: string): boolean {
   return itemStore(bundleBackend(name)).has(bundleMetaItem(name));
 }
 
+/**
+ * Read a bundle, or return null when its metadata is present but cannot be
+ * decrypted — a lost or rotated file-store passphrase, or a vault that cannot
+ * be unlocked here.
+ *
+ * Deleting a bundle is the only way out of that state, and deletion needs no
+ * plaintext, so it must not be gated behind a successful decrypt. A genuinely
+ * missing bundle still throws: "not found" and "present but unreadable" require
+ * different answers from the caller, and collapsing them would turn a typo into
+ * a silent no-op.
+ */
+export function readBundleIfDecryptable(name: string): SecretsBundle | null {
+  try {
+    return readBundle(name);
+  } catch (err) {
+    if (bundleExists(name)) return null;
+    throw err;
+  }
+}
+
 export function readBundle(name: string): SecretsBundle {
   validateBundleName(name);
   const backend = bundleBackend(name);

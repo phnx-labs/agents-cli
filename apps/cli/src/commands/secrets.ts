@@ -40,6 +40,7 @@ import {
   readAndResolveBundleEnv,
   isHeadlessSecretsContext,
   readBundle,
+  readBundleIfDecryptable,
   renameBundle,
   rotateBundleSecret,
   sanitizeProcessEnv,
@@ -307,20 +308,31 @@ async function importFromICloud(
 }
 
 /**
- * Printed under a "bundle not found" failure: if the name matches a bundle
- * stranded in the iCloud Keychain (pre-device-local-cutover era), point at the
- * recovery command instead of leaving a dead end.
+ * Printed under a read failure: if the name matches a bundle stranded in the
+ * iCloud Keychain (pre-device-local-cutover era), point at the recovery command
+ * instead of leaving a dead end.
+ *
+ * `stillPresent` distinguishes the two failures, because they need different
+ * commands. A MISSING bundle imports straight from iCloud. A bundle that is on
+ * disk but undecryptable does not: `import` reads the existing bundle before
+ * writing into it, so it fails the same way the read just did. That one has to
+ * be deleted first — which is why naming the wrong command here bricked the
+ * name entirely.
  */
-function maybePrintSyncedHint(name: string): void {
+function maybePrintSyncedHint(name: string, stillPresent: boolean): void {
   if (process.platform !== 'darwin') return;
   try {
-    if (discoverSyncedBundles().some((c) => c.name === name)) {
-      console.error(
-        chalk.yellow(
-          `A legacy iCloud Keychain copy of '${name}' exists. Recover it with: agents secrets import ${name} --from icloud`,
-        ),
-      );
-    }
+    if (!discoverSyncedBundles().some((c) => c.name === name)) return;
+    console.error(
+      chalk.yellow(
+        stillPresent
+          ? `A legacy iCloud Keychain copy of '${name}' exists, but the local copy is unreadable and ` +
+            `import writes into it. Delete the local copy first, then recover:\n` +
+            `  agents secrets delete ${name}\n` +
+            `  agents secrets import ${name} --from icloud`
+          : `A legacy iCloud Keychain copy of '${name}' exists. Recover it with: agents secrets import ${name} --from icloud`,
+      ),
+    );
   } catch {
     // Hint only — never mask the original error.
   }
@@ -959,7 +971,7 @@ export function registerSecretsCommands(program: Command): void {
           bundle = readBundle(resolvedName);
         } catch (err) {
           console.error(chalk.red((err as Error).message));
-          maybePrintSyncedHint(resolvedName);
+          maybePrintSyncedHint(resolvedName, bundleExists(resolvedName));
           process.exit(1);
         }
         const entries = describeBundle(bundle);
@@ -1543,16 +1555,26 @@ Examples:
     .action(async (name: string | undefined, opts: { keepSecrets?: boolean; yes?: boolean }) => {
       try {
         const resolvedName = name ?? (await pickBundleName('delete'));
-        const bundle = readBundle(resolvedName);
+        // An undecryptable bundle (lost/rotated passphrase) must still be
+        // deletable: deletion is the ONLY way out of that state, and every other
+        // verb — view, add, import — refuses to touch the name until it's gone.
+        // Its key refs are unreadable, so its keychain items cannot be
+        // enumerated for purging; say so rather than claiming a clean purge.
+        const bundle = readBundleIfDecryptable(resolvedName);
         if (!opts.yes) {
           if (!isInteractiveTerminal()) {
             console.error(chalk.red(`Refusing to delete '${resolvedName}' without --yes in a non-interactive shell.`));
             process.exit(1);
           }
-          const keychainCount = describeBundle(bundle).filter((e) => e.kind === 'keychain').length;
-          const suffix = keychainCount && !opts.keepSecrets
-            ? ` and purge ${keychainCount} keychain item${keychainCount === 1 ? '' : 's'}`
-            : '';
+          let suffix: string;
+          if (!bundle) {
+            suffix = ' (unreadable — its keychain items cannot be enumerated and will be left in place)';
+          } else {
+            const keychainCount = describeBundle(bundle).filter((e) => e.kind === 'keychain').length;
+            suffix = keychainCount && !opts.keepSecrets
+              ? ` and purge ${keychainCount} keychain item${keychainCount === 1 ? '' : 's'}`
+              : '';
+          }
           const { confirm } = await import('@inquirer/prompts');
           const proceed = await confirm({
             message: `Delete bundle '${resolvedName}'${suffix}?`,
@@ -1563,7 +1585,7 @@ Examples:
             return;
           }
         }
-        if (!opts.keepSecrets) {
+        if (bundle && !opts.keepSecrets) {
           const store = bundleItemStore(bundle.backend);
           for (const { item } of keychainItemsForBundle(bundle)) {
             store.delete(item);
