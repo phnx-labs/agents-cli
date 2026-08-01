@@ -2329,23 +2329,26 @@ Examples:
       const configured = (() => { try { const v = readMeta().secrets?.agent?.holdMs; return typeof v === 'number' && Number.isFinite(v) && v > 0; } catch { return false; } })();
       console.log(chalk.gray(`hold: ${holdStr}${configured ? ' (secrets.agent.holdMs)' : ' (default)'} — a daily bundle prompts once, then stays silent for this long or until sleep/logout.`));
       const entries = await agentStatus();
+      const held = new Set(entries.map((e) => e.name));
       if (entries.length === 0) {
         console.log(chalk.gray('No bundles held. The next read of each daily bundle will prompt once, then hold.'));
         console.log(chalk.gray('Pre-warm now with: agents secrets unlock <bundle>  (or --all)'));
-        return;
+      } else {
+        console.log(chalk.bold(`${'BUNDLE'.padEnd(24)} ${'KEYS'.padEnd(5)} LOCKS IN`));
+        for (const e of entries) {
+          console.log(`${chalk.cyan(e.name.padEnd(24))} ${String(e.keyCount).padEnd(5)} ${humanRemaining(e.expiresAt)}`);
+        }
+        console.log(chalk.gray('Reads of held bundles are silent; any bundle not listed prompts once on its next read.'));
       }
-      console.log(chalk.bold(`${'BUNDLE'.padEnd(24)} ${'KEYS'.padEnd(5)} LOCKS IN`));
-      for (const e of entries) {
-        console.log(`${chalk.cyan(e.name.padEnd(24))} ${String(e.keyCount).padEnd(5)} ${humanRemaining(e.expiresAt)}`);
-      }
-      console.log(chalk.gray('Reads of held bundles are silent; any bundle not listed prompts once on its next read.'));
 
-      // Usage hint: bundles you keep getting a Touch ID prompt for (read from
-      // the keychain, not the broker/session, >= a few times in the last week)
-      // and are not currently held — unlocking each once silences it for the
-      // hold window. `never`/no-ACL bundles never prompt, so they are dropped.
+      // Usage hint: bundles you keep getting a Touch ID prompt for — a keychain
+      // read that fell through to biometry (not served by the broker/session)
+      // >= a few times in the last week, and not currently held. Unlocking each
+      // once silences it for the hold window. This runs even when NO bundle is
+      // held — that user re-prompts on every read and most needs the nudge.
+      // Excludes `never`/no-ACL bundles (never prompt) and file/vault bundles
+      // (resolve by passphrase, not the keychain broker — `unlock` is a no-op).
       try {
-        const held = new Set(entries.map((e) => e.name));
         const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
         const reads = query({ eventTypes: ['secrets.get'], startDate: weekAgo }) as Array<{
           bundle?: string;
@@ -2353,7 +2356,7 @@ Examples:
         }>;
         const hot = frequentlyPromptedBundles(reads, held, { minReads: 3 }).filter((h) => {
           try {
-            return bundlePolicy(readBundle(h.name)) !== 'never';
+            return bundleBackend(h.name) === 'keychain' && bundlePolicy(readBundle(h.name)) !== 'never';
           } catch {
             return false; // bundle gone / unreadable metadata — nothing to suggest
           }
