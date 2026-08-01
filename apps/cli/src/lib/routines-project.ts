@@ -340,9 +340,9 @@ export interface SyncAllResult {
 }
 
 /**
- * Sync every opted-in project root, plus any project whose agents.yaml has
- * `routines.enable: true` when that path is also already on the allowlist or
- * is passed via `extraRoots`.
+ * Sync every project root on the user allowlist (`meta.routines.projects`),
+ * plus any explicit `extraRoots`. Project `agents.yaml` `routines.enable`
+ * alone never opts a path in — enable-project is required.
  */
 export function syncAllProjectRoutines(opts: { extraRoots?: string[] } = {}): SyncAllResult {
   const roots = new Set<string>(listEnabledProjectRoots());

@@ -745,6 +745,17 @@ export function validateJob(config: Partial<JobConfig>): string[] {
       }
     }
   }
+  // Off-box placement without a devices pin fires on every fleet daemon and
+  // each dispatches once (RUSH-1980). Enforce the pin at validation so hand
+  // edits and devices --clear cannot re-open the hole.
+  if (placementRequiresFiringPin(strategy)) {
+    if (!config.devices || config.devices.length === 0) {
+      errors.push(
+        `hostStrategy: ${strategy} requires devices: [<name>] to pin which daemon may fire ` +
+        '(otherwise every fleet daemon dispatches once). Pin to one machine, e.g. devices: [this-host]',
+      );
+    }
+  }
 
   return errors;
 }

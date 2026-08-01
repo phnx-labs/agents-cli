@@ -28,11 +28,12 @@ export type PlacementTarget =
  * 1. This machine, if online and eligible (avoids needless SSH)
  * 2. First eligible online device by name (stable / deterministic)
  *
- * When `config.devices` is set it is treated as an *execution* allowlist for
- * the pick (in addition to its firing role). Control / offline / no-address
- * devices are never chosen.
+ * `config.devices` is the *firing* allowlist only (which daemon may fire the
+ * job). It is intentionally NOT used as an execution pool filter — otherwise
+ * the double-fire pin (`devices: [self]`) would collapse fleet placement to
+ * always-local. Control / offline / no-address devices are never chosen.
  */
-export function pickFleetDevice(config: Pick<JobConfig, 'devices'>): string | null {
+export function pickFleetDevice(_config?: Pick<JobConfig, 'devices'>): string | null {
   let reg: ReturnType<typeof loadDevicesSync>;
   try {
     reg = loadDevicesSync();
@@ -40,11 +41,7 @@ export function pickFleetDevice(config: Pick<JobConfig, 'devices'>): string | nu
     return null;
   }
   const planned = planFleetTargets(reg);
-  let candidates = planned.filter((t) => !t.skip).map((t) => t.device.name);
-  if (config.devices && config.devices.length > 0) {
-    const allow = new Set(config.devices.map((d) => normalizeHost(d)));
-    candidates = candidates.filter((n) => allow.has(normalizeHost(n)));
-  }
+  const candidates = planned.filter((t) => !t.skip).map((t) => t.device.name);
   if (candidates.length === 0) {
     // No registry / nothing online: fall back to self so a single-box fleet
     // without a registry entry still runs locally.

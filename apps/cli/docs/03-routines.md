@@ -83,7 +83,7 @@ devices: [yosemite-s0]   # firing pin — only this daemon fires (avoids double-
 prompt: "Drain the local work queue"
 ```
 
-**Double-fire guard.** `host` / `fleet` / `cloud` without a `devices` pin would let every fleet daemon fire and each dispatch once. Add and sync auto-pin `devices` to this machine when you omit `--devices`. Bare `host:` (without `hostStrategy`) still works and implies `host` strategy.
+**Double-fire guard.** `host` / `fleet` / `cloud` require a `devices` pin naming which daemon may *fire* the job. Without it every fleet daemon would fire and each dispatch once. Add and sync auto-pin `devices` to this machine when you omit `--devices`. For `fleet`, that pin is **firing only** — the body still runs on any online fleet device (`pickFleetDevice` does not filter by `devices`). `devices --clear` refuses for off-box strategies. Bare `host:` (without `hostStrategy`) still works and implies `host` strategy (and still needs a pin).
 
 `--host` on `agents routines` is the remote-management passthrough ("manage routines **on** that machine") — do not overload it for placement. Use `--placement` / `--run-on`.
 

@@ -257,7 +257,8 @@ describe('placement resolution', () => {
 
   it('fleet falls back to self when the device registry is empty', () => {
     // pickFleetDevice with empty/missing registry returns machineId().
-    const picked = pickFleetDevice({});
+    // devices pin is fire-only and must not collapse the execution pool.
+    const picked = pickFleetDevice({ devices: ['some-other-box'] });
     expect(typeof picked).toBe('string');
     expect(picked!.length).toBeGreaterThan(0);
   });
@@ -267,6 +268,20 @@ describe('placement resolution', () => {
       name: 'e', mode: 'auto', effort: 'auto', timeout: '10m', enabled: true, prompt: 'p',
       hostStrategy: 'host',
     } as JobConfig)).toThrow(/no host/);
+  });
+
+  it('fleet with a self fire-pin still resolves (devices is not the execution pool)', async () => {
+    const { machineId } = await import('../machine-id.js');
+    const self = machineId();
+    // Even when devices pins firing to self, fleet may place on any online
+    // device — resolvePlacementTarget must not throw and may return local or host.
+    const t = resolvePlacementTarget({
+      name: 'fleet-pin', mode: 'auto', effort: 'auto', timeout: '10m', enabled: true, prompt: 'p',
+      agent: 'claude',
+      hostStrategy: 'fleet',
+      devices: [self],
+    } as JobConfig);
+    expect(t.mode === 'local' || t.mode === 'host').toBe(true);
   });
 });
 

@@ -453,26 +453,31 @@ describe('writeJob extension handling', () => {
 });
 
 describe('validateJob — host placement', () => {
-  it('accepts a plain host-placed agent job', () => {
-    expect(validateJob(baseJob({ schedule: '0 3 * * *', host: 'gpu-box' }))).toEqual([]);
+  it('accepts a plain host-placed agent job with a devices pin', () => {
+    expect(validateJob(baseJob({ schedule: '0 3 * * *', host: 'gpu-box', devices: ['zion'] }))).toEqual([]);
+  });
+
+  it('rejects host placement without a devices pin', () => {
+    const errors = validateJob(baseJob({ schedule: '0 3 * * *', host: 'gpu-box' }));
+    expect(errors.some((e) => e.includes('requires devices'))).toBe(true);
   });
 
   it('rejects an empty host', () => {
-    expect(validateJob(baseJob({ host: '  ' }))).toContainEqual(expect.stringContaining('host must be a non-empty machine name'));
+    expect(validateJob(baseJob({ host: '  ', devices: ['zion'] }))).toContainEqual(expect.stringContaining('host must be a non-empty machine name'));
   });
 
   it('rejects host + workflow (bundle lives on the firing machine)', () => {
-    const errors = validateJob(baseJob({ host: 'gpu-box', workflow: 'autodev', agent: undefined }));
+    const errors = validateJob(baseJob({ host: 'gpu-box', devices: ['zion'], workflow: 'autodev', agent: undefined }));
     expect(errors.some((e) => e.includes('host placement') && e.includes('workflow'))).toBe(true);
   });
 
   it('rejects host + loop (driver + signal files live on the firing machine)', () => {
-    const errors = validateJob(baseJob({ host: 'gpu-box', loop: { maxIterations: 2 } as JobConfig['loop'] }));
+    const errors = validateJob(baseJob({ host: 'gpu-box', devices: ['zion'], loop: { maxIterations: 2 } as JobConfig['loop'] }));
     expect(errors.some((e) => e.includes('host placement') && e.includes('loop'))).toBe(true);
   });
 
   it('rejects host + command (shell command has no agent to place remotely)', () => {
-    const errors = validateJob({ name: 'cmd-on-host', schedule: '0 3 * * *', command: 'echo hi', host: 'gpu-box', mode: 'auto', effort: 'auto', timeout: '10m', enabled: true, prompt: '' } as JobConfig);
+    const errors = validateJob({ name: 'cmd-on-host', schedule: '0 3 * * *', command: 'echo hi', host: 'gpu-box', devices: ['zion'], mode: 'auto', effort: 'auto', timeout: '10m', enabled: true, prompt: '' } as JobConfig);
     expect(errors.some((e) => e.includes('host placement') && e.includes('command'))).toBe(true);
   });
 

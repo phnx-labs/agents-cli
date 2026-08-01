@@ -1305,6 +1305,14 @@ export function registerRoutinesCommands(program: Command): void {
       }
 
       if (options.clear) {
+        const strategy = resolveHostStrategy(job);
+        if (placementRequiresFiringPin(strategy)) {
+          console.error(chalk.red(
+            `Cannot clear devices for hostStrategy: ${strategy} — without a pin every fleet daemon would dispatch once.`,
+          ));
+          console.error(chalk.gray(`Keep a single-machine pin (e.g. --set ${machineId()}) or switch to --placement local.`));
+          process.exit(1);
+        }
         job.devices = undefined;
         writeJob(job);
         console.log(chalk.green(`Devices cleared for '${name}' — runs on all devices`));
@@ -1315,6 +1323,12 @@ export function registerRoutinesCommands(program: Command): void {
       if (hasSet) {
         const devices = await parseAndValidateDevices(options.set!);
         job.devices = devices;
+        // Re-validate so host/fleet/cloud can't be left with an empty set via --set ""
+        const errs = validateJob(job);
+        if (errs.length > 0) {
+          console.error(chalk.red(errs.join('\n')));
+          process.exit(1);
+        }
         writeJob(job);
         console.log(chalk.green(`Devices for '${name}' set to: ${devices.join(', ')}`));
         if (isDaemonRunning()) signalDaemonReload();
@@ -1347,6 +1361,13 @@ export function registerRoutinesCommands(program: Command): void {
         });
 
         if (selected.length === 0) {
+          const strategy = resolveHostStrategy(job);
+          if (placementRequiresFiringPin(strategy)) {
+            console.error(chalk.red(
+              `Cannot clear devices for hostStrategy: ${strategy} — without a pin every fleet daemon would dispatch once.`,
+            ));
+            return;
+          }
           job.devices = undefined;
           writeJob(job);
           console.log(chalk.green(`Devices cleared for '${name}' — runs on all devices`));
@@ -1457,7 +1478,7 @@ export function registerRoutinesCommands(program: Command): void {
         process.exit(1);
       }
 
-      if (!options.yes && !options.json) {
+      if (!options.yes) {
         if (!isInteractiveTerminal()) {
           console.error(chalk.red('Refusing to enable project routines non-interactively without --yes.'));
           console.error(chalk.gray(`Found ${files.length} routine(s) in ${displayProjectPath(root)}. Re-run with --yes to confirm.`));
