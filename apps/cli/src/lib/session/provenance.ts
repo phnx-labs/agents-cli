@@ -76,6 +76,10 @@ export interface SessionProvenance {
   mux?: MuxLocation;
   /** Whether an existing rail can type back into this session (see module doc). */
   reply: ReplyRail;
+  /** The initiating device, resolved at query time from ssh.clientIp against the
+   * device registry (ssh transport only). Answers "who launched this and from
+   * where" without scraping ps/who/tailscale. */
+  origin?: { device: string; user?: string };
 }
 
 /** Env vars that carry provenance. Kept small so the macOS `ps` scan stays cheap. */
