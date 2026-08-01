@@ -340,9 +340,43 @@ Bumping it would un-deprecate a retired package.
   `npm update -g @phnx-labs/agents-cli`.
 - No sensitive data in any DotAgents repo — use `agents secrets` (Keychain-backed).
 
+## Contracts (source-of-truth spec — read before touching sessions/secrets)
+
+The major subsystems carry a **normative contract** in
+[`docs/specifications.md`](docs/specifications.md) — what a human, an agent, or a
+downstream tool may rely on, written because features have regressed by quietly
+deviating from an unwritten contract. When code and the spec disagree, one is a
+bug; fix the drift. It uses RFC-2119 MUST/SHOULD language, cites the implementing
+`file:line`, and carries Given/When/Then scenarios that map to tests. Sections:
+
+- **[`docs/specifications.md` §Sessions](docs/specifications.md#sessions)** — the `agents sessions`
+  contract. Load-bearing invariants: discovery MUST parse **every** harness in
+  `SESSION_AGENTS` (all 11) and a malformed line MUST be skipped, never thrown
+  (SES-1, SES-3); every list row MUST show a **non-empty preview** — live turn →
+  `label` → first-prompt `topic` → `'-'` (SES-8; the `--flat` renderer is the one
+  known violation, GAP-1); "where a session started" spans three fields
+  (`cwd` + `provenance` + `context`), not one `origin` (SES-13); the `--json`
+  shapes and `SessionEvent` union are a stability contract (IF-1, IF-4); R2 sync
+  is a zero-knowledge CRDT G-Set union (SES-24, SES-25).
+- **[`docs/specifications.md` §Secrets](docs/specifications.md#secrets)** — the `agents secrets`
+  contract. Load-bearing invariants: **inject into the child, never materialize
+  to the agent** — every command is on one side of the boundary by construction
+  (SEC-6, SEC-7); the master passphrase MUST be stripped from the child env
+  (SEC-8); the "no-noise" rules — silent value-free `list`, batched single-prompt
+  reads, silent broker miss, no `console.*` in the lib layer, no shell-rc
+  pollution (SEC-11..SEC-17); all three desktop platforms are supported and the
+  parity matrix names where guarantees are weaker (CROSS-1, CROSS-3).
+
+Both specs also enumerate **known gaps** (implemented-vs-intended drift) — a new
+feature MUST NOT widen them and SHOULD close the one it touches.
+
 ## Detailed design
 
 [`docs/`](docs/README.md) is the source-grounded reference. Start with
 [`architecture.md`](docs/architecture.md) for the CLI/extension layering and the
 session mechanisms, then [`00-concepts.md`](docs/00-concepts.md) for the resource
-model.
+model. The normative contract
+([`specifications.md`](docs/specifications.md)) sits
+alongside the reference docs ([05-sessions.md](docs/05-sessions.md),
+[secrets.md](docs/secrets.md)) — read the spec for the guarantee, the reference
+for the how-to.

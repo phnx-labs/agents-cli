@@ -1,5 +1,9 @@
 # Sessions
 
+> This is the **reference / how-to**. For the normative contract — what
+> `agents sessions` guarantees, as testable MUST/SHOULD requirements with
+> Given/When/Then scenarios — see [`specifications.md` §Sessions](specifications.md#sessions).
+
 Unified discovery, search, and rendering of agent conversation transcripts across
 the session-discoverable harnesses — Claude, Codex, Gemini, Antigravity, OpenCode,
 OpenClaw, Rush, Hermes, Grok, Kimi, and Droid (the `SESSION_AGENTS` set in
@@ -640,8 +644,9 @@ generating the encryption key if absent.
 
 ## Schema Version
 
-Schema version is currently `13` (`SCHEMA_VERSION` in
-[`src/lib/session/db.ts`](../src/lib/session/db.ts)). Migrations run on connection
+Schema version is tracked by the `SCHEMA_VERSION` constant in
+[`src/lib/session/db.ts`](../src/lib/session/db.ts) (the constant is the source
+of truth — don't hardcode the number here). Migrations run on connection
 open; old DBs get upgraded in place. The `meta` table tracks `schema_version`.
 Later migrations added, among others, `cost_usd` / `duration_ms` (pricing), the
 work-signal columns `pr_url` / `pr_number` / `worktree_slug` / `ticket_id`, the

@@ -222,3 +222,10 @@ prose. Voice is direct-developer: verb + artifact, no marketing claims — close
 with [`architecture.md`](apps/cli/docs/architecture.md) for the CLI/extension layering
 and the session mechanisms, then [`00-concepts.md`](apps/cli/docs/00-concepts.md) for
 the resource model and resolution semantics of the CLI.
+
+**Normative contract.** The major subsystems carry a source-of-truth spec
+(RFC-2119 MUST/SHOULD + Given/When/Then, cited to `file:line`) that a change MUST
+NOT silently deviate from — [`apps/cli/docs/specifications.md`](apps/cli/docs/specifications.md)
+(§[Sessions](apps/cli/docs/specifications.md#sessions) ·
+§[Secrets](apps/cli/docs/specifications.md#secrets) ·
+§[Agent execution](apps/cli/docs/specifications.md#agent-execution)).

@@ -1,5 +1,10 @@
 # Secrets
 
+> This is the **reference / how-to**. For the normative contract — what
+> `agents secrets` guarantees (storage & materialization boundaries, the no-noise
+> rules, cross-platform parity), as testable MUST/SHOULD requirements with
+> Given/When/Then scenarios — see [`specifications.md` §Secrets](specifications.md#secrets).
+
 ## Agent-scoped unlocks
 
 On macOS, **an agent launch never raises a Touch ID sheet.** A terminal, a
@@ -42,7 +47,10 @@ A bundle is a named container (`prod`, `staging`, `npm-tokens`) that maps env va
 
 Cross-machine sync has two paths: explicit encrypted push/pull (`agents secrets push/pull`) backed by api.prix.dev, or user-managed file sync with `agents login` plus synced bundles. Push/pull values are sealed with AES-256-GCM before upload. Synced bundles live inside `~/.agents/vault.age`, an age-encrypted file that you copy with iCloud Drive, Dropbox, Syncthing, git, scp, or any other transport.
 
-> **Platform:** macOS Keychain or Linux libsecret. Windows is not supported.
+> **Platform:** cross-platform — macOS Keychain, Linux libsecret, or Windows
+> Credential Manager, each with an AES-256-GCM encrypted-file fallback. The
+> biometry/broker layer is macOS-only; see the [cross-platform parity
+> matrix](specifications.md#secrets) for where guarantees differ per OS.
 
 ## Synced bundles
 
@@ -631,6 +639,8 @@ process running as the same user. For a key held **off disk**, set
 
 ## See Also
 
+- [`specifications.md` §Secrets](specifications.md#secrets) — **the normative contract** (requirements + Given/When/Then + parity matrix); read it for the guarantees this how-to implements
+- [`../../../docs/design/secrets-trust-boundaries.md`](../../../docs/design/secrets-trust-boundaries.md) — the plaintext data-flow: which commands inject vs materialize
 - `docs/00-concepts.md` — DotAgents repos and resource model
 - `docs/profiles.md` — provider API keys for non-default models
 - `docs/03-routines.md` — scheduled jobs with sandboxed permissions (secrets are dropped from the sandbox env by default)

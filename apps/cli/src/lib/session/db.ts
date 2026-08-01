@@ -2,7 +2,7 @@
  * SQLite-backed session index and full-text search.
  *
  * Stores session metadata and user-prompt text in a WAL-mode SQLite database
- * at ~/.agents/sessions/sessions.db. Provides incremental upsert, scan-stamp
+ * at ~/.agents/.history/sessions/sessions.db. Provides incremental upsert, scan-stamp
  * ledger (mtime/size tracking to skip unchanged files), FTS5 search with
  * BM25 ranking, and label-first search for /rename'd sessions.
  */
