@@ -73,6 +73,7 @@ import {
   listVaults,
   type OpVault,
 } from '../lib/onepassword.js';
+import { GLOBAL_HARNESS } from '../lib/secrets/scope.js';
 import {
   secretsHoldMs,
   secretsAgentDurable,
@@ -2176,7 +2177,7 @@ Examples:
     .description('Hold a bundle in the secrets-agent after one Touch ID, so concurrent runs read it without re-prompting (macOS). With --host, unlock FILE-backed bundle(s) on a remote (the passphrase prompt surfaces over the SSH TTY); keychain/biometry bundles are GUI-only and can\'t be remote-unlocked.')
     .option('--ttl <duration>', 'How long to hold it (e.g. 30m, 8h, 3d). Default 7d.')
     .option('--durable', 'Keep the unlock across sleep + reboot too (default: survives upgrade/restart but re-locks on sleep). Set secrets.agent.durable in agents.yaml to make this the default.')
-    .option('--for <agent>', 'Scope the unlock to one harness type (for example claude, codex, or kimi).')
+    .option('--for <agent>', 'Narrow the unlock to ONE harness type (for example claude, codex, or kimi). Default: the grant is global — every harness and a plain shell can read it, so one Touch ID covers them all.')
     .option('--all', 'Unlock every configured bundle')
     .option('--host <target>', 'Unlock the bundle(s) on this remote machine over SSH instead of locally (file-backed bundles only — the remote\'s passphrase prompt surfaces on your terminal over a -tt session). Single-valued (NOT variadic) so it never swallows the bundle name: `unlock <name> --host <machine>`.')
     .action(async (names: string[], opts: { ttl?: string; durable?: boolean; all?: boolean; host?: string; for?: string }) => {
@@ -2247,7 +2248,12 @@ Examples:
       // (single-instance start lock, #414) and best-effort — never blocks unlock.
       ensureDaemonStarted();
       let loaded = 0;
-      const harness = opts.for || process.env.AGENTS_AGENT_NAME || 'cli';
+      // An unlock is a deliberate act, so it grants GLOBALLY unless `--for`
+      // narrows it to one harness. It must NOT inherit the ambient
+      // AGENTS_AGENT_NAME: that silently scoped a terminal unlock to whichever
+      // agent happened to launch the shell, leaving the grant unreadable to
+      // every other reader for its whole TTL.
+      const harness = opts.for || GLOBAL_HARNESS;
       for (const name of targets) {
         try {
           // noAgent: read the real keychain (one Touch ID) rather than the

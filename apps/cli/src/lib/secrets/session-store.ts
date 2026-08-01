@@ -26,6 +26,7 @@
  */
 
 import { getKeychainToken, setKeychainToken, deleteKeychainToken, isKeychainBackendOverridden } from './index.js';
+import { GLOBAL_HARNESS, bundleScopeChain } from './scope.js';
 import type { SecretsBundle } from './bundles.js';
 
 /** Prefix for all durable session items (device-local, no-ACL). */
@@ -145,7 +146,7 @@ export function writeIndex(index: SessionIndex): void {
 export function saveSession(name: string, entry: SessionEntry): void {
   if (!shouldPersist()) return;
   try {
-    const harness = entry.harness || 'cli';
+    const harness = entry.harness || GLOBAL_HARNESS;
     const key = `${harness}:${name}`;
     setKeychainToken(sessionBlobItem(name, harness), JSON.stringify({ ...entry, harness }), { noAcl: true });
     writeIndex(upsertEntry(readIndex(), key, { expiresAt: entry.expiresAt, sleepPersist: entry.sleepPersist, harness }));
@@ -154,8 +155,26 @@ export function saveSession(name: string, entry: SessionEntry): void {
   }
 }
 
+/**
+ * Read a session honoring the scope chain: the caller's own harness first, then
+ * the global grant (see bundleScopeChain in scope.ts). This is the durable-store
+ * twin of the broker's `get` — both must resolve identically, or a bundle would
+ * be readable from RAM but not after a restart.
+ */
+export function resolveSession(
+  name: string,
+  now: number = Date.now(),
+  harness: string = GLOBAL_HARNESS,
+): { entry: SessionEntry; harness: string } | null {
+  for (const scope of bundleScopeChain(harness)) {
+    const entry = loadSession(name, now, scope);
+    if (entry) return { entry, harness: scope };
+  }
+  return null;
+}
+
 /** Read one session blob by known name. Null when absent/expired/malformed. */
-export function loadSession(name: string, now: number = Date.now(), harness: string = 'cli'): SessionEntry | null {
+export function loadSession(name: string, now: number = Date.now(), harness: string = GLOBAL_HARNESS): SessionEntry | null {
   if (!shouldPersist()) return null;
   try {
     const raw = getKeychainToken(sessionBlobItem(name, harness));
@@ -179,7 +198,7 @@ export function deleteBundleSessions(name: string): void {
   for (const [key, meta] of Object.entries(index.bundles)) {
     const scopedName = key.includes(':') ? key.split(':').slice(1).join(':') : key;
     if (scopedName !== name) continue;
-    const harness = meta.harness || 'cli';
+    const harness = meta.harness || GLOBAL_HARNESS;
     try { deleteKeychainToken(key.includes(':') ? sessionBlobItem(name, harness) : `${SESSION_ITEM_PREFIX}${name}`); } catch { /* keep going */ }
     next = removeEntry(next, key);
   }
@@ -187,7 +206,7 @@ export function deleteBundleSessions(name: string): void {
 }
 
 /** Delete one bundle's session blob and prune it from the index. */
-export function deleteSession(name: string, harness: string = 'cli'): void {
+export function deleteSession(name: string, harness: string = GLOBAL_HARNESS): void {
   if (!shouldPersist()) return;
   try {
     deleteKeychainToken(sessionBlobItem(name, harness));
@@ -206,7 +225,7 @@ export function deleteAllSessions(): void {
       const bundleName = name.includes(':') ? name.split(':').slice(1).join(':') : name;
       try {
         deleteKeychainToken(name.includes(':')
-          ? sessionBlobItem(bundleName, meta.harness || 'cli')
+          ? sessionBlobItem(bundleName, meta.harness || GLOBAL_HARNESS)
           : `${SESSION_ITEM_PREFIX}${bundleName}`);
       } catch { /* keep going */ }
     }
@@ -232,25 +251,45 @@ export function rehydrateSessions(now: number = Date.now()): Array<{ name: strin
       try {
         const raw = getKeychainToken(`${SESSION_ITEM_PREFIX}${key}`);
         const legacy = JSON.parse(raw) as SessionEntry;
-        setKeychainToken(sessionBlobItem(key, 'cli'), JSON.stringify({ ...legacy, harness: 'cli' }), { noAcl: true });
+        setKeychainToken(sessionBlobItem(key, GLOBAL_HARNESS), JSON.stringify({ ...legacy, harness: GLOBAL_HARNESS }), { noAcl: true });
         deleteKeychainToken(`${SESSION_ITEM_PREFIX}${key}`);
-        migratedIndex = upsertEntry(removeEntry(migratedIndex, key), `cli:${key}`, {
+        migratedIndex = upsertEntry(removeEntry(migratedIndex, key), `${GLOBAL_HARNESS}:${key}`, {
           expiresAt: meta.expiresAt,
           sleepPersist: meta.sleepPersist,
-          harness: 'cli',
+          harness: GLOBAL_HARNESS,
         });
       } catch { /* malformed/absent legacy entry is pruned below */ }
+    }
+    // Second source migration: `cli`-scoped grants predate the global scope. `cli`
+    // was never a harness — it was the default when no AGENTS_AGENT_NAME was set,
+    // i.e. "unlocked from a terminal for general use", which is exactly the global
+    // grant. Rewriting them means an unlock a user already paid Touch ID for keeps
+    // working after upgrade instead of silently becoming unreadable to every agent.
+    for (const [key, meta] of Object.entries(migratedIndex.bundles)) {
+      if (!key.startsWith('cli:')) continue;
+      const bundleName = key.slice('cli:'.length);
+      try {
+        const raw = getKeychainToken(sessionBlobItem(bundleName, 'cli'));
+        const legacy = JSON.parse(raw) as SessionEntry;
+        setKeychainToken(sessionBlobItem(bundleName, GLOBAL_HARNESS), JSON.stringify({ ...legacy, harness: GLOBAL_HARNESS }), { noAcl: true });
+        deleteKeychainToken(sessionBlobItem(bundleName, 'cli'));
+        migratedIndex = upsertEntry(removeEntry(migratedIndex, key), `${GLOBAL_HARNESS}:${bundleName}`, {
+          expiresAt: meta.expiresAt,
+          sleepPersist: meta.sleepPersist,
+          harness: GLOBAL_HARNESS,
+        });
+      } catch { /* malformed/absent entry is pruned below */ }
     }
     writeIndex(migratedIndex);
     index.bundles = migratedIndex.bundles;
     const { survivors, expiredNames } = pruneExpired(index, now);
     for (const name of expiredNames) {
-      const meta = index.bundles[name]; try { deleteKeychainToken(sessionBlobItem(name.split(':').slice(1).join(':'), meta.harness || 'cli')); } catch { /* keep going */ }
+      const meta = index.bundles[name]; try { deleteKeychainToken(sessionBlobItem(name.split(':').slice(1).join(':'), meta.harness || GLOBAL_HARNESS)); } catch { /* keep going */ }
     }
     if (expiredNames.length) writeIndex(survivors);
     for (const name of selectRehydratable(survivors, now)) {
       const meta = survivors.bundles[name]; const bundleName = name.split(':').slice(1).join(':');
-      const entry = loadSession(bundleName, now, meta.harness || 'cli');
+      const entry = loadSession(bundleName, now, meta.harness || GLOBAL_HARNESS);
       if (entry) out.push({ name: bundleName, entry });
     }
   } catch {
@@ -267,7 +306,7 @@ export function pruneSessionsOnSleep(): void {
     const { survivors, deletedNames } = pruneOnSleep(readIndex());
     for (const name of deletedNames) {
       const meta = readIndex().bundles[name];
-      try { deleteKeychainToken(sessionBlobItem(name.split(':').slice(1).join(':'), meta.harness || 'cli')); } catch { /* keep going */ }
+      try { deleteKeychainToken(sessionBlobItem(name.split(':').slice(1).join(':'), meta.harness || GLOBAL_HARNESS)); } catch { /* keep going */ }
     }
     writeIndex(survivors);
   } catch {

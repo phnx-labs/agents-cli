@@ -57,7 +57,8 @@ import { emit } from '../events.js';
 import { readMeta, getHelpersDir } from '../state.js';
 import { assertNameActiveInResourceProfile, filterNamesForActiveResourceProfile } from '../resource-profiles.js';
 import { agentGetSync, agentAutoLoadSync, agentGetMetaSync, agentAutoLoadMetaSync, agentEvictSync, secretsAgentAutoEnabled, secretsHoldMs } from './agent.js';
-import { loadSession, deleteSession } from './session-store.js';
+import { GLOBAL_HARNESS } from './scope.js';
+import { resolveSession, deleteSession } from './session-store.js';
 import { createHash } from 'node:crypto';
 
 /** Which store carries a bundle's items. */
@@ -1313,7 +1314,11 @@ export function readAndResolveBundleEnv(
   // file-backed bundle has none to dedup. The never-unlocked path is a single
   // stat (agentSocketExists) so it costs nothing when the agent isn't running.
   if (backend === 'keychain' && !opts.noAgent && process.env.AGENTS_SECRETS_NO_AGENT !== '1') {
-    const harness = opts.agent || process.env.AGENTS_AGENT_NAME || 'cli';
+    // The scope this reader asks under. Falls back to the GLOBAL scope, not to a
+    // literal `'cli'` harness — the broker and the durable store both resolve
+    // own-harness → global (bundleScopeChain), so an unscoped unlock is visible
+    // here whether this process was launched by an agent or typed in a terminal.
+    const harness = opts.agent || process.env.AGENTS_AGENT_NAME || GLOBAL_HARNESS;
     const hit = agentGetSync(name, harness);
     if (hit) {
       // The agent stores the FULL bundle env. Apply the same subset filter and
@@ -1339,13 +1344,16 @@ export function readAndResolveBundleEnv(
     // Touch ID. Serve from it and re-warm the broker, so a warm bundle stays warm
     // across restart — this fixes BOTH the interactive re-prompt and the headless
     // throw below (which now fires only when there is genuinely no session).
-    const session = loadSession(name, Date.now(), harness);
-    if (session) {
+    const resolved = resolveSession(name, Date.now(), harness);
+    if (resolved) {
+      const session = resolved.entry;
       const filtered = filterAgentHitBySubsetAndExpiry({ bundle: session.bundle, env: session.env }, opts);
       stampLastUsed(filtered.bundle);
       // Re-warm the broker with the remaining TTL so later reads hit RAM and
-      // `agents secrets status` is honest. Best-effort; no-ops off darwin.
-      agentAutoLoadSync(name, session.bundle, session.env, Math.max(1, session.expiresAt - Date.now()), harness);
+      // `agents secrets status` is honest. Re-warm under the scope the grant was
+      // MADE in (resolved.harness), never the asking scope — re-warming a global
+      // grant as `claude` would silently narrow it for every other harness.
+      agentAutoLoadSync(name, session.bundle, session.env, Math.max(1, session.expiresAt - Date.now()), resolved.harness);
       emit('secrets.get', {
         module: 'secrets',
         bundle: name,
@@ -1546,7 +1554,7 @@ export function readAndResolveBundleEnv(
       secretsAgentAutoEnabled() &&
       canCacheResolvedEnv(bundle, selectedKeys, opts.keyMode)
     ) {
-      agentAutoLoadSync(name, bundle, env, secretsHoldMs(), opts.agent || process.env.AGENTS_AGENT_NAME || 'cli');
+      agentAutoLoadSync(name, bundle, env, secretsHoldMs(), opts.agent || process.env.AGENTS_AGENT_NAME || GLOBAL_HARNESS);
     }
     return { bundle, env };
   } catch (err) {

@@ -36,8 +36,15 @@ import { getKeychainHelperPath } from './install-helper.js';
 import { getCliVersion, getCliVersionFresh } from '../version.js';
 import { getCliLaunch } from '../cli-entry.js';
 import type { SecretsBundle } from './bundles.js';
+import { GLOBAL_HARNESS, bundleScopeChain } from './scope.js';
 import { rehydrateSessions, pruneSessionsOnSleep } from './session-store.js';
 import { SYNC_GET_CMD, SYNC_PING_CMD, SYNC_LOCK_CMD } from './sync-commands.js';
+
+// Re-exported so callers already reaching for agent.js keep one obvious home for
+// the scope vocabulary; the definitions live in the leaf module scope.ts because
+// agent.ts and session-store.ts import each other and a cyclic `const` read can
+// hit the ESM temporal dead zone at runtime.
+export { GLOBAL_HARNESS, bundleScopeChain };
 
 /** Bumped when the wire protocol changes; a client that pings a mismatched
  * server kills and respawns it rather than talking a stale dialect. */
@@ -164,7 +171,7 @@ function onDarwin(): boolean {
 function rehydrateStore(now: number = Date.now()): Map<string, StoredBundle> {
   const store = new Map<string, StoredBundle>();
   for (const { name, entry } of rehydrateSessions(now)) {
-    const harness = entry.harness || 'cli';
+    const harness = entry.harness || GLOBAL_HARNESS;
     store.set(scopedBundleKey(name, harness), { bundle: entry.bundle, env: entry.env, expiresAt: entry.expiresAt, harness });
   }
   return store;
@@ -361,16 +368,19 @@ export function handleAgentRequest(
       // the broker is running pre-upgrade code and should be restarted.
       return { ok: true, cmd: 'ping', version: PROTOCOL_VERSION, cliVersion: getCliVersion() };
     case 'get': {
-      const key = scopedBundleKey(req.name, req.harness || 'cli');
-      const e = store.get(key);
-      if (!e || now >= e.expiresAt) {
-        if (e) store.delete(key); // drop expired on read
-        return { ok: true, cmd: 'get', hit: false };
+      // Walk own-harness → global so a `--for` grant wins over a global one and
+      // an unscoped unlock serves every harness (bundleScopeChain).
+      for (const scope of bundleScopeChain(req.harness)) {
+        const key = scopedBundleKey(req.name, scope);
+        const e = store.get(key);
+        if (!e) continue;
+        if (now >= e.expiresAt) { store.delete(key); continue; } // drop expired on read
+        return { ok: true, cmd: 'get', hit: true, bundle: e.bundle, env: e.env };
       }
-      return { ok: true, cmd: 'get', hit: true, bundle: e.bundle, env: e.env };
+      return { ok: true, cmd: 'get', hit: false };
     }
     case 'load':
-      const harness = req.harness || 'cli';
+      const harness = req.harness || GLOBAL_HARNESS;
       store.set(scopedBundleKey(req.name, harness), { bundle: req.bundle, env: req.env, expiresAt: now + req.ttlMs, harness });
       return { ok: true, cmd: 'load' };
     case 'lock': {
@@ -853,7 +863,7 @@ function syncClient(sub: string[], timeout: number): SpawnSyncReturns<string> | 
  * null if the agent isn't running / doesn't hold this bundle / anything fails
  * (soft — caller falls through to the real keychain). macOS only.
  */
-export function agentGetSync(name: string, harness: string = 'cli'): { bundle: SecretsBundle; env: Record<string, string> } | null {
+export function agentGetSync(name: string, harness: string = GLOBAL_HARNESS): { bundle: SecretsBundle; env: Record<string, string> } | null {
   if (!agentSocketExists()) return null;
   const r = syncClient([SYNC_GET_CMD, name, harness], SYNC_GET_TIMEOUT_MS);
   if (!r || r.status !== 0 || !r.stdout) return null;
@@ -929,7 +939,7 @@ export function agentEvictSync(name: string): void {
 
 /** Body of `__secrets-get <name>`. Prints `{bundle, env}` as JSON on a
  * cache hit. Exit 0 = hit, 3 = miss or broker down. */
-export async function runAgentGetSync(name: string, harness: string = 'cli'): Promise<number> {
+export async function runAgentGetSync(name: string, harness: string = GLOBAL_HARNESS): Promise<number> {
   const r = await request({ cmd: 'get', name, harness }, SOCKET_GET_TIMEOUT_MS);
   if (r?.ok === true && r.cmd === 'get' && r.hit) {
     // Trailing newline: the parent reads the LAST line (see lastLine), so the
@@ -1089,7 +1099,7 @@ export function agentAutoLoadSync(
   bundle: SecretsBundle,
   env: Record<string, string>,
   ttlMs: number,
-  harness: string = 'cli',
+  harness: string = GLOBAL_HARNESS,
 ): void {
   if (!onDarwin()) return;
   const payload = JSON.stringify({ name, bundle, env, ttlMs, harness });
@@ -1154,7 +1164,7 @@ export async function runAgentLoadFromStdin(): Promise<void> {
     process.exitCode = 1; // broker couldn't be brought up — did NOT load
     return;
   }
-  const loaded = await agentLoad(payload.name, payload.bundle, payload.env, payload.ttlMs ?? DEFAULT_TTL_MS, payload.harness ?? 'cli');
+  const loaded = await agentLoad(payload.name, payload.bundle, payload.env, payload.ttlMs ?? DEFAULT_TTL_MS, payload.harness ?? GLOBAL_HARNESS);
   if (!loaded) process.exitCode = 1; // transport failed — did NOT load
 }
 
@@ -1164,7 +1174,7 @@ export async function agentLoad(
   bundle: SecretsBundle,
   env: Record<string, string>,
   ttlMs: number,
-  harness: string = 'cli',
+  harness: string = GLOBAL_HARNESS,
 ): Promise<boolean> {
   const r = await request({ cmd: 'load', name, bundle, env, ttlMs, harness });
   return r?.ok === true && r.cmd === 'load';

@@ -15,6 +15,7 @@ import {
   upsertEntry,
   removeEntry,
   saveSession,
+  resolveSession,
   loadSession,
   deleteSession,
   deleteAllSessions,
@@ -113,7 +114,41 @@ describe.each([
     expect(got?.env.TOKEN).toBe('secret-apple.com');
     expect(got?.bundle.name).toBe('apple.com');
     // index reflects the hold
-    expect(Object.keys(readIndex().bundles)).toEqual(['cli:apple.com']);
+    expect(Object.keys(readIndex().bundles)).toEqual(['*:apple.com']);
+  });
+
+  // The durable twin of the broker's scope chain: after a restart the broker RAM
+  // is empty and reads come from here, so if this resolved differently a bundle
+  // would work until the daemon bounced and then silently stop.
+  it('resolveSession serves a global grant to an agent-scoped reader', () => {
+    saveSession('npmjs.com', entry('npmjs.com', FAR + Date.now(), false));
+    const got = resolveSession('npmjs.com', Date.now(), 'claude');
+    expect(got?.entry.env.TOKEN).toBe('secret-npmjs.com');
+    expect(got?.harness).toBe('*');
+  });
+
+  it('resolveSession prefers a --for grant over the global one', () => {
+    saveSession('prod', entry('prod', FAR + Date.now(), false));
+    saveSession('prod', { ...entry('prod', FAR + Date.now(), false), env: { TOKEN: 'narrow' }, harness: 'claude' });
+    expect(resolveSession('prod', Date.now(), 'claude')?.entry.env.TOKEN).toBe('narrow');
+    expect(resolveSession('prod', Date.now(), 'codex')?.entry.env.TOKEN).toBe('secret-prod');
+  });
+
+  it('resolveSession does not leak a --for grant to another harness', () => {
+    saveSession('prod', { ...entry('prod', FAR + Date.now(), false), harness: 'claude' });
+    expect(resolveSession('prod', Date.now(), 'codex')).toBeNull();
+  });
+
+  it('migrates a cli-scoped grant to global so an existing unlock keeps working', () => {
+    // `cli` was never a harness — it was the default when AGENTS_AGENT_NAME was
+    // unset, i.e. "unlocked from a terminal for general use". Without this
+    // migration every grant a user already paid Touch ID for goes unreadable on
+    // upgrade.
+    saveSession('npmjs.com', { ...entry('npmjs.com', FAR + Date.now(), false), harness: 'cli' });
+    expect(Object.keys(readIndex().bundles)).toEqual(['cli:npmjs.com']);
+    rehydrateSessions();
+    expect(Object.keys(readIndex().bundles)).toEqual(['*:npmjs.com']);
+    expect(resolveSession('npmjs.com', Date.now(), 'claude')?.entry.env.TOKEN).toBe('secret-npmjs.com');
   });
 
   it('does not reuse a persisted grant across harness types', () => {
@@ -130,7 +165,7 @@ describe.each([
     expect(loadSession('prod', Date.now(), 'codex')).toBeNull();
   });
 
-  it('migrates a pre-harness durable grant into the cli scope', () => {
+  it('migrates a pre-harness durable grant into the global scope', () => {
     const expiresAt = FAR + Date.now();
     const legacy = entry('legacy', expiresAt, false);
     setKeychainToken(`${SESSION_ITEM_PREFIX}legacy`, JSON.stringify(legacy), { noAcl: true });
@@ -138,8 +173,8 @@ describe.each([
       bundles: { legacy: { expiresAt, sleepPersist: false } },
     }), { noAcl: true });
     const restored = rehydrateSessions();
-    expect(restored[0]?.entry.harness).toBe('cli');
-    expect(loadSession('legacy', Date.now(), 'cli')?.env.TOKEN).toBe('secret-legacy');
+    expect(restored[0]?.entry.harness).toBe('*');
+    expect(loadSession('legacy', Date.now(), '*')?.env.TOKEN).toBe('secret-legacy');
     expect(hasKeychainToken(`${SESSION_ITEM_PREFIX}legacy`)).toBe(false);
   });
 
@@ -174,7 +209,7 @@ describe.each([
     pruneSessionsOnSleep();
     expect(loadSession('def')).toBeNull();
     expect(loadSession('dur')?.bundle.name).toBe('dur');
-    expect(Object.keys(readIndex().bundles)).toEqual(['cli:dur']);
+    expect(Object.keys(readIndex().bundles)).toEqual(['*:dur']);
   });
 
   it('deleteAllSessions clears everything', () => {
