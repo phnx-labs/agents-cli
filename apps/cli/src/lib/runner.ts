@@ -1041,16 +1041,33 @@ async function executeCommandJobForeground(config: JobConfig): Promise<RunResult
   return { meta, reportPath: null };
 }
 
-/** Spawn a job as a detached process and return immediately with run metadata. */
+/**
+ * Optional lifecycle callbacks for a detached routine run. The daemon passes an
+ * `onFinish` that fires the branded finish/output notification (RUSH-2030) — it
+ * runs from the in-process settle() when the child exits, the only seam that
+ * observes the live running→terminal transition (the monitor tick would already
+ * see a finalized record and skip it). Never let a hook throw into finalization.
+ */
+export interface RoutineHooks {
+  /** Called once with the finalized meta when the run reaches a terminal state. */
+  onFinish?: (meta: RunMeta) => void;
+}
+
+/** Invoke a lifecycle hook without letting a caller error break run finalization. */
+function safeHook(fn: (() => void) | undefined): void {
+  if (!fn) return;
+  try { fn(); } catch { /* hooks are best-effort */ }
+}
 
 /** Spawn a job as a detached process and return immediately with run metadata. */
-export async function executeJobDetached(config: JobConfig): Promise<RunMeta> {
+export async function executeJobDetached(config: JobConfig, hooks?: RoutineHooks): Promise<RunMeta> {
   const eligibility = checkJobDeviceEligibility(config);
   if (eligibility) {
     process.stderr.write(`[agents] daemon: skipping '${config.name}' — ${eligibility.message}\n`);
     throw new Error(eligibility.message);
   }
-  // `host:` placement — dispatch over SSH and return; the monitor finalizes.
+  // `host:` placement — dispatch over SSH and return; the monitor finalizes the
+  // run later, so the in-process onFinish hook does not fire for host routines.
   if (config.host) {
     const { meta } = await executeJobOnHost(config, { detached: true });
     return meta;
@@ -1060,7 +1077,7 @@ export async function executeJobDetached(config: JobConfig): Promise<RunMeta> {
   // no pinning, no sandbox overlay). Still writes a run record so the daemon,
   // list/runs, and overdue tracking keep working.
   if (config.command) {
-    return executeCommandJobDetached(config);
+    return executeCommandJobDetached(config, hooks);
   }
 
   // Pre-flight: pick a healthy version/account so the daemon does not launch
@@ -1135,6 +1152,9 @@ export async function executeJobDetached(config: JobConfig): Promise<RunMeta> {
     // the login error, which would poison the next run's {last_report} prompt.
     const isAuthFailure = !!errorMessage && errorMessage.startsWith('auth_failed:');
     if (status !== 'timeout' && !isAuthFailure) extractAndSaveReport(stdoutPath, effectiveAgent, runDir);
+    // Fire the finish/output notification AFTER the report is written so the hook
+    // can read report.md (RUSH-2030). Best-effort; never breaks finalization.
+    safeHook(hooks?.onFinish ? () => hooks.onFinish!(meta) : undefined);
   };
 
   child.on('exit', (code) => {
@@ -1177,7 +1197,7 @@ export async function executeJobDetached(config: JobConfig): Promise<RunMeta> {
  * un-sandboxed, unref, then record the pid. The daemon does not wait for exit;
  * `monitorRunningJobs` reaps the record on the next tick.
  */
-function executeCommandJobDetached(config: JobConfig): RunMeta {
+function executeCommandJobDetached(config: JobConfig, hooks?: RoutineHooks): RunMeta {
   const runId = generateRunId();
   const runDir = getRunDir(config.name, runId);
   fs.mkdirSync(runDir, { recursive: true });
@@ -1226,6 +1246,9 @@ function executeCommandJobDetached(config: JobConfig): RunMeta {
     settled = true;
     finalizeRunMeta(meta, status, exitCode, errorMessage ? { errorMessage } : undefined);
     writeRunMeta(meta);
+    // Finish notification (RUSH-2030). For command routines the threshold only
+    // surfaces failures, decided in routine-notify.ts. Best-effort.
+    safeHook(hooks?.onFinish ? () => hooks.onFinish!(meta) : undefined);
   };
   child.on('exit', (code) => settle(code === 0 ? 'completed' : 'failed', code ?? 1));
   child.on('error', (err) => {
