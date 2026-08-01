@@ -4251,25 +4251,46 @@ export function parseKimiWireMetricsIncremental(
     : { messageCount: 0, tokenCount: 0, outputTokens: 0 };
 
   let consumedBytes = 0;
+  let fd: number | undefined;
   try {
-    const buf = fs.readFileSync(wirePath);
-    const appended = buf.subarray(fromOffset);
-    // Bytes up to AND INCLUDING the last '\n' are the committed, complete-line run.
-    const lastNl = appended.lastIndexOf(0x0a);
-    consumedBytes = lastNl === -1 ? 0 : lastNl + 1;
-    if (consumedBytes > 0) {
-      for (const line of appended.subarray(0, consumedBytes).toString('utf-8').split('\n')) {
-        if (!line.trim()) continue;
-        try {
-          applyKimiWireEvent(acc, JSON.parse(line));
-        } catch {
-          // Malformed line, skip
+    // Read ONLY the appended byte range [fromOffset, stat.size) — not the whole
+    // file. readSync from an explicit position keeps this function synchronous
+    // (its callers are sync) while making the disk read + allocation scale with
+    // the appended delta, not total file size, matching scanCodexSessionIncremental
+    // / scanClaudeSessionIncremental. Bytes past the stat'd size are a concurrent
+    // append and are deferred to the next scan.
+    const bytesToRead = Math.max(0, stat.size - fromOffset);
+    const appended = Buffer.allocUnsafe(bytesToRead);
+    if (bytesToRead > 0) {
+      fd = fs.openSync(wirePath, 'r');
+      let read = 0;
+      while (read < bytesToRead) {
+        const n = fs.readSync(fd, appended, read, bytesToRead - read, fromOffset + read);
+        if (n <= 0) break;
+        read += n;
+      }
+      const chunk = read === bytesToRead ? appended : appended.subarray(0, read);
+      // Bytes up to AND INCLUDING the last '\n' are the committed, complete-line run.
+      const lastNl = chunk.lastIndexOf(0x0a);
+      consumedBytes = lastNl === -1 ? 0 : lastNl + 1;
+      if (consumedBytes > 0) {
+        for (const line of chunk.subarray(0, consumedBytes).toString('utf-8').split('\n')) {
+          if (!line.trim()) continue;
+          try {
+            applyKimiWireEvent(acc, JSON.parse(line));
+          } catch {
+            // Malformed line, skip
+          }
         }
       }
     }
   } catch {
     // If wire.jsonl can't be read, keep the accumulated counters (0s on a cold
     // parse) — graceful degradation, matching the pre-incremental behavior.
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch { /* already closed / gone */ }
+    }
   }
 
   return {
