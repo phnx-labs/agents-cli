@@ -2,6 +2,19 @@
 
 ## 1.20.77
 
+- **`agents sessions --active` (interactive) now shows active sessions from every
+  device, not just the local machine (RUSH-2055).** The interactive browser built
+  its pool fleet-wide but intersected the running filter against a LOCAL-ONLY live
+  set (`getActiveSessions()`), so every remote session — including agents launched
+  from this host onto other machines via VS Code / Codium — was silently dropped
+  and the view collapsed to local. The running filter now uses a fleet-wide live
+  index (local live sessions + each peer's `--active` set over SSH, deduped —
+  `fetchLiveIndex`), mirroring the static `--active` dump. Also: `--all` now widens
+  **every** non-status filter to "all" — every directory AND all-time (window),
+  where before it only widened directories; `--active` still composes as a status
+  filter and `-a`/`--device`/`--since` still narrow their axis. Source:
+  `apps/cli/src/commands/sessions-browser.ts`. (RUSH-2055)
+
 - **Interactive `agents run --host` now tracks the real session for every agent,
   not just Claude.** Codex, Kimi, Grok, and Gemini coin their own session id and
   reject a caller-supplied one, so an interactive host run of any of them showed a

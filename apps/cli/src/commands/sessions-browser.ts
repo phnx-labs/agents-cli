@@ -17,6 +17,7 @@ import type { SessionMeta } from '../lib/session/types.js';
 import { getActiveSessions, type ActiveSession } from '../lib/session/active.js';
 import { discoverSessions } from '../lib/session/discover.js';
 import { gatherRemoteList } from '../lib/session/remote-list.js';
+import { gatherRemoteActive } from '../lib/session/remote-active.js';
 import { machineId, normalizeHost } from '../lib/session/sync/config.js';
 import { buildPreview } from './sessions-picker.js';
 import {
@@ -26,6 +27,7 @@ import {
   ticketLabel,
   mergeLocalFirst,
   indexActiveBySessionId,
+  dedupeByMachineSession,
   handlePickedSession,
   shouldIncludeLocal,
   remoteHostsToDial,
@@ -125,13 +127,16 @@ export function normalizeDeviceSeed(host: string | undefined): string | undefine
  * The initial filter for the `--active` browser: fleet-wide (matches the static
  * `renderActiveSessions`, which has no project scoping — the `p` hotkey narrows to
  * this repo), running-only, with the device seed normalized and `--since` seeding
- * the window. Pure, so the routing call site is unit-testable.
+ * the window. `--all` widens the window to all-time (device/agent are already
+ * fleet-wide here); an explicit `--since` still overrides. Pure, so the routing
+ * call site is unit-testable.
  */
 export function activeBrowserSeed(opts: {
   teams?: boolean;
   agent?: string;
   host?: string[];
   since?: string;
+  all?: boolean;
 }): Partial<BrowserFilter> {
   return {
     running: true,
@@ -139,14 +144,16 @@ export function activeBrowserSeed(opts: {
     agent: opts.agent,
     projectScope: 'all',
     device: normalizeDeviceSeed(opts.host?.[0]),
-    window: opts.since ?? '30d',
+    window: opts.since ?? (opts.all ? undefined : '30d'),
   };
 }
 
 /**
  * The initial filter for the bare interactive listing: current-repo subtree by
- * default (matches the static overview's cwd scoping), `--all` widens to every
- * directory, `--since` seeds the window.
+ * default (matches the static overview's cwd scoping). `--all` sets every
+ * non-status filter to its "all" value — every directory (project) AND all-time
+ * (window) — so one flag maxes the view; `--since` still overrides the window,
+ * and `-a`/`--device` still narrow their axes.
  */
 export function bareBrowserSeed(opts: {
   teams?: boolean;
@@ -158,7 +165,7 @@ export function bareBrowserSeed(opts: {
     teams: !!opts.teams,
     agent: opts.agent,
     projectScope: opts.all ? 'all' : 'repo',
-    window: opts.since ?? '30d',
+    window: opts.since ?? (opts.all ? undefined : '30d'),
   };
 }
 
@@ -230,6 +237,35 @@ async function fetchRawPool(
   return { key: `${since ?? 'all'}|${f.teams}`, rows };
 }
 
+/** The fleet-wide live index for the running/active filter: local live sessions
+ * PLUS (unless --local) every peer's `--active` set over SSH, deduped and keyed
+ * by session id. Mirrors `renderActiveSessions` so the interactive running filter
+ * intersects against the SAME active set the static `--active` dump reports.
+ *
+ * Without this the live set was local-only (`getActiveSessions()`), so remote
+ * sessions — present in the fleet-wide pool — never matched `live.has(r.id)` and
+ * were silently dropped, leaving the browser showing only this machine's
+ * sessions. `hosts` scopes which peers are dialed (undefined = sweep the fleet). */
+async function fetchLiveIndex(
+  self: string,
+  local: boolean,
+  hosts: string[] | undefined,
+): Promise<Map<string, ActiveSession>> {
+  const localActive = shouldIncludeLocal(hosts, self) ? await getActiveSessions() : [];
+  for (const s of localActive) if (!s.machine) s.machine = self;
+  let merged = localActive;
+  if (!local) {
+    const remoteHosts = remoteHostsToDial(hosts, self);
+    // An explicit list naming only self leaves nothing remote to dial — skip the
+    // fan-out rather than let an empty list fall through to the device sweep.
+    if (!hosts?.length || (remoteHosts && remoteHosts.length > 0)) {
+      const remote = await gatherRemoteActive(remoteHosts);
+      merged = dedupeByMachineSession([...localActive, ...remote.sessions]);
+    }
+  }
+  return indexActiveBySessionId(merged);
+}
+
 /** Apply the cheap in-memory filters (agent / device / project / running). */
 function applyFilters(
   rows: SessionMeta[],
@@ -297,8 +333,10 @@ export async function runSessionBrowser(
   // Cache the transcript fetch, keyed by (window, teams); agent/device/project/
   // running are applied in memory so their hotkeys don't re-fan-out the fleet.
   let rawCache: { key: string; rows: SessionMeta[] } | null = null;
-  // The live index is slow (a full ps/tmux scan) and only the running filter
-  // needs it — fetch it once, lazily, the first time running is toggled on.
+  // The live index is slow (a local ps/tmux scan + an SSH fan-out to every peer)
+  // and only the running filter needs it — fetch it once, lazily, the first time
+  // running is toggled on. Fleet-wide so remote active sessions match, not just
+  // this machine's.
   let liveCache: Map<string, ActiveSession> | null = null;
   // Generation guard: two quick keypresses can start overlapping loads whose
   // SSH fan-outs settle out of order. dynamicPicker's own gen ref guards which
@@ -325,11 +363,12 @@ export async function runSessionBrowser(
       if (myGen !== loadGen) return []; // superseded — don't touch shared state
       pool = fetched;
     }
-    // Only pay for the live scan when the running filter needs it.
+    // Only pay for the live scan when the running filter needs it. Fleet-wide:
+    // local live sessions + every peer's active set (see fetchLiveIndex).
     let live = liveCache;
     if (f.running && !live) {
       try {
-        live = indexActiveBySessionId(await getActiveSessions());
+        live = await fetchLiveIndex(self, local, hosts);
       } catch {
         live = new Map();
       }
