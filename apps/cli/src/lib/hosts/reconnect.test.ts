@@ -6,7 +6,7 @@
  * the wall-clock wait) are supplied as deterministic sequences, because SSH cannot
  * run in CI. No production code path is stubbed.
  */
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import type { Host } from './types.js';
 import {
   reconnectStep,
