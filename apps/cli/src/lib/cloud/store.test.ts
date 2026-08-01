@@ -1,17 +1,27 @@
-import { describe, it, expect } from 'vitest';
+import { afterAll, describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import type { CloudTask } from './types.js';
 
-// Isolate BOTH stores under a temp HOME before any import touches them: the cloud
-// tasks.db and the sessions index db read their base dir lazily at first use.
+// Isolate BOTH stores under a temp HOME. state.js/db.js freeze their base dir
+// from HOME at *import* time (state.ts:34,107; db.ts:15-16), not lazily — and
+// static top-level imports are ESM-hoisted, so they'd run those module bodies
+// BEFORE this HOME assignment and bind to the runner's real HOME. Set HOME with a
+// plain statement first, then pull the stores in via top-level `await import`
+// (which runs after it), so both DBs resolve under TEST_HOME. Same hermetic
+// pattern as session/__tests__/db.test.ts.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-cloudstore-'));
 process.env.HOME = TEST_HOME;
 
-import { insertTask, updateTaskStatus, getTaskById } from './store.js';
-import { registerCloudSession } from './session-index.js';
-import { findSessionsById, closeDB } from '../session/db.js';
-import type { CloudTask } from './types.js';
+const { insertTask, updateTaskStatus, getTaskById } = await import('./store.js');
+const { registerCloudSession } = await import('./session-index.js');
+const { findSessionsById, closeDB } = await import('../session/db.js');
+
+afterAll(() => {
+  closeDB();
+  fs.rmSync(TEST_HOME, { recursive: true, force: true });
+});
 
 function cloudTask(overrides: Partial<CloudTask> = {}): CloudTask {
   return {
@@ -65,7 +75,5 @@ describe('registerCloudSession guards', () => {
     // charset guard here also rejects an id that isn't a usable execution id.
     registerCloudSession(cloudTask({ id: 'codex-1720000000000 not valid' }));
     expect(findSessionsById('codex-1720000000000 not valid')).toHaveLength(0);
-
-    closeDB();
   });
 });
