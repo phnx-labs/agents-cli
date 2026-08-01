@@ -1260,8 +1260,17 @@ export function isHeadlessSecretsContext(
   const override = env.AGENTS_SECRETS_NO_PROMPT;
   if (override === '1') return true;
   if (override === '0') return false;
+  // Every AGENT-LAUNCH runtime resolves broker-only, interactive included.
+  // `terminal` was missing, which made an agent terminal the one launch path
+  // still allowed to pop Touch ID: exec.ts sets AGENTS_RUNTIME='terminal' for an
+  // interactive run (exec.ts:426), that fell through to the TTY check below, and
+  // a TTY meant "a human is watching, so prompting is fine". It is not fine —
+  // opening a terminal is not a request to authenticate, and a launch that needs
+  // a locked bundle should say so and point at `agents secrets unlock`, not grab
+  // the fingerprint sensor. Explicit `agents secrets` commands are unaffected:
+  // they carry no AGENTS_RUNTIME and still fall through to the TTY check.
   const runtime = env.AGENTS_RUNTIME;
-  if (runtime === 'headless' || runtime === 'teams') return true;
+  if (runtime === 'headless' || runtime === 'teams' || runtime === 'terminal') return true;
   return !process.stdin.isTTY && !process.stdout.isTTY;
 }
 
@@ -1343,8 +1352,16 @@ export function readAndResolveBundleEnv(
   // synchronously wait for approval. Never/no-ACL bundles remain prompt-free.
   // The always-on daemon has no requesting agent waiting on the result, so it
   // remains prompt-free unless the bundle is explicitly no-ACL.
-  const interactiveUnlock = opts.interactiveUnlock
-    ?? (Boolean(opts.agent || process.env.AGENTS_AGENT_NAME) && process.env.AGENTS_SECRETS_NO_PROMPT !== '1');
+  // Explicit opt-in ONLY. This used to default to true whenever an agent name was
+  // present, which made `agentOnly: true` a no-op for every agent-initiated read —
+  // the guard was dead in precisely the case it exists for. The effect: opening an
+  // agent terminal, or a routine firing, would fall through to a prompting keychain
+  // read, and because each read is its own helper process the assertion never
+  // reuses, so one launch could raise several Touch ID sheets in a row. Only
+  // `AGENTS_SECRETS_NO_PROMPT=1` suppressed it, which is a workaround, not a
+  // default. No caller passes this flag today; it stays for a genuinely
+  // user-initiated unlock path that wants to raise the sheet on purpose.
+  const interactiveUnlock = opts.interactiveUnlock ?? false;
   if (opts.agentOnly && backend === 'keychain' && !interactiveUnlock) {
     let noAclBundle = false;
     try { noAclBundle = bundlePolicy(readBundle(name)) === 'never'; } catch { /* fail closed */ }

@@ -211,12 +211,27 @@ describe('readAndResolveBundleEnv agent-only reads', () => {
     else process.env.AGENTS_SECRETS_NO_AGENT = prevNoAgent;
   });
 
-  it('allows an agent-triggered interactive read for a daily bundle with no broker/session snapshot', () => {
+  // REVERSED deliberately. This previously asserted that an agent-triggered read
+  // may prompt: interactiveUnlock defaulted to true whenever an agent name was
+  // present, so agentOnly was a no-op for every agent-initiated read. That is the
+  // bug — opening an agent terminal is not a request to authenticate, and each
+  // keychain read is its own helper process, so one launch raised several sheets.
+  // An agent-initiated read now fails fast with an actionable message instead.
+  it('refuses an agent-triggered read of a locked daily bundle instead of prompting', () => {
     writeBundleWithItems(
       { name: 'apple.com', policy: 'daily', vars: { APPLE_TEAM_ID: 'keychain:APPLE_TEAM_ID' } },
       new Map([[secretsKeychainItem('apple.com', 'APPLE_TEAM_ID'), '2HTP252L87']]),
     );
-    expect(readAndResolveBundleEnv('apple.com', { caller: 'command deploy', agent: 'claude', agentOnly: true }).env)
+    expect(() => readAndResolveBundleEnv('apple.com', { caller: 'command deploy', agent: 'claude', agentOnly: true }))
+      .toThrow("Secrets bundle 'apple.com' is not unlocked in the secrets agent");
+  });
+
+  it('still resolves for a caller that explicitly opts into an interactive unlock', () => {
+    writeBundleWithItems(
+      { name: 'apple.com', policy: 'daily', vars: { APPLE_TEAM_ID: 'keychain:APPLE_TEAM_ID' } },
+      new Map([[secretsKeychainItem('apple.com', 'APPLE_TEAM_ID'), '2HTP252L87']]),
+    );
+    expect(readAndResolveBundleEnv('apple.com', { caller: 'secrets unlock', agent: 'claude', agentOnly: true, interactiveUnlock: true }).env)
       .toEqual({ APPLE_TEAM_ID: '2HTP252L87' });
   });
 
@@ -234,9 +249,21 @@ describe('readAndResolveBundleEnv agent-only reads', () => {
 });
 
 describe('isHeadlessSecretsContext', () => {
+  it('still allows a prompt for an explicit agents-secrets command (no AGENTS_RUNTIME)', () => {
+    // No runtime marker => not an agent launch => falls through to the TTY check.
+    expect(isHeadlessSecretsContext({} as NodeJS.ProcessEnv, 'darwin')).toBe(
+      !process.stdin.isTTY && !process.stdout.isTTY,
+    );
+  });
+
   it('is true for headless/teams runtime on darwin (where the Touch ID sheet exists)', () => {
     expect(isHeadlessSecretsContext({ AGENTS_RUNTIME: 'headless' } as NodeJS.ProcessEnv, 'darwin')).toBe(true);
     expect(isHeadlessSecretsContext({ AGENTS_RUNTIME: 'teams' } as NodeJS.ProcessEnv, 'darwin')).toBe(true);
+    // An interactive agent terminal too: exec.ts sets AGENTS_RUNTIME='terminal',
+    // and opening a terminal is not a request to authenticate. Without this, the
+    // agent terminal was the ONE launch path that could still pop Touch ID —
+    // several sheets per launch, since each keychain read is its own process.
+    expect(isHeadlessSecretsContext({ AGENTS_RUNTIME: 'terminal' } as NodeJS.ProcessEnv, 'darwin')).toBe(true);
   });
 
   it('is ALWAYS false off-darwin — no biometry prompt to suppress on Linux/Windows', () => {
