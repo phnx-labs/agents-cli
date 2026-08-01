@@ -1124,12 +1124,10 @@ if (!helpOrVersionRequested) {
   // Run update check before parsing so the upgrade notice/prompt precedes output.
   await checkForUpdates();
 
-  // Surface any "behind upstream" notices from the previous detached sync, then
-  // fire-and-forget the next background sync. System repo gets a real fast-forward
+  // Fire-and-forget the background sync. System repo gets a real fast-forward
   // pull (read-only locally, safe). User repo and extras get fetch-only + a
-  // status marker that we'll print on the *next* invocation.
-  const { spawnDetachedSync, printPendingUpdateNotices } = await import('./lib/auto-pull.js');
-  printPendingUpdateNotices();
+  // status marker that `agents doctor` surfaces as a repo-behind warning.
+  const { spawnDetachedSync } = await import('./lib/auto-pull.js');
   spawnDetachedSync();
 }
 
