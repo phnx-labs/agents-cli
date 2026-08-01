@@ -1,20 +1,15 @@
 /**
- * Smart launch: pick device + harness from usage affinity, then leave account
- * selection to `--strategy balanced` (live rate-limit windows in rotate.ts).
+ * Device affinity for `--device auto` / `--host auto`.
  *
- * Probability model (per axis):
- *   P(x) ∝ launches(x)^α   among eligible candidates
- * Most-used gets the highest probability; never a hard lock (sample, not argmax).
+ * Picks a host from 14d session usage (launches by machine), weighted sample
+ * among online devices. Most-used has highest probability — not a hard lock.
+ * Account selection is separate (`--strategy balanced` / rotate.ts).
  */
 
-import type { AgentId } from './types.js';
 import { queryAffinityRollup, type AffinityRow } from './session/db.js';
 import { localMachineId } from './session/origin-machine.js';
 import { loadDevicesSync } from './devices/registry.js';
 import { normalizeHost } from './machine-id.js';
-
-/** Default harness allowlist for auto-pick. */
-export const DEFAULT_SMART_HARNESSES: AgentId[] = ['claude', 'codex', 'kimi'];
 
 /** Peakiness of usage weights; >1 amplifies the most-used option. */
 export const DEFAULT_AFFINITY_ALPHA = 1.3;
@@ -79,12 +74,7 @@ export function listOnlineDeviceNames(localName: string = localMachineId()): str
   return [...names];
 }
 
-export interface SmartLaunchOptions {
-  /** Fixed harness (skip harness sample). */
-  agent?: AgentId;
-  /** When true and agent unset, sample harness from allowlist. */
-  pickHarness?: boolean;
-  allowAgents?: AgentId[];
+export interface DeviceAffinityOptions {
   sinceDays?: number;
   alpha?: number;
   /**
@@ -95,34 +85,26 @@ export interface SmartLaunchOptions {
   localMachine?: string;
   /** Injected affinity (tests). When omitted, reads sessions.db. */
   deviceAffinity?: AffinityRow[];
-  harnessAffinity?: AffinityRow[];
   rng?: () => number;
   project?: string;
 }
 
-export interface SmartLaunchPlan {
+export interface DeviceAffinityPlan {
   /** null means run locally (do not pass --host). */
   host: string | null;
-  agent: AgentId;
-  /** Account strategy the caller must use. Always balanced for smart launch. */
-  accountStrategy: 'balanced';
   deviceCandidates: WeightedCandidate[];
-  harnessCandidates: WeightedCandidate[];
   pickedDeviceKey: string | null;
-  pickedHarnessKey: string | null;
 }
 
 /**
- * Resolve host + harness for an unpinned launch. Does NOT pick accounts —
- * caller runs `agents run <agent> --host <host> --strategy balanced`.
+ * Resolve host for `--device auto`. Does NOT pick harness or accounts.
  */
-export function resolveSmartLaunch(opts: SmartLaunchOptions = {}): SmartLaunchPlan {
+export function resolveDeviceAffinity(opts: DeviceAffinityOptions = {}): DeviceAffinityPlan {
   const local = normalizeHost(opts.localMachine ?? localMachineId());
   const alpha = opts.alpha ?? DEFAULT_AFFINITY_ALPHA;
   const rng = opts.rng ?? Math.random;
   const sinceDays = opts.sinceDays ?? 14;
   const sinceMs = Date.now() - sinceDays * 24 * 60 * 60 * 1000;
-  const allow = opts.allowAgents ?? DEFAULT_SMART_HARNESSES;
 
   const eligible = new Set(
     (opts.eligibleHosts ?? listOnlineDeviceNames(local)).map(normalizeHost),
@@ -139,8 +121,7 @@ export function resolveSmartLaunch(opts: SmartLaunchOptions = {}): SmartLaunchPl
       project: opts.project,
     });
 
-  // Restrict affinity to online hosts. Hosts with history get launches^α;
-  // online hosts with no history still participate at weight 1 (exploration).
+  // Hosts with history get launches^α; online hosts with no history explore at weight 1.
   const launchesByHost = new Map<string, number>();
   for (const r of deviceRows) {
     const k = normalizeHost(r.key);
@@ -163,45 +144,31 @@ export function resolveSmartLaunch(opts: SmartLaunchOptions = {}): SmartLaunchPl
   const hostNorm = pickedDeviceKey ? normalizeHost(pickedDeviceKey) : local;
   const host = hostNorm === local ? null : hostNorm;
 
-  let agent: AgentId;
-  let harnessWeights: WeightedCandidate[] = [];
-  let pickedHarnessKey: string | null = null;
-
-  if (opts.agent) {
-    agent = opts.agent;
-    pickedHarnessKey = opts.agent;
-  } else if (opts.pickHarness) {
-    const harnessRows =
-      opts.harnessAffinity ??
-      queryAffinityRollup({
-        groupBy: 'agent',
-        sinceMs,
-        agents: allow as import('./session/types.js').SessionAgentId[],
-        excludeTeamOrigin: true,
-        onlyCli: true,
-        project: opts.project,
-      });
-    harnessWeights = affinityWeights(
-      harnessRows.filter((r) => allow.includes(r.key as AgentId)),
-      alpha,
-    );
-    if (harnessWeights.length === 0) {
-      harnessWeights = allow.map((key) => ({ key, launches: 1, weight: 1 }));
-    }
-    pickedHarnessKey = sampleWeighted(harnessWeights, rng) ?? allow[0];
-    agent = (pickedHarnessKey as AgentId) ?? allow[0];
-  } else {
-    agent = allow[0] ?? 'claude';
-    pickedHarnessKey = agent;
-  }
-
   return {
     host,
-    agent,
-    accountStrategy: 'balanced',
     deviceCandidates: deviceWeights,
-    harnessCandidates: harnessWeights,
     pickedDeviceKey,
-    pickedHarnessKey,
   };
+}
+
+/** @deprecated Use resolveDeviceAffinity — kept for any transitional callers. */
+export function resolveSmartLaunch(opts: DeviceAffinityOptions & { agent?: string } = {}): DeviceAffinityPlan & {
+  agent?: string;
+  accountStrategy: 'balanced';
+  harnessCandidates: WeightedCandidate[];
+  pickedHarnessKey: string | null;
+} {
+  const plan = resolveDeviceAffinity(opts);
+  return {
+    ...plan,
+    agent: opts.agent,
+    accountStrategy: 'balanced',
+    harnessCandidates: [],
+    pickedHarnessKey: opts.agent ?? null,
+  };
+}
+
+/** True when a host flag value means affinity pick. */
+export function isDeviceAuto(value: string | undefined | null): boolean {
+  return typeof value === 'string' && value.trim().toLowerCase() === 'auto';
 }

@@ -64,7 +64,10 @@ interface ExecCommandActionOptions {
   fallback?: string;
   balanced?: boolean;
   strategy?: string;
-  /** Affinity-pick host (and harness when agent is auto); accounts stay balanced. */
+  /**
+   * @deprecated Hidden alias for `--device auto`. Resolved before host dispatch.
+   * Remove after one release.
+   */
   smart?: boolean;
   acp?: boolean;
   yes?: boolean;
@@ -559,10 +562,6 @@ export function registerRunCommand(program: Command): void {
       'Version/account selection strategy: pinned | available | balanced. Defaults to run.<agent>.strategy, then balanced (spreads load across healthy accounts and skips any that are rate-limited). (Legacy `rotate` accepted as alias for `balanced`.)',
     )
     .option(
-      '--smart',
-      'Pick host from 14d usage affinity (most-used online device has highest probability). Accounts still use balanced. Ignored when --host/--device is set. Pass agent "auto" to also pick harness among claude/codex/kimi.',
-    )
-    .option(
       '--acp',
       'Route through the Agent Client Protocol instead of direct exec. Supported for gemini, claude (via @zed-industries/claude-code-acp adapter). Unified event stream; emits ndjson when --json.',
     )
@@ -597,11 +596,11 @@ export function registerRunCommand(program: Command): void {
     )
     .option(
       '--host <name>',
-      'Offload this run onto another machine over SSH instead of running locally — a device, a registered agent host, or user@host. See `agents devices` / `agents hosts`.',
+      'Offload this run onto another machine over SSH — a device name, registered host, or user@host. Pass "auto" to pick from 14d usage affinity (most-used online device has highest probability). See `agents devices`.',
     )
     .option(
       '--device <name>',
-      'Alias of --host: offload this run onto a registered device (from `agents devices`).',
+      'Alias of --host. Pass "auto" for affinity-based device pick (same as --host auto).',
     )
     .option('--remote-cwd <dir>', "Explicit host working directory for --host runs, used VERBATIM (overrides --cwd; usually --cwd suffices — it re-roots a local-home path onto the remote home). Pass a single-quoted '$HOME/…' or a valid remote absolute path; a local ~ expands here and won't exist there (/Users/you vs /home/you).")
     .option('--no-follow', 'With --host, dispatch detached and return immediately (track via `agents hosts ps/logs`).')
@@ -630,6 +629,10 @@ export function registerRunCommand(program: Command): void {
   // `--on` and `--computer` are hidden aliases of `--host` — same behavior.
   runCmd.addOption(new Option('--on <name>', 'Alias of --host.').hideHelp());
   runCmd.addOption(new Option('--computer <name>', 'Alias of --host.').hideHelp());
+  // Deprecated one-release alias: `agents run … --smart` → treat as `--device auto`.
+  runCmd.addOption(
+    new Option('--smart', 'Deprecated: use --device auto (affinity host pick).').hideHelp(),
+  );
 
   // Internal: the `--host` dispatch forwards this so the REMOTE run prints its
   // resolved session id as a one-line stdout sentinel (hosts/session-marker.ts),
@@ -739,8 +742,8 @@ export function registerRunCommand(program: Command): void {
         process.exit(1);
       }
 
-      // Account-picker conflict check runs BEFORE --smart mutates options.balanced,
-      // so an implicit smart→balanced preference never surfaces as a fake
+      // Account-picker conflict check runs BEFORE device=auto may set balanced,
+      // so an implicit balanced preference never surfaces as a fake
       // "cannot be combined with --balanced" when the user only typed trailing @.
       if (accountPickerRequested) {
         const conflicts = runAccountPickerConflicts(options);
@@ -753,38 +756,46 @@ export function registerRunCommand(program: Command): void {
         }
       }
 
-      // --smart: affinity-pick host (and optional harness when agent is "auto").
-      // Explicit --host/--device wins. Account rotation stays --strategy balanced
-      // unless the user is already on the trailing-@ account picker (they own
-      // account selection then — do not force balanced underneath them).
-      if (options.smart) {
-        const hostAlready = [options.host, options.device, options.on, options.computer].some(Boolean);
-        const [agentName, rawVersionPin] = normalizedAgentSpec.split('@');
-        if (rawVersionPin) {
+      // --device auto / --host auto (and deprecated --smart): affinity-pick host.
+      // Harness is always the agent the user typed — never auto-picked.
+      {
+        const { isDeviceAuto, resolveDeviceAffinity } = await import('../lib/smart-launch.js');
+        // Hidden --smart → same as --device auto when no host flag was given.
+        if (options.smart) {
+          const anyHost = [options.host, options.device, options.on, options.computer].some(
+            (v) => typeof v === 'string' && v.trim() !== '',
+          );
+          if (!anyHost) options.device = 'auto';
           if (!options.quiet) {
-            process.stderr.write(chalk.yellow('[agents] --smart ignored for host/harness pick when @version is pinned; accounts still use strategy\n'));
+            process.stderr.write(
+              chalk.yellow('[agents] --smart is deprecated; use --device auto\n'),
+            );
           }
-        } else if (!hostAlready || agentName === 'auto') {
+        }
+        const hostSlots: Array<'host' | 'device' | 'on' | 'computer'> = [
+          'host',
+          'device',
+          'on',
+          'computer',
+        ];
+        const autoSlot = hostSlots.find((k) => isDeviceAuto(options[k]));
+        if (autoSlot) {
+          // Only one host flag should be set; if several say auto, resolve once.
           try {
-            const { resolveSmartLaunch } = await import('../lib/smart-launch.js');
-            const pickHarness = agentName === 'auto';
-            const plan = resolveSmartLaunch({
-              agent: pickHarness ? undefined : (agentName as import('../lib/types.js').AgentId),
-              pickHarness,
-            });
-            if (!hostAlready && plan.host) {
-              options.host = plan.host;
+            const plan = resolveDeviceAffinity({});
+            const concrete = plan.host; // null = local
+            for (const k of hostSlots) {
+              if (isDeviceAuto(options[k])) {
+                options[k] = concrete ?? undefined;
+              }
             }
-            if (pickHarness) {
-              normalizedAgentSpec = plan.agent;
-            }
-            // Prefer balanced for smart launches unless the user overrode strategy
-            // or requested the interactive account picker (trailing @).
+            // Prefer balanced accounts on affinity launches unless overridden or
+            // the user is on the trailing-@ account picker.
             if (!accountPickerRequested && !options.strategy && !options.balanced) {
               options.balanced = true;
             }
             if (!options.quiet) {
-              const hostLabel = plan.host ?? 'local';
+              const hostLabel = concrete ?? 'local';
               const deviceHint = plan.deviceCandidates
                 .slice(0, 4)
                 .map((c) => `${c.key}:${c.launches}`)
@@ -794,18 +805,15 @@ export function registerRunCommand(program: Command): void {
                 : 'accounts=balanced';
               process.stderr.write(
                 chalk.gray(
-                  `[agents] smart: host=${hostLabel} agent=${pickHarness ? plan.agent : agentName}` +
-                    (deviceHint ? ` (device affinity ${deviceHint})` : '') +
+                  `[agents] device=auto → ${hostLabel}` +
+                    (deviceHint ? ` (affinity ${deviceHint})` : '') +
                     ` · ${acctNote}\n`,
                 ),
               );
             }
           } catch (err) {
-            if (!options.quiet) {
-              process.stderr.write(
-                chalk.yellow(`[agents] --smart skipped: ${(err as Error).message}\n`),
-              );
-            }
+            console.error(chalk.red(`[agents] device=auto failed: ${(err as Error).message}`));
+            process.exit(1);
           }
         }
       }
