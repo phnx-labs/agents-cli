@@ -1170,6 +1170,7 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
           agent: options.agent,
           host: options.host,
           since: options.since,
+          all: options.all,
         }),
         { local: options.local === true, hosts: options.host },
       );
@@ -2979,7 +2980,7 @@ export function registerSessionsCommands(program: Command): void {
     .option('--antigravity', 'Shorthand for --agent antigravity')
     .option('--grok', 'Shorthand for --agent grok')
     .option('--opencode', 'Shorthand for --agent opencode')
-    .option('--all', 'Include sessions from every directory (not just current project)')
+    .option('--all', 'Widen every non-status filter to "all": every directory (not just this project) and all time (no window cap). Status filters like --active still compose; -a/--device/--since still narrow their axis.')
     .option('--unmanaged', "Also show sessions from your own ~/.<agent> installs (hidden once agents-cli manages that agent)")
     .option('--teams', 'Include team-spawned sessions (hidden by default)')
     .option('--routine', 'Show only sessions archived from routine runs')

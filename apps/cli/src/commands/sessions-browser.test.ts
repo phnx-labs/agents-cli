@@ -135,6 +135,14 @@ describe('activeBrowserSeed — the --active call-site filter (fleet-wide)', () 
     expect(activeBrowserSeed({ since: '2h' }).window).toBe('2h');
   });
 
+  it('--all widens the window to all-time (undefined); --since still overrides; stays running-only', () => {
+    const f = activeBrowserSeed({ all: true });
+    expect(f.window).toBeUndefined();
+    expect(f.running).toBe(true);
+    expect(f.projectScope).toBe('all');
+    expect(activeBrowserSeed({ all: true, since: '2h' }).window).toBe('2h');
+  });
+
   it('normalizes a user@host / FQDN device seed to the canonical machine id', () => {
     expect(activeBrowserSeed({ host: ['muqsit@mac-mini.local'] }).device).toBe('mac-mini');
     expect(activeBrowserSeed({ host: ['YOSEMITE-S1'] }).device).toBe('yosemite-s1');
@@ -151,6 +159,13 @@ describe('bareBrowserSeed — the bare-listing call-site filter', () => {
   it('is not running-only and seeds the window from --since', () => {
     expect(bareBrowserSeed({}).running).toBeUndefined();
     expect(bareBrowserSeed({ since: '7d' }).window).toBe('7d');
+  });
+
+  it('defaults the window to 30d, but --all widens it to all-time (undefined)', () => {
+    expect(bareBrowserSeed({}).window).toBe('30d');
+    expect(bareBrowserSeed({ all: true }).window).toBeUndefined();
+    // an explicit --since still wins over --all's all-time default
+    expect(bareBrowserSeed({ all: true, since: '7d' }).window).toBe('7d');
   });
 });
 

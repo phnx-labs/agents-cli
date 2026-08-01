@@ -136,6 +136,7 @@ export function activeBrowserSeed(opts: {
   agent?: string;
   host?: string[];
   since?: string;
+  all?: boolean;
 }): Partial<BrowserFilter> {
   return {
     running: true,
@@ -143,14 +144,18 @@ export function activeBrowserSeed(opts: {
     agent: opts.agent,
     projectScope: 'all',
     device: normalizeDeviceSeed(opts.host?.[0]),
-    window: opts.since ?? '30d',
+    // --all widens the window to all-time (project is already 'all' here);
+    // --since still overrides.
+    window: opts.since ?? (opts.all ? undefined : '30d'),
   };
 }
 
 /**
  * The initial filter for the bare interactive listing: current-repo subtree by
- * default (matches the static overview's cwd scoping), `--all` widens to every
- * directory, `--since` seeds the window.
+ * default (matches the static overview's cwd scoping). `--all` sets every
+ * non-status filter to its "all" value — every directory (project) AND all-time
+ * (window) — so one flag maxes the view; `--since` still overrides the window and
+ * `-a`/`--device` still narrow their axis.
  */
 export function bareBrowserSeed(opts: {
   teams?: boolean;
@@ -161,8 +166,9 @@ export function bareBrowserSeed(opts: {
   return {
     teams: !!opts.teams,
     agent: opts.agent,
+    // --all maxes every non-status filter: all dirs AND all-time. --since wins.
     projectScope: opts.all ? 'all' : 'repo',
-    window: opts.since ?? '30d',
+    window: opts.since ?? (opts.all ? undefined : '30d'),
   };
 }
 
