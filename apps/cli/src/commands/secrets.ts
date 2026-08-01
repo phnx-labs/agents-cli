@@ -89,7 +89,8 @@ import { saveSession, deleteSession, deleteAllSessions } from '../lib/secrets/se
 import { getCliVersionFresh } from '../lib/version.js';
 import { readMeta } from '../lib/state.js';
 import { parseDuration } from '../lib/hooks/cache.js';
-import { emit } from '../lib/events.js';
+import { emit, query } from '../lib/events.js';
+import { frequentlyPromptedBundles } from '../lib/secrets/unlock-hints.js';
 import { registerCommandGroups, setHelpSections } from '../lib/help.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import {
@@ -2338,6 +2339,37 @@ Examples:
         console.log(`${chalk.cyan(e.name.padEnd(24))} ${String(e.keyCount).padEnd(5)} ${humanRemaining(e.expiresAt)}`);
       }
       console.log(chalk.gray('Reads of held bundles are silent; any bundle not listed prompts once on its next read.'));
+
+      // Usage hint: bundles you keep getting a Touch ID prompt for (read from
+      // the keychain, not the broker/session, >= a few times in the last week)
+      // and are not currently held — unlocking each once silences it for the
+      // hold window. `never`/no-ACL bundles never prompt, so they are dropped.
+      try {
+        const held = new Set(entries.map((e) => e.name));
+        const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        const reads = query({ eventTypes: ['secrets.get'], startDate: weekAgo }) as Array<{
+          bundle?: string;
+          source?: string;
+        }>;
+        const hot = frequentlyPromptedBundles(reads, held, { minReads: 3 }).filter((h) => {
+          try {
+            return bundlePolicy(readBundle(h.name)) !== 'never';
+          } catch {
+            return false; // bundle gone / unreadable metadata — nothing to suggest
+          }
+        });
+        if (hot.length > 0) {
+          console.log();
+          console.log(chalk.bold('Prompted often — unlock once to silence:'));
+          for (const h of hot) {
+            console.log(
+              `${chalk.cyan(h.name.padEnd(24))} ${chalk.gray(`${h.count}× in the last 7d`)}  →  ${chalk.green(`agents secrets unlock ${h.name}`)}`,
+            );
+          }
+        }
+      } catch {
+        // Best-effort hint — never let usage analysis break `secrets status`.
+      }
     });
 
   cmd
