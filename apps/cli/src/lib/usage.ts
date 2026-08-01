@@ -1378,8 +1378,12 @@ export async function saveClaudeOauth(
   home: string | undefined,
   credentials: ClaudeOauthCredentials
 ): Promise<boolean> {
-  // Windows not yet supported
-  if (process.platform !== 'darwin' && process.platform !== 'linux') {
+  // Windows not yet supported. An injected test backend is the exception, for
+  // the same reason as the loadClaudeOauth guard above: it makes the keychain
+  // path exercisable anywhere, and without it this returns before the rotated
+  // credential is written OR the no-ACL cache is evicted — so a cached reader
+  // keeps serving the pre-rotation access token.
+  if (process.platform !== 'darwin' && process.platform !== 'linux' && !isKeychainBackendOverridden()) {
     return false;
   }
 
