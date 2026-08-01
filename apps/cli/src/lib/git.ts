@@ -963,6 +963,42 @@ export async function pullRepo(
 ): Promise<{ success: boolean; commit: string; error?: string; branch?: string }> {
   try {
     const git = simpleGit(dir);
+
+    // A rebase left in progress by an earlier run must be reported as itself.
+    // Without this the dirty-tree guard below claims "Blocked by local changes",
+    // which is both wrong and actively harmful advice mid-rebase on a detached
+    // HEAD. Checked BEFORE commitOwnDeviceMeta so we never commit into one.
+    // Ask git where the state dirs live rather than assuming `<dir>/.git/` is a
+    // directory. In a worktree `.git` is a FILE containing `gitdir: <path>`, so
+    // path.join(dir, '.git', 'rebase-merge') can never exist and the check would
+    // silently never fire. `rev-parse --git-path` resolves both layouts.
+    const gitPath = async (name: string): Promise<string | null> => {
+      try {
+        const raw = (await git.raw(['rev-parse', '--git-path', name])).trim();
+        return path.isAbsolute(raw) ? raw : path.join(dir, raw);
+      } catch {
+        return null;
+      }
+    };
+    const [rebaseMerge, rebaseApply] = await Promise.all([
+      gitPath('rebase-merge'),
+      gitPath('rebase-apply'),
+    ]);
+    const rebaseInProgress =
+      (rebaseMerge !== null && fs.existsSync(rebaseMerge)) ||
+      (rebaseApply !== null && fs.existsSync(rebaseApply));
+    if (rebaseInProgress) {
+      return {
+        success: false,
+        commit: '',
+        error:
+          `A previous rebase is still in progress — finish or abort it, then pull again.\n\n` +
+          `  cd ${displayHomePath(dir)} && git status\n` +
+          `  git rebase --continue   # after resolving\n` +
+          `  git rebase --abort      # to discard the attempt`,
+      };
+    }
+
     // Commit this machine's own device-meta first so a per-machine pin change
     // never wedges the pull. Genuine edits elsewhere still block below.
     await commitOwnDeviceMeta(dir);
@@ -977,13 +1013,16 @@ export async function pullRepo(
     }
 
     const branch = status.current || 'main';
-    await git.fetch('origin');
 
     // Resolve the upstream ref to fast-forward against. Prefer the local
     // branch's tracking config; otherwise ask origin for its default branch.
     let tracking = status.tracking;
     if (!tracking) {
+      // No tracking config: fetch origin so its HEAD is known, then ask which
+      // branch it points at. This path only ever concerns origin — a branch with
+      // no upstream has no other remote to consult.
       try {
+        await git.fetch('origin');
         await git.raw(['remote', 'set-head', 'origin', '--auto']);
         const sym = await git.raw(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD']);
         tracking = sym.trim();
@@ -991,6 +1030,24 @@ export async function pullRepo(
         tracking = `origin/${branch}`;
       }
     }
+
+    // Split the remote-tracking ref (<remote>/<branch>) into its parts and pull
+    // THOSE. Hardcoding 'origin' while comparing against `tracking` is how a
+    // branch tracking e.g. upstream/main silently 'succeeded': revparse saw a
+    // difference, the pull fetched origin/main (already current), and pullRepo
+    // returned success having moved nothing — the same "reported ok, pulled
+    // nothing" failure this change exists to remove. Branch names may contain
+    // slashes, so split on the FIRST separator only.
+    const sep = tracking.indexOf('/');
+    const remoteName = sep > 0 ? tracking.slice(0, sep) : 'origin';
+    const remoteBranch = sep > 0 ? tracking.slice(sep + 1) : branch;
+
+    // Bare fetch: updates every remote, so the revparse below sees a fresh ref
+    // whichever one the branch tracks. Deliberately argument-less — simple-git's
+    // fetchTask only forwards a remote when BOTH remote and branch are passed,
+    // so `fetch(remoteName)` would silently drop the argument and do exactly
+    // this anyway. Saying so beats an inert argument that reads as targeted.
+    await git.fetch();
 
     const localRef = await git.revparse(['HEAD']);
     const remoteRef = await git.revparse([tracking]).catch(() => null);
@@ -1008,12 +1065,30 @@ export async function pullRepo(
     }
 
     try {
-      await git.merge(['--ff-only', tracking]);
-    } catch {
+      // Rebase, not --ff-only. Fast-forward refuses ANY divergence, conflict or
+      // not, so a single local commit — including the one commitOwnDeviceMeta
+      // makes just above — permanently wedged the pull with nothing actually in
+      // conflict. Every device carries its own devices/<host>/ path, so those
+      // replay cleanly. Matches syncRepoGit (below) and this function's own doc.
+      //
+      // Pull the RESOLVED tracking ref, not `branch`: when the local branch has
+      // no tracking config the block above falls back to origin's default head,
+      // which may be named differently (local `main` vs origin `master`). Using
+      // `branch` there asks origin for a ref it does not have.
+      assertValidBranchName(remoteBranch);
+      await git.pull(remoteName, remoteBranch, { '--rebase': 'true' });
+    } catch (err) {
+      // Abort so the tree is restored, matching the atomicity --ff-only gave us.
+      // Without this a conflict leaves the repo detached, mid-rebase, with
+      // conflict markers written into live config (this repo is ~/.agents —
+      // agents.yaml and AGENTS.md are in it), and every later pull misreports
+      // the cause. `agents sync` reaches this path unattended across the fleet,
+      // so a wedged checkout would be worse than the bug this fixes.
+      await git.raw(['rebase', '--abort']).catch(() => { /* not mid-rebase */ });
       return {
         success: false,
         commit: '',
-        error: `Blocked by local commits. Push or reset them before pulling.\n\n  cd ${displayHomePath(dir)} && git log --oneline HEAD...${tracking}`,
+        error: `Rebase onto ${tracking} hit a conflict — the pull was rolled back, nothing changed.\n\nResolve the divergence, then pull again:\n\n  cd ${displayHomePath(dir)} && git log --oneline HEAD...${tracking}\n\n${(err as Error).message}`,
       };
     }
 
