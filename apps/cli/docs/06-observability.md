@@ -180,6 +180,12 @@ contains `path`, `name`, `mediaType`, and `sizeBytes` so consumers such as Facto
 can render thumbnails and open the original attachment without re-reading the raw
 agent transcript.
 
+Every row also carries flat top-level `ticketId` and `project` keys — always
+present, `null` when unknown — so a watcher can join active sessions on ticket and
+project without reaching into the nested `ticket` object. `project` is the
+basename of the session's cwd, the same derivation the historical `--json`
+listing uses, so the active and recent views join identically.
+
 Some sessions appear in multiple sources:
 
 - **Local CLI**: `sessions` only
