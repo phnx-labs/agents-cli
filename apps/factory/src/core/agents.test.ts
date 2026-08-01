@@ -8,6 +8,7 @@ import {
   STRATEGY_LAUNCH_AGENTS,
   modeFlagForAgent,
   buildAgentLaunchCommand,
+  wrapNativeAgentCommand,
   extractPlanFromSessionJson,
   planTextToSteps
 } from './agents';
@@ -346,5 +347,34 @@ describe('buildAgentLaunchCommand', () => {
   test('default model is included when provided', () => {
     const cmd = buildAgentLaunchCommand('claude', null, 'claude-haiku-4-5');
     expect(cmd).toContain('--model claude-haiku-4-5');
+  });
+});
+
+describe('wrapNativeAgentCommand (RUSH-2026)', () => {
+  // The exec prefix makes the shell replace itself with the agent runner so VS
+  // Code closes the tab automatically when the agent exits — mirroring tmux
+  // pane-died behaviour.
+
+  test('agent terminal: command is exec-prefixed', () => {
+    const cmd = buildAgentLaunchCommand('claude', null);
+    expect(wrapNativeAgentCommand(cmd, false)).toBe(`exec ${cmd}`);
+  });
+
+  test('agent terminal with --host: exec prefix is preserved', () => {
+    const cmd = buildAgentLaunchCommand('claude', null, undefined, undefined, undefined, undefined, undefined, 'yosemite-s0');
+    const wrapped = wrapNativeAgentCommand(cmd, false);
+    expect(wrapped).toMatch(/^exec agents run claude --interactive/);
+    expect(wrapped).toContain("--host 'yosemite-s0'");
+  });
+
+  test('shell terminal: command is NOT exec-prefixed', () => {
+    const shellCmd = 'zsh';
+    expect(wrapNativeAgentCommand(shellCmd, true)).toBe(shellCmd);
+    expect(wrapNativeAgentCommand(shellCmd, true)).not.toMatch(/^exec /);
+  });
+
+  test('empty command returns empty string unchanged', () => {
+    expect(wrapNativeAgentCommand('', false)).toBe('');
+    expect(wrapNativeAgentCommand('', true)).toBe('');
   });
 });

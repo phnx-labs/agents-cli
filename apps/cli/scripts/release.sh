@@ -99,12 +99,17 @@ REMOTE="$(git rev-parse "origin/$DEFAULT_BRANCH")"
 [[ "$BASE_SHA" == "$REMOTE" ]] || die "$DEFAULT_BRANCH is not in sync with origin/$DEFAULT_BRANCH (run 'git push' first)"
 
 # ----- npm auth via token (skips 2FA OTP prompts) -----
-# Resolve NPM_TOKEN. Honor an env-supplied token first (lets CI and machines
-# whose keychain helper is broken publish without the bundle); otherwise read
-# from the keychain-backed `npmjs.com` secrets bundle. The token must have
-# publish access to both @phnx-labs and @companion; create automation tokens
-# at https://www.npmjs.com/settings/<user>/tokens with the "Automation" type
-# so 2FA is bypassed for publishes.
+# Resolve NPM_TOKEN in order: (1) an env-supplied token (lets CI and machines
+# whose keychain helper is broken publish without the bundle); (2) the local
+# keychain-backed `npmjs.com` secrets bundle; (3) — when neither is present, e.g.
+# a release driven from a Linux box that has no npm token in its own store — the
+# bundle resolved EPHEMERALLY from a primary device over SSH via
+# `agents secrets exec npmjs.com --host <host>` (never written to disk here). That
+# last hop is what lets a Linux box release without a human pasting/approving a
+# token: it borrows the secret from zion/mac-mini just for this run. The token
+# must have publish access to both @phnx-labs and @companion; create automation
+# tokens at https://www.npmjs.com/settings/<user>/tokens with the "Automation"
+# type so 2FA is bypassed for publishes.
 if [[ -z "${NPM_TOKEN:-}" ]]; then
   # Use local build if available (has latest keychain fixes), fallback to global
   if [[ -f "$ROOT/dist/index.js" ]]; then
@@ -113,16 +118,33 @@ if [[ -z "${NPM_TOKEN:-}" ]]; then
     command -v agents >/dev/null || die "'agents' CLI not on PATH (needed to read npmjs.com secrets bundle)"
     AGENTS_CMD="agents"
   fi
+  # (2) Local `npmjs.com` bundle — fast path, no network.
   NPM_BUNDLE_OUT="$($AGENTS_CMD secrets export npmjs.com --plaintext 2>/dev/null || true)"
-  [[ -n "$NPM_BUNDLE_OUT" ]] || die "could not read 'npmjs.com' secrets bundle -- create it with: agents secrets create npmjs.com && agents secrets add npmjs.com NPM_TOKEN  (or export NPM_TOKEN=<token> before running this script)"
-  NPM_TOKEN_LINE="$(printf '%s\n' "$NPM_BUNDLE_OUT" | grep -E '^export NPM_TOKEN=' | head -1)"
-  [[ -n "$NPM_TOKEN_LINE" ]] || die "secrets bundle 'npmjs.com' is missing key NPM_TOKEN"
-  # Strip 'export NPM_TOKEN=' prefix and surrounding quotes if any.
-  NPM_TOKEN="${NPM_TOKEN_LINE#export NPM_TOKEN=}"
-  NPM_TOKEN="${NPM_TOKEN%\"}"
-  NPM_TOKEN="${NPM_TOKEN#\"}"
-  NPM_TOKEN="${NPM_TOKEN%\'}"
-  NPM_TOKEN="${NPM_TOKEN#\'}"
+  if [[ -n "$NPM_BUNDLE_OUT" ]]; then
+    NPM_TOKEN_LINE="$(printf '%s\n' "$NPM_BUNDLE_OUT" | grep -E '^export NPM_TOKEN=' | head -1)"
+    [[ -n "$NPM_TOKEN_LINE" ]] || die "secrets bundle 'npmjs.com' is missing key NPM_TOKEN"
+    # Strip 'export NPM_TOKEN=' prefix and surrounding quotes if any.
+    NPM_TOKEN="${NPM_TOKEN_LINE#export NPM_TOKEN=}"
+    NPM_TOKEN="${NPM_TOKEN%\"}"
+    NPM_TOKEN="${NPM_TOKEN#\"}"
+    NPM_TOKEN="${NPM_TOKEN%\'}"
+    NPM_TOKEN="${NPM_TOKEN#\'}"
+  else
+    # (3) No local bundle: borrow it from a primary device over SSH. `secrets exec
+    # --host` resolves the bundle on the remote and injects it into this child
+    # process only — the token is never stored on this box. Try SECRET_HOST first,
+    # then the usual primaries (zion = the interactive Mac, mac-mini = the
+    # appliance). This is the sanctioned path, so no credential-move prompt fires.
+    for _sh in ${SECRET_HOST:-} zion mac-mini; do
+      [[ -n "$_sh" ]] || continue
+      NPM_TOKEN="$($AGENTS_CMD secrets exec npmjs.com --host "$_sh" -- sh -c 'printf %s "${NPM_TOKEN:-}"' 2>/dev/null || true)"
+      if [[ -n "$NPM_TOKEN" ]]; then
+        gray "Resolved npm token from $_sh over SSH (ephemeral; not stored on this box)."
+        break
+      fi
+    done
+    [[ -n "$NPM_TOKEN" ]] || die "no local 'npmjs.com' bundle and could not borrow it from a primary device (tried: ${SECRET_HOST:+$SECRET_HOST }zion mac-mini). Fix one of: create it locally (agents secrets create npmjs.com && agents secrets add npmjs.com NPM_TOKEN); export NPM_TOKEN=<token>; or make a primary device that holds the bundle ssh-reachable (SECRET_HOST=<host> to point at a specific one)."
+  fi
 fi
 [[ -n "$NPM_TOKEN" ]] || die "NPM_TOKEN resolved to empty string"
 

@@ -61,6 +61,7 @@ import { heal, healChangedAnything, type HealResult } from '../lib/heal.js';
 import { blocksLocalScripts, getEffectiveExecutionPolicy } from '../lib/platform/winpath.js';
 import { scanUserRcFiles, rcSecretWarningLines } from '../lib/secrets/rc-hygiene.js';
 import { terminalWidth, truncateToWidth, stringWidth, padToWidth } from '../lib/session/width.js';
+import { readRepoBehindMarkers, type FetchStatusMarker } from '../lib/auto-pull.js';
 import * as fs from 'fs';
 
 const AGENT_NAMES: Record<string, string> = Object.fromEntries(
@@ -123,6 +124,7 @@ function renderOverviewText(
   orphanRows: OrphanRow[],
   hostClis: ReturnType<typeof listCliStatus>,
   signIn: Record<string, Pick<AccountInfo, 'signedIn' | 'email' | 'accountId'>>,
+  repoBehindMarkers: FetchStatusMarker[],
 ): void {
   console.log(chalk.bold('Agent CLIs'));
   // Show the fleet you actually run — agents that are ready in PATH, plus any
@@ -238,6 +240,11 @@ function renderOverviewText(
   // environment (readable via /proc/<pid>/environ) — the RUSH-1968 class. Flag
   // them here so the master passphrase never silently lives in `~/.zshenv` again.
   renderRcHygieneAdvisory();
+
+  // Repos that are behind upstream — surfaced here instead of on stderr during
+  // every command. Markers are written by the background fetch worker and persist
+  // until the user runs `agents repo pull <alias>`.
+  renderRepoBehindAdvisory(repoBehindMarkers);
 }
 
 // ─── windows execution-policy advisory ─────────────────────────────────────────
@@ -271,6 +278,26 @@ function renderRcHygieneAdvisory(): void {
   console.log(`  ${chalk.yellow('warn ')}  ${headline}`);
   for (const line of rest) {
     console.log(chalk.gray(`           ${line}`));
+  }
+}
+
+// ─── repo-behind advisory ─────────────────────────────────────────────────────
+
+/**
+ * Render repo-behind notices from background fetch markers as a "Repo updates"
+ * section in `agents doctor`. Reads without consuming the markers so repeated
+ * invocations keep showing the notice until the user runs `agents repo pull`.
+ */
+function renderRepoBehindAdvisory(markers: FetchStatusMarker[]): void {
+  const behind = markers.filter((m) => m.behind > 0);
+  if (behind.length === 0) return;
+  console.log();
+  console.log(chalk.bold('Repo updates'));
+  for (const m of behind) {
+    const label = m.alias === 'user' ? '~/.agents/' : m.alias;
+    const commits = `${m.behind} commit${m.behind === 1 ? '' : 's'}`;
+    console.log(`  ${chalk.yellow('warn ')}  ${label} is ${commits} behind ${m.branch}`);
+    console.log(chalk.gray(`           run \`agents repo pull ${m.alias}\` to update`));
   }
 }
 
@@ -846,6 +873,7 @@ export function registerDoctorCommand(program: Command): void {
         const syncRows = checkSyncStatus(cwd);
         const orphanRows = countOrphans();
         const hostClis = listCliStatus(cwd);
+        const repoBehindMarkers = readRepoBehindMarkers();
         // Advisory login state per installed agent (file-based getAccountInfo,
         // no home → the account-global/active credential). Best-effort: a probe
         // failure just leaves that agent's badge as "logged out".
@@ -880,10 +908,19 @@ export function registerDoctorCommand(program: Command): void {
               })),
               errors: hostClis.errors,
             },
+            // Repos behind upstream — emitted here so menubar and other consumers
+            // can surface the notices without reading stderr from normal commands.
+            repos: repoBehindMarkers.map((m) => ({
+              alias: m.alias,
+              dir: m.dir,
+              behind: m.behind,
+              branch: m.branch,
+              fetchedAt: m.fetchedAt,
+            })),
           }, null, 2));
           return;
         }
-        renderOverviewText(clis, syncRows, orphanRows, hostClis, signIn);
+        renderOverviewText(clis, syncRows, orphanRows, hostClis, signIn, repoBehindMarkers);
         // Point at the interactive reconcile when anything is out of sync — the
         // report shouldn't be a dead end. `agents status` runs the unified
         // home-reading engine and offers to sync (opt-in, never auto-fires here).
