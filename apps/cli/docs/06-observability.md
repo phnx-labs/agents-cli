@@ -36,6 +36,15 @@ So "was this agent started on the host by a remote user?" is answerable for any
 event, not just runs. The write is a synchronous single-line append (durable
 before the action proceeds); `AGENTS_DISABLE_EVENT_LOG=1` turns it off.
 
+`agents sessions --active` carries the same SSH origin on each live session's
+`provenance` (including tmux-hosted panes, whose launch env is read from the pane
+process) and resolves the client IP against the device registry into
+`provenance.origin` (`{ device, user? }`). The row then reads `ssh←<device>`
+(e.g. `ssh←zion`) instead of a bare `ssh`, so "which box launched this session"
+is answerable without scraping `ps`/`who`/`tailscale`. An IP that matches no
+registered device stays bare `ssh` — the raw `provenance.ssh.clientIp` is still
+present.
+
 ### Actor provenance — which *human* is behind a run
 
 `osUser` answers "which OS account", but on a shared fleet that is one account for
