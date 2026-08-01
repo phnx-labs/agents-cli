@@ -323,7 +323,9 @@ run_crabbox_tests() {
   gray "  (streaming; full log captured at $log)"
   # sandbox.sh with no --pr flag = test mode: rsync this tree to the box, run the
   # command. tee both streams so the operator watches live AND we keep the log.
-  if scripts/sandbox.sh -- bash -c 'bun install && bun run test' 2>&1 | tee "$log"; then
+  # Monorepo root has no "test" script — CLI suite lives under apps/cli (same as
+  # .github/workflows/tests.yml working-directory and package.json "test:cli").
+  if scripts/sandbox.sh -- bash -c 'cd apps/cli && bun install && bun run test' 2>&1 | tee "$log"; then
     rc=0
   else
     rc="${PIPESTATUS[0]}"
