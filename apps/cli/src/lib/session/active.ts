@@ -25,7 +25,7 @@ import { listActiveTasks } from '../cloud/store.js';
 import type { CloudTaskStatus } from '../cloud/types.js';
 import { AgentManager } from '../teams/agents.js';
 import { getTerminalsDir } from '../state.js';
-import { readPidSessionEntry, prunePidSessionRegistry, type PidSessionEntry } from './pid-registry.js';
+import { readPidSessionEntry, listPidSessionEntries, prunePidSessionRegistry, type PidSessionEntry } from './pid-registry.js';
 import { loadHookSessionIndex, resolveHookSessionRecord, type HookSessionIndex, type HookSessionRecord } from './hook-sessions.js';
 import { buildClaudeLabelMap } from './discover.js';
 import { buildRunNameMap } from './run-names.js';
@@ -1068,14 +1068,64 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
   return out;
 }
 
+/** One tmux pane's resolved agent identity for the authoritative source. */
+export interface PaneIdentity {
+  agent: string;
+  /** Exact session id when resolvable (launch registry, or the hook join). */
+  sessionId?: string;
+  /** The agent's OS pid from the launch registry (may differ from `pane_pid`). */
+  pid?: number;
+}
+
+/**
+ * Attribute a single tmux pane to the agent actually running in it.
+ *
+ * The launch registry — written per bare-spawn AND per wrap, each stamped with the
+ * `tmuxPane` it targeted (see src/lib/exec.ts) — is the EXACT, per-pane source of
+ * truth. So an agent spawned into an EXISTING pane (a split, where `$TMUX` is
+ * already set so no new session meta is stamped) is attributed to its OWN launch,
+ * not the session's original agent — closing the gap where such an agent was
+ * dropped by this source and left to the weaker ps-scan fallback. Session-meta
+ * labels remain the fallback for the wrapped origin pane of a session whose
+ * registry entry is absent (a failed best-effort write, or a legacy session that
+ * predates the registry's `tmuxPane` field). `source: 'teams'` panes are skipped —
+ * teammates are surfaced by listTeamsActive. Pure so it is unit-tested without tmux.
+ */
+export function resolvePaneIdentity(
+  meta: { labels?: Record<string, string>; source?: string } | null,
+  liveEntry: PidSessionEntry | undefined,
+  getHookIndex: () => HookSessionIndex,
+): PaneIdentity | undefined {
+  if (meta?.source === 'teams') return undefined;
+  if (liveEntry) {
+    // Exact id: the id recorded at launch (Claude), else the agent's own
+    // SessionStart hook joined by launchId/terminalId (non-Claude, or agents we
+    // didn't launch) — kind-guarded against a stale reused-pid file.
+    const sessionId = liveEntry.sessionId
+      ?? resolveHookSessionRecord(getHookIndex(), {
+        pid: liveEntry.pid,
+        kind: liveEntry.agent,
+        launchId: liveEntry.launchId,
+        terminalId: liveEntry.terminalId,
+      })?.session_id;
+    return { agent: liveEntry.agent, sessionId, pid: liveEntry.pid };
+  }
+  const agent = meta?.labels?.agent;
+  const sessionId = meta?.labels?.sessionId;
+  if (agent && sessionId) return { agent, sessionId };
+  return undefined;
+}
+
 /**
  * Agents hosted in the shared-socket tmux server — the authoritative source for
- * tmux-wrapped interactive spawns (see src/lib/exec.ts `runInTmux`). Enumerates
- * every pane on the shared socket and keeps those whose session meta was stamped
- * with `labels.agent` + `labels.sessionId` by the spawn-wrap. Because tmux (not a
- * per-window `live-terminals.json`) is the source of truth, a tmux-hosted agent is
- * ALWAYS captured with its exact `%pane` even when the extension registry is stale
- * or absent. `source: 'teams'` is skipped — teammates are surfaced by listTeamsActive.
+ * tmux-hosted interactive spawns (see src/lib/exec.ts `runInTmux`). Enumerates
+ * every pane on the shared socket and attributes each to the agent running in it
+ * via {@link resolvePaneIdentity}: the per-pane launch registry (exact) first, the
+ * session-meta labels as fallback. Because tmux (not a per-window
+ * `live-terminals.json`) is the source of truth, a tmux-hosted agent is captured
+ * with its exact `%pane` even when the extension registry is stale — INCLUDING an
+ * agent bare-spawned into a split of an existing session, which older logic dropped
+ * (it kept only the first pane per session meta). `source: 'teams'` is skipped.
  */
 export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
   const { getDefaultSocketPath } = await import('../tmux/paths.js');
@@ -1096,6 +1146,20 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
   }
   if (res.code !== 0) return [];
 
+  // Index live launches by the pane they target, so a pane we did NOT wrap (a
+  // split) resolves to its own agent. Newest launch wins a pane (pid reuse), and
+  // only live pids count — a dead agent's stale entry can't light up its old pane.
+  const liveByPane = new Map<string, PidSessionEntry>();
+  for (const e of listPidSessionEntries()) {
+    if (!e.tmuxPane || !isPidAlive(e.pid)) continue;
+    const prev = liveByPane.get(e.tmuxPane);
+    if (!prev || e.startedAtMs > prev.startedAtMs) liveByPane.set(e.tmuxPane, e);
+  }
+  // Hook index is scanned lazily — only when a live launch lacks a recorded id
+  // (a non-Claude split) and needs the SessionStart-hook join.
+  let hookIndex: HookSessionIndex | undefined;
+  const getHookIndex = (): HookSessionIndex => (hookIndex ??= loadHookSessionIndex());
+
   const out: ActiveSession[] = [];
   const seen = new Set<string>();
   for (const line of res.stdout.split('\n')) {
@@ -1103,19 +1167,24 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
     const [pane, sessName, pidRaw, curPath] = line.split('\t');
     if (!pane || !sessName) continue;
     const meta = readSessionMeta(sessName);
-    const agent = meta?.labels?.agent;
-    const sessionId = meta?.labels?.sessionId;
-    if (!agent || !sessionId) continue;      // only our stamped agent sessions
-    if (meta?.source === 'teams') continue;  // teammates come from listTeamsActive
-    if (seen.has(sessionId)) continue;       // first pane per session wins
-    seen.add(sessionId);
+    const liveEntry = liveByPane.get(pane);
+    const id = resolvePaneIdentity(meta, liveEntry, getHookIndex);
+    if (!id) continue;
+    // Dedupe by resolved session id; an as-yet-unresolved id (a hookless/lagging
+    // split) keys on the unique pane so it still surfaces as its own row.
+    const dedupKey = id.sessionId ?? pane;
+    if (seen.has(dedupKey)) continue;
+    seen.add(dedupKey);
 
-    const pid = parseInt(pidRaw, 10) || undefined;
-    const cwd = meta?.cwd ?? (curPath || undefined);
-    const sessionFile = findSessionFileForKind(agent, cwd, sessionId);
+    // Prefer the registry pid (the agent), falling back to the pane leaf pid. A
+    // pid we emit here goes into getActiveSessions' attributed set, so the ps-scan
+    // does NOT also surface this agent as a duplicate headless row.
+    const pid = id.pid ?? (parseInt(pidRaw, 10) || undefined);
+    const cwd = liveEntry?.cwd ?? meta?.cwd ?? (curPath || undefined);
+    const sessionFile = findSessionFileForKind(id.agent, cwd, id.sessionId);
     const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
     const pidAlive = pid ? isPidAlive(pid) : true;
-    const { state, tokPerSec } = computeLiveSignals(agent, sessionFile, cwd, pidAlive);
+    const { state, tokPerSec } = computeLiveSignals(id.agent, sessionFile, cwd, pidAlive);
     const { birthtimeMs, mtimeMs } = sessionFileTimes(sessionFile);
     // Provenance is known exactly here (the pane IS a tmux pane) — set it so
     // enrichProvenance skips it and the locator/reply rails resolve off the pane.
@@ -1127,10 +1196,10 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
     };
     out.push(applyState({
       context: 'terminal',
-      kind: agent,
+      kind: id.agent,
       host: 'tmux',
       pid,
-      sessionId,
+      sessionId: id.sessionId ?? sessionIdFromFile(sessionFile),
       cwd,
       topic,
       tokPerSec,

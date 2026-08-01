@@ -2,7 +2,53 @@ import { describe, it, expect, afterAll } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { resolveCwds, LSOF_CONCURRENCY, agentKindFromComm, activeStatusFromCloudStatus, resolveFallbackStatus } from './active.js';
+import { resolveCwds, LSOF_CONCURRENCY, agentKindFromComm, activeStatusFromCloudStatus, resolveFallbackStatus, resolvePaneIdentity } from './active.js';
+import type { HookSessionIndex } from './hook-sessions.js';
+
+describe('resolvePaneIdentity (per-pane attribution for the authoritative tmux source)', () => {
+  const emptyHook = (): HookSessionIndex => ({ byLaunchId: new Map(), byTerminalId: new Map(), byPid: new Map() });
+  const meta = (labels: Record<string, string>, source = 'cli') => ({ labels, source });
+
+  it('the per-pane launch registry WINS over the session meta label (a split into an existing session)', () => {
+    // The session was originally a wrapped claude, but THIS pane hosts a gemini
+    // bare-spawned into a split — it must be attributed to its own launch.
+    const id = resolvePaneIdentity(
+      meta({ agent: 'claude', sessionId: 'origin-id' }),
+      { pid: 5, agent: 'gemini', sessionId: 'gem-id', startedAtMs: 1 },
+      emptyHook,
+    );
+    expect(id).toEqual({ agent: 'gemini', sessionId: 'gem-id', pid: 5 });
+  });
+
+  it('a registry entry with no recorded id joins the SessionStart hook by launchId (non-Claude split)', () => {
+    const idx: HookSessionIndex = {
+      byLaunchId: new Map([['L1', { session_id: 'hook-id', agent: 'gemini', pid: 5 }]]),
+      byTerminalId: new Map(),
+      byPid: new Map(),
+    };
+    const id = resolvePaneIdentity(null, { pid: 5, agent: 'gemini', launchId: 'L1', startedAtMs: 1 }, () => idx);
+    expect(id).toEqual({ agent: 'gemini', sessionId: 'hook-id', pid: 5 });
+  });
+
+  it('falls back to session-meta labels when the pane has no live launch entry (wrapped origin / legacy)', () => {
+    const id = resolvePaneIdentity(meta({ agent: 'claude', sessionId: 'meta-id' }), undefined, emptyHook);
+    expect(id).toEqual({ agent: 'claude', sessionId: 'meta-id' });
+  });
+
+  it('skips a teams pane (teammates come from listTeamsActive, never double-counted here)', () => {
+    const id = resolvePaneIdentity(
+      meta({ agent: 'claude', sessionId: 'x' }, 'teams'),
+      { pid: 5, agent: 'claude', sessionId: 'x', startedAtMs: 1 },
+      emptyHook,
+    );
+    expect(id).toBeUndefined();
+  });
+
+  it('returns undefined for an unlabeled pane with no launch entry (a plain shell split)', () => {
+    expect(resolvePaneIdentity(null, undefined, emptyHook)).toBeUndefined();
+    expect(resolvePaneIdentity(meta({}), undefined, emptyHook)).toBeUndefined();
+  });
+});
 
 describe('resolveFallbackStatus (honest status when no rich transcript state)', () => {
   const tmp: string[] = [];
