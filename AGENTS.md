@@ -140,9 +140,17 @@ When working on this repo or the sibling `agent-cli-web` landing:
   sections (Rush-only). Override destination to `~/Phoenix/agents-cli/launches/` and use
   this repo's color/type tokens.
 
-Note: `apps/factory` (the Factory extension) is a **different product** with its own
-`swarmify`/Factory identity — the Phoenix "no Rush brand" rule governs the CLI, assets,
-demo, and website; Factory keeps its own brand and publish identity (frozen, above).
+Note: what is separate about `apps/factory` (Factory) is its **brand + publish
+identity** — the `swarmify` publisher, `swarm-ext`, the Factory product name (frozen,
+above) — and the Phoenix "no Rush brand" rule that governs the CLI, assets, demo, and
+website. That is the *only* sense in which Factory is a "different product." It is **not
+architecturally separate**: Factory is the **VS Code UI layer of agi-cli**, not a
+distinct codebase or product line. The `agents` CLI is the engine (`agents tmux`,
+`agents sessions attach`, detached-tmux sessions); Factory is the IDE frontend that
+drives it. So a capability like SSH-drop reconnect spans both (CLI engine + Factory UI),
+Factory's own changelog lives at `apps/factory/CHANGELOG.md`, and **`agi-cli-web` is
+Factory's website too** — do not read "different product" as "agi-cli-web isn't where
+Factory features get documented."
 
 If any agent starts pulling Rush styling, paths, or voice into agents-cli work, stop
 and reread this block.
