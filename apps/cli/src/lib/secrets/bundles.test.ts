@@ -253,6 +253,27 @@ describe('isHeadlessSecretsContext', () => {
   // shell must still get their prompt. Nothing reached it before — the TTY state was
   // read from process.* directly, so a mutant that made a plain shell NEVER prompt
   // (which would strand every cold bundle) left the whole suite green.
+  // The DEFAULT binding, not just the branch. Parameterizing the TTY state split one
+  // untested expression into a tested branch plus an untested default; a miswired
+  // default would make a detached release script `( ... ) >log 2>&1 </dev/null`
+  // classify as non-headless and pop a sheet nobody is watching — the exact failure
+  // this guard exists to prevent. Calls the TWO-arg form so the default is exercised.
+  it('defaults to the live process TTY state when none is passed', () => {
+    const d = (k: 'stdin' | 'stdout') => Object.getOwnPropertyDescriptor(process[k], 'isTTY');
+    const set = (k: 'stdin' | 'stdout', v: boolean | undefined) =>
+      Object.defineProperty(process[k], 'isTTY', { value: v, configurable: true, writable: true });
+    const [pin, pout] = [d('stdin'), d('stdout')];
+    try {
+      set('stdin', undefined); set('stdout', undefined);
+      expect(isHeadlessSecretsContext({} as NodeJS.ProcessEnv, 'darwin')).toBe(true);
+      set('stdin', true); set('stdout', true);
+      expect(isHeadlessSecretsContext({} as NodeJS.ProcessEnv, 'darwin')).toBe(false);
+    } finally {
+      if (pin) Object.defineProperty(process.stdin, 'isTTY', pin);
+      if (pout) Object.defineProperty(process.stdout, 'isTTY', pout);
+    }
+  });
+
   it('a plain human shell with a TTY is NOT headless — it still prompts', () => {
     expect(isHeadlessSecretsContext({} as NodeJS.ProcessEnv, 'darwin', { stdin: true, stdout: true })).toBe(false);
   });
