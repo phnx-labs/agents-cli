@@ -22,6 +22,7 @@ import {
   generateLaunchdPlist,
   generateSystemdUnit,
   readDaemonClaudeOAuthToken,
+  readDaemonClaudeBundleEnv,
   buildDetachedDaemonEnv,
   getDaemonLaunch,
   getAgentsInvocation,
@@ -252,7 +253,7 @@ describe('buildDetachedDaemonEnv', () => {
     seedKeychainBacked('sk-ant-oat01-detached');
     const env = buildDetachedDaemonEnv(
       { PATH: '/usr/bin' },
-      readDaemonClaudeOAuthToken({ allowPrompt: true }),
+      readDaemonClaudeBundleEnv({ allowPrompt: true }),
     );
     expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe('sk-ant-oat01-detached');
     expect(env.PATH).toBe('/usr/bin');
