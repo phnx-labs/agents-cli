@@ -73,7 +73,7 @@ import {
   SessionAgentType
 } from '../core/utils';
 import { generateLabelWithLLM } from '../core/labelgen';
-import { readClaudeSessionName } from '../core/sessionName';
+import { readClaudeSessionName, readClaudeSessionNameInfo } from '../core/sessionName';
 import { resolveTerminalCwd, tryReleaseWorktreeForTerminal } from '../core/worktree';
 import * as path from 'path';
 import { spawn } from 'child_process';
@@ -3645,15 +3645,16 @@ async function fetchAndSetAutoLabel(
   try {
     const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     const previewInfo = await getSessionPreviewForEntry(entry, workspacePath);
-    if (!previewInfo) return undefined;
-    if (!previewInfo.firstUserMessage) return undefined;
+    const firstUserMessage = previewInfo?.firstUserMessage;
+    const ticket = firstUserMessage ? extractLinearTicketId(firstUserMessage) : null;
 
-    const ticket = extractLinearTicketId(previewInfo.firstUserMessage);
-
-    // Prefer Claude's own persisted session name (the title shown by /status)
-    // — it's already a clean human summary and avoids a redundant LLM call.
-    // Codex/Gemini/Opencode don't persist this yet, so they fall through to
-    // the LLM path.
+    // 1) Reuse an existing real label. Claude persists the /status title (set by
+    //    Claude itself or the user); readClaudeSessionName returns it unless it's
+    //    the derived `<dirname>-<n>` placeholder. This is a clean human summary,
+    //    needs no LLM call, and — unlike the summary path below — doesn't require
+    //    a captured first message, so a session that already has a name gets it
+    //    even before its first turn is recorded. Codex/Gemini/Opencode don't
+    //    persist an equivalent, so they fall through to the summary path.
     if (entry.agentType === 'claude') {
       const persistedName = await readClaudeSessionName(entry.sessionId);
       if (persistedName) {
@@ -3663,12 +3664,16 @@ async function fetchAndSetAutoLabel(
       }
     }
 
-    const sourceText = opts.useFullConversation && previewInfo.lastUserMessage
-      ? `Initial task:\n${previewInfo.firstUserMessage}\n\nLatest activity:\n${previewInfo.lastUserMessage}`
-      : previewInfo.firstUserMessage;
+    // 2) Otherwise summarize the session's activity into a short title. This
+    //    needs a first user message to summarize.
+    if (!firstUserMessage) return undefined;
+
+    const sourceText = opts.useFullConversation && previewInfo?.lastUserMessage
+      ? `Initial task:\n${firstUserMessage}\n\nLatest activity:\n${previewInfo.lastUserMessage}`
+      : firstUserMessage;
 
     const llmTitle = await generateLabelWithLLM(sourceText);
-    const fallback = extractFirstNWords(previewInfo.firstUserMessage, 5);
+    const fallback = extractFirstNWords(firstUserMessage, 5);
     const base = llmTitle ?? fallback;
     const autoLabel = ticket && base ? `${ticket} ${base}` : (ticket ?? base);
 
@@ -3681,13 +3686,42 @@ async function fetchAndSetAutoLabel(
   }
 }
 
+// Un-stick a tab whose label is EXACTLY this session's own derived placeholder
+// (Claude's `<dirname>-<n>`, e.g. "muqsitnawaz-91"). On a window reload the
+// derived name baked into the tab title gets re-adopted as a sticky manual
+// label (terminals.register), which then blocks the auto-label poller forever.
+// A genuine label never equals the session's derived name, and old CLIs have no
+// derived name — so this only ever clears the placeholder, never a real label.
+// It touches only the label + its persisted store entry; the tmux session and
+// agent process are never affected.
+async function maybeHealDerivedLabel(
+  terminal: vscode.Terminal,
+  entry: terminals.EditorTerminal,
+  context: vscode.ExtensionContext
+): Promise<void> {
+  if (!entry.label || !entry.sessionId || entry.agentType !== 'claude') return;
+  const info = await readClaudeSessionNameInfo(entry.sessionId);
+  if (info?.derived && info.name === entry.label) {
+    await terminals.setLabel(terminal, undefined, context);
+  }
+}
+
 function startAutoLabelPollerForTerminal(terminal: vscode.Terminal, context: vscode.ExtensionContext): void {
+  void armAutoLabelPoller(terminal, context);
+}
+
+async function armAutoLabelPoller(terminal: vscode.Terminal, context: vscode.ExtensionContext): Promise<void> {
   const display = getDisplayPrefs(context);
   if (!display.autoLabelInTabTitles) return;
 
   const entry = terminals.getByTerminal(terminal);
-  if (!entry || entry.label || entry.autoLabel) return;
-  if (!entry.sessionId || !entry.agentType) return;
+  if (!entry || !entry.sessionId || !entry.agentType) return;
+
+  // Heal first: if the sticky label is the derived placeholder, drop it so a
+  // real name/topic can resolve below.
+  await maybeHealDerivedLabel(terminal, entry, context);
+
+  if (entry.label || entry.autoLabel) return;
 
   terminals.startAutoLabelPoller(terminal, async () => {
     const autoLabel = await fetchAndSetAutoLabel(terminal, entry);
@@ -3777,11 +3811,14 @@ async function tryFetchLabelOnFocus(
   const entry = terminals.getByTerminal(terminal);
   if (!entry) return;
 
-  // Skip if already has a label
-  if (entry.label || entry.autoLabel) return;
-
   // Need sessionId and agentType to fetch label
   if (!entry.sessionId || !entry.agentType) return;
+
+  // Heal a stuck derived-placeholder label so focusing the tab re-resolves it.
+  await maybeHealDerivedLabel(terminal, entry, context);
+
+  // Skip if it already has a (real) label
+  if (entry.label || entry.autoLabel) return;
 
   // Fetch the label from session file
   const autoLabel = await fetchAndSetAutoLabel(terminal, entry);
