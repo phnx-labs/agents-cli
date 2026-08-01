@@ -12,7 +12,7 @@
  * These drive the real DB (isolated under a temp HOME, no mocks) with an EMPTY
  * pool, which is exactly the case the pool-only lookup got wrong.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterAll } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -42,6 +42,8 @@ function meta(id: string, extra: Partial<SessionMeta> = {}): SessionMeta {
     ...extra,
   };
 }
+
+afterAll(() => fs.rmSync(TEST_HOME, { recursive: true, force: true }));
 
 describe('resolveSessionQuery falls back to the index for a complete id', () => {
   const indexed = 'a7c1d88d-b543-48c1-993d-dd5cd8e210c9';
