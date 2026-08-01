@@ -579,6 +579,14 @@
         }
       },
       {
+        "command": "agents.newClaudeAuto",
+        "title": "Agents: New Claude (Auto)",
+        "icon": {
+          "light": "assets/claude.png",
+          "dark": "assets/claude.png"
+        }
+      },
+      {
         "command": "agents.newCodexPickHost",
         "title": "Agents: New Codex (Pick Host)",
         "icon": {
@@ -603,6 +611,14 @@
         }
       },
       {
+        "command": "agents.newCodexAuto",
+        "title": "Agents: New Codex (Auto)",
+        "icon": {
+          "light": "assets/chatgpt.png",
+          "dark": "assets/chatgpt.png"
+        }
+      },
+      {
         "command": "agents.newGeminiPickHost",
         "title": "Agents: New Gemini (Pick Host)",
         "icon": {
@@ -621,6 +637,14 @@
       {
         "command": "agents.newGeminiAutoHost",
         "title": "Agents: New Gemini (Auto Host)",
+        "icon": {
+          "light": "assets/gemini.png",
+          "dark": "assets/gemini.png"
+        }
+      },
+      {
+        "command": "agents.newGeminiAuto",
+        "title": "Agents: New Gemini (Auto)",
         "icon": {
           "light": "assets/gemini.png",
           "dark": "assets/gemini.png"
@@ -675,6 +699,14 @@
         }
       },
       {
+        "command": "agents.newCursorAuto",
+        "title": "Agents: New Cursor (Auto)",
+        "icon": {
+          "light": "assets/cursor.png",
+          "dark": "assets/cursor.png"
+        }
+      },
+      {
         "command": "agents.newAntigravityPickHost",
         "title": "Agents: New Antigravity (Pick Host)",
         "icon": {
@@ -693,6 +725,14 @@
       {
         "command": "agents.newAntigravityAutoHost",
         "title": "Agents: New Antigravity (Auto Host)",
+        "icon": {
+          "light": "assets/antigravity.png",
+          "dark": "assets/antigravity.png"
+        }
+      },
+      {
+        "command": "agents.newAntigravityAuto",
+        "title": "Agents: New Antigravity (Auto)",
         "icon": {
           "light": "assets/antigravity.png",
           "dark": "assets/antigravity.png"

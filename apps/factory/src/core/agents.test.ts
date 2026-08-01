@@ -347,4 +347,26 @@ describe('buildAgentLaunchCommand', () => {
     const cmd = buildAgentLaunchCommand('claude', null, 'claude-haiku-4-5');
     expect(cmd).toContain('--model claude-haiku-4-5');
   });
+
+  // RUSH-2025: Pick Host / Auto Host / New Claude (Auto) launch with BOTH a host
+  // and --strategy balanced so the CLI's account rotation routes around a
+  // signed-out / throttled version on the chosen device.
+  test('balanced strategy + host emit --host and --strategy balanced together', () => {
+    const cmd = buildAgentLaunchCommand(
+      'claude', 'sess-1', undefined, undefined, undefined, 'balanced', undefined, 'yosemite-s0',
+    );
+    expect(cmd).toContain("--host 'yosemite-s0'");
+    expect(cmd).toContain('--strategy balanced');
+  });
+
+  test('a pinned version on a host launch suppresses --strategy (pin overrides balance)', () => {
+    // Pick Version & Host: the exact pin wins, so no --strategy is emitted even
+    // if a strategy is passed.
+    const cmd = buildAgentLaunchCommand(
+      'claude', 'sess-2', undefined, undefined, '2.1.170', 'balanced', undefined, 'yosemite-s1',
+    );
+    expect(cmd).toContain('claude@2.1.170');
+    expect(cmd).toContain("--host 'yosemite-s1'");
+    expect(cmd).not.toContain('--strategy');
+  });
 });

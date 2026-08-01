@@ -11,9 +11,9 @@ import * as claudemd from './claudemd.vscode';
 import { AgentsMarkdownEditorProvider, swarmCurrentDocument } from './customEditor';
 import * as git from './git.vscode';
 import { AgentSettings, hasLoginEnabled, PromptEntry, QUICK_LAUNCH_SLOT_KEYS, getQuickLaunchSlot, QuickLaunchSlot, QuickLaunchSlotKey } from '../core/settings';
-import { listRegisteredDevices, countRunningAgents } from './deviceHealth.vscode';
+import { listRegisteredDevices, countRunningAgents, fetchDeviceStats, resolveSecret } from './deviceHealth.vscode';
 import { normalizeHost } from '../core/remoteSessions';
-import { pickLeastBusyDevice, resolveBalancePool } from '../core/launchHost';
+import { pickBestHost, deviceHasUsableVersion, resolveBalancePool, DeviceLoad } from '../core/launchHost';
 import * as settings from './settings.vscode';
 import * as swarm from './swarm.vscode';
 import {
@@ -318,27 +318,60 @@ function buildClaudeLaunchCommand(
 // Sentinel a QuickPick/slot uses to mean "auto-pick the least-busy device".
 const BALANCED_HOST = 'balanced';
 
-// Resolve the least-busy online device for a balanced launch. `pool` restricts
-// the candidate set (undefined/empty = every online device except this machine).
-// Probes running-agent counts behind a progress spinner. Returns undefined when
-// no device is eligible, so the caller falls back to the local machine.
-async function resolveBalancedHost(pool?: string[]): Promise<string | undefined> {
+// Resolve the best online device for a balanced launch. `pool` restricts the
+// candidate set (undefined/empty = every online device except this machine).
+// `agentKey` (RUSH-2025) makes the pick AGENT-AWARE: it additionally probes each
+// candidate's hardware load/memory and whether that agent has a signed-in,
+// non-throttled version there, then ranks via the composite pickBestHost and
+// DROPS devices with no usable version — so the launch never lands on a host
+// where the user would hit a login/limit wall. Without `agentKey` it degrades to
+// the running-agent-count ranking (unchanged legacy behavior). Returns undefined
+// when no device is eligible, so the caller falls back to the local machine.
+async function resolveBalancedHost(pool?: string[], agentKey?: string): Promise<string | undefined> {
   const localName = normalizeHost(os.hostname());
   const devices = await listRegisteredDevices();
   const fleet = devices.map(d => ({ name: d.name, online: !!d.online, running: 0 }));
-  const online = resolveBalancePool(fleet, { localName, pool }).filter(c => c.online);
-  if (online.length === 0) {
+  const eligible = resolveBalancePool(fleet, { localName, pool }).filter(c => c.online);
+  if (eligible.length === 0) {
     vscode.window.showInformationMessage('Balanced launch: no online device available — running locally.');
     return undefined;
   }
-  const loaded = await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Window, title: 'Picking least-busy host…' },
-    () => Promise.all(online.map(async c => ({
-      ...c,
-      running: await countRunningAgents(c.name, { isLocal: false }),
-    }))),
+  // Look up each eligible device's registry entry for its SSH address + creds so
+  // the hardware probe can reach it (mirrors the Factory Floor device-health
+  // fetch in settings.vscode.ts).
+  const byName = new Map(devices.map(d => [normalizeHost(d.name), d]));
+  const loaded: DeviceLoad[] = await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Window, title: agentKey ? `Picking best host for ${agentKey}…` : 'Picking least-busy host…' },
+    () => Promise.all(eligible.map(async (c): Promise<DeviceLoad> => {
+      const dev = byName.get(normalizeHost(c.name));
+      const host = dev?.host ?? c.name;
+      const running = await countRunningAgents(c.name, { isLocal: false });
+      if (!agentKey) return { ...c, running };
+      // Agent-aware: probe hardware health + usable-version in parallel.
+      const creds = dev?.secretRef ? await resolveSecret(dev.secretRef) : {};
+      const [stats, usableVersion] = await Promise.all([
+        fetchDeviceStats(host, { isLocal: false, identityFile: creds.identityFile, user: creds.user || dev?.user }),
+        hostHasUsableVersion(c.name, agentKey),
+      ]);
+      return {
+        ...c,
+        running,
+        usableVersion,
+        loadAvg1: stats.reachable ? stats.loadAvg1 : undefined,
+        memPercent: stats.reachable ? stats.memPercent : undefined,
+      };
+    })),
   );
-  return pickLeastBusyDevice(loaded) ?? undefined;
+  const best = pickBestHost(loaded);
+  if (!best && agentKey && loaded.length > 0) {
+    // Every online device lacks a signed-in, non-throttled version of this
+    // agent — fall back to local rather than launch into a broken agent.
+    vscode.window.showWarningMessage(
+      `No fleet device has a usable ${agentKey} version (signed in and not rate-limited) — running locally.`,
+    );
+    return undefined;
+  }
+  return best ?? undefined;
 }
 
 // Resolve a Quick Launch slot's Run-on target to a device name (undefined =
@@ -364,7 +397,7 @@ async function resolveSlotHost(slot: QuickLaunchSlot): Promise<string | undefine
 // Interactive host picker (This Mac / a device / Balanced) for the per-agent
 // "(Pick Host)" commands and the ⌘⌥⇧n override. Returns { cancelled } if the
 // user dismissed it; host === undefined means "this Mac".
-async function pickLaunchHost(title = 'Run on…'): Promise<{ host?: string; cancelled: boolean }> {
+async function pickLaunchHost(title = 'Run on…', agentKey?: string): Promise<{ host?: string; cancelled: boolean }> {
   const devices = await listRegisteredDevices();
   const sorted = [...devices].sort((a, b) => Number(b.online) - Number(a.online));
   const BALANCE_ID = ' balanced';
@@ -379,7 +412,10 @@ async function pickLaunchHost(title = 'Run on…'): Promise<{ host?: string; can
   ];
   const pick = await vscode.window.showQuickPick(items, { placeHolder: title, title });
   if (!pick) return { cancelled: true };
-  if (pick.hostId === BALANCE_ID) return { host: await resolveBalancedHost(undefined), cancelled: false };
+  // Balanced -> agent-aware best host (RUSH-2025). An explicit device pick is
+  // honored as-is; the launch still passes strategy 'balanced' so the CLI's
+  // account rotation routes around a signed-out / throttled version on it.
+  if (pick.hostId === BALANCE_ID) return { host: await resolveBalancedHost(undefined, agentKey), cancelled: false };
   return { host: pick.hostId, cancelled: false };
 }
 
@@ -1501,12 +1537,19 @@ export async function activate(context: vscode.ExtensionContext) {
   for (const def of BUILT_IN_AGENTS) {
     if (def.key === 'shell') continue;
 
+    // Agents that support --strategy balanced launch (Pick/Auto) Host with it so
+    // the CLI's account rotation routes around a signed-out / throttled version
+    // on the chosen device (RUSH-2025). Others (opencode/grok/kimi/droid) have no
+    // balanced rotation, so they keep the default strategy.
+    const hostStrategy: RunStrategy | undefined =
+      (STRATEGY_LAUNCH_AGENTS as readonly string[]).includes(def.key) ? 'balanced' : undefined;
+
     context.subscriptions.push(
       vscode.commands.registerCommand(`${def.commandId}PickHost`, async () => {
-        const picked = await pickLaunchHost(`New ${def.title} — run on…`);
+        const picked = await pickLaunchHost(`New ${def.title} — run on…`, def.key);
         if (picked.cancelled) return;
         const agentConfig = getBuiltInByTitle(context.extensionPath, def.title);
-        if (agentConfig) openSingleAgent(context, agentConfig, undefined, undefined, undefined, picked.host);
+        if (agentConfig) openSingleAgent(context, agentConfig, undefined, undefined, hostStrategy, picked.host);
       })
     );
 
@@ -1514,18 +1557,35 @@ export async function activate(context: vscode.ExtensionContext) {
       vscode.commands.registerCommand(`${def.commandId}PickVersionHost`, async () => {
         const version = await pickAgentVersion(def.key);
         if (!version) return;
-        const picked = await pickLaunchHost(`New ${def.title} v${version.version} — run on…`);
+        const picked = await pickLaunchHost(`New ${def.title} v${version.version} — run on…`, def.key);
         if (picked.cancelled) return;
         const agentConfig = getBuiltInByTitle(context.extensionPath, def.title);
+        // A pinned version is an explicit override, so no balanced strategy here.
         if (agentConfig) openSingleAgent(context, agentConfig, undefined, version.version, undefined, picked.host);
       })
     );
 
     context.subscriptions.push(
       vscode.commands.registerCommand(`${def.commandId}AutoHost`, async () => {
-        const host = await resolveBalancedHost(undefined);
+        // Agent-aware host pick: skips devices with no usable version of def.key.
+        const host = await resolveBalancedHost(undefined, def.key);
         const agentConfig = getBuiltInByTitle(context.extensionPath, def.title);
-        if (agentConfig) openSingleAgent(context, agentConfig, undefined, undefined, undefined, host);
+        if (agentConfig) openSingleAgent(context, agentConfig, undefined, undefined, hostStrategy, host);
+      })
+    );
+  }
+
+  // "New Claude (Auto)" (RUSH-2025): one command that auto-picks BOTH the host
+  // (least-loaded, agent-healthy device via resolveBalancedHost) AND the version
+  // strategy ('balanced'). Combines newClaudeAutoHost + newClaudeBalanced. Only
+  // registered for agents that support balanced rotation.
+  for (const def of BUILT_IN_AGENTS) {
+    if (!(STRATEGY_LAUNCH_AGENTS as readonly string[]).includes(def.key)) continue;
+    context.subscriptions.push(
+      vscode.commands.registerCommand(`${def.commandId}Auto`, async () => {
+        const host = await resolveBalancedHost(undefined, def.key);
+        const agentConfig = getBuiltInByTitle(context.extensionPath, def.title);
+        if (agentConfig) openSingleAgent(context, agentConfig, undefined, undefined, 'balanced', host);
       })
     );
   }
@@ -2455,17 +2515,32 @@ interface AgentViewResponse {
   versions: AgentVersionInfo[];
 }
 
-async function listAgentVersions(agentKey: string): Promise<AgentVersionInfo[]> {
+// List an agent's installed versions with login/usage health. A `host` targets a
+// remote device via `agents view <agent> --host <device> --json` (RUSH-2025 host
+// health probe); omit it for the local machine. A remote probe gets a longer
+// timeout since it makes an SSH round-trip.
+async function listAgentVersions(agentKey: string, host?: string): Promise<AgentVersionInfo[]> {
   const { runAgents } = await import('../core/agentsBin');
   try {
-    const { stdout } = await runAgents(`view ${agentKey} --json`, {
+    const hostFlag = host ? ` --host ${host}` : '';
+    const { stdout } = await runAgents(`view ${agentKey}${hostFlag} --json`, {
       maxBuffer: 10 * 1024 * 1024,
+      timeout: host ? 15_000 : 30_000,
     });
     const parsed: AgentViewResponse = JSON.parse(stdout);
     return parsed.versions || [];
   } catch {
     return [];
   }
+}
+
+// True when `host` has at least one signed-in, non-throttled version of the
+// agent — the RUSH-2025 "usable version" test. A probe failure (offline, no SSH,
+// agent not installed) yields an empty list, so the device is reported unusable
+// and gets filtered out of the balancer rather than launched into blindly.
+async function hostHasUsableVersion(host: string, agentKey: string): Promise<boolean> {
+  const versions = await listAgentVersions(agentKey, host);
+  return deviceHasUsableVersion(versions);
 }
 
 // Resolve the newest installed version for an agent (used by the "(Latest)"
