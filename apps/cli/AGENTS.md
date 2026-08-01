@@ -212,8 +212,16 @@ scripts/release.sh <version>          # dry-run: bump, type-check, build, test, 
 scripts/release.sh <version> --apply  # commits chore(release), tags v<version>, npm publish, pushes
 ```
 
-`release.sh` reads the npm token from the `npmjs.com` secrets bundle (`agents
-secrets`) — no 2FA prompt, no token on disk. The script's git-scope reads use
+`release.sh` resolves the npm token in three steps — no 2FA prompt, no token on
+disk: (1) an env-supplied `NPM_TOKEN`; (2) the local `npmjs.com` secrets bundle
+(`agents secrets`); (3) if neither is present — e.g. a release driven from a Linux
+box whose own store has no npm token — it **borrows the bundle from a primary
+device over SSH** via `agents secrets exec npmjs.com --host <host>`, which resolves
+on the remote and injects into this run only (never stored locally). It tries
+`SECRET_HOST` first, then `zion`, then `mac-mini`. This is why a Linux release no
+longer stops to ask you to approve a token: the sanctioned remote-resolve path
+fires automatically instead of an agent hand-moving a credential between hosts.
+The script's git-scope reads use
 `<ref>:apps/cli/package.json` (not root) since the package moved under `apps/cli`.
 If npm rejects a publish after the release PR merges, rerun the same command.
 The script revalidates that PR's full CI matrix and rebuilds from its exact merged
