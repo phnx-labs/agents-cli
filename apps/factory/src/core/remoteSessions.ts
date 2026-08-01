@@ -218,6 +218,10 @@ export interface RemoteSession {
   /** The CLI record's `context` ('terminal' | 'cloud' | 'teams' | ...). Lets the
    *  webview treat cloud rows differently from terminal-backed agents. */
   context: string;
+  /** Foreground/background presence from the CLI (`attached` | `background` |
+   *  `parked`), absent when the session isn't on that axis (cloud/team/ad-hoc
+   *  headless). Drives the detach/attach affordances. */
+  presence?: string;
   /** Cloud task id (`agents cloud message <id> <text>` is the reply channel for
    *  cloud rows). Empty for non-cloud sessions. */
   cloudTaskId: string;
@@ -288,6 +292,7 @@ export interface HostInfo {
  */
 export interface RawActiveSession {
   context?: string;
+  presence?: string;
   kind?: string;
   pid?: number;
   sessionId?: string;
@@ -597,6 +602,7 @@ export function normalizeActiveSession(
     label: asStr(raw.label),
     sessionFile: asStr(raw.sessionFile),
     context: asStr(raw.context),
+    presence: asStr(raw.presence),
     cloudTaskId: raw.cloudTaskId || '',
     cloudProvider: raw.cloudProvider || '',
     teamName: raw.teamName || '',

@@ -19,6 +19,7 @@ import type { SessionMeta, SessionAgentId } from '../session/types.js';
 import { SESSION_AGENTS } from '../session/types.js';
 import { localLogPath, updateTask, type HostTask } from './tasks.js';
 import { parseSessionIdMarker } from './session-marker.js';
+import { deriveShortId } from '../session/short-id.js';
 
 export interface HostSessionContext {
   /** Local directory the `agents run --host` was invoked from. */
@@ -39,7 +40,7 @@ export function hostSessionMeta(task: HostTask, ctx: HostSessionContext): Sessio
 
   return {
     id,
-    shortId: id.slice(0, 8),
+    shortId: deriveShortId(id),
     agent: task.agent as SessionAgentId,
     timestamp: task.createdAt,
     cwd: ctx.cwd,
@@ -119,7 +120,7 @@ export function registerInteractiveHostSession(ctx: InteractiveHostSessionContex
     upsertSession(
       {
         id: ctx.sessionId,
-        shortId: ctx.sessionId.slice(0, 8),
+        shortId: deriveShortId(ctx.sessionId),
         agent: ctx.agent as SessionAgentId,
         timestamp: ctx.createdAt ?? new Date().toISOString(),
         cwd: ctx.cwd,

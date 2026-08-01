@@ -72,8 +72,15 @@ counters come from a sibling `agents/main/wire.jsonl`, so its continuation track
 that file's offset + the three additive counter bases.) It falls back to a **full
 reparse from byte 0** when the file has no prior continuation (cold start), shrank
 at or below the saved offset (truncation / rewrite), or its mtime went backwards
-(clock rewind / restore). Full and incremental parses run through the same reducer
-per scanner, so the indexed row an append produces — token counts, cost, duration,
+(clock rewind / restore). For **Claude and Codex** it also re-derives the
+transcript's first-event identity (the first user/assistant `timestamp` for Claude,
+the `session_meta` id for Codex) from a bounded read of the file start and forces a
+FULL parse when it no longer matches the prior continuation — an in-place rewrite or
+restore that dropped a *different* session at the same path, which size + mtime alone
+cannot tell from an append. (**Kimi** needs no such re-check: its session dir is
+keyed by session UUID and `wire.jsonl` is append-only, so a given path can never
+change identity.) Full and incremental parses run through the same reducer per
+scanner, so the indexed row an append produces — token counts, cost, duration,
 topic/title, and (Claude/Codex) PR + ticket refs + FTS content — is identical to a
 from-scratch full reparse, even when a signal straddles two scans. Both incremental
 paths apply only newline-terminated lines and defer a complete-but-unterminated
@@ -312,6 +319,49 @@ Scope: v1 supports **Claude** (single-file transcript, native `--resume`). Codex
 (single-file) is a natural next step; multi-file agents (grok, kimi) and DB-only
 agents (opencode) need per-agent handling and are refused up front with a clear
 message.
+
+## Background & foreground (detach / attach)
+
+`agents detach <id>` sends a live agent session to the background; `agents attach <id>`
+brings it back. They are the foreground/background axis over a session, and route
+through the same version-pinned `agents run --resume` path everything else uses — so
+they are agent-agnostic (native resume for Claude/Codex, `/continue` replay for the
+rest), not a per-agent special case.
+
+- **detach**: stop the interactive process (kill the tmux session when tmux-hosted,
+  else SIGTERM the pid) and **wait for it to actually exit** before spawning a
+  detached, version-pinned `agents run <agent> --resume <id> --headless "<nudge>"`,
+  so the two never race over the same transcript. The nudge tells the now-unwatched
+  agent it is headless and to drive its task to completion rather than stall on a
+  confirmation nobody can answer. The continuation runs until the task is done, then
+  exits; its output is written to `~/.agents/.cache/logs/detach-<shortid>.log`
+  (printed on detach) so a background run that crashes leaves a trail.
+  - **Remote sessions** (matched via the cross-host sweep) are detached **on their
+    own host over SSH** — `agents detach <id> --local` runs there — since a pid and
+    tmux socket only mean something on the machine the session runs on. Use `--local`
+    to skip the sweep and only consider this machine.
+  - **Cloud and team sessions are refused**: cloud runs have their own lifecycle, and
+    a `teams` session must be stopped through `agents teams` so the team supervisor's
+    PID-reuse-safe stop path and bookkeeping stay in sync — `detach` won't SIGTERM a
+    teammate out from under it.
+- **attach**: stop the headless continuation (if any), then `resumeSessionInPlace`
+  the session interactively in the current terminal — the same session, full history,
+  including whatever the background run did.
+
+The record `detach` writes (`~/.agents/.system/detached/<id>.json`, one file per
+session; see `lib/session/detached.ts`) is the source of truth for **presence**, which
+`getActiveSessions` folds onto every row and `agents sessions --active --json` emits:
+
+| presence | meaning |
+| --- | --- |
+| `attached` | live interactive TUI you're watching |
+| `background` | detached: the headless continuation is running (its pid is alive) |
+| `parked` | the headless continuation has exited; the transcript is durable, `attach` resumes it |
+
+Presence is **derived, never asserted**: a record only says "this session was detached";
+whether it is `background` or `parked` is decided live from the recorded pid plus its
+start-time fingerprint (which defeats PID reuse). Ad-hoc headless runs and cloud/team
+rows carry no presence — they are not on this axis.
 
 ## Export / Import (portable bundles)
 

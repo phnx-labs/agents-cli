@@ -402,6 +402,25 @@ export function ticketLabel(s: Pick<SessionMeta, 'ticketId' | 'prNumber'>): stri
 }
 
 /**
+ * The row shape `agents sessions --active --json` emits. RUSH-1981: a watcher
+ * joins active sessions on ticketId + project, but the raw ActiveSession nests
+ * the ticket (`ticket.id`) and carries no `project` at all — so a naive join
+ * silently drops every row. Emit both as flat, always-present top-level keys
+ * (null when unknown) alongside the raw fields, so every active row is joinable.
+ * `project` uses the same derivation SessionMeta does — basename(cwd) (see
+ * discover.ts) — so the active view and the history view join identically.
+ */
+export function serializeActiveSessionsForJson(
+  sessions: ActiveSession[],
+): Array<ActiveSession & { ticketId: string | null; project: string | null }> {
+  return sessions.map((s) => ({
+    ...s,
+    ticketId: s.ticket?.id ?? null,
+    project: s.cwd ? path.basename(s.cwd) : null,
+  }));
+}
+
+/**
  * Compact, colour-coded badges for the durable/awaiting signals. Text-only (no
  * emoji, per repo convention): `plan` / `ask` / `perm` for why it's waiting,
  * `PR#N`, `wt:slug`, `TICKET-123`.
@@ -879,7 +898,7 @@ async function renderActiveSessions(
   const sessions = waitingOnly ? merged.filter(s => s.status === 'input_required') : merged;
 
   if (asJson) {
-    process.stdout.write(JSON.stringify(sessions, null, 2) + '\n');
+    process.stdout.write(JSON.stringify(serializeActiveSessionsForJson(sessions), null, 2) + '\n');
     if (waitingOnly && sessions.length > 0) process.exitCode = 1;
     return;
   }

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { serializeSessionsJson } from './sessions.js';
+import { serializeSessionsJson, serializeActiveSessionsForJson } from './sessions.js';
 import type { SessionMeta } from '../lib/session/types.js';
+import type { ActiveSession } from '../lib/session/active.js';
 
 /**
  * `serializeSessionsJson` is the single seam both the local `agents sessions
@@ -63,5 +64,45 @@ describe('serializeSessionsJson', () => {
     const out = serializeSessionsJson([meta()]);
     expect(out.endsWith('\n')).toBe(true);
     expect(out.endsWith('\n\n')).toBe(false);
+  });
+});
+
+/**
+ * RUSH-1981: `agents sessions --active --json` is what a supervising watcher
+ * joins on. The raw ActiveSession nests the ticket (`ticket.id`) and carries no
+ * `project`, so a naive join on ticketId+project drops every row. The serializer
+ * must add both as flat, always-present top-level keys.
+ */
+describe('serializeActiveSessionsForJson (RUSH-1981 — join keys)', () => {
+  function active(over: Partial<ActiveSession> = {}): ActiveSession {
+    return { context: 'terminal', kind: 'agent', status: 'running', ...over } as ActiveSession;
+  }
+
+  it('emits flat ticketId (from ticket.id) and project (basename of cwd)', () => {
+    const [row] = serializeActiveSessionsForJson([
+      active({ cwd: '/home/u/src/github.com/acme/widget', ticket: { id: 'RUSH-1981' } as ActiveSession['ticket'] }),
+    ]);
+    expect(row.ticketId).toBe('RUSH-1981');
+    expect(row.project).toBe('widget');
+  });
+
+  it('emits both keys as null (never absent) when the session has no ticket or cwd', () => {
+    const [row] = serializeActiveSessionsForJson([active()]);
+    // The keys must EXIST so a `.ticketId`/`.project` join never throws — a
+    // missing property and an explicit null are not the same to a consumer.
+    expect(Object.prototype.hasOwnProperty.call(row, 'ticketId')).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(row, 'project')).toBe(true);
+    expect(row.ticketId).toBeNull();
+    expect(row.project).toBeNull();
+  });
+
+  it('preserves the raw ActiveSession fields alongside the join keys', () => {
+    const [row] = serializeActiveSessionsForJson([
+      active({ sessionId: 'sess-1', machine: 'yosemite-s1', cwd: '/a/b/repo' }),
+    ]);
+    expect(row.sessionId).toBe('sess-1');
+    expect(row.machine).toBe('yosemite-s1');
+    expect(row.ticket).toBeUndefined();
+    expect(row.project).toBe('repo');
   });
 });

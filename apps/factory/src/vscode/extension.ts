@@ -27,6 +27,7 @@ import { startWatchdogBridge } from '../mcp/watchdog-bridge';
 import { ensureWatchdogMcpInstalled } from '../mcp/watchdogInstall';
 import * as notifications from './notifications.vscode';
 import * as terminals from './terminals.vscode';
+import { fetchLocalSessions } from './remoteSessions.vscode';
 import * as sessionTracker from './sessionTracker';
 import { runRecapHeadless, isRecapSupported } from './recap.vscode';
 import { buildAgentTerminalEnv } from '../core/terminals';
@@ -270,6 +271,77 @@ export function runHeadlessAgent(
 // background/headless run reopens in a new tab and resumes; a live terminal session is
 // attached). It auto-resolves the surface (no interactive picker), so it's safe to run
 // detached from the extension host.
+// Send the active agent terminal to the background: `agents detach <id>` stops its
+// interactive process and continues it headless, then we close the tab. When the
+// active terminal isn't an agent, fall back to a picker over the live agent tabs.
+async function detachAgentToBackground(): Promise<void> {
+  const active = vscode.window.activeTerminal;
+  let sessionId: string | undefined;
+  let target: vscode.Terminal | undefined;
+  if (active && terminals.isAgentTerminal(active) && terminals.getSessionId(active)) {
+    sessionId = terminals.getSessionId(active);
+    target = active;
+  } else {
+    const candidates = vscode.window.terminals.filter(
+      (t) => terminals.isAgentTerminal(t) && terminals.getSessionId(t),
+    );
+    if (candidates.length === 0) {
+      void vscode.window.showInformationMessage('No live agent terminal to send to the background.');
+      return;
+    }
+    const pick = await vscode.window.showQuickPick(
+      candidates.map((t) => ({
+        label: `${terminals.getAgentType(t) ?? 'agent'} ${(terminals.getSessionId(t) ?? '').slice(0, 8)}`,
+        detail: t.name,
+        terminal: t,
+      })),
+      { placeHolder: 'Send which agent to the background?' },
+    );
+    if (!pick) return;
+    sessionId = terminals.getSessionId(pick.terminal);
+    target = pick.terminal;
+  }
+  if (!sessionId) {
+    void vscode.window.showWarningMessage('That agent has no resolved session id yet — try again once it has started.');
+    return;
+  }
+  const child = spawn('agents', ['detach', sessionId], {
+    detached: true,
+    stdio: 'ignore',
+    env: agentsSpawnEnv(),
+  });
+  child.unref();
+  target?.dispose();
+  void vscode.window.showInformationMessage(
+    `Sent ${sessionId.slice(0, 8)} to the background — running headless. Bring it back with “Agents: Attach”.`,
+  );
+}
+
+// Bring a backgrounded/parked agent to the foreground: pick from the CLI's
+// active-session list (presence background/parked) and open a terminal running
+// `agents attach <id>`, which resumes the session interactively in that tab.
+async function attachAgentFromBackground(): Promise<void> {
+  const { sessions } = await fetchLocalSessions();
+  const backgrounded = sessions.filter((s) => s.presence === 'background' || s.presence === 'parked');
+  if (backgrounded.length === 0) {
+    void vscode.window.showInformationMessage('No backgrounded agents to bring forward. Send one back with “Agents: Detach”.');
+    return;
+  }
+  const pick = await vscode.window.showQuickPick(
+    backgrounded.map((s) => ({
+      label: `${s.agentType || 'agent'} ${(s.sessionId || '').slice(0, 8)}`,
+      description: s.presence,
+      detail: s.topic || s.label,
+      sessionId: s.sessionId,
+    })),
+    { placeHolder: 'Bring which agent to the foreground?' },
+  );
+  if (!pick?.sessionId) return;
+  const term = vscode.window.createTerminal({ name: `attach ${pick.sessionId.slice(0, 8)}`, env: agentsSpawnEnv() });
+  term.show();
+  term.sendText(`agents attach ${pick.sessionId}`);
+}
+
 export function focusSessionInTerminal(sessionId: string): void {
   const child = spawn('agents', ['sessions', 'focus', sessionId], {
     detached: true,
@@ -1080,6 +1152,14 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('agents.reopenLastSession', () => reopenLastClosedSession(context))
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('agents.detach', () => detachAgentToBackground())
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('agents.attach', () => attachAgentFromBackground())
   );
 
   context.subscriptions.push(

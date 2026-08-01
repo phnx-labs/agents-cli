@@ -25,6 +25,7 @@ import { AGENTS, agentConfigDirName, getCliVersion } from '../agents.js';
 import { walkForFilesWithStat } from '../fs-walk.js';
 import { getConfigSymlinkVersion } from '../shims.js';
 import { SESSION_AGENTS } from './types.js';
+import { deriveShortId } from './short-id.js';
 import { extractSessionTopic } from './prompt.js';
 import { parseAntigravity } from './parse.js';
 import { extractPrUrl, detectWorktree, detectTicket, isPrCreateCommand, detectSpawnedTeam, isTicketCreateTool, extractCreatedTicket } from './state.js';
@@ -1141,7 +1142,7 @@ async function readClaudeMeta(
     const cwd = normalizeCwd(scan.cwd || '');
     meta = {
       id: sessionId,
-      shortId: sessionId.slice(0, 8),
+      shortId: deriveShortId(sessionId),
       agent: 'claude',
       timestamp: scan.timestamp,
       lastActivity: scan.lastActivity,
@@ -1171,7 +1172,7 @@ async function readClaudeMeta(
     const stat = safeStatSync(filePath);
     meta = {
       id: sessionId,
-      shortId: sessionId.slice(0, 8),
+      shortId: deriveShortId(sessionId),
       agent: 'claude',
       timestamp: stat ? stat.mtime.toISOString() : new Date().toISOString(),
       lastActivity: scan.lastActivity,
@@ -1484,7 +1485,7 @@ export async function readCodexMeta(
   const cwd = normalizeCwd(scan.cwd || '');
   const meta: SessionMeta = {
     id: sessionId,
-    shortId: sessionId.slice(0, 8),
+    shortId: deriveShortId(sessionId),
     agent: 'codex',
     // Codex `session_meta` only carries the start time; use file mtime when
     // it's newer so long-running sessions register as recently active.
@@ -1717,7 +1718,7 @@ function readGeminiMeta(
 
   const meta: SessionMeta = {
     id: sessionId,
-    shortId: sessionId.slice(0, 8),
+    shortId: deriveShortId(sessionId),
     agent: 'gemini',
     timestamp: startTime || (stat ? stat.mtime.toISOString() : new Date().toISOString()),
     lastActivity: lastTsMs !== undefined ? new Date(lastTsMs).toISOString() : undefined,
@@ -1871,7 +1872,7 @@ function readAntigravityMeta(
   const stat = safeStatSync(filePath);
   const meta: SessionMeta = {
     id: sessionId,
-    shortId: sessionId.slice(0, 8),
+    shortId: deriveShortId(sessionId),
     agent: 'antigravity',
     timestamp: stat ? stat.mtime.toISOString() : new Date().toISOString(),
     project: normalizedCwd ? path.basename(normalizedCwd) : undefined,
@@ -2018,7 +2019,7 @@ async function scanOpenCodeIncremental(): Promise<void> {
 
       const meta: SessionMeta = {
         id,
-        shortId: id.replace(/^ses_/, '').slice(0, 8),
+        shortId: deriveShortId(id, /^ses_/),
         agent: 'opencode',
         timestamp,
         lastActivity,
@@ -2089,7 +2090,7 @@ async function scanOpenClawIncremental(): Promise<void> {
       entries.push({
         meta: {
           id: `openclaw-${agentId}`,
-          shortId: agentId.slice(0, 8),
+          shortId: deriveShortId(agentId),
           agent: 'openclaw',
           timestamp: new Date().toISOString(),
           project: name,
@@ -2127,7 +2128,7 @@ async function scanOpenClawIncremental(): Promise<void> {
       entries.push({
         meta: {
           id: `openclaw-cron-${jobId}`,
-          shortId: jobId.slice(0, 8),
+          shortId: deriveShortId(jobId),
           agent: 'openclaw',
           timestamp: new Date().toISOString(),
           project: `${jobName} (${agentId || 'unknown'})`,
@@ -2224,7 +2225,7 @@ async function readRushMeta(
   const timestamp = scan.timestamp
     || (stat ? stat.mtime.toISOString() : new Date().toISOString());
 
-  const shortId = sessionId.replace(/^session_/, '').slice(0, 8);
+  const shortId = deriveShortId(sessionId, /^session_/);
 
   const meta: SessionMeta = {
     id: sessionId,
@@ -2390,7 +2391,7 @@ function readHermesMeta(filePath: string): { meta: SessionMeta; content: string 
       ? session.session_start
       : stat ? stat.mtime.toISOString() : new Date().toISOString();
 
-  const shortId = sessionId.replace(/^api-/, '').slice(0, 8);
+  const shortId = deriveShortId(sessionId, /^api-/);
   const model = typeof session.model === 'string' ? session.model : undefined;
   const platform = typeof session.platform === 'string' ? session.platform : undefined;
 
@@ -2515,7 +2516,7 @@ async function readDroidMeta(
   const cwd = normalizeCwd(scan.cwd || '');
   const meta: SessionMeta = {
     id: sessionId,
-    shortId: sessionId.slice(0, 8),
+    shortId: deriveShortId(sessionId),
     agent: 'droid',
     timestamp: scan.timestamp || (stat ? stat.mtime.toISOString() : new Date().toISOString()),
     lastActivity: scan.lastActivity,
@@ -3199,18 +3200,66 @@ async function scanClaudeSessionResumable(
   currentFileSize: number,
   priorFileMtimeMs?: number,
 ): Promise<{ scan: ClaudeSessionScan; newState: ClaudeParserState; newOffset: number; mode: 'full' | 'incremental' }> {
-  const canIncrement =
+  // File size + mtime cannot distinguish an APPEND from an in-place rewrite or a
+  // restore that dropped DIFFERENT, larger content at the same path: both grow
+  // the file and move mtime forward. Resuming from the stored offset across that
+  // boundary would fold the new file's bytes into an accumulator hydrated from
+  // the OLD session, so the persisted row silently diverges from a full reparse.
+  // So the metadata gate below only makes a file ELIGIBLE; before trusting the
+  // offset we re-read the transcript's first user/assistant timestamp and require
+  // it to still match the prior continuation's. An append keeps that identity
+  // byte-for-byte; a rewrite/restore of a different session changes it. A
+  // mismatch — or an identity we cannot derive — falls back to a FULL parse,
+  // which is always correct. (A shrink is already handled: currentFileSize is not
+  // > prior.offset, so it takes the FULL branch.)
+  let canIncrement = false;
+  if (
     prior !== null &&
     currentFileSize > prior.offset &&
-    (priorFileMtimeMs === undefined || currentFileMtimeMs >= priorFileMtimeMs);
+    (priorFileMtimeMs === undefined || currentFileMtimeMs >= priorFileMtimeMs) &&
+    prior.timestamp !== undefined
+  ) {
+    canIncrement = (await claudeSessionIdentityAt(filePath)) === prior.timestamp;
+  }
 
-  if (canIncrement) {
+  if (canIncrement && prior !== null) {
     const result = await scanClaudeSessionIncremental(filePath, prior.offset, prior);
     return { ...result, mode: 'incremental' };
   }
 
   const result = await scanClaudeSessionIncremental(filePath, 0, freshClaudeParserState());
   return { ...result, mode: 'full' };
+}
+
+/**
+ * Cheaply derive a Claude transcript's session identity — the first
+ * user/assistant event `timestamp` — by streaming only the START of the file
+ * (at most `maxBytes`) and stopping at the first such event. Used by
+ * {@link scanClaudeSessionResumable} to confirm a grown file is still the SAME
+ * session before resuming from a stored parse offset. Returns undefined when no
+ * user/assistant event appears within the budget, which forces a FULL parse.
+ */
+async function claudeSessionIdentityAt(filePath: string, maxBytes = 1_048_576): Promise<string | undefined> {
+  const state = initClaudeParseState();
+  const stream = fs.createReadStream(filePath, { start: 0, end: maxBytes - 1, encoding: 'utf-8' });
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  try {
+    for await (const line of rl) {
+      if (!line.trim()) continue;
+      let parsed: any;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      applyClaudeLine(state, parsed);
+      if (state.timestamp !== undefined) break;
+    }
+  } finally {
+    rl.close();
+    stream.destroy();
+  }
+  return state.timestamp;
 }
 
 /**
@@ -3642,6 +3691,39 @@ function freshCodexParserState(): CodexParserState {
 }
 
 /**
+ * Cheaply derive a Codex rollout's session identity — the `session_meta` id — by
+ * streaming only the START of the file (at most `maxBytes`) and stopping once the
+ * id is known. Mirrors {@link claudeSessionIdentityAt}: used by
+ * {@link scanCodexSessionResumable} to confirm a grown file is still the SAME
+ * session before resuming from a stored parse offset. Codex writes `session_meta`
+ * (carrying the durable session UUID) on the first line of every rollout, so the
+ * id is reached almost immediately. Returns undefined when no id appears within
+ * the budget, which forces a FULL parse.
+ */
+async function codexSessionIdentityAt(filePath: string, maxBytes = 1_048_576): Promise<string | undefined> {
+  const state = initCodexParseState();
+  const stream = fs.createReadStream(filePath, { start: 0, end: maxBytes - 1, encoding: 'utf-8' });
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  try {
+    for await (const line of rl) {
+      if (!line.trim()) continue;
+      let parsed: any;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      applyCodexLine(state, parsed);
+      if (state.sessionId !== undefined) break;
+    }
+  } finally {
+    rl.close();
+    stream.destroy();
+  }
+  return state.sessionId;
+}
+
+/**
  * Decide full-vs-incremental for one Codex rollout and parse it uniformly,
  * always returning a finalized scan plus the continuation to persist. Both
  * branches run through the SAME reducer (via {@link scanCodexSessionIncremental}),
@@ -3657,12 +3739,28 @@ async function scanCodexSessionResumable(
   currentFileSize: number,
   priorFileMtimeMs?: number,
 ): Promise<{ scan: CodexSessionScan; newState: CodexParserState; newOffset: number; mode: 'full' | 'incremental' }> {
-  const canIncrement =
+  // File size + mtime cannot distinguish an APPEND from an in-place rewrite or a
+  // restore that dropped a DIFFERENT, larger rollout at the same path: both grow
+  // the file and move mtime forward. Resuming from the stored offset across that
+  // boundary would fold the new session's bytes into an accumulator hydrated from
+  // the OLD session, so the persisted row silently diverges from a full reparse.
+  // So the metadata gate below only makes a file ELIGIBLE; before trusting the
+  // offset we re-read the rollout's `session_meta` id and require it to still
+  // match the prior continuation's. An append keeps that id; a rewrite/restore of
+  // a different session changes it. A mismatch — or an id we cannot derive —
+  // falls back to a FULL parse, which is always correct. (A shrink is already
+  // handled: currentFileSize is not > prior.offset, so it takes the FULL branch.)
+  let canIncrement = false;
+  if (
     prior !== null &&
     currentFileSize > prior.offset &&
-    (priorFileMtimeMs === undefined || currentFileMtimeMs >= priorFileMtimeMs);
+    (priorFileMtimeMs === undefined || currentFileMtimeMs >= priorFileMtimeMs) &&
+    prior.sessionId !== undefined
+  ) {
+    canIncrement = (await codexSessionIdentityAt(filePath)) === prior.sessionId;
+  }
 
-  if (canIncrement) {
+  if (canIncrement && prior !== null) {
     const result = await scanCodexSessionIncremental(filePath, prior.offset, prior);
     return { ...result, mode: 'incremental' };
   }
@@ -4040,7 +4138,7 @@ export function readKimiMeta(
   const timestamp = updatedAt || createdAt
     || (stat ? stat.mtime.toISOString() : new Date().toISOString());
 
-  const shortId = sessionId.replace(/^session_/, '').slice(0, 8);
+  const shortId = deriveShortId(sessionId, /^session_/);
 
   // Try to infer project from session directory path
   // ~/.kimi-code/sessions/<workdir_hash>/session_<uuid>/
@@ -4135,6 +4233,17 @@ export function parseKimiWireMetricsIncremental(
   // INCREMENTAL only when a usable prior exists AND the file grew past its
   // offset; otherwise FULL from byte 0 with fresh counters (cold start OR the
   // file shrank to/below the offset — a truncation/rewrite).
+  //
+  // No session-identity re-check is needed here (unlike Claude's
+  // claudeSessionIdentityAt / Codex's codexSessionIdentityAt, which guard against
+  // an in-place rewrite dropping a DIFFERENT session at the same path). A Kimi
+  // wire.jsonl is uniquely keyed by its session dir — `.../session_<uuid>/agents/
+  // main/wire.jsonl` (see readKimiMeta: sessionId is `session_<uuid>` and must
+  // start with `session_`) — and Kimi only ever APPENDS to that per-session log.
+  // The path therefore cannot host a different session's transcript, so a
+  // size-grew wire.jsonl is always the same session's append. (A truncation/
+  // rewrite — the only way its bytes could diverge — already shrinks it to/below
+  // the offset and takes the FULL branch above.)
   const canIncrement = prior !== null && stat.size > prior.offset;
   const fromOffset = canIncrement ? prior!.offset : 0;
   const acc = canIncrement
@@ -4307,7 +4416,7 @@ export function readGrokMeta(
 
   const meta: SessionMeta = {
     id: sessionId,
-    shortId: sessionId.slice(0, 8),
+    shortId: deriveShortId(sessionId),
     agent: 'grok',
     timestamp,
     lastActivity,

@@ -20,6 +20,7 @@
 import { upsertSession } from '../session/db.js';
 import type { SessionAgentId } from '../session/types.js';
 import { SESSION_AGENTS } from '../session/types.js';
+import { deriveShortId } from '../session/short-id.js';
 import type { CloudTask } from './types.js';
 
 /** The execution-id charset the session index will accept as a row id. */
@@ -45,7 +46,7 @@ export function registerCloudSession(task: CloudTask, ctx: CloudSessionContext =
     upsertSession(
       {
         id: task.id,
-        shortId: task.id.slice(0, 8),
+        shortId: deriveShortId(task.id),
         agent: task.agent as SessionAgentId,
         timestamp: task.createdAt,
         lastActivity: task.updatedAt,

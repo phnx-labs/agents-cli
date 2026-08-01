@@ -937,6 +937,7 @@ export function registerRepoCommands(program: Command): void {
         console.log(chalk.gray('No repos to pull.'));
         return;
       }
+      let anyPulled = false;
       for (const t of targets) {
         if (!fs.existsSync(t.dir) || !isGitRepo(t.dir)) {
           // A plain (never-cloned) user repo — setup makes ~/.agents a bare dir and
@@ -975,8 +976,22 @@ export function registerRepoCommands(program: Command): void {
         const result = await pullRepo(t.dir);
         if (result.success) {
           spinner.succeed(`${formatRepoTarget(t.alias, t.dir, result.branch)}: ${result.commit}`);
+          anyPulled = true;
         } else {
           spinner.fail(`${formatRepoTarget(t.alias, t.dir)}: ${result.error}`);
+        }
+      }
+
+      // RUSH-1980: a pull rewrites the routine YAML on disk, but the daemon's
+      // scheduler froze its JobConfigs (device pins included) at load. Without a
+      // reload it keeps firing the pre-pull pins — a routine re-pinned to another
+      // host still fires here, double-firing across the fleet. SIGHUP the daemon
+      // so scheduler.reloadAll() re-reads the synced YAML and device pins refresh.
+      // No-op when the daemon isn't running (or on Windows, which has no SIGHUP).
+      if (anyPulled) {
+        const { isDaemonRunning, signalDaemonReload } = await import('../lib/daemon.js');
+        if (isDaemonRunning() && signalDaemonReload()) {
+          console.log(chalk.gray('Reloaded the routines daemon (device pins refreshed).'));
         }
       }
     });

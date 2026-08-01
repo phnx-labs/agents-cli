@@ -233,6 +233,68 @@ describe('B-3 live incremental Codex scan parity', () => {
     expect(short.topic).toBe('fresh short session');
   });
 
+  it('IN-PLACE REWRITE: replacing the path with a DIFFERENT, LARGER session forces FULL (no cross-session corruption)', async () => {
+    // The metadata-only guard (size-grew + mtime-forward) cannot tell an append
+    // from an in-place rewrite/restore that dropped a DIFFERENT, larger rollout at
+    // the same path. Resuming there would fold session B's bytes into an
+    // accumulator hydrated from session A's continuation — and because sessionId is
+    // first-wins, the corrupt row would keep A's id with B's counters folded in.
+    // The session_meta-id re-check (codexSessionIdentityAt) must catch the change
+    // and force FULL. Mirrors the Claude regression test in commit 1c8ff457.
+    const idA = 'sess-inplace-A';
+    const fp = writeRollout('inplace-rewrite', baseEvents(idA));
+    await runScan();
+    const priorOffset = JSON.parse(db.getParserStatesForPaths([fp]).get(fp)!.parserState!).offset as number;
+    expect(db.getSessionById(idA), 'session A indexed on first scan').not.toBeNull();
+
+    // Replace the path IN PLACE with a DIFFERENT session (distinct session_meta id
+    // AND first timestamp) whose byte length is LARGER than the stored offset and
+    // whose mtime moves forward — the exact shape metadata cannot tell from an
+    // append.
+    discover.__resetCodexScanBranchCountsForTest();
+    const idB = 'sess-inplace-B';
+    const sessionB = [
+      { type: 'session_meta', timestamp: '2026-07-01T09:00:00.000Z', payload: { id: idB, timestamp: '2026-07-01T09:00:00.000Z', cwd: '/home/u/other', git: { branch: 'PROJ-7' }, cli_version: '1.0.0', model: 'gpt-5-codex' } },
+      { type: 'response_item', timestamp: '2026-07-01T09:00:30.000Z', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: `restored different session ${'x'.repeat(400)}` }] } },
+      { type: 'response_item', timestamp: '2026-07-01T09:01:00.000Z', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: `restored reply ${'y'.repeat(200)}` }] } },
+      { type: 'event_msg', timestamp: '2026-07-01T09:01:05.000Z', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 200, output_tokens: 60, reasoning_output_tokens: 10 } } } },
+    ];
+    fs.writeFileSync(fp, sessionB.map(line).join('\n') + '\n', 'utf-8');
+    bumpMtimeToNow(fp, 3);
+
+    // Precondition — the trap: the new file is LARGER than the stored offset, so
+    // the size gate the metadata-only logic relied on does NOT fire.
+    expect(fs.statSync(fp).size, 'rewritten file must exceed the prior offset to exercise the guard').toBeGreaterThan(priorOffset);
+
+    await runScan();
+    const counts = discover.__codexScanBranchCountsForTest();
+    expect(counts.full, 'in-place rewrite to a different session must force FULL').toBeGreaterThanOrEqual(1);
+    expect(counts.incremental, 'must NOT resume incrementally across a session boundary').toBe(0);
+
+    // No cross-session corruption: the row (now under session B's id — the path's
+    // ledger row was rewritten) equals a from-scratch parse of session B, and
+    // carries B's counters, not A's continuation folded into B.
+    const row = db.getSessionById(idB)!;
+    expect(row, 'session B row exists after the rewrite').not.toBeNull();
+    expect(row.messageCount).toBe(2);
+    // LAST-WINS token snapshot from B: 200 + 60 + 10 = 270.
+    expect(row.tokenCount).toBe(270);
+
+    // Ground truth: session B's identical content under a DIFFERENT session_meta
+    // id (so it lands in its own row, not idB's), parsed from scratch. Text is
+    // stable so topic/counts/tokens parity holds.
+    const gtSessionId = 'sess-inplace-gt';
+    const gtId = await groundTruth(
+      sessionB.map((e: any) =>
+        e.type === 'session_meta'
+          ? { ...e, payload: { ...e.payload, id: gtSessionId } }
+          : e,
+      ),
+      gtSessionId,
+    );
+    assertRowParity(idB, gtId);
+  });
+
   it('LEDGER: parser_state is persisted after a scan, and its offset advances on append', async () => {
     const id = 'ledger-persist';
     const fp = writeRollout(id, baseEvents(id));
