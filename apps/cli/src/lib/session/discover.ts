@@ -35,6 +35,8 @@ import {
   getDB,
   getScanStampByPath,
   getScanStampsForPaths,
+  getDirLedgerForPaths,
+  recordDirScans,
   recordScans,
   syncLabels,
   seedLabelsFromNames,
@@ -46,6 +48,7 @@ import {
   tryClaimScan,
   releaseScan,
   type ScanStamp,
+  type DirStamp,
   type QueryOptions,
 } from './db.js';
 import { buildRunNameMap } from './run-names.js';
@@ -64,6 +67,28 @@ const HERMES_SESSIONS_DIR = path.join(HOME, '.hermes', 'sessions');
 /** How long OpenClaw channel/cron snapshots stay valid before we re-shell-out. */
 const OPENCLAW_TTL_MS = 60_000;
 const ACTIVE_APPEND_RESCAN_DEBOUNCE_MS = 5_000;
+
+/**
+ * How recently a file must have been scanned to be treated as "hot" — a
+ * candidate for an in-place append even when its parent dir's mtime hasn't
+ * moved. A dir-ledger match lets us skip the per-file stat of everything in a
+ * leaf dir EXCEPT its hot set; a file is hot if it lives under the agent's live
+ * `~/.<agent>` root (the only tree an agent appends to live) or was scanned
+ * within this window. 10 minutes comfortably covers a session that paused
+ * between `agents sessions` calls but is still being written to.
+ */
+const HOT_FILE_WINDOW_MS = 600_000;
+
+/**
+ * Kill-switch: set `AGENTS_SESSIONS_NO_DIR_LEDGER=1` to force the old full-walk
+ * path (readdir + per-file stat every dir, every run — the pre-A-2 behavior),
+ * skipping the dir_ledger short-circuit entirely. One env var reverts a field
+ * regression to today's behavior.
+ */
+function dirLedgerDisabled(): boolean {
+  const v = process.env.AGENTS_SESSIONS_NO_DIR_LEDGER;
+  return v === '1' || v === 'true';
+}
 
 let cachedOpenClawWorkspaces: Map<string, string> | null = null;
 
@@ -542,6 +567,122 @@ export function shouldDeferRecentAppend(
 }
 
 // ---------------------------------------------------------------------------
+// Directory-ledger short-circuit (A-2)
+// ---------------------------------------------------------------------------
+
+/** One leaf directory of transcripts to change-detect, plus its live-root flag. */
+export interface LeafDir {
+  /** Absolute path to the directory that directly holds transcript files. */
+  dirPath: string;
+  /**
+   * True if this dir is under the agent's LIVE `~/.<agent>` root — the only tree
+   * an agent process appends to live. Every file in such a dir is treated as
+   * hot (always re-stat'd), so an in-place append is never missed there.
+   */
+  isLiveRoot: boolean;
+}
+
+/** The changed files a leaf-dir walk surfaced, ready to parse + upsert. */
+export interface LeafDirScan {
+  /** Files whose (mtime, size) changed vs the ledger — the parse set. */
+  changed: Array<{ filePath: string; scan: ScanStamp }>;
+  /** Every transcript file seen across all leaf dirs (changed or not). */
+  allFiles: string[];
+}
+
+/**
+ * Walk a set of leaf transcript directories and return the files that changed,
+ * skipping the per-file `stat` of directories whose (mtime, entry_count) matches
+ * the dir_ledger.
+ *
+ * Per leaf dir:
+ *   - `stat` the dir once and `readdir` it (one cheap syscall) to get the entry
+ *     count and the file list.
+ *   - If the dir matches the dir_ledger (floored mtime AND entry_count), no file
+ *     was created / deleted / renamed since we last walked it. We then stat ONLY
+ *     the hot files (live-root files, or files scanned within HOT_FILE_WINDOW_MS)
+ *     and run just those through the ledger compare — so an in-place append to a
+ *     still-live session is still caught, while immutable backup/version dirs
+ *     collapse to a single dir stat and zero per-file stats.
+ *   - Else (changed dir, or no ledger row) we stat every file (today's full
+ *     walk) and record the fresh dir stamp so the next run can short-circuit.
+ *
+ * The kill-switch (`AGENTS_SESSIONS_NO_DIR_LEDGER=1`) forces the full-walk branch
+ * for every dir and never consults or records the dir_ledger.
+ */
+export function collectChangedFilesInLeafDirs(
+  leafDirs: LeafDir[],
+  ext: string,
+): LeafDirScan {
+  const disabled = dirLedgerDisabled();
+  const dirStamps = disabled ? new Map<string, DirStamp>() : getDirLedgerForPaths(leafDirs.map(d => d.dirPath));
+  const now = Date.now();
+
+  // Files whose per-file stat we still need to ledger-compare this run.
+  const toCompare: PreStatEntry[] = [];
+  const allFiles: string[] = [];
+  const dirScansToRecord: Array<{ dirPath: string; dirMtimeMs: number; entryCount: number }> = [];
+
+  for (const { dirPath, isLiveRoot } of leafDirs) {
+    const dirStat = safeStatSync(dirPath);
+    if (!dirStat?.isDirectory()) continue;
+
+    let names: string[];
+    try {
+      names = fs.readdirSync(dirPath).filter(f => f.endsWith(ext));
+    } catch {
+      continue;
+    }
+    const files = names.map(f => path.join(dirPath, f));
+    allFiles.push(...files);
+
+    const dirMtimeMs = Math.floor(dirStat.mtimeMs);
+    const entryCount = names.length;
+    const prevDir = dirStamps.get(dirPath);
+    const dirUnchanged =
+      !disabled && prevDir !== undefined && prevDir.dirMtimeMs === dirMtimeMs && prevDir.entryCount === entryCount;
+
+    if (dirUnchanged) {
+      // Contents did not change (no create/delete/rename). Stat only the hot
+      // files; the rest are served from the DB with no stat. An immutable backup
+      // dir (not a live root, nothing recently scanned) does zero per-file stats.
+      //
+      // A live-root dir treats every file as hot — that is the tree an agent
+      // appends to live, and an append does NOT bump the parent-dir mtime, so
+      // without this a growing session would be silently skipped. A non-live
+      // file is hot only if it was scanned within HOT_FILE_WINDOW_MS (bulk ledger
+      // lookup), covering a session under a version/backup path that is somehow
+      // still being written.
+      const stamps = isLiveRoot ? null : getScanStampsForPaths(files);
+      for (const filePath of files) {
+        let hot = isLiveRoot;
+        if (!hot && stamps) {
+          const s = stamps.get(filePath);
+          hot = s?.scannedAt !== undefined && now - s.scannedAt <= HOT_FILE_WINDOW_MS;
+        }
+        if (!hot) continue;
+        const stat = safeStatSync(filePath);
+        if (!stat) continue;
+        toCompare.push({ filePath, fileMtimeMs: stat.mtimeMs, fileSize: stat.size });
+      }
+      // No dir stamp to record — nothing about the dir changed.
+    } else {
+      // Changed dir (or cold ledger): full per-file stat, exactly as today.
+      for (const filePath of files) {
+        const stat = safeStatSync(filePath);
+        if (!stat) continue;
+        toCompare.push({ filePath, fileMtimeMs: stat.mtimeMs, fileSize: stat.size });
+      }
+      if (!disabled) dirScansToRecord.push({ dirPath, dirMtimeMs, entryCount });
+    }
+  }
+
+  const changed = filterChangedEntries(toCompare);
+  if (dirScansToRecord.length > 0) recordDirScans(dirScansToRecord);
+  return { changed, allFiles };
+}
+
+// ---------------------------------------------------------------------------
 // Multi-version directory scanning
 // ---------------------------------------------------------------------------
 
@@ -850,39 +991,45 @@ export function buildClaudeLabelMap(): Map<string, string | null> {
 async function scanClaudeIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
   const account = getClaudeAccount();
   const labelMap = buildClaudeLabelMap();
-  const filePaths: string[] = [];
-  const seen = new Set<string>();
 
-  for (const projectsDir of getAgentSessionDirs('claude', 'projects')) {
+  // Enumerate every leaf project dir across all Claude roots. The FIRST root
+  // returned by getAgentSessionDirs is the agent's live `~/.claude/projects` —
+  // the only tree Claude appends to in place, so its project dirs are live roots
+  // (every file hot). Version-home + backup roots are immutable: their dirs
+  // short-circuit to a single dir stat when unchanged.
+  const roots = getAgentSessionDirs('claude', 'projects');
+  const leafDirs: LeafDir[] = [];
+  const seenLeaf = new Set<string>();
+  roots.forEach((projectsDir, rootIdx) => {
+    const isLiveRoot = rootIdx === 0;
     let projectDirs: string[];
     try {
       projectDirs = fs.readdirSync(projectsDir);
     } catch {
-      continue;
+      return;
     }
-
     for (const dirName of projectDirs) {
       const dirPath = path.join(projectsDir, dirName);
-      const stat = safeStatSync(dirPath);
-      if (!stat?.isDirectory()) continue;
-
-      let files: string[];
-      try {
-        files = fs.readdirSync(dirPath).filter(f => f.endsWith('.jsonl'));
-      } catch {
-        continue;
-      }
-
-      for (const file of files) {
-        const sessionId = file.replace('.jsonl', '');
-        if (seen.has(sessionId)) continue;
-        seen.add(sessionId);
-        filePaths.push(path.join(dirPath, file));
-      }
+      const key = safeRealpathSync(dirPath) || dirPath;
+      if (seenLeaf.has(key)) continue;
+      seenLeaf.add(key);
+      leafDirs.push({ dirPath, isLiveRoot });
     }
-  }
+  });
 
-  const changed = filterChangedFiles(filePaths);
+  const { changed: changedAll } = collectChangedFilesInLeafDirs(leafDirs, '.jsonl');
+  // De-dup by sessionId across roots, keeping the first occurrence. leafDirs is
+  // ordered live-root-first, so a session present in both the live root and a
+  // backup/version home is scanned from its live path — the same precedence the
+  // pre-A-2 `seen` set gave, so `file_path` stays stable.
+  const seenSession = new Set<string>();
+  const changed: Array<{ filePath: string; scan: ScanStamp }> = [];
+  for (const entry of changedAll) {
+    const sessionId = path.basename(entry.filePath).replace('.jsonl', '');
+    if (seenSession.has(sessionId)) continue;
+    seenSession.add(sessionId);
+    changed.push(entry);
+  }
 
   if (changed.length > 0) {
     onProgress?.({ agent: 'claude', parsed: 0, total: changed.length });
@@ -1283,34 +1430,32 @@ async function scanGeminiIncremental(onProgress?: (p: ScanProgress) => void): Pr
   const currentVersion = await getCurrentAgentVersion('gemini');
   const projectMap = buildGeminiProjectMap();
 
-  const filePaths: Array<{ filePath: string; hashDir: string }> = [];
-  for (const tmpDir of getAgentSessionDirs('gemini', 'tmp')) {
+  // Each `<tmpDir>/<hashDir>/chats` is a leaf dir of Gemini transcripts. The
+  // FIRST tmp root is the live `~/.gemini/tmp` — its chats dirs are live roots;
+  // version-home + backup roots are immutable and short-circuit when unchanged.
+  const tmpRoots = getAgentSessionDirs('gemini', 'tmp');
+  const leafDirs: LeafDir[] = [];
+  const seenLeaf = new Set<string>();
+  tmpRoots.forEach((tmpDir, rootIdx) => {
+    const isLiveRoot = rootIdx === 0;
     let hashDirs: string[];
     try {
       hashDirs = fs.readdirSync(tmpDir);
     } catch {
-      continue;
+      return;
     }
-
     for (const hashDir of hashDirs) {
       const chatsDir = path.join(tmpDir, hashDir, 'chats');
       if (!fs.existsSync(chatsDir)) continue;
-
-      let chatFiles: string[];
-      try {
-        chatFiles = fs.readdirSync(chatsDir).filter(f => f.endsWith('.json'));
-      } catch {
-        continue;
-      }
-
-      for (const file of chatFiles) {
-        filePaths.push({ filePath: path.join(chatsDir, file), hashDir });
-      }
+      const key = safeRealpathSync(chatsDir) || chatsDir;
+      if (seenLeaf.has(key)) continue;
+      seenLeaf.add(key);
+      leafDirs.push({ dirPath: chatsDir, isLiveRoot });
     }
-  }
+  });
 
-  const changedPaths = filterChangedFiles(filePaths.map(f => f.filePath));
-  const changedByPath = new Map(changedPaths.map(c => [c.filePath, c.scan]));
+  const { changed } = collectChangedFilesInLeafDirs(leafDirs, '.json');
+  const changedByPath = new Map(changed.map(c => [c.filePath, c.scan]));
   if (changedByPath.size === 0) return;
 
   onProgress?.({ agent: 'gemini', parsed: 0, total: changedByPath.size });
@@ -1319,9 +1464,9 @@ async function scanGeminiIncremental(onProgress?: (p: ScanProgress) => void): Pr
   const touched: Array<{ filePath: string; scan: ScanStamp }> = [];
   const seen = new Set<string>();
   let parsed = 0;
-  for (const { filePath, hashDir } of filePaths) {
-    const scan = changedByPath.get(filePath);
-    if (!scan) continue;
+  for (const { filePath, scan } of changed) {
+    // The hashDir is the directory two levels up: <hashDir>/chats/<file>.json.
+    const hashDir = path.basename(path.dirname(path.dirname(filePath)));
     try {
       const result = readGeminiMeta(filePath, hashDir, projectMap, currentVersion);
       if (result && !seen.has(result.meta.id)) {
