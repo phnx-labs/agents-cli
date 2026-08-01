@@ -87,6 +87,22 @@ describe('formatPickerLabel', () => {
     const off = strip(formatPickerLabel(meta({ machine: 'yosemite-s0' }), '', { showMachine: false }));
     expect(off).not.toContain('s0');
   });
+
+  it('tags the row with ssh←<device> when the live session was launched over ssh', () => {
+    const row = strip(formatPickerLabel(meta(), '', {}, { device: 'zion' }));
+    expect(row).toContain('ssh←zion');
+  });
+
+  it('shows a bare ssh tag when the origin IP did not match a registered device', () => {
+    const row = strip(formatPickerLabel(meta(), '', {}, {}));
+    expect(row).toContain('ssh');
+    expect(row).not.toContain('ssh←');
+  });
+
+  it('adds no ssh tag for a local (non-ssh) session', () => {
+    const row = strip(formatPickerLabel(meta(), '', {}));
+    expect(row).not.toContain('ssh');
+  });
 });
 
 describe('formatPickerLabel width fits the gutter (no wrap)', () => {

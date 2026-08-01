@@ -1795,6 +1795,13 @@ function renderTopicCell(
 }
 
 /** Column-visibility flags for the picker row, computed once over the whole pool. */
+/** The SSH-launch origin for a picker row, resolved from the live session's
+ * provenance (transport 'ssh'). `device` is set when the client IP matched a
+ * registered device; absent for an unresolved IP (renders a bare `ssh`). */
+export interface SshOriginTag {
+  device?: string;
+}
+
 export interface PickerColumns {
   /** Render the machine column (only when the pool spans more than one machine). */
   showMachine?: boolean;
@@ -1865,11 +1872,19 @@ export function pickerColumnsFor(sessions: SessionMeta[]): PickerColumns {
   };
 }
 
-export function formatPickerLabel(s: SessionMeta, query: string, cols: PickerColumns = {}): string {
+export function formatPickerLabel(
+  s: SessionMeta,
+  query: string,
+  cols: PickerColumns = {},
+  ssh?: SshOriginTag,
+): string {
   const agentColor = colorAgent(s.agent);
   const when = formatRelativeTime(s.lastActivity ?? s.timestamp);
   const project = s.project || '-';
-  const tag = originTag(s) || teamTag(s);
+  // SSH-launch origin (live rows only): mirrors the flat listing's `ssh←<device>`
+  // token — prepended as a topic tag so the width-budgeted columns stay aligned.
+  const sshTag = ssh ? chalk.red(ssh.device ? `ssh←${ssh.device} ` : 'ssh ') : '';
+  const tag = `${sshTag}${originTag(s) || teamTag(s)}`;
   const label = (s as any).label;
   const topic = tag ? `${tag}${s.topic ?? ''}` : s.topic;
   const versionStr = s.version || '-';

@@ -22,6 +22,7 @@ import { buildPreview } from './sessions-picker.js';
 import {
   formatPickerLabel,
   pickerColumnsFor,
+  type SshOriginTag,
   ticketLabel,
   mergeLocalFirst,
   indexActiveBySessionId,
@@ -247,6 +248,16 @@ function applyFilters(
   return out;
 }
 
+/** Derive the SSH-launch origin tag for a picker row from the live index. Set
+ * only when the live session's provenance is ssh transport; `device` is the
+ * resolved origin device (absent → the row shows a bare `ssh`). Rows without a
+ * live entry (the running filter off) get no tag — provenance is live-only. */
+function sshOriginTagFor(live: Map<string, ActiveSession> | null, id: string): SshOriginTag | undefined {
+  const p = live?.get(id)?.provenance;
+  if (p?.transport !== 'ssh') return undefined;
+  return p.origin?.device ? { device: p.origin.device } : {};
+}
+
 function headerFor(f: BrowserFilter): string {
   const bits = [
     `device:${f.device ?? 'all'}`,
@@ -340,7 +351,7 @@ export async function runSessionBrowser(
     initialFilter,
     load,
     keyFor: (s) => s.id,
-    labelFor: (s, q) => formatPickerLabel(s, q, cols),
+    labelFor: (s, q) => formatPickerLabel(s, q, cols, sshOriginTagFor(liveCache, s.id)),
     matches: sessionMatchesQuery,
     buildPreview,
     headerFor,
