@@ -31,6 +31,8 @@ import { parseAntigravity } from './parse.js';
 import { extractPrUrl, detectWorktree, detectTicket, isPrCreateCommand, detectSpawnedTeam, isTicketCreateTool, extractCreatedTicket, extractRecentDirectoriesTouched, extractTodoProgressFromEvents } from './state.js';
 import { costOfUsage } from '../pricing/index.js';
 import { machineId } from './sync/config.js';
+import { machineForSessionFile } from './origin-machine.js';
+export { machineForSessionFile } from './origin-machine.js';
 import { mapBounded } from '../concurrency.js';
 import {
   getDB,
@@ -383,7 +385,6 @@ function dispatchAgentScan(
   }
 }
 
-let _localMachineId: string | undefined;
 
 /**
  * The machine a discovered session originated on. Cross-machine sync mirrors a
@@ -433,14 +434,6 @@ export function isManagedSessionFile(filePath: string): boolean {
 }
 
 
-export function machineForSessionFile(filePath: string, agent: string): string {
-  const base = path.join(getHistoryDir(), 'backups', agent) + path.sep;
-  if (filePath.startsWith(base)) {
-    const seg = filePath.slice(base.length).split(path.sep)[0];
-    if (seg) return seg;
-  }
-  return (_localMachineId ??= machineId());
-}
 
 /**
  * Count sessions in scope without running an incremental scan. Assumes the DB

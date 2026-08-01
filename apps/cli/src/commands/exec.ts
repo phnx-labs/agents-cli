@@ -64,6 +64,8 @@ interface ExecCommandActionOptions {
   fallback?: string;
   balanced?: boolean;
   strategy?: string;
+  /** Affinity-pick host (and harness when agent is auto); accounts stay balanced. */
+  smart?: boolean;
   acp?: boolean;
   yes?: boolean;
   loop?: boolean;
@@ -557,6 +559,10 @@ export function registerRunCommand(program: Command): void {
       'Version/account selection strategy: pinned | available | balanced. Defaults to run.<agent>.strategy, then balanced (spreads load across healthy accounts and skips any that are rate-limited). (Legacy `rotate` accepted as alias for `balanced`.)',
     )
     .option(
+      '--smart',
+      'Pick host from 14d usage affinity (most-used online device has highest probability). Accounts still use balanced. Ignored when --host/--device is set. Pass agent "auto" to also pick harness among claude/codex/kimi.',
+    )
+    .option(
       '--acp',
       'Route through the Agent Client Protocol instead of direct exec. Supported for gemini, claude (via @zed-industries/claude-code-acp adapter). Unified event stream; emits ndjson when --json.',
     )
@@ -727,10 +733,61 @@ export function registerRunCommand(program: Command): void {
       // their existing meaning in every dispatch path below.
       const accountPicker = parseRunAccountPickerRequest(agentSpec);
       const accountPickerRequested = accountPicker.requested;
-      const normalizedAgentSpec = accountPicker.normalizedAgentSpec;
+      let normalizedAgentSpec = accountPicker.normalizedAgentSpec;
       if (!accountPicker.valid) {
         console.error(chalk.red(`Invalid account picker target: ${agentSpec}. Use agents run <agent>@.`));
         process.exit(1);
+      }
+
+      // --smart: affinity-pick host (and optional harness when agent is "auto").
+      // Explicit --host/--device wins. Account rotation stays --strategy balanced.
+      if (options.smart) {
+        const hostAlready = [options.host, options.device, options.on, options.computer].some(Boolean);
+        const [agentName, rawVersionPin] = normalizedAgentSpec.split('@');
+        if (rawVersionPin) {
+          if (!options.quiet) {
+            process.stderr.write(chalk.yellow('[agents] --smart ignored for host/harness pick when @version is pinned; accounts still use strategy\n'));
+          }
+        } else if (!hostAlready || agentName === 'auto') {
+          try {
+            const { resolveSmartLaunch } = await import('../lib/smart-launch.js');
+            const pickHarness = agentName === 'auto';
+            const plan = resolveSmartLaunch({
+              agent: pickHarness ? undefined : (agentName as import('../lib/types.js').AgentId),
+              pickHarness,
+            });
+            if (!hostAlready && plan.host) {
+              options.host = plan.host;
+            }
+            if (pickHarness) {
+              normalizedAgentSpec = plan.agent;
+            }
+            // Prefer balanced for smart launches unless the user overrode strategy.
+            if (!options.strategy && !options.balanced) {
+              options.balanced = true;
+            }
+            if (!options.quiet) {
+              const hostLabel = plan.host ?? 'local';
+              const deviceHint = plan.deviceCandidates
+                .slice(0, 4)
+                .map((c) => `${c.key}:${c.launches}`)
+                .join(', ');
+              process.stderr.write(
+                chalk.gray(
+                  `[agents] smart: host=${hostLabel} agent=${pickHarness ? plan.agent : agentName}` +
+                    (deviceHint ? ` (device affinity ${deviceHint})` : '') +
+                    ` · accounts=balanced\n`,
+                ),
+              );
+            }
+          } catch (err) {
+            if (!options.quiet) {
+              process.stderr.write(
+                chalk.yellow(`[agents] --smart skipped: ${(err as Error).message}\n`),
+              );
+            }
+          }
+        }
       }
       if (accountPickerRequested) {
         const conflicts = runAccountPickerConflicts(options);

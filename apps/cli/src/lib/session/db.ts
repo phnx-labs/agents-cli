@@ -14,12 +14,13 @@ import type { SessionAgentId, SessionMeta } from './types.js';
 import { parseSession } from './parse.js';
 import { extractRecentDirectoriesTouched, extractTodoProgressFromEvents } from './state.js';
 import { getSessionsDir, getSessionsDbPath } from '../state.js';
+import { machineForSessionFile } from './origin-machine.js';
 
 const SESSIONS_DIR = getSessionsDir();
 const DB_PATH = getSessionsDbPath();
 
 /** Current schema version; bumped when migrations are added. */
-const SCHEMA_VERSION = 17;
+const SCHEMA_VERSION = 18;
 
 /**
  * Canonicalize a file path for use as a scan_ledger key. The same physical
@@ -77,6 +78,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   worktree_slug TEXT,
   ticket_id TEXT,
   plan TEXT,
+  machine TEXT,
   todos TEXT,
   recent_directories_touched TEXT,
   linear_project TEXT,
@@ -87,6 +89,8 @@ CREATE INDEX IF NOT EXISTS idx_sessions_cwd ON sessions(cwd);
 CREATE INDEX IF NOT EXISTS idx_sessions_agent ON sessions(agent);
 CREATE INDEX IF NOT EXISTS idx_sessions_file_path ON sessions(file_path);
 CREATE INDEX IF NOT EXISTS idx_sessions_short_id ON sessions(short_id);
+-- idx_sessions_machine_ts / idx_sessions_agent_ts are created after migration
+-- v17 guarantees the machine column exists (same pattern as last_activity).
 
 CREATE VIRTUAL TABLE IF NOT EXISTS session_text USING fts5(
   session_id UNINDEXED,
@@ -167,6 +171,7 @@ export interface SessionRow {
   worktree_slug: string | null;
   ticket_id: string | null;
   plan: string | null;
+  machine: string | null;
   todos: string | null;
   recent_directories_touched: string | null;
   linear_project: string | null;
@@ -395,13 +400,37 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     // primary key — so every corrupt row becomes addressable. No rescan needed.
     db.exec(`UPDATE sessions SET short_id = substr(id, 1, 8) WHERE short_id IS NULL OR short_id = ''`);
   }
+
   if (fromVersion < 17) {
+    // v16 → v17 (main): todos / recent dirs / linear project metadata.
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'todos')) db.exec(`ALTER TABLE sessions ADD COLUMN todos TEXT`);
     if (!cols.some(c => c.name === 'recent_directories_touched')) db.exec(`ALTER TABLE sessions ADD COLUMN recent_directories_touched TEXT`);
     if (!cols.some(c => c.name === 'linear_project')) db.exec(`ALTER TABLE sessions ADD COLUMN linear_project TEXT`);
     if (!cols.some(c => c.name === 'linear_project_url')) db.exec(`ALTER TABLE sessions ADD COLUMN linear_project_url TEXT`);
     db.exec(`DELETE FROM scan_ledger; DELETE FROM dir_ledger;`);
+  }
+
+  if (fromVersion < 18) {
+    // v17 → v18: persist origin machine for smart-launch affinity GROUP BY machine.
+    const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
+    if (!cols.some(c => c.name === 'machine')) {
+      db.exec(`ALTER TABLE sessions ADD COLUMN machine TEXT`);
+    }
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_sessions_machine_ts ON sessions(machine, timestamp DESC);
+      CREATE INDEX IF NOT EXISTS idx_sessions_agent_ts ON sessions(agent, timestamp DESC);
+    `);
+    const rows = db
+      .prepare(`SELECT id, agent, file_path FROM sessions WHERE machine IS NULL OR machine = ''`)
+      .all() as Array<{ id: string; agent: string; file_path: string }>;
+    const upd = db.prepare(`UPDATE sessions SET machine = ? WHERE id = ?`);
+    const txn = db.transaction((items: typeof rows) => {
+      for (const r of items) {
+        upd.run(machineForSessionFile(r.file_path, r.agent), r.id);
+      }
+    });
+    txn(rows);
   }
 }
 
@@ -438,6 +467,27 @@ export function getDB(): Database.Database {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_last_activity ON sessions(last_activity DESC)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_origin ON sessions(origin)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_routine_run_id ON sessions(routine_run_id)`);
+  // machine column + indexes: only after the column is guaranteed present.
+  // Fresh SCHEMA (v17) includes the column; older DBs get it from migrate v17.
+  // If a partial upgrade left schema_version ahead of the column, repair here.
+  {
+    const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === 'machine')) {
+      db.exec(`ALTER TABLE sessions ADD COLUMN machine TEXT`);
+      const rows = db
+        .prepare(`SELECT id, agent, file_path FROM sessions WHERE machine IS NULL OR machine = ''`)
+        .all() as Array<{ id: string; agent: string; file_path: string }>;
+      const upd = db.prepare(`UPDATE sessions SET machine = ? WHERE id = ?`);
+      const txn = db.transaction((items: typeof rows) => {
+        for (const r of items) {
+          upd.run(machineForSessionFile(r.file_path, r.agent), r.id);
+        }
+      });
+      txn(rows);
+    }
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_machine_ts ON sessions(machine, timestamp DESC)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_agent_ts ON sessions(agent, timestamp DESC)`);
+  }
 
   // One-shot cleanup of the pre-SQLite JSONL indexes. Safe — nothing reads
   // them anymore. Guarded by a meta flag so we only try once.
@@ -788,7 +838,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     output_tokens, cost_usd, duration_ms,
     file_path, file_mtime_ms, file_size, scanned_at, is_team_origin,
     pr_url, pr_number, worktree_slug, ticket_id, plan, todos,
-    recent_directories_touched, linear_project, linear_project_url
+    recent_directories_touched, linear_project, linear_project_url, machine
   ) VALUES (
     @id, @short_id, @agent, @origin, @routine_name, @routine_run_id,
     @version, @account, @timestamp, @last_activity,
@@ -796,7 +846,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     @output_tokens, @cost_usd, @duration_ms,
     @file_path, @file_mtime_ms, @file_size, @scanned_at, @is_team_origin,
     @pr_url, @pr_number, @worktree_slug, @ticket_id, @plan, @todos,
-    @recent_directories_touched, @linear_project, @linear_project_url
+    @recent_directories_touched, @linear_project, @linear_project_url, @machine
   )
   ON CONFLICT(id) DO UPDATE SET
     short_id = excluded.short_id,
@@ -845,7 +895,8 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     linear_project_url = CASE
       WHEN excluded.ticket_id IS NOT sessions.ticket_id THEN excluded.linear_project_url
       ELSE COALESCE(excluded.linear_project_url, sessions.linear_project_url)
-    END
+    END,
+    machine = excluded.machine
 `);
 
 function enrichCachedSessionMeta(meta: SessionMeta): SessionMeta {
@@ -903,6 +954,12 @@ function storedFtsLabel(readLabel: Database.Statement<unknown[]>, id: string): s
   return row?.label ?? '';
 }
 
+/** Resolve origin machine for a row: prefer caller-stamped meta, else path. */
+function resolveMachine(meta: SessionMeta): string {
+  if (meta.machine && meta.machine.trim()) return meta.machine.trim();
+  return machineForSessionFile(meta.filePath, meta.agent);
+}
+
 /**
  * Upsert a session row and replace its FTS5 content in a single transaction.
  * `content` is the tokenizable user-prompt text; pass '' to leave the row unsearchable.
@@ -946,6 +1003,7 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
     recent_directories_touched: meta.recentDirectoriesTouched ? JSON.stringify(meta.recentDirectoriesTouched) : null,
     linear_project: meta.linearProject ?? null,
     linear_project_url: meta.linearProjectUrl ?? null,
+    machine: resolveMachine(meta),
   };
 
   const txn = db.transaction(() => {
@@ -1070,6 +1128,7 @@ export function upsertSessionsBatch(
         recent_directories_touched: meta.recentDirectoriesTouched ? JSON.stringify(meta.recentDirectoriesTouched) : null,
         linear_project: meta.linearProject ?? null,
         linear_project_url: meta.linearProjectUrl ?? null,
+    machine: resolveMachine(meta),
       });
       delText.run(meta.id);
       insText.run(
@@ -1271,6 +1330,7 @@ function rowToMeta(row: SessionRow): SessionMeta {
     recentDirectoriesTouched: parseJsonColumn(row.recent_directories_touched),
     linearProject: row.linear_project ?? undefined,
     linearProjectUrl: row.linear_project_url ?? undefined,
+    machine: row.machine ?? undefined,
   };
 }
 
@@ -1467,6 +1527,97 @@ export interface UsageRollupRow {
 
 /** What to group a usage rollup by. */
 export type UsageRollupGroup = 'agent' | 'project' | 'day';
+
+/**
+ * Smart-launch affinity priors: group sessions by origin machine, harness, or
+ * joint (machine + agent). Ordered by launch count desc.
+ *
+ * SQL shape (device example):
+ *   SELECT machine, COUNT(*) launches, SUM(duration_ms), SUM(token_count)
+ *   FROM sessions
+ *   WHERE timestamp >= ? AND origin = 'cli' AND is_team_origin = 0
+ *   GROUP BY machine ORDER BY launches DESC
+ *
+ * Account rotation is NOT done here — that stays on live rate-limit windows
+ * via `--strategy balanced` / rotate.ts.
+ */
+export type AffinityGroup = 'machine' | 'agent' | 'machine_agent';
+
+export interface AffinityRow {
+  /** Group key: machine name, agent id, or "machine\\tagent". */
+  key: string;
+  machine?: string;
+  agent?: string;
+  launches: number;
+  durationMs: number;
+  tokenCount: number;
+  costUsd: number;
+}
+
+export function queryAffinityRollup(options: {
+  groupBy: AffinityGroup;
+  /** ISO cutoff or ms; defaults to 14 days ago when omitted. */
+  sinceMs?: number;
+  /** Restrict to these harnesses (e.g. claude/codex/kimi). */
+  agents?: SessionAgentId[];
+  /** Default true: only origin=cli rows. */
+  onlyCli?: boolean;
+  /** Default true: drop team-spawned sessions. */
+  excludeTeamOrigin?: boolean;
+  project?: string;
+}): AffinityRow[] {
+  const db = getDB();
+  const where: string[] = [];
+  const params: unknown[] = [];
+
+  const sinceMs = options.sinceMs ?? (Date.now() - 14 * 24 * 60 * 60 * 1000);
+  // ISO timestamps sort lexicographically; compare as string prefix of datetime.
+  where.push(`timestamp >= ?`);
+  params.push(new Date(sinceMs).toISOString());
+
+  if (options.onlyCli !== false) {
+    where.push(`IFNULL(origin, 'cli') = 'cli'`);
+  }
+  if (options.excludeTeamOrigin !== false) {
+    where.push(`IFNULL(is_team_origin, 0) = 0`);
+  }
+  if (options.agents && options.agents.length > 0) {
+    where.push(`agent IN (${options.agents.map(() => '?').join(',')})`);
+    params.push(...options.agents);
+  }
+  if (options.project) {
+    where.push(`LOWER(IFNULL(project, '')) LIKE ?`);
+    params.push(`%${options.project.toLowerCase()}%`);
+  }
+
+  let keyExpr: string;
+  let selectExtra: string;
+  if (options.groupBy === 'machine') {
+    keyExpr = `IFNULL(NULLIF(machine, ''), '(unknown)')`;
+    selectExtra = `${keyExpr} AS key, ${keyExpr} AS machine, NULL AS agent`;
+  } else if (options.groupBy === 'agent') {
+    keyExpr = `agent`;
+    selectExtra = `agent AS key, NULL AS machine, agent AS agent`;
+  } else {
+    keyExpr = `IFNULL(NULLIF(machine, ''), '(unknown)') || char(9) || agent`;
+    selectExtra = `${keyExpr} AS key, IFNULL(NULLIF(machine, ''), '(unknown)') AS machine, agent AS agent`;
+  }
+
+  const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const sql = `
+    SELECT
+      ${selectExtra},
+      COUNT(*) AS launches,
+      IFNULL(SUM(duration_ms), 0) AS durationMs,
+      IFNULL(SUM(token_count), 0) AS tokenCount,
+      IFNULL(SUM(cost_usd), 0) AS costUsd
+    FROM sessions
+    ${clause}
+    GROUP BY key
+    ORDER BY launches DESC, key ASC
+  `;
+  return db.prepare(sql).all(...params) as AffinityRow[];
+}
 
 /**
  * Aggregate cost / duration / tokens across sessions, grouped by agent,
