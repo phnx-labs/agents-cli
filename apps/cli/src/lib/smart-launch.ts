@@ -151,24 +151,100 @@ export function resolveDeviceAffinity(opts: DeviceAffinityOptions = {}): DeviceA
   };
 }
 
-/** @deprecated Use resolveDeviceAffinity — kept for any transitional callers. */
-export function resolveSmartLaunch(opts: DeviceAffinityOptions & { agent?: string } = {}): DeviceAffinityPlan & {
-  agent?: string;
-  accountStrategy: 'balanced';
-  harnessCandidates: WeightedCandidate[];
-  pickedHarnessKey: string | null;
-} {
-  const plan = resolveDeviceAffinity(opts);
-  return {
-    ...plan,
-    agent: opts.agent,
-    accountStrategy: 'balanced',
-    harnessCandidates: [],
-    pickedHarnessKey: opts.agent ?? null,
-  };
-}
-
 /** True when a host flag value means affinity pick. */
 export function isDeviceAuto(value: string | undefined | null): boolean {
   return typeof value === 'string' && value.trim().toLowerCase() === 'auto';
+}
+
+const HOST_SLOTS = ['host', 'device', 'on', 'computer'] as const;
+
+export type DeviceAutoHostOptions = {
+  host?: string;
+  device?: string;
+  on?: string;
+  computer?: string;
+  /** @deprecated Hidden alias for `--device auto`. */
+  smart?: boolean;
+  balanced?: boolean;
+  strategy?: string;
+};
+
+export type DeviceAutoApplyResult = {
+  /** True when affinity ran (success or degrade-to-local). */
+  attempted: boolean;
+  /** True when deprecated `--smart` was seen. */
+  deprecationSmart: boolean;
+  /** Affinity threw: host slots cleared → local; message for stderr. */
+  skipped?: string;
+  /** Present when affinity resolved without error. */
+  banner?: {
+    hostLabel: string;
+    deviceHint: string;
+    acctNote: string;
+  };
+};
+
+/**
+ * Apply `--device auto` / `--host auto` (and deprecated `--smart`) onto run options.
+ * Mutates `options` in place. On affinity failure, clears auto slots (local) and
+ * returns `skipped` — never throws; callers must not hard-exit.
+ */
+export function applyDeviceAutoToOptions(
+  options: DeviceAutoHostOptions,
+  deps: {
+    resolve?: () => DeviceAffinityPlan;
+    accountPickerRequested?: boolean;
+  } = {},
+): DeviceAutoApplyResult {
+  let deprecationSmart = false;
+
+  if (options.smart) {
+    const anyHost = HOST_SLOTS.some(
+      (k) => typeof options[k] === 'string' && options[k]!.trim() !== '',
+    );
+    if (!anyHost) options.device = 'auto';
+    deprecationSmart = true;
+  }
+
+  const hasAuto = HOST_SLOTS.some((k) => isDeviceAuto(options[k]));
+  if (!hasAuto) {
+    return { attempted: false, deprecationSmart };
+  }
+
+  try {
+    const plan = (deps.resolve ?? (() => resolveDeviceAffinity({})))();
+    const concrete = plan.host; // null = local
+    for (const k of HOST_SLOTS) {
+      if (isDeviceAuto(options[k])) {
+        options[k] = concrete ?? undefined;
+      }
+    }
+    const accountPickerRequested = deps.accountPickerRequested ?? false;
+    if (!accountPickerRequested && !options.strategy && !options.balanced) {
+      options.balanced = true;
+    }
+    const hostLabel = concrete ?? 'local';
+    const deviceHint = plan.deviceCandidates
+      .slice(0, 4)
+      .map((c) => `${c.key}:${c.launches}`)
+      .join(', ');
+    const acctNote = accountPickerRequested ? 'accounts=picker' : 'accounts=balanced';
+    return {
+      attempted: true,
+      deprecationSmart,
+      banner: { hostLabel, deviceHint, acctNote },
+    };
+  } catch (err) {
+    // Graceful degrade: clear auto slots so the run continues locally.
+    for (const k of HOST_SLOTS) {
+      if (isDeviceAuto(options[k])) {
+        options[k] = undefined;
+      }
+    }
+    return {
+      attempted: true,
+      deprecationSmart,
+      skipped: (err as Error).message,
+    };
+  }
 }

@@ -758,63 +758,33 @@ export function registerRunCommand(program: Command): void {
 
       // --device auto / --host auto (and deprecated --smart): affinity-pick host.
       // Harness is always the agent the user typed — never auto-picked.
+      // Affinity failure degrades to local (does not kill the run).
       {
-        const { isDeviceAuto, resolveDeviceAffinity } = await import('../lib/smart-launch.js');
-        // Hidden --smart → same as --device auto when no host flag was given.
-        if (options.smart) {
-          const anyHost = [options.host, options.device, options.on, options.computer].some(
-            (v) => typeof v === 'string' && v.trim() !== '',
+        const { applyDeviceAutoToOptions } = await import('../lib/smart-launch.js');
+        const result = applyDeviceAutoToOptions(options, {
+          accountPickerRequested,
+        });
+        if (!options.quiet && result.deprecationSmart) {
+          process.stderr.write(
+            chalk.yellow('[agents] --smart is deprecated; use --device auto\n'),
           );
-          if (!anyHost) options.device = 'auto';
-          if (!options.quiet) {
-            process.stderr.write(
-              chalk.yellow('[agents] --smart is deprecated; use --device auto\n'),
-            );
-          }
         }
-        const hostSlots: Array<'host' | 'device' | 'on' | 'computer'> = [
-          'host',
-          'device',
-          'on',
-          'computer',
-        ];
-        const autoSlot = hostSlots.find((k) => isDeviceAuto(options[k]));
-        if (autoSlot) {
-          // Only one host flag should be set; if several say auto, resolve once.
-          try {
-            const plan = resolveDeviceAffinity({});
-            const concrete = plan.host; // null = local
-            for (const k of hostSlots) {
-              if (isDeviceAuto(options[k])) {
-                options[k] = concrete ?? undefined;
-              }
-            }
-            // Prefer balanced accounts on affinity launches unless overridden or
-            // the user is on the trailing-@ account picker.
-            if (!accountPickerRequested && !options.strategy && !options.balanced) {
-              options.balanced = true;
-            }
-            if (!options.quiet) {
-              const hostLabel = concrete ?? 'local';
-              const deviceHint = plan.deviceCandidates
-                .slice(0, 4)
-                .map((c) => `${c.key}:${c.launches}`)
-                .join(', ');
-              const acctNote = accountPickerRequested
-                ? 'accounts=picker'
-                : 'accounts=balanced';
-              process.stderr.write(
-                chalk.gray(
-                  `[agents] device=auto → ${hostLabel}` +
-                    (deviceHint ? ` (affinity ${deviceHint})` : '') +
-                    ` · ${acctNote}\n`,
-                ),
-              );
-            }
-          } catch (err) {
-            console.error(chalk.red(`[agents] device=auto failed: ${(err as Error).message}`));
-            process.exit(1);
-          }
+        if (!options.quiet && result.skipped) {
+          process.stderr.write(
+            chalk.yellow(
+              `[agents] device=auto skipped: ${result.skipped} (running local)\n`,
+            ),
+          );
+        }
+        if (!options.quiet && result.banner) {
+          const { hostLabel, deviceHint, acctNote } = result.banner;
+          process.stderr.write(
+            chalk.gray(
+              `[agents] device=auto → ${hostLabel}` +
+                (deviceHint ? ` (affinity ${deviceHint})` : '') +
+                ` · ${acctNote}\n`,
+            ),
+          );
         }
       }
 

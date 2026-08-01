@@ -24,7 +24,14 @@ agents run claude "fix the auth bug"   --host mac-mini   # headless: prompt give
 agents run codex  "port this to rust"  --host spark-0    # headless: prompt given
 agents run droid  "triage the inbox"   --host win-mini    # headless: prompt given
 agents run claude                      --host mac-mini   # interactive: TTY forwarded
+agents run claude "…"                  --device auto     # affinity-pick host from 14d usage
+agents run claude "…"                  --host auto       # same (host is the special value auto)
 ```
+
+Pass `auto` as the `--host` / `--device` value to pick a host from 14-day session
+affinity (weighted by launch counts on `sessions.db` `machine`; most-used online
+device has highest probability). Harness stays the agent you typed — never
+auto-picked. Affinity failure degrades to local rather than aborting the run.
 
 It sits next to the vendor clouds (`agents cloud run --provider rush|codex|…`),
 not replacing them: those dispatch to *someone else's* cloud; `hosts` dispatches
