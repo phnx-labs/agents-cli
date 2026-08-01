@@ -443,6 +443,8 @@ agents hosts check gpu-box              # reachable? which agents-cli version?
 agents run claude --host gpu-box "profile this build"   # headless: follows live by default
 agents run claude --host gpu-box                         # no prompt → interactive TTY over SSH (tmux-backed)
 agents run claude --host gpu-box --copy-creds "fix auth" # copy local runtime creds + Claude token, shred after
+agents run claude --device auto "…"                      # affinity-pick host from 14d usage (harness stays claude)
+agents run claude --host auto "…"                        # same — auto is a host value, not a harness name
 agents hosts ps                         # list dispatched runs + terminal status
 agents hosts stop <id>                  # terminate a hung/detached run (alias: kill)
 agents logs --host gpu-box              # pick a dispatched run — concise summary by default
