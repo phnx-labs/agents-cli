@@ -108,14 +108,24 @@ describe('compareFleetInventories', () => {
     drift = report.divergences.find((d) => d.kind === 'repo-drift');
     expect(drift?.message).toContain('branch feature != local main');
 
-    // Same HEAD + branch, remote tree dirty while local is clean.
+    // Same HEAD + branch, remote tree dirty while local is clean → names the remote.
     const remoteDirty = inventory({ repos: { agents: repo({ head: 'aaaaaaaa', branch: 'main', dirty: true }) } });
     report = compareFleetInventories(
       [{ name: 'zion', inventory: local }, { name: 'box', inventory: remoteDirty }],
       'zion',
     );
     drift = report.divergences.find((d) => d.kind === 'repo-drift');
-    expect(drift?.message).toContain('uncommitted local changes');
+    expect(drift?.message).toContain('remote tree has uncommitted changes');
+
+    // Symmetric: local baseline dirty while the remote is clean → still flagged, names local.
+    const cleanRemote = inventory({ repos: { agents: repo({ head: 'aaaaaaaa', branch: 'main', dirty: false }) } });
+    const dirtyLocal = inventory({ repos: { agents: repo({ head: 'aaaaaaaa', branch: 'main', dirty: true }) } });
+    report = compareFleetInventories(
+      [{ name: 'zion', inventory: dirtyLocal }, { name: 'box', inventory: cleanRemote }],
+      'zion',
+    );
+    drift = report.divergences.find((d) => d.kind === 'repo-drift');
+    expect(drift?.message).toContain('local tree has uncommitted changes');
   });
 
   it('reports no divergence when a compared device matches the baseline exactly', () => {

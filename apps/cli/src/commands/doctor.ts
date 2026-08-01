@@ -531,10 +531,14 @@ export function renderFleetDivergence(report: FleetDivergenceReport): string[] {
     return lines;
   }
 
-  // Group findings by device so a box with several gaps reads as one block.
+  // Group findings by the LAGGING device so a box with several gaps reads as one
+  // block AND the remediation points at the right box. For a `*-missing-local`
+  // finding the resource is absent on the local baseline (present on `d.device`),
+  // so the box that's behind is the baseline — not the remote that has it.
   const byDevice = new Map<string, typeof report.divergences>();
   for (const d of report.divergences) {
-    (byDevice.get(d.device) ?? byDevice.set(d.device, []).get(d.device)!).push(d);
+    const lagging = d.kind.endsWith('-missing-local') ? report.baseline : d.device;
+    (byDevice.get(lagging) ?? byDevice.set(lagging, []).get(lagging)!).push(d);
   }
   for (const device of Array.from(byDevice.keys()).sort()) {
     lines.push(`  ${chalk.yellow('⚠')} ${chalk.bold(device)}`);

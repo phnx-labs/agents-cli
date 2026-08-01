@@ -133,7 +133,7 @@ function repoLabel(repo: 'agents' | 'system'): string {
 
 /** Describe how a remote repo state diverges from the local baseline, or null
  *  when they match. Compares HEAD first (the load-bearing difference), then
- *  branch, then a remote-only dirty tree. */
+ *  branch, then a dirty tree on either side (naming which side is dirty). */
 function describeRepoDrift(local: RepoState, remote: RepoState): string | null {
   if (local.head && remote.head && local.head !== remote.head) {
     return `HEAD ${remote.head} != local ${local.head}`;
@@ -141,8 +141,12 @@ function describeRepoDrift(local: RepoState, remote: RepoState): string | null {
   if (local.branch !== remote.branch) {
     return `branch ${remote.branch ?? 'detached'} != local ${local.branch ?? 'detached'}`;
   }
-  if (remote.dirty && !local.dirty) {
-    return 'uncommitted local changes';
+  // Flag a dirty tree on EITHER side (symmetric with HEAD/branch above), and name
+  // the side that has the uncommitted changes — the remote, or the local baseline.
+  if (remote.dirty !== local.dirty) {
+    return remote.dirty
+      ? 'remote tree has uncommitted changes'
+      : 'local tree has uncommitted changes';
   }
   return null;
 }
