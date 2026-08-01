@@ -6,17 +6,20 @@
  * user's real events log and reached the user's real secrets-agent broker
  * (wiping every unlocked bundle pre-#909).
  *
- * AGENTS_TEST_HOME (RUSH-2042): state.ts reads AGENTS_TEST_HOME first when
- * deriving the home root (HOME constant at line 34). Setting it here, before
- * any import runs, makes every ~/.agents/* path in this fork resolve into the
- * hermetic temp tree. In particular, getDevicesRegistryPath() points at
- * <tmp>/.agents/.history/devices/registry.json — so fixture devices written by
- * device-registry tests can never reach the user's real device registry.
+ * Home root (RUSH-2042): we pin HOME to a fork-private temp here, before any
+ * import runs, so every ~/.agents/* path state.ts derives at module-load
+ * resolves into the hermetic temp tree. In particular getDevicesRegistryPath()
+ * points at <tmp>/.agents/.history/devices/registry.json — so fixture devices
+ * written by device-registry tests can never reach the user's real registry.
  *
- * Individual test files that need their own isolated registry (e.g.
- * registry.test.ts, reachability.test.ts) override AGENTS_TEST_HOME to their
- * own mkdtemp before the dynamic import of any state consumer — the pattern
- * mirrors AGENTS_EVENTS_PATH override in events.test.ts.
+ * We pin HOME (not a fork-global AGENTS_TEST_HOME) deliberately: HOME-override
+ * is the isolation mechanism tests already use, so pinning HOME keeps a per-test
+ * `process.env.HOME = <tmp>` override working (a global AGENTS_TEST_HOME would
+ * win over it and silently redirect those tests to the fork root). state.ts
+ * still reads AGENTS_TEST_HOME ahead of HOME, so a test that wants a surgical
+ * override without touching HOME can set it; individual test files that need
+ * their own isolated registry (e.g. registry.test.ts, reachability.test.ts)
+ * set it to their own mkdtemp before the dynamic import of any state consumer.
  *
  * These are the DEFAULT posture, not a cage: tests that need a specific
  * posture (a live temp broker, event-content assertions, usage-stamp checks)
@@ -28,12 +31,22 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterAll } from 'vitest';
 
+// Capture the REAL home BEFORE we override HOME — the leak tripwires below must
+// check the user's actual registry / events log, not the hermetic temp.
+const realHome = process.env.HOME ?? os.homedir();
+
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-vitest-'));
 
-// Home root: pin to a fork-private temp so every ~/.agents/* path derived in
-// state.ts resolves inside the hermetic tree (RUSH-2042). Must be set BEFORE
-// any import chain reaches state.ts.
-process.env.AGENTS_TEST_HOME = tmp;
+// Home root: pin HOME to a fork-private temp so every ~/.agents/* path derived
+// in state.ts resolves inside the hermetic tree by default (RUSH-2042). Must be
+// set BEFORE any import chain reaches state.ts. Individual tests that need their
+// own isolated root still override HOME before a dynamic import (or set the
+// surgical AGENTS_TEST_HOME, which state.ts honors ahead of HOME) — exactly as
+// they do today, the saved "previous" value they restore being this hermetic
+// default. Pinning HOME (not a global AGENTS_TEST_HOME) keeps HOME-override the
+// single isolation mechanism, so tests that resolve state paths via a per-test
+// HOME are not silently redirected to a fork-global root.
+process.env.HOME = tmp;
 
 // Broker: pin the socket dir to a fork-private temp path so nothing in this
 // fork — nor any CLI subprocess it spawns with inherited env — can reach the
@@ -52,8 +65,7 @@ process.env.AGENTS_NO_USAGE_TRACK = '1';
 process.env.AGENTS_EVENTS_PATH = path.join(tmp, 'events.jsonl');
 
 // ─── Leak tripwires ───────────────────────────────────────────────────────────
-
-const realHome = process.env.HOME ?? os.homedir();
+// (realHome was captured at the top, before HOME was overridden.)
 
 // Events leak: the REAL events log must not grow while this fork runs.
 // CI-only — on a dev machine live agents append to it concurrently.
