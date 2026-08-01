@@ -8,6 +8,7 @@ import { AgentConfig } from './agents.vscode';
 
 import { fetchGitInfo } from '../monitor/snapshotDetector';
 import { findAgentInTree, SHELL_ADOPTION_TREE_DEPTH } from '../monitor/readinessDetector';
+import type { AgentLauncherKey } from '../core/terminalReadiness';
 import { PanelSnapshotPayload, SnapshotWatch } from '../monitor/protocol';
 import { generateTerminalId, resolveRestoredVersion, RunningCounts } from '../core/terminals';
 import * as sessionsPersist from '../core/sessions.persist';
@@ -716,16 +717,24 @@ export async function scanExisting(
     // a tab can be bound to a SIBLING session (wrong id, account, and version)
     // that merely looks newest. The live process's own `--session-id`/`--resume`
     // arg is the only signal tied to THIS pane, so it wins over every heuristic.
+    //
+    // Gate on THIS tab's agent: findAgentInTree only returns a descendant of
+    // `agentType`, so a nested/stray other-agent process (e.g. a codex spawned
+    // under a Claude tab's shell) can never bind this tab to the wrong agent's
+    // session. Only override an existing env id when the live id actually
+    // disagrees — a matching id is left untouched.
     if (pid !== undefined && agentType) {
       try {
-        const live = await findAgentInTree(pid, SHELL_ADOPTION_TREE_DEPTH);
-        if (live?.sessionId) {
-          if (live.sessionId !== sessionId) {
-            console.log(
-              `[TERMINALS] Live-process sessionId ${live.sessionId} (pid=${pid}) ` +
-                `overrides ${sessionId ?? 'none'} from env`
-            );
-          }
+        const live = await findAgentInTree(
+          pid,
+          SHELL_ADOPTION_TREE_DEPTH,
+          agentType as AgentLauncherKey
+        );
+        if (live?.sessionId && live.sessionId !== sessionId) {
+          console.log(
+            `[TERMINALS] Live-process sessionId ${live.sessionId} (pid=${pid}, ` +
+              `${live.agentKey}) overrides ${sessionId ?? 'none'} from env`
+          );
           sessionId = live.sessionId;
         }
       } catch {

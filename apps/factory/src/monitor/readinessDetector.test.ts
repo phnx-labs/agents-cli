@@ -7,7 +7,7 @@
 
 import { afterEach, describe, expect, test } from 'bun:test';
 import { spawn, ChildProcess } from 'child_process';
-import { ReadinessDetector } from './readinessDetector';
+import { ReadinessDetector, selectAgentFromCandidates } from './readinessDetector';
 import { ReadinessFactPayload } from './protocol';
 
 const spawned: ChildProcess[] = [];
@@ -115,4 +115,51 @@ describe('ReadinessDetector', () => {
       detector.stop();
     }
   }, 10000);
+});
+
+// The gate that stops a Claude tab from adopting a nested codex session on
+// reload (Strategy 0 in scanExisting). Pure over ordered BFS candidates — no
+// process probing, no mocks.
+describe('selectAgentFromCandidates — agent-type gating', () => {
+  const claudeId = '11111111-1111-4111-8111-111111111111';
+  const codexId = '22222222-2222-4222-8222-222222222222';
+  // A Claude tab whose shell also has a nested codex descendant, shallower.
+  const mixedTree = [
+    { childPid: 100, args: `codex --session-id ${codexId}` },
+    { childPid: 200, args: `claude --session-id ${claudeId}` },
+  ];
+
+  test('wanting claude skips the shallower codex and returns the claude id', () => {
+    const m = selectAgentFromCandidates(mixedTree, 'claude');
+    expect(m).not.toBeNull();
+    expect(m!.agentKey).toBe('claude');
+    expect(m!.childPid).toBe(200);
+    expect(m!.sessionId).toBe(claudeId);
+  });
+
+  test('wanting codex returns the codex id from the same tree', () => {
+    const m = selectAgentFromCandidates(mixedTree, 'codex');
+    expect(m!.agentKey).toBe('codex');
+    expect(m!.sessionId).toBe(codexId);
+  });
+
+  test('no wanted agent keeps first-of-any-type (unchanged adoption behavior)', () => {
+    const m = selectAgentFromCandidates(mixedTree);
+    expect(m!.agentKey).toBe('codex');
+    expect(m!.sessionId).toBe(codexId);
+  });
+
+  test('returns null when the wanted agent is absent — no wrong-agent fallback', () => {
+    expect(selectAgentFromCandidates([{ childPid: 100, args: `codex --session-id ${codexId}` }], 'claude')).toBeNull();
+    expect(selectAgentFromCandidates([], 'claude')).toBeNull();
+  });
+
+  test('resumed claude (--resume) is matched under the agent gate', () => {
+    const m = selectAgentFromCandidates(
+      [{ childPid: 300, args: `claude --resume ${claudeId}` }],
+      'claude',
+    );
+    expect(m!.agentKey).toBe('claude');
+    expect(m!.sessionId).toBe(claudeId);
+  });
 });

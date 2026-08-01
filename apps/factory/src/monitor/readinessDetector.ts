@@ -63,26 +63,52 @@ export interface AgentInTreeMatch {
   sessionId?: string;
 }
 
-/** Walk the descendant tree of `rootPid` for a known agent CLI. */
+/**
+ * Pick the first agent process from BFS-ordered `(childPid, args)` candidates.
+ * When `wantAgentKey` is set, descendants of a DIFFERENT agent are skipped, so a
+ * shallower wrong-agent process (e.g. a nested `codex` under a Claude tab's
+ * shell) can never shadow the agent the caller actually wants. Pure — no
+ * process probing — so the mixed-tree behavior is unit-testable without mocks.
+ */
+export function selectAgentFromCandidates(
+  candidates: Array<{ childPid: number; args: string }>,
+  wantAgentKey?: AgentLauncherKey,
+): AgentInTreeMatch | null {
+  for (const { childPid, args } of candidates) {
+    const agentKey = detectAgentKeyFromArgs(args);
+    if (agentKey && (!wantAgentKey || agentKey === wantAgentKey)) {
+      return { agentKey, childPid, sessionId: extractSessionIdFromArgs(args) };
+    }
+  }
+  return null;
+}
+
+/**
+ * Walk the descendant tree of `rootPid` for a known agent CLI. When
+ * `wantAgentKey` is passed, only a descendant of that exact agent is returned —
+ * the walk continues past other-agent processes (shallow-first order preserved)
+ * instead of returning the first agent of any type.
+ */
 export async function findAgentInTree(
   rootPid: number,
   maxDepth: number,
+  wantAgentKey?: AgentLauncherKey,
 ): Promise<AgentInTreeMatch | null> {
+  const candidates: Array<{ childPid: number; args: string }> = [];
   let frontier = [rootPid];
   for (let depth = 0; depth < maxDepth && frontier.length > 0; depth++) {
     const childrenResults = await Promise.all(frontier.map((pid) => probeChildPids(pid)));
     const nextFrontier = childrenResults.flat().filter((n) => Number.isFinite(n));
     for (const childPid of nextFrontier) {
       try {
-        const args = await probeArgs(childPid);
-        const agentKey = detectAgentKeyFromArgs(args);
-        if (agentKey) {
-          return { agentKey, childPid, sessionId: extractSessionIdFromArgs(args) };
-        }
+        candidates.push({ childPid, args: await probeArgs(childPid) });
       } catch {
         // child may have exited; skip
       }
     }
+    // Shallow-first: return as soon as this depth yields the wanted agent.
+    const match = selectAgentFromCandidates(candidates, wantAgentKey);
+    if (match) return match;
     frontier = nextFrontier;
   }
   return null;
