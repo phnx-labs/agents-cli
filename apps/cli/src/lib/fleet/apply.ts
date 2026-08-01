@@ -321,9 +321,10 @@ export function reconcileDevice(row: DeviceDiff, device: DeviceProfile, ctx: Exe
     ok = ok && r.ok;
   }
 
-  // 2. agents.
+  // 2. agents. Every add-agent action carries the full spec (set in diffFleet);
+  // install it directly rather than re-parsing the human-readable detail string.
   for (const a of row.actions.filter((x) => x.kind === 'add-agent')) {
-    const spec = a.detail.replace(/^install\s+/, '');
+    const spec = a.spec!;
     const r = sshAgents(['add', spec, '--yes']);
     steps.push({ kind: 'add-agent', ok: r.code === 0, detail: a.detail });
     ok = ok && r.code === 0;
