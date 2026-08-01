@@ -22,7 +22,7 @@ const execFileAsync = promisify(execFile);
 import type { SessionAgentId, SessionMeta } from './types.js';
 import type { AgentId } from '../types.js';
 import { AGENTS, agentConfigDirName, getCliVersion } from '../agents.js';
-import { walkForFiles } from '../fs-walk.js';
+import { walkForFilesWithStat } from '../fs-walk.js';
 import { getConfigSymlinkVersion } from '../shims.js';
 import { SESSION_AGENTS } from './types.js';
 import { extractSessionTopic } from './prompt.js';
@@ -481,27 +481,50 @@ export function searchContentIndex(
  * growing transcript over and over. The cached row is good enough for a few
  * seconds; once writes settle or the debounce expires, the file is parsed once.
  */
-function filterChangedFiles(
+export function filterChangedFiles(
   filePaths: string[],
 ): Array<{ filePath: string; scan: ScanStamp }> {
-  const ledger = getScanStampsForPaths(filePaths);
-  const out: Array<{ filePath: string; scan: ScanStamp }> = [];
-  const now = Date.now();
+  const entries: PreStatEntry[] = [];
   for (const filePath of filePaths) {
     const stat = safeStatSync(filePath);
     if (!stat) continue;
+    entries.push({ filePath, fileMtimeMs: stat.mtimeMs, fileSize: stat.size });
+  }
+  return filterChangedEntries(entries);
+}
+
+/** A path already stat'd by the walk — mtime is the raw (unfloored) fs value. */
+export interface PreStatEntry {
+  filePath: string;
+  fileMtimeMs: number;
+  fileSize: number;
+}
+
+/**
+ * Ledger-compare pre-stat'd entries (from the walk's own stat) without a second
+ * stat. Same debounce and change-detection as filterChangedFiles; the raw
+ * mtime is floored here so warm files match the ledger exactly as the stat path
+ * does (Math.floor(stat.mtimeMs)).
+ */
+export function filterChangedEntries(
+  entries: PreStatEntry[],
+): Array<{ filePath: string; scan: ScanStamp }> {
+  const ledger = getScanStampsForPaths(entries.map(e => e.filePath));
+  const out: Array<{ filePath: string; scan: ScanStamp }> = [];
+  const now = Date.now();
+  for (const entry of entries) {
     const scan: ScanStamp = {
-      fileMtimeMs: Math.floor(stat.mtimeMs),
-      fileSize: stat.size,
+      fileMtimeMs: Math.floor(entry.fileMtimeMs),
+      fileSize: entry.fileSize,
     };
-    const prev = ledger.get(filePath);
+    const prev = ledger.get(entry.filePath);
     if (prev && prev.fileMtimeMs === scan.fileMtimeMs && prev.fileSize === scan.fileSize) {
       continue;
     }
     if (prev && shouldDeferRecentAppend(prev, scan, now)) {
       continue;
     }
-    out.push({ filePath, scan });
+    out.push({ filePath: entry.filePath, scan });
   }
   return out;
 }
@@ -706,12 +729,14 @@ async function scanRoutineArchivesIncremental(
   if (!subdir) return;
 
   const ext = agent === 'gemini' ? '.json' : '.jsonl';
-  const filePaths: string[] = [];
+  const prestat: PreStatEntry[] = [];
   for (const sessionsDir of getRoutineArchiveSessionDirs(agent, subdir)) {
-    for (const fp of walkForFiles(sessionsDir, ext, 100_000)) filePaths.push(fp);
+    for (const f of walkForFilesWithStat(sessionsDir, ext, 100_000)) {
+      prestat.push({ filePath: f.path, fileMtimeMs: f.mtimeMs, fileSize: f.size });
+    }
   }
 
-  const changed = filterChangedFiles(filePaths);
+  const changed = filterChangedEntries(prestat);
   if (changed.length === 0) return;
 
   onProgress?.({ agent, parsed: 0, total: changed.length });
@@ -1053,15 +1078,16 @@ async function scanCodexIncremental(onProgress?: (p: ScanProgress) => void): Pro
   // so a no-op scan (changed.length === 0) never touches the credential file.
   const currentVersion = await getCurrentAgentVersion('codex');
 
-  const filePaths: string[] = [];
+  const prestat: PreStatEntry[] = [];
   for (const sessionsDir of getAgentSessionDirs('codex', 'sessions')) {
-    // High limit: we only stat files here, parsing is gated by ledger match.
-    for (const fp of walkForFiles(sessionsDir, '.jsonl', 100_000)) {
-      filePaths.push(fp);
+    // High limit: the walk stats each file once here; parsing is gated by the
+    // ledger match below, which reuses that stat instead of re-stat'ing.
+    for (const f of walkForFilesWithStat(sessionsDir, '.jsonl', 100_000)) {
+      prestat.push({ filePath: f.path, fileMtimeMs: f.mtimeMs, fileSize: f.size });
     }
   }
 
-  const changed = filterChangedFiles(filePaths);
+  const changed = filterChangedEntries(prestat);
 
   // Codex keeps human-readable titles (`thread_name`) in `session_index.jsonl`,
   // which updates independently of the rollout files. Stat each index against the
@@ -2158,15 +2184,16 @@ interface DroidSessionScan {
 async function scanDroidIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
   const currentVersion = await getCurrentAgentVersion('droid');
 
-  const filePaths: string[] = [];
+  const prestat: PreStatEntry[] = [];
   for (const sessionsDir of getAgentSessionDirs('droid', 'sessions')) {
-    // High limit: we only stat files here, parsing is gated by ledger match.
-    for (const fp of walkForFiles(sessionsDir, '.jsonl', 100_000)) {
-      filePaths.push(fp);
+    // High limit: the walk stats each file once here; parsing is gated by the
+    // ledger match below, which reuses that stat instead of re-stat'ing.
+    for (const f of walkForFilesWithStat(sessionsDir, '.jsonl', 100_000)) {
+      prestat.push({ filePath: f.path, fileMtimeMs: f.mtimeMs, fileSize: f.size });
     }
   }
 
-  const changed = filterChangedFiles(filePaths);
+  const changed = filterChangedEntries(prestat);
   if (changed.length === 0) return;
 
   onProgress?.({ agent: 'droid', parsed: 0, total: changed.length });
