@@ -2183,8 +2183,10 @@ export function registerRunCommand(program: Command): void {
               agent,
               keys: secretsKeysSubset,
               allowExpired: options.allowExpired,
-              // The harness identity scopes any cached grant and allows this
-              // requesting agent to wait for interactive approval.
+              // The harness identity scopes any cached grant. It no longer lets the
+              // requesting agent wait for interactive approval — an agent launch
+              // resolves broker-only and fails fast naming
+              // `agents secrets unlock <bundle>` (bundles.ts:interactiveUnlock).
               agentOnly: isHeadlessSecretsContext(),
             });
             const entries = describeBundle(bundle);

@@ -314,10 +314,23 @@ export async function runDaemon(): Promise<void> {
   // secrets-agent and is otherwise absent (leaving the daemon on its existing
   // interactive OAuth session), matching the detached-start path. Never blocks.
   if (!process.env.CLAUDE_CODE_OAUTH_TOKEN) {
-    const oauthToken = readDaemonClaudeOAuthToken();
+    const bundleEnv = readDaemonClaudeBundleEnv();
+    const oauthToken = (bundleEnv[DAEMON_OAUTH_KEY] ?? '').trim();
     if (oauthToken) {
       process.env.CLAUDE_CODE_OAUTH_TOKEN = oauthToken;
-      log('INFO', 'Loaded Claude OAuth token from secrets bundle for routine runs');
+      // Also inject each per-account CLAUDE_CODE_OAUTH_TOKEN_<slug> present in the
+      // bundle, so a routine authenticates its rotation-pinned account via that
+      // account's own long-lived, non-rotating setup-token (runner.ts
+      // buildRoutineSpawnEnv) instead of the interactive session that rotates and
+      // logs the fleet out (Claude Code #25609 / #56339).
+      let perAccount = 0;
+      for (const [k, v] of Object.entries(bundleEnv)) {
+        if (k.startsWith('CLAUDE_CODE_OAUTH_TOKEN_') && (v ?? '').trim() && !process.env[k]) {
+          process.env[k] = v!.trim();
+          perAccount++;
+        }
+      }
+      log('INFO', `Loaded Claude OAuth token from secrets bundle for routine runs${perAccount ? ` (+${perAccount} per-account)` : ''}`);
     } else {
       // No token available (e.g. a headless macOS daemon whose keychain was
       // locked at start resolves broker-only and gets nothing). Historically
@@ -784,16 +797,28 @@ export async function runDaemon(): Promise<void> {
 export function readDaemonClaudeOAuthToken(
   opts: { allowPrompt?: boolean } = {},
 ): string | null {
+  const token = (readDaemonClaudeBundleEnv(opts)[DAEMON_OAUTH_KEY] ?? '').trim();
+  return token.length > 0 ? token : null;
+}
+
+/**
+ * Read the FULL `claude` bundle env — the main `CLAUDE_CODE_OAUTH_TOKEN` plus any
+ * per-account `CLAUDE_CODE_OAUTH_TOKEN_<slug>` setup-tokens. Same resolution and
+ * never-throws contract as {@link readDaemonClaudeOAuthToken}; returns `{}` when
+ * the bundle can't be read (broker-only headless miss, absent bundle, etc.).
+ */
+export function readDaemonClaudeBundleEnv(
+  opts: { allowPrompt?: boolean } = {},
+): Record<string, string> {
   try {
     const allowPrompt = opts.allowPrompt ?? Boolean(process.stdin.isTTY);
     const { env } = readAndResolveBundleEnv(DAEMON_OAUTH_BUNDLE, {
       caller: 'daemon',
       agentOnly: !allowPrompt,
     });
-    const token = (env[DAEMON_OAUTH_KEY] ?? '').trim();
-    return token.length > 0 ? token : null;
+    return env;
   } catch {
-    return null;
+    return {};
   }
 }
 
@@ -1042,11 +1067,20 @@ function startDaemonLocked(agentsBin: string): { pid: number | null; method: str
  */
 export function buildDetachedDaemonEnv(
   baseEnv: NodeJS.ProcessEnv = process.env,
-  oauthToken: string | null = readDaemonClaudeOAuthToken(),
+  bundleEnv: Record<string, string> = readDaemonClaudeBundleEnv(),
 ): NodeJS.ProcessEnv {
   const env = { ...baseEnv };
   if (!env.CLAUDE_CODE_OAUTH_TOKEN) {
-    if (oauthToken) env.CLAUDE_CODE_OAUTH_TOKEN = oauthToken;
+    const main = (bundleEnv[DAEMON_OAUTH_KEY] ?? '').trim();
+    if (main) env.CLAUDE_CODE_OAUTH_TOKEN = main;
+  }
+  // Per-account setup-tokens — same rationale as the runDaemon startup injection:
+  // a routine authenticates its rotation-pinned account via that account's own
+  // long-lived, non-rotating token. An already-set value wins.
+  for (const [k, v] of Object.entries(bundleEnv)) {
+    if (k.startsWith('CLAUDE_CODE_OAUTH_TOKEN_') && (v ?? '').trim() && !env[k]) {
+      env[k] = v.trim();
+    }
   }
   return env;
 }

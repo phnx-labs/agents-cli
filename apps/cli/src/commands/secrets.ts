@@ -1171,8 +1171,9 @@ export function registerSecretsCommands(program: Command): void {
           process.exit(1);
         }
         // `secrets get` is the scriptable automation primitive ($(agents secrets
-        // get bundle KEY)); when embedded in a headless routine/CI script it must
-        // not pop an unwatched Touch ID prompt. Interactive use still prompts.
+        // get bundle KEY)); when embedded in a headless routine/CI script — or run
+        // beneath any agent, which inherits AGENTS_RUNTIME — it must not pop an
+        // unwatched Touch ID prompt. Typed in a plain shell it still prompts.
         const { env } = readAndResolveBundleEnv(item, { caller: 'secrets get', keys: [key], keyMode: 'storage', agentOnly: isHeadlessSecretsContext() });
         if (!(key in env)) {
           console.error(chalk.red(`Key '${key}' not in bundle '${item}'.`));
@@ -1924,10 +1925,10 @@ Examples:
           process.exit(1);
         }
         // `agents secrets export --plaintext` is what release/CI scripts eval.
-        // When it runs detached (both stdio non-TTY) or under a headless agent,
-        // resolve broker-only so it can never pop a Touch ID sheet on the
-        // interactive user's screen. An interactive `eval "$(...)"` keeps its
-        // terminal stdin, so it is not headless and still prompts.
+        // When it runs detached (both stdio non-TTY) or beneath ANY agent — which
+        // inherits AGENTS_RUNTIME — resolve broker-only so it can never pop a Touch
+        // ID sheet on the interactive user's screen. An `eval "$(...)"` typed in a
+        // plain shell carries no AGENTS_RUNTIME, so it is not headless and still prompts.
         const { env } = readAndResolveBundleEnv(resolvedBundleName, {
           caller: `export to shell`,
           keyMode: 'process',
