@@ -58,6 +58,48 @@ describe('sqlite shim named-parameter binds', () => {
     db.close();
   });
 
+  // The shim-level tests above pin the binding; this one pins the bug that
+  // motivated the fix — `agents sessions` writing its index (upsertSessionsBatch
+  // in session/db.ts, the codebase's only named bind) from the runtime the
+  // shipped standalone binary embeds.
+  it('indexes a scanned session when `agents sessions` runs under bun', () => {
+    const home = path.join(dir, 'home');
+    const sessionId = 'aaaaaaaa-1111-2222-3333-444444444444';
+    const projectDir = path.join(home, '.claude', 'projects', '-tmp-demo');
+    fs.mkdirSync(projectDir, { recursive: true });
+    // ensureInitialized() gates every non-setup command on the system repo being
+    // a git checkout — seed it so `sessions` runs instead of erroring.
+    fs.mkdirSync(path.join(home, '.agents', '.system', '.git'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.agents', 'agents.yaml'), 'agents: {}\n');
+    fs.writeFileSync(path.join(projectDir, `${sessionId}.jsonl`), [
+      JSON.stringify({
+        type: 'user', sessionId, cwd: '/tmp/demo', version: '2.1.220', gitBranch: 'main',
+        timestamp: '2026-07-31T10:00:00.000Z',
+        message: { role: 'user', content: 'index this session please' },
+      }),
+      JSON.stringify({
+        type: 'assistant', sessionId, cwd: '/tmp/demo', version: '2.1.220',
+        timestamp: '2026-07-31T10:00:05.000Z',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 10, output_tokens: 4 } },
+      }),
+    ].join('\n') + '\n');
+
+    const out = execFileSync('bun', [path.resolve(process.cwd(), 'src/index.ts'), 'sessions', '--all', '--local', '--json'], {
+      cwd: process.cwd(),
+      env: { ...process.env, HOME: home, AGENTS_REAL_HOME: home },
+      stdio: ['ignore', 'pipe', 'inherit'],
+    }).toString('utf-8');
+    expect(JSON.parse(out).map((s: { id: string }) => s.id)).toContain(sessionId);
+
+    // The listing can be served from the scan itself, so assert the row actually
+    // landed in the index — that is what the failed bind used to swallow.
+    const db = new Database(path.join(home, '.agents', '.history', 'sessions', 'sessions.db'));
+    expect(db.prepare('SELECT id, short_id FROM sessions').all()).toEqual([
+      { id: sessionId, short_id: 'aaaaaaaa' },
+    ]);
+    db.close();
+  });
+
   it('still binds positional parameters on the current runtime', () => {
     const db = new Database(dbPath);
     db.exec(SCHEMA);

@@ -33,9 +33,20 @@ const NativeDatabase: new (filename: string, options?: { strict: boolean }) => N
  * sigil (`{ '@id': … }` for `VALUES (@id)`); bare keys (`{ id: … }`) match
  * nothing and every parameter stays NULL, so the first NOT NULL column raises a
  * constraint error and the write is lost. node:sqlite accepts the bare keys.
- * `strict: true` makes bun accept them too, so one call shape works on both
- * runtimes. node:sqlite has no such option and rejects a second argument that
- * isn't an object, so the argument list is built per runtime.
+ * `strict: true` makes bun accept them too, so the bare-key call shape this
+ * codebase uses works on both runtimes. node:sqlite has no such option and
+ * rejects a second argument that isn't an object, so the argument list is built
+ * per runtime.
+ *
+ * The two runtimes are still not interchangeable at the edges, and only bun's
+ * half is exercised by the shipped binary rather than by vitest — so keep binds
+ * inside the intersection:
+ *   - omit a named key: bun throws `Missing parameter "x"`, node binds NULL.
+ *   - pass an extra named key: bun accepts it, node throws `Unknown named
+ *     parameter`.
+ *   - use sigil keys (`{'@id': …}`): node accepts them, strict bun rejects them.
+ *   - a single non-plain object positional arg (e.g. `run(new Date())`) reaches
+ *     the named path via bindArgs below and throws under strict bun.
  */
 const NATIVE_ARGS: [] | [{ strict: boolean }] = isBun ? [{ strict: true }] : [];
 

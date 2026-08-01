@@ -8,9 +8,7 @@ import type { HostTask } from './tasks.js';
 
 // Isolate the sessions DB under a temp HOME. db.js reads its base dir lazily
 // (at getDB() time), so setting HOME here — before any test calls getDB — is
-// enough. Use STATIC imports, matching session/__tests__/db.test.ts: a dynamic
-// `await import()` of the native better-sqlite3 addon mis-binds named params
-// under bun (every insert lands NULLs → NOT NULL constraint failures).
+// enough. Use STATIC imports, matching session/__tests__/db.test.ts.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-hostsession-'));
 process.env.HOME = TEST_HOME;
 

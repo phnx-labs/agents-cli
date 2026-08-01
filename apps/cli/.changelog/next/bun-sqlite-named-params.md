@@ -9,5 +9,7 @@
   listed only rows indexed earlier by the Node entrypoint. The suite runs under
   Node (vitest), where `node:sqlite` accepts bare keys, which is why CI stayed
   green. `apps/cli/src/lib/sqlite.ts` now opens the DB with `strict: true` under
-  Bun so both runtimes take the same bind shape, and `sqlite.test.ts` exercises
-  the named bind in a real `bun` subprocess.
+  Bun, so the bare-key call shape this codebase uses works on both runtimes (the
+  edges still differ — the module doc lists what strict changes). `sqlite.test.ts`
+  covers both the bind and a full `agents sessions` scan in a real `bun`
+  subprocess.
