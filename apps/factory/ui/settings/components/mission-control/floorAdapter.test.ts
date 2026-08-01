@@ -425,10 +425,46 @@ describe('toFloorAgentFromRemote', () => {
     expect(a.createdTickets).toEqual(['RUSH-901'])
     expect(a.spawnedTeam).toBe('rate-limiter')
     expect(a.question?.kind).toBe('confirm')
-    // remote carries only session-start; heartbeat anchors to it until backend adds a stamp.
+    // No lastActivityMs on the payload → heartbeat falls back to session-start.
     expect(a.lastActivityMs).toBe(NOW - 42_000)
     // a genuinely-remote host is already its real name — no display override.
     expect(a.hostLabel).toBeUndefined()
+  })
+
+  test('prefers the CLI lastActivityMs stamp over startedAtMs for the heartbeat', () => {
+    // The CLI now stamps the transcript last-write on active sessions (active.ts
+    // sessionFileTimes), so a session started long ago but touched seconds ago reads
+    // as freshly active — not "started 1h ago".
+    const r: RemoteSessionLike = {
+      host: 'yosemite-s0',
+      sessionId: 'live999',
+      agentType: 'claude',
+      cwd: '/Users/muqsit/src/github.com/muqsitnawaz',
+      project: 'muqsitnawaz',
+      phase: 'running',
+      activity: 'working',
+      tokPerSec: 40,
+      waitingForInput: false,
+      lastResponse: 'editing files',
+      prUrl: null,
+      ticket: null,
+      branch: '',
+      sinceMs: 3_600_000,
+      startedAtMs: NOW - 3_600_000, // started 1h ago
+      lastActivityMs: NOW - 20_000, // but last wrote 20s ago
+      topic: 'Long-running interactive session',
+      context: 'terminal',
+      cloudTaskId: '',
+      cloudProvider: '',
+      teamName: '',
+      pid: 999,
+      transport: 'ssh',
+      replyRail: '',
+      replyMuxTarget: '',
+      replyMuxSocket: '',
+    }
+    const a = toFloorAgentFromRemote(r, new Set())
+    expect(a.lastActivityMs).toBe(NOW - 20_000)
   })
 
   test('detects remote plan artifacts from output and attachment refs', () => {

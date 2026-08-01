@@ -249,14 +249,15 @@ async function fetchActiveForHost(sshTarget: string, isLocal: boolean, hostKey: 
     for (let session of unique) {
       // Activity / throughput / waiting now arrive on the CLI payload itself
       // (ActiveSession.activity / tokPerSec / awaitingReason, issue #741) — no
-      // transcript-tail re-parse here. The one thing the payload does not carry
-      // is the file's last-write time, so stat THIS machine's own session files
-      // (remote rows have no local file) to stamp the staleness signal.
+      // transcript-tail re-parse here. The CLI payload now also carries the file's
+      // last-write time (ActiveSession.lastActivityMs); re-stat THIS machine's own
+      // files to refresh it to the instant of render (remote rows keep the payload
+      // value — no local file to stat).
       if (session.host === LOCAL_LABEL && session.sessionFile) {
         try {
           const stat = await fs.promises.stat(session.sessionFile);
           session = { ...session, lastActivityMs: stat.mtimeMs };
-        } catch { /* file gone/rotated — leave the no-signal 0 */ }
+        } catch { /* file gone/rotated — keep the payload's lastActivityMs */ }
       }
       sessions.push(session);
     }

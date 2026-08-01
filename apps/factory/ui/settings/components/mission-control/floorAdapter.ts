@@ -614,10 +614,11 @@ export function toFloorAgentFromRemote(r: RemoteSessionLike, pinned: Set<string>
     target,
     tok: r.tokPerSec,
     since: sinceFromMs(r.sinceMs),
-    // Remote sessions only carry a wall-clock START (startedAtMs); there is no distinct
-    // last-activity epoch yet, so the heartbeat anchors to start until backend-data adds
-    // one. 0 (unknown) disables the heartbeat rather than raising a false stall.
-    lastActivityMs: r.startedAtMs > 0 ? r.startedAtMs : 0,
+    // Prefer the CLI's real last-activity epoch (transcript last-write, now stamped on
+    // active sessions too — active.ts sessionFileTimes) so "Xs ago" tracks the last
+    // turn, not the session's age. Fall back to start when no file signal exists; 0
+    // (unknown) disables the heartbeat rather than raising a false stall.
+    lastActivityMs: r.lastActivityMs && r.lastActivityMs > 0 ? r.lastActivityMs : (r.startedAtMs > 0 ? r.startedAtMs : 0),
     files: 0,
     tools: 0,
     needs,
