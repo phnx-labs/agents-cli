@@ -565,8 +565,12 @@ export function computeRekeyPlan(
     try {
       const parsed = JSON.parse(value) as Record<string, unknown> | null;
       if (parsed && typeof parsed === 'object') {
-        const tier = parsed.tier;
-        noAcl = tier === 'none' || tier === 'never';
+        // Bundle metadata is non-sensitive by contract and stored no-ACL at
+        // EVERY tier (matches writeBundle in bundles.ts), so `secrets list` /
+        // crabbox's `agents devices list` enumerate bundles with no Touch ID
+        // (RUSH-1759). Re-home metadata no-ACL regardless of the bundle's policy;
+        // the real secret values (second loop) still carry their per-bundle ACL.
+        noAcl = true;
         payload = JSON.stringify({ ...parsed, name });
       }
     } catch {

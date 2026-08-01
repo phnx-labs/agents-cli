@@ -271,7 +271,7 @@ describe('service-name hashing through the primitives', () => {
 describe('computeRekeyPlan', () => {
   const key = randomBytes(32);
 
-  it('preserves the no-ACL tier for never-policy bundles and injects the name into metadata', () => {
+  it('stores ALL bundle metadata no-ACL (non-sensitive) while value items keep their per-tier ACL', () => {
     const services = [
       'agents-cli.bundles.autobot',
       'agents-cli.secrets.autobot.CRON_TOKEN',
@@ -293,9 +293,12 @@ describe('computeRekeyPlan', () => {
     const { items, unreadable } = computeRekeyPlan(services, values, key);
     expect(unreadable).toEqual([]);
     const byOld = Object.fromEntries(items.map((i) => [i.oldService, i]));
+    // Metadata is no-ACL at every tier now (RUSH-1759): a `never` bundle (autobot)
+    // AND a daily/`session` bundle (prod) both re-home their metadata no-ACL, so
+    // enumeration never prompts. The secret VALUE items still split by tier.
     expect(byOld['agents-cli.bundles.autobot'].noAcl).toBe(true);
     expect(byOld['agents-cli.secrets.autobot.CRON_TOKEN'].noAcl).toBe(true);
-    expect(byOld['agents-cli.bundles.prod'].noAcl).toBe(false);
+    expect(byOld['agents-cli.bundles.prod'].noAcl).toBe(true);
     expect(byOld['agents-cli.secrets.prod.API_KEY'].noAcl).toBe(false);
     expect(byOld['agents-cli.anthropic.token'].noAcl).toBe(false);
     // Correction D: durable session items must stay no-ACL through a rekey, or
