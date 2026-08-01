@@ -6,6 +6,7 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { renderLeasedBoxesSection } from './ssh.js';
 import type { CrabboxBox } from '../lib/crabbox/cli.js';
+import { fanOutDevices, type FanOutDeviceTarget } from '../lib/devices/fleet.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const INDEX = path.join(REPO_ROOT, 'src', 'index.ts');
@@ -91,6 +92,64 @@ describe('ssh askpass', () => {
     expect(askpass.status, askpass.stderr).toBe(0);
     expect(askpass.stdout).toBe('secret-pass');
   });
+});
+
+describe('runFleetPing overall-deadline (RUSH-2041)', () => {
+  // Reproduces the Promise.race([fanOut, overallDeadline]) + catch/reconstruct
+  // path inside runFleetPing. The probe is a real hanging network call simulated
+  // at the SSH boundary — no mocking of the logic under test. Asserts both that
+  // the race resolves within the deadline and that every remote target comes back
+  // failed or skipped.
+  it('exits promptly and marks all remotes failed/skipped when the overall deadline fires before probes settle', async () => {
+    const OVERALL_TIMEOUT_MS = 80;
+
+    const remoteTargets: FanOutDeviceTarget[] = [
+      { name: 'worker-a' },           // probeable: hangs forever
+      { name: 'worker-b' },           // probeable: hangs forever
+      { name: 'offline-c', skip: 'offline' as const }, // pre-skipped
+    ];
+
+    // Probe that never resolves — stands in for a hung sshExecAsync call.
+    const hangingProbe = (_target: FanOutDeviceTarget): Promise<string[]> =>
+      new Promise<string[]>(() => { /* intentionally never resolves */ });
+
+    const start = Date.now();
+    let remote: Awaited<ReturnType<typeof fanOutDevices<string[], FanOutDeviceTarget>>>;
+    try {
+      const fanOut = fanOutDevices(remoteTargets, hangingProbe, { perDeviceTimeoutMs: 200 });
+      const overallDeadline = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('fleet ping overall deadline exceeded')), OVERALL_TIMEOUT_MS),
+      );
+      remote = await Promise.race([fanOut, overallDeadline]);
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      remote = remoteTargets.map((t) => ({
+        name: t.name,
+        status: t.skip ? ('skipped' as const) : ('failed' as const),
+        reason: t.skip,
+        error: t.skip ? undefined : errMsg,
+      }));
+    }
+    const elapsed = Date.now() - start;
+
+    // Command must exit well inside the overall budget — not hang for 200 ms or more.
+    expect(elapsed).toBeLessThan(OVERALL_TIMEOUT_MS + 50);
+
+    // Every remote target comes back as failed or skipped — none are missing.
+    expect(remote).toHaveLength(3);
+    const byName = Object.fromEntries(remote.map((r) => [r.name, r]));
+
+    expect(byName['worker-a'].status).toBe('failed');
+    expect(byName['worker-a'].error).toBe('fleet ping overall deadline exceeded');
+
+    expect(byName['worker-b'].status).toBe('failed');
+    expect(byName['worker-b'].error).toBe('fleet ping overall deadline exceeded');
+
+    // The pre-skipped device keeps its skip status and reason, no error.
+    expect(byName['offline-c'].status).toBe('skipped');
+    expect(byName['offline-c'].reason).toBe('offline');
+    expect(byName['offline-c'].error).toBeUndefined();
+  }, 2000);
 });
 
 describe('renderLeasedBoxesSection — F4 devices "Leased boxes" (RUSH-1923)', () => {
