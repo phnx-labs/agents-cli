@@ -22,6 +22,7 @@ import { promisify } from 'util';
 import { getActiveSessions, findSessionFileForKind, type ActiveSession } from '../lib/session/active.js';
 import { gatherRemoteActive } from '../lib/session/remote-active.js';
 import { discoverSessions } from '../lib/session/discover.js';
+import { deriveShortId } from '../lib/session/short-id.js';
 import type { SessionMeta, SessionAgentId } from '../lib/session/types.js';
 import { dedupeByMachineSession, mergeLocalFirst, pickSessionInteractive } from './sessions.js';
 import { focusAction } from './focus.js';
@@ -104,7 +105,7 @@ function synthMeta(s: ActiveSession, self: string): SessionMeta {
   const filePath = remote ? '' : (findSessionFileForKind(s.kind, s.cwd, s.sessionId) ?? '');
   return {
     id: s.sessionId!,
-    shortId: s.sessionId!.slice(0, 8),
+    shortId: deriveShortId(s.sessionId!),
     agent: s.kind as SessionAgentId,
     timestamp: new Date(s.startedAtMs ?? Date.now()).toISOString(),
     filePath,

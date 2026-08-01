@@ -25,6 +25,7 @@ import { AGENTS, agentConfigDirName, getCliVersion } from '../agents.js';
 import { walkForFilesWithStat } from '../fs-walk.js';
 import { getConfigSymlinkVersion } from '../shims.js';
 import { SESSION_AGENTS } from './types.js';
+import { deriveShortId } from './short-id.js';
 import { extractSessionTopic } from './prompt.js';
 import { parseAntigravity } from './parse.js';
 import { extractPrUrl, detectWorktree, detectTicket, isPrCreateCommand, detectSpawnedTeam, isTicketCreateTool, extractCreatedTicket } from './state.js';
@@ -1141,7 +1142,7 @@ async function readClaudeMeta(
     const cwd = normalizeCwd(scan.cwd || '');
     meta = {
       id: sessionId,
-      shortId: sessionId.slice(0, 8),
+      shortId: deriveShortId(sessionId),
       agent: 'claude',
       timestamp: scan.timestamp,
       lastActivity: scan.lastActivity,
@@ -1171,7 +1172,7 @@ async function readClaudeMeta(
     const stat = safeStatSync(filePath);
     meta = {
       id: sessionId,
-      shortId: sessionId.slice(0, 8),
+      shortId: deriveShortId(sessionId),
       agent: 'claude',
       timestamp: stat ? stat.mtime.toISOString() : new Date().toISOString(),
       lastActivity: scan.lastActivity,
@@ -1443,7 +1444,7 @@ export async function readCodexMeta(
   const cwd = normalizeCwd(scan.cwd || '');
   const meta: SessionMeta = {
     id: sessionId,
-    shortId: sessionId.slice(0, 8),
+    shortId: deriveShortId(sessionId),
     agent: 'codex',
     // Codex `session_meta` only carries the start time; use file mtime when
     // it's newer so long-running sessions register as recently active.
@@ -1668,7 +1669,7 @@ function readGeminiMeta(
 
   const meta: SessionMeta = {
     id: sessionId,
-    shortId: sessionId.slice(0, 8),
+    shortId: deriveShortId(sessionId),
     agent: 'gemini',
     timestamp: startTime || (stat ? stat.mtime.toISOString() : new Date().toISOString()),
     lastActivity: lastTsMs !== undefined ? new Date(lastTsMs).toISOString() : undefined,
@@ -1822,7 +1823,7 @@ function readAntigravityMeta(
   const stat = safeStatSync(filePath);
   const meta: SessionMeta = {
     id: sessionId,
-    shortId: sessionId.slice(0, 8),
+    shortId: deriveShortId(sessionId),
     agent: 'antigravity',
     timestamp: stat ? stat.mtime.toISOString() : new Date().toISOString(),
     project: normalizedCwd ? path.basename(normalizedCwd) : undefined,
@@ -1969,7 +1970,7 @@ async function scanOpenCodeIncremental(): Promise<void> {
 
       const meta: SessionMeta = {
         id,
-        shortId: id.replace(/^ses_/, '').slice(0, 8),
+        shortId: deriveShortId(id, /^ses_/),
         agent: 'opencode',
         timestamp,
         lastActivity,
@@ -2040,7 +2041,7 @@ async function scanOpenClawIncremental(): Promise<void> {
       entries.push({
         meta: {
           id: `openclaw-${agentId}`,
-          shortId: agentId.slice(0, 8),
+          shortId: deriveShortId(agentId),
           agent: 'openclaw',
           timestamp: new Date().toISOString(),
           project: name,
@@ -2078,7 +2079,7 @@ async function scanOpenClawIncremental(): Promise<void> {
       entries.push({
         meta: {
           id: `openclaw-cron-${jobId}`,
-          shortId: jobId.slice(0, 8),
+          shortId: deriveShortId(jobId),
           agent: 'openclaw',
           timestamp: new Date().toISOString(),
           project: `${jobName} (${agentId || 'unknown'})`,
@@ -2175,7 +2176,7 @@ async function readRushMeta(
   const timestamp = scan.timestamp
     || (stat ? stat.mtime.toISOString() : new Date().toISOString());
 
-  const shortId = sessionId.replace(/^session_/, '').slice(0, 8);
+  const shortId = deriveShortId(sessionId, /^session_/);
 
   const meta: SessionMeta = {
     id: sessionId,
@@ -2341,7 +2342,7 @@ function readHermesMeta(filePath: string): { meta: SessionMeta; content: string 
       ? session.session_start
       : stat ? stat.mtime.toISOString() : new Date().toISOString();
 
-  const shortId = sessionId.replace(/^api-/, '').slice(0, 8);
+  const shortId = deriveShortId(sessionId, /^api-/);
   const model = typeof session.model === 'string' ? session.model : undefined;
   const platform = typeof session.platform === 'string' ? session.platform : undefined;
 
@@ -2466,7 +2467,7 @@ async function readDroidMeta(
   const cwd = normalizeCwd(scan.cwd || '');
   const meta: SessionMeta = {
     id: sessionId,
-    shortId: sessionId.slice(0, 8),
+    shortId: deriveShortId(sessionId),
     agent: 'droid',
     timestamp: scan.timestamp || (stat ? stat.mtime.toISOString() : new Date().toISOString()),
     lastActivity: scan.lastActivity,
@@ -3690,7 +3691,7 @@ export function readKimiMeta(filePath: string): { meta: SessionMeta; content: st
   const timestamp = updatedAt || createdAt
     || (stat ? stat.mtime.toISOString() : new Date().toISOString());
 
-  const shortId = sessionId.replace(/^session_/, '').slice(0, 8);
+  const shortId = deriveShortId(sessionId, /^session_/);
 
   // Try to infer project from session directory path
   // ~/.kimi-code/sessions/<workdir_hash>/session_<uuid>/
@@ -3880,7 +3881,7 @@ export function readGrokMeta(
 
   const meta: SessionMeta = {
     id: sessionId,
-    shortId: sessionId.slice(0, 8),
+    shortId: deriveShortId(sessionId),
     agent: 'grok',
     timestamp,
     lastActivity,
