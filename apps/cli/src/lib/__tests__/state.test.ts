@@ -25,7 +25,7 @@ describe('state paths', () => {
   // state.ts reads AGENTS_TEST_HOME first (RUSH-2042). In the test suite,
   // setup.ts sets AGENTS_TEST_HOME to a fork-private temp dir. These assertions
   // must compare against the effective home root, not os.homedir().
-  const effectiveHome = process.env.AGENTS_TEST_HOME ?? os.homedir();
+  const effectiveHome = process.env.AGENTS_TEST_HOME ?? process.env.HOME ?? os.homedir();
 
   it('keeps system resource directories under ~/.agents/.system', () => {
     const systemRoot = path.join(effectiveHome, '.agents', '.system');

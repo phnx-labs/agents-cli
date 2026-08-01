@@ -66,7 +66,7 @@ describe('isDaemonWedged', () => {
     writeDaemonPid(process.pid);
     const stale = new Date(Date.now() - 4 * 60_000).toISOString();
     // state.ts uses AGENTS_TEST_HOME (set by tests/setup.ts) so write to the same root (RUSH-2042).
-    const hbPath = path.join(process.env.AGENTS_TEST_HOME ?? os.homedir(), '.agents', '.cache', 'helpers', 'daemon', 'heartbeat.json');
+    const hbPath = path.join(process.env.AGENTS_TEST_HOME ?? process.env.HOME ?? os.homedir(), '.agents', '.cache', 'helpers', 'daemon', 'heartbeat.json');
     fs.mkdirSync(path.dirname(hbPath), { recursive: true });
     fs.writeFileSync(hbPath, JSON.stringify({ lastTick: stale, pid: process.pid }));
     expect(isDaemonWedged()).toBe(true);
@@ -101,7 +101,7 @@ describe('getDaemonStatus', () => {
     writeDaemonPid(process.pid);
     const stale = new Date(Date.now() - 4 * 60_000).toISOString();
     // state.ts uses AGENTS_TEST_HOME (set by tests/setup.ts) so write to the same root (RUSH-2042).
-    const hbPath = path.join(process.env.AGENTS_TEST_HOME ?? os.homedir(), '.agents', '.cache', 'helpers', 'daemon', 'heartbeat.json');
+    const hbPath = path.join(process.env.AGENTS_TEST_HOME ?? process.env.HOME ?? os.homedir(), '.agents', '.cache', 'helpers', 'daemon', 'heartbeat.json');
     fs.mkdirSync(path.dirname(hbPath), { recursive: true });
     fs.writeFileSync(hbPath, JSON.stringify({ lastTick: stale, pid: process.pid }));
     const s = getDaemonStatus();

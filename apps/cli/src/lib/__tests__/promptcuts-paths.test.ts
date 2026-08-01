@@ -14,7 +14,7 @@ import {
 
 describe('promptcuts path resolution', () => {
   // state.ts uses AGENTS_TEST_HOME first (RUSH-2042), so mirror that resolution.
-  const home = process.env.AGENTS_TEST_HOME ?? os.homedir();
+  const home = process.env.AGENTS_TEST_HOME ?? process.env.HOME ?? os.homedir();
 
   it('system promptcuts file lives in ~/.agents/.system/hooks/', () => {
     expect(getSystemPromptcutsPath()).toBe(
