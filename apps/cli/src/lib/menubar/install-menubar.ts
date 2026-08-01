@@ -65,6 +65,20 @@ function installedExecutablePath(): string {
   return path.join(installedAppPath(), 'Contents', 'MacOS', 'MenubarHelper');
 }
 
+/**
+ * Absolute path to the installed MenubarHelper executable if it exists on disk,
+ * else null. The desktop notifier (notify-desktop.ts) routes daemon
+ * notifications through this one-shot (`MenubarHelper --notify ...`) so they
+ * carry the agents-cli mark rather than the generic osascript icon. Null on
+ * non-darwin or when the helper is not installed (menu bar disabled, a Linux
+ * package, or a dev checkout without a built bundle).
+ */
+export function resolveInstalledMenubarExecutable(): string | null {
+  if (!onDarwin()) return null;
+  const exec = installedExecutablePath();
+  return fs.existsSync(exec) ? exec : null;
+}
+
 /** ~/Library/LaunchAgents/com.phnx-labs.agents-menubar.plist */
 function servicePlistPath(): string {
   return path.join(os.homedir(), 'Library', 'LaunchAgents', `${SERVICE_LABEL}.plist`);
