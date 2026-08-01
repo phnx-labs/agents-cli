@@ -273,6 +273,7 @@ async function resolveLinearProjects(sessions: SessionMeta[]): Promise<void> {
       try {
         const response = await fetch('https://api.linear.app/graphql', {
           method: 'POST',
+          signal: AbortSignal.timeout(3_000),
           headers: { Authorization: apiKey, 'Content-Type': 'application/json' },
           body: JSON.stringify({
             query: `query($id:String!){ issue(id:$id){ project{ name url } } }`,
