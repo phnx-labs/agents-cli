@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { effectiveMode } from './sessions-migrate.js';
+import { effectiveMode, rehydrateCommand } from './sessions-migrate.js';
 import { buildResumeCommand } from './sessions.js';
+import { AGENTS } from '../lib/agents.js';
+import type { AgentId } from '../lib/types.js';
 import { SESSION_AGENTS, type SessionMeta, type SessionAgentId } from '../lib/session/types.js';
 
 /** Minimal SessionMeta with a resolvable version, for the harness-parity gate. */
@@ -35,6 +37,18 @@ describe('effectiveMode — harness parity gate', () => {
   it('honors an explicit rehydrate request for a resumable agent (no forced downgrade flag)', () => {
     const r = effectiveMode(meta('claude'), 'rehydrate');
     expect(r).toEqual({ mode: 'rehydrate', downgraded: false });
+  });
+
+  it('rehydrateCommand uses each agent\'s real binary (cliCommand), not the session-agent id', () => {
+    // antigravity's executable is `agy`, not `antigravity` — launching the raw id
+    // on the target would fail with a shell error instead of rehydrating.
+    expect(rehydrateCommand(meta('antigravity'))[0]).toBe('agy');
+    expect(rehydrateCommand(meta('claude'))[0]).toBe('claude');
+    // Pin the whole set to the registry so a renamed binary can't drift silently.
+    for (const agent of SESSION_AGENTS) {
+      const expected = AGENTS[agent as AgentId]?.cliCommand ?? agent;
+      expect(rehydrateCommand(meta(agent))[0]).toBe(expected);
+    }
   });
 
   it('stays in lockstep with buildResumeCommand for EVERY session agent (the parity invariant)', () => {

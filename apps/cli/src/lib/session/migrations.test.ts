@@ -4,7 +4,7 @@
  * catching are ordering (latest wins), per-session filtering, ignoring a failed
  * hop, and surviving a corrupt/partial line.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';

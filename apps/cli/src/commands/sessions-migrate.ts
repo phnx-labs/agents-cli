@@ -32,6 +32,8 @@ import { spawnSync } from 'child_process';
 
 import type { SessionMeta } from '../lib/session/types.js';
 import type { ActiveSession } from '../lib/session/active.js';
+import { AGENTS } from '../lib/agents.js';
+import type { AgentId } from '../lib/types.js';
 import { getActiveSessions } from '../lib/session/active.js';
 import { discoverSessions, resolveSessionById } from '../lib/session/discover.js';
 import { buildResumeCommand } from './sessions.js';
@@ -526,7 +528,10 @@ async function resumeOnTarget(
  * non-resumable agent there is no faithful --resume, so we start the agent with
  * a prompt pointing it at the imported transcript path.
  */
-function rehydrateCommand(source: SessionMeta): string[] {
+export function rehydrateCommand(source: SessionMeta): string[] {
+  // Resolve the real executable — the session-agent id is not always the binary
+  // name (antigravity → `agy`), matching versionedAliasIfPresent/buildFallbackCommand.
+  const cli = AGENTS[source.agent as AgentId]?.cliCommand ?? source.agent;
   const origin = source.machine ? ` from ${source.machine}` : '';
   const prompt = [
     `You are continuing session ${source.shortId}, migrated to this machine${origin}.`,
@@ -535,7 +540,7 @@ function rehydrateCommand(source: SessionMeta): string[] {
     `use them so large tool outputs don't blow your context — skim the recent turns first,`,
     `widen only if you need to, then continue the work where it left off.`,
   ].join(' ');
-  return [source.agent, prompt];
+  return [cli, prompt];
 }
 
 async function sessionsMigrateAction(sessionId: string | undefined, options: MigrateOptions): Promise<void> {
@@ -606,10 +611,14 @@ async function sessionsMigrateAction(sessionId: string | undefined, options: Mig
 /** Stop the source tmux session (kill its tmux session by name via its socket). */
 async function stopSource(source: SessionMeta, active: ActiveSession | undefined): Promise<void> {
   const mux = active?.provenance?.mux;
-  const pane = mux?.pane ?? process.env.TMUX_PANE;
+  // Fail closed: only the SOURCE's own pane, from its active-session provenance.
+  // Never fall back to $TMUX_PANE — that is the invoking shell's pane, so a
+  // migrate run by explicit id from a different pane (where `active` didn't
+  // resolve) would otherwise kill the user's OWN session, not the source.
+  const pane = mux?.pane;
   const socket = mux?.socket;
   if (!pane) {
-    console.log(chalk.yellow('  Could not resolve the source tmux pane to stop it — leaving the source running.'));
+    console.log(chalk.yellow(`  Could not resolve ${source.shortId}'s own tmux pane — leaving it running (won't stop a pane not confirmed to be the source).`));
     return;
   }
   const name = resolveSessionNameForPane(pane, socket);
