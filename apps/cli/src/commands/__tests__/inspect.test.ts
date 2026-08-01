@@ -79,7 +79,6 @@ function run(home: string, args: string[], cwd: string = home) {
     cwd,
     env: {
       ...process.env,
-      AGENTS_TEST_HOME: home,
       HOME: home,
       PATH: `${path.join(home, 'bin')}${path.delimiter}${process.env.PATH || ''}`,
       AGENTS_SKIP_MIGRATION: '1',

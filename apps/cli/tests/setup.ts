@@ -1,25 +1,10 @@
 /**
- * Fork-level hermeticity (#910, RUSH-2042). vitest runs pool:'forks' — this
- * file executes in every fresh fork BEFORE the test file's imports, so the env
- * it pins is what state.ts / secrets/agent.ts / events.ts capture. Without it,
- * a suite run on a dev machine wrote test-fixture `secrets.get` events into the
- * user's real events log and reached the user's real secrets-agent broker
- * (wiping every unlocked bundle pre-#909).
- *
- * Home root (RUSH-2042): we pin HOME to a fork-private temp here, before any
- * import runs, so every ~/.agents/* path state.ts derives at module-load
- * resolves into the hermetic temp tree. In particular getDevicesRegistryPath()
- * points at <tmp>/.agents/.history/devices/registry.json — so fixture devices
- * written by device-registry tests can never reach the user's real registry.
- *
- * We pin HOME (not a fork-global AGENTS_TEST_HOME) deliberately: HOME-override
- * is the isolation mechanism tests already use, so pinning HOME keeps a per-test
- * `process.env.HOME = <tmp>` override working (a global AGENTS_TEST_HOME would
- * win over it and silently redirect those tests to the fork root). state.ts
- * still reads AGENTS_TEST_HOME ahead of HOME, so a test that wants a surgical
- * override without touching HOME can set it; individual test files that need
- * their own isolated registry (e.g. registry.test.ts, reachability.test.ts)
- * set it to their own mkdtemp before the dynamic import of any state consumer.
+ * Fork-level hermeticity (#910). vitest runs pool:'forks' — this file executes
+ * in every fresh fork BEFORE the test file's imports, so the env it pins is
+ * what state.ts / secrets/agent.ts / events.ts capture. Without it, a suite
+ * run on a dev machine wrote test-fixture `secrets.get` events into the user's
+ * real events log and reached the user's real secrets-agent broker (wiping
+ * every unlocked bundle pre-#909).
  *
  * These are the DEFAULT posture, not a cage: tests that need a specific
  * posture (a live temp broker, event-content assertions, usage-stamp checks)
@@ -31,22 +16,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterAll } from 'vitest';
 
-// Capture the REAL home BEFORE we override HOME — the leak tripwires below must
-// check the user's actual registry / events log, not the hermetic temp.
-const realHome = process.env.HOME ?? os.homedir();
-
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-vitest-'));
-
-// Home root: pin HOME to a fork-private temp so every ~/.agents/* path derived
-// in state.ts resolves inside the hermetic tree by default (RUSH-2042). Must be
-// set BEFORE any import chain reaches state.ts. Individual tests that need their
-// own isolated root still override HOME before a dynamic import (or set the
-// surgical AGENTS_TEST_HOME, which state.ts honors ahead of HOME) — exactly as
-// they do today, the saved "previous" value they restore being this hermetic
-// default. Pinning HOME (not a global AGENTS_TEST_HOME) keeps HOME-override the
-// single isolation mechanism, so tests that resolve state paths via a per-test
-// HOME are not silently redirected to a fork-global root.
-process.env.HOME = tmp;
 
 // Broker: pin the socket dir to a fork-private temp path so nothing in this
 // fork — nor any CLI subprocess it spawns with inherited env — can reach the
@@ -64,79 +34,52 @@ process.env.AGENTS_NO_USAGE_TRACK = '1';
 // sink themselves via _resetForTest, which takes precedence over this env.
 process.env.AGENTS_EVENTS_PATH = path.join(tmp, 'events.jsonl');
 
-// ─── Leak tripwires ───────────────────────────────────────────────────────────
-// (realHome was captured at the top, before HOME was overridden.)
+// Devices registry (RUSH-2042): redirect the device registry + ignore-list dir
+// to a fork-private temp so device-registry tests can never write fixture
+// devices (alpha, bravo, box, …) into the user's real ~/.agents/.history/
+// devices. state.ts's getDevicesDir() reads this at call time; a test that
+// wants its own isolated registry overrides AGENTS_DEVICES_DIR per-test. This
+// is the surgical mirror of AGENTS_EVENTS_PATH / AGENTS_SECRETS_AGENT_DIR — it
+// leaves HOME untouched (git and every other HOME consumer behave normally).
+process.env.AGENTS_DEVICES_DIR = path.join(tmp, 'devices');
 
-// Events leak: the REAL events log must not grow while this fork runs.
-// CI-only — on a dev machine live agents append to it concurrently.
-const realEventsLog = path.join(realHome, '.agents', 'events.jsonl');
-const eventsLogSizeBefore = fs.existsSync(realEventsLog) ? fs.statSync(realEventsLog).size : 0;
+// Leak tripwire: the REAL events log must not grow while this fork runs.
+// CI-only — on a dev machine live agents append to it concurrently, so the
+// check would false-positive locally; CI homes are quiet.
+const realEventsLog = path.join(process.env.HOME ?? os.homedir(), '.agents', 'events.jsonl');
+const sizeBefore = fs.existsSync(realEventsLog) ? fs.statSync(realEventsLog).size : 0;
 
-// Device registry leak (RUSH-2042): the REAL device registry must not be
-// written during the suite — fixture device names (alpha, bravo, box, …) must
-// never appear in the user's real fleet. Checked on every run (not CI-only)
-// because the damage is silent and long-lasting: leaked fixtures pollute
-// `agents devices list` and `fleet ping` until manually removed.
-const realDevicesRegistry = path.join(realHome, '.agents', '.history', 'devices', 'registry.json');
+// Leak tripwire (RUSH-2042): the REAL device registry must not change while
+// this fork runs. On CI (no concurrent fleet writers) ANY change — a new,
+// modified, or removed entry — is a hermeticity breach; a full content compare
+// needs no fixture-name allowlist to stay in sync. On a dev machine live fleet
+// agents may legitimately update it mid-run, so the check is CI-only.
+const realDevicesRegistry = path.join(process.env.HOME ?? os.homedir(), '.agents', '.history', 'devices', 'registry.json');
 const devicesRegistryBefore: string | null = fs.existsSync(realDevicesRegistry)
   ? fs.readFileSync(realDevicesRegistry, 'utf-8')
   : null;
 
-// Known fixture device names from the test suite. Any of these appearing in
-// the real registry after the suite indicates a hermeticity breach.
-const FIXTURE_DEVICE_NAMES = new Set([
-  'alpha', 'bravo', 'charlie', 'delta', 'echo',
-  'box', 'box-a', 'box-b', 's1', 'worker',
-  'gpu-box', 'gpu-dev', 'winbox', 'test-cockpit',
-  'iphone', 'ipad', 'my-iphone', 'my-ipad',
-  'mac-mini-test', 'win-mini-test',
-]);
-
 afterAll(() => {
   try {
     if (process.env.CI) {
-      // Events leak check (CI-only — dev machines have concurrent appenders).
-      const eventsLogSizeAfter = fs.existsSync(realEventsLog) ? fs.statSync(realEventsLog).size : 0;
-      if (eventsLogSizeAfter > eventsLogSizeBefore) {
+      const sizeAfter = fs.existsSync(realEventsLog) ? fs.statSync(realEventsLog).size : 0;
+      if (sizeAfter > sizeBefore) {
         throw new Error(
-          `hermeticity leak (#910): the real events log grew by ${eventsLogSizeAfter - eventsLogSizeBefore} bytes ` +
+          `hermeticity leak (#910): the real events log grew by ${sizeAfter - sizeBefore} bytes ` +
           `during this test file (${realEventsLog}). Some code path bypassed AGENTS_EVENTS_PATH.`,
         );
       }
-    }
 
-    // Device registry leak check (RUSH-2042) — always, not CI-only.
-    if (fs.existsSync(realDevicesRegistry)) {
-      const devicesRegistryAfter = fs.readFileSync(realDevicesRegistry, 'utf-8');
+      const devicesRegistryAfter = fs.existsSync(realDevicesRegistry)
+        ? fs.readFileSync(realDevicesRegistry, 'utf-8')
+        : null;
       if (devicesRegistryAfter !== devicesRegistryBefore) {
-        // We only reach here because the REAL registry content changed during the run.
-        if (process.env.CI) {
-          // No concurrent fleet writers on CI, so ANY change is a hermeticity breach —
-          // a newly-added device, a MODIFIED existing entry, or a removed one. A full
-          // content comparison (not a name allowlist) catches the corrupt-an-existing-
-          // real-device case too, and needs no FIXTURE_DEVICE_NAMES list to stay in sync.
-          throw new Error(
-            `hermeticity leak (RUSH-2042): the real device registry (${realDevicesRegistry}) ` +
-            `changed during the suite — a test wrote to it instead of the hermetic temp home. ` +
-            `Set AGENTS_TEST_HOME (or override HOME) in the test file before importing any state consumer.`,
-          );
-        }
-        // Dev machine: live fleet agents may legitimately add/update real devices during
-        // the run, so we can't treat any change as a leak. Best-effort: flag only newly-
-        // added keys matching known fixture names (FIXTURE_DEVICE_NAMES is that allowlist).
-        let parsedBefore: Record<string, unknown> = {};
-        let parsedAfter: Record<string, unknown> = {};
-        try { parsedBefore = JSON.parse(devicesRegistryBefore ?? '{}'); } catch { /* ok */ }
-        try { parsedAfter = JSON.parse(devicesRegistryAfter); } catch { /* ok */ }
-        const newKeys = Object.keys(parsedAfter).filter((k) => !(k in parsedBefore));
-        const leaked = newKeys.filter((name) => FIXTURE_DEVICE_NAMES.has(name));
-        if (leaked.length > 0) {
-          throw new Error(
-            `hermeticity leak (RUSH-2042): fixture device(s) [${leaked.join(', ')}] were written ` +
-            `into the real device registry (${realDevicesRegistry}) during the suite. ` +
-            `Set AGENTS_TEST_HOME (or override HOME) in the test file before importing any state consumer.`,
-          );
-        }
+        throw new Error(
+          `hermeticity leak (RUSH-2042): the real device registry (${realDevicesRegistry}) ` +
+          `changed during this test file — a test wrote to it instead of the fork-private ` +
+          `AGENTS_DEVICES_DIR. Set AGENTS_DEVICES_DIR (or use the setup default) before ` +
+          `importing any state consumer.`,
+        );
       }
     }
   } finally {

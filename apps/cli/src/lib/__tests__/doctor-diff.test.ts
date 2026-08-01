@@ -48,7 +48,7 @@ function runDiff(cwd: string, agent: string, version: string, kinds?: string[]):
   `;
   const out = execFileSync('bun', ['-e', script], {
     cwd: process.cwd(),
-    env: { ...process.env, AGENTS_TEST_HOME: testHome, HOME: testHome },
+    env: { ...process.env, HOME: testHome },
     stdio: ['ignore', 'pipe', 'inherit'],
   }).toString('utf-8');
   return JSON.parse(out);

@@ -20,6 +20,7 @@ import * as os from 'os';
 import * as path from 'path';
 import Database from '../../sqlite.js';
 import { parseAntigravity, detectAgent, parseSession } from '../parse.js';
+import { extractRecentDirectoriesTouched, extractTodoProgressFromEvents } from '../state.js';
 
 // ── Minimal protobuf wire encoder (mirror of the decoder under test) ────────
 
@@ -116,6 +117,7 @@ describe('parseAntigravity', () => {
     ]);
 
     const events = parseAntigravity(dbPath);
+    expect(extractTodoProgressFromEvents(events)).toBeUndefined();
 
     // Deduped: 3 steps -> 2 events.
     expect(events).toHaveLength(2);
@@ -126,6 +128,7 @@ describe('parseAntigravity', () => {
     expect(bash.tool).toBe('Bash');
     expect(bash.command).toBe('echo hi');
     expect(bash.content).toBe('Run echo');
+    expect(extractRecentDirectoriesTouched(events, '/fallback')).toEqual(['/work']);
 
     const read = events[1];
     expect(read.tool).toBe('Read');

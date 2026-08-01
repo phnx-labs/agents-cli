@@ -20,7 +20,6 @@ import * as path from 'path';
 // Isolate the sessions DB under a temp HOME before db.js/state.js capture the
 // path at import time.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-resolve-'));
-process.env.AGENTS_TEST_HOME = TEST_HOME;
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 

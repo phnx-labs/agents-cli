@@ -484,6 +484,10 @@ CLEAR_EVENTS = {
     "Stop",
     "SessionEnd",
 }
+# Codex emits a PermissionRequest event (not Claude's Notification) when it
+# blocks on an approval prompt. Claude never fires PermissionRequest, so the
+# same script handles both: PermissionRequest maps to an approval-class block
+# with a high cost-of-delay so 'agents feed --dispatch' pages it as urgent.
 
 
 def read_json(path):
@@ -534,6 +538,19 @@ def main():
     hook_event = payload.get("hook_event_name", "PreToolUse")
 
     if hook_event in CLEAR_EVENTS:
+        # A matcher-less PostToolUse clear (registered for Codex so an approved
+        # tool clears its approval card) must NOT wipe an open AskUserQuestion
+        # while an unrelated tool runs mid-question -- those are cleared only by
+        # the AskUserQuestion-matched PostToolUse. So on PostToolUse, keep a
+        # 'question' block; approval/notification blocks clear once the tool runs.
+        if hook_event == "PostToolUse":
+            try:
+                with open(target) as existing_file:
+                    existing = json.load(existing_file)
+                if existing.get("kind") == "question" and payload.get("tool_name") != "AskUserQuestion":
+                    return
+            except Exception:
+                pass
         try:
             os.unlink(target)
         except FileNotFoundError:
@@ -578,6 +595,7 @@ def main():
         return
 
     notification_type = None
+    codex_approval = False
     if hook_event == "Notification":
         notification_type = payload.get("notification_type", "")
         if notification_type not in WAITING_NOTIFICATION_TYPES:
@@ -602,6 +620,34 @@ def main():
             "multiSelect": False,
         }]
         kind = "notification"
+    elif hook_event == "PermissionRequest":
+        # Codex approval prompt. The payload mirrors PreToolUse (tool_name,
+        # tool_input) but carries no questions -- Codex is asking to run a tool,
+        # not asking the operator a multiple-choice question. Publish it as a
+        # notification-kind approval block naming the tool so the feed and the
+        # phone notifier can surface it, and so the Factory extension can bridge
+        # it to a VS Code notification.
+        tool_name = payload.get("tool_name") or "a tool"
+        tool_input = payload.get("tool_input", {})
+        command = ""
+        if isinstance(tool_input, dict):
+            command = (
+                tool_input.get("command")
+                or tool_input.get("cmd")
+                or tool_input.get("path")
+                or ""
+            )
+            if isinstance(command, list):
+                command = " ".join(str(c) for c in command)
+        detail = f": {command}" if command else ""
+        normalized_questions = [{
+            "text": f"Codex needs approval to run {tool_name}{detail}",
+            "header": "Approval needed",
+            "multiSelect": False,
+        }]
+        kind = "notification"
+        notification_type = "permission_prompt"
+        codex_approval = True
     else:
         tool_input = payload.get("tool_input", {})
         questions = tool_input.get("questions", [])
@@ -671,9 +717,21 @@ def main():
     if notification_type:
         block["notificationType"] = notification_type
 
+    # A Codex PermissionRequest is a real approval gate: mark it approval-class
+    # with a high cost-of-delay so 'agents feed --dispatch' classifies it urgent
+    # (isPhoneUrgent gates on costOfDelay >= phoneNotifyThreshold, default
+    # 'medium') and pages the phone. A plain 'deny' is the safe default.
+    if codex_approval:
+        block["blockClass"] = "approval"
+        block["costOfDelay"] = "high"
+        block["safeDefault"] = "deny"
+
     # Optional multi-operator control metadata passed by the agent in the
-    # AskUserQuestion tool_input. Defaults keep the existing behavior.
-    controls = payload.get("tool_input", {}) if hook_event != "Notification" else {}
+    # AskUserQuestion tool_input. Defaults keep the existing behavior. A Codex
+    # PermissionRequest carries tool ARGS in tool_input (command/path), not
+    # operator controls, so it is excluded here -- its class/cost is stamped
+    # above from codex_approval.
+    controls = payload.get("tool_input", {}) if hook_event not in ("Notification", "PermissionRequest") else {}
     block_class = controls.get("blockClass") if isinstance(controls, dict) else None
     if block_class in ("approval", "decision"):
         block["blockClass"] = block_class
@@ -743,6 +801,16 @@ export const FEED_NOTIFICATION_HOOK_MANIFEST = {
   timeout: 5,
 };
 
+// Codex fires PermissionRequest (not Claude's Notification) when it blocks on an
+// approval prompt. The same script handles it, publishing a high-cost approval
+// block so the feed dispatch pages the phone. PermissionRequest has no matcher.
+export const FEED_PERMISSION_HOOK_MANIFEST = {
+  name: 'feed-publish-permission',
+  events: ['PermissionRequest'],
+  script: '10-feed-publish.py',
+  timeout: 5,
+};
+
 export const FEED_ANSWERED_HOOK_MANIFEST = {
   name: 'feed-clear-answered',
   events: ['PostToolUse'],
@@ -787,28 +855,51 @@ export function ensureFeedPublishHook(userAgentsDir: string = getUserAgentsDir()
     }
     const desiredHooks: Record<string, Record<string, unknown>> = {
       'feed-publish': {
-        agents: ['claude'],
+        agents: ['claude', 'codex'],
         events: ['PreToolUse'],
         matcher: 'AskUserQuestion',
         script: '10-feed-publish.py',
         timeout: 5,
       },
       'feed-publish-notification': {
-        agents: ['claude'],
+        agents: ['claude', 'codex'],
         events: ['Notification'],
         matcher: 'permission_prompt|idle_prompt|elicitation_dialog',
         script: '10-feed-publish.py',
         timeout: 5,
       },
+      // Codex-specific approval gate: Codex emits PermissionRequest (Claude does
+      // not), so this hook is where a blocked Codex agent surfaces to the feed.
+      'feed-publish-permission': {
+        agents: ['claude', 'codex'],
+        events: ['PermissionRequest'],
+        script: '10-feed-publish.py',
+        timeout: 5,
+      },
       'feed-clear-answered': {
-        agents: ['claude'],
+        agents: ['claude', 'codex'],
         events: ['PostToolUse'],
         matcher: 'AskUserQuestion',
         script: '10-feed-publish.py',
         timeout: 5,
       },
+      // Matcher-less PostToolUse clear: after Codex runs an approved tool, the
+      // approval card is stale, so clear it. Codex-only on purpose -- Claude
+      // never fires PermissionRequest, so it has no approval card to clear here,
+      // and a matcher-less PostToolUse for Claude would (1) re-run the script on
+      // every tool completion and (2) wipe Claude's notification-kind blocks
+      // (permission_prompt/idle_prompt/elicitation_dialog) the moment any later
+      // tool runs, instead of letting them persist to Stop/SessionEnd like they
+      // did before RUSH-2039. Registering it for codex alone keeps Claude's
+      // card lifetime exactly as it was.
+      'feed-clear-permission': {
+        agents: ['codex'],
+        events: ['PostToolUse'],
+        script: '10-feed-publish.py',
+        timeout: 5,
+      },
       'feed-clear-lifecycle': {
-        agents: ['claude'],
+        agents: ['claude', 'codex'],
         events: ['Stop', 'UserPromptSubmit', 'SessionEnd'],
         script: '10-feed-publish.py',
         timeout: 5,

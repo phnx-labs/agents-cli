@@ -18,7 +18,9 @@ import { syncAllProjectRoutines } from './routines-project.js';
 import { JobScheduler } from './scheduler.js';
 import { MonitorEngine } from './monitors/engine.js';
 import { executeJobDetached, monitorRunningJobs } from './runner.js';
-import { detectOverdueJobs, notifyOverdue, notifyDesktop } from './overdue.js';
+import { detectOverdueJobs, notifyOverdue } from './overdue.js';
+import { notifyDesktop } from './menubar/notify-desktop.js';
+import { notifyRoutineStart, notifyRoutineFinish, notifyRoutineStartFailed } from './routine-notify.js';
 import { BrowserService } from './browser/service.js';
 import { BrowserIPCServer } from './browser/ipc.js';
 import { readAndResolveBundleEnv } from './secrets/bundles.js';
@@ -341,10 +343,11 @@ export async function runDaemon(): Promise<void> {
         'No Claude OAuth token available — Claude routine runs will fail auth on this host. ' +
           'Restart the daemon with the keychain unlocked, or unlock the `claude` secrets bundle.',
       );
-      notifyDesktop(
-        'agents daemon: no Claude credential',
-        'Claude routines will fail auth on this host. Restart the daemon with the keychain unlocked.',
-      );
+      notifyDesktop({
+        title: 'agents daemon: no Claude credential',
+        body: 'Claude routines will fail auth on this host. Restart the daemon with the keychain unlocked.',
+        action: 'routines:list',
+      });
     }
   }
 
@@ -387,11 +390,27 @@ export async function runDaemon(): Promise<void> {
         ? `workflow: ${config.workflow}`
         : `agent: ${config.agent}`;
     log('INFO', `Triggering job '${config.name}' (${jobLabel})`);
+    // RUSH-2030: branded desktop notification on start (agent/workflow routines;
+    // suppressed for command housekeeping). Finish/output is fired from the
+    // onFinish hook below — executeJobDetached finalizes the run in-process, so
+    // the monitor tick never sees the live transition. Never let a notification
+    // failure break the trigger.
+    try { notifyRoutineStart(config); } catch { /* best-effort */ }
     try {
-      const meta = await executeJobDetached(config);
+      const meta = await executeJobDetached(config, {
+        onFinish: (final) => {
+          try { notifyRoutineFinish(final); } catch { /* best-effort */ }
+        },
+      });
       log('INFO', `Job '${config.name}' spawned (run: ${meta.runId}, PID: ${meta.pid})`);
     } catch (err) {
-      log('ERROR', `Job '${config.name}' failed to spawn: ${(err as Error).message}`);
+      const message = (err as Error).message;
+      log('ERROR', `Job '${config.name}' failed to spawn: ${message}`);
+      // RUSH-2030: the START ping already fired unconditionally above. A pre-spawn
+      // failure produces no run record and thus no onFinish, so send a synthetic
+      // "failed to start" finish here — otherwise the user is left with an orphaned
+      // "Routine started" and never told it failed.
+      try { notifyRoutineStartFailed(config, message); } catch { /* best-effort */ }
     }
   });
 

@@ -14,7 +14,6 @@ import type { HostTask } from './tasks.js';
 // modules via a top-level `await import` (which runs after it) — the same
 // hermetic pattern as session/__tests__/db.test.ts.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-hostsession-'));
-process.env.AGENTS_TEST_HOME = TEST_HOME;
 process.env.HOME = TEST_HOME;
 
 const { hostSessionMeta, registerHostSession, registerInteractiveHostSession, captureRemoteSessionId } =

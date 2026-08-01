@@ -511,7 +511,7 @@ describe('startDetached (integration: daemon stays alive)', () => {
     const endpoint = ipcEndpoint(socketPath);
     const daemonLog = path.join(tmpHome, '.agents', '.cache', 'helpers', 'daemon', 'logs.jsonl');
 
-    const childEnv = { ...process.env, AGENTS_TEST_HOME: tmpHome, HOME: tmpHome };
+    const childEnv = { ...process.env, HOME: tmpHome };
     delete childEnv.CLAUDE_CODE_OAUTH_TOKEN;
 
     const { pid } = startDetached({ agentsBin: DIST_ENTRY, logPath, env: childEnv });
@@ -577,7 +577,7 @@ describe('daemon single-instance (#414)', () => {
     execFileSync('git', ['init', '-q', systemDir]);
 
     const pidFile = path.join(tmpHome, '.agents', '.cache', 'helpers', 'daemon', 'daemon.pid');
-    const childEnv = { ...process.env, AGENTS_TEST_HOME: tmpHome, HOME: tmpHome };
+    const childEnv = { ...process.env, HOME: tmpHome };
     delete childEnv.CLAUDE_CODE_OAUTH_TOKEN;
 
     const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };

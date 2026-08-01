@@ -67,7 +67,7 @@ function runInHome(body: string): Record<string, unknown> {
   // test breaks. Setting both keeps this subprocess hermetic regardless.
   const out = execFileSync('bun', ['--eval', script], {
     cwd: repoRoot,
-    env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home, AGENTS_REAL_HOME: home },
+    env: { ...process.env, HOME: home, AGENTS_REAL_HOME: home },
     encoding: 'utf-8',
   });
   return JSON.parse(out.trim().split('\n').at(-1) ?? '{}');

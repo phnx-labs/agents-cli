@@ -329,6 +329,26 @@ export function parseExecEnv(entries: string[]): Record<string, string> | undefi
 }
 
 /**
+ * Resolve the launch id a run exports as `AGENT_LAUNCH_ID`.
+ *
+ * The launch id is the stable correlation key the SessionStart hook records
+ * alongside the agent's real session id (terminals/sessions/<pid>.json), so it
+ * is what maps a launch to its exact session even when the hook runs under a
+ * different pid (tmux pane leaf / cmd.exe wrapper) — and, across an SSH hop, what
+ * lets a `--host` launcher resolve the remote-coined id for agents that never
+ * accept a forced `--session-id`.
+ *
+ * ADOPT a caller-supplied `AGENT_LAUNCH_ID` (a `--host` launcher forwards one via
+ * `--env` so it controls the key end-to-end); MINT a fresh one otherwise (every
+ * local run, which passes none). A malformed inbound value is ignored in favour
+ * of a fresh mint — the key must be a real correlation id, never an empty string.
+ */
+export function resolveLaunchId(envLaunchId: string | undefined): string {
+  const inbound = envLaunchId?.trim();
+  return inbound ? inbound : randomUUID();
+}
+
+/**
  * Build the process environment for an agent invocation.
  * Pins CLAUDE_CONFIG_DIR for Claude, CODEX_HOME for Codex, and COPILOT_HOME
  * for GitHub Copilot; strips the other agents' env vars so they don't leak
@@ -1372,15 +1392,19 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
   // timeout. Spend is recorded to the shared ledger in the close handler. The
   // watcher is dormant (and zero-cost) when no caps are configured.
   const cwd = options.cwd || process.cwd();
-  // Mint the launch id once. It doubles as the budget watcher's run id AND is
+  // Resolve the launch id once. It doubles as the budget watcher's run id AND is
   // exported to the child as AGENT_LAUNCH_ID, so the agent's SessionStart hook
   // records the SAME id in its own state file (terminals/sessions/<pid>.json).
   // That id is the join key that reconciles this launch's pid-registry entry
   // with the hook's authoritative session id even when the hook runs under a
   // different pid (tmux pane leaf / cmd.exe wrapper) — see pid-registry.ts and
-  // session/hook-sessions.ts. Injected into options.env so every downstream env
-  // build (the bare spawn below AND the tmux env prefix in runInTmux) carries it.
-  const launchId = randomUUID();
+  // session/hook-sessions.ts. ADOPT a launch id a `--host` launcher already
+  // forwarded (via `--env AGENT_LAUNCH_ID=…`) so ONE correlation key spans the
+  // SSH hop and the launcher can resolve this run's real session id for every
+  // agent, not just Claude (RUSH-2034); mint a fresh one for every local run.
+  // Injected into options.env so every downstream env build (the bare spawn
+  // below AND the tmux env prefix in runInTmux) carries it.
+  const launchId = resolveLaunchId(options.env?.AGENT_LAUNCH_ID);
   const runId = launchId;
   options = { ...options, env: { ...options.env, AGENT_LAUNCH_ID: launchId } };
   const watcherState = await setupBudgetWatcher(options, cwd, runId);

@@ -98,4 +98,20 @@ describe('readUnifiedEvents', () => {
     }
     expect(readUnifiedEvents({ activityRoot, limit: 3 })).toHaveLength(3);
   });
+
+  it('carries checklist activity events into the unified stream', () => {
+    const { activityRoot } = setup();
+    appendActivityEvent(
+      { ts: new Date(Date.now() - 1000).toISOString(), event: 'task.completed', sessionId: 's-check', mailboxId: 's-check', host: 'h', runtime: 'headless', agent: 'claude', detail: 'Write tests 2/3 done' },
+      activityRoot,
+    );
+    appendActivityEvent(
+      { ts: new Date(Date.now() - 2000).toISOString(), event: 'checklist.created', sessionId: 's-check', mailboxId: 's-check', host: 'h', runtime: 'headless', agent: 'claude', detail: '3 tasks' },
+      activityRoot,
+    );
+    const events = readUnifiedEvents({ activityRoot, eventTypes: ['task.completed', 'checklist.created'] });
+    expect(events.map((e) => e.event)).toEqual(['task.completed', 'checklist.created']);
+    expect(events[0].detail).toBe('Write tests 2/3 done');
+    expect(events[0].module).toBe('activity');
+  });
 });

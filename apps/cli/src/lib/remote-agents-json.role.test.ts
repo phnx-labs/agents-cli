@@ -11,7 +11,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-fanout-role-'));
-process.env.AGENTS_TEST_HOME = TEST_HOME;
+process.env.HOME = TEST_HOME;
 
 const { upsertDevice } = await import('./devices/registry.js');
 const { gatherRemoteAgentsJson } = await import('./remote-agents-json.js');

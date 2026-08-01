@@ -5,7 +5,6 @@ import * as path from 'path';
 
 // Isolate the cache under a temp HOME before state.js captures HOME at import.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-runnames-'));
-process.env.AGENTS_TEST_HOME = TEST_HOME;
 process.env.HOME = TEST_HOME;
 
 const { recordRunName, buildRunNameMap, runNamesDir } = await import('./run-names.js');

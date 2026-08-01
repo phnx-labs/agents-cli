@@ -17,14 +17,14 @@ const HARNESS = path.join(__dirname, '_harness.ts');
 function buildRaw(fx: Fixture, env: Record<string, string> = {}): { permissions: { groups: Record<string, unknown>; permissionPreset: string | null } } {
   const out = execFileSync('bun', [HARNESS, JSON.stringify({
     cmd: 'build', agent: 'claude', version: '0.0.0-test', cwd: fx.projectRoot
-  })], { env: { ...process.env, AGENTS_TEST_HOME: fx.home, HOME: fx.home, ...env }, encoding: 'utf-8' });
+  })], { env: { ...process.env, HOME: fx.home, ...env }, encoding: 'utf-8' });
   return JSON.parse(out).manifest;
 }
 
 function isStaleEnv(fx: Fixture, env: Record<string, string> = {}): boolean {
   const out = execFileSync('bun', [HARNESS, JSON.stringify({
     cmd: 'isStale', agent: 'claude', version: '0.0.0-test', cwd: fx.projectRoot
-  })], { env: { ...process.env, AGENTS_TEST_HOME: fx.home, HOME: fx.home, ...env }, encoding: 'utf-8' });
+  })], { env: { ...process.env, HOME: fx.home, ...env }, encoding: 'utf-8' });
   return JSON.parse(out).stale;
 }
 
@@ -35,7 +35,7 @@ function detectCopilotPermissions(fx: Fixture, versionHome: string, cwd: string)
     version: '0.0.0-test',
     versionHome,
     cwd,
-  })], { env: { ...process.env, AGENTS_TEST_HOME: fx.home, HOME: fx.home }, encoding: 'utf-8' });
+  })], { env: { ...process.env, HOME: fx.home }, encoding: 'utf-8' });
   return JSON.parse(out).names;
 }
 

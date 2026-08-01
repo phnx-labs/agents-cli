@@ -33,7 +33,6 @@ function runAgents(args: string[], home: string) {
     cwd: path.resolve('.'),
     env: {
       ...process.env,
-      AGENTS_TEST_HOME: home,
       HOME: home,
       AGENTS_SKIP_MIGRATION: '1',
       NODE_NO_WARNINGS: '1',

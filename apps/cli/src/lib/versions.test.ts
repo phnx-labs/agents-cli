@@ -45,7 +45,7 @@ function runVersionSync(home: string, expression: string): unknown {
     const result = ${expression};
     console.log(JSON.stringify(result));
   `], {
-    env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
+    env: { ...process.env, HOME: home },
     encoding: 'utf-8',
   });
 
@@ -69,7 +69,7 @@ function runReconcile(home: string, agent: string, installedVersion: string): st
       console.log(JSON.stringify(result));
     })();
   `], {
-    env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
+    env: { ...process.env, HOME: home },
     encoding: 'utf-8',
   });
   expect(child.status, child.stderr).toBe(0);
@@ -141,7 +141,7 @@ function runReconcileForAgent(home: string, agent: string, fakeBinDir: string): 
     (async () => { await reconcileStaleLatestForAgent(${JSON.stringify(agent)}); })();
   `], {
     // Prepend the fake-bin dir so `droid --version` resolves to our stub.
-    env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home, PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH}` },
+    env: { ...process.env, HOME: home, PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH}` },
     encoding: 'utf-8',
   });
   expect(child.status, child.stderr).toBe(0);
@@ -576,7 +576,7 @@ describe('version resource sync path handling', () => {
       upsertResourceProfilePreset('work', { plugins: ['agents'], skills: ['*', '!debug'] });
       setActiveResourceProfile('work');
       console.log(JSON.stringify(getAvailableResources(home)));
-    `], { env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home }, encoding: 'utf-8' });
+    `], { env: { ...process.env, HOME: home }, encoding: 'utf-8' });
 
     expect(child.status, child.stderr).toBe(0);
     const result = JSON.parse(child.stdout.trim()) as { plugins: string[]; skills: string[] };
@@ -605,7 +605,7 @@ describe('version resource sync path handling', () => {
       upsertResourceProfilePreset('work', { plugins: ['agents'], skills: ['user:routines'] });
       setActiveResourceProfile('work');
       console.log(JSON.stringify(getAvailableResources(${JSON.stringify(home)})));
-    `], { env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home }, encoding: 'utf-8' });
+    `], { env: { ...process.env, HOME: home }, encoding: 'utf-8' });
 
     expect(child.status, child.stderr).toBe(0);
     const result = JSON.parse(child.stdout.trim()) as { plugins: string[]; skills: string[] };
@@ -662,7 +662,7 @@ describe('version resource sync path handling', () => {
       const wildcard = getAvailableResources(project);
 
       console.log(JSON.stringify({ exact, wildcard }));
-    `], { env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home }, encoding: 'utf-8' });
+    `], { env: { ...process.env, HOME: home }, encoding: 'utf-8' });
 
     expect(child.status, child.stderr).toBe(0);
     const result = JSON.parse(child.stdout.trim()) as {
@@ -794,7 +794,7 @@ function runInstallVersion(home: string, agent: string, version: string, extraPa
   `], {
     env: {
       ...process.env,
-      AGENTS_TEST_HOME: home, HOME: home,
+      HOME: home,
       ...(extraPathDir ? { PATH: `${extraPathDir}${path.delimiter}${process.env.PATH}` } : {}),
     },
     encoding: 'utf-8',
@@ -873,7 +873,7 @@ function runInstallVersionWithScript(
   `], {
     env: {
       ...process.env,
-      AGENTS_TEST_HOME: home, HOME: home,
+      HOME: home,
       ...(extraPathDir ? { PATH: `${extraPathDir}${path.delimiter}${process.env.PATH}` } : {}),
     },
     encoding: 'utf-8',
@@ -935,7 +935,7 @@ function runResolveAlias(home: string, agent: string, raw: string | undefined): 
     const r = resolveVersionAlias(${JSON.stringify(agent)}, ${JSON.stringify(raw ?? null)});
     console.log(JSON.stringify({ v: r === undefined ? null : r }));
   `], {
-    env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
+    env: { ...process.env, HOME: home },
     encoding: 'utf-8',
   });
   expect(child.status, child.stderr).toBe(0);
@@ -1026,7 +1026,7 @@ describe('resolveVersionAliasLoose — @any', () => {
         looseAny: resolveVersionAliasLoose('claude', 'any') ?? null,
         strictDefault: resolveVersionAlias('claude', 'default') ?? null,
       }));
-    `], { env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home }, encoding: 'utf-8' });
+    `], { env: { ...process.env, HOME: home }, encoding: 'utf-8' });
     expect(child.status, child.stderr).toBe(0);
     expect(JSON.parse(child.stdout.trim())).toEqual({ strictAny: null, looseAny: null, strictDefault: null });
   });
@@ -1044,7 +1044,7 @@ describe('buildRepoScopedSelection — agents sync <agent> --repo <name>', () =>
       import { buildRepoScopedSelection } from ${JSON.stringify(moduleUrl)};
       const home = ${JSON.stringify(home)};
       console.log(JSON.stringify(buildRepoScopedSelection(${JSON.stringify(repo)}, home)));
-    `], { env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home }, encoding: 'utf-8' });
+    `], { env: { ...process.env, HOME: home }, encoding: 'utf-8' });
     expect(child.status, child.stderr).toBe(0);
     return JSON.parse(child.stdout.trim());
   }
@@ -1122,7 +1122,7 @@ describe('unionResourceSelections + mergeRepoScopedSelections — interactive mu
       import * as V from ${JSON.stringify(moduleUrl)};
       const home = ${JSON.stringify(home)};
       console.log(JSON.stringify(${expr}));
-    `], { env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home }, encoding: 'utf-8' });
+    `], { env: { ...process.env, HOME: home }, encoding: 'utf-8' });
     expect(child.status, child.stderr).toBe(0);
     return JSON.parse(child.stdout.trim());
   }
@@ -1214,7 +1214,7 @@ function runNamedExport(home: string, importName: string, callExpr: string): unk
     import { ${importName} } from ${JSON.stringify(moduleUrl)};
     const home = ${JSON.stringify(home)};
     console.log(JSON.stringify(${callExpr}));
-  `], { env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home }, encoding: 'utf-8' });
+  `], { env: { ...process.env, HOME: home }, encoding: 'utf-8' });
   expect(child.status, child.stderr).toBe(0);
   return JSON.parse(child.stdout.trim());
 }
@@ -1294,7 +1294,7 @@ describe('removeVersion — default reassignment when removing the pinned defaul
       // removeVersion prints a human notice to stdout; tag the machine-readable
       // result so the parent can pick it out of the surrounding output.
       console.log('__RESULT__' + JSON.stringify({ removed, defaultAfter: getGlobalDefault('claude') }));
-    `], { env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home }, encoding: 'utf-8' });
+    `], { env: { ...process.env, HOME: home }, encoding: 'utf-8' });
     expect(child.status, child.stderr).toBe(0);
     const line = child.stdout.split('\n').find((l) => l.startsWith('__RESULT__'));
     expect(line, child.stdout).toBeTruthy();

@@ -276,10 +276,27 @@ export function runFleet(
   return results;
 }
 
+export interface FanOutDeviceOptions {
+  /**
+   * Per-device deadline in milliseconds. When set, any probe that does not
+   * settle within this window is abandoned via `Promise.race` against a
+   * rejection timer and recorded as a `failed` result with the message
+   * `'timed out'`. There is no AbortController — the underlying probe
+   * continues running in the background; cancellation of the in-flight work
+   * is the caller's responsibility. In practice `probeRemoteAuth` relies on
+   * `sshExecAsync`'s own 15 s timer to kill the ssh child independently.
+   * The per-device ssh timeout passed directly to {@link sshExecAsync} is
+   * the first line of defence; this acts as a hard backstop so one slow
+   * device can never stall the entire fan-out past its budget.
+   */
+  perDeviceTimeoutMs?: number;
+}
+
 /** Run one async probe per device in parallel, preserving input order. */
 export async function fanOutDevices<T, Target extends FanOutDeviceTarget = FanOutDeviceTarget>(
   targets: Target[],
   probe: (target: Target) => Promise<T>,
+  opts: FanOutDeviceOptions = {},
 ): Promise<FanOutDeviceResult<T>[]> {
   return Promise.all(targets.map(async (target) => {
     if (target.skip) {
@@ -290,10 +307,20 @@ export async function fanOutDevices<T, Target extends FanOutDeviceTarget = FanOu
       };
     }
     try {
+      let probePromise = probe(target);
+      if (opts.perDeviceTimeoutMs) {
+        const timeoutMs = opts.perDeviceTimeoutMs;
+        probePromise = Promise.race([
+          probePromise,
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('timed out')), timeoutMs),
+          ),
+        ]);
+      }
       return {
         name: target.name,
         status: 'ok' as const,
-        value: await probe(target),
+        value: await probePromise,
       };
     } catch (err) {
       return {

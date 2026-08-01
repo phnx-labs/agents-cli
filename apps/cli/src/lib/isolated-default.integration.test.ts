@@ -39,7 +39,7 @@ describe.skipIf(process.platform === 'win32')('isolated default', () => {
     try {
       const out = execFileSync('bun', [path.resolve(process.cwd(), 'src/index.ts'), ...args], {
         cwd: process.cwd(),
-        env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home, AGENTS_REAL_HOME: home, SHELL: '/bin/bash', AGENTS_NO_NUDGE: '1', FORCE_COLOR: '0' },
+        env: { ...process.env, HOME: home, AGENTS_REAL_HOME: home, SHELL: '/bin/bash', AGENTS_NO_NUDGE: '1', FORCE_COLOR: '0' },
         stdio: ['ignore', 'pipe', 'pipe'],
       }).toString('utf-8');
       return { out, status: 0 };
@@ -57,7 +57,7 @@ describe.skipIf(process.platform === 'win32')('isolated default', () => {
     `;
     const out = execFileSync('bun', ['-e', script], {
       cwd: process.cwd(),
-      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home, AGENTS_REAL_HOME: home, SHELL: '/bin/bash' },
+      env: { ...process.env, HOME: home, AGENTS_REAL_HOME: home, SHELL: '/bin/bash' },
       stdio: ['ignore', 'pipe', 'inherit'],
     }).toString();
     return JSON.parse(out.split('__R__')[1]);

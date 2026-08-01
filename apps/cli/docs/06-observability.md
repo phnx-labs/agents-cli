@@ -342,6 +342,29 @@ cost-of-delay rank, not chronology: idle minutes × downstream blast radius ×
 hourly burn × ask irreducibility. Suppressed stalls and FYIs get zero
 irreducibility, so a fresh cheap ask does not outrank an old critical-path block.
 
+### What publishes a block
+
+Blocks are written by the `feed-publish` hook (`~/.agents/hooks/10-feed-publish.py`,
+installed by `ensureFeedPublishHook`), registered for every hooks-capable agent:
+
+- **AskUserQuestion** (`PreToolUse`) — the structured multiple-choice ask.
+- **Waiting notifications** (`Notification`: `permission_prompt` / `idle_prompt` /
+  `elicitation_dialog`) — Claude's permission/idle prompts.
+- **Codex approval prompts** (`PermissionRequest`) — Codex emits `PermissionRequest`
+  (not Claude's `Notification`) when it blocks on an approval. The hook publishes an
+  **approval-class** block with `costOfDelay: high` and `safeDefault: deny`, so a
+  blocked headless/remote Codex agent surfaces on the feed and `agents feed --dispatch`
+  pages the phone as urgent (RUSH-2039). The Codex approval card is cleared once the
+  approved tool runs (`PostToolUse`) or the session ends.
+
+The block is cleared on answer (`PostToolUse` for AskUserQuestion, or `UserPromptSubmit`
+in the TUI) and on session lifecycle (`Stop` / `SessionEnd`). A **Codex** approval card
+additionally clears as soon as the next tool runs — this is a matcher-less `PostToolUse`
+clear hook registered **for Codex only** (`feed-clear-permission`). Claude registers no
+matcher-less `PostToolUse` clear, so its `permission_prompt` / `idle_prompt` /
+`elicitation_dialog` notification cards persist until `Stop` / `SessionEnd` (and its only
+`PostToolUse` feed hook, `feed-clear-answered`, stays matcher-scoped to `AskUserQuestion`).
+
 The same poll also synthesizes control cards for sessions that are burning
 abnormally without asking (`runaway`) or asking repeatedly (`needy`). Control
 cards are one row per session, with local controls:

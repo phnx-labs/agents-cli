@@ -6,7 +6,6 @@ import * as path from 'path';
 // Isolate a fresh HOME BEFORE importing state/db, so the sessions DB path they
 // capture at import time points at our temp dir.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-migv10-'));
-process.env.AGENTS_TEST_HOME = TEST_HOME;
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 

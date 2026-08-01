@@ -194,7 +194,7 @@ describe('syncResourcesToVersion preserves command-skills through the skills orp
       `;
       const out = execFileSync('bun', ['--eval', script], {
         cwd: repoRoot,
-        env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
+        env: { ...process.env, HOME: home },
         encoding: 'utf-8',
       });
       const result = JSON.parse(out.trim()) as {
@@ -245,7 +245,7 @@ describe('syncResourcesToVersion respects version-gated subagent capabilities', 
       `;
       const out = execFileSync('bun', ['--eval', script], {
         cwd: repoRoot,
-        env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
+        env: { ...process.env, HOME: home },
         encoding: 'utf-8',
       });
       const result = JSON.parse(out.trim().split('\n').at(-1) ?? '{}') as { beforeExists: boolean; afterExists: boolean };
@@ -399,7 +399,7 @@ describe('removeVersion never promotes an isolated install to the global default
       `;
       const out = execFileSync('bun', ['--eval', script], {
         cwd: repoRoot,
-        env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
+        env: { ...process.env, HOME: home },
         encoding: 'utf-8',
       });
       const result = JSON.parse(out.trim().split('\n').at(-1) ?? '{}') as { afterDefault: string | null };
@@ -426,7 +426,7 @@ describe('removeVersion never promotes an isolated install to the global default
       `;
       const out = execFileSync('bun', ['--eval', script], {
         cwd: repoRoot,
-        env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
+        env: { ...process.env, HOME: home },
         encoding: 'utf-8',
       });
       const result = JSON.parse(out.trim().split('\n').at(-1) ?? '{}') as { afterDefault: string | null };

@@ -6,7 +6,6 @@ import * as path from 'path';
 // Isolate a fresh HOME BEFORE importing state/db so the sessions DB path they
 // capture at import time points at our temp dir. Real sqlite, no mocking.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-migv14-'));
-process.env.AGENTS_TEST_HOME = TEST_HOME;
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
@@ -99,7 +98,7 @@ describe('schema migration v13 -> current (dir_ledger + resumable parser)', () =
   it('bumps the recorded schema version to the current version', () => {
     const db = getDB();
     const v = (db.prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string }).value;
-    expect(v).toBe('16');
+    expect(v).toBe('17');
   });
 
   it('preserves existing session rows through the migration', () => {

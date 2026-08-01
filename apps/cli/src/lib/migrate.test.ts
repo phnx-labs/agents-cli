@@ -446,7 +446,6 @@ describe('v12 device migration CLI startup failure (POSIX)', () => {
       cwd: REPO_ROOT,
       env: {
         ...process.env,
-        AGENTS_TEST_HOME: home,
         HOME: home,
         USERPROFILE: home,
         ...extraEnv,
@@ -507,7 +506,6 @@ describe('v12 device migration scheduler startup failure (POSIX)', () => {
       cwd: REPO_ROOT,
       env: {
         ...process.env,
-        AGENTS_TEST_HOME: home,
         HOME: home,
         USERPROFILE: home,
       },

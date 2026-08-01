@@ -91,7 +91,7 @@ describe('generateVersionedAliasScript', () => {
 
     const result = spawnSync('bash', [shimPath, 'ok'], {
       cwd: project,
-      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
+      env: { ...process.env, HOME: home },
       encoding: 'utf-8',
     });
 
@@ -116,7 +116,7 @@ describe('generateVersionedAliasScript', () => {
 
     const result = spawnSync('bash', [shimPath], {
       cwd: project,
-      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
+      env: { ...process.env, HOME: home },
       encoding: 'utf-8',
     });
 
@@ -195,7 +195,7 @@ describe('grok binary resolution order', () => {
 
     const result = spawnSync('bash', [shimPath, 'ok'], {
       cwd: project,
-      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
+      env: { ...process.env, HOME: home },
       encoding: 'utf-8',
     });
 
@@ -233,7 +233,7 @@ describe('grok binary resolution order', () => {
 
     const result = spawnSync('bash', [shimPath, 'ok'], {
       cwd: project,
-      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
+      env: { ...process.env, HOME: home },
       encoding: 'utf-8',
     });
 

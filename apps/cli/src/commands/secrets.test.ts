@@ -197,7 +197,6 @@ describe('secrets export --format json', () => {
       encoding: 'utf-8',
       env: {
         ...process.env,
-        AGENTS_TEST_HOME: home,
         HOME: home,
         // os.homedir() reads USERPROFILE on Windows, so HOME alone leaves the
         // spawned CLI resolving the real profile ('agents-cli is not set up').
@@ -242,7 +241,6 @@ describe('secrets list/view --json (agent discovery, RUSH-1834)', () => {
       encoding: 'utf-8',
       env: {
         ...process.env,
-        AGENTS_TEST_HOME: home,
         HOME: home,
         // os.homedir() reads USERPROFILE on Windows, so HOME alone leaves the
         // spawned CLI resolving the real profile ('agents-cli is not set up').

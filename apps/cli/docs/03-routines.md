@@ -595,6 +595,31 @@ Each execution creates a run directory with structured output:
         meta.json                     # { agent, version, mode, status, durationMs }
 ```
 
+### Desktop notifications
+
+The daemon fires a native macOS notification on the routine lifecycle, routed
+through the `MenubarHelper.app` companion (`src/lib/menubar/notify-desktop.ts`)
+so it carries the agents-cli mark (the bundle's `AppIcon`) rather than the
+generic AppleScript/Script Editor icon. When the menu-bar helper is not
+installed (Linux, or a machine that disabled it), delivery degrades to
+`osascript`/`notify-send` so a notice is never silently lost.
+
+| Event | When | Threshold |
+| --- | --- | --- |
+| **Start** | The scheduler triggers a routine | Agent/workflow routines only — command (housekeeping) routines are suppressed to avoid spam |
+| **Finish** | The run reaches a terminal state | Always for agent/workflow; command routines notify only on **failure** |
+| **Overdue** | Daemon startup finds a missed recurring routine | Any overdue routine (`src/lib/overdue.ts`) |
+
+"Notable output" is folded into the single **Finish** notification, not sent as
+a third message: on success the body is the first line of `report.md` (the
+routine's user-facing result), on failure it is the error reason. So a normal
+run produces exactly one start + one finish notification.
+
+Notifications are actionable where a target exists: clicking a **Finish** opens
+the run's `report.md`/`stdout.log`; **Start**/**Overdue** open the runs folder.
+The finish notification only fires for locally-run routines — `host:`-placed
+runs are finalized by the monitor sweep and do not emit one.
+
 ## Commands
 
 ```bash

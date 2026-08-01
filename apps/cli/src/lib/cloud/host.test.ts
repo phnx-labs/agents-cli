@@ -19,10 +19,10 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Set AGENTS_TEST_HOME before any import so state.ts's module-level HOME
-// constant resolves into this test's private temp tree, not the real ~/.agents.
+// Set HOME before state.ts loads so the hosts/devices registries and the
+// host-task sidecar dir all resolve under the temp root.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cloud-host-test-'));
-process.env.AGENTS_TEST_HOME = TEST_HOME;
+process.env.HOME = TEST_HOME;
 
 const { HostCloudProvider, hostTaskToCloudTask } = await import('./host.js');
 const { MissingTargetError } = await import('./types.js');

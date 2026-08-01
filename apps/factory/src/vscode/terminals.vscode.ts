@@ -225,6 +225,21 @@ export function getById(id: string): EditorTerminal | undefined {
   return editorTerminals.get(id);
 }
 
+/**
+ * The live editor-terminal entry for a CLI session id, if one is tracked in
+ * this window. Used to reveal the terminal from an approval-waiting
+ * notification (RUSH-2039). Skips entries whose process has exited.
+ */
+export function getBySessionId(sessionId: string): EditorTerminal | undefined {
+  if (!sessionId) return undefined;
+  for (const entry of editorTerminals.values()) {
+    if (entry.sessionId === sessionId && entry.terminal.exitStatus === undefined) {
+      return entry;
+    }
+  }
+  return undefined;
+}
+
 export function getAllTerminals(): EditorTerminal[] {
   return Array.from(editorTerminals.values());
 }

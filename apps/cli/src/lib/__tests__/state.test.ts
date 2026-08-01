@@ -22,13 +22,8 @@ import {
 } from '../state.js';
 
 describe('state paths', () => {
-  // state.ts reads AGENTS_TEST_HOME first (RUSH-2042). In the test suite,
-  // setup.ts sets AGENTS_TEST_HOME to a fork-private temp dir. These assertions
-  // must compare against the effective home root, not os.homedir().
-  const effectiveHome = process.env.AGENTS_TEST_HOME ?? process.env.HOME ?? os.homedir();
-
   it('keeps system resource directories under ~/.agents/.system', () => {
-    const systemRoot = path.join(effectiveHome, '.agents', '.system');
+    const systemRoot = path.join(os.homedir(), '.agents', '.system');
 
     expect(getCommandsDir()).toBe(path.join(systemRoot, 'commands'));
     expect(getHooksDir()).toBe(path.join(systemRoot, 'hooks'));
@@ -36,7 +31,7 @@ describe('state paths', () => {
   });
 
   it('stores durable runtime state under ~/.agents/.history', () => {
-    const userRoot = path.join(effectiveHome, '.agents');
+    const userRoot = path.join(os.homedir(), '.agents');
     const history = path.join(userRoot, '.history');
 
     expect(getVersionsDir()).toBe(path.join(history, 'versions'));
@@ -47,7 +42,7 @@ describe('state paths', () => {
   });
 
   it('stores regenerable runtime state under ~/.agents/.cache', () => {
-    const userRoot = path.join(effectiveHome, '.agents');
+    const userRoot = path.join(os.homedir(), '.agents');
     const cache = path.join(userRoot, '.cache');
 
     expect(getPackagesDir()).toBe(path.join(cache, 'packages'));
@@ -56,7 +51,7 @@ describe('state paths', () => {
   });
 
   it('keeps definitions/configs at the top of ~/.agents', () => {
-    const userRoot = path.join(effectiveHome, '.agents');
+    const userRoot = path.join(os.homedir(), '.agents');
     expect(getRoutinesDir()).toBe(path.join(userRoot, 'routines'));
     // Plugins are user-authored resources, alongside skills/, commands/, etc.
     expect(getPluginsDir()).toBe(path.join(userRoot, 'plugins'));
@@ -78,10 +73,7 @@ describe('readMeta merges agents.yaml from both repos', () => {
       ],
       {
         cwd: process.cwd(),
-        // AGENTS_TEST_HOME takes precedence over HOME in state.ts (RUSH-2042).
-        // Pass it explicitly so the subprocess sees the intended root, not the
-        // fork-wide hermetic root injected by tests/setup.ts into process.env.
-        env: { ...process.env, HOME: home, AGENTS_TEST_HOME: home },
+        env: { ...process.env, HOME: home },
         stdio: 'pipe',
         encoding: 'utf8',
       },
@@ -92,8 +84,7 @@ describe('readMeta merges agents.yaml from both repos', () => {
   function runStateScript(home: string, script: string): string {
     return execFileSync('bun', ['-e', script], {
       cwd: process.cwd(),
-      // AGENTS_TEST_HOME takes precedence over HOME in state.ts (RUSH-2042).
-      env: { ...process.env, HOME: home, AGENTS_TEST_HOME: home },
+      env: { ...process.env, HOME: home },
       stdio: 'pipe',
       encoding: 'utf8',
     }).trim();
@@ -105,8 +96,7 @@ describe('readMeta merges agents.yaml from both repos', () => {
   function runStateScriptWithNode(home: string, script: string): string {
     return execFileSync('node', ['--import', 'tsx', '--input-type=module', '-e', script], {
       cwd: process.cwd(),
-      // AGENTS_TEST_HOME takes precedence over HOME in state.ts (RUSH-2042).
-      env: { ...process.env, HOME: home, AGENTS_TEST_HOME: home },
+      env: { ...process.env, HOME: home },
       stdio: 'pipe',
       encoding: 'utf8',
     }).trim();
@@ -116,8 +106,7 @@ describe('readMeta merges agents.yaml from both repos', () => {
     return new Promise((resolve, reject) => {
       const child = spawn('bun', ['-e', script], {
         cwd: process.cwd(),
-        // AGENTS_TEST_HOME takes precedence over HOME in state.ts (RUSH-2042).
-        env: { ...process.env, HOME: home, AGENTS_TEST_HOME: home },
+        env: { ...process.env, HOME: home },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       let stdout = '';
@@ -402,8 +391,7 @@ describe('agents.yaml device-local split (routing + read overlay)', () => {
   function run(script: string): string {
     return execFileSync('bun', ['-e', script], {
       cwd: process.cwd(),
-      // AGENTS_TEST_HOME takes precedence over HOME in state.ts (RUSH-2042).
-      env: { ...process.env, HOME: home, AGENTS_TEST_HOME: home, AGENTS_SYNC_MACHINE_ID: MACHINE },
+      env: { ...process.env, HOME: home, AGENTS_SYNC_MACHINE_ID: MACHINE },
       stdio: 'pipe',
       encoding: 'utf8',
     }).trim();
@@ -480,7 +468,7 @@ describe('agents.yaml device-local split (routing + read overlay)', () => {
       console.log(JSON.stringify({ before, after }));
     `], {
       cwd: process.cwd(),
-      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home, AGENTS_SYNC_MACHINE_ID: MACHINE },
+      env: { ...process.env, HOME: home, AGENTS_SYNC_MACHINE_ID: MACHINE },
       stdio: 'pipe',
       encoding: 'utf8',
     }).trim();

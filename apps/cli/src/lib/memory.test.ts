@@ -39,7 +39,7 @@ function runMemory(home: string, expression: string): unknown {
       }
     `,
     ],
-    { env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home }, encoding: 'utf-8' },
+    { env: { ...process.env, HOME: home }, encoding: 'utf-8' },
   );
   if (child.status !== 0) {
     throw new Error(`memory helper failed: ${child.stderr || child.stdout}`);

@@ -96,7 +96,7 @@ interface HarnessResult {
 
 function callHarness(fx: Fixture, op: object): HarnessResult {
   const out = execFileSync('bun', [HARNESS_TS, JSON.stringify(op)], {
-    env: { ...process.env, AGENTS_TEST_HOME: fx.home, HOME: fx.home },
+    env: { ...process.env, HOME: fx.home },
     encoding: 'utf-8',
   });
   return JSON.parse(out) as HarnessResult;

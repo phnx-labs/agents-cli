@@ -12,7 +12,6 @@ import * as path from 'path';
 // so the test writes where the resolver reads regardless of which file froze
 // HOME first. This makes the test robust under both vitest and `bun test`.
 const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'budget-config-home-'));
-process.env.AGENTS_TEST_HOME = fakeHome;
 process.env.HOME = fakeHome;
 fs.mkdirSync(path.join(fakeHome, '.agents'), { recursive: true });
 

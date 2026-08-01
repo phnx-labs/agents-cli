@@ -37,7 +37,6 @@ function runProbe(
     encoding: 'utf-8',
     env: {
       ...process.env,
-      AGENTS_TEST_HOME: home,
       HOME: home,
       AGENTS_NO_UPDATE_CHECK: '1',
       AGENTS_NO_AUTOPULL: '1',

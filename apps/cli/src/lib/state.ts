@@ -31,16 +31,7 @@ import { ensureLockTarget, atomicWriteFileSync, withFileLock } from './fs-atomic
 import type { Meta, RegistryType } from './types.js';
 import { machineId } from './machine-id.js';
 
-// AGENTS_TEST_HOME pins the home root for the entire vitest fork before any
-// import runs (set by tests/setup.ts). It takes precedence over HOME so that
-// paths derived here — including the device registry, sessions dir, and every
-// other ~/.agents/* path — resolve into the hermetic temp tree, not the real
-// user home. Individual test files that need their own isolated root set this
-// env var to their own mkdtemp before doing a dynamic import of any state
-// consumer. Never set AGENTS_TEST_HOME in production code; it is a test-only
-// escape hatch that mirrors the AGENTS_EVENTS_PATH / AGENTS_SECRETS_AGENT_DIR
-// pattern established in #910.
-const HOME = process.env.AGENTS_TEST_HOME ?? process.env.HOME ?? os.homedir();
+const HOME = process.env.HOME ?? os.homedir();
 
 /**
  * Compare two filesystem paths for identity, resolving symlinks and (on
@@ -468,11 +459,23 @@ export function getTeamsAgentsDir(): string { return TEAMS_AGENTS_DIR; }
 /** Path to the team registry — list of named teams with timestamps. Durable runtime, per-machine. */
 export function getTeamsRegistryPath(): string { return path.join(HISTORY_DIR, 'teams', 'registry.json'); }
 
+/**
+ * The devices dir (registry + ignore-list live here). Read at CALL time so a
+ * test can redirect it to a temp dir via AGENTS_DEVICES_DIR without racing the
+ * module-load capture of HISTORY_DIR — mirrors the AGENTS_EVENTS_PATH /
+ * AGENTS_SECRETS_AGENT_DIR test-isolation escape hatches. Never set in
+ * production code; it exists so the vitest fork's device-registry writes can
+ * never reach the user's real ~/.agents/.history/devices (RUSH-2042).
+ */
+function getDevicesDir(): string {
+  return process.env.AGENTS_DEVICES_DIR ?? path.join(HISTORY_DIR, 'devices');
+}
+
 /** Path to the device registry — SSH device profiles with platform/auth metadata. Durable runtime, per-machine (host list + addresses are NOT pulled by `agents repo push`). */
-export function getDevicesRegistryPath(): string { return path.join(HISTORY_DIR, 'devices', 'registry.json'); }
+export function getDevicesRegistryPath(): string { return path.join(getDevicesDir(), 'registry.json'); }
 
 /** Path to the device ignore-list — tailscale node names the user dismissed, so auto-discovery never re-suggests them. Per-machine, same dir as the registry. */
-export function getDevicesIgnoredPath(): string { return path.join(HISTORY_DIR, 'devices', 'ignored.json'); }
+export function getDevicesIgnoredPath(): string { return path.join(getDevicesDir(), 'ignored.json'); }
 
 /** Dir of "pending device" sentinels (~/.agents/.cache/state/devices-pending/) — one empty-ish file per newly-discovered, not-yet-approved tailnet node. Written by the daemon probe, read by the menu-bar helper (mirrors the attention sentinel dir). */
 export function getDevicesPendingDir(): string { return path.join(RUNTIME_STATE_DIR, 'devices-pending'); }

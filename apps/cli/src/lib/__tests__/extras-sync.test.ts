@@ -52,7 +52,7 @@ function runInTempHome(scriptBody: string): Record<string, unknown> {
     `;
     const out = execFileSync('bun', ['--eval', script], {
       cwd: repoRoot,
-      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
+      env: { ...process.env, HOME: home },
       encoding: 'utf-8',
     });
     const lines = out.trim().split('\n').filter((l) => l.trim().startsWith('{'));

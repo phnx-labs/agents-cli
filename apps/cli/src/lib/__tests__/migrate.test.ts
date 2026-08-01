@@ -27,7 +27,7 @@ function runRealMigration(): void {
     ['-e', `import { runMigration } from ${JSON.stringify(modulePath)}; await runMigration();`],
     {
       cwd: process.cwd(),
-      env: { ...process.env, AGENTS_TEST_HOME: testHome, HOME: testHome, AGENTS_SYNC_MACHINE_ID: 'testdev' },
+      env: { ...process.env, HOME: testHome, AGENTS_SYNC_MACHINE_ID: 'testdev' },
       stdio: 'pipe',
     },
   );
@@ -479,7 +479,7 @@ describe('runMigration', () => {
       const proc = spawnSync(
         'bun',
         ['-e', `import { runMigration } from ${JSON.stringify(modulePath)}; await runMigration();`],
-        { cwd: process.cwd(), env: { ...process.env, AGENTS_TEST_HOME: testHome, HOME: testHome } },
+        { cwd: process.cwd(), env: { ...process.env, HOME: testHome } },
       );
       expect(proc.stderr.toString('utf-8')).toContain('mystery-leftover');
     });

@@ -78,7 +78,7 @@ function runDrive(home: string, binDir: string, expression: string): { ok: boole
       console.log(JSON.stringify({ ok: false, error: err.message }));
     }
   `], {
-    env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home, PATH: `${binDir}:${process.env.PATH ?? ''}` },
+    env: { ...process.env, HOME: home, PATH: `${binDir}:${process.env.PATH ?? ''}` },
     encoding: 'utf-8',
   });
   expect(child.status, child.stderr).toBe(0);

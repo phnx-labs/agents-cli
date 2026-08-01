@@ -25,7 +25,7 @@ describe('resolveBaseDir', () => {
       ],
       {
         cwd: process.cwd(),
-        env: { ...process.env, AGENTS_TEST_HOME: testRoot, HOME: testRoot },
+        env: { ...process.env, HOME: testRoot },
         stdio: 'pipe',
         encoding: 'utf8',
       },

@@ -6,7 +6,6 @@ import * as path from 'path';
 // Isolate the sessions DB under a temp HOME before any module that captures
 // the DB path at import time loads.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-cost-test-'));
-process.env.AGENTS_TEST_HOME = TEST_HOME;
 process.env.HOME = TEST_HOME;
 
 const { Command } = await import('commander');

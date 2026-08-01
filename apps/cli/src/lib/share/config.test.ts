@@ -26,7 +26,6 @@ const prevNoAgent = process.env.AGENTS_SECRETS_NO_AGENT;
 const prevNoUsage = process.env.AGENTS_NO_USAGE_TRACK;
 const prevNoPrompt = process.env.AGENTS_SECRETS_NO_PROMPT;
 
-process.env.AGENTS_TEST_HOME = HOME;
 process.env.HOME = HOME;
 process.env.AGENTS_SECRETS_NO_AGENT = '1';
 process.env.AGENTS_NO_USAGE_TRACK = '1';

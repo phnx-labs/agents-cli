@@ -521,16 +521,26 @@ enum Notifier {
     private static let delegate = NotifierDelegate()
     private static var wired = false
 
-    // `url`, when present, is opened on click (the created ticket). `image`
-    // is shown as the notification icon so the banner carries the agents-cli
-    // branding even when the bundle icon lookup is slow.
-    static func post(title: String, body: String, url: String? = nil, image: NSImage? = appIconImage()) {
+    // Register the click delegate without delivering anything. Called at app
+    // launch so the persistent menu-bar instance handles clicks on notifications
+    // the daemon posts via one-shot `--notify` processes (RUSH-2030). Idempotent.
+    static func wireClickHandler() {
         if !wired {
             NSUserNotificationCenter.default.delegate = delegate
             wired = true
         }
+    }
+
+    // `url`, when present, is opened on click (the created ticket, or a routine
+    // report/log for daemon notifications). `subtitle` is the secondary line.
+    // `image` is shown as the notification icon so the banner carries the
+    // agents-cli branding even when the bundle icon lookup is slow.
+    static func post(title: String, body: String, subtitle: String? = nil,
+                     url: String? = nil, image: NSImage? = appIconImage()) {
+        wireClickHandler()
         let note = NSUserNotification()
         note.title = title
+        if let subtitle { note.subtitle = subtitle }
         note.informativeText = body
         if let url {
             note.userInfo = ["url": url]
@@ -541,6 +551,44 @@ enum Notifier {
             note.contentImage = image
         }
         NSUserNotificationCenter.default.deliver(note)
+    }
+
+    // Daemon notification one-shot: `MenubarHelper --notify --title T --body B
+    // [--subtitle S] [--action A]` (RUSH-2030). The daemon spawns the installed
+    // .app in this mode, so the notification is attributed to this bundle and
+    // shows its AppIcon (the agents-cli mark) — not the generic osascript icon.
+    // Delivers, briefly spins the runloop so NSUserNotificationCenter flushes
+    // before the short-lived process exits, then exits.
+    static func runOneShot(_ args: [String]) -> Never {
+        func value(_ flag: String) -> String? {
+            guard let i = args.firstIndex(of: flag), i + 1 < args.count else { return nil }
+            return args[i + 1]
+        }
+        guard let title = value("--title"), let body = value("--body") else { exit(2) }
+        // Establish the app object so delivery has a running NSApplication to
+        // attribute the notification to; never call run() — the runloop spin below
+        // drives this short-lived process.
+        let app = NSApplication.shared
+        app.setActivationPolicy(.accessory)
+        post(title: title, body: body, subtitle: value("--subtitle"),
+             url: clickURL(for: value("--action")))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.6))
+        exit(0)
+    }
+
+    // Map the daemon action deep-link to a URL the click delegate opens:
+    //   open:<path>   -> the run report/log file (opens in the default app)
+    //   routines:list -> the runs-history folder (opens in Finder)
+    // Any other/absent action yields no click target.
+    private static func clickURL(for action: String?) -> String? {
+        guard let action else { return nil }
+        if action.hasPrefix("open:") {
+            return URL(fileURLWithPath: String(action.dropFirst("open:".count))).absoluteString
+        }
+        if action == "routines:list" {
+            return URL(fileURLWithPath: "\(NSHomeDirectory())/.agents/.history/runs").absoluteString
+        }
+        return nil
     }
 
     // Load the bundled app icon as an NSImage, if one exists.

@@ -80,7 +80,7 @@ function expectScanParity(inc: any, full: any) {
     'timestamp', 'cwd', 'gitBranch', 'version', 'topic', 'entrypoint',
     'messageCount', 'tokenCount', 'outputTokens', 'costUsd', 'durationMs',
     'lastActivity', 'contentText', 'prUrl', 'prNumber', 'worktreeSlug',
-    'ticketId', 'createdTickets', 'spawnedTeam', 'plan',
+    'ticketId', 'createdTickets', 'spawnedTeam', 'plan', 'todos', 'recentDirectoriesTouched',
   ];
   for (const f of fields) {
     expect(inc[f], `field ${f}`).toEqual(full[f]);
@@ -94,6 +94,8 @@ function richLines(): object[] {
     { type: 'user', timestamp: '2026-06-28T00:00:00.000Z', cwd: '/home/u/repo', gitBranch: 'RUSH-42-fix', version: '2.1.0', entrypoint: 'cli', message: { role: 'user', content: 'investigate the flaky exec test' } },
     { type: 'assistant', timestamp: '2026-06-28T00:01:00.000Z', uuid: 'a-1', message: { id: 'msg_1', model: 'claude-sonnet-4-5', content: [{ type: 'text', text: 'looking' }], usage: { input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 5, cache_creation_input_tokens: 3 } } },
     { type: 'assistant', timestamp: '2026-06-28T00:02:00.000Z', uuid: 'a-2', message: { id: 'msg_2', model: 'claude-sonnet-4-5', content: [{ type: 'tool_use', id: 'plan-1', name: 'ExitPlanMode', input: { plan: '# Plan\n- step one' } }], usage: { input_tokens: 50, output_tokens: 10 } } },
+    { type: 'assistant', timestamp: '2026-06-28T00:02:10.000Z', uuid: 'task-1', message: { id: 'task-msg-1', model: 'claude-sonnet-4-5', content: [{ type: 'tool_use', id: 'tc-1', name: 'TaskCreate', input: { subject: 'Inspect', activeForm: 'Inspecting' } }, { type: 'tool_use', id: 'edit-1', name: 'Edit', input: { file_path: '/home/u/repo/src/config.ts' } }], usage: { input_tokens: 1, output_tokens: 1 } } },
+    { type: 'assistant', timestamp: '2026-06-28T00:02:20.000Z', uuid: 'task-2', message: { id: 'task-msg-2', model: 'claude-sonnet-4-5', content: [{ type: 'tool_use', id: 'tu-1', name: 'TaskUpdate', input: { taskId: '1', status: 'completed' } }], usage: { input_tokens: 1, output_tokens: 1 } } },
     { type: 'user', timestamp: '2026-06-28T00:03:00.000Z', message: { role: 'user', content: 'yes go ahead' } },
     { type: 'ai-title', aiTitle: 'Flaky exec test fix', sessionId: 's' },
     { type: 'assistant', timestamp: '2026-06-28T00:04:00.000Z', uuid: 'a-3', message: { id: 'msg_3', model: 'claude-sonnet-4-5', content: [{ type: 'text', text: 'done' }], usage: { input_tokens: 30, output_tokens: 40 } } },

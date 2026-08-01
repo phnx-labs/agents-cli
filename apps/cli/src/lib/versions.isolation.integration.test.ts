@@ -66,7 +66,7 @@ describe.skipIf(process.platform === 'win32')('ensureAgentRunnable — isolation
     `;
     const out = execFileSync('bun', ['-e', script], {
       cwd: process.cwd(),
-      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
+      env: { ...process.env, HOME: home },
       stdio: ['ignore', 'pipe', 'inherit'],
     }).toString('utf-8');
     return JSON.parse(out.split('__RESULT__')[1]);

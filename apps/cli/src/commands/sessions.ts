@@ -36,14 +36,21 @@ import { filterTeamSessions } from '../lib/session/team-filter.js';
 import { parseSession } from '../lib/session/parse.js';
 import { runRemoteSessions, buildForwardedArgs, ensureWholeIndex } from '../lib/session/remote.js';
 import { formatRelativeTime } from '../lib/session/relative-time.js';
-import { renderConversationMarkdown, renderSummary, renderSummaryHeader, computeSummaryStats, renderJson, filterEvents, parseRoleList, type FilterOptions } from '../lib/session/render.js';
+import { renderConversationMarkdown, renderSummary, renderSummaryHeader, computeSummaryStats, renderJson, filterEvents, parseRoleList, linkUrl, type FilterOptions } from '../lib/session/render.js';
+import { linearIssueUrl } from '../lib/session/linear.js';
 import { renderMarkdown } from '../lib/markdown.js';
 import { AGENTS, colorAgent, resolveAgentName } from '../lib/agents.js';
 import { getShimsDir } from '../lib/state.js';
 import { fuzzyMatch, FUZZY_PRESETS } from '../lib/fuzzy.js';
 import { resolveVersionAliasLoose } from '../lib/versions.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
-import { sessionPicker, buildPreview, type PickedSession } from './sessions-picker.js';
+import {
+  sessionPicker,
+  buildPreview,
+  formatTodoCompact,
+  githubRepoUrlFromCwd,
+  type PickedSession,
+} from './sessions-picker.js';
 import { setHelpSections } from '../lib/help.js';
 import { registerSessionsTailCommand } from './sessions-tail.js';
 import { registerSessionsSyncCommand } from './sessions-sync.js';
@@ -337,22 +344,71 @@ export function cleanPreview(text: string): string {
 }
 
 /**
- * Build the live description for an active session: prefer the state engine's
- * preview (the latest turn), then a user label, then the first-prompt topic.
+ * Build the live description for an active session: checklist progress (when
+ * present) plus the state engine's preview (the latest turn), a user label, or
+ * the first-prompt topic. Used by both the flat listing's `doing` cell and as
+ * the snippet half of the --active row (identity is layered on in printActiveRow).
+ *
+ * Covers every ActiveSession context: terminal (interactive), headless, teams,
+ * cloud, and sub-agent rows that share the same ActiveSession.todos field.
  */
 function buildSessionDescription(s: ActiveSession): string {
+  const todo = formatTodoCompact(s.todos);
   if (s.context === 'cloud') {
-    return cleanPreview(s.preview || `${s.cloudProvider ?? ''}${s.cloudTaskId ? ` · ${s.cloudTaskId.slice(0, 12)}` : ''}`);
+    const base = s.preview || `${s.cloudProvider ?? ''}${s.cloudTaskId ? ` · ${s.cloudTaskId.slice(0, 12)}` : ''}`;
+    return cleanPreview([todo, base].filter(Boolean).join(' · '));
   }
   if (s.context === 'teams') {
     const parts = [s.teamName];
+    if (todo) parts.push(todo);
     if (s.preview) parts.push(s.preview);
     else if (s.label) parts.push(s.label);
     else if (s.topic) parts.push(s.topic);
     return cleanPreview(parts.filter(Boolean).join(' · '));
   }
-  // Terminal or headless: prefer the live preview, then label, then topic.
-  return cleanPreview(s.preview || s.label || s.topic || '');
+  // Terminal, headless, or sub-agent: todos + live preview, then label, then topic.
+  const base = s.preview || s.label || s.topic || '';
+  return cleanPreview([todo, base].filter(Boolean).join(' · '));
+}
+
+/**
+ * Identity + checklist + live snippet for an --active / cross-machine row.
+ * Surfaces agent-adjacent identity the flat table already has (label, project)
+ * with a clickable project when a GitHub URL is resolvable, then the checklist
+ * tally and the latest-turn snippet.
+ *
+ * Free-text fields are cleaned individually; OSC 8 hyperlinks are applied
+ * *after* cleaning so `cleanPreview` does not strip the clickable targets
+ * (RUSH-2045 review). Ticket is clickable via {@link signalBadges}, not here,
+ * so the id is not printed twice.
+ */
+export function formatActiveRowDescription(s: ActiveSession): string {
+  const parts: string[] = [];
+  const pushText = (t?: string) => {
+    const c = t ? cleanPreview(t) : '';
+    if (c) parts.push(c);
+  };
+  if (s.context === 'teams' && s.teamName) pushText(s.teamName);
+  if (s.label) pushText(s.label);
+  // Project = basename(cwd), same derivation as serializeActiveSessionsForJson.
+  const project = s.cwd ? path.basename(s.cwd) : '';
+  if (project && project !== s.label && project !== s.teamName) {
+    const label = cleanPreview(project);
+    const repoUrl = githubRepoUrlFromCwd(s.cwd);
+    parts.push(repoUrl ? linkUrl(repoUrl, label) : label);
+  }
+  const todo = formatTodoCompact(s.todos);
+  if (todo) parts.push(todo);
+
+  // Latest-turn snippet — avoid repeating label/topic when already used as identity.
+  if (s.context === 'cloud') {
+    pushText(s.preview || `${s.cloudProvider ?? ''}${s.cloudTaskId ? ` · ${s.cloudTaskId.slice(0, 12)}` : ''}`);
+  } else if (s.preview) {
+    pushText(s.preview);
+  } else if (!s.label && s.topic) {
+    pushText(s.topic);
+  }
+  return parts.filter(Boolean).join(' · ');
 }
 
 /** Short human word for a session's activity (falls back to the coarse status). */
@@ -433,8 +489,15 @@ function signalBadges(s: Pick<ActiveSession, 'awaitingReason' | 'pr' | 'worktree
   if (s.awaitingReason === 'plan_review') parts.push(chalk.yellow('plan'));
   else if (s.awaitingReason === 'question') parts.push(chalk.yellow('ask'));
   else if (s.awaitingReason === 'permission') parts.push(chalk.yellow('perm'));
-  if (s.ticket) parts.push(chalk.cyan(s.ticket.id));
-  if (s.pr) parts.push(chalk.blue(`PR#${s.pr.number ?? '?'}`));
+  if (s.ticket) {
+    // Clickable when Linear workspace is resolvable (same helper as the picker header).
+    const url = linearIssueUrl(s.ticket.id);
+    parts.push(chalk.cyan(url ? linkUrl(url, s.ticket.id) : s.ticket.id));
+  }
+  if (s.pr) {
+    const label = `PR#${s.pr.number ?? '?'}`;
+    parts.push(chalk.blue(s.pr.url ? linkUrl(s.pr.url, label) : label));
+  }
   if (s.worktree) parts.push(chalk.magenta(`wt:${s.worktree.slug}`));
   return parts.join(' ');
 }
@@ -478,13 +541,17 @@ function locatorBadge(s: ActiveSession): string {
  * terminal width so the row never wraps.
  */
 function printActiveRow(s: ActiveSession, indent: string): void {
+  // shortId (8-char) · agent · host · status · badges · identity+todos+snippet
   const idCol = chalk.dim(padToWidth((s.sessionId?.slice(0, 8)) ?? '-', 9));
   const kindCol = colorAgent(s.kind as any)(padToWidth(truncateToWidth(s.kind, 8), 9));
   const hostCol = chalk.gray(padToWidth(truncateToWidth(s.host ?? '-', 8), 9));
   const statusCol = statusColor(s.status)(padToWidth(truncateToWidth(activityLabel(s), 8), 9));
   const fork = s.pidCount && s.pidCount > 1 ? chalk.dim(`×${s.pidCount} `) : '';
   const badges = (fork ? fork : '') + [signalBadges(s), locatorBadge(s)].filter(Boolean).join(' ');
-  const desc = buildSessionDescription(s) || '-';
+  // Identity (label/project/ticket clickable) + checklist + live snippet.
+  // Cross-machine rows use the same path — remote ActiveSession fields arrive
+  // via the SSH fan-out already populated (including todos when the peer has them).
+  const desc = formatActiveRowDescription(s) || '-';
   // Fill the remaining width with the preview so nothing wraps under tmux/SSH.
   const fixed = stringWidth(indent) + 9 + 9 + 9 + 9 + (badges ? stringWidth(badges) + 1 : 0);
   const room = Math.max(12, terminalWidth() - fixed - 1);
@@ -1402,9 +1469,12 @@ function flatSessionRow(session: SessionMeta, live?: ActiveSession, showTicket =
   const tag = originTag(session) || teamTag(session);
   const label = (session as any).label;
   const { glyph, preview } = liveGlyphAndPreview(live);
-  // A running session's live preview says what the agent is doing now; a
-  // resting one falls back to its opening topic.
-  const doing = preview || (tag ? `${tag}${session.topic ?? ''}` : session.topic);
+  // A running session's live preview (via liveGlyphAndPreview → buildSessionDescription)
+  // already folds in ActiveSession.todos. For resting / not-live rows, surface
+  // SessionMeta.todos when the scan attached it.
+  const restingTodo = !live ? formatTodoCompact(session.todos) : '';
+  const topicBase = tag ? `${tag}${session.topic ?? ''}` : session.topic;
+  const doing = [restingTodo, preview || topicBase].filter(Boolean).join(' · ') || undefined;
   const wt = session.worktreeSlug ? chalk.magenta(`wt:${session.worktreeSlug}`) : '';
 
   // The machine column only earns its width when the listing spans more than one
@@ -1446,7 +1516,11 @@ function treeSessionRow(session: SessionMeta, live?: ActiveSession): string {
   const tag = originTag(session) || teamTag(session);
   const label = (session as any).label;
   const { glyph, preview } = liveGlyphAndPreview(live);
-  const topic = (preview || (tag ? `${tag}${session.topic ?? ''}` : session.topic)) || '-';
+  // Match flatSessionRow: live preview already folds ActiveSession.todos; resting
+  // rows surface SessionMeta.todos when present (RUSH-2045).
+  const restingTodo = !live ? formatTodoCompact(session.todos) : '';
+  const topicBase = preview || (tag ? `${tag}${session.topic ?? ''}` : session.topic);
+  const topic = [restingTodo, topicBase].filter(Boolean).join(' · ') || '-';
   const badges = signalBadges(metaSignals(session));
   const badgeW = badges ? stringWidth(badges) + 1 : 0;
   const head = label ? `${label} · ${topic}` : topic;

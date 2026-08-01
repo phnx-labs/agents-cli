@@ -36,7 +36,7 @@ function runCommandsExpression(home: string, expression: string): unknown {
     const result = ${expression};
     console.log(JSON.stringify(result));
   `], {
-    env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
+    env: { ...process.env, HOME: home },
     encoding: 'utf-8',
   });
 
@@ -72,7 +72,7 @@ function writeSystemCommand(home: string, name: string, content: string): void {
   fs.writeFileSync(path.join(dir, `${name}.md`), content, 'utf-8');
 }
 
-/** Path to the trash commands dir for a given AGENTS_TEST_HOME: home, HOME: home/.agents/.trash/commands */
+/** Path to the trash commands dir for a given HOME: home/.agents/.trash/commands */
 function trashCommandsDir(home: string): string {
   return path.join(home, '.agents', '.history', 'trash', 'commands');
 }

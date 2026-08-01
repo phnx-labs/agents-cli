@@ -16,8 +16,6 @@ const savedOptOut = process.env.AGENTS_NO_NUDGE;
 const savedTTY = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY');
 
 const TMP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-nudge-test-'));
-// AGENTS_TEST_HOME takes precedence over HOME in state.ts (RUSH-2042).
-process.env.AGENTS_TEST_HOME = TMP_HOME;
 process.env.HOME = TMP_HOME;
 delete process.env.CI;
 delete process.env.AGENTS_NO_NUDGE;
@@ -120,7 +118,7 @@ describe('maybeShowStarNudge is race-safe across concurrent processes', () => {
     const runChild = () =>
       new Promise<string>((resolve, reject) => {
         const child = spawn(tsxBin, [fixture], {
-          env: { ...process.env, AGENTS_TEST_HOME: raceHome, HOME: raceHome, CI: '', AGENTS_NO_NUDGE: '' },
+          env: { ...process.env, HOME: raceHome, CI: '', AGENTS_NO_NUDGE: '' },
         });
         let out = '';
         child.stdout.on('data', (d) => { out += d.toString(); });

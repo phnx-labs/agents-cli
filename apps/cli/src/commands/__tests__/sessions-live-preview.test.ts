@@ -6,8 +6,8 @@
  * directly rather than through the chalk+console renderer.
  */
 
-import { describe, it, expect } from 'vitest';
-import { indexActiveBySessionId, liveGlyphAndPreview } from '../sessions.js';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { indexActiveBySessionId, liveGlyphAndPreview, formatActiveRowDescription } from '../sessions.js';
 import type { ActiveSession } from '../../lib/session/active.js';
 
 function mk(overrides: Partial<ActiveSession>): ActiveSession {
@@ -74,5 +74,87 @@ describe('liveGlyphAndPreview', () => {
   it('preview falls back to label then topic when there is no live preview', () => {
     expect(liveGlyphAndPreview(mk({ status: 'running', label: 'my-task' })).preview).toBe('my-task');
     expect(liveGlyphAndPreview(mk({ status: 'running', topic: 'first prompt' })).preview).toBe('first prompt');
+  });
+
+  it('prepends compact checklist progress when ActiveSession.todos is set (RUSH-2045)', () => {
+    const todos = {
+      items: [
+        { content: 'a', status: 'completed' as const },
+        { content: 'b', status: 'in_progress' as const, activeForm: 'A5 wiring runner' },
+      ],
+      done: 1,
+      total: 2,
+      activeForm: 'A5 wiring runner',
+    };
+    // Interactive / headless terminal row.
+    expect(
+      liveGlyphAndPreview(mk({ status: 'running', preview: 'editing sessions.ts', todos })).preview,
+    ).toBe('✓1/2 · A5 wiring runner · editing sessions.ts');
+    // Teams-spawned session: team name + todos + preview.
+    expect(
+      liveGlyphAndPreview(
+        mk({
+          context: 'teams',
+          teamName: 'checklists',
+          status: 'running',
+          preview: 'wiring runner',
+          todos,
+        }),
+      ).preview,
+    ).toBe('checklists · ✓1/2 · A5 wiring runner · wiring runner');
+    // No live preview: todos alone still surface.
+    expect(liveGlyphAndPreview(mk({ status: 'running', todos })).preview).toBe(
+      '✓1/2 · A5 wiring runner',
+    );
+  });
+});
+
+describe('formatActiveRowDescription (RUSH-2045)', () => {
+  // Force OSC 8 support so we can assert the hyperlink survives cleanPreview.
+  const savedTerm = process.env.TERM_PROGRAM;
+  const savedIsTTY = process.stdout.isTTY;
+
+  beforeAll(() => {
+    process.env.TERM_PROGRAM = 'test';
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+  });
+  afterAll(() => {
+    if (savedTerm === undefined) delete process.env.TERM_PROGRAM;
+    else process.env.TERM_PROGRAM = savedTerm;
+    Object.defineProperty(process.stdout, 'isTTY', { value: savedIsTTY, configurable: true });
+  });
+
+  it('keeps project OSC 8 hyperlinks (does not run linkUrl through cleanPreview)', () => {
+    const desc = formatActiveRowDescription(
+      mk({
+        status: 'running',
+        label: 'views',
+        cwd: '/home/u/src/github.com/phnx-labs/agents-cli/apps/cli',
+        preview: 'editing sessions.ts',
+        todos: { items: [], done: 1, total: 2, activeForm: 'A5 wiring runner' },
+      }),
+    );
+    expect(desc).toContain('views');
+    expect(desc).toContain('✓1/2 · A5 wiring runner');
+    expect(desc).toContain('editing sessions.ts');
+    // Project label present; when hyperlinks are on, the GitHub target survives.
+    expect(desc).toContain('agents-cli');
+    if (desc.includes('\x1b]8;;')) {
+      expect(desc).toContain('https://github.com/phnx-labs/agents-cli');
+    }
+  });
+
+  it('cleans harness noise from the live snippet without destroying identity', () => {
+    const desc = formatActiveRowDescription(
+      mk({
+        status: 'running',
+        label: 'views',
+        cwd: '/tmp/scratch',
+        preview: '<system-reminder>ignore</system-reminder>real work',
+      }),
+    );
+    expect(desc).toContain('views');
+    expect(desc).toContain('real work');
+    expect(desc).not.toContain('system-reminder');
   });
 });

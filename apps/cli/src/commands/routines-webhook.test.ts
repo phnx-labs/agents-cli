@@ -71,7 +71,7 @@ function makeHome(jobs: Record<string, unknown>[]): string {
 function runWebhook(home: string, args: string[]): ReturnType<typeof spawnSync> {
   return spawnSync('node', ['--import', 'tsx', 'src/index.ts', 'routines', 'webhook', ...args], {
     cwd: REPO_ROOT,
-    env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home, USERPROFILE: home, AGENTS_SKIP_MIGRATION: '1' },
+    env: { ...process.env, HOME: home, USERPROFILE: home, AGENTS_SKIP_MIGRATION: '1' },
     encoding: 'utf-8',
   });
 }

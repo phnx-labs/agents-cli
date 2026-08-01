@@ -6,7 +6,6 @@ import * as path from 'path';
 // Isolate the hosts cache under a temp HOME before state.js captures HOME at
 // import time.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-hosttasks-'));
-process.env.AGENTS_TEST_HOME = TEST_HOME;
 process.env.HOME = TEST_HOME;
 
 const { saveTask, findTaskBySessionId, findTaskByName } = await import('./tasks.js');

@@ -16,8 +16,6 @@ let tmpHome: string;
 
 beforeAll(async () => {
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-token-'));
-  // AGENTS_TEST_HOME takes precedence over HOME in state.ts (RUSH-2042).
-  process.env.AGENTS_TEST_HOME = tmpHome;
   process.env.HOME = tmpHome;
   tok = await import('./token.js');
 });

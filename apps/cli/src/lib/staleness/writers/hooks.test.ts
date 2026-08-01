@@ -30,7 +30,7 @@ function runHooksWriterFixture(scriptBody: string): unknown {
     `;
     const out = execFileSync('bun', ['--eval', script], {
       cwd: repoRoot,
-      env: { ...process.env, AGENTS_TEST_HOME: home, HOME: home },
+      env: { ...process.env, HOME: home },
       encoding: 'utf-8',
     });
     return JSON.parse(out.trim());

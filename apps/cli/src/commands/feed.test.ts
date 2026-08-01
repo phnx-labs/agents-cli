@@ -15,6 +15,7 @@ import {
 } from './feed.js';
 import { groupBlocksByOutcome } from '../lib/feed-outcome.js';
 import { GLYPH } from '../lib/comms-render.js';
+import { formatActivityLine } from '../lib/activity.js';
 
 const children: ChildProcess[] = [];
 
@@ -206,5 +207,18 @@ describe('sessionHintsFromActive', () => {
       prNumber: 12,
       worktreeSlug: 'rush-9-fix',
     });
+  });
+});
+
+describe('formatActivityLine', () => {
+  it('renders checklist milestone events', () => {
+    const base = { v: 1, ts: new Date().toISOString(), sessionId: 's', mailboxId: 's', host: 'zion', runtime: 'headless' } as const;
+    const taskCompleted = formatActivityLine({ ...base, event: 'task.completed', tier: 'milestone', agent: 'claude', detail: 'Write tests 2/3 done' });
+    expect(taskCompleted).toContain('task completed');
+    expect(taskCompleted).toContain('Write tests 2/3 done');
+
+    const checklistCreated = formatActivityLine({ ...base, event: 'checklist.created', tier: 'milestone', agent: 'claude', detail: '3 tasks' });
+    expect(checklistCreated).toContain('checklist created');
+    expect(checklistCreated).toContain('3 tasks');
   });
 });

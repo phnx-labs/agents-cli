@@ -23,7 +23,6 @@ import * as path from 'path';
 // getHistoryDir() (which loadLedger uses) points at our temp dir and the
 // ledger starts empty regardless of the developer's real ~/.agents.
 const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'live-team-home-'));
-process.env.AGENTS_TEST_HOME = fakeHome;
 process.env.HOME = fakeHome;
 fs.mkdirSync(path.join(fakeHome, '.agents'), { recursive: true });
 

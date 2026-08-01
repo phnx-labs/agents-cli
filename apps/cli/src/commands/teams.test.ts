@@ -32,7 +32,6 @@ function run(args: string[]): { stdout: string; status: number | null } {
     encoding: 'utf-8',
     env: {
       ...process.env,
-      AGENTS_TEST_HOME: home,
       HOME: home,
       AGENTS_NO_UPDATE_CHECK: '1',
       AGENTS_NO_USAGE_TRACK: '1',

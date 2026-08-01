@@ -18,14 +18,16 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Set AGENTS_TEST_HOME before any import so state.ts's module-level HOME
-// constant resolves into this test's private temp tree, not the real ~/.agents.
+// Set HOME before state.ts loads so its module-level root picks up the override
+// (both the devices registry and the hosts providers resolve paths from it).
 // USERPROFILE too: os.homedir() ignores HOME on Windows, and ssh-config.ts
-// builds ~/.ssh from os.homedir() — with only AGENTS_TEST_HOME set, the stanza
-// written below is invisible there and every lookup falls through.
+// builds ~/.ssh from os.homedir() — with only HOME set, the stanza written
+// below is invisible there and every lookup falls through.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-host-resolve-test-'));
-process.env.AGENTS_TEST_HOME = TEST_HOME;
 process.env.HOME = TEST_HOME;
+// Redirect the device registry dir too (RUSH-2042): getDevicesDir() reads this at
+// call time, so it survives the module-cache race a plain HOME override loses.
+process.env.AGENTS_DEVICES_DIR = path.join(TEST_HOME, '.agents', '.history', 'devices');
 process.env.USERPROFILE = TEST_HOME;
 
 const { resolveHost, listAllHosts, DeviceOffloadUnsupportedError } = await import('./registry.js');
