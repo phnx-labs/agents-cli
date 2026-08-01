@@ -108,31 +108,136 @@ export interface TestResult {
   ts: number;
 }
 
-/** Recognized test/build runners → the label we show. */
+/**
+ * Recognized test/build runners → the label we show.
+ *
+ * These match a *real invocation* of a runner, not any command that merely
+ * contains a runner token. In particular we must NOT fire on npm-script
+ * sub-targets like `bun test:setup`, `npm run test:watch`, or `pnpm test:ci` —
+ * those are setup/watch/CI-orchestration scripts, not a test run whose output we
+ * can scrape for a pass/fail verdict. A `test` token followed by `:something` is
+ * a distinct script name and is excluded via the `(?![:\w-])` guard.
+ */
 const TEST_RUNNERS: Array<{ re: RegExp; label: string }> = [
-  { re: /\b((?:bun|npm|yarn|pnpm)\s+(?:run\s+)?test|vitest|jest)\b/, label: 'tests' },
-  { re: /\bpytest\b/, label: 'pytest' },
-  { re: /\bgo\s+test\b/, label: 'go test' },
-  { re: /\bcargo\s+test\b/, label: 'cargo test' },
-  { re: /\b(tsc|tsc\s+--noEmit)\b/, label: 'tsc' },
+  // Package-manager `test` script: `bun test`, `npm test`, `npm run test`,
+  // `yarn test`, `pnpm test`. The negative lookahead `(?![:\w-])` rejects
+  // `test:watch` / `test-ci` / `testfoo` — only the bare `test` target counts.
+  { re: /\b(?:bun|npm|yarn|pnpm)\s+(?:run\s+)?test(?![:\w-])/, label: 'tests' },
+  // Direct binaries — `vitest`, `jest`, `mocha` (optionally via a runner). These
+  // are real invocations; a trailing subcommand like `vitest run` is fine.
+  { re: /\b(?:vitest|jest|mocha)(?![:\w-])/, label: 'tests' },
+  { re: /\bpytest(?![:\w-])/, label: 'pytest' },
+  { re: /\bgo\s+test(?![:\w-])/, label: 'go test' },
+  { re: /\bcargo\s+test(?![:\w-])/, label: 'cargo test' },
+  { re: /\btsc(?:\s+--noEmit)?(?![:\w-])/, label: 'tsc' },
 ];
+
+/**
+ * Anchored summary-line extractors, per runner family. Each returns a pass/fail
+ * verdict ONLY when it matches that runner's authoritative summary construct —
+ * never an arbitrary `\d+ pass`-shaped substring elsewhere in stdout. This is
+ * what stops `442 passwords generated`, `442 files`, or `442 passes/sec` from
+ * being reported as `442 pass`.
+ */
+function parseSummaryLine(output: string): { passed?: number; failed?: number } | undefined {
+  const lines = output.split(/\r?\n/);
+
+  // vitest: ` Tests  1 failed | 2 passed (3)` (mixed) or ` Tests  2 passed (2)`
+  // (all green). Leading indent + the `Tests` / `Test Files` label + double
+  // space is the summary row. Prefer the ` Tests ` row (test count) over the
+  // ` Test Files ` row (file count).
+  for (const label of ['Tests', 'Test Files']) {
+    for (const line of lines) {
+      const row = new RegExp(`^\\s*${label}\\s{2,}(.+)$`).exec(line);
+      if (!row) continue;
+      const seg = row[1];
+      const passed = /(\d+)\s+passed/.exec(seg);
+      const failed = /(\d+)\s+failed/.exec(seg);
+      // Only accept a vitest row that actually reports a pass/fail count.
+      if (passed || failed) {
+        return {
+          passed: passed ? +passed[1] : undefined,
+          failed: failed ? +failed[1] : 0,
+        };
+      }
+    }
+  }
+
+  // jest: `Tests:       1 failed, 2 passed, 3 total`. The `Tests:` label anchors
+  // it; order of failed/passed varies.
+  for (const line of lines) {
+    const row = /^\s*Tests:\s+(.+)$/.exec(line);
+    if (!row) continue;
+    const seg = row[1];
+    const passed = /(\d+)\s+passed/.exec(seg);
+    const failed = /(\d+)\s+failed/.exec(seg);
+    if (passed || failed) {
+      return { passed: passed ? +passed[1] : undefined, failed: failed ? +failed[1] : 0 };
+    }
+  }
+
+  // pytest: the summary rule line `==== 3 passed, 1 failed in 0.12s ====`. The
+  // surrounding `=` rule and the ` in <dur>s` tail anchor it to the real footer,
+  // not a stray `N passed` in captured stdout.
+  for (const line of lines) {
+    if (!/={3,}.*\bin\s+[\d.]+s\b.*={3,}/.test(line) && !/^={3,}.*={3,}$/.test(line)) continue;
+    if (!/\bin\s+[\d.]+m?s\b/.test(line)) continue;
+    const passed = /(\d+)\s+passed/.exec(line);
+    const failed = /(\d+)\s+failed/.exec(line);
+    const errors = /(\d+)\s+error/.exec(line);
+    if (passed || failed || errors) {
+      const failCount = (failed ? +failed[1] : 0) + (errors ? +errors[1] : 0);
+      return { passed: passed ? +passed[1] : undefined, failed: failed || errors ? failCount : 0 };
+    }
+  }
+
+  // bun test: a summary block of ` N pass` / ` N fail` lines (each its own line,
+  // leading-indented), closed by `Ran N tests across M files.`. Require the
+  // `Ran … tests` sentinel to be present so we only read bun's real summary
+  // block — bun also prints inline `(pass)`/`(fail)` per-test lines we ignore.
+  if (/^Ran\s+\d+\s+tests?\b/m.test(output)) {
+    let passed: number | undefined;
+    let failed: number | undefined;
+    for (const line of lines) {
+      const p = /^\s*(\d+)\s+pass$/.exec(line);
+      const f = /^\s*(\d+)\s+fail$/.exec(line);
+      if (p) passed = +p[1];
+      if (f) failed = +f[1];
+    }
+    if (passed !== undefined || failed !== undefined) {
+      return { passed, failed: failed ?? 0 };
+    }
+  }
+
+  // mocha: ` 2 passing` / ` 1 failing` (leading-indented, own line). The
+  // `passing`/`failing` gerund is mocha-specific and won't match `442 passwords`.
+  {
+    let passed: number | undefined;
+    let failed: number | undefined;
+    for (const line of lines) {
+      const p = /^\s*(\d+)\s+passing\b/.exec(line);
+      const f = /^\s*(\d+)\s+failing\b/.exec(line);
+      if (p) passed = +p[1];
+      if (f) failed = +f[1];
+    }
+    if (passed !== undefined || failed !== undefined) {
+      return { passed, failed: failed ?? 0 };
+    }
+  }
+
+  return undefined;
+}
 
 /** Parse pass/fail counts from common runner output. */
 function parseTestOutput(runner: string, output: string): { passed?: number; failed?: number; ok: boolean } {
-  // vitest/jest/bun: "N passed", "N failed"; pytest: "N passed, N failed".
-  // Take the LAST occurrence — runners print a per-file line first, then the
-  // authoritative aggregate ("Tests 4 failed | 294 passed") at the end.
-  const lastNum = (re: RegExp): number | undefined => {
-    let m: RegExpExecArray | null;
-    let val: number | undefined;
-    const g = new RegExp(re.source, 'gi');
-    while ((m = g.exec(output)) !== null) val = +m[1];
-    return val;
-  };
-  const passed = lastNum(/(\d+)\s+pass(?:ed)?/);
-  const failed = lastNum(/(\d+)\s+fail(?:ed|ures?)?/);
-  if (passed !== undefined || failed !== undefined) {
-    return { passed, failed, ok: true };
+  // Anchor to a recognized runner summary construct (vitest ` Tests `, jest
+  // `Tests:`, pytest `=== N passed in Xs ===`, bun's `N pass`/`N fail` block,
+  // mocha `N passing`) — never a blanket `\d+ pass`-shaped scrape over stdout.
+  // That blanket scrape used to report `442 passwords`, `442 files passed
+  // validation`, or a `442 passes/sec` benchmark as `442 pass`.
+  const summary = parseSummaryLine(output);
+  if (summary) {
+    return { ...summary, ok: true };
   }
   // tsc: no news is good news; "error TSxxxx" means failure.
   if (runner === 'tsc') {
