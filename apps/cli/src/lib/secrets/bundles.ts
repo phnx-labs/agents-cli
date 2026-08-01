@@ -1332,17 +1332,33 @@ export function readAndResolveBundleEnv(
     }
   }
 
-  // Only keychain-backed bundles can pop a Touch ID prompt and are the only ones
-  // the broker ever holds. A file-backed bundle resolves via passphrase with no
-  // prompt, so agentOnly must never block it — the broker never holds file
-  // bundles, so the throw would fire unconditionally and break a legitimate read.
+  // The headless guard exists only to keep a Touch ID sheet off the interactive
+  // user's screen — so it must block ONLY reads that can actually raise one.
+  // A file-backed bundle resolves via passphrase with no prompt (handled below,
+  // never held by the broker). A `never`/no-ACL keychain bundle is written
+  // WITHOUT the biometry access control at every tier (see writeBundle), so its
+  // reads are fully silent (no Touch ID, no broker) — exactly like a file
+  // bundle, and exactly the "automation-only" tier a headless daemon reads
+  // (daemon.ts:readDaemonClaudeOAuthToken). Learning the policy here is itself
+  // prompt-less: metadata items are written no-ACL at every tier, so readBundle
+  // reads them silently. An unreadable metadata read is treated as prompt-risky
+  // (throw) — the safe default.
   if (opts.agentOnly && backend === 'keychain') {
-    throw new Error(
-      `Secrets bundle '${name}' is not unlocked in the secrets agent, and this is a ` +
-      `headless/background process that must not raise a Touch ID prompt on the ` +
-      `interactive user's screen. Run 'agents secrets unlock ${name}' in a terminal ` +
-      `first, or set AGENTS_SECRETS_NO_PROMPT=0 to force an interactive prompt.`
-    );
+    let noAclBundle = false;
+    try {
+      noAclBundle = bundlePolicy(readBundle(name)) === 'never';
+    } catch {
+      noAclBundle = false;
+    }
+    if (!noAclBundle) {
+      throw new Error(
+        `Secrets bundle '${name}' is not unlocked in the secrets agent, and this is a ` +
+        `headless/background process that must not raise a Touch ID prompt on the ` +
+        `interactive user's screen. Run 'agents secrets unlock ${name}' in a terminal ` +
+        `first, or set AGENTS_SECRETS_NO_PROMPT=0 to force an interactive prompt.`
+      );
+    }
+    // never/no-ACL ⇒ fall through to the prompt-less keychain read below.
   }
 
   if (backend === 'file') assertFileBackendUsable(name);

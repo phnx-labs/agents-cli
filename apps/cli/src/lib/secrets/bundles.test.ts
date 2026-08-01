@@ -175,28 +175,52 @@ describe('canCacheResolvedEnv (broker cache shape)', () => {
 });
 
 describe('readAndResolveBundleEnv agent-only reads', () => {
-  it('fails before touching Keychain when the broker has no unlocked snapshot', () => {
-    let keychainCalls = 0;
-    const fail = () => { keychainCalls++; throw new Error('keychain must not be read'); };
-    const backend: KeychainBackend = {
-      has: fail,
-      get: fail,
-      set: fail,
-      delete: fail,
-      list: fail,
-    };
-    const previousBackend = setKeychainBackendForTest(backend);
-    const previousNoAgent = process.env.AGENTS_SECRETS_NO_AGENT;
-    process.env.AGENTS_SECRETS_NO_AGENT = '1';
-    try {
-      expect(() => readAndResolveBundleEnv('claude', { caller: 'daemon', agentOnly: true }))
-        .toThrow("Secrets bundle 'claude' is not unlocked in the secrets agent");
-      expect(keychainCalls).toBe(0);
-    } finally {
-      setKeychainBackendForTest(previousBackend);
-      if (previousNoAgent === undefined) delete process.env.AGENTS_SECRETS_NO_AGENT;
-      else process.env.AGENTS_SECRETS_NO_AGENT = previousNoAgent;
+  class MemBackend implements KeychainBackend {
+    store = new Map<string, string>();
+    has(item: string) { return this.store.has(item); }
+    get(item: string) {
+      const v = this.store.get(item);
+      if (v === undefined) throw new Error(`missing ${item}`);
+      return v;
     }
+    set(item: string, value: string) { this.store.set(item, value); }
+    delete(item: string) { return this.store.delete(item); }
+    list(prefix: string) { return [...this.store.keys()].filter((k) => k.startsWith(prefix)); }
+  }
+  let mem: MemBackend;
+  let prevBackend: KeychainBackend;
+  let prevNoAgent: string | undefined;
+  beforeEach(() => {
+    mem = new MemBackend();
+    prevBackend = setKeychainBackendForTest(mem);
+    prevNoAgent = process.env.AGENTS_SECRETS_NO_AGENT;
+    process.env.AGENTS_SECRETS_NO_AGENT = '1'; // disable the broker fast-path
+  });
+  afterEach(() => {
+    setKeychainBackendForTest(prevBackend);
+    if (prevNoAgent === undefined) delete process.env.AGENTS_SECRETS_NO_AGENT;
+    else process.env.AGENTS_SECRETS_NO_AGENT = prevNoAgent;
+  });
+
+  it('throws for an ACL-gated (daily) bundle with no broker/session snapshot — never raises a Touch ID sheet headlessly', () => {
+    writeBundleWithItems(
+      { name: 'apple.com', policy: 'daily', vars: { APPLE_TEAM_ID: 'keychain:APPLE_TEAM_ID' } },
+      new Map([[secretsKeychainItem('apple.com', 'APPLE_TEAM_ID'), '2HTP252L87']]),
+    );
+    expect(() => readAndResolveBundleEnv('apple.com', { caller: 'daemon', agentOnly: true }))
+      .toThrow("Secrets bundle 'apple.com' is not unlocked in the secrets agent");
+  });
+
+  it('resolves a never/no-ACL bundle silently in a headless read — the daemon automation path (no unlock, no session, no throw)', () => {
+    // A `never` bundle carries no biometry ACL, so its reads raise no Touch ID
+    // sheet — the headless guard must let it through, exactly as the routines
+    // daemon reads the `claude` OAuth token at startup (daemon.ts).
+    writeBundleWithItems(
+      { name: 'claude', policy: 'never', vars: { CLAUDE_CODE_OAUTH_TOKEN: 'keychain:CLAUDE_CODE_OAUTH_TOKEN' } },
+      new Map([[secretsKeychainItem('claude', 'CLAUDE_CODE_OAUTH_TOKEN'), 'sk-ant-oat-headless']]),
+    );
+    const { env } = readAndResolveBundleEnv('claude', { caller: 'daemon', agentOnly: true });
+    expect(env).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat-headless' });
   });
 });
 
