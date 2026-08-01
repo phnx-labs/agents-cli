@@ -31,6 +31,7 @@ import { stringWidth, truncateToWidth, padToWidth, terminalWidth } from '../lib/
 import type { SessionActivity, AwaitingReason } from '../lib/session/state.js';
 import { inferSessionState } from '../lib/session/state.js';
 import { discoverSessions, countSessionsInScope, resolveSessionById, isCompleteSessionId, searchContentIndex, parseTimeFilter, getSessionRoots, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
+import { findSessionsById } from '../lib/session/db.js';
 import { filterTeamSessions } from '../lib/session/team-filter.js';
 import { parseSession } from '../lib/session/parse.js';
 import { runRemoteSessions, buildForwardedArgs, ensureWholeIndex } from '../lib/session/remote.js';
@@ -2341,8 +2342,15 @@ export function resolveSessionQuery(pool: SessionMeta[], query: string): Session
   const normalized = query.trim();
   const completeId = isCompleteSessionId(normalized);
   const byIdMatches = resolveSessionById(pool, normalized);
-  if (byIdMatches.length > 0 || completeId) {
-    return { matches: byIdMatches, byId: true, completeId };
+  if (byIdMatches.length > 0) return { matches: byIdMatches, byId: true, completeId };
+
+  if (completeId) {
+    // The pool is only what discoverSessions walked — a minority of the index
+    // (measured: 2,798 of 7,614 rows), because it re-reads live agent homes and
+    // skips whole classes of indexed session. Declaring absence from the pool
+    // alone denied 1,315 sessions whose transcript is on this disk right now.
+    // Ask the index itself, the same authoritative lookup `fork` and `exec` use.
+    return { matches: findSessionsById(normalized), byId: true, completeId };
   }
   return { matches: filterSessionsByQuery(pool, normalized), byId: false, completeId };
 }

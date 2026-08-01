@@ -23,6 +23,7 @@ import chalk from 'chalk';
 import type { Command } from 'commander';
 import type { SessionMeta } from '../lib/session/types.js';
 import { discoverSessions, resolveSessionById, isCompleteSessionId } from '../lib/session/discover.js';
+import { findSessionsById } from '../lib/session/db.js';
 import { filterSessionsByQuery, parseAgentFilter } from './sessions.js';
 import { listLocalTranscripts, SYNC_AGENTS, type LocalTranscript } from '../lib/session/sync/agents.js';
 import { machineId } from '../lib/machine-id.js';
@@ -254,9 +255,13 @@ function selectSessions(metas: SessionMeta[], selectors: string[]): SessionMeta[
   const byId: SessionMeta[] = [];
   const unmatched: string[] = [];
   for (const sel of selectors) {
-    const hits = resolveSessionById(metas, sel.trim());
-    if (hits.length > 0) byId.push(...hits);
-    else unmatched.push(sel);
+    const trimmed = sel.trim();
+    // Same reason as resolveSessionQuery: the discovered pool is a minority of
+    // the index, so a complete id absent from it may still be indexed here.
+    const hits = resolveSessionById(metas, trimmed);
+    const resolved = hits.length > 0 || !isCompleteSessionId(trimmed) ? hits : findSessionsById(trimmed);
+    if (resolved.length > 0) byId.push(...resolved);
+    else unmatched.push(trimmed);
   }
   if (byId.length > 0 && unmatched.length === 0) {
     const seen = new Set<string>();

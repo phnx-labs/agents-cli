@@ -1003,17 +1003,24 @@ describe('resolveSessionQuery id-vs-search resolution', () => {
     expect(r.completeId).toBe(true);
   });
 
+  // Synthetic ids, so these assert the resolver and never the developer's own
+  // session index (a complete id that MISSES the pool now also consults the DB,
+  // so a real id here would resolve from disk and make the test machine-specific).
   it('resolves a session_-prefixed complete id by id, not by content', () => {
-    const prefixed = 'session_933f4131-f3ed-495d-946b-71825e9f6a25';
+    const prefixed = 'session_00000000-0000-4000-8000-000000000001';
     const mentions = meta({ id: 'aaaa1111-2222-4333-8444-555566667777', topic: `see ${prefixed}` });
-    expect(resolveSessionQuery([mentions], prefixed).matches).toEqual([]);
+    const r = resolveSessionQuery([mentions], prefixed);
+    expect(r.completeId).toBe(true);
+    expect(r.matches.map(s => s.id)).not.toContain(mentions.id);
     const real = meta({ id: prefixed, topic: 'kimi run' });
     expect(resolveSessionQuery([mentions, real], prefixed).matches.map(s => s.id)).toEqual([prefixed]);
   });
 
   it('resolves a ses_ ULID complete id by id, not by content', () => {
-    const ses = 'ses_0485d75c1ffewpzVfoI0ni6hW1';
+    const ses = 'ses_00000000000000000000000001';
     const mentions = meta({ id: 'bbbb1111-2222-4333-8444-555566667777', topic: `see ${ses}` });
-    expect(resolveSessionQuery([mentions], ses).matches).toEqual([]);
+    const r = resolveSessionQuery([mentions], ses);
+    expect(r.completeId).toBe(true);
+    expect(r.matches.map(s => s.id)).not.toContain(mentions.id);
   });
 });
