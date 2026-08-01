@@ -3456,7 +3456,10 @@ export async function openSingleAgentWithQueue(
   }
 
   if (command) {
-    await sendCommandWhenReady(terminal, command);
+    // Native (non-tmux) path — always agent-terminal, never a shell tab. Apply
+    // exec so the shell replaces itself with the runner and VS Code closes the
+    // tab when the agent exits. isShell is always false here.
+    await sendCommandWhenReady(terminal, wrapNativeAgentCommand(command, false));
   }
 
   // Arm agentReady detection so the session-file fast path can fire.
