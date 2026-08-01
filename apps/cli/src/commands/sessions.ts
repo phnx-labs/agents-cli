@@ -30,7 +30,7 @@ import { gatherRemoteList, runOnPeer } from '../lib/session/remote-list.js';
 import { stringWidth, truncateToWidth, padToWidth, terminalWidth } from '../lib/session/width.js';
 import type { SessionActivity, AwaitingReason } from '../lib/session/state.js';
 import { inferSessionState } from '../lib/session/state.js';
-import { discoverSessions, countSessionsInScope, resolveSessionById, searchContentIndex, parseTimeFilter, getSessionRoots, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
+import { discoverSessions, countSessionsInScope, resolveSessionById, isCompleteSessionId, searchContentIndex, parseTimeFilter, getSessionRoots, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
 import { filterTeamSessions } from '../lib/session/team-filter.js';
 import { parseSession } from '../lib/session/parse.js';
 import { runRemoteSessions, buildForwardedArgs, ensureWholeIndex } from '../lib/session/remote.js';
@@ -986,10 +986,15 @@ async function renderSessionPreview(
 ): Promise<void> {
   const discovered = await discoverSessions({ all: true, cwd: process.cwd(), limit: 5000 });
   const pool = applyScopeFilters(discovered, scope);
-  const matches = resolveSessionById(pool, query);
-  const session = (matches.length > 0 ? matches : filterSessionsByQuery(pool, query))[0];
+  const { matches, completeId } = resolveSessionQuery(pool, query);
+  const session = matches[0];
   if (!session) {
-    console.log(chalk.gray(`No session matches "${query}".`));
+    // A complete id that missed is not "no match for this text" — say which.
+    console.log(
+      completeId
+        ? chalk.gray(`No session with id ${query} on this machine.`)
+        : chalk.gray(`No session matches "${query}".`),
+    );
     return;
   }
   console.log(buildPreview(session));
@@ -2303,6 +2308,51 @@ function formatSearchMessage(options: SessionFilterOptions): string {
   return `Search sessions (${filters.join(', ')}):`;
 }
 
+/**
+ * How a `sessions <query>` argument was resolved against the pool.
+ *
+ * `byId` records that the rows came from an id lookup, so only then does an
+ * ambiguous result mean "your id prefix is too short". `completeId` records that
+ * the query was a whole session id: it is unique by construction, so a miss is
+ * final and must NOT widen into a text/content search.
+ */
+export interface SessionQueryResolution {
+  matches: SessionMeta[];
+  byId: boolean;
+  completeId: boolean;
+}
+
+/**
+ * The single entry point for turning a `sessions <query>` argument into rows.
+ *
+ * A complete session id resolves by id alone. Anything else keeps the existing
+ * ladder: id lookup first (so a short id still wins), then the ranked
+ * metadata+content search.
+ */
+export function resolveSessionQuery(pool: SessionMeta[], query: string): SessionQueryResolution {
+  const completeId = isCompleteSessionId(query);
+  const byIdMatches = resolveSessionById(pool, query);
+  if (byIdMatches.length > 0 || completeId) {
+    return { matches: byIdMatches, byId: true, completeId };
+  }
+  return { matches: filterSessionsByQuery(pool, query), byId: false, completeId };
+}
+
+/** Explain an ambiguous resolution: a short id can be lengthened, a search phrase cannot. */
+function ambiguityHint(byId: boolean): string {
+  return byId
+    ? 'Pass a longer ID to narrow it down.'
+    : 'That matched on text, not an id. Pass a session id, or narrow the search.';
+}
+
+/** Explain a complete-id miss, which no local rephrasing can fix. */
+function notFoundByIdMessage(query: string): string[] {
+  return [
+    chalk.red(`No session with id ${query} on this machine.`),
+    chalk.gray(`Search the fleet with: agents sessions ${query} --device <host>`),
+  ];
+}
+
 /** Filter and rank sessions by a multi-term search query across metadata and content. */
 export function filterSessionsByQuery(
   sessions: SessionMeta[],
@@ -2445,12 +2495,12 @@ async function renderArtifactsGlobal(
     tracker.stop();
 
     const allSessions = applyScopeFilters(discovered, scope);
-    const matches = resolveSessionById(allSessions, query);
-    const queryMatches = matches.length > 0 ? matches : filterSessionsByQuery(allSessions, query);
+    const { matches: queryMatches, byId, completeId } = resolveSessionQuery(allSessions, query);
 
     if (queryMatches.length === 0) {
       spinner.stop();
-      console.error(chalk.red(`No session found matching: ${query}`));
+      if (completeId) notFoundByIdMessage(query).forEach(l => console.error(l));
+      else console.error(chalk.red(`No session found matching: ${query}`));
       process.exit(1);
     }
     if (queryMatches.length > 1) {
@@ -2459,7 +2509,7 @@ async function renderArtifactsGlobal(
       for (const m of queryMatches.slice(0, 10)) {
         console.error(chalk.cyan(`  ${m.shortId}  ${m.id}  ${(m as any).label ?? m.topic ?? ''}`));
       }
-      console.error(chalk.gray('Pass a longer ID to narrow it down.'));
+      console.error(chalk.gray(ambiguityHint(byId)));
       process.exit(1);
     }
 
@@ -2494,14 +2544,20 @@ async function renderOneSession(
     const allSessions = applyScopeFilters(discovered, scope);
     let session: SessionMeta | undefined;
 
-    const matches = resolveSessionById(allSessions, query);
-    let queryMatches: SessionMeta[] = matches.length > 0 ? matches : filterSessionsByQuery(allSessions, query);
+    const resolution = resolveSessionQuery(allSessions, query);
+    let queryMatches: SessionMeta[] = resolution.matches;
+    let byId = resolution.byId;
 
-    if (queryMatches.length === 0) {
+    // Widen to the transcript content index only for a genuine search phrase. A
+    // complete id is unique, so widening could only ever surface a DIFFERENT
+    // session that happens to mention the id — which is what made `sessions
+    // <uuid>` render an unrelated transcript.
+    if (queryMatches.length === 0 && !resolution.completeId) {
       const contentResults = searchContentIndex(allSessions, query);
       if (contentResults.size > 0) {
         const matchedSessions = Array.from(contentResults.values())
           .sort((a, b) => (b._bm25Score ?? 0) - (a._bm25Score ?? 0));
+        byId = false;
         if (matchedSessions.length === 1) {
           session = matchedSessions[0];
         } else {
@@ -2521,6 +2577,9 @@ async function renderOneSession(
           renderClaudeHistoryOnlyId(query, historyEntry, allSessions);
           process.exit(1);
         }
+      } else if (resolution.completeId) {
+        notFoundByIdMessage(query).forEach(l => console.error(l));
+        process.exit(1);
       } else {
         console.error(chalk.red(`No session found matching: ${query}`));
         console.error(chalk.gray('Run "agents sessions" to browse sessions.'));
@@ -2535,7 +2594,7 @@ async function renderOneSession(
         for (const match of queryMatches.slice(0, 10)) {
           console.error(chalk.cyan(`  ${match.shortId}  ${match.id}  ${(match as any).label ?? match.topic ?? ''}`));
         }
-        console.error(chalk.gray('Pass a longer ID to narrow it down.'));
+        console.error(chalk.gray(ambiguityHint(byId)));
         process.exit(1);
       } else {
         session = queryMatches[0];

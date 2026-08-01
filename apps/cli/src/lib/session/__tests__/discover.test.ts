@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import Database from '../../sqlite.js';
 import { buildFtsQuery, getDB } from '../db.js';
-import { scanClaudeSession, parseCodexThreadNameIndex, shouldDeferRecentAppend, machineForSessionFile, discoverSessions, resolveSessionById, readGrokMeta } from '../discover.js';
+import { scanClaudeSession, parseCodexThreadNameIndex, shouldDeferRecentAppend, machineForSessionFile, discoverSessions, resolveSessionById, isCompleteSessionId, readGrokMeta } from '../discover.js';
 import { machineId } from '../sync/config.js';
 import { getHistoryDir } from '../../state.js';
 
@@ -362,5 +362,34 @@ describe('readGrokMeta', () => {
     const fp = path.join(dir, uuid, 'summary.json');
     fs.writeFileSync(fp, '{ not valid json');
     expect(readGrokMeta(fp)).toBeNull();
+  });
+});
+
+describe('isCompleteSessionId', () => {
+  it('accepts a bare 36-char UUID, in either case', () => {
+    expect(isCompleteSessionId('d3470b57-2af6-4c11-b1de-3fab94f43603')).toBe(true);
+    expect(isCompleteSessionId('D3470B57-2AF6-4C11-B1DE-3FAB94F43603')).toBe(true);
+  });
+
+  it('accepts a v7 UUID (the shape newer harnesses mint)', () => {
+    expect(isCompleteSessionId('019fbd2f-971a-7fb0-a213-3709a27cd12b')).toBe(true);
+  });
+
+  it('accepts the vendor-prefixed forms carried in the index', () => {
+    expect(isCompleteSessionId('session_933f4131-f3ed-495d-946b-71825e9f6a25')).toBe(true);
+    expect(isCompleteSessionId('ses_933f4131-f3ed-495d-946b-71825e9f6a25')).toBe(true);
+    expect(isCompleteSessionId('api-933f4131-f3ed-495d-946b-71825e9f6a25')).toBe(true);
+  });
+
+  it('rejects a short id, a truncated id, and a search phrase', () => {
+    expect(isCompleteSessionId('d3470b57')).toBe(false);
+    expect(isCompleteSessionId('d3470b57-2af6-4c11-b1de')).toBe(false);
+    expect(isCompleteSessionId('add auth middleware')).toBe(false);
+    expect(isCompleteSessionId('')).toBe(false);
+  });
+
+  it('rejects a UUID with trailing text, so a phrase quoting an id stays a search', () => {
+    expect(isCompleteSessionId('resume d3470b57-2af6-4c11-b1de-3fab94f43603')).toBe(false);
+    expect(isCompleteSessionId('d3470b57-2af6-4c11-b1de-3fab94f43603.jsonl')).toBe(false);
   });
 });

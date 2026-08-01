@@ -454,6 +454,27 @@ function normalizeCwd(cwd?: string): string {
   return safeRealpathSync(resolved) || resolved;
 }
 
+/** The optional vendor prefixes a session id can carry, mirroring the strips in
+ * {@link deriveShortId}. */
+const SESSION_ID_PREFIX = /^(session_|api-|ses_)/;
+/** Canonical 8-4-4-4-12 hex UUID (covers both v4 and the v7 ids newer harnesses mint). */
+const UUID_36 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * Whether a query is a session id in full, rather than an id prefix or a search
+ * phrase. True for a bare 36-char UUID and for one carrying a known vendor
+ * prefix (`session_…`, `api-…`, `ses_…`).
+ *
+ * Callers use this to decide that an id lookup is the ONLY admissible
+ * interpretation: a complete id is unique, so when it misses there is nothing
+ * left to widen to. Without the check, `sessions <uuid>` fell through to the
+ * FTS content search, which tokenizes the UUID and matches every transcript that
+ * merely mentions it — surfacing unrelated sessions as if they were id matches.
+ */
+export function isCompleteSessionId(query: string): boolean {
+  return UUID_36.test(query.trim().toLowerCase().replace(SESSION_ID_PREFIX, ''));
+}
+
 /**
  * Resolve a session by full or short ID. Accepts a pre-loaded session list
  * (fast path from discoverSessions) and falls back to a DB lookup for the
