@@ -82,8 +82,6 @@ export const loadBudget: ModuleLoader = async () => (await import('../../command
 export const loadAlias: ModuleLoader = async () => (await import('../../commands/alias.js')).registerAliasCommand;
 export const loadMine: ModuleLoader = async () => (await import('../../commands/mine.js')).registerMineCommand;
 export const loadPty: ModuleLoader = async () => (await import('../../commands/pty.js')).registerPtyCommands;
-export const loadDetach: ModuleLoader = async () => (await import('../../commands/detach.js')).registerDetachCommand;
-export const loadAttach: ModuleLoader = async () => (await import('../../commands/attach.js')).registerAttachCommand;
 export const loadTmux: ModuleLoader = async () => (await import('../../commands/tmux.js')).registerTmuxCommands;
 export const loadWatchdog: ModuleLoader = async () => (await import('../../commands/watchdog.js')).registerWatchdogCommand;
 export const loadBrowser: ModuleLoader = async () => (await import('../../commands/browser.js')).registerBrowserCommand;
@@ -201,8 +199,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   alias: [loadAlias],
   mine: [loadMine],
   pty: [loadPty],
-  detach: [loadDetach],
-  attach: [loadAttach],
   tmux: [loadTmux],
   watchdog: [loadWatchdog],
   browser: [loadBrowser],

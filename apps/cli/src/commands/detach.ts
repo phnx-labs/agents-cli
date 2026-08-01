@@ -1,8 +1,9 @@
 /**
- * `agents detach <id>` — send a live agent session to the background: stop its
- * interactive process and continue it headless, unattended, so it drives its
- * task to completion without holding a terminal. Bring it back with
- * `agents attach`.
+ * `agents sessions detach <id>` — send a live agent session to the background:
+ * stop its interactive process and continue it headless, unattended, so it drives
+ * its task to completion without holding a terminal. Bring it back with
+ * `agents sessions attach`. A sibling of `sessions focus`/`resume` on the session
+ * lifecycle axis.
  *
  * Agent-agnostic and version-pinned by construction: it re-invokes
  * `agents run <agent> "<nudge>" --resume <id> --headless`, which resolves the
@@ -140,7 +141,7 @@ export async function detachAction(id: string, opts: { local?: boolean } = {}): 
   // focus/jumpTo's remote branch.
   if (target.kind === 'remote') {
     console.log(chalk.gray(`${short} lives on ${target.machine} — detaching it there over SSH…`));
-    const rc = await runOnPeer(['detach', target.sessionId, '--local'], target.machine);
+    const rc = await runOnPeer(['sessions', 'detach', target.sessionId, '--local'], target.machine);
     if (rc === 'no-target') {
       console.error(chalk.red(`Can't reach ${target.machine} to detach ${short}.`));
       process.exitCode = 1;
@@ -170,7 +171,7 @@ export async function detachAction(id: string, opts: { local?: boolean } = {}): 
 
   console.log(
     chalk.green(`◒ Backgrounded ${agent} ${short}`) +
-      chalk.gray(` — running headless (pid ${pid}). Bring it back: agents attach ${short}`),
+      chalk.gray(` — running headless (pid ${pid}). Bring it back: agents sessions attach ${short}`),
   );
   console.log(chalk.gray(`  logs: ${logFile}`));
 }

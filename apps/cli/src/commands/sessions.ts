@@ -49,6 +49,8 @@ import { registerSessionsSyncCommand } from './sessions-sync.js';
 import { registerSessionsResumeCommand } from './sessions-resume.js';
 import { registerGoCommand } from './go.js';
 import { registerFocusCommand } from './focus.js';
+import { registerDetachCommand } from './detach.js';
+import { registerAttachCommand } from './attach.js';
 import { registerSessionsInjectCommand } from './sessions-inject.js';
 import { registerSessionsExportCommand } from './sessions-export.js';
 import { registerSessionsImportCommand } from './sessions-import.js';
@@ -2662,6 +2664,8 @@ export function registerSessionsCommands(program: Command): void {
   registerSessionsResumeCommand(sessionsCmd);
   registerGoCommand(sessionsCmd);
   registerFocusCommand(sessionsCmd);
+  registerDetachCommand(sessionsCmd);
+  registerAttachCommand(sessionsCmd);
   registerSessionsInjectCommand(sessionsCmd);
   registerSessionsExportCommand(sessionsCmd);
   registerSessionsImportCommand(sessionsCmd);

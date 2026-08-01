@@ -1,9 +1,9 @@
 /**
- * `agents attach <id>` — bring a backgrounded (or parked) agent session back to
- * the foreground: stop its headless continuation, then resume it interactively
- * in this terminal. The resume is version-pinned native resume (claude/codex) or
- * a `/continue` replay (others) — the same session, full history, the exact
- * inverse of `agents detach`.
+ * `agents sessions attach <id>` — bring a backgrounded (or parked) agent session
+ * back to the foreground: stop its headless continuation, then resume it
+ * interactively in this terminal. The resume is version-pinned native resume
+ * (claude/codex) or a `/continue` replay (others) — the same session, full
+ * history, the exact inverse of `agents sessions detach`.
  */
 import type { Command } from 'commander';
 import chalk from 'chalk';

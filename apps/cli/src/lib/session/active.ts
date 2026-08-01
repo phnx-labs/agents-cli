@@ -142,7 +142,7 @@ export interface ActiveSession {
   /**
    * Foreground/background presence for the detach/attach model:
    *   `attached`   — live interactive TUI you're watching;
-   *   `background` — detached: running headless, unattended (via `agents detach`);
+   *   `background` — detached: running headless, unattended (via `agents sessions detach`);
    *   `parked`     — the headless continuation has exited; the transcript is durable.
    * Absent for ad-hoc headless runs and cloud/team rows, which aren't on the
    * foreground/background axis. Folded on at the end of {@link getActiveSessions}

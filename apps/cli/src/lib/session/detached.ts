@@ -1,6 +1,6 @@
 /**
- * Detached-session store — the record `agents detach` writes and both
- * `agents attach` and the active-session scan read to know an agent is
+ * Detached-session store — the record `agents sessions detach` writes and both
+ * `agents sessions attach` and the active-session scan read to know an agent is
  * "backgrounded": running headless with no terminal, continuing its task
  * unattended.
  *
@@ -23,7 +23,7 @@ export interface DetachRecord {
   sessionId: string;
   agent: string;
   cwd?: string;
-  /** pid of the detached headless continuation `agents detach` spawned. */
+  /** pid of the detached headless continuation `agents sessions detach` spawned. */
   headlessPid: number;
   /**
    * Start-time fingerprint of {@link headlessPid} at spawn, so a liveness check

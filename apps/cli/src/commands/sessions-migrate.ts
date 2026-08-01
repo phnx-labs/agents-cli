@@ -86,7 +86,7 @@ interface MigrateOptions {
 export function registerSessionsMigrateCommand(sessionsCmd: Command): void {
   const cmd = sessionsCmd
     .command('migrate [session-id]')
-    .alias('detach')
+    .alias('relocate')
     .description('Relocate a running session onto another machine (fleet worker, device, or ephemeral box), then stop the source here.')
     .option('--auto', 'Pick the best target host automatically (idle fleet worker preferred)')
     .option('--host <name>', 'Explicit target: an enrolled host, a device, or a warm ephemeral box slug')

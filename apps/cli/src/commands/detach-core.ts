@@ -1,5 +1,5 @@
 /**
- * Pure core of `agents detach` — the nudge, the resumed-run argv, and the id
+ * Pure core of `agents sessions detach` — the nudge, the resumed-run argv, and the id
  * resolver. Kept import-light (only a type import) so it is unit-tested without
  * loading the live-session discovery graph.
  */
