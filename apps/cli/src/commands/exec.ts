@@ -18,7 +18,7 @@ import { getUserAgentsDir } from '../lib/state.js';
 import type { CrabboxBox } from '../lib/crabbox/cli.js';
 import { parseLoopInterval } from '../lib/loop.js';
 import type { RotateResult } from '../lib/rotate.js';
-import { AGENTS } from '../lib/agents.js';
+import { AGENTS, resolveAgentName, isAgentHardDeprecated, hardDeprecationError } from '../lib/agents.js';
 import { recordDispatchedRun } from '../lib/audit/log.js';
 import { maybeShowStarNudge } from '../lib/star-nudge.js';
 import { warnUnpushedWork, shouldWarnUnpushed } from '../lib/warn-unpushed.js';
@@ -739,6 +739,13 @@ export function registerRunCommand(program: Command): void {
       let normalizedAgentSpec = accountPicker.normalizedAgentSpec;
       if (!accountPicker.valid) {
         console.error(chalk.red(`Invalid account picker target: ${agentSpec}. Use agents run <agent>@.`));
+        process.exit(1);
+      }
+
+      // Hard-deprecated harnesses cannot be run — point the user at the successor.
+      const runBaseAgentId = resolveAgentName(normalizedAgentSpec.split('@')[0]);
+      if (runBaseAgentId && isAgentHardDeprecated(runBaseAgentId)) {
+        console.error(chalk.red(hardDeprecationError(runBaseAgentId)));
         process.exit(1);
       }
 

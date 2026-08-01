@@ -366,7 +366,7 @@ One machine is set up the way you like it. Make every other machine match -- sam
 fleet:
   devices: all              # every online registered device (minus this one)
   defaults:
-    agents: [claude@latest, codex@latest, gemini@latest]
+    agents: [claude@latest, codex@latest, antigravity@latest]
     sync: [user]            # config scopes to reconcile
     login: sync             # propagate logins where the token is portable
 ```
@@ -379,7 +379,7 @@ agents apply --only agents,config   # limit dimensions (agents, config, login)
 agents apply --no-login             # skip login propagation
 ```
 
-`agents apply` (`ag apply`) probes every target over the existing SSH transport, then reconciles it to the profile: installs missing agents, upgrades `agents-cli`, syncs the named config scopes, and **propagates logins** so a host signed in once seeds the fleet -- turning "6 hosts x 8 harnesses = 48 OAuth flows" into one. Portable credential files (claude, codex, gemini, grok, kimi, opencode, droid, antigravity) stream to each target over encrypted SSH stdin, never shell-interpolated, and land at `0600`. **Honest boundary:** macOS keychain-bound tokens (claude, antigravity on a Mac target) can't be extracted -- those surface as a one-time manual login, never faked. `--plan` / `--dry-run` shows the full matrix without touching anything.
+`agents apply` (`ag apply`) probes every target over the existing SSH transport, then reconciles it to the profile: installs missing agents, upgrades `agents-cli`, syncs the named config scopes, and **propagates logins** so a host signed in once seeds the fleet -- turning "6 hosts x 8 harnesses = 48 OAuth flows" into one. Portable credential files (claude, codex, grok, kimi, opencode, droid, antigravity) stream to each target over encrypted SSH stdin, never shell-interpolated, and land at `0600`. **Honest boundary:** macOS keychain-bound tokens (claude, antigravity on a Mac target) can't be extracted -- those surface as a one-time manual login, never faked. `--plan` / `--dry-run` shows the full matrix without touching anything.
 
 See [docs/fleet.md](apps/cli/docs/fleet.md) for the manifest schema and reconcile semantics.
 
@@ -1178,9 +1178,9 @@ Same approach as nvm, pyenv, and rbenv — battle-tested by millions of develope
 
 Add a `.agents/` directory at your project root with your skills, hooks, rules, and commands. Resources merge automatically: project > user (`~/.agents/`) > system (`~/.agents-system/`). Commit it with your repo and teammates get the same agent environment.
 
-### Do I need to write separate rules for each agent (CLAUDE.md, GEMINI.md, etc.)?
+### Do I need to write separate rules for each agent (CLAUDE.md, .cursorrules, etc.)?
 
-No. Write one `AGENTS.md` — it's the canonical source. We automatically sync it to each agent's expected location (`CLAUDE.md` for Claude Code, `GEMINI.md` for Gemini CLI, `.cursorrules` for Cursor). Same content, zero duplication.
+No. Write one `AGENTS.md` — it's the canonical source. We automatically sync it to each agent's expected location (`CLAUDE.md` for Claude Code, `AGENTS.md` for Antigravity, `.cursorrules` for Cursor). Same content, zero duplication.
 
 ### Do agents use API keys or subscriptions?
 

@@ -23,6 +23,7 @@ import {
   readDaemonLog,
   getDaemonStatus,
 } from '../lib/daemon.js';
+import { resolveAgentName, isAgentHardDeprecated, hardDeprecationError } from '../lib/agents.js';
 import { humanizeCron, humanizeNextRun, formatRepoLink, REPO_DISPLAY_MAX } from '../lib/routines-format.js';
 import {
   listJobs as listAllJobs,
@@ -604,6 +605,16 @@ export function registerRoutinesCommands(program: Command): void {
         if (!options.agent && !options.workflow && !options.command) {
           console.error(chalk.red('An agent, workflow, or command is required (use --agent, --workflow, or --command)'));
           process.exit(1);
+        }
+
+        // Hard-deprecated harnesses cannot be scheduled — refuse at create time so
+        // no new recurring job silently fails against a retired backend.
+        if (options.agent) {
+          const routineAgentId = resolveAgentName(options.agent);
+          if (routineAgentId && isAgentHardDeprecated(routineAgentId)) {
+            console.error(chalk.red(hardDeprecationError(routineAgentId)));
+            process.exit(1);
+          }
         }
 
         // Command routines run a plain shell and take no prompt; agent/workflow routines require one.
