@@ -2353,9 +2353,10 @@ export interface SessionQueryResolution {
 /**
  * The single entry point for turning a `sessions <query>` argument into rows.
  *
- * A complete session id resolves by id alone. Anything else keeps the existing
- * ladder: id lookup first (so a short id still wins), then the ranked
- * metadata+content search.
+ * An id-shaped query — a complete id OR a hex short-id/prefix (looksLikeSessionId)
+ * — resolves by id alone, through the index, and never falls back to content
+ * search (a bare id must not surface every transcript that merely mentions it).
+ * A genuine search phrase keeps the ranked metadata+content search.
  */
 export function resolveSessionQuery(pool: SessionMeta[], query: string): SessionQueryResolution {
   // Normalize ONCE here. isCompleteSessionId trims but resolveSessionById does
@@ -2547,7 +2548,7 @@ async function renderArtifactsGlobal(
 
     if (queryMatches.length === 0) {
       spinner.stop();
-      if (completeId) notFoundByIdMessage(query).forEach(l => console.error(l));
+      if (byId) notFoundByIdMessage(query).forEach(l => console.error(l));
       else console.error(chalk.red(`No session found matching: ${query}`));
       process.exit(1);
     }
@@ -2629,7 +2630,7 @@ async function renderOneSession(
           renderClaudeHistoryOnlyId(query, historyEntry, allSessions);
           process.exit(1);
         }
-      } else if (completeId) {
+      } else if (byId) {
         notFoundByIdMessage(query).forEach(l => console.error(l));
         process.exit(1);
       } else {
