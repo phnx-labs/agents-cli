@@ -37,6 +37,16 @@ export interface SessionEvent {
   output?: string;
   /** Internal: marks tool_use events from local commands */
   _local?: boolean;
+  /**
+   * Internal: marks a `role=user` message that is harness-injected scaffolding
+   * (Claude `<bash-input>`/`<bash-stdout>` from `!`-prefix runs, `<system-reminder>`,
+   * `<task-notification>`, `<command-*>` wrappers, `[Request interrupted]`, skill
+   * bodies, hook feedback) rather than a genuine user turn. Set centrally in
+   * `parseSession` via `isSyntheticUserMessage`. Such events are excluded from
+   * `--include user` and are not counted as turn starts by `--first`/`--last`,
+   * but stay in the default full stream so `--markdown` keeps full fidelity.
+   */
+  _synthetic?: boolean;
   // Fields for usage events (type === 'usage')
   model?: string;
   inputTokens?: number;

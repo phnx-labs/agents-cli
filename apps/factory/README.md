@@ -45,7 +45,7 @@ curl -fsSL https://raw.githubusercontent.com/phnx-labs/agents-cli/main/scripts/i
 
 | Shortcut | Action |
 | --- | --- |
-| `Cmd+Shift+A` | Spawn new agent |
+| `Cmd+Shift+A` | Spawn new agent — smart pick: agent type by recent/frequent usage, version balanced, least-busy host |
 | `Cmd+Shift+L` | Label agent by task |
 | `Cmd+Shift+C` | Clear and restart agent |
 | `Cmd+Shift+D` | Open Dashboard |

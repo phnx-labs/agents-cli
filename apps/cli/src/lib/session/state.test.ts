@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import * as path from 'node:path';
 import type { SessionEvent } from './types.js';
 import {
   inferActivity,
@@ -406,12 +407,24 @@ describe('extractTodoProgress (RUSH-1380)', () => {
     expect(droid).toMatchObject({ done: 1, total: 2, activeForm: 'Doing two' });
   });
 
+  // Fixture paths are built through `path` so the case reads the same on every
+  // platform. extractRecentDirectoriesTouched resolves with the host's path
+  // flavor (its inputs are always host-native: db.ts:852 bails before enrichment
+  // when filePath is empty, which is exactly how remote transcripts are indexed
+  // — hosts/session-index.ts sets `filePath: ''`). A hardcoded POSIX literal
+  // therefore breaks on win32, where `path.resolve('/repo')` is drive-rooted
+  // (`D:\repo`) while `path.isAbsolute('/repo/tests')` is already true, so the
+  // relative and absolute forms of the same directory stop string-matching and
+  // dedup silently splits one entry into two.
   it('derives recent directories from edit/write and shell cwd events', () => {
+    const root = path.resolve('/repo');
+    const src = path.join(root, 'src');
+    const tests = path.join(root, 'tests');
     expect(extractRecentDirectoriesTouched([
-      tool('Edit', { file_path: 'src/a.ts' }),
-      tool('exec_command', { cmd: 'bun test', workdir: '/repo/tests' }),
-      tool('Write', { file_path: '/repo/src/b.ts' }),
-    ], '/repo')).toEqual(['/repo/tests', '/repo/src']);
+      tool('Edit', { file_path: path.join('src', 'a.ts') }),  // relative → resolved against cwd, then dirname'd
+      tool('exec_command', { cmd: 'bun test', workdir: tests }),
+      tool('Write', { file_path: path.join(src, 'b.ts') }),   // absolute → same dir as the Edit, so it dedups
+    ], root)).toEqual([tests, src]);
   });
   it('tallies done/total and surfaces the in-progress activeForm', () => {
     const p = extractTodoProgress({

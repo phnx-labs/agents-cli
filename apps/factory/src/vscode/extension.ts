@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { BUILT_IN_AGENTS, getBuiltInByKey, getBuiltInDefByTitle, getBuiltInByPrefix, pickLatestVersion, STRATEGY_LAUNCH_AGENTS, modeFlagForAgent, AgentLaunchMode, RunStrategy, buildAgentLaunchCommand } from '../core/agents';
+import { BUILT_IN_AGENTS, getBuiltInByKey, getBuiltInDefByTitle, getBuiltInByPrefix, pickLatestVersion, STRATEGY_LAUNCH_AGENTS, modeFlagForAgent, AgentLaunchMode, RunStrategy, buildAgentLaunchCommand, wrapNativeAgentCommand } from '../core/agents';
 import { parseSpawnRequest, SpawnRequest } from '../core/spawn';
 import {
   AgentConfig,
@@ -92,7 +92,9 @@ import { registerReconnect, hasTmuxMapping, NonRetryableError, type ReattachTarg
 import { normalizeTerminalMode, resolveTerminalMode } from '../core/terminalMode';
 import { DEFAULT_DISPLAY_PREFERENCES } from '../core/settings';
 import * as readiness from './terminalReadiness';
-import { resolveAlias, isAgentInstalled } from '../core/agentModels';
+import { resolveAlias, isAgentInstalled, checkInstalledAgentsViaCli } from '../core/agentModels';
+import { pickAgentByUsage } from '../core/agentUsage';
+import type { RemoteSession } from '../core/remoteSessions';
 // readAgentRunStrategy no longer needed: agents-cli reads strategy from
 // agents.yaml itself when invoked via `agents run`.
 import { resolveAgentsBin, AgentsBinNotFoundError } from '../core/agentsBin';
@@ -1188,11 +1190,50 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('agents.newAgent', async () => {
-      // Default is always Claude
-      const agentConfig = getBuiltInByTitle(context.extensionPath, defaultAgentTitle);
-      if (agentConfig) {
-        await openSingleAgent(context, agentConfig);
+      // Smart three-tier launch (RUSH-2029):
+      //   1. Agent TYPE by recent/frequent usage (last-24h weighted), falling back
+      //      to the configured default when there is no usable history.
+      //   2. Version/account balancing via --strategy balanced.
+      //   3. Device load balancing via resolveBalancedHost (least-busy online host).
+      const defaultKey = getBuiltInDefByTitle(defaultAgentTitle)?.key ?? 'claude';
+
+      // Only agents installed + signed-in on this machine are eligible. shell is
+      // never a "usage" target, so drop it from the candidate set.
+      const installedMap = await checkInstalledAgentsViaCli();
+      const installed = Object.entries(installedMap)
+        .filter(([key, ok]) => ok && key !== 'shell')
+        .map(([key]) => key);
+
+      // Fleet-wide recent history (local + every online device), the same sweep the
+      // Recap ledger uses. Per-host failures are swallowed there, so an empty sweep
+      // simply yields the default fallback below.
+      let sessions: RemoteSession[] = [];
+      try {
+        const { fetchRecapSessions } = await import('./remoteSessions.vscode');
+        sessions = await fetchRecapSessions(20, settings.getSettings(context).projectRules ?? []);
+      } catch (err) {
+        console.error('[agents.newAgent] recap sweep failed:', err);
       }
+
+      const chosenKey = pickAgentByUsage(sessions, installed, defaultKey, Date.now());
+      if (!chosenKey) {
+        // Neither history nor an installed default — leave the flow untouched.
+        vscode.window.showWarningMessage('New Agent: no installed agent available to launch.');
+        return;
+      }
+
+      const chosenDef = getBuiltInByKey(chosenKey);
+      const agentConfig = chosenDef && getBuiltInByTitle(context.extensionPath, chosenDef.title);
+      if (!agentConfig) return;
+
+      // Tier 3: auto-pick the least-busy healthy device (undefined = local).
+      const host = await resolveBalancedHost(undefined);
+
+      // Tier 2: --strategy balanced load-balances the version/account.
+      await openSingleAgent(context, agentConfig, undefined, undefined, 'balanced', host);
+
+      const hostLabel = host ? ` on ${host}` : '';
+      vscode.window.setStatusBarMessage(`New Agent: ${chosenDef!.title} (balanced${hostLabel})`, 4000);
     })
   );
 
@@ -2096,7 +2137,12 @@ async function openSingleAgent(
   }
 
   if (command) {
-    await sendCommandWhenReady(terminal, command);
+    // In native (non-tmux) mode, prefix the launch command with `exec` so the
+    // shell replaces itself with the agent runner. When the agent exits the
+    // terminal process exits too, which causes VS Code to close the tab
+    // automatically — mirroring the pane-died behaviour tmux mode already has.
+    // wrapNativeAgentCommand is a no-op for shell tabs.
+    await sendCommandWhenReady(terminal, wrapNativeAgentCommand(command, agentKey === 'shell'));
     readiness.armAgentReady(terminal, agentKey && sessionId
       ? { agentKey, sessionId, cwd }
       : {});
@@ -3526,7 +3572,10 @@ export async function openSingleAgentWithQueue(
   }
 
   if (command) {
-    await sendCommandWhenReady(terminal, command);
+    // Native (non-tmux) path — always agent-terminal, never a shell tab. Apply
+    // exec so the shell replaces itself with the runner and VS Code closes the
+    // tab when the agent exits. isShell is always false here.
+    await sendCommandWhenReady(terminal, wrapNativeAgentCommand(command, false));
   }
 
   // Arm agentReady detection so the session-file fast path can fire.

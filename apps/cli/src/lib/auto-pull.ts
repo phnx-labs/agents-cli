@@ -2,12 +2,13 @@
  * Background sync for tracked git repos:
  *   - System repo (~/.agents/.system/) is read-only locally — fast-forward auto-pull is safe.
  *   - User repo (~/.agents/) and enabled extras may have local commits, so we only
- *     `git fetch` and write a status marker. Next CLI invocation surfaces a one-line
- *     notice if upstream is ahead. Pulling is left to the user via `agents repo pull`.
+ *     `git fetch` and write a status marker. `agents doctor` surfaces these markers
+ *     as a "Repo updates" section instead of printing to stderr on every command.
+ *     Pulling is left to the user via `agents repo pull`.
  *
  * Public API:
- *   spawnDetachedSync()           — fire-and-forget; never blocks the foreground command.
- *   printPendingUpdateNotices()   — synchronous; reads markers and prints + consumes them.
+ *   spawnDetachedSync()      — fire-and-forget; never blocks the foreground command.
+ *   readRepoBehindMarkers()  — synchronous; reads markers without consuming them.
  */
 
 import * as fs from 'fs';
@@ -71,21 +72,29 @@ export function spawnDetachedSync(): void {
 }
 
 /**
- * Read any pending status markers and print one-line notices for repos that
- * are behind upstream. Markers are deleted after printing so notices don't
- * repeat on every invocation. Synchronous, cheap (small JSON files).
+ * Read all current status markers and return those where the local repo is
+ * behind upstream. Markers are NOT deleted — they persist until the next
+ * background fetch overwrites them with fresh data.
+ *
+ * Synchronous, cheap (small JSON files). Used by `agents doctor` to surface
+ * repo-behind warnings in one place instead of printing to stderr on every
+ * command.
+ *
+ * @param fetchDir - Override the fetch state dir (for tests). Defaults to the
+ *   production getFetchCacheDir() path.
  */
-export function printPendingUpdateNotices(): void {
-  const dir = fetchStateDir();
-  if (!fs.existsSync(dir)) return;
+export function readRepoBehindMarkers(fetchDir?: string): FetchStatusMarker[] {
+  const dir = fetchDir ?? fetchStateDir();
+  if (!fs.existsSync(dir)) return [];
 
   let entries: string[] = [];
   try {
     entries = fs.readdirSync(dir);
   } catch {
-    return;
+    return [];
   }
 
+  const result: FetchStatusMarker[] = [];
   for (const name of entries) {
     if (!name.endsWith('.status.json')) continue;
     const file = path.join(dir, name);
@@ -93,19 +102,10 @@ export function printPendingUpdateNotices(): void {
     try {
       marker = JSON.parse(fs.readFileSync(file, 'utf-8'));
     } catch {
-      try { fs.unlinkSync(file); } catch { /* ignore */ }
       continue;
     }
-    if (!marker || marker.behind <= 0) {
-      try { fs.unlinkSync(file); } catch { /* ignore */ }
-      continue;
-    }
-
-    const repoLabel = marker.alias === 'user' ? '~/.agents/' : marker.alias;
-    process.stderr.write(
-      `agents-cli: ${repoLabel} is ${marker.behind} commit${marker.behind === 1 ? '' : 's'} ` +
-        `behind ${marker.branch} — run 'agents repo pull ${marker.alias}' to update.\n`,
-    );
-    try { fs.unlinkSync(file); } catch { /* ignore */ }
+    if (!marker || marker.behind <= 0) continue;
+    result.push(marker);
   }
+  return result;
 }

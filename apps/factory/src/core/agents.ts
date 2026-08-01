@@ -206,6 +206,20 @@ export function buildAgentLaunchCommand(
   return command;
 }
 
+/**
+ * Wrap a native-mode agent launch command with `exec` so the shell process is
+ * replaced by the agent runner. When the runner exits the terminal process exits
+ * too, which causes VS Code to close the tab automatically — mirroring the
+ * pane-died behaviour tmux mode already has.
+ *
+ * Shell tabs must NOT be exec-prefixed: the user drives them interactively and
+ * keeping the parent shell alive is the expected behaviour.
+ */
+export function wrapNativeAgentCommand(command: string, isShell: boolean): string {
+  if (!command || isShell) return command;
+  return `exec ${command}`;
+}
+
 // Agents that expose the per-strategy launch trio (Latest / Balanced / Pinned).
 // These are the version- and account-managed agents that route through
 // `agents run <agent>` so the agents-cli can apply a version pin or strategy.
