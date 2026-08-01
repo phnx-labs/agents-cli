@@ -17,7 +17,7 @@ const SESSIONS_DIR = getSessionsDir();
 const DB_PATH = getSessionsDbPath();
 
 /** Current schema version; bumped when migrations are added. */
-const SCHEMA_VERSION = 15;
+const SCHEMA_VERSION = 16;
 
 /**
  * Canonicalize a file path for use as a scan_ledger key. The same physical
@@ -370,6 +370,20 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     if (!cols.some(c => c.name === 'parser_state')) db.exec(`ALTER TABLE scan_ledger ADD COLUMN parser_state TEXT`);
     if (!cols.some(c => c.name === 'content_text')) db.exec(`ALTER TABLE scan_ledger ADD COLUMN content_text TEXT`);
     db.exec(`DELETE FROM scan_ledger;`);
+  }
+
+  if (fromVersion < 16) {
+    // v15 → v16: repair rows poisoned by the empty-shortId bug (now fixed at the
+    // source in deriveShortId). A session id that was only a known prefix — a bare
+    // `session_` dir, an id of exactly `api-` or `ses_` — derived to '' via
+    // `id.replace(prefix, '').slice(0, 8)`, passed the `short_id TEXT NOT NULL`
+    // column (empty string is not NULL), yet matched nothing in the
+    // `short_id LIKE ?` picker lookups. The parser no longer produces '', but
+    // existing rows don't self-heal: an empty short_id is not re-parsed unless its
+    // file changes, and an orphaned row (file gone) never re-parses at all. Repair
+    // in place — `substr(id, 1, 8)` is non-empty because `id` is the non-empty
+    // primary key — so every corrupt row becomes addressable. No rescan needed.
+    db.exec(`UPDATE sessions SET short_id = substr(id, 1, 8) WHERE short_id IS NULL OR short_id = ''`);
   }
 }
 
