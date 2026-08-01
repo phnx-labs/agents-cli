@@ -16,6 +16,8 @@ import {
   deprecationNotice,
   formatClaudeOrgLabel,
   getAccountInfo,
+  hardDeprecationError,
+  hardDeprecationNotice,
   isClaudeCredentialFileBlank,
   resolveAgentName,
   resolveLastActive,
@@ -197,19 +199,17 @@ describe.skipIf(IS_WINDOWS)('MCP CLI execution', () => {
     expect(log).not.toContain('ARG:--\n');
   });
 
-  it('registers Gemini HTTP MCP servers with native transport args', async () => {
+  it('blocks MCP registration for hard-deprecated gemini', async () => {
     const dir = makeTempDir();
     const { binary, logPath } = writeArgLogger(dir);
 
     const result = runAgentsModule(
       `registerMcp('gemini', 'docs', 'https://developers.openai.com/mcp', 'project', 'http', { binary: ${JSON.stringify(binary)}, home: ${JSON.stringify(dir)} })`
-    ) as { success: boolean };
+    ) as { success: boolean; error?: string };
 
-    const log = fs.readFileSync(logPath, 'utf-8');
-    expect(result.success).toBe(true);
-    expect(log).toContain('ARG:--transport\nARG:http\nARG:--scope\nARG:project');
-    expect(log).toContain('ARG:docs\nARG:https://developers.openai.com/mcp');
-    expect(log).not.toContain('ARG:--\n');
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('Agent does not support MCP');
+    expect(fs.existsSync(logPath)).toBe(false);
   });
 
   it('skips HTTP MCP registration for agents without native HTTP support', async () => {
@@ -236,7 +236,7 @@ describe.skipIf(IS_WINDOWS)('MCP CLI execution', () => {
     expect(result.error).toBe('skipped: HTTP MCP headers are only supported for Claude registration');
   });
 
-  it('skips HTTP MCP headers for agents that accept HTTP but not headers (gemini)', async () => {
+  it('blocks HTTP MCP headers for hard-deprecated gemini before registration', async () => {
     const dir = makeTempDir();
     const { binary } = writeArgLogger(dir);
 
@@ -245,7 +245,7 @@ describe.skipIf(IS_WINDOWS)('MCP CLI execution', () => {
     ) as { success: boolean; error?: string };
 
     expect(result.success).toBe(false);
-    expect(result.error).toBe('skipped: HTTP MCP headers are only supported for Claude registration');
+    expect(result.error).toBe('Agent does not support MCP');
   });
 });
 
@@ -923,12 +923,13 @@ describe('claudeHomeHasOwnCredential (RUSH-1979 — rotated-account token drop)'
 });
 
 describe('agent deprecation warnings', () => {
-  it('marks gemini deprecated by Google with a dated notice and antigravity successor', () => {
+  it('marks gemini hard-deprecated by Google with a dated notice and antigravity successor', () => {
     const dep = AGENTS.gemini.deprecated;
     expect(dep).toBeDefined();
     expect(dep?.by).toBe('Google');
     expect(dep?.date).toBe('June 18, 2026');
     expect(dep?.replacement).toBe('antigravity');
+    expect(dep?.hard).toBe(true);
   });
 
   it('builds a notice whose header names the agent, vendor, and date and points at the successor', () => {
@@ -964,6 +965,13 @@ describe('agent deprecation warnings', () => {
     expect(printed.length).toBeGreaterThan(0);
     // chalk wraps in ANSI codes; assert the visible substring survives.
     expect(printed.join('\n')).toContain('was deprecated by Google');
+  });
+
+  it('builds a hard-deprecation error that tells users to install antigravity', () => {
+    const lines = hardDeprecationNotice('gemini');
+    expect(lines).not.toBeNull();
+    expect(lines![0]).toBe('Gemini is no longer supported by agents-cli because Google retired it (June 18, 2026).');
+    expect(hardDeprecationError('gemini')).toContain('Use Antigravity instead:  agents add antigravity');
   });
 });
 

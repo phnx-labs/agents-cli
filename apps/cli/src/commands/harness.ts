@@ -41,7 +41,7 @@ export function registerHarnessCommands(program: Command): void {
     .addHelpText(
       'after',
       `
-A custom harness pins a host CLI (opencode, claude, codex, grok, gemini, ...) to a
+A custom harness pins a host CLI (opencode, claude, codex, grok, antigravity, ...) to a
 model and gives it a name. 'agents run <name>' then behaves like a native agent
 type, and 'agents repo push user' syncs it to every device.
 
@@ -66,7 +66,7 @@ Examples:
   cmd
     .command('add <name>')
     .description('Create a custom harness from a host + model (or apply a built-in preset).')
-    .option('--host <agent>', 'Host CLI to run under (opencode, claude, codex, grok, gemini, ...) — pair with --model')
+    .option('--host <agent>', 'Host CLI to run under (opencode, claude, codex, grok, antigravity, ...) — pair with --model')
     .option('--model <id>', 'Model id to pin on the host (e.g., meta/muse-spark-1.1) — pair with --host')
     .option('--base-url <url>', 'Custom endpoint base URL (claude/codex hosts)')
     .option('--auth-provider <provider>', 'Attach a keychain-backed API key under this provider (for private endpoints)')

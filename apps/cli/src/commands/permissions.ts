@@ -277,7 +277,7 @@ When to use:
   permissionsCmd
     .command('add [source]')
     .description('Import permissions from an agent config, YAML, or GitHub, then apply to versions')
-    .option('-a, --agents <list>', 'Targets: claude, codex@0.116.0, or gemini@default')
+    .option('-a, --agents <list>', 'Targets: claude, codex@0.116.0, or antigravity@default')
     .option('--names <list>', 'Permission set names from ~/.agents/permissions/ (comma-separated)')
     .option('--all', 'Apply to all installed versions instead of just defaults')
     .option('--replace', 'Replace managed permission block instead of merging (drops rules no longer in the set)')

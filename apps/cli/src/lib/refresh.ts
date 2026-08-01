@@ -17,6 +17,7 @@ import { capableAgents } from './capabilities.js';
 import {
   AGENTS,
   ALL_AGENT_IDS,
+  MANAGED_AGENT_IDS,
   getAllCliStates,
   registerMcpToTargets,
   agentLabel,
@@ -182,7 +183,7 @@ export async function refresh(options: RefreshOptions = {}): Promise<void> {
 
   // 3. Sync resources to default version homes
   const cliStates = await getAllCliStates();
-  const agentsToSync = agentFilter ? [agentFilter] : ALL_AGENT_IDS;
+  const agentsToSync = agentFilter ? [agentFilter] : MANAGED_AGENT_IDS;
   const available = getAvailableResources();
 
   for (const agentId of agentsToSync) {

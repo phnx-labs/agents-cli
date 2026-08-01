@@ -23,19 +23,18 @@ describe('snapshotAuth + materializeAuth round-trip', () => {
     const src = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-src-'));
     const dst = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-dst-'));
     seedFile(src, '.codex/auth.json', '{"tokens":"codex-abc"}');
-    seedFile(src, '.gemini/oauth_creds.json', '{"refresh":"gem-xyz"}');
     seedFile(src, '.factory/auth.v2.file', 'droid-file');
     seedFile(src, '.factory/auth.v2.key', 'droid-key');
 
     const snap = snapshotAuth(['codex', 'gemini', 'droid'], { home: src, platform: 'linux' });
-    // codex(1) + gemini(1) + droid(2) = 4 files
-    expect(snap.files).toHaveLength(4);
+    // codex(1) + droid(2); hard-deprecated Gemini is not propagatable.
+    expect(snap.files).toHaveLength(3);
     expect(snap.bound).toEqual([]);
 
     const bundle = buildAuthBundle('src-box', snap.files);
     const res = materializeAuth(bundle, { home: dst });
     expect(res.errors).toEqual([]);
-    expect(res.written.sort()).toEqual(['codex', 'droid', 'gemini']);
+    expect(res.written.sort()).toEqual(['codex', 'droid']);
 
     expect(fs.readFileSync(path.join(dst, '.codex/auth.json'), 'utf-8')).toBe('{"tokens":"codex-abc"}');
     expect(fs.readFileSync(path.join(dst, '.factory/auth.v2.key'), 'utf-8')).toBe('droid-key');
@@ -98,10 +97,11 @@ describe('parseAuthBundle', () => {
 
 describe('FLEET_AUTH_FILES coverage', () => {
   it('maps the verified portable-auth agents and marks them propagatable', () => {
-    for (const agent of ['claude', 'codex', 'gemini', 'grok', 'kimi', 'opencode', 'droid', 'antigravity']) {
+    for (const agent of ['claude', 'codex', 'grok', 'kimi', 'opencode', 'droid', 'antigravity']) {
       expect(FLEET_AUTH_FILES[agent]?.length).toBeGreaterThan(0);
       expect(isPropagatableAgent(agent)).toBe(true);
     }
+    expect(isPropagatableAgent('gemini')).toBe(false);
     expect(isPropagatableAgent('cursor')).toBe(false);
   });
 });

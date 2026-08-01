@@ -290,7 +290,7 @@ describe('PermissionsHandler', () => {
       expect(rules).toContain('"-rf"');
     });
 
-    it('merges all permissions and writes to Gemini settings.json tools.core/exclude', () => {
+    it('does not sync permissions to hard-deprecated gemini', () => {
       const home = makeTempHome();
       const versionHome = makeTempHome();
 
@@ -311,11 +311,7 @@ describe('PermissionsHandler', () => {
       runPermissionsExpression(home, `PermissionsHandler.sync('gemini', ${JSON.stringify(versionHome)})`);
 
       const settingsPath = path.join(versionHome, '.gemini', 'settings.json');
-      expect(fs.existsSync(settingsPath)).toBe(true);
-
-      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
-      expect(settings.tools.core).toEqual(['ShellTool(git *)', 'ShellTool(mq *)']);
-      expect(settings.tools.exclude).toEqual(['ShellTool(rm -rf *)']);
+      expect(fs.existsSync(settingsPath)).toBe(false);
     });
 
     it('merges all permissions and writes to OpenClaw openclaw.json tools.alsoAllow/deny', () => {
@@ -346,39 +342,6 @@ describe('PermissionsHandler', () => {
       expect(settings.tools.alsoAllow).toEqual(['exec', 'read']);
       // Write(**) is blanket -> write.
       expect(settings.tools.deny).toEqual(['write']);
-    });
-
-    it('merges all permissions and writes to ForgeCode permissions.yaml policies', () => {
-      const home = makeTempHome();
-      const versionHome = makeTempHome();
-
-      fs.mkdirSync(path.join(home, '.agents', '.system'), { recursive: true });
-      fs.mkdirSync(path.join(home, '.agents'), { recursive: true });
-
-      writePermissionYaml(home, path.join('.agents', '.system'), 'base', {
-        name: 'base',
-        allow: ['Read(**)', 'Bash(git:*)'],
-      });
-
-      writePermissionYaml(home, '.agents', 'extra', {
-        name: 'extra',
-        allow: ['WebFetch(domain:api.github.com)'],
-        deny: ['Write(secrets/**)', 'Bash(rm -rf:*)'],
-      });
-
-      runPermissionsExpression(home, `PermissionsHandler.sync('forge', ${JSON.stringify(versionHome)})`);
-
-      const settingsPath = path.join(versionHome, '.forge', 'permissions.yaml');
-      expect(fs.existsSync(settingsPath)).toBe(true);
-
-      const settings = yaml.parse(fs.readFileSync(settingsPath, 'utf-8'));
-      expect(settings.policies).toEqual([
-        { permission: 'allow', rule: { command: 'git *' } },
-        { permission: 'allow', rule: { read: '**/*' } },
-        { permission: 'allow', rule: { url: 'api.github.com*' } },
-        { permission: 'deny', rule: { command: 'rm -rf *' } },
-        { permission: 'deny', rule: { write: 'secrets/**' } },
-      ]);
     });
 
     it('merges all permissions and writes to Hermes config.yaml command allowlist and approvals deny', () => {
@@ -477,11 +440,6 @@ describe('PermissionsHandler', () => {
       expect(result).toBe(path.join('/test/home', '.codex', 'config.toml'));
     });
 
-    it('returns correct path for Gemini', () => {
-      const result = PermissionsHandler.configPath!('gemini', '/test/home');
-      expect(result).toBe(path.join('/test/home', '.gemini', 'settings.json'));
-    });
-
     it('returns correct path for OpenCode', () => {
       const result = PermissionsHandler.configPath!('opencode', '/test/home');
       expect(result).toBe(path.join('/test/home', '.config', 'opencode', 'opencode.jsonc'));
@@ -500,11 +458,6 @@ describe('PermissionsHandler', () => {
     it('returns correct path for Copilot', () => {
       const result = PermissionsHandler.configPath!('copilot', '/test/home');
       expect(result).toBe(path.join('/test/home', '.copilot', 'permissions-config.json'));
-    });
-
-    it('returns correct path for ForgeCode', () => {
-      const result = PermissionsHandler.configPath!('forge', '/test/home');
-      expect(result).toBe(path.join('/test/home', '.forge', 'permissions.yaml'));
     });
 
     it('returns correct path for Hermes', () => {
@@ -532,7 +485,6 @@ describe('PermissionsHandler', () => {
     it('returns yaml format for all agents', () => {
       expect(PermissionsHandler.format('claude')).toBe('yaml');
       expect(PermissionsHandler.format('codex')).toBe('yaml');
-      expect(PermissionsHandler.format('gemini')).toBe('yaml');
     });
 
     it('returns permissions as target directory', () => {

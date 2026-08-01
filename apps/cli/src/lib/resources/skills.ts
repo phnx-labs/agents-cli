@@ -6,7 +6,7 @@
  */
 
 import * as fs from 'fs';
-import { AGENTS, agentConfigDirName } from '../agents.js';
+import { AGENTS, agentConfigDirName, isAgentHardDeprecated } from '../agents.js';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import type { AgentId, Layer, ResolvedItem, ResourceHandler } from './types.js';
@@ -244,6 +244,9 @@ export function createSkillsHandler(provider: LayerDirProvider = defaultProvider
     },
 
     sync(agent: AgentId, versionHome: string, cwd?: string): void {
+      if (isAgentHardDeprecated(agent)) {
+        return;
+      }
       // Agents that read directly from central ~/.agents/skills/ (e.g. Gemini,
       // Goose via the Summon extension) should not get a per-version copy.
       if (AGENTS[agent]?.nativeAgentsSkillsDir) {

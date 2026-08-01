@@ -1,7 +1,7 @@
 # agents-cli (the CLI)
 
 `@phnx-labs/agents-cli` — the `agents` / `ag` CLI for managing AI coding-agent
-versions, config, sessions, and cloud dispatch (Claude, Codex, Gemini, Cursor,
+versions, config, sessions, and cloud dispatch (Claude, Codex, Cursor,
 OpenCode, OpenClaw, Grok, Droid, …).
 
 This is the **internal architecture** map. The user-facing feature tour is
@@ -32,9 +32,9 @@ and participate after the user repo.
 
 ### 2. `AGENTS.md` is the canonical memory file
 
-`CLAUDE.md`, `GEMINI.md` are symlinks. **Edit `AGENTS.md` only** — editing a symlink
-target directly gets stomped on the next sync. The sync writes the right file name
-per agent (`OPENCODE.md`, `.cursorrules`, etc.).
+`CLAUDE.md` and legacy `GEMINI.md` are symlinks. **Edit `AGENTS.md` only** —
+editing a symlink target directly gets stomped on the next sync. The sync writes
+the right file name per supported agent (`OPENCODE.md`, `.cursorrules`, etc.).
 
 ### 3. Capability table gates per-agent writes
 
@@ -70,7 +70,7 @@ DAG-style, boundary contracts, `--watch` supervisor, `--worktree` isolation, opt
 
 ### 7. Self-updating agents are ONE binary, not fictional version-homes
 
-Some harnesses (droid, grok, antigravity, cursor, hermes, forge, kiro, goose) install
+Some harnesses (droid, grok, antigravity, cursor, hermes, kiro, goose) install
 via an official `curl … | sh` / `brew install` script that carries no version token —
 the installer only ever fetches the *current* release and the binary self-updates in
 place. `isSelfUpdatingAgent()` ([`src/lib/agents.ts`](src/lib/agents.ts)) is the single
@@ -134,7 +134,6 @@ Antigravity CLI, Grok CLI, OpenCode — features target these six first.
 | ★ Antigravity CLI | `antigravity` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ≥1.0.16 | ≥1.0.6 |
 | ★ Grok CLI | `grok` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ≥0.2.111 |
 | ★ OpenCode | `opencode` | ≥0.3.130 | ✓ | ≥1.1.1 | ✓ | ✓ | ✓ | — | — |
-| Gemini † | `gemini` | ≥0.26 | ✓ | ✓ | ✓ | ✓ | ≥0.8 | ≥0.36 | — |
 | Cursor | `cursor` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ≥2026.1.22 | — |
 | OpenClaw | `openclaw` | ✓ | ✓ | ✓ | ✓ | — | ✓ | ✓ | ✓ |
 | Copilot | `copilot` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ≥0.0.353 | — |
@@ -148,10 +147,11 @@ Antigravity CLI, Grok CLI, OpenCode — features target these six first.
 skipped silently). [`src/lib/agents.ts`](src/lib/agents.ts) is canonical — keep this
 snapshot in sync. `workflows` is `claude`/`kimi`/`goose`/`antigravity` (≥1.0.6, written to the
 shared HOME-global `~/.gemini/config/global_workflows/`, not a per-version home), `openclaw` (Lobster `.lobster` files under `.openclaw/workflows/`), and `grok` (≥0.2.111, native Rhai under `.grok/workflows/`); `mcp` is universal; `allowlist` is
-`claude`/`gemini`/`cursor`/`opencode`/`antigravity`/`grok`/`kimi`/`kiro`/`droid`/`goose`/`openclaw`/`copilot` (Copilot writes per-location approvals to `~/.copilot/permissions-config.json`; OpenClaw is tool-level only —
-blanket rules map to `~/.openclaw/openclaw.json` `tools.alsoAllow`/`tools.deny`, sub-command patterns skipped); `subagents` is `claude`/`codex`/`kiro`/`kimi`/`grok`/`openclaw`/`droid`/`copilot`/`antigravity`/`gemini`/`cursor` (≥2026.1.22).
-**† Gemini is deprecated by Google** (retired June 18 2026); Antigravity is the
-successor — the CLI warns on `agents add gemini` (`warnAgentDeprecated`).
+`claude`/`cursor`/`opencode`/`antigravity`/`grok`/`kimi`/`kiro`/`droid`/`goose`/`openclaw`/`copilot` (Copilot writes per-location approvals to `~/.copilot/permissions-config.json`; OpenClaw is tool-level only —
+blanket rules map to `~/.openclaw/openclaw.json` `tools.alsoAllow`/`tools.deny`, sub-command patterns skipped); `subagents` is `claude`/`codex`/`kiro`/`kimi`/`grok`/`openclaw`/`droid`/`copilot`/`antigravity`/`cursor` (≥2026.1.22).
+**Gemini is hard-deprecated.** Keep the legacy `gemini` id only for parsing old
+sessions/config; `agents add gemini`, `agents import gemini`, and
+`agents sync gemini` fail and point users to Antigravity.
 
 ## Source layout
 

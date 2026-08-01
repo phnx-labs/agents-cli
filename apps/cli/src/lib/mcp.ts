@@ -20,7 +20,6 @@ import { getBinaryPath, getVersionHomePath } from './versions.js';
 import { IS_WINDOWS, execFileShellSpec } from './platform/index.js';
 import { AGENTS, getMcpConfigPathForHome, getProjectMcpConfigPath } from './agents.js';
 import { isCapable } from './capabilities.js';
-import { setGeminiAutoUpdateDisabled, updateGeminiSettings } from './gemini-settings.js';
 
 /**
  * MCP server config as stored in ~/.agents/mcp/*.yaml
@@ -471,7 +470,7 @@ function registerMcpCommand(
 ): { success: boolean; error?: string } {
   try {
     validateMcpServerName(name);
-    if (agentId === 'hermes' || agentId === 'forge') {
+    if (agentId === 'hermes') {
       const server: InstalledMcpServer = {
         name,
         path: '',
@@ -483,11 +482,7 @@ function registerMcpCommand(
             : { command: commandSpec.command, args: commandSpec.args }),
         },
       };
-      if (agentId === 'hermes') {
-        installMcpToHermesConfig(server, options.home || os.homedir());
-      } else {
-        installMcpToForgeConfig(server, options.home || os.homedir());
-      }
+      installMcpToHermesConfig(server, options.home || os.homedir());
       return { success: true };
     }
     const bin = options.binary || AGENTS[agentId].cliCommand;
@@ -503,34 +498,6 @@ function registerMcpCommand(
   } catch (err) {
     return { success: false, error: (err as Error).message };
   }
-}
-
-/**
- * Install MCP server to Gemini config file.
- */
-function installMcpToGeminiConfig(server: InstalledMcpServer, versionHome: string): void {
-  const configPath = path.join(versionHome, '.gemini', 'settings.json');
-  updateGeminiSettings(configPath, (config) => {
-    setGeminiAutoUpdateDisabled(config);
-
-    if (!config.mcpServers || typeof config.mcpServers !== 'object') {
-      config.mcpServers = {};
-    }
-
-    const mcpServers = config.mcpServers as Record<string, unknown>;
-
-    if (server.config.transport === 'stdio') {
-      mcpServers[server.name] = {
-        command: server.config.command,
-        args: server.config.args || [],
-        env: server.config.env || {},
-      };
-    } else {
-      mcpServers[server.name] = {
-        url: server.config.url,
-      };
-    }
-  });
 }
 
 /**
@@ -665,35 +632,6 @@ function installMcpToHermesConfig(server: InstalledMcpServer, versionHome: strin
   fs.writeFileSync(configPath, yaml.stringify(config), 'utf-8');
 }
 
-function installMcpToForgeConfig(server: InstalledMcpServer, versionHome: string): void {
-  const configPath = path.join(versionHome, '.forge', '.mcp.json');
-
-  let config: Record<string, unknown> = {};
-  if (fs.existsSync(configPath)) {
-    config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-  }
-
-  if (!config.mcpServers || typeof config.mcpServers !== 'object' || Array.isArray(config.mcpServers)) {
-    config.mcpServers = {};
-  }
-
-  const mcpServers = config.mcpServers as Record<string, unknown>;
-  if (server.config.transport === 'stdio') {
-    mcpServers[server.name] = {
-      command: server.config.command,
-      args: server.config.args || [],
-      ...(server.config.env && { env: server.config.env }),
-    };
-  } else {
-    mcpServers[server.name] = {
-      url: server.config.url,
-    };
-  }
-
-  fs.mkdirSync(path.dirname(configPath), { recursive: true });
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
-}
-
 function installMcpToOpenCodeConfig(server: InstalledMcpServer, versionHome: string): void {
   const configPath = path.join(versionHome, '.config', 'opencode', 'opencode.jsonc');
 
@@ -755,10 +693,8 @@ function writeMcpConfigSupportsAgent(agentId: AgentId): boolean {
   switch (agentId) {
     case 'claude':
     case 'cursor':
-    case 'gemini':
     case 'kimi':
     case 'droid':
-    case 'forge':
     case 'openclaw':
     case 'codex':
     case 'grok':
@@ -791,10 +727,8 @@ export function writeMcpConfig(
   switch (agentId) {
     case 'claude':
     case 'cursor':
-    case 'gemini':
     case 'kimi':
-    case 'droid':
-    case 'forge': {
+    case 'droid': {
       let config: Record<string, unknown> = {};
       if (fs.existsSync(configPath)) {
         try {
@@ -1033,9 +967,6 @@ export function installMcpServers(
       } else if (agentId === 'codex') {
         installMcpViaCodex(binaryPath, server, versionHome);
         handled = true;
-      } else if (agentId === 'gemini') {
-        installMcpToGeminiConfig(server, versionHome);
-        handled = true;
       } else if (agentId === 'cursor') {
         installMcpToCursorConfig(server, versionHome);
         handled = true;
@@ -1079,9 +1010,6 @@ export function installMcpServers(
         handled = true;
       } else if (agentId === 'hermes') {
         installMcpToHermesConfig(server, versionHome);
-        handled = true;
-      } else if (agentId === 'forge') {
-        installMcpToForgeConfig(server, versionHome);
         handled = true;
       }
 

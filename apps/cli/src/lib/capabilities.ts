@@ -8,7 +8,7 @@
  * reason instead of silently corrupting an older binary's settings file.
  */
 
-import { AGENTS } from './agents.js';
+import { AGENTS, MANAGED_AGENT_IDS } from './agents.js';
 import type {
   AgentId,
   Capability,
@@ -46,6 +46,7 @@ function getCapability(agent: AgentId, cap: CapabilityName): Capability | RulesC
  * Useful for filtering UI lists; does not check installed version.
  */
 export function isCapable(agent: AgentId, cap: CapabilityName): boolean {
+  if (AGENTS[agent]?.deprecated?.hard) return false;
   const c = getCapability(agent, cap);
   return c !== false;
 }
@@ -61,6 +62,7 @@ export function supports(
   cap: CapabilityName,
   version?: string
 ): CapabilityResult {
+  if (AGENTS[agent]?.deprecated?.hard) return { ok: false, reason: 'unsupported' };
   const c = getCapability(agent, cap);
   if (c === false) return { ok: false, reason: 'unsupported' };
   if (c === true) return { ok: true };
@@ -95,5 +97,5 @@ export function explainSkip(
 
 /** All agents whose `capabilities[cap]` is anything other than `false`. */
 export function capableAgents(cap: CapabilityName): AgentId[] {
-  return (Object.keys(AGENTS) as AgentId[]).filter((id) => isCapable(id, cap));
+  return MANAGED_AGENT_IDS.filter((id) => isCapable(id, cap));
 }

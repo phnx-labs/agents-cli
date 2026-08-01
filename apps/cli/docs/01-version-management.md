@@ -412,7 +412,8 @@ refreshes project resources into the current workspace's dot-agent directory:
 ~/.agents/rules/AGENTS.md          ──copy──▶  ~/.agents/.history/versions/claude/2.0.65/home/.claude/CLAUDE.md
 ```
 
-Special case: Gemini requires TOML format, so commands are converted while copying.
+Commands are copied in the target agent's native format, with command-as-skill
+conversion for agents that require it.
 
 ## Shim Process Contract
 

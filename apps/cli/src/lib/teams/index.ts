@@ -14,7 +14,6 @@ export {
   computePathLCA,
   checkAllClis,
   checkCliAvailable,
-  ensureGeminiPlanMode,
   getAgentsDir,
   resolveMode,
   type TaskType,

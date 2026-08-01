@@ -331,7 +331,7 @@ program.helpInformation = function () {
     return brandRootHelp(`Usage: agents [command] [options]
 
 Install, configure, run, and dispatch AI coding agents from one place.
-Works with Claude, Codex, Gemini, Cursor, OpenCode, OpenClaw, and Droid.
+Works with Claude, Codex, Antigravity, Cursor, OpenCode, OpenClaw, and Droid.
 
 Quick start:
   agents setup                    First-time setup (interactive)

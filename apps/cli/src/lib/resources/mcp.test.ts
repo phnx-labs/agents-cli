@@ -53,11 +53,6 @@ describe('getMcpConfigPath', () => {
     expect(configPath).toBe(path.join('/home/user', '.cursor', 'mcp.json'));
   });
 
-  it('returns correct config path for Gemini', () => {
-    const configPath = getMcpConfigPath('gemini', '/home/user');
-    expect(configPath).toBe(path.join('/home/user', '.gemini', 'settings.json'));
-  });
-
   it('returns correct config path for OpenClaw', () => {
     const configPath = getMcpConfigPath('openclaw', '/home/user');
     expect(configPath).toBe(path.join('/home/user', '.openclaw', 'openclaw.json'));
@@ -66,11 +61,6 @@ describe('getMcpConfigPath', () => {
   it('returns correct config path for Hermes', () => {
     const configPath = getMcpConfigPath('hermes', '/home/user');
     expect(configPath).toBe(path.join('/home/user', '.hermes', 'config.yaml'));
-  });
-
-  it('returns correct config path for ForgeCode', () => {
-    const configPath = getMcpConfigPath('forge', '/home/user');
-    expect(configPath).toBe(path.join('/home/user', '.forge', '.mcp.json'));
   });
 
 });

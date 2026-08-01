@@ -33,7 +33,7 @@
 import * as path from 'path';
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { agentLabel, resolveAgentName, ALL_AGENT_IDS } from '../lib/agents.js';
+import { agentLabel, resolveAgentName, MANAGED_AGENT_IDS, isAgentHardDeprecated, hardDeprecationError } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
 import {
   isVersionInstalled,
@@ -184,7 +184,7 @@ async function runInteractiveReconcile(
   const { checkbox } = await import('@inquirer/prompts');
   const cwd = opts.cwd || process.cwd();
 
-  const installedAgents = ALL_AGENT_IDS.filter((a) => listInstalledVersions(a).length > 0);
+  const installedAgents = MANAGED_AGENT_IDS.filter((a) => listInstalledVersions(a).length > 0);
   if (installedAgents.length === 0) {
     errLog(chalk.red('No agents installed. Install one: agents add claude@latest'));
     process.exitCode = 1;
@@ -376,6 +376,11 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
       return;
     }
     agentId = resolved;
+  }
+  if (agentId && isAgentHardDeprecated(agentId)) {
+    errLog(chalk.red(hardDeprecationError(agentId)));
+    process.exitCode = 1;
+    return;
   }
   if (opts.agentVersion) {
     // Legacy flag and the launch-shim hot path (`--agent-version <concrete>`):

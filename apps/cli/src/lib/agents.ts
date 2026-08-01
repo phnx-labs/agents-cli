@@ -1,9 +1,10 @@
 /**
  * Core agent configuration and detection module.
  *
- * Defines the canonical registry of all supported AI coding agents (Claude, Codex,
- * Gemini, Cursor, OpenCode, OpenClaw, Copilot, Amp, Kiro, Goose, Grok) with their
- * CLI commands, config paths, capability flags, and MCP integration points.
+ * Defines the canonical registry of current and legacy AI coding agents (Claude,
+ * Codex, Gemini, Cursor, OpenCode, OpenClaw, Copilot, Amp, Kiro, Goose, Grok)
+ * with their CLI commands, config paths, capability flags, and MCP integration
+ * points.
  *
  * Provides functions for detecting installed CLIs, resolving version-managed binaries,
  * reading account/auth info, and managing MCP server registrations across agents.
@@ -278,13 +279,15 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     nativeAgentsSkillsDir: true,
     // Google retired the Gemini CLI (announced at Google I/O 2026, May 19); the `gemini`
     // command stopped serving free/Pro/Ultra requests on June 18, 2026. Antigravity CLI
-    // (`agy`) is the official successor. See warnAgentDeprecated() for the surfaced warning.
+    // (`agy`) is the official successor. Hard deprecation keeps legacy Gemini
+    // sessions/config parseable while blocking install/import/sync.
     deprecated: {
       by: 'Google',
       date: 'June 18, 2026',
       reason: 'The Gemini CLI was retired for free, Pro, and Ultra tiers and no longer serves requests (announced at Google I/O 2026 on May 19).',
       replacement: 'antigravity',
       url: 'https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/',
+      hard: true,
     },
     // gemini hooks: shipped in v0.26.0 (Jan 2026); older binaries silently ignore the `hooks` key.
     // extensions: gemini-extension.json bundles shipped in v0.8.0; custom subagents in v0.36.0.
@@ -720,60 +723,22 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       rulesImports: false,
     },
   },
-  // ForgeCode (`forge`) from Tailcall. It reads AGENTS.md project rules,
-  // SKILL.md directories, and MCP servers from `.mcp.json` files.
-  forge: {
-    id: 'forge',
-    name: 'ForgeCode',
-    color: 'greenBright',
-    cliCommand: 'forge',
-    npmPackage: '',
-    installScript: 'curl -fsSL https://forgecode.dev/cli | sh',
-    configDir: path.join(HOME, '.forge'),
-    commandsDir: path.join(HOME, '.forge', 'commands'),
-    commandsSubdir: 'commands',
-    skillsDir: path.join(HOME, '.forge', 'skills'),
-    hooksDir: 'hooks',
-    instructionsFile: 'AGENTS.md',
-    format: 'markdown',
-    variableSyntax: '$ARGUMENTS',
-    supportsHooks: false,
-    // Commands: ForgeCode reads Markdown slash commands from `~/.forge/commands/<name>.md`
-    // (also the shared `~/.agents/commands/`); the filename is the command name.
-    // Subagents: named `.md` agent definitions with YAML frontmatter under
-    // `~/.forge/agents/<name>.md` — same Markdown+frontmatter shape as Droid/Copilot
-    // (no `color` field), so transformSubagentForForge aliases transformSubagentForDroid.
-    // See https://forgecode.dev/docs/commands/ and /docs/agent-definition-guide/.
-    capabilities: {
-      hooks: false,
-      mcp: true,
-      mcpHttp: true,
-      mcpHeaders: false,
-      // Permissions: ~/.forge/permissions.yaml (or $FORGE_CONFIG/permissions.yaml)
-      // carries ordered operation-family glob policies. It is active only when
-      // `.forge.toml` sets `restricted = true`; MCP tools bypass this file.
-      allowlist: true,
-      skills: true,
-      commands: true,
-      plugins: false,
-      subagents: true,
-      rules: { file: 'AGENTS.md' },
-      workflows: false,
-      memory: false,
-      modes: ['edit'],
-      rulesImports: false,
-    },
-  },
 };
 
-/** All registered agent IDs derived from the AGENTS registry. */
+/** All current and legacy agent IDs derived from the AGENTS registry. */
 export const ALL_AGENT_IDS: AgentId[] = Object.keys(AGENTS) as AgentId[];
+
+/** Agents retained only for legacy reads, not install/import/sync targets. */
+export const HARD_DEPRECATED_AGENT_IDS: AgentId[] = ALL_AGENT_IDS.filter((id) => AGENTS[id].deprecated?.hard);
+
+/** Agents that can receive managed installs, imports, and resource sync writes. */
+export const MANAGED_AGENT_IDS: AgentId[] = ALL_AGENT_IDS.filter((id) => !AGENTS[id].deprecated?.hard);
 
 /**
  * A self-updating agent is a single global binary installed by an official
  * `curl … | sh` / `brew install` script that carries NO version token — the
  * installer can only ever fetch the *current* release, and the binary then keeps
- * itself up to date in place (droid, grok, antigravity, cursor, hermes, forge,
+ * itself up to date in place (droid, grok, antigravity, cursor, hermes,
  * kiro, goose). There is no semver to pin, so agents-cli must not model these as
  * having multiple installable version-homes the way it does for npm-packaged
  * agents (claude, codex, kimi, …).
@@ -792,6 +757,10 @@ export const ALL_AGENT_IDS: AgentId[] = Object.keys(AGENTS) as AgentId[];
 export function isSelfUpdatingAgent(agent: AgentId): boolean {
   const cfg = AGENTS[agent];
   return !cfg.npmPackage && !!cfg.installScript && !cfg.installScript.includes('VERSION');
+}
+
+export function isAgentHardDeprecated(agent: AgentId): boolean {
+  return AGENTS[agent].deprecated?.hard === true;
 }
 
 // Capability-filtered agent lists used to live here as `*_CAPABLE_AGENTS`
@@ -2030,7 +1999,7 @@ export async function registerMcp(
   options?: { home?: string; binary?: string; headers?: Record<string, string> }
 ): Promise<{ success: boolean; error?: string }> {
   const agent = AGENTS[agentId];
-  if (!agent.capabilities.mcp) {
+  if (!supports(agentId, 'mcp').ok) {
     return { success: false, error: 'Agent does not support MCP' };
   }
   if (transport === 'http' && !supports(agentId, 'mcpHttp').ok) {
@@ -2039,7 +2008,7 @@ export async function registerMcp(
   if (transport === 'http' && options?.headers && Object.keys(options.headers).length > 0 && !supports(agentId, 'mcpHeaders').ok) {
     return { success: false, error: 'skipped: HTTP MCP headers are only supported for Claude registration' };
   }
-  if (agentId === 'hermes' || agentId === 'forge') {
+  if (agentId === 'hermes') {
     try {
       writeMcpToConfig(agentId, name, command, scope, transport, options?.home);
       return { success: true };
@@ -2094,7 +2063,7 @@ export async function unregisterMcp(
   if (!agent.capabilities.mcp) {
     return { success: false, error: 'Agent does not support MCP' };
   }
-  if (agentId === 'hermes' || agentId === 'forge') {
+  if (agentId === 'hermes') {
     try {
       removeMcpFromConfig(agentId, name, options?.home);
       return { success: true };
@@ -2525,8 +2494,6 @@ export function getUserMcpConfigPath(agentId: AgentId): string {
       return path.join(agent.configDir, 'mcp.json');
     case 'hermes':
       return path.join(agent.configDir, 'config.yaml');
-    case 'forge':
-      return path.join(agent.configDir, '.mcp.json');
     default:
       // Gemini and others use settings.json
       return path.join(agent.configDir, 'settings.json');
@@ -2564,8 +2531,6 @@ export function getMcpConfigPathForHome(agentId: AgentId, home: string): string 
       return path.join(home, '.factory', 'mcp.json');
     case 'hermes':
       return path.join(home, '.hermes', 'config.yaml');
-    case 'forge':
-      return path.join(home, '.forge', '.mcp.json');
     default:
       return path.join(home, agentConfigDirName(agentId), 'settings.json');
   }
@@ -2606,8 +2571,6 @@ export function getProjectMcpConfigPath(agentId: AgentId, cwd: string = process.
       return path.join(cwd, '.factory', 'mcp.json');
     case 'hermes':
       return path.join(cwd, '.hermes', 'config.yaml');
-    case 'forge':
-      return path.join(cwd, '.mcp.json');
     default:
       return path.join(cwd, `.${agentId}`, 'settings.json');
   }
@@ -2770,9 +2733,6 @@ export const AGENT_NAME_ALIASES: Record<string, AgentId> = {
   droid: 'droid',
   hermes: 'hermes',
   'hermes-agent': 'hermes',
-  forge: 'forge',
-  forgecode: 'forge',
-  'forge-code': 'forge',
 };
 
 /**
@@ -2821,6 +2781,26 @@ export function deprecationNotice(agent: AgentId): string[] | null {
   }
   if (dep.url) lines.push(`  ${dep.url}`);
   return lines;
+}
+
+export function hardDeprecationNotice(agent: AgentId): string[] | null {
+  const dep = AGENTS[agent].deprecated;
+  if (!dep?.hard) return null;
+  const name = AGENTS[agent].name;
+  const lines = [
+    `${name} is no longer supported by agents-cli because ${dep.by} retired it (${dep.date}).`,
+    `  ${dep.reason}`,
+  ];
+  if (dep.replacement) {
+    const rep = AGENTS[dep.replacement];
+    lines.push(`  Use ${rep.name} instead:  agents add ${rep.id}`);
+  }
+  if (dep.url) lines.push(`  ${dep.url}`);
+  return lines;
+}
+
+export function hardDeprecationError(agent: AgentId): string {
+  return hardDeprecationNotice(agent)?.join('\n') ?? `${AGENTS[agent].name} is no longer supported.`;
 }
 
 /**

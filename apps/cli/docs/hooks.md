@@ -30,7 +30,6 @@ Central storage (user > system):
   <version-home>/
     .claude/hooks/<name>.sh          Copied script (Claude)
     .codex/hooks/<name>.sh           Copied script (Codex)
-    .gemini/hooks/<name>.sh          Copied script (Gemini)
     ...
 
   registerHooksToSettings() writes resolved paths into agent-native config:
@@ -66,7 +65,7 @@ Central storage (user > system):
 |---------|------|--------|
 | `list` | `-a, --agent <agent>` | Filter to a specific agent; supports `agent@version` syntax |
 | `list` | `-s, --scope <scope>` | `user` (global), `project` (repo), or `all` (default) |
-| `add` | `-a, --agents <list>` | Target specific agents/versions: `claude`, `codex@0.116.0`, `gemini@default` |
+| `add` | `-a, --agents <list>` | Target specific agents/versions: `claude`, `codex@0.116.0`, `antigravity@default` |
 | `add` | `--names <list>` | Install specific hooks by name from `~/.agents/hooks/` (comma-separated) |
 | `add` | `-y, --yes` | Skip all prompts |
 | `remove` | `-a, --agents <list>` | Limit removal to specific agents |
@@ -183,11 +182,11 @@ Only hooks with `cache:` are instrumented today — that's deliberate. Opting in
 
 | Event | When it fires | Agents |
 |-------|--------------|--------|
-| `SessionStart` | Agent session begins | Claude, Codex, Gemini, Grok, Copilot (`sessionStart`), Kiro, Goose, Cursor (`sessionStart`), Hermes (`on_session_start`) |
+| `SessionStart` | Agent session begins | Claude, Codex, Grok, Copilot (`sessionStart`), Kiro, Goose, Cursor (`sessionStart`), Hermes (`on_session_start`) |
 | `SessionEnd` | Agent session ends | Claude, Grok, Copilot (`sessionEnd`), Goose, Cursor (`sessionEnd`), Hermes (`on_session_end`) |
-| `UserPromptSubmit` | User prompt received before model sees it | Claude, Gemini (as `BeforeAgent`), Grok, Copilot (`userPromptSubmitted`), Kiro, Goose, Cursor (`beforeSubmitPrompt`), Hermes (`pre_llm_call`) |
-| `PreToolUse` | Before a tool call executes | Claude, Codex, Gemini, Antigravity (`before_tool_call`), Copilot (`preToolUse`), Kiro, Goose, Cursor (`preToolUse`), Hermes (`pre_tool_call`) |
-| `PostToolUse` | After a tool call completes | Claude, Codex, Gemini, Antigravity (mapped to `after_model_call`), Copilot (`postToolUse`), Kiro, Goose, Cursor (`postToolUse`), Hermes (`post_tool_call`) |
+| `UserPromptSubmit` | User prompt received before model sees it | Claude, Grok, Copilot (`userPromptSubmitted`), Kiro, Goose, Cursor (`beforeSubmitPrompt`), Hermes (`pre_llm_call`) |
+| `PreToolUse` | Before a tool call executes | Claude, Codex, Antigravity (`before_tool_call`), Copilot (`preToolUse`), Kiro, Goose, Cursor (`preToolUse`), Hermes (`pre_tool_call`) |
+| `PostToolUse` | After a tool call completes | Claude, Codex, Antigravity (mapped to `after_model_call`), Copilot (`postToolUse`), Kiro, Goose, Cursor (`postToolUse`), Hermes (`post_tool_call`) |
 | `SubagentStop` | A subagent finishes | Claude, Cursor (`subagentStop`), Hermes (`subagent_stop`) |
 | `PreCompact` | Before context compaction | Claude, Grok, Copilot (`preCompact`), Cursor (`preCompact`) |
 | `Stop` | Agent stops (final turn) | Claude, Codex, Antigravity (`on_loop_stop`), Grok, Copilot (`agentStop`), Kiro, Goose, Cursor (`stop`), Hermes (`on_session_finalize`) |

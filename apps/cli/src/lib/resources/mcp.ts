@@ -150,8 +150,6 @@ export function getMcpConfigPath(agent: AgentId, versionHome: string): string | 
       return path.join(versionHome, '.config', 'opencode', 'opencode.jsonc');
     case 'cursor':
       return path.join(versionHome, '.cursor', 'mcp.json');
-    case 'gemini':
-      return path.join(versionHome, '.gemini', 'settings.json');
     case 'openclaw':
       return path.join(versionHome, '.openclaw', 'openclaw.json');
     case 'antigravity':
@@ -161,8 +159,6 @@ export function getMcpConfigPath(agent: AgentId, versionHome: string): string | 
       return path.join(versionHome, '.grok', 'mcp.json');
     case 'hermes':
       return path.join(versionHome, '.hermes', 'config.yaml');
-    case 'forge':
-      return path.join(versionHome, '.forge', '.mcp.json');
     default:
       return null;
   }

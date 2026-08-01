@@ -102,7 +102,7 @@ const AGENT_NAMES: Record<AgentType, string> = {
   droid: 'Droid',
 };
 
-const VALID_AGENTS = Object.keys(AGENT_NAMES) as AgentType[];
+const VALID_AGENTS: AgentType[] = ['claude', 'codex', 'cursor', 'opencode', 'grok', 'antigravity', 'kimi', 'droid'];
 // 'full' kept as historical alias for 'skip'; normalized to 'skip' downstream.
 const VALID_MODES = ['plan', 'edit', 'auto', 'skip', 'full'] as const;
 const VALID_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max', 'auto'] as const;

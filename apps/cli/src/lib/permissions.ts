@@ -24,6 +24,7 @@ import type {
 import { getPermissionsDir, getUserPermissionsDir, ensureAgentsDir } from './state.js';
 import { safeJoin } from './paths.js';
 import { AGENTS, agentConfigDirName } from './agents.js';
+import { supports } from './capabilities.js';
 import { updateGeminiSettings } from './gemini-settings.js';
 
 const HOME = os.homedir();
@@ -578,43 +579,6 @@ function parseCanonicalPattern(permission: string): { tool: string; pattern: str
 const BLANKET_BASH_FORMS = new Set(['Bash', 'Bash(*)', 'Bash(**)']);
 
 /**
- * Convert canonical permission set to Gemini format.
- * Gemini reads tool allow/deny lists from settings.json under
- * `tools.core` / `tools.exclude`. Bash permissions map to ShellTool(pattern).
- * Blanket Bash grants map to bare "ShellTool" (no command filter).
- * Non-Bash tool patterns are skipped; Gemini uses different tool names.
- */
-export function convertToGeminiFormat(set: PermissionSet): { tools: { core: string[]; exclude?: string[] } } {
-  const serialize = (permissions: string[]): string[] => {
-    const tools = new Set<string>();
-    for (const perm of permissions) {
-      if (BLANKET_BASH_FORMS.has(perm)) {
-        tools.add('ShellTool');
-        continue;
-      }
-      const parsed = parseCanonicalPattern(perm);
-      if (!parsed || parsed.tool !== 'bash') continue;
-      const command = normalizeBashPattern(parsed.pattern);
-      if (command === '*') {
-        tools.add('ShellTool');
-      } else {
-        tools.add(`ShellTool(${command})`);
-      }
-    }
-    return Array.from(tools);
-  };
-
-  const core = serialize(set.allow);
-  const exclude = serialize(set.deny ?? []);
-  return {
-    tools: {
-      core,
-      ...(exclude.length ? { exclude } : {}),
-    },
-  };
-}
-
-/**
  * Strip Claude's `:*` subcommand-wildcard suffix and return a space-glob form.
  * "mq:*" -> "mq *", "git status" -> "git status", "*" -> "*".
  * Used by serializers whose native pattern grammar uses ` *` instead of `:*`.
@@ -779,65 +743,6 @@ export function convertToOpenClawFormat(set: PermissionSet): { alsoAllow: string
     alsoAllow: map(set.allow),
     deny: map(set.deny ?? []),
   };
-}
-
-export type ForgePermission = 'allow' | 'deny' | 'confirm';
-export type ForgeOperation = 'read' | 'write' | 'command' | 'url';
-export type ForgePolicy = { permission: ForgePermission; rule: Partial<Record<ForgeOperation, string>> };
-
-const FORGE_OPERATION_BY_CANONICAL: Record<string, ForgeOperation | undefined> = {
-  bash: 'command',
-  read: 'read',
-  grep: 'read',
-  glob: 'read',
-  write: 'write',
-  edit: 'write',
-  notebookedit: 'write',
-  webfetch: 'url',
-  websearch: 'url',
-};
-
-function canonicalToForgePolicy(perm: string, permission: ForgePermission): ForgePolicy | null {
-  if (BLANKET_BASH_FORMS.has(perm)) {
-    return { permission, rule: { command: '*' } };
-  }
-  const parsed = parseCanonicalPattern(perm);
-  if (!parsed) return null;
-  const operation = FORGE_OPERATION_BY_CANONICAL[parsed.tool];
-  if (!operation) return null;
-  const pattern = parsed.tool === 'bash'
-    ? normalizeBashPattern(parsed.pattern)
-    : (parsed.tool === 'webfetch' || parsed.tool === 'websearch') && parsed.pattern.startsWith('domain:')
-      ? `${parsed.pattern.slice('domain:'.length)}*`
-      : parsed.pattern === '**'
-        ? '**/*'
-        : parsed.pattern;
-  return { permission, rule: { [operation]: pattern } };
-}
-
-/**
- * Convert canonical permissions to ForgeCode's permissions.yaml policy list.
- *
- * ForgeCode gates built-in tools by operation family (`read`, `write`,
- * `command`, `url`) plus glob patterns, optionally scoped by `dir`. The policy
- * file is ignored unless `.forge.toml` has `restricted = true`, and MCP tools
- * bypass permissions.yaml entirely; agents-cli therefore maps only canonical
- * built-in allow/deny rules and does not try to express per-named-MCP-tool
- * grants.
- */
-export function convertToForgeFormat(set: PermissionSet): { policies: ForgePolicy[] } {
-  const policies: ForgePolicy[] = [];
-  const seen = new Set<string>();
-  const add = (policy: ForgePolicy | null): void => {
-    if (!policy) return;
-    const key = `${policy.permission}|${JSON.stringify(policy.rule)}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    policies.push(policy);
-  };
-  for (const perm of set.allow) add(canonicalToForgePolicy(perm, 'allow'));
-  for (const perm of set.deny ?? []) add(canonicalToForgePolicy(perm, 'deny'));
-  return { policies };
 }
 
 export function convertToHermesFormat(set: PermissionSet): { command_allowlist: string[]; approvals: { deny: string[] } } {
@@ -1649,6 +1554,10 @@ export function applyPermissionsToVersion(
   merge: boolean = true,
   cwd?: string
 ): { success: boolean; error?: string } {
+  if (!supports(agentId, 'allowlist').ok) {
+    return { success: false, error: `Agent '${agentId}' does not support permissions` };
+  }
+
   const configDir = path.join(versionHome, agentConfigDirName(agentId));
 
   try {
@@ -1750,34 +1659,6 @@ export function applyPermissionsToVersion(
         }
       }
 
-      return { success: true };
-    }
-
-    if (agentId === 'gemini') {
-      const geminiPerms = convertToGeminiFormat(set);
-      const settingsPath = path.join(versionHome, '.gemini', 'settings.json');
-      updateGeminiSettings(settingsPath, (settings) => {
-        // Remove stale keys written by earlier serializer versions:
-        // top-level `permissions`, and Gemini's pre-core/exclude `tools.allowed`.
-        delete (settings as Record<string, unknown>).permissions;
-        const tools = (typeof settings.tools === 'object' && settings.tools !== null && !Array.isArray(settings.tools))
-          ? settings.tools as Record<string, unknown>
-          : {};
-        delete tools.allowed;
-        if (merge) {
-          const existingCore = Array.isArray(tools.core) ? (tools.core as string[]) : [];
-          const existingExclude = Array.isArray(tools.exclude) ? (tools.exclude as string[]) : [];
-          tools.core = Array.from(new Set([...existingCore, ...geminiPerms.tools.core]));
-          const mergedExclude = Array.from(new Set([...existingExclude, ...(geminiPerms.tools.exclude ?? [])]));
-          if (mergedExclude.length) tools.exclude = mergedExclude;
-          else delete tools.exclude;
-        } else {
-          tools.core = geminiPerms.tools.core;
-          if (geminiPerms.tools.exclude?.length) tools.exclude = geminiPerms.tools.exclude;
-          else delete tools.exclude;
-        }
-        settings.tools = tools;
-      });
       return { success: true };
     }
 
@@ -2070,36 +1951,6 @@ export function applyPermissionsToVersion(
 
       fs.mkdirSync(path.dirname(configPath), { recursive: true });
       fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
-      return { success: true };
-    }
-
-    if (agentId === 'forge') {
-      const permissionsPath = path.join(versionHome, '.forge', 'permissions.yaml');
-      let config: { policies?: unknown[] } = {};
-      if (fs.existsSync(permissionsPath)) {
-        const parsed = yaml.parse(fs.readFileSync(permissionsPath, 'utf-8'));
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          config = parsed as { policies?: unknown[] };
-        }
-      }
-
-      const newPolicies = convertToForgeFormat(set).policies;
-      if (merge) {
-        const existingPolicies = Array.isArray(config.policies) ? config.policies : [];
-        const seen = new Set<string>();
-        config.policies = [...existingPolicies, ...newPolicies].filter((policy) => {
-          if (!policy || typeof policy !== 'object' || Array.isArray(policy)) return false;
-          const key = JSON.stringify(policy);
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
-      } else {
-        config.policies = newPolicies;
-      }
-
-      fs.mkdirSync(path.dirname(permissionsPath), { recursive: true });
-      fs.writeFileSync(permissionsPath, yaml.stringify(config), 'utf-8');
       return { success: true };
     }
 

@@ -675,7 +675,7 @@ describe('version resource sync path handling', () => {
     expect(result.wildcard.workflows).toEqual(['user-flow']);
   });
 
-  it('does not sync project MCP servers under the default user-only MCP policy', async () => {
+  it('does not sync resources into hard-deprecated gemini homes', async () => {
     const home = makeTempHome();
     const project = path.join(home, 'repo');
 
@@ -695,14 +695,15 @@ describe('version resource sync path handling', () => {
     const result = runVersionSync(
       home,
       `syncResourcesToVersion('gemini', '0.1.0', undefined, { cwd: ${JSON.stringify(project)} })`
-    ) as { mcp: string[] };
+    ) as { mcp: string[]; commands: boolean; skills: boolean; hooks: boolean };
 
     const settingsPath = path.join(home, '.agents', '.history', 'versions', 'gemini', '0.1.0', 'home', '.gemini', 'settings.json');
-    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8')) as { mcpServers?: Record<string, unknown> };
 
-    expect(result.mcp).toEqual(['safe']);
-    expect(settings.mcpServers?.safe).toBeDefined();
-    expect(settings.mcpServers?.evil).toBeUndefined();
+    expect(result.mcp).toEqual([]);
+    expect(result.commands).toBe(false);
+    expect(result.skills).toBe(false);
+    expect(result.hooks).toBe(false);
+    expect(fs.existsSync(settingsPath)).toBe(false);
   });
 
   it('syncs project commands and skills to the project dot-agent dir, not the version home', () => {
@@ -824,6 +825,16 @@ describe('installVersion version validation', () => {
       expect(fs.existsSync(path.join(home, '.agents', '.history', 'versions', 'codex'))).toBe(false);
     });
   }
+
+  it('hard-blocks gemini installs before any npm exec', () => {
+    const home = makeTempHome();
+    const outcome = runInstallVersion(home, 'gemini', 'latest');
+    expect(outcome.ok).toBe(true);
+    expect(outcome.result?.success).toBe(false);
+    expect(outcome.result?.error).toContain('Gemini is no longer supported by agents-cli');
+    expect(outcome.result?.error).toContain('Use Antigravity instead:  agents add antigravity');
+    expect(fs.existsSync(path.join(home, '.agents', '.history', 'versions', 'gemini'))).toBe(false);
+  });
 
   it.skipIf(process.platform === 'win32')('gracefully redirects a pinned self-updating install to the current release (RUSH-1321)', () => {
     const home = makeTempHome();

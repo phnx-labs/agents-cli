@@ -334,7 +334,7 @@ export function registerRoutinesCommands(program: Command): void {
     `,
     notes: `
       A routine is a YAML file that schedules an agent invocation. It specifies:
-        - which agent to run (claude, codex, gemini, ...)
+        - which agent to run (claude, codex, antigravity, ...)
         - when to run (cron schedule or one-shot time)
         - what task to give the agent (the prompt)
         - execution constraints (mode, effort, timeout)
@@ -531,7 +531,7 @@ export function registerRoutinesCommands(program: Command): void {
     .command('add [nameOrPath]')
     .description('Create a new routine from a YAML file or inline flags. Starts the scheduler automatically if it is not already running.')
     .option('-s, --schedule <cron>', 'Cron schedule in standard format (5 fields: minute hour day month weekday)')
-    .option('-a, --agent <agent>', 'Which agent runs this routine: claude, codex, gemini, cursor, or opencode')
+    .option('-a, --agent <agent>', 'Which agent runs this routine: claude, codex, antigravity, cursor, or opencode')
     .option('--workflow <name>', 'Run an installed workflow (~/.agents/workflows/<name>) via `agents run`. Mutually exclusive with --agent.')
     .option('--command <sh>', 'Run a plain shell command directly (no agent, no auth, no sandbox) — for deterministic housekeeping routines. Mutually exclusive with --agent and --workflow; --prompt is not used.')
     .option('-p, --prompt <prompt>', 'Task instruction for the agent')

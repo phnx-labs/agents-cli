@@ -338,7 +338,7 @@ export function registerProfilesCommands(program: Command): void {
     .addHelpText(
       'after',
       `
-A profile pins a host CLI (claude, codex, gemini, ...) to a non-default endpoint
+A profile pins a host CLI (claude, codex, antigravity, ...) to a non-default endpoint
 and model, with a keychain-backed API key. Running 'agents run <profile>' spawns
 the host CLI with the right env vars — no plaintext tokens, no local proxy.
 

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { AGENTS, ALL_AGENT_IDS, getAccountEmail, getMcpConfigPathForHome, parseMcpConfig } from '../src/lib/agents.js';
+import { AGENTS, ALL_AGENT_IDS, MANAGED_AGENT_IDS, getAccountEmail, getMcpConfigPathForHome, parseMcpConfig } from '../src/lib/agents.js';
 import { convertToOpenCodeFormat, convertToCursorFormat, applyPermissionsToVersion } from '../src/lib/permissions.js';
 import { capableAgents, supports } from '../src/lib/capabilities.js';
 import {
@@ -22,7 +22,7 @@ describe('capableAgents("commands")', () => {
   });
 
   it('includes all other agents that support file-based commands', () => {
-    const expected = ['claude', 'codex', 'gemini', 'cursor', 'opencode'];
+    const expected = ['claude', 'codex', 'cursor', 'opencode'];
     const agents = capableAgents('commands');
     for (const agent of expected) {
       expect(agents).toContain(agent);
@@ -30,7 +30,7 @@ describe('capableAgents("commands")', () => {
   });
 
   it('is derived from capabilities.commands', () => {
-    const fromCapabilities = ALL_AGENT_IDS.filter(id => AGENTS[id].capabilities.commands);
+    const fromCapabilities = MANAGED_AGENT_IDS.filter(id => AGENTS[id].capabilities.commands);
     expect(capableAgents('commands')).toEqual(fromCapabilities);
   });
 
@@ -113,7 +113,7 @@ describe('droid (Factory AI)', () => {
   });
 });
 
-describe('Hermes and ForgeCode install targets', () => {
+describe('Hermes install targets', () => {
   it('registers Hermes with skills, MCP, plugins, and MEMORY.md rules', () => {
     expect(ALL_AGENT_IDS).toContain('hermes');
     expect(capableAgents('mcp')).toContain('hermes');
@@ -146,37 +146,6 @@ describe('Hermes and ForgeCode install targets', () => {
       );
 
       const parsed = parseMcpConfig('hermes', configPath);
-      expect(parsed.ctx.command).toBe('ctx-server');
-      expect(parsed.ctx.args).toEqual(['--stdio']);
-    } finally {
-      fs.rmSync(home, { recursive: true, force: true });
-    }
-  });
-
-  it('registers ForgeCode with skills, MCP, commands, subagents, and AGENTS.md rules', () => {
-    expect(ALL_AGENT_IDS).toContain('forge');
-    expect(capableAgents('mcp')).toContain('forge');
-    expect(capableAgents('skills')).toContain('forge');
-    expect(capableAgents('commands')).toContain('forge');
-    expect(capableAgents('subagents')).toContain('forge');
-    expect(capableAgents('hooks')).not.toContain('forge');
-    expect(AGENTS.forge.instructionsFile).toBe('AGENTS.md');
-    expect(AGENTS.forge.capabilities.rules).toEqual({ file: 'AGENTS.md' });
-  });
-
-  it('resolves ForgeCode MCP config to ~/.forge/.mcp.json and parses mcpServers JSON', () => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-forge-mcp-'));
-    try {
-      const configPath = getMcpConfigPathForHome('forge', home);
-      expect(configPath).toBe(path.join(home, '.forge', '.mcp.json'));
-
-      fs.mkdirSync(path.dirname(configPath), { recursive: true });
-      fs.writeFileSync(
-        configPath,
-        JSON.stringify({ mcpServers: { ctx: { command: 'ctx-server', args: ['--stdio'] } } })
-      );
-
-      const parsed = parseMcpConfig('forge', configPath);
       expect(parsed.ctx.command).toBe('ctx-server');
       expect(parsed.ctx.args).toEqual(['--stdio']);
     } finally {

@@ -40,7 +40,7 @@ A **resource** is any named item inside a DotAgents repo. Resources are typed by
 
 | Kind | What it is | Agent format |
 |------|-----------|--------------|
-| `commands` | Slash commands and prompt shortcuts | `.md` (most agents), `.toml` (Gemini) |
+| `commands` | Slash commands and prompt shortcuts | `.md` (most agents), `.toml` only for legacy Gemini reads |
 | `skills` | Knowledge packs injected into the agent's context | Directory with `SKILL.md` |
 | `hooks` | Shell scripts that fire on agent lifecycle events | `.sh` scripts + `hooks.yaml` manifest |
 | `rules` | Persistent memory / instructions for the agent | `AGENTS.md` → `CLAUDE.md`, `GEMINI.md`, `.cursorrules`, … |
@@ -170,7 +170,6 @@ contract.
 |------|-------|-----|-------------|--------|----------|---------|-----------|-------|-----------|
 | Claude | yes | yes | yes | yes | yes | yes | yes | `CLAUDE.md` | yes |
 | Codex | >= 0.116.0 | yes | >= 0.138.0 | yes | < 0.117.0 · skills ($name, >= 0.117) | >= 0.128.0 | >= 0.117.0 | `AGENTS.md` | no |
-| Gemini † | >= 0.26.0 | yes | yes | yes | yes (.toml) | >= 0.8.0 | >= 0.36.0 | `GEMINI.md` | no |
 | Cursor | no | yes | no | yes | yes | no | no | `.cursorrules` | no |
 | OpenCode | no | yes | >= 1.1.1 | yes | yes | no | no | `AGENTS.md` | no |
 | OpenClaw | yes | yes | yes | yes | gateway | yes | yes | `workspace/AGENTS.md` | no |
@@ -184,19 +183,18 @@ contract.
 | Kimi | yes | yes | yes | yes | no | yes | yes | `AGENTS.md` | yes |
 | Droid | yes | yes | >= 0.57.5 | >= 0.26.0 | yes | yes | yes | `AGENTS.md` | no |
 | Hermes | no | yes | yes | yes | no | yes | no | `MEMORY.md` | no |
-| ForgeCode | no | yes | yes | yes | yes | no | yes | `AGENTS.md` | no |
 
-**† Gemini is deprecated.** Google retired the Gemini CLI for free/Pro/Ultra tiers on June 18, 2026 (announced at Google I/O 2026); Antigravity CLI (`antigravity`) is the successor. agents-cli still manages existing Gemini installs but warns on `agents add gemini` / `agents teams add … gemini`.
+**Gemini is hard-deprecated.** Google retired the Gemini CLI for free/Pro/Ultra
+tiers on June 18, 2026 (announced at Google I/O 2026); Antigravity CLI
+(`antigravity`) is the successor. agents-cli keeps the legacy `gemini` id only
+for old sessions/config, and blocks `agents add gemini`, `agents import gemini`,
+and `agents sync gemini`.
 
-Permissions sync is gated on the `allowlist` capability (Claude, Codex >= 0.138.0, Gemini, Cursor, OpenCode >= 1.1.1, Antigravity, Grok, Kimi, Kiro 2.8.0+, Goose, Droid >= 0.57.5, OpenClaw, Copilot, Hermes, and ForgeCode). Workflow sync writes Claude workflow bundles, Kimi `type: flow` skills with an `agents_workflow` ownership marker, Goose recipe YAML, Antigravity workflow markdown (since 1.0.6), and OpenClaw Lobster `.lobster` files under `.openclaw/workflows/` with an `AGENTS_CLI_WORKFLOW` ownership marker. Antigravity workflows are the one non-version-isolated target: `agy` scans a single shared `~/.gemini/config/global_workflows/` at startup (a real HOME directory, never symlinked per version), so agents-cli writes there once for all installed antigravity versions and reads it back the same way — the `agents_workflow` marker guards user-authored files from being overwritten or removed. **Host CLIs** (`agents cli`) are agent-agnostic PATH binaries — not in this matrix. Install paths call `supports(agent, cap, version)` before writing; gated capabilities skip with a clear reason instead of silently ignored config.
-
-Gemini permission sync maps canonical Bash rules to its native `ShellTool(...)` entries under `tools.core` / `tools.exclude`. Other canonical permission tools are not representable in Gemini's native allowlist grammar and are skipped.
+Permissions sync is gated on the `allowlist` capability (Claude, Codex >= 0.138.0, Cursor, OpenCode >= 1.1.1, Antigravity, Grok, Kimi, Kiro 2.8.0+, Goose, Droid >= 0.57.5, OpenClaw, Copilot, and Hermes). Workflow sync writes Claude workflow bundles, Kimi `type: flow` skills with an `agents_workflow` ownership marker, Goose recipe YAML, Antigravity workflow markdown (since 1.0.6), and OpenClaw Lobster `.lobster` files under `.openclaw/workflows/` with an `AGENTS_CLI_WORKFLOW` ownership marker. Antigravity workflows are the one non-version-isolated target: `agy` scans a single shared `~/.gemini/config/global_workflows/` at startup (a real HOME directory, never symlinked per version), so agents-cli writes there once for all installed antigravity versions and reads it back the same way — the `agents_workflow` marker guards user-authored files from being overwritten or removed. **Host CLIs** (`agents cli`) are agent-agnostic PATH binaries — not in this matrix. Install paths call `supports(agent, cap, version)` before writing; gated capabilities skip with a clear reason instead of silently ignored config.
 
 OpenClaw gates at tool granularity only, so permission sync maps just **blanket** (whole-tool) rules to `~/.openclaw/openclaw.json` `tools.alsoAllow` (allow) / `tools.deny` (deny): `bash → exec`, `read → read`, `write`/`edit → write`, `webfetch → web_fetch`, `websearch → web_search`. Sub-command/path/domain rules (`Bash(git:*)`, `Write(secrets/**)`, `WebFetch(domain:x)`) have no tool-level equivalent and are skipped. The absolute `tools.allow` list is never touched.
 
 Hermes permission sync maps canonical Bash allow rules to `~/.hermes/config.yaml` `command_allowlist` and Bash deny rules to `approvals.deny`. Hermes stores command globs only; session-scoped `/tools` toggles are not config-persistent and are not written.
-
-ForgeCode permission sync writes `~/.forge/permissions.yaml` policies by operation family: `bash → command`, `read`/`grep`/`glob → read`, `write`/`edit → write`, and web rules to `url`. Forge only reads that file when `.forge.toml` has `restricted = true`; MCP tools bypass `permissions.yaml` entirely.
 
 ### Per-command targeting
 
@@ -213,4 +211,4 @@ until: "0.117.0"                  # exclusive upper bound
 
 `commandAppliesTo()` in `src/lib/commands.ts` evaluates these fields after the agent-level `commands` / commands-as-skills gate. The check runs on central sync (`~/.agents/commands/` user/system → version home) and on `agents commands install`; project `.agents/commands/` files are discovered in place and are not filtered by `agents:`.
 
-Example: `.agents/commands/version.md` targets Claude, Codex, Gemini, Cursor, OpenCode, Copilot, and Grok; Antigravity is excluded until harness support is verified.
+Example: `.agents/commands/version.md` targets Claude, Codex, Cursor, OpenCode, Copilot, and Grok; Antigravity is excluded until harness support is verified.

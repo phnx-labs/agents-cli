@@ -144,7 +144,7 @@ When to use:
   skillsCmd
     .command('add [source]')
     .description('Install skills from a source (GitHub, local) or pick from central storage')
-    .option('-a, --agents <list>', 'Targets: claude, codex@0.116.0, or gemini@default')
+    .option('-a, --agents <list>', 'Targets: claude, codex@0.116.0, or antigravity@default')
     .option('--names <list>', 'Skill names from ~/.agents/skills/ (comma-separated)')
     .option('-y, --yes', 'Skip all prompts')
     .addHelpText('after', `

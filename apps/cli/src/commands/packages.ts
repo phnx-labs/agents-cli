@@ -16,7 +16,6 @@ import { getAgentsDir, getEnabledExtraRepos } from '../lib/state.js';
 
 import {
   AGENTS,
-  ALL_AGENT_IDS,
   getAllCliStates,
   agentLabel,
 } from '../lib/agents.js';
@@ -527,7 +526,7 @@ the sha256 in the index and abort on mismatch.
       console.log(chalk.gray('\n  Register + search + install:'));
       console.log(`    ${chalk.green(`agents registry add skill ${registryName} ${rawUrl}`)}`);
       console.log(`    ${chalk.green(`agents search ${index.skills[0].name} --type skill`)}`);
-      console.log(`    ${chalk.green(`agents install skill:${index.skills[0].name} --agents claude,codex,gemini`)}`);
+      console.log(`    ${chalk.green(`agents install skill:${index.skills[0].name} --agents claude,codex,cursor`)}`);
     });
 
   // ==========================================================================
@@ -537,7 +536,7 @@ the sha256 in the index and abort on mismatch.
   program
     .command('install <identifier>')
     .description('Install a package by registry name (mcp:notion), GitHub URL (gh:user/repo), or skill identifier')
-    .option('-a, --agents <list>', 'Targets: claude, codex@0.116.0, or gemini@default')
+    .option('-a, --agents <list>', 'Targets: claude, codex@0.116.0, or cursor@default')
     .option(
       '--types <list>',
       'When source is a repo: comma-separated resource types to install (skills,workflows,commands,hooks,permissions,subagents,mcp)'
@@ -761,19 +760,19 @@ When to use:
           }
 
           const gitCliStates = await getAllCliStates();
-          const installedAgents = ALL_AGENT_IDS.filter(
+          const installedAgents = capableAgents('commands').filter(
             (id) => gitCliStates[id]?.installed || listInstalledVersions(id).length > 0
           );
           let targets;
           if (options.agents) {
-            const resolved = await resolveInstalledAgentTargetsAutoInstalling(options.agents, ALL_AGENT_IDS, { yes: options.yes });
+            const resolved = await resolveInstalledAgentTargetsAutoInstalling(options.agents, capableAgents('commands'), { yes: options.yes });
             if (!resolved) {
               console.log(chalk.gray('Cancelled.'));
               return;
             }
             targets = resolved;
           } else {
-            targets = resolveConfiguredAgentTargets(installedAgents, undefined, ALL_AGENT_IDS);
+            targets = resolveConfiguredAgentTargets(installedAgents, undefined, capableAgents('commands'));
           }
 
           if (targets.selectedAgents.length === 0) {

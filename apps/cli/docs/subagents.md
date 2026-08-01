@@ -4,7 +4,7 @@ Lightweight named agent definitions that parent agents can spawn for focused sub
 
 ## Overview
 
-A subagent is a directory in `~/.agents/subagents/<name>/` containing an `AGENT.md` file with YAML frontmatter and an instruction body. Parent agents whose capability matrix declares `subagents` (see `capableAgents('subagents')` in `src/lib/capabilities.ts` — today Claude, Codex, Gemini, Cursor, OpenCode, OpenClaw, Copilot, Kiro, Goose, Antigravity, Grok, Kimi, Droid, and Forge) discover installed subagents and can spawn them using their native task-dispatch mechanism (e.g., Claude's `Task()` tool). Each subagent definition specifies a model, a display color, and a focused instruction set. The resource resolution order is `project > user > system`, matching every other resource kind.
+A subagent is a directory in `~/.agents/subagents/<name>/` containing an `AGENT.md` file with YAML frontmatter and an instruction body. Parent agents whose capability matrix declares `subagents` (see `capableAgents('subagents')` in `src/lib/capabilities.ts` — today Claude, Codex, Cursor, OpenCode, OpenClaw, Copilot, Kiro, Goose, Antigravity, Grok, Kimi, and Droid) discover installed subagents and can spawn them using their native task-dispatch mechanism (e.g., Claude's `Task()` tool). Each subagent definition specifies a model, a display color, and a focused instruction set. The resource resolution order is `project > user > system`, matching every other resource kind.
 
 Subagents are one of three patterns for specialization. Plugins can bundle subagent definitions alongside skills and hooks. Workflows declare `allowedAgents` in their frontmatter to constrain which subagents the orchestrator can reach. In all cases the on-disk format is the same `AGENT.md` file.
 
@@ -30,7 +30,6 @@ Central storage (project > user > system):
   <version-home>/                    (target dir + shape per registry entry)
     .claude/agents/<name>.md         flat-file  (Claude flatten)          [Tier 1]
     .codex/agents/<name>.toml        flat-file  (Codex TOML)              [Tier 1]
-    .gemini/agents/<name>.md         flat-file  (Claude-compatible)       [Tier 1]
     .cursor/agents/<name>.md         flat-file  (no color)                [Tier 1]
     .grok/agents/<name>.md           flat-file  (Claude-compatible)       [Tier 2]
     .factory/droids/<name>.md        flat-file  (Droid custom droid)      [Tier 2]
@@ -38,7 +37,6 @@ Central storage (project > user > system):
     .kiro/agents/<name>.json         flat-file  (Kiro JSON)               [Tier 2]
     .config/opencode/agents/<name>.md   flat-file (OpenCode)             [Tier 2]
     .config/goose/agents/<name>.yaml    flat-file (Goose recipe)         [Tier 3]
-    .forge/agents/<name>.md          flat-file  (ForgeCode)               [Tier 3]
     .gemini/config/agents/<name>/agent.md   dir-file (Antigravity)       [Tier 3]
     .openclaw/<name>/AGENTS.md       dir-copy   (AGENT.md → AGENTS.md)    [Tier 2]
     .kimi-code/agents/<name>.yaml + <name>.system.md   bespoke (+parent index) [Tier 3]
@@ -59,9 +57,9 @@ identically — the long tail should cost far less than the core.
 
 | Tier | Agents | What it means for a "wire X" ticket |
 |------|--------|-------------------------------------|
-| **Tier 1 — core** | `claude`, `codex`, `gemini`, `cursor` | First-class. Full support; bespoke transform/format work where the native format demands it. New subagent capabilities land here first. |
+| **Tier 1 — core** | `claude`, `codex`, `cursor` | First-class. Full support; bespoke transform/format work where the native format demands it. New subagent capabilities land here first. |
 | **Tier 2 — established** | `openclaw`, `grok`, `droid`, `copilot`, `kiro`, `opencode` | Supported, ride the generic registry path. A bespoke `transform` only where the on-disk format differs — never bespoke install/list/remove logic. |
-| **Tier 3 — long-tail** | `goose`, `forge`, `antigravity`, `kimi` | Config-only; spend the minimum. A new one is a single `SUBAGENT_TARGETS` entry. `kimi` is the sole current entry that still needs a bespoke handler (two files per subagent + a managed parent index). |
+| **Tier 3 — long-tail** | `goose`, `antigravity`, `kimi` | Config-only; spend the minimum. A new one is a single `SUBAGENT_TARGETS` entry. `kimi` is the sole current entry that still needs a bespoke handler (two files per subagent + a managed parent index). |
 
 **Adding a standard integration (Tier 2/3) is one entry, not six edits.** Give the
 agent a `subagents` gate in `src/lib/agents.ts`, add one entry to `SUBAGENT_TARGETS`

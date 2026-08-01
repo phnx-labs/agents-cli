@@ -7,7 +7,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId } from '../../types.js';
-import { AGENTS, agentConfigDirName } from '../../agents.js';
+import { AGENTS, MANAGED_AGENT_IDS, agentConfigDirName } from '../../agents.js';
 import { shouldInstallCommandAsSkill, listCommandSkillsInVersion } from '../../command-skills.js';
 import type { ResourceDetector, DetectArgs } from './types.js';
 import { lazyAgentMap } from '../writers/lazy-map.js';
@@ -38,7 +38,7 @@ function buildCommandsDetector(agent: AgentId): ResourceDetector {
 // agents with their own slash-command runtime (nativeCommandRuntime) opt out.
 export const commandsDetectors = lazyAgentMap<ResourceDetector>(() => {
   const m: Partial<Record<AgentId, ResourceDetector>> = {};
-  for (const id of Object.keys(AGENTS) as AgentId[]) {
+  for (const id of MANAGED_AGENT_IDS) {
     const cfg = AGENTS[id];
     if (cfg.capabilities.commands === false && (!cfg.commandsSubdir || cfg.commandsSubdir === '') && cfg.nativeCommandRuntime) continue;
     const hasCommands = cfg.capabilities.commands !== false;

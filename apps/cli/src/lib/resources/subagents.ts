@@ -15,6 +15,7 @@ import {
   getSystemSubagentsDir,
   getEnabledExtraRepos,
 } from '../state.js';
+import { isAgentHardDeprecated } from '../agents.js';
 
 /** Parsed content of a subagent YAML file. */
 export interface SubagentItem {
@@ -188,6 +189,9 @@ export class SubagentsHandler implements ResourceHandler<SubagentItem> {
    * Copies YAML files to the target directory.
    */
   sync(agent: AgentId, versionHome: string, cwd?: string): void {
+    if (isAgentHardDeprecated(agent)) {
+      return;
+    }
     const targetDir = path.join(versionHome, this.targetDir(agent));
 
     // Ensure target directory exists

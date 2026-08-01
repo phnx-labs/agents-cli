@@ -16,12 +16,14 @@ import { select, confirm, checkbox } from '@inquirer/prompts';
 
 import {
   AGENTS,
-  ALL_AGENT_IDS,
+  MANAGED_AGENT_IDS,
   accountOrgBadge,
   getAccountEmail,
   getAccountInfo,
   agentLabel,
   warnAgentDeprecated,
+  isAgentHardDeprecated,
+  hardDeprecationError,
   isSelfUpdatingAgent,
 } from '../lib/agents.js';
 import type { AccountInfo } from '../lib/agents.js';
@@ -207,7 +209,7 @@ async function versionPruneAction(
     const parsed = parseAgentSpec(spec);
     if (!parsed) {
       console.log(chalk.red(`Invalid agent: ${spec}`));
-      console.log(chalk.gray(`Format: <agent>[@version]. Available: ${ALL_AGENT_IDS.join(', ')}`));
+      console.log(chalk.gray(`Format: <agent>[@version]. Available: ${MANAGED_AGENT_IDS.join(', ')}`));
       continue;
     }
 
@@ -430,12 +432,18 @@ export function registerVersionsCommands(program: Command): void {
         const parsed = parseAgentSpec(spec);
         if (!parsed) {
           console.log(chalk.red(`Invalid agent: ${spec}`));
-          console.log(chalk.gray(`Format: <agent>[@version]. Available: ${ALL_AGENT_IDS.join(', ')}`));
+          console.log(chalk.gray(`Format: <agent>[@version]. Available: ${MANAGED_AGENT_IDS.join(', ')}`));
           continue;
         }
 
         const { agent, version } = parsed;
         const agentConfig = AGENTS[agent];
+
+        if (isAgentHardDeprecated(agent)) {
+          console.error(chalk.red(hardDeprecationError(agent)));
+          process.exitCode = 1;
+          continue;
+        }
 
         warnAgentDeprecated(agent);
 
@@ -753,7 +761,7 @@ export function registerVersionsCommands(program: Command): void {
           const parsed = parseAgentSpec(agentArg);
           if (!parsed) {
             console.log(chalk.red(`Invalid agent: ${agentArg}`));
-            console.log(chalk.gray(`Format: <agent>[@version]. Available: ${ALL_AGENT_IDS.join(', ')}`));
+            console.log(chalk.gray(`Format: <agent>[@version]. Available: ${MANAGED_AGENT_IDS.join(', ')}`));
             return;
           }
           agent = parsed.agent;
@@ -762,7 +770,7 @@ export function registerVersionsCommands(program: Command): void {
           const agentLower = agentArg.toLowerCase();
           if (!AGENTS[agentLower as AgentId]) {
             console.log(chalk.red(`Invalid agent: ${agentArg}`));
-            console.log(chalk.gray(`Available: ${ALL_AGENT_IDS.join(', ')}`));
+            console.log(chalk.gray(`Available: ${MANAGED_AGENT_IDS.join(', ')}`));
             return;
           }
           agent = agentLower;

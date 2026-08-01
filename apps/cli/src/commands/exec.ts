@@ -548,7 +548,7 @@ export function registerRunCommand(program: Command): void {
     .option('--timeout <duration>', 'Kill the agent after this duration (e.g., 30m, 1h, 2h30m)')
     .option(
       '--fallback <agents>',
-      'Comma-separated agents to try on rate-limit failure. Each entry accepts an optional @version pin (e.g., codex@0.116.0,gemini). The primary runs first; if it exits with a rate-limit error, the next agent picks up via /continue handoff.',
+      'Comma-separated agents to try on rate-limit failure. Each entry accepts an optional @version pin (e.g., codex@0.116.0,antigravity). The primary runs first; if it exits with a rate-limit error, the next agent picks up via /continue handoff.',
     )
     .option(
       '-b, --balanced',
@@ -564,7 +564,7 @@ export function registerRunCommand(program: Command): void {
     )
     .option(
       '--acp',
-      'Route through the Agent Client Protocol instead of direct exec. Supported for gemini, claude (via @zed-industries/claude-code-acp adapter). Unified event stream; emits ndjson when --json.',
+      'Route through the Agent Client Protocol instead of direct exec. Supported for claude via @zed-industries/claude-code-acp adapter. Unified event stream; emits ndjson when --json.',
     )
     .option(
       '-y, --yes',
@@ -696,7 +696,7 @@ export function registerRunCommand(program: Command): void {
         installed account for this run. Rows show identity, login state, plan,
         and available limits; unsafe accounts stay visible but disabled.
 
-      Fallback: --fallback codex,gemini retries on rate-limit failure via /continue handoff. Each entry accepts @version.
+      Fallback: --fallback codex,antigravity retries on rate-limit failure via /continue handoff. Each entry accepts @version.
 
       Resume: --resume <id> continues a prior conversation (full or partial id; omit to pick interactively). claude/codex resume natively; others replay via a /continue first message. Add a prompt to continue headlessly.
 

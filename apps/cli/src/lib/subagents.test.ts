@@ -9,7 +9,6 @@ import {
   transformSubagentForAntigravity,
   transformSubagentForCopilot,
   transformSubagentForCursor,
-  transformSubagentForForge,
   transformSubagentForKiro,
   transformSubagentForGoose,
 } from './subagents.js';
@@ -117,41 +116,6 @@ describe('installSubagentToAgent for Cursor', () => {
     expect(content).toContain('You run tests.');
 
     const installed = listSubagentsForAgent('cursor', agentHome);
-    expect(installed.map(s => s.name)).toEqual(['tester']);
-    expect(installed[0].frontmatter.description).toBe('Runs tests');
-  });
-});
-
-describe('transformSubagentForForge', () => {
-  it('emits a ForgeCode custom subagent .md (frontmatter + body, no color)', () => {
-    const dir = makeSubagentDir(makeTempDir(), 'security-auditor');
-    const output = transformSubagentForForge(dir);
-
-    expect(output).toContain('name: security-auditor');
-    expect(output).toContain('description: Test security-auditor agent');
-    expect(output).toContain('model: gpt-4o');
-    expect(output).toContain('You are the security-auditor agent.');
-    expect(output).not.toContain('color:');
-  });
-});
-
-describe('installSubagentToAgent for ForgeCode', () => {
-  it('writes a flattened .md subagent to ~/.forge/agents/ and round-trips', () => {
-    const sourceHome = makeTempHome();
-    const agentHome = makeTempHome();
-    const dir = path.join(sourceHome, 'subagent');
-    writeAgentMd(dir, '---\nname: tester\ndescription: Runs tests\nmodel: gpt-4o\n---\n\nYou run tests.');
-
-    const result = installSubagentToAgent(dir, 'tester', 'forge', agentHome);
-    expect(result.success).toBe(true);
-
-    const targetPath = path.join(agentHome, '.forge', 'agents', 'tester.md');
-    expect(fs.existsSync(targetPath)).toBe(true);
-    const content = fs.readFileSync(targetPath, 'utf-8');
-    expect(content).toContain('name: tester');
-    expect(content).toContain('You run tests.');
-
-    const installed = listSubagentsForAgent('forge', agentHome);
     expect(installed.map(s => s.name)).toEqual(['tester']);
     expect(installed[0].frontmatter.description).toBe('Runs tests');
   });
@@ -304,24 +268,20 @@ describe('installSubagentToAgent for Antigravity', () => {
   });
 });
 
-describe('installSubagentToAgent for Gemini', () => {
-  it('writes a markdown subagent file to ~/.gemini/agents/', () => {
+describe('installSubagentToAgent for hard-deprecated Gemini', () => {
+  it('does not write a markdown subagent file to ~/.gemini/agents/', () => {
     const sourceHome = makeTempHome();
     const agentHome = makeTempHome();
     const dir = path.join(sourceHome, 'subagent');
     writeAgentMd(dir, '---\nname: reviewer\ndescription: Reviews changes\n---\n\nReview the diff.');
 
     const result = installSubagentToAgent(dir, 'reviewer', 'gemini', agentHome);
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
 
     const targetPath = path.join(agentHome, '.gemini', 'agents', 'reviewer.md');
-    expect(fs.existsSync(targetPath)).toBe(true);
-    const content = fs.readFileSync(targetPath, 'utf-8');
-    expect(content).toContain('name: reviewer');
-    expect(content).toContain('Review the diff.');
+    expect(fs.existsSync(targetPath)).toBe(false);
 
     const installed = listSubagentsForAgent('gemini', agentHome);
-    expect(installed.map(s => s.name)).toContain('reviewer');
-    expect(installed.find(s => s.name === 'reviewer')?.frontmatter.description).toBe('Reviews changes');
+    expect(installed).toEqual([]);
   });
 });

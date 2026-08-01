@@ -47,7 +47,6 @@ import {
 
 const PLUGIN_MANIFEST_DIR = '.claude-plugin';
 const PLUGIN_MANIFEST_FILE = 'plugin.json';
-const GEMINI_EXTENSION_MANIFEST_FILE = 'gemini-extension.json';
 const HERMES_PLUGIN_MANIFEST_FILE = 'plugin.yaml';
 const USER_CONFIG_FILE = '.user-config.json';
 const SOURCE_FILE = '.source';
@@ -607,6 +606,9 @@ export function syncPluginToVersion(
   if (!pluginSupportsAgent(plugin, agent)) {
     return result;
   }
+  if (!isCapable(agent, 'plugins')) {
+    return result;
+  }
 
   // OpenCode uses TS/JS modules under ~/.config/opencode/plugins/, not the
   // Claude marketplace layout. Install those modules and return early.
@@ -614,7 +616,7 @@ export function syncPluginToVersion(
     // Trust gate (RUSH-1756): OpenCode plugins are raw executable TS/JS modules,
     // so they must clear the same consent check as every other exec surface
     // before install — this branch used to return early, bypassing the gate the
-    // Gemini/Hermes/marketplace branches all apply.
+    // Hermes/marketplace branches all apply.
     const enablePlugin = options.allowExecSurfaces === true || !hasPluginExecSurfaces(inspectPluginCapabilities(plugin.root));
     if (!enablePlugin) {
       return result;
@@ -622,28 +624,6 @@ export function syncPluginToVersion(
     const ok = installOpenCodePlugin(plugin, versionHome);
     result.success = ok;
     if (ok) result.skills.push(plugin.name);
-    return result;
-  }
-
-  // Gemini CLI loads extensions from $HOME/.gemini/extensions/<name>/.
-  // Copy the plugin bundle as an extension and synthesize gemini-extension.json.
-  if (agent === 'gemini') {
-    const enablePlugin = options.allowExecSurfaces === true || !hasPluginExecSurfaces(inspectPluginCapabilities(plugin.root));
-    if (!enablePlugin) {
-      return result;
-    }
-    const ok = installGeminiPlugin(plugin, versionHome);
-    result.success = ok;
-    if (ok) {
-      result.skills = plugin.skills.map(s => `${plugin.name}:${s}`);
-      result.commands = plugin.commands.map(c => `${plugin.name}:${c}`);
-      result.agentDefs = plugin.agentDefs.map(a => `${plugin.name}:${a}`);
-      result.bin = plugin.bin;
-      result.hooks = plugin.hooks;
-      result.mcp = plugin.hasMcp;
-      result.settings = plugin.hasSettings;
-      result.permissions = pluginHasPermissions(plugin);
-    }
     return result;
   }
 
@@ -1089,60 +1069,6 @@ export function removeOpenCodePlugin(pluginName: string, versionHome: string): b
 }
 
 
-// ─── Gemini extensions ───────────────────────────────────────────────────────
-
-/**
- * Gemini CLI extensions live under `$HOME/.gemini/extensions/<name>/` and
- * require a `gemini-extension.json` manifest at the extension root.
- */
-export function geminiExtensionsDir(versionHome: string): string {
-  return path.join(versionHome, '.gemini', 'extensions');
-}
-
-function readPluginMcpConfigForGemini(pluginRoot: string): Record<string, unknown> | undefined {
-  const mcpPath = path.join(pluginRoot, '.mcp.json');
-  if (!fs.existsSync(mcpPath)) return undefined;
-  try {
-    const parsed = JSON.parse(fs.readFileSync(mcpPath, 'utf-8')) as { mcpServers?: Record<string, unknown> };
-    if (!parsed.mcpServers || typeof parsed.mcpServers !== 'object') return undefined;
-    return rewriteGeminiExtensionVars(parsed.mcpServers) as Record<string, unknown>;
-  } catch {
-    return undefined;
-  }
-}
-
-function rewriteGeminiExtensionVars(value: unknown): unknown {
-  if (typeof value === 'string') {
-    return value
-      .replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, '${extensionPath}')
-      .replace(/\$\{CLAUDE_PLUGIN_DATA\}/g, '${extensionPath}/.data');
-  }
-  if (Array.isArray(value)) return value.map(rewriteGeminiExtensionVars);
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, rewriteGeminiExtensionVars(item)])
-    );
-  }
-  return value;
-}
-
-function writeGeminiExtensionManifest(plugin: DiscoveredPlugin, destRoot: string): void {
-  const manifest: Record<string, unknown> = {
-    name: plugin.manifest.name,
-    version: plugin.manifest.version,
-    description: plugin.manifest.description,
-  };
-  const mcpServers = readPluginMcpConfigForGemini(destRoot);
-  if (mcpServers && Object.keys(mcpServers).length > 0) {
-    manifest.mcpServers = mcpServers;
-  }
-  fs.writeFileSync(
-    path.join(destRoot, GEMINI_EXTENSION_MANIFEST_FILE),
-    `${JSON.stringify(manifest, null, 2)}\n`,
-    'utf-8'
-  );
-}
-
 /**
  * Security (RUSH-1755): `fs.cpSync(..., { recursive: true })` copies symlinks
  * verbatim (dereference defaults to false), so a malicious plugin can ship a
@@ -1199,42 +1125,6 @@ function stripEscapingSymlinks(destRoot: string, sourceRoot: string): string[] {
   walk(destRoot);
   return removed;
 }
-
-export function installGeminiPlugin(plugin: DiscoveredPlugin, versionHome: string): boolean {
-  const destRoot = path.join(geminiExtensionsDir(versionHome), plugin.name);
-  try {
-    if (fs.existsSync(destRoot)) {
-      fs.rmSync(destRoot, { recursive: true, force: true });
-    }
-    fs.cpSync(plugin.root, destRoot, { recursive: true });
-    stripEscapingSymlinks(destRoot, plugin.root);
-    const userConfig = loadUserConfig(plugin.name);
-    if (Object.keys(userConfig).length > 0) {
-      expandUserConfigInDir(destRoot, userConfig);
-    }
-    writeGeminiExtensionManifest(plugin, destRoot);
-    fs.writeFileSync(
-      path.join(destRoot, '.agents-cli-managed'),
-      `plugin=${plugin.name}\n`,
-      'utf-8'
-    );
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export function isGeminiPluginInstalled(pluginName: string, versionHome: string): boolean {
-  return fs.existsSync(path.join(geminiExtensionsDir(versionHome), pluginName, GEMINI_EXTENSION_MANIFEST_FILE));
-}
-
-export function removeGeminiPlugin(pluginName: string, versionHome: string): boolean {
-  const destRoot = path.join(geminiExtensionsDir(versionHome), pluginName);
-  if (!fs.existsSync(destRoot)) return false;
-  fs.rmSync(destRoot, { recursive: true, force: true });
-  return true;
-}
-
 
 // ─── Goose plugins (Open Plugins under .agents/plugins/) ─────────────────────
 
@@ -1409,9 +1299,6 @@ export function isPluginSynced(
   if (agent === 'opencode') {
     return isOpenCodePluginInstalled(plugin.name, versionHome);
   }
-  if (agent === 'gemini') {
-    return isGeminiPluginInstalled(plugin.name, versionHome);
-  }
   if (agent === 'goose') {
     return isGoosePluginInstalled(plugin.name, versionHome);
   }
@@ -1463,14 +1350,6 @@ export function removePluginFromVersion(
   // OpenCode: remove TS/JS modules from ~/.config/opencode/plugins/.
   if (agent === 'opencode') {
     if (removeOpenCodePlugin(pluginName, versionHome)) {
-      result.skills.push(pluginName);
-    }
-    return result;
-  }
-
-  // Gemini: remove extension directory from ~/.gemini/extensions/.
-  if (agent === 'gemini') {
-    if (removeGeminiPlugin(pluginName, versionHome)) {
       result.skills.push(pluginName);
     }
     return result;

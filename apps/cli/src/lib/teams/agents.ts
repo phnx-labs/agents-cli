@@ -3,7 +3,7 @@
  *
  * Defines the AgentProcess and AgentManager classes that handle spawning,
  * monitoring, stopping, and persisting teammate processes across all supported
- * agent CLIs (Claude, Codex, Gemini, Cursor, OpenCode). Supports DAG-based
+ * agent CLIs (Claude, Codex, Cursor, OpenCode). Supports DAG-based
  * dependency scheduling via --after, per-teammate model/effort overrides, and
  * multiple permission modes (plan, edit, full).
  */
@@ -18,7 +18,6 @@ import { resolveAgentsDir } from './persistence.js';
 import { findExecutable, captureProcessStartTime } from '../platform/index.js';
 import { normalizeEvents, AgentType } from './parsers.js';
 import { debug } from './debug.js';
-import { setGeminiAutoUpdateDisabled, updateGeminiSettings } from '../gemini-settings.js';
 import type { AgentId } from '../types.js';
 import { getAgentsDir as getSystemAgentsDir, getShimsDir } from '../state.js';
 import { AGENTS, getAccountInfo } from '../agents.js';
@@ -213,7 +212,7 @@ export function buildTeammateSpawnEnv(
 export { captureProcessStartTime };
 
 /** Agent types the team runner supports. */
-const TEAM_AGENT_TYPES: AgentType[] = ['codex', 'cursor', 'gemini', 'claude', 'opencode', 'grok', 'antigravity', 'kimi', 'droid'];
+const TEAM_AGENT_TYPES: AgentType[] = ['codex', 'cursor', 'claude', 'opencode', 'grok', 'antigravity', 'kimi', 'droid'];
 
 /**
  * Reasoning-intensity knob. Passed through to `agents run --effort`, which
@@ -330,30 +329,6 @@ export function resolveMode(
   }
 
   return normalizedDefault;
-}
-
-/** Ensure Gemini's settings.json has experimental.plan enabled for headless plan mode. */
-export async function ensureGeminiPlanMode(): Promise<void> {
-  const settingsPath = path.join(os.homedir(), '.gemini', 'settings.json');
-  try {
-    let changed = false;
-    const settings = updateGeminiSettings(settingsPath, (nextSettings) => {
-      setGeminiAutoUpdateDisabled(nextSettings);
-      const experimental = typeof nextSettings.experimental === 'object' && nextSettings.experimental !== null
-        ? nextSettings.experimental as Record<string, unknown>
-        : {};
-      if (experimental.plan === true) {
-        return;
-      }
-      nextSettings.experimental = { ...experimental, plan: true };
-      changed = true;
-    });
-    if (changed && settings.experimental && typeof settings.experimental === 'object' && (settings.experimental as Record<string, unknown>).plan === true) {
-      console.error('[Swarm] Enabled Gemini experimental.plan in', settingsPath);
-    }
-  } catch (err) {
-    console.warn('[Swarm] Could not enable Gemini plan mode:', err);
-  }
 }
 
 /**

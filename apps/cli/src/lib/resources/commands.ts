@@ -15,7 +15,7 @@ import {
   getSystemAgentsDir,
   getEnabledExtraRepos,
 } from '../state.js';
-import { AGENTS, agentConfigDirName } from '../agents.js';
+import { AGENTS, agentConfigDirName, isAgentHardDeprecated } from '../agents.js';
 import { markdownToToml } from '../convert.js';
 
 /** Command item metadata. */
@@ -194,6 +194,9 @@ export class CommandsHandler implements ResourceHandler<CommandItem> {
    * Copies/transforms commands as needed for the agent's expected format.
    */
   sync(agent: AgentId, versionHome: string, cwd?: string): void {
+    if (isAgentHardDeprecated(agent)) {
+      return;
+    }
     const agentConfig = AGENTS[agent];
     const targetFormat = this.format(agent);
     const targetDir = path.join(versionHome, agentConfigDirName(agent), this.targetDir(agent));

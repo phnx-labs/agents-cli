@@ -20,7 +20,7 @@ afterEach(() => {
 });
 
 describe('syncProjectResourcesToAgent', () => {
-  it('syncs project skills into native skill agents project config dirs', () => {
+  it('skips hard-deprecated gemini when syncing project resources', () => {
     const project = makeTempProject();
     const projectAgentsDir = path.join(project, '.agents');
     const skillDir = path.join(projectAgentsDir, 'skills', 'myskill');
@@ -28,19 +28,27 @@ describe('syncProjectResourcesToAgent', () => {
     fs.writeFileSync(path.join(skillDir, 'SKILL.md'), 'Project skill.', 'utf-8');
 
     const gemini = syncProjectResourcesToAgent('gemini', '0.36.0', projectAgentsDir);
+
+    expect(gemini.synced).toEqual([]);
+    expect(gemini.skipped).toEqual([]);
+    expect(fs.existsSync(path.join(project, '.gemini'))).toBe(false);
+  });
+
+  it('syncs project skills into native skill agents project config dirs', () => {
+    const project = makeTempProject();
+    const projectAgentsDir = path.join(project, '.agents');
+    const skillDir = path.join(projectAgentsDir, 'skills', 'myskill');
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), 'Project skill.', 'utf-8');
+
     const goose = syncProjectResourcesToAgent('goose', '1.25.0', projectAgentsDir);
 
-    expect(gemini.synced).toEqual(['skills/myskill']);
-    expect(gemini.skipped).toEqual([]);
     expect(goose.synced).toEqual(['skills/myskill']);
     expect(goose.skipped).toEqual([]);
 
-    expect(fs.readFileSync(path.join(project, '.gemini', 'skills', 'myskill', 'SKILL.md'), 'utf-8')).toBe('Project skill.');
     expect(fs.readFileSync(path.join(project, '.config', 'goose', 'skills', 'myskill', 'SKILL.md'), 'utf-8')).toBe('Project skill.');
 
-    const geminiManifest = JSON.parse(fs.readFileSync(path.join(project, '.gemini', '.agents-managed.json'), 'utf-8')) as { paths: string[] };
     const gooseManifest = JSON.parse(fs.readFileSync(path.join(project, '.config', 'goose', '.agents-managed.json'), 'utf-8')) as { paths: string[] };
-    expect(geminiManifest.paths).toEqual(['skills/myskill']);
     expect(gooseManifest.paths).toEqual(['skills/myskill']);
   });
 
@@ -55,18 +63,18 @@ describe('syncProjectResourcesToAgent', () => {
 
     // A file this manifest claims to manage, which is no longer backed by any
     // project resource — the next sync must remove it.
-    const geminiRoot = path.join(project, '.gemini');
-    const stale = path.join(geminiRoot, 'skills', 'gone');
+    const gooseRoot = path.join(project, '.config', 'goose');
+    const stale = path.join(gooseRoot, 'skills', 'gone');
     fs.mkdirSync(stale, { recursive: true });
     fs.writeFileSync(path.join(stale, 'SKILL.md'), 'stale', 'utf-8');
     fs.writeFileSync(
-      path.join(geminiRoot, '.agents-managed.json'),
+      path.join(gooseRoot, '.agents-managed.json'),
       // Backslashes exactly as a Windows run would have persisted them.
       JSON.stringify({ v: 1, paths: ['skills\\gone'] }),
       'utf-8',
     );
 
-    syncProjectResourcesToAgent('gemini', '0.36.0', projectAgentsDir);
+    syncProjectResourcesToAgent('goose', '1.25.0', projectAgentsDir);
 
     expect(fs.existsSync(stale)).toBe(false);
   });

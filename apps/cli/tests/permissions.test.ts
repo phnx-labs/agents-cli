@@ -12,7 +12,6 @@ import {
   convertToCursorFormat,
   convertToCopilotFormat,
   convertToCodexFormat,
-  convertToGeminiFormat,
   convertToAntigravityFormat,
   convertToGrokFormat,
   claudeToCanonical,
@@ -831,37 +830,7 @@ describe('applyPermissionsToVersion', () => {
     expect((config.sandbox_workspace_write as any)?.network_access).toBe(true);
   });
 
-  it('convertToGeminiFormat maps Bash allow and deny rules to tools.core/exclude', () => {
-    const set: PermissionSet = {
-      name: 'test',
-      allow: ['Bash(git *)', 'Bash(mq:*)', 'Bash(*)', 'Bash', 'Bash(**)', 'Read(**)'],
-      deny: ['Bash(rm -rf *)'],
-    };
-
-    const out = convertToGeminiFormat(set);
-
-    expect(out.tools.core).toContain('ShellTool(git *)');
-    expect(out.tools.core).toContain('ShellTool(mq *)');
-    expect(out.tools.core).toContain('ShellTool');
-    expect(out.tools.core.filter((tool) => tool === 'ShellTool')).toHaveLength(1);
-    expect(out.tools.core).not.toContain('ReadFileTool');
-    expect(out.tools.exclude).toEqual(['ShellTool(rm -rf *)']);
-  });
-
-  it('convertToGeminiFormat omits tools.exclude when there are no deny rules', () => {
-    const set: PermissionSet = {
-      name: 'test',
-      allow: ['Bash(git *)'],
-      deny: [],
-    };
-
-    const out = convertToGeminiFormat(set);
-
-    expect(out.tools.core).toEqual(['ShellTool(git *)']);
-    expect(out.tools.exclude).toBeUndefined();
-  });
-
-  it('writes Gemini permissions to .gemini/settings.json tools.core/exclude', () => {
+  it('does not write permissions for hard-deprecated gemini', () => {
     const versionHome = join(testDir, 'gemini-version-home');
     mkdirSync(versionHome, { recursive: true });
 
@@ -872,68 +841,11 @@ describe('applyPermissionsToVersion', () => {
     };
 
     const result = applyPermissionsToVersion('gemini', set, versionHome, false);
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Agent 'gemini' does not support permissions");
 
     const settingsPath = join(versionHome, '.gemini', 'settings.json');
-    expect(existsSync(settingsPath)).toBe(true);
-
-    const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
-    expect(settings.tools.core).toEqual(['ShellTool(git *)', 'ShellTool(mq *)']);
-    expect(settings.tools.exclude).toEqual(['ShellTool(rm -rf *)']);
-    expect(settings.tools.allowed).toBeUndefined();
-  });
-
-  it('merge=true preserves existing Gemini tools entries and removes stale tools.allowed', () => {
-    const versionHome = join(testDir, 'gemini-version-merge');
-    const geminiDir = join(versionHome, '.gemini');
-    mkdirSync(geminiDir, { recursive: true });
-    writeFileSync(join(geminiDir, 'settings.json'), JSON.stringify({
-      tools: {
-        core: ['ReadFileTool', 'ShellTool(git *)'],
-        exclude: ['ShellTool(curl *)'],
-        allowed: ['run_shell_command'],
-      },
-      customKey: 'preserved',
-    }), 'utf-8');
-
-    const set: PermissionSet = {
-      name: 'test',
-      allow: ['Bash(git *)', 'Bash(yarn:*)'],
-      deny: ['Bash(rm -rf *)'],
-    };
-
-    const result = applyPermissionsToVersion('gemini', set, versionHome, true);
-    expect(result.success).toBe(true);
-
-    const settings = JSON.parse(readFileSync(join(geminiDir, 'settings.json'), 'utf-8'));
-    expect(settings.tools.core).toEqual(['ReadFileTool', 'ShellTool(git *)', 'ShellTool(yarn *)']);
-    expect(settings.tools.exclude).toEqual(['ShellTool(curl *)', 'ShellTool(rm -rf *)']);
-    expect(settings.tools.allowed).toBeUndefined();
-    expect(settings.customKey).toBe('preserved');
-  });
-
-  it('merge=false replaces existing Gemini tools entries', () => {
-    const versionHome = join(testDir, 'gemini-version-replace');
-    const geminiDir = join(versionHome, '.gemini');
-    mkdirSync(geminiDir, { recursive: true });
-    writeFileSync(join(geminiDir, 'settings.json'), JSON.stringify({
-      tools: {
-        core: ['ReadFileTool', 'ShellTool(git *)'],
-        exclude: ['ShellTool(curl *)'],
-      },
-    }), 'utf-8');
-
-    const set: PermissionSet = {
-      name: 'test',
-      allow: ['Bash(yarn:*)'],
-    };
-
-    const result = applyPermissionsToVersion('gemini', set, versionHome, false);
-    expect(result.success).toBe(true);
-
-    const settings = JSON.parse(readFileSync(join(geminiDir, 'settings.json'), 'utf-8'));
-    expect(settings.tools.core).toEqual(['ShellTool(yarn *)']);
-    expect(settings.tools.exclude).toBeUndefined();
+    expect(existsSync(settingsPath)).toBe(false);
   });
 
   it('returns error for unsupported agent', () => {

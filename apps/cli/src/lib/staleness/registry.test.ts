@@ -103,9 +103,11 @@ describe('staleness/registry', () => {
     expect(DETECTORS.permissions.antigravity).toBeDefined();
   });
 
-  it('gemini has a permissions writer + detector', () => {
-    expect(WRITERS.permissions.gemini).toBeDefined();
-    expect(DETECTORS.permissions.gemini).toBeDefined();
+  it('gemini is hard-deprecated and has no sync writers or detectors', () => {
+    for (const kind of ALL_RESOURCE_KINDS) {
+      expect(WRITERS[kind].gemini).toBeUndefined();
+      expect(DETECTORS[kind].gemini).toBeUndefined();
+    }
   });
 
   it('openclaw has a permissions writer + detector', () => {
@@ -116,11 +118,6 @@ describe('staleness/registry', () => {
   it('openclaw has a workflows writer + detector', () => {
     expect(WRITERS.workflows.openclaw).toBeDefined();
     expect(DETECTORS.workflows.openclaw).toBeDefined();
-  });
-
-  it('forge has a permissions writer + detector', () => {
-    expect(WRITERS.permissions.forge).toBeDefined();
-    expect(DETECTORS.permissions.forge).toBeDefined();
   });
 
   it('hermes has a permissions writer + detector', () => {
@@ -143,13 +140,6 @@ describe('staleness/registry', () => {
   it('kiro has a subagents writer + detector', () => {
     expect(WRITERS.subagents.kiro).toBeDefined();
     expect(DETECTORS.subagents.kiro).toBeDefined();
-  });
-
-  it('gemini has plugins and subagents writers + detectors', () => {
-    expect(WRITERS.plugins.gemini).toBeDefined();
-    expect(DETECTORS.plugins.gemini).toBeDefined();
-    expect(WRITERS.subagents.gemini).toBeDefined();
-    expect(DETECTORS.subagents.gemini).toBeDefined();
   });
 
   it('goose has workflows and permissions writers + detectors', () => {

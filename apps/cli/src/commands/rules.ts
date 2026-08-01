@@ -17,11 +17,12 @@ import { select, checkbox } from '@inquirer/prompts';
 import {
   AGENTS,
   agentConfigDirName,
-  ALL_AGENT_IDS,
+  MANAGED_AGENT_IDS,
   resolveAgentName,
   formatAgentError,
   agentLabel,
 } from '../lib/agents.js';
+import { capableAgents } from '../lib/capabilities.js';
 import type { AgentId } from '../lib/types.js';
 import { cloneRepo } from '../lib/git.js';
 import {
@@ -74,7 +75,7 @@ Examples:
   agents rules list claude@2.1.112
 
   # Install rules from your .agents repo to multiple agents
-  agents rules add --agents claude,codex,gemini
+  agents rules add --agents claude,codex,cursor
 
   # Install a shared rule file from GitHub
   agents rules add gh:anthropics/agent-rules --agents codex@0.116.0
@@ -90,13 +91,13 @@ When to use:
 
 Project rules & @-imports:
   Project rules live in <repo>/.agents/rules/. On every agent launch, the shim compiles
-  them into <repo>/AGENTS.md (with CLAUDE.md, GEMINI.md, .cursorrules symlinked to it).
+  them into <repo>/AGENTS.md (with CLAUDE.md and .cursorrules symlinked to it).
   A hand-authored AGENTS.md is preserved — the compile pipeline only overwrites files
   it owns (those starting with the auto-compile header). Delete the file to migrate.
 
   @path imports inside AGENTS.md/CLAUDE.md are resolved at session start by the agent
   itself, not by agents-cli. Support is per-agent:
-    Inlined natively:  claude, gemini
+    Inlined natively:  claude
     Literal text:      codex, cursor, opencode, copilot, amp, kiro, goose
 
   For rules that need to work across all agents, inline the content rather than using
@@ -220,7 +221,7 @@ Project rules & @-imports:
       }
 
       console.log(chalk.bold('Installed Rules\n'));
-      for (const aid of ALL_AGENT_IDS) {
+      for (const aid of MANAGED_AGENT_IDS) {
         const agent = AGENTS[aid];
         const installedVersions = listInstalledVersions(aid);
         const defaultVer = getGlobalDefault(aid);
@@ -259,7 +260,7 @@ Project rules & @-imports:
   rulesCmd
     .command('add [source]')
     .description('Install rule files from a source (GitHub, local path) or pick from central storage')
-    .option('-a, --agents <list>', 'Targets: claude, codex@0.116.0, or gemini@default')
+    .option('-a, --agents <list>', 'Targets: claude, codex@0.116.0, or cursor@default')
     .option('--names <list>', 'Rule file names from ~/.agents/rules/ (comma-separated)')
     .option('-y, --yes', 'Skip all prompts and use defaults')
     .addHelpText('after', `
@@ -271,7 +272,7 @@ Examples:
   agents rules add --names AGENTS.md --agents codex@0.116.0
 
   # Install all rules from a GitHub repo to multiple agents
-  agents rules add gh:team/agent-rules --agents claude,gemini
+  agents rules add gh:team/agent-rules --agents claude,codex
 
   # Sync a local rules directory to your active agents
   agents rules add ~/projects/my-rules --agents claude@default
@@ -391,7 +392,7 @@ Examples:
         let versionSelections: Map<AgentId, string[]>;
 
         if (options.agents) {
-          const result = await resolveAgentTargetsAutoInstalling(options.agents, ALL_AGENT_IDS, { yes: options.yes });
+          const result = await resolveAgentTargetsAutoInstalling(options.agents, capableAgents('rules'), { yes: options.yes });
           if (!result) {
             console.log(chalk.gray('Cancelled.'));
             return;
@@ -399,7 +400,7 @@ Examples:
           selectedAgents = result.selectedAgents;
           versionSelections = result.versionSelections;
         } else {
-          const result = await promptAgentVersionSelection(ALL_AGENT_IDS, {
+          const result = await promptAgentVersionSelection(capableAgents('rules'), {
             skipPrompts: options.yes,
           });
           selectedAgents = result.selectedAgents;
@@ -453,7 +454,7 @@ Examples:
   agents rules view codex --scope project
 
   # View rules for a specific installed version
-  agents rules view gemini@1.5.0
+  agents rules view codex@0.116.0
 `)
     .action(async (agentArg?: string, options?: { scope?: string }) => {
       const cwd = process.cwd();
@@ -471,7 +472,7 @@ Examples:
         }
         requestedVersion = resolveVersionAlias(agentId, parts[1]) ?? null;
       } else {
-        const choices = ALL_AGENT_IDS.filter((id) => instructionsExists(id, 'user', cwd) || instructionsExists(id, 'project', cwd));
+        const choices = MANAGED_AGENT_IDS.filter((id) => instructionsExists(id, 'user', cwd) || instructionsExists(id, 'project', cwd));
         if (choices.length === 0) {
           console.log(chalk.yellow('No rule files found.'));
           return;
@@ -548,7 +549,7 @@ Examples:
       if (!agentArg) {
         // Only list agents that actually have a rules file installed — avoids
         // suggesting agents the user hasn't touched.
-        const candidates = ALL_AGENT_IDS.filter((id) => instructionsExists(id));
+        const candidates = MANAGED_AGENT_IDS.filter((id) => instructionsExists(id));
         requireDestructiveArg({
           argName: 'agent',
           command: 'agents rules remove',

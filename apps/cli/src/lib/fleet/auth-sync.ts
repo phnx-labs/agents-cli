@@ -32,7 +32,6 @@ interface AuthFileSpec {
 export const FLEET_AUTH_FILES: Record<string, AuthFileSpec[]> = {
   claude: [{ rel: '.claude/.credentials.json', mode: 0o600 }],
   codex: [{ rel: '.codex/auth.json', mode: 0o600 }],
-  gemini: [{ rel: '.gemini/oauth_creds.json', mode: 0o600 }],
   grok: [{ rel: '.grok/auth.json', mode: 0o600 }],
   kimi: [{ rel: '.kimi-code/credentials/kimi-code.json', mode: 0o600 }],
   opencode: [{ rel: '.local/share/opencode/auth.json', mode: 0o600 }],
@@ -71,7 +70,7 @@ export interface LoginFlow {
   /**
    * The exact command that starts the login flow on the remote box, run as
    * `ssh -tt <box> <loginCommand>`. Bare `<cli>` for agents whose device flow
-   * starts on launch (droid, kimi, gemini, antigravity), `<cli> login` for
+   * starts on launch (droid, kimi, antigravity), `<cli> login` for
    * codex/grok, `<cli> auth login` for opencode.
    */
   loginCommand: string;
@@ -163,14 +162,6 @@ export const FLEET_LOGIN_FLOWS: Record<string, LoginFlow> = {
     loginCommand: 'agy',
     flowType: 'loopback',
     successFile: successFileFor('antigravity'),
-  },
-  // gemini: bare `gemini`, Google login on launch. Not characterized as a
-  // device-code flow (typically loopback) and no captured pattern — mark unknown
-  // so it is flagged non-remotable rather than mis-driven.
-  gemini: {
-    loginCommand: 'gemini',
-    flowType: 'unknown',
-    successFile: successFileFor('gemini'),
   },
   // opencode: `opencode auth login`. No captured pattern — unknown/non-remotable.
   opencode: {

@@ -32,7 +32,7 @@ import { activeRulesPreset, filterNamesForActiveResourceProfile } from './resour
 // (single source of truth). Re-exported below so existing importers of
 // `compareVersions` from './versions.js' keep working.
 import { VERSION_RE, compareVersions } from './agent-spec/primitives.js';
-import { AGENTS, agentConfigDirName, getAccountEmail, getMcpConfigPathForHome, parseMcpConfig, resolveAgentName, formatAgentError, findInPath, isSelfUpdatingAgent } from './agents.js';
+import { AGENTS, agentConfigDirName, getAccountEmail, getMcpConfigPathForHome, parseMcpConfig, resolveAgentName, formatAgentError, findInPath, isSelfUpdatingAgent, isAgentHardDeprecated, hardDeprecationError } from './agents.js';
 import { getDefaultPermissionSet, applyPermissionsToVersion as applyPermsToVersion, discoverPermissionGroups, getTotalPermissionRuleCount, buildPermissionsFromGroups, CODEX_RULES_FILENAME, getActivePermissionPresetName, readPermissionPresetRecipe, PERMISSION_PRESET_ENV_VAR } from './permissions.js';
 import { installMcpServers, parseMcpServerConfig, isProjectMcpTrusted } from './mcp.js';
 import { markdownToToml } from './convert.js';
@@ -1453,6 +1453,10 @@ export async function installVersion(
 ): Promise<{ success: boolean; installedVersion: string; error?: string }> {
   const agentConfig = AGENTS[agent];
 
+  if (isAgentHardDeprecated(agent)) {
+    return { success: false, installedVersion: version, error: hardDeprecationError(agent) };
+  }
+
   // Validate before deriving filesystem paths or npm package specs. The CLI
   // parser already enforces this for user input; this guard protects direct
   // callers and tests the critical install path at the source.
@@ -2618,6 +2622,10 @@ export function mergeRepoScopedSelections(repos: string[], cwd: string = process
  * For Gemini: commands are converted from markdown to TOML.
  */
 export function syncResourcesToVersion(agent: AgentId, version: string, selection?: ResourceSelection, options: { projectDir?: string; cwd?: string; force?: boolean } = {}): SyncResult {
+  if (isAgentHardDeprecated(agent)) {
+    return { commands: false, skills: false, hooks: false, memory: [], permissions: false, mcp: [], subagents: [], plugins: [], workflows: [] };
+  }
+
   const agentConfig = AGENTS[agent];
   const versionHome = getVersionHomePath(agent, version);
   const agentDir = path.join(versionHome, agentConfigDirName(agent));

@@ -94,7 +94,7 @@ agents:
   codex: "0.116.0"
 ```
 
-Think `requirements.txt` for CLI coding agents, on steroids. A shim reads `agents.yaml` from the project root and routes `claude` / `codex` / `gemini` / `grok` (and others) to the right version automatically. Each version gets its own isolated home -- switching backs up config and re-syncs resources.
+Think `requirements.txt` for CLI coding agents, on steroids. A shim reads `agents.yaml` from the project root and routes `claude` / `codex` / `antigravity` / `grok` (and others) to the right version automatically. Each version gets its own isolated home -- switching backs up config and re-syncs resources.
 
 ```bash
 agents add claude@2.0.65     # Install a specific version
@@ -111,7 +111,7 @@ agents view                   # See everything installed
 # Set up the Notion MCP server once.
 agents install mcp:com.notion/mcp
 
-# It's now registered with Claude Code, Codex, Gemini CLI, and Cursor.
+# It's now registered with Claude Code, Codex, Antigravity, and Cursor.
 agents mcp list
 ```
 
@@ -120,25 +120,25 @@ Skills, slash commands, rules, hooks, and permissions work the same way -- insta
 ```bash
 agents skills add gh:yourteam/python-expert     # Knowledge pack -> all agents
 agents commands add gh:yourteam/commands         # Slash commands -> all agents
-agents rules add gh:team/rules                   # AGENTS.md -> CLAUDE.md, GEMINI.md, .cursorrules
+agents rules add gh:team/rules                   # AGENTS.md -> per-agent instruction files
 agents permissions add ./perms                   # Permissions -> auto-converted per agent
 ```
 
-Write one `AGENTS.md`. It becomes `CLAUDE.md` for Claude Code, `GEMINI.md` for Gemini CLI, `.cursorrules` for Cursor.
+Write one `AGENTS.md`. It becomes `CLAUDE.md` for Claude Code, `AGENTS.md` for Antigravity, and `.cursorrules` for Cursor.
 
 ---
 
 ## Run any agent
 
 <p align="center">
-  <img src="assets/run-agent.svg" alt="agents run: one command runs any harness (claude/codex/gemini) against the project-pinned version, with an automatic rate-limit fallback chain." width="100%" />
+  <img src="assets/run-agent.svg" alt="agents run: one command runs any harness (claude/codex/antigravity) against the project-pinned version, with an automatic rate-limit fallback chain." width="100%" />
 </p>
 
 
 ```bash
 agents run claude "Find all auth vulnerabilities in src/"
 agents run codex "Fix the issues Claude found"
-agents run gemini "Write tests for the fixed code"
+agents run antigravity "Write tests for the fixed code"
 ```
 
 Each resolves to the project-pinned version with skills, MCP servers, and permissions already synced. Single-typo names auto-correct across every command — `agents view cladue` resolves to `claude`, `agents add codx@latest` to `codex`.
@@ -147,7 +147,7 @@ Each resolves to the project-pinned version with skills, MCP servers, and permis
 
 ```bash
 # Claude Code hits a rate limit -> Codex picks up automatically. Same project, same config.
-agents run claude "refactor auth module" --mode edit --fallback codex,gemini
+agents run claude "refactor auth module" --mode edit --fallback codex,antigravity
 ```
 
 ### Multiple accounts? Spread the load.
@@ -165,7 +165,7 @@ agents run codex@ "review this branch"
 
 A trailing `@` opens an account picker before either an interactive or prompt-based run. Each installed version shows its account identity, exact version, login state, plan, and every available session, weekly, or monthly limit. Logged-out, rate-limited, and out-of-credit accounts remain visible with the reason they cannot be selected; signed-in accounts whose provider does not expose quota data stay selectable and say `limits unavailable`. The choice pins only that run and does not change your default version.
 
-Account selection is available for Claude, Codex, Gemini, Grok, Antigravity, Kimi, Droid, and OpenCode. It requires a terminal and cannot be combined with `--resume`, `--strategy`/`--balanced`, `--lease`, or `--host`/`--device`; profiles and workflows must use their concrete host agent instead.
+Account selection is available for Claude, Codex, Antigravity, Grok, Kimi, Droid, and OpenCode. It requires a terminal and cannot be combined with `--resume`, `--strategy`/`--balanced`, `--lease`, or `--host`/`--device`; profiles and workflows must use their concrete host agent instead.
 
 ### Chain agents
 
@@ -225,14 +225,14 @@ ACP adapters are documented for claude, codex, gemini, cursor, opencode, opencla
 ## Sessions across agents
 
 <p align="center">
-  <img src="assets/sessions.svg" alt="agents sessions: search transcripts across Claude, Codex, Gemini, and OpenCode at once, plus a live --active panel showing each running session's state (working / waiting / idle)." width="100%" />
+  <img src="assets/sessions.svg" alt="agents sessions: search transcripts across Claude, Codex, legacy Gemini, and OpenCode at once, plus a live --active panel showing each running session's state (working / waiting / idle)." width="100%" />
 </p>
 
 
 When you run multiple agents, conversations scatter across tools. Session search brings them together.
 
 ```bash
-# Where was that auth conversation? Search Claude Code, Codex, Gemini CLI, OpenCode at once.
+# Where was that auth conversation? Search Claude Code, Codex, legacy Gemini, OpenCode at once.
 agents sessions "auth middleware"
 
 # Filter by agent, project, or time window
@@ -1067,7 +1067,7 @@ Every agent run, version install, browser launch, and secrets access is logged t
 
 ### Session search
 
-Conversations with Claude, Codex, Gemini, and other agents scatter across their native storage. Session search indexes them locally so you can find any conversation:
+Conversations with Claude, Codex, legacy Gemini, and other agents scatter across their native storage. Session search indexes them locally so you can find any conversation:
 
 ```bash
 agents sessions "auth middleware"     # Full-text search across all agents
@@ -1102,13 +1102,12 @@ By default, secrets sync via iCloud Keychain to your other Macs. With `--no-iclo
 
 Which DotAgents resources each agent CLI can load. Source of truth: [src/lib/agents.ts](apps/cli/src/lib/agents.ts) (`capabilities`); gates use `supports(agent, cap, version)` from [src/lib/capabilities.ts](apps/cli/src/lib/capabilities.ts). Full matrix also in [docs/00-concepts.md](apps/cli/docs/00-concepts.md).
 
-> **† Gemini CLI is deprecated.** Google retired it for free, Pro, and Ultra tiers on **June 18, 2026** (announced at Google I/O 2026); the `gemini` command no longer serves requests on those tiers. agents-cli still manages existing installs, but warns on `agents add gemini` and `agents teams add … gemini`. New setups should use **Antigravity CLI** (`antigravity`), Google's official successor — see [the transition notice](https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/).
+> **Gemini CLI is hard-deprecated.** Google retired it for free, Pro, and Ultra tiers on **June 18, 2026** (announced at Google I/O 2026); the `gemini` command no longer serves requests on those tiers. agents-cli keeps the legacy `gemini` id only so old sessions/config can still be read. `agents add gemini`, `agents import gemini`, and `agents sync gemini` fail and point to **Antigravity CLI** (`antigravity`), Google's official successor — see [the transition notice](https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/).
 
 | Agent | Versions | Hooks | MCP | Permissions | Skills | Commands | Plugins | Subagents | Rules | Workflows |
 |-------|----------|-------|-----|-------------|--------|----------|---------|-----------|-------|-----------|
 | Claude Code | yes | yes | yes | yes | yes | yes | yes | yes | `CLAUDE.md` | yes |
 | Codex CLI | yes | >= 0.116.0 | yes | no | yes | < 0.117.0 · skills ($name, >= 0.117) | >= 0.128.0 | no | `AGENTS.md` | no |
-| Gemini CLI † | yes | >= 0.26.0 | yes | no | yes | yes (.toml) | no | no | `GEMINI.md` | no |
 | Antigravity | yes | yes | yes | yes | yes | yes | yes | no | `AGENTS.md` | no |
 | Grok Build | yes | yes | yes | yes | yes | skills ($name) | yes | no | `AGENTS.md` | no |
 | OpenClaw | yes | yes | yes | no | yes | gateway | yes | yes | `workspace/AGENTS.md` | no |
@@ -1131,7 +1130,6 @@ Which DotAgents resources each agent CLI can load. Source of truth: [src/lib/age
 |-------|----------|-------|---------------|
 | Claude Code | yes | yes | yes |
 | Codex CLI | yes | yes | yes |
-| Gemini CLI † | yes | yes | yes |
 | Cursor | -- | yes | -- |
 | OpenCode | -- | yes | -- |
 | Grok Build | -- | yes | yes |
@@ -1148,20 +1146,19 @@ Which DotAgents resources each agent CLI can load. Source of truth: [src/lib/age
 | Subagents | Kiro | >= 1.23.0 |
 | Skills | Droid | >= 0.26.0 |
 | Permissions | Droid | >= 0.57.5 |
-| Hooks | Gemini | >= 0.26.0 |
 | Permissions | Kiro | >= 2.8.0 |
 | File-based commands | Codex | < 0.117.0 (0.117+ uses command-as-skill) |
 | Plugins | Codex | >= 0.128.0 |
 
 Codex `0.117.0+` no longer reads `.codex/prompts/`; agents-cli converts slash commands into skills so they stay invocable as `$name`. OpenCode's plugin-based hook system is on the roadmap; hooks stay `no` until a writer ships.
 
-Slash commands can declare per-agent/version targeting in frontmatter (`agents:`, `since:`, `until:`). Gating applies when syncing from `~/.agents/commands/` (user/system) into version homes — project `.agents/commands/` files are read in place and are not filtered by `agents:`. This repo ships `.agents/commands/version.md` as `/version` for Claude, Codex, Gemini, Cursor, OpenCode, Copilot, and Grok; Antigravity excluded until verified.
+Slash commands can declare per-agent/version targeting in frontmatter (`agents:`, `since:`, `until:`). Gating applies when syncing from `~/.agents/commands/` (user/system) into version homes — project `.agents/commands/` files are read in place and are not filtered by `agents:`. This repo ships `.agents/commands/version.md` as `/version` for Claude, Codex, Cursor, OpenCode, Copilot, and Grok; Antigravity excluded until verified.
 
 ## FAQ
 
-### Why use `agents` instead of `claude` / `codex` / `gemini` directly?
+### Why use `agents` instead of `claude` / `codex` / `antigravity` directly?
 
-Claude Code, Codex CLI, Gemini CLI, Grok Build, and others each have their own config format, MCP setup, version management, and skill system. If you use more than one, you maintain N copies of everything. `agents` gives you one interface, one config source, and one place to pin versions -- plus features the individual CLIs don't ship: cross-agent pipelines, shared teams, unified session search, and project-pinned versions like `.nvmrc`.
+Claude Code, Codex CLI, Antigravity, Grok Build, and others each have their own config format, MCP setup, version management, and skill system. If you use more than one, you maintain N copies of everything. `agents` gives you one interface, one config source, and one place to pin versions -- plus features the individual CLIs don't ship: cross-agent pipelines, shared teams, unified session search, and project-pinned versions like `.nvmrc`.
 
 ### Is it free?
 

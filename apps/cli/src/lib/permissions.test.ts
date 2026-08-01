@@ -12,7 +12,6 @@ import {
   convertDenyToCodexRules,
   convertToKimiFormat,
   convertToDroidFormat,
-  convertToForgeFormat,
   convertToHermesFormat,
   convertToOpenClawFormat,
   convertToGooseFormat,
@@ -129,51 +128,6 @@ describe('OpenClaw permissions', () => {
     const written = JSON.parse(fs.readFileSync(path.join(configDir, 'openclaw.json'), 'utf-8'));
     expect(written.tools.allow).toEqual(['read']);
     expect(written.tools.alsoAllow).toEqual(['exec']);
-  });
-});
-
-describe('Forge permissions', () => {
-  it('maps canonical rules to operation-family policies', () => {
-    expect(convertToForgeFormat({
-      name: 'forge',
-      allow: ['Bash(git:*)', 'Read(**)', 'Write(src/**)', 'WebFetch(domain:api.github.com)'],
-      deny: ['Bash(rm -rf:*)', 'Edit(secrets/**)', 'MCP(mcp__server__tool)'],
-    })).toEqual({
-      policies: [
-        { permission: 'allow', rule: { command: 'git *' } },
-        { permission: 'allow', rule: { read: '**/*' } },
-        { permission: 'allow', rule: { write: 'src/**' } },
-        { permission: 'allow', rule: { url: 'api.github.com*' } },
-        { permission: 'deny', rule: { command: 'rm -rf *' } },
-        { permission: 'deny', rule: { write: 'secrets/**' } },
-      ],
-    });
-  });
-
-  it('writes and merges permissions.yaml without replacing user policies', () => {
-    const home = makeTempHome();
-    const configDir = path.join(home, '.forge');
-    fs.mkdirSync(configDir, { recursive: true });
-    fs.writeFileSync(path.join(configDir, 'permissions.yaml'), yaml.stringify({
-      policies: [
-        { permission: 'confirm', rule: { write: '**/*' } },
-      ],
-    }));
-
-    expect(applyPermissionsToVersion('forge', {
-      name: 'set',
-      allow: ['Bash(git:*)'],
-      deny: ['Write(secrets/**)'],
-    }, home, true)).toEqual({ success: true });
-
-    const written = yaml.parse(fs.readFileSync(path.join(configDir, 'permissions.yaml'), 'utf-8'));
-    expect(written).toEqual({
-      policies: [
-        { permission: 'confirm', rule: { write: '**/*' } },
-        { permission: 'allow', rule: { command: 'git *' } },
-        { permission: 'deny', rule: { write: 'secrets/**' } },
-      ],
-    });
   });
 });
 

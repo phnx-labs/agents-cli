@@ -14,8 +14,8 @@
  * every current agent, so most entries are a single call:
  *
  *   - `flatFile`  one `<name><ext>` file, body from a `transform` fn.
- *                 (claude, gemini, grok, droid, codex, opencode, copilot,
- *                  cursor, forge, kiro, goose)
+ *                 (claude, grok, droid, codex, opencode, copilot,
+ *                  cursor, kiro, goose)
  *   - `dirFile`   a `<name>/` directory holding one generated `<file>`.
  *                 (antigravity: `<name>/agent.md`)
  *   - `dirCopy`   copy the whole source directory to `<name>/`, applying
@@ -41,7 +41,6 @@ import {
   transformSubagentForCopilot,
   transformSubagentForCursor,
   transformSubagentForDroid,
-  transformSubagentForForge,
   transformSubagentForGoose,
   transformSubagentForKiro,
   transformSubagentForOpenCode,
@@ -88,12 +87,12 @@ export interface SubagentTarget {
 
 // ── metadata readers (the per-format escape hatch) ───────────────────────────
 
-/** Frontmatter, skipping files that lack a valid block (claude/gemini/grok/droid/codex). */
+/** Frontmatter, skipping files that lack a valid block (claude/grok/droid/codex). */
 function metaFrontmatterSkip(filePath: string): SubagentFrontmatter | null {
   return parseSubagentFrontmatter(filePath);
 }
 
-/** Frontmatter, falling back to an empty description (opencode/copilot/cursor/forge). */
+/** Frontmatter, falling back to an empty description (opencode/copilot/cursor). */
 function metaFrontmatterFallback(filePath: string, name: string): SubagentFrontmatter {
   return parseSubagentFrontmatter(filePath) ?? { name, description: '' };
 }
@@ -328,7 +327,6 @@ const kimiTarget: SubagentTarget = {
 export const SUBAGENT_TARGETS: Partial<Record<AgentId, SubagentTarget>> = {
   // Tier 1 -- flat markdown, Claude-compatible flatten.
   claude: flatFile({ subdir: ['.claude', 'agents'], ext: '.md', transform: transformSubagentForClaude }),
-  gemini: flatFile({ subdir: ['.gemini', 'agents'], ext: '.md', transform: transformSubagentForClaude }),
   grok: flatFile({ subdir: ['.grok', 'agents'], ext: '.md', transform: transformSubagentForClaude }),
   droid: flatFile({ subdir: ['.factory', 'droids'], ext: '.md', transform: transformSubagentForDroid }),
   // Bespoke frontmatter/format, still one flat file.
@@ -349,12 +347,6 @@ export const SUBAGENT_TARGETS: Partial<Record<AgentId, SubagentTarget>> = {
     subdir: ['.cursor', 'agents'],
     ext: '.md',
     transform: transformSubagentForCursor,
-    readMeta: metaFrontmatterFallback,
-  }),
-  forge: flatFile({
-    subdir: ['.forge', 'agents'],
-    ext: '.md',
-    transform: transformSubagentForForge,
     readMeta: metaFrontmatterFallback,
   }),
   kiro: flatFile({

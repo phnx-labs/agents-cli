@@ -172,7 +172,7 @@ describe('CommandsHandler.sync', () => {
     expect(content).toContain('$ARGUMENTS');
   });
 
-  it('syncs .toml format for gemini (converts from .md)', () => {
+  it('does not sync commands for hard-deprecated gemini', () => {
     writeCommandMd(userAgentsDir, 'test-cmd', 'Test description', 'Run $ARGUMENTS');
 
     const versionHome = path.join(tmpDir, 'version-home');
@@ -181,14 +181,7 @@ describe('CommandsHandler.sync', () => {
     handler.sync('gemini', versionHome, tmpDir);
 
     const targetPath = path.join(versionHome, '.gemini', 'commands', 'test-cmd.toml');
-    expect(fs.existsSync(targetPath)).toBe(true);
-
-    const content = fs.readFileSync(targetPath, 'utf-8');
-    expect(content).toContain('name = "test-cmd"');
-    expect(content).toContain('description = "Test description"');
-    // $ARGUMENTS should be converted to {{args}} for Gemini
-    expect(content).toContain('{{args}}');
-    expect(content).not.toContain('$ARGUMENTS');
+    expect(fs.existsSync(targetPath)).toBe(false);
   });
 
   it('syncs commands from all layers respecting precedence', () => {

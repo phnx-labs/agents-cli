@@ -3,7 +3,7 @@
  * reports the permission GROUP names that have been applied.
  *
  * For claude/opencode the detector intersects with discovered groups (a group
- * is "applied" if any of its allow/deny rules are present). For Codex / Gemini /
+ * is "applied" if any of its allow/deny rules are present). For Codex /
  * Antigravity / Grok the on-disk format is lossy — once any group has been
  * applied the storage doesn't carry per-group provenance back, so we report
  * "all known groups applied" when any permission artifact is present. This
@@ -95,28 +95,6 @@ function buildOpenCodeDetector(): ResourceDetector {
         const stripped = content.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
         const config = JSON.parse(stripped);
         if (config.permission && Object.keys(config.permission.bash || {}).length > 0) {
-          return discoverPermissionGroups().map(g => g.name);
-        }
-      } catch { /* parse fail */ }
-      return [];
-    },
-  };
-}
-
-function buildGeminiDetector(): ResourceDetector {
-  return {
-    kind: 'permissions',
-    agent: 'gemini',
-    list({ versionHome }: DetectArgs): string[] {
-      const settingsPath = path.join(versionHome, '.gemini', 'settings.json');
-      if (!fs.existsSync(settingsPath)) return [];
-      try {
-        const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
-        const core: unknown = settings?.tools?.core;
-        const exclude: unknown = settings?.tools?.exclude;
-        const hasCore = Array.isArray(core) && core.length > 0;
-        const hasExclude = Array.isArray(exclude) && exclude.length > 0;
-        if (hasCore || hasExclude) {
           return discoverPermissionGroups().map(g => g.name);
         }
       } catch { /* parse fail */ }
@@ -310,24 +288,6 @@ function buildCopilotDetector(): ResourceDetector {
   };
 }
 
-function buildForgeDetector(): ResourceDetector {
-  return {
-    kind: 'permissions',
-    agent: 'forge',
-    list({ versionHome }: DetectArgs): string[] {
-      const permissionsPath = path.join(versionHome, '.forge', 'permissions.yaml');
-      if (!fs.existsSync(permissionsPath)) return [];
-      try {
-        const config = yaml.parse(fs.readFileSync(permissionsPath, 'utf-8')) as { policies?: unknown[] } | null;
-        if (config && Array.isArray(config.policies) && config.policies.length > 0) {
-          return discoverPermissionGroups().map(g => g.name);
-        }
-      } catch { /* parse fail */ }
-      return [];
-    },
-  };
-}
-
 function buildHermesDetector(): ResourceDetector {
   return {
     kind: 'permissions',
@@ -353,7 +313,6 @@ const handlers: Partial<Record<AgentId, () => ResourceDetector>> = {
   claude: buildClaudeDetector,
   codex: buildCodexDetector,
   opencode: buildOpenCodeDetector,
-  gemini: buildGeminiDetector,
   antigravity: buildAntigravityDetector,
   grok: buildGrokDetector,
   goose: buildGooseDetector,
@@ -363,7 +322,6 @@ const handlers: Partial<Record<AgentId, () => ResourceDetector>> = {
   kiro: buildKiroDetector,
   openclaw: buildOpenClawDetector,
   copilot: buildCopilotDetector,
-  forge: buildForgeDetector,
   hermes: buildHermesDetector,
 };
 

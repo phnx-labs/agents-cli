@@ -8,8 +8,8 @@ For the conceptual model — what a DotAgents repo is, what resources are, and h
 
 | Resource | Source layers (resolved project > user > system) | Target Location | Sync Method |
 |----------|-----------------|----------------------|-------------|
-| Commands | `<project>/.agents/commands/*.md` › `~/.agents/commands/*.md` › `~/.agents-system/commands/*.md` | Project sources: `<project>/.{agent}/{commandsSubdir}/`; user/system: `<version-home>/.{agent}/{commandsSubdir}/` | Copy (TOML conversion for Gemini; command-skill conversion where required) |
-| Skills | `…/.agents/skills/{name}/` (same layering) | Project sources: `<project>/.{agent}/skills/`; user/system: `<version-home>/.{agent}/skills/` | Copy (Gemini reads central `~/.agents/skills/` natively) |
+| Commands | `<project>/.agents/commands/*.md` › `~/.agents/commands/*.md` › `~/.agents-system/commands/*.md` | Project sources: `<project>/.{agent}/{commandsSubdir}/`; user/system: `<version-home>/.{agent}/{commandsSubdir}/` | Copy (command-skill conversion where required) |
+| Skills | `…/.agents/skills/{name}/` (same layering) | Project sources: `<project>/.{agent}/skills/`; user/system: `<version-home>/.{agent}/skills/` | Copy |
 | Hooks | `…/.agents/hooks/*.sh` (same layering) | `.{agent}/hooks/` | Symlink |
 | Rules | `…/.agents/rules/AGENTS.md` (same layering) | `.{agent}/{instructionsFile}` | Symlink |
 | MCP | `…/.agents/mcp/*.yaml` (same layering) | `.{agent}/settings.json` | Merge into JSON |
@@ -29,7 +29,6 @@ Central `AGENTS.md` maps to agent-specific filenames:
 ```
 ~/.agents/rules/AGENTS.md  ───▶  ~/.claude/CLAUDE.md
                             ───▶  ~/.codex/AGENTS.md
-                            ───▶  ~/.gemini/GEMINI.md
                             ───▶  ~/.gemini/antigravity-cli/AGENTS.md
                             ───▶  ~/.cursor/.cursorrules
                             ───▶  ~/.opencode/OPENCODE.md
@@ -40,7 +39,7 @@ Symlinks in `~/.agents/rules/`:
 ```
 AGENTS.md       # Real file (source of truth)
 CLAUDE.md -> AGENTS.md
-GEMINI.md -> AGENTS.md
+GEMINI.md -> AGENTS.md     # Legacy only; Gemini sync is hard-deprecated.
 ```
 
 ## Sync Detection
@@ -128,9 +127,9 @@ directly into the agent's config.
 ```
 Source: ~/.agents/mcp/*.yaml       Per-agent destinations:
 
-┌────────────────────┐             Gemini  → <home>/.gemini/settings.json
+┌────────────────────┐             Agy     → <home>/.gemini/antigravity-cli/mcp_config.json
 │ github.yaml        │                      · key: mcpServers.<name> = {command,args,env}
-│ ───────            │             Agy     → <home>/.gemini/antigravity-cli/mcp_config.json
+│ ───────            │
 │ name: github       │                      · key: mcpServers.<name> = {command,args,env}
 │ transport: stdio   │             Cursor  → <home>/.cursor/mcp.json
 │ command: npx ...   │                      · key: mcpServers.<name> = {command,args,env}
@@ -144,14 +143,12 @@ Source: ~/.agents/mcp/*.yaml       Per-agent destinations:
                                             · key: mcp_servers.<name> (TOML)
                                    Hermes  → <home>/.hermes/config.yaml
                                             · key: mcp_servers.<name> (YAML)
-                                   Forge   → <home>/.forge/.mcp.json
-                                            · key: mcpServers.<name> = {command,args,env}
 ```
 
 Behavior rules, per `src/lib/mcp.ts`:
 
-1. **Read existing, set by name, write back.** For Gemini/Cursor
-   (`installMcpToGeminiConfig:194`, `installMcpToCursorConfig:227`):
+1. **Read existing, set by name, write back.** For JSON-backed agents such as
+   Cursor:
 
    ```
    config = JSON.parse(fs.readFileSync(settings.json)) || {}
@@ -237,19 +234,13 @@ Per-agent conversion is lossy in both directions:
   `command_allowlist` and Bash deny rules to `approvals.deny`, preserving
   sibling YAML keys like `mcp_servers` and `hooks`. Hermes has command-glob
   persistence only; session-scoped `/tools` toggles are not written.
-- ForgeCode maps canonical built-in tool rules to `~/.forge/permissions.yaml`
-  policies by operation family (`read`, `write`, `command`, `url`). The file is
-  active only when `.forge.toml` has `restricted = true`; MCP tools bypass this
-  policy file entirely, so per-named-MCP-tool grants are skipped.
-
 ## Plugins: Synthetic Marketplace + Exec-Surface Gate
 
 Plugins bundle skills, commands, hooks, MCP servers, settings, and permissions
 under a single `.claude-plugin/plugin.json` manifest. Sync copies the bundle
 into each capable version home and writes the agent-native registration:
-Claude-style harnesses use the synthetic `agents-cli` marketplace, Gemini
-0.8.0+ receives a generated `gemini-extension.json`, and Goose receives the
-bundle under `.agents/plugins/<name>/`.
+Claude-style harnesses use the synthetic `agents-cli` marketplace, and Goose
+receives the bundle under `.agents/plugins/<name>/`.
 
 ```
 Source: ~/.agents/plugins/<name>/        Per-version destination:
@@ -319,29 +310,6 @@ Behavior rules, per `src/lib/plugins.ts:379` and `src/lib/plugin-marketplace.ts`
    `~/.agents/plugins/`. The marketplace copy itself isn't pruned until
    `agents plugins remove <name>` runs explicitly.
 
-## Format Conversion (Gemini)
-
-Gemini requires TOML format for commands. Markdown commands are converted:
-
-```markdown
-# ~/.agents/commands/commit.md
----
-description: Create a commit
----
-Review changes and create a commit with a descriptive message.
-```
-
-Becomes:
-
-```toml
-# ~/.gemini/commands/commit.toml
-[command]
-description = "Create a commit"
-
-[[command.steps]]
-prompt = "Review changes and create a commit with a descriptive message."
-```
-
 ## Key Functions
 
 | Function | File | Purpose |
@@ -350,6 +318,6 @@ prompt = "Review changes and create a commit with a descriptive message."
 | `getActuallySyncedResources()` | versions.ts | Check what's synced to version |
 | `getNewResources()` | versions.ts | Diff available vs synced |
 | `syncResourcesToVersion()` | versions.ts | Create symlinks in version home |
-| `markdownToToml()` | convert.ts | Convert command format for Gemini |
+| `markdownToToml()` | convert.ts | Legacy command TOML conversion helper |
 | `syncWorkflowToGooseRecipe()` | workflows.ts | Convert workflows into Goose recipes and subrecipes |
 | `transformWorkflowForOpenClaw()` | workflows.ts | Convert workflows into Lobster `.lobster` files |

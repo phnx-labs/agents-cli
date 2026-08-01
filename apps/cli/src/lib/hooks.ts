@@ -14,7 +14,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import * as TOML from 'smol-toml';
-import { AGENTS, ALL_AGENT_IDS, agentConfigDirName } from './agents.js';
+import { AGENTS, ALL_AGENT_IDS, agentConfigDirName, isAgentHardDeprecated } from './agents.js';
 import { supports, explainSkip, capableAgents } from './capabilities.js';
 import { setGeminiAutoUpdateDisabled, updateGeminiSettings } from './gemini-settings.js';
 import { getAgentsDir, getHooksDir as getSystemHooksDir, getUserHooksDir, getUserAgentsDir, getSystemAgentsDir, getProjectAgentsDir, getTrashHooksDir, getEnabledExtraRepos, getResolvedRulesDir, getUserRulesDir } from './state.js';
@@ -1074,6 +1074,9 @@ export function registerHooksToSettings(
   hookManifest?: Record<string, ManifestHook>,
   agentsDirOverride?: string
 ): { registered: string[]; errors: string[] } {
+  if (isAgentHardDeprecated(agentId)) {
+    return { registered: [], errors: [] };
+  }
   const manifest = hookManifest || parseHookManifest();
   if (Object.keys(manifest).length === 0) {
     if (agentId === 'opencode') {
@@ -1138,9 +1141,6 @@ export function registerHooksToSettings(
   }
   if (agentId === 'codex') {
     return registerHooksForCodex(versionHome, manifest, resolveScript, managedPrefixes);
-  }
-  if (agentId === 'gemini') {
-    return registerHooksForGemini(versionHome, manifest, resolveScript, managedPrefixes);
   }
   if (agentId === 'antigravity') {
     return registerHooksForAntigravity(versionHome, manifest, resolveScript, managedPrefixes);

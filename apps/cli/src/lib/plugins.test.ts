@@ -26,9 +26,6 @@ import {
   inspectPluginCapabilities,
   pluginCapabilityLabels,
   pluginResourceGroups,
-  installGeminiPlugin,
-  isGeminiPluginInstalled,
-  removeGeminiPlugin,
   installGoosePlugin,
   isGoosePluginInstalled,
   installHermesPlugin,
@@ -127,80 +124,6 @@ describe('loadPluginManifest', () => {
   });
 });
 
-describe('Gemini extension plugin install', () => {
-  let tmpDir: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-test-'));
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it('copies a plugin bundle to .gemini/extensions with gemini-extension.json', () => {
-    const root = makePluginRoot(tmpDir, { name: 'gem-ext', version: '1.2.3', description: 'Gemini extension' });
-    fs.mkdirSync(path.join(root, 'commands'), { recursive: true });
-    fs.writeFileSync(path.join(root, 'commands', 'ship.md'), '# Ship\n');
-    fs.writeFileSync(path.join(root, '.mcp.json'), JSON.stringify({
-      mcpServers: {
-        demo: {
-          command: 'node',
-          args: ['${CLAUDE_PLUGIN_ROOT}/server.js'],
-        },
-      },
-    }));
-
-    const plugin = makeDiscoveredPlugin(root, { name: 'gem-ext', version: '1.2.3', description: 'Gemini extension' });
-    plugin.commands = ['ship'];
-    plugin.hasMcp = true;
-    const versionHome = path.join(tmpDir, 'home');
-
-    expect(installGeminiPlugin(plugin, versionHome)).toBe(true);
-    expect(isGeminiPluginInstalled('gem-ext', versionHome)).toBe(true);
-
-    const dest = path.join(versionHome, '.gemini', 'extensions', 'gem-ext');
-    expect(fs.existsSync(path.join(dest, 'commands', 'ship.md'))).toBe(true);
-    const manifest = JSON.parse(fs.readFileSync(path.join(dest, 'gemini-extension.json'), 'utf-8'));
-    expect(manifest).toEqual({
-      name: 'gem-ext',
-      version: '1.2.3',
-      description: 'Gemini extension',
-      mcpServers: {
-        demo: {
-          command: 'node',
-          args: ['${extensionPath}/server.js'],
-        },
-      },
-    });
-
-    expect(removeGeminiPlugin('gem-ext', versionHome)).toBe(true);
-    expect(isGeminiPluginInstalled('gem-ext', versionHome)).toBe(false);
-  });
-
-  it('does not sync live Gemini extensions with executable surfaces unless explicitly allowed', async () => {
-    const root = makePluginRoot(tmpDir, { name: 'gem-ext', version: '1.2.3', description: 'Gemini extension' });
-    fs.writeFileSync(path.join(root, '.mcp.json'), JSON.stringify({
-      mcpServers: {
-        demo: { command: 'node', args: ['${CLAUDE_PLUGIN_ROOT}/server.js'] },
-      },
-    }));
-
-    const plugin = makeDiscoveredPlugin(root, { name: 'gem-ext', version: '1.2.3', description: 'Gemini extension' });
-    plugin.hasMcp = true;
-    const versionHome = path.join(tmpDir, 'home');
-
-    const { syncPluginToVersion } = await import('./plugins.js');
-    const untrusted = syncPluginToVersion(plugin, 'gemini', versionHome);
-    expect(untrusted.success).toBe(false);
-    expect(isGeminiPluginInstalled('gem-ext', versionHome)).toBe(false);
-
-    const trusted = syncPluginToVersion(plugin, 'gemini', versionHome, { allowExecSurfaces: true });
-    expect(trusted.success).toBe(true);
-    expect(isGeminiPluginInstalled('gem-ext', versionHome)).toBe(true);
-  });
-});
-
 // ─── Symlink-escape hardening (RUSH-1755) ───────────────────────────────────────
 
 describe('plugin install strips symlinks escaping the install root (RUSH-1755)', () => {
@@ -212,32 +135,6 @@ describe('plugin install strips symlinks escaping the install root (RUSH-1755)',
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it('Gemini: drops a .agents-cli-managed symlink pointing outside destRoot and writes a real marker instead', () => {
-    // Attacker's file the symlink aims at, seeded with known contents.
-    const secretDir = path.join(tmpDir, 'outside');
-    fs.mkdirSync(secretDir, { recursive: true });
-    const secret = path.join(secretDir, 'victim');
-    fs.writeFileSync(secret, 'ORIGINAL', 'utf-8');
-
-    const root = makePluginRoot(tmpDir, { name: 'evil', version: '1.0.0', description: 'Evil' });
-    // Malicious symlink: the follow-up writeFileSync(.agents-cli-managed) would
-    // write THROUGH this link to the attacker path without the fix.
-    fs.symlinkSync(secret, path.join(root, '.agents-cli-managed'), 'file');
-
-    const plugin = makeDiscoveredPlugin(root, { name: 'evil', version: '1.0.0', description: 'Evil' });
-    const versionHome = path.join(tmpDir, 'home');
-
-    expect(installGeminiPlugin(plugin, versionHome)).toBe(true);
-
-    const dest = path.join(versionHome, '.gemini', 'extensions', 'evil');
-    const marker = path.join(dest, '.agents-cli-managed');
-    // The write-through was neutralized: the outside file is untouched...
-    expect(fs.readFileSync(secret, 'utf-8')).toBe('ORIGINAL');
-    // ...and the marker in destRoot is a real regular file (not a symlink).
-    expect(fs.lstatSync(marker).isSymbolicLink()).toBe(false);
-    expect(fs.readFileSync(marker, 'utf-8')).toContain('plugin=evil');
   });
 
   // Creating symlinks on Windows needs elevation/Developer Mode, so the CI

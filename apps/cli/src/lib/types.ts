@@ -8,8 +8,8 @@
 
 import type { CloudProviderId } from './cloud/types.js';
 
-/** Unique identifier for a supported AI coding agent. */
-export type AgentId = 'claude' | 'codex' | 'gemini' | 'cursor' | 'opencode' | 'openclaw' | 'copilot' | 'amp' | 'kiro' | 'goose' | 'antigravity' | 'grok' | 'kimi' | 'droid' | 'hermes' | 'forge';
+/** Unique identifier for a current or legacy AI coding agent. */
+export type AgentId = 'claude' | 'codex' | 'gemini' | 'cursor' | 'opencode' | 'openclaw' | 'copilot' | 'amp' | 'kiro' | 'goose' | 'antigravity' | 'grok' | 'kimi' | 'droid' | 'hermes';
 
 /** How `agents run <agent>` chooses an installed version when none is pinned. */
 export type RunStrategy = 'pinned' | 'available' | 'balanced';
@@ -118,11 +118,11 @@ export interface AgentConfig {
    */
   cloudProvider?: CloudProviderId;
   /**
-   * Set when the upstream vendor has retired this agent's CLI. Presence marks
-   * the agent deprecated (it is never blocked from use); `warnAgentDeprecated`
-   * surfaces this in yellow whenever a user installs the agent or adds it to a
-   * team. Point `replacement` at the successor agent so the warning can suggest
-   * a migration path.
+   * Set when the upstream vendor has retired this agent's CLI. A warning-only
+   * deprecation leaves the agent manageable; a hard deprecation keeps the id
+   * parseable for legacy state but excludes it from install/import/sync targets.
+   * Point `replacement` at the successor agent so messages can suggest a
+   * migration path.
    */
   deprecated?: {
     /** Vendor that retired it, e.g. "Google". */
@@ -135,6 +135,8 @@ export interface AgentConfig {
     replacement?: AgentId;
     /** Announcement URL for the deprecation. */
     url?: string;
+    /** Hard-deprecated agents are retained only for legacy reads. */
+    hard?: boolean;
   };
   capabilities: {
     hooks: Capability;

@@ -121,7 +121,6 @@ vi.mock('../src/lib/subagents.js', () => ({
   transformSubagentForCopilot: () => '',
   transformSubagentForCursor: () => '',
   transformSubagentForDroid: () => '',
-  transformSubagentForForge: () => '',
   transformSubagentForGoose: () => '',
   transformSubagentForKiro: () => '',
   transformSubagentForOpenCode: () => '',
@@ -858,7 +857,7 @@ describe('syncResourcesToVersion', () => {
       expect(content).toContain('Debug prompt');
     });
 
-    it('converts markdown to TOML for gemini', () => {
+    it('does not sync commands for hard-deprecated gemini', () => {
       setupCentralResources();
       const versionHome = path.join(AGENTS_DIR, 'versions', 'gemini', '1.0.0', 'home');
       fs.mkdirSync(versionHome, { recursive: true });
@@ -866,18 +865,9 @@ describe('syncResourcesToVersion', () => {
       const result = syncResourcesToVersion('gemini', '1.0.0');
 
       const commandsDir = path.join(versionHome, '.gemini', 'commands');
-      expect(result.commands).toBe(true);
-      expect(fs.existsSync(path.join(commandsDir, 'debug.toml'))).toBe(true);
-      // Should NOT have .md files
+      expect(result.commands).toBe(false);
+      expect(fs.existsSync(path.join(commandsDir, 'debug.toml'))).toBe(false);
       expect(fs.existsSync(path.join(commandsDir, 'debug.md'))).toBe(false);
-      // Verify TOML content
-      const toml = fs.readFileSync(path.join(commandsDir, 'debug.toml'), 'utf-8');
-      expect(toml).toContain('name = "debug"');
-      expect(toml).toContain('description =');
-      expect(toml).toContain("prompt = '''");
-      // Variable syntax should be converted
-      expect(toml).toContain('{{args}}');
-      expect(toml).not.toContain('$ARGUMENTS');
     });
 
     it('skips commands for agents without command capability', () => {
@@ -1078,15 +1068,15 @@ describe('syncResourcesToVersion', () => {
       expect(content).toContain('Be kind');
     });
 
-    it('writes GEMINI.md for gemini', () => {
+    it('does not write memory for hard-deprecated gemini', () => {
       setupCentralResources();
       const versionHome = path.join(AGENTS_DIR, 'versions', 'gemini', '1.0.0', 'home');
       fs.mkdirSync(versionHome, { recursive: true });
 
       const result = syncResourcesToVersion('gemini', '1.0.0');
 
-      expect(result.memory).toContain('GEMINI.md');
-      expect(fs.existsSync(path.join(versionHome, '.gemini', 'GEMINI.md'))).toBe(true);
+      expect(result.memory).toEqual([]);
+      expect(fs.existsSync(path.join(versionHome, '.gemini', 'GEMINI.md'))).toBe(false);
     });
 
     it('inlines all subrules listed in the active preset', () => {
@@ -1285,16 +1275,15 @@ describe('getActuallySyncedResources', () => {
     expect(synced.commands).not.toContain('notes');
   });
 
-  it('detects .toml commands for gemini', () => {
+  it('does not detect commands for hard-deprecated gemini', () => {
     const { agentDir } = setupVersionHome('gemini', '1.0.0');
     const commandsDir = path.join(agentDir, 'commands');
     fs.mkdirSync(commandsDir, { recursive: true });
     fs.writeFileSync(path.join(commandsDir, 'debug.toml'), 'name = "debug"');
-    fs.writeFileSync(path.join(commandsDir, 'plan.md'), '# should be ignored for gemini');
+    fs.writeFileSync(path.join(commandsDir, 'plan.md'), '# legacy command');
 
     const synced = getActuallySyncedResources('gemini', '1.0.0');
-    expect(synced.commands).toContain('debug');
-    expect(synced.commands).not.toContain('plan'); // .md ignored for toml agent
+    expect(synced.commands).toEqual([]);
   });
 
   it('detects skills when content matches central source', () => {

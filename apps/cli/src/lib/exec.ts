@@ -703,13 +703,6 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     },
     modelFlag: '--model',
   },
-  forge: {
-    base: ['forge'],
-    promptFlag: 'positional',
-    modeFlags: {
-      edit: [],
-    },
-  },
 };
 
 /**

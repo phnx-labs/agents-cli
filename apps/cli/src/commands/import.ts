@@ -32,8 +32,8 @@ import * as os from 'os';
 import * as path from 'path';
 import { confirm } from '@inquirer/prompts';
 
-import { ALL_AGENT_IDS } from '../lib/agents.js';
-import { AGENTS, getCliPath, getCliVersion, agentLabel, resolveAgentName } from '../lib/agents.js';
+import { MANAGED_AGENT_IDS } from '../lib/agents.js';
+import { AGENTS, getCliPath, getCliVersion, agentLabel, resolveAgentName, isAgentHardDeprecated, hardDeprecationError } from '../lib/agents.js';
 import { getVersionDir } from '../lib/versions.js';
 import {
   finalizeImport,
@@ -60,7 +60,11 @@ async function runImport(agentArg: string, opts: ImportOptions): Promise<void> {
   const agentId = resolveAgentName(agentArg);
   if (!agentId) {
     console.error(chalk.red(`Unknown agent: ${agentArg}`));
-    console.error(chalk.gray(`Known agents: ${ALL_AGENT_IDS.join(', ')}`));
+    console.error(chalk.gray(`Known agents: ${MANAGED_AGENT_IDS.join(', ')}`));
+    process.exit(1);
+  }
+  if (isAgentHardDeprecated(agentId)) {
+    console.error(chalk.red(hardDeprecationError(agentId)));
     process.exit(1);
   }
   const agent = AGENTS[agentId];
@@ -373,7 +377,7 @@ When to use:
   under agents-cli management without reinstalling. Creates a symlink farm
   pointing at the existing install — nothing is copied or moved (except the
   agent's config dir, which is moved into the version's home). Works for both
-  npm-style packages (claude, codex, gemini, opencode, openclaw) and
+  npm-style packages (claude, codex, opencode, openclaw) and
   installScript-based agents (grok, antigravity, cursor, kiro, goose).
 `)
     .action((...args: Parameters<typeof runImport>) =>

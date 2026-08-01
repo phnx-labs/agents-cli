@@ -24,7 +24,6 @@ export interface PickedTeam {
 const AGENT_LABEL: Record<string, string> = {
   claude: 'Claude',
   codex: 'Codex',
-  gemini: 'Gemini',
   cursor: 'Cursor',
   opencode: 'OpenCode',
 };

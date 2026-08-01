@@ -5,7 +5,7 @@ Coordinate multiple AI agents working in parallel on a shared task, with DAG-bas
 ## Overview
 
 `agents teams` groups agent processes into a named team. Each teammate runs
-in the background — Claude, Codex, Gemini, Cursor, OpenCode, Grok, or
+in the background — Claude, Codex, Cursor, OpenCode, Grok, or
 Antigravity — against the same working directory or a dedicated git worktree.
 Teammates can declare `--after` dependencies, forming a directed acyclic graph
 (DAG) that the supervisor drains wave by wave. The state machine lives on disk

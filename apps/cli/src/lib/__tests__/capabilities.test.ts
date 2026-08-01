@@ -17,7 +17,15 @@ describe('supports() capability gate', () => {
       // codex.hooks is { since: '0.116.0' }; with no version the agent-level
       // check returns ok -- callers must pass a version to actually gate.
       expect(supports('codex', 'hooks')).toEqual({ ok: true });
-      expect(supports('gemini', 'hooks')).toEqual({ ok: true });
+    });
+
+    it('blocks hard-deprecated gemini for every managed capability path', () => {
+      expect(isCapable('gemini', 'hooks')).toBe(false);
+      expect(supports('gemini', 'hooks')).toEqual({ ok: false, reason: 'unsupported' });
+      expect(supports('gemini', 'hooks', '0.26.0')).toEqual({ ok: false, reason: 'unsupported' });
+      expect(capableAgents('hooks')).not.toContain('gemini');
+      expect(capableAgents('mcp')).not.toContain('gemini');
+      expect(capableAgents('subagents')).not.toContain('gemini');
     });
 
     it('returns ok for rules file object-form caps', () => {
@@ -70,56 +78,12 @@ describe('supports() capability gate', () => {
   });
 });
 
-describe('gemini hooks since 0.26.0', () => {
-    it('gates 0.25.1 as too_old (the silent-no-op case)', () => {
-      const result = supports('gemini', 'hooks', '0.25.1');
-      expect(result.ok).toBe(false);
-      if (!result.ok) {
-        expect(result.reason).toBe('too_old');
-        expect(result.need).toBe('>= 0.26.0');
-      }
-    });
-
-    it('passes 0.26.0 exactly', () => {
-      expect(supports('gemini', 'hooks', '0.26.0')).toEqual({ ok: true });
-    });
-
-    it('passes 1.0.0', () => {
-      expect(supports('gemini', 'hooks', '1.0.0')).toEqual({ ok: true });
-  });
-});
-
-describe('gemini extensions and subagents version gates', () => {
-  it('gates plugins below 0.8.0 and passes 0.8.0+', () => {
-    const result = supports('gemini', 'plugins', '0.7.9');
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.need).toBe('>= 0.8.0');
-    expect(supports('gemini', 'plugins', '0.8.0')).toEqual({ ok: true });
-    expect(supports('gemini', 'plugins', '0.50.0')).toEqual({ ok: true });
-  });
-
-  it('gates subagents below 0.36.0 and passes 0.36.0+', () => {
-    const result = supports('gemini', 'subagents', '0.35.9');
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.need).toBe('>= 0.36.0');
-    expect(supports('gemini', 'subagents', '0.36.0')).toEqual({ ok: true });
-    expect(supports('gemini', 'subagents', '0.50.0')).toEqual({ ok: true });
-  });
-});
-
 describe('goose workflows and allowlist support', () => {
   it('passes workflow and allowlist capability checks', () => {
     expect(supports('goose', 'workflows')).toEqual({ ok: true });
     expect(supports('goose', 'allowlist')).toEqual({ ok: true });
     expect(supports('goose', 'workflows', '1.41.0')).toEqual({ ok: true });
     expect(supports('goose', 'allowlist', '1.41.0')).toEqual({ ok: true });
-  });
-});
-
-describe('gemini allowlist', () => {
-  it('is capable of allowlist', () => {
-    expect(supports('gemini', 'allowlist')).toEqual({ ok: true });
-    expect(capableAgents('allowlist')).toContain('gemini');
   });
 });
 
@@ -134,13 +98,6 @@ describe('copilot allowlist', () => {
   it('is capable of allowlist', () => {
     expect(supports('copilot', 'allowlist')).toEqual({ ok: true });
     expect(capableAgents('allowlist')).toContain('copilot');
-  });
-});
-
-describe('forge allowlist', () => {
-  it('is capable of allowlist', () => {
-    expect(supports('forge', 'allowlist')).toEqual({ ok: true });
-    expect(capableAgents('allowlist')).toContain('forge');
   });
 });
 
@@ -172,9 +129,8 @@ describe('mcpHttp / mcpHeaders capability gates', () => {
   it('mcpHttp: supported by HTTP MCP config writers', () => {
     expect(supports('claude', 'mcpHttp').ok).toBe(true);
     expect(supports('codex', 'mcpHttp').ok).toBe(true);
-    expect(supports('gemini', 'mcpHttp').ok).toBe(true);
+    expect(supports('gemini', 'mcpHttp').ok).toBe(false);
     expect(supports('hermes', 'mcpHttp').ok).toBe(true);
-    expect(supports('forge', 'mcpHttp').ok).toBe(true);
     expect(supports('cursor', 'mcpHttp').ok).toBe(false);
     expect(supports('opencode', 'mcpHttp').ok).toBe(false);
     expect(supports('openclaw', 'mcpHttp').ok).toBe(false);
@@ -204,15 +160,12 @@ describe('mcpHttp / mcpHeaders capability gates', () => {
     expect(supports('kimi', 'mcpHeaders').ok).toBe(false);
     expect(supports('droid', 'mcpHeaders').ok).toBe(false);
     expect(supports('hermes', 'mcpHeaders').ok).toBe(false);
-    expect(supports('forge', 'mcpHeaders').ok).toBe(false);
   });
 
   it('capableAgents(mcpHttp) matches direct HTTP MCP config writers', () => {
     expect(capableAgents('mcpHttp').sort()).toEqual([
       'claude',
       'codex',
-      'forge',
-      'gemini',
       'hermes',
     ]);
   });
@@ -226,7 +179,6 @@ describe('isCapable()', () => {
   it('reports true for any non-false capability', () => {
     expect(isCapable('claude', 'hooks')).toBe(true);
     expect(isCapable('codex', 'hooks')).toBe(true); // object form counts
-    expect(isCapable('gemini', 'hooks')).toBe(true);
   });
 
   it('reports false for explicit false', () => {
@@ -245,12 +197,12 @@ describe('isCapable()', () => {
 });
 
 describe('capableAgents()', () => {
-  it('includes claude/codex/gemini/openclaw for hooks', () => {
+  it('includes claude/codex/openclaw for hooks and excludes hard-deprecated gemini', () => {
     const agents = capableAgents('hooks');
     expect(agents).toContain('claude');
     expect(agents).toContain('codex');
-    expect(agents).toContain('gemini');
     expect(agents).toContain('openclaw');
+    expect(agents).not.toContain('gemini');
   });
 
   it('includes copilot for hooks (GA @github/copilot hooks system)', () => {
@@ -459,9 +411,9 @@ describe('explainSkip()', () => {
   });
 
   it('formats too_old message with version', () => {
-    const r = supports('gemini', 'hooks', '0.25.0');
-    expect(explainSkip('gemini', 'hooks', r, '0.25.0'))
-      .toBe('gemini@0.25.0: hooks requires >= 0.26.0');
+    const r = supports('codex', 'hooks', '0.115.0');
+    expect(explainSkip('codex', 'hooks', r, '0.115.0'))
+      .toBe('codex@0.115.0: hooks requires >= 0.116.0');
   });
 
   it('returns empty string when ok', () => {
@@ -485,4 +437,3 @@ describe('grok workflows version gate', () => {
   });
 
 });
-

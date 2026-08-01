@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { AGENTS, agentConfigDirName } from './agents.js';
+import { AGENTS, agentConfigDirName, isAgentHardDeprecated } from './agents.js';
 import { supports } from './capabilities.js';
 import { buildCommandSkillContent, commandSkillName, readSkillSourceCommandMarker, shouldInstallCommandAsSkill } from './command-skills.js';
 import { commandAppliesTo, parseCommandMetadata } from './commands.js';
@@ -36,6 +36,10 @@ export function syncProjectResourcesToAgent(
   version: string,
   projectAgentsDir: string,
 ): ProjectResourceSyncResult {
+  if (isAgentHardDeprecated(agent)) {
+    return { synced: [], skipped: [] };
+  }
+
   const projectRoot = path.dirname(projectAgentsDir);
   const agentRoot = projectAgentRoot(projectRoot, agent);
   const manifest = loadProjectManifest(agentRoot);

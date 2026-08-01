@@ -11,8 +11,7 @@
  *
  *  - native command file — `{agentDir}/<commandsSubdir>/<name>.md` (or .toml
  *    when the agent's format is toml). Standard path for Claude, Codex
- *    < 0.117.0, Gemini, Cursor, OpenCode, Copilot, Amp, Kiro, Roo,
- *    Antigravity.
+ *    < 0.117.0, Cursor, OpenCode, Copilot, Amp, Kiro, Roo, Antigravity.
  *
  * Source resolution is `resolveCommandSource` (user → system → extras —
  * project layer intentionally excluded).
@@ -20,7 +19,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId } from '../../types.js';
-import { AGENTS, agentConfigDirName } from '../../agents.js';
+import { AGENTS, MANAGED_AGENT_IDS, agentConfigDirName } from '../../agents.js';
 import { supports } from '../../capabilities.js';
 import { safeJoin } from '../../paths.js';
 import { markdownToToml } from '../../convert.js';
@@ -85,7 +84,7 @@ function buildCommandsWriter(agent: AgentId): ResourceWriter<string[]> {
 // Built lazily on first access — see lazy-map.ts for the cycle rationale.
 //
 // Registration covers two cases:
-//   - native commands (claude, codex < 0.117.0, gemini, grok, etc.) — `commands` cap
+//   - native commands (claude, codex < 0.117.0, grok, etc.) — `commands` cap
 //   - commands-as-skills (kimi, codex >= 0.117.0)
 //
 // Agents that have skills but use a NATIVE non-file slash-command system
@@ -94,7 +93,7 @@ function buildCommandsWriter(agent: AgentId): ResourceWriter<string[]> {
 // commands, so there's nothing to write and nothing to convert.
 export const commandsWriters = lazyAgentMap<ResourceWriter<string[]>>(() => {
   const m: Partial<Record<AgentId, ResourceWriter<string[]>>> = {};
-  for (const id of Object.keys(AGENTS) as AgentId[]) {
+  for (const id of MANAGED_AGENT_IDS) {
     const cfg = AGENTS[id];
     if (cfg.capabilities.commands === false && (!cfg.skillsDir || cfg.skillsDir === '')) continue;
     // Skills-capable agent with no native command-file dir: convert commands to

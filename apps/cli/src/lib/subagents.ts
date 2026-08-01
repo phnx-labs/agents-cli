@@ -341,19 +341,6 @@ export function transformSubagentForCursor(subagentDir: string): string {
 }
 
 /**
- * Transform a subagent into a ForgeCode custom subagent `.md` file.
- *
- * ForgeCode loads named agents from `.forge/agents/*.md` (project) or
- * `~/.forge/agents/*.md` (user) — Markdown with YAML frontmatter (id, title,
- * description, tools, model, temperature) + a system-prompt body. ForgeCode has
- * no `color` field, so this is an alias of transformSubagentForDroid, same as
- * Copilot/Cursor. See https://forgecode.dev/docs/agent-definition-guide/.
- */
-export function transformSubagentForForge(subagentDir: string): string {
-  return transformSubagentForDroid(subagentDir);
-}
-
-/**
  * Transform a subagent into Antigravity's custom-agent markdown shape.
  *
  * Antigravity exposes custom agents as Markdown files with YAML frontmatter,
