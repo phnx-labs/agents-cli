@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { readClaudeSessionName, resetSessionNameCache } from './sessionName';
+import { readClaudeSessionName, readClaudeSessionNameInfo, resetSessionNameCache } from './sessionName';
 
 let tmpDir: string;
 
@@ -105,6 +105,29 @@ describe('readClaudeSessionName', () => {
     const b = await readClaudeSessionName('user-set', { sessionsDirs: [tmpDir] });
     expect(a).toBe('Fix Fleet Login');
     expect(b).toBe('Ship Release');
+  });
+
+  it('readClaudeSessionNameInfo exposes the derived placeholder (so a stuck tab can be recognized)', async () => {
+    writeSessionFile(66280, { sessionId: 'abc-123', name: 'agents-cli-55', nameSource: 'derived' });
+    const info = await readClaudeSessionNameInfo('abc-123', { sessionsDirs: [tmpDir] });
+    expect(info).toEqual({ name: 'agents-cli-55', nameSource: 'derived', derived: true });
+    // ...while readClaudeSessionName still hides it (falls through to LLM).
+    resetSessionNameCache();
+    expect(await readClaudeSessionName('abc-123', { sessionsDirs: [tmpDir] })).toBeNull();
+  });
+
+  it('readClaudeSessionNameInfo reports a genuine title as not-derived', async () => {
+    writeSessionFile(66281, { sessionId: 'real-1', name: 'Investigate agent misreporting', nameSource: 'user' });
+    writeSessionFile(66282, { sessionId: 'old-cli', name: 'Fix Fleet Login' }); // no nameSource (old CLI)
+    const a = await readClaudeSessionNameInfo('real-1', { sessionsDirs: [tmpDir] });
+    resetSessionNameCache();
+    const b = await readClaudeSessionNameInfo('old-cli', { sessionsDirs: [tmpDir] });
+    expect(a).toEqual({ name: 'Investigate agent misreporting', nameSource: 'user', derived: false });
+    expect(b).toEqual({ name: 'Fix Fleet Login', nameSource: null, derived: false });
+  });
+
+  it('readClaudeSessionNameInfo returns null for an unknown session', async () => {
+    expect(await readClaudeSessionNameInfo('nope', { sessionsDirs: [tmpDir] })).toBeNull();
   });
 
   it('caches scans within the TTL window', async () => {
