@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { BUILT_IN_AGENTS, getBuiltInByKey, getBuiltInDefByTitle, getBuiltInByPrefix, pickLatestVersion, STRATEGY_LAUNCH_AGENTS, modeFlagForAgent, AgentLaunchMode, RunStrategy, buildAgentLaunchCommand, wrapNativeAgentCommand } from '../core/agents';
+import { BUILT_IN_AGENTS, getBuiltInByKey, getBuiltInDefByTitle, getBuiltInByPrefix, pickLatestVersion, STRATEGY_LAUNCH_AGENTS, modeFlagForAgent, AgentLaunchMode, RunStrategy, buildAgentLaunchCommand, wrapNativeAgentCommand, shquote } from '../core/agents';
 import { parseSpawnRequest, SpawnRequest } from '../core/spawn';
 import {
   AgentConfig,
@@ -382,7 +382,7 @@ async function resolveBalancedHost(pool?: string[], agentKey?: string): Promise<
 async function resolveSlotHost(slot: QuickLaunchSlot): Promise<string | undefined> {
   const target = slot.runOn?.trim();
   if (!target || target === 'local') return undefined;
-  if (target === BALANCED_HOST) return resolveBalancedHost(slot.balancePool);
+  if (target === BALANCED_HOST) return resolveBalancedHost(slot.balancePool, slot.agent);
   const devices = await listRegisteredDevices();
   const dev = devices.find(d => normalizeHost(d.name) === normalizeHost(target));
   if (!dev) {
@@ -2568,7 +2568,7 @@ interface AgentViewResponse {
 async function listAgentVersions(agentKey: string, host?: string): Promise<AgentVersionInfo[]> {
   const { runAgents } = await import('../core/agentsBin');
   try {
-    const hostFlag = host ? ` --host ${host}` : '';
+    const hostFlag = host ? ` --host ${shquote(host)}` : '';
     const { stdout } = await runAgents(`view ${agentKey}${hostFlag} --json`, {
       maxBuffer: 10 * 1024 * 1024,
       timeout: host ? 15_000 : 30_000,
