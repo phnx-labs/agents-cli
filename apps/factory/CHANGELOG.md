@@ -6,6 +6,22 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **`Agents: New Agent` (⌘⇧A) is now a smart three-tier launch instead of always
+  Claude (RUSH-2029).** The generic New Agent command previously hard-coded the
+  configured default agent. It now (1) picks the agent TYPE by recent/frequent
+  usage — aggregating fleet-wide session history (`fetchRecapSessions`) into a
+  per-agent preference that weights the last 24 hours heavily while still counting
+  longer-term frequency, and falling back to the configured default when there is
+  no usable history; (2) launches with `--strategy balanced` so the version/account
+  is load-balanced across healthy signed-in accounts; and (3) auto-picks the
+  least-busy healthy device via `resolveBalancedHost`. Uninstalled or signed-out
+  agents are excluded from selection, and a status-bar note reports the choice
+  (e.g. `New Agent: Codex (balanced on yosemite-s0)`). The explicit per-agent
+  commands (`New Claude …`, `New Codex …`) are unchanged. New pure selector
+  `src/core/agentUsage.ts` (`rankAgentsByUsage` / `pickAgentByUsage`) is unit-tested
+  against fixture history. Source: `apps/factory/src/core/agentUsage.ts`,
+  `apps/factory/src/vscode/extension.ts`.
+
 - **Interactive agent launches now default to `--mode auto` instead of stalling in read-only plan mode (RUSH-2038).** Launching Codex, Claude, Gemini, Cursor, OpenCode, or Antigravity from Factory without explicitly choosing a mode now runs in `auto` (writable-but-gated), so the agent can edit files immediately. Previously the CLI default of `plan` was inherited, causing Codex to start with `--sandbox read-only` and wait indefinitely for approval. `buildAgentLaunchCommand` is now in `src/core/agents.ts` so it is unit-testable without a VS Code harness. Source: `apps/factory/src/core/agents.ts`, `apps/factory/src/vscode/extension.ts`.
 
 - **Stuck Claude tab labels self-heal, and an existing session name is reused
