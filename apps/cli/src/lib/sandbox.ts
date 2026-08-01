@@ -47,12 +47,6 @@ const ENV_ALLOWLIST = [
   'VISUAL',
   'NO_COLOR',
   'FORCE_COLOR',
-  // Headless Claude auth: the routines daemon injects CLAUDE_CODE_OAUTH_TOKEN
-  // from the `claude` secrets bundle (see daemon.ts). Without this allowlist
-  // entry, sandboxed routine spawns drop the token and look "unconfigured".
-  // Intentionally NOT ANTHROPIC_API_KEY / other provider secrets — those stay
-  // stripped (see tests/sandbox.test.ts "does not include sensitive env vars").
-  'CLAUDE_CODE_OAUTH_TOKEN',
 ];
 
 /** Tools safe to grant as wildcards (no filesystem access). */
@@ -80,17 +74,6 @@ export function buildSpawnEnv(overlayHome: string, extraEnv?: Record<string, str
 
   for (const key of ENV_ALLOWLIST) {
     if (process.env[key]) {
-      env[key] = process.env[key]!;
-    }
-  }
-
-  // Per-account Claude setup-tokens: the daemon injects a CLAUDE_CODE_OAUTH_TOKEN_<slug>
-  // for each account so a routine authenticates its rotation-pinned account via a
-  // long-lived, non-rotating token (see runner.ts buildRoutineSpawnEnv). Forward every
-  // such key by prefix — same trust tier as CLAUDE_CODE_OAUTH_TOKEN above; still no API
-  // keys or other provider secrets.
-  for (const key of Object.keys(process.env)) {
-    if (key.startsWith('CLAUDE_CODE_OAUTH_TOKEN_') && process.env[key]) {
       env[key] = process.env[key]!;
     }
   }

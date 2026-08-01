@@ -40,8 +40,8 @@ function resolveR2Config(): R2Config {
   // The daemon monitor loop is headless by construction (no TTY, ever), so
   // isHeadlessSecretsContext() is true here and this resolves broker-only — a
   // broker miss can never pop an unattended Touch ID sheet on the user's screen
-  // (same rationale as daemon.ts readDaemonClaudeOAuthToken). Using the shared
-  // predicate rather than a literal keeps it consistent with the other callers
+  // (the same broker-only-when-headless rationale the secrets readers use). Using
+  // the shared predicate rather than a literal keeps it consistent with the other callers
   // and lets any interactive caller of loadR2Config still prompt.
   const { env } = readAndResolveBundleEnv(SYNC_BUNDLE, { caller: 'sessions-sync', agentOnly: isHeadlessSecretsContext() });
   const accountId = env.R2_ACCOUNT_ID?.trim();

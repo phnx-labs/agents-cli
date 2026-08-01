@@ -346,45 +346,27 @@ Those archives are indexed by `agents sessions` with `origin: "routine"`,
 them, or `agents sessions <run-id>` to render the existing session summary view
 for a specific routine run.
 
-### Headless claude auth
+### Claude auth for routines
 
-The sandbox overlay builds a clean `HOME` with no Claude credentials — the real
-`~/.claude/` (and its OAuth tokens) is invisible to the spawned process by design.
-A routine that drives headless `claude` will fail authentication unless one of two
-conditions is met.
+A routine authenticates exactly like an interactive `agents run claude` on the
+same device: through the pinned account's own on-disk login.
+`buildRoutineSpawnEnv` sets `CLAUDE_CONFIG_DIR` to the account's per-version home
+(`runner.ts`), so even under the sandbox overlay — which gives the spawn a clean
+`HOME` — Claude Code reads its credential from `CLAUDE_CONFIG_DIR/.credentials.json`,
+the real interactive login. That access token is short-lived but refreshes itself
+per-device, so a box that runs at least once inside the refresh window stays
+signed in on its own.
 
-**Current workaround — `sandbox: false`**
+The daemon holds **no** Claude token and injects nothing — no ambient
+`CLAUDE_CODE_OAUTH_TOKEN`, no per-account variant. A shared or injected token was
+the *cause* of the fleet-wide rotation logout, not the fix (see "Pinning an
+account" below). If a routine's pinned account login has gone dead, the auth-health
+preflight (`runner.ts`) skips the run up front with a `re-login required` message
+rather than firing a doomed run.
 
-Set `sandbox: false` on the routine to skip overlay creation. The agent inherits
-the daemon's full environment, including `CLAUDE_CODE_OAUTH_TOKEN` if the daemon
-was started with it (`runner.ts:218`):
-
-```yaml
-name: my-claude-routine
-schedule: "0 9 * * *"
-agent: claude
-sandbox: false            # overlay HOME has no claude credentials
-prompt: |
-  Do something useful.
-```
-
-**Why `sandbox: false` works, and why the default does not**
-
-When the daemon starts, it reads `CLAUDE_CODE_OAUTH_TOKEN` from the `claude`
-secrets bundle (`daemon.ts:550-563`) and bakes it into the daemon process
-environment (`daemon.ts:820-821`). With `sandbox: true` (the default),
-`buildSpawnEnv` only forwards keys in `ENV_ALLOWLIST` — `CLAUDE_CODE_OAUTH_TOKEN`
-is not on that list (`sandbox.ts:28-49`), so the token is stripped before the
-agent launches. `sandbox: false` sidesteps this by passing `process.env` directly,
-which includes the daemon-level token.
-
-To store the token in the `claude` secrets bundle:
-
-```bash
-agents secrets set claude CLAUDE_CODE_OAUTH_TOKEN <token>
-# Restart the daemon so the updated token is baked into its environment:
-agents routines stop && agents routines start
-```
+To bring a signed-out box back, log in on that box once — `agents run claude` (or
+`claude` directly) drives the interactive login and writes the credential the
+routine then reuses. The daemon does not need restarting; it reads no credential.
 
 ### Pinning an account (avoid the OAuth-rotation revocation storm)
 
