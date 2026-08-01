@@ -9,7 +9,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { stripVTControlCharacters } from 'node:util';
-import { buildPreview, formatTodoCompact, githubRepoUrlFromCwd } from './sessions-picker.js';
+import { buildPreview, formatTodoCompact, githubRepoUrlFromCwd, relativizeDir } from './sessions-picker.js';
 import { _resetLinearWorkspaceCache } from '../lib/session/linear.js';
 import type { SessionMeta, TodoProgress } from '../lib/session/types.js';
 
@@ -52,6 +52,73 @@ describe('githubRepoUrlFromCwd', () => {
   it('returns undefined when the path is not under github.com', () => {
     expect(githubRepoUrlFromCwd('/tmp/scratch')).toBeUndefined();
     expect(githubRepoUrlFromCwd(undefined)).toBeUndefined();
+  });
+});
+
+describe('relativizeDir — readable Dirs line', () => {
+  const savedHome = process.env.HOME;
+  afterEach(() => {
+    if (savedHome === undefined) delete process.env.HOME;
+    else process.env.HOME = savedHome;
+  });
+
+  it('(a) strips the session cwd prefix, leaving the relative remainder', () => {
+    expect(
+      relativizeDir('/home/me/repo/apps/cli/src/lib/secrets.ts', '/home/me/repo'),
+    ).toBe('apps/cli/src/lib');
+  });
+
+  it('(a) returns "." when the file sits directly in the cwd', () => {
+    expect(relativizeDir('/home/me/repo/index.ts', '/home/me/repo')).toBe('.');
+  });
+
+  it('(b) collapses a worktree path to ⧉ <slug>/<remainder>', () => {
+    expect(
+      relativizeDir(
+        '/home/me/repo/.agents/worktrees/fix-crabbox-touchid-storm/apps/cli/src/lib/crabbox/x.ts',
+        '/home/me/repo',
+      ),
+    ).toBe('⧉ fix-crabbox-touchid-storm/apps/cli/src/lib/crabbox');
+  });
+
+  it('(b) collapses to bare ⧉ <slug> when nothing follows the worktree root', () => {
+    expect(
+      relativizeDir('/home/me/repo/.agents/worktrees/my-slug/README.md', '/home/me/repo'),
+    ).toBe('⧉ my-slug');
+  });
+
+  it('(c) decodes a Claude project-slug instead of rendering the raw -Users- form', () => {
+    // Session cwd is unrelated to the decoded path, so the last-3-segment trim applies.
+    const out = relativizeDir(
+      '-Users-muqsit-src-github-com-muqsitnawaz-agents-cli/abc123/scratchpad/note.md',
+      '/home/muqsit/other',
+    );
+    expect(out).not.toContain('-Users-'); // the ugly raw slug is gone
+    expect(out).toBe('cli/abc123/scratchpad');
+  });
+
+  it('(c) decodes a -home- slug and relativizes against a matching cwd', () => {
+    // Decoded to /home/muqsit/src/app/lib; cwd matches, so only the remainder shows.
+    expect(
+      relativizeDir('-home-muqsit-src-app-lib/foo.ts', '/home/muqsit/src/app'),
+    ).toBe('lib');
+  });
+
+  it('(d) collapses the home prefix to ~', () => {
+    process.env.HOME = '/home/me';
+    // No cwd match; home → ~, and the path is shallow enough to keep in full.
+    expect(relativizeDir('/home/me/notes/todo.md')).toBe('~/notes');
+  });
+
+  it('(e) skips node_modules paths (undefined)', () => {
+    expect(
+      relativizeDir('/home/me/repo/node_modules/chalk/index.js', '/home/me/repo'),
+    ).toBeUndefined();
+  });
+
+  it('(e) skips .git and plans paths (undefined)', () => {
+    expect(relativizeDir('/home/me/repo/.git/config', '/home/me/repo')).toBeUndefined();
+    expect(relativizeDir('/home/me/repo/plans/x.md', '/home/me/repo')).toBeUndefined();
   });
 });
 
