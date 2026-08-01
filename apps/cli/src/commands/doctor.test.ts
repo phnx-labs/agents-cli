@@ -1,6 +1,21 @@
 import { describe, it, expect } from 'vitest';
-import { execPolicyWarningLines, wrapLine } from './doctor.js';
+import { execPolicyWarningLines, wrapLine, computeVerdict } from './doctor.js';
 import { stringWidth } from '../lib/session/width.js';
+import type { VersionResourceReport } from '../lib/doctor-diff.js';
+
+/** Minimal reconciled report; override the fields a case cares about. */
+function baseReport(over: Partial<VersionResourceReport> = {}): VersionResourceReport {
+  return {
+    agent: 'claude',
+    version: '2.1.207',
+    home: '/home/.claude',
+    cwd: '/work',
+    layers: { project: null, user: '~/.agents', system: '~/.agents/.system', extras: [] },
+    kinds: { commands: [], skills: [], hooks: [], rules: [], mcp: [], permissions: [], subagents: [], plugins: [], promptcuts: [] },
+    summary: { ok: 32, diff: 0, missing: 0, extra: 0 },
+    ...over,
+  };
+}
 
 describe('execPolicyWarningLines (Windows exec-policy advisory in `agents doctor`)', () => {
   it('fires when the policy blocks local scripts (Restricted) — with the RemoteSigned remediation', () => {
@@ -40,5 +55,57 @@ describe('wrapLine', () => {
 
   it('collapses embedded newlines before wrapping', () => {
     expect(wrapLine('  ', 'one\n\n  two\tthree', 80)).toEqual(['  one two three']);
+  });
+});
+
+describe('computeVerdict (doctor per-version health rollup)', () => {
+  it('is healthy when nothing diverges', () => {
+    const v = computeVerdict(baseReport());
+    expect(v.healthy).toBe(true);
+    expect(v.issues).toEqual([]);
+  });
+
+  it('an UNWIRED hook flips the verdict to unhealthy even when every file is ok', () => {
+    // The yosemite-s1 bug: 32 hook files reconcile ok, but one is never wired
+    // into settings.json. Files-ok must NOT read as healthy.
+    const v = computeVerdict(
+      baseReport({
+        hookWiring: {
+          supported: true,
+          settingsPath: '/home/.claude/settings.json',
+          expected: 32,
+          unwired: [{ name: 'ask-user-question-guard', event: 'PreToolUse', command: '~/x.sh' }],
+        },
+      }),
+    );
+    expect(v.healthy).toBe(false);
+    expect(v.issues.map((i) => i.text)).toContain('1 unwired');
+  });
+
+  it('a missing settings.json is unhealthy and names the unwired count', () => {
+    const v = computeVerdict(
+      baseReport({
+        hookWiring: { supported: true, settingsPath: '/home/.claude/settings.json', expected: 3, settingsMissing: true, unwired: [] },
+      }),
+    );
+    expect(v.healthy).toBe(false);
+    expect(v.issues.some((i) => i.text.includes('settings.json missing') && i.text.includes('3'))).toBe(true);
+  });
+
+  it('a source layer behind origin flips the verdict to unhealthy (not a buried note)', () => {
+    const v = computeVerdict(
+      baseReport({
+        sourceBehind: [{ layer: 'user', label: '~/.agents', alias: 'user', behind: 75, branch: 'origin/main' }],
+      }),
+    );
+    expect(v.healthy).toBe(false);
+    expect(v.issues.some((i) => i.text.includes('75 commits behind origin/main'))).toBe(true);
+  });
+
+  it('still folds in classic divergences (diff / missing / extra)', () => {
+    const v = computeVerdict(baseReport({ summary: { ok: 1, diff: 2, missing: 1, extra: 3 } }));
+    expect(v.healthy).toBe(false);
+    const texts = v.issues.map((i) => i.text);
+    expect(texts).toEqual(expect.arrayContaining(['2 divergent', '1 missing', '3 extra']));
   });
 });

@@ -19,6 +19,7 @@ import {
   assertValidBranchName,
   canonicalGitRemote,
   commitAndPush,
+  commitsBehindUpstream,
   commitOwnDeviceMeta,
   displayHomePath,
   parseSource,
@@ -588,5 +589,59 @@ describe('resolveGitHubUsername', () => {
 
   it('returns null when no source can resolve the username', () => {
     expect(resolveGitHubUsernameSync()).toBeNull();
+  });
+});
+
+describe('commitsBehindUpstream', () => {
+  let root: string, remote: string, author: string, local: string;
+
+  async function configIdentity(dir: string): Promise<void> {
+    const g = simpleGit(dir);
+    await g.addConfig('user.email', 'test@example.com');
+    await g.addConfig('user.name', 'Test');
+    await g.addConfig('commit.gpgsign', 'false');
+  }
+
+  beforeEach(async () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'behind-'));
+    remote = path.join(root, 'remote.git');
+    author = path.join(root, 'author');
+    local = path.join(root, 'local');
+    await simpleGit().raw(['init', '--bare', '-b', 'main', remote]);
+    await simpleGit().clone(remote, author);
+    await configIdentity(author);
+    fs.writeFileSync(path.join(author, 'README.md'), 'v1\n');
+    await simpleGit(author).add('-A');
+    await simpleGit(author).commit('init');
+    await simpleGit(author).push('origin', 'main');
+    await simpleGit().clone(remote, local);
+    await configIdentity(local);
+  });
+
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('counts how many commits the checkout trails its upstream', async () => {
+    // Two new commits land on the remote; the local clone fetches but does not
+    // pull — it is now 2 behind origin/main.
+    await simpleGit(author).raw(['commit', '--allow-empty', '-m', 'up1']);
+    await simpleGit(author).raw(['commit', '--allow-empty', '-m', 'up2']);
+    await simpleGit(author).push('origin', 'main');
+    await simpleGit(local).fetch('origin');
+
+    const res = commitsBehindUpstream(local);
+    expect(res).not.toBeNull();
+    expect(res!.behind).toBe(2);
+    expect(res!.branch).toBe('origin/main');
+  });
+
+  it('reports zero behind when the checkout matches its upstream', () => {
+    const res = commitsBehindUpstream(local);
+    expect(res).toMatchObject({ behind: 0, branch: 'origin/main' });
+  });
+
+  it('returns null for a non-git directory', () => {
+    expect(commitsBehindUpstream(root)).toBeNull();
   });
 });
