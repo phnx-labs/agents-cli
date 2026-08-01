@@ -9,8 +9,8 @@ This is the **internal architecture** map. The user-facing feature tour is
 plugins, browser, secrets, routines, pty). This file covers the design choices,
 module map, build, and release mechanics the README does not.
 
-> Phoenix Labs OSS (Apache-2.0). **NOT part of the Rush brand** — brand rules are
-> repo-wide, see the root [AGENTS.md](../../AGENTS.md) §Brand identity.
+> Phoenix Labs OSS · Apache-2.0. Repo-wide policy (conventions, code review, security)
+> lives in the root [AGENTS.md](../../AGENTS.md).
 
 ## Core design choices (read this first)
 
