@@ -991,6 +991,11 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
   // poll must not re-read the dir (or re-invert the map) per candidate.
   let hookIndex: HookSessionIndex | undefined;
   let childrenByParent: Map<number, number[]> | undefined;
+  // Durable `agents run --name` handles keyed by session id — the same source the
+  // terminal path uses to name a row. Headless agents have no live-terminals
+  // label and no /rename, so without this a `--name`d headless run would surface
+  // with only a topic and no tab title. Built once per scan.
+  const runNameMap = buildRunNameMap();
   const ensureChildren = (): Map<number, number[]> => {
     if (childrenByParent) return childrenByParent;
     const m = new Map<number, number[]>();
@@ -1045,6 +1050,14 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
     // `unknown`, not a fake `idle`.
     const { state, tokPerSec } = computeLiveSignals(kind, sessionFile, cwd, true);
     const { birthtimeMs, mtimeMs } = sessionFileTimes(sessionFile);
+    // Durable run name from `agents run --name`, resolved by the run's session id
+    // — the tab-title handle for a run we launched by name. A headless row carries
+    // no /rename label and no live-terminals label, so this handle IS its label
+    // (mirrors listTeamsActive `label: a.name`). Absent a `--name`, label stays
+    // undefined and the display falls back to the topic on its own — no band-aid.
+    const resolvedId = exactId ?? sessionIdFromFile(sessionFile);
+    const name = resolvedId ? runNameMap.get(resolvedId) ?? undefined : undefined;
+    const label = name;
     out.push(applyState({
       context,
       kind,
@@ -1052,7 +1065,9 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
       tty: procByPid.get(pid)?.tty,
       pid,
       cwd,
-      sessionId: exactId ?? sessionIdFromFile(sessionFile),
+      sessionId: resolvedId,
+      label,
+      name,
       topic,
       tokPerSec,
       sessionFile,
