@@ -30,20 +30,26 @@ export function accountTokenKey(account: string): string {
 }
 
 /**
- * Read the signed-in account email for a Claude version home from its
- * `.claude/.claude.json` (`oauthAccount.emailAddress`). Sync, no keychain, no
- * network — mirrors {@link claudeHomeHasOwnCredential}. Returns null when the
- * file/field is absent or unreadable.
+ * Read the signed-in account email for a Claude version home from
+ * `oauthAccount.emailAddress`. Sync, no keychain, no network. Tries both stores
+ * the canonical resolver uses (agents.ts getAccountInfo): the shim-set
+ * `CLAUDE_CONFIG_DIR` location `<home>/.claude/.claude.json` first, then the
+ * home-level `<home>/.claude.json` (an account signed in via the IDE / direct
+ * binary without the shim writes there). Returns null when neither has a usable
+ * email.
  */
 export function readClaudeAccountEmail(home: string): string | null {
-  try {
-    const raw = fs.readFileSync(path.join(home, '.claude', '.claude.json'), 'utf-8');
-    const email = (JSON.parse(raw) as { oauthAccount?: { emailAddress?: unknown } })
-      .oauthAccount?.emailAddress;
-    return typeof email === 'string' && email.trim().length > 0 ? email.trim() : null;
-  } catch {
-    return null;
+  for (const p of [path.join(home, '.claude', '.claude.json'), path.join(home, '.claude.json')]) {
+    try {
+      const email = (JSON.parse(fs.readFileSync(p, 'utf-8')) as {
+        oauthAccount?: { emailAddress?: unknown };
+      }).oauthAccount?.emailAddress;
+      if (typeof email === 'string' && email.trim().length > 0) return email.trim();
+    } catch {
+      // Missing/unreadable/malformed at this location — try the next.
+    }
   }
+  return null;
 }
 
 /**
