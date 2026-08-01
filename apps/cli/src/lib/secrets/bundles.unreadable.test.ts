@@ -100,3 +100,52 @@ describe('readBundleIfDecryptable', () => {
     expect(() => readBundleIfDecryptable('no-such-bundle.test')).toThrow(/not found/i);
   });
 });
+
+/**
+ * The narrow-miss the first pass had: a bundle that is only *locked for this
+ * run* — headless macOS with no `AGENTS_SECRETS_PASSPHRASE` — is fully
+ * recoverable, but the blanket catch collapsed it into "unreadable, safe to
+ * delete." `secrets delete <name> --yes` from a cron/launchd run that forgot to
+ * export the passphrase would then silently, permanently destroy a healthy
+ * bundle. Only a genuine decrypt failure (`BundleUndecryptableError`) may read
+ * as null; the "set the env" state must rethrow.
+ */
+describe('a file-backed bundle that is only locked for this run (headless macOS, env not set)', () => {
+  const realPlatform = process.platform;
+  const realIsTTY = process.stdin.isTTY;
+
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
+    process.stdin.isTTY = realIsTTY;
+  });
+
+  /** Written while decryptable, then made headless-macOS with the env unset. */
+  function healthyButLocked(): void {
+    writeBundle({ name: NAME, backend: 'file', vars: { NPM_TOKEN: 'literal:healthy' } });
+    expect(readBundle(NAME).vars.NPM_TOKEN).toBe('literal:healthy');
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+    process.stdin.isTTY = false;
+    delete process.env.AGENTS_SECRETS_PASSPHRASE;
+  }
+
+  it('rethrows the recoverable "needs AGENTS_SECRETS_PASSPHRASE" error — it must NOT read as unreadable/deletable', () => {
+    healthyButLocked();
+
+    // Present and healthy — just locked for this run, not a lost passphrase.
+    expect(bundleExists(NAME)).toBe(true);
+    expect(() => readBundle(NAME)).toThrow(/needs AGENTS_SECRETS_PASSPHRASE/i);
+
+    // The seam must rethrow, NOT return null. Returning null is exactly what let
+    // `secrets delete --yes` fall through and silently destroy this bundle.
+    expect(() => readBundleIfDecryptable(NAME)).toThrow(/needs AGENTS_SECRETS_PASSPHRASE/i);
+  });
+
+  it('reads back unchanged once the passphrase is exported again — nothing was lost', () => {
+    healthyButLocked();
+    expect(() => readBundleIfDecryptable(NAME)).toThrow(/needs AGENTS_SECRETS_PASSPHRASE/i);
+
+    // Restore darwin-gated env; the same healthy bundle decrypts.
+    usePassphrase('the-original-passphrase');
+    expect(readBundleIfDecryptable(NAME)?.vars.NPM_TOKEN).toBe('literal:healthy');
+  });
+});

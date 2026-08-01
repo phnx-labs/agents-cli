@@ -366,21 +366,39 @@ export function bundleExists(name: string): boolean {
 }
 
 /**
- * Read a bundle, or return null when its metadata is present but cannot be
- * decrypted — a lost or rotated file-store passphrase, or a vault that cannot
- * be unlocked here.
+ * Thrown by `readBundle` for the one state `readBundleIfDecryptable` may treat
+ * as "present but permanently unreadable": file-store ciphertext on disk that
+ * will not decrypt with the passphrase in effect (lost/rotated key or a tampered
+ * store). It is deliberately narrow — a bundle that is merely *locked for this
+ * run* (headless macOS without `AGENTS_SECRETS_PASSPHRASE`, or a vault that is
+ * not logged in) is recoverable and must not be collapsed into this.
+ */
+export class BundleUndecryptableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'BundleUndecryptableError';
+  }
+}
+
+/**
+ * Read a bundle, or return null when its metadata is present but genuinely
+ * cannot be decrypted — a lost or rotated file-store passphrase, or a tampered
+ * file store (signalled by `BundleUndecryptableError`).
  *
- * Deleting a bundle is the only way out of that state, and deletion needs no
- * plaintext, so it must not be gated behind a successful decrypt. A genuinely
- * missing bundle still throws: "not found" and "present but unreadable" require
- * different answers from the caller, and collapsing them would turn a typo into
- * a silent no-op.
+ * Deleting such a bundle is the only way out of that state, and deletion needs
+ * no plaintext, so it must not be gated behind a successful decrypt. Every other
+ * failure rethrows: a genuinely missing bundle ("not found"), and — critically —
+ * a bundle that is only *temporarily locked* for this run (headless macOS with no
+ * `AGENTS_SECRETS_PASSPHRASE`, or a not-logged-in vault). Collapsing that
+ * recoverable "set the env / log in" state into "unreadable, safe to delete"
+ * would let `secrets delete <name> --yes` silently destroy a perfectly healthy
+ * bundle from a cron/launchd run that merely forgot to export the passphrase.
  */
 export function readBundleIfDecryptable(name: string): SecretsBundle | null {
   try {
     return readBundle(name);
   } catch (err) {
-    if (bundleExists(name)) return null;
+    if (err instanceof BundleUndecryptableError) return null;
     throw err;
   }
 }
@@ -397,7 +415,7 @@ export function readBundle(name: string): SecretsBundle {
     // A file-backed bundle whose metadata is on disk but fails to decrypt is a
     // wrong-passphrase error, not a missing bundle — surface that clearly.
     if (backend === 'file' && fileStore.has(bundleMetaItem(name))) {
-      throw new Error(
+      throw new BundleUndecryptableError(
         `Bundle '${name}': failed to decrypt — wrong AGENTS_SECRETS_PASSPHRASE or tampered file store. (${(err as Error).message})`,
       );
     }
