@@ -281,6 +281,39 @@ Scope: v1 supports **Claude** (single-file transcript, native `--resume`). Codex
 agents (opencode) need per-agent handling and are refused up front with a clear
 message.
 
+## Background & foreground (detach / attach)
+
+`agents detach <id>` sends a live agent session to the background; `agents attach <id>`
+brings it back. They are the foreground/background axis over a session, and route
+through the same version-pinned `agents run --resume` path everything else uses — so
+they are agent-agnostic (native resume for Claude/Codex, `/continue` replay for the
+rest), not a per-agent special case.
+
+- **detach**: stop the interactive process (kill the tmux session when tmux-hosted,
+  else SIGTERM the pid), then spawn a detached, version-pinned
+  `agents run <agent> --resume <id> --headless "<nudge>"`. The nudge tells the now-
+  unwatched agent it is headless and to drive its task to completion rather than
+  stall on a confirmation nobody can answer. The continuation runs until the task is
+  done, then exits.
+- **attach**: stop the headless continuation (if any), then `resumeSessionInPlace`
+  the session interactively in the current terminal — the same session, full history,
+  including whatever the background run did.
+
+The record `detach` writes (`~/.agents/.system/detached/<id>.json`, one file per
+session; see `lib/session/detached.ts`) is the source of truth for **presence**, which
+`getActiveSessions` folds onto every row and `agents sessions --active --json` emits:
+
+| presence | meaning |
+| --- | --- |
+| `attached` | live interactive TUI you're watching |
+| `background` | detached: the headless continuation is running (its pid is alive) |
+| `parked` | the headless continuation has exited; the transcript is durable, `attach` resumes it |
+
+Presence is **derived, never asserted**: a record only says "this session was detached";
+whether it is `background` or `parked` is decided live from the recorded pid plus its
+start-time fingerprint (which defeats PID reuse). Ad-hoc headless runs and cloud/team
+rows carry no presence — they are not on this axis.
+
 ## Export / Import (portable bundles)
 
 `agents sessions export` bundles selected sessions into a portable, self-describing
