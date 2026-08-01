@@ -75,11 +75,18 @@ const Database = (await import('../sqlite.js')).default;
 
 const { getDB, getSessionById } = await import('./db.js');
 
-describe('schema migration v13 -> v14 (dir_ledger)', () => {
-  it('creates the dir_ledger table with the expected columns', () => {
+describe('schema migration v13 -> current (dir_ledger + resumable parser)', () => {
+  it('creates the dir_ledger table with the expected columns (v14)', () => {
     const db = getDB();
     const cols = (db.prepare(`PRAGMA table_info(dir_ledger)`).all() as Array<{ name: string }>).map(c => c.name);
     expect(cols).toEqual(['dir_path', 'dir_mtime_ms', 'entry_count', 'scanned_at']);
+  });
+
+  it('adds parser_state + content_text to scan_ledger (v15)', () => {
+    const db = getDB();
+    const cols = (db.prepare(`PRAGMA table_info(scan_ledger)`).all() as Array<{ name: string }>).map(c => c.name);
+    expect(cols).toContain('parser_state');
+    expect(cols).toContain('content_text');
   });
 
   it('clears scan_ledger so the first post-upgrade scan does a clean full walk', () => {
@@ -88,10 +95,10 @@ describe('schema migration v13 -> v14 (dir_ledger)', () => {
     expect(n).toBe(0);
   });
 
-  it('bumps the recorded schema version to 14', () => {
+  it('bumps the recorded schema version to the current version', () => {
     const db = getDB();
     const v = (db.prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string }).value;
-    expect(v).toBe('14');
+    expect(v).toBe('15');
   });
 
   it('preserves existing session rows through the migration', () => {

@@ -17,7 +17,7 @@ const SESSIONS_DIR = getSessionsDir();
 const DB_PATH = getSessionsDbPath();
 
 /** Current schema version; bumped when migrations are added. */
-const SCHEMA_VERSION = 14;
+const SCHEMA_VERSION = 15;
 
 /**
  * Canonicalize a file path for use as a scan_ledger key. The same physical
@@ -104,7 +104,14 @@ CREATE TABLE IF NOT EXISTS scan_ledger (
   file_path TEXT PRIMARY KEY,
   file_mtime_ms INTEGER NOT NULL,
   file_size INTEGER NOT NULL,
-  scanned_at INTEGER NOT NULL
+  scanned_at INTEGER NOT NULL,
+  -- Resumable-parse cursor + continuation (B-1). parser_state is a JSON
+  -- ClaudeParserState blob (offset + accumulator snapshot) so a scan can pick
+  -- up where the last one stopped; content_text caches the accumulated user
+  -- doc so detectTicket + FTS can rebuild on append without re-reading the file.
+  -- Written by B-2; B-1 only defines + round-trips them.
+  parser_state TEXT,
+  content_text TEXT
 );
 
 -- Tracks the mtime + entry-count of every LEAF directory that directly holds
@@ -351,6 +358,18 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
       );
       DELETE FROM scan_ledger;
     `);
+  }
+
+  if (fromVersion < 15) {
+    // v14 → v15: the Claude scan becomes resumable (B-1). scan_ledger gains a
+    // `parser_state` continuation blob (offset + accumulator snapshot) and a
+    // `content_text` cache of the accumulated user doc. Add both columns, then
+    // clear scan_ledger so the first post-upgrade scan does a clean full walk
+    // that reseeds the cursor from byte 0.
+    const cols = db.prepare(`PRAGMA table_info(scan_ledger)`).all() as Array<{ name: string }>;
+    if (!cols.some(c => c.name === 'parser_state')) db.exec(`ALTER TABLE scan_ledger ADD COLUMN parser_state TEXT`);
+    if (!cols.some(c => c.name === 'content_text')) db.exec(`ALTER TABLE scan_ledger ADD COLUMN content_text TEXT`);
+    db.exec(`DELETE FROM scan_ledger;`);
   }
 }
 
