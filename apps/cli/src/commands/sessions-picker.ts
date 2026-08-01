@@ -6,13 +6,15 @@
  * response) and delegates to the generic `itemPicker` for the interactive UI.
  */
 import fs from 'node:fs';
+import path from 'node:path';
 import chalk from 'chalk';
 import { truncate, humanDuration } from '../lib/format.js';
-import type { SessionEvent, SessionMeta } from '../lib/session/types.js';
+import type { SessionEvent, SessionMeta, TodoProgress } from '../lib/session/types.js';
 import { parseSession, sanitizeForTerminal } from '../lib/session/parse.js';
 import { cleanSessionPrompt, extractSessionTopic } from '../lib/session/prompt.js';
 import { linkPath, linkUrl, relativeToCwd } from '../lib/session/render.js';
 import { linearIssueUrl } from '../lib/session/linear.js';
+import { extractTodoProgress } from '../lib/session/state.js';
 import { renderMarkdown } from '../lib/markdown.js';
 import { itemPicker } from '../lib/picker.js';
 import { classifyFileChanges, changeCounts, toolHistogram, detectTestResult } from '../lib/session/digest.js';
@@ -23,6 +25,32 @@ import { classifyFileChanges, changeCounts, toolHistogram, detectTestResult } fr
  * still parse their file normally. */
 function remoteMachineOf(session: SessionMeta): string | undefined {
   return session._remote ? session.machine : undefined;
+}
+
+/**
+ * Compact checklist tally for list rows and previews (RUSH-2045).
+ * Example: `✓6/8 · A5 wiring runner`. Empty string when there is no list.
+ * Consumes `SessionMeta.todos` / `ActiveSession.todos` as populated by the
+ * state engine — does not re-parse transcripts.
+ */
+export function formatTodoCompact(todos?: Pick<TodoProgress, 'done' | 'total' | 'activeForm'> | null): string {
+  if (!todos || !Number.isFinite(todos.total) || todos.total < 1) return '';
+  const done = Number.isFinite(todos.done) ? Math.max(0, todos.done) : 0;
+  const tally = `✓${done}/${todos.total}`;
+  const step = todos.activeForm?.replace(/\s+/g, ' ').trim();
+  return step ? `${tally} · ${step}` : tally;
+}
+
+/**
+ * Best-effort GitHub repo URL from a checkout path shaped like
+ * `…/github.com/<owner>/<repo>/…`. Used to make the project name clickable
+ * when no Linear project URL is available.
+ */
+export function githubRepoUrlFromCwd(cwd?: string): string | undefined {
+  if (!cwd) return undefined;
+  const norm = cwd.replace(/\\/g, '/');
+  const m = norm.match(/\/github\.com\/([^/]+\/[^/]+)/);
+  return m ? `https://github.com/${m[1]}` : undefined;
 }
 
 /**
@@ -85,7 +113,8 @@ export function buildPreview(session: SessionMeta): string {
   if (remote) {
     const note = '  ' + chalk.gray(`on `) + chalk.bold.white(remote)
       + chalk.gray(` — enter to resume there, or space then enter to read it over SSH`);
-    const output = [formatHeader(safe, []), '', note].join('\n');
+    const metaBody = formatMetaOnlyBody(safe);
+    const output = [formatHeader(safe, []), '', note, metaBody].filter(Boolean).join('\n');
     previewCache.set(cacheKey, output);
     return output;
   }
@@ -94,7 +123,8 @@ export function buildPreview(session: SessionMeta): string {
   // entry (e.g. `sessions go`). Show the header + a clean note, not a parse error.
   if (!session.filePath || !fs.existsSync(session.filePath)) {
     const note = '  ' + chalk.gray('Live session — full transcript not indexed here.');
-    const output = [formatHeader(safe, []), '', note].filter(Boolean).join('\n');
+    const metaBody = formatMetaOnlyBody(safe);
+    const output = [formatHeader(safe, []), '', note, metaBody].filter(Boolean).join('\n');
     previewCache.set(cacheKey, output);
     return output;
   }
@@ -128,17 +158,24 @@ function formatHeader(session: SessionMeta, events: SessionEvent[]): string {
   const totalMessages = session.messageCount ?? countMessages(events);
   const totalTokens = session.tokenCount;
 
-  // Line 1: Agent v version · model · account
+  // Line 1: Agent v version · shortId · model · account
   const line1: string[] = [];
   line1.push(chalk.gray(`${displayAgent(session.agent)}${session.version ? ` v${session.version}` : ''}`));
+  if (session.shortId) line1.push(chalk.dim(session.shortId));
   if (model) line1.push(chalk.bold.white(model));
   if (session.account) line1.push(chalk.gray(session.account));
 
-  // Line 2: cwd · branch · started X ago · lasted Y
+  // Line 2: cwd · project · branch · started X ago · lasted Y
+  // Project is clickable: Linear issue URL is for tickets (line 4); for the
+  // project name prefer a GitHub repo URL derived from the checkout path.
   const line2: string[] = [];
   if (session.cwd) {
     const label = relativeToCwd(session.cwd);
     line2.push(chalk.bold.white(linkPath(session.cwd, label)));
+  }
+  if (session.project) {
+    const repoUrl = githubRepoUrlFromCwd(session.cwd);
+    line2.push(chalk.cyan(repoUrl ? linkUrl(repoUrl, session.project) : session.project));
   }
   if (session.gitBranch) line2.push(chalk.cyan(session.gitBranch));
   if (startedAgo) line2.push(chalk.gray('started ') + chalk.white(startedAgo + ' ago'));
@@ -153,7 +190,8 @@ function formatHeader(session: SessionMeta, events: SessionEvent[]): string {
     line3.push(chalk.bold.white(formatTokens(totalTokens)) + chalk.gray(' tokens'));
   }
   if (session.label) line3.push(chalk.white(session.label));
-  line3.push(chalk.gray(linkPath(session.filePath, session.id)));
+  if (session.filePath) line3.push(chalk.gray(linkPath(session.filePath, session.id)));
+  else line3.push(chalk.gray(session.id));
 
   // Line 4: ticket + PR — clickable when a URL is resolvable (OSC 8 hyperlink),
   // plain text otherwise. Only rendered when the session carries either.
@@ -173,6 +211,24 @@ function formatHeader(session: SessionMeta, events: SessionEvent[]): string {
     line3.join(DOT),
     ...(line4.length ? [line4.join(DOT)] : []),
   ].join('\n');
+}
+
+/**
+ * Body lines available from SessionMeta alone (no transcript parse) — used for
+ * remote / unindexed sessions so checklist progress still surfaces when the
+ * parser teammate (or a prior scan) has populated `session.todos`.
+ */
+function formatMetaOnlyBody(session: SessionMeta): string {
+  const lines: string[] = [];
+  if (session.topic) {
+    lines.push(chalk.cyan('Prompt: ') + chalk.white(truncate(session.topic.trim(), (process.stdout.columns || 80) - 12)));
+  }
+  const compact = formatTodoCompact(session.todos);
+  if (compact) {
+    lines.push(chalk.cyan('Todos: ') + chalk.white(compact));
+  }
+  if (lines.length === 0) return '';
+  return lines.map(l => '  ' + l).join('\n');
 }
 
 function extractModel(events: SessionEvent[]): string | undefined {
@@ -234,12 +290,10 @@ function stripTags(text: string): string {
 const LAST_RESPONSE_MAX_LINES = 15;
 const LAST_RESPONSE_MAX_LINES_WITH_TODOS = 8;
 const TODOS_MAX_ITEMS = 5;
+const DIRS_TOUCHED_MAX = 5;
 
-interface TodoItem {
-  content?: string;
-  text?: string;
-  status?: string;
-}
+/** Optional dirs-touched field the parser teammate may attach; we prefer it. */
+type SessionMetaWithDirs = SessionMeta & { dirsTouched?: string[] };
 
 function formatCompactPreview(events: ReturnType<typeof parseSession>, session: SessionMeta): string {
   let firstUser = '';
@@ -248,7 +302,8 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
   const toolCounts: Record<string, number> = {};
   let toolCalls = 0;
   let planFile = '';
-  let latestTodos: TodoItem[] | null = null;
+  /** Latest checklist from the transcript (Claude TodoWrite / Codex update_plan). */
+  let latestTodos: TodoProgress | undefined;
 
   for (const event of events) {
     if (event.type === 'message') {
@@ -269,13 +324,20 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
       if (!planFile && p && /\/plans\/[^/]+\.md$/.test(p)) {
         planFile = p;
       }
-      if (tool === 'TodoWrite' && Array.isArray(event.args?.todos)) {
-        latestTodos = event.args.todos as TodoItem[];
+      // Claude TodoWrite (`todos`) and Codex update_plan (`plan`) — same source as
+      // extractTodoProgress in the state engine. Prefer the most recent write.
+      if (tool === 'TodoWrite' || tool === 'update_plan') {
+        const progress = extractTodoProgress(event.args);
+        if (progress) latestTodos = progress;
       }
       if (tool) toolCounts[tool] = (toolCounts[tool] ?? 0) + 1;
       toolCalls++;
     }
   }
+
+  // Prefer SessionMeta.todos when the scan/state engine already attached it
+  // (remote fan-out, single-session path); else the transcript-derived list.
+  const todos: TodoProgress | undefined = session.todos ?? latestTodos;
 
   // Digest signals folded into the preview: change lifecycle, tool mix, tests.
   const changes = classifyFileChanges(events);
@@ -284,11 +346,31 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
   const lines: string[] = [];
   const termWidth = process.stdout.columns || 80;
 
+  // Originating user prompt (first non-system user turn).
   if (firstUser) {
     const first = extractSessionTopic(firstUser) || cleanSessionPrompt(firstUser).split('\n').find(l => l.trim()) || '';
     if (first) {
       lines.push(chalk.cyan('Prompt: ') + chalk.white(truncate(first.trim(), termWidth - 12)));
     }
+  } else if (session.topic) {
+    lines.push(chalk.cyan('Prompt: ') + chalk.white(truncate(session.topic.trim(), termWidth - 12)));
+  }
+
+  // Compact checklist: ✓done/total · current step (RUSH-2045).
+  const compact = formatTodoCompact(todos);
+  if (compact) {
+    lines.push(chalk.cyan('Todos: ') + chalk.white(compact));
+  }
+  const todosRendered = todos?.items?.length ? renderTodos(todos.items, termWidth) : [];
+  if (todosRendered.length > 0) {
+    for (const l of todosRendered) lines.push('  ' + l);
+  }
+
+  // Recent activity = directories touched (not raw tool calls). Prefer a
+  // parser-supplied dirsTouched when present; else derive from event paths.
+  const dirs = directoriesTouched(session as SessionMetaWithDirs, events, changes);
+  if (dirs.length) {
+    lines.push(chalk.cyan('Dirs:    ') + chalk.white(dirs.join(chalk.gray(' · '))));
   }
 
   const activity: string[] = [];
@@ -329,14 +411,8 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
     lines.push(chalk.cyan('Plan: ') + chalk.white(linkPath(planFile, basename)));
   }
 
-  const todosRendered = latestTodos ? renderTodos(latestTodos, termWidth) : [];
-  if (todosRendered.length > 0) {
-    lines.push(chalk.cyan('Todos:'));
-    for (const l of todosRendered) lines.push('  ' + l);
-  }
-
   if (lastAssistant) {
-    const maxLines = todosRendered.length > 0 ? LAST_RESPONSE_MAX_LINES_WITH_TODOS : LAST_RESPONSE_MAX_LINES;
+    const maxLines = todosRendered.length > 0 || compact ? LAST_RESPONSE_MAX_LINES_WITH_TODOS : LAST_RESPONSE_MAX_LINES;
     const rendered = renderLastResponse(lastAssistant, maxLines);
     if (rendered.length > 0) {
       lines.push('');
@@ -350,6 +426,63 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
   }
 
   return lines.map(l => '  ' + l).join('\n');
+}
+
+/**
+ * Unique directories the session touched, compact and human-readable.
+ * Prefer `session.dirsTouched` when the parser teammate has populated it;
+ * otherwise derive from file-change + tool paths already available here.
+ */
+function directoriesTouched(
+  session: SessionMetaWithDirs,
+  events: SessionEvent[],
+  changes: ReturnType<typeof classifyFileChanges>,
+): string[] {
+  const fromMeta = session.dirsTouched;
+  if (Array.isArray(fromMeta) && fromMeta.length > 0) {
+    return fromMeta
+      .map((d) => sanitizeForTerminal(String(d).trim()))
+      .filter(Boolean)
+      .slice(0, DIRS_TOUCHED_MAX);
+  }
+
+  const counts = new Map<string, number>();
+  const bump = (raw: string) => {
+    const dir = relativizeDir(raw, session.cwd);
+    if (!dir) return;
+    counts.set(dir, (counts.get(dir) ?? 0) + 1);
+  };
+  for (const ch of changes) bump(ch.path);
+  for (const event of events) {
+    if (event.type !== 'tool_use' || event._local) continue;
+    const p = event.path || event.args?.file_path || event.args?.path || '';
+    if (p) bump(p);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([d]) => d)
+    .slice(0, DIRS_TOUCHED_MAX);
+}
+
+/** Relativize a file path to its parent dir, short enough for one preview line. */
+function relativizeDir(filePath: string, cwd?: string): string | undefined {
+  const norm = filePath.replace(/\\/g, '/');
+  if (!norm || norm.includes('node_modules') || norm.includes('/.git/') || norm.includes('/plans/')) {
+    return undefined;
+  }
+  let dir = path.posix.dirname(norm);
+  if (cwd) {
+    const base = cwd.replace(/\\/g, '/').replace(/\/$/, '');
+    if (dir === base) return '.';
+    if (dir.startsWith(base + '/')) dir = dir.slice(base.length + 1);
+  }
+  // Collapse home prefix.
+  const home = (process.env.HOME || '').replace(/\\/g, '/');
+  if (home && dir.startsWith(home + '/')) dir = '~' + dir.slice(home.length);
+  // Drop ultra-deep absolute noise; keep last 3 segments.
+  const parts = dir.split('/').filter(Boolean);
+  if (parts.length > 3 && dir.startsWith('/')) dir = parts.slice(-3).join('/');
+  return dir || undefined;
 }
 
 function renderLastResponse(content: string, maxLines: number = LAST_RESPONSE_MAX_LINES): string[] {
@@ -375,7 +508,7 @@ function renderLastResponse(content: string, maxLines: number = LAST_RESPONSE_MA
   return shown;
 }
 
-function renderTodos(todos: TodoItem[], termWidth: number): string[] {
+function renderTodos(todos: Array<{ content?: string; text?: string; status?: string }>, termWidth: number): string[] {
   const out: string[] = [];
   const shown = todos.slice(0, TODOS_MAX_ITEMS);
   // Outer body indent (2) + inner '  ' (2) + marker (3) + space (1) = 8

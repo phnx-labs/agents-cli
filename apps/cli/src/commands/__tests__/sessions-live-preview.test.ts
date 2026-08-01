@@ -75,4 +75,36 @@ describe('liveGlyphAndPreview', () => {
     expect(liveGlyphAndPreview(mk({ status: 'running', label: 'my-task' })).preview).toBe('my-task');
     expect(liveGlyphAndPreview(mk({ status: 'running', topic: 'first prompt' })).preview).toBe('first prompt');
   });
+
+  it('prepends compact checklist progress when ActiveSession.todos is set (RUSH-2045)', () => {
+    const todos = {
+      items: [
+        { content: 'a', status: 'completed' as const },
+        { content: 'b', status: 'in_progress' as const, activeForm: 'A5 wiring runner' },
+      ],
+      done: 1,
+      total: 2,
+      activeForm: 'A5 wiring runner',
+    };
+    // Interactive / headless terminal row.
+    expect(
+      liveGlyphAndPreview(mk({ status: 'running', preview: 'editing sessions.ts', todos })).preview,
+    ).toBe('✓1/2 · A5 wiring runner · editing sessions.ts');
+    // Teams-spawned session: team name + todos + preview.
+    expect(
+      liveGlyphAndPreview(
+        mk({
+          context: 'teams',
+          teamName: 'checklists',
+          status: 'running',
+          preview: 'wiring runner',
+          todos,
+        }),
+      ).preview,
+    ).toBe('checklists · ✓1/2 · A5 wiring runner · wiring runner');
+    // No live preview: todos alone still surface.
+    expect(liveGlyphAndPreview(mk({ status: 'running', todos })).preview).toBe(
+      '✓1/2 · A5 wiring runner',
+    );
+  });
 });

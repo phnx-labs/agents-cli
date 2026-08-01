@@ -152,6 +152,14 @@ computed by the state engine from the most recent `TodoWrite` (Claude) or
 of any `--include` filter. Absent when the session wrote no checklist. (It is
 detail-output only — the listing `--json` above does not compute it per row.)
 
+List and preview surfaces still show that progress when it is available on the
+row (live `--active` from the state engine, or `SessionMeta.todos` / transcript
+parse in the picker): compact `✓done/total · current step` in the picker
+preview (`Todos:` line), the flat listing's `doing` cell, and `--active` /
+cross-machine rows (interactive, headless, teams, and sub-agent sessions share
+the same path). The picker preview also shows the originating user prompt and a
+`Dirs:` line of directories touched.
+
 ```json
 {
   "session": {
