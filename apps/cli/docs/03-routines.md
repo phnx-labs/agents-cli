@@ -15,17 +15,77 @@ Scheduled agent execution with sandboxed permissions and scheduler-driven cron e
 
 Each job is a YAML file in `~/.agents/routines/`. A background scheduler parses cron expressions with [croner](https://github.com/hucsm/croner), spawns agent processes at trigger time, and captures output.
 
-### Project routines (inspection-only)
+### Project routines (opt-in daemon firing)
 
 `agents routines list` and `agents routines view <name>` also discover routines in `<project>/.agents/routines/` when invoked from inside a project — project routines shadow user routines of the same name in those views.
 
-Execution paths are intentionally **not** project-aware:
+**Daemon firing is opt-in.** A cloned public repo's `.agents/routines/*.yml` never auto-executes. To schedule project routines:
 
-- `agents routines run <name>` only resolves user routines. A project routine spawns a full agent session with a YAML-supplied prompt, so honoring the project layer would let a cloned public repo prompt-inject the user's next Claude session via `.agents/routines/<name>.yml`.
-- `add`, `edit`, `remove`, `pause`, `resume` are mutation surfaces and stay on the user layer.
-- The background scheduler (which runs from `$HOME`) only loads user routines.
+```bash
+# From inside the project (or pass the path). Confirms interactively unless --yes.
+agents routines enable-project
+agents routines enable-project /path/to/repo --yes
 
-If you want to run a project routine, copy the YAML body into `~/.agents/routines/<name>.yml` first; that materializes consent.
+# Refresh user-layer copies after editing project YAML
+agents routines sync
+agents routines sync /path/to/repo
+
+# See which projects are on the allowlist
+agents routines projects
+
+# Reverse
+agents routines disable-project --remove-synced
+```
+
+What happens on enable/sync:
+
+1. The project root is recorded in `~/.agents/agents.yaml` under `routines.projects`.
+2. Each `.agents/routines/*.yml` is materialised into `~/.agents/routines/<name>.yml` with a `source:` block (`kind: project`, `projectPath`, and git `repo`/`branch`/`commit` when known).
+3. The daemon (which only loads user + system layers) can now fire them. Reload (`SIGHUP` / `agents routines` mutations) re-syncs opted-in projects automatically.
+4. Hand-authored user routines of the same name are never overwritten.
+
+`agents routines list` shows the source repo (and `@branch` when known) in the Repo column for project-sourced routines; `--json` includes `source`, `sourceRepo`, `sourceBranch`, and `hostStrategy`.
+
+A project may also declare `routines: { enable: true }` in its own `agents.yaml` as a documentation signal; daemon firing still requires the explicit `enable-project` allowlist step so consent is materialised into the user layer.
+
+### Host placement strategy
+
+Where the **job body** runs when the daemon fires it (`devices` still controls which daemon may *fire*):
+
+| Strategy | YAML | CLI | Behaviour |
+| --- | --- | --- | --- |
+| `local` | `hostStrategy: local` (default) | `--placement local` | Run on the firing machine |
+| `host` | `hostStrategy: host` + `host: <name>` | `--placement host --run-on <name>` | Run on a named machine over SSH |
+| `fleet` | `hostStrategy: fleet` | `--placement fleet` | Pick one online registered device per run |
+| `cloud` | `hostStrategy: cloud` | `--placement cloud` | Dispatch via the agent's native cloud provider |
+
+```bash
+# Pin firing to this machine and place the body on a GPU box
+agents routines add train --schedule "0 2 * * *" --agent claude \
+  --placement host --run-on gpu-box --prompt "Train overnight"
+
+# Fire once from this machine; each run picks any online fleet device
+agents routines add drain --schedule "0 3 * * *" --agent claude \
+  --placement fleet --prompt "Drain the local work queue"
+
+# Dispatch to Rush Cloud / the agent's native cloud
+agents routines add review --schedule "0 9 * * 1" --agent claude \
+  --placement cloud --repo phnx-labs/agents-cli --prompt "Review open PRs"
+```
+
+```yaml
+# ~/.agents/routines/drain.yml
+name: drain
+schedule: "0 3 * * *"
+agent: claude
+hostStrategy: fleet
+devices: [yosemite-s0]   # firing pin — only this daemon fires (avoids double-fire)
+prompt: "Drain the local work queue"
+```
+
+**Double-fire guard.** `host` / `fleet` / `cloud` without a `devices` pin would let every fleet daemon fire and each dispatch once. Add and sync auto-pin `devices` to this machine when you omit `--devices`. Bare `host:` (without `hostStrategy`) still works and implies `host` strategy.
+
+`--host` on `agents routines` is the remote-management passthrough ("manage routines **on** that machine") — do not overload it for placement. Use `--placement` / `--run-on`.
 
 ### Ending a recurring routine
 
@@ -50,9 +110,16 @@ effort: default               # fast, default, or detailed
 timeout: 10m
 runOnce: false                # true for one-shot jobs (--at)
 endAt: "2026-12-31T23:59:00Z" # optional: auto-disable on/after this time
+hostStrategy: local           # local | host | fleet | cloud (see Host placement strategy)
 devices:                      # optional: allowlist — each listed device fires independently
   - yosemite-s0               # omit entirely (or --clear) for unrestricted
   - mac-mini
+# source:                     # set by `agents routines enable-project` / sync
+#   kind: project
+#   projectPath: /path/to/repo
+#   repo: owner/name
+#   branch: main
+#   commit: abc1234
 
 prompt: |
   Review open PRs and summarize status.

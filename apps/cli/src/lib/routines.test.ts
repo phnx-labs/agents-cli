@@ -463,20 +463,20 @@ describe('validateJob — host placement', () => {
 
   it('rejects host + workflow (bundle lives on the firing machine)', () => {
     const errors = validateJob(baseJob({ host: 'gpu-box', workflow: 'autodev', agent: undefined }));
-    expect(errors).toContainEqual(expect.stringContaining("host: can't be combined with workflow:"));
+    expect(errors.some((e) => e.includes('host placement') && e.includes('workflow'))).toBe(true);
   });
 
   it('rejects host + loop (driver + signal files live on the firing machine)', () => {
     const errors = validateJob(baseJob({ host: 'gpu-box', loop: { maxIterations: 2 } as JobConfig['loop'] }));
-    expect(errors).toContainEqual(expect.stringContaining("host: can't be combined with loop:"));
+    expect(errors.some((e) => e.includes('host placement') && e.includes('loop'))).toBe(true);
   });
 
   it('rejects host + command (shell command has no agent to place remotely)', () => {
     const errors = validateJob({ name: 'cmd-on-host', schedule: '0 3 * * *', command: 'echo hi', host: 'gpu-box', mode: 'auto', effort: 'auto', timeout: '10m', enabled: true, prompt: '' } as JobConfig);
-    expect(errors).toContainEqual(expect.stringContaining("host: can't be combined with command:"));
+    expect(errors.some((e) => e.includes('host placement') && e.includes('command'))).toBe(true);
   });
 
-  it('rejects remoteCwd without host', () => {
+  it('rejects remoteCwd without host/fleet placement', () => {
     expect(validateJob(baseJob({ remoteCwd: '~/proj' }))).toContainEqual(expect.stringContaining('remoteCwd only applies'));
   });
 });
