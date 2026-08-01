@@ -2367,12 +2367,16 @@ export function resolveSessionQuery(pool: SessionMeta[], query: string): Session
   const byIdMatches = resolveSessionById(pool, normalized);
   if (byIdMatches.length > 0) return { matches: byIdMatches, byId: true, completeId };
 
-  if (completeId) {
-    // The pool is only what discoverSessions walked — a minority of the index
-    // (measured: 2,798 of 7,614 rows), because it re-reads live agent homes and
-    // skips whole classes of indexed session. Declaring absence from the pool
-    // alone denied 1,315 sessions whose transcript is on this disk right now.
-    // Ask the index itself, the same authoritative lookup `fork` and `exec` use.
+  if (looksLikeSessionId(normalized)) {
+    // Any id-shaped query — a complete id OR a bare hex short-id/prefix —
+    // resolves by id ONLY, never by content. The pool is a minority of the
+    // index (measured: 2,798 of 7,614 rows) because it re-reads live agent homes
+    // and skips whole classes of indexed session, so a pool miss isn't absence:
+    // ask the index directly, the same authoritative lookup `fork` and `exec`
+    // use. And an id that resolves to nothing must report "no session with that
+    // id" — NOT fall back to fuzzy content search. A short id like "d3470b57"
+    // otherwise surfaces every transcript that merely MENTIONS the string (a
+    // resume prompt echoes the parent id into the body of many later sessions).
     return { matches: findSessionsById(normalized), byId: true, completeId };
   }
   return { matches: filterSessionsByQuery(pool, normalized), byId: false, completeId };
