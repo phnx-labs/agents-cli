@@ -8,4 +8,10 @@
   patch-level path forward and a minor bump as the only escape. A new `patch-from-main`
   case accepts the version one patch above `package.json` when main is ahead of the
   registry; it grants no bypass, and the release still earns its own release PR, full
-  cross-platform matrix, merge, tag, and publish. Source: `apps/cli/scripts/release.sh`.
+  cross-platform matrix, merge, tag, and publish. The decision moved out of `release.sh`
+  into `scripts/validate-bump.sh` so it can be tested directly — `release.sh` itself
+  cannot be run in a test, since it demands a clean main plus npm and gh auth long before
+  it reaches the bump decision, which is why this arithmetic had no coverage at all. The
+  rejection message now also lists the main-ahead options only when main really is ahead,
+  instead of advising a version the script would then refuse. Source:
+  `apps/cli/scripts/validate-bump.sh`, `apps/cli/scripts/release.sh`.

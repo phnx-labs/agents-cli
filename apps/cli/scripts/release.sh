@@ -167,70 +167,15 @@ parse_v() { echo "$1" | tr '.' ' '; }
 read -r CMAJ CMIN CPAT <<< "$(parse_v "$PHNX_LATEST")"
 read -r TMAJ TMIN TPAT <<< "$(parse_v "$TARGET")"
 
-# Strict single-step bump from $PHNX_LATEST, OR equal to $PHNX_LATEST when the
-# shim is still behind (shim catch-up rerun after a partial publish), OR equal
-# to package.json on main when several patch commits accumulated without ever
-# being published (phnx catch-up — main is ahead of registry).
-is_valid_bump=false
-read -r SMAJ SMIN SPAT <<< "$(parse_v "$SWARMIFY_LATEST")"
+# Which kind of bump is this? The arithmetic lives in scripts/validate-bump.sh
+# so it can be tested directly (scripts/validate-bump.test.ts) — reaching it
+# here requires a clean main, npm auth and gh auth first. It prints the bump
+# kind, or the accepted versions to stderr and exits 1.
 PKG_JSON_VERSION="$(jq -r .version package.json)"
-read -r PMAJ PMIN PPAT <<< "$(parse_v "$PKG_JSON_VERSION")"
-if [[ $TMAJ -eq $CMAJ && $TMIN -eq $CMIN && $TPAT -eq $((CPAT + 1)) ]]; then
-  BUMP="patch"
-  is_valid_bump=true
-elif [[ $TMAJ -eq $CMAJ && $TMIN -eq $((CMIN + 1)) && $TPAT -eq 0 ]]; then
-  BUMP="minor"
-  is_valid_bump=true
-elif [[ $TMAJ -eq $((CMAJ + 1)) && $TMIN -eq 0 && $TPAT -eq 0 ]]; then
-  BUMP="major"
-  is_valid_bump=true
-elif [[ "$TARGET" == "$PHNX_LATEST" ]] && \
-     { [[ $TMAJ -gt $SMAJ ]] || \
-       { [[ $TMAJ -eq $SMAJ ]] && [[ $TMIN -gt $SMIN ]]; } || \
-       { [[ $TMAJ -eq $SMAJ ]] && [[ $TMIN -eq $SMIN ]] && [[ $TPAT -gt $SPAT ]]; }; }; then
-  BUMP="shim-catchup"
-  is_valid_bump=true
-elif [[ "$TARGET" == "$PKG_JSON_VERSION" ]] && \
-     { [[ $TMAJ -gt $CMAJ ]] || \
-       { [[ $TMAJ -eq $CMAJ ]] && [[ $TMIN -gt $CMIN ]]; } || \
-       { [[ $TMAJ -eq $CMAJ ]] && [[ $TMIN -eq $CMIN ]] && [[ $TPAT -gt $CPAT ]]; }; }; then
-  # Catch-up: main has accumulated unpublished patch commits (chore(release):
-  # N bumps that never reached the registry). Publish what main says.
-  BUMP="phnx-catchup"
-  is_valid_bump=true
-elif [[ $TMAJ -eq $PMAJ && $TMIN -eq $PMIN && $TPAT -eq $((PPAT + 1)) ]] && \
-     { [[ $PMAJ -gt $CMAJ ]] || \
-       { [[ $PMAJ -eq $CMAJ ]] && [[ $PMIN -gt $CMIN ]]; } || \
-       { [[ $PMAJ -eq $CMAJ ]] && [[ $PMIN -eq $CMIN ]] && [[ $PPAT -gt $CPAT ]]; }; }; then
-  # The next patch AFTER an unpublishable main. When main is ahead of the
-  # registry but its version can no longer be published — the catch-up guard
-  # below refuses a merged release PR whose squash pulled in concurrent main
-  # commits, so the tree that would ship is not the tree CI tested — the only
-  # correct move is to cut a fresh release from main and let it earn its own
-  # full-matrix run. That is what this script's own refusal message advises
-  # ("cut the next patch through the normal release PR flow"), and until now
-  # the validator rejected it: patch+1 is measured from the REGISTRY, so with
-  # main at 1.20.75 and npm at 1.20.74, 1.20.76 read as a skipped version and
-  # 1.20.75 was blocked — leaving no patch-level path forward at all.
-  #
-  # Deliberately NOT a bypass: the catch-up guard still owns the case where
-  # main's own version is publishable. This only opens the strictly-newer patch,
-  # which then runs the ordinary bump -> release PR -> full matrix -> merge ->
-  # tag -> publish flow against the exact tree being shipped.
-  BUMP="patch-from-main"
-  is_valid_bump=true
-fi
-
-if ! $is_valid_bump; then
-  red "invalid bump: $PHNX_LATEST -> $TARGET"
-  red "expected one of:"
-  red "  $((CMAJ)).$((CMIN)).$((CPAT + 1))   (patch)"
-  red "  $((CMAJ)).$((CMIN + 1)).0   (minor)"
-  red "  $((CMAJ + 1)).0.0   (major)"
-  red "  $PKG_JSON_VERSION              (phnx-catchup: package.json is ahead of registry)"
-  red "  $((PMAJ)).$((PMIN)).$((PPAT + 1))   (patch-from-main: the next patch after an unpublishable main)"
+if ! BUMP="$(scripts/validate-bump.sh "$PHNX_LATEST" "$PKG_JSON_VERSION" "$SWARMIFY_LATEST" "$TARGET")"; then
   exit 1
 fi
+read -r SMAJ SMIN SPAT <<< "$(parse_v "$SWARMIFY_LATEST")"
 
 # Target must also be strictly newer than @companion latest (rare edge case),
 # unless this is a shim-catchup where target == phnx_latest and shim is behind.
