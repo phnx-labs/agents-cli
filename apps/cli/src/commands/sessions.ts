@@ -52,7 +52,7 @@ import { registerFocusCommand } from './focus.js';
 import { registerSessionsInjectCommand } from './sessions-inject.js';
 import { registerSessionsExportCommand } from './sessions-export.js';
 import { registerSessionsImportCommand } from './sessions-import.js';
-import { registerSessionsMigrateCommand } from './sessions-migrate.js';
+import { registerSessionsMigrateCommand, registerSessionsMigrationsCommand } from './sessions-migrate.js';
 import { runBrowserSessions } from '../lib/browser/sessions-list.js';
 
 const SESSION_AGENT_FILTER_HELP = `Filter by agent, e.g. claude, codex, claude@2.0.65`;
@@ -2647,6 +2647,7 @@ export function registerSessionsCommands(program: Command): void {
   registerSessionsExportCommand(sessionsCmd);
   registerSessionsImportCommand(sessionsCmd);
   registerSessionsMigrateCommand(sessionsCmd);
+  registerSessionsMigrationsCommand(sessionsCmd);
 }
 
 function formatNoSessionsMessage(

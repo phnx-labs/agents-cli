@@ -13,14 +13,19 @@
   machine/source, ranked by platform-match, warm-worker-over-fresh-box, then live headroom),
   `--host <name>` names a target, and `--lease` provisions a fresh box. It wraps up a dirty
   working tree into a draft WIP PR (or, with `--agent-wrapup`, delegates that to the running
-  agent), ships the transcript over the same `sessions export --stdout | sessions import -`
-  pipeline, resumes on the target via the same `sessions resume --host` path, and only then
-  kills the source (`--keep` copies instead of moving). `--mode resume|rehydrate` picks a
-  faithful `--resume` vs a fresh agent reading the transcript; the non-resumable agents
-  (gemini, antigravity, openclaw, rush, hermes, grok, kimi, droid) transparently fall to
-  `rehydrate` — never a silent skip. Invariant: the source is never stopped before the
-  transcript + branch are confirmed on the target. Source:
-  `apps/cli/src/commands/sessions-migrate.ts`, `apps/cli/src/lib/session/migrate-targets.ts`,
+  agent), ships the transcript to the target's live agent dir (same path under the shared
+  `$HOME`), resumes on the target in a detached tmux session, confirms the pane is live, and
+  only then kills the source (`--keep` copies instead of moving). `--mode rehydrate` (default)
+  starts the target agent with a prompt to read the transported session via `agents sessions
+  <id>` (its own `--last`/`--include` judgment so long tool output can't blow context) and
+  continue — robust across every harness; `--mode resume` attempts a best-effort native
+  `<agent> --resume` and falls back to rehydrate when the target can't register the session.
+  Every migrate is recorded in an append-only ledger at `~/.agents/.history/migrations.jsonl`,
+  viewable with **`agents sessions migrations`** (the border tracker: `from → to`, mode,
+  move-vs-copy, status; a session that hops A→B→C leaves its full lineage). Invariant: the
+  source is never stopped before the transcript is on the target and its session is confirmed
+  live. Source: `apps/cli/src/commands/sessions-migrate.ts`,
+  `apps/cli/src/lib/session/migrate-targets.ts`, `apps/cli/src/lib/session/migrations.ts`,
   `apps/cli/src/commands/sessions.ts`, `apps/cli/docs/05-sessions.md`.
 
 - **The configured model now shows wherever an agent is displayed.** `agents view`,

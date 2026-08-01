@@ -24,6 +24,7 @@
  */
 import * as os from 'os';
 import * as fs from 'fs';
+import * as path from 'path';
 import chalk from 'chalk';
 import simpleGit from 'simple-git';
 import type { Command } from 'commander';
@@ -34,9 +35,10 @@ import type { ActiveSession } from '../lib/session/active.js';
 import { getActiveSessions } from '../lib/session/active.js';
 import { discoverSessions, resolveSessionById } from '../lib/session/discover.js';
 import { buildResumeCommand } from './sessions.js';
-import { openSurfaces } from '../lib/terminal/index.js';
 import { injectTargetFromReplyRail } from '../lib/session/inject.js';
 import { injectIntoTerminal } from '../lib/terminal/index.js';
+import { iLoginShell } from '../lib/terminal/shell.js';
+import { shellQuote as quoteArg } from '../lib/terminal/quote.js';
 import { killSession } from '../lib/tmux/session.js';
 
 import { listAllHosts, resolveHost } from '../lib/hosts/registry.js';
@@ -65,6 +67,7 @@ import {
 import { itemPicker } from '../lib/picker.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { setHelpSections } from '../lib/help.js';
+import { recordMigration, readMigrations, type MigrationRecord } from '../lib/session/migrations.js';
 
 /** Agents whose sessions cannot be faithfully --resume'd (buildResumeCommand → null). */
 type MigrateMode = 'resume' | 'rehydrate';
@@ -86,7 +89,7 @@ export function registerSessionsMigrateCommand(sessionsCmd: Command): void {
     .option('--auto', 'Pick the best target host automatically (idle fleet worker preferred)')
     .option('--host <name>', 'Explicit target: an enrolled host, a device, or a warm ephemeral box slug')
     .option('--lease', 'Provision a fresh ephemeral crabbox box as the target')
-    .option('--mode <mode>', 'resume (faithful --resume) or rehydrate (fresh agent reads the transcript)', 'resume')
+    .option('--mode <mode>', 'rehydrate (default: the target agent reads the transported transcript) or resume (best-effort native --resume)', 'rehydrate')
     .option('--keep', 'Copy, not move — do NOT stop the source after resuming on the target')
     .option('--agent-wrapup', 'Delegate the dirty-tree wrap-up to the running agent instead of a mechanical WIP-PR');
 
@@ -106,16 +109,27 @@ export function registerSessionsMigrateCommand(sessionsCmd: Command): void {
     `,
     notes: `
       - Without a [session-id], migrate resolves the session running in THIS tmux pane ($TMUX_PANE).
-      - The source is stopped only AFTER the target's prompt is confirmed live; --keep skips the stop.
-      - Non-resumable agents (gemini, antigravity, openclaw, rush, hermes, grok, kimi, droid) cannot be
-        faithfully --resume'd, so migrate uses --mode rehydrate for them and says so.
-      - Transport reuses the same bundle pipeline as 'sessions export --stdout | sessions import -', over SSH.
-      - Resume reuses the same host path as 'sessions resume --host' (tmux backend).
+      - Default --mode rehydrate: the transcript is shipped to the target and the agent reads it there
+        with 'agents sessions <id>' (its own judgment on --last/--include so long tool output can't
+        blow context), then continues. Robust across every harness.
+      - --mode resume attempts a native '<agent> --resume' on the target — faithful, but best-effort:
+        the target agent must have the session registered, so migrate falls back to rehydrate when it can't.
+      - The source is stopped only AFTER the target's session is confirmed live; --keep skips the stop (copy).
+      - Every migrate appends to the ledger — see 'agents sessions migrations' for where each session went.
     `,
   });
 
-  cmd.action(async (sessionId: string | undefined, options: MigrateOptions) => {
-    await sessionsMigrateAction(sessionId, options);
+  cmd.action(async (sessionId: string | undefined, options: MigrateOptions, command: Command) => {
+    // commander 15: the parent `sessions` command owns a global `-H, --host` (the
+    // listing fan-out), which shadows this subcommand's own --host — the value
+    // lands in the merged globals, not `options.host`. Read it from there so
+    // `agents sessions migrate --host <name>` binds.
+    const globals = command.optsWithGlobals() as { host?: string[] | string };
+    const hosts = Array.isArray(globals.host) ? globals.host : globals.host ? [globals.host] : [];
+    if (hosts.length > 1) {
+      console.error(chalk.yellow(`Multiple --host values given; migrating to the first (${hosts[0]}).`));
+    }
+    await sessionsMigrateAction(sessionId, { ...options, host: hosts[0] });
   });
 }
 
@@ -410,28 +424,29 @@ async function delegateWrapupToAgent(source: SessionMeta, active: ActiveSession 
 }
 
 /**
- * Ship the transcript to the target with the SAME bundle pipeline as
- * `sessions export --stdout | sessions import -`: export the one session's bundle
- * locally, pipe it into `agents sessions import -` on the target over SSH.
+ * Ship the transcript to the target so `<agent> --resume` can find it there.
+ *
+ * The live transcript (`SessionMeta.filePath`) is copied to the SAME absolute
+ * path on the target: claude/codex/opencode resolve a resumable session by the
+ * cwd-derived project dir under $HOME, which is identical across the shared fleet
+ * home, so a same-path copy is exactly what `--resume` reads. (`sessions import`
+ * deliberately lands bundles in the browsable history mirror, not the agent's
+ * live dir — right for reading a transcript on another box, wrong for resuming
+ * it.) Reuses the same `sshExec` transport, streaming the file over stdin.
  */
-function shipTranscript(sshTarget: string, source: SessionMeta, remoteOs?: string): void {
-  const local = spawnSync(
-    process.execPath,
-    [process.argv[1], 'sessions', 'export', source.id, '--stdout'],
-    { encoding: 'utf-8', maxBuffer: 256 * 1024 * 1024 },
-  );
-  if (local.status !== 0 || !local.stdout) {
-    fail(`Failed to export the transcript locally: ${(local.stderr || '').trim().split('\n').pop() || 'export error'}`);
+function shipTranscript(sshTarget: string, source: SessionMeta): void {
+  const file = source.filePath;
+  if (!file || !fs.existsSync(file)) {
+    fail(`Cannot locate the local transcript for ${source.shortId} to ship (${file ?? 'no path'}).`);
   }
-  const importCmd =
-    remoteOs && remoteOs.toLowerCase().includes('win')
-      ? 'agents sessions import -'
-      : `bash -lc ${shellQuote('agents sessions import -')}`;
-  const res = sshExec(sshTarget, importCmd, { input: local.stdout, timeoutMs: 120000 });
+  const content = fs.readFileSync(file, 'utf8');
+  const parent = path.dirname(file);
+  const remoteCmd = `mkdir -p ${shellQuote(parent)} && cat > ${shellQuote(file)}`;
+  const res = sshExec(sshTarget, remoteCmd, { input: content, timeoutMs: 120000 });
   if (res.code !== 0) {
-    fail(`Failed to import the transcript on ${sshTarget}: ${res.stderr.trim().split('\n').pop() || 'import error'}`);
+    fail(`Failed to ship the transcript to ${sshTarget}: ${res.stderr.trim().split('\n').pop() || `ssh exited ${res.code}`}`);
   }
-  console.log(chalk.green('  Transcript shipped to the target.'));
+  console.log(chalk.green(`  Transcript shipped to the target (${file}).`));
 }
 
 /** Git-clone + checkout the (WIP) branch on an ephemeral box so the cwd resolves. */
@@ -467,17 +482,42 @@ async function resumeOnTarget(
   if (!command) {
     fail(`Cannot build a resume command for ${source.agent} (mode ${mode}).`);
   }
-  const cwd = remoteCwd ?? source.cwd ?? '~';
-  const results = await openSurfaces(
-    [{ cwd, command: command! }],
-    { backend: 'tmux', host: sshTarget, packing: 'tabs' },
-  );
-  const r = results[0];
-  if (!r || !r.ok) {
-    console.log(chalk.red(`  Resume on ${sshTarget} failed: ${r?.error ?? 'unknown'}`));
+  // Start a DETACHED tmux session on the target. The generic engine tmux backend
+  // uses `new-window`, which needs a live server — a fresh worker or ephemeral
+  // box has none ("no server running"), so we create the session (and thus the
+  // server) directly with `new-session -d`, mirroring the local `createSession`
+  // helper (remain-on-exit keeps the pane inspectable if the agent exits), over
+  // the same SSH transport as `sessions resume --host`.
+  //
+  // Each argv element is quoted BEFORE the zsh -ilc wrapper so a command that
+  // carries spaces or backticks (the rehydrate prompt) reaches the agent as one
+  // clean argument — an unquoted join would let the target shell split it and
+  // run its backticks.
+  const sessionName = `migrate-${source.shortId}`;
+  const inner = iLoginShell(`exec ${command!.map(quoteArg).join(' ')}`);
+  const argv = ['tmux', 'set-option', '-g', 'remain-on-exit', 'on', ';', 'new-session', '-d', '-s', sessionName];
+  const cwd = remoteCwd ?? source.cwd;
+  if (cwd && cwd !== '~') argv.push('-c', cwd);
+  argv.push(inner);
+  const launch = sshExec(sshTarget, argv.map(shellQuote).join(' '), { timeoutMs: 60000 });
+  if (launch.code !== 0) {
+    console.log(chalk.red(`  Resume on ${sshTarget} failed: ${launch.stderr.trim().split('\n').pop() || `tmux exited ${launch.code}`}`));
     return false;
   }
-  console.log(chalk.green(`  Resumed on the target (${command!.join(' ')}).`));
+  // Liveness gate for the invariant: give the agent a moment to boot, then require
+  // the pane to be ALIVE (not merely the session to exist) before the caller may
+  // stop the source. An agent that dies on launch → we refuse to move.
+  const q = shellQuote(sessionName);
+  const probe = `sleep 3; tmux has-session -t ${q} 2>/dev/null || exit 3; test "$(tmux list-panes -t ${q} -F '#{pane_dead}' 2>/dev/null | head -n1)" = 0 || exit 4`;
+  const check = sshExec(sshTarget, probe, { timeoutMs: 30000 });
+  if (check.code !== 0) {
+    const why = check.code === 4 ? 'the agent exited immediately on the target'
+      : check.code === 3 ? 'the session did not start'
+      : (check.stderr.trim().split('\n').pop() || `liveness probe exited ${check.code}`);
+    console.log(chalk.red(`  Resume on ${sshTarget} is not live: ${why}.`));
+    return false;
+  }
+  console.log(chalk.green(`  Resumed on the target in tmux session ${sessionName} (${command!.join(' ')}).`));
   return true;
 }
 
@@ -487,7 +527,14 @@ async function resumeOnTarget(
  * a prompt pointing it at the imported transcript path.
  */
 function rehydrateCommand(source: SessionMeta): string[] {
-  const prompt = `You are resuming a prior session (id ${source.id}). Read its transcript at the imported path under ~/.agents/.history and continue where it left off.`;
+  const origin = source.machine ? ` from ${source.machine}` : '';
+  const prompt = [
+    `You are continuing session ${source.shortId}, migrated to this machine${origin}.`,
+    `Its full transcript is here — read it with \`agents sessions ${source.shortId}\`.`,
+    `It supports --markdown, role filters (e.g. --include user,assistant), and --last N;`,
+    `use them so large tool outputs don't blow your context — skim the recent turns first,`,
+    `widen only if you need to, then continue the work where it left off.`,
+  ].join(' ');
   return [source.agent, prompt];
 }
 
@@ -510,8 +557,9 @@ async function sessionsMigrateAction(sessionId: string | undefined, options: Mig
   // 4. Wrap up the working dir (WIP PR by default, or delegate to the agent).
   const branch = await wrapUpWorkingTree(source, active, options);
 
-  // 5. Transport the transcript to the target (portable export/import over SSH).
-  shipTranscript(sshTarget, source, target.host?.os);
+  // 5. Transport the transcript to the target's live agent dir (same path) so
+  //    `<agent> --resume` finds it.
+  shipTranscript(sshTarget, source);
 
   // 6. For an ephemeral box, clone + checkout the branch so the cwd resolves.
   const remoteCwd =
@@ -519,19 +567,40 @@ async function sessionsMigrateAction(sessionId: string | undefined, options: Mig
 
   // 7. Resume on the target.
   const resumed = await resumeOnTarget(sshTarget, source, remoteCwd, mode);
+
+  // Ledger stub shared by the success and failure records (RUSH-1977). `at` is
+  // stamped from the CLI's real clock.
+  const base: Omit<MigrationRecord, 'status' | 'error'> = {
+    sessionId: source.id,
+    shortId: source.shortId,
+    agent: source.agent,
+    mode,
+    move: !options.keep,
+    from: { host: os.hostname(), cwd: source.cwd, pane: active?.provenance?.mux?.pane },
+    to: { host: target.name, cwd: remoteCwd, box: target.box?.slug },
+    branch,
+    at: new Date().toISOString(),
+  };
+
   if (!resumed) {
+    recordMigration({ ...base, status: 'failed', error: 'resume did not launch on the target' });
     fail('Resume on the target did not launch — the source is left running (nothing was stopped).');
   }
 
-  // 8. INVARIANT: only now that the transcript + branch are confirmed on the
-  //    target and the resume launched, stop the source. --keep skips this.
+  // 8. INVARIANT: only now that the transcript is on the target and the session
+  //    is confirmed live, stop the source. --keep skips this (copy, not move).
   if (options.keep) {
     console.log(chalk.gray('--keep: the source session is left running (copy, not move).'));
   } else {
     await stopSource(source, active);
   }
 
-  console.log(chalk.green(`\nMigrated ${source.shortId} to ${target.name}${options.keep ? ' (copy)' : ''}.`));
+  // 9. Record the handoff so the session stays trackable (agents sessions migrations).
+  recordMigration({ ...base, status: 'completed' });
+  console.log(
+    chalk.green(`\nMigrated ${source.shortId} to ${target.name}${options.keep ? ' (copy)' : ''}.`) +
+      chalk.gray(" Tracked in 'agents sessions migrations'."),
+  );
 }
 
 /** Stop the source tmux session (kill its tmux session by name via its socket). */
@@ -551,6 +620,47 @@ async function stopSource(source: SessionMeta, active: ActiveSession | undefined
   const killed = await killSession(name, socket);
   if (killed) console.log(chalk.gray(`  Stopped the source tmux session (${name}).`));
   else console.log(chalk.yellow(`  Source tmux session ${name} was already gone.`));
+}
+
+/**
+ * `agents sessions migrations` — the border tracker: the append-only ledger of
+ * every session handed off to/from another machine (RUSH-1977).
+ */
+export function registerSessionsMigrationsCommand(sessionsCmd: Command): void {
+  sessionsCmd
+    .command('migrations')
+    .description('Show the migration ledger — sessions handed off to/from other machines.')
+    .option('--json', 'Output the raw ledger as JSON')
+    .option('--session <id>', 'Only rows whose session id starts with this fragment')
+    .action((options: { json?: boolean; session?: string }) => {
+      let recs = readMigrations();
+      if (options.session) recs = recs.filter((r) => r.sessionId.startsWith(options.session!) || r.shortId.startsWith(options.session!));
+      if (options.json) {
+        console.log(JSON.stringify(recs, null, 2));
+        return;
+      }
+      if (recs.length === 0) {
+        console.log(chalk.gray('No migrations recorded yet. Move one: agents sessions migrate --auto'));
+        return;
+      }
+      // Newest first — the most recent hop of a session is what you usually want.
+      recs.reverse();
+      console.log(
+        chalk.bold('WHEN'.padEnd(18)) + chalk.bold('SESSION'.padEnd(11)) + chalk.bold('AGENT'.padEnd(9)) +
+          chalk.bold('ROUTE'.padEnd(30)) + chalk.bold('MODE'.padEnd(11)) + chalk.bold('STATUS'),
+      );
+      for (const r of recs) {
+        const when = r.at.slice(0, 16).replace('T', ' ');
+        const route = `${r.from.host} → ${r.to.box ?? r.to.host}`;
+        const kind = r.move ? r.mode : `${r.mode}·copy`;
+        const status = r.status === 'completed' ? chalk.green('ok') : chalk.red('failed');
+        const pr = r.wipPr ? chalk.gray(`  ${r.wipPr}`) : '';
+        console.log(
+          when.padEnd(18) + r.shortId.padEnd(11) + r.agent.padEnd(9) +
+            route.padEnd(30) + kind.padEnd(11) + status + pr,
+        );
+      }
+    });
 }
 
 /** Map a tmux pane id to its session name via the same tmux binary the engine uses. */

@@ -366,25 +366,38 @@ The flow reuses existing primitives rather than reinventing transport or resume:
 4. **Wrap up the working tree.** Dirty → commit to a branch, push, open a **draft
    (WIP) PR** (mechanical by default). `--agent-wrapup` instead injects a wrap-up turn
    into the running agent (same tmux reply rail as `sessions inject`). Clean-but-ahead → push.
-5. **Ship the transcript** with the same bundle pipeline as
-   `sessions export --stdout | sessions import -`, over SSH.
-6. **Resume on the target** through the same host path as `sessions resume --host`
-   (`openSurfaces({ backend: 'tmux', host })`). For an ephemeral box, migrate git-clones
-   the repo and checks out the (WIP) branch first so the cwd resolves.
-7. **Stop the source** (`killSession`) — but only after the target's prompt is confirmed
+5. **Ship the transcript** to the target's live agent dir: the transcript file is copied
+   to the same path on the target (identical under the shared fleet `$HOME`), streamed
+   over the same `sshExec` transport, so the agent finds it where it reads sessions.
+   (`sessions import` lands bundles in the browsable history mirror — right for reading a
+   transcript elsewhere, wrong for continuing it.)
+6. **Resume on the target** in a detached tmux session (`tmux new-session -d`, which
+   starts the server a fresh worker/box lacks — the generic `new-window` backend needs a
+   live server), then confirm the pane is *live* (not merely created) before proceeding.
+   For an ephemeral box, migrate git-clones the repo and checks out the (WIP) branch first
+   so the cwd resolves.
+7. **Stop the source** (`killSession`) — but only after the target session is confirmed
    live. `--keep` skips this (copy, not move).
 
-**`--mode resume | rehydrate`** (default `resume`) chooses between a faithful
-`--resume` and a fresh agent that reads the transcript. **Harness parity:**
+**`--mode rehydrate | resume`** (default `rehydrate`). Rehydrate ships the transcript and
+starts the agent on the target with a prompt telling it to read the session
+(`agents sessions <id>` — its own judgment on `--last`/`--include` so large tool output
+can't blow context) and continue; robust across every harness. `--mode resume` attempts a
+native `<agent> --resume` — faithful, but best-effort: the target agent must have the
+session registered, so migrate falls back to rehydrate when it can't. **Harness parity:**
 `buildResumeCommand` returns null for the non-resumable agents (gemini, antigravity,
-openclaw, rush, hermes, grok, kimi, droid) — for those a faithful resume is impossible,
-so migrate transparently falls to `rehydrate` and prints a notice (it never silently
-skips an agent). The same fallback applies when the requested agent isn't installed on
-the target.
+openclaw, rush, hermes, grok, kimi, droid); a resume request for those transparently
+becomes rehydrate with a printed notice — never a silent skip.
 
-**Invariant:** the source is never killed before the transcript + branch are confirmed
-on the target. Source: `src/commands/sessions-migrate.ts`,
-`src/lib/session/migrate-targets.ts`.
+**Invariant:** the source is never killed before the transcript is on the target and its
+session is confirmed live.
+
+**Tracking handoffs.** Every migrate appends to an append-only ledger at
+`~/.agents/.history/migrations.jsonl` (synced with the rest of `.history`, so source and
+target converge). `agents sessions migrations` prints it — the border tracker showing each
+session's `from → to`, mode, move-vs-copy, and status; a session that hops A→B→C leaves
+three lines, its lineage. Source: `src/commands/sessions-migrate.ts`,
+`src/lib/session/migrate-targets.ts`, `src/lib/session/migrations.ts`.
 
 ## Cross-machine sync (R2 + CRDT)
 
