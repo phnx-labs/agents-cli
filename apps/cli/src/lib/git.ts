@@ -1013,13 +1013,16 @@ export async function pullRepo(
     }
 
     const branch = status.current || 'main';
-    await git.fetch('origin');
 
     // Resolve the upstream ref to fast-forward against. Prefer the local
     // branch's tracking config; otherwise ask origin for its default branch.
     let tracking = status.tracking;
     if (!tracking) {
+      // No tracking config: fetch origin so its HEAD is known, then ask which
+      // branch it points at. This path only ever concerns origin — a branch with
+      // no upstream has no other remote to consult.
       try {
+        await git.fetch('origin');
         await git.raw(['remote', 'set-head', 'origin', '--auto']);
         const sym = await git.raw(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD']);
         tracking = sym.trim();
@@ -1028,8 +1031,20 @@ export async function pullRepo(
       }
     }
 
-    // `tracking` is a remote-tracking ref (origin/<name>); git pull wants <name>.
-    const remoteBranch = tracking.startsWith('origin/') ? tracking.slice('origin/'.length) : branch;
+    // Split the remote-tracking ref (<remote>/<branch>) into its parts and pull
+    // THOSE. Hardcoding 'origin' while comparing against `tracking` is how a
+    // branch tracking e.g. upstream/main silently 'succeeded': revparse saw a
+    // difference, the pull fetched origin/main (already current), and pullRepo
+    // returned success having moved nothing — the same "reported ok, pulled
+    // nothing" failure this change exists to remove. Branch names may contain
+    // slashes, so split on the FIRST separator only.
+    const sep = tracking.indexOf('/');
+    const remoteName = sep > 0 ? tracking.slice(0, sep) : 'origin';
+    const remoteBranch = sep > 0 ? tracking.slice(sep + 1) : branch;
+
+    // Fetch the resolved remote, not a hardcoded 'origin' — otherwise the
+    // revparse below compares against a stale ref for any other remote.
+    await git.fetch(remoteName);
 
     const localRef = await git.revparse(['HEAD']);
     const remoteRef = await git.revparse([tracking]).catch(() => null);
@@ -1058,7 +1073,7 @@ export async function pullRepo(
       // which may be named differently (local `main` vs origin `master`). Using
       // `branch` there asks origin for a ref it does not have.
       assertValidBranchName(remoteBranch);
-      await git.pull('origin', remoteBranch, { '--rebase': 'true' });
+      await git.pull(remoteName, remoteBranch, { '--rebase': 'true' });
     } catch (err) {
       // Abort so the tree is restored, matching the atomicity --ff-only gave us.
       // Without this a conflict leaves the repo detached, mid-rebase, with

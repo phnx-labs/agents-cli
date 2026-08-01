@@ -706,6 +706,47 @@ describe('pullRepo reconciles a diverged branch by rebasing', () => {
     expect(res.error).not.toMatch(/Blocked by local changes/);
   });
 
+  // A branch may track a remote that is not named 'origin'. Hardcoding origin
+  // for the pull while comparing against `tracking` made pullRepo report SUCCESS
+  // having moved nothing — the exact "reported ok, pulled nothing" failure this
+  // change exists to remove, just narrower.
+  // A branch may track a remote that is not named 'origin'. Hardcoding origin
+  // for the pull while comparing against `tracking` made pullRepo report SUCCESS
+  // having moved nothing — the exact "reported ok, pulled nothing" failure this
+  // change exists to remove, just narrower. origin must be STALE here, or
+  // pulling it would incidentally fetch the same content and hide the bug.
+  it('pulls the remote the branch actually tracks, not a hardcoded origin', async () => {
+    const { local } = await divergedPair();
+
+    // A SECOND bare repo, seeded from local, that will receive the new commit.
+    // origin keeps pointing at the first one and never moves again.
+    const root = path.dirname(local);
+    const upstreamBare = path.join(root, 'upstream.git');
+    await simpleGit().raw(['init', '--bare', '-b', 'main', upstreamBare]);
+    await simpleGit(local).raw(['remote', 'add', 'upstream', upstreamBare]);
+    await simpleGit(local).raw(['push', 'upstream', 'main']);
+
+    const mover = path.join(root, 'mover');
+    await simpleGit().clone(upstreamBare, mover);
+    await simpleGit(mover).addConfig('user.email', 'test@example.com');
+    await simpleGit(mover).addConfig('user.name', 'Test');
+    await simpleGit(mover).addConfig('commit.gpgsign', 'false');
+    fs.writeFileSync(path.join(mover, 'from-upstream.txt'), 'x\n');
+    await simpleGit(mover).add('-A');
+    await simpleGit(mover).commit('upstream moved');
+    await simpleGit(mover).push('origin', 'main');
+
+    await simpleGit(local).raw(['fetch', 'upstream']);
+    await simpleGit(local).raw(['branch', '--set-upstream-to=upstream/main', 'main']);
+
+    const res = await pullRepo(local);
+
+    expect(res.success).toBe(true);
+    // The real assertion: content actually arrived. Reporting success without
+    // moving anything is the bug. Pulling 'origin' here is a no-op.
+    expect(fs.existsSync(path.join(local, 'from-upstream.txt'))).toBe(true);
+  });
+
   // A git WORKTREE has `.git` as a FILE (`gitdir: <path>`), so a hardcoded
   // <dir>/.git/rebase-merge probe can never fire there. pullRepo runs on real
   // clones today, but the probe must not silently depend on that.
