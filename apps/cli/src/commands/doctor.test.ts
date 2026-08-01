@@ -74,7 +74,7 @@ describe('computeVerdict (doctor per-version health rollup)', () => {
           supported: true,
           settingsPath: '/home/.claude/settings.json',
           expected: 32,
-          unwired: [{ name: 'ask-user-question-guard', event: 'PreToolUse', command: '~/x.sh' }],
+          unwired: [{ name: 'ask-user-question-guard', event: 'PreToolUse', matcher: 'AskUserQuestion', command: '~/x.sh' }],
         },
       }),
     );

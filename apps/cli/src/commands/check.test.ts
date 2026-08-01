@@ -73,10 +73,16 @@ function syncSnapshot(): void {
 function runCheck(...args: string[]): { status: number | null; stdout: string; stderr: string } {
   const r = spawnSync('bun', [INDEX, 'check', '--cwd', projectDir, ...args], {
     cwd: REPO_ROOT,
-    env: { ...process.env, HOME: testHome },
+    // AGENTS_NO_AUTOPULL keeps the detached background fetch from racing the
+    // git-repo fixtures these tests build under HOME.
+    env: { ...process.env, HOME: testHome, AGENTS_NO_AUTOPULL: '1' },
     encoding: 'utf-8',
   });
   return { status: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
+}
+
+function git(dir: string, ...args: string[]): void {
+  execFileSync('git', ['-C', dir, ...args], { stdio: 'ignore' });
 }
 
 describe('agents check — CI drift gate exit code', () => {
@@ -122,6 +128,81 @@ describe('agents check — CI drift gate exit code', () => {
     const parsed = JSON.parse(drifted.stdout);
     expect(parsed.hasDrift).toBe(true);
     expect(parsed.stale).toBe(1);
+  });
+
+  it('exits non-zero when a hook is present but unwired, with the version otherwise fresh', () => {
+    // The yosemite-s1 blind spot: `agents check` went through computeDrift, which
+    // only knew manifest staleness — a present-but-unwired hook read as fresh and
+    // the gate exited 0. This proves it now fails, and fails ONLY on the unwired
+    // signal (stale/never-synced/sourceBehind all zero).
+    seedHome();
+    syncSnapshot(); // 1st sync: the migrator runs here, clearing legacy agents.yaml
+
+    // Post-migration, declare a user-layer hook (hooks-only, no `agents:` map so
+    // the migrator stays quiet on the next sync) and its script.
+    const userDir = path.join(testHome, '.agents');
+    fs.writeFileSync(
+      path.join(userDir, 'agents.yaml'),
+      'hooks:\n  demo-guard:\n    script: demo-guard.sh\n    events: [PreToolUse]\n',
+    );
+    fs.mkdirSync(path.join(userDir, 'hooks'), { recursive: true });
+    fs.writeFileSync(path.join(userDir, 'hooks', 'demo-guard.sh'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    syncSnapshot(); // 2nd sync: snapshots WITH the hook (fresh) and wires settings.json
+    expect(runCheck('--json').status).toBe(0); // clean: fresh AND wired
+
+    // Now the exact bug state: keep the hook file, strip the settings.json wiring.
+    const settings = path.join(
+      userDir, '.history', 'versions', 'claude', '2.0.0', 'home', '.claude', 'settings.json',
+    );
+    const cfg = JSON.parse(fs.readFileSync(settings, 'utf-8'));
+    cfg.hooks = {};
+    fs.writeFileSync(settings, JSON.stringify(cfg, null, 2));
+
+    const r = runCheck('--json');
+    expect(r.status).not.toBe(0);
+    const parsed = JSON.parse(r.stdout);
+    expect(parsed.hasDrift).toBe(true);
+    expect(parsed.stale).toBe(0);
+    expect(parsed.neverSynced).toBe(0);
+    expect(parsed.unwiredHookVersions).toBe(1);
+    const claude = parsed.versions.find((v: any) => v.agent === 'claude');
+    expect(claude.status).toBe('fresh');
+    expect(claude.unwiredHooks).toBe(1);
+  });
+
+  it('exits non-zero when a source layer is behind origin (repo pull heals it, not --fix)', () => {
+    seedHome();
+    syncSnapshot();
+    expect(runCheck('--json').status).toBe(0); // clean before the source goes behind
+
+    // Make ~/.agents a git repo one commit behind its upstream.
+    const userDir = path.join(testHome, '.agents');
+    const remote = path.join(testHome, 'user-remote.git');
+    const other = path.join(testHome, 'user-other');
+    execFileSync('git', ['init', '--bare', '-b', 'main', remote], { stdio: 'ignore' });
+    execFileSync('git', ['init', '-b', 'main', userDir], { stdio: 'ignore' });
+    git(userDir, 'config', 'user.email', 't@e.co');
+    git(userDir, 'config', 'user.name', 'T');
+    git(userDir, 'config', 'commit.gpgsign', 'false');
+    fs.writeFileSync(path.join(userDir, '.ci-marker'), 'base\n');
+    git(userDir, 'add', '.ci-marker');
+    git(userDir, 'commit', '-m', 'base');
+    git(userDir, 'remote', 'add', 'origin', remote);
+    git(userDir, 'push', '-u', 'origin', 'main');
+    // Advance the remote from a second clone, then fetch so ~/.agents trails it.
+    execFileSync('git', ['clone', remote, other], { stdio: 'ignore' });
+    git(other, 'config', 'user.email', 't@e.co');
+    git(other, 'config', 'user.name', 'T');
+    git(other, 'config', 'commit.gpgsign', 'false');
+    git(other, 'commit', '--allow-empty', '-m', 'ahead');
+    git(other, 'push', 'origin', 'main');
+    git(userDir, 'fetch', 'origin');
+
+    const r = runCheck('--json');
+    expect(r.status).not.toBe(0);
+    const parsed = JSON.parse(r.stdout);
+    expect(parsed.hasDrift).toBe(true);
+    expect(parsed.sourceBehind.some((s: any) => s.layer === 'user' && s.behind >= 1)).toBe(true);
   });
 
   it('--devices exits non-zero when any registered device is unreachable', () => {
