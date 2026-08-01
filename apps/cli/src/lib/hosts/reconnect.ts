@@ -90,14 +90,16 @@ export function exhaustedNotice(sessionId: string, host: string): string {
 }
 
 /** Re-attach the live remote tmux pane for `sessionId` by driving the peer's own
- *  `agents sessions focus`. Returns the ssh exit code (255 = still unreachable /
- *  dropped again; 0 = clean detach; other = session ended). */
-export function reattachRemoteSession(host: Host, sessionId: string, opts: { copyCreds?: boolean } = {}): number {
+ *  `agents sessions focus`. This carries no credentials (the agent is already
+ *  running on the peer), so it rides the normal multiplexed transport. Returns the
+ *  ssh exit code (255 = still unreachable / dropped again; 0 = clean detach; other
+ *  = session ended). */
+export function reattachRemoteSession(host: Host, sessionId: string): number {
   const target = sshTargetFor(host);
   const remoteCmd = ['agents', 'sessions', 'focus', sessionId, '--local', '--attach-only']
     .map(shellQuote)
     .join(' ');
-  return sshStream(target, remoteCmd, { tty: true, multiplex: !opts.copyCreds });
+  return sshStream(target, remoteCmd, { tty: true });
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -109,11 +111,10 @@ export interface ReconnectLoopOpts {
   initialExit: number;
   /** How long the initial run held, in ms (for the live-session budget refill). */
   initialDurationMs: number;
-  copyCreds?: boolean;
   /** Injected for tests: the real re-attach and wait are swapped for deterministic
    *  fakes so the loop's control flow is exercised without SSH. Production uses the
    *  real {@link reattachRemoteSession} + `sleep`. */
-  reattach?: (host: Host, sessionId: string, opts: { copyCreds?: boolean }) => ReconnectOutcome;
+  reattach?: (host: Host, sessionId: string) => ReconnectOutcome;
   wait?: (ms: number) => Promise<void>;
   write?: (s: string) => void;
 }
@@ -128,9 +129,9 @@ export async function reconnectInteractiveSession(opts: ReconnectLoopOpts): Prom
   const wait = opts.wait ?? sleep;
   const reattach =
     opts.reattach ??
-    ((host, id, o): ReconnectOutcome => {
+    ((host, id): ReconnectOutcome => {
       const t0 = Date.now();
-      const code = reattachRemoteSession(host, id, o);
+      const code = reattachRemoteSession(host, id);
       return { code, durationMs: Date.now() - t0 };
     });
 
@@ -145,6 +146,6 @@ export async function reconnectInteractiveSession(opts: ReconnectLoopOpts): Prom
     write(reconnectNotice(opts.sessionId, opts.host.name, decision.state.attempt, decision.waitMs));
     await wait(decision.waitMs);
     state = decision.state;
-    outcome = reattach(opts.host, opts.sessionId, { copyCreds: opts.copyCreds });
+    outcome = reattach(opts.host, opts.sessionId);
   }
 }

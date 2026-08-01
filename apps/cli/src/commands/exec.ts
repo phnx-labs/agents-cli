@@ -1339,7 +1339,6 @@ export function registerRunCommand(program: Command): void {
                     sessionId: reconnectId,
                     initialExit: exitCode,
                     initialDurationMs: Date.now() - runStartedMs,
-                    copyCreds: hostCopyCreds,
                   }),
                 );
               }
