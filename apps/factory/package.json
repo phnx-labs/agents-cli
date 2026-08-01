@@ -519,6 +519,14 @@
         "title": "Agents: Reopen Last Session"
       },
       {
+        "command": "agents.detach",
+        "title": "Agents: Detach (Send to Background)"
+      },
+      {
+        "command": "agents.attach",
+        "title": "Agents: Attach (Bring to Foreground)"
+      },
+      {
         "command": "agents.continueInNew",
         "title": "Agents: Continue in New Session"
       },
@@ -948,6 +956,10 @@
         {
           "command": "agents.askAnotherAgent",
           "group": "agents@1"
+        },
+        {
+          "command": "agents.detach",
+          "group": "agents@2"
         }
       ],
       "commandPalette": [
@@ -1023,6 +1035,17 @@
         "command": "agents.autogit",
         "key": "ctrl+shift+g",
         "mac": "cmd+shift+g"
+      },
+      {
+        "command": "agents.detach",
+        "key": "ctrl+k ctrl+b",
+        "mac": "cmd+k cmd+b",
+        "when": "terminalFocus"
+      },
+      {
+        "command": "agents.attach",
+        "key": "ctrl+k ctrl+a",
+        "mac": "cmd+k cmd+a"
       },
       {
         "command": "agents.newAgent",
