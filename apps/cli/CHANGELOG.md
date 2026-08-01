@@ -1,21 +1,5 @@
 # Changelog
 
-## 1.20.75
-
-- **`agents detach` / `agents attach` — send a running agent to the background and
-  back.** `agents detach <id>` stops a live session's interactive process and
-  continues it headless, unattended, so it drives its task to completion without
-  holding a terminal; `agents attach <id>` stops that headless continuation and
-  resumes the session interactively — version-pinned native resume (Claude/Codex)
-  or a `/continue` replay (others), the same session and full history. Both are
-  agent-agnostic, routing through the existing `agents run --resume` path. The
-  backgrounded run resumes with a nudge that tells the agent it is unattended and
-  to drive to done rather than stall on a confirmation nobody can answer.
-  `agents sessions --active --json` now carries a `presence` field (`attached` /
-  `background` / `parked`) so the menu bar and Factory show where each agent is.
-  Source: `apps/cli/src/commands/detach.ts`, `apps/cli/src/commands/attach.ts`,
-  `apps/cli/src/lib/session/detached.ts`.
-
 ## 1.20.74
 
 - **Project resource manifests are now portable across Windows and POSIX.** The
