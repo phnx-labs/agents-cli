@@ -21,6 +21,9 @@ import * as path from 'path';
 // (both the devices registry and the hosts providers resolve paths from it).
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-run-target-test-'));
 process.env.HOME = TEST_HOME;
+// Redirect the device registry dir too (RUSH-2042): getDevicesDir() reads this at
+// call time, so it survives the module-cache race a plain HOME override loses.
+process.env.AGENTS_DEVICES_DIR = path.join(TEST_HOME, '.agents', '.history', 'devices');
 
 const { resolveHostRunTarget, resolveHostSessionId, HostResolutionError } = await import('./run-target.js');
 const { DeviceOffloadUnsupportedError } = await import('./registry.js');

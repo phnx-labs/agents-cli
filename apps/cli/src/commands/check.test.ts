@@ -65,7 +65,7 @@ function seedHome(): { commandSrc: string } {
 function syncSnapshot(): void {
   execFileSync('bun', [INDEX, 'sync', 'claude@2.0.0', '-y', '--cwd', projectDir], {
     cwd: REPO_ROOT,
-    env: { ...process.env, HOME: testHome },
+    env: { ...process.env, HOME: testHome, AGENTS_DEVICES_DIR: path.join(testHome, '.agents', '.history', 'devices') },
     stdio: 'ignore',
   });
 }
@@ -75,7 +75,7 @@ function runCheck(...args: string[]): { status: number | null; stdout: string; s
     cwd: REPO_ROOT,
     // AGENTS_NO_AUTOPULL keeps the detached background fetch from racing the
     // git-repo fixtures these tests build under HOME.
-    env: { ...process.env, HOME: testHome, AGENTS_NO_AUTOPULL: '1' },
+    env: { ...process.env, HOME: testHome, AGENTS_NO_AUTOPULL: '1', AGENTS_DEVICES_DIR: path.join(testHome, '.agents', '.history', 'devices') },
     encoding: 'utf-8',
   });
   return { status: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };

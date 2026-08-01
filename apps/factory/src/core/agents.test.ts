@@ -7,6 +7,8 @@ import {
   pickLatestVersion,
   STRATEGY_LAUNCH_AGENTS,
   modeFlagForAgent,
+  buildAgentLaunchCommand,
+  wrapNativeAgentCommand,
   extractPlanFromSessionJson,
   planTextToSteps
 } from './agents';
@@ -289,5 +291,112 @@ describe('STRATEGY_LAUNCH_AGENTS', () => {
     for (const key of STRATEGY_LAUNCH_AGENTS) {
       expect(getBuiltInByKey(key)).toBeDefined();
     }
+  });
+});
+
+describe('buildAgentLaunchCommand', () => {
+  // RUSH-2038: interactive Factory launches must default to --mode auto so the
+  // agent starts in a writable posture instead of stalling in read-only plan mode.
+
+  test('no mode supplied -> defaults to --mode auto', () => {
+    const cmd = buildAgentLaunchCommand('codex', null);
+    expect(cmd).toContain('--mode auto');
+    expect(cmd).not.toContain('--mode plan');
+  });
+
+  test('no mode supplied for claude -> --mode auto', () => {
+    const cmd = buildAgentLaunchCommand('claude', 'session-abc');
+    expect(cmd).toContain('--mode auto');
+    expect(cmd).toContain('--session-id session-abc');
+  });
+
+  test('explicit mode plan is preserved when the caller requests it', () => {
+    const cmd = buildAgentLaunchCommand('codex', null, undefined, undefined, undefined, undefined, 'plan');
+    expect(cmd).toContain('--mode plan');
+    expect(cmd).not.toContain('--mode auto');
+  });
+
+  test('explicit mode edit is preserved', () => {
+    const cmd = buildAgentLaunchCommand('gemini', null, undefined, undefined, undefined, undefined, 'edit');
+    expect(cmd).toContain('--mode edit');
+  });
+
+  test('additionalFlags already containing --mode suppresses the default', () => {
+    // Caller has injected --mode plan via additionalFlags; the function must not
+    // double-emit another --mode flag.
+    const cmd = buildAgentLaunchCommand('codex', null, undefined, '--mode plan');
+    expect(cmd.match(/--mode/g)?.length).toBe(1);
+    expect(cmd).toContain('--mode plan');
+  });
+
+  test('includes --interactive and the agent key in the base command', () => {
+    const cmd = buildAgentLaunchCommand('codex', null);
+    expect(cmd).toMatch(/^agents run codex --interactive/);
+  });
+
+  test('pinned version is appended as agent@version', () => {
+    const cmd = buildAgentLaunchCommand('claude', null, undefined, undefined, '2.1.170');
+    expect(cmd).toContain('claude@2.1.170');
+  });
+
+  test('host flag is shell-quoted and included', () => {
+    const cmd = buildAgentLaunchCommand('codex', null, undefined, undefined, undefined, undefined, undefined, 'mac-mini');
+    expect(cmd).toContain("--host 'mac-mini'");
+  });
+
+  test('default model is included when provided', () => {
+    const cmd = buildAgentLaunchCommand('claude', null, 'claude-haiku-4-5');
+    expect(cmd).toContain('--model claude-haiku-4-5');
+  });
+
+  // RUSH-2025: Pick Host / Auto Host / New Claude (Auto) launch with BOTH a host
+  // and --strategy balanced so the CLI's account rotation routes around a
+  // signed-out / throttled version on the chosen device.
+  test('balanced strategy + host emit --host and --strategy balanced together', () => {
+    const cmd = buildAgentLaunchCommand(
+      'claude', 'sess-1', undefined, undefined, undefined, 'balanced', undefined, 'yosemite-s0',
+    );
+    expect(cmd).toContain("--host 'yosemite-s0'");
+    expect(cmd).toContain('--strategy balanced');
+  });
+
+  test('a pinned version on a host launch suppresses --strategy (pin overrides balance)', () => {
+    // Pick Version & Host: the exact pin wins, so no --strategy is emitted even
+    // if a strategy is passed.
+    const cmd = buildAgentLaunchCommand(
+      'claude', 'sess-2', undefined, undefined, '2.1.170', 'balanced', undefined, 'yosemite-s1',
+    );
+    expect(cmd).toContain('claude@2.1.170');
+    expect(cmd).toContain("--host 'yosemite-s1'");
+    expect(cmd).not.toContain('--strategy');
+  });
+});
+
+describe('wrapNativeAgentCommand (RUSH-2026)', () => {
+  // The exec prefix makes the shell replace itself with the agent runner so VS
+  // Code closes the tab automatically when the agent exits — mirroring tmux
+  // pane-died behaviour.
+
+  test('agent terminal: command is exec-prefixed', () => {
+    const cmd = buildAgentLaunchCommand('claude', null);
+    expect(wrapNativeAgentCommand(cmd, false)).toBe(`exec ${cmd}`);
+  });
+
+  test('agent terminal with --host: exec prefix is preserved', () => {
+    const cmd = buildAgentLaunchCommand('claude', null, undefined, undefined, undefined, undefined, undefined, 'yosemite-s0');
+    const wrapped = wrapNativeAgentCommand(cmd, false);
+    expect(wrapped).toMatch(/^exec agents run claude --interactive/);
+    expect(wrapped).toContain("--host 'yosemite-s0'");
+  });
+
+  test('shell terminal: command is NOT exec-prefixed', () => {
+    const shellCmd = 'zsh';
+    expect(wrapNativeAgentCommand(shellCmd, true)).toBe(shellCmd);
+    expect(wrapNativeAgentCommand(shellCmd, true)).not.toMatch(/^exec /);
+  });
+
+  test('empty command returns empty string unchanged', () => {
+    expect(wrapNativeAgentCommand('', false)).toBe('');
+    expect(wrapNativeAgentCommand('', true)).toBe('');
   });
 });

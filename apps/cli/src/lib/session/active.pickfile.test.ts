@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { pickSessionFile } from './active.js';
+import { pickSessionFile, pickClaudeSessionFileAcrossRoots } from './active.js';
 
 // Regression for the "every co-located session shows the same preview" bug: when a
 // concrete session id was requested but its transcript file was absent,
@@ -47,5 +47,58 @@ describe('pickSessionFile', () => {
 
   it('an unreadable project dir returns undefined', () => {
     expect(pickSessionFile(path.join(dir, 'nope'), undefined)).toBeUndefined();
+  });
+});
+
+// Regression for the "watchdog / sessions goes blind after an upgrade" bug: a
+// session launched under an EARLIER agent version keeps its transcript under that
+// version's home, not the live `~/.claude` symlink (which repoints to the newest
+// installed version). Resolving only the live root dropped every still-running
+// older-version session — no sessionFile → no timestamp → `unknown` state and a
+// watchdog "no activity timestamp" skip. The resolver must search ALL roots.
+describe('pickClaudeSessionFileAcrossRoots', () => {
+  let base: string;
+  const cwd = '/work/proj';
+  const enc = cwd.replace(/[/.]/g, '-'); // mirrors claudeProjectDirName
+  const sid = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+
+  // `projectRoots` are the `projects`-level dirs (e.g. ~/.claude/projects); the
+  // resolver appends the cwd-encoded subdir itself. liveRoot mirrors the current
+  // ~/.claude/projects; oldRoot mirrors an earlier version home's projects dir.
+  const projectsRoot = (name: string) => path.join(base, name);
+  const projDir = (name: string) => path.join(projectsRoot(name), enc);
+  const roots = () => [projectsRoot('live'), projectsRoot('old')];
+
+  beforeAll(() => {
+    base = fs.mkdtempSync(path.join(os.tmpdir(), 'roots-'));
+    fs.mkdirSync(projDir('live'), { recursive: true });
+    fs.mkdirSync(projDir('old'), { recursive: true });
+  });
+
+  afterAll(() => {
+    try { fs.rmSync(base, { recursive: true, force: true }); } catch { /* best effort */ }
+  });
+
+  it('finds a session whose transcript lives ONLY in an older version home', () => {
+    // The bug: the file is absent from the live root but present in the old one.
+    fs.writeFileSync(path.join(projDir('old'), `${sid}.jsonl`), '{"x":1}\n');
+    expect(pickClaudeSessionFileAcrossRoots(roots(), cwd, sid)).toBe(
+      path.join(projDir('old'), `${sid}.jsonl`),
+    );
+  });
+
+  it('newest mtime wins when the id resolves in more than one root', () => {
+    const liveHit = path.join(projDir('live'), `${sid}.jsonl`);
+    const oldHit = path.join(projDir('old'), `${sid}.jsonl`);
+    fs.writeFileSync(liveHit, '{"x":2}\n');
+    const stale = new Date(Date.now() - 120_000);
+    fs.utimesSync(oldHit, stale, stale); // make the live copy the newer write
+    expect(pickClaudeSessionFileAcrossRoots(roots(), cwd, sid)).toBe(liveHit);
+  });
+
+  it('a supplied-but-missing id returns undefined across all roots', () => {
+    expect(
+      pickClaudeSessionFileAcrossRoots(roots(), cwd, 'ffffffff-0000-0000-0000-000000000000'),
+    ).toBeUndefined();
   });
 });

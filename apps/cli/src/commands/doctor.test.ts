@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { execPolicyWarningLines, wrapLine, computeVerdict } from './doctor.js';
-import { stringWidth } from '../lib/session/width.js';
+import { execPolicyWarningLines, renderFleetDivergence, wrapLine, computeVerdict } from './doctor.js';
+import { stringWidth, stripAnsi } from '../lib/session/width.js';
 import type { VersionResourceReport } from '../lib/doctor-diff.js';
+import { compareFleetInventories, FLEET_RESOURCE_KINDS, type FleetInventory, type FleetResourceKind } from '../lib/devices/fleet-divergence.js';
 
 /** Minimal reconciled report; override the fields a case cares about. */
 function baseReport(over: Partial<VersionResourceReport> = {}): VersionResourceReport {
@@ -15,6 +16,12 @@ function baseReport(over: Partial<VersionResourceReport> = {}): VersionResourceR
     summary: { ok: 32, diff: 0, missing: 0, extra: 0 },
     ...over,
   };
+}
+
+function inv(plugins: string[] = []): FleetInventory {
+  const resources = {} as Record<FleetResourceKind, string[]>;
+  for (const k of FLEET_RESOURCE_KINDS) resources[k] = k === 'plugins' ? plugins : [];
+  return { resources, agentVersions: {}, repos: { agents: null, system: null } };
 }
 
 describe('execPolicyWarningLines (Windows exec-policy advisory in `agents doctor`)', () => {
@@ -107,5 +114,33 @@ describe('computeVerdict (doctor per-version health rollup)', () => {
     expect(v.healthy).toBe(false);
     const texts = v.issues.map((i) => i.text);
     expect(texts).toEqual(expect.arrayContaining(['2 divergent', '1 missing', '3 extra']));
+  });
+});
+
+describe('renderFleetDivergence (agents doctor --devices, RUSH-2027)', () => {
+  it('names the missing resource and the box it is missing on', () => {
+    const report = compareFleetInventories(
+      [{ name: 'zion', inventory: inv(['swarm']) }, { name: 'yosemite-s0', inventory: inv([]) }],
+      'zion',
+    );
+    const out = renderFleetDivergence(report).map(stripAnsi).join('\n');
+    expect(out).toContain('Cross-device divergence');
+    expect(out).toContain('yosemite-s0');
+    expect(out).toContain("missing plugin 'swarm'");
+    expect(out).toContain('agents apply'); // read-only remediation hint
+  });
+
+  it('renders an all-clear line and names uncompared boxes when the fleet agrees', () => {
+    const report = compareFleetInventories(
+      [
+        { name: 'zion', inventory: inv(['swarm']) },
+        { name: 'box', inventory: inv(['swarm']) },
+        { name: 'offline', inventory: null },
+      ],
+      'zion',
+    );
+    const out = renderFleetDivergence(report).map(stripAnsi).join('\n');
+    expect(out).toContain('Fleet is consistent');
+    expect(out).toContain('not compared: offline');
   });
 });

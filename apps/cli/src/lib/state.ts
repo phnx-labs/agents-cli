@@ -369,9 +369,13 @@ export function getSystemRoutinesDir(): string { return SYSTEM_ROUTINES_DIR; }
  * Path to a project-scoped routines directory (`<project>/.agents/routines/`),
  * or null when no project `.agents/` is found by walking up from cwd.
  *
- * Project routines participate in `list`/`view`/`run` for inspection but are
- * NOT fired by the daemon (which runs from $HOME and loads only user + system
- * routines). Opt-in firing for project routines is tracked as a follow-up.
+ * Project routines participate in `list`/`view` for inspection always. Daemon
+ * firing requires an explicit opt-in via `agents routines enable-project`
+ * (writes `meta.routines.projects`); after opt-in, `agents routines sync`
+ * materialises them into the user layer with `source:` provenance so the
+ * daemon (which loads user + system only) can fire them safely. A project's
+ * own `agents.yaml` `routines.enable: true` is a documentation signal only —
+ * it does not auto-enable firing. See `lib/routines-project.ts`.
  */
 export function getProjectRoutinesDir(cwd: string = process.cwd()): string | null {
   const projectAgentsDir = getProjectAgentsDir(cwd);
@@ -455,11 +459,23 @@ export function getTeamsAgentsDir(): string { return TEAMS_AGENTS_DIR; }
 /** Path to the team registry — list of named teams with timestamps. Durable runtime, per-machine. */
 export function getTeamsRegistryPath(): string { return path.join(HISTORY_DIR, 'teams', 'registry.json'); }
 
+/**
+ * The devices dir (registry + ignore-list live here). Read at CALL time so a
+ * test can redirect it to a temp dir via AGENTS_DEVICES_DIR without racing the
+ * module-load capture of HISTORY_DIR — mirrors the AGENTS_EVENTS_PATH /
+ * AGENTS_SECRETS_AGENT_DIR test-isolation escape hatches. Never set in
+ * production code; it exists so the vitest fork's device-registry writes can
+ * never reach the user's real ~/.agents/.history/devices (RUSH-2042).
+ */
+function getDevicesDir(): string {
+  return process.env.AGENTS_DEVICES_DIR ?? path.join(HISTORY_DIR, 'devices');
+}
+
 /** Path to the device registry — SSH device profiles with platform/auth metadata. Durable runtime, per-machine (host list + addresses are NOT pulled by `agents repo push`). */
-export function getDevicesRegistryPath(): string { return path.join(HISTORY_DIR, 'devices', 'registry.json'); }
+export function getDevicesRegistryPath(): string { return path.join(getDevicesDir(), 'registry.json'); }
 
 /** Path to the device ignore-list — tailscale node names the user dismissed, so auto-discovery never re-suggests them. Per-machine, same dir as the registry. */
-export function getDevicesIgnoredPath(): string { return path.join(HISTORY_DIR, 'devices', 'ignored.json'); }
+export function getDevicesIgnoredPath(): string { return path.join(getDevicesDir(), 'ignored.json'); }
 
 /** Dir of "pending device" sentinels (~/.agents/.cache/state/devices-pending/) — one empty-ish file per newly-discovered, not-yet-approved tailnet node. Written by the daemon probe, read by the menu-bar helper (mirrors the attention sentinel dir). */
 export function getDevicesPendingDir(): string { return path.join(RUNTIME_STATE_DIR, 'devices-pending'); }

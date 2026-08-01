@@ -33,9 +33,19 @@ interface ClaudeSessionFile {
   nameSource?: string | null;
 }
 
+// The session's current name plus where it came from. `derived` is Claude's
+// auto-generated `<dirname>-<n>` placeholder (nameSource === 'derived'); any
+// other source (a real /status title, or an old CLI with no nameSource) is a
+// genuine name.
+export interface ClaudeSessionNameInfo {
+  name: string;
+  nameSource: string | null;
+  derived: boolean;
+}
+
 interface ScanCache {
   builtAt: number;
-  bySessionId: Map<string, string>; // only successful resolutions
+  bySessionId: Map<string, ClaudeSessionNameInfo>; // every named session, derived or not
 }
 
 const TTL_MS = 30_000;
@@ -46,10 +56,25 @@ export interface ReadSessionNameOptions {
   now?: number;
 }
 
+// The genuine title for a session, or null when there is none OR the only name
+// is Claude's derived placeholder. This is the label-worthy name — reuse it as
+// the tab label; a null means "fall through to the LLM topic path".
 export async function readClaudeSessionName(
   sessionId: string,
   options: ReadSessionNameOptions = {}
 ): Promise<string | null> {
+  const info = await readClaudeSessionNameInfo(sessionId, options);
+  if (!info || info.derived) return null;
+  return info.name;
+}
+
+// The session's CURRENT name and its source, INCLUDING the derived placeholder.
+// Callers use this to ask "is <label> exactly this session's derived name?" —
+// e.g. to un-stick a tab whose label is the `<dirname>-<n>` placeholder.
+export async function readClaudeSessionNameInfo(
+  sessionId: string,
+  options: ReadSessionNameOptions = {}
+): Promise<ClaudeSessionNameInfo | null> {
   if (!sessionId) return null;
 
   const now = options.now ?? Date.now();
@@ -84,14 +109,14 @@ async function discoverSessionDirs(): Promise<string[]> {
 }
 
 async function rebuildCache(dirs: string[], now: number): Promise<ScanCache> {
-  const bySessionId = new Map<string, string>();
+  const bySessionId = new Map<string, ClaudeSessionNameInfo>();
 
   await Promise.all(dirs.map((dir) => scanDir(dir, bySessionId)));
 
   return { builtAt: now, bySessionId };
 }
 
-async function scanDir(dir: string, sink: Map<string, string>): Promise<void> {
+async function scanDir(dir: string, sink: Map<string, ClaudeSessionNameInfo>): Promise<void> {
   let entries: string[];
   try {
     entries = await fs.promises.readdir(dir);
@@ -106,13 +131,17 @@ async function scanDir(dir: string, sink: Map<string, string>): Promise<void> {
         try {
           const raw = await fs.promises.readFile(path.join(dir, f), 'utf-8');
           const parsed = JSON.parse(raw) as ClaudeSessionFile;
-          // A `derived` name is Claude's auto-generated `<dirname>-<n>`
-          // placeholder, not a real title — skip it so the caller falls
-          // through to the LLM topic path instead of labelling the tab with
-          // the repo name.
-          if (parsed.nameSource === 'derived') return;
+          // Store EVERY named session — including Claude's derived `<dirname>-<n>`
+          // placeholder. readClaudeSessionName filters `derived` out (so a tab
+          // never labels with the repo name), while readClaudeSessionNameInfo
+          // exposes it so a caller can recognize and un-stick a promoted
+          // placeholder label.
           if (parsed.sessionId && typeof parsed.name === 'string' && parsed.name.trim()) {
-            sink.set(parsed.sessionId, parsed.name.trim());
+            sink.set(parsed.sessionId, {
+              name: parsed.name.trim(),
+              nameSource: parsed.nameSource ?? null,
+              derived: parsed.nameSource === 'derived',
+            });
           }
         } catch {
           // malformed or unreadable file — skip silently

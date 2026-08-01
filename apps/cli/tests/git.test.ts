@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, rmSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import simpleGit from 'simple-git';
@@ -83,8 +83,13 @@ describe('pullRepo', () => {
     expect(result.error).toContain('Blocked by local changes');
   });
 
-  it('refuses to fast-forward when local commits diverge from origin', async () => {
-    // Commit on remote, then commit locally on a divergent line.
+  // REVERSED deliberately (RUSH-2056). This asserted that divergence alone
+  // refuses the pull — the behavior that broke fleet distribution. pullRepo
+  // auto-commits the machine's own devices/<host> pin just before pulling, so
+  // every device eventually diverged and could never pull again, with nothing
+  // in conflict. It now rebases, as its own doc comment always claimed.
+  it('rebases a diverged branch instead of refusing when nothing conflicts', async () => {
+    // Remote and local each add a DIFFERENT file → diverged, no conflict.
     writeFileSync(join(REMOTE_DIR, 'remote-only.txt'), 'remote');
     const remoteGit = simpleGit(REMOTE_DIR);
     await remoteGit.add('.');
@@ -95,15 +100,39 @@ describe('pullRepo', () => {
     await localGit.add('.');
     await localGit.commit('local commit');
 
+    const result = await pullRepo(LOCAL_DIR);
+
+    expect(result.success).toBe(true);
+    // Upstream content arrived...
+    expect(existsSync(join(LOCAL_DIR, 'remote-only.txt'))).toBe(true);
+    // ...and the local commit survived, replayed on top rather than discarded.
+    expect(existsSync(join(LOCAL_DIR, 'local-only.txt'))).toBe(true);
+    const log = await localGit.log({ maxCount: 1 });
+    expect(log.latest?.message).toContain('local commit');
+  });
+
+  // The integration suite had NO conflict coverage at all. A failed pull must
+  // leave the checkout exactly as it found it — the atomicity --ff-only gave
+  // for free, and the reason `rebase --abort` is in the catch.
+  it('rolls the tree back on a genuine conflict, leaving no rebase in progress', async () => {
+    writeFileSync(join(REMOTE_DIR, 'shared.txt'), 'remote side');
+    const remoteGit = simpleGit(REMOTE_DIR);
+    await remoteGit.add('.');
+    await remoteGit.commit('remote edit');
+
+    writeFileSync(join(LOCAL_DIR, 'shared.txt'), 'local side');
+    const localGit = simpleGit(LOCAL_DIR);
+    await localGit.add('.');
+    await localGit.commit('local edit');
+
     const before = await localGit.revparse(['HEAD']);
     const result = await pullRepo(LOCAL_DIR);
     const after = await localGit.revparse(['HEAD']);
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain('Blocked by local commits');
     expect(after).toBe(before);
-    expect(
-      await localGit.revparse(['HEAD']),
-    ).not.toBe(await remoteGit.revparse(['HEAD']));
+    expect(existsSync(join(LOCAL_DIR, '.git', 'rebase-merge'))).toBe(false);
+    const status = await localGit.status();
+    expect(status.conflicted).toEqual([]);
   });
 });

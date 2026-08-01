@@ -27,7 +27,7 @@ import { AgentManager } from '../teams/agents.js';
 import { getTerminalsDir } from '../state.js';
 import { readPidSessionEntry, listPidSessionEntries, prunePidSessionRegistry, type PidSessionEntry } from './pid-registry.js';
 import { loadHookSessionIndex, resolveHookSessionRecord, type HookSessionIndex, type HookSessionRecord } from './hook-sessions.js';
-import { buildClaudeLabelMap } from './discover.js';
+import { buildClaudeLabelMap, getAgentSessionDirs } from './discover.js';
 import { buildRunNameMap } from './run-names.js';
 import { latestSessionFileForCwd } from './db.js';
 import { extractSessionTopic } from './prompt.js';
@@ -225,7 +225,6 @@ export interface ActiveQueryOptions {
   skipHeadless?: boolean;
 }
 
-const HOME = os.homedir();
 const LIVE_TERMINALS_FILE = path.join(getTerminalsDir(), 'live-terminals.json');
 
 /**
@@ -386,9 +385,47 @@ function claudeProjectDirName(cwd: string): string {
  * Locate the active Claude session file for a process. If we know the session
  * UUID (from terminal env or team parent), prefer the exact match. Otherwise
  * fall back to the most-recent-mtime .jsonl in the project's folder.
+ *
+ * Searches EVERY version-home project root, not just the live `~/.claude`
+ * symlink. `~/.claude` points at the currently-installed agent version; a
+ * session launched under an EARLIER version keeps its transcript under that
+ * version's home (`…/.history/versions/claude/<ver>/home/.claude/projects/`).
+ * Resolving only `~/.claude/projects` meant that the instant a newer version
+ * was installed, every still-running older-version session lost its transcript
+ * here — no `sessionFile`, so no start/activity time, so `agents sessions`
+ * rendered it `unknown` and the watchdog skipped it as "no activity timestamp".
+ * `getAgentSessionDirs('claude','projects')` is the same version-aware enumerator
+ * the rest of the CLI uses, so this stays in lockstep with discovery.
  */
 function findClaudeSessionFile(cwd: string, sessionId?: string): string | undefined {
-  return pickSessionFile(path.join(HOME, '.claude', 'projects', claudeProjectDirName(cwd)), sessionId);
+  return pickClaudeSessionFileAcrossRoots(getAgentSessionDirs('claude', 'projects'), cwd, sessionId);
+}
+
+/**
+ * Resolve a Claude transcript for `cwd` across the given project roots, newest
+ * mtime winning when the same id/cwd resolves in more than one version home
+ * (the actively-written copy is the newest). Pure over `projectRoots`, so it is
+ * testable against temp dirs without touching the real home directory.
+ */
+export function pickClaudeSessionFileAcrossRoots(
+  projectRoots: string[],
+  cwd: string,
+  sessionId?: string,
+): string | undefined {
+  const enc = claudeProjectDirName(cwd);
+  let best: { path: string; mtime: number } | undefined;
+  for (const root of projectRoots) {
+    const hit = pickSessionFile(path.join(root, enc), sessionId);
+    if (!hit) continue;
+    let mtime: number;
+    try {
+      mtime = fs.statSync(hit).mtimeMs;
+    } catch {
+      continue;
+    }
+    if (!best || mtime > best.mtime) best = { path: hit, mtime };
+  }
+  return best?.path;
 }
 
 /**

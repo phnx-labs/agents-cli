@@ -15,17 +15,77 @@ Scheduled agent execution with sandboxed permissions and scheduler-driven cron e
 
 Each job is a YAML file in `~/.agents/routines/`. A background scheduler parses cron expressions with [croner](https://github.com/hucsm/croner), spawns agent processes at trigger time, and captures output.
 
-### Project routines (inspection-only)
+### Project routines (opt-in daemon firing)
 
 `agents routines list` and `agents routines view <name>` also discover routines in `<project>/.agents/routines/` when invoked from inside a project — project routines shadow user routines of the same name in those views.
 
-Execution paths are intentionally **not** project-aware:
+**Daemon firing is opt-in.** A cloned public repo's `.agents/routines/*.yml` never auto-executes. To schedule project routines:
 
-- `agents routines run <name>` only resolves user routines. A project routine spawns a full agent session with a YAML-supplied prompt, so honoring the project layer would let a cloned public repo prompt-inject the user's next Claude session via `.agents/routines/<name>.yml`.
-- `add`, `edit`, `remove`, `pause`, `resume` are mutation surfaces and stay on the user layer.
-- The background scheduler (which runs from `$HOME`) only loads user routines.
+```bash
+# From inside the project (or pass the path). Confirms interactively unless --yes.
+agents routines enable-project
+agents routines enable-project /path/to/repo --yes
 
-If you want to run a project routine, copy the YAML body into `~/.agents/routines/<name>.yml` first; that materializes consent.
+# Refresh user-layer copies after editing project YAML
+agents routines sync
+agents routines sync /path/to/repo
+
+# See which projects are on the allowlist
+agents routines projects
+
+# Reverse
+agents routines disable-project --remove-synced
+```
+
+What happens on enable/sync:
+
+1. The project root is recorded in `~/.agents/agents.yaml` under `routines.projects`.
+2. Each `.agents/routines/*.yml` is materialised into `~/.agents/routines/<name>.yml` with a `source:` block (`kind: project`, `projectPath`, and git `repo`/`branch`/`commit` when known).
+3. The daemon (which only loads user + system layers) can now fire them. Reload (`SIGHUP` / `agents routines` mutations) re-syncs opted-in projects automatically.
+4. Hand-authored user routines of the same name are never overwritten.
+
+`agents routines list` shows the source repo (and `@branch` when known) in the Repo column for project-sourced routines; `--json` includes `source`, `sourceRepo`, `sourceBranch`, and `hostStrategy`.
+
+A project may also declare `routines: { enable: true }` in its own `agents.yaml` as a documentation signal; daemon firing still requires the explicit `enable-project` allowlist step so consent is materialised into the user layer.
+
+### Host placement strategy
+
+Where the **job body** runs when the daemon fires it (`devices` still controls which daemon may *fire*):
+
+| Strategy | YAML | CLI | Behaviour |
+| --- | --- | --- | --- |
+| `local` | `hostStrategy: local` (default) | `--placement local` | Run on the firing machine |
+| `host` | `hostStrategy: host` + `host: <name>` | `--placement host --run-on <name>` | Run on a named machine over SSH |
+| `fleet` | `hostStrategy: fleet` | `--placement fleet` | Pick one online registered device per run |
+| `cloud` | `hostStrategy: cloud` | `--placement cloud` | Dispatch via the agent's native cloud provider |
+
+```bash
+# Pin firing to this machine and place the body on a GPU box
+agents routines add train --schedule "0 2 * * *" --agent claude \
+  --placement host --run-on gpu-box --prompt "Train overnight"
+
+# Fire once from this machine; each run picks any online fleet device
+agents routines add drain --schedule "0 3 * * *" --agent claude \
+  --placement fleet --prompt "Drain the local work queue"
+
+# Dispatch to Rush Cloud / the agent's native cloud
+agents routines add review --schedule "0 9 * * 1" --agent claude \
+  --placement cloud --repo phnx-labs/agents-cli --prompt "Review open PRs"
+```
+
+```yaml
+# ~/.agents/routines/drain.yml
+name: drain
+schedule: "0 3 * * *"
+agent: claude
+hostStrategy: fleet
+devices: [yosemite-s0]   # firing pin — only this daemon fires (avoids double-fire)
+prompt: "Drain the local work queue"
+```
+
+**Double-fire guard.** `host` / `fleet` / `cloud` require a `devices` pin naming which daemon may *fire* the job. Without it every fleet daemon would fire and each dispatch once. Add and sync auto-pin `devices` to this machine when you omit `--devices`. For `fleet`, that pin is **firing only** — the body still runs on any online fleet device (`pickFleetDevice` does not filter by `devices`). `devices --clear` refuses for off-box strategies. Bare `host:` (without `hostStrategy`) still works and implies `host` strategy (and still needs a pin).
+
+`--host` on `agents routines` is the remote-management passthrough ("manage routines **on** that machine") — do not overload it for placement. Use `--placement` / `--run-on`.
 
 ### Ending a recurring routine
 
@@ -50,9 +110,16 @@ effort: default               # fast, default, or detailed
 timeout: 10m
 runOnce: false                # true for one-shot jobs (--at)
 endAt: "2026-12-31T23:59:00Z" # optional: auto-disable on/after this time
+hostStrategy: local           # local | host | fleet | cloud (see Host placement strategy)
 devices:                      # optional: allowlist — each listed device fires independently
   - yosemite-s0               # omit entirely (or --clear) for unrestricted
   - mac-mini
+# source:                     # set by `agents routines enable-project` / sync
+#   kind: project
+#   projectPath: /path/to/repo
+#   repo: owner/name
+#   branch: main
+#   commit: abc1234
 
 prompt: |
   Review open PRs and summarize status.
@@ -279,45 +346,27 @@ Those archives are indexed by `agents sessions` with `origin: "routine"`,
 them, or `agents sessions <run-id>` to render the existing session summary view
 for a specific routine run.
 
-### Headless claude auth
+### Claude auth for routines
 
-The sandbox overlay builds a clean `HOME` with no Claude credentials — the real
-`~/.claude/` (and its OAuth tokens) is invisible to the spawned process by design.
-A routine that drives headless `claude` will fail authentication unless one of two
-conditions is met.
+A routine authenticates exactly like an interactive `agents run claude` on the
+same device: through the pinned account's own on-disk login.
+`buildRoutineSpawnEnv` sets `CLAUDE_CONFIG_DIR` to the account's per-version home
+(`runner.ts`), so even under the sandbox overlay — which gives the spawn a clean
+`HOME` — Claude Code reads its credential from `CLAUDE_CONFIG_DIR/.credentials.json`,
+the real interactive login. That access token is short-lived but refreshes itself
+per-device, so a box that runs at least once inside the refresh window stays
+signed in on its own.
 
-**Current workaround — `sandbox: false`**
+The daemon holds **no** Claude token and injects nothing — no ambient
+`CLAUDE_CODE_OAUTH_TOKEN`, no per-account variant. A shared or injected token was
+the *cause* of the fleet-wide rotation logout, not the fix (see "Pinning an
+account" below). If a routine's pinned account login has gone dead, the auth-health
+preflight (`runner.ts`) skips the run up front with a `re-login required` message
+rather than firing a doomed run.
 
-Set `sandbox: false` on the routine to skip overlay creation. The agent inherits
-the daemon's full environment, including `CLAUDE_CODE_OAUTH_TOKEN` if the daemon
-was started with it (`runner.ts:218`):
-
-```yaml
-name: my-claude-routine
-schedule: "0 9 * * *"
-agent: claude
-sandbox: false            # overlay HOME has no claude credentials
-prompt: |
-  Do something useful.
-```
-
-**Why `sandbox: false` works, and why the default does not**
-
-When the daemon starts, it reads `CLAUDE_CODE_OAUTH_TOKEN` from the `claude`
-secrets bundle (`daemon.ts:550-563`) and bakes it into the daemon process
-environment (`daemon.ts:820-821`). With `sandbox: true` (the default),
-`buildSpawnEnv` only forwards keys in `ENV_ALLOWLIST` — `CLAUDE_CODE_OAUTH_TOKEN`
-is not on that list (`sandbox.ts:28-49`), so the token is stripped before the
-agent launches. `sandbox: false` sidesteps this by passing `process.env` directly,
-which includes the daemon-level token.
-
-To store the token in the `claude` secrets bundle:
-
-```bash
-agents secrets set claude CLAUDE_CODE_OAUTH_TOKEN <token>
-# Restart the daemon so the updated token is baked into its environment:
-agents routines stop && agents routines start
-```
+To bring a signed-out box back, log in on that box once — `agents run claude` (or
+`claude` directly) drives the interactive login and writes the credential the
+routine then reuses. The daemon does not need restarting; it reads no credential.
 
 ### Pinning an account (avoid the OAuth-rotation revocation storm)
 
@@ -527,6 +576,31 @@ Each execution creates a run directory with structured output:
         report.md                     # Extracted report
         meta.json                     # { agent, version, mode, status, durationMs }
 ```
+
+### Desktop notifications
+
+The daemon fires a native macOS notification on the routine lifecycle, routed
+through the `MenubarHelper.app` companion (`src/lib/menubar/notify-desktop.ts`)
+so it carries the agents-cli mark (the bundle's `AppIcon`) rather than the
+generic AppleScript/Script Editor icon. When the menu-bar helper is not
+installed (Linux, or a machine that disabled it), delivery degrades to
+`osascript`/`notify-send` so a notice is never silently lost.
+
+| Event | When | Threshold |
+| --- | --- | --- |
+| **Start** | The scheduler triggers a routine | Agent/workflow routines only — command (housekeeping) routines are suppressed to avoid spam |
+| **Finish** | The run reaches a terminal state | Always for agent/workflow; command routines notify only on **failure** |
+| **Overdue** | Daemon startup finds a missed recurring routine | Any overdue routine (`src/lib/overdue.ts`) |
+
+"Notable output" is folded into the single **Finish** notification, not sent as
+a third message: on success the body is the first line of `report.md` (the
+routine's user-facing result), on failure it is the error reason. So a normal
+run produces exactly one start + one finish notification.
+
+Notifications are actionable where a target exists: clicking a **Finish** opens
+the run's `report.md`/`stdout.log`; **Start**/**Overdue** open the runs folder.
+The finish notification only fires for locally-run routines — `host:`-placed
+runs are finalized by the monitor sweep and do not emit one.
 
 ## Commands
 

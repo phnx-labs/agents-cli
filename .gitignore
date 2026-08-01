@@ -57,9 +57,23 @@ scripts/scrub-history.sh
 .rush/
 
 # Agents (recurisve)
+# Harness config homes written by `agents` config sync. Keep this list in step
+# with the AGENTS registry in apps/cli/src/lib/agents.ts — a harness that syncs
+# a dir here but is missing below leaves the tree permanently dirty, which
+# blocks scripts/release.sh (it refuses to build a release from a dirty tree).
 **/.claude
 **/.codex
 **/.gemini
+**/.factory
+**/.grok
+**/.kimi-code
+**/.opencode
+**/.antigravity
+**/.cursor
+**/.droid
+**/.goose
+**/.kiro
+**/.openclaw
 **/.tmp
 **/.tmp-bun
 

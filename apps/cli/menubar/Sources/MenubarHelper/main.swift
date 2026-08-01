@@ -9,6 +9,16 @@ import Carbon.HIToolbox
 //   MenubarHelper                 # daemon-spawned; quits when daemon stops
 //   MENUBAR_STANDALONE=1 ...      # dev: stay up even with no daemon running
 //   AGENTS_BIN=/path/to/agents    # override the `agents` binary location
+//   MenubarHelper --notify ...    # one-shot: post a desktop notification, exit
+
+// One-shot notification delivery for the daemon (RUSH-2030). Posts and exits
+// WITHOUT starting the status-bar UI, so the daemon can fire branded, actionable
+// notifications by spawning the installed .app in this mode. The notification is
+// attributed to this bundle, so it shows the app's AppIcon (the agents-cli mark)
+// instead of the generic osascript/Script Editor icon. See Notifier (PromptPanel.swift).
+if CommandLine.arguments.contains("--notify") {
+    Notifier.runOneShot(CommandLine.arguments)
+}
 
 // Benchmark mode: time the data-layer methods that build the menu, then exit.
 // No GUI session needed — LocalState reads files, AgentsCLI shells the CLI.
@@ -42,6 +52,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let promptController = PromptPanelController()
     func applicationDidFinishLaunching(_ notification: Notification) {
         controller.install()
+        // Own notification click-through (RUSH-2030): the daemon posts branded
+        // notifications via one-shot `--notify` processes, but this persistent
+        // instance is the NSUserNotificationCenter delegate that opens their
+        // click URL (a run report/log, or the runs folder) when clicked.
+        Notifier.wireClickHandler()
         let mods = UInt32(cmdKey | shiftKey)
         hotkey.register([
             .init(id: HotkeyManager.clipID, keyCode: UInt32(kVK_ANSI_V), modifiers: mods,

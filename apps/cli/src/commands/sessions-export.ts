@@ -22,7 +22,7 @@ import * as path from 'path';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import type { SessionMeta } from '../lib/session/types.js';
-import { discoverSessions, resolveSessionById, isCompleteSessionId } from '../lib/session/discover.js';
+import { discoverSessions, resolveSessionById, looksLikeSessionId } from '../lib/session/discover.js';
 import { findSessionsById } from '../lib/session/db.js';
 import { filterSessionsByQuery, parseAgentFilter } from './sessions.js';
 import { listLocalTranscripts, SYNC_AGENTS, type LocalTranscript } from '../lib/session/sync/agents.js';
@@ -248,8 +248,8 @@ function resolveAgentShorthand(g: GlobalSelection): string | undefined {
   return undefined;
 }
 
-/** ids > query > everything-in-scope. */
-function selectSessions(metas: SessionMeta[], selectors: string[]): SessionMeta[] {
+/** ids > query > everything-in-scope. Exported for the id-resolution test. */
+export function selectSessions(metas: SessionMeta[], selectors: string[]): SessionMeta[] {
   if (selectors.length === 0) return metas;
 
   const byId: SessionMeta[] = [];
@@ -257,9 +257,11 @@ function selectSessions(metas: SessionMeta[], selectors: string[]): SessionMeta[
   for (const sel of selectors) {
     const trimmed = sel.trim();
     // Same reason as resolveSessionQuery: the discovered pool is a minority of
-    // the index, so a complete id absent from it may still be indexed here.
+    // the index, so an id-shaped selector absent from it may still be indexed
+    // here. Gate on looksLikeSessionId, not isCompleteSessionId, so a SHORT id
+    // ("d3470b57") also resolves through the index instead of falling to content.
     const hits = resolveSessionById(metas, trimmed);
-    const resolved = hits.length > 0 || !isCompleteSessionId(trimmed) ? hits : findSessionsById(trimmed);
+    const resolved = hits.length > 0 || !looksLikeSessionId(trimmed) ? hits : findSessionsById(trimmed);
     if (resolved.length > 0) byId.push(...resolved);
     else unmatched.push(trimmed);
   }
@@ -267,11 +269,12 @@ function selectSessions(metas: SessionMeta[], selectors: string[]): SessionMeta[
     const seen = new Set<string>();
     return byId.filter(s => (seen.has(s.id) ? false : (seen.add(s.id), true)));
   }
-  // A selector that is a COMPLETE session id and still missed cannot be widened:
-  // the id is unique, so the text query below could only bundle sessions that
-  // merely mention it. Bundling those would ship unrelated transcripts to
-  // whoever receives the export, so select nothing and let the caller report it.
-  const missingIds = unmatched.filter(isCompleteSessionId);
+  // A selector that is an id (complete OR a short hex id/prefix) and still missed
+  // cannot be widened: the id is unique, so the text query below could only bundle
+  // sessions that merely mention it. Bundling those would ship unrelated
+  // transcripts to whoever receives the export, so select nothing and let the
+  // caller report it — a short id like "d3470b57" must never content-search.
+  const missingIds = unmatched.filter(looksLikeSessionId);
   if (missingIds.length > 0) {
     process.stderr.write(chalk.red(`No session with id ${missingIds.join(', ')} on this machine.\n`));
     return [];

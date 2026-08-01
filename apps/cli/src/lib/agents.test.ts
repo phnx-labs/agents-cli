@@ -12,7 +12,6 @@ import {
   __resetAntigravityKeychainCacheForTest,
   accountOrgBadge,
   antigravityOsKeyringProbe,
-  claudeHomeHasOwnCredential,
   deprecationNotice,
   formatClaudeOrgLabel,
   getAccountInfo,
@@ -858,68 +857,6 @@ describe('getAccountInfo — claude credential floor (blanked .credentials.json)
       expect(info.usageStatus).toBeNull();
     },
   );
-});
-
-// RUSH-1979: the daemon injects one ambient CLAUDE_CODE_OAUTH_TOKEN so a
-// token-less default account still authenticates; when balanced rotation pins a
-// specific account whose config dir carries its OWN credential, a routine spawn
-// must drop that ambient token (Claude and the Linux shim both prefer the env
-// var) so the pinned account authenticates itself. claudeHomeHasOwnCredential is
-// the signal that decides "this account has its own credential to fall back on".
-describe('claudeHomeHasOwnCredential (RUSH-1979 — rotated-account token drop)', () => {
-  function writeCred(home: string, oauth: Record<string, unknown> | null): void {
-    fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
-    if (oauth) {
-      fs.writeFileSync(
-        path.join(home, '.claude', '.credentials.json'),
-        JSON.stringify({ claudeAiOauth: oauth }),
-        'utf-8',
-      );
-    }
-  }
-
-  it('is true for a home with a live access token off macOS — drop the ambient token', () => {
-    const home = makeTempDir();
-    writeCred(home, { accessToken: 'at-real', refreshToken: 'rt-real', expiresAt: 1 });
-    expect(claudeHomeHasOwnCredential(home, 'linux')).toBe(true);
-  });
-
-  it('is true when only the refresh token survives (a refresh can still recover it)', () => {
-    const home = makeTempDir();
-    writeCred(home, { accessToken: '', refreshToken: 'rt-real', expiresAt: 0 });
-    expect(claudeHomeHasOwnCredential(home, 'linux')).toBe(true);
-  });
-
-  it('is true for a keychain-less .oauth_token fallback file', () => {
-    const home = makeTempDir();
-    fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
-    fs.writeFileSync(path.join(home, '.claude', '.oauth_token'), 'sk-oauth-abc\n', 'utf-8');
-    expect(claudeHomeHasOwnCredential(home, 'linux')).toBe(true);
-  });
-
-  it('is false for a blanked credential pair — keep the ambient token', () => {
-    const home = makeTempDir();
-    writeCred(home, { accessToken: '', refreshToken: '', expiresAt: 0 });
-    expect(claudeHomeHasOwnCredential(home, 'linux')).toBe(false);
-  });
-
-  it('is false when the account home has no on-disk credential at all', () => {
-    const home = makeTempDir();
-    expect(claudeHomeHasOwnCredential(home, 'linux')).toBe(false);
-  });
-
-  it('does not treat a corrupt credential file as a usable credential', () => {
-    const home = makeTempDir();
-    fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
-    fs.writeFileSync(path.join(home, '.claude', '.credentials.json'), '{not json', 'utf-8');
-    expect(claudeHomeHasOwnCredential(home, 'linux')).toBe(false);
-  });
-
-  it('never judges from the file on macOS, where the daemon injects no shadowing token', () => {
-    const home = makeTempDir();
-    writeCred(home, { accessToken: 'at-real', refreshToken: 'rt-real', expiresAt: 1 });
-    expect(claudeHomeHasOwnCredential(home, 'darwin')).toBe(false);
-  });
 });
 
 describe('agent deprecation warnings', () => {

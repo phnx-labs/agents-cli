@@ -13,9 +13,8 @@
  */
 
 import { Cron } from 'croner';
-import * as os from 'os';
-import { spawn } from 'child_process';
 import { listJobs, getLatestRun, jobRunsOnThisDevice } from './routines.js';
+import { notifyDesktop } from './menubar/notify-desktop.js';
 
 export interface OverdueJob {
   name: string;
@@ -91,56 +90,21 @@ export function detectOverdueJobs(now: Date = new Date()): OverdueJob[] {
 }
 
 /**
- * Fire a native desktop notification. Best-effort — failures (missing
- * `osascript`/`notify-send`, no display, headless box) are swallowed so a
- * notification attempt can never take the daemon down.
+ * Fire a branded desktop notification listing the overdue jobs. Routed through
+ * the MenubarHelper companion (notify-desktop.ts) so it carries the agents-cli
+ * mark; clicking opens the runs folder (~/.agents/.history/runs). Best-effort —
+ * a missing notifier or absent display is swallowed and never crashes the daemon.
  */
-export function notifyDesktop(title: string, body: string): void {
-  const platform = os.platform();
-  try {
-    if (platform === 'darwin') {
-      const safeTitle = title.replace(/"/g, '\\"');
-      const safeBody = body.replace(/"/g, '\\"');
-      const child = spawn(
-        'osascript',
-        ['-e', `display notification "${safeBody}" with title "${safeTitle}"`],
-        { detached: true, stdio: 'ignore' }
-      );
-      // A missing binary surfaces as an async 'error' event, NOT a synchronous
-      // throw the try/catch would catch. Without a listener Node re-throws it as
-      // an uncaught exception and takes the whole daemon down. Swallow it — the
-      // notification is best-effort.
-      child.on('error', () => {});
-      child.unref();
-    } else if (platform === 'linux') {
-      const child = spawn('notify-send', [title, body], {
-        detached: true,
-        stdio: 'ignore',
-      });
-      // Headless Linux boxes have no `notify-send` (libnotify-bin); its ENOENT
-      // arrives as an async 'error' event, not a throw. Without this listener
-      // the daemon crashes on every overdue routine and systemd restart-loops it
-      // (which also tears down the browser IPC socket). Swallow — best-effort.
-      child.on('error', () => {});
-      child.unref();
-    }
-  } catch {
-    // Notification is best-effort; nothing to do.
-  }
-}
-
-/** Fire a native desktop notification listing the overdue jobs. Best-effort. */
 export function notifyOverdue(jobs: OverdueJob[]): void {
   if (jobs.length === 0) return;
 
   const title =
-    jobs.length === 1
-      ? `Routine overdue: ${jobs[0].name}`
-      : `${jobs.length} routines overdue`;
+    jobs.length === 1 ? 'Routine overdue' : `${jobs.length} routines overdue`;
+  const subtitle = jobs.length === 1 ? jobs[0].name : undefined;
   const body =
     jobs.length === 1
       ? `Missed ${jobs[0].expectedAt.toLocaleString()}. Run: agents routines catchup`
       : `${jobs.map((j) => j.name).join(', ')} — agents routines catchup`;
 
-  notifyDesktop(title, body);
+  notifyDesktop({ title, subtitle, body, action: 'routines:list' });
 }

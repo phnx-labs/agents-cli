@@ -15,6 +15,7 @@ import { cleanSessionPrompt, extractSessionTopic } from './prompt.js';
 import { renderMarkdown } from '../markdown.js';
 import { redactSecrets } from '../redact.js';
 import { classifyFileChanges, changeCounts, toolHistogram, detectTestResult, type FileChange, type FileOp } from './digest.js';
+import { extractTodoProgressFromEvents } from './state.js';
 
 // ── Path helpers ──────────────────────────────────────────────────────────────
 
@@ -598,7 +599,7 @@ export function renderSummary(events: SessionEvent[], cwd?: string): string {
   const cmdList: Array<{ cmd: string; ts: number }> = [];
 
   // Plan items
-  const todoItems: string[] = [];
+  const todoItems = extractTodoProgressFromEvents(events)?.items.map(item => item.content) ?? [];
   let exitPlanContent: string | null = null;
   let planFilePath: string | null = null;
 
@@ -650,17 +651,6 @@ export function renderSummary(events: SessionEvent[], cwd?: string): string {
         }
       }
 
-      // Plan items: TodoWrite items + TaskCreate descriptions (project's task tracker)
-      if (tool === 'TodoWrite' && Array.isArray(args.todos)) {
-        for (const item of args.todos) {
-          const text = item.content || item.text || String(item);
-          if (text && !todoItems.includes(text)) todoItems.push(text);
-        }
-      }
-      if (tool === 'TaskCreate' && (args.description || args.prompt)) {
-        const text = String(args.description || args.prompt || '').slice(0, 140);
-        if (text && !todoItems.includes(text)) todoItems.push(text);
-      }
       if (tool === 'ExitPlanMode') {
         exitPlanContent = args.result || args.plan || args.content || null;
       }
@@ -902,6 +892,9 @@ export function parseRoleList(raw: string, flag: string): RoleFilter[] {
 }
 
 function roleOfEvent(e: SessionEvent): RoleFilter | null {
+  // Synthetic scaffolding still maps to 'user' here so `--exclude user` drops it
+  // like any other user-role event (pre-flag behavior). `--include user`'s
+  // "genuine intent only" carve-out lives in applyRoleFilter, not here.
   if (e.type === 'message' && e.role === 'user') return 'user';
   if (e.type === 'message' && e.role === 'assistant') return 'assistant';
   if (e.type === 'thinking') return 'thinking';
@@ -920,7 +913,12 @@ function applyRoleFilter(events: SessionEvent[], opts: FilterOptions): SessionEv
     const set = new Set(opts.include);
     return events.filter(e => {
       const role = roleOfEvent(e);
-      return role !== null && set.has(role);
+      if (role === null) return false;
+      // `--include user` means genuine user intent, so drop harness-injected
+      // `_synthetic` scaffolding (bash-input, system-reminder) even though it
+      // carries role=user. `--exclude user` still drops it via roleOfEvent.
+      if (role === 'user' && e._synthetic) return false;
+      return set.has(role);
     });
   }
   if (opts.exclude && opts.exclude.length > 0) {
@@ -949,8 +947,12 @@ function applyTurnSlice(events: SessionEvent[], opts: FilterOptions): SessionEve
     throw new Error(`Turn count must be a positive integer, got ${n}`);
   }
 
+  // A turn starts at a GENUINE user message — harness-injected `_synthetic`
+  // scaffolding (`<bash-input>`/`<bash-stdout>`, etc.) does not start a turn,
+  // so `--first N` / `--last N` count real asks, not the jump command that
+  // opened the session and its shell output.
   const isTurnStart = (e: SessionEvent): boolean =>
-    e.type === 'message' && e.role === 'user';
+    e.type === 'message' && e.role === 'user' && !e._synthetic;
   const turnStartIdx: number[] = [];
   for (let i = 0; i < events.length; i++) if (isTurnStart(events[i])) turnStartIdx.push(i);
 

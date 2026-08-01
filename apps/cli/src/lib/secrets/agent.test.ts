@@ -61,8 +61,8 @@ describe('handleAgentRequest', () => {
     handleAgentRequest(store, loadReq('b', { K: '2' }, 60_000), 0);
     const r = handleAgentRequest(store, { cmd: 'lock', name: 'a' }, 0);
     expect(r).toEqual({ ok: true, cmd: 'lock', wiped: 1 });
-    expect(store.has('cli:a')).toBe(false);
-    expect(store.has('cli:b')).toBe(true);
+    expect(store.has('*:a')).toBe(false);
+    expect(store.has('*:b')).toBe(true);
   });
 
   it('lock with no name wipes everything and reports the count', () => {
@@ -86,8 +86,38 @@ describe('handleAgentRequest', () => {
     const r = handleAgentRequest(store, { cmd: 'status' }, 5_000);
     expect(r.ok).toBe(true);
     if (r.ok && r.cmd === 'status') {
-      expect(r.entries).toEqual([{ name: 'live', expiresAt: 10_000, keyCount: 2, harness: 'cli' }]);
+      expect(r.entries).toEqual([{ name: 'live', expiresAt: 10_000, keyCount: 2, harness: '*' }]);
     }
+  });
+
+  // The bug: an unlock typed in a terminal was stored under the ambient harness
+  // and a read from inside an agent asked under ITS ambient harness, so the two
+  // never met and a live grant read as "not unlocked" for its whole TTL.
+  it('an unscoped (global) grant is readable by an agent-scoped reader', () => {
+    const store = freshStore();
+    handleAgentRequest(store, loadReq('npmjs.com', { NPM_TOKEN: 't' }, 60_000), 0);
+    const r = handleAgentRequest(store, { cmd: 'get', name: 'npmjs.com', harness: 'claude' }, 0);
+    expect(r.ok && r.cmd === 'get' && r.hit).toBe(true);
+    if (r.ok && r.cmd === 'get' && r.hit) expect(r.env.NPM_TOKEN).toBe('t');
+  });
+
+  it('a --for grant stays private to that harness', () => {
+    const store = freshStore();
+    handleAgentRequest(store, { ...loadReq('prod', { K: '1' }, 60_000), harness: 'claude' }, 0);
+    const mine = handleAgentRequest(store, { cmd: 'get', name: 'prod', harness: 'claude' }, 0);
+    const theirs = handleAgentRequest(store, { cmd: 'get', name: 'prod', harness: 'codex' }, 0);
+    expect(mine.ok && mine.cmd === 'get' && mine.hit).toBe(true);
+    expect(theirs.ok && theirs.cmd === 'get' && theirs.hit).toBe(false);
+  });
+
+  it('a narrow grant wins over a global one for its own harness', () => {
+    const store = freshStore();
+    handleAgentRequest(store, loadReq('prod', { K: 'global' }, 60_000), 0);
+    handleAgentRequest(store, { ...loadReq('prod', { K: 'narrow' }, 60_000), harness: 'claude' }, 0);
+    const r = handleAgentRequest(store, { cmd: 'get', name: 'prod', harness: 'claude' }, 0);
+    if (r.ok && r.cmd === 'get' && r.hit) expect(r.env.K).toBe('narrow');
+    const other = handleAgentRequest(store, { cmd: 'get', name: 'prod', harness: 'codex' }, 0);
+    if (other.ok && other.cmd === 'get' && other.hit) expect(other.env.K).toBe('global');
   });
 
   it('load overwrites an existing bundle and resets its TTL', () => {
@@ -584,7 +614,7 @@ describe('isRequestAuthorized (RUSH-1760: authorization gate)', () => {
         // Correct token: load lands, and an authorized get reads it back.
         expect(await roundtrip(sock, { cmd: 'load', name: 'prod', bundle: bundle('prod'), env: { K: 'v' }, ttlMs: 60_000, token: TOKEN }))
           .toEqual({ ok: true, cmd: 'load' });
-        expect(store.has('cli:prod')).toBe(true);
+        expect(store.has('*:prod')).toBe(true);
         expect(await roundtrip(sock, { cmd: 'get', name: 'prod', token: TOKEN }))
           .toMatchObject({ ok: true, cmd: 'get', hit: true, env: { K: 'v' } });
       } finally {

@@ -2,14 +2,35 @@
 
 ## Agent-scoped unlocks
 
-On macOS, a secrets request can raise Touch ID directly, including from a
-background agent. The sheet names the requesting harness, bundle, reason, and
-unlock duration. Approved bundles are cached for seven days by default and are
-reused only by the same harness type.
+On macOS, **an agent launch never raises a Touch ID sheet.** A terminal, a
+routine, a teammate, or the daemon that needs a locked bundle fails fast and names
+`agents secrets unlock <bundle>` — opening an agent is not a request to
+authenticate, and because each keychain read runs in its own helper process the
+biometric assertion never reuses, so one launch used to mean one sheet per bundle.
 
-Use `agents secrets unlock prod --for claude` to pre-authorize a bundle for
-Claude. Codex, Kimi, and other harnesses require their own approval. `--ttl`
-changes the duration; `--durable` keeps the grant across sleep and reboot.
+The sheet is raised only by a deliberate human request: `agents secrets unlock`,
+or an `agents secrets get/export/exec` you run **in a plain shell**. Beneath an
+agent those same commands inherit `AGENTS_RUNTIME` and resolve broker-only — there
+the agent is the caller, not you. It names the requesting
+harness, bundle, reason, and unlock duration. Approved bundles are cached for seven
+days by default.
+
+**An unlock is global unless you narrow it.** `agents secrets unlock prod` grants
+every harness and a plain shell access for the whole TTL — one Touch ID covers all
+of them. `--for claude` narrows the grant to that harness alone, and other
+harnesses then need their own approval. A reader resolves its own harness scope
+first and falls back to the global grant, so a narrow grant always wins where it
+applies. `--ttl` changes the duration; `--durable` keeps the grant across sleep and
+reboot.
+
+Grants are keyed by scope (`*` for global, the harness id for a `--for` grant) in
+both the broker's memory and the durable session store, and both resolve through
+the same chain — so an unlock behaves identically before and after a daemon
+restart. Before this was unified, an unlock typed in a terminal was stored under
+the ambient `AGENTS_AGENT_NAME` (falling back to a literal `cli`) while a read from
+inside an agent looked under *its* ambient name: the two never met, and a valid
+grant read as "not unlocked" for its entire TTL. Grants written under the old `cli`
+scope migrate to global automatically on the next broker start.
 
 Named bundles of environment variables backed by macOS Keychain — device-local, biometry-gated, injected into agent runs at spawn time.
 
@@ -252,7 +273,7 @@ The Windows push bridge is `buildWindowsStdinImportCommand` in
 | `secrets unlock <name> --ttl <dur>` | Hold for a custom lifetime (default 7d) | `agents secrets unlock prod --ttl 30m` |
 | `secrets unlock <name> --durable` | Also survive sleep + reboot (default: survives upgrade/restart, re-locks on sleep) | `agents secrets unlock prod --durable` |
 | `secrets lock [names...]` | Wipe held bundles from the agent (default: all) — next read re-prompts | `agents secrets lock` |
-| `secrets status` | Show which bundles the agent holds and when they lock | `agents secrets status` |
+| `secrets status` | Show which bundles the agent holds and when they lock, and suggest unlocking any you keep getting prompted for | `agents secrets status` |
 | `secrets policy <bundle> [policy]` | Show or set a bundle's prompt policy: `daily` (default), `always`, or `never` (silent, no biometry ACL — needs `--i-understand`) | `agents secrets policy signing always` |
 | `secrets create <name> --policy always` | Create a bundle that prompts on every read | `agents secrets create signing --policy always` |
 | `secrets create <name> --policy never --i-understand` | Create a silent, unprotected (no biometry ACL) automation-only bundle | `agents secrets create ci-cache --policy never --i-understand` |
@@ -532,6 +553,8 @@ The secrets-agent is the ssh-agent answer:
 - **The unlock survives an agents-cli upgrade / daemon restart.** The resolved env is also persisted as a device-local, non-biometry keychain session item that the broker **rehydrates on start** and that reads fall back to silently — so a restart (which empties the broker's memory) no longer forces a re-tap, and a headless read no longer fails with "not unlocked in the secrets agent". It still re-locks on sleep by default; pass **`--durable`** (or set `secrets.agent.durable: true`) to survive sleep + reboot as well. `lock`, rotate, and delete clear the session item. Audit reads served from it tag `"source":"session"`.
 
 It is **opt-in by construction**: if you never run `unlock`, resolution is byte-for-byte today's keychain path. Audit events tag broker-served reads with `"source":"agent"` so you can tell them apart from real keychain reads.
+
+Because those audit events record every read, `agents secrets status` closes the loop: it reads the `secrets.get` events and, at the end of its output, lists any keychain-backed bundle you were prompted for (a read that fell through to biometry, not served by the broker/session) **3+ times in the last 7 days** and is not currently held — each with a ready `agents secrets unlock <name>`. It runs even when nothing is held (the case where you re-prompt most), and skips `never`/no-ACL and file/vault bundles, which never raise a Touch ID prompt.
 
 ### Persistent service
 

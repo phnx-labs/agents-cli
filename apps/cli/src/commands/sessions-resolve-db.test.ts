@@ -82,4 +82,27 @@ describe('resolveSessionQuery falls back to the index for a complete id', () => 
     expect(r.completeId).toBe(false);
     expect(r.byId).toBe(false);
   });
+
+  it('a short/partial id resolves by id only — never fuzzy-matches content', () => {
+    // Reproduces the bug: a bare hex short-id used to skip the id path
+    // (isCompleteSessionId only caught full UUIDs) and fall to content search,
+    // surfacing every transcript that merely MENTIONS the string — e.g. a resume
+    // prompt echoing the parent id. It must resolve by id: no id starts with the
+    // query, so the answer is "no match", not the mentioner. (Synthetic ids that
+    // no sibling test uses, so a shared index can't cross-contaminate.)
+    const mentioner = 'aaaa1111-1111-2222-3333-444455556666';
+    upsertSession(meta(mentioner, { topic: 'resume previous work: bbbb2222' }), 'resume previous work bbbb2222 earlier');
+    const r = resolveSessionQuery([], 'bbbb2222');
+    expect(r.matches).toEqual([]);
+    expect(r.byId).toBe(true);
+    expect(r.completeId).toBe(false);
+  });
+
+  it('a short id that IS a real session prefix resolves to that session by id', () => {
+    const full = 'cccc3333-1111-2222-3333-444455556666';
+    upsertSession(meta(full, { topic: 'the real one' }), '');
+    const r = resolveSessionQuery([], 'cccc3333');
+    expect(r.matches.map(s => s.id)).toEqual([full]);
+    expect(r.byId).toBe(true);
+  });
 });

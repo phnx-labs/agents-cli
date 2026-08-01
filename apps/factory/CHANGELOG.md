@@ -6,6 +6,40 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **Host selection is now agent-aware, and a new "New Claude (Auto)" command picks host + strategy in one step (RUSH-2025).** "New Claude (Pick Host)" / "(Auto Host)" could land on a device with no signed-in, usable Claude — the host picker only ranked by running-agent count. Now, when picking or auto-selecting a host for a specific agent, the balancer probes each candidate's version health (via `agents view <agent> --host <device> --json`) and hardware load/memory (via `fetchDeviceStats`), **drops devices with no signed-in, non-throttled version**, and ranks the rest by a composite score (running agents dominate; load and memory pressure break ties so a crashing/thrashing box is deprioritized). If no fleet device has a usable version, it falls back to a local launch with a clear warning instead of launching into a broken agent. Pick Host and Auto Host now also launch with `--strategy balanced`, so the CLI's account rotation routes around a signed-out / throttled version on the chosen device. A new **"Agents: New Claude (Auto)"** command (`agents.newClaudeAuto`, plus Codex/Gemini/Cursor/Antigravity equivalents) combines automatic agent-healthy host selection with balanced version rotation. Pure ranking logic (`deviceHasUsableVersion`, `hostScore`, `pickBestHost`) lives in `src/core/launchHost.ts` and is unit-tested without live SSH. Source: `apps/factory/src/core/launchHost.ts`, `apps/factory/src/vscode/extension.ts`, `apps/factory/package.json`.
+- **`Agents: New Agent` (⌘⇧A) is now a smart three-tier launch instead of always
+  Claude (RUSH-2029).** The generic New Agent command previously hard-coded the
+  configured default agent. It now (1) picks the agent TYPE by recent/frequent
+  usage — aggregating fleet-wide session history (`fetchRecapSessions`) into a
+  per-agent preference that weights the last 24 hours heavily while still counting
+  longer-term frequency, and falling back to the configured default when there is
+  no usable history; (2) launches with `--strategy balanced` so the version/account
+  is load-balanced across healthy signed-in accounts; and (3) auto-picks the
+  least-busy healthy device via `resolveBalancedHost`. Uninstalled or signed-out
+  agents are excluded from selection, and a status-bar note reports the choice
+  (e.g. `New Agent: Codex (balanced on yosemite-s0)`). The explicit per-agent
+  commands (`New Claude …`, `New Codex …`) are unchanged. New pure selector
+  `src/core/agentUsage.ts` (`rankAgentsByUsage` / `pickAgentByUsage`) is unit-tested
+  against fixture history. Source: `apps/factory/src/core/agentUsage.ts`,
+  `apps/factory/src/vscode/extension.ts`.
+- **Native-mode agent terminal tabs now close automatically when the agent exits (RUSH-2026).** In native (non-tmux) terminal mode, the launch command is now prefixed with `exec` so the shell process replaces itself with the agent runner. When the agent exits the terminal process exits too and VS Code closes the tab automatically — no manual close needed. This mirrors the existing tmux pane-died behaviour. Shell tabs (the SH agent type) and tmux-mode terminals are unaffected. Remote `--host` launches get the same treatment: the local SSH wrapper exits with the remote session. Source: `apps/factory/src/core/agents.ts` (`wrapNativeAgentCommand`), `apps/factory/src/vscode/extension.ts` (`openSingleAgent`).
+
+- **Interactive agent launches now default to `--mode auto` instead of stalling in read-only plan mode (RUSH-2038).** Launching Codex, Claude, Gemini, Cursor, OpenCode, or Antigravity from Factory without explicitly choosing a mode now runs in `auto` (writable-but-gated), so the agent can edit files immediately. Previously the CLI default of `plan` was inherited, causing Codex to start with `--sandbox read-only` and wait indefinitely for approval. `buildAgentLaunchCommand` is now in `src/core/agents.ts` so it is unit-testable without a VS Code harness. Source: `apps/factory/src/core/agents.ts`, `apps/factory/src/vscode/extension.ts`.
+
+- **Stuck Claude tab labels self-heal, and an existing session name is reused
+  before summarizing.** Two follow-ups to the derived-label fix: (1) On reload,
+  a tab already reading `CC - muqsitnawaz-91` had that derived placeholder
+  re-adopted as a sticky manual label, which blocked the auto-label poller
+  forever. The label paths (poller-arm and focus) now detect a label that is
+  EXACTLY the session's own derived name and clear it so a real name/topic
+  resolves — matched against the session file, so a genuine label (e.g.
+  "Daemon Creds") or an old-CLI name is never touched. It only clears a label +
+  its store entry; the tmux session and agent are never affected. (2) The
+  auto-label path now reuses Claude's persisted `/status` title as soon as one
+  exists — even before a first user message is captured — and only summarizes
+  with the LLM when there is no existing name. New `readClaudeSessionNameInfo`
+  exposes the session's name + source for the heal check.
+
 ## [0.9.299] - 2026-08-01
 
 - **The extension no longer runs its own stall-detection/nudge injector — the

@@ -12,15 +12,16 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { getDaemonDir as getDaemonDirRoot } from './state.js';
-import { isAlive, killTree, backgroundSpawnOptions } from './platform/index.js';
+import { isAlive, killTree, backgroundSpawnOptions, waitForExit } from './platform/index.js';
 import { listJobs as listAllJobs } from './routines.js';
+import { syncAllProjectRoutines } from './routines-project.js';
 import { JobScheduler } from './scheduler.js';
 import { MonitorEngine } from './monitors/engine.js';
 import { executeJobDetached, monitorRunningJobs } from './runner.js';
-import { detectOverdueJobs, notifyOverdue, notifyDesktop } from './overdue.js';
+import { detectOverdueJobs, notifyOverdue } from './overdue.js';
+import { notifyRoutineStart, notifyRoutineFinish, notifyRoutineStartFailed } from './routine-notify.js';
 import { BrowserService } from './browser/service.js';
 import { BrowserIPCServer } from './browser/ipc.js';
-import { readAndResolveBundleEnv } from './secrets/bundles.js';
 import { redactSecrets } from './redact.js';
 import { getAgentsBinPath, getCliLaunch, BUN_VIRTUAL_ROOT } from './cli-entry.js';
 
@@ -34,13 +35,6 @@ const PLIST_NAME = 'com.phnx-labs.agents-daemon';
 const SYSTEMD_UNIT = 'agents-daemon.service';
 const MONITOR_TICK_MS = 60_000;
 const WEDGE_THRESHOLD_TICKS = 3;
-
-// A long-lived `claude setup-token` value stored in this secrets bundle/key is
-// baked into the daemon's service-manager environment so headless routine runs
-// authenticate without depending on the short-lived interactive Keychain OAuth
-// session (which expires between runs and produces intermittent 401s).
-const DAEMON_OAUTH_BUNDLE = 'claude';
-const DAEMON_OAUTH_KEY = 'CLAUDE_CODE_OAUTH_TOKEN';
 
 /**
  * RUSH-1817: decide whether the daemon should (re)take over hosting the secrets
@@ -183,6 +177,11 @@ export function isDaemonWedged(): boolean {
   return elapsed > WEDGE_THRESHOLD_TICKS * MONITOR_TICK_MS;
 }
 
+/** How long stopDaemon waits for a SIGTERMed daemon to exit before escalating. */
+const STOP_GRACE_MS = 5000;
+/** How long it waits after the hard tree-kill before giving up. */
+const STOP_KILL_GRACE_MS = 2000;
+
 /** Check if the daemon process is alive by sending signal 0 to the stored PID. */
 export function isDaemonRunning(): boolean {
   const pid = readDaemonPid();
@@ -304,35 +303,13 @@ export async function runDaemon(): Promise<void> {
   }
   log('INFO', `Daemon started (PID: ${process.pid})`);
 
-  // RUSH-1759: the launchd plist / systemd unit no longer bake the Claude OAuth
-  // token onto disk. Obtain it here from the secure `claude` secrets bundle and
-  // inject into this process's env so every routine run this daemon spawns still
-  // receives it (via the sandbox allowlist), without the token ever being
-  // persisted in the service manifest. A read from a file-backed store (Linux)
-  // needs no prompt; on macOS it resolves broker-only from an unlocked
-  // secrets-agent and is otherwise absent (leaving the daemon on its existing
-  // interactive OAuth session), matching the detached-start path. Never blocks.
-  if (!process.env.CLAUDE_CODE_OAUTH_TOKEN) {
-    const oauthToken = readDaemonClaudeOAuthToken();
-    if (oauthToken) {
-      process.env.CLAUDE_CODE_OAUTH_TOKEN = oauthToken;
-      log('INFO', 'Loaded Claude OAuth token from secrets bundle for routine runs');
-    } else {
-      // No token available (e.g. a headless macOS daemon whose keychain was
-      // locked at start resolves broker-only and gets nothing). Historically
-      // this was silent, so every Claude routine the daemon spawned failed auth
-      // with no signal. Make it loud: WARN in the log and fire a desktop alert.
-      log(
-        'WARN',
-        'No Claude OAuth token available — Claude routine runs will fail auth on this host. ' +
-          'Restart the daemon with the keychain unlocked, or unlock the `claude` secrets bundle.',
-      );
-      notifyDesktop(
-        'agents daemon: no Claude credential',
-        'Claude routines will fail auth on this host. Restart the daemon with the keychain unlocked.',
-      );
-    }
-  }
+  // The daemon holds NO Claude credential of its own. Routine runs authenticate
+  // exactly like an interactive `agents run`: through the per-account
+  // CLAUDE_CONFIG_DIR login on this device (its own auto-refreshing
+  // .credentials.json). Claude Code's interactive access token is short-lived but
+  // refreshes itself per-device; a routine whose account login has gone dead is
+  // skipped up front by the auth-health preflight (runner.ts) with a re-login
+  // hint, rather than papered over by an injected fallback token.
 
   // Reap any stray duplicate daemon of this install that slipped past the start
   // lock or was orphaned by a hard-crash — before it can double-fire jobs.
@@ -373,13 +350,39 @@ export async function runDaemon(): Promise<void> {
         ? `workflow: ${config.workflow}`
         : `agent: ${config.agent}`;
     log('INFO', `Triggering job '${config.name}' (${jobLabel})`);
+    // RUSH-2030: branded desktop notification on start (agent/workflow routines;
+    // suppressed for command housekeeping). Finish/output is fired from the
+    // onFinish hook below — executeJobDetached finalizes the run in-process, so
+    // the monitor tick never sees the live transition. Never let a notification
+    // failure break the trigger.
+    try { notifyRoutineStart(config); } catch { /* best-effort */ }
     try {
-      const meta = await executeJobDetached(config);
+      const meta = await executeJobDetached(config, {
+        onFinish: (final) => {
+          try { notifyRoutineFinish(final); } catch { /* best-effort */ }
+        },
+      });
       log('INFO', `Job '${config.name}' spawned (run: ${meta.runId}, PID: ${meta.pid})`);
     } catch (err) {
-      log('ERROR', `Job '${config.name}' failed to spawn: ${(err as Error).message}`);
+      const message = (err as Error).message;
+      log('ERROR', `Job '${config.name}' failed to spawn: ${message}`);
+      // RUSH-2030: the START ping already fired unconditionally above. A pre-spawn
+      // failure produces no run record and thus no onFinish, so send a synthetic
+      // "failed to start" finish here — otherwise the user is left with an orphaned
+      // "Routine started" and never told it failed.
+      try { notifyRoutineStartFailed(config, message); } catch { /* best-effort */ }
     }
   });
+
+  // Materialise opted-in project routines into the user layer on every start
+  // so a fresh daemon picks up project YAML without a separate sync step.
+  try {
+    const result = syncAllProjectRoutines();
+    const n = result.projects.reduce((acc, p) => acc + p.synced.length, 0);
+    if (n > 0) log('INFO', `Project routines sync: ${n} job(s) from ${result.projects.length} project(s)`);
+  } catch (err) {
+    log('WARN', `Project routines sync failed: ${(err as Error).message}`);
+  }
 
   scheduler.loadAll();
   const scheduled = scheduler.listScheduled();
@@ -703,6 +706,18 @@ export async function runDaemon(): Promise<void> {
 
   const handleReload = () => {
     log('INFO', 'Reloading jobs (SIGHUP)');
+    // Refresh user-layer copies of opted-in project routines BEFORE the
+    // scheduler reloads, so YAML edits under `<project>/.agents/routines/`
+    // take effect on the next fire without a manual `routines sync`.
+    try {
+      const result = syncAllProjectRoutines();
+      const n = result.projects.reduce((acc, p) => acc + p.synced.length, 0);
+      if (n > 0 || result.missing.length > 0) {
+        log('INFO', `Project routines sync: ${n} updated, ${result.missing.length} missing roots`);
+      }
+    } catch (err) {
+      log('WARN', `Project routines sync failed: ${(err as Error).message}`);
+    }
     scheduler.reloadAll();
     const reloaded = scheduler.listScheduled();
     log('INFO', `Reloaded ${reloaded.length} jobs`);
@@ -749,31 +764,6 @@ export async function runDaemon(): Promise<void> {
   await new Promise(() => {});
 }
 
-/**
- * Read the long-lived Claude OAuth token (from `claude setup-token`) that the
- * user stored under the `claude` secrets bundle. Resolves the bundle the same
- * way `agents run --secrets` does. Interactive starts may prompt Keychain;
- * headless auto-starts are broker-only and return null unless the user already
- * unlocked the bundle in the secrets agent. That keeps a background browser
- * command from hanging on an unseen biometric prompt. Never throws: an absent
- * token leaves the daemon on its existing interactive OAuth session.
- */
-export function readDaemonClaudeOAuthToken(
-  opts: { allowPrompt?: boolean } = {},
-): string | null {
-  try {
-    const allowPrompt = opts.allowPrompt ?? Boolean(process.stdin.isTTY);
-    const { env } = readAndResolveBundleEnv(DAEMON_OAUTH_BUNDLE, {
-      caller: 'daemon',
-      agentOnly: !allowPrompt,
-    });
-    const token = (env[DAEMON_OAUTH_KEY] ?? '').trim();
-    return token.length > 0 ? token : null;
-  } catch {
-    return null;
-  }
-}
-
 /** Escape a string for safe inclusion in an XML <string> node. */
 function xmlEscape(s: string): string {
   return s
@@ -803,11 +793,10 @@ export function writeOwnerOnlyServiceManifest(filePath: string, content: string)
 /**
  * Generate a macOS launchd plist for auto-starting the daemon.
  *
- * The plist never embeds the Claude OAuth token (RUSH-1759): a persisted service
- * manifest is a plaintext credential on disk even at 0600. The daemon instead
- * obtains the token at startup from the `claude` secrets bundle
- * (readDaemonClaudeOAuthToken, injected in runDaemon), so it stays in the
- * Keychain-backed secure store and never touches the unit file.
+ * The plist never embeds a Claude OAuth token: the daemon holds no Claude
+ * credential at all. Routine runs authenticate through the per-account
+ * CLAUDE_CONFIG_DIR login on this device, exactly like an interactive
+ * `agents run`, so no credential ever touches the service manifest.
  */
 export function generateLaunchdPlist(
   agentsBin: string = getAgentsBinPath(),
@@ -850,11 +839,10 @@ function systemdExecArg(value: string): string {
 /**
  * Generate a Linux systemd user unit for auto-starting the daemon.
  *
- * The unit never embeds the Claude OAuth token (RUSH-1759): a persisted service
- * manifest is a plaintext credential on disk even at 0600. The daemon instead
- * obtains the token at startup from the `claude` secrets bundle
- * (readDaemonClaudeOAuthToken, injected in runDaemon), so it stays in the secure
- * store and never touches the unit file.
+ * The unit never embeds a Claude OAuth token: the daemon holds no Claude
+ * credential at all. Routine runs authenticate through the per-account
+ * CLAUDE_CONFIG_DIR login on this device, exactly like an interactive
+ * `agents run`, so no credential ever touches the unit file.
  */
 export function generateSystemdUnit(
   agentsBin: string = getAgentsBinPath(),
@@ -1010,25 +998,6 @@ function startDaemonLocked(agentsBin: string): { pid: number | null; method: str
 }
 
 /**
- * Environment for the detached daemon fallback. The launchd/systemd paths
- * deliver the long-lived OAuth token via the service manifest's environment;
- * the detached path has no manifest, so inject it here. Read happens during an
- * interactive `routines start`, so a Keychain Touch ID prompt can be satisfied;
- * the daemon then passes it to every routine run it spawns. An already-set
- * value (e.g. inherited from launchd) is left untouched.
- */
-export function buildDetachedDaemonEnv(
-  baseEnv: NodeJS.ProcessEnv = process.env,
-  oauthToken: string | null = readDaemonClaudeOAuthToken(),
-): NodeJS.ProcessEnv {
-  const env = { ...baseEnv };
-  if (!env.CLAUDE_CODE_OAUTH_TOKEN) {
-    if (oauthToken) env.CLAUDE_CODE_OAUTH_TOKEN = oauthToken;
-  }
-  return env;
-}
-
-/**
  * Resolve how to launch the daemon: `node <entry> __daemon-run`, matching the
  * exact form that works under a direct `__daemon-run`.
  *
@@ -1110,7 +1079,7 @@ interface StartDetachedOptions {
   agentsBin?: string;
   /** Log file the daemon's stdio is redirected to (defaults to the daemon log). */
   logPath?: string;
-  /** Environment for the child (defaults to the OAuth-augmented detached env). */
+  /** Environment for the child (defaults to the daemon's current process env). */
   env?: NodeJS.ProcessEnv;
 }
 
@@ -1127,7 +1096,7 @@ export function startDetached(opts: StartDetachedOptions = {}): { pid: number | 
   const child = spawn(command, args, {
     stdio: ['ignore', logFd, logFd],
     ...backgroundSpawnOptions({ fdStdio: true }),
-    env: opts.env ?? buildDetachedDaemonEnv(),
+    env: opts.env ?? process.env,
   });
 
   // A failed spawn (ENOENT/EACCES) emits 'error' asynchronously; without a
@@ -1204,10 +1173,19 @@ export function stopDaemon(): boolean {
         process.kill(pid, 'SIGTERM');
       } catch { /* process already exited */ }
 
-      // Escalate to a hard tree-kill if it ignored SIGTERM after the grace period.
-      setTimeout(() => {
-        if (isAlive(pid)) killTree(pid);
-      }, 5000);
+      // Wait for it to actually go. This used to be a setTimeout escalation plus
+      // an immediate removeDaemonPid(), which had two failure modes: in a
+      // short-lived process (the npm postinstall) the timer never fired at all,
+      // and clearing the pid file while the old daemon still ran made
+      // isDaemonRunning() report false, so startDaemon() launched a SECOND
+      // daemon. Its hosted broker then unlinked the live socket and rebound,
+      // orphaning the first broker with every unlocked bundle still in its RAM
+      // and unreachable — two brokers on one socket path, seen on a real machine
+      // after an install into a second prefix.
+      if (!waitForExit(pid, STOP_GRACE_MS)) {
+        killTree(pid);
+        waitForExit(pid, STOP_KILL_GRACE_MS);
+      }
     }
   }
 

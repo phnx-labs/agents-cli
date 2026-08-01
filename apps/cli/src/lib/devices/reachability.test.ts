@@ -18,9 +18,12 @@ import * as os from 'os';
 import * as path from 'path';
 import type { DeviceStats } from './health.js';
 
-// Set HOME before state.ts loads so its module-level root picks up the override.
+// Redirect the device registry dir to a test-private temp so writes never touch
+// the user's real ~/.agents/.history/devices (RUSH-2042). getDevicesDir() reads
+// AGENTS_DEVICES_DIR at call time — immune to the module-cache race a plain HOME
+// override loses once any static import of state.ts has already run.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-reachability-test-'));
-process.env.HOME = TEST_HOME;
+process.env.AGENTS_DEVICES_DIR = path.join(TEST_HOME, 'devices');
 
 const { upsertDevice, loadDevices, getDevice, writeReachability } = await import('./registry.js');
 const { deviceOnlineState, reachabilityFromStats, collectReachabilityWriteBacks } = await import(
@@ -28,7 +31,7 @@ const { deviceOnlineState, reachabilityFromStats, collectReachabilityWriteBacks 
 );
 
 function registryPath(): string {
-  return path.join(TEST_HOME, '.agents', '.history', 'devices', 'registry.json');
+  return path.join(TEST_HOME, 'devices', 'registry.json');
 }
 
 function stat(host: string, reachable: boolean, fetchedAt: number): DeviceStats {

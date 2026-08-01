@@ -85,6 +85,7 @@ import {
   type FleetHealthRow,
 } from '../lib/devices/health-report.js';
 import { loadFleetStats, readStatsCache } from '../lib/devices/stats-cache.js';
+import { collectLocalFleetInventory } from '../lib/devices/fleet-inventory.js';
 import { checkSyncStatus, countOrphans } from '../lib/drift.js';
 import { checkAllClis } from '../lib/teams/agents.js';
 import { buildRemoteAgentsInvocation } from '../lib/hosts/remote-cmd.js';
@@ -403,6 +404,7 @@ interface RemoteDoctorJson {
   sync?: FleetHealthRow['sync'];
   orphans?: FleetHealthRow['orphans'];
   auth?: FleetHealthRow['auth'];
+  fleet?: FleetHealthRow['inventory'];
 }
 
 interface FleetStatusTarget extends FanOutDeviceTarget {
@@ -426,6 +428,9 @@ function localHealthRow(self: string, stats?: DeviceStats): FleetHealthRow {
     clis: checkAllClis(),
     sync: checkSyncStatus(process.cwd()),
     orphans: countOrphans(),
+    // Local baseline inventory for cross-device divergence (RUSH-2027) — the
+    // yardstick every remote box is compared against.
+    inventory: collectLocalFleetInventory(process.cwd()),
   };
 }
 
@@ -451,6 +456,10 @@ async function probeRemoteHealth(target: FleetStatusTarget): Promise<Omit<FleetH
     // so the Auth column is current without a prior fleet-wide `fleet ping`.
     // Older remotes that don't emit it fall back to this host's cache below.
     auth: parsed.auth,
+    // Harness inventory (resources / agent versions / repo state) for
+    // cross-device divergence detection (RUSH-2027). Undefined on an older CLI
+    // that doesn't emit the `fleet` field — the comparator skips it.
+    inventory: parsed.fleet,
   };
 }
 
@@ -526,7 +535,7 @@ async function runFleetStatus(opts: { json?: boolean; strict?: boolean; stats?: 
     }
   }
 
-  const report = buildFleetHealthReport(rows);
+  const report = buildFleetHealthReport(rows, new Date(), { self });
   if (opts.json) {
     console.log(JSON.stringify(report, null, 2));
   } else if (opts.verbose) {
@@ -553,12 +562,48 @@ async function probeRemoteAuth(target: FleetStatusTarget): Promise<AuthProbeRow[
   const isWin = /^win/i.test((target.platform ?? '').trim());
   const env = isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' };
   const cmd = buildRemoteAgentsInvocation(['devices', 'ping', '--local', '--json'], undefined, isWin ? 'windows' : undefined, env);
-  const res = await sshExecAsync(target.dialTarget, cmd, { timeoutMs: 60000, multiplex: true });
+  const res = await sshExecAsync(target.dialTarget, cmd, { timeoutMs: 15000, multiplex: true });
   if (res.code !== 0) {
     throw new Error(res.timedOut ? 'timed out' : (res.stderr.trim() || `exit ${res.code ?? 'unknown'}`));
   }
   const parsed = JSON.parse(res.stdout) as { host: string; rows: AuthProbeRow[] };
   return parsed.rows ?? [];
+}
+
+/**
+ * Race `fanOut` against an overall wall-clock deadline (RUSH-2041).
+ *
+ * If `fanOut` settles first the result passes through unchanged. If the
+ * deadline fires first every pending remote target is mapped to `failed` (or
+ * `skipped` for pre-skipped targets), so callers always get a complete result
+ * array and the command exits promptly rather than hanging.
+ *
+ * Exported so the unit test can exercise the real path with a hanging probe
+ * instead of reimplementing the logic.
+ */
+export async function raceFleetPingDeadline<T, Target extends FanOutDeviceTarget>(
+  fanOut: Promise<import('../lib/devices/fleet.js').FanOutDeviceResult<T>[]>,
+  remoteTargets: Target[],
+  overallTimeoutMs: number,
+): Promise<import('../lib/devices/fleet.js').FanOutDeviceResult<T>[]> {
+  const overallDeadline = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error('fleet ping overall deadline exceeded')), overallTimeoutMs),
+  );
+  try {
+    return await Promise.race([fanOut, overallDeadline]);
+  } catch (err) {
+    // Overall deadline hit before all devices settled — mark every pending
+    // device as failed so the command exits promptly. Individual probes that
+    // already settled are not retrievable (Promise.all internals), so we
+    // record all remote targets as timed out / skipped.
+    const errMsg = err instanceof Error ? err.message : String(err);
+    return remoteTargets.map((t) => ({
+      name: t.name,
+      status: t.skip ? ('skipped' as const) : ('failed' as const),
+      reason: t.skip,
+      error: t.skip ? undefined : errMsg,
+    }));
+  }
 }
 
 async function runFleetPing(opts: { json?: boolean; local?: boolean; verbose?: boolean; strict?: boolean }): Promise<void> {
@@ -599,9 +644,16 @@ async function runFleetPing(opts: { json?: boolean; local?: boolean; verbose?: b
   const spinner = isInteractiveTerminal() && !opts.json
     ? ora(`Pinging ${probeable} device${probeable === 1 ? '' : 's'}…`).start()
     : undefined;
+  // Per-device: 15 s (matches the version probe budget; enough for the ~8 s
+  // provider-fetch inside the remote local auth probe, with headroom).
+  // Overall: 30 s hard cap so the command can never outlast a reasonable
+  // budget when several devices are simultaneously unreachable (RUSH-2041).
+  const FLEET_PING_DEVICE_TIMEOUT_MS = 15_000;
+  const FLEET_PING_OVERALL_TIMEOUT_MS = 30_000;
   let remote: Awaited<ReturnType<typeof fanOutDevices<AuthProbeRow[], FleetStatusTarget>>>;
   try {
-    remote = await fanOutDevices(remoteTargets, probeRemoteAuth);
+    const fanOut = fanOutDevices(remoteTargets, probeRemoteAuth, { perDeviceTimeoutMs: FLEET_PING_DEVICE_TIMEOUT_MS });
+    remote = await raceFleetPingDeadline(fanOut, remoteTargets, FLEET_PING_OVERALL_TIMEOUT_MS);
   } finally {
     spinner?.stop();
   }

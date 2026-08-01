@@ -73,6 +73,7 @@ import {
   listVaults,
   type OpVault,
 } from '../lib/onepassword.js';
+import { GLOBAL_HARNESS } from '../lib/secrets/scope.js';
 import {
   secretsHoldMs,
   secretsAgentDurable,
@@ -89,7 +90,8 @@ import { saveSession, deleteBundleSessions, deleteAllSessions } from '../lib/sec
 import { getCliVersionFresh } from '../lib/version.js';
 import { readMeta } from '../lib/state.js';
 import { parseDuration } from '../lib/hooks/cache.js';
-import { emit } from '../lib/events.js';
+import { emit, query } from '../lib/events.js';
+import { frequentlyPromptedBundles } from '../lib/secrets/unlock-hints.js';
 import { registerCommandGroups, setHelpSections } from '../lib/help.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import {
@@ -1170,8 +1172,9 @@ export function registerSecretsCommands(program: Command): void {
           process.exit(1);
         }
         // `secrets get` is the scriptable automation primitive ($(agents secrets
-        // get bundle KEY)); when embedded in a headless routine/CI script it must
-        // not pop an unwatched Touch ID prompt. Interactive use still prompts.
+        // get bundle KEY)); when embedded in a headless routine/CI script — or run
+        // beneath any agent, which inherits AGENTS_RUNTIME — it must not pop an
+        // unwatched Touch ID prompt. Typed in a plain shell it still prompts.
         const { env } = readAndResolveBundleEnv(item, { caller: 'secrets get', keys: [key], keyMode: 'storage', agentOnly: isHeadlessSecretsContext() });
         if (!(key in env)) {
           console.error(chalk.red(`Key '${key}' not in bundle '${item}'.`));
@@ -1923,10 +1926,10 @@ Examples:
           process.exit(1);
         }
         // `agents secrets export --plaintext` is what release/CI scripts eval.
-        // When it runs detached (both stdio non-TTY) or under a headless agent,
-        // resolve broker-only so it can never pop a Touch ID sheet on the
-        // interactive user's screen. An interactive `eval "$(...)"` keeps its
-        // terminal stdin, so it is not headless and still prompts.
+        // When it runs detached (both stdio non-TTY) or beneath ANY agent — which
+        // inherits AGENTS_RUNTIME — resolve broker-only so it can never pop a Touch
+        // ID sheet on the interactive user's screen. An `eval "$(...)"` typed in a
+        // plain shell carries no AGENTS_RUNTIME, so it is not headless and still prompts.
         const { env } = readAndResolveBundleEnv(resolvedBundleName, {
           caller: `export to shell`,
           keyMode: 'process',
@@ -2174,7 +2177,7 @@ Examples:
     .description('Hold a bundle in the secrets-agent after one Touch ID, so concurrent runs read it without re-prompting (macOS). With --host, unlock FILE-backed bundle(s) on a remote (the passphrase prompt surfaces over the SSH TTY); keychain/biometry bundles are GUI-only and can\'t be remote-unlocked.')
     .option('--ttl <duration>', 'How long to hold it (e.g. 30m, 8h, 3d). Default 7d.')
     .option('--durable', 'Keep the unlock across sleep + reboot too (default: survives upgrade/restart but re-locks on sleep). Set secrets.agent.durable in agents.yaml to make this the default.')
-    .option('--for <agent>', 'Scope the unlock to one harness type (for example claude, codex, or kimi).')
+    .option('--for <agent>', 'Narrow the unlock to ONE harness type (for example claude, codex, or kimi). Default: the grant is global — every harness and a plain shell can read it, so one Touch ID covers them all.')
     .option('--all', 'Unlock every configured bundle')
     .option('--host <target>', 'Unlock the bundle(s) on this remote machine over SSH instead of locally (file-backed bundles only — the remote\'s passphrase prompt surfaces on your terminal over a -tt session). Single-valued (NOT variadic) so it never swallows the bundle name: `unlock <name> --host <machine>`.')
     .action(async (names: string[], opts: { ttl?: string; durable?: boolean; all?: boolean; host?: string; for?: string }) => {
@@ -2245,7 +2248,12 @@ Examples:
       // (single-instance start lock, #414) and best-effort — never blocks unlock.
       ensureDaemonStarted();
       let loaded = 0;
-      const harness = opts.for || process.env.AGENTS_AGENT_NAME || 'cli';
+      // An unlock is a deliberate act, so it grants GLOBALLY unless `--for`
+      // narrows it to one harness. It must NOT inherit the ambient
+      // AGENTS_AGENT_NAME: that silently scoped a terminal unlock to whichever
+      // agent happened to launch the shell, leaving the grant unreadable to
+      // every other reader for its whole TTL.
+      const harness = opts.for || GLOBAL_HARNESS;
       for (const name of targets) {
         try {
           // noAgent: read the real keychain (one Touch ID) rather than the
@@ -2337,16 +2345,50 @@ Examples:
       const configured = (() => { try { const v = readMeta().secrets?.agent?.holdMs; return typeof v === 'number' && Number.isFinite(v) && v > 0; } catch { return false; } })();
       console.log(chalk.gray(`hold: ${holdStr}${configured ? ' (secrets.agent.holdMs)' : ' (default)'} — a daily bundle prompts once, then stays silent for this long or until sleep/logout.`));
       const entries = await agentStatus();
+      const held = new Set(entries.map((e) => e.name));
       if (entries.length === 0) {
         console.log(chalk.gray('No bundles held. The next read of each daily bundle will prompt once, then hold.'));
         console.log(chalk.gray('Pre-warm now with: agents secrets unlock <bundle>  (or --all)'));
-        return;
+      } else {
+        console.log(chalk.bold(`${'BUNDLE'.padEnd(24)} ${'KEYS'.padEnd(5)} LOCKS IN`));
+        for (const e of entries) {
+          console.log(`${chalk.cyan(e.name.padEnd(24))} ${String(e.keyCount).padEnd(5)} ${humanRemaining(e.expiresAt)}`);
+        }
+        console.log(chalk.gray('Reads of held bundles are silent; any bundle not listed prompts once on its next read.'));
       }
-      console.log(chalk.bold(`${'BUNDLE'.padEnd(24)} ${'KEYS'.padEnd(5)} LOCKS IN`));
-      for (const e of entries) {
-        console.log(`${chalk.cyan(e.name.padEnd(24))} ${String(e.keyCount).padEnd(5)} ${humanRemaining(e.expiresAt)}`);
+
+      // Usage hint: bundles you keep getting a Touch ID prompt for — a keychain
+      // read that fell through to biometry (not served by the broker/session)
+      // >= a few times in the last week, and not currently held. Unlocking each
+      // once silences it for the hold window. This runs even when NO bundle is
+      // held — that user re-prompts on every read and most needs the nudge.
+      // Excludes `never`/no-ACL bundles (never prompt) and file/vault bundles
+      // (resolve by passphrase, not the keychain broker — `unlock` is a no-op).
+      try {
+        const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        const reads = query({ eventTypes: ['secrets.get'], startDate: weekAgo }) as Array<{
+          bundle?: string;
+          source?: string;
+        }>;
+        const hot = frequentlyPromptedBundles(reads, held, { minReads: 3 }).filter((h) => {
+          try {
+            return bundleBackend(h.name) === 'keychain' && bundlePolicy(readBundle(h.name)) !== 'never';
+          } catch {
+            return false; // bundle gone / unreadable metadata — nothing to suggest
+          }
+        });
+        if (hot.length > 0) {
+          console.log();
+          console.log(chalk.bold('Prompted often — unlock once to silence:'));
+          for (const h of hot) {
+            console.log(
+              `${chalk.cyan(h.name.padEnd(24))} ${chalk.gray(`${h.count}× in the last 7d`)}  →  ${chalk.green(`agents secrets unlock ${h.name}`)}`,
+            );
+          }
+        }
+      } catch {
+        // Best-effort hint — never let usage analysis break `secrets status`.
       }
-      console.log(chalk.gray('Reads of held bundles are silent; any bundle not listed prompts once on its next read.'));
     });
 
   cmd

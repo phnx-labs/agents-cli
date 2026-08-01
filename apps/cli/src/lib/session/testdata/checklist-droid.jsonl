@@ -1,0 +1,1 @@
+{"type":"message","timestamp":"2026-08-01T00:00:00Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"TodoWrite","input":{"input":{"todos":[{"content":"Inspect","status":"completed"},{"content":"Build","status":"in_progress","activeForm":"Building"}]}}}]}}

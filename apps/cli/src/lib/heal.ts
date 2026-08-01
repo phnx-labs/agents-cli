@@ -50,7 +50,7 @@ import { repairPluginManifestFile } from './plugin-marketplace.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { spawn } from 'child_process';
+import { notifyDesktop } from './menubar/notify-desktop.js';
 
 // ─── result shapes ─────────────────────────────────────────────────────────
 
@@ -160,10 +160,13 @@ export function summarizeHeal(r: HealResult): string {
 }
 
 /**
- * Fire a native desktop notification when a background heal did something
- * noteworthy. Best-effort — missing `osascript`/`notify-send` or no display is
- * swallowed. Silent when the pass auto-fixed everything and nothing needs the
- * operator (no point pinging them for routine self-healing).
+ * Fire a branded desktop notification when a background heal did something
+ * noteworthy. Routed through the MenubarHelper companion (notify-desktop.ts) so
+ * it carries the agents-cli mark; clicking opens the runs folder
+ * (~/.agents/.history/runs, via the `routines:list` action the companion
+ * understands). Best-effort — a missing
+ * notifier or no display is swallowed. Silent when the pass auto-fixed everything
+ * and nothing needs the operator (no point pinging them for routine self-healing).
  */
 export function notifyHeal(r: HealResult): void {
   const needsAttention = r.skippedPlugins.length;
@@ -171,30 +174,13 @@ export function notifyHeal(r: HealResult): void {
   if (needsAttention === 0 && healed === 0) return;
 
   const title = needsAttention > 0
-    ? `agents: ${needsAttention} plugin${needsAttention === 1 ? '' : 's'} need attention`
+    ? `${needsAttention} plugin${needsAttention === 1 ? '' : 's'} need attention`
     : 'agents: auto-healed config gaps';
   const body = needsAttention > 0
     ? `${summarizeHeal(r)}. Run: agents doctor --fix`
     : summarizeHeal(r);
 
-  const platform = os.platform();
-  try {
-    if (platform === 'darwin') {
-      const safeTitle = title.replace(/"/g, '\\"');
-      const safeBody = body.replace(/"/g, '\\"');
-      const child = spawn(
-        'osascript',
-        ['-e', `display notification "${safeBody}" with title "${safeTitle}"`],
-        { detached: true, stdio: 'ignore' },
-      );
-      child.unref();
-    } else if (platform === 'linux') {
-      const child = spawn('notify-send', [title, body], { detached: true, stdio: 'ignore' });
-      child.unref();
-    }
-  } catch {
-    // Notification is best-effort; nothing to do.
-  }
+  notifyDesktop({ title, body, action: 'routines:list' });
 }
 
 // ─── central plugin layer (version-independent, runs once per heal) ──────────

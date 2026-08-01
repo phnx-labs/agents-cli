@@ -16,16 +16,19 @@ import * as fsp from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 
-// Set HOME before state.ts loads so its module-level root picks up the
-// override. Top-level statements run before the dynamic `await import` below.
+// Redirect the device registry dir to a test-private temp so writes never touch
+// the user's real ~/.agents/.history/devices (RUSH-2042). state.ts's
+// getDevicesDir() reads AGENTS_DEVICES_DIR at call time, so this is immune to the
+// module-cache race that made a plain HOME override leak (state.ts pins HOME at
+// module load; a later HOME change is too late once any static import ran).
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-devices-registry-test-'));
-process.env.HOME = TEST_HOME;
+process.env.AGENTS_DEVICES_DIR = path.join(TEST_HOME, 'devices');
 
 const { upsertDevice, loadDevices, getDevice, removeDevice, deviceRole, isControlDevice } =
   await import('./registry.js');
 
 function registryPath(): string {
-  return path.join(TEST_HOME, '.agents', '.history', 'devices', 'registry.json');
+  return path.join(TEST_HOME, 'devices', 'registry.json');
 }
 
 beforeAll(async () => {

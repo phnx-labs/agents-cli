@@ -3,6 +3,7 @@ import { padToWidth, stringWidth, terminalWidth, truncateToWidth } from '../sess
 import { fmtBytes, headroom, type DeviceStats } from './health.js';
 import { formatCheckedAge, type HostAuthSummary } from '../auth-health.js';
 import type { OnlineState } from './reachability.js';
+import { compareFleetInventories, type FleetInventory } from './fleet-divergence.js';
 
 export interface FleetCliStatus {
   installed: boolean;
@@ -46,10 +47,15 @@ export interface FleetHealthRow {
    *  an offline row. Sourced from the registry's tailscale snapshot / reachability
    *  verdict. Undefined when never recorded. */
   lastSeen?: string;
+  /** This host's self-reported harness inventory (resources / agent versions /
+   *  repo state) from its `doctor --json` `fleet` field, for cross-device
+   *  divergence detection (RUSH-2027). Undefined for an unreachable box or an
+   *  older CLI that doesn't emit it. */
+  inventory?: FleetInventory;
 }
 
 export interface FleetWarning {
-  kind: 'unreachable' | 'drift' | 'cli' | 'version-skew';
+  kind: 'unreachable' | 'drift' | 'cli' | 'version-skew' | 'divergence';
   devices: string[];
   message: string;
 }
@@ -74,7 +80,11 @@ function installedCliCount(row: FleetHealthRow): { installed: number; total: num
   };
 }
 
-export function buildFleetHealthReport(rows: FleetHealthRow[], now = new Date()): FleetHealthReport {
+export function buildFleetHealthReport(
+  rows: FleetHealthRow[],
+  now = new Date(),
+  opts: { self?: string } = {},
+): FleetHealthReport {
   const warnings: FleetWarning[] = [];
   const unreachable = rows
     .filter((r) => r.error || r.skipped)
@@ -123,6 +133,28 @@ export function buildFleetHealthReport(rows: FleetHealthRow[], now = new Date())
       devices: rows.filter((r) => r.version).map((r) => r.name),
       message: `agents-cli version skew: ${Array.from(versions.keys()).sort().join(', ')}`,
     });
+  }
+
+  // Cross-device harness divergence (RUSH-2027): compare every device's
+  // self-reported inventory against the local baseline and roll the findings up
+  // into one warning per affected device. Only runs when a baseline (`self`) is
+  // named and at least one device carries an inventory — an older-CLI fleet with
+  // no `fleet` field simply produces no divergence warning.
+  if (opts.self && rows.some((r) => r.inventory)) {
+    const divergence = compareFleetInventories(
+      rows.map((r) => ({ name: r.name, inventory: r.inventory ?? null })),
+      opts.self,
+    );
+    const byDevice = new Map<string, number>();
+    for (const d of divergence.divergences) byDevice.set(d.device, (byDevice.get(d.device) ?? 0) + 1);
+    for (const device of Array.from(byDevice.keys()).sort()) {
+      const n = byDevice.get(device)!;
+      warnings.push({
+        kind: 'divergence',
+        devices: [device],
+        message: `${device} diverges from ${opts.self} (${n} resource/version/repo gap${n === 1 ? '' : 's'})`,
+      });
+    }
   }
 
   return {
@@ -393,6 +425,16 @@ export function buildFleetAttentionItems(report: FleetHealthReport, now: number 
       .map(([v, n]) => `${n}× ${v}`)
       .join(' · ');
     items.push({ glyph: 'warn', subject: 'version skew', detail: summary, fix: 'agents upgrade --fleet' });
+  }
+  // 4) Cross-device harness divergence — one item per diverged box (RUSH-2027).
+  for (const w of report.warnings) {
+    if (w.kind !== 'divergence') continue;
+    items.push({
+      glyph: 'warn',
+      subject: w.devices[0] ?? 'fleet',
+      detail: w.message.replace(`${w.devices[0]} `, ''),
+      fix: `agents apply ${w.devices[0] ?? ''}`.trim(),
+    });
   }
   return items;
 }

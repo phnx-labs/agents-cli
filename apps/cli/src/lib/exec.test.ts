@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as os from 'node:os';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { shouldTapStdout, resolveInteractive, inferredInteractiveWithoutTty, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv, shouldWrapInTmux, buildTmuxAgentCommand, formatPaneTail, detectRateLimit, detectAuthFailure, detectAuthFailureEvent, authFailureReason, isAuthFailureFromLog, type TmuxWrapContext } from './exec.js';
+import { shouldTapStdout, resolveInteractive, inferredInteractiveWithoutTty, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv, shouldWrapInTmux, buildTmuxAgentCommand, formatPaneTail, detectRateLimit, detectAuthFailure, detectAuthFailureEvent, authFailureReason, isAuthFailureFromLog, resolveLaunchId, type TmuxWrapContext } from './exec.js';
 import type { ExecOptions } from './exec.js';
 import { mailboxDir } from './mailbox.js';
 
@@ -532,5 +532,33 @@ describe('buildTmuxAgentCommand (env-preserving pane command)', () => {
     // …but no real value leaks into the (persisted) string.
     expect(cmd).not.toContain('sk-ant-supersecret');
     expect(cmd).not.toContain('/usr/bin:/bin');
+  });
+});
+
+// resolveLaunchId is the one place that decides AGENT_LAUNCH_ID for a run. A
+// `--host` launcher forwards an id it controls so ONE correlation key spans the
+// SSH hop (RUSH-2034); every local run passes none and gets a fresh mint. The
+// adopt-vs-mint decision is what lets the launcher resolve a non-Claude agent's
+// real remote session id from the hook record afterwards.
+describe('resolveLaunchId', () => {
+  it('adopts a launcher-forwarded id verbatim (the cross-hop correlation key)', () => {
+    expect(resolveLaunchId('LID-from-host-42')).toBe('LID-from-host-42');
+  });
+
+  it('mints a fresh uuid when no id was forwarded (every local run)', () => {
+    expect(resolveLaunchId(undefined)).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it('mints rather than adopt an empty/whitespace id — the key must be real', () => {
+    expect(resolveLaunchId('')).toMatch(/^[0-9a-f-]{36}$/);
+    expect(resolveLaunchId('   ')).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it('trims a forwarded id so a stray newline never desyncs the join', () => {
+    expect(resolveLaunchId('  LID-x  \n')).toBe('LID-x');
+  });
+
+  it('mints a DISTINCT id each call when none is forwarded', () => {
+    expect(resolveLaunchId(undefined)).not.toBe(resolveLaunchId(undefined));
   });
 });

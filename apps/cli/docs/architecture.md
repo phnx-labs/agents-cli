@@ -154,6 +154,28 @@ the **session-discoverable** set is `SESSION_AGENTS`
 ([`src/lib/session/types.ts`](../src/lib/session/types.ts)): `claude`, `codex`,
 `gemini`, `antigravity`, `opencode`, `openclaw`, `rush`, `hermes`, `grok`, `kimi`,
 `droid`. `cursor` and `copilot` are runnable but not session-discoverable.
+`isSessionTrackedAgent()` in the same file is the single predicate every session-index
+writer gates on.
+
+### Across the SSH hop: `AGENT_LAUNCH_ID` is the one correlation key
+
+`agents run --host` runs `agents run` on a remote box, so the "who names the session"
+split above still holds — Claude forwards a `--session-id` the launcher controls, every
+other agent coins its own id on the peer. The launcher recovers that remote-coined id
+through **one stable correlation key it controls end-to-end**: `AGENT_LAUNCH_ID`.
+
+- The launcher forwards a launch id (`--env AGENT_LAUNCH_ID=<id>`); the remote
+  `agents run` **adopts** it rather than minting a fresh one (`resolveLaunchId` in
+  [`src/lib/exec.ts`](../src/lib/exec.ts)), so the remote SessionStart hook records the
+  agent's real `session_id` under that exact key in `terminals/sessions/<pid>.json`.
+- **Headless** host runs read the id back from the followed log — the remote prints it
+  as a `--emit-session-id` marker ([`src/lib/hosts/session-marker.ts`](../src/lib/hosts/session-marker.ts)).
+- **Interactive** host runs have no followed log (the TTY is wired straight through
+  `sshStream`), so after the stream returns the launcher does one ssh read of the remote
+  hook dir and resolves the id by launch id — `resolveRemoteSessionId` /
+  `pickRemoteSessionId` in [`src/lib/hosts/remote-session-id.ts`](../src/lib/hosts/remote-session-id.ts).
+  It then registers the real id in the local session index and reconnects against it on a
+  dropped link — for Codex/Kimi/Grok/Gemini, not only Claude.
 
 ---
 

@@ -139,6 +139,8 @@ export const RUN_OPTION_FORWARDING: Record<string, RunOptionForwarding> = {
   tailscale: 'local-only', // --tailscale/--no-tailscale gate the lease net mode; never forwarded
   copyCreds: 'local-only', // copies creds TO the host before dispatch — local concern only
   authCheck: 'local-only', // --no-auth-check gates the local interactive login preflight; --host runs skip that preflight entirely
+  // Deprecated alias for --device auto; resolved on the launching box before SSH.
+  smart: 'local-only',
 };
 
 /** Actionable messages for value-aware rejections, keyed by attribute name. */

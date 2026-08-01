@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import Database from '../../sqlite.js';
 import { buildFtsQuery, getDB } from '../db.js';
-import { scanClaudeSession, parseCodexThreadNameIndex, shouldDeferRecentAppend, machineForSessionFile, discoverSessions, resolveSessionById, isCompleteSessionId, readGrokMeta } from '../discover.js';
+import { scanClaudeSession, parseCodexThreadNameIndex, shouldDeferRecentAppend, machineForSessionFile, discoverSessions, resolveSessionById, isCompleteSessionId, looksLikeSessionId, readGrokMeta } from '../discover.js';
 import { machineId } from '../sync/config.js';
 import { getHistoryDir } from '../../state.js';
 
@@ -410,5 +410,31 @@ describe('isCompleteSessionId', () => {
   it('rejects a UUID with trailing text, so a phrase quoting an id stays a search', () => {
     expect(isCompleteSessionId('resume d3470b57-2af6-4c11-b1de-3fab94f43603')).toBe(false);
     expect(isCompleteSessionId('d3470b57-2af6-4c11-b1de-3fab94f43603.jsonl')).toBe(false);
+  });
+});
+
+describe('looksLikeSessionId', () => {
+  it('accepts a bare hex short-id/prefix that isCompleteSessionId rejects', () => {
+    // The whole point of the wider test: a short id must route to id-only
+    // resolution, not content search.
+    expect(looksLikeSessionId('d3470b57')).toBe(true);
+    expect(looksLikeSessionId('d3470b57-2af6')).toBe(true);
+    expect(isCompleteSessionId('d3470b57')).toBe(false);
+  });
+
+  it('accepts every complete id shape (delegates to isCompleteSessionId)', () => {
+    expect(looksLikeSessionId('d3470b57-2af6-4c11-b1de-3fab94f43603')).toBe(true);
+    expect(looksLikeSessionId('session_933f4131-f3ed-495d-946b-71825e9f6a25')).toBe(true);
+    expect(looksLikeSessionId('ses_0485d75c1ffewpzVfoI0ni6hW1')).toBe(true);
+  });
+
+  it('trims surrounding whitespace before testing', () => {
+    expect(looksLikeSessionId('  d3470b57  ')).toBe(true);
+  });
+
+  it('rejects a search phrase and a too-short fragment', () => {
+    expect(looksLikeSessionId('add auth middleware')).toBe(false);
+    expect(looksLikeSessionId('d347')).toBe(false); // < 6 hex chars
+    expect(looksLikeSessionId('')).toBe(false);
   });
 });

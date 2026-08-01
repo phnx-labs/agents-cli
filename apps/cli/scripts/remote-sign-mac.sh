@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 #
-# Offload the macOS native-helper build + codesign + notarize to a headless Mac
-# so an agents-cli release can be DRIVEN FROM A LINUX BOX.
+# Offload the macOS native-helper build + codesign + notarize to the release home
+# base so an agents-cli release can be DRIVEN FROM ANOTHER MAC.
+#
+# NOTE: the normal release flow no longer calls this. release.sh routes the whole
+# privileged phase (build + sign + notarize + npm publish + computer-helper) to
+# the home base directly (run_home_base_phase / --home-base-phase). This script
+# remains for the narrow case of building + pulling back JUST the signed macOS
+# artifacts from another Mac, without publishing.
 #
 # The published tarball bundles two signed macOS .app helpers that Linux cannot
 # produce:
@@ -11,21 +17,17 @@
 #   - bin/MenubarHelper.app — the menu-bar status item (swift build → codesign,
 #                            NO notarization). See menubar/scripts/build.sh.
 #
-# This script rsyncs the exact build INPUTS from THIS worktree to an
-# auto-selected macOS sign host (see SIGN_HOST below), runs the two Mac build
-# scripts there under the appliance's headless signing creds, then pulls the
-# signed bundles back into THIS worktree's apps/cli/bin/ so `bun run build` (now
-# presence-gated, not uname-gated) can package them and `npm publish` can run
-# anywhere.
+# This script rsyncs the exact build INPUTS from THIS worktree to the home base,
+# runs the two Mac build scripts there under its headless signing creds, then
+# pulls the signed bundles back into THIS worktree's apps/cli/bin/ so
+# `bun run build` (presence-gated) can package them.
 #
-# Env knobs:
-#   SIGN_HOST        sign host, must be ssh/scp reachable. When unset it is
-#                    auto-discovered from `agents devices list` in preference
-#                    order mac-mini -> zion -> any other online macOS device.
-#   SIGN_HOST_REPO   agents-cli checkout on the sign host. $HOME is resolved on
-#                    the REMOTE side (default: $HOME/src/github.com/muqsitnawaz/agents-cli).
+# ZERO CONFIG: there are no environment variables. The one machine name is the
+# hardcoded home base (RELEASE_HOME_BASE), the same constant release.sh uses --
+# no sign-host / secret-host overrides, no force-remote knob, no fleet discovery,
+# no interactive-Mac fallback.
 #
-# The sign host must have: a Developer ID identity in rush-signing.keychain-db,
+# The home base must have: a Developer ID identity in rush-signing.keychain-db,
 # the kcpass + secrets.pass files under ~/Library/Application Support/rush/, the
 # `apple.com` secrets bundle (APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD /
 # APPLE_TEAM_ID), and — for the keychain helper only — bin/embedded.provisionprofile
@@ -34,12 +36,9 @@
 # Usage: scripts/remote-sign-mac.sh
 set -euo pipefail
 
-# SIGN_HOST is resolved just below: an explicit env override wins, otherwise it
-# is auto-discovered from the fleet so a Linux release never hard-depends on one
-# hardcoded Mac. Preference order when unset: mac-mini (headless sign appliance),
-# then zion (the interactive Mac), then any other reachable macOS device.
-SIGN_HOST_REPO="${SIGN_HOST_REPO:-\$HOME/src/github.com/muqsitnawaz/agents-cli}"
-PREFERRED_SIGN_HOSTS=(mac-mini zion)
+# The one hardcoded machine name (matches release.sh's RELEASE_HOME_BASE). It is
+# a constant, not an env var -- nobody sets anything to sign.
+readonly RELEASE_HOME_BASE="mac-mini"
 
 # apps/cli in THIS worktree (script lives in apps/cli/scripts/).
 LOCAL_CLI="$(cd "$(dirname "$0")/.." && pwd)"
@@ -51,78 +50,43 @@ die()  { printf '\033[31m[remote-sign] error:\033[0m %s\n' "$*" >&2; exit 1; }
 command -v ssh   >/dev/null || die "ssh not found"
 command -v rsync >/dev/null || die "rsync not found"
 
-# Live reachability probe — a direct ssh, not the registry's cached flag.
-reachable() { ssh -o BatchMode=yes -o ConnectTimeout=8 "$1" true >/dev/null 2>&1; }
-
-# Resolve the sign host. An explicit SIGN_HOST always wins. Otherwise ask the
-# fleet registry (agents devices list --json) for macOS boxes that look online,
-# order them mac-mini -> zion -> the rest, and pick the first that answers ssh
-# right now. Falls back to the static preference list when the registry or jq is
-# unavailable, so the script still works off-fleet.
-select_sign_host() {
-  if [[ -n "${SIGN_HOST:-}" ]]; then printf '%s' "$SIGN_HOST"; return 0; fi
-  local candidates=() macos=() p m c seen name
-  if command -v agents >/dev/null && command -v jq >/dev/null; then
-    mapfile -t macos < <(agents devices list --json 2>/dev/null \
-      | jq -r '.[] | select(.platform=="macos")
-                   | select((.reachability.reachable==true) or (.tailscale.online==true))
-                   | .name' 2>/dev/null)
-    for p in "${PREFERRED_SIGN_HOSTS[@]}"; do
-      for m in "${macos[@]}"; do [[ "$m" == "$p" ]] && candidates+=("$m"); done
-    done
-    for m in "${macos[@]}"; do
-      seen=0; for c in "${candidates[@]}"; do [[ "$c" == "$m" ]] && seen=1; done
-      [[ $seen -eq 0 ]] && candidates+=("$m")
-    done
-  fi
-  [[ ${#candidates[@]} -gt 0 ]] || candidates=("${PREFERRED_SIGN_HOSTS[@]}")
-  for name in "${candidates[@]}"; do
-    if reachable "$name"; then printf '%s' "$name"; return 0; fi
-  done
-  return 1
-}
-
-[[ -n "${SIGN_HOST:-}" ]] && SIGN_HOST_SRC="from SIGN_HOST" || SIGN_HOST_SRC="auto-selected"
-if ! SIGN_HOST="$(select_sign_host)"; then
-  die "no reachable macOS sign host found (tried, in order: ${PREFERRED_SIGN_HOSTS[*]} plus any online macOS device in 'agents devices list'). Bring one online, or set SIGN_HOST=<host> to a Mac that holds the Developer ID signing keychain."
-fi
-export SIGN_HOST
-
-log "sign host:        $SIGN_HOST ($SIGN_HOST_SRC)"
+HOME_BASE="$RELEASE_HOME_BASE"
+log "home base:        $HOME_BASE (build + sign + notarize)"
 log "local apps/cli:   $LOCAL_CLI"
 
-# Resolve the remote build workspace. SIGN_HOST_REPO carries a literal '$HOME'
-# that only the REMOTE shell may expand, so echo it there and capture the result.
-HOST_CLI="$(ssh "$SIGN_HOST" "echo ${SIGN_HOST_REPO}/apps/cli")" \
-  || die "could not reach $SIGN_HOST over ssh"
-[[ -n "$HOST_CLI" ]] || die "resolved an empty remote apps/cli path"
-log "remote apps/cli:  $SIGN_HOST:$HOST_CLI"
+# Resolve the remote build workspace. $HOME expands on the REMOTE side (never the
+# local shell), so single-quote it and let the home base's shell expand it.
+HOST_CLI="$(ssh "$HOME_BASE" 'echo $HOME/src/github.com/muqsitnawaz/agents-cli/apps/cli')" \
+  || die "could not reach the home base $HOME_BASE over ssh"
+[[ -n "$HOST_CLI" ]] || die "resolved an empty remote apps/cli path on $HOME_BASE"
+log "remote apps/cli:  $HOME_BASE:$HOST_CLI"
 
 # ----- 1. Ship the build inputs from this worktree to the sign host -----
 # We stage into the sign host's apps/cli subtree so the Mac build scripts see the
 # layout they expect (scripts/.., src/lib/secrets/.., menubar/..). This is a build
 # workspace, not a git checkout — the sign host's own branch/version is irrelevant.
-log "staging build inputs on $SIGN_HOST ..."
-ssh "$SIGN_HOST" "mkdir -p '$HOST_CLI/src/lib/secrets' '$HOST_CLI/scripts' '$HOST_CLI/bin' '$HOST_CLI/menubar'"
+log "staging build inputs on $HOME_BASE ..."
+ssh "$HOME_BASE" "mkdir -p '$HOST_CLI/src/lib/secrets' '$HOST_CLI/scripts' '$HOST_CLI/bin' '$HOST_CLI/menubar'"
 
 # Full src tree + package manifest: the standalone CLI binary is compiled from
 # src/ with `bun build --compile` (scripts/build-bin.sh), which resolves its
 # npm imports from node_modules — the remote script runs `bun install` first.
 rsync -az --delete --exclude '__tests__/' --exclude '*.test.ts' \
-          "$LOCAL_CLI/src/" "$SIGN_HOST:$HOST_CLI/src/"
-rsync -az "$LOCAL_CLI/package.json" "$LOCAL_CLI/bun.lock" "$SIGN_HOST:$HOST_CLI/"
+          "$LOCAL_CLI/src/" "$HOME_BASE:$HOST_CLI/src/"
+rsync -az "$LOCAL_CLI/package.json" "$LOCAL_CLI/bun.lock" "$HOME_BASE:$HOST_CLI/"
 rsync -az "$LOCAL_CLI/scripts/keychain-entitlements.plist" \
           "$LOCAL_CLI/scripts/build-keychain-helper.sh" \
           "$LOCAL_CLI/scripts/build-bin.sh" \
           "$LOCAL_CLI/scripts/sign-cli-binary.sh" \
           "$LOCAL_CLI/scripts/bun-jit-entitlements.plist" \
-          "$SIGN_HOST:$HOST_CLI/scripts/"
+          "$LOCAL_CLI/scripts/headless-sign-context.sh" \
+          "$HOME_BASE:$HOST_CLI/scripts/"
 # Menu-bar Swift package — exclude build outputs so we don't ship stale artifacts.
 rsync -az --delete --exclude '.build/' --exclude 'dist/' \
-          "$LOCAL_CLI/menubar/" "$SIGN_HOST:$HOST_CLI/menubar/"
+          "$LOCAL_CLI/menubar/" "$HOME_BASE:$HOST_CLI/menubar/"
 
 if [[ -f "$LOCAL_CLI/bin/embedded.provisionprofile" ]]; then
-  rsync -az "$LOCAL_CLI/bin/embedded.provisionprofile" "$SIGN_HOST:$HOST_CLI/bin/"
+  rsync -az "$LOCAL_CLI/bin/embedded.provisionprofile" "$HOME_BASE:$HOST_CLI/bin/"
   log "shipped local bin/embedded.provisionprofile"
 else
   log "no local provisioning profile — relying on the sign host's own copy"
@@ -136,7 +100,7 @@ ok "inputs staged"
 # misconfigured sign host still yields the (reliably signable) menu-bar bundle
 # before failing loudly on the keychain helper, which additionally requires the
 # provisioning profile + a notarization round-trip.
-log "building + signing on $SIGN_HOST (menu-bar helper, then keychain helper + notarize) ..."
+log "building + signing on $HOME_BASE (menu-bar helper, then keychain helper + notarize) ..."
 
 # Generate the remote build script LOCALLY and ship it as a file, then run it on
 # the host. A file dodges the multi-layer quoting hell of embedding a multi-line
@@ -148,9 +112,10 @@ trap 'rm -f "$BUILD_SCRIPT"' EXIT
 {
   printf '#!/usr/bin/env bash\nset -euo pipefail\ncd %q\n' "$HOST_CLI"
   cat <<'REMOTE_EOF'
-# Unlock the signing keychain headless, then inject the Apple notary creds.
-security unlock-keychain -p "$(cat "$HOME/Library/Application Support/rush/signing.kcpass")" rush-signing.keychain-db
-export AGENTS_SECRETS_PASSPHRASE="$(cat "$HOME/Library/Application Support/rush/secrets.pass")"
+# Enter the shared headless signing + secrets context (unlock the signing
+# keychain + export AGENTS_SECRETS_PASSPHRASE) -- the single source of truth,
+# also sourced by release.sh's run_home_base_phase.
+. scripts/headless-sign-context.sh
 agents secrets exec apple.com -- bash -c '
   set -euo pipefail
   echo "== menu-bar helper: swift build + codesign =="
@@ -173,21 +138,21 @@ agents secrets exec apple.com -- bash -c '
 REMOTE_EOF
 } > "$BUILD_SCRIPT"
 
-rsync -az "$BUILD_SCRIPT" "$SIGN_HOST:$HOST_CLI/.remote-sign-build.sh"
+rsync -az "$BUILD_SCRIPT" "$HOME_BASE:$HOST_CLI/.remote-sign-build.sh"
 # `bash -lc` gives the run `agents` on PATH (homebrew); `bash <file>` avoids
 # needing the staged script to be +x.
-ssh "$SIGN_HOST" "bash -lc 'bash \"$HOST_CLI/.remote-sign-build.sh\"'" \
-  || die "remote build/sign failed on $SIGN_HOST (see output above)"
+ssh "$HOME_BASE" "bash -lc 'bash \"$HOST_CLI/.remote-sign-build.sh\"'" \
+  || die "remote build/sign failed on $HOME_BASE (see output above)"
 ok "remote build + sign complete"
 
 # ----- 3. Pull the signed bundles + refreshed sha pin back into this worktree -----
 log "pulling signed bundles back into $LOCAL_CLI/bin/ ..."
 mkdir -p "$LOCAL_CLI/bin"
-rsync -az --delete "$SIGN_HOST:$HOST_CLI/bin/Agents CLI.app"   "$LOCAL_CLI/bin/"
-rsync -az --delete "$SIGN_HOST:$HOST_CLI/bin/MenubarHelper.app" "$LOCAL_CLI/bin/"
-rsync -az "$SIGN_HOST:$HOST_CLI/scripts/Agents CLI.app.sha256" "$LOCAL_CLI/scripts/Agents CLI.app.sha256"
-rsync -az "$SIGN_HOST:$HOST_CLI/bin/agents-macos" "$LOCAL_CLI/bin/agents-macos"
-rsync -az "$SIGN_HOST:$HOST_CLI/scripts/agents-cli-bin.sha256" "$LOCAL_CLI/scripts/agents-cli-bin.sha256"
+rsync -az --delete "$HOME_BASE:$HOST_CLI/bin/Agents CLI.app"   "$LOCAL_CLI/bin/"
+rsync -az --delete "$HOME_BASE:$HOST_CLI/bin/MenubarHelper.app" "$LOCAL_CLI/bin/"
+rsync -az "$HOME_BASE:$HOST_CLI/scripts/Agents CLI.app.sha256" "$LOCAL_CLI/scripts/Agents CLI.app.sha256"
+rsync -az "$HOME_BASE:$HOST_CLI/bin/agents-macos" "$LOCAL_CLI/bin/agents-macos"
+rsync -az "$HOME_BASE:$HOST_CLI/scripts/agents-cli-bin.sha256" "$LOCAL_CLI/scripts/agents-cli-bin.sha256"
 ok "bundles pulled back"
 
 # ----- 4. Local sanity: recompute the sha over the pulled Mach-O and assert match -----

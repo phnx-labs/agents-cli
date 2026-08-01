@@ -13,6 +13,15 @@ export type SessionAgentId = 'claude' | 'codex' | 'gemini' | 'antigravity' | 'op
 /** All agents with session discovery support, in display order. */
 export const SESSION_AGENTS: SessionAgentId[] = ['claude', 'codex', 'gemini', 'antigravity', 'opencode', 'openclaw', 'rush', 'hermes', 'grok', 'kimi', 'droid'];
 
+/**
+ * True when `agent` stores session data `agents sessions` can discover (a member
+ * of {@link SESSION_AGENTS}). The single predicate every session-index writer
+ * gates on, so "is this a trackable agent?" is decided in exactly one place.
+ */
+export function isSessionTrackedAgent(agent: string): agent is SessionAgentId {
+  return (SESSION_AGENTS as string[]).includes(agent);
+}
+
 /** A single normalized event within a session (message, tool call, thinking, etc.). */
 export interface SessionEvent {
   type: 'message' | 'tool_use' | 'tool_result' | 'thinking' | 'error' | 'init' | 'result' | 'usage' | 'attachment';
@@ -28,6 +37,16 @@ export interface SessionEvent {
   output?: string;
   /** Internal: marks tool_use events from local commands */
   _local?: boolean;
+  /**
+   * Internal: marks a `role=user` message that is harness-injected scaffolding
+   * (Claude `<bash-input>`/`<bash-stdout>` from `!`-prefix runs, `<system-reminder>`,
+   * `<task-notification>`, `<command-*>` wrappers, `[Request interrupted]`, skill
+   * bodies, hook feedback) rather than a genuine user turn. Set centrally in
+   * `parseSession` via `isSyntheticUserMessage`. Such events are excluded from
+   * `--include user` and are not counted as turn starts by `--first`/`--last`,
+   * but stay in the default full stream so `--markdown` keeps full fidelity.
+   */
+  _synthetic?: boolean;
   // Fields for usage events (type === 'usage')
   model?: string;
   inputTokens?: number;
@@ -48,10 +67,12 @@ export interface SessionAttachment {
   sizeBytes?: number;
 }
 
-/** One checklist item, as Claude's `TodoWrite` (`content`) or Codex's `update_plan` (`step`) emits it. */
+/** One normalized checklist/task item emitted by any transcript harness. */
 export interface TodoItem {
   content: string;
   status: 'pending' | 'in_progress' | 'completed';
+  /** Optional longer explanation supplied by task-based harnesses. */
+  description?: string;
   /** Present-continuous label shown while this item is the active step. */
   activeForm?: string;
 }
@@ -162,6 +183,12 @@ export interface SessionMeta {
    * instead of re-parsing the transcript. Absent when the session wrote no list.
    */
   todos?: TodoProgress;
+  /** Most-recent unique directories changed or used as a shell working directory. */
+  recentDirectoriesTouched?: string[];
+  /** Linear project containing ticketId, resolved lazily and cached in SQLite. */
+  linearProject?: string;
+  /** Browser URL for linearProject. */
+  linearProjectUrl?: string;
   /**
    * True when the session was spawned programmatically (SDK entrypoint) rather
    * than by a human at the Claude CLI. Captured at scan time from the JSONL

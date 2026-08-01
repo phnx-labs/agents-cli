@@ -18,6 +18,7 @@ import * as os from 'os';
 import * as path from 'path';
 import Database from '../../sqlite.js';
 import { parseOpenCode } from '../parse.js';
+import { extractTodoProgressFromEvents } from '../state.js';
 
 interface PartRow {
   id: string;
@@ -101,6 +102,7 @@ describe('parseOpenCode', () => {
     ]);
 
     const events = parseOpenCode(`${dbPath}#${sessionId}`);
+    expect(extractTodoProgressFromEvents(events)).toBeUndefined();
 
     expect(events.map(e => e.type)).toEqual([
       'message', // user text

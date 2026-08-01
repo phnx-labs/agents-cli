@@ -78,6 +78,10 @@ function run(
       ...process.env,
       HOME: home,
       USERPROFILE: home,
+      // Point the device registry at this test's home (RUSH-2042): getDevicesDir()
+      // reads AGENTS_DEVICES_DIR, and the parent vitest fork exports its own via
+      // setup.ts — override it so the child reads the registry makeHome() wrote.
+      AGENTS_DEVICES_DIR: path.join(home, '.agents', '.history', 'devices'),
       AGENTS_SKIP_MIGRATION: '1',
       ...extraEnv,
     },
@@ -449,7 +453,9 @@ describe('routines list --json has devices+runsHere, no device', () => {
 
       const viewRes = run(home, ['view', 'test-job'], { AGENTS_SYNC_MACHINE_ID: 'zion' }, projectDir);
       expect(viewRes.status).toBe(0);
-      const viewDoc = yaml.parse(viewRes.stdout.replace(/^Job: test-job\s*/m, ''));
+      // Strip ANSI (FORCE_COLOR / chalk.bold on the Job: header) before YAML parse.
+      const viewPlain = viewRes.stdout.replace(/\x1b\[[0-9;]*m/g, '');
+      const viewDoc = yaml.parse(viewPlain.replace(/^Job: test-job\s*/m, ''));
       expect(viewDoc.prompt).toBe('project noop');
       expect(viewDoc.devices).toEqual(['zion']);
     } finally {

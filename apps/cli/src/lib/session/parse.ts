@@ -10,6 +10,7 @@ import * as fs from 'fs';
 import { truncate } from '../format.js';
 import * as path from 'path';
 import Database from '../sqlite.js';
+import { isSyntheticUserMessage } from './prompt.js';
 import type { SessionAgentId, SessionEvent } from './types.js';
 
 /**
@@ -163,8 +164,17 @@ export function parseSession(filePath: string, agent?: SessionAgentId): SessionE
 
   // Chokepoint: every string field that originated in an untrusted session
   // file gets stripped of terminal escapes here, so renderers downstream can
-  // safely splat values into chalk/console output.
-  for (const e of events) sanitizeEvent(e);
+  // safely splat values into chalk/console output. Same pass flags
+  // harness-injected `role=user` scaffolding (Claude `<bash-input>`/`<bash-stdout>`
+  // from `!`-prefix runs, `<system-reminder>`, etc.) as `_synthetic` so turn
+  // slicing and `--include user` count only genuine user intent — one place,
+  // every harness, instead of per-consumer regex.
+  for (const e of events) {
+    sanitizeEvent(e);
+    if (e.type === 'message' && e.role === 'user' && isSyntheticUserMessage(e.content)) {
+      e._synthetic = true;
+    }
+  }
   return events;
 }
 

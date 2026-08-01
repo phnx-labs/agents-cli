@@ -28,6 +28,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { spawnSync } from 'child_process';
+import { randomUUID } from 'crypto';
+import { isSessionTrackedAgent } from '../lib/session/types.js';
 
 interface ExecCommandActionOptions {
   mode: ExecMode;
@@ -62,6 +64,11 @@ interface ExecCommandActionOptions {
   fallback?: string;
   balanced?: boolean;
   strategy?: string;
+  /**
+   * @deprecated Hidden alias for `--device auto`. Resolved before host dispatch.
+   * Remove after one release.
+   */
+  smart?: boolean;
   acp?: boolean;
   yes?: boolean;
   loop?: boolean;
@@ -589,11 +596,11 @@ export function registerRunCommand(program: Command): void {
     )
     .option(
       '--host <name>',
-      'Offload this run onto another machine over SSH instead of running locally — a device, a registered agent host, or user@host. See `agents devices` / `agents hosts`.',
+      'Offload this run onto another machine over SSH — a device name, registered host, or user@host. Pass "auto" to pick from 14d usage affinity (most-used online device has highest probability). See `agents devices`.',
     )
     .option(
       '--device <name>',
-      'Alias of --host: offload this run onto a registered device (from `agents devices`).',
+      'Alias of --host. Pass "auto" for affinity-based device pick (same as --host auto).',
     )
     .option('--remote-cwd <dir>', "Explicit host working directory for --host runs, used VERBATIM (overrides --cwd; usually --cwd suffices — it re-roots a local-home path onto the remote home). Pass a single-quoted '$HOME/…' or a valid remote absolute path; a local ~ expands here and won't exist there (/Users/you vs /home/you).")
     .option('--no-follow', 'With --host, dispatch detached and return immediately (track via `agents hosts ps/logs`).')
@@ -622,6 +629,10 @@ export function registerRunCommand(program: Command): void {
   // `--on` and `--computer` are hidden aliases of `--host` — same behavior.
   runCmd.addOption(new Option('--on <name>', 'Alias of --host.').hideHelp());
   runCmd.addOption(new Option('--computer <name>', 'Alias of --host.').hideHelp());
+  // Deprecated one-release alias: `agents run … --smart` → treat as `--device auto`.
+  runCmd.addOption(
+    new Option('--smart', 'Deprecated: use --device auto (affinity host pick).').hideHelp(),
+  );
 
   // Internal: the `--host` dispatch forwards this so the REMOTE run prints its
   // resolved session id as a one-line stdout sentinel (hosts/session-marker.ts),
@@ -725,11 +736,15 @@ export function registerRunCommand(program: Command): void {
       // their existing meaning in every dispatch path below.
       const accountPicker = parseRunAccountPickerRequest(agentSpec);
       const accountPickerRequested = accountPicker.requested;
-      const normalizedAgentSpec = accountPicker.normalizedAgentSpec;
+      let normalizedAgentSpec = accountPicker.normalizedAgentSpec;
       if (!accountPicker.valid) {
         console.error(chalk.red(`Invalid account picker target: ${agentSpec}. Use agents run <agent>@.`));
         process.exit(1);
       }
+
+      // Account-picker conflict check runs BEFORE device=auto may set balanced,
+      // so an implicit balanced preference never surfaces as a fake
+      // "cannot be combined with --balanced" when the user only typed trailing @.
       if (accountPickerRequested) {
         const conflicts = runAccountPickerConflicts(options);
         if (conflicts.length > 0) {
@@ -738,6 +753,38 @@ export function registerRunCommand(program: Command): void {
             'Pick the account locally, or use an explicit agent@version target.',
           ));
           process.exit(1);
+        }
+      }
+
+      // --device auto / --host auto (and deprecated --smart): affinity-pick host.
+      // Harness is always the agent the user typed — never auto-picked.
+      // Affinity failure degrades to local (does not kill the run).
+      {
+        const { applyDeviceAutoToOptions } = await import('../lib/smart-launch.js');
+        const result = applyDeviceAutoToOptions(options, {
+          accountPickerRequested,
+        });
+        if (!options.quiet && result.deprecationSmart) {
+          process.stderr.write(
+            chalk.yellow('[agents] --smart is deprecated; use --device auto\n'),
+          );
+        }
+        if (!options.quiet && result.skipped) {
+          process.stderr.write(
+            chalk.yellow(
+              `[agents] device=auto skipped: ${result.skipped} (running local)\n`,
+            ),
+          );
+        }
+        if (!options.quiet && result.banner) {
+          const { hostLabel, deviceHint, acctNote } = result.banner;
+          process.stderr.write(
+            chalk.gray(
+              `[agents] device=auto → ${hostLabel}` +
+                (deviceHint ? ` (affinity ${deviceHint})` : '') +
+                ` · ${acctNote}\n`,
+            ),
+          );
         }
       }
 
@@ -1285,6 +1332,18 @@ export function registerRunCommand(program: Command): void {
             // one here. Registering that same id keeps the local index aligned
             // with the remote agent. On resume, don't mint a new one.
             const hostSessionId = resolveHostSessionId(runAgent, resumeId, options.sessionId);
+            // For every OTHER agent the remote coins its own id, which we can't
+            // know up front. Forward a launch id we control as AGENT_LAUNCH_ID:
+            // the remote `agents run` adopts it (exec.ts resolveLaunchId) and its
+            // SessionStart hook records the real id under that exact key, so after
+            // the stream we resolve the id by one ssh read of the remote hook
+            // record — the same launch-id join used locally (RUSH-2034). Not
+            // needed for Claude (id forced) or resume (id already known).
+            const correlationLaunchId =
+              !hostSessionId && !resumeId && isSessionTrackedAgent(runAgent) ? randomUUID() : undefined;
+            const hostEnv = correlationLaunchId
+              ? [...options.env, `AGENT_LAUNCH_ID=${correlationLaunchId}`]
+              : options.env;
             if (hostSessionId) {
               registerInteractiveHostSession({
                 cwd: process.cwd(),
@@ -1304,7 +1363,7 @@ export function registerRunCommand(program: Command): void {
               mode: options.mode,
               model: options.model,
               effort: options.effort,
-              env: options.env,
+              env: hostEnv,
               addDir: hostAddDirs,
               json: options.json,
               verbose: options.verbose,
@@ -1320,14 +1379,40 @@ export function registerRunCommand(program: Command): void {
               forceInteractive: options.interactive,
               copyCreds: hostCopyCreds,
             });
+            // Resolve a non-Claude agent's REAL remote session id now the run has
+            // booted (its hook has fired on the peer): one ssh read of the remote
+            // hook record, keyed by the launch id we forwarded. Register it so the
+            // run shows in `agents sessions` and can be reconnected/focused —
+            // closing the non-Claude gap RUSH-2033 left. Best-effort: an
+            // unreachable host or a not-yet-landed record leaves the run un-mapped
+            // rather than mis-mapped.
+            let resolvedRemoteId: string | undefined;
+            if (correlationLaunchId) {
+              const { resolveRemoteSessionId } = await import('../lib/hosts/remote-session-id.js');
+              const { sshTargetFor } = await import('../lib/hosts/types.js');
+              try {
+                resolvedRemoteId = resolveRemoteSessionId(sshTargetFor(host), correlationLaunchId);
+              } catch {
+                /* ssh read is best-effort — keep the run un-mapped, never guess */
+              }
+              if (resolvedRemoteId) {
+                registerInteractiveHostSession({
+                  cwd: process.cwd(),
+                  host: host.name,
+                  agent: runAgent,
+                  sessionId: resolvedRemoteId,
+                  name: options.name,
+                });
+              }
+            }
             // A network drop kills the local ssh client (exit 255) but the remote
             // agent survives in its detached tmux session. With a known session id
-            // (Claude, or a resumed run) and a tmux-hosted run, re-attach the live
-            // pane automatically instead of exiting — the user never has to notice
-            // the drop and `agents sessions focus` by hand. `raw` runs aren't tmux
-            // wrapped, so there is nothing to reconnect to. Non-Claude id capture is
-            // tracked in RUSH-2007.
-            const reconnectId = hostSessionId ?? resumeId;
+            // (Claude's forced id, a resumed run, or a non-Claude id we just
+            // resolved from the remote hook record) and a tmux-hosted run,
+            // re-attach the live pane automatically instead of exiting — the user
+            // never has to notice the drop and `agents sessions focus` by hand.
+            // `raw` runs aren't tmux wrapped, so there is nothing to reconnect to.
+            const reconnectId = hostSessionId ?? resolvedRemoteId ?? resumeId;
             if (reconnectId && !isRaw) {
               const { reconnectInteractiveSession, SSH_CONN_FAILURE } = await import('../lib/hosts/reconnect.js');
               if (exitCode === SSH_CONN_FAILURE) {
@@ -2183,8 +2268,10 @@ export function registerRunCommand(program: Command): void {
               agent,
               keys: secretsKeysSubset,
               allowExpired: options.allowExpired,
-              // The harness identity scopes any cached grant and allows this
-              // requesting agent to wait for interactive approval.
+              // The harness identity scopes any cached grant. It no longer lets the
+              // requesting agent wait for interactive approval — an agent launch
+              // resolves broker-only and fails fast naming
+              // `agents secrets unlock <bundle>` (bundles.ts:interactiveUnlock).
               agentOnly: isHeadlessSecretsContext(),
             });
             const entries = describeBundle(bundle);

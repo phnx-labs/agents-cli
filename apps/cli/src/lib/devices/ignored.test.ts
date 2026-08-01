@@ -19,6 +19,7 @@ import * as path from 'path';
 // Set HOME before state.ts loads so its module-level root picks up the override.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-devices-ignored-test-'));
 process.env.HOME = TEST_HOME;
+process.env.AGENTS_DEVICES_DIR = path.join(TEST_HOME, '.agents', '.history', 'devices');
 
 const { loadIgnored, addIgnored, removeIgnored, isIgnored } = await import('./registry.js');
 

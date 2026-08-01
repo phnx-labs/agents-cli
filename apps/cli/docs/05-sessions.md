@@ -152,6 +152,14 @@ computed by the state engine from the most recent `TodoWrite` (Claude) or
 of any `--include` filter. Absent when the session wrote no checklist. (It is
 detail-output only — the listing `--json` above does not compute it per row.)
 
+List and preview surfaces still show that progress when it is available on the
+row (live `--active` from the state engine, or `SessionMeta.todos` / transcript
+parse in the picker): compact `✓done/total · current step` in the picker
+preview (`Todos:` line), the flat listing's `doing` cell, and `--active` /
+cross-machine rows (interactive, headless, teams, and sub-agent sessions share
+the same path). The picker preview also shows the originating user prompt and a
+`Dirs:` line of directories touched.
+
 ```json
 {
   "session": {
@@ -236,6 +244,37 @@ results, and errors; thinking, usage, init, and result metadata are hidden. Use
 `agents sessions tail --json` for the raw JSONL stream, or `agents logs -f --full`
 for the raw transcript follow.
 
+## Live sessions (`--active`) and the interactive browser
+
+`agents sessions --active` answers "what is running right now, everywhere". It sweeps
+the local machine (`getActiveSessions`) and, unless `--local`, every registered online
+device over SSH, through one shared gather — `gatherActiveSessions` in
+`src/commands/sessions.ts`. `--host`/`--device` **scopes** that sweep to the named
+machines rather than adding to it.
+
+On a TTY it opens the interactive browser seeded to running-only; `--json`,
+`--waiting`, and `--no-interactive` print the static grouped view instead. Both read
+the same gather, so they always agree on what is live.
+
+Two properties of the running view are worth stating, because a session missing from
+it is indistinguishable from a session that isn't running:
+
+- **Running is a source of rows, not a filter over the transcript index.** A live
+  session the local index doesn't carry — one on a peer, one older than the browser's
+  window, one whose agent hasn't written a transcript yet — is listed as its own row
+  (`mergeLiveIntoPool`, `src/commands/sessions-browser.ts`). Rows keyed by session id
+  merge with their indexed row; a session with no id yet is keyed by cloud task id or
+  `machine:pid`, so two of them never collapse into one.
+- **The host column names the program the session runs in** — `codium`, `ghostty`,
+  `tmux`, and `tmux→ghostty` when a tmux session is currently being watched through
+  another app. A tmux row with no attached client stays a bare `tmux`, which is what
+  running detached looks like. It comes from the live scan (`ActiveSession.host` /
+  `viewingIn`), so it appears only in the running view — transcript metadata has no
+  host.
+
+A row with no session id addresses no transcript: picking it reports where the process
+is instead of failing to open a file that does not exist.
+
 ## BM25 Column Weights
 
 FTS5 ranks search hits across four columns with these weights:
@@ -289,6 +328,33 @@ cases a live pull can't reach: a machine that is **offline / asleep / decommissi
   the "every machine's sessions show up automatically, even offline" case. Prefer
   on-demand `--host` reads and explicit export/import; reach for sync only when you want
   a passive always-on mirror (further below).
+
+### Resolving a full session id across the fleet
+
+`--host` names *which* box to look on. When you already have a full session id but
+**not** the box, `agents sessions <uuid>` finds it for you: a UUID is treated as an
+identifier, so on a local miss the CLI fans the **id lookup** out to the online fleet
+(the same `gatherRemoteList` SSH sweep the listing uses) and renders the session's
+summary from the machine that holds it — delegated to that peer via `runOnPeer`, since
+its transcript and agent binary live there.
+
+```
+# You have the id from a log or a teammate; you don't know the machine
+agents sessions d3470b57-2af6-4c11-b1de-3fab94f43603
+# → renders the summary from whichever online box owns it (e.g. yosemite-s0)
+```
+
+- **Exact id only — never a content search.** A UUID appears verbatim in *other*
+  sessions' transcripts (a watchdog `/continue <uuid>` reference echoes the parent id
+  into later sessions), so a fuzzy match would surface unrelated sessions as "matches."
+  There is no FTS/content fallback for an id-shaped query: it is found by id or reported
+  not found, locally and on every peer.
+- **Same id on more than one machine** surfaces a labeled conflict so you can pick one
+  with `--device <host>`.
+- **`--local`** restricts the lookup to this machine — no cross-machine sweep — for
+  scripts that want deterministic local behavior.
+- A peer already answering a parent's sweep (`AGENTS_SESSIONS_LOCAL=1`) never re-fans-out,
+  so a fleet resolve can't recurse.
 
 ## Forking (branch a conversation)
 

@@ -57,6 +57,12 @@ everyone. The **actor** layer ([`src/lib/actor.ts`](../src/lib/actor.ts)) answer
   no personal identity rather than guessing the box owner.
 - **Inherited** — a child spawn trusts the `AGENTS_ACTOR*` env its parent stamped
   instead of re-resolving, so the whole spawn tree shares one actor.
+- **Dispatched over SSH (outbound)** — when the CLI runs an agent on another host
+  (`agents run --host`, `agents ssh <host>`, or a remote teammate), the resolved actor is
+  forwarded into the remote invocation's env, so the remote box inherits it instead of
+  re-resolving. Without this the actor is dropped at the SSH hop and the remote
+  `tailscale whois`es the *originating* box's IP — mis-crediting the shared fleet account
+  rather than the human who launched the run.
 
 The resolved actor rides the agent's process env (`AGENTS_ACTOR`,
 `AGENTS_ACTOR_KIND`, and `AGENTS_ACTOR_NAME`/`_EMAIL`/`_GITHUB` when known). For a
@@ -184,6 +190,50 @@ agents hq floor --json | jq '.agents[0].actions'
 Typical action commands are `agents message <mailbox> ... --surface hq`,
 `agents feed --kill <mailbox>`, `agents teams stop <team> <teammate>`,
 `agents sessions <id> --markdown`, and `agents teams add <team> ...`.
+
+## Fleet health & cross-device divergence (`agents doctor`)
+
+Three diagnostics with distinct scopes (RUSH-2027):
+
+- `agents fleet status` — coarse **device** health: online/offline, which agent
+  CLIs are installed, sign-in, agents-cli **version skew**. Not fine-grained
+  resource divergence.
+- `agents inspect <agent>[@version]` — deep **single-harness** diff between one
+  version home and its resolved sources (staleness, orphans).
+- `agents doctor` — the **umbrella**: local diagnostics (CLI presence, sign-in,
+  per-version sync, orphans) **and**, with `--devices`, cross-device divergence.
+
+### `agents doctor --devices`
+
+Compares every registered device's installed harness inventory against the local
+machine (the baseline) and flags anything present on one box but missing on
+another:
+
+- **Resource presence** — commands, skills, hooks, rules, mcp, permissions,
+  subagents, plugins, promptcuts, workflows. A plugin like `swarm` installed on
+  `zion` but absent on `yosemite-s0` reads as
+  `yosemite-s0 is missing plugin 'swarm' (present on zion)` — instead of only
+  surfacing at runtime as `Unknown command: /swarm:run`.
+- **Agent version parity** — a version installed on one box but not another
+  (`yosemite-s0 is missing claude@2.1.220`).
+- **`.agents` / `.system` repo drift** — a device whose config-repo HEAD, branch,
+  or dirty state diverges from the local baseline.
+
+It is **read-only**: it never installs or syncs. The remediation hint points at
+`agents apply` / `agents repo pull` on the lagging box.
+
+```bash
+agents doctor --devices          # human table + a Cross-device divergence section
+agents doctor --devices --json   # { devices: [...], fleet: { divergences: [...] } }
+```
+
+Each device's top-level `agents doctor --json` emits a `fleet` inventory field
+(installed resources per kind, installed versions per agent, repo state), so the
+comparison needs no extra probe. `agents fleet status` reuses the same comparator
+to add a per-device divergence line to its rollup. Source:
+`src/lib/devices/fleet-divergence.ts` (pure comparator),
+`src/lib/devices/fleet-inventory.ts` (`collectLocalFleetInventory`),
+`src/commands/doctor.ts` (`runDevicesDoctor`).
 
 ## Three Sources, One Fleet
 
@@ -335,6 +385,29 @@ log.
 cost-of-delay rank, not chronology: idle minutes × downstream blast radius ×
 hourly burn × ask irreducibility. Suppressed stalls and FYIs get zero
 irreducibility, so a fresh cheap ask does not outrank an old critical-path block.
+
+### What publishes a block
+
+Blocks are written by the `feed-publish` hook (`~/.agents/hooks/10-feed-publish.py`,
+installed by `ensureFeedPublishHook`), registered for every hooks-capable agent:
+
+- **AskUserQuestion** (`PreToolUse`) — the structured multiple-choice ask.
+- **Waiting notifications** (`Notification`: `permission_prompt` / `idle_prompt` /
+  `elicitation_dialog`) — Claude's permission/idle prompts.
+- **Codex approval prompts** (`PermissionRequest`) — Codex emits `PermissionRequest`
+  (not Claude's `Notification`) when it blocks on an approval. The hook publishes an
+  **approval-class** block with `costOfDelay: high` and `safeDefault: deny`, so a
+  blocked headless/remote Codex agent surfaces on the feed and `agents feed --dispatch`
+  pages the phone as urgent (RUSH-2039). The Codex approval card is cleared once the
+  approved tool runs (`PostToolUse`) or the session ends.
+
+The block is cleared on answer (`PostToolUse` for AskUserQuestion, or `UserPromptSubmit`
+in the TUI) and on session lifecycle (`Stop` / `SessionEnd`). A **Codex** approval card
+additionally clears as soon as the next tool runs — this is a matcher-less `PostToolUse`
+clear hook registered **for Codex only** (`feed-clear-permission`). Claude registers no
+matcher-less `PostToolUse` clear, so its `permission_prompt` / `idle_prompt` /
+`elicitation_dialog` notification cards persist until `Stop` / `SessionEnd` (and its only
+`PostToolUse` feed hook, `feed-clear-answered`, stays matcher-scoped to `AskUserQuestion`).
 
 The same poll also synthesizes control cards for sessions that are burning
 abnormally without asking (`runaway`) or asking repeatedly (`needy`). Control

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { BUILT_IN_AGENTS, getBuiltInByKey, getBuiltInDefByTitle, getBuiltInByPrefix, pickLatestVersion, STRATEGY_LAUNCH_AGENTS, modeFlagForAgent, AgentLaunchMode } from '../core/agents';
+import { BUILT_IN_AGENTS, getBuiltInByKey, getBuiltInDefByTitle, getBuiltInByPrefix, pickLatestVersion, STRATEGY_LAUNCH_AGENTS, modeFlagForAgent, AgentLaunchMode, RunStrategy, buildAgentLaunchCommand, wrapNativeAgentCommand, shquote } from '../core/agents';
 import { parseSpawnRequest, SpawnRequest } from '../core/spawn';
 import {
   AgentConfig,
@@ -11,9 +11,9 @@ import * as claudemd from './claudemd.vscode';
 import { AgentsMarkdownEditorProvider, swarmCurrentDocument } from './customEditor';
 import * as git from './git.vscode';
 import { AgentSettings, hasLoginEnabled, PromptEntry, QUICK_LAUNCH_SLOT_KEYS, getQuickLaunchSlot, QuickLaunchSlot, QuickLaunchSlotKey } from '../core/settings';
-import { listRegisteredDevices, countRunningAgents } from './deviceHealth.vscode';
+import { listRegisteredDevices, countRunningAgents, fetchDeviceStats, resolveSecret } from './deviceHealth.vscode';
 import { normalizeHost } from '../core/remoteSessions';
-import { pickLeastBusyDevice, resolveBalancePool } from '../core/launchHost';
+import { pickBestHost, deviceHasUsableVersion, resolveBalancePool, DeviceLoad } from '../core/launchHost';
 import * as settings from './settings.vscode';
 import * as swarm from './swarm.vscode';
 import {
@@ -73,7 +73,7 @@ import {
   SessionAgentType
 } from '../core/utils';
 import { generateLabelWithLLM } from '../core/labelgen';
-import { readClaudeSessionName } from '../core/sessionName';
+import { readClaudeSessionName, readClaudeSessionNameInfo } from '../core/sessionName';
 import { resolveTerminalCwd, tryReleaseWorktreeForTerminal } from '../core/worktree';
 import * as path from 'path';
 import { spawn } from 'child_process';
@@ -92,7 +92,9 @@ import { registerReconnect, hasTmuxMapping, NonRetryableError, type ReattachTarg
 import { normalizeTerminalMode, resolveTerminalMode } from '../core/terminalMode';
 import { DEFAULT_DISPLAY_PREFERENCES } from '../core/settings';
 import * as readiness from './terminalReadiness';
-import { resolveAlias, isAgentInstalled } from '../core/agentModels';
+import { resolveAlias, isAgentInstalled, checkInstalledAgentsViaCli } from '../core/agentModels';
+import { pickAgentByUsage } from '../core/agentUsage';
+import type { RemoteSession } from '../core/remoteSessions';
 // readAgentRunStrategy no longer needed: agents-cli reads strategy from
 // agents.yaml itself when invoked via `agents run`.
 import { resolveAgentsBin, AgentsBinNotFoundError } from '../core/agentsBin';
@@ -177,61 +179,8 @@ function buildTerminalTitle(
 // post-spawn.
 type LaunchableAgent = 'claude' | 'codex' | 'gemini' | 'opencode' | 'cursor' | 'antigravity';
 
-// Version/account selection strategy passed to `agents run --strategy`. Mirrors
-// the agents-cli: pinned uses the configured default, balanced rotates across
-// healthy accounts. (Latest is expressed as an explicit @version pin, not a
-// strategy.) The CLI ignores --strategy when an @version is pinned.
-type RunStrategy = 'pinned' | 'available' | 'balanced';
-
-// Shell-quote a token (device names come from the registry; quote defensively so
-// a stray character can never break out of the `agents run … --host <x>` string).
-function shquote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
-}
-
-function buildAgentLaunchCommand(
-  agentKey: string,
-  sessionId: string | null,
-  defaultModel?: string,
-  additionalFlags?: string,
-  pinnedVersion?: string,
-  strategy?: RunStrategy,
-  mode?: AgentLaunchMode,
-  host?: string,
-): string {
-  const agentSpec = pinnedVersion ? `${agentKey}@${pinnedVersion}` : agentKey;
-  let command = `agents run ${agentSpec} --interactive`;
-  // Offload onto another machine over SSH — the CLI resolves the device from
-  // `agents devices` and runs interactive-on-host. Emitted for ANY agent so
-  // grok/kimi/droid (which launch as raw binaries locally) get host parity.
-  if (host) {
-    command += ` --host ${shquote(host)}`;
-  }
-  if (sessionId && agentKey === 'claude') {
-    command += ` --session-id ${sessionId}`;
-  }
-  // --strategy is meaningless (and ignored by the CLI) once a version is
-  // pinned, so only emit it for the unpinned, strategy-driven launches.
-  if (strategy && !pinnedVersion) {
-    command += ` --strategy ${strategy}`;
-  }
-  if (defaultModel && (!additionalFlags || !additionalFlags.includes('--model'))) {
-    command += ` --model ${defaultModel}`;
-  }
-  // Dispatch mode -> `agents run --mode plan|auto|edit`, next to --model/--strategy.
-  // Skip when the caller already threaded an explicit --mode via additionalFlags
-  // so we never emit it twice.
-  if (mode) {
-    const modeFlag = modeFlagForAgent(agentKey, mode);
-    if (modeFlag && (!additionalFlags || !additionalFlags.includes('--mode'))) {
-      command += ` ${modeFlag}`;
-    }
-  }
-  if (additionalFlags?.trim()) {
-    command += ` ${additionalFlags.trim()}`;
-  }
-  return command;
-}
+// buildAgentLaunchCommand, RunStrategy, and shquote are now in core/agents.ts
+// so they can be unit-tested without a VS Code harness.
 
 // PATH augmented with the agents shim dirs — the extension-host PATH can omit them,
 // so a bare `agents` spawn would fail to resolve. Shared by the detached spawns below.
@@ -371,27 +320,60 @@ function buildClaudeLaunchCommand(
 // Sentinel a QuickPick/slot uses to mean "auto-pick the least-busy device".
 const BALANCED_HOST = 'balanced';
 
-// Resolve the least-busy online device for a balanced launch. `pool` restricts
-// the candidate set (undefined/empty = every online device except this machine).
-// Probes running-agent counts behind a progress spinner. Returns undefined when
-// no device is eligible, so the caller falls back to the local machine.
-async function resolveBalancedHost(pool?: string[]): Promise<string | undefined> {
+// Resolve the best online device for a balanced launch. `pool` restricts the
+// candidate set (undefined/empty = every online device except this machine).
+// `agentKey` (RUSH-2025) makes the pick AGENT-AWARE: it additionally probes each
+// candidate's hardware load/memory and whether that agent has a signed-in,
+// non-throttled version there, then ranks via the composite pickBestHost and
+// DROPS devices with no usable version — so the launch never lands on a host
+// where the user would hit a login/limit wall. Without `agentKey` it degrades to
+// the running-agent-count ranking (unchanged legacy behavior). Returns undefined
+// when no device is eligible, so the caller falls back to the local machine.
+async function resolveBalancedHost(pool?: string[], agentKey?: string): Promise<string | undefined> {
   const localName = normalizeHost(os.hostname());
   const devices = await listRegisteredDevices();
   const fleet = devices.map(d => ({ name: d.name, online: !!d.online, running: 0 }));
-  const online = resolveBalancePool(fleet, { localName, pool }).filter(c => c.online);
-  if (online.length === 0) {
+  const eligible = resolveBalancePool(fleet, { localName, pool }).filter(c => c.online);
+  if (eligible.length === 0) {
     vscode.window.showInformationMessage('Balanced launch: no online device available — running locally.');
     return undefined;
   }
-  const loaded = await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Window, title: 'Picking least-busy host…' },
-    () => Promise.all(online.map(async c => ({
-      ...c,
-      running: await countRunningAgents(c.name, { isLocal: false }),
-    }))),
+  // Look up each eligible device's registry entry for its SSH address + creds so
+  // the hardware probe can reach it (mirrors the Factory Floor device-health
+  // fetch in settings.vscode.ts).
+  const byName = new Map(devices.map(d => [normalizeHost(d.name), d]));
+  const loaded: DeviceLoad[] = await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Window, title: agentKey ? `Picking best host for ${agentKey}…` : 'Picking least-busy host…' },
+    () => Promise.all(eligible.map(async (c): Promise<DeviceLoad> => {
+      const dev = byName.get(normalizeHost(c.name));
+      const host = dev?.host ?? c.name;
+      const running = await countRunningAgents(c.name, { isLocal: false });
+      if (!agentKey) return { ...c, running };
+      // Agent-aware: probe hardware health + usable-version in parallel.
+      const creds = dev?.secretRef ? await resolveSecret(dev.secretRef) : {};
+      const [stats, usableVersion] = await Promise.all([
+        fetchDeviceStats(host, { isLocal: false, identityFile: creds.identityFile, user: creds.user || dev?.user }),
+        hostHasUsableVersion(c.name, agentKey),
+      ]);
+      return {
+        ...c,
+        running,
+        usableVersion,
+        loadAvg1: stats.reachable ? stats.loadAvg1 : undefined,
+        memPercent: stats.reachable ? stats.memPercent : undefined,
+      };
+    })),
   );
-  return pickLeastBusyDevice(loaded) ?? undefined;
+  const best = pickBestHost(loaded);
+  if (!best && agentKey && loaded.length > 0) {
+    // Every online device lacks a signed-in, non-throttled version of this
+    // agent — fall back to local rather than launch into a broken agent.
+    vscode.window.showWarningMessage(
+      `No fleet device has a usable ${agentKey} version (signed in and not rate-limited) — running locally.`,
+    );
+    return undefined;
+  }
+  return best ?? undefined;
 }
 
 // Resolve a Quick Launch slot's Run-on target to a device name (undefined =
@@ -400,7 +382,7 @@ async function resolveBalancedHost(pool?: string[]): Promise<string | undefined>
 async function resolveSlotHost(slot: QuickLaunchSlot): Promise<string | undefined> {
   const target = slot.runOn?.trim();
   if (!target || target === 'local') return undefined;
-  if (target === BALANCED_HOST) return resolveBalancedHost(slot.balancePool);
+  if (target === BALANCED_HOST) return resolveBalancedHost(slot.balancePool, slot.agent);
   const devices = await listRegisteredDevices();
   const dev = devices.find(d => normalizeHost(d.name) === normalizeHost(target));
   if (!dev) {
@@ -417,7 +399,7 @@ async function resolveSlotHost(slot: QuickLaunchSlot): Promise<string | undefine
 // Interactive host picker (This Mac / a device / Balanced) for the per-agent
 // "(Pick Host)" commands and the ⌘⌥⇧n override. Returns { cancelled } if the
 // user dismissed it; host === undefined means "this Mac".
-async function pickLaunchHost(title = 'Run on…'): Promise<{ host?: string; cancelled: boolean }> {
+async function pickLaunchHost(title = 'Run on…', agentKey?: string): Promise<{ host?: string; cancelled: boolean }> {
   const devices = await listRegisteredDevices();
   const sorted = [...devices].sort((a, b) => Number(b.online) - Number(a.online));
   const BALANCE_ID = ' balanced';
@@ -432,7 +414,10 @@ async function pickLaunchHost(title = 'Run on…'): Promise<{ host?: string; can
   ];
   const pick = await vscode.window.showQuickPick(items, { placeHolder: title, title });
   if (!pick) return { cancelled: true };
-  if (pick.hostId === BALANCE_ID) return { host: await resolveBalancedHost(undefined), cancelled: false };
+  // Balanced -> agent-aware best host (RUSH-2025). An explicit device pick is
+  // honored as-is; the launch still passes strategy 'balanced' so the CLI's
+  // account rotation routes around a signed-out / throttled version on it.
+  if (pick.hostId === BALANCE_ID) return { host: await resolveBalancedHost(undefined, agentKey), cancelled: false };
   return { host: pick.hostId, cancelled: false };
 }
 
@@ -1205,11 +1190,50 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('agents.newAgent', async () => {
-      // Default is always Claude
-      const agentConfig = getBuiltInByTitle(context.extensionPath, defaultAgentTitle);
-      if (agentConfig) {
-        await openSingleAgent(context, agentConfig);
+      // Smart three-tier launch (RUSH-2029):
+      //   1. Agent TYPE by recent/frequent usage (last-24h weighted), falling back
+      //      to the configured default when there is no usable history.
+      //   2. Version/account balancing via --strategy balanced.
+      //   3. Device load balancing via resolveBalancedHost (least-busy online host).
+      const defaultKey = getBuiltInDefByTitle(defaultAgentTitle)?.key ?? 'claude';
+
+      // Only agents installed + signed-in on this machine are eligible. shell is
+      // never a "usage" target, so drop it from the candidate set.
+      const installedMap = await checkInstalledAgentsViaCli();
+      const installed = Object.entries(installedMap)
+        .filter(([key, ok]) => ok && key !== 'shell')
+        .map(([key]) => key);
+
+      // Fleet-wide recent history (local + every online device), the same sweep the
+      // Recap ledger uses. Per-host failures are swallowed there, so an empty sweep
+      // simply yields the default fallback below.
+      let sessions: RemoteSession[] = [];
+      try {
+        const { fetchRecapSessions } = await import('./remoteSessions.vscode');
+        sessions = await fetchRecapSessions(20, settings.getSettings(context).projectRules ?? []);
+      } catch (err) {
+        console.error('[agents.newAgent] recap sweep failed:', err);
       }
+
+      const chosenKey = pickAgentByUsage(sessions, installed, defaultKey, Date.now());
+      if (!chosenKey) {
+        // Neither history nor an installed default — leave the flow untouched.
+        vscode.window.showWarningMessage('New Agent: no installed agent available to launch.');
+        return;
+      }
+
+      const chosenDef = getBuiltInByKey(chosenKey);
+      const agentConfig = chosenDef && getBuiltInByTitle(context.extensionPath, chosenDef.title);
+      if (!agentConfig) return;
+
+      // Tier 3: auto-pick the least-busy healthy device (undefined = local).
+      const host = await resolveBalancedHost(undefined);
+
+      // Tier 2: --strategy balanced load-balances the version/account.
+      await openSingleAgent(context, agentConfig, undefined, undefined, 'balanced', host);
+
+      const hostLabel = host ? ` on ${host}` : '';
+      vscode.window.setStatusBarMessage(`New Agent: ${chosenDef!.title} (balanced${hostLabel})`, 4000);
     })
   );
 
@@ -1554,12 +1578,19 @@ export async function activate(context: vscode.ExtensionContext) {
   for (const def of BUILT_IN_AGENTS) {
     if (def.key === 'shell') continue;
 
+    // Agents that support --strategy balanced launch (Pick/Auto) Host with it so
+    // the CLI's account rotation routes around a signed-out / throttled version
+    // on the chosen device (RUSH-2025). Others (opencode/grok/kimi/droid) have no
+    // balanced rotation, so they keep the default strategy.
+    const hostStrategy: RunStrategy | undefined =
+      (STRATEGY_LAUNCH_AGENTS as readonly string[]).includes(def.key) ? 'balanced' : undefined;
+
     context.subscriptions.push(
       vscode.commands.registerCommand(`${def.commandId}PickHost`, async () => {
-        const picked = await pickLaunchHost(`New ${def.title} — run on…`);
+        const picked = await pickLaunchHost(`New ${def.title} — run on…`, def.key);
         if (picked.cancelled) return;
         const agentConfig = getBuiltInByTitle(context.extensionPath, def.title);
-        if (agentConfig) openSingleAgent(context, agentConfig, undefined, undefined, undefined, picked.host);
+        if (agentConfig) openSingleAgent(context, agentConfig, undefined, undefined, hostStrategy, picked.host);
       })
     );
 
@@ -1567,18 +1598,35 @@ export async function activate(context: vscode.ExtensionContext) {
       vscode.commands.registerCommand(`${def.commandId}PickVersionHost`, async () => {
         const version = await pickAgentVersion(def.key);
         if (!version) return;
-        const picked = await pickLaunchHost(`New ${def.title} v${version.version} — run on…`);
+        const picked = await pickLaunchHost(`New ${def.title} v${version.version} — run on…`, def.key);
         if (picked.cancelled) return;
         const agentConfig = getBuiltInByTitle(context.extensionPath, def.title);
+        // A pinned version is an explicit override, so no balanced strategy here.
         if (agentConfig) openSingleAgent(context, agentConfig, undefined, version.version, undefined, picked.host);
       })
     );
 
     context.subscriptions.push(
       vscode.commands.registerCommand(`${def.commandId}AutoHost`, async () => {
-        const host = await resolveBalancedHost(undefined);
+        // Agent-aware host pick: skips devices with no usable version of def.key.
+        const host = await resolveBalancedHost(undefined, def.key);
         const agentConfig = getBuiltInByTitle(context.extensionPath, def.title);
-        if (agentConfig) openSingleAgent(context, agentConfig, undefined, undefined, undefined, host);
+        if (agentConfig) openSingleAgent(context, agentConfig, undefined, undefined, hostStrategy, host);
+      })
+    );
+  }
+
+  // "New Claude (Auto)" (RUSH-2025): one command that auto-picks BOTH the host
+  // (least-loaded, agent-healthy device via resolveBalancedHost) AND the version
+  // strategy ('balanced'). Combines newClaudeAutoHost + newClaudeBalanced. Only
+  // registered for agents that support balanced rotation.
+  for (const def of BUILT_IN_AGENTS) {
+    if (!(STRATEGY_LAUNCH_AGENTS as readonly string[]).includes(def.key)) continue;
+    context.subscriptions.push(
+      vscode.commands.registerCommand(`${def.commandId}Auto`, async () => {
+        const host = await resolveBalancedHost(undefined, def.key);
+        const agentConfig = getBuiltInByTitle(context.extensionPath, def.title);
+        if (agentConfig) openSingleAgent(context, agentConfig, undefined, undefined, 'balanced', host);
       })
     );
   }
@@ -2089,7 +2137,12 @@ async function openSingleAgent(
   }
 
   if (command) {
-    await sendCommandWhenReady(terminal, command);
+    // In native (non-tmux) mode, prefix the launch command with `exec` so the
+    // shell replaces itself with the agent runner. When the agent exits the
+    // terminal process exits too, which causes VS Code to close the tab
+    // automatically — mirroring the pane-died behaviour tmux mode already has.
+    // wrapNativeAgentCommand is a no-op for shell tabs.
+    await sendCommandWhenReady(terminal, wrapNativeAgentCommand(command, agentKey === 'shell'));
     readiness.armAgentReady(terminal, agentKey && sessionId
       ? { agentKey, sessionId, cwd }
       : {});
@@ -2508,17 +2561,32 @@ interface AgentViewResponse {
   versions: AgentVersionInfo[];
 }
 
-async function listAgentVersions(agentKey: string): Promise<AgentVersionInfo[]> {
+// List an agent's installed versions with login/usage health. A `host` targets a
+// remote device via `agents view <agent> --host <device> --json` (RUSH-2025 host
+// health probe); omit it for the local machine. A remote probe gets a longer
+// timeout since it makes an SSH round-trip.
+async function listAgentVersions(agentKey: string, host?: string): Promise<AgentVersionInfo[]> {
   const { runAgents } = await import('../core/agentsBin');
   try {
-    const { stdout } = await runAgents(`view ${agentKey} --json`, {
+    const hostFlag = host ? ` --host ${shquote(host)}` : '';
+    const { stdout } = await runAgents(`view ${agentKey}${hostFlag} --json`, {
       maxBuffer: 10 * 1024 * 1024,
+      timeout: host ? 15_000 : 30_000,
     });
     const parsed: AgentViewResponse = JSON.parse(stdout);
     return parsed.versions || [];
   } catch {
     return [];
   }
+}
+
+// True when `host` has at least one signed-in, non-throttled version of the
+// agent — the RUSH-2025 "usable version" test. A probe failure (offline, no SSH,
+// agent not installed) yields an empty list, so the device is reported unusable
+// and gets filtered out of the balancer rather than launched into blindly.
+async function hostHasUsableVersion(host: string, agentKey: string): Promise<boolean> {
+  const versions = await listAgentVersions(agentKey, host);
+  return deviceHasUsableVersion(versions);
 }
 
 // Resolve the newest installed version for an agent (used by the "(Latest)"
@@ -3452,12 +3520,22 @@ export async function openSingleAgentWithQueue(
     opencodeSessionsBefore = await listOpencodeSessions(cwd);
   }
 
-  if (agentKey === 'claude') {
-    // Claude: generate session ID at open time; others are discovered post-spawn.
-    // A caller (dispatch) may pre-supply the id so it can watch that exact
-    // session file for a plan / completion afterwards.
-    sessionId = opts?.sessionId ?? generateClaudeSessionId();
-    command = buildClaudeLaunchCommand(context, sessionId, defaultModel, undefined, opts?.mode);
+  // Route LAUNCHABLE agents through `agents run <agent> --interactive` so the
+  // --mode flag is applied and the CLI resolves the configured strategy. Claude
+  // gets a pre-generated session id for the resume flow; other agents discover
+  // their session post-spawn. opts?.mode defaults to 'auto' (writable-but-gated)
+  // inside buildAgentLaunchCommand when the caller does not supply an explicit mode.
+  const LAUNCHABLE_SET: ReadonlySet<string> = new Set(['claude', 'codex', 'gemini', 'opencode', 'cursor', 'antigravity']);
+  if (agentKey && LAUNCHABLE_SET.has(agentKey)) {
+    if (agentKey === 'claude') {
+      // Claude: generate session ID at open time; others are discovered post-spawn.
+      // A caller (dispatch) may pre-supply the id so it can watch that exact
+      // session file for a plan / completion afterwards.
+      sessionId = opts?.sessionId ?? generateClaudeSessionId();
+      command = buildClaudeLaunchCommand(context, sessionId, defaultModel, undefined, opts?.mode);
+    } else {
+      command = buildAgentLaunchCommand(agentKey, null, defaultModel, undefined, undefined, undefined, opts?.mode);
+    }
   }
 
   const title = buildTerminalTitle(agentConfig.title, undefined, context, sessionId);
@@ -3494,7 +3572,10 @@ export async function openSingleAgentWithQueue(
   }
 
   if (command) {
-    await sendCommandWhenReady(terminal, command);
+    // Native (non-tmux) path — always agent-terminal, never a shell tab. Apply
+    // exec so the shell replaces itself with the runner and VS Code closes the
+    // tab when the agent exits. isShell is always false here.
+    await sendCommandWhenReady(terminal, wrapNativeAgentCommand(command, false));
   }
 
   // Arm agentReady detection so the session-file fast path can fire.
@@ -3645,15 +3726,16 @@ async function fetchAndSetAutoLabel(
   try {
     const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     const previewInfo = await getSessionPreviewForEntry(entry, workspacePath);
-    if (!previewInfo) return undefined;
-    if (!previewInfo.firstUserMessage) return undefined;
+    const firstUserMessage = previewInfo?.firstUserMessage;
+    const ticket = firstUserMessage ? extractLinearTicketId(firstUserMessage) : null;
 
-    const ticket = extractLinearTicketId(previewInfo.firstUserMessage);
-
-    // Prefer Claude's own persisted session name (the title shown by /status)
-    // — it's already a clean human summary and avoids a redundant LLM call.
-    // Codex/Gemini/Opencode don't persist this yet, so they fall through to
-    // the LLM path.
+    // 1) Reuse an existing real label. Claude persists the /status title (set by
+    //    Claude itself or the user); readClaudeSessionName returns it unless it's
+    //    the derived `<dirname>-<n>` placeholder. This is a clean human summary,
+    //    needs no LLM call, and — unlike the summary path below — doesn't require
+    //    a captured first message, so a session that already has a name gets it
+    //    even before its first turn is recorded. Codex/Gemini/Opencode don't
+    //    persist an equivalent, so they fall through to the summary path.
     if (entry.agentType === 'claude') {
       const persistedName = await readClaudeSessionName(entry.sessionId);
       if (persistedName) {
@@ -3663,12 +3745,16 @@ async function fetchAndSetAutoLabel(
       }
     }
 
-    const sourceText = opts.useFullConversation && previewInfo.lastUserMessage
-      ? `Initial task:\n${previewInfo.firstUserMessage}\n\nLatest activity:\n${previewInfo.lastUserMessage}`
-      : previewInfo.firstUserMessage;
+    // 2) Otherwise summarize the session's activity into a short title. This
+    //    needs a first user message to summarize.
+    if (!firstUserMessage) return undefined;
+
+    const sourceText = opts.useFullConversation && previewInfo?.lastUserMessage
+      ? `Initial task:\n${firstUserMessage}\n\nLatest activity:\n${previewInfo.lastUserMessage}`
+      : firstUserMessage;
 
     const llmTitle = await generateLabelWithLLM(sourceText);
-    const fallback = extractFirstNWords(previewInfo.firstUserMessage, 5);
+    const fallback = extractFirstNWords(firstUserMessage, 5);
     const base = llmTitle ?? fallback;
     const autoLabel = ticket && base ? `${ticket} ${base}` : (ticket ?? base);
 
@@ -3681,13 +3767,42 @@ async function fetchAndSetAutoLabel(
   }
 }
 
+// Un-stick a tab whose label is EXACTLY this session's own derived placeholder
+// (Claude's `<dirname>-<n>`, e.g. "muqsitnawaz-91"). On a window reload the
+// derived name baked into the tab title gets re-adopted as a sticky manual
+// label (terminals.register), which then blocks the auto-label poller forever.
+// A genuine label never equals the session's derived name, and old CLIs have no
+// derived name — so this only ever clears the placeholder, never a real label.
+// It touches only the label + its persisted store entry; the tmux session and
+// agent process are never affected.
+async function maybeHealDerivedLabel(
+  terminal: vscode.Terminal,
+  entry: terminals.EditorTerminal,
+  context: vscode.ExtensionContext
+): Promise<void> {
+  if (!entry.label || !entry.sessionId || entry.agentType !== 'claude') return;
+  const info = await readClaudeSessionNameInfo(entry.sessionId);
+  if (info?.derived && info.name === entry.label) {
+    await terminals.setLabel(terminal, undefined, context);
+  }
+}
+
 function startAutoLabelPollerForTerminal(terminal: vscode.Terminal, context: vscode.ExtensionContext): void {
+  void armAutoLabelPoller(terminal, context);
+}
+
+async function armAutoLabelPoller(terminal: vscode.Terminal, context: vscode.ExtensionContext): Promise<void> {
   const display = getDisplayPrefs(context);
   if (!display.autoLabelInTabTitles) return;
 
   const entry = terminals.getByTerminal(terminal);
-  if (!entry || entry.label || entry.autoLabel) return;
-  if (!entry.sessionId || !entry.agentType) return;
+  if (!entry || !entry.sessionId || !entry.agentType) return;
+
+  // Heal first: if the sticky label is the derived placeholder, drop it so a
+  // real name/topic can resolve below.
+  await maybeHealDerivedLabel(terminal, entry, context);
+
+  if (entry.label || entry.autoLabel) return;
 
   terminals.startAutoLabelPoller(terminal, async () => {
     const autoLabel = await fetchAndSetAutoLabel(terminal, entry);
@@ -3777,11 +3892,14 @@ async function tryFetchLabelOnFocus(
   const entry = terminals.getByTerminal(terminal);
   if (!entry) return;
 
-  // Skip if already has a label
-  if (entry.label || entry.autoLabel) return;
-
   // Need sessionId and agentType to fetch label
   if (!entry.sessionId || !entry.agentType) return;
+
+  // Heal a stuck derived-placeholder label so focusing the tab re-resolves it.
+  await maybeHealDerivedLabel(terminal, entry, context);
+
+  // Skip if it already has a (real) label
+  if (entry.label || entry.autoLabel) return;
 
   // Fetch the label from session file
   const autoLabel = await fetchAndSetAutoLabel(terminal, entry);

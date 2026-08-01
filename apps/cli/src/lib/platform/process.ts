@@ -3,6 +3,7 @@
  */
 import { execFileSync } from 'child_process';
 import { readFileSync } from 'fs';
+import { sleepSync } from '../fs-atomic.js';
 
 /**
  * Forcefully terminate a process AND its descendant tree.
@@ -71,6 +72,55 @@ export function backgroundSpawnOptions(
  * permission to signal it), matching the long-standing call sites that treat a
  * throw from `process.kill(pid, 0)` as "not running".
  */
+/** Poll interval while waiting for a pid to disappear. */
+const EXIT_POLL_MS = 50;
+
+/**
+ * Whether `pid` has stopped serving — dead, or a ZOMBIE awaiting reap.
+ *
+ * `isAlive` is a bare `kill(pid, 0)`, which succeeds for a zombie. That matters
+ * here because {@link waitForExit} blocks the event loop, so a daemon that is
+ * this process's own child can never be reaped while we wait: it would read as
+ * alive for the entire timeout and then be hard-killed after it had already
+ * exited. A zombie holds no socket and serves no request, so for stop purposes
+ * it has exited.
+ */
+export function hasExited(pid: number): boolean {
+  if (!isAlive(pid)) return true;
+  if (process.platform === 'win32') return false; // no zombie state to unwrap
+  try {
+    const state = execFileSync('ps', ['-o', 'state=', '-p', String(pid)], { encoding: 'utf-8' }).trim();
+    return state.startsWith('Z');
+  } catch (err: any) {
+    // `ps` exiting non-zero because the pid is unknown means gone. Any OTHER
+    // failure (ps missing from PATH, a permission error) is NOT evidence of
+    // death, and isAlive already said this pid is live — so fail CLOSED and keep
+    // treating it as alive. Failing open here would clear the pid file under a
+    // running daemon and recreate this very bug through a different door.
+    if (err?.code === 'ENOENT' && err?.syscall === 'spawnSync ps') return false;
+    const out = String(err?.stdout ?? '').trim();
+    const errOut = String(err?.stderr ?? '').trim();
+    if (err?.status === 1 && out === '' && errOut === '') return true; // no such pid
+    return false;
+  }
+}
+
+/**
+ * Block until `pid` stops serving or `timeoutMs` elapses. Synchronous on purpose:
+ * the callers are short-lived CLI/postinstall processes that exit before any
+ * async timer would fire, which is exactly how a SIGTERMed daemon used to outlive
+ * the `stopDaemon()` that was supposed to have reaped it. Returns true if it is
+ * gone.
+ */
+export function waitForExit(pid: number, timeoutMs: number): boolean {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (hasExited(pid)) return true;
+    if (Date.now() >= deadline) return false;
+    sleepSync(EXIT_POLL_MS); // blocks this thread outright; no busy-loop
+  }
+}
+
 export function isAlive(pid: number): boolean {
   if (!pid || pid <= 0) return false;
   try {

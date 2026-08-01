@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import * as path from 'node:path';
 import type { SessionEvent } from './types.js';
 import {
   inferActivity,
@@ -13,6 +14,8 @@ import {
   extractCreatedTicket,
   structuredQuestionFromAsk,
   extractTodoProgress,
+  extractTodoProgressFromEvents,
+  extractRecentDirectoriesTouched,
 } from './state.js';
 
 const now = Date.now();
@@ -373,6 +376,56 @@ describe('inferSessionState — composed', () => {
 });
 
 describe('extractTodoProgress (RUSH-1380)', () => {
+  it('folds TaskCreate and TaskUpdate as an event log', () => {
+    const p = extractTodoProgressFromEvents([
+      tool('TaskCreate', { subject: 'Inspect loader', description: 'Read formats', activeForm: 'Inspecting loader' }),
+      tool('TaskCreate', { subject: 'Refactor loader', activeForm: 'Refactoring loader' }),
+      tool('TaskCreate', { subject: 'Remove me' }),
+      tool('TaskUpdate', { taskId: '1', status: 'completed' }),
+      tool('TaskUpdate', { taskId: '2', status: 'in_progress', subject: 'Refactor config loader' }),
+      tool('TaskUpdate', { taskId: '3', status: 'deleted' }),
+    ]);
+    expect(p).toEqual({
+      items: [
+        { content: 'Inspect loader', status: 'completed', description: 'Read formats', activeForm: 'Inspecting loader' },
+        { content: 'Refactor config loader', status: 'in_progress', activeForm: 'Refactoring loader' },
+      ],
+      done: 1,
+      total: 2,
+      activeForm: 'Refactoring loader',
+    });
+  });
+
+  it('normalizes Grok todo_write and Droid nested TodoWrite snapshots', () => {
+    const grok = extractTodoProgressFromEvents([tool('todo_write', { todos: [
+      { content: 'One', status: 'completed' }, { content: 'Two', status: 'in_progress' },
+    ] })]);
+    const droid = extractTodoProgressFromEvents([tool('TodoWrite', { input: { todos: [
+      { content: 'One', status: 'completed' }, { content: 'Two', status: 'in_progress', activeForm: 'Doing two' },
+    ] } })]);
+    expect(grok).toMatchObject({ done: 1, total: 2, activeForm: 'Two' });
+    expect(droid).toMatchObject({ done: 1, total: 2, activeForm: 'Doing two' });
+  });
+
+  // Fixture paths are built through `path` so the case reads the same on every
+  // platform. extractRecentDirectoriesTouched resolves with the host's path
+  // flavor (its inputs are always host-native: db.ts:852 bails before enrichment
+  // when filePath is empty, which is exactly how remote transcripts are indexed
+  // — hosts/session-index.ts sets `filePath: ''`). A hardcoded POSIX literal
+  // therefore breaks on win32, where `path.resolve('/repo')` is drive-rooted
+  // (`D:\repo`) while `path.isAbsolute('/repo/tests')` is already true, so the
+  // relative and absolute forms of the same directory stop string-matching and
+  // dedup silently splits one entry into two.
+  it('derives recent directories from edit/write and shell cwd events', () => {
+    const root = path.resolve('/repo');
+    const src = path.join(root, 'src');
+    const tests = path.join(root, 'tests');
+    expect(extractRecentDirectoriesTouched([
+      tool('Edit', { file_path: path.join('src', 'a.ts') }),  // relative → resolved against cwd, then dirname'd
+      tool('exec_command', { cmd: 'bun test', workdir: tests }),
+      tool('Write', { file_path: path.join(src, 'b.ts') }),   // absolute → same dir as the Edit, so it dedups
+    ], root)).toEqual([tests, src]);
+  });
   it('tallies done/total and surfaces the in-progress activeForm', () => {
     const p = extractTodoProgress({
       todos: [
