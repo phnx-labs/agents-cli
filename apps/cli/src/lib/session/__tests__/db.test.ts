@@ -472,3 +472,45 @@ describe('upsertSessionsBatch per-row guard', () => {
     expect(ids).not.toContain('batch-bad-00000-4000-8000-000000000002');
   });
 });
+
+describe('closeDB drops the cached prepared statements', () => {
+  // Regression for the "statement has been finalized" bug: closeDB() finalizes
+  // every prepared statement the connection owns, but the module-level
+  // cachedStmts (upsert/FTS) used to survive the close. The next getDB() opened a
+  // fresh connection while stmts() handed back the stale, finalized statements —
+  // so the first upsertSession() after a closeDB() threw. In host-session
+  // registration (which swallows write errors) that silently dropped the row.
+  it('lets upsertSession run again after closeDB without throwing a finalized statement', () => {
+    const fileA = path.join(SEED_FILES_DIR, 'reopen-a.jsonl');
+    const fileB = path.join(SEED_FILES_DIR, 'reopen-b.jsonl');
+    fs.writeFileSync(fileA, '');
+    fs.writeFileSync(fileB, '');
+
+    // A first upsert POPULATES cachedStmts with statements bound to this
+    // connection. Without that priming, stmts() would just rebuild fresh after
+    // the close and the bug wouldn't reproduce — the finalized statement only
+    // bites when the cache already holds statements from the closed connection.
+    upsertSession(
+      { id: 'reopen00-0000-4000-8000-00000000000a', shortId: 'reopen00',
+        agent: 'claude', timestamp: '2026-07-05T00:00:00.000Z', cwd: '/x',
+        filePath: fileA } as SessionMeta,
+      '',
+    );
+
+    // Close finalizes those cached statements. Pre-fix, cachedStmts survived and
+    // pointed at the finalized handles.
+    closeDB();
+
+    // The upsert that used to throw "statement has been finalized": getDB() opens
+    // a fresh connection, but stmts() must NOT hand back the stale cache.
+    const meta: SessionMeta = {
+      id: 'reopen00-0000-4000-8000-00000000000b', shortId: 'reopen00',
+      agent: 'claude', timestamp: '2026-07-05T00:00:01.000Z', cwd: '/x',
+      filePath: fileB,
+    } as SessionMeta;
+    expect(() => upsertSession(meta, '')).not.toThrow();
+
+    // And the row actually landed against the reopened connection.
+    expect(findSessionsById('reopen00-0000-4000-8000-00000000000b')).toHaveLength(1);
+  });
+});
