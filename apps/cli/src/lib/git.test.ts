@@ -468,20 +468,26 @@ describe('pullRepo fast-forward only', () => {
     expect(after).toBe(before);
   });
 
-  it('refuses to fast-forward when local commits diverge from origin', async () => {
-    // Upstream and local each add a different file → diverged histories.
+  // REVERSED deliberately (RUSH-2056). This asserted that divergence alone
+  // refuses the pull. That is what broke fleet distribution: --ff-only rejects
+  // ANY divergence, conflict or not, so one commitOwnDeviceMeta commit wedged
+  // every device permanently with nothing actually in conflict. pullRepo now
+  // rebases, which is what its own doc has always claimed it does.
+  it('rebases a diverged branch instead of refusing when nothing conflicts', async () => {
+    // Upstream and local each add a DIFFERENT file → diverged, no conflict.
     await commitFile(author, 'up.txt', 'from-author\n', 'author commit');
     await simpleGit(author).push('origin', 'main');
     await commitFile(local, 'down.txt', 'from-local\n', 'local commit');
 
-    const before = await simpleGit(local).revparse(['HEAD']);
     const res = await pullRepo(local);
-    const after = await simpleGit(local).revparse(['HEAD']);
 
-    expect(res.success).toBe(false);
-    expect(res.error).toContain('Blocked by local commits');
-    expect(after).toBe(before);
-    expect(fs.existsSync(path.join(local, 'up.txt'))).toBe(false);
+    expect(res.success).toBe(true);
+    // Upstream content arrived...
+    expect(fs.existsSync(path.join(local, 'up.txt'))).toBe(true);
+    // ...and the local commit was replayed on top, not discarded.
+    expect(fs.existsSync(path.join(local, 'down.txt'))).toBe(true);
+    const log = await simpleGit(local).log({ maxCount: 1 });
+    expect(log.latest?.message).toContain('local commit');
   });
 });
 
@@ -588,5 +594,87 @@ describe('resolveGitHubUsername', () => {
 
   it('returns null when no source can resolve the username', () => {
     expect(resolveGitHubUsernameSync()).toBeNull();
+  });
+});
+
+describe('pullRepo reconciles a diverged branch by rebasing', () => {
+  const tmpDirs: string[] = [];
+  afterEach(() => {
+    for (const d of tmpDirs) fs.rmSync(d, { recursive: true, force: true });
+    tmpDirs.length = 0;
+  });
+
+  async function identity(dir: string): Promise<void> {
+    const g = simpleGit(dir);
+    await g.addConfig('user.email', 'test@example.com');
+    await g.addConfig('user.name', 'Test');
+    await g.addConfig('commit.gpgsign', 'false');
+    await g.addConfig('core.autocrlf', 'false');
+  }
+
+  // Builds: bare remote + an `author` clone that pushes upstream, and a `local`
+  // clone that has its own unpushed commit. That is exactly the fleet shape —
+  // commitOwnDeviceMeta makes a local commit, upstream moves on, and the two
+  // diverge with NOTHING in conflict (different files).
+  async function divergedPair(): Promise<{ local: string; author: string }> {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pullrebase-'));
+    tmpDirs.push(root);
+    const remote = path.join(root, 'remote.git');
+    const author = path.join(root, 'author');
+    const local = path.join(root, 'local');
+    await simpleGit().raw(['init', '--bare', '-b', 'main', remote]);
+    await simpleGit().clone(remote, author);
+    await identity(author);
+    fs.writeFileSync(path.join(author, 'seed.txt'), 'seed\n');
+    await simpleGit(author).add('-A');
+    await simpleGit(author).commit('seed');
+    await simpleGit(author).push('origin', 'main');
+    await simpleGit().clone(remote, local);
+    await identity(local);
+    return { local, author };
+  }
+
+  it('replays a local-only commit on top of upstream instead of refusing', async () => {
+    const { local, author } = await divergedPair();
+
+    // local: its own commit, never pushed (the devices/<host> pin case)
+    fs.mkdirSync(path.join(local, 'devices', 'boxA'), { recursive: true });
+    fs.writeFileSync(path.join(local, 'devices', 'boxA', 'agents.yaml'), 'agents:\n  claude: 1.0.0\n');
+    await simpleGit(local).add('-A');
+    await simpleGit(local).commit('chore(devices): snapshot boxA agent pins');
+
+    // upstream: an unrelated commit, so the branches diverge
+    fs.writeFileSync(path.join(author, 'rule.md'), '# a rule\n');
+    await simpleGit(author).add('-A');
+    await simpleGit(author).commit('add a rule');
+    await simpleGit(author).push('origin', 'main');
+
+    const res = await pullRepo(local);
+
+    // --ff-only fails here: divergence alone is enough, no conflict needed.
+    expect(res.success).toBe(true);
+    // upstream content arrived...
+    expect(fs.existsSync(path.join(local, 'rule.md'))).toBe(true);
+    // ...and the local commit survived, replayed on top.
+    expect(fs.existsSync(path.join(local, 'devices', 'boxA', 'agents.yaml'))).toBe(true);
+    const log = await simpleGit(local).log({ maxCount: 1 });
+    expect(log.latest?.message).toContain('snapshot boxA agent pins');
+  });
+
+  it('fails with a conflict message when the same file genuinely conflicts', async () => {
+    const { local, author } = await divergedPair();
+
+    fs.writeFileSync(path.join(local, 'seed.txt'), 'local version\n');
+    await simpleGit(local).add('-A');
+    await simpleGit(local).commit('local edit');
+
+    fs.writeFileSync(path.join(author, 'seed.txt'), 'upstream version\n');
+    await simpleGit(author).add('-A');
+    await simpleGit(author).commit('upstream edit');
+    await simpleGit(author).push('origin', 'main');
+
+    const res = await pullRepo(local);
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/conflict/i);
   });
 });

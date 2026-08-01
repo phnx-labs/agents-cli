@@ -979,6 +979,10 @@ export function registerRepoCommands(program: Command): void {
           anyPulled = true;
         } else {
           spinner.fail(`${formatRepoTarget(t.alias, t.dir)}: ${result.error}`);
+        // A failed repo must fail the command. Without this, `agents fleet run
+        // "agents repo pull user"` reported 11 ok across a fleet that pulled
+        // nothing — the silence that hid RUSH-2056. Matches commands/sync.ts.
+        process.exitCode = 1;
         }
       }
 
@@ -1037,6 +1041,10 @@ export function registerRepoCommands(program: Command): void {
           );
         } else {
           spinner.fail(`${formatRepoTarget(t.alias, t.dir)}: ${result.error}`);
+        // A failed repo must fail the command. Without this, `agents fleet run
+        // "agents repo pull user"` reported 11 ok across a fleet that pulled
+        // nothing — the silence that hid RUSH-2056. Matches commands/sync.ts.
+        process.exitCode = 1;
         }
       }
     });

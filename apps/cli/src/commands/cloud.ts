@@ -354,7 +354,14 @@ Examples:
         if (options.host) {
           routine.host = options.host as string;
           if (options.remoteCwd) routine.remoteCwd = options.remoteCwd as string;
-          routine.devices = [machineId()];
+          // Fill the firing pin only when the author left it empty — the same
+          // guard the three sibling pin sites use (routines.ts:637, :746,
+          // routines-project.ts:302). Without it, re-registering on another box
+          // silently reassigned a pin the routine's author had chosen, and the
+          // routine started firing from whichever machine ran the command last.
+          if (!routine.devices || routine.devices.length === 0) {
+            routine.devices = [machineId()];
+          }
         }
         writeJob(routine);
 

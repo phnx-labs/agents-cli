@@ -1008,12 +1008,17 @@ export async function pullRepo(
     }
 
     try {
-      await git.merge(['--ff-only', tracking]);
-    } catch {
+      // Rebase, not --ff-only. Fast-forward refuses ANY divergence, conflict or
+      // not, so a single local commit — including the one commitOwnDeviceMeta
+      // makes just above — permanently wedged the pull with nothing actually in
+      // conflict. Every device carries its own devices/<host>/ path, so those
+      // replay cleanly. Matches syncRepoGit (below) and this function's own doc.
+      await git.pull('origin', branch, { '--rebase': 'true' });
+    } catch (err) {
       return {
         success: false,
         commit: '',
-        error: `Blocked by local commits. Push or reset them before pulling.\n\n  cd ${displayHomePath(dir)} && git log --oneline HEAD...${tracking}`,
+        error: `Rebase onto ${tracking} hit a conflict — resolve it, then pull again.\n\n  cd ${displayHomePath(dir)} && git status\n\n${(err as Error).message}`,
       };
     }
 
