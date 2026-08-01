@@ -7,6 +7,7 @@ import {
   pickLatestVersion,
   STRATEGY_LAUNCH_AGENTS,
   modeFlagForAgent,
+  buildAgentLaunchCommand,
   extractPlanFromSessionJson,
   planTextToSteps
 } from './agents';
@@ -289,5 +290,61 @@ describe('STRATEGY_LAUNCH_AGENTS', () => {
     for (const key of STRATEGY_LAUNCH_AGENTS) {
       expect(getBuiltInByKey(key)).toBeDefined();
     }
+  });
+});
+
+describe('buildAgentLaunchCommand', () => {
+  // RUSH-2038: interactive Factory launches must default to --mode auto so the
+  // agent starts in a writable posture instead of stalling in read-only plan mode.
+
+  test('no mode supplied -> defaults to --mode auto', () => {
+    const cmd = buildAgentLaunchCommand('codex', null);
+    expect(cmd).toContain('--mode auto');
+    expect(cmd).not.toContain('--mode plan');
+  });
+
+  test('no mode supplied for claude -> --mode auto', () => {
+    const cmd = buildAgentLaunchCommand('claude', 'session-abc');
+    expect(cmd).toContain('--mode auto');
+    expect(cmd).toContain('--session-id session-abc');
+  });
+
+  test('explicit mode plan is preserved when the caller requests it', () => {
+    const cmd = buildAgentLaunchCommand('codex', null, undefined, undefined, undefined, undefined, 'plan');
+    expect(cmd).toContain('--mode plan');
+    expect(cmd).not.toContain('--mode auto');
+  });
+
+  test('explicit mode edit is preserved', () => {
+    const cmd = buildAgentLaunchCommand('gemini', null, undefined, undefined, undefined, undefined, 'edit');
+    expect(cmd).toContain('--mode edit');
+  });
+
+  test('additionalFlags already containing --mode suppresses the default', () => {
+    // Caller has injected --mode plan via additionalFlags; the function must not
+    // double-emit another --mode flag.
+    const cmd = buildAgentLaunchCommand('codex', null, undefined, '--mode plan');
+    expect(cmd.match(/--mode/g)?.length).toBe(1);
+    expect(cmd).toContain('--mode plan');
+  });
+
+  test('includes --interactive and the agent key in the base command', () => {
+    const cmd = buildAgentLaunchCommand('codex', null);
+    expect(cmd).toMatch(/^agents run codex --interactive/);
+  });
+
+  test('pinned version is appended as agent@version', () => {
+    const cmd = buildAgentLaunchCommand('claude', null, undefined, undefined, '2.1.170');
+    expect(cmd).toContain('claude@2.1.170');
+  });
+
+  test('host flag is shell-quoted and included', () => {
+    const cmd = buildAgentLaunchCommand('codex', null, undefined, undefined, undefined, undefined, undefined, 'mac-mini');
+    expect(cmd).toContain("--host 'mac-mini'");
+  });
+
+  test('default model is included when provided', () => {
+    const cmd = buildAgentLaunchCommand('claude', null, 'claude-haiku-4-5');
+    expect(cmd).toContain('--model claude-haiku-4-5');
   });
 });

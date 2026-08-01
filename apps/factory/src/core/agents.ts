@@ -143,6 +143,69 @@ export function planTextToSteps(plan: string): PlanStepData[] {
   }));
 }
 
+// Version/account selection strategy passed to `agents run --strategy`. Mirrors
+// the agents-cli: pinned uses the configured default, balanced rotates across
+// healthy accounts. The CLI ignores --strategy when an @version is pinned.
+export type RunStrategy = 'pinned' | 'available' | 'balanced';
+
+// Shell-quote a single token for safe interpolation into a `agents run …` shell
+// string. Device names and user-supplied values are quoted defensively so a stray
+// character can never break out of the command.
+export function shquote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+// Build the `agents run <agent> --interactive [--mode <m>] […]` shell string for
+// an interactive terminal launch. `mode` defaults to `'auto'` when the caller
+// does not specify one — auto is the writable-but-gated posture that lets an
+// interactive agent edit files without stalling for read-only plan approval.
+// Callers that need plan mode (e.g. a dispatch that explicitly wants planning)
+// must pass `'plan'` explicitly.
+export function buildAgentLaunchCommand(
+  agentKey: string,
+  sessionId: string | null,
+  defaultModel?: string,
+  additionalFlags?: string,
+  pinnedVersion?: string,
+  strategy?: RunStrategy,
+  mode?: AgentLaunchMode,
+  host?: string,
+): string {
+  const agentSpec = pinnedVersion ? `${agentKey}@${pinnedVersion}` : agentKey;
+  let command = `agents run ${agentSpec} --interactive`;
+  // Offload onto another machine over SSH — the CLI resolves the device from
+  // `agents devices` and runs interactive-on-host. Emitted for ANY agent so
+  // grok/kimi/droid (which launch as raw binaries locally) get host parity.
+  if (host) {
+    command += ` --host ${shquote(host)}`;
+  }
+  if (sessionId && agentKey === 'claude') {
+    command += ` --session-id ${sessionId}`;
+  }
+  // --strategy is meaningless (and ignored by the CLI) once a version is
+  // pinned, so only emit it for the unpinned, strategy-driven launches.
+  if (strategy && !pinnedVersion) {
+    command += ` --strategy ${strategy}`;
+  }
+  if (defaultModel && (!additionalFlags || !additionalFlags.includes('--model'))) {
+    command += ` --model ${defaultModel}`;
+  }
+  // Dispatch mode -> `agents run --mode plan|auto|edit`, next to --model/--strategy.
+  // Default to 'auto' when the caller has no preference — interactive Factory
+  // launches must start in a writable posture so the agent can edit files.
+  // Skip when the caller already threaded an explicit --mode via additionalFlags
+  // so we never emit it twice.
+  const effectiveMode: AgentLaunchMode = mode ?? 'auto';
+  const modeFlag = modeFlagForAgent(agentKey, effectiveMode);
+  if (modeFlag && (!additionalFlags || !additionalFlags.includes('--mode'))) {
+    command += ` ${modeFlag}`;
+  }
+  if (additionalFlags?.trim()) {
+    command += ` ${additionalFlags.trim()}`;
+  }
+  return command;
+}
+
 // Agents that expose the per-strategy launch trio (Latest / Balanced / Pinned).
 // These are the version- and account-managed agents that route through
 // `agents run <agent>` so the agents-cli can apply a version pin or strategy.

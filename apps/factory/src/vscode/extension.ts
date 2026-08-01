@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { BUILT_IN_AGENTS, getBuiltInByKey, getBuiltInDefByTitle, getBuiltInByPrefix, pickLatestVersion, STRATEGY_LAUNCH_AGENTS, modeFlagForAgent, AgentLaunchMode } from '../core/agents';
+import { BUILT_IN_AGENTS, getBuiltInByKey, getBuiltInDefByTitle, getBuiltInByPrefix, pickLatestVersion, STRATEGY_LAUNCH_AGENTS, modeFlagForAgent, AgentLaunchMode, RunStrategy, buildAgentLaunchCommand } from '../core/agents';
 import { parseSpawnRequest, SpawnRequest } from '../core/spawn';
 import {
   AgentConfig,
@@ -177,61 +177,8 @@ function buildTerminalTitle(
 // post-spawn.
 type LaunchableAgent = 'claude' | 'codex' | 'gemini' | 'opencode' | 'cursor' | 'antigravity';
 
-// Version/account selection strategy passed to `agents run --strategy`. Mirrors
-// the agents-cli: pinned uses the configured default, balanced rotates across
-// healthy accounts. (Latest is expressed as an explicit @version pin, not a
-// strategy.) The CLI ignores --strategy when an @version is pinned.
-type RunStrategy = 'pinned' | 'available' | 'balanced';
-
-// Shell-quote a token (device names come from the registry; quote defensively so
-// a stray character can never break out of the `agents run … --host <x>` string).
-function shquote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
-}
-
-function buildAgentLaunchCommand(
-  agentKey: string,
-  sessionId: string | null,
-  defaultModel?: string,
-  additionalFlags?: string,
-  pinnedVersion?: string,
-  strategy?: RunStrategy,
-  mode?: AgentLaunchMode,
-  host?: string,
-): string {
-  const agentSpec = pinnedVersion ? `${agentKey}@${pinnedVersion}` : agentKey;
-  let command = `agents run ${agentSpec} --interactive`;
-  // Offload onto another machine over SSH — the CLI resolves the device from
-  // `agents devices` and runs interactive-on-host. Emitted for ANY agent so
-  // grok/kimi/droid (which launch as raw binaries locally) get host parity.
-  if (host) {
-    command += ` --host ${shquote(host)}`;
-  }
-  if (sessionId && agentKey === 'claude') {
-    command += ` --session-id ${sessionId}`;
-  }
-  // --strategy is meaningless (and ignored by the CLI) once a version is
-  // pinned, so only emit it for the unpinned, strategy-driven launches.
-  if (strategy && !pinnedVersion) {
-    command += ` --strategy ${strategy}`;
-  }
-  if (defaultModel && (!additionalFlags || !additionalFlags.includes('--model'))) {
-    command += ` --model ${defaultModel}`;
-  }
-  // Dispatch mode -> `agents run --mode plan|auto|edit`, next to --model/--strategy.
-  // Skip when the caller already threaded an explicit --mode via additionalFlags
-  // so we never emit it twice.
-  if (mode) {
-    const modeFlag = modeFlagForAgent(agentKey, mode);
-    if (modeFlag && (!additionalFlags || !additionalFlags.includes('--mode'))) {
-      command += ` ${modeFlag}`;
-    }
-  }
-  if (additionalFlags?.trim()) {
-    command += ` ${additionalFlags.trim()}`;
-  }
-  return command;
-}
+// buildAgentLaunchCommand, RunStrategy, and shquote are now in core/agents.ts
+// so they can be unit-tested without a VS Code harness.
 
 // PATH augmented with the agents shim dirs — the extension-host PATH can omit them,
 // so a bare `agents` spawn would fail to resolve. Shared by the detached spawns below.
@@ -3452,12 +3399,22 @@ export async function openSingleAgentWithQueue(
     opencodeSessionsBefore = await listOpencodeSessions(cwd);
   }
 
-  if (agentKey === 'claude') {
-    // Claude: generate session ID at open time; others are discovered post-spawn.
-    // A caller (dispatch) may pre-supply the id so it can watch that exact
-    // session file for a plan / completion afterwards.
-    sessionId = opts?.sessionId ?? generateClaudeSessionId();
-    command = buildClaudeLaunchCommand(context, sessionId, defaultModel, undefined, opts?.mode);
+  // Route LAUNCHABLE agents through `agents run <agent> --interactive` so the
+  // --mode flag is applied and the CLI resolves the configured strategy. Claude
+  // gets a pre-generated session id for the resume flow; other agents discover
+  // their session post-spawn. opts?.mode defaults to 'auto' (writable-but-gated)
+  // inside buildAgentLaunchCommand when the caller does not supply an explicit mode.
+  const LAUNCHABLE_SET: ReadonlySet<string> = new Set(['claude', 'codex', 'gemini', 'opencode', 'cursor', 'antigravity']);
+  if (agentKey && LAUNCHABLE_SET.has(agentKey)) {
+    if (agentKey === 'claude') {
+      // Claude: generate session ID at open time; others are discovered post-spawn.
+      // A caller (dispatch) may pre-supply the id so it can watch that exact
+      // session file for a plan / completion afterwards.
+      sessionId = opts?.sessionId ?? generateClaudeSessionId();
+      command = buildClaudeLaunchCommand(context, sessionId, defaultModel, undefined, opts?.mode);
+    } else {
+      command = buildAgentLaunchCommand(agentKey, null, defaultModel, undefined, undefined, undefined, opts?.mode);
+    }
   }
 
   const title = buildTerminalTitle(agentConfig.title, undefined, context, sessionId);

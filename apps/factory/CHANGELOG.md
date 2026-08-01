@@ -6,6 +6,8 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **Interactive agent launches now default to `--mode auto` instead of stalling in read-only plan mode (RUSH-2038).** Launching Codex, Claude, Gemini, Cursor, OpenCode, or Antigravity from Factory without explicitly choosing a mode now runs in `auto` (writable-but-gated), so the agent can edit files immediately. Previously the CLI default of `plan` was inherited, causing Codex to start with `--sandbox read-only` and wait indefinitely for approval. `buildAgentLaunchCommand` is now in `src/core/agents.ts` so it is unit-testable without a VS Code harness. Source: `apps/factory/src/core/agents.ts`, `apps/factory/src/vscode/extension.ts`.
+
 - **Stuck Claude tab labels self-heal, and an existing session name is reused
   before summarizing.** Two follow-ups to the derived-label fix: (1) On reload,
   a tab already reading `CC - muqsitnawaz-91` had that derived placeholder
