@@ -318,7 +318,12 @@ REMOTE="$(git rev-parse "origin/$DEFAULT_BRANCH")"
 # covers the cross-platform (macOS/Windows) legs (see wait_for_ci_green below).
 run_crabbox_tests() {
   local log rc
-  log="$(mktemp "${TMPDIR:-/tmp}/agents-cli-crabbox-tests.XXXXXX.log")"
+  # X placeholders MUST be the trailing characters: BSD mktemp (macOS) treats
+  # any suffix after them as part of a literal filename, so this template created
+  # a real file called "…crabbox-tests.XXXXXX.log" and every later release on the
+  # same box then died with "mkstemp failed: File exists". Matches the other
+  # mktemp templates in this script.
+  log="$(mktemp "${TMPDIR:-/tmp}/agents-cli-crabbox-tests.XXXXXX")"
   bold "Running the Linux test suite on a crabbox (dynamic Hetzner VM)..."
   gray "  (streaming; full log captured at $log)"
   # sandbox.sh with no --pr flag = test mode: rsync this tree to the box, run the
