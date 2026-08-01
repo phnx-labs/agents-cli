@@ -6,6 +6,25 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **The extension no longer runs its own stall-detection/nudge injector — the
+  agents-cli daemon watchdog is the sole injector.** The extension's autonomous
+  watchdog tick used to `fs.stat` each agent session file, call a Claude Haiku
+  headless instance to decide whether an agent was stalled, and inject a nudge
+  by typing into the terminal. In real setups (agent terminals in VS Codium) it
+  fired the wrong message at the wrong time and double-nudged against the CLI
+  daemon watchdog, so its active poking is retired: the nudge injection, the
+  headless/smart-agent stall decision, the per-terminal opt-out command
+  (`agents.watchdog.toggleTerminal`), and the monitor's centralized stall
+  broadcast are all removed, along with the `stallNudge`, `stallSeconds`,
+  `cooldownSeconds`, and `useSmartAgent` settings. The extension keeps the one
+  capability the CLI lacks — **version auto-rotate**: when a version-pinned
+  Claude terminal exhausts its quad it still spawns a fresh terminal on the best
+  signed-in version and replays `/continue` (`agents.watchdog.autoRotate`,
+  `rotateCooldownSeconds`, `tickSeconds`; the `enabled` master switch now gates
+  auto-rotate). The Factory Floor **watchdog status card stays**, now rendering
+  the `~/.agents/.cache/logs/watchdog.log` feed the CLI daemon writes. The
+  on-demand MCP peer-nudge path (`send_nudge`/`send_to_agent`) is unchanged.
+
 - **Claude terminal tabs get a real topic label again, not the repo name.**
   Claude 2.1.207+ auto-derives a placeholder session name `<dirname>-<n>`
   (e.g. `agents-cli-55`, tagged `nameSource: "derived"`). The extension used it

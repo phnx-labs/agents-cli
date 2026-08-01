@@ -547,10 +547,6 @@
         "title": "Agents: Resume Current Session in Best Profile"
       },
       {
-        "command": "agents.watchdog.toggleTerminal",
-        "title": "Agents: Toggle Watchdog for Active Terminal"
-      },
-      {
         "command": "agents.spawnWithPrompt",
         "title": "Agents: Spawn with Prompt"
       },
@@ -898,7 +894,7 @@
         "agents.watchdog.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Master switch for the agent watchdog. When on, it polls active agent terminals on an interval to auto-rotate exhausted versions and (optionally) nudge stalled ones."
+          "description": "Master switch for the version auto-rotate loop. When on, the extension polls active agent terminals on an interval to auto-rotate exhausted versions. (Stall nudging was retired — the agents-cli daemon watchdog owns that now.)"
         },
         "agents.watchdog.autoRotate": {
           "type": "boolean",
@@ -910,30 +906,10 @@
           "default": 120,
           "description": "Minimum seconds between auto-rotate attempts for the same terminal."
         },
-        "agents.watchdog.stallNudge": {
-          "type": "boolean",
-          "default": true,
-          "description": "When an agent appears truly blocked, call a Claude Haiku headless instance to decide whether to inject a nudge."
-        },
-        "agents.watchdog.stallSeconds": {
-          "type": "number",
-          "default": 300,
-          "description": "Seconds of inactivity before an agent is considered stalled enough for blocked checks."
-        },
-        "agents.watchdog.cooldownSeconds": {
-          "type": "number",
-          "default": 1200,
-          "description": "Minimum seconds between nudges to the same terminal."
-        },
         "agents.watchdog.tickSeconds": {
           "type": "number",
           "default": 120,
-          "description": "How often the watchdog evaluates terminals."
-        },
-        "agents.watchdog.useSmartAgent": {
-          "type": "boolean",
-          "default": false,
-          "description": "Use context-aware watchdog agent with access to mq, linear, and full session history. When enabled, the watchdog can read project conventions and make smarter nudge decisions."
+          "description": "How often the extension checks agent terminals for a version that needs auto-rotating."
         }
       }
     },

@@ -20,7 +20,6 @@ import {
   startWatchdog,
   setWatchdogMonitorConnectivity,
   setWatchdogArmSink,
-  ingestWatchdogStallFact,
   ingestWatchdogVersionsFact,
 } from './watchdog.vscode';
 import { startWatchdogBridge } from '../mcp/watchdog-bridge';
@@ -995,15 +994,17 @@ export async function activate(context: vscode.ExtensionContext) {
     console.warn('[WATCHDOG] ensureWatchdogMcpInstalled failed:', err);
   });
 
+  // Version auto-rotate loop. NOT a nudger — autonomous stall detection and
+  // nudge injection were retired; the CLI daemon watchdog is the sole injector.
+  // The extension keeps only the rotate-on-exhaustion capability the CLI lacks.
   context.subscriptions.push(
-    startWatchdog(context, {
+    startWatchdog({
       rotateTerminal: (entry) =>
         rotateTerminalToBestVersion(context, entry, {
           closeOldTerminal: true,
           focusNewTerminal: false,
           notifyOnFailure: false,
         }),
-      mcpServerPath: watchdogBridge.mcpServerPath,
     })
   );
 
@@ -4897,8 +4898,6 @@ function initMonitorFollower(context: vscode.ExtensionContext): void {
       sessionTracker.ingestSessionFact(event.payload);
     } else if (proto.isSessionWarmth(event)) {
       sessionTracker.ingestSessionWarmth(event.payload.filePath);
-    } else if (proto.isWatchdogStall(event)) {
-      ingestWatchdogStallFact(event.payload);
     } else if (proto.isWatchdogVersions(event)) {
       ingestWatchdogVersionsFact(event.payload);
     } else if (proto.isPanelSnapshot(event)) {

@@ -35,7 +35,6 @@ import {
   SnapshotWatchRequest,
   TerminalTuple,
   TuplesSnapshotPayload,
-  WatchdogStallPayload,
   WatchdogVersionsPayload,
   WatchdogWatchRequest,
 } from './protocol';
@@ -180,7 +179,6 @@ export class MonitorHost {
     }
     if (opts.watchdog !== false) {
       this.watchdogDetector = new WatchdogDetector({
-        emitStall: (fact) => this.broadcastWatchdogStall(fact),
         emitVersions: (fact) => this.broadcastWatchdogVersions(fact),
         tickMs: opts.watchdogTickMs,
         viewPollMs: opts.watchdogViewPollMs,
@@ -273,10 +271,6 @@ export class MonitorHost {
 
   private broadcastSessionWarmth(payload: SessionWarmthPayload): void {
     this.broadcast(MONITOR_FACT.sessionWarmth, payload);
-  }
-
-  private broadcastWatchdogStall(payload: WatchdogStallPayload): void {
-    this.broadcast(MONITOR_FACT.watchdogStall, payload);
   }
 
   private broadcastWatchdogVersions(payload: WatchdogVersionsPayload): void {
