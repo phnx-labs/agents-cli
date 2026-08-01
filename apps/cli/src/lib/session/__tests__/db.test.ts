@@ -90,6 +90,31 @@ describe('querySessions version filter', () => {
   });
 });
 
+describe('cached checklist metadata', () => {
+  it('persists todos and recent directories on transcript upsert', () => {
+    const filePath = path.join(SEED_FILES_DIR, 'task-cache.jsonl');
+    const rows = [
+      { type: 'assistant', timestamp: '2026-08-01T00:00:00Z', message: { content: [
+        { type: 'tool_use', id: '1', name: 'TaskCreate', input: { subject: 'Inspect', activeForm: 'Inspecting' } },
+        { type: 'tool_use', id: '2', name: 'TaskCreate', input: { subject: 'Build', activeForm: 'Building' } },
+        { type: 'tool_use', id: '3', name: 'TaskUpdate', input: { taskId: '1', status: 'completed' } },
+        { type: 'tool_use', id: '4', name: 'TaskUpdate', input: { taskId: '2', status: 'in_progress' } },
+        { type: 'tool_use', id: '5', name: 'Edit', input: { file_path: '/repo/src/config.ts' } },
+      ] } },
+    ];
+    fs.writeFileSync(filePath, rows.map(row => JSON.stringify(row)).join('\n'));
+    const meta: SessionMeta = {
+      id: 'task-cache', shortId: 'task-cac', agent: 'claude', timestamp: '2026-08-01T00:00:00Z',
+      filePath, cwd: '/repo',
+    };
+    upsertSession(meta, '', { fileMtimeMs: 1, fileSize: fs.statSync(filePath).size });
+    expect(findSessionsById('task-cache')[0]).toMatchObject({
+      todos: { done: 1, total: 2, activeForm: 'Building' },
+      recentDirectoriesTouched: ['/repo/src'],
+    });
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Cost + duration (issue #323) — real SQLite, migration v6 columns, sort,
 // rollup grouping for a multi-model session.
@@ -141,7 +166,7 @@ describe('migration v5 -> v6 adds cost/duration columns', () => {
   it('schema_version is recorded as the current version', () => {
     const db = getDB();
     const row = db.prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string };
-    expect(row.value).toBe('16');
+    expect(row.value).toBe('17');
   });
 
   it('v10 unifies name into label — the separate `name` column is dropped', () => {

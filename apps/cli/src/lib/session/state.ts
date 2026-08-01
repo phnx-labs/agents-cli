@@ -15,6 +15,7 @@
  * shape + mtime — same function, driven off the normalized events.
  */
 
+import * as path from 'path';
 import type { SessionAttachment, SessionEvent, TodoItem, TodoProgress } from './types.js';
 import { summarizeToolUse } from './parse.js';
 
@@ -161,9 +162,9 @@ const PROSE_QUESTION_FRESH_MS = 30 * 60_000;
 const PLAN_TOOL = 'ExitPlanMode';
 const ASK_TOOL = 'AskUserQuestion';
 
-/** The live plan/checklist tools: Claude's `TodoWrite` and Codex's `update_plan`. */
-const TODO_TOOL = 'TodoWrite';
-const CODEX_PLAN_TOOL = 'update_plan';
+const SNAPSHOT_TODO_TOOLS = new Set(['TodoWrite', 'todo_write', 'update_plan']);
+const TASK_CREATE_TOOL = 'TaskCreate';
+const TASK_UPDATE_TOOL = 'TaskUpdate';
 
 /**
  * Derive live plan progress from a checklist tool call's args. Accepts both
@@ -173,10 +174,11 @@ const CODEX_PLAN_TOOL = 'update_plan';
  * list, so a session with no plan carries no `todos` field.
  */
 export function extractTodoProgress(args?: Record<string, any>): TodoProgress | undefined {
-  const raw = Array.isArray(args?.todos)
-    ? args!.todos
-    : Array.isArray(args?.plan)
-      ? args!.plan
+  const input = args?.input && typeof args.input === 'object' ? args.input : args;
+  const raw = Array.isArray(input?.todos)
+    ? input.todos
+    : Array.isArray(input?.plan)
+      ? input.plan
       : undefined;
   if (!Array.isArray(raw) || raw.length === 0) return undefined;
   const items: TodoItem[] = [];
@@ -193,7 +195,8 @@ export function extractTodoProgress(args?: Record<string, any>): TodoProgress | 
     if (!content) continue;
     const status: TodoItem['status'] =
       t?.status === 'completed' || t?.status === 'in_progress' ? t.status : 'pending';
-    items.push(activeForm ? { content, status, activeForm } : { content, status });
+    const description = typeof t?.description === 'string' && t.description ? t.description : undefined;
+    items.push({ content, status, ...(description ? { description } : {}), ...(activeForm ? { activeForm } : {}) });
   }
   if (items.length === 0) return undefined;
   const done = items.filter(i => i.status === 'completed').length;
@@ -204,6 +207,81 @@ export function extractTodoProgress(args?: Record<string, any>): TodoProgress | 
     total: items.length,
     activeForm: inProgress ? inProgress.activeForm ?? inProgress.content : undefined,
   };
+}
+
+/** Fold snapshot checklist tools and Claude TaskCreate/TaskUpdate event logs. */
+export function extractTodoProgressFromEvents(events: SessionEvent[]): TodoProgress | undefined {
+  let items: Array<Record<string, any>> = [];
+  let nextTaskId = 1;
+  let sawChecklist = false;
+  for (const event of events) {
+    if (event.type !== 'tool_use') continue;
+    const args = event.args ?? {};
+    if (SNAPSHOT_TODO_TOOLS.has(event.tool ?? '')) {
+      const input = args.input && typeof args.input === 'object' ? args.input : args;
+      const raw = Array.isArray(input.todos) ? input.todos : Array.isArray(input.plan) ? input.plan : undefined;
+      if (raw) {
+        items = raw.map((item: any) => ({ ...item }));
+        sawChecklist = true;
+      }
+      continue;
+    }
+    if (event.tool === TASK_CREATE_TOOL) {
+      const content = args.subject || args.description;
+      if (typeof content !== 'string' || !content.trim()) continue;
+      items.push({
+        taskId: String(nextTaskId++),
+        content: content.trim(),
+        description: typeof args.description === 'string' ? args.description : undefined,
+        activeForm: typeof args.activeForm === 'string' ? args.activeForm : undefined,
+        status: 'pending',
+      });
+      sawChecklist = true;
+      continue;
+    }
+    if (event.tool === TASK_UPDATE_TOOL) {
+      const taskId = String(args.taskId ?? args.task_id ?? '');
+      const index = items.findIndex(item => String(item.taskId ?? '') === taskId);
+      if (index < 0) continue;
+      if (args.status === 'deleted') {
+        items.splice(index, 1);
+        continue;
+      }
+      const prior = items[index];
+      items[index] = {
+        ...prior,
+        ...(typeof args.subject === 'string' ? { content: args.subject } : {}),
+        ...(typeof args.description === 'string' ? { description: args.description } : {}),
+        ...(typeof args.activeForm === 'string' ? { activeForm: args.activeForm } : {}),
+        ...(typeof args.status === 'string' ? { status: args.status } : {}),
+      };
+    }
+  }
+  return sawChecklist ? extractTodoProgress({ todos: items }) : undefined;
+}
+
+/** Derive a recency-ordered, de-duplicated list of directories touched by tools. */
+export function extractRecentDirectoriesTouched(events: SessionEvent[], cwd?: string): string[] | undefined {
+  const dirs: string[] = [];
+  const add = (value: unknown, file = false) => {
+    if (typeof value !== 'string' || !value.trim()) return;
+    const resolved = path.isAbsolute(value) ? value : path.resolve(cwd || process.cwd(), value);
+    const dir = file ? path.dirname(resolved) : resolved;
+    const old = dirs.indexOf(dir);
+    if (old >= 0) dirs.splice(old, 1);
+    dirs.push(dir);
+  };
+  for (const event of events) {
+    if (event.type !== 'tool_use') continue;
+    const tool = event.tool ?? '';
+    const args = event.args ?? {};
+    if (['Edit', 'Write', 'edit_file', 'write_file', 'create_file', 'edit', 'write'].includes(tool)) {
+      add(args.file_path ?? args.filePath ?? args.path ?? event.path, true);
+    } else if (['Bash', 'exec_command', 'run_shell_command', 'shell', 'Execute'].includes(tool)) {
+      add(args.cwd ?? args.workdir ?? args.working_directory ?? cwd);
+    }
+  }
+  return dirs.length ? dirs.slice(-10) : undefined;
 }
 
 /** Trailing '?' or a leading interrogative — a question aimed at the user. */
@@ -441,11 +519,10 @@ export function inferActivity(events: SessionEvent[], ctx: StateContext = {}): S
     .map(e => oneLine(e.content ?? ''))
     .filter(Boolean);
 
-  // Live plan progress: the most recent TodoWrite's checklist (RUSH-1380). Attached
+  // Live plan progress: snapshot checklist tools or the folded Task* event log. Attached
   // to `base` so every return path below carries it — a working, waiting, or idle
   // session all keep showing how far the plan got.
-  const lastTodo = lastOf(meaningful, e => e.type === 'tool_use' && (e.tool === TODO_TOOL || e.tool === CODEX_PLAN_TOOL));
-  const todos = lastTodo ? extractTodoProgress(lastTodo.args) : undefined;
+  const todos = extractTodoProgressFromEvents(meaningful);
 
   const base: SessionState = {
     activity: 'idle',

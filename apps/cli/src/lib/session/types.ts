@@ -48,10 +48,12 @@ export interface SessionAttachment {
   sizeBytes?: number;
 }
 
-/** One checklist item, as Claude's `TodoWrite` (`content`) or Codex's `update_plan` (`step`) emits it. */
+/** One normalized checklist/task item emitted by any transcript harness. */
 export interface TodoItem {
   content: string;
   status: 'pending' | 'in_progress' | 'completed';
+  /** Optional longer explanation supplied by task-based harnesses. */
+  description?: string;
   /** Present-continuous label shown while this item is the active step. */
   activeForm?: string;
 }
@@ -162,6 +164,12 @@ export interface SessionMeta {
    * instead of re-parsing the transcript. Absent when the session wrote no list.
    */
   todos?: TodoProgress;
+  /** Most-recent unique directories changed or used as a shell working directory. */
+  recentDirectoriesTouched?: string[];
+  /** Linear project containing ticketId, resolved lazily and cached in SQLite. */
+  linearProject?: string;
+  /** Browser URL for linearProject. */
+  linearProjectUrl?: string;
   /**
    * True when the session was spawned programmatically (SDK entrypoint) rather
    * than by a human at the Claude CLI. Captured at scan time from the JSONL

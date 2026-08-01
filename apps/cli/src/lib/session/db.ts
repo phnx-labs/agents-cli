@@ -11,13 +11,15 @@ import * as fs from 'fs';
 import * as path from 'path';
 import Database from '../sqlite.js';
 import type { SessionAgentId, SessionMeta } from './types.js';
+import { parseSession } from './parse.js';
+import { extractRecentDirectoriesTouched, extractTodoProgressFromEvents } from './state.js';
 import { getSessionsDir, getSessionsDbPath } from '../state.js';
 
 const SESSIONS_DIR = getSessionsDir();
 const DB_PATH = getSessionsDbPath();
 
 /** Current schema version; bumped when migrations are added. */
-const SCHEMA_VERSION = 16;
+const SCHEMA_VERSION = 17;
 
 /**
  * Canonicalize a file path for use as a scan_ledger key. The same physical
@@ -74,7 +76,11 @@ CREATE TABLE IF NOT EXISTS sessions (
   pr_number INTEGER,
   worktree_slug TEXT,
   ticket_id TEXT,
-  plan TEXT
+  plan TEXT,
+  todos TEXT,
+  recent_directories_touched TEXT,
+  linear_project TEXT,
+  linear_project_url TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_timestamp ON sessions(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_cwd ON sessions(cwd);
@@ -161,6 +167,10 @@ export interface SessionRow {
   worktree_slug: string | null;
   ticket_id: string | null;
   plan: string | null;
+  todos: string | null;
+  recent_directories_touched: string | null;
+  linear_project: string | null;
+  linear_project_url: string | null;
 }
 
 /** File stat snapshot used to detect changes between scan runs. */
@@ -384,6 +394,14 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     // in place — `substr(id, 1, 8)` is non-empty because `id` is the non-empty
     // primary key — so every corrupt row becomes addressable. No rescan needed.
     db.exec(`UPDATE sessions SET short_id = substr(id, 1, 8) WHERE short_id IS NULL OR short_id = ''`);
+  }
+  if (fromVersion < 17) {
+    const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
+    if (!cols.some(c => c.name === 'todos')) db.exec(`ALTER TABLE sessions ADD COLUMN todos TEXT`);
+    if (!cols.some(c => c.name === 'recent_directories_touched')) db.exec(`ALTER TABLE sessions ADD COLUMN recent_directories_touched TEXT`);
+    if (!cols.some(c => c.name === 'linear_project')) db.exec(`ALTER TABLE sessions ADD COLUMN linear_project TEXT`);
+    if (!cols.some(c => c.name === 'linear_project_url')) db.exec(`ALTER TABLE sessions ADD COLUMN linear_project_url TEXT`);
+    db.exec(`DELETE FROM scan_ledger;`);
   }
 }
 
@@ -769,14 +787,16 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     project, cwd, git_branch, topic, label, message_count, token_count,
     output_tokens, cost_usd, duration_ms,
     file_path, file_mtime_ms, file_size, scanned_at, is_team_origin,
-    pr_url, pr_number, worktree_slug, ticket_id, plan
+    pr_url, pr_number, worktree_slug, ticket_id, plan, todos,
+    recent_directories_touched, linear_project, linear_project_url
   ) VALUES (
     @id, @short_id, @agent, @origin, @routine_name, @routine_run_id,
     @version, @account, @timestamp, @last_activity,
     @project, @cwd, @git_branch, @topic, @label, @message_count, @token_count,
     @output_tokens, @cost_usd, @duration_ms,
     @file_path, @file_mtime_ms, @file_size, @scanned_at, @is_team_origin,
-    @pr_url, @pr_number, @worktree_slug, @ticket_id, @plan
+    @pr_url, @pr_number, @worktree_slug, @ticket_id, @plan, @todos,
+    @recent_directories_touched, @linear_project, @linear_project_url
   )
   ON CONFLICT(id) DO UPDATE SET
     short_id = excluded.short_id,
@@ -815,8 +835,33 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     pr_number = excluded.pr_number,
     worktree_slug = excluded.worktree_slug,
     ticket_id = excluded.ticket_id,
-    plan = excluded.plan
+    plan = excluded.plan,
+    todos = excluded.todos,
+    recent_directories_touched = excluded.recent_directories_touched,
+    linear_project = CASE
+      WHEN excluded.ticket_id IS NOT sessions.ticket_id THEN excluded.linear_project
+      ELSE COALESCE(excluded.linear_project, sessions.linear_project)
+    END,
+    linear_project_url = CASE
+      WHEN excluded.ticket_id IS NOT sessions.ticket_id THEN excluded.linear_project_url
+      ELSE COALESCE(excluded.linear_project_url, sessions.linear_project_url)
+    END
 `);
+
+function enrichCachedSessionMeta(meta: SessionMeta): SessionMeta {
+  if (!meta.filePath) return meta;
+  try {
+    const events = parseSession(meta.filePath, meta.agent);
+    return {
+      ...meta,
+      todos: extractTodoProgressFromEvents(events),
+      recentDirectoriesTouched: extractRecentDirectoriesTouched(events, meta.cwd),
+    };
+  } catch {
+    // Synthetic/cloud rows can intentionally name a transcript that is not local.
+    return meta;
+  }
+}
 
 const deleteTextStmt = (db: Database.Database) =>
   db.prepare(`DELETE FROM session_text WHERE session_id = ?`);
@@ -863,6 +908,7 @@ function storedFtsLabel(readLabel: Database.Statement<unknown[]>, id: string): s
  * `content` is the tokenizable user-prompt text; pass '' to leave the row unsearchable.
  */
 export function upsertSession(meta: SessionMeta, content: string, scan?: ScanStamp): void {
+  meta = enrichCachedSessionMeta(meta);
   const db = getDB();
   const { upsert, delText, insText, readLabel } = stmts(db);
   const row: SessionRow = {
@@ -896,6 +942,10 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
     worktree_slug: meta.worktreeSlug ?? null,
     ticket_id: meta.ticketId ?? null,
     plan: meta.plan ?? null,
+    todos: meta.todos ? JSON.stringify(meta.todos) : null,
+    recent_directories_touched: meta.recentDirectoriesTouched ? JSON.stringify(meta.recentDirectoriesTouched) : null,
+    linear_project: meta.linearProject ?? null,
+    linear_project_url: meta.linearProjectUrl ?? null,
   };
 
   const txn = db.transaction(() => {
@@ -970,7 +1020,8 @@ export function upsertSessionsBatch(
       }
     }
 
-    for (const { meta, content, scan, parserState, contentText } of items) {
+    for (const { meta: rawMeta, content, scan, parserState, contentText } of items) {
+      const meta = enrichCachedSessionMeta(rawMeta);
       if (alreadyIndexed.has(meta.id)) continue;
       // Per-row guard: one malformed session (e.g. a required field that resolves to
       // NULL) must not abort the whole batch and take down the entire `agents sessions`
@@ -1011,6 +1062,10 @@ export function upsertSessionsBatch(
         worktree_slug: meta.worktreeSlug ?? null,
         ticket_id: meta.ticketId ?? null,
         plan: meta.plan ?? null,
+        todos: meta.todos ? JSON.stringify(meta.todos) : null,
+        recent_directories_touched: meta.recentDirectoriesTouched ? JSON.stringify(meta.recentDirectoriesTouched) : null,
+        linear_project: meta.linearProject ?? null,
+        linear_project_url: meta.linearProjectUrl ?? null,
       });
       delText.run(meta.id);
       insText.run(
@@ -1208,7 +1263,16 @@ function rowToMeta(row: SessionRow): SessionMeta {
     worktreeSlug: row.worktree_slug ?? undefined,
     ticketId: row.ticket_id ?? undefined,
     plan: row.plan ?? undefined,
+    todos: parseJsonColumn(row.todos),
+    recentDirectoriesTouched: parseJsonColumn(row.recent_directories_touched),
+    linearProject: row.linear_project ?? undefined,
+    linearProjectUrl: row.linear_project_url ?? undefined,
   };
+}
+
+function parseJsonColumn<T>(value: string | null): T | undefined {
+  if (!value) return undefined;
+  try { return JSON.parse(value) as T; } catch { return undefined; }
 }
 
 /**
@@ -1233,6 +1297,12 @@ export function isSessionActivityFresh(
   const parsedActivityMs = Date.parse(row.last_activity ?? row.timestamp);
   const activityMs = Number.isFinite(parsedActivityMs) ? parsedActivityMs : row.file_mtime_ms ?? undefined;
   return activityMs != null && nowMs - activityMs <= maxAgeMs;
+}
+
+/** Persist a lazily resolved Linear project without reparsing the transcript. */
+export function cacheLinearProject(sessionId: string, project: string, projectUrl: string): void {
+  getDB().prepare(`UPDATE sessions SET linear_project = ?, linear_project_url = ? WHERE id = ?`)
+    .run(project, projectUrl, sessionId);
 }
 
 /**

@@ -49,11 +49,13 @@ import {
   ftsSearch,
   tryClaimScan,
   releaseScan,
+  cacheLinearProject,
   type ScanStamp,
   type DirStamp,
   type QueryOptions,
 } from './db.js';
 import { buildRunNameMap } from './run-names.js';
+import { resolveLinearApiKey } from '../auto-dispatch-linear.js';
 
 const HOME = os.homedir();
 // Versions can live under either repo: the user repo (current canonical
@@ -250,8 +252,43 @@ export async function discoverSessions(options?: DiscoverOptions): Promise<Sessi
   }
 
   const sessions = querySessions(buildQueryOptions(options, agents, { includeLimit: true }));
+  await resolveLinearProjects(sessions);
   for (const s of sessions) s.machine = machineForSessionFile(s.filePath, s.agent);
   return scopeToManaged(sessions, agents, options);
+}
+
+const linearProjectCache = new Map<string, { name: string; url: string } | null>();
+
+async function resolveLinearProjects(sessions: SessionMeta[]): Promise<void> {
+  const apiKey = resolveLinearApiKey();
+  if (!apiKey) return;
+  await Promise.all(sessions.map(async session => {
+    if (!session.ticketId || session.linearProject) return;
+    let project = linearProjectCache.get(session.ticketId);
+    if (project === undefined) {
+      try {
+        const response = await fetch('https://api.linear.app/graphql', {
+          method: 'POST',
+          headers: { Authorization: apiKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query: `query($id:String!){ issue(id:$id){ project{ name url } } }`,
+            variables: { id: session.ticketId },
+          }),
+        });
+        if (!response.ok) throw new Error(String(response.status));
+        const body = await response.json() as { data?: { issue?: { project?: { name?: string; url?: string } | null } } };
+        const node = body.data?.issue?.project;
+        project = node?.name && node?.url ? { name: node.name, url: node.url } : null;
+      } catch {
+        project = null;
+      }
+      linearProjectCache.set(session.ticketId, project);
+    }
+    if (!project) return;
+    session.linearProject = project.name;
+    session.linearProjectUrl = project.url;
+    cacheLinearProject(session.id, project.name, project.url);
+  }));
 }
 
 /**

@@ -13,6 +13,8 @@ import {
   extractCreatedTicket,
   structuredQuestionFromAsk,
   extractTodoProgress,
+  extractTodoProgressFromEvents,
+  extractRecentDirectoriesTouched,
 } from './state.js';
 
 const now = Date.now();
@@ -373,6 +375,44 @@ describe('inferSessionState — composed', () => {
 });
 
 describe('extractTodoProgress (RUSH-1380)', () => {
+  it('folds TaskCreate and TaskUpdate as an event log', () => {
+    const p = extractTodoProgressFromEvents([
+      tool('TaskCreate', { subject: 'Inspect loader', description: 'Read formats', activeForm: 'Inspecting loader' }),
+      tool('TaskCreate', { subject: 'Refactor loader', activeForm: 'Refactoring loader' }),
+      tool('TaskCreate', { subject: 'Remove me' }),
+      tool('TaskUpdate', { taskId: '1', status: 'completed' }),
+      tool('TaskUpdate', { taskId: '2', status: 'in_progress', subject: 'Refactor config loader' }),
+      tool('TaskUpdate', { taskId: '3', status: 'deleted' }),
+    ]);
+    expect(p).toEqual({
+      items: [
+        { content: 'Inspect loader', status: 'completed', description: 'Read formats', activeForm: 'Inspecting loader' },
+        { content: 'Refactor config loader', status: 'in_progress', activeForm: 'Refactoring loader' },
+      ],
+      done: 1,
+      total: 2,
+      activeForm: 'Refactoring loader',
+    });
+  });
+
+  it('normalizes Grok todo_write and Droid nested TodoWrite snapshots', () => {
+    const grok = extractTodoProgressFromEvents([tool('todo_write', { todos: [
+      { content: 'One', status: 'completed' }, { content: 'Two', status: 'in_progress' },
+    ] })]);
+    const droid = extractTodoProgressFromEvents([tool('TodoWrite', { input: { todos: [
+      { content: 'One', status: 'completed' }, { content: 'Two', status: 'in_progress', activeForm: 'Doing two' },
+    ] } })]);
+    expect(grok).toMatchObject({ done: 1, total: 2, activeForm: 'Two' });
+    expect(droid).toMatchObject({ done: 1, total: 2, activeForm: 'Doing two' });
+  });
+
+  it('derives recent directories from edit/write and shell cwd events', () => {
+    expect(extractRecentDirectoriesTouched([
+      tool('Edit', { file_path: 'src/a.ts' }),
+      tool('exec_command', { cmd: 'bun test', workdir: '/repo/tests' }),
+      tool('Write', { file_path: '/repo/src/b.ts' }),
+    ], '/repo')).toEqual(['/repo/tests', '/repo/src']);
+  });
   it('tallies done/total and surfaces the in-progress activeForm', () => {
     const p = extractTodoProgress({
       todos: [
