@@ -88,6 +88,25 @@ describe('readClaudeSessionName', () => {
     expect(res).toBe('Spaced title');
   });
 
+  it('skips Claude auto-derived placeholder names (nameSource="derived")', async () => {
+    // Claude 2.1.207+ writes `<dirname>-<n>` as a derived placeholder. It is
+    // not a topic, so readClaudeSessionName must treat it as no name — the
+    // caller then falls through to the LLM topic path.
+    writeSessionFile(66280, { sessionId: 'abc-123', name: 'agents-cli-55', nameSource: 'derived' });
+    const res = await readClaudeSessionName('abc-123', { sessionsDirs: [tmpDir] });
+    expect(res).toBeNull();
+  });
+
+  it('returns a genuine title even when nameSource is absent or non-derived', async () => {
+    writeSessionFile(11111, { sessionId: 'no-source', name: 'Fix Fleet Login' });
+    writeSessionFile(22222, { sessionId: 'user-set', name: 'Ship Release', nameSource: 'user' });
+    const a = await readClaudeSessionName('no-source', { sessionsDirs: [tmpDir] });
+    resetSessionNameCache();
+    const b = await readClaudeSessionName('user-set', { sessionsDirs: [tmpDir] });
+    expect(a).toBe('Fix Fleet Login');
+    expect(b).toBe('Ship Release');
+  });
+
   it('caches scans within the TTL window', async () => {
     writeSessionFile(44444, { sessionId: 'sid', name: 'First' });
     const t0 = 1_000_000;

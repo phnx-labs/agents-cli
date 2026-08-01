@@ -3,10 +3,18 @@ import * as path from 'path';
 import * as os from 'os';
 
 // Claude Code persists a per-session metadata file containing
-// { sessionId, name, ... } where `name` is the human-readable title shown
-// by `/status`. We use it as the terminal tab label so the tab matches the
-// agent's own title instead of a 5-word truncation of the user's first
-// message.
+// { sessionId, name, nameSource, ... } where `name` is the title shown by
+// `/status`. When the user (or Claude itself) has set a real title, we use it
+// as the terminal tab label so the tab matches the agent's own title instead
+// of a 5-word truncation of the user's first message.
+//
+// Claude 2.1.207+ ALSO auto-derives a placeholder name — `<dirname>-<n>`
+// (e.g. "agents-cli-55"), tagged `nameSource: "derived"`. That placeholder is
+// not a topic; surfacing it as the tab label tells you the repo, not what the
+// agent is working on, and it short-circuits the LLM topic path in
+// extension.ts (which produces "Fix Fleet Login"-style titles). So a derived
+// name is treated as no name at all — the caller falls through to the LLM
+// path. Only a genuine title (any nameSource other than "derived") is used.
 //
 // File locations:
 //   - ~/.claude/sessions/<pid>.json                          (vanilla install)
@@ -22,6 +30,7 @@ import * as os from 'os';
 interface ClaudeSessionFile {
   sessionId?: string;
   name?: string | null;
+  nameSource?: string | null;
 }
 
 interface ScanCache {
@@ -97,6 +106,11 @@ async function scanDir(dir: string, sink: Map<string, string>): Promise<void> {
         try {
           const raw = await fs.promises.readFile(path.join(dir, f), 'utf-8');
           const parsed = JSON.parse(raw) as ClaudeSessionFile;
+          // A `derived` name is Claude's auto-generated `<dirname>-<n>`
+          // placeholder, not a real title — skip it so the caller falls
+          // through to the LLM topic path instead of labelling the tab with
+          // the repo name.
+          if (parsed.nameSource === 'derived') return;
           if (parsed.sessionId && typeof parsed.name === 'string' && parsed.name.trim()) {
             sink.set(parsed.sessionId, parsed.name.trim());
           }
