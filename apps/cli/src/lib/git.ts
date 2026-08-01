@@ -1278,3 +1278,36 @@ export async function tryAutoPull(dir: string): Promise<{ pulled: boolean; error
     return { pulled: false, error: (err as Error).message };
   }
 }
+
+/**
+ * How many commits `dir`'s checked-out branch is behind its upstream, read from
+ * the LAST-FETCHED remote-tracking ref — no network call. Returns null when the
+ * dir is not a git repo, has no upstream configured, or git errors.
+ *
+ * Used by `agents doctor` to flag a source layer (`~/.agents`, `~/.agents/.system`)
+ * that is reconciled against stale truth. Staleness relative to origin is a
+ * background auto-pull concern; this surfaces the same fact synchronously in the
+ * per-version verdict.
+ */
+export function commitsBehindUpstream(dir: string): { behind: number; branch: string } | null {
+  if (!isGitRepo(dir)) return null;
+  const run = (args: string[]): string | null => {
+    try {
+      return execFileSync('git', ['-C', dir, ...args], {
+        stdio: ['ignore', 'pipe', 'ignore'],
+        encoding: 'utf8',
+      }).trim();
+    } catch {
+      return null;
+    }
+  };
+  // Name of the upstream ref (e.g. `origin/main`) for the human-readable message.
+  const branch = run(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}']);
+  if (!branch) return null;
+  // `--count HEAD..@{upstream}` = commits on upstream not yet in HEAD = behind.
+  const raw = run(['rev-list', '--count', 'HEAD..@{upstream}']);
+  if (raw === null) return null;
+  const behind = parseInt(raw, 10);
+  if (!Number.isFinite(behind)) return null;
+  return { behind, branch };
+}

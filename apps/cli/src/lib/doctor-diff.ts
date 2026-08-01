@@ -51,7 +51,7 @@ import { shouldInstallCommandAsSkill, commandSkillMatches, commandSkillName } fr
 import { gooseCommandMatches, gooseCommandsDir } from './goose-commands.js';
 import { supports } from './capabilities.js';
 import { listSkillsInVersionHome, getVersionSkillsDir } from './skills.js';
-import { listHooksInVersionHome, getVersionHooksDir, listHookEntriesFromDir } from './hooks.js';
+import { listHooksInVersionHome, getVersionHooksDir, listHookEntriesFromDir, checkVersionHookWiring, type HookWiringReport } from './hooks.js';
 
 const RULES_DOC_FILENAME = 'README.md';
 
@@ -84,6 +84,20 @@ export interface ResourceDiff {
   detail?: string;
 }
 
+/** A source layer (user / system / an extra repo) that is behind its upstream —
+ *  reconciled against stale truth. Attached to the report by the doctor command
+ *  (needs a git probe, kept out of the pure per-version diff). */
+export interface SourceLayerBehind {
+  layer: 'user' | 'system' | 'extra';
+  /** Human label for the layer's on-disk root (e.g. `~/.agents`). */
+  label: string;
+  /** `agents repo pull` alias for the remediation hint. */
+  alias: string;
+  behind: number;
+  /** Upstream ref the layer trails (e.g. `origin/main`). */
+  branch: string;
+}
+
 export interface VersionResourceReport {
   agent: AgentId;
   version: string;
@@ -97,6 +111,12 @@ export interface VersionResourceReport {
   };
   kinds: Record<DoctorKind, ResourceDiff[]>;
   summary: { ok: number; diff: number; missing: number; extra: number };
+  /** Wiring inspection for the version's native settings.json (claude/droid).
+   *  Populated only when the `hooks` kind is in scope. */
+  hookWiring?: HookWiringReport;
+  /** Source layers behind their upstream. Filled by the doctor command (a git
+   *  probe), not the pure diff — undefined when uncomputed. */
+  sourceBehind?: SourceLayerBehind[];
 }
 
 const ALL_KINDS: DoctorKind[] = [
@@ -676,6 +696,10 @@ export function diffVersionResources(
   if (requested.has('commands')) empty.commands = diffCommands(agent, version, cwd, excludeProject);
   if (requested.has('skills')) empty.skills = diffSkills(agent, version, cwd, excludeProject);
   if (requested.has('hooks')) empty.hooks = diffHooks(agent, version, cwd);
+  // Wiring check: a hook FILE can be present and byte-identical to source (ok
+  // above) yet never referenced in settings.json, so it never fires. Only
+  // meaningful when hooks are in scope.
+  const hookWiring = requested.has('hooks') ? checkVersionHookWiring(agent, version) : undefined;
   if (requested.has('rules')) empty.rules = diffRules(agent, version, cwd, excludeProject);
   if (requested.has('mcp')) empty.mcp = diffPresenceOnly('mcp', available.mcp, synced.mcp);
   if (requested.has('permissions')) empty.permissions = diffPresenceOnly('permissions', available.permissions, synced.permissions);
@@ -706,6 +730,7 @@ export function diffVersionResources(
     },
     kinds: empty,
     summary: { ok, diff, missing, extra },
+    ...(hookWiring ? { hookWiring } : {}),
   };
 }
 

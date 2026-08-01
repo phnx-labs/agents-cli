@@ -155,7 +155,7 @@ function isStaleSiblingVersionCommand(
 
 import { getEffectiveHome, getVersionHomePath, listInstalledVersions } from './versions.js';
 import type { AgentId, InstalledHook, ManifestHook } from './types.js';
-import { generateHookShim, isValidHookShimName, parseCacheConfig, removeHookShim } from './hooks/cache.js';
+import { generateHookShim, getHookShimPath, isValidHookShimName, parseCacheConfig, removeHookShim } from './hooks/cache.js';
 import { getHookShimsDir } from './state.js';
 
 export type HookEntry = { name: string; scriptPath: string; dataFile?: string };
@@ -556,6 +556,138 @@ export function getVersionHooksDir(agent: AgentId, version: string): string {
  */
 export function listHooksInVersionHome(agent: AgentId, version: string): HookEntry[] {
   return listHookEntriesFromDir(getVersionHooksDir(agent, version));
+}
+
+// ─── wiring inspection (settings.json family: claude, droid) ──────────────────
+
+/**
+ * Agents whose hooks register through {@link registerHooksForClaude} — a native
+ * settings.json shaped `hooks[event] = [{ matcher, hooks: [{ command }] }]`, with
+ * no event renaming. These are the only agents this read-only wiring inspector
+ * understands; every other harness uses a divergent config format and/or event
+ * map (Gemini/Antigravity settings.json variants, Codex config.toml, the OpenCode
+ * plugin, …), so it reports them unsupported rather than risk a false verdict.
+ */
+const SETTINGS_JSON_HOOK_FAMILY: readonly AgentId[] = ['claude', 'droid'];
+
+export interface HookWiringIssue {
+  /** Hook name (script basename minus extension). */
+  name: string;
+  /** Native lifecycle event the hook should be wired to (Stop, PreToolUse, …). */
+  event: string;
+  /** The command settings.json should reference for this hook under `event`. */
+  command: string;
+}
+
+export interface HookWiringReport {
+  /** Whether this agent's hook config format is understood by the inspector. */
+  supported: boolean;
+  /** Absolute path of the settings file inspected (when supported). */
+  settingsPath?: string;
+  /** Number of hooks the manifest says should be wired for this version. */
+  expected?: number;
+  /** settings.json does not exist — nothing declared can be wired. */
+  settingsMissing?: boolean;
+  /** settings.json exists but is not valid JSON — wiring can't be verified. */
+  settingsUnparseable?: boolean;
+  /** Hooks whose file is present/resolvable but that are NOT referenced in the
+   *  event array settings.json should carry them in. */
+  unwired: HookWiringIssue[];
+}
+
+/**
+ * Verify that every hook the manifest says should be wired for a (claude|droid)
+ * version is actually REFERENCED in that version's native settings.json — not
+ * merely present as a file on disk.
+ *
+ * `agents doctor` compares hook FILES against source (see diffHooks in
+ * doctor-diff.ts) but never checks the wiring, so a hook whose script is
+ * byte-identical to source yet missing from settings.json's PreToolUse/Stop/…
+ * array reads as "ok" while it never fires. This closes that blind spot.
+ *
+ * Read-only by construction: it mirrors registerHooksForClaude's command
+ * resolution WITHOUT the shim-generation / chmod side effects that
+ * resolveHookCommand performs, so it never mutates the version home.
+ */
+export function checkVersionHookWiring(agent: AgentId, version: string): HookWiringReport {
+  if (!AGENTS[agent].supportsHooks || !SETTINGS_JSON_HOOK_FAMILY.includes(agent)) {
+    return { supported: false, unwired: [] };
+  }
+
+  const versionHome = getVersionHomePath(agent, version);
+  const settingsPath = path.join(versionHome, agentConfigDirName(agent), 'settings.json');
+  const localHooksDir = getVersionHooksDir(agent, version);
+
+  // Read-only mirror of registerHooksToSettings' resolveScript: prefer the hook
+  // copied into the version home, then the central/extra/system source. No
+  // ensureExecutable — that chmods, and this path must not touch disk.
+  const resolveScript = (script: string): string | null => {
+    if (path.isAbsolute(script) && fs.existsSync(script)) return script;
+    const local = resolveContainedHookPath(localHooksDir, script);
+    if (local) return local;
+    return resolveHookScriptPath(script);
+  };
+  // Read-only mirror of resolveHookCommand — same command string, no shim write.
+  const expectedCommand = (name: string, hookDef: ManifestHook): string | null => {
+    const scriptPath = resolveScript(hookDef.script);
+    if (!scriptPath) return null;
+    if (!isValidHookShimName(name)) return null;
+    const cache = parseCacheConfig(hookDef.cache);
+    const hasMatches = hookDef.matches != null && Object.keys(hookDef.matches).length > 0;
+    if (!cache && !hasMatches) return toPortableCommand(scriptPath);
+    return toPortableCommand(getHookShimPath(name));
+  };
+
+  const manifest = parseHookManifest({ warn: false });
+  const expected: HookWiringIssue[] = [];
+  for (const [name, hookDef] of Object.entries(manifest)) {
+    if (!hookDef.events || hookDef.events.length === 0) continue;
+    const command = expectedCommand(name, hookDef);
+    if (!command) continue; // script unresolved — a file gap, reported by diffHooks
+    for (const event of hookDef.events) expected.push({ name, event, command });
+  }
+
+  if (!fs.existsSync(settingsPath)) {
+    return {
+      supported: true,
+      settingsPath,
+      expected: expected.length,
+      settingsMissing: expected.length > 0,
+      unwired: [],
+    };
+  }
+  let config: Record<string, unknown>;
+  try {
+    config = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+  } catch {
+    return {
+      supported: true,
+      settingsPath,
+      expected: expected.length,
+      settingsUnparseable: true,
+      unwired: [],
+    };
+  }
+
+  // Command strings actually referenced under each event array of settings.json.
+  const wiredByEvent = new Map<string, Set<string>>();
+  const hooks = config.hooks && typeof config.hooks === 'object'
+    ? (config.hooks as Record<string, unknown>)
+    : {};
+  for (const [event, groups] of Object.entries(hooks)) {
+    if (!Array.isArray(groups)) continue;
+    const cmds = new Set<string>();
+    for (const group of groups as Array<{ hooks?: Array<{ command?: unknown }> }>) {
+      if (!group || !Array.isArray(group.hooks)) continue;
+      for (const h of group.hooks) {
+        if (h && typeof h.command === 'string') cmds.add(h.command);
+      }
+    }
+    wiredByEvent.set(event, cmds);
+  }
+
+  const unwired = expected.filter((e) => !wiredByEvent.get(e.event)?.has(e.command));
+  return { supported: true, settingsPath, expected: expected.length, unwired };
 }
 
 /**
