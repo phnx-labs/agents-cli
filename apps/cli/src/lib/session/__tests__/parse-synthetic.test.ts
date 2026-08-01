@@ -73,4 +73,20 @@ describe('parseSession flags harness-injected user turns as _synthetic', () => {
     const out = filterEvents(events, { include: ['user'], first: 1 });
     expect(out.map(e => e.content)).toEqual(['Refactor the auth module and add tests.']);
   });
+
+  test('--exclude user drops synthetic scaffolding too (it is user-role noise)', () => {
+    // Regression: synthetic events must not leak through --exclude user. They
+    // map to role=user, so excluding "user" drops both genuine and synthetic.
+    const events = parseSession(writeClaudeFixture(), 'claude');
+    const out = filterEvents(events, { exclude: ['user'] });
+    expect(out.some(e => e.role === 'user')).toBe(false);
+    expect(out.some(e => e.content?.startsWith('<bash-input>'))).toBe(false);
+    expect(out.map(e => e.content)).toEqual(['On it.']); // only the assistant turn
+  });
+
+  test('the default stream (no filter) keeps synthetic events for full fidelity', () => {
+    const events = parseSession(writeClaudeFixture(), 'claude');
+    const out = filterEvents(events, {});
+    expect(out.some(e => e.content === '<bash-input>j agents-cli</bash-input>')).toBe(true);
+  });
 });

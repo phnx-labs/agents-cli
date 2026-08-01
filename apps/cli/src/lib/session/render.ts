@@ -902,10 +902,10 @@ export function parseRoleList(raw: string, flag: string): RoleFilter[] {
 }
 
 function roleOfEvent(e: SessionEvent): RoleFilter | null {
-  // Harness-injected `role=user` scaffolding (flagged `_synthetic` in
-  // parseSession) is not genuine user intent, so `--include user` excludes it.
-  // Returning null keeps it in the default/`--exclude` streams (full fidelity).
-  if (e.type === 'message' && e.role === 'user') return e._synthetic ? null : 'user';
+  // Synthetic scaffolding still maps to 'user' here so `--exclude user` drops it
+  // like any other user-role event (pre-flag behavior). `--include user`'s
+  // "genuine intent only" carve-out lives in applyRoleFilter, not here.
+  if (e.type === 'message' && e.role === 'user') return 'user';
   if (e.type === 'message' && e.role === 'assistant') return 'assistant';
   if (e.type === 'thinking') return 'thinking';
   if (e.type === 'tool_use' || e.type === 'tool_result') return 'tools';
@@ -923,7 +923,12 @@ function applyRoleFilter(events: SessionEvent[], opts: FilterOptions): SessionEv
     const set = new Set(opts.include);
     return events.filter(e => {
       const role = roleOfEvent(e);
-      return role !== null && set.has(role);
+      if (role === null) return false;
+      // `--include user` means genuine user intent, so drop harness-injected
+      // `_synthetic` scaffolding (bash-input, system-reminder) even though it
+      // carries role=user. `--exclude user` still drops it via roleOfEvent.
+      if (role === 'user' && e._synthetic) return false;
+      return set.has(role);
     });
   }
   if (opts.exclude && opts.exclude.length > 0) {
