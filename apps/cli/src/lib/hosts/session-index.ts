@@ -16,7 +16,7 @@
 import * as fs from 'fs';
 import { upsertSession } from '../session/db.js';
 import type { SessionMeta, SessionAgentId } from '../session/types.js';
-import { SESSION_AGENTS } from '../session/types.js';
+import { isSessionTrackedAgent } from '../session/types.js';
 import { localLogPath, updateTask, type HostTask } from './tasks.js';
 import { parseSessionIdMarker } from './session-marker.js';
 import { deriveShortId } from '../session/short-id.js';
@@ -36,7 +36,7 @@ export interface HostSessionContext {
 export function hostSessionMeta(task: HostTask, ctx: HostSessionContext): SessionMeta | null {
   const id = task.sessionId;
   if (!id) return null;
-  if (!SESSION_AGENTS.includes(task.agent as SessionAgentId)) return null;
+  if (!isSessionTrackedAgent(task.agent)) return null;
 
   return {
     id,
@@ -115,7 +115,7 @@ export interface InteractiveHostSessionContext {
  * surface and resume it by id.
  */
 export function registerInteractiveHostSession(ctx: InteractiveHostSessionContext): void {
-  if (!SESSION_AGENTS.includes(ctx.agent as SessionAgentId)) return;
+  if (!isSessionTrackedAgent(ctx.agent)) return;
   try {
     upsertSession(
       {

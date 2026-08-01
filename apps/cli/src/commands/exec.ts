@@ -28,6 +28,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { spawnSync } from 'child_process';
+import { randomUUID } from 'crypto';
+import { isSessionTrackedAgent } from '../lib/session/types.js';
 
 interface ExecCommandActionOptions {
   mode: ExecMode;
@@ -1285,6 +1287,18 @@ export function registerRunCommand(program: Command): void {
             // one here. Registering that same id keeps the local index aligned
             // with the remote agent. On resume, don't mint a new one.
             const hostSessionId = resolveHostSessionId(runAgent, resumeId, options.sessionId);
+            // For every OTHER agent the remote coins its own id, which we can't
+            // know up front. Forward a launch id we control as AGENT_LAUNCH_ID:
+            // the remote `agents run` adopts it (exec.ts resolveLaunchId) and its
+            // SessionStart hook records the real id under that exact key, so after
+            // the stream we resolve the id by one ssh read of the remote hook
+            // record — the same launch-id join used locally (RUSH-2034). Not
+            // needed for Claude (id forced) or resume (id already known).
+            const correlationLaunchId =
+              !hostSessionId && !resumeId && isSessionTrackedAgent(runAgent) ? randomUUID() : undefined;
+            const hostEnv = correlationLaunchId
+              ? [...options.env, `AGENT_LAUNCH_ID=${correlationLaunchId}`]
+              : options.env;
             if (hostSessionId) {
               registerInteractiveHostSession({
                 cwd: process.cwd(),
@@ -1304,7 +1318,7 @@ export function registerRunCommand(program: Command): void {
               mode: options.mode,
               model: options.model,
               effort: options.effort,
-              env: options.env,
+              env: hostEnv,
               addDir: hostAddDirs,
               json: options.json,
               verbose: options.verbose,
@@ -1320,14 +1334,40 @@ export function registerRunCommand(program: Command): void {
               forceInteractive: options.interactive,
               copyCreds: hostCopyCreds,
             });
+            // Resolve a non-Claude agent's REAL remote session id now the run has
+            // booted (its hook has fired on the peer): one ssh read of the remote
+            // hook record, keyed by the launch id we forwarded. Register it so the
+            // run shows in `agents sessions` and can be reconnected/focused —
+            // closing the non-Claude gap RUSH-2033 left. Best-effort: an
+            // unreachable host or a not-yet-landed record leaves the run un-mapped
+            // rather than mis-mapped.
+            let resolvedRemoteId: string | undefined;
+            if (correlationLaunchId) {
+              const { resolveRemoteSessionId } = await import('../lib/hosts/remote-session-id.js');
+              const { sshTargetFor } = await import('../lib/hosts/types.js');
+              try {
+                resolvedRemoteId = resolveRemoteSessionId(sshTargetFor(host), correlationLaunchId);
+              } catch {
+                /* ssh read is best-effort — keep the run un-mapped, never guess */
+              }
+              if (resolvedRemoteId) {
+                registerInteractiveHostSession({
+                  cwd: process.cwd(),
+                  host: host.name,
+                  agent: runAgent,
+                  sessionId: resolvedRemoteId,
+                  name: options.name,
+                });
+              }
+            }
             // A network drop kills the local ssh client (exit 255) but the remote
             // agent survives in its detached tmux session. With a known session id
-            // (Claude, or a resumed run) and a tmux-hosted run, re-attach the live
-            // pane automatically instead of exiting — the user never has to notice
-            // the drop and `agents sessions focus` by hand. `raw` runs aren't tmux
-            // wrapped, so there is nothing to reconnect to. Non-Claude id capture is
-            // tracked in RUSH-2007.
-            const reconnectId = hostSessionId ?? resumeId;
+            // (Claude's forced id, a resumed run, or a non-Claude id we just
+            // resolved from the remote hook record) and a tmux-hosted run,
+            // re-attach the live pane automatically instead of exiting — the user
+            // never has to notice the drop and `agents sessions focus` by hand.
+            // `raw` runs aren't tmux wrapped, so there is nothing to reconnect to.
+            const reconnectId = hostSessionId ?? resolvedRemoteId ?? resumeId;
             if (reconnectId && !isRaw) {
               const { reconnectInteractiveSession, SSH_CONN_FAILURE } = await import('../lib/hosts/reconnect.js');
               if (exitCode === SSH_CONN_FAILURE) {

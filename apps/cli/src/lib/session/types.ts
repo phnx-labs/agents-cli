@@ -13,6 +13,15 @@ export type SessionAgentId = 'claude' | 'codex' | 'gemini' | 'antigravity' | 'op
 /** All agents with session discovery support, in display order. */
 export const SESSION_AGENTS: SessionAgentId[] = ['claude', 'codex', 'gemini', 'antigravity', 'opencode', 'openclaw', 'rush', 'hermes', 'grok', 'kimi', 'droid'];
 
+/**
+ * True when `agent` stores session data `agents sessions` can discover (a member
+ * of {@link SESSION_AGENTS}). The single predicate every session-index writer
+ * gates on, so "is this a trackable agent?" is decided in exactly one place.
+ */
+export function isSessionTrackedAgent(agent: string): agent is SessionAgentId {
+  return (SESSION_AGENTS as string[]).includes(agent);
+}
+
 /** A single normalized event within a session (message, tool call, thinking, etc.). */
 export interface SessionEvent {
   type: 'message' | 'tool_use' | 'tool_result' | 'thinking' | 'error' | 'init' | 'result' | 'usage' | 'attachment';
