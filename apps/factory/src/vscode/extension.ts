@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { BUILT_IN_AGENTS, getBuiltInByKey, getBuiltInDefByTitle, getBuiltInByPrefix, pickLatestVersion, STRATEGY_LAUNCH_AGENTS, modeFlagForAgent, AgentLaunchMode, RunStrategy, buildAgentLaunchCommand } from '../core/agents';
+import { BUILT_IN_AGENTS, getBuiltInByKey, getBuiltInDefByTitle, getBuiltInByPrefix, pickLatestVersion, STRATEGY_LAUNCH_AGENTS, modeFlagForAgent, AgentLaunchMode, RunStrategy, buildAgentLaunchCommand, wrapNativeAgentCommand } from '../core/agents';
 import { parseSpawnRequest, SpawnRequest } from '../core/spawn';
 import {
   AgentConfig,
@@ -2036,7 +2036,12 @@ async function openSingleAgent(
   }
 
   if (command) {
-    await sendCommandWhenReady(terminal, command);
+    // In native (non-tmux) mode, prefix the launch command with `exec` so the
+    // shell replaces itself with the agent runner. When the agent exits the
+    // terminal process exits too, which causes VS Code to close the tab
+    // automatically — mirroring the pane-died behaviour tmux mode already has.
+    // wrapNativeAgentCommand is a no-op for shell tabs.
+    await sendCommandWhenReady(terminal, wrapNativeAgentCommand(command, agentKey === 'shell'));
     readiness.armAgentReady(terminal, agentKey && sessionId
       ? { agentKey, sessionId, cwd }
       : {});

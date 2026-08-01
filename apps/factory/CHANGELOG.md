@@ -6,6 +6,8 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **Native-mode agent terminal tabs now close automatically when the agent exits (RUSH-2026).** In native (non-tmux) terminal mode, the launch command is now prefixed with `exec` so the shell process replaces itself with the agent runner. When the agent exits the terminal process exits too and VS Code closes the tab automatically — no manual close needed. This mirrors the existing tmux pane-died behaviour. Shell tabs (the SH agent type) and tmux-mode terminals are unaffected. Remote `--host` launches get the same treatment: the local SSH wrapper exits with the remote session. Source: `apps/factory/src/core/agents.ts` (`wrapNativeAgentCommand`), `apps/factory/src/vscode/extension.ts` (`openSingleAgent`).
+
 - **Interactive agent launches now default to `--mode auto` instead of stalling in read-only plan mode (RUSH-2038).** Launching Codex, Claude, Gemini, Cursor, OpenCode, or Antigravity from Factory without explicitly choosing a mode now runs in `auto` (writable-but-gated), so the agent can edit files immediately. Previously the CLI default of `plan` was inherited, causing Codex to start with `--sandbox read-only` and wait indefinitely for approval. `buildAgentLaunchCommand` is now in `src/core/agents.ts` so it is unit-testable without a VS Code harness. Source: `apps/factory/src/core/agents.ts`, `apps/factory/src/vscode/extension.ts`.
 
 - **Stuck Claude tab labels self-heal, and an existing session name is reused
