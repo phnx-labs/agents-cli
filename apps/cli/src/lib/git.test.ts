@@ -401,7 +401,7 @@ describe('commitAndPush (clean-but-ahead + dirty)', () => {
   });
 });
 
-describe('pullRepo fast-forward only', () => {
+describe('pullRepo reconciliation', () => {
   let root: string;
   let remote: string;
   let local: string;
@@ -661,7 +661,7 @@ describe('pullRepo reconciles a diverged branch by rebasing', () => {
     expect(log.latest?.message).toContain('snapshot boxA agent pins');
   });
 
-  it('fails with a conflict message when the same file genuinely conflicts', async () => {
+  it('rolls the tree back when a conflict aborts the rebase, leaving the repo usable', async () => {
     const { local, author } = await divergedPair();
 
     fs.writeFileSync(path.join(local, 'seed.txt'), 'local version\n');
@@ -673,8 +673,35 @@ describe('pullRepo reconciles a diverged branch by rebasing', () => {
     await simpleGit(author).commit('upstream edit');
     await simpleGit(author).push('origin', 'main');
 
+    const before = await simpleGit(local).revparse(['HEAD']);
+    const res = await pullRepo(local);
+    const after = await simpleGit(local).revparse(['HEAD']);
+
+    expect(res.success).toBe(false);
+
+    // The invariant --ff-only used to give for free, and the reason this suite
+    // exists: a failed pull must leave the checkout exactly as it found it.
+    // Without `rebase --abort` the repo is left detached, mid-rebase, with
+    // conflict markers written into live config files.
+    expect(after).toBe(before);
+    expect(fs.existsSync(path.join(local, '.git', 'rebase-merge'))).toBe(false);
+    expect(fs.existsSync(path.join(local, '.git', 'rebase-apply'))).toBe(false);
+    expect(fs.readFileSync(path.join(local, 'seed.txt'), 'utf-8')).not.toContain('<<<<<<<');
+    const status = await simpleGit(local).status();
+    expect(status.current).toBe('main'); // not detached HEAD
+    expect(status.conflicted).toEqual([]);
+  });
+
+  it('reports an in-progress rebase as itself, not as a dirty tree', async () => {
+    const { local, author } = await divergedPair();
+
+    // Wedge the repo the way a pre-abort conflict used to.
+    fs.mkdirSync(path.join(local, '.git', 'rebase-merge'), { recursive: true });
+
     const res = await pullRepo(local);
     expect(res.success).toBe(false);
-    expect(res.error).toMatch(/conflict/i);
+    expect(res.error).toMatch(/rebase is still in progress/i);
+    expect(res.error).not.toMatch(/Blocked by local changes/);
+    void author;
   });
 });

@@ -110,4 +110,29 @@ describe('pullRepo', () => {
     const log = await localGit.log({ maxCount: 1 });
     expect(log.latest?.message).toContain('local commit');
   });
+
+  // The integration suite had NO conflict coverage at all. A failed pull must
+  // leave the checkout exactly as it found it — the atomicity --ff-only gave
+  // for free, and the reason `rebase --abort` is in the catch.
+  it('rolls the tree back on a genuine conflict, leaving no rebase in progress', async () => {
+    writeFileSync(join(REMOTE_DIR, 'shared.txt'), 'remote side');
+    const remoteGit = simpleGit(REMOTE_DIR);
+    await remoteGit.add('.');
+    await remoteGit.commit('remote edit');
+
+    writeFileSync(join(LOCAL_DIR, 'shared.txt'), 'local side');
+    const localGit = simpleGit(LOCAL_DIR);
+    await localGit.add('.');
+    await localGit.commit('local edit');
+
+    const before = await localGit.revparse(['HEAD']);
+    const result = await pullRepo(LOCAL_DIR);
+    const after = await localGit.revparse(['HEAD']);
+
+    expect(result.success).toBe(false);
+    expect(after).toBe(before);
+    expect(existsSync(join(LOCAL_DIR, '.git', 'rebase-merge'))).toBe(false);
+    const status = await localGit.status();
+    expect(status.conflicted).toEqual([]);
+  });
 });

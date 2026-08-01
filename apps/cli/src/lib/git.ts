@@ -963,6 +963,26 @@ export async function pullRepo(
 ): Promise<{ success: boolean; commit: string; error?: string; branch?: string }> {
   try {
     const git = simpleGit(dir);
+
+    // A rebase left in progress by an earlier run must be reported as itself.
+    // Without this the dirty-tree guard below claims "Blocked by local changes",
+    // which is both wrong and actively harmful advice mid-rebase on a detached
+    // HEAD. Checked BEFORE commitOwnDeviceMeta so we never commit into one.
+    const rebaseInProgress =
+      fs.existsSync(path.join(dir, '.git', 'rebase-merge')) ||
+      fs.existsSync(path.join(dir, '.git', 'rebase-apply'));
+    if (rebaseInProgress) {
+      return {
+        success: false,
+        commit: '',
+        error:
+          `A previous rebase is still in progress — finish or abort it, then pull again.\n\n` +
+          `  cd ${displayHomePath(dir)} && git status\n` +
+          `  git rebase --continue   # after resolving\n` +
+          `  git rebase --abort      # to discard the attempt`,
+      };
+    }
+
     // Commit this machine's own device-meta first so a per-machine pin change
     // never wedges the pull. Genuine edits elsewhere still block below.
     await commitOwnDeviceMeta(dir);
@@ -992,6 +1012,9 @@ export async function pullRepo(
       }
     }
 
+    // `tracking` is a remote-tracking ref (origin/<name>); git pull wants <name>.
+    const remoteBranch = tracking.startsWith('origin/') ? tracking.slice('origin/'.length) : branch;
+
     const localRef = await git.revparse(['HEAD']);
     const remoteRef = await git.revparse([tracking]).catch(() => null);
     if (!remoteRef) {
@@ -1013,12 +1036,25 @@ export async function pullRepo(
       // makes just above — permanently wedged the pull with nothing actually in
       // conflict. Every device carries its own devices/<host>/ path, so those
       // replay cleanly. Matches syncRepoGit (below) and this function's own doc.
-      await git.pull('origin', branch, { '--rebase': 'true' });
+      //
+      // Pull the RESOLVED tracking ref, not `branch`: when the local branch has
+      // no tracking config the block above falls back to origin's default head,
+      // which may be named differently (local `main` vs origin `master`). Using
+      // `branch` there asks origin for a ref it does not have.
+      assertValidBranchName(remoteBranch);
+      await git.pull('origin', remoteBranch, { '--rebase': 'true' });
     } catch (err) {
+      // Abort so the tree is restored, matching the atomicity --ff-only gave us.
+      // Without this a conflict leaves the repo detached, mid-rebase, with
+      // conflict markers written into live config (this repo is ~/.agents —
+      // agents.yaml and AGENTS.md are in it), and every later pull misreports
+      // the cause. `agents sync` reaches this path unattended across the fleet,
+      // so a wedged checkout would be worse than the bug this fixes.
+      await git.raw(['rebase', '--abort']).catch(() => { /* not mid-rebase */ });
       return {
         success: false,
         commit: '',
-        error: `Rebase onto ${tracking} hit a conflict — resolve it, then pull again.\n\n  cd ${displayHomePath(dir)} && git status\n\n${(err as Error).message}`,
+        error: `Rebase onto ${tracking} hit a conflict — the pull was rolled back, nothing changed.\n\nResolve the divergence, then pull again:\n\n  cd ${displayHomePath(dir)} && git log --oneline HEAD...${tracking}\n\n${(err as Error).message}`,
       };
     }
 
