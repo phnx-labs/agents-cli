@@ -24,7 +24,10 @@
 #
 # Validates that <version> is a single-step bump from the current published
 # @phnx-labs latest -- patch+1, or minor+1 with patch=0, or major+1 with
-# minor=patch=0. No skips.
+# minor=patch=0. No skips. Two exceptions cover main running ahead of the
+# registry: the version main already carries (phnx-catchup), and the next patch
+# after it (patch-from-main) for when main's own version can no longer be
+# published because its merged release PR no longer matches the tree CI tested.
 
 set -euo pipefail
 
@@ -171,6 +174,7 @@ read -r TMAJ TMIN TPAT <<< "$(parse_v "$TARGET")"
 is_valid_bump=false
 read -r SMAJ SMIN SPAT <<< "$(parse_v "$SWARMIFY_LATEST")"
 PKG_JSON_VERSION="$(jq -r .version package.json)"
+read -r PMAJ PMIN PPAT <<< "$(parse_v "$PKG_JSON_VERSION")"
 if [[ $TMAJ -eq $CMAJ && $TMIN -eq $CMIN && $TPAT -eq $((CPAT + 1)) ]]; then
   BUMP="patch"
   is_valid_bump=true
@@ -194,6 +198,27 @@ elif [[ "$TARGET" == "$PKG_JSON_VERSION" ]] && \
   # N bumps that never reached the registry). Publish what main says.
   BUMP="phnx-catchup"
   is_valid_bump=true
+elif [[ $TMAJ -eq $PMAJ && $TMIN -eq $PMIN && $TPAT -eq $((PPAT + 1)) ]] && \
+     { [[ $PMAJ -gt $CMAJ ]] || \
+       { [[ $PMAJ -eq $CMAJ ]] && [[ $PMIN -gt $CMIN ]]; } || \
+       { [[ $PMAJ -eq $CMAJ ]] && [[ $PMIN -eq $CMIN ]] && [[ $PPAT -gt $CPAT ]]; }; }; then
+  # The next patch AFTER an unpublishable main. When main is ahead of the
+  # registry but its version can no longer be published — the catch-up guard
+  # below refuses a merged release PR whose squash pulled in concurrent main
+  # commits, so the tree that would ship is not the tree CI tested — the only
+  # correct move is to cut a fresh release from main and let it earn its own
+  # full-matrix run. That is what this script's own refusal message advises
+  # ("cut the next patch through the normal release PR flow"), and until now
+  # the validator rejected it: patch+1 is measured from the REGISTRY, so with
+  # main at 1.20.75 and npm at 1.20.74, 1.20.76 read as a skipped version and
+  # 1.20.75 was blocked — leaving no patch-level path forward at all.
+  #
+  # Deliberately NOT a bypass: the catch-up guard still owns the case where
+  # main's own version is publishable. This only opens the strictly-newer patch,
+  # which then runs the ordinary bump -> release PR -> full matrix -> merge ->
+  # tag -> publish flow against the exact tree being shipped.
+  BUMP="patch-from-main"
+  is_valid_bump=true
 fi
 
 if ! $is_valid_bump; then
@@ -203,6 +228,7 @@ if ! $is_valid_bump; then
   red "  $((CMAJ)).$((CMIN + 1)).0   (minor)"
   red "  $((CMAJ + 1)).0.0   (major)"
   red "  $PKG_JSON_VERSION              (phnx-catchup: package.json is ahead of registry)"
+  red "  $((PMAJ)).$((PMIN)).$((PPAT + 1))   (patch-from-main: the next patch after an unpublishable main)"
   exit 1
 fi
 
