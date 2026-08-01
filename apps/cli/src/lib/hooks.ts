@@ -575,6 +575,10 @@ export interface HookWiringIssue {
   name: string;
   /** Native lifecycle event the hook should be wired to (Stop, PreToolUse, …). */
   event: string;
+  /** Matcher group the hook belongs to under `event` (`''` = the catch-all
+   *  group). Real hooks scope by matcher — ask-user-question-guard=AskUserQuestion,
+   *  user-message-guard=Bash — so wiring is verified per (event, matcher). */
+  matcher: string;
   /** The command settings.json should reference for this hook under `event`. */
   command: string;
 }
@@ -618,14 +622,18 @@ export function checkVersionHookWiring(agent: AgentId, version: string): HookWir
   const settingsPath = path.join(versionHome, agentConfigDirName(agent), 'settings.json');
   const localHooksDir = getVersionHooksDir(agent, version);
 
-  // Read-only mirror of registerHooksToSettings' resolveScript: prefer the hook
-  // copied into the version home, then the central/extra/system source. No
-  // ensureExecutable — that chmods, and this path must not touch disk.
+  // Resolve ONLY to a script that was actually synced for THIS agent+version: the
+  // copy in the version home hooks dir, or an absolute subrule-dir path (those are
+  // registered in place, never copied). Deliberately NO central-source fallback —
+  // sync wires `selectHookManifest(parseHookManifest(), hooksToSync)` where
+  // hooksToSync is the per-agent selected set (versions.ts), so a hook the manifest
+  // declares but that was never synced into THIS version home (e.g. a claude-scoped
+  // hook viewed for droid) must not be expected here. A missing-but-declared hook
+  // is a FILE gap that diffHooks reports as `missing`, not a wiring gap.
+  // No ensureExecutable — that chmods, and this path must not touch disk.
   const resolveScript = (script: string): string | null => {
     if (path.isAbsolute(script) && fs.existsSync(script)) return script;
-    const local = resolveContainedHookPath(localHooksDir, script);
-    if (local) return local;
-    return resolveHookScriptPath(script);
+    return resolveContainedHookPath(localHooksDir, script);
   };
   // Read-only mirror of resolveHookCommand — same command string, no shim write.
   const expectedCommand = (name: string, hookDef: ManifestHook): string | null => {
@@ -644,7 +652,10 @@ export function checkVersionHookWiring(agent: AgentId, version: string): HookWir
     if (!hookDef.events || hookDef.events.length === 0) continue;
     const command = expectedCommand(name, hookDef);
     if (!command) continue; // script unresolved — a file gap, reported by diffHooks
-    for (const event of hookDef.events) expected.push({ name, event, command });
+    // Mirror registerHooksForClaude: a hook registers under the matcher group
+    // `hookDef.matcher || ''` for each of its events.
+    const matcher = hookDef.matcher || '';
+    for (const event of hookDef.events) expected.push({ name, event, matcher, command });
   }
 
   if (!fs.existsSync(settingsPath)) {
@@ -669,24 +680,29 @@ export function checkVersionHookWiring(agent: AgentId, version: string): HookWir
     };
   }
 
-  // Command strings actually referenced under each event array of settings.json.
-  const wiredByEvent = new Map<string, Set<string>>();
+  // Command strings actually referenced, keyed by (event, matcher) — a hook wired
+  // under the WRONG matcher group must NOT read as wired, so scope by matcher and
+  // not just by event.
+  const wiredByGroup = new Map<string, Set<string>>();
+  const groupKey = (event: string, matcher: string): string => `${event}\n${matcher}`;
   const hooks = config.hooks && typeof config.hooks === 'object'
     ? (config.hooks as Record<string, unknown>)
     : {};
   for (const [event, groups] of Object.entries(hooks)) {
     if (!Array.isArray(groups)) continue;
-    const cmds = new Set<string>();
-    for (const group of groups as Array<{ hooks?: Array<{ command?: unknown }> }>) {
+    for (const group of groups as Array<{ matcher?: unknown; hooks?: Array<{ command?: unknown }> }>) {
       if (!group || !Array.isArray(group.hooks)) continue;
+      const matcher = typeof group.matcher === 'string' ? group.matcher : '';
+      const key = groupKey(event, matcher);
+      let cmds = wiredByGroup.get(key);
+      if (!cmds) { cmds = new Set<string>(); wiredByGroup.set(key, cmds); }
       for (const h of group.hooks) {
         if (h && typeof h.command === 'string') cmds.add(h.command);
       }
     }
-    wiredByEvent.set(event, cmds);
   }
 
-  const unwired = expected.filter((e) => !wiredByEvent.get(e.event)?.has(e.command));
+  const unwired = expected.filter((e) => !wiredByGroup.get(groupKey(e.event, e.matcher))?.has(e.command));
   return { supported: true, settingsPath, expected: expected.length, unwired };
 }
 
