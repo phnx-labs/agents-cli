@@ -20,10 +20,10 @@ const {
   DEFAULT_RETRY,
 } = await import('./reconnect');
 
-const LIVE: TmuxSessionState = { exists: true, paneAlive: true, hasClient: false };
-const ATTACHED: TmuxSessionState = { exists: true, paneAlive: true, hasClient: true };
-const DEAD: TmuxSessionState = { exists: true, paneAlive: false, hasClient: false };
-const GONE: TmuxSessionState = { exists: false, paneAlive: false, hasClient: false };
+const LIVE: TmuxSessionState = { exists: true, paneAlive: true, hasClient: false, probeFailed: false };
+const ATTACHED: TmuxSessionState = { exists: true, paneAlive: true, hasClient: true, probeFailed: false };
+const DEAD: TmuxSessionState = { exists: true, paneAlive: false, hasClient: false, probeFailed: false };
+const GONE: TmuxSessionState = { exists: false, paneAlive: false, hasClient: false, probeFailed: false };
 
 function mapping(id: string, tmuxSession: string | undefined): PersistedSession {
   return {

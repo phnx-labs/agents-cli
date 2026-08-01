@@ -76,7 +76,7 @@ describe('reconnect: detach vs agent-exit kill decision', () => {
     tmux(['new-session', '-d', '-s', name, 'sleep 60'], socket);
 
     const state = await queryTmuxSessionState(socket, name);
-    expect(state).toEqual({ exists: true, paneAlive: true, hasClient: false });
+    expect(state).toEqual({ exists: true, paneAlive: true, hasClient: false, probeFailed: false });
     // A live pane means the agent is still running: leave it alone for re-attach.
     expect(shouldKillOnClose(state)).toBe(false);
   });
@@ -106,8 +106,58 @@ describe('reconnect: detach vs agent-exit kill decision', () => {
     tmux(['new-session', '-d', '-s', 'other', 'sleep 60'], socket);
 
     const state = await queryTmuxSessionState(socket, name);
-    expect(state).toEqual({ exists: false, paneAlive: false, hasClient: false });
+    expect(state).toEqual({ exists: false, paneAlive: false, hasClient: false, probeFailed: false });
     expect(shouldKillOnClose(state)).toBe(true);
+  });
+
+  // A genuinely LIVE session that the probe cannot READ because no tmux binary is
+  // reachable (asdf/mise/Nix/Linuxbrew/container prefix — tmux lives outside the 4
+  // candidate paths). queryTmuxSessionState must report probeFailed (NOT "gone"),
+  // and shouldKillOnClose must then decline to kill. Driven with a candidate list
+  // that resolves to nothing while the session is really alive on the socket.
+  realTmuxTest('a live session with NO reachable tmux binary is probeFailed and NOT killed', async () => {
+    const socket = newSocket();
+    const name = 'factory-live-unreadable';
+    tmux(['new-session', '-d', '-s', name, 'sleep 60'], socket); // genuinely alive
+
+    // Candidate list that can never resolve to a runnable tmux → ENOENT on every
+    // candidate → no-binary. The session is still alive on the socket.
+    const state = await queryTmuxSessionState(socket, name, ['/nonexistent/tmux-a', '/nonexistent/tmux-b']);
+    expect(state.probeFailed).toBe(true);
+    expect(state.exists).toBe(false);   // we learned nothing, so exists is false…
+    expect(shouldKillOnClose(state)).toBe(false); // …but probeFailed makes it a no-kill
+  });
+
+  // Contrast: tmux IS reachable but the session is genuinely gone → command-error,
+  // NOT probeFailed → this DOES kill (a real exit, cleaned up).
+  realTmuxTest('a gone session with a reachable tmux binary is NOT probeFailed and IS killed', async () => {
+    const socket = newSocket();
+    tmux(['new-session', '-d', '-s', 'other', 'sleep 60'], socket); // server exists
+    const state = await queryTmuxSessionState(socket, 'never-created');
+    expect(state.probeFailed).toBe(false);
+    expect(shouldKillOnClose(state)).toBe(true);
+  });
+});
+
+// The fail-safe kill decision, pure — no tmux binary needed, so this runs
+// everywhere (including the CI/sandbox that has no tmux, exactly the environment
+// where the regression it guards would otherwise ship undetected).
+describe('shouldKillOnClose fail-safe', () => {
+  test('a live pane is never killed (detach)', () => {
+    expect(shouldKillOnClose({ exists: true, paneAlive: true, hasClient: false, probeFailed: false })).toBe(false);
+  });
+  test('a dead pane is killed (true agent exit)', () => {
+    expect(shouldKillOnClose({ exists: true, paneAlive: false, hasClient: false, probeFailed: false })).toBe(true);
+  });
+  test('a confirmed-gone session is killed', () => {
+    expect(shouldKillOnClose({ exists: false, paneAlive: false, hasClient: false, probeFailed: false })).toBe(true);
+  });
+  test('a FAILED probe (tmux binary unreachable) is NEVER killed — fail safe, keep the agent alive', () => {
+    // This is the regression prix flagged: without the probeFailed guard, a host
+    // whose tmux lives outside the 4 candidate paths reports exists:false on every
+    // live session and destroys every agent on detach. The guard makes an
+    // unconfirmable probe a no-kill.
+    expect(shouldKillOnClose({ exists: false, paneAlive: false, hasClient: false, probeFailed: true })).toBe(false);
   });
 });
 

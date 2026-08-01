@@ -288,24 +288,51 @@ export async function relabelTmuxPane(
 const TMUX_BIN_CANDIDATES = ['tmux', '/opt/homebrew/bin/tmux', '/usr/local/bin/tmux', '/usr/bin/tmux'] as const;
 
 /**
- * Run a tmux command on the shared socket from the extension host, trying each
- * candidate binary until one exists. Returns stdout on success, or undefined if
- * no tmux binary was found or the command errored — callers treat tmux styling
- * as best-effort, never load-bearing.
+ * Outcome of a host-side tmux call, distinguishing WHY it didn't produce output:
+ *   ok           — a tmux binary ran the command successfully; `stdout` is real.
+ *   command-error— a tmux binary ran but the command failed (e.g. the session is
+ *                  gone: `list-panes -t <gone>` exits non-zero). This is a
+ *                  TRUSTWORTHY "tmux answered" signal.
+ *   no-binary    — none of the candidate paths were a runnable tmux (ENOENT on
+ *                  every one). We learned NOTHING about the session; a liveness
+ *                  caller must NOT treat this as "gone" (that would kill a live
+ *                  agent whose tmux merely lives at a non-probed path).
  */
-async function hostTmux(socket: string, args: string[]): Promise<string | undefined> {
-  for (const bin of TMUX_BIN_CANDIDATES) {
+type HostTmuxResult =
+  | { ok: true; stdout: string }
+  | { ok: false; reason: 'command-error' }
+  | { ok: false; reason: 'no-binary' };
+
+async function hostTmuxResult(
+  socket: string,
+  args: string[],
+  candidates: readonly string[] = TMUX_BIN_CANDIDATES,
+): Promise<HostTmuxResult> {
+  for (const bin of candidates) {
     try {
       const { stdout } = await pexecFile(bin, ['-S', socket, ...args], { timeout: 3_000 });
-      return stdout;
+      return { ok: true, stdout };
     } catch (err) {
       // ENOENT → this binary path doesn't exist; try the next candidate.
-      // Any other error → tmux ran but the command failed; don't keep probing.
+      // Any other error → tmux ran but the command failed (session gone, etc.);
+      // that's a real answer, stop probing.
       if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') continue;
-      return undefined;
+      return { ok: false, reason: 'command-error' };
     }
   }
-  return undefined;
+  return { ok: false, reason: 'no-binary' };
+}
+
+/**
+ * Run a tmux command on the shared socket from the extension host, trying each
+ * candidate binary until one exists. Returns stdout on success, or undefined if
+ * no tmux binary was found or the command errored — styling callers treat tmux
+ * as best-effort, never load-bearing. Liveness callers that must NOT conflate
+ * "tmux unreachable" with "session gone" use `hostTmuxResult` directly.
+ */
+async function hostTmux(socket: string, args: string[]): Promise<string | undefined> {
+  const r = await hostTmuxResult(socket, args);
+  return r.ok ? r.stdout : undefined;
 }
 
 /**
@@ -389,40 +416,64 @@ export interface TmuxSessionState {
   paneAlive: boolean;
   /** A tmux client is currently attached (someone is viewing it). */
   hasClient: boolean;
+  /**
+   * The probe itself could not run — no tmux binary was found in any candidate
+   * path, so we learned NOTHING about the session (this is distinct from "tmux
+   * answered: the session is gone"). The kill decision must fail SAFE here and
+   * NOT kill, otherwise a host whose tmux lives at a non-probed path (asdf, mise,
+   * Nix, Linuxbrew, a container prefix) would destroy every live agent on detach —
+   * the exact bug this module exists to prevent.
+   */
+  probeFailed: boolean;
 }
 
 /**
  * Query the shared server for a session's liveness, off the same socket the
- * agent's detached session lives on, via the existing hostTmux probe (no new
- * tmux abstraction). Returns `exists:false` when the server can't answer
- * (session gone, no tmux binary) — the caller treats "can't confirm alive" as
- * "gone" for the cleanup decision, which is safe because a truly-live session
- * that we momentarily can't read is re-adopted by the reattach scan anyway.
+ * agent's detached session lives on. Distinguishes three outcomes:
+ *   - tmux answered, session live  → { exists:true, paneAlive, hasClient }
+ *   - tmux answered, session gone / all panes dead → { exists:false, ... }
+ *   - tmux binary unreachable (no-binary) → { probeFailed:true, exists:false }
+ * The last case is NOT "gone": `shouldKillOnClose` treats a failed probe as
+ * "do not kill", so a truly-live agent we merely can't read is left alive for
+ * the reattach scan instead of being destroyed.
  */
-export async function queryTmuxSessionState(socket: string, session: string): Promise<TmuxSessionState> {
-  const panes = await hostTmux(socket, ['list-panes', '-t', session, '-F', '#{pane_dead}']);
-  if (panes === undefined) {
-    // No pane output → session gone (or unreadable). Either way, not alive.
-    return { exists: false, paneAlive: false, hasClient: false };
+export async function queryTmuxSessionState(
+  socket: string,
+  session: string,
+  candidates: readonly string[] = TMUX_BIN_CANDIDATES,
+): Promise<TmuxSessionState> {
+  const panes = await hostTmuxResult(socket, ['list-panes', '-t', session, '-F', '#{pane_dead}'], candidates);
+  if (!panes.ok) {
+    // no-binary → we couldn't probe at all: report probeFailed so the caller
+    // fails safe (never kills). command-error → tmux ran and the session isn't
+    // there: a trustworthy "gone".
+    const probeFailed = panes.reason === 'no-binary';
+    return { exists: false, paneAlive: false, hasClient: false, probeFailed };
   }
-  const paneFlags = panes.split('\n').map((s) => s.trim()).filter(Boolean);
+  const paneFlags = panes.stdout.split('\n').map((s) => s.trim()).filter(Boolean);
   if (paneFlags.length === 0) {
-    return { exists: false, paneAlive: false, hasClient: false };
+    // tmux answered with no panes → session gone. Trustworthy.
+    return { exists: false, paneAlive: false, hasClient: false, probeFailed: false };
   }
   const paneAlive = paneFlags.some((flag) => flag === '0');
-  const clients = await hostTmux(socket, ['list-clients', '-t', session, '-F', '#{client_pid}']);
-  const hasClient = clients !== undefined && clients.split('\n').some((l) => l.trim().length > 0);
-  return { exists: true, paneAlive, hasClient };
+  const clients = (await hostTmuxResult(socket, ['list-clients', '-t', session, '-F', '#{client_pid}'], candidates));
+  const hasClient = clients.ok && clients.stdout.split('\n').some((l) => l.trim().length > 0);
+  return { exists: true, paneAlive, hasClient, probeFailed: false };
 }
 
 /**
  * The cleanup decision, pure so it can be unit-tested without tmux. Kill only
- * when the agent has truly exited: the session is gone, or every pane is dead
- * (`remain-on-exit` keeps a dead pane lingering, so `paneAlive===false` is the
- * unambiguous agent-exit signal). A live pane means the process is still
- * running and this close was a client/network detach — leave it for re-attach.
+ * when the agent has truly exited AND we could actually confirm it: the session
+ * is gone, or every pane is dead (`remain-on-exit` keeps a dead pane lingering,
+ * so `paneAlive===false` is the unambiguous agent-exit signal). A live pane means
+ * the process is still running and this close was a client/network detach — leave
+ * it for re-attach. Crucially, when the probe couldn't run at all
+ * (`probeFailed`), we do NOT kill: an unreachable tmux binary must never be read
+ * as "the agent exited", or a non-standard tmux install location silently
+ * regresses to destroying live agents on every detach.
  */
 export function shouldKillOnClose(state: TmuxSessionState): boolean {
+  if (state.probeFailed) return false; // couldn't confirm — fail safe, keep the agent alive
   return !state.exists || !state.paneAlive;
 }
 

@@ -14,6 +14,11 @@ All notable changes to the Factory extension are documented here. Format follows
   the client blinked. `cleanupTmuxTerminal` now queries the shared server first
   and kills ONLY on a true agent exit (session gone or every pane dead); a live
   pane is treated as a client/network detach and left alive for re-attach. The
+  liveness probe fails SAFE: when no tmux binary is reachable (an install outside
+  the probed paths — asdf, mise, Nix, Linuxbrew, a container prefix) the probe
+  reports "couldn't confirm" rather than "gone", and the kill decision declines
+  to kill, so a non-standard tmux location can no longer silently destroy live
+  agents on every detach. The
   terminal↔tmux mapping (session/socket/pane/pid) is persisted so it survives an
   extension reload, and on reconnect (window regains focus, or the extension
   reactivates) every mapped session that is still live but has no attached

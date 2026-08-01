@@ -126,7 +126,7 @@ describe('reload path: restoreAgentTerminals + reconnect ordering (real store)',
       let resumed = 0; // a resume would restart the agent — must stay 0.
       const attached = await reconnect.runReconnectPass({
         loadPersisted: () => persist.getWorkspaceSessions(ws),
-        queryState: async () => ({ exists: true, paneAlive: true, hasClient: false }),
+        queryState: async () => ({ exists: true, paneAlive: true, hasClient: false, probeFailed: false }),
         trackedTerminalIds: () => new Set(), // restore did NOT register the tmux session
         reattachOne: async (t) => { reattached.push(t.session.terminalId); },
         resumePanelPolling: () => {},
