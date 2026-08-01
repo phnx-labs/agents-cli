@@ -35,6 +35,7 @@ import {
   getDB,
   getScanStampByPath,
   getScanStampsForPaths,
+  getParserStatesForPaths,
   getDirLedgerForPaths,
   recordDirScans,
   recordScans,
@@ -201,6 +202,15 @@ interface ScanEntry {
   meta: SessionMeta;
   content: string;
   scan: ScanStamp;
+  /**
+   * Serialized {@link ClaudeParserState} continuation to persist in
+   * scan_ledger.parser_state (Claude only). Carries the offset + accumulator so
+   * the NEXT scan of this file resumes from where this parse stopped. Absent for
+   * non-Claude scanners, which leave the column NULL.
+   */
+  parserState?: string;
+  /** Accumulated user doc to persist in scan_ledger.content_text for the next hydrate (Claude only). */
+  contentText?: string;
 }
 
 /**
@@ -856,7 +866,13 @@ async function readRoutineArchiveMeta(
 
   if (agent === 'claude') {
     const sessionId = path.basename(filePath).replace(/\.jsonl$/, '');
-    const result = await readClaudeMeta(filePath, sessionId);
+    // Routine archives are finalized, immutable transcripts — no live append, so
+    // no continuation to resume. A FULL parse (undefined prior) is correct here;
+    // the returned continuation is unused by this archive path.
+    const stat = safeStatSync(filePath);
+    if (!stat) return null;
+    const scanStamp: ScanStamp = { fileMtimeMs: Math.floor(stat.mtimeMs), fileSize: stat.size };
+    const result = await readClaudeMeta(filePath, sessionId, scanStamp, undefined);
     return result ? { ...result, meta: decorateRoutineSession(result.meta, info) } : null;
   }
 
@@ -1050,6 +1066,13 @@ async function scanClaudeIncremental(onProgress?: (p: ScanProgress) => void): Pr
   if (changed.length > 0) {
     onProgress?.({ agent: 'claude', parsed: 0, total: changed.length });
 
+    // Bulk-fetch each changed file's prior resumable continuation. A file with a
+    // usable prior state + growth goes incremental (re-parse only the appended
+    // bytes); everything else does a FULL from-offset-0 parse. The decision + the
+    // parse both live in scanClaudeSessionResumable so full and incremental share
+    // one reducer and produce identical rows.
+    const priorStates = getParserStatesForPaths(changed.map(c => c.filePath));
+
     const entries: ScanEntry[] = [];
     const touched: Array<{ filePath: string; scan: ScanStamp }> = [];
     let parsed = 0;
@@ -1057,9 +1080,16 @@ async function scanClaudeIncremental(onProgress?: (p: ScanProgress) => void): Pr
       try {
         const sessionId = path.basename(filePath).replace('.jsonl', '');
         const label = labelMap.get(sessionId) ?? undefined;
-        const result = await readClaudeMeta(filePath, sessionId, account, label);
+        const priorRow = priorStates.get(filePath);
+        const result = await readClaudeMeta(filePath, sessionId, scan, priorRow, account, label);
         if (result) {
-          entries.push({ meta: result.meta, content: result.content, scan });
+          entries.push({
+            meta: result.meta,
+            content: result.content,
+            scan,
+            parserState: result.parserState,
+            contentText: result.contentText,
+          });
         } else {
           touched.push({ filePath, scan });
         }
@@ -1079,14 +1109,31 @@ async function scanClaudeIncremental(onProgress?: (p: ScanProgress) => void): Pr
   if (labelMap.size > 0) syncLabels(labelMap);
 }
 
-/** Stream-parse a single Claude JSONL file to extract session metadata. */
+/**
+ * Stream-parse a single Claude JSONL file to extract session metadata, resuming
+ * from the persisted continuation when the file merely grew (see
+ * {@link scanClaudeSessionResumable}). Returns the row's meta + FTS content plus
+ * the serialized continuation (parser_state + content_text) to persist for the
+ * next scan.
+ */
 async function readClaudeMeta(
   filePath: string,
   sessionId: string,
+  scanStamp: ScanStamp,
+  priorRow: { parserState: string | null; fileMtimeMs: number } | undefined,
   account?: string,
   label?: string,
-): Promise<{ meta: SessionMeta; content: string } | null> {
-  const scan = await scanClaudeSession(filePath);
+): Promise<{ meta: SessionMeta; content: string; parserState: string; contentText?: string } | null> {
+  const prior = parsePriorClaudeState(priorRow);
+  const { scan, newState, mode } = await scanClaudeSessionResumable(
+    filePath,
+    prior,
+    scanStamp.fileMtimeMs,
+    scanStamp.fileSize,
+    priorRow?.fileMtimeMs,
+  );
+  if (mode === 'incremental') claudeIncrementalScanCount++;
+  else claudeFullScanCount++;
   const isTeamOrigin = scan.entrypoint === 'sdk-cli';
 
   let meta: SessionMeta;
@@ -1148,7 +1195,15 @@ async function readClaudeMeta(
     };
   }
 
-  return { meta, content: scan.contentText || '' };
+  return {
+    meta,
+    content: scan.contentText || '',
+    // Persist the continuation so the next scan of this file can resume from the
+    // offset instead of a full reparse. content_text is the same accumulated user
+    // doc, cached so the resume can hydrate userTexts without re-reading the file.
+    parserState: JSON.stringify(newState),
+    contentText: newState.contentText,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -3065,6 +3120,81 @@ export async function scanClaudeSessionIncremental(
     newState: serializeClaudeParserState(state, newOffset),
     newOffset,
   };
+}
+
+/** Serialized zero-value continuation: a fresh accumulator at offset 0, used to drive a FULL parse from the start through the same resumable path. */
+function freshClaudeParserState(): ClaudeParserState {
+  return serializeClaudeParserState(initClaudeParseState(), 0);
+}
+
+/**
+ * Decide full-vs-incremental for one Claude file and parse it uniformly, always
+ * returning a finalized scan plus the continuation to persist. Both branches run
+ * through the SAME reducer (via {@link scanClaudeSessionIncremental}), so the row
+ * an append produces is identical to a from-scratch full reparse by construction
+ * (the B-1 parity harness proves this at the function level).
+ *
+ * INCREMENTAL when a prior continuation exists AND the file grew past the
+ * persisted offset AND its mtime did not go backwards — an in-place append.
+ * FULL (from byte 0, fresh state) otherwise: cold start (no prior), truncation /
+ * rewrite (size shrank to at or below the offset), or a clock rewind / restore
+ * (mtime older than the last parse). A FULL parse still produces a continuation,
+ * so the file's very next append can go incremental.
+ *
+ * `mode` is returned so the caller (and tests) can confirm which branch ran.
+ */
+async function scanClaudeSessionResumable(
+  filePath: string,
+  prior: ClaudeParserState | null,
+  currentFileMtimeMs: number,
+  currentFileSize: number,
+  priorFileMtimeMs?: number,
+): Promise<{ scan: ClaudeSessionScan; newState: ClaudeParserState; newOffset: number; mode: 'full' | 'incremental' }> {
+  const canIncrement =
+    prior !== null &&
+    currentFileSize > prior.offset &&
+    (priorFileMtimeMs === undefined || currentFileMtimeMs >= priorFileMtimeMs);
+
+  if (canIncrement) {
+    const result = await scanClaudeSessionIncremental(filePath, prior.offset, prior);
+    return { ...result, mode: 'incremental' };
+  }
+
+  const result = await scanClaudeSessionIncremental(filePath, 0, freshClaudeParserState());
+  return { ...result, mode: 'full' };
+}
+
+/**
+ * Parse the prior continuation blob for a changed file into a usable
+ * {@link ClaudeParserState}, or null when there is none / it is unusable. A blob
+ * from a different serialization version is treated as absent so the file falls
+ * back to a clean FULL parse rather than resuming against a stale shape.
+ */
+function parsePriorClaudeState(row: { parserState: string | null } | undefined): ClaudeParserState | null {
+  if (!row?.parserState) return null;
+  try {
+    const parsed = JSON.parse(row.parserState) as ClaudeParserState;
+    if (parsed?.v !== 1 || typeof parsed.offset !== 'number') return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/** Test seam: how many times the incremental (append-resume) branch was taken since the last reset. */
+let claudeIncrementalScanCount = 0;
+/** Test seam: how many times a full (from-offset-0) Claude parse ran since the last reset. */
+let claudeFullScanCount = 0;
+
+/** Test seam: read the (incremental, full) Claude parse counters. */
+export function __claudeScanBranchCountsForTest(): { incremental: number; full: number } {
+  return { incremental: claudeIncrementalScanCount, full: claudeFullScanCount };
+}
+
+/** Test seam: reset the Claude parse-branch counters to observe a scan from a clean slate. */
+export function __resetClaudeScanBranchCountsForTest(): void {
+  claudeIncrementalScanCount = 0;
+  claudeFullScanCount = 0;
 }
 
 /** Stream a Codex JSONL file and extract scan-level metadata (session ID, cwd, topic, tokens). */
