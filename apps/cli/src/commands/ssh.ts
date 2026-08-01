@@ -553,7 +553,7 @@ async function probeRemoteAuth(target: FleetStatusTarget): Promise<AuthProbeRow[
   const isWin = /^win/i.test((target.platform ?? '').trim());
   const env = isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' };
   const cmd = buildRemoteAgentsInvocation(['devices', 'ping', '--local', '--json'], undefined, isWin ? 'windows' : undefined, env);
-  const res = await sshExecAsync(target.dialTarget, cmd, { timeoutMs: 60000, multiplex: true });
+  const res = await sshExecAsync(target.dialTarget, cmd, { timeoutMs: 15000, multiplex: true });
   if (res.code !== 0) {
     throw new Error(res.timedOut ? 'timed out' : (res.stderr.trim() || `exit ${res.code ?? 'unknown'}`));
   }
@@ -599,9 +599,31 @@ async function runFleetPing(opts: { json?: boolean; local?: boolean; verbose?: b
   const spinner = isInteractiveTerminal() && !opts.json
     ? ora(`Pinging ${probeable} device${probeable === 1 ? '' : 's'}…`).start()
     : undefined;
+  // Per-device: 15 s (matches the version probe budget; enough for the ~8 s
+  // provider-fetch inside the remote local auth probe, with headroom).
+  // Overall: 30 s hard cap so the command can never outlast a reasonable
+  // budget when several devices are simultaneously unreachable (RUSH-2041).
+  const FLEET_PING_DEVICE_TIMEOUT_MS = 15_000;
+  const FLEET_PING_OVERALL_TIMEOUT_MS = 30_000;
   let remote: Awaited<ReturnType<typeof fanOutDevices<AuthProbeRow[], FleetStatusTarget>>>;
   try {
-    remote = await fanOutDevices(remoteTargets, probeRemoteAuth);
+    const fanOut = fanOutDevices(remoteTargets, probeRemoteAuth, { perDeviceTimeoutMs: FLEET_PING_DEVICE_TIMEOUT_MS });
+    const overallDeadline = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('fleet ping overall deadline exceeded')), FLEET_PING_OVERALL_TIMEOUT_MS),
+    );
+    remote = await Promise.race([fanOut, overallDeadline]);
+  } catch (err) {
+    // Overall deadline hit before all devices settled — mark every pending
+    // device as failed so the command exits promptly. Individual probes that
+    // already settled are not retrievable (Promise.all internals), so we
+    // record all remote targets as timed out / skipped.
+    const errMsg = err instanceof Error ? err.message : String(err);
+    remote = remoteTargets.map((t) => ({
+      name: t.name,
+      status: t.skip ? ('skipped' as const) : ('failed' as const),
+      reason: t.skip,
+      error: t.skip ? undefined : errMsg,
+    }));
   } finally {
     spinner?.stop();
   }
