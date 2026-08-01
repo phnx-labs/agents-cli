@@ -403,6 +403,43 @@ export async function getRepoCommit(repoPath: string): Promise<string> {
   }
 }
 
+/** Compact, self-contained state of a git repo — branch, short HEAD, and a
+ *  dirty flag — for cross-device comparison (RUSH-2027). Synchronous and
+ *  best-effort: a non-repo or unreadable path yields `null` fields, never a
+ *  throw, so a device's `doctor --json` payload always serializes. */
+export interface RepoStateSnapshot {
+  branch: string | null;
+  head: string | null;
+  dirty: boolean;
+}
+
+/** Read {@link RepoStateSnapshot} for `repoPath` using plumbing commands so the
+ *  result is stable across git versions and never mutates the tree. Returns null
+ *  when the path is not a git worktree. */
+export function readRepoState(repoPath: string): RepoStateSnapshot | null {
+  const runGit = (args: string[]): string | null => {
+    try {
+      return execFileSync('git', ['-C', repoPath, ...args], {
+        stdio: ['ignore', 'pipe', 'ignore'],
+      })
+        .toString()
+        .trim();
+    } catch {
+      return null;
+    }
+  };
+  // Gate on a real worktree first; `rev-parse --is-inside-work-tree` prints
+  // `true` only inside one, and returns non-zero (→ null) otherwise.
+  if (runGit(['rev-parse', '--is-inside-work-tree']) !== 'true') return null;
+  const branchRaw = runGit(['rev-parse', '--abbrev-ref', 'HEAD']);
+  const branch = branchRaw && branchRaw !== 'HEAD' ? branchRaw : null; // detached → null
+  const headRaw = runGit(['rev-parse', 'HEAD']);
+  const head = headRaw ? headRaw.slice(0, 8) : null;
+  const porcelain = runGit(['status', '--porcelain']);
+  const dirty = porcelain != null && porcelain.length > 0;
+  return { branch, head, dirty };
+}
+
 /**
  * Get the current GitHub username using gh CLI.
  * Returns null if gh is not installed or user is not authenticated.

@@ -85,6 +85,7 @@ import {
   type FleetHealthRow,
 } from '../lib/devices/health-report.js';
 import { loadFleetStats, readStatsCache } from '../lib/devices/stats-cache.js';
+import { collectLocalFleetInventory } from '../lib/devices/fleet-inventory.js';
 import { checkSyncStatus, countOrphans } from '../lib/drift.js';
 import { checkAllClis } from '../lib/teams/agents.js';
 import { buildRemoteAgentsInvocation } from '../lib/hosts/remote-cmd.js';
@@ -403,6 +404,7 @@ interface RemoteDoctorJson {
   sync?: FleetHealthRow['sync'];
   orphans?: FleetHealthRow['orphans'];
   auth?: FleetHealthRow['auth'];
+  fleet?: FleetHealthRow['inventory'];
 }
 
 interface FleetStatusTarget extends FanOutDeviceTarget {
@@ -426,6 +428,9 @@ function localHealthRow(self: string, stats?: DeviceStats): FleetHealthRow {
     clis: checkAllClis(),
     sync: checkSyncStatus(process.cwd()),
     orphans: countOrphans(),
+    // Local baseline inventory for cross-device divergence (RUSH-2027) — the
+    // yardstick every remote box is compared against.
+    inventory: collectLocalFleetInventory(process.cwd()),
   };
 }
 
@@ -451,6 +456,10 @@ async function probeRemoteHealth(target: FleetStatusTarget): Promise<Omit<FleetH
     // so the Auth column is current without a prior fleet-wide `fleet ping`.
     // Older remotes that don't emit it fall back to this host's cache below.
     auth: parsed.auth,
+    // Harness inventory (resources / agent versions / repo state) for
+    // cross-device divergence detection (RUSH-2027). Undefined on an older CLI
+    // that doesn't emit the `fleet` field — the comparator skips it.
+    inventory: parsed.fleet,
   };
 }
 
@@ -526,7 +535,7 @@ async function runFleetStatus(opts: { json?: boolean; strict?: boolean; stats?: 
     }
   }
 
-  const report = buildFleetHealthReport(rows);
+  const report = buildFleetHealthReport(rows, new Date(), { self });
   if (opts.json) {
     console.log(JSON.stringify(report, null, 2));
   } else if (opts.verbose) {

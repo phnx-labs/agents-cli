@@ -28,6 +28,8 @@ import { addHostOption } from '../lib/hosts/option.js';
 import { buildRemoteAgentsInvocation } from '../lib/hosts/remote-cmd.js';
 import { loadDevices, isControlDevice } from '../lib/devices/registry.js';
 import { fanOutDevices } from '../lib/devices/fleet.js';
+import { compareFleetInventories, type FleetInventory, type FleetDivergenceReport } from '../lib/devices/fleet-divergence.js';
+import { collectLocalFleetInventory } from '../lib/devices/fleet-inventory.js';
 import { resolveHost } from '../lib/hosts/registry.js';
 import { sshExecAsync } from '../lib/ssh-exec.js';
 import { sshTargetFor } from '../lib/hosts/types.js';
@@ -297,6 +299,11 @@ interface DeviceDoctorResult {
   online: boolean;
   error?: string;
   agents: Record<string, TeamsDoctorEntry>;
+  /** This device's self-reported harness inventory (resources / agent versions /
+   *  repo state) from its top-level `agents doctor --json`, for cross-device
+   *  divergence detection (RUSH-2027). Undefined when the inventory probe failed
+   *  or the remote is an older CLI that doesn't emit the `fleet` field. */
+  inventory?: FleetInventory;
 }
 
 interface FleetTarget {
@@ -392,31 +399,83 @@ async function probeFleetTarget(target: FleetTarget): Promise<DeviceDoctorResult
   }
 }
 
+/**
+ * Fetch a device's harness inventory by running its top-level `agents doctor
+ * --json` (which carries the `fleet` field, RUSH-2027). Separate from
+ * {@link probeFleetTarget} — that forwards `teams doctor --json` for per-agent
+ * readiness, a different payload. Returns the parsed {@link FleetInventory} or
+ * null (unreachable, non-zero exit, unparseable, or an older CLI with no
+ * `fleet` field); a null is skipped by the comparator, never a false gap.
+ */
+async function probeFleetInventory(target: FleetTarget): Promise<FleetInventory | null> {
+  const isWin = /^win/i.test((target.os ?? '').trim());
+  const remoteCmd = buildRemoteAgentsInvocation(
+    ['doctor', '--json'],
+    undefined,
+    isWin ? 'windows' : undefined,
+    isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' },
+  );
+  const res = await sshExecAsync(target.sshTarget, remoteCmd, { timeoutMs: 30000, multiplex: true });
+  if (res.code !== 0) return null;
+  try {
+    const parsed = JSON.parse(res.stdout) as { fleet?: FleetInventory };
+    return parsed.fleet ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function runDevicesDoctor(opts: DoctorOptions): Promise<void> {
   const singleName = opts.host || opts.device;
   const targets = await resolveFleetTargets(opts);
   const localName = machineId();
   const results: DeviceDoctorResult[] = [];
 
-  // Local machine first, directly.
+  // Local machine first, directly. Its inventory is collected in-process — no
+  // SSH round-trip to this box.
   if (!singleName) {
-    results.push({ name: localName, online: true, agents: await collectTeamsDoctorData() });
+    results.push({
+      name: localName,
+      online: true,
+      agents: await collectTeamsDoctorData(),
+      inventory: collectLocalFleetInventory(opts.cwd ?? process.cwd()),
+    });
   }
 
-  // Remote targets in parallel, through the shared fleet fan-out helper.
-  const remoteResults = await fanOutDevices(targets, probeFleetTarget);
+  // Remote targets in parallel: agent readiness (teams doctor) and the harness
+  // inventory (top-level doctor --json) in one fan-out per concern. Both run
+  // through the shared fleet helper so an offline box degrades to a skipped row.
+  const [remoteResults, inventoryResults] = await Promise.all([
+    fanOutDevices(targets, probeFleetTarget),
+    fanOutDevices(targets, probeFleetInventory),
+  ]);
+  const inventoryByName = new Map<string, FleetInventory | null>();
+  for (const r of inventoryResults) inventoryByName.set(r.name, r.status === 'ok' ? (r.value ?? null) : null);
   results.push(...remoteResults.map((r): DeviceDoctorResult => {
-    if (r.status === 'ok' && r.value) return r.value;
+    const inventory = inventoryByName.get(r.name) ?? undefined;
+    if (r.status === 'ok' && r.value) return { ...r.value, inventory: inventory ?? undefined };
     return {
       name: r.name,
       online: false,
       error: r.error ?? String(r.reason ?? 'skipped'),
       agents: {},
+      inventory: inventory ?? undefined,
     };
   }));
 
+  // Cross-device divergence: compare every device's inventory against the local
+  // baseline and flag resources / agent versions / repo state present on one box
+  // but missing on another (RUSH-2027). A single-device filter has no baseline
+  // to compare against, so the section is only meaningful for the full fan-out.
+  const divergence = singleName
+    ? null
+    : compareFleetInventories(
+        results.map((r) => ({ name: r.name, inventory: r.inventory ?? null })),
+        localName,
+      );
+
   if (opts.json) {
-    console.log(JSON.stringify({ devices: results }, null, 2));
+    console.log(JSON.stringify({ devices: results, fleet: divergence }, null, 2));
     return;
   }
 
@@ -446,6 +505,46 @@ async function runDevicesDoctor(opts: DoctorOptions): Promise<void> {
   }
   console.log();
   console.log(chalk.gray('  rdy* = installed and signed in · rdy = installed · no = not installed · err = probe failed · - = offline'));
+
+  if (divergence) {
+    console.log();
+    for (const line of renderFleetDivergence(divergence)) console.log(line);
+  }
+}
+
+/**
+ * Render the cross-device divergence section for `agents doctor --devices`
+ * (RUSH-2027): a clean all-clear when the fleet agrees, otherwise the specific
+ * gaps — a resource/version present here but missing on a box, or a diverged
+ * config repo — grouped by device, each a plain-language line. Devices that
+ * couldn't be compared (offline / older CLI) are named so the readout is honest.
+ */
+export function renderFleetDivergence(report: FleetDivergenceReport): string[] {
+  const lines: string[] = [chalk.bold('Cross-device divergence')];
+  const skippedNote = report.skippedDevices.length > 0
+    ? chalk.gray(`  (not compared: ${report.skippedDevices.join(', ')} — offline or no inventory)`)
+    : null;
+
+  if (!report.hasDivergence) {
+    lines.push(chalk.green(`  Fleet is consistent — every compared device matches ${report.baseline}.`));
+    if (skippedNote) lines.push(skippedNote);
+    return lines;
+  }
+
+  // Group findings by device so a box with several gaps reads as one block.
+  const byDevice = new Map<string, typeof report.divergences>();
+  for (const d of report.divergences) {
+    (byDevice.get(d.device) ?? byDevice.set(d.device, []).get(d.device)!).push(d);
+  }
+  for (const device of Array.from(byDevice.keys()).sort()) {
+    lines.push(`  ${chalk.yellow('⚠')} ${chalk.bold(device)}`);
+    for (const d of byDevice.get(device)!) {
+      lines.push(chalk.gray(`      ${d.message}`));
+    }
+  }
+  if (skippedNote) lines.push(skippedNote);
+  lines.push(chalk.gray('  Read-only — run `agents apply` or `agents repo pull` on a lagging box to reconcile.'));
+  return lines;
 }
 
 // ─── target mode ──────────────────────────────────────────────────────────────
@@ -738,7 +837,7 @@ export function registerDoctorCommand(program: Command): void {
     .option('--cwd <path>', 'Resolution cwd for project layer detection (default: process.cwd())')
     .option('--adopt <agent>', "Take over the agent's native launcher that shadows the shim (symlink it to the version-managed shim; reversible with --release)")
     .option('--release <agent>', 'Undo --adopt: restore the native launcher agents-cli previously adopted')
-    .option('--devices', 'Check agent readiness on every registered device (alias --hosts)')
+    .option('--devices', 'Check agent readiness AND cross-device harness divergence (missing resources/versions, repo drift) on every registered device (alias --hosts)')
     .option('--hosts', 'Alias of --devices');
 
   setHelpSections(doctorCmd, {
@@ -763,6 +862,10 @@ export function registerDoctorCommand(program: Command): void {
 
       # Heal just one agent (all its installed versions)
       agents doctor claude --fix
+
+      # Fleet: agent readiness + cross-device divergence (missing plugins/skills,
+      # agent-version gaps, .agents/.system repo drift) vs this machine
+      agents doctor --devices
     `,
   });
 
@@ -871,6 +974,12 @@ export function registerDoctorCommand(program: Command): void {
             auth: summarizeHostAuth(readAuthHealthCache(), machineId()),
             sync: syncRows,
             orphans: orphanRows,
+            // This host's harness inventory — installed resources per kind,
+            // installed version ids per agent, and `.agents`/`.system` repo
+            // state — so `agents doctor --devices` can compare presence across
+            // the fleet and flag a resource/version present here but missing
+            // elsewhere (RUSH-2027). Read-only; no network.
+            fleet: collectLocalFleetInventory(cwd),
             hostClis: {
               statuses: hostClis.statuses.map((s) => ({
                 name: s.manifest.name,

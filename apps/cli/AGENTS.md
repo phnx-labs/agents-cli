@@ -85,6 +85,38 @@ stale dirs into the survivor, `agents view` shows the live `--version`, and
 grok is self-updating but stores a real per-version binary under each version-home, so
 it is NOT a global-binary agent and is left uncollapsed. (RUSH-1321)
 
+### 8. Diagnostic command taxonomy — `doctor` is the umbrella (RUSH-2027)
+
+Three diagnostics, distinct scopes. Don't blur them — each answers a different
+question, and a new health check goes in the one whose scope it matches.
+
+| Command | Scope | Answers |
+|---|---|---|
+| `agents fleet status` | Coarse **device** health across the fleet | Are devices online, do they have the agent CLIs installed, are they signed in, what is the agents-cli **version skew**. NOT fine-grained resource divergence. |
+| `agents inspect <agent>[@version]` | Deep **single-harness** diagnosis | Per-resource diff between one version home and its resolved sources; manifest staleness; orphans. One harness, one machine. |
+| `agents doctor` | **Umbrella** — overall fleet + harness health | Local diagnostics (CLI presence, sign-in, per-version sync, orphans) **and** cross-device divergence. The single command a user runs to discover problems before runtime. |
+
+**Cross-device divergence lives in `agents doctor --devices`.** It compares each
+device's self-reported harness inventory against the local baseline and flags a
+resource / agent-version / config-repo present on one box but missing on another
+(e.g. the `swarm` plugin on `zion` but not `yosemite-s0`). The data path:
+
+- Every device's **top-level `agents doctor --json`** emits a `fleet` inventory
+  field ([`src/lib/devices/fleet-inventory.ts`](src/lib/devices/fleet-inventory.ts) →
+  `collectLocalFleetInventory`): installed resource names per kind, installed
+  version ids per agent, and `.agents`/`.system` repo state (`readRepoState` in
+  [`src/lib/git.ts`](src/lib/git.ts)).
+- `runDevicesDoctor` ([`src/commands/doctor.ts`](src/commands/doctor.ts)) fans that
+  payload out per device and runs the **pure comparator**
+  [`compareFleetInventories`](src/lib/devices/fleet-divergence.ts) — SSH-free, so
+  it's unit-tested against fixtures with no live fleet.
+- `agents fleet status` reuses the same comparator inside `buildFleetHealthReport`
+  ([`src/lib/devices/health-report.ts`](src/lib/devices/health-report.ts)) to add a
+  per-device `divergence` warning to its rollup.
+
+Read-only by default — divergence detection never installs or syncs. `--json`
+carries a stable `fleet` divergence block for the VS Code extension / Agency.
+
 ## Supported harnesses
 
 The supported harnesses are the entries in the `AGENTS` registry

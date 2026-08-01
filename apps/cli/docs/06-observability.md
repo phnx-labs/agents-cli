@@ -191,6 +191,50 @@ Typical action commands are `agents message <mailbox> ... --surface hq`,
 `agents feed --kill <mailbox>`, `agents teams stop <team> <teammate>`,
 `agents sessions <id> --markdown`, and `agents teams add <team> ...`.
 
+## Fleet health & cross-device divergence (`agents doctor`)
+
+Three diagnostics with distinct scopes (RUSH-2027):
+
+- `agents fleet status` — coarse **device** health: online/offline, which agent
+  CLIs are installed, sign-in, agents-cli **version skew**. Not fine-grained
+  resource divergence.
+- `agents inspect <agent>[@version]` — deep **single-harness** diff between one
+  version home and its resolved sources (staleness, orphans).
+- `agents doctor` — the **umbrella**: local diagnostics (CLI presence, sign-in,
+  per-version sync, orphans) **and**, with `--devices`, cross-device divergence.
+
+### `agents doctor --devices`
+
+Compares every registered device's installed harness inventory against the local
+machine (the baseline) and flags anything present on one box but missing on
+another:
+
+- **Resource presence** — commands, skills, hooks, rules, mcp, permissions,
+  subagents, plugins, promptcuts, workflows. A plugin like `swarm` installed on
+  `zion` but absent on `yosemite-s0` reads as
+  `yosemite-s0 is missing plugin 'swarm' (present on zion)` — instead of only
+  surfacing at runtime as `Unknown command: /swarm:run`.
+- **Agent version parity** — a version installed on one box but not another
+  (`yosemite-s0 is missing claude@2.1.220`).
+- **`.agents` / `.system` repo drift** — a device whose config-repo HEAD, branch,
+  or dirty state diverges from the local baseline.
+
+It is **read-only**: it never installs or syncs. The remediation hint points at
+`agents apply` / `agents repo pull` on the lagging box.
+
+```bash
+agents doctor --devices          # human table + a Cross-device divergence section
+agents doctor --devices --json   # { devices: [...], fleet: { divergences: [...] } }
+```
+
+Each device's top-level `agents doctor --json` emits a `fleet` inventory field
+(installed resources per kind, installed versions per agent, repo state), so the
+comparison needs no extra probe. `agents fleet status` reuses the same comparator
+to add a per-device divergence line to its rollup. Source:
+`src/lib/devices/fleet-divergence.ts` (pure comparator),
+`src/lib/devices/fleet-inventory.ts` (`collectLocalFleetInventory`),
+`src/commands/doctor.ts` (`runDevicesDoctor`).
+
 ## Three Sources, One Fleet
 
 ```

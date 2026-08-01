@@ -30,6 +30,7 @@ function row(overrides: Partial<FleetHealthRow> & { name: string }): FleetHealth
     auth: overrides.auth,
     online: overrides.online,
     lastSeen: overrides.lastSeen,
+    inventory: overrides.inventory,
   };
 }
 
@@ -64,6 +65,38 @@ describe('buildFleetHealthReport', () => {
       'cli',
       'version-skew',
     ]);
+  });
+
+  it('emits a per-device divergence warning when a remote inventory lacks a local resource (RUSH-2027)', () => {
+    const emptyKinds = {
+      commands: [], skills: [], hooks: [], rules: [], mcp: [],
+      permissions: [], subagents: [], plugins: [], promptcuts: [], workflows: [],
+    };
+    const report = buildFleetHealthReport(
+      [
+        row({ name: 'zion', inventory: { resources: { ...emptyKinds, plugins: ['swarm'] }, agentVersions: {}, repos: { agents: null, system: null } } }),
+        row({ name: 'yosemite-s0', inventory: { resources: { ...emptyKinds }, agentVersions: {}, repos: { agents: null, system: null } } }),
+      ],
+      new Date('2026-08-01T00:00:00.000Z'),
+      { self: 'zion' },
+    );
+    const div = report.warnings.find((w) => w.kind === 'divergence');
+    expect(div).toBeDefined();
+    expect(div!.devices).toEqual(['yosemite-s0']);
+    expect(div!.message).toContain('yosemite-s0 diverges from zion');
+    expect(report.hasWarnings).toBe(true);
+  });
+
+  it('does not emit a divergence warning when no self baseline is provided', () => {
+    const emptyKinds = {
+      commands: [], skills: [], hooks: [], rules: [], mcp: [],
+      permissions: [], subagents: [], plugins: [], promptcuts: [], workflows: [],
+    };
+    const report = buildFleetHealthReport([
+      row({ name: 'zion', inventory: { resources: { ...emptyKinds, plugins: ['swarm'] }, agentVersions: {}, repos: { agents: null, system: null } } }),
+      row({ name: 'box', inventory: { resources: { ...emptyKinds }, agentVersions: {}, repos: { agents: null, system: null } } }),
+    ]);
+    expect(report.warnings.some((w) => w.kind === 'divergence')).toBe(false);
   });
 });
 

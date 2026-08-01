@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { execPolicyWarningLines, wrapLine } from './doctor.js';
-import { stringWidth } from '../lib/session/width.js';
+import { execPolicyWarningLines, renderFleetDivergence, wrapLine } from './doctor.js';
+import { stringWidth, stripAnsi } from '../lib/session/width.js';
+import { compareFleetInventories, FLEET_RESOURCE_KINDS, type FleetInventory, type FleetResourceKind } from '../lib/devices/fleet-divergence.js';
+
+function inv(plugins: string[] = []): FleetInventory {
+  const resources = {} as Record<FleetResourceKind, string[]>;
+  for (const k of FLEET_RESOURCE_KINDS) resources[k] = k === 'plugins' ? plugins : [];
+  return { resources, agentVersions: {}, repos: { agents: null, system: null } };
+}
 
 describe('execPolicyWarningLines (Windows exec-policy advisory in `agents doctor`)', () => {
   it('fires when the policy blocks local scripts (Restricted) — with the RemoteSigned remediation', () => {
@@ -40,5 +47,33 @@ describe('wrapLine', () => {
 
   it('collapses embedded newlines before wrapping', () => {
     expect(wrapLine('  ', 'one\n\n  two\tthree', 80)).toEqual(['  one two three']);
+  });
+});
+
+describe('renderFleetDivergence (agents doctor --devices, RUSH-2027)', () => {
+  it('names the missing resource and the box it is missing on', () => {
+    const report = compareFleetInventories(
+      [{ name: 'zion', inventory: inv(['swarm']) }, { name: 'yosemite-s0', inventory: inv([]) }],
+      'zion',
+    );
+    const out = renderFleetDivergence(report).map(stripAnsi).join('\n');
+    expect(out).toContain('Cross-device divergence');
+    expect(out).toContain('yosemite-s0');
+    expect(out).toContain("missing plugin 'swarm'");
+    expect(out).toContain('agents apply'); // read-only remediation hint
+  });
+
+  it('renders an all-clear line and names uncompared boxes when the fleet agrees', () => {
+    const report = compareFleetInventories(
+      [
+        { name: 'zion', inventory: inv(['swarm']) },
+        { name: 'box', inventory: inv(['swarm']) },
+        { name: 'offline', inventory: null },
+      ],
+      'zion',
+    );
+    const out = renderFleetDivergence(report).map(stripAnsi).join('\n');
+    expect(out).toContain('Fleet is consistent');
+    expect(out).toContain('not compared: offline');
   });
 });
