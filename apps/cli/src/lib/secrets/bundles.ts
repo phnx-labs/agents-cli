@@ -1263,12 +1263,14 @@ export function isHeadlessSecretsContext(
   // Every AGENT-LAUNCH runtime resolves broker-only, interactive included.
   // `terminal` was missing, which made an agent terminal the one launch path
   // still allowed to pop Touch ID: exec.ts sets AGENTS_RUNTIME='terminal' for an
-  // interactive run (exec.ts:426), that fell through to the TTY check below, and
+  // interactive run (exec.ts:430), that fell through to the TTY check below, and
   // a TTY meant "a human is watching, so prompting is fine". It is not fine —
   // opening a terminal is not a request to authenticate, and a launch that needs
   // a locked bundle should say so and point at `agents secrets unlock`, not grab
-  // the fingerprint sensor. Explicit `agents secrets` commands are unaffected:
-  // they carry no AGENTS_RUNTIME and still fall through to the TTY check.
+  // the fingerprint sensor. Note AGENTS_RUNTIME is INHERITED by everything spawned
+  // under an agent terminal, so a human typing `agents secrets export` inside one
+  // sees it too — those commands pass `interactiveUnlock: true` explicitly
+  // (commands/secrets.ts) so a deliberate human request still raises the sheet.
   const runtime = env.AGENTS_RUNTIME;
   if (runtime === 'headless' || runtime === 'teams' || runtime === 'terminal') return true;
   return !process.stdin.isTTY && !process.stdout.isTTY;
@@ -1366,7 +1368,11 @@ export function readAndResolveBundleEnv(
     let noAclBundle = false;
     try { noAclBundle = bundlePolicy(readBundle(name)) === 'never'; } catch { /* fail closed */ }
     if (!noAclBundle) {
-      throw new Error(`Secrets bundle '${name}' is not unlocked in the secrets agent.`);
+      throw new Error(
+        `Secrets bundle '${name}' is not unlocked in the secrets agent. ` +
+        `Run 'agents secrets unlock ${name}' in a terminal first — an agent launch ` +
+        `never raises a Touch ID sheet on its own.`
+      );
     }
   }
 

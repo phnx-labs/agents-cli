@@ -5,8 +5,11 @@
 - **Project routines opt-in + host placement strategy (RUSH-2035).** `agents routines enable-project` / `sync` / `--placement local|host|fleet|cloud`. See `apps/cli/CHANGELOG.md`.
 
 - Secrets: name the requesting harness, bundle, reason, and duration in macOS
-  Touch ID prompts; allow agent-triggered approval and scope cached unlocks to
-  the harness type, with `secrets unlock --for <agent>`.
+  Touch ID prompts, and scope cached unlocks to the harness type, with
+  `secrets unlock --for <agent>`. Agent-triggered approval is **not** part of
+  this: an agent launch never raises a sheet, it fails fast naming
+  `agents secrets unlock <bundle>`. Only a human-typed `agents secrets` command
+  prompts.
 
 ### Added
 

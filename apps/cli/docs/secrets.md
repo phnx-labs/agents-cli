@@ -2,10 +2,16 @@
 
 ## Agent-scoped unlocks
 
-On macOS, a secrets request can raise Touch ID directly, including from a
-background agent. The sheet names the requesting harness, bundle, reason, and
-unlock duration. Approved bundles are cached for seven days by default and are
-reused only by the same harness type.
+On macOS, **an agent launch never raises a Touch ID sheet.** A terminal, a
+routine, a teammate, or the daemon that needs a locked bundle fails fast and names
+`agents secrets unlock <bundle>` — opening an agent is not a request to
+authenticate, and because each keychain read runs in its own helper process the
+biometric assertion never reuses, so one launch used to mean one sheet per bundle.
+
+The sheet is raised only by a deliberate human request: `agents secrets unlock`,
+or an `agents secrets get/export/exec` you typed yourself. It names the requesting
+harness, bundle, reason, and unlock duration. Approved bundles are cached for seven
+days by default and are reused only by the same harness type.
 
 Use `agents secrets unlock prod --for claude` to pre-authorize a bundle for
 Claude. Codex, Kimi, and other harnesses require their own approval. `--ttl`

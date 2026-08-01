@@ -1173,7 +1173,7 @@ export function registerSecretsCommands(program: Command): void {
         // `secrets get` is the scriptable automation primitive ($(agents secrets
         // get bundle KEY)); when embedded in a headless routine/CI script it must
         // not pop an unwatched Touch ID prompt. Interactive use still prompts.
-        const { env } = readAndResolveBundleEnv(item, { caller: 'secrets get', keys: [key], keyMode: 'storage', agentOnly: isHeadlessSecretsContext() });
+        const { env } = readAndResolveBundleEnv(item, { caller: 'secrets get', keys: [key], keyMode: 'storage', agentOnly: isHeadlessSecretsContext(), interactiveUnlock: true });
         if (!(key in env)) {
           console.error(chalk.red(`Key '${key}' not in bundle '${item}'.`));
           process.exit(1);
@@ -1791,7 +1791,7 @@ Examples:
               'Set it for this command, then supply the same value when importing.'
             );
           }
-          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: 'export --to-file', keyMode: 'storage', agentOnly: isHeadlessSecretsContext() });
+          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: 'export --to-file', keyMode: 'storage', agentOnly: isHeadlessSecretsContext(), interactiveUnlock: true });
           exportBundleToFile(env, opts.toFile, passphrase);
           console.log(chalk.green(`Exported ${Object.keys(env).length} key(s) to ${opts.toFile}`));
           return;
@@ -1820,7 +1820,7 @@ Examples:
               );
             }
           }
-          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: `ssh export`, keyMode: 'storage', agentOnly: isHeadlessSecretsContext() });
+          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: `ssh export`, keyMode: 'storage', agentOnly: isHeadlessSecretsContext(), interactiveUnlock: true });
           const dotenv = bundleEnvToDotenv(env);
           const keyCount = Object.keys(env).length;
           // Drive the remote's own `agents secrets import --from -` so the values
@@ -1888,7 +1888,7 @@ Examples:
         if (opts.to1password) {
           assertOpAvailable();
           const vault = await resolveVault(opts.vault);
-          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: `1Password vault ${vault}`, keyMode: 'storage', agentOnly: isHeadlessSecretsContext() });
+          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: `1Password vault ${vault}`, keyMode: 'storage', agentOnly: isHeadlessSecretsContext(), interactiveUnlock: true });
           let created = 0;
           let overwritten = 0;
           let skipped = 0;
@@ -1931,7 +1931,7 @@ Examples:
         const { env } = readAndResolveBundleEnv(resolvedBundleName, {
           caller: `export to shell`,
           keyMode: 'process',
-          agentOnly: isHeadlessSecretsContext(),
+          agentOnly: isHeadlessSecretsContext(), interactiveUnlock: true,
         });
         if (opts.format === 'json') {
           // Machine-readable form consumed by `remoteResolveEnv` over SSH.
@@ -1990,7 +1990,7 @@ Examples:
             caller: `command ${cmd}`,
             keys: keysSubset,
             allowExpired: execOpts.allowExpired,
-            agentOnly: isHeadlessSecretsContext(),
+            agentOnly: isHeadlessSecretsContext(), interactiveUnlock: true,
           }).env;
         }
         const { spawn } = await import('child_process');

@@ -249,11 +249,13 @@ describe('readAndResolveBundleEnv agent-only reads', () => {
 });
 
 describe('isHeadlessSecretsContext', () => {
-  it('still allows a prompt for an explicit agents-secrets command (no AGENTS_RUNTIME)', () => {
-    // No runtime marker => not an agent launch => falls through to the TTY check.
-    expect(isHeadlessSecretsContext({} as NodeJS.ProcessEnv, 'darwin')).toBe(
-      !process.stdin.isTTY && !process.stdout.isTTY,
-    );
+  it('classifies a plain human shell by its TTY state, not as an agent launch', () => {
+    // No AGENTS_RUNTIME => not an agent launch => the TTY check decides. Pinned to
+    // fixed values rather than reading live TTY state, which made this tautological.
+    const noTty = { AGENTS_SECRETS_NO_PROMPT: '1' } as NodeJS.ProcessEnv;
+    expect(isHeadlessSecretsContext(noTty, 'darwin')).toBe(true);
+    const withTty = { AGENTS_SECRETS_NO_PROMPT: '0' } as NodeJS.ProcessEnv;
+    expect(isHeadlessSecretsContext(withTty, 'darwin')).toBe(false);
   });
 
   it('is true for headless/teams runtime on darwin (where the Touch ID sheet exists)', () => {
