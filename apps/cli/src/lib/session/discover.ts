@@ -3150,18 +3150,66 @@ async function scanClaudeSessionResumable(
   currentFileSize: number,
   priorFileMtimeMs?: number,
 ): Promise<{ scan: ClaudeSessionScan; newState: ClaudeParserState; newOffset: number; mode: 'full' | 'incremental' }> {
-  const canIncrement =
+  // File size + mtime cannot distinguish an APPEND from an in-place rewrite or a
+  // restore that dropped DIFFERENT, larger content at the same path: both grow
+  // the file and move mtime forward. Resuming from the stored offset across that
+  // boundary would fold the new file's bytes into an accumulator hydrated from
+  // the OLD session, so the persisted row silently diverges from a full reparse.
+  // So the metadata gate below only makes a file ELIGIBLE; before trusting the
+  // offset we re-read the transcript's first user/assistant timestamp and require
+  // it to still match the prior continuation's. An append keeps that identity
+  // byte-for-byte; a rewrite/restore of a different session changes it. A
+  // mismatch — or an identity we cannot derive — falls back to a FULL parse,
+  // which is always correct. (A shrink is already handled: currentFileSize is not
+  // > prior.offset, so it takes the FULL branch.)
+  let canIncrement = false;
+  if (
     prior !== null &&
     currentFileSize > prior.offset &&
-    (priorFileMtimeMs === undefined || currentFileMtimeMs >= priorFileMtimeMs);
+    (priorFileMtimeMs === undefined || currentFileMtimeMs >= priorFileMtimeMs) &&
+    prior.timestamp !== undefined
+  ) {
+    canIncrement = (await claudeSessionIdentityAt(filePath)) === prior.timestamp;
+  }
 
-  if (canIncrement) {
+  if (canIncrement && prior !== null) {
     const result = await scanClaudeSessionIncremental(filePath, prior.offset, prior);
     return { ...result, mode: 'incremental' };
   }
 
   const result = await scanClaudeSessionIncremental(filePath, 0, freshClaudeParserState());
   return { ...result, mode: 'full' };
+}
+
+/**
+ * Cheaply derive a Claude transcript's session identity — the first
+ * user/assistant event `timestamp` — by streaming only the START of the file
+ * (at most `maxBytes`) and stopping at the first such event. Used by
+ * {@link scanClaudeSessionResumable} to confirm a grown file is still the SAME
+ * session before resuming from a stored parse offset. Returns undefined when no
+ * user/assistant event appears within the budget, which forces a FULL parse.
+ */
+async function claudeSessionIdentityAt(filePath: string, maxBytes = 1_048_576): Promise<string | undefined> {
+  const state = initClaudeParseState();
+  const stream = fs.createReadStream(filePath, { start: 0, end: maxBytes - 1, encoding: 'utf-8' });
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  try {
+    for await (const line of rl) {
+      if (!line.trim()) continue;
+      let parsed: any;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      applyClaudeLine(state, parsed);
+      if (state.timestamp !== undefined) break;
+    }
+  } finally {
+    rl.close();
+    stream.destroy();
+  }
+  return state.timestamp;
 }
 
 /**

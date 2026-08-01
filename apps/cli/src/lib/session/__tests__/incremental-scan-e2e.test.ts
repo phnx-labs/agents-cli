@@ -319,6 +319,47 @@ describe('B-2 live incremental scan parity', () => {
     assertRowParity(id, gtId);
   });
 
+  it('IN-PLACE REWRITE: replacing the path with a DIFFERENT, LARGER session forces FULL (no cross-session corruption)', async () => {
+    const id = 'inplace-rewrite';
+
+    // Seed + scan session A → FULL, persisting a continuation whose offset is A's
+    // byte length.
+    const fp = writeTranscript(id, baseEvents(id));
+    await runScan();
+    const priorOffset = JSON.parse(db.getParserStatesForPaths([fp]).get(fp)!.parserState!).offset as number;
+
+    // Replace the path IN PLACE with a DIFFERENT session (distinct first
+    // timestamp) whose byte length is LARGER than the stored offset and whose
+    // mtime moves forward — the exact shape metadata cannot tell from an append.
+    // Size-grew + mtime-forward alone would wrongly resume from priorOffset and
+    // fold session B's bytes into session A's hydrated accumulator; the identity
+    // re-check must catch the session change and force FULL.
+    discover.__resetClaudeScanBranchCountsForTest();
+    const sessionB = [
+      { type: 'user', timestamp: '2026-07-01T09:00:00.000Z', cwd: '/home/u/other', gitBranch: 'PROJ-7', version: '2.2.0', message: { role: 'user', content: `restored different session ${'x'.repeat(400)}` } },
+      { type: 'assistant', timestamp: '2026-07-01T09:01:00.000Z', uuid: `${id}-b1`, message: { id: `${id}-bmsg1`, model: 'claude-sonnet-4-5', content: [{ type: 'text', text: `restored reply ${'y'.repeat(200)}` }], usage: { input_tokens: 200, output_tokens: 60 } } },
+      { type: 'assistant', timestamp: '2026-07-01T09:02:00.000Z', uuid: `${id}-b2`, message: { id: `${id}-bmsg2`, model: 'claude-sonnet-4-5', content: [{ type: 'text', text: 'more restored content' }], usage: { input_tokens: 90, output_tokens: 30 } } },
+    ];
+    fs.writeFileSync(fp, sessionB.map(line).join('\n') + '\n', 'utf-8');
+    bumpMtimeToNow(fp, 3);
+
+    // Precondition — this is the trap: the new file is LARGER than the stored
+    // offset, so the size gate that the old logic relied on does NOT fire.
+    expect(fs.statSync(fp).size, 'rewritten file must exceed the prior offset to exercise the guard').toBeGreaterThan(priorOffset);
+
+    await runScan();
+    const counts = discover.__claudeScanBranchCountsForTest();
+    expect(counts.full, 'in-place rewrite to a different session must force FULL').toBeGreaterThanOrEqual(1);
+    expect(counts.incremental, 'must NOT resume incrementally across a session boundary').toBe(0);
+
+    // No cross-session corruption: the row equals a from-scratch parse of session B.
+    const row = db.getSessionById(id)!;
+    expect(row.messageCount).toBe(3);
+    expect(row.timestamp).toBe('2026-07-01T09:00:00.000Z');
+    const gtId = await groundTruth(sessionB);
+    assertRowParity(id, gtId);
+  });
+
   it('FTS: a content search finds the session by a term that appears only in the appended chunk', async () => {
     const id = 'fts-append';
     writeTranscript(id, [
