@@ -884,10 +884,16 @@ export function ensureFeedPublishHook(userAgentsDir: string = getUserAgentsDir()
         timeout: 5,
       },
       // Matcher-less PostToolUse clear: after Codex runs an approved tool, the
-      // approval card is stale, so clear it. Kind-aware in the script so it
-      // never wipes an open AskUserQuestion mid-turn (see CLEAR_EVENTS handler).
+      // approval card is stale, so clear it. Codex-only on purpose -- Claude
+      // never fires PermissionRequest, so it has no approval card to clear here,
+      // and a matcher-less PostToolUse for Claude would (1) re-run the script on
+      // every tool completion and (2) wipe Claude's notification-kind blocks
+      // (permission_prompt/idle_prompt/elicitation_dialog) the moment any later
+      // tool runs, instead of letting them persist to Stop/SessionEnd like they
+      // did before RUSH-2039. Registering it for codex alone keeps Claude's
+      // card lifetime exactly as it was.
       'feed-clear-permission': {
-        agents: ['claude', 'codex'],
+        agents: ['codex'],
         events: ['PostToolUse'],
         script: '10-feed-publish.py',
         timeout: 5,

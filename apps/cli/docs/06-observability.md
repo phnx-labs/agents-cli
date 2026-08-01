@@ -354,12 +354,16 @@ installed by `ensureFeedPublishHook`), registered for every hooks-capable agent:
   (not Claude's `Notification`) when it blocks on an approval. The hook publishes an
   **approval-class** block with `costOfDelay: high` and `safeDefault: deny`, so a
   blocked headless/remote Codex agent surfaces on the feed and `agents feed --dispatch`
-  pages the phone as urgent (RUSH-2039). The card is cleared once the approved tool
-  runs (`PostToolUse`) or the session ends.
+  pages the phone as urgent (RUSH-2039). The Codex approval card is cleared once the
+  approved tool runs (`PostToolUse`) or the session ends.
 
 The block is cleared on answer (`PostToolUse` for AskUserQuestion, or `UserPromptSubmit`
-in the TUI), on session lifecycle (`Stop` / `SessionEnd`), and — for approval/notification
-cards — as soon as the next tool runs.
+in the TUI) and on session lifecycle (`Stop` / `SessionEnd`). A **Codex** approval card
+additionally clears as soon as the next tool runs — this is a matcher-less `PostToolUse`
+clear hook registered **for Codex only** (`feed-clear-permission`). Claude registers no
+matcher-less `PostToolUse` clear, so its `permission_prompt` / `idle_prompt` /
+`elicitation_dialog` notification cards persist until `Stop` / `SessionEnd` (and its only
+`PostToolUse` feed hook, `feed-clear-answered`, stays matcher-scoped to `AskUserQuestion`).
 
 The same poll also synthesizes control cards for sessions that are burning
 abnormally without asking (`runaway`) or asking repeatedly (`needy`). Control
