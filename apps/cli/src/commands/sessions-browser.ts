@@ -320,6 +320,22 @@ export function mergeLiveIntoPool(
   return extra.length === 0 ? rows : mergeLocalFirst([...rows, ...extra], self);
 }
 
+/**
+ * Whether to render the host-program column. It belongs to the running view
+ * only, so this gates on the FILTER — not on the live index being populated.
+ * `liveCache` outlives a toggle of the `r` hotkey, so testing `live` alone would
+ * keep the column after running is turned back off, widening a plain transcript
+ * listing that has no live rows to explain it.
+ */
+export function shouldShowHostColumn(
+  f: BrowserFilter,
+  live: Map<string, ActiveSession> | null,
+  rows: SessionMeta[],
+): boolean {
+  if (!f.running || !live) return false;
+  return rows.some((r) => liveHostLabel(live.get(r.id)) !== '');
+}
+
 /** Apply the cheap in-memory filters (agent / device / project / running). */
 function applyFilters(
   rows: SessionMeta[],
@@ -439,9 +455,7 @@ export async function runSessionBrowser(
     devicesInPool = distinct(rows.map((r) => r.machine ?? self));
     const filtered = applyFilters(rows, live ?? new Map(), f, self);
     cols = pickerColumnsFor(filtered);
-    // The host-program column is live-only: show it whenever any visible row
-    // resolved one, so a plain transcript listing keeps its current width.
-    cols.showHost = !!live && filtered.some((r) => liveHostLabel(live.get(r.id)) !== '');
+    cols.showHost = shouldShowHostColumn(f, live, filtered);
     return filtered;
   };
 

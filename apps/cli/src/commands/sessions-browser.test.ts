@@ -11,6 +11,7 @@ import {
   indexLiveRows,
   liveSessionToMeta,
   mergeLiveIntoPool,
+  shouldShowHostColumn,
   type BrowserFilter,
 } from './sessions-browser.js';
 import { liveHostLabel } from './sessions.js';
@@ -315,5 +316,34 @@ describe('liveHostLabel — which program the session runs in', () => {
   it('is empty when the host could not be resolved', () => {
     expect(liveHostLabel(live({ host: undefined }))).toBe('');
     expect(liveHostLabel(undefined)).toBe('');
+  });
+});
+
+describe('shouldShowHostColumn — live-only, gated on the filter not the cache', () => {
+  const hosted = live({ host: 'ghostty' });
+  const rows = [row({ id: hosted.sessionId })];
+  const index = indexLiveRows([hosted], 'zion');
+
+  it('shows the column in the running view when a visible row has a host', () => {
+    expect(shouldShowHostColumn({ ...base, running: true }, index, rows)).toBe(true);
+  });
+
+  it('drops the column when running is toggled back off, even though liveCache survives', () => {
+    // Regression: gating on `!!live` alone kept the column after the `r` hotkey
+    // turned running off, widening a plain listing with no live rows to explain it.
+    expect(shouldShowHostColumn({ ...base, running: false }, index, rows)).toBe(false);
+  });
+
+  it('stays off when no visible row resolved a host', () => {
+    const hostless = live({ host: undefined });
+    expect(
+      shouldShowHostColumn({ ...base, running: true }, indexLiveRows([hostless], 'zion'), [
+        row({ id: hostless.sessionId }),
+      ]),
+    ).toBe(false);
+  });
+
+  it('stays off before the live index has been fetched', () => {
+    expect(shouldShowHostColumn({ ...base, running: true }, null, rows)).toBe(false);
   });
 });
