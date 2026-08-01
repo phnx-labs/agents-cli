@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import { getTerminalsDir } from '../state.js';
-import { loadHookSessionIndex, resolveHookSessionId } from './hook-sessions.js';
+import { loadHookSessionIndex, resolveHookSessionId, resolveHookSessionRecord } from './hook-sessions.js';
 
 // Fake pids far above any real process, so the test never reads or clobbers a
 // live hook state file.
@@ -27,6 +27,18 @@ describe('hook session index + resolver', () => {
     writeRecord(P1, { session_id: 'sess-direct', agent: 'codex', pid: P1, ts: 10 });
     const idx = loadHookSessionIndex();
     expect(resolveHookSessionId(idx, { pid: P1, kind: 'codex' })).toBe('sess-direct');
+  });
+
+  it('resolveHookSessionRecord returns the full record incl. ts (the startedAtMs source)', () => {
+    // active.ts stamps startedAtMs from this ts; resolving only the id (the old
+    // resolveHookSessionId) is why terminal/headless rows had no start time.
+    writeRecord(P1, { session_id: 'sess-ts', agent: 'claude', pid: P1, ts: 1785544530059 });
+    const idx = loadHookSessionIndex();
+    const rec = resolveHookSessionRecord(idx, { pid: P1, kind: 'claude' });
+    expect(rec?.session_id).toBe('sess-ts');
+    expect(rec?.ts).toBe(1785544530059);
+    // kind guard still applies: a mismatched kind resolves nothing.
+    expect(resolveHookSessionRecord(idx, { pid: P1, kind: 'codex' })).toBeUndefined();
   });
 
   it('joins by launchId even when the hook pid differs from the recorded pid', () => {

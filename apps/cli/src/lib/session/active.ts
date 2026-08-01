@@ -26,7 +26,7 @@ import type { CloudTaskStatus } from '../cloud/types.js';
 import { AgentManager } from '../teams/agents.js';
 import { getTerminalsDir } from '../state.js';
 import { readPidSessionEntry, prunePidSessionRegistry, type PidSessionEntry } from './pid-registry.js';
-import { loadHookSessionIndex, resolveHookSessionId, type HookSessionIndex } from './hook-sessions.js';
+import { loadHookSessionIndex, resolveHookSessionRecord, type HookSessionIndex, type HookSessionRecord } from './hook-sessions.js';
 import { buildClaudeLabelMap } from './discover.js';
 import { buildRunNameMap } from './run-names.js';
 import { latestSessionFileForCwd } from './db.js';
@@ -112,6 +112,13 @@ export interface ActiveSession {
   attachments?: SessionAttachment[];
   sessionFile?: string;
   startedAtMs?: number;
+  /**
+   * Last-activity epoch — the transcript's last write (mtime). Distinct from
+   * {@link startedAtMs} (session START): a session begun 3h ago but last touched
+   * 20s ago has an old start and a fresh last-activity. The Floor renders "Xs ago"
+   * off this so an idle-but-old session doesn't read as freshly active.
+   */
+  lastActivityMs?: number;
   status: ActiveStatus;
   /** How many live PIDs resolve to this same session (subagents/forks). 1 unless collapsed. */
   pidCount?: number;
@@ -336,6 +343,22 @@ export function pickSessionFile(projectDir: string, sessionId?: string): string 
   return best?.path;
 }
 
+/**
+ * One `stat` → the transcript's creation (≈ session start) and last-write (≈ last
+ * activity) epochs. Both `undefined` when the file can't be stat'd (vanished /
+ * unresolved). `birthtimeMs` can be 0 on filesystems without creation time — coerce
+ * that to `undefined` so callers fall through to a real signal instead of epoch 0.
+ */
+export function sessionFileTimes(sessionFile: string | undefined): { birthtimeMs?: number; mtimeMs?: number } {
+  if (!sessionFile) return {};
+  try {
+    const st = fs.statSync(sessionFile);
+    return { birthtimeMs: st.birthtimeMs || undefined, mtimeMs: st.mtimeMs || undefined };
+  } catch {
+    return {};
+  }
+}
+
 function classifyActivity(sessionFile: string | undefined): 'running' | 'idle' {
   // No resolvable transcript is NOT evidence of activity — default to idle. (Before
   // the no-borrow fix in pickSessionFile this rarely fired because every terminal
@@ -522,6 +545,7 @@ export async function listTeamsActive(): Promise<ActiveSession[]> {
       tokPerSec,
       sessionFile,
       startedAtMs: a.startedAt.getTime(),
+      lastActivityMs: sessionFileTimes(sessionFile).mtimeMs,
       teamName: a.taskName,
       agentId: a.agentId,
     }, state, sessionFile);
@@ -577,6 +601,7 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
       tokPerSec,
       sessionFile,
       startedAtMs: t.startedAtMs,
+      lastActivityMs: sessionFileTimes(sessionFile).mtimeMs,
       windowId: t.windowId,
     }, state, sessionFile);
   });
@@ -959,15 +984,20 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
     // launchId/terminalId/pid and kind-guarded against a stale reused-pid file;
     // (3) the newest-jsonl heuristic (sessionIdFromFile, below).
     let exactId = entry?.sessionId;
+    // The hook record (when we fall to it) also carries the SessionStart `ts` — the
+    // real session-start epoch. Capture it so terminal/headless rows get a
+    // `startedAtMs` instead of rendering "0s ago" (they set none before this).
+    let hookRec: HookSessionRecord | undefined;
     if (!exactId) {
       hookIndex ??= loadHookSessionIndex();
-      exactId = resolveHookSessionId(hookIndex, {
+      hookRec = resolveHookSessionRecord(hookIndex, {
         pid,
         kind,
         launchId: entry?.launchId,
         terminalId: entry?.terminalId,
         childPids: ensureChildren().get(pid),
       });
+      exactId = hookRec?.session_id;
     }
     const cwd = cwds[i] ?? entry?.cwd ?? undefined;
     const sessionFile = findSessionFileForKind(kind, cwd, exactId);
@@ -975,6 +1005,7 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
     const host = detectHost(pid, procByPid);
     const context: ActiveContext = host && UI_HOSTS.has(host) ? 'terminal' : 'headless';
     const { state, tokPerSec } = computeLiveSignals(kind, sessionFile, cwd, true);
+    const { birthtimeMs, mtimeMs } = sessionFileTimes(sessionFile);
     out.push(applyState({
       context,
       kind,
@@ -986,6 +1017,10 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
       topic,
       tokPerSec,
       sessionFile,
+      // Session start: the hook's authoritative SessionStart `ts`, else the
+      // transcript's creation time. Last activity: the transcript's last write.
+      startedAtMs: hookRec?.ts ?? birthtimeMs,
+      lastActivityMs: mtimeMs,
       pidCount: 1 + (foldedByRoot.get(pid) ?? 0),
     }, state, sessionFile));
   }
@@ -1041,6 +1076,7 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
     const sessionFile = findSessionFileForKind(agent, cwd, sessionId);
     const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
     const { state, tokPerSec } = computeLiveSignals(agent, sessionFile, cwd, pid ? isPidAlive(pid) : true);
+    const { birthtimeMs, mtimeMs } = sessionFileTimes(sessionFile);
     // Provenance is known exactly here (the pane IS a tmux pane) — set it so
     // enrichProvenance skips it and the locator/reply rails resolve off the pane.
     const provenance: SessionProvenance = {
@@ -1059,6 +1095,10 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
       topic,
       tokPerSec,
       sessionFile,
+      // tmux panes carry no start timestamp; derive both from the transcript
+      // (creation ≈ start, last write ≈ last activity).
+      startedAtMs: birthtimeMs,
+      lastActivityMs: mtimeMs,
       provenance,
     }, state, sessionFile));
   }
