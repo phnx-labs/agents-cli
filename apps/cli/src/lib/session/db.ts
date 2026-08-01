@@ -574,7 +574,15 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     cwd = excluded.cwd,
     git_branch = excluded.git_branch,
     topic = excluded.topic,
-    label = excluded.label,
+    -- Never let an empty/placeholder incoming label clobber a good stored one.
+    -- A real incoming label (non-empty after trim) still wins; a blank one keeps
+    -- the label seeded by --name (seedLabelsFromNames) or refined by an agent
+    -- title / rename (syncLabels). A bare rescan carries no label, so it must
+    -- preserve, not erase, the good one already stored.
+    label = CASE
+      WHEN excluded.label IS NULL OR trim(excluded.label) = '' THEN sessions.label
+      ELSE excluded.label
+    END,
     message_count = excluded.message_count,
     token_count = excluded.token_count,
     output_tokens = excluded.output_tokens,
@@ -596,11 +604,17 @@ const deleteTextStmt = (db: Database.Database) =>
   db.prepare(`DELETE FROM session_text WHERE session_id = ?`);
 const insertTextStmt = (db: Database.Database) =>
   db.prepare(`INSERT INTO session_text (session_id, label, topic, project, content) VALUES (?, ?, ?, ?, ?)`);
+// Read back the label the upsert actually stored (which may be the preserved
+// one, not the incoming blank) so the FTS label column stays consistent with
+// sessions.label after a bare rescan.
+const readLabelStmt = (db: Database.Database) =>
+  db.prepare(`SELECT label FROM sessions WHERE id = ?`);
 
 let cachedStmts: {
   upsert?: Database.Statement<SessionRow>;
   delText?: Database.Statement<unknown[]>;
   insText?: Database.Statement<unknown[]>;
+  readLabel?: Database.Statement<unknown[]>;
 } = {};
 
 function stmts(db: Database.Database) {
@@ -609,9 +623,21 @@ function stmts(db: Database.Database) {
       upsert: upsertSessionStmt(db) as Database.Statement<SessionRow>,
       delText: deleteTextStmt(db),
       insText: insertTextStmt(db),
+      readLabel: readLabelStmt(db),
     };
   }
   return cachedStmts as Required<typeof cachedStmts>;
+}
+
+/**
+ * Return the label stored for a session, as text for the FTS index (never NULL).
+ * Called inside the upsert transaction, AFTER the row upsert, so it reflects the
+ * preserve-non-empty-label rule in the ON CONFLICT clause rather than the raw
+ * incoming label.
+ */
+function storedFtsLabel(readLabel: Database.Statement<unknown[]>, id: string): string {
+  const row = readLabel.get(id) as { label: string | null } | undefined;
+  return row?.label ?? '';
 }
 
 /**
@@ -620,7 +646,7 @@ function stmts(db: Database.Database) {
  */
 export function upsertSession(meta: SessionMeta, content: string, scan?: ScanStamp): void {
   const db = getDB();
-  const { upsert, delText, insText } = stmts(db);
+  const { upsert, delText, insText, readLabel } = stmts(db);
   const row: SessionRow = {
     id: meta.id,
     short_id: meta.shortId,
@@ -659,7 +685,9 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
     delText.run(meta.id);
     insText.run(
       meta.id,
-      meta.label ?? '',
+      // Use the label the upsert actually stored (preserve-non-empty rule),
+      // not the raw incoming one, so FTS label ranking survives a bare rescan.
+      storedFtsLabel(readLabel, meta.id),
       meta.topic ?? '',
       meta.project ?? '',
       content ?? '',
@@ -674,7 +702,7 @@ export function upsertSessionsBatch(
 ): void {
   if (entries.length === 0) return;
   const db = getDB();
-  const { upsert, delText, insText } = stmts(db);
+  const { upsert, delText, insText, readLabel } = stmts(db);
   const now = Date.now();
   const ledger = db.prepare(`
     INSERT INTO scan_ledger (file_path, file_mtime_ms, file_size, scanned_at)
@@ -762,7 +790,9 @@ export function upsertSessionsBatch(
       delText.run(meta.id);
       insText.run(
         meta.id,
-        meta.label ?? '',
+        // Mirror upsertSession: index the label the upsert actually stored
+        // (preserve-non-empty rule), not the raw incoming one.
+        storedFtsLabel(readLabel, meta.id),
         meta.topic ?? '',
         meta.project ?? '',
         content ?? '',
