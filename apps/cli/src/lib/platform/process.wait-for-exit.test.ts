@@ -22,7 +22,11 @@ function spawnSleeper(seconds: number) {
   return child;
 }
 
-describe('waitForExit — the wait stopDaemon relies on', () => {
+// POSIX signal semantics. On Windows `process.kill(pid, 'SIGTERM')` maps to
+// TerminateProcess, which kills unconditionally — a process cannot decline it —
+// and there is no zombie state for hasExited to unwrap. stopDaemon takes the
+// win32 killTree branch before waitForExit is ever reached there.
+describe.skipIf(process.platform === 'win32')('waitForExit — the wait stopDaemon relies on', () => {
   it('returns true once a SIGTERMed process is actually gone', () => {
     const child = spawnSleeper(30);
     expect(isAlive(child.pid!)).toBe(true);
