@@ -2597,11 +2597,14 @@ async function renderOneSession(
     let byId = resolution.byId;
     const completeId = resolution.completeId;
 
-    // Widen to the transcript content index only for a genuine search phrase. A
-    // complete id is unique, so widening could only ever surface a DIFFERENT
-    // session that happens to mention the id — which is what made `sessions
-    // <uuid>` render an unrelated transcript.
-    if (queryMatches.length === 0 && !completeId) {
+    // Widen to the transcript content index only for a genuine search phrase.
+    // ANY id-shaped query (a complete id OR a hex short-id/prefix) names a
+    // specific session; widening could only surface a DIFFERENT session that
+    // happens to MENTION the id — which is what made `sessions <uuid>` render an
+    // unrelated transcript and `sessions <shortid>` list every session that
+    // echoes the id in a resume prompt. Gate on looksLikeSessionId, not just
+    // completeId, so a short id resolves to "no match" rather than fuzzy content.
+    if (queryMatches.length === 0 && !looksLikeSessionId(query)) {
       const contentResults = searchContentIndex(allSessions, query);
       if (contentResults.size > 0) {
         const matchedSessions = Array.from(contentResults.values())
