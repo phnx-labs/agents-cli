@@ -17,7 +17,7 @@ const SESSIONS_DIR = getSessionsDir();
 const DB_PATH = getSessionsDbPath();
 
 /** Current schema version; bumped when migrations are added. */
-const SCHEMA_VERSION = 13;
+const SCHEMA_VERSION = 14;
 
 /**
  * Canonicalize a file path for use as a scan_ledger key. The same physical
@@ -104,6 +104,20 @@ CREATE TABLE IF NOT EXISTS scan_ledger (
   file_path TEXT PRIMARY KEY,
   file_mtime_ms INTEGER NOT NULL,
   file_size INTEGER NOT NULL,
+  scanned_at INTEGER NOT NULL
+);
+
+-- Tracks the mtime + entry-count of every LEAF directory that directly holds
+-- transcripts (a Claude project dir, a Gemini chats dir). A dir's mtime bumps
+-- on create/delete/rename of its entries but NOT on an in-place append, so a
+-- match here means the dir gained/lost/renamed no files: we can skip the
+-- readdir + per-file stat and serve unchanged files from the DB (append-safety
+-- is preserved by re-stat'ing only the "hot set" — see discover.ts). Keyed by
+-- canonicalLedgerKey, same as scan_ledger.
+CREATE TABLE IF NOT EXISTS dir_ledger (
+  dir_path TEXT PRIMARY KEY,
+  dir_mtime_ms INTEGER NOT NULL,
+  entry_count INTEGER NOT NULL,
   scanned_at INTEGER NOT NULL
 );
 `;
@@ -319,6 +333,24 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     if (!cols.some(c => c.name === 'routine_run_id')) db.exec(`ALTER TABLE sessions ADD COLUMN routine_run_id TEXT`);
     db.exec(`UPDATE sessions SET origin = 'cli' WHERE origin IS NULL OR origin = ''`);
     db.exec(`DELETE FROM scan_ledger;`);
+  }
+
+  if (fromVersion < 14) {
+    // v13 → v14: the discovery scan now short-circuits the readdir + per-file
+    // stat of leaf transcript dirs whose (mtime, entry_count) is unchanged,
+    // caching that snapshot in the new `dir_ledger` table. Create it, and clear
+    // scan_ledger so the first post-upgrade scan does a clean full walk — that
+    // walk seeds BOTH ledgers correctly, so a cold/empty dir_ledger degrades to
+    // today's full behavior.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS dir_ledger (
+        dir_path TEXT PRIMARY KEY,
+        dir_mtime_ms INTEGER NOT NULL,
+        entry_count INTEGER NOT NULL,
+        scanned_at INTEGER NOT NULL
+      );
+      DELETE FROM scan_ledger;
+    `);
   }
 }
 
@@ -544,6 +576,82 @@ export function recordScans(entries: Array<{ filePath: string; scan: ScanStamp }
   const txn = db.transaction((items: typeof entries) => {
     for (const { filePath, scan } of items) {
       stmt.run(canonicalLedgerKey(filePath), scan.fileMtimeMs, scan.fileSize, now);
+    }
+  });
+  txn(entries);
+}
+
+/** Snapshot of a leaf transcript directory used to detect create/delete/rename. */
+export interface DirStamp {
+  dirMtimeMs: number;
+  entryCount: number;
+}
+
+/**
+ * Bulk-load the dir ledger for a set of leaf directories in a single SQL query.
+ * Mirrors {@link getScanStampsForPaths}: keys by canonical path (so a dir
+ * reachable via a symlinked version home and its realpath collapse to one row)
+ * and fans the result back out to every original alias so callers can
+ * `.get(dirPath)` with the path they passed in.
+ */
+export function getDirLedgerForPaths(dirs: string[]): Map<string, DirStamp> {
+  const result = new Map<string, DirStamp>();
+  if (dirs.length === 0) return result;
+  const db = getDB();
+
+  const canonicalToOriginals = new Map<string, string[]>();
+  for (const d of dirs) {
+    const canonical = canonicalLedgerKey(d);
+    const aliases = canonicalToOriginals.get(canonical);
+    if (aliases) aliases.push(d);
+    else canonicalToOriginals.set(canonical, [d]);
+  }
+
+  const canonicalKeys = [...canonicalToOriginals.keys()];
+  const CHUNK = 500;
+  for (let i = 0; i < canonicalKeys.length; i += CHUNK) {
+    const chunk = canonicalKeys.slice(i, i + CHUNK);
+    const placeholders = chunk.map(() => '?').join(',');
+    const rows = db
+      .prepare(`
+        SELECT dir_path, dir_mtime_ms, entry_count
+        FROM dir_ledger
+        WHERE dir_path IN (${placeholders})
+      `)
+      .all(...chunk) as Array<{ dir_path: string; dir_mtime_ms: number; entry_count: number }>;
+
+    for (const row of rows) {
+      const stamp: DirStamp = { dirMtimeMs: row.dir_mtime_ms, entryCount: row.entry_count };
+      for (const original of canonicalToOriginals.get(row.dir_path) || []) {
+        result.set(original, stamp);
+      }
+    }
+  }
+  return result;
+}
+
+/**
+ * Upsert dir-scan stamps. Recorded after a full readdir of a leaf transcript
+ * dir so the next scan can skip that dir when its (mtime, entry_count) is
+ * unchanged. Mirrors {@link recordScans}.
+ */
+export function recordDirScans(
+  entries: Array<{ dirPath: string; dirMtimeMs: number; entryCount: number }>,
+): void {
+  if (entries.length === 0) return;
+  const db = getDB();
+  const stmt = db.prepare(`
+    INSERT INTO dir_ledger (dir_path, dir_mtime_ms, entry_count, scanned_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(dir_path) DO UPDATE SET
+      dir_mtime_ms = excluded.dir_mtime_ms,
+      entry_count = excluded.entry_count,
+      scanned_at = excluded.scanned_at
+  `);
+  const now = Date.now();
+  const txn = db.transaction((items: typeof entries) => {
+    for (const { dirPath, dirMtimeMs, entryCount } of items) {
+      stmt.run(canonicalLedgerKey(dirPath), dirMtimeMs, entryCount, now);
     }
   });
   txn(entries);
