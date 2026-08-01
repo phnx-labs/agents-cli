@@ -79,9 +79,9 @@ describe('classifyLoginFlow', () => {
     expect(anti.remotable).toBe(false);
     expect(anti.reason).toMatch(/loopback/i);
 
-    const gem = classifyLoginFlow('gemini', 'linux');
-    expect(gem.remotable).toBe(false);
-    expect(gem.reason).toMatch(/not yet/i);
+    const open = classifyLoginFlow('opencode', 'linux');
+    expect(open.remotable).toBe(false);
+    expect(open.reason).toMatch(/not yet/i);
   });
 
   it('flags a macOS keychain-bound agent non-remotable even if its flow were device-code', () => {
@@ -124,15 +124,15 @@ describe('selectLoginTargets', () => {
       'box-b:droid:1.0.0': health('revoked'),
       // box-a codex missing entirely -> pending
     };
-    const pending = selectLoginTargets(devices, ['droid', 'codex', 'gemini'], cache);
+    const pending = selectLoginTargets(devices, ['droid', 'codex', 'antigravity'], cache);
 
     const keys = pending.map((p) => `${p.agent}@${p.device}:${p.remotable}`).sort();
     // box-a droid live -> excluded. box-b droid revoked -> pending remotable.
-    // codex missing on both -> pending remotable. gemini unknown -> pending but not remotable.
+    // codex missing on both -> pending remotable. antigravity loopback -> pending but not remotable.
     expect(keys).toContain('droid@box-b:true');
     expect(keys).toContain('codex@box-a:true');
     expect(keys).toContain('codex@box-b:true');
-    expect(keys).toContain('gemini@box-a:false');
+    expect(keys).toContain('antigravity@box-a:false');
     expect(keys).not.toContain('droid@box-a:true');
     expect(keys).not.toContain('droid@box-a:false');
   });
@@ -174,7 +174,7 @@ describe('buildRemoteLoginSshCommand', () => {
 describe('buildDashboardHtml', () => {
   const pending = [
     { device: 'box-a', agent: 'droid', platform: 'linux', target: 'box-a', flow: droid, remotable: true },
-    { device: 'box-b', agent: 'gemini', platform: 'linux', target: 'box-b', flow: FLEET_LOGIN_FLOWS.gemini, remotable: false, reason: 'loopback' },
+    { device: 'box-b', agent: 'antigravity', platform: 'linux', target: 'box-b', flow: FLEET_LOGIN_FLOWS.antigravity, remotable: false, reason: 'loopback' },
   ];
 
   it('renders a self-contained page naming every pending pair and the mode', () => {
