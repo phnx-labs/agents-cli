@@ -902,7 +902,10 @@ export function parseRoleList(raw: string, flag: string): RoleFilter[] {
 }
 
 function roleOfEvent(e: SessionEvent): RoleFilter | null {
-  if (e.type === 'message' && e.role === 'user') return 'user';
+  // Harness-injected `role=user` scaffolding (flagged `_synthetic` in
+  // parseSession) is not genuine user intent, so `--include user` excludes it.
+  // Returning null keeps it in the default/`--exclude` streams (full fidelity).
+  if (e.type === 'message' && e.role === 'user') return e._synthetic ? null : 'user';
   if (e.type === 'message' && e.role === 'assistant') return 'assistant';
   if (e.type === 'thinking') return 'thinking';
   if (e.type === 'tool_use' || e.type === 'tool_result') return 'tools';
@@ -949,8 +952,12 @@ function applyTurnSlice(events: SessionEvent[], opts: FilterOptions): SessionEve
     throw new Error(`Turn count must be a positive integer, got ${n}`);
   }
 
+  // A turn starts at a GENUINE user message — harness-injected `_synthetic`
+  // scaffolding (`<bash-input>`/`<bash-stdout>`, etc.) does not start a turn,
+  // so `--first N` / `--last N` count real asks, not the jump command that
+  // opened the session and its shell output.
   const isTurnStart = (e: SessionEvent): boolean =>
-    e.type === 'message' && e.role === 'user';
+    e.type === 'message' && e.role === 'user' && !e._synthetic;
   const turnStartIdx: number[] = [];
   for (let i = 0; i < events.length; i++) if (isTurnStart(events[i])) turnStartIdx.push(i);
 
