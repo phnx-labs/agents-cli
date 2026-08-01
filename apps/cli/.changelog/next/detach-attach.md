@@ -9,7 +9,12 @@
   interactively** in the current terminal (`resumeSessionInPlace`) — the same
   session and full history, including whatever the background run did. Both verbs
   are agent-agnostic (native resume for Claude/Codex, `/continue` replay for the
-  rest). `agents sessions --active --json` now carries a `presence` field
+  rest). A session on **another host** is detached there over SSH rather than
+  killed locally; **cloud and team sessions are refused** (they have their own
+  lifecycles); the interactive process is fully awaited before the headless resume
+  starts (no transcript race); and the background run's output is captured to
+  `~/.agents/.cache/logs/detach-<shortid>.log` so a crash after detach is
+  debuggable. `agents sessions --active --json` now carries a `presence` field
   (`attached` / `background` / `parked`), folded onto every row from a per-session
   detach record, so the menu bar and Factory show where each agent is. Source:
   `apps/cli/src/commands/detach.ts`, `apps/cli/src/commands/attach.ts`,

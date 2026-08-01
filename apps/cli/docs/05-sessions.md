@@ -290,11 +290,21 @@ they are agent-agnostic (native resume for Claude/Codex, `/continue` replay for 
 rest), not a per-agent special case.
 
 - **detach**: stop the interactive process (kill the tmux session when tmux-hosted,
-  else SIGTERM the pid), then spawn a detached, version-pinned
-  `agents run <agent> --resume <id> --headless "<nudge>"`. The nudge tells the now-
-  unwatched agent it is headless and to drive its task to completion rather than
-  stall on a confirmation nobody can answer. The continuation runs until the task is
-  done, then exits.
+  else SIGTERM the pid) and **wait for it to actually exit** before spawning a
+  detached, version-pinned `agents run <agent> --resume <id> --headless "<nudge>"`,
+  so the two never race over the same transcript. The nudge tells the now-unwatched
+  agent it is headless and to drive its task to completion rather than stall on a
+  confirmation nobody can answer. The continuation runs until the task is done, then
+  exits; its output is written to `~/.agents/.cache/logs/detach-<shortid>.log`
+  (printed on detach) so a background run that crashes leaves a trail.
+  - **Remote sessions** (matched via the cross-host sweep) are detached **on their
+    own host over SSH** — `agents detach <id> --local` runs there — since a pid and
+    tmux socket only mean something on the machine the session runs on. Use `--local`
+    to skip the sweep and only consider this machine.
+  - **Cloud and team sessions are refused**: cloud runs have their own lifecycle, and
+    a `teams` session must be stopped through `agents teams` so the team supervisor's
+    PID-reuse-safe stop path and bookkeeping stay in sync — `detach` won't SIGTERM a
+    teammate out from under it.
 - **attach**: stop the headless continuation (if any), then `resumeSessionInPlace`
   the session interactively in the current terminal — the same session, full history,
   including whatever the background run did.
