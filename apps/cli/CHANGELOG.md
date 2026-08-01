@@ -1,5 +1,821 @@
 # Changelog
 
+## 1.20.75
+
+- **Wire native file-based slash commands for Grok (RUSH-1851).** Grok >= 0.2.111
+discovers commands from the cross-agent `~/.agents/commands/` dir (plus the
+legacy `~/.claude/commands/` symlink). `agents sync grok` now writes native
+`.md` command files there instead of converting commands to skills, so `agents
+view grok` and `agents commands list grok` report Grok as commands-capable.
+Source: `apps/cli/src/lib/agents.ts`.
+
+- **Document that Droid Factory Missions are invoke-only (RUSH-1864).** Probed
+  droid v0.177.0 (self-updating; ticket cited v0.161.0) and Factory docs:
+  Missions run via `/missions` or `droid exec --mission` (optional `-f` is a
+  prompt file, not a named template). `~/.factory/missions/<sessionId>/` is
+  runtime state only — no auto-discovery dir agents-cli can populate — so
+  `workflows` stays `false` with an evidence comment rather than inventing a
+  writer target. Source: `apps/cli/src/lib/agents.ts`, `apps/cli/tests/agents.test.ts`.
+
+- **Reading state no longer writes `agents.yaml`, which silently deadlocked
+  `agents repo pull` (RUSH-1925).** Registry presets from `SEEDED_REGISTRIES` (today
+  `skill.hermes`) were seeded on the state **read** path, which wrote the registry entry
+  plus a `seededPresets` marker into `agents.yaml`. That file is git-tracked in the user's
+  DotAgents repo, so the write left the working tree dirty and every subsequent
+  `agents repo pull` aborted with `Working tree has uncommitted changes` — naming neither
+  the file nor the cause. Because *every* `agents` invocation reads state, the dirt
+  reappeared the instant it was cleared: `git checkout -- agents.yaml && agents repo pull`
+  re-seeded before the pull ran, so the loop could not be escaped through the CLI at all.
+  On a host with several live agent sessions even a raw `git pull --rebase` lost the race,
+  and one machine sat 27 commits behind for weeks as a result. Seeded presets are now
+  resolved in memory by `getRegistries` — the same way `DEFAULT_REGISTRIES` has always
+  worked — so nothing is written and no later write can flush them into the file.
+  `seededPresets` becomes a removal tombstone: `agents registry remove skill hermes`
+  records the key and the preset stops being offered, which is the behaviour the marker
+  existed to protect. Files seeded by the old code carry both the tombstone and an explicit
+  entry in their own `registries:` block, and the explicit entry still wins, so upgrading
+  changes nothing for them. `setRegistry` also falls back to
+  `SEEDED_REGISTRIES` when merging a partial update, so `registry disable/enable/config`
+  on a never-materialized preset can no longer persist a stripped entry that drops `url`.
+  Source: `apps/cli/src/lib/registry.ts`,
+  `apps/cli/src/lib/state.ts`, `apps/cli/src/lib/registry.seeds.test.ts`,
+  `apps/cli/src/lib/state.test.ts`.
+
+- **`agents fleet status` no longer hangs on an unreachable box (RUSH-1964).** The cheap
+  stats probe (~2.5s) already learns whether each box is reachable, but the dead-box skip
+  that spares the expensive `agents --version` (15s) + `agents doctor --json` (30s) dials
+  was gated behind `--refresh` — so a default run still spent up to 45s per genuinely
+  unreachable box, and one down box could stall the whole matrix. The default path now
+  gates those dials on the same reachability verdict: a box the stats probe found
+  unreachable short-circuits straight to an `unreachable` row with zero further SSH
+  round-trips. Measured on a single blackholed target, `fleet status` dropped from 22.8s
+  to 2.8s. (VPN-first transport and SSH key provisioning remain deferred.) Source:
+  `apps/cli/src/lib/devices/fleet.ts` (`fleetHealthSkip`), `apps/cli/src/commands/ssh.ts`
+  (`runFleetStatus`).
+
+- **Fleet reachability reflects the live probe (RUSH-1965).** `agents devices` and `agents fleet status` now persist the live SSH probe's `{reachable, via, checkedAt}` verdict to the registry and read the online/offline word from it — freshest signal wins: a live stat this run, then the written-back verdict, then the cached `tailscale.online` snapshot. A reachable box (including a `via:"manual"` device with no Tailscale peer) no longer renders "offline" while its live load/mem sit one column over. Source: `apps/cli/src/lib/devices/reachability.ts`, `apps/cli/src/lib/devices/registry.ts`.
+
+- **`agents fleet status` output redesigned — rollup + NEEDS ATTENTION, quiet when healthy
+  (RUSH-1966).** The old grid buried "is my fleet OK?" under duplicated columns and glyph
+  soup (a "Health" column that just repeated Load/Mem, `stale · cold` counts across every
+  orphan version, an `●5 ·8 ◐3` auth cell, and warnings that re-listed all 12 devices three
+  times). The default view now leads with a one-line rollup (`● N online · ○ M offline`),
+  then a short **NEEDS ATTENTION** list where every item names its fix command — offline →
+  `check the box`, config drift or a stark CLI gap → `agents apply <box>`, version skew →
+  `agents upgrade --fleet` — then quiet per-device rows grouped by OS (macOS / Linux /
+  Windows) showing `name · capacity · load/mem · version`, with this machine flagged
+  `▸ … ← this machine`. Drift is reported on the active version only (not orphan versions);
+  orphaned versions are demoted to a one-line `agents prune` nudge in the footer; the
+  freshness footer names the cache age and what `--live` / `--verbose` add. A healthy fleet
+  reads in a few lines. The full per-device auth/CLI/sync/version grid moves behind the new
+  `--verbose` flag; `--json` is unchanged. Source: `apps/cli/src/lib/devices/health-report.ts`
+  (`renderFleetSummary`, `buildFleetAttentionItems`), `apps/cli/src/commands/ssh.ts`
+  (`runFleetStatus`).
+
+- **`agents doctor` now flags credentials exported from shell rc files (RUSH-1968).** A
+  secret exported from `~/.zshenv`/`~/.zshrc`/`~/.bashrc`/`~/.profile` is inherited by every
+  process the login shell spawns and is readable from `/proc/<pid>/environ` by any same-user
+  process — `.zshenv` is sourced even by non-interactive `ssh host 'cmd'`, so the value lands
+  in essentially everything the box runs. The doctor overview now scans the current user's rc
+  files and prints a `Secrets in shell config` warning that names each credential-shaped
+  export by `file:line` and variable name (never the value), with the file-store master key
+  `AGENTS_SECRETS_PASSPHRASE` called out separately — its off-env home is
+  `~/.agents/.secrets-key/passphrase` (chmod 600), and other credentials should move to
+  `agents secrets` and inject via `agents secrets exec`. The scanner reads only the variable
+  name and line number, so a finding is safe to print or log. Source:
+  `apps/cli/src/lib/secrets/rc-hygiene.ts` (`scanUserRcFiles`, `scanRcExports`,
+  `rcSecretWarningLines`), wired into `apps/cli/src/commands/doctor.ts`
+  (`renderRcHygieneAdvisory`).
+
+- **`agents devices` no longer forces a Touch ID prompt on a password-auth box
+  (RUSH-1970).** The read-only stats probe's live SSH to an uncached
+  `auth.method === 'password'` device used to drive the askpass shim to resolve
+  the SSH password through the biometry-gated Keychain sheet under a TTY, popping
+  Touch ID during what should be a silent probe. The probe now threads a
+  broker-only signal (`AGENTS_SSH_AGENT_ONLY`) so it resolves from an
+  already-unlocked broker or degrades to an unreachable row — never a biometric
+  prompt. Source: `apps/cli/src/commands/ssh.ts`,
+  `apps/cli/src/lib/devices/health.ts`, `apps/cli/src/lib/devices/connect.ts`.
+
+- **`agents sessions migrate` (alias `relocate`) relocates a RUNNING session onto
+  another machine, then stops the source here (RUSH-1977).** `--auto` scores the
+  fleet and picks a target, `--host <name>` names one explicitly, and `--lease`
+  provisions a fresh ephemeral box; `--mode resume|rehydrate` chooses whether the
+  target resumes the native transcript or replays it via `/continue`. Every
+  migration is written to an append-only ledger, viewable with `agents sessions
+  migrations`. Load-bearing invariant: the source session is never stopped until
+  the transcript is confirmed live on the target, so a failed hop leaves the
+  original running. (Not to be confused with `agents sessions detach`/`attach`,
+  the unrelated background/foreground pair.) Source:
+  `apps/cli/src/commands/sessions-migrate.ts`,
+  `apps/cli/src/lib/session/migrate-targets.ts`,
+  `apps/cli/src/lib/session/migrations.ts`.
+
+- **`agents sessions --active --json` now emits flat `ticketId` and `project`
+  keys on every row.** A supervising watcher joins active sessions on ticket +
+  project, but the raw row nested the ticket under `ticket.id` and carried no
+  `project` at all, so a naive join silently dropped every session. Each row now
+  carries top-level `ticketId` (from the detected ticket) and `project` (the
+  basename of the session's cwd — the same derivation the historical `--json`
+  listing uses), both always present and `null` when unknown. The existing raw
+  fields are unchanged. Source: `apps/cli/src/commands/sessions.ts`
+  (`serializeActiveSessionsForJson`).
+
+- **Actor provenance — agent git commits are now credited to the human who
+  started the run, not the shared account.** One account across a shared fleet
+  meant every commit, from anyone who SSH'd into a box, showed up as the same
+  author. `resolveActor()` now identifies who is behind a run: over SSH it
+  `tailscale whois`es the client IP to the connecting tailnet identity (name +
+  login email); locally it stays honest with `UNRESOLVED@<host>` and claims no
+  identity. The resolved actor rides the agent's process env as `AGENTS_ACTOR` /
+  `AGENTS_ACTOR_KIND` (inherited by the whole spawn tree, so it resolves once),
+  and for a resolved human it also injects `GIT_AUTHOR_*` / `GIT_COMMITTER_*` — so
+  the agent's own `git commit` is attributed to the person. An unresolved actor
+  injects no git identity, so local runs keep their ambient git config unchanged.
+  Source: `apps/cli/src/lib/actor.ts`, wired into `buildExecEnv`
+  (`apps/cli/src/lib/exec.ts`).
+
+- **New optional `actors:` map in `agents.yaml`.** Keyed by a short slug, each
+  entry (`kind` / `name` / `email` / `github` / `login`) enriches or overrides
+  what `tailscale whois` resolves — pin a preferred git email, add a GitHub
+  handle, override the display name, or mark an entry as an agent rather than a
+  human. Entirely optional: a tailnet SSH identity already resolves without it.
+  Source: `apps/cli/src/lib/types.ts` (`ActorConfig`, `Meta.actors`).
+
+- **`agents run antigravity "prompt"` now works headless without an explicit
+  `--headless`.** Antigravity's `--print` flag was gated on the raw `--headless`
+  flag, which defaults to `false` at the CLI layer — but headless is inferred from
+  prompt presence. So a bare `agents run antigravity "do X"` built `agy <prompt>`
+  with no `--print`, launching the interactive TUI and dying with
+  `bubbletea: could not open TTY: /dev/tty` in any non-terminal shell (headless
+  runs, teams, routines, `--host`). Print flags are now gated on the resolved
+  headless state, matching the documented "`--headless` auto-enabled when a prompt
+  is provided" contract and the behavior of every other agent. Antigravity was the
+  only agent affected — it is the sole harness whose prompt is a bare positional
+  with no headless subcommand and no `-p` print alias. Source:
+  `apps/cli/src/lib/exec.ts`.
+
+- **Routine auth-failures are now detected, not silent.** When a routine's agent is logged
+  out or its token is revoked, the run is classified `failed` with an `auth_failed:` /
+  `auth_preflight:` reason instead of a generic non-zero exit. The login-error text is no
+  longer written into `report.md`, and `{last_report}` now only injects the last *completed*
+  run's report — so a single logged-out run can no longer poison every subsequent run's
+  prompt. Classification uses the Claude stream-json markers (`error:"authentication_failed"`
+  and a `result` event with `is_error:true`), which is the reliable signal — `terminal_reason`
+  is `"completed"` on a logged-out run. Rate-limit still classifies first, so a 429 keeps
+  triggering failover rather than being mistaken for an auth failure. Source:
+  `apps/cli/src/lib/exec.ts`, `apps/cli/src/lib/runner.ts`, `apps/cli/src/lib/routines.ts`.
+- **`agents routines run` now exits non-zero when a run doesn't complete.** A run that ends
+  in `failed`, `timeout`, or an auth failure returns exit code 1 and `--json { "ok": false, … }`
+  with the reason, instead of exiting 0 with `ok:true` — so cron wrappers, `&&` chains, and
+  `--json` consumers actually see the failure. (Exit code is set via `process.exitCode` so the
+  JSON payload flushes fully to a pipe first.) Source: `apps/cli/src/commands/routines.ts`.
+- **Auth preflight before dispatch.** A routine whose (agent, version) has a cached
+  `revoked` auth verdict fails fast with `auth_preflight: revoked` without spawning a
+  doomed agent. Fails open on any other verdict, so a stale/absent probe or a network blip
+  never blocks a run, and agents with no live probe (codex/gemini/grok) are never blocked.
+  Source: `apps/cli/src/lib/runner.ts`, reusing `apps/cli/src/lib/auth-health.ts`.
+- **The routines daemon no longer starts silently token-less.** When no Claude OAuth token
+  is available (e.g. a headless macOS daemon whose keychain was locked at start), the daemon
+  now logs a `WARN` and fires a desktop notification instead of quietly spawning Claude
+  routines that all fail auth. Source: `apps/cli/src/lib/daemon.ts`.
+
+- **`agents sessions` indexes again from the standalone binary.** Every session
+  write went through a named-parameter bind (`INSERT ... VALUES (@id, @short_id,
+  ...)` in `apps/cli/src/lib/session/db.ts`), and `bun:sqlite` matches such an
+  object only when its keys carry the SQL sigil — bare keys bound nothing, so all
+  columns landed NULL and `sessions.short_id` (NOT NULL) rejected the row. The
+  shims exec the Bun-compiled `dist/bin/agents`, so no session reached the index
+  from the CLI: `agents sessions` printed `Warning: skipped unindexable session
+  <id>: NOT NULL constraint failed: sessions.short_id` per session and then
+  listed only rows indexed earlier by the Node entrypoint. The suite runs under
+  Node (vitest), where `node:sqlite` accepts bare keys, which is why CI stayed
+  green. `apps/cli/src/lib/sqlite.ts` now opens the DB with `strict: true` under
+  Bun, so the bare-key call shape this codebase uses works on both runtimes (the
+  edges still differ — the module doc lists what strict changes). `sqlite.test.ts`
+  covers both the bind and a full `agents sessions` scan in a real `bun`
+  subprocess.
+
+- **The compiled binary no longer reports itself as a phantom `/$bunfs` install, and can self-upgrade again.**
+  Since the standalone executable started shipping (1.20.53), the running copy located
+  its own package root as `<__dirname>/..`. Under a Bun standalone binary `__dirname`
+  is the embedded virtual filesystem, so that resolved to `/$bunfs` — a path that
+  exists nowhere. Two symptoms followed on every machine running the compiled binary:
+  the multi-install check reported one install as two (`/$bunfs (running)` alongside
+  the real npm root, with the misleading advice to uninstall a stale copy that did not
+  exist), and `agents upgrade` failed closed with `/$bunfs is not an npm-managed
+  install` because no global prefix can be derived from a virtual path. A new
+  `resolveRunningPackageRoot()` resolves the real on-disk root by walking up from
+  `process.execPath` to the directory whose `package.json` names this package, and
+  both sites use it. The PATH scan also recognizes `<root>/dist/bin/agents` as an
+  entrypoint, so a shim pointing at the compiled binary — typically first on PATH, and
+  the copy that actually runs — resolves to the same root as its sibling npm bin
+  instead of being invisible. Genuine multi-install warnings still fire, now naming a
+  real, actionable path. Source: `apps/cli/src/lib/self-update.ts`,
+  `apps/cli/src/index.ts`, `apps/cli/src/lib/self-update.test.ts`.
+
+- **Reading Claude usage no longer rotates the token and logs your fleet out.**
+  `getClaudeUsageInfo` refreshed the OAuth token just to read the usage endpoint
+  (`getClaudeAccessToken`, `usage.ts`) — and Claude's refresh token is single-use
+  and rotates server-side, so with one account signed into several machines that
+  background refresh (fired by the stale-while-revalidate usage cache and by
+  `agents run`'s default "balanced" rotation on every unpinned run) invalidated
+  every other box's copy, dropping the fleet to "run /login". This is the
+  RUSH-1822 stampede, which was fixed for the 3-minute health probe but left live
+  in the usage/run hot path. Usage reads are now strictly read-only: a new pure
+  `claudeUsageAccessTokenNoRefresh` uses the stored access token and, when it is
+  within the refresh leeway, reports "no usage right now" instead of rotating —
+  exactly mirroring `probeClaudeStatus`. The single legitimate refresh stays on
+  the real `claude` run, never a usage read. Source: `apps/cli/src/lib/usage.ts`,
+  `apps/cli/src/lib/usage.test.ts`.
+
+- **No more Touch ID storm from the usage view.** On macOS, the usage-bar fetch
+  (`agents view`, the Factory watchdog that polls `agents view --json` every 60s
+  per agent) and the daemon's every-3-min auth-health probe each read Claude's own
+  ACL-bound `Claude Code-credentials-<hash>` keychain item on every refresh — each
+  read popping a Touch ID prompt, so several running Claude agents meant a
+  biometric prompt every couple of minutes. Those two access-token-only, high-
+  frequency callers now opt into a device-local **no-ACL** access-token cache (the
+  prompt-free mechanism `secrets/session-store.ts` uses for unlocked bundles),
+  bounded by the token's own expiry, so the ACL-gated read happens at most once per
+  token lifetime and every agent process reads the cache silently. The cache is
+  opt-in and caches only the short-lived access token — callers that need the full
+  credential (`isClaudeAuthValid`'s refresh, `readClaudeCredentialsBlob`'s Rush
+  Cloud export) still take the ACL read with the refresh token intact. Source:
+  `apps/cli/src/lib/usage.ts`.
+
+- **The daemon no longer silently repoints your default agent version.** The unattended
+  6-hourly launch-health pass (`healBrokenDefaultLaunches` → `ensureAgentRunnable`) now runs
+  with `allowDefaultSwitch: false`: it still repairs the *current* default in place, but if
+  that default can't be repaired it no longer adopts another installed version or installs
+  `latest` and pins it. A background default switch installs a fresh version home, which for
+  Claude is a fresh, empty credential scope (macOS keychain keyed off `CLAUDE_CONFIG_DIR`;
+  Linux per-version token file) — i.e. an "unprovoked logout" at a time uncorrelated with
+  anything you did, and a leading cause of routine auth-failures on unattended machines. The
+  daemon now logs a `WARN` naming the version to pick instead; interactive callers
+  (`agents run`, `agents add`) are unchanged and still repoint as before. Source:
+  `apps/cli/src/lib/versions.ts`, `apps/cli/src/lib/daemon.ts`.
+
+- **`agents sessions detach` / `agents sessions attach` — send a running agent to the
+  background and back.** `agents sessions detach <id>` stops a live session's
+  interactive process (killing the tmux session when tmux-hosted, else SIGTERM'ing the
+  pid) and continues it **headless**, detached, via the existing version-pinned
+  `agents run --resume` path — so it drives its task to completion without holding a
+  terminal. The resumed run carries a nudge that tells the now-unwatched agent it is
+  headless and to make the call rather than stall on a confirmation nobody can answer.
+  `agents sessions attach <id>` stops that headless continuation and **resumes the
+  session interactively** in the current terminal (`resumeSessionInPlace`) — the same
+  session and full history, including whatever the background run did. They sit under
+  `sessions` next to `focus`/`resume` (the session-lifecycle verbs); the Factory
+  extension exposes them as **Agents: Detach** (`Cmd/Ctrl+K B`) and **Agents: Attach**
+  (`Cmd/Ctrl+K A`). Both verbs are agent-agnostic (native resume for Claude/Codex,
+  `/continue` replay for the rest). A session on **another host** is detached there over SSH rather than
+  killed locally; **cloud and team sessions are refused** (they have their own
+  lifecycles); the interactive process is fully awaited before the headless resume
+  starts (no transcript race); and the background run's output is captured to
+  `~/.agents/.cache/logs/detach-<shortid>.log` so a crash after detach is
+  debuggable. `agents sessions --active --json` now carries a `presence` field
+  (`attached` / `background` / `parked`), folded onto every row from a per-session
+  detach record, so the menu bar and Factory show where each agent is. Source:
+  `apps/cli/src/commands/detach.ts`, `apps/cli/src/commands/attach.ts`,
+  `apps/cli/src/lib/session/detached.ts`.
+  (`agents sessions migrate`'s old `detach` alias is renamed to `relocate` to free
+  the `detach` name for the background/foreground verb — `migrate` and `relocate`
+  both still work.)
+
+- **`agents devices sync` no longer auto-registers tailnet nodes another user
+  shared into the tailnet.** `tailscale status` includes ShareeNode peers (for
+  example a tagged relay shared in by a teammate); the parser ignored that flag,
+  so bootstrap registered them as your own boxes and they surfaced in `agents
+  fleet ls`. Parsing now carries a `sharee` flag, `runDeviceSync` filters those
+  peers out of auto-registration and suggestions, and the interactive picker
+  leaves them unchecked (labeled `shared`). Deliberate paths — `devices
+  register`/`add` and a `fleet:` manifest — still reach shared nodes when you name
+  them. Source: `apps/cli/src/lib/devices/sync.ts`,
+  `apps/cli/src/lib/devices/tailscale.ts`.
+
+- **Faster `agents sessions` on large / unchanged session trees.** Session
+  discovery re-walked and re-`stat`'d every transcript directory on every
+  `agents sessions` / `output` / `view` / `teams` call — for a heavy user the
+  immutable version-home and backup roots dominated the cost yet never changed. A
+  new `dir_ledger` (SQLite, schema v14) caches each leaf transcript directory's
+  `(mtime, entry_count)`; when both match, the per-file `stat` of that directory
+  is skipped and its unchanged files are served straight from the DB, so those
+  immutable roots cost one dir stat each instead of hundreds of per-file stats.
+  Append safety is preserved: a file under the agent's live `~/.<agent>` root, or
+  scanned within the last 10 minutes, is always re-`stat`'d (a parent-dir mtime
+  bumps on create/delete/rename but NOT on an in-place append), so a growing live
+  session is never missed; a create / delete / rename bumps the dir mtime and
+  forces a full re-walk of that dir exactly as before. Wired into the Claude and
+  Gemini scanners (the biggest win); the other scanners keep the existing
+  per-file path. Set `AGENTS_SESSIONS_NO_DIR_LEDGER=1` to disable the
+  short-circuit and force the old full per-file walk. Source:
+  `apps/cli/src/lib/session/db.ts`, `apps/cli/src/lib/session/discover.ts`.
+
+- **`agents feed post` — agents announce progress without opening a “needs you”
+  block.** Free-text status posts append a `status.posted` milestone to the
+  per-session activity log (same stream as `agents activity` and the feed’s
+  recent-activity lane). Session/agent/host/runtime/pid/launch identity is
+  auto-stamped from the process env and the per-pid launch registry — no
+  domain-specific flags (tickets, URLs). Managed runs export `AGENT_SESSION_ID`
+  / `AGENTS_AGENT_NAME` / `AGENTS_CWD` so a Bash tool call needs no extra
+  wiring. Source: `apps/cli/src/lib/feed-post.ts`, `apps/cli/src/commands/feed.ts`,
+  `apps/cli/src/lib/activity.ts`, `apps/cli/src/lib/exec.ts`.
+
+- **PID-reuse protection now works on Windows, from one implementation.**
+  `captureProcessStartTime()` existed twice — in `pty-server.ts` and `teams/agents.ts` —
+  and neither copy had a Windows branch: both fell through to `ps`, which does not exist
+  there, so the function always returned `null` and every caller silently skipped the
+  guard. A dead session whose PID the OS had recycled read as alive, and
+  `agents teams stop` could signal an unrelated process group. Both copies now delegate to
+  a single implementation in `platform/process.ts` that reads `CreationDate` from
+  `Win32_Process` as a culture-independent FILETIME, memoizes per PID (the listing path
+  probes one PID per row), and bounds the spawn with a timeout. Source:
+  `apps/cli/src/lib/platform/process.ts` (`captureProcessStartTime`).
+
+- **A session's recorded working directory is no longer rebased onto the local drive.**
+  `normalizeCwd()` ran `path.resolve()` over a cwd read out of a transcript, which may name
+  a directory on another machine. On Windows that grafted the current drive onto a POSIX
+  path (`/Users/me` became `D:\Users\me`), inventing a location that never existed. A
+  foreign path is now normalized with POSIX rules and never realpath'd; local paths still
+  normalize and resolve symlinks as before. Source:
+  `apps/cli/src/lib/session/discover.ts` (`normalizeCwd`).
+
+- **`agents cloud`'s task database can now be closed.** `cloud/store.ts` opened `tasks.db`
+  and exported no closer, so nothing could release the handle — on Windows that leaves the
+  file un-unlinkable. Adds `closeStore()`, the mirror of `closeDB()` in `session/db.ts`.
+  Source: `apps/cli/src/lib/cloud/store.ts` (`closeStore`).
+
+- **Collapse indistinguishable worker processes into one active-session row.** A daemon
+  that spawns many agent binaries (an OpenClaw gateway running `codex app-server`) produced
+  one `sessions --active` row per process, because a row with no session id and no
+  transcript file skipped dedupe entirely — the Factory Floor showed ~40 identical
+  `.openclaw · bg · 0s ago` rows that buried every real session. Dedupe now falls back to
+  the cloud/run handle and then to the worker's identity (agent binary + context + working
+  directory), so N indistinguishable workers become one row carrying `pidCount: N`.
+  Source: `apps/cli/src/lib/session/active.ts`.
+
+- **`sessions --active` now stamps a start and last-activity time on every
+  interactive session.** Terminal, tmux, and headless agents discovered by the
+  process scan carried no `startedAtMs` — so the Factory Floor rendered every
+  running agent as "0s ago" even when its transcript, topic, and progress had
+  resolved. The scan now stamps `startedAtMs` (the SessionStart hook's own
+  timestamp, else the transcript's creation time) and a new `lastActivityMs` (the
+  transcript's last-write) on each row, and the Floor renders "Xs ago" off the
+  real last-activity instead of the session's age. Source:
+  `apps/cli/src/lib/session/active.ts`, `apps/cli/src/lib/session/hook-sessions.ts`.
+
+- **`agents sessions` now classifies Grok transcripts into real events, not a
+  one-line stub.** Grok sessions were indexed (title, timestamps, message count)
+  but opening one showed a single placeholder `session_start` event — `parseGrok`
+  was a stub. It now reads the session's `chat_history.jsonl` and normalizes every
+  line into the shared `SessionEvent` shape: `user`/`assistant` messages,
+  `reasoning` → thinking, `assistant.tool_calls[]` → tool_use (with `path` and
+  `command` surfaced), and `tool_result` correlated back to its call by
+  `tool_call_id` (an `Error:`-prefixed result becomes an error event). The scanner
+  records `summary.json` as the session path, so the parser resolves
+  `chat_history.jsonl` beside it; per-line timestamps aren't stored, so each event
+  carries the session's `created_at` (falling back to the transcript mtime).
+  Verified end-to-end against a real Grok session (30 events: messages + thinking +
+  tool_use + tool_result). Source: `apps/cli/src/lib/session/parse.ts`.
+
+- **`agents harness` — name a (host CLI + model) combo and run it like a native agent
+  type.** `agents harness add spark --host opencode --model meta/muse-spark-1.1` writes
+  `~/.agents/profiles/spark.yml`, and `agents run spark` then dispatches OpenCode pinned to
+  that model; `--model` at run time still overrides it. A harness is a profile under the
+  hood (same YAML, same run resolution, same `agents repo push user` device sync), so
+  `agents profiles` is unchanged; `harness` adds the host+model one-shot (no preset
+  required), owns its own `--host` (never remote-routed, unlike `profiles --host`), and
+  `agents harness list` shows custom harnesses, addable presets, and the native harness
+  registry in one view. The model lands on the host's model env var
+  (`OPENCODE_MODEL`/`ANTHROPIC_MODEL`/`GROK_MODEL`/`GEMINI_MODEL`). Source:
+  `apps/cli/src/commands/harness.ts`, `apps/cli/src/lib/profiles.ts`,
+  `apps/cli/src/lib/hosts/passthrough.ts`.
+- **Fixed the Spark presets, which never ran.** `claude-spark`, `opencode-spark`, and the
+  `opencode` preset help all named `meta/claude-spark-1.1` — a model neither OpenRouter nor
+  OpenCode serves; the live id is `meta/muse-spark-1.1`. Separately, an `authOptional`
+  preset (opencode) still wrote a keychain `auth` block that `resolveProfileEnv` always
+  read, so `agents run opencode-spark` died with "Keychain item not found" even though
+  OpenCode uses its own login. `resolveProfileEnv` now skips optional auth when no token is
+  stored, so those presets run on the host's own credentials. Source:
+  `apps/cli/src/lib/profiles-presets.ts`, `apps/cli/src/lib/profiles.ts`.
+
+- **`agents sessions` now heals any pre-existing empty-`shortId` rows on upgrade.**
+  The prior fix stopped *producing* empty shortIds (bare-prefix ids like a `session_`
+  directory stripped to `''`), but a row already poisoned in the index did not
+  self-heal — an empty shortId is not re-parsed unless its transcript changes, and an
+  orphaned row whose file is gone never re-parses at all, so it stayed unaddressable in
+  the `short_id LIKE ?` picker lookups. A one-time schema migration (v16) repairs every
+  such row in place (`short_id = substr(id, 1, 8)`), so upgrading users get a clean
+  index without a full rescan. Source: `apps/cli/src/lib/session/db.ts`.
+
+- **Host and cloud runs are now mappable in `agents sessions` for every agent, not
+  just Claude.** A `--host` dispatch forced a session id only for Claude (the sole
+  agent that accepts `--session-id`); every other agent's remote run coined its own
+  id that the launcher never learned, so the run was orphaned in `agents sessions`
+  and couldn't be resumed by id. The remote run now prints its resolved session id
+  as a one-line stdout sentinel (via a new internal `--emit-session-id` flag the
+  dispatch forwards); the launcher parses it out of the followed log and stamps it
+  on the host task, so `agents sessions`/resume-by-id work for Codex, Gemini, and
+  the rest. Source: `apps/cli/src/lib/hosts/session-marker.ts`,
+  `apps/cli/src/lib/hosts/session-index.ts`, `apps/cli/src/lib/hosts/run-target.ts`,
+  `apps/cli/src/lib/exec.ts`.
+
+- **`agents cloud run` reconciles into the session index at dispatch.** The cloud
+  task store (`tasks.db`) and the session index were disjoint: a cloud run wrote only
+  the store, and `agents sessions` learned of it only later, via a proxy discovery.
+  Now every cloud dispatch (and every status poll) registers a session row keyed by
+  the real execution id with a `[cloud/<status>]` label, so a launch is mappable to a
+  session immediately. Source: `apps/cli/src/lib/cloud/session-index.ts`,
+  `apps/cli/src/lib/cloud/store.ts`.
+
+- **Codex Cloud dispatch no longer fabricates a task id.** When `codex cloud exec`
+  didn't print a parseable id, the provider minted a synthetic `codex-<timestamp>` —
+  an id that could never match the real execution, silently breaking status, list,
+  and session reconcile. It now also scans stderr for the id and, on a genuine miss,
+  fails loud pointing at `agents cloud list` rather than persisting a bogus id.
+  Source: `apps/cli/src/lib/cloud/codex.ts`.
+
+- **`agents import <agent> --as <version>` — the version flag now actually works.** The
+  option was declared as `--version <version>`, which the program-level `.version(VERSION)`
+  claims globally: `agents import codex --version 1.2.3` printed the CLI's own version and
+  exited without importing. It had been unreachable since it was introduced, and the
+  "could not determine version" error advised passing it. Renamed to `--as`, which reaches
+  the command. This also makes `agents import <agent> --isolated --as <version>` re-seed an
+  *existing* isolated copy from your current local config, instead of only ever creating a
+  new copy at whatever version happens to be installed locally.
+- **Fixed a silent no-op in config copying under the compiled binary.** `fs.cpSync` defaults
+  to `force: true`, but Bun drops that default when a `filter` is supplied — so copies that
+  strip symlinks left existing destination files untouched. `dist/bin/agents` is
+  bun-compiled, so this affected a shipped path, not just tests. Now passed explicitly in
+  `config-transfer.ts` and `import.ts`.
+
+- **`agents import --isolated` no longer misdescribes itself, chokes on codex, or copies
+  your session history.** Three defects found by using it: (1) the confirmation summary
+  printed `config: ~/.codex (will be moved into version home)` even under `--isolated` —
+  announcing the exact adoption the flag exists to prevent, though the code correctly
+  copied; it now reads `will be COPIED — your original stays put`. (2) Seeding failed
+  outright for codex with `Cannot overwrite non-directory`, because its version home is a
+  SUN_LEN-safe symlink to `~/.agents/.codex-homes/<version>/.codex` rather than a real
+  directory; the seeder now follows the link and writes the home the agent actually reads.
+  (3) The seed copied the whole config dir including sessions, logs, caches and sqlite —
+  757MB on a real machine, 349MB of it `sessions` — so runtime state is now skipped and
+  reported (33MB for the same install), with `--all` to include it. Also skips the config
+  copy when `~/.<agent>` is itself a managed symlink, which is another version's home
+  rather than the user's real settings. Source: `apps/cli/src/lib/import.ts`,
+  `apps/cli/src/commands/import.ts`.
+
+- **Incremental Claude transcript parsing on the live scan path.** When an active
+  Claude session grows, `agents sessions` (and every consumer that scans:
+  `output` / `view` / `teams` / the watcher) now re-parses only the newly-appended
+  bytes instead of re-reading the whole transcript from the top. The scan persists
+  a resumable continuation (`parser_state` + `content_text`, schema v15) in the
+  `scan_ledger`; the next scan resumes from the saved byte offset when the file
+  merely grew and its mtime did not go backwards, and falls back to a full reparse
+  from byte 0 on a cold start, a truncation / rewrite (size shrank), or a clock
+  rewind. Both paths run through one shared reducer, so the indexed row an append
+  produces is identical, field for field, to a from-scratch full reparse — token
+  counts, cost, duration, topic/title, PR + ticket refs, and FTS content all match
+  even when a signal straddles two scans (a `gh pr create` in one write and its URL
+  in the next). Only the Claude scanner is wired for now (Codex / Kimi are
+  follow-ups); the other scanners are unchanged. Source:
+  `apps/cli/src/lib/session/discover.ts`, `apps/cli/src/lib/session/db.ts`.
+
+- **Incremental Codex + Kimi transcript parsing on the live scan path.** Following
+  the Claude incremental parse, the Codex rollout scanner and the Kimi wire.jsonl
+  scanner now re-parse only the newly-appended bytes when an active session grows,
+  instead of re-reading the whole file from the top every scan (`agents sessions`
+  and every consumer that scans: `output` / `view` / `teams` / the watcher). Each
+  persists a resumable continuation in the `scan_ledger` (`parser_state`, reusing
+  the schema v15 columns): the next scan resumes from the saved byte offset when
+  the file merely grew and its mtime did not go backwards, and falls back to a full
+  reparse from byte 0 on a cold start, a truncation / rewrite (size shrank), or a
+  clock rewind. Both branches run through one shared reducer per scanner, so the
+  indexed row an append produces is identical, field for field, to a from-scratch
+  full reparse. For Codex that covers messageCount, the last-wins cumulative token
+  snapshot (tokenCount / outputTokens / cost), duration, topic, and PR + ticket +
+  team signals that straddle two scans (a `gh pr create` function_call in one write
+  and its URL in the next). For Kimi it covers the additive message + token
+  counters. Both incremental paths apply only newline-terminated lines and defer a
+  complete-but-unterminated trailing record to the next pass, so a record written
+  before its `'\n'` is flushed is never double-counted. Grok is out of scope (it
+  reads a whole `summary.json`, not an append-only JSONL); Claude / Gemini and the
+  shared helpers are unchanged. Source: `apps/cli/src/lib/session/discover.ts`.
+
+- **Isolated installs now resume sessions and resolve `@default` like any other install.**
+  Two places still assumed a managed version is reachable on PATH — which an isolated
+  install deliberately is not. (1) `agents sessions` resume looked up
+  `<cli>@<version>` with a plain PATH lookup, never found it (the shims dir is
+  intentionally off PATH under `--isolated`), concluded the version was uninstalled, and
+  fell back to spawning `<cli> "/continue <id>"` — a slash command neither CLI has, so
+  the session simply never resumed. It now resolves the versioned alias by absolute path,
+  the way `agents run` already did, and the fallback is the agent's real resume verb
+  against the current version rather than `/continue`. (2) The agent-spec resolver behind
+  `--agents` / `@default` / `@pinned` read only the global default, so an isolated-only
+  agent threw "No default version set" even after an explicit `agents use` —
+  `resolveVersion` had gained the isolated-default fallback but this resolver had not.
+  Both now consult it, and report `isolated-default` as the source rather than claiming a
+  global default. `opencode` resume stays deliberately un-pinned, since its sessions are
+  shared across versions. Source: `apps/cli/src/commands/sessions.ts`,
+  `apps/cli/src/lib/agent-spec/`.
+
+- **Menu bar: prune orphan attention sentinels; group `NEEDS YOU`; end silent
+  truncation.** `LocalState.attentionMarks` now takes the caller's live-session
+  set and unlinks sentinels whose `sessionId` is not alive — the
+  `06-attention-sentinel.sh` hook already clears on `Stop`/`UserPromptSubmit`,
+  but leaks when a terminal is killed hard, a Claude version has no hook, or the
+  `sessionId` doesn't round-trip; the reader is the only layer with `pidAlive`
+  ground truth. Verified on mac-mini: 6 stale sentinels aged 1–22 days pruned to
+  0 on one dump run. `addNeedsAttention` groups blocked sessions by
+  `(agent, repo)` and collapses groups of 2+ into a single
+  `<Agent> · <repo> · N waiting · oldest <t> ›` row + submenu, dropping the
+  generic `— Claude is waiting for your input` filler when the Notification
+  message is empty. `addActive` collapses the `"other"` bucket to a single
+  clickable `ACTIVE · other · N idle ›` row when idle-only, and replaces the
+  silent 3-cap on idle rows with an explicit `+ N more idle ›` row + submenu so
+  the header count always matches visible + explicit-hidden. No new session
+  state — closed = hidden, as before.
+
+- **The menu-bar helper no longer crash-loops on macOS 26.** npm's pack/extract
+  strips the ad-hoc signature the release bakes into `MenubarHelper.app`, leaving
+  it `code object is not signed at all`. macOS 26's code-signing monitor SIGKILLs
+  an unsigned binary at launch (`SIGKILL (Code Signature Invalid)`), so under the
+  launchd `KeepAlive` service it restarted forever, and its unstable identity made
+  the Accessibility grant (needed for the clip→paste keystroke in `Clip.swift`)
+  re-prompt every time. The install path now re-signs the copied bundle ad-hoc and
+  verifies it before bootstrapping the service, so every machine gets a valid
+  signature the kernel accepts — and a bundle that can't be made valid is skipped
+  instead of spun in a crash loop. A Developer-ID-signed helper (which survives
+  npm) is left untouched. Source: `apps/cli/src/lib/menubar/install-menubar.ts`,
+  `apps/cli/menubar/scripts/build.sh`.
+
+- **The configured model now shows wherever an agent is displayed.** `agents
+  view`, `use`, `add`, `status`, and `inspect` surface the model an agent+version
+  actually runs with, beside the version (the identity cluster reads `agent ·
+  version · model · account`). The model is resolved agents.yaml `run.defaults` →
+  the native `settings.json` → the built-in default, and `agents view --json`
+  gains a `configuredModel { model, source }` field so downstream tools can read
+  both the value and where it came from. Source: `apps/cli/src/lib/models.ts`,
+  `apps/cli/src/commands/view.ts`.
+
+- **`agents repo pull` now reloads the routines daemon so device pins refresh.**
+  The scheduler froze each routine's config — device pins included — in memory at
+  daemon start. A `repo pull` rewrites the synced routine YAML on disk (a routine
+  re-pinned to another host, say), but without a reload the daemon kept firing the
+  pre-pull pins, so a routine moved to another device still fired on the old host
+  too — a phantom double-fire across the fleet. A successful pull now SIGHUPs the
+  running daemon (`scheduler.reloadAll()`), re-reading the YAML so pins refresh. A
+  no-op when the daemon isn't running or on Windows (no SIGHUP). Source:
+  `apps/cli/src/commands/repo.ts`.
+
+- **Routines can pin a Claude account by identity to stop the OAuth-rotation
+  logout storm.** Unpinned `claude` routines pick an account with the default
+  `balanced` (stateless weighted-random) strategy, so two concurrent unattended
+  runs — on one box or across the fleet — can land on the same account; Claude's
+  refresh token is single-use and rotates server-side, so the second refresh
+  revokes the first run's token mid-flight (`401 OAuth access token has been
+  revoked`). Across ~20 routines waking in one morning window that is a
+  self-inflicted logout storm (RUSH-1957). A routine may now set `account:` (a
+  login email or account key) to pin the run to the version slot holding that
+  account — no rotation, no usage-read refresh, no failover onto other accounts —
+  so each routine (or each device's routines) refreshes one credential nobody else
+  touches. Prefer it over `version:`, which pins a version *number* that is GC'd on
+  the next upgrade, silently dropping the routine back to `balanced`. An account
+  that is not signed in on the box warns and falls back to the strategy rather than
+  refusing to run. Source: `apps/cli/src/lib/routines.ts`,
+  `apps/cli/src/lib/rotate.ts`, `apps/cli/src/lib/runner.ts`.
+
+- **Balanced account rotation now works for scheduled Claude routines.** The
+  routines daemon injects one `CLAUDE_CODE_OAUTH_TOKEN` into its environment so a
+  token-less default account still authenticates (RUSH-1759). But Claude — and the
+  Linux shim's own `-z CLAUDE_CODE_OAUTH_TOKEN` guard — both prefer that env var
+  over a pinned account's `CLAUDE_CONFIG_DIR`, so once balanced rotation pinned a
+  specific account the injected token shadowed it: the whole pool was inert and
+  every fire authenticated as (and eventually 401'd on) the one token. A routine
+  spawn now drops the injected token when the rotated account holds its own on-disk
+  credential, so it authenticates as that account; when the account has no on-disk
+  credential (the RUSH-1759 default) the injected token is kept. Source:
+  `apps/cli/src/lib/runner.ts` (`buildRoutineSpawnEnv`),
+  `apps/cli/src/lib/agents.ts` (`claudeHomeHasOwnCredential`).
+
+- **No more Touch ID prompt on every new agent session.** Bundle metadata (names,
+  descriptions, variable names + references, and non-sensitive `--value` literals)
+  is now stored WITHOUT the biometry ACL at every prompt-policy tier, not just
+  `never`. Metadata is non-sensitive by contract — real secret values live in
+  separate `agents-cli.secrets.*` items that keep the bundle's policy ACL — so
+  enumerating bundles no longer needs a keychain unlock. This kills the recurring
+  Touch ID prompt that fired on every new Claude/agent terminal: a SessionStart
+  hook runs `agents devices list`, which scans bundle metadata through crabbox, and
+  that scan used to pop Touch ID once per broker window (~7 days) on every cold
+  launch. `agents secrets list` is now silent too. Reading a bundle's actual
+  values (run injection, `view --reveal`) still prompts. Existing bundles are
+  migrated automatically and once: the first metadata scan after upgrade re-homes
+  each bundle's metadata item no-ACL (reusing the read it already did, so it adds
+  no extra prompt), and every scan after that is prompt-free. Source:
+  `apps/cli/src/lib/secrets/bundles.ts`, `apps/cli/src/lib/secrets/index.ts`.
+
+- **Wire workflows support for Grok (RUSH-1863).** Grok Build ships native Workflows as of v0.2.111 (on by default): file-defined Rhai orchestration scripts in `~/.grok/workflows/<name>.rhai` (user-global, under `GROK_HOME`) and `.grok/workflows/` (repo-level). agents-cli now declares `workflows: { since: 0.2.111 }` for grok, projects central `WORKFLOW.md` bundles into managed Rhai scripts via `transformWorkflowForGrok` (with an `// agents_workflow: <name>` marker so user-authored scripts are never overwritten), and registers the writer + detector so `agents workflows add --agents grok@…` / sync land files Grok can invoke as `/<name>`. Distinct from the grok *commands* gap (RUSH-1851). Source: `apps/cli/src/lib/agents.ts`, `apps/cli/src/lib/workflows.ts`, `apps/cli/src/lib/staleness/{writers,detectors}/workflows.ts`, `apps/cli/src/lib/versions.ts`.
+
+- **Dispatch-bar screenshots now upload via `linear create --image` instead of
+  landing as dead local paths.** The menu-bar helper previously injected
+  screenshot paths into the ticket-agent prompt, and the model echoed them into
+  the issue description as `/Users/…` text. The agent now returns ticket fields
+  as JSON, and the helper itself runs `linear create` with `--image <path>` for
+  each selected screenshot, so paths pass through Swift argv and survive spaces
+  or `@` in CleanShot filenames. Coordinates with the `linear create --image`
+  support added in `phnx-labs/linear-cli#28`. Source:
+  `apps/cli/menubar/Sources/MenubarHelper/AgentsCLI.swift`,
+  `apps/cli/menubar/Sources/MenubarHelper/IssueSelfTest.swift`.
+
+- **Native helper bundles now ship the agents-cli icon and the computer helper is
+  branded "Agents Computer".** MenubarHelper.app, ComputerHelper.app, and the
+  keychain `Agents CLI.app` previously had no `CFBundleIconFile`/`.icns`, so
+  Notification Center and System Settings → Privacy & Security showed a blank
+  square. Each build script now generates `AppIcon.icns` from `assets/logo.png`
+  and adds `CFBundleIconFile` to the bundle `Info.plist`. The computer helper
+  display name changed from "Computer Helper" to "Agents Computer" while keeping
+  its bundle id and on-disk path, so existing Accessibility/Screen Recording
+  grants remain valid. Source: `apps/cli/menubar/scripts/build.sh`,
+  `native/computer-mac/scripts/build.sh`, `apps/cli/scripts/build-keychain-helper.sh`,
+  `apps/cli/src/commands/setup-computer.ts`, `apps/cli/menubar/Sources/MenubarHelper/PromptPanel.swift`.
+
+- **One resolver for `--host` / `--device` — every subcommand now dials the same box
+  (RUSH-1967).** A host token used to resolve through two disagreeing code paths:
+  `run --host` (and the generic passthrough, teams placement, doctor, funnel, remote
+  secrets) let a `~/.ssh/config` stanza win and dialed its bare name, while
+  `sessions --host`, session bundles, and `agents ssh` dialed the device Tailscale
+  `user@dnsName`. The same name could reach two different machines, and because the two
+  emitted different target strings they never shared a multiplexed SSH connection.
+  Resolution is now a single merged lookup (`matchHost`): the live devices registry
+  supplies address/OS/presence, the agents.yaml overlay supplies capability tags, and
+  ssh_config supplies hosts Tailscale has never seen — merged per-field, not one
+  shadowing another. Fallout fixed with it: an enrolled device address always comes from
+  the live registry (so `agents devices sync` takes effect without re-enrolling, no more
+  frozen route), an enrolled device keeps its presence and `dispatchable` flags, a
+  password-auth device cannot be made dispatchable by shadowing it with an inline entry,
+  and a host present only in `~/.ssh/config` is now visible to the `sessions --host`
+  fan-out.
+
+- **`agents run --device`/`--host` now auto-reconnects when the network drops.** A
+  remote interactive agent runs in a detached tmux session on the peer, so an SSH
+  blink kills only the local client — the agent keeps running. Previously the local
+  side exited with ssh's connection-layer code (255) and you had to notice, find the
+  session id, and `agents sessions focus` by hand. Now, when a tmux-hosted run with a
+  known session id drops (exit 255), the client re-attaches the live remote pane
+  automatically over SSH — reusing the peer's own `agents sessions focus <id> --local
+  --attach-only` (a live join, not a resumed copy) — with bounded exponential backoff
+  (2s→30s, up to 6 attempts, and the budget refills after a genuinely live
+  reconnection). A clean detach (Ctrl-b d, exit 0) or a real agent exit (any non-255
+  code) is left alone; `--raw`/no-tmux runs, which don't survive a drop, are not
+  retried. This covers Claude and resumed runs today; capturing a resumable id for
+  other agents on the `--device` path is tracked in RUSH-2007. Source:
+  `apps/cli/src/lib/hosts/reconnect.ts`, `apps/cli/src/commands/exec.ts`.
+
+- **The secrets broker cache now actually works on the shipped macOS binary — one Touch ID per bundle per hold window, not one per read.** The three synchronous broker clients (`agentGetSync`, `agentReachableSync`, `agentEvictSync`) spawned `process.execPath -e <inline node program>`, which is only correct when `process.execPath` is node. Since 1.20.53 the macOS `agents` is a bun-compiled Mach-O, so `process.execPath` is the CLI itself and the spawn became `agents -e …` — rejected with `error: unknown option '-e'` and a non-zero exit. Each client then took its own failure path (`null` / `false` / no-op), which the caller reads as "broker down" and falls through to a real keychain read. Net effect: on every standalone install the hot cache was never hit, so the `daily` policy's one-prompt-per-7d never applied and **every bundle read re-popped Touch ID** — `agents secrets status` would report the broker running while holding nothing but explicitly `unlock`ed bundles (the durable session-store path, the only client that never spawned). Same defect class as the broker launch fixed in 1.20.56 and the PTY sidecar in 1.20.72; these three sites were simply never converted. They now spawn top-level `__secrets-get` / `__secrets-ping` / `__secrets-lock` tokens built by the shared `getCliLaunch` primitive and intercepted in `index.ts` before commander — alongside `__daemon-run` and `__vault-age-helper`, and deliberately above the line where every normal command runs `checkForUpdates()` and forks a detached background sync, which would otherwise fire on every cache hit. Source: `apps/cli/src/lib/secrets/agent.ts`, `apps/cli/src/index.ts`.
+
+- **Let a bundle whose passphrase is lost be deleted, so the name can be recovered.**
+  A file-backed bundle that no longer decrypts bricked its own name: `view`, `add`,
+  `delete`, and both `import --from icloud` and `import --from 1password` all called
+  `readBundle()` first, so none of them could touch it — including the two commands that
+  exist to restore it from a valid iCloud Keychain or 1Password copy. `delete` now uses
+  the new `readBundleIfDecryptable()` and proceeds without the plaintext, reporting that
+  the bundle's keychain items cannot be enumerated for purging instead of claiming a
+  clean purge. The `view` hint no longer points at `import --from icloud` for a bundle
+  that is still on disk — that command fails identically — and names the delete-then-import
+  sequence that actually works. Only a genuine decrypt failure counts as deletable: a
+  bundle that is merely locked for the run (headless macOS with no
+  `AGENTS_SECRETS_PASSPHRASE`) still fails loudly and is left in place, so
+  `secrets delete <name> --yes` from a cron/launchd run that forgot to export the
+  passphrase can't silently destroy a healthy bundle. Source:
+  `apps/cli/src/lib/secrets/bundles.ts`, `apps/cli/src/commands/secrets.ts`.
+
+- **Session tab titles no longer go missing or stale.** A rescan that carried an
+  empty or whitespace-only label used to clobber a good stored label, because
+  `upsertSession`/`upsertSessionsBatch` wrote `label = excluded.label`
+  unconditionally on conflict. The `ON CONFLICT` clause now preserves an existing
+  non-empty label and only overwrites when a real label arrives, so a `/rename`,
+  agent-generated title, or `--name` handle survives later rescans. Headless runs
+  launched with `--name` now also surface that name as the session label (matching
+  the terminal path) instead of showing only the topic. Source:
+  `apps/cli/src/lib/session/db.ts`, `apps/cli/src/lib/session/active.ts`.
+
+- **`agents sessions --active` no longer shows zombie sessions from recycled pids.**
+  Liveness was a bare `process.kill(pid, 0)` existence check, so once the OS handed a
+  dead session's pid to an unrelated process, that session kept showing as alive — and
+  the registry GC never pruned it. `isPidAlive` now takes the session's recorded
+  `startedAtMs` and, when a start time is available, verifies the process at that pid did
+  not begin meaningfully after the session started (a 60s window): a process that started
+  later is a reused pid, so the session is dead. The start time is read once via
+  `ps -o lstart=` (macOS + Linux); Windows and any unreadable start time fall back to the
+  existence check, never worse than before. Applied to every registry-backed liveness
+  path — the live-terminals filter, the terminal listing, the tmux-pane resolver, and the
+  pid-registry prune. Source: `apps/cli/src/lib/session/active.ts`.
+
+- **`agents sessions` no longer corrupts the index with empty `shortId` rows.**
+  Session ids that are only a known prefix — a bare `session_` Rush directory, an
+  id of exactly `api-` (Hermes) or `ses_` (OpenCode) — used to strip to `''`
+  (`'session_'.replace(/^session_/, '').slice(0, 8) === ''`). An empty `shortId`
+  passes the `short_id TEXT NOT NULL` constraint (empty string is not NULL) yet
+  matches nothing in the `short_id LIKE ?` picker lookups, so the row was silently
+  unaddressable. All shortId derivation is now routed through one helper,
+  `deriveShortId`, that guarantees a non-empty result by falling back to the
+  unstripped id when the strip empties it. Every producer — the twelve parsers in
+  `discover.ts`, `session/cloud.ts`, `cloud/session-index.ts`, `hosts/session-index.ts`,
+  `session/fork.ts`, and `commands/go.ts` — uses it, replacing the duplicated inline
+  `.slice(0, 8)` (some with a `.replace(prefix, '')`). Source:
+  `apps/cli/src/lib/session/short-id.ts`.
+
+- **Honest live status: report `unknown` instead of a fake `idle` (RUSH-1976).** `agents
+  sessions --active` now reports an explicit `unknown` status (`◌`) for a live agent whose
+  activity it cannot introspect — a running gemini/droid/cursor/opencode whose transcript
+  format is not parsed — instead of the misleading `idle` it showed before. Status resolution
+  is standardized in one place (`resolveFallbackStatus`): a vanished transcript file no longer
+  flips to a false `running`, an unanswered prose question with no mtime signal no longer
+  sticks as "waiting on you" forever (the RUSH-1522 null-mtime hole), and the `ps`/`lsof`
+  probes behind the scan now have hard timeouts so a hung syscall can't silently drop live
+  sessions. Source: `apps/cli/src/lib/session/active.ts` (`resolveFallbackStatus`),
+  `apps/cli/src/lib/session/state.ts`, `apps/cli/src/commands/sessions.ts`.
+
+- **Interactive session browser: preview-by-default with clickable ticket + PR
+  links.** In `agents sessions` / `agents sessions --active`, the highlighted
+  row's preview is now open by default (`tab` toggles it off), and the preview's
+  links line renders the ticket and PR as OSC 8 terminal hyperlinks — the ticket
+  resolves to its Linear URL (workspace slug resolved config-first) and `PR#`
+  resolves to its GitHub URL — so they are click-through in terminals that support
+  them. Source: `apps/cli/src/lib/picker.ts`,
+  `apps/cli/src/commands/sessions-browser.ts`,
+  `apps/cli/src/lib/session/render.ts`.
+
+- **`agents sessions` now lists what agents-cli manages, not your own installs.** Discovery
+  scans the union of your real `~/.<agent>` and every managed version home, so once you had
+  managed versions the listing mixed both — most visibly after `agents add --isolated`, where
+  keeping the two apart was the whole point. Listing is now scoped to managed versions
+  (isolated or not); `--unmanaged` brings your own installs back, and every render path prints
+  what it hid (`N sessions from your own unmanaged installs hidden`) so nothing disappears
+  silently. A user who has never run `agents add` sees exactly what they saw before — with
+  nothing managed there is nothing to scope to. Scoping happens at query time rather than by
+  narrowing the scan, so the index stays complete, `--unmanaged` needs no re-scan, and
+  watchdog / `--roots` / the Factory watcher are unaffected. Source:
+  `apps/cli/src/lib/session/discover.ts`, `apps/cli/src/commands/sessions.ts`.
+
+- **Attribute split-spawned agents on the authoritative tmux source (RUSH-1976).** `agents
+  sessions --active` now attributes each tmux pane to the agent actually running in it: an
+  agent bare-spawned into a split of an existing shared-socket session (where `$TMUX` is
+  already set, so no new session meta is stamped) is surfaced by the authoritative tmux
+  source with its own exact identity and pane, instead of being dropped there and left to the
+  weaker `ps`-scan fallback. Attribution reads the per-pane launch registry (the id recorded
+  at launch, or the SessionStart-hook join by launchId for a non-Claude agent), gated on the
+  pid still being alive so a dead agent's pane can't linger. Source:
+  `apps/cli/src/lib/session/active.ts` (`resolvePaneIdentity`, `listTmuxAgentSessions`),
+  `apps/cli/src/lib/session/pid-registry.ts` (`listPidSessionEntries`).
+
+- **Watchdog v2 — the always-on watchdog now has judgment and delivers correctly
+  into VS Codium.** The 2-minute `agents watchdog --nudge` routine no longer
+  hard-skips a session that stopped to ask a question. The deterministic pass is
+  now a cheap pre-filter (clearly-complete → skip, clear promise-without-toolcall →
+  nudge) that ESCALATES the judgment-heavy cases — a session parked on a question,
+  or an ambiguous stall — to a smart brain. The brain drives the agent to finish
+  end-to-end when it asked a needless / already-authorized question or paused with
+  work left, and leaves it for the human only for genuine cases (credentials/auth,
+  an irreversible or outward-facing action, a real ambiguous product decision, or a
+  finished task). Nudge messages restate the goal, tell the agent to use best
+  judgment, and give one concrete next step. The brain is a customizable
+  `watchdog` workflow: drop a `watchdog` WORKFLOW.md in your project or user
+  `workflows/` to override the prompt and pick the `model:`; absent one, the
+  improved built-in prompt runs via `agents run … --mode plan`. Source:
+  `apps/cli/src/lib/watchdog/watchdog.ts`, `apps/cli/src/lib/watchdog/runner.ts`.
+- **Watchdog delivery routes through the answer-router with the VS Codium rail
+  working.** A running agent is steered via its mailbox; a parked-on-question agent
+  is answered into its EXACT split — including a VS Codium / Cursor / VS Code
+  integrated terminal, which the answer-router's own resolver could not address —
+  or, when headless, re-entered via resume; a parked agent with no addressable rail
+  is flagged, never a guessed target.
+- **Watchdog precedence + concurrency fixes.** A long-idle (>15m) open question is
+  no longer blindly force-nudged — waiting-on-user and completion now win over the
+  15-minute force-review short-circuit. The per-session cooldown ledger is written
+  under a file lock (fresh-read + merge + atomic write), closing a lost-update race
+  between concurrent ticks.
+- **Watchdog decisions are logged to `~/.agents/.cache/logs/watchdog.log`** in the
+  JSONL shape the Factory Floor watchdog card reads, so it keeps working after the
+  extension-side watchdog is retired.
+
+- **The always-on watchdog is now a daemon-fired routine, not a hand-rolled loop + sentinel.**
+  `agents watchdog enable` used to flip a private `~/.agents/.cache/state/watchdog/enabled`
+  sentinel that only meant anything to a manually-launched `agents watchdog --watch` loop —
+  so the auto-nudge only ran while some shell was babysitting it. It now creates and enables a
+  plain `watchdog` command routine (`agents watchdog --nudge`, every 2 minutes) and reloads
+  the daemon, so the always-on watchdog is fired by the same scheduler that runs every other
+  routine: it survives reboots, catches up if the daemon was down, and shows up in
+  `agents routines list`. `disable` pauses that routine; `status` reports whether it is
+  enabled. The Swift menu-bar toggle and `watchdog status --json` are unchanged. Bare
+  `agents watchdog` (dry) and `agents watchdog --watch` (now dry unless `--nudge`) still work
+  for ad-hoc runs. If you had already opted in under the old build, a one-shot migration
+  folds that state forward — you stay enabled, now as the routine. Source:
+  `apps/cli/src/lib/watchdog/routine.ts`, `apps/cli/src/commands/watchdog.ts`,
+  `apps/cli/src/lib/migrate.ts`.
+
+- **Wire hooks support for OpenCode through generated plugins (RUSH-1850).** `hooks.yaml` entries now compile into `~/.config/opencode/plugins/agents-cli-hooks.ts`, mapping tool, prompt, and session lifecycle events to OpenCode's native plugin API and executing managed scripts with Bun's `$` shell primitive. OpenCode hooks are capability-gated to v0.3.130 and newer.
+
 ## 1.20.74
 
 - **`agents apply --agent claude@all --device <box>` — replicate this machine's

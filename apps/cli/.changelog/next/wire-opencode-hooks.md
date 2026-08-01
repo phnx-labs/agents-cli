@@ -1,1 +1,0 @@
-- **Wire hooks support for OpenCode through generated plugins (RUSH-1850).** `hooks.yaml` entries now compile into `~/.config/opencode/plugins/agents-cli-hooks.ts`, mapping tool, prompt, and session lifecycle events to OpenCode's native plugin API and executing managed scripts with Bun's `$` shell primitive. OpenCode hooks are capability-gated to v0.3.130 and newer.
