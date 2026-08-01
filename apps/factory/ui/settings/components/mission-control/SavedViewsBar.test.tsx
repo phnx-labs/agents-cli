@@ -33,6 +33,8 @@ describe('SavedViews feed header bar (RUSH-1526)', () => {
           abbrs: [],
           availableAbbrs: ['CC', 'CX'],
           onToggleAbbr: noop,
+          showBackground: false,
+          onToggleBackground: noop,
         }}
       />,
     )
@@ -43,6 +45,8 @@ describe('SavedViews feed header bar (RUSH-1526)', () => {
     expect(html).toContain('Project')
     expect(html).toContain('Needs you')
     expect(html).toContain('Running')
+    expect(html).toContain('Background')
+    expect(html).not.toContain('feed-header-background on')
     expect(html).toContain('feed-header-status on') // needs active
     expect(html).toContain('>CC<')
     expect(html).toContain('>CX<')
@@ -73,9 +77,12 @@ describe('SavedViews feed header bar (RUSH-1526)', () => {
           abbrs: ['CC'],
           availableAbbrs: ['CC', 'CX'],
           onToggleAbbr: noop,
+          showBackground: true,
+          onToggleBackground: noop,
         }}
       />,
     )
     expect(html).toContain('feed-header-agent on')
+    expect(html).toContain('feed-header-background on')
   })
 })

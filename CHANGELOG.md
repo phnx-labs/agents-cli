@@ -211,6 +211,13 @@
 
 ### Fixed
 
+- **Factory Floor cards keep their task context and their section counts agree.**
+  Cross-host sessions now recover the original task from `topic`, legacy `prompt`,
+  `firstUserMessage`, label, worktree, or branch before showing a clear `No topic`
+  placeholder. Background/headless runs are hidden by default and available through
+  the new **Background** feed toggle. One view-model partition now supplies both the
+  rendered Needs you / active / done cards and their displayed counts (RUSH-2031).
+
 - **`agents run <agent> --fallback …` no longer disables account rotation.**
   A `--fallback` chain skipped strategy resolution entirely ("strategy balanced
   ignored: --fallback pins versions directly"), so the bare primary always ran on

@@ -47,6 +47,8 @@ interface SavedViewsProps {
     abbrs: AgentAbbr[]
     availableAbbrs: AgentAbbr[]
     onToggleAbbr: (a: AgentAbbr) => void
+    showBackground: boolean
+    onToggleBackground: () => void
   }
 }
 
@@ -153,6 +155,13 @@ export function SavedViews({
               </span>
             )
           })}
+          <span
+            className={`chip feed-header-background${feedFilters.showBackground ? ' on' : ''}`}
+            title={feedFilters.showBackground ? 'Hide background agents' : 'Show background agents'}
+            onClick={feedFilters.onToggleBackground}
+          >
+            Background
+          </span>
           {feedFilters.availableAbbrs.length > 0 && (
             <>
               <span className="sv-sep" aria-hidden="true" />

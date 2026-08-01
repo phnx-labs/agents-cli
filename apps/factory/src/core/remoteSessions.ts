@@ -299,6 +299,9 @@ export interface RawActiveSession {
   cwd?: string;
   label?: string;
   topic?: string;
+  /** Compatibility task fields emitted by older/alternate session producers. */
+  prompt?: string;
+  firstUserMessage?: string;
   sessionFile?: string;
   startedAtMs?: number;
   /** Transcript last-write epoch (ms) stamped by the CLI — the real activity signal. */
@@ -598,7 +601,7 @@ export function normalizeActiveSession(
     // hosts too. The local fan-out still re-stats as a fallback. Deliberately NOT
     // startedAtMs — start time is not activity.
     lastActivityMs: typeof raw.lastActivityMs === 'number' ? raw.lastActivityMs : 0,
-    topic: asStr(raw.topic) || asStr(raw.label),
+    topic: asStr(raw.topic) || asStr(raw.prompt) || asStr(raw.firstUserMessage) || asStr(raw.label),
     label: asStr(raw.label),
     sessionFile: asStr(raw.sessionFile),
     context: asStr(raw.context),

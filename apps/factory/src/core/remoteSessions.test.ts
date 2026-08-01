@@ -531,6 +531,18 @@ describe('normalizeActiveSession — topic', () => {
     );
     expect(cloud.topic).toBe('Read README and summarize');
     expect(cloud.label).toBe('Read README and summarize');
+    const legacy = normalizeActiveSession(
+      { kind: 'claude', status: 'running', prompt: 'Repair remote cards' } as RawActiveSession,
+      'yosemite-m0',
+      FETCHED_AT
+    );
+    expect(legacy.topic).toBe('Repair remote cards');
+    const firstMessage = normalizeActiveSession(
+      { kind: 'codex', status: 'running', firstUserMessage: 'Explain the background run' } as RawActiveSession,
+      'mac-mini',
+      FETCHED_AT
+    );
+    expect(firstMessage.topic).toBe('Explain the background run');
   });
 });
 

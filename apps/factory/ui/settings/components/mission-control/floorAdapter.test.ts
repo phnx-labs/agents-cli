@@ -815,6 +815,22 @@ describe('toFloorAgentFromRemote', () => {
     const a = toFloorAgentFromRemote(r, new Set())
     expect(a.name).toBe('Claude session')
     expect(a.name).not.toContain('019e30a2')
+    expect(a.summary).toBe('No topic')
+  })
+
+  test('uses a remote worktree slug as the task anchor when topic is absent', () => {
+    const r: RemoteSessionLike = {
+      host: 'yosemite-m0', sessionId: 'remote-1', agentType: 'codex',
+      cwd: '/home/u/src/app/.agents/worktrees/rush-2031-factory-floor', project: 'app',
+      phase: 'running', activity: '', tokPerSec: 0, waitingForInput: false,
+      lastResponse: '', prUrl: null, ticket: null, branch: 'rush-2031-factory-floor',
+      worktreeSlug: 'rush-2031-factory-floor', sinceMs: 0, startedAtMs: NOW,
+      topic: '', context: 'terminal', cloudTaskId: '', cloudProvider: '', teamName: '',
+      pid: 0, transport: 'ssh', replyRail: '', replyMuxTarget: '', replyMuxSocket: '', tmuxPane: '',
+    }
+    const a = toFloorAgentFromRemote(r, new Set())
+    expect(a.prompt).toBe('rush-2031-factory-floor')
+    expect(a.summary).toBe('rush-2031-factory-floor')
   })
 })
 
