@@ -2,8 +2,6 @@
 
 ## 1.20.75
 
-- **The routines daemon can read a `never`/no-ACL secrets bundle headlessly again — fixes a false "no Claude credential" alert.** The headless secrets guard (`readAndResolveBundleEnv`'s `agentOnly` branch) threw for every keychain-backed bundle absent from the broker, but a `never`/no-ACL bundle carries no biometry ACL — its reads raise no Touch ID sheet, so blocking it served no purpose. That wrongly blocked the automation-only `claude` bundle the daemon reads at startup (`readDaemonClaudeOAuthToken`), leaving every scheduled Claude routine token-less, and — on the new auth-failure alert path — firing "no Claude credential" on each daemon start even when the bundle was configured correctly. The guard now exempts `never`/no-ACL bundles (policy learned via a prompt-less metadata read), matching the existing file-backend exemption. Source: `apps/cli/src/lib/secrets/bundles.ts`.
-
 - **Wire native file-based slash commands for Grok (RUSH-1851).** Grok >= 0.2.111
 discovers commands from the cross-agent `~/.agents/commands/` dir (plus the
 legacy `~/.claude/commands/` symlink). `agents sync grok` now writes native
