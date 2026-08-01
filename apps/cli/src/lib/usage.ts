@@ -1289,6 +1289,15 @@ function writeCachedClaudeOauth(service: string, creds: ClaudeOauthCredentials):
   }
 }
 
+/** Evict the no-ACL cache so a source rotation or sign-out is reflected immediately. */
+function deleteCachedClaudeOauth(service: string): void {
+  try {
+    deleteKeychainToken(claudeOauthCacheItem(service));
+  } catch {
+    /* best-effort — cache is an optimization */
+  }
+}
+
 /**
  * Load a version home's Claude OAuth credential from the two stores Claude Code
  * uses, tried in order:
@@ -1340,6 +1349,8 @@ export async function loadClaudeOauth(
       }
     } catch {
       // No keychain item, or no reachable keyring (headless Linux) — fall through.
+      // Evict any stale no-ACL cache so a sign-out/deletion isn't masked.
+      if (cacheActive) deleteCachedClaudeOauth(service);
     }
   }
 
@@ -1357,8 +1368,9 @@ export async function loadClaudeOauth(
 /**
  * Save Claude OAuth credentials to the system keychain/keyring.
  * Reads the existing payload, merges the new OAuth fields, and writes back.
+ * Exported for regression tests; not part of the public command surface.
  */
-async function saveClaudeOauth(
+export async function saveClaudeOauth(
   home: string | undefined,
   credentials: ClaudeOauthCredentials
 ): Promise<boolean> {
@@ -1401,6 +1413,8 @@ async function saveClaudeOauth(
     }
 
     setKeychainToken(service, payloadJson);
+    // A new credential rotation means any cached access token is stale.
+    deleteCachedClaudeOauth(service);
     return true;
   } catch {
     return false;

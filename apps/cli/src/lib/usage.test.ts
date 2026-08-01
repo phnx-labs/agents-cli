@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import { claudeAccessTokenNeedsRefresh, claudeUsageAccessTokenNoRefresh, loadClaudeOauth, getClaudeKeychainService } from './usage.js';
+import { claudeAccessTokenNeedsRefresh, claudeUsageAccessTokenNoRefresh, loadClaudeOauth, saveClaudeOauth, getClaudeKeychainService } from './usage.js';
 import { setKeychainToken, setKeychainBackendForTest, type KeychainBackend } from './secrets/index.js';
 
 const LEEWAY_MS = 5 * 60 * 1000;
@@ -162,6 +162,32 @@ describe('loadClaudeOauth no-ACL access-token cache', () => {
       expect(mem.noAclCacheWrites).toBe(0);
       // Every default read goes to the ACL source (no cache short-circuit).
       expect(mem.sourceReads).toBe(2);
+    } finally {
+      setKeychainBackendForTest(prev);
+    }
+  });
+
+  it('evicts the no-ACL cache when the source credential is rotated', async () => {
+    // A refresh (getClaudeAccessToken -> saveClaudeOauth) writes a new source token.
+    // The cache must be invalidated so the next cached caller sees the rotated token,
+    // not the stale cached access token.
+    const mem = new CountingBackend();
+    const prev = setKeychainBackendForTest(mem);
+    try {
+      seedSource(Date.now() + 60 * 60 * 1000);
+
+      const first = await loadClaudeOauth(HOME, { accessTokenCache: true });
+      expect(first?.accessToken).toBe('tok-live');
+
+      await saveClaudeOauth(HOME, {
+        accessToken: 'tok-rotated',
+        refreshToken: 'refresh-secret',
+        expiresAt: Date.now() + 60 * 60 * 1000,
+        scopes: ['user:inference'],
+      });
+
+      const second = await loadClaudeOauth(HOME, { accessTokenCache: true });
+      expect(second?.accessToken).toBe('tok-rotated');
     } finally {
       setKeychainBackendForTest(prev);
     }
