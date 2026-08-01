@@ -158,6 +158,27 @@ The helper is a launchd user service (`com.phnx-labs.agents-menubar`,
   disabled menu bar never silently returns on the next upgrade. Re-enable with
   `agents menubar enable`.
 
+## Notifications
+
+The helper doubles as the daemon's branded desktop-notification channel
+(RUSH-2030). The daemon fires a notification by spawning the installed bundle in
+a one-shot mode:
+
+```bash
+MenubarHelper --notify --title T --body B [--subtitle S] [--action A]
+```
+
+Because the poster is the app bundle, macOS attributes the notification to the
+agents-cli helper and shows its `AppIcon` (the agents-cli mark) instead of the
+generic osascript icon. The one-shot delivers via `NSUserNotificationCenter`,
+briefly spins the runloop so delivery flushes, then exits — it never starts the
+status-bar UI. The persistent menu-bar instance registers the click delegate at
+launch (`Notifier.wireClickHandler`), so clicking a daemon notification runs its
+`--action`: `open:<path>` opens a run report/log, `routines:list` opens the runs
+folder. The Node side lives in `src/lib/menubar/notify-desktop.ts` (routing) and
+`src/lib/routine-notify.ts` (routine start/finish content + anti-spam
+threshold); see [routines.md](03-routines.md#desktop-notifications).
+
 ## Files
 
 | Path | Purpose |
