@@ -1059,7 +1059,7 @@ export function registerSecretsCommands(program: Command): void {
         } else {
           console.log(
             bundlePolicy(bundle) === 'hold'
-              ? chalk.gray('policy: daily (ask once, then held ~7 days until sleep / logout — screen-lock does not drop it)')
+              ? chalk.gray('policy: hold (ask once, then held for the hold window — 7d by default — until sleep / logout; screen-lock does not drop it)')
               : chalk.gray('policy: always (asks for Touch ID every time — never auto-held)'),
           );
         }
@@ -1227,7 +1227,7 @@ export function registerSecretsCommands(program: Command): void {
     .description('Create an empty bundle')
     .option('--description <text>', 'Free-form description')
     .option('--allow-exec', 'Allow exec: refs in this bundle (off by default)')
-    .option('--policy <policy>', 'prompt policy: daily (default, ask once a week), always (ask every time), or never (silent, NO biometry ACL — needs --i-understand)')
+    .option('--policy <policy>', "prompt policy: hold (default, ask once per hold window — secrets.agent.holdMs, 7d by default), always (ask every time), or never (silent, NO biometry ACL — needs --i-understand). 'daily'/'session' are accepted aliases for 'hold'.")
     .addOption(new Option('--tier <policy>', 'deprecated alias for --policy').hideHelp())
     .option('--i-understand', 'Confirm creating a "never"-policy bundle (no biometry ACL) without an interactive prompt')
     .option('--backend <backend>', 'storage backend: keychain (default) or file (passphrase-encrypted)', 'keychain')
@@ -1263,7 +1263,7 @@ export function registerSecretsCommands(program: Command): void {
         };
         writeBundle(bundle);
         const policyTag = bundlePolicy(bundle) === 'hold'
-          ? 'policy: daily'
+          ? 'policy: hold'
           : bundlePolicy(bundle) === 'always'
             ? 'policy: always ask'
             : 'policy: never (NO biometry ACL)';

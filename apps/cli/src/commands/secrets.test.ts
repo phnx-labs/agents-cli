@@ -3,6 +3,7 @@ import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { bundlePolicy } from '../lib/secrets/bundles.js';
 import {
   assertValidSshTarget,
   assertNeverPolicyAcknowledged,
@@ -82,6 +83,24 @@ describe('assertValidSshTarget', () => {
     expect(() => assertValidSshTarget('a`id`')).toThrow();
     expect(() => assertValidSshTarget('a@b@c')).toThrow();
     expect(() => assertValidSshTarget('')).toThrow();
+  });
+});
+
+// The `--json` payload is a machine surface: it now reports `hold` where it
+// reported `daily`. That is a deliberate, documented break (see the changelog
+// fragment), so pin it — an accidental revert to `daily`, or a future rename
+// that forgets this surface, should fail here rather than silently move a
+// string that scripts match on.
+describe('policy in the --json discovery payload', () => {
+  it('reports the current policy vocabulary, not the retired name', () => {
+    const bundle = { name: 'x', vars: {}, policy: undefined } as unknown as SecretsBundle;
+    expect(bundlePolicy(bundle)).toBe('hold');
+    expect(bundlePolicy(bundle)).not.toBe('daily');
+  });
+
+  it('still accepts the retired name as INPUT, so configs and scripts keep working', () => {
+    expect(parsePolicyOpt('daily')).toBe('hold');
+    expect(bundlePolicy({ name: 'x', vars: {}, policy: parsePolicyOpt('daily') } as unknown as SecretsBundle)).toBe('hold');
   });
 });
 

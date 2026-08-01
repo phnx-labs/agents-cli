@@ -30,7 +30,7 @@ import {
 } from './session-store.js';
 
 const FAR = 10 * 24 * 60 * 60 * 1000; // 10 days out
-const bundle = (name: string) => ({ name, description: '', vars: {}, policy: 'daily' } as unknown as SecretsBundle);
+const bundle = (name: string) => ({ name, description: '', vars: {}, policy: 'hold' } as unknown as SecretsBundle);
 const entry = (name: string, expiresAt: number, sleepPersist: boolean): SessionEntry => ({
   bundle: bundle(name),
   env: { TOKEN: `secret-${name}` },

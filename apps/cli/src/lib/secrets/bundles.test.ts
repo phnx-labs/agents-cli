@@ -219,7 +219,7 @@ describe('readAndResolveBundleEnv agent-only reads', () => {
   // An agent-initiated read now fails fast with an actionable message instead.
   it('refuses an agent-triggered read of a locked daily bundle instead of prompting', () => {
     writeBundleWithItems(
-      { name: 'apple.com', policy: 'daily', vars: { APPLE_TEAM_ID: 'keychain:APPLE_TEAM_ID' } },
+      { name: 'apple.com', policy: 'hold', vars: { APPLE_TEAM_ID: 'keychain:APPLE_TEAM_ID' } },
       new Map([[secretsKeychainItem('apple.com', 'APPLE_TEAM_ID'), '2HTP252L87']]),
     );
     expect(() => readAndResolveBundleEnv('apple.com', { caller: 'command deploy', agent: 'claude', agentOnly: true }))
@@ -228,7 +228,7 @@ describe('readAndResolveBundleEnv agent-only reads', () => {
 
   it('still resolves for a caller that explicitly opts into an interactive unlock', () => {
     writeBundleWithItems(
-      { name: 'apple.com', policy: 'daily', vars: { APPLE_TEAM_ID: 'keychain:APPLE_TEAM_ID' } },
+      { name: 'apple.com', policy: 'hold', vars: { APPLE_TEAM_ID: 'keychain:APPLE_TEAM_ID' } },
       new Map([[secretsKeychainItem('apple.com', 'APPLE_TEAM_ID'), '2HTP252L87']]),
     );
     expect(readAndResolveBundleEnv('apple.com', { caller: 'secrets unlock', agent: 'claude', agentOnly: true, interactiveUnlock: true }).env)
@@ -572,7 +572,7 @@ describe('metadata is stored no-ACL at every tier (RUSH-1759)', () => {
 
   it('writeBundleWithItems: metadata always no-ACL; value items keep their per-policy ACL', () => {
     writeBundleWithItems(
-      { name: 'prod', policy: 'daily', vars: { API_KEY: 'keychain:API_KEY' } },
+      { name: 'prod', policy: 'hold', vars: { API_KEY: 'keychain:API_KEY' } },
       new Map([[secretsKeychainItem('prod', 'API_KEY'), 'sk-1']]),
     );
     expect(mem.noAcl.get(META('prod'))).toBe(true); // metadata: no-ACL
