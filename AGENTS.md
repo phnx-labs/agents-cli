@@ -59,7 +59,7 @@ rather than a one-off command in a PR.
 |---|---|---|
 | CLI build | [`apps/cli/scripts/build.sh`](apps/cli/scripts/build.sh) `[<version>] [--clean]` | builds into `apps/cli/dist` |
 | CLI dev install | [`apps/cli/scripts/install.sh`](apps/cli/scripts/install.sh) | side-by-side dev build at `~/.local/agents-cli-dev`, exposed via `~/.local/bin/agents`; does not touch the registry install |
-| CLI tests | [`apps/cli/scripts/sandbox.sh`](apps/cli/scripts/sandbox.sh) `test` | full vitest suite offloaded to a remote crabbox (the laptop-safe path) |
+| CLI tests | `bun run test:remote` (in `apps/cli`) | full vitest suite offloaded to a remote crabbox via [`sandbox.sh`](apps/cli/scripts/sandbox.sh) — the laptop-safe path |
 | CLI release | [`apps/cli/scripts/release.sh`](apps/cli/scripts/release.sh) `<version>` | publishes `@phnx-labs/agents-cli` to npm (legacy `@swarmify` shim built for reference, not published) |
 | Factory build / release | [`apps/factory/scripts/build.sh`](apps/factory/scripts/build.sh) `<version>` · [`release.sh`](apps/factory/scripts/release.sh) `<x.y.z> [--confirm]` | ships `swarmify.swarm-ext` to VS Code Marketplace + Open VSX (dry-run without `--confirm`) |
 | agents-dbg app release | [`scripts/release.sh`](scripts/release.sh) `<version> [--confirm]` | root — builds/signs/notarizes the debug Mac app, uploads the GitHub release, updates the Homebrew tap |
