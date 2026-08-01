@@ -2,12 +2,13 @@
  * Background sync for tracked git repos:
  *   - System repo (~/.agents/.system/) is read-only locally — fast-forward auto-pull is safe.
  *   - User repo (~/.agents/) and enabled extras may have local commits, so we only
- *     `git fetch` and write a status marker. Next CLI invocation surfaces a one-line
- *     notice if upstream is ahead. Pulling is left to the user via `agents repo pull`.
+ *     `git fetch` and write a status marker. `agents doctor` surfaces these markers
+ *     as a "Repo updates" section instead of printing to stderr on every command.
+ *     Pulling is left to the user via `agents repo pull`.
  *
  * Public API:
- *   spawnDetachedSync()           — fire-and-forget; never blocks the foreground command.
- *   printPendingUpdateNotices()   — synchronous; reads markers and prints + consumes them.
+ *   spawnDetachedSync()      — fire-and-forget; never blocks the foreground command.
+ *   readRepoBehindMarkers()  — synchronous; reads markers without consuming them.
  */
 
 import * as fs from 'fs';
