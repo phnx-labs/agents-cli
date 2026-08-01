@@ -1,5 +1,50 @@
-import { describe, it, expect } from 'vitest';
-import { resolveCwds, LSOF_CONCURRENCY, agentKindFromComm, activeStatusFromCloudStatus } from './active.js';
+import { describe, it, expect, afterAll } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { resolveCwds, LSOF_CONCURRENCY, agentKindFromComm, activeStatusFromCloudStatus, resolveFallbackStatus } from './active.js';
+
+describe('resolveFallbackStatus (honest status when no rich transcript state)', () => {
+  const tmp: string[] = [];
+  const mkfile = (ageMs: number): string => {
+    const p = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'agents-fallback-')), 'sess.jsonl');
+    fs.writeFileSync(p, '{}\n');
+    const when = new Date(Date.now() - ageMs);
+    fs.utimesSync(p, when, when);
+    tmp.push(p);
+    return p;
+  };
+
+  it('no transcript + a LIVE process ⇒ unknown, NOT a fabricated idle', () => {
+    // The truthful answer for a live gemini/droid/cursor/opencode whose format we
+    // do not parse: alive, but we cannot see what it is doing.
+    expect(resolveFallbackStatus(undefined, true)).toBe('unknown');
+  });
+
+  it('no transcript + a process not known alive ⇒ idle (nothing to report)', () => {
+    expect(resolveFallbackStatus(undefined, false)).toBe('idle');
+  });
+
+  it('a transcript written within the active window ⇒ running (measured freshness)', () => {
+    expect(resolveFallbackStatus(mkfile(10_000), true)).toBe('running');
+  });
+
+  it('a transcript stale past the active window ⇒ idle', () => {
+    // 5 min old — beyond ACTIVE_MTIME_WINDOW_MS (2 min).
+    expect(resolveFallbackStatus(mkfile(5 * 60_000), true)).toBe('idle');
+  });
+
+  it('a named transcript whose stat throws (vanished) ⇒ unknown, never an optimistic running', () => {
+    // This branch previously returned running, contradicting the idle default.
+    const gone = path.join(os.tmpdir(), `agents-fallback-missing-${process.pid}.jsonl`);
+    try { fs.unlinkSync(gone); } catch { /* already absent */ }
+    expect(resolveFallbackStatus(gone, true)).toBe('unknown');
+  });
+
+  afterAll(() => {
+    for (const p of tmp) { try { fs.rmSync(path.dirname(p), { recursive: true, force: true }); } catch { /* best-effort */ } }
+  });
+});
 
 describe('agentKindFromComm', () => {
   it('matches a real agent CLI by basename (absolute path or bare name)', () => {

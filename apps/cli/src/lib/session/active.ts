@@ -49,9 +49,27 @@ const execFileAsync = promisify(execFile);
 export const LSOF_CONCURRENCY = 4;
 const LSOF_STAGGER_MS = 10;
 
+/**
+ * Hard ceilings on the two syscalls the status path shells out to. Without them
+ * a single hung probe (a wedged NFS `lsof`, an EDR that stalls the `ps` snapshot)
+ * pins a bounded worker slot forever and silently drops live sessions to a
+ * fallback status. On timeout the call rejects, is caught, and the row degrades
+ * honestly (unknown / empty table) instead of the sweep hanging.
+ */
+const LSOF_TIMEOUT_MS = 5_000;
+const PS_SNAPSHOT_TIMEOUT_MS = 10_000;
+
 export type ActiveContext = 'terminal' | 'teams' | 'cloud' | 'headless';
 
-export type ActiveStatus = 'running' | 'idle' | 'queued' | 'input_required';
+/**
+ * `unknown` = the process is alive but we cannot introspect what it is doing —
+ * a live harness whose transcript format we do not parse (everything but
+ * claude/codex), or a resolvable transcript whose `stat` momentarily failed. It
+ * is NOT a synonym for idle: idle is a positive "not mid-turn, not waiting on
+ * you" conclusion drawn from a readable transcript; unknown is the honest "we
+ * can't tell", which we refuse to fake as idle.
+ */
+export type ActiveStatus = 'running' | 'idle' | 'queued' | 'input_required' | 'unknown';
 
 export interface ActiveSession {
   context: ActiveContext;
@@ -359,17 +377,30 @@ export function sessionFileTimes(sessionFile: string | undefined): { birthtimeMs
   }
 }
 
-function classifyActivity(sessionFile: string | undefined): 'running' | 'idle' {
-  // No resolvable transcript is NOT evidence of activity — default to idle. (Before
-  // the no-borrow fix in pickSessionFile this rarely fired because every terminal
-  // borrowed the newest file; now a session with an unresolved id lands here, and
-  // "running" would wrongly light it up.)
-  if (!sessionFile) return 'idle';
+/**
+ * The ONE place a fallback status is decided when no rich transcript state is
+ * available — a non-Claude/Codex kind we cannot parse, or a Claude/Codex tail
+ * that was empty or unreadable. Honest by construction: it never asserts a status
+ * it cannot justify from a measured signal.
+ *
+ *   - Resolvable transcript, readable mtime → the MEASURED freshness signal:
+ *     written within ACTIVE_MTIME_WINDOW_MS ⇒ `running`, else `idle`.
+ *   - Resolvable transcript whose `stat` throws (file vanished / permission) → we
+ *     genuinely cannot tell ⇒ `unknown`. (This branch previously returned
+ *     `running`, which contradicted the `idle` default one branch up.)
+ *   - No resolvable transcript but the process is alive → alive-but-opaque ⇒
+ *     `unknown`. This is the truthful answer for a live gemini / droid / cursor /
+ *     opencode whose format we don't parse — NOT a fabricated `idle` (which the
+ *     UI reads as "done and waiting"), and it never lies as `running` either.
+ *   - No transcript and the process is not known alive → nothing to report ⇒ `idle`.
+ */
+export function resolveFallbackStatus(sessionFile: string | undefined, pidAlive: boolean): ActiveStatus {
+  if (!sessionFile) return pidAlive ? 'unknown' : 'idle';
   try {
     const mtimeMs = fs.statSync(sessionFile).mtimeMs;
     return Date.now() - mtimeMs < ACTIVE_MTIME_WINDOW_MS ? 'running' : 'idle';
   } catch {
-    return 'running';
+    return 'unknown';
   }
 }
 
@@ -427,10 +458,12 @@ function statusFromActivity(activity: SessionActivity): ActiveStatus {
 /**
  * Fold a computed SessionState onto an active-session row: rich status +
  * preview + PR/worktree/ticket badges. With no state (unreadable/non-Claude/
- * Codex file) it degrades to the mtime-only classification.
+ * Codex file) it degrades to {@link resolveFallbackStatus}, which needs
+ * `pidAlive` to tell an alive-but-opaque process (`unknown`) from a dead one
+ * (`idle`).
  */
-function applyState(base: Omit<ActiveSession, 'status'>, state: SessionState | undefined, fallbackFile: string | undefined): ActiveSession {
-  if (!state) return { ...base, status: classifyActivity(fallbackFile) };
+function applyState(base: Omit<ActiveSession, 'status'>, state: SessionState | undefined, fallbackFile: string | undefined, pidAlive: boolean): ActiveSession {
+  if (!state) return { ...base, status: resolveFallbackStatus(fallbackFile, pidAlive) };
   return {
     ...base,
     status: statusFromActivity(state.activity),
@@ -533,7 +566,8 @@ export async function listTeamsActive(): Promise<ActiveSession[]> {
     const sessionId = a.parentSessionId ?? a.remoteSessionId ?? undefined;
     const sessionFile = findSessionFileForKind(a.agentType, a.cwd ?? undefined, sessionId ?? undefined);
     const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
-    const { state, tokPerSec } = computeLiveSignals(a.agentType, sessionFile, a.cwd ?? undefined, a.pid ? isPidAlive(a.pid) : true);
+    const pidAlive = a.pid ? isPidAlive(a.pid) : true;
+    const { state, tokPerSec } = computeLiveSignals(a.agentType, sessionFile, a.cwd ?? undefined, pidAlive);
     return applyState({
       context: 'teams',
       kind: a.agentType,
@@ -548,7 +582,7 @@ export async function listTeamsActive(): Promise<ActiveSession[]> {
       lastActivityMs: sessionFileTimes(sessionFile).mtimeMs,
       teamName: a.taskName,
       agentId: a.agentId,
-    }, state, sessionFile);
+    }, state, sessionFile, pidAlive);
   });
 }
 
@@ -586,7 +620,8 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
     const name = resolvedId ? runNameMap.get(resolvedId) ?? undefined : undefined;
     // Extract topic from session file (first meaningful user message)
     const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
-    const { state, tokPerSec } = computeLiveSignals(t.kind, sessionFile, t.cwd ?? undefined, isPidAlive(t.pid));
+    const pidAlive = isPidAlive(t.pid);
+    const { state, tokPerSec } = computeLiveSignals(t.kind, sessionFile, t.cwd ?? undefined, pidAlive);
     return applyState({
       context: 'terminal',
       kind: t.kind,
@@ -603,7 +638,7 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
       startedAtMs: t.startedAtMs,
       lastActivityMs: sessionFileTimes(sessionFile).mtimeMs,
       windowId: t.windowId,
-    }, state, sessionFile);
+    }, state, sessionFile, pidAlive);
   });
 }
 
@@ -664,7 +699,7 @@ async function readProcessTable(): Promise<ProcRow[]> {
   if (process.platform === 'win32') return readProcessTableWin32();
   let out: string;
   try {
-    ({ stdout: out } = await execFileAsync('ps', ['-A', '-o', 'pid=,ppid=,tty=,comm='], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }));
+    ({ stdout: out } = await execFileAsync('ps', ['-A', '-o', 'pid=,ppid=,tty=,comm='], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: PS_SNAPSHOT_TIMEOUT_MS }));
   } catch {
     return [];
   }
@@ -696,7 +731,7 @@ async function readProcessTableWin32(): Promise<ProcRow[]> {
     ({ stdout: out } = await execFileAsync('powershell.exe', [
       '-NoProfile', '-NonInteractive', '-Command',
       'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name | ConvertTo-Csv -NoTypeInformation',
-    ], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, windowsHide: true }));
+    ], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, windowsHide: true, timeout: PS_SNAPSHOT_TIMEOUT_MS }));
   } catch {
     return [];
   }
@@ -760,6 +795,7 @@ async function getCwdForPid(pid: number): Promise<string | undefined> {
   try {
     const res = await execFileAsync('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'], {
       encoding: 'utf8',
+      timeout: LSOF_TIMEOUT_MS,
     });
     out = res.stdout;
   } catch {
@@ -1004,6 +1040,9 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
     const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
     const host = detectHost(pid, procByPid);
     const context: ActiveContext = host && UI_HOSTS.has(host) ? 'terminal' : 'headless';
+    // pidAlive is true by construction: this pid was just enumerated from the
+    // live process table, so an opaque (non-parseable) kind resolves to
+    // `unknown`, not a fake `idle`.
     const { state, tokPerSec } = computeLiveSignals(kind, sessionFile, cwd, true);
     const { birthtimeMs, mtimeMs } = sessionFileTimes(sessionFile);
     out.push(applyState({
@@ -1022,7 +1061,7 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
       startedAtMs: hookRec?.ts ?? birthtimeMs,
       lastActivityMs: mtimeMs,
       pidCount: 1 + (foldedByRoot.get(pid) ?? 0),
-    }, state, sessionFile));
+    }, state, sessionFile, true));
   }
   // Housekeeping: drop registry files for pids that have since died.
   prunePidSessionRegistry(isPidAlive);
@@ -1075,7 +1114,8 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
     const cwd = meta?.cwd ?? (curPath || undefined);
     const sessionFile = findSessionFileForKind(agent, cwd, sessionId);
     const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
-    const { state, tokPerSec } = computeLiveSignals(agent, sessionFile, cwd, pid ? isPidAlive(pid) : true);
+    const pidAlive = pid ? isPidAlive(pid) : true;
+    const { state, tokPerSec } = computeLiveSignals(agent, sessionFile, cwd, pidAlive);
     const { birthtimeMs, mtimeMs } = sessionFileTimes(sessionFile);
     // Provenance is known exactly here (the pane IS a tmux pane) — set it so
     // enrichProvenance skips it and the locator/reply rails resolve off the pane.
@@ -1100,7 +1140,7 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
       startedAtMs: birthtimeMs,
       lastActivityMs: mtimeMs,
       provenance,
-    }, state, sessionFile));
+    }, state, sessionFile, pidAlive));
   }
   return out;
 }
