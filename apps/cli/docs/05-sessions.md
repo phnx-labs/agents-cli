@@ -298,6 +298,33 @@ cases a live pull can't reach: a machine that is **offline / asleep / decommissi
   on-demand `--host` reads and explicit export/import; reach for sync only when you want
   a passive always-on mirror (further below).
 
+### Resolving a full session id across the fleet
+
+`--host` names *which* box to look on. When you already have a full session id but
+**not** the box, `agents sessions <uuid>` finds it for you: a UUID is treated as an
+identifier, so on a local miss the CLI fans the **id lookup** out to the online fleet
+(the same `gatherRemoteList` SSH sweep the listing uses) and renders the session's
+summary from the machine that holds it — delegated to that peer via `runOnPeer`, since
+its transcript and agent binary live there.
+
+```
+# You have the id from a log or a teammate; you don't know the machine
+agents sessions d3470b57-2af6-4c11-b1de-3fab94f43603
+# → renders the summary from whichever online box owns it (e.g. yosemite-s0)
+```
+
+- **Exact id only — never a content search.** A UUID appears verbatim in *other*
+  sessions' transcripts (a watchdog `/continue <uuid>` reference echoes the parent id
+  into later sessions), so a fuzzy match would surface unrelated sessions as "matches."
+  There is no FTS/content fallback for an id-shaped query: it is found by id or reported
+  not found, locally and on every peer.
+- **Same id on more than one machine** surfaces a labeled conflict so you can pick one
+  with `--device <host>`.
+- **`--local`** restricts the lookup to this machine — no cross-machine sweep — for
+  scripts that want deterministic local behavior.
+- A peer already answering a parent's sweep (`AGENTS_SESSIONS_LOCAL=1`) never re-fans-out,
+  so a fleet resolve can't recurse.
+
 ## Forking (branch a conversation)
 
 `agents fork <session>` branches an existing conversation into a NEW, independent

@@ -1248,7 +1248,7 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
   // When the user explicitly asks to render (via mode flag), resolve the
   // query globally so sessions outside the default cwd/30d window are found.
   if (wantsRender && searchQuery) {
-    await renderOneSession(searchQuery, mode, { agent: options.agent, project: options.project, filter: filterOpts, redact: options.redact });
+    await renderOneSession(searchQuery, mode, { agent: options.agent, project: options.project, filter: filterOpts, redact: options.redact, local: options.local, hosts: options.host });
     return;
   }
 
@@ -1324,20 +1324,35 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
     // Smart ID routing: a bare query that resolves to one session renders
     // directly. If nothing matches in the scoped window and the query looks
     // like a session ID, widen to global scope (incl. Claude /resume history).
-    if (searchQuery) {
+    //
+    // Exception: a PEER answering a parent's `--json` locate sweep
+    // (AGENTS_SESSIONS_LOCAL=1) must return the SessionMeta[] ROW for the id, not
+    // render its transcript — the sweep parses an array (parseRemoteList). So when
+    // we are that peer and --json is set, skip the single-session short-circuit and
+    // fall through to the array-emitting --json block below.
+    const answeringJsonSweep = options.json === true && process.env[NO_FANOUT_ENV] === '1';
+    if (searchQuery && !answeringJsonSweep) {
       const idMatches = resolveSessionById(sessions, searchQuery);
       if (idMatches.length === 1) {
         await renderSession(idMatches[0], mode, filterOpts, options);
         return;
       }
       if (idMatches.length === 0 && looksLikeSessionId(searchQuery)) {
-        await renderOneSession(searchQuery, mode, { agent: options.agent, project: options.project, filter: filterOpts, redact: options.redact });
+        await renderOneSession(searchQuery, mode, { agent: options.agent, project: options.project, filter: filterOpts, redact: options.redact, local: options.local, hosts: options.host });
         return;
       }
     }
 
     if (options.json) {
-      const filtered = searchQuery ? filterSessionsByQuery(sessions, searchQuery) : sessions;
+      // An id-shaped query resolves by id ONLY — the same rule the render path
+      // uses (resolveSessionQuery). Without this a `--json <uuid>` (as issued by
+      // the fleet locate sweep, which runs `sessions <uuid> --json --local` on
+      // each peer) would fall to FTS content search and return every transcript
+      // that merely MENTIONS the id, defeating exact remote resolution. A genuine
+      // search phrase keeps the ranked metadata+content path.
+      const filtered = searchQuery
+        ? resolveSessionQuery(sessions, searchQuery).matches
+        : sessions;
       process.stdout.write(serializeSessionsJson(filtered));
       return;
     }
@@ -2650,7 +2665,7 @@ async function renderArtifactsGlobal(
 async function renderOneSession(
   query: string,
   mode: ViewMode,
-  scope: { agent?: string; project?: string; filter: FilterOptions; redact?: boolean },
+  scope: { agent?: string; project?: string; filter: FilterOptions; redact?: boolean; local?: boolean; hosts?: string[] },
 ): Promise<void> {
   const spinner = ora().start();
   const tracker = createScanProgressTracker(FIND_VERBS, 'session', spinner);
@@ -2705,6 +2720,19 @@ async function renderOneSession(
           process.exit(1);
         }
       } else if (byId) {
+        // Not on this machine. A UUID names ONE session, so before giving up ask
+        // the fleet — the session may live only on a peer (the whole point of
+        // RUSH-2024). Skip the sweep when the caller pinned --local, or when we
+        // are ourselves a peer answering a parent's sweep (AGENTS_SESSIONS_LOCAL),
+        // so a locate never recurses. On a single remote hit we hand rendering to
+        // that peer; a multi-host hit surfaces the conflict; a miss keeps the
+        // local not-found message. No FTS fallback either way.
+        if (shouldFanOutForId(query, scope.local)) {
+          const outcome = await resolveSessionAcrossFleet(query, mode, scope.hosts);
+          if (outcome === 'rendered') return;
+          if (outcome === 'conflict') process.exit(1);
+          // 'not-found' falls through to the local message below.
+        }
         notFoundByIdMessage(query).forEach(l => console.error(l));
         process.exit(1);
       } else {
@@ -2741,6 +2769,137 @@ async function renderOneSession(
     console.error(chalk.red(`Failed to read session: ${err.message}`));
     process.exit(1);
   }
+}
+
+/**
+ * Whether a missed local id lookup should widen to a cross-machine sweep.
+ *
+ * Gate (all must hold):
+ *   - the query is id-shaped (`looksLikeSessionId`) — only an identifier resolves
+ *     across the fleet; a search phrase never does.
+ *   - not `--local` — the caller opted out of cross-machine lookup (deterministic
+ *     local behavior for scripts, RUSH-2024 acceptance: "--local still restricts").
+ *   - `AGENTS_SESSIONS_LOCAL` is unset — we are not ourselves a peer answering a
+ *     parent's sweep, so a locate can never recurse (RUSH-2024: avoid double-fan-out).
+ *
+ * Pure + exported so the gate is unit-tested without driving discovery / SSH.
+ */
+export function shouldFanOutForId(query: string, local: boolean | undefined): boolean {
+  if (local === true) return false;
+  if (process.env[NO_FANOUT_ENV] === '1') return false;
+  return looksLikeSessionId(query);
+}
+
+/** The render-mode flag a peer's `agents sessions <id>` must carry so the remote
+ * summary matches the mode the user asked for. `summary` is the peer's default,
+ * so it needs no flag; the others map 1:1 to a CLI flag. */
+function modeFlag(mode: ViewMode): string | undefined {
+  if (mode === 'markdown') return '--markdown';
+  if (mode === 'json') return '--json';
+  return undefined; // summary — the peer's default render
+}
+
+/** Injectable SSH/peer boundary so the fleet-resolve logic is unit-testable
+ * without a live tailnet. Production wires these to the real remote-list infra. */
+export interface FleetResolveDeps {
+  gatherRemoteList: typeof gatherRemoteList;
+  runOnPeer: typeof runOnPeer;
+}
+
+/** One distinct machine that reported the id, plus its winning row. */
+interface FleetHit {
+  machine: string;
+  session: SessionMeta;
+}
+
+/** Group a fleet sweep's rows to the DISTINCT machines that hold the id. Each
+ * peer answered `sessions <id> --json --local`, which (post-fix) id-resolves and
+ * so returns the matching row(s); a peer with a synced MIRROR of the same id can
+ * emit more than one row, so we keep the first per machine. Rows the peer somehow
+ * returned that do NOT match the id (defensive against version skew) are dropped
+ * so a stray content hit can never masquerade as an exact resolution. */
+export function fleetHitsById(rows: SessionMeta[], id: string): FleetHit[] {
+  const q = id.trim().toLowerCase();
+  const byMachine = new Map<string, SessionMeta>();
+  for (const s of rows) {
+    const machine = s.machine;
+    if (!machine) continue; // an untagged row can't be routed back to a peer
+    if (s.id?.toLowerCase() !== q) continue; // exact id only — never a content hit
+    if (!byMachine.has(machine)) byMachine.set(machine, s);
+  }
+  return Array.from(byMachine.entries()).map(([machine, session]) => ({ machine, session }));
+}
+
+/**
+ * Locate a full session id across the online fleet and render it from the machine
+ * that holds it. The local disk already missed; this fans `sessions <id> --json
+ * --all` out to every registered online peer (or the explicit `hosts` set),
+ * groups the rows to distinct machines, then:
+ *
+ *   - exactly one machine  → delegate rendering to that peer via `runOnPeer`
+ *     (its transcript and agent binary live there — a local `--host` hop would
+ *     re-discover locally and dead-end), returning `'rendered'`.
+ *   - more than one machine → print the conflict with machine labels so the user
+ *     can disambiguate with `--device <host>`, returning `'conflict'`.
+ *   - none                 → `'not-found'`, letting the caller print the local
+ *     "no session on this machine" message.
+ *
+ * No fuzzy/content fallback: the sweep forwards a UUID, each peer id-resolves it,
+ * and `fleetHitsById` drops anything that isn't an exact id match.
+ */
+export async function resolveSessionAcrossFleet(
+  id: string,
+  mode: ViewMode,
+  hosts?: string[],
+  deps: FleetResolveDeps = { gatherRemoteList, runOnPeer },
+): Promise<'rendered' | 'conflict' | 'not-found'> {
+  const spinner = isInteractiveTerminal() ? ora('Searching the fleet...').start() : null;
+  let hits: FleetHit[];
+  try {
+    // Force whole-index scope (--all): the peer runs in its SSH-login home dir,
+    // whose cwd would otherwise silently narrow the lookup and hide the row.
+    // --json so each peer answers a parseable array; --local so it answers for
+    // itself and never re-fans-out (belt-and-suspenders with the parent's
+    // AGENTS_SESSIONS_LOCAL, which remote-list also sets on the peer).
+    const forwarded = ['sessions', id, '--json', '--all', '--local'];
+    const { sessions } = await deps.gatherRemoteList(forwarded, hosts);
+    hits = fleetHitsById(sessions, id);
+  } catch {
+    // A fan-out failure is not an exact resolution — treat as not-found so the
+    // caller prints the honest local message rather than a half-answer.
+    hits = [];
+  } finally {
+    spinner?.stop();
+  }
+
+  if (hits.length === 0) return 'not-found';
+
+  if (hits.length > 1) {
+    console.error(chalk.red(`Session ${id} exists on multiple machines:`));
+    for (const h of hits) {
+      const s = h.session;
+      const label = (s as any).label ?? s.topic ?? '';
+      console.error(chalk.cyan(`  ${h.machine}`) + chalk.gray(`  ${s.agent}${s.version ? ` ${s.version}` : ''}  ${label}`));
+    }
+    console.error(chalk.gray(`Pick one with: agents sessions ${id} --device <host>`));
+    return 'conflict';
+  }
+
+  const { machine } = hits[0];
+  // Render the remote summary by re-running `sessions <id>` ON the peer. --local
+  // keeps that render on the peer (it owns the transcript); the mode flag matches
+  // the mode the user asked for. No TTY: a summary/markdown/json render is a
+  // one-shot capture, not an interactive resume.
+  const peerArgs = ['sessions', id, '--local'];
+  const flag = modeFlag(mode);
+  if (flag) peerArgs.push(flag);
+  const result = await deps.runOnPeer(peerArgs, machine);
+  if (result === 'no-target') {
+    console.error(chalk.red(`Session ${id} is on ${machine}, but it is not a reachable registered device.`));
+    console.error(chalk.gray('Register it with `agents devices` or run the command on that machine.'));
+    return 'conflict'; // a definitive answer (found, un-renderable) — do NOT fall to the local not-found line
+  }
+  return 'rendered';
 }
 
 /** Register the `agents sessions` command with all its options and help text. */
