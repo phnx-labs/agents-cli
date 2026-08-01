@@ -14,6 +14,7 @@ import * as os from 'os';
 import { getDaemonDir as getDaemonDirRoot } from './state.js';
 import { isAlive, killTree, backgroundSpawnOptions } from './platform/index.js';
 import { listJobs as listAllJobs } from './routines.js';
+import { syncAllProjectRoutines } from './routines-project.js';
 import { JobScheduler } from './scheduler.js';
 import { MonitorEngine } from './monitors/engine.js';
 import { executeJobDetached, monitorRunningJobs } from './runner.js';
@@ -381,6 +382,16 @@ export async function runDaemon(): Promise<void> {
     }
   });
 
+  // Materialise opted-in project routines into the user layer on every start
+  // so a fresh daemon picks up project YAML without a separate sync step.
+  try {
+    const result = syncAllProjectRoutines();
+    const n = result.projects.reduce((acc, p) => acc + p.synced.length, 0);
+    if (n > 0) log('INFO', `Project routines sync: ${n} job(s) from ${result.projects.length} project(s)`);
+  } catch (err) {
+    log('WARN', `Project routines sync failed: ${(err as Error).message}`);
+  }
+
   scheduler.loadAll();
   const scheduled = scheduler.listScheduled();
   log('INFO', `Loaded ${scheduled.length} jobs`);
@@ -703,6 +714,18 @@ export async function runDaemon(): Promise<void> {
 
   const handleReload = () => {
     log('INFO', 'Reloading jobs (SIGHUP)');
+    // Refresh user-layer copies of opted-in project routines BEFORE the
+    // scheduler reloads, so YAML edits under `<project>/.agents/routines/`
+    // take effect on the next fire without a manual `routines sync`.
+    try {
+      const result = syncAllProjectRoutines();
+      const n = result.projects.reduce((acc, p) => acc + p.synced.length, 0);
+      if (n > 0 || result.missing.length > 0) {
+        log('INFO', `Project routines sync: ${n} updated, ${result.missing.length} missing roots`);
+      }
+    } catch (err) {
+      log('WARN', `Project routines sync failed: ${(err as Error).message}`);
+    }
     scheduler.reloadAll();
     const reloaded = scheduler.listScheduled();
     log('INFO', `Reloaded ${reloaded.length} jobs`);

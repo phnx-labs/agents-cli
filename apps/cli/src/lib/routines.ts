@@ -26,6 +26,32 @@ export interface JobAllowConfig {
   dirs?: string[];
 }
 
+/**
+ * Where a routine's job body executes when the daemon fires it.
+ * Distinct from `devices` (which daemon may *fire*) and from the CLI `--host`
+ * remote-management passthrough (manage routines *on* another machine).
+ */
+export type HostStrategy = 'local' | 'host' | 'fleet' | 'cloud';
+
+export const HOST_STRATEGIES: readonly HostStrategy[] = ['local', 'host', 'fleet', 'cloud'] as const;
+
+/**
+ * Provenance for a routine that was materialised from a project
+ * (`.agents/routines/*.yml` synced into the user layer after opt-in).
+ */
+export interface JobSource {
+  /** Always `project` today; reserved for future layers. */
+  kind: 'project';
+  /** Absolute path to the project root that owns the YAML. */
+  projectPath: string;
+  /** GitHub `owner/repo` when the project has a GitHub origin remote. */
+  repo?: string;
+  /** Branch at last sync (when known). */
+  branch?: string;
+  /** Short commit SHA at last sync (when known). */
+  commit?: string;
+}
+
 /** GitHub webhook events a routine can be triggered by. */
 export type GithubTriggerEvent = 'pull_request' | 'push' | 'issue_comment' | 'workflow_run';
 
@@ -148,10 +174,33 @@ export interface JobConfig {
    * `host` says where the dispatched run EXECUTES. CLI flag: `--run-on`
    * (`--host` on routines commands already means "manage routines on that
    * machine" via the remote passthrough).
+   *
+   * When `hostStrategy` is set, it owns placement semantics; `host` is then
+   * only required for `hostStrategy: host` (or when strategy is inferred from
+   * a bare `host:` field for back-compat).
    */
   host?: string;
+  /**
+   * Where the job body should run when the daemon fires it.
+   * - `local`  — on the firing machine (default / current behavior)
+   * - `host`   — on the named `host` over SSH (maps to `--run-on`)
+   * - `fleet`  — pick one online registered device per run (no cross-device
+   *              double-fire; the firing pin stays on `devices`)
+   * - `cloud`  — dispatch via the agent's native cloud provider
+   *
+   * CLI flag: `--placement` (not `--host`, which is the remote-management
+   * passthrough). Omitted strategy falls back to `host` when `host:` is set,
+   * otherwise `local`.
+   */
+  hostStrategy?: HostStrategy;
   /** Working directory on the host for `host:`-placed runs. */
   remoteCwd?: string;
+  /**
+   * Provenance for routines materialised from a project
+   * (`<project>/.agents/routines/*.yml` → user-layer copy after opt-in).
+   * Absent for hand-authored user/system routines.
+   */
+  source?: JobSource;
   variables?: Record<string, string>;
   sandbox?: boolean;
   allow?: JobAllowConfig;
@@ -214,6 +263,10 @@ export interface RunMeta {
   /** The host-task sidecar id backing a `host:` run; the daemon monitor
    *  finalizes the run by reconciling it against the remote `.exit`. */
   hostTaskId?: string;
+  /** Cloud provider task id when `hostStrategy: cloud` dispatched the run. */
+  cloudTaskId?: string;
+  /** Cloud provider id when the run was cloud-dispatched. */
+  cloudProvider?: string;
 }
 
 /**
@@ -253,6 +306,40 @@ export function jobRunsOnThisDevice(config: Pick<JobConfig, 'devices'>): boolean
   if (!config.devices || config.devices.length === 0) return true;
   const self = machineId();
   return config.devices.some((d) => normalizeHost(d) === self);
+}
+
+/**
+ * Resolve the effective host strategy for a job.
+ * Bare `host:` without an explicit strategy implies `host` (back-compat with
+ * pre-hostStrategy YAML). Otherwise default to `local`.
+ */
+export function resolveHostStrategy(
+  config: Pick<JobConfig, 'hostStrategy' | 'host'>,
+): HostStrategy {
+  if (config.hostStrategy) return config.hostStrategy;
+  if (config.host) return 'host';
+  return 'local';
+}
+
+/**
+ * Parse a CLI `--placement` value into a HostStrategy, or null when empty.
+ * Throws a human-readable Error for unknown values.
+ */
+export function parseHostStrategy(raw: string | undefined | null): HostStrategy | null {
+  if (raw === undefined || raw === null || raw === '') return null;
+  const v = raw.trim().toLowerCase();
+  if ((HOST_STRATEGIES as readonly string[]).includes(v)) return v as HostStrategy;
+  throw new Error(`Invalid placement '${raw}'. Use one of: ${HOST_STRATEGIES.join(', ')}`);
+}
+
+/**
+ * Strategies that dispatch the job body off the firing machine. Without a
+ * `devices` pin every daemon in the fleet would fire and each would dispatch
+ * once — N× duplicate runs. Callers pin to this machine when the user did not
+ * set an explicit allowlist.
+ */
+export function placementRequiresFiringPin(strategy: HostStrategy): boolean {
+  return strategy === 'host' || strategy === 'fleet' || strategy === 'cloud';
 }
 
 /** Human presentation of a device-affinity mismatch for commands and runner. */
@@ -604,24 +691,47 @@ export function validateJob(config: Partial<JobConfig>): string[] {
   if ((config as Record<string, unknown>).device !== undefined) {
     errors.push('singular "device" key is no longer supported — replace with devices: [<name>] (an array)');
   }
+  if (config.hostStrategy !== undefined) {
+    if (!HOST_STRATEGIES.includes(config.hostStrategy)) {
+      errors.push(`hostStrategy must be one of: ${HOST_STRATEGIES.join(', ')}`);
+    }
+  }
+  const strategy = resolveHostStrategy(config);
   if (config.host !== undefined) {
     if (typeof config.host !== 'string' || config.host.trim() === '') {
       errors.push('host must be a non-empty machine name (a registered host, device, capability tag, or user@host)');
     }
-    // v1: the workflow bundle and the loop driver (with its signal files) live
-    // on the firing machine — neither can cross SSH to the target yet.
+  }
+  if (strategy === 'host' && (!config.host || config.host.trim() === '')) {
+    errors.push("hostStrategy: host requires host: (set via --run-on or host: in YAML)");
+  }
+  // Remote placement (host/fleet/cloud) can't carry workflow/loop/command yet —
+  // those live on the firing machine.
+  if (strategy === 'host' || strategy === 'fleet' || strategy === 'cloud') {
     if (config.workflow) {
-      errors.push("host: can't be combined with workflow: yet (the bundle lives on the firing machine) — run the workflow locally or convert it to a plain prompt");
+      errors.push(`${strategy} placement can't be combined with workflow: yet — run the workflow locally or convert it to a plain prompt`);
     }
     if (config.loop) {
-      errors.push("host: can't be combined with loop: yet (the loop driver and its signal files live on the firing machine)");
+      errors.push(`${strategy} placement can't be combined with loop: yet (the loop driver and its signal files live on the firing machine)`);
     }
     if (config.command) {
-      errors.push("host: can't be combined with command: yet (a plain shell command has no agent to place remotely) — run it locally, or convert it to a prompt");
+      errors.push(`${strategy} placement can't be combined with command: yet (a plain shell command has no agent to place remotely)`);
     }
   }
-  if (config.remoteCwd !== undefined && config.host === undefined) {
-    errors.push('remoteCwd only applies to host:-placed routines — set host: too, or drop it');
+  if (config.remoteCwd !== undefined && strategy !== 'host' && strategy !== 'fleet') {
+    errors.push('remoteCwd only applies to host/fleet-placed routines — set hostStrategy: host|fleet, or drop it');
+  }
+  if (config.source !== undefined) {
+    if (!config.source || typeof config.source !== 'object') {
+      errors.push('source must be an object');
+    } else {
+      if (config.source.kind !== 'project') {
+        errors.push("source.kind must be 'project'");
+      }
+      if (typeof config.source.projectPath !== 'string' || config.source.projectPath.trim() === '') {
+        errors.push('source.projectPath must be a non-empty absolute path');
+      }
+    }
   }
   if (config.devices !== undefined) {
     if (!Array.isArray(config.devices)) {

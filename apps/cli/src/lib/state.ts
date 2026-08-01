@@ -369,9 +369,12 @@ export function getSystemRoutinesDir(): string { return SYSTEM_ROUTINES_DIR; }
  * Path to a project-scoped routines directory (`<project>/.agents/routines/`),
  * or null when no project `.agents/` is found by walking up from cwd.
  *
- * Project routines participate in `list`/`view`/`run` for inspection but are
- * NOT fired by the daemon (which runs from $HOME and loads only user + system
- * routines). Opt-in firing for project routines is tracked as a follow-up.
+ * Project routines participate in `list`/`view` for inspection always. Daemon
+ * firing requires an explicit opt-in (`agents routines enable-project` or
+ * `meta.routines.projects` / project `agents.yaml` `routines.enable: true`);
+ * after opt-in, `agents routines sync` materialises them into the user layer
+ * with `source:` provenance so the daemon (which loads user + system only)
+ * can fire them safely. See `lib/routines-project.ts`.
  */
 export function getProjectRoutinesDir(cwd: string = process.cwd()): string | null {
   const projectAgentsDir = getProjectAgentsDir(cwd);

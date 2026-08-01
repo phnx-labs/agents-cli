@@ -612,11 +612,19 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
   if (eligibility) {
     throw new Error(eligibility.message);
   }
-  // `host:` placement — the job body runs on another machine over SSH; local
-  // version selection / sandbox / spawn do not apply. Sync callers (manual
-  // `routines run`, catchup) follow the remote run to completion.
-  if (config.host) {
-    return executeJobOnHost(config, { detached: false });
+  // Placement (hostStrategy / bare host:) — body may run on another machine
+  // over SSH or in the cloud; local version selection / sandbox / spawn then
+  // do not apply. Sync callers (manual `routines run`, catchup) follow the
+  // remote run to completion when possible.
+  {
+    const { resolvePlacementTarget } = await import('./routines-placement.js');
+    const target = resolvePlacementTarget(config);
+    if (target.mode === 'host') {
+      return executeJobOnHost({ ...config, host: target.host }, { detached: false });
+    }
+    if (target.mode === 'cloud') {
+      return executeJobOnCloud(config, { detached: false });
+    }
   }
 
   // Command-mode: run a plain shell command directly (no agent, no rotation,
@@ -880,6 +888,88 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
   return { meta, reportPath: null };
 }
 
+/**
+ * Dispatch a routine to the agent's native cloud provider (or the configured
+ * default). Writes a local run record with `cloudTaskId` so list/runs still
+ * work; does not wait for cloud completion on the detached path.
+ */
+async function executeJobOnCloud(config: JobConfig, opts: { detached: boolean }): Promise<RunResult> {
+  if (config.workflow) {
+    throw new Error(`Routine '${config.name}' runs a workflow bundle, which can't execute in the cloud yet — remove 'hostStrategy: cloud' or 'workflow:'.`);
+  }
+  if (config.loop) {
+    throw new Error(`Routine '${config.name}' uses 'loop:', which can't execute in the cloud yet — remove 'hostStrategy: cloud' or 'loop:'.`);
+  }
+  if (config.command) {
+    throw new Error(`Routine '${config.name}' uses 'command:', which can't execute in the cloud yet — remove 'hostStrategy: cloud' or 'command:'.`);
+  }
+  if (!config.agent) {
+    throw new Error(`Routine '${config.name}' hostStrategy: cloud requires an agent`);
+  }
+
+  const { resolveProvider } = await import('./cloud/registry.js');
+  const { insertTask } = await import('./cloud/store.js');
+  const provider = resolveProvider(undefined, config.agent);
+
+  const timer = createTimer('agent.run', {
+    agent: config.agent,
+    jobName: config.name,
+    mode: config.mode,
+    placement: 'cloud',
+    ...redactPrompt(config.prompt),
+    schedule: config.schedule,
+  });
+
+  const runId = generateRunId();
+  const runDir = getRunDir(config.name, runId);
+  fs.mkdirSync(runDir, { recursive: true });
+
+  const meta: RunMeta = {
+    jobName: config.name,
+    runId,
+    agent: config.agent,
+    pid: null,
+    spawnedAt: Date.now(),
+    status: 'running',
+    startedAt: new Date().toISOString(),
+    completedAt: null,
+    exitCode: null,
+  };
+  writeRunMeta(meta);
+
+  try {
+    const task = await provider.dispatch({
+      prompt: resolveJobPrompt(config),
+      agent: config.agent,
+      repo: config.repo,
+      timeout: config.timeout,
+      model: config.config?.model as string | undefined,
+    });
+    try { insertTask(task); } catch { /* store is best-effort */ }
+    meta.cloudTaskId = task.id;
+    meta.cloudProvider = task.provider;
+
+    // Terminal cloud responses (e.g. antigravity) finalize immediately.
+    // Async providers leave the run `running` with the cloud task id for
+    // the user to follow via `agents cloud status`.
+    if (task.status === 'completed') {
+      finalizeRunMeta(meta, 'completed', 0);
+    } else if (task.status === 'failed' || task.status === 'cancelled') {
+      finalizeRunMeta(meta, 'failed', 1, { errorMessage: task.summary ?? `cloud ${task.status}` });
+    }
+    // Non-terminal statuses stay `running` for both detached and sync paths;
+    // the user follows via `agents cloud status <id>`.
+    writeRunMeta(meta);
+    timer.end({ status: meta.status, exitCode: meta.exitCode ?? undefined, runId });
+    return { meta, reportPath: null };
+  } catch (err) {
+    finalizeRunMeta(meta, 'failed', 1, { errorMessage: (err as Error).message });
+    writeRunMeta(meta);
+    timer.end({ status: 'failed', exitCode: 1, runId, error: (err as Error).message });
+    throw err;
+  }
+}
+
 async function executeJobOnHost(config: JobConfig, opts: { detached: boolean }): Promise<RunResult> {
   if (config.workflow) {
     throw new Error(`Routine '${config.name}' runs a workflow bundle, which can't execute on a host yet — remove 'host:' or 'workflow:'.`);
@@ -1050,10 +1140,19 @@ export async function executeJobDetached(config: JobConfig): Promise<RunMeta> {
     process.stderr.write(`[agents] daemon: skipping '${config.name}' — ${eligibility.message}\n`);
     throw new Error(eligibility.message);
   }
-  // `host:` placement — dispatch over SSH and return; the monitor finalizes.
-  if (config.host) {
-    const { meta } = await executeJobOnHost(config, { detached: true });
-    return meta;
+  // Placement (hostStrategy / bare host:) — dispatch off-box and return; the
+  // monitor finalizes host: runs, cloud runs stay terminal when dispatch ends.
+  {
+    const { resolvePlacementTarget } = await import('./routines-placement.js');
+    const target = resolvePlacementTarget(config);
+    if (target.mode === 'host') {
+      const { meta } = await executeJobOnHost({ ...config, host: target.host }, { detached: true });
+      return meta;
+    }
+    if (target.mode === 'cloud') {
+      const { meta } = await executeJobOnCloud(config, { detached: true });
+      return meta;
+    }
   }
 
   // Command-mode: fire a plain shell command detached (no agent, no rotation,
