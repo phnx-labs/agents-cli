@@ -1296,7 +1296,6 @@ export function registerRunCommand(program: Command): void {
               });
             }
             const isRaw = options.raw || options.tmux === false || options.disableTmux === true;
-            const runStartedMs = Date.now();
             const exitCode = await runInteractiveOnHost(host, {
               agent: runAgent,
               version: resumeId ? undefined : runVersion,
@@ -1338,7 +1337,6 @@ export function registerRunCommand(program: Command): void {
                     host,
                     sessionId: reconnectId,
                     initialExit: exitCode,
-                    initialDurationMs: Date.now() - runStartedMs,
                   }),
                 );
               }
