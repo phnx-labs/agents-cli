@@ -1,26 +1,37 @@
 #!/usr/bin/env bash
 #
-# Release script for agents-cli.
+# Release script for agents-cli. Self-routing, zero-config.
 #
 # Publishes @phnx-labs/agents-cli (the canonical package) to npm. The legacy
 # @swarmify/agents-cli shim is built + previewed for reference but NOT published
 # (frozen at 1.19.x since v1.20.0).
 #
-# Flow (--apply): open the release as a chore(release) PR on a release/v<version>
-# branch -- which fires the full cross-platform CI matrix (.github/workflows/
-# ci.yml) plus the test + gitleaks checks -- wait for that CI to go green,
-# squash-merge the PR, verify the merged tree matches what we built, then tag
-# v<version> at the merge commit and npm-publish locally (publishing must stay on
-# macOS because the tarball bundles the signed + notarized keychain helper).
-# If a publish fails after the PR merge, a retry rebuilds from that merged PR's
-# exact CI-tested tree even when newer commits have since landed on main.
+# Three self-selected homes, no environment variables to set:
+#   - Orchestrate (bump, changelog, PR, tag): the box you invoke it on (git + gh).
+#   - CI / tests: a crabbox (dynamic Hetzner Linux VM) via scripts/sandbox.sh --
+#     never a hardcoded instance. Covers the Linux suite; the GH Actions matrix
+#     still covers the cross-platform (macOS/Windows) legs on the release PR.
+#   - Build + sign + notarize + npm publish + computer-helper: the mac-mini home
+#     base (the one hardcoded name -- it holds the Developer ID cert + npm publish
+#     rights). If you invoke from mac-mini it runs locally; otherwise the script
+#     ssh's to mac-mini, checks out the merged tag, and runs the privileged phase
+#     there in mac-mini's headless secrets context (no Touch ID, no token borrow).
+#
+# Flow (--apply): run the Linux suite on a crabbox; open the release as a
+# chore(release) PR on a release/v<version> branch -- which fires the full
+# cross-platform CI matrix (.github/workflows/ci.yml) plus the test + gitleaks
+# checks -- wait for that CI to go green, squash-merge the PR, verify the merged
+# tree matches what we built, then tag v<version> at the merge commit and route
+# the build+sign+publish phase to the home base. If a publish fails after the PR
+# merge, a retry rebuilds from that merged PR's exact CI-tested tree even when
+# newer commits have since landed on main.
 #
 # Usage: scripts/release.sh <version> [--apply]
 #
 # Default mode is DRY-RUN: every local check runs (type-check, build, tarball
 # preview) and the detected release state is reported, but nothing is pushed,
 # opened, merged, tagged, or published. Add --apply to actually release. Tests
-# run in CI on the release PR, not locally.
+# run on a crabbox (Linux) + in the GH Actions matrix on the release PR.
 #
 # Validates that <version> is a single-step bump from the current published
 # @phnx-labs latest -- patch+1, or minor+1 with patch=0, or major+1 with
@@ -45,16 +56,61 @@ bold()   { printf '\033[1m%s\033[0m\n'  "$*"; }
 
 die() { red "error: $*"; exit 1; }
 
+# ----- Home base: the one hardcoded machine name (owner-endorsed) -----
+# The build/sign/notarize/publish/computer-helper phase MUST run here: it is the
+# only box that holds the Developer ID cert + npm publish rights + the headless
+# signing/secrets context. This is a constant, NOT an env var -- nobody sets
+# anything to release. Everything else self-selects (crabbox for tests; the
+# invoking box for git+gh orchestration).
+readonly RELEASE_HOME_BASE="mac-mini"
+
+# Detect the short hostname of the box we are on, portably (macOS + Linux), and
+# compute whether we are already on the home base. `scutil --get LocalHostName`
+# is the macOS name that matches the ssh/Tailscale name; `hostname -s` is the
+# Linux short name.
+if [[ "$(uname)" == "Darwin" ]]; then
+  THIS_HOST="$(scutil --get LocalHostName 2>/dev/null || hostname -s)"
+else
+  THIS_HOST="$(hostname -s 2>/dev/null || hostname)"
+fi
+ON_HOME_BASE=false
+[[ "$THIS_HOST" == "$RELEASE_HOME_BASE" ]] && ON_HOME_BASE=true
+
+# ----- Phase tracker -----
+# A running [n/N] progress line the operator can follow: each phase names the box
+# it runs on, and closes with a ✓ (pass) or ✗ (fail + one-line cause). Reuses the
+# bold/green/red helpers above. TOTAL_PHASES is the count for the current mode.
+PHASE_NUM=0
+TOTAL_PHASES=6
+phase() {
+  PHASE_NUM=$((PHASE_NUM + 1))
+  bold "[$PHASE_NUM/$TOTAL_PHASES] $1  (on: $2)"
+}
+phase_ok()   { green "  ✓ $1"; }
+# phase_fail prints the ✗ + cause + (optional) log location, then aborts. This is
+# the single failure surface: never a bare "CI red" or a silent hang.
+phase_fail() {
+  red "  ✗ $1"
+  [[ -n "${2:-}" ]] && red "    log: $2"
+  exit 1
+}
+
 # ----- Parse args -----
 APPLY=false
 SKIP_TESTS=false
 YES=false
+# --home-base-phase is an INTERNAL entrypoint, not a user knob: the trigger box
+# ssh's release.sh onto the home base with this flag to run ONLY the privileged
+# publish phase (build + sign + notarize + npm publish + computer-helper) against
+# an already-merged+tagged release. It is never something an operator passes.
+HOME_BASE_PHASE=false
 TARGET=""
 for arg in "$@"; do
   case "$arg" in
     --apply) APPLY=true ;;
     --skip-tests) SKIP_TESTS=true ;;
     --yes|-y) YES=true ;;
+    --home-base-phase) HOME_BASE_PHASE=true ;;
     -h|--help) printf '%s\n' "usage: scripts/release.sh <version> [--apply] [--skip-tests] [--yes]"; exit 0 ;;
     --*) die "unknown flag: $arg" ;;
     *)
@@ -71,7 +127,155 @@ if $APPLY; then
 else
   yellow "Mode: DRY-RUN (no branch, PR, merge, tag, publish, or push -- pass --apply to actually release)"
 fi
+gray "  this box:   $THIS_HOST$($ON_HOME_BASE && echo '  (home base)' || echo '')"
+gray "  home base:  $RELEASE_HOME_BASE  (build + sign + notarize + npm publish + computer-helper)"
+gray "  tests:      a crabbox (dynamic Hetzner Linux VM, selected at run time)"
 echo
+
+# ----- Privileged phase on the home base (internal --home-base-phase entrypoint) -----
+# This runs the TAGGED release.sh (route_home_base_phase checks out the tag into a
+# worktree and invokes THAT worktree's script with --home-base-phase), so the
+# script executing here is guaranteed to carry --home-base-phase and
+# headless-sign-context.sh. It therefore assumes it is ALREADY inside the tagged
+# worktree ($ROOT = <tag-worktree>/apps/cli, cwd set by the caller): it verifies
+# the checked-out version == $TARGET, then builds the signed macOS artifacts
+# fresh (the home base is the sign host), publishes to npm with the token resolved
+# HERE, and pushes the computer-helper asset. It does NOT create its own worktree.
+run_home_base_phase() {
+  [[ "$(uname)" == "Darwin" ]] \
+    || die "the home base ($RELEASE_HOME_BASE) must be macOS to build + sign + notarize + publish"
+  command -v npm >/dev/null  || die "npm not found on $RELEASE_HOME_BASE"
+  command -v node >/dev/null || die "node not found on $RELEASE_HOME_BASE"
+  command -v git >/dev/null  || die "git not found on $RELEASE_HOME_BASE"
+  command -v jq >/dev/null   || die "jq not found on $RELEASE_HOME_BASE (brew install jq)"
+  command -v gh >/dev/null   || die "gh not found on $RELEASE_HOME_BASE (needed for the computer-helper release asset)"
+
+  cd "$ROOT"
+
+  # Registry is the source of truth. If already published, nothing to do -- the
+  # privileged phase is idempotent (the trigger box already handled the tag).
+  if npm view "$PHNX_PKG@$TARGET" version >/dev/null 2>&1; then
+    green "$PHNX_PKG@$TARGET already on the registry -- nothing to publish"
+    return 0
+  fi
+
+  # We are inside the tagged worktree already; verify the checked-out tree is
+  # actually $TARGET before signing/publishing.
+  local checked_out_ver
+  checked_out_ver="$(jq -r .version package.json)"
+  [[ "$checked_out_ver" == "$TARGET" ]] \
+    || die "checked-out tree is at $checked_out_ver, not $TARGET -- refusing to build/publish on $RELEASE_HOME_BASE"
+
+  # Enter the headless signing + secrets context (shared with remote-sign-mac.sh):
+  # unlocks rush-signing.keychain-db + exports AGENTS_SECRETS_PASSPHRASE so
+  # codesign, notarytool, AND `agents secrets` (npmjs.com token + apple.com creds)
+  # all resolve with NO Touch ID and NO per-secret prompt. This must run BEFORE
+  # resolve_npm_auth, which reads the npmjs.com bundle.
+  command -v agents >/dev/null 2>&1 \
+    || die "'agents' CLI not on PATH on $RELEASE_HOME_BASE -- needed to inject apple.com/npmjs.com creds"
+  # shellcheck source=scripts/headless-sign-context.sh
+  . scripts/headless-sign-context.sh
+
+  # npm auth resolves HERE, on the home base, in its headless secrets context --
+  # the token never crosses to the box that invoked the release.
+  resolve_npm_auth
+
+  bun install --frozen-lockfile >/dev/null \
+    || die "dependency install failed in the tagged worktree on $RELEASE_HOME_BASE"
+
+  # Sign + notarize the standalone binary, build the signed helpers, then publish.
+  # These reuse the same scripts the macOS-local release path uses. The apple.com
+  # bundle resolves headlessly (the context above set AGENTS_SECRETS_PASSPHRASE).
+  bold "Signing + notarizing the standalone agents binary + helpers on $RELEASE_HOME_BASE..."
+  agents secrets exec apple.com -- scripts/sign-cli-binary.sh \
+    || die "CLI binary sign/notarize failed on $RELEASE_HOME_BASE"
+  # The keychain + menu-bar helpers are the other signed .apps the tarball bundles.
+  # Build them directly here so bin/ is populated before `bun run build`.
+  agents secrets exec apple.com -- bash -c '
+    set -euo pipefail
+    menubar/scripts/build.sh release
+    rm -rf bin/MenubarHelper.app
+    cp -R menubar/dist/MenubarHelper.app bin/MenubarHelper.app
+    codesign --verify --deep --strict "bin/MenubarHelper.app"
+    scripts/build-keychain-helper.sh
+    shasum -a 256 "bin/Agents CLI.app/Contents/MacOS/Agents CLI" > "scripts/Agents CLI.app.sha256"
+  ' || die "signed helper build failed on $RELEASE_HOME_BASE"
+
+  bold "Building (bun run build) on $RELEASE_HOME_BASE..."
+  rm -rf dist
+  bun run build >/dev/null || die "build failed on $RELEASE_HOME_BASE"
+
+  bold "Publishing $PHNX_PKG@$TARGET from $RELEASE_HOME_BASE..."
+  npm publish --access=public --provenance=false \
+    || die "npm publish failed on $RELEASE_HOME_BASE (tag exists; rerun to retry)"
+  green "Published $PHNX_PKG@$TARGET"
+
+  # Publish the signed + notarized macOS computer helper as the release asset.
+  # Best-effort: npm is already published, so a failure here is a warning.
+  bold "Publishing the macOS computer helper asset for v$TARGET..."
+  agents secrets exec apple.com -- scripts/publish-computer-helper-mac.sh "$TARGET" \
+    || yellow "computer-helper publish failed -- retry on $RELEASE_HOME_BASE: agents secrets exec apple.com -- apps/cli/scripts/publish-computer-helper-mac.sh $TARGET"
+}
+
+# Resolve the npm publish token from the local `npmjs.com` secrets bundle and
+# write a temp .npmrc. Called ONLY on the home base (by run_home_base_phase),
+# inside the headless secrets context, so the token never crosses to the trigger
+# box. Defined here (before the --home-base-phase dispatch) so that entrypoint,
+# which exits before the trigger-box preflight, can reach it.
+resolve_npm_auth() {
+  local bundle_out token_line
+  # Read the npmjs.com bundle via the globally-installed `agents` (homebrew). We
+  # resolve the token BEFORE the build, so the worktree's own dist/ does not exist
+  # yet -- there is no local build to prefer, and the headless context sourced
+  # above has already set AGENTS_SECRETS_PASSPHRASE so this resolves silently.
+  command -v agents >/dev/null || die "'agents' CLI not on PATH (needed to read npmjs.com secrets bundle on $RELEASE_HOME_BASE)"
+  bundle_out="$(agents secrets export npmjs.com --plaintext 2>/dev/null || true)"
+  [[ -n "$bundle_out" ]] \
+    || die "no 'npmjs.com' secrets bundle on $RELEASE_HOME_BASE -- the home base must hold the publish token (agents secrets create npmjs.com && agents secrets add npmjs.com NPM_TOKEN)"
+  token_line="$(printf '%s\n' "$bundle_out" | grep -E '^export NPM_TOKEN=' | head -1)"
+  [[ -n "$token_line" ]] || die "secrets bundle 'npmjs.com' is missing key NPM_TOKEN"
+  NPM_TOKEN="${token_line#export NPM_TOKEN=}"
+  NPM_TOKEN="${NPM_TOKEN%\"}"; NPM_TOKEN="${NPM_TOKEN#\"}"
+  NPM_TOKEN="${NPM_TOKEN%\'}"; NPM_TOKEN="${NPM_TOKEN#\'}"
+  [[ -n "$NPM_TOKEN" ]] || die "NPM_TOKEN resolved to empty string on $RELEASE_HOME_BASE"
+
+  NPMRC_TMP="$(mktemp "${TMPDIR:-/tmp}/agents-cli-npmrc.XXXXXX")"
+  chmod 600 "$NPMRC_TMP"
+  # Use ${NPM_TOKEN} env var reference - npm expands it at runtime. Writing the
+  # token directly causes 404 errors for scoped packages.
+  # shellcheck disable=SC2016
+  printf '//registry.npmjs.org/:_authToken=${NPM_TOKEN}\nalways-auth=true\n' > "$NPMRC_TMP"
+  export NPM_TOKEN
+  export NPM_CONFIG_USERCONFIG="$NPMRC_TMP"
+
+  local npm_user
+  npm_user="$(npm whoami 2>/dev/null || true)"
+  [[ -n "$npm_user" ]] || die "npm whoami failed with the resolved NPM_TOKEN on $RELEASE_HOME_BASE -- token may be expired or lack publish scope"
+  green "npm authenticated as $npm_user (via npmjs.com bundle on $RELEASE_HOME_BASE)"
+}
+
+# Echo the commit a remote tag points at (peeled first, then direct). Defined here
+# so both the --home-base-phase entrypoint and the trigger-box flow can use it.
+remote_tag_commit() {
+  local tag="$1" refs peeled direct
+  refs="$(git ls-remote --tags origin "refs/tags/$tag" "refs/tags/$tag^{}")"
+  peeled="$(awk '$2 ~ /\^\{\}$/ { print $1; exit }' <<<"$refs")"
+  direct="$(awk '$2 !~ /\^\{\}$/ { print $1; exit }' <<<"$refs")"
+  printf '%s' "${peeled:-$direct}"
+}
+
+# The internal --home-base-phase entrypoint short-circuits everything else.
+if $HOME_BASE_PHASE; then
+  [[ -n "$TARGET" ]] || die "--home-base-phase needs a <version>"
+  bold "[home-base phase] build + sign + notarize + npm publish + computer-helper on $THIS_HOST"
+  # NPMRC_TMP is cleaned up on exit; declare the trap here since the trigger-box
+  # traps below are not reached on this path.
+  NPMRC_TMP=""
+  trap 'rm -f "${NPMRC_TMP:-}"' EXIT
+  run_home_base_phase
+  green "Released $TARGET (home-base phase)"
+  exit 0
+fi
 
 # ----- Pre-flight -----
 command -v npm >/dev/null    || die "npm not found"
@@ -98,77 +302,102 @@ BASE_SHA="$(git rev-parse HEAD)"
 REMOTE="$(git rev-parse "origin/$DEFAULT_BRANCH")"
 [[ "$BASE_SHA" == "$REMOTE" ]] || die "$DEFAULT_BRANCH is not in sync with origin/$DEFAULT_BRANCH (run 'git push' first)"
 
-# ----- npm auth via token (skips 2FA OTP prompts) -----
-# Resolve NPM_TOKEN in order: (1) an env-supplied token (lets CI and machines
-# whose keychain helper is broken publish without the bundle); (2) the local
-# keychain-backed `npmjs.com` secrets bundle; (3) — when neither is present, e.g.
-# a release driven from a Linux box that has no npm token in its own store — the
-# bundle resolved EPHEMERALLY from a primary device over SSH via
-# `agents secrets exec npmjs.com --host <host>` (never written to disk here). That
-# last hop is what lets a Linux box release without a human pasting/approving a
-# token: it borrows the secret from zion/mac-mini just for this run. The token
-# must have publish access to both @phnx-labs and @companion; create automation
-# tokens at https://www.npmjs.com/settings/<user>/tokens with the "Automation"
-# type so 2FA is bypassed for publishes.
-if [[ -z "${NPM_TOKEN:-}" ]]; then
-  # Use local build if available (has latest keychain fixes), fallback to global
-  if [[ -f "$ROOT/dist/index.js" ]]; then
-    AGENTS_CMD="node $ROOT/dist/index.js"
+# ----- npm auth: resolved ON the home base, never borrowed to the trigger box -----
+# The npm publish token lives only on the home base (mac-mini) and is resolved
+# there (resolve_npm_auth, defined above), in its headless secrets context, at
+# publish time -- it never crosses to the box that invoked the release. Anonymous
+# `npm view` reads below (latest version, is-target-published) need no token, so
+# version validation + the already-published short-circuit run fine on any box.
+
+# ----- Tests on a crabbox (dynamic Hetzner Linux VM) -----
+# scripts/sandbox.sh already selects an available crabbox for THIS repo's profile
+# (or warms a fresh one) and runs an arbitrary command on it -- never a hardcoded
+# box. We run the full suite there, capture its output to a log, and on failure
+# print which tests failed + the log location and HALT before any PR/publish.
+# This covers the LINUX suite; the GH Actions CI matrix on the release PR still
+# covers the cross-platform (macOS/Windows) legs (see wait_for_ci_green below).
+run_crabbox_tests() {
+  local log rc
+  log="$(mktemp "${TMPDIR:-/tmp}/agents-cli-crabbox-tests.XXXXXX.log")"
+  bold "Running the Linux test suite on a crabbox (dynamic Hetzner VM)..."
+  gray "  (streaming; full log captured at $log)"
+  # sandbox.sh with no --pr flag = test mode: rsync this tree to the box, run the
+  # command. tee both streams so the operator watches live AND we keep the log.
+  if scripts/sandbox.sh -- bash -c 'bun install && bun run test' 2>&1 | tee "$log"; then
+    rc=0
   else
-    command -v agents >/dev/null || die "'agents' CLI not on PATH (needed to read npmjs.com secrets bundle)"
-    AGENTS_CMD="agents"
+    rc="${PIPESTATUS[0]}"
   fi
-  # (2) Local `npmjs.com` bundle — fast path, no network.
-  NPM_BUNDLE_OUT="$($AGENTS_CMD secrets export npmjs.com --plaintext 2>/dev/null || true)"
-  if [[ -n "$NPM_BUNDLE_OUT" ]]; then
-    NPM_TOKEN_LINE="$(printf '%s\n' "$NPM_BUNDLE_OUT" | grep -E '^export NPM_TOKEN=' | head -1)"
-    [[ -n "$NPM_TOKEN_LINE" ]] || die "secrets bundle 'npmjs.com' is missing key NPM_TOKEN"
-    # Strip 'export NPM_TOKEN=' prefix and surrounding quotes if any.
-    NPM_TOKEN="${NPM_TOKEN_LINE#export NPM_TOKEN=}"
-    NPM_TOKEN="${NPM_TOKEN%\"}"
-    NPM_TOKEN="${NPM_TOKEN#\"}"
-    NPM_TOKEN="${NPM_TOKEN%\'}"
-    NPM_TOKEN="${NPM_TOKEN#\'}"
-  else
-    # (3) No local bundle: borrow it from a primary device over SSH. `secrets exec
-    # --host` resolves the bundle on the remote and injects it into this child
-    # process only — the token is never stored on this box. Try SECRET_HOST first,
-    # then the usual primaries (zion = the interactive Mac, mac-mini = the
-    # appliance). This is the sanctioned path, so no credential-move prompt fires.
-    for _sh in ${SECRET_HOST:-} zion mac-mini; do
-      [[ -n "$_sh" ]] || continue
-      NPM_TOKEN="$($AGENTS_CMD secrets exec npmjs.com --host "$_sh" -- sh -c 'printf %s "${NPM_TOKEN:-}"' 2>/dev/null || true)"
-      if [[ -n "$NPM_TOKEN" ]]; then
-        gray "Resolved npm token from $_sh over SSH (ephemeral; not stored on this box)."
-        break
-      fi
-    done
-    [[ -n "$NPM_TOKEN" ]] || die "no local 'npmjs.com' bundle and could not borrow it from a primary device (tried: ${SECRET_HOST:+$SECRET_HOST }zion mac-mini). Fix one of: create it locally (agents secrets create npmjs.com && agents secrets add npmjs.com NPM_TOKEN); export NPM_TOKEN=<token>; or make a primary device that holds the bundle ssh-reachable (SECRET_HOST=<host> to point at a specific one)."
+  if [[ "$rc" != "0" ]]; then
+    red "  ✗ crabbox tests FAILED (exit $rc)"
+    # Surface the actual failing test names + assertion output, not a bare "red".
+    local fails
+    fails="$(grep -E '^\s*(FAIL|×|✗|not ok|AssertionError|Error:|Expected|Received)' "$log" | head -40 || true)"
+    if [[ -n "$fails" ]]; then
+      red "  failing tests / errors:"
+      printf '%s\n' "$fails" | while IFS= read -r line; do red "    $line"; done
+    fi
+    phase_fail "Linux tests failed on the crabbox -- release halted before opening a PR" "$log"
   fi
-fi
-[[ -n "$NPM_TOKEN" ]] || die "NPM_TOKEN resolved to empty string"
+  phase_ok "crabbox tests passed (full log: $log)"
+}
 
-NPMRC_TMP="$(mktemp "${TMPDIR:-/tmp}/agents-cli-npmrc.XXXXXX")"
-chmod 600 "$NPMRC_TMP"
-# Use ${NPM_TOKEN} env var reference - npm expands it at runtime.
-# Writing the token directly causes 404 errors for scoped packages.
-# npm, not this shell, expands the literal reference.
-# shellcheck disable=SC2016
-printf '//registry.npmjs.org/:_authToken=${NPM_TOKEN}\nalways-auth=true\n' > "$NPMRC_TMP"
-export NPM_TOKEN
-export NPM_CONFIG_USERCONFIG="$NPMRC_TMP"
-
-# Verify the token works.
-NPM_USER="$(npm whoami 2>/dev/null || true)"
-[[ -n "$NPM_USER" ]] || die "npm whoami failed with the resolved NPM_TOKEN -- token may be expired or lack publish scope"
-green "npm authenticated as $NPM_USER (via npmjs.com bundle)"
-
-remote_tag_commit() {
-  local tag="$1" refs peeled direct
-  refs="$(git ls-remote --tags origin "refs/tags/$tag" "refs/tags/$tag^{}")"
-  peeled="$(awk '$2 ~ /\^\{\}$/ { print $1; exit }' <<<"$refs")"
-  direct="$(awk '$2 !~ /\^\{\}$/ { print $1; exit }' <<<"$refs")"
-  printf '%s' "${peeled:-$direct}"
+# ----- Route the privileged phase to the home base -----
+# After the trigger box has merged + tagged the release (git + gh, which need the
+# invoking box's auth), the build+sign+notarize+publish+computer-helper phase runs
+# on the home base -- always from the TAGGED release.sh, checked out into a
+# throwaway worktree at v$TARGET, so the home base's own on-disk checkout (which,
+# on the first release after this PR merges, predates --home-base-phase) is never
+# executed. If we ARE the home base, do the checkout + run locally; otherwise the
+# same steps run over ssh on $RELEASE_HOME_BASE. The npm token is resolved on the
+# home base -- it never crosses to the trigger box.
+#
+# HOME_BASE_WT_SNIPPET is the shared shell that both paths run (locally via bash,
+# or remotely via ssh): fetch origin + the tag, verify the tag's version, create a
+# detached worktree at v$TARGET, and run THAT worktree's
+# apps/cli/scripts/release.sh $TARGET --home-base-phase. The worktree is removed on
+# exit whether the phase succeeds or fails (BLOCKER 3), via a scoped EXIT trap.
+home_base_wt_snippet() {
+  # $1 = version. Emits a self-contained bash program (no outer-shell expansion of
+  # runtime values beyond the version, which is validated MAJOR.MINOR.PATCH).
+  cat <<SNIPPET
+set -euo pipefail
+REPO_ROOT="\$(git rev-parse --show-toplevel)"
+git -C "\$REPO_ROOT" fetch --quiet origin
+git -C "\$REPO_ROOT" fetch --quiet origin "refs/tags/v$1:refs/tags/v$1" 2>/dev/null || true
+git -C "\$REPO_ROOT" rev-parse --verify --quiet "refs/tags/v$1^{commit}" >/dev/null \\
+  || { echo "tag v$1 not found on the home base after fetch" >&2; exit 1; }
+TAG_VER="\$(git -C "\$REPO_ROOT" show "v$1:apps/cli/package.json" | jq -r .version)"
+[ "\$TAG_VER" = "$1" ] \\
+  || { echo "tag v$1 tree is at \$TAG_VER, not $1 -- refusing home-base phase" >&2; exit 1; }
+WT="\$REPO_ROOT/.agents/worktrees/homebase-publish-v$1-\$\$"
+trap 'git -C "\$REPO_ROOT" worktree remove --force "\$WT" >/dev/null 2>&1 || true' EXIT
+git -C "\$REPO_ROOT" worktree add --quiet --detach "\$WT" "v$1" \\
+  || { echo "could not create home-base publish worktree at \$WT" >&2; exit 1; }
+[ -z "\$(git -C "\$WT" status --short | grep '^ D')" ] \\
+  || { echo "home-base publish worktree \$WT is incomplete -- refusing to build" >&2; exit 1; }
+cd "\$WT/apps/cli"
+scripts/release.sh $1 --home-base-phase
+SNIPPET
+}
+route_home_base_phase() {
+  local snippet
+  snippet="$(home_base_wt_snippet "$TARGET")"
+  if $ON_HOME_BASE; then
+    bold "Building + signing + publishing on the home base ($RELEASE_HOME_BASE, this box) from the tagged tree..."
+    # cwd is this repo's apps/cli (ROOT), so the snippet's `git rev-parse
+    # --show-toplevel` resolves the checkout we are in.
+    bash -c "$snippet" || return 1
+    return 0
+  fi
+  bold "Routing build + sign + publish to the home base ($RELEASE_HOME_BASE) over ssh (from the tagged tree)..."
+  # Over ssh the remote shell starts in $HOME, so cd into the home base's checkout
+  # first; then run the SAME snippet. `bash -lc` puts `agents` (homebrew) +
+  # node/bun on PATH for the headless signing + secrets resolution. The snippet is
+  # passed on stdin so no quoting of its body is needed across the ssh hop; $HOME
+  # expands on the REMOTE side (single-quoted).
+  ssh "$RELEASE_HOME_BASE" 'bash -lc "cd \$HOME/src/github.com/muqsitnawaz/agents-cli && bash -s"' <<<"$snippet" \
+    || return 1
 }
 
 # ----- Validate version bump -----
@@ -231,6 +460,16 @@ MAIN_AT_TARGET=false
 if [[ "$(git show "origin/$DEFAULT_BRANCH:apps/cli/package.json" 2>/dev/null | jq -r .version 2>/dev/null || echo '')" == "$TARGET" ]]; then
   MAIN_AT_TARGET=true
 fi
+
+# Phase count for the [n/N] tracker, computed for the actual path taken so it
+# never shows gaps or a wrong denominator. Normal release runs 6 phases:
+# preflight, crabbox tests, PR+CI+merge, tag, publish, verify. A catch-up publish
+# (main already at $TARGET) skips the tests + PR+CI+merge phases -> 4 phases.
+if $MAIN_AT_TARGET; then
+  TOTAL_PHASES=4
+else
+  TOTAL_PHASES=6
+fi
 EXISTING_PR="$(gh pr list --head "$RELEASE_BRANCH" --state open --json number --jq '.[0].number // empty' 2>/dev/null || true)"
 MERGED_RELEASE_JSON="$(gh pr list --head "$RELEASE_BRANCH" --base "$DEFAULT_BRANCH" --state merged --limit 1 --json number,mergeCommit,headRefOid 2>/dev/null || echo '[]')"
 MERGED_RELEASE_PR="$(jq -r '.[0].number // empty' <<<"$MERGED_RELEASE_JSON")"
@@ -268,33 +507,14 @@ if $MAIN_AT_TARGET && ! $PHNX_TARGET_PUBLISHED && [[ -n "$MERGED_RELEASE_SHA" ]]
   [[ "$(git show "$MERGED_RELEASE_SHA:apps/cli/package.json" | jq -r .version)" == "$TARGET" ]] \
     || die "merged release PR #$MERGED_RELEASE_PR is not version $TARGET"
 
-  if [[ "$(uname)" == "Darwin" ]]; then
-    [[ -d "$INVOKING_ROOT/bin/Agents CLI.app" ]] \
-      || die "historical publish retry needs the staged SHA-pinned helper: $INVOKING_ROOT/bin/Agents CLI.app"
-  fi
-
+  # The catch-up guards above (CI-tested head match + tree match + version match)
+  # are preserved intact -- they gate an unverified retry publish. What is NOT
+  # done here anymore: building the signed macOS artifacts on the trigger box.
+  # The whole privileged phase (build + sign + notarize + publish + computer-
+  # helper) now runs on the home base against the tagged tree, so no staged
+  # helper / historical worktree build is needed on the invoking box.
   HISTORICAL_CATCHUP=true
-  HISTORICAL_WT="$REPO_ROOT/.agents/worktrees/retry-release-v$TARGET-$$"
-  git worktree add --quiet --detach "$HISTORICAL_WT" "$MERGED_RELEASE_SHA" \
-    || die "could not create historical release worktree at $HISTORICAL_WT"
-  cd "$HISTORICAL_WT/apps/cli"
-  ROOT="$(pwd)"
-  bold "Retrying from merged release PR #$MERGED_RELEASE_PR at ${MERGED_RELEASE_SHA:0:9} (current main: ${BASE_SHA:0:9})..."
-  bun install --frozen-lockfile >/dev/null \
-    || die "dependency install failed in historical release worktree"
-  if [[ "$(uname)" == "Darwin" ]]; then
-    mkdir -p bin
-    cp -R "$INVOKING_ROOT/bin/Agents CLI.app" bin/
-    scripts/verify-keychain-helper.sh \
-      || die "staged keychain helper does not match the historical release pin"
-    bold "Building the menu-bar helper from the historical release tree..."
-    menubar/scripts/build.sh release \
-      || die "historical menu-bar helper build failed"
-    rm -rf bin/MenubarHelper.app
-    cp -R menubar/dist/MenubarHelper.app bin/MenubarHelper.app
-    codesign --verify --deep --strict bin/MenubarHelper.app \
-      || die "historical menu-bar helper signature verification failed"
-  fi
+  bold "Catch-up: main already at $TARGET (merged PR #$MERGED_RELEASE_PR at ${MERGED_RELEASE_SHA:0:9}); routing publish to the home base."
 fi
 
 # ----- Sync package.json with target -----
@@ -342,86 +562,31 @@ fi
 rm -f "$TSC_LOG"
 green "Type check clean."
 
-# ----- Offload the macOS helper build + sign to a remote sign host (opt-in) -----
-# The tarball bundles two signed macOS .app helpers (bin/Agents CLI.app +
-# bin/MenubarHelper.app) that a Linux box can't produce. When releasing off a
-# non-macOS host (or when FORCE_REMOTE_SIGN=1), offload the Swift build + codesign
-# + notarize to ${SIGN_HOST:-mac-mini} over ssh and pull the signed bundles back,
-# so `bun run build` (now presence-gated, not uname-gated) can package them.
-# On macOS the signed helpers are expected to be staged locally already, so this
-# is skipped unless FORCE_REMOTE_SIGN=1.
-NEED_REMOTE_SIGN=false
-if [[ "${FORCE_REMOTE_SIGN:-}" == "1" ]]; then
-  NEED_REMOTE_SIGN=true
-elif [[ "$(uname)" != "Darwin" ]]; then
-  # Always remote-sign off macOS: unlike the .app helpers (stable across
-  # releases once staged), the standalone CLI binary embeds the release
-  # version, so every release needs a freshly built + signed + notarized
-  # bin/agents-macos (see scripts/sign-cli-binary.sh).
-  NEED_REMOTE_SIGN=true
-fi
-if $NEED_REMOTE_SIGN; then
-  bold "Offloading macOS helper build + sign to ${SIGN_HOST:-mac-mini}..."
-  scripts/remote-sign-mac.sh || die "remote sign failed -- cannot package signed helpers"
-  green "Signed helpers pulled back into bin/."
-fi
+# The build + sign + notarize of the signed macOS artifacts no longer happens on
+# the trigger box: it runs on the home base ($RELEASE_HOME_BASE) in the privileged
+# phase (run_home_base_phase / --home-base-phase). That box is the only one with
+# the Developer ID cert + headless signing context, and every release rebuilds the
+# version-stamped standalone binary there. The trigger box's job is the fast local
+# fail-fast (tsc, above) + orchestration (tests on a crabbox, PR, merge, tag).
 
-# ----- Sign + notarize the standalone macOS `agents` binary (issue #315) -----
-# Runs on every macOS release (dry-run included: `npm pack --dry-run` below
-# fires prepack, whose verify-cli-binary.sh gate needs the fresh artifact).
-# Off macOS, the remote-sign step above already produced bin/agents-macos on
-# the sign host and pulled it back.
-if [[ "$(uname)" == "Darwin" ]]; then
-  bold "Signing + notarizing the standalone agents binary..."
-  if [[ -n "${APPLE_ID:-}" && -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" && -n "${APPLE_TEAM_ID:-}" ]]; then
-    scripts/sign-cli-binary.sh || die "CLI binary sign/notarize failed"
-  elif command -v agents >/dev/null 2>&1; then
-    agents secrets exec apple.com -- scripts/sign-cli-binary.sh || die "CLI binary sign/notarize failed"
-  else
-    die "cannot sign dist/bin/agents: export APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID, or install agents-cli so 'agents secrets exec apple.com -- scripts/sign-cli-binary.sh' can inject them"
-  fi
-  green "Standalone binary signed + notarized."
-fi
+# ----- Tests -----
+# The Linux suite runs on a dynamic crabbox in the --apply flow, before the PR is
+# opened (see run_crabbox_tests / the "[2/6] Linux tests" phase below); the GH
+# Actions CI matrix on the release PR then covers the macOS/Windows legs. Local
+# 'tsc --noEmit' above is the fast pre-flight fail-fast. --skip-tests skips the
+# crabbox lease only (CI still gates the PR).
 
-# ----- Build (real artifacts) -----
-bold "Building (bun run build)..."
-rm -rf dist
-BUILD_LOG="$(mktemp "${TMPDIR:-/tmp}/agents-cli-build.XXXXXX")"
-if ! bun run build > "$BUILD_LOG" 2>&1; then
-  red "Build failed:"
-  cat "$BUILD_LOG" >&2
-  rm -f "$BUILD_LOG"
-  die "build failed"
+# ----- Tarball preview (home base only) -----
+# `npm pack --dry-run` fires prepack, whose verify-keychain-helper.sh /
+# verify-menubar-helper.sh / verify-cli-binary.sh gates need the signed macOS
+# artifacts. Those are built only on the home base, so the preview runs there.
+# On the trigger box we skip it and note where the real tarball is produced.
+if $ON_HOME_BASE && [[ -d dist && -d "bin/Agents CLI.app" ]]; then
+  bold "Tarball preview ($PHNX_PKG@$TARGET)"
+  npm pack --dry-run 2>&1 | tail -10
+else
+  gray "Tarball preview skipped on $THIS_HOST -- the signed tarball is built + packed on the home base ($RELEASE_HOME_BASE)."
 fi
-# Same paranoid scan over build output (the keychain copy step shouldn't
-# print anything; if it does, we want to know).
-if grep -iE '\berror\b|\bwarning\b' "$BUILD_LOG" >/dev/null 2>&1; then
-  red "build emitted warnings/errors:"
-  grep -iE '\berror\b|\bwarning\b' "$BUILD_LOG" >&2
-  rm -f "$BUILD_LOG"
-  die "fix the build output above before releasing"
-fi
-rm -f "$BUILD_LOG"
-green "Build clean."
-
-# ----- Tests: run in CI on the release PR, not here -----
-# The suite is no longer run locally / on crabbox at release time. The apply
-# phase opens the release as a PR on a release/v<version> branch, which triggers
-# the full cross-platform CI matrix (.github/workflows/ci.yml) plus the 'test'
-# and 'gitleaks' checks; the script blocks on that CI being green before it
-# merges and publishes (see "Wait for CI" below). Running the suite here too
-# would double-run it (a crabbox lease + minutes) and create a second source of
-# truth. Local 'tsc --noEmit' + 'bun run build' above stay as the fast pre-PR
-# fail-fast (and the build is needed for the tarball preview + publish anyway).
-# --skip-tests is accepted for backward compatibility but is now a no-op.
-if $SKIP_TESTS; then
-  gray "(--skip-tests: tests run in CI on the release PR now; flag is a no-op)"
-fi
-echo
-
-# ----- Tarball preview (always) -----
-bold "Tarball preview ($PHNX_PKG@$TARGET)"
-npm pack --dry-run 2>&1 | tail -10
 echo
 
 # ----- Build the shim package on disk so we can preview/publish it -----
@@ -504,14 +669,13 @@ if ! $APPLY; then
   gray "  open release PR           ${EXISTING_PR:-none} ($RELEASE_BRANCH)"
   gray "  merged release PR         ${MERGED_RELEASE_PR:-none} ($RELEASE_BRANCH)"
   echo
-  yellow "Will run on --apply (NPM_TOKEN from npmjs.com bundle, no 2FA prompts):"
-  yellow "  1. fold .changelog/next/* -> .changelog/$TARGET.md + regenerate CHANGELOG.md"
-  yellow "  2. push branch $RELEASE_BRANCH (chore(release): $TARGET) -> fires the full CI matrix"
-  yellow "  3. open a PR into $DEFAULT_BRANCH"
-  yellow "  4. wait for CI green (matrix + test + gitleaks), fail-closed"
-  yellow "  5. squash-merge the PR"
-  yellow "  6. verify merged tree == built tree, tag v$TARGET at the merge commit"
-  yellow "  7. npm publish $PHNX_PKG@$TARGET, push the tag"
+  yellow "Will run on --apply (self-routing, zero-config -- no env vars, no 2FA prompt):"
+  yellow "  1. [this box: $THIS_HOST] fold .changelog/next/* -> .changelog/$TARGET.md + regenerate CHANGELOG.md"
+  yellow "  2. [crabbox]  run the Linux test suite on a dynamic Hetzner VM; halt on failure"
+  yellow "  3. [this box] push branch $RELEASE_BRANCH (chore(release): $TARGET) -> fires the CI matrix; open a PR"
+  yellow "  4. [this box] wait for CI green (matrix + test + gitleaks), fail-closed"
+  yellow "  5. [this box] squash-merge the PR; verify merged tree == expected; tag v$TARGET"
+  yellow "  6. [$RELEASE_HOME_BASE] build + sign + notarize + npm publish + push tag + computer-helper (token resolved there)"
   gray   "  (steps already done in a prior run are skipped: published / merged / PR-open / tag-exists)"
   exit 0
 fi
@@ -526,6 +690,9 @@ fi
 # carried into the release branch commit (and the cleanup trap reverts the
 # working tree to HEAD on any abort, keeping re-runs clean).
 PKG_BUMPED=false
+
+phase "Preflight + version validation complete" "$THIS_HOST"
+phase_ok "clean $DEFAULT_BRANCH, bump $BUMP ($PHNX_LATEST -> $TARGET), type check + tarball preview done"
 
 # ----- Short-circuit: already published -----
 # Registry is the source of truth. If the version is live, the release happened;
@@ -619,8 +786,38 @@ if $MAIN_AT_TARGET && ! $PHNX_TARGET_PUBLISHED; then
   wait_for_ci_green "$MERGED_RELEASE_PR"
 fi
 
+# ----- Tests on a crabbox (before opening the PR) -----
+# Only for a genuinely new release (a catch-up publish already went through CI on
+# its merged PR). On failure this halts before any PR/publish with the failing
+# tests + log location. --skip-tests skips the crabbox lease (CI still gates the
+# PR below). Covers Linux; the GH Actions matrix on the PR covers macOS/Windows.
+#
+# Test the CLEAN, pre-bump tree: the only working-tree mutation so far is the
+# package.json version bump, and the suite is version-independent, so we revert to
+# $ORIGINAL_PKG_VERSION for the rsync (sandbox.sh copies the working tree) and
+# re-apply the bump afterward. This avoids testing a half-mutated tree (bumped
+# version but not-yet-folded changelog) that never actually ships.
+if ! $MAIN_AT_TARGET; then
+  phase "Linux tests" "a crabbox"
+  if $SKIP_TESTS; then
+    gray "(--skip-tests: skipping the crabbox Linux suite; the GH Actions CI matrix still gates the PR)"
+    phase_ok "skipped (--skip-tests); GH Actions CI still gates the PR"
+  else
+    if $PKG_BUMPED; then
+      _rb_tmp="$(mktemp)"
+      jq --arg v "$ORIGINAL_PKG_VERSION" '.version = $v' package.json > "$_rb_tmp" && mv "$_rb_tmp" package.json
+    fi
+    run_crabbox_tests
+    if $PKG_BUMPED; then
+      _rb_tmp="$(mktemp)"
+      jq --arg v "$TARGET" '.version = $v' package.json > "$_rb_tmp" && mv "$_rb_tmp" package.json
+    fi
+  fi
+fi
+
 # ----- Open (or reuse) the release PR + merge, unless already merged -----
 if ! $MAIN_AT_TARGET; then
+  phase "Open release PR, wait for the CI matrix (macOS/Windows/Linux), merge" "$THIS_HOST + GH Actions"
   # Collapse the release queue: fold every .changelog/next/<slug>.md fragment into
   # .changelog/$TARGET.md, then regenerate the released-only aggregate CHANGELOG.md.
   # Fails closed if the queue is empty (a release must document itself). The folded
@@ -684,7 +881,11 @@ if ! $MAIN_AT_TARGET; then
   bold "Merging PR #$PR_NUMBER (squash)..."
   gh pr merge "$PR_NUMBER" --squash --delete-branch || die "merge failed for PR #$PR_NUMBER (left open)"
   green "Merged PR #$PR_NUMBER"
+  phase_ok "PR #$PR_NUMBER: CI matrix all-green, squash-merged"
 fi
+
+# Phase 4 (both paths): verify the merged tree + create/push the tag.
+phase "Verify merged tree + tag v$TARGET" "$THIS_HOST"
 
 # ----- Resolve the merged commit + integrity guards (before any publish) -----
 git fetch --quiet origin "$DEFAULT_BRANCH"
@@ -708,10 +909,9 @@ fi
 [[ "$(git rev-parse "$MERGED_SHA^{tree}")" == "$EXPECTED_TREE" ]] \
   || die "merged tree != built tree -- refusing to publish (concurrent merge or stray push on $RELEASE_BRANCH)"
 
-# Bring the working-tree package.json/CHANGELOG to exactly the merged code so the
-# published tarball matches merged main. dist/ was already built from the same
-# source (base + bump) earlier and is unaffected.
-git checkout -q "$MERGED_SHA" -- package.json CHANGELOG.md
+# The published tarball is built on the home base from a fresh checkout of the
+# tag (below), so the trigger box's working tree is not the publish source and is
+# left untouched here -- restore_release_tree keeps it clean for a re-run.
 
 # ----- Tag at the merged commit (idempotent) -----
 REMOTE_TAG_SHA="$(remote_tag_commit "v$TARGET")"
@@ -726,41 +926,37 @@ else
   green "Created tag v$TARGET at $(git rev-parse --short "$MERGED_SHA")"
 fi
 
-# ----- Publish @phnx-labs -----
-bold "Publishing $PHNX_PKG@$TARGET..."
-if ! npm publish --access=public --provenance=false; then
-  red "publish failed for $PHNX_PKG"
-  red "the PR is merged and the tag exists locally; rerun to retry publish: $0 $TARGET --apply"
-  exit 1
-fi
-green "Published $PHNX_PKG@$TARGET"
-echo
-
-# @swarmify/agents-cli legacy shim no longer published as of v1.20.0.
-
-# ----- Push the tag; restore the working tree to a clean state -----
+# ----- Push the tag (git, on the trigger box) so the home base can resolve it -----
+# The tag is created + pushed here, before the privileged phase, so the home base
+# resolves the exact release commit from origin. @swarmify/agents-cli legacy shim
+# is no longer published as of v1.20.0.
 git push origin "v$TARGET"
+phase_ok "merged tree verified; tag v$TARGET at ${MERGED_SHA:0:9} pushed"
 
-# ----- Publish the signed + notarized macOS computer helper as a release asset
-# for this tag. Best-effort: npm is already published, so a failure here is a
-# warning + a copy-paste retry, never a hard release failure. macOS + Developer
-# ID + notary creds required, so it runs on a Mac (locally, or the sign host). -----
-if [[ "$(uname -s)" == "Darwin" ]]; then
-  bold "Publishing the macOS computer helper asset for v$TARGET..."
-  if command -v agents >/dev/null 2>&1; then
-    agents secrets exec apple.com -- scripts/publish-computer-helper-mac.sh "$TARGET" \
-      || yellow "computer-helper publish failed — retry on a Mac: agents secrets exec apple.com -- scripts/publish-computer-helper-mac.sh $TARGET"
-  else
-    APPLE_ID="${APPLE_ID:-}" scripts/publish-computer-helper-mac.sh "$TARGET" \
-      || yellow "computer-helper publish failed — retry: scripts/publish-computer-helper-mac.sh $TARGET (needs APPLE_ID/APPLE_APP_SPECIFIC_PASSWORD/APPLE_TEAM_ID)"
-  fi
-else
-  yellow "Skipping macOS computer-helper asset (not on macOS)."
-  yellow "  Publish it from a Mac with signing creds:"
-  yellow "    agents secrets exec apple.com -- apps/cli/scripts/publish-computer-helper-mac.sh $TARGET"
-fi
-
+# Restore the working tree to clean now that the tag is durable; the privileged
+# phase below builds from a fresh checkout of the tag (locally on the home base,
+# or over ssh), never from this working tree.
 restore_release_tree
+
+# ----- Privileged phase: build + sign + notarize + npm publish + computer-helper -----
+# Routes to the home base ($RELEASE_HOME_BASE): inline if we ARE it, else over ssh.
+# The npm token is resolved on the home base and never crosses to this box. On
+# failure this halts with the cause; the tag + merge are durable, so a re-run
+# resumes at the publish (the already-published short-circuit + tag idempotency
+# make it safe).
+phase "Build + sign + notarize + npm publish + computer-helper" "$RELEASE_HOME_BASE"
+route_home_base_phase \
+  || phase_fail "privileged phase failed on the home base ($RELEASE_HOME_BASE) -- PR merged + tag v$TARGET pushed; rerun to retry: $0 $TARGET --apply"
+phase_ok "published $PHNX_PKG@$TARGET from $RELEASE_HOME_BASE (token resolved there; no Touch ID)"
+
+# ----- Verify the published version live (from the trigger box) -----
+phase "Verify live" "$THIS_HOST"
+PUBLISHED_NOW="$(npm view "$PHNX_PKG@$TARGET" version 2>/dev/null || true)"
+if [[ "$PUBLISHED_NOW" == "$TARGET" ]]; then
+  phase_ok "npm registry reports $PHNX_PKG@$TARGET; tag v$TARGET pushed"
+else
+  phase_fail "npm registry does not yet report $PHNX_PKG@$TARGET (saw '${PUBLISHED_NOW:-none}') -- check the home-base publish output"
+fi
 
 green "Released $TARGET"
 gray "Local $DEFAULT_BRANCH is behind origin by the release commit -- run: git pull --ff-only"
