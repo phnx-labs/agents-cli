@@ -209,7 +209,9 @@ export interface VarMeta {
 
 /**
  * A bundle's prompt policy — how often macOS asks for Touch ID to read it:
- * - `daily` (default): ask once, then hold it silently for up to ~7 days.
+ * - `hold` (default): ask once, then serve it silently for the configured hold
+ *   duration (`secrets.agent.holdMs`, 7d by default). Named for what it does —
+ *   it was called `daily`, which stated a period it never had.
  *   (Historical name — the window is now a rolling ~1 week, not one calendar day.)
  *   Eligible for the secrets-agent — the first real keychain read auto-loads it
  *   (auto-cache is on by default) so concurrent runs read it silently, or `unlock`
@@ -227,12 +229,12 @@ export interface VarMeta {
  *   it loudly rather than silently downgrading to `always`.
  *
  * The default is configurable via `secrets.policy` in agents.yaml. Stored on disk
- * under the legacy `tier` key (`session` == `daily`, `biometry` == explicit
+ * under the legacy `tier` key (`session` == `hold`, `biometry` == explicit
  * `always`, `none` == `never`, absent == inherit the default) so bundles stay
  * readable across mixed CLI versions on synced machines. The user-facing
- * vocabulary is `policy`/`always`/`daily`/`never`.
+ * vocabulary is `policy`/`always`/`hold`/`never`.
  */
-export type SecretsPolicy = 'always' | 'daily' | 'never';
+export type SecretsPolicy = 'always' | 'hold' | 'never';
 
 /** A named set of environment variable definitions backed by various secret providers. */
 export interface SecretsBundle {
@@ -241,7 +243,7 @@ export interface SecretsBundle {
   allow_exec?: boolean;
   /** Which store carries this bundle's items. Absent ⇒ `keychain` (the default). */
   backend?: SecretsBackend;
-  /** Prompt policy. Absent ⇒ the configured default (`daily`). Serialized under
+  /** Prompt policy. Absent ⇒ the configured default (`hold`). Serialized under
    * the legacy `tier` key — see SecretsPolicy. */
   policy?: SecretsPolicy;
   /** ISO 8601 UTC timestamp. Set once on the first writeBundle() for a bundle. */
@@ -444,7 +446,7 @@ export function readBundle(name: string): SecretsBundle {
     // Absent ⇒ keychain; only set when non-keychain so a keychain bundle
     // round-trips byte-for-byte.
     backend: backend === 'keychain' ? undefined : backend,
-    // Legacy wire key: the policy is persisted under `tier` (`session` == `daily`).
+    // Legacy wire key: the policy is persisted under `tier` (`session` == `hold`).
     policy: parsePolicy((parsed as { tier?: unknown }).tier),
     vars: parsed.vars && typeof parsed.vars === 'object' ? parsed.vars : {},
   };
@@ -461,27 +463,28 @@ export function readBundle(name: string): SecretsBundle {
 }
 
 /** Normalize the persisted prompt policy. The on-disk `tier` key uses legacy
- * tokens for cross-version compatibility: `session` ⇒ `daily`, `biometry` ⇒ an
+ * tokens for cross-version compatibility: `session` ⇒ `hold`, `biometry` ⇒ an
  * explicit `always`. An absent token ⇒ undefined, which resolves to the
- * configured default policy (`daily`). Persisting an explicit `always` as the
- * legacy `biometry` token keeps older CLIs correct — they don't know `daily`,
+ * configured default policy (`hold`). Persisting an explicit `always` as the
+ * legacy `biometry` token keeps older CLIs correct — they don't know `hold`,
  * read `biometry` as undefined, and fall back to their own always default. */
 function parsePolicy(raw: unknown): SecretsPolicy | undefined {
-  if (raw === 'daily' || raw === 'session') return 'daily';
+  if (raw === 'hold' || raw === 'daily' || raw === 'session') return 'hold';
   if (raw === 'always' || raw === 'biometry') return 'always';
   if (raw === 'never' || raw === 'none') return 'never';
   return undefined;
 }
 
 /** The default prompt policy applied to bundles without an explicit per-bundle
- * policy. Configurable via `secrets.policy` in agents.yaml; `daily` (one Touch
- * ID per ~7d) unless the user explicitly opts back into prompt-every-time with
- * `always`. Best-effort: an unreadable config falls back to the `daily` default. */
+ * policy. Configurable via `secrets.policy` in agents.yaml; `hold` (one Touch ID
+ * per hold window — `secrets.agent.holdMs`, 7d by default) unless the user
+ * explicitly opts back into prompt-every-time with `always`. Best-effort: an
+ * unreadable config falls back to the `hold` default. */
 export function secretsDefaultPolicy(): SecretsPolicy {
   try {
-    return readMeta().secrets?.policy === 'always' ? 'always' : 'daily';
+    return readMeta().secrets?.policy === 'always' ? 'always' : 'hold';
   } catch {
-    return 'daily';
+    return 'hold';
   }
 }
 
@@ -566,12 +569,12 @@ function prepareBundleWrite(bundle: SecretsBundle): PreparedBundleWrite {
     allow_exec: bundle.allow_exec ? true : undefined,
     backend: backend === 'keychain' ? undefined : backend,
     // Wire format: persist the policy under the legacy `tier` token so older CLI
-    // versions on other synced machines keep reading it — `daily`⇒`session`,
+    // versions on other synced machines keep reading it — `hold`⇒`session`,
     // explicit `always`⇒`biometry`, `never`⇒`none`. An absent policy omits the
-    // token entirely and resolves to the configured default (`daily`) on read.
+    // token entirely and resolves to the configured default (`hold`) on read.
     // An older CLI that doesn't know `none` reads it as undefined and falls back
     // to its own default — safe, since it also lacks the no-ACL write path.
-    tier: bundle.policy === 'daily' ? 'session'
+    tier: bundle.policy === 'hold' ? 'session'
       : bundle.policy === 'always' ? 'biometry'
       : bundle.policy === 'never' ? 'none'
       : undefined,
@@ -683,7 +686,7 @@ function parseBundleMeta(nameHint: string | undefined, json: string, backend: Se
     description: parsed.description,
     allow_exec: Boolean(parsed.allow_exec),
     backend: backend === 'keychain' ? undefined : backend,
-    // Legacy wire key: the policy is persisted under `tier` (`session` == `daily`).
+    // Legacy wire key: the policy is persisted under `tier` (`session` == `hold`).
     policy: parsePolicy((parsed as { tier?: unknown }).tier),
     vars: parsed.vars && typeof parsed.vars === 'object' ? parsed.vars : {},
   };
@@ -1453,7 +1456,7 @@ export function readAndResolveBundleEnv(
     description: parsed.description,
     allow_exec: Boolean(parsed.allow_exec),
     backend: backend === 'keychain' ? undefined : backend,
-    // Legacy wire key: the policy is persisted under `tier` (`session` == `daily`).
+    // Legacy wire key: the policy is persisted under `tier` (`session` == `hold`).
     policy: parsePolicy((parsed as { tier?: unknown }).tier),
     vars: parsed.vars && typeof parsed.vars === 'object' ? parsed.vars : {},
   };
@@ -1550,7 +1553,7 @@ export function readAndResolveBundleEnv(
       backend === 'keychain' &&
       !opts.noAgent &&
       process.env.AGENTS_SECRETS_NO_AGENT !== '1' &&
-      bundlePolicy(bundle) === 'daily' &&
+      bundlePolicy(bundle) === 'hold' &&
       secretsAgentAutoEnabled() &&
       canCacheResolvedEnv(bundle, selectedKeys, opts.keyMode)
     ) {

@@ -135,7 +135,7 @@ describe('writeBundle + readBundle round-trip', () => {
   });
 
   it('round-trips each explicit policy, persisting never under the legacy tier=none token', () => {
-    for (const policy of ['always', 'daily', 'never'] as const) {
+    for (const policy of ['always', 'hold', 'never'] as const) {
       writeBundle({ name: `pol-${policy}`, vars: { A: 'x' }, policy });
       expect(readBundle(`pol-${policy}`).policy).toBe(policy);
     }

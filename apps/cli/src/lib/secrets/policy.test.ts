@@ -35,27 +35,31 @@ function bundle(name: string, policy?: SecretsBundle['policy']): SecretsBundle {
   return { name, policy, vars: {} };
 }
 
+// The rename `daily` -> `hold` must be name-only. A bundle written by any
+// earlier CLI persists `tier: session`, and a user's agents.yaml may say
+// `daily` — both have to keep resolving, or an upgrade silently changes the
+// prompt behaviour of every bundle already on disk.
 describe('secrets prompt-policy persistence', () => {
-  it('round-trips a daily policy through write -> read', () => {
-    writeBundle(bundle('s', 'daily'));
-    expect(readBundle('s').policy).toBe('daily');
-    expect(bundlePolicy(readBundle('s'))).toBe('daily');
+  it('round-trips a hold policy through write -> read', () => {
+    writeBundle(bundle('s', 'hold'));
+    expect(readBundle('s').policy).toBe('hold');
+    expect(bundlePolicy(readBundle('s'))).toBe('hold');
   });
 
-  it('persists daily under the legacy `tier: session` wire token (cross-version sync)', () => {
-    writeBundle(bundle('w', 'daily'));
+  it('persists hold under the legacy `tier: session` wire token (cross-version sync)', () => {
+    writeBundle(bundle('w', 'hold'));
     const raw = JSON.parse(mem.get('agents-cli.bundles.w'));
     expect(raw.tier).toBe('session'); // older CLIs read this
     expect(raw.policy).toBeUndefined(); // we never write a `policy` key
   });
 
-  it('reads a legacy `tier: session` bundle back as daily', () => {
+  it('reads a legacy `tier: session` bundle back as hold', () => {
     writeBundle(bundle('legacy')); // create the metadata item
     const item = 'agents-cli.bundles.legacy';
     const raw = JSON.parse(mem.get(item));
     raw.tier = 'session'; // simulate metadata written by an older CLI version
     mem.set(item, JSON.stringify(raw));
-    expect(bundlePolicy(readBundle('legacy'))).toBe('daily');
+    expect(bundlePolicy(readBundle('legacy'))).toBe('hold');
   });
 
   it('stores no policy when unset and resolves it to the configured default', () => {
@@ -63,7 +67,7 @@ describe('secrets prompt-policy persistence', () => {
     const read = readBundle('b');
     expect(read.policy).toBeUndefined(); // absent on disk → inherits the default
     // On a clean machine/CI (no `secrets.policy` in agents.yaml) the default is daily.
-    expect(secretsDefaultPolicy()).toBe('daily');
+    expect(secretsDefaultPolicy()).toBe('hold');
     expect(bundlePolicy(read)).toBe(secretsDefaultPolicy());
   });
 
@@ -87,17 +91,17 @@ describe('secrets prompt-policy persistence', () => {
   });
 
   it('reflects the policy in listBundles (unset inherits the default)', () => {
-    writeBundle(bundle('alpha', 'daily'));
+    writeBundle(bundle('alpha', 'hold'));
     writeBundle(bundle('beta')); // unset → default
     writeBundle(bundle('gamma', 'always')); // explicit override
     const byName = Object.fromEntries(listBundles().map((b) => [b.name, bundlePolicy(b)]));
-    expect(byName.alpha).toBe('daily');
+    expect(byName.alpha).toBe('hold');
     expect(byName.beta).toBe(secretsDefaultPolicy());
     expect(byName.gamma).toBe('always');
   });
 
   it('treats an unknown/forward-incompatible persisted policy as the default', () => {
-    writeBundle(bundle('weird', 'daily'));
+    writeBundle(bundle('weird', 'hold'));
     // Simulate a token written by a newer/other version.
     const item = 'agents-cli.bundles.weird';
     const raw = JSON.parse(mem.get(item));

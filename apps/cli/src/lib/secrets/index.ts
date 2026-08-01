@@ -818,7 +818,7 @@ export interface KeychainReadContext {
   bundle?: string;
   reason?: string;
   duration?: string;
-  defaultPolicy?: 'daily' | 'always' | 'never';
+  defaultPolicy?: 'hold' | 'always' | 'never';
   forceDuration?: boolean;
 }
 
@@ -919,7 +919,9 @@ export function getKeychainTokens(items: string[], context: KeychainReadContext 
       ...process.env,
       AGENTS_KEYCHAIN_PROMPT: keychainOperationPrompt(context),
       AGENTS_KEYCHAIN_PROMPT_BASE: keychainOperationPrompt({ ...context, duration: undefined }),
-      AGENTS_KEYCHAIN_DEFAULT_POLICY: context.defaultPolicy || 'daily',
+      // The signed helper's own vocabulary is unchanged (it predates the rename
+      // and ships as a separately-versioned binary), so map to its legacy token.
+      AGENTS_KEYCHAIN_DEFAULT_POLICY: (context.defaultPolicy ?? 'hold') === 'hold' ? 'daily' : (context.defaultPolicy as string),
       AGENTS_KEYCHAIN_FORCE_DURATION: context.forceDuration ? '1' : '0',
     },
     stdio: ['ignore', 'pipe', 'pipe'],

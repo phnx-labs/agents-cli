@@ -89,8 +89,13 @@ describe('parsePolicyOpt', () => {
   it('accepts the three policies and their legacy aliases', () => {
     expect(parsePolicyOpt('always')).toBe('always');
     expect(parsePolicyOpt('biometry')).toBe('always');
-    expect(parsePolicyOpt('daily')).toBe('daily');
-    expect(parsePolicyOpt('session')).toBe('daily');
+    expect(parsePolicyOpt('hold')).toBe('hold');
+    // `daily` was the old name for this tier and `session` its wire token. Both
+    // MUST keep parsing: they are in users' agents.yaml, in scripts, and in the
+    // `tier` key of every bundle already written to a keychain on every machine.
+    expect(parsePolicyOpt('daily')).toBe('hold');
+    expect(parsePolicyOpt('session')).toBe('hold');
+    expect(parsePolicyOpt('DAILY')).toBe('hold');
     // The whole point of #421: `never` (and its `none` alias) is now accepted,
     // not rejected by the old stub.
     expect(parsePolicyOpt('never')).toBe('never');
@@ -106,7 +111,7 @@ describe('parsePolicyOpt', () => {
 describe('assertNeverPolicyAcknowledged', () => {
   it('is a no-op for non-never policies regardless of flags', () => {
     expect(assertNeverPolicyAcknowledged('always', { interactive: false })).toBe('ok');
-    expect(assertNeverPolicyAcknowledged('daily', { interactive: false })).toBe('ok');
+    expect(assertNeverPolicyAcknowledged('hold', { interactive: false })).toBe('ok');
     expect(assertNeverPolicyAcknowledged(undefined, { interactive: false })).toBe('ok');
   });
 
@@ -153,12 +158,12 @@ describe('renderPolicyCol', () => {
     expect(never).toMatch(/no prompt/i);
     // Distinct from the other tiers — the marking is not shared.
     expect(never).not.toBe(renderPolicyCol(bundle('always')));
-    expect(never).not.toBe(renderPolicyCol(bundle('daily')));
+    expect(never).not.toBe(renderPolicyCol(bundle('hold')));
   });
 
   it('does not label always/daily bundles as never', () => {
     expect(renderPolicyCol(bundle('always'))).not.toMatch(/never/i);
-    expect(renderPolicyCol(bundle('daily'))).not.toMatch(/never/i);
+    expect(renderPolicyCol(bundle('hold'))).not.toMatch(/never/i);
   });
 });
 

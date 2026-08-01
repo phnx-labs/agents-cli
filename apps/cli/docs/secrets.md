@@ -274,7 +274,7 @@ The Windows push bridge is `buildWindowsStdinImportCommand` in
 | `secrets unlock <name> --durable` | Also survive sleep + reboot (default: survives upgrade/restart, re-locks on sleep) | `agents secrets unlock prod --durable` |
 | `secrets lock [names...]` | Wipe held bundles from the agent (default: all) — next read re-prompts | `agents secrets lock` |
 | `secrets status` | Show which bundles the agent holds and when they lock, and suggest unlocking any you keep getting prompted for | `agents secrets status` |
-| `secrets policy <bundle> [policy]` | Show or set a bundle's prompt policy: `daily` (default), `always`, or `never` (silent, no biometry ACL — needs `--i-understand`) | `agents secrets policy signing always` |
+| `secrets policy <bundle> [policy]` | Show or set a bundle's prompt policy: `hold` (default), `always`, or `never` (silent, no biometry ACL — needs `--i-understand`) | `agents secrets policy signing always` |
 | `secrets create <name> --policy always` | Create a bundle that prompts on every read | `agents secrets create signing --policy always` |
 | `secrets create <name> --policy never --i-understand` | Create a silent, unprotected (no biometry ACL) automation-only bundle | `agents secrets create ci-cache --policy never --i-understand` |
 
@@ -569,26 +569,30 @@ A long-running daemon or broker keeps running the code it started with; an in-pl
 
 ### Prompt policy and auto-cache
 
-Each bundle has a **prompt policy** that controls how often macOS asks for Touch ID, shown in the `POLICY` column of `agents secrets list` and set with `agents secrets policy <bundle> [daily|always]` (also `--policy` on `create`):
+Each bundle has a **prompt policy** that controls how often macOS asks for Touch ID, shown in the `POLICY` column of `agents secrets list` and set with `agents secrets policy <bundle> [hold|always|never]` (also `--policy` on `create`):
 
-- **`daily`** (default): ask once, then hold it silently. The **first real keychain read auto-loads it** into the broker (in the background, no added latency), so the next concurrent run reads it silently without you running `unlock` at all — one Touch ID per ~7 days. Held from that unlock (not refreshed on use) — re-asks sooner after sleep, logout, or `lock`. A bare screen-lock does **not** drop it. Despite the name, it is **not** tied to one calendar day or one login session; it's the rolling ~7-day (1 week) hold — the name is historical, from when the window was ~24h.
+- **`hold`** (default): ask once, then serve it silently for the **hold window** — `secrets.agent.holdMs`, 7 days by default. The **first real keychain read auto-loads it** into the broker (in the background, no added latency), so the next concurrent run reads it silently without you running `unlock` at all. Held from that unlock (not refreshed on use) — re-asks sooner after sleep, logout, or `lock`. A bare screen-lock does **not** drop it.
+
+  This tier was called **`daily`**, which was simply wrong: it is not one calendar day, not one login session, and not any fixed period — it is whatever `secrets.agent.holdMs` says. `daily` and the wire token `session` are still accepted everywhere, so existing configs, scripts, and bundles already written to a keychain keep working unchanged.
+
+  **The hold is not a property of the stored item.** The item itself always carries the biometry ACL; the silence comes entirely from the broker holding the value in RAM plus the no-ACL durable session backing it. If either is unavailable, every read falls through to the ACL'd item and prompts — so a broker that is down or unreachable silently degrades `hold` to prompt-every-read. Only `never` is prompt-free independently of the broker.
 - **`always`**: ask every time. Only an explicit `unlock` ever puts it in the agent; every other read pops Touch ID. Opt high-value bundles (signing keys, etc.) into this when you want to confirm every single read.
 - **`never`**: stored **without** the biometry access control — reads are fully silent (no Touch ID, no broker, no user-presence check). This is the least-safe tier and is [documented in the security model](#security-model) as an on-disk-plaintext-equivalent downgrade: any code running as your user reads it with zero interaction. It is marked loudly (`never · NO ACL`, in red) in `agents secrets list` and `view`, and creating or switching to it requires an explicit confirmation — an interactive "are you sure" prompt, or `--i-understand` in a headless shell. Reserve it for low-sensitivity, automation-only credentials. Writing a `never` item needs a signed helper that carries the `set-no-acl` path; an older pinned helper rejects the write loudly rather than silently storing an `always`-style ACL'd item.
 
 Change the **default** for all bundles globally in `agents.yaml` (`secrets.policy: always` to flip it back), or override per bundle with `agents secrets policy <bundle> always`. `never` is never a *default* — it can only be set explicitly per bundle, behind the confirmation gate.
 
-> Wire-format note: the policy persists under the legacy `tier` key (`session` == `daily`, `biometry` == explicit `always`, `none` == `never`, absent == inherit the default) so bundles stay readable across mixed CLI versions on synced machines. `--tier`/`agents secrets tier` and the old `biometry`/`session`/`none` values still work as aliases. An older CLI that doesn't know `none` reads it as absent and falls back to its own default — safe, since it also lacks the no-ACL write path.
+> Wire-format note: the policy persists under the legacy `tier` key (`session` == `hold`, `biometry` == explicit `always`, `none` == `never`, absent == inherit the default) so bundles stay readable across mixed CLI versions on synced machines. `--tier`/`agents secrets tier` and the old `biometry`/`session`/`none` values still work as aliases. An older CLI that doesn't know `none` reads it as absent and falls back to its own default — safe, since it also lacks the no-ACL write path.
 
 ```yaml
 # ~/.agents/agents.yaml
 secrets:
-  policy: daily   # default prompt policy for bundles without an explicit one (this IS the default)
+  policy: hold    # default prompt policy for bundles without an explicit one (this IS the default; `daily` still accepted)
   agent:
-    auto: false     # opt OUT of daily-policy self-caching (on by default)
+    auto: false     # opt OUT of hold-policy self-caching (on by default)
     durable: true   # make every unlock survive sleep + reboot too (default: survives upgrade/restart, re-locks on sleep)
 ```
 
-Auto-cache is **on by default** and only ever applies to `daily`-policy bundles — an `always` bundle is never auto-held, and a `never` bundle needs no agent at all (it is already silent). The `never` policy (items stored without the biometry ACL for fully silent reads with no broker) is the global downgrade the agent is otherwise designed to avoid, so it stays gated behind an explicit confirmation and a signed helper with the `set-no-acl` write path; see the [security model](#security-model). Tracked in [issue #421](https://github.com/phnx-labs/agents-cli/issues/421).
+Auto-cache is **on by default** and only ever applies to `hold`-policy bundles — an `always` bundle is never auto-held, and a `never` bundle needs no agent at all (it is already silent). The `never` policy (items stored without the biometry ACL for fully silent reads with no broker) is the global downgrade the agent is otherwise designed to avoid, so it stays gated behind an explicit confirmation and a signed helper with the `set-no-acl` write path; see the [security model](#security-model). Tracked in [issue #421](https://github.com/phnx-labs/agents-cli/issues/421).
 
 **The trade-off (read this):** while a bundle is unlocked, a same-user process that can reach the socket reads it **silently** — today it would at least have to pop a visible "Unlock agents-cli secrets" prompt you might notice. That is the same trust boundary the keychain already concedes above ("any same-user process can pop the prompt and read"), minus the prompt. Bound it by unlocking only the bundles you need, keeping a short TTL, locking when you step away, and never unlocking high-value bundles you'd rather always confirm.
 

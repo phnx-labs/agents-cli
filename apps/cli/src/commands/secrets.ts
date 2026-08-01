@@ -554,7 +554,7 @@ export function renderPolicyCol(b: SecretsBundle, held?: Map<string, number>): s
   if (bundlePolicy(b) === 'never') return chalk.red.bold('never · no prompt');
   if (bundlePolicy(b) === 'always') return chalk.yellow('always · prompt');
   const exp = held?.get(b.name);
-  return exp ? chalk.green(`daily · held ${compactRemaining(exp)}`) : chalk.gray('daily');
+  return exp ? chalk.green(`hold · held ${compactRemaining(exp)}`) : chalk.gray('hold');
 }
 
 /** Human-readable hold window for `secrets status`. Sub-hour values render in
@@ -825,7 +825,7 @@ export function registerSecretsCommands(program: Command): void {
       agents secrets view prod
 
       # Stop a noisy automation bundle from prompting every run: ask once a week
-      agents secrets policy prod daily
+      agents secrets policy prod hold
 
       # Eval the bundle into your current shell
       eval "$(agents secrets export prod --plaintext)"
@@ -843,17 +843,21 @@ export function registerSecretsCommands(program: Command): void {
 
       Touch ID noise: macOS pops a prompt per bundle per process. Each bundle has
       a prompt policy, shown in the POLICY column of 'agents secrets list':
-        daily (default)   ask once, then hold it silently in the local agent up
-                          to ~7 days, until sleep / logout or 'lock' (a bare
-                          screen-lock does NOT drop it). Name is historical.
+        hold (default)    ask once, then serve it silently from the local agent
+                          for the hold window ('secrets.agent.holdMs', 7d by
+                          default), until sleep / logout or 'lock' (a bare
+                          screen-lock does NOT drop it). Accepts the older names
+                          'daily' and 'session'.
         always            ask for Touch ID every time — never auto-held.
-      The default is 'daily' (one Touch ID per ~7 days); change it globally with
+        never             no biometry ACL at all — reads are silent forever, even
+                          if the agent is down. Automation credentials only.
+      The default is 'hold' (one Touch ID per hold window); change it globally with
       'secrets.policy' in agents.yaml, or per bundle with 'agents secrets policy
       <bundle> always'. 'agents secrets unlock <bundle>' holds any bundle after one
       prompt regardless of policy. Nothing on disk.
 
       See also:
-        agents secrets policy <bundle> daily           ask once a week, not every run
+        agents secrets policy <bundle> hold            ask once per hold window (7d by default), not every run
         agents secrets unlock <bundle>                 hold a bundle after one Touch ID
         agents secrets lock                            wipe held bundles (re-prompt next read)
         agents secrets status                          show held bundles + when they lock
@@ -1054,7 +1058,7 @@ export function registerSecretsCommands(program: Command): void {
           console.log(chalk.red.bold('policy: never — NO biometry ACL; reads are silent (no Touch ID, no user-presence check). Automation-only.'));
         } else {
           console.log(
-            bundlePolicy(bundle) === 'daily'
+            bundlePolicy(bundle) === 'hold'
               ? chalk.gray('policy: daily (ask once, then held ~7 days until sleep / logout — screen-lock does not drop it)')
               : chalk.gray('policy: always (asks for Touch ID every time — never auto-held)'),
           );
@@ -1258,7 +1262,7 @@ export function registerSecretsCommands(program: Command): void {
           vars: {},
         };
         writeBundle(bundle);
-        const policyTag = bundlePolicy(bundle) === 'daily'
+        const policyTag = bundlePolicy(bundle) === 'hold'
           ? 'policy: daily'
           : bundlePolicy(bundle) === 'always'
             ? 'policy: always ask'
@@ -2394,7 +2398,7 @@ Examples:
   cmd
     .command('policy <bundle> [policy]')
     .alias('tier')
-    .description("Show or set a bundle's prompt policy: daily (default, ask once a week), always (ask every time), or never (silent, NO biometry ACL).")
+    .description("Show or set a bundle's prompt policy: hold (default, ask once per hold window — secrets.agent.holdMs, 7d by default), always (ask every time), or never (silent, NO biometry ACL). 'daily'/'session' are accepted aliases for 'hold'.")
     .option('--i-understand', 'Confirm switching to the "never" policy (no biometry ACL) without an interactive prompt')
     .action(async (bundleName: string, policyArg: string | undefined, opts: { iUnderstand?: boolean }) => {
       try {
@@ -2411,12 +2415,12 @@ Examples:
           return;
         }
         bundle.policy = next;
-        // writeBundle evicts any broker-held copy, so tightening daily ->
+        // writeBundle evicts any broker-held copy, so tightening hold ->
         // always/never takes effect NOW: the next read re-prompts (`always`)
         // or reads its no-ACL item directly (`never`).
         writeBundle(bundle);
         console.log(chalk.green(`${bundle.name} policy set to ${next}.`));
-        if (next === 'daily') {
+        if (next === 'hold') {
           console.log(chalk.gray('Held by the secrets-agent for ~7 days after one unlock (auto-cache is on by default; disable with `secrets.agent.auto: false` in agents.yaml).'));
         } else if (next === 'always') {
           console.log(chalk.gray('Asks for Touch ID every time — never auto-held.'));
@@ -2491,9 +2495,9 @@ Examples:
 export function parsePolicyOpt(raw: string | undefined): SecretsPolicy {
   const v = (raw ?? 'always').toLowerCase();
   if (v === 'always' || v === 'biometry') return 'always';
-  if (v === 'daily' || v === 'session') return 'daily';
+  if (v === 'hold' || v === 'daily' || v === 'session') return 'hold';
   if (v === 'never' || v === 'none') return 'never';
-  throw new Error(`Invalid policy '${raw}'. Use 'always', 'daily', or 'never'.`);
+  throw new Error(`Invalid policy '${raw}'. Use 'always', 'hold', or 'never'.`);
 }
 
 /**
