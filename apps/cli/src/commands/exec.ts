@@ -1295,6 +1295,8 @@ export function registerRunCommand(program: Command): void {
                 name: options.name,
               });
             }
+            const isRaw = options.raw || options.tmux === false || options.disableTmux === true;
+            const runStartedMs = Date.now();
             const exitCode = await runInteractiveOnHost(host, {
               agent: runAgent,
               version: resumeId ? undefined : runVersion,
@@ -1316,10 +1318,32 @@ export function registerRunCommand(program: Command): void {
               name: options.name,
               resume: resumeId,
               passthroughArgs,
-              raw: options.raw || options.tmux === false || options.disableTmux === true,
+              raw: isRaw,
               forceInteractive: options.interactive,
               copyCreds: hostCopyCreds,
             });
+            // A network drop kills the local ssh client (exit 255) but the remote
+            // agent survives in its detached tmux session. With a known session id
+            // (Claude, or a resumed run) and a tmux-hosted run, re-attach the live
+            // pane automatically instead of exiting — the user never has to notice
+            // the drop and `agents sessions focus` by hand. `raw` runs aren't tmux
+            // wrapped, so there is nothing to reconnect to. Non-Claude id capture is
+            // tracked in RUSH-2007.
+            const reconnectId = hostSessionId ?? resumeId;
+            if (reconnectId && !isRaw) {
+              const { reconnectInteractiveSession, SSH_CONN_FAILURE } = await import('../lib/hosts/reconnect.js');
+              if (exitCode === SSH_CONN_FAILURE) {
+                process.exit(
+                  await reconnectInteractiveSession({
+                    host,
+                    sessionId: reconnectId,
+                    initialExit: exitCode,
+                    initialDurationMs: Date.now() - runStartedMs,
+                    copyCreds: hostCopyCreds,
+                  }),
+                );
+              }
+            }
             process.exit(exitCode);
           }
 

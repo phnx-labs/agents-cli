@@ -215,7 +215,8 @@ agents run <agent> ["<task>"] --host <host>
   └─ no prompt?                interactive TTY-forwarded path
         ssh -tt <node> 'agents run <agent>'   (only when local stdin is a TTY)
         remote agents-cli launches its normal interactive UI (tmux on the host)
-        local CLI exits when the SSH session ends
+        network drop (ssh exit 255) → auto-reattach the live remote pane;
+        clean detach / agent exit → local CLI exits with that code
 ```
 
 > Shipped surface: dispatch is `agents run <agent> ["<task>"] --host <name>`.
@@ -226,6 +227,18 @@ agents run <agent> ["<task>"] --host <host>
 > tmux wrapper.
 > Host runs are tracked in a **local** task store, not `agents cloud` (a separate
 > subsystem for Rush/Codex/Factory backends).
+>
+> **Surviving a network drop.** Because the remote agent runs in a *detached* tmux
+> session on the host, an SSH blink kills only the local client — the agent keeps
+> working. When an interactive host run with a known session id (Claude, or a
+> `--resume`d run) drops (ssh reports its connection-layer code, 255), the local CLI
+> **re-attaches the live remote pane automatically** — it drives the host's own
+> `agents sessions focus <id> --local --attach-only` over SSH (a live join, not a
+> resumed copy), with bounded exponential backoff (2s→30s, up to 6 attempts; the
+> budget refills after a genuinely live reconnection). A clean detach (`Ctrl-b d`,
+> exit 0) or a real agent exit (any non-255 code) is left alone, and `--raw`/no-tmux
+> runs are not retried (they don't survive a drop). If every attempt fails the CLI
+> prints the manual `agents sessions focus <id>` to reconnect once the link is back.
 >
 > Pass `--name <slug>` at dispatch to give the run a durable handle instead of an
 > opaque id: `agents hosts ps` shows it under a **NAME** column, and
