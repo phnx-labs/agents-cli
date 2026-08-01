@@ -24,6 +24,7 @@ import {
   deleteKeychainToken,
   isKeychainBackendOverridden,
 } from './secrets/index.js';
+import { bundleExists, bundleBackend, readAndResolveBundleEnv } from './secrets/bundles.js';
 import { getCacheDir } from './state.js';
 import type { AgentId } from './types.js';
 
@@ -1299,6 +1300,66 @@ function deleteCachedClaudeOauth(service: string): void {
 }
 
 /**
+ * Reserved FILE-BASED secrets bundle holding long-lived, non-rotating Claude
+ * setup-tokens. Usage/probe reads authenticate with these instead of Claude
+ * Code's ACL-bound login item, so they never pop Touch ID. Keyed strictly
+ * per-account (`CLAUDE_CODE_OAUTH_TOKEN_<slug>` from the account email) — never a
+ * bare key, so one account's token can't be misapplied to another in a
+ * multi-account fleet.
+ */
+const AUTH_BUNDLE = 'auth';
+
+/** The per-account key an email maps to inside the `auth` bundle. */
+function claudeAccountTokenKey(account: string): string {
+  const slug = account
+    .trim()
+    .toUpperCase()
+    .replace(/@/g, '_AT_')
+    .replace(/\./g, '_DOT_')
+    .replace(/[^A-Z0-9_]/g, '_');
+  return `CLAUDE_CODE_OAUTH_TOKEN_${slug}`;
+}
+
+/** Signed-in account email for a version home, from `.claude.json` (no keychain). */
+function readClaudeAccountEmail(home?: string): string | null {
+  const base = home ?? os.homedir();
+  for (const p of [path.join(base, '.claude', '.claude.json'), path.join(base, '.claude.json')]) {
+    try {
+      const email = (JSON.parse(fs.readFileSync(p, 'utf-8')) as {
+        oauthAccount?: { emailAddress?: unknown };
+      }).oauthAccount?.emailAddress;
+      if (typeof email === 'string' && email.trim().length > 0) return email.trim();
+    } catch {
+      // Missing/unreadable at this location — try the next.
+    }
+  }
+  return null;
+}
+
+/**
+ * Resolve a long-lived `claude setup-token` for the account signed into `home`
+ * from the reserved FILE-BASED `auth` bundle. Returns the token or null. Reads
+ * ONLY when the bundle is file-backed (never keychain), so this path itself can
+ * never trigger a Touch ID prompt — that is the entire point: usage/probe reads
+ * authenticate with the shareable setup-token, not the ACL-bound login item.
+ */
+function resolveClaudeSetupToken(home?: string): string | null {
+  try {
+    // Require a known account (email) up front: without it we cannot key a
+    // per-account token, and we must NOT fall back to a bare shared key that
+    // would misapply one account's setup-token to another.
+    const email = readClaudeAccountEmail(home);
+    if (!email) return null;
+    if (!bundleExists(AUTH_BUNDLE) || bundleBackend(AUTH_BUNDLE) !== 'file') return null;
+    const { env } = readAndResolveBundleEnv(AUTH_BUNDLE, { caller: 'usage', agentOnly: true });
+    const v = (env[claudeAccountTokenKey(email)] ?? '').trim();
+    return v.length > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Load a version home's Claude OAuth credential from the two stores Claude Code
  * uses, tried in order:
  *
@@ -1327,6 +1388,24 @@ export async function loadClaudeOauth(
   home?: string,
   opts?: { accessTokenCache?: boolean }
 ): Promise<ClaudeOauthCredentials | null> {
+  // Read-only usage/probe callers (accessTokenCache) authenticate with a
+  // file-based setup-token when one is provisioned: the usage endpoint accepts
+  // any sk-ant-oat01 bearer, and the token is read from the file-based `auth`
+  // bundle — never Claude Code's ACL-bound keychain item — so it never pops
+  // Touch ID. Transitional: an account with no provisioned setup-token still
+  // falls through to the keychain/file read below (that fallback is removed once
+  // the fleet is fully seeded, per docs/design/credential-management.md).
+  if (opts?.accessTokenCache === true) {
+    const setupToken = resolveClaudeSetupToken(home);
+    if (setupToken) {
+      // No expiresAt: a setup-token is long-lived and non-rotating, and a null
+      // expiry reads as "still fresh" (claudeAccessTokenNeedsRefresh) so the
+      // probe never reports it expired or tries to refresh it. The endpoint is
+      // the source of truth if it has actually been revoked.
+      return { accessToken: setupToken };
+    }
+  }
+
   // The OS keychain/keyring step is macOS/Linux-only. Windows skips straight
   // to the .credentials.json fallback — the Claude CLI has no keychain
   // integration there and stores its OAuth token in that file too. An injected

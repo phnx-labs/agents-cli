@@ -1,7 +1,12 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 import { claudeAccessTokenNeedsRefresh, claudeUsageAccessTokenNoRefresh, loadClaudeOauth, saveClaudeOauth, getClaudeKeychainService } from './usage.js';
-import { setKeychainToken, setKeychainBackendForTest, type KeychainBackend } from './secrets/index.js';
+import { setKeychainToken, setKeychainBackendForTest, secretsKeychainItem, type KeychainBackend } from './secrets/index.js';
+import { writeBundle, keychainRef, bundleItemStore } from './secrets/bundles.js';
+import { _resetFileStoreForTest } from './secrets/filestore.js';
 
 const LEEWAY_MS = 5 * 60 * 1000;
 const NOW = 1_800_000_000_000; // fixed epoch ms so the tests are deterministic
@@ -191,5 +196,73 @@ describe('loadClaudeOauth no-ACL access-token cache', () => {
     } finally {
       setKeychainBackendForTest(prev);
     }
+  });
+});
+
+describe('loadClaudeOauth — file-based `auth` setup-token (Touch-ID-free usage read)', () => {
+  const EMAIL = 'muqsit@trp.so';
+  const SETUP_TOKEN = 'sk-ant-oat01-setup-tok-xyz';
+  const PASS = 'usage-setup-token-pass';
+  // email -> claudeAccountTokenKey(email): upper, @->_AT_, .->_DOT_.
+  const KEY = 'CLAUDE_CODE_OAUTH_TOKEN_MUQSIT_AT_TRP_DOT_SO';
+  let restore: KeychainBackend | null = null;
+  let home: string;
+  let fileDir: string;
+  let prevNoAgent: string | undefined;
+
+  // A keychain backend that THROWS on read — proves the usage path never falls
+  // through to a keychain read once the file-based setup-token resolves.
+  function makeThrowingKeychain(): KeychainBackend {
+    return {
+      has: () => false,
+      get: (item) => { throw new Error(`keychain read of '${item}' — usage must not touch the keychain`); },
+      set: () => { /* no-op */ },
+      delete: () => false,
+      list: () => [],
+    };
+  }
+
+  beforeEach(() => {
+    restore = setKeychainBackendForTest(makeThrowingKeychain());
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'usage-home-'));
+    fileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'usage-fstore-'));
+    prevNoAgent = process.env.AGENTS_SECRETS_NO_AGENT;
+    process.env.AGENTS_SECRETS_NO_AGENT = '1';
+    process.env.AGENTS_SECRETS_PASSPHRASE = PASS;
+    _resetFileStoreForTest({ fileDir, passphrase: PASS });
+    // Reserved FILE-BASED `auth` bundle carrying the per-account setup-token.
+    bundleItemStore('file').set(secretsKeychainItem('auth', KEY), SETUP_TOKEN);
+    writeBundle({ name: 'auth', backend: 'file', vars: { [KEY]: keychainRef(KEY) } });
+    // The account's .claude.json so the resolver maps home -> email -> KEY.
+    fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(home, '.claude', '.claude.json'),
+      JSON.stringify({ oauthAccount: { emailAddress: EMAIL } }),
+    );
+  });
+
+  afterEach(() => {
+    setKeychainBackendForTest(restore);
+    _resetFileStoreForTest({});
+    delete process.env.AGENTS_SECRETS_PASSPHRASE;
+    if (prevNoAgent === undefined) delete process.env.AGENTS_SECRETS_NO_AGENT;
+    else process.env.AGENTS_SECRETS_NO_AGENT = prevNoAgent;
+    try { fs.rmSync(home, { recursive: true, force: true }); } catch { /* best effort */ }
+    try { fs.rmSync(fileDir, { recursive: true, force: true }); } catch { /* best effort */ }
+  });
+
+  it('serves the file-based setup-token to accessTokenCache callers, no keychain read', async () => {
+    const oauth = await loadClaudeOauth(home, { accessTokenCache: true });
+    expect(oauth?.accessToken).toBe(SETUP_TOKEN);
+    // Non-rotating: no expiry => reads as fresh, probe never reports expired.
+    expect(oauth?.expiresAt ?? null).toBeNull();
+  });
+
+  it('ignores the setup-token for full-credential callers (accessTokenCache off)', async () => {
+    // Run/export callers need the real keychain credential (with refresh token),
+    // never the access-token-only setup-token — so this path does NOT short out.
+    // With no keychain item and no .credentials.json, that resolves to null.
+    const oauth = await loadClaudeOauth(home);
+    expect(oauth).toBeNull();
   });
 });
