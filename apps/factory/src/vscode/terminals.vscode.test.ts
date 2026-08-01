@@ -150,6 +150,64 @@ describe('BUG A+B+C: full chain — session changes allow label refresh', () => 
   });
 });
 
+describe('live tmux detach (SSH drop): entry + mapping survive for the reconnect pass', () => {
+  const COORDS = { session: 'agents-1712345678901', socket: '/tmp/server.sock', pane: '%3' };
+
+  test('markDetached keeps the entry, stamps coords, and buildPersistedSessions still emits the tmux mapping', () => {
+    const term = fakeTerm('CC-detach');
+    t.register(term, 'CC-detach-1', fakeAgentConfig(), undefined);
+    t.setSessionId(term, 'sess-detach');
+    t.setAgentType(term, 'claude' as any);
+
+    // The client tab closed on a live tmux detach — the live tmux map is already
+    // cleared, so the close handler passes the coords it snapshotted first.
+    t.markDetached(term, COORDS);
+
+    // The entry is KEPT (not unregistered) and flagged detached.
+    const entry = t.getAllTerminals().find((e) => e.id === 'CC-detach-1');
+    expect(entry).toBeDefined();
+    expect(entry?.detached).toBe(true);
+
+    // The durable mapping still lands in every persistence snapshot — sourced from
+    // the stamped coords now that the live tmux map is gone. This is what the
+    // reconnect pass loads to re-attach the still-live agent.
+    const persisted = t.buildPersistedSessions();
+    const row = persisted.find((p) => p.terminalId === 'CC-detach-1');
+    expect(row).toBeDefined();
+    expect(row?.tmuxSession).toBe('agents-1712345678901');
+    expect(row?.tmuxSocket).toBe('/tmp/server.sock');
+    expect(row?.tmuxPane).toBe('%3');
+  });
+
+  test('a detached id is excluded from the reconnect "tracked" set so the pass can re-attach it', () => {
+    const live = fakeTerm('CC-live');
+    const gone = fakeTerm('CC-gone');
+    t.register(live, 'CC-live-1', fakeAgentConfig(), undefined);
+    t.register(gone, 'CC-gone-1', fakeAgentConfig(), undefined);
+    t.markDetached(gone, COORDS);
+
+    // This is exactly buildReconnectDeps.trackedTerminalIds: LIVE tabs only.
+    const tracked = new Set(
+      t.getAllTerminals().filter((e) => !e.detached).map((e) => e.id),
+    );
+    expect(tracked.has('CC-live-1')).toBe(true);
+    expect(tracked.has('CC-gone-1')).toBe(false); // detached → the pass will re-attach it
+  });
+
+  test('a fresh re-register under the same id clears the detached flag (reattach path)', () => {
+    const term = fakeTerm('CC-reattach');
+    t.register(term, 'CC-reattach-1', fakeAgentConfig(), undefined);
+    t.markDetached(term, COORDS);
+    expect(t.getAllTerminals().find((e) => e.id === 'CC-reattach-1')?.detached).toBe(true);
+
+    // reattachSession spawns a new terminal and re-registers the same id.
+    const fresh = fakeTerm('CC-reattach');
+    t.register(fresh, 'CC-reattach-1', fakeAgentConfig(), undefined);
+    const entry = t.getAllTerminals().find((e) => e.id === 'CC-reattach-1');
+    expect(entry?.detached).toBeUndefined(); // no longer detached — it's a live tab again
+  });
+});
+
 describe('BUG I: setLabel immediately stops autoLabelPoller', () => {
   test('poller interval is cleared after manual label is set via setLabel', async () => {
     const term = fakeTerm('CC-bug-i');

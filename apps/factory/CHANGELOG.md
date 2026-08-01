@@ -25,10 +25,17 @@ All notable changes to the Factory extension are documented here. Format follows
   terminal and resumes it from the CLI session file, which would restart the
   agent) and preserves that mapping on disk instead of wiping it, so the pass can
   `agents tmux attach` the still-live session and a subsequent reload still has
-  the mapping to recover from. A permanent reattach failure (an unknown agent
-  prefix) is now non-retryable, so it no longer burns the backoff budget on every
-  window-focus event. The Factory Floor grid re-arms its polling on reconnect so
-  it no longer looks frozen. Source: `apps/factory/src/vscode/tmux.ts`,
+  the mapping to recover from. On a network drop that does NOT reload the
+  extension host (the common Remote-SSH case), a single `onDidCloseTerminal`
+  handler now decides the whole close from one detach-vs-exit classification: on a
+  live detach it marks the entry detached and preserves its durable mapping (so
+  the reconnect pass can re-attach even a session spawned in the current window),
+  instead of unconditionally unregistering it and overwriting the on-disk mapping
+  to exclude it — the previous behavior orphaned freshly-spawned agents. A
+  permanent reattach failure (an unknown agent prefix) is now non-retryable, so it
+  no longer burns the backoff budget on every window-focus event. The Factory
+  Floor grid re-arms its polling on reconnect so it no longer looks frozen.
+  Source: `apps/factory/src/vscode/tmux.ts`,
   `apps/factory/src/vscode/reconnect.ts`, `apps/factory/src/vscode/extension.ts`,
   `apps/factory/src/vscode/terminals.vscode.ts`,
   `apps/factory/src/core/sessions.persist.ts`,

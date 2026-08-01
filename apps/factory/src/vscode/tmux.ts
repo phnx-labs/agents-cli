@@ -6,10 +6,10 @@
 // server socket (~/.agents/.cache/helpers/tmux/server.sock), meta JSON, and
 // arg-array spawning — this module is now a thin VS Code adapter.
 //
-// Public surface is preserved verbatim so extension.ts call sites don't
-// move: `isTmuxAvailable`, `createTmuxTerminal`, `tmuxSplitH`, `tmuxSplitV`,
-// `isTmuxTerminal`, `getTmuxState`, `cleanupTmuxTerminal`,
-// `registerTmuxCleanup`.
+// Public surface: `isTmuxAvailable`, `createTmuxTerminal`, `tmuxSplitH`,
+// `tmuxSplitV`, `isTmuxTerminal`, `getTmuxState`, `getTmuxCoords`,
+// `cleanupTmuxTerminal` (returns a detach-vs-exit classification; the extension's
+// single onDidCloseTerminal handler drives the un-track/persist decision from it).
 
 import * as os from 'os';
 import * as path from 'path';
@@ -456,9 +456,24 @@ export function getTmuxCoords(
   return { session: state.session, socket: state.socket, pane: state.pane };
 }
 
-export async function cleanupTmuxTerminal(terminal: vscode.Terminal): Promise<void> {
+// How a terminal close resolved, for the extension's single close handler.
+//   tmuxBacked  — the closed terminal was spawned inside a tmux session.
+//   liveDetach  — tmuxBacked AND the session is still live (a client/network
+//                 detach, NOT an agent exit): the agent keeps running detached
+//                 and its terminal↔tmux mapping MUST be preserved so the
+//                 reconnect pass can re-attach it. When false for a tmux-backed
+//                 terminal, the agent truly exited and the mapping should be torn
+//                 down as a normal close.
+export interface TerminalCloseClassification {
+  tmuxBacked: boolean;
+  liveDetach: boolean;
+}
+
+export async function cleanupTmuxTerminal(
+  terminal: vscode.Terminal,
+): Promise<TerminalCloseClassification> {
   const state = tmuxTerminals.get(terminal);
-  if (!state) return;
+  if (!state) return { tmuxBacked: false, liveDetach: false };
 
   // Stop tracking this vscode.Terminal instance regardless — the client-side
   // tab is gone. The tmux session is a separate, server-side lifetime.
@@ -471,17 +486,13 @@ export async function cleanupTmuxTerminal(terminal: vscode.Terminal): Promise<vo
   // dead); a live pane means the process is still running and we must leave the
   // detached session alive so the reconnect scan can re-attach to it.
   const st = await queryTmuxSessionState(state.socket, state.session);
-  if (!shouldKillOnClose(st)) return;
+  if (!shouldKillOnClose(st)) {
+    // Live pane → client/network detach. Keep the agent + its mapping alive.
+    return { tmuxBacked: true, liveDetach: true };
+  }
 
   // `agents tmux kill` is idempotent — a race with an already-dead session is a
   // no-op.
   runAgents(`tmux kill ${shq(state.session)}`).catch(() => { /* ignore */ });
-}
-
-export function registerTmuxCleanup(context: vscode.ExtensionContext): void {
-  context.subscriptions.push(
-    vscode.window.onDidCloseTerminal((terminal) => {
-      void cleanupTmuxTerminal(terminal);
-    }),
-  );
+  return { tmuxBacked: true, liveDetach: false };
 }

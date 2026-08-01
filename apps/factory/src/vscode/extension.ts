@@ -81,7 +81,8 @@ import {
   createTmuxTerminal,
   getTmuxState,
   isTmuxTerminal,
-  registerTmuxCleanup,
+  cleanupTmuxTerminal,
+  getTmuxCoords,
   reattachTmuxTerminal,
   tmuxSplitH,
   tmuxSplitV,
@@ -905,7 +906,11 @@ export async function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  registerTmuxCleanup(context);
+  // Tmux cleanup no longer registers its own onDidCloseTerminal listener: the
+  // single close handler below owns the whole close lifecycle so the kill
+  // decision (cleanupTmuxTerminal) and the un-track/persist decision are made
+  // from ONE detach-vs-exit classification — otherwise a live detach unregisters
+  // the entry and wipes its mapping before the reconnect pass can re-attach.
 
   // Start watchdog MCP bridge for smart agent mode
   const watchdogBridge = startWatchdogBridge(context);
@@ -1659,38 +1664,69 @@ export async function activate(context: vscode.ExtensionContext) {
     );
   }
 
-  // Listen for terminal closures to update our tracking
+  // Single terminal-close handler. It owns BOTH the tmux kill decision
+  // (cleanupTmuxTerminal) and the un-track/persist decision, from one
+  // detach-vs-exit classification. This is deliberate: a Remote-SSH network drop
+  // closes the tab without an extension reload, firing this on a still-live
+  // agent. If we unconditionally unregister + push-to-closed + release the
+  // worktree, `terminals.unregister` overwrites the on-disk mapping to exclude
+  // the session (buildPersistedSessions only sees live editorTerminals), so the
+  // reconnect pass — which loads that mapping — can never find and re-attach the
+  // detached agent. On a live detach we therefore mark the entry detached and
+  // preserve everything, leaving it for the reconnect pass; only a true agent
+  // exit (or a non-tmux terminal) tears the entry down.
   context.subscriptions.push(
     vscode.window.onDidCloseTerminal((terminal) => {
-      // Capture session info before unregistering (for reopen)
-      const entry = terminals.getByTerminal(terminal);
-      if (entry?.agentConfig && entry.sessionId) {
-        terminals.pushClosedSession({
-          terminalId: entry.id,
-          prefix: entry.agentConfig.prefix,
-          sessionId: entry.sessionId,
-          label: entry.label,
-          agentType: entry.agentType,
-          version: entry.version,
-          account: entry.account || entry.statusAccount || undefined,
-          agentConfig: entry.agentConfig,
-          closedAt: Date.now()
-        });
-      }
+      void (async () => {
+        const entry = terminals.getByTerminal(terminal);
+        // Snapshot the tmux coords BEFORE cleanup runs — cleanupTmuxTerminal
+        // clears tmux.ts's live map synchronously, so this is our last chance to
+        // read them for the detach mapping.
+        const coords = getTmuxCoords(terminal);
+        // cleanupTmuxTerminal kills the tmux session ONLY on a true agent exit
+        // and reports how the close resolved. It also stops tmux-tracking the
+        // terminal, so it must run exactly once — hence the single handler.
+        const close = await cleanupTmuxTerminal(terminal);
 
-      // Lazy release of the per-terminal worktree (no-op unless
-      // agents.worktreePerTerminal is enabled). Safe-by-default: only removes
-      // when clean and merged; otherwise leaves the worktree for the user to
-      // inspect or for `agents worktree prune` to revisit later.
-      if (entry?.id) {
-        const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        if (workspaceFolder) {
-          tryReleaseWorktreeForTerminal(workspaceFolder, entry.id);
+        if (close.liveDetach) {
+          // Live agent, client gone: keep the entry (and its durable mapping) so
+          // the reconnect pass can re-attach. Don't push-to-closed (the agent is
+          // still running) and don't release the worktree (it's in use).
+          terminals.markDetached(terminal, coords);
+          updateActiveAgentContextKey(vscode.window.activeTerminal, context.extensionPath);
+          return;
         }
-      }
 
-      terminals.unregister(terminal);
-      updateActiveAgentContextKey(vscode.window.activeTerminal, context.extensionPath);
+        // True exit, or a non-tmux terminal: normal teardown.
+        // Capture session info before unregistering (for reopen).
+        if (entry?.agentConfig && entry.sessionId) {
+          terminals.pushClosedSession({
+            terminalId: entry.id,
+            prefix: entry.agentConfig.prefix,
+            sessionId: entry.sessionId,
+            label: entry.label,
+            agentType: entry.agentType,
+            version: entry.version,
+            account: entry.account || entry.statusAccount || undefined,
+            agentConfig: entry.agentConfig,
+            closedAt: Date.now()
+          });
+        }
+
+        // Lazy release of the per-terminal worktree (no-op unless
+        // agents.worktreePerTerminal is enabled). Safe-by-default: only removes
+        // when clean and merged; otherwise leaves the worktree for the user to
+        // inspect or for `agents worktree prune` to revisit later.
+        if (entry?.id) {
+          const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+          if (workspaceFolder) {
+            tryReleaseWorktreeForTerminal(workspaceFolder, entry.id);
+          }
+        }
+
+        terminals.unregister(terminal);
+        updateActiveAgentContextKey(vscode.window.activeTerminal, context.extensionPath);
+      })();
     })
   );
 
@@ -4446,7 +4482,11 @@ function buildReconnectDeps(
       for (const s of terminals.buildPersistedSessions()) byId.set(s.terminalId, s);
       return Array.from(byId.values());
     },
-    trackedTerminalIds: () => new Set(terminals.getAllTerminals().map((e) => e.id)),
+    // Only entries with a LIVE tab count as "tracked" — a detached entry (its
+    // tab closed on an SSH drop, agent still running) is exactly what the
+    // reconnect pass must re-attach, so it must NOT be filtered out as tracked.
+    trackedTerminalIds: () =>
+      new Set(terminals.getAllTerminals().filter((e) => !e.detached).map((e) => e.id)),
     reattachOne: (target) => reattachSession(context, target),
     resumePanelPolling: () => settings.resumeFloorPolling(),
   };
