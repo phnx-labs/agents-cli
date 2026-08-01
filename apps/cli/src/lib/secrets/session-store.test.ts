@@ -151,6 +151,29 @@ describe.each([
     expect(resolveSession('npmjs.com', Date.now(), 'claude')?.entry.env.TOKEN).toBe('secret-npmjs.com');
   });
 
+  // Review catch: the migration used to overwrite a coexisting global grant with
+  // the stale cli one. Real sequence — upgrade, re-run `unlock` (writes global),
+  // then the broker restarts and migrates. Overwriting restored a superseded
+  // token; if the stale entry had also expired, its expiry rode along and the
+  // prune deleted a valid unlock outright.
+  it('migration discards a stale cli grant instead of clobbering a fresh global one', () => {
+    const now = Date.now();
+    saveSession('npmjs.com', { ...entry('npmjs.com', now + FAR, false), env: { TOKEN: 'stale' }, harness: 'cli' });
+    saveSession('npmjs.com', { ...entry('npmjs.com', now + FAR, false), env: { TOKEN: 'fresh' }, harness: '*' });
+    expect(Object.keys(readIndex().bundles).sort()).toEqual(['*:npmjs.com', 'cli:npmjs.com']);
+    rehydrateSessions(now);
+    expect(Object.keys(readIndex().bundles)).toEqual(['*:npmjs.com']);
+    expect(resolveSession('npmjs.com', now, 'claude')?.entry.env.TOKEN).toBe('fresh');
+  });
+
+  it('an expired stale cli grant cannot expire a live global grant', () => {
+    const now = Date.now();
+    saveSession('npmjs.com', { ...entry('npmjs.com', now + 1000, false), env: { TOKEN: 'stale' }, harness: 'cli' });
+    saveSession('npmjs.com', { ...entry('npmjs.com', now + FAR, false), env: { TOKEN: 'fresh' }, harness: '*' });
+    rehydrateSessions(now + 5000); // the cli entry is expired by now, the global one is not
+    expect(resolveSession('npmjs.com', now + 5000, 'claude')?.entry.env.TOKEN).toBe('fresh');
+  });
+
   it('does not reuse a persisted grant across harness types', () => {
     saveSession('prod', { ...entry('prod', FAR + Date.now(), false), harness: 'claude' });
     expect(loadSession('prod', Date.now(), 'claude')?.env.TOKEN).toBe('secret-prod');

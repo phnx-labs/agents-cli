@@ -268,12 +268,25 @@ export function rehydrateSessions(now: number = Date.now()): Array<{ name: strin
     for (const [key, meta] of Object.entries(migratedIndex.bundles)) {
       if (!key.startsWith('cli:')) continue;
       const bundleName = key.slice('cli:'.length);
+      const globalKey = `${GLOBAL_HARNESS}:${bundleName}`;
+      // A global grant for this bundle can already exist: the user re-runs
+      // `unlock` on the new code (which writes the global scope) before the
+      // broker restarts to run this migration. The existing global grant is the
+      // NEWER one, so the stale `cli` entry is discarded, never merged over it —
+      // overwriting would restore a superseded token and, if the stale entry had
+      // expired, hand its expiry to the fresh grant so the prune below deletes a
+      // valid unlock outright.
+      if (migratedIndex.bundles[globalKey]) {
+        try { deleteKeychainToken(sessionBlobItem(bundleName, 'cli')); } catch { /* already gone */ }
+        migratedIndex = removeEntry(migratedIndex, key);
+        continue;
+      }
       try {
         const raw = getKeychainToken(sessionBlobItem(bundleName, 'cli'));
         const legacy = JSON.parse(raw) as SessionEntry;
         setKeychainToken(sessionBlobItem(bundleName, GLOBAL_HARNESS), JSON.stringify({ ...legacy, harness: GLOBAL_HARNESS }), { noAcl: true });
         deleteKeychainToken(sessionBlobItem(bundleName, 'cli'));
-        migratedIndex = upsertEntry(removeEntry(migratedIndex, key), `${GLOBAL_HARNESS}:${bundleName}`, {
+        migratedIndex = upsertEntry(removeEntry(migratedIndex, key), globalKey, {
           expiresAt: meta.expiresAt,
           sleepPersist: meta.sleepPersist,
           harness: GLOBAL_HARNESS,
