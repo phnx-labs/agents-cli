@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as yaml from 'yaml';
 import { spawnSync } from 'child_process';
 import {
   FEED_PUBLISH_HOOK_SCRIPT,
@@ -19,6 +20,8 @@ import {
   listAskStats,
   type OpenBlock,
 } from './feed.js';
+import { classifyBlock, filterBlocksForFeed } from './ask-classifier.js';
+import { isPhoneUrgent, DEFAULT_POLICY } from './feed-policy.js';
 import { loadOperators } from './operator.js';
 
 const hasPython = spawnSync('python3', ['--version']).status === 0;
@@ -414,9 +417,25 @@ describe('feed store', () => {
     expect(updated).toContain('# keep this comment');
     expect(updated).toContain('feed-publish:');
     expect(updated).toContain('feed-publish-notification:');
+    expect(updated).toContain('feed-publish-permission:');
     expect(updated).toContain('feed-clear-answered:');
+    expect(updated).toContain('feed-clear-permission:');
     expect(updated).toContain('feed-clear-lifecycle:');
     expect(fs.readFileSync(path.join(userDir, 'hooks', '10-feed-publish.py'), 'utf-8')).toBe(FEED_PUBLISH_HOOK_SCRIPT);
+  });
+
+  it('installs feed hooks for codex as well as claude (RUSH-2039)', () => {
+    const userDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-codex-install-'));
+    expect(ensureFeedPublishHook(userDir)).toEqual({ installed: true });
+    const yamlText = fs.readFileSync(path.join(userDir, 'agents.yaml'), 'utf-8');
+    // The Codex-only approval hook subscribes to PermissionRequest.
+    expect(yamlText).toContain('feed-publish-permission:');
+    expect(yamlText).toContain('PermissionRequest');
+    // Every feed hook now lists codex so its harness parity is documented.
+    const doc = yaml.parse(yamlText) as { hooks: Record<string, { agents?: string[] }> };
+    for (const name of ['feed-publish', 'feed-publish-notification', 'feed-publish-permission', 'feed-clear-answered', 'feed-clear-permission', 'feed-clear-lifecycle']) {
+      expect(doc.hooks[name].agents).toContain('codex');
+    }
   });
 
   it('recordAnswer claims the first answer and rejects later ones', () => {
@@ -597,5 +616,130 @@ describe('feed store', () => {
     expect(republish.status).toBe(0);
     expect(isBlockAnswered(blockId, feedDir)).toBe(false);
     expect(listBlocks(feedDir)).toMatchObject([{ questions: [{ text: 'Second?' }] }]);
+  });
+
+  // --- RUSH-2039: Codex approval prompts publish urgent feed blocks ---------
+
+  it.runIf(hasPython)('real hook publishes a Codex PermissionRequest as an urgent approval block', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-codex-perm-'));
+    const feedDir = path.join(home, '.agents', '.history', 'feed');
+    const result = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
+      input: JSON.stringify({
+        session_id: 'codex-sess-1',
+        hook_event_name: 'PermissionRequest',
+        permission_mode: 'default',
+        tool_name: 'Bash',
+        tool_input: { command: 'rm -rf build' },
+      }),
+      env: { ...process.env, HOME: home, AGENTS_RUNTIME: 'headless' },
+      encoding: 'utf-8',
+    });
+    expect(result.status).toBe(0);
+    const blocks = listBlocks(feedDir);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({
+      kind: 'notification',
+      notificationType: 'permission_prompt',
+      blockClass: 'approval',
+      costOfDelay: 'high',
+      safeDefault: 'deny',
+    });
+    // The block names the tool and its command so the operator can judge it.
+    expect(blocks[0].questions[0].text).toContain('Bash');
+    expect(blocks[0].questions[0].text).toContain('rm -rf build');
+    expect(blocks[0].questions[0].header).toBe('Approval needed');
+  });
+
+  it.runIf(hasPython)('real hook clears a Codex approval block once the approved tool runs', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-codex-clear-'));
+    const feedDir = path.join(home, '.agents', '.history', 'feed');
+    const publish = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
+      input: JSON.stringify({
+        session_id: 'codex-sess-2',
+        hook_event_name: 'PermissionRequest',
+        tool_name: 'Bash',
+        tool_input: { command: 'ls' },
+      }),
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+    expect(publish.status).toBe(0);
+    expect(listBlocks(feedDir)).toHaveLength(1);
+
+    // Codex runs the approved tool -> matcher-less PostToolUse clears the card.
+    const clear = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
+      input: JSON.stringify({
+        session_id: 'codex-sess-2',
+        hook_event_name: 'PostToolUse',
+        tool_name: 'Bash',
+      }),
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+    expect(clear.status).toBe(0);
+    expect(listBlocks(feedDir)).toEqual([]);
+  });
+
+  it.runIf(hasPython)('matcher-less PostToolUse does not wipe an open AskUserQuestion mid-turn', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-question-guard-'));
+    const feedDir = path.join(home, '.agents', '.history', 'feed');
+    const publish = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
+      input: JSON.stringify({
+        session_id: 'sess-q-guard',
+        hook_event_name: 'PreToolUse',
+        tool_input: { questions: [{ question: 'Which approach?' }] },
+      }),
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+    expect(publish.status).toBe(0);
+    expect(listBlocks(feedDir)).toHaveLength(1);
+
+    // An unrelated tool completing must NOT clear the open question.
+    const unrelated = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
+      input: JSON.stringify({
+        session_id: 'sess-q-guard',
+        hook_event_name: 'PostToolUse',
+        tool_name: 'Bash',
+      }),
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+    expect(unrelated.status).toBe(0);
+    expect(listBlocks(feedDir)).toMatchObject([{ kind: 'question', questions: [{ text: 'Which approach?' }] }]);
+
+    // The AskUserQuestion PostToolUse still clears it.
+    const answer = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
+      input: JSON.stringify({
+        session_id: 'sess-q-guard',
+        hook_event_name: 'PostToolUse',
+        tool_name: 'AskUserQuestion',
+      }),
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+    expect(answer.status).toBe(0);
+    expect(listBlocks(feedDir)).toEqual([]);
+  });
+
+  it('feed --dispatch classifies a Codex approval block as urgent and surfaces it', () => {
+    // Mirror the block the hook publishes for a Codex PermissionRequest.
+    const block = makeBlock('codex-dispatch', 'Codex needs approval to run Bash: rm -rf build', {
+      runtime: 'headless',
+      kind: 'notification',
+      notificationType: 'permission_prompt',
+      blockClass: 'approval',
+      costOfDelay: 'high',
+      safeDefault: 'deny',
+      questions: [{ text: 'Codex needs approval to run Bash: rm -rf build', header: 'Approval needed' }],
+    });
+
+    // Not suppressed as a stall, and classified as an approval.
+    const filtered = filterBlocksForFeed([block]);
+    expect(filtered.surfaced).toHaveLength(1);
+    expect(classifyBlock(block).class).toBe('approval');
+
+    // Urgent under the default policy (costOfDelay high >= threshold medium).
+    expect(isPhoneUrgent(block, DEFAULT_POLICY)).toBe(true);
   });
 });

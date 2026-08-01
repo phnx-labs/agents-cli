@@ -13,6 +13,7 @@ import { readPromptsFromPath, writePromptsToPath, DEFAULT_PROMPTS } from '../cor
 import { openExternalUrl, isAllowedWebviewCommand } from './webviewSecurity';
 import * as terminals from './terminals.vscode';
 import * as swarm from './swarm.vscode';
+import { notifyNewlyWaiting } from './waitingNotifier.vscode';
 import { fetchAllTasks, detectAvailableSources } from './tasks.vscode';
 import { getBuiltInByTitle, configFromDef } from './agents.vscode';
 import { openSingleAgentWithQueue, runHeadlessAgent, focusSessionInTerminal } from './extension';
@@ -1155,6 +1156,9 @@ async function pushFloorUpdate(workspacePath?: string): Promise<void> {
   ]);
   if (!settingsPanel || !floorSubscribed) return;
   lastFloorTasks = floorTasks;
+  // RUSH-2039: page the user when a session (Codex included) enters the
+  // approval-waiting state. Edge-triggered so it fires once per wait.
+  notifyNewlyWaiting(floorTerminals);
   settingsPanel.webview.postMessage({ type: 'allTerminalsData', terminals: floorTerminals });
   settingsPanel.webview.postMessage({ type: 'tasksData', tasks: floorTasks });
   // Re-reconcile so newly-spawned terminals get watched too.
