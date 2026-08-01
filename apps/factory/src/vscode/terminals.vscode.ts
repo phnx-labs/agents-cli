@@ -28,7 +28,7 @@ import {
   SessionAgentType
 } from '../core/utils';
 import { registerTerminal as registerSessionTracker } from './sessionTracker';
-import { relabelTmuxPane } from './tmux';
+import { relabelTmuxPane, getTmuxCoords } from './tmux';
 
 // getTerminalsByAgentType runs 5x (one per agent type) on every 10s floor poll
 // and again on every terminal open/close. Its per-terminal/per-session debug
@@ -1268,6 +1268,13 @@ export function buildPersistedSessions(): sessionsPersist.PersistedSession[] {
     // Only persist agent terminals (not regular terminals)
     if (!entry.agentConfig) continue;
 
+    // Durable terminal↔tmux mapping: when this terminal was spawned inside
+    // tmux, persist its session/socket/pane so the reconnect scanner can
+    // re-attach to the still-live detached session after a reload rather than
+    // resuming from the CLI session file. Synchronous read — deactivate can't
+    // await. Undefined for the native (non-tmux) terminal path.
+    const coords = getTmuxCoords(entry.terminal);
+
     sessions.push({
       terminalId: entry.id,
       prefix: entry.agentConfig.prefix,
@@ -1275,7 +1282,11 @@ export function buildPersistedSessions(): sessionsPersist.PersistedSession[] {
       label: entry.label,
       agentType: entry.agentType,
       version: entry.version,
-      createdAt: entry.createdAt
+      createdAt: entry.createdAt,
+      tmuxSession: coords?.session,
+      tmuxSocket: coords?.socket,
+      tmuxPane: coords?.pane,
+      agentPid: entry.pid,
     });
   }
 

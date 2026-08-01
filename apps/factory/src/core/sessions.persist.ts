@@ -19,6 +19,16 @@ export interface PersistedSession {
   agentType?: string;           // Agent type key (e.g., "claude", "codex")
   version?: string;             // Pinned agent version, if known (e.g., "2.1.113")
   createdAt: number;            // Timestamp
+  // --- Durable terminal↔tmux mapping (reconnect resilience) ---
+  // The agent runs in a DETACHED tmux session on the shared socket, so it
+  // survives an SSH drop / window reload. Persisting these lets the reconnect
+  // scanner re-attach to the SAME live session after a reload instead of
+  // resuming from the CLI session file (which restarts the agent). Absent for
+  // the native (non-tmux) terminal path.
+  tmuxSession?: string;         // tmux session name (e.g., "agents-1712345678901")
+  tmuxSocket?: string;          // shared server socket the session lives on
+  tmuxPane?: string;            // tmux `%N` pane id, when resolved
+  agentPid?: number;            // shell/attach pid of the terminal (liveness cross-check)
 }
 
 // Per-workspace session data
