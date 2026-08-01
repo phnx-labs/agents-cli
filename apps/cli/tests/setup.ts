@@ -120,12 +120,18 @@ afterAll(() => {
         try { parsedAfter = JSON.parse(devicesRegistryAfter); } catch { /* ok */ }
         // Newly added keys only — keys present in after but not in the pre-test snapshot.
         const newKeys = Object.keys(parsedAfter).filter((k) => !(k in parsedBefore));
-        const leaked = newKeys.filter((name) => FIXTURE_DEVICE_NAMES.has(name));
+        // On CI there are no concurrent fleet writers, so ANY newly-added device is a
+        // hermeticity breach — not just the names we happened to enumerate; this closes
+        // the gap where a fixture named outside FIXTURE_DEVICE_NAMES would leak silently.
+        // On a dev machine, live fleet agents may legitimately add real devices during
+        // the run, so fall back to flagging only known fixture names to avoid false
+        // positives (FIXTURE_DEVICE_NAMES is the dev-side allowlist for exactly this).
+        const leaked = process.env.CI ? newKeys : newKeys.filter((name) => FIXTURE_DEVICE_NAMES.has(name));
         if (leaked.length > 0) {
           throw new Error(
-            `hermeticity leak (RUSH-2042): fixture device(s) [${leaked.join(', ')}] were written ` +
-            `into the real device registry (${realDevicesRegistry}). ` +
-            `Set AGENTS_TEST_HOME in the test file before importing any state consumer.`,
+            `hermeticity leak (RUSH-2042): device(s) [${leaked.join(', ')}] were written ` +
+            `into the real device registry (${realDevicesRegistry}) during the suite. ` +
+            `Set AGENTS_TEST_HOME (or override HOME) in the test file before importing any state consumer.`,
           );
         }
       }
