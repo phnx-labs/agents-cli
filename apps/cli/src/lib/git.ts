@@ -968,9 +968,25 @@ export async function pullRepo(
     // Without this the dirty-tree guard below claims "Blocked by local changes",
     // which is both wrong and actively harmful advice mid-rebase on a detached
     // HEAD. Checked BEFORE commitOwnDeviceMeta so we never commit into one.
+    // Ask git where the state dirs live rather than assuming `<dir>/.git/` is a
+    // directory. In a worktree `.git` is a FILE containing `gitdir: <path>`, so
+    // path.join(dir, '.git', 'rebase-merge') can never exist and the check would
+    // silently never fire. `rev-parse --git-path` resolves both layouts.
+    const gitPath = async (name: string): Promise<string | null> => {
+      try {
+        const raw = (await git.raw(['rev-parse', '--git-path', name])).trim();
+        return path.isAbsolute(raw) ? raw : path.join(dir, raw);
+      } catch {
+        return null;
+      }
+    };
+    const [rebaseMerge, rebaseApply] = await Promise.all([
+      gitPath('rebase-merge'),
+      gitPath('rebase-apply'),
+    ]);
     const rebaseInProgress =
-      fs.existsSync(path.join(dir, '.git', 'rebase-merge')) ||
-      fs.existsSync(path.join(dir, '.git', 'rebase-apply'));
+      (rebaseMerge !== null && fs.existsSync(rebaseMerge)) ||
+      (rebaseApply !== null && fs.existsSync(rebaseApply));
     if (rebaseInProgress) {
       return {
         success: false,

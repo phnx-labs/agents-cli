@@ -693,15 +693,34 @@ describe('pullRepo reconciles a diverged branch by rebasing', () => {
   });
 
   it('reports an in-progress rebase as itself, not as a dirty tree', async () => {
-    const { local, author } = await divergedPair();
+    const { local } = await divergedPair();
 
-    // Wedge the repo the way a pre-abort conflict used to.
-    fs.mkdirSync(path.join(local, '.git', 'rebase-merge'), { recursive: true });
+    // Wedge the repo the way a pre-abort conflict used to. Resolve the state
+    // dir through git rather than assuming <dir>/.git is a directory.
+    const gp = (await simpleGit(local).raw(['rev-parse', '--git-path', 'rebase-merge'])).trim();
+    fs.mkdirSync(path.isAbsolute(gp) ? gp : path.join(local, gp), { recursive: true });
 
     const res = await pullRepo(local);
     expect(res.success).toBe(false);
     expect(res.error).toMatch(/rebase is still in progress/i);
     expect(res.error).not.toMatch(/Blocked by local changes/);
-    void author;
+  });
+
+  // A git WORKTREE has `.git` as a FILE (`gitdir: <path>`), so a hardcoded
+  // <dir>/.git/rebase-merge probe can never fire there. pullRepo runs on real
+  // clones today, but the probe must not silently depend on that.
+  it('detects an in-progress rebase in a worktree, where .git is a file', async () => {
+    const { local } = await divergedPair();
+    const wt = path.join(path.dirname(local), 'wt');
+    await simpleGit(local).raw(['worktree', 'add', '--detach', wt]);
+
+    expect(fs.statSync(path.join(wt, '.git')).isFile()).toBe(true);
+
+    const gp = (await simpleGit(wt).raw(['rev-parse', '--git-path', 'rebase-merge'])).trim();
+    fs.mkdirSync(path.isAbsolute(gp) ? gp : path.join(wt, gp), { recursive: true });
+
+    const res = await pullRepo(wt);
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/rebase is still in progress/i);
   });
 });
