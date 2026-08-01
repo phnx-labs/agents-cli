@@ -1,5 +1,11 @@
 # `lib/session` — the session subsystem
 
+> **Audience: maintainers of this subsystem — not end users.** This is an internal
+> contributor spec: the data model, the render contract, and the known gaps, written
+> for whoever next changes this code. It is not user-facing CLI documentation (that
+> lives in `--help` output and the user docs); nothing here is shown to a person
+> running `agents sessions`.
+
 This directory owns everything about an "agent session": discovering transcripts on
 disk, parsing them per harness, detecting which are alive, indexing them for search,
 and rendering them for the `agents sessions` command. If code reasons about a session
