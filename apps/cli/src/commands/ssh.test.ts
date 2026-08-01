@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { renderLeasedBoxesSection } from './ssh.js';
+import { renderLeasedBoxesSection, raceFleetPingDeadline } from './ssh.js';
 import type { CrabboxBox } from '../lib/crabbox/cli.js';
 import { fanOutDevices, type FanOutDeviceTarget } from '../lib/devices/fleet.js';
 
@@ -95,44 +95,30 @@ describe('ssh askpass', () => {
 });
 
 describe('runFleetPing overall-deadline (RUSH-2041)', () => {
-  // Reproduces the Promise.race([fanOut, overallDeadline]) + catch/reconstruct
-  // path inside runFleetPing. The probe is a real hanging network call simulated
-  // at the SSH boundary — no mocking of the logic under test. Asserts both that
-  // the race resolves within the deadline and that every remote target comes back
-  // failed or skipped.
+  // Calls the real exported raceFleetPingDeadline with a genuinely hanging
+  // fanOut promise. The only test double is the fanOut (the network boundary) —
+  // the deadline logic itself is the shipped code path, not a reimplementation.
   it('exits promptly and marks all remotes failed/skipped when the overall deadline fires before probes settle', async () => {
-    const OVERALL_TIMEOUT_MS = 80;
+    const OVERALL_TIMEOUT_MS = 50;
 
     const remoteTargets: FanOutDeviceTarget[] = [
-      { name: 'worker-a' },           // probeable: hangs forever
-      { name: 'worker-b' },           // probeable: hangs forever
+      { name: 'worker-a' },                            // probeable: hangs forever
+      { name: 'worker-b' },                            // probeable: hangs forever
       { name: 'offline-c', skip: 'offline' as const }, // pre-skipped
     ];
 
-    // Probe that never resolves — stands in for a hung sshExecAsync call.
-    const hangingProbe = (_target: FanOutDeviceTarget): Promise<string[]> =>
-      new Promise<string[]>(() => { /* intentionally never resolves */ });
+    // A fanOut that never settles — stands in for a hung sshExecAsync call.
+    // The per-device timeout is longer than OVERALL_TIMEOUT_MS so it can't
+    // resolve the race before the overall deadline fires.
+    const hangingFanOut = new Promise<Awaited<ReturnType<typeof fanOutDevices<string[], FanOutDeviceTarget>>>>(() => {
+      /* intentionally never resolves */
+    });
 
     const start = Date.now();
-    let remote: Awaited<ReturnType<typeof fanOutDevices<string[], FanOutDeviceTarget>>>;
-    try {
-      const fanOut = fanOutDevices(remoteTargets, hangingProbe, { perDeviceTimeoutMs: 200 });
-      const overallDeadline = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('fleet ping overall deadline exceeded')), OVERALL_TIMEOUT_MS),
-      );
-      remote = await Promise.race([fanOut, overallDeadline]);
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      remote = remoteTargets.map((t) => ({
-        name: t.name,
-        status: t.skip ? ('skipped' as const) : ('failed' as const),
-        reason: t.skip,
-        error: t.skip ? undefined : errMsg,
-      }));
-    }
+    const remote = await raceFleetPingDeadline(hangingFanOut, remoteTargets, OVERALL_TIMEOUT_MS);
     const elapsed = Date.now() - start;
 
-    // Command must exit well inside the overall budget — not hang for 200 ms or more.
+    // Must resolve well inside the overall budget — not hang indefinitely.
     expect(elapsed).toBeLessThan(OVERALL_TIMEOUT_MS + 50);
 
     // Every remote target comes back as failed or skipped — none are missing.

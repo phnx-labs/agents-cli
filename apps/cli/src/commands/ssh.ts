@@ -561,6 +561,42 @@ async function probeRemoteAuth(target: FleetStatusTarget): Promise<AuthProbeRow[
   return parsed.rows ?? [];
 }
 
+/**
+ * Race `fanOut` against an overall wall-clock deadline (RUSH-2041).
+ *
+ * If `fanOut` settles first the result passes through unchanged. If the
+ * deadline fires first every pending remote target is mapped to `failed` (or
+ * `skipped` for pre-skipped targets), so callers always get a complete result
+ * array and the command exits promptly rather than hanging.
+ *
+ * Exported so the unit test can exercise the real path with a hanging probe
+ * instead of reimplementing the logic.
+ */
+export async function raceFleetPingDeadline<T, Target extends FanOutDeviceTarget>(
+  fanOut: Promise<import('../lib/devices/fleet.js').FanOutDeviceResult<T>[]>,
+  remoteTargets: Target[],
+  overallTimeoutMs: number,
+): Promise<import('../lib/devices/fleet.js').FanOutDeviceResult<T>[]> {
+  const overallDeadline = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error('fleet ping overall deadline exceeded')), overallTimeoutMs),
+  );
+  try {
+    return await Promise.race([fanOut, overallDeadline]);
+  } catch (err) {
+    // Overall deadline hit before all devices settled — mark every pending
+    // device as failed so the command exits promptly. Individual probes that
+    // already settled are not retrievable (Promise.all internals), so we
+    // record all remote targets as timed out / skipped.
+    const errMsg = err instanceof Error ? err.message : String(err);
+    return remoteTargets.map((t) => ({
+      name: t.name,
+      status: t.skip ? ('skipped' as const) : ('failed' as const),
+      reason: t.skip,
+      error: t.skip ? undefined : errMsg,
+    }));
+  }
+}
+
 async function runFleetPing(opts: { json?: boolean; local?: boolean; verbose?: boolean; strict?: boolean }): Promise<void> {
   const self = machineId();
   const cliVersion = getCliVersion();
@@ -608,22 +644,7 @@ async function runFleetPing(opts: { json?: boolean; local?: boolean; verbose?: b
   let remote: Awaited<ReturnType<typeof fanOutDevices<AuthProbeRow[], FleetStatusTarget>>>;
   try {
     const fanOut = fanOutDevices(remoteTargets, probeRemoteAuth, { perDeviceTimeoutMs: FLEET_PING_DEVICE_TIMEOUT_MS });
-    const overallDeadline = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('fleet ping overall deadline exceeded')), FLEET_PING_OVERALL_TIMEOUT_MS),
-    );
-    remote = await Promise.race([fanOut, overallDeadline]);
-  } catch (err) {
-    // Overall deadline hit before all devices settled — mark every pending
-    // device as failed so the command exits promptly. Individual probes that
-    // already settled are not retrievable (Promise.all internals), so we
-    // record all remote targets as timed out / skipped.
-    const errMsg = err instanceof Error ? err.message : String(err);
-    remote = remoteTargets.map((t) => ({
-      name: t.name,
-      status: t.skip ? ('skipped' as const) : ('failed' as const),
-      reason: t.skip,
-      error: t.skip ? undefined : errMsg,
-    }));
+    remote = await raceFleetPingDeadline(fanOut, remoteTargets, FLEET_PING_OVERALL_TIMEOUT_MS);
   } finally {
     spinner?.stop();
   }
