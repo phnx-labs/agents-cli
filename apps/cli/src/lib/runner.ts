@@ -1226,6 +1226,28 @@ export async function executeJobDetached(config: JobConfig, hooks?: RoutineHooks
     exitCode: null,
   };
 
+  // Auth preflight (mirrors executeJob): with no injected token, a daemon-fired
+  // Claude routine authenticates via the pinned account's own CLAUDE_CONFIG_DIR
+  // login. If the last live probe rejected that (agent, version)'s token, the run
+  // is guaranteed to 401 — fail fast with a re-login hint instead of spawning a
+  // doomed run + poisoned report. Cache-only; fails OPEN on any non-dead/missing
+  // verdict, and agents with no live probe (codex/gemini/grok) are never blocked.
+  const preflightVersion = launch.chain[0]?.version;
+  if (preflightVersion) {
+    const health = readAuthHealth(machineId(), effectiveAgent, preflightVersion);
+    if (health && isDeadVerdict(health.verdict)) {
+      const reason = `auth_preflight: ${health.verdict}`;
+      process.stderr.write(
+        `[agents] routine ${config.name}: ${effectiveAgent}@${preflightVersion} token ${health.verdict} — skipping run (re-login required)\n`,
+      );
+      try { fs.closeSync(stdoutFd); } catch { /* already closed */ }
+      finalizeRunMeta(meta, 'failed', 1, { errorMessage: reason });
+      writeRunMeta(meta);
+      archiveRoutineTranscripts(meta, runDir, overlayHome);
+      return meta;
+    }
+  }
+
   const child = spawn(cmd[0], cmd.slice(1), {
     stdio: ['ignore', stdoutFd, stdoutFd],
     ...backgroundSpawnOptions({ fdStdio: true }),
