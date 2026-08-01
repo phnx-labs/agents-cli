@@ -739,8 +739,24 @@ export function registerRunCommand(program: Command): void {
         process.exit(1);
       }
 
+      // Account-picker conflict check runs BEFORE --smart mutates options.balanced,
+      // so an implicit smart→balanced preference never surfaces as a fake
+      // "cannot be combined with --balanced" when the user only typed trailing @.
+      if (accountPickerRequested) {
+        const conflicts = runAccountPickerConflicts(options);
+        if (conflicts.length > 0) {
+          console.error(chalk.red(
+            `Account selection with ${agentSpec} cannot be combined with ${conflicts.join(', ')}. ` +
+            'Pick the account locally, or use an explicit agent@version target.',
+          ));
+          process.exit(1);
+        }
+      }
+
       // --smart: affinity-pick host (and optional harness when agent is "auto").
-      // Explicit --host/--device wins. Account rotation stays --strategy balanced.
+      // Explicit --host/--device wins. Account rotation stays --strategy balanced
+      // unless the user is already on the trailing-@ account picker (they own
+      // account selection then — do not force balanced underneath them).
       if (options.smart) {
         const hostAlready = [options.host, options.device, options.on, options.computer].some(Boolean);
         const [agentName, rawVersionPin] = normalizedAgentSpec.split('@');
@@ -762,8 +778,9 @@ export function registerRunCommand(program: Command): void {
             if (pickHarness) {
               normalizedAgentSpec = plan.agent;
             }
-            // Prefer balanced for smart launches unless the user overrode strategy.
-            if (!options.strategy && !options.balanced) {
+            // Prefer balanced for smart launches unless the user overrode strategy
+            // or requested the interactive account picker (trailing @).
+            if (!accountPickerRequested && !options.strategy && !options.balanced) {
               options.balanced = true;
             }
             if (!options.quiet) {
@@ -772,11 +789,14 @@ export function registerRunCommand(program: Command): void {
                 .slice(0, 4)
                 .map((c) => `${c.key}:${c.launches}`)
                 .join(', ');
+              const acctNote = accountPickerRequested
+                ? 'accounts=picker'
+                : 'accounts=balanced';
               process.stderr.write(
                 chalk.gray(
                   `[agents] smart: host=${hostLabel} agent=${pickHarness ? plan.agent : agentName}` +
                     (deviceHint ? ` (device affinity ${deviceHint})` : '') +
-                    ` · accounts=balanced\n`,
+                    ` · ${acctNote}\n`,
                 ),
               );
             }
@@ -787,16 +807,6 @@ export function registerRunCommand(program: Command): void {
               );
             }
           }
-        }
-      }
-      if (accountPickerRequested) {
-        const conflicts = runAccountPickerConflicts(options);
-        if (conflicts.length > 0) {
-          console.error(chalk.red(
-            `Account selection with ${agentSpec} cannot be combined with ${conflicts.join(', ')}. ` +
-            'Pick the account locally, or use an explicit agent@version target.',
-          ));
-          process.exit(1);
         }
       }
 
