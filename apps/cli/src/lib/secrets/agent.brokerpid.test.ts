@@ -8,7 +8,7 @@
  * sockets (lsof), one of them orphaned.
  *
  * brokerPidAlive is the second, independent liveness signal that makes the
- * reclaim safe. These drive a REAL pid file and REAL processes.
+ * reclaim safe. These drive a REAL owner file and REAL processes.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
@@ -32,7 +32,7 @@ afterEach(() => {
 });
 
 describe('brokerPidAlive — do not steal a live broker socket', () => {
-  it('is false when no pid file exists', () => {
+  it('is false when no owner file exists', () => {
     expect(brokerPidAlive()).toBe(false);
   });
 
@@ -40,7 +40,7 @@ describe('brokerPidAlive — do not steal a live broker socket', () => {
     const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 50)'], { stdio: 'ignore' });
     const pid = child.pid!;
     await new Promise<void>((resolve) => child.once('exit', () => resolve()));
-    fs.writeFileSync(path.join(dir, 'agent.pid'), String(pid));
+    fs.writeFileSync(path.join(dir, 'agent.owner'), String(pid));
     expect(brokerPidAlive()).toBe(false); // reclaim is safe
   });
 
@@ -49,7 +49,7 @@ describe('brokerPidAlive — do not steal a live broker socket', () => {
       stdio: ['ignore', 'pipe', 'ignore'],
     });
     await new Promise<void>((resolve) => child.stdout!.once('data', () => resolve()));
-    fs.writeFileSync(path.join(dir, 'agent.pid'), String(child.pid!));
+    fs.writeFileSync(path.join(dir, 'agent.owner'), String(child.pid!));
     try {
       expect(brokerPidAlive()).toBe(true);
     } finally {
@@ -58,7 +58,7 @@ describe('brokerPidAlive — do not steal a live broker socket', () => {
   });
 
   it('ignores our own pid — a broker never blocks itself', () => {
-    fs.writeFileSync(path.join(dir, 'agent.pid'), String(process.pid));
+    fs.writeFileSync(path.join(dir, 'agent.owner'), String(process.pid));
     expect(brokerPidAlive()).toBe(false);
   });
 });

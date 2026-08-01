@@ -31,7 +31,7 @@ import * as path from 'path';
 import { randomBytes } from 'crypto';
 import { spawn, spawnSync, execFileSync, type ChildProcess, type SpawnSyncReturns } from 'child_process';
 import { getHelpersDir, readMeta } from '../state.js';
-import { isAlive } from '../platform/process.js';
+import { isAlive, waitForExit } from '../platform/process.js';
 import { getKeychainHelperPath } from './install-helper.js';
 import { getCliVersion, getCliVersionFresh } from '../version.js';
 import { getCliLaunch } from '../cli-entry.js';
@@ -79,6 +79,9 @@ const SWEEP_INTERVAL_MS = 30 * 1000;
  * large read or the startup rehydrate can outlast a single ping budget while the
  * process is healthy. */
 const BIND_PROBE_ATTEMPTS = 3;
+/** How long a broker teardown waits for the old process to actually exit before
+ * clearing its socket + ownership record. */
+const BROKER_STOP_GRACE_MS = 3000;
 /** Pause between those probes. */
 const BIND_PROBE_INTERVAL_MS = 250;
 
@@ -214,6 +217,21 @@ function pidPath(): string {
  */
 function tokenPath(): string {
   return path.join(agentDir(), 'agent.token');
+}
+
+/**
+ * Path of the CURRENT SOCKET OWNER's pid.
+ *
+ * Deliberately NOT `agent.pid`: that file is the standalone service's O_EXCL
+ * single-instance claim, and a standalone that loses the socket race stays alive
+ * and quiescent while holding it (so launchd's KeepAlive doesn't restart-loop
+ * it), ready to take over if the hosted broker stops. Overloading it as the
+ * socket-ownership record made the standalone see a live holder and exit
+ * immediately — the exact restart loop that guard exists to prevent. This file
+ * answers a different question: which pid is serving the socket right now.
+ */
+function ownerPath(): string {
+  return path.join(agentDir(), 'agent.owner');
 }
 
 /**
@@ -499,9 +517,19 @@ export function makeConnectionHandler(
  * The pid file is the second, independent liveness signal that makes the reclaim
  * safe.
  */
+/** Drop our ownership record, but only if it is still ours — never clobber a
+ *  successor that already claimed the socket. */
+export function releaseBrokerPid(): void {
+  try {
+    if (parseInt(fs.readFileSync(ownerPath(), 'utf-8').trim(), 10) === process.pid) {
+      fs.unlinkSync(ownerPath());
+    }
+  } catch { /* absent or unreadable — nothing to release */ }
+}
+
 export function brokerPidAlive(): boolean {
   try {
-    const holder = parseInt(fs.readFileSync(pidPath(), 'utf-8').trim(), 10);
+    const holder = parseInt(fs.readFileSync(ownerPath(), 'utf-8').trim(), 10);
     return !isNaN(holder) && holder !== process.pid && isAlive(holder);
   } catch {
     return false; // no pid file → nothing claims ownership
@@ -535,6 +563,14 @@ async function bindBrokerSocket(
         // confirmed socket owner — so a losing starter never clobbers the live
         // owner's token (RUSH-1760).
         try { writeAgentToken(); } catch { /* dir 0700 gates the socket regardless */ }
+        // Record ownership at the same moment, for the same reason. The
+        // daemon-hosted broker deliberately skips the O_EXCL pid-file GUARD (the
+        // daemon owns its instance), but without an ownership RECORD
+        // brokerPidAlive() has nothing to read — so a later starter saw an
+        // ownerless socket and reclaimed the live hosted broker anyway, which is
+        // the primary configuration and the one that actually orphaned here.
+        // Writing it from the confirmed owner covers both broker flavours.
+        try { fs.writeFileSync(ownerPath(), String(process.pid)); } catch { /* dir 0700 gates it */ }
         resolve(server);
       });
     });
@@ -715,6 +751,7 @@ export async function runSecretsAgent(
     try { watcher?.kill(); } catch { /* already gone */ }
     try { server.close(); } catch { /* not listening */ }
     try { fs.unlinkSync(sock); } catch { /* gone */ }
+    releaseBrokerPid();
     releasePid();
   };
 
@@ -818,6 +855,7 @@ export async function startHostedBroker(): Promise<{ close(): void } | null> {
       try { watcher?.kill(); } catch { /* already gone */ }
       try { server.close(); } catch { /* not listening */ }
       try { fs.unlinkSync(sock); } catch { /* gone */ }
+      releaseBrokerPid();
     },
   };
 }
@@ -1316,9 +1354,16 @@ export async function ensureAgentRunning(timeoutMs = 5000): Promise<boolean> {
   })();
   if (!isNaN(stalePid) && isAlive(stalePid)) {
     try { process.kill(stalePid, 'SIGTERM'); } catch { /* already dead */ }
+    // Wait for it to actually go before clearing its socket and ownership
+    // record. Unlinking them under a live broker is what leaves an orphan
+    // holding every unlocked bundle in RAM with no way to reach it — and it also
+    // destroys the very record brokerPidAlive() reads, so the successor sees an
+    // ownerless socket and reclaims it regardless.
+    waitForExit(stalePid, BROKER_STOP_GRACE_MS);
   }
   try { fs.unlinkSync(socketPath()); } catch { /* gone */ }
   try { fs.unlinkSync(pidPath()); } catch { /* gone */ }
+  try { fs.unlinkSync(ownerPath()); } catch { /* gone */ }
 
   const { cmd, args } = brokerSpawn();
   spawn(cmd, args, { stdio: 'ignore', detached: true }).unref();
@@ -1340,7 +1385,11 @@ export async function ensureAgentRunning(timeoutMs = 5000): Promise<boolean> {
 async function teardownStaleBroker(): Promise<void> {
   retireLegacySecretsAgentService();
   const pid = (() => { try { return parseInt(fs.readFileSync(pidPath(), 'utf-8').trim(), 10); } catch { return NaN; } })();
-  if (!isNaN(pid) && isAlive(pid)) { try { process.kill(pid, 'SIGTERM'); } catch { /* gone */ } }
+  if (!isNaN(pid) && isAlive(pid)) {
+    try { process.kill(pid, 'SIGTERM'); } catch { /* gone */ }
+    waitForExit(pid, BROKER_STOP_GRACE_MS); // same reason as ensureAgentRunning
+  }
   try { fs.unlinkSync(socketPath()); } catch { /* gone */ }
   try { fs.unlinkSync(pidPath()); } catch { /* gone */ }
+  try { fs.unlinkSync(ownerPath()); } catch { /* gone */ }
 }

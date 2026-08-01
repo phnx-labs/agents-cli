@@ -12,7 +12,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { getDaemonDir as getDaemonDirRoot } from './state.js';
-import { isAlive, killTree, backgroundSpawnOptions } from './platform/index.js';
+import { isAlive, killTree, backgroundSpawnOptions, waitForExit } from './platform/index.js';
 import { listJobs as listAllJobs } from './routines.js';
 import { syncAllProjectRoutines } from './routines-project.js';
 import { JobScheduler } from './scheduler.js';
@@ -181,46 +181,6 @@ export function isDaemonWedged(): boolean {
 const STOP_GRACE_MS = 5000;
 /** How long it waits after the hard tree-kill before giving up. */
 const STOP_KILL_GRACE_MS = 2000;
-/** Poll interval while waiting for a pid to disappear. */
-const EXIT_POLL_MS = 50;
-
-/**
- * Whether `pid` has stopped serving — dead, or a ZOMBIE awaiting reap.
- *
- * `isAlive` is a bare `kill(pid, 0)`, which succeeds for a zombie. That matters
- * here because {@link waitForExit} blocks the event loop, so a daemon that is
- * this process's own child can never be reaped while we wait: it would read as
- * alive for the entire timeout and then be hard-killed after it had already
- * exited. A zombie holds no socket and serves no request, so for stop purposes
- * it has exited.
- */
-export function hasExited(pid: number): boolean {
-  if (!isAlive(pid)) return true;
-  if (process.platform === 'win32') return false; // no zombie state to unwrap
-  try {
-    const state = execFileSync('ps', ['-o', 'state=', '-p', String(pid)], { encoding: 'utf-8' }).trim();
-    return state.startsWith('Z');
-  } catch {
-    return true; // ps could not find it — gone
-  }
-}
-
-/**
- * Block until `pid` stops serving or `timeoutMs` elapses. Synchronous on purpose:
- * the callers are short-lived CLI/postinstall processes that exit before any
- * async timer would fire, which is exactly how a SIGTERMed daemon used to outlive
- * the `stopDaemon()` that was supposed to have reaped it. Returns true if it is
- * gone.
- */
-export function waitForExit(pid: number, timeoutMs: number): boolean {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    if (hasExited(pid)) return true;
-    if (Date.now() >= deadline) return false;
-    // Sleep without a busy-loop: Atomics.wait blocks this thread outright.
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, EXIT_POLL_MS);
-  }
-}
 
 /** Check if the daemon process is alive by sending signal 0 to the stored PID. */
 export function isDaemonRunning(): boolean {

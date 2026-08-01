@@ -156,7 +156,25 @@ Both signals are now required before a socket is reclaimed:
    escalates to a tree-kill only when it genuinely did not exit. A **zombie counts
    as exited** — it holds no socket — so a daemon that is the caller's own child
    is never hard-killed after it has already gone.
-2. **A live pid-file owner is never evicted.** `bindBrokerSocket` probes an in-use
-   socket several times, and even then refuses to reclaim it while `brokerPidAlive()`
-   reports a live owner, surfacing a clear error instead of starting a second
-   broker on the same path.
+2. **A live socket owner is never evicted.** Whichever broker wins the bind records
+   its pid in `agent.owner` at the moment it is the confirmed owner (the same
+   instant it mints the capability token), and releases it on close.
+   `bindBrokerSocket` probes an in-use socket several times and, even then, refuses
+   to reclaim it while `brokerPidAlive()` reports a live owner.
+
+   `agent.owner` is deliberately a **separate file from `agent.pid`**. `agent.pid`
+   is the standalone service's O_EXCL single-instance claim, held by a standalone
+   that lost the socket race and stays alive and quiescent so launchd's KeepAlive
+   does not restart-loop it, ready to take over if the hosted broker stops.
+   Overloading it as the ownership record made that standalone see a live holder
+   and exit immediately — the very restart loop the guard exists to prevent. The
+   two files answer different questions: *who may run* versus *who is serving the
+   socket right now*. Both broker flavours write `agent.owner`, so the signal is
+   present for the daemon-hosted broker, which is the primary configuration.
+
+3. **Every teardown waits before unlinking.** `ensureAgentRunning`'s one-off
+   fallback and `teardownStaleBroker` used to SIGTERM a possibly-live broker and
+   immediately unlink its socket and pid files. That both orphaned a slow-exiting
+   broker and destroyed the ownership record the check above depends on, so the
+   successor saw an ownerless socket and reclaimed it regardless. Both now wait
+   for the process to stop serving first.

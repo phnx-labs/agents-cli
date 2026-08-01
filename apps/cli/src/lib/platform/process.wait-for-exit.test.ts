@@ -12,8 +12,8 @@
  */
 import { describe, it, expect } from 'vitest';
 import { spawn } from 'child_process';
-import { waitForExit, hasExited } from './daemon.js';
-import { isAlive } from './platform/index.js';
+import { waitForExit, hasExited, isAlive } from './index.js';
+
 
 function spawnSleeper(seconds: number) {
   const child = spawn(process.execPath, ['-e', `setTimeout(() => {}, ${seconds * 1000})`], {
