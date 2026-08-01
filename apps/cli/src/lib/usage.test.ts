@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 
-import { claudeAccessTokenNeedsRefresh, claudeUsageAccessTokenNoRefresh } from './usage.js';
+import { claudeAccessTokenNeedsRefresh, claudeUsageAccessTokenNoRefresh, loadClaudeOauth, getClaudeKeychainService } from './usage.js';
+import { setKeychainToken, setKeychainBackendForTest, type KeychainBackend } from './secrets/index.js';
 
 const LEEWAY_MS = 5 * 60 * 1000;
 const NOW = 1_800_000_000_000; // fixed epoch ms so the tests are deterministic
@@ -59,5 +60,86 @@ describe('claudeUsageAccessTokenNoRefresh', () => {
   it('returns null for a missing/empty access token', () => {
     expect(claudeUsageAccessTokenNoRefresh({ accessToken: '', expiresAt: now + 60 * 60 * 1000 })).toBeNull();
     expect(claudeUsageAccessTokenNoRefresh({ accessToken: '   ', expiresAt: now + 60 * 60 * 1000 })).toBeNull();
+  });
+});
+
+/**
+ * The Touch ID storm fix: `loadClaudeOauth` reads Claude's ACL-bound keychain item
+ * (one prompt per read on macOS). We cache the access token in a no-ACL item so the
+ * source read happens at most once per token lifetime, shared across processes.
+ * Here the in-memory keychain backend (the sanctioned test seam) counts source reads
+ * by payload shape — the source item wraps `claudeAiOauth`, the cache item does not.
+ */
+describe('loadClaudeOauth no-ACL access-token cache', () => {
+  /** Counting backend: tracks reads of the source (ACL) item and no-ACL cache writes,
+   *  identified by value shape so the test is agnostic to keychain name hashing. */
+  class CountingBackend implements KeychainBackend {
+    store = new Map<string, string>();
+    sourceReads = 0;
+    noAclCacheWrites = 0;
+    has(item: string) { return this.store.has(item); }
+    get(item: string) {
+      const v = this.store.get(item);
+      if (v === undefined) throw new Error(`missing ${item}`);
+      if (v.includes('"claudeAiOauth"')) this.sourceReads += 1;
+      return v;
+    }
+    set(item: string, value: string, opts?: { noAcl?: boolean }) {
+      if (opts?.noAcl && value.includes('"cacheExpiresAt"')) this.noAclCacheWrites += 1;
+      this.store.set(item, value);
+    }
+    delete(item: string) { return this.store.delete(item); }
+    list(prefix: string) { return [...this.store.keys()].filter((k) => k.startsWith(prefix)); }
+  }
+
+  const HOME = '/tmp/agents-cli-usage-cache-test';
+  const service = getClaudeKeychainService(HOME);
+  const seedSource = (expiresAt: number) =>
+    setKeychainToken(
+      service,
+      JSON.stringify({
+        organizationUuid: 'org-1',
+        claudeAiOauth: { accessToken: 'tok-live', refreshToken: 'refresh-secret', expiresAt, scopes: ['user:inference'] },
+      })
+    );
+
+  it('reads the ACL source once, then serves the no-ACL cache (no repeat prompt)', async () => {
+    const mem = new CountingBackend();
+    const prev = setKeychainBackendForTest(mem);
+    try {
+      seedSource(Date.now() + 60 * 60 * 1000); // fresh: 1h out
+
+      const first = await loadClaudeOauth(HOME);
+      const second = await loadClaudeOauth(HOME);
+
+      expect(first?.accessToken).toBe('tok-live');
+      expect(second?.accessToken).toBe('tok-live');
+      // The source (prompting) item is read exactly once across both loads.
+      expect(mem.sourceReads).toBe(1);
+      // The cache was populated via the no-ACL write path.
+      expect(mem.noAclCacheWrites).toBe(1);
+      // The cache deliberately omits the refresh token (minimal no-ACL exposure);
+      // the first read comes straight from source and still carries it.
+      expect(first?.refreshToken).toBe('refresh-secret');
+      expect(second?.refreshToken).toBeNull();
+    } finally {
+      setKeychainBackendForTest(prev);
+    }
+  });
+
+  it('re-reads the source when the cached token has expired (never serves a stale token)', async () => {
+    const mem = new CountingBackend();
+    const prev = setKeychainBackendForTest(mem);
+    try {
+      seedSource(Date.now() - 60 * 1000); // already expired
+
+      await loadClaudeOauth(HOME);
+      await loadClaudeOauth(HOME);
+
+      // Every load evicts the expired cache entry and reads the source again.
+      expect(mem.sourceReads).toBe(2);
+    } finally {
+      setKeychainBackendForTest(prev);
+    }
   });
 });

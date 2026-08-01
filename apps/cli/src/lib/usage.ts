@@ -22,6 +22,7 @@ import {
   getKeychainToken,
   setKeychainToken,
   deleteKeychainToken,
+  isKeychainBackendOverridden,
 } from './secrets/index.js';
 import { getCacheDir } from './state.js';
 import type { AgentId } from './types.js';
@@ -1182,6 +1183,107 @@ function parseClaudeOauthPayload(raw: string): ClaudeOauthCredentials | null {
   }
 }
 
+// ── No-ACL cache for Claude's OAuth token (kills the macOS Touch ID storm) ──
+//
+// The source item `Claude Code-credentials-<hash>` is ACL-bound to Claude Code's
+// own process, so every read agents-cli makes (via `/usr/bin/security`) pops
+// Touch ID. The Factory watchdog polls `agents view --json` every 60s per agent,
+// and each poll that crosses the 2-minute usage cache fires a background refresh
+// -> loadClaudeOauth -> keychain read -> a biometric prompt. With many agents and
+// accounts that is a prompt every couple of minutes, per account.
+//
+// Fix: after one real (prompting) read, cache the ACCESS token in a device-local
+// NO-ACL keychain item — the same `set-no-acl` mechanism secrets/session-store.ts
+// uses for unlocked bundles, whose reads never prompt — and serve every later read
+// from it until the token's own `expiresAt`. The ACL read then happens at most once
+// per token lifetime (~a few times a day), shared across every agent process.
+//
+// Security posture: only the short-lived access token is cached, never the refresh
+// token, and the entry dies at the token's expiry (capped below). This mirrors the
+// no-ACL posture session-store.ts already accepts for held bundles.
+const CLAUDE_OAUTH_CACHE_PREFIX = 'agents-cli.claude-oauth-cache.';
+/** Hard cap so a token with a distant or absent `expiresAt` can't pin a stale entry. */
+const CLAUDE_OAUTH_CACHE_MAX_TTL_MS = 8 * 60 * 60 * 1000;
+
+/** One cached access token, stored as a no-ACL keychain item (prompt-free reads). */
+interface CachedClaudeOauthEntry {
+  accessToken: string;
+  expiresAt?: number | null;
+  scopes?: string[] | null;
+  subscriptionType?: string | null;
+  rateLimitTier?: string | null;
+  organizationUuid?: string | null;
+  /** epoch ms; the entry is dead once Date.now() passes this. */
+  cacheExpiresAt: number;
+}
+
+/** The no-ACL cache item name for a Claude keychain service (hashed to stay tidy). */
+function claudeOauthCacheItem(service: string): string {
+  const hash = createHash('sha256').update(service).digest('hex').slice(0, 16);
+  return `${CLAUDE_OAUTH_CACHE_PREFIX}${hash}`;
+}
+
+/** Whether the no-ACL cache is meaningful: macOS (where the source read prompts) or
+ * whenever a test keychain backend is installed, so the path is exercisable on CI.
+ * Off macOS in production the source read is prompt-free, so there is nothing to cache. */
+function claudeOauthCacheActive(): boolean {
+  return process.platform === 'darwin' || isKeychainBackendOverridden();
+}
+
+/** Read the cached access token (prompt-free). Null on miss, or when the cache entry
+ * or the token itself has expired — in which case the stale entry is dropped. */
+function readCachedClaudeOauth(service: string): ClaudeOauthCredentials | null {
+  try {
+    const entry = JSON.parse(getKeychainToken(claudeOauthCacheItem(service))) as CachedClaudeOauthEntry;
+    if (!entry || typeof entry.accessToken !== 'string' || !entry.accessToken) return null;
+    const now = Date.now();
+    const tokenExpired = typeof entry.expiresAt === 'number' && entry.expiresAt > 0 && now >= entry.expiresAt;
+    if (now >= entry.cacheExpiresAt || tokenExpired) {
+      try {
+        deleteKeychainToken(claudeOauthCacheItem(service));
+      } catch {
+        /* best-effort eviction */
+      }
+      return null;
+    }
+    return {
+      accessToken: entry.accessToken,
+      refreshToken: null,
+      expiresAt: entry.expiresAt ?? null,
+      scopes: entry.scopes ?? null,
+      subscriptionType: entry.subscriptionType ?? null,
+      rateLimitTier: entry.rateLimitTier ?? null,
+      organizationUuid: entry.organizationUuid ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Populate the no-ACL cache after a real (prompting) source read. Best-effort — the
+ * cache is an optimization, so any failure just means the next read prompts again. */
+function writeCachedClaudeOauth(service: string, creds: ClaudeOauthCredentials): void {
+  if (!creds.accessToken) return;
+  try {
+    const now = Date.now();
+    const cap = now + CLAUDE_OAUTH_CACHE_MAX_TTL_MS;
+    const tokenExp =
+      typeof creds.expiresAt === 'number' && creds.expiresAt > now ? creds.expiresAt : cap;
+    const entry: CachedClaudeOauthEntry = {
+      accessToken: creds.accessToken,
+      expiresAt: creds.expiresAt ?? null,
+      scopes: creds.scopes ?? null,
+      subscriptionType: creds.subscriptionType ?? null,
+      rateLimitTier: creds.rateLimitTier ?? null,
+      organizationUuid: creds.organizationUuid ?? null,
+      cacheExpiresAt: Math.min(tokenExp, cap),
+    };
+    setKeychainToken(claudeOauthCacheItem(service), JSON.stringify(entry), { noAcl: true });
+  } catch {
+    /* best-effort — cache is an optimization */
+  }
+}
+
 /**
  * Load a version home's Claude OAuth credential from the two stores Claude Code
  * uses, tried in order:
@@ -1204,9 +1306,21 @@ export async function loadClaudeOauth(home?: string): Promise<ClaudeOauthCredent
   // to the .credentials.json fallback — the Claude CLI has no keychain
   // integration there and stores its OAuth token in that file too.
   if (process.platform === 'darwin' || process.platform === 'linux') {
+    const service = getClaudeKeychainService(home);
+    // Serve the no-ACL cache first (macOS/test only) so the ACL-gated read below —
+    // the one that pops Touch ID — happens at most once per token lifetime instead
+    // of on every usage refresh. See the cache helpers above.
+    const cacheActive = claudeOauthCacheActive();
+    if (cacheActive) {
+      const cached = readCachedClaudeOauth(service);
+      if (cached) return cached;
+    }
     try {
-      const fromKeychain = parseClaudeOauthPayload(getKeychainToken(getClaudeKeychainService(home)));
-      if (fromKeychain) return fromKeychain;
+      const fromKeychain = parseClaudeOauthPayload(getKeychainToken(service));
+      if (fromKeychain) {
+        if (cacheActive) writeCachedClaudeOauth(service, fromKeychain);
+        return fromKeychain;
+      }
     } catch {
       // No keychain item, or no reachable keyring (headless Linux) — fall through.
     }
