@@ -1309,6 +1309,19 @@ export function clearPersistedSessions(workspacePath: string): void {
   sessionsPersist.clearWorkspaceSessions(workspacePath);
 }
 
+// After restore, keep ONLY the tmux-backed mappings on disk. The plain (non-tmux)
+// sessions have been recreated by restoreAgentTerminals and can be dropped, but the
+// tmux-backed ones are still LIVE in detached tmux and are owned by the reconnect
+// pass — clearing them would orphan the live agents and destroy the durable map a
+// second reload needs. `tmuxBacked` must already be filtered to sessions carrying
+// a tmuxSession + tmuxSocket (see reconnect.hasTmuxMapping).
+export function saveOnlyTmuxPersistedSessions(
+  workspacePath: string,
+  tmuxBacked: sessionsPersist.PersistedSession[]
+): void {
+  sessionsPersist.saveWorkspaceSessions(workspacePath, tmuxBacked, true);
+}
+
 // Update a session's metadata (e.g., when CLI sessionId is captured)
 export function updatePersistedSession(
   workspacePath: string,

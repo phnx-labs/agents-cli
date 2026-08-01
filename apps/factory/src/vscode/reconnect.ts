@@ -28,12 +28,31 @@ export interface ReattachTarget {
 }
 
 // A persisted session is reattach-eligible iff it carries a tmux session +
-// socket (the native terminal path has neither).
-function hasTmuxMapping(
+// socket (the native terminal path has neither). Exported so restoreAgentTerminals
+// can defer these to the reconnect pass instead of recreating/resuming them —
+// a reload of a tmux-backed agent must re-attach the live session, never restart it.
+export function hasTmuxMapping(
   s: PersistedSession,
 ): s is PersistedSession & { tmuxSession: string; tmuxSocket: string } {
   return typeof s.tmuxSession === 'string' && s.tmuxSession.length > 0
     && typeof s.tmuxSocket === 'string' && s.tmuxSocket.length > 0;
+}
+
+// A permanent (non-transient) reattach failure. `withRetry` rethrows it
+// immediately instead of burning the backoff budget — retrying a permanent
+// failure (e.g. an unknown agent prefix) just wastes seconds on every
+// window-focus event and never succeeds.
+export class NonRetryableError extends Error {
+  readonly nonRetryable = true as const;
+  constructor(message: string) {
+    super(message);
+    this.name = 'NonRetryableError';
+  }
+}
+
+function isNonRetryable(err: unknown): boolean {
+  return err instanceof NonRetryableError
+    || (typeof err === 'object' && err !== null && (err as { nonRetryable?: unknown }).nonRetryable === true);
 }
 
 // Decide, from a session's tmux state, whether it needs reconnecting. Pure so
@@ -93,6 +112,9 @@ export async function withRetry<T>(
       return await fn();
     } catch (err) {
       lastErr = err;
+      // A permanent failure will never succeed on retry — surface it now instead
+      // of sleeping through the whole backoff budget on every reconnect pass.
+      if (isNonRetryable(err)) throw err;
       if (attempt < opts.attempts - 1) {
         await sleep(backoffDelayMs(attempt, opts));
       }

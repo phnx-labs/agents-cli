@@ -15,6 +15,8 @@ const {
   backoffDelayMs,
   withRetry,
   runReconnectPass,
+  hasTmuxMapping,
+  NonRetryableError,
   DEFAULT_RETRY,
 } = await import('./reconnect');
 
@@ -100,6 +102,22 @@ describe('withRetry', () => {
       withRetry(async () => { calls++; throw new Error(`fail ${calls}`); }, opts, async () => {}),
     ).rejects.toThrow('fail 3');
     expect(calls).toBe(3);
+  });
+
+  test('a NonRetryableError is thrown immediately without burning retries', async () => {
+    let calls = 0;
+    let slept = 0;
+    await expect(
+      withRetry(
+        async () => { calls++; throw new NonRetryableError('unknown prefix for reattach: ZZ'); },
+        DEFAULT_RETRY,
+        async () => { slept++; }, // count any backoff sleeps
+      ),
+    ).rejects.toThrow('unknown prefix for reattach: ZZ');
+    // Called exactly once — no retry, no backoff sleep. Without the non-retryable
+    // gate this would call DEFAULT_RETRY.attempts (4) times and sleep 3 times.
+    expect(calls).toBe(1);
+    expect(slept).toBe(0);
   });
 });
 

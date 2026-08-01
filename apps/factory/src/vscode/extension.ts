@@ -87,7 +87,7 @@ import {
   tmuxSplitV,
   isTmuxAvailable
 } from './tmux';
-import { registerReconnect, type ReattachTarget, type ReconnectDeps } from './reconnect';
+import { registerReconnect, hasTmuxMapping, NonRetryableError, type ReattachTarget, type ReconnectDeps } from './reconnect';
 import { normalizeTerminalMode, resolveTerminalMode } from '../core/terminalMode';
 import { DEFAULT_DISPLAY_PREFERENCES } from '../core/settings';
 import * as readiness from './terminalReadiness';
@@ -4315,9 +4315,26 @@ async function restoreAgentTerminals(context: vscode.ExtensionContext): Promise<
   const tracked = terminals.getAllTerminals();
   const trackedIds = new Set(tracked.map(e => e.id));
 
-  const toRestore = persisted.filter(p => !trackedIds.has(p.terminalId));
+  // Tmux-backed sessions are the EXCLUSIVE responsibility of the reconnect pass
+  // (registerReconnect, wired right after this restore settles). Their agent is
+  // still LIVE in a detached tmux session, so the correct recovery is
+  // `agents tmux attach` — NOT recreating a plain terminal and resuming from the
+  // CLI session file (which restarts the agent, the very bug reconnect fixes).
+  // Skip them here and, crucially, do NOT clear their persisted mapping below —
+  // the reconnect scan (and any future reload) needs it to re-attach.
+  const toRestore = persisted.filter(
+    p => !trackedIds.has(p.terminalId) && !hasTmuxMapping(p),
+  );
+  const tmuxBacked = persisted.filter(hasTmuxMapping);
   if (toRestore.length === 0) {
-    terminals.clearPersistedSessions(workspacePath);
+    // Preserve tmux-backed mappings for the reconnect pass; only drop what we
+    // (non-tmux) would have restored. If everything is tmux-backed, the store is
+    // left intact so the reattach path — and a second reload — still recover it.
+    if (tmuxBacked.length > 0) {
+      terminals.saveOnlyTmuxPersistedSessions(workspacePath, tmuxBacked);
+    } else {
+      terminals.clearPersistedSessions(workspacePath);
+    }
     return;
   }
 
@@ -4400,8 +4417,15 @@ async function restoreAgentTerminals(context: vscode.ExtensionContext): Promise<
     }
   }
 
-  terminals.clearPersistedSessions(workspacePath);
-  console.log(`[RESTORE] Restored ${toRestore.length} agent terminal(s)`);
+  // Clear only what we restored (the non-tmux sessions). Tmux-backed mappings are
+  // preserved so the reconnect pass can `agents tmux attach` the still-live
+  // sessions and a subsequent reload still has them to recover from.
+  if (tmuxBacked.length > 0) {
+    terminals.saveOnlyTmuxPersistedSessions(workspacePath, tmuxBacked);
+  } else {
+    terminals.clearPersistedSessions(workspacePath);
+  }
+  console.log(`[RESTORE] Restored ${toRestore.length} agent terminal(s); preserved ${tmuxBacked.length} tmux-backed mapping(s) for reconnect`);
 }
 
 // Assemble the deps the reconnect orchestrator (reconnect.ts) needs from the
@@ -4447,7 +4471,10 @@ async function reattachSession(
     displayTitle = 'SH';
   } else {
     const def = getBuiltInByPrefix(session.prefix);
-    if (!def) throw new Error(`unknown prefix for reattach: ${session.prefix}`);
+    // An unknown prefix is a permanent mapping error — a retry can never resolve
+    // it. Mark it non-retryable so withRetry skips the ~3.5s backoff it would
+    // otherwise burn on every window-focus reconnect pass.
+    if (!def) throw new NonRetryableError(`unknown prefix for reattach: ${session.prefix}`);
     agentConfig = createAgentConfig(context.extensionPath, def.title, def.command, def.icon, def.prefix);
     displayTitle = def.title;
   }
