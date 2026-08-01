@@ -23,7 +23,7 @@ const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-resolve-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
-const { upsertSession } = await import('../lib/session/db.js');
+const { upsertSession, closeDB } = await import('../lib/session/db.js');
 const { resolveSessionQuery } = await import('./sessions.js');
 type SessionMeta = import('../lib/session/types.js').SessionMeta;
 
@@ -43,7 +43,13 @@ function meta(id: string, extra: Partial<SessionMeta> = {}): SessionMeta {
   };
 }
 
-afterAll(() => fs.rmSync(TEST_HOME, { recursive: true, force: true }));
+afterAll(() => {
+  // Close before removing the tree: Windows refuses to unlink an open file, so
+  // a leaked connection (plus its WAL sidecars) fails the whole suite there with
+  // EBUSY before a single assertion is reported.
+  closeDB();
+  fs.rmSync(TEST_HOME, { recursive: true, force: true });
+});
 
 describe('resolveSessionQuery falls back to the index for a complete id', () => {
   const indexed = 'a7c1d88d-b543-48c1-993d-dd5cd8e210c9';
