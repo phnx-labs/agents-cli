@@ -74,6 +74,18 @@ const IDLE_EXIT_MS = 5 * 60 * 1000; // 5m
 /** How often the broker sweeps expired entries. */
 const SWEEP_INTERVAL_MS = 30 * 1000;
 
+/** How many times a starting broker probes an in-use socket before treating its
+ * owner as gone. One probe is not enough: the broker is single-threaded, so a
+ * large read or the startup rehydrate can outlast a single ping budget while the
+ * process is healthy. */
+const BIND_PROBE_ATTEMPTS = 3;
+/** Pause between those probes. */
+const BIND_PROBE_INTERVAL_MS = 250;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * Timeouts for the three synchronous broker clients, split across the process
  * boundary they now straddle.
@@ -476,10 +488,34 @@ export function makeConnectionHandler(
 }
 
 /**
+ * Whether a live process still owns the broker pid file.
+ *
+ * A single missed `agentPing` is NOT proof the owner is dead — the broker is
+ * single-threaded, so a big `get` or the rehydrate at startup can blow the
+ * 700ms ping budget while the process is perfectly healthy. Treating that as
+ * death let a starting broker unlink a live socket and rebind, leaving the old
+ * process alive holding every unlocked bundle in RAM that no client could reach
+ * any more (observed live: two brokers, one socket path, two kernel sockets).
+ * The pid file is the second, independent liveness signal that makes the reclaim
+ * safe.
+ */
+export function brokerPidAlive(): boolean {
+  try {
+    const holder = parseInt(fs.readFileSync(pidPath(), 'utf-8').trim(), 10);
+    return !isNaN(holder) && holder !== process.pid && isAlive(holder);
+  } catch {
+    return false; // no pid file → nothing claims ownership
+  }
+}
+
+/**
  * Bind the shared broker socket without stealing it from another live owner.
  * Both the standalone service and daemon-hosted broker use this single path so
  * either startup order is safe: a reachable owner wins, while an unreachable
  * stale socket is reclaimed once.
+ *
+ * "Unreachable" is established with retries plus a pid-file liveness check, never
+ * a single ping — see {@link brokerPidAlive}.
  */
 async function bindBrokerSocket(
   sock: string,
@@ -505,7 +541,22 @@ async function bindBrokerSocket(
 
   let bound = await listenOnce();
   if (bound !== 'inuse') return bound;
-  if ((await agentPing()).reachable) return null;
+
+  // Give a busy owner several chances before concluding it is gone. One slow
+  // ping used to be enough to evict a healthy broker and orphan its RAM.
+  for (let attempt = 0; attempt < BIND_PROBE_ATTEMPTS; attempt++) {
+    if ((await agentPing()).reachable) return null;
+    if (attempt < BIND_PROBE_ATTEMPTS - 1) await delay(BIND_PROBE_INTERVAL_MS);
+  }
+  // Silent but alive is still alive: refuse to steal the socket from a process
+  // that still owns the pid file, and let the caller surface the wedge instead
+  // of quietly starting a second broker on the same path.
+  if (brokerPidAlive()) {
+    throw new Error(
+      `Secrets broker socket is held by a live process that is not answering: ${sock}. ` +
+      `Run 'agents secrets lock --all' then retry, or stop the stuck broker.`,
+    );
+  }
 
   try { fs.unlinkSync(sock); } catch { /* disappeared between probe and reclaim */ }
   bound = await listenOnce();
