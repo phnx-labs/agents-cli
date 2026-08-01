@@ -42,6 +42,8 @@ agents sessions [query] [--json] [--since 1h] [--all]
 │       Else -> readdir + stat each file:                             │
 │         If unchanged since last scan -> skip (DB row is fresh)      │
 │         Else -> parse file, upsert sessions row + FTS5 content row  │
+│           (Claude: resume from the saved byte offset & parse only   │
+│            the appended lines when the file merely grew)            │
 │                                                                     │
 │  3. SQL query with filters (agent, cwd, since, project, limit)      │
 │     FTS5 search if [query] given, BM25 ranked                       │
@@ -60,6 +62,19 @@ was scanned within the last 10 minutes, so an in-place append is never missed. A
 create / delete / rename bumps the dir mtime and forces a full re-walk of that dir.
 Set `AGENTS_SESSIONS_NO_DIR_LEDGER=1` to disable the short-circuit and force the old
 full per-file walk.
+
+When a **Claude** transcript that already has an index row grows, the scan does
+not re-read it from the top. The `scan_ledger` stores a resumable continuation
+(`parser_state` — a byte offset plus an accumulator snapshot — and `content_text`,
+the accumulated user doc); the next scan resumes from that offset and folds in only
+the newly-appended lines. It falls back to a **full reparse from byte 0** when the
+file has no prior continuation (cold start), shrank at or below the saved offset
+(truncation / rewrite), or its mtime went backwards (clock rewind / restore). Full
+and incremental parses run through the same reducer, so the indexed row an append
+produces — token counts, cost, duration, topic/title, PR + ticket refs, FTS content
+— is identical to a from-scratch full reparse, even when a signal straddles two
+scans. Only the Claude scanner is incremental today; the other agents still full-parse
+each changed file.
 
 ## SessionMeta (list output)
 

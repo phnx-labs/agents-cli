@@ -63,6 +63,11 @@ The **transcript** side is a SQLite index (`~/.agents/.history/sessions/sessions
 `scan_ledger` that re-reads a file only when its `mtime`/`size` changed, a
 `dir_ledger` that skips the per-file `stat` of a leaf transcript directory whose
 `(mtime, entry_count)` is unchanged, plus a `session_text` FTS5 table for search.
+For **Claude**, a changed file that merely grew is parsed **incrementally**: the
+`scan_ledger` also stores a resumable continuation (`parser_state` + `content_text`)
+so the next scan resumes from the saved byte offset and folds in only the appended
+lines — falling back to a full reparse on a truncation / rewrite or a clock rewind.
+Both paths share one reducer, so the incremental row is identical to a full reparse.
 Listing is a DB read; only opening one session fully re-parses its transcript.
 Detail in [05-sessions.md](05-sessions.md).
 
