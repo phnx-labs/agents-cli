@@ -322,11 +322,13 @@ message.
 
 ## Background & foreground (detach / attach)
 
-`agents detach <id>` sends a live agent session to the background; `agents attach <id>`
-brings it back. They are the foreground/background axis over a session, and route
-through the same version-pinned `agents run --resume` path everything else uses — so
-they are agent-agnostic (native resume for Claude/Codex, `/continue` replay for the
-rest), not a per-agent special case.
+`agents sessions detach <id>` sends a live agent session to the background;
+`agents sessions attach <id>` brings it back. They live under `sessions` alongside
+`focus`/`resume` — the session-lifecycle axis — and route through the same
+version-pinned `agents run --resume` path everything else uses, so they are
+agent-agnostic (native resume for Claude/Codex, `/continue` replay for the rest),
+not a per-agent special case. (In the Factory extension: **Agents: Detach**
+`Cmd/Ctrl+K B`, **Agents: Attach** `Cmd/Ctrl+K A`.)
 
 - **detach**: stop the interactive process (kill the tmux session when tmux-hosted,
   else SIGTERM the pid) and **wait for it to actually exit** before spawning a
@@ -337,9 +339,9 @@ rest), not a per-agent special case.
   exits; its output is written to `~/.agents/.cache/logs/detach-<shortid>.log`
   (printed on detach) so a background run that crashes leaves a trail.
   - **Remote sessions** (matched via the cross-host sweep) are detached **on their
-    own host over SSH** — `agents detach <id> --local` runs there — since a pid and
-    tmux socket only mean something on the machine the session runs on. Use `--local`
-    to skip the sweep and only consider this machine.
+    own host over SSH** — `agents sessions detach <id> --local` runs there — since a
+    pid and tmux socket only mean something on the machine the session runs on. Use
+    `--local` to skip the sweep and only consider this machine.
   - **Cloud and team sessions are refused**: cloud runs have their own lifecycle, and
     a `teams` session must be stopped through `agents teams` so the team supervisor's
     PID-reuse-safe stop path and bookkeeping stay in sync — `detach` won't SIGTERM a

@@ -299,14 +299,14 @@ agents sessions resume --host zion --tmux  # resume on another machine over SSH
 
 ### Send an agent to the background — and bring it back
 
-Running 30 agents and drowning in terminal tabs? `agents detach <id>` stops a session's interactive process and keeps it working **headless** in the background -- it drives its task to done unattended, no tab, lower cost. `agents attach <id>` brings it back: version-pinned resume into a live TUI, the same session and full history (including whatever it did while backgrounded).
+Running 30 agents and drowning in terminal tabs? `agents sessions detach <id>` stops a session's interactive process and keeps it working **headless** in the background -- it drives its task to done unattended, no tab, lower cost. `agents sessions attach <id>` brings it back: version-pinned resume into a live TUI, the same session and full history (including whatever it did while backgrounded).
 
 ```
-agents detach a1b2c3d4     # go headless in the background, keep working
-agents attach a1b2c3d4     # resume it interactively, right here
+agents sessions detach a1b2c3d4     # go headless in the background, keep working
+agents sessions attach a1b2c3d4     # resume it interactively, right here
 ```
 
-Both are agent-agnostic -- they route through the same `agents run --resume` path (native resume for Claude/Codex, `/continue` replay for the rest). `agents sessions --active` marks each session's `presence` -- `attached` (you're watching it), `background` (running headless), or `parked` (its background run finished) -- so the menu bar and Factory show where every agent is.
+Both are agent-agnostic -- they route through the same `agents run --resume` path (native resume for Claude/Codex, `/continue` replay for the rest). `agents sessions --active` marks each session's `presence` -- `attached` (you're watching it), `background` (running headless), or `parked` (its background run finished) -- so the menu bar and Factory show where every agent is. In the Factory extension, **Agents: Detach** (`Cmd/Ctrl+K B`) and **Agents: Attach** (`Cmd/Ctrl+K A`) do the same over the focused terminal.
 
 ---
 
