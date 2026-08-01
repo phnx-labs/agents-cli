@@ -265,8 +265,9 @@ SSH access (§7); rendering sessions that no harness produced.
 
 - **SES-28 (MUST).** The index MUST open with WAL + `busy_timeout=30000` so
   multiple processes read concurrently, and use the built-in sqlite binding
-  (`bun:sqlite`/`node:sqlite`), never `better-sqlite3`
-  (`lib/session/db.ts:395-403`; `sqlite.ts:5-8`).
+  (`bun:sqlite`/`node:sqlite`), never `better-sqlite3` (`getDB()` in
+  `lib/session/db.ts` — `journal_mode = WAL` ~`:442`, `busy_timeout = 30000`
+  ~`:450`; binding selected in `lib/sqlite.ts:23-24`).
 - **SES-29 (MUST).** Schema migrations MUST run on open, land a several-versions-old
   DB on the current `SCHEMA_VERSION` (**18** at time of writing,
   `lib/session/db.ts:23` — treat the constant as the source of truth, not this number) in
