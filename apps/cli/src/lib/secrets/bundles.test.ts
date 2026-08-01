@@ -211,10 +211,10 @@ describe('readAndResolveBundleEnv agent-only reads', () => {
     else process.env.AGENTS_SECRETS_NO_AGENT = prevNoAgent;
   });
 
-  // REVERSED deliberately. This previously asserted that an agent-triggered read
-  // may prompt: interactiveUnlock defaulted to true whenever an agent name was
-  // present, so agentOnly was a no-op for every agent-initiated read. That is the
-  // bug — opening an agent terminal is not a request to authenticate, and each
+  // REVERSED deliberately, and this is a NARROWING of RUSH-2032 rather than a bug
+  // fix: interactiveUnlock defaulting to true whenever an agent name was present
+  // was that feature's spec (b99796f8, 4eeada68), not an oversight. It is unwanted
+  // here — opening an agent terminal is not a request to authenticate, and each
   // keychain read is its own helper process, so one launch raised several sheets.
   // An agent-initiated read now fails fast with an actionable message instead.
   it('refuses an agent-triggered read of a locked daily bundle instead of prompting', () => {
@@ -249,6 +249,24 @@ describe('readAndResolveBundleEnv agent-only reads', () => {
 });
 
 describe('isHeadlessSecretsContext', () => {
+  // The branch carrying this guard's entire safety argument: a person in a plain
+  // shell must still get their prompt. Nothing reached it before — the TTY state was
+  // read from process.* directly, so a mutant that made a plain shell NEVER prompt
+  // (which would strand every cold bundle) left the whole suite green.
+  it('a plain human shell with a TTY is NOT headless — it still prompts', () => {
+    expect(isHeadlessSecretsContext({} as NodeJS.ProcessEnv, 'darwin', { stdin: true, stdout: true })).toBe(false);
+  });
+
+  it('a detached process with no TTY IS headless — it must not prompt', () => {
+    expect(isHeadlessSecretsContext({} as NodeJS.ProcessEnv, 'darwin', { stdin: false, stdout: false })).toBe(true);
+  });
+
+  it('an agent runtime is headless even with a TTY — the agent is the caller', () => {
+    for (const runtime of ['headless', 'teams', 'terminal']) {
+      expect(isHeadlessSecretsContext({ AGENTS_RUNTIME: runtime } as NodeJS.ProcessEnv, 'darwin', { stdin: true, stdout: true })).toBe(true);
+    }
+  });
+
   it('is true for headless/teams runtime on darwin (where the Touch ID sheet exists)', () => {
     expect(isHeadlessSecretsContext({ AGENTS_RUNTIME: 'headless' } as NodeJS.ProcessEnv, 'darwin')).toBe(true);
     expect(isHeadlessSecretsContext({ AGENTS_RUNTIME: 'teams' } as NodeJS.ProcessEnv, 'darwin')).toBe(true);

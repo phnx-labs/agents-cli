@@ -1259,6 +1259,10 @@ export function resolveBundleEnv(bundle: SecretsBundle, _opts: ResolveBundleOpti
 export function isHeadlessSecretsContext(
   env: NodeJS.ProcessEnv = process.env,
   platform: NodeJS.Platform = process.platform,
+  // Injected so the TTY branch below is testable: it is the branch that decides a
+  // plain human shell still prompts, which is this guard's entire safety argument,
+  // and reading process.* directly made it unreachable from a test.
+  tty: { stdin?: boolean; stdout?: boolean } = { stdin: process.stdin.isTTY, stdout: process.stdout.isTTY },
 ): boolean {
   if (platform !== 'darwin') return false; // no biometry prompt to suppress off-darwin
   const override = env.AGENTS_SECRETS_NO_PROMPT;
@@ -1271,13 +1275,13 @@ export function isHeadlessSecretsContext(
   // a TTY meant "a human is watching, so prompting is fine". It is not fine —
   // opening a terminal is not a request to authenticate, and a launch that needs
   // a locked bundle should say so and point at `agents secrets unlock`, not grab
-  // the fingerprint sensor. Note AGENTS_RUNTIME is INHERITED by everything spawned
-  // under an agent terminal, so a human typing `agents secrets export` inside one
-  // sees it too — those commands pass `interactiveUnlock: true` explicitly
-  // (commands/secrets.ts) so a deliberate human request still raises the sheet.
+  // the fingerprint sensor. AGENTS_RUNTIME is INHERITED by everything spawned under
+  // an agent, so `agents secrets export` run beneath one resolves broker-only too —
+  // correctly: there the agent, not the human, is the caller. A plain shell carries
+  // no AGENTS_RUNTIME, so a person running it themselves still gets the sheet.
   const runtime = env.AGENTS_RUNTIME;
   if (runtime === 'headless' || runtime === 'teams' || runtime === 'terminal') return true;
-  return !process.stdin.isTTY && !process.stdout.isTTY;
+  return !tty.stdin && !tty.stdout;
 }
 
 /**
@@ -1354,10 +1358,8 @@ export function readAndResolveBundleEnv(
     }
   }
 
-  // A headless harness may initiate the macOS authentication sheet itself and
-  // synchronously wait for approval. Never/no-ACL bundles remain prompt-free.
-  // The always-on daemon has no requesting agent waiting on the result, so it
-  // remains prompt-free unless the bundle is explicitly no-ACL.
+  // Never/no-ACL bundles remain prompt-free regardless. No agent launch — harness,
+  // teammate, routine, or the always-on daemon — may raise the sheet itself.
   // Explicit opt-in ONLY — a deliberate NARROWING of the agent-triggered approval
   // added in RUSH-2032 (b99796f8 removed this throw so an agent could raise the
   // sheet itself; 4eeada68 generalized the daemon rule into `!interactiveUnlock`).

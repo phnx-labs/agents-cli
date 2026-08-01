@@ -9,7 +9,9 @@ authenticate, and because each keychain read runs in its own helper process the
 biometric assertion never reuses, so one launch used to mean one sheet per bundle.
 
 The sheet is raised only by a deliberate human request: `agents secrets unlock`,
-or an `agents secrets get/export/exec` you typed yourself. It names the requesting
+or an `agents secrets get/export/exec` you run **in a plain shell**. Beneath an
+agent those same commands inherit `AGENTS_RUNTIME` and resolve broker-only — there
+the agent is the caller, not you. It names the requesting
 harness, bundle, reason, and unlock duration. Approved bundles are cached for seven
 days by default and are reused only by the same harness type.
 

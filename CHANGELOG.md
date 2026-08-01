@@ -8,8 +8,8 @@
   Touch ID prompts, and scope cached unlocks to the harness type, with
   `secrets unlock --for <agent>`. Agent-triggered approval is **not** part of
   this: an agent launch never raises a sheet, it fails fast naming
-  `agents secrets unlock <bundle>`. Only a human-typed `agents secrets` command
-  prompts.
+  `agents secrets unlock <bundle>`. Only an `agents secrets` command run in a plain
+  shell prompts; beneath an agent it inherits `AGENTS_RUNTIME` and refuses too.
 
 ### Added
 
