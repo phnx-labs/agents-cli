@@ -443,7 +443,7 @@ export function getTrashDir(): string { return TRASH_DIR; }
 /** Path to local session indexer storage (~/.agents/.history/sessions/). */
 export function getSessionsDir(): string { return SESSIONS_DIR; }
 
-/** Path to the session index database (~/.agents/.history/sessions.db). */
+/** Path to the session index database (~/.agents/.history/sessions/sessions.db). */
 export function getSessionsDbPath(): string { return SESSIONS_DB_PATH; }
 
 /** Path to teams config + registry (~/.agents/teams/). */
