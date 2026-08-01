@@ -50,7 +50,8 @@ import { loadTask as loadHostTask } from './hosts/tasks.js';
 import { reconcileTask as reconcileHostTask } from './hosts/reconcile.js';
 import { backgroundSpawnOptions } from './platform/process.js';
 import { walkForFiles } from './fs-walk.js';
-import { getBinaryPath, isVersionInstalled, resolveVersion } from './versions.js';
+import { getBinaryPath, getVersionHomePath, isVersionInstalled, resolveVersion } from './versions.js';
+import { claudeHomeHasOwnCredential } from './agents.js';
 import {
   getConfiguredRunStrategy,
   resolveRunVersion,
@@ -483,6 +484,21 @@ export function buildRoutineSpawnEnv(
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(execEnv)) {
     if (v !== undefined) out[k] = v;
+  }
+  // RUSH-1979: the daemon injects one ambient CLAUDE_CODE_OAUTH_TOKEN (RUSH-1759)
+  // so a token-less default account still authenticates. When balanced rotation
+  // pins THIS spawn to a specific account's CLAUDE_CONFIG_DIR that holds its own
+  // credential, that ambient token would shadow the account (Claude and the Linux
+  // shim both prefer the env var) — making the pool inert and 401ing on the one
+  // stale token. Drop it here so the pinned account authenticates itself; keep it
+  // when the account has no on-disk credential (the RUSH-1759 default).
+  if (
+    agent === 'claude' &&
+    version &&
+    out.CLAUDE_CONFIG_DIR &&
+    claudeHomeHasOwnCredential(getVersionHomePath('claude', version))
+  ) {
+    delete out.CLAUDE_CODE_OAUTH_TOKEN;
   }
   if (timezone) out.TZ = timezone;
   return out;
