@@ -599,7 +599,9 @@ export function claudeUsageAccessTokenNoRefresh(
 /** Fetch Claude usage via the Anthropic OAuth usage API. */
 async function getClaudeUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
   try {
-    const oauth = await loadClaudeOauth(options?.home);
+    // Opt into the no-ACL access-token cache: this is the every-60s watchdog hot
+    // path and usage needs only the access token, so it kills the Touch ID storm.
+    const oauth = await loadClaudeOauth(options?.home, { accessTokenCache: true });
     if (!oauth?.accessToken) {
       return { snapshot: null, error: null };
     }
@@ -930,7 +932,10 @@ export interface ProviderProbe {
 
 /** Probe Claude's OAuth token against the usage endpoint. Never refreshes — reports `expired` for a near-expiry token; see the comment below (RUSH-1822). */
 export async function probeClaudeStatus(home?: string, cliVersion?: string | null): Promise<ProviderProbe> {
-  const oauth = await loadClaudeOauth(home);
+  // Opt into the no-ACL access-token cache: the daemon warms this probe every ~3
+  // min per account and it never refreshes (access token only), so caching is safe
+  // and stops it from adding to the Touch ID storm.
+  const oauth = await loadClaudeOauth(home, { accessTokenCache: true });
   const accessToken = oauth?.accessToken?.trim();
   if (!accessToken) return { status: null, token: 'missing' };
   // Never refresh from a health probe. Claude's refresh token is single-use and
@@ -1300,17 +1305,29 @@ function writeCachedClaudeOauth(service: string, creds: ClaudeOauthCredentials):
  * Without step 2 the live usage fetch got no token on Linux, so `agents view`
  * (run remotely over SSH by `--host`) rendered no usage bars even though the
  * account + plan — read from the plaintext `.claude.json` — showed fine.
+ *
+ * `opts.accessTokenCache` opts INTO the no-ACL access-token cache (the Touch ID
+ * storm fix, see the cache helpers above). It is OFF by default so every caller
+ * keeps the full ACL-read credential — the cached copy deliberately omits the
+ * refresh token, so callers that refresh (`isClaudeAuthValid` ->
+ * `getClaudeAccessToken`) or export the full blob (`readClaudeCredentialsBlob`
+ * for Rush Cloud dispatch) must NOT pass it. Only the read-only, high-frequency
+ * access-token-only consumers (the usage fetch and the auth-health probe) opt in.
  */
-export async function loadClaudeOauth(home?: string): Promise<ClaudeOauthCredentials | null> {
+export async function loadClaudeOauth(
+  home?: string,
+  opts?: { accessTokenCache?: boolean }
+): Promise<ClaudeOauthCredentials | null> {
   // The OS keychain/keyring step is macOS/Linux-only. Windows skips straight
   // to the .credentials.json fallback — the Claude CLI has no keychain
   // integration there and stores its OAuth token in that file too.
   if (process.platform === 'darwin' || process.platform === 'linux') {
     const service = getClaudeKeychainService(home);
-    // Serve the no-ACL cache first (macOS/test only) so the ACL-gated read below —
-    // the one that pops Touch ID — happens at most once per token lifetime instead
-    // of on every usage refresh. See the cache helpers above.
-    const cacheActive = claudeOauthCacheActive();
+    // Serve the no-ACL cache first (opt-in, macOS/test only) so the ACL-gated read
+    // below — the one that pops Touch ID — happens at most once per token lifetime
+    // instead of on every usage refresh. Off unless the caller opts in, because the
+    // cached copy drops the refresh token (see the doc comment above).
+    const cacheActive = opts?.accessTokenCache === true && claudeOauthCacheActive();
     if (cacheActive) {
       const cached = readCachedClaudeOauth(service);
       if (cached) return cached;

@@ -109,8 +109,8 @@ describe('loadClaudeOauth no-ACL access-token cache', () => {
     try {
       seedSource(Date.now() + 60 * 60 * 1000); // fresh: 1h out
 
-      const first = await loadClaudeOauth(HOME);
-      const second = await loadClaudeOauth(HOME);
+      const first = await loadClaudeOauth(HOME, { accessTokenCache: true });
+      const second = await loadClaudeOauth(HOME, { accessTokenCache: true });
 
       expect(first?.accessToken).toBe('tok-live');
       expect(second?.accessToken).toBe('tok-live');
@@ -133,10 +133,34 @@ describe('loadClaudeOauth no-ACL access-token cache', () => {
     try {
       seedSource(Date.now() - 60 * 1000); // already expired
 
-      await loadClaudeOauth(HOME);
-      await loadClaudeOauth(HOME);
+      await loadClaudeOauth(HOME, { accessTokenCache: true });
+      await loadClaudeOauth(HOME, { accessTokenCache: true });
 
       // Every load evicts the expired cache entry and reads the source again.
+      expect(mem.sourceReads).toBe(2);
+    } finally {
+      setKeychainBackendForTest(prev);
+    }
+  });
+
+  it('without the opt-in, returns the full credential and never caches (cloud-export contract)', async () => {
+    // readClaudeCredentialsBlob / isClaudeAuthValid call loadClaudeOauth WITHOUT
+    // the cache flag: they must always get the ACL-read credential WITH the refresh
+    // token. Regression guard for the Rush Cloud token-export path.
+    const mem = new CountingBackend();
+    const prev = setKeychainBackendForTest(mem);
+    try {
+      seedSource(Date.now() + 60 * 60 * 1000);
+
+      const first = await loadClaudeOauth(HOME); // default: no cache
+      const second = await loadClaudeOauth(HOME);
+
+      // Full refresh token every time — never dropped.
+      expect(first?.refreshToken).toBe('refresh-secret');
+      expect(second?.refreshToken).toBe('refresh-secret');
+      // No no-ACL cache is ever written on the default path.
+      expect(mem.noAclCacheWrites).toBe(0);
+      // Every default read goes to the ACL source (no cache short-circuit).
       expect(mem.sourceReads).toBe(2);
     } finally {
       setKeychainBackendForTest(prev);
