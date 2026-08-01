@@ -6,8 +6,8 @@
  * directly rather than through the chalk+console renderer.
  */
 
-import { describe, it, expect } from 'vitest';
-import { indexActiveBySessionId, liveGlyphAndPreview } from '../sessions.js';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { indexActiveBySessionId, liveGlyphAndPreview, formatActiveRowDescription } from '../sessions.js';
 import type { ActiveSession } from '../../lib/session/active.js';
 
 function mk(overrides: Partial<ActiveSession>): ActiveSession {
@@ -106,5 +106,55 @@ describe('liveGlyphAndPreview', () => {
     expect(liveGlyphAndPreview(mk({ status: 'running', todos })).preview).toBe(
       '✓1/2 · A5 wiring runner',
     );
+  });
+});
+
+describe('formatActiveRowDescription (RUSH-2045)', () => {
+  // Force OSC 8 support so we can assert the hyperlink survives cleanPreview.
+  const savedTerm = process.env.TERM_PROGRAM;
+  const savedIsTTY = process.stdout.isTTY;
+
+  beforeAll(() => {
+    process.env.TERM_PROGRAM = 'test';
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+  });
+  afterAll(() => {
+    if (savedTerm === undefined) delete process.env.TERM_PROGRAM;
+    else process.env.TERM_PROGRAM = savedTerm;
+    Object.defineProperty(process.stdout, 'isTTY', { value: savedIsTTY, configurable: true });
+  });
+
+  it('keeps project OSC 8 hyperlinks (does not run linkUrl through cleanPreview)', () => {
+    const desc = formatActiveRowDescription(
+      mk({
+        status: 'running',
+        label: 'views',
+        cwd: '/home/u/src/github.com/phnx-labs/agents-cli/apps/cli',
+        preview: 'editing sessions.ts',
+        todos: { items: [], done: 1, total: 2, activeForm: 'A5 wiring runner' },
+      }),
+    );
+    expect(desc).toContain('views');
+    expect(desc).toContain('✓1/2 · A5 wiring runner');
+    expect(desc).toContain('editing sessions.ts');
+    // Project label present; when hyperlinks are on, the GitHub target survives.
+    expect(desc).toContain('agents-cli');
+    if (desc.includes('\x1b]8;;')) {
+      expect(desc).toContain('https://github.com/phnx-labs/agents-cli');
+    }
+  });
+
+  it('cleans harness noise from the live snippet without destroying identity', () => {
+    const desc = formatActiveRowDescription(
+      mk({
+        status: 'running',
+        label: 'views',
+        cwd: '/tmp/scratch',
+        preview: '<system-reminder>ignore</system-reminder>real work',
+      }),
+    );
+    expect(desc).toContain('views');
+    expect(desc).toContain('real work');
+    expect(desc).not.toContain('system-reminder');
   });
 });

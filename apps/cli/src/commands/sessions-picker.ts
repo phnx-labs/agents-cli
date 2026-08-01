@@ -61,6 +61,17 @@ export function githubRepoUrlFromCwd(cwd?: string): string | undefined {
  */
 function sanitizeMeta(s: SessionMeta): SessionMeta {
   const clean = (v: string | undefined) => (v == null ? v : sanitizeForTerminal(v));
+  const todos = s.todos
+    ? {
+        ...s.todos,
+        activeForm: clean(s.todos.activeForm),
+        items: s.todos.items.map((it) => ({
+          ...it,
+          content: sanitizeForTerminal(it.content),
+          activeForm: clean(it.activeForm),
+        })),
+      }
+    : s.todos;
   return {
     ...s,
     id: sanitizeForTerminal(s.id),
@@ -75,6 +86,7 @@ function sanitizeMeta(s: SessionMeta): SessionMeta {
     label: clean(s.label),
     ticketId: clean(s.ticketId),
     prUrl: clean(s.prUrl),
+    todos,
   };
 }
 
@@ -335,9 +347,10 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
     }
   }
 
-  // Prefer SessionMeta.todos when the scan/state engine already attached it
-  // (remote fan-out, single-session path); else the transcript-derived list.
-  const todos: TodoProgress | undefined = session.todos ?? latestTodos;
+  // Prefer the transcript-derived list when we just re-parsed the file (freshest
+  // checklist write); fall back to SessionMeta.todos for rows where the scan/
+  // fan-out attached progress but the event stream has no TodoWrite yet.
+  const todos: TodoProgress | undefined = latestTodos ?? session.todos;
 
   // Digest signals folded into the preview: change lifecycle, tool mix, tests.
   const changes = classifyFileChanges(events);

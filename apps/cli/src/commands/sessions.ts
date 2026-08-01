@@ -373,37 +373,42 @@ function buildSessionDescription(s: ActiveSession): string {
 
 /**
  * Identity + checklist + live snippet for an --active / cross-machine row.
- * Surfaces agent-adjacent identity the flat table already has (label, project,
- * ticket) with clickable project/ticket when a URL is resolvable, then the
- * checklist tally and the latest-turn snippet.
+ * Surfaces agent-adjacent identity the flat table already has (label, project)
+ * with a clickable project when a GitHub URL is resolvable, then the checklist
+ * tally and the latest-turn snippet.
+ *
+ * Free-text fields are cleaned individually; OSC 8 hyperlinks are applied
+ * *after* cleaning so `cleanPreview` does not strip the clickable targets
+ * (RUSH-2045 review). Ticket is clickable via {@link signalBadges}, not here,
+ * so the id is not printed twice.
  */
-function formatActiveRowDescription(s: ActiveSession): string {
+export function formatActiveRowDescription(s: ActiveSession): string {
   const parts: string[] = [];
-  if (s.context === 'teams' && s.teamName) parts.push(s.teamName);
-  if (s.label) parts.push(s.label);
+  const pushText = (t?: string) => {
+    const c = t ? cleanPreview(t) : '';
+    if (c) parts.push(c);
+  };
+  if (s.context === 'teams' && s.teamName) pushText(s.teamName);
+  if (s.label) pushText(s.label);
   // Project = basename(cwd), same derivation as serializeActiveSessionsForJson.
   const project = s.cwd ? path.basename(s.cwd) : '';
   if (project && project !== s.label && project !== s.teamName) {
+    const label = cleanPreview(project);
     const repoUrl = githubRepoUrlFromCwd(s.cwd);
-    parts.push(repoUrl ? linkUrl(repoUrl, project) : project);
-  }
-  if (s.ticket?.id) {
-    const url = linearIssueUrl(s.ticket.id);
-    parts.push(url ? linkUrl(url, s.ticket.id) : s.ticket.id);
+    parts.push(repoUrl ? linkUrl(repoUrl, label) : label);
   }
   const todo = formatTodoCompact(s.todos);
   if (todo) parts.push(todo);
 
   // Latest-turn snippet — avoid repeating label/topic when already used as identity.
   if (s.context === 'cloud') {
-    const cloud = s.preview || `${s.cloudProvider ?? ''}${s.cloudTaskId ? ` · ${s.cloudTaskId.slice(0, 12)}` : ''}`;
-    if (cloud) parts.push(cloud);
+    pushText(s.preview || `${s.cloudProvider ?? ''}${s.cloudTaskId ? ` · ${s.cloudTaskId.slice(0, 12)}` : ''}`);
   } else if (s.preview) {
-    parts.push(s.preview);
+    pushText(s.preview);
   } else if (!s.label && s.topic) {
-    parts.push(s.topic);
+    pushText(s.topic);
   }
-  return cleanPreview(parts.filter(Boolean).join(' · '));
+  return parts.filter(Boolean).join(' · ');
 }
 
 /** Short human word for a session's activity (falls back to the coarse status). */
@@ -484,8 +489,15 @@ function signalBadges(s: Pick<ActiveSession, 'awaitingReason' | 'pr' | 'worktree
   if (s.awaitingReason === 'plan_review') parts.push(chalk.yellow('plan'));
   else if (s.awaitingReason === 'question') parts.push(chalk.yellow('ask'));
   else if (s.awaitingReason === 'permission') parts.push(chalk.yellow('perm'));
-  if (s.ticket) parts.push(chalk.cyan(s.ticket.id));
-  if (s.pr) parts.push(chalk.blue(`PR#${s.pr.number ?? '?'}`));
+  if (s.ticket) {
+    // Clickable when Linear workspace is resolvable (same helper as the picker header).
+    const url = linearIssueUrl(s.ticket.id);
+    parts.push(chalk.cyan(url ? linkUrl(url, s.ticket.id) : s.ticket.id));
+  }
+  if (s.pr) {
+    const label = `PR#${s.pr.number ?? '?'}`;
+    parts.push(chalk.blue(s.pr.url ? linkUrl(s.pr.url, label) : label));
+  }
   if (s.worktree) parts.push(chalk.magenta(`wt:${s.worktree.slug}`));
   return parts.join(' ');
 }
@@ -1504,7 +1516,11 @@ function treeSessionRow(session: SessionMeta, live?: ActiveSession): string {
   const tag = originTag(session) || teamTag(session);
   const label = (session as any).label;
   const { glyph, preview } = liveGlyphAndPreview(live);
-  const topic = (preview || (tag ? `${tag}${session.topic ?? ''}` : session.topic)) || '-';
+  // Match flatSessionRow: live preview already folds ActiveSession.todos; resting
+  // rows surface SessionMeta.todos when present (RUSH-2045).
+  const restingTodo = !live ? formatTodoCompact(session.todos) : '';
+  const topicBase = preview || (tag ? `${tag}${session.topic ?? ''}` : session.topic);
+  const topic = [restingTodo, topicBase].filter(Boolean).join(' · ') || '-';
   const badges = signalBadges(metaSignals(session));
   const badgeW = badges ? stringWidth(badges) + 1 : 0;
   const head = label ? `${label} · ${topic}` : topic;
