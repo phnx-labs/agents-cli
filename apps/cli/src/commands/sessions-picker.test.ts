@@ -87,21 +87,36 @@ describe('relativizeDir — readable Dirs line', () => {
     ).toBe('⧉ my-slug');
   });
 
-  it('(c) decodes a Claude project-slug instead of rendering the raw -Users- form', () => {
-    // Session cwd is unrelated to the decoded path, so the last-3-segment trim applies.
+  it('(c1) collapses a `--`/dot-dir worktree slug to ⧉ <name> (never a lossy // path)', () => {
+    // Real Claude slug: cwd /home/muqsit/.agents/repos/x/.agents/worktrees/rush1506
+    // encodes `.` and `/` to `-`, so `/.agents/worktrees/` becomes `--agents-worktrees-`.
     const out = relativizeDir(
-      '-Users-muqsit-src-github-com-muqsitnawaz-agents-cli/abc123/scratchpad/note.md',
+      '-home-muqsit--agents-repos-x--agents-worktrees-rush1506/sess-id/scratchpad/n.md',
       '/home/muqsit/other',
     );
-    expect(out).not.toContain('-Users-'); // the ugly raw slug is gone
-    expect(out).toBe('cli/abc123/scratchpad');
+    expect(out).not.toContain('//'); // no mangled dot-dir path
+    expect(out).toBe('⧉ rush1506'); // worktree name recovered from the encoded marker
   });
 
-  it('(c) decodes a -home- slug and relativizes against a matching cwd', () => {
-    // Decoded to /home/muqsit/src/app/lib; cwd matches, so only the remainder shows.
+  it('(c2) drops a slug that is this session\'s own cwd (internal projects-storage scratch)', () => {
+    // slug === encodeClaudeSlug(cwd) → the leaked `<id>/scratchpad` is Claude's
+    // internal store, not a code dir, so it is dropped like node_modules.
     expect(
-      relativizeDir('-home-muqsit-src-app-lib/foo.ts', '/home/muqsit/src/app'),
-    ).toBe('lib');
+      relativizeDir(
+        '-home-muqsit-src-github-com-phnx-labs-agents-cli/sess-id/scratchpad/n.md',
+        '/home/muqsit/src/github.com/phnx-labs/agents-cli',
+      ),
+    ).toBeUndefined();
+  });
+
+  it('(c3) leaves a genuine local absolute path with dashes UNTOUCHED (no false slug-decode)', () => {
+    // Starts with `/`, not `-`, so the slug branch never fires; normal cwd-relativize.
+    expect(
+      relativizeDir(
+        '/home/me/src/phnx-labs/agents-cli/apps/cli/x.ts',
+        '/home/me/src/phnx-labs/agents-cli',
+      ),
+    ).toBe('apps/cli');
   });
 
   it('(d) collapses the home prefix to ~', () => {

@@ -478,29 +478,22 @@ export function directoriesTouched(
 }
 
 /**
- * Claude encodes a session's cwd into its `~/.claude/projects/<slug>` dir name by
- * replacing every `/` with `-`, so a path like `/Users/me/src/app` becomes the
- * slug `-Users-me-src-app`. That slug then leaks into transcript paths verbatim.
- * Decode the KNOWN root prefix (`-Users-<user>-` / `-home-<user>-` / `-var-…`)
- * back to an absolute path so it can be relativized like any other. The rest of
- * the slug is left with its `-` intact — real dir names can contain `-`, so a
- * blanket `-`→`/` would corrupt them; best-effort by design. Returns the input
- * unchanged when it isn't a recognizable slug.
+ * Claude names its per-project transcript store `~/.claude/projects/<slug>`, where
+ * `<slug>` is the cwd with every `/` AND `.` replaced by `-` — so `/Users/me/app`
+ * → `-Users-me-app` and `.agents/worktrees/x` → `--agents-worktrees-x`. That slug
+ * leaks into transcript paths as a leading segment (`<slug>/<session-id>/…`).
+ *
+ * The encoding is LOSSY and irreversible (`-`, `/`, and `.` all collapse to `-`),
+ * so we never try to decode it back to a path. Instead we ENCODE the comparison
+ * targets (cwd, the worktree marker) into the same slug space and match there. See
+ * {@link relativizeDir}. `encodeClaudeSlug` mirrors Claude's own transform.
  */
-function decodeClaudeSlug(dir: string): string {
-  if (!dir.startsWith('-')) return dir;
-  // The slug is the LEADING path segment; a leaked form can carry real subdirs
-  // after it (`<slug>/<id>/scratchpad`), so decode only that first segment and
-  // keep the rest verbatim.
-  const slash = dir.indexOf('/');
-  const head = slash === -1 ? dir : dir.slice(0, slash);
-  const tail = slash === -1 ? '' : dir.slice(slash); // includes the leading `/`
-  const m = head.match(/^-(Users|home)-([^-]+)-(.*)$/);
-  if (m) return `/${m[1]}/${m[2]}/${m[3].replace(/-/g, '/')}${tail}`;
-  const mv = head.match(/^-(var|opt|tmp|srv|mnt)-(.*)$/);
-  if (mv) return `/${mv[1]}/${mv[2].replace(/-/g, '/')}${tail}`;
-  return dir;
+function encodeClaudeSlug(absPath: string): string {
+  return absPath.replace(/[/.]/g, '-');
 }
+
+/** The `.agents/worktrees/<name>` marker, Claude-slug-encoded (`/.` → `--`). */
+const SLUG_WORKTREE_RE = /--agents-worktrees-(.+)$/;
 
 /** Relativize a file path to its parent dir, short enough for one preview line. */
 export function relativizeDir(filePath: string, cwd?: string): string | undefined {
@@ -509,9 +502,32 @@ export function relativizeDir(filePath: string, cwd?: string): string | undefine
     return undefined;
   }
   let dir = path.posix.dirname(norm);
-  // Decode a Claude project-slug (`-Users-me-…`) into an absolute path first so the
-  // cwd/home/trim logic below can simplify it like any real path.
-  dir = decodeClaudeSlug(dir);
+
+  // Claude project-slug form: a leading `-`-segment (`-home-me-…`) that carries
+  // the cwd, lossily encoded. Handle it in SLUG SPACE — never lossy-decode to a
+  // fake path. The slug is the first path segment; any real `/`-subdirs after it
+  // are Claude's internal storage (`<session-id>/scratchpad|tasks`), not code.
+  if (dir.startsWith('-')) {
+    const slash = dir.indexOf('/');
+    const slug = slash === -1 ? dir : dir.slice(0, slash);
+    // A worktree encodes its `/.agents/worktrees/<name>` marker as
+    // `--agents-worktrees-<name>` — collapse to the worktree name, same display
+    // as a real worktree path. (The name may contain `-`; we can't losslessly
+    // re-split it, so show the whole encoded remainder — readable and honest.)
+    const wtSlug = slug.match(SLUG_WORKTREE_RE);
+    if (wtSlug) return `⧉ ${wtSlug[1]}`;
+    // Not a worktree: if the slug is this session's own cwd, the leaked path is
+    // Claude's internal projects-storage scratch (`<id>/scratchpad`) — not a
+    // meaningful code dir, so drop it like node_modules.
+    if (cwd && slug === encodeClaudeSlug(cwd.replace(/\\/g, '/').replace(/\/$/, ''))) {
+      return undefined;
+    }
+    // An unattributable slug: don't invent a `/`-joined fake path. Show only the
+    // trailing `-`-group as a minimal, honest token.
+    const segs = slug.split('-').filter(Boolean);
+    return segs.length ? segs[segs.length - 1] : undefined;
+  }
+
   // Inside a git worktree, show the worktree NAME + the in-worktree remainder,
   // not the noisy `.agents/worktrees/<slug>/` prefix.
   const wt = dir.match(WORKTREE_RE);
@@ -527,12 +543,6 @@ export function relativizeDir(filePath: string, cwd?: string): string | undefine
   // Collapse home prefix.
   const home = (process.env.HOME || '').replace(/\\/g, '/');
   if (home && dir.startsWith(home + '/')) dir = '~' + dir.slice(home.length);
-  // A slug we couldn't decode to an absolute path is still one giant `-`-joined
-  // segment; trim it to its last 3 `-` groups so it stops rendering in full.
-  if (dir.startsWith('-') && !dir.includes('/')) {
-    const segs = dir.split('-').filter(Boolean);
-    if (segs.length > 3) dir = segs.slice(-3).join('/');
-  }
   // Drop ultra-deep absolute noise; keep last 3 segments.
   const parts = dir.split('/').filter(Boolean);
   if (parts.length > 3 && dir.startsWith('/')) dir = parts.slice(-3).join('/');
