@@ -2060,7 +2060,7 @@ export async function unregisterMcp(
   options?: { home?: string; binary?: string }
 ): Promise<{ success: boolean; error?: string }> {
   const agent = AGENTS[agentId];
-  if (!agent.capabilities.mcp) {
+  if (!supports(agentId, 'mcp').ok) {
     return { success: false, error: 'Agent does not support MCP' };
   }
   if (agentId === 'hermes') {
