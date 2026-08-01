@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildBackgroundArgv, resolveOne, BACKGROUND_NUDGE } from './detach-core.js';
+import { buildBackgroundArgv, resolveDetachTarget, resolveOne, BACKGROUND_NUDGE } from './detach-core.js';
 import type { ActiveSession } from '../lib/session/active.js';
 
 function session(sessionId: string): ActiveSession {
@@ -63,5 +63,47 @@ describe('resolveOne', () => {
   it('errors (none) when nothing matches', () => {
     const r = resolveOne(map, 'zzz');
     expect('error' in r && r.error).toMatch(/no live session/i);
+  });
+});
+
+describe('resolveDetachTarget', () => {
+  it('detaches a local session (same machine) locally', () => {
+    const s = { context: 'terminal', kind: 'claude', sessionId: 'abc-1', machine: 'zion' } as ActiveSession;
+    expect(resolveDetachTarget(s, 'zion')).toEqual({ kind: 'local', sessionId: 'abc-1' });
+  });
+
+  it('treats a session with no machine as local', () => {
+    const s = { context: 'terminal', kind: 'claude', sessionId: 'abc-2' } as ActiveSession;
+    expect(resolveDetachTarget(s, 'zion')).toEqual({ kind: 'local', sessionId: 'abc-2' });
+  });
+
+  it('delegates a session on another host to that host over SSH', () => {
+    const s = { context: 'terminal', kind: 'claude', sessionId: 'abc-3', machine: 'yosemite-s0' } as ActiveSession;
+    expect(resolveDetachTarget(s, 'zion')).toEqual({
+      kind: 'remote',
+      machine: 'yosemite-s0',
+      sessionId: 'abc-3',
+    });
+  });
+
+  it('refuses cloud sessions (they run remotely with their own lifecycle)', () => {
+    const s = { context: 'cloud', kind: 'claude', sessionId: 'abc-4' } as ActiveSession;
+    const t = resolveDetachTarget(s, 'zion');
+    expect(t.kind).toBe('refuse');
+    expect(t.kind === 'refuse' && t.reason).toMatch(/cloud/i);
+  });
+
+  it('refuses team sessions so it can\'t bypass the team stop path', () => {
+    const s = { context: 'teams', kind: 'claude', sessionId: 'abc-5', pid: 4321 } as ActiveSession;
+    const t = resolveDetachTarget(s, 'zion');
+    expect(t.kind).toBe('refuse');
+    expect(t.kind === 'refuse' && t.reason).toMatch(/team/i);
+  });
+
+  it('refuses a session with no id to resume', () => {
+    const s = { context: 'terminal', kind: 'claude', sessionId: '' } as ActiveSession;
+    const t = resolveDetachTarget(s, 'zion');
+    expect(t.kind).toBe('refuse');
+    expect(t.kind === 'refuse' && t.reason).toMatch(/no id/i);
   });
 });

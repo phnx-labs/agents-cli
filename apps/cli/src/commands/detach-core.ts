@@ -28,6 +28,39 @@ export function buildBackgroundArgv(agent: string, sessionId: string, cwd?: stri
   return argv;
 }
 
+/** What to do with a resolved session, given which machine we're on. */
+export type DetachTarget =
+  | { kind: 'local'; sessionId: string }
+  | { kind: 'remote'; machine: string; sessionId: string }
+  | { kind: 'refuse'; reason: string };
+
+/**
+ * Decide how to detach a resolved session. Cloud and team sessions are refused
+ * (they have their own lifecycles); a session on another machine is delegated to
+ * that host over SSH — never stopped/resumed locally, since its pid and tmux
+ * socket only mean something where it actually runs. Pure, so every branch is
+ * unit-tested without a live pool. Mirrors `focus`/`jumpTo`'s remote branch.
+ */
+export function resolveDetachTarget(s: ActiveSession, self: string): DetachTarget {
+  if (s.context === 'cloud') {
+    return { kind: 'refuse', reason: 'Cloud sessions run remotely and cannot be detached from here.' };
+  }
+  if (s.context === 'teams') {
+    return {
+      kind: 'refuse',
+      reason: 'That session is managed by its team — stop it with `agents teams`, not `detach`.',
+    };
+  }
+  const sessionId = s.sessionId ?? '';
+  if (!sessionId) {
+    return { kind: 'refuse', reason: 'That session has no id to resume, so it cannot be detached.' };
+  }
+  if (s.machine && s.machine !== self) {
+    return { kind: 'remote', machine: s.machine, sessionId };
+  }
+  return { kind: 'local', sessionId };
+}
+
 /**
  * Resolve `<id>` to exactly one live session by prefix. Mirrors `focus`'s match
  * so the two verbs accept the same ids.
