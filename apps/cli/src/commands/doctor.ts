@@ -51,7 +51,12 @@ import {
   type DoctorKind,
   type ResourceDiff,
   type VersionResourceReport,
+  type SourceLayerBehind,
 } from '../lib/doctor-diff.js';
+import { checkVersionHookWiring, registerHooksToSettings, type HookWiringReport } from '../lib/hooks.js';
+import { isVersionIsolated } from '../lib/versions.js';
+import { commitsBehindUpstream } from '../lib/git.js';
+import { getUserAgentsDir, getSystemAgentsDir, getEnabledExtraRepos } from '../lib/state.js';
 import { checkSyncStatus, countOrphans, type SyncStatusRow, type OrphanRow } from '../lib/drift.js';
 import { readAuthHealthCache, summarizeHostAuth } from '../lib/auth-health.js';
 import { unifiedDiff, colorizeUnifiedDiff } from '../lib/diff-text.js';
@@ -600,6 +605,96 @@ function readExpectedForDiff(kind: DoctorKind, row: ResourceDiff): string | null
   return safeRead(row.sourcePath);
 }
 
+// Family of agents whose hooks re-wire through registerHooksToSettings into a
+// Claude-style settings.json (matches checkVersionHookWiring's supported set).
+const HOOK_WIRING_FIX_AGENTS: AgentId[] = ['claude', 'droid'];
+
+/**
+ * Probe each source layer (user, system, enabled extras) for how far it trails
+ * its upstream, using the last-fetched remote-tracking ref (no network). A layer
+ * behind origin means every version home is reconciled against stale truth — a
+ * loud unhealthy signal, not a buried preamble. Returns only the behind layers.
+ */
+function computeSourceBehind(): SourceLayerBehind[] {
+  const out: SourceLayerBehind[] = [];
+  const probe = (layer: SourceLayerBehind['layer'], dir: string, label: string, alias: string): void => {
+    const r = commitsBehindUpstream(dir);
+    if (r && r.behind > 0) out.push({ layer, label, alias, behind: r.behind, branch: r.branch });
+  };
+  probe('user', getUserAgentsDir(), '~/.agents', 'user');
+  probe('system', getSystemAgentsDir(), '~/.agents/.system', 'system');
+  for (const e of getEnabledExtraRepos()) probe('extra', e.dir, e.alias, e.alias);
+  return out;
+}
+
+export interface VerdictIssue {
+  text: string;
+  color: 'yellow' | 'red' | 'magenta';
+}
+
+export interface DoctorVerdict {
+  healthy: boolean;
+  issues: VerdictIssue[];
+}
+
+/**
+ * Fold a version report's divergences into a single verdict. Divergent files,
+ * missing/extra resources, UNWIRED hooks, an absent/broken settings.json, and a
+ * source layer behind origin all count against health — an UNWIRED hook or a
+ * stale source is as unhealthy as a divergent file, not a footnote. Pure so the
+ * health rollup is unit-testable without a version home.
+ */
+export function computeVerdict(report: VersionResourceReport): DoctorVerdict {
+  const issues: VerdictIssue[] = [];
+  const { diff, missing, extra } = report.summary;
+  if (diff) issues.push({ text: `${diff} divergent`, color: 'yellow' });
+  if (missing) issues.push({ text: `${missing} missing`, color: 'red' });
+  if (extra) issues.push({ text: `${extra} extra`, color: 'magenta' });
+
+  const w = report.hookWiring;
+  if (w?.settingsMissing) {
+    const n = w.expected ?? 0;
+    issues.push({ text: `settings.json missing (${n} hook${n === 1 ? '' : 's'} unwired)`, color: 'red' });
+  } else if (w?.settingsUnparseable) {
+    issues.push({ text: 'settings.json unparseable', color: 'red' });
+  } else if (w && w.unwired.length > 0) {
+    issues.push({ text: `${w.unwired.length} unwired`, color: 'red' });
+  }
+
+  for (const b of report.sourceBehind ?? []) {
+    if (b.behind > 0) {
+      issues.push({
+        text: `source ${b.label} ${b.behind} commit${b.behind === 1 ? '' : 's'} behind ${b.branch}`,
+        color: 'red',
+      });
+    }
+  }
+
+  return { healthy: issues.length === 0, issues };
+}
+
+/**
+ * Render the UNWIRED hook rows (and settings.json problems) inside the hooks
+ * section, in the same row style as the reconcile rows above them.
+ */
+function renderHookWiringRows(w: HookWiringReport): void {
+  if (!w.supported) return;
+  if (w.settingsMissing) {
+    const where = w.settingsPath ? ` at ${w.settingsPath}` : '';
+    console.log(`    ${chalk.red('UNWIRED')}  ${chalk.gray(`settings.json not found${where} — ${w.expected ?? 0} declared hook(s) never fire`)}`);
+    return;
+  }
+  if (w.settingsUnparseable) {
+    const where = w.settingsPath ? ` at ${w.settingsPath}` : '';
+    console.log(`    ${chalk.red('UNWIRED')}  ${chalk.gray(`settings.json unparseable${where} — wiring can't be verified`)}`);
+    return;
+  }
+  for (const u of w.unwired) {
+    const name = padToWidth(truncateToWidth(u.name, 28), 28);
+    console.log(`    ${chalk.red('UNWIRED')}  ${name} ${chalk.gray(`event=${u.event}`)}`);
+  }
+}
+
 function renderTargetText(report: VersionResourceReport, options: { showDiff: boolean; requestedKinds?: Set<DoctorKind> }): void {
   const label = `${AGENT_NAMES[report.agent] || report.agent}@${report.version}`;
   console.log(chalk.bold(label));
@@ -640,19 +735,25 @@ function renderTargetText(report: VersionResourceReport, options: { showDiff: bo
     // sees what was checked. options.requestedKinds drives this.
     if (options.requestedKinds && !options.requestedKinds.has(kind)) continue;
     renderKindSection(kind, rows, report.layers, options);
+    // A hook file can reconcile "ok" above yet be absent from settings.json — a
+    // present-but-dead hook. Surface that right under the hooks section.
+    if (kind === 'hooks' && report.hookWiring) renderHookWiringRows(report.hookWiring);
   }
 
   console.log();
-  const { ok, diff, missing, extra } = report.summary;
-  const verdictParts: string[] = [];
-  if (diff) verdictParts.push(chalk.yellow(`${diff} divergent`));
-  if (missing) verdictParts.push(chalk.red(`${missing} missing`));
-  if (extra) verdictParts.push(chalk.magenta(`${extra} extra`));
-  if (verdictParts.length === 0) {
+  const { ok } = report.summary;
+  const verdict = computeVerdict(report);
+  if (verdict.healthy) {
     console.log(chalk.green(`  Verdict: ${ok} resource${ok === 1 ? '' : 's'} reconciled. Version home matches resolved sources.`));
   } else {
-    console.log(`  Verdict: ${verdictParts.join(', ')}.`);
+    const colored = verdict.issues.map((i) => chalk[i.color](i.text));
+    console.log(`  Verdict: ${colored.join(', ')}.`);
     printWrappedLine('  ', `Run \`agents doctor ${report.agent}@${report.version} --fix\` to heal, or \`agents prune cleanup\` to drop extras.`);
+    for (const b of report.sourceBehind ?? []) {
+      if (b.behind > 0) {
+        printWrappedLine('  ', `Source ${b.label} is behind ${b.branch} — run \`agents repo pull ${b.alias}\` to reconcile against current sources.`);
+      }
+    }
   }
 }
 
@@ -706,6 +807,61 @@ function renderHealText(result: HealResult): void {
   }
 }
 
+interface HookRewireResult {
+  agent: AgentId;
+  version: string;
+  /** Hooks newly wired into settings.json by this pass. */
+  rewired: number;
+  /** Hooks still unwired after re-registering (source/home mismatch). */
+  remaining: number;
+}
+
+/**
+ * Re-wire hooks that reconcile as files but are absent from settings.json.
+ *
+ * heal() only re-syncs resources the diff flags missing/diff; a hook whose file
+ * is byte-identical to source but never referenced in settings.json is neither,
+ * so heal walks past it. registerHooksToSettings (the same call `agents sync`
+ * makes at versions.ts) regenerates the wiring, so run it for any Claude-family
+ * version this fix targets that has unwired hooks. Only claude/droid — the set
+ * checkVersionHookWiring can verify.
+ */
+function rewireUnwiredHooks(parsed: ResolvedTarget | null): HookRewireResult[] {
+  const out: HookRewireResult[] = [];
+  const agents = parsed?.agent
+    ? (HOOK_WIRING_FIX_AGENTS.includes(parsed.agent) ? [parsed.agent] : [])
+    : HOOK_WIRING_FIX_AGENTS;
+  for (const agent of agents) {
+    // A named version is explicit consent; a sweep excludes isolated copies,
+    // mirroring heal().
+    const versions = parsed?.agent && parsed.versionExplicit
+      ? parsed.versions
+      : listInstalledVersions(agent).filter((v) => !isVersionIsolated(agent, v));
+    for (const version of versions) {
+      const before = checkVersionHookWiring(agent, version);
+      if (!before.supported) continue;
+      const need = before.unwired.length + (before.settingsMissing ? (before.expected ?? 0) : 0);
+      if (need === 0) continue;
+      registerHooksToSettings(agent, getVersionHomePath(agent, version));
+      const after = checkVersionHookWiring(agent, version);
+      const remaining = after.unwired.length + (after.settingsMissing ? (after.expected ?? 0) : 0);
+      out.push({ agent, version, rewired: Math.max(0, need - remaining), remaining });
+    }
+  }
+  return out;
+}
+
+function renderHookRewireText(rewired: HookRewireResult[]): void {
+  for (const r of rewired) {
+    const label = `${AGENT_NAMES[r.agent] || r.agent}@${r.version}`;
+    if (r.remaining === 0) {
+      console.log(`  ${chalk.green('rewired')} ${label}  ${chalk.gray(`${r.rewired} hook${r.rewired === 1 ? '' : 's'} wired into settings.json`)}`);
+    } else {
+      console.log(`  ${chalk.yellow('hold  ')} ${label}  ${chalk.gray(`${r.remaining} hook${r.remaining === 1 ? '' : 's'} still unwired — run \`agents sync ${r.agent}@${r.version} --yes\``)}`);
+    }
+  }
+}
+
 async function runFix(parsed: ResolvedTarget | null, opts: DoctorOptions): Promise<void> {
   // Heal targets the global install — project layer is irrelevant, so cwd is
   // left to heal's neutral default rather than process.cwd().
@@ -719,11 +875,14 @@ async function runFix(parsed: ResolvedTarget | null, opts: DoctorOptions): Promi
     agent: parsed?.agent,
     versions: parsed?.versionExplicit ? parsed.versions : undefined,
   });
+  // Re-wire hooks the diff-driven heal leaves behind (present file, not wired).
+  const rewired = rewireUnwiredHooks(parsed);
   if (opts.json) {
-    console.log(JSON.stringify(result, null, 2));
+    console.log(JSON.stringify({ ...result, hookRewire: rewired }, null, 2));
     return;
   }
   renderHealText(result);
+  renderHookRewireText(rewired);
 }
 
 // ─── command registration ────────────────────────────────────────────────────
@@ -908,6 +1067,12 @@ export function registerDoctorCommand(program: Command): void {
       const reports: VersionResourceReport[] = parsed.versions.map((v) =>
         diffVersionResources(parsed.agent, v, { cwd, kinds }),
       );
+
+      // Source-layer staleness is global (same across versions) and needs a git
+      // probe kept out of the pure diff — compute once, attach to every report so
+      // both --json and the text verdict carry it.
+      const sourceBehind = computeSourceBehind();
+      for (const r of reports) r.sourceBehind = sourceBehind;
 
       if (opts.json) {
         console.log(JSON.stringify(reports.length === 1 ? reports[0] : reports, null, 2));
