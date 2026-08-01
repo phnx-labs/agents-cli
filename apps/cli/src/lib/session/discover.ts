@@ -3980,16 +3980,21 @@ async function scanKimiIncremental(onProgress?: (p: ScanProgress) => void): Prom
 
   onProgress?.({ agent: 'kimi', parsed: 0, total: changed.length });
 
+  // Bulk-fetch each changed session's prior wire-parse continuation (offset +
+  // counter bases). A session whose wire.jsonl grew resumes from the offset;
+  // everything else (cold start, truncation) full-parses from byte 0.
+  const priorStates = getParserStatesForPaths(changed.map(c => c.filePath));
+
   const scanEntries: ScanEntry[] = [];
   const touched: Array<{ filePath: string; scan: ScanStamp }> = [];
   const seen = new Set<string>();
   let parsed = 0;
   for (const { filePath, scan } of changed) {
     try {
-      const result = readKimiMeta(filePath);
+      const result = readKimiMeta(filePath, priorStates.get(filePath));
       if (result && !seen.has(result.meta.id)) {
         seen.add(result.meta.id);
-        scanEntries.push({ meta: result.meta, content: result.content, scan });
+        scanEntries.push({ meta: result.meta, content: result.content, scan, parserState: result.parserState });
       } else {
         touched.push({ filePath, scan });
       }
@@ -4005,7 +4010,10 @@ async function scanKimiIncremental(onProgress?: (p: ScanProgress) => void): Prom
 }
 
 /** Parse a single Kimi session state.json file to extract session metadata. */
-export function readKimiMeta(filePath: string): { meta: SessionMeta; content: string } | null {
+export function readKimiMeta(
+  filePath: string,
+  priorRow?: { parserState: string | null },
+): { meta: SessionMeta; content: string; parserState?: string } | null {
   let state: any;
   try {
     state = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
@@ -4045,8 +4053,11 @@ export function readKimiMeta(filePath: string): { meta: SessionMeta; content: st
     }
   }
 
-  // Parse wire.jsonl to extract message count and token usage
-  const { messageCount, tokenCount, outputTokens } = parseKimiWireMetrics(sessionDir);
+  // Parse wire.jsonl incrementally: resume from the persisted offset + counter
+  // bases when the wire grew, else full-parse from byte 0. The continuation is
+  // persisted on this session's state.json ledger row.
+  const prior = parsePriorKimiState(priorRow);
+  const { messageCount, tokenCount, outputTokens, newState } = parseKimiWireMetricsIncremental(sessionDir, prior);
 
   const meta: SessionMeta = {
     id: sessionId,
@@ -4061,46 +4072,120 @@ export function readKimiMeta(filePath: string): { meta: SessionMeta; content: st
     outputTokens: outputTokens > 0 ? outputTokens : undefined,
   };
 
-  return { meta, content: lastPrompt || '' };
+  return { meta, content: lastPrompt || '', parserState: JSON.stringify(newState) };
 }
 
-/** Parse Kimi's wire.jsonl to extract message count and token usage.
- * TODO: optimize to stream (like scanClaudeSession) to avoid loading large files into memory.
- * For now, synchronous readFileSync matches the pattern of reading state.json and is acceptable
- * since session dirs are usually fresh in FS cache during incremental scans. */
-function parseKimiWireMetrics(sessionDir: string): { messageCount: number; tokenCount: number; outputTokens: number } {
-  const wirePath = path.join(sessionDir, 'agents', 'main', 'wire.jsonl');
-  let messageCount = 0;
-  let tokenCount = 0;
-  let outputTokens = 0;
+/**
+ * Kimi wire metrics are pure additive counters (messageCount, tokenCount,
+ * outputTokens) with NO straddle/dedup state, so the continuation is just those
+ * three bases plus the byte `offset` already consumed from wire.jsonl. Resuming
+ * from `offset` + adding the appended tail's deltas equals a full parse.
+ */
+export interface KimiParserState {
+  v: 1;
+  offset: number;
+  messageCount: number;
+  tokenCount: number;
+  outputTokens: number;
+}
 
-  if (!fs.existsSync(wirePath)) {
-    return { messageCount: 0, tokenCount: 0, outputTokens: 0 };
+/** Fold one parsed Kimi wire event into the additive counters, in place. */
+function applyKimiWireEvent(
+  acc: { messageCount: number; tokenCount: number; outputTokens: number },
+  event: any,
+): void {
+  if (event.type === 'context.append_message') {
+    acc.messageCount++;
+  } else if (event.type === 'usage.record' && event.usage) {
+    // Kimi usage structure: inputOther + output + inputCacheRead + inputCacheCreation
+    const u = event.usage;
+    acc.tokenCount += (u.inputOther || 0) + (u.output || 0) + (u.inputCacheRead || 0) + (u.inputCacheCreation || 0);
+    acc.outputTokens += (u.output || 0);
+  }
+}
+
+/**
+ * Incrementally parse Kimi's wire.jsonl for message-count and token counters,
+ * resuming from a persisted continuation instead of re-reading from byte 0 every
+ * scan. Returns the finalized counters and the next {@link KimiParserState} to
+ * persist (offset + the three counter bases).
+ *
+ * Same trailing-line discipline as {@link scanClaudeSessionIncremental}: read
+ * only the appended byte range from `prior.offset`, apply ONLY the run of
+ * newline-terminated lines (slice at the last `'\n'`), and advance the offset to
+ * `prior.offset + consumedBytes`. A complete-but-not-yet-terminated last record
+ * is DEFERRED to the next pass; because these counters are additive with no
+ * dedup, re-reading such a line would double-count it. FULL parse from byte 0
+ * (fresh counters) when there is no prior OR the file shrank below the stored
+ * offset (truncation/rewrite).
+ */
+export function parseKimiWireMetricsIncremental(
+  sessionDir: string,
+  prior: KimiParserState | null,
+): { messageCount: number; tokenCount: number; outputTokens: number; newState: KimiParserState } {
+  const wirePath = path.join(sessionDir, 'agents', 'main', 'wire.jsonl');
+
+  const stat = safeStatSync(wirePath);
+  if (!stat) {
+    // No wire.jsonl (yet): zero counters, offset 0 so a later append is a clean
+    // full parse.
+    return { messageCount: 0, tokenCount: 0, outputTokens: 0, newState: { v: 1, offset: 0, messageCount: 0, tokenCount: 0, outputTokens: 0 } };
   }
 
+  // INCREMENTAL only when a usable prior exists AND the file grew past its
+  // offset; otherwise FULL from byte 0 with fresh counters (cold start OR the
+  // file shrank to/below the offset — a truncation/rewrite).
+  const canIncrement = prior !== null && stat.size > prior.offset;
+  const fromOffset = canIncrement ? prior!.offset : 0;
+  const acc = canIncrement
+    ? { messageCount: prior!.messageCount, tokenCount: prior!.tokenCount, outputTokens: prior!.outputTokens }
+    : { messageCount: 0, tokenCount: 0, outputTokens: 0 };
+
+  let consumedBytes = 0;
   try {
-    const lines = fs.readFileSync(wirePath, 'utf-8').split('\n');
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const event = JSON.parse(line);
-        if (event.type === 'context.append_message') {
-          messageCount++;
-        } else if (event.type === 'usage.record' && event.usage) {
-          // Kimi usage structure: inputOther + output + inputCacheRead + inputCacheCreation
-          const u = event.usage;
-          tokenCount += (u.inputOther || 0) + (u.output || 0) + (u.inputCacheRead || 0) + (u.inputCacheCreation || 0);
-          outputTokens += (u.output || 0);
+    const buf = fs.readFileSync(wirePath);
+    const appended = buf.subarray(fromOffset);
+    // Bytes up to AND INCLUDING the last '\n' are the committed, complete-line run.
+    const lastNl = appended.lastIndexOf(0x0a);
+    consumedBytes = lastNl === -1 ? 0 : lastNl + 1;
+    if (consumedBytes > 0) {
+      for (const line of appended.subarray(0, consumedBytes).toString('utf-8').split('\n')) {
+        if (!line.trim()) continue;
+        try {
+          applyKimiWireEvent(acc, JSON.parse(line));
+        } catch {
+          // Malformed line, skip
         }
-      } catch {
-        // Malformed line, skip
       }
     }
   } catch {
-    // If wire.jsonl can't be read, return 0s (graceful degradation)
+    // If wire.jsonl can't be read, keep the accumulated counters (0s on a cold
+    // parse) — graceful degradation, matching the pre-incremental behavior.
   }
 
-  return { messageCount, tokenCount, outputTokens };
+  return {
+    messageCount: acc.messageCount,
+    tokenCount: acc.tokenCount,
+    outputTokens: acc.outputTokens,
+    newState: { v: 1, offset: fromOffset + consumedBytes, messageCount: acc.messageCount, tokenCount: acc.tokenCount, outputTokens: acc.outputTokens },
+  };
+}
+
+/**
+ * Parse the prior continuation blob for a changed Kimi session into a usable
+ * {@link KimiParserState}, or null when there is none / it is unusable. A blob
+ * from a different serialization version is treated as absent so the wire parse
+ * falls back to a clean FULL parse rather than resuming against a stale shape.
+ */
+function parsePriorKimiState(row: { parserState: string | null } | undefined): KimiParserState | null {
+  if (!row?.parserState) return null;
+  try {
+    const parsed = JSON.parse(row.parserState) as KimiParserState;
+    if (parsed?.v !== 1 || typeof parsed.offset !== 'number') return null;
+    return parsed;
+  } catch {
+    return null;
+  }
 }
 
 /**

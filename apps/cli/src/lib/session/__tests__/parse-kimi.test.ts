@@ -41,7 +41,12 @@ function makeKimiSession(wireContent: string): string {
     title: 'Test session',
     createdAt: '2026-06-24T00:00:00.000Z',
   }));
-  fs.writeFileSync(path.join(agentsDir, 'wire.jsonl'), wireContent);
+  // Real Kimi wire.jsonl is newline-terminated (see testdata/kimi-tool-args.jsonl,
+  // which ends in 0x0a). Terminate the fixture too so the incremental parse's
+  // trailing-line discipline (a complete-but-unterminated tail is DEFERRED, not
+  // applied — the double-count guard) sees the final record as committed.
+  const terminated = wireContent.endsWith('\n') || wireContent === '' ? wireContent : wireContent + '\n';
+  fs.writeFileSync(path.join(agentsDir, 'wire.jsonl'), terminated);
   return path.join(sessionDir, 'state.json');
 }
 
