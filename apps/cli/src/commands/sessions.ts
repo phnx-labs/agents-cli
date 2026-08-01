@@ -989,12 +989,10 @@ async function renderSessionPreview(
   const { matches, completeId } = resolveSessionQuery(pool, query);
   const session = matches[0];
   if (!session) {
-    // A complete id that missed is not "no match for this text" — say which.
-    console.log(
-      completeId
-        ? chalk.gray(`No session with id ${query} on this machine.`)
-        : chalk.gray(`No session matches "${query}".`),
-    );
+    // A complete id that missed is not "no match for this text" — say which, and
+    // give the same fleet pointer the render paths give.
+    if (completeId) notFoundByIdMessage(query).forEach(l => console.log(l));
+    else console.log(chalk.gray(`No session matches "${query}".`));
     return;
   }
   console.log(buildPreview(session));
@@ -1357,8 +1355,14 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
   }
 }
 
+/** Whether a query should route to the single-session render rather than the
+ * listing. The hex-ish test catches a bare id prefix; `isCompleteSessionId`
+ * additionally catches the prefixed whole ids (`session_…`, `ses_…`) that the
+ * hex test rejects — without it those never reach the id-only resolution and
+ * still content-search. */
 function looksLikeSessionId(query: string): boolean {
-  return /^[0-9a-f-]{6,}$/i.test(query.trim());
+  const trimmed = query.trim();
+  return /^[0-9a-f-]{6,}$/i.test(trimmed) || isCompleteSessionId(trimmed);
 }
 
 function teamTag(session: SessionMeta): string {
@@ -2330,26 +2334,35 @@ export interface SessionQueryResolution {
  * metadata+content search.
  */
 export function resolveSessionQuery(pool: SessionMeta[], query: string): SessionQueryResolution {
-  const completeId = isCompleteSessionId(query);
-  const byIdMatches = resolveSessionById(pool, query);
+  // Normalize ONCE here. isCompleteSessionId trims but resolveSessionById does
+  // not, so a padded id ("<uuid> ", e.g. pasted from a terminal) would classify
+  // as complete and then miss the id lookup — reporting a session that IS on
+  // this machine as absent.
+  const normalized = query.trim();
+  const completeId = isCompleteSessionId(normalized);
+  const byIdMatches = resolveSessionById(pool, normalized);
   if (byIdMatches.length > 0 || completeId) {
     return { matches: byIdMatches, byId: true, completeId };
   }
-  return { matches: filterSessionsByQuery(pool, query), byId: false, completeId };
+  return { matches: filterSessionsByQuery(pool, normalized), byId: false, completeId };
 }
 
-/** Explain an ambiguous resolution: a short id can be lengthened, a search phrase cannot. */
-function ambiguityHint(byId: boolean): string {
+/** Explain an ambiguous resolution. Only a short id can be lengthened: a complete
+ * id is already maximal, and a search phrase was never an id to begin with. */
+function ambiguityHint(byId: boolean, completeId: boolean): string {
+  if (completeId) return 'That is already a complete id — these rows share it as a prefix.';
   return byId
     ? 'Pass a longer ID to narrow it down.'
     : 'That matched on text, not an id. Pass a session id, or narrow the search.';
 }
 
-/** Explain a complete-id miss, which no local rephrasing can fix. */
+/** Explain a complete-id miss, which no local rephrasing can fix. Echoes the
+ * normalized id so a pasted, padded argument doesn't produce an unrunnable hint. */
 function notFoundByIdMessage(query: string): string[] {
+  const id = query.trim();
   return [
-    chalk.red(`No session with id ${query} on this machine.`),
-    chalk.gray(`Search the fleet with: agents sessions ${query} --device <host>`),
+    chalk.red(`No session with id ${id} on this machine.`),
+    chalk.gray(`Search the fleet with: agents sessions ${id} --device <host>`),
   ];
 }
 
@@ -2509,7 +2522,7 @@ async function renderArtifactsGlobal(
       for (const m of queryMatches.slice(0, 10)) {
         console.error(chalk.cyan(`  ${m.shortId}  ${m.id}  ${(m as any).label ?? m.topic ?? ''}`));
       }
-      console.error(chalk.gray(ambiguityHint(byId)));
+      console.error(chalk.gray(ambiguityHint(byId, completeId)));
       process.exit(1);
     }
 
@@ -2547,12 +2560,13 @@ async function renderOneSession(
     const resolution = resolveSessionQuery(allSessions, query);
     let queryMatches: SessionMeta[] = resolution.matches;
     let byId = resolution.byId;
+    const completeId = resolution.completeId;
 
     // Widen to the transcript content index only for a genuine search phrase. A
     // complete id is unique, so widening could only ever surface a DIFFERENT
     // session that happens to mention the id — which is what made `sessions
     // <uuid>` render an unrelated transcript.
-    if (queryMatches.length === 0 && !resolution.completeId) {
+    if (queryMatches.length === 0 && !completeId) {
       const contentResults = searchContentIndex(allSessions, query);
       if (contentResults.size > 0) {
         const matchedSessions = Array.from(contentResults.values())
@@ -2577,7 +2591,7 @@ async function renderOneSession(
           renderClaudeHistoryOnlyId(query, historyEntry, allSessions);
           process.exit(1);
         }
-      } else if (resolution.completeId) {
+      } else if (completeId) {
         notFoundByIdMessage(query).forEach(l => console.error(l));
         process.exit(1);
       } else {
@@ -2594,7 +2608,7 @@ async function renderOneSession(
         for (const match of queryMatches.slice(0, 10)) {
           console.error(chalk.cyan(`  ${match.shortId}  ${match.id}  ${(match as any).label ?? match.topic ?? ''}`));
         }
-        console.error(chalk.gray(ambiguityHint(byId)));
+        console.error(chalk.gray(ambiguityHint(byId, completeId)));
         process.exit(1);
       } else {
         session = queryMatches[0];

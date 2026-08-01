@@ -992,4 +992,28 @@ describe('resolveSessionQuery id-vs-search resolution', () => {
     expect(r.byId).toBe(false);
     expect(r.completeId).toBe(false);
   });
+
+  // isCompleteSessionId trims but resolveSessionById does not, so without a
+  // single normalization point a pasted, padded id classified as complete and
+  // then missed the lookup — reporting a session that IS here as absent.
+  it('resolves a padded id instead of declaring it missing', () => {
+    const real = meta({ id: wanted, topic: 'Improve session display' });
+    const r = resolveSessionQuery([decoy, real], `  ${wanted} `);
+    expect(r.matches.map(s => s.id)).toEqual([wanted]);
+    expect(r.completeId).toBe(true);
+  });
+
+  it('resolves a session_-prefixed complete id by id, not by content', () => {
+    const prefixed = 'session_933f4131-f3ed-495d-946b-71825e9f6a25';
+    const mentions = meta({ id: 'aaaa1111-2222-4333-8444-555566667777', topic: `see ${prefixed}` });
+    expect(resolveSessionQuery([mentions], prefixed).matches).toEqual([]);
+    const real = meta({ id: prefixed, topic: 'kimi run' });
+    expect(resolveSessionQuery([mentions, real], prefixed).matches.map(s => s.id)).toEqual([prefixed]);
+  });
+
+  it('resolves a ses_ ULID complete id by id, not by content', () => {
+    const ses = 'ses_0485d75c1ffewpzVfoI0ni6hW1';
+    const mentions = meta({ id: 'bbbb1111-2222-4333-8444-555566667777', topic: `see ${ses}` });
+    expect(resolveSessionQuery([mentions], ses).matches).toEqual([]);
+  });
 });

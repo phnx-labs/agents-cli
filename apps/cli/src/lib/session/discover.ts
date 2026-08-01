@@ -454,25 +454,33 @@ function normalizeCwd(cwd?: string): string {
   return safeRealpathSync(resolved) || resolved;
 }
 
-/** The optional vendor prefixes a session id can carry, mirroring the strips in
- * {@link deriveShortId}. */
-const SESSION_ID_PREFIX = /^(session_|api-|ses_)/;
 /** Canonical 8-4-4-4-12 hex UUID (covers both v4 and the v7 ids newer harnesses mint). */
 const UUID_36 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** kimi and rush mint `session_` + a UUID. */
+const SESSION_UUID_PREFIX = /^session_/;
+/** opencode mints `ses_` + a 26-char ULID — NOT a UUID, so it needs its own shape. */
+const SES_ULID = /^ses_[0-9a-z]{26}$/;
 
 /**
  * Whether a query is a session id in full, rather than an id prefix or a search
- * phrase. True for a bare 36-char UUID and for one carrying a known vendor
- * prefix (`session_…`, `api-…`, `ses_…`).
+ * phrase.
  *
  * Callers use this to decide that an id lookup is the ONLY admissible
  * interpretation: a complete id is unique, so when it misses there is nothing
  * left to widen to. Without the check, `sessions <uuid>` fell through to the
  * FTS content search, which tokenizes the UUID and matches every transcript that
  * merely mentions it — surfacing unrelated sessions as if they were id matches.
+ *
+ * The accepted shapes are the ones the index actually holds, measured over a
+ * 12,507-row index: a bare UUID (11,116 rows), `session_` + UUID (1,360 — kimi
+ * and rush), and `ses_` + ULID (15 — opencode). Deliberately NOT covered, so a
+ * miss keeps today's search behavior rather than gaining a wrong error: routine
+ * run ids (ISO timestamps, matched via `routineRunId` below) and cloud execution
+ * ids, whose charset is too permissive to distinguish from a search phrase.
  */
 export function isCompleteSessionId(query: string): boolean {
-  return UUID_36.test(query.trim().toLowerCase().replace(SESSION_ID_PREFIX, ''));
+  const q = query.trim().toLowerCase();
+  return UUID_36.test(q.replace(SESSION_UUID_PREFIX, '')) || SES_ULID.test(q);
 }
 
 /**

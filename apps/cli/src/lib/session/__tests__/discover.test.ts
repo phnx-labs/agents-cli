@@ -375,10 +375,29 @@ describe('isCompleteSessionId', () => {
     expect(isCompleteSessionId('019fbd2f-971a-7fb0-a213-3709a27cd12b')).toBe(true);
   });
 
-  it('accepts the vendor-prefixed forms carried in the index', () => {
+  // The prefixed shapes are the ones the index actually holds — verified against
+  // a live 12,507-row index: session_+UUID (kimi, rush) and ses_+26-char ULID
+  // (opencode). `ses_` is NOT a UUID, so it needs its own shape, and `api-`
+  // appears zero times and is deliberately not claimed.
+  it('accepts session_ + UUID, the shape kimi and rush mint', () => {
     expect(isCompleteSessionId('session_933f4131-f3ed-495d-946b-71825e9f6a25')).toBe(true);
-    expect(isCompleteSessionId('ses_933f4131-f3ed-495d-946b-71825e9f6a25')).toBe(true);
-    expect(isCompleteSessionId('api-933f4131-f3ed-495d-946b-71825e9f6a25')).toBe(true);
+  });
+
+  it('accepts ses_ + 26-char ULID, the shape opencode actually mints', () => {
+    expect(isCompleteSessionId('ses_0485d75c1ffewpzVfoI0ni6hW1')).toBe(true);
+    expect(isCompleteSessionId('ses_0e508fa24ffeZe0092umrYovhg')).toBe(true);
+  });
+
+  it('rejects ses_ + UUID — a shape no harness mints', () => {
+    expect(isCompleteSessionId('ses_933f4131-f3ed-495d-946b-71825e9f6a25')).toBe(false);
+  });
+
+  it('rejects a truncated ULID, so a ses_ prefix stays searchable', () => {
+    expect(isCompleteSessionId('ses_0485d75c')).toBe(false);
+  });
+
+  it('accepts a padded id, matching the resolver that trims before lookup', () => {
+    expect(isCompleteSessionId('  d3470b57-2af6-4c11-b1de-3fab94f43603 ')).toBe(true);
   });
 
   it('rejects a short id, a truncated id, and a search phrase', () => {
