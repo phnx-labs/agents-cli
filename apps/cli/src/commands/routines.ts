@@ -351,8 +351,10 @@ export function registerRoutinesCommands(program: Command): void {
         - Detached/daemon fires use the pre-flight pick only (next tick re-selects).
         - Diagnostic lines log which account was picked, which were skipped, and
           each failover hop: look for "[agents] routine <name>:" in the run log.
-        - Headless Claude auth: store CLAUDE_CODE_OAUTH_TOKEN in the 'claude'
-          secrets bundle so the daemon can inject it into routine spawns.
+        - Claude auth: a routine authenticates through the pinned account's own
+          on-disk login (the same one 'agents run claude' uses on this device).
+          The daemon injects no token; if that account's login has expired the
+          run is skipped up front with a re-login hint.
     `,
   });
 

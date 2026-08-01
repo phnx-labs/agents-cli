@@ -236,62 +236,66 @@ Nothing from `apps/`, `native/`, or sibling `packages/` can leak into the tarbal
 
 ## Releasing
 
-**Releases can be cut locally on macOS, or driven from Linux by offloading the
-Mac-only signing to a remote sign host.** Run from a clean, in-sync `main`:
+**Self-routing, zero-config.** Run it from ANY fleet box with an empty
+environment — no variables to set, no Touch ID, no hand-moved credentials. Run
+from a clean, in-sync `main`:
 
 ```bash
-scripts/release.sh <version>          # dry-run: bump, type-check, build, test, tarball preview
-scripts/release.sh <version> --apply  # commits chore(release), tags v<version>, npm publish, pushes
+scripts/release.sh <version>          # dry-run: bump, type-check, tarball preview, detected state
+scripts/release.sh <version> --apply  # tests on a crabbox -> PR + CI -> merge + tag -> build/sign/publish on the home base
 ```
 
-`release.sh` resolves the npm token in three steps — no 2FA prompt, no token on
-disk: (1) an env-supplied `NPM_TOKEN`; (2) the local `npmjs.com` secrets bundle
-(`agents secrets`); (3) if neither is present — e.g. a release driven from a Linux
-box whose own store has no npm token — it **borrows the bundle from a primary
-device over SSH** via `agents secrets exec npmjs.com --host <host>`, which resolves
-on the remote and injects into this run only (never stored locally). It tries
-`SECRET_HOST` first, then `zion`, then `mac-mini`. This is why a Linux release no
-longer stops to ask you to approve a token: the sanctioned remote-resolve path
-fires automatically instead of an agent hand-moving a credential between hosts.
-The script's git-scope reads use
-`<ref>:apps/cli/package.json` (not root) since the package moved under `apps/cli`.
-If npm rejects a publish after the release PR merges, rerun the same command.
-The script revalidates that PR's full CI matrix and rebuilds from its exact merged
-tree in a temporary worktree. It verifies the staged keychain helper against the
-historical SHA pin, rebuilds the unpinned menu-bar helper from historical source,
-and requires any remote tag to name the verified release commit, so later commits
-on `main` cannot leak into the already-versioned package or strand the retry.
+The release has **three self-selected homes** and prints a `[n/6]` phase tracker,
+each phase labeled with the box it runs on and a ✓/✗ result:
 
-**Linux-driven release (`SIGN_HOST`).** The signed macOS artifacts (below) are
-the only reason publishing was macOS-pinned. `release.sh` now offloads producing
-them: on every **non-macOS** release (the standalone CLI binary embeds the release
-version, so it must be rebuilt each time; `FORCE_REMOTE_SIGN=1` forces it on any
-host), it invokes [`scripts/remote-sign-mac.sh`](scripts/remote-sign-mac.sh), which
-rsyncs the build inputs (the full `src/` tree + `package.json`/`bun.lock`,
-keychain-helper.swift, entitlements, the build/sign scripts, the `menubar/` Swift
-package, and — if present — `bin/embedded.provisionprofile`)
-to an **auto-selected** sign host, runs the Mac build scripts there under its
-headless signing creds (unlock `rush-signing.keychain-db`; Apple notary creds via
-the `apple.com` secrets bundle), then pulls the signed `bin/*.app` +
-`bin/agents-macos` back and re-verifies both sha pins locally. `bun run build` copies the helpers into
-`dist/` on a **presence** gate now (`[ -d bin/… ]`), not `[ "$(uname)" = Darwin ]`,
-so a Linux box that has pulled the pre-signed bundles packages them; `prepack`'s
-sha gate is sha-tool-portable (`shasum` or `sha256sum`). The sign host needs a
-Developer ID identity in `rush-signing.keychain-db`, the `kcpass` + `secrets.pass`
-files under `~/Library/Application Support/rush/`, the `apple.com` secrets bundle,
-and `bin/embedded.provisionprofile` (for the notarized keychain helper). Override
-the checkout with `SIGN_HOST_REPO` (`$HOME` resolves on the remote side).
+| Work | Runs on | How it's chosen |
+|---|---|---|
+| Orchestrate: bump, changelog, PR, tag | the box you invoked it on | it's already there (git + gh only) |
+| CI / tests (Linux) | a **crabbox** (Hetzner Linux VM) | [`scripts/sandbox.sh`](scripts/sandbox.sh) selects an available box for this repo's `.crabbox.yaml` profile or warms a fresh one — **dynamic, never a hardcoded instance** |
+| Build, sign+notarize, npm publish, computer-helper | the **home base** | one hardcoded constant `RELEASE_HOME_BASE="mac-mini"` in `release.sh`; the script detects if it's already there (`scutil --get LocalHostName` / `hostname -s`), else reaches it over `ssh` |
 
-**Sign-host selection (no hardcoded Mac).** With `SIGN_HOST` unset,
-`remote-sign-mac.sh` discovers one at runtime: it reads `agents devices list
---json`, keeps the reachable/online macOS boxes, and picks the first that answers
-`ssh` in preference order **`mac-mini` → `zion` → any other online Mac** — so a
-Linux-driven release still proceeds when the usual appliance is offline, without an
-agent hardcoding a host (or triggering a Touch ID prompt on a box nobody is sitting
-at). `SIGN_HOST=<host>` pins one explicitly and skips discovery; if no reachable Mac
-has the signing keychain, the script fails with the list it tried. `mac-mini` is
-preferred because it signs headlessly; `zion` (the interactive Mac) is the
-fallback.
+`mac-mini` is the only hardcoded machine name (it holds the Developer ID cert +
+npm publish rights). The crabbox is **not** hardcoded.
+
+**The privileged phase runs on the home base, always — from the TAGGED script.**
+After the invoking box merges + tags (git + gh, which need that box's auth),
+`release.sh` routes build + sign + notarize + `npm publish` + computer-helper to
+`mac-mini`. Whether inline (you invoked it there) or over ssh, it first checks out
+`v<version>` into a throwaway worktree under `.agents/worktrees/`, then runs **that
+worktree's** `apps/cli/scripts/release.sh <version> --home-base-phase` — so the
+script that publishes is the one carried by the release tag (with
+`--home-base-phase` + `headless-sign-context.sh`), never the home base's possibly-
+stale on-disk checkout. The worktree is removed on exit whether the phase succeeds
+or fails. `--home-base-phase` runs inside that worktree: it verifies the checked-
+out version == `<version>`, enters the headless context
+([`scripts/headless-sign-context.sh`](scripts/headless-sign-context.sh) — unlocks
+`rush-signing.keychain-db` + exports `AGENTS_SECRETS_PASSPHRASE` from the on-disk
+pass files, so codesign/notarytool and every `agents secrets exec` run with **no
+Touch ID**), builds + signs the artifacts, resolves the **npm token on the home
+base** (never borrowed to the trigger box), publishes, and pushes the computer-
+helper release asset. `bun run build` copies the signed helpers into `dist/` on a
+presence gate (`[ -d bin/… ]`); `prepack`'s sha gate is sha-tool-portable.
+
+**Tests: crabbox for Linux, GH Actions for the rest.** The `--apply` flow runs the
+full suite on a crabbox before opening the PR; a failure prints the failing tests +
+the captured log path and **halts before any PR/publish**. That covers the Linux
+suite; the GH Actions CI matrix on the release PR still gates the cross-platform
+(macOS/Windows) legs (`wait_for_ci_green` blocks on them, fail-closed). `--skip-tests`
+skips only the crabbox lease.
+
+**Idempotent re-runs.** The script's git-scope reads use `<ref>:apps/cli/package.json`
+(not root) since the package moved under `apps/cli`. If a publish fails after the PR
+merges, rerun the same command: registry-truth short-circuits skip an
+already-published version, tag creation is idempotent against the verified release
+commit, and the catch-up guards (CI-tested-head match + merged-tree match + version
+match) refuse an unverified publish so later commits on `main` cannot leak into the
+already-versioned package.
+
+**`scripts/remote-sign-mac.sh` is no longer on the release path.** The privileged
+phase builds signed artifacts directly on the home base. The script remains only
+for the narrow case of building + pulling back JUST the signed macOS artifacts from
+another Mac (no publish); it too is zero-config, targeting the same hardcoded
+`RELEASE_HOME_BASE` with no env knobs or fleet discovery.
 
 **Why not CI?** The tarball bundles `dist/lib/secrets/Agents CLI.app` — a native
 keychain helper compiled with `swiftc`, codesigned (Developer ID), and notarized
@@ -316,9 +320,9 @@ needs MAP_JIT or the binary dies on startup), and notarizes it via
 points the alias shims and the `~/.local/bin/agents`/`ag` links at it, with a
 run-probe fallback to the JS entrypoint (mitigation 1 of #315 — the unsigned
 node-shebang shim is what EDR flags). Unlike the `.app` helpers it embeds the
-release version, so it is rebuilt **every** release: locally on macOS (`release.sh`
-injects Apple creds via the `apple.com` bundle) or on the sign host for
-Linux-driven releases. `prepack` gates it with
+release version, so it is rebuilt **every** release on the home base (`release.sh`
+injects Apple creds via the `apple.com` bundle in the headless context). `prepack`
+gates it with
 [`scripts/verify-cli-binary.sh`](scripts/verify-cli-binary.sh): sha pin at
 `scripts/agents-cli-bin.sha256` (gitignored — a per-release artifact paired to the
 sign run, unlike the helper's committed pin), an embedded-version check so a stale

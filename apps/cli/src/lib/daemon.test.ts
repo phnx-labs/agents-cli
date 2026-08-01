@@ -1,14 +1,13 @@
 /**
  * Daemon service-manifest generation.
  *
- * The load-bearing security contract under test (RUSH-1759): the Claude OAuth
- * token stored in the `claude` secrets bundle is NEVER written into the launchd
- * plist / systemd unit, even when one is configured — a persisted service
- * manifest is a plaintext credential on disk. The daemon obtains the token at
- * startup from the secure store instead (readDaemonClaudeOAuthToken). The
- * Keychain itself is swapped for an in-memory backend via
- * setKeychainBackendForTest so the generators can be exercised with a token
- * configured and proven to omit it.
+ * The load-bearing security contract under test: the service manifest (launchd
+ * plist / systemd unit) NEVER embeds a Claude OAuth token — even when one is
+ * configured in the `claude` secrets bundle. The daemon holds no Claude
+ * credential of its own; routine runs authenticate through the per-account
+ * CLAUDE_CONFIG_DIR login on the device. The Keychain is swapped for an
+ * in-memory backend via setKeychainBackendForTest so a token can be configured
+ * and the generators proven to omit it.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -21,9 +20,6 @@ import { fileURLToPath } from 'url';
 import {
   generateLaunchdPlist,
   generateSystemdUnit,
-  readDaemonClaudeOAuthToken,
-  readDaemonClaudeBundleEnv,
-  buildDetachedDaemonEnv,
   getDaemonLaunch,
   getAgentsInvocation,
   getAgentsBinPath,
@@ -70,11 +66,6 @@ function seedKeychainBacked(value: string): void {
   setKeychainToken(secretsKeychainItem('claude', 'CLAUDE_CODE_OAUTH_TOKEN'), value);
 }
 
-/** Seed the `claude` bundle with a literal CLAUDE_CODE_OAUTH_TOKEN. */
-function seedLiteral(value: string): void {
-  writeBundle({ name: 'claude', vars: { CLAUDE_CODE_OAUTH_TOKEN: value } });
-}
-
 let restore: KeychainBackend | null = null;
 let prevNoAgent: string | undefined;
 
@@ -97,37 +88,6 @@ afterEach(() => {
   setKeychainBackendForTest(restore);
   if (prevNoAgent === undefined) delete process.env.AGENTS_SECRETS_NO_AGENT;
   else process.env.AGENTS_SECRETS_NO_AGENT = prevNoAgent;
-});
-
-describe('readDaemonClaudeOAuthToken', () => {
-  it('returns null when the bundle does not exist', () => {
-    expect(readDaemonClaudeOAuthToken()).toBeNull();
-  });
-
-  it('returns a keychain-backed token', () => {
-    seedKeychainBacked('sk-ant-oat01-abc123');
-    expect(readDaemonClaudeOAuthToken({ allowPrompt: true })).toBe('sk-ant-oat01-abc123');
-  });
-
-  it('returns a token stored as a literal (the no-op footgun fix)', () => {
-    seedLiteral('sk-ant-oat01-literal');
-    expect(readDaemonClaudeOAuthToken({ allowPrompt: true })).toBe('sk-ant-oat01-literal');
-  });
-
-  it('trims surrounding whitespace from the stored token', () => {
-    seedKeychainBacked('  sk-ant-oat01-abc123\n');
-    expect(readDaemonClaudeOAuthToken({ allowPrompt: true })).toBe('sk-ant-oat01-abc123');
-  });
-
-  it('treats an empty/whitespace-only token as absent', () => {
-    seedKeychainBacked('   ');
-    expect(readDaemonClaudeOAuthToken({ allowPrompt: true })).toBeNull();
-  });
-
-  it('does not fall through to Keychain when prompting is unavailable', () => {
-    seedKeychainBacked('sk-ant-oat01-must-not-be-read');
-    expect(readDaemonClaudeOAuthToken({ allowPrompt: false })).toBeNull();
-  });
 });
 
 describe('writeOwnerOnlyServiceManifest', () => {
@@ -175,11 +135,8 @@ describe('generateLaunchdPlist', () => {
     expect(plist).not.toContain('v24.0.0');
   });
 
-  it('omits the token even when one is configured in the claude bundle (RUSH-1759)', () => {
+  it('omits the token even when one is configured in the claude bundle', () => {
     seedKeychainBacked('sk-ant-oat01-abc123');
-    // Sanity: the token IS resolvable — proving the omission below is the
-    // generator's doing, not an empty bundle.
-    expect(readDaemonClaudeOAuthToken({ allowPrompt: true })).toBe('sk-ant-oat01-abc123');
     const plist = generateLaunchdPlist();
     expect(plist).not.toContain('CLAUDE_CODE_OAUTH_TOKEN');
     expect(plist).not.toContain('sk-ant-oat01-abc123');
@@ -191,9 +148,8 @@ describe('generateSystemdUnit', () => {
     expect(generateSystemdUnit()).not.toContain('CLAUDE_CODE_OAUTH_TOKEN');
   });
 
-  it('omits the token even when one is configured in the claude bundle (RUSH-1759)', () => {
+  it('omits the token even when one is configured in the claude bundle', () => {
     seedKeychainBacked('sk-ant-oat01-abc123');
-    expect(readDaemonClaudeOAuthToken({ allowPrompt: true })).toBe('sk-ant-oat01-abc123');
     const unit = generateSystemdUnit();
     expect(unit).not.toContain('CLAUDE_CODE_OAUTH_TOKEN');
     expect(unit).not.toContain('sk-ant-oat01-abc123');
@@ -245,29 +201,6 @@ describe('service manifest CLI entry injection', () => {
       process.argv[1] = savedArgv1;
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
-  });
-});
-
-describe('buildDetachedDaemonEnv', () => {
-  it('injects the token when configured and absent from the base env', () => {
-    seedKeychainBacked('sk-ant-oat01-detached');
-    const env = buildDetachedDaemonEnv(
-      { PATH: '/usr/bin' },
-      readDaemonClaudeBundleEnv({ allowPrompt: true }),
-    );
-    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe('sk-ant-oat01-detached');
-    expect(env.PATH).toBe('/usr/bin');
-  });
-
-  it('leaves an already-set token untouched (launchd-provided wins)', () => {
-    seedKeychainBacked('sk-ant-oat01-fromKeychain');
-    const env = buildDetachedDaemonEnv({ CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-fromEnv' });
-    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe('sk-ant-oat01-fromEnv');
-  });
-
-  it('adds no token key when none is configured', () => {
-    const env = buildDetachedDaemonEnv({ PATH: '/usr/bin' });
-    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
   });
 });
 

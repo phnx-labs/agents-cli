@@ -128,3 +128,53 @@ blast radius.
   daemon, covering the broker for free.
 - Migration: on upgrade, `bootout` the old secrets-agent service and let the
   daemon take over the socket.
+
+### Single-instance is enforced by two independent signals
+
+"Only one broker owns the socket" is the invariant the whole model rests on, and
+it was enforced by one signal that could lie:
+
+- `stopDaemon()` sent SIGTERM, scheduled its escalation on a `setTimeout`, and
+  cleared the daemon pid file **immediately**. In a short-lived caller (the npm
+  postinstall) that timer never fired, and the cleared pid file made
+  `isDaemonRunning()` report false while the old daemon was still running — so
+  `startDaemon()` launched a second one.
+- `bindBrokerSocket()` then treated a single missed `agentPing` as proof the
+  socket owner was dead. The broker is single-threaded, so a large read or the
+  startup rehydrate can outlast one 700ms ping while the process is healthy.
+
+Together they produced an orphan: the reclaiming broker unlinked the live socket
+and rebound, and the original kept running with every unlocked bundle in RAM,
+unreachable to every client. On a machine with two installs (nvm + homebrew) this
+recurred on every upgrade — `lsof` showed two processes on one socket path at two
+different kernel socket addresses.
+
+Both signals are now required before a socket is reclaimed:
+
+1. **Liveness is observed, not assumed.** `stopDaemon` waits for the process to
+   stop serving before clearing the pid file (`waitForExit` in `daemon.ts`), and
+   escalates to a tree-kill only when it genuinely did not exit. A **zombie counts
+   as exited** — it holds no socket — so a daemon that is the caller's own child
+   is never hard-killed after it has already gone.
+2. **A live socket owner is never evicted.** Whichever broker wins the bind records
+   its pid in `agent.owner` at the moment it is the confirmed owner (the same
+   instant it mints the capability token), and releases it on close.
+   `bindBrokerSocket` probes an in-use socket several times and, even then, refuses
+   to reclaim it while `brokerPidAlive()` reports a live owner.
+
+   `agent.owner` is deliberately a **separate file from `agent.pid`**. `agent.pid`
+   is the standalone service's O_EXCL single-instance claim, held by a standalone
+   that lost the socket race and stays alive and quiescent so launchd's KeepAlive
+   does not restart-loop it, ready to take over if the hosted broker stops.
+   Overloading it as the ownership record made that standalone see a live holder
+   and exit immediately — the very restart loop the guard exists to prevent. The
+   two files answer different questions: *who may run* versus *who is serving the
+   socket right now*. Both broker flavours write `agent.owner`, so the signal is
+   present for the daemon-hosted broker, which is the primary configuration.
+
+3. **Every teardown waits before unlinking.** `ensureAgentRunning`'s one-off
+   fallback and `teardownStaleBroker` used to SIGTERM a possibly-live broker and
+   immediately unlink its socket and pid files. That both orphaned a slow-exiting
+   broker and destroyed the ownership record the check above depends on, so the
+   successor saw an ownerless socket and reclaimed it regardless. Both now wait
+   for the process to stop serving first.

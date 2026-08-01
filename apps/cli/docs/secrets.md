@@ -13,11 +13,24 @@ or an `agents secrets get/export/exec` you run **in a plain shell**. Beneath an
 agent those same commands inherit `AGENTS_RUNTIME` and resolve broker-only — there
 the agent is the caller, not you. It names the requesting
 harness, bundle, reason, and unlock duration. Approved bundles are cached for seven
-days by default and are reused only by the same harness type.
+days by default.
 
-Use `agents secrets unlock prod --for claude` to pre-authorize a bundle for
-Claude. Codex, Kimi, and other harnesses require their own approval. `--ttl`
-changes the duration; `--durable` keeps the grant across sleep and reboot.
+**An unlock is global unless you narrow it.** `agents secrets unlock prod` grants
+every harness and a plain shell access for the whole TTL — one Touch ID covers all
+of them. `--for claude` narrows the grant to that harness alone, and other
+harnesses then need their own approval. A reader resolves its own harness scope
+first and falls back to the global grant, so a narrow grant always wins where it
+applies. `--ttl` changes the duration; `--durable` keeps the grant across sleep and
+reboot.
+
+Grants are keyed by scope (`*` for global, the harness id for a `--for` grant) in
+both the broker's memory and the durable session store, and both resolve through
+the same chain — so an unlock behaves identically before and after a daemon
+restart. Before this was unified, an unlock typed in a terminal was stored under
+the ambient `AGENTS_AGENT_NAME` (falling back to a literal `cli`) while a read from
+inside an agent looked under *its* ambient name: the two never met, and a valid
+grant read as "not unlocked" for its entire TTL. Grants written under the old `cli`
+scope migrate to global automatically on the next broker start.
 
 Named bundles of environment variables backed by macOS Keychain — device-local, biometry-gated, injected into agent runs at spawn time.
 

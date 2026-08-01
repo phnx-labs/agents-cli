@@ -12,7 +12,7 @@ import {
 import { readRunMeta } from '../routines.js';
 import { getRunsDir } from '../state.js';
 import type { JobConfig } from '../routines.js';
-import { getBinaryPath, getVersionDir, getVersionHomePath } from '../versions.js';
+import { getBinaryPath, getVersionDir } from '../versions.js';
 import { rotationFailoverChain, type RotateCandidate, type RotateResult } from '../rotate.js';
 import { detectRateLimit } from '../exec.js';
 
@@ -256,52 +256,18 @@ describe('buildRoutineSpawnEnv', () => {
     expect(env.HOME).toBe('/tmp/overlay');
   });
 
-  // RUSH-1979: the routines daemon injects one ambient CLAUDE_CODE_OAUTH_TOKEN so
-  // a token-less default account still authenticates. When rotation pins a
-  // specific account whose config dir holds its OWN credential, that ambient
-  // token would shadow the account (Claude and the Linux shim both prefer the env
-  // var) — leaving the balanced pool inert and 401ing on the one stale token.
-  describe('RUSH-1979 — drops the ambient CLAUDE_CODE_OAUTH_TOKEN for a rotated account', () => {
-    // Use a throwaway version slot so we never touch a real installed version.
-    const VER = '9.9.9-rush1979-test';
-    const home = getVersionHomePath('claude', VER);
-    const credFile = path.join(home, '.claude', '.credentials.json');
-
-    afterEach(() => {
-      try {
-        fs.rmSync(getVersionDir('claude', VER), { recursive: true, force: true });
-      } catch { /* best effort */ }
-    });
-
-    it.skipIf(process.platform === 'darwin')(
-      'drops the injected token when the pinned account home has its own credential',
-      () => {
-        fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
-        fs.writeFileSync(
-          credFile,
-          JSON.stringify({ claudeAiOauth: { accessToken: 'at-account', refreshToken: 'rt-account' } }),
-          'utf-8',
-        );
-        const env = buildRoutineSpawnEnv(
-          { HOME: '/tmp/overlay', PATH: '/usr/bin', CLAUDE_CODE_OAUTH_TOKEN: 'daemon-injected-stale' },
-          'claude',
-          VER,
-        );
-        expect(env.CLAUDE_CONFIG_DIR).toContain(path.join('claude', VER));
-        expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
-      },
+  // The daemon holds no Claude token, so buildRoutineSpawnEnv does no claude-token
+  // manipulation at all — it neither injects a per-account/ambient token nor drops
+  // one. A routine authenticates through the pinned account's own CLAUDE_CONFIG_DIR
+  // login, identical to interactive `agents run`.
+  it('adds no CLAUDE_CODE_OAUTH_TOKEN — routines use the per-account CLAUDE_CONFIG_DIR login', () => {
+    const env = buildRoutineSpawnEnv(
+      { HOME: '/tmp/overlay', PATH: '/usr/bin' },
+      'claude',
+      '2.1.0',
     );
-
-    it('keeps the injected token when the pinned account has no on-disk credential (RUSH-1759 default)', () => {
-      // No credential written under `home`, so the account cannot self-authenticate
-      // — the daemon-injected token must survive so the run still authenticates.
-      const env = buildRoutineSpawnEnv(
-        { HOME: '/tmp/overlay', PATH: '/usr/bin', CLAUDE_CODE_OAUTH_TOKEN: 'daemon-injected' },
-        'claude',
-        VER,
-      );
-      expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe('daemon-injected');
-    });
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+    expect(env.CLAUDE_CONFIG_DIR).toContain(path.join('claude', '2.1.0'));
   });
 });
 

@@ -179,11 +179,10 @@ export function buildAgentLaunchCommand(
   if (host) {
     command += ` --host ${shquote(host)}`;
   }
-  // Unpinned, no explicit host: CLI affinity-picks host via --smart (most-used
-  // online device has highest probability). Explicit Pick Host / @version pin
-  // skip this. Accounts stay on balanced unless strategy is set.
+  // Unpinned, no explicit host: affinity-pick device via --device auto.
+  // Explicit Pick Host / @version pin skip this.
   if (!host && !pinnedVersion) {
-    command += ' --smart';
+    command += ' --device auto';
   }
   if (sessionId && agentKey === 'claude') {
     command += ` --session-id ${sessionId}`;

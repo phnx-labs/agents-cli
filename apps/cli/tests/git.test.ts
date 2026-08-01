@@ -89,8 +89,7 @@ describe('pullRepo', () => {
   // every device eventually diverged and could never pull again, with nothing
   // in conflict. It now rebases, as its own doc comment always claimed.
   it('rebases a diverged branch instead of refusing when nothing conflicts', async () => {
-    // Remote and local each add a different file, so the histories diverge
-    // without creating a content conflict.
+    // Remote and local each add a DIFFERENT file → diverged, no conflict.
     writeFileSync(join(REMOTE_DIR, 'remote-only.txt'), 'remote');
     const remoteGit = simpleGit(REMOTE_DIR);
     await remoteGit.add('.');
@@ -104,14 +103,17 @@ describe('pullRepo', () => {
     const result = await pullRepo(LOCAL_DIR);
 
     expect(result.success).toBe(true);
+    // Upstream content arrived...
     expect(existsSync(join(LOCAL_DIR, 'remote-only.txt'))).toBe(true);
+    // ...and the local commit survived, replayed on top rather than discarded.
     expect(existsSync(join(LOCAL_DIR, 'local-only.txt'))).toBe(true);
     const log = await localGit.log({ maxCount: 1 });
     expect(log.latest?.message).toContain('local commit');
   });
 
-  // A failed pull must leave the checkout exactly as it found it. This keeps
-  // `rebase --abort` covered at the integration level.
+  // The integration suite had NO conflict coverage at all. A failed pull must
+  // leave the checkout exactly as it found it — the atomicity --ff-only gave
+  // for free, and the reason `rebase --abort` is in the catch.
   it('rolls the tree back on a genuine conflict, leaving no rebase in progress', async () => {
     writeFileSync(join(REMOTE_DIR, 'shared.txt'), 'remote side');
     const remoteGit = simpleGit(REMOTE_DIR);

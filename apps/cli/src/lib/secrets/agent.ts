@@ -31,13 +31,20 @@ import * as path from 'path';
 import { randomBytes } from 'crypto';
 import { spawn, spawnSync, execFileSync, type ChildProcess, type SpawnSyncReturns } from 'child_process';
 import { getHelpersDir, readMeta } from '../state.js';
-import { isAlive } from '../platform/process.js';
+import { isAlive, waitForExit } from '../platform/process.js';
 import { getKeychainHelperPath } from './install-helper.js';
 import { getCliVersion, getCliVersionFresh } from '../version.js';
 import { getCliLaunch } from '../cli-entry.js';
 import type { SecretsBundle } from './bundles.js';
+import { GLOBAL_HARNESS, bundleScopeChain } from './scope.js';
 import { rehydrateSessions, pruneSessionsOnSleep } from './session-store.js';
 import { SYNC_GET_CMD, SYNC_PING_CMD, SYNC_LOCK_CMD } from './sync-commands.js';
+
+// Re-exported so callers already reaching for agent.js keep one obvious home for
+// the scope vocabulary; the definitions live in the leaf module scope.ts because
+// agent.ts and session-store.ts import each other and a cyclic `const` read can
+// hit the ESM temporal dead zone at runtime.
+export { GLOBAL_HARNESS, bundleScopeChain };
 
 /** Bumped when the wire protocol changes; a client that pings a mismatched
  * server kills and respawns it rather than talking a stale dialect. */
@@ -66,6 +73,21 @@ const IDLE_EXIT_MS = 5 * 60 * 1000; // 5m
 
 /** How often the broker sweeps expired entries. */
 const SWEEP_INTERVAL_MS = 30 * 1000;
+
+/** How many times a starting broker probes an in-use socket before treating its
+ * owner as gone. One probe is not enough: the broker is single-threaded, so a
+ * large read or the startup rehydrate can outlast a single ping budget while the
+ * process is healthy. */
+const BIND_PROBE_ATTEMPTS = 3;
+/** How long a broker teardown waits for the old process to actually exit before
+ * clearing its socket + ownership record. */
+const BROKER_STOP_GRACE_MS = 3000;
+/** Pause between those probes. */
+const BIND_PROBE_INTERVAL_MS = 250;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /**
  * Timeouts for the three synchronous broker clients, split across the process
@@ -164,7 +186,7 @@ function onDarwin(): boolean {
 function rehydrateStore(now: number = Date.now()): Map<string, StoredBundle> {
   const store = new Map<string, StoredBundle>();
   for (const { name, entry } of rehydrateSessions(now)) {
-    const harness = entry.harness || 'cli';
+    const harness = entry.harness || GLOBAL_HARNESS;
     store.set(scopedBundleKey(name, harness), { bundle: entry.bundle, env: entry.env, expiresAt: entry.expiresAt, harness });
   }
   return store;
@@ -195,6 +217,21 @@ function pidPath(): string {
  */
 function tokenPath(): string {
   return path.join(agentDir(), 'agent.token');
+}
+
+/**
+ * Path of the CURRENT SOCKET OWNER's pid.
+ *
+ * Deliberately NOT `agent.pid`: that file is the standalone service's O_EXCL
+ * single-instance claim, and a standalone that loses the socket race stays alive
+ * and quiescent while holding it (so launchd's KeepAlive doesn't restart-loop
+ * it), ready to take over if the hosted broker stops. Overloading it as the
+ * socket-ownership record made the standalone see a live holder and exit
+ * immediately — the exact restart loop that guard exists to prevent. This file
+ * answers a different question: which pid is serving the socket right now.
+ */
+function ownerPath(): string {
+  return path.join(agentDir(), 'agent.owner');
 }
 
 /**
@@ -361,16 +398,19 @@ export function handleAgentRequest(
       // the broker is running pre-upgrade code and should be restarted.
       return { ok: true, cmd: 'ping', version: PROTOCOL_VERSION, cliVersion: getCliVersion() };
     case 'get': {
-      const key = scopedBundleKey(req.name, req.harness || 'cli');
-      const e = store.get(key);
-      if (!e || now >= e.expiresAt) {
-        if (e) store.delete(key); // drop expired on read
-        return { ok: true, cmd: 'get', hit: false };
+      // Walk own-harness → global so a `--for` grant wins over a global one and
+      // an unscoped unlock serves every harness (bundleScopeChain).
+      for (const scope of bundleScopeChain(req.harness)) {
+        const key = scopedBundleKey(req.name, scope);
+        const e = store.get(key);
+        if (!e) continue;
+        if (now >= e.expiresAt) { store.delete(key); continue; } // drop expired on read
+        return { ok: true, cmd: 'get', hit: true, bundle: e.bundle, env: e.env };
       }
-      return { ok: true, cmd: 'get', hit: true, bundle: e.bundle, env: e.env };
+      return { ok: true, cmd: 'get', hit: false };
     }
     case 'load':
-      const harness = req.harness || 'cli';
+      const harness = req.harness || GLOBAL_HARNESS;
       store.set(scopedBundleKey(req.name, harness), { bundle: req.bundle, env: req.env, expiresAt: now + req.ttlMs, harness });
       return { ok: true, cmd: 'load' };
     case 'lock': {
@@ -466,10 +506,44 @@ export function makeConnectionHandler(
 }
 
 /**
+ * Whether a live process still owns the broker pid file.
+ *
+ * A single missed `agentPing` is NOT proof the owner is dead — the broker is
+ * single-threaded, so a big `get` or the rehydrate at startup can blow the
+ * 700ms ping budget while the process is perfectly healthy. Treating that as
+ * death let a starting broker unlink a live socket and rebind, leaving the old
+ * process alive holding every unlocked bundle in RAM that no client could reach
+ * any more (observed live: two brokers, one socket path, two kernel sockets).
+ * The pid file is the second, independent liveness signal that makes the reclaim
+ * safe.
+ */
+/** Drop our ownership record, but only if it is still ours — never clobber a
+ *  successor that already claimed the socket. */
+export function releaseBrokerPid(): void {
+  try {
+    if (parseInt(fs.readFileSync(ownerPath(), 'utf-8').trim(), 10) === process.pid) {
+      fs.unlinkSync(ownerPath());
+    }
+  } catch { /* absent or unreadable — nothing to release */ }
+}
+
+export function brokerPidAlive(): boolean {
+  try {
+    const holder = parseInt(fs.readFileSync(ownerPath(), 'utf-8').trim(), 10);
+    return !isNaN(holder) && holder !== process.pid && isAlive(holder);
+  } catch {
+    return false; // no pid file → nothing claims ownership
+  }
+}
+
+/**
  * Bind the shared broker socket without stealing it from another live owner.
  * Both the standalone service and daemon-hosted broker use this single path so
  * either startup order is safe: a reachable owner wins, while an unreachable
  * stale socket is reclaimed once.
+ *
+ * "Unreachable" is established with retries plus a pid-file liveness check, never
+ * a single ping — see {@link brokerPidAlive}.
  */
 async function bindBrokerSocket(
   sock: string,
@@ -489,13 +563,36 @@ async function bindBrokerSocket(
         // confirmed socket owner — so a losing starter never clobbers the live
         // owner's token (RUSH-1760).
         try { writeAgentToken(); } catch { /* dir 0700 gates the socket regardless */ }
+        // Record ownership at the same moment, for the same reason. The
+        // daemon-hosted broker deliberately skips the O_EXCL pid-file GUARD (the
+        // daemon owns its instance), but without an ownership RECORD
+        // brokerPidAlive() has nothing to read — so a later starter saw an
+        // ownerless socket and reclaimed the live hosted broker anyway, which is
+        // the primary configuration and the one that actually orphaned here.
+        // Writing it from the confirmed owner covers both broker flavours.
+        try { fs.writeFileSync(ownerPath(), String(process.pid)); } catch { /* dir 0700 gates it */ }
         resolve(server);
       });
     });
 
   let bound = await listenOnce();
   if (bound !== 'inuse') return bound;
-  if ((await agentPing()).reachable) return null;
+
+  // Give a busy owner several chances before concluding it is gone. One slow
+  // ping used to be enough to evict a healthy broker and orphan its RAM.
+  for (let attempt = 0; attempt < BIND_PROBE_ATTEMPTS; attempt++) {
+    if ((await agentPing()).reachable) return null;
+    if (attempt < BIND_PROBE_ATTEMPTS - 1) await delay(BIND_PROBE_INTERVAL_MS);
+  }
+  // Silent but alive is still alive: refuse to steal the socket from a process
+  // that still owns the pid file, and let the caller surface the wedge instead
+  // of quietly starting a second broker on the same path.
+  if (brokerPidAlive()) {
+    throw new Error(
+      `Secrets broker socket is held by a live process that is not answering: ${sock}. ` +
+      `Run 'agents secrets lock --all' then retry, or stop the stuck broker.`,
+    );
+  }
 
   try { fs.unlinkSync(sock); } catch { /* disappeared between probe and reclaim */ }
   bound = await listenOnce();
@@ -654,6 +751,7 @@ export async function runSecretsAgent(
     try { watcher?.kill(); } catch { /* already gone */ }
     try { server.close(); } catch { /* not listening */ }
     try { fs.unlinkSync(sock); } catch { /* gone */ }
+    releaseBrokerPid();
     releasePid();
   };
 
@@ -757,6 +855,7 @@ export async function startHostedBroker(): Promise<{ close(): void } | null> {
       try { watcher?.kill(); } catch { /* already gone */ }
       try { server.close(); } catch { /* not listening */ }
       try { fs.unlinkSync(sock); } catch { /* gone */ }
+      releaseBrokerPid();
     },
   };
 }
@@ -853,7 +952,7 @@ function syncClient(sub: string[], timeout: number): SpawnSyncReturns<string> | 
  * null if the agent isn't running / doesn't hold this bundle / anything fails
  * (soft — caller falls through to the real keychain). macOS only.
  */
-export function agentGetSync(name: string, harness: string = 'cli'): { bundle: SecretsBundle; env: Record<string, string> } | null {
+export function agentGetSync(name: string, harness: string = GLOBAL_HARNESS): { bundle: SecretsBundle; env: Record<string, string> } | null {
   if (!agentSocketExists()) return null;
   const r = syncClient([SYNC_GET_CMD, name, harness], SYNC_GET_TIMEOUT_MS);
   if (!r || r.status !== 0 || !r.stdout) return null;
@@ -929,7 +1028,7 @@ export function agentEvictSync(name: string): void {
 
 /** Body of `__secrets-get <name>`. Prints `{bundle, env}` as JSON on a
  * cache hit. Exit 0 = hit, 3 = miss or broker down. */
-export async function runAgentGetSync(name: string, harness: string = 'cli'): Promise<number> {
+export async function runAgentGetSync(name: string, harness: string = GLOBAL_HARNESS): Promise<number> {
   const r = await request({ cmd: 'get', name, harness }, SOCKET_GET_TIMEOUT_MS);
   if (r?.ok === true && r.cmd === 'get' && r.hit) {
     // Trailing newline: the parent reads the LAST line (see lastLine), so the
@@ -1089,7 +1188,7 @@ export function agentAutoLoadSync(
   bundle: SecretsBundle,
   env: Record<string, string>,
   ttlMs: number,
-  harness: string = 'cli',
+  harness: string = GLOBAL_HARNESS,
 ): void {
   if (!onDarwin()) return;
   const payload = JSON.stringify({ name, bundle, env, ttlMs, harness });
@@ -1154,7 +1253,7 @@ export async function runAgentLoadFromStdin(): Promise<void> {
     process.exitCode = 1; // broker couldn't be brought up — did NOT load
     return;
   }
-  const loaded = await agentLoad(payload.name, payload.bundle, payload.env, payload.ttlMs ?? DEFAULT_TTL_MS, payload.harness ?? 'cli');
+  const loaded = await agentLoad(payload.name, payload.bundle, payload.env, payload.ttlMs ?? DEFAULT_TTL_MS, payload.harness ?? GLOBAL_HARNESS);
   if (!loaded) process.exitCode = 1; // transport failed — did NOT load
 }
 
@@ -1164,7 +1263,7 @@ export async function agentLoad(
   bundle: SecretsBundle,
   env: Record<string, string>,
   ttlMs: number,
-  harness: string = 'cli',
+  harness: string = GLOBAL_HARNESS,
 ): Promise<boolean> {
   const r = await request({ cmd: 'load', name, bundle, env, ttlMs, harness });
   return r?.ok === true && r.cmd === 'load';
@@ -1255,9 +1354,16 @@ export async function ensureAgentRunning(timeoutMs = 5000): Promise<boolean> {
   })();
   if (!isNaN(stalePid) && isAlive(stalePid)) {
     try { process.kill(stalePid, 'SIGTERM'); } catch { /* already dead */ }
+    // Wait for it to actually go before clearing its socket and ownership
+    // record. Unlinking them under a live broker is what leaves an orphan
+    // holding every unlocked bundle in RAM with no way to reach it — and it also
+    // destroys the very record brokerPidAlive() reads, so the successor sees an
+    // ownerless socket and reclaims it regardless.
+    waitForExit(stalePid, BROKER_STOP_GRACE_MS);
   }
   try { fs.unlinkSync(socketPath()); } catch { /* gone */ }
   try { fs.unlinkSync(pidPath()); } catch { /* gone */ }
+  try { fs.unlinkSync(ownerPath()); } catch { /* gone */ }
 
   const { cmd, args } = brokerSpawn();
   spawn(cmd, args, { stdio: 'ignore', detached: true }).unref();
@@ -1279,7 +1385,11 @@ export async function ensureAgentRunning(timeoutMs = 5000): Promise<boolean> {
 async function teardownStaleBroker(): Promise<void> {
   retireLegacySecretsAgentService();
   const pid = (() => { try { return parseInt(fs.readFileSync(pidPath(), 'utf-8').trim(), 10); } catch { return NaN; } })();
-  if (!isNaN(pid) && isAlive(pid)) { try { process.kill(pid, 'SIGTERM'); } catch { /* gone */ } }
+  if (!isNaN(pid) && isAlive(pid)) {
+    try { process.kill(pid, 'SIGTERM'); } catch { /* gone */ }
+    waitForExit(pid, BROKER_STOP_GRACE_MS); // same reason as ensureAgentRunning
+  }
   try { fs.unlinkSync(socketPath()); } catch { /* gone */ }
   try { fs.unlinkSync(pidPath()); } catch { /* gone */ }
+  try { fs.unlinkSync(ownerPath()); } catch { /* gone */ }
 }

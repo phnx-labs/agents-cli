@@ -387,13 +387,15 @@ describe('buildSpawnEnv', () => {
     delete process.env.OPENAI_API_KEY;
   });
 
-  // RUSH-1016: daemon-injected headless Claude OAuth must survive sandbox strip.
-  it('forwards CLAUDE_CODE_OAUTH_TOKEN (daemon headless auth)', () => {
+  // The daemon holds no Claude token; the sandbox strips CLAUDE_CODE_OAUTH_TOKEN
+  // from the ambient env — routines authenticate via the per-account
+  // CLAUDE_CONFIG_DIR login, not an injected token.
+  it('does not forward CLAUDE_CODE_OAUTH_TOKEN', () => {
     const original = process.env.CLAUDE_CODE_OAUTH_TOKEN;
     process.env.CLAUDE_CODE_OAUTH_TOKEN = 'sk-ant-oat01-test';
     try {
       const env = buildSpawnEnv('/fake/overlay');
-      expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe('sk-ant-oat01-test');
+      expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
     } finally {
       if (original) process.env.CLAUDE_CODE_OAUTH_TOKEN = original;
       else delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
