@@ -1171,9 +1171,10 @@ export function registerSecretsCommands(program: Command): void {
           process.exit(1);
         }
         // `secrets get` is the scriptable automation primitive ($(agents secrets
-        // get bundle KEY)); when embedded in a headless routine/CI script it must
-        // not pop an unwatched Touch ID prompt. Interactive use still prompts.
-        const { env } = readAndResolveBundleEnv(item, { caller: 'secrets get', keys: [key], keyMode: 'storage', agentOnly: isHeadlessSecretsContext(), interactiveUnlock: true });
+        // get bundle KEY)); when embedded in a headless routine/CI script — or run
+        // beneath any agent, which inherits AGENTS_RUNTIME — it must not pop an
+        // unwatched Touch ID prompt. Typed in a plain shell it still prompts.
+        const { env } = readAndResolveBundleEnv(item, { caller: 'secrets get', keys: [key], keyMode: 'storage', agentOnly: isHeadlessSecretsContext() });
         if (!(key in env)) {
           console.error(chalk.red(`Key '${key}' not in bundle '${item}'.`));
           process.exit(1);
@@ -1791,7 +1792,7 @@ Examples:
               'Set it for this command, then supply the same value when importing.'
             );
           }
-          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: 'export --to-file', keyMode: 'storage', agentOnly: isHeadlessSecretsContext(), interactiveUnlock: true });
+          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: 'export --to-file', keyMode: 'storage', agentOnly: isHeadlessSecretsContext() });
           exportBundleToFile(env, opts.toFile, passphrase);
           console.log(chalk.green(`Exported ${Object.keys(env).length} key(s) to ${opts.toFile}`));
           return;
@@ -1820,7 +1821,7 @@ Examples:
               );
             }
           }
-          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: `ssh export`, keyMode: 'storage', agentOnly: isHeadlessSecretsContext(), interactiveUnlock: true });
+          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: `ssh export`, keyMode: 'storage', agentOnly: isHeadlessSecretsContext() });
           const dotenv = bundleEnvToDotenv(env);
           const keyCount = Object.keys(env).length;
           // Drive the remote's own `agents secrets import --from -` so the values
@@ -1888,7 +1889,7 @@ Examples:
         if (opts.to1password) {
           assertOpAvailable();
           const vault = await resolveVault(opts.vault);
-          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: `1Password vault ${vault}`, keyMode: 'storage', agentOnly: isHeadlessSecretsContext(), interactiveUnlock: true });
+          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: `1Password vault ${vault}`, keyMode: 'storage', agentOnly: isHeadlessSecretsContext() });
           let created = 0;
           let overwritten = 0;
           let skipped = 0;
@@ -1924,14 +1925,14 @@ Examples:
           process.exit(1);
         }
         // `agents secrets export --plaintext` is what release/CI scripts eval.
-        // When it runs detached (both stdio non-TTY) or under a headless agent,
-        // resolve broker-only so it can never pop a Touch ID sheet on the
-        // interactive user's screen. An interactive `eval "$(...)"` keeps its
-        // terminal stdin, so it is not headless and still prompts.
+        // When it runs detached (both stdio non-TTY) or beneath ANY agent — which
+        // inherits AGENTS_RUNTIME — resolve broker-only so it can never pop a Touch
+        // ID sheet on the interactive user's screen. An `eval "$(...)"` typed in a
+        // plain shell carries no AGENTS_RUNTIME, so it is not headless and still prompts.
         const { env } = readAndResolveBundleEnv(resolvedBundleName, {
           caller: `export to shell`,
           keyMode: 'process',
-          agentOnly: isHeadlessSecretsContext(), interactiveUnlock: true,
+          agentOnly: isHeadlessSecretsContext(),
         });
         if (opts.format === 'json') {
           // Machine-readable form consumed by `remoteResolveEnv` over SSH.
@@ -1990,7 +1991,7 @@ Examples:
             caller: `command ${cmd}`,
             keys: keysSubset,
             allowExpired: execOpts.allowExpired,
-            agentOnly: isHeadlessSecretsContext(), interactiveUnlock: true,
+            agentOnly: isHeadlessSecretsContext(),
           }).env;
         }
         const { spawn } = await import('child_process');

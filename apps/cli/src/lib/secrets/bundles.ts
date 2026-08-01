@@ -1231,15 +1231,19 @@ export function resolveBundleEnv(bundle: SecretsBundle, _opts: ResolveBundleOpti
  * True when the current process is a background / non-interactive context that
  * must NEVER raise a Keychain biometry prompt on the interactive user's screen —
  * a prompt nobody is watching. Two signals, either sufficient:
- *   - `AGENTS_RUNTIME` is `headless` or `teams` (set on the child env by
- *     `agents run --headless`, scheduled routines, and teammates — see
- *     exec.ts:resolveInteractive, runner.ts, teams/agents.ts).
+ *   - `AGENTS_RUNTIME` is `headless`, `teams`, or `terminal` — i.e. ANY agent
+ *     launch, interactive included, and inherited by everything spawned beneath
+ *     one (set on the child env by `agents run --headless`, scheduled routines,
+ *     teammates, and interactive runs — see exec.ts:430, runner.ts,
+ *     teams/agents.ts).
  *   - neither stdin nor stdout is a TTY (a detached/backgrounded task whose
  *     stdio is redirected to a log — e.g. a release script run in the
  *     background as `( ... ) >log 2>&1 </dev/null`).
  * `AGENTS_SECRETS_NO_PROMPT=1` forces headless-safe; `=0` force-allows a prompt
- * even in a non-TTY context. An interactive `eval "$(agents secrets export X)"`
- * keeps its terminal stdin, so it is NOT classified headless and still prompts.
+ * even in a non-TTY context. An `eval "$(agents secrets export X)"` typed in a
+ * PLAIN shell has no AGENTS_RUNTIME, so it is not classified headless and still
+ * prompts. Run beneath an agent it inherits AGENTS_RUNTIME and resolves
+ * broker-only — the agent, not the human, is the caller there.
  *
  * Only **macOS keychain** reads pop an interactive Touch ID sheet — the secrets
  * broker itself is a no-op off darwin (see agent.ts), and libsecret (Linux) /
@@ -1354,15 +1358,16 @@ export function readAndResolveBundleEnv(
   // synchronously wait for approval. Never/no-ACL bundles remain prompt-free.
   // The always-on daemon has no requesting agent waiting on the result, so it
   // remains prompt-free unless the bundle is explicitly no-ACL.
-  // Explicit opt-in ONLY. This used to default to true whenever an agent name was
-  // present, which made `agentOnly: true` a no-op for every agent-initiated read —
-  // the guard was dead in precisely the case it exists for. The effect: opening an
-  // agent terminal, or a routine firing, would fall through to a prompting keychain
-  // read, and because each read is its own helper process the assertion never
-  // reuses, so one launch could raise several Touch ID sheets in a row. Only
-  // `AGENTS_SECRETS_NO_PROMPT=1` suppressed it, which is a workaround, not a
-  // default. No caller passes this flag today; it stays for a genuinely
-  // user-initiated unlock path that wants to raise the sheet on purpose.
+  // Explicit opt-in ONLY — a deliberate NARROWING of the agent-triggered approval
+  // added in RUSH-2032 (b99796f8 removed this throw so an agent could raise the
+  // sheet itself; 4eeada68 generalized the daemon rule into `!interactiveUnlock`).
+  // That default — true whenever an agent name was present — was the spec, not a
+  // bug. It is unwanted: each keychain read runs in its own helper process, so the
+  // biometric assertion never reuses and one agent launch meant one sheet per
+  // bundle. `agentOnly` decides alone now; a human in a plain shell carries no
+  // AGENTS_RUNTIME, so isHeadlessSecretsContext() is false, agentOnly is false, the
+  // guard never fires, and they still get their prompt. No caller passes this flag;
+  // it remains the seam for a future unlock path that wants the sheet on purpose.
   const interactiveUnlock = opts.interactiveUnlock ?? false;
   if (opts.agentOnly && backend === 'keychain' && !interactiveUnlock) {
     let noAclBundle = false;
