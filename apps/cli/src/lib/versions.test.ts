@@ -794,7 +794,6 @@ function runInstallVersion(home: string, agent: string, version: string, extraPa
   `], {
     env: {
       ...process.env,
-      AGENTS_TEST_HOME: home,
       AGENTS_TEST_HOME: home, HOME: home,
       ...(extraPathDir ? { PATH: `${extraPathDir}${path.delimiter}${process.env.PATH}` } : {}),
     },
@@ -874,7 +873,6 @@ function runInstallVersionWithScript(
   `], {
     env: {
       ...process.env,
-      AGENTS_TEST_HOME: home,
       AGENTS_TEST_HOME: home, HOME: home,
       ...(extraPathDir ? { PATH: `${extraPathDir}${path.delimiter}${process.env.PATH}` } : {}),
     },

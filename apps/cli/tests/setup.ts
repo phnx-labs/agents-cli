@@ -106,30 +106,33 @@ afterAll(() => {
     }
 
     // Device registry leak check (RUSH-2042) — always, not CI-only.
-    // Only flag fixture device names that are NEWLY present (not in the snapshot
-    // taken before the test ran). This avoids false positives when the user's
-    // real fleet happens to include devices with the same names as test fixtures
-    // (e.g. box, alpha, worker), or when concurrent fleet agents update the
-    // registry during the test run.
     if (fs.existsSync(realDevicesRegistry)) {
       const devicesRegistryAfter = fs.readFileSync(realDevicesRegistry, 'utf-8');
       if (devicesRegistryAfter !== devicesRegistryBefore) {
+        // We only reach here because the REAL registry content changed during the run.
+        if (process.env.CI) {
+          // No concurrent fleet writers on CI, so ANY change is a hermeticity breach —
+          // a newly-added device, a MODIFIED existing entry, or a removed one. A full
+          // content comparison (not a name allowlist) catches the corrupt-an-existing-
+          // real-device case too, and needs no FIXTURE_DEVICE_NAMES list to stay in sync.
+          throw new Error(
+            `hermeticity leak (RUSH-2042): the real device registry (${realDevicesRegistry}) ` +
+            `changed during the suite — a test wrote to it instead of the hermetic temp home. ` +
+            `Set AGENTS_TEST_HOME (or override HOME) in the test file before importing any state consumer.`,
+          );
+        }
+        // Dev machine: live fleet agents may legitimately add/update real devices during
+        // the run, so we can't treat any change as a leak. Best-effort: flag only newly-
+        // added keys matching known fixture names (FIXTURE_DEVICE_NAMES is that allowlist).
         let parsedBefore: Record<string, unknown> = {};
         let parsedAfter: Record<string, unknown> = {};
         try { parsedBefore = JSON.parse(devicesRegistryBefore ?? '{}'); } catch { /* ok */ }
         try { parsedAfter = JSON.parse(devicesRegistryAfter); } catch { /* ok */ }
-        // Newly added keys only — keys present in after but not in the pre-test snapshot.
         const newKeys = Object.keys(parsedAfter).filter((k) => !(k in parsedBefore));
-        // On CI there are no concurrent fleet writers, so ANY newly-added device is a
-        // hermeticity breach — not just the names we happened to enumerate; this closes
-        // the gap where a fixture named outside FIXTURE_DEVICE_NAMES would leak silently.
-        // On a dev machine, live fleet agents may legitimately add real devices during
-        // the run, so fall back to flagging only known fixture names to avoid false
-        // positives (FIXTURE_DEVICE_NAMES is the dev-side allowlist for exactly this).
-        const leaked = process.env.CI ? newKeys : newKeys.filter((name) => FIXTURE_DEVICE_NAMES.has(name));
+        const leaked = newKeys.filter((name) => FIXTURE_DEVICE_NAMES.has(name));
         if (leaked.length > 0) {
           throw new Error(
-            `hermeticity leak (RUSH-2042): device(s) [${leaked.join(', ')}] were written ` +
+            `hermeticity leak (RUSH-2042): fixture device(s) [${leaked.join(', ')}] were written ` +
             `into the real device registry (${realDevicesRegistry}) during the suite. ` +
             `Set AGENTS_TEST_HOME (or override HOME) in the test file before importing any state consumer.`,
           );
