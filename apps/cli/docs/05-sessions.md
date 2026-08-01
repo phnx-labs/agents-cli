@@ -69,7 +69,10 @@ not re-read it from the top. The `scan_ledger` stores a resumable continuation
 the accumulated user doc); the next scan resumes from that offset and folds in only
 the newly-appended lines. It falls back to a **full reparse from byte 0** when the
 file has no prior continuation (cold start), shrank at or below the saved offset
-(truncation / rewrite), or its mtime went backwards (clock rewind / restore). Full
+(truncation / rewrite), its mtime went backwards (clock rewind / restore), or it
+grew but its re-derived first-event identity no longer matches the prior
+continuation — an in-place rewrite or restore that dropped a different session at
+the same path, which size + mtime alone cannot tell from an append. Full
 and incremental parses run through the same reducer, so the indexed row an append
 produces — token counts, cost, duration, topic/title, PR + ticket refs, FTS content
 — is identical to a from-scratch full reparse, even when a signal straddles two
