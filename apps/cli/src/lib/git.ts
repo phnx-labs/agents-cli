@@ -1042,9 +1042,12 @@ export async function pullRepo(
     const remoteName = sep > 0 ? tracking.slice(0, sep) : 'origin';
     const remoteBranch = sep > 0 ? tracking.slice(sep + 1) : branch;
 
-    // Fetch the resolved remote, not a hardcoded 'origin' — otherwise the
-    // revparse below compares against a stale ref for any other remote.
-    await git.fetch(remoteName);
+    // Bare fetch: updates every remote, so the revparse below sees a fresh ref
+    // whichever one the branch tracks. Deliberately argument-less — simple-git's
+    // fetchTask only forwards a remote when BOTH remote and branch are passed,
+    // so `fetch(remoteName)` would silently drop the argument and do exactly
+    // this anyway. Saying so beats an inert argument that reads as targeted.
+    await git.fetch();
 
     const localRef = await git.revparse(['HEAD']);
     const remoteRef = await git.revparse([tracking]).catch(() => null);

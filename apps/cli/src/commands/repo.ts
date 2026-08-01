@@ -979,10 +979,10 @@ export function registerRepoCommands(program: Command): void {
           anyPulled = true;
         } else {
           spinner.fail(`${formatRepoTarget(t.alias, t.dir)}: ${result.error}`);
-        // A failed repo must fail the command. Without this, `agents fleet run
-        // "agents repo pull user"` reported 11 ok across a fleet that pulled
-        // nothing — the silence that hid RUSH-2056. Matches commands/sync.ts.
-        process.exitCode = 1;
+          // A failed repo must fail the command. Without this, `agents fleet run
+          // "agents repo pull user"` reported 11 ok across a fleet that pulled
+          // nothing — the silence that hid RUSH-2056. Matches commands/sync.ts.
+          process.exitCode = 1;
         }
       }
 
@@ -1007,7 +1007,7 @@ export function registerRepoCommands(program: Command): void {
     .action(async (alias: string | undefined, options: { message: string }) => {
       const targets = collectRepoTargets(alias);
       if (!targets) {
-        process.exitCode = 1;
+          process.exitCode = 1;
         return;
       }
       // Drop system-repo targets — read-only by design.
@@ -1021,7 +1021,7 @@ export function registerRepoCommands(program: Command): void {
           console.log(chalk.yellow(`  ${t.alias}: not a git repo, skipping`));
           continue;
         }
-        // Defense in depth: refuse if origin happens to be the system upstream.
+          // Defense in depth: refuse if origin happens to be the system upstream.
         if (await isSystemRepoOrigin(t.dir)) {
           console.log(chalk.red(`  ${t.alias}: origin tracks the system repo — refusing to push.`));
           continue;
@@ -1041,10 +1041,10 @@ export function registerRepoCommands(program: Command): void {
           );
         } else {
           spinner.fail(`${formatRepoTarget(t.alias, t.dir)}: ${result.error}`);
-        // A failed repo must fail the command. Without this, `agents fleet run
-        // "agents repo pull user"` reported 11 ok across a fleet that pulled
-        // nothing — the silence that hid RUSH-2056. Matches commands/sync.ts.
-        process.exitCode = 1;
+          // A failed repo must fail the command. Without this, `agents fleet run
+          // "agents repo push user"` reported ok across a fleet that pushed
+          // nothing — the silence that hid RUSH-2056. Matches commands/sync.ts.
+          process.exitCode = 1;
         }
       }
     });
