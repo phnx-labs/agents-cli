@@ -1378,8 +1378,13 @@ export async function saveClaudeOauth(
   home: string | undefined,
   credentials: ClaudeOauthCredentials
 ): Promise<boolean> {
-  // Windows not yet supported
-  if (process.platform !== 'darwin' && process.platform !== 'linux') {
+  // Windows not yet supported — except under an installed test keychain backend,
+  // which is in-memory and touches no real credential store. This mirrors
+  // claudeOauthCacheActive(): that gate turns the no-ACL cache ON whenever a test
+  // backend is installed, so on a Windows runner the cache was live while this
+  // save (and the deleteCachedClaudeOauth eviction below) returned early. A
+  // rotation then left the stale cached token served forever.
+  if (process.platform !== 'darwin' && process.platform !== 'linux' && !isKeychainBackendOverridden()) {
     return false;
   }
 
