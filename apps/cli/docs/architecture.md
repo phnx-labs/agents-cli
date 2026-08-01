@@ -60,9 +60,11 @@ confusion in this codebase.
 
 The **transcript** side is a SQLite index (`~/.agents/.history/sessions/sessions.db`,
 `SCHEMA_VERSION` in [`src/lib/session/db.ts`](../src/lib/session/db.ts)) with a
-`scan_ledger` that re-reads a file only when its `mtime`/`size` changed, plus a
-`session_text` FTS5 table for search. Listing is a DB read; only opening one session
-fully re-parses its transcript. Detail in [05-sessions.md](05-sessions.md).
+`scan_ledger` that re-reads a file only when its `mtime`/`size` changed, a
+`dir_ledger` that skips the per-file `stat` of a leaf transcript directory whose
+`(mtime, entry_count)` is unchanged, plus a `session_text` FTS5 table for search.
+Listing is a DB read; only opening one session fully re-parses its transcript.
+Detail in [05-sessions.md](05-sessions.md).
 
 The **live identity** side is the rest of this document.
 

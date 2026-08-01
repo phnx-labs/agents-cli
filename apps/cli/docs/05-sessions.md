@@ -34,10 +34,14 @@ agents sessions [query] [--json] [--since 1h] [--all]
 │  1. Open ~/.agents/.history/sessions/sessions.db (cached connection)       │
 │                                                                     │
 │  2. Parallel incremental scan per agent:                            │
-│     For each on-disk session file:                                  │
-│       stat() -> (mtime, size)                                       │
-│       If unchanged since last scan -> skip (DB row is fresh)        │
-│       Else -> parse file, upsert sessions row + FTS5 content row    │
+│     For each leaf transcript dir:                                   │
+│       stat() the dir -> (mtime, entry_count)                        │
+│       If it matches the dir_ledger -> no create/delete/rename;      │
+│         skip the per-file stat, serve unchanged files from the DB   │
+│         (only "hot" files are re-stat'd — see below)                │
+│       Else -> readdir + stat each file:                             │
+│         If unchanged since last scan -> skip (DB row is fresh)      │
+│         Else -> parse file, upsert sessions row + FTS5 content row  │
 │                                                                     │
 │  3. SQL query with filters (agent, cwd, since, project, limit)      │
 │     FTS5 search if [query] given, BM25 ranked                       │
@@ -46,8 +50,16 @@ agents sessions [query] [--json] [--since 1h] [--all]
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-Cold run re-parses everything. Warm run is mostly DB-only with a stat() per file;
-active sessions get refreshed each call because their mtime keeps advancing.
+Cold run re-parses everything. Warm run is mostly DB-only; a directory whose
+`(mtime, entry_count)` matches the `dir_ledger` is served entirely from the DB
+without stat'ing its files, so the immutable version-home and backup roots — which
+dominate a heavy user's tree — cost one dir stat each instead of hundreds of
+per-file stats. Active sessions still refresh: a file is "hot" (always re-stat'd,
+even in an unchanged dir) when it lives under the agent's live `~/.<agent>` root or
+was scanned within the last 10 minutes, so an in-place append is never missed. A
+create / delete / rename bumps the dir mtime and forces a full re-walk of that dir.
+Set `AGENTS_SESSIONS_NO_DIR_LEDGER=1` to disable the short-circuit and force the old
+full per-file walk.
 
 ## SessionMeta (list output)
 
