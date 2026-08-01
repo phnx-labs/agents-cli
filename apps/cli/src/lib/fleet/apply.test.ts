@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { agentIdOf, diffFleet, canPushLogin, type SourceAuth } from './apply.js';
+import {
+  agentIdOf,
+  diffFleet,
+  canPushLogin,
+  pinnedVersion,
+  rosterNeedsVersions,
+  expandAllSpecs,
+  parseInstalledVersions,
+  type SourceAuth,
+} from './apply.js';
 import type { DeviceDesired, DeviceProbe } from './types.js';
 
 function srcAuth(available: string[], bound: string[] = []): SourceAuth {
@@ -193,5 +202,124 @@ describe('diffFleet — secrets surfacing', () => {
       secretsBundles: ['attio'],
     });
     expect(plan.devices[0].secretsNeeded).toEqual([]);
+  });
+});
+
+describe('pinnedVersion', () => {
+  it('returns the explicit version', () => {
+    expect(pinnedVersion('claude@2.1.170')).toBe('2.1.170');
+  });
+  it('returns undefined for id-level / label specs', () => {
+    expect(pinnedVersion('claude')).toBeUndefined();
+    expect(pinnedVersion('claude@latest')).toBeUndefined();
+    expect(pinnedVersion('claude@oldest')).toBeUndefined();
+    expect(pinnedVersion('claude@all')).toBeUndefined();
+  });
+});
+
+describe('rosterNeedsVersions', () => {
+  it('is true when any device pins a version', () => {
+    expect(rosterNeedsVersions([
+      { device: 's0', agents: ['claude@latest'], sync: [], login: 'skip' },
+      { device: 's1', agents: ['claude@2.1.170'], sync: [], login: 'skip' },
+    ])).toBe(true);
+  });
+  it('is false for a purely id-level roster', () => {
+    expect(rosterNeedsVersions([
+      { device: 's0', agents: ['claude', 'codex@latest'], sync: [], login: 'skip' },
+    ])).toBe(false);
+  });
+});
+
+describe('expandAllSpecs', () => {
+  const versionsOf = (id: string) => (id === 'claude' ? ['2.1.170', '2.1.207'] : []);
+  it('expands @all into one pinned spec per source version', () => {
+    expect(expandAllSpecs(['claude@all'], versionsOf)).toEqual(['claude@2.1.170', 'claude@2.1.207']);
+  });
+  it('passes non-@all specs through and de-dups', () => {
+    expect(expandAllSpecs(['claude@all', 'claude@2.1.207', 'codex@latest'], versionsOf))
+      .toEqual(['claude@2.1.170', 'claude@2.1.207', 'codex@latest']);
+  });
+  it('throws when @all names an agent with no installed versions', () => {
+    expect(() => expandAllSpecs(['codex@all'], versionsOf)).toThrow(/no codex versions installed/);
+  });
+});
+
+describe('parseInstalledVersions', () => {
+  it('maps agent id -> versions from the view --json array', () => {
+    const json = JSON.stringify([
+      { agent: 'claude', versions: [{ version: '2.1.170' }, { version: '2.1.207' }], profiles: [] },
+      { agent: 'codex', versions: [{ version: '0.146.0' }], profiles: [] },
+    ]);
+    expect(parseInstalledVersions(json)).toEqual({ claude: ['2.1.170', '2.1.207'], codex: ['0.146.0'] });
+  });
+  it('returns undefined on malformed output', () => {
+    expect(parseInstalledVersions('not json')).toBeUndefined();
+    expect(parseInstalledVersions('{"not":"an array"}')).toBeUndefined();
+  });
+});
+
+describe('diffFleet — version-aware add-agent', () => {
+  const twoVersions: DeviceDesired[] = [
+    { device: 's0', agents: ['claude@2.1.170', 'claude@2.1.207'], sync: [], login: 'skip' },
+  ];
+
+  it('installs only the missing version when one is already present', () => {
+    const probes = new Map<string, DeviceProbe>([
+      ['s0', {
+        device: 's0', reachable: true, platform: 'linux', cliVersion: CLI,
+        installedAgents: ['claude'], installedVersions: { claude: ['2.1.207'] },
+      }],
+    ]);
+    const plan = diffFleet(twoVersions, probes, { targetCliVersion: CLI, sourceAuth: srcAuth([]) });
+    const adds = plan.actions.filter((a) => a.kind === 'add-agent');
+    expect(adds).toHaveLength(1);
+    expect(adds[0].spec).toBe('claude@2.1.170');
+    expect(adds[0].detail).toBe('install claude@2.1.170');
+  });
+
+  it('installs every version when the agent id is present but no versions match', () => {
+    const probes = new Map<string, DeviceProbe>([
+      ['s0', {
+        device: 's0', reachable: true, platform: 'linux', cliVersion: CLI,
+        installedAgents: ['claude'], installedVersions: { claude: ['2.1.100'] },
+      }],
+    ]);
+    const plan = diffFleet(twoVersions, probes, { targetCliVersion: CLI, sourceAuth: srcAuth([]) });
+    expect(plan.actions.filter((a) => a.kind === 'add-agent').map((a) => a.spec))
+      .toEqual(['claude@2.1.170', 'claude@2.1.207']);
+  });
+
+  it('nothing to add when both versions are already installed', () => {
+    const probes = new Map<string, DeviceProbe>([
+      ['s0', {
+        device: 's0', reachable: true, platform: 'linux', cliVersion: CLI,
+        installedAgents: ['claude'], installedVersions: { claude: ['2.1.170', '2.1.207'] },
+      }],
+    ]);
+    const plan = diffFleet(twoVersions, probes, { targetCliVersion: CLI, sourceAuth: srcAuth([]) });
+    expect(plan.actions.filter((a) => a.kind === 'add-agent')).toHaveLength(0);
+  });
+
+  it('a version-pinned spec installs when the probe has no version info (fallback)', () => {
+    const probes = new Map<string, DeviceProbe>([
+      ['s0', { device: 's0', reachable: true, platform: 'linux', cliVersion: CLI, installedAgents: ['claude'] }],
+    ]);
+    const plan = diffFleet(twoVersions, probes, { targetCliVersion: CLI, sourceAuth: srcAuth([]) });
+    expect(plan.actions.filter((a) => a.kind === 'add-agent')).toHaveLength(2);
+  });
+
+  it('propagates login once per id even when @all names claude many times', () => {
+    const roster: DeviceDesired[] = [
+      { device: 's0', agents: ['claude@2.1.170', 'claude@2.1.207'], sync: [], login: 'sync' },
+    ];
+    const probes = new Map<string, DeviceProbe>([
+      ['s0', {
+        device: 's0', reachable: true, platform: 'linux', cliVersion: CLI,
+        installedAgents: ['claude'], installedVersions: { claude: ['2.1.170', '2.1.207'] },
+      }],
+    ]);
+    const plan = diffFleet(roster, probes, { targetCliVersion: CLI, sourceAuth: srcAuth(['claude']) });
+    expect(plan.actions.filter((a) => a.kind === 'push-login')).toHaveLength(1);
   });
 });

@@ -91,6 +91,14 @@ export interface DeviceProbe {
   cliVersion?: string;
   /** Agent ids currently installed on the device. */
   installedAgents: string[];
+  /**
+   * Installed version strings per agent id (e.g. `{ claude: ['2.1.170', '2.1.207'] }`),
+   * parsed from `agents view --json` on the device. Only populated when the plan
+   * involves a version-pinned spec (`claude@2.1.170`, or a `claude@all` expansion)
+   * — a bare `claude`/`claude@latest` roster never pays for the extra probe. When
+   * undefined, version-pinned specs fall back to id-level presence.
+   */
+  installedVersions?: Record<string, string[]>;
   /** Reason string when `reachable` is false or the probe partially failed. */
   note?: string;
 }
@@ -112,6 +120,9 @@ export interface FleetAction {
   kind: FleetActionKind;
   /** Agent id for agent/login actions; undefined for cli/config actions. */
   agent?: string;
+  /** Full agent spec for `add-agent` (e.g. `claude@2.1.170`) so the plan can show
+   * the exact version being installed; equals the id for a bare/latest spec. */
+  spec?: string;
   /** Human, one-line description of the action. */
   detail: string;
 }

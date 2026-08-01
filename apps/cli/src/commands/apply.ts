@@ -26,9 +26,13 @@ import {
   runFleetApply,
   pool,
   sourceHome,
+  expandAllSpecs,
+  rosterNeedsVersions,
   type SourceAuth,
   type DeviceApplyResult,
 } from '../lib/fleet/apply.js';
+import { listInstalledVersions } from '../lib/versions.js';
+import type { AgentId } from '../lib/types.js';
 import type { DeviceDesired, DeviceProbe, DeviceDiff, FleetPlan } from '../lib/fleet/types.js';
 
 interface ApplyOptions {
@@ -37,6 +41,7 @@ interface ApplyOptions {
   dryRun?: boolean;
   yes?: boolean;
   device?: string;
+  agent?: string[]; // --agent claude@all codex@latest (variadic)
   only?: string;
   login?: boolean; // Commander sets false for --no-login
   recvAuth?: boolean; // hidden internal receiver
@@ -118,7 +123,7 @@ function renderPlan(plan: FleetPlan): void {
     const agentsCell = row.probe.reachable
       ? (() => {
         const add = row.actions.filter((a) => a.kind === 'add-agent');
-        return add.length === 0 ? chalk.green(`ok ${row.desired.agents.length}/${row.desired.agents.length}`) : chalk.cyan('+ ' + add.map((a) => a.agent).join(','));
+        return add.length === 0 ? chalk.green(`ok ${row.desired.agents.length}/${row.desired.agents.length}`) : chalk.cyan('+ ' + add.map((a) => a.spec ?? a.agent).join(','));
       })()
       : chalk.gray('-');
     const configCell = row.probe.reachable
@@ -207,6 +212,15 @@ async function runApply(opts: ApplyOptions): Promise<void> {
     desired = desired.filter((d) => d.device === opts.device);
     if (desired.length === 0) throw new Error(`Device '${opts.device}' is not a target in this manifest.`);
   }
+  // --agent overrides the roster for the targeted device(s): install exactly these
+  // specs instead of the manifest's. `claude@all` expands to every claude version
+  // installed on THIS machine, so a fresh box inherits the same version set. Pair
+  // with --device to seed one box; without it, every targeted device gets the set.
+  if (opts.agent && opts.agent.length > 0) {
+    const specs = expandAllSpecs(opts.agent, (id) => listInstalledVersions(id as AgentId));
+    desired = desired.map((d) => ({ ...d, agents: specs }));
+    console.log(chalk.gray(`Roster override (--agent): ${specs.join(', ')}`));
+  }
   if (opts.login === false) desired = desired.map((d) => ({ ...d, login: 'skip' as const }));
   if (desired.length === 0) {
     console.log(chalk.gray('No target devices — nothing to apply.'));
@@ -230,8 +244,9 @@ async function runApply(opts: ApplyOptions): Promise<void> {
 
   // Probe every target device in parallel.
   const nameToProfile = new Map<string, DeviceProfile>(desired.map((d) => [d.device, registry[d.device]!]));
+  const withVersions = rosterNeedsVersions(desired);
   console.log(chalk.gray(`Probing ${desired.length} device(s)…`));
-  const probeList = await pool(desired, 6, async (d) => probeDevice(nameToProfile.get(d.device)!));
+  const probeList = await pool(desired, 6, async (d) => probeDevice(nameToProfile.get(d.device)!, { withVersions }));
   const probes = new Map<string, DeviceProbe>(probeList.map((p) => [p.device, p]));
 
   const targetCliVersion = localCliVersion();
@@ -314,6 +329,7 @@ export function configureApplyCommand(cmd: Command): Command {
     .option('--dry-run', 'Alias for --plan')
     .option('-y, --yes', 'Skip the confirmation prompt')
     .option('--device <name>', 'Scope the apply to a single device')
+    .option('--agent <specs...>', 'Override the roster for targeted device(s): install these specs instead of the manifest\'s. Use `claude@all` to replicate every version installed on this machine.')
     .option('--only <dims>', 'Limit to dimensions: comma list of agents,config,login')
     .option('--no-login', 'Do not propagate logins')
     .addOption(new Option('--recv-auth', 'internal: receive an auth bundle on stdin').hideHelp())
@@ -343,6 +359,12 @@ export function registerApplyCommand(program: Command): void {
 
       # One device only
       agents apply --device yosemite-s1 -y
+
+      # Replicate every claude version on this machine onto a fresh box
+      agents apply --agent claude@all --device yosemite-s0 -y
+
+      # Install a specific pinned version on one device
+      agents apply --agent claude@2.1.207 --device yosemite-s0
     `,
   });
 }

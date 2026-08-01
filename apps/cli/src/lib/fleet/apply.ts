@@ -34,6 +34,75 @@ export function agentIdOf(spec: string): string {
   return spec.split('@')[0].trim();
 }
 
+/**
+ * The explicit pinned version of a spec, or undefined for an id-level spec.
+ * `claude@2.1.170` -> `2.1.170`; `claude`, `claude@latest`, `claude@oldest`, and
+ * `claude@all` all return undefined (the label channels install-latest / are
+ * expanded upstream, so they diff at id granularity, not per-version).
+ */
+export function pinnedVersion(spec: string): string | undefined {
+  const at = spec.indexOf('@');
+  if (at < 0) return undefined;
+  const v = spec.slice(at + 1).trim();
+  if (!v || v === 'latest' || v === 'oldest' || v === 'all') return undefined;
+  return v;
+}
+
+/** True when any spec in the roster pins an explicit version (needs a version probe). */
+export function rosterNeedsVersions(desired: DeviceDesired[]): boolean {
+  return desired.some((d) => d.agents.some((s) => pinnedVersion(s) !== undefined));
+}
+
+/**
+ * Expand any `<agent>@all` spec into one pinned spec per version installed on the
+ * source, so `--agent claude@all` replicates THIS machine's exact version set.
+ * `versionsOf` returns the source's installed versions for an agent id. Every
+ * other spec passes through unchanged; the result is de-duplicated in order.
+ * Throws if `@all` names an agent with no installed versions here (nothing to
+ * replicate — a clear misconfig, not a silent no-op).
+ */
+export function expandAllSpecs(specs: string[], versionsOf: (id: string) => string[]): string[] {
+  const out: string[] = [];
+  for (const spec of specs) {
+    const at = spec.indexOf('@');
+    const label = at >= 0 ? spec.slice(at + 1).trim() : '';
+    if (label !== 'all') {
+      out.push(spec);
+      continue;
+    }
+    const id = agentIdOf(spec);
+    const versions = versionsOf(id);
+    if (versions.length === 0) {
+      throw new Error(`--agent ${spec}: no ${id} versions installed on this machine to replicate.`);
+    }
+    for (const v of versions) out.push(`${id}@${v}`);
+  }
+  return [...new Set(out)];
+}
+
+/**
+ * Parse `agents view --json` (the all-agents array form) into a map of agent id
+ * -> installed version strings. Tolerant: returns undefined on any parse failure
+ * so a version-pinned spec falls back to id-level presence rather than crashing.
+ */
+export function parseInstalledVersions(stdout: string): Record<string, string[]> | undefined {
+  try {
+    const arr = JSON.parse(stdout) as Array<{ agent?: unknown; versions?: unknown }>;
+    if (!Array.isArray(arr)) return undefined;
+    const out: Record<string, string[]> = {};
+    for (const a of arr) {
+      if (a && typeof a.agent === 'string' && Array.isArray(a.versions)) {
+        out[a.agent] = (a.versions as Array<{ version?: unknown }>)
+          .map((v) => v?.version)
+          .filter((v): v is string => typeof v === 'string');
+      }
+    }
+    return out;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Source-side auth availability, computed once from `snapshotAuth`. */
 export interface SourceAuth {
   /** Agent ids the source has a readable, propagatable credential file for. */
@@ -89,21 +158,28 @@ export function diffFleet(desired: DeviceDesired[], probes: Map<string, DevicePr
       } else if (probe.cliVersion !== ctx.targetCliVersion) {
         rowActions.push({ device: d.device, kind: 'upgrade-cli', detail: `agents-cli ${probe.cliVersion} -> ${ctx.targetCliVersion}` });
       }
-      // agents.
+      // agents. A version-pinned spec (`claude@2.1.170`, or an expanded
+      // `claude@all` member) is present only when that exact version is on the
+      // device; a bare/latest spec diffs at id granularity. So `--agent claude@all`
+      // installs every missing version even when some claude is already there.
       for (const spec of d.agents) {
         const id = agentIdOf(spec);
-        if (!probe.installedAgents.includes(id)) {
-          rowActions.push({ device: d.device, kind: 'add-agent', agent: id, detail: `install ${spec}` });
+        const want = pinnedVersion(spec);
+        const present = want !== undefined
+          ? (probe.installedVersions?.[id]?.includes(want) ?? false)
+          : probe.installedAgents.includes(id);
+        if (!present) {
+          rowActions.push({ device: d.device, kind: 'add-agent', agent: id, spec, detail: `install ${spec}` });
         }
       }
       // config.
       if (d.sync.length > 0) {
         rowActions.push({ device: d.device, kind: 'sync-config', detail: `sync config (${d.sync.join(', ')})` });
       }
-      // login.
+      // login — per agent id, not per spec: `claude@all` names one id many times,
+      // but login propagates once per agent (its credential is version-shared).
       if (d.login === 'sync') {
-        for (const spec of d.agents) {
-          const id = agentIdOf(spec);
+        for (const id of [...new Set(d.agents.map(agentIdOf))]) {
           if (canPushLogin(id, probe.platform, ctx.sourceAuth)) {
             rowActions.push({ device: d.device, kind: 'push-login', agent: id, detail: `propagate ${id} login` });
           } else if (
@@ -150,8 +226,15 @@ function remoteEnv(platform: string | undefined): Record<string, string> | undef
   return platform === 'windows' ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' };
 }
 
-/** Probe one device: reachability + agents-cli version + installed agent ids. */
-export function probeDevice(device: DeviceProfile): DeviceProbe {
+export interface ProbeOptions {
+  /** Also fetch per-agent installed versions (one extra `agents view --json`
+   * round-trip). Enable only when the plan has a version-pinned spec. */
+  withVersions?: boolean;
+}
+
+/** Probe one device: reachability + agents-cli version + installed agent ids
+ * (and, when `withVersions`, the installed version strings per agent). */
+export function probeDevice(device: DeviceProfile, opts?: ProbeOptions): DeviceProbe {
   let target: string;
   try {
     target = sshTargetFor(device);
@@ -174,12 +257,19 @@ export function probeDevice(device: DeviceProfile): DeviceProbe {
       /* agents-cli present but doctor output unparsable — treat as no agents */
     }
   }
+  let installedVersions: Record<string, string[]> | undefined;
+  if (opts?.withVersions) {
+    const viewCmd = buildRemoteAgentsInvocation(['view', '--json'], undefined, hint, remoteEnv(device.platform));
+    const vres = sshExec(target, viewCmd, { timeoutMs: 30000, multiplex: true });
+    if (vres.code === 0) installedVersions = parseInstalledVersions(vres.stdout);
+  }
   return {
     device: device.name,
     reachable: true,
     platform: device.platform,
     cliVersion: ready.version ?? undefined,
     installedAgents: installed,
+    installedVersions,
   };
 }
 
