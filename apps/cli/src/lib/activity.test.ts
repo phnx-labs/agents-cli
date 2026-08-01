@@ -273,4 +273,254 @@ describe('real activity-log hook (Python)', () => {
     });
     expect(readSessionActivity('sess-7', activityDirFor(home))).toHaveLength(0);
   });
+
+  it.runIf(hasPython)('emits checklist.created on the first TodoWrite', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-todo-create-'));
+    const sessionId = 'sess-todo-create';
+    const transcript = path.join(home, `${sessionId}.jsonl`);
+    runHook(home, {
+      session_id: sessionId,
+      hook_event_name: 'PostToolUse',
+      tool_name: 'TodoWrite',
+      tool_input: { todos: [{ id: '1', content: 'Explore auth', status: 'pending' }] },
+      transcript_path: transcript,
+    });
+    const events = readSessionActivity(sessionId, activityDirFor(home));
+    expect(events.map((e) => e.event)).toEqual(['checklist.created']);
+    expect(events[0].tier).toBe('milestone');
+    expect(events[0].detail).toBe('1 task');
+  });
+
+  it.runIf(hasPython)('emits task.completed when a TodoWrite item flips to completed', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-todo-done-'));
+    const sessionId = 'sess-todo-done';
+    const transcript = path.join(home, `${sessionId}.jsonl`);
+    fs.writeFileSync(
+      transcript,
+      [
+        JSON.stringify({ name: 'TodoWrite', input: { todos: [{ id: '1', content: 'Explore auth', status: 'pending' }] } }),
+        JSON.stringify({ name: 'TodoWrite', input: { todos: [{ id: '1', content: 'Explore auth', status: 'completed' }] } }),
+      ].join('\n') + '\n',
+    );
+    runHook(home, {
+      session_id: sessionId,
+      hook_event_name: 'PostToolUse',
+      tool_name: 'TodoWrite',
+      tool_input: { todos: [{ id: '1', content: 'Explore auth', status: 'completed' }] },
+      transcript_path: transcript,
+    });
+    const events = readSessionActivity(sessionId, activityDirFor(home));
+    expect(events.map((e) => e.event)).toEqual(['task.completed']);
+    expect(events[0].tier).toBe('milestone');
+    expect(events[0].detail).toBe('Explore auth 1/1 done');
+  });
+
+  it.runIf(hasPython)('emits task.completed with N/M detail for a multi-item TodoWrite', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-todo-multi-'));
+    const sessionId = 'sess-todo-multi';
+    const transcript = path.join(home, `${sessionId}.jsonl`);
+    fs.writeFileSync(
+      transcript,
+      [
+        JSON.stringify({
+          name: 'TodoWrite',
+          input: {
+            todos: [
+              { id: '1', content: 'Explore auth', status: 'completed' },
+              { id: '2', content: 'Write tests', status: 'pending' },
+              { id: '3', content: 'Open PR', status: 'pending' },
+            ],
+          },
+        }),
+        JSON.stringify({
+          name: 'TodoWrite',
+          input: {
+            todos: [
+              { id: '1', content: 'Explore auth', status: 'completed' },
+              { id: '2', content: 'Write tests', status: 'completed' },
+              { id: '3', content: 'Open PR', status: 'pending' },
+            ],
+          },
+        }),
+      ].join('\n') + '\n',
+    );
+    runHook(home, {
+      session_id: sessionId,
+      hook_event_name: 'PostToolUse',
+      tool_name: 'TodoWrite',
+      tool_input: {
+        todos: [
+          { id: '1', content: 'Explore auth', status: 'completed' },
+          { id: '2', content: 'Write tests', status: 'completed' },
+          { id: '3', content: 'Open PR', status: 'pending' },
+        ],
+      },
+      transcript_path: transcript,
+    });
+    const events = readSessionActivity(sessionId, activityDirFor(home));
+    expect(events.map((e) => e.event)).toEqual(['task.completed']);
+    expect(events[0].detail).toBe('Write tests 2/3 done');
+  });
+
+  it.runIf(hasPython)('emits nothing for a TodoWrite with no new completions', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-todo-noop-'));
+    const sessionId = 'sess-todo-noop';
+    const transcript = path.join(home, `${sessionId}.jsonl`);
+    fs.writeFileSync(
+      transcript,
+      [
+        JSON.stringify({
+          name: 'TodoWrite',
+          input: { todos: [{ id: '1', content: 'Explore auth', status: 'completed' }] },
+        }),
+        JSON.stringify({
+          name: 'TodoWrite',
+          input: { todos: [{ id: '1', content: 'Explore auth', status: 'completed' }] },
+        }),
+      ].join('\n') + '\n',
+    );
+    runHook(home, {
+      session_id: sessionId,
+      hook_event_name: 'PostToolUse',
+      tool_name: 'TodoWrite',
+      tool_input: { todos: [{ id: '1', content: 'Explore auth', status: 'completed' }] },
+      transcript_path: transcript,
+    });
+    expect(readSessionActivity(sessionId, activityDirFor(home))).toHaveLength(0);
+  });
+
+  it.runIf(hasPython)('emits task.completed for codex update_plan step completion', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-plan-done-'));
+    const sessionId = 'sess-plan-done';
+    const transcript = path.join(home, `${sessionId}.jsonl`);
+    fs.writeFileSync(
+      transcript,
+      [
+        JSON.stringify({
+          name: 'update_plan',
+          arguments: JSON.stringify({ plan: [{ step: 'Read files', status: 'pending' }] }),
+        }),
+        JSON.stringify({
+          name: 'update_plan',
+          arguments: JSON.stringify({ plan: [{ step: 'Read files', status: 'completed' }] }),
+        }),
+      ].join('\n') + '\n',
+    );
+    runHook(home, {
+      session_id: sessionId,
+      hook_event_name: 'PostToolUse',
+      tool_name: 'update_plan',
+      tool_input: { plan: [{ step: 'Read files', status: 'completed' }] },
+      transcript_path: transcript,
+    });
+    const events = readSessionActivity(sessionId, activityDirFor(home));
+    expect(events.map((e) => e.event)).toEqual(['task.completed']);
+    expect(events[0].detail).toBe('Read files 1/1 done');
+  });
+
+  it.runIf(hasPython)('emits task.completed for TaskUpdate by resolving subject from transcript', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-task-update-'));
+    const sessionId = 'sess-task-update';
+    const transcript = path.join(home, `${sessionId}.jsonl`);
+    fs.writeFileSync(
+      transcript,
+      [
+        JSON.stringify({
+          name: 'TodoWrite',
+          input: {
+            todos: [
+              { id: '1', content: 'Explore auth', status: 'completed' },
+              { id: '2', content: 'Write tests', status: 'pending' },
+            ],
+          },
+        }),
+        JSON.stringify({ name: 'TaskUpdate', input: { taskId: '2', status: 'completed' } }),
+      ].join('\n') + '\n',
+    );
+    runHook(home, {
+      session_id: sessionId,
+      hook_event_name: 'PostToolUse',
+      tool_name: 'TaskUpdate',
+      tool_input: { taskId: '2', status: 'completed' },
+      transcript_path: transcript,
+    });
+    const events = readSessionActivity(sessionId, activityDirFor(home));
+    expect(events.map((e) => e.event)).toEqual(['task.completed']);
+    expect(events[0].detail).toBe('Write tests 2/2 done');
+  });
+
+  it.runIf(hasPython)('emits checklist.created on the first TaskCreate and resolves TaskUpdate subject from TaskCreate results', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-task-create-'));
+    const sessionId = 'sess-task-create';
+    const transcript = path.join(home, `${sessionId}.jsonl`);
+    fs.writeFileSync(
+      transcript,
+      [
+        JSON.stringify({
+          type: 'assistant',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'tc-1', name: 'TaskCreate', input: { subject: 'Build the spine', description: 'Core work' } }],
+          },
+        }),
+        JSON.stringify({
+          type: 'user',
+          toolUseResult: { task: { id: '1', subject: 'Build the spine' } },
+          tool_use_id: 'tc-1',
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'tu-1', name: 'TaskUpdate', input: { taskId: '1', status: 'completed' } }],
+          },
+        }),
+        JSON.stringify({
+          type: 'user',
+          toolUseResult: { success: true, taskId: '1', statusChange: { from: 'pending', to: 'completed' } },
+          tool_use_id: 'tu-1',
+        }),
+      ].join('\n') + '\n',
+    );
+
+    runHook(home, {
+      session_id: sessionId,
+      hook_event_name: 'PostToolUse',
+      tool_name: 'TaskCreate',
+      tool_input: { subject: 'Build the spine', description: 'Core work' },
+      tool_response: { task: { id: '1', subject: 'Build the spine' } },
+      tool_use_id: 'tc-1',
+      transcript_path: transcript,
+    });
+    const createEvents = readSessionActivity(sessionId, activityDirFor(home));
+    expect(createEvents.map((e) => e.event)).toEqual(['checklist.created']);
+    expect(createEvents[0].detail).toBe('Build the spine');
+
+    runHook(home, {
+      session_id: sessionId,
+      hook_event_name: 'PostToolUse',
+      tool_name: 'TaskUpdate',
+      tool_input: { taskId: '1', status: 'completed' },
+      tool_response: { success: true, taskId: '1', statusChange: { from: 'pending', to: 'completed' } },
+      tool_use_id: 'tu-1',
+      transcript_path: transcript,
+    });
+    const updateEvents = readSessionActivity(sessionId, activityDirFor(home));
+    expect(updateEvents.map((e) => e.event)).toEqual(['checklist.created', 'task.completed']);
+    expect(updateEvents[1].detail).toBe('Build the spine 1/1 done');
+  });
+
+  it.runIf(hasPython)('is fail-open when transcript_path is missing', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-todo-failopen-'));
+    const sessionId = 'sess-todo-failopen';
+    runHook(home, {
+      session_id: sessionId,
+      hook_event_name: 'PostToolUse',
+      tool_name: 'TodoWrite',
+      tool_input: { todos: [{ id: '1', content: 'Explore auth', status: 'completed' }] },
+      transcript_path: path.join(home, 'nonexistent', 'transcript.jsonl'),
+    });
+    const events = readSessionActivity(sessionId, activityDirFor(home));
+    expect(events.map((e) => e.event)).toEqual(['checklist.created', 'task.completed']);
+  });
 });

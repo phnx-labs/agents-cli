@@ -390,4 +390,21 @@ describe('events', () => {
       expect(results[0].args).toEqual(['claude', '-p', 'hi']);
     });
   });
+
+  describe('activity event types', () => {
+    it('accepts checklist events in the EventType union through emit/query', () => {
+      setupLogsDir();
+      emit('task.completed', { agent: 'claude', detail: 'Write tests 2/3 done' });
+      emit('checklist.created', { agent: 'claude', detail: '3 tasks' });
+
+      const tasks = query({ eventTypes: ['task.completed'] });
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0].event).toBe('task.completed');
+      expect(tasks[0].detail).toBe('Write tests 2/3 done');
+
+      const lists = query({ eventTypes: ['checklist.created'] });
+      expect(lists).toHaveLength(1);
+      expect(lists[0].event).toBe('checklist.created');
+    });
+  });
 });
