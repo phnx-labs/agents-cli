@@ -36,7 +36,7 @@ import { filterTeamSessions } from '../lib/session/team-filter.js';
 import { parseSession } from '../lib/session/parse.js';
 import { runRemoteSessions, buildForwardedArgs, ensureWholeIndex } from '../lib/session/remote.js';
 import { formatRelativeTime } from '../lib/session/relative-time.js';
-import { renderConversationMarkdown, renderSummary, renderSummaryHeader, computeSummaryStats, renderJson, filterEvents, parseRoleList, linkUrl, type FilterOptions } from '../lib/session/render.js';
+import { renderConversationMarkdown, renderSummary, renderSummaryHeader, computeSummaryStats, renderJson, filterEvents, parseRoleList, linkPath, linkUrl, shortenModel, type FilterOptions } from '../lib/session/render.js';
 import { linearIssueUrl } from '../lib/session/linear.js';
 import { renderMarkdown } from '../lib/markdown.js';
 import { AGENTS, colorAgent, resolveAgentName } from '../lib/agents.js';
@@ -503,6 +503,24 @@ export function ticketLabel(s: Pick<SessionMeta, 'ticketId' | 'prNumber'>): stri
   return s.ticketId ?? (s.prNumber ? `PR#${s.prNumber}` : '');
 }
 
+function ticketUrl(s: Pick<SessionMeta, 'ticketId' | 'prNumber' | 'prUrl'>): string | undefined {
+  if (s.ticketId) return linearIssueUrl(s.ticketId);
+  return s.prNumber ? s.prUrl : undefined;
+}
+
+export function linkTicketCell(s: Pick<SessionMeta, 'ticketId' | 'prNumber' | 'prUrl'>, label: string): string {
+  const url = ticketUrl(s);
+  return url && label.trim() !== '-' ? linkUrl(url, label) : label;
+}
+
+export function linkCwdCell(s: Pick<SessionMeta, 'cwd' | '_remote'>, label: string): string {
+  return s.cwd && !s._remote ? linkPath(s.cwd, label) : label;
+}
+
+function modelLabel(model?: string): string {
+  return model ? shortenModel(model) : '-';
+}
+
 /**
  * The row shape `agents sessions --active --json` emits. RUSH-1981: a watcher
  * joins active sessions on ticketId + project, but the raw ActiveSession nests
@@ -514,11 +532,12 @@ export function ticketLabel(s: Pick<SessionMeta, 'ticketId' | 'prNumber'>): stri
  */
 export function serializeActiveSessionsForJson(
   sessions: ActiveSession[],
-): Array<ActiveSession & { ticketId: string | null; project: string | null }> {
+): Array<ActiveSession & { ticketId: string | null; project: string | null; prLink: string | null }> {
   return sessions.map((s) => ({
     ...s,
     ticketId: s.ticket?.id ?? null,
     project: s.cwd ? path.basename(s.cwd) : null,
+    prLink: s.pr?.url ?? null,
   }));
 }
 
@@ -1556,12 +1575,12 @@ function metaSignals(s: SessionMeta): Parameters<typeof signalBadges>[0] {
 }
 
 /** One flat table row:
- *   shortId · agent · version · project · [glyph] label·doing · [ticket] · [wt] · time
+ *   shortId · agent · version · model · project · [glyph] label·doing · [ticket] · [wt] · time
  * `doing` is the live preview when running, else the topic. The `ticket` column
  * (tracker/PR ref, pulled out of the badge blob so refs align) is only rendered
  * when `showTicket` — otherwise a listing with no refs would waste a column of
  * dashes and needlessly truncate the topic. Worktree stays a trailing badge. */
-function flatSessionRow(session: SessionMeta, live?: ActiveSession, showTicket = false, cols: PickerColumns = {}): string {
+export function flatSessionRow(session: SessionMeta, live?: ActiveSession, showTicket = false, cols: PickerColumns = {}): string {
   const agentColor = colorAgent(session.agent);
   const when = formatRelativeTime(session.lastActivity ?? session.timestamp);
   const project = session.project || '-';
@@ -1586,7 +1605,7 @@ function flatSessionRow(session: SessionMeta, live?: ActiveSession, showTicket =
 
   const TICKET_W = 10;
   const ticketCell = showTicket
-    ? chalk.blue(padToWidth(truncateToWidth(ticketLabel(session) || '-', TICKET_W), TICKET_W + 1))
+    ? chalk.blue(linkTicketCell(session, padToWidth(truncateToWidth(ticketLabel(session) || '-', TICKET_W), TICKET_W + 1)))
     : '';
   // Live status word (working / waiting / idle) next to the glyph — the default
   // list is no longer a bare glyph. Empty (zero width) for resting rows.
@@ -1595,14 +1614,16 @@ function flatSessionRow(session: SessionMeta, live?: ActiveSession, showTicket =
   const machineW = cols.showMachine ? machineColW : 0;
   const ticketW = showTicket ? TICKET_W + 1 : 0;
   const wtW = wt ? stringWidth(wt) + 1 : 0;
-  const topicW = Math.max(16, terminalWidth() - (10 + 9 + 8 + 16) - glyphW - statusW - machineW - ticketW - wtW - stringWidth(when) - 1);
+  const modelW = cols.showModel ? (cols.modelWidth ?? PICKER_MODEL_MAX) : 0;
+  const topicW = Math.max(16, terminalWidth() - (10 + 9 + 8 + modelW + 16) - glyphW - statusW - machineW - ticketW - wtW - stringWidth(when) - 1);
 
   return (
     chalk.white(padToWidth(truncateToWidth(session.shortId, 9), 10)) +
     agentColor(padToWidth(truncateToWidth(session.agent, 8), 9)) +
     chalk.yellow(padToWidth(truncateToWidth(session.version || '-', 7), 8)) +
+    (modelW ? chalk.yellow(padToWidth(truncateToWidth(modelLabel(session.model), modelW - 1), modelW)) : '') +
     machineCell +
-    chalk.cyan(padToWidth(truncateToWidth(project, 14), 16)) +
+    chalk.cyan(linkCwdCell(session, padToWidth(truncateToWidth(project, 14), 16))) +
     (glyph ? glyph + ' ' : '') +
     statusCell +
     renderTopicCell(label, doing, '', topicW, topicW) +
@@ -1768,7 +1789,9 @@ function printSessionTable(sessions: SessionMeta[], hiddenCount = 0, tree = fals
       if (!first) console.log();
       first = false;
       const group = byDir.get(key)!;
-      console.log(`${chalk.cyan.bold(shortCwd(key))} ${chalk.gray(`(${group.length})`)}`);
+      const cwd = group.find((s) => s.cwd && !s._remote)?.cwd;
+      const header = cwd ? linkPath(cwd, shortCwd(key)) : shortCwd(key);
+      console.log(`${chalk.cyan.bold(header)} ${chalk.gray(`(${group.length})`)}`);
       for (const s of group) console.log(treeSessionRow(s, liveIndex?.get(s.id)));
     }
     const dirWord = keys.length === 1 ? 'directory' : 'directories';
@@ -1989,6 +2012,10 @@ export interface PickerColumns {
   /** Total width of the machine column, sized to the widest compacted hostname
    * in the pool (capped). Falls back to PICKER_MACHINE_W when absent. */
   machineWidth?: number;
+  /** Render the model column only when at least one row carries a model. */
+  showModel?: boolean;
+  /** Pool-sized model column width, including one trailing separator cell. */
+  modelWidth?: number;
   /** Render the ticket/PR column (only when at least one row carries a ref). */
   showTicket?: boolean;
   /**
@@ -2013,12 +2040,21 @@ export interface PickerColumns {
 const PICKER_MACHINE_W = 11;
 const PICKER_MACHINE_MIN = 8;
 const PICKER_MACHINE_MAX = 18;
+const PICKER_MODEL_MIN = 6;
+const PICKER_MODEL_MAX = 13;
 
 /** Column width that shows every compacted hostname in `machines` whole (one
  * trailing space for separation), bounded by MIN/MAX. */
 function machineColumnWidth(machines: string[], label: (m: string) => string): number {
   const widest = machines.reduce((w, m) => Math.max(w, stringWidth(label(m))), 0);
   return Math.min(PICKER_MACHINE_MAX, Math.max(PICKER_MACHINE_MIN, widest + 1));
+}
+
+function modelColumnWidth(sessions: SessionMeta[]): number {
+  const widest = sessions.reduce((width, session) => (
+    Math.max(width, session.model ? stringWidth(modelLabel(session.model)) : 0)
+  ), 0);
+  return Math.min(PICKER_MODEL_MAX, Math.max(PICKER_MODEL_MIN, widest + 1));
 }
 
 /**
@@ -2054,6 +2090,8 @@ export function pickerColumnsFor(sessions: SessionMeta[]): PickerColumns {
     showMachine: distinct.length > 1,
     machineLabel,
     machineWidth: machineColumnWidth(distinct, machineLabel),
+    showModel: sessions.some((s) => !!s.model),
+    modelWidth: modelColumnWidth(sessions),
     showTicket: sessions.some((s) => ticketLabel(s) !== ''),
   };
 }

@@ -12,7 +12,7 @@ import { truncate, humanDuration } from '../lib/format.js';
 import type { SessionEvent, SessionMeta, TodoProgress } from '../lib/session/types.js';
 import { parseSession, sanitizeForTerminal } from '../lib/session/parse.js';
 import { cleanSessionPrompt, extractSessionTopic } from '../lib/session/prompt.js';
-import { linkPath, linkUrl, relativeToCwd } from '../lib/session/render.js';
+import { linkPath, linkUrl, relativeToCwd, shortenModel } from '../lib/session/render.js';
 import { linearIssueUrl } from '../lib/session/linear.js';
 import { extractTodoProgress, WORKTREE_RE } from '../lib/session/state.js';
 import { renderMarkdown } from '../lib/markdown.js';
@@ -165,7 +165,7 @@ function displayAgent(agent: string): string {
 const DOT = chalk.gray(' · ');
 
 function formatHeader(session: SessionMeta, events: SessionEvent[]): string {
-  const model = extractModel(events);
+  const model = extractModel(events) || session.model;
   const { startedAgo, duration } = extractTiming(events);
   const totalMessages = session.messageCount ?? countMessages(events);
   const totalTokens = session.tokenCount;
@@ -174,7 +174,7 @@ function formatHeader(session: SessionMeta, events: SessionEvent[]): string {
   const line1: string[] = [];
   line1.push(chalk.gray(`${displayAgent(session.agent)}${session.version ? ` v${session.version}` : ''}`));
   if (session.shortId) line1.push(chalk.dim(session.shortId));
-  if (model) line1.push(chalk.bold.white(model));
+  if (model) line1.push(chalk.bold.white(shortenModel(model)));
   if (session.account) line1.push(chalk.gray(session.account));
 
   // Line 2: cwd · project · branch · started X ago · lasted Y
@@ -316,6 +316,8 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
   let planFile = '';
   /** Latest checklist from the transcript (Claude TodoWrite / Codex update_plan). */
   let latestTodos: TodoProgress | undefined;
+  let subAgentCount = 0;
+  const toolTags = new Set<string>();
 
   for (const event of events) {
     if (event.type === 'message') {
@@ -329,6 +331,9 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
       }
     } else if (event.type === 'tool_use' && !event._local) {
       const tool = event.tool || '';
+      const command = event.command || '';
+      for (const tag of classifySessionTool(tool, command)) toolTags.add(tag);
+      if (isSubAgentTool(tool, command)) subAgentCount++;
       const p = event.path || event.args?.file_path || event.args?.path || '';
       if (['Read', 'read_file', 'view_file', 'cat_file', 'get_file'].includes(tool) && p) {
         filesRead.add(p);
@@ -402,6 +407,14 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
     lines.push(chalk.cyan('Changes:  ') + activity.join(chalk.gray(' · ')));
   }
 
+  const metadata = [
+    ...toolTags,
+    subAgentCount ? `${subAgentCount} sub-agent${subAgentCount === 1 ? '' : 's'}` : '',
+  ].filter(Boolean);
+  if (metadata.length) {
+    lines.push(chalk.cyan('Meta:     ') + chalk.gray(metadata.join(' · ')));
+  }
+
   // Tool mix (top 4) — what kind of work this was.
   const hist = toolHistogram(toolCounts, 4);
   if (hist.length) {
@@ -439,6 +452,22 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
   }
 
   return lines.map(l => '  ' + l).join('\n');
+}
+
+function classifySessionTool(tool: string, command: string): string[] {
+  const toolName = tool.toLowerCase();
+  const commandUses = (surface: 'browser' | 'computer') => (
+    new RegExp(`\\b(?:agents|ag)\\b[^\\n;&|]*\\b${surface}\\b`).test(command.toLowerCase())
+  );
+  const tags: string[] = [];
+  if (/browser|webfetch|websearch/.test(toolName) || commandUses('browser')) tags.push('browser');
+  if (/computer/.test(toolName) || commandUses('computer')) tags.push('computer');
+  return tags;
+}
+
+function isSubAgentTool(tool: string, command: string): boolean {
+  if (/^(Agent|Task)$/i.test(tool)) return true;
+  return /\b(?:agents|ag)\b[^\n;&|]*\b(?:run|cloud\s+run|teams\s+(?:add|start))\b/.test(command);
 }
 
 /**

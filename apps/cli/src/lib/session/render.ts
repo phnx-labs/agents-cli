@@ -255,7 +255,7 @@ export function computeSummaryStats(events: SessionEvent[]): SessionStats {
 }
 
 /** Strip the 'claude-' prefix and date suffix from a model identifier. */
-function shortenModel(model: string): string {
+export function shortenModel(model: string): string {
   return model.replace(/^claude-/, '').replace(/-\d{8}$/, '');
 }
 

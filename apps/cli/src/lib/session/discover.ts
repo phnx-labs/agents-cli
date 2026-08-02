@@ -145,6 +145,7 @@ interface ClaudeSessionScan {
   cwd?: string;
   gitBranch?: string;
   version?: string;
+  model?: string;
   topic?: string;
   messageCount: number;
   tokenCount?: number;
@@ -185,6 +186,7 @@ interface CodexSessionScan {
   cwd?: string;
   gitBranch?: string;
   version?: string;
+  model?: string;
   topic?: string;
   messageCount: number;
   tokenCount?: number;
@@ -1270,6 +1272,7 @@ async function readClaudeMeta(
       filePath,
       gitBranch: scan.gitBranch,
       version: scan.version,
+      model: scan.model,
       account,
       topic: scan.topic,
       label,
@@ -1299,6 +1302,7 @@ async function readClaudeMeta(
       lastActivity: scan.lastActivity,
       filePath,
       account,
+      model: scan.model,
       label,
       messageCount: scan.messageCount,
       tokenCount: scan.tokenCount,
@@ -1619,6 +1623,7 @@ export async function readCodexMeta(
     filePath,
     gitBranch: scan.gitBranch,
     version: resolveSessionVersion('codex', filePath, scan.version, currentVersion),
+    model: scan.model,
     topic: scan.topic,
     messageCount: scan.messageCount,
     tokenCount: scan.tokenCount,
@@ -1851,6 +1856,7 @@ function readGeminiMeta(
     cwd,
     filePath,
     version: resolveSessionVersion('gemini', filePath, embeddedVersion, currentVersion),
+    model: sessionModel,
     topic,
     messageCount,
     tokenCount: sawTokenCount ? tokenCount : undefined,
@@ -2528,6 +2534,7 @@ function readHermesMeta(filePath: string): { meta: SessionMeta; content: string 
     project: platform,
     filePath,
     version: model,
+    model,
     topic,
     messageCount: messageCount || (typeof session.message_count === 'number' ? session.message_count : undefined),
   };
@@ -2649,6 +2656,7 @@ async function readDroidMeta(
     cwd,
     filePath,
     version: resolveSessionVersion('droid', filePath, undefined, currentVersion),
+    model,
     topic: scan.topic,
     messageCount: scan.messageCount,
     tokenCount,
@@ -2802,6 +2810,7 @@ export interface ClaudeParseState {
   cwd?: string;
   gitBranch?: string;
   version?: string;
+  model?: string;
   topic?: string;
   // Explicit session titles: `/rename` writes a `custom-title` event; Claude
   // auto-generates an `ai-title`. Both can repeat across the file — last wins.
@@ -2845,6 +2854,7 @@ export function initClaudeParseState(): ClaudeParseState {
     cwd: undefined,
     gitBranch: undefined,
     version: undefined,
+    model: undefined,
     topic: undefined,
     customTitle: undefined,
     aiTitle: undefined,
@@ -3023,6 +3033,7 @@ export function applyClaudeLine(state: ClaudeParseState, parsed: any): void {
   // Per-assistant-message cost: each event carries its own model, so we
   // multiply that event's raw token directions by that model's price.
   const model = parsed.message?.model;
+  if (typeof model === 'string' && model) state.model = model;
   if (model && usageObj && typeof usageObj === 'object') {
     const eventCost = costOfUsage({
       model,
@@ -3059,6 +3070,7 @@ export function finalizeClaudeScan(state: ClaudeParseState): ClaudeSessionScan {
     cwd: state.cwd,
     gitBranch: state.gitBranch,
     version: state.version,
+    model: state.model,
     topic: resolvedTopic,
     entrypoint: state.entrypoint,
     messageCount: state.messageCount,
@@ -3126,6 +3138,7 @@ export interface ClaudeParserState {
   cwd?: string;
   gitBranch?: string;
   version?: string;
+  model?: string;
   entrypoint?: string;
   firstTsMs?: number;
   topic?: string;
@@ -3174,6 +3187,7 @@ export function serializeClaudeParserState(state: ClaudeParseState, offset: numb
     cwd: state.cwd,
     gitBranch: state.gitBranch,
     version: state.version,
+    model: state.model,
     entrypoint: state.entrypoint,
     firstTsMs: state.firstTsMs,
     topic: state.topic,
@@ -3235,6 +3249,7 @@ export function hydrateClaudeParseState(prior: ClaudeParserState): ClaudeParseSt
     cwd: prior.cwd,
     gitBranch: prior.gitBranch,
     version: prior.version,
+    model: prior.model,
     topic: prior.topic,
     customTitle: prior.customTitle,
     aiTitle: prior.aiTitle,
@@ -3641,6 +3656,7 @@ export function finalizeCodexScan(state: CodexParseState): CodexSessionScan {
     cwd: state.cwd,
     gitBranch: state.gitBranch,
     version: state.version,
+    model: state.model,
     topic: state.topic,
     messageCount: state.messageCount,
     tokenCount: state.tokenCount,
