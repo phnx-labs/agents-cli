@@ -290,6 +290,34 @@ export function log(level: string, message: string): void {
 }
 
 /** Main daemon loop: load jobs, schedule crons, monitor runs, and handle signals. */
+/**
+ * Anchor the daemon's working directory to a stable, always-present path.
+ *
+ * The daemon is long-lived and inherits whatever cwd it was launched from — often
+ * a git worktree (e.g. a `.agents/worktrees/<slug>/` a session happened to be in).
+ * When that directory is later removed (`git worktree remove`, `rm -rf`), the
+ * daemon keeps the deleted inode as its cwd — a process cannot chdir out of a
+ * deleted directory on its own — and every job it spawns inherits the dead cwd
+ * (`spawnJobAttempt` and command runs pass no explicit `cwd`, so the child uses
+ * the parent's). Bun then fails `getcwd()` during startup and every routine crashes
+ * at 0 seconds with `ENOENT: Bun could not find a file` before the agent even runs.
+ *
+ * Re-anchoring to the home directory once, at daemon startup, makes the daemon
+ * immune regardless of how it was launched (systemd unit, launchd, or a manual
+ * `agents __daemon-run` from any directory). Returns the resolved cwd, or null if
+ * anchoring failed (logged, non-fatal).
+ */
+export function anchorDaemonCwd(): string | null {
+  const home = os.homedir();
+  try {
+    process.chdir(home);
+    return home;
+  } catch (err) {
+    log('WARN', `Could not anchor daemon cwd to ${home}: ${(err as Error).message}`);
+    return null;
+  }
+}
+
 export async function runDaemon(): Promise<void> {
   // Single-instance guard: a direct `agents __daemon-run` (manual, or a
   // service-manager restart racing a live predecessor) must not clobber a
@@ -302,6 +330,8 @@ export async function runDaemon(): Promise<void> {
     process.exit(0);
   }
   log('INFO', `Daemon started (PID: ${process.pid})`);
+
+  anchorDaemonCwd();
 
   // The daemon holds NO Claude credential of its own. Routine runs authenticate
   // exactly like an interactive `agents run`: through the per-account

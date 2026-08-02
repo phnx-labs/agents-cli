@@ -31,6 +31,7 @@ import {
   writeDaemonPid,
   removeDaemonPid,
   shouldTakeOverBroker,
+  anchorDaemonCwd,
 } from './daemon.js';
 import { ipcEndpoint } from './platform/index.js';
 
@@ -619,5 +620,62 @@ describe('shouldTakeOverBroker (RUSH-1817: daemon self-heals a dead standalone)'
 
   it('never clobbers a reachable (healthy) standalone broker', () => {
     expect(shouldTakeOverBroker(false, true)).toBe(false);
+  });
+});
+
+describe('anchorDaemonCwd', () => {
+  let originalCwd: string;
+
+  beforeEach(() => {
+    originalCwd = process.cwd();
+  });
+
+  afterEach(() => {
+    // The tests below chdir into temp dirs (some deleted); restore a valid cwd so
+    // later tests and vitest teardown aren't left standing in a dead directory.
+    try {
+      process.chdir(originalCwd);
+    } catch {
+      process.chdir(os.homedir());
+    }
+  });
+
+  it('recovers a deleted working directory by anchoring to home', () => {
+    // Reproduce the exact routine-outage failure: the daemon is running with its
+    // cwd inside a directory (a git worktree, in the real incident) that then gets
+    // removed out from under it. A process cannot chdir out of a deleted directory
+    // on its own, so every job it spawns inherits the dead cwd and Bun crashes with
+    // `ENOENT: Bun could not find a file` at startup. anchorDaemonCwd must recover.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'daemon-cwd-'));
+    const realTmp = fs.realpathSync(tmp);
+    process.chdir(realTmp);
+    fs.rmSync(realTmp, { recursive: true, force: true });
+
+    // Sanity: we are genuinely standing in a deleted directory now. On Linux,
+    // process.cwd() throws ENOENT here — the precondition of the outage.
+    let cwdBroken = false;
+    try {
+      process.cwd();
+    } catch {
+      cwdBroken = true;
+    }
+    expect(cwdBroken).toBe(true);
+
+    const resolved = anchorDaemonCwd();
+    expect(resolved).toBe(os.homedir());
+    // cwd() must now succeed and point at home — spawns will inherit a live dir.
+    expect(fs.realpathSync(process.cwd())).toBe(fs.realpathSync(os.homedir()));
+  });
+
+  it('anchors to home even when launched from an unrelated valid directory', () => {
+    const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'daemon-cwd-')));
+    try {
+      process.chdir(tmp);
+      const resolved = anchorDaemonCwd();
+      expect(resolved).toBe(os.homedir());
+      expect(fs.realpathSync(process.cwd())).toBe(fs.realpathSync(os.homedir()));
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });
