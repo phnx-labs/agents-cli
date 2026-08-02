@@ -205,24 +205,31 @@ interface CodexRateLimitMatch {
   rateLimits: CodexRateLimits;
 }
 
-/** Fetch usage info for a given agent, dispatching to the agent-specific implementation. */
+interface UsageSource {
+  fetch: (options?: UsageOptions) => Promise<UsageInfo>;
+  network: boolean;
+}
+
+/** The single registry of agent usage sources and their transport. */
+const USAGE_SOURCES = {
+  claude: { fetch: getClaudeUsageInfo, network: true },
+  codex: { fetch: getCodexUsageInfo, network: false },
+  kimi: { fetch: getKimiUsageInfo, network: true },
+  droid: { fetch: getDroidUsageInfo, network: true },
+  grok: { fetch: getGrokUsageInfo, network: false },
+  cursor: { fetch: getCursorUsageInfo, network: true },
+} as const satisfies Partial<Record<AgentId, UsageSource>>;
+
+export const USAGE_SOURCE_AGENT_IDS = Object.keys(USAGE_SOURCES) as (keyof typeof USAGE_SOURCES)[];
+
+function getUsageSource(agentId: AgentId): UsageSource | undefined {
+  return USAGE_SOURCES[agentId as keyof typeof USAGE_SOURCES];
+}
+
+/** Fetch usage info for a given agent through the canonical source registry. */
 export async function getUsageInfo(agentId: AgentId, options?: UsageOptions): Promise<UsageInfo> {
-  switch (agentId) {
-    case 'claude':
-      return getClaudeUsageInfo(options);
-    case 'codex':
-      return getCodexUsageInfo(options);
-    case 'kimi':
-      return getKimiUsageInfo(options);
-    case 'droid':
-      return getDroidUsageInfo(options);
-    case 'grok':
-      return getGrokUsageInfo(options);
-    case 'cursor':
-      return getCursorUsageInfo(options);
-    default:
-      return { snapshot: null, error: null };
-  }
+  const source = getUsageSource(agentId);
+  return source ? source.fetch(options) : { snapshot: null, error: null };
 }
 
 /** Derive a stable lookup key from account info for usage deduplication. */
@@ -274,14 +281,7 @@ export function buildCanonicalUsageContext(inputs: UsageIdentityInput[]): {
  * versus simply not applicable (Antigravity, OpenCode).
  */
 export function agentReportsUsage(agentId: AgentId): boolean {
-  return (
-    agentId === 'claude' ||
-    agentId === 'codex' ||
-    agentId === 'kimi' ||
-    agentId === 'droid' ||
-    agentId === 'grok' ||
-    agentId === 'cursor'
-  );
+  return getUsageSource(agentId) !== undefined;
 }
 
 /** Fetch usage info for all unique accounts in parallel, keyed by usage key. */
@@ -336,15 +336,14 @@ export async function getUsageInfoForIdentity(
   const usageKey = getUsageLookupKey(input.info);
   const forceRefresh = opts?.forceRefresh === true;
 
-  // Agents whose usage comes from a live network call (Claude, Kimi, Droid) go
+  // Agents whose registered usage source makes a live network call go
   // through the stale-while-revalidate cache below so `agents run`/`agents view`
   // stay off the network on the hot path. Everything else (Codex reads local
   // session logs) takes the legacy blocking path. The on-disk cache is shared and
   // keyed by usageKey, which is namespaced per agent (`claude:org=…`,
-  // `kimi:user=…`, `droid:org=…`), so one cache file holds every account without
-  // collision.
-  const usesNetworkUsage =
-    input.agentId === 'claude' || input.agentId === 'kimi' || input.agentId === 'droid';
+  // `kimi:user=…`, `droid:org=…`, `cursor:user=…`), so one cache file holds every
+  // account without collision.
+  const usesNetworkUsage = getUsageSource(input.agentId)?.network === true;
   if (!usesNetworkUsage || !usageKey) {
     return getUsageInfo(input.agentId, {
       home: input.home,

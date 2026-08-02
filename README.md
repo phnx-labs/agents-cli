@@ -165,7 +165,7 @@ agents run codex@ "review this branch"
 
 A trailing `@` opens an account picker before either an interactive or prompt-based run. Each installed version shows its account identity, exact version, login state, plan, and every available session, weekly, or monthly limit. Logged-out, rate-limited, and out-of-credit accounts remain visible with the reason they cannot be selected; signed-in accounts whose provider does not expose quota data stay selectable and say `limits unavailable`. The choice pins only that run and does not change your default version.
 
-Account selection is available for Claude, Codex, Antigravity, Grok, Kimi, Droid, and OpenCode. It requires a terminal and cannot be combined with `--resume`, `--strategy`/`--balanced`, `--lease`, or `--host`/`--device`; profiles and workflows must use their concrete host agent instead.
+Account selection is available for Claude, Codex, Gemini, Cursor, Antigravity, Grok, Kimi, Droid, and OpenCode. It requires a terminal and cannot be combined with `--resume`, `--strategy`/`--balanced`, `--lease`, or `--host`/`--device`; profiles and workflows must use their concrete host agent instead.
 
 ### Chain agents
 

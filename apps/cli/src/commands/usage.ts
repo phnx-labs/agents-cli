@@ -36,16 +36,6 @@ export interface AgentUsageRecord {
   usage?: Awaited<ReturnType<typeof getUsageInfoForIdentity>>;
 }
 
-/** Return the unsupported record only when the usage library has no source. */
-export function unsupportedUsageRecord(
-  agentId: AgentId,
-  label: string,
-): AgentUsageRecord | null {
-  return agentReportsUsage(agentId)
-    ? null
-    : { agent: agentId, label, status: 'unsupported' };
-}
-
 export function registerUsageCommand(program: Command): void {
   addHostOption(program.command('usage [agent]'))
     .description('Show rate-limit / quota usage per agent')
@@ -99,8 +89,9 @@ async function collectAgentUsage(agentId: AgentId): Promise<AgentUsageRecord> {
   // `--json` never emits ANSI escapes in `label` (e.g. under FORCE_COLOR=1).
   const label = AGENTS[agentId].name;
 
-  const unsupported = unsupportedUsageRecord(agentId, label);
-  if (unsupported) return unsupported;
+  if (!agentReportsUsage(agentId)) {
+    return { agent: agentId, label, status: 'unsupported' };
+  }
 
   const versions = listInstalledVersions(agentId);
   const version = getGlobalDefault(agentId) || versions[0];

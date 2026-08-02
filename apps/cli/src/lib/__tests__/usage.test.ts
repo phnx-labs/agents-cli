@@ -4,6 +4,7 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { AccountInfo } from '../agents.js';
+import { ALL_AGENT_IDS } from '../agents.js';
 import * as state from '../state.js';
 import {
   agentReportsUsage,
@@ -22,6 +23,7 @@ import {
   formatKimiPlan,
   normalizeDroidWindows,
   normalizeCursorUsage,
+  USAGE_SOURCE_AGENT_IDS,
   type DroidBillingLimitsResponse,
   type KimiUsagesResponse,
   type UsageSnapshot,
@@ -138,12 +140,10 @@ describe('usage formatting', () => {
       .not.toContain('usage unavailable');
   });
 
-  it('agentReportsUsage flags only the agents that expose usage data', () => {
-    for (const a of ['claude', 'codex', 'kimi', 'droid', 'grok', 'cursor'] as const) {
-      expect(agentReportsUsage(a)).toBe(true);
-    }
-    for (const a of ['antigravity', 'opencode', 'gemini'] as const) {
-      expect(agentReportsUsage(a)).toBe(false);
+  it('pins the complete usage source registry and derives support from it', () => {
+    expect(USAGE_SOURCE_AGENT_IDS).toEqual(['claude', 'codex', 'kimi', 'droid', 'grok', 'cursor']);
+    for (const agentId of ALL_AGENT_IDS) {
+      expect(agentReportsUsage(agentId)).toBe(USAGE_SOURCE_AGENT_IDS.includes(agentId as never));
     }
   });
 
