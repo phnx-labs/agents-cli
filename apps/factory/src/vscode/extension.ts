@@ -1555,10 +1555,6 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('agents.setupGemini', () => swarm.setupSwarmIntegrationForAgent('gemini', context))
-  );
-
-  context.subscriptions.push(
     vscode.commands.registerCommand('agents.enableNotifications', () => notifications.enableNotifications(context))
   );
 
@@ -1723,6 +1719,11 @@ export async function activate(context: vscode.ExtensionContext) {
           if (agentConfig) openSingleAgent(context, agentConfig);
         })
       );
+      continue;
+    }
+    if (def.key === 'gemini') {
+      // Gemini is deprecated; Antigravity is the replacement. Don't register
+      // launch commands for it, but keep session parsing/watching intact.
       continue;
     }
     context.subscriptions.push(

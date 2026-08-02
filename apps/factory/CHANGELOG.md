@@ -6,6 +6,10 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.9.303] - 2026-08-02
+
+- **Remove deprecated Gemini launch commands from the Factory palette (RUSH-2089).** Gemini is no longer supported; Antigravity is its replacement. The command palette no longer shows `Agents: New Gemini`, `Agents: New Gemini (Pick Host)`, `Agents: New Gemini (Auto)`, or `Agents: Setup Gemini`. Existing Gemini session parsing and transcript watching remain in place so old sessions are still readable. Source: `apps/factory/src/vscode/extension.ts`, `apps/factory/package.json`.
+
 ## [0.9.302] - 2026-08-02
 
 - **Every built-in harness now has a fast `New <Harness> (Auto)` launch command.** Auto launch ranks a persisted warm cache by successful recent device history plus cached load, memory, and running-agent count; it excludes offline, SSH-unreachable, signed-out, and throttled devices without performing SSH on the command path. Every launch updates per-device history, a cold/no-match cache warns and launches locally, and Droid explains that account health is unavailable before opening the host picker. Auto-supported harnesses launch with balanced account rotation. Source: `apps/factory/src/core/launchHistory.ts`, `apps/factory/src/vscode/extension.ts`, `apps/factory/package.json`.

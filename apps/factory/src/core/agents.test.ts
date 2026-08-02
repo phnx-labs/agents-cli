@@ -25,6 +25,8 @@ describe('BUILT_IN_AGENTS', () => {
     expect(extensionSource).toContain('`${def.commandId}Auto`');
     for (const agent of BUILT_IN_AGENTS) {
       if (agent.key === 'shell') continue;
+      // Gemini is deprecated and no longer gets launch commands in the palette.
+      if (agent.key === 'gemini') continue;
       expect(contributed.has(`${agent.commandId}Auto`)).toBe(true);
     }
   });

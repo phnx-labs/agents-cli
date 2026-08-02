@@ -2,8 +2,8 @@
   "name": "swarm-ext",
   "displayName": "Agents",
   "publisher": "swarmify",
-  "description": "Run Claude, Codex, Gemini, Cursor, and other coding agents from one IDE workspace.",
-  "version": "0.9.302",
+  "description": "Run Claude, Codex, Antigravity, Cursor, and other coding agents from one IDE workspace.",
+  "version": "0.9.303",
   "license": "MIT",
   "author": "Muqsit Nawaz <dev@muqsitnawaz.com>",
   "icon": "assets/agents.png",
@@ -147,14 +147,6 @@
         }
       },
       {
-        "command": "agents.newGemini",
-        "title": "Agents: New Gemini",
-        "icon": {
-          "light": "assets/gemini.png",
-          "dark": "assets/gemini.png"
-        }
-      },
-      {
         "command": "agents.newAntigravity",
         "title": "Agents: New Antigravity",
         "icon": {
@@ -277,10 +269,6 @@
       {
         "command": "agents.setupCodex",
         "title": "Agents: Setup Codex"
-      },
-      {
-        "command": "agents.setupGemini",
-        "title": "Agents: Setup Gemini"
       },
       {
         "command": "agents.enableNotifications",
@@ -445,18 +433,6 @@
       {
         "command": "agents.newCodexAuto",
         "title": "Agents: New Codex (Auto)"
-      },
-      {
-        "command": "agents.newGeminiPickHost",
-        "title": "Agents: New Gemini (Pick Host)",
-        "icon": {
-          "light": "assets/gemini.png",
-          "dark": "assets/gemini.png"
-        }
-      },
-      {
-        "command": "agents.newGeminiAuto",
-        "title": "Agents: New Gemini (Auto)"
       },
       {
         "command": "agents.newOpenCodePickHost",
@@ -696,11 +672,6 @@
       ],
       "commandPalette": [
         {
-          "command": "agents.newGemini",
-          "when": "true",
-          "group": "navigation@2"
-        },
-        {
           "command": "agents.newAntigravity",
           "when": "true",
           "group": "navigation@2"
@@ -843,11 +814,6 @@
         "command": "agents.prompts",
         "key": "ctrl+shift+'",
         "mac": "cmd+shift+'"
-      },
-      {
-        "command": "agents.newGemini",
-        "key": "ctrl+shift+m",
-        "mac": "cmd+shift+m"
       },
       {
         "command": "agents.newCursor",
