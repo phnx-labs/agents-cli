@@ -1126,6 +1126,40 @@ function useInteractiveBrowser(options: SessionsOptions): boolean {
   return options.interactive !== false && !options.json && isInteractiveTerminal();
 }
 
+/**
+ * A bare interactive fleet listing — no query, no render/filter flag — that the
+ * `runSessionBrowser` picker can represent. The single predicate shared by the
+ * bare-browser branch and the `--host` early-return guard so they can't drift:
+ * when this holds, an explicit `--host`/`--device` scope is folded into the
+ * browser (preview-rich, selectable) instead of the legacy per-host raw stream.
+ */
+export function isBareBrowserListing(options: SessionsOptions, query: string | undefined): boolean {
+  return useInteractiveBrowser(options) && hasNoBrowserDisqualifyingFlags(options, query);
+}
+
+/**
+ * Pure flag-gate half of {@link isBareBrowserListing} (TTY-independent, so it is
+ * unit-testable): true when no query, render, or filter flag is present that the
+ * `runSessionBrowser` picker cannot represent.
+ */
+export function hasNoBrowserDisqualifyingFlags(
+  options: SessionsOptions,
+  query: string | undefined
+): boolean {
+  return (
+    !query &&
+    !options.routine &&
+    !options.flat &&
+    !options.tree &&
+    !options.markdown &&
+    !options.until &&
+    !options.project &&
+    !options.sort &&
+    !options.artifacts &&
+    options.artifact === undefined
+  );
+}
+
 /** The canonical `ag sessions …` command for a set of flags — the twin of the
  * browser's `y` hotkey (see --print-cmd). Normalizes to the stable flag form. */
 function canonicalSessionsCommand(query: string | undefined, options: SessionsOptions): string {
@@ -1222,13 +1256,20 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
       await runRemoteSessionsJson(options.host);
       return;
     }
-    try {
-      runRemoteSessions(options.host);
-    } catch (err: any) {
-      console.error(chalk.red(err.message));
-      process.exit(1);
+    // A bare interactive `--host`/`--device <box>` listing falls through to the
+    // fleet browser below, which folds the named host(s) into the same merged,
+    // preview-rich, selectable view as the local listing (via gatherRemoteList).
+    // A query, a render/filter flag, or a non-interactive caller keeps the legacy
+    // per-host raw stream under a `── host ──` banner.
+    if (!isBareBrowserListing(options, query)) {
+      try {
+        runRemoteSessions(options.host);
+      } catch (err: any) {
+        console.error(chalk.red(err.message));
+        process.exit(1);
+      }
+      return;
     }
-    return;
   }
 
   // --preview <id/query>: resolve one session and print its compact preview, then
@@ -1291,19 +1332,7 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
   // filter the browser can't represent), or --no-interactive keep the existing
   // printed/render paths (agents and scripts unaffected). An explicit --since seeds
   // the browser's window so the flag is honored, not swallowed.
-  if (
-    useInteractiveBrowser(options) &&
-    !query &&
-    !options.routine &&
-    !options.flat &&
-    !options.tree &&
-    !options.markdown &&
-    !options.until &&
-    !options.project &&
-    !options.sort &&
-    !options.artifacts &&
-    options.artifact === undefined
-  ) {
+  if (isBareBrowserListing(options, query)) {
     const { runSessionBrowser, bareBrowserSeed } = await import('./sessions-browser.js');
     await runSessionBrowser(
       bareBrowserSeed({

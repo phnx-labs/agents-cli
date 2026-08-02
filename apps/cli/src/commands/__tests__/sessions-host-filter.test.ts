@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { shouldIncludeLocal, remoteHostsToDial } from '../sessions.js';
+import { shouldIncludeLocal, remoteHostsToDial, hasNoBrowserDisqualifyingFlags } from '../sessions.js';
 
 describe('shouldIncludeLocal', () => {
   const self = 'zion';
@@ -58,5 +58,26 @@ describe('remoteHostsToDial', () => {
   it('returns [] when the only named host is self (caller then skips the fan-out)', () => {
     expect(remoteHostsToDial(['zion'], self)).toEqual([]);
     expect(remoteHostsToDial(['zion.tail1a85a1.ts.net'], self)).toEqual([]);
+  });
+});
+
+describe('hasNoBrowserDisqualifyingFlags (bare interactive --host routing)', () => {
+  // The bug this pins: a bare `agents sessions --host/--device <box>` used to
+  // short-circuit into the legacy per-host raw stream (non-interactive, no
+  // previews) instead of the fleet browser. The browser handles an explicit
+  // host scope; the gate below is what lets `--host` reach it — but only for a
+  // bare listing the picker can represent (no query / render / filter flag).
+  it('allows a bare --host listing (no query, no flags) into the browser', () => {
+    expect(hasNoBrowserDisqualifyingFlags({ host: ['yosemite-s0'] } as any, undefined)).toBe(true);
+  });
+
+  it('keeps the raw stream for a --host search (a query the picker path owns)', () => {
+    expect(hasNoBrowserDisqualifyingFlags({ host: ['yosemite-s0'] } as any, 'auth bug')).toBe(false);
+  });
+
+  it('keeps the raw stream when a render/filter flag is set', () => {
+    for (const flags of [{ flat: true }, { tree: true }, { markdown: true }, { until: '2d' }, { project: 'x' }, { sort: 'cost' }, { artifacts: true }]) {
+      expect(hasNoBrowserDisqualifyingFlags({ host: ['yosemite-s0'], ...flags } as any, undefined)).toBe(false);
+    }
   });
 });

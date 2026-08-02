@@ -305,12 +305,21 @@ Discovery is local-only — every path is rooted at `os.homedir()`, so a machine
 sees only its own transcripts. `--host` runs the query on another machine instead:
 
 ```
+# Browse another machine's sessions in the interactive picker (previews + resume)
+agents sessions --host yosemite-s1        # or --device yosemite-s1
+
 # Search another machine's sessions live (no sync, always current)
 agents sessions "auth bug" --last 3 --host yosemite-s1
 
 # Fan the same query across several machines
 agents sessions --all "deploy script" --host box-a --host box-b
 ```
+
+A **bare** `--host`/`--device <box>` listing on a TTY folds that box into the same
+interactive fleet browser as the local view — preview-rich and selectable — rather
+than the legacy per-host raw stream. The stream is still used for a `--host` *query*
+(`agents sessions "term" --host <box>`), a render/filter flag, `--json`, or a
+non-interactive caller (piped/`--no-interactive`).
 
 It works by invoking the **remote's own** `agents sessions` against its already-built
 index over SSH and streaming stdout back — `ssh -o BatchMode=yes <host> bash -lc
