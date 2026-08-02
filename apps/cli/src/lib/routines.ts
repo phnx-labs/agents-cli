@@ -18,6 +18,7 @@ import type { AgentId } from './types.js';
 import { ALL_AGENT_IDS } from './agents.js';
 import type { LoopConfig } from './loop.js';
 import { machineId, normalizeHost } from './machine-id.js';
+import { resolveActor } from './actor.js';
 
 /** Tool/site/directory allow-list for sandboxed job execution. */
 export interface JobAllowConfig {
@@ -237,6 +238,14 @@ export interface JobConfig {
   resume?: string;
   /** When set, executeJob runs this job through the loop driver instead of once. */
   loop?: LoopConfig;
+  /**
+   * Actor id of whoever CREATED this routine (`resolveActor().id`, stamped by
+   * `writeJob` at creation and preserved across edits). Propagated into each
+   * fired run's env and RunMeta so an unattended cron traces back to the person
+   * who scheduled it, not the `UNRESOLVED@<host>` a live resolve would give.
+   * RUSH-2020.
+   */
+  actor?: string;
 }
 
 /** Metadata for a single job execution, persisted as JSON in the run directory. */
@@ -267,6 +276,18 @@ export interface RunMeta {
   cloudTaskId?: string;
   /** Cloud provider id when the run was cloud-dispatched. */
   cloudProvider?: string;
+  /**
+   * Actor id of the routine's CREATOR (stamped at creation, carried from the job
+   * config). Answers "whose scheduled run is this" for an unattended cron fire,
+   * where resolving the actor live would only yield `UNRESOLVED@<host>`. RUSH-2020.
+   */
+  actor?: string;
+  /**
+   * Actor id that TRIGGERED this particular run (`resolveActor().id` at fire
+   * time): a person for a manual `agents routines run`, `UNRESOLVED@<host>` for
+   * an unattended scheduled fire. Distinct from {@link actor} (the creator).
+   */
+  triggeredBy?: string;
 }
 
 /**
@@ -505,6 +526,10 @@ function readJobFile(filePath: string): JobConfig | null {
  */
 export function writeJob(config: JobConfig): void {
   ensureAgentsDir();
+  // Stamp the creator once (RUSH-2020). An edit re-writes a config loaded from
+  // disk, which already carries `actor`, so this preserves the original creator;
+  // only a brand-new routine (no actor yet) gets the current resolver.
+  if (!config.actor) config.actor = resolveActor().id;
   const jobsDir = getRoutinesDir();
   const ymlPath = safeJoin(jobsDir, config.name + '.yml');
   const yamlPath = safeJoin(jobsDir, config.name + '.yaml');

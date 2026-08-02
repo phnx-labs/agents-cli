@@ -9,6 +9,7 @@ import {
   detectCaller,
   _resetForTest,
 } from './events.js';
+import { resetActorCache } from './actor.js';
 
 const tempDirs: string[] = [];
 
@@ -71,6 +72,24 @@ describe('events', () => {
 
       const records = query({});
       expect(records[0].level).toBe('warn');
+    });
+
+    it('stamps the resolved actor + kind on every record (RUSH-2020)', () => {
+      // Force an inherited actor via env so the resolve is deterministic offline.
+      process.env.AGENTS_ACTOR = 'ada@example.com';
+      process.env.AGENTS_ACTOR_KIND = 'human';
+      resetActorCache();
+      try {
+        setupLogsDir();
+        emit('info', { module: 'test' });
+        const rec = query({})[0];
+        expect(rec.actor).toBe('ada@example.com');
+        expect(rec.kind).toBe('human');
+      } finally {
+        delete process.env.AGENTS_ACTOR;
+        delete process.env.AGENTS_ACTOR_KIND;
+        resetActorCache();
+      }
     });
 
     it('assigns debug level to debug events', () => {
@@ -342,6 +361,23 @@ describe('events', () => {
       expect(s.byEvent['secrets.get']).toBe(1);
       expect(s.byModule.secrets).toBe(1);
       expect(s.fileCount).toBe(1);
+    });
+
+    it('groups events by actor (RUSH-2020)', () => {
+      process.env.AGENTS_ACTOR = 'grace@example.com';
+      process.env.AGENTS_ACTOR_KIND = 'human';
+      resetActorCache();
+      try {
+        setupLogsDir();
+        emit('info', { module: 'test' });
+        emit('warn', { module: 'test' });
+        const s = stats({ days: 1 });
+        expect(s.byActor['grace@example.com']).toBe(2);
+      } finally {
+        delete process.env.AGENTS_ACTOR;
+        delete process.env.AGENTS_ACTOR_KIND;
+        resetActorCache();
+      }
     });
   });
 

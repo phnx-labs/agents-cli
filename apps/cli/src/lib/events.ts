@@ -20,6 +20,7 @@ import { gzipSync, gunzipSync } from 'node:zlib';
 import { parseSshConnection } from './session/provenance.js';
 import { ensureLockTarget, withFileLock } from './fs-atomic.js';
 import { getUserAgentsDir } from './state.js';
+import { resolveActor, type ActorKind } from './actor.js';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -177,6 +178,10 @@ export interface EventMeta {
   osUser: string;
   transport: 'local' | 'ssh';
   sshClientIp?: string;
+  /** Resolved actor id — which human/agent is behind this event (RUSH-2020). */
+  actor?: string;
+  /** Actor kind (`human`/`agent`). */
+  kind?: ActorKind;
 }
 
 export interface EventPayload {
@@ -270,6 +275,7 @@ const SENSITIVE_PAYLOAD_KEY = /password|secret|token|api[-_]?key|auth/i;
 const RESERVED_META_KEYS = new Set([
   'ts', 'tz', 'tzName', 'hostname', 'platform', 'arch', 'pid', 'ppid',
   'event', 'level', 'caller', 'session', 'osUser', 'transport', 'sshClientIp',
+  'actor', 'kind',
 ]);
 
 function promptMarker(value: string): string {
@@ -432,6 +438,10 @@ interface AuditOrigin {
   osUser: string;
   transport: 'local' | 'ssh';
   sshClientIp?: string;
+  /** Resolved actor id (`resolveActor().id`) — which human/agent is behind this event. */
+  actor: string;
+  /** Actor kind (`resolveActor().kind`). */
+  kind: ActorKind;
 }
 
 /**
@@ -449,10 +459,13 @@ function auditOrigin(): AuditOrigin {
     // Container/edge cases where the uid has no passwd entry.
   }
   const ssh = process.env.SSH_CONNECTION ? parseSshConnection(process.env.SSH_CONNECTION) : undefined;
+  const actor = resolveActor();
   _origin = {
     osUser,
     transport: ssh ? 'ssh' : 'local',
     ...(ssh ? { sshClientIp: ssh.clientIp } : {}),
+    actor: actor.id,
+    kind: actor.kind,
   };
   return _origin;
 }
@@ -932,6 +945,8 @@ export interface EventStats {
   byEvent: Record<string, number>;
   byModule: Record<string, number>;
   byUser: Record<string, number>;
+  /** Event counts grouped by resolved actor id (the human/agent behind them). */
+  byActor: Record<string, number>;
   fileCount: number;
   totalBytes: number;
 }
@@ -947,6 +962,7 @@ export function stats(options: { days?: number } = {}): EventStats {
   const byEvent: Record<string, number> = {};
   const byModule: Record<string, number> = {};
   const byUser: Record<string, number> = {};
+  const byActor: Record<string, number> = {};
 
   for (const r of records) {
     const lvl = r.level ?? levelFor(r.event as EventType);
@@ -955,6 +971,7 @@ export function stats(options: { days?: number } = {}): EventStats {
     if (r.module) byModule[r.module] = (byModule[r.module] ?? 0) + 1;
     const user = `${r.osUser ?? '?'}@${r.hostname}`;
     byUser[user] = (byUser[user] ?? 0) + 1;
+    if (r.actor) byActor[r.actor] = (byActor[r.actor] ?? 0) + 1;
   }
 
   let fileCount = 0;
@@ -979,6 +996,7 @@ export function stats(options: { days?: number } = {}): EventStats {
     byEvent,
     byModule,
     byUser,
+    byActor,
     fileCount,
     totalBytes,
   };

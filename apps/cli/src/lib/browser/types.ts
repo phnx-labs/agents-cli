@@ -74,6 +74,11 @@ export interface Task {
   createdAt: number;
   pid: number;
   /**
+   * Resolved actor id (`resolveActor().id`) stamped at task start — who launched
+   * this browser task. Optional: tasks persisted before RUSH-2020 carry none.
+   */
+  owner?: string;
+  /**
    * Per-tab snapshot of the last ref listing captured for that tab
    * (shortId -> {descriptors, opts}). Persisted to tasks.json so a later
    * `click`/`type <ref>` can self-heal a drifted ref — the cached `opts` let
@@ -120,6 +125,8 @@ export interface HistoricalTask {
   endedAt: number;
   domains: string[];
   tabCount: number;
+  /** Actor id who launched the task (RUSH-2020); absent for pre-RUSH-2020 history. */
+  owner?: string;
 }
 
 export type IPCAction =

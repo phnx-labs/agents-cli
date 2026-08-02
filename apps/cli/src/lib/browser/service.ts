@@ -45,6 +45,7 @@ import {
   uploadViaFileChooser,
 } from './upload.js';
 import { emit } from '../events.js';
+import { resolveActor } from '../actor.js';
 import { sshExecAsync } from '../ssh-exec.js';
 import type { TargetFilter } from './types.js';
 
@@ -423,6 +424,7 @@ export class BrowserService {
       currentTabId: undefined,
       createdAt: Date.now(),
       pid: conn.pid,
+      owner: resolveActor().id, // who launched this browser task (RUSH-2020)
     };
 
     // For Electron, get the existing window as the tab
@@ -2496,6 +2498,7 @@ export class BrowserService {
       endedAt: Date.now(),
       domains,
       tabCount: Object.keys(task.tabs).length,
+      ...(task.owner ? { owner: task.owner } : {}), // carry who launched it (RUSH-2020)
     });
 
     // Keep only last 50 entries

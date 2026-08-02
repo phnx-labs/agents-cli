@@ -262,6 +262,30 @@ describe('writeJob atomic persistence', () => {
       deleteJob(name);
     }
   });
+
+  it('stamps the creator actor at creation and preserves it across an edit (RUSH-2020)', () => {
+    ensureAgentsDir();
+    const name = '__test-actor-stamp-routine__';
+    const name2 = '__test-actor-pinned-routine__';
+    try {
+      writeJob({ name, schedule: '0 3 * * *', agent: 'claude', prompt: 'p' } as JobConfig);
+      const created = readJob(name);
+      // A fresh routine gets the current resolver stamped (non-empty id).
+      expect(created?.actor).toBeTruthy();
+      // An edit re-writes the loaded config (which already carries actor) — the
+      // original creator is preserved, not overwritten with the editor.
+      writeJob({ ...created!, prompt: 'edited' } as JobConfig);
+      const after = readJob(name);
+      expect(after?.prompt).toBe('edited');
+      expect(after?.actor).toBe(created?.actor);
+      // An explicit actor on a new config is kept as-is.
+      writeJob({ name: name2, schedule: '0 3 * * *', agent: 'claude', prompt: 'p', actor: 'pinned@example.com' } as JobConfig);
+      expect(readJob(name2)?.actor).toBe('pinned@example.com');
+    } finally {
+      deleteJob(name);
+      deleteJob(name2);
+    }
+  });
 });
 
 describe('normalizeTriggerEvent', () => {

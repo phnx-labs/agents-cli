@@ -105,6 +105,14 @@ each run, not just *what* is running:
   inherit the orchestrator's frozen actor, so a whole team traces back to the one
   human who started it; their records also carry a `parent_session_id` (the
   orchestrator's session) so the spawn chain is walkable.
+- **Beyond sessions — events, routines, and browser tasks carry the actor too.**
+  Every emitted **event** records `actor` + `kind` (via the audit origin), so
+  `agents events` and its stats group by who did it (a `byActor` breakdown). A
+  **routine** stamps its creator's actor at creation and injects it into each fired
+  run's env, so an unattended cron traces back to the person who scheduled it (not
+  the `UNRESOLVED@<host>` a live resolve would give); its run records carry `actor`
+  (the creator) and `triggeredBy` (who kicked off that specific run). A **browser
+  task** records the `owner` who launched it, on the live task and in history.
 
 ```bash
 agents events                          # recent activity across everything

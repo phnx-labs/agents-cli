@@ -45,6 +45,7 @@ import {
   type ExecEffort,
   type FallbackEntry,
 } from './exec.js';
+import { resolveActor } from './actor.js';
 import type { LoopDeps } from './loop.js';
 import { loadTask as loadHostTask } from './hosts/tasks.js';
 import { reconcileTask as reconcileHostTask } from './hosts/reconcile.js';
@@ -607,6 +608,29 @@ function spawnJobAttempt(
  * Single-shot path: pre-flight version/account selection + mid-run rate-limit
  * failover across healthy same-agent accounts (RUSH-1016).
  */
+/**
+ * Actor provenance for a routine run (RUSH-2020): `actor` is the routine's
+ * CREATOR (carried from the job config), `triggeredBy` is whoever kicked off THIS
+ * run (`resolveActor().id` — a person for a manual run, `UNRESOLVED@<host>` for an
+ * unattended scheduled fire). Spread into every RunMeta so a fired cron traces
+ * back to the person who scheduled it.
+ */
+function runProvenance(config: JobConfig): { actor?: string; triggeredBy: string } {
+  return { ...(config.actor ? { actor: config.actor } : {}), triggeredBy: resolveActor().id };
+}
+
+/**
+ * Inject the routine creator's actor into a run's base env so the fired agent
+ * INHERITS it (the `AGENTS_ACTOR` path in actor.ts) instead of re-resolving to
+ * `UNRESOLVED@<host>` on an unattended fire — so its session, events, and commits
+ * all attribute to the person who scheduled the routine (RUSH-2020). Mutates and
+ * returns the same env object for call-site brevity.
+ */
+function injectRoutineActor(env: Record<string, string>, config: JobConfig): Record<string, string> {
+  if (config.actor && !env.AGENTS_ACTOR) env.AGENTS_ACTOR = config.actor;
+  return env;
+}
+
 export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<RunResult> {
   const eligibility = checkJobDeviceEligibility(config);
   if (eligibility) {
@@ -661,9 +685,12 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
   const runDir = getRunDir(config.name, runId);
   fs.mkdirSync(runDir, { recursive: true });
 
-  const baseEnv = useSandbox
-    ? buildSpawnEnv(overlayHome!)
-    : { ...process.env } as Record<string, string>;
+  const baseEnv = injectRoutineActor(
+    useSandbox
+      ? buildSpawnEnv(overlayHome!)
+      : { ...process.env } as Record<string, string>,
+    config,
+  );
 
   // Workflows run via `agents run <workflow>` which delegates to claude under the hood.
   // Use 'claude' as the effective agent for report extraction and metadata when workflow is set.
@@ -673,6 +700,7 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
   const meta: RunMeta = {
     jobName: config.name,
     runId,
+    ...runProvenance(config),
     agent: effectiveAgent,
     ...(config.workflow ? { workflow: config.workflow } : {}),
     pid: null,
@@ -927,6 +955,7 @@ async function executeJobOnCloud(config: JobConfig, opts: { detached: boolean })
   const meta: RunMeta = {
     jobName: config.name,
     runId,
+    ...runProvenance(config),
     agent: config.agent,
     pid: null,
     spawnedAt: Date.now(),
@@ -999,6 +1028,7 @@ async function executeJobOnHost(config: JobConfig, opts: { detached: boolean }):
   const meta: RunMeta = {
     jobName: config.name,
     runId,
+    ...runProvenance(config),
     agent: config.agent,
     pid: null, // no local process — the run lives on the host
     spawnedAt: Date.now(),
@@ -1053,6 +1083,7 @@ async function executeCommandJobForeground(config: JobConfig): Promise<RunResult
   const meta: RunMeta = {
     jobName: config.name,
     runId,
+    ...runProvenance(config),
     command: config.command,
     pid: null,
     spawnedAt: Date.now(),
@@ -1209,9 +1240,12 @@ export async function executeJobDetached(config: JobConfig, hooks?: RoutineHooks
   const stdoutPath = path.join(runDir, 'stdout.log');
   const stdoutFd = fs.openSync(stdoutPath, 'w', 0o600);
 
-  const baseEnv = useSandbox
-    ? buildSpawnEnv(overlayHome!)
-    : { ...process.env } as Record<string, string>;
+  const baseEnv = injectRoutineActor(
+    useSandbox
+      ? buildSpawnEnv(overlayHome!)
+      : { ...process.env } as Record<string, string>,
+    config,
+  );
   const spawnEnv = dispatchesViaAgentsRun(config)
     ? (() => {
         const e = { ...baseEnv };
@@ -1226,6 +1260,7 @@ export async function executeJobDetached(config: JobConfig, hooks?: RoutineHooks
   const meta: RunMeta = {
     jobName: config.name,
     runId,
+    ...runProvenance(config),
     agent: effectiveAgent,
     ...(config.workflow ? { workflow: config.workflow } : {}),
     pid: null,
@@ -1345,6 +1380,7 @@ function executeCommandJobDetached(config: JobConfig, hooks?: RoutineHooks): Run
   const meta: RunMeta = {
     jobName: config.name,
     runId,
+    ...runProvenance(config),
     command: config.command,
     pid: null,
     spawnedAt: Date.now(),
