@@ -26,6 +26,8 @@ import {
 } from './bundles.js';
 import { _resetFileStoreForTest } from './filestore.js';
 import { secretsKeychainItem, setKeychainBackendForTest, type KeychainBackend } from './index.js';
+import { saveSession } from './session-store.js';
+import { GLOBAL_HARNESS } from './scope.js';
 
 const tmpDirs: string[] = [];
 function tempDir(): string {
@@ -177,5 +179,43 @@ describe('secret access audit — real read path (file backend)', () => {
     // And the read shows up in the raw `agents events` stream.
     const surfaced = readUnifiedEvents({ module: 'secrets', activityRoot });
     expect(surfaced.map((e) => e.event)).toContain('secrets.get');
+  });
+
+  it('fast-path durable-session read audits with the resolved harness scope, not opts.agent', () => {
+    // No explicit agent and no $AGENTS_AGENT_NAME ⇒ the reader resolves to the
+    // GLOBAL scope ('*'). The keychain backend fast-path misses the broker (no
+    // socket off darwin) and falls through to the durable-session hit — the
+    // branch whose audit emit this fix corrects. Before the fix that emit passed
+    // `opts.agent` (undefined), so a global-scoped read was logged with no agent
+    // at all; it must instead carry the resolved scope, '*'.
+    delete process.env.AGENTS_AGENT_NAME;
+    // The agent fast-path is off by default in this environment via
+    // AGENTS_SECRETS_NO_AGENT=1; clear it so the keychain fast-path (and its
+    // durable-session fallback) actually runs. Restored in afterEach.
+    const prevNoAgent = process.env.AGENTS_SECRETS_NO_AGENT;
+    delete process.env.AGENTS_SECRETS_NO_AGENT;
+    try {
+    const bundle: SecretsBundle = { name: 'warm', vars: { TOKEN: keychainRef('TOKEN') } };
+    saveSession('warm', {
+      bundle,
+      env: { TOKEN: 'sealed-value' },
+      expiresAt: Date.now() + 60_000,
+      sleepPersist: false,
+      harness: GLOBAL_HARNESS,
+    });
+
+    const { env } = readAndResolveBundleEnv('warm', { caller: 'export to shell' });
+    expect(env.TOKEN).toBe('sealed-value'); // served from the durable session
+
+    const recs = query({ eventTypes: ['secrets.get'] });
+    expect(recs).toHaveLength(1);
+    const r = recs[0];
+    expect(r.source).toBe('session');
+    expect(r.bundle).toBe('warm');
+    expect(r.agent).toBe('*'); // the resolved harness scope, not undefined
+    } finally {
+      if (prevNoAgent === undefined) delete process.env.AGENTS_SECRETS_NO_AGENT;
+      else process.env.AGENTS_SECRETS_NO_AGENT = prevNoAgent;
+    }
   });
 });

@@ -1338,7 +1338,7 @@ export function readAndResolveBundleEnv(
         status: 'success',
         source: 'agent',
         keyCount: Object.keys(filtered.env).length,
-        agent: opts.agent,
+        agent: harness,
       });
       return filtered;
     }
@@ -1366,7 +1366,7 @@ export function readAndResolveBundleEnv(
         status: 'success',
         source: 'session',
         keyCount: Object.keys(filtered.env).length,
-        agent: opts.agent,
+        agent: harness,
       });
       return filtered;
     }
