@@ -144,7 +144,7 @@ describe('agents events --limit', () => {
 
     const res = runEvents(home, ['--event', 'pr.opened', '--limit', 'abc', '--json']);
     expect(res.status).toBe(2);
-    expect(res.stderr).toContain('Invalid --limit abc');
+    expect(res.stderr).toContain('Invalid --limit "abc"');
   });
 
   it('rejects a negative --limit', () => {
@@ -155,4 +155,19 @@ describe('agents events --limit', () => {
     expect(res.status).toBe(2);
     expect(res.stderr).toContain('Invalid --limit');
   });
+
+  // `--limit "$VAR"` with VAR unset is the realistic way this arrives. Number('')
+  // is 0, so a laxer parse would hand back an uncapped read — the opposite of the
+  // documented contract, and silent.
+  it.each([['empty', ''], ['whitespace', '   '], ['fractional', '1.5'], ['exponent', '1e3']])(
+    'rejects a %s --limit rather than reading uncapped',
+    (_label, value) => {
+      const home = makeTempHome();
+      seedEvents(home);
+
+      const res = runEvents(home, ['--event', 'pr.opened', '--limit', value, '--json']);
+      expect(res.status, `--limit ${JSON.stringify(value)} was accepted`).toBe(2);
+      expect(res.stderr).toContain('Invalid --limit');
+    },
+  );
 });

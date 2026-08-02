@@ -173,8 +173,9 @@ stdout for the human view:
 Showing the newest 50 — more events matched. Pass --limit 0 for all.
 ```
 
-A non-numeric or negative `--limit` is rejected with exit 2 rather than silently
-falling back to 50.
+`--limit` accepts whole numbers only. Anything else — non-numeric, negative,
+fractional, or **empty** (the shape `--limit "$VAR"` takes when `VAR` is unset) —
+exits 2 rather than silently falling back to 50 or, worse, reading uncapped.
 
 **Every secret access AND unlock is audited at the read, not just at the command.**
 `agents events --module secrets` surfaces two typed events:
