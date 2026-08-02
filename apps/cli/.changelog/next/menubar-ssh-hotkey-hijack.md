@@ -4,8 +4,9 @@
   Accessibility request to the responsible process, `/usr/libexec/sshd-keygen-wrapper`,
   not to the helper's bundle, so the prompt named a process whose grant does nothing
   for the paste (and, if granted, hands keystroke synthesis to everything any ssh
-  session spawns). Because `RegisterEventHotKey` is first-come, that copy also took
-  Cmd-Shift-V away from the launchd-managed helper that *is* trusted. The interactive
+  session spawns). And because `RegisterEventHotKey` is first-come, that copy — up
+  since before the trusted launchd helper — also held Cmd-Shift-V away from it. The
+  interactive
   mode now refuses to start over a remote shell, and refuses unrecognized arguments —
   an unknown flag used to fall straight through to the status-bar app, which is how a
   stray `MenubarHelper --self-test` from a verify run became a permanent second

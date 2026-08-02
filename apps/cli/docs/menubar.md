@@ -39,8 +39,9 @@ first-come. A helper started **from an ssh session** therefore breaks the paste
 twice over: macOS attributes its Accessibility request to the responsible
 process, `/usr/libexec/sshd-keygen-wrapper`, so the prompt names a process whose
 grant does nothing for the helper — and granting it would let anything an ssh
-session spawns synthesize keystrokes — while the chord it registered no longer
-reaches the launchd-managed helper that *is* trusted.
+session spawns synthesize keystrokes — and, if it wins the chord, Cmd-Shift-V
+stops reaching the launchd-managed helper that *is* trusted. Which of the two
+wins is just a matter of which started first, so the outcome is arbitrary.
 
 The interactive mode refuses to start in that situation, and refuses
 unrecognized arguments (an unknown flag used to fall through to the status-bar
@@ -159,9 +160,11 @@ agents menubar status     # installed / running, versions, staleness; --json
 `status` reports the installed bundle version vs. the current CLI version and
 whether the install is stale (see [Lifecycle](#lifecycle)). `running` tracks the
 **installed bundle** specifically, identified by its resolved executable; any
-other live `MenubarHelper` process is listed separately with its pid (
-`foreignInstances` in `--json`) because a second copy silently takes the global
-chords — see [Do not hand-launch the helper](#do-not-hand-launch-the-helper).
+other live `MenubarHelper` process is listed separately with its pid
+(`foreignInstances` in `--json`). `RegisterEventHotKey` is first-come, so a
+second copy may be the one holding the global chords — which of the two won is
+not answerable from a process list, so status reports the conflict rather than a
+winner. See [Do not hand-launch the helper](#do-not-hand-launch-the-helper).
 
 ## Data sources
 
