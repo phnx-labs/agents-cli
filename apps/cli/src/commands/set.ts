@@ -35,7 +35,12 @@ export function registerSetCommand(program: Command): void {
     .option('--mode <mode>', "Default mode: plan, edit, auto, skip. 'full' accepted as alias for skip.")
     .action((selector: string | undefined, options: SetOptions) => {
       try {
+        const hasFlags = options.model !== undefined || options.mode !== undefined;
+
         if (!selector) {
+          if (hasFlags) {
+            throw new Error('Selector is required when passing --model/--mode. Example: agents set claude@2.1.220 --model opus-5');
+          }
           const entries = listRunDefaults();
           if (entries.length === 0) {
             console.log(chalk.gray('No agent defaults configured.'));
@@ -49,7 +54,6 @@ export function registerSetCommand(program: Command): void {
           return;
         }
 
-        const hasFlags = options.model !== undefined || options.mode !== undefined;
         if (!hasFlags) {
           const parsed = parseRunDefaultSelector(selector);
           const entry = listRunDefaults().find((e) => e.selector === parsed.selector);

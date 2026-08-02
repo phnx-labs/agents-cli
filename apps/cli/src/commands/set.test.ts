@@ -72,6 +72,20 @@ describe('set command', () => {
     expect(listOut).toContain('claude:2.1.220');
   });
 
+  it('errors (does not silently drop flags) when a selector is omitted but flags are given', () => {
+    let err: { status?: number; stderr?: string; stdout?: string } | undefined;
+    try {
+      runAgents(home, ['set', '--model', 'opus-5']);
+    } catch (e) {
+      err = e as { status?: number; stderr?: string; stdout?: string };
+    }
+    expect(err).toBeDefined();
+    expect(err?.status).toBe(1);
+    expect(String(err?.stderr) + String(err?.stdout)).toContain('Selector is required');
+    // and nothing was written
+    expect(fs.existsSync(path.join(home, '.agents', 'agents.yaml'))).toBe(false);
+  });
+
   it('reports no default set for an unconfigured selector', () => {
     const out = runAgents(home, ['set', 'claude@9.9.9']);
     expect(out).toContain('No default set for claude:9.9.9');
