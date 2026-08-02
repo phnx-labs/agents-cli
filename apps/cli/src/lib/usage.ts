@@ -1,5 +1,5 @@
 /**
- * Usage and rate-limit tracking for Claude, Codex, Kimi, and Droid agents.
+ * Usage and rate-limit tracking for Claude, Codex, Kimi, Droid, and Grok agents.
  *
  * Fetches live usage data from each agent's usage API (Anthropic OAuth for
  * Claude, Kimi Code /usages, Factory billing limits for Droid) or parses
