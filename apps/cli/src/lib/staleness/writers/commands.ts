@@ -67,11 +67,11 @@ function buildCommandsWriter(agent: AgentId): ResourceWriter<string[]> {
         const metadata = parseCommandMetadata(srcFile);
         if (!commandAppliesTo(agent, version, metadata).ok) continue;
 
-        let installedAsSkill = true;
         if (commandsAsSkills || commandsAlsoAsSkills) {
           const installed = installCommandSkillToVersion(agentDir, cmd, srcFile, skillRoots);
-          installedAsSkill = installed.success && !installed.skipped;
-          if (commandsAsSkills && !installedAsSkill) continue;
+          // installed.skipped means a real skill source already owns this name,
+          // which is a deliberate no-op, not a failure — the native file is still written.
+          if (!installed.success) continue;
         }
 
         if (supportsCommands && agent === 'goose') {
@@ -85,7 +85,7 @@ function buildCommandsWriter(agent: AgentId): ResourceWriter<string[]> {
         } else if (supportsCommands) {
           fs.copyFileSync(srcFile, safeJoin(commandsTarget, `${cmd}.md`));
         }
-        if (installedAsSkill) synced.push(cmd);
+        synced.push(cmd);
       }
       return { synced };
     },
