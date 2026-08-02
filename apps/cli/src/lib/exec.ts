@@ -147,9 +147,13 @@ export function resolveHeadlessMode(
 ): Mode {
   const mode = resolveMode(agent, requested);
   const warn = (message: string): void => {
-    if (warningState?.quiet || warningState?.emitted) return;
+    if (warningState?.quiet) return;
+    if (warningState) {
+      warningState.emitted ??= new Set();
+      if (warningState.emitted.has(agent)) return;
+      warningState.emitted.add(agent);
+    }
     process.stderr.write(message);
-    if (warningState) warningState.emitted = true;
   };
   if (mode !== requested) {
     const subject = warningContext ? `${warningContext}: ` : '';
@@ -174,7 +178,10 @@ export function resolveHeadlessMode(
 }
 
 export interface ModeWarningState {
-  emitted: boolean;
+  /** Agents already warned about, so one run warns once per agent. A fallback
+   *  chain degrades each agent independently and the agent that actually ran is
+   *  usually not the first, so this cannot be a single boolean. */
+  emitted?: Set<AgentId>;
   quiet?: boolean;
 }
 
@@ -1517,7 +1524,10 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
     agent: options.agent,
     version: options.version,
     cwd: options.cwd || process.cwd(),
-    mode: options.mode,
+    // The mode that ran, not the one requested — `agents run` passes the
+    // requested mode so the resolver can warn, but telemetry must agree with
+    // the audit log. See RUSH-2106 for removing that ambiguity at the source.
+    mode: resolveMode(options.agent, options.mode),
     model: options.model,
     interactive,
     sessionId: options.sessionId,

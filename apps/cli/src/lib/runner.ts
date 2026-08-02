@@ -779,7 +779,7 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
       json: true,
       headless: true,
       modeWarningContext: `routine ${config.name}`,
-      modeWarningState: { emitted: false },
+      modeWarningState: {},
       ...(config.config?.model ? { model: config.config.model as string } : {}),
       ...(config.allow?.dirs ? {
         addDirs: config.allow.dirs

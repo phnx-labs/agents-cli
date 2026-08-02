@@ -1251,11 +1251,39 @@ describe('resolveMode', () => {
 describe('resolveHeadlessMode (RUSH-1810)', () => {
   it('warns exactly once when one run builds argv more than once', () => {
     const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
-    const warningState = { emitted: false };
+    const warningState = {};
     const options = opts({ agent: 'cursor', mode: 'plan', modeWarningState: warningState });
     buildExecCommand(options);
     buildExecCommand(options);
     expect(write.mock.calls.filter(([line]) => String(line).includes('read-only plan mode'))).toHaveLength(1);
+    write.mockRestore();
+  });
+
+  it('warns for every agent in a fallback chain sharing one warning state', () => {
+    // runWithFallback spreads one state object across every attempt. Each agent
+    // degrades independently and the agent that actually runs is usually not the
+    // first, so a single latch silently dropped the warning that mattered.
+    const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const shared = {};
+    buildExecCommand(opts({ agent: 'cursor', mode: 'plan', modeWarningState: shared }));
+    buildExecCommand(opts({ agent: 'antigravity', mode: 'plan', modeWarningState: shared }));
+    const warned = write.mock.calls
+      .map(([line]) => String(line))
+      .filter((line) => line.includes('(writable) instead'));
+    expect(warned).toHaveLength(2);
+    expect(warned.some((l) => l.includes('cursor'))).toBe(true);
+    expect(warned.some((l) => l.includes('antigravity'))).toBe(true);
+    write.mockRestore();
+  });
+
+  it('still warns only once for the same agent built twice in one run', () => {
+    const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const shared = {};
+    buildExecCommand(opts({ agent: 'cursor', mode: 'plan', modeWarningState: shared }));
+    buildExecCommand(opts({ agent: 'cursor', mode: 'plan', modeWarningState: shared }));
+    expect(
+      write.mock.calls.map(([l]) => String(l)).filter((l) => l.includes('(writable) instead')),
+    ).toHaveLength(1);
     write.mockRestore();
   });
 

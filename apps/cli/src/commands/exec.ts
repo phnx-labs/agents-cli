@@ -2346,7 +2346,7 @@ export function registerRunCommand(program: Command): void {
         name: options.name,
         resume: resumeNative,
         verbose: options.verbose,
-        modeWarningState: { emitted: false, quiet: options.quiet },
+        modeWarningState: { quiet: options.quiet },
         // --raw, --no-tmux (commander negation → options.tmux === false), and
         // --disable-tmux all bypass the interactive tmux wrapper. AGENTS_NO_TMUX=1
         // does the same via the env check in exec.ts.
