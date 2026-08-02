@@ -156,11 +156,26 @@ describe('generateSystemdUnit', () => {
     expect(unit).not.toContain('sk-ant-oat01-abc123');
   });
 
+  // Parse the daemon PATH into ordered segments — robust to whatever
+  // `process.execPath` is on the runner (CI's Node is /usr/local/bin/node, a dev
+  // box's is deep in nvm), so the assertions test the real invariants, not a
+  // substring that only holds for one machine's layout.
+  const systemdPath = (unit: string): string[] => {
+    const m = unit.match(/^Environment=PATH=(.+)$/m);
+    if (!m) throw new Error('no PATH line in systemd unit');
+    return m[1].split(':');
+  };
+  const launchdPath = (plist: string): string[] => {
+    const m = plist.match(/<key>PATH<\/key>\s*<string>([^<]+)<\/string>/);
+    if (!m) throw new Error('no PATH in launchd plist');
+    return m[1].split(':');
+  };
+
   it('pins the running Node bin dir first on PATH and drops the stale hardcoded nvm version', () => {
-    const unit = generateSystemdUnit();
-    expect(unit).toContain(`Environment=PATH=${path.dirname(process.execPath)}`);
-    expect(unit).toContain(':/usr/local/bin:/usr/bin:/bin');
-    expect(unit).not.toContain('v24.0.0');
+    const segs = systemdPath(generateSystemdUnit());
+    expect(segs[0]).toBe(path.dirname(process.execPath));
+    expect(segs).toEqual(expect.arrayContaining(['/usr/local/bin', '/usr/bin', '/bin']));
+    expect(generateSystemdUnit()).not.toContain('v24.0.0');
   });
 
   it('also puts the agents shim dir on PATH so a child routine resolves `agents` (exit-127 fix)', () => {
@@ -173,23 +188,22 @@ describe('generateSystemdUnit', () => {
     const shim = path.join(shimDir, 'agents');
     fs.writeFileSync(shim, '');
     try {
-      const nodeDir = path.dirname(process.execPath);
-      expect(generateSystemdUnit(shim)).toContain(
-        `Environment=PATH=${nodeDir}:${shimDir}:/usr/local/bin:/usr/bin:/bin`,
-      );
-      expect(generateLaunchdPlist(shim)).toContain(
-        `<string>${nodeDir}:${shimDir}:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:${os.homedir()}/.bun/bin</string>`,
-      );
+      const unitSegs = systemdPath(generateSystemdUnit(shim));
+      expect(unitSegs[0]).toBe(path.dirname(process.execPath)); // Node still first
+      expect(unitSegs).toContain(shimDir); // the shim's dir is now on PATH — the fix
+      expect(launchdPath(generateLaunchdPlist(shim))).toContain(shimDir);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 
-  it('dedups when the shim lives beside Node — one leading PATH entry, not a doubled dir', () => {
+  it('dedups the whole PATH — no dir appears twice, even for a /usr/local/bin install', () => {
+    // Shim beside Node, and (on CI) Node itself in /usr/local/bin: the assembled
+    // list collides with the system dirs. Full-list dedup must collapse them.
     const nodeDir = path.dirname(process.execPath);
-    const unit = generateSystemdUnit(path.join(nodeDir, 'agents'));
-    expect(unit).toContain(`Environment=PATH=${nodeDir}:/usr/local/bin:/usr/bin:/bin`);
-    expect(unit).not.toContain(`${nodeDir}:${nodeDir}`);
+    const segs = systemdPath(generateSystemdUnit(path.join(nodeDir, 'agents')));
+    expect(segs.length).toBe(new Set(segs).size);
+    expect(segs[0]).toBe(nodeDir);
   });
 
   it('pins a JavaScript install to the Node runtime that installed the service', () => {

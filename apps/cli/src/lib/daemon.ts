@@ -855,7 +855,7 @@ ${[launch.command, ...launch.args].map((arg) => `    <string>${xmlEscape(arg)}</
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>${daemonPathPrefix(agentsBin)}:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:${os.homedir()}/.bun/bin</string>
+    <string>${daemonPathValue(agentsBin, ['/usr/local/bin', '/usr/bin', '/bin', '/opt/homebrew/bin', `${os.homedir()}/.bun/bin`])}</string>
   </dict>
 </dict>
 </plist>`;
@@ -889,7 +889,7 @@ Type=simple
 ExecStart=${execStart}
 Restart=always
 RestartSec=10
-Environment=PATH=${daemonPathPrefix(agentsBin)}:/usr/local/bin:/usr/bin:/bin
+Environment=PATH=${daemonPathValue(agentsBin, ['/usr/local/bin', '/usr/bin', '/bin'])}
 
 [Install]
 WantedBy=default.target`;
@@ -1064,18 +1064,19 @@ function daemonNodeBinDir(): string {
 }
 
 /**
- * The leading PATH entries the daemon service manifest pins, in order: the Node
- * runtime dir (so the shim's shebang and any child resolve the exact installing
- * Node — see {@link daemonNodeBinDir}), then the directory of the `agents` shim
- * itself. The second entry matters because a scheduled `command` routine shells
- * out to the bare name `agents` (`/bin/sh -c 'agents watchdog --nudge'`): when the
- * shim lives outside the Node bin dir — a `~/.local/bin` global install, a
- * separate npm prefix — a PATH carrying only the Node dir resolves `agents` to
- * nothing and every routine dies with `exit 127`. Deduped so the common case
- * (shim beside Node, e.g. an nvm install) stays a single entry.
+ * The full PATH value the daemon service manifest pins, in order: the Node runtime
+ * dir (so the shim's shebang and any child resolve the exact installing Node — see
+ * {@link daemonNodeBinDir}), then the directory of the `agents` shim itself, then
+ * the platform's system dirs. The shim's own dir matters because a scheduled
+ * `command` routine shells out to the bare name `agents`
+ * (`/bin/sh -c 'agents watchdog --nudge'`): when the shim lives outside the Node
+ * bin dir — a `~/.local/bin` global install, a separate npm prefix — a PATH
+ * carrying only the Node dir resolves `agents` to nothing and every routine dies
+ * with `exit 127`. Deduped across the whole list, so a Node/shim dir that already
+ * appears among the system dirs (e.g. a `/usr/local/bin` install) never doubles.
  */
-function daemonPathPrefix(agentsBin: string): string {
-  return [...new Set([daemonNodeBinDir(), path.dirname(agentsBin)])].join(':');
+function daemonPathValue(agentsBin: string, systemDirs: readonly string[]): string {
+  return [...new Set([daemonNodeBinDir(), path.dirname(agentsBin), ...systemDirs])].join(':');
 }
 
 /**
