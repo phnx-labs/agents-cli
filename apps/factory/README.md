@@ -1,8 +1,8 @@
 # Agents
 
-Orchestrate Claude, Codex, Gemini, and Cursor in parallel — from one IDE. Open source. Free.
+Orchestrate Claude, Codex, Antigravity, and Cursor in parallel — from one IDE. Open source. Free.
 
-Turn your editor into a command center for orchestrating Claude, Codex, Gemini, and Cursor in parallel. Each agent runs as a full-screen editor tab. Each agent can spawn sub-agents. You orchestrate — approving plans, monitoring execution, shipping faster.
+Turn your editor into a command center for orchestrating Claude, Codex, Antigravity, and Cursor in parallel. Each agent runs as a full-screen editor tab. Each agent can spawn sub-agents. You orchestrate — approving plans, monitoring execution, shipping faster.
 
 ## Why an IAE?
 
@@ -57,7 +57,7 @@ curl -fsSL https://raw.githubusercontent.com/phnx-labs/agents-cli/main/scripts/i
 
 ### Agent Terminals
 
-Spawn any agent as a full-screen editor tab. Built-in support for Claude Code, Codex, Gemini, OpenCode, and Cursor. Add custom agents through settings.
+Spawn any agent as a full-screen editor tab. Built-in support for Claude Code, Codex, Antigravity, OpenCode, and Cursor. Add custom agents through settings.
 
 ### Session Persistence
 
@@ -105,7 +105,7 @@ Generate commit messages from staged changes with `Cmd+Shift+G`. Learns from you
 ## Requirements
 
 - VS Code or Cursor
-- Agent CLIs installed (`claude`, `codex`, `gemini`, `cursor-agent`, `opencode`)
+- Agent CLIs installed (`claude`, `codex`, `antigravity`, `cursor-agent`, `opencode`)
 - OpenAI API key (optional, for commit generation and the Foreman voice orb)
 - ffmpeg (optional, for the Foreman voice orb: `brew install ffmpeg`)
 

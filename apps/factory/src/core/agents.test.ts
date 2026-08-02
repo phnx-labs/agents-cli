@@ -31,6 +31,17 @@ describe('BUILT_IN_AGENTS', () => {
     }
   });
 
+  test('deprecated Gemini launch and setup commands are not contributed', () => {
+    const packageJson = JSON.parse(readFileSync(resolve(import.meta.dir, '../../package.json'), 'utf8'));
+    const contributed = new Set(packageJson.contributes.commands.map((entry: { command: string }) => entry.command));
+    const extensionSource = readFileSync(resolve(import.meta.dir, '../vscode/extension.ts'), 'utf8');
+    expect(contributed.has('agents.newGemini')).toBe(false);
+    expect(contributed.has('agents.newGeminiPickHost')).toBe(false);
+    expect(contributed.has('agents.newGeminiAuto')).toBe(false);
+    expect(contributed.has('agents.setupGemini')).toBe(false);
+    expect(extensionSource).not.toContain("agents.setupGemini");
+  });
+
   test('every non-shell agent is a CLI agent and launches its CLI binary', () => {
     for (const agent of BUILT_IN_AGENTS) {
       if (agent.key === 'shell') continue;

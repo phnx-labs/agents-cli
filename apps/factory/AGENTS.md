@@ -1,6 +1,6 @@
 # Agents Extension
 
-VS Code extension for multi-agent coding. Spawns AI terminals (Claude, Codex, Gemini, Cursor, OpenCode) as editor tabs with keyboard shortcuts, and dispatches work to Rush Cloud.
+VS Code extension for multi-agent coding. Spawns AI terminals (Claude, Codex, Antigravity, Cursor, OpenCode) as editor tabs with keyboard shortcuts, and dispatches work to Rush Cloud.
 
 This file is a **map**, not the territory. Keep it a short paragraph per area plus pointers. Read the actual code for current details.
 
