@@ -449,6 +449,45 @@ fi
 
 green "Bump: $BUMP ($PHNX_LATEST -> $TARGET)"
 
+# ----- Finish a stuck release before starting a new one -----
+# A release that dies after the tag but before the publish leaves a pushed v* tag
+# the registry never saw. The next run then validates its bump against npm (which
+# is behind), cuts the NEXT version, and the gap widens by one every time: on
+# 2026-08-02 that turned a one-version gap into npm 1.20.78 / main 1.20.81 with
+# v1.20.80 and v1.20.81 tagged and unpublished. Refuse to widen it -- the
+# unpublished tag is a release to finish, and re-running with that version is the
+# documented recovery (it rebuilds from the merged PR's CI-tested tree).
+# The decision arithmetic lives in scripts/stuck-release.sh so it can be tested
+# directly (scripts/stuck-release.test.ts); this block only gathers the facts it
+# needs -- the pushed tags, and whether the registry has each one.
+TAG_FACTS=""
+while read -r _sha _ref; do
+  v="${_ref#refs/tags/v}"
+  [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
+  # Only versions ahead of the registry can be stuck, so only those are worth an
+  # `npm view` round trip.
+  [[ "$v" != "$PHNX_LATEST" ]] || continue
+  [[ "$(printf '%s\n%s\n' "$PHNX_LATEST" "$v" | sort -V | tail -1)" == "$v" ]] || continue
+  if npm view "$PHNX_PKG@$v" version >/dev/null 2>&1; then
+    TAG_FACTS+="$v yes"$'\n'
+  else
+    TAG_FACTS+="$v no"$'\n'
+  fi
+done < <(git ls-remote --tags origin 'refs/tags/v*' 2>/dev/null | grep -v '\^{}$' || true)
+
+UNPUBLISHED_TAG="$(printf '%s' "$TAG_FACTS" | scripts/stuck-release.sh "$PHNX_LATEST" || true)"
+
+if [[ -n "$UNPUBLISHED_TAG" && "$UNPUBLISHED_TAG" != "$TARGET" ]]; then
+  red "v$UNPUBLISHED_TAG is tagged but was never published -- finish that release first."
+  gray "  registry latest   $PHNX_LATEST"
+  gray "  stuck tag         v$UNPUBLISHED_TAG"
+  gray "  you asked for     $TARGET"
+  echo
+  yellow "  Re-run with the stuck version; it rebuilds from that release PR's CI-tested tree:"
+  yellow "    scripts/release.sh $UNPUBLISHED_TAG --apply"
+  die "refusing to bump past an unpublished release"
+fi
+
 # ----- Source of truth: npm registry says whether $TARGET is already published -----
 # Run these checks NOW (before tests) so a re-run that's already partly published
 # can short-circuit cleanly and the user can see what will actually happen.
@@ -629,6 +668,13 @@ cleanup_all() {
   rm -rf "${SHIM_TMP:-}"
   rm -f "${NPMRC_TMP:-}"
   remove_historical_worktree
+  # Drop the release lease on every exit path. A run that dies without reaching
+  # this (SIGKILL, severed ssh, rebooted box) leaves the lease behind on purpose:
+  # release-lease.sh reclaims it after its TTL and logs whose it was, rather than
+  # letting a half-dead release look finished.
+  if [[ "${LEASE_HELD:-false}" == "true" ]]; then
+    scripts/release-lease.sh release || true
+  fi
 }
 trap cleanup_all EXIT
 
@@ -694,6 +740,21 @@ if ! $YES; then
   read -r -p "Release $TARGET via a PR into $DEFAULT_BRANCH, then publish $PHNX_PKG? [y/N] " yn
   [[ "$yn" =~ ^[Yy]$ ]] || die "aborted"
 fi
+
+# ----- Claim the release lease (the mutex) -----
+# Agents release from whichever box they are on, so exclusivity has to live on
+# origin, not on a local flock. Claim BEFORE the first mutation: everything past
+# this point (changelog fold, branch push, PR, merge, tag, publish) is what two
+# concurrent runs clobber. On 2026-08-02 two agents entered here at once and only
+# found out at the publish gate -- by then one had already merged and tagged, and
+# the version was left merged but unshipped.
+#
+# Released by cleanup_all's trap on EVERY exit path, success or failure.
+LEASE_HELD=false
+if ! scripts/release-lease.sh claim "$TARGET"; then
+  die "another release is in flight -- watch it instead of racing it (scripts/release-lease.sh status)"
+fi
+LEASE_HELD=true
 
 # Auto-revert of the package.json bump is no longer wanted here — the bump is
 # carried into the release branch commit (and the cleanup trap reverts the

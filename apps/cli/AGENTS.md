@@ -257,6 +257,37 @@ each phase labeled with the box it runs on and a ✓/✗ result:
 `mac-mini` is the only hardcoded machine name (it holds the Developer ID cert +
 npm publish rights). The crabbox is **not** hardcoded.
 
+**One releaser at a time — the lease.** Because the script runs from any box, two
+agents on two machines could enter it at once; they then clobber the same release
+branch, tag, and publish, and the collision only surfaces at the publish gate
+(`merged tree != built tree`) once one of them has already merged and tagged.
+[`scripts/release-lease.sh`](scripts/release-lease.sh) holds exclusivity on
+`origin` — the only thing every box can agree on — by pushing an **orphan commit**
+to `refs/release-lock/held`. A second claimant's push can never be a fast-forward
+of the first's, so git's rejection *is* the failed lock acquisition: no polling, no
+second service.
+
+```bash
+scripts/release-lease.sh status     # unheld | held version=… holder=… age=…min
+scripts/release-lease.sh claim <v>  # 0 = acquired, 1 = someone else is releasing
+scripts/release-lease.sh release    # drop the lease this checkout claimed
+```
+
+`release.sh` claims it right after the confirmation (before the first mutation)
+and drops it from `cleanup_all`'s trap on every exit path. Ownership is the lease
+**commit sha**, recorded in `.git/release-lease.token` — not the pid, so a release
+resumed by a second invocation can still drop its own lease, and a third agent can
+never drop one it did not claim. A lease abandoned by a killed run is reclaimable
+after `RELEASE_LEASE_TTL` minutes (default 45); reclaiming names the dead holder
+rather than silently overwriting it.
+
+**Finish a stuck release before cutting a new one.** `release.sh` refuses to start
+when an older `v*` tag exists that npm never received, and prints the re-run that
+finishes it. Without this, a release that died between tag and publish left the
+next run validating its bump against a registry that was behind, so it cut the
+*next* version and the gap widened by one every time — that is how npm sat at
+1.20.78 while `main` carried 1.20.81.
+
 **The privileged phase runs on the home base, always — from the TAGGED script.**
 After the invoking box merges + tags (git + gh, which need that box's auth),
 `release.sh` routes build + sign + notarize + `npm publish` + computer-helper to
