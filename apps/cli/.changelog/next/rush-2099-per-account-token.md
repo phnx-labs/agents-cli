@@ -1,1 +1,0 @@
-- **Claude per-account run tokens.** `agents run` now injects the Claude setup token keyed to the selected version home's own account email, so balanced Claude rotation no longer inherits one ambient shared token across accounts. Source: `src/lib/exec.ts`.
