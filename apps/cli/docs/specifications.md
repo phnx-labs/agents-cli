@@ -1081,7 +1081,8 @@ schema (`--json` passes through each agent's native stream format).
   label.
 
   Status: `[Drift]` — EXEC-19 names `--acp` as a routing exception, but the env
-  guarantees it forfeits (EXEC-1 sanitize, EXEC-3 mailbox/session, EXEC-4 actor
+  guarantees it forfeits (EXEC-1 sanitize, EXEC-3 mailbox/session + the
+  `AGENTS_RUNTIME` label, EXEC-4 actor
   provenance, EXEC-14 per-version pin) are an undeclared consequence of that
   exception, not a scoped one; see EXEC-GAP-2.
 - **EXEC-21 (MUST).** Every finalized run path (plain, fallback, loop, ACP)
