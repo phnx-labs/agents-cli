@@ -6,6 +6,8 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.9.302] - 2026-08-02
+
 - **Every built-in harness now has a fast `New <Harness> (Auto)` launch command.** Auto launch ranks a persisted warm cache by successful recent device history plus cached load, memory, and running-agent count; it excludes offline, SSH-unreachable, signed-out, and throttled devices without performing SSH on the command path. Every launch updates per-device history, a cold/no-match cache warns and launches locally, and Droid explains that account health is unavailable before opening the host picker. Auto-supported harnesses launch with balanced account rotation. Source: `apps/factory/src/core/launchHistory.ts`, `apps/factory/src/vscode/extension.ts`, `apps/factory/package.json`.
 - **Remote Factory launches explicitly forward the active workspace or isolated worktree cwd.** `openSingleAgent` now passes the resolved local cwd to `agents run --cwd` whenever it emits `--host`, allowing agents-cli's existing `toRemotePortable()` rewrite to re-root home-relative paths on the selected device. Local launches still emit no cwd flag. Source: `apps/factory/src/core/agents.ts`, `apps/factory/src/vscode/extension.ts`.
 - **`Agents: Fork Current Session` starts a sibling agent with the active session's context (RUSH-2058).** The command keeps the source terminal running, reuses its harness and persisted launch device, asks agents-cli to balance the target account when that harness supports rotation, and queues `/continue <session-id>` into the new terminal. Non-rotating harnesses keep their normal account strategy. Source: `apps/factory/src/core/forkSession.ts`, `apps/factory/src/vscode/extension.ts`, `apps/factory/package.json`.
