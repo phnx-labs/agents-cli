@@ -76,7 +76,13 @@ jobs:
         run: bun run build
 
       - name: Test
-        run: bun run test
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ] && [ "${{ matrix.node-version }}" = "24" ]; then
+            node ./node_modules/vitest/vitest.mjs run --maxWorkers=1 --no-file-parallelism
+          else
+            bun run test
+          fi
 
   # No CI publish job — publishing happens locally on macOS via
   # `scripts/release.sh <version> --apply`.
