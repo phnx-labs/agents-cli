@@ -1527,7 +1527,7 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
     // The mode that ran, not the one requested — `agents run` passes the
     // requested mode so the resolver can warn, but telemetry must agree with
     // the audit log. See RUSH-2106 for removing that ambiguity at the source.
-    mode: resolveMode(options.agent, options.mode),
+    mode: resolveMode(options.agent, normalizeMode(options.mode)),
     model: options.model,
     interactive,
     sessionId: options.sessionId,

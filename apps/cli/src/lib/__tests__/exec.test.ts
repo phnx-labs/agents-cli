@@ -1292,7 +1292,7 @@ describe('resolveHeadlessMode (RUSH-1810)', () => {
     buildExecCommand(opts({
       agent: 'cursor',
       mode: 'plan',
-      modeWarningState: { emitted: false, quiet: true },
+      modeWarningState: { quiet: true },
     }));
     expect(write).not.toHaveBeenCalled();
     write.mockRestore();
