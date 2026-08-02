@@ -82,6 +82,34 @@ and [`architecture.md`](apps/cli/docs/architecture.md).
   `agents sessions --active --json`, holding no data models of its own — not a separate
   codebase. Fix a mechanism in the CLI and every consumer benefits.
 
+## CLI surface conventions
+
+How the `agents` command surface is shaped. Coding agents invoke these commands under
+token pressure, so the surface has to read like the task and teach its own use. These are
+design rules for new or changed commands; the reviewer flags a new surface that ignores
+them (see [§Code review conventions](#code-review-conventions-the-reviewer-must-enforce-these)).
+
+- **Nest by relatedness, not dogma.** Put a command under the group that owns its noun;
+  a free-standing top-level command is right when nothing owns the concept. Navigate by
+  noun then action — `agents sessions summary <id>`, not `agents summary --session <id>`.
+  Flags refine an action, they don't stand in for the group. Don't force a command under
+  the wrong parent just to deepen the tree, and don't flatten a verb that collides with an
+  owned noun.
+- **Intuitive surfaces over clever flags.** A command reads like the task it performs: the
+  primary object sits in the path when there is one, verbs stay consistent across groups
+  (`list` / `add` / `remove` / `start` / `done`), and every command that emits data takes
+  `--json` for machine callers. Flag soup burns tokens and produces wrong invocations.
+- **`browser` and `computer` are similar tool surfaces.** Both drive real UIs (web /
+  native desktop, local / remote / cloud) as thin CLI surfaces, not thick SDKs. They need
+  not share an identical API — the backends differ (CDP vs Accessibility/UIA) — but they
+  share a shape so an agent learns one mental model: pick a target/session, act, observe,
+  clean up. When you add an action to one, reuse the analogous verb on the other.
+- **Help teaches agents workflows, not man-page flag dumps.** A non-trivial command's
+  `--help` leads with the ordered happy path — the typical sequence of commands and the
+  next one to run — before the flag list, via `setHelpSections` / `lib/help.ts`. An agent
+  reading help mid-task needs a three-line playbook, not 40 alphabetized options. Don't
+  leave a non-trivial tool on commander's default help.
+
 ## Entry points — always build and release through the scripts
 
 Never hand-roll a build or a release. A bare `tsc` / `bun run build` / `npm publish` /
@@ -169,6 +197,11 @@ the exception.
   `SUBAGENT_TARGETS` in `apps/cli/src/lib/subagents-registry.ts`, gated by
   `capableAgents(...)` — not near-identical `else if (agent === '...')` arms), and the
   completeness tests that pin the registry to the capability list must still pass.
+- **The capability table stays truthful, in lockstep with the code.** A harness that lacks
+  a capability must read as unsupported in its registry/map *before* any write path assumes
+  it, and a capability flips to supported only in the **same PR** that lands its real code
+  path — never ahead of it. A map asserting a capability the code doesn't implement is a
+  lying table; flag it with `file:line`.
 - **Surface parity for propagation / cross-cutting features.** When a change adds data
   that must ride the exec env or a spawn — actor/provenance, identity, session lineage,
   credentials — it must be wired through **every** exec boundary that data is meant to
@@ -195,6 +228,14 @@ the exception.
 - **No fallback band-aids.** Reject "just in case" branches, defensive lookups that paper
   over a data-shape inconsistency, or a second code path added to tolerate bad input.
   Standardize at the source — every fallback is a bug being hidden.
+- **Fail loud at boundaries.** At an integration boundary (a harness the code path doesn't
+  handle, an unsupported target, a missing prerequisite) the code raises a clear error or
+  skips with a stated reason, never a silent no-op or a wrong path that looks like success.
+  Flag any branch that swallows an unsupported case and returns as if it worked.
+- **New commands follow the [CLI surface conventions](#cli-surface-conventions).** Flag a
+  new or changed command that flattens a verb colliding with an owned noun, leans on flag
+  soup where an object-in-path reads clearer, or ships a non-trivial tool on commander's
+  default help instead of a workflow-first `setHelpSections` block.
 - **No dead or commented-out code.** Removed logic is deleted, not commented out "for
   later." git history is the archive.
 - **Tests exercise the real path.** New behavior ships with a test that hits the actual
