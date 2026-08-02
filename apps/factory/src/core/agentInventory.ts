@@ -4,8 +4,20 @@ import * as path from 'path';
 import YAML from 'yaml';
 import { AgentsViewJsonAgent, sessionUsedPercent } from './resumeInBest';
 import { runAgents } from './agentsBin';
-const AGENTS_SYSTEM_CONFIG_PATH = path.join(homedir(), '.agents-system', 'agents.yaml');
+// The CLI's run config. `run.<agent>.strategy` is read by agents-cli from
+// `~/.agents/agents.yaml` (lib/state.ts readMeta → META_FILE). The old
+// `~/.agents-system/` peer directory was folded into `~/.agents/.system/` and no
+// longer holds agents.yaml — reading it returned {} on every machine, so the
+// roster always rendered the default and every toggle wrote to a file the CLI
+// never reads.
+export const AGENTS_CONFIG_PATH = path.join(homedir(), '.agents', 'agents.yaml');
 const RUN_STRATEGIES = new Set(['pinned', 'available', 'balanced']);
+
+// What agents-cli does when `run.<agent>.strategy` is unset — see
+// getConfiguredRunStrategy in apps/cli/src/lib/rotate.ts. A bare `agents run
+// <agent>` spreads across healthy accounts by remaining headroom, so the roster
+// must show `balanced` for an unconfigured agent, not `pinned`.
+const DEFAULT_RUN_STRATEGY: AgentRunStrategy = 'balanced';
 
 export type AgentRunStrategy = 'pinned' | 'available' | 'balanced';
 
@@ -34,10 +46,10 @@ export interface AgentInventory {
 }
 
 export function normalizeRunStrategy(value: unknown): AgentRunStrategy {
-  if (typeof value !== 'string') return 'pinned';
+  if (typeof value !== 'string') return DEFAULT_RUN_STRATEGY;
   // 'rotate' is a deprecated alias kept so old agents.yaml configs still load.
   if (value === 'rotate') return 'balanced';
-  return RUN_STRATEGIES.has(value) ? (value as AgentRunStrategy) : 'pinned';
+  return RUN_STRATEGIES.has(value) ? (value as AgentRunStrategy) : DEFAULT_RUN_STRATEGY;
 }
 
 export function readAgentRunStrategyFromConfig(
@@ -45,9 +57,9 @@ export function readAgentRunStrategyFromConfig(
   agentKey: string,
 ): AgentRunStrategy {
   const run = config?.run;
-  if (!run || typeof run !== 'object') return 'pinned';
+  if (!run || typeof run !== 'object') return DEFAULT_RUN_STRATEGY;
   const agent = (run as Record<string, unknown>)[agentKey];
-  if (!agent || typeof agent !== 'object') return 'pinned';
+  if (!agent || typeof agent !== 'object') return DEFAULT_RUN_STRATEGY;
   return normalizeRunStrategy((agent as Record<string, unknown>).strategy);
 }
 
@@ -101,7 +113,7 @@ export function summarizeAgentInventory(
   };
 }
 
-function loadAgentsSystemConfig(configPath: string = AGENTS_SYSTEM_CONFIG_PATH): Record<string, unknown> {
+function loadAgentsConfig(configPath: string = AGENTS_CONFIG_PATH): Record<string, unknown> {
   try {
     if (!fs.existsSync(configPath)) return {};
     const raw = fs.readFileSync(configPath, 'utf-8');
@@ -114,17 +126,17 @@ function loadAgentsSystemConfig(configPath: string = AGENTS_SYSTEM_CONFIG_PATH):
 
 export function readAgentRunStrategy(
   agentKey: string,
-  configPath: string = AGENTS_SYSTEM_CONFIG_PATH,
+  configPath: string = AGENTS_CONFIG_PATH,
 ): AgentRunStrategy {
-  return readAgentRunStrategyFromConfig(loadAgentsSystemConfig(configPath), agentKey);
+  return readAgentRunStrategyFromConfig(loadAgentsConfig(configPath), agentKey);
 }
 
 export function writeAgentRunStrategy(
   agentKey: string,
   strategy: AgentRunStrategy,
-  configPath: string = AGENTS_SYSTEM_CONFIG_PATH,
+  configPath: string = AGENTS_CONFIG_PATH,
 ): void {
-  const current = loadAgentsSystemConfig(configPath);
+  const current = loadAgentsConfig(configPath);
   const next = setAgentRunStrategyInConfig(current, agentKey, strategy);
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
   fs.writeFileSync(configPath, YAML.stringify(next, { indent: 2 }));
