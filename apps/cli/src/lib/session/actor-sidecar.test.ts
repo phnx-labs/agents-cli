@@ -7,6 +7,7 @@ const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-sidecar-'));
 process.env.HOME = TEST_HOME;
 
 const { writeSessionActorRecord, readSessionActorRecord, loadSessionActorIndex } = await import('./actor-sidecar.js');
+const { resolveOwner } = await import('./active.js');
 const { getDB, closeDB, upsertSession, upsertSessionsBatch, getSessionById } = await import('./db.js');
 type SessionMeta = import('./types.js').SessionMeta;
 
@@ -29,6 +30,18 @@ describe('session actor sidecar (RUSH-2019)', () => {
     // No id -> no file written, and a read of an absent id is undefined.
     writeSessionActorRecord({ sessionId: '', actor: 'x', initiatedBy: 'human', startedAtMs: 1 });
     expect(readSessionActorRecord('missing')).toBeUndefined();
+  });
+
+  it('resolveOwner falls back to the sidecar when the pid entry has no actor (RUSH-2018 --active fix)', () => {
+    writeSessionActorRecord({ sessionId: 'own-1', actor: 'ada@example.com', initiatedBy: 'human', startedAtMs: 1 });
+    // pid entry carried the actor -> use it directly.
+    expect(resolveOwner('pid@example.com', 'own-1')).toBe('pid@example.com');
+    // pid entry actor-less (the SessionStart-hook clobber case) -> sidecar wins.
+    expect(resolveOwner(undefined, 'own-1')).toBe('ada@example.com');
+    expect(resolveOwner(null, 'own-1')).toBe('ada@example.com');
+    // no pid actor and no sidecar -> honestly undefined.
+    expect(resolveOwner(undefined, 'own-absent')).toBeUndefined();
+    expect(resolveOwner(undefined, undefined)).toBeUndefined();
   });
 
   it('loadSessionActorIndex surfaces every record keyed by session id', () => {
@@ -83,6 +96,20 @@ describe('upsertSession joins the actor sidecar (RUSH-2019)', () => {
     upsertSession(scanMeta('joined-2'), '');
     const meta = getSessionById('joined-2');
     expect(meta?.actor).toBeUndefined();
+  });
+
+  it('BACKFILLS a null-first row once the sidecar lands (RUSH-2018/2019 fix)', () => {
+    // The bug: a scanner (an older build, or any scan that ran before the actor
+    // sidecar was written) inserts the row with actor NULL. The write-once
+    // ON CONFLICT then locked it to NULL forever, so the sidecar-join could never
+    // attribute it. COALESCE(existing, incoming) must let the join fill a NULL.
+    upsertSession(scanMeta('backfill-1'), ''); // null-first: no sidecar yet
+    expect(getSessionById('backfill-1')?.actor).toBeUndefined();
+    // Sidecar appears (the run had stamped it), a later rescan runs the join:
+    writeSessionActorRecord({ sessionId: 'backfill-1', actor: 'ada@example.com', initiatedBy: 'human', startedAtMs: 1 });
+    upsertSession(scanMeta('backfill-1'), '');
+    expect(getSessionById('backfill-1')?.actor).toBe('ada@example.com');
+    expect(getSessionById('backfill-1')?.initiatedBy).toBe('human');
   });
 
   it('an explicit meta.actor wins over the sidecar (caller-provided identity)', () => {

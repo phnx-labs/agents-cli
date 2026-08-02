@@ -118,14 +118,18 @@ each run, not just *what* is running:
   account. `--active --json` carries the raw `owner` field for a consumer to join on.
 - **The session index** (`sessions.db`) carries `actor` and `initiated_by`
   (`human`/`agent`) columns, so the durable `agents sessions` listing attributes
-  historical sessions to a person, not just the live `--active` view. They are
-  **write-once at session creation** — a later content rescan carries no actor and
-  is deliberately kept out of the upsert's `ON CONFLICT` update set, so the original
-  owner is never clobbered by re-indexing.
+  historical sessions to a person, not just the live `--active` view. The upsert
+  fills them with `COALESCE(existing, incoming)`: a stored owner is never clobbered
+  (a content rescan carries no actor, so the stored value wins), yet a row that was
+  indexed **before** its actor sidecar existed — an older scanner, or any scan that
+  raced ahead of the spawn-time sidecar write — still gets **backfilled** once the
+  join finally provides one. (Plain exclusion locked those rows to `NULL` forever.)
 - **How the index gets the actor** — the transcript on disk records no actor, so at
   spawn each run also writes a small **durable `sessionId -> actor` sidecar** under
   `~/.agents/.history/by-session/` (unlike the pid-registry, this survives the
-  process). The scanner joins it as it indexes, filling the columns above. Teammates
+  process). The scanner joins it as it indexes, filling the columns above; the same
+  sidecar is the fallback for the live `--active` **owner** when the per-pid entry
+  (rewritten by the SessionStart hook without an actor) has none. Teammates
   inherit the orchestrator's frozen actor, so a whole team traces back to the one
   human who started it; their records also carry a `parent_session_id` (the
   orchestrator's session) so the spawn chain is walkable.

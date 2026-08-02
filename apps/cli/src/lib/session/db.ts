@@ -924,11 +924,15 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
       WHEN excluded.ticket_id IS NOT sessions.ticket_id THEN excluded.linear_project_url
       ELSE COALESCE(excluded.linear_project_url, sessions.linear_project_url)
     END,
-    machine = excluded.machine
-    -- actor / initiated_by are deliberately NOT in this update set (RUSH-2018):
-    -- they record who launched the session, write-once at creation. A later
-    -- content rescan carries no actor, so updating here would clobber the real
-    -- owner with NULL. Omitting them preserves the original on every rescan.
+    machine = excluded.machine,
+    -- actor / initiated_by record who launched the session. COALESCE(existing,
+    -- incoming) keeps a stored owner (a rescan carries no actor -> excluded.actor
+    -- is NULL -> the stored value wins, never clobbered) BUT backfills a row that
+    -- was inserted NULL-first — e.g. an older scanner, or any scan that ran before
+    -- the actor sidecar landed — once the sidecar-join finally provides one. Plain
+    -- exclusion locked those rows to NULL forever (RUSH-2018/2019 fix).
+    actor = COALESCE(sessions.actor, excluded.actor),
+    initiated_by = COALESCE(sessions.initiated_by, excluded.initiated_by)
 `);
 
 function enrichCachedSessionMeta(meta: SessionMeta): SessionMeta {
