@@ -626,6 +626,14 @@ describe('pullRepo reconciles a diverged branch by rebasing', () => {
     await simpleGit().raw(['init', '--bare', '-b', 'main', remote]);
     await simpleGit().clone(remote, author);
     await identity(author);
+    // Commit `* -text` BEFORE anything clones this branch, exactly as the outer
+    // fixture does. identity() sets core.autocrlf=false, but on Windows the
+    // checkout inside `git clone` has already run by then — so `local` came out
+    // CRLF while the index held LF, status.isClean() saw a phantom modification
+    // of every file, and pullRepo correctly refused with "Blocked by local
+    // changes". A committed .gitattributes wins over autocrlf at checkout time,
+    // so the clone is byte-identical on every OS.
+    fs.writeFileSync(path.join(author, '.gitattributes'), '* -text\n');
     fs.writeFileSync(path.join(author, 'seed.txt'), 'seed\n');
     await simpleGit(author).add('-A');
     await simpleGit(author).commit('seed');
