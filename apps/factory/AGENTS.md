@@ -41,12 +41,42 @@ bun test          # Full test suite, no mocks
 bash scripts/install.sh <version>   # Package .vsix and install to Cursor + Code + Codium
 ```
 
+## Releasing to the Marketplace
+
+Use `scripts/release.sh` from any fleet box. It routes itself to the machine that holds the `vs-marketplace` secrets bundle (currently `zion`) and publishes from a clean clone of the commit.
+
+```bash
+cd apps/factory
+bash scripts/release.sh 0.9.xxx --confirm
+```
+
+Before running, the `vs-marketplace` bundle must be unlocked on the publish host. If it is locked, the script fails with:
+
+> Secrets bundle 'vs-marketplace' is not unlocked in the secrets agent. Run 'agents secrets unlock vs-marketplace' in a terminal first — an agent launch never raises a Touch ID sheet on its own.
+
+To unlock:
+
+```bash
+agents ssh zion
+agents secrets unlock vs-marketplace
+# Touch ID / password prompt appears on zion
+```
+
+Then re-run the release command.
+
+Known gotchas:
+- The release clone's test environment on `zion` currently misses some dev dependencies (`@happy-dom/global-registrator`, `gray-matter`) and cannot find `agents` on PATH for live-agent tests, so the local test run may fail even when GitHub CI is green. If CI passed and the change is release-ready, use `--skip-tests` as a hotfix path:
+  ```bash
+  bash scripts/release.sh 0.9.xxx --confirm --skip-tests
+  ```
+- The script builds and publishes to both VS Code Marketplace and Open VSX. Marketplace propagation can lag a few minutes; Open VSX is usually live immediately.
+- The script installs the new `.vsix` into local VS Code / Codium windows automatically.
+
 ## Areas (and where to look)
 
 | Area | Start here |
 |---|---|
 | Agent spawn flow + editor-tab terminals | `src/vscode/extension.ts` (`openSingleAgent`, `openSingleAgentWithQueue`) |
-| Fork current session | `src/vscode/extension.ts` (`forkCurrentSession`) validates through `src/core/forkSession.ts`, then reuses `openSingleAgentWithQueue` with the source harness, persisted host, balanced strategy where supported, and `/continue <sessionId>`; the source terminal remains running. |
 | The ONE launch engine (every "New agent" command) | `launchAgent(context, {agentKey?, host?, pickHost?, local?})` in `src/vscode/extension.ts` is the single route. It resolves: **host** (explicit / device-first `pickLaunchHost` / auto `resolveBalancedHost`), **harness** (explicit, or `resolveAutoAgentKey` — usable-on-the-chosen-host via `hostHasUsableVersion`, ranked by `pickAgentByUsage`), and **version/account** (ALWAYS balanced via `--strategy balanced`; no pinned/latest/version-picker path exists). Commands are thin: `agents.newAgent` = `launchAgent({})` (auto everything), `agents.newAgentPickHost` = `{pickHost:true}` (device-first, auto harness), `agents.new<Harness>` = `{agentKey, local:true}`, `agents.new<Harness>PickHost` = `{agentKey, pickHost:true}`. Pure ranking: `src/core/launchHost.ts` (`pickBestHost`, `deviceHasUsableVersion`, `resolveBalancePool`) + `src/core/agentUsage.ts` (`pickAgentByUsage`). Health probe: `src/vscode/deviceHealth.vscode.ts` (`fetchDeviceStats`). |
 | Terminal registry + session IDs | `src/vscode/terminals.vscode.ts` |
 | Offloaded (`--host`) tabs — session id, title, resume | A remote tab is registered exactly like a local one: `openSingleAgent` mints the Claude session id for local AND remote (`agents run --host` adopts it via the CLI's `resolveHostSessionId`), and stamps the device on `EditorTerminal.host` (persisted in `src/core/sessions.persist.ts`, restored on reload and on Reopen Last Session). Anything that reads the session then has to follow that host: the label poller routes to `fetchRemoteSessionLabelSource` (`src/vscode/remoteSessions.vscode.ts` → `agents sessions <id> --host <device> --json`, parsed by `parseSessionLabelSource` in `src/core/remoteSessions.ts`) because the transcript is not on this machine, and resume goes through `buildVersionedResumeCommand(..., host)` (`src/core/prewarm.ts`) which emits `agents run --host … --resume` instead of a local `claude -r <id>`. |
