@@ -264,10 +264,10 @@ export function buildCanonicalUsageContext(inputs: UsageIdentityInput[]): {
 
 /**
  * Whether an agent exposes usage/limit data we can render — Claude/Kimi/Droid via
- * a live API, Codex via local session logs. Everything else has no usage concept,
- * so callers use this to decide whether a missing snapshot is worth flagging as
- * "usage unavailable" (a signed-in Claude account with no data) versus simply not
- * applicable (Antigravity, Grok, OpenCode).
+ * a live API, Codex/Grok via local session logs. Everything else has no usage
+ * concept, so callers use this to decide whether a missing snapshot is worth
+ * flagging as "usage unavailable" (a signed-in Claude account with no data)
+ * versus simply not applicable (Antigravity, OpenCode).
  */
 export function agentReportsUsage(agentId: AgentId): boolean {
   return agentId === 'claude' || agentId === 'codex' || agentId === 'kimi' || agentId === 'droid' || agentId === 'grok';
