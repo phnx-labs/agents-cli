@@ -1,5 +1,113 @@
 # Changelog
 
+## 1.20.83
+
+- **Routines now treat date-specific cron schedules as one-shot jobs (RUSH-2074).**
+  `agents routines add --schedule "0 14 29 7 *"` now warns, persists
+  `runOnce: true`, marks the routine as one-shot in `routines list`, and
+  `agents routines cleanup` removes completed expired one-shots that still have
+  user-layer YAML. Source: `apps/cli/src/lib/routines.ts`,
+  `apps/cli/src/lib/scheduler.ts`, `apps/cli/src/commands/routines.ts`.
+
+- **`agents routines list` groups terminal output by device and placement
+  (RUSH-2075).** The default table is bucketed under this machine, fleet-wide,
+  cloud, named devices, and named hosts with offline/unknown registry hints;
+  `--flat` keeps the legacy single table and `--json` remains a flat payload.
+  Source: `apps/cli/src/commands/routines.ts`.
+
+- **`agents.yaml` no longer churns on every meta write.** `writeMetaUnlocked` wrote
+  the central config with `yaml.stringify`, which strips all comments — so the
+  freshly-serialized bytes never matched the comment-annotated file on disk,
+  `writeIfChanged` rewrote it on every meta write, and the perpetually-dirty tree
+  wedged `agents sync` ("Blocked by local changes") across the fleet. It now
+  serializes via a `yaml.Document` round-trip (`serializeCentral`) that edits only
+  the keys that actually changed, so comments, key ordering, and untouched
+  top-level blocks (e.g. `hosts:`) are byte-stable — and a write that changes no
+  central field leaves `agents.yaml` untouched. Source: `apps/cli/src/lib/state.ts`.
+
+- **`agents run codex` can now reach the fleet from inside its sandbox.** Codex's
+  `workspace-write` sandbox blocks `$HOME` (verified against the live CLI and OpenAI's
+  sandbox docs), but the model routinely shells out to `agents ...`, whose runtime state
+  lives under `~/.agents` — the SSH askpass shim (`~/.agents/.cache/devices/askpass.sh`),
+  the device/stats cache, secrets, session writes, config tunings. Those inner writes hit
+  `EROFS` (`agents ssh` died before connecting, so a remote `agents run codex` could not
+  SSH or self-tune), and the fix was previously left to the caller (teams pass
+  `--add-dir ~/.agents` explicitly; a plain `agents run` never did). `buildExecCommand`
+  now grants `~/.agents` as an extra writable root whenever Codex runs `workspace-write`
+  (`--mode edit`/`auto`) — via `--add-dir` on fresh runs (deduped against user
+  `--add-dir`s) and via `-c sandbox_workspace_write.writable_roots` on resume forms (which
+  reject `--add-dir`). This is the officially-recommended way to widen scope "without
+  removing the sandbox entirely" — far narrower than `--mode skip` (danger-full-access).
+  `plan` (read-only) and `skip` (sandbox already dropped) are unaffected. Source:
+  `apps/cli/src/lib/exec.ts` (`buildExecCommand`, `codexWritableRootsConfig`).
+
+- **Fix headless release signing (`errSecInternalComponent`).** `headless-sign-context.sh` now runs `security set-key-partition-list` right after unlocking `rush-signing.keychain-db`, authorizing `codesign`/`apple-tool` to use the Developer ID key non-interactively. Without it, the key's ACL prompts for UI approval that a headless SSH release session can't answer, so `codesign` fails and the npm publish halts. Idempotent; runs every release. Source: `apps/cli/scripts/headless-sign-context.sh`.
+
+- **Cmd-Shift-V clip paste no longer breaks with an "sshd-keygen-wrapper would like
+  to control this computer" prompt.** A menu-bar helper started from an ssh session
+  registered the global chords but could never service them: macOS attributes its
+  Accessibility request to the responsible process, `/usr/libexec/sshd-keygen-wrapper`,
+  not to the helper's bundle, so the prompt named a process whose grant does nothing
+  for the paste (and, if granted, hands keystroke synthesis to everything any ssh
+  session spawns). `RegisterEventHotKey` is first-come, and the prompt naming
+  sshd-keygen-wrapper is itself the evidence that this copy — not the trusted
+  launchd-managed one — had registered Cmd-Shift-V and was servicing it. The
+  interactive mode now refuses to start over a remote shell, and refuses
+  unrecognized arguments: an unknown flag used to fall straight through to the
+  status-bar app, which is how a stray `MenubarHelper --self-test` from a verify run
+  became a permanent second helper. `launchctl bootstrap` (`agents menubar enable`)
+  is unaffected, including when run over ssh. Source:
+  `apps/cli/menubar/Sources/MenubarHelper/Guards.swift`.
+
+- **`agents menubar status` now names a second helper process instead of reporting a
+  healthy `running: yes`.** The check was `pgrep -f MenubarHelper`, which matches any
+  process with that name, so a stray copy holding the global chords looked identical
+  to a working install. Status now identifies the helper by its resolved executable
+  (`ps -o comm=`), reports `running` only for the installed bundle, and lists every
+  other live copy with its pid under `foreignInstances` (also in `--json`). Source:
+  `apps/cli/src/lib/menubar/install-menubar.ts`.
+
+- **The menu bar now says so when a hotkey is unavailable or the paste is not
+  permitted.** A `RegisterEventHotKey` conflict only wrote a line to a launchd log,
+  and a missing Accessibility grant made `Clip.inject` return silently — both looked
+  exactly like a dead hotkey. A stolen chord now posts a notification naming it, and a
+  denied grant copies the `host:path` reference to the clipboard and says which
+  setting to grant, so the clip is never lost. Source:
+  `apps/cli/menubar/Sources/MenubarHelper/Hotkey.swift`,
+  `apps/cli/menubar/Sources/MenubarHelper/Clip.swift`.
+
+- **Fix the release catch-up path aborting on an unbound variable.** When a release PR had already merged and only the tag + publish remained, `release.sh` re-validated CI and then aborted with `line 933: RELEASE_COMMIT: unbound variable`, so the retry never reached npm. The catch-up block that runs when `main` sits exactly at the release merge commit never set `HISTORICAL_CATCHUP`, so phase 4 took the normal-release branch and read `RELEASE_COMMIT`, which only the branch-creating path defines. It now sets the flag, and phase 4 resolves the release commit from the merged PR (`MERGED_RELEASE_SHA` + `CI_TESTED_HEAD`) as intended. This is why 1.20.79, 1.20.80, and 1.20.81 were tagged but never published. Source: `apps/cli/scripts/release.sh`.
+
+- **Removed `agents check` / `agents resources` now forward to their replacements
+  instead of erroring (RUSH-1234).** After the command consolidation, running the
+  removed names produced a bare `unknown command` (their edit-distance to `doctor`
+  was too far to even trigger a "did you mean"). They are now hidden tombstone
+  commands that print a one-line deprecation notice to stderr and re-run the
+  replacement, preserving flags and exit codes: `agents check …` runs
+  `agents doctor --check …` (so `--json` / `--quiet` / `--devices` and the CI
+  drift-gate exit code carry through), and `agents resources …` runs
+  `agents view --merged …` (with `agents inspect <target>` pointed to for
+  per-agent/per-repo detail). The notice goes to stderr so a `--json` consumer's
+  stdout stays clean. Source: `apps/cli/src/index.ts`.
+
+- **`agents sessions --host`/`--device <box>` now opens the interactive fleet
+  browser instead of a raw text dump.** A bare remote listing on a TTY folds the
+  named box into the same preview-rich, selectable picker as the local view (it
+  previously short-circuited to the legacy per-host stream — non-interactive, no
+  previews). A `--host` *query*, a render/filter flag, `--json`, or a
+  non-interactive caller keep the streamed output. Source:
+  `apps/cli/src/commands/sessions.ts`.
+
+- **`agents sessions` now shows which orchestrator spawned each team.** A teams
+  teammate row was keyed off its orchestrator's session id (captured from
+  `AGENTS_SESSION_ID` at spawn), which both hid the lineage and mislabeled the
+  teammate with the orchestrator's id/topic. The teammate now keys off its own
+  transcript, exposes the orchestrator as `orchestratorSessionId` (+ a resolved
+  `orchestratorLabel`) in `--active --json`, and the listing renders
+  `<team> · by <orchestrator>` so "which session spun up this team" is answerable
+  at a glance. Source: `apps/cli/src/lib/session/active.ts`,
+  `apps/cli/src/commands/sessions.ts`.
+
 ## 1.20.82
 
 - **Codex hook sync no longer leaves startup warnings after upgrades.** The Codex
