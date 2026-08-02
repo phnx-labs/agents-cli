@@ -87,15 +87,12 @@ export interface EditorTerminal {
   pid?: number;             // Shell process ID
   messageQueue: string[];   // Queued messages to send after terminal ready
   sessionId?: string;       // CLI session ID (for resume, history reading)
-  host?: string;            // Device the agent runs on when offloaded via `agents run --host`;
-                            // undefined for a local tab. The session's transcript lives on THAT
-                            // machine, so every by-session lookup (label, preview, resume) has to
-                            // route through `--host <name>` instead of the local filesystem.
   agentType?: SessionAgentType; // Agent type for session operations
   version?: string;         // Pinned agent version ("2.1.113"); undefined when unknown
   account?: string;         // Resolved account email for this terminal when known
   statusVersion?: string;   // Display-only version from agents-cli metadata
   statusAccount?: string;   // Display-only account from agents-cli metadata
+  host?: string;            // Launch host; undefined means this extension host
   approvalStatus?: 'pending' | 'approved' | 'running' | 'complete'; // Swarm approval status
   autoLabelPollerId?: NodeJS.Timeout; // Poller for auto-label fetch (cleared once label is set)
   detached?: boolean;       // The client tab closed on a live tmux detach (SSH drop) but the
@@ -151,8 +148,6 @@ export interface ClosedSession {
   terminalId: string;
   prefix: string;
   sessionId?: string;
-  /** Device the closed session ran on, so reopening resumes it there. */
-  host?: string;
   label?: string;
   agentType?: SessionAgentType;
   version?: string;
@@ -549,17 +544,6 @@ export function adoptShellAsAgent(
   return true;
 }
 
-/** Record the device an offloaded terminal runs on (see EditorTerminal.host). */
-export function setHost(terminal: vscode.Terminal, host: string): void {
-  const entry = getByTerminal(terminal);
-  if (entry) {
-    entry.host = host;
-    schedulePersist();
-  } else {
-    console.error(`[TERMINALS] FAILED to set host - terminal "${terminal.name}" not found in registry.`);
-  }
-}
-
 export function setVersion(terminal: vscode.Terminal, version: string): void {
   const entry = getByTerminal(terminal);
   if (entry) {
@@ -593,6 +577,11 @@ export function getSessionId(terminal: vscode.Terminal): string | undefined {
 export function getAgentType(terminal: vscode.Terminal): SessionAgentType | undefined {
   const entry = getByTerminal(terminal);
   return entry?.agentType;
+}
+
+export function setHost(terminal: vscode.Terminal, host: string | undefined): void {
+  const entry = getByTerminal(terminal);
+  if (entry) entry.host = host?.trim() || undefined;
 }
 
 // Message queue management
@@ -1357,7 +1346,6 @@ export function buildPersistedSessions(): sessionsPersist.PersistedSession[] {
       terminalId: entry.id,
       prefix: entry.agentConfig.prefix,
       sessionId: entry.sessionId,
-      host: entry.host,
       label: entry.label,
       agentType: entry.agentType,
       version: entry.version,

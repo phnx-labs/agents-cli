@@ -419,6 +419,10 @@
         "title": "Agents: Spawn with Context"
       },
       {
+        "command": "agents.forkCurrentSession",
+        "title": "Agents: Fork Current Session"
+      },
+      {
         "command": "agents.newClaudePickHost",
         "title": "Agents: New Claude (Pick Host)",
         "icon": {

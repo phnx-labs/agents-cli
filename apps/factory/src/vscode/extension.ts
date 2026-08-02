@@ -26,7 +26,7 @@ import { startWatchdogBridge } from '../mcp/watchdog-bridge';
 import { ensureWatchdogMcpInstalled } from '../mcp/watchdogInstall';
 import * as notifications from './notifications.vscode';
 import * as terminals from './terminals.vscode';
-import { fetchLocalSessions, fetchRemoteSessionLabelSource, fetchRecapSessions, LOCAL_LABEL } from './remoteSessions.vscode';
+import { fetchLocalSessions } from './remoteSessions.vscode';
 import * as sessionTracker from './sessionTracker';
 import { runRecapHeadless, isRecapSupported } from './recap.vscode';
 import { buildAgentTerminalEnv } from '../core/terminals';
@@ -36,7 +36,6 @@ import {
   pickBestVersion,
   sessionUsedPercent,
   buildLaunchCommand,
-  buildHostLaunchCommand,
   buildResumeInput,
   isVersionStillUsable,
 } from '../core/resumeInBest';
@@ -94,7 +93,8 @@ import { normalizeTerminalMode, resolveTerminalMode } from '../core/terminalMode
 import { DEFAULT_DISPLAY_PREFERENCES } from '../core/settings';
 import * as readiness from './terminalReadiness';
 import { resolveAlias, isAgentInstalled, checkInstalledAgentsViaCli } from '../core/agentModels';
-import { pickAgentByUsage, rankHostsByUsage, HostUsageScore } from '../core/agentUsage';
+import { pickAgentByUsage } from '../core/agentUsage';
+import { buildForkSessionRequest } from '../core/forkSession';
 import type { RemoteSession } from '../core/remoteSessions';
 // readAgentRunStrategy no longer needed: agents-cli reads strategy from
 // agents.yaml itself when invoked via `agents run`.
@@ -139,9 +139,7 @@ let defaultAgentTitle: string = CLAUDE_TITLE;
 let secondaryAgentTitle: string = CODEX_TITLE;
 let lastFocusedTerminal: vscode.Terminal | null = null;
 const STATUS_BAR_AGENTS_VIEW_TTL_MS = 30_000;
-// Keyed by agent, or `agent@host` for an offloaded terminal — account usage is
-// per machine, so a device's view must never be served from this box's entry.
-const agentsViewCache = new Map<string, { fetchedAtMs: number; data: AgentsViewJsonAgent | null }>();
+const agentsViewCache = new Map<PrewarmAgentType, { fetchedAtMs: number; data: AgentsViewJsonAgent | null }>();
 const statusBarMetaInFlight = new Set<string>();
 
 // BUILT_IN_AGENTS is now imported from ./agents
@@ -399,70 +397,19 @@ async function resolveSlotHost(slot: QuickLaunchSlot): Promise<string | undefine
   return dev.name;
 }
 
-// How long a host-usage ranking stays good enough to reuse. The picker opens
-// often and the underlying sweep is a fleet-wide SSH fan-out; a minute-old
-// ordering is indistinguishable from a fresh one.
-const HOST_USAGE_TTL_MS = 60_000;
-let hostUsageCache: { scores: Map<string, HostUsageScore>; fetchedAt: number } | null = null;
-
-/**
- * Recency-weighted session count per machine, keyed by normalized host name
- * (the local box under LOCAL_LABEL). Drives the host picker's order.
- *
- * Best-effort by design: the fan-out can be slow or partly unreachable, and a
- * picker that hangs behind it would be worse than one in registry order — so a
- * failure yields an empty map and the caller falls back to sorting by name.
- */
-async function fetchHostUsageScores(): Promise<Map<string, HostUsageScore>> {
-  const now = Date.now();
-  if (hostUsageCache && now - hostUsageCache.fetchedAt < HOST_USAGE_TTL_MS) return hostUsageCache.scores;
-  try {
-    const sessions = await fetchRecapSessions(HOST_USAGE_SESSION_LIMIT, []);
-    const scores = new Map(rankHostsByUsage(sessions, now).map((s) => [s.host, s]));
-    hostUsageCache = { scores, fetchedAt: now };
-    return scores;
-  } catch {
-    return new Map();
-  }
-}
-
-// Recent sessions pulled per host for the usage ranking. Enough to separate the
-// boxes you live on from the ones you touched once; small enough that the sweep
-// stays cheap.
-const HOST_USAGE_SESSION_LIMIT = 50;
-
-/** The QuickPick sub-label for one host: reachability first, then how much you use it. */
-function describeLaunchHost(online: boolean, score: HostUsageScore | undefined, onlineWord = 'online'): string {
-  const state = online ? onlineWord : 'offline';
-  if (!score || score.sessions === 0) return state;
-  return `${state} · ${score.sessions} recent session${score.sessions === 1 ? '' : 's'}`;
-}
-
 // Interactive host picker (This Mac / a device / Balanced) for the per-agent
 // "(Pick Host)" commands and the ⌘⌥⇧n override. Returns { cancelled } if the
 // user dismissed it; host === undefined means "this Mac".
 async function pickLaunchHost(title = 'Run on…', agentKey?: string): Promise<{ host?: string; cancelled: boolean }> {
   const devices = await listRegisteredDevices();
-  // Order by how much you actually use each box, not by registry order — with a
-  // dozen devices the two you work on daily otherwise land in an arbitrary spot.
-  // Online still outranks usage: an offline box cannot take the launch however
-  // familiar it is. History is best-effort; when the sweep returns nothing every
-  // score is 0 and the order falls back to the device name.
-  const usage = await fetchHostUsageScores();
-  const scoreOf = (name: string) => usage.get(normalizeHost(name))?.score ?? 0;
-  const sorted = [...devices].sort(
-    (a, b) =>
-      Number(b.online) - Number(a.online) ||
-      scoreOf(b.name) - scoreOf(a.name) ||
-      a.name.localeCompare(b.name),
-  );
-  const BALANCE_ID = ' balanced';
+  const sorted = [...devices].sort((a, b) => Number(b.online) - Number(a.online));
+  const BALANCE_ID = ' balanced';
   const items: (vscode.QuickPickItem & { hostId?: string })[] = [
-    { label: '$(vm) This Mac', description: describeLaunchHost(true, usage.get(LOCAL_LABEL), 'Run locally'), hostId: undefined },
+    { label: '$(vm) This Mac', description: 'Run locally', hostId: undefined },
     { label: '$(sync) Balanced (least-busy)', description: 'Auto-pick the least-busy online device', hostId: BALANCE_ID },
     ...sorted.map(d => ({
       label: `${d.online ? '$(radio-tower)' : '$(circle-slash)'} ${d.name}`,
-      description: describeLaunchHost(!!d.online, usage.get(normalizeHost(d.name))),
+      description: d.online ? 'online' : 'offline',
       hostId: d.name,
     })),
   ];
@@ -521,6 +468,7 @@ async function resolveAutoAgentKey(
   // Recap ledger uses. A failed/empty sweep just yields the default fallback.
   let sessions: RemoteSession[] = [];
   try {
+    const { fetchRecapSessions } = await import('./remoteSessions.vscode');
     sessions = await fetchRecapSessions(20, settings.getSettings(context).projectRules ?? []);
   } catch (err) {
     console.error('[launchAgent] recap sweep failed:', err);
@@ -1525,6 +1473,12 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand('agents.forkCurrentSession', async () => {
+      await forkCurrentSession(context);
+    })
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand('agents.handoff', () => handoffToAgent(context))
   );
 
@@ -1807,7 +1761,6 @@ export async function activate(context: vscode.ExtensionContext) {
             terminalId: entry.id,
             prefix: entry.agentConfig.prefix,
             sessionId: entry.sessionId,
-            host: entry.host,
             label: entry.label,
             agentType: entry.agentType,
             version: entry.version,
@@ -2020,18 +1973,11 @@ async function openSingleAgent(
   // raw command. Remote (targetHost): ALL agents route through `agents run
   // --host` so every agent can be offloaded onto a device.
   if (agentKey && (LAUNCHABLE.has(agentKey) || targetHost)) {
-    // Mint Claude's session id up front for LOCAL and REMOTE alike. The id is
-    // what every downstream surface keys off: the status bar, the auto-label
-    // poller that fills in the tab title, and Session Resume / Trace / Fork.
-    // A host run used to skip it and let the remote coin its own id, which left
-    // remote tabs stuck on the bare agent prefix with an empty status bar and no
-    // way to resume them by id. `agents run --host` accepts a caller-supplied
-    // `--session-id` and pins the remote session to it (hosts/run-target.ts
-    // resolveHostSessionId), so the id we generate here is the id the remote
-    // session actually uses.
-    if (agentKey === 'claude') {
+    // Claude's up-front session id is for the LOCAL resume flow; a remote run
+    // manages its own session on the target host, so skip it when offloading.
+    if (agentKey === 'claude' && !targetHost) {
       sessionId = generateClaudeSessionId();
-      console.log(`[SESSION] Claude using on-demand session ID: ${sessionId}${targetHost ? ` (host ${targetHost})` : ''}`);
+      console.log(`[SESSION] Claude using on-demand session ID: ${sessionId}`);
     }
     command = buildAgentLaunchCommand(agentKey, sessionId, defaultModel, additionalFlags, pinnedVersion, strategy, undefined, targetHost);
   }
@@ -2053,6 +1999,7 @@ async function openSingleAgent(
 
     const pid = await terminal.processId;
     terminals.register(terminal, terminalId, agentConfig, pid, context);
+    terminals.setHost(terminal, targetHost);
     readiness.registerTerminal(terminal);
     if (command) {
       readiness.armAgentReady(terminal, agentKey && sessionId
@@ -2062,11 +2009,6 @@ async function openSingleAgent(
 
     if (agentKey && supportsPrewarming(agentKey)) {
       terminals.setAgentType(terminal, agentKey);
-    }
-    // Stamp the host BEFORE the label poller starts: the poller reads the entry
-    // to decide whether to look the session up locally or over `--host`.
-    if (targetHost) {
-      terminals.setHost(terminal, targetHost);
     }
     if (sessionId) {
       terminals.setSessionId(terminal, sessionId);
@@ -2108,15 +2050,11 @@ async function openSingleAgent(
 
   const pid = await terminal.processId;
   terminals.register(terminal, terminalId, agentConfig, pid, context);
+  terminals.setHost(terminal, targetHost);
   readiness.registerTerminal(terminal);
 
   if (agentKey && supportsPrewarming(agentKey)) {
     terminals.setAgentType(terminal, agentKey);
-  }
-  // Stamp the host BEFORE the label poller starts: the poller reads the entry
-  // to decide whether to look the session up locally or over `--host`.
-  if (targetHost) {
-    terminals.setHost(terminal, targetHost);
   }
   if (sessionId) {
     terminals.setSessionId(terminal, sessionId);
@@ -2839,16 +2777,11 @@ async function resumeSession(context: vscode.ExtensionContext) {
 
 async function fetchAgentsViewJson(
   agentKey: PrewarmAgentType,
-  opts: { quiet?: boolean; useCache?: boolean; host?: string } = {}
+  opts: { quiet?: boolean; useCache?: boolean } = {}
 ): Promise<AgentsViewJsonAgent | null> {
-  // Accounts and their remaining usage are PER MACHINE. A terminal offloaded to
-  // a device must be judged against that device's installs, not this box's, or
-  // the caller reads one machine's quota and acts on another's.
-  const host = opts.host;
-  const cacheKey = host ? `${agentKey}@${host}` : agentKey;
   const useCache = opts.useCache === true;
   if (useCache) {
-    const cached = agentsViewCache.get(cacheKey);
+    const cached = agentsViewCache.get(agentKey);
     if (cached && Date.now() - cached.fetchedAtMs < STATUS_BAR_AGENTS_VIEW_TTL_MS) {
       return cached.data;
     }
@@ -2856,25 +2789,23 @@ async function fetchAgentsViewJson(
 
   const { runAgents } = await import('../core/agentsBin');
   try {
-    const target = host ? ` --host ${shquote(host)} --no-tty` : '';
-    const { stdout } = await runAgents(`view ${agentKey}${target} --json`, {
+    const { stdout } = await runAgents(`view ${agentKey} --json`, {
       maxBuffer: 5 * 1024 * 1024,
-      timeout: host ? 30_000 : undefined,
     });
     const parsed = JSON.parse(stdout) as AgentsViewJsonAgent;
     if (!parsed || !Array.isArray(parsed.versions)) {
       if (useCache) {
-        agentsViewCache.set(cacheKey, { fetchedAtMs: Date.now(), data: null });
+        agentsViewCache.set(agentKey, { fetchedAtMs: Date.now(), data: null });
       }
       return null;
     }
     if (useCache) {
-      agentsViewCache.set(cacheKey, { fetchedAtMs: Date.now(), data: parsed });
+      agentsViewCache.set(agentKey, { fetchedAtMs: Date.now(), data: parsed });
     }
     return parsed;
   } catch (err: any) {
     if (useCache) {
-      agentsViewCache.set(cacheKey, { fetchedAtMs: Date.now(), data: null });
+      agentsViewCache.set(agentKey, { fetchedAtMs: Date.now(), data: null });
     }
     if (!opts.quiet) {
       const msg = err?.stderr || err?.message || String(err);
@@ -2934,11 +2865,7 @@ export async function rotateTerminalToBestVersion(
     return { status: 'unsupported_agent' };
   }
 
-  // Read the accounts on the machine this terminal runs on. Rotating a device's
-  // exhausted account against THIS box's quota would pick a version the device
-  // may not even have installed.
-  const host = terminalEntry.host;
-  const data = await fetchAgentsViewJson(agentKey, { host });
+  const data = await fetchAgentsViewJson(agentKey);
   if (!data) return { status: 'view_unavailable' };
 
   // If the active terminal already sits on a version that still has usage,
@@ -2946,7 +2873,7 @@ export async function rotateTerminalToBestVersion(
   // a usable current version IS the best. Skip the terminal churn and the
   // /continue round-trip. Undefined version falls through to the legacy
   // switch path (we can't reason about untagged terminals).
-  const currentVersion = terminalEntry.version ?? terminalEntry.statusVersion;
+  const currentVersion = terminalEntry.version;
   if (currentVersion) {
     const currentVersionData = data.versions.find(v => v.version === currentVersion);
     if (isVersionStillUsable(currentVersionData)) {
@@ -3013,17 +2940,12 @@ export async function rotateTerminalToBestVersion(
   // back to reusing the old id and the generic ps/pgrep probe.
   const supportsSessionIdFlag = agentKey === 'claude';
   const newSessionId = supportsSessionIdFlag ? randomUUID() : oldSessionId;
-  // An offloaded terminal has to be relaunched ON its device — the raw
-  // `claude@<version>` form would silently move the work to this box, which is
-  // the opposite of what a rotate is for.
-  const launchCmd = host
-    ? buildHostLaunchCommand(agentKey, best.version, host, supportsSessionIdFlag ? newSessionId : null)
-    : buildLaunchCommand(
-        builtIn.command,
-        best.version,
-        agentKey,
-        supportsSessionIdFlag ? newSessionId : null,
-      );
+  const launchCmd = buildLaunchCommand(
+    builtIn.command,
+    best.version,
+    agentKey,
+    supportsSessionIdFlag ? newSessionId : null,
+  );
 
   const terminalId = terminals.nextId(builtIn.prefix);
   const title = buildTerminalTitle(agentConfig.title, undefined, context, newSessionId);
@@ -3042,22 +2964,17 @@ export async function rotateTerminalToBestVersion(
   terminals.setAgentType(terminal, agentKey);
   terminals.setVersion(terminal, best.version);
   terminals.setAccount(terminal, best.email);
-  if (host) terminals.setHost(terminal, host);
   startAutoLabelPollerForTerminal(terminal, context);
 
   // /continue takes the OLD session id (the transcript we want to load),
   // not the new one (which is just the container for the fresh process).
   // Prefer the /continue slash command if it's synced to this version's
   // home; otherwise inline the full instructions.
-  // Whether `/continue` is synced into the target version's home is a question
-  // about THAT machine's filesystem. For a remote rotate we cannot answer it
-  // from here, so we inline the instructions instead of gambling on a slash
-  // command the device may not have.
   const versionHomeCommand = path.join(
     os.homedir(), '.agents-system', 'versions', agentKey, best.version,
     'home', '.claude', 'commands', 'continue.md'
   );
-  const hasContinueCmd = !host && fsSync.existsSync(versionHomeCommand);
+  const hasContinueCmd = fsSync.existsSync(versionHomeCommand);
 
   let centralContinueMdBody: string | null = null;
   if (!hasContinueCmd) {
@@ -3287,7 +3204,7 @@ export async function openSingleAgentWithQueue(
   context: vscode.ExtensionContext,
   agentConfig: Omit<AgentConfig, 'count'>,
   messages: string[],
-  opts?: { cwd?: string; mode?: AgentLaunchMode; sessionId?: string }
+  opts?: { cwd?: string; mode?: AgentLaunchMode; sessionId?: string; strategy?: RunStrategy; host?: string }
 ): Promise<{ terminalId: string; sessionId: string | null }> {
   const editorLocation: vscode.TerminalEditorLocationOptions = {
     viewColumn: vscode.ViewColumn.Active,
@@ -3321,16 +3238,17 @@ export async function openSingleAgentWithQueue(
   // gets a pre-generated session id for the resume flow; other agents discover
   // their session post-spawn. opts?.mode defaults to 'auto' (writable-but-gated)
   // inside buildAgentLaunchCommand when the caller does not supply an explicit mode.
+  const targetHost = opts?.host && opts.host !== 'local' ? opts.host : undefined;
   const LAUNCHABLE_SET: ReadonlySet<string> = new Set(['claude', 'codex', 'gemini', 'opencode', 'cursor', 'antigravity']);
-  if (agentKey && LAUNCHABLE_SET.has(agentKey)) {
-    if (agentKey === 'claude') {
+  if (agentKey && (LAUNCHABLE_SET.has(agentKey) || targetHost)) {
+    if (agentKey === 'claude' && !targetHost) {
       // Claude: generate session ID at open time; others are discovered post-spawn.
       // A caller (dispatch) may pre-supply the id so it can watch that exact
       // session file for a plan / completion afterwards.
       sessionId = opts?.sessionId ?? generateClaudeSessionId();
-      command = buildClaudeLaunchCommand(context, sessionId, defaultModel, undefined, opts?.mode);
+      command = buildAgentLaunchCommand(agentKey, sessionId, defaultModel, undefined, undefined, opts?.strategy, opts?.mode, targetHost);
     } else {
-      command = buildAgentLaunchCommand(agentKey, null, defaultModel, undefined, undefined, undefined, opts?.mode);
+      command = buildAgentLaunchCommand(agentKey, null, defaultModel, undefined, undefined, opts?.strategy, opts?.mode, targetHost);
     }
   }
 
@@ -3346,6 +3264,7 @@ export async function openSingleAgentWithQueue(
 
   const pid = await terminal.processId;
   terminals.register(terminal, terminalId, agentConfig, pid, context);
+  terminals.setHost(terminal, targetHost);
   readiness.registerTerminal(terminal);
 
   // Track session ID and agent type
@@ -3511,38 +3430,6 @@ interface FetchAutoLabelOpts {
   useFullConversation?: boolean;
 }
 
-/**
- * Auto-label for a tab whose agent runs on another machine.
- *
- * Same two-step shape as the local path — reuse a real persisted name, else
- * summarize the first user message — but both inputs come from the host over
- * `agents sessions <id> --host`. A ticket id in the first message is prefixed
- * exactly as locally, so a remote tab reads the same as a local one.
- */
-async function fetchRemoteAutoLabel(
-  terminal: vscode.Terminal,
-  entry: terminals.EditorTerminal,
-  host: string
-): Promise<string | undefined> {
-  if (!entry.sessionId) return undefined;
-  const source = await fetchRemoteSessionLabelSource(entry.sessionId, host);
-  if (!source) return undefined;
-
-  const ticket = source.topic ? extractLinearTicketId(source.topic) : null;
-  if (source.label) {
-    const label = ticket ? `${ticket} ${source.label}` : source.label;
-    terminals.setAutoLabel(terminal, label);
-    return label;
-  }
-  if (!source.topic) return undefined;
-
-  const llmTitle = await generateLabelWithLLM(source.topic);
-  const base = llmTitle ?? extractFirstNWords(source.topic, 5);
-  const autoLabel = ticket && base ? `${ticket} ${base}` : (ticket ?? base);
-  if (autoLabel) terminals.setAutoLabel(terminal, autoLabel);
-  return autoLabel ?? undefined;
-}
-
 async function fetchAndSetAutoLabel(
   terminal: vscode.Terminal,
   entry: terminals.EditorTerminal,
@@ -3550,13 +3437,6 @@ async function fetchAndSetAutoLabel(
 ): Promise<string | undefined> {
   if (!entry.sessionId) return entry.autoLabel;
   if (!opts.force && entry.autoLabel) return entry.autoLabel;
-
-  // Offloaded tab: the transcript is on the host, so the local session-file scan
-  // and jsonl preview below have nothing to read. Ask the host for the same two
-  // inputs instead — its persisted name, else its first message to summarize.
-  if (entry.host) {
-    return await fetchRemoteAutoLabel(terminal, entry, entry.host);
-  }
 
   try {
     const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -4171,7 +4051,7 @@ async function reloadActiveTerminal(context: vscode.ExtensionContext) {
 
     const config = PREWARM_CONFIGS[agentType];
     const exitSequence = config.exitSequence;
-    const resumeCommand = buildVersionedResumeCommand(agentType, sessionId, entry.version, entry.host);
+    const resumeCommand = buildVersionedResumeCommand(agentType, sessionId, entry.version);
 
     terminal.show();
     for (const seq of exitSequence) {
@@ -4382,6 +4262,45 @@ async function spawnWithContext(context: vscode.ExtensionContext): Promise<void>
   await openSingleAgentWithQueue(context, entry.agentConfig, [`/continue ${entry.sessionId}`]);
 }
 
+async function forkCurrentSession(context: vscode.ExtensionContext): Promise<void> {
+  const activeTerminal = vscode.window.activeTerminal;
+  if (!activeTerminal) {
+    vscode.window.showErrorMessage('No active terminal to fork.');
+    return;
+  }
+
+  const entryBefore = terminals.getByTerminal(activeTerminal);
+  if (entryBefore?.agentConfig?.prefix) {
+    await tryHydrateLiveSessionId(activeTerminal, entryBefore.agentConfig.prefix);
+  }
+
+  const entry = terminals.getByTerminal(activeTerminal);
+  if (!entry?.agentConfig) {
+    vscode.window.showErrorMessage('Active terminal is not an agent terminal.');
+    return;
+  }
+
+  const request = buildForkSessionRequest({
+    sessionId: entry.sessionId,
+    agentKey: entry.agentType ?? prefixToAgentType(entry.agentConfig.prefix) ?? undefined,
+    host: entry.host,
+  });
+  if (!request.ok) {
+    const message = request.reason === 'no_session'
+      ? 'No session ID found for the active terminal.'
+      : 'No agent harness found for the active terminal.';
+    vscode.window.showErrorMessage(message);
+    return;
+  }
+
+  const strategy: RunStrategy | undefined =
+    (STRATEGY_LAUNCH_AGENTS as readonly string[]).includes(request.agentKey) ? 'balanced' : undefined;
+  await openSingleAgentWithQueue(context, entry.agentConfig, [request.prompt], {
+    strategy,
+    host: request.host,
+  });
+}
+
 // Store context reference for deactivate
 let extensionContext: vscode.ExtensionContext | undefined;
 
@@ -4473,11 +4392,6 @@ async function restoreAgentTerminals(context: vscode.ExtensionContext): Promise<
     if (session.sessionId && session.agentType) {
       terminals.setSessionId(terminal, session.sessionId);
       terminals.setAgentType(terminal, session.agentType as SessionAgentType);
-      // Stamp the host before the poller starts so a restored offloaded tab
-      // keeps resolving its label (and its resume) on the machine that owns it.
-      if (session.host) {
-        terminals.setHost(terminal, session.host);
-      }
       startAutoLabelPollerForTerminal(terminal, context);
 
       // Actually resume the session by sending the resume command
@@ -4485,8 +4399,7 @@ async function restoreAgentTerminals(context: vscode.ExtensionContext): Promise<
         const resumeCmd = buildVersionedResumeCommand(
           session.agentType,
           session.sessionId,
-          session.version,
-          session.host
+          session.version
         );
         try {
           await readiness.waitFor(terminal, 'promptReady');
@@ -4664,19 +4577,13 @@ async function reopenLastClosedSession(context: vscode.ExtensionContext): Promis
     if (closed.account) {
       terminals.setAccount(terminal, closed.account);
     }
-    // Stamp the host before the poller starts so a reopened offloaded tab keeps
-    // resolving its label (and its resume) on the machine that owns it.
-    if (closed.host) {
-      terminals.setHost(terminal, closed.host);
-    }
     startAutoLabelPollerForTerminal(terminal, context);
 
     if (supportsPrewarming(closed.agentType)) {
       const resumeCmd = buildVersionedResumeCommand(
         closed.agentType,
         closed.sessionId,
-        closed.version,
-        closed.host
+        closed.version
       );
       try {
         await readiness.waitFor(terminal, 'promptReady');
