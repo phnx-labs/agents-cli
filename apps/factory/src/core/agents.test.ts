@@ -360,6 +360,12 @@ describe('buildAgentLaunchCommand', () => {
     expect(cmd).toContain('--strategy balanced');
   });
 
+  test('explicit local launch suppresses automatic device selection', () => {
+    expect(buildAgentLaunchCommand(
+      'codex', null, undefined, undefined, undefined, 'balanced', undefined, undefined, true,
+    )).toBe('agents run codex --interactive --strategy balanced --mode auto');
+  });
+
   test('a pinned version on a host launch suppresses --strategy (pin overrides balance)', () => {
     // Pick Version & Host: the exact pin wins, so no --strategy is emitted even
     // if a strategy is passed.

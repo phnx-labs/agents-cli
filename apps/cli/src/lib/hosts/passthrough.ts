@@ -30,6 +30,16 @@ import {
 } from './remote-cmd.js';
 import { resolveRemoteOsSync } from './remote-os.js';
 import { machineId } from '../session/sync/config.js';
+import { loadDevices, type DeviceProfile, type DeviceRegistry } from '../devices/registry.js';
+import {
+  fanOutDevices,
+  planFleetTargets,
+  runLocalCommand,
+  runOnDevice,
+  type FleetSkipReason,
+  type FanOutDeviceResult,
+} from '../devices/fleet.js';
+import { platformGroupLabel } from '../devices/health-report.js';
 
 /** Per-command remote behaviour. Absence from this map = not host-routable here. */
 interface RemoteSpec {
@@ -128,8 +138,15 @@ const OWN_HOST_COMMANDS = new Set([
   'monitors', // `--device` names the OWNER machine (pin-to-one), not a routing target
 ]);
 
-/** `--no-tty` is stripped like the routing flags but carries no value. */
-const STRIP_SPECS: StripSpec[] = [...HOST_ROUTING_SPECS, { long: 'no-tty', takesValue: false }];
+/** `--no-tty` is stripped like the routing flags but carries no value. The plural
+ * fleet flags are stripped only when we handle the `all` sentinel ourselves;
+ * otherwise they fall through to command-level aggregators. */
+const STRIP_SPECS: StripSpec[] = [
+  ...HOST_ROUTING_SPECS,
+  { long: 'no-tty', takesValue: false },
+  { long: 'hosts', takesValue: true },
+  { long: 'devices', takesValue: true },
+];
 
 /** Pull the value of `--host`/`-H`/`--remote-cwd` (any form) out of an argv. */
 export function flagValue(args: string[], long: string, short?: string): string | undefined {
@@ -168,6 +185,238 @@ async function resolveTargetHost(name: string, any: boolean): Promise<Host> {
   return syntheticHost(name);
 }
 
+/** Injectable dependencies for {@link runFleetPassthrough} — used by tests. */
+export interface FleetPassthroughOptions {
+  /** Override the device registry loader (tests). */
+  loadDevices?: () => Promise<DeviceRegistry>;
+  /** Override the per-device runner (tests). Defaults to `runOnDevice`. */
+  runner?: typeof runOnDevice;
+  /** Override the local runner for the self device (tests). Defaults to `runLocalCommand`. */
+  localRunner?: typeof runLocalCommand;
+  /** Override this machine's id (tests). Defaults to `machineId()`. */
+  self?: string;
+}
+
+interface FleetTargetWithDevice {
+  name: string;
+  device: DeviceProfile;
+  skip?: FleetSkipReason;
+}
+
+/** Detect the `all` sentinel on any routing flag. */
+function isFleetAllSentinel(
+  hostFlag: string | undefined,
+  deviceFlag: string | undefined,
+  hostsFlag: string | undefined,
+  devicesFlag: string | undefined,
+): boolean {
+  return (
+    hostFlag?.toLowerCase() === 'all' ||
+    deviceFlag?.toLowerCase() === 'all' ||
+    hostsFlag?.toLowerCase() === 'all' ||
+    devicesFlag?.toLowerCase() === 'all'
+  );
+}
+
+/** Strip routing flags from the argv and ensure the per-device call emits JSON. */
+function buildFleetForwardedArgs(allArgs: string[]): string[] {
+  const stripped = stripRoutingFlags(allArgs, STRIP_SPECS);
+  if (!stripped.includes('--json')) stripped.push('--json');
+  return stripped;
+}
+
+/** Parse stdout as JSON; on failure return an object describing the error. */
+function safeJsonParse(stdout: string): unknown {
+  try {
+    return JSON.parse(stdout);
+  } catch {
+    return { parseError: 'invalid JSON', snippet: stdout.trim().slice(0, 200) };
+  }
+}
+
+/** One-line summary of a per-device `agents view [agent] --json` payload. */
+function summarizeViewResult(forwarded: string[], json: unknown): string {
+  // After routing flags are stripped, the agent argument is the first token that
+  // is not a flag (e.g. `kimi` in `agents view kimi --json`).
+  const agentArg = forwarded.find((a, i) => i > 0 && !a.startsWith('-'));
+  // `agents view --json` returns an array; `agents view <agent> --json` returns
+  // a single object. Normalize to the per-agent shape.
+  const agent = agentArg
+    ? (Array.isArray(json) ? (json[0] as any) : (json as any))
+    : undefined;
+  if (!agentArg) {
+    const rows = Array.isArray(json) ? json : [];
+    const count = rows.reduce((n, r: any) => n + (r.versions?.length ?? 0), 0);
+    return count === 0 ? 'no agents installed' : `${count} version${count === 1 ? '' : 's'}`;
+  }
+  if (!agent || !Array.isArray(agent.versions) || agent.versions.length === 0) {
+    return 'not installed';
+  }
+  const v = agent.versions.find((x: any) => x.isDefault) ?? agent.versions[0];
+  const parts: string[] = [chalk.cyan(String(v.version))];
+  if (v.signedIn) {
+    parts.push(chalk.green('active'));
+    if (v.email) parts.push(chalk.gray(String(v.email)));
+  } else {
+    parts.push(chalk.gray('signed out'));
+  }
+  return parts.join(' · ');
+}
+
+function formatCompactUsd(usd: number): string {
+  if (usd >= 1000) return `$${(usd / 1000).toFixed(1)}k`;
+  if (usd >= 1) return `$${usd.toFixed(2)}`;
+  return `$${usd.toFixed(3)}`;
+}
+
+function formatCompactTokens(n: number): string {
+  const abs = Math.abs(n);
+  if (abs >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
+  if (abs >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (abs >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
+  return String(n);
+}
+
+/** One-line summary of a per-device `agents output --json` payload. */
+function summarizeOutputResult(json: unknown): string {
+  const p = json as any;
+  const burn = p?.burn;
+  if (!burn || typeof burn !== 'object') return 'ok';
+  const parts: string[] = [];
+  if (typeof burn.costUsd === 'number') parts.push(`${formatCompactUsd(burn.costUsd)} burned`);
+  if (typeof burn.outputTokens === 'number') parts.push(`${formatCompactTokens(burn.outputTokens)} output tokens`);
+  const commits = p?.output?.commits;
+  if (typeof commits === 'number' && commits > 0) parts.push(`${commits} commits`);
+  return parts.length ? parts.join(' · ') : 'ok';
+}
+
+/** Best-effort summary of any per-device JSON payload. */
+function summarizeResult(command: string, forwarded: string[], json: unknown): string {
+  if (command === 'view') return summarizeViewResult(forwarded, json);
+  if (command === 'output') return summarizeOutputResult(json);
+  return 'ok';
+}
+
+const GROUP_ORDER = ['macOS', 'Linux', 'Windows', 'Other'];
+
+/** Render the grouped-by-OS fleet roster from per-device results. */
+function renderFleetRoster(
+  command: string,
+  forwarded: string[],
+  results: Array<FanOutDeviceResult<unknown> & { device: DeviceProfile }>,
+  self: string,
+): void {
+  const agentArg = forwarded[1];
+  const installed = results.filter((r) => r.status === 'ok').length;
+  const skipped = results.filter((r) => r.status === 'skipped').length;
+  const failed = results.filter((r) => r.status === 'failed').length;
+
+  const title = agentArg ? `${command} ${agentArg}` : command;
+  const summaryParts: string[] = [];
+  if (installed) summaryParts.push(`${installed} installed`);
+  if (failed) summaryParts.push(`${failed} unreachable`);
+  if (skipped) summaryParts.push(`${skipped} skipped`);
+  console.log(chalk.bold(title) + chalk.gray(` · ${results.length} device${results.length === 1 ? '' : 's'}`));
+  console.log('');
+
+  const nameW = Math.max(6, ...results.map((r) => r.name.length));
+  const grouped = new Map<string, Array<FanOutDeviceResult<unknown> & { device: DeviceProfile }>>();
+  for (const r of results) {
+    const g = platformGroupLabel(r.device.platform);
+    (grouped.get(g) ?? grouped.set(g, []).get(g)!).push(r);
+  }
+
+  for (const group of GROUP_ORDER) {
+    const members = grouped.get(group);
+    if (!members || members.length === 0) continue;
+    members.sort((a, b) => {
+      const aSelf = a.name.toLowerCase() === self.toLowerCase();
+      const bSelf = b.name.toLowerCase() === self.toLowerCase();
+      return (aSelf ? -1 : bSelf ? 1 : 0) || a.name.localeCompare(b.name);
+    });
+    console.log(chalk.bold(group));
+    for (const r of members) {
+      const isSelf = r.name.toLowerCase() === self.toLowerCase();
+      const prefix = isSelf ? chalk.cyan('▸') : ' ';
+      let glyph: string;
+      let text: string;
+      if (r.status === 'skipped') {
+        glyph = chalk.gray('○');
+        text = chalk.gray(String(r.reason ?? 'skipped'));
+      } else if (r.status === 'failed') {
+        glyph = chalk.red('✕');
+        text = chalk.red(String(r.error ?? 'unreachable').split('\n')[0].slice(0, 80));
+      } else {
+        glyph = chalk.green('●');
+        text = summarizeResult(command, forwarded, r.value);
+      }
+      const selfNote = isSelf ? chalk.cyan('   ← this machine') : '';
+      console.log(` ${prefix} ${r.name.padEnd(nameW)}  ${glyph}  ${text}${selfNote}`);
+    }
+    console.log('');
+  }
+
+  if (summaryParts.length) {
+    console.log(chalk.gray(summaryParts.join(' · ')));
+  }
+}
+
+/** Run `agents <command> …` across every registered device and render the roster. */
+export async function runFleetPassthrough(
+  command: string,
+  allArgs: string[],
+  spec: RemoteSpec,
+  opts: FleetPassthroughOptions = {},
+): Promise<boolean> {
+  const self = opts.self ?? machineId();
+  const registry = await (opts.loadDevices ?? loadDevices)();
+  const planned = planFleetTargets(registry);
+  const targets: FleetTargetWithDevice[] = planned.map((t) => ({
+    name: t.device.name,
+    device: t.device,
+    skip: t.skip,
+  }));
+
+  const forwarded = buildFleetForwardedArgs(allArgs);
+  const runner = opts.runner ?? runOnDevice;
+  const localRunner = opts.localRunner ?? runLocalCommand;
+
+  const results = await fanOutDevices<unknown, FleetTargetWithDevice>(
+    targets,
+    async (target) => {
+      const cmd = ['agents', ...forwarded];
+      const isSelf = target.device.name.toLowerCase() === self.toLowerCase();
+      const res = isSelf ? localRunner(cmd) : runner(target.device, cmd);
+      if (res.code !== 0) {
+        const detail = (res.stderr || res.stdout || 'unreachable').trim().slice(0, 200);
+        throw new Error(detail || 'unreachable');
+      }
+      return safeJsonParse(res.stdout);
+    },
+    { perDeviceTimeoutMs: 120_000 },
+  );
+
+  // Map fan-out results back to typed results with device attached for rendering.
+  const typedResults: Array<FanOutDeviceResult<unknown> & { device: DeviceProfile }> = results.map((r, i) => ({
+    ...r,
+    device: targets[i].device,
+  }));
+
+  if (allArgs.includes('--json')) {
+    const out: Record<string, unknown> = {};
+    for (const r of typedResults) {
+      out[r.name] = r.status === 'ok' ? r.value : { error: r.error ?? r.reason ?? 'unknown' };
+    }
+    console.log(JSON.stringify(out, null, 2));
+  } else {
+    renderFleetRoster(command, forwarded, typedResults, self);
+  }
+
+  const anyFailed = typedResults.some((r) => r.status === 'failed');
+  process.exitCode = anyFailed ? 1 : 0;
+  return true;
+}
+
 /**
  * Route `agents <command> … --host <name>` to a remote if the command is
  * host-routable and a `--host` (or its `--device` alias) was given. Returns
@@ -180,11 +429,20 @@ async function resolveTargetHost(name: string, any: boolean): Promise<Host> {
  * @param command the resolved subcommand name (`process.argv`'s first non-flag).
  * @param allArgs `process.argv.slice(2)` — the command name followed by its args.
  */
-export async function maybeRunOnHost(command: string, allArgs: string[]): Promise<boolean> {
+export async function maybeRunOnHost(
+  command: string,
+  allArgs: string[],
+  opts?: FleetPassthroughOptions,
+): Promise<boolean> {
   const hostFlag = flagValue(allArgs, 'host', 'H');
   const deviceFlag = flagValue(allArgs, 'device');
+  const hostsFlag = flagValue(allArgs, 'hosts');
+  const devicesFlag = flagValue(allArgs, 'devices');
   const hostName = hostFlag ?? deviceFlag;
-  if (!hostName) return false;
+  const fleetAll = isFleetAllSentinel(hostFlag, deviceFlag, hostsFlag, devicesFlag);
+  // Proceed when any routing flag is present, including the plural fleet flags
+  // that may carry the `all` sentinel.
+  if (!hostName && !hostsFlag && !devicesFlag) return false;
 
   // Commands with their own richer --host semantics must reach local commander
   // BEFORE any single-target conflict gate. sessions/feed merge --host and
@@ -207,12 +465,15 @@ export async function maybeRunOnHost(command: string, allArgs: string[]): Promis
     }
   }
 
-  // `--hosts` is always a generic fleet flag — bail for every command so the
-  // local aggregator handles it. `--devices` is fan-out on most commands but
-  // a placement flag on `routines` (which devices may run the routine), so
-  // only exempt routines from the bail.
-  if (allArgs.includes('--hosts')) return false;
-  if (allArgs.includes('--devices') && command !== 'routines') return false;
+  // `--hosts` / `--devices` are command-level fleet flags unless their value is
+  // the `all` sentinel, which this module fans out generically. On `routines`,
+  // a non-all `--devices` value is placement (which devices may run the routine).
+  if (allArgs.includes('--hosts') && hostsFlag?.toLowerCase() !== 'all') return false;
+  if (allArgs.includes('--devices')) {
+    if (devicesFlag === undefined) return false; // malformed, let commander error
+    const isAll = devicesFlag.toLowerCase() === 'all';
+    if (!isAll && command !== 'routines') return false;
+  }
 
   const spec = REMOTE_PASSTHROUGH[command];
   if (!spec) {
@@ -230,13 +491,24 @@ export async function maybeRunOnHost(command: string, allArgs: string[]): Promis
     return true;
   }
 
-  // Single-target remote path only: reject a conflicting --host/--device pair
-  // rather than silently preferring one (same rule as `agents run`).
+  // Reject a conflicting --host/--device pair before either the fleet fan-out
+  // or single-target path runs. Equal values (e.g. both `all`) are allowed.
   if (hostFlag && deviceFlag && hostFlag !== deviceFlag) {
     console.error(chalk.red('Conflicting --host/--device values — pass just one.'));
     process.exitCode = 1;
     return true;
   }
+
+  // Generic fleet fan-out for the `all` sentinel — before single-host resolution
+  // so `all` is never treated as a literal hostname.
+  if (fleetAll) {
+    return runFleetPassthrough(command, allArgs, spec, opts);
+  }
+
+  // After the bailouts and fleet fan-out above, the only remaining path is a
+  // single-target --host/--device. Guard for the type checker: plural non-all
+  // flags and bare flags were already handled.
+  if (!hostName) return false;
 
   // Running against your own machine is just a local run — skip the SSH round-trip.
   // `machineId()` is the same self-identifier the device registry and session

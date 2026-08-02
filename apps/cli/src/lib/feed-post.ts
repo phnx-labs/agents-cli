@@ -17,8 +17,11 @@ import * as path from 'path';
 import { spawnSync } from 'child_process';
 import {
   appendActivityEvent,
+  projectFromCwd,
   type ActivityEvent,
+  type Attachment,
 } from './activity.js';
+import { getHistoryDir } from './state.js';
 import { machineId } from './machine-id.js';
 import { isValidMailboxId } from './mailbox.js';
 import {
@@ -35,8 +38,16 @@ export interface FeedPostInput {
   text: string;
   /** Override session id (escape hatch for scripts/tests). Prefer auto-resolve. */
   sessionId?: string;
+  /** Generic artifacts to attach: local paths (copied for durability) or URLs. */
+  attach?: string[];
   /** Override activity root (tests). */
   activityRoot?: string;
+  /**
+   * Override the attachments store root (tests). Local files are copied under
+   * `<attachmentsRoot>/<sessionId>/<updateId>/`. Defaults to
+   * `~/.agents/.history/attachments`.
+   */
+  attachmentsRoot?: string;
   /** Override env for identity resolution (tests). */
   env?: NodeJS.ProcessEnv;
   /** Override cwd stamp (defaults to process.cwd() / env). */
@@ -204,6 +215,112 @@ export function parentPidOf(pid: number): number | undefined {
   return undefined;
 }
 
+/** Extension → (kind, mediaType) for attachment classification. */
+const MEDIA_BY_EXT: Record<string, { kind: Attachment['kind']; mediaType: string }> = {
+  '.png': { kind: 'image', mediaType: 'image/png' },
+  '.jpg': { kind: 'image', mediaType: 'image/jpeg' },
+  '.jpeg': { kind: 'image', mediaType: 'image/jpeg' },
+  '.gif': { kind: 'image', mediaType: 'image/gif' },
+  '.svg': { kind: 'image', mediaType: 'image/svg+xml' },
+  '.webp': { kind: 'image', mediaType: 'image/webp' },
+  '.wav': { kind: 'audio', mediaType: 'audio/wav' },
+  '.mp3': { kind: 'audio', mediaType: 'audio/mpeg' },
+  '.m4a': { kind: 'audio', mediaType: 'audio/mp4' },
+  '.aac': { kind: 'audio', mediaType: 'audio/aac' },
+  '.ogg': { kind: 'audio', mediaType: 'audio/ogg' },
+  '.flac': { kind: 'audio', mediaType: 'audio/flac' },
+  '.mp4': { kind: 'video', mediaType: 'video/mp4' },
+  '.mov': { kind: 'video', mediaType: 'video/quicktime' },
+  '.webm': { kind: 'video', mediaType: 'video/webm' },
+  '.mkv': { kind: 'video', mediaType: 'video/x-matroska' },
+};
+
+/** True when the token is an http(s) URL (a remote attachment / link). */
+function isRemoteUrl(token: string): boolean {
+  return /^https?:\/\//i.test(token.trim());
+}
+
+function mediaForExt(ext: string): { kind: Attachment['kind']; mediaType?: string } {
+  const hit = MEDIA_BY_EXT[ext.toLowerCase()];
+  return hit ? { kind: hit.kind, mediaType: hit.mediaType } : { kind: 'file' };
+}
+
+/** A short, filesystem-safe id grouping one post's copied attachments. */
+function newUpdateId(ts: string): string {
+  const rand = Math.random().toString(36).slice(2, 8);
+  const stamp = ts.replace(/[^0-9]/g, '').slice(0, 14) || 'post';
+  return `${stamp}-${rand}`;
+}
+
+/**
+ * Turn one `--attach` token into an {@link Attachment}. Remote URLs become
+ * `link` (or a media kind when the extension is unambiguous). Local files are
+ * classified by extension and, when `copyRoot` is set, copied under
+ * `<copyRoot>/<sessionId>/<updateId>/<basename>` so the link survives a worktree
+ * delete — the stored `href` then points at the durable copy. A missing local
+ * file is dropped (fail-open) rather than throwing.
+ */
+export function buildAttachment(
+  token: string,
+  ctx: { copyRoot?: string; sessionId: string; updateId: string },
+): Attachment | undefined {
+  const value = token.trim();
+  if (!value) return undefined;
+
+  if (isRemoteUrl(value)) {
+    const ext = path.extname(new URL(value).pathname);
+    const media = mediaForExt(ext);
+    const att: Attachment = { kind: media.kind === 'file' ? 'link' : media.kind, href: value };
+    const name = path.basename(new URL(value).pathname);
+    if (name) att.name = name;
+    if (media.mediaType) att.mediaType = media.mediaType;
+    return att;
+  }
+
+  const abs = path.resolve(value);
+  let stat: fs.Stats | undefined;
+  try {
+    stat = fs.statSync(abs);
+  } catch {
+    return undefined; // dropped: local file does not exist
+  }
+  if (!stat.isFile()) return undefined;
+
+  const media = mediaForExt(path.extname(abs));
+  const name = path.basename(abs);
+  let href = abs;
+
+  if (ctx.copyRoot) {
+    try {
+      const destDir = path.join(ctx.copyRoot, ctx.sessionId, ctx.updateId);
+      fs.mkdirSync(destDir, { recursive: true });
+      const dest = path.join(destDir, name);
+      fs.copyFileSync(abs, dest);
+      href = dest;
+    } catch {
+      href = abs; // copy failed: fall back to the original path
+    }
+  }
+
+  const att: Attachment = { kind: media.kind, href, name, bytes: stat.size };
+  if (media.mediaType) att.mediaType = media.mediaType;
+  return att;
+}
+
+/** Classify + store every `--attach` token; empty/failed tokens are dropped. */
+export function buildAttachments(
+  tokens: string[] | undefined,
+  ctx: { copyRoot?: string; sessionId: string; updateId: string },
+): Attachment[] {
+  if (!tokens?.length) return [];
+  const out: Attachment[] = [];
+  for (const token of tokens) {
+    const att = buildAttachment(token, ctx);
+    if (att) out.push(att);
+  }
+  return out;
+}
+
 export function normalizeStatusText(text: string): string {
   const collapsed = text.replace(/\s+/g, ' ').trim();
   if (!collapsed) return '';
@@ -229,8 +346,16 @@ export function postFeedStatus(input: FeedPostInput): FeedPostResult {
     );
   }
 
+  const ts = input.ts ?? new Date().toISOString();
+  const project = projectFromCwd(identity.cwd);
+  const attachments = buildAttachments(input.attach, {
+    copyRoot: input.attachmentsRoot ?? path.join(getHistoryDir(), 'attachments'),
+    sessionId: identity.sessionId,
+    updateId: newUpdateId(ts),
+  });
+
   const event: Omit<ActivityEvent, 'v' | 'tier'> = {
-    ts: input.ts ?? new Date().toISOString(),
+    ts,
     event: 'status.posted',
     sessionId: identity.sessionId,
     mailboxId: identity.mailboxId,
@@ -240,10 +365,12 @@ export function postFeedStatus(input: FeedPostInput): FeedPostResult {
     agent: identity.agent,
     tool: 'feed.post',
     detail,
+    ...(project ? { project } : {}),
     ...(identity.pid !== undefined ? { pid: identity.pid } : {}),
     ...(identity.launchId ? { launchId: identity.launchId } : {}),
     ...(identity.terminalId ? { terminalId: identity.terminalId } : {}),
     ...(identity.tmuxPane ? { tmuxPane: identity.tmuxPane } : {}),
+    ...(attachments.length ? { attachments } : {}),
   };
 
   appendActivityEvent(event, input.activityRoot);

@@ -523,6 +523,17 @@ cost-of-delay rank, not chronology: idle minutes × downstream blast radius ×
 hourly burn × ask irreducibility. Suppressed stalls and FYIs get zero
 irreducibility, so a fresh cheap ask does not outrank an old critical-path block.
 
+`--filter <view>` selects what the surface shows:
+
+```bash
+agents feed                     # needs (default): open blocks — decisions agents wait on
+agents feed --filter updates    # only deliberate progress posts (see Status posts below)
+agents feed --filter all        # blocks first, then the updates view appended
+```
+
+`--filter updates` reads the local activity timeline only (no block pipeline, no
+remote fan-out); its `--json` emits the raw `status.posted` events.
+
 ### What publishes a block
 
 Blocks are written by the `feed-publish` hook (`~/.agents/hooks/10-feed-publish.py`,
@@ -565,6 +576,7 @@ registry (`lib/session/pid-registry.ts`).
 ```bash
 # Inside an agents-cli run (AGENT_SESSION_ID / AGENTS_MAILBOX_DIR already set):
 agents feed post "CHANGELOG pushed; watching CI and mac-mini E2E"
+agents feed post "cover render ready" --attach ./out/cover.png   # attach an artifact
 agents feed post "ready for review" --json
 
 # Escape hatch when not in a managed run:
@@ -576,6 +588,20 @@ Each post appends a `status.posted` **milestone** to
 `agents activity` and the feed’s recent-activity lane already read. It does
 **not** create a feed block. Domain facts (tickets, PRs) are not CLI flags;
 join them from the session index / live session enrichment at read time.
+
+- **`--attach <path-or-url…>` (repeatable).** Attach an artifact to the post. A
+  **local file** is copied under
+  `~/.agents/.history/attachments/<sessionId>/<updateId>/` so the reference survives
+  a worktree delete; a **URL** is kept as-is. Each is classified to an
+  image/audio/video/file/link kind by extension for its render glyph.
+- **Project chip.** The post is stamped with its project (basename of cwd,
+  worktree-aware) on the event itself, so the chip shows even without a live-session
+  join.
+- **Rich render.** A `status.posted` event renders multi-line — `agent · session ·
+  host · project` chips, the message, an attachment row with per-kind glyphs, and a
+  `↳ ag focus/sessions` hint — in the `feed post` echo, the feed activity lane,
+  `agents feed --filter updates`, and `agents activity`. Other milestones keep the
+  compact one-line form.
 
 Identity resolution order: `--session` → `AGENT_SESSION_ID` /
 `AGENTS_SESSION_ID` / mailbox basename → `AGENT_LAUNCH_ID` match in the pid

@@ -4,17 +4,27 @@
 #
 # Defaults to dry-run. Pass --confirm to actually publish.
 #
+# Runnable from any box on the fleet. Publishing needs the marketplace PATs,
+# which live in the `vs-marketplace` secrets bundle on ONE machine; credentials
+# are never copied between hosts, so the publish has to run where the bundle
+# is. If this box doesn't hold it, the script finds a box that does and
+# re-invokes itself there over ssh, against a clean clone of this exact commit.
+#
 # Usage:
-#   scripts/release.sh <x.y.z> [--pre <tag>] [--confirm] [--skip-build] [--skip-tests]
+#   scripts/release.sh <x.y.z> [--pre <tag>] [--confirm] [--skip-build]
+#                              [--skip-tests] [--host <name>] [--here]
 #
 # Examples:
 #   scripts/release.sh 0.9.206                            # dry-run
 #   scripts/release.sh 0.9.206 --confirm                  # real release
 #   scripts/release.sh 0.9.206 --pre rc.1 --confirm       # 0.9.206-rc.1
 #   scripts/release.sh 0.9.206 --confirm --skip-tests     # hotfix
+#   scripts/release.sh 0.9.206 --confirm --host zion      # pin the publish box
+#   scripts/release.sh 0.9.206 --confirm --here           # never route off-box
 #
-# Pre-flight order: marketplace version-collision -> token presence -> tests
-# -> build -> publish. Cheap failures fail fast.
+# Pre-flight order: changelog -> publish-host routing -> marketplace
+# version-collision -> token presence -> tests -> build -> publish. Cheap
+# failures fail fast.
 
 set -euo pipefail
 
@@ -28,9 +38,14 @@ PRE_TAG=""
 CONFIRM=0
 SKIP_BUILD=0
 SKIP_TESTS=0
+PUBLISH_HOST=""
+STAY_HERE=0
+# Internal. Set on the re-invocation that runs ON the publish host, so it does
+# the work instead of routing again.
+PUBLISH_PHASE=0
 
 usage() {
-    sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'
     exit "${1:-0}"
 }
 
@@ -44,6 +59,13 @@ while [ $# -gt 0 ]; do
         --confirm)     CONFIRM=1; shift ;;
         --skip-build)  SKIP_BUILD=1; shift ;;
         --skip-tests)  SKIP_TESTS=1; shift ;;
+        --host)
+            PUBLISH_HOST="${2:-}"
+            if [ -z "$PUBLISH_HOST" ]; then echo "Error: --host requires a device name" >&2; exit 1; fi
+            shift 2
+            ;;
+        --here)          STAY_HERE=1; shift ;;
+        --publish-phase) PUBLISH_PHASE=1; shift ;;
         -h|--help)     usage 0 ;;
         --*)           echo "Error: unknown flag $1" >&2; usage 1 ;;
         *)
@@ -107,11 +129,166 @@ echo "  skip-build: $SKIP_BUILD"
 echo "  skip-tests: $SKIP_TESTS"
 echo
 
+# --- Publish host routing ------------------------------------------------
+#
+# The marketplace PATs live in the `vs-marketplace` secrets bundle, which sits
+# on exactly one machine. Tokens are never copied between hosts, so the publish
+# must RUN where the bundle is. Decide that here, before any expensive step.
+#
+# `agents secrets list` is the probe: the bundle either resolves on a box or it
+# does not, and asking the live store beats maintaining a hardcoded list of
+# which machine is "the release box".
+
+readonly PUBLISH_BUNDLE="vs-marketplace"
+# Tried in order when this box cannot publish and --host was not given. These
+# are the long-lived personal machines; a worker box is never a publish target.
+PUBLISH_HOST_CANDIDATES=(zion mac-mini)
+
+# Short hostname, matching the ssh/Tailscale name on both platforms.
+if [ "$(uname -s)" = "Darwin" ]; then
+    THIS_HOST="$(scutil --get LocalHostName 2>/dev/null || hostname -s)"
+else
+    THIS_HOST="$(hostname -s 2>/dev/null || hostname)"
+fi
+
+# Echo "yes" when the given host holds the publish bundle. Empty arg = this box.
+host_has_publish_bundle() {
+    local host="${1:-}" out
+    if [ -z "$host" ]; then
+        out="$(agents secrets list 2>/dev/null || true)"
+    else
+        out="$(agents ssh "$host" 'agents secrets list 2>/dev/null' 2>/dev/null || true)"
+    fi
+    printf '%s\n' "$out" | grep -qE "^${PUBLISH_BUNDLE}[[:space:]]" && echo yes
+}
+
+# Re-invoke this script on $1, against a clean clone of the commit we are on.
+# A clone rather than the host's own checkout, so the publish box's working
+# trees are never touched and the vsix can never pick up someone's local edits.
+route_to_publish_host() {
+    local host="$1" sha origin flags payload
+    sha="$(git rev-parse HEAD)"
+    origin="$(git remote get-url origin)"
+
+    # The publish box fetches the commit from origin, so it has to be pushed.
+    if ! git ls-remote --exit-code origin >/dev/null 2>&1; then
+        echo "Error: cannot reach origin to hand the release commit to $host." >&2
+        exit 1
+    fi
+
+    flags=""
+    [ $CONFIRM -eq 1 ] && flags="--confirm"
+    [ -n "$PRE_TAG" ] && flags="$flags --pre $PRE_TAG"
+    [ $SKIP_TESTS -eq 1 ] && flags="$flags --skip-tests"
+    [ $SKIP_BUILD -eq 1 ] && flags="$flags --skip-build"
+
+    echo "Routing the publish to $host (holds the '$PUBLISH_BUNDLE' bundle)."
+    echo "  commit:  $sha"
+    echo "  flags:  $flags --publish-phase"
+    echo
+
+    # base64 so the remote payload survives shell quoting intact.
+    payload="$(cat <<REMOTE_EOF | base64 | tr -d '\n'
+set -euo pipefail
+VERSION="$VERSION"
+SHA="$sha"
+ORIGIN="$origin"
+export PATH="\$HOME/.bun/bin:\$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH"
+
+command -v bun >/dev/null 2>&1 || { echo "Error: bun not found on \$(hostname)." >&2; exit 1; }
+command -v git >/dev/null 2>&1 || { echo "Error: git not found on \$(hostname)." >&2; exit 1; }
+
+# The publishing CLIs are tools, not credentials - install them rather than failing.
+command -v vsce >/dev/null 2>&1 || { echo "Installing @vscode/vsce..."; bun add -g @vscode/vsce >/dev/null; }
+command -v ovsx >/dev/null 2>&1 || { echo "Installing ovsx..."; bun add -g ovsx >/dev/null; }
+
+CACHE="\$HOME/.cache/factory-release/agents-cli"
+mkdir -p "\$(dirname "\$CACHE")"
+[ -d "\$CACHE/.git" ] || git clone --quiet "\$ORIGIN" "\$CACHE"
+git -C "\$CACHE" fetch --quiet origin
+if [ -z "\$(git -C "\$CACHE" branch -r --contains "\$SHA" 2>/dev/null)" ]; then
+    echo "Error: commit \$SHA is not reachable from any origin branch - push the release commit first." >&2
+    exit 1
+fi
+git -C "\$CACHE" checkout --quiet --detach "\$SHA"
+
+cd "\$CACHE/apps/factory"
+bun install --silent
+bash scripts/release.sh "\$VERSION" $flags --publish-phase
+REMOTE_EOF
+)"
+
+    agents ssh "$host" "echo $payload | base64 -d | bash"
+}
+
+if [ $PUBLISH_PHASE -eq 1 ]; then
+    echo "Publish phase on $THIS_HOST."
+    if [ -z "$(host_has_publish_bundle '')" ]; then
+        echo "Error: --publish-phase on $THIS_HOST, which has no '$PUBLISH_BUNDLE' bundle." >&2
+        exit 1
+    fi
+    echo
+elif [ -n "$(host_has_publish_bundle '')" ]; then
+    echo "Publish host: $THIS_HOST (holds the '$PUBLISH_BUNDLE' bundle)."
+    echo
+elif [ $STAY_HERE -eq 1 ]; then
+    echo "Error: --here was passed, but $THIS_HOST has no '$PUBLISH_BUNDLE' bundle." >&2
+    echo "       Create it here (agents secrets create $PUBLISH_BUNDLE) or drop --here to route." >&2
+    exit 1
+else
+    if ! command -v agents >/dev/null 2>&1; then
+        echo "Error: $THIS_HOST has no '$PUBLISH_BUNDLE' bundle and agents-cli is not installed to route with." >&2
+        exit 1
+    fi
+    TARGET_HOST=""
+    if [ -n "$PUBLISH_HOST" ]; then
+        if [ -z "$(host_has_publish_bundle "$PUBLISH_HOST")" ]; then
+            echo "Error: --host $PUBLISH_HOST does not hold the '$PUBLISH_BUNDLE' bundle." >&2
+            exit 1
+        fi
+        TARGET_HOST="$PUBLISH_HOST"
+    else
+        echo "$THIS_HOST has no '$PUBLISH_BUNDLE' bundle - looking for a publish host..."
+        for CANDIDATE in "${PUBLISH_HOST_CANDIDATES[@]}"; do
+            [ "$CANDIDATE" = "$THIS_HOST" ] && continue
+            echo "  probing $CANDIDATE..."
+            if [ -n "$(host_has_publish_bundle "$CANDIDATE")" ]; then
+                TARGET_HOST="$CANDIDATE"
+                break
+            fi
+        done
+    fi
+    if [ -z "$TARGET_HOST" ]; then
+        echo "Error: no reachable host holds the '$PUBLISH_BUNDLE' bundle." >&2
+        echo "       Tried: ${PUBLISH_HOST_CANDIDATES[*]}" >&2
+        echo "       Create it on the box that should publish:" >&2
+        echo "         agents secrets create $PUBLISH_BUNDLE && agents secrets add $PUBLISH_BUNDLE VSCE_PAT" >&2
+        exit 1
+    fi
+    route_to_publish_host "$TARGET_HOST"
+    exit $?
+fi
+
 # --- Pre-flight: marketplace version collision ---------------------------
 
 # Source of truth = marketplace, not git. If the version is already published
 # we abort — re-running with the same version would 409 on the publish step
 # anyway, but failing here is faster.
+if command -v bun >/dev/null 2>&1; then
+    # Both publishing CLIs are tools, not credentials. Install whichever is
+    # missing so a local publish reaches both registries — the routed path
+    # already does this on the publish host, and skipping ovsx here would
+    # silently drop the Open VSX half of the release.
+    if ! command -v vsce >/dev/null 2>&1; then
+        echo "vsce not installed - installing @vscode/vsce..."
+        bun add -g @vscode/vsce >/dev/null 2>&1 || true
+    fi
+    if ! command -v ovsx >/dev/null 2>&1; then
+        echo "ovsx not installed - installing ovsx..."
+        bun add -g ovsx >/dev/null 2>&1 || true
+    fi
+    export PATH="$HOME/.bun/bin:$PATH"
+fi
 if ! command -v vsce >/dev/null 2>&1; then
     echo "Error: vsce not installed. Run: bun add -g @vscode/vsce" >&2
     exit 1

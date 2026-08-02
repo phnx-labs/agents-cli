@@ -1,3 +1,5 @@
+import { STRATEGY_LAUNCH_AGENTS, type RunStrategy } from './agents';
+
 export interface ForkSessionSource {
   sessionId?: string;
   agentKey?: string;
@@ -5,10 +7,14 @@ export interface ForkSessionSource {
 }
 
 export type ForkSessionRequest =
-  | { ok: true; sessionId: string; agentKey: string; host?: string; prompt: string }
+  | { ok: true; sessionId: string; agentKey: string; host?: string; local: boolean; strategy?: RunStrategy; prompt: string }
   | { ok: false; reason: 'no_session' | 'no_agent' };
 
-/** Build the launch inputs for a divergent terminal without mutating the source. */
+export function strategyForForkAgent(agentKey: string): RunStrategy | undefined {
+  return (STRATEGY_LAUNCH_AGENTS as readonly string[]).includes(agentKey) ? 'balanced' : undefined;
+}
+
+/** Build a sibling launch request without mutating or closing the source terminal. */
 export function buildForkSessionRequest(source: ForkSessionSource): ForkSessionRequest {
   const sessionId = source.sessionId?.trim();
   if (!sessionId) return { ok: false, reason: 'no_session' };
@@ -22,6 +28,8 @@ export function buildForkSessionRequest(source: ForkSessionSource): ForkSessionR
     sessionId,
     agentKey,
     host,
+    local: !host,
+    strategy: strategyForForkAgent(agentKey),
     prompt: `/continue ${sessionId}`,
   };
 }
