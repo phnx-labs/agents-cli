@@ -640,7 +640,12 @@ describe('anchorDaemonCwd', () => {
     }
   });
 
-  it('recovers a deleted working directory by anchoring to home', () => {
+  // Windows refuses to remove a directory that is a live process's cwd, so the
+  // rmSync below throws EBUSY and the test fails on its own setup. That is not a
+  // gap in coverage: the state being reproduced — a process standing in a
+  // directory that no longer exists — cannot arise on Windows for the same
+  // reason. The recovery this asserts is POSIX-only by construction.
+  it.skipIf(process.platform === 'win32')('recovers a deleted working directory by anchoring to home', () => {
     // Reproduce the exact routine-outage failure: the daemon is running with its
     // cwd inside a directory (a git worktree, in the real incident) that then gets
     // removed out from under it. A process cannot chdir out of a deleted directory
