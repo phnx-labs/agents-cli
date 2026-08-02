@@ -1,8 +1,9 @@
 /**
  * Commands detector — mirrors the command dispatch in versions.ts. Inspects the version home,
  * returns command names. Honors the commands-as-skills marker for skills-only
- * agents (Kimi, Codex >= 0.117.0, …), requires both copies for dual-write
- * targets, and scans `{agentDir}/<commandsSubdir>/` for native-only targets.
+ * agents (Kimi, Codex >= 0.117.0, …), treats the native file as authoritative
+ * for dual-write targets (the skill copy is deliberately absent on a name
+ * collision), and scans `{agentDir}/<commandsSubdir>/` for native-only targets.
  */
 import * as fs from 'fs';
 import * as path from 'path';

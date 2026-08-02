@@ -2785,17 +2785,17 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   const commandsInstallAsSkills = commandsAsSkills || commandsAlsoAsSkills;
   let writtenCommands: string[] = [];
 
-  // Agents that replace native command files with skills (codex >= 0.117.0,
-  // kimi) must have their legacy command dir removed, or files written by an
-  // older version linger forever: the orphan sweep below is gated off for
-  // them, and `agents prune` only sees their skills. Gated on
-  // `commandsAsSkills`, never `commandsAlsoAsSkills` -- a dual-write agent's
-  // native dir is a live product surface (Cursor IDE) and must not be wiped.
-  if (commandsAsSkills && agentConfig.commandsSubdir) {
-    removePath(path.join(agentDir, agentConfig.commandsSubdir));
-  }
-
   if (commandsToSync.length > 0 && commandsWriter) {
+    // Agents that replace native command files with skills (codex >= 0.117.0,
+    // kimi) must have their legacy command dir removed, or files written by an
+    // older version linger forever: the orphan sweep below is gated off for
+    // them, and `agents prune` only sees their skills. Gated on
+    // `commandsAsSkills`, never `commandsAlsoAsSkills` -- a dual-write agent's
+    // native dir is a live product surface (Cursor IDE) and must not be wiped.
+    if (commandsAsSkills && agentConfig.commandsSubdir) {
+      removePath(path.join(agentDir, agentConfig.commandsSubdir));
+    }
+
     const r = commandsWriter.write({ version, versionHome, selection: commandsToSync, cwd });
     writtenCommands = r.synced;
     result.commands = r.synced.length > 0;
