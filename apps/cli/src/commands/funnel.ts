@@ -3,7 +3,7 @@
  */
 import type { Command } from 'commander';
 import chalk from 'chalk';
-import { buildFunnelStatusCommand, buildFunnelUpCommand, parseFunnelPort } from '../lib/funnel.js';
+import { buildFunnelDownCommand, buildFunnelStatusCommand, buildFunnelUpCommand, parseFunnelPort } from '../lib/funnel.js';
 import { resolveHost } from '../lib/hosts/registry.js';
 import { resolveRemoteOsSync } from '../lib/hosts/remote-os.js';
 import { sshTargetFor } from '../lib/hosts/types.js';
@@ -59,6 +59,21 @@ export function registerFunnelCommand(program: Command): void {
         const command = buildFunnelUpCommand(publicPort, localPort);
         await runOnHost(host, command);
         console.log(chalk.green(`Funnel enabled on ${host}: public :${publicPort} → localhost:${localPort}`));
+      } catch (err) {
+        console.error(chalk.red((err as Error).message));
+        process.exit(1);
+      }
+    });
+
+  funnel
+    .command('down <host>')
+    .description('Disable Tailscale Funnel exposure for a public HTTPS port.')
+    .option('--port <n>', 'Public Funnel port: 443, 8443, or 10000', '443')
+    .action(async (host: string, opts: { port?: string }) => {
+      try {
+        const publicPort = parseFunnelPort(opts.port ?? '443');
+        await runOnHost(host, buildFunnelDownCommand(publicPort));
+        console.log(chalk.green(`Funnel disabled on ${host}: public :${publicPort}`));
       } catch (err) {
         console.error(chalk.red((err as Error).message));
         process.exit(1);

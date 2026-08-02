@@ -216,7 +216,9 @@ agents webhook serve --secrets-bundle webhooks --port 8787
 The bundle may contain `GITHUB_WEBHOOK_SECRET`, `LINEAR_WEBHOOK_SECRET`, or both.
 The receiver accepts `POST /hooks/github` and `POST /hooks/linear`, rejects
 unsigned deliveries, dedupes repeated delivery IDs, rate-limits each source, and
-binds `127.0.0.1` by default.
+binds `127.0.0.1` by default. Keep webhook signing keys in `agents secrets`; do
+not put keys in webhook URLs, path segments, query strings, routine YAML, or
+Funnel commands.
 
 Expose the receiver publicly from a Linux/macOS Tailscale node with Funnel:
 
@@ -227,6 +229,44 @@ agents funnel status yosemite-s0
 
 Funnel public ports are limited to `443`, `8443`, and `10000`; `agents funnel up`
 validates that before running the remote Tailscale CLI.
+
+Operational runbook:
+
+1. Create or update the secret bundle on the ingress host:
+
+   ```bash
+   agents secrets create webhooks
+   agents secrets add webhooks GITHUB_WEBHOOK_SECRET
+   agents secrets add webhooks LINEAR_WEBHOOK_SECRET
+   ```
+
+   If a key already exists, replace the matching `add` command with
+   `agents secrets rotate webhooks <KEY>`.
+
+2. Start the receiver on the ingress host and leave it bound to localhost:
+
+   ```bash
+   agents webhook serve --secrets-bundle webhooks --host 127.0.0.1 --port 8787
+   ```
+
+3. Enable Funnel only after the receiver is listening:
+
+   ```bash
+   agents funnel up yosemite-s0 --local-port 8787 --port 443
+   agents funnel status yosemite-s0
+   ```
+
+4. Rotate a signing key source by source. Set the new source secret in the
+   `webhooks` bundle, update the provider webhook configuration to sign with the
+   new value, restart `agents webhook serve`, then send one signed test delivery
+   before deleting the old provider secret.
+
+5. Disable public ingress before stopping or moving the receiver:
+
+   ```bash
+   agents funnel down yosemite-s0 --port 443
+   agents funnel status yosemite-s0
+   ```
 
 ### Device Allowlist
 

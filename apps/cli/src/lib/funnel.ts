@@ -13,6 +13,15 @@ export function buildFunnelStatusCommand(): string {
   return 'tailscale funnel status';
 }
 
+export function buildFunnelDownCommand(publicPort: FunnelPort): string {
+  return [
+    'tailscale',
+    'funnel',
+    `--https=${publicPort}`,
+    'off',
+  ].map(shellQuote).join(' ');
+}
+
 export function buildFunnelUpCommand(publicPort: FunnelPort, localPort: number): string {
   if (!Number.isInteger(localPort) || localPort <= 0 || localPort > 65535) {
     throw new Error('Local port must be between 1 and 65535');
