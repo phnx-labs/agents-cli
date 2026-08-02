@@ -720,6 +720,7 @@ function writeIfChanged(filePath: string, content: string): void {
  * all. Falls back to plain stringify only when the file doesn't exist yet.
  */
 function serializeCentral(central: Record<string, unknown>): string {
+  const isEmpty = Object.keys(central).length === 0;
   let existing: string | null = null;
   try {
     existing = fs.readFileSync(META_FILE, 'utf-8');
@@ -727,7 +728,11 @@ function serializeCentral(central: Record<string, unknown>): string {
     /* first write — no file yet */
   }
   if (existing == null) {
-    return META_HEADER + yaml.stringify(central);
+    // Empty central → header only. `yaml.stringify({})` emits `{}` (a FLOW empty
+    // map); once that lands on disk, a later parseDocument sees a flow root and
+    // doc.set() below would inherit flow, flow-ifying the whole file. Writing just
+    // the header avoids seeding that poison.
+    return isEmpty ? META_HEADER : META_HEADER + yaml.stringify(central);
   }
   const doc = yaml.parseDocument(existing);
   const current: Record<string, unknown> = (doc.toJSON() as Record<string, unknown>) ?? {};
@@ -744,9 +749,15 @@ function serializeCentral(central: Record<string, unknown>): string {
       changed = true;
     }
   }
-  // No central field changed → keep the file byte-identical (comments intact),
-  // so writeIfChanged skips it and the churn loop never starts.
-  return changed ? String(doc) : existing;
+  // No central field changed → keep the file byte-identical (comments intact), so
+  // writeIfChanged skips it and the churn loop never starts.
+  if (!changed) return existing;
+  // Everything cleared → header only (never leave a flow `{}` behind).
+  // Otherwise force BLOCK style: an existing flow root (e.g. a legacy `{}`) would
+  // otherwise make the edited nodes render flow (`disabledCommands: [ teams ]`
+  // instead of a `- teams` block list). collectionStyle pins the whole doc block
+  // while parseDocument still preserves comments + key ordering.
+  return isEmpty ? META_HEADER : doc.toString({ collectionStyle: 'block' });
 }
 
 function writeMetaUnlocked(meta: Meta): void {
