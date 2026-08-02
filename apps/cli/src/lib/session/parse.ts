@@ -1671,14 +1671,30 @@ export function parseCursor(filePath: string): SessionEvent[] {
   return parseAnthropicMessageJsonl(filePath, 'cursor');
 }
 
+/**
+ * Cursor stamps the first user turn as
+ * `<timestamp>Sunday, Aug 2, 2026, 3:51 AM (UTC-7)</timestamp>` followed by the
+ * real question in `<user_query>`. `Date.parse` silently DISCARDS the `(UTC-7)`
+ * parenthetical and reads the rest as local time, so the offset has to be applied
+ * by hand — otherwise the recovered instant is wrong on every machine whose zone
+ * differs from the one that wrote the transcript.
+ */
 function parseCursorUserText(text: string): { text: string; timestamp?: string } {
   const query = text.match(/<user_query>\s*([\s\S]*?)\s*<\/user_query>/);
-  const timestampText = text.match(/<timestamp>\s*([\s\S]*?)\s*<\/timestamp>/)?.[1]?.trim();
-  const parsedTimestamp = timestampText ? Date.parse(timestampText) : Number.NaN;
-  return {
-    text: (query?.[1] ?? text).trim(),
-    timestamp: Number.isNaN(parsedTimestamp) ? undefined : new Date(parsedTimestamp).toISOString(),
-  };
+  const stamp = text.match(/<timestamp>\s*([\s\S]*?)\s*<\/timestamp>/)?.[1]?.trim();
+  return { text: (query?.[1] ?? text).trim(), timestamp: parseCursorTimestamp(stamp) };
+}
+
+function parseCursorTimestamp(stamp: string | undefined): string | undefined {
+  if (!stamp) return undefined;
+  const offset = stamp.match(/\(UTC([+-])(\d{1,2})(?::(\d{2}))?\)/);
+  // Without a declared offset there is no instant to recover -- guessing the
+  // local zone would be worse than falling back to the file mtime.
+  if (!offset) return undefined;
+  const wall = Date.parse(`${stamp.replace(/\s*\(UTC[^)]*\)\s*/, " ").trim()} UTC`);
+  if (Number.isNaN(wall)) return undefined;
+  const offsetMs = (Number(offset[2]) * 60 + Number(offset[3] ?? 0)) * 60_000;
+  return new Date(offset[1] === "-" ? wall + offsetMs : wall - offsetMs).toISOString();
 }
 
 function parseAnthropicMessageJsonl(filePath: string, agent: 'cursor' | 'droid'): SessionEvent[] {
