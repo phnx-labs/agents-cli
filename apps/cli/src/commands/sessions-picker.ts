@@ -10,7 +10,7 @@ import path from 'node:path';
 import chalk from 'chalk';
 import { truncate, humanDuration } from '../lib/format.js';
 import type { SessionEvent, SessionMeta, TodoProgress } from '../lib/session/types.js';
-import { parseSession, sanitizeForTerminal } from '../lib/session/parse.js';
+import { parseSession, sanitizeForTerminal, SNAPSHOT_TODO_TOOLS } from '../lib/session/parse.js';
 import { cleanSessionPrompt, extractSessionTopic } from '../lib/session/prompt.js';
 import { linkPath, linkUrl, relativeToCwd, shortenModel } from '../lib/session/render.js';
 import { linearIssueUrl } from '../lib/session/linear.js';
@@ -341,9 +341,10 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
       if (!planFile && p && /\/plans\/[^/]+\.md$/.test(p)) {
         planFile = p;
       }
-      // Claude TodoWrite (`todos`) and Codex update_plan (`plan`) — same source as
-      // extractTodoProgress in the state engine. Prefer the most recent write.
-      if (tool === 'TodoWrite' || tool === 'update_plan') {
+      // Every harness's checklist-snapshot tool (Claude TodoWrite, Kimi TodoList,
+      // Codex update_plan, …) — the same registry the state engine folds through
+      // extractTodoProgress. Prefer the most recent write.
+      if (SNAPSHOT_TODO_TOOLS.has(tool)) {
         const progress = extractTodoProgress(event.args);
         if (progress) latestTodos = progress;
       }

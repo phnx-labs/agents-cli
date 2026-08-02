@@ -17,7 +17,7 @@
 
 import * as path from 'path';
 import type { SessionAttachment, SessionEvent, TodoItem, TodoProgress } from './types.js';
-import { summarizeToolUse } from './parse.js';
+import { isCompletedTodoStatus, SNAPSHOT_TODO_TOOLS, summarizeToolUse } from './parse.js';
 
 // TodoItem / TodoProgress moved to ./types.ts so SessionMeta can carry `todos`
 // without a state↔types import cycle; re-exported here for existing importers.
@@ -162,16 +162,16 @@ const PROSE_QUESTION_FRESH_MS = 30 * 60_000;
 const PLAN_TOOL = 'ExitPlanMode';
 const ASK_TOOL = 'AskUserQuestion';
 
-const SNAPSHOT_TODO_TOOLS = new Set(['TodoWrite', 'todo_write', 'update_plan']);
 const TASK_CREATE_TOOL = 'TaskCreate';
 const TASK_UPDATE_TOOL = 'TaskUpdate';
 
 /**
- * Derive live plan progress from a checklist tool call's args. Accepts both
- * Claude's `TodoWrite` (`todos: [{content,status,activeForm}]`) and Codex's
- * `update_plan` (`plan: [{step,status}]`) shapes, so the CLI is the single source
- * of checklist state for every agent. Returns undefined when there is no usable
- * list, so a session with no plan carries no `todos` field.
+ * Derive live plan progress from a checklist tool call's args. Accepts Claude's
+ * `TodoWrite` (`todos: [{content,status,activeForm}]`), Kimi's `TodoList`
+ * (`todos: [{title,status}]`, where finished is `done` rather than `completed`)
+ * and Codex's `update_plan` (`plan: [{step,status}]`) shapes, so the CLI is the
+ * single source of checklist state for every agent. Returns undefined when there
+ * is no usable list, so a session with no plan carries no `todos` field.
  */
 export function extractTodoProgress(args?: Record<string, any>): TodoProgress | undefined {
   const input = args?.input && typeof args.input === 'object' ? args.input : args;
@@ -191,10 +191,15 @@ export function extractTodoProgress(args?: Record<string, any>): TodoProgress | 
           ? t.text
           : typeof t?.step === 'string' && t.step
             ? t.step
-            : activeForm ?? '';
+            : typeof t?.title === 'string' && t.title
+              ? t.title
+              : activeForm ?? '';
     if (!content) continue;
-    const status: TodoItem['status'] =
-      t?.status === 'completed' || t?.status === 'in_progress' ? t.status : 'pending';
+    const status: TodoItem['status'] = isCompletedTodoStatus(t?.status)
+      ? 'completed'
+      : t?.status === 'in_progress'
+        ? 'in_progress'
+        : 'pending';
     const description = typeof t?.description === 'string' && t.description ? t.description : undefined;
     items.push({ content, status, ...(description ? { description } : {}), ...(activeForm ? { activeForm } : {}) });
   }

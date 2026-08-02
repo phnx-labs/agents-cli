@@ -204,6 +204,21 @@ export function detectAgent(filePath: string): SessionAgentId | null {
 }
 
 /**
+ * Checklist-snapshot tool names across harnesses — each sends the WHOLE list on
+ * every write, so the last call is the current checklist. Claude `TodoWrite`,
+ * Kimi `TodoList`, Droid/OpenCode `todo_write`, Codex `update_plan`.
+ */
+export const SNAPSHOT_TODO_TOOLS = new Set(['TodoWrite', 'TodoList', 'todo_write', 'update_plan']);
+
+/**
+ * Whether a harness's checklist status means "finished". Claude/Codex write
+ * `completed`; Kimi writes `done`.
+ */
+export function isCompletedTodoStatus(status: unknown): boolean {
+  return status === 'completed' || status === 'done';
+}
+
+/**
  * Summarize a tool_use into a one-liner string.
  */
 export function summarizeToolUse(tool: string, args?: Record<string, any>): string {
@@ -212,12 +227,13 @@ export function summarizeToolUse(tool: string, args?: Record<string, any>): stri
   switch (tool) {
     case 'Bash':
       return `Bash: ${truncate(String(args.command || '').replace(/\n/g, ' ').trim(), 120)}`;
+    // `path` is the Kimi spelling of Claude's `file_path` for the same tools.
     case 'Read':
-      return `Read ${shortenPath(args.file_path || '')}`;
+      return `Read ${shortenPath(args.file_path || args.path || '')}`;
     case 'Write':
-      return `Write ${shortenPath(args.file_path || '')}`;
+      return `Write ${shortenPath(args.file_path || args.path || '')}`;
     case 'Edit':
-      return `Edit ${shortenPath(args.file_path || '')}`;
+      return `Edit ${shortenPath(args.file_path || args.path || '')}`;
     case 'Glob':
       return `Glob ${args.pattern || ''}`;
     case 'Grep':
@@ -232,13 +248,16 @@ export function summarizeToolUse(tool: string, args?: Record<string, any>): stri
       const steps = Array.isArray(args.plan) ? args.plan.length : 0;
       return `Plan: ${steps} step${steps === 1 ? '' : 's'}`;
     }
-    // Claude's live checklist: show progress + the current step, not a bare "TodoWrite".
-    case 'TodoWrite': {
+    // Live checklist: show progress + the current step, not a bare "TodoWrite".
+    // Claude writes `TodoWrite`, Kimi writes `TodoList`; both carry the whole list
+    // under `todos`, with Kimi spelling the item text `title` and "done" `done`.
+    case 'TodoWrite':
+    case 'TodoList': {
       const todos = Array.isArray(args.todos) ? args.todos : [];
       if (todos.length === 0) return 'Plan: 0 steps';
-      const done = todos.filter((t: any) => t?.status === 'completed').length;
+      const done = todos.filter((t: any) => isCompletedTodoStatus(t?.status)).length;
       const active = todos.find((t: any) => t?.status === 'in_progress');
-      const step = active?.activeForm || active?.content;
+      const step = active?.activeForm || active?.content || active?.title;
       return step
         ? `Plan ${done}/${todos.length}: ${truncate(String(step), 80)}`
         : `Plan: ${done}/${todos.length} done`;
