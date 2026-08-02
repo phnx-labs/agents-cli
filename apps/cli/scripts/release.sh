@@ -710,10 +710,18 @@ if $PHNX_TARGET_PUBLISHED; then
   green "$PHNX_PKG@$TARGET is already on the registry."
   REMOTE_TAG_SHA="$(remote_tag_commit "v$TARGET")"
   if [[ -z "$REMOTE_TAG_SHA" ]]; then
-    # No tag yet: create it at the CI-tested release commit when we know it (a
-    # drift-fallback release tags the PR head, which may sit off the default
-    # branch), else at the merge commit / default branch.
-    TAG_TARGET="${CI_TESTED_HEAD:-${MERGED_RELEASE_SHA:-origin/$DEFAULT_BRANCH}}"
+    # Published but no tag yet: tag the exact commit that was shipped. When a
+    # merged release PR is known, apply the same drift rule as the primary flow --
+    # the CI-tested PR head over the drifted merge -- by re-fetching the PR head
+    # here (CI_TESTED_HEAD is only populated on the not-yet-published paths, so it
+    # is never set on this branch). Otherwise fall back to the default branch.
+    if [[ -n "$MERGED_RELEASE_PR" && -n "$MERGED_RELEASE_SHA" ]]; then
+      git fetch --quiet origin "pull/$MERGED_RELEASE_PR/head" \
+        || die "could not fetch the CI-tested head for merged release PR #$MERGED_RELEASE_PR"
+      TAG_TARGET="$(scripts/select-publish-commit.sh "$MERGED_RELEASE_SHA" "$(git rev-parse FETCH_HEAD)")"
+    else
+      TAG_TARGET="origin/$DEFAULT_BRANCH"
+    fi
     [[ "$(git show "$TAG_TARGET:apps/cli/package.json" | jq -r .version)" == "$TARGET" ]] \
       || die "refusing to create v$TARGET: $TAG_TARGET does not contain package version $TARGET"
     git tag -f "v$TARGET" "$(git rev-parse "$TAG_TARGET^{commit}")" >/dev/null
@@ -722,9 +730,13 @@ if $PHNX_TARGET_PUBLISHED; then
     # Already published + tagged: accept any tag that references version TARGET. A
     # drift-fallback release tags the CI-tested PR head rather than the merge
     # commit, so verify the tag's own tree carries TARGET instead of requiring it
-    # to equal the merge commit.
-    git fetch --quiet origin "refs/tags/v$TARGET:refs/tags/v$TARGET" 2>/dev/null || true
-    [[ "$(git show "v$TARGET:apps/cli/package.json" 2>/dev/null | jq -r .version 2>/dev/null || echo "")" == "$TARGET" ]] \
+    # to equal the merge commit. Fetch --force so a stale local v$TARGET (from a
+    # prior tagging attempt) is overwritten rather than leaving the fetch rejected
+    # ("would clobber existing tag") and reading the stale ref; never swallow the
+    # fetch's exit code.
+    git fetch --quiet --force origin "refs/tags/v$TARGET:refs/tags/v$TARGET" \
+      || die "could not fetch remote tag v$TARGET to verify its version"
+    [[ "$(git show "v$TARGET:apps/cli/package.json" | jq -r .version)" == "$TARGET" ]] \
       || die "remote tag v$TARGET points at $REMOTE_TAG_SHA, which is not version $TARGET"
     gray "Tag v$TARGET already present for the published release."
   fi
