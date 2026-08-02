@@ -541,3 +541,41 @@ describe('extractTodoProgress (RUSH-1380)', () => {
     expect(s.todos).toBeUndefined();
   });
 });
+
+describe('detectSpawnedTeam — rejects prose and flag values', () => {
+  // Every string below was pulled from a real transcript on a live index, where
+  // it had been indexed as a team name. They only became visible once the row
+  // started rendering a `team:<name>` badge, at which point a wrong name is
+  // worse than none.
+  it('ignores a backticked mention inside prose or tool output', () => {
+    const line =
+      '`agents run --device auto` and `agents teams add --device auto`\n"is_error":false\n=== installed binary carries';
+    expect(detectSpawnedTeam(line)).toBeUndefined();
+  });
+
+  it('does not run the flag-skip across a newline into another line\'s word', () => {
+    // `\s` in the flag-skip let a match starting on one line capture a bareword
+    // from the next — a heredoc of docs indexed as `team:installed`.
+    expect(detectSpawnedTeam('agents teams add --device auto\nsomething installed here')).toBeUndefined();
+  });
+
+  it('ignores a single-character doc placeholder', () => {
+    expect(detectSpawnedTeam('`agents teams create t --host <name>`')).toBeUndefined();
+  });
+
+  it('ignores an English article after the sub-verb', () => {
+    expect(detectSpawnedTeam('you can use agents teams add a teammate later')).toBeUndefined();
+  });
+
+  it('lets a value-taking flag swallow its value instead of naming the team', () => {
+    expect(detectSpawnedTeam('agents teams add --device yosemite-s0 remote-team codex "x"')).toBe('remote-team');
+    expect(detectSpawnedTeam('agents teams add my-team claude "go" --worktree auth --mode edit')).toBe('my-team');
+  });
+
+  it('still detects a real invocation after a shell separator or at a line start', () => {
+    expect(detectSpawnedTeam('cd /repo && agents teams create shipit')).toBe('shipit');
+    expect(detectSpawnedTeam('agents teams create lineage-probe\nagents teams start lineage-probe')).toBe(
+      'lineage-probe'
+    );
+  });
+});

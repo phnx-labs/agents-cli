@@ -314,11 +314,51 @@ const GH_ISSUE_CREATE_RE = /\bgh\s+issue\s+create\b/;
 /** A created GitHub issue URL (…/issues/123) in tool-result output. */
 const GH_ISSUE_URL_RE = /https:\/\/github\.com\/[^\s"'()<>]+\/issues\/(\d+)/;
 /**
+ * Flags of `teams create` / `teams add` that take a value, so the value is not
+ * mistaken for the positional team name. Mirrors their `.option('… <x>')`
+ * registrations in `commands/teams.ts`; a flag missing here degrades to "no team
+ * detected", never to a wrong one.
+ */
+const TEAM_VALUE_FLAGS = [
+  '-d', '--description', '--use-worktree', '--devices', '--hosts', '--repo',
+  '-n', '--name', '-m', '--mode', '-e', '--effort', '--model', '--env',
+  '--cwd', '--worktree', '--after', '--task-type', '--cloud', '--branch',
+  '--device', '--host',
+];
+
+/**
  * `agents teams create <name>` / `agents teams add <team> …` (also the `ag` alias).
  * The team NAME is the first bareword after the sub-verb, skipping any flags. This
  * is the structural signal that a session SPAWNED a team (vs. was spawned by one).
+ *
+ * The separators are spaces/tabs, never `\s`: a command string routinely embeds
+ * documentation and quoted output, and `\s` let the flag-skip run across newlines
+ * to capture a word from a completely different line (a real scan produced
+ * `team:installed` from a heredoc). For the same reason the flag-skip is bounded
+ * rather than unlimited — a real invocation carries a handful of flags before the
+ * name, not dozens.
  */
-const TEAMS_SPAWN_RE = /\bag(?:ents)?\s+teams?\s+(?:create|add)\s+(?:--?[a-z][\w-]*(?:[= ]\S+)?\s+)*([A-Za-z0-9][\w-]*)/;
+const TEAMS_SPAWN_RE = new RegExp(
+  // Start of an actually-executed command: string start, a newline, or a shell
+  // separator. Without this, a backticked mention inside prose or tool output
+  // ("… and `agents teams add --device auto`") reads as a spawn.
+  String.raw`(?:^|[\n;&|(]|&&|\|\|)[ \t]*` +
+    String.raw`ag(?:ents)?[ \t]+teams?[ \t]+(?:create|add)[ \t]+` +
+    // Flags before the positional name. A value-taking flag must swallow its
+    // value, or `--device auto` leaves `auto` looking like the team name — and
+    // the generic branch must exclude those flags, or it swallows the flag alone
+    // and hands the value back as the name.
+    String.raw`(?:(?:${TEAM_VALUE_FLAGS.join('|')})[= \t]\S+[ \t]+` +
+    String.raw`|(?!(?:${TEAM_VALUE_FLAGS.join('|')})[= \t])--?[a-z][\w-]*(?:=\S+)?[ \t]+){0,6}` +
+    String.raw`([A-Za-z][\w-]*)`
+);
+
+/**
+ * Sub-verbs that can follow `teams create|add` in prose ("teams add a teammate")
+ * but are never a team name. Guards the common case where the match came from a
+ * sentence rather than an executed command.
+ */
+const NON_TEAM_WORDS = new Set(['a', 'an', 'the', 'to', 'for', 'with', 'and', 'this', 'your', 'my', 'it']);
 
 /** Collapse to a single trimmed line for a one-row preview cell. */
 function oneLine(s: string): string {
@@ -370,7 +410,14 @@ export function isPrCreateCommand(command?: string): boolean {
 export function detectSpawnedTeam(command?: string): string | undefined {
   if (!command) return undefined;
   const m = command.match(TEAMS_SPAWN_RE);
-  return m ? m[1] : undefined;
+  if (!m) return undefined;
+  const name = m[1];
+  // A single character is a doc placeholder (`agents teams create t --host <box>`)
+  // far more often than a real team, and an English article is prose. Both used to
+  // land in the index as a team name, and now that the name is rendered on the row
+  // a wrong one is worse than none.
+  if (name.length < 2 || NON_TEAM_WORDS.has(name.toLowerCase())) return undefined;
+  return name;
 }
 
 /**
