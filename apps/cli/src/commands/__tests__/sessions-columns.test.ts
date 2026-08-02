@@ -19,6 +19,7 @@ import {
   linkCwdCell,
 } from '../sessions.js';
 import type { SessionMeta } from '../../lib/session/types.js';
+import { stringWidth } from '../../lib/session/width.js';
 
 const strip = (s: string) => s.replace(/\[[0-9;]*m/g, '');
 
@@ -179,16 +180,22 @@ describe('static flat-list columns', () => {
 
   it('keeps a modeled row within an 80-column terminal', () => {
     const original = Object.getOwnPropertyDescriptor(process.stdout, 'columns');
+    const originalColumnsEnv = process.env.COLUMNS;
+    delete process.env.COLUMNS;
     Object.defineProperty(process.stdout, 'columns', { configurable: true, writable: true, value: 80 });
     try {
       const session = meta({
         timestamp: new Date().toISOString(),
         model: 'claude-sonnet-4-20250514',
+        ticketId: 'RUSH-1992',
         topic: 'A topic that must shrink without wrapping the row',
       });
-      const row = stripVTControlCharacters(flatSessionRow(session, undefined, false, pickerColumnsFor([session])));
-      expect(row.length).toBeLessThanOrEqual(80);
+      const row = stripVTControlCharacters(flatSessionRow(session, undefined, true, pickerColumnsFor([session])));
+      expect(stringWidth(row)).toBeLessThanOrEqual(80);
+      expect(row).not.toContain('sonnet-4');
     } finally {
+      if (originalColumnsEnv === undefined) delete process.env.COLUMNS;
+      else process.env.COLUMNS = originalColumnsEnv;
       if (original) Object.defineProperty(process.stdout, 'columns', original);
       else delete (process.stdout as { columns?: number }).columns;
     }

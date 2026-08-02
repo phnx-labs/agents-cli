@@ -1614,8 +1614,14 @@ export function flatSessionRow(session: SessionMeta, live?: ActiveSession, showT
   const machineW = cols.showMachine ? machineColW : 0;
   const ticketW = showTicket ? TICKET_W + 1 : 0;
   const wtW = wt ? stringWidth(wt) + 1 : 0;
-  const modelW = cols.showModel ? (cols.modelWidth ?? PICKER_MODEL_MAX) : 0;
-  const topicW = Math.max(16, terminalWidth() - (10 + 9 + 8 + modelW + 16) - glyphW - statusW - machineW - ticketW - wtW - stringWidth(when) - 1);
+  const width = terminalWidth();
+  const requestedModelW = cols.showModel ? (cols.modelWidth ?? PICKER_MODEL_MAX) : 0;
+  const fixedW = (10 + 9 + 8 + 16) + glyphW + statusW + machineW + ticketW + wtW + stringWidth(when) + 1;
+  const modelSlack = width - fixedW - 16;
+  const modelW = requestedModelW <= modelSlack
+    ? requestedModelW
+    : modelSlack >= PICKER_MODEL_MIN ? modelSlack : 0;
+  const topicW = Math.max(16, width - fixedW - modelW);
 
   return (
     chalk.white(padToWidth(truncateToWidth(session.shortId, 9), 10)) +
