@@ -182,13 +182,19 @@ enum IssueSelfTest {
         check("quick-fix prompt requires repo discovery", prompt.contains("agents sessions --all --limit 20"))
         check("quick-fix prompt requires verification", prompt.contains("Verify with the focused tests"))
 
-        let name = AgentsCLI.quickDispatchName(agent: "Codex_Cli", date: Date(timeIntervalSince1970: 1234))
-        check("quick-dispatch names are durable and normalized", name == "quick-codex-cli-1234", detail: name)
+        let name = AgentsCLI.quickDispatchName(note: "Fix the broken login button", date: Date(timeIntervalSince1970: 1234))
+        check("dispatch name is a slug of the user's task", name == "fix-the-broken-login-button", detail: name)
+        let emptyName = AgentsCLI.quickDispatchName(note: "   ", date: Date(timeIntervalSince1970: 1234))
+        check("empty note falls back to a timestamped task name", emptyName == "task-1234", detail: emptyName)
 
-        let args = AgentsCLI.quickFixRunArgs(agent: "codex", prompt: "<prompt>", name: "quick-codex-1234")
-        check("quick-fix runs in autonomous mode",
-              args == ["run", "codex", "<prompt>", "--mode", "auto", "--name", "quick-codex-1234"],
+        let args = AgentsCLI.quickFixRunArgs(agent: "codex", prompt: "<prompt>", name: "my-task")
+        check("run is balanced + autonomous",
+              args == ["run", "codex", "<prompt>", "--mode", "auto", "--balanced", "--name", "my-task"],
               detail: args.joined(separator: " "))
+        let scoped = AgentsCLI.quickFixRunArgs(agent: "codex", prompt: "<p>", name: "n", cwd: "/repo", device: "zion")
+        check("run scopes to cwd + device when given",
+              scoped == ["run", "codex", "<p>", "--mode", "auto", "--balanced", "--name", "n", "--cwd", "/repo", "--device", "zion"],
+              detail: scoped.joined(separator: " "))
     }
 
     // The picker roster is configurable but remains pinned to supported agents.
