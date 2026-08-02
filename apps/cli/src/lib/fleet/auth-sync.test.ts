@@ -9,6 +9,9 @@ import {
   parseAuthBundle,
   FLEET_AUTH_FILES,
   isPropagatableAgent,
+  hasPortableAuthFiles,
+  isCredentialSafeToPropagate,
+  SINGLE_USE_ROTATING_REFRESH_AGENTS,
 } from './auth-sync.js';
 
 function seedFile(home: string, rel: string, content: string, mode = 0o600): void {
@@ -23,25 +26,46 @@ describe('snapshotAuth + materializeAuth round-trip', () => {
     const src = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-src-'));
     const dst = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-dst-'));
     seedFile(src, '.codex/auth.json', '{"tokens":"codex-abc"}');
-    seedFile(src, '.factory/auth.v2.file', 'droid-file');
-    seedFile(src, '.factory/auth.v2.key', 'droid-key');
 
-    const snap = snapshotAuth(['codex', 'gemini', 'droid'], { home: src, platform: 'linux' });
-    // codex(1) + droid(2); hard-deprecated Gemini is not propagatable.
-    expect(snap.files).toHaveLength(3);
+    const snap = snapshotAuth(['codex', 'gemini'], { home: src, platform: 'linux' });
+    // codex(1); hard-deprecated Gemini is not propagatable.
+    expect(snap.files).toHaveLength(1);
     expect(snap.bound).toEqual([]);
 
     const bundle = buildAuthBundle('src-box', snap.files);
     const res = materializeAuth(bundle, { home: dst });
     expect(res.errors).toEqual([]);
-    expect(res.written.sort()).toEqual(['codex', 'droid']);
+    expect(res.written.sort()).toEqual(['codex']);
 
     expect(fs.readFileSync(path.join(dst, '.codex/auth.json'), 'utf-8')).toBe('{"tokens":"codex-abc"}');
-    expect(fs.readFileSync(path.join(dst, '.factory/auth.v2.key'), 'utf-8')).toBe('droid-key');
     // credential mode preserved at 0600 (POSIX only — Windows has no 0600 bit)
     if (process.platform !== 'win32') {
       expect(fs.statSync(path.join(dst, '.codex/auth.json')).mode & 0o777).toBe(0o600);
     }
+  });
+
+  it('never captures single-use rotating refresh tokens (droid/WorkOS)', () => {
+    const src = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-src-'));
+    const dst = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-dst-'));
+    seedFile(src, '.factory/auth.v2.file', 'droid-file');
+    seedFile(src, '.factory/auth.v2.key', 'droid-key');
+
+    const snap = snapshotAuth(['droid'], { home: src, platform: 'linux' });
+    expect(snap.files).toHaveLength(0);
+    expect(snap.bound).toEqual([]);
+
+    // Even if a malicious/downstream caller built a bundle with droid files,
+    // materializeAuth would still write them (it writes whatever it receives).
+    // The safety gate is at capture time and in the propagation decision.
+    const bundle = buildAuthBundle('src-box', [
+      { agent: 'droid', rel: '.factory/auth.v2.file', contentB64: Buffer.from('droid-file').toString('base64'), mode: 0o600 },
+      { agent: 'droid', rel: '.factory/auth.v2.key', contentB64: Buffer.from('droid-key').toString('base64'), mode: 0o600 },
+    ]);
+    const res = materializeAuth(bundle, { home: dst });
+    expect(res.errors).toEqual([]);
+    expect(res.written.sort()).toEqual(['droid']);
+    expect(fs.existsSync(path.join(dst, '.factory/auth.v2.file'))).toBe(true);
+    expect(fs.existsSync(path.join(dst, '.factory/auth.v2.key'))).toBe(true);
   });
 
   it('silently skips agents that are not signed in (no file on disk)', () => {
@@ -97,11 +121,19 @@ describe('parseAuthBundle', () => {
 
 describe('FLEET_AUTH_FILES coverage', () => {
   it('maps the verified portable-auth agents and marks them propagatable', () => {
-    for (const agent of ['claude', 'codex', 'grok', 'kimi', 'opencode', 'droid', 'antigravity']) {
+    for (const agent of ['claude', 'codex', 'grok', 'kimi', 'opencode', 'antigravity']) {
       expect(FLEET_AUTH_FILES[agent]?.length).toBeGreaterThan(0);
       expect(isPropagatableAgent(agent)).toBe(true);
     }
     expect(isPropagatableAgent('gemini')).toBe(false);
     expect(isPropagatableAgent('cursor')).toBe(false);
+  });
+
+  it('keeps droid in portable files but marks it unsafe to propagate', () => {
+    expect(FLEET_AUTH_FILES['droid']?.length).toBeGreaterThan(0);
+    expect(hasPortableAuthFiles('droid')).toBe(true);
+    expect(SINGLE_USE_ROTATING_REFRESH_AGENTS.has('droid')).toBe(true);
+    expect(isCredentialSafeToPropagate('droid')).toBe(false);
+    expect(isPropagatableAgent('droid')).toBe(false);
   });
 });

@@ -863,7 +863,9 @@ export interface DroidBillingLimitsResponse {
  * here would race a concurrently running droid session and can permanently
  * invalidate the user's login chain. Droid refreshes its own credential when
  * it runs; if the stored token is expired we skip the live fetch and let the
- * SWR cache serve the last-seen snapshot.
+ * SWR cache serve the last-seen snapshot. This same single-use-rotation property
+ * is why `agents apply` refuses to propagate droid credentials across machines
+ * (see `isCredentialSafeToPropagate` in `../fleet/auth-sync.ts`).
  */
 async function getDroidUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
   try {

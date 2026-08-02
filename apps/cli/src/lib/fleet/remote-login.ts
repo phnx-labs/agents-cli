@@ -9,6 +9,11 @@
  * each verification URL + user code, and surfacing them all in ONE local browser
  * page so the human enters codes back-to-back instead of babysitting N terminals.
  *
+ * The propagation gate lives in `auth-sync.ts`: {@link isCredentialSafeToPropagate}
+ * and {@link SINGLE_USE_ROTATING_REFRESH_AGENTS} are the single place where the
+ * "is this credential safe to copy?" decision is made, shared by `agents apply`
+ * and any other propagation path.
+ *
  * Layering — pure vs I/O, so the valuable logic is unit-testable without SSH:
  *  - `scrapeLogin` / `classifyLoginFlow` / `selectLoginTargets` /
  *    `buildRemoteLoginSshCommand` / `buildDashboardHtml` are PURE.

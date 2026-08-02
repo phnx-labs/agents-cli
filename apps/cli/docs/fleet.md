@@ -129,13 +129,21 @@ path traversal. Agents with a portable credential:
 
 > `claude`, `codex`, `gemini`, `grok`, `kimi`, `opencode`, `droid`, `antigravity`
 
-**Honest boundary — never faked.** macOS keychain-bound tokens (`claude`,
-`antigravity`) can't be read from the ACL-locked keychain on a **macOS target**,
-and a token that is keychain-bound on the **source** can't be extracted to push.
-Those cases surface as a one-time **manual login** in the plan, not a fake
-success. Agents with no portable credential (e.g. `cursor`), and a source that
-simply isn't signed into an agent, produce no login action at all — the same on
-every OS.
+**Honest boundary — never faked, never fatal.** macOS keychain-bound tokens
+(`claude`, `antigravity`) can't be read from the ACL-locked keychain on a **macOS
+target**, and a token that is keychain-bound on the **source** can't be extracted
+to push. Single-use rotating refresh tokens — droid (WorkOS) is the known
+offender — are also never propagated: copying one credential file across N boxes
+would let the first refresh on any box invalidate every other holder. Those cases
+surface as a one-time **manual login** in the plan, not a fake success. Agents
+with no portable credential (e.g. `cursor`), and a source that simply isn't signed
+into an agent, produce no login action at all — the same on every OS.
+
+The "is this credential safe to copy?" decision is centralized in
+`src/lib/fleet/auth-sync.ts` (`isCredentialSafeToPropagate` and
+`SINGLE_USE_ROTATING_REFRESH_AGENTS`). Add any newly-discovered single-use-
+rotation harness there rather than scattering per-agent conditionals through the
+propagation path.
 
 ## Flags
 

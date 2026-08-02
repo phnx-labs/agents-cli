@@ -18,7 +18,7 @@ import { machineId } from '../lib/session/sync/config.js';
 import { loadDevices, isControlDevice, type DeviceProfile } from '../lib/devices/registry.js';
 import { ensureDevicesRegistered } from '../lib/devices/sync.js';
 import { readFleetFile, resolveDesired } from '../lib/fleet/manifest.js';
-import { snapshotAuth, materializeAuth, parseAuthBundle, KEYCHAIN_BOUND_ON_MAC } from '../lib/fleet/auth-sync.js';
+import { snapshotAuth, materializeAuth, parseAuthBundle, KEYCHAIN_BOUND_ON_MAC, isCredentialSafeToPropagate } from '../lib/fleet/auth-sync.js';
 import {
   agentIdOf,
   diffFleet,
@@ -135,16 +135,22 @@ function renderPlan(plan: FleetPlan): void {
   console.log();
   console.log(chalk.gray(`  ${plan.actions.length} action(s) across ${rows.filter((r) => r.probe.reachable).length} reachable device(s)`));
 
-  // Distinguish *why* a login can't be propagated: a macOS keychain-bound token
-  // vs. the source simply not being signed in to that agent (no portable file).
+  // Distinguish *why* a login can't be propagated: macOS keychain-bound,
+  // single-use rotating refresh token (never copied), or the source simply not
+  // being signed in to that agent (no portable file).
   const bound: string[] = [];
+  const rotating: string[] = [];
   const noToken: string[] = [];
   for (const r of rows) {
     for (const a of r.loginBlocked) {
       const tag = `${a}@${r.device}`;
-      if (r.probe.platform === 'macos' && KEYCHAIN_BOUND_ON_MAC.has(a)) bound.push(tag);
+      if (!isCredentialSafeToPropagate(a)) rotating.push(tag);
+      else if (r.probe.platform === 'macos' && KEYCHAIN_BOUND_ON_MAC.has(a)) bound.push(tag);
       else noToken.push(tag);
     }
+  }
+  if (rotating.length > 0) {
+    console.log(chalk.yellow(`  manual login needed (single-use rotating refresh token): ${rotating.join(', ')}`));
   }
   if (bound.length > 0) {
     console.log(chalk.yellow(`  manual login needed (macOS keychain-bound): ${bound.join(', ')}`));

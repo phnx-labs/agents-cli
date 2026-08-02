@@ -141,6 +141,25 @@ describe('diffFleet', () => {
     expect(plan.actions.some((a) => a.agent === 'codex' && a.kind === 'push-login')).toBe(true);
   });
 
+  it('excludes droid (single-use rotating refresh token) from propagation and surfaces per-machine login', () => {
+    const droidDesired: DeviceDesired[] = [
+      { device: 's1', agents: ['droid@latest', 'codex@latest'], sync: [], login: 'sync' },
+    ];
+    const probes = new Map<string, DeviceProbe>([
+      ['s1', { device: 's1', reachable: true, platform: 'linux', cliVersion: CLI, installedAgents: ['droid', 'codex'] }],
+    ]);
+    // Pretend the source has droid credentials available — the propagation gate
+    // must still refuse to push them.
+    const plan = diffFleet(droidDesired, probes, { targetCliVersion: CLI, sourceAuth: srcAuth(['droid', 'codex']) });
+    const droidActions = plan.actions.filter((a) => a.agent === 'droid');
+    expect(droidActions.some((a) => a.kind === 'push-login')).toBe(false);
+    expect(droidActions.some((a) => a.kind === 'needs-login')).toBe(true);
+    expect(droidActions.find((a) => a.kind === 'needs-login')?.detail).toMatch(/single-use rotating refresh token/);
+    expect(plan.devices[0].loginBlocked).toContain('droid');
+    // codex is still portable and safe → pushes.
+    expect(plan.actions.some((a) => a.agent === 'codex' && a.kind === 'push-login')).toBe(true);
+  });
+
   it('produces no actions for an unreachable device', () => {
     const probes = new Map<string, DeviceProbe>([
       ['s1', { device: 's1', reachable: false, platform: 'linux', installedAgents: [], note: 'unreachable' }],

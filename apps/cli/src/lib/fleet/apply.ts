@@ -17,6 +17,8 @@ import { sshExec } from '../ssh-exec.js';
 import type { TeamsDoctorEntry } from '../teams/agents.js';
 import {
   isPropagatableAgent,
+  hasPortableAuthFiles,
+  isCredentialSafeToPropagate,
   KEYCHAIN_BOUND_ON_MAC,
   buildAuthBundle,
 } from './auth-sync.js';
@@ -182,6 +184,12 @@ export function diffFleet(desired: DeviceDesired[], probes: Map<string, DevicePr
         for (const id of [...new Set(d.agents.map(agentIdOf))]) {
           if (canPushLogin(id, probe.platform, ctx.sourceAuth)) {
             rowActions.push({ device: d.device, kind: 'push-login', agent: id, detail: `propagate ${id} login` });
+          } else if (hasPortableAuthFiles(id) && !isCredentialSafeToPropagate(id)) {
+            // Single-use rotating refresh tokens (e.g. droid/WorkOS) must never be
+            // copied across boxes — the first refresh invalidates every other copy.
+            // Surface per-machine login guidance instead of silently propagating.
+            loginBlocked.push(id);
+            rowActions.push({ device: d.device, kind: 'needs-login', agent: id, detail: `${id} login uses a single-use rotating refresh token — log in on ${d.device} itself` });
           } else if (
             isPropagatableAgent(id) &&
             (ctx.sourceAuth.bound.has(id) || (probe.platform === 'macos' && KEYCHAIN_BOUND_ON_MAC.has(id)))
