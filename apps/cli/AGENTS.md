@@ -297,6 +297,17 @@ for the narrow case of building + pulling back JUST the signed macOS artifacts f
 another Mac (no publish); it too is zero-config, targeting the same hardcoded
 `RELEASE_HOME_BASE` with no env knobs or fleet discovery.
 
+**Provisioning the `apple.com` bundle on a headless sign host.** A Linux-driven
+release offloads macOS signing to a sign host over SSH, which needs the `apple.com`
+secrets bundle *on that host*. Push it with the **file backend** —
+`agents secrets export apple.com --host <signer> --remote-backend file` (needs
+`AGENTS_SECRETS_PASSPHRASE` set locally) — **not** the default keychain backend: a
+macOS login keychain is locked under headless SSH, so a keychain-backed push lands
+the bundle metadata but no readable secret items (`secrets export --host` now
+read-back-verifies a keychain push and fails loudly if it didn't persist, pointing
+at this fix). `--device` is accepted as an alias for `--host` on the secrets remote
+commands. See [`docs/secrets.md`](docs/secrets.md) → *Pushing to a headless sign host*.
+
 **Why not CI?** The tarball bundles `dist/lib/secrets/Agents CLI.app` — a native
 keychain helper compiled with `swiftc`, codesigned (Developer ID), and notarized
 (`xcrun notarytool`). `prepack` ([`scripts/verify-keychain-helper.sh`](scripts/verify-keychain-helper.sh))

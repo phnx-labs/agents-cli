@@ -166,8 +166,10 @@ agents run claude "ship it" --secrets r2.backups@yosemite-s1   # bundle@host suf
 ```
 
 - **`--host <target>`** (single) and **`--hosts <a,b,c>`** (comma list) compose on
-  `list` / `view`; **`bundle@host`** is the reference form for `run --secrets` and
-  the target for `exec --host`.
+  `list` / `view` / `export`; **`--device` / `--devices`** are accepted as aliases
+  everywhere `--host` / `--hosts` are (fleet-vocabulary parity with `agents activity`
+  and `agents run --device`), and resolve identically. **`bundle@host`** is the
+  reference form for `run --secrets` and the target for `exec --host`.
 - **Ephemeral.** Remote values cross over ssh stdout (encrypted in transit), are
   parsed in memory, and injected into the run/command env — never written to this
   machine's keychain or disk.
@@ -177,6 +179,33 @@ agents run claude "ship it" --secrets r2.backups@yosemite-s1   # bundle@host suf
   a remote `file` bundle, an already-unlocked remote secrets-agent, or run
   `view --reveal` from an interactive terminal (it forces an SSH TTY so the prompt
   can surface). This machine's passphrase is never forwarded.
+
+### Pushing to a headless sign host — use `--remote-backend file`
+
+`secrets export --host` defaults to `--remote-backend keychain`. On a **macOS**
+target reached over headless SSH (e.g. the sign host a Linux-driven release offloads
+notarization to), the remote login keychain is **locked** in the non-interactive SSH
+context: the keychain *write* is accepted but the biometry-gated items are not
+readable, so the push lands the bundle **metadata** with no readable secret values,
+and the remote `import` still reports success. A later headless read then fails with
+the confusing `Bundle '<b>' key '<k>': stored item '…' not found`.
+
+The push now **verifies** a keychain-backed write by reading the bundle back the way
+a release will (headlessly, so no Touch ID) and **fails loudly** if the keys didn't
+materialize — naming the locked-login-keychain cause and steering to the fix. For a
+headless sign host, push with the headless-readable file backend instead:
+
+```bash
+export AGENTS_SECRETS_PASSPHRASE="…"                 # one biometry-gated read on the laptop
+agents secrets export apple.com --host mac-mini --remote-backend file
+```
+
+A file-backed bundle is encrypted at rest with `AGENTS_SECRETS_PASSPHRASE` (forwarded
+over ssh stdin, never argv) and reads with no biometry — the right choice whenever the
+remote can't satisfy a Touch ID prompt. Alternatively, unlock the remote login
+keychain first (an interactive login / `agents secrets unlock` on the target) and
+retry the keychain push. See [File-backed bundles](#file-backed-bundles-headless--remote)
+and [Recipe 8](#8-headless-release-on-a-remote-mac).
 
 ### Push to a Windows host
 
@@ -269,6 +298,8 @@ The Windows push bridge is `buildWindowsStdinImportCommand` in
 | `secrets export [bundle] --to-1password --vault <name>` | Push bundle to a 1Password vault | `agents secrets export prod --to-1password --vault Team` |
 | `secrets export ... --force` | Overwrite existing 1Password items | `agents secrets export prod --to-1password --vault Team --force` |
 | `secrets export [bundle] --to-file <path>` | Write the bundle as an AES-256-GCM encrypted offline file (needs `AGENTS_SECRETS_PASSPHRASE`; symmetric counterpart of `import --from-file`) | `agents secrets export prod --to-file prod.enc` |
+| `secrets export [bundle] --host <target>` | Push the bundle over SSH to a remote (repeatable; `--device` is an alias). Keychain-backed by default; the push read-back-verifies the write and fails loudly if it didn't persist | `agents secrets export apple.com --host mac-mini` |
+| `secrets export ... --remote-backend file` | Push as a headless-readable file bundle (needs `AGENTS_SECRETS_PASSPHRASE`) — required for a **headless sign host** whose login keychain is locked over SSH | `agents secrets export apple.com --host mac-mini --remote-backend file` |
 
 ### Agent commands (macOS)
 
