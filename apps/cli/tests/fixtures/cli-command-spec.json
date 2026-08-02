@@ -114,8 +114,7 @@
         "path_template": "{HOME}/.cursor/commands/{name}.md",
         "reason": "IDE-only per official Cursor staff response — does not work in cursor-agent CLI."
       }
-    ],
-    "registry_divergence": "agents-cli registry says commandsSubdir='commands' for cursor; per docs this only works in the IDE, not the CLI. CLI needs skills format."
+    ]
   },
 
   "opencode": {

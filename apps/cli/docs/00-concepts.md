@@ -173,7 +173,7 @@ contract.
 |------|-------|-----|-------------|--------|----------|---------|-----------|-------|-----------|
 | Claude | yes | yes | yes | yes | yes | yes | yes | `CLAUDE.md` | yes |
 | Codex | >= 0.116.0 | yes | >= 0.138.0 | yes | < 0.117.0 · skills ($name, >= 0.117) | >= 0.128.0 | >= 0.117.0 | `AGENTS.md` | no |
-| Cursor | no | yes | no | yes | yes | no | no | `.cursorrules` | no |
+| Cursor | yes | yes | yes | yes | IDE + skills ($name) | yes | >= 2026.1.22 | `.cursorrules` | no |
 | OpenCode | no | yes | >= 1.1.1 | yes | yes | no | no | `AGENTS.md` | no |
 | OpenClaw | yes | yes | yes | yes | gateway | yes | yes | `workspace/AGENTS.md` | no |
 | Copilot | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
@@ -206,7 +206,7 @@ Slash commands in `commands/*.md` can narrow sync with optional YAML frontmatter
 ```yaml
 ---
 description: Required one-line summary
-agents: [claude, cursor, codex]   # omit = all command-capable agents
+agents: [claude, cursor, codex]   # omit = all compatible agents; Cursor receives both formats
 since: "0.116.0"                  # minimum agent CLI version (inclusive)
 until: "0.117.0"                  # exclusive upper bound
 ---
@@ -214,4 +214,4 @@ until: "0.117.0"                  # exclusive upper bound
 
 `commandAppliesTo()` in `src/lib/commands.ts` evaluates these fields after the agent-level `commands` / commands-as-skills gate. The check runs on central sync (`~/.agents/commands/` user/system → version home) and on `agents commands install`; project `.agents/commands/` files are discovered in place and are not filtered by `agents:`.
 
-Example: `.agents/commands/version.md` targets Claude, Codex, Cursor, OpenCode, Copilot, and Grok; Antigravity is excluded until harness support is verified.
+Example: `.agents/commands/version.md` targets Claude, Codex, Cursor, OpenCode, Copilot, and Grok. Cursor receives both an IDE command file and an Agent Skill because cursor-agent does not load the IDE's `.cursor/commands/` files; Antigravity is excluded until harness support is verified.

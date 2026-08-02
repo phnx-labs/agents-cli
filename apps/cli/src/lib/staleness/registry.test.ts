@@ -80,6 +80,12 @@ describe('staleness/registry', () => {
     expect(DETECTORS.commands.kimi).toBeDefined();
   });
 
+  it('cursor remains covered by the commands writer + detector for dual-write sync', () => {
+    expect(AGENTS.cursor.capabilities.commands).toBe(true);
+    expect(WRITERS.commands.cursor).toBeDefined();
+    expect(DETECTORS.commands.cursor).toBeDefined();
+  });
+
   it('openclaw opts OUT of commands-as-skills (native command runtime)', () => {
     // openclaw resolves slash commands through its Gateway runtime, so it
     // declares nativeCommandRuntime and must NOT be registered for commands.

@@ -393,6 +393,32 @@ describe('version resource sync path handling', () => {
     expect(skill).toContain('Recap the conversation so far.');
   });
 
+  it('preserves user-authored Cursor IDE commands and syncs managed commands to both Cursor surfaces', () => {
+    const home = makeTempHome();
+    const sourceCommand = path.join(home, '.agents', '.system', 'commands', 'recap.md');
+    const cursorHome = path.join(home, '.agents', '.history', 'versions', 'cursor', '2026.07.23-e383d2b', 'home', '.cursor');
+    const sentinel = path.join(cursorHome, 'commands', 'my-ide-command.md');
+
+    fs.mkdirSync(path.dirname(sourceCommand), { recursive: true });
+    fs.writeFileSync(
+      sourceCommand,
+      ['---', 'description: Summarize the current session', '---', '', 'Recap the conversation so far.'].join('\n'),
+      'utf-8'
+    );
+    fs.mkdirSync(path.dirname(sentinel), { recursive: true });
+    fs.writeFileSync(sentinel, 'user-authored IDE command', 'utf-8');
+
+    const result = runVersionSync(
+      home,
+      "syncResourcesToVersion('cursor', '2026.07.23-e383d2b', undefined, { cwd: home, force: true })"
+    ) as { commands: boolean };
+
+    expect(result.commands).toBe(true);
+    expect(fs.readFileSync(sentinel, 'utf-8')).toBe('user-authored IDE command');
+    expect(fs.readFileSync(path.join(cursorHome, 'commands', 'recap.md'), 'utf-8')).toContain('Recap the conversation so far.');
+    expect(fs.readFileSync(path.join(cursorHome, 'skills', 'recap', 'SKILL.md'), 'utf-8')).toContain('agents_command: "recap"');
+  });
+
   it('syncs grok commands and skills to separate native paths', async () => {
     const home = makeTempHome();
     const commandPath = path.join(home, '.agents', 'commands', 'debug.md');

@@ -31,6 +31,7 @@ import { AGENTS } from '../src/lib/agents.js';
 import { supports } from '../src/lib/capabilities.js';
 import {
   shouldInstallCommandAsSkill,
+  shouldAlsoInstallCommandAsSkill,
   installCommandSkillToVersion,
 } from '../src/lib/command-skills.js';
 import { toPosix } from '../src/lib/platform/index.js';
@@ -176,10 +177,10 @@ describe('CLI command sync: registry-vs-docs conformance', () => {
         });
       }
 
-      // Skill-dir-only CLIs (cursor, kiro, antigravity, grok): the docs say
-      // there is no commands/ directory. The registry should reflect that
-      // by setting commands capability off, otherwise the writer fires the
-      // native-commands path and emits files the CLI never reads.
+      // Skill-dir-only CLIs (cursor-agent, Kiro, Antigravity) must reach the
+      // skill writer. Most declare commands unsupported. Cursor is the one
+      // dual-surface exception: its IDE reads command files while its CLI reads
+      // generated skills, so the dual-write registry makes both claims true.
       // Skills-only: every documented format is a skill-dir, and no format
       // is version-gated to a markdown-flat predecessor. Codex is excluded
       // because it has BOTH a pre-0.117 markdown-flat and a post-0.117
@@ -189,13 +190,12 @@ describe('CLI command sync: registry-vs-docs conformance', () => {
         cli.formats.every((f) => f.kind === 'skill-dir' && !f.applies_when);
 
       if (isSkillsOnly) {
-        itc('commands capability should be off (docs say skill-dir only)', () => {
+        itc('registry routes the CLI through skills', () => {
           const cap = reg.capabilities?.commands;
-          // Acceptable: false, or a {until: "x"} record where x <= the version_split
-          const off = cap === false;
+          const skillsOnly = cap === false || shouldAlsoInstallCommandAsSkill(id as keyof typeof AGENTS, '9999.0.0');
           expect(
-            off,
-            `Docs say ${id} uses skill-dir format only (no commands/ directory). Registry has commands cap = ${JSON.stringify(cap)}.${banner}`,
+            skillsOnly,
+            `Docs say ${id} CLI uses skill-dir format. Registry has commands cap = ${JSON.stringify(cap)} and dual-write=${shouldAlsoInstallCommandAsSkill(id as keyof typeof AGENTS, '9999.0.0')}.${banner}`,
           ).toBe(true);
         });
       }
@@ -271,5 +271,12 @@ describe('CLI command sync: sync-pipeline invariants', () => {
 
   it('grok uses native command files (per docs: ~/.agents/commands/)', () => {
     expect(shouldInstallCommandAsSkill('grok', '0.2.111')).toBe(false);
+  });
+
+  it('cursor installs commands as skills in addition to its IDE command files', () => {
+    expect(supports('cursor', 'commands', '2026.07.23-e383d2b').ok).toBe(true);
+    expect(supports('cursor', 'skills', '2026.07.23-e383d2b').ok).toBe(true);
+    expect(shouldInstallCommandAsSkill('cursor', '2026.07.23-e383d2b')).toBe(false);
+    expect(shouldAlsoInstallCommandAsSkill('cursor', '2026.07.23-e383d2b')).toBe(true);
   });
 });

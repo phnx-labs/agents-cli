@@ -59,6 +59,22 @@ export function shouldInstallCommandAsSkill(agent: AgentId, version: string): bo
   return !supports(agent, 'commands', version).ok && supports(agent, 'skills', version).ok;
 }
 
+/**
+ * Agents whose native command files serve a separate surface while their CLI
+ * consumes the generated skill form. Keep this registry distinct from
+ * `shouldInstallCommandAsSkill`: these targets need both writes, not a format
+ * replacement.
+ */
+export const COMMAND_SKILL_DUAL_WRITE_TARGETS = {
+  cursor: true,
+} satisfies Partial<Record<AgentId, true>>;
+
+export function shouldAlsoInstallCommandAsSkill(agent: AgentId, version: string): boolean {
+  return COMMAND_SKILL_DUAL_WRITE_TARGETS[agent as keyof typeof COMMAND_SKILL_DUAL_WRITE_TARGETS] === true
+    && supports(agent, 'commands', version).ok
+    && supports(agent, 'skills', version).ok;
+}
+
 export function commandSkillName(commandName: string): string {
   return commandName;
 }

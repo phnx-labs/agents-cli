@@ -1116,7 +1116,7 @@ Which DotAgents resources each agent CLI can load. Source of truth: [src/lib/age
 | Antigravity | yes | yes | yes | yes | yes | yes | yes | no | `AGENTS.md` | no |
 | Grok Build | yes | yes | yes | yes | yes | skills ($name) | yes | no | `AGENTS.md` | no |
 | OpenClaw | yes | yes | yes | no | yes | gateway | yes | yes | `workspace/AGENTS.md` | no |
-| Cursor | yes | no | yes | no | yes | yes | no | no | `.cursorrules` | no |
+| Cursor | yes | yes | yes | yes | yes | IDE + skills ($name) | yes | >= 2026.1.22 | `.cursorrules` | no |
 | OpenCode | yes | no | yes | >= 1.1.1 | yes | yes | no | no | `AGENTS.md` | no |
 | Copilot | yes | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | Amp | yes | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
@@ -1125,7 +1125,7 @@ Which DotAgents resources each agent CLI can load. Source of truth: [src/lib/age
 | Roo Code | yes | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | Droid | yes | yes | yes | >= 0.57.5 | >= 0.26.0 | yes | yes | yes | `AGENTS.md` | no |
 
-**Legend:** `yes` / `no` = synced or skipped at install time. `skills ($name)` = no file-based slash-command dir; behavior ships as a generated skill invoked with `$command`. `gateway` = OpenClaw resolves slash commands at runtime, not from synced files. Version suffixes are enforced at sync time — out-of-range versions are skipped with a clear message.
+**Legend:** `yes` / `no` = synced or skipped at install time. `skills ($name)` = no file-based slash-command dir; behavior ships as a generated skill invoked with `$command`. `IDE + skills ($name)` = an IDE command file plus a generated skill for the CLI. `gateway` = OpenClaw resolves slash commands at runtime, not from synced files. Version suffixes are enforced at sync time — out-of-range versions are skipped with a clear message.
 
 **Host CLIs** (`agents cli`) are separate: YAML manifests under `~/.agents/cli/` install binaries onto your PATH (`gh`, `higgsfield`, etc.). They are not copied into per-agent version homes.
 

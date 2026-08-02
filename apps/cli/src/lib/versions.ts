@@ -55,7 +55,13 @@ import { composeRulesFromState } from './rules/compose.js';
 import { loadManifest, saveManifest, buildManifest as buildSyncManifest, isStale } from './staleness/index.js';
 import { emit } from './events.js';
 import { safeJoin } from './paths.js';
-import { installCommandSkillToVersion, listCommandSkillsInVersion, readSkillSourceCommandMarker, shouldInstallCommandAsSkill } from './command-skills.js';
+import {
+  installCommandSkillToVersion,
+  listCommandSkillsInVersion,
+  readSkillSourceCommandMarker,
+  shouldAlsoInstallCommandAsSkill,
+  shouldInstallCommandAsSkill,
+} from './command-skills.js';
 import { getWriter, getDetector } from './staleness/registry.js';
 import { syncMemoryToVersionHome } from './memory.js';
 import { listPluginSkillNames, resolveCommandSource, resolveSkillSource } from './staleness/writers/sources.js';
@@ -2766,21 +2772,19 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   const trustedCommandNames = (names: string[]): string[] => names.filter((name) => resolveCommandSource(name) !== null);
 
   // Sync commands — dispatch through WRITERS.commands. The writer dispatches
-  // between native (file copy / TOML conversion) and commands-as-skills
-  // (grok, Codex >= 0.117.0) based on `shouldInstallCommandAsSkill`. The
-  // previous COMMANDS_CAPABLE_AGENTS gate excluded grok even though it
-  // takes the commands-as-skills path — silently dropping every command.
+  // between native (file copy / TOML conversion), commands-as-skills, and the
+  // registry-driven dual-write path based on the command-skill predicates. The
+  // previous COMMANDS_CAPABLE_AGENTS gate excluded skills-only targets such as
+  // Kimi, silently dropping every converted command.
   const commandsWriter = getWriter('commands', agent);
   const commandsToSync = selection
     ? trustedCommandNames(resolveSelection(selection.commands, available.commands))
     : trustedCommandNames(available.commands); // No selection = sync all trusted commands, excluding project-only commands
   const commandsAsSkills = shouldInstallCommandAsSkill(agent, version);
+  const commandsAlsoAsSkills = shouldAlsoInstallCommandAsSkill(agent, version);
+  const commandsInstallAsSkills = commandsAsSkills || commandsAlsoAsSkills;
 
   if (commandsToSync.length > 0 && commandsWriter) {
-    const commandsTarget = path.join(agentDir, agentConfig.commandsSubdir);
-    if (commandsAsSkills && agentConfig.commandsSubdir) {
-      removePath(commandsTarget);
-    }
     const r = commandsWriter.write({ version, versionHome, selection: commandsToSync, cwd });
     result.commands = r.synced.length > 0;
   }
@@ -2797,11 +2801,17 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     if (fs.existsSync(commandsTargetSweep)) {
       const ext = agentConfig.format === 'toml' ? '.toml' : '.md';
       const trustedCommands = new Set(commandsToSync);
+      // A dual-write target's native directory also belongs to another
+      // product surface (Cursor IDE). Only names captured by our prior sync
+      // manifest are managed there; every other file is user-owned.
+      const previouslyManagedCommands = commandsAlsoAsSkills
+        ? new Set(Object.keys(loadManifest(agent, version)?.commands ?? {}))
+        : null;
       for (const entry of fs.readdirSync(commandsTargetSweep, { withFileTypes: true })) {
         if (!entry.isFile() || entry.name.startsWith('.')) continue;
         if (!entry.name.endsWith(ext)) continue;
         const name = entry.name.slice(0, -ext.length);
-        if (!trustedCommands.has(name)) {
+        if (!trustedCommands.has(name) && (!previouslyManagedCommands || previouslyManagedCommands.has(name))) {
           removePath(safeJoin(commandsTargetSweep, entry.name));
         }
       }
@@ -2825,7 +2835,7 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   let skillsToSync = userPassedSelection
     ? selectedSkillsToSync
     : Array.from(new Set([...selectedSkillsToSync, ...pluginSkillsToSync]));
-  if (commandsAsSkills && commandsToSync.length > 0 && skillsToSync.length > 0) {
+  if (commandsInstallAsSkills && commandsToSync.length > 0 && skillsToSync.length > 0) {
     const commandNames = new Set(commandsToSync);
     const skillRoots = [
       path.join(getUserAgentsDir(), 'skills'),
@@ -2852,13 +2862,13 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     // dot-dirs to keep plugin-managed subtrees (.plugins/, .promptcuts) intact.
     const skillsTargetSweep = path.join(agentDir, 'skills');
     if (!userPassedSelection && fs.existsSync(skillsTargetSweep) && !fs.lstatSync(skillsTargetSweep).isSymbolicLink()) {
-      // Trust real skills AND command-skills: when commandsAsSkills, the
+      // Trust real skills AND command-skills: when commandsInstallAsSkills, the
       // commands writer (above) materialized each command as a skill dir under
       // skills/. Those names are not in skillsToSync, so without this they'd be
       // swept as orphans — silently deleting every converted command (e.g.
-      // /recap on kimi/grok).
+      // /recap on Kimi or newer Codex releases).
       const trustedSkills = new Set(skillsToSync);
-      if (commandsAsSkills) for (const cmd of commandsToSync) trustedSkills.add(cmd);
+      if (commandsInstallAsSkills) for (const cmd of commandsToSync) trustedSkills.add(cmd);
       for (const entry of fs.readdirSync(skillsTargetSweep, { withFileTypes: true })) {
         if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
         if (!trustedSkills.has(entry.name)) {

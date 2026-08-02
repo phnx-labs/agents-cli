@@ -1,14 +1,18 @@
 /**
  * Commands detector — mirrors versions.ts:343-357. Inspects the version home,
  * returns command names. Honors the commands-as-skills marker for skills-only
- * agents (kimi, Codex >= 0.117.0, …); falls back to scanning
- * `{agentDir}/<commandsSubdir>/` for the native path.
+ * agents (Kimi, Codex >= 0.117.0, …), requires both copies for dual-write
+ * targets, and scans `{agentDir}/<commandsSubdir>/` for native-only targets.
  */
 import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId } from '../../types.js';
 import { AGENTS, MANAGED_AGENT_IDS, agentConfigDirName } from '../../agents.js';
-import { shouldInstallCommandAsSkill, listCommandSkillsInVersion } from '../../command-skills.js';
+import {
+  listCommandSkillsInVersion,
+  shouldAlsoInstallCommandAsSkill,
+  shouldInstallCommandAsSkill,
+} from '../../command-skills.js';
 import type { ResourceDetector, DetectArgs } from './types.js';
 import { lazyAgentMap } from '../writers/lazy-map.js';
 
@@ -26,9 +30,13 @@ function buildCommandsDetector(agent: AgentId): ResourceDetector {
       const commandsDir = path.join(agentDir, agentConfig.commandsSubdir);
       if (!fs.existsSync(commandsDir)) return [];
       const ext = agentConfig.format === 'toml' ? '.toml' : '.md';
-      return fs.readdirSync(commandsDir)
+      const nativeCommands = fs.readdirSync(commandsDir)
         .filter(f => f.endsWith(ext))
         .map(f => f.replace(new RegExp(`\\${ext}$`), ''));
+      if (!shouldAlsoInstallCommandAsSkill(agent, version)) return nativeCommands;
+
+      const commandSkills = new Set(listCommandSkillsInVersion(agentDir));
+      return nativeCommands.filter((name) => commandSkills.has(name));
     },
   };
 }
