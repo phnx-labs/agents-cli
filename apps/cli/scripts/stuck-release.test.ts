@@ -10,6 +10,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'child_process';
+import * as fs from 'fs';
 import * as path from 'path';
 
 const SCRIPT = path.resolve(__dirname, 'stuck-release.sh');
@@ -68,6 +69,55 @@ describe('stuck-release: nothing stuck', () => {
 
   it('reports nothing for an empty tag list', () => {
     expect(stuck('1.20.81', [])).toBeNull();
+  });
+});
+
+describe('stuck-release: release.sh must consume the tag list fail-closed', () => {
+  // This pins a bug that was actually shipped in this PR's first draft and only
+  // caught on a second pass. `remote_version_tags` calls `die` when it cannot
+  // read origin, so the guard looks fail-closed — but if release.sh consumes it
+  // as `done < <(remote_version_tags)`, the `die` exits only the process
+  // substitution's SUBSHELL. The loop then reads an empty list, no stuck tag is
+  // found, and the release bumps straight past the stuck version: fail-OPEN,
+  // the exact widening the guard exists to prevent.
+  const RELEASE_SH = fs.readFileSync(path.resolve(__dirname, 'release.sh'), 'utf-8');
+
+  it('demonstrates why: die inside a process substitution does NOT abort the script', () => {
+    const script = `
+      set -euo pipefail
+      die() { echo "DIED" >&2; exit 1; }
+      gather() { false || die "cannot read"; }
+      while read -r a; do :; done < <(gather)
+      echo "CONTINUED"
+    `;
+    const r = spawnSync('bash', ['-c', script], { encoding: 'utf-8' });
+    // The subshell died, yet the script ran to completion and exited 0.
+    expect(r.stdout).toContain('CONTINUED');
+    expect(r.status).toBe(0);
+  });
+
+  it('demonstrates the safe form: a command substitution does abort it', () => {
+    const script = `
+      set -euo pipefail
+      die() { echo "DIED" >&2; exit 1; }
+      gather() { false || die "cannot read"; }
+      RAW="$(gather)"
+      while read -r a; do :; done <<< "$RAW"
+      echo "CONTINUED"
+    `;
+    const r = spawnSync('bash', ['-c', script], { encoding: 'utf-8' });
+    expect(r.stdout).not.toContain('CONTINUED');
+    expect(r.status).toBe(1);
+  });
+
+  it('release.sh uses the safe form', () => {
+    expect(RELEASE_SH).toMatch(/REMOTE_TAG_LINES="\$\(remote_version_tags\)"/);
+    // The unsafe form must not appear as actual code. It is named once in a
+    // comment explaining the trap, so match a line that is not a comment.
+    const unsafe = RELEASE_SH.split('\n').filter(
+      (l) => !l.trimStart().startsWith('#') && l.includes('< <(remote_version_tags)'),
+    );
+    expect(unsafe).toEqual([]);
   });
 });
 

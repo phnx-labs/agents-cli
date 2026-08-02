@@ -461,6 +461,14 @@ green "Bump: $BUMP ($PHNX_LATEST -> $TARGET)"
 # disables the guard and the release bumps straight past a stuck version -- the
 # exact widening this check exists to stop. If we cannot read the tags, we do not
 # know whether it is safe to proceed, so we stop.
+#
+# The result is consumed via a command substitution below and fed to the loop as
+# a here-string -- NOT `done < <(remote_version_tags)`. That distinction is the
+# whole guard: a process substitution runs in a subshell, so `die` there exits
+# only the subshell, the loop reads an empty list, and release.sh sails on with
+# "no stuck tag found" -- fail-OPEN, the precise bug this function exists to
+# prevent. A command substitution's non-zero status propagates to the assignment
+# under `set -e`, so the script actually stops.
 remote_version_tags() {
   local out
   out="$(git ls-remote --tags origin 'refs/tags/v*' 2>&1)" \
@@ -472,6 +480,7 @@ remote_version_tags() {
 # directly (scripts/stuck-release.test.ts); this block only gathers the facts it
 # needs -- the pushed tags, and whether the registry has each one.
 TAG_FACTS=""
+REMOTE_TAG_LINES="$(remote_version_tags)"
 while read -r _sha _ref; do
   v="${_ref#refs/tags/v}"
   [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
@@ -484,7 +493,7 @@ while read -r _sha _ref; do
   else
     TAG_FACTS+="$v no"$'\n'
   fi
-done < <(remote_version_tags)
+done <<< "$REMOTE_TAG_LINES"
 
 UNPUBLISHED_TAG="$(printf '%s' "$TAG_FACTS" | scripts/stuck-release.sh "$PHNX_LATEST" || true)"
 
