@@ -1,0 +1,554 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan · agents-cli release train</title>
+<style>
+  :root{
+    --bg:#0a0a0a; --panel:#111312; --panel2:#161a18; --ink:#e7ece8; --dim:#8b938c;
+    --line:#26302a; --accent:#a3e635; --amber:#f5c451; --red:#ff6b6b; --cyan:#5ad6c0;
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  }
+  :root[data-theme="light"]{
+    --bg:#faf9f6; --panel:#ffffff; --panel2:#f2f4f0; --ink:#1a1c1a; --dim:#5c655c;
+    --line:#e2e6df; --accent:#4d7c0f; --amber:#b45309; --red:#dc2626; --cyan:#0e7490;
+  }
+  :root[data-theme="light"] .fig{background:#0e120f;border-color:#26302a}
+  :root[data-theme="light"] .fig figcaption{color:#8b938c}
+  :root[data-theme="light"] .fig figcaption b{color:#e7ece8}
+  :root[data-theme="light"] .legend{color:#8b938c}
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1000px;margin:0 auto;padding:56px 28px 120px}
+  header.hero{border-bottom:1px solid var(--line);padding-bottom:28px;margin-bottom:40px}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--accent);margin:0 0 14px}
+  h1{font-size:34px;line-height:1.15;margin:0 0 12px;font-weight:700;letter-spacing:-.01em}
+  h1 .accent{color:var(--accent)}
+  .sub{color:var(--dim);font-size:17px;max-width:70ch;margin:0}
+  .meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+  .chip{font-family:var(--mono);font-size:11.5px;color:var(--dim);border:1px solid var(--line);
+    border-radius:999px;padding:4px 11px;background:var(--panel)}
+  .chip b{color:var(--ink);font-weight:500}
+  .chip.bad b{color:var(--red)}
+  h2{font-size:23px;margin:52px 0 8px;letter-spacing:-.01em;scroll-margin-top:20px}
+  h2 .n{font-family:var(--mono);color:var(--accent);font-size:15px;margin-right:10px;opacity:.85}
+  h3{font-size:16.5px;margin:26px 0 8px;color:var(--ink)}
+  p{margin:10px 0}
+  .lead{color:var(--dim)}
+  code{font-family:var(--mono);font-size:.88em;background:var(--panel2);border:1px solid var(--line);
+    border-radius:5px;padding:1.5px 6px;color:var(--cyan)}
+  a{color:var(--accent);text-decoration:none;border-bottom:1px solid transparent}
+  a:hover{border-bottom-color:var(--accent)}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:18px 0}
+  .fig{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:26px 22px 18px;margin:22px 0;overflow-x:auto}
+  .fig figcaption{font-family:var(--mono);font-size:12px;color:var(--dim);margin-top:14px;text-align:center}
+  .fig figcaption b{color:var(--ink)}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:760px){.grid2{grid-template-columns:1fr}}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);font-weight:500}
+  td code{font-size:.85em}
+  td.num{font-family:var(--mono);text-align:right}
+  .tag{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:6px;font-weight:600;white-space:nowrap}
+  .tag.a{background:rgba(163,230,53,.12);color:var(--accent);border:1px solid rgba(163,230,53,.3)}
+  .tag.b{background:rgba(90,214,192,.1);color:var(--cyan);border:1px solid rgba(90,214,192,.28)}
+  .tag.c{background:rgba(245,196,81,.1);color:var(--amber);border:1px solid rgba(245,196,81,.28)}
+  .tag.d{background:rgba(255,107,107,.1);color:var(--red);border:1px solid rgba(255,107,107,.3)}
+  ul{margin:10px 0;padding-left:22px}li{margin:6px 0}
+  .callout{border-left:3px solid var(--accent);background:var(--panel2);border-radius:0 10px 10px 0;
+    padding:14px 18px;margin:18px 0}
+  .callout.warn{border-left-color:var(--amber)}
+  .callout.bad{border-left-color:var(--red)}
+  .callout .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--accent);display:block;margin-bottom:5px}
+  .callout.warn .lbl{color:var(--amber)}
+  .callout.bad .lbl{color:var(--red)}
+  .toc{font-family:var(--mono);font-size:13px;display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:18px}
+  .toc a{color:var(--dim);border:0}.toc a:hover{color:var(--accent)}
+  pre{font-family:var(--mono);font-size:13px;background:#0c0f0d;border:1px solid var(--line);
+    border-radius:12px;padding:16px 18px;overflow-x:auto;line-height:1.55;color:#e7ece8}
+  pre .c{color:#8b938c}pre .k{color:#a3e635}pre .s{color:#5ad6c0}pre .r{color:#ff6b6b}
+  .foot{margin-top:60px;padding-top:22px;border-top:1px solid var(--line);color:var(--dim);
+    font-family:var(--mono);font-size:12px}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;font-family:var(--mono);font-size:11.5px;color:var(--dim);
+    justify-content:center;margin-top:6px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .sw{width:11px;height:11px;border-radius:3px;display:inline-block}
+  .themebtn{position:fixed;top:16px;right:16px;z-index:9;font-family:var(--mono);font-size:12px;
+    color:var(--dim);background:var(--panel);border:1px solid var(--line);border-radius:999px;
+    padding:6px 13px;cursor:pointer}
+  .themebtn:hover{color:var(--accent);border-color:var(--accent)}
+</style>
+</head>
+<body>
+<button class="themebtn" onclick="tt()" id="tb">◐ light</button>
+<script>
+  var r=document.documentElement;
+  function set(t){r.setAttribute('data-theme',t);document.getElementById('tb').textContent=(t==='light'?'◑ dark':'◐ light')}
+  set(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');
+  function tt(){set(r.getAttribute('data-theme')==='light'?'dark':'light')}
+</script>
+<div class="wrap">
+
+<header class="hero">
+  <p class="kicker">agents-cli · release pipeline · plan</p>
+  <h1>Stop every agent from releasing.<br>Give the release to <span class="accent">one train.</span></h1>
+  <p class="sub">Since the fleet scaled up, the npm publish stopped happening: on 2026-08-02 four
+  release attempts produced zero published versions, and <code>main</code> now sits three versions
+  ahead of the registry. The cause is not a slow pipeline. It is N agents each believing the
+  release is their job, with nothing preventing two of them from running it at once.</p>
+  <div class="meta">
+    <span class="chip">npm latest: <b>1.20.78</b></span>
+    <span class="chip">main: <b>1.20.81</b></span>
+    <span class="chip bad">unpublished tags: <b>2</b></span>
+    <span class="chip bad">last 8 releases shipped: <b>3 / 8</b></span>
+    <span class="chip">status: <b>awaiting go</b></span>
+  </div>
+  <nav class="toc">
+    <a href="#s1">01 · what the data says</a>
+    <a href="#s2">02 · where the time goes</a>
+    <a href="#s3">03 · the collision, verbatim</a>
+    <a href="#s4">04 · three root causes</a>
+    <a href="#s5">05 · the fix</a>
+    <a href="#s6">06 · files</a>
+    <a href="#s7">07 · unjamming today</a>
+    <a href="#s8">08 · tracking</a>
+  </nav>
+</header>
+
+<h2 id="s1"><span class="n">01</span>What the data says</h2>
+<p class="lead">Every number below comes from <code>gh run list --workflow=ci.yml</code>,
+<code>npm view @phnx-labs/agents-cli time</code>, <code>git tag</code>, and the session
+transcripts on this box. Nothing is estimated.</p>
+
+<p>Across 47 versions that reached a <code>release/v*</code> branch, 42 published. That looks
+healthy until you split by day. The pipeline worked fine at 1–3 concurrent agents and stopped
+working entirely once the fleet went wide.</p>
+
+<table>
+  <thead><tr><th>Version</th><th class="num">CI runs</th><th class="num">red</th><th>First CI (UTC)</th><th>npm publish</th><th class="num">wall</th><th>Outcome</th></tr></thead>
+  <tbody>
+    <tr><td><code>1.20.74</code></td><td class="num">1</td><td class="num">0</td><td>07-30 23:52</td><td>07-31 00:03</td><td class="num">10m</td><td><span class="tag a">published</span></td></tr>
+    <tr><td><code>1.20.75</code></td><td class="num">3</td><td class="num">2</td><td>08-01 11:39</td><td>—</td><td class="num">—</td><td><span class="tag d">abandoned</span></td></tr>
+    <tr><td><code>1.20.76</code></td><td class="num">2</td><td class="num">1</td><td>08-01 13:41</td><td>08-01 14:23</td><td class="num">42m</td><td><span class="tag a">published</span></td></tr>
+    <tr><td><code>1.20.77</code></td><td class="num">5</td><td class="num">1</td><td>08-01 16:40</td><td>08-01 19:46</td><td class="num">186m</td><td><span class="tag a">published</span></td></tr>
+    <tr><td><code>1.20.78</code></td><td class="num">1</td><td class="num">0</td><td>08-01 22:28</td><td>08-01 23:03</td><td class="num">35m</td><td><span class="tag a">published</span></td></tr>
+    <tr><td><code>1.20.79</code></td><td class="num">2</td><td class="num">1</td><td>08-02 00:17</td><td>—</td><td class="num">—</td><td><span class="tag d">merged, never tagged</span></td></tr>
+    <tr><td><code>1.20.80</code></td><td class="num">1</td><td class="num">0</td><td>08-02 01:23</td><td>—</td><td class="num">—</td><td><span class="tag d">tagged, publish refused</span></td></tr>
+    <tr><td><code>1.20.81</code></td><td class="num">1</td><td class="num">0</td><td>08-02 02:49</td><td>—</td><td class="num">—</td><td><span class="tag d">tagged, unpublished</span></td></tr>
+    <tr><td><code>1.20.82</code></td><td class="num">3</td><td class="num">2</td><td>08-02 03:53</td><td>—</td><td class="num">—</td><td><span class="tag d">PR open, CI red</span></td></tr>
+  </tbody>
+</table>
+
+<div class="callout bad">
+  <span class="lbl">the headline number</span>
+  On <b>2026-08-02, four release attempts produced zero published versions.</b> Three versions of
+  merged, CI-green work (1.20.79, 1.20.80, 1.20.81) are sitting on <code>main</code> that no user
+  can install. Eight feature PRs are queued behind them.
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 900 300" role="img" aria-label="Release throughput by day: attempted versus published">
+  <text x="12" y="20" font-family="monospace" font-size="12" fill="#8b938c">versions per day</text>
+  <line x1="60" y1="240" x2="870" y2="240" stroke="#26302a" stroke-width="1"/>
+  <line x1="60" y1="40" x2="60" y2="240" stroke="#26302a" stroke-width="1"/>
+  <text x="40" y="245" font-family="monospace" font-size="11" fill="#8b938c" text-anchor="end">0</text>
+  <text x="40" y="153" font-family="monospace" font-size="11" fill="#8b938c" text-anchor="end">6</text>
+  <text x="40" y="61" font-family="monospace" font-size="11" fill="#8b938c" text-anchor="end">12</text>
+  <line x1="60" y1="148" x2="870" y2="148" stroke="#26302a" stroke-width="1" stroke-dasharray="2 5"/>
+  <line x1="60" y1="56" x2="870" y2="56" stroke="#26302a" stroke-width="1" stroke-dasharray="2 5"/>
+
+  <!-- 07-07: 11 attempted 11 published -->
+  <rect x="90"  y="72"  width="34" height="168" fill="#a3e635" opacity=".85" rx="2"/>
+  <text x="107" y="258" font-family="monospace" font-size="10" fill="#8b938c" text-anchor="middle">07-07</text>
+  <rect x="180" y="163" width="34" height="77" fill="#a3e635" opacity=".85" rx="2"/>
+  <text x="197" y="258" font-family="monospace" font-size="10" fill="#8b938c" text-anchor="middle">07-13</text>
+  <rect x="270" y="194" width="34" height="46" fill="#a3e635" opacity=".85" rx="2"/>
+  <text x="287" y="258" font-family="monospace" font-size="10" fill="#8b938c" text-anchor="middle">07-14</text>
+  <rect x="360" y="194" width="34" height="46" fill="#a3e635" opacity=".85" rx="2"/>
+  <text x="377" y="258" font-family="monospace" font-size="10" fill="#8b938c" text-anchor="middle">07-19</text>
+  <rect x="450" y="225" width="34" height="15" fill="#a3e635" opacity=".85" rx="2"/>
+  <text x="467" y="258" font-family="monospace" font-size="10" fill="#8b938c" text-anchor="middle">07-30</text>
+  <!-- 08-01: 4 attempted, 3 published -->
+  <rect x="600" y="179" width="34" height="61" fill="#ff6b6b" opacity=".5" rx="2"/>
+  <rect x="600" y="194" width="34" height="46" fill="#a3e635" opacity=".85" rx="2"/>
+  <text x="617" y="258" font-family="monospace" font-size="10" fill="#8b938c" text-anchor="middle">08-01</text>
+  <text x="617" y="172" font-family="monospace" font-size="10" fill="#ff6b6b" text-anchor="middle">3/4</text>
+  <!-- 08-02: 4 attempted, 0 published -->
+  <rect x="700" y="179" width="34" height="61" fill="#ff6b6b" opacity=".5" rx="2"/>
+  <text x="717" y="258" font-family="monospace" font-size="10" fill="#8b938c" text-anchor="middle">08-02</text>
+  <text x="717" y="172" font-family="monospace" font-size="11" fill="#ff6b6b" text-anchor="middle" font-weight="bold">0/4</text>
+
+  <line x1="560" y1="40" x2="560" y2="248" stroke="#f5c451" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <text x="568" y="46" font-family="monospace" font-size="11" fill="#f5c451">fleet goes wide (10+ concurrent agents on this repo)</text>
+</svg>
+<div class="legend">
+  <span><i class="sw" style="background:#a3e635"></i> published to npm</span>
+  <span><i class="sw" style="background:#ff6b6b;opacity:.5"></i> attempted but stuck</span>
+</div>
+<figcaption><b>Figure 1.</b> Release throughput collapsed the day the fleet went wide, not gradually.
+Before 08-01: 39 attempts, 39 published. After: 8 attempts, 3 published.</figcaption>
+</figure>
+
+<h2 id="s2"><span class="n">02</span>Where the time goes</h2>
+<p class="lead">The crabbox is not the bottleneck. It is the fastest stage in the pipeline.</p>
+
+<p>A clean release takes about <b>40 minutes</b> of wall clock, and the median across the last 8
+versions is 42 minutes. Here is how that 40 minutes divides, measured per stage.</p>
+
+<figure class="fig">
+<svg viewBox="0 0 900 330" role="img" aria-label="Release pipeline stages with measured durations">
+  <defs>
+    <marker id="ar" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#5ad6c0"/>
+    </marker>
+  </defs>
+  <text x="12" y="20" font-family="monospace" font-size="12" fill="#8b938c">happy-path release, measured</text>
+
+  <!-- stage 1 crabbox -->
+  <rect x="30" y="48" width="150" height="70" rx="8" fill="#161a18" stroke="#5ad6c0" stroke-width="1.4"/>
+  <text x="105" y="72" font-family="monospace" font-size="12" fill="#e7ece8" text-anchor="middle">1 · crabbox</text>
+  <text x="105" y="90" font-family="monospace" font-size="10" fill="#8b938c" text-anchor="middle">Hetzner cpx62 VM</text>
+  <text x="105" y="106" font-family="monospace" font-size="13" fill="#5ad6c0" text-anchor="middle" font-weight="bold">~3 min</text>
+  <line x1="180" y1="83" x2="218" y2="83" stroke="#5ad6c0" stroke-width="1.5" marker-end="url(#ar)"/>
+
+  <!-- stage 2 CI matrix -->
+  <rect x="222" y="40" width="180" height="86" rx="8" fill="#161a18" stroke="#f5c451" stroke-width="1.8"/>
+  <text x="312" y="64" font-family="monospace" font-size="12" fill="#e7ece8" text-anchor="middle">2 · GH Actions matrix</text>
+  <text x="312" y="81" font-family="monospace" font-size="10" fill="#8b938c" text-anchor="middle">6 legs · win test = 750s</text>
+  <text x="312" y="99" font-family="monospace" font-size="13" fill="#f5c451" text-anchor="middle" font-weight="bold">9.5 min median</text>
+  <text x="312" y="116" font-family="monospace" font-size="10" fill="#ff6b6b" text-anchor="middle">39% of runs red</text>
+  <line x1="402" y1="83" x2="440" y2="83" stroke="#5ad6c0" stroke-width="1.5" marker-end="url(#ar)"/>
+
+  <!-- stage 3 merge+tag -->
+  <rect x="444" y="48" width="130" height="70" rx="8" fill="#161a18" stroke="#5ad6c0" stroke-width="1.4"/>
+  <text x="509" y="72" font-family="monospace" font-size="12" fill="#e7ece8" text-anchor="middle">3 · merge + tag</text>
+  <text x="509" y="90" font-family="monospace" font-size="10" fill="#8b938c" text-anchor="middle">squash, tag v1.20.x</text>
+  <text x="509" y="106" font-family="monospace" font-size="13" fill="#5ad6c0" text-anchor="middle" font-weight="bold">~1 min</text>
+  <line x1="574" y1="83" x2="612" y2="83" stroke="#5ad6c0" stroke-width="1.5" marker-end="url(#ar)"/>
+
+  <!-- stage 4 mac-mini -->
+  <rect x="616" y="40" width="255" height="86" rx="8" fill="#161a18" stroke="#f5c451" stroke-width="1.8"/>
+  <text x="743" y="64" font-family="monospace" font-size="12" fill="#e7ece8" text-anchor="middle">4 · mac-mini home base</text>
+  <text x="743" y="81" font-family="monospace" font-size="10" fill="#8b938c" text-anchor="middle">build · sign · notarize · npm publish</text>
+  <text x="743" y="99" font-family="monospace" font-size="13" fill="#f5c451" text-anchor="middle" font-weight="bold">26 min</text>
+  <text x="743" y="116" font-family="monospace" font-size="10" fill="#8b938c" text-anchor="middle">Apple notary service dominates</text>
+
+  <!-- failure arrows -->
+  <path d="M312,126 L312,168 L105,168 L105,126" fill="none" stroke="#ff6b6b" stroke-width="1.3" stroke-dasharray="4 4"/>
+  <text x="200" y="184" font-family="monospace" font-size="10" fill="#ff6b6b" text-anchor="middle">red matrix → full restart (median 2 CI runs per release)</text>
+
+  <!-- the real killer -->
+  <rect x="30" y="212" width="841" height="88" rx="8" fill="#1a1210" stroke="#ff6b6b" stroke-width="1.5"/>
+  <text x="50" y="236" font-family="monospace" font-size="12" fill="#ff6b6b" font-weight="bold">the actual failure mode — not on this timeline</text>
+  <text x="50" y="257" font-family="monospace" font-size="11" fill="#e7ece8">A second agent starts its own release between stage 2 and stage 4. Stage 4's guard fires:</text>
+  <text x="50" y="276" font-family="monospace" font-size="11.5" fill="#f5c451">"merged tree != built tree -- refusing to publish (concurrent merge or stray push)"  rc=1</text>
+  <text x="50" y="294" font-family="monospace" font-size="11" fill="#8b938c">The version is now merged and tagged but never published. No agent owns finishing it.</text>
+</svg>
+<div class="legend">
+  <span><i class="sw" style="background:#5ad6c0"></i> fast, reliable</span>
+  <span><i class="sw" style="background:#f5c451"></i> slow leg</span>
+  <span><i class="sw" style="background:#ff6b6b"></i> failure path</span>
+</div>
+<figcaption><b>Figure 2.</b> Stage durations from a real release (1.20.78: PR merged 22:37:40Z,
+npm publish 23:03:45Z). The crabbox costs 3 minutes. The two expensive legs are the Windows CI
+matrix and Apple notarization, and neither is why releases stop.</figcaption>
+</figure>
+
+<div class="callout warn">
+  <span class="lbl">on the crabbox specifically</span>
+  You suspected the crabbox was the cost. It isn't. A <code>cpx62</code> runs the full 7,499-test
+  Linux suite in <b>105 seconds</b> (vitest self-reported), about <b>3 minutes</b> including
+  provision and rsync. Leave it alone. The Windows CI leg takes <b>750 seconds</b> — four times
+  longer — and it is the leg that flakes.
+</div>
+
+<h2 id="s3"><span class="n">03</span>The collision, verbatim</h2>
+<p class="lead">This is not a theory about what might happen with concurrent agents. It is in the
+transcripts, timestamped.</p>
+
+<p>At <code>01:24:23Z</code> on 08-02, session <code>051e16d1</code> ran <code>pgrep -af release.sh</code>
+before firing its own release and found another agent already mid-release on the same version:</p>
+
+<pre><span class="c">// session 051e16d1, 01:24:51Z — its own words</span>
+A <span class="k">sibling session</span> (version 2.1.186, PID 458550) is already running the exact
+same release — <span class="s">release.sh 1.20.80 --apply --yes</span>. That's why my run saw a dirty
+tree: the two were racing. Two concurrent releases would clobber each other
+(same <span class="s">release/v1.20.80</span> branch, tag, publish).</pre>
+
+<p>That agent did the right thing and stood down. It then watched for 30 minutes, and at
+<code>01:56:41Z</code> reported the outcome:</p>
+
+<pre><span class="c">// session 051e16d1, 01:56:41Z</span>
+PR #1622 <span class="k">merged</span> (01:34:31Z, CI all-green), so 1.20.80 is on main — but the
+sibling's release then <span class="r">failed at the publish gate</span>:
+  <span class="r">merged tree != built tree -- refusing to publish (concurrent merge or stray push)</span>
+and exited rc=1. <span class="k">That guard tripped because of the concurrent runs.</span>
+The publish/tag never happened.</pre>
+
+<p>The guard is correct. It is doing exactly what it should: refusing to publish a tree that
+differs from the one CI tested. The defect is that nothing <em>prevented</em> the concurrency in
+the first place, and nothing owns the half-finished release afterwards.</p>
+
+<table>
+  <thead><tr><th>Cost of that one collision</th><th>Measured</th></tr></thead>
+  <tbody>
+    <tr><td>Agent sessions that ran <code>release.sh</code> in 7 days</td><td class="num">13 sessions, 107 invocations</td></tr>
+    <tr><td>Two colliding sessions on 08-02 01:12–03:31</td><td class="num">$76 of tokens, 253 agent-minutes</td></tr>
+    <tr><td>Versions shipped by those two sessions</td><td class="num">0</td></tr>
+  </tbody>
+</table>
+
+<h2 id="s4"><span class="n">04</span>Three root causes</h2>
+
+<h3>1. Every agent thinks releasing is its job — because we told them so</h3>
+<p>The <code>release-to-fleet</code> rule in <code>AGENTS.md</code> says a merge "implicitly
+authorizes the rest of the chain" and that stopping at merged is "a banned stop". That rule was
+written for one agent working alone, where it is correct. With 10+ agents merging into the same
+repo, it instructs all ten to drive the release train simultaneously. This is the primary cause,
+and it lives in the memory file, not the code.</p>
+
+<h3>2. <code>release.sh</code> has no mutual exclusion</h3>
+<p>Grepping <code>apps/cli/scripts/release.sh</code> (1,004 lines) for <code>flock</code>,
+<code>lock</code>, or <code>mutex</code> returns nothing but comments about concurrent-merge
+<em>drift</em>. The script handles the symptom (it detects a drifted tree and refuses) but never
+claims exclusivity. Two agents on two machines can and do enter it at once.</p>
+
+<h3>3. A failed release leaves an orphan, and the next agent bumps past it</h3>
+<p>When the publish gate refuses, the version stays merged and tagged but unpublished. The next
+agent runs <code>validate-bump.sh</code>, sees <code>main</code> at 1.20.80, and cuts
+<b>1.20.81</b> rather than finishing 1.20.80. Repeat three times and you get today's state:
+npm at .78, main at .81, an open PR for .82. The queue drains backwards.</p>
+
+<div class="callout">
+  <span class="lbl">what is not a root cause</span>
+  The crabbox (3 min), the pipeline design (the self-routing home base is sound and the tree-match
+  guard is what kept a bad publish from shipping), and reviewer latency. Do not rewrite these.
+</div>
+
+<h2 id="s5"><span class="n">05</span>The fix — three layers</h2>
+<p class="lead">Policy stops the contention, a lease makes it enforceable, and a scheduled train
+makes releasing someone's actual job instead of everyone's side quest.</p>
+
+<figure class="fig">
+<svg viewBox="0 0 900 320" role="img" aria-label="Before and after: every agent releasing versus a single release train">
+  <text x="20" y="22" font-family="monospace" font-size="12" fill="#ff6b6b">TODAY — every agent drives the whole chain</text>
+  <text x="480" y="22" font-family="monospace" font-size="12" fill="#a3e635">PROPOSED — agents merge, the train ships</text>
+  <line x1="450" y1="10" x2="450" y2="300" stroke="#26302a" stroke-width="1"/>
+
+  <!-- BEFORE -->
+  <g>
+    <rect x="20" y="42" width="72" height="30" rx="5" fill="#161a18" stroke="#26302a"/>
+    <text x="56" y="62" font-family="monospace" font-size="10" fill="#8b938c" text-anchor="middle">agent A</text>
+    <rect x="20" y="82" width="72" height="30" rx="5" fill="#161a18" stroke="#26302a"/>
+    <text x="56" y="102" font-family="monospace" font-size="10" fill="#8b938c" text-anchor="middle">agent B</text>
+    <rect x="20" y="122" width="72" height="30" rx="5" fill="#161a18" stroke="#26302a"/>
+    <text x="56" y="142" font-family="monospace" font-size="10" fill="#8b938c" text-anchor="middle">agent C</text>
+    <rect x="20" y="162" width="72" height="30" rx="5" fill="#161a18" stroke="#26302a"/>
+    <text x="56" y="182" font-family="monospace" font-size="10" fill="#8b938c" text-anchor="middle">agent D</text>
+
+    <path d="M92,57 L200,110" fill="none" stroke="#ff6b6b" stroke-width="1.2"/>
+    <path d="M92,97 L200,110" fill="none" stroke="#ff6b6b" stroke-width="1.2"/>
+    <path d="M92,137 L200,117" fill="none" stroke="#ff6b6b" stroke-width="1.2"/>
+    <path d="M92,177 L200,124" fill="none" stroke="#ff6b6b" stroke-width="1.2"/>
+
+    <rect x="202" y="92" width="120" height="52" rx="6" fill="#1a1210" stroke="#ff6b6b" stroke-width="1.5"/>
+    <text x="262" y="112" font-family="monospace" font-size="10.5" fill="#ff6b6b" text-anchor="middle">release.sh</text>
+    <text x="262" y="128" font-family="monospace" font-size="9.5" fill="#8b938c" text-anchor="middle">no lock</text>
+
+    <text x="262" y="176" font-family="monospace" font-size="10" fill="#ff6b6b" text-anchor="middle">tree mismatch</text>
+    <text x="262" y="192" font-family="monospace" font-size="10" fill="#ff6b6b" text-anchor="middle">publish refused</text>
+    <path d="M262,146 L262,164" stroke="#ff6b6b" stroke-width="1.2" stroke-dasharray="3 3"/>
+
+    <rect x="200" y="222" width="124" height="42" rx="6" fill="#161a18" stroke="#26302a"/>
+    <text x="262" y="240" font-family="monospace" font-size="10" fill="#8b938c" text-anchor="middle">npm</text>
+    <text x="262" y="255" font-family="monospace" font-size="11" fill="#ff6b6b" text-anchor="middle">3 versions behind</text>
+    <text x="262" y="288" font-family="monospace" font-size="10" fill="#8b938c" text-anchor="middle">0 of 4 shipped on 08-02</text>
+  </g>
+
+  <!-- AFTER -->
+  <g>
+    <rect x="478" y="42" width="72" height="30" rx="5" fill="#161a18" stroke="#26302a"/>
+    <text x="514" y="62" font-family="monospace" font-size="10" fill="#8b938c" text-anchor="middle">agent A</text>
+    <rect x="478" y="82" width="72" height="30" rx="5" fill="#161a18" stroke="#26302a"/>
+    <text x="514" y="102" font-family="monospace" font-size="10" fill="#8b938c" text-anchor="middle">agent B</text>
+    <rect x="478" y="122" width="72" height="30" rx="5" fill="#161a18" stroke="#26302a"/>
+    <text x="514" y="142" font-family="monospace" font-size="10" fill="#8b938c" text-anchor="middle">agent C</text>
+    <rect x="478" y="162" width="72" height="30" rx="5" fill="#161a18" stroke="#26302a"/>
+    <text x="514" y="182" font-family="monospace" font-size="10" fill="#8b938c" text-anchor="middle">agent D</text>
+
+    <path d="M550,57 L604,110" fill="none" stroke="#a3e635" stroke-width="1.2"/>
+    <path d="M550,97 L604,112" fill="none" stroke="#a3e635" stroke-width="1.2"/>
+    <path d="M550,137 L604,118" fill="none" stroke="#a3e635" stroke-width="1.2"/>
+    <path d="M550,177 L604,124" fill="none" stroke="#a3e635" stroke-width="1.2"/>
+
+    <rect x="606" y="94" width="118" height="48" rx="6" fill="#161a18" stroke="#a3e635" stroke-width="1.4"/>
+    <text x="665" y="113" font-family="monospace" font-size="10.5" fill="#a3e635" text-anchor="middle">merge to main</text>
+    <text x="665" y="129" font-family="monospace" font-size="9.5" fill="#8b938c" text-anchor="middle">+ changelog fragment</text>
+
+    <path d="M724,118 L762,118" stroke="#5ad6c0" stroke-width="1.5" marker-end="url(#ar)"/>
+    <rect x="766" y="86" width="112" height="64" rx="6" fill="#111a11" stroke="#a3e635" stroke-width="1.8"/>
+    <text x="822" y="106" font-family="monospace" font-size="10.5" fill="#a3e635" text-anchor="middle">release train</text>
+    <text x="822" y="121" font-family="monospace" font-size="9" fill="#8b938c" text-anchor="middle">routine on mac-mini</text>
+    <text x="822" y="135" font-family="monospace" font-size="9" fill="#8b938c" text-anchor="middle">every 4h · holds lease</text>
+
+    <path d="M822,150 L822,214" stroke="#a3e635" stroke-width="1.4" marker-end="url(#ar)"/>
+    <rect x="762" y="222" width="120" height="42" rx="6" fill="#161a18" stroke="#a3e635"/>
+    <text x="822" y="240" font-family="monospace" font-size="10" fill="#8b938c" text-anchor="middle">npm</text>
+    <text x="822" y="255" font-family="monospace" font-size="11" fill="#a3e635" text-anchor="middle">at most 4h behind</text>
+    <text x="822" y="288" font-family="monospace" font-size="10" fill="#8b938c" text-anchor="middle">1 releaser, never 2</text>
+  </g>
+</svg>
+<div class="legend">
+  <span><i class="sw" style="background:#ff6b6b"></i> contended path</span>
+  <span><i class="sw" style="background:#a3e635"></i> serialized path</span>
+</div>
+<figcaption><b>Figure 3.</b> The change is not to the pipeline. It is to who is allowed to enter it.
+Feature agents stop at merge; a single scheduled train owns everything downstream.</figcaption>
+</figure>
+
+<h3>Layer A — policy: a feature agent's job ends at merge</h3>
+<p>Rewrite the <code>release-to-fleet</code> rule so the ship chain is the <em>release train's</em>
+contract, not every agent's. A feature agent is done when its PR is merged and it has added a
+changelog fragment. It does not run <code>release.sh</code>. The rule keeps its teeth for the one
+role that owns releasing.</p>
+
+<h3>Layer B — mechanism: an origin-side release lease</h3>
+<p>The lock must live on <code>origin</code>, not on a filesystem — agents run on
+<code>zion</code>, <code>mac-mini</code>, <code>yosemite-s0/s1</code>, and Hetzner boxes, so
+<code>flock</code> cannot see across them. A git ref is an atomic compare-and-swap that every box
+already has credentials for:</p>
+
+<pre><span class="c"># claim: fails if another releaser already holds it — this is the mutex</span>
+git push origin HEAD:refs/release-lock/claim <span class="c"># non-forced push to a fresh ref = CAS</span>
+
+<span class="c"># the lease carries who/when/what, so a stale one is diagnosable</span>
+<span class="k">holder</span>=<span class="s">$(hostname)/$AGENT_SESSION_ID</span>  <span class="k">version</span>=<span class="s">1.20.82</span>  <span class="k">claimed</span>=<span class="s">2026-08-02T04:00Z</span>
+
+<span class="c"># released on success OR failure via a trap; a lease older than 45 min is</span>
+<span class="c"># reclaimable, and reclaiming logs the stale holder rather than silently stealing</span></pre>
+<p>Second requirement on the same layer: <b>resume before you start.</b> If npm's latest is behind
+<code>main</code> and an unpublished <code>v*</code> tag exists, <code>release.sh</code> must finish
+that version rather than cut a new one. This is the check that would have prevented .79 → .80 →
+.81 stacking up.</p>
+
+<h3>Layer C — cadence: a scheduled release train</h3>
+<p>Run the release as a routine on <code>mac-mini</code>. It is already the home base: it holds the
+Developer ID cert and the npm token, so there is no ssh hop and no Touch ID prompt. The routine
+holds the lease for its whole run, so an agent that tries to release mid-train is refused by
+Layer B rather than by luck.</p>
+<table>
+  <thead><tr><th>Cadence</th><th>Effect</th><th>Verdict</th></tr></thead>
+  <tbody>
+    <tr><td><b>Nightly (1×/day)</b></td><td>npm up to 24h behind main. At the observed rate of ~6 merges/day that is a large batch and a wide blast radius per release.</td><td><span class="tag c">too slow</span></td></tr>
+    <tr><td><b>Every 4 hours</b></td><td>6 trains/day, matching the observed merge rate. npm at most 4h behind. Each release stays small enough to bisect.</td><td><span class="tag a">recommended</span></td></tr>
+    <tr><td><b>On-merge, queued</b></td><td>Lowest latency, but 40 min of pipeline per merge means the queue never drains at 6 merges/day, and each run burns a crabbox.</td><td><span class="tag c">later, if needed</span></td></tr>
+  </tbody>
+</table>
+<p>The train skips itself when there is nothing to do: if <code>main</code>'s version equals npm's
+latest and no unpublished tag exists, it exits without provisioning a crabbox.</p>
+
+<h3>Layer D — fix the Windows flake that is blocking today's release</h3>
+<p>PR #1642 is red right now, and not from a real test failure. The Windows leg reports
+<b>7,358 passed, 0 failed</b> and then exits 1:</p>
+<pre><span class="r">Error: [vitest-pool]: Worker forks emitted error.</span>
+<span class="r">Caused by: Error: Worker exited unexpectedly</span>
+  Test Files  577 passed | 22 skipped (600)
+       Tests  <span class="k">7358 passed</span> | 317 skipped (7675)
+      Errors  <span class="r">1 error</span>
+    Duration  750.24s</pre>
+<p>A vitest worker fork crashes on the Windows runner after the suite has passed. Fix at the source
+(<code>pool: 'threads'</code> or reduced fork concurrency for the Windows matrix leg), not with a
+retry loop. This alone accounts for a large share of the 39% red rate on release branches.</p>
+
+<h2 id="s6"><span class="n">06</span>Files</h2>
+<table>
+  <thead><tr><th></th><th>File</th><th>Change</th></tr></thead>
+  <tbody>
+    <tr><td><span class="tag b">edit</span></td><td><code>~/.agents/rules/release-to-fleet.md</code></td><td>Scope the ship chain to the release-train role. Feature agents stop at merge + changelog fragment.</td></tr>
+    <tr><td><span class="tag b">edit</span></td><td><code>apps/cli/scripts/release.sh</code></td><td>Claim/release an origin-side lease around the whole run; refuse to start a new version while an unpublished tag exists.</td></tr>
+    <tr><td><span class="tag a">new</span></td><td><code>apps/cli/scripts/release-lease.sh</code></td><td>Claim, renew, release, and reclaim-if-stale the <code>refs/release-lock/*</code> ref. Unit-tested against a real bare repo.</td></tr>
+    <tr><td><span class="tag a">new</span></td><td><code>apps/cli/scripts/release-lease.test.ts</code></td><td>Two concurrent claims: exactly one wins. Stale lease reclaim after the TTL. Release on failure via trap.</td></tr>
+    <tr><td><span class="tag a">new</span></td><td>routine <code>release-train</code> on <code>mac-mini</code></td><td>Every 4h: if main &gt; npm or an unpublished tag exists, drive one release to npm, then upgrade the fleet.</td></tr>
+    <tr><td><span class="tag b">edit</span></td><td><code>.github/workflows/ci.yml</code></td><td>Windows matrix leg: switch the vitest pool so a worker fork crash cannot fail a green suite.</td></tr>
+    <tr><td><span class="tag c">keep</span></td><td>crabbox / <code>sandbox.sh</code></td><td>3 minutes for 7,499 tests. Unchanged.</td></tr>
+    <tr><td><span class="tag c">keep</span></td><td>tree-match publish guard</td><td>Correct behaviour. It caught a genuinely unsafe publish. Unchanged.</td></tr>
+  </tbody>
+</table>
+
+<h2 id="s7"><span class="n">07</span>Unjamming today, before any of the above</h2>
+<p>The backlog needs draining regardless of which fix lands. In order:</p>
+<ol>
+  <li>Fix the Windows vitest pool so #1642's matrix can go green.</li>
+  <li>Publish the stuck versions. <code>1.20.80</code> and <code>1.20.81</code> are tagged and were
+  CI-green; <code>release.sh</code> documents a re-run as the recovery path, rebuilding from the
+  merged PR's CI-tested tree.</li>
+  <li>Land <code>1.20.82</code> through the normal path once its CI is green.</li>
+  <li>Verify with the live signal: <code>npm view @phnx-labs/agents-cli version</code> equals main,
+  then <code>agents --version</code> on each reachable host.</li>
+</ol>
+<div class="callout warn">
+  <span class="lbl">do this with the fleet quiet</span>
+  Ten agents are live on this repo right now, two of them in <code>agents-cli</code> itself. Draining
+  the backlog while they merge reproduces the exact collision this plan is about. The lease
+  (Layer B) should land first, or the drain should run with a manual hold announced to the fleet.
+</div>
+
+<h2 id="s8"><span class="n">08</span>Tracking</h2>
+<p class="lead">What this plan spawned, and where each layer stands.</p>
+<table>
+  <thead><tr><th>Layer</th><th>PR</th><th>State</th></tr></thead>
+  <tbody>
+    <tr><td><b>A</b> — policy: feature agents stop at merge</td><td><a href="https://github.com/muqsitnawaz/.agents/pull/173">muqsitnawaz/.agents#173</a></td><td>open · needs a non-author merge (governance change, no CI or automated reviewer on that repo)</td></tr>
+    <tr><td><b>C</b> — the release-train routine (mac-mini, every 4h)</td><td><a href="https://github.com/muqsitnawaz/.agents/pull/173">muqsitnawaz/.agents#173</a></td><td>same PR as Layer A</td></tr>
+    <tr><td><b>B</b> — origin-side lease + stuck-tag guard</td><td><a href="https://github.com/phnx-labs/agents-cli/pull/1662">phnx-labs/agents-cli#1662</a></td><td>open · CI green, 28 tests. Review caught a blocking defect (a 45-min TTL with no renewal could have the lease reclaimed mid-release); fixed with renewal + fail-closed <code>verify</code> before merge/tag/publish. A second pass then caught that the fail-closed tag guard was itself fail-open through a process substitution.</td></tr>
+    <tr><td><b>D</b> — cross-platform CI is red on <code>main</code></td><td><a href="https://github.com/phnx-labs/agents-cli/issues/1674">agents-cli#1674</a></td><td>diagnosed with a root cause, filed. Blocks every release right now.</td></tr>
+    <tr><td>Backlog drain (1.20.80 / .81 / .82)</td><td>—</td><td>blocked on D, and deliberately sequenced after B so the drain itself runs under the lease</td></tr>
+  </tbody>
+</table>
+
+<div class="callout bad">
+  <span class="lbl">layer D — the release is blocked by something bigger than a flake</span>
+  Dispatching <code>ci.yml</code> manually on <code>main</code>
+  (<a href="https://github.com/phnx-labs/agents-cli/actions/runs/30734112958">run 30734112958</a>) shows
+  <b>macOS and Windows both failing, Linux green</b>. The failure is
+  <code>setup.test.ts › agents setup secrets › makes future secrets create/import use the saved
+  backend default</code>: on macOS the <code>secrets create</code> path reaches for the signed
+  Keychain helper app, which no CI checkout has (it is built and codesigned only during release),
+  so <code>readBundle()</code> returns nothing and the assertion fails. Linux never needs the helper,
+  so it stayed green and the PR merged.
+  <br><br>
+  The question worth settling is which thing is actually broken: <b>a <code>file</code>-backed bundle
+  should arguably not touch the macOS Keychain helper at all</b>, which would make this a real product
+  defect on any Mac whose install lacks the signed bundle, not just CI.
+  <br><br>
+  Separately and still unexplained: a vitest worker-fork crash on Windows <em>after</em> a fully green
+  suite (7,358 passed, 0 failed, then <code>Worker exited unexpectedly</code> → exit 1). Which test
+  leaves the handle is not identified; <code>win-mini</code> is in the fleet but its SSH credential is
+  not in <code>agents secrets</code>, so the available repro path is <code>workflow_dispatch</code>
+  iterations. Retry-looping the job would be a band-aid over an unknown crash and is not proposed.
+</div>
+
+<div class="callout warn">
+  <span class="lbl">the structural gap that let it through</span>
+  <code>ci.yml</code> runs the cross-platform matrix only on <code>release/**</code> branches and
+  <code>v*</code> tags, never on PRs to <code>main</code> — deliberately, because macOS is billed 10×
+  and Windows 2×. The cost reasoning is sound; the consequence is that a PR can merge fully green and
+  break the release, and it surfaces days later as a blocked publish attributed to nobody. A cheap
+  middle ground is one macOS leg on PRs to <code>main</code>, or a nightly matrix whose red is
+  attributed to the PR that caused it.
+</div>
+
+<p class="foot">agents-cli · release pipeline · evidence: gh run list (200 runs), npm registry
+times, 13 session transcripts · next: go / reshape</p>
+
+</div>
+</body>
+</html>
