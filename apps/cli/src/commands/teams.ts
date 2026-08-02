@@ -1313,7 +1313,15 @@ export function registerTeamsCommands(program: Command): void {
         byTeam.set(a.task_name, arr);
       }
 
-      let rows = buildTeamRowsFromSnapshots(registry, everyAgent).rows;
+      // Same lineage enrichment as loadTeamRows — without it this listing is the
+      // one `teams list` surface that silently drops the "spawned by" column.
+      let spawners: Map<string, TeamSpawner> | undefined;
+      try {
+        spawners = teamSpawners();
+      } catch {
+        // The session index is an enrichment here; a missing one drops the column.
+      }
+      let rows = buildTeamRowsFromSnapshots(registry, everyAgent, spawners).rows;
 
       // --- query: substring match on team name ---
       if (query) {

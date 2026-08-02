@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { classifyTeamSession, enrichTeamOrigins, filterTeamSessions } from './team-filter.js';
+import { _resetTeamOriginIndex, classifyTeamSession, enrichTeamOrigins, filterTeamSessions } from './team-filter.js';
 import type { SessionMeta } from './types.js';
 
 function makeSession(overrides: Partial<SessionMeta> = {}): SessionMeta {
@@ -24,6 +24,7 @@ describe('classifyTeamSession', () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-team-filter-'));
     savedEnv = process.env.AGENTS_TEAMS_DIR;
     process.env.AGENTS_TEAMS_DIR = tmpDir;
+    _resetTeamOriginIndex();
   });
 
   afterEach(() => {
@@ -144,6 +145,7 @@ describe('filterTeamSessions', () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-team-filter-'));
     savedEnv = process.env.AGENTS_TEAMS_DIR;
     process.env.AGENTS_TEAMS_DIR = tmpDir;
+    _resetTeamOriginIndex();
   });
 
   afterEach(() => {
@@ -244,6 +246,7 @@ describe('enrichTeamOrigins', () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-team-enrich-'));
     savedEnv = process.env.AGENTS_TEAMS_DIR;
     process.env.AGENTS_TEAMS_DIR = tmpDir;
+    _resetTeamOriginIndex();
   });
 
   afterEach(() => {
@@ -269,6 +272,34 @@ describe('enrichTeamOrigins', () => {
     expect(teammate.teamOrigin?.team).toBe('redesign');
     expect(teammate.teamOrigin?.parentSessionId).toBe('orch-1');
     expect(ordinary.teamOrigin).toBeUndefined();
+  });
+
+  it('resolves a teammate whose transcript id is not its agent-dir name', () => {
+    // The directory is named for the AGENT id; the harness mints its own session
+    // id, recorded separately as remote_session_id. Keying only on the directory
+    // name missed most teammates — on a live box, 14 of 16 records were reachable
+    // only this way — so their rows could not name their team at all.
+    writeTeammate('agent-dir-id', {
+      name: 'core',
+      mode: 'edit',
+      task_name: 'checklists',
+      parent_session_id: 'orch-1',
+      remote_session_id: 'transcript-id-42',
+    });
+
+    const [row] = enrichTeamOrigins([makeSession({ id: 'transcript-id-42' })]);
+
+    expect(row.teamOrigin?.team).toBe('checklists');
+    expect(row.teamOrigin?.handle).toBe('core');
+    expect(row.teamOrigin?.parentSessionId).toBe('orch-1');
+  });
+
+  it('still resolves a teammate under its agent-dir name', () => {
+    writeTeammate('same-id', { name: 'ui', task_name: 'redesign', remote_session_id: 'other-id' });
+    const [byDir] = enrichTeamOrigins([makeSession({ id: 'same-id' })]);
+    const [byRemote] = enrichTeamOrigins([makeSession({ id: 'other-id' })]);
+    expect(byDir.teamOrigin?.team).toBe('redesign');
+    expect(byRemote.teamOrigin?.team).toBe('redesign');
   });
 
   it('preserves a teamOrigin the peer already resolved', () => {

@@ -32,6 +32,28 @@
   `apps/cli/src/commands/sessions.ts`, `apps/cli/src/commands/sessions-browser.ts`,
   `apps/cli/src/lib/session/remote-list.ts`.
 
+- **Teammate records are found by the session id they actually produced.** A
+  teammate's directory under `teams/agents/` is named for its *agent* id, but the
+  harness mints its own session id and the spawn records it separately as
+  `remote_session_id`. `classifyTeamSession` looked only under the directory
+  name, so most teammates were unreachable — on a live box, 14 of 16 records
+  resolved only via `remote_session_id` — and their rows could not name their
+  team however complete the record was. Both keys are now registered in one
+  index built per process, which also replaces the `existsSync` + `readFileSync`
+  the old path paid for every row in the pool. Source:
+  `apps/cli/src/lib/session/team-filter.ts`.
+
+- **`detectSpawnedTeam` no longer indexes prose or flag values as team names.**
+  Rendering the value exposed that it had been wrong for most of the rows that
+  had one: on a live index of 4627 sessions, 11 carried a team and 6 of those
+  read `2` or `t`. It matched documentation and echoed output rather than only
+  executed commands; its flag-skip used `\s` and so ran across a newline to
+  capture a word from the next line; and a value-taking flag did not swallow its
+  value, so `--device auto` left `auto` looking like the team name — which was
+  corrupting real detections, not just adding false ones. After the fix the same
+  index resolves ten teams, every one of them a real team name. Source:
+  `apps/cli/src/lib/session/state.ts`.
+
 - **The session preview pane sanitizes peer-supplied `plan` and directory
   text.** A remote row's metadata is JSON the peer sent and `parseRemoteList`
   hands over verbatim; `sanitizeMeta` covered `topic`/`label`/`cwd`/`todos` but
