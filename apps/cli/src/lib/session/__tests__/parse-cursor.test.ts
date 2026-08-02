@@ -29,7 +29,11 @@ describe('Cursor session parsing and discovery metadata', () => {
   test('maps text and tool-use blocks and ignores turn_ended', () => {
     const events = parseCursor(transcriptPath);
     expect(events).toHaveLength(4);
-    expect(events[0]).toMatchObject({ agent: 'cursor', type: 'message', role: 'user' });
+    expect(events[0]).toMatchObject({
+      agent: 'cursor', type: 'message', role: 'user',
+      content: 'Inspect the public CLI documentation and summarize the session commands.',
+      timestamp: '2026-08-02T10:51:00.000Z',
+    });
     expect(events[1]).toMatchObject({
       agent: 'cursor', type: 'message', role: 'assistant',
       content: 'I will inspect the session documentation.',
@@ -45,6 +49,9 @@ describe('Cursor session parsing and discovery metadata', () => {
   });
 
   test('joins authoritative cwd, title, and timestamps from chats meta.json', () => {
+    const unrelatedMetaPath = path.join(root, '.cursor', 'chats', 'another-workspace', 'other-session', 'meta.json');
+    fs.mkdirSync(path.dirname(unrelatedMetaPath), { recursive: true });
+    fs.writeFileSync(unrelatedMetaPath, JSON.stringify({ title: 'Different session' }));
     const metaPath = path.join(root, '.cursor', 'chats', 'workspace-hash', SESSION_ID, 'meta.json');
     fs.mkdirSync(path.dirname(metaPath), { recursive: true });
     fs.writeFileSync(metaPath, JSON.stringify({

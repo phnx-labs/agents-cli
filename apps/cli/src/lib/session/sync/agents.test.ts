@@ -13,6 +13,7 @@ describe('SYNC_AGENTS expanded beyond claude+codex', () => {
   it('includes the four agents from RUSH-1467', () => {
     const ids = SYNC_AGENTS.map(s => s.id);
     expect(ids).toContain('droid');
+    expect(ids).toContain('cursor');
     expect(ids).toContain('grok');
     expect(ids).toContain('kimi');
     expect(ids).toContain('opencode');
@@ -49,6 +50,12 @@ describe('sessionIdFromRelKey', () => {
     expect(
       spec('droid').sessionIdFromRelKey('-home-muqsit/2bd0daa3-8336-464a-bf51-42b1ea22cd30.jsonl'),
     ).toBe('2bd0daa3-8336-464a-bf51-42b1ea22cd30');
+  });
+
+  it('cursor: parent directory name (UUID)', () => {
+    expect(
+      spec('cursor').sessionIdFromRelKey('encoded-cwd/agent-transcripts/019f5a97-33ec-7001-8aad-4c42ae1d30d9/019f5a97-33ec-7001-8aad-4c42ae1d30d9.jsonl'),
+    ).toBe('019f5a97-33ec-7001-8aad-4c42ae1d30d9');
   });
 
   it('grok: parent directory name (UUID)', () => {

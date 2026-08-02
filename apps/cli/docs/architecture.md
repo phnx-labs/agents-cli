@@ -237,11 +237,11 @@ The rich `SessionActivity` maps to a coarse `ActiveStatus` the renderer and coun
 use: `working → running`, `waiting_input → input_required`, `idle → idle`. Rich
 state is derived for **every tracked harness**: Claude/Codex take the fast bounded
 byte-tail (`readSessionTailWithRaw`, which also yields tokens/sec), and every other
-tracked kind (grok, droid, rush, gemini, kimi, hermes, opencode, antigravity) is
+tracked kind (grok, droid, rush, gemini, kimi, hermes, opencode, antigravity, cursor) is
 parsed by its own parser and run through the same `inferSessionState`
 (`computeLiveSignals` → `parseSession`). `findSessionFileForKind` locates the
 transcript for all of them — Claude off disk by cwd, the rest via the session index
-(`latestSessionFileForCwd`). Only an **opaque/untracked** kind (cursor) or an
+(`latestSessionFileForCwd`). Only an **opaque/untracked** kind or an
 unreadable/empty transcript has no rich state, and then one canonical function,
 `resolveFallbackStatus(sessionFile, pidAlive)`, decides the status:
 

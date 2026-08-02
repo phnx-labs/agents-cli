@@ -27,7 +27,7 @@ describe('effectiveMode — harness parity gate', () => {
   });
 
   it('downgrades resume→rehydrate for every non-resumable agent (no silent skip)', () => {
-    const nonResumable: SessionAgentId[] = ['gemini', 'antigravity', 'openclaw', 'rush', 'hermes', 'grok', 'kimi', 'droid'];
+    const nonResumable: SessionAgentId[] = ['gemini', 'antigravity', 'openclaw', 'rush', 'hermes', 'grok', 'kimi', 'droid', 'cursor'];
     for (const agent of nonResumable) {
       const r = effectiveMode(meta(agent), 'resume');
       expect(r).toEqual({ mode: 'rehydrate', downgraded: true });

@@ -1976,7 +1976,7 @@ export function registerRunCommand(program: Command): void {
         const { buildContinuePrompt } = await import('../lib/loop.js');
 
         // Freshen the index for this agent before any lookup (incremental, cached).
-        // AgentId is wider than SessionAgentId (cursor/amp/… keep no transcripts);
+        // AgentId is wider than SessionAgentId (amp/kiro/goose/copilot keep no transcripts);
         // those simply yield no matches and fall through to the not-found error.
         const sessionAgent = agent as import('../lib/session/types.js').SessionAgentId;
         await discoverSessions({ agent: sessionAgent, version });

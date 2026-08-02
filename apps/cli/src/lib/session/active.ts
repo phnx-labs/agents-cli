@@ -600,13 +600,13 @@ export function resolveFallbackStatus(
  * Locate the live transcript for an agent process. Claude files are keyed by cwd
  * (+ optional session uuid), so they resolve straight off disk. Every OTHER
  * tracked harness — Codex (date-partitioned), plus grok / droid / rush / gemini /
- * kimi / hermes / opencode / antigravity (per-session dirs, SQLite, single-JSON)
+ * kimi / hermes / opencode / antigravity / cursor (per-session dirs, SQLite, single-JSON)
  * — is resolved through the session index by cwd: the newest indexed transcript
  * for that cwd, bounded by ACTIVE_SESSION_STALE_MS so a live pid never borrows a
  * weeks-old transcript. This is what lets a live NON-claude/codex agent get a real
  * status instead of falling through to `unknown` (the file feeds
- * {@link computeLiveSignals}). An opaque kind we don't track (cursor) still yields
- * undefined here and degrades honestly to a live `running`.
+ * {@link computeLiveSignals}). An opaque kind we don't track still yields undefined
+ * here and degrades honestly to a live `running`.
  */
 export function findSessionFileForKind(kind: string, cwd?: string, sessionId?: string): string | undefined {
   if (!cwd) return undefined;
@@ -661,10 +661,10 @@ function parseTailEventsForKind(agent: SessionAgentId, sessionFile: string): Ses
  * Claude/Codex take the fast bounded byte-tail ({@link readSessionTailWithRaw}) —
  * the hot path, and the only two that also yield throughput (their raw lines
  * carry usage the event model drops). EVERY OTHER tracked harness (grok, droid,
- * rush, gemini, kimi, hermes, opencode, antigravity) is parsed with its own
+ * rush, gemini, kimi, hermes, opencode, antigravity, cursor) is parsed with its own
  * parser and run through the SAME {@link inferSessionState}, so a live
  * non-claude/codex agent gets a real working/waiting/idle instead of the blanket
- * `unknown` it used to fall through to. An opaque/untracked kind (cursor) or an
+ * `unknown` it used to fall through to. An opaque/untracked kind or an
  * unreadable/empty transcript yields an empty signal set, and the caller's
  * {@link resolveFallbackStatus} reports the honest live floor (`running`).
  */

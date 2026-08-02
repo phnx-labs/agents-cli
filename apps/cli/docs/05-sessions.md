@@ -24,6 +24,7 @@ Per-agent on-disk session files (not owned by agents-cli, read-only):
 ~/.local/share/opencode/project/*/storage/session/...     # OpenCode
 ~/Library/Application Support/OpenClaw/sessions/*.json    # OpenClaw
 ~/.cursor/projects/*/agent-transcripts/*/*.jsonl          # Cursor
+~/.cursor/chats/<workspace-hash>/<uuid>/meta.json         # Cursor cwd/title/timestamps
 
 Routine archives (owned by agents-cli, durable):
 ~/.agents/.history/runs/<routine>/<run-id>/sessions/<agent>/...
@@ -68,6 +69,11 @@ create / delete / rename bumps the dir mtime and forces a full re-walk of that d
 Set `AGENTS_SESSIONS_NO_DIR_LEDGER=1` to disable the short-circuit and force the old
 full per-file walk.
 
+Cursor is installed outside agents-cli's version homes. Once any managed agent
+version exists, the default managed scope excludes Cursor transcripts; pass
+`--unmanaged` (for example, `agents sessions --agent cursor --unmanaged`) to list
+them. `--all` controls age filtering and does not replace `--unmanaged`.
+
 When a **Claude**, **Codex**, or **Kimi** transcript that already has an index row
 grows, the scan does not re-read it from the top. The `scan_ledger` stores a
 resumable continuation (`parser_state` — a byte offset plus an accumulator snapshot,
@@ -91,7 +97,7 @@ from-scratch full reparse, even when a signal straddles two scans. Both incremen
 paths apply only newline-terminated lines and defer a complete-but-unterminated
 trailing record to the next pass, so a record written before its `'\n'` is flushed
 is never double-counted. Grok is not incremental — it reads a whole `summary.json`,
-not an append-only JSONL; Gemini still full-parses each changed file.
+not an append-only JSONL; Gemini and Cursor still full-parse each changed file.
 
 ## SessionMeta (list output)
 

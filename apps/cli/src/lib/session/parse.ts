@@ -1671,6 +1671,16 @@ export function parseCursor(filePath: string): SessionEvent[] {
   return parseAnthropicMessageJsonl(filePath, 'cursor');
 }
 
+function parseCursorUserText(text: string): { text: string; timestamp?: string } {
+  const query = text.match(/<user_query>\s*([\s\S]*?)\s*<\/user_query>/);
+  const timestampText = text.match(/<timestamp>\s*([\s\S]*?)\s*<\/timestamp>/)?.[1]?.trim();
+  const parsedTimestamp = timestampText ? Date.parse(timestampText) : Number.NaN;
+  return {
+    text: (query?.[1] ?? text).trim(),
+    timestamp: Number.isNaN(parsedTimestamp) ? undefined : new Date(parsedTimestamp).toISOString(),
+  };
+}
+
 function parseAnthropicMessageJsonl(filePath: string, agent: 'cursor' | 'droid'): SessionEvent[] {
   const content = safeReadSessionFile(filePath);
   const lines = content.split('\n').filter(l => l.trim());
@@ -1689,14 +1699,18 @@ function parseAnthropicMessageJsonl(filePath: string, agent: 'cursor' | 'droid')
     if (raw.type === 'turn_ended' || (agent === 'droid' && raw.type !== 'message')) continue;
     const message = raw.message;
     const wireRole = agent === 'cursor' ? raw.role : message?.role;
-    if (!message || !['user', 'assistant'].includes(wireRole)) continue;
+    if (!message || (agent === 'cursor' && !['user', 'assistant'].includes(wireRole))) continue;
 
     const role = wireRole === 'user' ? 'user' : 'assistant';
-    const timestamp = raw.timestamp || fallbackTimestamp;
+    let timestamp = raw.timestamp || fallbackTimestamp;
     const blocks = message.content;
 
     if (typeof blocks === 'string') {
-      const text = blocks.trim();
+      const parsed = agent === 'cursor' && role === 'user'
+        ? parseCursorUserText(blocks)
+        : { text: blocks.trim(), timestamp: undefined };
+      const text = parsed.text;
+      timestamp = parsed.timestamp || timestamp;
       if (text) events.push({ type: 'message', agent, timestamp, role, content: text });
       continue;
     }
@@ -1704,7 +1718,11 @@ function parseAnthropicMessageJsonl(filePath: string, agent: 'cursor' | 'droid')
 
     for (const block of blocks) {
       if (block.type === 'text') {
-        const text = (block.text || '').trim();
+        const parsed = agent === 'cursor' && role === 'user'
+          ? parseCursorUserText(block.text || '')
+          : { text: (block.text || '').trim(), timestamp: undefined };
+        const text = parsed.text;
+        timestamp = parsed.timestamp || timestamp;
         if (text && !(role === 'user' && text.startsWith('<system-reminder>'))) {
           events.push({ type: 'message', agent, timestamp, role, content: text });
         }

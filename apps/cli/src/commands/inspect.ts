@@ -46,7 +46,7 @@ import { listMcpServerConfigs, discoverMcpConfigsFromRepo, type McpYamlConfig } 
 import { discoverPlugins, discoverPluginsInDir, pluginResourceGroups, type PluginResourceGroup } from '../lib/plugins.js';
 import { PLUGIN_GROUP_COLORS } from './plugins.js';
 import { countSessionsInScope } from '../lib/session/discover.js';
-import type { SessionAgentId } from '../lib/session/types.js';
+import { isSessionTrackedAgent } from '../lib/session/types.js';
 import { damerauLevenshtein } from '../lib/fuzzy.js';
 import { terminalWidth, truncateToWidth, stringWidth, stripAnsi } from '../lib/session/width.js';
 
@@ -1353,12 +1353,7 @@ function safeStat(p: string): fs.Stats | null {
   try { return fs.statSync(p); } catch { return null; }
 }
 
-const SESSION_AGENTS: ReadonlySet<string> = new Set([
-  'claude', 'codex', 'gemini', 'opencode', 'openclaw', 'rush', 'hermes', 'grok', 'kimi', 'droid',
-]);
-
 function safeCountSessions(agent: AgentId): number {
-  if (!SESSION_AGENTS.has(agent)) return 0;
-  try { return countSessionsInScope({ agent: agent as SessionAgentId }); } catch { return 0; }
+  if (!isSessionTrackedAgent(agent)) return 0;
+  try { return countSessionsInScope({ agent }); } catch { return 0; }
 }
-

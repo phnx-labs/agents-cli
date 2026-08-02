@@ -100,6 +100,12 @@ export const SYNC_AGENTS: SyncAgentSpec[] = [
     sessionIdFromRelKey: rel => path.basename(rel).replace(/\.jsonl$/, ''),
   },
   {
+    id: 'cursor',
+    subdir: 'projects',
+    // Cursor writes <encoded-cwd>/agent-transcripts/<uuid>/<uuid>.jsonl.
+    sessionIdFromRelKey: rel => path.basename(path.dirname(rel)),
+  },
+  {
     id: 'grok',
     subdir: 'sessions',
     // Grok sessions are multi-file directories under ~/.grok/sessions/<cwd>/<uuid>/.

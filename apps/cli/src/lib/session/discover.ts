@@ -1006,7 +1006,10 @@ async function readRoutineArchiveMeta(
   }
 
   if (agent === 'cursor') {
-    const result = await readCursorMeta(filePath);
+    // PR #1723 archives Cursor routine transcripts; preserve version resolution
+    // when this reader consumes those archives.
+    const currentVersion = await getCurrentAgentVersion('cursor');
+    const result = readCursorMeta(filePath, currentVersion);
     return result ? { ...result, meta: decorateRoutineSession(result.meta, info) } : null;
   }
 
@@ -4324,11 +4327,6 @@ function readCursorChatMeta(filePath: string, sessionId: string): any | undefine
   return undefined;
 }
 
-function cursorUserText(text: string): string {
-  const query = text.match(/<user_query>\s*([\s\S]*?)\s*<\/user_query>/);
-  return (query?.[1] || text).trim();
-}
-
 /** Parse one Cursor transcript and enrich it with the matching chat meta.json. */
 export function readCursorMeta(
   filePath: string,
@@ -4353,7 +4351,7 @@ export function readCursorMeta(
   const cwd = normalizeCwd(typeof chatMeta?.cwd === 'string' ? chatMeta.cwd : '');
   const userTexts = events
     .filter((event) => event.type === 'message' && event.role === 'user' && event.content)
-    .map((event) => cursorUserText(event.content!));
+    .map((event) => event.content!);
   const firstUserText = userTexts[0];
   const title = typeof chatMeta?.title === 'string' && chatMeta.title.trim()
     ? chatMeta.title.trim()

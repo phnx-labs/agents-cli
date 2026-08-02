@@ -42,9 +42,9 @@ describe('computeLiveSignals wires every tracked harness into real state', () =>
 
   it('an untracked/opaque kind yields no state (falls back to the live floor upstream)', () => {
     const file = freshCopy('grok-idle/chat_history.jsonl', 'chat_history.jsonl');
-    // `cursor` has no parser — computeLiveSignals returns {} and the caller's
+    // `amp` is not session-tracked — computeLiveSignals returns {} and the caller's
     // resolveFallbackStatus reports `running` for the live process.
-    expect(computeLiveSignals('cursor', file, path.dirname(file), true)).toEqual({});
+    expect(computeLiveSignals('amp', file, path.dirname(file), true)).toEqual({});
   });
 
   it('no transcript file yields no state', () => {
