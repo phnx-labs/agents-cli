@@ -1,15 +1,17 @@
 import AppKit
 import Carbon.HIToolbox
 
-// agents-cli menu bar helper. A no-Dock (.accessory) status-bar app whose
-// lifecycle is tied to the routines scheduler daemon — the daemon spawns it on
-// start and it self-terminates when the daemon's PID goes away.
+// agents-cli menu bar helper. A no-Dock (.accessory) status-bar app run as a
+// launchd user agent (`com.phnx-labs.agents-menubar`, KeepAlive), installed and
+// started by `agents menubar enable` -> install-menubar.ts. Do NOT hand-launch
+// the interactive mode: launchd starts it in the GUI session, which is the only
+// context where its global chords can hold the Accessibility grant they need
+// (see Guards.swift).
 //
 // Usage:
-//   MenubarHelper                 # daemon-spawned; quits when daemon stops
-//   MENUBAR_STANDALONE=1 ...      # dev: stay up even with no daemon running
-//   AGENTS_BIN=/path/to/agents    # override the `agents` binary location
+//   MenubarHelper                 # status item + global hotkeys (launchd-started)
 //   MenubarHelper --notify ...    # one-shot: post a desktop notification, exit
+//   AGENTS_BIN=/path/to/agents    # override the `agents` binary location
 
 // One-shot notification delivery for the daemon (RUSH-2030). Posts and exits
 // WITHOUT starting the status-bar UI, so the daemon can fire branded, actionable
@@ -40,6 +42,18 @@ if ProcessInfo.processInfo.environment["MENUBAR_ISSUE_TEST"] == "1" {
     IssueSelfTest.run()
 }
 
+// Launch-guard self-test: exercise the remote-shell and argument predicates
+// that gate the interactive mode below, print PASS/FAIL, exit. See Guards.swift.
+if ProcessInfo.processInfo.environment["MENUBAR_GUARD_TEST"] == "1" {
+    GuardsSelfTest.run()
+}
+
+// Everything past here installs the status item and registers the global
+// chords, so it must only run where those chords can actually be serviced.
+// Refuses an ssh-started launch or an unrecognized flag — the two ways a helper
+// that can never hold the Accessibility grant has ended up owning Cmd-Shift-V.
+Guards.enforceForInteractiveLaunch()
+
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 
@@ -60,8 +74,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let mods = UInt32(cmdKey | shiftKey)
         hotkey.register([
             .init(id: HotkeyManager.clipID, keyCode: UInt32(kVK_ANSI_V), modifiers: mods,
+                  label: "Cmd-Shift-V (paste clip reference)",
                   onFire: { Clip.run() }),
             .init(id: HotkeyManager.promptID, keyCode: UInt32(kVK_ANSI_O), modifiers: mods,
+                  label: "Cmd-Shift-O (quick capture)",
                   onFire: { [weak self] in self?.promptController.summon() }),
         ])
         // Preview the quick-issue panel without the global hotkey (QA / a machine

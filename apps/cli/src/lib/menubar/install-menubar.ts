@@ -451,6 +451,55 @@ export function installMenubarLaunchAgentOnUpgrade(): void {
   }
 }
 
+/** A live MenubarHelper process: its pid and the executable it is running. */
+export interface MenubarProcess {
+  pid: number;
+  executable: string;
+}
+
+/** Parse `ps -axo pid=,<field>=` into pid -> field. The field is the rest of the
+ *  line, so a path containing spaces (App Support does) survives intact. */
+function parsePsLines(psOutput: string): Map<number, string> {
+  const out = new Map<number, string>();
+  for (const line of psOutput.split('\n')) {
+    const m = /^\s*(\d+)\s+(.+)$/.exec(line);
+    if (m) out.set(Number(m[1]), m[2]);
+  }
+  return out;
+}
+
+/**
+ * Split the live MenubarHelper processes into the installed bundle's own
+ * (`running`) and every other copy (`foreign`).
+ *
+ * `pgrep -f MenubarHelper` conflated the two, so a stray dev build could hold
+ * the global Cmd-Shift-V chord (RegisterEventHotKey is first-come) while status
+ * still reported a healthy `running: yes` — the paste was dead and nothing said
+ * so. A foreign copy is the thing to look for, so name it.
+ *
+ * Identity comes from `comm` (the resolved executable), never from a substring
+ * of the command line: matching the latter flags any shell that merely mentions
+ * MenubarHelper. `command` is consulted only to drop `--notify` one-shots.
+ */
+export function classifyMenubarProcesses(
+  commOutput: string,
+  commandOutput: string,
+  installedExec: string,
+): { running: boolean; foreign: MenubarProcess[] } {
+  const commands = parsePsLines(commandOutput);
+  const foreign: MenubarProcess[] = [];
+  let running = false;
+  for (const [pid, executable] of parsePsLines(commOutput)) {
+    if (path.basename(executable) !== 'MenubarHelper') continue;
+    // `--notify` is a one-shot that posts a notification and exits; it runs the
+    // installed binary but never claims the status item or the chords.
+    if ((commands.get(pid) || '').includes('--notify')) continue;
+    if (executable === installedExec) running = true;
+    else foreign.push({ pid, executable });
+  }
+  return { running, foreign };
+}
+
 export interface MenubarStatus {
   platform: string;
   source: string | null;
@@ -460,15 +509,25 @@ export interface MenubarStatus {
   stale: boolean;
   serviceInstalled: boolean;
   running: boolean;
+  /** Live MenubarHelper processes that are NOT the installed bundle. */
+  foreignInstances: MenubarProcess[];
   disabledByUser: boolean;
 }
 
 export function getMenubarStatus(): MenubarStatus {
   const dest = installedAppPath();
   let running = false;
+  let foreignInstances: MenubarProcess[] = [];
   if (onDarwin()) {
-    const r = spawnSync('pgrep', ['-f', 'MenubarHelper'], { stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf-8' });
-    running = r.status === 0 && (r.stdout || '').trim().length > 0;
+    const ps = (format: string) =>
+      spawnSync('ps', ['-axo', format], { stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf-8' });
+    const comm = ps('pid=,comm=');
+    const command = ps('pid=,command=');
+    if (comm.status === 0 && command.status === 0) {
+      const c = classifyMenubarProcesses(comm.stdout || '', command.stdout || '', installedExecutablePath());
+      running = c.running;
+      foreignInstances = c.foreign;
+    }
   }
   const serviceInstalled = menubarServiceInstalled();
   return {
@@ -480,6 +539,7 @@ export function getMenubarStatus(): MenubarStatus {
     stale: onDarwin() && serviceInstalled && menubarSetupStale(),
     serviceInstalled,
     running,
+    foreignInstances,
     disabledByUser: menubarDisabledByUser(),
   };
 }

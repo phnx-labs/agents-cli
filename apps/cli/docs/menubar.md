@@ -16,6 +16,43 @@ session, running a routine).
 macOS only. It is auto-enabled for every user (see [Lifecycle](#lifecycle)); opt
 out with `agents menubar disable`.
 
+## Clip paste (`Cmd-Shift-V`)
+
+`Cmd-Shift-V` hands whatever is on the clipboard to the agent in the focused
+terminal as a native scp-style reference — `<host>:<abs-path>` — instead of
+pasting raw bytes that would mangle a terminal or an ssh'd session. A screenshot
+that lives only on the clipboard is written to
+`~/.agents/.history/attachments/`, a copied file is snapshotted there under an
+scp-safe name, and a copied directory is referenced in place. The agent reads
+the path directly when `host` is its own machine and `scp`s it otherwise, so the
+same token works whether the session is local or on another box.
+
+The paste synthesizes a `Cmd-V` keystroke, which needs an **Accessibility**
+grant for "Agents Menu Bar" (System Settings > Privacy & Security >
+Accessibility). Without it the helper copies the reference to the clipboard and
+notifies you to paste it yourself, so the clip is never lost.
+
+### Do not hand-launch the helper
+
+TCC grants are keyed to a code identity, and `RegisterEventHotKey` is
+first-come. A helper started **from an ssh session** therefore breaks the paste
+twice over: macOS attributes its Accessibility request to the responsible
+process, `/usr/libexec/sshd-keygen-wrapper`, so the prompt names a process whose
+grant does nothing for the helper — and granting it would let anything an ssh
+session spawns synthesize keystrokes — while the chord it registered no longer
+reaches the launchd-managed helper that *is* trusted.
+
+The interactive mode refuses to start in that situation, and refuses
+unrecognized arguments (an unknown flag used to fall through to the status-bar
+app, leaving a permanent second helper). Start it through launchd instead:
+
+```bash
+agents menubar enable      # works over ssh — launchd starts it in the GUI session
+```
+
+If a chord stops working, `agents menubar status` lists any other live helper
+process with its pid; end it and re-run `agents menubar enable`.
+
 ## Quick dispatch
 
 `Cmd-Shift-O` opens the Spotlight-style capture panel. Type a short request,
@@ -120,7 +157,11 @@ agents menubar status     # installed / running, versions, staleness; --json
 ```
 
 `status` reports the installed bundle version vs. the current CLI version and
-whether the install is stale (see [Lifecycle](#lifecycle)).
+whether the install is stale (see [Lifecycle](#lifecycle)). `running` tracks the
+**installed bundle** specifically, identified by its resolved executable; any
+other live `MenubarHelper` process is listed separately with its pid (
+`foreignInstances` in `--json`) because a second copy silently takes the global
+chords — see [Do not hand-launch the helper](#do-not-hand-launch-the-helper).
 
 ## Data sources
 

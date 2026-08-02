@@ -18,6 +18,7 @@ final class HotkeyManager {
         let id: UInt32          // EventHotKeyID.id, namespaced under 'AGCT'
         let keyCode: UInt32     // e.g. UInt32(kVK_ANSI_V)
         let modifiers: UInt32   // e.g. UInt32(cmdKey | shiftKey)
+        let label: String       // human name for the chord, e.g. "Cmd-Shift-V"
         let onFire: () -> Void
     }
 
@@ -56,11 +57,19 @@ final class HotkeyManager {
                                                  EventHotKeyID(signature: signature, id: b.id),
                                                  GetApplicationEventTarget(), 0, &ref)
             hotKeyRefs.append(ref)
-            // Registration fails if another app already owns the chord — surface
-            // it rather than silently never firing.
+            // Registration fails if another app already owns the chord. stderr
+            // goes to the launchd log, which nobody reads — a stolen Cmd-Shift-V
+            // then looks exactly like a broken paste. Notify as well, naming the
+            // chord, so the conflict is visible where the user is.
             if registered != noErr {
                 FileHandle.standardError.write(Data(
                     "hotkey: registration failed id=\(b.id) (register=\(registered))\n".utf8))
+                Notifier.post(
+                    title: "Hotkey unavailable",
+                    body: "\(b.label) is already registered by another app, so it will not work here. "
+                        + "A second copy of the menu bar helper is the usual cause — "
+                        + "check it with `agents menubar status`.",
+                    subtitle: b.label)
             }
         }
 

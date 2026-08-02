@@ -179,7 +179,21 @@ enum Clip {
     // pattern in computer-helper/AX.swift. Uses a .hidSystemState source so
     // terminals wrapped in Electron/webview accept the event.
     private static func inject(_ text: String) {
-        guard ensureAccessibility() else { return }
+        guard ensureAccessibility() else {
+            // The clip IS persisted at this point — only the keystroke failed.
+            // Returning silently made a denied grant indistinguishable from a
+            // dead hotkey, so hand the reference over in the one place the user
+            // is looking, and say what to grant.
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            Notifier.post(
+                title: "Paste needs Accessibility",
+                body: "Copied \(text) to the clipboard instead — press Cmd-V to paste it. "
+                    + "Grant \"Agents Menu Bar\" in System Settings > Privacy & Security > "
+                    + "Accessibility to have the hotkey type it for you.",
+                subtitle: "System Settings > Privacy & Security > Accessibility")
+            return
+        }
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(text, forType: .string)

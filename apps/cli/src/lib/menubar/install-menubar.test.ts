@@ -4,12 +4,77 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import {
+  classifyMenubarProcesses,
   codesignVerifies,
   ensureValidSignature,
   isMenubarStale,
   menubarPlistNeedsRepoint,
   restartMenubarLaunchAgent,
 } from './install-menubar.js';
+
+// Regression guard for the STOLEN-HOTKEY blind spot. Status used
+// `pgrep -f MenubarHelper`, which matches ANY process with that name — so a
+// stray dev build launched over ssh reported `running: yes` while it, not the
+// installed bundle, held the global Cmd-Shift-V chord (RegisterEventHotKey is
+// first-come). The paste was dead and status said everything was fine. The
+// fixtures below are the real `ps -axo pid=,command=` lines from that incident.
+describe('classifyMenubarProcesses', () => {
+  // Note the space in "Application Support" — the reason pid/field parsing takes
+  // the rest of the line rather than splitting on whitespace.
+  const INSTALLED =
+    '/Users/muqsit/Library/Application Support/agents-cli/MenubarHelper.app/Contents/MacOS/MenubarHelper';
+  // Orphaned SwiftPM debug build from a deleted worktree, started over ssh.
+  const ORPHAN =
+    '/Users/muqsit/src/github.com/muqsitnawaz/agents-cli/.agents/worktrees/menubar-verify/apps/cli/menubar/.build/arm64-apple-macosx/debug/MenubarHelper';
+
+  it('reports the installed bundle as running', () => {
+    const r = classifyMenubarProcesses(`74027 ${INSTALLED}`, `74027 ${INSTALLED}`, INSTALLED);
+    expect(r.running).toBe(true);
+    expect(r.foreign).toEqual([]);
+  });
+
+  it('flags a stray build as foreign, not as the installed helper running', () => {
+    const r = classifyMenubarProcesses(`58619 ${ORPHAN}`, `58619 .build/debug/MenubarHelper --self-test`, INSTALLED);
+    expect(r.running).toBe(false);
+    expect(r.foreign).toEqual([{ pid: 58619, executable: ORPHAN }]);
+  });
+
+  it('separates the two when both are alive — the state that broke the paste', () => {
+    const comm = `74027 ${INSTALLED}\n58619 ${ORPHAN}`;
+    const r = classifyMenubarProcesses(comm, comm, INSTALLED);
+    expect(r.running).toBe(true);
+    expect(r.foreign.map((p) => p.pid)).toEqual([58619]);
+  });
+
+  it('ignores --notify one-shots (installed binary, but never the status item)', () => {
+    const r = classifyMenubarProcesses(
+      `91002 ${INSTALLED}`,
+      `91002 ${INSTALLED} --notify --title Done`,
+      INSTALLED,
+    );
+    expect(r.running).toBe(false);
+    expect(r.foreign).toEqual([]);
+  });
+
+  // The false positive that a command-line substring match produced: this
+  // shell is not a helper, it merely mentions one.
+  it('does not flag a shell whose command line merely mentions MenubarHelper', () => {
+    const r = classifyMenubarProcesses(
+      '18933 /bin/zsh',
+      '18933 /bin/zsh -c cp /bin/sleep .build/debug/MenubarHelper',
+      INSTALLED,
+    );
+    expect(r.running).toBe(false);
+    expect(r.foreign).toEqual([]);
+  });
+
+  it('ignores unrelated processes', () => {
+    const ps = '3675 /System/Library/.../com.apple.Passwords.MenuBarExtra\n1 /sbin/launchd';
+    const r = classifyMenubarProcesses(ps, ps, INSTALLED);
+    expect(r.running).toBe(false);
+    expect(r.foreign).toEqual([]);
+  });
+});
 
 // Regression guard for the upgrade self-heal: before this, the helper was only
 // (re)installed when no service existed, so `npm update` left the menu bar

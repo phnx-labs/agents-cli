@@ -74,6 +74,14 @@ export function registerMenubarCommands(program: Command): void {
       console.log(`  current version    ${chalk.gray(s.currentVersion)}`);
       console.log(`  bundle source      ${s.source ? chalk.gray(s.source) : chalk.red('missing (cannot enable)')}`);
       console.log(`  disabled by user   ${yn(s.disabledByUser)}`);
+      if (s.foreignInstances.length > 0) {
+        // A second copy steals the global chords from the installed bundle
+        // (RegisterEventHotKey is first-come), so Cmd-Shift-V/O stop working
+        // with no other symptom. Name the pid so it can be ended.
+        console.log(chalk.yellow(`\n  ${s.foreignInstances.length} other helper process running — it holds Cmd-Shift-V/O instead of the installed one:`));
+        for (const p of s.foreignInstances) console.log(chalk.gray(`    ${p.pid}  ${p.executable}`));
+        console.log(chalk.gray('  End it, then `agents menubar enable` to restart the installed helper.'));
+      }
       if (s.stale) {
         console.log(chalk.yellow('\n  Installed helper is stale — runs on next `agents` startup, or `agents menubar enable` now.'));
       } else if (!s.serviceInstalled && !s.disabledByUser) {
