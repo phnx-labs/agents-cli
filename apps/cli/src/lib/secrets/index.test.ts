@@ -41,6 +41,24 @@ describe('keychainOperationPrompt', () => {
       duration: '7 days',
     })).toBe("Claude is requesting to unlock the 'prod' bundle for 7 days to deploy the API.");
   });
+
+  it('names the session (short-id) that triggered the read (RUSH-1971)', () => {
+    expect(keychainOperationPrompt({
+      agent: 'Claude',
+      bundle: 'prod',
+      sessionId: 'e0a1b2c3-4d5e-6f70-8192-a3b4c5d6e7f8',
+      reason: 'to deploy the API',
+      duration: '7 days',
+    })).toBe(
+      "Claude is requesting to unlock the 'prod' bundle (session e0a1b2c3) for 7 days to deploy the API.",
+    );
+  });
+
+  it('omits the session clause when no sessionId is supplied', () => {
+    expect(keychainOperationPrompt({ agent: 'Claude', bundle: 'prod' })).toBe(
+      "Claude is requesting to unlock the 'prod' bundle.",
+    );
+  });
 });
 
 describe('buildAddGenericPasswordArgs (RUSH-1764: value never in argv)', () => {

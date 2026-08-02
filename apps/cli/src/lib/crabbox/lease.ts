@@ -217,7 +217,7 @@ export function buildBootstrapScript(opts: LeaseRunOptions): string {
     // (leaseAndRun, before this script). Here — after ENSURE_AGENTS_CLI installed
     // the CLI — we materialize that config into the runtime home. Gated by
     // copySetup (cleared for --bare). Best-effort; a refresh failure never aborts.
-    copySetup ? [step('copy-setup'), 'agents repo refresh >/dev/null 2>&1 || true'].join('\n') : '',
+    copySetup ? [step('copy-setup'), 'agents sync --local -y >/dev/null 2>&1 || true'].join('\n') : '',
     // Marker on its own line: the command layer shows everything before this as
     // setup progress and everything after (the agent's output) verbatim.
     `echo ${q(LEASE_AGENT_MARKER)}`,
@@ -256,7 +256,7 @@ export async function leaseAndRun(opts: LeaseRunOptions): Promise<LeaseRunResult
   // Setup-copy (F1, RUSH-1920): push the git-tracked ~/.agents config onto the
   // box from the host, over crabbox's own per-lease ssh (a raw ssh fails
   // publickey). rsync only here — the box has no agents-cli yet, so the matching
-  // `agents repo refresh` runs inside the bootstrap script, after the install
+  // `agents sync --local` runs inside the bootstrap script, after the install
   // step. Best-effort: a copy failure never aborts the run (the agent just runs
   // without the config).
   if (opts.copySetup !== false) {

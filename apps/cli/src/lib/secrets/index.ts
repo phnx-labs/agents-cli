@@ -34,6 +34,7 @@ import type { NativeImportReport } from './fallback.js';
 
 export type { NativeImportReport, NativeImportResult, NativeImportStatus } from './fallback.js';
 import { getKeychainHelperPath } from './install-helper.js';
+import { deriveShortId } from '../session/short-id.js';
 
 const SERVICE_PREFIX = 'agents-cli';
 export const SECRETS_ITEM_PREFIX = `${SERVICE_PREFIX}.secrets.`;
@@ -816,6 +817,7 @@ export function hasKeychainToken(item: string): boolean {
 export interface KeychainReadContext {
   agent?: string;
   bundle?: string;
+  sessionId?: string;
   reason?: string;
   duration?: string;
   defaultPolicy?: 'hold' | 'always' | 'never';
@@ -825,9 +827,12 @@ export interface KeychainReadContext {
 export function keychainOperationPrompt(context: KeychainReadContext = {}): string {
   const agent = context.agent || 'Agents CLI';
   const bundle = context.bundle ? ` the '${context.bundle}' bundle` : ' secrets';
+  // Which session triggered the read — the short-id disambiguates an unexpected
+  // prompt when several agents run at once (interactive + headless + exec).
+  const session = context.sessionId ? ` (session ${deriveShortId(context.sessionId)})` : '';
   const duration = context.duration ? ` for ${context.duration}` : '';
   const reason = context.reason ? ` ${context.reason}` : '';
-  return `${agent} is requesting to unlock${bundle}${duration}${reason}.`;
+  return `${agent} is requesting to unlock${bundle}${session}${duration}${reason}.`;
 }
 
 export function getKeychainToken(item: string, context: KeychainReadContext = {}): string {

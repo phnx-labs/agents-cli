@@ -79,7 +79,7 @@ Examples:
   agents cli check
 
 When to use:
-  - After 'agents repo refresh' on a new machine, to materialize host binaries
+  - After 'agents sync' on a new machine, to materialize host binaries
   - In a team setup: commit cli/ entries so teammates get the same toolchain
 `);
 

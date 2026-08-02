@@ -339,11 +339,30 @@ enum AgentsCLI {
     // paths never pass through an LLM shell string. It runs as a MONITORED async
     // process (not fully detached) so completion drives a real notification
     // without blocking the panel/UI.
-    static func dispatchTicketAgent(note: String, screenshotPaths: [String], agent: String? = nil) {
+    // Distinct recent working directories from local session history, most-recent
+    // first, with the home dir dropped — running an agent straight in $HOME is too
+    // broad a permission surface, so the panel offers real repos to scope into.
+    static func recentRepoDirs(limit: Int = 8) -> [String] {
+        let home = (NSHomeDirectory() as NSString).standardizingPath
+        var seen = Set<String>()
+        var dirs: [String] = []
+        for s in recentSessions(limit: 40) {
+            guard let cwd = s.cwd, !cwd.isEmpty else { continue }
+            let norm = (cwd as NSString).standardizingPath
+            if norm == home { continue }
+            if seen.insert(norm).inserted { dirs.append(norm) }
+            if dirs.count >= limit { break }
+        }
+        return dirs
+    }
+
+    static func dispatchTicketAgent(note: String, screenshotPaths: [String], agent: String? = nil, cwd: String? = nil) {
         let prompt = ticketAgentPrompt(note: note, screenshotPaths: screenshotPaths)
         let agent = agent ?? env["AGENTS_ISSUE_AGENT"] ?? "claude"
         Notifier.post(title: "Filing ticket…", body: shortenForNotice(note))
-        runMonitored(argv(["run", agent, prompt, "--mode", "auto"])) { output, ok in
+        var planArgs = ["run", agent, prompt, "--mode", "auto"]
+        if let cwd, !cwd.isEmpty { planArgs += ["--cwd", cwd] }
+        runMonitored(argv(planArgs)) { output, ok in
             guard ok, let draft = parseTicketDraft(output) else {
                 Notifier.post(title: "Ticket agent finished",
                               body: ok ? "Could not parse ticket draft from agent output."
@@ -373,14 +392,16 @@ enum AgentsCLI {
         }
     }
 
-    static func dispatchQuickFix(note: String, screenshotPaths: [String], agents: [String]) {
+    static func dispatchQuickFix(note: String, screenshotPaths: [String], agents: [String],
+                                 cwd: String? = nil, device: String? = nil) {
         let selected = agents.isEmpty ? ["claude"] : agents
         let prompt = quickFixPrompt(note: note, screenshotPaths: screenshotPaths)
+        let name = quickDispatchName(note: note)
         Notifier.post(title: "Dispatching \(selected.count) agent\(selected.count == 1 ? "" : "s")…",
                       body: shortenForNotice(note))
         for agent in selected {
-            let name = quickDispatchName(agent: agent)
-            runMonitored(argv(quickFixRunArgs(agent: agent, prompt: prompt, name: name))) { _, ok in
+            runMonitored(argv(quickFixRunArgs(agent: agent, prompt: prompt, name: name,
+                                              cwd: cwd, device: device))) { _, ok in
                 let label = LocalState.agentLabel(agent)
                 Notifier.post(title: ok ? "\(label) finished" : "\(label) failed",
                               body: shortenForNotice(note))
@@ -434,14 +455,39 @@ enum AgentsCLI {
         return t.count > 80 ? String(t.prefix(79)) + "…" : t
     }
 
-    static func quickDispatchName(agent: String, date: Date = Date()) -> String {
-        let stamp = Int(date.timeIntervalSince1970)
-        let clean = LocalState.normalizeAgent(agent).replacingOccurrences(of: "[^a-z0-9-]", with: "-", options: .regularExpression)
-        return "quick-\(clean)-\(stamp)"
+    // Seed `agents run --name` from the user's own task text — the first few words,
+    // slugified — so the run reads as THEIR task in `agents sessions` instead of an
+    // opaque `quick-<timestamp>`. The agent's generated title refines it later.
+    static func quickDispatchName(note: String, date: Date = Date()) -> String {
+        let words = note
+            .lowercased()
+            .replacingOccurrences(of: "[^a-z0-9 ]", with: " ", options: .regularExpression)
+            .split(separator: " ")
+            .prefix(5)
+        let slug = words.joined(separator: "-")
+        if slug.isEmpty {
+            return "task-\(Int(date.timeIntervalSince1970))"
+        }
+        return String(slug.prefix(48))
     }
 
-    static func quickFixRunArgs(agent: String, prompt: String, name: String) -> [String] {
-        ["run", agent, prompt, "--mode", "auto", "--name", name]
+    // Build the `agents run` argv for a headless Run. Strategy is ALWAYS balanced
+    // (auto load-balance across signed-in versions with headroom, skipping any that
+    // are rate-limited); an explicit --cwd scopes the agent to the chosen repo (never
+    // the home dir); an explicit --device offloads onto the chosen box (nil = this
+    // Mac / affinity-auto is handled by the caller passing "auto").
+    static func quickFixRunArgs(agent: String, prompt: String, name: String,
+                                cwd: String? = nil, device: String? = nil) -> [String] {
+        var args = ["run", agent, prompt, "--mode", "auto", "--balanced", "--name", name]
+        if let cwd, !cwd.isEmpty {
+            args.append("--cwd")
+            args.append(cwd)
+        }
+        if let device, !device.isEmpty, device != "local" {
+            args.append("--device")
+            args.append(device)
+        }
+        return args
     }
 
     // MARK: Process helpers

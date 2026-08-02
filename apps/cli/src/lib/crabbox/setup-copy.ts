@@ -12,7 +12,7 @@
  *   2. `rsync` that exact file set to `~/.agents` on the box over crabbox's OWN
  *      ssh invocation (`crabboxSshArgv`) — crabbox provisions a per-lease identity
  *      key, so a raw `ssh crabbox@ip` fails publickey; only crabbox's key works.
- *   3. `agents repo refresh` on the box so the copied config takes effect.
+ *   3. `agents sync --local` on the box so the copied config takes effect.
  *
  * NEVER copies `~/.claude` / `~/.claude.json` — they live in `$HOME`, not
  * `~/.agents`, and are rebuilt on the box by `agents add` + refresh; an explicit
@@ -46,7 +46,7 @@ export interface CopySetupOptions {
   /** Receives combined stdout/stderr of the rsync + refresh, if set. */
   onData?: (chunk: string) => void;
   /**
-   * Run `agents repo refresh` on the box after the push (default `true`). Set
+   * Run `agents sync --local` on the box after the push (default `true`). Set
    * `false` when the caller runs the refresh itself in the box bootstrap — the
    * lease path does this so the refresh runs AFTER the box installs agents-cli
    * (this host-side push happens before the box boots agents-cli, so a host-side
@@ -60,7 +60,7 @@ export interface CopySetupResult {
   files: string[];
   /** rsync exit code, or null when the process failed to spawn. */
   pushExitCode: number | null;
-  /** `agents repo refresh` exit code, or null when it was skipped/failed to spawn. */
+  /** `agents sync --local` exit code, or null when it was skipped/failed to spawn. */
   refreshExitCode: number | null;
 }
 
@@ -132,7 +132,7 @@ function runStreaming(
 /**
  * Replicate the git-tracked subset of the local `~/.agents` onto the crabbox box
  * and refresh it. Enumerates tracked files, rsyncs them over ssh, then runs
- * `agents repo refresh` on the box. Refresh is skipped when the push fails or the
+ * `agents sync --local` on the box. Refresh is skipped when the push fails or the
  * file set is empty (nothing to refresh). Never throws — surfaces failure through
  * the returned exit codes.
  */
@@ -162,8 +162,8 @@ export async function copySetupToBox(opts: CopySetupOptions): Promise<CopySetupR
 
     let refreshExitCode: number | null = null;
     if (pushExitCode === 0 && opts.refresh !== false) {
-      // ssh <opts> crabbox@host bash -lc 'agents repo refresh'
-      const refreshArgs = [...sshArgv.slice(1), 'bash', '-lc', 'agents repo refresh'];
+      // ssh <opts> crabbox@host bash -lc 'agents sync --local -y'
+      const refreshArgs = [...sshArgv.slice(1), 'bash', '-lc', 'agents sync --local -y'];
       refreshExitCode = await runStreaming('ssh', refreshArgs, env, opts.onData);
     }
     return { files, pushExitCode, refreshExitCode };

@@ -3,9 +3,11 @@
  * sync resources into installed version homes, register hooks, add shims to
  * PATH, prompt for missing default versions, install declared host-CLIs.
  *
- * Used by `agents repo refresh` (user-facing) and any other caller that needs
- * to re-derive local state from declared configuration. Does NOT do any git
- * operations — that lives in `agents repo pull`.
+ * The reconcile stage behind `agents sync` (the umbrella `--local` path calls
+ * this; see sync-umbrella.ts) and any other caller that needs to re-derive local
+ * state from declared configuration. Does NOT do any git operations — that lives
+ * in `agents repo pull`. (Also still reachable via the deprecated, hidden
+ * `agents repo refresh` alias.)
  */
 
 import * as fs from 'fs';

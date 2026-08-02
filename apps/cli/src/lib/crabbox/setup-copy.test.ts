@@ -173,7 +173,7 @@ describe('copySetupToBox', () => {
         const rlog = fs.readFileSync(rsyncLog, 'utf-8');
         expect(rlog).toContain('crabbox@203.0.113.7:.agents/');
         expect(rlog).toContain('/fake/id_ed25519');
-        expect(fs.readFileSync(sshLog, 'utf-8')).toContain('agents repo refresh');
+        expect(fs.readFileSync(sshLog, 'utf-8')).toContain('agents sync --local');
       });
     } finally {
       fs.rmSync(repo, { recursive: true, force: true });
