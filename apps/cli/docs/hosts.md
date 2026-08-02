@@ -33,6 +33,21 @@ affinity (weighted by launch counts on `sessions.db` `machine`; most-used online
 device has highest probability). Harness stays the agent you typed — never
 auto-picked. Affinity failure degrades to local rather than aborting the run.
 
+Pass `all` as the `--host` / `--device` value to fan any fleet-aware command out
+across every registered device. The passthrough runs `agents <cmd> --json` on each
+box concurrently, then renders a grouped-by-OS roster with one row per device
+(`○ offline` rows for unreachable devices, `●` rows for successful ones). Add
+`--json` to get the raw device-keyed object instead.
+
+```
+agents view kimi --device all          # every box's kimi version + account
+agents output --device all             # per-device burn vs shipped output
+agents view --device all --json        # machine-readable fleet inventory
+```
+
+`--devices all` and `--hosts all` are synonyms. Commands that already register
+`--all-hosts` (e.g. `agents output --all-hosts`) keep their existing behavior.
+
 It sits next to the vendor clouds (`agents cloud run --provider rush|codex|…`),
 not replacing them: those dispatch to *someone else's* cloud; `hosts` dispatches
 to *your* boxes (owned, or leased on demand via crabbox — see Host sources).

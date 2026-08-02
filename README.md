@@ -445,6 +445,9 @@ agents run claude --host gpu-box                         # no prompt → interac
 agents run claude --host gpu-box --copy-creds "fix auth" # copy local runtime creds + Claude token, shred after
 agents run claude --device auto "…"                      # affinity-pick host from 14d usage (harness stays claude)
 agents run claude --host auto "…"                        # same — auto is a host value, not a harness name
+agents view kimi --device all                            # fan out across every registered device (grouped-by-OS roster)
+agents output --device all                               # per-device burn vs shipped output across the fleet
+agents view --device all --json                          # machine-readable fleet inventory
 agents hosts ps                         # list dispatched runs + terminal status
 agents hosts stop <id>                  # terminate a hung/detached run (alias: kill)
 agents logs --host gpu-box              # pick a dispatched run — concise summary by default
