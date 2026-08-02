@@ -27,7 +27,11 @@ import { readUnifiedEvents } from '../lib/event-stream.js';
  * A non-numeric or negative value is a usage error, not a quiet fallback.
  */
 export function resolveEventsLimit(raw: string | undefined): number | undefined {
-  const value = Number(raw ?? '50');
+  const token = raw ?? '50';
+  // Number('') and Number('   ') are both 0, which would read as "no cap" — an
+  // empty --limit (an unset "$LIMIT" in a script) must be rejected, not silently
+  // turned into the unbounded read.
+  const value = token.trim() === '' ? NaN : Number(token);
   if (!Number.isInteger(value) || value < 0) {
     throw new RangeError(`Invalid --limit ${raw} — pass a whole number, or 0 for no cap.`);
   }

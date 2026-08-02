@@ -155,4 +155,20 @@ describe('agents events --limit', () => {
     expect(res.status).toBe(2);
     expect(res.stderr).toContain('Invalid --limit');
   });
+
+  // `Number('')` and `Number('   ')` are both 0, which the cap resolver reads as
+  // "no cap". An unset shell variable — `agents events --limit "$LIMIT"` — would
+  // therefore return the entire unbounded stream with exit 0 and no notice: the
+  // same silent-wrong-answer this ticket exists to remove, in the other direction.
+  it.each([['empty', ''], ['whitespace', '   ']])(
+    'rejects an %s --limit instead of reading the whole stream unannounced',
+    (_label, value) => {
+      const home = makeTempHome();
+      seedEvents(home);
+
+      const res = runEvents(home, ['--event', 'pr.opened', '--limit', value, '--json']);
+      expect(res.status).toBe(2);
+      expect(res.stderr).toContain('Invalid --limit');
+    },
+  );
 });
