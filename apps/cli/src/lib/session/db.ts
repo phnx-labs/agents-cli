@@ -1004,8 +1004,9 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
   meta = enrichCachedSessionMeta(meta);
   // Join the durable sessionId -> actor sidecar (RUSH-2019) when the caller
   // didn't already carry an actor, so a scanned transcript still attributes to a
-  // person. ON CONFLICT excludes actor/initiated_by, so this only ever fills a
-  // fresh row — a rescan never overwrites the stored owner.
+  // person. The ON CONFLICT COALESCEs actor/initiated_by, so this fills a fresh
+  // row AND backfills one indexed null-first (before its sidecar existed), while a
+  // rescan carrying no actor still keeps the stored owner.
   const actorRec = meta.actor ? undefined : readSessionActorRecord(meta.id);
   const db = getDB();
   const { upsert, delText, insText, readLabel } = stmts(db);
@@ -1076,8 +1077,9 @@ export function upsertSessionsBatch(
   const now = Date.now();
   // One directory read for the whole batch: join the durable sessionId -> actor
   // sidecar (RUSH-2019) so scanned transcripts attribute to a person. Only used
-  // for entries whose meta carries no actor; ON CONFLICT excludes the column, so
-  // this fills fresh rows without ever clobbering a stored owner on rescan.
+  // for entries whose meta carries no actor; the ON CONFLICT COALESCEs the column,
+  // so this fills fresh rows AND backfills null-first ones, never clobbering a
+  // stored owner on rescan.
   const actorIndex = loadSessionActorIndex();
   // Persist the Claude resumable-parse continuation (parser_state + content_text)
   // alongside the stamp. On a full/incremental Claude parse the caller passes the

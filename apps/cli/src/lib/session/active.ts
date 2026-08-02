@@ -27,18 +27,6 @@ import { AgentManager } from '../teams/agents.js';
 import { getTerminalsDir } from '../state.js';
 import { readPidSessionEntry, listPidSessionEntries, prunePidSessionRegistry, type PidSessionEntry } from './pid-registry.js';
 import { readSessionActorRecord } from './actor-sidecar.js';
-
-/**
- * The owner (actor id) to show for a session in `--active`. Prefers the actor
- * recorded on the live-attribution source (the pid registry / teammate record),
- * but falls back to the durable per-session actor sidecar — written at spawn and,
- * unlike the pid entry, NOT overwritten by the SessionStart hook's own by-pid
- * write. Without this fallback a real `agents run` shows no owner whenever the
- * hook's actor-less entry wins the by-pid file (RUSH-2018 fix).
- */
-export function resolveOwner(pidActor: string | null | undefined, sessionId: string | undefined): string | undefined {
-  return pidActor ?? (sessionId ? readSessionActorRecord(sessionId)?.actor : undefined) ?? undefined;
-}
 import { loadHookSessionIndex, resolveHookSessionRecord, readStateSessionRecord, type HookSessionIndex, type HookSessionRecord } from './hook-sessions.js';
 import { buildClaudeLabelMap, getAgentSessionDirs } from './discover.js';
 import { buildRunNameMap } from './run-names.js';
@@ -55,6 +43,18 @@ import { presenceFromStore, type Presence } from './detached.js';
 import { mapBounded } from '../concurrency.js';
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * The owner (actor id) to show for a session in `--active`. Prefers the actor
+ * recorded on the live-attribution source (the pid registry / teammate record),
+ * but falls back to the durable per-session actor sidecar — written at spawn and,
+ * unlike the pid entry, NOT overwritten by the SessionStart hook's own by-pid
+ * write. Without this fallback a real `agents run` shows no owner whenever the
+ * hook's actor-less entry wins the by-pid file (RUSH-2018 fix).
+ */
+export function resolveOwner(pidActor: string | null | undefined, sessionId: string | undefined): string | undefined {
+  return pidActor ?? (sessionId ? readSessionActorRecord(sessionId)?.actor : undefined) ?? undefined;
+}
 
 /**
  * Per-PID `lsof` probes run bounded and staggered rather than as one parallel
@@ -1478,7 +1478,7 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
       startedAtMs: birthtimeMs,
       lastActivityMs: mtimeMs,
       provenance,
-      owner: resolveOwner(liveEntry?.actor, id.sessionId),
+      owner: resolveOwner(liveEntry?.actor, id.sessionId ?? sessionIdFromFile(sessionFile)),
     }, state, sessionFile, pidAlive));
   }
   return out;
