@@ -3,7 +3,7 @@
 ## Unreleased
 
 - **Codex hook sync no longer leaves startup warnings after upgrades.** See
-  `apps/cli/CHANGELOG.md`.
+  `apps/cli/.changelog/next/codex-hook-sync-warnings.md`.
 
 - **Session lifecycle status is explicit (RUSH-2066).** `agents sessions --active`
   now reports dead processes as `closed` and days-stale/dangling sessions as
