@@ -94,21 +94,19 @@ const keychainStore: ItemStore = {
   list: listKeychainItems,
 };
 
-// The file store auto-provisions a machine-local passphrase on Linux (the
-// existing headless-libsecret fallback) but NEVER on macOS: a file-backed
-// bundle on a Mac must be unlocked with an explicit AGENTS_SECRETS_PASSPHRASE
-// supplied per run, so the box holds ciphertext only. assertFileBackendUsable()
-// enforces that the passphrase is present before we touch the store.
-const FILE_ALLOW_AUTO_PROVISION = process.platform !== 'darwin';
-
+// The file store auto-provisions a stable machine-local passphrase on EVERY
+// platform (macOS included) — a 0600 key file, encryption-at-rest with the same
+// posture as an SSH key — so `agents secrets` "just works" with no passphrase to
+// set, type, or remember, and no Touch ID. Set AGENTS_SECRETS_PASSPHRASE to opt
+// into an off-disk key.
 const fileItemStore: ItemStore = {
   has: (item) => fileStore.has(item),
-  get: (item) => fileStore.get(item, { allowAutoProvision: FILE_ALLOW_AUTO_PROVISION }),
+  get: (item) => fileStore.get(item),
   getBatch: (items) => {
     const out = new Map<string, string>();
     for (const item of items) {
       try {
-        out.set(item, fileStore.get(item, { allowAutoProvision: FILE_ALLOW_AUTO_PROVISION }));
+        out.set(item, fileStore.get(item));
       } catch {
         // Missing/undecryptable item — absent from the map, mirroring
         // getKeychainTokens (caller decides whether that's an error).
@@ -116,10 +114,10 @@ const fileItemStore: ItemStore = {
     }
     return out;
   },
-  set: (item, value) => fileStore.set(item, value, { allowAutoProvision: FILE_ALLOW_AUTO_PROVISION }),
+  set: (item, value) => fileStore.set(item, value),
   setBatch: (items) => {
     for (const [item, value] of items) {
-      fileStore.set(item, value, { allowAutoProvision: FILE_ALLOW_AUTO_PROVISION });
+      fileStore.set(item, value);
     }
   },
   delete: (item) => fileStore.delete(item),
@@ -160,24 +158,6 @@ export function bundleBackend(name: string): SecretsBackend {
     }
   }
   return 'keychain';
-}
-
-/**
- * Guard a file-backed bundle operation. On macOS the file store must be
- * unlocked with an explicit passphrase (env or interactive prompt) — we refuse
- * to silently auto-provision a machine-local key there, so a remote/headless
- * Mac cannot decrypt on its own. Linux keeps the existing auto-provision
- * behavior, so this is a no-op there.
- */
-function assertFileBackendUsable(name: string): void {
-  if (process.platform !== 'darwin') return;
-  if (process.env.AGENTS_SECRETS_PASSPHRASE && process.env.AGENTS_SECRETS_PASSPHRASE.length > 0) return;
-  if (process.stdin.isTTY) return;
-  throw new Error(
-    `File-backed bundle '${name}' needs AGENTS_SECRETS_PASSPHRASE to be set on macOS ` +
-    `(no biometry prompt is available headlessly). Set it for this run, e.g.\n` +
-    `  AGENTS_SECRETS_PASSPHRASE=… agents secrets exec ${name} -- <command>`
-  );
 }
 
 function assertVaultBackendUsable(name: string): void {
@@ -410,7 +390,6 @@ export function readBundleIfDecryptable(name: string): SecretsBundle | null {
 export function readBundle(name: string): SecretsBundle {
   validateBundleName(name);
   const backend = bundleBackend(name);
-  if (backend === 'file') assertFileBackendUsable(name);
   if (backend === 'vault') assertVaultBackendUsable(name);
   let json: string;
   try {
@@ -536,7 +515,6 @@ interface PreparedBundleWrite {
 function prepareBundleWrite(bundle: SecretsBundle): PreparedBundleWrite {
   validateBundleName(bundle.name);
   const backend: SecretsBackend = bundle.backend ?? 'keychain';
-  if (backend === 'file') assertFileBackendUsable(bundle.name);
   if (backend === 'vault') assertVaultBackendUsable(bundle.name);
   for (const key of Object.keys(bundle.vars)) {
     validateEnvKey(key);
@@ -1397,7 +1375,6 @@ export function readAndResolveBundleEnv(
     }
   }
 
-  if (backend === 'file') assertFileBackendUsable(name);
   if (backend === 'vault') assertVaultBackendUsable(name);
   const store = itemStore(backend);
 

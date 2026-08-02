@@ -34,9 +34,10 @@ let prevBackend: ReturnType<typeof setKeychainBackendForTest>;
 let prevPassphrase: string | undefined;
 
 /**
- * Point the store at `phrase`. On macOS `assertFileBackendUsable` gates on the
- * env var, and the key is derived from it — so setting it here is what makes a
- * later change a genuine key loss rather than a cache miss.
+ * Point the store at `phrase`. The file-store key is derived from
+ * `AGENTS_SECRETS_PASSPHRASE` when set (it takes precedence over the
+ * auto-provisioned machine-local key), so setting it here is what makes a later
+ * change a genuine key loss rather than a cache miss.
  */
 function usePassphrase(phrase: string): void {
   process.env.AGENTS_SECRETS_PASSPHRASE = phrase;
@@ -120,51 +121,9 @@ describe('readBundleIfDecryptable', () => {
   });
 });
 
-/**
- * The narrow-miss the first pass had: a bundle that is only *locked for this
- * run* — headless macOS with no `AGENTS_SECRETS_PASSPHRASE` — is fully
- * recoverable, but the blanket catch collapsed it into "unreadable, safe to
- * delete." `secrets delete <name> --yes` from a cron/launchd run that forgot to
- * export the passphrase would then silently, permanently destroy a healthy
- * bundle. Only a genuine decrypt failure (`BundleUndecryptableError`) may read
- * as null; the "set the env" state must rethrow.
- */
-describe('a file-backed bundle that is only locked for this run (headless macOS, env not set)', () => {
-  const realPlatform = process.platform;
-  const realIsTTY = process.stdin.isTTY;
-
-  afterEach(() => {
-    Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
-    process.stdin.isTTY = realIsTTY;
-  });
-
-  /** Written while decryptable, then made headless-macOS with the env unset. */
-  function healthyButLocked(): void {
-    writeBundle({ name: NAME, backend: 'file', vars: { NPM_TOKEN: 'literal:healthy' } });
-    expect(readBundle(NAME).vars.NPM_TOKEN).toBe('literal:healthy');
-    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
-    process.stdin.isTTY = false;
-    delete process.env.AGENTS_SECRETS_PASSPHRASE;
-  }
-
-  it('rethrows the recoverable "needs AGENTS_SECRETS_PASSPHRASE" error — it must NOT read as unreadable/deletable', () => {
-    healthyButLocked();
-
-    // Present and healthy — just locked for this run, not a lost passphrase.
-    expect(bundleExists(NAME)).toBe(true);
-    expect(() => readBundle(NAME)).toThrow(/needs AGENTS_SECRETS_PASSPHRASE/i);
-
-    // The seam must rethrow, NOT return null. Returning null is exactly what let
-    // `secrets delete --yes` fall through and silently destroy this bundle.
-    expect(() => readBundleIfDecryptable(NAME)).toThrow(/needs AGENTS_SECRETS_PASSPHRASE/i);
-  });
-
-  it('reads back unchanged once the passphrase is exported again — nothing was lost', () => {
-    healthyButLocked();
-    expect(() => readBundleIfDecryptable(NAME)).toThrow(/needs AGENTS_SECRETS_PASSPHRASE/i);
-
-    // Restore darwin-gated env; the same healthy bundle decrypts.
-    usePassphrase('the-original-passphrase');
-    expect(readBundleIfDecryptable(NAME)?.vars.NPM_TOKEN).toBe('literal:healthy');
-  });
-});
+// NOTE: the former "locked for this run (headless macOS, env not set)" cases are
+// gone: the file store now silently auto-provisions a machine-local key on every
+// platform, so a file-backed bundle written on a box is always decryptable on that
+// same box — there is no "needs AGENTS_SECRETS_PASSPHRASE" locked state to
+// misread as deletable. A genuine wrong-key decrypt failure (a raw .enc copied
+// from another machine) is still covered above via BundleUndecryptableError.

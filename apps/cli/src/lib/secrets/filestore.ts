@@ -3,31 +3,30 @@
  *
  * An AES-256-GCM encrypted-file store under `~/.agents/.cache/secrets/`. The
  * encryption key is scrypt-derived from a passphrase read from
- * `AGENTS_SECRETS_PASSPHRASE` (preferred), a machine-local provisioned key, or
- * a TTY prompt. One `<item>.enc` JSON file per item, mode 0600.
+ * `AGENTS_SECRETS_PASSPHRASE` (preferred) or a machine-local key the store
+ * auto-provisions on first use. One `<item>.enc` JSON file per item, mode 0600.
  *
- * Two callers:
+ * Two callers, one policy: the store silently auto-provisions a stable
+ * machine-local key (a 0600 file under `~/.agents/.secrets-key/`) on EVERY
+ * platform, so it works out of the box with no passphrase to set or remember and
+ * never pops a prompt or Touch ID sheet.
  *  - Linux (src/lib/secrets/linux.ts): the headless fallback when the default
- *    Secret Service collection is locked. Auto-provisions a machine-local
- *    passphrase so `agents secrets` works out of the box on a server.
- *  - macOS file-backed bundles (src/lib/secrets/bundles.ts): an explicit,
- *    opt-in non-biometry backend for headless/remote release runs. The bundle
- *    layer guards this path so it only activates with an explicit
- *    AGENTS_SECRETS_PASSPHRASE (or TTY) — never the silent machine-local
- *    auto-provision — so a remote box holds ciphertext only.
+ *    Secret Service collection is locked.
+ *  - macOS/Windows file-backed bundles (src/lib/secrets/bundles.ts): an explicit,
+ *    opt-in non-biometry backend for headless/remote runs.
+ * Set AGENTS_SECRETS_PASSPHRASE to opt into a key held off disk instead (e.g. to
+ * share one bundle's ciphertext across boxes under a common key).
  *
  * The item-name scheme is shared with the keychain backend so a file-backed
  * item and its keychain twin carry identical names:
  *   `agents-cli.bundles.<name>` and `agents-cli.secrets.<bundle>.<key>`.
  */
 
-import { execSync, spawnSync } from 'child_process';
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import type { KeychainBackend } from './index.js';
-import { encodePwshBase64 } from '../pwsh.js';
 
 // ---------- file store location ----------
 
@@ -46,83 +45,6 @@ function ensureFileDir(): void {
 
 // ---------- passphrase ----------
 
-/**
- * Windows has no `/dev/tty` and no POSIX `stty`, so the interactive prompt runs
- * through PowerShell's `Read-Host -AsSecureString` (which never echoes). The
- * secure string is marshaled back out and written to stdout, which we capture.
- * If PowerShell cannot run at all, fail with an actionable error rather than
- * letting `fs.openSync('/dev/tty')` throw a raw ENOENT. Reached only on the rare
- * interactive-Windows file-fallback path — the headless service-account case
- * (no TTY) auto-provisions a machine-local key and never gets here.
- */
-function readPassphraseFromTtyWindows(): string {
-  const script = `
-$ErrorActionPreference = 'Stop'
-$sec = Read-Host -AsSecureString -Prompt 'Enter AGENTS_SECRETS_PASSPHRASE'
-$ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec)
-try { [Console]::Out.Write([Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)) }
-finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }
-`;
-  // Not -NonInteractive: that flag would suppress the Read-Host prompt itself.
-  const res = spawnSync('powershell.exe', ['-NoProfile', '-EncodedCommand', encodePwshBase64(script)], {
-    stdio: ['inherit', 'pipe', 'inherit'],
-  });
-  if (res.error || res.status !== 0) {
-    throw new Error(
-      'Could not prompt for a passphrase on Windows. Set AGENTS_SECRETS_PASSPHRASE ' +
-      'to decrypt the file-backed secret store.'
-    );
-  }
-  return (res.stdout?.toString() ?? '').replace(/\r?\n$/, '');
-}
-
-/**
- * Turn off terminal echo on the controlling TTY, or throw — fail CLOSED. If echo
- * cannot be disabled (`stty` missing, no controlling terminal) we must NOT fall
- * through and read the passphrase anyway: that echoes the secret to the screen
- * and into scrollback (RUSH-1764). Refuse and point the user at the environment
- * variable instead. `run` performs the echo-disable and throws iff it fails.
- * Exported so the fail-closed contract has direct test coverage.
- */
-export function disableTtyEchoOrThrow(run: () => void): void {
-  try {
-    run();
-  } catch {
-    throw new Error(
-      'Refusing to prompt for AGENTS_SECRETS_PASSPHRASE: terminal echo could not be ' +
-      'disabled (stty unavailable or no controlling TTY), so the passphrase would be ' +
-      'shown in cleartext. Set AGENTS_SECRETS_PASSPHRASE in the environment instead.'
-    );
-  }
-}
-
-function readPassphraseFromTty(): string {
-  if (process.platform === 'win32') return readPassphraseFromTtyWindows();
-  const fd = fs.openSync('/dev/tty', 'r+');
-  let echoDisabled = false;
-  try {
-    fs.writeSync(fd, 'Enter AGENTS_SECRETS_PASSPHRASE: ');
-    // Fail closed: if echo can't be turned off, abort rather than echo the secret.
-    disableTtyEchoOrThrow(() => execSync('stty -echo < /dev/tty', { stdio: 'ignore' }));
-    echoDisabled = true;
-    let pass = '';
-    const buf = Buffer.alloc(1);
-    while (true) {
-      const n = fs.readSync(fd, buf, 0, 1, null);
-      if (n === 0) break;
-      const ch = buf.toString('utf8', 0, n);
-      if (ch === '\n' || ch === '\r') break;
-      pass += ch;
-    }
-    return pass;
-  } finally {
-    if (echoDisabled) {
-      try { execSync('stty echo < /dev/tty', { stdio: 'ignore' }); } catch { /* best effort */ }
-    }
-    try { fs.writeSync(fd, '\n'); } catch { /* best effort */ }
-    fs.closeSync(fd);
-  }
-}
 
 /**
  * Directory for the auto-provisioned machine-local passphrase. Kept outside
@@ -205,15 +127,13 @@ function provisionMachinePassphrase(): string {
  * Resolve the passphrase for the encrypted file store.
  *
  * Order: AGENTS_SECRETS_PASSPHRASE > previously-provisioned machine-local key >
- * (interactive) TTY prompt > (headless) auto-provisioned machine-local key.
- *
- * `allowAutoProvision` (default true, used by the Linux fallback) controls the
- * last two steps. macOS file-backed bundles pass `false` so a missing
- * passphrase is a hard, explicit error instead of a silently provisioned
- * on-disk key — the caller (bundles.ts) guards this before we get here.
+ * a freshly auto-provisioned machine-local key. It NEVER prompts and NEVER
+ * hard-fails — the file store must work on every platform (macOS included)
+ * without the user setting, typing, or remembering a passphrase. Provisioning
+ * writes a 0600 key file (encryption-at-rest, same posture as an SSH key); set
+ * AGENTS_SECRETS_PASSPHRASE to opt into an off-disk key.
  */
-export function getPassphrase(opts: { allowAutoProvision?: boolean } = {}): string {
-  const allowAutoProvision = opts.allowAutoProvision ?? true;
+export function getPassphrase(): string {
   if (cachedPassphrase !== null) return cachedPassphrase;
   const env = process.env.AGENTS_SECRETS_PASSPHRASE;
   if (env && env.length > 0) {
@@ -221,27 +141,18 @@ export function getPassphrase(opts: { allowAutoProvision?: boolean } = {}): stri
     return env;
   }
   // A previously-provisioned machine-local passphrase is this machine's stable
-  // file-store key — prefer it for both interactive and headless runs so they
-  // always agree (a TTY run won't re-prompt once the file exists).
+  // file-store key — prefer it so interactive and headless runs always agree.
   const onDisk = readMachinePassphrase();
   if (onDisk) {
     cachedPassphrase = onDisk;
     return onDisk;
   }
-  if (!allowAutoProvision) {
-    throw new Error(
-      'AGENTS_SECRETS_PASSPHRASE is not set. A passphrase is required to decrypt ' +
-      'this file-backed secret store.'
-    );
-  }
-  // First run, no env, no provisioned key: prompt when interactive, otherwise
-  // (headless — the reported bug) auto-provision instead of hard-failing.
-  if (process.stdin.isTTY) {
-    const p = readPassphraseFromTty();
-    if (!p) throw new Error('No passphrase entered.');
-    cachedPassphrase = p;
-    return p;
-  }
+  // No env passphrase and no machine-local key yet: silently provision a stable
+  // machine-local key (a 0600 file) on EVERY platform, macOS included. This is
+  // encryption-at-rest with an on-disk key — the same posture as an SSH private
+  // key — so the file store "just works" without the user ever setting, typing,
+  // or remembering a passphrase, and never pops a prompt or a Touch ID sheet.
+  // Set AGENTS_SECRETS_PASSPHRASE to opt into an off-disk key instead.
   cachedPassphrase = provisionMachinePassphrase();
   return cachedPassphrase;
 }
@@ -300,7 +211,7 @@ function fileHas(item: string): boolean {
   return fs.existsSync(fileFor(item));
 }
 
-function fileGet(item: string, opts: { allowAutoProvision?: boolean } = {}): string {
+function fileGet(item: string): string {
   const fp = fileFor(item);
   if (!fs.existsSync(fp)) {
     throw new Error(`Secret '${item}' not found in encrypted store.`);
@@ -313,7 +224,7 @@ function fileGet(item: string, opts: { allowAutoProvision?: boolean } = {}): str
     throw new Error(`Encrypted secret file ${fp} is corrupt (not valid JSON).`);
   }
   try {
-    return decryptForFallback(parsed, getPassphrase(opts));
+    return decryptForFallback(parsed, getPassphrase());
   } catch {
     throw new Error(
       `Failed to decrypt '${item}'. Wrong AGENTS_SECRETS_PASSPHRASE or tampered file.`
@@ -321,9 +232,9 @@ function fileGet(item: string, opts: { allowAutoProvision?: boolean } = {}): str
   }
 }
 
-function fileSet(item: string, value: string, opts: { allowAutoProvision?: boolean } = {}): void {
+function fileSet(item: string, value: string): void {
   ensureFileDir();
-  const enc = encryptForFallback(value, getPassphrase(opts));
+  const enc = encryptForFallback(value, getPassphrase());
   fs.writeFileSync(fileFor(item), JSON.stringify(enc), { mode: 0o600 });
 }
 

@@ -116,10 +116,11 @@ Bundle metadata (names, descriptions, variable names + references, and any non-s
 The keychain backend is biometry-gated, so it can't be read on a headless Mac
 over SSH — there's no GUI session to satisfy Touch ID / the device passcode.
 A **file-backed** bundle stores the same items in an AES-256-GCM encrypted-file
-store (`~/.agents/.cache/secrets/<item>.enc`, scrypt-derived key) keyed by
-`AGENTS_SECRETS_PASSPHRASE` instead — no biometry, fully headless. Source:
-`src/lib/secrets/filestore.ts`, routed per-bundle in `src/lib/secrets/bundles.ts`
-(`bundleBackend`, `bundleItemStore`).
+store (`~/.agents/.cache/secrets/<item>.enc`, scrypt-derived key) — no biometry,
+fully headless. The encryption key comes from `AGENTS_SECRETS_PASSPHRASE` when
+set, otherwise a machine-local key the store auto-provisions on first use (see
+below). Source: `src/lib/secrets/filestore.ts`, routed per-bundle in
+`src/lib/secrets/bundles.ts` (`bundleBackend`, `bundleItemStore`).
 
 ```
 ~/.agents/.cache/secrets/
@@ -129,13 +130,20 @@ store (`~/.agents/.cache/secrets/<item>.enc`, scrypt-derived key) keyed by
 
 - **Opt-in.** Create with `--backend file` (or `import --backend file`). Keychain
   stays the default; existing bundles are untouched.
-- **macOS requires an explicit passphrase.** On a Mac the file store never
-  auto-provisions a machine-local key — reads/writes need `AGENTS_SECRETS_PASSPHRASE`
-  in the environment (or an interactive prompt). This keeps the box holding only
-  ciphertext: the passphrase is supplied per run, not stored next to the data.
-  (Linux keeps the existing locked-keyring auto-provision fallback.)
-- **The passphrase is the one key.** Hold it in a biometry-gated keychain bundle
-  on a trusted machine and forward it per run; never commit it.
+- **Works headless out of the box, every platform.** With no
+  `AGENTS_SECRETS_PASSPHRASE` set, the file store silently provisions a stable
+  machine-local key (a 0600 file under `~/.agents/.secrets-key/`, kept outside the
+  encrypted store so a scan never co-locates key + ciphertext) on first use — macOS
+  included, no prompt, no Touch ID, nothing to remember. This is encryption-at-rest
+  with an on-disk key, the same posture as an SSH private key. Set
+  `AGENTS_SECRETS_PASSPHRASE` to opt into a key held off disk (it always takes
+  precedence and provisions no machine-local file).
+- **`AGENTS_SECRETS_PASSPHRASE` is the off-disk-key opt-in — not a requirement.**
+  Set it when you want the key held in the environment rather than in the 0600
+  machine-local file (e.g. a shared bundle whose ciphertext you sync between boxes,
+  so each box needs the same key): hold it in a biometry-gated keychain bundle on a
+  trusted machine and forward it per run; never commit it. Leave it unset and the
+  box uses its own auto-provisioned machine-local key.
 - **Migrating off a stale keyring.** On Linux/Windows, secrets written earlier
   into the OS keyring / Credential Manager (e.g. while a desktop keyring was
   unlocked) can be shadowed once the file store is in use. Reads transparently
@@ -174,7 +182,8 @@ agents run claude "ship it" --secrets r2.backups@yosemite-s1   # bundle@host suf
   parsed in memory, and injected into the run/command env — never written to this
   machine's keychain or disk.
 - **The remote unlocks with its own credentials.** A file-backed remote bundle
-  reads headlessly via the remote's own `AGENTS_SECRETS_PASSPHRASE`; a keychain
+  reads headlessly with the remote's own key — its auto-provisioned machine-local
+  key, or the remote's own `AGENTS_SECRETS_PASSPHRASE` if it sets one; a keychain
   bundle on a macOS remote will block on Touch ID under non-interactive SSH — use
   a remote `file` bundle, an already-unlocked remote secrets-agent, or run
   `view --reveal` from an interactive terminal (it forces an SSH TTY so the prompt

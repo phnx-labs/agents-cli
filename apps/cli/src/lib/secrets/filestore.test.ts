@@ -3,89 +3,50 @@
  *
  * The crypto round-trip and basic file-store ops are covered by
  * __tests__/linux.test.ts (which exercises the same module via the Linux
- * backend re-exports). This file pins the NEW `allowAutoProvision` seam that
- * the macOS file-backed bundle path relies on: with auto-provision OFF, a
- * missing passphrase is a hard error and NO machine-local key is written to
- * disk — so a remote/headless Mac can only decrypt with a passphrase handed in
- * per run, never one sitting next to the ciphertext.
+ * backend re-exports). This file pins the policy: the file store silently
+ * auto-provisions a machine-local key on EVERY platform (no passphrase to set,
+ * type, or remember, no prompt, no Touch ID), and an explicit
+ * AGENTS_SECRETS_PASSPHRASE takes precedence and provisions no on-disk key.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Mock only spawnSync (the win32 TTY prompt path); keep execSync real so the
-// POSIX TTY branch and crypto still work. Same pattern as windows.test.ts:9-13.
-const { spawnSyncMock } = vi.hoisted(() => ({ spawnSyncMock: vi.fn() }));
-vi.mock('child_process', async () => {
-  const actual = await vi.importActual<typeof import('child_process')>('child_process');
-  return { ...actual, spawnSync: spawnSyncMock };
-});
+import { fileStore, getPassphrase, _resetFileStoreForTest } from './filestore.js';
 
-import { execSync } from 'child_process';
-import { fileStore, getPassphrase, disableTtyEchoOrThrow, _resetFileStoreForTest } from './filestore.js';
-
-describe('disableTtyEchoOrThrow (RUSH-1764: fail closed so a passphrase never echoes)', () => {
-  it('throws (fail closed) when echo cannot be disabled — never falls through', () => {
-    // A real command that exits non-zero stands in for "stty unavailable".
-    expect(() => disableTtyEchoOrThrow(() => { execSync('exit 7', { stdio: 'ignore' }); }))
-      .toThrow(/cleartext|echo could not be disabled/i);
-  });
-
-  it('does not throw when echo is disabled successfully', () => {
-    // A real no-op command succeeds; the guard passes through.
-    expect(() => disableTtyEchoOrThrow(() => { execSync('true', { stdio: 'ignore' }); })).not.toThrow();
-  });
-});
-
-describe('filestore passphrase policy (allowAutoProvision)', () => {
+describe('filestore passphrase policy (silent auto-provision)', () => {
   let tmpRoot: string;
   let storeDir: string;
   let keyDir: string;
-  let prevTty: boolean | undefined;
 
   beforeEach(() => {
     tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-filestore-'));
     storeDir = path.join(tmpRoot, 'store');
     keyDir = path.join(tmpRoot, 'key');
     delete process.env.AGENTS_SECRETS_PASSPHRASE;
-    // Force the headless branch deterministically regardless of how the runner
-    // was launched (a real TTY would otherwise hit the interactive prompt).
-    prevTty = process.stdin.isTTY;
-    Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
     _resetFileStoreForTest({ fileDir: storeDir, passphraseDir: keyDir });
   });
 
   afterEach(() => {
     delete process.env.AGENTS_SECRETS_PASSPHRASE;
-    Object.defineProperty(process.stdin, 'isTTY', { value: prevTty, configurable: true });
     _resetFileStoreForTest();
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   });
 
-  it('with allowAutoProvision:false and no passphrase, getPassphrase throws (no passphrase written)', () => {
-    expect(() => getPassphrase({ allowAutoProvision: false })).toThrow(/AGENTS_SECRETS_PASSPHRASE/);
-    expect(fs.existsSync(path.join(keyDir, 'passphrase'))).toBe(false);
-    expect(fs.existsSync(path.join(storeDir, '.passphrase'))).toBe(false);
+  it('with no passphrase, getPassphrase silently auto-provisions instead of throwing', () => {
+    // The whole point of this change: the file store must work with no
+    // AGENTS_SECRETS_PASSPHRASE and no prompt, on every platform.
+    expect(() => getPassphrase()).not.toThrow();
+    expect(fs.existsSync(path.join(keyDir, 'passphrase'))).toBe(true);
   });
 
-  it('with allowAutoProvision:false, fileStore.set refuses and writes nothing to disk', () => {
-    expect(() => fileStore.set('agents-cli.secrets.b.K', 'v', { allowAutoProvision: false }))
-      .toThrow(/AGENTS_SECRETS_PASSPHRASE/);
-    // No ciphertext, no provisioned key — the box holds nothing decryptable.
-    const storeEntries = fs.existsSync(storeDir) ? fs.readdirSync(storeDir) : [];
-    expect(storeEntries.filter((e) => e.endsWith('.enc'))).toEqual([]);
-    expect(storeEntries).not.toContain('.passphrase');
-    expect(fs.existsSync(path.join(keyDir, 'passphrase'))).toBe(false);
-  });
-
-  it('with an explicit AGENTS_SECRETS_PASSPHRASE, set/get round-trips with auto-provision OFF', () => {
+  it('an explicit AGENTS_SECRETS_PASSPHRASE takes precedence and provisions no machine key', () => {
     process.env.AGENTS_SECRETS_PASSPHRASE = 'per-run-key';
     _resetFileStoreForTest({ fileDir: storeDir, passphraseDir: keyDir });
-    const opts = { allowAutoProvision: false } as const;
-    fileStore.set('agents-cli.secrets.b.K', 'sealed', opts);
-    expect(fileStore.get('agents-cli.secrets.b.K', opts)).toBe('sealed');
+    fileStore.set('agents-cli.secrets.b.K', 'sealed');
+    expect(fileStore.get('agents-cli.secrets.b.K')).toBe('sealed');
     // Encrypted on disk; the machine key was never provisioned.
     expect(fs.existsSync(path.join(keyDir, 'passphrase'))).toBe(false);
     expect(fs.existsSync(path.join(storeDir, '.passphrase'))).toBe(false);
@@ -93,13 +54,13 @@ describe('filestore passphrase policy (allowAutoProvision)', () => {
     expect(enc).not.toContain('sealed');
   });
 
-  it('with the wrong passphrase, get fails the auth tag with a clear message (auto-provision OFF)', () => {
+  it('with the wrong passphrase, get fails the auth tag with a clear message', () => {
     process.env.AGENTS_SECRETS_PASSPHRASE = 'right';
     _resetFileStoreForTest({ fileDir: storeDir, passphraseDir: keyDir });
-    fileStore.set('agents-cli.secrets.b.K', 'sealed', { allowAutoProvision: false });
+    fileStore.set('agents-cli.secrets.b.K', 'sealed');
     process.env.AGENTS_SECRETS_PASSPHRASE = 'wrong';
     _resetFileStoreForTest({ fileDir: storeDir, passphraseDir: keyDir });
-    expect(() => fileStore.get('agents-cli.secrets.b.K', { allowAutoProvision: false }))
+    expect(() => fileStore.get('agents-cli.secrets.b.K'))
       .toThrow(/decrypt|passphrase/i);
   });
 
@@ -114,62 +75,5 @@ describe('filestore passphrase policy (allowAutoProvision)', () => {
       expect(fs.statSync(path.join(keyDir, 'passphrase')).mode & 0o777).toBe(0o600);
       expect(fs.statSync(keyDir).mode & 0o777).toBe(0o700);
     }
-  });
-});
-
-// Windows has no /dev/tty; the interactive prompt must route through PowerShell
-// Read-Host instead of crashing with a raw ENOENT on fs.openSync('/dev/tty').
-describe('filestore win32 interactive passphrase branch', () => {
-  let tmpRoot: string;
-  let storeDir: string;
-  let keyDir: string;
-  let prevTty: boolean | undefined;
-  let prevPlatform: PropertyDescriptor | undefined;
-
-  beforeEach(() => {
-    tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-filestore-win-'));
-    storeDir = path.join(tmpRoot, 'store');
-    keyDir = path.join(tmpRoot, 'key');
-    delete process.env.AGENTS_SECRETS_PASSPHRASE;
-    // Interactive (isTTY) + win32 so getPassphrase reaches the TTY prompt.
-    prevTty = process.stdin.isTTY;
-    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
-    prevPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
-    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
-    spawnSyncMock.mockReset();
-    _resetFileStoreForTest({ fileDir: storeDir, passphraseDir: keyDir });
-  });
-
-  afterEach(() => {
-    delete process.env.AGENTS_SECRETS_PASSPHRASE;
-    Object.defineProperty(process.stdin, 'isTTY', { value: prevTty, configurable: true });
-    if (prevPlatform) Object.defineProperty(process, 'platform', prevPlatform);
-    spawnSyncMock.mockReset();
-    _resetFileStoreForTest();
-    fs.rmSync(tmpRoot, { recursive: true, force: true });
-  });
-
-  it('reads the passphrase via PowerShell Read-Host, not /dev/tty', () => {
-    spawnSyncMock.mockImplementation((cmd: string, args: string[]) => {
-      expect(cmd).toBe('powershell.exe');
-      expect(args).toContain('-EncodedCommand');
-      // -NonInteractive would suppress Read-Host, so it must be absent.
-      expect(args).not.toContain('-NonInteractive');
-      return { status: 0, stdout: Buffer.from('typed-pass\r\n'), stderr: Buffer.from('') };
-    });
-    // Round-trips a value using the prompted passphrase (proves it flows through).
-    fileStore.set('agents-cli.secrets.b.K', 'sealed');
-    _resetFileStoreForTest({ fileDir: storeDir, passphraseDir: keyDir });
-    spawnSyncMock.mockImplementation(() => ({
-      status: 0, stdout: Buffer.from('typed-pass\n'), stderr: Buffer.from(''),
-    }));
-    expect(fileStore.get('agents-cli.secrets.b.K')).toBe('sealed');
-  });
-
-  it('throws an actionable error (not ENOENT) when PowerShell cannot run', () => {
-    spawnSyncMock.mockImplementation(() => ({
-      status: 1, stdout: Buffer.from(''), stderr: Buffer.from(''), error: new Error('spawn ENOENT'),
-    }));
-    expect(() => getPassphrase()).toThrow(/AGENTS_SECRETS_PASSPHRASE/);
   });
 });
