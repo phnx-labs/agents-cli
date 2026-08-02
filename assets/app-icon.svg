@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="agents-cli">
+  <!-- The agents-cli app mark, shared with the agi-cli web favicon and the menu
+       bar glyph (Icon.swift). Lime tile + chunky near-black lowercase 'a'.
+       This is the source for MenubarHelper.app's AppIcon.icns (the notification
+       icon), so a daemon/menu-bar notification carries the current brand mark
+       instead of the legacy assets/logo.png gradient 'A'. -->
+  <rect x="0" y="0" width="32" height="32" rx="6" fill="#a3e635"/>
+  <g fill="#0a0a0a">
+    <path d="M6 10 L24 10 L26 12 L26 26 L20 26 L20 22 L12 22 L12 26 L6 26 Z M12 16 L12 18 L20 18 L20 16 Z"/>
+  </g>
+</svg>

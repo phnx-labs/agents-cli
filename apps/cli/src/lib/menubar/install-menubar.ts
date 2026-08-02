@@ -160,6 +160,29 @@ function copyAppBundle(src: string, dest: string): void {
   }
 }
 
+/**
+ * Register the freshly-installed bundle with LaunchServices.
+ *
+ * The helper is copied to ~/Library/Application Support (not /Applications) and
+ * launched only via launchd, so LaunchServices may never discover it on its own.
+ * A daemon notification posted by the one-shot `MenubarHelper --notify` process is
+ * attributed to this bundle, and macOS resolves the notification's LEFT-hand app
+ * icon from the bundle's LaunchServices record — so a bundle LS doesn't know about
+ * shows a blank app icon there (the right-hand contentImage is unaffected;
+ * appIconImage reads the `.icns` directly). `lsregister -f` registers the bundle at
+ * its current path so the OS can resolve its AppIcon for that slot. Best-effort:
+ * LaunchServices is advisory, and a failure here must never block install.
+ */
+function refreshBundleIconRegistration(appPath: string): void {
+  const lsregister =
+    '/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister';
+  const bin = fs.existsSync(lsregister) ? lsregister : 'lsregister';
+  const r = spawnSync(bin, ['-f', appPath], { stdio: ['ignore', 'ignore', 'ignore'] });
+  if (r.error) {
+    /* lsregister missing / moved — advisory only, ignore. */
+  }
+}
+
 /** True when the bundle carries a signature the kernel will accept at launch. */
 export function codesignVerifies(appPath: string): boolean {
   const r = spawnSync('codesign', ['--verify', '--strict', appPath], { stdio: ['ignore', 'ignore', 'ignore'] });
@@ -214,6 +237,10 @@ export function ensureMenubarAppInstalled(opts: { forceReinstall?: boolean } = {
   }
   copyAppBundle(src, dest);
   ensureValidSignature(dest);
+  // A fresh copy is exactly when the bundle's icon can be new (first install) or
+  // superseded (upgrade) — re-register so LaunchServices drops any stale "no
+  // icon" record and the new AppIcon shows on the left of daemon notifications.
+  refreshBundleIconRegistration(dest);
   return installedExecutablePath();
 }
 

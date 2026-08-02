@@ -64,7 +64,12 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 mkdir -p "$APP/Contents/Resources"
 cp "$SRC" "$APP/Contents/MacOS/MenubarHelper"
-generate_app_icon "$REPO_ROOT/assets/logo.png" "$APP/Contents/Resources/AppIcon.icns"
+# Icon source is the current agents-cli mark (assets/app-icon.svg -> app-icon.png):
+# the lime-tile lowercase `a` shared with the agi-cli web favicon and the menu-bar
+# glyph (Icon.swift), NOT the legacy assets/logo.png gradient `A`. This drives the
+# notification's app icon — both the left-hand bundle icon (CFBundleIconFile) and
+# the right-hand contentImage (appIconImage in PromptPanel.swift loads AppIcon.icns).
+generate_app_icon "$REPO_ROOT/assets/app-icon.png" "$APP/Contents/Resources/AppIcon.icns"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
