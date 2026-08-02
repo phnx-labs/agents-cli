@@ -18,7 +18,16 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { ensureFeedPublishHook, listAskStats, listBlocks, recordNotified, type OpenBlock } from '../lib/feed.js';
-import { ensureActivityLogHook, readRecentActivity, formatActivityLine, formatProgressUpdate, type ActivityEvent } from '../lib/activity.js';
+import {
+  ensureActivityLogHook,
+  readRecentActivity,
+  formatActivityLine,
+  formatProgressUpdate,
+  mergeActivityEvents,
+  parseActivityPayload,
+  type ActivityEvent,
+  type EnrichedActivityEvent,
+} from '../lib/activity.js';
 import { postFeedStatus } from '../lib/feed-post.js';
 import {
   enrichBlocksFromSessions,
@@ -385,20 +394,39 @@ Domain facts (tickets, PRs) are not CLI flags — join them on the session at re
         }
       }
 
-      // Updates view: deliberate progress posts only, over the local activity
-      // timeline (blocks are decisions, not announcements). Short-circuit the
-      // whole block pipeline — no remote fan-out, no dispatch policy.
+      // Trailing lane under the block views: `--filter all` appends the same
+      // fleet-wide updates section, anything else the compact local lane.
+      const renderTrailingActivity = async (): Promise<void> => {
+        if (filter === 'all') {
+          console.log();
+          renderUpdatesView(await gatherStatusPosts({
+            limit: UPDATES_VIEW_LIMIT, hosts: opts.host, local: opts.local, includeLocal, self,
+          }));
+          return;
+        }
+        if (includeLocal) renderActivityLane();
+      };
+
+      // Updates view: deliberate progress posts only (blocks are decisions, not
+      // announcements). Short-circuits the block pipeline — no dispatch policy —
+      // but fans out like the block view, because a post lands on whichever box
+      // ran the agent.
       if (filter === 'updates') {
         for (const warning of setupWarnings) {
           console.error(chalk.yellow(`Feed hook setup warning: ${warning}`));
         }
+        const updates = await gatherStatusPosts({
+          limit: opts.json ? UPDATES_JSON_LIMIT : UPDATES_VIEW_LIMIT,
+          hosts: opts.host,
+          local: opts.local,
+          includeLocal,
+          self,
+        });
         if (opts.json) {
-          const updates = readRecentActivity({ sinceMs: Date.now() - 7 * 24 * 60 * 60 * 1000, limit: 100 })
-            .filter((e) => e.event === 'status.posted');
           console.log(JSON.stringify(updates, null, 2));
           return;
         }
-        renderUpdatesView();
+        renderUpdatesView(updates);
         return;
       }
 
@@ -520,10 +548,7 @@ Domain facts (tickets, PRs) are not CLI flags — join them on the session at re
 
       if (blocks.length === 0) {
         console.log(chalk.gray(digest ? 'No open blocks after stall suppression.' : 'No open blocks.'));
-        if (includeLocal) {
-          if (filter === 'all') { console.log(); renderUpdatesView(); }
-          else renderActivityLane();
-        }
+        await renderTrailingActivity();
         return;
       }
 
@@ -549,10 +574,7 @@ Domain facts (tickets, PRs) are not CLI flags — join them on the session at re
         return br - ar;
       });
       for (const g of groups) renderOutcomeGroup(g, self);
-      if (includeLocal) {
-        if (filter === 'all') { console.log(); renderUpdatesView(); }
-        else renderActivityLane();
-      }
+      await renderTrailingActivity();
     });
 }
 
@@ -580,16 +602,67 @@ function renderActivityEntry(ev: ActivityEvent): void {
   }
 }
 
+/** How far back the updates view looks for deliberate progress posts. */
+const UPDATES_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+/** Posts kept per machine in the rendered view / the `--json` payload. */
+const UPDATES_VIEW_LIMIT = 30;
+const UPDATES_JSON_LIMIT = 100;
+
+/**
+ * The most recent `limit` deliberate progress posts on THIS machine, newest
+ * first. The event filter is pushed into the reader so `limit` counts posts —
+ * slicing first and filtering after returned an empty view on a busy box, where
+ * routine `file.edited` hook events fill the whole slice.
+ */
+function readStatusPosts(limit: number): ActivityEvent[] {
+  return readRecentActivity({
+    sinceMs: Date.now() - UPDATES_WINDOW_MS,
+    limit,
+    events: ['status.posted'],
+  });
+}
+
+/**
+ * Progress posts across the fleet, newest first. An agent posts on whichever
+ * box it runs on, so a local-only read shows the operator a fraction of what
+ * the fleet reported. Peers are dialed with the same SSH fan-out the block view
+ * uses; `--local` (or the no-fanout env guard on a peer) keeps it to this box.
+ */
+async function gatherStatusPosts(opts: {
+  limit: number;
+  hosts?: string[];
+  local?: boolean;
+  includeLocal: boolean;
+  self: string;
+}): Promise<EnrichedActivityEvent[]> {
+  const local: EnrichedActivityEvent[] = opts.includeLocal ? readStatusPosts(opts.limit) : [];
+  const forceLocal = opts.local === true || process.env[FEED_NO_FANOUT_ENV] === '1';
+  if (forceLocal) return local;
+  const remoteHosts = opts.hosts?.length ? remoteFeedHostsToDial(opts.hosts, opts.self) : undefined;
+  if (opts.hosts?.length && (!remoteHosts || remoteHosts.length === 0)) return local;
+  const remote = await gatherRemoteAgentsJson({
+    args: ['feed', '--filter', 'updates', '--json'],
+    noFanoutEnv: FEED_NO_FANOUT_ENV,
+    hosts: remoteHosts,
+    parse: parseActivityPayload,
+  });
+  return mergeActivityEvents(local, remote.items).slice(0, opts.limit);
+}
+
 /**
  * Render the **Updates** view: deliberate progress posts only (`status.posted`),
  * recency-ordered, with rich identity chips. Pure `file.edited` / git-hook noise
  * is excluded so operators see announcements, not tool churn.
  */
-function renderUpdatesView(limit = 30): void {
-  const updates = readRecentActivity({ sinceMs: Date.now() - 7 * 24 * 60 * 60 * 1000, limit })
-    .filter((e) => e.event === 'status.posted');
+function renderUpdatesView(updates: ActivityEvent[]): void {
+  const hosts = new Set(updates.map((e) => e.host).filter(Boolean));
   console.log(
-    masthead({ title: 'updates', accent: 'cyan', host: machineId(), right: `${updates.length} post${updates.length === 1 ? '' : 's'}` }),
+    masthead({
+      title: 'updates',
+      accent: 'cyan',
+      host: hosts.size > 1 ? `${hosts.size} machines` : (updates[0]?.host ?? machineId()),
+      right: `${updates.length} post${updates.length === 1 ? '' : 's'}`,
+    }),
   );
   console.log();
   if (updates.length === 0) {
@@ -609,8 +682,11 @@ function renderUpdatesView(limit = 30): void {
  * when empty.
  */
 function renderActivityLane(limit = 6): void {
-  const events = readRecentActivity({ sinceMs: Date.now() - 24 * 60 * 60 * 1000, limit })
-    .filter((e) => e.tier === 'milestone');
+  const events = readRecentActivity({
+    sinceMs: Date.now() - 24 * 60 * 60 * 1000,
+    limit,
+    tier: 'milestone',
+  });
   if (events.length === 0) return;
   console.log(chalk.bold('\n  recent activity'));
   for (const ev of events) renderActivityEntry(ev);

@@ -85,6 +85,28 @@ describe('activity log store (TS)', () => {
     expect(readRecentActivity({ root: dir, limit: 1 })).toHaveLength(1);
   });
 
+  it('applies the event filter before the limit so rare posts survive routine churn', () => {
+    const dir = tmpActivityDir();
+    // A busy box: 40 routine edits newer than the one deliberate progress post.
+    appendActivityEvent(
+      { ts: '2026-07-29T09:00:00.000Z', event: 'status.posted', sessionId: 's1', mailboxId: 's1', host: 'h', runtime: 'headless', detail: 'PR #1690 open; watching CI' },
+      dir,
+    );
+    for (let i = 0; i < 40; i += 1) {
+      appendActivityEvent(
+        { ts: `2026-07-29T10:${String(i).padStart(2, '0')}:00.000Z`, event: 'file.edited', sessionId: 's2', mailboxId: 's2', host: 'h', runtime: 'headless' },
+        dir,
+      );
+    }
+    // Slicing first and filtering after is what returned an empty updates view.
+    expect(readRecentActivity({ root: dir, limit: 30 }).filter((e) => e.event === 'status.posted')).toHaveLength(0);
+    // Pushing the filter into the reader makes `limit` count posts, not churn.
+    const posts = readRecentActivity({ root: dir, limit: 30, events: ['status.posted'] });
+    expect(posts.map((e) => e.detail)).toEqual(['PR #1690 open; watching CI']);
+    // Same defect, same fix for the milestone lane under the block view.
+    expect(readRecentActivity({ root: dir, limit: 6, tier: 'milestone' }).map((e) => e.event)).toEqual(['status.posted']);
+  });
+
   it('skips corrupt / partial lines without throwing', () => {
     const dir = tmpActivityDir();
     fs.writeFileSync(path.join(dir, 's1.jsonl'), '{not json\n{"ts":"2026-07-29T10:00:00.000Z","event":"pr.opened","sessionId":"s1"}\n\n');

@@ -535,8 +535,18 @@ agents feed --filter updates    # only deliberate progress posts (see Status pos
 agents feed --filter all        # blocks first, then the updates view appended
 ```
 
-`--filter updates` reads the local activity timeline only (no block pipeline, no
-remote fan-out); its `--json` emits the raw `status.posted` events.
+`--filter updates` skips the block pipeline (no stall suppression, no dispatch
+policy) but keeps the same SSH fan-out the block view uses — an agent posts on
+whichever box ran it, so the fleet's posts merge into one recency-ordered list.
+`-H/--host` (alias `--device`) scopes it to named machines; `--local` (or
+`AGENTS_FEED_LOCAL=1`) keeps it to this box. Its `--json` emits the raw
+`status.posted` events.
+
+The `limit` on this view counts **posts**, not raw events: the event filter is
+pushed into `readRecentActivity` (`events` / `tier` options) rather than applied
+to an already-sliced window. Slicing first meant a busy box's routine
+`file.edited` churn filled the whole slice and the view rendered "0 posts" while
+real posts sat in the log.
 
 ### What publishes a block
 

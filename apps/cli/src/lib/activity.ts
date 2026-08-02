@@ -288,6 +288,14 @@ export interface RecentActivityOptions {
   root?: string;
   /** Per-session tail budget in bytes. */
   maxBytesPerSession?: number;
+  /**
+   * Only include these event names. Applied BEFORE `limit`, so asking for a
+   * rare event (a deliberate `status.posted`) returns that many of it instead
+   * of however many survive a slice dominated by routine `file.edited` churn.
+   */
+  events?: string[];
+  /** Only include events in these tiers. Applied BEFORE `limit`, as `events` is. */
+  tier?: ActivityTier;
 }
 
 /**
@@ -297,9 +305,12 @@ export interface RecentActivityOptions {
 export function readRecentActivity(opts: RecentActivityOptions = {}): ActivityEvent[] {
   const dir = opts.root ?? getActivityDir();
   const sinceMs = opts.sinceMs ?? 0;
+  const wanted = opts.events && opts.events.length > 0 ? new Set(opts.events) : null;
   const all: ActivityEvent[] = [];
   for (const sessionId of listActivitySessions(dir)) {
     for (const ev of readSessionActivity(sessionId, dir, opts.maxBytesPerSession)) {
+      if (wanted && !wanted.has(ev.event)) continue;
+      if (opts.tier && ev.tier !== opts.tier) continue;
       const t = Date.parse(ev.ts);
       if (Number.isFinite(t) && t >= sinceMs) all.push(ev);
     }
