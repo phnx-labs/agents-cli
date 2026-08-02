@@ -302,7 +302,7 @@ export function multiItemPicker<T>(config: MultiPickerConfig<T>): Promise<T[] | 
     const theme = makeTheme({});
     const [status, setStatus] = useState<'idle' | 'done'>('idle');
     const [searchTerm, setSearchTerm] = useState(cfg.initialSearch ?? '');
-    const [previewOpen, setPreviewOpen] = useState(false);
+    const [previewOpen, setPreviewOpen] = useState(Boolean(cfg.buildPreview));
     const [selectedKeys, setSelectedKeys] = useState<ReadonlySet<string>>(new Set());
     const [active, setActive] = useState(0);
     const prefix = usePrefix({ status, theme });

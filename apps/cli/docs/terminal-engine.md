@@ -131,7 +131,7 @@ await openSurfaces(items, {
 |---|---|
 | `--iterm` / `--ghostty` / `--tmux` / `--vscodium` | Force a backend (else auto-detect / prompt). |
 | `--host <alias>` | Resume on a remote host over SSH (defaults to `tmux`). |
-| `--tabs` | One tab per session (default packs two-per-tab). |
+| `--splits` | Pack two sessions side by side per tab (default is one tab per session). |
 
 Non-resumable agents (where `buildResumeCommand` returns null) are skipped with a
 note, never silently dropped. With no GUI backend and no tmux, resume falls back
@@ -167,9 +167,8 @@ codium --open-url 'vscodium://swarmify.swarm-ext/spawn?p=<base64url(JSON)>'
 - **No `zsh -ilc` wrap** — the command runs in an editor terminal that is already
   an interactive login shell (see [above](#interactive-login-shell)).
 
-**Layout:** VSCodium defaults to **one editor tab per session** (matching swarm-ext's
-native agent-terminal UX — full-width tabs, not split panes); the two-per-tab split
-packing is for the terminal-app backends. `--tabs` forces tabs on any backend.
+**Layout:** Every backend defaults to **one full-width tab per session**. `--splits`
+opts into two-per-tab split packing for side-by-side sessions.
 
 Auto-detection is intentionally *not* wired for this backend: a VS Code integrated
 terminal reports `TERM_PROGRAM=vscode` for all three products, so the engine can't
