@@ -845,6 +845,143 @@ export function isPastEndAt(config: Pick<JobConfig, 'endAt'>, now: Date = new Da
   return now.getTime() >= end;
 }
 
+export interface OneShotScheduleParts {
+  minute: number;
+  hour: number;
+  day: number;
+  month: number;
+}
+
+export function parseOneShotLikeSchedule(schedule: string | undefined | null): OneShotScheduleParts | null {
+  if (!schedule) return null;
+  const parts = schedule.trim().split(/\s+/);
+  if (parts.length !== 5) return null;
+  const [minuteRaw, hourRaw, dayRaw, monthRaw, weekdayRaw] = parts;
+  if (weekdayRaw !== '*') return null;
+  if (![minuteRaw, hourRaw, dayRaw, monthRaw].every((p) => /^\d+$/.test(p))) return null;
+
+  const minute = parseInt(minuteRaw, 10);
+  const hour = parseInt(hourRaw, 10);
+  const day = parseInt(dayRaw, 10);
+  const month = parseInt(monthRaw, 10);
+  if (minute < 0 || minute > 59) return null;
+  if (hour < 0 || hour > 23) return null;
+  if (month < 1 || month > 12) return null;
+  if (day < 1 || day > 31) return null;
+  return { minute, hour, day, month };
+}
+
+export function isOneShotLikeSchedule(schedule: string | undefined | null): boolean {
+  return parseOneShotLikeSchedule(schedule) !== null;
+}
+
+export function isOneShotRoutine(config: Pick<JobConfig, 'schedule' | 'runOnce'>): boolean {
+  return Boolean(config.runOnce || isOneShotLikeSchedule(config.schedule));
+}
+
+function zonedParts(date: Date, timezone: string): OneShotScheduleParts & { year: number } {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    hour12: false,
+    hourCycle: 'h23',
+  }).formatToParts(date);
+  const get = (type: string): number => parseInt(parts.find((p) => p.type === type)?.value ?? '0', 10);
+  return {
+    year: get('year'),
+    month: get('month'),
+    day: get('day'),
+    hour: get('hour'),
+    minute: get('minute'),
+  };
+}
+
+function zonedDateToUtc(year: number, parts: OneShotScheduleParts, timezone: string): Date | null {
+  const targetUtc = Date.UTC(year, parts.month - 1, parts.day, parts.hour, parts.minute, 0, 0);
+  let candidate = new Date(targetUtc);
+  for (let i = 0; i < 4; i++) {
+    const actual = zonedParts(candidate, timezone);
+    const actualUtc = Date.UTC(actual.year, actual.month - 1, actual.day, actual.hour, actual.minute, 0, 0);
+    const delta = actualUtc - targetUtc;
+    if (delta === 0) break;
+    candidate = new Date(candidate.getTime() - delta);
+  }
+  const verify = zonedParts(candidate, timezone);
+  if (
+    verify.year !== year ||
+    verify.month !== parts.month ||
+    verify.day !== parts.day ||
+    verify.hour !== parts.hour ||
+    verify.minute !== parts.minute
+  ) {
+    return null;
+  }
+  return candidate;
+}
+
+export function oneShotScheduleFireDate(
+  schedule: string | undefined | null,
+  now: Date = new Date(),
+  timezone?: string,
+): Date | null {
+  const parts = parseOneShotLikeSchedule(schedule);
+  if (!parts) return null;
+
+  if (timezone) {
+    try {
+      const year = zonedParts(now, timezone).year;
+      return zonedDateToUtc(year, parts, timezone);
+    } catch {
+      return null;
+    }
+  }
+
+  const fireAt = new Date(now.getFullYear(), parts.month - 1, parts.day, parts.hour, parts.minute, 0, 0);
+  if (
+    fireAt.getFullYear() !== now.getFullYear() ||
+    fireAt.getMonth() !== parts.month - 1 ||
+    fireAt.getDate() !== parts.day ||
+    fireAt.getHours() !== parts.hour ||
+    fireAt.getMinutes() !== parts.minute
+  ) {
+    return null;
+  }
+  return fireAt;
+}
+
+export function isPastOneShotRoutine(
+  config: Pick<JobConfig, 'schedule' | 'runOnce' | 'timezone'>,
+  now: Date = new Date(),
+): boolean {
+  if (!isOneShotRoutine(config)) return false;
+  const fireAt = oneShotScheduleFireDate(config.schedule, now, config.timezone);
+  return Boolean(fireAt && now.getTime() >= fireAt.getTime());
+}
+
+export function hasCompletedOneShotRun(
+  config: Pick<JobConfig, 'name' | 'schedule' | 'runOnce' | 'timezone'>,
+  now: Date = new Date(),
+): boolean {
+  if (!isPastOneShotRoutine(config, now)) return false;
+  const fireAt = oneShotScheduleFireDate(config.schedule, now, config.timezone);
+  if (!fireAt) return false;
+  const latest = getLatestRun(config.name);
+  if (!latest || latest.status === 'running') return false;
+  const startedAt = Date.parse(latest.startedAt);
+  return Number.isFinite(startedAt) && startedAt >= fireAt.getTime() - 60_000;
+}
+
+export function shouldPurgeCompletedOneShotRoutine(
+  config: Pick<JobConfig, 'name' | 'schedule' | 'runOnce' | 'timezone'>,
+  now: Date = new Date(),
+): boolean {
+  return hasCompletedOneShotRun(config, now);
+}
+
 /** Expand built-in and user-defined template variables in a job's prompt string. */
 export function resolveJobPrompt(config: JobConfig): string {
   const now = new Date();

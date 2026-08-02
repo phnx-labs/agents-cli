@@ -397,6 +397,41 @@ describe('routines add --json', () => {
   });
 });
 
+describe('routines add one-shot-looking --schedule', () => {
+  it('warns, persists runOnce, and keeps JSON stdout parseable', async () => {
+    const home = makeHome({ registry });
+    let daemon: ReturnType<typeof startIsolatedDaemon> | undefined;
+    let pid: number | null = null;
+    try {
+      daemon = startIsolatedDaemon(home);
+      pid = await daemon.pidPromise;
+      expect(pid).not.toBeNull();
+
+      const res = run(home, [
+        'add', 'date-cron',
+        '--schedule', '0 14 31 12 *',
+        '--agent', 'claude',
+        '--prompt', 'hi',
+        '--json',
+      ]);
+      expect(res.status).toBe(0);
+      expect(JSON.parse(res.stdout.trim())).toMatchObject({
+        jobId: 'date-cron',
+        schedule: '0 14 31 12 *',
+      });
+      expect(res.stderr).toContain('treating it as one-shot');
+
+      const doc = readRoutineYaml(home, 'date-cron');
+      expect(doc).not.toBeNull();
+      expect(doc!.runOnce).toBe(true);
+    } finally {
+      if (daemon) await stopIsolatedDaemon(daemon.child);
+      if (typeof pid === 'number') expect(isProcessAlive(pid)).toBe(false);
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('routines list --json has devices+runsHere, no device', () => {
   it('includes devices array and runsHere, excludes singular device key', () => {
     const job = { ...baseJob, devices: ['yosemite-s0', 'mac-mini'] };
@@ -595,7 +630,7 @@ describe('routines list table has Devices column with bounded ellipsis', () => {
   it('table header includes Devices', () => {
     const home = makeHome({ jobs: [baseJob], registry });
     try {
-      const res = run(home, ['list']);
+      const res = run(home, ['list', '--flat']);
       expect(res.status).toBe(0);
       expect(res.stdout).toContain('Devices');
     } finally {
@@ -607,7 +642,7 @@ describe('routines list table has Devices column with bounded ellipsis', () => {
     const job = { ...baseJob, devices: ['yosemite-s0', 'yosemite-s1', 'mac-mini', 'zion'] };
     const home = makeHome({ jobs: [job], registry });
     try {
-      const res = run(home, ['list']);
+      const res = run(home, ['list', '--flat']);
       expect(res.status).toBe(0);
       const stripped = res.stdout.replace(/\x1b\[[0-9;]*m/g, '');
       const lines = stripped.split('\n').filter((l) => l.includes('test-job'));
@@ -621,7 +656,7 @@ describe('routines list table has Devices column with bounded ellipsis', () => {
   it('renders unrestricted routines with Devices set to "all"', () => {
     const home = makeHome({ jobs: [baseJob], registry });
     try {
-      const res = run(home, ['list']);
+      const res = run(home, ['list', '--flat']);
       expect(res.status).toBe(0);
       const stripped = res.stdout.replace(/\x1b\[[0-9;]*m/g, '');
       const lines = stripped.split('\n');
@@ -635,6 +670,97 @@ describe('routines list table has Devices column with bounded ellipsis', () => {
       expect(scheduleStart).toBeGreaterThan(deviceStart);
       const deviceField = line!.slice(deviceStart, scheduleStart).trim();
       expect(deviceField).toBe('all');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('marks one-shot routines in the schedule column', () => {
+    const job = { ...baseJob, schedule: '0 14 31 12 *', runOnce: true };
+    const home = makeHome({ jobs: [job], registry });
+    try {
+      const res = run(home, ['list', '--flat']);
+      expect(res.status).toBe(0);
+      expect(res.stdout.replace(/\x1b\[[0-9;]*m/g, '')).toContain('one-shot');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('routines list grouped by device', () => {
+  it('groups by fleet, current device, pinned devices, hosts, cloud, and offline registry state', () => {
+    const jobs = [
+      { ...baseJob, name: 'all-local' },
+      { ...baseJob, name: 'zion-local', devices: ['zion'] },
+      { ...baseJob, name: 's0-local', devices: ['yosemite-s0'] },
+      { ...baseJob, name: 'fleet-placed', hostStrategy: 'fleet', devices: ['zion'] },
+      { ...baseJob, name: 'cloud-placed', hostStrategy: 'cloud', devices: ['zion'] },
+      { ...baseJob, name: 'host-placed', hostStrategy: 'host', host: 'mac-mini', devices: ['zion'] },
+      { ...baseJob, name: 'offline-local', devices: ['offline-box'] },
+    ];
+    const groupedRegistry = {
+      ...registry,
+      'mac-mini': { ...registry['mac-mini'], tailscale: { online: false, direct: false } },
+      'offline-box': { name: 'offline-box', platform: 'linux', tailscale: { online: false, direct: false } },
+    };
+    const home = makeHome({ jobs, registry: groupedRegistry });
+    try {
+      const res = run(home, ['list', '--group-by', 'device'], { AGENTS_SYNC_MACHINE_ID: 'zion' });
+      expect(res.status).toBe(0);
+      const stripped = res.stdout.replace(/\x1b\[[0-9;]*m/g, '');
+      expect(stripped).toContain('This machine (zion)');
+      expect(stripped).toContain('Fleet-wide');
+      expect(stripped).toContain('Cloud');
+      expect(stripped).toContain('Device: yosemite-s0');
+      expect(stripped).toContain('Device: offline-box (offline)');
+      expect(stripped).toContain('Host: mac-mini (offline)');
+      for (const job of jobs) expect(stripped).toContain(job.name);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the legacy flat table available with --flat', () => {
+    const home = makeHome({ jobs: [baseJob], registry });
+    try {
+      const grouped = run(home, ['list'], { AGENTS_SYNC_MACHINE_ID: 'zion' });
+      const flat = run(home, ['list', '--flat'], { AGENTS_SYNC_MACHINE_ID: 'zion' });
+      expect(grouped.status).toBe(0);
+      expect(flat.status).toBe(0);
+      expect(grouped.stdout.replace(/\x1b\[[0-9;]*m/g, '')).toContain('Fleet-wide');
+      expect(flat.stdout.replace(/\x1b\[[0-9;]*m/g, '')).not.toContain('Fleet-wide');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('routines cleanup', () => {
+  it('removes completed expired one-shot-looking routines', () => {
+    const year = new Date().getFullYear();
+    const job = { ...baseJob, name: 'stale-followup', schedule: '0 0 1 1 *' };
+    const home = makeHome({ jobs: [job], registry });
+    writeRunMeta(home, 'stale-followup', `${year}-01-02T00-00-00-000Z`, {
+      jobName: 'stale-followup',
+      runId: `${year}-01-02T00-00-00-000Z`,
+      agent: 'claude',
+      pid: null,
+      status: 'completed',
+      startedAt: `${year}-01-02T00:00:00.000Z`,
+      completedAt: `${year}-01-02T00:00:01.000Z`,
+      exitCode: 0,
+    });
+    try {
+      const dryRun = run(home, ['cleanup', '--dry-run']);
+      expect(dryRun.status).toBe(0);
+      expect(dryRun.stdout).toContain('stale-followup');
+      expect(readRoutineYaml(home, 'stale-followup')).not.toBeNull();
+
+      const res = run(home, ['cleanup']);
+      expect(res.status).toBe(0);
+      expect(res.stdout).toContain('Removed stale-followup');
+      expect(readRoutineYaml(home, 'stale-followup')).toBeNull();
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }

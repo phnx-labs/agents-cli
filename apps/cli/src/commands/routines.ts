@@ -37,6 +37,10 @@ import {
   getRunDir,
   getJobPath,
   parseAtTime,
+  hasCompletedOneShotRun,
+  isOneShotLikeSchedule,
+  isOneShotRoutine,
+  isPastOneShotRoutine,
   jobRunsOnThisDevice,
   checkJobDeviceEligibility,
   normalizeTriggerEvent,
@@ -66,7 +70,8 @@ import { JobScheduler } from '../lib/scheduler.js';
 import { detectOverdueJobs } from '../lib/overdue.js';
 import { isInteractiveTerminal, requireInteractiveSelection } from './utils.js';
 import { setHelpSections } from '../lib/help.js';
-import { loadDevices } from '../lib/devices/registry.js';
+import { loadDevices, loadDevicesSync } from '../lib/devices/registry.js';
+import type { DeviceRegistry } from '../lib/devices/registry.js';
 import { machineId, normalizeHost } from '../lib/machine-id.js';
 import { addHostOption } from '../lib/hosts/option.js';
 
@@ -113,6 +118,189 @@ function fireConditionLabel(job: JobConfig): string {
     return `on linear:${job.trigger.event}${filters ? ` (${filters})` : ''}`;
   }
   return '-';
+}
+
+function scheduleLabel(job: JobConfig): string {
+  let label = fireConditionLabel(job);
+  if (isOneShotRoutine(job)) label = `${label} (one-shot)`;
+  if (job.endAt) {
+    const end = new Date(job.endAt);
+    const endLabel = Number.isFinite(end.getTime())
+      ? end.toLocaleDateString()
+      : job.endAt;
+    label = `${label} (until ${endLabel})`;
+  }
+  return label;
+}
+
+function nextRunForDisplay(job: JobConfig, scheduler: JobScheduler): Date | null {
+  if (isPastOneShotRoutine(job)) return null;
+  return scheduler.getNextRun(job.name);
+}
+
+function nextRunLabel(job: JobConfig, scheduler: JobScheduler, now: Date): string {
+  if (isPastOneShotRoutine(job)) return 'expired';
+  return humanizeNextRun(scheduler.getNextRun(job.name) ?? null, now, job.timezone);
+}
+
+function deviceStateLabel(name: string, registry: DeviceRegistry): string | null {
+  const profile = registry[normalizeHost(name)] ?? registry[name];
+  if (!profile) return 'unknown';
+  if (profile.reachability?.reachable === false) return 'offline';
+  if (profile.reachability?.reachable === true) return 'online';
+  if (profile.tailscale?.online === false) return 'offline';
+  if (profile.tailscale?.online === true) return 'online';
+  return 'unknown';
+}
+
+function titleWithDeviceState(title: string, name: string, registry: DeviceRegistry): string {
+  const state = deviceStateLabel(name, registry);
+  return state && state !== 'online' ? `${title} (${state})` : title;
+}
+
+function placementTag(job: JobConfig): string {
+  const strategy = resolveHostStrategy(job);
+  if (strategy === 'local') return job.host ? `->${job.host}` : '';
+  if (strategy === 'host') return `->${job.host ?? '?'}`;
+  if (strategy === 'fleet') return '->fleet';
+  return '->cloud';
+}
+
+function deviceLabel(job: JobConfig, width?: number): { raw: string; display: string; dim: boolean } {
+  const full = [job.devices?.join(',') ?? '', placementTag(job)]
+    .filter(Boolean)
+    .join(' ');
+  const raw = full.length === 0 ? 'all' : full;
+  const display = width && raw.length > width
+    ? raw.slice(0, width - 1) + '…'
+    : raw;
+  return { raw, display, dim: full.length === 0 || !jobRunsOnThisDevice(job) };
+}
+
+export interface RoutineListGroup {
+  key: string;
+  title: string;
+  jobs: JobConfig[];
+}
+
+export function groupRoutineJobsByDevice(
+  jobs: JobConfig[],
+  registry: DeviceRegistry,
+  self: string = machineId(),
+): RoutineListGroup[] {
+  const groups = new Map<string, RoutineListGroup>();
+  const add = (key: string, title: string, job: JobConfig): void => {
+    const existing = groups.get(key);
+    if (existing) {
+      existing.jobs.push(job);
+      return;
+    }
+    groups.set(key, { key, title, jobs: [job] });
+  };
+
+  for (const job of jobs) {
+    const strategy = resolveHostStrategy(job);
+    if (strategy === 'cloud') {
+      add('cloud', 'Cloud', job);
+      continue;
+    }
+    if (strategy === 'fleet') {
+      add('fleet', 'Fleet-wide', job);
+      continue;
+    }
+    if (strategy === 'host') {
+      const host = job.host ?? 'unknown-host';
+      add(`host:${normalizeHost(host)}`, titleWithDeviceState(`Host: ${host}`, host, registry), job);
+      continue;
+    }
+
+    const devices = job.devices ?? [];
+    if (devices.length === 0) {
+      add('fleet', 'Fleet-wide', job);
+      continue;
+    }
+    for (const device of devices) {
+      const normalized = normalizeHost(device);
+      if (normalized === self) {
+        add('this-machine', `This machine (${self})`, job);
+      } else {
+        add(`device:${normalized}`, titleWithDeviceState(`Device: ${normalized}`, normalized, registry), job);
+      }
+    }
+  }
+
+  const order = (group: RoutineListGroup): number => {
+    if (group.key === 'this-machine') return 0;
+    if (group.key === 'fleet') return 1;
+    if (group.key === 'cloud') return 2;
+    if (group.key.startsWith('device:')) return 3;
+    if (group.key.startsWith('host:')) return 4;
+    return 5;
+  };
+  return [...groups.values()].sort((a, b) => order(a) - order(b) || a.title.localeCompare(b.title));
+}
+
+interface RenderRowsOptions {
+  jobs: JobConfig[];
+  scheduler: JobScheduler;
+  overdueSet: Set<string>;
+  link: (label: string, url: string | null) => string;
+  now: Date;
+}
+
+function renderRoutineRows({ jobs, scheduler, overdueSet, link, now }: RenderRowsOptions): void {
+  const NAME_W = 24;
+  const AGENT_W = 10;
+  const REPO_W = REPO_DISPLAY_MAX;
+  const DEVICE_W = 22;
+  const SCHED_W = 34;
+  const ENABLED_W = 10;
+  const NEXT_W = 22;
+
+  const header =
+    `  ${'Name'.padEnd(NAME_W)} ${'Agent'.padEnd(AGENT_W)} ${'Repo'.padEnd(REPO_W)} ${'Devices'.padEnd(DEVICE_W)} ${'Schedule'.padEnd(SCHED_W)} ${'Enabled'.padEnd(ENABLED_W)} ${'Next Run'.padEnd(NEXT_W)} Last Status`;
+  console.log(chalk.gray(header));
+  console.log(chalk.gray('  ' + '-'.repeat(NAME_W + AGENT_W + REPO_W + DEVICE_W + SCHED_W + ENABLED_W + NEXT_W + 20)));
+
+  for (const job of jobs) {
+    const nextStr = nextRunLabel(job, scheduler, now);
+    const schedStr = scheduleLabel(job);
+    const latestRun = getLatestRun(job.name);
+    const lastStatus = latestRun?.status || '-';
+
+    const sourceRepo = job.source?.repo ?? job.repo;
+    const sourceLabel = sourceRepo
+      ? (job.source?.branch ? `${sourceRepo}@${job.source.branch}` : sourceRepo)
+      : null;
+    const repoInfo = formatRepoLink(sourceLabel ?? job.repo);
+    const repoCell = link(repoInfo.display, repoInfo.href);
+    const repoPadding = Math.max(0, REPO_W - repoInfo.display.length);
+
+    const enabledStr = job.enabled ? chalk.green('yes') : chalk.gray('no');
+    const enabledWord = job.enabled ? 'yes' : 'no';
+    const enabledPad = Math.max(0, ENABLED_W - enabledWord.length);
+
+    const device = deviceLabel(job, DEVICE_W);
+    const deviceCell = device.dim ? chalk.gray(device.display) : device.display;
+    const devicePad = Math.max(0, DEVICE_W - device.display.length);
+
+    const statusColor =
+      lastStatus === 'completed' ? chalk.green
+      : lastStatus === 'failed' ? chalk.red
+      : lastStatus === 'timeout' ? chalk.yellow
+      : chalk.gray;
+
+    const overdueTag = overdueSet.has(job.name) ? chalk.yellow(' (overdue)') : '';
+
+    const agentLabelPadded = job.command
+      ? chalk.magenta('command'.padEnd(10))
+      : job.workflow
+        ? chalk.magenta(`wf:${job.workflow}`.padEnd(10))
+        : (job.agent || '').padEnd(10);
+    console.log(
+      `  ${chalk.cyan(job.name.padEnd(NAME_W))} ${agentLabelPadded} ${repoCell}${' '.repeat(repoPadding)} ${deviceCell}${' '.repeat(devicePad)} ${schedStr.padEnd(SCHED_W)} ${enabledStr}${' '.repeat(enabledPad)} ${chalk.gray(nextStr.padEnd(NEXT_W))} ${statusColor(lastStatus)}${overdueTag}`
+    );
+  }
 }
 
 function parseRoutineTrigger(options: Record<string, unknown>): JobTrigger | undefined {
@@ -363,7 +551,13 @@ export function registerRoutinesCommands(program: Command): void {
     .command('list')
     .description('See all scheduled jobs, when they run next, and their last execution status')
     .option('--json', 'Emit machine-readable JSON instead of the table (used by the menu bar helper)')
-    .action((options: { json?: boolean }) => {
+    .option('--group-by <field>', 'Group table output by device (default for terminal output)')
+    .option('--flat', 'Print the legacy flat table instead of grouped sections')
+    .action((options: { json?: boolean; groupBy?: string; flat?: boolean }) => {
+      if (options.groupBy && options.groupBy !== 'device') {
+        console.error(chalk.red(`Unsupported --group-by '${options.groupBy}'. Use: device`));
+        process.exit(1);
+      }
       try { monitorRunningJobs(); } catch { /* best-effort orphan reap */ }
       const jobs = listAllJobs(process.cwd());
       if (jobs.length === 0) {
@@ -392,7 +586,6 @@ export function registerRoutinesCommands(program: Command): void {
       if (options.json) {
         const nowJson = new Date();
         const payload = jobs.map((job) => {
-          const nextRun = scheduler.getNextRun(job.name);
           const latestRun = getLatestRun(job.name);
           return {
             name: job.name,
@@ -410,11 +603,14 @@ export function registerRoutinesCommands(program: Command): void {
             source: job.source ?? null,
             sourceRepo: job.source?.repo ?? job.repo ?? null,
             sourceBranch: job.source?.branch ?? null,
+            runOnce: Boolean(job.runOnce),
+            oneShot: isOneShotRoutine(job),
+            expired: isPastOneShotRoutine(job, nowJson),
             runsHere: jobRunsOnThisDevice(job),
             enabled: job.enabled,
             overdue: overdueSet.has(job.name),
-            nextRun: nextRun ? nextRun.toISOString() : null,
-            nextRunHuman: humanizeNextRun(nextRun ?? null, nowJson, job.timezone),
+            nextRun: nextRunForDisplay(job, scheduler)?.toISOString() ?? null,
+            nextRunHuman: nextRunLabel(job, scheduler, nowJson),
             lastStatus: latestRun?.status ?? null,
             exitCode: latestRun?.exitCode ?? null,
             failureReason: latestRun?.errorMessage ?? null,
@@ -436,89 +632,19 @@ export function registerRoutinesCommands(program: Command): void {
         url && process.stdout.isTTY ? `\x1b]8;;${url}\x07${label}\x1b]8;;\x07` : label;
 
       const now = new Date();
-
-      const NAME_W = 24;
-      const AGENT_W = 10;
-      const REPO_W = REPO_DISPLAY_MAX;
-      const DEVICE_W = 22;
-      const SCHED_W = 22;
-      const ENABLED_W = 10;
-      const NEXT_W = 22;
-
-      const header =
-        `  ${'Name'.padEnd(NAME_W)} ${'Agent'.padEnd(AGENT_W)} ${'Repo'.padEnd(REPO_W)} ${'Devices'.padEnd(DEVICE_W)} ${'Schedule'.padEnd(SCHED_W)} ${'Enabled'.padEnd(ENABLED_W)} ${'Next Run'.padEnd(NEXT_W)} Last Status`;
-      console.log(chalk.gray(header));
-      console.log(chalk.gray('  ' + '-'.repeat(NAME_W + AGENT_W + REPO_W + DEVICE_W + SCHED_W + ENABLED_W + NEXT_W + 20)));
-
-      for (const job of jobs) {
-        const nextRun = scheduler.getNextRun(job.name);
-        const nextStr = humanizeNextRun(nextRun ?? null, now, job.timezone);
-        let schedStr = fireConditionLabel(job);
-        if (job.endAt) {
-          const end = new Date(job.endAt);
-          const endLabel = Number.isFinite(end.getTime())
-            ? end.toLocaleDateString()
-            : job.endAt;
-          schedStr = `${schedStr} (until ${endLabel})`;
+      if (options.flat) {
+        renderRoutineRows({ jobs, scheduler, overdueSet, link, now });
+      } else {
+        let registry: DeviceRegistry = {};
+        try {
+          registry = loadDevicesSync();
+        } catch (err) {
+          console.error(chalk.yellow(`Could not read device registry: ${(err as Error).message}`));
         }
-        const latestRun = getLatestRun(job.name);
-        const lastStatus = latestRun?.status || '-';
-
-        // Prefer project-source repo (with optional @branch) over bare job.repo.
-        const sourceRepo = job.source?.repo ?? job.repo;
-        const sourceLabel = sourceRepo
-          ? (job.source?.branch ? `${sourceRepo}@${job.source.branch}` : sourceRepo)
-          : null;
-        const repoInfo = formatRepoLink(sourceLabel ?? job.repo);
-        const repoCell = link(repoInfo.display, repoInfo.href);
-        // Pad based on the display string, not the raw cell (which may include escape codes).
-        const repoPadding = Math.max(0, REPO_W - repoInfo.display.length);
-
-        const enabledStr = job.enabled ? chalk.green('yes') : chalk.gray('no');
-        // chalk adds escape codes; pad the raw word and let chalk wrap it.
-        const enabledWord = job.enabled ? 'yes' : 'no';
-        const enabledPad = Math.max(0, ENABLED_W - enabledWord.length);
-
-        // Placement rides in the Devices cell: eligibility →execution strategy.
-        const strategy = resolveHostStrategy(job);
-        const placementTag = strategy === 'local'
-          ? (job.host ? `→${job.host}` : '')
-          : strategy === 'host'
-            ? `→${job.host ?? '?'}`
-            : strategy === 'fleet'
-              ? '→fleet'
-              : '→cloud';
-        const deviceFull = [job.devices?.join(',') ?? '', placementTag]
-          .filter(Boolean)
-          .join(' ');
-        const deviceWord = deviceFull.length === 0
-          ? 'all'
-          : deviceFull.length > DEVICE_W
-            ? deviceFull.slice(0, DEVICE_W - 1) + '…'
-            : deviceFull;
-        const deviceCell = deviceFull.length === 0
-          ? chalk.gray('all')
-          : jobRunsOnThisDevice(job)
-            ? deviceWord
-            : chalk.gray(deviceWord);
-        const devicePad = Math.max(0, DEVICE_W - deviceWord.length);
-
-        const statusColor =
-          lastStatus === 'completed' ? chalk.green
-          : lastStatus === 'failed' ? chalk.red
-          : lastStatus === 'timeout' ? chalk.yellow
-          : chalk.gray;
-
-        const overdueTag = overdueSet.has(job.name) ? chalk.yellow(' (overdue)') : '';
-
-        const agentLabelPadded = job.command
-          ? chalk.magenta('command'.padEnd(10))
-          : job.workflow
-            ? chalk.magenta(`wf:${job.workflow}`.padEnd(10))
-            : (job.agent || '').padEnd(10);
-        console.log(
-          `  ${chalk.cyan(job.name.padEnd(NAME_W))} ${agentLabelPadded} ${repoCell}${' '.repeat(repoPadding)} ${deviceCell}${' '.repeat(devicePad)} ${schedStr.padEnd(SCHED_W)} ${enabledStr}${' '.repeat(enabledPad)} ${chalk.gray(nextStr.padEnd(NEXT_W))} ${statusColor(lastStatus)}${overdueTag}`
-        );
+        for (const group of groupRoutineJobsByDevice(jobs, registry)) {
+          console.log(chalk.bold(`\n${group.title}`));
+          renderRoutineRows({ jobs: group.jobs, scheduler, overdueSet, link, now });
+        }
       }
 
       if (overdueSet.size > 0) {
@@ -595,6 +721,12 @@ export function registerRoutinesCommands(program: Command): void {
           }
           schedule = parsed.schedule;
           runOnce = parsed.runOnce;
+        }
+        if (!options.at && isOneShotLikeSchedule(schedule)) {
+          runOnce = true;
+          console.error(chalk.yellow(
+            `Schedule "${schedule}" pins minute, hour, day, and month; treating it as one-shot. Prefer --at for one-time routines.`,
+          ));
         }
 
         if (!schedule && !trigger) {
@@ -751,6 +883,12 @@ export function registerRoutinesCommands(program: Command): void {
           enabled: true,
           ...parsed,
         } as JobConfig;
+        if (isOneShotLikeSchedule(config.schedule)) {
+          config.runOnce = true;
+          console.error(chalk.yellow(
+            `Schedule "${config.schedule}" pins minute, hour, day, and month; treating it as one-shot. Prefer --at for one-time routines.`,
+          ));
+        }
 
         // Same duplicate-fire guard as --placement/--run-on: off-box placement
         // with no eligibility pin would fire from every daemon in the fleet.
@@ -781,6 +919,44 @@ export function registerRoutinesCommands(program: Command): void {
         console.log(chalk.green(`Job '${name}' added`));
 
         ensureSchedulerRunning();
+      }
+    });
+
+  routinesCmd
+    .command('cleanup')
+    .description('Remove expired one-shot routines that already fired and still have a user-layer YAML file.')
+    .option('--dry-run', 'Show routines that would be removed without deleting files')
+    .action((options: { dryRun?: boolean }) => {
+      const jobs = listAllJobs()
+        .filter((job) => getJobPath(job.name) !== null)
+        .filter((job) => hasCompletedOneShotRun(job));
+
+      if (jobs.length === 0) {
+        console.log(chalk.gray('No completed expired one-shot routines to clean up.'));
+        return;
+      }
+
+      if (options.dryRun) {
+        console.log(chalk.bold('Expired one-shot routines eligible for cleanup\n'));
+        for (const job of jobs) {
+          console.log(`  ${chalk.cyan(job.name)} ${chalk.gray(scheduleLabel(job))}`);
+        }
+        console.log(chalk.gray(`\nDry run. Remove with: agents routines cleanup`));
+        return;
+      }
+
+      let removed = 0;
+      for (const job of jobs) {
+        if (deleteJob(job.name)) {
+          removed++;
+          console.log(chalk.green(`Removed ${job.name}`));
+        }
+      }
+      console.log(chalk.gray(`Cleaned up ${removed} expired one-shot routine(s).`));
+      try {
+        signalDaemonReload();
+      } catch {
+        // The daemon may not be running; the next start will read the cleaned directory.
       }
     });
 

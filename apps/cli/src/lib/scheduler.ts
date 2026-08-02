@@ -8,7 +8,16 @@
 
 import { Cron } from 'croner';
 import type { JobConfig } from './routines.js';
-import { listJobs, deleteJob, isPastEndAt, setJobEnabled, jobRunsOnThisDevice } from './routines.js';
+import {
+  listJobs,
+  deleteJob,
+  isPastEndAt,
+  isPastOneShotRoutine,
+  isOneShotRoutine,
+  setJobEnabled,
+  shouldPurgeCompletedOneShotRoutine,
+  jobRunsOnThisDevice,
+} from './routines.js';
 
 /** A job config paired with its active cron instance. */
 interface ScheduledJob {
@@ -31,9 +40,13 @@ export class JobScheduler {
       // Trigger-only jobs (no cron schedule) fire via the webhook receiver,
       // not the cron loop — skip them here. Jobs pinned to another device
       // (routines are fleet-synced) never enter this machine's cron loop.
-      if (config.enabled && config.schedule && jobRunsOnThisDevice(config)) {
-        this.schedule(config);
+      if (!config.enabled || !config.schedule || !jobRunsOnThisDevice(config)) continue;
+      if (shouldPurgeCompletedOneShotRoutine(config)) {
+        deleteJob(config.name);
+        continue;
       }
+      if (isPastOneShotRoutine(config)) continue;
+      this.schedule(config);
     }
   }
 
@@ -41,6 +54,11 @@ export class JobScheduler {
     // A schedule-less (trigger-only) job has nothing to hand to croner.
     if (!config.schedule) return;
     this.unschedule(config.name);
+    if (shouldPurgeCompletedOneShotRoutine(config)) {
+      deleteJob(config.name);
+      return;
+    }
+    if (isPastOneShotRoutine(config)) return;
 
     // catch: true — a throw from one job's callback should not kill the
     // whole cron loop. Each invocation of onTrigger is already wrapped in
@@ -71,7 +89,7 @@ export class JobScheduler {
       }
 
       // One-shot jobs: remove after first execution
-      if (config.runOnce) {
+      if (isOneShotRoutine(config)) {
         this.unschedule(config.name);
         deleteJob(config.name);
       }

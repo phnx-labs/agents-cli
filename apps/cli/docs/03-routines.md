@@ -44,7 +44,7 @@ What happens on enable/sync:
 3. The daemon (which only loads user + system layers) can now fire them. Reload (`SIGHUP` / `agents routines` mutations) re-syncs opted-in projects automatically.
 4. Hand-authored user routines of the same name are never overwritten.
 
-`agents routines list` shows the source repo (and `@branch` when known) in the Repo column for project-sourced routines; `--json` includes `source`, `sourceRepo`, `sourceBranch`, and `hostStrategy`.
+`agents routines list` groups terminal output by effective device/host scope so it is clear what runs on the current machine, the fleet, cloud, named devices, and named hosts. Use `agents routines list --flat` for the legacy single table, or `--json` for the flat machine-readable payload. Project-sourced routines still show the source repo (and `@branch` when known) in the Repo column; `--json` includes `source`, `sourceRepo`, `sourceBranch`, `hostStrategy`, `oneShot`, and `expired`.
 
 A project may also declare `routines: { enable: true }` in its own `agents.yaml` as a documentation signal; daemon firing still requires the explicit `enable-project` allowlist step so consent is materialised into the user layer.
 
@@ -139,7 +139,18 @@ allow:
 agents routines add reminder --at "14:30" --agent claude --prompt "Remind Muqsit to stand up"
 ```
 
-`--at` accepts `"14:30"` (today at that time) or `"2026-02-24 09:00"` (absolute). The daemon converts it to a cron expression with `runOnce: true`.
+Prefer `--at` for one-time routines. It accepts `"14:30"` (today at that time, or tomorrow if the time already passed) or `"2026-02-24 09:00"` (absolute). The daemon converts it to a cron expression with `runOnce: true` and deletes the routine after it fires.
+
+Raw cron schedules that pin minute, hour, day, and month with wildcard weekday, such as `"0 14 29 7 *"`, are also treated as one-shot at creation time. The CLI prints a warning and persists `runOnce: true`; use `--at` instead when an agent is scheduling a one-time wake-up.
+
+List output marks one-shot routines in the Schedule column. Expired one-shots that missed cleanup show `expired` instead of next year's recurrence.
+
+Remove completed, expired one-shots that still have user-layer YAML:
+
+```bash
+agents routines cleanup --dry-run
+agents routines cleanup
+```
 
 ### Webhook Triggers
 
@@ -247,6 +258,16 @@ agents routines add drain --schedule "0 3 * * *" --agent claude \
 ```
 
 `--devices` is validated against the registered fleet (`agents devices sync`).
+
+For a grouped view of everything that targets a device or placement, run:
+
+```bash
+agents routines list
+agents routines list --group-by device
+agents routines list --flat
+```
+
+The grouped view buckets routines under **This machine**, **Fleet-wide**, **Cloud**, one section per pinned device, and one section per named host. Offline or unknown registry entries are marked in the section header.
 
 Device names are compared against the local `machineId()` (normalized hostname, as
 shown by `agents devices`), so `Yosemite-S0` and `yosemite-s0.tailnet.ts.net` both
