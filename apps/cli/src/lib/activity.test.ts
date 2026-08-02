@@ -7,18 +7,23 @@ import {
   ACTIVITY_LOG_HOOK_SCRIPT,
   activityGroupKey,
   appendActivityEvent,
+  attachmentName,
   collapseActivity,
   enrichActivityEvents,
   ensureActivityLogHook,
   filterActivityEvents,
   formatEnrichedActivityLine,
+  formatProgressUpdate,
   groupActivity,
   mergeActivityEvents,
   parseActivityPayload,
   projectFromCwd,
   readRecentActivity,
   readSessionActivity,
+  sanitizeAttachments,
+  shortSessionId,
   tierForEvent,
+  type ActivityEvent,
   type EnrichedActivityEvent,
 } from './activity.js';
 
@@ -763,5 +768,94 @@ describe('fleet fan-out MERGE + group (integration over per-host JSON payloads)'
     expect(new Set(groups[0].events.map((e) => e.host))).toEqual(new Set(['yosemite-s0', 'zion']));
     // Grouping by device buckets by the execution host of each event.
     expect(groupActivity(merged, 'device').map((g) => g.label).sort()).toEqual(['yosemite-s0', 'zion']);
+  });
+});
+
+const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
+
+describe('attachments schema (RUSH-2013)', () => {
+  it('sanitizeAttachments drops entries without an href and clamps meta', () => {
+    const out = sanitizeAttachments([
+      { kind: 'image', href: ' cover.png ', name: 'Cover', bytes: 42, meta: { width: 800, junk: {} } },
+      { kind: 'link' }, // no href -> dropped
+      { href: 'https://x/y' }, // kind defaults to link
+      'nope', // not an object -> dropped
+    ]);
+    expect(out).toEqual([
+      { kind: 'image', href: 'cover.png', name: 'Cover', bytes: 42, meta: { width: 800 } },
+      { kind: 'link', href: 'https://x/y' },
+    ]);
+  });
+
+  it('sanitizeAttachments returns undefined for non-arrays / empty', () => {
+    expect(sanitizeAttachments(undefined)).toBeUndefined();
+    expect(sanitizeAttachments([])).toBeUndefined();
+    expect(sanitizeAttachments('x')).toBeUndefined();
+  });
+
+  it('appended attachments + project survive a read round-trip', () => {
+    const dir = tmpActivityDir();
+    appendActivityEvent({
+      ts: '2026-07-31T10:00:00.000Z', event: 'status.posted', sessionId: 's1', mailboxId: 's1',
+      host: 'zion', runtime: 'headless', project: 'agents-cli', detail: 'shipped',
+      attachments: [{ kind: 'audio', href: '/a/draft.wav', name: 'draft.wav', bytes: 10 }],
+    }, dir);
+    const [event] = readSessionActivity('s1', dir);
+    expect(event.project).toBe('agents-cli');
+    expect(event.attachments).toEqual([{ kind: 'audio', href: '/a/draft.wav', name: 'draft.wav', bytes: 10 }]);
+  });
+});
+
+describe('formatProgressUpdate (RUSH-2014)', () => {
+  const base: ActivityEvent = {
+    v: 1, tier: 'milestone', ts: new Date().toISOString(), event: 'status.posted',
+    sessionId: '0108441e-2d15-4d2f-a58b-974a886c9b47', mailboxId: 'm', host: 'yosemite-s1',
+    runtime: 'teams', agent: 'grok', project: 'agents', detail: 'CHANGELOG pushed; watching CI',
+  };
+
+  it('shows agent, session short id, host, project chips + message', () => {
+    const out = stripAnsi(formatProgressUpdate(base));
+    expect(out).toContain('▸ update');
+    expect(out).toContain('grok · 0108441e · yosemite-s1 · agents');
+    expect(out).toContain('"CHANGELOG pushed; watching CI"');
+    expect(out).toContain('ag focus 0108441e');
+  });
+
+  it('lists attachments by name, basename fallback when name absent', () => {
+    const out = stripAnsi(formatProgressUpdate({
+      ...base,
+      attachments: [
+        { kind: 'audio', href: '/x/draft.wav', name: 'draft.wav' },
+        { kind: 'image', href: '/x/cover.png' },
+      ],
+    }));
+    expect(out).toContain('draft.wav');
+    expect(out).toContain('cover.png');
+  });
+
+  it('omits chips that are unknown', () => {
+    const out = stripAnsi(formatProgressUpdate({
+      ...base, agent: undefined, host: 'unknown', project: undefined,
+    }));
+    expect(out).not.toContain('unknown');
+    expect(out).toContain('0108441e');
+  });
+
+  it('joins ticket / label at display time when provided', () => {
+    const out = stripAnsi(formatProgressUpdate(base, { joined: { ticketId: 'RUSH-2014', label: 'render' } }));
+    expect(out).toContain('RUSH-2014');
+    expect(out).toContain('render');
+  });
+});
+
+describe('shortSessionId / attachmentName', () => {
+  it('strips known prefixes and takes 8 chars', () => {
+    expect(shortSessionId('0108441e-2d15')).toBe('0108441e');
+    expect(shortSessionId('session_abcdef01-x')).toBe('abcdef01');
+    expect(shortSessionId('ses_01HZXABCDEF')).toBe('01HZXABC');
+  });
+  it('falls back to href basename when name absent', () => {
+    expect(attachmentName({ kind: 'image', href: '/a/b/cover.png' })).toBe('cover.png');
+    expect(attachmentName({ kind: 'link', href: 'https://x/y/z', name: '  ' })).toBe('z');
   });
 });

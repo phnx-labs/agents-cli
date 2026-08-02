@@ -18,7 +18,7 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { ensureFeedPublishHook, listAskStats, listBlocks, recordNotified, type OpenBlock } from '../lib/feed.js';
-import { ensureActivityLogHook, readRecentActivity, formatActivityLine } from '../lib/activity.js';
+import { ensureActivityLogHook, readRecentActivity, formatActivityLine, formatProgressUpdate, type ActivityEvent } from '../lib/activity.js';
 import { postFeedStatus } from '../lib/feed-post.js';
 import {
   enrichBlocksFromSessions,
@@ -285,6 +285,7 @@ export function registerFeedCommand(program: Command): void {
     .command('feed')
     .description('Open blocks (needs you) + agent status posts (feed post)')
     .option('--json', 'Output as JSON (each block stamped with its outcome + ask class)')
+    .option('--filter <view>', 'What to show: needs (default) · updates · all', 'needs')
     .option('--flat', 'List one block per agent instead of grouping by outcome')
     .option('--all', 'Include stalls/FYIs that policy would suppress (default: hide them)')
     .option('--local', 'Only this machine -- skip the cross-machine SSH fan-out')
@@ -299,11 +300,13 @@ export function registerFeedCommand(program: Command): void {
     .description('Post a status update to the fleet activity stream (for agents)')
     .argument('<text...>', 'What just happened — one short human line')
     .option('--session <id>', 'Session id escape hatch (default: auto from env / pid registry)')
+    .option('--attach <path-or-url...>', 'Attach an artifact (local file or URL); repeatable')
     .option('--json', 'Emit the written event as JSON')
     .addHelpText('after', `
 Examples:
   # Inside an agents-cli run (session identity is already in the env):
   agents feed post "CHANGELOG pushed; watching CI and mac-mini E2E"
+  agents feed post "cover render ready" --attach ./out/cover.png
   agents feed post "ready for review" --json
 
   # Outside a run, pass the session explicitly:
@@ -314,26 +317,28 @@ Domain facts (tickets, PRs) are not CLI flags — join them on the session at re
 `)
     .action((
       textParts: string[],
-      opts: { session?: string; json?: boolean },
-      cmd?: { opts: () => { session?: string; json?: boolean }; parent?: { opts: () => { json?: boolean } } },
+      opts: { session?: string; attach?: string[]; json?: boolean },
+      cmd?: { opts: () => { session?: string; attach?: string[]; json?: boolean }; parent?: { opts: () => { json?: boolean } } },
     ) => {
       // Parent `feed` also declares `--json` (for the list view). Commander
       // binds the flag on the parent, so a `feed post … --json` lands on
       // parent.opts().json — not the child. Read both.
       const flags = {
         session: opts?.session ?? cmd?.opts?.()?.session,
+        attach: opts?.attach ?? cmd?.opts?.()?.attach,
         json: Boolean(opts?.json ?? cmd?.opts?.()?.json ?? cmd?.parent?.opts?.()?.json),
       };
       try {
         const { event } = postFeedStatus({
           text: Array.isArray(textParts) ? textParts.join(' ') : String(textParts ?? ''),
           sessionId: flags.session,
+          attach: flags.attach,
         });
         if (flags.json) {
           console.log(JSON.stringify(event, null, 2));
           return;
         }
-        console.log(formatActivityLine(event, { showHost: true }).trimStart());
+        console.log(formatProgressUpdate(event));
       } catch (err) {
         console.error(chalk.red((err as Error).message));
         process.exitCode = 1;
@@ -342,6 +347,7 @@ Domain facts (tickets, PRs) are not CLI flags — join them on the session at re
 
   feed.action(async (opts: {
       json?: boolean;
+      filter?: string;
       flat?: boolean;
       all?: boolean;
       local?: boolean;
@@ -353,6 +359,7 @@ Domain facts (tickets, PRs) are not CLI flags — join them on the session at re
     }) => {
       if (opts.device?.length) opts.host = [...(opts.host ?? []), ...opts.device];
       const self = machineId();
+      const filter = resolveFeedFilter(opts.filter);
       const includeLocal = shouldIncludeLocalFeed(opts.host, self);
       const setupWarnings: string[] = [];
       if (includeLocal) {
@@ -376,6 +383,23 @@ Domain facts (tickets, PRs) are not CLI flags — join them on the session at re
             }
           }
         }
+      }
+
+      // Updates view: deliberate progress posts only, over the local activity
+      // timeline (blocks are decisions, not announcements). Short-circuit the
+      // whole block pipeline — no remote fan-out, no dispatch policy.
+      if (filter === 'updates') {
+        for (const warning of setupWarnings) {
+          console.error(chalk.yellow(`Feed hook setup warning: ${warning}`));
+        }
+        if (opts.json) {
+          const updates = readRecentActivity({ sinceMs: Date.now() - 7 * 24 * 60 * 60 * 1000, limit: 100 })
+            .filter((e) => e.event === 'status.posted');
+          console.log(JSON.stringify(updates, null, 2));
+          return;
+        }
+        renderUpdatesView();
+        return;
       }
 
       // Active sessions feed both the GC sweep and outcome enrichment (ticket/PR).
@@ -496,7 +520,10 @@ Domain facts (tickets, PRs) are not CLI flags — join them on the session at re
 
       if (blocks.length === 0) {
         console.log(chalk.gray(digest ? 'No open blocks after stall suppression.' : 'No open blocks.'));
-        if (includeLocal) renderActivityLane();
+        if (includeLocal) {
+          if (filter === 'all') { console.log(); renderUpdatesView(); }
+          else renderActivityLane();
+        }
         return;
       }
 
@@ -522,20 +549,70 @@ Domain facts (tickets, PRs) are not CLI flags — join them on the session at re
         return br - ar;
       });
       for (const g of groups) renderOutcomeGroup(g, self);
-      if (includeLocal) renderActivityLane();
+      if (includeLocal) {
+        if (filter === 'all') { console.log(); renderUpdatesView(); }
+        else renderActivityLane();
+      }
     });
+}
+
+/** Feed view selector (RUSH-2015): decisions, progress, or both. */
+export type FeedFilter = 'needs' | 'updates' | 'all';
+
+/** Normalize a raw --filter value; unknown/empty falls back to the default. */
+export function resolveFeedFilter(raw: string | undefined): FeedFilter {
+  const v = (raw ?? '').trim().toLowerCase();
+  if (v === 'updates' || v === 'update') return 'updates';
+  if (v === 'all') return 'all';
+  return 'needs';
+}
+
+/**
+ * Render one activity event in the lane: deliberate progress posts
+ * (`status.posted`) use the rich multi-line {@link formatProgressUpdate}; hook
+ * milestones (PR, commit, …) keep the compact {@link formatActivityLine}.
+ */
+function renderActivityEntry(ev: ActivityEvent): void {
+  if (ev.event === 'status.posted') {
+    console.log(formatProgressUpdate(ev));
+  } else {
+    console.log(formatActivityLine(ev, { showHost: true }));
+  }
+}
+
+/**
+ * Render the **Updates** view: deliberate progress posts only (`status.posted`),
+ * recency-ordered, with rich identity chips. Pure `file.edited` / git-hook noise
+ * is excluded so operators see announcements, not tool churn.
+ */
+function renderUpdatesView(limit = 30): void {
+  const updates = readRecentActivity({ sinceMs: Date.now() - 7 * 24 * 60 * 60 * 1000, limit })
+    .filter((e) => e.event === 'status.posted');
+  console.log(
+    masthead({ title: 'updates', accent: 'cyan', host: machineId(), right: `${updates.length} post${updates.length === 1 ? '' : 's'}` }),
+  );
+  console.log();
+  if (updates.length === 0) {
+    console.log(chalk.gray('  No progress updates yet. Agents post them with `agents feed post "…"`.'));
+    return;
+  }
+  for (const ev of updates) {
+    console.log(formatProgressUpdate(ev));
+    console.log();
+  }
 }
 
 /**
  * Print a compact "recent activity" lane under the feed: the last few milestone
- * events (plans, PRs, worktrees, sub-agents) from the append-only activity logs.
- * Read-only tail of the logs -- no transcript re-parsing. Silent when empty.
+ * events (plans, PRs, worktrees, sub-agents, progress posts) from the append-only
+ * activity logs. Read-only tail of the logs -- no transcript re-parsing. Silent
+ * when empty.
  */
-function renderActivityLane(): void {
-  const events = readRecentActivity({ sinceMs: Date.now() - 24 * 60 * 60 * 1000, limit: 6 })
+function renderActivityLane(limit = 6): void {
+  const events = readRecentActivity({ sinceMs: Date.now() - 24 * 60 * 60 * 1000, limit })
     .filter((e) => e.tier === 'milestone');
   if (events.length === 0) return;
   console.log(chalk.bold('\n  recent activity'));
-  for (const ev of events) console.log(formatActivityLine(ev, { showHost: true }));
+  for (const ev of events) renderActivityEntry(ev);
   console.log(chalk.gray('  → agents activity  for the full stream'));
 }

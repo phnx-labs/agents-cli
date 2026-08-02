@@ -51,6 +51,30 @@ export type ActivityEventKind = MilestoneEvent | ActivityKind;
 
 export type ActivityTier = 'milestone' | 'activity';
 
+/** Well-known attachment kinds; the field is an open string, not an enum. */
+export type AttachmentKind = 'link' | 'file' | 'image' | 'audio' | 'video';
+
+/**
+ * A generic artifact carried by a progress update — a rendered plan, an audio
+ * take, a preview URL. Deliberately domain-agnostic: `kind` is an open string,
+ * and `meta` is an open bag (duration, width, …) so any producer can attach
+ * anything without a schema change.
+ */
+export interface Attachment {
+  /** Coarse kind for glyph/rendering; open string, not a closed enum. */
+  kind: AttachmentKind | string;
+  /** https:// URL, an absolute path, or a history-relative path. */
+  href: string;
+  /** Display name (defaults to basename(href) at render time). */
+  name?: string;
+  /** MIME type when known (e.g. `audio/wav`). */
+  mediaType?: string;
+  /** Size in bytes for local files, when stat succeeded. */
+  bytes?: number;
+  /** Open bag for kind-specific facts (duration, width, height, …). */
+  meta?: Record<string, string | number>;
+}
+
 /** The set of milestone events, for tier classification and ordering. */
 export const MILESTONE_EVENTS: readonly MilestoneEvent[] = [
   'plan.created',
@@ -92,6 +116,13 @@ export interface ActivityEvent {
   runtime: string;
   /** Working directory at event time -- the join key to a project/git repo. */
   cwd?: string;
+  /**
+   * Project/repo name stamped by the writer (basename of cwd, worktree-aware),
+   * so a progress post carries its project even without a live-session join.
+   * Read-time enrichment ({@link enrichActivityEvents}) still fills it for
+   * hook-written events that lack it.
+   */
+  project?: string;
   /** Agent that produced the event (claude, codex, ...). */
   agent?: string;
   /** Tool that triggered the event (Bash, Task, ExitPlanMode, feed.post, ...). */
@@ -108,6 +139,40 @@ export interface ActivityEvent {
   terminalId?: string;
   /** `$TMUX_PANE` at launch when recorded. */
   tmuxPane?: string;
+  /** Generic artifacts attached to a deliberate progress post. */
+  attachments?: Attachment[];
+}
+
+/**
+ * Coerce an unknown value into a clean {@link Attachment}[] — a fail-open reader
+ * over user/agent-written JSON. Drops entries without a usable `href`, clamps
+ * `kind` to a string, and keeps only primitive `meta` values.
+ */
+export function sanitizeAttachments(value: unknown): Attachment[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const out: Attachment[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== 'object') continue;
+    const a = raw as Record<string, unknown>;
+    const href = typeof a.href === 'string' ? a.href.trim() : '';
+    if (!href) continue;
+    const att: Attachment = {
+      kind: typeof a.kind === 'string' && a.kind.trim() ? a.kind.trim() : 'link',
+      href,
+    };
+    if (typeof a.name === 'string' && a.name.trim()) att.name = a.name.trim();
+    if (typeof a.mediaType === 'string' && a.mediaType.trim()) att.mediaType = a.mediaType.trim();
+    if (typeof a.bytes === 'number' && Number.isFinite(a.bytes) && a.bytes >= 0) att.bytes = a.bytes;
+    if (a.meta && typeof a.meta === 'object' && !Array.isArray(a.meta)) {
+      const meta: Record<string, string | number> = {};
+      for (const [k, v] of Object.entries(a.meta as Record<string, unknown>)) {
+        if (typeof v === 'string' || typeof v === 'number') meta[k] = v;
+      }
+      if (Object.keys(meta).length > 0) att.meta = meta;
+    }
+    out.push(att);
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 function activityPath(root: string, sessionId: string): string {
@@ -151,6 +216,7 @@ function parseLine(line: string): ActivityEvent | undefined {
       host: parsed.host ?? 'unknown',
       runtime: parsed.runtime ?? 'headless',
       cwd: parsed.cwd,
+      project: parsed.project,
       agent: parsed.agent,
       tool: parsed.tool,
       detail: parsed.detail,
@@ -159,6 +225,7 @@ function parseLine(line: string): ActivityEvent | undefined {
       launchId: parsed.launchId,
       terminalId: parsed.terminalId,
       tmuxPane: parsed.tmuxPane,
+      attachments: sanitizeAttachments(parsed.attachments),
     };
   } catch {
     return undefined; // skip corrupt / partial lines (fail-open reader)
@@ -304,9 +371,11 @@ export function activityEventToRecord(ev: ActivityEvent): EventRecord {
     detail: ev.detail,
     url: ev.url,
     tier: ev.tier,
+    ...(ev.project ? { project: ev.project } : {}),
     ...(ev.launchId ? { launchId: ev.launchId } : {}),
     ...(ev.terminalId ? { terminalId: ev.terminalId } : {}),
     ...(ev.tmuxPane ? { tmuxPane: ev.tmuxPane } : {}),
+    ...(ev.attachments?.length ? { attachments: ev.attachments } : {}),
   } as EventRecord;
 }
 
@@ -352,6 +421,94 @@ export function formatActivityLine(ev: ActivityEvent, opts: { showHost?: boolean
   const agent = ev.event === 'status.posted' && ev.agent ? chalk.gray(` · ${ev.agent}`) : '';
   const when = chalk.gray(relTime(ev.ts).padStart(7));
   return `  ${when}  ${host}${label}${detail}${agent}${url}`;
+}
+
+// ---------------------------------------------------------------------------
+// Rich progress render (RUSH-2014): `status.posted` posts are the deliberate,
+// operator-facing announcements — a single truncated line under-serves them.
+// `formatProgressUpdate` renders each as a multi-line row with full identity
+// chips (agent · session · host · project) and any attached artifacts.
+// ---------------------------------------------------------------------------
+
+/** Glyph per attachment kind, so an artifact row reads at a glance. */
+export const ATTACHMENT_GLYPH: Record<string, string> = {
+  image: '🖼',
+  audio: '♪',
+  video: '▶',
+  file: '📎',
+  link: '↗',
+};
+
+export function attachmentGlyph(kind: string): string {
+  return ATTACHMENT_GLYPH[kind] ?? '📎';
+}
+
+/** Display name for an attachment: its `name`, else the basename of its href. */
+export function attachmentName(att: Attachment): string {
+  if (att.name && att.name.trim()) return att.name.trim();
+  const href = att.href.replace(/[/\\]+$/, '');
+  const slash = Math.max(href.lastIndexOf('/'), href.lastIndexOf('\\'));
+  const base = slash >= 0 ? href.slice(slash + 1) : href;
+  return base || href;
+}
+
+/**
+ * Short session id for a chip: strip a known prefix (`session_`, `ses_`) then
+ * take the first 8 chars — enough to disambiguate, matching `ag sessions`.
+ */
+export function shortSessionId(sessionId: string): string {
+  const stripped = sessionId.replace(/^(session_|ses_)/, '');
+  return stripped.slice(0, 8) || sessionId.slice(0, 8);
+}
+
+/** Extra identity resolved at display time by joining the session index. */
+export interface ProgressJoin {
+  ticketId?: string;
+  prUrl?: string;
+  label?: string;
+}
+
+/**
+ * Render a deliberate progress update (`status.posted`) as an operator-facing,
+ * multi-line row with full identity — not a 60-char one-liner. Shape:
+ *
+ * ```
+ *   ▸ update · 3m ago
+ *     grok · 0108441e · yosemite-s1 · agents
+ *     "CHANGELOG pushed; watching CI"
+ *     ♪ draft.wav   🖼 cover.png
+ *     ↳ ag focus 0108441e · ag sessions 0108441e
+ * ```
+ *
+ * Chips (agent, short session id, host, project, optional joined ticket/label)
+ * are shown only when known. Non-progress milestones keep {@link formatActivityLine}.
+ */
+export function formatProgressUpdate(ev: ActivityEvent, opts: { joined?: ProgressJoin } = {}): string {
+  const shortId = shortSessionId(ev.sessionId);
+  const lines: string[] = [];
+
+  lines.push(`  ${chalk.white('▸ update')} ${chalk.gray(`· ${relTime(ev.ts)}`)}`);
+
+  const chips = [
+    ev.agent,
+    shortId,
+    ev.host && ev.host !== 'unknown' ? ev.host : undefined,
+    ev.project,
+    opts.joined?.ticketId,
+    opts.joined?.label,
+  ].filter((c): c is string => Boolean(c));
+  if (chips.length > 0) lines.push(`    ${chalk.gray(chips.join(' · '))}`);
+
+  if (ev.detail) lines.push(`    ${chalk.white(`"${ev.detail}"`)}`);
+
+  if (ev.attachments?.length) {
+    const parts = ev.attachments.map((a) => `${attachmentGlyph(a.kind)} ${chalk.cyan(attachmentName(a))}`);
+    lines.push(`    ${parts.join('   ')}`);
+  }
+  if (opts.joined?.prUrl) lines.push(`    ${chalk.gray(opts.joined.prUrl)}`);
+
+  lines.push(`    ${chalk.dim(`↳ ag focus ${shortId} · ag sessions ${shortId}`)}`);
+  return lines.join('\n');
 }
 
 // ---------------------------------------------------------------------------

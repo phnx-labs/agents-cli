@@ -24,6 +24,7 @@ import {
   filterActivityEvents,
   formatActivityGroupHeader,
   formatEnrichedActivityLine,
+  formatProgressUpdate,
   groupActivity,
   mergeActivityEvents,
   parseActivityPayload,
@@ -93,13 +94,29 @@ function activityHintsFromSessions(sessions: ActiveSession[]): ActivitySessionHi
   }));
 }
 
+/**
+ * Render one enriched event. Deliberate progress posts (`status.posted`) use the
+ * rich multi-line {@link formatProgressUpdate} (joining the ticket the event's
+ * session carries); every other milestone keeps the compact enriched line.
+ */
+function renderEnrichedEntry(
+  ev: EnrichedActivityEvent,
+  opts: { showHost?: boolean; showProject?: boolean; indent?: string } = {},
+): string {
+  if (ev.event === 'status.posted') {
+    const body = formatProgressUpdate(ev, { joined: { ticketId: ev.ticket } });
+    return opts.indent ? body.split('\n').map((l) => `${opts.indent}${l}`).join('\n') : body;
+  }
+  return formatEnrichedActivityLine(ev, opts);
+}
+
 /** Print one flat, newest-first stream (the default view). */
 function renderFlat(events: EnrichedActivityEvent[], opts: ActivityOpts): void {
   const { milestones, counts, subagentCount } = collapseActivity(events);
   process.stdout.write(chalk.bold('\n  recent activity\n'));
   const shown = opts.all ? events : milestones;
   for (const ev of shown) {
-    process.stdout.write(`${formatEnrichedActivityLine(ev, { showHost: true, showProject: true })}\n`);
+    process.stdout.write(`${renderEnrichedEntry(ev, { showHost: true, showProject: true })}\n`);
   }
   if (!opts.all) {
     const parts = Object.entries(counts)
@@ -125,7 +142,7 @@ function renderGrouped(events: EnrichedActivityEvent[], by: ActivityGroupBy, opt
     const { milestones, counts, subagentCount } = collapseActivity(group.events);
     const shown = opts.all ? group.events : milestones;
     for (const ev of shown) {
-      process.stdout.write(`${formatEnrichedActivityLine(ev, { showHost, showProject, indent: '  ' })}\n`);
+      process.stdout.write(`${renderEnrichedEntry(ev, { showHost, showProject, indent: '  ' })}\n`);
     }
     if (!opts.all) {
       const parts = Object.entries(counts)
