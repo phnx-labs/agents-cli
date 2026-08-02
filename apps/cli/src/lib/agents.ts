@@ -1631,6 +1631,34 @@ export async function getAccountInfo(
         const email = data.active || null;
         return { ...empty, email, signedIn: !!email, lastActive };
       }
+      case 'cursor': {
+        // Cursor CLI keeps account metadata in ~/.cursor/cli-config.json
+        // (authInfo: { email, userId, authId }) and its OAuth tokens SEPARATELY
+        // in ~/.config/cursor/auth.json ({ accessToken, refreshToken }). Presence
+        // of an access token is the signed-in signal; email/ids come from
+        // cli-config. authId is the OAuth subject (e.g. "google-oauth2|<n>") — the
+        // same value the usage endpoint keys on (see getCursorUsageInfo).
+        const cfgPath = resolveAccountCredentialPath(base, '.cursor', 'cli-config.json');
+        if (!cfgPath) return { ...empty, lastActive };
+        try {
+          const cfg = JSON.parse(await fs.promises.readFile(cfgPath, 'utf-8'));
+          const authInfo = cfg?.authInfo;
+          const email = typeof authInfo?.email === 'string' ? authInfo.email : null;
+          const accountId = normalizeIdentityPart(authInfo?.authId ?? authInfo?.userId);
+          if (!email && !accountId) return { ...empty, lastActive };
+          const authPath = resolveAccountCredentialPath(base, '.config', 'cursor', 'auth.json');
+          let hasToken = false;
+          if (authPath) {
+            try {
+              const tok = JSON.parse(fs.readFileSync(authPath, 'utf-8'));
+              hasToken = typeof tok?.accessToken === 'string' && tok.accessToken.length > 0;
+            } catch { /* unreadable token file */ }
+          }
+          const accountKey = buildIdentityKey(agentId, [['user', accountId]]);
+          return { ...empty, email, accountId, accountKey, signedIn: hasToken || !!email, lastActive };
+        } catch {}
+        return { ...empty, lastActive };
+      }
       case 'grok': {
         // Grok stores auth in ~/.grok/auth.json as a map keyed by
         // "<oidc_issuer>::<client_id>" -> { email, user_id, refresh_token,

@@ -21,6 +21,7 @@ import {
   normalizeKimiWindows,
   formatKimiPlan,
   normalizeDroidWindows,
+  normalizeCursorUsage,
   type DroidBillingLimitsResponse,
   type KimiUsagesResponse,
   type UsageSnapshot,
@@ -138,12 +139,39 @@ describe('usage formatting', () => {
   });
 
   it('agentReportsUsage flags only the agents that expose usage data', () => {
-    for (const a of ['claude', 'codex', 'kimi', 'droid', 'grok'] as const) {
+    for (const a of ['claude', 'codex', 'kimi', 'droid', 'grok', 'cursor'] as const) {
       expect(agentReportsUsage(a)).toBe(true);
     }
     for (const a of ['antigravity', 'opencode', 'gemini'] as const) {
       expect(agentReportsUsage(a)).toBe(false);
     }
+  });
+
+  it('normalizeCursorUsage builds a monthly request bar for request-capped plans', () => {
+    // Free / legacy plans carry a maxRequestUsage on the premium bucket.
+    const windows = normalizeCursorUsage({
+      'gpt-4': { numRequests: 120, maxRequestUsage: 500 },
+      startOfMonth: '2026-07-22T11:35:59.000Z',
+    });
+    expect(windows).toHaveLength(1);
+    expect(windows[0]?.key).toBe('month');
+    expect(windows[0]?.shortLabel).toBe('M');
+    expect(windows[0]?.usedPercent).toBe(24); // 120 / 500
+    // Resets one calendar month after startOfMonth.
+    expect(windows[0]?.resetsAt?.toISOString()).toBe(new Date('2026-08-22T11:35:59.000Z').toISOString());
+  });
+
+  it('normalizeCursorUsage returns no window for usage-based plans (no request cap)', () => {
+    // Real usage-based Pro shape: maxRequestUsage is null, so there is no bar to draw.
+    expect(
+      normalizeCursorUsage({
+        'gpt-4': { numRequests: 0, numRequestsTotal: 0, maxRequestUsage: null } as never,
+        startOfMonth: '2026-07-22T11:35:59.000Z',
+      })
+    ).toEqual([]);
+    // Missing premium bucket entirely -> no window, no throw.
+    expect(normalizeCursorUsage({ startOfMonth: '2026-07-22T11:35:59.000Z' })).toEqual([]);
+    expect(normalizeCursorUsage({})).toEqual([]);
   });
 
   it('parses Grok usage from the local unified.jsonl (real log shape)', async () => {
