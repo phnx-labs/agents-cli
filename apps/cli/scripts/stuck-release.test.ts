@@ -121,6 +121,52 @@ describe('stuck-release: release.sh must consume the tag list fail-closed', () =
   });
 });
 
+describe('release.sh: every irreversible act is gated by the lease', () => {
+  // Two separate review rounds each found an UNGATED push that the previous
+  // round's fix had missed — first the already-published recovery tag, then the
+  // main tag push on the branch where the local tag already exists. Both were
+  // the same shape: the gate was attached to a conditional branch rather than to
+  // the irreversible act itself. This walks the script and asserts the gate sits
+  // on the act, so the next one is caught here instead of by a third reviewer.
+  const LINES = fs
+    .readFileSync(path.resolve(__dirname, 'release.sh'), 'utf-8')
+    .split('\n');
+
+  /** The nearest preceding non-blank, non-comment line(s) within `window`. */
+  function precededByLeaseGate(idx: number, window = 6) {
+    for (let i = idx - 1; i >= 0 && i >= idx - window; i--) {
+      const l = LINES[i].trim();
+      if (l === '' || l.startsWith('#')) continue;
+      if (l.startsWith('require_lease')) return true;
+    }
+    return false;
+  }
+
+  it('every `git push origin "v$TARGET"` is preceded by require_lease', () => {
+    const pushes = LINES.map((l, i) => ({ l, i })).filter(({ l }) =>
+      /^\s*git push origin "v\$TARGET"/.test(l),
+    );
+    expect(pushes.length).toBeGreaterThan(0);
+    const ungated = pushes.filter(({ i }) => !precededByLeaseGate(i));
+    expect(ungated.map(({ i, l }) => `line ${i + 1}: ${l.trim()}`)).toEqual([]);
+  });
+
+  it('the squash-merge is preceded by require_lease', () => {
+    const merges = LINES.map((l, i) => ({ l, i })).filter(({ l }) =>
+      /^\s*gh pr merge /.test(l),
+    );
+    expect(merges.length).toBeGreaterThan(0);
+    const ungated = merges.filter(({ i }) => !precededByLeaseGate(i, 8));
+    expect(ungated.map(({ i, l }) => `line ${i + 1}: ${l.trim()}`)).toEqual([]);
+  });
+
+  it('the publish routing is preceded by require_lease', () => {
+    const idx = LINES.findIndex((l) => /^\s*route_home_base_phase\s*\\?$/.test(l));
+    expect(idx).toBeGreaterThan(-1);
+    expect(precededByLeaseGate(idx)).toBe(true);
+  });
+});
+
 describe('stuck-release: version ordering', () => {
   it('sorts numerically, not lexically', () => {
     // The bug a plain string compare would hide: "1.20.9" > "1.20.10" lexically.

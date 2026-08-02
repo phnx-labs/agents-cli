@@ -1078,7 +1078,6 @@ if git rev-parse --verify --quiet "refs/tags/v$TARGET" >/dev/null; then
     || die "local tag v$TARGET does not point at the verified release commit $PUBLISH_SHA"
   gray "Tag v$TARGET already exists locally at the verified release commit"
 else
-  require_lease "tagging v$TARGET"
   git tag "v$TARGET" "$PUBLISH_SHA"
   green "Created tag v$TARGET at $(git rev-parse --short "$PUBLISH_SHA")"
 fi
@@ -1087,6 +1086,13 @@ fi
 # The tag is created + pushed here, before the privileged phase, so the home base
 # resolves the exact release commit from origin. @swarmify/agents-cli legacy shim
 # is no longer published as of v1.20.0.
+#
+# The lease gate belongs HERE, not on the `git tag` above: a local tag is local
+# and reversible, the PUSH is the irreversible, shared act. Gating only the tag
+# creation left this push ungated whenever the local tag already existed (a
+# re-run, or a prior attempt), because that path skips the else branch entirely
+# and falls straight through to here.
+require_lease "pushing tag v$TARGET"
 git push origin "v$TARGET"
 phase_ok "CI-tested tree verified; tag v$TARGET at ${PUBLISH_SHA:0:9} pushed"
 
