@@ -22,6 +22,8 @@ import {
   remoteSecretsRaw,
   remoteSecretsStream,
   resolveHostSshTarget,
+  verifyRemoteKeychainPush,
+  keychainWriteFailureMessage,
 } from '../lib/secrets/remote.js';
 import { remoteShellFor, buildWindowsStdinImportCommand } from '../lib/hosts/remote-cmd.js';
 import { resolveRemoteOsSync } from '../lib/hosts/remote-os.js';
@@ -886,8 +888,10 @@ export function registerSecretsCommands(program: Command): void {
     .description('List configured secrets bundles (use --host/--hosts to list bundles on other machines over SSH)')
     .option('--host <target>', 'List bundles on a remote host over SSH (enrolled `agents hosts` name, ssh-config alias, or user@host)')
     .option('--hosts <list>', 'Comma-separated hosts to list in one shot, e.g. yosemite-s0,yosemite-s1')
+    .option('--device <target>', 'Alias for --host')
+    .option('--devices <list>', 'Alias for --hosts')
     .option('--json', 'Emit machine-readable JSON (bundle metadata only — never secret values) instead of the table')
-    .action(async (opts: { host?: string; hosts?: string; json?: boolean }) => {
+    .action(async (opts: { host?: string; hosts?: string; device?: string; devices?: string; json?: boolean }) => {
       const targets = parseHostsOption(opts);
       if (targets.length > 0) {
         await browseRemote(targets, opts.json ? ['list', '--json'] : ['list'], false);
@@ -953,7 +957,9 @@ export function registerSecretsCommands(program: Command): void {
     .option('--json', 'Emit machine-readable JSON (values masked unless --reveal) instead of the human view')
     .option('--host <target>', 'Show a bundle on a remote host over SSH (enrolled `agents hosts` name, ssh-config alias, or user@host)')
     .option('--hosts <list>', 'Comma-separated hosts to show in one shot, e.g. yosemite-s0,yosemite-s1')
-    .action(async (name: string | undefined, opts: { reveal?: boolean; plaintext?: boolean; json?: boolean; host?: string; hosts?: string }) => {
+    .option('--device <target>', 'Alias for --host')
+    .option('--devices <list>', 'Alias for --hosts')
+    .action(async (name: string | undefined, opts: { reveal?: boolean; plaintext?: boolean; json?: boolean; host?: string; hosts?: string; device?: string; devices?: string }) => {
       try {
         const targets = parseHostsOption(opts);
         if (targets.length > 0) {
@@ -1772,6 +1778,7 @@ Examples:
     .option('--to-1password', 'Push every key in the bundle as a PASSWORD item in a 1Password vault')
     .option('--vault <name>', '1Password vault name (used with --to-1password)')
     .option('--host <target...>', 'Push the bundle over SSH to this target (host alias or user@host); repeatable for multiple machines')
+    .option('--device <target...>', 'Alias for --host; repeatable')
     .option('--remote-backend <backend>', 'Backend for the bundle on the remote (with --host): keychain (default) or file (passphrase-encrypted, headless-readable). file forwards AGENTS_SECRETS_PASSPHRASE over stdin.', 'keychain')
     .option('--force', 'Overwrite existing keys/items on the target (used with --to-1password and --host)')
     .option('--format <shell|json>', 'Output for --plaintext export: shell (default) or json (lossless, machine-readable; used by remote resolve)', 'shell')
@@ -1781,12 +1788,17 @@ Examples:
       to1password?: boolean;
       vault?: string;
       host?: string[];
+      device?: string[];
       remoteBackend?: string;
       force?: boolean;
       format?: string;
       toFile?: string;
     }) => {
       try {
+        // `--device` is an alias for `--host` (fleet vocabulary parity with
+        // `agents activity`/`run --device`); fold it into the host list up front so
+        // every downstream branch sees one resolved target list.
+        if (opts.device?.length) opts.host = [...(opts.host ?? []), ...opts.device];
         const { readAndResolveBundleEnv, bundleToEnvPrefix, isReservedEnvName } = await import('../lib/secrets/bundles.js');
         const resolvedBundleName = bundleName ?? (await pickBundleName('export'));
 
@@ -1884,6 +1896,28 @@ Examples:
               const msg = (res.stderr || res.stdout || '').trim();
               console.error(chalk.red(`${host}: remote import failed (exit ${res.code})${msg ? `: ${msg}` : ''}`));
               continue;
+            }
+            // A keychain-backed push to a macOS remote over headless SSH can land
+            // the bundle metadata but no READABLE value items: the remote login
+            // keychain is locked in the non-interactive SSH context, so Security
+            // accepts the write but the biometry-ACL'd item is unreadable, and the
+            // remote `import` still exits 0. Read the bundle back the same way a
+            // release will (drops the plaintext, keeps only key presence; the
+            // remote's headless `agentOnly` guard fails fast, so no Touch ID) and
+            // FAIL LOUDLY if the keys didn't materialize — rather than leave a
+            // metadata-only bundle that breaks later with "stored item not found".
+            // The file backend is headless-readable by construction, so skip it.
+            if (remoteBackend === 'keychain') {
+              const verdict = verifyRemoteKeychainPush(host, resolvedBundleName, Object.keys(env), { osLookupName: host });
+              if (!verdict.ok) {
+                failures++;
+                if (verdict.kind === 'locked-keychain') {
+                  console.error(chalk.red(keychainWriteFailureMessage(host, resolvedBundleName, verdict.reason)));
+                } else {
+                  console.error(chalk.red(`${host}: pushed '${resolvedBundleName}' but could not verify it on the remote: ${verdict.reason}`));
+                }
+                continue;
+              }
             }
             const remoteMsg = (res.stdout || '').trim().split('\n').map((l) => l.trim()).filter(Boolean).pop();
             console.log(chalk.green(`${host} -> '${resolvedBundleName}': ${remoteMsg || `${keyCount} key(s) exported`}`));

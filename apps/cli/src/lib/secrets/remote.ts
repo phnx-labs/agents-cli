@@ -75,10 +75,18 @@ export async function resolveHostSshTarget(nameOrAlias: string): Promise<string>
 }
 
 /**
- * Merge `--host <single>` and `--hosts <a,b,c>` into an ordered, de-duplicated
- * list. Both flags compose; either alone works. Empty when neither is set.
+ * Merge `--host <single>` / `--hosts <a,b,c>` (and their `--device` / `--devices`
+ * aliases) into an ordered, de-duplicated list. All four flags compose; any alone
+ * works. `--device`/`--devices` resolve identically to `--host`/`--hosts` so the
+ * fleet-wide `--device` vocabulary (see `agents activity`, `agents run --device`)
+ * works on the secrets remote commands too. Empty when none is set.
  */
-export function parseHostsOption(opts: { host?: string; hosts?: string }): string[] {
+export function parseHostsOption(opts: {
+  host?: string;
+  hosts?: string;
+  device?: string;
+  devices?: string;
+}): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
   const push = (h: string) => {
@@ -89,7 +97,9 @@ export function parseHostsOption(opts: { host?: string; hosts?: string }): strin
     }
   };
   if (opts.host) push(opts.host);
+  if (opts.device) push(opts.device);
   if (opts.hosts) for (const h of opts.hosts.split(',')) push(h);
+  if (opts.devices) for (const h of opts.devices.split(',')) push(h);
   return out;
 }
 
@@ -231,4 +241,173 @@ export async function remoteResolveEnv(
     keyCount: Object.keys(env).length,
   });
   return env;
+}
+
+/**
+ * Outcome of a post-push read-back verification (see verifyRemoteKeychainPush).
+ *   - `ok`               — the pushed keys materialized readably on the remote.
+ *   - `locked-keychain`  — the read-back gave the SPECIFIC signal of a keychain
+ *                          that didn't persist (the remote's headless "not unlocked
+ *                          in the secrets agent" guard, or a "stored item … not
+ *                          found" on read-back, or pushed keys simply absent). Only
+ *                          this verdict earns the locked-login-keychain diagnosis +
+ *                          `--remote-backend file` steer.
+ *   - `error`            — a DIFFERENT failure (flaky SSH, timeout, unparseable
+ *                          payload). The raw error is re-surfaced verbatim, never
+ *                          mislabeled as a locked keychain.
+ */
+export type RemoteKeychainWriteVerification =
+  | { ok: true }
+  | { ok: false; kind: 'locked-keychain'; reason: string }
+  | { ok: false; kind: 'error'; reason: string };
+
+/**
+ * The remote's headless read-back raises one of these when a keychain-backed bundle
+ * has metadata but no readable value items — the exact locked-login-keychain
+ * signature. Anything else (connection refused, timeout, host key error) is a
+ * transient/unrelated failure and must NOT be mislabeled as a locked keychain.
+ */
+function isLockedKeychainReadBackError(stderr: string): boolean {
+  const s = stderr.toLowerCase();
+  return (
+    // bundles.ts agentOnly guard: "…is not unlocked in the secrets agent…"
+    s.includes('not unlocked') ||
+    s.includes('secrets agent') ||
+    // resolveBundleEnv: "Bundle '<b>' key '<k>': stored item '<item>' not found."
+    s.includes('stored item') ||
+    s.includes('not found')
+  );
+}
+
+/**
+ * Decide whether a keychain-backed push to a remote actually PERSISTED its secret
+ * value items, given the read-back of that bundle from the remote's own store.
+ *
+ * The silent-failure this guards: pushing `--remote-backend keychain` (default) to
+ * a macOS host over headless SSH lands the bundle METADATA but not readable value
+ * items — the remote login keychain is locked in the non-interactive SSH context,
+ * so Security accepts the item WRITE at the DB level but the biometry-ACL'd item is
+ * unreadable, and the remote `import` still reports success (values written first,
+ * metadata `noAcl` last — bundles.ts writeBundleWithItems). The metadata-only bundle
+ * then fails every later read with the confusing `Bundle '<b>' key '<k>': stored
+ * item '<item>' not found` (bundles.ts resolveBundleEnv). We catch it by reading
+ * the bundle back the same way a release will (`secrets export --plaintext --format
+ * json`, driven headlessly on the remote so its `agentOnly` guard FAILS FAST before
+ * any keychain read — no Touch ID prompt) and confirming every pushed key returned.
+ *
+ * Pure so both branches are unit-testable without a real locked keychain: inject the
+ * "read-back failed / key absent" condition through `readBack`.
+ */
+export function evaluateKeychainWriteVerification(
+  pushedKeys: string[],
+  readBack:
+    | { ok: true; keys: string[] }
+    | { ok: false; stderr: string },
+): RemoteKeychainWriteVerification {
+  if (!readBack.ok) {
+    const stderr = readBack.stderr.trim();
+    if (isLockedKeychainReadBackError(stderr)) {
+      // The remote's own headless read raised the not-unlocked / not-found signal —
+      // exactly the confusing error the user hits later. Surface it now, at push
+      // time, with the fix.
+      return {
+        ok: false,
+        kind: 'locked-keychain',
+        reason: `the remote could not read it back${stderr ? ` (${stderr})` : ''}`,
+      };
+    }
+    // A transient / unrelated failure (flaky SSH, timeout, bad payload). Re-surface
+    // verbatim — do NOT diagnose a locked keychain from a connection error.
+    return {
+      ok: false,
+      kind: 'error',
+      reason: stderr || 'read-back failed',
+    };
+  }
+  const present = new Set(readBack.keys);
+  const missing = pushedKeys.filter((k) => !present.has(k));
+  if (missing.length > 0) {
+    // Read-back succeeded but some pushed keys are absent — the value items didn't
+    // persist. Same locked-keychain cause and fix.
+    return {
+      ok: false,
+      kind: 'locked-keychain',
+      reason:
+        `${missing.length} of ${pushedKeys.length} key(s) did not persist on the remote ` +
+        `(missing: ${missing.slice(0, 5).join(', ')}${missing.length > 5 ? ', …' : ''})`,
+    };
+  }
+  return { ok: true };
+}
+
+/**
+ * The actionable error message for a failed keychain-over-SSH push verification.
+ * Names the cause (locked remote login keychain) and steers to the two real fixes:
+ * re-run with the headless-readable file backend, or unlock the remote keychain.
+ * Pure + exported so the exact guidance is asserted in tests.
+ */
+export function keychainWriteFailureMessage(
+  host: string,
+  bundle: string,
+  reason: string,
+): string {
+  return (
+    `${host}: pushed '${bundle}' but the keychain items did not persist — ${reason}. ` +
+    `A macOS login keychain is LOCKED under headless SSH, so a keychain-backed write ` +
+    `lands the bundle metadata but no readable secret items, and later reads fail with ` +
+    `"stored item '…' not found". Re-run with a headless-readable backend:\n` +
+    `    agents secrets export ${bundle} --host ${host} --remote-backend file\n` +
+    `(needs AGENTS_SECRETS_PASSPHRASE set locally), or unlock the remote keychain first ` +
+    `(e.g. an interactive login / \`agents secrets unlock\` on ${host}) and retry.`
+  );
+}
+
+/**
+ * Read a bundle back from a remote over SSH (headlessly, so it fails fast rather
+ * than prompting Touch ID) and confirm the pushed keys materialized. Drives the
+ * remote's own `secrets export <bundle> --plaintext --format json` — the same read
+ * a headless release performs — but keeps only the KEY NAMES; the plaintext values
+ * are dropped immediately and never retained or logged. Returns a verification
+ * verdict; the caller renders `keychainWriteFailureMessage` on failure.
+ */
+export function verifyRemoteKeychainPush(
+  target: string,
+  bundle: string,
+  pushedKeys: string[],
+  opts: { osLookupName?: string } = {},
+): RemoteKeychainWriteVerification {
+  const remoteCmd = buildRemoteAgentsInvocation(
+    ['secrets', 'export', bundle, '--plaintext', '--format', 'json'],
+    undefined,
+    osForTarget(target, opts.osLookupName),
+  );
+  const res: SshExecResult = sshExec(target, remoteCmd, { timeoutMs: REMOTE_TIMEOUT_MS });
+  if (res.code !== 0) {
+    const why = res.timedOut ? 'timed out' : res.code === null ? 'ssh failed' : `exit ${res.code}`;
+    const stderr = `${why}${(res.stderr || res.stdout || '').trim() ? `: ${(res.stderr || res.stdout).trim()}` : ''}`;
+    return evaluateKeychainWriteVerification(pushedKeys, { ok: false, stderr });
+  }
+  // Take the outer { … } object (tolerate login-shell banner noise), read the key
+  // names, and immediately discard the values — we only need presence here.
+  const raw = res.stdout;
+  const start = raw.indexOf('{');
+  const end = raw.lastIndexOf('}');
+  const jsonText = start >= 0 && end >= start ? raw.slice(start, end + 1) : raw.trim();
+  let keys: string[];
+  try {
+    const parsed = JSON.parse(jsonText) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return evaluateKeychainWriteVerification(pushedKeys, {
+        ok: false,
+        stderr: 'unexpected read-back payload',
+      });
+    }
+    keys = Object.keys(parsed as Record<string, unknown>);
+  } catch {
+    return evaluateKeychainWriteVerification(pushedKeys, {
+      ok: false,
+      stderr: 'could not parse read-back JSON',
+    });
+  }
+  return evaluateKeychainWriteVerification(pushedKeys, { ok: true, keys });
 }

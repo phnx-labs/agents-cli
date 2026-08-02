@@ -34,6 +34,9 @@ import {
   remoteSecretsRaw,
   remoteResolveEnv,
   isDangerousRemoteEnvKey,
+  verifyRemoteKeychainPush,
+  evaluateKeychainWriteVerification,
+  keychainWriteFailureMessage,
 } from './remote.js';
 
 const ok = (stdout: string): SshExecResult => ({ code: 0, stdout, stderr: '', timedOut: false });
@@ -62,6 +65,24 @@ describe('parseHostsOption', () => {
 
   it('merges --host and --hosts, trims, drops empties, dedupes in order', () => {
     expect(parseHostsOption({ host: 'a', hosts: 'b, a ,,c' })).toEqual(['a', 'b', 'c']);
+  });
+
+  it('resolves --device identically to --host', () => {
+    expect(parseHostsOption({ device: 'mac-mini' })).toEqual(['mac-mini']);
+  });
+
+  it('resolves --devices identically to --hosts', () => {
+    expect(parseHostsOption({ devices: 'yosemite-s0,yosemite-s1' })).toEqual(['yosemite-s0', 'yosemite-s1']);
+  });
+
+  it('--host and --device dedupe to the same resolved target', () => {
+    // A user passing both the host name and its device alias must not get it twice.
+    expect(parseHostsOption({ host: 'mac-mini', device: 'mac-mini' })).toEqual(['mac-mini']);
+  });
+
+  it('composes all four flags in host,device,hosts,devices order, deduped', () => {
+    expect(parseHostsOption({ host: 'a', device: 'b', hosts: 'c,a', devices: 'd,b' }))
+      .toEqual(['a', 'b', 'c', 'd']);
   });
 });
 
@@ -271,5 +292,111 @@ describe('isDangerousRemoteEnvKey', () => {
     for (const k of ['FOO', 'ANTHROPIC_API_KEY', 'DATABASE_URL', 'GITHUB_TOKEN', 'MY_PROXYING']) {
       expect(isDangerousRemoteEnvKey(k)).toBe(false);
     }
+  });
+});
+
+describe('evaluateKeychainWriteVerification (post-push read-back verdict)', () => {
+  it('passes when the read-back returns every pushed key', () => {
+    expect(evaluateKeychainWriteVerification(['A', 'B'], { ok: true, keys: ['A', 'B', 'C'] }))
+      .toEqual({ ok: true });
+  });
+
+  it('flags locked-keychain when a pushed key is absent from the read-back', () => {
+    const v = evaluateKeychainWriteVerification(['A', 'B'], { ok: true, keys: ['A'] });
+    expect(v.ok).toBe(false);
+    if (v.ok) throw new Error('expected failure');
+    expect(v.kind).toBe('locked-keychain');
+    expect(v.reason).toContain('B');
+  });
+
+  it('flags locked-keychain on the remote "not unlocked in the secrets agent" read-back error', () => {
+    const v = evaluateKeychainWriteVerification(['A'], {
+      ok: false,
+      stderr: "Bundle 'apple.com' is not unlocked in the secrets agent.",
+    });
+    expect(v.ok).toBe(false);
+    if (v.ok) throw new Error('expected failure');
+    expect(v.kind).toBe('locked-keychain');
+  });
+
+  it('flags locked-keychain on the "stored item ... not found" read-back error', () => {
+    const v = evaluateKeychainWriteVerification(['A'], {
+      ok: false,
+      stderr: "Bundle 'apple.com' key 'A': stored item 'agents-cli.secrets.apple.com.A' not found.",
+    });
+    expect(v.ok).toBe(false);
+    if (v.ok) throw new Error('expected failure');
+    expect(v.kind).toBe('locked-keychain');
+  });
+
+  it('does NOT diagnose a locked keychain from a transient SSH/network failure', () => {
+    // A flaky connection must be re-surfaced as-is, never mislabeled "locked keychain".
+    const v = evaluateKeychainWriteVerification(['A'], {
+      ok: false,
+      stderr: 'ssh: connect to host mac-mini port 22: Connection refused',
+    });
+    expect(v.ok).toBe(false);
+    if (v.ok) throw new Error('expected failure');
+    expect(v.kind).toBe('error');
+    expect(v.reason).toContain('Connection refused');
+  });
+});
+
+describe('keychainWriteFailureMessage', () => {
+  it('names the locked-login-keychain cause and steers to --remote-backend file', () => {
+    const msg = keychainWriteFailureMessage('mac-mini', 'apple.com', 'the remote could not read it back');
+    expect(msg).toContain('mac-mini');
+    expect(msg).toContain('apple.com');
+    expect(msg).toContain('login keychain is LOCKED');
+    expect(msg).toContain('--remote-backend file');
+    expect(msg).toContain('unlock the remote keychain');
+  });
+});
+
+describe('verifyRemoteKeychainPush (real read-back over the stubbed SSH boundary)', () => {
+  it('passes when the remote read-back returns the pushed keys, and never retains values', () => {
+    // The remote export returns plaintext values; verification keeps only key names.
+    sshExecMock.mockReturnValue(ok('{"APPLE_ID":"secret-value","APP_PWD":"another"}'));
+    const v = verifyRemoteKeychainPush('mac-mini', 'apple.com', ['APPLE_ID', 'APP_PWD']);
+    expect(v).toEqual({ ok: true });
+    // The verdict must not leak the plaintext values it read back.
+    expect(JSON.stringify(v)).not.toContain('secret-value');
+    // It drove the same read a headless release performs.
+    const [, remoteCmd] = sshExecMock.mock.calls[0];
+    expect(remoteCmd).toContain('agents secrets export apple.com --plaintext --format json');
+  });
+
+  it('flags locked-keychain when the remote headless read-back fails with the not-unlocked guard', () => {
+    // This is the real silent-failure: keychain write "succeeded" (exit 0 on the
+    // import) but the value items are unreadable, so the remote's own headless read
+    // (agentOnly guard) refuses — exactly what a later release hits.
+    sshExecMock.mockReturnValue({
+      code: 1,
+      stdout: '',
+      stderr: "Bundle 'apple.com' is not unlocked in the secrets agent. Run: agents secrets unlock apple.com",
+      timedOut: false,
+    });
+    const v = verifyRemoteKeychainPush('mac-mini', 'apple.com', ['APPLE_ID']);
+    expect(v.ok).toBe(false);
+    if (v.ok) throw new Error('expected failure');
+    expect(v.kind).toBe('locked-keychain');
+  });
+
+  it('flags locked-keychain when a pushed key is missing from a successful read-back', () => {
+    sshExecMock.mockReturnValue(ok('{"APPLE_ID":"v"}'));
+    const v = verifyRemoteKeychainPush('mac-mini', 'apple.com', ['APPLE_ID', 'APP_PWD']);
+    expect(v.ok).toBe(false);
+    if (v.ok) throw new Error('expected failure');
+    expect(v.kind).toBe('locked-keychain');
+    expect(v.reason).toContain('APP_PWD');
+  });
+
+  it('re-surfaces a transient error verbatim rather than diagnosing a locked keychain', () => {
+    sshExecMock.mockReturnValue({ code: null, stdout: '', stderr: '', timedOut: true });
+    const v = verifyRemoteKeychainPush('mac-mini', 'apple.com', ['APPLE_ID']);
+    expect(v.ok).toBe(false);
+    if (v.ok) throw new Error('expected failure');
+    expect(v.kind).toBe('error');
+    expect(v.reason).toContain('timed out');
   });
 });

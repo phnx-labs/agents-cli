@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { Command } from 'commander';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -17,6 +18,7 @@ import {
   parsePolicyOpt,
   quoteWin32ExecArg,
   readImportDotenv,
+  registerSecretsCommands,
   renderPolicyCol,
 } from './secrets.js';
 import { parseDotenv, type SecretsBundle } from '../lib/secrets/bundles.js';
@@ -62,6 +64,51 @@ describe('parseImportSource', () => {
   it('rejects missing and conflicting sources', () => {
     expect(() => parseImportSource({})).toThrow(/--from <source>/);
     expect(() => parseImportSource({ from: '.env', from1password: true })).toThrow(/mutually exclusive/);
+  });
+});
+
+describe('secrets --device alias wiring (resolves identically to --host)', () => {
+  function secretsSub(name: string): Command {
+    const program = new Command();
+    registerSecretsCommands(program);
+    const secrets = program.commands.find((c) => c.name() === 'secrets');
+    if (!secrets) throw new Error('secrets command not registered');
+    const sub = secrets.commands.find((c) => c.name() === name || c.aliases().includes(name));
+    if (!sub) throw new Error(`secrets ${name} not registered`);
+    return sub;
+  }
+
+  it('registers --device / --devices on export, list, and view', () => {
+    for (const name of ['export', 'list', 'view']) {
+      const longs = secretsSub(name).options.map((o) => o.long);
+      expect(longs).toContain('--host');
+      expect(longs).toContain('--device');
+    }
+  });
+
+  it('export accepts repeatable --device without an unknown-option error and parses the target', () => {
+    const cmd = secretsSub('export');
+    cmd.exitOverride();
+    expect(() => cmd.parseOptions(['apple.com', '--device', 'mac-mini'])).not.toThrow();
+    // Variadic --device mirrors the variadic --host it aliases.
+    expect(cmd.opts().device).toEqual(['mac-mini']);
+    const cmd2 = secretsSub('export');
+    cmd2.exitOverride();
+    cmd2.parseOptions(['apple.com', '--device', 'a', '--device', 'b']);
+    expect(cmd2.opts().device).toEqual(['a', 'b']);
+  });
+
+  it('list/view accept --device and --devices without an unknown-option error', () => {
+    for (const name of ['list', 'view']) {
+      const cmd = secretsSub(name);
+      cmd.exitOverride();
+      expect(() => cmd.parseOptions(['--device', 'mac-mini'])).not.toThrow();
+      expect(cmd.opts().device).toBe('mac-mini');
+      const cmd2 = secretsSub(name);
+      cmd2.exitOverride();
+      expect(() => cmd2.parseOptions(['--devices', 'a,b'])).not.toThrow();
+      expect(cmd2.opts().devices).toBe('a,b');
+    }
   });
 });
 
