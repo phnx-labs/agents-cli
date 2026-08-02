@@ -93,9 +93,18 @@ each run, not just *what* is running:
   teammate record, so a co-located fleet no longer collapses to one anonymous
   account. `--active --json` carries the raw `owner` field for a consumer to join on.
 - **The session index** (`sessions.db`) carries `actor` and `initiated_by`
-  (`human`/`agent`) columns. They are **write-once at session creation** — a later
-  content rescan carries no actor and is deliberately kept out of the upsert's
-  `ON CONFLICT` update set, so the original owner is never clobbered by re-indexing.
+  (`human`/`agent`) columns, so the durable `agents sessions` listing attributes
+  historical sessions to a person, not just the live `--active` view. They are
+  **write-once at session creation** — a later content rescan carries no actor and
+  is deliberately kept out of the upsert's `ON CONFLICT` update set, so the original
+  owner is never clobbered by re-indexing.
+- **How the index gets the actor** — the transcript on disk records no actor, so at
+  spawn each run also writes a small **durable `sessionId -> actor` sidecar** under
+  `~/.agents/.history/by-session/` (unlike the pid-registry, this survives the
+  process). The scanner joins it as it indexes, filling the columns above. Teammates
+  inherit the orchestrator's frozen actor, so a whole team traces back to the one
+  human who started it; their records also carry a `parent_session_id` (the
+  orchestrator's session) so the spawn chain is walkable.
 
 ```bash
 agents events                          # recent activity across everything

@@ -1522,6 +1522,15 @@ export class AgentManager {
     await this.initialize();
     const resolvedMode = resolveMode(mode, this.defaultMode);
 
+    // Lineage (RUSH-2019): when the caller didn't name a parent, inherit the
+    // orchestrator's own session id from its env (exec.ts stamps AGENTS_SESSION_ID
+    // onto every agent process). A team spawned from inside a running agent then
+    // records which session created it, so the spawn chain traces back to a parent
+    // session; a team started outside any agent simply carries none.
+    if (!parentSessionId) {
+      parentSessionId = process.env.AGENTS_SESSION_ID ?? null;
+    }
+
     // Enforce: teammate names are unique within a team.
     const siblings = await this.listByTask(taskName);
     if (name && siblings.some((a) => a.name === name)) {

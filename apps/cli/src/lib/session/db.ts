@@ -15,6 +15,7 @@ import { parseSession } from './parse.js';
 import { extractRecentDirectoriesTouched, extractTodoProgressFromEvents } from './state.js';
 import { getSessionsDir, getSessionsDbPath } from '../state.js';
 import { machineForSessionFile } from './origin-machine.js';
+import { loadSessionActorIndex, readSessionActorRecord } from './actor-sidecar.js';
 
 const SESSIONS_DIR = getSessionsDir();
 const DB_PATH = getSessionsDbPath();
@@ -987,6 +988,11 @@ function resolveMachine(meta: SessionMeta): string {
  */
 export function upsertSession(meta: SessionMeta, content: string, scan?: ScanStamp): void {
   meta = enrichCachedSessionMeta(meta);
+  // Join the durable sessionId -> actor sidecar (RUSH-2019) when the caller
+  // didn't already carry an actor, so a scanned transcript still attributes to a
+  // person. ON CONFLICT excludes actor/initiated_by, so this only ever fills a
+  // fresh row — a rescan never overwrites the stored owner.
+  const actorRec = meta.actor ? undefined : readSessionActorRecord(meta.id);
   const db = getDB();
   const { upsert, delText, insText, readLabel } = stmts(db);
   const row: SessionRow = {
@@ -1025,8 +1031,8 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
     linear_project: meta.linearProject ?? null,
     linear_project_url: meta.linearProjectUrl ?? null,
     machine: resolveMachine(meta),
-    actor: meta.actor ?? null,
-    initiated_by: meta.initiatedBy ?? null,
+    actor: meta.actor ?? actorRec?.actor ?? null,
+    initiated_by: meta.initiatedBy ?? actorRec?.initiatedBy ?? null,
   };
 
   const txn = db.transaction(() => {
@@ -1053,6 +1059,11 @@ export function upsertSessionsBatch(
   const db = getDB();
   const { upsert, delText, insText, readLabel } = stmts(db);
   const now = Date.now();
+  // One directory read for the whole batch: join the durable sessionId -> actor
+  // sidecar (RUSH-2019) so scanned transcripts attribute to a person. Only used
+  // for entries whose meta carries no actor; ON CONFLICT excludes the column, so
+  // this fills fresh rows without ever clobbering a stored owner on rescan.
+  const actorIndex = loadSessionActorIndex();
   // Persist the Claude resumable-parse continuation (parser_state + content_text)
   // alongside the stamp. On a full/incremental Claude parse the caller passes the
   // serialized newState + accumulated user doc so the NEXT scan can resume from
@@ -1152,8 +1163,8 @@ export function upsertSessionsBatch(
         linear_project: meta.linearProject ?? null,
         linear_project_url: meta.linearProjectUrl ?? null,
     machine: resolveMachine(meta),
-        actor: meta.actor ?? null,
-        initiated_by: meta.initiatedBy ?? null,
+        actor: meta.actor ?? actorIndex.get(meta.id)?.actor ?? null,
+        initiated_by: meta.initiatedBy ?? actorIndex.get(meta.id)?.initiatedBy ?? null,
       });
       delText.run(meta.id);
       insText.run(
