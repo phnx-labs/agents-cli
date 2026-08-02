@@ -311,8 +311,8 @@ The command surface (bare `sessions [query]`, `tail`, `sync`, `resume`, `focus`,
   with `sessions --all --json --limit 500` (`commands/sessions-browser.ts:219`),
   so the array shape is load-bearing across the fleet.
 - **IF-2 (MUST).** `sessions --active --json` MUST emit `ActiveSession[]` with
-  `ticketId`/`project` always present as keys (test
-  `sessions.serialize.test.ts:76-108`); `tail --json` MUST pass raw JSONL through
+  `ticketId`/`project`/`prLink` always present as keys (test
+  `sessions.serialize.test.ts:76-115`); `tail --json` MUST pass raw JSONL through
   one event per line (`commands/sessions-tail.ts:229-232`); `sync --json`,
   `inject --json`, `migrations --json` emit their documented shapes.
 - **IF-3 (MUST).** The export **bundle format** is NDJSON, `kind`

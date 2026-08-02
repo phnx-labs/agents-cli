@@ -21,6 +21,7 @@ import {
   normalizeKimiWindows,
   formatKimiPlan,
   normalizeDroidWindows,
+  normalizeCursorUsage,
   type DroidBillingLimitsResponse,
   type KimiUsagesResponse,
   type UsageSnapshot,
@@ -138,12 +139,50 @@ describe('usage formatting', () => {
   });
 
   it('agentReportsUsage flags only the agents that expose usage data', () => {
-    for (const a of ['claude', 'codex', 'kimi', 'droid', 'grok'] as const) {
+    for (const a of ['claude', 'codex', 'kimi', 'droid', 'grok', 'cursor'] as const) {
       expect(agentReportsUsage(a)).toBe(true);
     }
     for (const a of ['antigravity', 'opencode', 'gemini'] as const) {
       expect(agentReportsUsage(a)).toBe(false);
     }
+  });
+
+  it('normalizeCursorUsage builds a monthly request bar for request-capped plans', () => {
+    // Free / legacy plans carry a maxRequestUsage on the premium bucket.
+    const windows = normalizeCursorUsage({
+      'gpt-4': { numRequests: 120, maxRequestUsage: 500 },
+      startOfMonth: '2026-07-22T11:35:59.000Z',
+    });
+    expect(windows).toHaveLength(1);
+    expect(windows[0]?.key).toBe('month');
+    expect(windows[0]?.shortLabel).toBe('M');
+    expect(windows[0]?.usedPercent).toBe(24); // 120 / 500
+    // Resets one calendar month after startOfMonth.
+    expect(windows[0]?.resetsAt?.toISOString()).toBe(new Date('2026-08-22T11:35:59.000Z').toISOString());
+  });
+
+  it('normalizeCursorUsage clamps a month-end reset instead of overflowing into the next month', () => {
+    // A Jan-31 period start: +1 month must land in February, not spill into March
+    // (naive setMonth(m+1) yields Feb 31 -> Mar 3).
+    const [w] = normalizeCursorUsage({
+      'gpt-4': { numRequests: 10, maxRequestUsage: 100 },
+      startOfMonth: '2026-01-31T12:00:00.000Z',
+    });
+    expect(w?.resetsAt?.getMonth()).toBe(1); // February (1), not March (2)
+    expect(w?.resetsAt?.getDate()).toBeGreaterThanOrEqual(28);
+  });
+
+  it('normalizeCursorUsage returns no window for usage-based plans (no request cap)', () => {
+    // Real usage-based Pro shape: maxRequestUsage is null, so there is no bar to draw.
+    expect(
+      normalizeCursorUsage({
+        'gpt-4': { numRequests: 0, numRequestsTotal: 0, maxRequestUsage: null } as never,
+        startOfMonth: '2026-07-22T11:35:59.000Z',
+      })
+    ).toEqual([]);
+    // Missing premium bucket entirely -> no window, no throw.
+    expect(normalizeCursorUsage({ startOfMonth: '2026-07-22T11:35:59.000Z' })).toEqual([]);
+    expect(normalizeCursorUsage({})).toEqual([]);
   });
 
   it('parses Grok usage from the local unified.jsonl (real log shape)', async () => {

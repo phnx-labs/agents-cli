@@ -407,11 +407,11 @@ contains `path`, `name`, `mediaType`, and `sizeBytes` so consumers such as Facto
 can render thumbnails and open the original attachment without re-reading the raw
 agent transcript.
 
-Every row also carries flat top-level `ticketId` and `project` keys — always
-present, `null` when unknown — so a watcher can join active sessions on ticket and
-project without reaching into the nested `ticket` object. `project` is the
-basename of the session's cwd, the same derivation the historical `--json`
-listing uses, so the active and recent views join identically.
+Every row also carries flat top-level `ticketId`, `project`, and `prLink` keys —
+always present, `null` when unknown — so a watcher can join active sessions on
+ticket and project or open the linked pull request without reaching into nested
+objects. `project` is the basename of the session's cwd, the same derivation the
+historical `--json` listing uses, so the active and recent views join identically.
 
 Some sessions appear in multiple sources:
 
@@ -749,6 +749,7 @@ contains — this is a data-availability limit, not a policy choice:
 | Grok | email + tier | last-seen (`~/.grok/logs/unified.jsonl`) | email from the local auth file; weekly window (`W`) + subscription tier parsed from the newest `billing: fetched credits config` log line, since Grok's network usage endpoints 404 |
 | Droid | email | live (`api.factory.ai`) | `~/.factory/auth.v2.file` is AES-256-GCM (key on disk at `auth.v2.key`); decrypt locally, read the email from the WorkOS access-token JWT. That same token authorizes `GET /api/billing/limits` for the three rolling rate-limit windows (5-hour → `S`, weekly → `W`, monthly, detailed-view only). |
 | Kimi | `id:<user_id>` + tier | live (`api.kimi.com/coding/v1/usages`) | JWT carries no email — only an opaque `user_id`. Quota + membership tier come from the `/usages` endpoint. |
+| Cursor | email | live (`cursor.com/api/usage`) | email/authId from `~/.cursor/cli-config.json`; access token from `~/.config/cursor/auth.json`. The endpoint is authed with a `WorkosCursorSessionToken=<authId>::<token>` cookie and returns a monthly request bar (`M`) for request-capped (free/legacy) plans. Usage-based plans report no request cap, so they render the account row without a bar. |
 | Antigravity | `signed in` | — | OAuth grant with no id_token — presence only. File `~/.gemini/antigravity-cli/antigravity-oauth-token`, else macOS keychain / Linux libsecret (`service gemini` + user `antigravity`) |
 | others | `not signed in` unless a credential exists | — | `default` case: no detector |
 

@@ -960,6 +960,38 @@ describe('getAccountInfo — grok (nested auth.json)', () => {
   });
 });
 
+describe('getAccountInfo — cursor (cli-config authInfo + separate auth.json)', () => {
+  let prevRealHome: string | undefined;
+  beforeEach(() => { prevRealHome = process.env.AGENTS_REAL_HOME; process.env.AGENTS_REAL_HOME = makeTempDir(); });
+  afterEach(() => {
+    if (prevRealHome === undefined) delete process.env.AGENTS_REAL_HOME;
+    else process.env.AGENTS_REAL_HOME = prevRealHome;
+  });
+
+  it('reads email/authId from cli-config and treats a present access token as signed in', async () => {
+    const home = makeTempDir();
+    fs.mkdirSync(path.join(home, '.cursor'), { recursive: true });
+    fs.mkdirSync(path.join(home, '.config', 'cursor'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.cursor', 'cli-config.json'), JSON.stringify({
+      authInfo: { email: 'muqsitnawaz@gmail.com', userId: 27457401, authId: 'google-oauth2|106748008124572295566' },
+    }));
+    fs.writeFileSync(path.join(home, '.config', 'cursor', 'auth.json'), JSON.stringify({
+      accessToken: 'eyJ.abc.def', refreshToken: 'eyJ.ghi.jkl',
+    }));
+
+    const info = await getAccountInfo('cursor', home);
+    expect(info.signedIn).toBe(true);
+    expect(info.email).toBe('muqsitnawaz@gmail.com');
+    expect(info.accountId).toBe('google-oauth2|106748008124572295566');
+    expect(info.accountKey).toBeTruthy();
+  });
+
+  it('treats cursor as signed out when cli-config is absent', async () => {
+    const info = await getAccountInfo('cursor', makeTempDir());
+    expect(info.signedIn).toBe(false);
+  });
+});
+
 describe('getAccountInfo — Claude organization identity', () => {
   // Fixture shapes below mirror real .claude.json oauthAccount payloads: a
   // personal Max plan carries an auto-generated organizationName while a Team

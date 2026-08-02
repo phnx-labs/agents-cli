@@ -1,5 +1,5 @@
 /**
- * Usage and rate-limit tracking for Claude, Codex, Kimi, Droid, and Grok agents.
+ * Usage and rate-limit tracking for Claude, Codex, Kimi, Droid, Grok, and Cursor agents.
  *
  * Fetches live usage data from each agent's usage API (Anthropic OAuth for
  * Claude, Kimi Code /usages, Factory billing limits for Droid) or parses
@@ -68,6 +68,8 @@ const CACHED_CLAUDE_USAGE_SOURCE_LABEL = 'last seen live account data';
 const KIMI_USAGES_URL = 'https://api.kimi.com/coding/v1/usages';
 
 const DROID_USAGE_URL = 'https://api.factory.ai/api/billing/limits';
+
+const CURSOR_USAGE_URL = 'https://cursor.com/api/usage';
 
 const COMPACT_BAR_LEN = 5;
 const USAGE_BAR_LEN = 10;
@@ -216,6 +218,8 @@ export async function getUsageInfo(agentId: AgentId, options?: UsageOptions): Pr
       return getDroidUsageInfo(options);
     case 'grok':
       return getGrokUsageInfo(options);
+    case 'cursor':
+      return getCursorUsageInfo(options);
     default:
       return { snapshot: null, error: null };
   }
@@ -263,14 +267,21 @@ export function buildCanonicalUsageContext(inputs: UsageIdentityInput[]): {
 }
 
 /**
- * Whether an agent exposes usage/limit data we can render — Claude/Kimi/Droid via
- * a live API, Codex/Grok via local session logs. Everything else has no usage
+ * Whether an agent exposes usage/limit data we can render — Claude/Kimi/Droid/Cursor
+ * via a live API, Codex/Grok via local session logs. Everything else has no usage
  * concept, so callers use this to decide whether a missing snapshot is worth
  * flagging as "usage unavailable" (a signed-in Claude account with no data)
  * versus simply not applicable (Antigravity, OpenCode).
  */
 export function agentReportsUsage(agentId: AgentId): boolean {
-  return agentId === 'claude' || agentId === 'codex' || agentId === 'kimi' || agentId === 'droid' || agentId === 'grok';
+  return (
+    agentId === 'claude' ||
+    agentId === 'codex' ||
+    agentId === 'kimi' ||
+    agentId === 'droid' ||
+    agentId === 'grok' ||
+    agentId === 'cursor'
+  );
 }
 
 /** Fetch usage info for all unique accounts in parallel, keyed by usage key. */
@@ -1983,4 +1994,127 @@ async function readLatestGrokBilling(filePath: string): Promise<GrokBillingMatch
     rl.on('close', () => resolve(latest));
     rl.on('error', () => resolve(latest));
   });
+}
+
+/** Per-model bucket in Cursor's /api/usage response. */
+interface CursorUsageModel {
+  numRequests?: number | null;
+  maxRequestUsage?: number | null;
+}
+
+/** Response shape from Cursor's dashboard usage endpoint. */
+export interface CursorUsageResponse {
+  /** The premium ("fast request") bucket the plan meters. */
+  'gpt-4'?: CursorUsageModel | null;
+  /** ISO timestamp the monthly request window resets from. */
+  startOfMonth?: string | null;
+  [model: string]: CursorUsageModel | string | null | undefined;
+}
+
+/**
+ * Normalize Cursor's /api/usage payload into the common UsageWindow shape.
+ *
+ * Only free / legacy request-capped plans carry a `maxRequestUsage` on the
+ * premium ("gpt-4") bucket — that's the fast-request cap the plan meters, and it
+ * maps cleanly to a monthly window. Usage-based plans report `maxRequestUsage:
+ * null` (no request cap — spend is metered in dollars instead), so they have no
+ * bar to draw here and return no windows rather than a misleading empty gauge.
+ */
+export function normalizeCursorUsage(data: CursorUsageResponse): UsageWindow[] {
+  const premium = data['gpt-4'];
+  if (!premium || typeof premium !== 'object') return [];
+  const max = premium.maxRequestUsage;
+  if (typeof max !== 'number' || !Number.isFinite(max) || max <= 0) return [];
+  const used = typeof premium.numRequests === 'number' ? premium.numRequests : 0;
+
+  const startOfMonth =
+    typeof data.startOfMonth === 'string' ? parseDateValue(data.startOfMonth) : null;
+  // The request quota resets one calendar month after the period start. Guard the
+  // month-end overflow: setMonth on a day the target month lacks (Jan 31 -> Feb 31)
+  // rolls forward into the month after (Mar 3), so clamp back to the intended
+  // month's last day.
+  let resetsAt: Date | null = null;
+  if (startOfMonth) {
+    resetsAt = new Date(startOfMonth);
+    const intendedMonth = (resetsAt.getMonth() + 1) % 12;
+    resetsAt.setMonth(resetsAt.getMonth() + 1);
+    if (resetsAt.getMonth() !== intendedMonth) resetsAt.setDate(0);
+  }
+
+  return [
+    {
+      key: 'month',
+      label: 'Current month',
+      shortLabel: 'M',
+      usedPercent: Math.max(0, Math.min(100, (used / max) * 100)),
+      resetsAt,
+      windowMinutes: inferWindowMinutes('month'),
+    },
+  ];
+}
+
+/** Read Cursor's OAuth subject + access token from the local CLI config/auth files. */
+function readCursorCredentials(base: string): { sub: string; accessToken: string } | null {
+  try {
+    const cfgPath = path.join(base, '.cursor', 'cli-config.json');
+    const authPath = path.join(base, '.config', 'cursor', 'auth.json');
+    if (!fs.existsSync(cfgPath) || !fs.existsSync(authPath)) return null;
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+    const sub = cfg?.authInfo?.authId;
+    const auth = JSON.parse(fs.readFileSync(authPath, 'utf-8'));
+    const accessToken = auth?.accessToken;
+    if (typeof sub !== 'string' || !sub) return null;
+    if (typeof accessToken !== 'string' || !accessToken) return null;
+    return { sub, accessToken };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch Cursor usage from the dashboard usage endpoint. Cursor authenticates the
+ * request with a `WorkosCursorSessionToken` cookie of the form
+ * `<oauth-subject>::<access-token>` (the same pair the web dashboard sends), not a
+ * bearer header. Free/legacy plans return a monthly request bar; usage-based plans
+ * have no request cap, so they return a live-but-window-less snapshot (the account
+ * row still renders, without a misleading empty gauge).
+ */
+async function getCursorUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
+  try {
+    const base = options?.home || os.homedir();
+    const creds = readCursorCredentials(base);
+    if (!creds) return { snapshot: null, error: null };
+
+    const exp = decodeJwtPayload(creds.accessToken)?.exp;
+    if (typeof exp === 'number' && Date.now() / 1000 >= exp) {
+      return { snapshot: null, error: null };
+    }
+
+    const url = `${CURSOR_USAGE_URL}?user=${encodeURIComponent(creds.sub)}`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Cookie: `WorkosCursorSessionToken=${creds.sub}%3A%3A${creds.accessToken}`,
+        Accept: 'application/json',
+      },
+      signal: AbortSignal.timeout(5000),
+    });
+
+    // 401/redirect => revoked/expired session; render nothing rather than a
+    // misleading empty bar.
+    if (!response.ok) return { snapshot: null, error: null };
+
+    const data = (await response.json()) as CursorUsageResponse;
+    return {
+      snapshot: {
+        source: 'live',
+        sourceLabel: 'live account data',
+        capturedAt: new Date(),
+        windows: normalizeCursorUsage(data),
+      },
+      error: null,
+    };
+  } catch {
+    return { snapshot: null, error: null };
+  }
 }

@@ -166,7 +166,21 @@ describe('migration v5 -> v6 adds cost/duration columns', () => {
   it('schema_version is recorded as the current version', () => {
     const db = getDB();
     const row = db.prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string };
-    expect(row.value).toBe('19');
+    expect(row.value).toBe('20');
+  });
+
+  it('persists the session model when present', () => {
+    const filePath = path.join(COST_FILES_DIR, 'model-row.jsonl');
+    fs.writeFileSync(filePath, '');
+    upsertSession({
+      id: 'model-row',
+      shortId: 'model-ro',
+      agent: 'claude',
+      timestamp: '2026-08-01T14:00:00.000Z',
+      filePath,
+      model: 'claude-sonnet-4-20250514',
+    }, '');
+    expect(querySessions({ idExact: 'model-row' })[0]?.model).toBe('claude-sonnet-4-20250514');
   });
 
   it('v10 unifies name into label — the separate `name` column is dropped', () => {

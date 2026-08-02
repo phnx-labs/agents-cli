@@ -21,7 +21,7 @@ const SESSIONS_DIR = getSessionsDir();
 const DB_PATH = getSessionsDbPath();
 
 /** Current schema version; bumped when migrations are added. */
-const SCHEMA_VERSION = 19;
+const SCHEMA_VERSION = 20;
 
 /**
  * Canonicalize a file path for use as a scan_ledger key. The same physical
@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   output_tokens INTEGER,
   cost_usd REAL,
   duration_ms INTEGER,
+  model TEXT,
   file_path TEXT NOT NULL,
   file_mtime_ms INTEGER,
   file_size INTEGER,
@@ -164,6 +165,7 @@ export interface SessionRow {
   output_tokens: number | null;
   cost_usd: number | null;
   duration_ms: number | null;
+  model: string | null;
   file_path: string;
   file_mtime_ms: number | null;
   file_size: number | null;
@@ -447,6 +449,13 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'actor')) db.exec(`ALTER TABLE sessions ADD COLUMN actor TEXT`);
     if (!cols.some(c => c.name === 'initiated_by')) db.exec(`ALTER TABLE sessions ADD COLUMN initiated_by TEXT`);
+  }
+
+  if (fromVersion < 20) {
+    // v19 → v20: persist the transcript's model for the static session list.
+    const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
+    if (!cols.some(c => c.name === 'model')) db.exec(`ALTER TABLE sessions ADD COLUMN model TEXT`);
+    db.exec(`DELETE FROM scan_ledger; DELETE FROM dir_ledger;`);
   }
 }
 
@@ -851,7 +860,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     id, short_id, agent, origin, routine_name, routine_run_id,
     version, account, timestamp, last_activity,
     project, cwd, git_branch, topic, label, message_count, token_count,
-    output_tokens, cost_usd, duration_ms,
+    output_tokens, cost_usd, duration_ms, model,
     file_path, file_mtime_ms, file_size, scanned_at, is_team_origin,
     pr_url, pr_number, worktree_slug, ticket_id, plan, todos,
     recent_directories_touched, linear_project, linear_project_url, machine,
@@ -860,7 +869,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     @id, @short_id, @agent, @origin, @routine_name, @routine_run_id,
     @version, @account, @timestamp, @last_activity,
     @project, @cwd, @git_branch, @topic, @label, @message_count, @token_count,
-    @output_tokens, @cost_usd, @duration_ms,
+    @output_tokens, @cost_usd, @duration_ms, @model,
     @file_path, @file_mtime_ms, @file_size, @scanned_at, @is_team_origin,
     @pr_url, @pr_number, @worktree_slug, @ticket_id, @plan, @todos,
     @recent_directories_touched, @linear_project, @linear_project_url, @machine,
@@ -894,6 +903,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     output_tokens = excluded.output_tokens,
     cost_usd = excluded.cost_usd,
     duration_ms = excluded.duration_ms,
+    model = excluded.model,
     file_path = excluded.file_path,
     file_mtime_ms = excluded.file_mtime_ms,
     file_size = excluded.file_size,
@@ -1016,6 +1026,7 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
     output_tokens: meta.outputTokens ?? null,
     cost_usd: meta.costUsd ?? null,
     duration_ms: meta.durationMs ?? null,
+    model: meta.model ?? null,
     file_path: meta.filePath,
     file_mtime_ms: scan?.fileMtimeMs ?? null,
     file_size: scan?.fileSize ?? null,
@@ -1148,6 +1159,7 @@ export function upsertSessionsBatch(
         output_tokens: meta.outputTokens ?? null,
         cost_usd: meta.costUsd ?? null,
         duration_ms: meta.durationMs ?? null,
+        model: meta.model ?? null,
         file_path: meta.filePath,
         file_mtime_ms: scan?.fileMtimeMs ?? null,
         file_size: scan?.fileSize ?? null,
@@ -1352,6 +1364,7 @@ function rowToMeta(row: SessionRow): SessionMeta {
     outputTokens: row.output_tokens ?? undefined,
     costUsd: row.cost_usd ?? undefined,
     durationMs: row.duration_ms ?? undefined,
+    model: row.model ?? undefined,
     version: row.version ?? undefined,
     account: row.account ?? undefined,
     topic: row.topic ?? undefined,

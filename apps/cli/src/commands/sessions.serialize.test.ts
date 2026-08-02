@@ -71,19 +71,24 @@ describe('serializeSessionsJson', () => {
  * RUSH-1981: `agents sessions --active --json` is what a supervising watcher
  * joins on. The raw ActiveSession nests the ticket (`ticket.id`) and carries no
  * `project`, so a naive join on ticketId+project drops every row. The serializer
- * must add both as flat, always-present top-level keys.
+ * must add those join keys plus the PR link as flat, always-present top-level keys.
  */
 describe('serializeActiveSessionsForJson (RUSH-1981 — join keys)', () => {
   function active(over: Partial<ActiveSession> = {}): ActiveSession {
     return { context: 'terminal', kind: 'agent', status: 'running', ...over } as ActiveSession;
   }
 
-  it('emits flat ticketId (from ticket.id) and project (basename of cwd)', () => {
+  it('emits flat ticketId, project, and prLink', () => {
     const [row] = serializeActiveSessionsForJson([
-      active({ cwd: '/home/u/src/github.com/acme/widget', ticket: { id: 'RUSH-1981' } as ActiveSession['ticket'] }),
+      active({
+        cwd: '/home/u/src/github.com/acme/widget',
+        ticket: { id: 'RUSH-1981' } as ActiveSession['ticket'],
+        pr: { url: 'https://github.com/acme/widget/pull/42', number: 42 },
+      }),
     ]);
     expect(row.ticketId).toBe('RUSH-1981');
     expect(row.project).toBe('widget');
+    expect(row.prLink).toBe('https://github.com/acme/widget/pull/42');
   });
 
   it('emits both keys as null (never absent) when the session has no ticket or cwd', () => {
@@ -92,8 +97,10 @@ describe('serializeActiveSessionsForJson (RUSH-1981 — join keys)', () => {
     // missing property and an explicit null are not the same to a consumer.
     expect(Object.prototype.hasOwnProperty.call(row, 'ticketId')).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(row, 'project')).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(row, 'prLink')).toBe(true);
     expect(row.ticketId).toBeNull();
     expect(row.project).toBeNull();
+    expect(row.prLink).toBeNull();
   });
 
   it('preserves the raw ActiveSession fields alongside the join keys', () => {

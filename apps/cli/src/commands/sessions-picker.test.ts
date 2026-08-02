@@ -8,6 +8,9 @@
  * SessionMeta.todos even when no transcript is on disk.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import { buildPreview, formatTodoCompact, githubRepoUrlFromCwd, relativizeDir } from './sessions-picker.js';
 import { _resetLinearWorkspaceCache } from '../lib/session/linear.js';
@@ -226,5 +229,32 @@ describe('buildPreview — ticket + PR links line', () => {
     const preview = stripVTControlCharacters(buildPreview(mk({ topic: 'no checklist' })));
     expect(preview).not.toContain('Todos:');
     expect(preview).not.toContain('✓');
+  });
+});
+
+describe('buildPreview — usage metadata (RUSH-1994)', () => {
+  it('shows browser/computer use and the sub-agent count from a real transcript', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-preview-'));
+    try {
+      const filePath = path.join(dir, 'session.jsonl');
+      fs.writeFileSync(filePath, [
+        JSON.stringify({ type: 'user', timestamp: '2026-08-01T14:00:00.000Z', cwd: dir, sessionId: 'rich-meta-session', version: '2.1.112', message: { role: 'user', content: 'Inspect the UI' } }),
+        JSON.stringify({ type: 'assistant', timestamp: '2026-08-01T14:00:10.000Z', message: { role: 'assistant', model: 'claude-sonnet-4-20250514', usage: { input_tokens: 1, output_tokens: 1 }, content: [{ type: 'tool_use', id: 'a1', name: 'Agent', input: { prompt: 'Explore' } }] } }),
+        JSON.stringify({ type: 'assistant', timestamp: '2026-08-01T14:00:12.000Z', message: { role: 'assistant', model: 'claude-sonnet-4-20250514', usage: { input_tokens: 1, output_tokens: 1 }, content: [{ type: 'tool_use', id: 'b1', name: 'Bash', input: { command: 'agents browser list' } }, { type: 'tool_use', id: 'c1', name: 'Bash', input: { command: 'agents computer screenshot' } }] } }),
+      ].join('\n') + '\n');
+
+      const preview = stripVTControlCharacters(buildPreview(mk({
+        id: 'rich-meta-session',
+        shortId: 'richmeta',
+        filePath,
+        cwd: dir,
+      })));
+      expect(preview).toContain('sonnet-4');
+      expect(preview).toContain('browser');
+      expect(preview).toContain('computer');
+      expect(preview).toContain('1 sub-agent');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

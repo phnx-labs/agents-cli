@@ -132,6 +132,8 @@ export interface SessionMeta {
   costUsd?: number;
   /** Wall-clock duration in ms (lastTs − firstTs), persisted at scan time. */
   durationMs?: number;
+  /** Underlying LLM model observed in the transcript, when the agent records one. */
+  model?: string;
   version?: string;
   account?: string;
   topic?: string;

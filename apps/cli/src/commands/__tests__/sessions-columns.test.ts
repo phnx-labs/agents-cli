@@ -7,7 +7,17 @@
 
 import { describe, it, expect } from 'vitest';
 import chalk from 'chalk';
-import { ticketLabel, machineLabeler, formatPickerLabel, formatPickerTip } from '../sessions.js';
+import { stripVTControlCharacters } from 'node:util';
+import {
+  ticketLabel,
+  machineLabeler,
+  formatPickerLabel,
+  formatPickerTip,
+  pickerColumnsFor,
+  flatSessionRow,
+  linkTicketCell,
+  linkCwdCell,
+} from '../sessions.js';
 import type { SessionMeta } from '../../lib/session/types.js';
 
 const strip = (s: string) => s.replace(/\[[0-9;]*m/g, '');
@@ -146,6 +156,52 @@ describe('formatPickerLabel', () => {
   it('omits the host column entirely when it is off', () => {
     const row = strip(formatPickerLabel(meta(), '', { showHost: false }, undefined, 'ghostty'));
     expect(row).not.toContain('ghostty');
+  });
+});
+
+describe('static flat-list columns', () => {
+  it('shows a pool-sized model column only when the pool has model metadata', () => {
+    const withModel = [
+      meta({ model: 'claude-sonnet-4-20250514' }),
+      meta({ id: 'other', shortId: 'other', model: undefined }),
+    ];
+    const cols = pickerColumnsFor(withModel);
+    expect(cols.showModel).toBe(true);
+    expect(cols.modelWidth).toBe(9);
+    expect(stripVTControlCharacters(flatSessionRow(withModel[0], undefined, false, cols))).toContain('sonnet-4');
+
+    const withoutModel = [meta({ topic: 'Show codex versions in the session list' })];
+    const noModelCols = pickerColumnsFor(withoutModel);
+    expect(noModelCols.showModel).toBe(false);
+    expect(stripVTControlCharacters(flatSessionRow(withoutModel[0], undefined, false, noModelCols)))
+      .toContain('Show codex versions in the session list');
+  });
+
+  it('keeps a modeled row within an 80-column terminal', () => {
+    const original = Object.getOwnPropertyDescriptor(process.stdout, 'columns');
+    Object.defineProperty(process.stdout, 'columns', { configurable: true, writable: true, value: 80 });
+    try {
+      const session = meta({
+        timestamp: new Date().toISOString(),
+        model: 'claude-sonnet-4-20250514',
+        topic: 'A topic that must shrink without wrapping the row',
+      });
+      const row = stripVTControlCharacters(flatSessionRow(session, undefined, false, pickerColumnsFor([session])));
+      expect(row.length).toBeLessThanOrEqual(80);
+    } finally {
+      if (original) Object.defineProperty(process.stdout, 'columns', original);
+      else delete (process.stdout as { columns?: number }).columns;
+    }
+  });
+
+  it('links local ticket and cwd labels while remote cwd stays plain', () => {
+    const ticket = linkTicketCell(meta({ ticketId: 'RUSH-1991' }), 'RUSH-1991');
+    const cwd = linkCwdCell(meta({ cwd: '/repo/agents-cli' }), 'agents-cli');
+    expect(stripVTControlCharacters(ticket)).toBe('RUSH-1991');
+    expect(stripVTControlCharacters(cwd)).toBe('agents-cli');
+    if (ticket.includes('\x1b]8;;')) expect(ticket).toContain('/issue/RUSH-1991');
+    if (cwd.includes('\x1b]8;;')) expect(cwd).toContain('file:///repo/agents-cli');
+    expect(linkCwdCell(meta({ cwd: '/remote/repo', _remote: true }), 'remote')).toBe('remote');
   });
 });
 

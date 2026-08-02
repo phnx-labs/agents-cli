@@ -343,7 +343,7 @@ export async function fetchRemoteSessionLabelSource(
       ['sessions', sessionId, '--host', host, '--json'],
       { timeout: DETAIL_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, env: pathAugmentedEnv() },
     );
-    return parseSessionLabelSource(stdout);
+    return parseSessionLabelSource(stdout, sessionId);
   } catch {
     return null;
   }

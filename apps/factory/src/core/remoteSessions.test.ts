@@ -877,3 +877,56 @@ describe('isDerivedSessionName', () => {
     expect(isDerivedSessionName('agents-cli-55', '')).toBe(false);
   });
 });
+
+describe('parseSessionLabelSource — the REMOTE payload shape', () => {
+  // Captured from a real `agents sessions <id> --host yosemite-s0 --json` run,
+  // not hand-written. The first cut of this parser only understood the LOCAL
+  // `{ session, events }` shape and returned null for every offloaded tab — the
+  // exact case it exists to serve — because the fixtures were written from the
+  // local shape instead of from the wire.
+  const remoteRaw = fs.readFileSync(
+    path.join(__dirname, 'testdata', 'sessions-by-id-remote.json'),
+    'utf-8',
+  );
+
+  test('is a flat ARRAY on the wire, not a { session } envelope', () => {
+    const parsed = JSON.parse(remoteRaw);
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed[0].session).toBeUndefined();
+    expect(typeof parsed[0].id).toBe('string');
+  });
+
+  test('reads the label inputs straight off the real remote payload', () => {
+    const parsed = parseSessionLabelSource(remoteRaw, 'e2f20244-fbb7-413a-8333-aa1b692851bc');
+    expect(parsed).not.toBeNull();
+    expect(parsed!.topic).toBe('Reply with exactly: OK');
+  });
+
+  test('still reads the LOCAL { session } envelope', () => {
+    const local = JSON.stringify({
+      session: { id: 'abc', cwd: '/home/muqsit/src/x', label: 'Fix Fleet Login', topic: 'fix login' },
+      events: [],
+    });
+    expect(parseSessionLabelSource(local, 'abc')).toEqual({ label: 'Fix Fleet Login', topic: 'fix login' });
+  });
+
+  test('never labels a tab from a different session in a multi-record payload', () => {
+    const many = JSON.stringify([
+      { id: 'other', cwd: '/x', topic: 'someone elses work' },
+      { id: 'mine', cwd: '/x', topic: 'my work' },
+    ]);
+    expect(parseSessionLabelSource(many, 'mine')!.topic).toBe('my work');
+    expect(parseSessionLabelSource(many, 'absent')).toBeNull();
+    // Ambiguous with no id to disambiguate: refuse rather than guess.
+    expect(parseSessionLabelSource(many)).toBeNull();
+  });
+
+  test('a single-record array needs no id', () => {
+    const one = JSON.stringify([{ id: 'solo', cwd: '/x', topic: 'solo work' }]);
+    expect(parseSessionLabelSource(one)!.topic).toBe('solo work');
+  });
+
+  test('an empty array is no session, not a crash', () => {
+    expect(parseSessionLabelSource('[]', 'anything')).toBeNull();
+  });
+});
