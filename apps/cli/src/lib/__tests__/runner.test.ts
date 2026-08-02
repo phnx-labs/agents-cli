@@ -269,6 +269,25 @@ describe('buildRoutineSpawnEnv', () => {
     expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
     expect(env.CLAUDE_CONFIG_DIR).toContain(path.join('claude', '2.1.0'));
   });
+
+  // The above passed everywhere a token was absent — which is every CI runner,
+  // and why this shipped. On a provisioned box the daemon's own environment
+  // carries CLAUDE_CODE_OAUTH_TOKEN, buildExecEnv spreads ambient process.env,
+  // and every routine silently ran on that one shared rotating token instead of
+  // the host's login. Set it for real so the assertion means something.
+  it('drops an AMBIENT CLAUDE_CODE_OAUTH_TOKEN — the host login wins, not a shared token', () => {
+    const prev = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'sk-ant-oat01-ambient-must-not-leak';
+    try {
+      const env = buildRoutineSpawnEnv({ HOME: '/tmp/overlay', PATH: '/usr/bin' }, 'claude', '2.1.0');
+      expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+      // and the routine still authenticates — via this box's own version home
+      expect(env.CLAUDE_CONFIG_DIR).toContain(path.join('claude', '2.1.0'));
+    } finally {
+      if (prev === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+      else process.env.CLAUDE_CODE_OAUTH_TOKEN = prev;
+    }
+  });
 });
 
 describe('credit/rate-limit detect + failover chain composition (RUSH-1016)', () => {

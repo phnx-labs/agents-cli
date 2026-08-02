@@ -484,12 +484,22 @@ export function buildRoutineSpawnEnv(
   for (const [k, v] of Object.entries(execEnv)) {
     if (v !== undefined) out[k] = v;
   }
-  // No Claude token is injected here. A routine authenticates through the pinned
-  // account's own CLAUDE_CONFIG_DIR login (buildExecEnv points it at the
-  // per-account version home), identical to interactive `agents run`. Claude
-  // Code's interactive session refreshes itself per-device; keeping the daemon
-  // out of the credential entirely is what avoids the fleet-wide rotation logout
-  // — a shared/rotating token was the cause, not the fix.
+  // A routine authenticates through the pinned account's own CLAUDE_CONFIG_DIR
+  // login on THIS box (buildExecEnv points it at the per-account version home).
+  // Claude Code's interactive session refreshes itself per-device; keeping the
+  // daemon out of the credential entirely is what avoids the fleet-wide rotation
+  // logout — a shared/rotating token was the cause, not the fix.
+  //
+  // Injecting a token was already ruled out, but INHERITING one was not:
+  // buildExecEnv spreads the ambient process.env (exec.ts) and sanitizeProcessEnv
+  // only strips loader/interpreter vars, never credentials. So on any box whose
+  // daemon environment happens to carry CLAUDE_CODE_OAUTH_TOKEN, every routine
+  // spawn silently ran on that one shared rotating token instead of the host's
+  // own login — the exact fleet-wide-logout path, arriving by inheritance rather
+  // than injection. CI never caught it because CI has no token to inherit; a
+  // provisioned box does. Drop it here so a routine always uses the login of the
+  // machine it runs on.
+  delete out.CLAUDE_CODE_OAUTH_TOKEN;
   if (timezone) out.TZ = timezone;
   return out;
 }
