@@ -96,6 +96,23 @@ function readRoutineYaml(home: string, name: string): Record<string, unknown> | 
   return yaml.parse(fs.readFileSync(p, 'utf-8'));
 }
 
+describe('routines add help', () => {
+  it('lists exactly the agents backed by the daemon command table', () => {
+    const home = makeHome();
+    try {
+      const result = run(home, ['add', '--help']);
+      expect(result.status).toBe(0);
+      expect(result.stdout).toMatch(
+        /Which agent runs this routine: claude, codex, gemini,\s+cursor, kimi, droid/,
+      );
+      expect(result.stdout).not.toContain('antigravity');
+      expect(result.stdout).not.toContain('opencode');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
 function writeRunMeta(home: string, jobName: string, runId: string, meta: Record<string, unknown>): void {
   const runDir = path.join(home, '.agents', '.history', 'runs', jobName, runId);
   fs.mkdirSync(runDir, { recursive: true });

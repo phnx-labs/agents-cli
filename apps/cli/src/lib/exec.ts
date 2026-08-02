@@ -1792,11 +1792,11 @@ export function detectAuthFailure(text: string): boolean {
  * reason logic can never catch it — the `error:"authentication_failed"` marker
  * and the `result`+`is_error` text are the reliable signals.
  *
- * Gated on the Claude stream-json shape; other agents don't emit these fields,
- * so callers pass their agent and this returns false for non-claude.
+ * Gated on the Claude-compatible stream-json shape emitted by Claude and Cursor;
+ * callers pass their agent so unrelated stream formats cannot match by accident.
  */
 export function detectAuthFailureEvent(logText: string, agent: AgentId): boolean {
-  if (agent !== 'claude') return false;
+  if (agent !== 'claude' && agent !== 'cursor') return false;
   const lines = logText.split('\n');
   for (const line of lines) {
     const trimmed = line.trim();

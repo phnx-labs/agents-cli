@@ -53,9 +53,13 @@ describe('detectAuthFailure — user-visible auth strings', () => {
   });
 });
 
-describe('detectAuthFailureEvent — Claude stream-json structural signal', () => {
+describe('detectAuthFailureEvent — Claude-compatible stream-json structural signal', () => {
   it('is true for a real logged-out Claude log', () => {
     expect(detectAuthFailureEvent(LOGGED_OUT_CLAUDE_LOG, 'claude')).toBe(true);
+  });
+
+  it('recognizes the same structural auth failure in Cursor stream-json', () => {
+    expect(detectAuthFailureEvent(LOGGED_OUT_CLAUDE_LOG, 'cursor')).toBe(true);
   });
 
   it('is false for a completed run that merely mentions the phrase', () => {
@@ -66,7 +70,7 @@ describe('detectAuthFailureEvent — Claude stream-json structural signal', () =
     expect(detectAuthFailureEvent(RATE_LIMITED_CLAUDE_LOG, 'claude')).toBe(false);
   });
 
-  it('is false for non-claude agents (they do not emit these markers)', () => {
+  it('is false for agents that do not emit these markers', () => {
     expect(detectAuthFailureEvent(LOGGED_OUT_CLAUDE_LOG, 'codex')).toBe(false);
     expect(detectAuthFailureEvent(LOGGED_OUT_CLAUDE_LOG, 'gemini')).toBe(false);
   });

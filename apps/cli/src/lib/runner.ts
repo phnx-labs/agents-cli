@@ -74,13 +74,17 @@ const AGENT_COMMANDS: Record<string, string[]> = {
   claude: ['claude', '-p', '--verbose', '{prompt}', '--output-format', 'stream-json', '--permission-mode', 'plan'],
   codex: ['codex', 'exec', '--sandbox', 'workspace-write', '{prompt}', '--json'],
   gemini: ['gemini', '{prompt}', '--output-format', 'stream-json'],
+  cursor: ['cursor-agent', '-p', '{prompt}', '--output-format', 'stream-json'],
   kimi: ['kimi', '--prompt', '{prompt}', '--output-format', 'stream-json'],
   droid: ['droid', 'exec', '{prompt}', '-o', 'stream-json'],
 };
 
+export const ROUTINE_AGENT_IDS = Object.freeze(Object.keys(AGENT_COMMANDS));
+
 const ROUTINE_TRANSCRIPT_SPECS: Partial<Record<AgentId, Array<{ root: string[]; ext: string }>>> = {
   claude: [{ root: ['.claude', 'projects'], ext: '.jsonl' }],
   codex: [{ root: ['.codex', 'sessions'], ext: '.jsonl' }],
+  cursor: [{ root: ['.cursor', 'projects'], ext: '.jsonl' }],
 };
 
 /** Build the full CLI argv for executing a job, applying mode, model, and permission flags. */
@@ -170,6 +174,22 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string): stri
       cmd.push('--approval-mode', 'auto_edit');
     } else if (mode === 'skip') {
       cmd.push('--yolo');
+    }
+
+    appendModelAndReasoning(cmd, config);
+  }
+
+  if (config.agent === 'cursor') {
+    // cursor-agent supports --plan, but the capability registry has not been
+    // upgraded yet. RUSH-2101 tracks adding that read-only mode after PR #1721.
+    const cursorMode = resolveHeadlessMode('cursor', mode, false);
+    if (mode === 'plan' && cursorMode !== 'plan') {
+      process.stderr.write(
+        `warning: cursor has no read-only 'plan' mode; using '${cursorMode}' (writable) instead\n`,
+      );
+    }
+    if (cursorMode === 'skip') {
+      cmd.push('-f');
     }
 
     appendModelAndReasoning(cmd, config);
@@ -1458,7 +1478,7 @@ export function extractReport(stdoutPath: string, agentType: AgentId): string | 
       try {
         const parsed = JSON.parse(line);
 
-        if (agentType === 'claude') {
+        if (agentType === 'claude' || agentType === 'cursor') {
           if (parsed.type === 'assistant' && parsed.message?.content) {
             for (const block of parsed.message.content) {
               if (block.type === 'text' && block.text) {
@@ -1496,7 +1516,7 @@ export function extractReport(stdoutPath: string, agentType: AgentId): string | 
  *  that carries `is_error`. If we find it, the run completed cleanly (modulo
  *  agent-reported error). If not, the process likely died mid-stream and the
  *  caller should treat the run as failed. */
-function inferFinalStatusFromLog(
+export function inferFinalStatusFromLog(
   stdoutPath: string,
   agent: AgentId,
 ): { status: 'completed' | 'failed'; exitCode: number } | null {
@@ -1509,7 +1529,7 @@ function inferFinalStatusFromLog(
     for (let i = lines.length - 1, scanned = 0; i >= 0 && scanned < 20; i--, scanned++) {
       try {
         const parsed = JSON.parse(lines[i]);
-        if (agent === 'claude' && parsed.type === 'result') {
+        if ((agent === 'claude' || agent === 'cursor') && parsed.type === 'result') {
           return parsed.is_error
             ? { status: 'failed', exitCode: 1 }
             : { status: 'completed', exitCode: 0 };

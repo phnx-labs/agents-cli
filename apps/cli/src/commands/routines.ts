@@ -65,7 +65,7 @@ import { fireWebhookJobs, matchJobsToWebhook, type IncomingWebhook, type Webhook
 import { getRoutinesDir } from '../lib/state.js';
 import { IS_WINDOWS } from '../lib/platform/index.js';
 import { safeJoin } from '../lib/paths.js';
-import { executeJob, executeJobDetached, monitorRunningJobs } from '../lib/runner.js';
+import { executeJob, executeJobDetached, monitorRunningJobs, ROUTINE_AGENT_IDS } from '../lib/runner.js';
 import { JobScheduler } from '../lib/scheduler.js';
 import { detectOverdueJobs } from '../lib/overdue.js';
 import { isInteractiveTerminal, requireInteractiveSelection } from './utils.js';
@@ -660,7 +660,7 @@ export function registerRoutinesCommands(program: Command): void {
     .command('add [nameOrPath]')
     .description('Create a new routine from a YAML file or inline flags. Starts the scheduler automatically if it is not already running.')
     .option('-s, --schedule <cron>', 'Cron schedule in standard format (5 fields: minute hour day month weekday)')
-    .option('-a, --agent <agent>', 'Which agent runs this routine: claude, codex, antigravity, cursor, or opencode')
+    .option('-a, --agent <agent>', `Which agent runs this routine: ${ROUTINE_AGENT_IDS.join(', ')}`)
     .option('--workflow <name>', 'Run an installed workflow (~/.agents/workflows/<name>) via `agents run`. Mutually exclusive with --agent.')
     .option('--command <sh>', 'Run a plain shell command directly (no agent, no auth, no sandbox) — for deterministic housekeeping routines. Mutually exclusive with --agent and --workflow; --prompt is not used.')
     .option('-p, --prompt <prompt>', 'Task instruction for the agent')

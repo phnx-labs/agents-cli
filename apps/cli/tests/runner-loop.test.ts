@@ -112,10 +112,10 @@ describe('executeJob — loop driver (issue #400)', () => {
     const deps = makeLoopDeps(calls);
 
     // No loop field — should go to the single-shot spawn path.
-    // Use agent 'cursor' which buildJobCommand rejects immediately (unsupported),
+    // Use a sentinel agent which buildJobCommand rejects immediately (unsupported),
     // so executeJob throws without ever reaching a real spawn or the loop driver.
     await expect(
-      executeJob(makeConfig({ agent: 'cursor' as any }), deps),
+      executeJob(makeConfig({ agent: 'no-such-agent' as any }), deps),
     ).rejects.toThrow('Unsupported agent for daemon jobs');
 
     // Loop driver must not have been invoked.

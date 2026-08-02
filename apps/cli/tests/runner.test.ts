@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir, homedir } from 'os';
-import { buildJobCommand, extractReport } from '../src/lib/runner.js';
+import { buildJobCommand, extractReport, inferFinalStatusFromLog } from '../src/lib/runner.js';
 import { toPosix } from '../src/lib/platform/index.js';
 import type { JobConfig } from '../src/lib/jobs.js';
 
@@ -149,10 +149,82 @@ describe('buildJobCommand', () => {
     });
   });
 
+  describe('cursor', () => {
+    it('builds the exact edit mode command without a mode flag', () => {
+      expect(buildJobCommand(makeConfig({ agent: 'cursor', mode: 'edit' }), 'hello')).toEqual([
+        'cursor-agent',
+        '-p',
+        'hello',
+        '--output-format',
+        'stream-json',
+      ]);
+    });
+
+    it('builds the exact skip mode command with force approval', () => {
+      expect(buildJobCommand(makeConfig({ agent: 'cursor', mode: 'skip' }), 'hello')).toEqual([
+        'cursor-agent',
+        '-p',
+        'hello',
+        '--output-format',
+        'stream-json',
+        '-f',
+      ]);
+    });
+
+    it('warns when the stale registry degrades plan mode to writable edit', () => {
+      const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      expect(buildJobCommand(makeConfig({ agent: 'cursor', mode: 'plan' }), 'hello')).toEqual([
+        'cursor-agent',
+        '-p',
+        'hello',
+        '--output-format',
+        'stream-json',
+      ]);
+      expect(stderr).toHaveBeenCalledWith(
+        "warning: cursor has no read-only 'plan' mode; using 'edit' (writable) instead\n",
+      );
+      stderr.mockRestore();
+    });
+
+    it('adds --model when config.model is set', () => {
+      expect(buildJobCommand(makeConfig({
+        agent: 'cursor',
+        mode: 'edit',
+        config: { model: 'sonnet-4-thinking' },
+      }), 'hello')).toEqual([
+        'cursor-agent',
+        '-p',
+        'hello',
+        '--output-format',
+        'stream-json',
+        '--model',
+        'sonnet-4-thinking',
+      ]);
+    });
+  });
+
   it('throws for unsupported agent', () => {
-    expect(() => buildJobCommand(makeConfig({ agent: 'cursor' }), 'hello')).toThrow(
-      'Unsupported agent for daemon jobs: cursor'
+    expect(() => buildJobCommand(makeConfig({ agent: 'no-such-agent' as any }), 'hello')).toThrow(
+      'Unsupported agent for daemon jobs: no-such-agent'
     );
+  });
+});
+
+describe('inferFinalStatusFromLog', () => {
+  it('recognizes a successful Cursor result event after a detached run is reaped', () => {
+    const stdoutPath = join(TEST_DIR, 'cursor-result.jsonl');
+    mkdirSync(TEST_DIR, { recursive: true });
+    writeFileSync(stdoutPath, JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: 'RUSH_2080_CURSOR_ROUTINE_OK',
+    }));
+
+    expect(inferFinalStatusFromLog(stdoutPath, 'cursor')).toEqual({
+      status: 'completed',
+      exitCode: 0,
+    });
   });
 });
 
@@ -202,6 +274,23 @@ describe('extractReport', () => {
     writeFileSync(logPath, lines.join('\n'), 'utf-8');
 
     expect(extractReport(logPath, 'gemini')).toBe('Gemini final report');
+  });
+
+  it('extracts the last assistant text from cursor stream-json', () => {
+    const lines = [
+      JSON.stringify({
+        type: 'assistant',
+        message: { content: [{ type: 'text', text: 'First' }] },
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        message: { content: [{ type: 'text', text: 'Cursor final report' }] },
+      }),
+    ];
+    const logPath = join(TEST_DIR, 'cursor.log');
+    writeFileSync(logPath, lines.join('\n'), 'utf-8');
+
+    expect(extractReport(logPath, 'cursor')).toBe('Cursor final report');
   });
 
   it('returns null for nonexistent file', () => {
