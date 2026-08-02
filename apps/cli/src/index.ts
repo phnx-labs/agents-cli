@@ -802,6 +802,43 @@ function registerJobsCronAliasCommand(p: Command, alias: string): void {
     });
 }
 
+/**
+ * Removed `check` command (RUSH-1234) — re-parses as `doctor --check`, forwarding
+ * any remaining flags so `check --quiet` / `check --json` / `check --devices` keep
+ * working and the drift-gate exit code survives the rename. The notice goes to
+ * stderr so `--json` stdout stays clean for CI parsers.
+ */
+function registerCheckTombstoneCommand(p: Command): void {
+  p.command('check', { hidden: true })
+    .allowUnknownOption()
+    .allowExcessArguments()
+    .action(async () => {
+      console.error(chalk.yellow('Deprecated: "agents check" is now "agents doctor --check". Running that for you.\n'));
+      const args = process.argv.slice(2);
+      args[0] = 'doctor';
+      args.splice(1, 0, '--check');
+      await program.parseAsync(['node', 'agents', ...args]);
+    });
+}
+
+/**
+ * Removed `resources` command (RUSH-1234) — re-parses as `view --merged` (the
+ * cross-layer, first-wins resource table now lives there; `agents inspect <target>`
+ * covers per-agent / per-repo detail). Forwards remaining flags like `--json`.
+ */
+function registerResourcesTombstoneCommand(p: Command): void {
+  p.command('resources', { hidden: true })
+    .allowUnknownOption()
+    .allowExcessArguments()
+    .action(async () => {
+      console.error(chalk.yellow('Deprecated: "agents resources" is now "agents view --merged" (use "agents inspect <target>" for per-agent/per-repo detail). Running that for you.\n'));
+      const args = process.argv.slice(2);
+      args[0] = 'view';
+      args.splice(1, 0, '--merged');
+      await program.parseAsync(['node', 'agents', ...args]);
+    });
+}
+
 /** Self-upgrade command (`agents upgrade [version]`). */
 function registerUpgradeCommand(p: Command): void {
   p.command('upgrade')
@@ -890,6 +927,16 @@ async function registerEagerForRequest(name: string): Promise<boolean> {
       registerJobsCronAliasCommand(program, name);
       await reg(loadRoutines);
       return true;
+    case 'check':
+      // The action re-parses as `doctor --check`, so doctor must exist too.
+      registerCheckTombstoneCommand(program);
+      await reg(loadDoctor);
+      return true;
+    case 'resources':
+      // The action re-parses as `view --merged`, so view must exist too.
+      registerResourcesTombstoneCommand(program);
+      await reg(loadView);
+      return true;
     case 'upgrade':
       registerUpgradeCommand(program);
       return true;
@@ -910,6 +957,7 @@ async function registerEagerForRequest(name: string): Promise<boolean> {
  */
 async function registerAllEagerCommands(): Promise<void> {
   await reg(loadView);
+  registerResourcesTombstoneCommand(program);
   await reg(loadShare);
   await reg(loadSend);
   await reg(loadInspect);
@@ -942,6 +990,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadTrash);
   await reg(loadRestore);
   await reg(loadDoctor);
+  registerCheckTombstoneCommand(program);
   await reg(loadApply);
   await reg(loadStatus);
   registerExecAliasCommand(program);
