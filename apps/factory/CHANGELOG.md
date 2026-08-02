@@ -6,13 +6,17 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.9.304] - 2026-08-02
+
 - **Respect per-device auto-launch preferences from the CLI (RUSH-2092).**
   Devices disabled with `agents devices disable <name>` are excluded from
   `New <Agent>` auto launches; devices preferred with `agents devices prefer
-  <name>` get a ranking boost. Disabled devices remain available through
-  `New <Agent> (Pick Host)`. Preferences are read from
-  `~/.agents/.history/devices/auto-launch.json`. Source:
-  `apps/factory/src/core/deviceAutoLaunch.ts`,
+  <name>` get a ranking boost worth two running agents in the host score, so a
+  preference wins ties but never sends work to a genuinely swamped machine.
+  Disabled devices remain available through `New <Agent> (Pick Host)`.
+  Preferences are read from `~/.agents/.history/devices/auto-launch.json`.
+  Source: `apps/factory/src/core/deviceAutoLaunch.ts`,
+  `apps/factory/src/core/launchHost.ts`,
   `apps/factory/src/core/launchHistory.ts`,
   `apps/factory/src/vscode/extension.ts`.
 
