@@ -188,6 +188,31 @@ export function deduplicateVersionHookCommands(
   return [...passthrough, ...Array.from(selected.values(), ({ command }) => command)];
 }
 
+/**
+ * Collapse a matcher group's hook entries down to the deduplicated command
+ * multiset {@link deduplicateVersionHookCommands} returns, preserving order and
+ * the concrete entry objects. The deduped list is honored as a per-command
+ * budget, NOT a membership set: two identical active-version entries collapse to
+ * one because the budget for that command is one. (A membership `Set.has` test
+ * would keep both — the bug this replaces.) Passthrough (user / non-version-home)
+ * commands keep their original multiplicity, so genuine user hooks are untouched.
+ */
+function collapseVersionHookEntries<T extends { command: string }>(
+  entries: T[],
+  activeVersionHome: string,
+): T[] {
+  const budget = new Map<string, number>();
+  for (const command of deduplicateVersionHookCommands(entries.map((e) => e.command), activeVersionHome)) {
+    budget.set(command, (budget.get(command) ?? 0) + 1);
+  }
+  return entries.filter((e) => {
+    const remaining = budget.get(e.command) ?? 0;
+    if (remaining <= 0) return false;
+    budget.set(e.command, remaining - 1);
+    return true;
+  });
+}
+
 import { getEffectiveHome, getVersionHomePath, listInstalledVersions, resolveVersion } from './versions.js';
 import type { AgentId, InstalledHook, ManifestHook } from './types.js';
 import { generateHookShim, getHookShimPath, isValidHookShimName, parseCacheConfig, removeHookShim } from './hooks/cache.js';
@@ -1651,16 +1676,12 @@ function registerHooksForClaude(
       hooks?: Array<{ type: string; command: string; timeout?: number }>;
     }>) {
       if (!group.hooks) continue;
-      const selectedCommands = new Set(deduplicateVersionHookCommands(
-        group.hooks.map((hook) => hook.command),
-        versionHome,
-      ));
-      group.hooks = group.hooks.filter(
+      const managed = group.hooks.filter(
         (h) =>
-          selectedCommands.has(h.command) &&
           (!isManagedHookCommand(h.command, managedPrefixes) || currentManifestPaths.has(h.command)) &&
           !isStaleSiblingVersionCommand(h.command, currentVh)
       );
+      group.hooks = collapseVersionHookEntries(managed, versionHome);
     }
   }
 
@@ -1843,16 +1864,12 @@ function registerHooksForCodex(
   for (const eventGroups of Object.values(hooksFile.hooks)) {
     for (const group of eventGroups) {
       if (!group.hooks) continue;
-      const selectedCommands = new Set(deduplicateVersionHookCommands(
-        group.hooks.map((hook) => hook.command),
-        versionHome,
-      ));
-      group.hooks = group.hooks.filter(
+      const managed = group.hooks.filter(
         (h) =>
-          selectedCommands.has(h.command) &&
           (!isManagedHookCommand(h.command, managedPrefixes) || currentManifestPaths.has(h.command)) &&
           !isStaleSiblingVersionCommand(h.command, currentVh)
       );
+      group.hooks = collapseVersionHookEntries(managed, versionHome);
     }
   }
   for (const [event, eventGroups] of Object.entries(hooksFile.hooks)) {

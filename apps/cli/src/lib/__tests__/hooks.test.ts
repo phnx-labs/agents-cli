@@ -2100,6 +2100,41 @@ describe('per-version hook entry pruning (settings accumulation regression)', ()
       expect(commands).toContain(SYSTEM_HOOK);
       expect(commands).toContain(CUSTOM_HOOK);
     });
+
+    it('collapses an exact-duplicate entry of the CURRENT version to a single hook', () => {
+      // The sibling-version prune (isStaleSiblingVersionCommand) only removes a
+      // DIFFERENT version's path; it can't collapse two identical current-version
+      // entries. Seeding the same current-version command twice is what a
+      // membership-Set wiring let both survive — Claude Code then fires the hook
+      // twice. Deduplication must leave exactly one.
+      const versionHome = path.join(
+        tmpDir, '.agents', '.history', 'versions', 'claude', '2.1.201', 'home'
+      );
+      const settingsPath = path.join(versionHome, '.claude', 'settings.json');
+      fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+
+      fs.writeFileSync(settingsPath, JSON.stringify({
+        hooks: preToolUseGroup([
+          guardCmd('2.1.201'),   // current version
+          guardCmd('2.1.201'),   // EXACT duplicate of the current version -> collapse
+          CUSTOM_HOOK,           // user's own hook -> keep untouched
+        ]),
+      }, null, 2));
+
+      makeScript('git-guard.sh');
+      const manifest: Record<string, ManifestHook> = {
+        'git-guard': { script: 'git-guard.sh', events: ['PreToolUse'], matcher: 'Bash' },
+      };
+
+      const result = registerHooksToSettings('claude', versionHome, manifest, agentsDir);
+      expect(result.errors).toHaveLength(0);
+
+      const commands = collectCommands(JSON.parse(fs.readFileSync(settingsPath, 'utf-8')));
+      // Exactly one current-version guard entry — the duplicate is gone.
+      expect(commands.filter((c) => c === guardCmd('2.1.201'))).toEqual([guardCmd('2.1.201')]);
+      // The user's own hook is left exactly as-is.
+      expect(commands).toContain(CUSTOM_HOOK);
+    });
   });
 
   describe('remove (pruneVersionHomeHookEntriesFromSettings)', () => {
