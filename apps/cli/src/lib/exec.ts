@@ -29,6 +29,7 @@ import { mailboxDir, isValidMailboxId } from './mailbox.js';
 import { composeWin32CommandLine } from './platform/index.js';
 import { isTmuxInstalled } from './tmux/binary.js';
 import { shellQuote } from './ssh-exec.js';
+import { resolveClaudeSetupToken } from './claude-account-token.js';
 
 /**
  * Agent execution modes. Canonical name `skip` (dangerously skip permissions);
@@ -371,7 +372,15 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
       ? resolvedVersion
       : (resolvedVersion && isVersionInstalled('claude', resolvedVersion) ? resolvedVersion : null);
     if (version) {
-      result.CLAUDE_CONFIG_DIR = path.join(getVersionHomePath('claude', version), '.claude');
+      const versionHome = getVersionHomePath('claude', version);
+      result.CLAUDE_CONFIG_DIR = path.join(versionHome, '.claude');
+      const setupToken = resolveClaudeSetupToken(versionHome);
+      if (setupToken) {
+        // A token keyed to this version home's own account replaces any ambient
+        // shared value inherited from the launcher. options.env still wins below
+        // for explicit caller overrides.
+        result.CLAUDE_CODE_OAUTH_TOKEN = setupToken;
+      }
       // A managed pin lives in a per-version dir; Claude Code's own background
       // auto-updater would rewrite that pinned binary in place (and has left it
       // half-swapped and broken). Disable it so a pin stays a pin. Honor an
