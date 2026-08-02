@@ -203,6 +203,55 @@ Three diagnostics with distinct scopes (RUSH-2027):
 - `agents doctor` — the **umbrella**: local diagnostics (CLI presence, sign-in,
   per-version sync, orphans) **and**, with `--devices`, cross-device divergence.
 
+### Triaged health block (local modes)
+
+Both the bare `agents doctor` overview and the target report
+`agents doctor <agent>[@version]` lead with a **triaged health block** — the
+verdict, ranked by severity, so the reader sees what is unhealthy, why it matters,
+and the exact fix without decoding status text. A clean install collapses to one
+green line:
+
+```
+Claude@2.1.220
+  ✓ healthy — 34 resources reconciled · hooks wired · sources current
+```
+
+Otherwise a severity-counted header is followed by one row per finding — icon ·
+severity · subject — impact, then the exact fix — and a heal footer when anything
+is `--fix`-able:
+
+```
+Claude@2.1.220
+  ✗ unhealthy — 3 issues (1 critical · 2 warnings)
+
+  ✗ critical  ask-user-question-guard — on disk but not wired into settings.json; the hook never fires
+              → agents sync claude@2.1.220 --yes
+  ⚠ warning   ~/.agents — 16 commits behind origin/main; you're running stale config
+              → agents repo pull user
+  ⚠ warning   11-activity-log — differs from source
+              → agents doctor claude@2.1.220 --fix
+
+  heal what's auto-fixable:  agents doctor claude@2.1.220 --fix
+```
+
+Every finding carries an agent-agnostic **severity** (glyphs `✓` `✗` `⚠` and a
+subtle info dot, colored via `chalk`):
+
+- **critical** (`✗`, silent breakage) — an unwired hook, a missing/unparseable
+  `settings.json`, a MISSING resource.
+- **warning** (`⚠`, stale / drift) — a source layer behind origin, a DIVERGENT
+  resource, a stale / never-synced version.
+- **info** (`·`, orphan) — an EXTRA resource → `agents prune cleanup`. Capped with
+  a `+N more orphans` rollup so the block stays scannable.
+
+The bare overview opens with a `Health` banner aggregated across every installed
+version; the target report renders the block below its per-resource detail rows
+(kept — the health block layers on top as the verdict). `--json` carries the same
+triage: a `verdict` field in target mode and a `health` field in the overview,
+each with `severity`/`category`/`subject`/`impact`/`fix` per issue. Source:
+`src/commands/doctor.ts` (`computeVerdict`, `computeOverviewHealth`,
+`healthBlockLines`).
+
 ### `agents doctor --devices`
 
 Compares every registered device's installed harness inventory against the local
