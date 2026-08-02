@@ -23,13 +23,6 @@ export interface AcpHarnessSpec {
 }
 
 export const ACP_HARNESSES: Partial<Record<AgentId, AcpHarnessSpec>> = {
-  gemini: {
-    command: 'gemini',
-    args: ['--experimental-acp'],
-    installHint: 'npm i -g @google/gemini-cli',
-    confidence: 'documented',
-    source: 'https://agentclientprotocol.com/get-started/agents',
-  },
   claude: {
     command: 'npx',
     args: ['-y', '@zed-industries/claude-agent-acp'],
