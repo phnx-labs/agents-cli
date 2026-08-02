@@ -7,6 +7,7 @@ import {
   normalizeDeviceSeed,
   activeBrowserSeed,
   bareBrowserSeed,
+  buildInitialFilter,
   liveRowKey,
   indexLiveRows,
   liveSessionToMeta,
@@ -214,6 +215,46 @@ describe('bareBrowserSeed — an explicit --device scope', () => {
 
   it('lets an explicit --since still bound an --in-team view', () => {
     expect(bareBrowserSeed({ inTeam: 'redesign', since: '7d' }).window).toBe('7d');
+  });
+});
+
+describe('buildInitialFilter — the seed must survive into the live filter', () => {
+  // The seed is copied field-by-field, and every field is optional, so a dropped
+  // one is invisible to the compiler and silent at runtime: `team` was omitted
+  // here, which made --in-team a no-op interactively while the scope half of the
+  // same seed still applied — the browser opened wide and looked filtered.
+  it('carries every seeded field through, not just the ones with defaults', () => {
+    const seed = bareBrowserSeed({ inTeam: 'redesign', agent: 'codex', host: ['zion'] });
+    const filter = buildInitialFilter(seed);
+
+    expect(filter.team).toBe('redesign');
+    expect(filter.agent).toBe('codex');
+    expect(filter.device).toBe('zion');
+    expect(filter.projectScope).toBe('all');
+    expect(filter.window).toBeUndefined();
+  });
+
+  it('loses no key of the seed', () => {
+    // Guards the next filter field someone adds: if the seed sets it and the
+    // filter doesn't carry it, this fails without anyone having to remember.
+    const seed = bareBrowserSeed({ inTeam: 'redesign', agent: 'codex', host: ['zion'], teams: true });
+    const filter = buildInitialFilter(seed) as Record<string, unknown>;
+    for (const [key, value] of Object.entries(seed)) {
+      expect({ key, value: filter[key] }).toEqual({ key, value });
+    }
+  });
+
+  it('applies its own defaults only where the seed is silent', () => {
+    const filter = buildInitialFilter({});
+    expect(filter.running).toBe(false);
+    expect(filter.teams).toBe(false);
+    expect(filter.projectScope).toBe('repo');
+    expect(filter.window).toBe('30d');
+    expect(filter.team).toBeUndefined();
+  });
+
+  it('honors an explicit undefined window as all-time', () => {
+    expect(buildInitialFilter({ window: undefined }).window).toBeUndefined();
   });
 });
 

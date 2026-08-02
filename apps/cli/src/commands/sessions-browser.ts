@@ -59,6 +59,38 @@ export interface BrowserFilter {
   window?: string;
 }
 
+/**
+ * Complete a seed into the filter the picker actually runs on.
+ *
+ * Every optional field of {@link BrowserFilter} has to be named here, because the
+ * seed is copied field-by-field and an omission is silent: the field is optional,
+ * so the compiler says nothing and the browser just opens without that filter.
+ * `team` was dropped exactly this way, which made `--in-team` a no-op on the
+ * interactive path while the scope half of the same seed still applied — so the
+ * view opened wide and all-time and looked like the flag had worked.
+ *
+ * Exported so a test can assert the FILTER, not just the seed; testing the seed
+ * alone cannot see this class of bug.
+ */
+export function buildInitialFilter(initial: Partial<BrowserFilter>): BrowserFilter {
+  return {
+    running: initial.running ?? false,
+    teams: initial.teams ?? false,
+    agent: initial.agent,
+    device: initial.device,
+    team: initial.team,
+    projectScope: initial.projectScope ?? 'repo',
+    window: 'window' in initial ? initial.window : '30d',
+  };
+}
+
+/** Cache key for the transcript pool: every filter that changes what is FETCHED
+ *  (window, team-origin inclusion, and the team filter's deeper limit) — not the
+ *  ones applied in memory afterwards. */
+function poolCacheKey(f: BrowserFilter): string {
+  return `${f.window ?? 'all'}|${f.teams}|${f.team ?? ''}`;
+}
+
 /** Pool size when a team filter is active; one team's rows can sit anywhere. */
 const WHOLE_TEAM_POOL_LIMIT = 5000;
 
@@ -285,7 +317,7 @@ async function fetchRawPool(
   // actually in the pool — with `c` off they were excluded at the query.
   if (f.teams) rows = enrichTeamOrigins(rows);
 
-  return { key: `${since ?? 'all'}|${f.teams}`, rows, unreachable };
+  return { key: poolCacheKey(f), rows, unreachable };
 }
 
 /**
@@ -475,18 +507,14 @@ export async function runSessionBrowser(
   // it. We compute into locals and only write the shared state as the latest load.
   let loadGen = 0;
 
-  const initialFilter: BrowserFilter = {
-    running: initial.running ?? false,
-    teams: initial.teams ?? false,
-    agent: initial.agent,
-    device: initial.device,
-    projectScope: initial.projectScope ?? 'repo',
-    window: 'window' in initial ? initial.window : '30d',
-  };
+  const initialFilter = buildInitialFilter(initial);
 
   const load = async (f: BrowserFilter): Promise<SessionMeta[]> => {
     const myGen = ++loadGen;
-    const key = `${f.window ?? 'all'}|${f.teams}`;
+    // f.team decides the fetch limit, so it belongs in the key — otherwise arriving
+    // via `t` reuses a 500-row pool while --in-team fetched 5000, and the cycle can
+    // only offer the teams that happened to be in whichever pool was built first.
+    const key = poolCacheKey(f);
     let pool = rawCache && rawCache.key === key ? rawCache : null;
     if (!pool) {
       const fetched = await fetchRawPool(f, self, local, hosts);
