@@ -9,8 +9,10 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { spawnSync } from 'node:child_process';
+import { getCliLaunch } from '../lib/cli-entry.js';
 import { loadDevices } from '../lib/devices/registry.js';
 import { runDeviceSync } from '../lib/devices/sync.js';
+import { tailscaleStatusJson } from '../lib/devices/tailscale.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 
 type FleetAuthMethod = 'key' | 'password';
@@ -32,11 +34,8 @@ function parseAuth(raw: string | undefined): FleetAuthMethod {
 }
 
 function runAgentsSubcommand(args: string[], opts: { optional?: boolean } = {}): boolean {
-  const entry = process.argv[1];
-  if (!entry) throw new Error('Cannot locate the current agents entrypoint.');
-  const command = entry.endsWith('.ts') ? 'tsx' : process.execPath;
-  const commandArgs = entry.endsWith('.ts') ? [entry, ...args] : [entry, ...args];
-  const res = spawnSync(command, commandArgs, { stdio: 'inherit', env: process.env });
+  const launch = getCliLaunch(args);
+  const res = spawnSync(launch.command, launch.args, { stdio: 'inherit', env: process.env });
   if ((res.status ?? 1) === 0) return true;
   if (opts.optional) return false;
   throw new Error(`agents ${args.join(' ')} failed with exit ${res.status ?? 1}.`);
@@ -50,8 +49,12 @@ function commandExists(command: string): boolean {
 }
 
 function tailscaleStatusOk(): boolean {
-  const res = spawnSync('tailscale', ['status', '--json'], { stdio: 'ignore', windowsHide: true });
-  return (res.status ?? 1) === 0;
+  try {
+    tailscaleStatusJson();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function printTailscaleInstallInstructions(): void {
