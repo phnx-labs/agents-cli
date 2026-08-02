@@ -317,8 +317,11 @@ enum AgentsCLI {
             \(head)
 
             Steps:
-            1. Read the ticket, claim it — `linear update \(ticket.identifier) --pickup` \
-            — and investigate the repo you were launched in.
+            1. Read the ticket, claim it, and investigate the repo you were launched in. \
+            To claim it, move it to this workspace's in-progress state: `linear states` \
+            lists the states with their types — pick the one typed `started` and run \
+            `linear update \(ticket.identifier) --status <that state>`. Do not guess a \
+            state name; workspaces name them differently.
             2. Implement the change following that repo's AGENTS.md (worktree + PR when the \
             repo requires it; never commit on the default branch).
             3. Verify with the focused tests or the real flow that proves the user-visible \

@@ -447,11 +447,14 @@ enum IssueSelfTest {
         let runPrompt = AgentsCLI.ticketWorkPrompt(ticket: t, action: .run)
         check("the run brief names the ticket and how to read it",
               runPrompt.contains("RUSH-2098") && runPrompt.contains("linear tasks RUSH-2098"))
-        // `--pickup` is the state-name-independent way to move a ticket to In
-        // Progress; a literal state name like "Doing" is workspace-specific and
-        // `--status progress` is not a state at all (it is a `tasks` filter value).
-        check("the run brief claims the ticket and reports back",
-              runPrompt.contains("--pickup") && runPrompt.contains("--comment"))
+        // The brief must make the agent DISCOVER the in-progress state: state names
+        // are per-workspace ("Doing" here, not "In Progress"), `--pickup` hardcodes
+        // "In Progress", and `--status progress` is a `tasks` filter value, not a
+        // state — both fail on a workspace that names it anything else.
+        check("the run brief claims the ticket by discovering the started state",
+              runPrompt.contains("linear states") && runPrompt.contains("--status")
+                  && !runPrompt.contains("--pickup"))
+        check("the run brief reports back on the ticket", runPrompt.contains("--comment"))
         let planPrompt = AgentsCLI.ticketWorkPrompt(ticket: t, action: .plan)
         check("the plan brief forbids code changes and a PR",
               planPrompt.contains("Do NOT change code") && planPrompt.contains("do NOT open a PR"))
