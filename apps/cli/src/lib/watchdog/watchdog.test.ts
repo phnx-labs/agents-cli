@@ -352,4 +352,20 @@ describe('WATCHDOG_SYSTEM_PROMPT — drive-to-completion judgment', () => {
     // The verdict shape parseWatchdogResponse consumes is still specified.
     expect(p).toContain('"action":"nudge"|"skip"');
   });
+
+  it('encodes the idle-to-completion strategy: read-first, context, split, point-at-tool', () => {
+    const p = WATCHDOG_SYSTEM_PROMPT;
+    // Idle is the target, and the brain reads before it judges.
+    expect(p).toMatch(/idle/i);
+    expect(p).toMatch(/read the transcript/i);
+    expect(p).toMatch(/already reached|already decided/i);
+    // Nudge carries context and names a concrete next step.
+    expect(p).toMatch(/restate the goal/i);
+    expect(p).toMatch(/concrete next step/i);
+    // Point the agent at a tool it forgot it has.
+    expect(p).toMatch(/agents computer/);
+    expect(p).toMatch(/agents browser/);
+    // Split the ask: drive the reversible part, flag only the disruptive one.
+    expect(p).toMatch(/split the ask/i);
+  });
 });
