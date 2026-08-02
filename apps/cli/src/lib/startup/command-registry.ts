@@ -31,7 +31,6 @@ export type ModuleLoader = () => Promise<Registrar>;
 // them into the exact main-branch registration order for the slow path.
 export const loadView: ModuleLoader = async () => (await import('../../commands/view.js')).registerViewCommand;
 export const loadInspect: ModuleLoader = async () => (await import('../../commands/inspect.js')).registerInspectCommand;
-export const loadResources: ModuleLoader = async () => (await import('../../commands/resources.js')).registerResourcesCommand;
 export const loadFeedback: ModuleLoader = async () => (await import('../../commands/feedback.js')).registerFeedbackCommand;
 export const loadCommands: ModuleLoader = async () => (await import('../../commands/commands.js')).registerCommandsCommands;
 export const loadHooks: ModuleLoader = async () => (await import('../../commands/hooks.js')).registerHooksCommands;
@@ -61,7 +60,6 @@ export const loadTrash: ModuleLoader = async () => (await import('../../commands
 export const loadRestore: ModuleLoader = async () => (await import('../../commands/trash.js')).registerRestoreCommand;
 export const loadDoctor: ModuleLoader = async () => (await import('../../commands/doctor.js')).registerDoctorCommand;
 export const loadApply: ModuleLoader = async () => (await import('../../commands/apply.js')).registerApplyCommand;
-export const loadCheck: ModuleLoader = async () => (await import('../../commands/check.js')).registerCheckCommand;
 export const loadStatus: ModuleLoader = async () => (await import('../../commands/status.js')).registerStatusCommand;
 export const loadProfiles: ModuleLoader = async () => (await import('../../commands/profiles.js')).registerProfilesCommands;
 export const loadHarness: ModuleLoader = async () => (await import('../../commands/harness.js')).registerHarnessCommands;
@@ -138,7 +136,6 @@ export const LAZY_COMMAND_NAMES: ReadonlySet<string> = new Set(['sessions', 'tea
 export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   view: [loadView],
   inspect: [loadInspect],
-  resources: [loadResources],
   feedback: [loadFeedback],
   commands: [loadCommands],
   hooks: [loadHooks],
@@ -175,7 +172,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   restore: [loadRestore],
   doctor: [loadDoctor],
   apply: [loadApply],
-  check: [loadCheck],
   status: [loadStatus],
   profile: [loadProfiles],
   profiles: [loadProfiles],

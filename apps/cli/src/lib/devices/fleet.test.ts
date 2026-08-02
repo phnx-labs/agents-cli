@@ -81,7 +81,7 @@ describe('remoteFleetTargets (fleet health/drift gate targeting)', () => {
     const targets = remoteFleetTargets(planFleetTargets(reg), 'zion');
     const byName = Object.fromEntries(targets.map((t) => [t.device.name, t]));
     // A registered cockpit must NOT reach the fan-out — otherwise the CI gate
-    // (check --devices / fleet status --strict) fails on every run for its skip.
+    // (doctor --check --devices / fleet status --strict) fails on every run for its skip.
     expect(byName.cockpit).toBeUndefined();
     expect(byName.zion).toBeUndefined(); // self is probed in-process, not fanned out
     expect(byName.worker.skip).toBeUndefined(); // a real probe target

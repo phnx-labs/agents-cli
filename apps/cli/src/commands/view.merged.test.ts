@@ -43,7 +43,7 @@ function run(home: string, cwd: string, args: string[]): { stdout: string; statu
   return { stdout: r.stdout ?? '', status: r.status };
 }
 
-describe('resources command', () => {
+describe('agents view --merged — merged resource surface', () => {
   it('prints the merged resource union with the winning layer for duplicates', () => {
     const home = makeHome();
     const project = makeProject();
@@ -55,7 +55,7 @@ describe('resources command', () => {
     fs.writeFileSync(path.join(project, '.agents', 'skills', 'shared.md'), 'project');
     fs.writeFileSync(path.join(home, '.agents', '.system', 'skills', 'system-only.md'), 'system');
 
-    const { stdout, status } = run(home, project, ['resources', '--merged']);
+    const { stdout, status } = run(home, project, ['view', '--merged']);
 
     expect(status).toBe(0);
     expect(stdout).toContain('Resources (2 merged)');

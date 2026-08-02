@@ -1,12 +1,18 @@
 /**
- * `agents resources` — show the merged DotAgents resource surface.
+ * The merged, first-wins DotAgents resource surface — every resource kind, one
+ * table, showing the winning layer per row.
+ *
+ * Ported verbatim from the former `agents resources` command, now surfaced as
+ * `agents view --merged`. `agents view agent@version` shows per-version
+ * resources; this shows the cross-layer merge across project → user → extras →
+ * system. Kept as a shared lib (not inlined into `view.ts`) so `inspect` can
+ * reuse it later.
  */
 
 import * as path from 'path';
-import type { Command } from 'commander';
 import chalk from 'chalk';
-import { listResources, type ResolvedResource, type ResourceKind } from '../lib/resources.js';
-import { terminalWidth, truncateToWidth, stringWidth } from '../lib/session/width.js';
+import { listResources, type ResolvedResource, type ResourceKind } from './resources.js';
+import { terminalWidth, truncateToWidth, stringWidth } from './session/width.js';
 
 const DRILLABLE_KINDS = [
   'skills',
@@ -37,27 +43,7 @@ interface ResourceGroup {
   rows: ResolvedResource[];
 }
 
-interface ResourcesOptions {
-  merged?: boolean;
-}
-
-export function registerResourcesCommand(program: Command): void {
-  program
-    .command('resources')
-    .description('Show the merged DotAgents resources resolved across project, user, system, and extras')
-    .option('--merged', 'Show the merged first-wins resource surface (default)')
-    .addHelpText('after', `
-Examples:
-  agents resources
-  agents resources --merged
-`)
-    .action((options: ResourcesOptions) => {
-      void options;
-      renderMergedResources();
-    });
-}
-
-function renderMergedResources(): void {
+export function renderMergedResources(): void {
   const groups: ResourceGroup[] = DRILLABLE_KINDS.map((kind) => ({
     kind,
     rows: listResources(kind as ResourceKind),

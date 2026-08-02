@@ -4,6 +4,30 @@ Using agents-cli as a programmatic observability layer for agent fleets.
 
 `agents feed` and `agents mailboxes` share one fleet-comms visual language (masthead + glyphs from `comms-render`) so the two operator surfaces read as one product.
 
+## Command roles at a glance
+
+Five surfaces read the fleet's activity; each has one job. Reach for the one whose
+*consumer* and *axis* match your question, not whichever you remember first.
+
+| Command | Role (one line) | Source | Consumer |
+|---|---|---|---|
+| **`events`** | **Raw unified event stream = the audit log.** Everything: secrets access, command invocations, version/skill/mcp/team ops, browser events, plus agent milestones. `--follow` to tail, `--audit` for ops-only. | `events.jsonl` + per-session `activity/*.jsonl`, merged by `readUnifiedEvents` | Audit, debugging, monitoring (human + machine) |
+| **`feed`** | **Consolidated cross-agent surface.** Open blocks (decisions agents are waiting on) + `feed post` status updates — "what needs you / what are agents saying." | `.history/feed/*` + active sessions | Humans (operator inbox) + agents (progress) |
+| **`activity`** | **Human milestone timeline.** Recent plans / PRs / worktrees / sub-agents, newest-first — a friendly lens on the milestone tier of the event stream. | `activity/*.jsonl` | Human at the terminal |
+| **`output`** | **Productivity accounting.** Token burn vs shipped output (PRs, commits) across agents — the "was it worth it" axis. (`agents cost` is the pure $-and-duration sibling.) | `sessions.db` + git/gh | Human + `--json` |
+| **`sessions`** | **Live agent roster + transcripts.** Which agents are running right now and their state; browse/read past conversation transcripts. A live process probe + transcript index, not an event log. | live pid/transcript probe + `sessions.db` | Human + `--json` |
+
+The two write-stores behind these: `~/.agents/events.jsonl` (operational audit) and
+per-session `~/.agents/.history/activity/<id>.jsonl` (agent milestones). They are
+distinct on disk and merged only at read time by
+`event-stream.ts::readUnifiedEvents` — so `events` is the union, while `activity`
+is the milestone tier on its own.
+
+For the inspection/health cluster, `agents doctor` is the canonical detector of
+which resources are configured, synced, or drifted; `agents doctor --check` is its
+scriptable CI gate (exit non-zero on drift). See
+[§Fleet health & cross-device divergence](#fleet-health--cross-device-divergence-agents-doctor).
+
 ## Audit Event Log (`agents events`)
 
 Separate from the fleet-state sources below (which answer "what's running *now*"),
@@ -237,6 +261,24 @@ Three diagnostics with distinct scopes (RUSH-2027):
   version home and its resolved sources (staleness, orphans).
 - `agents doctor` — the **umbrella**: local diagnostics (CLI presence, sign-in,
   per-version sync, orphans) **and**, with `--devices`, cross-device divergence.
+
+`agents doctor` is the human report; `agents doctor --check` is the machine gate —
+same drift engine (`computeDrift`), different output. `--check` exits non-zero when
+any installed version is stale or never-synced (orphans are informational, never a
+failure), zero when clean; add `--json` for a scriptable payload, `--quiet` for just
+the verdict line, and `--devices` to gate the whole fleet:
+
+```bash
+agents doctor --check            # exit 1 on drift, 0 if clean
+agents doctor --check --quiet    # just the one-line verdict
+agents doctor --check --json     # machine-readable, for CI
+agents doctor --check --devices  # gate every registered device
+```
+
+> The former standalone `agents check` (the CI gate) and `agents resources` (the
+> merged cross-layer resource table) are gone: `check` is now `doctor --check`, and
+> the merged table is now [`agents view --merged`](00-concepts.md). One command per
+> responsibility, no overlap.
 
 ### Triaged health block (local modes)
 

@@ -78,7 +78,7 @@ export function planFleetTargets(reg: DeviceRegistry): FleetTarget[] {
 
 /**
  * Remote fan-out targets for the fleet health/drift gates (`fleet status`,
- * `check --devices`): every planned device except this machine and control-only
+ * `doctor --check --devices`): every planned device except this machine and control-only
  * cockpits. A control device never runs agents (mirrors doctor's fan-out, which
  * drops it via `isControlDevice`), so counting it as unreachable/drift would make
  * the CI gate fail on every run for a fleet that merely has a cockpit registered.

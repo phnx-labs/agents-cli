@@ -6,14 +6,15 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 
 /**
- * Real-filesystem, real-CLI tests for `agents check` — the scriptable CI drift
- * gate. No mocks: we build a temp HOME with a real installed version + real
- * source resources, drive the actual `agents sync` to snapshot the manifest,
- * then run `agents check` in a subprocess and assert the EXIT CODE.
+ * Real-filesystem, real-CLI tests for `agents doctor --check` — the scriptable
+ * CI drift gate (folded in from the former `agents check`). No mocks: we build a
+ * temp HOME with a real installed version + real source resources, drive the
+ * actual `agents sync` to snapshot the manifest, then run `agents doctor --check`
+ * in a subprocess and assert the EXIT CODE.
  *
  * The contract (issue #329): a clean, in-sync install exits 0; drift (a source
- * changed since last sync) exits non-zero. This is the gap `agents doctor` left
- * — it returned 0 even under drift, so CI could never gate on it.
+ * changed since last sync) exits non-zero. This is the gap plain `agents doctor`
+ * left — it returned 0 even under drift, so CI could never gate on it.
  */
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -71,7 +72,7 @@ function syncSnapshot(): void {
 }
 
 function runCheck(...args: string[]): { status: number | null; stdout: string; stderr: string } {
-  const r = spawnSync('bun', [INDEX, 'check', '--cwd', projectDir, ...args], {
+  const r = spawnSync('bun', [INDEX, 'doctor', '--check', '--cwd', projectDir, ...args], {
     cwd: REPO_ROOT,
     // AGENTS_NO_AUTOPULL keeps the detached background fetch from racing the
     // git-repo fixtures these tests build under HOME.
@@ -85,7 +86,7 @@ function git(dir: string, ...args: string[]): void {
   execFileSync('git', ['-C', dir, ...args], { stdio: 'ignore' });
 }
 
-describe('agents check — CI drift gate exit code', () => {
+describe('agents doctor --check — CI drift gate exit code', () => {
   it('exits 0 when the install is clean (synced, sources unchanged)', () => {
     seedHome();
     syncSnapshot();
@@ -131,7 +132,7 @@ describe('agents check — CI drift gate exit code', () => {
   });
 
   it('exits non-zero when a hook is present but unwired, with the version otherwise fresh', () => {
-    // The yosemite-s1 blind spot: `agents check` went through computeDrift, which
+    // The yosemite-s1 blind spot: the drift gate went through computeDrift, which
     // only knew manifest staleness — a present-but-unwired hook read as fresh and
     // the gate exited 0. This proves it now fails, and fails ONLY on the unwired
     // signal (stale/never-synced/sourceBehind all zero).

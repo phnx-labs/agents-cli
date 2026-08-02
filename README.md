@@ -459,7 +459,7 @@ agents fleet status                     # online/offline rollup + NEEDS ATTENTIO
 agents fleet status --verbose           # full per-device auth/CLI/sync/version grid
 agents fleet status --live              # force a live resource probe (alias of --refresh)
 agents fleet status --json --strict     # scriptable fleet health gate
-agents check --devices                  # CI drift gate across every registered device
+agents doctor --check --devices         # CI drift gate across every registered device
 
 # Your Tailscale fleet, auto-discovered
 agents devices sync                     # ingest `tailscale status`
@@ -986,7 +986,7 @@ Two repos with the same shape, different roles:
 
 **Version pinning:** `agents.yaml` at project root pins which agent version to use (like `.nvmrc` for Node).
 
-**Resource resolution:** When syncing resources (commands, skills, rules, hooks, MCP, permissions), the order is **project > user > system**. A `.agents/` directory at project root wins, then `~/.agents/`, then `~/.agents-system/`. Same-named resources higher in the chain override lower ones; everything else unions in. Run `agents resources --merged` to see the effective skills, commands, MCP servers, hooks, rules, plugins, workflows, and subagents, with each row tagged by its winning layer.
+**Resource resolution:** When syncing resources (commands, skills, rules, hooks, MCP, permissions), the order is **project > user > system**. A `.agents/` directory at project root wins, then `~/.agents/`, then `~/.agents-system/`. Same-named resources higher in the chain override lower ones; everything else unions in. Run `agents view --merged` to see the effective skills, commands, MCP servers, hooks, rules, plugins, workflows, and subagents, with each row tagged by its winning layer.
 
 See [docs/00-concepts.md](apps/cli/docs/00-concepts.md) for the full mental model: DotAgents repos, resource kinds, and how resolution works end-to-end.
 

@@ -27,7 +27,8 @@ import { explainIsolationBoundary } from '../lib/isolation-boundary-report.js';
 import { addHostOption } from '../lib/hosts/option.js';
 import { buildRemoteAgentsInvocation } from '../lib/hosts/remote-cmd.js';
 import { loadDevices, isControlDevice } from '../lib/devices/registry.js';
-import { fanOutDevices } from '../lib/devices/fleet.js';
+import { fanOutDevices, planFleetTargets, remoteFleetTargets, type FanOutDeviceTarget } from '../lib/devices/fleet.js';
+import { fleetDialTarget } from '../lib/devices/connect.js';
 import { compareFleetInventories, type FleetInventory, type FleetDivergenceReport } from '../lib/devices/fleet-divergence.js';
 import { collectLocalFleetInventory } from '../lib/devices/fleet-inventory.js';
 import { resolveHost } from '../lib/hosts/registry.js';
@@ -56,7 +57,7 @@ import {
 } from '../lib/doctor-diff.js';
 import { checkVersionHookWiring, registerHooksToSettings, type HookWiringReport } from '../lib/hooks.js';
 import { isVersionIsolated } from '../lib/versions.js';
-import { checkSyncStatus, countOrphans, computeSourceBehind, type SyncStatusRow, type OrphanRow } from '../lib/drift.js';
+import { computeDrift, checkSyncStatus, countOrphans, computeSourceBehind, type SyncStatusRow, type OrphanRow } from '../lib/drift.js';
 import { readAuthHealthCache, summarizeHostAuth } from '../lib/auth-health.js';
 import { unifiedDiff, colorizeUnifiedDiff } from '../lib/diff-text.js';
 import { listCliStatus } from '../lib/cli-resources.js';
@@ -84,6 +85,8 @@ interface DoctorOptions {
   device?: string;
   devices?: boolean;
   hosts?: boolean;
+  check?: boolean;
+  quiet?: boolean;
 }
 
 // ─── overview mode (no target) ────────────────────────────────────────────────
@@ -1263,6 +1266,195 @@ async function runFix(parsed: ResolvedTarget | null, opts: DoctorOptions): Promi
   renderHookRewireText(rewired);
 }
 
+// ─── CI drift gate (doctor --check) ──────────────────────────────────────────
+//
+// The scriptable exit-code gate, folded in from the former `agents check`. Runs
+// the SAME drift diagnostic doctor computes (`computeDrift`), but turns it into
+// an exit code: non-zero when any installed version is stale or never-synced,
+// zero when the whole install is fresh. `agents doctor` is the human report;
+// `agents doctor --check` is the machine gate — same engine, different output.
+//
+// Orphans are surfaced informationally but never fail the gate: they are a
+// `prune` concern, not sync drift (mirrors the sync-status engine).
+
+interface DeviceCheckResult {
+  device: string;
+  hasDrift: boolean;
+  stale: number;
+  neverSynced: number;
+  orphanVersions: number;
+  error?: string;
+}
+
+function checkLabel(row: SyncStatusRow): string {
+  return `${AGENT_NAMES[row.agent] || row.agent}@${row.version}`;
+}
+
+function runCheckGate(opts: DoctorOptions, cwd: string): void {
+  const drift = computeDrift(cwd);
+
+  if (opts.json) {
+    console.log(JSON.stringify({
+      hasDrift: drift.hasDrift,
+      stale: drift.staleCount,
+      neverSynced: drift.neverSyncedCount,
+      unwiredHookVersions: drift.unwiredHookVersions,
+      orphanVersions: drift.orphanVersionCount,
+      sourceBehind: drift.sourceBehind,
+      versions: drift.syncRows.map((r) => ({
+        agent: r.agent,
+        version: r.version,
+        status: r.status,
+        isDefault: r.isDefault,
+        unwiredHooks: r.unwiredHooks ?? 0,
+        divergence: r.divergence ?? [],
+      })),
+    }, null, 2));
+    process.exit(drift.hasDrift ? 1 : 0);
+  }
+
+  if (drift.syncRows.length === 0) {
+    // Nothing installed is a clean state, not a failure — CI on a fresh
+    // checkout with no versions should pass, not error.
+    console.log(chalk.gray('check: no installed versions — nothing to verify'));
+    process.exit(0);
+  }
+
+  if (!drift.hasDrift) {
+    const orphanNote = drift.orphanVersionCount > 0
+      ? chalk.gray(` (${drift.orphanVersionCount} version(s) carry orphans — run \`agents prune cleanup\`)`)
+      : '';
+    console.log(`${chalk.green('ok')}  ${drift.syncRows.length} version(s) in sync${orphanNote}`);
+    process.exit(0);
+  }
+
+  // Drift: one-line verdict always, per-version detail unless --quiet.
+  const parts: string[] = [];
+  if (drift.staleCount > 0) parts.push(`${drift.staleCount} stale`);
+  if (drift.neverSyncedCount > 0) parts.push(`${drift.neverSyncedCount} never-synced`);
+  if (drift.unwiredHookVersions > 0) parts.push(`${drift.unwiredHookVersions} with unwired hooks`);
+  if (drift.sourceBehind.length > 0) parts.push(`${drift.sourceBehind.length} source layer(s) behind origin`);
+  console.error(`${chalk.red('drift')}  ${parts.join(', ')}`);
+
+  if (!opts.quiet) {
+    for (const row of drift.syncRows) {
+      const unwired = (row.unwiredHooks ?? 0) > 0;
+      if (row.status === 'fresh' && !unwired) continue;
+      const tag = row.status === 'stale' ? chalk.yellow('stale')
+        : row.status === 'never-synced' ? chalk.gray('cold ')
+        : chalk.red('unwired'); // fresh but hooks not wired into settings.json
+      console.error(`  ${tag}  ${checkLabel(row)}`);
+      for (const line of row.divergence ?? []) {
+        console.error(chalk.gray(`           ${line}`));
+      }
+    }
+    for (const b of drift.sourceBehind) {
+      console.error(`  ${chalk.red('behind')} source ${b.label}  ${chalk.gray(`${b.behind} commit${b.behind === 1 ? '' : 's'} behind ${b.branch}`)}`);
+    }
+    const hints: string[] = [];
+    if (drift.staleCount > 0 || drift.neverSyncedCount > 0 || drift.unwiredHookVersions > 0) {
+      hints.push('`agents doctor --fix` (or `agents doctor <agent>@<version> --fix`)');
+    }
+    if (drift.sourceBehind.length > 0) hints.push('`agents repo pull <alias>` for a source layer behind origin');
+    console.error(chalk.gray(`\nReconcile with ${hints.join('; ')}.`));
+  }
+
+  process.exit(1);
+}
+
+function checkPayload(device: string, drift: ReturnType<typeof computeDrift>): DeviceCheckResult {
+  return {
+    device,
+    hasDrift: drift.hasDrift,
+    stale: drift.staleCount,
+    neverSynced: drift.neverSyncedCount,
+    orphanVersions: drift.orphanVersionCount,
+  };
+}
+
+interface CheckFanOutTarget extends FanOutDeviceTarget {
+  platform?: string;
+  /** Registry Tailscale address to dial, not the bare name — see {@link fleetDialTarget}. */
+  dialTarget: string;
+}
+
+async function probeDeviceCheck(target: CheckFanOutTarget): Promise<DeviceCheckResult> {
+  const isWin = /^win/i.test((target.platform ?? '').trim());
+  const remoteCmd = buildRemoteAgentsInvocation(
+    ['doctor', '--check', '--json'],
+    undefined,
+    isWin ? 'windows' : undefined,
+    isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' },
+  );
+  const res = await sshExecAsync(target.dialTarget, remoteCmd, { timeoutMs: 30000, multiplex: true });
+  if (res.code !== 0 && !res.stdout.trim()) {
+    throw new Error(res.timedOut ? 'timed out' : (res.stderr.trim() || `exit ${res.code ?? 'unknown'}`));
+  }
+  try {
+    const parsed = JSON.parse(res.stdout) as Omit<DeviceCheckResult, 'device'>;
+    return {
+      device: target.name,
+      hasDrift: Boolean(parsed.hasDrift),
+      stale: parsed.stale ?? 0,
+      neverSynced: parsed.neverSynced ?? 0,
+      orphanVersions: parsed.orphanVersions ?? 0,
+    };
+  } catch (err: any) {
+    throw new Error(`invalid JSON (${err?.message ?? 'parse error'})`);
+  }
+}
+
+async function runDevicesCheck(opts: DoctorOptions, cwd: string): Promise<void> {
+  const registry = await loadDevices();
+  const self = machineId();
+  const planned = planFleetTargets(registry);
+  const local = checkPayload(self, computeDrift(cwd));
+  const remoteTargets: CheckFanOutTarget[] = remoteFleetTargets(planned, self)
+    .map((t) => ({
+      name: t.device.name,
+      platform: t.device.platform,
+      skip: t.skip,
+      dialTarget: fleetDialTarget(t.device),
+    }));
+  const remote = await fanOutDevices(remoteTargets, probeDeviceCheck);
+  const devices: DeviceCheckResult[] = [local];
+  for (const result of remote) {
+    if (result.status === 'ok' && result.value) {
+      devices.push(result.value);
+    } else {
+      devices.push({
+        device: result.name,
+        hasDrift: true,
+        stale: 0,
+        neverSynced: 0,
+        orphanVersions: 0,
+        error: result.error ?? String(result.reason ?? 'skipped'),
+      });
+    }
+  }
+  const hasDrift = devices.some((d) => d.hasDrift || d.error);
+  if (opts.json) {
+    console.log(JSON.stringify({ hasDrift, devices }, null, 2));
+    process.exit(hasDrift ? 1 : 0);
+  }
+  if (!hasDrift) {
+    console.log(chalk.green('ok') + chalk.gray(`  ${devices.length} device(s) in sync`));
+    process.exit(0);
+  }
+  console.error(chalk.red('drift') + chalk.gray(`  ${devices.filter((d) => d.hasDrift || d.error).length} of ${devices.length} device(s)`));
+  if (!opts.quiet) {
+    for (const d of devices) {
+      if (!d.hasDrift && !d.error) continue;
+      const detail = d.error
+        ? d.error
+        : [`${d.stale} stale`, `${d.neverSynced} never-synced`].filter((p) => !p.startsWith('0 ')).join(', ');
+      console.error(`  ${chalk.yellow(d.device.padEnd(18))} ${detail || 'drift'}`);
+    }
+    console.error(chalk.gray('\nReconcile each device with `agents doctor --fix` or `agents repo pull user`.'));
+  }
+  process.exit(1);
+}
+
 // ─── command registration ────────────────────────────────────────────────────
 
 export function registerDoctorCommand(program: Command): void {
@@ -1276,7 +1468,9 @@ export function registerDoctorCommand(program: Command): void {
     .option('--adopt <agent>', "Take over the agent's native launcher that shadows the shim (symlink it to the version-managed shim; reversible with --release)")
     .option('--release <agent>', 'Undo --adopt: restore the native launcher agents-cli previously adopted')
     .option('--devices', 'Check agent readiness AND cross-device harness divergence (missing resources/versions, repo drift) on every registered device (alias --hosts)')
-    .option('--hosts', 'Alias of --devices');
+    .option('--hosts', 'Alias of --devices')
+    .option('--check', 'CI drift gate: exit non-zero when any installed version is out of sync (stale or never-synced), zero when clean. Combine with --devices to gate the whole fleet.')
+    .option('-q, --quiet', 'With --check, suppress per-version lines; print only the one-line verdict');
 
   setHelpSections(doctorCmd, {
     examples: `
@@ -1304,11 +1498,34 @@ export function registerDoctorCommand(program: Command): void {
       # Fleet: agent readiness + cross-device divergence (missing plugins/skills,
       # agent-version gaps, .agents/.system repo drift) vs this machine
       agents doctor --devices
+
+      # CI drift gate: exit 1 if anything drifted (stale/never-synced), 0 if clean
+      agents doctor --check
+      agents doctor --check --quiet          # just the verdict line
+      agents doctor --check --json           # machine-readable, for scripting
+      agents doctor --check --devices        # gate every registered device
+      agents doctor --check || { echo "resources drifted — run 'agents doctor --fix'"; exit 1; }
     `,
   });
 
   doctorCmd.action(async (target: string | undefined, opts: DoctorOptions) => {
       const cwd = opts.cwd ? opts.cwd : process.cwd();
+
+      // CI drift gate. Kept BEFORE the --devices branch so `doctor --check
+      // --devices` routes to the drift gate fan-out (runDevicesCheck), while a
+      // bare `doctor --devices` still routes to the readiness matrix below.
+      if (opts.check) {
+        if (target) {
+          console.error(chalk.red('Cannot combine --check with a target argument.'));
+          process.exit(1);
+        }
+        if (opts.devices || opts.hosts) {
+          await runDevicesCheck(opts, cwd);
+        } else {
+          runCheckGate(opts, cwd);
+        }
+        return;
+      }
 
       if (opts.devices || opts.hosts) {
         if (target) {

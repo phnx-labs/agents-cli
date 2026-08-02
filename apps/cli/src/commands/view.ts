@@ -72,6 +72,7 @@ import {
   removeShim,
 } from '../lib/shims.js';
 import { getAgentResources, listResources } from '../lib/resources.js';
+import { renderMergedResources } from '../lib/merged-resources.js';
 import { resolveVersionFilter, AgentSpecError } from '../lib/agent-spec/index.js';
 import { listCliStatus } from '../lib/cli-resources.js';
 import { isCapable } from '../lib/capabilities.js';
@@ -1784,8 +1785,15 @@ export async function viewAction(
     detailed?: boolean;
     refresh?: boolean;
     live?: boolean;
+    merged?: boolean;
   } & ViewSectionFilter,
 ): Promise<void> {
+  // --merged renders the cross-layer, first-wins resource surface (the former
+  // `agents resources`), independent of the per-version detail view below.
+  if (options?.merged) {
+    renderMergedResources();
+    return;
+  }
   // --live is a shorter-to-type alias of --refresh; both force a live probe.
   const forceRefresh = options?.refresh === true || options?.live === true;
   // --resources / --detailed imply --json (they only shape structured output).
@@ -1917,6 +1925,7 @@ export function registerViewCommand(program: Command): void {
     .option('--hooks', 'Show only hooks in the detail view.')
     .option('--promptcuts', 'Show only promptcuts in the detail view.')
     .option('--cli', 'Show only host CLIs (declared in cli/, installed to PATH).')
+    .option('--merged', 'Show the merged, first-wins resource surface across all layers (project, user, extras, system) in one table with the winning layer per row.')
     .addHelpText('after', `
 Examples:
   # Show all installed agents with versions, accounts, and usage
@@ -1947,6 +1956,9 @@ Examples:
   agents view claude@default --plugins --workflows
   agents view claude --commands    # implicitly the default version
 
+  # Merged, first-wins resource surface across all layers, with the winning layer
+  agents view --merged
+
 When to use:
   - Checking which agents are installed and what their default versions are
   - Seeing which account each version is logged into (useful for multi-account setups)
@@ -1973,6 +1985,7 @@ Output:
         resources?: string | boolean;
         detailed?: boolean;
         refresh?: boolean;
+        merged?: boolean;
       } & ViewSectionFilter,
     ) => viewAction(agentArg, options));
 }

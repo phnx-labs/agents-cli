@@ -126,7 +126,6 @@ import {
   LAZY_COMMAND_NAMES,
   loadView,
   loadInspect,
-  loadResources,
   loadFeedback,
   loadCommands,
   loadHooks,
@@ -156,7 +155,6 @@ import {
   loadRestore,
   loadDoctor,
   loadApply,
-  loadCheck,
   loadStatus,
   loadProfiles,
   loadHarness,
@@ -348,9 +346,8 @@ Agent versions:
   use <agent>@<version>           Set the default version
   prune cleanup [target]          Remove orphan resources and older duplicate version installs
   trash                           Inspect and restore soft-deleted version directories
-  view [agent[@version]]          List versions, or inspect one in detail
+  view [agent[@version]]          List versions, inspect one in detail, or --merged for the cross-layer resource surface
   inspect <target>                Deep details for one agent+version, or a DotAgents repo (user|system|project|alias|path)
-  resources                       Show merged DotAgents resources with their winning layer
 
 Agent configuration (synced across versions):
   rules                           Instructions given to agents (CLAUDE.md, etc.)
@@ -385,8 +382,7 @@ Credentials and profiles:
   secrets                         Keychain-backed env bundles; use 'secrets exec <bundle> -- <cmd>' to inject into a subprocess
 
 Diagnostics:
-  doctor [agent[@version]]        Diagnose CLI availability, sync status, and resource divergence
-  check                           CI drift gate: exit non-zero when resources are out of sync
+  doctor [agent[@version]]        Diagnose CLI availability, sync status, and resource divergence; --check for the CI drift gate
   usage [agent]                   Show rate-limit and quota usage per agent
 
 Config sync:
@@ -917,7 +913,6 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadShare);
   await reg(loadSend);
   await reg(loadInspect);
-  await reg(loadResources);
   await reg(loadFeedback);
   await reg(loadCommands);
   await reg(loadHooks);
@@ -948,7 +943,6 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadRestore);
   await reg(loadDoctor);
   await reg(loadApply);
-  await reg(loadCheck);
   await reg(loadStatus);
   registerExecAliasCommand(program);
   await reg(loadProfiles);
