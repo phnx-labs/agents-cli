@@ -67,9 +67,11 @@ function buildCommandsWriter(agent: AgentId): ResourceWriter<string[]> {
         const metadata = parseCommandMetadata(srcFile);
         if (!commandAppliesTo(agent, version, metadata).ok) continue;
 
+        let installedAsSkill = true;
         if (commandsAsSkills || commandsAlsoAsSkills) {
           const installed = installCommandSkillToVersion(agentDir, cmd, srcFile, skillRoots);
-          if (!installed.success) continue;
+          installedAsSkill = installed.success && !installed.skipped;
+          if (commandsAsSkills && !installedAsSkill) continue;
         }
 
         if (supportsCommands && agent === 'goose') {
@@ -83,7 +85,7 @@ function buildCommandsWriter(agent: AgentId): ResourceWriter<string[]> {
         } else if (supportsCommands) {
           fs.copyFileSync(srcFile, safeJoin(commandsTarget, `${cmd}.md`));
         }
-        synced.push(cmd);
+        if (installedAsSkill) synced.push(cmd);
       }
       return { synced };
     },

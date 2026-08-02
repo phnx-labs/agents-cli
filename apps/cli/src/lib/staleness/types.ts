@@ -52,6 +52,8 @@ export interface SyncManifest {
   v:          typeof MANIFEST_VERSION;
   syncedAt:   string;
   commands:   Record<string, FileEntry>;
+  /** Command names the version writer emitted during the preceding full sync. */
+  writtenCommands?: string[];
   skills:     Record<string, DirEntry>;
   hooks:      Record<string, FileEntry>;
   rules:      RulesEntry;

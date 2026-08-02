@@ -1,5 +1,5 @@
 /**
- * Commands detector — mirrors versions.ts:343-357. Inspects the version home,
+ * Commands detector — mirrors the command dispatch in versions.ts. Inspects the version home,
  * returns command names. Honors the commands-as-skills marker for skills-only
  * agents (Kimi, Codex >= 0.117.0, …), requires both copies for dual-write
  * targets, and scans `{agentDir}/<commandsSubdir>/` for native-only targets.

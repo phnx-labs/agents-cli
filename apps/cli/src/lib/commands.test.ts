@@ -27,6 +27,7 @@ function runCommandsExpression(home: string, expression: string): unknown {
   const child = spawnSync(tsxBin, ['-e', `
     import {
       diffVersionCommands,
+      installCommand,
       installCommandToVersion,
       listCommandsInVersionHome,
       listPluginCommandNames,
@@ -66,10 +67,12 @@ function scaffoldInstalledVersion(home: string, agent: string, version: string):
 }
 
 /** Place a command .md in the system commands dir so listCentralCommands() finds it. */
-function writeSystemCommand(home: string, name: string, content: string): void {
+function writeSystemCommand(home: string, name: string, content: string): string {
   const dir = path.join(home, '.agents', '.system', 'commands');
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, `${name}.md`), content, 'utf-8');
+  const source = path.join(dir, `${name}.md`);
+  fs.writeFileSync(source, content, 'utf-8');
+  return source;
 }
 
 /** Path to the trash commands dir for a given HOME: home/.agents/.trash/commands */
@@ -206,6 +209,41 @@ describe('diffVersionCommands — plugin-bundled commands are source-managed', (
 });
 
 describe('version command management', () => {
+  it('installs an unmanaged Cursor command to both surfaces through the package installation path', () => {
+    const home = makeTempHome();
+    const source = writeSystemCommand(
+      home,
+      'package-command',
+      '---\nname: package-command\ndescription: Package command\n---\n\nPackage command body.',
+    );
+
+    const installed = runCommandsExpression(
+      home,
+      `installCommand(${JSON.stringify(source)}, 'cursor', 'package-command', 'copy')`
+    ) as { error?: string };
+
+    expect(installed.error).toBeUndefined();
+    expect(fs.existsSync(path.join(home, '.cursor', 'commands', 'package-command.md'))).toBe(true);
+    expect(fs.existsSync(path.join(home, '.cursor', 'skills', 'package-command', 'SKILL.md'))).toBe(true);
+  });
+
+  it('installs and removes Cursor commands from both native and generated-skill surfaces', () => {
+    const home = makeTempHome();
+    writeSystemCommand(home, 'recap', 'Summarize this session.');
+
+    const installed = runCommandsExpression(home, "installCommandToVersion('cursor', '2026.07.23-e383d2b', 'recap')") as { success: boolean };
+    const cursorHome = path.join(versionHomePath(home, 'cursor', '2026.07.23-e383d2b'), '.cursor');
+
+    expect(installed.success).toBe(true);
+    expect(fs.existsSync(path.join(cursorHome, 'commands', 'recap.md'))).toBe(true);
+    expect(fs.existsSync(path.join(cursorHome, 'skills', 'recap', 'SKILL.md'))).toBe(true);
+
+    const removed = runCommandsExpression(home, "removeCommandFromVersion('cursor', '2026.07.23-e383d2b', 'recap')") as { success: boolean };
+    expect(removed.success).toBe(true);
+    expect(fs.existsSync(path.join(cursorHome, 'commands', 'recap.md'))).toBe(false);
+    expect(fs.existsSync(path.join(cursorHome, 'skills', 'recap', 'SKILL.md'))).toBe(false);
+  });
+
   it('installs, lists, diffs, and removes generated command skills for Codex 0.117.0+', () => {
     const home = makeTempHome();
     // codex 0.117.0 uses shouldInstallCommandAsSkill (skills path, not prompts file).

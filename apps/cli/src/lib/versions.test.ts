@@ -395,10 +395,15 @@ describe('version resource sync path handling', () => {
 
   it('preserves user-authored Cursor IDE commands and syncs managed commands to both Cursor surfaces', () => {
     const home = makeTempHome();
+    const projectRoot = path.join(home, 'repo');
+    const projectCommand = path.join(projectRoot, '.agents', 'commands', 'projonly.md');
     const sourceCommand = path.join(home, '.agents', '.system', 'commands', 'recap.md');
     const cursorHome = path.join(home, '.agents', '.history', 'versions', 'cursor', '2026.07.23-e383d2b', 'home', '.cursor');
     const sentinel = path.join(cursorHome, 'commands', 'my-ide-command.md');
+    const projectNameCollision = path.join(cursorHome, 'commands', 'projonly.md');
 
+    fs.mkdirSync(path.dirname(projectCommand), { recursive: true });
+    fs.writeFileSync(projectCommand, 'project-only command', 'utf-8');
     fs.mkdirSync(path.dirname(sourceCommand), { recursive: true });
     fs.writeFileSync(
       sourceCommand,
@@ -407,14 +412,21 @@ describe('version resource sync path handling', () => {
     );
     fs.mkdirSync(path.dirname(sentinel), { recursive: true });
     fs.writeFileSync(sentinel, 'user-authored IDE command', 'utf-8');
+    fs.writeFileSync(projectNameCollision, 'user-authored command matching a project command', 'utf-8');
 
-    const result = runVersionSync(
+    const first = runVersionSync(
       home,
-      "syncResourcesToVersion('cursor', '2026.07.23-e383d2b', undefined, { cwd: home, force: true })"
+      `syncResourcesToVersion('cursor', '2026.07.23-e383d2b', undefined, { cwd: ${JSON.stringify(projectRoot)}, force: true })`
+    ) as { commands: boolean };
+    const second = runVersionSync(
+      home,
+      `syncResourcesToVersion('cursor', '2026.07.23-e383d2b', undefined, { cwd: ${JSON.stringify(projectRoot)}, force: true })`
     ) as { commands: boolean };
 
-    expect(result.commands).toBe(true);
+    expect(first.commands).toBe(true);
+    expect(second.commands).toBe(true);
     expect(fs.readFileSync(sentinel, 'utf-8')).toBe('user-authored IDE command');
+    expect(fs.readFileSync(projectNameCollision, 'utf-8')).toBe('user-authored command matching a project command');
     expect(fs.readFileSync(path.join(cursorHome, 'commands', 'recap.md'), 'utf-8')).toContain('Recap the conversation so far.');
     expect(fs.readFileSync(path.join(cursorHome, 'skills', 'recap', 'SKILL.md'), 'utf-8')).toContain('agents_command: "recap"');
   });

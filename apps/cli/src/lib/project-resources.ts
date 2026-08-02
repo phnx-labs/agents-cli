@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { AGENTS, agentConfigDirName, isAgentHardDeprecated } from './agents.js';
 import { supports } from './capabilities.js';
-import { buildCommandSkillContent, commandSkillName, readSkillSourceCommandMarker, shouldInstallCommandAsSkill } from './command-skills.js';
+import { buildCommandSkillContent, commandSkillName, readSkillSourceCommandMarker, shouldAlsoInstallCommandAsSkill, shouldInstallCommandAsSkill } from './command-skills.js';
 import { commandAppliesTo, parseCommandMetadata } from './commands.js';
 import { markdownToToml } from './convert.js';
 import { safeJoin } from './paths.js';
@@ -168,6 +168,7 @@ function syncProjectCommands(
 ): void {
   const cfg = AGENTS[agent];
   const commandsAsSkills = shouldInstallCommandAsSkill(agent, version);
+  const commandsAlsoAsSkills = shouldAlsoInstallCommandAsSkill(agent, version);
   const supportsCommands = supports(agent, 'commands', version).ok;
   if (!commandsAsSkills && !supportsCommands) return;
 
@@ -179,20 +180,27 @@ function syncProjectCommands(
     const metadata = parseCommandMetadata(srcFile);
     if (!commandAppliesTo(agent, version, metadata).ok) continue;
 
-    if (commandsAsSkills) {
+    const written: string[] = [];
+    if (commandsAsSkills || commandsAlsoAsSkills) {
       const sourceMarker = readSkillSourceCommandMarker(name, [path.join(projectAgentsDir, 'skills')]);
-      if (pathExists(path.join(projectAgentsDir, 'skills', name)) && sourceMarker !== name) continue;
-      const skillName = commandSkillName(name);
-      const rel = path.join('skills', skillName);
-      const destDir = path.join(agentRoot, rel);
-      if (pathExists(destDir)) {
-        skip(destDir, projectRoot, result);
+      if (pathExists(path.join(projectAgentsDir, 'skills', name)) && sourceMarker !== name) {
+        if (commandsAsSkills) continue;
+      } else {
+        const skillName = commandSkillName(name);
+        const rel = path.join('skills', skillName);
+        const destDir = path.join(agentRoot, rel);
+        if (pathExists(destDir)) {
+          skip(destDir, projectRoot, result);
+        } else {
+          fs.mkdirSync(destDir, { recursive: true });
+          fs.writeFileSync(path.join(destDir, 'SKILL.md'), buildCommandSkillContent(name, srcFile), 'utf-8');
+          written.push(rel);
+        }
+      }
+      if (commandsAsSkills) {
+        if (written.length > 0) record('commands', name, written, result, manifestPaths);
         continue;
       }
-      fs.mkdirSync(destDir, { recursive: true });
-      fs.writeFileSync(path.join(destDir, 'SKILL.md'), buildCommandSkillContent(name, srcFile), 'utf-8');
-      record('commands', name, [rel], result, manifestPaths);
-      continue;
     }
 
     const ext = cfg.format === 'toml' ? '.toml' : '.md';
@@ -200,15 +208,16 @@ function syncProjectCommands(
     const destFile = path.join(agentRoot, rel);
     if (pathExists(destFile)) {
       skip(destFile, projectRoot, result);
-      continue;
-    }
-    fs.mkdirSync(path.dirname(destFile), { recursive: true });
-    if (cfg.format === 'toml') {
-      fs.writeFileSync(destFile, markdownToToml(name, fs.readFileSync(srcFile, 'utf-8')), 'utf-8');
     } else {
-      fs.copyFileSync(srcFile, destFile);
+      fs.mkdirSync(path.dirname(destFile), { recursive: true });
+      if (cfg.format === 'toml') {
+        fs.writeFileSync(destFile, markdownToToml(name, fs.readFileSync(srcFile, 'utf-8')), 'utf-8');
+      } else {
+        fs.copyFileSync(srcFile, destFile);
+      }
+      written.push(rel);
     }
-    record('commands', name, [rel], result, manifestPaths);
+    if (written.length > 0) record('commands', name, written, result, manifestPaths);
   }
 }
 

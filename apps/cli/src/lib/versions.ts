@@ -2783,9 +2783,11 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   const commandsAsSkills = shouldInstallCommandAsSkill(agent, version);
   const commandsAlsoAsSkills = shouldAlsoInstallCommandAsSkill(agent, version);
   const commandsInstallAsSkills = commandsAsSkills || commandsAlsoAsSkills;
+  let writtenCommands: string[] = [];
 
   if (commandsToSync.length > 0 && commandsWriter) {
     const r = commandsWriter.write({ version, versionHome, selection: commandsToSync, cwd });
+    writtenCommands = r.synced;
     result.commands = r.synced.length > 0;
   }
 
@@ -2801,11 +2803,11 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     if (fs.existsSync(commandsTargetSweep)) {
       const ext = agentConfig.format === 'toml' ? '.toml' : '.md';
       const trustedCommands = new Set(commandsToSync);
-      // A dual-write target's native directory also belongs to another
-      // product surface (Cursor IDE). Only names captured by our prior sync
-      // manifest are managed there; every other file is user-owned.
+      // A dual-write target's native directory also belongs to another product
+      // surface (Cursor IDE). Delete only names the command writer recorded as
+      // successfully emitted during the preceding full sync.
       const previouslyManagedCommands = commandsAlsoAsSkills
-        ? new Set(Object.keys(loadManifest(agent, version)?.commands ?? {}))
+        ? new Set(loadManifest(agent, version)?.writtenCommands ?? [])
         : null;
       for (const entry of fs.readdirSync(commandsTargetSweep, { withFileTypes: true })) {
         if (!entry.isFile() || entry.name.startsWith('.')) continue;
@@ -3098,7 +3100,9 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   // one-off override, so the resulting state matches what the manifest
   // records as the synced set.
   if (!userPassedSelection) {
-    saveManifest(agent, version, buildSyncManifest(agent, version, cwd));
+    const manifest = buildSyncManifest(agent, version, cwd);
+    manifest.writtenCommands = writtenCommands;
+    saveManifest(agent, version, manifest);
   }
 
   return result;

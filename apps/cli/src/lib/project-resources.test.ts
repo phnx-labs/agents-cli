@@ -20,6 +20,20 @@ afterEach(() => {
 });
 
 describe('syncProjectResourcesToAgent', () => {
+  it('syncs Cursor project commands to both native and generated-skill surfaces', () => {
+    const project = makeTempProject();
+    const projectAgentsDir = path.join(project, '.agents');
+    const command = path.join(projectAgentsDir, 'commands', 'ping.md');
+    fs.mkdirSync(path.dirname(command), { recursive: true });
+    fs.writeFileSync(command, 'Ping from the project.', 'utf-8');
+
+    const result = syncProjectResourcesToAgent('cursor', '2026.07.23-e383d2b', projectAgentsDir);
+
+    expect(result.synced).toEqual(['commands/ping']);
+    expect(fs.readFileSync(path.join(project, '.cursor', 'commands', 'ping.md'), 'utf-8')).toBe('Ping from the project.');
+    expect(fs.readFileSync(path.join(project, '.cursor', 'skills', 'ping', 'SKILL.md'), 'utf-8')).toContain('agents_command: "ping"');
+  });
+
   it('skips hard-deprecated gemini when syncing project resources', () => {
     const project = makeTempProject();
     const projectAgentsDir = path.join(project, '.agents');

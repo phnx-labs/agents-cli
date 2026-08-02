@@ -22,6 +22,7 @@ import {
   installCommandSkillToVersion,
   listCommandSkillsInVersion,
   removeCommandSkillFromVersion,
+  shouldAlsoInstallCommandAsSkill,
   shouldInstallCommandAsSkill,
 } from './command-skills.js';
 import {
@@ -312,6 +313,20 @@ export function installCommand(
   ensureCommandsDir(agentId);
 
   const home = getEffectiveHome(agentId);
+  const installVersion = pinnedVersion ?? listInstalledVersions(agentId)[0] ?? '';
+  const alsoInstallAsSkill = shouldAlsoInstallCommandAsSkill(agentId, installVersion);
+
+  if (alsoInstallAsSkill) {
+    const installed = installCommandSkillToVersion(
+      path.join(home, agentConfigDirName(agentId)),
+      commandName,
+      sourcePath,
+      [getSkillsDir(), ...getEnabledExtraRepos().map((repo) => path.join(repo.dir, 'skills'))],
+    );
+    if (!installed.success) {
+      return { path: '', method: 'copy', error: installed.error, warnings: validation.warnings };
+    }
+  }
 
   // Goose: a slash command is a recipe YAML registered in config.yaml, not a
   // native command file under commandsSubdir.
@@ -541,6 +556,16 @@ export function installCommandToVersion(
     );
   }
 
+  if (shouldAlsoInstallCommandAsSkill(agent, version)) {
+    const installed = installCommandSkillToVersion(
+      agentDir,
+      commandName,
+      sourcePath,
+      [getSkillsDir(), ...getEnabledExtraRepos().map((repo) => path.join(repo.dir, 'skills'))],
+    );
+    if (!installed.success) return installed;
+  }
+
   // Goose: a slash command is a recipe YAML registered in config.yaml, not a
   // native command file. Write the recipe + slash_commands entry.
   if (agent === 'goose') {
@@ -586,6 +611,10 @@ export function removeCommandFromVersion(
   const agentDir = path.join(versionHome, agentConfigDirName(agent));
   if (shouldInstallCommandAsSkill(agent, version)) {
     return removeCommandSkillFromVersion(agentDir, commandName);
+  }
+  if (shouldAlsoInstallCommandAsSkill(agent, version)) {
+    const removed = removeCommandSkillFromVersion(agentDir, commandName);
+    if (!removed.success) return removed;
   }
   if (agent === 'goose') {
     const trashDir = path.join(getTrashCommandsDir(), agent, version, commandName);
