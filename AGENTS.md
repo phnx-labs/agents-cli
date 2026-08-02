@@ -91,7 +91,7 @@ them (see [§Code review conventions](#code-review-conventions-the-reviewer-must
 
 - **Nest by relatedness, not dogma.** Put a command under the group that owns its noun;
   a free-standing top-level command is right when nothing owns the concept. Navigate by
-  noun then action — `agents sessions summary <id>`, not `agents summary --session <id>`.
+  noun then action — `agents sessions resume <id>`, not `agents resume --session <id>`.
   Flags refine an action, they don't stand in for the group. Don't force a command under
   the wrong parent just to deepen the tree, and don't flatten a verb that collides with an
   owned noun.
@@ -104,11 +104,12 @@ them (see [§Code review conventions](#code-review-conventions-the-reviewer-must
   not share an identical API — the backends differ (CDP vs Accessibility/UIA) — but they
   share a shape so an agent learns one mental model: pick a target/session, act, observe,
   clean up. When you add an action to one, reuse the analogous verb on the other.
-- **Help teaches agents workflows, not man-page flag dumps.** A non-trivial command's
-  `--help` leads with the ordered happy path — the typical sequence of commands and the
-  next one to run — before the flag list, via `setHelpSections` / `lib/help.ts`. An agent
-  reading help mid-task needs a three-line playbook, not 40 alphabetized options. Don't
-  leave a non-trivial tool on commander's default help.
+- **Help teaches agents workflows, not man-page flag dumps.** A non-trivial command sets
+  an `examples` block (and `notes` for prereqs and follow-ups) via `setHelpSections`
+  ([`apps/cli/src/lib/help.ts`](apps/cli/src/lib/help.ts)), so `--help` renders an ordered
+  happy-path sequence before the flag list. An agent reading help mid-task needs a
+  three-line playbook, not 40 alphabetized options. Don't leave a non-trivial tool on
+  commander's default help.
 
 ## Entry points — always build and release through the scripts
 
