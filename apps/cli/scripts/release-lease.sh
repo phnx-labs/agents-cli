@@ -15,23 +15,35 @@
 #
 # Usage:
 #   release-lease.sh claim <version> [--ttl-min N]   # 0 = acquired, 1 = held by someone else
+#   release-lease.sh renew                            # refresh our lease's timestamp
+#   release-lease.sh verify                           # 0 = we still hold it, 1 = we do NOT
 #   release-lease.sh release                          # drop the lease we hold
 #   release-lease.sh status                           # print the current holder, if any
 #
 # Env:
 #   RELEASE_LEASE_REF   override the ref (tests point this at a scratch ref)
-#   RELEASE_LEASE_TTL   default TTL in minutes before a lease is reclaimable (45)
+#   RELEASE_LEASE_TTL   minutes before an unrenewed lease is reclaimable (30)
 #
 # A lease older than the TTL is reclaimable: a release that dies without running
 # its trap (SIGKILL, a severed ssh, a rebooted box) must not wedge the pipeline
 # forever. Reclaiming is itself a compare-and-swap (--force-with-lease pinned to
 # the exact stale sha), so two agents reclaiming at once still yield one winner,
 # and the stale holder is always logged rather than silently overwritten.
+#
+# The TTL must NOT be read as "how long a release takes" -- it is "how long since
+# the holder last proved it was alive". A real release routinely outlives any
+# sane TTL: the CI matrix alone has run 57 minutes, and release 1.20.77 took 186
+# minutes wall clock. So a live release RENEWS (release.sh runs a renewer in the
+# background for the whole run), and every irreversible step -- merge, tag,
+# publish -- calls `verify` first and refuses to proceed if the lease is no
+# longer ours. Without both, a long-but-healthy release would have its lease
+# reclaimed mid-flight and two releasers would run at once, which is the exact
+# failure this script exists to prevent.
 
 set -euo pipefail
 
 LEASE_REF="${RELEASE_LEASE_REF:-refs/release-lock/held}"
-DEFAULT_TTL_MIN="${RELEASE_LEASE_TTL:-45}"
+DEFAULT_TTL_MIN="${RELEASE_LEASE_TTL:-30}"
 
 red()   { printf '\033[31m%s\033[0m\n' "$*" >&2; }
 green() { printf '\033[32m%s\033[0m\n' "$*"; }
@@ -169,6 +181,50 @@ cmd_claim() {
   return 1
 }
 
+cmd_renew() {
+  local mine held sha
+  mine="$(read_token)"
+  [[ -n "$mine" ]] || { red "no release lease claimed from this checkout"; return 1; }
+
+  held="$(remote_lease_sha)"
+  if [[ "$held" != "$mine" ]]; then
+    # Reclaimed or dropped while we were working. Fail loudly: the caller must
+    # stop before its next irreversible step, not carry on believing it is alone.
+    red "release lease is no longer ours -- another releaser holds it"
+    [[ -n "$held" ]] && { fetch_lease || true; gray "  now held by: $(describe_lease "$held")"; }
+    return 1
+  fi
+
+  fetch_lease || true
+  sha="$(make_lease_commit "$(lease_field "$held" version)")"
+  if git push --quiet --force-with-lease="$LEASE_REF:$held" origin "$sha:$LEASE_REF" 2>/dev/null; then
+    write_token "$sha"
+    gray "release lease renewed"
+    return 0
+  fi
+  red "could not renew the release lease (it was reclaimed mid-renew)"
+  return 1
+}
+
+# Fail CLOSED: any error -- no token, no ref, an unreachable origin -- is "we do
+# not demonstrably hold it", never "probably fine". A verify that fails open is
+# worse than no verify, because the caller would proceed into merge/tag/publish
+# believing it had been checked.
+cmd_verify() {
+  local mine held
+  mine="$(read_token)"
+  [[ -n "$mine" ]] || { red "release lease: no token in this checkout"; return 1; }
+  held="$(remote_lease_sha)" || { red "release lease: could not read origin"; return 1; }
+  [[ -n "$held" ]] || { red "release lease: the lease is gone from origin"; return 1; }
+  if [[ "$held" != "$mine" ]]; then
+    fetch_lease || true
+    red "release lease: no longer ours -- held by $(describe_lease "$held")"
+    return 1
+  fi
+  gray "release lease still ours"
+  return 0
+}
+
 cmd_release() {
   local mine held
   mine="$(read_token)"
@@ -212,8 +268,10 @@ cmd_status() {
 
 case "${1:-}" in
   claim)   shift; cmd_claim "$@" ;;
+  renew)   shift; cmd_renew "$@" ;;
+  verify)  shift; cmd_verify "$@" ;;
   release) shift; cmd_release "$@" ;;
   status)  shift; cmd_status "$@" ;;
-  -h|--help|"") sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  -h|--help|"") sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
   *) die "unknown subcommand: $1" ;;
 esac

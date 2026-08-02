@@ -232,6 +232,74 @@ describe('release-lease: releasing what you do not own', () => {
   });
 });
 
+describe('release-lease: a long healthy release must not lose its lease', () => {
+  // The defect this pins: the TTL is "how long since the holder proved it was
+  // alive", NOT "how long a release takes". Measured on this repo, the CI matrix
+  // alone has run 57 minutes and release 1.20.77 took 186 minutes wall clock —
+  // both longer than any sane TTL. Without renewal, a healthy release would have
+  // its lease reclaimed mid-flight and two releasers would run at once.
+  it('renewing keeps a lease that would otherwise be reclaimable', () => {
+    lease(boxA, ['claim', '1.20.82']);
+
+    // Simulate the run outliving the TTL, then proving it is still alive.
+    expect(lease(boxA, ['renew']).status).toBe(0);
+
+    // box-b now sees a FRESH lease, so even a 45-minute TTL will not reclaim it.
+    const b = lease(boxB, ['claim', '1.20.83', '--ttl-min', '45']);
+    expect(b.status).toBe(1);
+    expect(b.stderr).toContain('release already in flight');
+  });
+
+  it('renew fails loudly once the lease has been reclaimed', () => {
+    lease(boxA, ['claim', '1.20.82']);
+    plantStaleLease(boxB, '1.20.83', 0, { force: true }); // box-b took over
+
+    const a = lease(boxA, ['renew']);
+    expect(a.status).toBe(1);
+    expect(a.stderr).toContain('no longer ours');
+  });
+
+  it('renew does not resurrect a lease that was already dropped', () => {
+    lease(boxA, ['claim', '1.20.82']);
+    lease(boxA, ['release']);
+
+    expect(lease(boxA, ['renew']).status).toBe(1);
+    // …and the pipeline is genuinely free for the next releaser.
+    expect(lease(boxB, ['claim', '1.20.83']).status).toBe(0);
+  });
+});
+
+describe('release-lease: verify gates the irreversible steps', () => {
+  it('passes only while the lease is genuinely ours', () => {
+    lease(boxA, ['claim', '1.20.82']);
+    expect(lease(boxA, ['verify']).status).toBe(0);
+  });
+
+  it('fails once another box has reclaimed it', () => {
+    lease(boxA, ['claim', '1.20.82']);
+    plantStaleLease(boxB, '1.20.83', 0, { force: true });
+
+    const a = lease(boxA, ['verify']);
+    expect(a.status).toBe(1);
+    expect(a.stderr).toContain('no longer ours');
+  });
+
+  it('fails closed when this checkout never claimed anything', () => {
+    // The dangerous shape would be verify passing by default: release.sh would
+    // then merge/tag/publish believing it had been checked.
+    expect(lease(boxB, ['verify']).status).toBe(1);
+  });
+
+  it('fails closed when the lease vanished from origin', () => {
+    lease(boxA, ['claim', '1.20.82']);
+    git(boxB, 'push', '--quiet', '--delete', 'origin', REF);
+
+    const a = lease(boxA, ['verify']);
+    expect(a.status).toBe(1);
+    expect(a.stderr).toContain('gone from origin');
+  });
+});
+
 describe('release-lease: status', () => {
   it('reports unheld, then the holder', () => {
     expect(lease(boxA, ['status']).stdout.trim()).toBe('unheld');

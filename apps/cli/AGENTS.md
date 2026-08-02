@@ -270,6 +270,8 @@ second service.
 ```bash
 scripts/release-lease.sh status     # unheld | held version=… holder=… age=…min
 scripts/release-lease.sh claim <v>  # 0 = acquired, 1 = someone else is releasing
+scripts/release-lease.sh renew      # prove this run is still alive
+scripts/release-lease.sh verify     # 0 = still ours; fails CLOSED on any doubt
 scripts/release-lease.sh release    # drop the lease this checkout claimed
 ```
 
@@ -277,8 +279,25 @@ scripts/release-lease.sh release    # drop the lease this checkout claimed
 and drops it from `cleanup_all`'s trap on every exit path. Ownership is the lease
 **commit sha**, recorded in `.git/release-lease.token` — not the pid, so a release
 resumed by a second invocation can still drop its own lease, and a third agent can
-never drop one it did not claim. A lease abandoned by a killed run is reclaimable
-after `RELEASE_LEASE_TTL` minutes (default 45); reclaiming names the dead holder
+never drop one it did not claim.
+
+**The TTL is not "how long a release takes".** It is "how long since the holder
+last proved it was alive" — a distinction that matters because a healthy release
+routinely outlives any sane TTL: the CI matrix alone has run **57 minutes**, and
+release 1.20.77 took **186 minutes** wall clock. So two things hold the invariant
+together:
+
+- **Renewal.** `release.sh` runs a background renewer for the whole release
+  (`renew` every 10 minutes), so a live run's lease is never older than 10 minutes
+  and cannot be reclaimed out from under it. The renewer is killed before the
+  lease is dropped, so it can never re-push a lease that is being deleted.
+- **`verify` before every irreversible step.** `require_lease` gates the
+  squash-merge, the tag, and the publish routing. It fails **closed** — no token,
+  no ref, unreachable origin all mean "we cannot prove this is ours", so the
+  release stops rather than merging alongside whoever holds it now.
+
+A lease abandoned by a killed run stops being renewed, so it becomes reclaimable
+after `RELEASE_LEASE_TTL` minutes (default 30); reclaiming names the dead holder
 rather than silently overwriting it.
 
 **Finish a stuck release before cutting a new one.** `release.sh` refuses to start

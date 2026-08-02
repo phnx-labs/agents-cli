@@ -457,6 +457,17 @@ green "Bump: $BUMP ($PHNX_LATEST -> $TARGET)"
 # v1.20.80 and v1.20.81 tagged and unpublished. Refuse to widen it -- the
 # unpublished tag is a release to finish, and re-running with that version is the
 # documented recovery (it rebuilds from the merged PR's CI-tested tree).
+# Fail CLOSED. A `|| true` here would mean a transient network blip silently
+# disables the guard and the release bumps straight past a stuck version -- the
+# exact widening this check exists to stop. If we cannot read the tags, we do not
+# know whether it is safe to proceed, so we stop.
+remote_version_tags() {
+  local out
+  out="$(git ls-remote --tags origin 'refs/tags/v*' 2>&1)" \
+    || die "could not read remote tags from origin -- refusing to release without checking for a stuck version: $out"
+  printf '%s\n' "$out" | grep -v '\^{}$' || true
+}
+
 # The decision arithmetic lives in scripts/stuck-release.sh so it can be tested
 # directly (scripts/stuck-release.test.ts); this block only gathers the facts it
 # needs -- the pushed tags, and whether the registry has each one.
@@ -473,7 +484,7 @@ while read -r _sha _ref; do
   else
     TAG_FACTS+="$v no"$'\n'
   fi
-done < <(git ls-remote --tags origin 'refs/tags/v*' 2>/dev/null | grep -v '\^{}$' || true)
+done < <(remote_version_tags)
 
 UNPUBLISHED_TAG="$(printf '%s' "$TAG_FACTS" | scripts/stuck-release.sh "$PHNX_LATEST" || true)"
 
@@ -668,6 +679,12 @@ cleanup_all() {
   rm -rf "${SHIM_TMP:-}"
   rm -f "${NPMRC_TMP:-}"
   remove_historical_worktree
+  # Stop renewing before dropping, so the renewer cannot re-push a lease we are
+  # about to delete and leave the ref orphaned until its TTL.
+  if [[ -n "${LEASE_RENEWER_PID:-}" ]]; then
+    kill "$LEASE_RENEWER_PID" >/dev/null 2>&1 || true
+    wait "$LEASE_RENEWER_PID" 2>/dev/null || true
+  fi
   # Drop the release lease on every exit path. A run that dies without reaching
   # this (SIGKILL, severed ssh, rebooted box) leaves the lease behind on purpose:
   # release-lease.sh reclaims it after its TTL and logs whose it was, rather than
@@ -755,6 +772,25 @@ if ! scripts/release-lease.sh claim "$TARGET"; then
   die "another release is in flight -- watch it instead of racing it (scripts/release-lease.sh status)"
 fi
 LEASE_HELD=true
+
+# Keep the lease fresh for as long as this release runs. The TTL is "how long
+# since the holder last proved it was alive", NOT "how long a release takes" --
+# a healthy release routinely outlives any sane TTL (the CI matrix alone has run
+# 57 minutes; release 1.20.77 took 186 minutes wall clock). Without this
+# renewer a long-but-healthy release would go stale mid-flight and a second
+# releaser would reclaim its lease, recreating the exact collision the lease
+# exists to prevent. Killed by cleanup_all.
+LEASE_RENEWER_PID=""
+( while sleep 600; do scripts/release-lease.sh renew >/dev/null 2>&1 || exit 0; done ) &
+LEASE_RENEWER_PID=$!
+
+# Called before every irreversible step. Fails CLOSED: if we cannot prove the
+# lease is still ours, we stop rather than merge/tag/publish alongside whoever
+# holds it now.
+require_lease() { # $1 = what we are about to do
+  scripts/release-lease.sh verify \
+    || phase_fail "lost the release lease before $1 -- refusing to continue; another releaser owns this pipeline now"
+}
 
 # Auto-revert of the package.json bump is no longer wanted here — the bump is
 # carried into the release branch commit (and the cleanup trap reverts the
@@ -968,6 +1004,9 @@ if ! $MAIN_AT_TARGET; then
 
   # Squash-merge. Never --admin: branch protection must hold, and the ruleset has
   # no PR-review rule, so green test+gitleaks is a sufficient, non-bypass merge.
+  # The CI wait above is the longest gap in the release (the matrix has run 57
+  # minutes). Re-prove the lease before the first irreversible act.
+  require_lease "merging PR #$PR_NUMBER"
   bold "Merging PR #$PR_NUMBER (squash)..."
   gh pr merge "$PR_NUMBER" --squash --delete-branch || die "merge failed for PR #$PR_NUMBER (left open)"
   green "Merged PR #$PR_NUMBER"
@@ -1025,6 +1064,7 @@ if git rev-parse --verify --quiet "refs/tags/v$TARGET" >/dev/null; then
     || die "local tag v$TARGET does not point at the verified release commit $PUBLISH_SHA"
   gray "Tag v$TARGET already exists locally at the verified release commit"
 else
+  require_lease "tagging v$TARGET"
   git tag "v$TARGET" "$PUBLISH_SHA"
   green "Created tag v$TARGET at $(git rev-parse --short "$PUBLISH_SHA")"
 fi
@@ -1048,6 +1088,7 @@ restore_release_tree
 # resumes at the publish (the already-published short-circuit + tag idempotency
 # make it safe).
 phase "Build + sign + notarize + npm publish + computer-helper" "$RELEASE_HOME_BASE"
+require_lease "publishing $PHNX_PKG@$TARGET"
 route_home_base_phase \
   || phase_fail "privileged phase failed on the home base ($RELEASE_HOME_BASE) -- PR merged + tag v$TARGET pushed; rerun to retry: $0 $TARGET --apply"
 phase_ok "published $PHNX_PKG@$TARGET from $RELEASE_HOME_BASE (token resolved there; no Touch ID)"

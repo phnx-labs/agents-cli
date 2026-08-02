@@ -7,8 +7,13 @@
   commit at `refs/release-lock/held` — a second claimant's push can never be a
   fast-forward, so git's rejection *is* the failed lock acquisition. The lease is
   claimed before the first mutation and dropped by the existing cleanup trap on
-  every exit path; one abandoned more than 45 minutes is reclaimable, and
-  reclaiming names the dead holder instead of silently overwriting it. Separately,
+  every exit path. Because a healthy release routinely outlives any sane
+  expiry — the CI matrix alone has run 57 minutes and release 1.20.77 took 186
+  minutes — the lease is **renewed** by a background renewer for the whole run,
+  and the squash-merge, the tag, and the publish each **verify** ownership first,
+  failing closed if it can no longer be proven. A lease that stops being renewed
+  is reclaimable after 30 minutes, and reclaiming names the dead holder instead
+  of silently overwriting it. Separately,
   `release.sh` now refuses to cut a new version while an older `v*` tag exists
   that npm never received, and points at the re-run that finishes it — bumping
   past an unpublished tag is what turned a one-version gap into npm 1.20.78 vs
