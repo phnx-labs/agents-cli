@@ -10,7 +10,6 @@ import type { AgentId } from '../../types.js';
 import { AGENTS, MANAGED_AGENT_IDS, agentConfigDirName } from '../../agents.js';
 import {
   listCommandSkillsInVersion,
-  shouldAlsoInstallCommandAsSkill,
   shouldInstallCommandAsSkill,
 } from '../../command-skills.js';
 import type { ResourceDetector, DetectArgs } from './types.js';
@@ -33,10 +32,14 @@ function buildCommandsDetector(agent: AgentId): ResourceDetector {
       const nativeCommands = fs.readdirSync(commandsDir)
         .filter(f => f.endsWith(ext))
         .map(f => f.replace(new RegExp(`\\${ext}$`), ''));
-      if (!shouldAlsoInstallCommandAsSkill(agent, version)) return nativeCommands;
-
-      const commandSkills = new Set(listCommandSkillsInVersion(agentDir));
-      return nativeCommands.filter((name) => commandSkills.has(name));
+      // For a dual-write target the native file is the authoritative record that
+      // the command synced. The skill copy is derived, and
+      // installCommandSkillToVersion deliberately writes none when a real skill
+      // source already owns the name -- requiring both copies reported those
+      // commands missing forever and drove an `agents refresh` loop no sync could
+      // clear. This also matches `agents doctor`/`prune`, which read the
+      // unfiltered listCommandsInVersionHome.
+      return nativeCommands;
     },
   };
 }

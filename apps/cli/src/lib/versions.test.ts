@@ -393,6 +393,33 @@ describe('version resource sync path handling', () => {
     expect(skill).toContain('Recap the conversation so far.');
   });
 
+  it('removes a stale legacy prompts/ file left by an older Codex version', () => {
+    // The sibling test above only asserts the *current* command is absent from
+    // prompts/, which the writer never puts there anyway — so it cannot catch a
+    // regression in the legacy-dir cleanup. Pre-seed a file no sync will write.
+    const home = makeTempHome();
+    const sourceCommand = path.join(home, '.agents', '.system', 'commands', 'recap.md');
+    const versionHome = path.join(home, '.agents', '.history', 'versions', 'codex', '0.117.0', 'home', '.codex');
+    const stale = path.join(versionHome, 'prompts', 'alpha.md');
+
+    fs.mkdirSync(path.dirname(sourceCommand), { recursive: true });
+    fs.writeFileSync(
+      sourceCommand,
+      ['---', 'description: Summarize the current session', '---', '', 'Recap the conversation so far.'].join('\n'),
+      'utf-8'
+    );
+    fs.mkdirSync(path.dirname(stale), { recursive: true });
+    fs.writeFileSync(stale, 'STALE ALPHA FROM CODEX 0.116', 'utf-8');
+
+    runVersionSync(home, "syncResourcesToVersion('codex', '0.117.0', undefined, { force: true })");
+
+    // Codex >= 0.117.0 converts commands to skills, so nothing may linger in
+    // prompts/ — the orphan sweep is gated off for those agents and `agents
+    // prune` only sees their skills, so a survivor is permanent.
+    expect(fs.existsSync(stale)).toBe(false);
+    expect(fs.existsSync(path.join(versionHome, 'skills', 'recap', 'SKILL.md'))).toBe(true);
+  });
+
   it('preserves user-authored Cursor IDE commands and syncs managed commands to both Cursor surfaces', () => {
     const home = makeTempHome();
     const projectRoot = path.join(home, 'repo');
