@@ -3286,6 +3286,10 @@ export function registerSessionsCommands(program: Command): void {
       # Search across every directory, not just this project
       agents sessions "topic" --all
 
+      # Who spawned which team: an orchestrator row carries team:<name>, and a
+      # teammate row [<team>/<handle>]. --in-team narrows to one team's lineage.
+      agents sessions --in-team redesign --teams
+
       # Show routine-run sessions and open one by routine run id
       agents sessions --routine --all
       agents sessions 2026-07-21T10-30-00-000Z
@@ -3302,6 +3306,7 @@ export function registerSessionsCommands(program: Command): void {
     notes: `
       - The interactive listing folds in your other online machines automatically (live over SSH, no sync) — each row is labelled by host, this machine first. Use --local to skip the fan-out; --json and single-id lookups stay local.
       - --host runs the query on the remote's own index over SSH (host alias or user@host); repeat or pass several to fan out. SSH access is the only auth.
+      - --in-team matches both ends of the lineage: the session that ran 'agents teams create/add', and (with --teams) that team's teammates. In the interactive list, 't' cycles the same filter over the teams in view.
       - --include and --exclude are mutually exclusive.
       - --first and --last are mutually exclusive.
       - A filter flag (--include/--exclude/--first/--last) without --markdown/--json defaults to --markdown output.
