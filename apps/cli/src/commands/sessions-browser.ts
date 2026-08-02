@@ -18,7 +18,7 @@ import { isSessionTrackedAgent, type SessionMeta } from '../lib/session/types.js
 import type { ActiveSession } from '../lib/session/active.js';
 import { discoverSessions } from '../lib/session/discover.js';
 import { gatherRemoteList } from '../lib/session/remote-list.js';
-import { enrichTeamOrigins } from '../lib/session/team-filter.js';
+import { enrichTeamOrigins, safeTeamText } from '../lib/session/team-filter.js';
 import { machineId, normalizeHost } from '../lib/session/sync/config.js';
 import { buildPreview } from './sessions-picker.js';
 import {
@@ -502,9 +502,12 @@ export async function runSessionBrowser(
     // row belongs to. Teammate rows only carry `teamOrigin` when `c` is on, so
     // with teams hidden this ranges over spawned teams alone — which is exactly
     // the set whose rows are visible.
+    // Through safeTeamText: the cycle's values become `f.team`, which headerFor
+    // interpolates into the header and browserFilterToArgv copies into a command,
+    // and on a peer's row these strings are that machine's to choose.
     teamsInPool = distinct([
-      ...rows.map((r) => r.spawnedTeam),
-      ...rows.map((r) => r.teamOrigin?.team),
+      ...rows.map((r) => safeTeamText(r.spawnedTeam)),
+      ...rows.map((r) => safeTeamText(r.teamOrigin?.team)),
     ]);
     const filtered = applyFilters(rows, live ?? new Map(), f, self);
     cols = pickerColumnsFor(filtered);
