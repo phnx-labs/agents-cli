@@ -652,8 +652,8 @@ access control (that is 1Password/Vault; this tool is device-local first).
   few operational diagnostics use `console.error` for names/paths only, e.g.
   `lib/secrets/index.ts:500,505`, `lib/secrets/vault-age-helper.ts:41`; the
   invariant is "no value on any stream," not "no console at all.")
-- **SEC-16 (MUST).** The following non-actionable operations — and only these —
-  MUST be silent no-ops rather than errors: `lock`/`unlock` on a non-macOS host
+- **SEC-16 (MUST).** The following non-actionable operations — and no others
+  without a change to this spec — MUST be silent no-ops rather than errors: `lock`/`unlock` on a non-macOS host
   (exit 0, no value output), a best-effort session-store write that fails
   (resolution still succeeds), and a throttled `last_used` stamp
   (`commands/secrets.ts:2219,2282`; `lib/secrets/session-store.ts:24-25`;
@@ -1080,8 +1080,10 @@ schema (`--json` passes through each agent's native stream format).
   pin, no actor provenance, no mailbox/session wiring, no `AGENTS_RUNTIME`
   label.
 
-  Status: `[Drift]` — a named deviation from EXEC-18's single-engine contract;
-  see EXEC-GAP-2.
+  Status: `[Drift]` — EXEC-19 names `--acp` as a routing exception, but the env
+  guarantees it forfeits (EXEC-1 sanitize, EXEC-3 mailbox/session, EXEC-4 actor
+  provenance, EXEC-14 per-version pin) are an undeclared consequence of that
+  exception, not a scoped one; see EXEC-GAP-2.
 - **EXEC-21 (MUST).** Every finalized run path (plain, fallback, loop, ACP)
   MUST call `recordDispatchedRun` exactly once as its audit funnel
   (`commands/exec.ts:1571,2470,2628,2683`, each commented *"Governance
