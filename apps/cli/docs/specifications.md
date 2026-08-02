@@ -37,6 +37,7 @@ guarantee, the reference for the mechanism.
 - [Sessions](#sessions) — `agents sessions`: discovery, parsing, preview, metadata, lifecycle, sync
 - [Secrets](#secrets) — `agents secrets`: storage & materialization boundaries, sharing, no-noise
 - [Agent execution](#agent-execution) — `agents run`: the one execution engine, env, isolation, fallback, dispatch
+- [Watchdog](#watchdog) — `agents watchdog`: detect idle agents, decide nudge/skip, deliver to the exact split
 
 ---
 
@@ -1369,3 +1370,129 @@ and resolves exit code 7 (`lib/exec.ts:1571,1584`); given instead a `--loop
 Then the driver stops with `stoppedBy: 'budget'` and `loopExitCode` maps it
 to the same 7 (`commands/exec.ts:379`) — a CI caller can `if exit==7` for
 "budget," regardless of which path produced it.
+
+---
+
+## Watchdog
+
+The normative contract for `agents watchdog` — the routine that detects **idle** agents
+and steers them to completion. The how-it-works companion is [watchdog.md](watchdog.md).
+Requirement keywords **MUST / MUST NOT / SHOULD / MAY** are per RFC 2119; scenarios are
+Given/When/Then so they map 1:1 to tests.
+
+### 1. Purpose & scope
+
+The watchdog exists to get **idle** agents moving to completion. In scope: detecting a
+stalled/idle session, deciding nudge-vs-skip, and delivering a steering message to the
+exact terminal split. Out of scope: sessions that explicitly stopped for the human
+(`waiting_input`) — those surface in the user's feed and are the feed's responsibility,
+not the watchdog's.
+
+### 2. Requirements
+
+#### 2.1 Trigger & lifecycle
+
+- **WD-1 (MUST).** The always-on watchdog MUST be a daemon-fired cron routine, not a
+  bespoke loop — the routine command is `agents watchdog --nudge` on
+  `WATCHDOG_ROUTINE_SCHEDULE` (`lib/watchdog/routine.ts`). Each fire MUST run exactly one
+  bounded tick.
+- **WD-2 (MUST).** Delivery MUST occur only when `--nudge` is set; without it a tick is a
+  dry run that reports "would nudge" and delivers nothing (`lib/watchdog/runner.ts`).
+- **WD-3 (MUST).** `enable`/`disable` MUST be backed by the routine store (create/pause the
+  job), and `status` MUST reflect the routine's real state (`commands/watchdog.ts`).
+
+#### 2.2 Detection — idle is the target
+
+- **WD-4 (MUST).** A candidate MUST be a session idle at least `WATCHDOG_STALL_MS` and less
+  than `WATCHDOG_DORMANT_MS`, past its per-session cooldown (`lib/watchdog/read.ts`,
+  `classifyTerminal`). Idle age is derived from the transcript's last-write time.
+- **WD-5 (MUST).** A session whose inferred activity is `working` MUST NOT be nudged
+  (`lib/session/state.ts`).
+- **WD-6 (MUST NOT).** The watchdog MUST NOT fight the feed: a session in `waiting_input`
+  (asked a question / permission prompt) is the feed's to surface; the watchdog MUST either
+  leave it for the human or escalate to the brain — never blind-nudge it as if idle
+  (`deterministicDecision`, `lib/watchdog/runner.ts`).
+- **WD-7 (SHOULD).** When several candidates exist, the watchdog SHOULD prioritize the ones
+  active most recently (a warm session is likeliest to be steerable).
+- **WD-8 (MUST).** A session whose transcript cannot be located (no timestamp) MUST be
+  skipped, not guessed — and transcript resolution MUST search every version home, not just
+  the live `~/.claude` (`findClaudeSessionFile` → `getAgentSessionDirs`,
+  `lib/session/active.ts`), so an agent-version upgrade does not blind the watchdog.
+
+#### 2.3 Decision — nudge vs skip
+
+- **WD-9 (MUST).** The default per-tick decision MUST be a cheap deterministic pre-filter;
+  judgment-heavy cases (parked-on-question, ambiguous stall) MUST escalate to an LLM brain
+  via `agents run … --mode plan` (`makeDefaultSmartDecider`, `lib/watchdog/runner.ts`). A
+  decider failure MUST resolve to a safe skip, never a blind nudge.
+- **WD-10 (MUST).** The brain MUST skip (leave for the human) on: credentials/auth, an
+  irreversible or outward-facing action needing sign-off (publish/release, delete prod,
+  spend, external message), a genuine product/intent decision, a completed task, or an
+  unreadable state (`WATCHDOG_SYSTEM_PROMPT`, `lib/watchdog/watchdog.ts`).
+- **WD-11 (MUST).** A nudge message MUST carry context — restate the goal and name ONE
+  concrete next step (the specific action, a forgotten tool, or the sensible default). A
+  generic "use your judgment and finish" with no concrete step MUST NOT be emitted.
+- **WD-12 (SHOULD).** When the blocker is resolvable by a tool the agent already has
+  (`agents computer`, `agents browser`, `agents ssh <mac> "agents computer …"`), the nudge
+  SHOULD name that tool rather than escalating to the human.
+- **WD-13 (MAY).** A user playbook at `~/.agents/playbooks/watchdog.md` MAY be appended as
+  House Rules to tune the nudge/skip line per fleet (`composePromptWithPlaybook`).
+
+#### 2.4 Delivery
+
+- **WD-14 (MUST).** A nudge MUST be delivered into the exact split the session lives in,
+  resolved by the single canonical `resolveInjectTargetForSession`
+  (`lib/terminal/resolve.ts`, precedence `tmux > iterm > vscodium > pty`) and injected by
+  `injectIntoTerminal` (`lib/terminal/inject.ts`).
+- **WD-15 (MUST).** `agents sessions inject` MUST resolve targets through the same
+  `resolveInjectTargetForSession` as the watchdog, so the manual unblock path and the
+  watchdog agree on which sessions are addressable (no duplicate weaker resolver).
+- **WD-16 (MUST).** When no addressable split exists, the tick MUST fall back (mailbox or
+  headless `--resume`) or refuse-and-flag — it MUST NOT silently claim delivery.
+- **WD-17 (MUST).** Every decision MUST be appended to `watchdog.log` in the Factory event
+  shape (`lib/watchdog/log.ts`).
+
+#### 2.5 Per-session policy
+
+- **WD-18 (MUST).** `agents watchdog policy <id> off|keep|handsoff` MUST be honored:
+  `off` excludes the session; `handsoff` detects+flags but never delivers; `keep` is the
+  default path (`readPolicySentinel`/`writePolicySentinel`, `lib/watchdog/runner.ts`).
+
+### 3. Given/When/Then scenarios
+
+**GWT-W1 — Idle promise-without-toolcall is nudged with a concrete step.**
+Given a session idle past `WATCHDOG_STALL_MS` whose tail shows an announced action and no
+following tool call; When a `--nudge` tick runs; Then the brain returns `nudge` and the
+message restates the goal and names the next step (WD-11), delivered into the session's
+exact split (WD-14).
+
+**GWT-W2 — A release ask is left for the human.**
+Given an idle session whose last turn asks to publish/release; When the tick runs; Then the
+brain returns `skip` (WD-10) and nothing is delivered.
+
+**GWT-W3 — A working session is never nudged.**
+Given a session whose inferred activity is `working` (fresh transcript writes); When the
+tick runs; Then it is not a candidate and no nudge is sent (WD-5).
+
+**GWT-W4 — VSCodium session is addressable by both paths.**
+Given a live `codium`-hosted session with a session id; When either the watchdog or
+`agents sessions inject <id>` resolves a target; Then both return an addressable `vscodium`
+rail via `resolveInjectTargetForSession` (WD-14, WD-15).
+
+**GWT-W5 — Upgrade does not blind the watchdog.**
+Given a running session whose transcript lives under an earlier version home while
+`~/.claude` points at a newer version; When the tick classifies it; Then the transcript is
+found via `getAgentSessionDirs` and the session is evaluated, not skipped as "no activity
+timestamp" (WD-8).
+
+### 4. Known gaps
+
+- The brain is not yet seeded with the full fleet-wide `agents sessions --active --json`
+  snapshot as its starting context; it reads per-candidate tails. Planned (see
+  [watchdog.md](watchdog.md) roadmap).
+- There is no distinct `done` state — a completed session is inferred as `idle` and skipped
+  via completion hints rather than a first-class status. Planned.
+- Live status inference covers Claude/Codex; other harnesses fall to `unknown` and are not
+  yet steered (`findSessionFileForKind`, `lib/session/active.ts`). Planned.
+- No default `watchdog/WORKFLOW.md` decider ships in this repo; absent one, the built-in
+  `WATCHDOG_SYSTEM_PROMPT` runs.

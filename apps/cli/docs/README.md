@@ -43,6 +43,7 @@ How agents-cli is laid out on disk and how it decides what to load.
 | [Share](share.md) | Publish an HTML artifact to a public link on your own Cloudflare R2 (`agents share <file>`) — zero-egress, BYO-Cloudflare, expiry + fleet mode. |
 | [Routines](03-routines.md) | Cron-scheduled and signed-webhook-triggered agent runs with sandboxed permissions and a long-running daemon. |
 | [Monitors](10-monitors.md) | Durable event-triggered watchers: watch a source, detect a change, fire an action. A routine whose trigger is a watched source instead of a clock. |
+| [Watchdog](watchdog.md) | Detect **idle** agents across the fleet and steer them to completion — a daemon-fired routine that analyzes a stalled session's goal and nudges it with the concrete next step (idle is its job; `waiting` belongs to the feed). |
 
 ## Extensibility
 
