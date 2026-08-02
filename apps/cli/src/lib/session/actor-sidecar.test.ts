@@ -7,7 +7,7 @@ const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-sidecar-'));
 process.env.HOME = TEST_HOME;
 
 const { writeSessionActorRecord, readSessionActorRecord, loadSessionActorIndex } = await import('./actor-sidecar.js');
-const { getDB, closeDB, upsertSession, getSessionById } = await import('./db.js');
+const { getDB, closeDB, upsertSession, upsertSessionsBatch, getSessionById } = await import('./db.js');
 type SessionMeta = import('./types.js').SessionMeta;
 
 const FILES = path.join(TEST_HOME, 'files');
@@ -37,6 +37,15 @@ describe('session actor sidecar (RUSH-2019)', () => {
     const idx = loadSessionActorIndex();
     expect(idx.get('sid-a')?.actor).toBe('a@x.io');
     expect(idx.get('sid-b')?.initiatedBy).toBe('agent');
+  });
+
+  it('refuses a session id with path separators (no write outside by-session/)', () => {
+    // A caller-supplied `--session-id '../../evil'` must not escape the dir via
+    // path.join; the write is dropped and the read finds nothing.
+    writeSessionActorRecord({ sessionId: '../../evil', actor: 'mallory@x.io', initiatedBy: 'human', startedAtMs: 1 });
+    expect(readSessionActorRecord('../../evil')).toBeUndefined();
+    const escaped = path.join(TEST_HOME, '.agents', '.history', 'evil.json');
+    expect(fs.existsSync(escaped)).toBe(false);
   });
 });
 
@@ -81,5 +90,28 @@ describe('upsertSession joins the actor sidecar (RUSH-2019)', () => {
     const meta = { ...scanMeta('joined-3'), actor: 'explicit@example.com', initiatedBy: 'human' as const };
     upsertSession(meta, '');
     expect(getSessionById('joined-3')?.actor).toBe('explicit@example.com');
+  });
+
+  it('the batch scanner path joins the sidecar too (the real discover.ts flow)', () => {
+    // upsertSessionsBatch is what every harness scanner in discover.ts calls.
+    writeSessionActorRecord({ sessionId: 'batch-1', actor: 'linus@example.com', initiatedBy: 'human', startedAtMs: 1 });
+    upsertSessionsBatch([
+      { meta: scanMeta('batch-1'), content: '' }, // has a sidecar -> filled
+      { meta: scanMeta('batch-2'), content: '' }, // no sidecar -> stays null
+    ]);
+    expect(getSessionById('batch-1')?.actor).toBe('linus@example.com');
+    expect(getSessionById('batch-2')?.actor).toBeUndefined();
+  });
+
+  it('a rescan through the batch path does not clobber a stored owner', () => {
+    writeSessionActorRecord({ sessionId: 'batch-3', actor: 'grace@example.com', initiatedBy: 'human', startedAtMs: 1 });
+    upsertSessionsBatch([{ meta: scanMeta('batch-3'), content: '' }]);
+    // Rescan: same id, new content, sidecar removed — the stored owner must persist
+    // (ON CONFLICT excludes actor/initiated_by).
+    fs.rmSync(path.join(TEST_HOME, '.agents', '.history', 'by-session', 'batch-3.json'), { force: true });
+    upsertSessionsBatch([{ meta: { ...scanMeta('batch-3'), topic: 'rescanned' }, content: '' }]);
+    const meta = getSessionById('batch-3');
+    expect(meta?.topic).toBe('rescanned');
+    expect(meta?.actor).toBe('grace@example.com');
   });
 });

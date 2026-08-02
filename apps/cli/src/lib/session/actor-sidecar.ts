@@ -31,6 +31,17 @@ function sidecarDir(): string {
   return path.join(getHistoryDir(), 'by-session');
 }
 
+/**
+ * A session id safe to use as a filename: no path separators or `..`, so a
+ * caller-supplied `--session-id` can never escape `by-session/` via
+ * `path.join`. Session ids are uuids in practice; anything else is rejected
+ * rather than sanitized, so a bad id degrades to no record, never a write
+ * outside the directory.
+ */
+function isSafeSessionId(sessionId: string): boolean {
+  return sessionId.length > 0 && !/[/\\]/.test(sessionId) && sessionId !== '.' && sessionId !== '..';
+}
+
 function recordPath(sessionId: string): string {
   return path.join(sidecarDir(), `${sessionId}.json`);
 }
@@ -41,7 +52,7 @@ function recordPath(sessionId: string): string {
  * No-ops without a concrete session id (nothing to key on).
  */
 export function writeSessionActorRecord(record: SessionActorRecord): void {
-  if (!record.sessionId) return;
+  if (!isSafeSessionId(record.sessionId)) return;
   try {
     fs.mkdirSync(sidecarDir(), { recursive: true });
     fs.writeFileSync(recordPath(record.sessionId), JSON.stringify(record), 'utf8');
@@ -52,7 +63,7 @@ export function writeSessionActorRecord(record: SessionActorRecord): void {
 
 /** Read one session's actor record. Returns undefined if absent/corrupt. */
 export function readSessionActorRecord(sessionId: string): SessionActorRecord | undefined {
-  if (!sessionId) return undefined;
+  if (!isSafeSessionId(sessionId)) return undefined;
   let raw: string;
   try {
     raw = fs.readFileSync(recordPath(sessionId), 'utf8');
