@@ -54,6 +54,8 @@ interface ExecCommandActionOptions {
   sessionId?: string;
   /** --name <slug>: durable launch handle, resolvable via `agents sessions <name>`. */
   name?: string;
+  /** --notify: post a desktop notification when a headless run finishes. */
+  notify?: boolean;
   verbose?: boolean;
   raw?: boolean;
   /** `--no-tmux` → commander sets this false (default true) to bypass the tmux wrapper. */
@@ -544,6 +546,7 @@ export function registerRunCommand(program: Command): void {
     .option('--resume [id]', 'Resume a previous conversation. Accepts a full or partial session id (prefix-matched against the index); omit the id to pick from recent sessions interactively. Resumes under the version that started the session. claude/codex resume natively; other agents replay via a /continue first message. Pair with a prompt to continue headlessly.')
     .option('--session-id <id>', 'Force a NEW conversation to use this exact session UUID (Claude only). This CREATES a session — to resume an existing one, use --resume.')
     .option('--name <slug>', 'Name the run — seeds the session label so it shows up as `<name>` in `agents sessions` and resolves by it (and `agents hosts logs <name>` for --host runs) instead of an opaque id. An agent-generated title later refines the label; your name shows until then. Optional.')
+    .option('--notify', 'Post a desktop notification when a headless run finishes. Fired by this process on exit, so it survives whatever launched the run (the menu bar dispatching it, a terminal you closed).')
     .option('--verbose', 'Show detailed execution logs')
     .option('--raw', 'Interactive runs on macOS/Linux launch inside a shared tmux session (for %pane addressing + re-attach). Pass --raw to spawn the agent directly instead. Also disabled by AGENTS_NO_TMUX=1.')
     .option('--no-tmux', 'Spawn the agent directly instead of wrapping it in the shared tmux session. Same effect as --raw / AGENTS_NO_TMUX=1. Use this to see the agent\'s full startup output when a launch is failing.')
@@ -729,6 +732,21 @@ export function registerRunCommand(program: Command): void {
         // The token commander assigned to [prompt] came from behind `--` — it is
         // a native flag, not a prompt. Run interactively.
         prompt = undefined;
+      }
+
+      // --notify: post a desktop notification when this run finishes. Armed on
+      // process exit so it covers EVERY dispatch path below (local, --host,
+      // --lease, the error path) instead of one branch. Only for headless runs
+      // — an interactive run ends in front of the person who started it.
+      if (options.notify && prompt !== undefined) {
+        const { armRunFinishNotification } = await import('../lib/run-notify.js');
+        armRunFinishNotification({
+          agent: agentSpec,
+          name: options.name,
+          prompt,
+          cwd: options.cwd ?? process.cwd(),
+          host: options.host,
+        });
       }
 
       // A trailing @ is an explicit request to choose one installed account.

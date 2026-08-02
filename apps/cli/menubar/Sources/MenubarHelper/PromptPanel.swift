@@ -649,12 +649,22 @@ enum Notifier {
 
     // Map the daemon action deep-link to a URL the click delegate opens:
     //   open:<path>   -> the run report/log file (opens in the default app)
+    //   url:<https…>  -> a web target (the PR or ticket a finished run produced)
     //   routines:list -> the runs-history folder (opens in Finder)
     // Any other/absent action yields no click target.
     private static func clickURL(for action: String?) -> String? {
         guard let action else { return nil }
         if action.hasPrefix("open:") {
             return URL(fileURLWithPath: String(action.dropFirst("open:".count))).absoluteString
+        }
+        if action.hasPrefix("url:") {
+            // Only web schemes: the click handler hands this straight to
+            // NSWorkspace, so a `file:`/custom scheme here would be an arbitrary
+            // open-anything primitive driven by a notification argument.
+            let raw = String(action.dropFirst("url:".count))
+            guard let url = URL(string: raw), let scheme = url.scheme?.lowercased(),
+                  scheme == "https" || scheme == "http" else { return nil }
+            return url.absoluteString
         }
         if action == "routines:list" {
             return URL(fileURLWithPath: "\(NSHomeDirectory())/.agents/.history/runs").absoluteString

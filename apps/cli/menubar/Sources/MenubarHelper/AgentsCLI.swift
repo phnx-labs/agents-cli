@@ -392,6 +392,13 @@ enum AgentsCLI {
         }
     }
 
+    // Fire-and-forget: the run is launched detached and posts its OWN completion
+    // notification via `agents run --notify`. It used to be monitored here, with
+    // the finish notice in the process-termination callback — but that callback
+    // lives in THIS process, so a helper that restarted (an upgrade replacing the
+    // bundle, a crash) took it with it while the run carried on reparented to
+    // launchd. A dispatch could then never report back. The run process owns the
+    // notice now, so nothing that happens to the menu bar can lose it.
     static func dispatchQuickFix(note: String, screenshotPaths: [String], agents: [String],
                                  cwd: String? = nil, device: String? = nil) {
         let selected = agents.isEmpty ? ["claude"] : agents
@@ -400,12 +407,8 @@ enum AgentsCLI {
         Notifier.post(title: "Dispatching \(selected.count) agent\(selected.count == 1 ? "" : "s")…",
                       body: shortenForNotice(note))
         for agent in selected {
-            runMonitored(argv(quickFixRunArgs(agent: agent, prompt: prompt, name: name,
-                                              cwd: cwd, device: device))) { _, ok in
-                let label = LocalState.agentLabel(agent)
-                Notifier.post(title: ok ? "\(label) finished" : "\(label) failed",
-                              body: shortenForNotice(note))
-            }
+            runDetached(argv(quickFixRunArgs(agent: agent, prompt: prompt, name: name,
+                                             cwd: cwd, device: device)))
         }
     }
 
@@ -475,10 +478,11 @@ enum AgentsCLI {
     // (auto load-balance across signed-in versions with headroom, skipping any that
     // are rate-limited); an explicit --cwd scopes the agent to the chosen repo (never
     // the home dir); an explicit --device offloads onto the chosen box (nil = this
-    // Mac / affinity-auto is handled by the caller passing "auto").
+    // Mac / affinity-auto is handled by the caller passing "auto"). `--notify` makes
+    // the run itself post the completion notification, so it outlives this helper.
     static func quickFixRunArgs(agent: String, prompt: String, name: String,
                                 cwd: String? = nil, device: String? = nil) -> [String] {
-        var args = ["run", agent, prompt, "--mode", "auto", "--balanced", "--name", name]
+        var args = ["run", agent, prompt, "--mode", "auto", "--balanced", "--notify", "--name", name]
         if let cwd, !cwd.isEmpty {
             args.append("--cwd")
             args.append(cwd)

@@ -188,12 +188,14 @@ enum IssueSelfTest {
         check("empty note falls back to a timestamped task name", emptyName == "task-1234", detail: emptyName)
 
         let args = AgentsCLI.quickFixRunArgs(agent: "codex", prompt: "<prompt>", name: "my-task")
-        check("run is balanced + autonomous",
-              args == ["run", "codex", "<prompt>", "--mode", "auto", "--balanced", "--name", "my-task"],
+        check("run is balanced + autonomous + self-notifying",
+              args == ["run", "codex", "<prompt>", "--mode", "auto", "--balanced", "--notify", "--name", "my-task"],
               detail: args.joined(separator: " "))
+        check("dispatch carries --notify so completion survives a helper restart",
+              args.contains("--notify"))
         let scoped = AgentsCLI.quickFixRunArgs(agent: "codex", prompt: "<p>", name: "n", cwd: "/repo", device: "zion")
         check("run scopes to cwd + device when given",
-              scoped == ["run", "codex", "<p>", "--mode", "auto", "--balanced", "--name", "n", "--cwd", "/repo", "--device", "zion"],
+              scoped == ["run", "codex", "<p>", "--mode", "auto", "--balanced", "--notify", "--name", "n", "--cwd", "/repo", "--device", "zion"],
               detail: scoped.joined(separator: " "))
     }
 

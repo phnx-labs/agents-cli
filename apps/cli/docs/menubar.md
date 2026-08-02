@@ -68,8 +68,17 @@ agent for **File Ticket** or one or more agents for **Fix**.
   issue description — screenshot paths never pass through an LLM-authored shell
   string.
 - **Fix** fans out to every selected agent with `agents run <agent> --mode auto
-  --name quick-<agent>-<timestamp>`, so the resulting sessions appear in normal
-  `agents sessions` and menu-bar surfaces instead of as opaque background work.
+  --balanced --notify --name <slug-of-your-note>`, so the resulting sessions
+  appear in normal `agents sessions` and menu-bar surfaces instead of as opaque
+  background work.
+
+`--notify` is what makes a dispatch report back. The run is launched **detached**
+and posts its own "finished"/"failed" notification when it ends (see
+[Notifications](#notifications)). Earlier the helper monitored the child and
+posted from the process-termination callback — which lived in the helper, so a
+helper that restarted mid-run (an upgrade replacing the bundle, a crash) took the
+callback with it. The run carried on, reparented to launchd, and could never
+report back. Nothing about the menu bar's lifetime affects the notice now.
 
 Set `AGENTS_QUICK_DISPATCH_ROSTER=claude,codex` in the helper environment to
 filter which agents appear in the picker, and
@@ -205,9 +214,9 @@ The helper is a launchd user service (`com.phnx-labs.agents-menubar`,
 
 ## Notifications
 
-The helper doubles as the daemon's branded desktop-notification channel
-(RUSH-2030). The daemon fires a notification by spawning the installed bundle in
-a one-shot mode:
+The helper doubles as the branded desktop-notification channel for the daemon
+(RUSH-2030) and for any `agents run --notify`. The caller fires a notification by
+spawning the installed bundle in a one-shot mode:
 
 ```bash
 MenubarHelper --notify --title T --body B [--subtitle S] [--action A]
@@ -218,11 +227,23 @@ agents-cli helper and shows its `AppIcon` (the agents-cli mark) instead of the
 generic osascript icon. The one-shot delivers via `NSUserNotificationCenter`,
 briefly spins the runloop so delivery flushes, then exits — it never starts the
 status-bar UI. The persistent menu-bar instance registers the click delegate at
-launch (`Notifier.wireClickHandler`), so clicking a daemon notification runs its
-`--action`: `open:<path>` opens a run report/log, `routines:list` opens the runs
-folder. The Node side lives in `src/lib/menubar/notify-desktop.ts` (routing) and
-`src/lib/routine-notify.ts` (routine start/finish content + anti-spam
-threshold); see [routines.md](03-routines.md#desktop-notifications).
+launch (`Notifier.wireClickHandler`), so clicking a notification runs its
+`--action`: `open:<path>` opens a run report/log, `url:<https…>` opens a web
+target (the PR or ticket a finished run produced — `http`/`https` only, so a
+notification argument can never become an open-anything primitive), and
+`routines:list` opens the runs folder. The Node side lives in
+`src/lib/menubar/notify-desktop.ts` (routing), `src/lib/routine-notify.ts`
+(routine start/finish content + anti-spam threshold; see
+[routines.md](03-routines.md#desktop-notifications)), and `src/lib/run-notify.ts`
+(the `agents run --notify` finish notice).
+
+**A run notifies for itself.** `agents run --notify` arms the finish notification
+on the run process's own `exit`, so it covers every dispatch path — local spawn,
+`--host`, `--lease`, the error path — and, more importantly, does not depend on
+whatever launched the run still being alive. That is the whole point: the menu
+bar's quick dispatch used to post from its own process-termination callback and
+lost it whenever the helper restarted. A run killed with SIGKILL never reaches an
+exit handler and so never notifies; that is the documented limit.
 
 **Bounded lifetime (no pile-up).** A one-shot posts and exits in well under a
 second, but a stalled delivery — a locked screen, a WindowServer/XPC hiccup —
