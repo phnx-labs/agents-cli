@@ -4,16 +4,19 @@
  * (`injectIntoTerminal`, src/lib/terminal/inject.ts), so a native watchdog
  * (RUSH-1415) can shell out to nudge a stalled agent with "continue".
  *
- * Resolution: find the active session by id, map its `provenance.reply` rail
- * (provenance.ts:47) to an engine `InjectTarget` and inject. Today only tmux rails
- * are externally addressable; `--pane`/`--pty` target a backend directly when the
- * handle is already known (skipping the session lookup).
+ * Resolution: find the active session by id, then resolve its exact split through
+ * the SAME canonical resolver the watchdog uses — `resolveInjectTargetForSession`
+ * (lib/terminal/resolve.ts), precedence tmux > iterm > vscodium > pty. Sharing one
+ * resolver keeps the manual unblock path and the watchdog in agreement on which
+ * sessions are addressable (a prior duplicate resolver read only `provenance.reply`
+ * and could not address a VSCodium/Cursor terminal the watchdog handled fine).
+ * `--pane`/`--pty` target a backend directly when the handle is already known.
  */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { getActiveSessions } from '../lib/session/active.js';
-import { injectTargetFromReplyRail } from '../lib/session/inject.js';
+import { resolveInjectTargetForSession } from '../lib/terminal/resolve.js';
 import { injectIntoTerminal, type InjectTarget } from '../lib/terminal/index.js';
 import { setHelpSections } from '../lib/help.js';
 
@@ -27,23 +30,20 @@ interface InjectOptions {
   json?: boolean;
 }
 
-/** Resolve a session id (short or full) to an addressable terminal target. */
+/** Resolve a session id (short or full) to an addressable terminal target, via the
+ * same resolver the watchdog uses so both agree on what is reachable. */
 async function resolveTarget(sessionId: string): Promise<{ target: InjectTarget | null; reason?: string }> {
   const sessions = await getActiveSessions();
   const match = sessions.find(
     (s) => s.sessionId === sessionId || (s.sessionId != null && s.sessionId.startsWith(sessionId)),
   );
   if (!match) return { target: null, reason: `No active session matches "${sessionId}".` };
-  const rail = match.provenance?.reply;
-  if (!rail) {
-    return {
-      target: null,
-      reason: `Session "${sessionId}" has no addressable reply rail (not running under tmux). Relaunch it under a tmux/pty rail to inject.`,
-    };
+  const resolution = resolveInjectTargetForSession(match);
+  if (!resolution.addressable) {
+    // Surface the resolver's precise reason (host/rail), not a generic "not tmux".
+    return { target: null, reason: `Session "${sessionId}": ${resolution.reason}` };
   }
-  const target = injectTargetFromReplyRail(rail);
-  if (!target) return { target: null, reason: `Session "${sessionId}" reply rail is not injectable.` };
-  return { target };
+  return { target: resolution.target };
 }
 
 async function runInject(sessionId: string, text: string, options: InjectOptions): Promise<void> {
@@ -108,8 +108,9 @@ export function registerSessionsInjectCommand(sessionsCmd: Command): void {
     notes: `
       - Ink-TUI Enter semantics: by default the text and Enter are two separate
         writes, which is what Claude's Ink TUI needs. --combined fuses them.
-      - Only sessions running under a tmux pane are addressable by id today
-        (provenance.ts reply rails). Use --pane/--pty for direct targeting.
+      - A session is addressable by id when it resolves to a precise split —
+        tmux, iTerm, a VSCodium/Cursor/VS Code integrated terminal, or a pty
+        (resolveInjectTargetForSession). Use --pane/--pty for direct targeting.
       - Built on the Terminal Engine (src/lib/terminal): --host runs the tmux /
         AppleScript spec over the same SSH transport the launch engine uses.
     `,
