@@ -384,6 +384,18 @@ git -C "\$REPO_ROOT" worktree add --quiet --detach "\$WT" "v$1" \\
   || { echo "could not create home-base publish worktree at \$WT" >&2; exit 1; }
 [ -z "\$(git -C "\$WT" status --short | grep '^ D')" ] \\
   || { echo "home-base publish worktree \$WT is incomplete -- refusing to build" >&2; exit 1; }
+# The signed keychain + menu-bar helpers need bin/embedded.provisionprofile — an
+# Apple provisioning profile that is gitignored (never committed, /apps/cli/bin/
+# is ignored wholesale), so the tag worktree has no bin/ at all. Seed it from the
+# home base's own checkout (REPO_ROOT has it) before the helper build reads it;
+# without this the home-base phase dies "Missing .../bin/embedded.provisionprofile"
+# on every release, regardless of which box triggered it.
+mkdir -p "\$WT/apps/cli/bin"
+if [ -f "\$REPO_ROOT/apps/cli/bin/embedded.provisionprofile" ]; then
+  cp "\$REPO_ROOT/apps/cli/bin/embedded.provisionprofile" "\$WT/apps/cli/bin/embedded.provisionprofile"
+else
+  echo "warning: \$REPO_ROOT/apps/cli/bin/embedded.provisionprofile absent on the home base; the signed helper build will fail" >&2
+fi
 cd "\$WT/apps/cli"
 scripts/release.sh $1 --home-base-phase
 SNIPPET
