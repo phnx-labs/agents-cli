@@ -152,6 +152,7 @@ agents events --module secrets         # every secret accessed, revealed, or unl
 agents events --command "teams create" # a command path — prefix match
 agents events --event teams.disband    # a semantic event: a team torn down
 agents events --event secrets.get --since 7d --json
+agents events --event pr.opened --since 30d --limit 0 --json   # every match, uncapped
 agents events -f                       # live tail of today's log
 ```
 
@@ -159,6 +160,22 @@ agents events -f                       # live tail of today's log
 prefix (`teams` catches `teams create`); `--event` filters a typed event
 (repeatable); `--since` takes `2h`/`7d`/`4w` or an ISO date. `--json` emits the
 raw records for external consumers.
+
+**`--limit` caps the read at 50 records by default — pass `--limit 0` before you
+aggregate.** The cap keeps an interactive `agents events` readable, but it is
+applied *after* filtering and *before* you see the records, so a group-by over a
+capped `--json` read ranks the newest 50 rather than the real set. On a 30-day
+stream here that is 50 records out of 29,649. When a read is capped, the command
+says so — on stderr for `--json` (so a `| jq` pipeline still gets clean JSON), on
+stdout for the human view:
+
+```
+Showing the newest 50 — more events matched. Pass --limit 0 for all.
+```
+
+A non-numeric, negative, or empty `--limit` is rejected with exit 2 rather than
+silently falling back to 50. Empty counts: `--limit "$LIMIT"` with an unset
+variable is a scripting mistake, not a request for the whole stream.
 
 **Every secret access AND unlock is audited at the read, not just at the command.**
 `agents events --module secrets` surfaces two typed events:

@@ -20,6 +20,34 @@ import * as fs from 'fs';
 import { getLogsPath, type EventRecord, type EventType } from '../lib/events.js';
 import { readUnifiedEvents } from '../lib/event-stream.js';
 
+/**
+ * Resolve `--limit` into a record cap. `0` means "no cap" — without it there is
+ * no way to read the whole stream, and any aggregation (group-by failure, count
+ * per module) silently ranks the newest 50 records instead of the real set.
+ * A non-numeric or negative value is a usage error, not a quiet fallback.
+ */
+export function resolveEventsLimit(raw: string | undefined): number | undefined {
+  const token = raw ?? '50';
+  // Number('') and Number('   ') are both 0, which would read as "no cap" — an
+  // empty --limit (an unset "$LIMIT" in a script) must be rejected, not silently
+  // turned into the unbounded read.
+  const value = token.trim() === '' ? NaN : Number(token);
+  if (!Number.isInteger(value) || value < 0) {
+    throw new RangeError(`Invalid --limit ${raw} — pass a whole number, or 0 for no cap.`);
+  }
+  return value === 0 ? undefined : value;
+}
+
+/**
+ * Cap `fetched` (read with `limit + 1`) to `limit`, reporting whether records
+ * were dropped. The caller announces the cap so a truncated read is never
+ * mistaken for the complete set.
+ */
+export function capRecords<T>(fetched: T[], limit: number | undefined): { records: T[]; truncated: boolean } {
+  if (limit === undefined || fetched.length <= limit) return { records: fetched, truncated: false };
+  return { records: fetched.slice(0, limit), truncated: true };
+}
+
 interface EventsOptions {
   module?: string;
   command?: string;
@@ -89,7 +117,7 @@ export function registerEventsCommand(program: Command): void {
     .option('--agent <name>', 'Only events tagged with this agent')
     .option('--since <time>', 'Only events newer than this (e.g. 2h, 7d, or ISO date)')
     .option('--audit', 'Operational events only (skip agent activity)')
-    .option('--limit <n>', 'Max records to show (default 50)', '50')
+    .option('--limit <n>', 'Max records to show; 0 for no cap (default 50)', '50')
     .option('--json', 'Output raw records as JSON')
     .option('-f, --follow', "Tail today's operational log live")
     .addHelpText('after', `
@@ -99,33 +127,42 @@ Examples:
   agents events --audit                  Operational events only (secrets / teams / ...)
   agents events --event pr.opened --since 7d
   agents events --module secrets         Every secret accessed or revealed
-  agents events -f                       Live tail (operational)`)
+  agents events -f                       Live tail (operational)
+  agents events --event pr.opened --since 30d --limit 0 --json
+                                         Every match — use --limit 0 whenever you
+                                         aggregate, or you rank only the newest 50`)
     .action(async (options: EventsOptions) => {
       if (options.follow) {
         await followLog();
         return;
       }
 
-      const limit = Math.max(1, parseInt(options.limit ?? '50', 10) || 50);
+      let limit: number | undefined;
       let startDate: Date | undefined;
       try {
+        limit = resolveEventsLimit(options.limit);
         startDate = options.since ? parseSince(options.since) : undefined;
       } catch (err) {
         console.error(chalk.red((err as Error).message));
         process.exit(2);
       }
 
-      const records = readUnifiedEvents({
+      // Read one past the cap so we can tell a full result from a clipped one.
+      const fetched = readUnifiedEvents({
         startDate,
         eventTypes: options.event && options.event.length ? (options.event as EventType[]) : undefined,
         agent: options.agent,
         command: options.command,
         module: options.module,
-        limit,
+        limit: limit === undefined ? undefined : limit + 1,
         includeActivity: !options.audit,
       });
+      const { records, truncated } = capRecords(fetched, limit);
+      const capNote = `Showing the newest ${limit} — more events matched. Pass --limit 0 for all.`;
 
       if (options.json) {
+        // Notice goes to stderr so `--json | jq` still receives clean JSON.
+        if (truncated) console.error(chalk.yellow(capNote));
         console.log(JSON.stringify(records, null, 2));
         return;
       }
@@ -138,6 +175,7 @@ Examples:
       // query() returns newest-first; print oldest-first so a tail reads naturally.
       for (const r of records.slice().reverse()) console.log(renderRow(r));
       console.log(chalk.gray(`\n${records.length} event(s). Log: ${getLogsPath()}`));
+      if (truncated) console.log(chalk.yellow(capNote));
     });
 }
 

@@ -82,7 +82,7 @@ In short, agents-cli is a **user-owned, multi-device, self-hosted, SSH-based** v
 |---|---|---|---|---|
 | 1 | **Network partition tolerance for session recall** | Laptops sleep, tailnets flake, hosts move networks. | `--host` falls back to a stale per-query cache (`remote.ts:148-199`); R2 sync is opt-in and transcript-only. | Partition lasts longer than cache freshness; R2 not configured; you need *interactive* state, not just old transcripts. |
 | 2 | **GitHub as the shared coordination plane** | "If both partitions can still reach GitHub, agents should see each other's progress." | GitHub is used for code/PRs (teams boundary contracts), not session state or fleet coordination. | A machine can't advertise "I am working on X" except by pushing code/PRs; no lightweight progress signal. |
-| 3 | **Queryable context without embedding cost** | Not all transcript lines are equally important; embedding everything is expensive and often worse than structured extraction. | FTS5 keyword index + extracted signals (topic, todos, PR, ticket, cost). Coverage is uneven across harnesses (spec GAP-2). | Semantic/relational queries fail; non-Claude/Codex harnesses lack rich metadata; no "decisions made" or "files touched" index. |
+| 3 | **Queryable context without embedding cost** | Not all transcript lines are equally important; embedding everything is expensive and often worse than structured extraction. | FTS5 keyword index + extracted signals (topic, todos, PR, ticket, cost). Coverage is uneven across harnesses (spec SES-GAP-2). | Semantic/relational queries fail; non-Claude/Codex harnesses lack rich metadata; no "decisions made" or "files touched" index. |
 | 4 | **Importance-aware session ledgers** | Conversations contain noise; agents need a compact, navigable summary. | Live preview from the latest turn + static `topic`; no durable per-session summary or milestone index. | Long sessions become opaque; resuming/forking wastes context window on noise. |
 | 5 | **Live-state consistency across machines** | `--active` is computed on demand per peer; no CRDT for live status. | Parallel SSH polls via `remote-agents-json.ts`; dead/slow hosts skipped. | Partitions make remote active state unavailable; no eventual model of "who was doing what." |
 | 6 | **Auth beyond SSH reachability** | Cross-machine trust today requires a live SSH path. | Same-user SSH keys; secrets bundles resolved locally or via SSH. | GitHub- or token-based attestation would let machines trust each other through the shared GitHub plane even when SSH is partitioned. |
@@ -96,7 +96,7 @@ In short, agents-cli is a **user-owned, multi-device, self-hosted, SSH-based** v
 
 ### 5.2 R2 CRDT sync (`src/lib/session/sync/`)
 - **Works**: durable, encrypted, append-only transcript backup; converges without conflict resolution.
-- **Limits**: requires R2 setup; only Claude/Codex today (opencode gap, spec GAP-4); eventual, not real-time; does not sync live state or extracted metadata; centralized object store is a single point of failure if credentials/region have issues.
+- **Limits**: requires R2 setup; only Claude/Codex today (opencode gap, spec SES-GAP-4); eventual, not real-time; does not sync live state or extracted metadata; centralized object store is a single point of failure if credentials/region have issues.
 
 ### 5.3 SQLite FTS5 index (`src/lib/session/db.ts`, `src/lib/session/discover.ts`)
 - **Works**: fast keyword search, deterministic, no network/LLM cost, incremental scanning.
