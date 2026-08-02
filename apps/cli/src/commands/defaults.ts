@@ -8,23 +8,16 @@ import type { Command } from 'commander';
 import chalk from 'chalk';
 import { setHelpSections } from '../lib/help.js';
 import {
+  formatRunDefaultEntry,
   listRunDefaults,
   setRunDefault,
   unsetRunDefault,
-  type RunDefaultEntry,
 } from '../lib/run-defaults.js';
 import { getProjectRoot, setProjectRoot } from '../lib/project-root.js';
 
 interface RunDefaultsSetOptions {
   mode?: string;
   model?: string;
-}
-
-function formatRunDefault(entry: RunDefaultEntry): string {
-  const parts: string[] = [];
-  if (entry.defaults.mode) parts.push(`mode ${chalk.white(entry.defaults.mode)}`);
-  if (entry.defaults.model) parts.push(`model ${chalk.white(entry.defaults.model)}`);
-  return `${chalk.cyan(entry.selector.padEnd(22))} ${parts.join('  ')}`;
 }
 
 export function registerDefaultsCommands(program: Command): void {
@@ -63,7 +56,7 @@ export function registerDefaultsCommands(program: Command): void {
 
       console.log(chalk.bold('Run Defaults\n'));
       for (const entry of entries) {
-        console.log(`  ${formatRunDefault(entry)}`);
+        console.log(`  ${formatRunDefaultEntry(entry)}`);
       }
     });
 
@@ -79,7 +72,7 @@ export function registerDefaultsCommands(program: Command): void {
           ...(options.model !== undefined ? { model: options.model } : {}),
         });
         console.log(chalk.green('Set run default:'));
-        console.log(`  ${formatRunDefault(entry)}`);
+        console.log(`  ${formatRunDefaultEntry(entry)}`);
       } catch (err) {
         console.error(chalk.red((err as Error).message));
         process.exit(1);

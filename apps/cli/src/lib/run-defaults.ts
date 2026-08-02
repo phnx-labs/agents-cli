@@ -17,6 +17,7 @@ import { ALL_MODES } from './types.js';
 import { AGENTS } from './agents.js';
 import { readMeta, updateMeta } from './state.js';
 import { getProjectRunConfigs } from './run-config.js';
+import chalk from 'chalk';
 
 const VERSION_RE = /^(?:\*|latest|(?!.*\.\.)[A-Za-z0-9._+-]{1,64})$/;
 
@@ -182,6 +183,13 @@ export function resolveRunDefaults(
 ): ResolvedRunDefaults {
   const projectRunConfigs = getProjectRunConfigs(startPath).reverse();
   return resolveRunDefaultsFromConfigs([readMeta().run, ...projectRunConfigs], agent, version);
+}
+
+export function formatRunDefaultEntry(entry: RunDefaultEntry): string {
+  const parts: string[] = [];
+  if (entry.defaults.mode) parts.push(`mode ${chalk.white(entry.defaults.mode)}`);
+  if (entry.defaults.model) parts.push(`model ${chalk.white(entry.defaults.model)}`);
+  return `${chalk.cyan(entry.selector.padEnd(22))} ${parts.join('  ')}`;
 }
 
 export function listRunDefaults(): RunDefaultEntry[] {
