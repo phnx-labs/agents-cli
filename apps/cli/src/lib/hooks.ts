@@ -1724,12 +1724,19 @@ function registerHooksForCodex(
     if (resolved) currentManifestPaths.add(resolved);
   }
 
+  // Identity of the version home being synced. Codex stores hooks in a shared
+  // hooks.json per CODEX_HOME, but agents-cli registers version-scoped command
+  // paths; without this, old version entries keep firing after upgrades.
+  const currentVh = versionHomeIdentity(versionHome);
+
   // Remove stale entries from all event groups
   for (const eventGroups of Object.values(hooksFile.hooks)) {
     for (const group of eventGroups) {
       if (!group.hooks) continue;
       group.hooks = group.hooks.filter(
-        (h) => !isManagedHookCommand(h.command, managedPrefixes) || currentManifestPaths.has(h.command)
+        (h) =>
+          (!isManagedHookCommand(h.command, managedPrefixes) || currentManifestPaths.has(h.command)) &&
+          !isStaleSiblingVersionCommand(h.command, currentVh)
       );
     }
   }
@@ -1781,7 +1788,8 @@ function registerHooksForCodex(
       }
 
       const existingIdx = group.hooks.findIndex((h) => h.command === commandPath);
-      const hookEntry = { type: 'command', command: commandPath, timeout };
+      const eventTimeout = event === 'SessionEnd' ? Math.min(timeout, 3) : timeout;
+      const hookEntry = { type: 'command', command: commandPath, timeout: eventTimeout };
 
       if (existingIdx >= 0) {
         group.hooks[existingIdx] = hookEntry;
