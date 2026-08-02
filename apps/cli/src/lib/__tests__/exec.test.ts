@@ -791,6 +791,16 @@ describe('buildExecCommand', () => {
       expect(cmd[ci - 1]).toBe('-c');
     });
 
+    it('codex interactive TUI resume grants ~/.agents via -c writable_roots (rejects --add-dir)', () => {
+      const cmd = buildExecCommand(opts({
+        agent: 'codex', mode: 'edit', resume: true, sessionId: 'abc-2', interactive: true, prompt: undefined,
+      }));
+      expect(cmd).not.toContain('--add-dir');
+      const ci = cmd.indexOf(codexWritableRootsConfig(AGENTS_DIR));
+      expect(ci).toBeGreaterThan(0);
+      expect(cmd[ci - 1]).toBe('-c');
+    });
+
     it('codexWritableRootsConfig emits a TOML array of the quoted dir', () => {
       expect(codexWritableRootsConfig('/home/u/.agents'))
         .toBe('sandbox_workspace_write.writable_roots=["/home/u/.agents"]');
