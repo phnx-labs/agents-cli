@@ -108,8 +108,8 @@ final class ClipThumbView: NSView {
 }
 
 enum QuickDispatchAction: Int {
-    case fileTicket = 0
-    case fix = 1
+    case plan = 0
+    case run = 1
 }
 
 struct PromptDraft {
@@ -146,18 +146,23 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
 
     private var panel: PromptPanel?
     private let field = NSTextField()
-    private let modeControl = NSSegmentedControl(labels: ["File Ticket", "Fix"],
+    private let modeControl = NSSegmentedControl(labels: ["Plan", "Run"],
                                                  trackingMode: .selectOne,
                                                  target: nil,
                                                  action: nil)
     private let agentStrip = NSStackView()
     private let hint = NSTextField(labelWithString: "")
     private let thumbStrip = NSStackView()
+    // Repo the agent runs in — sourced from recent-session cwds, never $HOME. The
+    // parallel `repoDirs` holds the full paths behind the shown basenames.
+    private let repoPicker = NSPopUpButton(frame: .zero, pullsDown: false)
+    private var repoDirs: [String] = []
+    private static let lastRepoKey = "menubar.quickDispatch.lastRepo"
     private var selected: [String] = []   // newest-first order preserved
     private var selectedAgents = Set<String>()
     private var roster: [MenuAgent] = []
     private var agentButtons: [NSButton] = []
-    private var action: QuickDispatchAction = .fileTicket
+    private var action: QuickDispatchAction = .plan
     private var inFlight = false
     private var draft: PromptDraft?
     // Click-outside dismissal is armed only AFTER the summon settles — otherwise
@@ -179,10 +184,11 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         let restoredDraft = draft
         inFlight = false
         field.stringValue = restoredDraft?.note ?? ""
-        action = restoredDraft?.action ?? .fileTicket
+        action = restoredDraft?.action ?? .plan
         modeControl.setSelected(true, forSegment: action.rawValue)
         rebuildAgents(restoring: restoredDraft?.selectedAgents)
         rebuildThumbs(restoring: restoredDraft?.selectedPaths)
+        rebuildRepos()
 
         let hasThumbs = !thumbStrip.arrangedSubviews.isEmpty
         thumbStrip.isHidden = !hasThumbs
@@ -243,11 +249,13 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         guard !note.isEmpty, !inFlight else { return }
         inFlight = true
         let agents = selectedAgentList()
+        let cwd = selectedRepo()
+        if let cwd { UserDefaults.standard.set(cwd, forKey: Self.lastRepoKey) }
         switch action {
-        case .fileTicket:
-            AgentsCLI.dispatchTicketAgent(note: note, screenshotPaths: selected, agent: agents.first)
-        case .fix:
-            AgentsCLI.dispatchQuickFix(note: note, screenshotPaths: selected, agents: agents)
+        case .plan:
+            AgentsCLI.dispatchTicketAgent(note: note, screenshotPaths: selected, agent: agents.first, cwd: cwd)
+        case .run:
+            AgentsCLI.dispatchQuickFix(note: note, screenshotPaths: selected, agents: agents, cwd: cwd)
         }
         dismiss(preservingDraft: false)
     }
@@ -263,7 +271,7 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
     // MARK: Dispatch mode / agents
 
     @objc private func onModeChanged(_ sender: NSSegmentedControl) {
-        action = QuickDispatchAction(rawValue: sender.selectedSegment) ?? .fileTicket
+        action = QuickDispatchAction(rawValue: sender.selectedSegment) ?? .plan
         normalizeSelectionForAction()
         updateAgentButtons()
         updateHint()
@@ -273,9 +281,9 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         guard sender.tag >= 0, sender.tag < roster.count else { return }
         let id = roster[sender.tag].id
         switch action {
-        case .fileTicket:
+        case .plan:
             selectedAgents = [id]
-        case .fix:
+        case .run:
             if sender.state == .on {
                 selectedAgents.insert(id)
             } else {
@@ -329,7 +337,7 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         if selectedAgents.isEmpty {
             selectedAgents = [roster.first?.id ?? "claude"]
         }
-        if action == .fileTicket, let first = selectedAgentList().first {
+        if action == .plan, let first = selectedAgentList().first {
             selectedAgents = [first]
         }
     }
@@ -339,6 +347,43 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
             let id = roster[index].id
             button.state = selectedAgents.contains(id) ? .on : .off
         }
+    }
+
+    @objc private func onRepoChanged(_ sender: NSPopUpButton) {
+        updateHint()
+    }
+
+    // MARK: Repo picker
+
+    // Populate the repo dropdown from recent-session cwds (never $HOME). The last
+    // picked repo is restored; if none is remembered, the most-recent one leads.
+    private func rebuildRepos() {
+        repoDirs = AgentsCLI.recentRepoDirs()
+        repoPicker.removeAllItems()
+        guard !repoDirs.isEmpty else {
+            repoPicker.addItem(withTitle: "This Mac (no recent repo)")
+            repoPicker.isEnabled = false
+            return
+        }
+        repoPicker.isEnabled = true
+        for dir in repoDirs {
+            repoPicker.addItem(withTitle: "\u{1F4C1} \((dir as NSString).lastPathComponent)")
+            repoPicker.lastItem?.toolTip = dir
+        }
+        if let last = UserDefaults.standard.string(forKey: Self.lastRepoKey),
+           let idx = repoDirs.firstIndex(of: last) {
+            repoPicker.selectItem(at: idx)
+        } else {
+            repoPicker.selectItem(at: 0)
+        }
+    }
+
+    // The absolute path behind the selected repo item, or nil when there is no
+    // recent repo (the agent then falls back to This Mac / cwd inheritance).
+    private func selectedRepo() -> String? {
+        let idx = repoPicker.indexOfSelectedItem
+        guard idx >= 0, idx < repoDirs.count else { return nil }
+        return repoDirs[idx]
     }
 
     // MARK: Thumbnails
@@ -405,7 +450,10 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
             : count == 1 ? "1 image attached" : "\(count) images attached"
         let pickable = thumbStrip.arrangedSubviews.isEmpty ? "" : " · click attaches · dbl-click previews"
         let agents = selectedAgentList().map(LocalState.agentLabel).joined(separator: ", ")
-        let actionText = action == .fileTicket ? "file ticket with \(agents)" : "fix with \(agents)"
+        let repoName = selectedRepo().map { " in \(($0 as NSString).lastPathComponent)" } ?? ""
+        let actionText = action == .plan
+            ? "file ticket + plan with \(agents)\(repoName)"
+            : "run \(agents)\(repoName) · balanced"
         hint.stringValue = "\(attach)\(pickable)    ↩ \(actionText) · esc clear"
     }
 
@@ -441,7 +489,7 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         bg.layer?.borderColor = kAccent.withAlphaComponent(0.35).cgColor
         panel.contentView = bg
 
-        field.placeholderString = "Describe the issue or fix…"
+        field.placeholderString = "Describe the task…"
         field.font = .systemFont(ofSize: 21, weight: .regular)
         field.textColor = .labelColor
         field.isBezeled = false
@@ -458,7 +506,7 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
 
         modeControl.target = self
         modeControl.action = #selector(onModeChanged(_:))
-        modeControl.selectedSegment = QuickDispatchAction.fileTicket.rawValue
+        modeControl.selectedSegment = QuickDispatchAction.plan.rawValue
         modeControl.segmentStyle = .rounded
         modeControl.translatesAutoresizingMaskIntoConstraints = false
 
@@ -467,10 +515,22 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         agentStrip.spacing = 10
         rebuildAgents()
 
+        repoPicker.translatesAutoresizingMaskIntoConstraints = false
+        repoPicker.controlSize = .small
+        repoPicker.font = .systemFont(ofSize: 12)
+        repoPicker.target = self
+        repoPicker.action = #selector(onRepoChanged(_:))
+        rebuildRepos()
+
         hint.font = .monospacedSystemFont(ofSize: 11.5, weight: .regular)
         hint.textColor = .secondaryLabelColor
 
-        let stack = NSStackView(views: [field, modeControl, agentStrip, thumbStrip, hint])
+        let controlRow = NSStackView(views: [modeControl, repoPicker])
+        controlRow.orientation = .horizontal
+        controlRow.alignment = .centerY
+        controlRow.spacing = 12
+
+        let stack = NSStackView(views: [field, controlRow, agentStrip, thumbStrip, hint])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 10

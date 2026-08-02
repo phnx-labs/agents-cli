@@ -339,11 +339,30 @@ enum AgentsCLI {
     // paths never pass through an LLM shell string. It runs as a MONITORED async
     // process (not fully detached) so completion drives a real notification
     // without blocking the panel/UI.
-    static func dispatchTicketAgent(note: String, screenshotPaths: [String], agent: String? = nil) {
+    // Distinct recent working directories from local session history, most-recent
+    // first, with the home dir dropped — running an agent straight in $HOME is too
+    // broad a permission surface, so the panel offers real repos to scope into.
+    static func recentRepoDirs(limit: Int = 8) -> [String] {
+        let home = (NSHomeDirectory() as NSString).standardizingPath
+        var seen = Set<String>()
+        var dirs: [String] = []
+        for s in recentSessions(limit: 40) {
+            guard let cwd = s.cwd, !cwd.isEmpty else { continue }
+            let norm = (cwd as NSString).standardizingPath
+            if norm == home { continue }
+            if seen.insert(norm).inserted { dirs.append(norm) }
+            if dirs.count >= limit { break }
+        }
+        return dirs
+    }
+
+    static func dispatchTicketAgent(note: String, screenshotPaths: [String], agent: String? = nil, cwd: String? = nil) {
         let prompt = ticketAgentPrompt(note: note, screenshotPaths: screenshotPaths)
         let agent = agent ?? env["AGENTS_ISSUE_AGENT"] ?? "claude"
         Notifier.post(title: "Filing ticket…", body: shortenForNotice(note))
-        runMonitored(argv(["run", agent, prompt, "--mode", "auto"])) { output, ok in
+        var planArgs = ["run", agent, prompt, "--mode", "auto"]
+        if let cwd, !cwd.isEmpty { planArgs += ["--cwd", cwd] }
+        runMonitored(argv(planArgs)) { output, ok in
             guard ok, let draft = parseTicketDraft(output) else {
                 Notifier.post(title: "Ticket agent finished",
                               body: ok ? "Could not parse ticket draft from agent output."
