@@ -812,6 +812,9 @@ export interface Meta {
    * passing `--durable` per unlock; off means the secure split default (survive
    * upgrade/restart, re-lock on sleep). */
   secrets?: {
+    /** Default storage backend used when `agents secrets create/import` create a
+     * new bundle without `--backend` or `--synced`. */
+    backend?: 'keychain' | 'file' | 'vault';
     /** Default prompt policy. `hold` (the default) holds a bundle for
      * `agent.holdMs`; `daily`/`session` are accepted aliases kept so an existing
      * agents.yaml keeps working. See SecretsPolicy in lib/secrets/bundles.ts. */

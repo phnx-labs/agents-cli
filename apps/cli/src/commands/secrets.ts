@@ -758,7 +758,7 @@ function countExpiringSoon(meta: Record<string, VarMeta> | undefined): number {
  * guard can't drift between them.
  */
 function resolveImportBundle(name: string, backendOpt: string | undefined, synced = false): SecretsBundle {
-  const requestedBackend = synced ? 'vault' : parseBackendOpt(backendOpt);
+  const requestedBackend = synced ? 'vault' : resolveBackendOpt(backendOpt);
   if (bundleExists(name)) {
     const bundle = readBundle(name);
     if (requestedBackend !== 'keychain' && bundle.backend !== requestedBackend) {
@@ -1237,7 +1237,7 @@ export function registerSecretsCommands(program: Command): void {
     .option('--policy <policy>', "prompt policy: hold (default, ask once per hold window — secrets.agent.holdMs, 7d by default), always (ask every time), or never (silent, NO biometry ACL — needs --i-understand). 'daily'/'session' are accepted aliases for 'hold'.")
     .addOption(new Option('--tier <policy>', 'deprecated alias for --policy').hideHelp())
     .option('--i-understand', 'Confirm creating a "never"-policy bundle (no biometry ACL) without an interactive prompt')
-    .option('--backend <backend>', 'storage backend: keychain (default) or file (passphrase-encrypted)', 'keychain')
+    .option('--backend <backend>', 'storage backend: keychain or file (defaults to agents.yaml secrets.backend)')
     .option('--synced', 'Store this bundle in the age-encrypted synced secrets file for user-managed cross-machine file sync')
     .option('--force', 'Overwrite an existing bundle')
     .action(async (name: string | undefined, opts: { description?: string; allowExec?: boolean; policy?: string; tier?: string; iUnderstand?: boolean; backend?: string; synced?: boolean; force?: boolean }) => {
@@ -1248,7 +1248,7 @@ export function registerSecretsCommands(program: Command): void {
         // inherits the configured default (`daily`) instead of being pinned.
         const policyOpt = opts.policy ?? opts.tier;
         const policy = policyOpt ? parsePolicyOpt(policyOpt) : undefined;
-        const backend = opts.synced ? 'vault' : parseBackendOpt(opts.backend);
+        const backend = opts.synced ? 'vault' : resolveBackendOpt(opts.backend);
         if (bundleExists(resolvedName) && !opts.force) {
           console.error(chalk.red(`Bundle '${resolvedName}' already exists. Use --force to overwrite.`));
           process.exit(1);
@@ -1658,7 +1658,7 @@ Examples:
     .addOption(new Option('--from-1password', 'deprecated alias for --from 1password:<vault>').hideHelp())
     .addOption(new Option('--vault <name>', 'deprecated: name the vault in --from 1password:<vault>').hideHelp())
     .option('--all-plaintext', 'Store every imported value as a literal in the bundle metadata (skip keychain item creation)')
-    .option('--backend <backend>', 'When creating the bundle: keychain (default) or file (passphrase-encrypted)', 'keychain')
+    .option('--backend <backend>', 'When creating the bundle: keychain or file (defaults to agents.yaml secrets.backend)')
     .option('--synced', 'When creating the bundle, store it in the age-encrypted synced secrets file')
     .option('--force', 'Overwrite an existing key in the bundle')
     .option('--purge', 'With --from icloud: delete the iCloud copies after a successful import (iCloud propagates the deletion to your other devices)')
@@ -1727,7 +1727,7 @@ Examples:
         if (opts.from1password) {
           console.log(chalk.yellow('--from-1password is deprecated; use --from 1password:<vault>.'));
         }
-        const requestedBackend = opts.synced ? 'vault' : parseBackendOpt(opts.backend);
+        const requestedBackend = opts.synced ? 'vault' : resolveBackendOpt(opts.backend);
 
         if (source.kind === 'icloud') {
           await importFromICloud(bundleName, {
@@ -2589,11 +2589,24 @@ async function confirmNeverPolicyInteractive(bundleName: string): Promise<boolea
 }
 
 /** Validate a --backend value, exiting with a clear message on a bad one. */
-function parseBackendOpt(raw: string | undefined): SecretsBackend {
-  const v = (raw ?? 'keychain').toLowerCase();
+export function secretsDefaultBackend(): SecretsBackend {
+  const raw = readMeta().secrets?.backend;
+  if (raw === undefined) return 'keychain';
+  if (raw === 'keychain' || raw === 'file' || raw === 'vault') return raw;
+  console.error(chalk.red(`Invalid secrets.backend '${raw}'. Use 'keychain', 'file', or 'vault'.`));
+  process.exit(1);
+}
+
+function parseBackendOpt(raw: string | undefined, defaultBackend: SecretsBackend = 'keychain'): SecretsBackend {
+  const v = (raw ?? defaultBackend).toLowerCase();
+  if (!raw && v === 'vault') return 'vault';
   if (v === 'keychain' || v === 'file') return v;
   console.error(chalk.red(`Invalid --backend '${raw}'. Use 'keychain' or 'file'. For cross-machine file sync, pass --synced.`));
   process.exit(1);
+}
+
+function resolveBackendOpt(raw: string | undefined): SecretsBackend {
+  return parseBackendOpt(raw, raw === undefined ? secretsDefaultBackend() : 'keychain');
 }
 
 /** Human-readable "locks in 3 hours" / "locks in 5 minutes" from an epoch-ms expiry. */

@@ -24,7 +24,6 @@ interface SetupSecretsOptions {
   importFrom?: string;
   bundle?: string;
   vault?: string;
-  yes?: boolean;
   iUnderstand?: boolean;
   force?: boolean;
 }
@@ -73,13 +72,13 @@ function saveSetupSecretsPrefs(prefs: SetupSecretsPrefs): string {
   return file;
 }
 
-function applyPromptPolicyDefault(policy: SetupSecretsPolicy): void {
-  if (policy === 'never') return;
+function applySecretsDefaults(backend: SetupSecretsBackend, policy: SetupSecretsPolicy): void {
   updateMeta((meta) => ({
     ...meta,
     secrets: {
       ...meta.secrets,
-      policy,
+      backend,
+      ...(policy === 'never' ? {} : { policy }),
     },
   }));
 }
@@ -218,7 +217,7 @@ export async function runSecretsSetupWizard(opts: SetupSecretsOptions = {}): Pro
     throw new Error("Refusing to save policy 'never' non-interactively without --i-understand.");
   }
 
-  applyPromptPolicyDefault(policy);
+  applySecretsDefaults(backend, policy);
   const prefsFile = saveSetupSecretsPrefs({
     defaultBackend: backend,
     defaultPolicy: policy,
@@ -243,10 +242,9 @@ export function registerSetupSecretsCommand(setupCmd: Command): void {
     .description('Configure `agents secrets` defaults and optionally import existing secrets.')
     .option('--backend <backend>', 'default backend: keychain, file, or vault')
     .option('--policy <policy>', 'default prompt policy: daily, always, or never')
-    .option('--import-from <source>', 'optional import source: none, env, 1password, or icloud', 'none')
+    .option('--import-from <source>', 'optional import source: none, env, 1password, or icloud')
     .option('--bundle <name>', 'bundle name for optional imports')
     .option('--vault <name-or-path>', '1Password vault name, or .env path with --import-from env')
-    .option('--yes', 'accept defaults for omitted choices in non-interactive use')
     .option('--i-understand', 'allow saving the "never" policy preference without an interactive prompt')
     .option('--force', 'pass --force through to optional imports')
     .action(async (options: SetupSecretsOptions) => {

@@ -48,7 +48,47 @@ describe('agents setup secrets', () => {
     expect(prefs.defaultPolicy).toBe('always');
 
     const { readMeta } = await import('../lib/state.js');
+    expect(readMeta().secrets?.backend).toBe('file');
     expect(readMeta().secrets?.policy).toBe('always');
+  });
+
+  it('does not treat omitted --import-from as a CLI-selected import source', () => {
+    const program = new Command();
+    registerSetupCommand(program);
+
+    const setup = program.commands.find((c) => c.name() === 'setup')!;
+    const secrets = setup.commands.find((c) => c.name() === 'secrets')!;
+    secrets.parseOptions([]);
+
+    expect(secrets.opts().importFrom).toBeUndefined();
+  });
+
+  it('makes future secrets create/import use the saved backend default', async () => {
+    process.env.AGENTS_SECRETS_PASSPHRASE = 'setup-test-passphrase';
+
+    const setupProgram = new Command();
+    setupProgram.exitOverride();
+    registerSetupCommand(setupProgram);
+    await setupProgram.parseAsync(['setup', 'secrets', '--backend', 'file', '--policy', 'daily'], {
+      from: 'user',
+    });
+
+    const { registerSecretsCommands } = await import('./secrets.js');
+    const { readBundle } = await import('../lib/secrets/bundles.js');
+
+    const createProgram = new Command();
+    createProgram.exitOverride();
+    registerSecretsCommands(createProgram);
+    await createProgram.parseAsync(['secrets', 'create', 'setup-default-create'], { from: 'user' });
+    expect(readBundle('setup-default-create')?.backend).toBe('file');
+
+    const envPath = path.join(TEST_HOME, 'setup-default.env');
+    fs.writeFileSync(envPath, 'SETUP_DEFAULT=1\n');
+    const importProgram = new Command();
+    importProgram.exitOverride();
+    registerSecretsCommands(importProgram);
+    await importProgram.parseAsync(['secrets', 'import', 'setup-default-import', '--from', envPath], { from: 'user' });
+    expect(readBundle('setup-default-import')?.backend).toBe('file');
   });
 });
 
