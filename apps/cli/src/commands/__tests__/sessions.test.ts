@@ -958,7 +958,11 @@ describe('resolveSessionQuery id-vs-search resolution', () => {
   // another machine); the pool holds an unrelated session whose topic merely
   // quotes that id — the exact shape that made `sessions <uuid>` render the wrong
   // transcript and advise "Pass a longer ID" for an already-complete id.
-  const wanted = 'd3470b57-2af6-4c11-b1de-3fab94f43603';
+  // Synthetic id that cannot exist in any real session DB: a complete id absent
+  // from the pool now also consults the on-disk index (findSessionsById), so a
+  // REAL id here would resolve from the developer's own history and make these
+  // tests machine-specific (they'd fail wherever that session exists).
+  const wanted = '00000000-0000-4000-8000-000000000042';
   const decoy = meta({
     id: 'ffa1f432-1a9e-4a81-8e93-e70aa8df1c95',
     topic: `Resume previous work: ${wanted}`,
@@ -980,7 +984,7 @@ describe('resolveSessionQuery id-vs-search resolution', () => {
 
   it('keeps short-id prefix lookup working', () => {
     const real = meta({ id: wanted, topic: 'Improve session display' });
-    const r = resolveSessionQuery([real], 'd3470b57');
+    const r = resolveSessionQuery([real], '00000000');
     expect(r.matches.map(s => s.id)).toEqual([wanted]);
     expect(r.byId).toBe(true);
     expect(r.completeId).toBe(false);
