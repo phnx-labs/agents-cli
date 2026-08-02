@@ -29,6 +29,8 @@ import {
   loadIgnored,
   removeDevice,
   removeIgnored,
+  setAutoLaunchEnabled,
+  setAutoLaunchPreferred,
   upsertDevice,
   writeReachability,
   type DeviceAuthMethod,
@@ -797,6 +799,8 @@ Typical workflow:
   agents devices sync --yes      # non-interactive: register all non-ignored nodes
   agents devices list            # see what's registered
   agents devices ignore ipad165  # dismiss a node so it's never re-suggested
+  agents devices disable zion    # exclude a device from Factory auto-launch
+  agents devices prefer mac-mini # boost a device in Factory auto-launch ranking
   agents devices set win-mini --auth password --bundle muqsit
   agents devices render --write  # write ~/.ssh/config.d/agents include
   agents fleet update            # roll out latest agents-cli to every online device
@@ -878,6 +882,62 @@ Typical workflow:
         return;
       }
       console.log(chalk.green(`No longer ignoring '${name}'`) + chalk.gray(' — run `agents devices sync` to register it.'));
+    });
+
+  devicesCmd
+    .command('enable <name>')
+    .description('Allow a registered device to be auto-picked by Factory agent launches.')
+    .action(async (name: string) => {
+      try {
+        await mustGetDevice(name);
+        await setAutoLaunchEnabled(name, true);
+        console.log(chalk.green(`Enabled '${name}'`) + chalk.gray(' for Factory auto-launch.'));
+      } catch (err: any) {
+        console.error(chalk.red(err.message));
+        process.exit(1);
+      }
+    });
+
+  devicesCmd
+    .command('disable <name>')
+    .description('Exclude a registered device from Factory auto-launch. It can still be picked manually via (Pick Host).')
+    .action(async (name: string) => {
+      try {
+        await mustGetDevice(name);
+        await setAutoLaunchEnabled(name, false);
+        console.log(chalk.green(`Disabled '${name}'`) + chalk.gray(' for Factory auto-launch.'));
+      } catch (err: any) {
+        console.error(chalk.red(err.message));
+        process.exit(1);
+      }
+    });
+
+  devicesCmd
+    .command('prefer <name>')
+    .description('Boost a registered device in Factory auto-launch ranking.')
+    .action(async (name: string) => {
+      try {
+        await mustGetDevice(name);
+        await setAutoLaunchPreferred(name, true);
+        console.log(chalk.green(`Preferred '${name}'`) + chalk.gray(' for Factory auto-launch.'));
+      } catch (err: any) {
+        console.error(chalk.red(err.message));
+        process.exit(1);
+      }
+    });
+
+  devicesCmd
+    .command('unprefer <name>')
+    .description('Remove the auto-launch preference boost from a device.')
+    .action(async (name: string) => {
+      try {
+        await mustGetDevice(name);
+        await setAutoLaunchPreferred(name, false);
+        console.log(chalk.green(`No longer preferring '${name}'`) + chalk.gray(' for Factory auto-launch.'));
+      } catch (err: any) {
+        console.error(chalk.red(err.message));
+        process.exit(1);
+      }
     });
 
   const runList = async (opts: { json?: boolean; stats?: boolean; full?: boolean; refresh?: boolean; live?: boolean } = {}) => {

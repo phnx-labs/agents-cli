@@ -6,6 +6,16 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **Respect per-device auto-launch preferences from the CLI (RUSH-2092).**
+  Devices disabled with `agents devices disable <name>` are excluded from
+  `New <Agent>` auto launches; devices preferred with `agents devices prefer
+  <name>` get a ranking boost. Disabled devices remain available through
+  `New <Agent> (Pick Host)`. Preferences are read from
+  `~/.agents/.history/devices/auto-launch.json`. Source:
+  `apps/factory/src/core/deviceAutoLaunch.ts`,
+  `apps/factory/src/core/launchHistory.ts`,
+  `apps/factory/src/vscode/extension.ts`.
+
 ## [0.9.303] - 2026-08-02
 
 - **Remove deprecated Gemini launch commands from the Factory palette (RUSH-2089).** Gemini is no longer supported; Antigravity is its replacement. The command palette no longer shows `Agents: New Gemini`, `Agents: New Gemini (Pick Host)`, `Agents: New Gemini (Auto)`, or `Agents: Setup Gemini`. Existing Gemini session parsing and transcript watching remain in place so old sessions are still readable. Source: `apps/factory/src/vscode/extension.ts`, `apps/factory/package.json`.

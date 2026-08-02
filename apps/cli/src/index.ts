@@ -205,7 +205,7 @@ import { renderWhatsNew } from './lib/whats-new.js';
 import type { AgentId } from './lib/types.js';
 import { IS_WINDOWS } from './lib/platform/index.js';
 import { getCliLaunch } from './lib/cli-entry.js';
-import { emit, redactArgs } from './lib/events.js';
+import { emit, emitFriction, redactArgs } from './lib/events.js';
 
 // Transparent shim delegate: the generated Windows `.cmd` shims invoke
 // `agents __shim <agent>[@version] <raw args>`. Intercept here, before commander
@@ -839,6 +839,33 @@ function registerResourcesTombstoneCommand(p: Command): void {
     });
 }
 
+/**
+ * Hidden `agents _internal <sub>` namespace for machine-to-machine calls that
+ * are not user-facing. The first subcommand is `friction`, used by shell guard
+ * hooks (git-guard, rm-guard, …) to self-report a block into the event log
+ * before they exit 2 — they run before any `agents` process exists, so they
+ * cannot emit in-process.
+ */
+function registerInternalCommand(p: Command): void {
+  const internal = p.command('_internal', { hidden: true });
+  internal
+    .command('friction')
+    .option('--surface <surface>', 'Subsystem that hit the failure (e.g. guard, teams)')
+    .option('--id <failureId>', 'Stable failure slug (e.g. git.reset-hard)')
+    .option('--error <message>', 'Human-readable failure reason')
+    .option('--command <command>', 'The command that was blocked')
+    .action((opts: { surface?: string; id?: string; error?: string; command?: string }) => {
+      if (!opts.surface || !opts.id) {
+        process.exit(0); // fail-open: never break the caller
+      }
+      emitFriction(opts.surface, opts.id, {
+        ...(opts.error ? { error: opts.error } : {}),
+        ...(opts.command ? { command: opts.command } : {}),
+      });
+      process.exit(0);
+    });
+}
+
 /** Self-upgrade command (`agents upgrade [version]`). */
 function registerUpgradeCommand(p: Command): void {
   p.command('upgrade')
@@ -937,6 +964,9 @@ async function registerEagerForRequest(name: string): Promise<boolean> {
       registerResourcesTombstoneCommand(program);
       await reg(loadView);
       return true;
+    case '_internal':
+      registerInternalCommand(program);
+      return true;
     case 'upgrade':
       registerUpgradeCommand(program);
       return true;
@@ -1031,6 +1061,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadSsh);
   registerJobsCronAliasCommand(program, 'jobs');
   registerJobsCronAliasCommand(program, 'cron');
+  registerInternalCommand(program);
   registerUpgradeCommand(program);
   await reg(loadPull);
   await reg(loadPush);

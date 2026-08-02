@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { BUILT_IN_AGENTS, getBuiltInByKey, getBuiltInDefByTitle, getBuiltInByPrefix, STRATEGY_LAUNCH_AGENTS, modeFlagForAgent, AgentLaunchMode, RunStrategy, buildAgentLaunchCommand, wrapNativeAgentCommand, shquote } from '../core/agents';
+import { loadAutoLaunchPreferences, isAutoLaunchEnabled, isAutoLaunchPreferred } from '../core/deviceAutoLaunch';
 import { parseSpawnRequest, SpawnRequest } from '../core/spawn';
 import {
   AgentConfig,
@@ -379,7 +380,8 @@ function resolveCachedAutoHost(context: vscode.ExtensionContext, agentKey: strin
   const startedAt = performance.now();
   const cache = context.globalState.get<LaunchHealthCache>(LAUNCH_HEALTH_KEY);
   const history = context.globalState.get<LaunchHistory>(LAUNCH_HISTORY_KEY, {});
-  const host = pickCachedLaunchHost(agentKey, cache, history) ?? undefined;
+  const preferences = loadAutoLaunchPreferences();
+  const host = pickCachedLaunchHost(agentKey, cache, history, preferences) ?? undefined;
   console.log(`[launchAgent] cached ${agentKey} host pick took ${(performance.now() - startedAt).toFixed(1)}ms`);
   return host;
 }
@@ -410,7 +412,15 @@ async function saveLaunchHistory(context: vscode.ExtensionContext, device: strin
 async function resolveBalancedHost(pool?: string[], agentKey?: string): Promise<string | undefined> {
   const localName = normalizeHost(os.hostname());
   const devices = await listRegisteredDevices();
-  const fleet = devices.map(d => ({ name: d.name, online: !!d.online, running: 0 }));
+  const preferences = loadAutoLaunchPreferences();
+  const fleet = devices
+    .filter(d => isAutoLaunchEnabled(preferences, d.name))
+    .map(d => ({
+      name: d.name,
+      online: !!d.online,
+      running: 0,
+      preferred: isAutoLaunchPreferred(preferences, d.name),
+    }));
   const eligible = resolveBalancePool(fleet, { localName, pool }).filter(c => c.online);
   if (eligible.length === 0) {
     vscode.window.showInformationMessage('Balanced launch: no online device available — running locally.');

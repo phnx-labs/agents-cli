@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatSignInBadge, loginHint, shouldCheckLoginBeforeLaunch } from './signin-badge.js';
+import { ambientClaudeToken, formatSignInBadge, loginHint, shouldCheckLoginBeforeLaunch } from './signin-badge.js';
 import type { AccountInfo } from './agents.js';
 
 // Strip ANSI so assertions read against text, not color codes.
@@ -79,5 +79,23 @@ describe('shouldCheckLoginBeforeLaunch', () => {
     expect(shouldCheckLoginBeforeLaunch({ ...base, rotated: true })).toBe(false);
     // A suppressor wins even when forceInteractive is set.
     expect(shouldCheckLoginBeforeLaunch({ ...base, forceInteractive: true, rotated: true })).toBe(false);
+  });
+});
+
+describe('ambientClaudeToken', () => {
+  it('flags a claude box whose environment carries a token', () => {
+    expect(ambientClaudeToken('claude', { CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-test' })).toBe(true);
+  });
+
+  it('is false with no token, an empty token, or whitespace', () => {
+    expect(ambientClaudeToken('claude', {})).toBe(false);
+    expect(ambientClaudeToken('claude', { CLAUDE_CODE_OAUTH_TOKEN: '' })).toBe(false);
+    expect(ambientClaudeToken('claude', { CLAUDE_CODE_OAUTH_TOKEN: '   ' })).toBe(false);
+  });
+
+  it('never claims an ambient token for another agent', () => {
+    // The var is claude-specific; codex/kimi read their own credential files, so
+    // a stray value must not relabel their badge.
+    expect(ambientClaudeToken('codex', { CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-test' })).toBe(false);
   });
 });

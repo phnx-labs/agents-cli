@@ -4,6 +4,7 @@ import {
   pickBestHost,
   deviceHasUsableVersion,
   hostScore,
+  PREFERENCE_BONUS,
   resolveBalancePool,
   DeviceLoad,
   VersionHealth,
@@ -196,4 +197,33 @@ test('hostScore: running agents weighted 10x, load capped at 16, mem scaled by 2
   expect(hostScore({ name: 'x', online: true, running: 0, loadAvg1: 99, memPercent: 0 })).toBe(16);
   // Unprobed hardware contributes 0.
   expect(hostScore({ name: 'x', online: true, running: 3 })).toBe(30);
+});
+
+test('hostScore: a preferred device is favored by PREFERENCE_BONUS', () => {
+  const base = { name: 'x', online: true, running: 2, loadAvg1: 3, memPercent: 40 };
+  expect(hostScore({ ...base, preferred: true })).toBeCloseTo(hostScore(base) - PREFERENCE_BONUS, 5);
+});
+
+// The regression behind the review of PR #1714: `agents devices prefer <name>`
+// only biased the warm-cache pick, because the balanced pool path ranks with
+// pickBestHost and the bonus lived outside hostScore. Both paths rank through
+// hostScore now, so a preference has to decide this tie.
+test('pickBestHost: preference decides between otherwise-equivalent hosts', () => {
+  expect(
+    pickBestHost([
+      { name: 'plain', online: true, running: 10, usableVersion: true, loadAvg1: 1, memPercent: 20 },
+      { name: 'chosen', online: true, running: 10, usableVersion: true, loadAvg1: 1, memPercent: 20, preferred: true },
+    ]),
+  ).toBe('chosen');
+});
+
+test('pickBestHost: preference does not override a genuinely swamped host', () => {
+  // 'busy' is preferred but carries 5 more running agents (50 pts) than the
+  // 20-pt bonus can offset — work still goes to the machine with room.
+  expect(
+    pickBestHost([
+      { name: 'busy', online: true, running: 6, usableVersion: true, preferred: true },
+      { name: 'free', online: true, running: 1, usableVersion: true },
+    ]),
+  ).toBe('free');
 });

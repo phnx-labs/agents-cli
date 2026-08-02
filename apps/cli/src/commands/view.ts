@@ -28,7 +28,7 @@ import {
   colorAgent,
 } from '../lib/agents.js';
 import type { AccountInfo, CliState } from '../lib/agents.js';
-import { loginHint } from '../lib/signin-badge.js';
+import { ambientClaudeToken, loginHint } from '../lib/signin-badge.js';
 import type { AgentId } from '../lib/types.js';
 import { machineId } from '../lib/machine-id.js';
 import { authCacheKey, formatCheckedAge, readAuthHealthCache, type AuthHealth } from '../lib/auth-health.js';
@@ -640,8 +640,21 @@ async function showInstalledVersions(
         if (runDefaults.mode) runDefaultBits.push(`mode:${runDefaults.mode}`);
 
         if (!hasEmail && !hasUsage && !signedIn) {
-          // Installed but never signed in
-          parts.push(chalk.gray('(logged out — log in with: ' + loginHint(agentId) + ')'));
+          // No per-version credential. That is NOT the same as unusable: Claude
+          // Code authenticates from `CLAUDE_CODE_OAUTH_TOKEN` when the
+          // environment carries one, and a run then succeeds against whatever
+          // account minted that token — while `signedIn` (agents.ts: `!!email`,
+          // read from this version home's `.claude.json`) stays false because no
+          // account was ever written here. Reporting that as "logged out" reads
+          // as a locked-out account and sends people hunting a login that is not
+          // missing; naming the ambient token instead points at the real state —
+          // every version on this box resolves to the SAME account, so balanced
+          // rotation across them is not actually rotating.
+          parts.push(chalk.gray(
+            ambientClaudeToken(agentId)
+              ? '(no per-version login — using ambient CLAUDE_CODE_OAUTH_TOKEN)'
+              : '(logged out — log in with: ' + loginHint(agentId) + ')',
+          ));
         } else {
           if (hasEmail || hasUsage || hasActive || signedIn) {
             // Signed-in agents without a local email show their account id

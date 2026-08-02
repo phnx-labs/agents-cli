@@ -1,4 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import {
   truncate,
   relTime,
@@ -9,7 +12,20 @@ import {
   isJsonMode,
   termLink,
   formatDie,
+  dieFriction,
 } from './format.js';
+import { _resetForTest } from './events.js';
+
+const tempDirs: string[] = [];
+
+afterEach(() => {
+  for (const dir of tempDirs) {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ok */ }
+  }
+  tempDirs.length = 0;
+  _resetForTest();
+  vi.restoreAllMocks();
+});
 
 describe('truncate', () => {
   it('returns the string unchanged when within max', () => {
@@ -121,5 +137,30 @@ describe('formatDie (RUSH-1830 — machine-readable failures for --json callers)
   it('omits an absent hint from the json payload (no null/undefined key)', () => {
     const out = formatDie('nope', { json: true });
     expect(out.text).not.toContain('hint');
+  });
+});
+
+describe('dieFriction', () => {
+  it('emits a friction event before exiting', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-format-'));
+    tempDirs.push(dir);
+    const eventsPath = path.join(dir, 'events.jsonl');
+    _resetForTest(eventsPath);
+
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((code?: number) => {
+      throw new Error(`exit:${code}`);
+    });
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(() => dieFriction('teams', 'remote-cwd-on-add', 'cannot use --remote-cwd')).toThrow('exit:1');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(errSpy).toHaveBeenCalled();
+
+    const content = fs.readFileSync(eventsPath, 'utf-8');
+    const record = JSON.parse(content.trim().split('\n').pop()!);
+    expect(record.event).toBe('friction');
+    expect(record.surface).toBe('teams');
+    expect(record.failureId).toBe('remote-cwd-on-add');
+    expect(record.error).toBe('cannot use --remote-cwd');
   });
 });

@@ -1,4 +1,5 @@
 import { hostScore } from './launchHost';
+import { AutoLaunchPreference, isAutoLaunchEnabled, isAutoLaunchPreferred } from './deviceAutoLaunch';
 
 export interface LaunchHistoryEntry {
   launches: number;
@@ -77,28 +78,40 @@ function historyPreference(entry: LaunchHistoryEntry | undefined, now: number): 
 }
 
 /**
- * Rank a warm cache without I/O. Unreachable, offline, stale, or agent-unusable
- * devices are excluded before history and load are considered.
+ * Rank a warm cache without I/O. Unreachable, offline, stale, agent-unusable,
+ * or disabled devices are excluded before history and load are considered.
+ * Preferred devices receive a ranking bonus.
  */
 export function pickCachedLaunchHost(
   agentKey: string,
   cache: LaunchHealthCache | undefined,
   history: LaunchHistory,
+  preferences: Record<string, AutoLaunchPreference> = {},
   now = Date.now(),
 ): string | null {
   if (!cache || now - cache.refreshedAt > LAUNCH_HEALTH_MAX_AGE_MS) return null;
   const eligible = cache.devices.filter(
-    (device) => device.online && device.sshReachable && device.usableAgents[agentKey] === true,
+    (device) =>
+      device.online &&
+      device.sshReachable &&
+      device.usableAgents[agentKey] === true &&
+      isAutoLaunchEnabled(preferences, device.name),
   );
   if (eligible.length === 0) return null;
 
+  // The preference bonus lives inside hostScore (launchHost.ts) so the balanced
+  // pool pick applies it identically — pass the flag, don't re-implement it.
+  const rank = (device: CachedLaunchDevice): number =>
+    hostScore({ ...device, preferred: isAutoLaunchPreferred(preferences, device.name) }) -
+    historyPreference(history[normalized(device.name)], now);
+
   let best = eligible[0];
-  let bestRank = hostScore(best) - historyPreference(history[normalized(best.name)], now);
+  let bestRank = rank(best);
   for (const device of eligible.slice(1)) {
-    const rank = hostScore(device) - historyPreference(history[normalized(device.name)], now);
-    if (rank < bestRank) {
+    const deviceRank = rank(device);
+    if (deviceRank < bestRank) {
       best = device;
-      bestRank = rank;
+      bestRank = deviceRank;
     }
   }
   return best.name;

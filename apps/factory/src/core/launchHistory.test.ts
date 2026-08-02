@@ -24,7 +24,7 @@ describe('pickCachedLaunchHost', () => {
       familiar: { launches: 12, successes: 12, lastLaunchAt: NOW - 60_000 },
     };
 
-    expect(pickCachedLaunchHost('codex', health, history, NOW)).toBe('familiar');
+    expect(pickCachedLaunchHost('codex', health, history, {}, NOW)).toBe('familiar');
   });
 
   test('never selects offline, SSH-unreachable, or harness-unusable devices', () => {
@@ -35,14 +35,34 @@ describe('pickCachedLaunchHost', () => {
       { name: 'ready', online: true, sshReachable: true, running: 3, usableAgents: { claude: true }, fetchedAt: NOW },
     ]);
 
-    expect(pickCachedLaunchHost('claude', health, {}, NOW)).toBe('ready');
+    expect(pickCachedLaunchHost('claude', health, {}, {}, NOW)).toBe('ready');
   });
 
   test('cold or stale cache returns null for local fallback', () => {
-    expect(pickCachedLaunchHost('gemini', undefined, {}, NOW)).toBeNull();
+    expect(pickCachedLaunchHost('gemini', undefined, {}, {}, NOW)).toBeNull();
     const stale = cache([]);
     stale.refreshedAt = NOW - LAUNCH_HEALTH_MAX_AGE_MS - 1;
-    expect(pickCachedLaunchHost('gemini', stale, {}, NOW)).toBeNull();
+    expect(pickCachedLaunchHost('gemini', stale, {}, {}, NOW)).toBeNull();
+  });
+
+  test('excludes devices disabled for auto-launch', () => {
+    const health = cache([
+      { name: 'disabled', online: true, sshReachable: true, running: 0, loadAvg1: 1, memPercent: 20, usableAgents: { claude: true }, fetchedAt: NOW },
+      { name: 'enabled', online: true, sshReachable: true, running: 3, loadAvg1: 1, memPercent: 20, usableAgents: { claude: true }, fetchedAt: NOW },
+    ]);
+    const preferences = { disabled: { enabled: false } };
+
+    expect(pickCachedLaunchHost('claude', health, {}, preferences, NOW)).toBe('enabled');
+  });
+
+  test('boosts preferred devices in ranking', () => {
+    const health = cache([
+      { name: 'busy', online: true, sshReachable: true, running: 10, loadAvg1: 1, memPercent: 20, usableAgents: { claude: true }, fetchedAt: NOW },
+      { name: 'preferred', online: true, sshReachable: true, running: 10, loadAvg1: 1, memPercent: 20, usableAgents: { claude: true }, fetchedAt: NOW },
+    ]);
+    const preferences = { preferred: { preferred: true } };
+
+    expect(pickCachedLaunchHost('claude', health, {}, preferences, NOW)).toBe('preferred');
   });
 });
 

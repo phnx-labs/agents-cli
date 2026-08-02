@@ -95,7 +95,7 @@ function run(
   args: string[],
   setup?: (home: string) => void,
   timeout = 10_000,
-): { stdout: string; stderr: string; status: number | null; error?: Error } {
+): { stdout: string; stderr: string; status: number | null; error?: Error; home: string } {
   const home = guardedHome();
   setup?.(home);
   const r = spawnSync('bun', [INDEX, ...args], {
@@ -107,9 +107,12 @@ function run(
       AGENTS_NO_UPDATE_CHECK: '1',
       AGENTS_NO_USAGE_TRACK: '1',
       AGENTS_SKIP_MIGRATION: '1',
+      // Vitest's global setup redirects the real log; point the spawned CLI at
+      // this test home's log so assertions read the right file.
+      AGENTS_EVENTS_PATH: path.join(home, '.agents', 'events.jsonl'),
     },
   });
-  return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', status: r.status, error: r.error };
+  return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', status: r.status, error: r.error, home };
 }
 
 describe('teams list output modes', () => {
@@ -162,5 +165,19 @@ describe('teams list output modes', () => {
       agent_count: 1,
       running: 1,
     });
+  });
+
+  it('emits a friction event when teams add --remote-cwd is rejected', () => {
+    const { status, home } = run(['teams', 'add', 't1', 'claude', 'task', '--remote-cwd', '/tmp/x']);
+
+    expect(status).toBe(1);
+    const eventsPath = path.join(home, '.agents', 'events.jsonl');
+    expect(fs.existsSync(eventsPath)).toBe(true);
+    const lines = fs.readFileSync(eventsPath, 'utf-8').trim().split('\n');
+    const friction = lines.map((l) => JSON.parse(l)).find((r) => r.event === 'friction');
+    expect(friction).toBeDefined();
+    expect(friction.surface).toBe('teams');
+    expect(friction.failureId).toBe('remote-cwd-on-add');
+    expect(friction.error).toContain('--remote-cwd');
   });
 });

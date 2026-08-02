@@ -41,6 +41,19 @@ bun test          # Full test suite, no mocks
 bash scripts/install.sh <version>   # Package .vsix and install to Cursor + Code + Codium
 ```
 
+## Device auto-launch preferences
+
+Factory's auto-host selection reads per-device enable/prefer flags managed by the CLI (`agents devices enable|disable|prefer|unprefer <name>`). The store is `~/.agents/.history/devices/auto-launch.json`.
+
+- A **disabled** device is excluded from `New <Agent>` auto picks. It remains manually pickable via `New <Agent> (Pick Host)`.
+- A **preferred** device gets a `PREFERENCE_BONUS` (20 pts, ≈ two running agents) shaved off its `hostScore`, so it wins ties against otherwise-equivalent machines but never outranks one that is genuinely swamped. The bonus lives in `hostScore` itself, so both ranking paths — the warm-cache pick and the balanced pool pick — apply it identically.
+- Defaults: every registered device is enabled and not preferred. An unregistered name is rejected by the CLI rather than written as a dead entry.
+
+Source of truth:
+- Persistence + CLI commands: `apps/cli/src/lib/devices/registry.ts` (`loadAutoLaunchPreferences`, `setAutoLaunchEnabled`, `setAutoLaunchPreferred`) and `apps/cli/src/commands/ssh.ts`.
+- Extension consumption: `apps/factory/src/core/deviceAutoLaunch.ts`.
+- Filtering/bias applied: `apps/factory/src/core/launchHistory.ts` (`pickCachedLaunchHost`) and `apps/factory/src/vscode/extension.ts` (`resolveCachedAutoHost`, `resolveBalancedHost`).
+
 ## Releasing to the Marketplace
 
 Use `scripts/release.sh` from any fleet box. It routes itself to the machine that holds the `vs-marketplace` secrets bundle (currently `zion`) and publishes from a clean clone of the commit.
@@ -77,7 +90,7 @@ Known gotchas:
 | Area | Start here |
 |---|---|
 | Agent spawn flow + editor-tab terminals | `src/vscode/extension.ts` (`openSingleAgent`, `openSingleAgentWithQueue`) |
-| The ONE launch engine (every "New agent" command) | `launchAgent(context, {agentKey?, host?, pickHost?, local?})` in `src/vscode/extension.ts` is the single route. It resolves: **host** (explicit / device-first `pickLaunchHost` / auto `resolveBalancedHost`), **harness** (explicit, or `resolveAutoAgentKey` — usable-on-the-chosen-host via `hostHasUsableVersion`, ranked by `pickAgentByUsage`), and **version/account** (ALWAYS balanced via `--strategy balanced`; no pinned/latest/version-picker path exists). Commands are thin: `agents.newAgent` = `launchAgent({})` (auto everything), `agents.newAgentPickHost` = `{pickHost:true}` (device-first, auto harness), `agents.new<Harness>` = `{agentKey, local:true}`, `agents.new<Harness>PickHost` = `{agentKey, pickHost:true}`. Pure ranking: `src/core/launchHost.ts` (`pickBestHost`, `deviceHasUsableVersion`, `resolveBalancePool`) + `src/core/agentUsage.ts` (`pickAgentByUsage`). Health probe: `src/vscode/deviceHealth.vscode.ts` (`fetchDeviceStats`). |
+| The ONE launch engine (every "New agent" command) | `launchAgent(context, {agentKey?, host?, pickHost?, local?})` in `src/vscode/extension.ts` is the single route. It resolves: **host** (explicit / device-first `pickLaunchHost` / auto `resolveBalancedHost`), **harness** (explicit, or `resolveAutoAgentKey` — usable-on-the-chosen-host via `hostHasUsableVersion`, ranked by `pickAgentByUsage`), and **version/account** (ALWAYS balanced via `--strategy balanced`; no pinned/latest/version-picker path exists). Commands are thin: `agents.newAgent` = `launchAgent({})` (auto everything), `agents.newAgentPickHost` = `{pickHost:true}` (device-first, auto harness), `agents.new<Harness>` = `{agentKey, local:true}`, `agents.new<Harness>PickHost` = `{agentKey, pickHost:true}`. Pure ranking: `src/core/launchHost.ts` (`pickBestHost`, `deviceHasUsableVersion`, `resolveBalancePool`) + `src/core/agentUsage.ts` (`pickAgentByUsage`). Health probe: `src/vscode/deviceHealth.vscode.ts` (`fetchDeviceStats`). Auto-launch filtering/bias: `src/core/deviceAutoLaunch.ts` (loaded from CLI-managed `~/.agents/.history/devices/auto-launch.json`). |
 | Terminal registry + session IDs | `src/vscode/terminals.vscode.ts` |
 | Offloaded (`--host`) tabs — session id, title, resume | A remote tab is registered exactly like a local one: `openSingleAgent` mints the Claude session id for local AND remote (`agents run --host` adopts it via the CLI's `resolveHostSessionId`), and stamps the device on `EditorTerminal.host` (persisted in `src/core/sessions.persist.ts`, restored on reload and on Reopen Last Session). Anything that reads the session then has to follow that host: the label poller routes to `fetchRemoteSessionLabelSource` (`src/vscode/remoteSessions.vscode.ts` → `agents sessions <id> --host <device> --json`, parsed by `parseSessionLabelSource` in `src/core/remoteSessions.ts`) because the transcript is not on this machine, and resume goes through `buildVersionedResumeCommand(..., host)` (`src/core/prewarm.ts`) which emits `agents run --host … --resume` instead of a local `claude -r <id>`. |
 | Terminal readiness events (tabReady, shellReady, promptReady, agentReady) | `src/core/terminalReadiness.ts`, `src/vscode/terminalReadiness.ts` (design doc: `swarmify/docs/01-terminal-lifecycle.md`) |

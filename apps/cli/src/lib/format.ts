@@ -9,6 +9,7 @@
  */
 import chalk from 'chalk';
 import { readSync } from 'node:fs';
+import { emitFriction } from './events.js';
 
 /** Options for {@link die} — opt into machine-readable failure output. */
 export interface DieOptions {
@@ -56,6 +57,23 @@ export function die(msg: string, code = 1, opts: DieOptions = {}): never {
   if (stream === 'stdout') console.log(text);
   else console.error(text);
   process.exit(code);
+}
+
+/**
+ * `die()` with a structured friction event attached. Use this at CLI error
+ * chokepoints so the nightly routine can classify and rank recurring failures
+ * without re-parsing transcripts. `surface` is the subsystem (teams, browser,
+ * secrets, guard, …); `failureId` is a stable slug (e.g. 'remote-cwd-on-add').
+ */
+export function dieFriction(
+  surface: string,
+  failureId: string,
+  msg: string,
+  code = 1,
+  opts: DieOptions = {},
+): never {
+  emitFriction(surface, failureId, { error: msg });
+  die(msg, code, opts);
 }
 
 /**

@@ -20,7 +20,18 @@ export interface DeviceLoad {
   // score.
   loadAvg1?: number;
   memPercent?: number;
+  // User preference from `agents devices prefer <name>` (auto-launch.json). A
+  // preferred device gets PREFERENCE_BONUS shaved off its score so it wins
+  // against otherwise-equivalent machines. Lives here rather than in each
+  // caller so EVERY ranking path — the warm-cache pick and the balanced pool
+  // pick both route through hostScore — honors the preference identically.
+  preferred?: boolean;
 }
+
+// How much a `prefer`red device is favored, in hostScore points. Two running
+// agents' worth (each ≈ 10), so a preference outranks a small load difference
+// but never sends work to a machine that is genuinely swamped.
+export const PREFERENCE_BONUS = 20;
 
 // One installed version's login/usage health, matching the fields of the CLI's
 // `agents view <agent> --json` output (ViewJsonVersion). Kept minimal so this
@@ -65,7 +76,8 @@ export function hostScore(d: DeviceLoad): number {
   const running = d.running * 10;
   const load = d.loadAvg1 !== undefined ? Math.min(d.loadAvg1, 16) : 0;
   const mem = d.memPercent !== undefined ? d.memPercent / 20 : 0; // 100% -> 5 pts
-  return running + load + mem;
+  const preference = d.preferred ? PREFERENCE_BONUS : 0;
+  return running + load + mem - preference;
 }
 
 // Pick the best online host for a launch: drop devices with no usable version of

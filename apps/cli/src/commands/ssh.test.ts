@@ -175,3 +175,79 @@ describe('renderLeasedBoxesSection — F4 devices "Leased boxes" (RUSH-1923)', (
     expect(flat).toContain('agents lease stop <slug>');
   });
 });
+
+describe('devices auto-launch preferences', () => {
+  // tests/setup.ts pins AGENTS_DEVICES_DIR for hermeticity, and run() forwards
+  // the whole env — so the spawned CLI reads its registry from there, NOT from
+  // the fixture HOME. Pin it at the fixture's devices dir in both the seed and
+  // the child env so the test exercises one registry under either runner.
+  function devicesDir(): string {
+    return path.join(testHome, '.agents', '.history', 'devices');
+  }
+
+  function devicesEnv(): Record<string, string> {
+    return { AGENTS_DEVICES_DIR: devicesDir() };
+  }
+
+  function autoLaunchPath(): string {
+    return path.join(devicesDir(), 'auto-launch.json');
+  }
+
+  // These commands refuse a device that is not registered, so the fixture has
+  // to contain one — seeding the registry the CLI reads is the cheapest way to
+  // exercise the real command path end to end.
+  function registerDevice(name: string): void {
+    fs.mkdirSync(devicesDir(), { recursive: true });
+    const now = new Date().toISOString();
+    fs.writeFileSync(
+      path.join(devicesDir(), 'registry.json'),
+      JSON.stringify({
+        [name]: {
+          name,
+          platform: 'macos',
+          shell: 'posix',
+          user: 'someone',
+          address: { via: 'tailscale', dnsName: `${name}.example.ts.net` },
+          auth: { method: 'key' },
+          createdAt: now,
+          updatedAt: now,
+        },
+      }),
+    );
+  }
+
+  it('disable and enable persist through the CLI', () => {
+    guardedHome();
+    registerDevice('zion');
+
+    expect(run(['devices', 'disable', 'zion'], devicesEnv()).status).toBe(0);
+    const disabled = JSON.parse(fs.readFileSync(autoLaunchPath(), 'utf-8'));
+    expect(disabled.devices.zion).toEqual({ enabled: false });
+
+    expect(run(['devices', 'enable', 'zion'], devicesEnv()).status).toBe(0);
+    const enabled = JSON.parse(fs.readFileSync(autoLaunchPath(), 'utf-8'));
+    expect(enabled.devices.zion).toBeUndefined();
+  });
+
+  it('prefer and unprefer persist through the CLI', () => {
+    guardedHome();
+    registerDevice('mac-mini');
+
+    expect(run(['devices', 'prefer', 'mac-mini'], devicesEnv()).status).toBe(0);
+    const preferred = JSON.parse(fs.readFileSync(autoLaunchPath(), 'utf-8'));
+    expect(preferred.devices['mac-mini']).toEqual({ preferred: true });
+
+    expect(run(['devices', 'unprefer', 'mac-mini'], devicesEnv()).status).toBe(0);
+    const unpreferred = JSON.parse(fs.readFileSync(autoLaunchPath(), 'utf-8'));
+    expect(unpreferred.devices['mac-mini']).toBeUndefined();
+  });
+
+  it('refuses a device that is not registered instead of writing a dead entry', () => {
+    guardedHome();
+    registerDevice('zion');
+    const r = run(['devices', 'disable', 'zoin'], devicesEnv());
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/Unknown device 'zoin'/);
+    expect(fs.existsSync(autoLaunchPath())).toBe(false);
+  });
+});
