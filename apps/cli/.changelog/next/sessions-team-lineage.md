@@ -54,6 +54,14 @@
   index resolves ten teams, every one of them a real team name. Source:
   `apps/cli/src/lib/session/state.ts`.
 
+- **`--in-team` returns a team's whole lineage, not the slice inside the default
+  window.** It filtered in memory after the query, so a team older than the
+  default top-50 / 30-day / current-directory scope came back empty with no
+  message — and a team's teammates run in their own worktrees, which the
+  directory scope hid. The flag now widens its own scope the way `--all` does. It
+  is also refused with `--active`, whose live rows carry no lineage to match on,
+  rather than being silently ignored. Source: `apps/cli/src/commands/sessions.ts`.
+
 - **The session preview pane sanitizes peer-supplied `plan` and directory
   text.** A remote row's metadata is JSON the peer sent and `parseRemoteList`
   hands over verbatim; `sanitizeMeta` covered `topic`/`label`/`cwd`/`todos` but

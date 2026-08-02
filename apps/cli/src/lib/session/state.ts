@@ -315,9 +315,11 @@ const GH_ISSUE_CREATE_RE = /\bgh\s+issue\s+create\b/;
 const GH_ISSUE_URL_RE = /https:\/\/github\.com\/[^\s"'()<>]+\/issues\/(\d+)/;
 /**
  * Flags of `teams create` / `teams add` that take a value, so the value is not
- * mistaken for the positional team name. Mirrors their `.option('… <x>')`
- * registrations in `commands/teams.ts`; a flag missing here degrades to "no team
- * detected", never to a wrong one.
+ * mistaken for the positional team name. Mirrors their value-taking flags in
+ * `commands/teams.ts` — most are `.option('… <x>')` registrations, but
+ * `--device`/`--host` come from `addHostOption`, so auditing this list against
+ * `.option(` alone would wrongly drop them. A flag missing here degrades to "no
+ * team detected", never to a wrong one.
  */
 const TEAM_VALUE_FLAGS = [
   '-d', '--description', '--use-worktree', '--devices', '--hosts', '--repo',
@@ -325,6 +327,15 @@ const TEAM_VALUE_FLAGS = [
   '--cwd', '--worktree', '--after', '--task-type', '--cloud', '--branch',
   '--device', '--host',
 ];
+
+/**
+ * One flag value: a quoted string or a bare token. `-d "sessions lineage"` is the
+ * common shape — `--description` is usually a phrase — and a value pattern of
+ * `\S+` alone stops at the first space, leaving the rest of the phrase to be read
+ * as the positional team name (`… -d "sessions lineage" my-team` detected
+ * `lineage`). Quotes are matched as a unit so the whole value is consumed.
+ */
+const FLAG_VALUE = String.raw`(?:"[^"\n]*"|'[^'\n]*'|\S+)`;
 
 /**
  * `agents teams create <name>` / `agents teams add <team> …` (also the `ag` alias).
@@ -348,9 +359,12 @@ const TEAMS_SPAWN_RE = new RegExp(
     // value, or `--device auto` leaves `auto` looking like the team name — and
     // the generic branch must exclude those flags, or it swallows the flag alone
     // and hands the value back as the name.
-    String.raw`(?:(?:${TEAM_VALUE_FLAGS.join('|')})[= \t]\S+[ \t]+` +
+    String.raw`(?:(?:${TEAM_VALUE_FLAGS.join('|')})[= \t]${FLAG_VALUE}[ \t]+` +
     String.raw`|(?!(?:${TEAM_VALUE_FLAGS.join('|')})[= \t])--?[a-z][\w-]*(?:=\S+)?[ \t]+){0,6}` +
-    String.raw`([A-Za-z][\w-]*)`
+    // A team name may start with a digit — `createTeam` validates nothing, and
+    // `2fa-migration` is a legal name — so the class stays [A-Za-z0-9]. The
+    // all-digits case is rejected in the guard below instead.
+    String.raw`([A-Za-z0-9][\w-]*)`
 );
 
 /**
@@ -416,7 +430,11 @@ export function detectSpawnedTeam(command?: string): string | undefined {
   // far more often than a real team, and an English article is prose. Both used to
   // land in the index as a team name, and now that the name is rendered on the row
   // a wrong one is worse than none.
-  if (name.length < 2 || NON_TEAM_WORDS.has(name.toLowerCase())) return undefined;
+  // A single character is a doc placeholder (`agents teams create t --host <name>`)
+  // far more often than a real team; an all-digits token is a flag value or a list
+  // index that leaked through, never a name someone typed. Both had reached the
+  // index, and now that the name is rendered a wrong one is worse than none.
+  if (name.length < 2 || /^\d+$/.test(name) || NON_TEAM_WORDS.has(name.toLowerCase())) return undefined;
   return name;
 }
 

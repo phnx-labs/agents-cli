@@ -222,7 +222,9 @@ agents sessions "auth refactor"
 agents sessions --teams
 
 # One team's whole lineage: the session that spawned it, plus (with --teams) its
-# teammates. In the browser, `t` cycles the same filter over the teams in view.
+# teammates. Spans every directory and all time — a team's teammates run in their
+# own worktrees and its history outlives the default window — so it needs no --all.
+# In the browser, `t` cycles the same filter over the teams in view.
 agents sessions --in-team redesign --teams
 
 # Show routine-run sessions, then open one by routine run id

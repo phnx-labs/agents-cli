@@ -579,3 +579,27 @@ describe('detectSpawnedTeam — rejects prose and flag values', () => {
     );
   });
 });
+
+describe('detectSpawnedTeam — review findings from PR #1710', () => {
+  it('lets a QUOTED flag value be swallowed whole', () => {
+    // `-d`/`--description` normally carries a phrase. A value pattern of \S+ stops
+    // at the first space, so the rest of the phrase fell out of the flag branch and
+    // the next word became the "team name" — the same corruption class the earlier
+    // --device fix was supposed to close, still open for the commonest flag.
+    expect(detectSpawnedTeam('agents teams create -d "sessions lineage" my-team')).toBe('my-team');
+    expect(detectSpawnedTeam('agents teams create --description "redesign resume picker" my-team')).toBe('my-team');
+    expect(detectSpawnedTeam("agents teams create -d 'single quoted phrase' my-team")).toBe('my-team');
+  });
+
+  it('detects a team name that starts with a digit', () => {
+    // createTeam validates nothing (lib/teams/registry.ts), so digit-leading names
+    // are legal. Narrowing the capture class to [A-Za-z] silently stopped detecting
+    // them; the all-digits junk it was meant to stop is rejected by the guard instead.
+    expect(detectSpawnedTeam('agents teams create 2fa-migration')).toBe('2fa-migration');
+    expect(detectSpawnedTeam('agents teams create 3d-viewer')).toBe('3d-viewer');
+  });
+
+  it('still rejects an all-digits token', () => {
+    expect(detectSpawnedTeam('agents teams add --after 22 ')).toBeUndefined();
+  });
+});

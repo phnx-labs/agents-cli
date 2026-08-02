@@ -217,8 +217,6 @@ export interface QueryOptions {
   excludeTeamOrigin?: boolean;
   /** Keep only team-origin rows (for hidden-count queries). */
   onlyTeamOrigin?: boolean;
-  /** Keep only sessions that spawned this team (`agents sessions --in-team`). */
-  spawnedTeam?: string;
   /**
    * Column to order by, all descending. 'timestamp' (default) sorts newest
    * first; 'cost' and 'duration' put the priciest / longest sessions on top,
@@ -1549,10 +1547,6 @@ function buildSessionWhere(options: QueryOptions): { clause: string; params: any
   }
   if (options.onlyTeamOrigin) {
     where.push('IFNULL(is_team_origin, 0) = 1');
-  }
-  if (options.spawnedTeam) {
-    where.push('spawned_team = ? COLLATE NOCASE');
-    params.push(options.spawnedTeam);
   }
 
   const clause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';

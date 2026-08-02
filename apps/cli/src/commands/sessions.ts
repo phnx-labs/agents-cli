@@ -32,7 +32,7 @@ import type { SessionActivity, AwaitingReason } from '../lib/session/state.js';
 import { inferSessionState } from '../lib/session/state.js';
 import { discoverSessions, countSessionsInScope, resolveSessionById, isCompleteSessionId, looksLikeSessionId, searchContentIndex, parseTimeFilter, getSessionRoots, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
 import { findSessionsById } from '../lib/session/db.js';
-import { filterTeamSessions } from '../lib/session/team-filter.js';
+import { filterTeamSessions, safeTeamText } from '../lib/session/team-filter.js';
 import { parseSession } from '../lib/session/parse.js';
 import { runRemoteSessions, buildForwardedArgs, ensureWholeIndex } from '../lib/session/remote.js';
 import { formatRelativeTime } from '../lib/session/relative-time.js';
@@ -216,6 +216,15 @@ function createScanProgressTracker(
 
 const PICKER_RECENT_COUNT = 15;
 const PICKER_POOL_LIMIT = 200;
+/**
+ * The `--limit` default, shared with its `.option()` registration. Commander fills
+ * the default in, so `options.limit` is never falsy — code that wants to know
+ * whether the USER set a limit has to compare against this rather than test
+ * truthiness.
+ */
+const DEFAULT_LIMIT = '50';
+/** Pool size for `--in-team`: one team's rows can sit anywhere in the history. */
+const WHOLE_TEAM_POOL_LIMIT = 5000;
 // The grouped default view ("overview"): fetch a generous recency-ordered pool
 // for accurate per-project totals, show each project's most-recent rows grouped
 // by project, newest-active project first.
@@ -1323,6 +1332,15 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
   }
 
   if (options.active) {
+    // The running view is built from the live scan, which carries no team lineage
+    // (that comes off the transcript index and the teams meta dir), so --in-team
+    // has nothing to match on here. Say so rather than ignoring the flag.
+    if (options.inTeam) {
+      console.error(chalk.red('--in-team does not apply to --active: the running view carries no team lineage.'));
+      console.error(chalk.gray('Drop --active to filter by team, or use `agents teams status <name>` for a live team.'));
+      process.exit(1);
+    }
+
     // On a TTY (and not a scripting path), open the interactive browser seeded to
     // running-only. --json / --waiting / --no-interactive / a peer fan-out keep the
     // static dump untouched, so scripts and agents are unaffected. An explicit
@@ -1441,14 +1459,25 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
   // no query, no path drill-in, not explicitly --flat/--tree. It drops the silent
   // cwd-scope + 50-cap + 30-day window that hide most of a large index.
   const wantsOverview = isInteractive && !searchQuery && !pathFilter && !options.flat && !options.tree;
+  // --in-team asks for ONE team's whole lineage, which is a handful of rows that
+  // can sit anywhere in history. Bounding it by the default top-50 / 30-day window
+  // silently returns nothing for any team older than that — so the flag widens its
+  // own scope, the way --all does, unless the caller set an explicit --limit.
+  const wantsWholeTeam = !!options.inTeam;
+  // `--limit` has a commander default, so an untouched flag still arrives as a
+  // string; only a value different from that default counts as user intent.
+  const userSetLimit = options.limit !== undefined && options.limit !== DEFAULT_LIMIT;
   const limit = wantsOverview
     ? OVERVIEW_POOL_LIMIT
-    : parseInt(options.limit || (isInteractive ? String(PICKER_POOL_LIMIT) : '50'), 10);
+    : parseInt(
+        userSetLimit ? options.limit! : wantsWholeTeam ? String(WHOLE_TEAM_POOL_LIMIT) : DEFAULT_LIMIT,
+        10
+      );
   // Overview: recency order across the whole index, no default window; an explicit
   // --since still narrows. Non-overview keeps the prior interactive-30d default.
   const since = wantsOverview
     ? options.since
-    : (options.since ?? (isInteractive && !options.all ? '30d' : undefined));
+    : (options.since ?? (isInteractive && !options.all && !wantsWholeTeam ? '30d' : undefined));
   const spinner = options.json ? null : ora().start();
   const tracker = createScanProgressTracker(LOAD_VERBS, 'sessions', spinner);
 
@@ -1464,12 +1493,15 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
     const scope: DiscoverOptions = {
       agent,
       version,
-      all: pathFilter ? undefined : options.all,
+      // --in-team spans directories by construction: a team's teammates run in
+      // their own worktrees, so scoping to the current cwd hides most of the
+      // lineage the flag exists to show.
+      all: pathFilter ? undefined : options.all || wantsWholeTeam,
       cwd: process.cwd(),
       // Default overview scopes to the current repo SUBTREE (prefix match), so a
       // monorepo shows its sub-projects grouped instead of collapsing to the one
       // exact-cwd project. `--all` clears the prefix and spans the whole index.
-      cwdPrefix: pathFilter ?? (wantsOverview && !options.all ? process.cwd() : undefined),
+      cwdPrefix: pathFilter ?? (wantsOverview && !options.all && !wantsWholeTeam ? process.cwd() : undefined),
       project: options.project,
       since,
       until: options.until,
@@ -1505,7 +1537,9 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
     // read. Match either, after that pass has populated `teamOrigin`.
     if (options.inTeam) sessions = sessions.filter((s) => matchesTeam(s, options.inTeam!));
 
-    const hiddenCount = options.teams
+    // Under --in-team the visible list is one team, so the whole-index team-origin
+    // count would be a non-sequitur next to it.
+    const hiddenCount = options.teams || options.inTeam
       ? 0
       : countSessionsInScope({ ...scope, onlyTeamOrigin: true });
 
@@ -1638,8 +1672,9 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
 function teamTag(session: SessionMeta): string {
   const origin = session.teamOrigin;
   if (!origin) return '';
-  const handle = origin.handle;
-  if (origin.team) return `[${origin.team}${handle ? `/${handle}` : ''}] `;
+  const handle = safeTeamText(origin.handle);
+  const team = safeTeamText(origin.team);
+  if (team) return `[${team}${handle ? `/${handle}` : ''}] `;
   return handle ? `[${handle}] ` : '[team] ';
 }
 
@@ -1652,8 +1687,8 @@ export function matchesTeam(session: SessionMeta, team: string): boolean {
   const want = team.trim().toLowerCase();
   if (!want) return true;
   return (
-    session.spawnedTeam?.toLowerCase() === want ||
-    session.teamOrigin?.team?.toLowerCase() === want
+    safeTeamText(session.spawnedTeam)?.toLowerCase() === want ||
+    safeTeamText(session.teamOrigin?.team)?.toLowerCase() === want
   );
 }
 
@@ -1669,8 +1704,9 @@ const TEAM_BADGE_MAX = 10;
  * re-whitens every slice.
  */
 export function teamBadge(session: SessionMeta): { plain: string; width: number } {
-  if (!session.spawnedTeam) return { plain: '', width: 0 };
-  const plain = `team:${truncate(session.spawnedTeam, TEAM_BADGE_MAX)} `;
+  const team = safeTeamText(session.spawnedTeam);
+  if (!team) return { plain: '', width: 0 };
+  const plain = `team:${truncate(team, TEAM_BADGE_MAX)} `;
   return { plain, width: stringWidth(plain) };
 }
 
@@ -3234,12 +3270,12 @@ export function registerSessionsCommands(program: Command): void {
     .option('--all', 'Widen every non-status filter to "all": every directory (not just this project) and all time (no window cap). Status filters like --active still compose; -a/--device/--since still narrow their axis.')
     .option('--unmanaged', "Also show sessions from your own ~/.<agent> installs (hidden once agents-cli manages that agent)")
     .option('--teams', 'Include team-spawned sessions (hidden by default)')
-    .option('--in-team <name>', 'Only this team: the session that spawned it plus (with --teams) its teammates')
+    .option('--in-team <name>', "Only this team: the session that spawned it plus (with --teams) its teammates. Spans every directory and all time, since a team's worktrees and history sit outside the default window.")
     .option('--routine', 'Show only sessions archived from routine runs')
     .option('-p, --project <name>', 'Filter by project name (searches across all directories)')
     .option('--since <time>', 'Only sessions newer than this (e.g., 2h, 7d, 4w, or ISO date)')
     .option('--until <time>', 'Only sessions older than this (ISO timestamp)')
-    .option('-n, --limit <n>', 'Maximum number of sessions to return', '50')
+    .option('-n, --limit <n>', 'Maximum number of sessions to return', DEFAULT_LIMIT)
     .option('--sort <field>', 'Sort the list by: recent (default), cost, or duration')
     .option('--markdown', 'Render the session as markdown (user, assistant, thinking, tool calls)')
     .option('--no-redact', 'Disable default secret redaction in rendered session output (--markdown and --json)')

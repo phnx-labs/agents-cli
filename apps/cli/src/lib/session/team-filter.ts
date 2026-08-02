@@ -11,6 +11,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import type { SessionMeta, TeamOrigin } from './types.js';
+import { sanitizeForTerminal } from './parse.js';
 import { getTeamsAgentsDir } from '../state.js';
 
 const HOME = os.homedir();
@@ -66,6 +67,21 @@ function readTeamOrigin(metaPath: string, agentId: string): { origin: TeamOrigin
   } catch {
     return { origin: { handle: agentId.slice(0, 8) } };
   }
+}
+
+/**
+ * A team name / handle as it is safe to render: a real string, terminal escapes
+ * stripped, or undefined.
+ *
+ * These values reach the row and the preview pane, and for a peer's row they are
+ * whatever JSON that machine sent — `parseRemoteList` copies the object through
+ * without inspecting its fields, so neither the type nor the content is ours to
+ * assume. A non-string `spawnedTeam` used to throw out of `teamBadge`, which runs
+ * on every row, taking down the whole listing rather than one entry.
+ */
+export function safeTeamText(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value === '') return undefined;
+  return sanitizeForTerminal(value);
 }
 
 /** Cached teammate index; the directory is small (teams GC it after 7 days). */

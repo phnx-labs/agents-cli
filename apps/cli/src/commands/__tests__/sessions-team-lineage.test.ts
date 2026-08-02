@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { hasNoBrowserDisqualifyingFlags, matchesTeam } from '../sessions.js';
+import { formatPickerLabel, hasNoBrowserDisqualifyingFlags, matchesTeam, teamBadge } from '../sessions.js';
 import { formatTeamLineage } from '../sessions-picker.js';
 import type { SessionMeta } from '../../lib/session/types.js';
 
@@ -118,5 +118,44 @@ describe('formatTeamLineage — the preview pane Team: line', () => {
 
   it('is empty for a session with no team involvement', () => {
     expect(formatTeamLineage(meta())).toBe('');
+  });
+});
+
+describe('peer-supplied team data is neither trusted nor rendered raw', () => {
+  // parseRemoteList copies a peer's JSON through without inspecting its fields
+  // (lib/session/remote-list.ts), and enrichTeamOrigins deliberately leaves an
+  // already-populated teamOrigin alone — so both the type and the content of these
+  // fields belong to another machine.
+  it('does not throw on a non-string spawnedTeam or team', () => {
+    // teamBadge runs on EVERY picker row, so one malformed row used to take down
+    // the whole listing rather than degrade a single entry.
+    const bad = { ...meta(), spawnedTeam: 99 as unknown as string };
+    expect(() => teamBadge(bad)).not.toThrow();
+    expect(teamBadge(bad).plain).toBe('');
+    expect(() => matchesTeam(bad, 'redesign')).not.toThrow();
+    expect(matchesTeam(bad, 'redesign')).toBe(false);
+
+    const badOrigin = { ...meta(), teamOrigin: { team: 42 as unknown as string, handle: 7 as unknown as string } };
+    expect(() => formatTeamLineage(badOrigin)).not.toThrow();
+  });
+
+  it('strips terminal escapes out of the team name on the row', () => {
+    // The row path never went through sanitizeMeta (that is preview-only), so a
+    // peer's escape sequence reached the terminal through the new team: badge.
+    const row = formatPickerLabel(meta({ spawnedTeam: '\x1b[31mEVIL' }), '', {});
+    expect(row).not.toContain('\x1b[31m');
+    expect(strip(row)).toContain('EVIL');
+  });
+
+  it('strips terminal escapes out of a teammate tag and the lineage line', () => {
+    const row = formatPickerLabel(
+      meta({ teamOrigin: { team: '\x1b[31mred', handle: 'ui' } }),
+      '',
+      {}
+    );
+    expect(row).not.toContain('\x1b[31m');
+
+    const line = formatTeamLineage(meta({ teamOrigin: { team: '\x1b]0;pwned\x07t', handle: 'ui' } }));
+    expect(line).not.toContain('\x1b]0;');
   });
 });

@@ -11,6 +11,7 @@ import chalk from 'chalk';
 import { truncate, humanDuration } from '../lib/format.js';
 import type { SessionEvent, SessionMeta, TodoProgress } from '../lib/session/types.js';
 import { parseSession, sanitizeForTerminal, SNAPSHOT_TODO_TOOLS } from '../lib/session/parse.js';
+import { safeTeamText } from '../lib/session/team-filter.js';
 import { cleanSessionPrompt, extractSessionTopic } from '../lib/session/prompt.js';
 import { linkPath, linkUrl, relativeToCwd, shortenModel } from '../lib/session/render.js';
 import { linearIssueUrl } from '../lib/session/linear.js';
@@ -250,19 +251,24 @@ function formatHeader(session: SessionMeta, events: SessionEvent[]): string {
 export function formatTeamLineage(session: SessionMeta): string {
   const origin = session.teamOrigin;
   if (origin) {
-    const parts = [chalk.white(origin.team ?? 'team')];
-    const handle = origin.handle ? `teammate ${origin.handle}` : 'teammate';
-    parts.push(chalk.white(origin.mode ? `${handle} (${origin.mode})` : handle));
-    if (origin.parentSessionId) {
-      parts.push(chalk.gray('spawned by ') + chalk.white(origin.parentSessionId.slice(0, 8)));
+    const team = safeTeamText(origin.team);
+    const handleName = safeTeamText(origin.handle);
+    const mode = safeTeamText(origin.mode);
+    const parent = safeTeamText(origin.parentSessionId);
+    const parts = [chalk.white(team ?? 'team')];
+    const handle = handleName ? `teammate ${handleName}` : 'teammate';
+    parts.push(chalk.white(mode ? `${handle} (${mode})` : handle));
+    if (parent) {
+      parts.push(chalk.gray('spawned by ') + chalk.white(parent.slice(0, 8)));
     }
     return parts.join(chalk.gray(' · '));
   }
-  if (session.spawnedTeam) {
+  const spawned = safeTeamText(session.spawnedTeam);
+  if (spawned) {
     return (
       chalk.gray('spawned team ') +
-      chalk.white(session.spawnedTeam) +
-      chalk.gray(` · agents teams status ${session.spawnedTeam}`)
+      chalk.white(spawned) +
+      chalk.gray(` · agents teams status ${spawned}`)
     );
   }
   return '';
@@ -362,9 +368,6 @@ const LAST_RESPONSE_MAX_LINES_WITH_TODOS = 8;
 const TODOS_MAX_ITEMS = 5;
 const DIRS_TOUCHED_MAX = 5;
 
-/** Directories the scan recorded on the row; preferred over deriving from events. */
-type SessionMetaWithDirs = SessionMeta;
-
 function formatCompactPreview(events: ReturnType<typeof parseSession>, session: SessionMeta): string {
   let firstUser = '';
   let lastAssistant = '';
@@ -445,7 +448,7 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
 
   // Recent activity = directories touched (not raw tool calls). Prefer a
   // parser-supplied dirsTouched when present; else derive from event paths.
-  const dirs = directoriesTouched(session as SessionMetaWithDirs, events, changes);
+  const dirs = directoriesTouched(session, events, changes);
   if (dirs.length) {
     lines.push(chalk.cyan('Dirs:    ') + chalk.white(dirs.join(chalk.gray(' · '))));
   }
@@ -541,16 +544,23 @@ function isSubAgentTool(tool: string, command: string): boolean {
  * derive from the file-change + tool paths already available.
  */
 export function directoriesTouched(
-  session: SessionMetaWithDirs,
+  session: SessionMeta,
   events: SessionEvent[],
   changes: ReturnType<typeof classifyFileChanges>,
 ): string[] {
   const fromMeta = session.recentDirectoriesTouched;
   if (Array.isArray(fromMeta) && fromMeta.length > 0) {
-    return fromMeta
-      .map((d) => sanitizeForTerminal(String(d).trim()))
-      .filter(Boolean)
-      .slice(0, DIRS_TOUCHED_MAX);
+    // The scan stores ABSOLUTE paths, so they go through the same relativizer the
+    // derived branch below uses — otherwise adopting this field (which a remote row
+    // needs, having no transcript to derive from) would turn every local preview's
+    // `Dirs:` line from `src/lib · docs` into a column of full home-rooted paths.
+    const seen = new Set<string>();
+    for (const raw of fromMeta) {
+      const dir = relativizeDir(sanitizeForTerminal(String(raw).trim()), session.cwd);
+      if (dir) seen.add(dir);
+      if (seen.size >= DIRS_TOUCHED_MAX) break;
+    }
+    if (seen.size > 0) return [...seen];
   }
 
   const counts = new Map<string, number>();

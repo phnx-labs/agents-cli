@@ -124,8 +124,6 @@ export interface DiscoverOptions {
   excludeTeamOrigin?: boolean;
   /** Keep only team-spawned sessions (used for hidden-count queries). */
   onlyTeamOrigin?: boolean;
-  /** Keep only sessions that spawned this team (`agents sessions --in-team`). */
-  spawnedTeam?: string;
   /** Keep only sessions from this source. */
   origin?: 'cli' | 'routine';
   /** Column to order results by (all descending): 'timestamp' (default), 'cost', or 'duration'. */
@@ -481,7 +479,6 @@ function buildQueryOptions(
     limit: opts.includeLimit ? (options?.limit ?? 50) : undefined,
     excludeTeamOrigin: options?.excludeTeamOrigin,
     onlyTeamOrigin: options?.onlyTeamOrigin,
-    spawnedTeam: options?.spawnedTeam,
     origin: options?.origin,
     sortBy: options?.sortBy,
   };
