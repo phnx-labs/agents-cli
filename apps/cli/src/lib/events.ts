@@ -138,6 +138,7 @@ export type EventType =
   | 'status.posted'
   | 'file.edited'
   // Generic
+  | 'friction'
   | 'error'
   | 'warn'
   | 'info'
@@ -739,6 +740,24 @@ export function emitError(
     ...payload,
     error: error.message,
     errorStack: truncate(error.stack, 1000),
+  });
+}
+
+/**
+ * Emit a friction event — a structured, point-of-use record of a failure or
+ * block the CLI just hit. `surface` is the subsystem (teams, browser, secrets,
+ * guard, …); `failureId` is a stable slug that lets the nightly routine group
+ * the same failure across sessions (e.g. 'remote-cwd-on-add', 'not-installed').
+ */
+export function emitFriction(
+  surface: string,
+  failureId: string,
+  payload: EventPayload = {}
+): void {
+  emit('friction', {
+    ...payload,
+    surface,
+    failureId,
   });
 }
 

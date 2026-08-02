@@ -4,7 +4,7 @@ import * as path from 'path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  emit, emitStart, emitCommand, query, rotate, stats,
+  emit, emitStart, emitCommand, emitFriction, query, rotate, stats,
   redactPrompt, redactArgs, truncate,
   detectCaller,
   _resetForTest,
@@ -120,6 +120,24 @@ describe('events', () => {
       } else {
         expect(files.length).toBe(0);
       }
+    });
+
+    it('emitFriction writes a friction event with surface and failureId', () => {
+      const logsDir = setupLogsDir();
+      emitFriction('teams', 'remote-cwd-on-add', { error: 'cannot use --remote-cwd' });
+
+      const files = fs.readdirSync(logsDir).filter(f => f === 'events.jsonl');
+      expect(files).toEqual(['events.jsonl']);
+
+      const content = fs.readFileSync(path.join(logsDir, 'events.jsonl'), 'utf-8');
+      const record = JSON.parse(content.trim().split('\n').pop()!);
+      expect(record.event).toBe('friction');
+      expect(record.surface).toBe('teams');
+      expect(record.failureId).toBe('remote-cwd-on-add');
+      expect(record.error).toBe('cannot use --remote-cwd');
+      expect(record.level).toBe('info');
+      expect(record.ts).toBeDefined();
+      expect(record.hostname).toBeDefined();
     });
   });
 
