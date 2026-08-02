@@ -1,5 +1,61 @@
 # Changelog
 
+## 1.20.86
+
+- **`agents sessions` now shows a Kimi session's todo list and its file-touching
+  tool calls.** Kimi writes its checklist with `TodoList` (items shaped
+  `{title, status}`, where finished is `done`) rather than Claude's `TodoWrite`
+  (`{content, status: "completed"}`), so the checklist registry matched nothing
+  and every Kimi session rendered with no todos — in the picker preview, the
+  session detail, and the `--active` fan-out that carries progress off remote
+  devices. Kimi also names the file argument `path` where Claude names it
+  `file_path`, so `Read`/`Write`/`Edit` calls summarized as a bare `Read ` with
+  no file. Both spellings are now handled, and the snapshot-checklist tool names
+  live in one exported registry (`SNAPSHOT_TODO_TOOLS`) that the picker and the
+  state engine share instead of each hardcoding its own pair. Source:
+  `apps/cli/src/lib/session/parse.ts`, `apps/cli/src/lib/session/state.ts`,
+  `apps/cli/src/commands/sessions-picker.ts`.
+
+- **`agents view` now shows Grok's default model (e.g. `grok-4.5`).** Claude,
+  Codex, Antigravity, and Kimi already filled the model column via their
+  catalogs; Grok was missing from `locateModelSource`, so
+  `resolveConfiguredModel` returned null and the column stayed blank. Grok has
+  no `settings.json` `model` field (its config is `config.toml` +
+  `models_cache.json`); the authoritative default is `grok models` →
+  `Default model: <id>`. The catalog extractor now spawns that command against
+  the version-home binary (skipping failed-download stubs) and flags the
+  default, so `agents view`, `agents view --json` (`configuredModel`), and the
+  other identity-cluster surfaces show it. Source: `apps/cli/src/lib/models.ts`,
+  `apps/cli/src/commands/models.ts`.
+
+- **`agents events --limit 0` now reads the whole stream, and a capped read says
+  so.** `--limit` parsed as `Math.max(1, parseInt(raw) || 50)`, so `--limit 0`
+  collapsed back to `50` (`0 || 50`) and there was no way to read past the default
+  cap at all. The cap is applied after filtering and before the caller sees
+  anything, so every aggregation over `--json` silently ranked the newest 50
+  records instead of the matching set — measured against a real 7-day corpus of
+  2,135 CLI failures in 9 classes, 8 of 9 ranks came out wrong with counts off by
+  roughly 100x, and nothing warned. `--limit 0` now means no cap (29,649 records
+  on a 30-day stream here, against 50 before), a truncated read prints
+  `Showing the newest 50 — more events matched. Pass --limit 0 for all.` (on
+  stderr under `--json`, so a `| jq` pipeline still receives clean JSON), and a
+  non-numeric, negative, or empty `--limit` exits 2 rather than quietly becoming
+  50 — an empty one (`--limit "$LIMIT"` with the variable unset) would otherwise
+  have read as "no cap" and returned the whole stream unannounced.
+  Source: `apps/cli/src/commands/events.ts`, `apps/cli/tests/events-limit.test.ts`,
+  `apps/cli/docs/06-observability.md`.
+
+- **Desktop notifications now show the current agents-cli mark, not the old
+  logo.** The menu-bar helper's app icon — the icon macOS puts on the left of
+  every notification banner it posts (the menu bar helper's own notices and every
+  `agents run --notify` finish notice) — was generated from the retired gradient
+  "A" logo, so notifications carried stale branding while the menu-bar status
+  item already used the new lowercase `a`. The shared master logo
+  (`assets/logo.png`) is now the current `a` mark, so the menu-bar helper, the
+  `agents computer` helper, and the keychain helper all regenerate their
+  `AppIcon.icns` from it on the next build. Source: `assets/logo.png`,
+  `apps/cli/menubar/scripts/build.sh`.
+
 ## 1.20.85
 
 - **`agents feed post` can now be mirrored to the systems you actually watch.**
