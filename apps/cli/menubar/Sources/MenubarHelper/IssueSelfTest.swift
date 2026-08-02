@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 // Self-test for the quick-issue capture logic (Cmd-Shift-O). Follows the repo's
@@ -21,6 +22,11 @@ enum IssueSelfTest {
         testRecentTicketsMerge()
         testDraftPreservation()
         testRoutineFailureReason()
+        testLinearProjectResolution()
+        testLinearTicketRanking()
+        testLinearTicketFilter()
+        testLinearCache()
+        testTicketDispatchContract()
         if failures == 0 {
             print("\nALL PASS")
             exit(0)
@@ -314,7 +320,187 @@ enum IssueSelfTest {
               detail: routineFailureDetail(failed, max: 72) ?? "nil")
     }
 
+    // The repo picker drives the ticket scope, so `agents-cli` has to land on the
+    // "Agents CLI" project without any configured mapping — and a repo that matches
+    // nothing must resolve to nil rather than to someone else's project.
+    private static func testLinearProjectResolution() {
+        let projects = [
+            LinearProject(id: "p1", name: "Agents CLI"),
+            LinearProject(id: "p2", name: "Rush App"),
+            LinearProject(id: "p3", name: "Rush CLI"),
+        ]
+        check("repo name matches a project across case + punctuation",
+              LinearTickets.resolveProject(repoName: "agents-cli", projects: projects)?.id == "p1")
+        check("an ambiguous repo name matches nothing",
+              LinearTickets.resolveProject(repoName: "rush", projects: projects) == nil)
+        check("an explicit per-repo project wins over the derived match",
+              LinearTickets.resolveProject(repoName: "agents-cli", projects: projects,
+                                           override: "Rush CLI")?.id == "p3")
+        check("an override naming no live project falls through to the derived match",
+              LinearTickets.resolveProject(repoName: "agents-cli", projects: projects,
+                                           override: "Deleted Project")?.id == "p1")
+        check("no repo means no scope",
+              LinearTickets.resolveProject(repoName: nil, projects: projects) == nil)
+        check("no projects means no scope",
+              LinearTickets.resolveProject(repoName: "agents-cli", projects: []) == nil)
+    }
+
+    // The ranking IS the suggestion: urgent leads, "no priority" sinks below low,
+    // and within one priority overdue beats in-progress beats newest.
+    private static func testLinearTicketRanking() {
+        let now = date("2026-08-02T00:00:00Z")
+        let urgent = ticket("A-1", priority: 1, createdAt: "2026-07-01T00:00:00.000Z")
+        let none = ticket("A-2", priority: 0, createdAt: "2026-08-01T00:00:00.000Z")
+        let low = ticket("A-3", priority: 4, createdAt: "2026-08-01T00:00:00.000Z")
+        let highOld = ticket("A-4", priority: 2, createdAt: "2026-07-01T00:00:00.000Z")
+        let highNew = ticket("A-5", priority: 2, createdAt: "2026-08-01T00:00:00.000Z")
+        let highStarted = ticket("A-6", priority: 2, createdAt: "2026-06-01T00:00:00.000Z",
+                                 stateType: "started")
+        let highOverdue = ticket("A-7", priority: 2, createdAt: "2026-06-01T00:00:00.000Z",
+                                 dueDate: "2026-07-30")
+
+        let ranked = LinearTickets.rank([none, low, highNew, urgent, highOverdue, highStarted, highOld],
+                                        now: now).map(\.identifier)
+        check("urgent leads the list", ranked.first == "A-1", detail: ranked.joined(separator: ","))
+        check("no-priority sinks below low", ranked.last == "A-2", detail: ranked.joined(separator: ","))
+        check("inside one priority: overdue, then started, then newest",
+              Array(ranked.dropFirst().prefix(4)) == ["A-7", "A-6", "A-5", "A-4"],
+              detail: ranked.joined(separator: ","))
+        check("an overdue ticket is only overdue against today",
+              LinearTickets.isOverdue(highOverdue, now: now)
+                  && !LinearTickets.isOverdue(highOverdue, now: date("2026-07-01T00:00:00Z")))
+        check("priority labels read as Linear's scale",
+              LinearTickets.priorityLabel(1) == "P1" && LinearTickets.priorityLabel(0) == "--")
+    }
+
+    // Typing narrows the list so an existing ticket surfaces before Return files a
+    // duplicate.
+    private static func testLinearTicketFilter() {
+        let tickets = [
+            ticket("RUSH-2078", title: "prix/code-reviewer is down"),
+            ticket("RUSH-1968", title: "Passphrase exported in plaintext from .zshenv"),
+        ]
+        check("every term must match, in any order",
+              LinearTickets.filter(tickets, query: "plaintext passphrase").map(\.identifier)
+                  == ["RUSH-1968"])
+        check("the identifier is searchable too",
+              LinearTickets.filter(tickets, query: "rush-2078").map(\.identifier) == ["RUSH-2078"])
+        check("an unmatched term yields nothing",
+              LinearTickets.filter(tickets, query: "kubernetes").isEmpty)
+        check("an empty query keeps the whole ranked list",
+              LinearTickets.filter(tickets, query: "   ").count == 2)
+    }
+
+    // The cache is what makes the panel appear instantly; a write for one project
+    // must not disturb another, and staleness has to be honest.
+    private static func testLinearCache() {
+        let now = Date()
+        var cache = LinearTickets.Cache()
+        cache = LinearTickets.merged(cache, projects: [LinearProject(id: "p1", name: "Agents CLI")],
+                                     at: now)
+        cache = LinearTickets.merged(cache, project: "Agents CLI",
+                                     tickets: [ticket("A-1")], at: now)
+        cache = LinearTickets.merged(cache, project: "Rush App",
+                                     tickets: [ticket("B-1"), ticket("B-2")], at: now)
+        check("each project keeps its own tickets",
+              cache.scopes["Agents CLI"]?.tickets.count == 1 && cache.scopes["Rush App"]?.tickets.count == 2)
+        check("the project list survives a ticket write", cache.projects.count == 1)
+        check("a just-fetched scope is fresh",
+              LinearTickets.isFresh(cache, project: "Agents CLI", now: now))
+        check("a scope older than the TTL is stale",
+              !LinearTickets.isFresh(cache, project: "Agents CLI",
+                                     now: now.addingTimeInterval(LinearTickets.cacheTTL + 1)))
+        check("an unfetched scope is never fresh",
+              !LinearTickets.isFresh(cache, project: "Prix", now: now))
+
+        // The cache round-trips through JSON — it is read back on the next launch.
+        guard let encoded = try? JSONEncoder().encode(cache),
+              let decoded = try? JSONDecoder().decode(LinearTickets.Cache.self, from: encoded) else {
+            check("cache round-trips through JSON", false)
+            return
+        }
+        check("cache round-trips through JSON",
+              decoded.scopes["Rush App"]?.tickets == cache.scopes["Rush App"]?.tickets)
+    }
+
+    // Dispatching an existing ticket must produce a real, scoped, self-reporting
+    // run — and the Plan variant must not tell an agent to change code.
+    private static func testTicketDispatchContract() {
+        let t = ticket("RUSH-2098", title: "Surface the repo's open tickets", priority: 2)
+        let args = AgentsCLI.ticketWorkRunArgs(
+            agent: "claude",
+            prompt: AgentsCLI.ticketWorkPrompt(ticket: t, action: .run),
+            ticket: t, action: .run, cwd: "/Users/me/src/agents-cli")
+        for flag in ["--mode", "auto", "--balanced", "--notify"] {
+            check("ticket run argv carries \(flag)", args.contains(flag))
+        }
+        check("ticket run is scoped to the picked repo",
+              args.contains("--cwd") && args.contains("/Users/me/src/agents-cli"))
+        check("the session is named after the ticket",
+              args.contains("rush-2098"), detail: args.joined(separator: " "))
+        let planArgs = AgentsCLI.ticketWorkRunArgs(
+            agent: "claude", prompt: "p", ticket: t, action: .plan, cwd: nil)
+        check("a plan dispatch is named apart from the implementation run",
+              planArgs.contains("rush-2098-plan"), detail: planArgs.joined(separator: " "))
+        check("no --cwd when there is no repo to scope to", !planArgs.contains("--cwd"))
+
+        let runPrompt = AgentsCLI.ticketWorkPrompt(ticket: t, action: .run)
+        check("the run brief names the ticket and how to read it",
+              runPrompt.contains("RUSH-2098") && runPrompt.contains("linear tasks RUSH-2098"))
+        check("the run brief claims the ticket and reports back",
+              runPrompt.contains("--status progress") && runPrompt.contains("--comment"))
+        let planPrompt = AgentsCLI.ticketWorkPrompt(ticket: t, action: .plan)
+        check("the plan brief forbids code changes and a PR",
+              planPrompt.contains("Do NOT change code") && planPrompt.contains("do NOT open a PR"))
+        check("the plan brief posts the plan on the ticket",
+              planPrompt.contains("linear update RUSH-2098 --comment"))
+
+        // The click seam: a plain click on a row dispatches THAT ticket, and
+        // Cmd-click opens it in Linear instead of spending an agent run on it.
+        let row = TicketRowView(ticket: t, index: 0)
+        var dispatched: LinearTicket?
+        var opened: LinearTicket?
+        row.onDispatch = { dispatched = $0 }
+        row.onOpen = { opened = $0 }
+        row.mouseDown(with: mouseEvent(modifiers: []))
+        check("a click on a row dispatches that ticket",
+              dispatched?.identifier == t.identifier && opened == nil)
+        dispatched = nil
+        row.mouseDown(with: mouseEvent(modifiers: [.command]))
+        check("cmd-click opens the ticket instead of dispatching",
+              opened?.identifier == t.identifier && dispatched == nil)
+
+        let scopeArgs = AgentsCLI.linearTicketArgs(project: "Agents CLI")
+        check("the ticket query asks for every open ticket of the project",
+              scopeArgs.contains("--all") && scopeArgs.contains("--status")
+                  && scopeArgs.contains("open") && scopeArgs.contains("--cycle")
+                  && scopeArgs.contains("all") && scopeArgs.contains("Agents CLI"),
+              detail: scopeArgs.joined(separator: " "))
+    }
+
     // MARK: helpers
+
+    private static func ticket(_ identifier: String, title: String = "t", priority: Int = 2,
+                               createdAt: String? = "2026-07-01T00:00:00.000Z",
+                               dueDate: String? = nil,
+                               stateType: String = "unstarted") -> LinearTicket {
+        LinearTicket(identifier: identifier, title: title, priority: priority,
+                     state: LinearTicketState(name: stateType == "started" ? "Doing" : "Todo",
+                                              type: stateType),
+                     url: "https://linear.app/getrush/issue/\(identifier)",
+                     dueDate: dueDate, createdAt: createdAt)
+    }
+
+    private static func mouseEvent(modifiers: NSEvent.ModifierFlags) -> NSEvent {
+        NSEvent.mouseEvent(with: .leftMouseDown, location: .zero, modifierFlags: modifiers,
+                           timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0,
+                           clickCount: 1, pressure: 1)!
+    }
+
+    private static func date(_ iso: String) -> Date {
+        let f = ISO8601DateFormatter()
+        return f.date(from: iso) ?? Date(timeIntervalSince1970: 0)
+    }
 
     private static func write(_ dir: URL, _ name: String, modified offset: TimeInterval) {
         let url = dir.appendingPathComponent(name)

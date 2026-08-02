@@ -1,0 +1,169 @@
+import Foundation
+
+// The quick-dispatch panel's ticket half (Cmd-Shift-O). The panel captures NEW
+// work, and this is what it shows about work that ALREADY exists: the open Linear
+// tickets of the repo the picker is pointed at, ranked so the ones that should be
+// picked up next lead.
+//
+// Everything here is pure or file-local — no network, no AppKit — so the ordering,
+// the repo→project mapping, and the cache are exercised by the MENUBAR_ISSUE_TEST
+// self-test (IssueSelfTest.swift). The actual fetch lives in AgentsCLI, which
+// shells the `linear` skill CLI the same way the ticket-create path does.
+enum LinearTickets {
+    // How many rows the panel shows, and how long a fetched scope is reused
+    // before the next summon refreshes it in the background.
+    static let displayLimit = 5
+    static let cacheTTL: TimeInterval = 90
+
+    // MARK: Repo -> Linear project
+
+    // Collapse a repo directory name or a Linear project name to one comparable
+    // key: lowercase, alphanumerics only. `agents-cli` and "Agents CLI" both
+    // become "agentscli", which is what makes the repo picker able to drive the
+    // project scope without the user configuring a mapping.
+    static func projectKey(_ s: String) -> String {
+        s.lowercased().filter { $0.isLetter || $0.isNumber }
+    }
+
+    // The Linear project a repo's tickets live in. `override` is a project name
+    // the user picked explicitly for this repo (remembered per repo by the panel)
+    // and always wins; otherwise the repo name must match a project name under
+    // `projectKey`. No near-match guessing: a repo whose name matches nothing
+    // resolves to nil and the panel says so, rather than silently listing some
+    // other project's tickets.
+    static func resolveProject(repoName: String?,
+                               projects: [LinearProject],
+                               override: String? = nil) -> LinearProject? {
+        if let override, !override.isEmpty,
+           let pinned = projects.first(where: { $0.name == override }) {
+            return pinned
+        }
+        guard let repoName, !repoName.isEmpty else { return nil }
+        let key = projectKey(repoName)
+        guard !key.isEmpty else { return nil }
+        return projects.first { projectKey($0.name) == key }
+    }
+
+    // MARK: Ranking — "what should I pick up next?"
+
+    // Linear's priority scale is 1=urgent … 4=low with 0 meaning "no priority",
+    // so 0 has to be pushed past 4 instead of sorting first.
+    static func priorityOrder(_ priority: Int) -> Int {
+        priority <= 0 ? 5 : priority
+    }
+
+    static func priorityLabel(_ priority: Int) -> String {
+        priority <= 0 ? "--" : "P\(priority)"
+    }
+
+    // Dates arrive as ISO-8601 UTC (`createdAt`) and plain `yyyy-MM-dd`
+    // (`dueDate`), both of which compare correctly as strings — so the ordering
+    // needs no date parsing and no locale.
+    static func today(_ now: Date = Date()) -> String {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .iso8601)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: now)
+    }
+
+    static func isOverdue(_ ticket: LinearTicket, now: Date = Date()) -> Bool {
+        guard let due = ticket.dueDate, !due.isEmpty else { return false }
+        return due < today(now)
+    }
+
+    // Urgent first, then overdue, then already in progress — ascending, so a
+    // smaller key leads. Exposed so the self-test asserts the rule itself, not
+    // just one sorted example. Recency is the tiebreak, applied in `rank` because
+    // it runs the other way (newest first).
+    static func rankKey(_ ticket: LinearTicket, now: Date = Date()) -> (Int, Int, Int) {
+        (priorityOrder(ticket.priority),
+         isOverdue(ticket, now: now) ? 0 : 1,
+         ticket.isStarted ? 0 : 1)
+    }
+
+    static func rank(_ tickets: [LinearTicket], now: Date = Date()) -> [LinearTicket] {
+        tickets.sorted { a, b in
+            let (ka, kb) = (rankKey(a, now: now), rankKey(b, now: now))
+            if ka != kb { return ka < kb }
+            // ISO-8601 UTC timestamps compare correctly as strings; a ticket with
+            // no timestamp sorts after one that has it.
+            let (ca, cb) = (a.createdAt ?? "", b.createdAt ?? "")
+            if ca != cb { return ca > cb }
+            return a.identifier < b.identifier
+        }
+    }
+
+    // MARK: Filtering — type to find an existing ticket before filing a new one
+
+    // Match the typed note against identifier + title, every whitespace-separated
+    // term having to appear somewhere (so "menubar ticket" finds a ticket titled
+    // "Menu bar: dispatch a ticket"). An empty query matches everything, which is
+    // what keeps the unfiltered list showing the top-ranked tickets.
+    static func filter(_ tickets: [LinearTicket], query: String) -> [LinearTicket] {
+        let terms = query.lowercased().split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        guard !terms.isEmpty else { return tickets }
+        return tickets.filter { ticket in
+            let haystack = "\(ticket.identifier) \(ticket.title)".lowercased()
+            return terms.allSatisfy { haystack.contains($0) }
+        }
+    }
+
+    // MARK: Cache
+
+    // Warm cache so a summon renders tickets immediately instead of waiting on a
+    // `linear tasks` round trip (measured 0.4-3.6s). Same durable, gitignored home
+    // as the recent-tickets ledger.
+    struct Cache: Codable {
+        var projects: [LinearProject] = []
+        var projectsFetchedAt: Double = 0
+        var scopes: [String: Scope] = [:]
+
+        struct Scope: Codable {
+            var fetchedAt: Double
+            var tickets: [LinearTicket]
+        }
+    }
+
+    private static var cacheURL: URL {
+        URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent(".agents/.history/menubar/linear-cache.json")
+    }
+
+    static func loadCache() -> Cache {
+        guard let data = try? Data(contentsOf: cacheURL),
+              let cache = try? JSONDecoder().decode(Cache.self, from: data) else { return Cache() }
+        return cache
+    }
+
+    static func saveCache(_ cache: Cache) {
+        try? FileManager.default.createDirectory(
+            at: cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if let out = try? JSONEncoder().encode(cache) { try? out.write(to: cacheURL) }
+    }
+
+    /// Pure cache update for one project's tickets — replaces that scope and
+    /// leaves every other scope (and the project list) untouched.
+    static func merged(_ cache: Cache, project: String, tickets: [LinearTicket],
+                       at now: Date = Date()) -> Cache {
+        var next = cache
+        next.scopes[project] = Cache.Scope(fetchedAt: now.timeIntervalSince1970, tickets: tickets)
+        return next
+    }
+
+    static func merged(_ cache: Cache, projects: [LinearProject], at now: Date = Date()) -> Cache {
+        var next = cache
+        next.projects = projects
+        next.projectsFetchedAt = now.timeIntervalSince1970
+        return next
+    }
+
+    /// True when a scope was fetched recently enough that the panel can show it
+    /// without kicking a refresh.
+    static func isFresh(_ cache: Cache, project: String, now: Date = Date(),
+                        ttl: TimeInterval = cacheTTL) -> Bool {
+        guard let scope = cache.scopes[project] else { return false }
+        return now.timeIntervalSince1970 - scope.fetchedAt <= ttl
+    }
+}

@@ -24,6 +24,9 @@ private let kAccent = NSColor(red: 0xa3/255.0, green: 0xe6/255.0, blue: 0x35/255
 final class PromptPanel: NSPanel {
     var onResignKey: (() -> Void)?
     var onBecomeKey: (() -> Void)?
+    // Cmd-1 … Cmd-9 dispatch the Nth listed ticket. Returns true when the index
+    // matched a visible row, so an unhandled digit still reaches the field editor.
+    var onTicketShortcut: ((Int) -> Bool)?
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
     override func resignKey() {
@@ -42,6 +45,10 @@ final class PromptPanel: NSPanel {
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
            let key = event.charactersIgnoringModifiers?.lowercased() {
+            if let digit = Int(key), digit >= 1, digit <= 9,
+               onTicketShortcut?(digit - 1) == true {
+                return true
+            }
             let selector: Selector?
             switch key {
             case "v": selector = #selector(NSText.paste(_:))
@@ -107,6 +114,102 @@ final class ClipThumbView: NSView {
     }
 }
 
+// One open Linear ticket in the panel's list. Click dispatches it to the selected
+// agents in the picked repo; Cmd-click opens it in Linear instead (the escape hatch
+// for "I want to read it first"). A row is a real button-shaped surface — hover
+// highlight and a `⌘N` chip — because dispatching an agent on a click needs to look
+// deliberate, not incidental.
+final class TicketRowView: NSView {
+    let ticket: LinearTicket
+    var onDispatch: ((LinearTicket) -> Void)?
+    var onOpen: ((LinearTicket) -> Void)?
+    static let height: CGFloat = 22
+
+    private var hovered = false { didSet { updateChrome() } }
+
+    init(ticket: LinearTicket, index: Int) {
+        self.ticket = ticket
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 5
+        translatesAutoresizingMaskIntoConstraints = false
+        heightAnchor.constraint(equalToConstant: Self.height).isActive = true
+
+        let shortcut = Self.label(index < 9 ? "\u{2318}\(index + 1)" : "",
+                                  color: .tertiaryLabelColor, width: 24)
+        let priority = Self.label(LinearTickets.priorityLabel(ticket.priority),
+                                  color: Self.priorityColor(ticket.priority), width: 24)
+        let identifier = Self.label(ticket.identifier, color: kAccent, width: 80)
+        let state = Self.label(ticket.stateName, color: .tertiaryLabelColor, width: 56)
+        // A long title truncates instead of widening the panel.
+        let title = Self.label(ticket.title, color: .labelColor, width: nil)
+        title.lineBreakMode = .byTruncatingTail
+        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let row = NSStackView(views: [shortcut, priority, identifier, state, title])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 8
+        row.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(row)
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+            row.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+
+        var tip = "\(ticket.identifier) — \(ticket.title)"
+        if let due = ticket.dueDate, !due.isEmpty { tip += "\ndue \(due)" }
+        tip += "\nclick dispatches · \u{2318}click opens in Linear"
+        toolTip = tip
+        updateChrome()
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas { removeTrackingArea(area) }
+        addTrackingArea(NSTrackingArea(rect: bounds,
+                                       options: [.mouseEnteredAndExited, .activeAlways],
+                                       owner: self, userInfo: nil))
+    }
+    override func mouseEntered(with event: NSEvent) { hovered = true }
+    override func mouseExited(with event: NSEvent) { hovered = false }
+
+    override func mouseDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.command) {
+            onOpen?(ticket)
+        } else {
+            onDispatch?(ticket)
+        }
+    }
+
+    private func updateChrome() {
+        layer?.backgroundColor = hovered
+            ? kAccent.withAlphaComponent(0.14).cgColor
+            : NSColor.clear.cgColor
+    }
+
+    // Linear's scale: 1 urgent, 2 high, 3 medium, 4 low, 0 none.
+    static func priorityColor(_ priority: Int) -> NSColor {
+        switch priority {
+        case 1: return .systemRed
+        case 2: return .systemOrange
+        case 3: return .secondaryLabelColor
+        default: return .tertiaryLabelColor
+        }
+    }
+
+    private static func label(_ text: String, color: NSColor, width: CGFloat?) -> NSTextField {
+        let field = NSTextField(labelWithString: text)
+        field.font = .monospacedSystemFont(ofSize: 11.5, weight: .regular)
+        field.textColor = color
+        field.translatesAutoresizingMaskIntoConstraints = false
+        if let width { field.widthAnchor.constraint(equalToConstant: width).isActive = true }
+        return field
+    }
+}
+
 enum QuickDispatchAction: Int {
     case plan = 0
     case run = 1
@@ -143,6 +246,11 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
     // strip for manual attach, since the user can see exactly what they're picking.
     private static let recentClipWindow: TimeInterval = 10 * 60
     private static let panelWidth: CGFloat = 640
+    // Panel height is additive: the capture half is fixed, and the screenshot strip
+    // and the ticket list each add their own block when they have content.
+    private static let baseHeight: CGFloat = 156
+    private static let thumbStripHeight: CGFloat = 92
+    private static let ticketSectionChrome: CGFloat = 36   // header row + stack spacing
 
     private var panel: PromptPanel?
     private let field = NSTextField()
@@ -158,6 +266,21 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
     private let repoPicker = NSPopUpButton(frame: .zero, pullsDown: false)
     private var repoDirs: [String] = []
     private static let lastRepoKey = "menubar.quickDispatch.lastRepo"
+    // Ticket half: the picked repo's Linear project, its open tickets ranked
+    // urgent-first, and the rows currently shown (the ranked list narrowed by
+    // whatever has been typed).
+    private let projectPicker = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let ticketStatus = NSTextField(labelWithString: "")
+    private let ticketList = NSStackView()
+    private var linearCache = LinearTickets.Cache()
+    private var activeProject: LinearProject?
+    private var visibleTickets: [LinearTicket] = []
+    // Bumped on every scope change so a slow `linear tasks` answering after the
+    // user switched repo/project is dropped instead of overwriting the new list.
+    private var ticketFetchToken = 0
+    private var repoNamesByDir: [String: String] = [:]
+    private var rebuildingProjectPicker = false
+    private static let projectOverrideKeyPrefix = "menubar.quickDispatch.project."
     private var selected: [String] = []   // newest-first order preserved
     private var selectedAgents = Set<String>()
     private var roster: [MenuAgent] = []
@@ -189,10 +312,13 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         rebuildAgents(restoring: restoredDraft?.selectedAgents)
         rebuildThumbs(restoring: restoredDraft?.selectedPaths)
         rebuildRepos()
+        // Tickets render from the warm cache first (a `linear tasks` round trip
+        // costs seconds), then refresh in the background.
+        linearCache = LinearTickets.loadCache()
+        refreshTicketScope()
 
-        let hasThumbs = !thumbStrip.arrangedSubviews.isEmpty
-        thumbStrip.isHidden = !hasThumbs
-        panel.setContentSize(NSSize(width: Self.panelWidth, height: hasThumbs ? 248 : 156))
+        thumbStrip.isHidden = thumbStrip.arrangedSubviews.isEmpty
+        applyContentHeight()
 
         dismissArmed = false
         position(panel)
@@ -205,7 +331,11 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
             FileHandle.standardError.write(Data(
                 "summon: frame=\(panel.frame) visible=\(panel.isVisible) thumbs=\(thumbStrip.arrangedSubviews.count)\n".utf8))
         }
-        // Arm click-outside dismissal once the activation race has settled.
+        // Arm click-outside dismissal once the activation race has settled. The
+        // preview affordance leaves it disarmed: its whole point is to hold the
+        // panel on screen for QA and screenshots, and an unbundled dev build does
+        // not keep app activation, so an armed panel dismisses itself immediately.
+        guard ProcessInfo.processInfo.environment["MENUBAR_PROMPT_PREVIEW"] != "1" else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
             self?.dismissArmed = true
         }
@@ -351,6 +481,8 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
 
     @objc private func onRepoChanged(_ sender: NSPopUpButton) {
         updateHint()
+        // The repo IS the ticket scope: switching it switches the Linear project.
+        refreshTicketScope()
     }
 
     // MARK: Repo picker
@@ -384,6 +516,199 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         let idx = repoPicker.indexOfSelectedItem
         guard idx >= 0, idx < repoDirs.count else { return nil }
         return repoDirs[idx]
+    }
+
+    // MARK: Linear tickets
+
+    // The repo name behind the picked directory — the key that maps to a Linear
+    // project. Resolving it shells out to git for the common dir (a worktree must
+    // answer with its parent repo), so it runs off the main thread and is memoized
+    // for the life of the helper: the first summon for a directory fills its ticket
+    // list one beat late, every later summon has the name before the panel is on
+    // screen. Deliberately NOT persisted — a directory that gets renamed or
+    // repurposed would otherwise keep answering with a name that no longer exists.
+    private func currentRepoName() -> String? {
+        guard let dir = selectedRepo() else { return nil }
+        if let known = repoNamesByDir[dir] { return known }
+        resolveRepoName(dir: dir)
+        return nil
+    }
+
+    private func resolveRepoName(dir: String) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let name = AgentsCLI.repoName(forDir: dir)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.repoNamesByDir[dir] = name
+                if dir == self.selectedRepo() { self.refreshTicketScope() }
+            }
+        }
+    }
+
+    private func projectOverride(for repoName: String) -> String? {
+        UserDefaults.standard.string(forKey: Self.projectOverrideKeyPrefix + repoName)
+    }
+
+    @objc private func onProjectChanged(_ sender: NSPopUpButton) {
+        // Populating the popup selects its first item, which arrives here as an
+        // action — persisting that would pin every repo to whatever project Linear
+        // happens to list first.
+        guard !rebuildingProjectPicker else { return }
+        guard let name = sender.titleOfSelectedItem, let repoName = currentRepoName(),
+              name != activeProject?.name else { return }
+        // An explicit pick sticks to this repo, which is how a repo whose name
+        // matches no project (or matches the wrong one) gets scoped correctly.
+        UserDefaults.standard.set(name, forKey: Self.projectOverrideKeyPrefix + repoName)
+        refreshTicketScope()
+    }
+
+    // Point the ticket list at the project behind the picked repo: rebuild the
+    // project popup, render whatever is cached, and fetch when the cache is stale.
+    private func refreshTicketScope() {
+        ticketFetchToken += 1
+        let repoName = currentRepoName()
+        activeProject = LinearTickets.resolveProject(
+            repoName: repoName,
+            projects: linearCache.projects,
+            override: repoName.flatMap { projectOverride(for: $0) })
+        rebuildProjectPicker()
+
+        if linearCache.projects.isEmpty { fetchProjects() }
+
+        guard let project = activeProject else {
+            visibleTickets = []
+            if selectedRepo() == nil {
+                renderTickets(status: "pick a repo to see its tickets")
+            } else if let repoName {
+                renderTickets(status: "no Linear project matches \(repoName) — pick one")
+            } else {
+                // The repo name is still being resolved (first summon for this dir).
+                renderTickets(status: "loading…")
+            }
+            return
+        }
+        let cached = linearCache.scopes[project.name]?.tickets
+        visibleTickets = rankedAndFiltered(cached ?? [])
+        renderTickets(status: cached == nil ? "loading \(project.name)…" : nil)
+        if !LinearTickets.isFresh(linearCache, project: project.name) {
+            fetchTickets(project: project.name)
+        }
+    }
+
+    private func fetchProjects() {
+        let token = ticketFetchToken
+        AgentsCLI.linearProjectsAsync { [weak self] projects in
+            guard let self, let projects else { return }
+            self.linearCache = LinearTickets.merged(self.linearCache, projects: projects)
+            LinearTickets.saveCache(self.linearCache)
+            // A project list arriving after a scope change still helps the CURRENT
+            // scope, so re-resolve rather than dropping it on the token check.
+            if token == self.ticketFetchToken || self.activeProject == nil { self.refreshTicketScope() }
+        }
+    }
+
+    private func fetchTickets(project: String) {
+        let token = ticketFetchToken
+        AgentsCLI.linearTicketsAsync(project: project) { [weak self] tickets in
+            guard let self else { return }
+            guard let tickets else {
+                if token == self.ticketFetchToken, self.visibleTickets.isEmpty {
+                    self.renderTickets(status: "could not reach Linear")
+                }
+                return
+            }
+            self.linearCache = LinearTickets.merged(self.linearCache, project: project,
+                                                    tickets: tickets)
+            LinearTickets.saveCache(self.linearCache)
+            guard token == self.ticketFetchToken, self.activeProject?.name == project else { return }
+            self.visibleTickets = self.rankedAndFiltered(tickets)
+            self.renderTickets()
+        }
+    }
+
+    // Urgent first, then narrowed by whatever the user has typed — so typing a few
+    // words shows the tickets that already cover it before Return files a new one.
+    private func rankedAndFiltered(_ tickets: [LinearTicket]) -> [LinearTicket] {
+        let query = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let matched = LinearTickets.filter(LinearTickets.rank(tickets), query: query)
+        return Array(matched.prefix(LinearTickets.displayLimit))
+    }
+
+    private func renderTickets(status: String? = nil) {
+        for v in ticketList.arrangedSubviews {
+            ticketList.removeArrangedSubview(v)
+            v.removeFromSuperview()
+        }
+        for (index, ticket) in visibleTickets.enumerated() {
+            let row = TicketRowView(ticket: ticket, index: index)
+            row.onDispatch = { [weak self] t in self?.dispatchTicket(t) }
+            row.onOpen = { [weak self] t in self?.openTicket(t) }
+            ticketList.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: ticketList.widthAnchor).isActive = true
+        }
+        ticketList.isHidden = visibleTickets.isEmpty
+        ticketStatus.stringValue = status ?? ticketCountText()
+        applyContentHeight()
+        updateHint()
+    }
+
+    private func ticketCountText() -> String {
+        guard let project = activeProject else { return "" }
+        let total = linearCache.scopes[project.name]?.tickets.count ?? 0
+        if total == 0 { return "no open tickets" }
+        if visibleTickets.isEmpty { return "\(total) open · none match what you typed" }
+        return "\(total) open · urgent first · click or \u{2318}N dispatches"
+    }
+
+    private func rebuildProjectPicker() {
+        rebuildingProjectPicker = true
+        defer { rebuildingProjectPicker = false }
+        projectPicker.removeAllItems()
+        let names = linearCache.projects.map(\.name)
+        guard !names.isEmpty else {
+            projectPicker.addItem(withTitle: activeProject?.name ?? "Linear project")
+            projectPicker.isEnabled = false
+            return
+        }
+        projectPicker.isEnabled = true
+        for name in names {
+            projectPicker.addItem(withTitle: name)
+            projectPicker.lastItem?.toolTip = "Scope the ticket list to \(name)"
+        }
+        if let active = activeProject, let idx = names.firstIndex(of: active.name) {
+            projectPicker.selectItem(at: idx)
+        }
+    }
+
+    // Cmd-click a row: read the ticket in Linear instead of dispatching it. Same
+    // dismissal suppression as the screenshot preview — the browser taking focus
+    // must not throw away the typed note.
+    private func openTicket(_ ticket: LinearTicket) {
+        guard let raw = ticket.url, let url = URL(string: raw) else { return }
+        suppressDismiss = true
+        NSWorkspace.shared.open(url)
+    }
+
+    // Dispatch an EXISTING ticket: same agents, same repo, same balanced headless
+    // run as a quick Run — Plan asks for a plan comment on the ticket, Run asks for
+    // the change. The panel closes immediately, like a submit does, so a second
+    // click can't double-dispatch.
+    private func dispatchTicket(_ ticket: LinearTicket) {
+        guard !inFlight else { return }
+        inFlight = true
+        let cwd = selectedRepo()
+        if let cwd { UserDefaults.standard.set(cwd, forKey: Self.lastRepoKey) }
+        AgentsCLI.dispatchTicketWork(ticket: ticket, agents: selectedAgentList(),
+                                     action: action, cwd: cwd)
+        dismiss(preservingDraft: false)
+    }
+
+    // Dispatch the Nth listed ticket (Cmd-1 … Cmd-9). False when no such row is
+    // listed, so the keystroke falls through to the text field.
+    private func dispatchTicket(at index: Int) -> Bool {
+        guard index >= 0, index < visibleTickets.count else { return false }
+        dispatchTicket(visibleTickets[index])
+        return true
     }
 
     // MARK: Thumbnails
@@ -454,7 +779,38 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         let actionText = action == .plan
             ? "file ticket + plan with \(agents)\(repoName)"
             : "run \(agents)\(repoName) · balanced"
+        // Deliberately unchanged in length by the ticket list: this label's
+        // intrinsic width is what sizes the panel, and the rows carry their own
+        // `⌘N` chips plus a click/⌘click tooltip, so nothing needs saying here.
         hint.stringValue = "\(attach)\(pickable)    ↩ \(actionText) · esc clear"
+    }
+
+    // Typing is also a ticket search: narrow the list so an existing ticket shows
+    // up before Return files a duplicate.
+    func controlTextDidChange(_ obj: Notification) {
+        guard let project = activeProject,
+              let tickets = linearCache.scopes[project.name]?.tickets else {
+            updateHint()
+            return
+        }
+        visibleTickets = rankedAndFiltered(tickets)
+        renderTickets()
+    }
+
+    // Height is additive over the fixed capture half; the panel grows downward from
+    // a fixed top edge while it is on screen, so a list that fills in after an async
+    // fetch doesn't shift the text field out from under the cursor.
+    private func applyContentHeight() {
+        guard let panel else { return }
+        var height = Self.baseHeight + Self.ticketSectionChrome
+            + CGFloat(visibleTickets.count) * TicketRowView.height
+        if !thumbStrip.isHidden { height += Self.thumbStripHeight }
+        guard abs(panel.frame.height - height) > 0.5 else { return }
+        let top = panel.frame.maxY
+        panel.setContentSize(NSSize(width: Self.panelWidth, height: height))
+        if panel.isVisible {
+            panel.setFrameOrigin(NSPoint(x: panel.frame.minX, y: top - panel.frame.height))
+        }
     }
 
     // MARK: Build / layout
@@ -477,6 +833,7 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         }
         // Returning to the bar after a preview re-arms click-outside dismissal.
         panel.onBecomeKey = { [weak self] in self?.suppressDismiss = false }
+        panel.onTicketShortcut = { [weak self] index in self?.dispatchTicket(at: index) ?? false }
 
         let bg = NSVisualEffectView()
         bg.material = .hudWindow
@@ -525,12 +882,38 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         hint.font = .monospacedSystemFont(ofSize: 11.5, weight: .regular)
         hint.textColor = .secondaryLabelColor
 
+        projectPicker.translatesAutoresizingMaskIntoConstraints = false
+        projectPicker.controlSize = .small
+        projectPicker.font = .systemFont(ofSize: 12)
+        projectPicker.target = self
+        projectPicker.action = #selector(onProjectChanged(_:))
+
+        ticketStatus.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        ticketStatus.textColor = .tertiaryLabelColor
+        ticketStatus.lineBreakMode = .byTruncatingTail
+        ticketStatus.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        ticketList.orientation = .vertical
+        ticketList.alignment = .leading
+        ticketList.spacing = 0
+
         let controlRow = NSStackView(views: [modeControl, repoPicker])
         controlRow.orientation = .horizontal
         controlRow.alignment = .centerY
         controlRow.spacing = 12
 
-        let stack = NSStackView(views: [field, controlRow, agentStrip, thumbStrip, hint])
+        // The ticket header names the scope (project popup) and its state; the rows
+        // below it are the open tickets of that project.
+        let ticketTitle = NSTextField(labelWithString: "Tickets")
+        ticketTitle.font = .monospacedSystemFont(ofSize: 11, weight: .medium)
+        ticketTitle.textColor = .secondaryLabelColor
+        let ticketHeader = NSStackView(views: [ticketTitle, projectPicker, ticketStatus])
+        ticketHeader.orientation = .horizontal
+        ticketHeader.alignment = .centerY
+        ticketHeader.spacing = 8
+
+        let stack = NSStackView(views: [field, controlRow, agentStrip, thumbStrip,
+                                        ticketHeader, ticketList, hint])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 10
@@ -542,6 +925,12 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
             stack.centerYAnchor.constraint(equalTo: bg.centerYAnchor),
             field.widthAnchor.constraint(equalTo: stack.widthAnchor),
             modeControl.widthAnchor.constraint(equalToConstant: 180),
+            ticketList.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            // The panel is a fixed-width bar: cap the two popups so a long repo
+            // path or project name truncates inside them instead of stretching the
+            // window past panelWidth.
+            repoPicker.widthAnchor.constraint(lessThanOrEqualToConstant: 220),
+            projectPicker.widthAnchor.constraint(lessThanOrEqualToConstant: 190),
         ])
         return panel
     }

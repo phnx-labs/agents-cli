@@ -224,6 +224,140 @@ enum AgentsCLI {
         "\(home)/.agents/skills/linear/scripts/linear"
     }
 
+    // MARK: Linear tickets in the quick-dispatch panel
+
+    // `linear projects --json`, so the panel can scope its ticket list to the
+    // project behind the picked repo (LinearTickets.resolveProject).
+    static func linearProjectsAsync(completion: @escaping ([LinearProject]?) -> Void) {
+        runMonitored([linearSkillBinary(), "projects", "--json"]) { text, ok in
+            guard ok, let data = text.data(using: .utf8),
+                  let projects = try? JSONDecoder().decode([LinearProject].self, from: data) else {
+                completion(nil)
+                return
+            }
+            completion(projects)
+        }
+    }
+
+    // Every OPEN ticket of one project, across cycles and the backlog — the panel
+    // ranks and trims the list itself (LinearTickets.rank), because "what should I
+    // pick up next" is not the cycle order Linear returns. `--all` drops the CLI's
+    // default per-agent filter so a ticket delegated to another agent is still
+    // offered.
+    static func linearTicketArgs(project: String) -> [String] {
+        [linearSkillBinary(), "tasks", "--all",
+         "--project", project,
+         "--status", "open",
+         "--cycle", "all",
+         "--json"]
+    }
+
+    static func linearTicketsAsync(project: String,
+                                   completion: @escaping ([LinearTicket]?) -> Void) {
+        runMonitored(linearTicketArgs(project: project)) { text, ok in
+            guard ok, let data = text.data(using: .utf8),
+                  let decoded = try? JSONDecoder().decode(LinearTasksResponse.self, from: data) else {
+                completion(nil)
+                return
+            }
+            completion(decoded.issues)
+        }
+    }
+
+    // The repo name behind a working directory — the identity the panel maps to a
+    // Linear project. A worktree under `<repo>/.agents/worktrees/<slug>` must
+    // resolve to `<repo>`, not to the slug, so ask git for the COMMON dir (shared
+    // by every worktree) rather than trusting the path's last component. A
+    // directory that is not a git repo has no repo name but is still a real place
+    // to run in, so it identifies as itself.
+    static func repoName(forDir dir: String) -> String {
+        let common = capture(["/usr/bin/git", "-C", dir, "rev-parse",
+                              "--path-format=absolute", "--git-common-dir"])
+            .flatMap { String(data: $0, encoding: .utf8) }?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let common, !common.isEmpty {
+            return ((common as NSString).deletingLastPathComponent as NSString).lastPathComponent
+        }
+        return (dir as NSString).lastPathComponent
+    }
+
+    // The brief for working a ticket that already exists. Plan asks for a plan
+    // posted back on the ticket; Run asks for the change, shipped. Both run in
+    // `auto` mode — even the plan has to read the repo and comment on the ticket,
+    // which a read-only run cannot do.
+    static func ticketWorkPrompt(ticket: LinearTicket, action: QuickDispatchAction) -> String {
+        let head = """
+        You are picking up an existing Linear ticket, dispatched from the agents \
+        menu-bar quick-dispatch panel. Do not ask questions — make your best call and act.
+
+        Ticket: \(ticket.identifier) — \(ticket.title)
+        Priority: \(LinearTickets.priorityLabel(ticket.priority))\
+        \(ticket.stateName.isEmpty ? "" : " · state: \(ticket.stateName)")\
+        \(ticket.url.map { "\nURL: \($0)" } ?? "")
+
+        Read the full ticket first: `linear tasks \(ticket.identifier)`.
+        """
+        switch action {
+        case .plan:
+            return """
+            \(head)
+
+            Steps:
+            1. Read the ticket, then investigate the repo you were launched in for real \
+            context — name the files and the concrete change the ticket needs.
+            2. Write an implementation plan: the approach, the files to touch, the tests \
+            that will prove it, and anything genuinely ambiguous.
+            3. Post the plan on the ticket as a comment: \
+            `linear update \(ticket.identifier) --comment <plan>`.
+            4. Do NOT change code and do NOT open a PR — this dispatch is the plan only. \
+            Print the plan as your final output.
+            """
+        case .run:
+            return """
+            \(head)
+
+            Steps:
+            1. Read the ticket, claim it — `linear update \(ticket.identifier) --status progress` \
+            — and investigate the repo you were launched in.
+            2. Implement the change following that repo's AGENTS.md (worktree + PR when the \
+            repo requires it; never commit on the default branch).
+            3. Verify with the focused tests or the real flow that proves the user-visible \
+            outcome, and quote the real output.
+            4. Comment the result on the ticket with the PR link \
+            (`linear update \(ticket.identifier) --comment <result>`), and print the PR URL \
+            or the local verification evidence as your final output.
+            """
+        }
+    }
+
+    // `agents run` argv for a ticket dispatch. Same shape as a quick Run — headless,
+    // balanced across signed-in versions, self-notifying, scoped to the picked repo
+    // — but named after the ticket so the session reads as `rush-2098` in
+    // `agents sessions` instead of a slug of a note nobody typed.
+    static func ticketWorkRunArgs(agent: String, prompt: String, ticket: LinearTicket,
+                                  action: QuickDispatchAction, cwd: String? = nil) -> [String] {
+        let suffix = action == .plan ? "-plan" : ""
+        return quickFixRunArgs(agent: agent, prompt: prompt,
+                               name: "\(ticket.identifier.lowercased())\(suffix)", cwd: cwd)
+    }
+
+    // Fan the selected agents out onto one existing ticket. Detached + `--notify`
+    // for the same reason as dispatchQuickFix: the run must outlive this helper.
+    static func dispatchTicketWork(ticket: LinearTicket, agents: [String],
+                                  action: QuickDispatchAction, cwd: String? = nil) {
+        let selected = agents.isEmpty ? ["claude"] : agents
+        let prompt = ticketWorkPrompt(ticket: ticket, action: action)
+        Notifier.post(title: action == .plan
+                        ? "Planning \(ticket.identifier)…"
+                        : "Dispatching \(ticket.identifier)…",
+                      body: shortenForNotice(ticket.title),
+                      url: ticket.url)
+        for agent in selected {
+            runDetached(argv(ticketWorkRunArgs(agent: agent, prompt: prompt, ticket: ticket,
+                                               action: action, cwd: cwd)))
+        }
+    }
+
     // The standing brief handed to the ticket agent. It embeds the user's note
     // and every selected screenshot path as user-provided ticket material so the
     // agent can inspect them. The menu-bar helper owns the actual `linear create`
@@ -525,6 +659,13 @@ enum AgentsCLI {
     // (on the main queue) when it exits. Unlike runDetached this keeps a strong
     // reference until termination so the completion callback can fire — used for
     // the ticket agent, which is long-running but must still report its result.
+    //
+    // The pipe is drained on a background queue WHILE the child runs, not from a
+    // termination handler. A child that outputs more than the pipe buffer holds
+    // (~64 KiB — `linear tasks --json` for one project is several hundred KiB, and
+    // headless `agents run` output can be far more) blocks forever on write if
+    // nothing reads until it exits, so the termination handler never fires and the
+    // dispatch hangs with no notification.
     private static var monitored: [Process] = []
     private static func runMonitored(_ argv: [String], onFinish: @escaping (String, Bool) -> Void) {
         let p = Process()
@@ -533,20 +674,22 @@ enum AgentsCLI {
         let out = Pipe()
         p.standardOutput = out
         p.standardError = FileHandle.nullDevice
-        p.terminationHandler = { proc in
-            let data = out.fileHandleForReading.readDataToEndOfFile()
-            let text = String(data: data, encoding: .utf8) ?? ""
-            let ok = proc.terminationStatus == 0
-            DispatchQueue.main.async {
-                monitored.removeAll { $0 === proc }
-                onFinish(text, ok)
-            }
-        }
         do {
             try p.run()
             monitored.append(p)
         } catch {
             DispatchQueue.main.async { onFinish("", false) }
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let data = out.fileHandleForReading.readDataToEndOfFile()
+            p.waitUntilExit()
+            let text = String(data: data, encoding: .utf8) ?? ""
+            let ok = p.terminationStatus == 0
+            DispatchQueue.main.async {
+                monitored.removeAll { $0 === p }
+                onFinish(text, ok)
+            }
         }
     }
 
@@ -562,22 +705,29 @@ enum AgentsCLI {
         p.standardOutput = out
         p.standardInput = inPipe
         p.standardError = FileHandle.nullDevice
-        p.terminationHandler = { proc in
-            let data = out.fileHandleForReading.readDataToEndOfFile()
-            let text = String(data: data, encoding: .utf8) ?? ""
-            let ok = proc.terminationStatus == 0
-            DispatchQueue.main.async {
-                monitored.removeAll { $0 === proc }
-                onFinish(text, ok)
-            }
-        }
         do {
             try p.run()
             monitored.append(p)
-            inPipe.fileHandleForWriting.write(input)
-            inPipe.fileHandleForWriting.closeFile()
         } catch {
             DispatchQueue.main.async { onFinish("", false) }
+            return
+        }
+        // Feed stdin and drain stdout off the main thread, for the same reason as
+        // runMonitored: either direction can fill its pipe buffer and block, and a
+        // blocked main thread would freeze the menu bar.
+        DispatchQueue.global(qos: .userInitiated).async {
+            inPipe.fileHandleForWriting.write(input)
+            inPipe.fileHandleForWriting.closeFile()
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let data = out.fileHandleForReading.readDataToEndOfFile()
+            p.waitUntilExit()
+            let text = String(data: data, encoding: .utf8) ?? ""
+            let ok = p.terminationStatus == 0
+            DispatchQueue.main.async {
+                monitored.removeAll { $0 === p }
+                onFinish(text, ok)
+            }
         }
     }
 

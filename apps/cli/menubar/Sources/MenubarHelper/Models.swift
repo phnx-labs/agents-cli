@@ -25,6 +25,41 @@ struct MenuAgent {
     let label: String
 }
 
+// One entry of `linear projects --json` (the linear skill CLI). Only the fields
+// the quick-dispatch panel needs to name and scope a project are decoded.
+struct LinearProject: Codable, Equatable {
+    let id: String
+    let name: String
+}
+
+// Shape of `linear tasks --json`: a scope envelope around the issue list.
+struct LinearTasksResponse: Decodable {
+    let count: Int
+    let issues: [LinearTicket]
+}
+
+// One open Linear issue as the quick-dispatch panel shows it. `priority` is
+// Linear's own scale — 1 urgent, 2 high, 3 medium, 4 low, 0 none (0 sorts last,
+// see LinearTickets.rank). Cached to disk, so Codable both ways.
+struct LinearTicket: Codable, Equatable {
+    let identifier: String
+    let title: String
+    let priority: Int
+    let state: LinearTicketState?
+    let url: String?
+    let dueDate: String?
+    let createdAt: String?
+
+    // "started" is Linear's state type for in-progress workflow states.
+    var isStarted: Bool { state?.type == "started" }
+    var stateName: String { state?.name ?? "" }
+}
+
+struct LinearTicketState: Codable, Equatable {
+    let name: String
+    let type: String
+}
+
 struct RecentSession: Decodable {
     let id: String?
     let shortId: String?
