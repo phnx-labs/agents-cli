@@ -41,7 +41,8 @@ process, `/usr/libexec/sshd-keygen-wrapper`, so the prompt names a process whose
 grant does nothing for the helper — and granting it would let anything an ssh
 session spawns synthesize keystrokes — and, if it wins the chord, Cmd-Shift-V
 stops reaching the launchd-managed helper that *is* trusted. Which of the two
-wins is just a matter of which started first, so the outcome is arbitrary.
+wins comes down to which registered the chord first, so the outcome is
+arbitrary.
 
 The interactive mode refuses to start in that situation, and refuses
 unrecognized arguments (an unknown flag used to fall through to the status-bar

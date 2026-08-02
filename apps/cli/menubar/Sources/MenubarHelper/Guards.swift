@@ -13,8 +13,8 @@ import Foundation
 //      bundle. The user gets an "sshd-keygen-wrapper would like to control this
 //      computer" prompt; granting it does nothing for the helper and hands
 //      keystroke synthesis to every process any ssh session spawns. And since
-//      RegisterEventHotKey is first-come, whichever helper started first owns
-//      the chord — so when this one wins it, Cmd-Shift-V stops reaching the
+//      RegisterEventHotKey is first-come, the helper that registered the chord
+//      first owns it — so when this one wins, Cmd-Shift-V stops reaching the
 //      launchd-managed bundle that IS trusted, and the paste silently dies.
 //   2. Started with an unrecognized flag. Every mode other than `--notify` is
 //      env-gated, so an unknown flag used to fall straight through to
