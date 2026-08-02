@@ -21,6 +21,15 @@ import { ensureFeedPublishHook, listAskStats, listBlocks, recordNotified, type O
 import { ensureActivityLogHook, readRecentActivity, formatActivityLine, formatProgressUpdate, type ActivityEvent } from '../lib/activity.js';
 import { postFeedStatus } from '../lib/feed-post.js';
 import {
+  parseFeedPostLevel,
+  planFeedBroadcast,
+  runFeedBroadcast,
+  type FeedPostLevel,
+  type SinkOutcome,
+} from '../lib/feed-broadcast.js';
+import { getSessionById } from '../lib/session/db.js';
+import { readMeta } from '../lib/state.js';
+import {
   enrichBlocksFromSessions,
   groupBlocksByOutcome,
   isUnambiguousOutcomeAnswer,
@@ -301,6 +310,7 @@ export function registerFeedCommand(program: Command): void {
     .argument('<text...>', 'What just happened — one short human line')
     .option('--session <id>', 'Session id escape hatch (default: auto from env / pid registry)')
     .option('--attach <path-or-url...>', 'Attach an artifact (local file or URL); repeatable')
+    .option('--level <level>', 'How loudly to broadcast: milestone (default) or important. Configured sinks with minLevel: important only fire on the latter.', 'milestone')
     .option('--json', 'Emit the written event as JSON')
     .addHelpText('after', `
 Examples:
@@ -309,16 +319,24 @@ Examples:
   agents feed post "cover render ready" --attach ./out/cover.png
   agents feed post "ready for review" --json
 
+  # Worth interrupting someone over — reaches sinks gated on minLevel: important:
+  agents feed post "release blocked: npm token expired" --level important
+
   # Outside a run, pass the session explicitly:
   agents feed post "manual note" --session 00998b0e-2d15-4d2f-a58b-974a886c9b47
 
 Identity (session, agent, host, runtime, pid, launchId) is stamped automatically.
-Domain facts (tickets, PRs) are not CLI flags — join them on the session at read time.
+Domain facts (tickets, PRs) are not CLI flags — the ticket is joined from the
+session index at post time, so a broadcast sink can comment on it without the
+agent having to remember it.
+
+Configure where a post is mirrored under feed.broadcast in agents.yaml — see
+docs/06-observability.md.
 `)
     .action((
       textParts: string[],
-      opts: { session?: string; attach?: string[]; json?: boolean },
-      cmd?: { opts: () => { session?: string; attach?: string[]; json?: boolean }; parent?: { opts: () => { json?: boolean } } },
+      opts: { session?: string; attach?: string[]; level?: string; json?: boolean },
+      cmd?: { opts: () => { session?: string; attach?: string[]; level?: string; json?: boolean }; parent?: { opts: () => { json?: boolean } } },
     ) => {
       // Parent `feed` also declares `--json` (for the list view). Commander
       // binds the flag on the parent, so a `feed post … --json` lands on
@@ -326,19 +344,23 @@ Domain facts (tickets, PRs) are not CLI flags — join them on the session at re
       const flags = {
         session: opts?.session ?? cmd?.opts?.()?.session,
         attach: opts?.attach ?? cmd?.opts?.()?.attach,
+        level: opts?.level ?? cmd?.opts?.()?.level,
         json: Boolean(opts?.json ?? cmd?.opts?.()?.json ?? cmd?.parent?.opts?.()?.json),
       };
       try {
+        const level = parseFeedPostLevel(flags.level);
         const { event } = postFeedStatus({
           text: Array.isArray(textParts) ? textParts.join(' ') : String(textParts ?? ''),
           sessionId: flags.session,
           attach: flags.attach,
         });
+        const outcomes = broadcastPostedEvent(event, level);
         if (flags.json) {
-          console.log(JSON.stringify(event, null, 2));
+          console.log(JSON.stringify(outcomes.length ? { ...event, broadcast: outcomes } : event, null, 2));
           return;
         }
         console.log(formatProgressUpdate(event));
+        reportBroadcast(outcomes);
       } catch (err) {
         console.error(chalk.red((err as Error).message));
         process.exitCode = 1;
@@ -554,6 +576,41 @@ Domain facts (tickets, PRs) are not CLI flags — join them on the session at re
         else renderActivityLane();
       }
     });
+}
+
+/**
+ * Mirror a written post to the configured sinks (`feed.broadcast` in
+ * agents.yaml). The ticket is JOINED from the session index rather than asked
+ * for as a flag — it is a domain fact about the session, and an agent that has
+ * to remember a `--ticket` argument is an agent that will forget it. Returns the
+ * per-sink outcomes; an empty array means nothing is configured, which is the
+ * default and is not a failure.
+ */
+function broadcastPostedEvent(event: ActivityEvent, level: FeedPostLevel): SinkOutcome[] {
+  const config = readMeta().feed?.broadcast;
+  if (!config || Object.keys(config).length === 0) return [];
+  const ticket = getSessionById(event.sessionId)?.ticketId;
+  const planned = planFeedBroadcast(config, {
+    text: event.detail ?? '',
+    level,
+    ticket,
+    project: event.project,
+    agent: event.agent,
+    host: event.host,
+    session: event.sessionId,
+    links: (event.attachments ?? [])
+      .map((a) => a.href)
+      .filter((href) => /^https?:\/\//i.test(href)),
+  });
+  return runFeedBroadcast(planned);
+}
+
+/** One line per sink that ran. Silent when nothing is configured. */
+function reportBroadcast(outcomes: SinkOutcome[]): void {
+  for (const o of outcomes) {
+    if (o.ok) console.log(chalk.gray(`  → ${o.name}`));
+    else console.error(chalk.yellow(`  → ${o.name} failed: ${o.error}`));
+  }
 }
 
 /** Feed view selector (RUSH-2015): decisions, progress, or both. */

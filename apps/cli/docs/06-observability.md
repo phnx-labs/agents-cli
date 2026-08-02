@@ -611,6 +611,54 @@ Identity resolution order: `--session` → `AGENT_SESSION_ID` /
 `AGENTS_SESSION_ID` / mailbox basename → `AGENT_LAUNCH_ID` match in the pid
 registry → parent-pid walk through `by-pid/<pid>.json`.
 
+#### Broadcasting a post outward (`feed.broadcast`)
+
+A post is durable in the activity log, but an operator away from every terminal
+never sees it and the tracker that owns the work hears nothing. Declare sinks in
+`agents.yaml` and each post is mirrored to them:
+
+```yaml
+feed:
+  broadcast:
+    ticket:
+      command: [linear, update, "{ticket}", --comment, "{text}"]
+    message:
+      command: [rush, message, send, --text, "{message}", --from-agent, "{agent}"]
+      minLevel: important
+```
+
+Sinks are **argv templates**, not built-in integrations — this CLI ships
+Apache-2.0 and must not depend on one person's tracker or messaging stack. The
+first element is spawned directly (no shell), so post text can never become shell
+syntax. Point the same mechanism at `jira`, `gh issue comment`, or a webhook
+script.
+
+Two rules decide whether a sink runs, both read off the post itself:
+
+- **Level.** `agents feed post … --level important` marks a post worth
+  interrupting someone over; a sink with `minLevel: important` only sees those, so
+  a routine "CI green" never buzzes a phone. The default level is `milestone`.
+- **Placeholders.** A template referencing `{ticket}` is skipped when no ticket is
+  known — the template declares what it needs, and a sink can never fire with a
+  hole in its argv (`linear update  --comment …` commenting on nothing).
+
+Available placeholders: `{text}` (the post verbatim), `{ticket}`, `{project}`,
+`{agent}`, `{host}`, `{session}`, `{level}`, `{links}` (attached URLs, space
+separated), and `{message}` — a composed human line, `<project> · <text>` with the
+first attached URL on a second line. Prefer `{message}` for a messaging sink: it
+leads with the project the reader cares about and carries a clickable link,
+rather than opening with an agent name that tells them nothing.
+
+The **ticket is joined from the session index**, not passed as a flag — it is a
+domain fact about the session (the rule above), and an agent that has to remember
+a `--ticket` argument is an agent that will forget it. Attach the PR or a shared
+plan with `--attach <url>` (an HTML plan published via `agents share` gives you a
+public one) and it rides along as `{links}` / `{message}`.
+
+Delivery is best-effort and reported: each sink that ran prints `→ <name>`, a
+failure prints a warning and a non-zero exit is never propagated. Losing a mirror
+must not cost the operator the post — it is already written.
+
 ### Activity lane (`agents activity`) — progress at a glance, fleet-wide
 
 `agents activity` reads the same append-only activity stream (never re-parsing
