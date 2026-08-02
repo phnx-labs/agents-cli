@@ -1106,10 +1106,6 @@ export function convertToOpenCodeFormat(set: PermissionSet): OpenCodePermissions
 }
 
 /**
- * Convert canonical permission set to Codex format.
- * Codex uses coarse-grained modes, so we infer the best fit.
- */
-/**
  * Default extra writable roots for Codex's `workspace-write` sandbox: the
  * regenerable package/toolchain caches that build/test/install write OUTSIDE the
  * workspace (cargo registry, npm/bun/pnpm caches, GOPATH/GOCACHE, the OS cache
@@ -1158,6 +1154,10 @@ export function mergeCodexSandboxWrite(
   };
 }
 
+/**
+ * Convert canonical permission set to Codex format.
+ * Codex uses coarse-grained modes, so we infer the best fit.
+ */
 export function convertToCodexFormat(set: PermissionSet, cwd?: string): CodexPermissions {
   const result: CodexPermissions = {};
 
@@ -1557,6 +1557,8 @@ function applyCodexPermissions(
     }
     if (newPermissions.sandbox_workspace_write) {
       const existing = config.sandbox_workspace_write as Record<string, unknown> | undefined;
+      // merge=false is a deliberate full replace (drops any user-custom roots);
+      // production sync always passes merge=true, taking the union path.
       config.sandbox_workspace_write = merge
         ? mergeCodexSandboxWrite(existing, newPermissions.sandbox_workspace_write)
         : newPermissions.sandbox_workspace_write;
@@ -1701,6 +1703,8 @@ export function applyPermissionsToVersion(
       }
       if (newPermissions.sandbox_workspace_write) {
         const existing = config.sandbox_workspace_write as Record<string, unknown> | undefined;
+        // merge=false is a deliberate full replace (drops any user-custom roots);
+        // production sync always passes merge=true, taking the union path.
         config.sandbox_workspace_write = merge
           ? mergeCodexSandboxWrite(existing, newPermissions.sandbox_workspace_write)
           : newPermissions.sandbox_workspace_write;

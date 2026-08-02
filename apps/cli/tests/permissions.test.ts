@@ -12,6 +12,7 @@ import {
   convertToCursorFormat,
   convertToCopilotFormat,
   convertToCodexFormat,
+  codexDefaultWritableRoots,
   convertToAntigravityFormat,
   convertToGrokFormat,
   claudeToCanonical,
@@ -280,14 +281,19 @@ describe('convertToCodexFormat', () => {
     expect(result.sandbox_workspace_write?.network_access).toBe(true);
   });
 
-  it('returns empty object for no permissions', () => {
+  it('grants the baseline cache writable_roots even with no permissions', () => {
+    // No perms → no approval_policy/sandbox_mode, but the build/test/install
+    // cache roots are an unconditional baseline so a workspace-write run can
+    // still build without escalating to danger-full-access.
     const set: PermissionSet = {
       name: 'test',
       allow: [],
     };
 
     const result = convertToCodexFormat(set);
-    expect(result).toEqual({});
+    expect(result.approval_policy).toBeUndefined();
+    expect(result.sandbox_mode).toBeUndefined();
+    expect(result.sandbox_workspace_write?.writable_roots).toEqual(codexDefaultWritableRoots());
   });
 });
 
