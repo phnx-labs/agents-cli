@@ -1422,6 +1422,9 @@ export function readAndResolveBundleEnv(
     ? getKeychainTokens([...new Set([metaItem, ...secretItems])], {
         agent: opts.agent || process.env.AGENTS_AGENT_NAME || 'Agents CLI',
         bundle: name,
+        // The session that triggered the read, so a Touch ID prompt is
+        // attributable when several agents run at once. Exported by exec.ts.
+        sessionId: process.env.AGENT_SESSION_ID || process.env.AGENTS_SESSION_ID,
         reason: opts.caller ? `to ${opts.caller}` : reason,
         duration: opts.duration || humanUnlockDuration(secretsHoldMs()),
         defaultPolicy: secretsDefaultPolicy(),
