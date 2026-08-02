@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { BUILT_IN_AGENTS, getBuiltInByKey, getBuiltInDefByTitle, getBuiltInByPrefix, pickLatestVersion, STRATEGY_LAUNCH_AGENTS, modeFlagForAgent, AgentLaunchMode, RunStrategy, buildAgentLaunchCommand, wrapNativeAgentCommand, shquote } from '../core/agents';
+import { BUILT_IN_AGENTS, getBuiltInByKey, getBuiltInDefByTitle, getBuiltInByPrefix, STRATEGY_LAUNCH_AGENTS, modeFlagForAgent, AgentLaunchMode, RunStrategy, buildAgentLaunchCommand, wrapNativeAgentCommand, shquote } from '../core/agents';
 import { parseSpawnRequest, SpawnRequest } from '../core/spawn';
 import {
   AgentConfig,
@@ -419,6 +419,102 @@ async function pickLaunchHost(title = 'Run on…', agentKey?: string): Promise<{
   // account rotation routes around a signed-out / throttled version on it.
   if (pick.hostId === BALANCE_ID) return { host: await resolveBalancedHost(undefined, agentKey), cancelled: false };
   return { host: pick.hostId, cancelled: false };
+}
+
+// --- The one launch engine --------------------------------------------------
+// Every "New agent" command routes through launchAgent. The command is just a
+// route: it fills in whichever of {agentKey, host} the user pinned, and the
+// engine resolves the rest — harness by availability/headroom, host by load,
+// and the version/account always by BALANCED rotation (token-usage-aware) unless
+// an explicit version is pinned. There is deliberately no manual version picker
+// and no per-strategy command trio anymore: balanced is the default, full stop.
+interface LaunchAgentOpts {
+  // Explicit harness key (e.g. 'claude'); omit to auto-pick by availability + usage.
+  agentKey?: string;
+  // Explicit device; omit to auto-pick the least-busy healthy host for the harness.
+  host?: string;
+  // Prompt for the host FIRST (device-first flow), then auto-pick the harness.
+  pickHost?: boolean;
+  // Keep the launch local (this Mac) instead of auto-picking a fleet host.
+  local?: boolean;
+}
+
+// Pick the harness automatically. When a host is chosen we only consider harnesses
+// that are actually usable ON THAT HOST (signed in + not rate-limited); otherwise
+// the locally installed + signed-in set. Ranked by recent fleet usage, falling
+// back to the configured default.
+async function resolveAutoAgentKey(
+  context: vscode.ExtensionContext,
+  host: string | undefined,
+): Promise<string | undefined> {
+  const defaultKey = getBuiltInDefByTitle(defaultAgentTitle)?.key ?? 'claude';
+
+  let candidates: string[];
+  if (host) {
+    const all = BUILT_IN_AGENTS.filter(d => d.key !== 'shell').map(d => d.key);
+    const usable = await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Window, title: `Finding an available agent on ${host}…` },
+      () => Promise.all(all.map(async k => ((await hostHasUsableVersion(host, k)) ? k : null))),
+    );
+    candidates = usable.filter((k): k is string => !!k);
+  } else {
+    const installedMap = await checkInstalledAgentsViaCli();
+    candidates = Object.entries(installedMap).filter(([key, ok]) => ok && key !== 'shell').map(([key]) => key);
+  }
+  if (candidates.length === 0) return undefined;
+
+  // Fleet-wide recent history (local + every online device) — the same sweep the
+  // Recap ledger uses. A failed/empty sweep just yields the default fallback.
+  let sessions: RemoteSession[] = [];
+  try {
+    const { fetchRecapSessions } = await import('./remoteSessions.vscode');
+    sessions = await fetchRecapSessions(20, settings.getSettings(context).projectRules ?? []);
+  } catch (err) {
+    console.error('[launchAgent] recap sweep failed:', err);
+  }
+  return pickAgentByUsage(sessions, candidates, defaultKey, Date.now()) ?? undefined;
+}
+
+async function launchAgent(context: vscode.ExtensionContext, opts: LaunchAgentOpts = {}): Promise<void> {
+  // 1. Host. Device-first pick, an explicit host, or (later) auto.
+  let host = opts.host;
+  if (opts.pickHost) {
+    const picked = await pickLaunchHost('New agent — run on…', opts.agentKey);
+    if (picked.cancelled) return;
+    host = picked.host; // undefined here means the user chose "This Mac"
+  }
+
+  // 2. Harness. Explicit, or auto by availability on the chosen host + recent usage.
+  const agentKey = opts.agentKey ?? await resolveAutoAgentKey(context, host);
+  if (!agentKey) {
+    vscode.window.showWarningMessage(
+      host ? `New Agent: no usable agent found on ${host}.` : 'New Agent: no installed agent available to launch.',
+    );
+    return;
+  }
+
+  // 3. Auto host (agent-aware least-busy) only when the caller neither pinned a
+  //    host nor asked to pick one nor forced local.
+  if (host === undefined && !opts.pickHost && !opts.local) {
+    host = await resolveBalancedHost(undefined, agentKey);
+  }
+
+  // 4. Config + strategy. Balanced version/account rotation is the default for
+  //    every harness that supports it; there is no pinned-version path here.
+  const def = getBuiltInByKey(agentKey);
+  const agentConfig = def && getBuiltInByTitle(context.extensionPath, def.title);
+  if (!agentConfig) {
+    vscode.window.showWarningMessage(`New Agent: ${agentKey} is not available.`);
+    return;
+  }
+  const strategy: RunStrategy | undefined =
+    (STRATEGY_LAUNCH_AGENTS as readonly string[]).includes(agentKey) ? 'balanced' : undefined;
+
+  await openSingleAgent(context, agentConfig, undefined, undefined, strategy, host);
+
+  const hostLabel = host ? ` on ${host}` : '';
+  const stratLabel = strategy === 'balanced' ? ' (balanced)' : '';
+  vscode.window.setStatusBarMessage(`New Agent: ${def!.title}${stratLabel}${hostLabel}`, 4000);
 }
 
 // Terminal readiness detection moved to src/vscode/terminalReadiness.ts.
@@ -1189,52 +1285,7 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('agents.newAgent', async () => {
-      // Smart three-tier launch (RUSH-2029):
-      //   1. Agent TYPE by recent/frequent usage (last-24h weighted), falling back
-      //      to the configured default when there is no usable history.
-      //   2. Version/account balancing via --strategy balanced.
-      //   3. Device load balancing via resolveBalancedHost (least-busy online host).
-      const defaultKey = getBuiltInDefByTitle(defaultAgentTitle)?.key ?? 'claude';
-
-      // Only agents installed + signed-in on this machine are eligible. shell is
-      // never a "usage" target, so drop it from the candidate set.
-      const installedMap = await checkInstalledAgentsViaCli();
-      const installed = Object.entries(installedMap)
-        .filter(([key, ok]) => ok && key !== 'shell')
-        .map(([key]) => key);
-
-      // Fleet-wide recent history (local + every online device), the same sweep the
-      // Recap ledger uses. Per-host failures are swallowed there, so an empty sweep
-      // simply yields the default fallback below.
-      let sessions: RemoteSession[] = [];
-      try {
-        const { fetchRecapSessions } = await import('./remoteSessions.vscode');
-        sessions = await fetchRecapSessions(20, settings.getSettings(context).projectRules ?? []);
-      } catch (err) {
-        console.error('[agents.newAgent] recap sweep failed:', err);
-      }
-
-      const chosenKey = pickAgentByUsage(sessions, installed, defaultKey, Date.now());
-      if (!chosenKey) {
-        // Neither history nor an installed default — leave the flow untouched.
-        vscode.window.showWarningMessage('New Agent: no installed agent available to launch.');
-        return;
-      }
-
-      const chosenDef = getBuiltInByKey(chosenKey);
-      const agentConfig = chosenDef && getBuiltInByTitle(context.extensionPath, chosenDef.title);
-      if (!agentConfig) return;
-
-      // Tier 3: auto-pick the least-busy healthy device (undefined = local).
-      const host = await resolveBalancedHost(undefined);
-
-      // Tier 2: --strategy balanced load-balances the version/account.
-      await openSingleAgent(context, agentConfig, undefined, undefined, 'balanced', host);
-
-      const hostLabel = host ? ` on ${host}` : '';
-      vscode.window.setStatusBarMessage(`New Agent: ${chosenDef!.title} (balanced${hostLabel})`, 4000);
-    })
+    vscode.commands.registerCommand('agents.newAgent', () => launchAgent(context, {}))
   );
 
   context.subscriptions.push(
@@ -1495,165 +1546,35 @@ export async function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // Register built-in individual agent commands
+  // Per-harness launch commands — every one is a thin route into launchAgent.
+  // For each non-shell agent:
+  //   New <Harness>              -> balanced version, this Mac
+  //   New <Harness> (Pick Host)  -> pick a device first, then balanced version
+  // There is no version picker, no pinned/latest variant, no per-strategy trio:
+  // the version/account is ALWAYS chosen by balanced rotation (token-usage-aware).
   for (const def of BUILT_IN_AGENTS) {
+    if (def.key === 'shell') {
+      // Shell is a plain terminal — no balancing, no host offload.
+      context.subscriptions.push(
+        vscode.commands.registerCommand(def.commandId, () => {
+          const agentConfig = getBuiltInByTitle(context.extensionPath, def.title);
+          if (agentConfig) openSingleAgent(context, agentConfig);
+        })
+      );
+      continue;
+    }
     context.subscriptions.push(
-      vscode.commands.registerCommand(def.commandId, () => {
-        const agentConfig = getBuiltInByTitle(context.extensionPath, def.title);
-        if (agentConfig) {
-          openSingleAgent(context, agentConfig);
-        }
-      })
+      vscode.commands.registerCommand(def.commandId, () => launchAgent(context, { agentKey: def.key, local: true }))
+    );
+    context.subscriptions.push(
+      vscode.commands.registerCommand(`${def.commandId}PickHost`, () => launchAgent(context, { agentKey: def.key, pickHost: true }))
     );
   }
 
-  // Register the per-strategy launch trio for version/account-managed agents:
-  //   (Pinned)   -> pick an exact version interactively, launch it pinned
-  //   (Latest)   -> resolve the newest installed version, launch it pinned
-  //   (Balanced) -> launch with --strategy balanced (rotate across accounts)
-  // STRATEGY_LAUNCH_AGENTS = claude, codex, gemini, cursor, antigravity.
-  for (const def of BUILT_IN_AGENTS) {
-    if (!(STRATEGY_LAUNCH_AGENTS as readonly string[]).includes(def.key)) continue;
-
-    // (Pinned): interactive version picker. Command id keeps the legacy
-    // `PickVersion` suffix for back-compat with existing keybindings.
-    context.subscriptions.push(
-      vscode.commands.registerCommand(`${def.commandId}PickVersion`, async () => {
-        const version = await pickAgentVersion(def.key);
-        if (!version) return;
-        const agentConfig = getBuiltInByTitle(context.extensionPath, def.title);
-        if (agentConfig) {
-          openSingleAgent(context, agentConfig, undefined, version.version);
-        }
-      })
-    );
-
-    // (Latest): newest installed version, no prompt.
-    context.subscriptions.push(
-      vscode.commands.registerCommand(`${def.commandId}Latest`, async () => {
-        const latest = await resolveLatestVersion(def.key);
-        if (!latest) {
-          vscode.window.showInformationMessage(`No installed ${def.key} versions found`);
-          return;
-        }
-        const agentConfig = getBuiltInByTitle(context.extensionPath, def.title);
-        if (agentConfig) {
-          openSingleAgent(context, agentConfig, undefined, latest);
-        }
-      })
-    );
-
-    // (Balanced): rotate across healthy accounts via --strategy balanced.
-    context.subscriptions.push(
-      vscode.commands.registerCommand(`${def.commandId}Balanced`, () => {
-        const agentConfig = getBuiltInByTitle(context.extensionPath, def.title);
-        if (agentConfig) {
-          openSingleAgent(context, agentConfig, undefined, undefined, 'balanced');
-        }
-      })
-    );
-  }
-
-  // Register unified agent version picker (all agents in one list, ranked by usage)
+  // Generic device-first launch: pick the HOST, then the harness is auto-picked
+  // from what's available + has headroom on that host, with balanced rotation.
   context.subscriptions.push(
-    vscode.commands.registerCommand('agents.newAgentPickVersion', async () => {
-      const result = await pickAnyAgentVersion(context.extensionPath);
-      if (!result) return;
-      const def = getBuiltInByKey(result.agentKey);
-      if (!def) return;
-      const agentConfig = getBuiltInByTitle(context.extensionPath, def.title);
-      if (agentConfig) {
-        openSingleAgent(context, agentConfig, undefined, result.version);
-      }
-    })
-  );
-
-  // Register the per-agent HOST launch trio (the host axis, mirroring the
-  // version triad above) for EVERY non-shell agent — full parity across
-  // claude/codex/gemini/opencode/cursor/antigravity/grok/kimi/droid:
-  //   (Pick Host)          -> choose a device (or Balanced), default version
-  //   (Pick Version & Host)-> pick an exact version, then a device
-  //   (Auto Host)          -> least-busy online device, no prompt
-  // All route through openSingleAgent's host path (`agents run --host`).
-  for (const def of BUILT_IN_AGENTS) {
-    if (def.key === 'shell') continue;
-
-    // Agents that support --strategy balanced launch (Pick/Auto) Host with it so
-    // the CLI's account rotation routes around a signed-out / throttled version
-    // on the chosen device (RUSH-2025). Others (opencode/grok/kimi/droid) have no
-    // balanced rotation, so they keep the default strategy.
-    const hostStrategy: RunStrategy | undefined =
-      (STRATEGY_LAUNCH_AGENTS as readonly string[]).includes(def.key) ? 'balanced' : undefined;
-
-    context.subscriptions.push(
-      vscode.commands.registerCommand(`${def.commandId}PickHost`, async () => {
-        const picked = await pickLaunchHost(`New ${def.title} — run on…`, def.key);
-        if (picked.cancelled) return;
-        const agentConfig = getBuiltInByTitle(context.extensionPath, def.title);
-        if (agentConfig) openSingleAgent(context, agentConfig, undefined, undefined, hostStrategy, picked.host);
-      })
-    );
-
-    context.subscriptions.push(
-      vscode.commands.registerCommand(`${def.commandId}PickVersionHost`, async () => {
-        const version = await pickAgentVersion(def.key);
-        if (!version) return;
-        const picked = await pickLaunchHost(`New ${def.title} v${version.version} — run on…`, def.key);
-        if (picked.cancelled) return;
-        const agentConfig = getBuiltInByTitle(context.extensionPath, def.title);
-        // A pinned version is an explicit override, so no balanced strategy here.
-        if (agentConfig) openSingleAgent(context, agentConfig, undefined, version.version, undefined, picked.host);
-      })
-    );
-
-    context.subscriptions.push(
-      vscode.commands.registerCommand(`${def.commandId}AutoHost`, async () => {
-        // Agent-aware host pick: skips devices with no usable version of def.key.
-        const host = await resolveBalancedHost(undefined, def.key);
-        const agentConfig = getBuiltInByTitle(context.extensionPath, def.title);
-        if (agentConfig) openSingleAgent(context, agentConfig, undefined, undefined, hostStrategy, host);
-      })
-    );
-  }
-
-  // "New Claude (Auto)" (RUSH-2025): one command that auto-picks BOTH the host
-  // (least-loaded, agent-healthy device via resolveBalancedHost) AND the version
-  // strategy ('balanced'). Combines newClaudeAutoHost + newClaudeBalanced. Only
-  // registered for agents that support balanced rotation.
-  for (const def of BUILT_IN_AGENTS) {
-    if (!(STRATEGY_LAUNCH_AGENTS as readonly string[]).includes(def.key)) continue;
-    context.subscriptions.push(
-      vscode.commands.registerCommand(`${def.commandId}Auto`, async () => {
-        const host = await resolveBalancedHost(undefined, def.key);
-        const agentConfig = getBuiltInByTitle(context.extensionPath, def.title);
-        if (agentConfig) openSingleAgent(context, agentConfig, undefined, undefined, 'balanced', host);
-      })
-    );
-  }
-
-  // Generic host pickers (any agent in one flow).
-  context.subscriptions.push(
-    vscode.commands.registerCommand('agents.newAgentPickHost', async () => {
-      const agentItems = BUILT_IN_AGENTS.filter(d => d.key !== 'shell').map(d => ({ label: d.title, key: d.key, def: d }));
-      const agentPick = await vscode.window.showQuickPick(agentItems, { placeHolder: 'New agent — pick agent, then host', title: 'New Agent (Pick Host)' });
-      if (!agentPick) return;
-      const picked = await pickLaunchHost(`New ${agentPick.def.title} — run on…`);
-      if (picked.cancelled) return;
-      const agentConfig = getBuiltInByTitle(context.extensionPath, agentPick.def.title);
-      if (agentConfig) openSingleAgent(context, agentConfig, undefined, undefined, undefined, picked.host);
-    })
-  );
-  context.subscriptions.push(
-    vscode.commands.registerCommand('agents.newAgentPickVersionHost', async () => {
-      const result = await pickAnyAgentVersion(context.extensionPath);
-      if (!result) return;
-      const def = getBuiltInByKey(result.agentKey);
-      if (!def) return;
-      const picked = await pickLaunchHost(`New ${def.title} v${result.version} — run on…`);
-      if (picked.cancelled) return;
-      const agentConfig = getBuiltInByTitle(context.extensionPath, def.title);
-      if (agentConfig) openSingleAgent(context, agentConfig, undefined, result.version, undefined, picked.host);
-    })
+    vscode.commands.registerCommand('agents.newAgentPickHost', () => launchAgent(context, { pickHost: true }))
   );
 
   // Dynamically register custom agent commands
@@ -2587,223 +2508,6 @@ async function listAgentVersions(agentKey: string, host?: string): Promise<Agent
 async function hostHasUsableVersion(host: string, agentKey: string): Promise<boolean> {
   const versions = await listAgentVersions(agentKey, host);
   return deviceHasUsableVersion(versions);
-}
-
-// Resolve the newest installed version for an agent (used by the "(Latest)"
-// launch commands). Returns null when nothing semver-shaped is installed.
-async function resolveLatestVersion(agentKey: string): Promise<string | null> {
-  const versions = await listAgentVersions(agentKey);
-  return pickLatestVersion(versions.map(v => v.version)) ?? null;
-}
-
-function formatUsageStatus(status?: string): string {
-  switch (status) {
-    case 'available': return 'available';
-    case 'rate_limited': return 'rate limited';
-    case 'out_of_credits': return 'out of credits';
-    default: return '';
-  }
-}
-
-function formatVersionUsage(version: AgentVersionInfo): string {
-  const weekWindow = version.windows?.find(w => w.key === 'week');
-  if (weekWindow) {
-    return `${weekWindow.usedPercent}% used`;
-  }
-  return '';
-}
-
-interface VersionQuickPickItem extends vscode.QuickPickItem {
-  version: AgentVersionInfo;
-}
-
-async function pickAgentVersion(agentKey: string): Promise<AgentVersionInfo | null> {
-  let versions: AgentVersionInfo[];
-  try {
-    versions = await listAgentVersions(agentKey);
-  } catch (err: any) {
-    const msg = err?.stderr || err?.message || String(err);
-    vscode.window.showInformationMessage(`Failed to list versions: ${msg.slice(0, 120)}`);
-    return null;
-  }
-
-  if (versions.length === 0) {
-    vscode.window.showInformationMessage(`No ${agentKey} versions installed`);
-    return null;
-  }
-
-  const pinButton: vscode.QuickInputButton = {
-    iconPath: new vscode.ThemeIcon('pin'),
-    tooltip: 'Pin as default version',
-  };
-
-  const items: VersionQuickPickItem[] = versions.map(v => {
-    const statusIcon = v.usageStatus === 'available' ? '$(check)' :
-                       v.usageStatus === 'rate_limited' ? '$(warning)' :
-                       v.usageStatus === 'out_of_credits' ? '$(error)' : '';
-    const defaultTag = v.isDefault ? '$(pinned) ' : '';
-    const usage = formatVersionUsage(v);
-    const status = formatUsageStatus(v.usageStatus);
-
-    return {
-      label: `${defaultTag}${v.version}`,
-      description: `${v.email || 'not signed in'}${status ? ` - ${status}` : ''}`,
-      detail: `${statusIcon} ${v.plan || ''}${usage ? ` - ${usage}` : ''}`.trim(),
-      version: v,
-      buttons: v.isDefault ? [] : [pinButton],
-    };
-  });
-
-  return new Promise((resolve) => {
-    const quickPick = vscode.window.createQuickPick<VersionQuickPickItem>();
-    quickPick.title = `Pick ${agentKey} version`;
-    quickPick.placeholder = 'Select to launch, or click pin icon to set as default';
-    quickPick.items = items;
-    quickPick.matchOnDescription = true;
-
-    quickPick.onDidTriggerItemButton(async (e) => {
-      const item = e.item;
-      const { runAgents } = await import('../core/agentsBin');
-      try {
-        await runAgents(`use ${agentKey}@${item.version.version}`);
-        vscode.window.showInformationMessage(`Pinned ${agentKey}@${item.version.version} as default`);
-      } catch (err: any) {
-        vscode.window.showErrorMessage(`Failed to pin: ${err.message || err}`);
-      }
-      quickPick.hide();
-      resolve(null);
-    });
-
-    quickPick.onDidAccept(() => {
-      const selected = quickPick.selectedItems[0];
-      quickPick.hide();
-      resolve(selected?.version ?? null);
-    });
-
-    quickPick.onDidHide(() => {
-      quickPick.dispose();
-      resolve(null);
-    });
-
-    quickPick.show();
-  });
-}
-
-interface UnifiedVersionInfo extends AgentVersionInfo {
-  agentKey: string;
-  agentTitle: string;
-}
-
-interface UnifiedVersionQuickPickItem extends vscode.QuickPickItem {
-  unified: UnifiedVersionInfo;
-}
-
-function usageRank(status?: string): number {
-  switch (status) {
-    case 'available': return 0;
-    case 'rate_limited': return 1;
-    case 'out_of_credits': return 2;
-    default: return 3;
-  }
-}
-
-async function pickAnyAgentVersion(
-  extensionPath: string
-): Promise<{ agentKey: string; version: string } | null> {
-  const AGENTS_TO_FETCH = ['claude', 'codex', 'gemini', 'cursor'];
-  const allVersions: UnifiedVersionInfo[] = [];
-
-  const results = await Promise.allSettled(
-    AGENTS_TO_FETCH.map(async (agentKey) => {
-      const versions = await listAgentVersions(agentKey);
-      const def = getBuiltInByKey(agentKey);
-      return versions.map(v => ({
-        ...v,
-        agentKey,
-        agentTitle: def?.title || agentKey,
-      }));
-    })
-  );
-
-  for (const result of results) {
-    if (result.status === 'fulfilled') {
-      allVersions.push(...result.value);
-    }
-  }
-
-  if (allVersions.length === 0) {
-    vscode.window.showInformationMessage('No agent versions installed');
-    return null;
-  }
-
-  allVersions.sort((a, b) => {
-    const rankDiff = usageRank(a.usageStatus) - usageRank(b.usageStatus);
-    if (rankDiff !== 0) return rankDiff;
-    const aWeek = a.windows?.find(w => w.key === 'week')?.usedPercent ?? 100;
-    const bWeek = b.windows?.find(w => w.key === 'week')?.usedPercent ?? 100;
-    return aWeek - bWeek;
-  });
-
-  const pinButton: vscode.QuickInputButton = {
-    iconPath: new vscode.ThemeIcon('pin'),
-    tooltip: 'Pin as default version',
-  };
-
-  const items: UnifiedVersionQuickPickItem[] = allVersions.map(v => {
-    const statusIcon = v.usageStatus === 'available' ? '$(check)' :
-                       v.usageStatus === 'rate_limited' ? '$(warning)' :
-                       v.usageStatus === 'out_of_credits' ? '$(error)' : '';
-    const defaultTag = v.isDefault ? '$(pinned) ' : '';
-    const usage = formatVersionUsage(v);
-    const status = formatUsageStatus(v.usageStatus);
-    const agentLabel = v.agentKey.charAt(0).toUpperCase() + v.agentKey.slice(1);
-
-    return {
-      label: `${defaultTag}${agentLabel} ${v.version}`,
-      description: `${v.email || 'not signed in'}${status ? ` - ${status}` : ''}`,
-      detail: `${statusIcon} ${v.plan || ''}${usage ? ` - ${usage}` : ''}`.trim(),
-      unified: v,
-      buttons: v.isDefault ? [] : [pinButton],
-    };
-  });
-
-  return new Promise((resolve) => {
-    const quickPick = vscode.window.createQuickPick<UnifiedVersionQuickPickItem>();
-    quickPick.title = 'Pick agent version';
-    quickPick.placeholder = 'Select to launch, or click pin icon to set as default';
-    quickPick.items = items;
-    quickPick.matchOnDescription = true;
-
-    quickPick.onDidTriggerItemButton(async (e) => {
-      const item = e.item;
-      const { runAgents } = await import('../core/agentsBin');
-      try {
-        await runAgents(`use ${item.unified.agentKey}@${item.unified.version}`);
-        vscode.window.showInformationMessage(`Pinned ${item.unified.agentKey}@${item.unified.version} as default`);
-      } catch (err: any) {
-        vscode.window.showErrorMessage(`Failed to pin: ${err.message || err}`);
-      }
-      quickPick.hide();
-      resolve(null);
-    });
-
-    quickPick.onDidAccept(() => {
-      const selected = quickPick.selectedItems[0];
-      quickPick.hide();
-      if (selected) {
-        resolve({ agentKey: selected.unified.agentKey, version: selected.unified.version });
-      } else {
-        resolve(null);
-      }
-    });
-
-    quickPick.onDidHide(() => {
-      quickPick.dispose();
-      resolve(null);
-    });
-
-    quickPick.show();
-  });
 }
 
 async function listSessionsViaCli(limit = 30): Promise<CliSessionItem[]> {

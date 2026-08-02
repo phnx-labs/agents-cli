@@ -124,7 +124,7 @@
       },
       {
         "command": "agents.newAgent",
-        "title": "Agents: New Mix of Agents"
+        "title": "Agents: New Agent"
       },
       {
         "command": "agents.newSecondaryAgent",
@@ -132,7 +132,7 @@
       },
       {
         "command": "agents.newClaude",
-        "title": "Agents: New Claude (CC)",
+        "title": "Agents: New Claude",
         "icon": {
           "light": "assets/claude.png",
           "dark": "assets/claude.png"
@@ -140,7 +140,7 @@
       },
       {
         "command": "agents.newCodex",
-        "title": "Agents: New Codex (CX)",
+        "title": "Agents: New Codex",
         "icon": {
           "light": "assets/chatgpt-light.png",
           "dark": "assets/chatgpt.png"
@@ -148,7 +148,7 @@
       },
       {
         "command": "agents.newGemini",
-        "title": "Agents: New Gemini (GX)",
+        "title": "Agents: New Gemini",
         "icon": {
           "light": "assets/gemini.png",
           "dark": "assets/gemini.png"
@@ -156,7 +156,7 @@
       },
       {
         "command": "agents.newAntigravity",
-        "title": "Agents: New Antigravity (AG)",
+        "title": "Agents: New Antigravity",
         "icon": {
           "light": "assets/antigravity.png",
           "dark": "assets/antigravity.png"
@@ -164,7 +164,7 @@
       },
       {
         "command": "agents.newGrok",
-        "title": "Agents: New Grok (GK)",
+        "title": "Agents: New Grok",
         "icon": {
           "light": "assets/grok-light.png",
           "dark": "assets/grok.png"
@@ -172,7 +172,7 @@
       },
       {
         "command": "agents.newKimi",
-        "title": "Agents: New Kimi (KM)",
+        "title": "Agents: New Kimi",
         "icon": {
           "light": "assets/kimi.png",
           "dark": "assets/kimi.png"
@@ -180,7 +180,7 @@
       },
       {
         "command": "agents.newDroid",
-        "title": "Agents: New Droid (DR)",
+        "title": "Agents: New Droid",
         "icon": {
           "light": "assets/droid.png",
           "dark": "assets/droid.png"
@@ -188,7 +188,7 @@
       },
       {
         "command": "agents.newOpenCode",
-        "title": "Agents: New OpenCode (OC)",
+        "title": "Agents: New OpenCode",
         "icon": {
           "light": "assets/opencode.png",
           "dark": "assets/opencode.png"
@@ -196,7 +196,7 @@
       },
       {
         "command": "agents.newCursor",
-        "title": "Agents: New Cursor (CR)",
+        "title": "Agents: New Cursor",
         "icon": {
           "light": "assets/cursor-light.png",
           "dark": "assets/cursor.png"
@@ -205,142 +205,6 @@
       {
         "command": "agents.newAlias",
         "title": "Agents: New Alias"
-      },
-      {
-        "command": "agents.newAgentPickVersion",
-        "title": "Agents: New Agent (Pinned)",
-        "icon": {
-          "light": "assets/agents.png",
-          "dark": "assets/agents.png"
-        }
-      },
-      {
-        "command": "agents.newClaudePickVersion",
-        "title": "Agents: New Claude (Pinned)",
-        "icon": {
-          "light": "assets/claude.png",
-          "dark": "assets/claude.png"
-        }
-      },
-      {
-        "command": "agents.newClaudeLatest",
-        "title": "Agents: New Claude (Latest)",
-        "icon": {
-          "light": "assets/claude.png",
-          "dark": "assets/claude.png"
-        }
-      },
-      {
-        "command": "agents.newClaudeBalanced",
-        "title": "Agents: New Claude (Balanced)",
-        "icon": {
-          "light": "assets/claude.png",
-          "dark": "assets/claude.png"
-        }
-      },
-      {
-        "command": "agents.newCodexPickVersion",
-        "title": "Agents: New Codex (Pinned)",
-        "icon": {
-          "light": "assets/chatgpt-light.png",
-          "dark": "assets/chatgpt.png"
-        }
-      },
-      {
-        "command": "agents.newCodexLatest",
-        "title": "Agents: New Codex (Latest)",
-        "icon": {
-          "light": "assets/chatgpt-light.png",
-          "dark": "assets/chatgpt.png"
-        }
-      },
-      {
-        "command": "agents.newCodexBalanced",
-        "title": "Agents: New Codex (Balanced)",
-        "icon": {
-          "light": "assets/chatgpt-light.png",
-          "dark": "assets/chatgpt.png"
-        }
-      },
-      {
-        "command": "agents.newGeminiPickVersion",
-        "title": "Agents: New Gemini (Pinned)",
-        "icon": {
-          "light": "assets/gemini.png",
-          "dark": "assets/gemini.png"
-        }
-      },
-      {
-        "command": "agents.newGeminiLatest",
-        "title": "Agents: New Gemini (Latest)",
-        "icon": {
-          "light": "assets/gemini.png",
-          "dark": "assets/gemini.png"
-        }
-      },
-      {
-        "command": "agents.newGeminiBalanced",
-        "title": "Agents: New Gemini (Balanced)",
-        "icon": {
-          "light": "assets/gemini.png",
-          "dark": "assets/gemini.png"
-        }
-      },
-      {
-        "command": "agents.newAntigravityPickVersion",
-        "title": "Agents: New Antigravity (Pinned)",
-        "icon": {
-          "light": "assets/antigravity.png",
-          "dark": "assets/antigravity.png"
-        }
-      },
-      {
-        "command": "agents.newAntigravityLatest",
-        "title": "Agents: New Antigravity (Latest)",
-        "icon": {
-          "light": "assets/antigravity.png",
-          "dark": "assets/antigravity.png"
-        }
-      },
-      {
-        "command": "agents.newAntigravityBalanced",
-        "title": "Agents: New Antigravity (Balanced)",
-        "icon": {
-          "light": "assets/antigravity.png",
-          "dark": "assets/antigravity.png"
-        }
-      },
-      {
-        "command": "agents.newGrokPickVersion",
-        "title": "Agents: New Grok (Pick Version)",
-        "icon": {
-          "light": "assets/grok.png",
-          "dark": "assets/grok.png"
-        }
-      },
-      {
-        "command": "agents.newCursorPickVersion",
-        "title": "Agents: New Cursor (Pinned)",
-        "icon": {
-          "light": "assets/cursor-light.png",
-          "dark": "assets/cursor.png"
-        }
-      },
-      {
-        "command": "agents.newCursorLatest",
-        "title": "Agents: New Cursor (Latest)",
-        "icon": {
-          "light": "assets/cursor-light.png",
-          "dark": "assets/cursor.png"
-        }
-      },
-      {
-        "command": "agents.newCursorBalanced",
-        "title": "Agents: New Cursor (Balanced)",
-        "icon": {
-          "light": "assets/cursor-light.png",
-          "dark": "assets/cursor.png"
-        }
       },
       {
         "command": "agents.quickLaunch0",
@@ -448,7 +312,7 @@
       },
       {
         "command": "agents.newShell",
-        "title": "Agents: New Shell (SH)",
+        "title": "Agents: New Shell",
         "icon": {
           "light": "assets/agents.png",
           "dark": "assets/agents.png"
@@ -563,56 +427,8 @@
         }
       },
       {
-        "command": "agents.newClaudePickVersionHost",
-        "title": "Agents: New Claude (Pick Version & Host)",
-        "icon": {
-          "light": "assets/claude.png",
-          "dark": "assets/claude.png"
-        }
-      },
-      {
-        "command": "agents.newClaudeAutoHost",
-        "title": "Agents: New Claude (Auto Host)",
-        "icon": {
-          "light": "assets/claude.png",
-          "dark": "assets/claude.png"
-        }
-      },
-      {
-        "command": "agents.newClaudeAuto",
-        "title": "Agents: New Claude (Auto)",
-        "icon": {
-          "light": "assets/claude.png",
-          "dark": "assets/claude.png"
-        }
-      },
-      {
         "command": "agents.newCodexPickHost",
         "title": "Agents: New Codex (Pick Host)",
-        "icon": {
-          "light": "assets/chatgpt.png",
-          "dark": "assets/chatgpt.png"
-        }
-      },
-      {
-        "command": "agents.newCodexPickVersionHost",
-        "title": "Agents: New Codex (Pick Version & Host)",
-        "icon": {
-          "light": "assets/chatgpt.png",
-          "dark": "assets/chatgpt.png"
-        }
-      },
-      {
-        "command": "agents.newCodexAutoHost",
-        "title": "Agents: New Codex (Auto Host)",
-        "icon": {
-          "light": "assets/chatgpt.png",
-          "dark": "assets/chatgpt.png"
-        }
-      },
-      {
-        "command": "agents.newCodexAuto",
-        "title": "Agents: New Codex (Auto)",
         "icon": {
           "light": "assets/chatgpt.png",
           "dark": "assets/chatgpt.png"
@@ -627,48 +443,8 @@
         }
       },
       {
-        "command": "agents.newGeminiPickVersionHost",
-        "title": "Agents: New Gemini (Pick Version & Host)",
-        "icon": {
-          "light": "assets/gemini.png",
-          "dark": "assets/gemini.png"
-        }
-      },
-      {
-        "command": "agents.newGeminiAutoHost",
-        "title": "Agents: New Gemini (Auto Host)",
-        "icon": {
-          "light": "assets/gemini.png",
-          "dark": "assets/gemini.png"
-        }
-      },
-      {
-        "command": "agents.newGeminiAuto",
-        "title": "Agents: New Gemini (Auto)",
-        "icon": {
-          "light": "assets/gemini.png",
-          "dark": "assets/gemini.png"
-        }
-      },
-      {
         "command": "agents.newOpenCodePickHost",
         "title": "Agents: New OpenCode (Pick Host)",
-        "icon": {
-          "light": "assets/opencode.png",
-          "dark": "assets/opencode.png"
-        }
-      },
-      {
-        "command": "agents.newOpenCodePickVersionHost",
-        "title": "Agents: New OpenCode (Pick Version & Host)",
-        "icon": {
-          "light": "assets/opencode.png",
-          "dark": "assets/opencode.png"
-        }
-      },
-      {
-        "command": "agents.newOpenCodeAutoHost",
-        "title": "Agents: New OpenCode (Auto Host)",
         "icon": {
           "light": "assets/opencode.png",
           "dark": "assets/opencode.png"
@@ -683,56 +459,8 @@
         }
       },
       {
-        "command": "agents.newCursorPickVersionHost",
-        "title": "Agents: New Cursor (Pick Version & Host)",
-        "icon": {
-          "light": "assets/cursor.png",
-          "dark": "assets/cursor.png"
-        }
-      },
-      {
-        "command": "agents.newCursorAutoHost",
-        "title": "Agents: New Cursor (Auto Host)",
-        "icon": {
-          "light": "assets/cursor.png",
-          "dark": "assets/cursor.png"
-        }
-      },
-      {
-        "command": "agents.newCursorAuto",
-        "title": "Agents: New Cursor (Auto)",
-        "icon": {
-          "light": "assets/cursor.png",
-          "dark": "assets/cursor.png"
-        }
-      },
-      {
         "command": "agents.newAntigravityPickHost",
         "title": "Agents: New Antigravity (Pick Host)",
-        "icon": {
-          "light": "assets/antigravity.png",
-          "dark": "assets/antigravity.png"
-        }
-      },
-      {
-        "command": "agents.newAntigravityPickVersionHost",
-        "title": "Agents: New Antigravity (Pick Version & Host)",
-        "icon": {
-          "light": "assets/antigravity.png",
-          "dark": "assets/antigravity.png"
-        }
-      },
-      {
-        "command": "agents.newAntigravityAutoHost",
-        "title": "Agents: New Antigravity (Auto Host)",
-        "icon": {
-          "light": "assets/antigravity.png",
-          "dark": "assets/antigravity.png"
-        }
-      },
-      {
-        "command": "agents.newAntigravityAuto",
-        "title": "Agents: New Antigravity (Auto)",
         "icon": {
           "light": "assets/antigravity.png",
           "dark": "assets/antigravity.png"
@@ -747,40 +475,8 @@
         }
       },
       {
-        "command": "agents.newGrokPickVersionHost",
-        "title": "Agents: New Grok (Pick Version & Host)",
-        "icon": {
-          "light": "assets/grok.png",
-          "dark": "assets/grok.png"
-        }
-      },
-      {
-        "command": "agents.newGrokAutoHost",
-        "title": "Agents: New Grok (Auto Host)",
-        "icon": {
-          "light": "assets/grok.png",
-          "dark": "assets/grok.png"
-        }
-      },
-      {
         "command": "agents.newKimiPickHost",
         "title": "Agents: New Kimi (Pick Host)",
-        "icon": {
-          "light": "assets/kimi.png",
-          "dark": "assets/kimi.png"
-        }
-      },
-      {
-        "command": "agents.newKimiPickVersionHost",
-        "title": "Agents: New Kimi (Pick Version & Host)",
-        "icon": {
-          "light": "assets/kimi.png",
-          "dark": "assets/kimi.png"
-        }
-      },
-      {
-        "command": "agents.newKimiAutoHost",
-        "title": "Agents: New Kimi (Auto Host)",
         "icon": {
           "light": "assets/kimi.png",
           "dark": "assets/kimi.png"
@@ -795,28 +491,8 @@
         }
       },
       {
-        "command": "agents.newDroidPickVersionHost",
-        "title": "Agents: New Droid (Pick Version & Host)",
-        "icon": {
-          "light": "assets/droid.png",
-          "dark": "assets/droid.png"
-        }
-      },
-      {
-        "command": "agents.newDroidAutoHost",
-        "title": "Agents: New Droid (Auto Host)",
-        "icon": {
-          "light": "assets/droid.png",
-          "dark": "assets/droid.png"
-        }
-      },
-      {
         "command": "agents.newAgentPickHost",
         "title": "Agents: New Agent (Pick Host)"
-      },
-      {
-        "command": "agents.newAgentPickVersionHost",
-        "title": "Agents: New Agent (Pick Version & Host)"
       },
       {
         "command": "agents.quickLaunch0PickHost",
