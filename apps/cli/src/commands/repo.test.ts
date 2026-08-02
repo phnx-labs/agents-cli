@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   resourceUnit, formatResourceDelta, resourceDelta, deltaBrief, wrapPhrases, repoSlug,
-  type ChangeAction,
+  resolveDeviceIntent, parseRemoteRepoRows, renderDeviceStatusRows, NO_REPO_FANOUT_ENV,
+  type ChangeAction, type DeviceRepoStatus,
 } from './repo.js';
 
 /** Strip ANSI color codes so assertions are stable regardless of TTY/color env. */
@@ -149,5 +150,124 @@ describe('repoSlug', () => {
 
   it('falls back to the raw string for non-github URLs', () => {
     expect(repoSlug('/local/path/repo')).toBe('/local/path/repo');
+  });
+});
+
+describe('resolveDeviceIntent', () => {
+  it('reads --devices-all / --hosts-all as a full-fleet sweep', () => {
+    expect(resolveDeviceIntent({ devicesAll: true })).toEqual({ all: true });
+    expect(resolveDeviceIntent({ hostsAll: true })).toEqual({ all: true });
+  });
+
+  it('treats --devices/--hosts "all" (any case) as a full-fleet sweep', () => {
+    expect(resolveDeviceIntent({ devices: 'all' })).toEqual({ all: true });
+    expect(resolveDeviceIntent({ hosts: 'ALL' })).toEqual({ all: true });
+    expect(resolveDeviceIntent({ devices: '' })).toEqual({ all: true });
+  });
+
+  it('parses an explicit comma list into trimmed device names (--devices/--hosts alias)', () => {
+    expect(resolveDeviceIntent({ devices: 'a, b ,c' })).toEqual({ hosts: ['a', 'b', 'c'] });
+    expect(resolveDeviceIntent({ hosts: 'box' })).toEqual({ hosts: ['box'] });
+  });
+
+  it('returns null (local-only) when no device flag is passed', () => {
+    expect(resolveDeviceIntent({})).toBeNull();
+    expect(resolveDeviceIntent({ verbose: true, json: true })).toBeNull();
+  });
+
+  it('never fans out again on a peer carrying the recursion-guard env', () => {
+    const prev = process.env[NO_REPO_FANOUT_ENV];
+    process.env[NO_REPO_FANOUT_ENV] = '1';
+    try {
+      expect(resolveDeviceIntent({ devicesAll: true })).toBeNull();
+      expect(resolveDeviceIntent({ devices: 'box' })).toBeNull();
+    } finally {
+      if (prev === undefined) delete process.env[NO_REPO_FANOUT_ENV];
+      else process.env[NO_REPO_FANOUT_ENV] = prev;
+    }
+  });
+});
+
+describe('parseRemoteRepoRows', () => {
+  it('tags a peer\'s RepoRow[] with its device name', () => {
+    const json = JSON.stringify([
+      { alias: 'system', branch: 'main', tracking: true, clean: true },
+      { alias: 'user', branch: 'main', tracking: true, clean: false },
+    ]);
+    expect(parseRemoteRepoRows(json, 'yosemite-m0')).toEqual([
+      {
+        device: 'yosemite-m0',
+        reachable: true,
+        rows: [
+          { alias: 'system', branch: 'main', tracking: true, clean: true },
+          { alias: 'user', branch: 'main', tracking: true, clean: false },
+        ],
+      },
+    ]);
+  });
+
+  it('drops non-object rows and survives version skew without throwing', () => {
+    const json = JSON.stringify([{ alias: 'system' }, null, 5, ['x'], { alias: 'user' }]);
+    expect(parseRemoteRepoRows(json, 'box')).toEqual([
+      { device: 'box', reachable: true, rows: [{ alias: 'system' }, { alias: 'user' }] },
+    ]);
+  });
+
+  it('yields no entry for non-JSON or a non-array payload', () => {
+    expect(parseRemoteRepoRows('not json', 'box')).toEqual([]);
+    expect(parseRemoteRepoRows('{"a":1}', 'box')).toEqual([]);
+  });
+});
+
+describe('renderDeviceStatusRows', () => {
+  // Collapse ANSI + column padding so assertions key on content, not spacing.
+  const norm = (s: string) => plain(s).replace(/\s+/g, ' ').trim();
+
+  it('renders one row per (device, repo) with the device shown once per group', () => {
+    const results: DeviceRepoStatus[] = [
+      {
+        device: 'zion', reachable: true, rows: [
+          { alias: 'system', branch: 'main', tracking: true, clean: true },
+          { alias: 'user', branch: 'main', tracking: true, clean: false, local: resourceDelta([e('changed', 'skills/x/SKILL.md')]) },
+        ],
+      },
+    ];
+    const rows = renderDeviceStatusRows(results).map(norm);
+    expect(rows[0]).toBe('DEVICE REPO SYNC CHANGES');
+    expect(rows).toContain('zion system up to date clean');
+    // Second repo of the same device: device column blank -> trims away.
+    expect(rows).toContain('user up to date ~1 edit');
+  });
+
+  it('shows a compact ↓N pull cell for a behind repo', () => {
+    const results: DeviceRepoStatus[] = [
+      {
+        device: 'box', reachable: true, rows: [
+          {
+            alias: 'user', branch: 'main', tracking: true, clean: true,
+            pull: { delta: resourceDelta([e('new', 'skills/a/SKILL.md'), e('new', 'skills/b/SKILL.md')]), commits: 2 },
+          },
+        ],
+      },
+    ];
+    const rows = renderDeviceStatusRows(results).map(norm);
+    expect(rows).toContain('box user ↓2 (2 skills) clean');
+  });
+
+  it('collapses an unreachable device to a single marker row', () => {
+    const rows = renderDeviceStatusRows([{ device: 'asleep', reachable: false }]).map(norm);
+    expect(rows).toContain('asleep unreachable');
+  });
+
+  it('renders a raw trailer (missing / no-remote) in place of the sync cell', () => {
+    const results: DeviceRepoStatus[] = [
+      { device: 'box', reachable: true, rows: [{ alias: 'user', raw: 'missing /home/u/.agents-work' }] },
+    ];
+    const rows = renderDeviceStatusRows(results).map(norm);
+    expect(rows).toContain('box user missing /home/u/.agents-work');
+  });
+
+  it('returns no lines for an empty result set', () => {
+    expect(renderDeviceStatusRows([])).toEqual([]);
   });
 });

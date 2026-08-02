@@ -76,6 +76,8 @@ import { refresh } from '../lib/refresh.js';
 import { capableAgents } from '../lib/capabilities.js';
 import { getGlobalDefault, getVersionHomePath, listInstalledVersions } from '../lib/versions.js';
 import { syncAllMarketplaces } from '../lib/plugin-marketplace.js';
+import { gatherRemoteAgentsJson } from '../lib/remote-agents-json.js';
+import { machineId, normalizeHost } from '../lib/machine-id.js';
 
 /**
  * After a repo add/remove/enable/disable, reconcile each plugins-capable
@@ -307,7 +309,7 @@ interface RepoDivergence {
  * (missing repo, no git remote, error) that don't fit the columns; otherwise the
  * fields feed whichever layout (table / cards) the terminal width selects.
  */
-interface RepoRow {
+export interface RepoRow {
   alias: string;
   raw?: string;
   branch?: string;
@@ -537,13 +539,206 @@ function renderCards(rows: RepoRow[], cols: number): void {
   }
 }
 
+/** Options shared by `agents repo list` and the `agents repo status` alias. */
+export interface RepoStatusOptions {
+  verbose?: boolean;
+  json?: boolean;
+  /** Fan out across every reachable fleet device (`--devices-all`/`--hosts-all`). */
+  devicesAll?: boolean;
+  hostsAll?: boolean;
+  /** `all`, or a comma-separated device list (`--devices`/`--hosts`). */
+  devices?: string;
+  hosts?: string;
+}
+
+/**
+ * Per-device repo status — the unit of the `--devices-all` fleet fan-out. One
+ * entry per device: its parsed repo rows when reachable, or `reachable: false`
+ * when the peer could not be queried (kept in the model so the table can mark it).
+ */
+export interface DeviceRepoStatus {
+  device: string;
+  reachable: boolean;
+  rows?: RepoRow[];
+}
+
+/**
+ * Recursion guard for the fleet fan-out, passed as an env var (not a CLI flag)
+ * so an OLDER remote `agents` that predates this feature ignores it harmlessly
+ * instead of erroring on an unknown option. A peer new enough to fan out reads
+ * it and answers only for itself. Mirrors `NO_FANOUT_ENV` in remote-active.ts.
+ */
+export const NO_REPO_FANOUT_ENV = 'AGENTS_REPO_LOCAL';
+
+/**
+ * Parse one peer's `repo status --json` stdout (a RepoRow[]) into a single
+ * device entry tagged with `machine`. Defensive against version skew: non-JSON
+ * or a non-array yields no entry, and non-object rows are dropped rather than
+ * throwing. Exported for unit testing without a live tailnet.
+ */
+export function parseRemoteRepoRows(stdout: string, machine: string): DeviceRepoStatus[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  const rows = parsed.filter(
+    (x): x is RepoRow => !!x && typeof x === 'object' && !Array.isArray(x),
+  );
+  return [{ device: machine, reachable: true, rows }];
+}
+
+/**
+ * Query repo status on the fleet. With an explicit `hosts` list, fan out to
+ * exactly those; otherwise sweep every registered, online peer (excluding this
+ * machine). Each peer runs `repo status [alias] --json` locally — never its own
+ * fan-out — and unreachable peers are skipped with a gray note, never fatal.
+ */
+async function gatherRemoteRepoStatus(
+  alias: string | undefined,
+  hosts?: string[],
+): Promise<DeviceRepoStatus[]> {
+  const args = ['repo', 'status', ...(alias ? [alias] : []), '--json'];
+  const { items } = await gatherRemoteAgentsJson<DeviceRepoStatus>({
+    args,
+    noFanoutEnv: NO_REPO_FANOUT_ENV,
+    hosts,
+    parse: parseRemoteRepoRows,
+  });
+  return items;
+}
+
+/**
+ * Render the fleet repo-status table: one row per (device, repo), with the
+ * device name shown once per group. SYNC and CHANGES reuse the same compact
+ * cells as the local wide table (`↓N (…)  ↑N` / `clean` / `~N edits`), and an
+ * unreachable device collapses to a single `unreachable` marker row. Pure — no
+ * I/O — so the aggregation/formatting is unit-testable without live devices.
+ */
+export function renderDeviceStatusRows(results: DeviceRepoStatus[]): string[] {
+  interface Cell { device: string; repo: string; sync: string; changes: string }
+  const cells: Cell[] = [];
+  for (const r of results) {
+    if (!r.reachable || !r.rows) {
+      cells.push({ device: r.device, repo: chalk.gray('unreachable'), sync: '', changes: '' });
+      continue;
+    }
+    if (r.rows.length === 0) {
+      cells.push({ device: r.device, repo: chalk.gray('no repos'), sync: '', changes: '' });
+      continue;
+    }
+    let firstOfDevice = true;
+    for (const row of r.rows) {
+      const device = firstOfDevice ? r.device : '';
+      firstOfDevice = false;
+      if (row.raw) {
+        // missing / no-git-remote / error — the free-form trailer says it all.
+        cells.push({ device, repo: row.alias, sync: row.raw, changes: '' });
+      } else {
+        cells.push({ device, repo: row.alias, sync: syncCompact(row), changes: changesCompact(row) });
+      }
+    }
+  }
+  if (cells.length === 0) return [];
+
+  const headers = ['DEVICE', 'REPO', 'SYNC', 'CHANGES'];
+  const devW = Math.max(headers[0].length, ...cells.map((c) => visibleWidth(c.device)));
+  const repoW = Math.max(headers[1].length, ...cells.map((c) => visibleWidth(c.repo)));
+  const syncW = Math.max(headers[2].length, ...cells.map((c) => visibleWidth(c.sync)));
+
+  const lines: string[] = [];
+  lines.push(
+    `  ${chalk.gray(headers[0].padEnd(devW))}  ${chalk.gray(headers[1].padEnd(repoW))}  ${chalk.gray(headers[2].padEnd(syncW))}  ${chalk.gray(headers[3])}`,
+  );
+  for (const c of cells) {
+    lines.push(
+      `  ${chalk.cyan(padVisible(c.device, devW))}  ${padVisible(c.repo, repoW)}  ${padVisible(c.sync, syncW)}  ${c.changes}`,
+    );
+  }
+  return lines;
+}
+
+/** Where a `repo status` run should report: this machine only, or the fleet. */
+type DeviceIntent = { all: true } | { hosts: string[] };
+
+/**
+ * Read the device-scope flags into an intent, or null for the default local-only
+ * run. `--devices-all`/`--hosts-all` (and `--devices all`/`--hosts all`) sweep
+ * every reachable peer; `--devices box1,box2` targets an explicit list. A peer
+ * carrying {@link NO_REPO_FANOUT_ENV} never fans out again (recursion guard).
+ */
+export function resolveDeviceIntent(opts: RepoStatusOptions): DeviceIntent | null {
+  if (process.env[NO_REPO_FANOUT_ENV] === '1') return null;
+  if (opts.devicesAll || opts.hostsAll) return { all: true };
+  const val = opts.devices ?? opts.hosts;
+  if (val === undefined) return null;
+  const v = val.trim();
+  if (v === '' || v.toLowerCase() === 'all') return { all: true };
+  const hosts = v.split(',').map((s) => s.trim()).filter(Boolean);
+  return hosts.length ? { hosts } : { all: true };
+}
+
+/**
+ * `repo status`/`list` across the fleet: read THIS machine's rows locally, fan
+ * out to peers, and render one aggregated table (device · repo · sync · changes).
+ * The local box is always shown first; unreachable peers were already noted by
+ * the fan-out and are simply absent from the table.
+ */
+async function listReposAcrossDevices(
+  alias: string | undefined,
+  opts: RepoStatusOptions,
+  intent: DeviceIntent,
+): Promise<void> {
+  const localTargets = collectRepoTargets(alias);
+  if (!localTargets) {
+    process.exitCode = 1;
+    return;
+  }
+  const localRows = await Promise.all(localTargets.map(renderRepoRow));
+  const self = machineId();
+  const hosts = 'hosts' in intent ? intent.hosts : undefined;
+  const remote = (await gatherRemoteRepoStatus(alias, hosts))
+    // An explicit host list may name this box; the local rows already cover it.
+    .filter((r) => normalizeHost(r.device) !== self);
+
+  const combined: DeviceRepoStatus[] = [
+    { device: self, reachable: true, rows: localRows },
+    ...remote,
+  ];
+
+  if (opts.json) {
+    const clean = combined.map((r) => ({
+      device: r.device,
+      reachable: r.reachable,
+      rows: (r.rows ?? []).map((row) =>
+        row.raw !== undefined ? { ...row, raw: stripAnsi(row.raw) } : row,
+      ),
+    }));
+    console.log(JSON.stringify(clean, null, 2));
+    return;
+  }
+
+  console.log('');
+  for (const line of renderDeviceStatusRows(combined)) console.log(line);
+  console.log('');
+}
+
 /**
  * Shared action body for `agents repo list` and the hidden `agents repo status`
  * alias. Responsive: a wide terminal gets an aligned table with compact SYNC /
  * CHANGES cells; a narrow one gets one card per repo with wrapping detail;
- * `--verbose` forces the full-detail table at any width.
+ * `--verbose` forces the full-detail table at any width. A device-scope flag
+ * (`--devices-all` / `--devices <list>`) instead fans out across the fleet.
  */
-async function listRepos(alias: string | undefined, opts: { verbose?: boolean; json?: boolean } = {}): Promise<void> {
+async function listRepos(alias: string | undefined, opts: RepoStatusOptions = {}): Promise<void> {
+  const intent = resolveDeviceIntent(opts);
+  if (intent) {
+    await listReposAcrossDevices(alias, opts, intent);
+    return;
+  }
+
   const targets = collectRepoTargets(alias);
   if (!targets) {
     process.exitCode = 1;
@@ -596,6 +791,21 @@ function formatRepoTarget(alias: string, dir: string, branch?: string): string {
   return `${alias} (${displayHomePath(dir)} → ${ref})`;
 }
 
+/**
+ * Register the fleet device-scope flags shared by `repo list` / `repo status`.
+ * `--devices-all` (alias `--hosts-all`) sweeps every reachable device;
+ * `--devices <who>` (alias `--hosts`) takes `all` or a comma-separated list.
+ * A single `--host`/`--device` is handled upstream by maybeRunOnHost, which
+ * streams that one box's `agents repo status` — these are the aggregating forms.
+ */
+function addDeviceStatusOptions(cmd: Command): Command {
+  return cmd
+    .option('--devices-all', 'Report repo sync state across ALL reachable fleet devices (alias: --hosts-all).')
+    .option('--hosts-all', 'Alias of --devices-all.')
+    .option('--devices <who>', 'Fleet devices to report on: "all", or a comma-separated device list (alias: --hosts).')
+    .option('--hosts <who>', 'Alias of --devices.');
+}
+
 /** Register the `agents repos` command tree (`repo` is a convenience alias). */
 export function registerRepoCommands(program: Command): void {
   // addHostOption on the group so --help documents --host/--device; remote
@@ -623,6 +833,9 @@ export function registerRepoCommands(program: Command): void {
 
       # See what's registered
       agents repos list
+
+      # Report repo sync state across the whole fleet (one box: --device <name>)
+      agents repos status --devices-all
 
       # View one repo's contents (git state + resource counts); omit the name for a picker
       agents repos view system
@@ -831,15 +1044,17 @@ export function registerRepoCommands(program: Command): void {
       console.log(chalk.gray(`picked up automatically the next time you launch any agent.`));
     });
 
-  repoCmd
+  const listCmd = repoCmd
     .command('list [alias]')
     .alias('ls')
     .description('Show all repos with resource-level sync (skills/commands/plugins to pull or push) and local changes.')
     .option('-v, --verbose', 'Full per-resource detail in a table, regardless of terminal width')
-    .option('--json', 'machine-readable JSON output')
-    .action(async (alias: string | undefined, options: { verbose?: boolean; json?: boolean }) => {
+    .option('--json', 'machine-readable JSON output');
+  addDeviceStatusOptions(listCmd).action(
+    async (alias: string | undefined, options: RepoStatusOptions) => {
       await listRepos(alias, options);
-    });
+    },
+  );
 
   repoCmd
     .command('view [name]')
@@ -1082,14 +1297,16 @@ export function registerRepoCommands(program: Command): void {
       }
     });
 
-  repoCmd
+  const statusCmd = repoCmd
     .command('status [alias]', { hidden: true })
-    .description('Alias of `list` (kept for muscle memory).')
+    .description('Alias of `list` (kept for muscle memory). Add --devices-all to report across the fleet.')
     .option('-v, --verbose', 'Full per-resource detail in a table, regardless of terminal width')
-    .option('--json', 'machine-readable JSON output')
-    .action(async (alias: string | undefined, options: { verbose?: boolean; json?: boolean }) => {
+    .option('--json', 'machine-readable JSON output');
+  addDeviceStatusOptions(statusCmd).action(
+    async (alias: string | undefined, options: RepoStatusOptions) => {
       await listRepos(alias, options);
-    });
+    },
+  );
 }
 
 interface RepoTarget {
