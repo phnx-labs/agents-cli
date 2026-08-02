@@ -510,8 +510,9 @@ if $MAIN_AT_TARGET && ! $PHNX_TARGET_PUBLISHED && [[ -n "$MERGED_RELEASE_SHA" ]]
   CI_TESTED_HEAD="$(git rev-parse FETCH_HEAD)"
   [[ "$CI_TESTED_HEAD" == "$MERGED_RELEASE_HEAD" ]] \
     || die "fetched PR head ${CI_TESTED_HEAD:0:9} != recorded release head ${MERGED_RELEASE_HEAD:0:9} -- refusing catch-up publish"
-  [[ "$(git rev-parse "$CI_TESTED_HEAD^{tree}")" == "$(git rev-parse "$MERGED_RELEASE_SHA^{tree}")" ]] \
-    || die "merged release PR #$MERGED_RELEASE_PR tree differs from its CI-tested head -- refusing catch-up publish"
+  if [[ "$(git rev-parse "$CI_TESTED_HEAD^{tree}")" != "$(git rev-parse "$MERGED_RELEASE_SHA^{tree}")" ]]; then
+    yellow "$DEFAULT_BRANCH drifted since release PR #$MERGED_RELEASE_PR merged (concurrent merges); will tag + publish the CI-tested head ${CI_TESTED_HEAD:0:9}, not the drifted merge."
+  fi
   [[ "$(git show "$MERGED_RELEASE_SHA:apps/cli/package.json" | jq -r .version)" == "$TARGET" ]] \
     || die "merged release PR #$MERGED_RELEASE_PR is not version $TARGET"
 
@@ -707,18 +708,25 @@ phase_ok "clean $DEFAULT_BRANCH, bump $BUMP ($PHNX_LATEST -> $TARGET), type chec
 # just make sure the tag exists on the merged commit and is pushed.
 if $PHNX_TARGET_PUBLISHED; then
   green "$PHNX_PKG@$TARGET is already on the registry."
-  TAG_TARGET="${MERGED_RELEASE_SHA:-origin/$DEFAULT_BRANCH}"
-  [[ "$(git show "$TAG_TARGET:apps/cli/package.json" | jq -r .version)" == "$TARGET" ]] \
-    || die "refusing to create v$TARGET: $TAG_TARGET does not contain package version $TARGET"
-  VERIFIED_TAG_SHA="$(git rev-parse "$TAG_TARGET^{commit}")"
   REMOTE_TAG_SHA="$(remote_tag_commit "v$TARGET")"
   if [[ -z "$REMOTE_TAG_SHA" ]]; then
-    git tag -f "v$TARGET" "$VERIFIED_TAG_SHA" >/dev/null
+    # No tag yet: create it at the CI-tested release commit when we know it (a
+    # drift-fallback release tags the PR head, which may sit off the default
+    # branch), else at the merge commit / default branch.
+    TAG_TARGET="${CI_TESTED_HEAD:-${MERGED_RELEASE_SHA:-origin/$DEFAULT_BRANCH}}"
+    [[ "$(git show "$TAG_TARGET:apps/cli/package.json" | jq -r .version)" == "$TARGET" ]] \
+      || die "refusing to create v$TARGET: $TAG_TARGET does not contain package version $TARGET"
+    git tag -f "v$TARGET" "$(git rev-parse "$TAG_TARGET^{commit}")" >/dev/null
     git push origin "v$TARGET" && green "Pushed missing tag v$TARGET"
   else
-    [[ "$REMOTE_TAG_SHA" == "$VERIFIED_TAG_SHA" ]] \
-      || die "remote tag v$TARGET points at $REMOTE_TAG_SHA, not verified release commit $VERIFIED_TAG_SHA"
-    gray "Tag v$TARGET already points at the verified release commit."
+    # Already published + tagged: accept any tag that references version TARGET. A
+    # drift-fallback release tags the CI-tested PR head rather than the merge
+    # commit, so verify the tag's own tree carries TARGET instead of requiring it
+    # to equal the merge commit.
+    git fetch --quiet origin "refs/tags/v$TARGET:refs/tags/v$TARGET" 2>/dev/null || true
+    [[ "$(git show "v$TARGET:apps/cli/package.json" 2>/dev/null | jq -r .version 2>/dev/null || echo "")" == "$TARGET" ]] \
+      || die "remote tag v$TARGET points at $REMOTE_TAG_SHA, which is not version $TARGET"
+    gray "Tag v$TARGET already present for the published release."
   fi
   exit 0
 fi
@@ -788,8 +796,9 @@ if $MAIN_AT_TARGET && ! $PHNX_TARGET_PUBLISHED; then
   fi
   [[ "$CI_TESTED_HEAD" == "$MERGED_RELEASE_HEAD" ]] \
     || die "fetched PR head ${CI_TESTED_HEAD:0:9} != recorded release head ${MERGED_RELEASE_HEAD:0:9} -- refusing catch-up publish"
-  [[ "$(git rev-parse "$CI_TESTED_HEAD^{tree}")" == "$(git rev-parse "$MERGED_RELEASE_SHA^{tree}")" ]] \
-    || die "merged release PR #$MERGED_RELEASE_PR tree differs from its CI-tested head -- refusing catch-up publish"
+  if [[ "$(git rev-parse "$CI_TESTED_HEAD^{tree}")" != "$(git rev-parse "$MERGED_RELEASE_SHA^{tree}")" ]]; then
+    yellow "$DEFAULT_BRANCH drifted since release PR #$MERGED_RELEASE_PR merged (concurrent merges); will tag + publish the CI-tested head ${CI_TESTED_HEAD:0:9}, not the drifted merge."
+  fi
   bold "Re-validating CI from merged release PR #$MERGED_RELEASE_PR before catch-up publish..."
   wait_for_ci_green "$MERGED_RELEASE_PR"
 fi
@@ -892,46 +901,59 @@ if ! $MAIN_AT_TARGET; then
   phase_ok "PR #$PR_NUMBER: CI matrix all-green, squash-merged"
 fi
 
-# Phase 4 (both paths): verify the merged tree + create/push the tag.
-phase "Verify merged tree + tag v$TARGET" "$THIS_HOST"
+# Phase 4 (both paths): resolve the CI-tested release commit + create/push the tag.
+phase "Verify CI-tested tree + tag v$TARGET" "$THIS_HOST"
 
-# ----- Resolve the merged commit + integrity guards (before any publish) -----
+# ----- Resolve the merge commit + the CI-tested release commit -----
+# The published tarball MUST be a tree the full CI matrix went green on. Normally
+# that is the commit that landed on the default branch. But the default branch is
+# busy: if unrelated PRs merge during this release PR's CI window, the squash-merge
+# lands on a newer base and its tree diverges from what CI actually tested. In that
+# case we do NOT publish the drifted, never-tested-as-a-unit merge tree -- we tag +
+# publish the exact release commit the matrix validated (the PR head), and the
+# commits that merged during the window ride the next release.
 git fetch --quiet origin "$DEFAULT_BRANCH"
 if $HISTORICAL_CATCHUP; then
   MERGED_SHA="$MERGED_RELEASE_SHA"
+  CI_COMMIT="$CI_TESTED_HEAD"                 # the merged release PR's CI-tested head
 else
   MERGED_SHA="$(git rev-parse "origin/$DEFAULT_BRANCH")"
+  CI_COMMIT="$RELEASE_COMMIT"                 # the release PR head this run built + CI-tested
 fi
 MERGED_VER="$(git show "$MERGED_SHA:apps/cli/package.json" | jq -r .version)"
 [[ "$MERGED_VER" == "$TARGET" ]] || die "merged $DEFAULT_BRANCH is at $MERGED_VER, not $TARGET -- refusing to tag/publish"
-# A normal release compares against the release-commit tree. A catch-up release
-# skips that commit because main already carries TARGET, so compare against the
-# exact base tree that passed preflight and was built locally. Either way, a
-# concurrent merge must abort before the tag or registry can point at artifacts
-# produced from a different source tree.
-if $HISTORICAL_CATCHUP; then
-  EXPECTED_TREE="$(git rev-parse "$MERGED_RELEASE_SHA^{tree}")"
-else
-  EXPECTED_TREE="${BRANCH_TREE:-$(git rev-parse "$BASE_SHA^{tree}")}"
+
+# CI_COMMIT is, by construction, the commit GH Actions ran the full matrix on (a
+# normal run built it via commit-tree and pushed it as the PR head; a catch-up
+# fetched it from pull/<pr>/head and re-asserted CI green). Its tree is the
+# CI-tested tree. Re-assert its version so we never tag a mismatched commit.
+[[ -n "${CI_COMMIT:-}" ]] || die "internal: no CI-tested release commit resolved -- refusing to publish"
+[[ "$(git show "$CI_COMMIT:apps/cli/package.json" | jq -r .version)" == "$TARGET" ]] \
+  || die "CI-tested release commit ${CI_COMMIT:0:9} is not version $TARGET -- refusing to publish"
+
+# Tag the merge commit when its tree still matches the CI-tested tree (clean, keeps
+# the tag on the default branch); on concurrent-merge drift, tag the CI-tested
+# release commit so the published artifact is exactly what CI validated.
+PUBLISH_SHA="$(scripts/select-publish-commit.sh "$MERGED_SHA" "$CI_COMMIT")"
+if [[ "$PUBLISH_SHA" != "$MERGED_SHA" ]]; then
+  yellow "Concurrent merge drifted $DEFAULT_BRANCH during CI; tagging the CI-tested release commit ${PUBLISH_SHA:0:9} (its tree passed the full matrix). Commits that merged during the window ride the next release."
 fi
-[[ "$(git rev-parse "$MERGED_SHA^{tree}")" == "$EXPECTED_TREE" ]] \
-  || die "merged tree != built tree -- refusing to publish (concurrent merge or stray push on $RELEASE_BRANCH)"
 
 # The published tarball is built on the home base from a fresh checkout of the
 # tag (below), so the trigger box's working tree is not the publish source and is
 # left untouched here -- restore_release_tree keeps it clean for a re-run.
 
-# ----- Tag at the merged commit (idempotent) -----
+# ----- Tag at the CI-tested release commit (idempotent) -----
 REMOTE_TAG_SHA="$(remote_tag_commit "v$TARGET")"
-[[ -z "$REMOTE_TAG_SHA" || "$REMOTE_TAG_SHA" == "$MERGED_SHA" ]] \
-  || die "remote tag v$TARGET points at $REMOTE_TAG_SHA, not verified release commit $MERGED_SHA"
+[[ -z "$REMOTE_TAG_SHA" || "$REMOTE_TAG_SHA" == "$PUBLISH_SHA" ]] \
+  || die "remote tag v$TARGET points at $REMOTE_TAG_SHA, not verified release commit $PUBLISH_SHA"
 if git rev-parse --verify --quiet "refs/tags/v$TARGET" >/dev/null; then
-  [[ "$(git rev-parse "refs/tags/v$TARGET^{commit}")" == "$MERGED_SHA" ]] \
-    || die "local tag v$TARGET does not point at the verified release commit $MERGED_SHA"
+  [[ "$(git rev-parse "refs/tags/v$TARGET^{commit}")" == "$PUBLISH_SHA" ]] \
+    || die "local tag v$TARGET does not point at the verified release commit $PUBLISH_SHA"
   gray "Tag v$TARGET already exists locally at the verified release commit"
 else
-  git tag "v$TARGET" "$MERGED_SHA"
-  green "Created tag v$TARGET at $(git rev-parse --short "$MERGED_SHA")"
+  git tag "v$TARGET" "$PUBLISH_SHA"
+  green "Created tag v$TARGET at $(git rev-parse --short "$PUBLISH_SHA")"
 fi
 
 # ----- Push the tag (git, on the trigger box) so the home base can resolve it -----
@@ -939,7 +961,7 @@ fi
 # resolves the exact release commit from origin. @swarmify/agents-cli legacy shim
 # is no longer published as of v1.20.0.
 git push origin "v$TARGET"
-phase_ok "merged tree verified; tag v$TARGET at ${MERGED_SHA:0:9} pushed"
+phase_ok "CI-tested tree verified; tag v$TARGET at ${PUBLISH_SHA:0:9} pushed"
 
 # Restore the working tree to clean now that the tag is durable; the privileged
 # phase below builds from a fresh checkout of the tag (locally on the home base,
