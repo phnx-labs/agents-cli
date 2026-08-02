@@ -244,16 +244,16 @@ enum IssueSelfTest {
         //     dismisses clean so the next summon starts fresh.
         check("empty note clears the draft",
               PromptDraft.forDismissal(note: "", selectedPaths: [],
-                                       selectedAgents: [], action: .fileTicket) == nil)
+                                       selectedAgents: [], action: .plan) == nil)
         check("whitespace/newline-only note clears the draft",
               PromptDraft.forDismissal(note: "  \n\t ", selectedPaths: ["/tmp/a.png"],
-                                       selectedAgents: ["codex"], action: .fix) == nil)
+                                       selectedAgents: ["codex"], action: .run) == nil)
 
         // (b) A real note round-trips every field verbatim through save→restore.
         let saved = PromptDraft.forDismissal(note: "  cards show raw uuids  ",
                                              selectedPaths: ["/tmp/a.png", "/tmp/b.png"],
                                              selectedAgents: ["codex", "claude"],
-                                             action: .fix)
+                                             action: .run)
         check("non-empty note preserves a draft", saved != nil,
               detail: saved.map { $0.note } ?? "nil")
         check("draft preserves the raw (untrimmed) note",
@@ -264,19 +264,19 @@ enum IssueSelfTest {
         check("draft preserves selectedAgents",
               saved?.selectedAgents == ["codex", "claude"],
               detail: (saved?.selectedAgents ?? []).sorted().joined(separator: ","))
-        check("draft preserves the dispatch action", saved?.action == .fix)
+        check("draft preserves the dispatch action", saved?.action == .run)
 
         // The restore side (summon's `draft?.field ?? default`): a saved draft
         // rehydrates its fields; a nil draft — what submit and Escape leave behind
         // via clearDraft — restores to a clean slate.
         check("restore rehydrates note+action from a saved draft",
               (saved?.note ?? "") == "  cards show raw uuids  " &&
-              (saved?.action ?? .fileTicket) == .fix)
+              (saved?.action ?? .plan) == .run)
         let cleared: PromptDraft? = nil   // what submit/Escape (clearDraft) leave
         check("submit/Escape leave no draft → restore yields empty note",
               (cleared?.note ?? "") == "")
         check("submit/Escape leave no draft → restore yields default action + no selection",
-              (cleared?.action ?? .fileTicket) == .fileTicket &&
+              (cleared?.action ?? .plan) == .plan &&
               (cleared?.selectedPaths ?? []).isEmpty &&
               (cleared?.selectedAgents ?? []).isEmpty)
     }
