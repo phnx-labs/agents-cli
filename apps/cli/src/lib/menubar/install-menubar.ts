@@ -238,8 +238,8 @@ export function ensureMenubarAppInstalled(opts: { forceReinstall?: boolean } = {
   copyAppBundle(src, dest);
   ensureValidSignature(dest);
   // A fresh copy is exactly when the bundle's icon can be new (first install) or
-  // superseded (upgrade) — re-register so LaunchServices drops any stale "no
-  // icon" record and the new AppIcon shows on the left of daemon notifications.
+  // superseded (upgrade) — register it so LaunchServices knows the bundle and can
+  // resolve its AppIcon for the left-hand slot of daemon notifications.
   refreshBundleIconRegistration(dest);
   return installedExecutablePath();
 }
