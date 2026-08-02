@@ -264,7 +264,12 @@ async function fetchRawPool(
   const dialPeers = !local && (!hosts?.length || (remoteHosts && remoteHosts.length > 0));
   if (dialPeers) {
     try {
-      const forwarded = ['sessions', '--all', '--json', '--limit', '500'];
+      // The peer's cap has to match the local one, or a team filter widens only
+      // this machine's half of the pool and a peer's older rows stay invisible —
+      // the same bug one hop out. A numeric --limit is forwarded rather than
+      // --in-team itself, which a peer on an older build would reject as an
+      // unknown option and fail the whole fan-out.
+      const forwarded = ['sessions', '--all', '--json', '--limit', String(f.team ? WHOLE_TEAM_POOL_LIMIT : 500)];
       if (since) forwarded.push('--since', since);
       if (f.teams) forwarded.push('--teams');
       const remoteResult = await gatherRemoteList(forwarded, remoteHosts);
