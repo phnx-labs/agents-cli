@@ -110,6 +110,28 @@ const VALID_CLOUD_PROVIDERS = ['rush', 'codex', 'factory'] as const satisfies re
 
 type Mode = (typeof VALID_MODES)[number];
 type Effort = (typeof VALID_EFFORTS)[number];
+type TeamRegistry = Record<string, { created_at: string; description?: string }>;
+
+export interface TeamListAgentSnapshot {
+  agent_id: string;
+  task_name: string;
+  agent_type: string;
+  status: string;
+  prompt: string;
+  started_at: string;
+  completed_at: string | null;
+  workspace_dir: string | null;
+  version: string | null;
+  remote_session_id: string | null;
+  name: string | null;
+  after: string[];
+  task_type: TaskType | null;
+  host: string | null;
+  mode: string | null;
+  cloud_session_id: string | null;
+  cloud_provider: string | null;
+  pr_url: string | null;
+}
 
 function statusColor(status: string): (s: string) => string {
   switch (status) {
@@ -136,6 +158,74 @@ function formatTimestamp(iso: string | null | undefined): string | null {
     hour: 'numeric',
     minute: '2-digit',
   });
+}
+
+function normalizeTeamListStatus(status: unknown): AgentStatus {
+  if (Object.values(AgentStatus).includes(status as AgentStatus)) {
+    return status as AgentStatus;
+  }
+  return AgentStatus.RUNNING;
+}
+
+function parseTimestamp(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function durationFromSnapshot(agent: TeamListAgentSnapshot): string | null {
+  const startedAt = parseTimestamp(agent.started_at);
+  if (!startedAt) return null;
+  const completedAt = parseTimestamp(agent.completed_at);
+  let seconds: number;
+  if (completedAt) {
+    seconds = (completedAt.getTime() - startedAt.getTime()) / 1000;
+  } else if (normalizeTeamListStatus(agent.status) === AgentStatus.RUNNING) {
+    seconds = (Date.now() - startedAt.getTime()) / 1000;
+  } else {
+    return null;
+  }
+  if (seconds < 60) return `${Math.max(0, Math.floor(seconds))} seconds`;
+  return `${Math.max(0, seconds / 60).toFixed(1)} minutes`;
+}
+
+function snapshotActivityTime(agent: TeamListAgentSnapshot): Date {
+  const status = normalizeTeamListStatus(agent.status);
+  if (status === AgentStatus.RUNNING) return new Date();
+  return parseTimestamp(agent.completed_at) || parseTimestamp(agent.started_at) || new Date(0);
+}
+
+function snapshotToStatusDetail(agent: TeamListAgentSnapshot): AgentStatusDetail {
+  return {
+    agent_id: agent.agent_id,
+    agent_type: agent.agent_type,
+    status: normalizeTeamListStatus(agent.status),
+    prompt: agent.prompt,
+    started_at: parseTimestamp(agent.started_at)?.toISOString() || new Date(0).toISOString(),
+    completed_at: parseTimestamp(agent.completed_at)?.toISOString() || null,
+    duration: durationFromSnapshot(agent),
+    files_created: [],
+    files_modified: [],
+    files_read: [],
+    files_deleted: [],
+    bash_commands: [],
+    recent_tool_calls: [],
+    last_messages: [],
+    tool_count: 0,
+    has_errors: false,
+    cursor: snapshotActivityTime(agent).toISOString(),
+    mode: agent.mode ?? undefined,
+    cloud_session_id: agent.cloud_session_id,
+    cloud_provider: agent.cloud_provider,
+    pr_url: agent.pr_url,
+    version: agent.version,
+    remote_session_id: agent.remote_session_id,
+    session_label: null,
+    name: agent.name,
+    after: agent.after,
+    task_type: agent.task_type,
+    host: agent.host,
+  };
 }
 
 
@@ -855,7 +945,7 @@ function classifyTeamStatus(t: TaskInfo): 'empty' | 'waiting' | 'working' | 'don
 // Merge persistent team registry with tasks derived from live agents so empty
 // teams (created but no teammates yet) still show up.
 function mergeTeams(
-  registry: Record<string, { created_at: string; description?: string }>,
+  registry: TeamRegistry,
   tasks: TaskInfo[]
 ): TaskInfo[] {
   const byName = new Map<string, TaskInfo>();
@@ -881,26 +971,141 @@ function mergeTeams(
   );
 }
 
-// Build the same enriched rows the `list` picker uses. Shared between `list`
-// (interactive default) and the picker fallback for `status` / `start`.
-async function loadTeamRows(
-  mgr: AgentManager
-): Promise<{ rows: TeamRow[]; names: string[] }> {
-  const [tasks, registry] = await Promise.all([handleTasks(mgr, 1000), loadTeams()]);
-  const merged = mergeTeams(registry, tasks.tasks);
-  const rows: TeamRow[] = await Promise.all(
-    merged.map(async (team) => {
-      let agents: AgentStatusDetail[] = [];
-      try {
-        const res = await handleStatus(mgr, team.task_name, 'all');
-        agents = res.agents;
-      } catch {
-        // Empty teams (no live agents) throw in some code paths.
+function buildTasksFromSnapshots(agents: TeamListAgentSnapshot[]): TaskInfo[] {
+  const byTeam = new Map<string, TeamListAgentSnapshot[]>();
+  for (const agent of agents) {
+    const teamAgents = byTeam.get(agent.task_name) || [];
+    teamAgents.push(agent);
+    byTeam.set(agent.task_name, teamAgents);
+  }
+
+  const tasks: TaskInfo[] = [];
+  for (const [taskName, teamAgents] of byTeam) {
+    let pending = 0;
+    let running = 0;
+    let completed = 0;
+    let failed = 0;
+    let stopped = 0;
+    let earliestStart: Date | null = null;
+    let latestActivity: Date | null = null;
+    let workspaceDir: string | null = null;
+
+    for (const agent of teamAgents) {
+      const status = normalizeTeamListStatus(agent.status);
+      if (status === AgentStatus.PENDING) pending++;
+      else if (status === AgentStatus.RUNNING) running++;
+      else if (status === AgentStatus.COMPLETED) completed++;
+      else if (status === AgentStatus.FAILED) failed++;
+      else if (status === AgentStatus.STOPPED) stopped++;
+
+      const startedAt = parseTimestamp(agent.started_at);
+      if (startedAt && (!earliestStart || startedAt < earliestStart)) {
+        earliestStart = startedAt;
       }
-      return { team, agents, description: registry[team.task_name]?.description };
-    })
-  );
-  return { rows, names: merged.map((t) => t.task_name) };
+
+      const activity = snapshotActivityTime(agent);
+      if (!latestActivity || activity > latestActivity) {
+        latestActivity = activity;
+      }
+
+      if (!workspaceDir && agent.workspace_dir) {
+        workspaceDir = agent.workspace_dir;
+      }
+    }
+
+    const fallback = new Date(0);
+    tasks.push({
+      task_name: taskName,
+      agent_count: teamAgents.length,
+      pending,
+      running,
+      completed,
+      failed,
+      stopped,
+      workspace_dir: workspaceDir,
+      created_at: (earliestStart || fallback).toISOString(),
+      modified_at: (latestActivity || earliestStart || fallback).toISOString(),
+    });
+  }
+
+  return tasks.sort((a, b) => new Date(b.modified_at).getTime() - new Date(a.modified_at).getTime());
+}
+
+export function buildTeamRowsFromSnapshots(
+  registry: TeamRegistry,
+  agents: TeamListAgentSnapshot[]
+): { rows: TeamRow[]; teams: TaskInfo[]; names: string[] } {
+  const byTeam = new Map<string, AgentStatusDetail[]>();
+  for (const agent of agents) {
+    const details = byTeam.get(agent.task_name) || [];
+    details.push(snapshotToStatusDetail(agent));
+    byTeam.set(agent.task_name, details);
+  }
+
+  const teams = mergeTeams(registry, buildTasksFromSnapshots(agents));
+  return {
+    teams,
+    rows: teams.map((team) => ({
+      team,
+      agents: byTeam.get(team.task_name) || [],
+      description: registry[team.task_name]?.description,
+    })),
+    names: teams.map((team) => team.task_name),
+  };
+}
+
+function snapshotFromMeta(meta: any): TeamListAgentSnapshot | null {
+  if (!meta || typeof meta !== 'object') return null;
+  const agentId = typeof meta.agent_id === 'string' ? meta.agent_id : '';
+  const taskName = typeof meta.task_name === 'string' ? meta.task_name : '';
+  const agentType = typeof meta.agent_type === 'string' ? meta.agent_type : '';
+  if (!agentId || !taskName || !agentType) return null;
+  return {
+    agent_id: agentId,
+    task_name: taskName,
+    agent_type: agentType,
+    status: normalizeTeamListStatus(meta.status),
+    prompt: typeof meta.prompt === 'string' ? meta.prompt : '',
+    started_at: parseTimestamp(meta.started_at)?.toISOString() || new Date(0).toISOString(),
+    completed_at: parseTimestamp(meta.completed_at)?.toISOString() || null,
+    workspace_dir: typeof meta.workspace_dir === 'string' ? meta.workspace_dir : null,
+    version: typeof meta.version === 'string' ? meta.version : null,
+    remote_session_id: typeof meta.remote_session_id === 'string' ? meta.remote_session_id : null,
+    name: typeof meta.name === 'string' ? meta.name : null,
+    after: Array.isArray(meta.after) ? meta.after.filter((name: unknown): name is string => typeof name === 'string') : [],
+    task_type: typeof meta.task_type === 'string' && (VALID_TASK_TYPES as readonly string[]).includes(meta.task_type)
+      ? meta.task_type as TaskType
+      : null,
+    host: typeof meta.host_name === 'string' ? meta.host_name : null,
+    mode: typeof meta.mode === 'string' ? meta.mode : null,
+    cloud_session_id: typeof meta.cloud_session_id === 'string' ? meta.cloud_session_id : null,
+    cloud_provider: typeof meta.cloud_provider === 'string' ? meta.cloud_provider : null,
+    pr_url: typeof meta.pr_url === 'string' ? meta.pr_url : null,
+  };
+}
+
+async function loadTeamAgentSnapshots(): Promise<TeamListAgentSnapshot[]> {
+  const agentsDir = await getAgentsDir();
+  const entries = await fs.readdir(agentsDir).catch(() => []);
+  const snapshots = await Promise.all(entries.map(async (entry) => {
+    const metaPath = path.join(agentsDir, entry, 'meta.json');
+    try {
+      const raw = await fs.readFile(metaPath, 'utf-8');
+      return snapshotFromMeta(JSON.parse(raw));
+    } catch {
+      return null;
+    }
+  }));
+  return snapshots.filter((snapshot): snapshot is TeamListAgentSnapshot => snapshot !== null);
+}
+
+// Build cached rows for the `list` picker. Shared between `list` and picker
+// fallbacks for `status` / `start`; full status stays lazy until a team is picked.
+async function loadTeamRows(
+  _mgr: AgentManager
+): Promise<{ rows: TeamRow[]; names: string[] }> {
+  const [registry, agents] = await Promise.all([loadTeams(), loadTeamAgentSnapshots()]);
+  return buildTeamRowsFromSnapshots(registry, agents);
 }
 
 // Picker fallback for `teams logs` when the teammate ref is omitted. Shows a
@@ -1081,28 +1286,26 @@ export function registerTeamsCommands(program: Command): void {
       agent?: string; status?: string; since?: string; until?: string;
       limit: string; json?: boolean;
     }) => {
-      const mgr = mkManager();
       const limit = Math.max(1, parseInt(opts.limit, 10) || 20);
-      const [tasks, registry, everyAgent] = await Promise.all([
-        handleTasks(mgr, 1000),
+      const [registry, everyAgent] = await Promise.all([
         loadTeams(),
-        mgr.listAll(),
+        loadTeamAgentSnapshots(),
       ]);
 
       // Group agents by team so we can filter on agent-type / version.
-      const byTeam = new Map<string, { agent_type: string; version: string | null }[]>();
+      const byTeam = new Map<string, TeamListAgentSnapshot[]>();
       for (const a of everyAgent) {
-        const arr = byTeam.get(a.taskName) || [];
-        arr.push({ agent_type: a.agentType, version: a.version });
-        byTeam.set(a.taskName, arr);
+        const arr = byTeam.get(a.task_name) || [];
+        arr.push(a);
+        byTeam.set(a.task_name, arr);
       }
 
-      let merged = mergeTeams(registry, tasks.tasks);
+      let rows = buildTeamRowsFromSnapshots(registry, everyAgent).rows;
 
       // --- query: substring match on team name ---
       if (query) {
         const q = query.toLowerCase();
-        merged = merged.filter((t) => t.task_name.toLowerCase().includes(q));
+        rows = rows.filter((row) => row.team.task_name.toLowerCase().includes(q));
       }
 
       // --- --agent: filter teams containing a matching teammate ---
@@ -1111,8 +1314,8 @@ export function registerTeamsCommands(program: Command): void {
         const wantVersion = VALID_AGENTS.includes(wantType as AgentType)
           ? resolveVersionAliasLoose(wantType as AgentId, rawVersion)
           : rawVersion;
-        merged = merged.filter((t) => {
-          const teammates = byTeam.get(t.task_name) || [];
+        rows = rows.filter((row) => {
+          const teammates = byTeam.get(row.team.task_name) || [];
           return teammates.some(
             (m) => m.agent_type === wantType && (!wantVersion || m.version === wantVersion)
           );
@@ -1126,29 +1329,29 @@ export function registerTeamsCommands(program: Command): void {
         if (!validStatuses.includes(want)) {
           die(`Invalid --status '${opts.status}'. Use one of: ${validStatuses.join(', ')}`);
         }
-        merged = merged.filter((t) => classifyTeamStatus(t) === want);
+        rows = rows.filter((row) => classifyTeamStatus(row.team) === want);
       }
 
       // --- --since / --until: filter by activity window ---
       if (opts.since) {
         const cutoff = parseTimeFilter(opts.since);
         if (!cutoff) die(`Could not parse --since '${opts.since}'`);
-        merged = merged.filter((t) => new Date(t.modified_at).getTime() >= cutoff);
+        rows = rows.filter((row) => new Date(row.team.modified_at).getTime() >= cutoff);
       }
       if (opts.until) {
         const cutoff = parseTimeFilter(opts.until);
         if (!cutoff) die(`Could not parse --until '${opts.until}'`);
-        merged = merged.filter((t) => new Date(t.modified_at).getTime() <= cutoff);
+        rows = rows.filter((row) => new Date(row.team.modified_at).getTime() <= cutoff);
       }
 
-      merged = merged.slice(0, limit);
+      rows = rows.slice(0, limit);
 
       if (isJsonMode(opts)) {
-        console.log(JSON.stringify({ teams: merged }, null, 2));
+        console.log(JSON.stringify({ teams: rows.map((row) => row.team) }, null, 2));
         return;
       }
 
-      if (merged.length === 0) {
+      if (rows.length === 0) {
         if (query || opts.agent || opts.status || opts.since || opts.until) {
           console.log(chalk.gray('No teams match those filters.'));
         } else {
@@ -1158,26 +1361,12 @@ export function registerTeamsCommands(program: Command): void {
         return;
       }
 
-      // Enrich teams with teammate details for the picker's preview pane.
-      const rows: TeamRow[] = await Promise.all(
-        merged.map(async (team) => {
-          let agents: AgentStatusDetail[] = [];
-          try {
-            const res = await handleStatus(mgr, team.task_name, 'all');
-            agents = res.agents;
-          } catch {
-            // Empty teams (no live agents) throw in some code paths — preview
-            // will just show "no teammates yet".
-          }
-          return { team, agents, description: registry[team.task_name]?.description };
-        })
-      );
-
       if (isInteractiveTerminal()) {
         try {
           const picked = await teamPicker(rows, query);
           if (picked) {
             // Fall through to the status subcommand's action for the picked team.
+            const mgr = mkManager();
             const result = await handleStatus(mgr, picked.team, 'all');
             await printTeamStatus(picked.team, result);
           }

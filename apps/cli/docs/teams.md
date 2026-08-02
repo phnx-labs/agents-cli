@@ -71,6 +71,10 @@ PENDING ──deps resolved──▶ spawned ──▶ RUNNING ──exit 0─�
 
 ### `teams list` options
 
+`agents teams list` renders from the cached team registry and teammate `meta.json`
+records. It does not poll remote hosts or read teammate logs while listing; choosing
+a team or running `agents teams status <team>` performs the full status read.
+
 | Flag | Description |
 |---|---|
 | `-a, --agent <agent>` | Filter to teams containing this agent (e.g. `claude` or `claude@2.1.112`) |
