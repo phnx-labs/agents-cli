@@ -9,6 +9,8 @@
   on a 30-day stream here, against 50 before), a truncated read prints
   `Showing the newest 50 — more events matched. Pass --limit 0 for all.` (on
   stderr under `--json`, so a `| jq` pipeline still receives clean JSON), and a
-  non-numeric or negative `--limit` exits 2 rather than quietly becoming 50.
+  non-numeric, negative, or empty `--limit` exits 2 rather than quietly becoming
+  50 — an empty one (`--limit "$LIMIT"` with the variable unset) would otherwise
+  have read as "no cap" and returned the whole stream unannounced.
   Source: `apps/cli/src/commands/events.ts`, `apps/cli/tests/events-limit.test.ts`,
   `apps/cli/docs/06-observability.md`.
