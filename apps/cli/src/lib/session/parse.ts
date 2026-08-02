@@ -160,6 +160,7 @@ export function parseSession(filePath: string, agent?: SessionAgentId): SessionE
     case 'hermes': events = parseHermes(filePath); break;
     case 'kimi': events = parseKimi(filePath); break;
     case 'droid': events = parseDroid(filePath); break;
+    case 'cursor': events = parseCursor(filePath); break;
   }
 
   // Chokepoint: every string field that originated in an untrusted session
@@ -193,6 +194,7 @@ export function detectAgent(filePath: string): SessionAgentId | null {
   if (filePath.includes('/.hermes/') || filePath.includes('\\.hermes\\')) return 'hermes';
   if (filePath.includes('/.kimi-code/') || filePath.includes('\\.kimi-code\\')) return 'kimi';
   if (filePath.includes('/.factory/') || filePath.includes('\\.factory\\')) return 'droid';
+  if (filePath.includes('/.cursor/') || filePath.includes('\\.cursor\\')) return 'cursor';
   // Cloud convention: cloud-sessions/<id>/session.<format>.jsonl
   const cloudMatch = filePath.match(/session\.(claude|codex|rush)\.jsonl(?:$|[?#])/);
   if (cloudMatch) return cloudMatch[1] as SessionAgentId;
@@ -1661,22 +1663,20 @@ export function parseKimi(filePath: string): SessionEvent[] {
 }
 
 // ---------------------------------------------------------------------------
-// Droid (Factory) parser
+// Cursor and Droid (Factory) parsers
 // ---------------------------------------------------------------------------
 
-/**
- * Parse a Droid (Factory) JSONL session file into normalized events. Droid
- * wraps each turn in a `{type:'message', message:{role, content, modelId}}`
- * envelope; the content blocks are Anthropic-shaped (text/thinking/tool_use/
- * tool_result), so block handling mirrors the Claude parser.
- */
-export function parseDroid(filePath: string): SessionEvent[] {
+/** Parse Cursor's Anthropic-shaped message JSONL transcript. */
+export function parseCursor(filePath: string): SessionEvent[] {
+  return parseAnthropicMessageJsonl(filePath, 'cursor');
+}
+
+function parseAnthropicMessageJsonl(filePath: string, agent: 'cursor' | 'droid'): SessionEvent[] {
   const content = safeReadSessionFile(filePath);
   const lines = content.split('\n').filter(l => l.trim());
   const events: SessionEvent[] = [];
-
-  // Map tool_use id -> {tool, args} for correlating with tool_result.
   const toolUseMap = new Map<string, { tool: string; args: Record<string, any> }>();
+  const fallbackTimestamp = fs.statSync(filePath).mtime.toISOString();
 
   for (const line of lines) {
     let raw: any;
@@ -1686,17 +1686,18 @@ export function parseDroid(filePath: string): SessionEvent[] {
       continue;
     }
 
-    if (raw.type !== 'message') continue;
+    if (raw.type === 'turn_ended' || (agent === 'droid' && raw.type !== 'message')) continue;
+    const message = raw.message;
+    const wireRole = agent === 'cursor' ? raw.role : message?.role;
+    if (!message || !['user', 'assistant'].includes(wireRole)) continue;
 
-    const message = raw.message || {};
-    const role = message.role === 'user' ? 'user' : 'assistant';
-    const timestamp = raw.timestamp || new Date().toISOString();
+    const role = wireRole === 'user' ? 'user' : 'assistant';
+    const timestamp = raw.timestamp || fallbackTimestamp;
     const blocks = message.content;
 
-    // Plain-string content (rare) renders as a single message.
     if (typeof blocks === 'string') {
       const text = blocks.trim();
-      if (text) events.push({ type: 'message', agent: 'droid', timestamp, role, content: text });
+      if (text) events.push({ type: 'message', agent, timestamp, role, content: text });
       continue;
     }
     if (!Array.isArray(blocks)) continue;
@@ -1704,50 +1705,40 @@ export function parseDroid(filePath: string): SessionEvent[] {
     for (const block of blocks) {
       if (block.type === 'text') {
         const text = (block.text || '').trim();
-        // Skip injected context blocks (date, skills list) on the first user turn.
         if (text && !(role === 'user' && text.startsWith('<system-reminder>'))) {
-          events.push({ type: 'message', agent: 'droid', timestamp, role, content: text });
+          events.push({ type: 'message', agent, timestamp, role, content: text });
         }
       } else if (block.type === 'thinking') {
         const thinkingText = (block.thinking || '').trim();
-        if (thinkingText) events.push({ type: 'thinking', agent: 'droid', timestamp, content: thinkingText });
+        if (thinkingText) events.push({ type: 'thinking', agent, timestamp, content: thinkingText });
       } else if (block.type === 'tool_use') {
         const toolName = block.name || 'unknown';
         const toolInput = block.input || {};
         if (block.id) toolUseMap.set(block.id, { tool: toolName, args: toolInput });
         events.push({
           type: 'tool_use',
-          agent: 'droid',
+          agent,
           timestamp,
           tool: toolName,
           args: toolInput,
           path: toolInput.file_path || toolInput.path || undefined,
-          command: (toolName === 'Bash' || toolName === 'Execute') ? toolInput.command : undefined,
+          command: (toolName === 'Bash' || toolName === 'Execute' || toolName === 'Shell') ? toolInput.command : undefined,
         });
       } else if (block.type === 'tool_result') {
         const toolId = block.tool_use_id;
         const toolInfo = toolId ? toolUseMap.get(toolId) : undefined;
         const isError = block.is_error === true;
-
-        let output = '';
-        if (typeof block.content === 'string') {
-          output = block.content;
-        } else if (Array.isArray(block.content)) {
-          output = block.content
-            .filter((c: any) => c.type === 'text')
-            .map((c: any) => c.text || '')
-            .join('\n');
-        }
+        const output = typeof block.content === 'string'
+          ? block.content
+          : Array.isArray(block.content)
+            ? block.content.filter((c: any) => c.type === 'text').map((c: any) => c.text || '').join('\n')
+            : '';
 
         if (isError) {
-          events.push({ type: 'error', agent: 'droid', timestamp, tool: toolInfo?.tool, content: output || 'Tool execution failed' });
+          events.push({ type: 'error', agent, timestamp, tool: toolInfo?.tool, content: output || 'Tool execution failed' });
         } else {
           events.push({
-            type: 'tool_result',
-            agent: 'droid',
-            timestamp,
-            tool: toolInfo?.tool,
-            success: true,
+            type: 'tool_result', agent, timestamp, tool: toolInfo?.tool, success: true,
             output: output.length > 500 ? output.slice(0, 497) + '...' : output,
           });
         }
@@ -1755,10 +1746,20 @@ export function parseDroid(filePath: string): SessionEvent[] {
       } else if (block.type === 'image') {
         const source = block.source || {};
         const sizeBytes = source.type === 'base64' ? Math.ceil(((source.data as string)?.length || 0) * 0.75) : 0;
-        events.push(normalizedAttachmentEvent('droid', timestamp, block, source, 'image/png', sizeBytes));
+        events.push(normalizedAttachmentEvent(agent, timestamp, block, source, 'image/png', sizeBytes));
       }
     }
   }
 
   return events;
+}
+
+/**
+ * Parse a Droid (Factory) JSONL session file into normalized events. Droid
+ * wraps each turn in a `{type:'message', message:{role, content, modelId}}`
+ * envelope; the content blocks are Anthropic-shaped (text/thinking/tool_use/
+ * tool_result), so block handling mirrors the Claude parser.
+ */
+export function parseDroid(filePath: string): SessionEvent[] {
+  return parseAnthropicMessageJsonl(filePath, 'droid');
 }

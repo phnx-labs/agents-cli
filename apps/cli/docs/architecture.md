@@ -153,7 +153,7 @@ Two formats trip people up (both handled in [`src/lib/session/discover.ts`](../s
 the **session-discoverable** set is `SESSION_AGENTS`
 ([`src/lib/session/types.ts`](../src/lib/session/types.ts)): `claude`, `codex`,
 `gemini`, `antigravity`, `opencode`, `openclaw`, `rush`, `hermes`, `grok`, `kimi`,
-`droid`. `cursor` and `copilot` are runnable but not session-discoverable.
+`droid`, `cursor`. `copilot` is runnable but not session-discoverable.
 `isSessionTrackedAgent()` in the same file is the single predicate every session-index
 writer gates on.
 

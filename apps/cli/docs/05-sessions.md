@@ -6,7 +6,7 @@
 
 Unified discovery, search, and rendering of agent conversation transcripts across
 the session-discoverable harnesses — Claude, Codex, Gemini, Antigravity, OpenCode,
-OpenClaw, Rush, Hermes, Grok, Kimi, and Droid (the `SESSION_AGENTS` set in
+OpenClaw, Rush, Hermes, Grok, Kimi, Droid, and Cursor (the `SESSION_AGENTS` set in
 `src/lib/session/types.ts`).
 
 ## Architecture
@@ -23,6 +23,7 @@ Per-agent on-disk session files (not owned by agents-cli, read-only):
 ~/.gemini/tmp/<project>/chats/session-*.json              # Gemini
 ~/.local/share/opencode/project/*/storage/session/...     # OpenCode
 ~/Library/Application Support/OpenClaw/sessions/*.json    # OpenClaw
+~/.cursor/projects/*/agent-transcripts/*/*.jsonl          # Cursor
 
 Routine archives (owned by agents-cli, durable):
 ~/.agents/.history/runs/<routine>/<run-id>/sessions/<agent>/...
@@ -127,7 +128,7 @@ Fields:
 |---|---|---|
 | `id` | Agent-native UUID | Primary key; stable across reloads |
 | `shortId` | First 8 chars of `id` | For human matching in CLI output |
-| `agent` | One of 11 formats | See the `SessionAgentId` / `SESSION_AGENTS` union |
+| `agent` | One of 12 formats | See the `SessionAgentId` / `SESSION_AGENTS` union |
 | `origin` | `cli` or `routine` | Routine rows are archived from a run directory and can be filtered with `--routine` |
 | `routineName` | Routine name | Present when `origin` is `routine` |
 | `routineRunId` | Routine run id | Present when `origin` is `routine`; `agents sessions <runId>` resolves it |

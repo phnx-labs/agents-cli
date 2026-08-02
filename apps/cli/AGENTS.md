@@ -367,7 +367,7 @@ bug; fix the drift. It uses RFC-2119 MUST/SHOULD language, cites the implementin
 
 - **[`docs/specifications.md` §Sessions](docs/specifications.md#sessions)** — the `agents sessions`
   contract. Load-bearing invariants: discovery MUST parse **every** harness in
-  `SESSION_AGENTS` (all 11) and a malformed line MUST be skipped, never thrown
+  `SESSION_AGENTS` (all 12) and a malformed line MUST be skipped, never thrown
   (SES-1, SES-3); every list row MUST show a **non-empty preview** — live turn →
   `label` → first-prompt `topic` → `'-'` (SES-8; `--flat` and the interactive
   picker share the one unguarded renderer, SES-GAP-1); "where a session started"

@@ -1,0 +1,4 @@
+{"role":"user","message":{"content":[{"type":"text","text":"<timestamp>Sunday, Aug 2, 2026, 3:51 AM (UTC-7)</timestamp>\n<user_query>\nInspect the public CLI documentation and summarize the session commands.\n</user_query>"}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"I will inspect the session documentation."},{"type":"tool_use","id":"tool-1","name":"Read","input":{"path":"/tmp/public-project/docs/sessions.md","limit":40}}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"The sessions command discovers and renders local transcripts."}]}}
+{"type":"turn_ended","status":"success"}

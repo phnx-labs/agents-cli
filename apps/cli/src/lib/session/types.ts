@@ -8,10 +8,10 @@
  */
 
 /** Agents that store session data on disk and can be discovered by `agents sessions`. */
-export type SessionAgentId = 'claude' | 'codex' | 'gemini' | 'antigravity' | 'opencode' | 'openclaw' | 'rush' | 'hermes' | 'grok' | 'kimi' | 'droid';
+export type SessionAgentId = 'claude' | 'codex' | 'gemini' | 'antigravity' | 'opencode' | 'openclaw' | 'rush' | 'hermes' | 'grok' | 'kimi' | 'droid' | 'cursor';
 
 /** All agents with session discovery support, in display order. */
-export const SESSION_AGENTS: SessionAgentId[] = ['claude', 'codex', 'gemini', 'antigravity', 'opencode', 'openclaw', 'rush', 'hermes', 'grok', 'kimi', 'droid'];
+export const SESSION_AGENTS: SessionAgentId[] = ['claude', 'codex', 'gemini', 'antigravity', 'opencode', 'openclaw', 'rush', 'hermes', 'grok', 'kimi', 'droid', 'cursor'];
 
 /**
  * True when `agent` stores session data `agents sessions` can discover (a member

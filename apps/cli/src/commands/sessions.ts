@@ -2656,6 +2656,7 @@ export function buildResumeCommand(session: SessionMeta): string[] | null {
     case 'grok':
     case 'kimi':
     case 'droid':
+    case 'cursor':
       // Grok (and some others) sessions are captured artifacts, not resumable the same way.
       return null;
   }

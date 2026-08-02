@@ -27,7 +27,7 @@ import { getConfigSymlinkVersion } from '../shims.js';
 import { SESSION_AGENTS } from './types.js';
 import { deriveShortId } from './short-id.js';
 import { extractSessionTopic } from './prompt.js';
-import { parseAntigravity } from './parse.js';
+import { parseAntigravity, parseCursor } from './parse.js';
 import { extractPrUrl, detectWorktree, detectTicket, isPrCreateCommand, detectSpawnedTeam, isTicketCreateTool, extractCreatedTicket, extractRecentDirectoriesTouched, extractTodoProgressFromEvents } from './state.js';
 import { costOfUsage } from '../pricing/index.js';
 import { machineId } from './sync/config.js';
@@ -383,6 +383,7 @@ function dispatchAgentScan(
     case 'kimi': return scanKimiIncremental(onProgress);
     case 'droid': return scanDroidIncremental(onProgress);
     case 'grok': return scanGrokIncremental(onProgress);
+    case 'cursor': return scanCursorIncremental(onProgress);
     default: return Promise.resolve();
   }
 }
@@ -897,6 +898,7 @@ const SESSION_ROOT_SPECS: ReadonlyArray<{ agent: SessionAgentId; subdir: string 
   { agent: 'droid', subdir: 'sessions' },
   { agent: 'kimi', subdir: 'sessions' },
   { agent: 'grok', subdir: 'sessions' },
+  { agent: 'cursor', subdir: 'projects' },
 ];
 
 function sessionRootSubdir(agent: SessionAgentId): string | null {
@@ -1000,6 +1002,11 @@ async function readRoutineArchiveMeta(
 
   if (agent === 'codex') {
     const result = await readCodexMeta(filePath);
+    return result ? { ...result, meta: decorateRoutineSession(result.meta, info) } : null;
+  }
+
+  if (agent === 'cursor') {
+    const result = await readCursorMeta(filePath);
     return result ? { ...result, meta: decorateRoutineSession(result.meta, info) } : null;
   }
 
@@ -4227,6 +4234,148 @@ function sumKnownNumbers(values: unknown[]): number | null {
 // ---------------------------------------------------------------------------
 // Time range parsing
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Cursor
+// ---------------------------------------------------------------------------
+// Cursor writes the conversation to
+// projects/<encoded-cwd>/agent-transcripts/<uuid>/<uuid>.jsonl and metadata to
+// chats/<workspace-hash>/<uuid>/meta.json. Discovery deliberately starts from
+// transcripts, then joins metadata by UUID: chat directories with no transcript
+// are empty or abandoned sessions and must not become broken zero-event rows.
+// Routine archives may contain only the transcript; those remain browsable with
+// file timestamps and without guessed cwd/title metadata.
+
+/** Incrementally re-scan changed Cursor transcript files and upsert into the DB. */
+async function scanCursorIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
+  const currentVersion = await getCurrentAgentVersion('cursor');
+  const prestat: PreStatEntry[] = [];
+
+  for (const projectsDir of getAgentSessionDirs('cursor', 'projects')) {
+    collectCursorTranscripts(projectsDir, prestat);
+  }
+
+  const changed = filterChangedEntries(prestat);
+  if (changed.length === 0) return;
+
+  onProgress?.({ agent: 'cursor', parsed: 0, total: changed.length });
+
+  const entries: ScanEntry[] = [];
+  const touched: Array<{ filePath: string; scan: ScanStamp }> = [];
+  const seen = new Set<string>();
+  let parsed = 0;
+  for (const { filePath, scan } of changed) {
+    try {
+      const result = readCursorMeta(filePath, currentVersion);
+      if (result && !seen.has(result.meta.id)) {
+        seen.add(result.meta.id);
+        entries.push({ meta: result.meta, content: result.content, scan });
+      } else {
+        touched.push({ filePath, scan });
+      }
+    } catch {
+      touched.push({ filePath, scan });
+    }
+    parsed++;
+    onProgress?.({ agent: 'cursor', parsed, total: changed.length });
+  }
+
+  upsertSessionsBatch(entries);
+  recordScans(touched);
+}
+
+function collectCursorTranscripts(projectsDir: string, out: PreStatEntry[]): void {
+  let projectNames: string[];
+  try {
+    projectNames = fs.readdirSync(projectsDir);
+  } catch {
+    return;
+  }
+
+  for (const projectName of projectNames) {
+    const transcriptsDir = path.join(projectsDir, projectName, 'agent-transcripts');
+    for (const f of walkForFilesWithStat(transcriptsDir, '.jsonl', 100_000)) {
+      const sessionId = path.basename(path.dirname(f.path));
+      if (path.basename(f.path) !== `${sessionId}.jsonl`) continue;
+      out.push({ filePath: f.path, fileMtimeMs: f.mtimeMs, fileSize: f.size });
+    }
+  }
+}
+
+function readCursorChatMeta(filePath: string, sessionId: string): any | undefined {
+  const projectDir = path.dirname(path.dirname(path.dirname(filePath)));
+  const projectsDir = path.dirname(projectDir);
+  const chatsDir = path.join(path.dirname(projectsDir), 'chats');
+  let workspaceHashes: string[];
+  try {
+    workspaceHashes = fs.readdirSync(chatsDir);
+  } catch {
+    return undefined;
+  }
+
+  for (const workspaceHash of workspaceHashes) {
+    const metaPath = path.join(chatsDir, workspaceHash, sessionId, 'meta.json');
+    try {
+      return JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+    } catch {
+      // This workspace hash does not own the session, or its metadata is unreadable.
+    }
+  }
+  return undefined;
+}
+
+function cursorUserText(text: string): string {
+  const query = text.match(/<user_query>\s*([\s\S]*?)\s*<\/user_query>/);
+  return (query?.[1] || text).trim();
+}
+
+/** Parse one Cursor transcript and enrich it with the matching chat meta.json. */
+export function readCursorMeta(
+  filePath: string,
+  currentVersion?: string,
+): { meta: SessionMeta; content: string } | null {
+  const sessionId = path.basename(filePath).replace(/\.jsonl$/, '');
+  if (!sessionId || path.basename(path.dirname(filePath)) !== sessionId) return null;
+
+  const events = parseCursor(filePath);
+  if (events.length === 0) return null;
+
+  const chatMeta = readCursorChatMeta(filePath, sessionId);
+  const stat = safeStatSync(filePath);
+  const createdAtMs = typeof chatMeta?.createdAtMs === 'number' ? chatMeta.createdAtMs : undefined;
+  const updatedAtMs = typeof chatMeta?.updatedAtMs === 'number' ? chatMeta.updatedAtMs : undefined;
+  const timestamp = createdAtMs !== undefined
+    ? new Date(createdAtMs).toISOString()
+    : stat ? stat.mtime.toISOString() : new Date().toISOString();
+  const lastActivity = updatedAtMs !== undefined
+    ? new Date(updatedAtMs).toISOString()
+    : stat ? stat.mtime.toISOString() : timestamp;
+  const cwd = normalizeCwd(typeof chatMeta?.cwd === 'string' ? chatMeta.cwd : '');
+  const userTexts = events
+    .filter((event) => event.type === 'message' && event.role === 'user' && event.content)
+    .map((event) => cursorUserText(event.content!));
+  const firstUserText = userTexts[0];
+  const title = typeof chatMeta?.title === 'string' && chatMeta.title.trim()
+    ? chatMeta.title.trim()
+    : undefined;
+
+  const meta: SessionMeta = {
+    id: sessionId,
+    shortId: deriveShortId(sessionId),
+    agent: 'cursor',
+    timestamp,
+    lastActivity,
+    project: cwd ? path.basename(cwd) : undefined,
+    cwd,
+    filePath,
+    version: resolveSessionVersion('cursor', filePath, undefined, currentVersion),
+    topic: firstUserText ? extractSessionTopic(firstUserText) : undefined,
+    label: title,
+    messageCount: events.filter((event) => event.type === 'message').length,
+  };
+
+  return { meta, content: userTexts.join('\n') };
+}
 
 // ---------------------------------------------------------------------------
 // Kimi

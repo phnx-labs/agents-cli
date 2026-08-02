@@ -418,7 +418,7 @@ Each source answers a different question:
 
 | Source | Question | Coverage | Misses |
 |---|---|---|---|
-| `agents sessions --json` | What local CLI and team-spawned agents have run recently? | The `SESSION_AGENTS` harnesses on this laptop (Claude, Codex, Gemini, Antigravity, OpenCode, OpenClaw, Rush, Hermes, Grok, Kimi, Droid) | Pure-cloud runs with no local file |
+| `agents sessions --json` | What local CLI and team-spawned agents have run recently? | The `SESSION_AGENTS` harnesses on this laptop (Claude, Codex, Gemini, Antigravity, OpenCode, OpenClaw, Rush, Hermes, Grok, Kimi, Droid, Cursor) | Pure-cloud runs with no local file |
 | `agents cloud list --json` | What am I running on remote VMs right now? | Rush Cloud, Codex Cloud, Factory | Local sessions |
 | `agents teams list --json` | What multi-agent DAGs are active? | All team-coordinated runs | Standalone agents |
 

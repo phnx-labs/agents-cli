@@ -113,8 +113,8 @@ SSH access (§7); rendering sessions that no harness produced.
 #### 3.1 Discovery & harness parsing
 
 - **SES-1 (MUST).** The canonical session-capable harness set is
-  `SESSION_AGENTS` — exactly these 11, in display order: `claude, codex, gemini,
-  antigravity, opencode, openclaw, rush, hermes, grok, kimi, droid`
+  `SESSION_AGENTS` — exactly these 12, in display order: `claude, codex, gemini,
+  antigravity, opencode, openclaw, rush, hermes, grok, kimi, droid, cursor`
   (`lib/session/types.ts:14`). Adding harness discovery MUST extend this set (and
   its parser + `dispatchAgentScan` arm), not special-case a caller.
 - **SES-2 (MUST).** Each harness's transcript location + on-disk format is fixed
@@ -377,7 +377,7 @@ normative — a change that widens/narrows a cell is a spec change.
 
 | Behavior | macOS | Linux | Windows |
 |---|---|---|---|
-| Discovery & parsing (all 11 harnesses) | yes | yes | yes |
+| Discovery & parsing (all 12 harnesses) | yes | yes | yes |
 | Process table source | `ps` | `ps` | `Get-CimInstance Win32_Process` (`active.ts:793-799`) |
 | PID-reuse start-time guard | yes | yes | **no** — bare existence (`active.ts:299-300`) |
 | Live-process provenance | `ps eww` | `/proc/<pid>/environ` | **none** (`provenance.ts:196-217`) |
