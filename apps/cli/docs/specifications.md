@@ -604,9 +604,13 @@ access control (that is 1Password/Vault; this tool is device-local first).
   (`lib/secrets/agent.ts:356-363,840-844`; test `agent.test.ts:43-46`).
 - **SEC-15 (MUST NOT).** The `lib/secrets` layer MUST NOT print a secret **value**
   to `console.*`; state changes flow through structured audit events whose
-  payloads MUST NOT carry values — only bundle name + key count
-  (`lib/secrets/bundles.ts` `emit(...)` sites; `lib/secrets/sync.ts:236-237`;
-  `lib/secrets/remote.ts:223`). (The lib layer is *not* fully `console`-free — a
+  payloads MUST NOT carry values — only bundle name + key NAMES + count. Every
+  value read and every unlock grant funnels through the canonical
+  `emitSecretAudit` helper (`lib/secrets/audit.ts`), which emits `secrets.get`
+  (a value was read) or `secrets.unlocked` (a bundle was granted into the broker),
+  value-free, tagged with the resolving agent scope
+  (`lib/secrets/bundles.ts` reader sites; `commands/secrets.ts` `view --reveal` /
+  raw `get` / `unlock`; `lib/secrets/sync.ts`; `lib/secrets/remote.ts`). (The lib layer is *not* fully `console`-free — a
   few operational diagnostics use `console.error` for names/paths only, e.g.
   `lib/secrets/index.ts:500,505`, `lib/secrets/vault-age-helper.ts:41`; the
   invariant is "no value on any stream," not "no console at all.")

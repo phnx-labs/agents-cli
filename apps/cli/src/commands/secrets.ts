@@ -91,6 +91,7 @@ import { getCliVersionFresh } from '../lib/version.js';
 import { readMeta } from '../lib/state.js';
 import { parseDuration } from '../lib/hooks/cache.js';
 import { emit, query } from '../lib/events.js';
+import { emitSecretAudit } from '../lib/secrets/audit.js';
 import { frequentlyPromptedBundles } from '../lib/secrets/unlock-hints.js';
 import { registerCommandGroups, setHelpSections } from '../lib/help.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
@@ -1003,8 +1004,8 @@ export function registerSecretsCommands(program: Command): void {
             }
             const exposed = revealed.size + entries.filter((e) => e.kind === 'literal').length;
             if (exposed > 0) {
-              emit('secrets.get', {
-                module: 'secrets',
+              emitSecretAudit({
+                event: 'secrets.get',
                 bundle: bundle.name,
                 operation: 'view --reveal --json',
                 source: 'reveal',
@@ -1103,8 +1104,8 @@ export function registerSecretsCommands(program: Command): void {
           const literalCount = entries.filter((e) => e.kind === 'literal').length;
           const exposedCount = revealedValues.size + literalCount;
           if (exposedCount > 0) {
-            emit('secrets.get', {
-              module: 'secrets',
+            emitSecretAudit({
+              event: 'secrets.get',
               bundle: bundle.name,
               operation: 'view --reveal',
               source: 'reveal',
@@ -1158,7 +1159,7 @@ export function registerSecretsCommands(program: Command): void {
           const value = getKeychainToken(item);
           // Raw item reads bypass readAndResolveBundleEnv, so audit here too.
           // `item` is the keychain service name, never the value.
-          emit('secrets.get', { module: 'secrets', item, source: 'raw-item', status: 'success' });
+          emitSecretAudit({ event: 'secrets.get', item, source: 'raw-item', status: 'success' });
           process.stdout.write(value.endsWith('\n') ? value : `${value}\n`);
         } catch {
           // Missing item is a normal, quiet outcome for a hook probe: exit 1,
@@ -2273,12 +2274,28 @@ Examples:
             loaded++;
             // Persist a durable session snapshot so the unlock survives a daemon
             // restart / upgrade (and sleep too, with --durable). session-store.ts.
+            const durable = opts.durable ?? secretsAgentDurable();
             saveSession(name, {
               bundle,
               env,
               expiresAt: Date.now() + ttlMs,
-              sleepPersist: opts.durable ?? secretsAgentDurable(),
+              sleepPersist: durable,
               harness,
+            });
+            // Audit the GRANT itself — the broker + durable session now serve this
+            // bundle prompt-free for the whole TTL, to every reader in `harness`
+            // scope. The pre-read above emits `secrets.get`; this records the
+            // longer-lived unlock a `secrets.get` does not capture. Key NAMES only.
+            emitSecretAudit({
+              event: 'secrets.unlocked',
+              bundle: name,
+              operation: 'unlock',
+              source: durable ? 'broker+durable' : 'broker',
+              status: 'success',
+              keyCount: Object.keys(env).length,
+              keys: Object.keys(env).sort(),
+              agent: harness,
+              ttlMs,
             });
             console.log(`${chalk.green('unlocked')} ${chalk.cyan(name)} ${chalk.gray(`(${Object.keys(env).length} keys, ${humanRemaining(Date.now() + ttlMs)})`)}`);
           } else {

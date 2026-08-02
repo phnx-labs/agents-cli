@@ -85,6 +85,7 @@ export type EventType =
   | 'browser.screenshot'
   // Secrets (no values logged)
   | 'secrets.get'
+  | 'secrets.unlocked'
   | 'secrets.set'
   | 'secrets.delete'
   | 'secrets.rename'
@@ -143,7 +144,7 @@ export type EventType =
 
 const AUDIT_EVENTS: ReadonlySet<string> = new Set([
   'command.start', 'command.end',
-  'secrets.get', 'secrets.set', 'secrets.delete', 'secrets.rename',
+  'secrets.get', 'secrets.unlocked', 'secrets.set', 'secrets.delete', 'secrets.rename',
   'teams.create', 'teams.add', 'teams.start', 'teams.complete', 'teams.disband',
   'cloud.dispatch', 'cloud.complete', 'cloud.cancel', 'cloud.message',
   'version.install', 'version.switch', 'version.remove',

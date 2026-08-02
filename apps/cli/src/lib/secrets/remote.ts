@@ -18,7 +18,7 @@
 
 import { sshExec, sshStream, assertValidSshTarget, type SshExecResult } from '../ssh-exec.js';
 import { resolveHost } from '../hosts/registry.js';
-import { emit } from '../events.js';
+import { emitSecretAudit } from './audit.js';
 import { sshTargetFor } from '../hosts/types.js';
 import { buildRemoteAgentsInvocation } from '../hosts/remote-cmd.js';
 import { resolveRemoteOsSync } from '../hosts/remote-os.js';
@@ -221,8 +221,8 @@ export async function remoteResolveEnv(
   // event on the INITIATING host too (values were pulled into this process and
   // injected locally). Covers `secrets exec --host` and `run --secrets b@host`.
   // Values never enter the payload — only the bundle, target host, and count.
-  emit('secrets.get', {
-    module: 'secrets',
+  emitSecretAudit({
+    event: 'secrets.get',
     bundle,
     operation: 'remote resolve',
     source: 'remote',

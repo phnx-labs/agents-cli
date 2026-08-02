@@ -28,7 +28,7 @@ import {
 } from './bundles.js';
 import { rushSyncBackend } from './drivers/rush.js';
 import type { SyncBackend, SyncEnvelope, RemoteBundleSummary, EncryptedEnvelope } from './sync-backend.js';
-import { emit } from '../events.js';
+import { emitSecretAudit } from './audit.js';
 
 // Re-export the envelope + summary types so existing importers of this module
 // keep resolving them from here.
@@ -235,8 +235,8 @@ export async function pushBundle(name: string, opts: PushOptions): Promise<{ upd
   // bundle off-machine — the most sensitive read there is. It bypasses
   // readAndResolveBundleEnv, so audit it explicitly. Values never enter the
   // payload; only the bundle name and how many keys were read.
-  emit('secrets.get', {
-    module: 'secrets',
+  emitSecretAudit({
+    event: 'secrets.get',
     bundle: name,
     operation: 'sync push',
     source: 'sync-push',

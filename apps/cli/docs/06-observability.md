@@ -85,7 +85,7 @@ actors:
 ```bash
 agents events                          # recent activity across everything
 agents events --module teams           # team lifecycle (create / add / disband)
-agents events --module secrets         # every secret accessed or revealed
+agents events --module secrets         # every secret accessed, revealed, or unlocked
 agents events --command "teams create" # a command path — prefix match
 agents events --event teams.disband    # a semantic event: a team torn down
 agents events --event secrets.get --since 7d --json
@@ -97,20 +97,31 @@ prefix (`teams` catches `teams create`); `--event` filters a typed event
 (repeatable); `--since` takes `2h`/`7d`/`4w` or an ISO date. `--json` emits the
 raw records for external consumers.
 
-**Secret-bundle reads are audited at the read, not just at the command.**
-`agents events --module secrets` (or `--event secrets.get`) surfaces every path
-that resolves a secret VALUE out of a bundle — `run --secrets`, `secrets
-exec`/`export`, the MCP `get_secret` tool, `secrets view --reveal`, the raw
-`secrets get <item>`, `secrets push` (which reads the whole bundle to upload
-it), and remote `bundle@host` resolves. (Value reads in adjacent subsystems that
-don't go through the bundle resolver — e.g. `wallet`, profile auth tokens — are
-not part of this `secrets.*` stream.) Each record carries a `source` telling you
-HOW it was read — `keychain` (real Touch-ID read), `agent` (served from the unlocked
-broker), `reveal`, `raw-item`, `sync-push`, or `remote` (with the `host`) — plus
-the `bundle`, `caller`, `keyCount`, and OS-user/host/transport. The resolved
-**value is never written to the log** — only names and counts. Note the event
-log has a 7-day retention (older daily files are pruned), so export what you need
-for long-term records.
+**Every secret access AND unlock is audited at the read, not just at the command.**
+`agents events --module secrets` surfaces two typed events:
+
+- **`secrets.get`** — a secret VALUE was resolved out of a bundle. Every path
+  emits it: `run --secrets`, `secrets exec`/`export`, the MCP `get_secret` tool,
+  `secrets view --reveal`, the raw `secrets get <item>`, `secrets push` (which
+  reads the whole bundle to upload it), and remote `bundle@host` resolves. (Value
+  reads in adjacent subsystems that don't go through the bundle resolver — e.g.
+  `wallet`, profile auth tokens — are not part of this `secrets.*` stream.)
+- **`secrets.unlocked`** — `agents secrets unlock <bundle>` granted the bundle into
+  the secrets broker (and the durable session), so it then reads prompt-free for
+  the grant TTL. This records the longer-lived grant a per-read `secrets.get` does
+  not, carrying `ttlMs` and the `agent` scope (`*` = a global grant).
+
+Both are audit-level and **not** milestones, so they land in `agents events` and
+the persisted audit log without cluttering the curated `agents activity` /
+`agents feed`. Every record carries a `source` telling you HOW it was read or
+granted — `keychain` (real Touch-ID read), `agent` (served from the unlocked
+broker), `session` (durable snapshot after a restart), `reveal`, `raw-item`,
+`sync-push`, `remote` (with the `host`), `broker`/`broker+durable` (an unlock
+grant) — plus the `bundle`, `agent` (the resolving harness scope), `caller`,
+`keyCount`, key NAMES, and OS-user/host/session/transport. The resolved **value is
+never written to the log** — only names and counts. Note the event log has a
+7-day retention (older daily files are pruned), so export what you need for
+long-term records.
 
 ### Audit Viewer (`agents logs audit`)
 

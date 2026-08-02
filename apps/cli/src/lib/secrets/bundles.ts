@@ -54,6 +54,7 @@ import {
   vaultSetItem,
 } from './vault.js';
 import { emit } from '../events.js';
+import { emitSecretAudit } from './audit.js';
 import { readMeta, getHelpersDir } from '../state.js';
 import { assertNameActiveInResourceProfile, filterNamesForActiveResourceProfile } from '../resource-profiles.js';
 import { agentGetSync, agentAutoLoadSync, agentGetMetaSync, agentAutoLoadMetaSync, agentEvictSync, secretsAgentAutoEnabled, secretsHoldMs } from './agent.js';
@@ -1330,13 +1331,14 @@ export function readAndResolveBundleEnv(
       // the first cache-populating run.
       const filtered = filterAgentHitBySubsetAndExpiry(hit, opts);
       stampLastUsed(filtered.bundle);
-      emit('secrets.get', {
-        module: 'secrets',
+      emitSecretAudit({
+        event: 'secrets.get',
         bundle: name,
         operation: opts.caller,
         status: 'success',
         source: 'agent',
         keyCount: Object.keys(filtered.env).length,
+        agent: opts.agent,
       });
       return filtered;
     }
@@ -1357,13 +1359,14 @@ export function readAndResolveBundleEnv(
       // MADE in (resolved.harness), never the asking scope — re-warming a global
       // grant as `claude` would silently narrow it for every other harness.
       agentAutoLoadSync(name, session.bundle, session.env, Math.max(1, session.expiresAt - Date.now()), resolved.harness);
-      emit('secrets.get', {
-        module: 'secrets',
+      emitSecretAudit({
+        event: 'secrets.get',
         bundle: name,
         operation: opts.caller,
         status: 'success',
         source: 'session',
         keyCount: Object.keys(filtered.env).length,
+        agent: opts.agent,
       });
       return filtered;
     }
@@ -1492,8 +1495,8 @@ export function readAndResolveBundleEnv(
   keychainKeys.sort();
 
   const emitReadAudit = (status: 'success' | 'error', err?: unknown) => {
-    emit('secrets.get', {
-      module: 'secrets',
+    emitSecretAudit({
+      event: 'secrets.get',
       bundle: bundle.name,
       operation: opts.caller,
       status,
@@ -1501,6 +1504,7 @@ export function readAndResolveBundleEnv(
       keys,
       keychainKeys,
       kindCounts,
+      agent: opts.agent,
       error: err instanceof Error ? err.message : (err ? String(err) : undefined),
     });
   };

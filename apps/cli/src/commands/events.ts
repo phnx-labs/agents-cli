@@ -85,7 +85,7 @@ export function registerEventsCommand(program: Command): void {
     .description('Read the unified event stream (operational + agent activity)')
     .option('--module <name>', 'Only events from this group (e.g. teams, secrets, activity)')
     .option('--command <path>', 'Only this command path — prefix match (e.g. "teams create")')
-    .option('--event <type>', 'Only this typed event (repeatable, e.g. secrets.get, pr.opened)', collect, [])
+    .option('--event <type>', 'Only this typed event (repeatable, e.g. secrets.get, secrets.unlocked, pr.opened)', collect, [])
     .option('--agent <name>', 'Only events tagged with this agent')
     .option('--since <time>', 'Only events newer than this (e.g. 2h, 7d, or ISO date)')
     .option('--audit', 'Operational events only (skip agent activity)')
