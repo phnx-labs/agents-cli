@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   buildExecCommand,
   resolveInteractive,
@@ -138,9 +138,22 @@ describe('buildExecCommand', () => {
       expect(planCmd).not.toContain('--dangerously-skip-permissions');
     });
 
-    it('cursor edit produces no flags (edit is cursor default)', () => {
-      const cmd = buildExecCommand(opts({ agent: 'cursor', mode: 'edit' }));
+    it('cursor headless edit trusts the selected workspace without using -f', () => {
+      const cmd = buildExecCommand(opts({ agent: 'cursor', mode: 'edit', headless: true }));
+      expect(cmd).toContain('--trust');
       expect(cmd).not.toContain('-f');
+    });
+
+    it('cursor interactive edit preserves Cursor workspace trust prompting', () => {
+      const cmd = buildExecCommand(opts({
+        agent: 'cursor',
+        mode: 'edit',
+        prompt: undefined,
+        interactive: true,
+      }));
+      expect(cmd).not.toContain('--trust');
+      expect(cmd).not.toContain('-f');
+      expect(cmd).toEqual(['cursor-agent']);
     });
 
     it('cursor skip produces -f', () => {
@@ -1236,6 +1249,34 @@ describe('resolveMode', () => {
 });
 
 describe('resolveHeadlessMode (RUSH-1810)', () => {
+  it('warns exactly once when one run builds argv more than once', () => {
+    const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const warningState = { emitted: false };
+    const options = opts({ agent: 'cursor', mode: 'plan', modeWarningState: warningState });
+    buildExecCommand(options);
+    buildExecCommand(options);
+    expect(write.mock.calls.filter(([line]) => String(line).includes('read-only plan mode'))).toHaveLength(1);
+    write.mockRestore();
+  });
+
+  it('suppresses degradation warnings for a quiet run', () => {
+    const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    buildExecCommand(opts({
+      agent: 'cursor',
+      mode: 'plan',
+      modeWarningState: { emitted: false, quiet: true },
+    }));
+    expect(write).not.toHaveBeenCalled();
+    write.mockRestore();
+  });
+
+  it('warns when codex auto resolves to edit', () => {
+    const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    expect(resolveHeadlessMode('codex', 'auto', false)).toBe('edit');
+    expect(write).toHaveBeenCalledWith("[agents] codex has no 'auto' mode; using 'edit'.\n");
+    write.mockRestore();
+  });
+
   it('downgrades headless plan to auto for kimi (headlessPlan:false → kimi keeps auto)', () => {
     expect(AGENTS.kimi.capabilities.headlessPlan).toBe(false);
     expect(resolveHeadlessMode('kimi', 'plan', false)).toBe('auto');

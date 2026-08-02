@@ -143,24 +143,39 @@ export function resolveHeadlessMode(
   requested: Mode,
   interactive: boolean,
   warningContext?: string,
+  warningState?: ModeWarningState,
 ): Mode {
   const mode = resolveMode(agent, requested);
-  if (requested === 'plan' && mode !== 'plan') {
+  const warn = (message: string): void => {
+    if (warningState?.quiet || warningState?.emitted) return;
+    process.stderr.write(message);
+    if (warningState) warningState.emitted = true;
+  };
+  if (mode !== requested) {
     const subject = warningContext ? `${warningContext}: ` : '';
-    const limitation = agent === 'cursor'
-      ? "cursor's read-only plan mode is not enabled in this build"
-      : `${agent} has no read-only 'plan' mode`;
-    process.stderr.write(
-      `[agents] ${subject}${limitation}; ` +
-      `running '${mode}' (writable) instead${agent === 'cursor' ? ' (RUSH-2101)' : ''}. ` +
-      `Pass --mode ${mode} to silence this.\n`,
-    );
+    if (requested === 'plan') {
+      const limitation = agent === 'cursor'
+        ? "cursor's read-only plan mode is not enabled in this build"
+        : `${agent} has no read-only 'plan' mode`;
+      warn(
+        `[agents] ${subject}${limitation}; ` +
+        `running '${mode}' (writable) instead${agent === 'cursor' ? ' (RUSH-2101)' : ''}. ` +
+        `Pass --mode ${mode} to silence this.\n`,
+      );
+    } else {
+      warn(`[agents] ${subject}${agent} has no '${requested}' mode; using '${mode}'.\n`);
+    }
   }
   if (!interactive && mode === 'plan' && AGENTS[agent].capabilities.headlessPlan === false) {
-    process.stderr.write(`warning: ${agent} has no headless plan mode; running --mode auto instead\n`);
+    warn(`warning: ${agent} has no headless plan mode; running --mode auto instead\n`);
     return resolveMode(agent, 'auto');
   }
   return mode;
+}
+
+export interface ModeWarningState {
+  emitted: boolean;
+  quiet?: boolean;
 }
 
 /**
@@ -196,6 +211,8 @@ export interface ExecOptions {
   headless?: boolean;
   /** Prefix for mode-degradation warnings emitted by shared headless paths. */
   modeWarningContext?: string;
+  /** Shared across command previews/spawns/loop iterations so degradation warns once. */
+  modeWarningState?: ModeWarningState;
   json?: boolean;
   model?: string;
   addDirs?: string[];
@@ -583,9 +600,7 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     base: ['cursor-agent'],
     promptFlag: '-p',
     modeFlags: {
-      // A configured headless run is the workspace trust decision. Keep this
-      // narrower than --yolo/-f, which also bypasses permission checks.
-      edit: ['--trust'],
+      edit: [],
       skip: ['-f'],
     },
     jsonFlags: ['--output-format', 'stream-json'],
@@ -837,6 +852,7 @@ export function buildExecCommand(options: ExecOptions): string[] {
     normalizeMode(options.mode),
     interactive,
     options.modeWarningContext,
+    options.modeWarningState,
   );
   const modeFlags = template.modeFlags[resolvedMode];
   if (!modeFlags) {
@@ -845,6 +861,11 @@ export function buildExecCommand(options: ExecOptions): string[] {
     throw new Error(
       `Internal error: ${options.agent} declares '${resolvedMode}' in capabilities.modes but has no entry in AGENT_COMMANDS.modeFlags.${resolvedMode}.`,
     );
+  }
+  if (options.agent === 'cursor' && resolvedMode === 'edit' && !interactive) {
+    // A configured headless run is the workspace trust decision. Keep this
+    // narrower than --yolo/-f, which also bypasses permission checks.
+    cmd.push('--trust');
   }
   // Codex's workspace-write sandbox blocks $HOME (verified against the live CLI
   // and OpenAI's sandbox docs: writable roots extend scope "without removing the

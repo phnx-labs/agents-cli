@@ -130,7 +130,7 @@ describe('cursor loop routine mode warning', () => {
         },
       });
       expect(write).toHaveBeenCalledWith(
-        expect.stringContaining("[agents] routine 'cursor-loop-warning-test': cursor's read-only plan mode is not enabled in this build"),
+        expect.stringContaining("[agents] routine cursor-loop-warning-test: cursor's read-only plan mode is not enabled in this build"),
       );
     } finally {
       write.mockRestore();
@@ -287,8 +287,18 @@ describe('buildRoutineSpawnEnv', () => {
       { HOME: '/tmp/cursor-overlay', PATH: '/usr/bin', XDG_CONFIG_HOME: '/real/config' },
       'cursor',
       undefined,
+      undefined,
+      '/tmp/cursor-overlay',
     );
     expect(env.XDG_CONFIG_HOME).toBe(path.join('/tmp/cursor-overlay', '.config'));
+  });
+  it('preserves Cursor XDG_CONFIG_HOME when no sandbox overlay exists', () => {
+    const env = buildRoutineSpawnEnv(
+      { HOME: '/home/real-user', PATH: '/usr/bin', XDG_CONFIG_HOME: '/opt/custom-cfg' },
+      'cursor',
+      undefined,
+    );
+    expect(env.XDG_CONFIG_HOME).toBe('/opt/custom-cfg');
   });
   it('pins CLAUDE_CONFIG_DIR for a versioned claude launch and preserves TZ', () => {
     const env = buildRoutineSpawnEnv(

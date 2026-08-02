@@ -2203,8 +2203,8 @@ export function registerRunCommand(program: Command): void {
       // safest native mode (modes[0], typically edit). That covers both the
       // implicit default and an explicit `--mode plan`, so multi-agent
       // scripts can pass a uniform plan flag without per-agent branching.
-      // Elevation is never silent: we warn on stderr (yellow when the user
-      // explicitly asked for plan; gray for the implicit default / auto).
+      // Mode degradation is never silent: buildExecCommand emits one stderr
+      // warning for the requested-to-resolved transition unless --quiet is set.
       // `skip` still hard-fails when unsupported — pretending we bypassed
       // permissions would be unsafe.
       const modeIsDefault = modeSource === 'default';
@@ -2216,13 +2216,7 @@ export function registerRunCommand(program: Command): void {
         console.error(chalk.red((err as Error).message));
         process.exit(1);
       }
-      if (resolvedMode !== requestedMode) {
-        // Preserve the requested mode for buildExecCommand. Its shared
-        // resolveHeadlessMode call owns degradation warnings for agents run,
-        // teams, loops, and routines. Use resolvedMode only for local guards.
-      } else {
-        mode = resolvedMode as ExecMode;
-      }
+      mode = resolvedMode as ExecMode;
 
       // Fail fast on the headless-plan stall footgun: a slash command run
       // headless under the implicit default 'plan' mode hangs forever at
@@ -2341,7 +2335,7 @@ export function registerRunCommand(program: Command): void {
         version,
         prompt,
         interactive: options.interactive || forceInteractive,
-        mode,
+        mode: requestedMode,
         effort,
         cwd: options.cwd,
         model,
@@ -2352,6 +2346,7 @@ export function registerRunCommand(program: Command): void {
         name: options.name,
         resume: resumeNative,
         verbose: options.verbose,
+        modeWarningState: { emitted: false, quiet: options.quiet },
         // --raw, --no-tmux (commander negation → options.tmux === false), and
         // --disable-tmux all bypass the interactive tmux wrapper. AGENTS_NO_TMUX=1
         // does the same via the env check in exec.ts.

@@ -405,6 +405,11 @@ read-only plan mode exists in the CLI but is not enabled in the agents-cli
 capability registry yet (RUSH-2101), so `mode: plan` currently warns and runs the
 registry-selected writable mode.
 
+The same trust rule applies to any headless `agents run cursor "<prompt>"` launch:
+agents-cli passes `--trust` because the caller selected both a working directory
+and a non-interactive prompt. Interactive `agents run cursor` launches preserve
+Cursor's own workspace-trust prompt and never add `--trust`.
+
 ### Pinning an account (avoid the OAuth-rotation revocation storm)
 
 Left unpinned, a `claude` routine selects its account by the default `balanced`

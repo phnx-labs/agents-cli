@@ -185,7 +185,7 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string): stri
   if (config.agent === 'cursor') {
     // cursor-agent supports --plan, but the capability registry has not been
     // upgraded yet. RUSH-2101 tracks adding that read-only mode after PR #1721.
-    const cursorMode = resolveHeadlessMode('cursor', mode, false, `routine '${config.name}'`);
+    const cursorMode = resolveHeadlessMode('cursor', mode, false, `routine ${config.name}`);
     if (cursorMode === 'skip') {
       cmd.push('-f');
     } else {
@@ -494,6 +494,7 @@ export function buildRoutineSpawnEnv(
   agent: AgentId,
   version: string | undefined,
   timezone?: string,
+  overlayHome?: string,
 ): Record<string, string> {
   const execEnv = buildExecEnv({
     agent,
@@ -523,10 +524,10 @@ export function buildRoutineSpawnEnv(
   // provisioned box does. Drop it here so a routine always uses the login of the
   // machine it runs on.
   delete out.CLAUDE_CODE_OAUTH_TOKEN;
-  if (agent === 'cursor' && baseEnv.HOME) {
+  if (agent === 'cursor' && overlayHome) {
     // prepareJobHome links this host's Cursor auth file here. Pin XDG_CONFIG_HOME
     // to the overlay so an ambient value cannot bypass the routine sandbox.
-    out.XDG_CONFIG_HOME = path.join(baseEnv.HOME, '.config');
+    out.XDG_CONFIG_HOME = path.join(overlayHome, '.config');
   }
   if (timezone) out.TZ = timezone;
   return out;
@@ -765,7 +766,7 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
 
   // Loop path: delegate to runLoop (same driver as `agents run --loop` / workflow loop:).
   if (config.loop) {
-    const spawnEnv = buildRoutineSpawnEnv(baseEnv, effectiveAgent, primaryVersion, config.timezone);
+    const spawnEnv = buildRoutineSpawnEnv(baseEnv, effectiveAgent, primaryVersion, config.timezone, overlayHome);
     const execOptions: ExecOptions = {
       agent: effectiveAgent,
       // Routine-supported self-updating CLIs (Cursor/Droid) use one global
@@ -777,7 +778,8 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
       env: spawnEnv,
       json: true,
       headless: true,
-      modeWarningContext: `routine '${config.name}'`,
+      modeWarningContext: `routine ${config.name}`,
+      modeWarningState: { emitted: false },
       ...(config.config?.model ? { model: config.config.model as string } : {}),
       ...(config.allow?.dirs ? {
         addDirs: config.allow.dirs
@@ -838,7 +840,7 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
           if (config.timezone) e.TZ = config.timezone;
           return e;
         })()
-      : buildRoutineSpawnEnv(baseEnv, attemptAgent, attemptVersion, config.timezone);
+      : buildRoutineSpawnEnv(baseEnv, attemptAgent, attemptVersion, config.timezone, overlayHome);
 
     // Remaining timeout budget shared across failover attempts.
     const elapsed = Date.now() - Date.parse(meta.startedAt);
@@ -1283,7 +1285,7 @@ export async function executeJobDetached(config: JobConfig, hooks?: RoutineHooks
         return e;
       })()
     // Non-command path only: config.agent is always set here (command/workflow branch earlier).
-    : buildRoutineSpawnEnv(baseEnv, config.agent!, version, config.timezone);
+    : buildRoutineSpawnEnv(baseEnv, config.agent!, version, config.timezone, overlayHome);
 
   const effectiveAgent: AgentId = config.workflow ? 'claude' : config.agent!;
 

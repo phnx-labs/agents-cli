@@ -19,7 +19,7 @@ import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import {
   addAlwaysFreshRepo,
   computeNetMode,
@@ -31,6 +31,40 @@ import {
   runAccountPickerConflicts,
 } from './exec.js';
 import { isHostPinned, recordScannedKeys } from '../lib/devices/known-hosts.js';
+
+describe('degraded run governance mode', () => {
+  it('records the resolved writable mode in the audit chain', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'exec-audit-mode-'));
+    const binDir = path.join(root, 'bin');
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.mkdirSync(path.join(root, '.agents', '.system', '.git'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.agents', 'agents.yaml'), 'agents: {}\n');
+    const cursor = path.join(binDir, process.platform === 'win32' ? 'cursor-agent.cmd' : 'cursor-agent');
+    fs.writeFileSync(
+      cursor,
+      process.platform === 'win32'
+        ? '@echo {"type":"result","subtype":"success","is_error":false,"result":"OK"}\r\n'
+        : '#!/bin/sh\nprintf \'{"type":"result","subtype":"success","is_error":false,"result":"OK"}\\n\'\n',
+      { mode: 0o755 },
+    );
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [path.resolve(import.meta.dirname, '..', 'index.ts'), 'run', 'cursor', 'probe', '--mode', 'plan', '--quiet', '--cwd', root],
+        {
+          cwd: path.resolve(import.meta.dirname, '..', '..'),
+          env: { ...process.env, HOME: root, PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}` },
+          encoding: 'utf8',
+        },
+      );
+      expect(result.status, result.stderr).toBe(0);
+      const lines = fs.readFileSync(path.join(root, '.agents', '.history', 'audit', 'log.jsonl'), 'utf8').trim().split('\n');
+      expect(JSON.parse(lines.at(-1)!)).toMatchObject({ agent: 'cursor', mode: 'edit', outcome: 'ok', exit: 0 });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
 
 const KEY = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI0000000000000000000000000000000000000000000';
 

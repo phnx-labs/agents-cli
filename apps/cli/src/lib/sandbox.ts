@@ -134,17 +134,23 @@ export function generateCursorConfig(overlayHome: string): void {
   if (process.platform === 'win32') {
     // File symlinks need Developer Mode on Windows. A same-volume hard link
     // shares the credential inode without copying its contents to another host.
-    fs.linkSync(realAuth, overlayAuth);
+    try {
+      fs.linkSync(realAuth, overlayAuth);
+    } catch { /* cross-volume or link creation refused: Cursor will fail auth loudly */ }
   } else {
     fs.symlinkSync(realAuth, overlayAuth);
   }
 
   // Setting XDG_CONFIG_HOME makes Cursor look for cli-config.json beside auth.json.
-  // This file contains preferences, not credentials, and remains linked to the
-  // interactive CLI's current settings for the duration of the run.
+  // This file carries account identity (authId, displayName, email, userId) as
+  // well as preferences, so it must remain linked rather than copied.
   const realCliConfig = path.join(resolveRealHome(), '.cursor', 'cli-config.json');
   if (fs.existsSync(realCliConfig)) {
-    createLink(realCliConfig, path.join(overlayCursorDir, 'cli-config.json'));
+    const overlayCliConfig = path.join(overlayCursorDir, 'cli-config.json');
+    try {
+      if (process.platform === 'win32') fs.linkSync(realCliConfig, overlayCliConfig);
+      else fs.symlinkSync(realCliConfig, overlayCliConfig);
+    } catch { /* cross-volume or link creation refused: Cursor will fail auth loudly */ }
   }
 }
 
