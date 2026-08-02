@@ -10,6 +10,7 @@ import chalk from 'chalk';
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawnSync } from 'node:child_process';
+import { getCliLaunch } from '../lib/cli-entry.js';
 import { getHistoryDir, updateMeta } from '../lib/state.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 
@@ -98,11 +99,8 @@ function printBackendNotes(backend: SetupSecretsBackend): void {
 }
 
 function runAgentsSubcommand(args: string[]): void {
-  const entry = process.argv[1];
-  if (!entry) throw new Error('Cannot locate the current agents entrypoint.');
-  const command = entry.endsWith('.ts') ? 'tsx' : process.execPath;
-  const commandArgs = entry.endsWith('.ts') ? [entry, ...args] : [entry, ...args];
-  const res = spawnSync(command, commandArgs, { stdio: 'inherit', env: process.env });
+  const launch = getCliLaunch(args);
+  const res = spawnSync(launch.command, launch.args, { stdio: 'inherit', env: process.env });
   if ((res.status ?? 1) !== 0) {
     throw new Error(`agents ${args.join(' ')} failed with exit ${res.status ?? 1}.`);
   }
