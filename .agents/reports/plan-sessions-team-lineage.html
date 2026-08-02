@@ -1,0 +1,556 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan · Team lineage + interactive --device</title>
+<style>
+  :root{
+    --bg:#0a0a0a; --panel:#111312; --panel2:#161a18; --ink:#e7ece8; --dim:#8b938c;
+    --line:#26302a; --accent:#a3e635; --amber:#f5c451; --red:#ff6b6b; --cyan:#5ad6c0;
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  }
+  :root[data-theme="light"]{
+    --bg:#faf9f6; --panel:#ffffff; --panel2:#f2f4f0; --ink:#1a1c1a; --dim:#5c655c;
+    --line:#e2e6df; --accent:#4d7c0f; --amber:#b45309; --red:#dc2626; --cyan:#0e7490;
+  }
+  :root[data-theme="light"] .fig{background:#0e120f;border-color:#26302a}
+  :root[data-theme="light"] .fig figcaption{color:#8b938c}
+  :root[data-theme="light"] .fig figcaption b{color:#e7ece8}
+
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1000px;margin:0 auto;padding:56px 28px 120px}
+  header.hero{border-bottom:1px solid var(--line);padding-bottom:28px;margin-bottom:40px}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--accent);margin:0 0 14px}
+  h1{font-size:34px;line-height:1.15;margin:0 0 12px;font-weight:700;letter-spacing:-.01em}
+  h1 .accent{color:var(--accent)}
+  .sub{color:var(--dim);font-size:17px;max-width:70ch;margin:0}
+  .meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+  .chip{font-family:var(--mono);font-size:11.5px;color:var(--dim);border:1px solid var(--line);
+    border-radius:999px;padding:4px 11px;background:var(--panel)}
+  .chip b{color:var(--ink);font-weight:500}
+  .prov{margin-top:10px}
+  .prov .chip{font-size:11px;opacity:.82}
+  .prov .chip b{color:var(--cyan)}
+  h2{font-size:23px;margin:52px 0 8px;letter-spacing:-.01em;scroll-margin-top:20px}
+  h2 .n{font-family:var(--mono);color:var(--accent);font-size:15px;margin-right:10px;opacity:.85}
+  h3{font-size:16.5px;margin:26px 0 8px;color:var(--ink)}
+  p{margin:10px 0}
+  .lead{color:var(--dim)}
+  code{font-family:var(--mono);font-size:.88em;background:var(--panel2);border:1px solid var(--line);
+    border-radius:5px;padding:1.5px 6px;color:var(--cyan)}
+  a{color:var(--accent);text-decoration:none;border-bottom:1px solid transparent}
+  a:hover{border-bottom-color:var(--accent)}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:18px 0}
+  .fig{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:26px 22px 18px;margin:22px 0;overflow-x:auto}
+  .fig figcaption{font-family:var(--mono);font-size:12px;color:var(--dim);margin-top:14px;text-align:center}
+  .fig figcaption b{color:var(--ink)}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:760px){.grid2{grid-template-columns:1fr}}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);font-weight:500}
+  td code{font-size:.85em}
+  .tag{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:6px;font-weight:600;white-space:nowrap}
+  .tag.a{background:rgba(163,230,53,.12);color:var(--accent);border:1px solid rgba(163,230,53,.3)}
+  .tag.b{background:rgba(90,214,192,.1);color:var(--cyan);border:1px solid rgba(90,214,192,.28)}
+  .tag.c{background:rgba(245,196,81,.1);color:var(--amber);border:1px solid rgba(245,196,81,.28)}
+  ul{margin:10px 0;padding-left:22px}li{margin:6px 0}
+  .callout{border-left:3px solid var(--accent);background:var(--panel2);border-radius:0 10px 10px 0;
+    padding:14px 18px;margin:18px 0}
+  .callout.warn{border-left-color:var(--amber)}
+  .callout .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--accent);display:block;margin-bottom:5px}
+  .callout.warn .lbl{color:var(--amber)}
+  .toc{font-family:var(--mono);font-size:13px;display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:18px}
+  .toc a{color:var(--dim);border:0}.toc a:hover{color:var(--accent)}
+  pre{font-family:var(--mono);font-size:13px;background:#0c0f0d;border:1px solid var(--line);
+    border-radius:12px;padding:16px 18px;overflow-x:auto;line-height:1.55;color:#e7ece8}
+  pre .c{color:#8b938c}pre .k{color:#a3e635}pre .s{color:#5ad6c0}pre .r{color:#ff6b6b}
+  pre .m{color:#f5c451}
+  .foot{margin-top:60px;padding-top:22px;border-top:1px solid var(--line);color:var(--dim);
+    font-family:var(--mono);font-size:12px}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;font-family:var(--mono);font-size:11.5px;color:var(--dim);
+    justify-content:center;margin-top:6px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .sw{width:11px;height:11px;border-radius:3px;display:inline-block}
+  .themebtn{position:fixed;top:16px;right:16px;z-index:9;font-family:var(--mono);font-size:12px;
+    color:var(--dim);background:var(--panel);border:1px solid var(--line);border-radius:999px;
+    padding:6px 13px;cursor:pointer}
+  .themebtn:hover{color:var(--accent);border-color:var(--accent)}
+</style>
+</head>
+<body>
+<button class="themebtn" onclick="tt()" id="tb">◐ light</button>
+<script>
+  var r=document.documentElement;
+  function set(t){r.setAttribute('data-theme',t);document.getElementById('tb').textContent=(t==='light'?'◑ dark':'◐ light')}
+  set(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');
+  function tt(){set(r.getAttribute('data-theme')==='light'?'dark':'light')}
+</script>
+<div class="wrap">
+
+<header class="hero">
+  <p class="kicker">agents-cli · sessions · plan</p>
+  <h1>Show which session spawned which team, and make<br><span class="accent">--device open the real browser</span></h1>
+  <p class="sub">Both links already exist in the code and are thrown away. <code>spawnedTeam</code> is
+  detected at scan time and dropped at the SQLite boundary; the teammate's <code>meta.json</code> is
+  opened and its team name and orchestrator id discarded. <code>--device</code> short-circuits into a
+  raw SSH stdout dump before the interactive browser is ever considered.</p>
+  <div class="meta">
+    <span class="chip"><b>9</b>&nbsp;files touched</span>
+    <span class="chip"><b>1</b>&nbsp;schema migration (v20&nbsp;→&nbsp;v21)</span>
+    <span class="chip"><b>0</b>&nbsp;new detection logic</span>
+    <span class="chip">status: <b>awaiting go</b></span>
+  </div>
+  <div class="meta prov">
+    <span class="chip">harness: <b>claude</b></span>
+    <span class="chip">agent: <b>opus-5</b></span>
+    <span class="chip">host: <b>yosemite-s0</b></span>
+    <span class="chip">session: <b>42064bd8</b></span>
+    <span class="chip"><b>2026-08-02</b></span>
+  </div>
+  <nav class="toc">
+    <a href="#s1">01 · what you'll see</a>
+    <a href="#s2">02 · the dropped link</a>
+    <a href="#s3">03 · persist spawned_team</a>
+    <a href="#s4">04 · --device routing</a>
+    <a href="#s5">05 · render + navigate</a>
+    <a href="#s6">06 · rejected approach</a>
+    <a href="#s7">07 · verification</a>
+  </nav>
+</header>
+
+<!-- ============ 01 ============ -->
+<h2 id="s1"><span class="n">01</span>What you'll see</h2>
+<p class="lead">The two screenshots you sent are the before. Here is the after, in the same listing.</p>
+
+<p>Default listing — the session that spawned a team carries a <code>team:</code> badge, so you can
+spot an orchestrator without expanding anything:</p>
+<pre><span class="c"># agents sessions</span>
+21805f5f  claude  2.1.186  agents-cli   Good question, and the honest…  PR#1628  <span class="k">team:redesign</span>   1h
+1d418ba5  claude  2.1.186  muqsitnawaz  Fix VS Codeium agent auto-lab…  PR#1530                 9h</pre>
+
+<p>Press <code>c</code> (or pass <code>--teams</code>) and each teammate row names its team and handle
+instead of a bare id, so the 3813 hidden rows stop being anonymous:</p>
+<pre><span class="c"># agents sessions --teams</span>
+019fc07d  codex   0.146.0  resume-pick  <span class="k">[redesign/resume-picker]</span> ## Apps…  <span class="m">wt:resume-picker</span>  2h
+019fc07e  codex   0.146.0  short-id     <span class="k">[redesign/short-id]</span> ## Apps (Co…     <span class="m">wt:short-id</span>       3h</pre>
+
+<p>Press <code>t</code> to cycle the team filter — the orchestrator and every teammate it spawned,
+in one view. That is the question "which agent spun up which team", answered:</p>
+<pre><span class="c"># Sessions   device:all · agent:all · all dirs · window:30d · teams · </span><span class="k">team:redesign</span>
+21805f5f  claude  2.1.186  agents-cli   Good question, and the honest…  <span class="k">team:redesign</span>   1h
+019fc07d  codex   0.146.0  resume-pick  <span class="k">[redesign/resume-picker]</span> ## Apps…   <span class="m">wt:resume-picker</span>  2h
+019fc07e  codex   0.146.0  short-id     <span class="k">[redesign/short-id]</span> ## Apps (Co…      <span class="m">wt:short-id</span>       3h
+
+<span class="c">preview pane, orchestrator row:</span>
+Team:    spawned `redesign` — 4 teammates · 2 working · 1 done · 1 failed
+<span class="c">preview pane, teammate row:</span>
+Team:    redesign · teammate resume-picker (edit) · spawned by 21805f5f</pre>
+
+<p>And <code>agents sessions --device zion</code> opens that same browser — preview pane, hotkeys,
+search — instead of the flat SSH dump.</p>
+
+<!-- ============ 02 ============ -->
+<h2 id="s2"><span class="n">02</span>The link is computed, then dropped</h2>
+<p class="lead">Nothing new needs to be detected. The transcript reducer already reads the
+<code>agents teams create</code> command off the session and carries the team name through the
+incremental serialize/hydrate round-trip. One hop is missing.</p>
+
+<figure class="fig">
+<svg viewBox="0 0 920 250" role="img" aria-label="spawnedTeam data flow from transcript to listing, broken at the SQLite boundary">
+  <defs>
+    <marker id="ok" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0 L8 4.5 L0 9 z" fill="#a3e635"/></marker>
+    <marker id="bad" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0 L8 4.5 L0 9 z" fill="#ff6b6b"/></marker>
+  </defs>
+
+  <text x="20" y="30" fill="#8b938c" font-size="11.5" font-family="monospace">exists today</text>
+  <rect x="20" y="44" width="150" height="44" rx="8" fill="#161a18" stroke="#26302a"/>
+  <text x="95" y="63" fill="#e7ece8" font-size="11.5" text-anchor="middle" font-family="monospace">transcript</text>
+  <text x="95" y="78" fill="#8b938c" font-size="10" text-anchor="middle" font-family="monospace">teams create X</text>
+
+  <path d="M170 66 L212 66" stroke="#a3e635" fill="none" marker-end="url(#ok)"/>
+  <rect x="212" y="44" width="160" height="44" rx="8" fill="#161a18" stroke="#26302a"/>
+  <text x="292" y="63" fill="#e7ece8" font-size="11.5" text-anchor="middle" font-family="monospace">detectSpawnedTeam</text>
+  <text x="292" y="78" fill="#8b938c" font-size="10" text-anchor="middle" font-family="monospace">discover.ts:2923</text>
+
+  <path d="M372 66 L414 66" stroke="#a3e635" fill="none" marker-end="url(#ok)"/>
+  <rect x="414" y="44" width="160" height="44" rx="8" fill="#161a18" stroke="#26302a"/>
+  <text x="494" y="63" fill="#e7ece8" font-size="11.5" text-anchor="middle" font-family="monospace">scan + hydrate</text>
+  <text x="494" y="78" fill="#8b938c" font-size="10" text-anchor="middle" font-family="monospace">:3088 :3211 :3272</text>
+
+  <path d="M574 66 L616 66" stroke="#a3e635" fill="none" marker-end="url(#ok)"/>
+  <rect x="616" y="44" width="160" height="44" rx="8" fill="#161a18" stroke="#26302a"/>
+  <text x="696" y="63" fill="#e7ece8" font-size="11.5" text-anchor="middle" font-family="monospace">SessionMeta</text>
+  <text x="696" y="78" fill="#8b938c" font-size="10" text-anchor="middle" font-family="monospace">:1290 :1319 :1639</text>
+
+  <path d="M696 88 L696 122" stroke="#ff6b6b" fill="none" marker-end="url(#bad)"/>
+  <rect x="596" y="122" width="200" height="46" rx="8" fill="#1a1010" stroke="#ff6b6b"/>
+  <text x="696" y="141" fill="#ff6b6b" font-size="11.5" text-anchor="middle" font-family="monospace">upsertSession — DROPPED</text>
+  <text x="696" y="157" fill="#8b938c" font-size="10" text-anchor="middle" font-family="monospace">no spawned_team column</text>
+
+  <path d="M596 145 L520 145" stroke="#ff6b6b" fill="none" stroke-dasharray="4 3"/>
+  <text x="470" y="149" fill="#ff6b6b" font-size="11.5" text-anchor="middle" font-family="monospace">✕</text>
+  <rect x="230" y="122" width="220" height="46" rx="8" fill="#161a18" stroke="#26302a"/>
+  <text x="340" y="141" fill="#8b938c" font-size="11.5" text-anchor="middle" font-family="monospace">rowToMeta → listing</text>
+  <text x="340" y="157" fill="#8b938c" font-size="10" text-anchor="middle" font-family="monospace">always undefined</text>
+
+  <text x="20" y="205" fill="#8b938c" font-size="11.5" font-family="monospace">this plan</text>
+  <rect x="596" y="192" width="200" height="40" rx="8" fill="#12160f" stroke="#a3e635"/>
+  <text x="696" y="216" fill="#a3e635" font-size="11.5" text-anchor="middle" font-family="monospace">+ spawned_team TEXT (v21)</text>
+  <path d="M596 212 L452 212" stroke="#a3e635" fill="none" marker-end="url(#ok)"/>
+  <rect x="230" y="192" width="220" height="40" rx="8" fill="#12160f" stroke="#a3e635"/>
+  <text x="340" y="216" fill="#a3e635" font-size="11.5" text-anchor="middle" font-family="monospace">team:redesign badge</text>
+</svg>
+<div class="legend">
+  <span><span class="sw" style="background:#a3e635"></span>works today / this plan</span>
+  <span><span class="sw" style="background:#ff6b6b"></span>the one broken hop</span>
+</div>
+<figcaption><b>One missing column.</b> Detection, incremental state, and the meta assignment are all
+already written. <code>db.ts</code> never persists the field, so no caller has ever seen a non-<code>undefined</code>
+<code>SessionMeta.spawnedTeam</code>.</figcaption>
+</figure>
+
+<div class="callout">
+  <span class="lbl">free regression net</span>
+  <code>incremental-scan-e2e.test.ts:89</code> already lists <code>spawnedTeam</code> in
+  <code>PARITY_FIELDS</code> and compares DB rows — it has been passing vacuously
+  (<code>undefined === undefined</code>). Adding the column makes that assertion real.
+</div>
+
+<!-- ============ 03 ============ -->
+<h2 id="s3"><span class="n">03</span>Persist <code>spawned_team</code> (schema v20 → v21)</h2>
+<p class="lead">Entirely inside <code>lib/session/db.ts</code>. <code>discover.ts</code> is untouched —
+the value is already on the meta that reaches the writer.</p>
+
+<table>
+  <thead><tr><th>Edit</th><th>Where</th></tr></thead>
+  <tbody>
+    <tr><td><span class="tag b">edit</span></td><td><code>SCHEMA_VERSION = 21</code> — <code>db.ts:24</code></td></tr>
+    <tr><td><span class="tag a">new</span></td><td><code>spawned_team TEXT,</code> in <code>CREATE TABLE sessions</code>, after <code>ticket_id</code> — <code>:81</code></td></tr>
+    <tr><td><span class="tag a">new</span></td><td><code>spawned_team: string | null;</code> on <code>SessionRow</code> — <code>:177</code></td></tr>
+    <tr><td><span class="tag b">edit</span></td><td>upsert column list, <code>@</code>-bindings, <code>ON CONFLICT … SET</code> — <code>:865 :874 :915</code></td></tr>
+    <tr><td><span class="tag b">edit</span></td><td><code>spawned_team: meta.spawnedTeam ?? null</code> in <b>both</b> row builders — <code>:1038</code> and <code>:1171</code></td></tr>
+    <tr><td><span class="tag b">edit</span></td><td><code>spawnedTeam: row.spawned_team ?? undefined</code> in <code>rowToMeta</code> — <code>:1376</code></td></tr>
+    <tr><td><span class="tag a">new</span></td><td>the <code>fromVersion &lt; 21</code> migration block, after <code>:459</code></td></tr>
+    <tr><td><span class="tag a">new</span></td><td><code>spawnedTeam</code> predicate on <code>QueryOptions</code> + <code>WHERE</code> builder (<code>:1518</code> is the template), so <code>--in-team</code> filters in SQL</td></tr>
+  </tbody>
+</table>
+
+<div class="callout warn">
+  <span class="lbl">the migration must wipe both ledgers</span>
+  The <code>is_team_origin</code> precedent at <code>db.ts:260-268</code> predates <code>dir_ledger</code>.
+  Copy the v17/v20 form instead (<code>:418</code>, <code>:458</code>). With only <code>scan_ledger</code>
+  wiped, <code>collectChangedFilesInLeafDirs</code> sees <code>dirUnchanged</code> for every non-live-root
+  dir (<code>discover.ts:779-781</code>) and computes <code>hot</code> from the table just emptied
+  (<code>:792-798</code>) — archived dirs are never re-parsed and stay NULL forever.
+</div>
+
+<pre><span class="k">if</span> (fromVersion &lt; 21) {
+  <span class="k">const</span> cols = db.prepare(<span class="s">`PRAGMA table_info(sessions)`</span>).all() <span class="k">as</span> Array&lt;{ name: string }&gt;;
+  <span class="k">if</span> (!cols.some(c =&gt; c.name === <span class="s">'spawned_team'</span>))
+    db.exec(<span class="s">`ALTER TABLE sessions ADD COLUMN spawned_team TEXT`</span>);
+  <span class="c">// both ledgers — scan_ledger alone leaves archived dirs unparsed forever</span>
+  db.exec(<span class="s">`DELETE FROM scan_ledger; DELETE FROM dir_ledger;`</span>);
+}</pre>
+
+<p><b>Known one-time cost.</b> The forced rescan is slow on a large index, and the fan-out kills a peer
+at <code>REMOTE_TIMEOUT_MS = 12_000</code> (<code>remote-list.ts:30</code>), reporting it "unreachable".
+The first post-upgrade <code>--device &lt;box&gt;</code> may therefore come back empty. Covered by the
+unreachable-vs-empty distinction in §04 and a CHANGELOG line.</p>
+
+<h3>The teammate half</h3>
+<p><code>TeamOrigin</code> (<code>types.ts:98-103</code>) gains <code>team</code> and <code>parentSessionId</code>.
+<code>classifyTeamSession</code> (<code>team-filter.ts:43-46</code>) already opens the file holding both —
+return <code>meta.task_name</code> and <code>meta.parent_session_id</code> instead of discarding them.</p>
+
+<div class="callout warn">
+  <span class="lbl">teamTag is currently dead code in the browser</span>
+  <code>filterTeamSessions</code> runs only at <code>sessions.ts:1430</code> and
+  <code>sessions-resume.ts:125</code> — never on the browser's pool. So <code>teamTag</code> inside
+  <code>formatPickerLabel</code> (<code>:2134</code>) never fires. Wire it into <code>fetchRawPool</code>
+  <b>only when <code>f.teams</code> is on</b>, and via one <code>readdir</code> of the teams-agents dir
+  intersected with the pool ids — not the per-row <code>existsSync</code> + <code>readFileSync</code>
+  <code>classifyTeamSession</code> does today. A 500-row pool must not cost 1000 syscalls per reload.
+</div>
+
+<!-- ============ 04 ============ -->
+<h2 id="s4"><span class="n">04</span><code>--device</code> routing</h2>
+<p class="lead">The browser already scopes its fan-out to named hosts and <code>--active --device X</code>
+already opens it. Only one early return stands in the way.</p>
+
+<figure class="fig">
+<svg viewBox="0 0 920 280" role="img" aria-label="control flow of agents sessions --device, today versus proposed">
+  <defs>
+    <marker id="a2" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0 L8 4.5 L0 9 z" fill="#a3e635"/></marker>
+    <marker id="d2" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0 L8 4.5 L0 9 z" fill="#8b938c"/></marker>
+  </defs>
+
+  <text x="20" y="26" fill="#ff6b6b" font-size="11.5" font-family="monospace">TODAY</text>
+  <rect x="20" y="40" width="150" height="40" rx="8" fill="#161a18" stroke="#26302a"/>
+  <text x="95" y="64" fill="#e7ece8" font-size="11.5" text-anchor="middle" font-family="monospace">--device zion</text>
+  <path d="M170 60 L214 60" stroke="#ff6b6b" fill="none" marker-end="url(#bad)"/>
+  <polygon points="214,60 300,36 386,60 300,84" fill="#1a1010" stroke="#ff6b6b"/>
+  <text x="300" y="57" fill="#ff6b6b" font-size="10.5" text-anchor="middle" font-family="monospace">host &amp;&amp; !active</text>
+  <text x="300" y="70" fill="#8b938c" font-size="9.5" text-anchor="middle" font-family="monospace">sessions.ts:1220</text>
+  <path d="M386 60 L440 60" stroke="#ff6b6b" fill="none" marker-end="url(#bad)"/>
+  <rect x="440" y="40" width="190" height="40" rx="8" fill="#1a1010" stroke="#ff6b6b"/>
+  <text x="535" y="64" fill="#ff6b6b" font-size="11.5" text-anchor="middle" font-family="monospace">raw SSH stdout dump</text>
+  <text x="660" y="64" fill="#8b938c" font-size="10.5" font-family="monospace">no TUI, no preview</text>
+
+  <line x1="20" y1="108" x2="900" y2="108" stroke="#26302a" stroke-dasharray="3 4"/>
+
+  <text x="20" y="136" fill="#a3e635" font-size="11.5" font-family="monospace">PROPOSED</text>
+  <rect x="20" y="150" width="150" height="40" rx="8" fill="#161a18" stroke="#26302a"/>
+  <text x="95" y="174" fill="#e7ece8" font-size="11.5" text-anchor="middle" font-family="monospace">--device zion</text>
+  <path d="M170 170 L214 170" stroke="#a3e635" fill="none" marker-end="url(#a2)"/>
+  <polygon points="214,170 310,142 406,170 310,198" fill="#12160f" stroke="#a3e635"/>
+  <text x="310" y="166" fill="#a3e635" font-size="10.5" text-anchor="middle" font-family="monospace">browserEligible()</text>
+  <text x="310" y="179" fill="#8b938c" font-size="9.5" text-anchor="middle" font-family="monospace">shared predicate</text>
+
+  <path d="M406 170 L470 170" stroke="#a3e635" fill="none" marker-end="url(#a2)"/>
+  <rect x="470" y="150" width="200" height="40" rx="8" fill="#12160f" stroke="#a3e635"/>
+  <text x="570" y="174" fill="#a3e635" font-size="11.5" text-anchor="middle" font-family="monospace">runSessionBrowser</text>
+  <text x="690" y="168" fill="#8b938c" font-size="10.5" font-family="monospace">previews, hotkeys,</text>
+  <text x="690" y="181" fill="#8b938c" font-size="10.5" font-family="monospace">already host-scoped</text>
+
+  <path d="M310 198 L310 234" stroke="#8b938c" fill="none" marker-end="url(#d2)"/>
+  <rect x="180" y="234" width="270" height="36" rx="8" fill="#161a18" stroke="#26302a"/>
+  <text x="315" y="256" fill="#8b938c" font-size="10.5" text-anchor="middle" font-family="monospace">--json · piped · query · &gt;1 host · --cloud</text>
+  <path d="M450 252 L512 252" stroke="#8b938c" fill="none" marker-end="url(#d2)"/>
+  <text x="600" y="256" fill="#8b938c" font-size="10.5" text-anchor="middle" font-family="monospace">legacy stream, unchanged</text>
+</svg>
+<div class="legend">
+  <span><span class="sw" style="background:#a3e635"></span>new interactive path</span>
+  <span><span class="sw" style="background:#8b938c"></span>preserved legacy path</span>
+  <span><span class="sw" style="background:#ff6b6b"></span>today's unconditional short-circuit</span>
+</div>
+<figcaption><b>One predicate, two call sites.</b> Extract the inline eligibility test at
+<code>sessions.ts:1294-1306</code> into one exported function so the bare-listing gate and the
+<code>--device</code> gate cannot drift apart.</figcaption>
+</figure>
+
+<p>The extracted predicate must add three conditions the current inline version lacks:</p>
+<ul>
+  <li><code>process.env.AGENTS_SESSIONS_LOCAL !== '1'</code> — the peer-side recursion guard. The
+  <code>--active</code> gate checks it (<code>:1259</code>); the bare gate relies on the implicit
+  invariant that peers are always invoked with <code>--json</code>. Make it explicit.</li>
+  <li><code>!options.cloud</code> — <code>:1220</code> currently returns <i>before</i> the cloud branch
+  at <code>:1284</code>. Once <code>--device</code> falls through, <code>--device box --cloud</code>
+  would reach <code>runCloudSessions</code>, which ignores the host scope.</li>
+  <li><code>(options.host?.length ?? 0) &lt;= 1</code> — see the multi-host row below.</li>
+</ul>
+
+<p><code>bareBrowserSeed</code> (<code>sessions-browser.ts:163</code>) gains <code>host?: string[]</code>
+and must force <code>projectScope: 'all'</code> whenever a host scope is present:
+<code>applyFilters</code> filters on <code>r.cwd.startsWith(process.cwd() + '/')</code>
+(<code>:355-358</code>) and no peer cwd matches, so the <code>'repo'</code> default would render an
+empty list. Make the <code>p</code> hotkey (<code>:487</code>) a no-op under a host scope — returning
+the same reference is already a no-op (<code>picker.ts:617</code>).</p>
+
+<h3>Four latent bugs in <code>fetchRawPool</code> this makes reachable</h3>
+<table>
+  <thead><tr><th>Bug</th><th>Why</th><th>Fix</th></tr></thead>
+  <tbody>
+    <tr><td><code>--device &lt;self&gt;</code> sweeps the whole fleet</td>
+      <td><code>remoteHostsToDial</code> returns <code>[]</code> for self-only (<code>sessions.ts:1011</code>) but <code>gatherRemoteList</code> branches on <code>hosts.length &gt; 0</code> (<code>remote-list.ts:124</code>), so <code>[]</code> falls to the <b>else</b> and dials every online device</td>
+      <td>copy the guard <code>gatherActiveSessions</code> already has at <code>sessions.ts:1042</code></td></tr>
+    <tr><td><code>--local --device box</code> → silent empty list</td>
+      <td><code>shouldIncludeLocal</code> false <i>and</i> fan-out skipped</td>
+      <td>reject the combination at the routing site with a clear message</td></tr>
+    <tr><td>offline device → "No sessions match this filter."</td>
+      <td>the browser writes to stderr (<code>remote-list.ts:103</code>) and swallows (<code>sessions-browser.ts:235</code>); inquirer's full-screen redraw scrolls it away. <code>runRemoteSessions</code> today prints <code>formatUnreachable</code> (<code>remote.ts:166</code>), replays an offline cache (<code>:181</code>), and sets <code>exitCode = 1</code> (<code>:264</code>)</td>
+      <td>thread per-host outcome out of <code>fetchRawPool</code> into <code>headerFor</code>/<code>emptyMessage</code>; fall back to <code>runRemoteSessions</code> when <b>every</b> named host failed</td></tr>
+    <tr><td>multi-host breaks the <code>y</code> round-trip</td>
+      <td><code>BrowserFilter.device</code> is one string (<code>:51</code>) and <code>browserFilterToArgv</code> emits one (<code>:112</code>), while <code>canonicalSessionsCommand</code> handles multi-host (<code>sessions.ts:1137</code>) — the copied command would silently lose the scope</td>
+      <td>keep &gt;1 host on the legacy stream; multi-host is a scripted use anyway</td></tr>
+  </tbody>
+</table>
+
+<div class="callout warn">
+  <span class="lbl">a query plus --device stays on the legacy stream</span>
+  The peer runs FTS over its content index. The browser's <code>s</code> search is a deliberate cheap
+  substring test over visible fields only (<code>sessions-browser.ts:78-82</code>) — routing a query
+  there would silently weaken it. Say so in the help text and point at the in-browser <code>s</code> key.
+</div>
+
+<h3>Richer previews for remote rows</h3>
+<p><code>formatMetaOnlyBody</code> (<code>sessions-picker.ts:233-244</code>) shows topic plus todo tally
+only. Every <code>SessionMeta</code> field survives the JSON hop, so add the todo <b>item list</b>
+(<code>renderTodos</code>, <code>:609</code>), <code>recentDirectoriesTouched</code>, and a
+<b>one-line summary</b> of <code>plan</code> — it is full ExitPlanMode markdown
+(<code>types.ts:174-183</code>), not a path, so render "plan · N lines", never the blob. Skip
+<code>label</code> and <code>model</code>: <code>formatHeader</code> already emits them.</p>
+
+<div class="callout warn">
+  <span class="lbl">security, same PR</span>
+  <code>sanitizeMeta</code> (<code>sessions-picker.ts:62-90</code>) covers <code>topic</code>,
+  <code>label</code>, <code>cwd</code>, <code>todos</code> — but <b>not</b> <code>plan</code> or
+  <code>recentDirectoriesTouched</code>, exactly the fields being added. For a remote row that content
+  is peer-supplied JSON parsed with no sanitization (<code>remote-list.ts:59-74</code>), so a terminal
+  escape in a peer's plan text would reach your TTY. Add both to <code>sanitizeMeta</code>.
+  While here: <code>directoriesTouched</code> (<code>:478-483</code>) reads
+  <code>session.dirsTouched</code>, a field written <b>nowhere</b> in the repo — point it at the real
+  <code>recentDirectoriesTouched</code>.
+</div>
+
+<!-- ============ 05 ============ -->
+<h2 id="s5"><span class="n">05</span>Render the badge, navigate the link</h2>
+
+<p><b>Do not add a column.</b> <code>formatPickerLabel</code> reserves
+<code>terminalWidth() - gutter - 43 - machine - host - ticket - wt - ssh - when</code>
+(<code>:2160-2167</code>); at 120 cols with machine+host+ticket on, the topic is already ~32 cells and
+<code>Math.max(16, …)</code> starts clamping — rows would wrap. Use the <code>sshSeg</code>/<code>sshW</code>
+pattern (<code>:2131-2133</code>): its own colored segment before the topic, width subtracted from the
+topic budget, because <code>renderTopicCell</code> strips ANSI and re-whitens every slice
+(<code>:1956-1996</code>).</p>
+
+<table>
+  <thead><tr><th>Surface</th><th>Change</th></tr></thead>
+  <tbody>
+    <tr><td>orchestrator row</td><td>a <code>teamSeg</code>/<code>teamW</code> pair rendering <code>team:&lt;name&gt;</code>, name capped ~10 chars</td></tr>
+    <tr><td>teammate row</td><td>extend <code>teamTag</code> (<code>sessions.ts:1555</code>) to <code>[&lt;team&gt;/&lt;handle&gt;]</code>; drop <code>mode</code> from the row (it can push past 30 cells against a 16-cell topic floor) and keep it in the preview</td></tr>
+    <tr><td>flat + tree rows</td><td>mirror both — <code>flatSessionRow</code> (<code>:1583</code>, reserve <code>:1612</code>), <code>treeSessionRow</code> (<code>:1637</code>, reserve <code>:1655</code>)</td></tr>
+    <tr><td>preview pane</td><td>a <code>Team:</code> line in <code>formatCompactPreview</code> (<code>:377-385</code> is the adjacent template)</td></tr>
+  </tbody>
+</table>
+
+<div class="callout warn">
+  <span class="lbl">read teammate counts the cheap way</span>
+  Use <code>loadTeamAgentSnapshots</code> (<code>teams.ts:1087-1100</code>) — one <code>readdir</code>
+  plus N <code>readFile</code>, no manager, no GC, no process polling. Never
+  <code>listByParentSession</code>: it goes through <code>listAll()</code> →
+  <code>readNewEvents()</code> + <code>updateStatusFromProcess()</code> per teammate
+  (<code>agents.ts:2357-2360</code>), including SSH round-trips for remote ones.
+</div>
+
+<h3>Navigation</h3>
+<ul>
+  <li><code>--in-team &lt;name&gt;</code> on <code>agents sessions</code>. <b>Not <code>--team</code></b> —
+  a one-letter difference from the existing <code>--teams</code> (<code>sessions.ts:3113</code>) with
+  different arity is a footgun.</li>
+  <li><code>team?: string</code> on <code>BrowserFilter</code> plus a <code>t</code> hotkey cycling teams
+  present in the pool (mirrors the <code>a</code>/<code>d</code> cycles at <code>:485-486</code>), with a
+  <code>team:&lt;name&gt;</code> chip in <code>headerFor</code> (<code>:373</code>).</li>
+  <li>Emit it from <b>both</b> canonical-command twins or <code>y</code> and <code>--print-cmd</code>
+  diverge: <code>browserFilterToArgv</code> (<code>sessions-browser.ts:107</code>) <b>and</b>
+  <code>canonicalSessionsCommand</code> (<code>sessions.ts:1131</code>).</li>
+  <li><code>agents teams status --parent-session &lt;id&gt;</code>: register the flag at
+  <code>teams.ts:1874-1879</code>, pass it at <code>:1897</code>. <code>handleStatus</code> already
+  accepts it (<code>api.ts:396</code>) and calls <code>listByParentSession</code>
+  (<code>agents.ts:2379</code>) — two lines for existing, unreachable functionality. Note in
+  <code>--help</code> that it only resolves teammates newer than the 7-day GC.</li>
+  <li><code>agents teams list</code> gains a <b>spawned by</b> column sourced from the new
+  <code>querySessions({ spawnedTeam })</code> — authoritative and historical, so no new registry
+  field is needed.</li>
+</ul>
+
+<h3>Docs the reviewer will block without</h3>
+<ul>
+  <li><code>docs/specifications.md:243</code> <b>SES-22</b> ("MUST run the peer's own
+  <code>agents sessions</code> … and stream stdout back") and <code>:249</code> <b>SES-23</b>
+  ("MUST degrade … <code>process.exitCode=1</code>") need an explicit carve-out for the interactive
+  case, which JSON-merges and renders locally.</li>
+  <li><code>:374</code> <b>COMPAT-4</b> ("forwards every other flag verbatim") no longer holds for the
+  browser path — <code>--limit</code>, <code>--unmanaged</code>, <code>--no-live</code> are dropped
+  (the browser hardcodes <code>--limit 500</code>, <code>sessions-browser.ts:230</code>).</li>
+  <li><code>docs/05-sessions.md:302-323</code> describes the stdout-streaming behavior.</li>
+  <li><code>CHANGELOG.md</code> fragment: new column + forced rescan, the <code>--device</code> behavior
+  change, <code>--in-team</code>, <code>--parent-session</code>.</li>
+</ul>
+
+<!-- ============ 06 ============ -->
+<h2 id="s6"><span class="n">06</span>Rejected: recording the orchestrator on the team registry</h2>
+<p class="lead">Recorded so it isn't re-proposed. The obvious approach is
+<code>TeamMeta.spawned_by_session</code> plus a one-time backfill from teammate
+<code>meta.json</code> files. Three disqualifiers.</p>
+
+<table>
+  <thead><tr><th>Property</th><th>Registry + backfill</th><th>DB column</th></tr></thead>
+  <tbody>
+    <tr><td>Survives GC</td>
+      <td><span class="tag c">no</span> teammate dirs are deleted after 7 days (<code>teams/agents.ts:1464-1467</code>, <code>cleanupAgeDays = 7</code> at <code>:1364</code>) — a backfill writing <code>null</code> for older teams freezes the wrong answer permanently</td>
+      <td><span class="tag a">yes</span> the transcript is the source; a rescan re-derives it</td></tr>
+    <tr><td>Crosses the SSH hop</td>
+      <td><span class="tag c">no</span> <code>registry.json</code> is per-machine under <code>.history/</code> (<code>registry.ts:4-8</code>) — it cannot resolve a peer's orchestrator, and post-§04 the browser is explicitly cross-machine</td>
+      <td><span class="tag a">yes</span> <code>serializeSessionsJson</code> strips only <code>_matchedTerms</code>/<code>_bm25Score</code>/<code>_remote</code> (<code>sessions.ts:842-843</code>)</td></tr>
+    <tr><td>Complete coverage</td>
+      <td><span class="tag c">no</span> <code>AGENTS_SESSION_ID</code> is pre-minted only for Claude via <code>agents run</code> (<code>exec.ts:1389-1391</code>) — a human typing <code>agents teams create</code>, or any Codex/Grok/Gemini orchestrator, records nothing</td>
+      <td><span class="tag a">yes</span> reads the command off the transcript, harness-agnostic</td></tr>
+    <tr><td>Read cost on the listing path</td>
+      <td><span class="tag c">high</span> a JSON read plus a cross-process lock write (<code>registry.ts:82-85</code>) on a path the browser re-runs per hotkey</td>
+      <td><span class="tag a">zero</span> one more column in a row already <code>SELECT</code>ed</td></tr>
+  </tbody>
+</table>
+
+<!-- ============ 07 ============ -->
+<h2 id="s7"><span class="n">07</span>Verification</h2>
+<p class="lead">Extend existing tests, don't add new files. Then prove it on the real fleet with the
+installed binary — not <code>./bin</code>.</p>
+
+<table>
+  <thead><tr><th>File</th><th>What</th></tr></thead>
+  <tbody>
+    <tr><td><code>__tests__/db.migrations.test.ts:46</code></td><td>v21 from the v20 template: drop the column, set <code>schema_version=20</code>, reopen, assert <code>PRAGMA table_info</code></td></tr>
+    <tr><td><code>__tests__/incremental-scan-e2e.test.ts:88</code></td><td>make the vacuous parity real — transcript with <code>agents teams create x</code> → scan → <code>getSessionById(...).spawnedTeam === 'x'</code>, plus an incremental append proving serialize/hydrate still carries it</td></tr>
+    <tr><td><code>team-filter.test.ts:38</code></td><td>fixtures gain <code>task_name</code>/<code>parent_session_id</code>; the <code>isTeamOrigin</code>-only fallback at <code>:72</code> must still return <code>{handle}</code> with no team</td></tr>
+    <tr><td><code>sessions-browser.test.ts:153</code></td><td><code>bareBrowserSeed</code>: 1 host ⇒ device seeded + <code>projectScope:'all'</code>; 2 hosts ⇒ no device, still <code>'all'</code>; 0 hosts ⇒ unchanged. The <code>browserFilterToArgv</code> order test at <code>:57</code> gains <code>--in-team</code></td></tr>
+    <tr><td><code>__tests__/sessions-columns.test.ts:102</code></td><td>the ssh-segment tests are the exact template for the colored <code>team:</code> segment; add a width test that the topic doesn't wrap with machine+host+ticket+team all on</td></tr>
+    <tr><td><code>sessions-picker.test.ts</code></td><td>enriched remote preview renders dirs/todo-items/plan-summary, <b>and</b> a <code>\x1b[</code> in <code>plan</code>/<code>recentDirectoriesTouched</code> is stripped</td></tr>
+    <tr><td><span class="tag a">new</span> beside <code>sessions-resolve-fleet.test.ts:187</code></td><td>the extracted predicate directly: <code>--json</code>, non-TTY, each render flag, a query, <code>--cloud</code>, <code>AGENTS_SESSIONS_LOCAL=1</code>, &gt;1 host ⇒ all false</td></tr>
+    <tr><td><code>__tests__/remote-list.test.ts</code></td><td><code>gatherRemoteList(args, [])</code> must not sweep — pin the guard at the <code>fetchRawPool</code> call site</td></tr>
+  </tbody>
+</table>
+
+<h3>End-to-end on this fleet</h3>
+<pre><span class="c"># 1. the browser opens, previews render, hotkeys work — screenshot this against your dump</span>
+agents sessions --device zion
+
+<span class="c"># 2. an offline box reads "unreachable", not "no matches"</span>
+agents sessions --device gpu-box
+
+<span class="c"># 3. legacy paths untouched</span>
+agents sessions --device zion --json | jq length
+agents sessions --device zion | head
+
+<span class="c"># 4. must NOT fan out to the fleet (watch for per-host stderr lines)</span>
+agents sessions --device $(hostname -s)
+
+<span class="c"># 5. lineage, end to end, from inside this session</span>
+agents teams create lineage-probe
+agents teams add lineage-probe claude <span class="s">"reply with exactly PROBEOK"</span> --name probe --mode plan
+agents teams start lineage-probe
+agents sessions --all                          <span class="c"># this session shows team:lineage-probe</span>
+agents sessions --teams --in-team lineage-probe <span class="c"># orchestrator + [lineage-probe/probe]</span>
+agents teams status --parent-session &lt;this session id&gt;
+
+<span class="c"># 6. the badge crosses the SSH hop — the property the registry approach lacked</span>
+agents sessions --device yosemite-s0 --json | jq <span class="s">'.[].spawnedTeam'</span>
+
+<span class="c"># 7. works on history, not just new writes</span>
+agents teams list                              <span class="c"># spawned by populated for a pre-existing team</span></pre>
+
+<div class="callout">
+  <span class="lbl">the takeaway</span>
+  No new detection is written anywhere. The team link is added by persisting a column that is
+  already computed, and the interactive <code>--device</code> is unlocked by gating one early return
+  on a predicate that already exists. The bulk of the work is the four latent
+  <code>fetchRawPool</code> bugs and the spec amendments that honesty requires.
+</div>
+
+<div class="foot">
+  agents-cli · plan mode · rendered by plan-render &nbsp;·&nbsp;
+  claude · opus-5 · yosemite-s0 · session 42064bd8 · 2026-08-02 &nbsp;·&nbsp;
+  next: <span style="color:var(--accent)">go / reshape</span>
+</div>
+
+</div>
+</body>
+</html>
