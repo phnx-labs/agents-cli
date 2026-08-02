@@ -215,7 +215,6 @@ function createScanProgressTracker(
 }
 
 const PICKER_RECENT_COUNT = 15;
-const PICKER_POOL_LIMIT = 200;
 /**
  * The `--limit` default, shared with its `.option()` registration. Commander fills
  * the default in, so `options.limit` is never falsy — code that wants to know
@@ -1252,7 +1251,16 @@ async function renderSessionPreview(
 }
 
 /** Main action handler for `agents sessions`. Routes to picker, table, or single-session render. */
-async function sessionsAction(query: string | undefined, options: SessionsOptions): Promise<void> {
+async function sessionsAction(
+  query: string | undefined,
+  options: SessionsOptions,
+  /**
+   * Where commander got `--limit` from: 'cli'/'env' when the user supplied it,
+   * 'default' when it filled in its own. Truthiness can't tell those apart,
+   * because the default arrives as a string like any typed value.
+   */
+  limitSource?: string
+): Promise<void> {
   // Explicit --query is interchangeable with the positional; it's how you search
   // for text that collides with a subcommand name (e.g. `sessions --query go`).
   query = query ?? options.query;
@@ -1465,8 +1473,11 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
   // own scope, the way --all does, unless the caller set an explicit --limit.
   const wantsWholeTeam = !!options.inTeam;
   // `--limit` has a commander default, so an untouched flag still arrives as a
-  // string; only a value different from that default counts as user intent.
-  const userSetLimit = options.limit !== undefined && options.limit !== DEFAULT_LIMIT;
+  // string and truthiness can't tell it from a typed one. Commander records where
+  // each value came from, which is the only signal that distinguishes an explicit
+  // `--limit 50` from no flag at all — a script asking for 50 must get 50, not the
+  // whole-team pool.
+  const userSetLimit = limitSource === 'cli' || limitSource === 'env';
   const limit = wantsOverview
     ? OVERVIEW_POOL_LIMIT
     : parseInt(
@@ -1684,7 +1695,11 @@ function teamTag(session: SessionMeta): string {
  * predicate behind `querySessions({ spawnedTeam })`.
  */
 export function matchesTeam(session: SessionMeta, team: string): boolean {
-  const want = team.trim().toLowerCase();
+  // The needle is peer-derived in the browser: `f.team` comes off the team cycle,
+  // which is built from rows another machine sent. Guard it the same way as the
+  // fields it is compared against, so a non-string can't throw out of a filter
+  // that runs over every row.
+  const want = safeTeamText(team)?.trim().toLowerCase();
   if (!want) return true;
   return (
     safeTeamText(session.spawnedTeam)?.toLowerCase() === want ||
@@ -3352,13 +3367,13 @@ export function registerSessionsCommands(program: Command): void {
     `,
   });
 
-  sessionsCmd.action(async (query: string | undefined, options: SessionsOptions) => {
+  sessionsCmd.action(async (query: string | undefined, options: SessionsOptions, command: Command) => {
     if ((options as { browser?: boolean }).browser) {
       // Alias for `agents browser sessions`: a profile positional narrows to one profile.
       runBrowserSessions({ profile: query, json: options.json });
       return;
     }
-    await sessionsAction(query, options);
+    await sessionsAction(query, options, command?.getOptionValueSource?.('limit'));
   });
 
   registerSessionsTailCommand(sessionsCmd);

@@ -59,6 +59,9 @@ export interface BrowserFilter {
   window?: string;
 }
 
+/** Pool size when a team filter is active; one team's rows can sit anywhere. */
+const WHOLE_TEAM_POOL_LIMIT = 5000;
+
 /** Ordered window cycle for the `W` key. `undefined` = all time. */
 const WINDOW_CYCLE: (string | undefined)[] = [undefined, '1d', '7d', '30d'];
 
@@ -175,6 +178,13 @@ export function bareBrowserSeed(opts: {
   // 'repo' scope would filter every fetched row away and render an empty list.
   // A host scope therefore implies all-directories, exactly as --all does.
   const scoped = (opts.host?.length ?? 0) > 0;
+  // --in-team asks for ONE team's lineage, and a team's teammates run in their own
+  // `.agents/worktrees/<slug>/` — a different cwd from ours — while the team itself
+  // may be older than the default window. Both defaults would hide exactly the rows
+  // the flag exists to surface, so it widens the scope the way --all does. The flag
+  // path does this too (sessions.ts `wantsWholeTeam`); the browser is the one a
+  // human actually reaches, so it must not be the one that stays narrow.
+  const wholeTeam = !!opts.inTeam;
   return {
     teams: !!opts.teams,
     agent: opts.agent,
@@ -183,8 +193,8 @@ export function bareBrowserSeed(opts: {
     device: opts.host?.length === 1 ? normalizeDeviceSeed(opts.host[0]) : undefined,
     team: opts.inTeam,
     // --all maxes every non-status filter: all dirs AND all-time. --since wins.
-    projectScope: opts.all || scoped ? 'all' : 'repo',
-    window: opts.since ?? (opts.all ? undefined : '30d'),
+    projectScope: opts.all || scoped || wholeTeam ? 'all' : 'repo',
+    window: opts.since ?? (opts.all || wholeTeam ? undefined : '30d'),
   };
 }
 
@@ -233,7 +243,10 @@ async function fetchRawPool(
         cwd: process.cwd(),
         since,
         excludeTeamOrigin: !f.teams,
-        limit: 500,
+        // A team filter reaches back past the usual browse window, so the pool it
+        // draws from has to as well — otherwise the newest 500 rows decide which
+        // teams exist.
+        limit: f.team ? WHOLE_TEAM_POOL_LIMIT : 500,
         sortBy: 'timestamp',
       })
     : [];

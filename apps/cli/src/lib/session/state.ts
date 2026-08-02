@@ -334,6 +334,10 @@ const TEAM_VALUE_FLAGS = [
  * `\S+` alone stops at the first space, leaving the rest of the phrase to be read
  * as the positional team name (`… -d "sessions lineage" my-team` detected
  * `lineage`). Quotes are matched as a unit so the whole value is consumed.
+ *
+ * A value containing an ESCAPED quote (`-d "say \"hi\" now"`) stops the quoted
+ * branch early and the match then fails outright — which is the intended failure
+ * direction: no team detected rather than a wrong one.
  */
 const FLAG_VALUE = String.raw`(?:"[^"\n]*"|'[^'\n]*'|\S+)`;
 

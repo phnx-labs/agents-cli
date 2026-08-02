@@ -159,3 +159,17 @@ describe('peer-supplied team data is neither trusted nor rendered raw', () => {
     expect(line).not.toContain('\x1b]0;');
   });
 });
+
+describe('matchesTeam guards its needle, not just the row', () => {
+  it('does not throw when the team argument is not a string', () => {
+    // In the browser the needle is `f.team`, taken off a cycle built from rows
+    // another machine sent — so it is peer-derived exactly like the fields it is
+    // compared against, and it runs over every row in the pool.
+    expect(() => matchesTeam(meta({ spawnedTeam: 'redesign' }), 42 as unknown as string)).not.toThrow();
+    expect(matchesTeam(meta({ spawnedTeam: 'redesign' }), 42 as unknown as string)).toBe(true);
+  });
+
+  it('treats an all-whitespace needle as no filter', () => {
+    expect(matchesTeam(meta(), '   ')).toBe(true);
+  });
+});

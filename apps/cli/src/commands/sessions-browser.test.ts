@@ -201,6 +201,20 @@ describe('bareBrowserSeed — an explicit --device scope', () => {
     expect(bareBrowserSeed({ inTeam: 'redesign' }).team).toBe('redesign');
     expect(bareBrowserSeed({}).team).toBeUndefined();
   });
+
+  it('widens scope and window for --in-team, since a team outlives both defaults', () => {
+    // The browser is the path a human actually reaches, so seeding the filter
+    // without widening left the interactive default hiding exactly the rows the
+    // flag exists to surface: teammates run in their own worktrees (a different
+    // cwd), and the team itself is often older than the 30-day window.
+    const seed = bareBrowserSeed({ inTeam: 'redesign' });
+    expect(seed.projectScope).toBe('all');
+    expect(seed.window).toBeUndefined();
+  });
+
+  it('lets an explicit --since still bound an --in-team view', () => {
+    expect(bareBrowserSeed({ inTeam: 'redesign', since: '7d' }).window).toBe('7d');
+  });
 });
 
 describe('normalizeDeviceSeed — canonical .machine form', () => {
