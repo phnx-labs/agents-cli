@@ -13,6 +13,7 @@ import { homedir } from 'os';
 import { betaEnableHint, isBetaEnabled } from '../lib/beta.js';
 import { insertTask } from '../lib/cloud/store.js';
 import { emit } from '../lib/events.js';
+import { buildFactorySnapshot, type FactorySnapshot } from '../lib/factory/snapshot.js';
 
 
 function requireFactoryUrl(): string {
@@ -70,14 +71,29 @@ export function registerFactoryCommands(program: Command): void {
 Examples:
   agents factory submit PROJ-123
   agents factory submit https://linear.app/example/issue/PROJ-123
+  agents factory snapshot --json
 `);
 
-  factory.hook('preAction', () => {
-    if (enabled) return;
+  factory.hook('preAction', (_thisCommand, actionCommand) => {
+    // Foreman must be able to read its tick input before any beta-gated action.
+    if (enabled || actionCommand.name() === 'snapshot') return;
     console.error(chalk.red('agents factory is in beta.'));
     console.error(chalk.gray(betaEnableHint('factory')));
     process.exit(1);
   });
+
+  factory
+    .command('snapshot')
+    .description('Read the complete Software Factory state without dispatching or changing it.')
+    .option('--json', 'Output the stable machine-readable snapshot')
+    .action(async (opts: { json?: boolean }) => {
+      const snapshot = await buildFactorySnapshot();
+      if (opts.json) {
+        console.log(JSON.stringify(snapshot, null, 2));
+        return;
+      }
+      renderSnapshot(snapshot);
+    });
 
   factory
     .command('submit <linear-ref>')
@@ -114,4 +130,14 @@ Examples:
       console.log(`  execution    ${result.cloud_execution_id}`);
       console.log(`  tail output  agents cloud logs ${result.cloud_execution_id}`);
     });
+}
+
+function renderSnapshot(snapshot: FactorySnapshot): void {
+  console.log(chalk.bold(`Factory snapshot ${snapshot.generatedAt}`));
+  console.log(`  sessions     ${snapshot.sessions.length}`);
+  console.log(`  open PRs     ${snapshot.prs.length}`);
+  console.log(`  devices      ${snapshot.devices.length}`);
+  for (const [project, queue] of Object.entries(snapshot.queues)) {
+    console.log(`  ${project.padEnd(12)} todo ${queue.todo} · in progress ${queue.inProgress} · blocked ${queue.blocked}`);
+  }
 }
