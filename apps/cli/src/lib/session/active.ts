@@ -202,6 +202,17 @@ export interface ActiveSession {
    */
   machine?: string;
   teamName?: string;
+  /**
+   * For a teams teammate: the session id of the ORCHESTRATOR that spawned the
+   * team (the agent that ran `agents teams add`, captured from AGENTS_SESSION_ID
+   * at spawn). Lets the listing answer "which session spun up this team" and
+   * group teammates under their orchestrator. Distinct from `sessionId`, which is
+   * the teammate's OWN transcript.
+   */
+  orchestratorSessionId?: string;
+  /** Display label for the orchestrator (its topic/label), resolved when the
+   * orchestrator is itself present in the active set. Display-only. */
+  orchestratorLabel?: string;
   agentId?: string;
   cloudProvider?: string;
   cloudTaskId?: string;
@@ -787,16 +798,24 @@ export async function listTeamsActive(): Promise<ActiveSession[]> {
   const mgr = new AgentManager();
   const running = await mgr.listRunning();
   return running.map((a): ActiveSession => {
-    const sessionId = a.parentSessionId ?? a.remoteSessionId ?? undefined;
-    const sessionFile = findSessionFileForKind(a.agentType, a.cwd ?? undefined, sessionId ?? undefined);
+    // The teammate's OWN transcript is `remoteSessionId` (captured from its first
+    // stream event). `parentSessionId` is the ORCHESTRATOR that spawned the team
+    // (AGENTS_SESSION_ID at spawn) — a link, not this teammate's id. Keying the
+    // row off the orchestrator conflated the two (a teammate showed the
+    // orchestrator's id/topic and lineage was invisible); resolve the teammate's
+    // own session for the row and expose the orchestrator separately.
+    const ownSessionId = a.remoteSessionId ?? undefined;
+    const sessionFile = findSessionFileForKind(a.agentType, a.cwd ?? undefined, ownSessionId);
     const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
     const pidAlive = a.pid ? isPidAlive(a.pid) : true;
     const { state, tokPerSec } = computeLiveSignals(a.agentType, sessionFile, a.cwd ?? undefined, pidAlive);
+    const resolvedId = ownSessionId ?? sessionIdFromFile(sessionFile);
     return applyState({
       context: 'teams',
       kind: a.agentType,
       pid: a.pid ?? undefined,
-      sessionId: sessionId ?? sessionIdFromFile(sessionFile),
+      sessionId: resolvedId,
+      orchestratorSessionId: a.parentSessionId ?? undefined,
       cwd: a.cwd ?? undefined,
       label: a.name ?? undefined,
       topic,
@@ -809,7 +828,7 @@ export async function listTeamsActive(): Promise<ActiveSession[]> {
       // The frozen actor stamped on the teammate record (RUSH-2028) — who ran
       // this teammate, surfaced as the owner in --active (RUSH-2018); sidecar
       // fallback for a teammate record predating the actor field.
-      owner: resolveOwner(a.actor, sessionId ?? sessionIdFromFile(sessionFile)),
+      owner: resolveOwner(a.actor, resolvedId),
     }, state, sessionFile, pidAlive);
   });
 }
@@ -1510,7 +1529,24 @@ export async function getActiveSessions(opts: ActiveQueryOptions = {}): Promise<
   await enrichProvenance(merged);
   await resolveOrigins(merged);
   foldPresence(merged);
+  annotateOrchestratorLabels(merged);
   return merged;
+}
+
+/**
+ * Resolve each teams row's `orchestratorLabel` from the orchestrator's own row,
+ * when that orchestrator session is itself in the active set (it usually is — the
+ * agent that ran `agents teams add` is running). Falls back to nothing, so the
+ * renderer shows the short id. Pure over the array; exported for tests.
+ */
+export function annotateOrchestratorLabels(sessions: ActiveSession[]): void {
+  const byId = new Map<string, ActiveSession>();
+  for (const s of sessions) if (s.sessionId) byId.set(s.sessionId, s);
+  for (const s of sessions) {
+    if (!s.orchestratorSessionId) continue;
+    const orch = byId.get(s.orchestratorSessionId);
+    if (orch) s.orchestratorLabel = orch.label || orch.topic || undefined;
+  }
 }
 
 /**

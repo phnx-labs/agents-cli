@@ -2,7 +2,7 @@ import { describe, it, expect, afterAll } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { resolveCwds, LSOF_CONCURRENCY, agentKindFromComm, activeStatusFromCloudStatus, resolveFallbackStatus, lifecycleStatus, ABANDONED_STALE_MS, resolvePaneIdentity, matchOriginDevice } from './active.js';
+import { resolveCwds, LSOF_CONCURRENCY, agentKindFromComm, activeStatusFromCloudStatus, resolveFallbackStatus, lifecycleStatus, ABANDONED_STALE_MS, resolvePaneIdentity, matchOriginDevice, annotateOrchestratorLabels } from './active.js';
 import type { HookSessionIndex } from './hook-sessions.js';
 import type { DeviceProfile, DeviceRegistry } from '../devices/registry.js';
 
@@ -258,5 +258,36 @@ describe('matchOriginDevice (resolve an ssh client IP to the initiating device)'
     // '' would falsely match a device whose address.ip is undefined if the guard
     // were missing; assert the no-ip device is never returned.
     expect(matchOriginDevice('', reg)).toBeUndefined();
+  });
+});
+
+describe('annotateOrchestratorLabels (team lineage — which session spun up a team)', () => {
+  const row = (over: Partial<import('./active.js').ActiveSession>) =>
+    ({ context: 'teams', kind: 'claude', status: 'working', ...over }) as any;
+
+  it('resolves a teammate\'s orchestrator label from the orchestrator\'s own row', () => {
+    const orchestrator = row({ sessionId: 'orch-1234', context: 'terminal', label: 'refactor auth' });
+    const teammate = row({ sessionId: 'mate-abcd', teamName: 'my-feature', orchestratorSessionId: 'orch-1234' });
+    annotateOrchestratorLabels([orchestrator, teammate]);
+    expect(teammate.orchestratorLabel).toBe('refactor auth');
+  });
+
+  it('falls back to the orchestrator topic when it has no label', () => {
+    const orchestrator = row({ sessionId: 'orch-1234', context: 'terminal', topic: 'ship the CLI' });
+    const teammate = row({ sessionId: 'mate-abcd', teamName: 't', orchestratorSessionId: 'orch-1234' });
+    annotateOrchestratorLabels([orchestrator, teammate]);
+    expect(teammate.orchestratorLabel).toBe('ship the CLI');
+  });
+
+  it('leaves orchestratorLabel unset when the orchestrator is not in the active set', () => {
+    const teammate = row({ sessionId: 'mate-abcd', teamName: 't', orchestratorSessionId: 'gone-9999' });
+    annotateOrchestratorLabels([teammate]);
+    expect(teammate.orchestratorLabel).toBeUndefined();
+  });
+
+  it('does nothing for a non-team row with no orchestrator link', () => {
+    const solo = row({ sessionId: 's1', context: 'terminal', label: 'x' });
+    annotateOrchestratorLabels([solo]);
+    expect(solo.orchestratorLabel).toBeUndefined();
   });
 });

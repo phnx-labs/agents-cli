@@ -6,7 +6,7 @@ import * as crypto from 'crypto';
 import { spawnSync } from 'child_process';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { buildResumeCommand, resumeSpawnInvocation, resolveSessionQuery } from '../sessions.js';
+import { buildResumeCommand, resumeSpawnInvocation, resolveSessionQuery, buildSessionDescription } from '../sessions.js';
 import { needsWindowsShell, composeWin32CommandLine } from '../../lib/platform/index.js';
 import type { SessionMeta } from '../../lib/session/types.js';
 
@@ -1022,5 +1022,31 @@ describe('resolveSessionQuery id-vs-search resolution', () => {
     const r = resolveSessionQuery([mentions], ses);
     expect(r.completeId).toBe(true);
     expect(r.matches.map(s => s.id)).not.toContain(mentions.id);
+  });
+});
+
+describe('buildSessionDescription — team lineage', () => {
+  it('shows "by <orchestrator label>" for a teammate with a resolved orchestrator', () => {
+    const desc = buildSessionDescription({
+      context: 'teams', kind: 'claude', status: 'working',
+      teamName: 'my-feature', orchestratorLabel: 'refactor auth', label: 'auth',
+    } as any);
+    expect(desc).toContain('my-feature');
+    expect(desc).toContain('by refactor auth');
+  });
+
+  it('falls back to the orchestrator short id when no label resolved', () => {
+    const desc = buildSessionDescription({
+      context: 'teams', kind: 'claude', status: 'working',
+      teamName: 't', orchestratorSessionId: 'abcd1234efgh',
+    } as any);
+    expect(desc).toContain('by abcd1234'); // first 8 chars
+  });
+
+  it('omits the "by" clause when there is no orchestrator link', () => {
+    const desc = buildSessionDescription({
+      context: 'teams', kind: 'claude', status: 'working', teamName: 't', label: 'x',
+    } as any);
+    expect(desc).not.toContain('by ');
   });
 });

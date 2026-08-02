@@ -357,7 +357,7 @@ export function cleanPreview(text: string): string {
  * Covers every ActiveSession context: terminal (interactive), headless, teams,
  * cloud, and sub-agent rows that share the same ActiveSession.todos field.
  */
-function buildSessionDescription(s: ActiveSession): string {
+export function buildSessionDescription(s: ActiveSession): string {
   const todo = formatTodoCompact(s.todos);
   if (s.context === 'cloud') {
     const base = s.preview || `${s.cloudProvider ?? ''}${s.cloudTaskId ? ` · ${s.cloudTaskId.slice(0, 12)}` : ''}`;
@@ -365,6 +365,10 @@ function buildSessionDescription(s: ActiveSession): string {
   }
   if (s.context === 'teams') {
     const parts = [s.teamName];
+    // Lineage: which orchestrator spun up this team. Prefer the resolved label,
+    // else the short session id, so "by whom" is answerable at a glance.
+    const orch = s.orchestratorLabel || (s.orchestratorSessionId ? s.orchestratorSessionId.slice(0, 8) : '');
+    if (orch) parts.push(`by ${orch}`);
     if (todo) parts.push(todo);
     if (s.preview) parts.push(s.preview);
     else if (s.label) parts.push(s.label);
