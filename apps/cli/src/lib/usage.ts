@@ -214,6 +214,8 @@ export async function getUsageInfo(agentId: AgentId, options?: UsageOptions): Pr
       return getKimiUsageInfo(options);
     case 'droid':
       return getDroidUsageInfo(options);
+    case 'grok':
+      return getGrokUsageInfo(options);
     default:
       return { snapshot: null, error: null };
   }
@@ -268,7 +270,7 @@ export function buildCanonicalUsageContext(inputs: UsageIdentityInput[]): {
  * applicable (Antigravity, Grok, OpenCode).
  */
 export function agentReportsUsage(agentId: AgentId): boolean {
-  return agentId === 'claude' || agentId === 'codex' || agentId === 'kimi' || agentId === 'droid';
+  return agentId === 'claude' || agentId === 'codex' || agentId === 'kimi' || agentId === 'droid' || agentId === 'grok';
 }
 
 /** Fetch usage info for all unique accounts in parallel, keyed by usage key. */
@@ -1903,4 +1905,80 @@ function safeStatSync(filePath: string): fs.Stats | null {
   } catch {
     return null;
   }
+}
+
+/** Parse the latest billing info from Grok's unified log. */
+async function getGrokUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
+  try {
+    const base = options?.home || os.homedir();
+    const logPath = path.join(base, '.grok', 'logs', 'unified.jsonl');
+    if (!fs.existsSync(logPath)) return { snapshot: null, error: null };
+
+    const match = await readLatestGrokBilling(logPath);
+    if (!match) return { snapshot: null, error: null };
+
+    return {
+      snapshot: {
+        source: 'last_seen',
+        sourceLabel: 'last seen in Grok logs',
+        capturedAt: match.capturedAt,
+        windows: match.windows,
+        plan: match.subscriptionTier,
+      },
+      error: null,
+    };
+  } catch {
+    return { snapshot: null, error: null };
+  }
+}
+
+interface GrokBillingMatch {
+  capturedAt: Date | null;
+  subscriptionTier?: string | null;
+  windows: UsageWindow[];
+}
+
+async function readLatestGrokBilling(filePath: string): Promise<GrokBillingMatch | null> {
+  return new Promise((resolve) => {
+    let latest: GrokBillingMatch | null = null;
+    const stream = fs.createReadStream(filePath, { encoding: 'utf-8' });
+    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+    rl.on('line', (line) => {
+      if (!line.trim()) return;
+      try {
+        const parsed = JSON.parse(line);
+        if (parsed.msg === 'billing: fetched credits config' && parsed.ctx?.config) {
+          const config = parsed.ctx.config;
+          const windows: UsageWindow[] = [];
+
+          if (config.currentPeriod?.end) {
+            // Grok does not provide a hard limit percentage in this payload,
+            // but we can map the billing period end as a 'week' window reset.
+            // Using 0% to avoid rendering a full limit bar, while still displaying
+            // the window period.
+            windows.push({
+              key: 'week',
+              label: 'Current week',
+              shortLabel: 'W',
+              usedPercent: 0,
+              resetsAt: parseDateValue(config.currentPeriod.end),
+              windowMinutes: inferWindowMinutes('week'),
+            });
+          }
+
+          latest = {
+            capturedAt: parseDateValue(parsed.ts),
+            subscriptionTier: parsed.ctx.subscriptionTier || null,
+            windows,
+          };
+        }
+      } catch {
+        /* malformed session line */
+      }
+    });
+
+    rl.on('close', () => resolve(latest));
+    rl.on('error', () => resolve(latest));
+  });
 }

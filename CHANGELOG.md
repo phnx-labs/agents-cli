@@ -13,6 +13,8 @@
 
 ### Added
 
+- **`ag view grok` now shows usage limits.** It parses the latest billing period config and subscription tier from Grok's local `unified.jsonl` log, avoiding the need for an inaccessible network endpoint.
+
 - **`agents sessions migrate` (alias `detach`) relocates a RUNNING session onto another
   machine, then stops the source here (RUSH-1977).** Move the live agent — not just its
   transcript — off the interactive laptop and onto a fleet worker, a registered device, or
