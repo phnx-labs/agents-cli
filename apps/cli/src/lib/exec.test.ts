@@ -22,6 +22,12 @@ const RATE_LIMITED_CLAUDE_LOG = [
   '{"type":"result","subtype":"error","is_error":true,"result":"You have hit your 5-hour limit. Try again later.","num_turns":1}',
 ].join('\n');
 
+// Entire stdout from a real logged-out Cursor 2026.07.23 routine run. Cursor
+// exits before stream-json initialization, so raw-text classification is the
+// only available signal.
+const LOGGED_OUT_CURSOR_LOG =
+  "Error: Authentication required. Please run 'agent login' first, or set CURSOR_API_KEY environment variable.";
+
 // A COMPLETED run whose report text merely mentions the phrase "Not logged in"
 // (e.g. a routine summarizing an auth doc). Must NOT be classified as an auth
 // failure — the structural signal is is_error:false.
@@ -38,6 +44,7 @@ describe('detectAuthFailure — user-visible auth strings', () => {
       'API Error: 401 Invalid authentication credentials',
       'OAuth session expired and could not be refreshed',
       "Your organization has disabled Claude subscription access",
+      LOGGED_OUT_CURSOR_LOG,
     ]) {
       expect(detectAuthFailure(s)).toBe(true);
     }
@@ -58,8 +65,8 @@ describe('detectAuthFailureEvent — Claude-compatible stream-json structural si
     expect(detectAuthFailureEvent(LOGGED_OUT_CLAUDE_LOG, 'claude')).toBe(true);
   });
 
-  it('recognizes the same structural auth failure in Cursor stream-json', () => {
-    expect(detectAuthFailureEvent(LOGGED_OUT_CLAUDE_LOG, 'cursor')).toBe(true);
+  it('does not invent a structural event for Cursor plain-text auth output', () => {
+    expect(detectAuthFailureEvent(LOGGED_OUT_CURSOR_LOG, 'cursor')).toBe(false);
   });
 
   it('is false for a completed run that merely mentions the phrase', () => {
@@ -90,6 +97,9 @@ describe('rate-limit vs auth precedence', () => {
 });
 
 describe('isAuthFailureFromLog — the shared foreground/detached decision', () => {
+  it('classifies a real Cursor plain-text auth failure after a failed process', () => {
+    expect(isAuthFailureFromLog(LOGGED_OUT_CURSOR_LOG, 'cursor', { processFailed: true })).toBe(true);
+  });
   it('classifies a real logged-out log regardless of process exit code', () => {
     // Structural marker is authoritative even on a clean (exit 0) process.
     expect(isAuthFailureFromLog(LOGGED_OUT_CLAUDE_LOG, 'claude', { processFailed: false })).toBe(true);

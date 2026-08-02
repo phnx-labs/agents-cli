@@ -138,8 +138,24 @@ export function resolveMode(agent: AgentId, requested: Mode): Mode {
  * downgraded. This is the single source of truth shared by buildExecCommand
  * (agents run / teams) and the routine runner.
  */
-export function resolveHeadlessMode(agent: AgentId, requested: Mode, interactive: boolean): Mode {
+export function resolveHeadlessMode(
+  agent: AgentId,
+  requested: Mode,
+  interactive: boolean,
+  warningContext?: string,
+): Mode {
   const mode = resolveMode(agent, requested);
+  if (requested === 'plan' && mode !== 'plan') {
+    const subject = warningContext ? `${warningContext}: ` : '';
+    const limitation = agent === 'cursor'
+      ? "cursor's read-only plan mode is not enabled in this build"
+      : `${agent} has no read-only 'plan' mode`;
+    process.stderr.write(
+      `[agents] ${subject}${limitation}; ` +
+      `running '${mode}' (writable) instead${agent === 'cursor' ? ' (RUSH-2101)' : ''}. ` +
+      `Pass --mode ${mode} to silence this.\n`,
+    );
+  }
   if (!interactive && mode === 'plan' && AGENTS[agent].capabilities.headlessPlan === false) {
     process.stderr.write(`warning: ${agent} has no headless plan mode; running --mode auto instead\n`);
     return resolveMode(agent, 'auto');
@@ -178,6 +194,8 @@ export interface ExecOptions {
   cwd?: string;
   /** Force headless mode even when no prompt is provided (e.g. piping via stdin). */
   headless?: boolean;
+  /** Prefix for mode-degradation warnings emitted by shared headless paths. */
+  modeWarningContext?: string;
   json?: boolean;
   model?: string;
   addDirs?: string[];
@@ -565,8 +583,9 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     base: ['cursor-agent'],
     promptFlag: '-p',
     modeFlags: {
-      // cursor-agent has no read-only flag; we only expose edit + skip.
-      edit: [],
+      // A configured headless run is the workspace trust decision. Keep this
+      // narrower than --yolo/-f, which also bypasses permission checks.
+      edit: ['--trust'],
       skip: ['-f'],
     },
     jsonFlags: ['--output-format', 'stream-json'],
@@ -813,7 +832,12 @@ export function buildExecCommand(options: ExecOptions): string[] {
   //   degrades to `auto` with a stderr warning (see resolveHeadlessMode)
   // - `skip` on an unsupported agent → throws a clear error
   // After resolution, the chosen mode is guaranteed to be in template.modeFlags.
-  const resolvedMode = resolveHeadlessMode(options.agent, normalizeMode(options.mode), interactive);
+  const resolvedMode = resolveHeadlessMode(
+    options.agent,
+    normalizeMode(options.mode),
+    interactive,
+    options.modeWarningContext,
+  );
   const modeFlags = template.modeFlags[resolvedMode];
   if (!modeFlags) {
     // Defense in depth: would only fire if AGENTS.capabilities.modes and
@@ -1766,6 +1790,7 @@ export function detectRateLimit(text: string): boolean {
 export const AUTH_FAILURE_PATTERNS: RegExp[] = [
   /OAuth (?:access token has been revoked|session expired)/i,
   /(?:Please run|run) \/login/i,
+  /Please run 'agent login' first/i,
   /\bNot logged in\b/i,
   /Invalid authentication credentials/i,
   /Failed to authenticate/i,

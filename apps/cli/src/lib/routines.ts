@@ -15,10 +15,12 @@ import { getRoutinesDir, getSystemRoutinesDir, getRunsDir, ensureAgentsDir, getP
 import { safeJoin, isSafeSegmentName } from './paths.js';
 import { atomicWriteFileSync } from './fs-atomic.js';
 import type { AgentId } from './types.js';
-import { ALL_AGENT_IDS } from './agents.js';
 import type { LoopConfig } from './loop.js';
 import { machineId, normalizeHost } from './machine-id.js';
 import { resolveActor } from './actor.js';
+
+/** Agents with a concrete daemon command implementation. */
+export const ROUTINE_AGENT_IDS: readonly AgentId[] = ['claude', 'codex', 'gemini', 'cursor', 'kimi', 'droid'];
 
 /** Tool/site/directory allow-list for sandboxed job execution. */
 export interface JobAllowConfig {
@@ -669,8 +671,10 @@ export function validateJob(config: Partial<JobConfig>): string[] {
   if (config.command !== undefined && (typeof config.command !== 'string' || config.command.trim() === '')) {
     errors.push('command must be a non-empty shell command string');
   }
-  if (hasAgent && config.agent && !ALL_AGENT_IDS.includes(config.agent as AgentId)) {
-    errors.push(`agent must be one of: ${ALL_AGENT_IDS.join(', ')}`);
+  // RUSH-2102: reject harnesses the daemon command table cannot execute now,
+  // instead of accepting them and failing when the scheduled run fires.
+  if (hasAgent && config.agent && !ROUTINE_AGENT_IDS.includes(config.agent)) {
+    errors.push(`agent must be one of: ${ROUTINE_AGENT_IDS.join(', ')}`);
   }
   if (hasWorkflow && config.workflow) {
     if (!/^[a-z0-9][a-z0-9_-]*$/.test(config.workflow)) {

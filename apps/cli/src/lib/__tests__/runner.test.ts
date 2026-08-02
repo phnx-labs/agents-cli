@@ -1,10 +1,11 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import {
   buildJobCommand,
   buildRoutineSpawnEnv,
   dispatchesViaAgentsRun,
+  executeJob,
   executeJobDetached,
   pinJobBinary,
   resolveRoutineLaunch,
@@ -15,6 +16,7 @@ import type { JobConfig } from '../routines.js';
 import { getBinaryPath, getVersionDir } from '../versions.js';
 import { rotationFailoverChain, type RotateCandidate, type RotateResult } from '../rotate.js';
 import { detectRateLimit } from '../exec.js';
+import { buildExecCommand } from '../exec.js';
 
 function baseJob(overrides: Partial<JobConfig> = {}): JobConfig {
   return {
@@ -31,6 +33,13 @@ function baseJob(overrides: Partial<JobConfig> = {}): JobConfig {
 }
 
 describe('buildJobCommand', () => {
+  it('cursor default/write mode trusts the configured workspace without using --yolo', () => {
+    const argv = buildJobCommand(baseJob({ agent: 'cursor', mode: 'auto' }), 'Do the task.');
+    expect(argv).toContain('--trust');
+    expect(argv).not.toContain('--yolo');
+    expect(argv).not.toContain('-f');
+  });
+
   it('bare-agent claude plan mode includes --permission-mode plan', () => {
     const argv = buildJobCommand(baseJob({ agent: 'claude', mode: 'plan' }), 'Do the task.');
     expect(argv).toContain('--permission-mode');
@@ -97,6 +106,36 @@ describe('buildJobCommand', () => {
     expect(argv).toContain('--prompt');
     expect(argv).not.toContain('--plan');
     expect(argv).not.toContain('--auto');
+  });
+});
+
+describe('cursor loop routine mode warning', () => {
+  it('warns from the shared command builder before a plan-mode loop iteration runs', async () => {
+    const config = baseJob({
+      name: 'cursor-loop-warning-test',
+      agent: 'cursor',
+      version: '0.0.0-test',
+      mode: 'plan',
+      sandbox: false,
+      loop: { maxIterations: 1 },
+    });
+    const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      await executeJob(config, {
+        runIteration: async (options) => {
+          expect(options.version).toBeUndefined();
+          const argv = buildExecCommand(options);
+          expect(argv).toContain('--trust');
+          return { exitCode: 0, tokens: 0 };
+        },
+      });
+      expect(write).toHaveBeenCalledWith(
+        expect.stringContaining("[agents] routine 'cursor-loop-warning-test': cursor's read-only plan mode is not enabled in this build"),
+      );
+    } finally {
+      write.mockRestore();
+      fs.rmSync(path.join(getRunsDir(), config.name), { recursive: true, force: true });
+    }
   });
 });
 
@@ -243,6 +282,14 @@ describe('resolveRoutineLaunch (RUSH-1016 — pin + failover chain)', () => {
 });
 
 describe('buildRoutineSpawnEnv', () => {
+  it('pins Cursor XDG_CONFIG_HOME to the sandbox overlay', () => {
+    const env = buildRoutineSpawnEnv(
+      { HOME: '/tmp/cursor-overlay', PATH: '/usr/bin', XDG_CONFIG_HOME: '/real/config' },
+      'cursor',
+      undefined,
+    );
+    expect(env.XDG_CONFIG_HOME).toBe(path.join('/tmp/cursor-overlay', '.config'));
+  });
   it('pins CLAUDE_CONFIG_DIR for a versioned claude launch and preserves TZ', () => {
     const env = buildRoutineSpawnEnv(
       { HOME: '/tmp/overlay', PATH: '/usr/bin' },

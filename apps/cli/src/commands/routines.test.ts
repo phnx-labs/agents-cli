@@ -105,8 +105,9 @@ describe('routines add help', () => {
       expect(result.stdout).toMatch(
         /Which agent runs this routine: claude, codex, gemini,\s+cursor, kimi, droid/,
       );
-      expect(result.stdout).not.toContain('antigravity');
-      expect(result.stdout).not.toContain('opencode');
+      const agentLine = result.stdout.split('\n').find((line) => line.includes('--agent')) ?? '';
+      expect(agentLine).not.toContain('antigravity');
+      expect(agentLine).not.toContain('opencode');
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }

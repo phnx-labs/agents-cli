@@ -20,6 +20,7 @@ import * as path from 'path';
 import * as os from 'os';
 import type { JobConfig, RunMeta } from './routines.js';
 import {
+  ROUTINE_AGENT_IDS,
   resolveJobPrompt,
   parseTimeout,
   writeRunMeta,
@@ -62,6 +63,7 @@ import {
 } from './rotate.js';
 import { readAuthHealth, isDeadVerdict } from './auth-health.js';
 import { machineId } from './machine-id.js';
+import { isSelfUpdatingAgent } from './agents.js';
 
 /** Result of a completed job execution, including metadata and optional report. */
 export interface RunResult {
@@ -79,7 +81,7 @@ const AGENT_COMMANDS: Record<string, string[]> = {
   droid: ['droid', 'exec', '{prompt}', '-o', 'stream-json'],
 };
 
-export const ROUTINE_AGENT_IDS = Object.freeze(Object.keys(AGENT_COMMANDS));
+export { ROUTINE_AGENT_IDS } from './routines.js';
 
 const ROUTINE_TRANSCRIPT_SPECS: Partial<Record<AgentId, Array<{ root: string[]; ext: string }>>> = {
   claude: [{ root: ['.claude', 'projects'], ext: '.jsonl' }],
@@ -182,14 +184,13 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string): stri
   if (config.agent === 'cursor') {
     // cursor-agent supports --plan, but the capability registry has not been
     // upgraded yet. RUSH-2101 tracks adding that read-only mode after PR #1721.
-    const cursorMode = resolveHeadlessMode('cursor', mode, false);
-    if (mode === 'plan' && cursorMode !== 'plan') {
-      process.stderr.write(
-        `warning: cursor has no read-only 'plan' mode; using '${cursorMode}' (writable) instead\n`,
-      );
-    }
+    const cursorMode = resolveHeadlessMode('cursor', mode, false, `routine '${config.name}'`);
     if (cursorMode === 'skip') {
       cmd.push('-f');
+    } else {
+      // The configured cwd is the user's workspace trust decision. --trust is
+      // narrower than --yolo/-f because it does not bypass tool permissions.
+      cmd.push('--trust');
     }
 
     appendModelAndReasoning(cmd, config);
@@ -521,6 +522,11 @@ export function buildRoutineSpawnEnv(
   // provisioned box does. Drop it here so a routine always uses the login of the
   // machine it runs on.
   delete out.CLAUDE_CODE_OAUTH_TOKEN;
+  if (agent === 'cursor' && baseEnv.HOME) {
+    // prepareJobHome links this host's Cursor auth file here. Pin XDG_CONFIG_HOME
+    // to the overlay so an ambient value cannot bypass the routine sandbox.
+    out.XDG_CONFIG_HOME = path.join(baseEnv.HOME, '.config');
+  }
   if (timezone) out.TZ = timezone;
   return out;
 }
@@ -761,13 +767,16 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
     const spawnEnv = buildRoutineSpawnEnv(baseEnv, effectiveAgent, primaryVersion, config.timezone);
     const execOptions: ExecOptions = {
       agent: effectiveAgent,
-      version: primaryVersion,
+      // Routine-supported self-updating CLIs (Cursor/Droid) use one global
+      // binary; a versioned shim would point at a nonexistent isolated install.
+      version: isSelfUpdatingAgent(effectiveAgent) ? undefined : primaryVersion,
       prompt: resolvedPrompt,
       mode: normalizeMode(config.mode),
       effort: config.effort as ExecEffort,
       env: spawnEnv,
       json: true,
       headless: true,
+      modeWarningContext: `routine '${config.name}'`,
       ...(config.config?.model ? { model: config.config.model as string } : {}),
       ...(config.allow?.dirs ? {
         addDirs: config.allow.dirs

@@ -111,6 +111,8 @@ export function prepareJobHome(config: JobConfig): string {
     generateCodexConfig(overlayHome, config);
   } else if (config.agent === 'gemini') {
     generateGeminiConfig(overlayHome, config);
+  } else if (config.agent === 'cursor') {
+    generateCursorConfig(overlayHome);
   }
 
   if (config.allow?.dirs) {
@@ -118,6 +120,32 @@ export function prepareJobHome(config: JobConfig): string {
   }
 
   return overlayHome;
+}
+
+/** Link this host's Cursor login and CLI config into the disposable overlay. */
+export function generateCursorConfig(overlayHome: string): void {
+  const realConfigHome = process.env.XDG_CONFIG_HOME || path.join(resolveRealHome(), '.config');
+  const realAuth = path.join(realConfigHome, 'cursor', 'auth.json');
+  if (!fs.existsSync(realAuth)) return;
+
+  const overlayCursorDir = path.join(overlayHome, '.config', 'cursor');
+  fs.mkdirSync(overlayCursorDir, { recursive: true });
+  const overlayAuth = path.join(overlayCursorDir, 'auth.json');
+  if (process.platform === 'win32') {
+    // File symlinks need Developer Mode on Windows. A same-volume hard link
+    // shares the credential inode without copying its contents to another host.
+    fs.linkSync(realAuth, overlayAuth);
+  } else {
+    fs.symlinkSync(realAuth, overlayAuth);
+  }
+
+  // Setting XDG_CONFIG_HOME makes Cursor look for cli-config.json beside auth.json.
+  // This file contains preferences, not credentials, and remains linked to the
+  // interactive CLI's current settings for the duration of the run.
+  const realCliConfig = path.join(resolveRealHome(), '.cursor', 'cli-config.json');
+  if (fs.existsSync(realCliConfig)) {
+    createLink(realCliConfig, path.join(overlayCursorDir, 'cli-config.json'));
+  }
 }
 
 /** Remove a job's overlay HOME directory entirely. */

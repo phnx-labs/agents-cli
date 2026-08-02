@@ -4,7 +4,7 @@ import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { JobConfig } from '../routines.js';
-import { generateCodexConfig } from '../sandbox.js';
+import { generateCodexConfig, generateCursorConfig } from '../sandbox.js';
 
 const tempDirs: string[] = [];
 
@@ -75,5 +75,25 @@ describe('generateCodexConfig', () => {
     expect(() => generateCodexConfig(overlayHome, makeJobConfig({
       someKey: 'value\ninjected = true',
     }))).toThrow(/TOML value contains newline/);
+  });
+});
+
+describe('generateCursorConfig', () => {
+  it('links the same-host Cursor auth file into the overlay', () => {
+    const overlayHome = createOverlayHome();
+    const realConfigHome = createOverlayHome();
+    const cursorDir = path.join(realConfigHome, 'cursor');
+    fs.mkdirSync(cursorDir, { recursive: true });
+    const realAuth = path.join(cursorDir, 'auth.json');
+    fs.writeFileSync(realAuth, '{}', { mode: 0o600 });
+    const previous = process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = realConfigHome;
+    try {
+      generateCursorConfig(overlayHome);
+      expect(fs.realpathSync(path.join(overlayHome, '.config', 'cursor', 'auth.json'))).toBe(fs.realpathSync(realAuth));
+    } finally {
+      if (previous === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = previous;
+    }
   });
 });

@@ -157,6 +157,7 @@ describe('buildJobCommand', () => {
         'hello',
         '--output-format',
         'stream-json',
+        '--trust',
       ]);
     });
 
@@ -179,9 +180,10 @@ describe('buildJobCommand', () => {
         'hello',
         '--output-format',
         'stream-json',
+        '--trust',
       ]);
       expect(stderr).toHaveBeenCalledWith(
-        "warning: cursor has no read-only 'plan' mode; using 'edit' (writable) instead\n",
+        "[agents] routine 'test-job': cursor's read-only plan mode is not enabled in this build; running 'edit' (writable) instead (RUSH-2101). Pass --mode edit to silence this.\n",
       );
       stderr.mockRestore();
     });
@@ -197,6 +199,7 @@ describe('buildJobCommand', () => {
         'hello',
         '--output-format',
         'stream-json',
+        '--trust',
         '--model',
         'sonnet-4-thinking',
       ]);

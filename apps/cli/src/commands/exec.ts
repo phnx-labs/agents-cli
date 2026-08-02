@@ -2217,20 +2217,9 @@ export function registerRunCommand(program: Command): void {
         process.exit(1);
       }
       if (resolvedMode !== requestedMode) {
-        mode = resolvedMode as ExecMode;
-        if (!options.quiet) {
-          if (requestedMode === 'plan' && !modeIsDefault) {
-            process.stderr.write(
-              chalk.yellow(
-                `[agents] ${agent} has no read-only 'plan' mode; using '${mode}' (writable) instead. Pass --mode ${mode} to silence this.\n`,
-              ),
-            );
-          } else {
-            process.stderr.write(
-              chalk.gray(`[agents] ${agent} has no '${requestedMode}' mode; using '${mode}'\n`),
-            );
-          }
-        }
+        // Preserve the requested mode for buildExecCommand. Its shared
+        // resolveHeadlessMode call owns degradation warnings for agents run,
+        // teams, loops, and routines. Use resolvedMode only for local guards.
       } else {
         mode = resolvedMode as ExecMode;
       }
@@ -2243,7 +2232,7 @@ export function registerRunCommand(program: Command): void {
       const stallCmd = headlessPlanStallCommand({
         prompt,
         interactive: options.interactive,
-        mode,
+        mode: resolvedMode as ExecMode,
         modeIsDefault,
       });
       if (stallCmd) {

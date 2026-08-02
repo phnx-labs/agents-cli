@@ -389,6 +389,22 @@ To bring a signed-out box back, log in on that box once — `agents run claude` 
 `claude` directly) drives the interactive login and writes the credential the
 routine then reuses. The daemon does not need restarting; it reads no credential.
 
+### Cursor auth and workspace trust for routines
+
+A sandboxed Cursor routine reuses the login from this same device without copying
+credentials to another host. The routine overlay links the local Cursor auth file
+from `$XDG_CONFIG_HOME/cursor` (or `~/.config/cursor`) and the CLI preferences from
+`~/.cursor/cli-config.json`, then pins `XDG_CONFIG_HOME` to that overlay. If the
+device is signed out, the run fails as `auth_failed` with Cursor's `agent login`
+instruction.
+
+Cursor routines pass `--trust` because configuring a routine with a working
+directory is the user's workspace-trust decision. This is narrower than `--yolo`
+or `-f`: it accepts the workspace without bypassing tool permissions. Cursor's
+read-only plan mode exists in the CLI but is not enabled in the agents-cli
+capability registry yet (RUSH-2101), so `mode: plan` currently warns and runs the
+registry-selected writable mode.
+
 ### Pinning an account (avoid the OAuth-rotation revocation storm)
 
 Left unpinned, a `claude` routine selects its account by the default `balanced`
