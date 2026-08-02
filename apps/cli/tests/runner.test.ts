@@ -183,7 +183,7 @@ describe('buildJobCommand', () => {
         '--trust',
       ]);
       expect(stderr).toHaveBeenCalledWith(
-        "[agents] routine 'test-job': cursor's read-only plan mode is not enabled in this build; running 'edit' (writable) instead (RUSH-2101). Pass --mode edit to silence this.\n",
+        "[agents] routine test-job: cursor's read-only plan mode is not enabled in this build; running 'edit' (writable) instead (RUSH-2101). Pass --mode edit to silence this.\n",
       );
       stderr.mockRestore();
     });

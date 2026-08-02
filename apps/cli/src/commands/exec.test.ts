@@ -20,6 +20,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { execFileSync, spawnSync } from 'child_process';
+import { pathToFileURL } from 'url';
+import { createRequire } from 'module';
 import {
   addAlwaysFreshRepo,
   computeNetMode,
@@ -48,9 +50,14 @@ describe('degraded run governance mode', () => {
       { mode: 0o755 },
     );
     try {
+      // `node` cannot resolve the CLI's `.js` ESM specifiers to .ts sources on its
+      // own — spawn through the tsx loader, the same way every other CLI-spawning
+      // test does (commands/routines.test.ts:19-26,75). `--import` needs a module
+      // specifier, not a bare path, or Windows dies on ERR_UNSUPPORTED_ESM_URL_SCHEME.
+      const tsxImport = pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href;
       const result = spawnSync(
-        process.execPath,
-        [path.resolve(import.meta.dirname, '..', 'index.ts'), 'run', 'cursor', 'probe', '--mode', 'plan', '--quiet', '--cwd', root],
+        'node',
+        ['--import', tsxImport, path.resolve(import.meta.dirname, '..', 'index.ts'), 'run', 'cursor', 'probe', '--mode', 'plan', '--quiet', '--cwd', root],
         {
           cwd: path.resolve(import.meta.dirname, '..', '..'),
           env: { ...process.env, HOME: root, PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}` },
