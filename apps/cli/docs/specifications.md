@@ -124,7 +124,7 @@ SSH access (§7); rendering sessions that no harness produced.
   home, every version-home, and backup mirrors, deduped by realpath, **live root
   scanned first** (`lib/session/discover.ts:772-787,1092-1093`).
 - **SES-3 (MUST).** A malformed JSONL **line** MUST be skipped, never thrown —
-  for every harness (`lib/session/parse.ts:322-328,531-537,720-726,1004-1010,1151,1356-1362,1448-1454,1538-1544,1691-1697`).
+  for every harness (`lib/session/parse.ts:322-328,531-537,1004-1010,1151,1356-1362,1448-1454,1538-1544,1707-1713`).
 - **SES-4 (MUST).** An unrecognized path MUST fail loudly
   (`Cannot detect agent type from path`), never be silently mis-indexed
   (`lib/session/parse.ts:143-147`); an unknown agent id in the scanner is a no-op,

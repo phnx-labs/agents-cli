@@ -574,7 +574,7 @@ export function lifecycleStatus(
 
 /**
  * The ONE place a fallback status is decided when no rich transcript state is
- * available — an opaque kind we cannot parse (cursor, openclaw), or a transcript
+ * available — an opaque kind we cannot parse (openclaw), or a transcript
  * whose parse/tail was empty or unreadable. Honest by construction: computed from
  * PID + mtime, never a fabricated `idle`.
  *
