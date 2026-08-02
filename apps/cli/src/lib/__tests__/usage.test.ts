@@ -161,6 +161,17 @@ describe('usage formatting', () => {
     expect(windows[0]?.resetsAt?.toISOString()).toBe(new Date('2026-08-22T11:35:59.000Z').toISOString());
   });
 
+  it('normalizeCursorUsage clamps a month-end reset instead of overflowing into the next month', () => {
+    // A Jan-31 period start: +1 month must land in February, not spill into March
+    // (naive setMonth(m+1) yields Feb 31 -> Mar 3).
+    const [w] = normalizeCursorUsage({
+      'gpt-4': { numRequests: 10, maxRequestUsage: 100 },
+      startOfMonth: '2026-01-31T12:00:00.000Z',
+    });
+    expect(w?.resetsAt?.getMonth()).toBe(1); // February (1), not March (2)
+    expect(w?.resetsAt?.getDate()).toBeGreaterThanOrEqual(28);
+  });
+
   it('normalizeCursorUsage returns no window for usage-based plans (no request cap)', () => {
     // Real usage-based Pro shape: maxRequestUsage is null, so there is no bar to draw.
     expect(

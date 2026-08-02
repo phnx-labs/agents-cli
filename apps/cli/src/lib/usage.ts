@@ -2024,16 +2024,21 @@ export function normalizeCursorUsage(data: CursorUsageResponse): UsageWindow[] {
   const premium = data['gpt-4'];
   if (!premium || typeof premium !== 'object') return [];
   const max = premium.maxRequestUsage;
-  if (typeof max !== 'number' || max <= 0) return [];
+  if (typeof max !== 'number' || !Number.isFinite(max) || max <= 0) return [];
   const used = typeof premium.numRequests === 'number' ? premium.numRequests : 0;
 
   const startOfMonth =
     typeof data.startOfMonth === 'string' ? parseDateValue(data.startOfMonth) : null;
-  // The request quota resets one calendar month after the period start.
+  // The request quota resets one calendar month after the period start. Guard the
+  // month-end overflow: setMonth on a day the target month lacks (Jan 31 -> Feb 31)
+  // rolls forward into the month after (Mar 3), so clamp back to the intended
+  // month's last day.
   let resetsAt: Date | null = null;
   if (startOfMonth) {
     resetsAt = new Date(startOfMonth);
+    const intendedMonth = (resetsAt.getMonth() + 1) % 12;
     resetsAt.setMonth(resetsAt.getMonth() + 1);
+    if (resetsAt.getMonth() !== intendedMonth) resetsAt.setDate(0);
   }
 
   return [
