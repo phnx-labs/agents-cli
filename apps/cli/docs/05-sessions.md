@@ -142,6 +142,8 @@ Fields:
 | `costUsd` | Σ tokens × per-model price, at scan time | `null` when the model is unknown/unpriced; see `agents cost` |
 | `durationMs` | `lastTs − firstTs` over timestamped events | `null` for single-event sessions |
 | `isTeamOrigin` | Set when spawned by `agents teams` | JSONL `entrypoint: 'sdk-cli'` |
+| `spawnedTeam` | The team this session CREATED, read off its `agents teams create/add` command at scan time | `null` for the ~everything that never ran one; the inverse of `isTeamOrigin` |
+| `teamOrigin` | For a teammate: its `{team, handle, mode, parentSessionId}`, read from the teammate's `meta.json` | `null` for a non-teammate; `team`/`parentSessionId` absent on records predating their capture, or once the 7-day teams cleanup removes the dir |
 | `plan` | Last `ExitPlanMode` plan markdown (Claude sessions only) | `null` when the session never entered plan-review |
 
 ## SessionEvent (detail output)
@@ -218,6 +220,10 @@ agents sessions "auth refactor"
 
 # Include team-spawned sessions (hidden by default)
 agents sessions --teams
+
+# One team's whole lineage: the session that spawned it, plus (with --teams) its
+# teammates. In the browser, `t` cycles the same filter over the teams in view.
+agents sessions --in-team redesign --teams
 
 # Show routine-run sessions, then open one by routine run id
 agents sessions --routine --all
@@ -337,13 +343,22 @@ than the legacy per-host raw stream. The stream is still used for a `--host` *qu
 non-interactive caller (piped/`--no-interactive`).
 
 It works by invoking the **remote's own** `agents sessions` against its already-built
-index over SSH and streaming stdout back — `ssh -o BatchMode=yes <host> bash -lc
-'agents sessions …'` (`src/lib/session/remote.ts`). Every other flag (`--since`,
-`--json`, `--markdown`, query, even `tail` and `--active`) forwards verbatim, since
-the far end runs the same binary. `--host` is stripped before forwarding so there is
-no recursion; the target must be a host alias or `user@host` (validated against
+index over SSH — `ssh -o BatchMode=yes <host> bash -lc 'agents sessions …'`
+(`src/lib/session/remote.ts`). `--host` is stripped before forwarding so there is no
+recursion; the target must be a host alias or `user@host` (validated against
 `SSH_TARGET_RE` to block argv-flag smuggling). SSH access is the only auth — if you
 can `ssh <host>`, you own the box; there is no identity layer.
+
+On the **streaming** path every other flag (`--since`, `--json`, `--markdown`, query,
+even `tail` and `--active`) forwards verbatim, since the far end runs the same binary,
+and the peer's stdout comes back under a per-host banner. The **browser** path asks
+each peer a fixed `sessions --all --json --limit 500` (plus `--since`/`--teams`) and
+merges the rows locally, so `--limit`, `--unmanaged`, and `--no-live` do not reach the
+peer there. Because a host scope means "look only over there", the browser also drops
+the default this-repo filter (no peer cwd is under yours) and refuses `--local`, which
+would skip the very fan-out the scope needs. A peer that fails to answer is named in
+the browser header — the full-screen picker repaints over the fan-out's stderr note,
+so an asleep box would otherwise be indistinguishable from an empty result.
 
 **`--host` is the default cross-machine recall path.** Online machines are the norm,
 so a live pull covers almost all recall with zero storage, zero lag, and no daemon —
@@ -675,7 +690,7 @@ of truth — don't hardcode the number here). Migrations run on connection
 open; old DBs get upgraded in place. The `meta` table tracks `schema_version`.
 Later migrations added, among others, `cost_usd` / `duration_ms` (pricing), the
 work-signal columns `pr_url` / `pr_number` / `worktree_slug` / `ticket_id`, the
-`plan` markdown, `output_tokens`, and `is_team_origin`. A migration that changes how
+`plan` markdown, `output_tokens`, `is_team_origin`, and `spawned_team`. A migration that changes how
 a column is derived forces a full rescan so every existing session is re-derived
 (as the pricing columns once did).
 

@@ -77,6 +77,14 @@ describe('browserFilterToArgv — the human↔agent contract', () => {
     ]);
   });
 
+  it('round-trips the team filter as --in-team', () => {
+    expect(browserFilterToArgv({ ...base, team: 'redesign' })).toEqual([
+      'sessions',
+      '--in-team',
+      'redesign',
+    ]);
+  });
+
   it('appends a search query as a quoted positional', () => {
     expect(browserFilterToArgv({ ...base, agent: 'codex' }, 'auth bug')).toEqual([
       'sessions',
@@ -166,6 +174,32 @@ describe('bareBrowserSeed — the bare-listing call-site filter', () => {
     expect(bareBrowserSeed({ all: true }).window).toBeUndefined();
     // an explicit --since still wins over --all's all-time default
     expect(bareBrowserSeed({ all: true, since: '7d' }).window).toBe('7d');
+  });
+});
+
+describe('bareBrowserSeed — an explicit --device scope', () => {
+  it('forces all-dirs scope so a peer\'s rows are not filtered away', () => {
+    // Every fetched row is the peer's, and no peer cwd sits under OUR
+    // process.cwd() — with the default 'repo' scope the browser renders empty.
+    expect(bareBrowserSeed({ host: ['zion'] }).projectScope).toBe('all');
+    expect(bareBrowserSeed({ host: ['zion', 'mac-mini'] }).projectScope).toBe('all');
+  });
+
+  it('seeds the device chip only when the scope names exactly one host', () => {
+    expect(bareBrowserSeed({ host: ['user@Zion.local'] }).device).toBe('zion');
+    // Two hosts: seeding the first would narrow the view to it and hide the other.
+    expect(bareBrowserSeed({ host: ['zion', 'mac-mini'] }).device).toBeUndefined();
+    expect(bareBrowserSeed({}).device).toBeUndefined();
+  });
+
+  it('leaves the no-host behaviour untouched', () => {
+    expect(bareBrowserSeed({}).projectScope).toBe('repo');
+    expect(bareBrowserSeed({}).window).toBe('30d');
+  });
+
+  it('seeds the team filter from --in-team', () => {
+    expect(bareBrowserSeed({ inTeam: 'redesign' }).team).toBe('redesign');
+    expect(bareBrowserSeed({}).team).toBeUndefined();
   });
 });
 

@@ -258,3 +258,47 @@ describe('buildPreview — usage metadata (RUSH-1994)', () => {
     }
   });
 });
+
+describe('remote preview body — richer, and sanitized', () => {
+  // A remote row's meta is peer-supplied JSON that parseRemoteList hands over
+  // verbatim, so every field the preview newly renders has to be scrubbed before
+  // it reaches the terminal.
+  const remote = (over: Partial<SessionMeta>): SessionMeta =>
+    mk({ machine: 'zion', _remote: true, ...over } as Partial<SessionMeta>);
+
+  it('renders the directories the scan recorded on the row', () => {
+    const out = stripVTControlCharacters(
+      buildPreview(remote({ recentDirectoriesTouched: ['apps/cli/src', 'docs'] }))
+    );
+    expect(out).toContain('apps/cli/src');
+    expect(out).toContain('docs');
+  });
+
+  it('summarizes the plan instead of pasting the markdown blob', () => {
+    const plan = '# Rework the scanner\n\nstep one\nstep two\nstep three';
+    const out = stripVTControlCharacters(buildPreview(remote({ plan })));
+    expect(out).toContain('Rework the scanner');
+    expect(out).toContain('5 lines');
+    expect(out).not.toContain('step three');
+  });
+
+  it('renders the team lineage for a peer teammate row', () => {
+    const out = stripVTControlCharacters(
+      buildPreview(remote({ teamOrigin: { handle: 'ui', team: 'redesign', parentSessionId: 'orch1234-aaaa' } }))
+    );
+    expect(out).toContain('redesign');
+    expect(out).toContain('spawned by orch1234');
+  });
+
+  it('strips terminal escapes out of a peer-supplied plan and dir list', () => {
+    const out = buildPreview(
+      remote({
+        plan: '\x1b[31mred plan title\x1b[0m',
+        recentDirectoriesTouched: ['\x1b]0;pwned\x07apps/cli'],
+      })
+    );
+    expect(out).not.toContain('\x1b[31m');
+    expect(out).not.toContain('\x1b]0;');
+    expect(stripVTControlCharacters(out)).toContain('red plan title');
+  });
+});

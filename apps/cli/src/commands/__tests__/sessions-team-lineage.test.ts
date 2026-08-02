@@ -1,0 +1,122 @@
+/**
+ * Team lineage + the `--device` browser gate.
+ *
+ * Two links that existed on disk but never reached the listing: the team a
+ * session spawned (derived at scan time, dropped at the DB write) and the team a
+ * teammate belongs to (parsed from its meta.json, then discarded). Plus the flag
+ * gate that decides whether an explicit `--device` opens the interactive browser
+ * or falls back to the legacy per-host SSH stream.
+ */
+
+import { describe, it, expect } from 'vitest';
+import { hasNoBrowserDisqualifyingFlags, matchesTeam } from '../sessions.js';
+import { formatTeamLineage } from '../sessions-picker.js';
+import type { SessionMeta } from '../../lib/session/types.js';
+
+const strip = (s: string) => s.replace(/\[[0-9;]*m/g, '');
+
+function meta(over: Partial<SessionMeta> = {}): SessionMeta {
+  return {
+    id: 'abcdef01-2345-6789-abcd-ef0123456789',
+    shortId: 'abcdef01',
+    agent: 'claude',
+    timestamp: '2026-08-01T12:00:00.000Z',
+    filePath: '/tmp/sess.jsonl',
+    ...over,
+  };
+}
+
+describe('hasNoBrowserDisqualifyingFlags — which views the browser can represent', () => {
+  it('a bare listing qualifies', () => {
+    expect(hasNoBrowserDisqualifyingFlags({}, undefined)).toBe(true);
+  });
+
+  it('a positional query does not — the peer runs FTS the browser cannot', () => {
+    // The browser's `s` search is a cheap substring test over visible fields;
+    // routing a query there would silently weaken it to less than the peer does.
+    expect(hasNoBrowserDisqualifyingFlags({}, 'auth bug')).toBe(false);
+  });
+
+  it('every render/filter flag the picker cannot express disqualifies', () => {
+    for (const opts of [
+      { flat: true },
+      { tree: true },
+      { markdown: true },
+      { until: '2026-01-01' },
+      { project: 'agents-cli' },
+      { sort: 'cost' },
+      { routine: true },
+      { artifacts: true },
+      { artifact: 'x' },
+    ]) {
+      expect(hasNoBrowserDisqualifyingFlags(opts, undefined)).toBe(false);
+    }
+  });
+
+  it('--cloud disqualifies: it lists provider tasks and has no host scope', () => {
+    // Without this, `--device box --cloud` fell through the --host guard and
+    // reached runCloudSessions, which silently drops the device the user named.
+    expect(hasNoBrowserDisqualifyingFlags({ cloud: true }, undefined)).toBe(false);
+  });
+
+  it('one host qualifies; two do not, because `y` can only copy back one --device', () => {
+    expect(hasNoBrowserDisqualifyingFlags({ host: ['zion'] }, undefined)).toBe(true);
+    expect(hasNoBrowserDisqualifyingFlags({ host: ['zion', 'mac-mini'] }, undefined)).toBe(false);
+  });
+});
+
+describe('matchesTeam — --in-team spans both ends of the lineage', () => {
+  it('matches the session that spawned the team', () => {
+    expect(matchesTeam(meta({ spawnedTeam: 'redesign' }), 'redesign')).toBe(true);
+  });
+
+  it('matches a teammate of that team', () => {
+    expect(matchesTeam(meta({ teamOrigin: { handle: 'ui', team: 'redesign' } }), 'redesign')).toBe(true);
+  });
+
+  it('is case-insensitive, like the SQL predicate behind querySessions', () => {
+    expect(matchesTeam(meta({ spawnedTeam: 'ReDesign' }), 'redesign')).toBe(true);
+  });
+
+  it('rejects an unrelated session and a different team', () => {
+    expect(matchesTeam(meta(), 'redesign')).toBe(false);
+    expect(matchesTeam(meta({ spawnedTeam: 'other' }), 'redesign')).toBe(false);
+  });
+});
+
+describe('formatTeamLineage — the preview pane Team: line', () => {
+  it('names the team an orchestrator spawned, and where to get its counts', () => {
+    const line = strip(formatTeamLineage(meta({ spawnedTeam: 'redesign' })));
+    expect(line).toContain('spawned team redesign');
+    expect(line).toContain('agents teams status redesign');
+  });
+
+  it('names a teammate\'s team, handle, mode, and the session that spawned it', () => {
+    const line = strip(
+      formatTeamLineage(
+        meta({
+          teamOrigin: {
+            handle: 'resume-picker',
+            mode: 'edit',
+            team: 'redesign',
+            parentSessionId: '21805f5f-1111-2222-3333-444444444444',
+          },
+        })
+      )
+    );
+    expect(line).toContain('redesign');
+    expect(line).toContain('teammate resume-picker (edit)');
+    expect(line).toContain('spawned by 21805f5f');
+  });
+
+  it('omits the orchestrator when the record carries no parent session', () => {
+    // A team started outside any agent session records no parent_session_id.
+    const line = strip(formatTeamLineage(meta({ teamOrigin: { handle: 'ui', team: 'redesign' } })));
+    expect(line).toContain('redesign');
+    expect(line).not.toContain('spawned by');
+  });
+
+  it('is empty for a session with no team involvement', () => {
+    expect(formatTeamLineage(meta())).toBe('');
+  });
+});

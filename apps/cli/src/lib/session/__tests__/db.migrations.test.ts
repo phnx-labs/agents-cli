@@ -55,3 +55,70 @@ describe('model column migration (v20)', () => {
     expect(cols).toContain('model');
   });
 });
+
+describe('spawned_team column migration (v21)', () => {
+  it('adds the spawned_team column to a v20 index', () => {
+    const db = getDB();
+    db.exec(`ALTER TABLE sessions DROP COLUMN spawned_team`);
+    db.prepare(`INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', '20')`).run();
+    closeDB();
+
+    const reopened = getDB();
+    const cols = (reopened.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map(c => c.name);
+    expect(cols).toContain('spawned_team');
+  });
+
+  it('clears BOTH ledgers so already-scanned dirs get re-parsed for the new column', () => {
+    // scan_ledger alone is not enough: with dir_ledger intact,
+    // collectChangedFilesInLeafDirs treats an unchanged dir's files as cold and
+    // skips them, so their spawned_team would stay NULL forever.
+    const db = getDB();
+    db.prepare(
+      `INSERT OR REPLACE INTO scan_ledger(file_path, file_mtime_ms, file_size, scanned_at) VALUES (?, ?, ?, ?)`
+    ).run('/tmp/stale/session.jsonl', 1, 1, 1);
+    db.prepare(
+      `INSERT OR REPLACE INTO dir_ledger(dir_path, dir_mtime_ms, entry_count, scanned_at) VALUES (?, ?, ?, ?)`
+    ).run('/tmp/stale', 1, 1, 1);
+    db.exec(`ALTER TABLE sessions DROP COLUMN spawned_team`);
+    db.prepare(`INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', '20')`).run();
+    closeDB();
+
+    const reopened = getDB();
+    expect((reopened.prepare(`SELECT COUNT(*) AS n FROM scan_ledger`).get() as { n: number }).n).toBe(0);
+    expect((reopened.prepare(`SELECT COUNT(*) AS n FROM dir_ledger`).get() as { n: number }).n).toBe(0);
+  });
+});
+
+describe('spawned_team round-trip', () => {
+  it('persists the team a session spawned and reads it back', () => {
+    // Before this column existed the value was derived at scan time, set on the
+    // meta, and then silently dropped by the writer — so every read came back
+    // undefined. This pins the whole write -> read path.
+    upsertSession(
+      {
+        id: 'orchestrator-1',
+        shortId: 'orchestr',
+        agent: 'claude',
+        timestamp: '2026-08-01T10:00:00.000Z',
+        filePath: '/tmp/orchestrator-1.jsonl',
+        spawnedTeam: 'redesign',
+      } as SessionMeta,
+      'agents teams create redesign'
+    );
+    expect(getSessionById('orchestrator-1')?.spawnedTeam).toBe('redesign');
+  });
+
+  it('leaves spawnedTeam undefined for a session that spawned nothing', () => {
+    upsertSession(
+      {
+        id: 'plain-1',
+        shortId: 'plain-1a',
+        agent: 'claude',
+        timestamp: '2026-08-01T10:00:00.000Z',
+        filePath: '/tmp/plain-1.jsonl',
+      } as SessionMeta,
+      'just a normal session'
+    );
+    expect(getSessionById('plain-1')?.spawnedTeam).toBeUndefined();
+  });
+});

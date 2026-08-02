@@ -20,8 +20,10 @@ import { loadSessionActorIndex, readSessionActorRecord } from './actor-sidecar.j
 const SESSIONS_DIR = getSessionsDir();
 const DB_PATH = getSessionsDbPath();
 
-/** Current schema version; bumped when migrations are added. */
-const SCHEMA_VERSION = 20;
+/** Current schema version; bumped when migrations are added. Exported so tests
+ * assert against the constant instead of hardcoding a number that every bump
+ * then has to chase (docs/05-sessions.md calls the constant the source of truth). */
+export const SCHEMA_VERSION = 21;
 
 /**
  * Canonicalize a file path for use as a scan_ledger key. The same physical
@@ -79,6 +81,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   pr_number INTEGER,
   worktree_slug TEXT,
   ticket_id TEXT,
+  spawned_team TEXT,
   plan TEXT,
   machine TEXT,
   todos TEXT,
@@ -175,6 +178,7 @@ export interface SessionRow {
   pr_number: number | null;
   worktree_slug: string | null;
   ticket_id: string | null;
+  spawned_team: string | null;
   plan: string | null;
   machine: string | null;
   todos: string | null;
@@ -213,6 +217,8 @@ export interface QueryOptions {
   excludeTeamOrigin?: boolean;
   /** Keep only team-origin rows (for hidden-count queries). */
   onlyTeamOrigin?: boolean;
+  /** Keep only sessions that spawned this team (`agents sessions --in-team`). */
+  spawnedTeam?: string;
   /**
    * Column to order by, all descending. 'timestamp' (default) sorts newest
    * first; 'cost' and 'duration' put the priciest / longest sessions on top,
@@ -455,6 +461,19 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     // v19 → v20: persist the transcript's model for the static session list.
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'model')) db.exec(`ALTER TABLE sessions ADD COLUMN model TEXT`);
+    db.exec(`DELETE FROM scan_ledger; DELETE FROM dir_ledger;`);
+  }
+
+  if (fromVersion < 21) {
+    // v20 → v21: persist the team a session SPAWNED (`agents teams create/add`).
+    // The value was already derived at scan time (discover.ts detectSpawnedTeam)
+    // and set on SessionMeta, but had no column — so it was dropped at the write
+    // and no consumer ever saw it. Wipe BOTH ledgers, not just scan_ledger: with
+    // dir_ledger intact, collectChangedFilesInLeafDirs treats every non-live-root
+    // dir as unchanged and derives its hot set from the scan stamps just deleted,
+    // so archived dirs would never be re-parsed and would stay NULL forever.
+    const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
+    if (!cols.some(c => c.name === 'spawned_team')) db.exec(`ALTER TABLE sessions ADD COLUMN spawned_team TEXT`);
     db.exec(`DELETE FROM scan_ledger; DELETE FROM dir_ledger;`);
   }
 }
@@ -862,7 +881,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     project, cwd, git_branch, topic, label, message_count, token_count,
     output_tokens, cost_usd, duration_ms, model,
     file_path, file_mtime_ms, file_size, scanned_at, is_team_origin,
-    pr_url, pr_number, worktree_slug, ticket_id, plan, todos,
+    pr_url, pr_number, worktree_slug, ticket_id, spawned_team, plan, todos,
     recent_directories_touched, linear_project, linear_project_url, machine,
     actor, initiated_by
   ) VALUES (
@@ -871,7 +890,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     @project, @cwd, @git_branch, @topic, @label, @message_count, @token_count,
     @output_tokens, @cost_usd, @duration_ms, @model,
     @file_path, @file_mtime_ms, @file_size, @scanned_at, @is_team_origin,
-    @pr_url, @pr_number, @worktree_slug, @ticket_id, @plan, @todos,
+    @pr_url, @pr_number, @worktree_slug, @ticket_id, @spawned_team, @plan, @todos,
     @recent_directories_touched, @linear_project, @linear_project_url, @machine,
     @actor, @initiated_by
   )
@@ -913,6 +932,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     pr_number = excluded.pr_number,
     worktree_slug = excluded.worktree_slug,
     ticket_id = excluded.ticket_id,
+    spawned_team = excluded.spawned_team,
     plan = excluded.plan,
     todos = excluded.todos,
     recent_directories_touched = excluded.recent_directories_touched,
@@ -1041,6 +1061,7 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
     pr_number: meta.prNumber ?? null,
     worktree_slug: meta.worktreeSlug ?? null,
     ticket_id: meta.ticketId ?? null,
+    spawned_team: meta.spawnedTeam ?? null,
     plan: meta.plan ?? null,
     todos: meta.todos ? JSON.stringify(meta.todos) : null,
     recent_directories_touched: meta.recentDirectoriesTouched ? JSON.stringify(meta.recentDirectoriesTouched) : null,
@@ -1175,6 +1196,7 @@ export function upsertSessionsBatch(
         pr_number: meta.prNumber ?? null,
         worktree_slug: meta.worktreeSlug ?? null,
         ticket_id: meta.ticketId ?? null,
+        spawned_team: meta.spawnedTeam ?? null,
         plan: meta.plan ?? null,
         todos: meta.todos ? JSON.stringify(meta.todos) : null,
         recent_directories_touched: meta.recentDirectoriesTouched ? JSON.stringify(meta.recentDirectoriesTouched) : null,
@@ -1380,6 +1402,7 @@ function rowToMeta(row: SessionRow): SessionMeta {
     prNumber: row.pr_number ?? undefined,
     worktreeSlug: row.worktree_slug ?? undefined,
     ticketId: row.ticket_id ?? undefined,
+    spawnedTeam: row.spawned_team ?? undefined,
     plan: row.plan ?? undefined,
     todos: parseJsonColumn(row.todos),
     recentDirectoriesTouched: parseJsonColumn(row.recent_directories_touched),
@@ -1526,6 +1549,10 @@ function buildSessionWhere(options: QueryOptions): { clause: string; params: any
   }
   if (options.onlyTeamOrigin) {
     where.push('IFNULL(is_team_origin, 0) = 1');
+  }
+  if (options.spawnedTeam) {
+    where.push('spawned_team = ? COLLATE NOCASE');
+    params.push(options.spawnedTeam);
   }
 
   const clause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
@@ -1712,6 +1739,39 @@ export function queryUsageRollup(
     ORDER BY costUsd DESC, key ASC
   `;
   return db.prepare(sql).all(...params) as UsageRollupRow[];
+}
+
+/** Who spawned a team: the orchestrator session, from its transcript. */
+export interface TeamSpawner {
+  sessionId: string;
+  shortId: string;
+  /** The human the orchestrator ran as, when the row carries actor provenance. */
+  actor?: string;
+}
+
+/**
+ * Map every team name to the session that ran `agents teams create/add` for it.
+ *
+ * One scan over the rows that carry a `spawned_team`, rather than a query per
+ * team — `agents teams list` needs the whole map at once, and the column has no
+ * index. When two sessions spawned the same team name (a team re-created after a
+ * disband), the most recent wins, which is the one whose work the name refers to.
+ */
+export function teamSpawners(): Map<string, TeamSpawner> {
+  const db = getDB();
+  const rows = db
+    .prepare(
+      `SELECT spawned_team, id, short_id, actor FROM sessions
+       WHERE spawned_team IS NOT NULL AND spawned_team != ''
+       ORDER BY timestamp ASC`
+    )
+    .all() as Array<{ spawned_team: string; id: string; short_id: string; actor: string | null }>;
+
+  const out = new Map<string, TeamSpawner>();
+  for (const r of rows) {
+    out.set(r.spawned_team, { sessionId: r.id, shortId: r.short_id, actor: r.actor ?? undefined });
+  }
+  return out;
 }
 
 /** A session with its cost, for the top-N-by-cost listing. */

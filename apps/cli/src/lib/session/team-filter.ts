@@ -36,24 +36,68 @@ function teamsAgentsDir(): string {
 export function classifyTeamSession(session: SessionMeta): TeamOrigin | null {
   const metaPath = path.join(teamsAgentsDir(), session.id, 'meta.json');
 
-  if (fs.existsSync(metaPath)) {
-    try {
-      const raw = fs.readFileSync(metaPath, 'utf-8');
-      const meta = JSON.parse(raw) as Record<string, unknown>;
-      const name = typeof meta.name === 'string' && meta.name ? meta.name : undefined;
-      const handle = name ?? session.id.slice(0, 8);
-      const mode = typeof meta.mode === 'string' ? meta.mode : undefined;
-      return { handle, mode };
-    } catch {
-      return { handle: session.id.slice(0, 8) };
-    }
-  }
+  if (fs.existsSync(metaPath)) return readTeamOrigin(metaPath, session.id);
 
   if (session.isTeamOrigin) {
     return { handle: session.id.slice(0, 8) };
   }
 
   return null;
+}
+
+/**
+ * Parse one teammate `meta.json` into a {@link TeamOrigin}. Degrades to a bare
+ * handle when the file is unreadable or malformed — a teammate whose record we
+ * can't parse is still a teammate.
+ */
+function readTeamOrigin(metaPath: string, sessionId: string): TeamOrigin {
+  try {
+    const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8')) as Record<string, unknown>;
+    const name = typeof meta.name === 'string' && meta.name ? meta.name : undefined;
+    const mode = typeof meta.mode === 'string' ? meta.mode : undefined;
+    const team = typeof meta.task_name === 'string' && meta.task_name ? meta.task_name : undefined;
+    const parentSessionId =
+      typeof meta.parent_session_id === 'string' && meta.parent_session_id
+        ? meta.parent_session_id
+        : undefined;
+    return { handle: name ?? sessionId.slice(0, 8), mode, team, parentSessionId };
+  } catch {
+    return { handle: sessionId.slice(0, 8) };
+  }
+}
+
+/**
+ * Attach `teamOrigin` to every team-spawned row in `sessions`, listing the
+ * teams-agents directory ONCE rather than stat-ing per row.
+ *
+ * {@link classifyTeamSession} pays an `fs.existsSync` plus an `fs.readFileSync`
+ * for every session it is handed, which is fine for a one-shot listing but a
+ * syscall sink in the interactive browser, where a 500-row pool is re-filtered
+ * on every hotkey. Here a single `readdir` decides which ids have a record, so
+ * only the intersection is read.
+ */
+export function enrichTeamOrigins(sessions: SessionMeta[]): SessionMeta[] {
+  const dir = teamsAgentsDir();
+  let known: Set<string>;
+  try {
+    known = new Set(fs.readdirSync(dir));
+  } catch {
+    known = new Set();
+  }
+
+  return sessions.map((session) => {
+    // A peer's rows are classified on the peer (its meta.json is on its disk, not
+    // ours) and ride across in the --json fan-out already populated. Re-deriving
+    // here would find no local record and downgrade a named teammate to a bare id.
+    if (session.teamOrigin) return session;
+
+    const origin = known.has(session.id)
+      ? readTeamOrigin(path.join(dir, session.id, 'meta.json'), session.id)
+      : session.isTeamOrigin
+        ? { handle: session.id.slice(0, 8) }
+        : null;
+    return origin ? { ...session, teamOrigin: origin } : session;
+  });
 }
 
 /** Result of splitting sessions into visible and hidden (team-origin) groups. */

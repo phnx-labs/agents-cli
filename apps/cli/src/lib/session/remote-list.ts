@@ -98,19 +98,32 @@ function sshCapture(target: string, remoteCmd: string, timeoutMs: number): Promi
   });
 }
 
-async function fetchByTarget(target: string, machine: string, display: string, forwardedArgs: string[], os?: string): Promise<SessionMeta[]> {
+async function fetchByTarget(
+  target: string,
+  machine: string,
+  display: string,
+  forwardedArgs: string[],
+  os?: string
+): Promise<{ sessions: SessionMeta[]; unreachable?: string }> {
   const { code, stdout } = await sshCapture(target, remoteListCommand(forwardedArgs, os), REMOTE_TIMEOUT_MS);
   if (code !== 0) {
     process.stderr.write(chalk.gray(`  ${display}: unreachable or no agents CLI — skipped\n`));
-    return [];
+    return { sessions: [], unreachable: display };
   }
-  return parseRemoteList(stdout, machine);
+  return { sessions: parseRemoteList(stdout, machine) };
 }
 
 export interface RemoteListResult {
   sessions: SessionMeta[];
   /** How many peer machines we attempted to reach (drives the empty-fleet tip). */
   deviceCount: number;
+  /**
+   * Peers that failed to answer, by display name. The stderr note above is
+   * enough for a printed listing, but the interactive browser repaints over it —
+   * so callers rendering a full-screen UI need the outcome as data to tell
+   * "that box is asleep" apart from "that box has no matching sessions".
+   */
+  unreachable: string[];
 }
 
 /**
@@ -133,7 +146,7 @@ export async function gatherRemoteList(forwardedArgs: string[], hosts?: string[]
     try {
       reg = await loadDevices();
     } catch {
-      return { sessions: [], deviceCount: 0 };
+      return { sessions: [], deviceCount: 0, unreachable: [] };
     }
     for (const d of Object.values(reg)) {
       if (d.tailscale?.online !== true) continue;
@@ -154,7 +167,11 @@ export async function gatherRemoteList(forwardedArgs: string[], hosts?: string[]
   }
 
   const results = await Promise.all(targets.map((t) => fetchByTarget(t.target, t.machine, t.name, forwardedArgs, t.os)));
-  return { sessions: results.flat(), deviceCount: targets.length };
+  return {
+    sessions: results.flatMap((r) => r.sessions),
+    deviceCount: targets.length,
+    unreachable: results.map((r) => r.unreachable).filter((n): n is string => !!n),
+  };
 }
 
 /** Resolve a peer's SSH target (and OS) from the device registry by its

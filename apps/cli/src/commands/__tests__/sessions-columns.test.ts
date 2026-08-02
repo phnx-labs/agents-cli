@@ -248,3 +248,72 @@ describe('formatPickerTip', () => {
     expect(strip(formatPickerTip(pool))).toBe(a);
   });
 });
+
+describe('team badge — the orchestrator end of the lineage', () => {
+  it('renders team:<name> on a session that spawned a team', () => {
+    const row = strip(formatPickerLabel(meta({ spawnedTeam: 'redesign' }), '', {}));
+    expect(row).toContain('team:redesign');
+  });
+
+  it('renders nothing for a session that spawned no team', () => {
+    expect(strip(formatPickerLabel(meta(), '', {}))).not.toContain('team:');
+  });
+
+  it('renders the badge in green, not folded into the whitened topic', () => {
+    // Same regression the ssh tag hit: concatenating it into the topic string
+    // means renderTopicCell strips the ANSI and re-wraps every slice in white.
+    const prev = chalk.level;
+    chalk.level = Math.max(prev, 1) as 0 | 1 | 2 | 3;
+    try {
+      const raw = formatPickerLabel(meta({ spawnedTeam: 'redesign' }), '', {});
+      expect(raw).toContain('\x1b[32mteam:redesign');
+    } finally {
+      chalk.level = prev;
+    }
+  });
+
+  it('truncates a long team name so it cannot devour the topic column', () => {
+    const row = strip(formatPickerLabel(meta({ spawnedTeam: 'a-very-long-team-name-indeed' }), '', {}));
+    expect(row).toContain('team:');
+    expect(row).not.toContain('a-very-long-team-name-indeed');
+  });
+
+  it('takes its width out of the topic, not out of the row', () => {
+    // The badge is a segment, not a column: adding it must shrink the topic cell
+    // rather than widen the row, or every fixed-width column after it misaligns.
+    // (At the Math.max(16, ...) topic floor there is nothing left to give back,
+    // which is why this asserts against a width with slack in it.)
+    const prev = process.env.COLUMNS;
+    process.env.COLUMNS = '160';
+    try {
+      const common = { machine: 'yosemite-s0', ticketId: 'RUSH-2076', topic: 'x'.repeat(400) };
+      const without = strip(formatPickerLabel(meta(common), '', { showTicket: true }));
+      const withBadge = strip(formatPickerLabel(meta({ ...common, spawnedTeam: 'redesign' }), '', { showTicket: true }));
+
+      expect(withBadge).toContain('team:redesign');
+      expect(stringWidth(withBadge)).toBe(stringWidth(without));
+    } finally {
+      if (prev === undefined) delete process.env.COLUMNS;
+      else process.env.COLUMNS = prev;
+    }
+  });
+
+  it('marks a teammate row with [team/handle] and drops the mode', () => {
+    // The mode survives in the preview pane; in the row it would eat characters
+    // the prompt needs, against a 16-column topic floor.
+    const row = strip(
+      formatPickerLabel(meta({ teamOrigin: { handle: 'resume-picker', mode: 'edit', team: 'redesign' } }), '', {})
+    );
+    expect(row).toContain('[redesign/resume-picker]');
+    expect(row).not.toContain('edit');
+  });
+
+  it('falls back to the bare handle when the record predates team-name capture', () => {
+    const row = strip(formatPickerLabel(meta({ teamOrigin: { handle: 'abcd1234' } }), '', {}));
+    expect(row).toContain('[abcd1234]');
+  });
+
+  it('shows the badge in the flat listing too', () => {
+    expect(strip(flatSessionRow(meta({ spawnedTeam: 'redesign' })))).toContain('team:redesign');
+  });
+});

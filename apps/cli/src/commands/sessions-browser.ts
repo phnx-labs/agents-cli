@@ -18,6 +18,7 @@ import { isSessionTrackedAgent, type SessionMeta } from '../lib/session/types.js
 import type { ActiveSession } from '../lib/session/active.js';
 import { discoverSessions } from '../lib/session/discover.js';
 import { gatherRemoteList } from '../lib/session/remote-list.js';
+import { enrichTeamOrigins } from '../lib/session/team-filter.js';
 import { machineId, normalizeHost } from '../lib/session/sync/config.js';
 import { buildPreview } from './sessions-picker.js';
 import {
@@ -33,6 +34,7 @@ import {
   handlePickedSession,
   shouldIncludeLocal,
   remoteHostsToDial,
+  matchesTeam,
   type PickerColumns,
 } from './sessions.js';
 
@@ -49,6 +51,8 @@ export interface BrowserFilter {
   agent?: string;
   /** filter to one machine, or all — the `D` key / `--device`. */
   device?: string;
+  /** filter to one team's lineage, or all — the `T` key / `--in-team`. */
+  team?: string;
   /** this-repo subtree vs every directory — the `P` key / `--all`. */
   projectScope: 'repo' | 'all';
   /** time window (undefined = all time) — the `W` key / `--since`. */
@@ -110,6 +114,7 @@ export function browserFilterToArgv(f: BrowserFilter, query = ''): string[] {
   if (f.teams) a.push('--teams');
   if (f.agent) a.push('-a', f.agent);
   if (f.device) a.push('--device', f.device);
+  if (f.team) a.push('--in-team', f.team);
   if (f.projectScope === 'all') a.push('--all');
   if (f.window) a.push('--since', f.window);
   const q = query.trim();
@@ -162,12 +167,23 @@ export function bareBrowserSeed(opts: {
   agent?: string;
   all?: boolean;
   since?: string;
+  host?: string[];
+  inTeam?: string;
 }): Partial<BrowserFilter> {
+  // An explicit --device scopes the pool to a peer, whose cwds live under that
+  // machine's home — none of them can be under OUR process.cwd(), so the default
+  // 'repo' scope would filter every fetched row away and render an empty list.
+  // A host scope therefore implies all-directories, exactly as --all does.
+  const scoped = (opts.host?.length ?? 0) > 0;
   return {
     teams: !!opts.teams,
     agent: opts.agent,
+    // The filter carries one device; seed it only when the scope names exactly
+    // one, so a two-device scope isn't narrowed to the first of them.
+    device: opts.host?.length === 1 ? normalizeDeviceSeed(opts.host[0]) : undefined,
+    team: opts.inTeam,
     // --all maxes every non-status filter: all dirs AND all-time. --since wins.
-    projectScope: opts.all ? 'all' : 'repo',
+    projectScope: opts.all || scoped ? 'all' : 'repo',
     window: opts.since ?? (opts.all ? undefined : '30d'),
   };
 }
@@ -205,8 +221,9 @@ async function fetchRawPool(
   self: string,
   local: boolean,
   hosts: string[] | undefined,
-): Promise<{ key: string; rows: SessionMeta[] }> {
+): Promise<{ key: string; rows: SessionMeta[]; unreachable: string[] }> {
   const since = f.window;
+  let unreachable: string[] = [];
   // Local pool: wide (every directory) — device/agent/project are applied in
   // memory so a hotkey toggle is instant and doesn't re-hit the disk. Skipped
   // when an explicit host scope excludes this machine.
@@ -225,19 +242,32 @@ async function fetchRawPool(
   // Skipped under --local. An explicit --host/--device scopes exactly which peers
   // are dialed (undefined = sweep every online device). Best-effort — a fan-out
   // failure leaves the local list intact.
-  if (!local) {
+  const remoteHosts = remoteHostsToDial(hosts, self);
+  // An explicit scope naming only this machine leaves nothing remote to dial.
+  // gatherRemoteList reads `[]` as "no hosts given" and falls through to the
+  // whole-fleet sweep, so `--device <self>` would dial every online box — the
+  // exact opposite of the flag's scope-not-add contract. Skip the fan-out here,
+  // the same way gatherActiveSessions does for --active.
+  const dialPeers = !local && (!hosts?.length || (remoteHosts && remoteHosts.length > 0));
+  if (dialPeers) {
     try {
       const forwarded = ['sessions', '--all', '--json', '--limit', '500'];
       if (since) forwarded.push('--since', since);
       if (f.teams) forwarded.push('--teams');
-      const { sessions: remote } = await gatherRemoteList(forwarded, remoteHostsToDial(hosts, self));
-      if (remote.length > 0) rows = mergeLocalFirst([...rows, ...remote], self);
+      const remoteResult = await gatherRemoteList(forwarded, remoteHosts);
+      unreachable = remoteResult.unreachable;
+      if (remoteResult.sessions.length > 0) rows = mergeLocalFirst([...rows, ...remoteResult.sessions], self);
     } catch {
       // enrichment, never a hard dependency
     }
   }
 
-  return { key: `${since ?? 'all'}|${f.teams}`, rows };
+  // Team rows are anonymous without their meta.json (team name, handle, the
+  // orchestrator that spawned them). Only pay for that read when team rows are
+  // actually in the pool — with `c` off they were excluded at the query.
+  if (f.teams) rows = enrichTeamOrigins(rows);
+
+  return { key: `${since ?? 'all'}|${f.teams}`, rows, unreachable };
 }
 
 /**
@@ -352,6 +382,7 @@ function applyFilters(
   let out = rows;
   if (f.agent) out = out.filter((r) => r.agent === f.agent);
   if (f.device) out = out.filter((r) => (r.machine ?? self) === f.device);
+  if (f.team) out = out.filter((r) => matchesTeam(r, f.team!));
   if (f.projectScope === 'repo') {
     const cwd = process.cwd();
     out = out.filter((r) => !!r.cwd && (r.cwd === cwd || r.cwd.startsWith(cwd + '/')));
@@ -374,6 +405,7 @@ function headerFor(f: BrowserFilter): string {
   const bits = [
     `device:${f.device ?? 'all'}`,
     `agent:${f.agent ?? 'all'}`,
+    `team:${f.team ?? 'all'}`,
     f.projectScope === 'repo' ? 'this repo' : 'all dirs',
     `window:${f.window ?? 'all'}`,
   ];
@@ -386,7 +418,7 @@ function helpFor(_f: BrowserFilter, mode: 'nav' | 'search'): string {
   if (mode === 'search') {
     return 'type to filter · ↑↓ navigate · esc exit search · ⏎ resume';
   }
-  return 's search · r running · c teams · a agent · d device · p project · w window · tab preview · y copy-cmd · ⏎ resume · esc quit';
+  return 's search · r running · c teams · t team · a agent · d device · p project · w window · tab preview · y copy-cmd · ⏎ resume · esc quit';
 }
 
 /**
@@ -405,10 +437,16 @@ export async function runSessionBrowser(
   // Updated after each load so the A/D cycles range over what's actually present.
   let agentsInPool: string[] = [];
   let devicesInPool: string[] = [];
+  let teamsInPool: string[] = [];
   let cols: PickerColumns = {};
   // Cache the transcript fetch, keyed by (window, teams); agent/device/project/
   // running are applied in memory so their hotkeys don't re-fan-out the fleet.
-  let rawCache: { key: string; rows: SessionMeta[] } | null = null;
+  let rawCache: { key: string; rows: SessionMeta[]; unreachable: string[] } | null = null;
+  // Peers that didn't answer the last fan-out. The fan-out's own note goes to
+  // stderr, which the full-screen picker repaints over — so it is surfaced in
+  // the header instead, where "that box is asleep" stays distinguishable from
+  // "that box has nothing matching".
+  let unreachable: string[] = [];
   // The live index is slow (a full ps/tmux scan) and only the running filter
   // needs it — fetch it once, lazily, the first time running is toggled on.
   let liveCache: Map<string, ActiveSession> | null = null;
@@ -453,12 +491,21 @@ export async function runSessionBrowser(
     // Latest load — commit shared state atomically (no await past this point, so
     // no newer load can interleave between these writes).
     rawCache = pool;
+    unreachable = pool.unreachable;
     if (live) liveCache = live;
     // Live sessions the transcript pool lacks become rows of their own, so the
     // running view lists every active session, not just the ones already indexed.
     const rows = f.running && live ? mergeLiveIntoPool(pool.rows, live, self) : pool.rows;
     agentsInPool = distinct(rows.map((r) => r.agent));
     devicesInPool = distinct(rows.map((r) => r.machine ?? self));
+    // Both ends of the lineage seed the cycle: teams a row spawned, and teams a
+    // row belongs to. Teammate rows only carry `teamOrigin` when `c` is on, so
+    // with teams hidden this ranges over spawned teams alone — which is exactly
+    // the set whose rows are visible.
+    teamsInPool = distinct([
+      ...rows.map((r) => r.spawnedTeam),
+      ...rows.map((r) => r.teamOrigin?.team),
+    ]);
     const filtered = applyFilters(rows, live ?? new Map(), f, self);
     cols = pickerColumnsFor(filtered);
     cols.showHost = shouldShowHostColumn(f, live, filtered);
@@ -474,7 +521,10 @@ export async function runSessionBrowser(
       formatPickerLabel(s, q, cols, sshOriginTagFor(liveCache, s.id), liveHostLabel(liveCache?.get(s.id))),
     matches: sessionMatchesQuery,
     buildPreview,
-    headerFor,
+    headerFor: (f) =>
+      unreachable.length > 0
+        ? `${headerFor(f)} · ${chalk.yellow(`${unreachable.join(', ')}: unreachable`)}`
+        : headerFor(f),
     helpFor,
     enterHint: 'resume',
     emptyMessage: 'No sessions match this filter.',
@@ -484,7 +534,11 @@ export async function runSessionBrowser(
       c: (f) => ({ ...f, teams: !f.teams }),
       a: (f) => ({ ...f, agent: cycle(f.agent, agentsInPool) }),
       d: (f) => ({ ...f, device: cycle(f.device, devicesInPool) }),
-      p: (f) => ({ ...f, projectScope: f.projectScope === 'repo' ? 'all' : 'repo' }),
+      t: (f) => ({ ...f, team: cycle(f.team, teamsInPool) }),
+      // Under an explicit --device scope every row is a peer's, and no peer cwd
+      // is under our process.cwd() — so narrowing to "this repo" could only ever
+      // empty the list. Returning the same reference makes the key a no-op.
+      p: (f) => (hosts ? f : { ...f, projectScope: f.projectScope === 'repo' ? 'all' : 'repo' }),
       w: (f) => ({ ...f, window: cycleWindow(f.window) }),
     },
     onKey: (name, f, _active, query) => {

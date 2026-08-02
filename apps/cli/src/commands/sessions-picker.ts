@@ -86,6 +86,12 @@ function sanitizeMeta(s: SessionMeta): SessionMeta {
     label: clean(s.label),
     ticketId: clean(s.ticketId),
     prUrl: clean(s.prUrl),
+    // A remote row's meta is peer-supplied JSON that parseRemoteList hands over
+    // unsanitized, and both of these reach the preview pane — so an escape
+    // sequence in a peer's plan text or path list would otherwise hit our TTY.
+    plan: clean(s.plan),
+    spawnedTeam: clean(s.spawnedTeam),
+    recentDirectoriesTouched: s.recentDirectoriesTouched?.map(sanitizeForTerminal),
     todos,
   };
 }
@@ -230,14 +236,66 @@ function formatHeader(session: SessionMeta, events: SessionEvent[]): string {
  * remote / unindexed sessions so checklist progress still surfaces when the
  * parser teammate (or a prior scan) has populated `session.todos`.
  */
+/**
+ * The session's place in a team, from whichever end it sits at: the orchestrator
+ * that ran `agents teams create` (from the scan-derived `spawnedTeam`), or a
+ * teammate (from its `meta.json`, via `classifyTeamSession`). Empty for a session
+ * with no team involvement, which is the overwhelming majority.
+ *
+ * Deliberately no live teammate counts: tallying a team means reading every
+ * record under the teams-agents dir, which runs to thousands of files on a busy
+ * machine — far too much for a pane that repaints as the cursor moves. The line
+ * names the command that does report them instead.
+ */
+export function formatTeamLineage(session: SessionMeta): string {
+  const origin = session.teamOrigin;
+  if (origin) {
+    const parts = [chalk.white(origin.team ?? 'team')];
+    const handle = origin.handle ? `teammate ${origin.handle}` : 'teammate';
+    parts.push(chalk.white(origin.mode ? `${handle} (${origin.mode})` : handle));
+    if (origin.parentSessionId) {
+      parts.push(chalk.gray('spawned by ') + chalk.white(origin.parentSessionId.slice(0, 8)));
+    }
+    return parts.join(chalk.gray(' · '));
+  }
+  if (session.spawnedTeam) {
+    return (
+      chalk.gray('spawned team ') +
+      chalk.white(session.spawnedTeam) +
+      chalk.gray(` · agents teams status ${session.spawnedTeam}`)
+    );
+  }
+  return '';
+}
+
 function formatMetaOnlyBody(session: SessionMeta): string {
   const lines: string[] = [];
   if (session.topic) {
     lines.push(chalk.cyan('Prompt: ') + chalk.white(truncate(session.topic.trim(), (process.stdout.columns || 80) - 12)));
   }
+  const teamLine = formatTeamLineage(session);
+  if (teamLine) {
+    lines.push(chalk.cyan('Team:   ') + teamLine);
+  }
   const compact = formatTodoCompact(session.todos);
   if (compact) {
     lines.push(chalk.cyan('Todos: ') + chalk.white(compact));
+  }
+  const termWidth = process.stdout.columns || 80;
+  for (const l of session.todos?.items?.length ? renderTodos(session.todos.items, termWidth) : []) {
+    lines.push(l);
+  }
+  const dirs = session.recentDirectoriesTouched?.slice(0, DIRS_TOUCHED_MAX) ?? [];
+  if (dirs.length) {
+    lines.push(chalk.cyan('Dirs:   ') + chalk.white(dirs.join(chalk.gray(' · '))));
+  }
+  // `plan` is the whole ExitPlanMode markdown, not a path — summarize it. The
+  // pane is height-clamped anyway, so pasting the blob would just push every
+  // other line out of view.
+  const planLines = session.plan?.trim() ? session.plan.trim().split('\n') : [];
+  if (planLines.length) {
+    const head = truncate(planLines[0].replace(/^#+\s*/, ''), termWidth - 20);
+    lines.push(chalk.cyan('Plan:   ') + chalk.white(head) + chalk.gray(` · ${planLines.length} lines`));
   }
   if (lines.length === 0) return '';
   return lines.map(l => '  ' + l).join('\n');
@@ -304,8 +362,8 @@ const LAST_RESPONSE_MAX_LINES_WITH_TODOS = 8;
 const TODOS_MAX_ITEMS = 5;
 const DIRS_TOUCHED_MAX = 5;
 
-/** Optional dirs-touched field the parser teammate may attach; we prefer it. */
-type SessionMetaWithDirs = SessionMeta & { dirsTouched?: string[] };
+/** Directories the scan recorded on the row; preferred over deriving from events. */
+type SessionMetaWithDirs = SessionMeta;
 
 function formatCompactPreview(events: ReturnType<typeof parseSession>, session: SessionMeta): string {
   let firstUser = '';
@@ -392,6 +450,11 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
     lines.push(chalk.cyan('Dirs:    ') + chalk.white(dirs.join(chalk.gray(' · '))));
   }
 
+  const teamLine = formatTeamLineage(session);
+  if (teamLine) {
+    lines.push(chalk.cyan('Team:    ') + teamLine);
+  }
+
   const activity: string[] = [];
   const changed = chg.created + chg.modified + chg.deleted;
   if (changed) {
@@ -473,15 +536,16 @@ function isSubAgentTool(tool: string, command: string): boolean {
 
 /**
  * Unique directories the session touched, compact and human-readable.
- * Prefer `session.dirsTouched` when the parser teammate has populated it;
- * otherwise derive from file-change + tool paths already available here.
+ * Prefer `session.recentDirectoriesTouched` — the scan records it on the row, so
+ * it is present for remote rows whose transcript we can't parse here — otherwise
+ * derive from the file-change + tool paths already available.
  */
 export function directoriesTouched(
   session: SessionMetaWithDirs,
   events: SessionEvent[],
   changes: ReturnType<typeof classifyFileChanges>,
 ): string[] {
-  const fromMeta = session.dirsTouched;
+  const fromMeta = session.recentDirectoriesTouched;
   if (Array.isArray(fromMeta) && fromMeta.length > 0) {
     return fromMeta
       .map((d) => sanitizeForTerminal(String(d).trim()))

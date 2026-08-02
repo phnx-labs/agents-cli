@@ -100,6 +100,14 @@ export interface TeamOrigin {
   handle?: string;
   /** Agent mode: 'plan', 'edit', 'auto', or 'skip' ('full' accepted as legacy alias for 'skip'). */
   mode?: string;
+  /** The team this teammate belongs to (`task_name` in its meta.json). */
+  team?: string;
+  /**
+   * The orchestrator session that spawned this teammate (`parent_session_id`).
+   * Absent for a team started outside any agent session, and for teammates whose
+   * meta dir has aged past the teams cleanup window.
+   */
+  parentSessionId?: string;
 }
 
 /** Lightweight metadata for a discovered session, used in listings and pickers. */

@@ -22,6 +22,7 @@ const {
   topSessionsByCost,
   syncTopics,
   ftsSearch,
+  SCHEMA_VERSION,
 } = await import('../db.js');
 const { costOfUsage } = await import('../../pricing/index.js');
 type SessionMeta = import('../types.js').SessionMeta;
@@ -166,7 +167,7 @@ describe('migration v5 -> v6 adds cost/duration columns', () => {
   it('schema_version is recorded as the current version', () => {
     const db = getDB();
     const row = db.prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string };
-    expect(row.value).toBe('20');
+    expect(row.value).toBe(String(SCHEMA_VERSION));
   });
 
   it('persists the session model when present', () => {

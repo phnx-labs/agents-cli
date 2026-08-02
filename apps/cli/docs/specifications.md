@@ -241,15 +241,32 @@ SSH access (§7); rendering sessions that no harness produced.
 #### 3.5 Sync & remote
 
 - **SES-22 (MUST).** `--host`/`--device` MUST run the peer's **own**
-  `agents sessions` over hardened SSH and stream stdout back; transcripts stay on
-  the origin machine, there is no identity layer beyond SSH access
-  (`lib/session/remote.ts:1-11`). A recursion guard (`AGENTS_SESSIONS_LOCAL=1`)
-  MUST prevent re-fan-out (`lib/session/remote-active.ts:20`).
+  `agents sessions` over hardened SSH; transcripts stay on the origin machine and
+  there is no identity layer beyond SSH access (`lib/session/remote.ts:1-11`). A
+  recursion guard (`AGENTS_SESSIONS_LOCAL=1`) MUST prevent re-fan-out
+  (`lib/session/remote-active.ts:20`) and MUST also suppress the interactive
+  browser, so a peer answering a fan-out can never open a TUI
+  (`commands/sessions.ts` `isBareBrowserListing`).
+  - **Streaming vs. merging.** A **non-interactive** invocation (`--json`, piped
+    stdout, `--no-interactive`, a positional query, a render/filter flag,
+    `--cloud`, or more than one host) MUST stream the peer's stdout back verbatim
+    under a per-host banner. A **bare interactive** one-host listing instead folds
+    the peer's `--json` rows into the local merged browser (`gatherRemoteList`),
+    which renders and selects locally. Both keep transcripts on the origin.
 - **SES-23 (MUST).** Remote fan-out MUST degrade, never throw or blank: an
   unreachable host (ssh 255) falls back to offline cache, a slow host is killed
   to `[]`, and overall `process.exitCode=1` signals partial failure
   (`lib/session/remote.ts:141-146,220-261`; `remote-list.ts:88-108`; test
   `remote.test.ts:167-181`).
+  - **In the browser**, where the full-screen repaint hides the fan-out's stderr
+    note and there is no exit code to read, the unreachable peers MUST be surfaced
+    as data instead — `RemoteListResult.unreachable`, rendered in the browser
+    header — so "that box is asleep" stays distinguishable from "that box has no
+    matching sessions" (`lib/session/remote-list.ts`; `commands/sessions-browser.ts`).
+  - **A host scope MUST NOT widen.** An explicit `--host`/`--device` naming only
+    this machine leaves nothing remote to dial; the fan-out MUST be skipped rather
+    than passing an empty list to `gatherRemoteList`, which reads `[]` as "no hosts
+    given" and sweeps every online device.
 - **SES-24 (MUST).** R2 sync MUST converge as a CRDT **G-Set union** of transcript
   events keyed by SHA-256 of raw line bytes — associative, commutative,
   idempotent, byte-identical across machines regardless of order
@@ -371,9 +388,14 @@ normative — a change that widens/narrows a cell is a spec change.
   (no migration, no error) rather than failing safe (`lib/session/db.ts` schema
   gate ~`:453-461`). The requirement is "MUST fail safe"; the code does not yet
   enforce it. See GAP-8.
-- **COMPAT-4 (MUST).** `--host` forwards every other flag verbatim to the peer's
-  same-version binary; the SSH target MUST stay validated against `SSH_TARGET_RE`
-  to block argv-flag smuggling ([05-sessions.md](05-sessions.md):277).
+- **COMPAT-4 (MUST).** On the streaming path, `--host` forwards every other flag
+  verbatim to the peer's same-version binary; the SSH target MUST stay validated
+  against `SSH_TARGET_RE` to block argv-flag smuggling
+  ([05-sessions.md](05-sessions.md):277). The interactive one-host browser
+  (SES-22) is the documented exception: it asks each peer a fixed
+  `sessions --all --json --limit 500` (plus `--since`/`--teams`), so `--limit`,
+  `--unmanaged`, and `--no-live` do not reach the peer there
+  (`commands/sessions-browser.ts` `fetchRawPool`).
 
 ---
 
