@@ -1097,6 +1097,7 @@ export const ACCOUNT_INSPECTION_AGENT_IDS = [
   'claude',
   'codex',
   'gemini',
+  'cursor',
   'grok',
   'antigravity',
   'kimi',

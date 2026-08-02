@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatAgentUsage, type AgentUsageRecord } from './usage.js';
+import { ALL_AGENT_IDS, AGENTS } from '../lib/agents.js';
+import { agentReportsUsage } from '../lib/usage.js';
+import { formatAgentUsage, unsupportedUsageRecord, type AgentUsageRecord } from './usage.js';
+
+describe('usage support gate', () => {
+  it('derives command support from every library usage source', () => {
+    for (const agentId of ALL_AGENT_IDS) {
+      const record = unsupportedUsageRecord(agentId, AGENTS[agentId].name);
+      expect(record === null).toBe(agentReportsUsage(agentId));
+    }
+  });
+});
 
 // Locks the text-path output of the collect/format refactor: `formatAgentUsage`
 // must render each status branch exactly as the old inline `renderAgentUsage` did,
