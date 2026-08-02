@@ -158,8 +158,38 @@ describe('generateSystemdUnit', () => {
 
   it('pins the running Node bin dir first on PATH and drops the stale hardcoded nvm version', () => {
     const unit = generateSystemdUnit();
-    expect(unit).toContain(`Environment=PATH=${path.dirname(process.execPath)}:/usr/local/bin:/usr/bin:/bin`);
+    expect(unit).toContain(`Environment=PATH=${path.dirname(process.execPath)}`);
+    expect(unit).toContain(':/usr/local/bin:/usr/bin:/bin');
     expect(unit).not.toContain('v24.0.0');
+  });
+
+  it('also puts the agents shim dir on PATH so a child routine resolves `agents` (exit-127 fix)', () => {
+    // A shim installed OUTSIDE the Node bin dir — the ~/.local/bin global-install
+    // shape that left the daemon PATH carrying only the Node dir, so every
+    // `command` routine shelling out to `agents …` died with exit 127.
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-shim-'));
+    const shimDir = path.join(tmpDir, 'local-bin');
+    fs.mkdirSync(shimDir, { recursive: true });
+    const shim = path.join(shimDir, 'agents');
+    fs.writeFileSync(shim, '');
+    try {
+      const nodeDir = path.dirname(process.execPath);
+      expect(generateSystemdUnit(shim)).toContain(
+        `Environment=PATH=${nodeDir}:${shimDir}:/usr/local/bin:/usr/bin:/bin`,
+      );
+      expect(generateLaunchdPlist(shim)).toContain(
+        `<string>${nodeDir}:${shimDir}:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:${os.homedir()}/.bun/bin</string>`,
+      );
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('dedups when the shim lives beside Node — one leading PATH entry, not a doubled dir', () => {
+    const nodeDir = path.dirname(process.execPath);
+    const unit = generateSystemdUnit(path.join(nodeDir, 'agents'));
+    expect(unit).toContain(`Environment=PATH=${nodeDir}:/usr/local/bin:/usr/bin:/bin`);
+    expect(unit).not.toContain(`${nodeDir}:${nodeDir}`);
   });
 
   it('pins a JavaScript install to the Node runtime that installed the service', () => {
