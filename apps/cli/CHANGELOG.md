@@ -1,5 +1,82 @@
 # Changelog
 
+## 1.20.79
+
+- **A daemon bounce no longer orphans the secrets broker.** Installing agents-cli ran `stopDaemon()`, which sent SIGTERM, scheduled its hard-kill escalation on a `setTimeout`, and cleared the daemon pid file immediately — without waiting for the process to actually exit. In a short-lived process like the npm postinstall the timer never fired at all, and the cleared pid file made `isDaemonRunning()` report false, so `startDaemon()` launched a second daemon alongside the live one. Its hosted broker then found the socket in use, missed one 700ms ping against the busy owner, unlinked the live socket and rebound — leaving the first broker running with every unlocked bundle in RAM that no client could reach. On a machine with two installs (nvm + homebrew) this reproduced on every upgrade: `lsof` showed two processes on one socket path at two different kernel socket addresses. `stopDaemon` now waits for the process to actually stop serving before clearing the pid file (and escalates to a tree-kill only if it does not), and `bindBrokerSocket` probes an in-use socket several times and refuses to reclaim it while a live process still owns the broker pid file, surfacing a clear error instead of silently starting a second broker. A zombie counts as exited — it holds no socket — so a daemon that is the caller's own child is not hard-killed after it has already gone.  The socket owner is recorded in a dedicated `agent.owner` file rather than the standalone service's `agent.pid` single-instance claim, so the signal is present for the daemon-hosted broker (the primary configuration) without making a losing standalone service exit into a launchd restart loop; `ensureAgentRunning`'s one-off fallback and `teardownStaleBroker` also wait for a broker to stop serving before unlinking its socket and ownership record, instead of destroying the evidence the check depends on. Source: `apps/cli/src/lib/platform/process.ts` (`waitForExit`, `hasExited`), `apps/cli/src/lib/daemon.ts` (`stopDaemon`), `apps/cli/src/lib/secrets/agent.ts` (`ownerPath`, `brokerPidAlive`, `releaseBrokerPid`, `bindBrokerSocket`, `ensureAgentRunning`, `teardownStaleBroker`).
+
+- **`agents doctor` now checks hook WIRING, not just hook files — and treats a
+  stale source layer as unhealthy.** Two blind spots let a version home read
+  "healthy" while its hooks were dead. (1) Doctor only compared hook FILES against
+  source, never that `settings.json` actually references each hook in the right
+  event array — so a hook whose script was byte-identical to source but never
+  wired into `PreToolUse`/`Stop`/… reported `ok` and silently never fired
+  (reproduced on `yosemite-s1`: `Claude@2.1.207` printed `hooks 32 items 32 ok`
+  while its `settings.json` PreToolUse array omitted `ask-user-question-guard.sh`).
+  Doctor now inspects the version's native `settings.json` (Claude-family: claude,
+  droid), verifying each hook per `(event, matcher)` group, and reports a
+  present-but-not-wired hook as `UNWIRED <hook> event=<event> matcher=<matcher>`,
+  counted against the verdict; a missing/unparseable `settings.json` is surfaced
+  too. `--fix` re-wires via the same `registerHooksToSettings` path `agents sync`
+  uses. (2) A source layer behind `origin/main` means the home is reconciled
+  against stale truth, yet the "N commits behind" fact was a buried preamble while
+  the verdict still said healthy — it now flips the per-version verdict to unhealthy
+  with the `agents repo pull` remediation. Both checks run in every mode, not just
+  `agents doctor <agent>@<version>`: bare `agents doctor` (overview) and the CI gate
+  `agents check` now flag a present-but-unwired hook and a behind-origin source
+  layer, and `agents check` exits non-zero on them. Source:
+  `apps/cli/src/lib/hooks.ts` (`checkVersionHookWiring`), `apps/cli/src/lib/drift.ts`
+  (`checkSyncStatus`/`computeSourceBehind`/`computeDrift`),
+  `apps/cli/src/lib/doctor-diff.ts`, `apps/cli/src/commands/doctor.ts`
+  (`computeVerdict`), `apps/cli/src/commands/check.ts`, `apps/cli/src/lib/git.ts`
+  (`commitsBehindUpstream`).
+
+- **`agents repo pull` reconciles a diverged repo instead of wedging on it.** It ran
+  `git merge --ff-only`, which refuses *any* divergence — conflict or not — so a
+  single local commit permanently blocked every later pull with nothing actually in
+  conflict. Since `pullRepo` itself auto-commits the machine's own
+  `devices/<host>/agents.yaml` before pulling, every device eventually created that
+  commit and stopped receiving updates: on one fleet, nine machines sat 9 commits
+  behind and merged rule changes never reached any of them. It now rebases, which is
+  what its own documentation has always described. Per-device paths are disjoint, so
+  they replay cleanly. A genuine conflict aborts the rebase and rolls the checkout
+  back untouched, so a failed pull can never leave the repo detached, mid-rebase, or
+  with conflict markers in live config; a rebase already in progress is reported as
+  itself rather than as a dirty tree.
+- **`agents repo pull` / `push` exit non-zero when a repo fails.** Both printed a
+  failure line and returned 0, so `agents fleet run "agents repo pull user"` reported
+  `11 ok` across a fleet that pulled nothing. Any automation gating on the exit code
+  read a total no-op as success. Matches `agents sync <repo>`, which already did this.
+
+- **`agents repo status` reports across the fleet.** New `--devices-all` (alias
+  `--hosts-all`) fans `repo status`/`repo list` out to every reachable device and
+  renders one aggregated table (device · repo · sync · changes); `--devices <who>`
+  (alias `--hosts`) takes `all` or a comma-separated device list. Unreachable peers
+  are skipped with a clear marker, never failing the command, and a single
+  `--device`/`--host` still streams that one box as before. Source:
+  `apps/cli/src/commands/repo.ts`.
+
+- **Routines now always authenticate as the machine they run on, never on an inherited Claude token.** The daemon was already forbidden from *injecting* a Claude OAuth token into a routine, but nothing stopped it *inheriting* one: `buildExecEnv` spreads the ambient `process.env`, and `sanitizeProcessEnv` only strips loader/interpreter variables, never credentials. So on any box whose daemon environment happened to carry `CLAUDE_CODE_OAUTH_TOKEN` — a provisioned fleet machine, a shell that exported it — every routine spawn silently ran on that one shared, rotating token instead of the host's own login. That is the fleet-wide-logout path the no-token design exists to prevent, reached by inheritance rather than injection: when the server rotates a refresh token, every other holder drops to "run /login". No CI runner has a token to inherit, so the existing test passed everywhere and the leak only appeared on a real machine (it surfaced on the release VM, halting a release). `buildRoutineSpawnEnv` now drops the variable, and the routine still authenticates exactly as before — `CLAUDE_CONFIG_DIR` is pinned to that box's per-account version home, so a routine uses whatever agent login is set up there and needs no token of its own. Source: `apps/cli/src/lib/runner.ts` (`buildRoutineSpawnEnv`).
+
+- **The `daily` secrets policy is now called `hold`, because it was never daily.** The default prompt policy holds a bundle for `secrets.agent.holdMs` — 7 days out of the box — yet it was named `daily`, so `agents secrets policy --help` read as "you will be asked once a day" while the code comment beside it said "one Touch ID per ~7d". Both the CLI help and `docs/secrets.md` had resorted to apologising for it in prose ("Name is historical", "Despite the name, it is not tied to one calendar day"), which is a name stating something false, not a name that is merely unclear. It is not one day, not one session, and not any fixed period — it is the configured hold window, so it is now named for that. **`daily` and the wire token `session` remain accepted everywhere** (`agents secrets policy <bundle> daily`, `secrets.policy: daily` in agents.yaml, and the `tier: session` key already written into every bundle on every synced machine), so no config or stored bundle changes behaviour on upgrade. **One machine-readable surface does change**: `agents secrets list --json` and `agents secrets view --json` now report `"policy": "hold"` where a default-tier bundle previously reported `"daily"`. Anything matching on that string needs updating — the CLI keeps accepting `daily` as input, but it no longer emits it, because a JSON field that reports a name the CLI itself has retired is a worse trap than a one-line change. The help text now also states what the tier actually depends on: the hold is a property of the running broker plus the durable session, not of the stored keychain item, so a broker that is down degrades `hold` to prompt-every-read; only `never` is prompt-free independently of the broker. Source: `apps/cli/src/lib/secrets/bundles.ts` (`SecretsPolicy`, `parsePolicy`, `secretsDefaultPolicy`), `apps/cli/src/commands/secrets.ts` (`parsePolicyOpt`, `policy` command help), `apps/cli/src/lib/secrets/index.ts` (legacy token mapping for the signed helper), `apps/cli/docs/secrets.md`.
+
+- **Claude usage/probe reads can authenticate with a file-based setup-token
+  instead of the login keychain — no Touch ID.** On macOS, reading a Claude
+  account's usage went through Claude Code's ACL-bound
+  `Claude Code-credentials-<hash>` keychain item (`loadClaudeOauth` →
+  `/usr/bin/security`), popping a Touch ID sheet on every cold read — per account,
+  roughly every 8h, and again on the routines daemon's 3-minute auth-health probe
+  (`probeLocalFleetAuth`), so `ag view` and the background warm both prompted.
+  `loadClaudeOauth` now first resolves a per-account `claude setup-token` from the
+  reserved **file-based** `auth` secrets bundle (keyed by account email as
+  `CLAUDE_CODE_OAUTH_TOKEN_<slug>`); when present, the usage endpoint is
+  authenticated with that long-lived, non-rotating token and the keychain is never
+  touched — killing the prompt. This applies only to the read-only usage/probe
+  callers (`accessTokenCache`); the full-credential run/export path (which needs the
+  refresh token) is unchanged, and an account with no provisioned setup-token still
+  falls through to the keychain for now. Keyed strictly per-account (never a bare
+  shared key) so one account's token can't be misapplied to another. Source:
+  `apps/cli/src/lib/usage.ts`; design: `docs/design/credential-management.md`.
+
 ## 1.20.78
 
 - **`agents sessions <uuid>` now resolves a remote session exactly, across the
