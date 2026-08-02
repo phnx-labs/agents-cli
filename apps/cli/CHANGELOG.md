@@ -2,8 +2,6 @@
 
 ## 1.20.80
 
-- **`ag view grok` now shows usage limits.** Parses local `unified.jsonl` to display Grok billing configuration and subscription tiers since network APIs are inaccessible.
-
 - **`agents activity` goes fleet-wide, grouped, and session-enriched.** The activity
   lane was a flat, local-only, newest-first list; it now shows progress-so-far across
   the whole fleet — who did what, where, on which project, for which ticket. New flags:

@@ -11,6 +11,7 @@ import {
   deriveUsageStatusFromSnapshot,
   formatUsageSummary,
   formatUsageStatusBadge,
+  getUsageInfo,
   getClaudeKeychainService,
   loadClaudeOauth,
   getUsageInfoForIdentity,
@@ -137,11 +138,65 @@ describe('usage formatting', () => {
   });
 
   it('agentReportsUsage flags only the agents that expose usage data', () => {
-    for (const a of ['claude', 'codex', 'kimi', 'droid'] as const) {
+    for (const a of ['claude', 'codex', 'kimi', 'droid', 'grok'] as const) {
       expect(agentReportsUsage(a)).toBe(true);
     }
-    for (const a of ['antigravity', 'grok', 'opencode', 'gemini'] as const) {
+    for (const a of ['antigravity', 'opencode', 'gemini'] as const) {
       expect(agentReportsUsage(a)).toBe(false);
+    }
+  });
+
+  it('parses Grok usage from the local unified.jsonl (real log shape)', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-grok-usage-'));
+    try {
+      const logDir = path.join(home, '.grok', 'logs');
+      fs.mkdirSync(logDir, { recursive: true });
+      // Two billing lines; the parser keeps the LAST one seen.
+      const lines = [
+        JSON.stringify({
+          ts: '2026-08-01T00:00:00.000Z',
+          msg: 'billing: fetched credits config',
+          ctx: { config: { creditUsagePercent: 10, currentPeriod: { end: '2026-08-01T18:27:00Z' } }, subscriptionTier: 'X Premium' },
+        }),
+        // Real-world shape captured from ~/.grok/logs/unified.jsonl.
+        JSON.stringify({
+          ts: '2026-08-02T04:00:49.628Z',
+          src: 'shell',
+          lvl: 'info',
+          msg: 'billing: fetched credits config',
+          ctx: {
+            config: {
+              creditUsagePercent: 100.0,
+              currentPeriod: { type: 'USAGE_PERIOD_TYPE_WEEKLY', end: '2026-08-02T18:27:00.269749+00:00' },
+              isUnifiedBillingUser: true,
+            },
+            subscriptionTier: 'X Premium+',
+          },
+        }),
+      ];
+      fs.writeFileSync(path.join(logDir, 'unified.jsonl'), `${lines.join('\n')}\n`);
+
+      const { snapshot, error } = await getUsageInfo('grok', { home });
+      expect(error).toBeNull();
+      expect(snapshot?.plan).toBe('X Premium+');
+      const week = snapshot?.windows.find((w) => w.key === 'week');
+      expect(week?.shortLabel).toBe('W');
+      // Real credit consumption is surfaced, not a hardcoded 0%.
+      expect(week?.usedPercent).toBe(100);
+      expect(week?.resetsAt?.toISOString()).toBe(new Date('2026-08-02T18:27:00.269749+00:00').toISOString());
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('returns an empty Grok snapshot when the log is absent', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-grok-nolog-'));
+    try {
+      const { snapshot, error } = await getUsageInfo('grok', { home });
+      expect(error).toBeNull();
+      expect(snapshot).toBeNull();
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
     }
   });
 

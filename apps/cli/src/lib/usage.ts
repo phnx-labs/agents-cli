@@ -1953,15 +1953,15 @@ async function readLatestGrokBilling(filePath: string): Promise<GrokBillingMatch
           const windows: UsageWindow[] = [];
 
           if (config.currentPeriod?.end) {
-            // Grok does not provide a hard limit percentage in this payload,
-            // but we can map the billing period end as a 'week' window reset.
-            // Using 0% to avoid rendering a full limit bar, while still displaying
-            // the window period.
+            // `creditUsagePercent` is Grok's weekly credit consumption (0-100);
+            // the billing period's `end` is when that window resets.
+            const rawPercent =
+              typeof config.creditUsagePercent === 'number' ? config.creditUsagePercent : 0;
             windows.push({
               key: 'week',
               label: 'Current week',
               shortLabel: 'W',
-              usedPercent: 0,
+              usedPercent: Math.max(0, Math.min(100, rawPercent)),
               resetsAt: parseDateValue(config.currentPeriod.end),
               windowMinutes: inferWindowMinutes('week'),
             });
