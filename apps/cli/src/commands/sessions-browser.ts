@@ -88,7 +88,11 @@ export function buildInitialFilter(initial: Partial<BrowserFilter>): BrowserFilt
  *  (window, team-origin inclusion, and the team filter's deeper limit) — not the
  *  ones applied in memory afterwards. */
 function poolCacheKey(f: BrowserFilter): string {
-  return `${f.window ?? 'all'}|${f.teams}|${f.team ?? ''}`;
+  // The team filter contributes only whether it is SET, not which team: any team
+  // fetches the same deep pool and is then narrowed in memory. Keying on the name
+  // would make `t` the one hotkey that re-fans-out the fleet on every step of the
+  // cycle, at up to REMOTE_TIMEOUT_MS per unreachable peer.
+  return `${f.window ?? 'all'}|${f.teams}|${f.team ? 'team' : ''}`;
 }
 
 /** Pool size when a team filter is active; one team's rows can sit anywhere. */
@@ -489,8 +493,9 @@ export async function runSessionBrowser(
   let devicesInPool: string[] = [];
   let teamsInPool: string[] = [];
   let cols: PickerColumns = {};
-  // Cache the transcript fetch, keyed by (window, teams); agent/device/project/
-  // running are applied in memory so their hotkeys don't re-fan-out the fleet.
+  // Cache the transcript fetch, keyed by poolCacheKey (everything that changes
+  // what is FETCHED); agent/device/project/running are applied in memory so their
+  // hotkeys don't re-fan-out the fleet.
   let rawCache: { key: string; rows: SessionMeta[]; unreachable: string[] } | null = null;
   // Peers that didn't answer the last fan-out. The fan-out's own note goes to
   // stderr, which the full-screen picker repaints over — so it is surfaced in

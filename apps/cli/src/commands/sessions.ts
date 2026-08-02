@@ -3373,7 +3373,7 @@ export function registerSessionsCommands(program: Command): void {
       runBrowserSessions({ profile: query, json: options.json });
       return;
     }
-    await sessionsAction(query, options, command?.getOptionValueSource?.('limit'));
+    await sessionsAction(query, options, command.getOptionValueSource('limit'));
   });
 
   registerSessionsTailCommand(sessionsCmd);
