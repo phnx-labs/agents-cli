@@ -17,7 +17,7 @@ import { resolveModel, buildReasoningFlags } from './models.js';
 import { emitStart, maybeRotate, createTimer, redactPrompt, redactArgs } from './events.js';
 import { sanitizeProcessEnv } from './secrets/bundles.js';
 import { resolveActor, actorEnv } from './actor.js';
-import { getShimsDir, getHistoryDir } from './state.js';
+import { getShimsDir, getHistoryDir, getUserAgentsDir } from './state.js';
 import { resolveCodexHome } from './codex-home.js';
 import { readCodexConfiguredModel } from './shims.js';
 import { writePidSessionEntry, extractSessionIdArg } from './session/pid-registry.js';
@@ -715,6 +715,16 @@ export function nativeResume(agent: AgentId): boolean {
   return AGENT_COMMANDS[agent]?.resume !== undefined;
 }
 
+/**
+ * Build the `-c` value that adds `dir` to codex's workspace-write writable
+ * roots. Codex parses the value as TOML, so it's a single-element TOML array of
+ * one quoted string. Used on codex resume forms, which reject `--add-dir` and
+ * only accept `-c` config overrides.
+ */
+export function codexWritableRootsConfig(dir: string): string {
+  return `sandbox_workspace_write.writable_roots=[${JSON.stringify(dir)}]`;
+}
+
 /** Assemble the full CLI argument array for an agent invocation. */
 export function buildExecCommand(options: ExecOptions): string[] {
   const template = AGENT_COMMANDS[options.agent];
@@ -803,6 +813,18 @@ export function buildExecCommand(options: ExecOptions): string[] {
       `Internal error: ${options.agent} declares '${resolvedMode}' in capabilities.modes but has no entry in AGENT_COMMANDS.modeFlags.${resolvedMode}.`,
     );
   }
+  // Codex's workspace-write sandbox blocks $HOME (verified against the live CLI
+  // and OpenAI's sandbox docs: writable roots extend scope "without removing the
+  // sandbox entirely"). But the model routinely shells out to `agents ...`, whose
+  // runtime state lives under ~/.agents — the SSH askpass shim
+  // (~/.agents/.cache/devices/askpass.sh), the device/stats cache, secrets,
+  // session writes, config tunings. Without ~/.agents as a writable root those
+  // inner writes fail with EROFS (e.g. `agents ssh` dies before connecting),
+  // which is why a remote `agents run codex` couldn't reach the fleet. Grant it
+  // implicitly whenever codex runs workspace-write — far narrower than --mode skip
+  // (danger-full-access). Fresh runs take --add-dir (below); resume forms reject
+  // --add-dir, so they take the same root via -c writable_roots here.
+  const codexWorkspaceWrite = options.agent === 'codex' && resolvedMode === 'edit';
   if (resumeSpec && 'subcommand' in resumeSpec) {
     if (resolvedMode === 'skip') {
       // skip = yolo on resume too; both `codex resume` (TUI) and
@@ -811,6 +833,7 @@ export function buildExecCommand(options: ExecOptions): string[] {
     } else if (interactive) {
       // `codex resume` (TUI) accepts the same -s/--sandbox flags as a fresh run.
       cmd.push(...modeFlags);
+      if (codexWorkspaceWrite) cmd.push('-c', codexWritableRootsConfig(getUserAgentsDir()));
     } else {
       // `codex exec resume` rejects `--sandbox <mode>` (verified against
       // `codex exec resume --help` on 0.142.5), but takes -c config overrides —
@@ -819,6 +842,7 @@ export function buildExecCommand(options: ExecOptions): string[] {
       cmd.push('-c', `sandbox_mode=${resolvedMode === 'plan' ? 'read-only' : 'workspace-write'}`);
       if (resolvedMode !== 'plan') {
         cmd.push('-c', 'sandbox_workspace_write.network_access=true');
+        cmd.push('-c', codexWritableRootsConfig(getUserAgentsDir()));
       }
     }
   } else if (options.agent === 'kimi' && !interactive) {
@@ -924,11 +948,19 @@ export function buildExecCommand(options: ExecOptions): string[] {
   // claude-only, silently dropped for codex and masked by edit mode carrying
   // the approval/sandbox bypass. Codex's resume forms reject --add-dir, so
   // skip it there (claude's flag-based resume accepts it).
+  //
+  // On top of any user-supplied dirs, a fresh codex workspace-write run
+  // implicitly gets ~/.agents (deduped) so the CLI's own tooling — askpass,
+  // secrets, sessions, tunings — can write from inside the sandbox. Resume forms
+  // get the same root via -c writable_roots above (see codexWorkspaceWrite).
+  const codexImplicitDirs =
+    codexWorkspaceWrite && !options.resume ? [getUserAgentsDir()] : [];
+  const addDirs = [...new Set([...(options.addDirs ?? []), ...codexImplicitDirs])];
   if (
-    options.addDirs &&
+    addDirs.length > 0 &&
     (options.agent === 'claude' || (options.agent === 'codex' && !options.resume))
   ) {
-    for (const dir of options.addDirs) {
+    for (const dir of addDirs) {
       cmd.push('--add-dir', dir);
     }
   }

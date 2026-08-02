@@ -12,6 +12,7 @@ import {
   resolveHeadlessMode,
   defaultModeFor,
   headlessPlanStallCommand,
+  codexWritableRootsConfig,
   type ExecOptions,
 } from '../exec.js';
 import type { AgentId, Mode } from '../types.js';
@@ -740,6 +741,59 @@ describe('buildExecCommand', () => {
     it('gemini ignores addDirs', () => {
       const cmd = buildExecCommand(opts({ agent: 'gemini', addDirs: ['/a'] }));
       expect(cmd).not.toContain('--add-dir');
+    });
+  });
+
+  // --- Codex sandbox: implicit ~/.agents writable root ---
+  //
+  // Codex's workspace-write sandbox blocks $HOME, so `agents ...` the model
+  // shells out to can't write ~/.agents (askpass shim, secrets, sessions),
+  // which broke remote `agents run codex`. A fresh edit run gets ~/.agents via
+  // --add-dir; resume forms (which reject --add-dir) get it via -c writable_roots.
+  describe('codex ~/.agents writable root', () => {
+    const AGENTS_DIR = path.join(HOME, '.agents');
+
+    it('fresh codex edit run implicitly grants ~/.agents as a writable root', () => {
+      const cmd = buildExecCommand(opts({ agent: 'codex', mode: 'edit' }));
+      const dirs = cmd.reduce<string[]>((acc, v, i) => (v === '--add-dir' ? [...acc, cmd[i + 1]] : acc), []);
+      expect(dirs).toContain(AGENTS_DIR);
+    });
+
+    it('dedupes ~/.agents when the user also passes it explicitly', () => {
+      const cmd = buildExecCommand(opts({ agent: 'codex', mode: 'edit', addDirs: [AGENTS_DIR, '/x'] }));
+      const dirs = cmd.reduce<string[]>((acc, v, i) => (v === '--add-dir' ? [...acc, cmd[i + 1]] : acc), []);
+      expect(dirs.filter((d) => d === AGENTS_DIR)).toHaveLength(1);
+      expect(dirs).toContain('/x');
+    });
+
+    it('does NOT add ~/.agents for codex read-only (plan) — no writes happen there', () => {
+      const cmd = buildExecCommand(opts({ agent: 'codex', mode: 'plan' }));
+      expect(cmd).not.toContain(AGENTS_DIR);
+    });
+
+    it('does NOT add --add-dir for codex skip (sandbox already dropped)', () => {
+      const cmd = buildExecCommand(opts({ agent: 'codex', mode: 'skip' }));
+      expect(cmd).not.toContain('--add-dir');
+    });
+
+    it('does NOT grant the implicit root to claude (codex-sandbox-specific)', () => {
+      const cmd = buildExecCommand(opts({ agent: 'claude', mode: 'edit' }));
+      expect(cmd).not.toContain(AGENTS_DIR);
+    });
+
+    it('codex headless resume grants ~/.agents via -c writable_roots (rejects --add-dir)', () => {
+      const cmd = buildExecCommand(opts({
+        agent: 'codex', mode: 'edit', resume: true, sessionId: 'abc-1', prompt: 'go',
+      }));
+      expect(cmd).not.toContain('--add-dir');
+      const ci = cmd.indexOf(codexWritableRootsConfig(AGENTS_DIR));
+      expect(ci).toBeGreaterThan(0);
+      expect(cmd[ci - 1]).toBe('-c');
+    });
+
+    it('codexWritableRootsConfig emits a TOML array of the quoted dir', () => {
+      expect(codexWritableRootsConfig('/home/u/.agents'))
+        .toBe('sandbox_workspace_write.writable_roots=["/home/u/.agents"]');
     });
   });
 

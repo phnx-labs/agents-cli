@@ -1055,6 +1055,16 @@ schema (`--json` passes through each agent's native stream format).
   `capabilities.modes[0]`, or (headless-only, e.g. kimi/grok) to `auto` with
   a stderr warning when the agent's plan mode is known to stall headless;
   `skip` on an unsupported agent throws naming the agent's real modes.
+- **EXEC-22a (MUST).** When the resolved mode puts Codex in its `workspace-write`
+  sandbox (`resolvedMode === 'edit'`), `buildExecCommand` MUST grant the user's
+  `~/.agents` dir as an extra writable root. Codex's sandbox blocks `$HOME`, but
+  the CLI tooling Codex shells out to (the SSH askpass shim at
+  `~/.agents/.cache/devices/askpass.sh`, secrets, session state, config tunings)
+  writes there — without it those inner writes fail with `EROFS`. Fresh runs pass
+  it via `--add-dir` (deduped against user `--add-dir`s); resume forms, which
+  reject `--add-dir`, pass it via `-c sandbox_workspace_write.writable_roots`
+  (`lib/exec.ts`, `codexWritableRootsConfig`). `plan` (read-only) and `skip`
+  (sandbox dropped) MUST NOT add it.
 - **EXEC-23 (MUST).** A prompt-less run inferred as interactive at a
   non-TTY MUST be refused before spawn rather than hang on dead stdin
   (`inferredInteractiveWithoutTty`, `lib/exec.ts:270-276`; enforced
