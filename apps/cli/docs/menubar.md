@@ -118,8 +118,8 @@ filing a duplicate.
 - **Click a row to dispatch it** to the selected agents in the picked repo
   (`⌘1` … `⌘5` do the same from the keyboard). **Plan** posts an implementation
   plan as a comment on the ticket and changes no code; **Run** claims the ticket
-  (`--status progress`), implements it per the repo's `AGENTS.md`, and comments
-  the result. Both are the same headless `agents run --mode auto --balanced
+  (`linear update <id> --pickup`), implements it per the repo's `AGENTS.md`, and
+  comments the result. Both are the same headless `agents run --mode auto --balanced
   --notify` dispatch as a quick Run, named after the ticket (`rush-2098`,
   `rush-2098-plan`) so it reads as that ticket in `agents sessions`.
   **`⌘`-click** opens the ticket in Linear instead, when you want to read it

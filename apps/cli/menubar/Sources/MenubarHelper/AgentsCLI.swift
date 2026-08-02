@@ -317,7 +317,7 @@ enum AgentsCLI {
             \(head)
 
             Steps:
-            1. Read the ticket, claim it — `linear update \(ticket.identifier) --status progress` \
+            1. Read the ticket, claim it — `linear update \(ticket.identifier) --pickup` \
             — and investigate the repo you were launched in.
             2. Implement the change following that repo's AGENTS.md (worktree + PR when the \
             repo requires it; never commit on the default branch).
