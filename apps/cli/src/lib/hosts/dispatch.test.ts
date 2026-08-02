@@ -304,7 +304,16 @@ describe('deriveMirroredCwd', () => {
 // The prefix is only ever consumed by a remote POSIX shell, so run it through a
 // real one against a real directory tree — that is what proves the mirror lands
 // in the project and the fallback lands in the home.
-describe('remoteCdPrefix executed by a real shell', () => {
+//
+// The shell it runs through here is the LOCAL one, which is only a valid stand-in
+// for the remote where the local shell is POSIX. On Windows there is no bash to
+// spawn, so `spawnSync` returns a null status and the `pwd` output is empty —
+// the two positive cases fail on the harness rather than on the behavior, and the
+// negative case ("must exit non-zero") passes for the wrong reason. The prefix
+// itself is correct on a Windows client: it targets a remote POSIX shell either
+// way. Assert it there via the pure string expectations above, and run the
+// real-shell block only where a real POSIX shell exists.
+describe.skipIf(process.platform === 'win32')('remoteCdPrefix executed by a real shell', () => {
   const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'mirror-cwd-'));
   const present = 'src/github.com/acme/repo';
   fs.mkdirSync(path.join(tmpHome, present), { recursive: true });

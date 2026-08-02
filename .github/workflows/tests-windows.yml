@@ -26,6 +26,12 @@ on:
       - 'apps/cli/src/lib/platform/**'
       - 'apps/cli/src/lib/shims*.ts'
       - 'apps/cli/hooks/**'
+      # Remote dispatch builds shell fragments and spawns local processes, so it
+      # is exactly as platform-sensitive as the paths above. It was missing here,
+      # which is how the `remoteCdPrefix executed by a real shell` break reached
+      # main unnoticed: it only surfaced days later on an unrelated hooks PR that
+      # happened to trip this filter.
+      - 'apps/cli/src/lib/hosts/**'
       - '.github/workflows/tests-windows.yml'
 
 concurrency:
