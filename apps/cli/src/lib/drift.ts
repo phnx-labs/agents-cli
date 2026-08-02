@@ -1,11 +1,11 @@
 /**
  * Shared drift-detection internals for `agents doctor` (overview mode) and
- * `agents check` (the scriptable, CI-friendly gate).
+ * `agents doctor --check` (the scriptable, CI-friendly gate).
  *
  * This is the single source of truth for "is the install out of sync?": the
  * per-version sync status (fresh / stale / never-synced) and the orphan census.
- * `agents doctor` renders it as a human report; `agents check` reduces it to an
- * exit code. Neither reimplements the diagnostic — both call `computeDrift`.
+ * `agents doctor` renders it as a human report; `agents doctor --check` reduces it
+ * to an exit code. Neither reimplements the diagnostic — both call `computeDrift`.
  */
 import type { AgentId } from './types.js';
 import { ALL_AGENT_IDS } from './agents.js';
@@ -88,7 +88,7 @@ export function checkSyncStatus(cwd: string): SyncStatusRow[] {
       // Hook WIRING is independent of manifest staleness: a hook file can be
       // byte-identical to source (fresh) yet absent from settings.json, so it
       // never fires. Surface that for every version, fresh or stale, so overview
-      // AND `agents check` flag it (claude/droid; other agents report unsupported).
+      // AND `agents doctor --check` flag it (claude/droid; other agents report unsupported).
       const wiring = checkVersionHookWiring(agent, version);
       if (wiring.supported) {
         const expected = wiring.expected ?? 0;
@@ -149,8 +149,8 @@ export function countOrphans(): OrphanRow[] {
  * Probe each source layer (user, system, enabled extras) for how far it trails
  * its upstream, from the LAST-FETCHED remote-tracking ref (no network). A layer
  * behind origin means every version home is reconciled against stale truth — a
- * drift signal `agents check` must fail on, not a buried preamble. Returns only
- * the behind layers. Canonical home for both `agents doctor` and `agents check`.
+ * drift signal `agents doctor --check` must fail on, not a buried preamble. Returns
+ * only the behind layers. Canonical home for both `agents doctor` and `agents doctor --check`.
  */
 export function computeSourceBehind(): SourceLayerBehind[] {
   const out: SourceLayerBehind[] = [];
@@ -180,8 +180,8 @@ export interface DriftSummary {
   /**
    * True when the install is out of sync: any installed version is stale,
    * never-synced, or carries unwired hooks, OR a source layer is behind origin.
-   * `agents doctor` surfaces it as "run `agents status`"; `agents check` maps it
-   * to a non-zero exit. Orphans are a `prune` concern, not sync drift, so they do
+   * `agents doctor` surfaces it as "run `agents status`"; `agents doctor --check`
+   * maps it to a non-zero exit. Orphans are a `prune` concern, not sync drift, so they do
    * NOT set this flag (mirrors the sync-status engine: an orphan alone never
    * flags needsSync).
    */
@@ -190,8 +190,8 @@ export interface DriftSummary {
 
 /**
  * Compute the same drift/divergence diagnostic `agents doctor` prints, reduced
- * to a summary with a single `hasDrift` boolean. The gate `agents check` maps
- * to an exit code; the readout `agents doctor` renders in full.
+ * to a summary with a single `hasDrift` boolean. The gate `agents doctor --check`
+ * maps to an exit code; the readout `agents doctor` renders in full.
  */
 export function computeDrift(cwd: string): DriftSummary {
   const syncRows = checkSyncStatus(cwd);
