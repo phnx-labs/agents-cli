@@ -1,5 +1,65 @@
 # Changelog
 
+## 1.20.88
+
+- **`agents doctor` redesigned into a prioritized, fleet-aware, per-version
+  readout (RUSH-2069).** Comprehensive by default (no `--verbose`): a top
+  `✗ CRITICAL — needs you now (N)` section lists every critical across the whole
+  fleet worst-first (`device · harness@version · account · message → remediation`),
+  then a `─── by computer ───` section gives each device its warnings plus a
+  compact accounts/versions line showing every installed version and its account
+  (provable ✓ / ✗). A single-machine `agents doctor` collapses to the CRITICAL
+  section plus one `▸ <machine>` block. Severity: provable logged-out, a missing
+  hook/plugin, a broken CLI, and a never-synced version whose declared resources
+  are therefore absent are CRITICAL; drift, version-skew, repo-behind/-drift,
+  orphans, and an unprovable logout are WARNINGS. Sign-in is
+  now probed **per installed version** (each version's own home + the global
+  credential via the new `credentialPresence`), so a per-version logged-out claim
+  is made only when both are absent, agents with no inspectable identity never
+  report logged-out, and the login remediation is
+  version-targeted (`agents run <agent>@<version>` for the isolated set;
+  gemini/antigravity/droid/cursor say the login is shared). Older fleet boxes that
+  can't report per-version sign-in surface an "older agents-cli — upgrade"
+  warning. The readout is de-duplicated so one root cause is one line: a version's
+  missing hooks/plugins and drifted resources collapse to a count plus two
+  examples (`32 hooks missing (incl. 'a', 'b')`), the same problem on several
+  versions of one agent reads as `claude (5 versions)` with an agent-wide fix
+  (isolated copies stay on their own line, since the sweep skips them), every
+  orphan row on a machine folds into one cleanup-only line, and a version that
+  already listed its drifted resources no longer also says "sources changed since
+  last sync". The two advisories that predate the redesign are findings now, not
+  separate blocks: credential-shaped exports in shell rc files (RUSH-1968) and the
+  Windows execution policy that blocks `agents.ps1`. The duplicate-version-home
+  hook check keeps its text output too — differing copies are critical, identical
+  ones a warning, one row per agent rather than one per hook — and so does the
+  Host CLIs check, as a `host CLIs` warning naming `agents cli install <name>`.
+  Remediations reach every version in their row: a row collapsed across versions
+  uses `agents sync <agent>@all --yes` (a bare `agents sync <agent>` would fix only
+  the default version), a cross-device resource gap says `agents repo pull` rather
+  than the central-to-home `agents doctor --fix`, and a diverged config repo names
+  its own alias instead of always saying `user`.
+  `agents doctor --json` adds a `findings` array and a per-version
+  `fleet.signIn` map; the existing `clis`/`sync`/`orphans`/`fleet`/`signIn`/`repos`
+  fields are unchanged. Source: `apps/cli/src/lib/devices/doctor-findings.ts`,
+  `apps/cli/src/lib/devices/fleet-inventory.ts`, `apps/cli/src/lib/agents.ts`,
+  `apps/cli/src/commands/doctor.ts`.
+
+- **Run Cursor routines safely (RUSH-2080).** Routines configured with `agent: cursor` now reuse the same-device login under the default sandbox, trust the configured workspace without `--yolo`, warn when a requested read-only plan is elevated to writable edit mode (including `loop:` jobs), and record successful runs correctly. Source: `apps/cli/src/lib/runner.ts`.
+
+- **`agents sessions` now discovers, indexes, and renders Cursor agent transcripts (RUSH-2081).**
+  Cursor writes its conversation to `projects/<encoded-cwd>/agent-transcripts/<uuid>/<uuid>.jsonl`
+  and metadata to `chats/<workspace-hash>/<uuid>/meta.json`. Discovery starts from the transcript
+  and joins metadata by UUID, so abandoned chats with no transcript never become empty rows.
+  Cursor is installed outside agents-cli's managed version homes, so users with any managed
+  agent version must pass `--unmanaged` to include Cursor rows.
+  Source: `apps/cli/src/lib/session/discover.ts`, `apps/cli/src/lib/session/parse.ts`.
+
+- **Fix Cursor usage and account inspection (RUSH-2082).** `agents usage` now derives support from the usage library so Cursor, Grok, and future usage sources cannot drift from the command, and `agents run cursor@` can inspect Cursor's active account. Source: `apps/cli/src/commands/usage.ts`, `apps/cli/src/lib/agents.ts`.
+
+- **Sync Cursor commands to the IDE and cursor-agent CLI (RUSH-2083).** Shared commands now remain available as typed IDE slash commands and are also generated as Agent Skills for cursor-agent, while preserving user-authored files in `.cursor/commands/`. Source: `apps/cli/src/lib/command-skills.ts`.
+
+- **Daemon routines resolve `agents` on `~/.local/bin` installs.** The generated daemon service (systemd + launchd) now puts the `agents` shim's own directory on `PATH`, not only the Node runtime dir. On a box where the shim lives outside the Node bin dir (a `~/.local/bin` global install, a separate npm prefix), the daemon's `PATH` previously carried only the Node dir, so every scheduled `command` routine — the always-on watchdog included — shelled out to a bare `agents` that resolved to nothing and died with `exit 127`. Source: `apps/cli/src/lib/daemon.ts`.
+
 ## 1.20.87
 
 - **`agents devices enable|disable|prefer|unprefer <name>` control which machines
