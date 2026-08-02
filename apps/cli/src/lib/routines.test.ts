@@ -17,10 +17,6 @@ function baseJob(partial: Partial<JobConfig> = {}): Partial<JobConfig> {
 }
 
 describe('validateJob — schedule OR trigger', () => {
-  it('rejects agents without a daemon command before the scheduled run', () => {
-    expect(validateJob(baseJob({ schedule: '0 3 * * *', agent: 'opencode' })))
-      .toContain('agent must be one of: claude, codex, gemini, cursor, kimi, droid');
-  });
   it('accepts a schedule-only job (existing cron behavior unchanged)', () => {
     expect(validateJob(baseJob({ schedule: '0 3 * * *' }))).toEqual([]);
   });

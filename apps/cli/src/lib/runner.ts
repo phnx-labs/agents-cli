@@ -20,7 +20,6 @@ import * as path from 'path';
 import * as os from 'os';
 import type { JobConfig, RunMeta } from './routines.js';
 import {
-  ROUTINE_AGENT_IDS,
   resolveJobPrompt,
   parseTimeout,
   writeRunMeta,
@@ -81,7 +80,9 @@ const AGENT_COMMANDS: Record<string, string[]> = {
   droid: ['droid', 'exec', '{prompt}', '-o', 'stream-json'],
 };
 
-export { ROUTINE_AGENT_IDS } from './routines.js';
+/** Agents the daemon can actually run, derived from the command table above
+ * so the `--agent` help and any validation can never drift from it. */
+export const ROUTINE_AGENT_IDS = Object.freeze(Object.keys(AGENT_COMMANDS));
 
 const ROUTINE_TRANSCRIPT_SPECS: Partial<Record<AgentId, Array<{ root: string[]; ext: string }>>> = {
   claude: [{ root: ['.claude', 'projects'], ext: '.jsonl' }],
