@@ -5,13 +5,37 @@ import * as path from 'path';
 import { spawnSync } from 'child_process';
 import {
   ACTIVITY_LOG_HOOK_SCRIPT,
+  activityGroupKey,
   appendActivityEvent,
   collapseActivity,
+  enrichActivityEvents,
   ensureActivityLogHook,
+  filterActivityEvents,
+  formatEnrichedActivityLine,
+  groupActivity,
+  mergeActivityEvents,
+  parseActivityPayload,
+  projectFromCwd,
   readRecentActivity,
   readSessionActivity,
   tierForEvent,
+  type EnrichedActivityEvent,
 } from './activity.js';
+
+/** Minimal well-formed enriched event; override any field per test. */
+function ev(partial: Partial<EnrichedActivityEvent>): EnrichedActivityEvent {
+  return {
+    v: 1,
+    ts: partial.ts ?? '2026-08-01T12:00:00.000Z',
+    event: partial.event ?? 'file.edited',
+    tier: partial.tier ?? 'activity',
+    sessionId: partial.sessionId ?? 'sess-1',
+    mailboxId: partial.mailboxId ?? partial.sessionId ?? 'sess-1',
+    host: partial.host ?? 'yosemite-s0',
+    runtime: partial.runtime ?? 'headless',
+    ...partial,
+  } as EnrichedActivityEvent;
+}
 
 const hasPython = spawnSync('python3', ['--version']).status === 0;
 
@@ -558,5 +582,186 @@ describe('real activity-log hook (Python)', () => {
     });
     const events = readSessionActivity(sessionId, activityDirFor(home));
     expect(events.map((e) => e.event)).toEqual(['checklist.created', 'task.completed']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fleet fan-out, enrichment, grouping (the "activity bar")
+// ---------------------------------------------------------------------------
+
+describe('projectFromCwd', () => {
+  it('resolves a worktree cwd to the repo dir name', () => {
+    expect(projectFromCwd('/home/me/src/agents-cli/.agents/worktrees/my-slug')).toBe('agents-cli');
+  });
+  it('resolves a subdir inside a worktree to the repo', () => {
+    expect(projectFromCwd('/home/me/src/agents-cli/.agents/worktrees/my-slug/apps/cli')).toBe('agents-cli');
+  });
+  it('falls back to the basename for a plain path, stripping a trailing slash', () => {
+    expect(projectFromCwd('/home/me/src/rush')).toBe('rush');
+    expect(projectFromCwd('/home/me/src/rush/')).toBe('rush');
+  });
+  it('returns undefined for an empty or missing cwd', () => {
+    expect(projectFromCwd(undefined)).toBeUndefined();
+    expect(projectFromCwd('')).toBeUndefined();
+    expect(projectFromCwd(null)).toBeUndefined();
+  });
+});
+
+describe('enrichActivityEvents', () => {
+  it('joins ticket / project / execution host from a session hint by sessionId', () => {
+    const [out] = enrichActivityEvents([ev({ sessionId: 'a', cwd: '/home/me/src/agents-cli' })], [
+      { sessionId: 'a', ticket: 'RUSH-2100', executionHost: 'yosemite-s1', project: 'agents-cli' },
+    ]);
+    expect(out.ticket).toBe('RUSH-2100');
+    expect(out.executionHost).toBe('yosemite-s1');
+    expect(out.project).toBe('agents-cli');
+  });
+
+  it('falls back to cwd-derived project and the event host when no hint matches', () => {
+    const [out] = enrichActivityEvents([ev({ sessionId: 'x', cwd: '/home/me/src/rush', host: 'mac-mini' })], [
+      { sessionId: 'other', ticket: 'RUSH-1' },
+    ]);
+    expect(out.project).toBe('rush');
+    expect(out.executionHost).toBe('mac-mini');
+    expect(out.ticket).toBeUndefined();
+  });
+
+  it('preserves pre-baked enriched fields from a remote peer (no local hint)', () => {
+    const [out] = enrichActivityEvents(
+      [ev({ sessionId: 'r', project: 'peer-repo', ticket: 'RUSH-9', executionHost: 'zion' })],
+      [],
+    );
+    expect(out).toMatchObject({ project: 'peer-repo', ticket: 'RUSH-9', executionHost: 'zion' });
+  });
+
+  it('does not treat an unknown host as an execution host', () => {
+    const [out] = enrichActivityEvents([ev({ host: 'unknown', cwd: undefined })], []);
+    expect(out.executionHost).toBeUndefined();
+  });
+});
+
+describe('parseActivityPayload', () => {
+  it('keeps the event host and drops invalid items', () => {
+    const payload = JSON.stringify([
+      { v: 1, ts: '2026-08-01T00:00:00Z', event: 'pr.opened', tier: 'milestone', sessionId: 's1', host: 'zion' },
+      { event: 'file.edited' }, // missing sessionId + ts -> dropped
+      42, // not an object -> dropped
+    ]);
+    const out = parseActivityPayload(payload, 'dialed-peer');
+    expect(out).toHaveLength(1);
+    expect(out[0].host).toBe('zion');
+  });
+  it('host-tags with the dialed peer when the item carries no host', () => {
+    const [out] = parseActivityPayload(JSON.stringify([{ ts: '2026-08-01T00:00:00Z', event: 'pushed', sessionId: 's2' }]), 'mac-mini');
+    expect(out.host).toBe('mac-mini');
+  });
+  it('returns [] for non-array or invalid JSON', () => {
+    expect(parseActivityPayload('not json', 'h')).toEqual([]);
+    expect(parseActivityPayload('{"not":"array"}', 'h')).toEqual([]);
+  });
+});
+
+describe('mergeActivityEvents', () => {
+  it('merges host-tagged streams, dedupes by identity, and sorts newest first', () => {
+    const local = ev({ sessionId: 's', ts: '2026-08-01T10:00:00.000Z', event: 'commit.created', host: 'yosemite-s0' });
+    const dup = ev({ sessionId: 's', ts: '2026-08-01T10:00:00.000Z', event: 'commit.created', host: 'yosemite-s0' });
+    const newer = ev({ sessionId: 't', ts: '2026-08-01T11:00:00.000Z', event: 'pr.opened', host: 'zion' });
+    const merged = mergeActivityEvents([local], [dup, newer]);
+    expect(merged).toHaveLength(2); // dup collapsed
+    expect(merged[0].ts).toBe('2026-08-01T11:00:00.000Z'); // newest first
+    expect(new Set(merged.map((e) => e.host))).toEqual(new Set(['yosemite-s0', 'zion']));
+  });
+  it('does not collapse the same session/ts/event across different hosts', () => {
+    const a = ev({ sessionId: 's', ts: '2026-08-01T10:00:00.000Z', event: 'pushed', host: 'zion' });
+    const b = ev({ sessionId: 's', ts: '2026-08-01T10:00:00.000Z', event: 'pushed', host: 'mac-mini' });
+    expect(mergeActivityEvents([a], [b])).toHaveLength(2);
+  });
+});
+
+describe('filterActivityEvents', () => {
+  const events = [
+    ev({ sessionId: '1', project: 'agents-cli', agent: 'claude', event: 'pr.opened', ticket: 'RUSH-2100', host: 'zion' }),
+    ev({ sessionId: '2', project: 'rush', agent: 'codex', event: 'file.edited', host: 'mac-mini', executionHost: 'mac-mini' }),
+  ];
+  it('matches on project, ticket, agent, device, and event kind (case-insensitive)', () => {
+    expect(filterActivityEvents(events, 'AGENTS-CLI').map((e) => e.sessionId)).toEqual(['1']);
+    expect(filterActivityEvents(events, 'rush-2100').map((e) => e.sessionId)).toEqual(['1']);
+    expect(filterActivityEvents(events, 'codex').map((e) => e.sessionId)).toEqual(['2']);
+    expect(filterActivityEvents(events, 'mac-mini').map((e) => e.sessionId)).toEqual(['2']);
+    expect(filterActivityEvents(events, 'pr.opened').map((e) => e.sessionId)).toEqual(['1']);
+  });
+  it('an empty filter is a no-op', () => {
+    expect(filterActivityEvents(events, '   ')).toHaveLength(2);
+  });
+});
+
+describe('activityGroupKey / groupActivity', () => {
+  it('keys by each dimension with sensible fallbacks', () => {
+    const e = ev({ project: 'agents-cli', executionHost: 'zion', agent: 'claude' });
+    expect(activityGroupKey(e, 'project')).toEqual({ key: 'agents-cli', label: 'agents-cli' });
+    expect(activityGroupKey(e, 'device')).toEqual({ key: 'zion', label: 'zion' });
+    expect(activityGroupKey(e, 'agent')).toEqual({ key: 'claude', label: 'claude' });
+    expect(activityGroupKey(ev({ agent: undefined, host: 'unknown', cwd: undefined }), 'agent'))
+      .toEqual({ key: '', label: 'unknown agent' });
+  });
+  it('buckets by project, orders by count desc, and puts the unknown bucket last', () => {
+    const groups = groupActivity([
+      ev({ sessionId: '1', project: 'agents-cli' }),
+      ev({ sessionId: '2', project: 'agents-cli' }),
+      ev({ sessionId: '3', project: 'rush' }),
+      ev({ sessionId: '4', host: 'unknown', cwd: undefined }), // unknown project
+    ], 'project');
+    expect(groups.map((g) => g.label)).toEqual(['agents-cli', 'rush', 'unknown project']);
+    expect(groups[0].events).toHaveLength(2);
+    expect(groups[2].key).toBe('');
+  });
+  it('groups by device using the resolved execution host (host fallback)', () => {
+    const groups = groupActivity([
+      ev({ sessionId: '1', executionHost: 'zion' }),
+      ev({ sessionId: '2', host: 'mac-mini' }),
+    ], 'device');
+    expect(new Set(groups.map((g) => g.label))).toEqual(new Set(['zion', 'mac-mini']));
+  });
+});
+
+describe('formatEnrichedActivityLine', () => {
+  it('appends project and ticket tags when asked', () => {
+    const line = formatEnrichedActivityLine(ev({ event: 'pr.opened', project: 'agents-cli', ticket: 'RUSH-2100' }), { showHost: true, showProject: true });
+    expect(line).toContain('agents-cli');
+    expect(line).toContain('RUSH-2100');
+  });
+  it('omits the project tag when showProject is false but keeps the ticket', () => {
+    const line = formatEnrichedActivityLine(ev({ event: 'pr.opened', project: 'agents-cli', ticket: 'RUSH-2100' }), { showProject: false });
+    expect(line).not.toContain('agents-cli');
+    expect(line).toContain('RUSH-2100');
+  });
+});
+
+describe('fleet fan-out MERGE + group (integration over per-host JSON payloads)', () => {
+  it('parses each peer payload, merges host-tagged, and groups by project', () => {
+    // Two peers each answer `activity --json` for themselves.
+    const s0 = JSON.stringify([
+      { v: 1, ts: '2026-08-01T10:00:00.000Z', event: 'pr.opened', tier: 'milestone', sessionId: 'a', host: 'yosemite-s0', runtime: 'headless', project: 'agents-cli', ticket: 'RUSH-2100' },
+    ]);
+    const zion = JSON.stringify([
+      { v: 1, ts: '2026-08-01T11:00:00.000Z', event: 'commit.created', tier: 'milestone', sessionId: 'b', host: 'zion', runtime: 'headless', project: 'rush' },
+      { v: 1, ts: '2026-08-01T09:00:00.000Z', event: 'plan.created', tier: 'milestone', sessionId: 'c', host: 'zion', runtime: 'headless', project: 'agents-cli' },
+    ]);
+    const merged = mergeActivityEvents(parseActivityPayload(s0, 'yosemite-s0'), parseActivityPayload(zion, 'zion'));
+    // Newest first across the fleet.
+    expect(merged.map((e) => e.ts)).toEqual([
+      '2026-08-01T11:00:00.000Z',
+      '2026-08-01T10:00:00.000Z',
+      '2026-08-01T09:00:00.000Z',
+    ]);
+    // Host tags survive the merge.
+    expect(new Set(merged.map((e) => e.host))).toEqual(new Set(['yosemite-s0', 'zion']));
+
+    const groups = groupActivity(merged, 'project');
+    expect(groups.map((g) => g.label)).toEqual(['agents-cli', 'rush']); // agents-cli has 2, rush 1
+    // The agents-cli bucket carries one event from each machine.
+    expect(new Set(groups[0].events.map((e) => e.host))).toEqual(new Set(['yosemite-s0', 'zion']));
+    // Grouping by device buckets by the execution host of each event.
+    expect(groupActivity(merged, 'device').map((g) => g.label).sort()).toEqual(['yosemite-s0', 'zion']);
   });
 });

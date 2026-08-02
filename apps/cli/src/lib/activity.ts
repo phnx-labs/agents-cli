@@ -23,6 +23,7 @@ import * as yaml from 'yaml';
 import chalk from 'chalk';
 import { relTime, truncate } from './format.js';
 import { getActivityDir, getUserAgentsDir } from './state.js';
+import { normalizeHost } from './machine-id.js';
 // Type-only import: no runtime dependency on events.ts, so no import cycle
 // (events.ts / event-stream.ts import THIS module at runtime).
 import type { EventRecord } from './events.js';
@@ -351,6 +352,212 @@ export function formatActivityLine(ev: ActivityEvent, opts: { showHost?: boolean
   const agent = ev.event === 'status.posted' && ev.agent ? chalk.gray(` · ${ev.agent}`) : '';
   const when = chalk.gray(relTime(ev.ts).padStart(7));
   return `  ${when}  ${host}${label}${detail}${agent}${url}`;
+}
+
+// ---------------------------------------------------------------------------
+// Fleet fan-out, session enrichment, grouping (the "activity bar")
+//
+// `agents activity --json` is a mergeable per-host payload, so a feed-style
+// fan-out (`gatherRemoteAgentsJson`) collects every peer's own stream and
+// merges them host-tagged. Each item is then enriched by JOINING to live
+// sessions (project / ticket / execution host) — NOT by re-parsing transcripts
+// — and can be grouped by project, device, or agent so progress reads at a
+// glance across the whole fleet.
+// ---------------------------------------------------------------------------
+
+/** An activity event with the session-derived facts joined on at read time. */
+export interface EnrichedActivityEvent extends ActivityEvent {
+  /** Resolved project/repo name (from cwd or the session join), not the raw path. */
+  project?: string;
+  /** Tracker ticket the owning session is tied to (e.g. `RUSH-1234`). */
+  ticket?: string;
+  /** Machine the event actually ran on — session `provenance.host`, else `host`. */
+  executionHost?: string;
+}
+
+/**
+ * Facts pulled off a live session to enrich its activity events. Keyed by
+ * `sessionId`; every field optional so callers pass whatever they resolved.
+ */
+export interface ActivitySessionHint {
+  sessionId?: string | null;
+  /** Tracker ticket id (from `ActiveSession.ticket`). */
+  ticket?: string | null;
+  /** Machine the session executes on (`provenance.host` / `machine`). */
+  executionHost?: string | null;
+  /** Resolved project/repo slug from the session cwd. */
+  project?: string | null;
+}
+
+/**
+ * Resolve a stable project/repo name from a working directory. A worktree cwd
+ * (`…/<repo>/.agents/worktrees/<slug>[/sub]`) resolves to the repo dir name so
+ * a worktree session groups with its own repo; any other path resolves to its
+ * basename. Pure — no filesystem access, so it works for remote events too.
+ */
+export function projectFromCwd(cwd?: string | null): string | undefined {
+  if (!cwd) return undefined;
+  const norm = cwd.replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!norm) return undefined;
+  const wtIdx = norm.indexOf('/.agents/worktrees/');
+  if (wtIdx > 0) {
+    const repoPath = norm.slice(0, wtIdx);
+    const base = repoPath.slice(repoPath.lastIndexOf('/') + 1);
+    if (base) return base;
+  }
+  const base = norm.slice(norm.lastIndexOf('/') + 1);
+  return base || undefined;
+}
+
+/**
+ * Join session facts (ticket / project / execution host) onto each event by
+ * `sessionId`. A hint wins; otherwise pre-baked enriched fields (from a remote
+ * peer that already enriched its own stream) are preserved, and project/host
+ * fall back to what the event itself carries (`cwd`, `host`). Pure.
+ */
+export function enrichActivityEvents(
+  events: EnrichedActivityEvent[],
+  hints: ActivitySessionHint[],
+): EnrichedActivityEvent[] {
+  const bySession = new Map<string, ActivitySessionHint>();
+  for (const h of hints) if (h.sessionId) bySession.set(h.sessionId, h);
+  return events.map((ev) => {
+    const hint = ev.sessionId ? bySession.get(ev.sessionId) : undefined;
+    const project = hint?.project ?? ev.project ?? projectFromCwd(ev.cwd);
+    const ticket = hint?.ticket ?? ev.ticket ?? undefined;
+    const executionHost = hint?.executionHost ?? ev.executionHost
+      ?? (ev.host && ev.host !== 'unknown' ? ev.host : undefined);
+    return {
+      ...ev,
+      ...(project ? { project } : {}),
+      ...(ticket ? { ticket } : {}),
+      ...(executionHost ? { executionHost } : {}),
+    };
+  });
+}
+
+/**
+ * Validate + host-tag one peer's `activity --json` payload for the fan-out
+ * merge. Mirrors {@link parseLine}: skip anything missing `event`/`sessionId`/
+ * `ts`, drop corrupt items. The event's own `host` is the execution host and is
+ * authoritative; only fall back to the dialed peer's `machine` when it's absent.
+ * Enriched fields the peer stamped (project/ticket/executionHost) ride through.
+ */
+export function parseActivityPayload(stdout: string, machine: string): EnrichedActivityEvent[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  const out: EnrichedActivityEvent[] = [];
+  for (const item of parsed) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const ev = item as Partial<EnrichedActivityEvent>;
+    if (!ev.event || !ev.sessionId || !ev.ts) continue;
+    const host = ev.host && ev.host !== 'unknown' ? ev.host : machine;
+    out.push({ ...(ev as EnrichedActivityEvent), host });
+  }
+  return out;
+}
+
+/**
+ * Merge local + remote event lists, keeping the first copy of a given
+ * host/session/ts/event and sorting newest first. Cross-machine activity dirs
+ * can sync in a peer's own events, so the identity key dedupes those (mirrors
+ * `mergeFeedBlocks`).
+ */
+export function mergeActivityEvents(...groups: EnrichedActivityEvent[][]): EnrichedActivityEvent[] {
+  const byKey = new Map<string, EnrichedActivityEvent>();
+  for (const ev of groups.flat()) {
+    const key = `${normalizeHost(ev.host)}\0${ev.sessionId}\0${ev.ts}\0${ev.event}`;
+    if (!byKey.has(key)) byKey.set(key, ev);
+  }
+  return [...byKey.values()].sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts));
+}
+
+export type ActivityGroupBy = 'project' | 'device' | 'agent';
+
+/** One bucket of the grouped view. */
+export interface ActivityGroup {
+  /** Grouping value; empty string for the "unknown" bucket. */
+  key: string;
+  /** Display label. */
+  label: string;
+  events: EnrichedActivityEvent[];
+}
+
+/** The (key, label) an event sorts under for a given grouping dimension. */
+export function activityGroupKey(ev: EnrichedActivityEvent, by: ActivityGroupBy): { key: string; label: string } {
+  if (by === 'project') {
+    const p = ev.project ?? projectFromCwd(ev.cwd);
+    return p ? { key: p, label: p } : { key: '', label: 'unknown project' };
+  }
+  if (by === 'device') {
+    const h = ev.executionHost ?? (ev.host && ev.host !== 'unknown' ? ev.host : undefined);
+    return h ? { key: h, label: h } : { key: '', label: 'unknown device' };
+  }
+  const a = ev.agent;
+  return a ? { key: a, label: a } : { key: '', label: 'unknown agent' };
+}
+
+/**
+ * Bucket events by project, device, or agent. Groups are ordered by event count
+ * (desc) then label; the "unknown" bucket always sorts last. Input order is
+ * preserved within a group, so newest-first survives when the input is sorted.
+ */
+export function groupActivity(events: EnrichedActivityEvent[], by: ActivityGroupBy): ActivityGroup[] {
+  const byKey = new Map<string, ActivityGroup>();
+  for (const ev of events) {
+    const { key, label } = activityGroupKey(ev, by);
+    const g = byKey.get(key);
+    if (g) g.events.push(ev);
+    else byKey.set(key, { key, label, events: [ev] });
+  }
+  return [...byKey.values()].sort((a, b) => {
+    if (!a.key && b.key) return 1;
+    if (!b.key && a.key) return -1;
+    if (b.events.length !== a.events.length) return b.events.length - a.events.length;
+    return a.label.localeCompare(b.label);
+  });
+}
+
+/**
+ * Narrow events to those whose project, device/host, agent, event kind, or
+ * ticket contains `filter` (case-insensitive substring). An empty filter is a
+ * no-op. Pure.
+ */
+export function filterActivityEvents(events: EnrichedActivityEvent[], filter: string): EnrichedActivityEvent[] {
+  const needle = filter.trim().toLowerCase();
+  if (!needle) return events;
+  return events.filter((ev) => {
+    const fields = [ev.project, ev.executionHost, ev.host, ev.agent, ev.event, ev.ticket];
+    return fields.some((f) => typeof f === 'string' && f.toLowerCase().includes(needle));
+  });
+}
+
+/** One rendered enriched line: the base activity line + `· project · ticket` tags. */
+export function formatEnrichedActivityLine(
+  ev: EnrichedActivityEvent,
+  opts: { showHost?: boolean; showProject?: boolean; indent?: string } = {},
+): string {
+  const base = formatActivityLine(ev, { showHost: opts.showHost });
+  const tags: string[] = [];
+  if (opts.showProject && ev.project) tags.push(ev.project);
+  if (ev.ticket) tags.push(ev.ticket);
+  const suffix = tags.length > 0 ? chalk.gray(`  · ${tags.join(' · ')}`) : '';
+  return `${opts.indent ?? ''}${base}${suffix}`;
+}
+
+/** Human header for one grouped bucket: `<label> · N events · M milestones`. */
+export function formatActivityGroupHeader(group: ActivityGroup): string {
+  const { milestones } = collapseActivity(group.events);
+  const n = group.events.length;
+  const m = milestones.length;
+  const parts = [`${n} event${n === 1 ? '' : 's'}`];
+  if (m > 0) parts.push(`${m} milestone${m === 1 ? '' : 's'}`);
+  return `${group.label} · ${parts.join(' · ')}`;
 }
 
 // ---------------------------------------------------------------------------

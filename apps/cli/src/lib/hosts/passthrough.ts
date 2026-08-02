@@ -116,6 +116,7 @@ const OWN_HOST_COMMANDS = new Set([
   'harnesses',
   'sessions',
   'feed',
+  'activity', // fans `--host`/`--device`/`--devices-all` out itself (feed-style)
   'computer',
   'secrets',
   'logs',

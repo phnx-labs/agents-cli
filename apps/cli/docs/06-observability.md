@@ -444,6 +444,32 @@ Identity resolution order: `--session` → `AGENT_SESSION_ID` /
 `AGENTS_SESSION_ID` / mailbox basename → `AGENT_LAUNCH_ID` match in the pid
 registry → parent-pid walk through `by-pid/<pid>.json`.
 
+### Activity lane (`agents activity`) — progress at a glance, fleet-wide
+
+`agents activity` reads the same append-only activity stream (never re-parsing
+transcripts) and, by opt-in, across the whole fleet:
+
+```bash
+agents activity                                    # this machine, newest first (default)
+agents activity --devices-all --group-by project   # per project: what each agent did, where, for which ticket
+agents activity --host yosemite-s1                 # one box over SSH (--device is an alias)
+agents activity --devices-all --filter RUSH-2100   # one ticket, fleet-wide
+agents activity --milestones                       # only plans / PRs / worktrees / sub-agents
+```
+
+- **Fleet fan-out.** `--devices-all` (alias `--hosts-all`) runs the same
+  `activity --json` on every reachable device and merges each peer's stream
+  host-tagged (feed-style, via `gatherRemoteAgentsJson`); `-H/--host` / `--device`
+  scope to specific boxes; `--local` forces local-only. Local-only is the default.
+- **Grouping + filter.** `--group-by project|device|agent` buckets the stream;
+  `--filter <text>` narrows by project / device / agent / event / ticket. The flat
+  newest-first list stays the default.
+- **Enrichment (the join, not transcript parsing).** Each item is joined to live
+  sessions for the **project** (repo/worktree slug from cwd), the **execution host**
+  (`provenance.host` — the box it actually runs on), and the **Linear ticket**
+  (`ActiveSession.ticket`). `--json` is a mergeable per-host payload carrying these
+  enriched fields.
+
 ### Live tail (`--watch`, `-f`) — the money shot
 
 ```bash

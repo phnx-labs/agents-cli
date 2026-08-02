@@ -38,6 +38,11 @@ describe('maybeRunOnHost — local short-circuits (no SSH attempted)', () => {
     expect(await maybeRunOnHost('feed', ['feed', '--host', 'mac', '--json'])).toBe(false);
   });
 
+  it('leaves activity host lists to the command-level fleet aggregator', async () => {
+    expect(await maybeRunOnHost('activity', ['activity', '--host', 'mac', '--json'])).toBe(false);
+    expect(await maybeRunOnHost('activity', ['activity', '--device', 'a', '--devices-all'])).toBe(false);
+  });
+
   it('rejects --host on a non-routable, non-OWN_HOST group with a clear error (not unknown option)', async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
     // setup has no remote semantics and no own-host handler — must not fall
