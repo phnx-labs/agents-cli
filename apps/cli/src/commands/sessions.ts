@@ -364,15 +364,22 @@ export function buildSessionDescription(s: ActiveSession): string {
     return cleanPreview([todo, base].filter(Boolean).join(' · '));
   }
   if (s.context === 'teams') {
+    // A teams row identifies its TEAM, then the teammate within it, then who
+    // spun it up, then what it's working on — so several teams from one
+    // orchestrator stay distinct and each shows its target, not just its slug.
     const parts = [s.teamName];
+    // Teammate name (distinct from the team slug) — which member this row is.
+    if (s.label && s.label !== s.teamName) parts.push(s.label);
     // Lineage: which orchestrator spun up this team. Prefer the resolved label,
     // else the short session id, so "by whom" is answerable at a glance.
     const orch = s.orchestratorLabel || (s.orchestratorSessionId ? s.orchestratorSessionId.slice(0, 8) : '');
     if (orch) parts.push(`by ${orch}`);
     if (todo) parts.push(todo);
-    if (s.preview) parts.push(s.preview);
-    else if (s.label) parts.push(s.label);
-    else if (s.topic) parts.push(s.topic);
+    // Target: the live latest turn if working, else the assigned mission (the
+    // team's task/target, shown even before the teammate has a transcript), else
+    // the transcript topic.
+    const target = s.preview || s.assignedTask || s.topic;
+    if (target) parts.push(target);
     return cleanPreview(parts.filter(Boolean).join(' · '));
   }
   // Terminal, headless, or sub-agent: todos + live preview, then label, then topic.

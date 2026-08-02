@@ -266,9 +266,15 @@ spawned it — the session that ran `agents teams add`, captured from
 `AGENTS_SESSION_ID` at spawn and stored as the teammate's `parentSessionId`
 (`src/lib/teams/agents.ts`). `listTeamsActive` surfaces it as `orchestratorSessionId`
 (the teammate's own transcript stays `sessionId`), and `getActiveSessions` resolves an
-`orchestratorLabel` from the orchestrator's own row when it is present in the set. The
-listing shows it as `<team> · by <orchestrator>`, so "which session spun up this team"
-is answerable at a glance; `--active --json` carries both fields for programmatic use.
+`orchestratorLabel` from the orchestrator's own row when it is present in the set.
+
+Each row also carries the team's **target** — a one-line summary of the mission the
+teammate was spawned with (`summarizeMission` over the stored `prompt`), exposed as
+`assignedTask` and shown even before the teammate has produced a transcript. The row
+reads `<team> · <teammate> · by <orchestrator> · <live turn | mission>`, so one
+orchestrator running several teams stays legible (distinct `teamName`s) and each team
+says what it is *for*, not just its slug. `--active --json` carries
+`orchestratorSessionId`, `orchestratorLabel`, and `assignedTask` for programmatic use.
 
 Two properties of the running view are worth stating, because a session missing from
 it is indistinguishable from a session that isn't running:

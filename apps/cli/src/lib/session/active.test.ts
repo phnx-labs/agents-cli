@@ -2,7 +2,7 @@ import { describe, it, expect, afterAll } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { resolveCwds, LSOF_CONCURRENCY, agentKindFromComm, activeStatusFromCloudStatus, resolveFallbackStatus, lifecycleStatus, ABANDONED_STALE_MS, resolvePaneIdentity, matchOriginDevice, annotateOrchestratorLabels } from './active.js';
+import { resolveCwds, LSOF_CONCURRENCY, agentKindFromComm, activeStatusFromCloudStatus, resolveFallbackStatus, lifecycleStatus, ABANDONED_STALE_MS, resolvePaneIdentity, matchOriginDevice, annotateOrchestratorLabels, summarizeMission } from './active.js';
 import type { HookSessionIndex } from './hook-sessions.js';
 import type { DeviceProfile, DeviceRegistry } from '../devices/registry.js';
 
@@ -289,5 +289,26 @@ describe('annotateOrchestratorLabels (team lineage — which session spun up a t
     const solo = row({ sessionId: 's1', context: 'terminal', label: 'x' });
     annotateOrchestratorLabels([solo]);
     expect(solo.orchestratorLabel).toBeUndefined();
+  });
+});
+
+describe('summarizeMission (team task/target from the spawn prompt)', () => {
+  it('takes the first line and strips a MISSION: label', () => {
+    expect(summarizeMission('MISSION: Fix the session mapping bug\n\nDetails...')).toBe('Fix the session mapping bug');
+  });
+  it('strips CONTEXT:/TASK:/GOAL: labels too', () => {
+    expect(summarizeMission('CONTEXT: improve the docs site')).toBe('improve the docs site');
+    expect(summarizeMission('TASK - ship the CLI')).toBe('ship the CLI');
+  });
+  it('truncates a long mission with an ellipsis', () => {
+    const long = 'x'.repeat(200);
+    const out = summarizeMission(long)!;
+    expect(out.length).toBe(80);
+    expect(out.endsWith('…')).toBe(true);
+  });
+  it('returns undefined for empty/whitespace prompt', () => {
+    expect(summarizeMission('')).toBeUndefined();
+    expect(summarizeMission('   \n  ')).toBeUndefined();
+    expect(summarizeMission(null)).toBeUndefined();
   });
 });

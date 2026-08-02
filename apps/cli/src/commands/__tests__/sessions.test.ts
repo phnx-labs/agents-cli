@@ -1050,3 +1050,32 @@ describe('buildSessionDescription — team lineage', () => {
     expect(desc).not.toContain('by ');
   });
 });
+
+describe('buildSessionDescription — team target + teammate', () => {
+  it('shows team, teammate, orchestrator, and the assigned mission', () => {
+    const desc = buildSessionDescription({
+      context: 'teams', kind: 'claude', status: 'working',
+      teamName: 'session-ship', label: 'cli-ids', orchestratorLabel: 'ship the CLI',
+      assignedTask: 'Make short + full session ids resolve everywhere',
+    } as any);
+    expect(desc).toContain('session-ship');
+    expect(desc).toContain('cli-ids');
+    expect(desc).toContain('by ship the CLI');
+    expect(desc).toContain('Make short + full session ids resolve everywhere');
+  });
+  it('prefers the live preview over the assigned mission once working', () => {
+    const desc = buildSessionDescription({
+      context: 'teams', kind: 'claude', status: 'working',
+      teamName: 't', assignedTask: 'the mission', preview: 'editing usage.ts',
+    } as any);
+    expect(desc).toContain('editing usage.ts');
+    expect(desc).not.toContain('the mission');
+  });
+  it('shows the assigned mission for a teammate with no transcript yet (pending)', () => {
+    const desc = buildSessionDescription({
+      context: 'teams', kind: 'claude', status: 'pending',
+      teamName: 't', assignedTask: 'wire up the auth flow',
+    } as any);
+    expect(desc).toContain('wire up the auth flow');
+  });
+});

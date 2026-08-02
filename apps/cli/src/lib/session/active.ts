@@ -213,6 +213,15 @@ export interface ActiveSession {
   /** Display label for the orchestrator (its topic/label), resolved when the
    * orchestrator is itself present in the active set. Display-only. */
   orchestratorLabel?: string;
+  /**
+   * For a teams teammate: a one-line summary of the mission it was spawned with
+   * (the `prompt` stored on the teammate record — the team's task/target), so the
+   * listing answers "what is this team working on", not just its name. Survives
+   * before the teammate has produced any transcript (a pending/staged teammate
+   * still shows its target). Distinct from `topic`, which is derived from the
+   * teammate's own transcript once it starts.
+   */
+  assignedTask?: string;
   agentId?: string;
   cloudProvider?: string;
   cloudTaskId?: string;
@@ -793,6 +802,20 @@ function quickExtractTopic(sessionFile: string): string | undefined {
   return undefined;
 }
 
+/**
+ * One-line summary of a teammate's spawn prompt — the team's task/target. Takes
+ * the first non-empty line, strips a leading `MISSION:`/`CONTEXT:`/`TASK:` label,
+ * and truncates. Exported for tests.
+ */
+export function summarizeMission(prompt: string | null | undefined): string | undefined {
+  if (!prompt) return undefined;
+  const firstLine = prompt.split('\n').map((l) => l.trim()).find(Boolean);
+  if (!firstLine) return undefined;
+  const cleaned = firstLine.replace(/^(MISSION|CONTEXT|TASK|GOAL|OBJECTIVE)\s*[:\-—]\s*/i, '').trim();
+  if (!cleaned) return undefined;
+  return cleaned.length > 80 ? `${cleaned.slice(0, 79)}…` : cleaned;
+}
+
 /** Live teams teammates. Reuses AgentManager which already polls PIDs via `kill -0`. */
 export async function listTeamsActive(): Promise<ActiveSession[]> {
   const mgr = new AgentManager();
@@ -824,6 +847,7 @@ export async function listTeamsActive(): Promise<ActiveSession[]> {
       startedAtMs: a.startedAt.getTime(),
       lastActivityMs: sessionFileTimes(sessionFile).mtimeMs,
       teamName: a.taskName,
+      assignedTask: summarizeMission(a.prompt),
       agentId: a.agentId,
       // The frozen actor stamped on the teammate record (RUSH-2028) — who ran
       // this teammate, surfaced as the owner in --active (RUSH-2018); sidecar
