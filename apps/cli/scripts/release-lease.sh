@@ -72,10 +72,25 @@ holder_desc() {
 # exact commit the remote ref points at is its owner -- that is what makes
 # `release` safe to run from a different process than `claim`, and what stops a
 # third agent from dropping a lease it never held.
-token_path() { printf '%s/release-lease.token' "$(git rev-parse --git-common-dir)"; }
-read_token()  { cat "$(token_path)" 2>/dev/null || true; }
-write_token() { printf '%s\n' "$1" > "$(token_path)"; }
-clear_token() { rm -f "$(token_path)"; }
+token_path()   { printf '%s/release-lease.token' "$(git rev-parse --git-common-dir)"; }
+# Every sha this run has ever pushed for the CURRENT lease. `renew` rotates the
+# lease commit, and the rotation is not atomic with updating the token file: the
+# renewer pushes sha2, and only then writes it. A concurrent `release` reading
+# just the current token would see sha1, find sha2 on origin, conclude the lease
+# was reclaimed, and leave it alone -- orphaning our own lease until its TTL.
+# Checking membership in the history closes that window: any sha in here is one
+# WE authored, so it is ours to drop.
+history_path() { printf '%s/release-lease.history' "$(git rev-parse --git-common-dir)"; }
+read_token()   { cat "$(token_path)" 2>/dev/null || true; }
+write_token()  { printf '%s\n' "$1" >> "$(history_path)"; printf '%s\n' "$1" > "$(token_path)"; }
+clear_token()  { rm -f "$(token_path)" "$(history_path)"; }
+# A fresh claim starts a fresh history -- shas from a previous, already-released
+# lease must never make us think we own someone else's current one.
+reset_token()  { clear_token; }
+owned_token() { # $1 = a sha seen on origin
+  [[ -n "${1:-}" ]] || return 1
+  grep -qxF "$1" "$(history_path)" 2>/dev/null
+}
 
 # Read the remote lease, if any. Echoes the sha; empty when unheld.
 remote_lease_sha() {
@@ -131,6 +146,7 @@ cmd_claim() {
 
   local sha
   sha="$(make_lease_commit "$version")"
+  reset_token   # a new claim starts a new ownership history
 
   # First attempt: create the ref. Succeeds only when nobody holds it.
   if git push --quiet origin "$sha:$LEASE_REF" 2>/dev/null; then
@@ -187,7 +203,7 @@ cmd_renew() {
   [[ -n "$mine" ]] || { red "no release lease claimed from this checkout"; return 1; }
 
   held="$(remote_lease_sha)"
-  if [[ "$held" != "$mine" ]]; then
+  if ! owned_token "$held"; then
     # Reclaimed or dropped while we were working. Fail loudly: the caller must
     # stop before its next irreversible step, not carry on believing it is alone.
     red "release lease is no longer ours -- another releaser holds it"
@@ -216,7 +232,9 @@ cmd_verify() {
   [[ -n "$mine" ]] || { red "release lease: no token in this checkout"; return 1; }
   held="$(remote_lease_sha)" || { red "release lease: could not read origin"; return 1; }
   [[ -n "$held" ]] || { red "release lease: the lease is gone from origin"; return 1; }
-  if [[ "$held" != "$mine" ]]; then
+  # Any sha this run pushed counts as ours -- a renew that landed between the
+  # token write and this check is still us, not a reclaim.
+  if ! owned_token "$held"; then
     fetch_lease || true
     red "release lease: no longer ours -- held by $(describe_lease "$held")"
     return 1
@@ -239,9 +257,12 @@ cmd_release() {
     gray "release lease already gone"
     return 0
   fi
-  if [[ "$held" != "$mine" ]]; then
-    # Someone reclaimed it (our run outlived the TTL). Dropping it now would
-    # hand the pipeline to a third agent while the real holder is publishing.
+  # Match against every sha this run pushed, not just the latest token. A renew
+  # that pushed but had not yet written its token would otherwise look like a
+  # reclaim by someone else, and we would orphan our own lease until its TTL.
+  if ! owned_token "$held"; then
+    # Genuinely reclaimed (our run outlived the TTL). Dropping it now would hand
+    # the pipeline to a third agent while the real holder is publishing.
     fetch_lease || true
     yellow "release lease is no longer ours -- leaving it alone"
     gray "  now held by: $(describe_lease "$held")"

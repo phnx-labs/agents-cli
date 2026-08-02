@@ -269,6 +269,47 @@ describe('release-lease: a long healthy release must not lose its lease', () => 
   });
 });
 
+describe('release-lease: a renew must not orphan our own lease', () => {
+  // The race: `renew` pushes sha2, then writes sha2 to the token file. Those are
+  // not atomic. A `release` (or `verify`) landing between them reads sha1, sees
+  // sha2 on origin, and — matching only the latest token — would conclude the
+  // lease was reclaimed and "leave it alone", orphaning OUR OWN lease until the
+  // TTL expires. Ownership is therefore membership in the set of shas this run
+  // pushed, not equality with the most recent one.
+  it('release still drops a lease that renew rotated', () => {
+    lease(boxA, ['claim', '1.20.82']);
+    lease(boxA, ['renew']); // origin now holds sha2
+
+    // Simulate the window: roll the token file back to the pre-renew sha, which
+    // is exactly what a `release` racing the renewer would read.
+    const gitdir = git(boxA, 'rev-parse', '--git-common-dir');
+    const histPath = path.resolve(boxA, gitdir, 'release-lease.history');
+    const tokPath = path.resolve(boxA, gitdir, 'release-lease.token');
+    const history = fs.readFileSync(histPath, 'utf-8').trim().split('\n');
+    expect(history.length).toBeGreaterThanOrEqual(2);
+    fs.writeFileSync(tokPath, history[0] + '\n'); // stale token, pre-renew
+
+    const r = lease(boxA, ['release']);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('release lease dropped');
+    expect(r.stdout).not.toContain('leaving it alone');
+
+    // Genuinely free for the next releaser — not orphaned.
+    expect(lease(boxB, ['claim', '1.20.83']).status).toBe(0);
+  });
+
+  it('a fresh claim does not inherit ownership of a previous lease', () => {
+    lease(boxA, ['claim', '1.20.82']);
+    lease(boxA, ['release']);
+    // box-b now holds a completely different lease.
+    lease(boxB, ['claim', '1.20.83']);
+
+    // box-a must NOT believe box-b's lease is one of its own old shas.
+    const a = lease(boxA, ['verify']);
+    expect(a.status).toBe(1);
+  });
+});
+
 describe('release-lease: verify gates the irreversible steps', () => {
   it('passes only while the lease is genuinely ours', () => {
     lease(boxA, ['claim', '1.20.82']);

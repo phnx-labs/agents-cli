@@ -830,6 +830,11 @@ if $PHNX_TARGET_PUBLISHED; then
     fi
     [[ "$(git show "$TAG_TARGET:apps/cli/package.json" | jq -r .version)" == "$TARGET" ]] \
       || die "refusing to create v$TARGET: $TAG_TARGET does not contain package version $TARGET"
+    # This is the second place a tag gets pushed (the already-published recovery
+    # path), and it is just as irreversible as the primary one -- gate it too, or
+    # a lease lost during the npm-view round trip lets two releasers both push a
+    # tag for the same version.
+    require_lease "pushing the missing tag v$TARGET"
     git tag -f "v$TARGET" "$(git rev-parse "$TAG_TARGET^{commit}")" >/dev/null
     git push origin "v$TARGET" && green "Pushed missing tag v$TARGET"
   else
