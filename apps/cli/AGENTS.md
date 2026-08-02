@@ -369,11 +369,12 @@ bug; fix the drift. It uses RFC-2119 MUST/SHOULD language, cites the implementin
   contract. Load-bearing invariants: discovery MUST parse **every** harness in
   `SESSION_AGENTS` (all 11) and a malformed line MUST be skipped, never thrown
   (SES-1, SES-3); every list row MUST show a **non-empty preview** — live turn →
-  `label` → first-prompt `topic` → `'-'` (SES-8; the `--flat` renderer is the one
-  known violation, GAP-1); "where a session started" spans three fields
-  (`cwd` + `provenance` + `context`), not one `origin` (SES-13); the `--json`
-  shapes and `SessionEvent` union are a stability contract (IF-1, IF-4); R2 sync
-  is a zero-knowledge CRDT G-Set union (SES-24, SES-25).
+  `label` → first-prompt `topic` → `'-'` (SES-8; `--flat` and the interactive
+  picker share the one unguarded renderer, SES-GAP-1); "where a session started"
+  spans three fields (`cwd` + `provenance` + `context`), not one `origin`
+  (SES-13); the `--json` shapes and `SessionEvent` union are a stability contract
+  (SES-IF-1, SES-IF-4); R2 sync is a CRDT G-Set union, zero-knowledge whenever an
+  encryption key is configured (SES-24, SES-25).
 - **[`docs/specifications.md` §Secrets](docs/specifications.md#secrets)** — the `agents secrets`
   contract. Load-bearing invariants: **inject into the child, never materialize
   to the agent** — every command is on one side of the boundary by construction
@@ -381,7 +382,12 @@ bug; fix the drift. It uses RFC-2119 MUST/SHOULD language, cites the implementin
   (SEC-8); the "no-noise" rules — silent value-free `list`, batched single-prompt
   reads, silent broker miss, no `console.*` in the lib layer, no shell-rc
   pollution (SEC-11..SEC-17); all three desktop platforms are supported and the
-  parity matrix names where guarantees are weaker (CROSS-1, CROSS-3).
+  parity matrix names where guarantees are weaker (SEC-CROSS-1, SEC-CROSS-3).
+
+Requirement ids are section-namespaced — `SES-*` / `SEC-*` / `EXEC-*`, with the
+`-IF-` (interface), `-CROSS-` (platform parity), `-COMPAT-` (stability) and
+`-GAP-` (known gap) families — and a requirement the code does not yet fully meet
+carries a trailing `Status: [Intended]` or `[Drift]` line naming its `-GAP-`.
 
 Both specs also enumerate **known gaps** (implemented-vs-intended drift) — a new
 feature MUST NOT widen them and SHOULD close the one it touches.

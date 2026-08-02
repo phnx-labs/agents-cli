@@ -24,13 +24,27 @@ guarantee, the reference for the mechanism.
 - Requirement keywords **MUST / MUST NOT / SHOULD / SHOULD NOT / MAY** are used
   per [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119) /
   [RFC 8174](https://www.rfc-editor.org/rfc/rfc8174), and only when capitalized.
-- Every requirement carries a stable id (`SES-*` sessions, `SEC-*` secrets,
-  `EXEC-*` agent execution) and cites the implementing `file:line` under
-  `apps/cli/src/` unless noted. **Line numbers drift as code moves — the cited
-  symbol/constant is the source of truth, not the number.**
+- **Requirement id families are section-namespaced** so an id is globally unique.
+  Each family is prefixed with its section (`SES` sessions, `SEC` secrets, `EXEC`
+  agent execution):
+  - `<SEC>-<n>` — a normative behavioral requirement (e.g. `SES-8`, `SEC-15`, `EXEC-1`).
+  - `<SEC>-IF-<n>` — an interface / output / exit-code contract.
+  - `<SEC>-CROSS-<n>` — a cross-platform parity requirement.
+  - `<SEC>-COMPAT-<n>` — a compatibility / stability guarantee.
+  - `<SEC>-GAP-<n>` — a known implemented-vs-intended gap (informative, non-normative).
+- **Every requirement has a status.** Unmarked requirements describe **Current**
+  behavior (what the code does today). A requirement the code does **not yet fully
+  meet** carries a trailing `Status:` line tagging it **`[Intended]`** (the contract
+  is the target; the shortfall is named in a `-GAP-`) or **`[Drift]`** (a named
+  deviation from another requirement in this document). Normative `MUST`/`SHOULD`
+  bodies state only the contract; the shortfall lives in the `-GAP-` entry. An entry
+  that exists purely to record such a deviation carries no RFC-2119 keyword.
+- Every requirement cites the implementing `file:line` under `apps/cli/src/` unless
+  noted, and SHOULD name the symbol/function/constant. **Line numbers drift as code
+  moves — the cited symbol is the durable anchor, not the number.**
 - Behavioral scenarios are written Given/When/Then so they map 1:1 to tests.
-- Each section ends with **known gaps** — implemented-vs-intended drift. A new
-  feature MUST NOT widen a gap and SHOULD close the one it touches.
+- Each section ends with **known gaps** (`-GAP-`). A new feature MUST NOT widen a
+  gap and SHOULD close the one it touches.
 
 ## Contents
 
@@ -145,15 +159,10 @@ SSH access (§7); rendering sessions that no harness produced.
     (`commands/sessions.ts:1447`).
   - picker / `--preview <id>` satisfy this: fallback at every branch
     (`commands/sessions-picker.ts:348-350,85-100`).
-  - **GAP (SES-8 violated today):** `flatSessionRow` (`--flat`) has no `'-'`
-    fallback — the "doing" cell (`commands/sessions.ts` ~`:1500`) flows a
-    `topic === undefined` (non-live, no tag, noise-only first prompt; cf.
-    `prompt.test.ts`) into `renderTopicCell` (~`:1851`) which renders a **blank**
-    cell. The interactive picker's `formatPickerLabel` (~`:2060`) shares the same
-    unguarded `renderTopicCell`, so the gap is **not** exclusive to `--flat`. Fix:
-    add the `'-'` fallback in `renderTopicCell` (or where its callers build the
-    cell), mirroring the guarded renderers above; or never persist an empty
-    `topic` for a session with ≥1 real user turn. Untested. See GAP-1.
+
+  Status: `[Intended]` — two renderers do not yet meet it (`--flat` and the
+  interactive picker share an unguarded `renderTopicCell`); the shortfall is
+  SES-GAP-1.
 - **SES-9 (MUST).** The preview MUST be deterministic and non-LLM: live rows use
   the state-engine's latest-turn string; static rows use the persisted
   first-prompt `topic`; the picker uses pure regex/heuristic digests
@@ -200,7 +209,11 @@ SSH access (§7); rendering sessions that no harness produced.
 - **SES-16 (SHOULD).** Cross-harness durable signals (todos/checklist, PR url,
   ticket id, created tickets) SHOULD be extracted by shared agent-agnostic
   extractors so a harness earns them by emitting the right event
-  (`lib/session/state.ts:164-317`). Coverage is currently uneven (see GAP-2).
+  (`lib/session/state.ts:164-317`).
+
+  Status: `[Intended]` — coverage is uneven today (the live path forces
+  non-Codex→Claude, and no harness populates `costUsd`); the shortfall is
+  SES-GAP-2.
 
 #### 3.4 Lifecycle
 
@@ -255,12 +268,17 @@ SSH access (§7); rendering sessions that no harness produced.
   idempotent, byte-identical across machines regardless of order
   (`lib/session/sync/crdt.ts:6-19,73-117`). Each machine MUST be the single writer
   of its own R2 prefix (`lib/session/sync/sync.ts:5-7`).
-- **SES-25 (MUST).** Sync MUST be zero-knowledge: each transcript body sealed
-  client-side with AES-256-GCM (fresh IV) under the shared `R2_SYNC_ENC_KEY`,
-  which is separate from the R2 access token and never leaves the machine; merge
-  identity stays over plaintext (`lib/session/sync/transcript-crypto.ts:13-24,83-96`).
-  A missing key uploads plaintext with a loud once-per-cycle warning, not an error
-  (`lib/session/sync/sync.ts:94-99`).
+- **SES-25 (MUST).** When an encryption key is configured, sync MUST be
+  zero-knowledge: each transcript body is sealed client-side with AES-256-GCM
+  (fresh IV) under the shared `R2_SYNC_ENC_KEY` — separate from the R2 access
+  token, never leaving the machine — so the bucket only ever holds ciphertext;
+  merge identity stays over plaintext
+  (`lib/session/sync/transcript-crypto.ts:13-24,83-96`). If no `R2_SYNC_ENC_KEY`
+  is configured, sync MAY fall back to plaintext upload with a loud once-per-cycle
+  warning (`lib/session/sync/sync.ts:94-99`); that fallback is explicitly **not**
+  zero-knowledge — the SES-25 guarantee holds only in the encrypted mode.
+  Fail-closed instead of the plaintext fallback is a reasonable future hardening
+  (see SES-GAP-9).
 - **SES-26 (MUST).** A partial fetch MUST be safe: if any copy of a session fails
   to fetch this tick, the whole session is skipped (no write, no pull-state
   stamp) and retried intact (`lib/session/sync/sync.ts:260-284,343-379`).
@@ -303,31 +321,31 @@ The command surface (bare `sessions [query]`, `tail`, `sync`, `resume`, `focus`,
 
 #### 4.2 Machine-readable output (STABLE — agents depend on these)
 
-- **IF-1 (MUST).** `sessions --json` (listing) MUST emit a JSON **array** of
+- **SES-IF-1 (MUST).** `sessions --json` (listing) MUST emit a JSON **array** of
   `SessionMeta` (`serializeSessionsJson`, `commands/sessions.ts:695-701,1272`);
   `sessions <id> --json` MUST emit `{ session, events }` (a bare event array is
   the pre-1.20.51 shape — consumers read `output.events`,
   [05-sessions.md](05-sessions.md):142-147). The fleet browser itself shells peers
   with `sessions --all --json --limit 500` (`commands/sessions-browser.ts:219`),
   so the array shape is load-bearing across the fleet.
-- **IF-2 (MUST).** `sessions --active --json` MUST emit `ActiveSession[]` with
+- **SES-IF-2 (MUST).** `sessions --active --json` MUST emit `ActiveSession[]` with
   `ticketId`/`project`/`prLink` always present as keys (test
   `sessions.serialize.test.ts:76-115`); `tail --json` MUST pass raw JSONL through
   one event per line (`commands/sessions-tail.ts:229-232`); `sync --json`,
   `inject --json`, `migrations --json` emit their documented shapes.
-- **IF-3 (MUST).** The export **bundle format** is NDJSON, `kind`
+- **SES-IF-3 (MUST).** The export **bundle format** is NDJSON, `kind`
   `agents-session-bundle`, `version` 1; parse MUST reject a wrong kind/version;
   per-record `hash`/`size` are always over **plaintext** for byte-exact dedup;
   bundle files are written `0600` (`lib/session/bundle.ts:28-29,110-113,188-227`).
-- **IF-4 (MUST).** `SessionEvent.type` is a **closed union** of the 9 documented
+- **SES-IF-4 (MUST).** `SessionEvent.type` is a **closed union** of the 9 documented
   types (`lib/session/types.ts:17-41`); a parser MUST NOT introduce a tenth.
 
 #### 4.3 stdout / stderr / exit discipline
 
-- **IF-5 (MUST).** Machine-readable output (`--json`, `--markdown`, `tail`
+- **SES-IF-5 (MUST).** Machine-readable output (`--json`, `--markdown`, `tail`
   stream, bundle NDJSON) goes to **stdout**; human/diagnostic/skip notes go to
   **stderr**, so piping a session is never polluted.
-- **IF-6 (MUST).** Exit codes are a contract: `sessions --waiting` sets exit **1**
+- **SES-IF-6 (MUST).** Exit codes are a contract: `sessions --waiting` sets exit **1**
   to signal matching (waiting-on-you) sessions exist
   (`commands/sessions.ts:905,942`); `tail` uses **2** for usage/unsupported-agent
   vs **1** for no-match (`commands/sessions-tail.ts:185,192,196`); remote
@@ -351,7 +369,7 @@ normative — a change that widens/narrows a cell is a spec change.
 | Foreign-absolute-cwd drive rebase | n/a | n/a | **prohibited** (SES-6) |
 | Remote shell for `--host` | `bash -lc` | `bash -lc` | PowerShell (`remote.ts:117-121`) |
 
-- **CROSS-1 (MUST).** All three desktop platforms MUST be supported for discovery,
+- **SES-CROSS-1 (MUST).** All three desktop platforms MUST be supported for discovery,
   parsing, listing, and `--host`. Windows-specific gaps (no provenance, no
   start-time reuse guard) are documented deviations, not silent behavior.
 
@@ -359,19 +377,19 @@ normative — a change that widens/narrows a cell is a spec change.
 
 ### 6. Compatibility & stability guarantees
 
-- **COMPAT-1 (MUST).** The `--json` listing array shape and `<id> --json`
+- **SES-COMPAT-1 (MUST).** The `--json` listing array shape and `<id> --json`
   `{ session, events }` shape MUST NOT change incompatibly without a version note;
-  additive fields are allowed (IF-1).
-- **COMPAT-2 (MUST).** `SessionEvent.type` (the 9-value union) and the export
+  additive fields are allowed (SES-IF-1).
+- **SES-COMPAT-2 (MUST).** `SessionEvent.type` (the 9-value union) and the export
   bundle `kind`/`version` MUST remain backward-compatible; a bundle producer that
-  bumps `version` MUST keep the parser rejecting unknown versions loudly (IF-3/IF-4).
-- **COMPAT-3 (MUST).** Schema migrations MUST be forward-only and lossless
-  (SES-29). **Known gap:** there is currently **no** `currentVersion >
-  SCHEMA_VERSION` guard — an older CLI opening a newer DB silently falls through
-  (no migration, no error) rather than failing safe (`lib/session/db.ts` schema
-  gate ~`:453-461`). The requirement is "MUST fail safe"; the code does not yet
-  enforce it. See GAP-8.
-- **COMPAT-4 (MUST).** `--host` forwards every other flag verbatim to the peer's
+  bumps `version` MUST keep the parser rejecting unknown versions loudly (SES-IF-3/SES-IF-4).
+- **SES-COMPAT-3 (MUST).** Schema migrations MUST be forward-only and lossless
+  (SES-29), and a CLI that opens a DB written by a newer CLI MUST fail safe
+  rather than proceed (`lib/session/db.ts` schema gate ~`:453-461`).
+
+  Status: `[Intended]` — no `currentVersion > SCHEMA_VERSION` guard exists yet,
+  so the fail-safe half is unenforced; the shortfall is SES-GAP-8.
+- **SES-COMPAT-4 (MUST).** `--host` forwards every other flag verbatim to the peer's
   same-version binary; the SSH target MUST stay validated against `SSH_TARGET_RE`
   to block argv-flag smuggling ([05-sessions.md](05-sessions.md):277).
 
@@ -386,12 +404,12 @@ normative — a change that widens/narrows a cell is a spec change.
   ([05-sessions.md](05-sessions.md):277-278).
 
 **Known gaps (implemented-vs-intended drift to fix, not to hide):**
-- **GAP-1.** `flatSessionRow` (`--flat`) and the picker's `formatPickerLabel`
+- **SES-GAP-1.** `flatSessionRow` (`--flat`) and the picker's `formatPickerLabel`
   both feed `renderTopicCell` (~`commands/sessions.ts:1500`, `:2060` →
   `:1851`) without the `'-'` fallback the other renderers use, so a session with
   no live preview, no tag, and an empty `topic` renders a **blank** cell —
   untested. Directly contradicts "always show a preview" (SES-8).
-- **GAP-2.** Metadata coverage is uneven. PR/ticket extractors are agent-agnostic
+- **SES-GAP-2.** Metadata coverage is uneven. PR/ticket extractors are agent-agnostic
   (`lib/session/state.ts` ~`:332-358`) but the live path forces non-Codex→Claude
   (`lib/session/active.ts` ~`:541-546`), so signals are effectively claude/codex
   only. And **`costUsd` is populated by no harness in the session pipeline** — it
@@ -399,28 +417,38 @@ normative — a change that widens/narrows a cell is a spec change.
   nothing sets it); real cost accounting lives in the separate budget ledger
   (`lib/budget/ledger.ts`). If per-harness metadata parity is the intended
   contract (SES-16), this is the break.
-- **GAP-3.** No `model` and no `repo`/git-remote field is persisted on
+- **SES-GAP-3.** No `model` and no `repo`/git-remote field is persisted on
   `SessionMeta` — only transient `SessionEvent.model` and `gitBranch`/`worktreeSlug`
   (`lib/session/types.ts:32,105,135`). Surfacing either needs a schema addition.
-- **GAP-4.** `opencode` has a reserved `SYNC_AGENTS` slot but SQLite→JSONL export
+- **SES-GAP-4.** `opencode` has a reserved `SYNC_AGENTS` slot but SQLite→JSONL export
   is **not implemented** (`lib/session/sync/agents.ts:130-138`) — opencode
   sessions do not sync today.
-- **GAP-5.** `dedupeBySession` runs only over local sources, never across the
+- **SES-GAP-5.** `dedupeBySession` runs only over local sources, never across the
   local↔remote seam; a session surfacing both locally and via a peer's self-report
   is not provably collapsed and is untested
   (`lib/session/active.ts:1324` vs `remote-active.ts:43-47`).
-- **GAP-6.** Whole-**file** JSON parse failure is inconsistent: Gemini throws
+- **SES-GAP-6.** Whole-**file** JSON parse failure is inconsistent: Gemini throws
   (and `parseSession` has no outer catch), while Hermes/Antigravity degrade to
   `[]` (`lib/session/parse.ts:143-169,691-696`). Standardize on degrade-to-empty.
-- **GAP-7.** Doc drift (fixed in this change): [05-sessions.md](05-sessions.md)
+- **SES-GAP-7.** Doc drift (fixed in this change): [05-sessions.md](05-sessions.md)
   said schema version 13; the code is 18 (`lib/session/db.ts`, `SCHEMA_VERSION`).
   Any hardcoded schema number in prose drifts — cite the constant. The stale
   `lib/session/db.ts` header path comment (missing `.history/`) is corrected here
   too (real path `~/.agents/.history/sessions/sessions.db`).
-- **GAP-8.** No `currentVersion > SCHEMA_VERSION` guard exists (COMPAT-3): an
+- **SES-GAP-8.** No `currentVersion > SCHEMA_VERSION` guard exists (SES-COMPAT-3): an
   older CLI opening a DB written by a newer one silently proceeds instead of
   failing safe (`lib/session/db.ts` schema gate). The "fail safe on newer DB"
   guarantee is aspirational until a guard is added.
+- **SES-GAP-9.** The zero-knowledge guarantee (SES-25) is opt-in, not enforced:
+  with no `R2_SYNC_ENC_KEY` in the `r2.backups` bundle, `pushOwn` warns once per
+  cycle and uploads transcript bodies in **plaintext** rather than refusing
+  (`lib/session/sync/sync.ts:90-99`, comment: *"the feature predates
+  encryption"*). Provisioning mints a key when one is absent
+  (`lib/session/sync/provision.ts:71-77`), so the plaintext path is reachable
+  mainly by a pre-encryption or hand-edited bundle — but a machine that loses its
+  key downgrades from sealed to readable without failing. Fail-closed (refuse the
+  upload unless a key is present, or require an explicit opt-in flag) is the
+  hardening; neither branch is covered by a test today.
 
 ---
 
@@ -457,7 +485,7 @@ the live-row checklist string is `Plan N/M: <item>`, not `✓N/M`.)
 Given a non-live indexed session with no live preview; When rendered via
 `--active` / overview / tree; Then the cell is `topic`, or `'-'` if topic is
 absent (`commands/sessions.ts:355,485,1447`); **but** via `--flat` with a
-noise-only first prompt the cell is blank today — the GAP-1 violation.
+noise-only first prompt the cell is blank today — the SES-GAP-1 violation.
 
 **GWT-7 — "Where it started" spans three axes.**
 Given a live SSH-launched session with a pid; When metadata is enriched; Then
@@ -567,7 +595,7 @@ access control (that is 1Password/Vault; this tool is device-local first).
 - **SEC-5 (SHOULD).** On macOS, stored keychain **service names** SHOULD be
   opaque HMAC-SHA256 hashes (`agents-cli.h.*`) so a passive enumerator learns
   only counts/grouping, never bundle/key/provider names
-  (`lib/secrets/index.ts:178-217`). See CROSS-3 for the platform gap.
+  (`lib/secrets/index.ts:178-217`). See SEC-CROSS-3 for the platform gap.
 
 #### 3.2 Materialization boundary — the agent never sees plaintext unless a command says so
 
@@ -624,10 +652,14 @@ access control (that is 1Password/Vault; this tool is device-local first).
   few operational diagnostics use `console.error` for names/paths only, e.g.
   `lib/secrets/index.ts:500,505`, `lib/secrets/vault-age-helper.ts:41`; the
   invariant is "no value on any stream," not "no console at all.")
-- **SEC-16 (MUST).** Non-actionable operations MUST be silent no-ops rather than
-  errors (e.g. `lock`/`unlock` off-darwin, best-effort session-store writes,
-  throttled `last_used` stamping) (`commands/secrets.ts:2219,2282`;
-  `lib/secrets/session-store.ts:24-25`; `lib/secrets/bundles.ts:938-945`).
+- **SEC-16 (MUST).** The following non-actionable operations — and only these —
+  MUST be silent no-ops rather than errors: `lock`/`unlock` on a non-macOS host
+  (exit 0, no value output), a best-effort session-store write that fails
+  (resolution still succeeds), and a throttled `last_used` stamp
+  (`commands/secrets.ts:2219,2282`; `lib/secrets/session-store.ts:24-25`;
+  `lib/secrets/bundles.ts:938-945`). A silent no-op MUST NOT be used to swallow an
+  actionable failure (a real resolution error, a missing bundle, a decrypt
+  failure) — those MUST surface.
 - **SEC-17 (SHOULD).** `agents doctor` SHOULD warn (name + line only, never the
   value) when a credential-shaped var is exported from a shell rc file, and point
   the user at `agents secrets exec` (`lib/secrets/rc-hygiene.ts:16-17,157-179`).
@@ -703,14 +735,14 @@ do not (`../../../docs/design/secrets-trust-boundaries.md:110-111`).
 
 #### 4.3 stdout / stderr / exit discipline
 
-- **IF-1 (MUST).** Machine-readable value output goes to **stdout** only
+- **SEC-IF-1 (MUST).** Machine-readable value output goes to **stdout** only
   (`get`, `export --plaintext`, `--format json`); human/advisory/warning output
   goes to **stderr** (dangerous-key drops, rc-hygiene notices) so a piped value
   is never polluted (`lib/secrets/remote.ts:214-219`; `rc-hygiene` advisories).
-- **IF-2 (MUST).** A masked marker (`redact()` emits `'*'` × min(len,8)) MUST be
+- **SEC-IF-2 (MUST).** A masked marker (`redact()` emits `'*'` × min(len,8)) MUST be
   shown wherever a value would otherwise appear but reveal was not requested
   (`commands/secrets.ts` `redact`, ~`:647-650`).
-- **IF-3 (MUST).** Error strings MUST reference names/paths only, never values or
+- **SEC-IF-3 (MUST).** Error strings MUST reference names/paths only, never values or
   the passphrase (`commands/secrets.ts:452,1361,1463`).
 
 ---
@@ -732,14 +764,14 @@ normative — a change that widens or narrows a cell is a spec change.
 | `never` policy = silent read | yes | yes (already silent) | yes (already silent) |
 | Value-size ceiling | none | none | 2560 B → file fallback (`windows.ts:64,415-420`) |
 
-- **CROSS-1 (MUST).** All three desktop platforms MUST be supported. Windows IS
+- **SEC-CROSS-1 (MUST).** All three desktop platforms MUST be supported. Windows IS
   a first-class backend (`lib/secrets/windows.ts`, full Credential Manager
   implementation + tests) — the stale "Windows is not supported" line in
   `secrets.md` is corrected by this change.
-- **CROSS-2 (SHOULD).** Off-macOS, the biometry/broker layer is a documented
+- **SEC-CROSS-2 (SHOULD).** Off-macOS, the biometry/broker layer is a documented
   no-op; `unlock`/`lock`/`status` SHOULD degrade to friendly no-ops, not errors
   (`docs/secrets.md:563`).
-- **CROSS-3 (KNOWN WEAKER GUARANTEE).** Service-name confidentiality (SEC-5)
+- **SEC-CROSS-3 (KNOWN WEAKER GUARANTEE).** Service-name confidentiality (SEC-5)
   holds on macOS only. On Linux/Windows, item names are stored verbatim and are
   enumerable by any same-user process. This is a real asymmetry to close or
   document, not to hide.
@@ -748,19 +780,19 @@ normative — a change that widens or narrows a cell is a spec change.
 
 ### 6. Compatibility & stability guarantees
 
-- **COMPAT-1 (MUST).** Policy MUST persist under the legacy `tier` wire key
+- **SEC-COMPAT-1 (MUST).** Policy MUST persist under the legacy `tier` wire key
   (`session`≡`daily`, `biometry`≡`always`, `none`≡`never`, absent≡inherit) so
   bundles stay readable across mixed CLI versions on synced machines
   (`docs/secrets.md:546`; `lib/secrets/bundles.ts:243-244,567-576`).
-- **COMPAT-2 (MUST).** The `--format json` wire output of `secrets export` is the
+- **SEC-COMPAT-2 (MUST).** The `--format json` wire output of `secrets export` is the
   machine-readable contract other subsystems (remote resolve, `--secrets`) depend
   on; its shape MUST NOT change incompatibly without a version note
   (`docs/secrets.md:173`).
-- **COMPAT-3 (MUST).** An older CLI that predates a capability MUST fail closed,
+- **SEC-COMPAT-3 (MUST).** An older CLI that predates a capability MUST fail closed,
   not silently downgrade: a pre-`set-no-acl` helper MUST reject a `never` write
   rather than store it as an ACL'd item (`docs/secrets.md:542`); a stale install
   after re-key MUST NOT be assumed to see re-keyed items (`docs/secrets.md:497`).
-- **COMPAT-4 (MUST).** Bundle name charset `^[a-z0-9][a-z0-9\-_.]{0,48}$/i` and
+- **SEC-COMPAT-4 (MUST).** Bundle name charset `^[a-z0-9][a-z0-9\-_.]{0,48}$/i` and
   key charset (with optional `.account` suffix) MUST remain accepted
   (`lib/secrets/bundles.ts:266-268,319-334`).
 
@@ -777,7 +809,7 @@ normative — a change that widens or narrows a cell is a spec change.
 
 **Known gaps (implemented-vs-intended drift to fix, not to paper over):**
 - **SEC-GAP-1 (fixed here).** `secrets.md`'s platform line said "Windows is not
-  supported" while `lib/secrets/windows.ts` implements a full backend (CROSS-1).
+  supported" while `lib/secrets/windows.ts` implements a full backend (SEC-CROSS-1).
   This change corrects that line to "cross-platform."
 - **SEC-GAP-2.** The `env:`-ref allowlist control exists (`envAllowlist` on
   `ResolveOptions`, `lib/secrets/index.ts` ~`:1392,1411`) but no command wires it
@@ -961,8 +993,8 @@ schema (`--json` passes through each agent's native stream format).
   a static `env` block plus, when the profile declares `auth`, a Keychain
   token read live at exec time and merged in under `auth.envVar`, so the
   profile YAML itself never carries a secret (`lib/profiles.ts:380-393`).
-- **EXEC-8 (SHOULD).** The "auto share token" (`shareRuntimeEnv`) MUST be
-  best-effort and MUST NOT throw or block an unrelated run when the share
+- **EXEC-8 (MUST).** The "auto share token" (`shareRuntimeEnv`) MUST be
+  best-effort: it MUST NOT throw or block an unrelated run when the share
   bundle is missing or locked (`lib/share/config.ts:117-136`, wrapped in
   `try/catch`, doc comment: *"Never throws."*).
 - **EXEC-9 (MUST).** `--secrets <bundle>` resolution MUST go through
@@ -1000,7 +1032,7 @@ schema (`--json` passes through each agent's native stream format).
   (`lib/shims.ts:280-330`), a separate code path from `buildExecEnv`, and even
   there no literal `HOME=` assignment exists (verified: no `HOME="` writer in
   `lib/shims.ts` — only `AGENTS_USER_DIR`/`GROK_DOWNLOADS` etc. *read* `$HOME`).
-- **EXEC-16 (KNOWN GAP — see GAP-1).** The other 12 registered agents
+- **EXEC-16.** The other 12 registered agents
   (gemini, cursor, opencode, openclaw, amp, kiro, goose, antigravity, grok,
   droid, hermes, forge) get **no** per-version config-dir var from
   `buildExecEnv` itself — its per-agent branch has no arm for them
@@ -1018,6 +1050,9 @@ schema (`--json` passes through each agent's native stream format).
   not per-version — by design (`apps/cli/AGENTS.md:150`;
   `lib/agents.ts:1410-1425`, doc comment: *"account-global (not
   per-version)"*).
+
+  Status: `[Drift]` — a named deviation from EXEC-13's per-version isolation
+  contract, scoped (with the two ways to close it) in EXEC-GAP-1.
 - **EXEC-17 (MUST).** The Windows `.cmd` shim delegate
   (`execShimPassthrough`) MUST route its env through the same `buildExecEnv`
   `agents run` uses (`lib/exec.ts:1059`) — so on Windows the isolated-agent
@@ -1039,11 +1074,14 @@ schema (`--json` passes through each agent's native stream format).
   own finalize (`commands/exec.ts:2459-2470`, comment: *"Governance
   chokepoint (#347): the --acp path exits here, bypassing the normal
   finalize below."*).
-- **EXEC-20 (KNOWN GAP — see GAP-2).** The ACP child spawn passes
-  `env: process.env` verbatim (`lib/acp/client.ts:65-69`) — it receives NONE
-  of `buildExecEnv`'s guarantees: no `sanitizeProcessEnv` stripping, no
-  per-version config-dir pin, no actor provenance, no mailbox/session
-  wiring, no `AGENTS_RUNTIME` label.
+- **EXEC-20.** The ACP child spawn passes `env: process.env` verbatim
+  (`lib/acp/client.ts:65-69`) — it receives NONE of `buildExecEnv`'s
+  guarantees: no `sanitizeProcessEnv` stripping, no per-version config-dir
+  pin, no actor provenance, no mailbox/session wiring, no `AGENTS_RUNTIME`
+  label.
+
+  Status: `[Drift]` — a named deviation from EXEC-18's single-engine contract;
+  see EXEC-GAP-2.
 - **EXEC-21 (MUST).** Every finalized run path (plain, fallback, loop, ACP)
   MUST call `recordDispatchedRun` exactly once as its audit funnel
   (`commands/exec.ts:1571,2470,2628,2683`, each commented *"Governance
@@ -1237,18 +1275,18 @@ and host/lease dispatch (`--host`/`--device`/`--remote-cwd`/`--no-follow`/
 | `--host`, followed to completion | the remote's own exit code (read from the sidecar `.exit` file), or 1 if unknown | `commands/exec.ts:1484-1485` |
 | `--host`, `--no-follow` or follow window closed | 0 locally; the remote run continues untethered | `commands/exec.ts:1469-1485` |
 
-- **IF-1 (MUST).** Exit code 7 MUST mean "budget-killed," never overloaded
+- **EXEC-IF-1 (MUST).** Exit code 7 MUST mean "budget-killed," never overloaded
   for any other failure — shared between the live watcher's hard-cap kill
   and a loop's budget stop, so CI/headless callers can tell it apart from an
   ordinary failure (`lib/exec.ts:1584`; `commands/exec.ts:379`, comment:
   *"mirrors BUDGET_KILL_EXIT_CODE."*).
-- **IF-2 (MUST).** Fallback/retry/handoff banners MUST print to stderr,
+- **EXEC-IF-2 (MUST).** Fallback/retry/handoff banners MUST print to stderr,
   never stdout, so a piped `agents run … | jq` stays parseable
   (`lib/exec.ts:1932-1937,1963`).
-- **IF-3 (SHOULD).** `--json` streams the underlying agent's own event
+- **EXEC-IF-3 (SHOULD).** `--json` streams the underlying agent's own event
   format per `AGENT_COMMANDS[agent].jsonFlags` (`lib/exec.ts:511-713`) — the
   run layer does not normalize a single cross-agent JSON schema (contrast
-  [Sessions](#sessions) IF-1..4, which do normalize their own output).
+  [Sessions](#sessions) EXEC-IF-1..4, which do normalize their own output).
 
 ---
 
@@ -1266,20 +1304,20 @@ and host/lease dispatch (`--host`/`--device`/`--remote-cwd`/`--no-follow`/
 
 ### 6. Compatibility & stability guarantees
 
-- **COMPAT-1 (MUST).** `AGENT_COMMANDS[agent].modeFlags` keys MUST agree
+- **EXEC-COMPAT-1 (MUST).** `AGENT_COMMANDS[agent].modeFlags` keys MUST agree
   with `AGENTS[agent].capabilities.modes` — a test asserts this
   (`lib/exec.ts:508-510`); `buildExecCommand` throws an "Internal error" as
   defense-in-depth if they ever drift (`lib/exec.ts:804-811`).
-- **COMPAT-2 (MUST).** `AGENT_LAUNCH_ID`, once minted or adopted, MUST stay
+- **EXEC-COMPAT-2 (MUST).** `AGENT_LAUNCH_ID`, once minted or adopted, MUST stay
   the stable join key threaded through `options.env` for the lifetime of one
   launch — the pid-registry / hook-session-index reconciliation depends on
   it never changing mid-launch (`lib/exec.ts:331-349,1407-1409`).
-- **COMPAT-3 (MUST).** The `full` mode spelling MUST continue to be accepted
+- **EXEC-COMPAT-3 (MUST).** The `full` mode spelling MUST continue to be accepted
   as a permanent silent alias for `skip` (`normalizeMode`,
   `lib/exec.ts:45-53`) — not a deprecation to remove.
-- **COMPAT-4 (MUST).** `BUDGET_KILL_EXIT_CODE` (7) MUST stay in sync with
+- **EXEC-COMPAT-4 (MUST).** `BUDGET_KILL_EXIT_CODE` (7) MUST stay in sync with
   `loopExitCode`'s `budget` mapping (`commands/exec.ts:379`; `lib/exec.ts:1584`)
-  — IF-1 depends on the two never diverging.
+  — EXEC-IF-1 depends on the two never diverging.
 
 ---
 
@@ -1287,30 +1325,30 @@ and host/lease dispatch (`--host`/`--device`/`--remote-cwd`/`--no-follow`/
 
 **Non-goals (by design):**
 - Not a cross-agent JSON schema normalizer — `--json` passes through each
-  agent's native stream format (IF-3).
+  agent's native stream format (EXEC-IF-3).
 - Not the secrets storage/materialization boundary itself — that contract is
   [§Secrets](#secrets); this spec only covers the run-time call site (§3.6).
 
 **Known gaps (implemented-vs-intended drift to fix, not to paper over):**
-- **GAP-1.** `buildExecEnv` isolates only 4 of 16 registered agents
+- **EXEC-GAP-1.** `buildExecEnv` isolates only 4 of 16 registered agents
   (EXEC-16). `docs/00-concepts.md:87` reads as if `HOME` itself were swapped
   for every shimmed launch ("sets HOME to the matching version home before
   exec-ing the binary"); no literal `HOME=` assignment exists anywhere in
   the run engine (EXEC-15), and the doc's own claim is imprecise even for
   the shim it describes. Either wire the remaining 12 agents into
   `buildExecEnv` (so `agents run` and the shim path agree) or narrow the doc.
-- **GAP-2.** `--acp` bypasses every `buildExecEnv` guarantee (EXEC-20) — no
+- **EXEC-GAP-2.** `--acp` bypasses every `buildExecEnv` guarantee (EXEC-20) — no
   `sanitizeProcessEnv`, no per-version isolation, no actor provenance, no
   mailbox/session wiring. This is undocumented as an isolation exception
   anywhere outside this spec.
-- **GAP-3.** Antigravity workflows and OpenCode auth are explicitly
+- **EXEC-GAP-3.** Antigravity workflows and OpenCode auth are explicitly
   account-global, not per-version (`apps/cli/AGENTS.md:150`;
   `lib/agents.ts:1410-1425`) — a deliberate, named exception to "isolated
   version home" — but `buildExecEnv`'s own doc comment only claims
   "Pins CLAUDE_CONFIG_DIR for Claude, CODEX_HOME for Codex, and
   COPILOT_HOME for GitHub Copilot" (`lib/exec.ts:352-355`), silent on Kimi
   (which it also handles) and silent on the 12 agents it doesn't.
-- **GAP-4.** A detached (`--no-follow`) `--host` run skips the local
+- **EXEC-GAP-4.** A detached (`--no-follow`) `--host` run skips the local
   `recordDispatchedRun` audit funnel entirely — no call site records it
   (EXEC-21's four sites are all reachable only from a path that knows the
   exit code). The launcher exits before an outcome is known, so a
@@ -1341,7 +1379,7 @@ alias shim materialized on disk; When `agents run grok@1.0.0 "..."` runs;
 Then `buildExecEnv` sets no `GROK_HOME` (its per-agent branch has no grok
 arm, `lib/exec.ts:364-437`) and `buildExecCommand` resolves the spawn target
 straight to the real npm binary (`lib/exec.ts:770-778`) — the run is not
-version-isolated the way EXEC-2 promises for claude (GAP-1).
+version-isolated the way EXEC-2 promises for claude (EXEC-GAP-1).
 
 **GWT-E4 — Single engine, one named exception.**
 Given a plain headless run and an `--acp` run of the same agent+prompt; When
@@ -1349,7 +1387,7 @@ both execute; Then the plain run's child env is `buildExecEnv`'s output
 (sanitized, isolated, actor-stamped) while the ACP run's child env is raw
 `process.env` (`lib/acp/client.ts:68`) — the only two shapes a run's child
 env can take, and the divergence is exactly the documented "Governance
-chokepoint" bypass (EXEC-19, GAP-2).
+chokepoint" bypass (EXEC-19, EXEC-GAP-2).
 
 **GWT-E5 — Fallback cascades on a rate limit, never on an auth failure.**
 Given `--fallback codex` and a primary claude run that exits 1 with "Invalid
@@ -1503,12 +1541,13 @@ timestamp" (WD-8).
 
 ### 4. Known gaps
 
-- The brain is not yet seeded with the full fleet-wide `agents sessions --active --json`
-  snapshot as its starting context; it reads per-candidate tails. Planned (see
-  [watchdog.md](watchdog.md) roadmap).
-- There is no distinct `done` state — a completed session is inferred as `idle` and skipped
-  via completion hints rather than a first-class status. Planned.
-- Live status inference covers Claude/Codex; other harnesses fall to `unknown` and are not
-  yet steered (`findSessionFileForKind`, `lib/session/active.ts`). Planned.
-- No default `watchdog/WORKFLOW.md` decider ships in this repo; absent one, the built-in
-  `WATCHDOG_SYSTEM_PROMPT` runs.
+- **WD-GAP-1.** The brain is not yet seeded with the full fleet-wide
+  `agents sessions --active --json` snapshot as its starting context; it reads
+  per-candidate tails. Planned (see [watchdog.md](watchdog.md) roadmap).
+- **WD-GAP-2.** There is no distinct `done` state — a completed session is inferred as
+  `idle` and skipped via completion hints rather than a first-class status. Planned.
+- **WD-GAP-3.** Live status inference covers Claude/Codex; other harnesses fall to
+  `unknown` and are not yet steered (`findSessionFileForKind`,
+  `lib/session/active.ts`). Planned.
+- **WD-GAP-4.** No default `watchdog/WORKFLOW.md` decider ships in this repo; absent
+  one, the built-in `WATCHDOG_SYSTEM_PROMPT` runs.
