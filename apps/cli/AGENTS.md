@@ -4,6 +4,11 @@
 versions, config, sessions, and cloud dispatch (Claude, Codex, Cursor,
 OpenCode, OpenClaw, Grok, Droid, …).
 
+> **New agent? Read [`docs/AGENT-CHEATSHEET.md`](docs/AGENT-CHEATSHEET.md) first.**
+> It covers the dozen concepts agents repeatedly need (DotAgents repos, version
+> homes, the two "session" meanings, capability gating, the execution path) in
+> one scannable page. Come back to this file for the full architecture map.
+
 This is the **internal architecture** map. The user-facing feature tour is
 [README.md](README.md) (pin versions, run, sessions, hosts, teams, workflows,
 plugins, browser, secrets, routines, pty). This file covers the design choices,

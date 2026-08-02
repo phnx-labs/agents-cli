@@ -1,6 +1,14 @@
 # agents-cli docs
 
-Reference documentation for every feature `agents` ships. Read [`00-concepts.md`](00-concepts.md) first if you are new — it covers DotAgents repos, resource kinds, and the layered resolution model that everything else builds on.
+Reference documentation for every feature `agents` ships.
+
+## Agent onboarding (read in this order)
+
+| Doc | Why read it |
+|---|---|
+| **[`AGENT-CHEATSHEET.md`](AGENT-CHEATSHEET.md)** | The dozen concepts agents repeatedly need, on one page. Start here if you are an agent touching the codebase. |
+| [`00-concepts.md`](00-concepts.md) | DotAgents repos, resource kinds, and the layered resolution model that everything else builds on. |
+| [`architecture.md`](architecture.md) | How the CLI and Factory extension layer, and the two meanings of "session". |
 
 Source-grounded: every command, flag, and YAML field is sourced from `src/`. If you spot a mismatch, the code wins — please file an issue.
 
@@ -74,7 +82,7 @@ How agents-cli is laid out on disk and how it decides what to load.
 - **YAML schema** blocks document the on-disk format. Field types come from the matching TypeScript interface in `src/`.
 - **Command reference** tables list every subcommand and flag. Run `agents <cmd> --help` if anything looks stale.
 - **Recipes** are numbered, copy-pasteable shell sequences. They run end-to-end, not toy snippets.
-- **Demo clips** under `assets/videos/` are 6–15s real terminal captures. The pipeline is documented in [`../assets/videos/README.md`](../assets/videos/README.md).
+- **Demo clips** under `assets/videos/` are 6–15s real terminal captures. The pipeline is documented in [`../../../assets/videos/README.md`](../../../assets/videos/README.md).
 
 ## Contributing
 
