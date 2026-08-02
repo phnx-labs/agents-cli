@@ -444,6 +444,59 @@ describe('agents.yaml device-local split (routing + read overlay)', () => {
     expect(meta.hosts).toBeDefined();
   });
 
+  it('preserves comments + hosts in central agents.yaml; a device-only write does not touch it (no churn)', () => {
+    const out = run(`
+      import * as fs from 'fs';
+      import { writeMeta, readMeta } from ${JSON.stringify(moduleUrl)};
+      const p = process.env.HOME + '/.agents/agents.yaml';
+      fs.writeFileSync(p, [
+        '# hand-written note: do not clobber me',
+        'defaultAgent: claude',
+        'hosts:',
+        '  box:',
+        '    source: inline',
+        '    address: 10.0.0.1  # tailnet IP',
+        ''
+      ].join('\\n'));
+      const before = fs.readFileSync(p, 'utf8');
+      // Unrelated write: a device pin (agents:) routes to the device file, not central.
+      writeMeta({ ...readMeta(), agents: { claude: '2.1.0' } });
+      const after = fs.readFileSync(p, 'utf8');
+      console.log(JSON.stringify({
+        commentSurvived: after.includes('do not clobber me'),
+        inlineCommentSurvived: after.includes('# tailnet IP'),
+        hostsSurvived: after.includes('address: 10.0.0.1'),
+        byteIdentical: before === after,
+      }));
+    `);
+    const r = JSON.parse(out);
+    expect(r.commentSurvived).toBe(true);
+    expect(r.inlineCommentSurvived).toBe(true);
+    expect(r.hostsSurvived).toBe(true);
+    // The churn fix: a write that changes no central field leaves agents.yaml byte-identical.
+    expect(r.byteIdentical).toBe(true);
+  });
+
+  it('updates a changed central field while keeping surrounding comments', () => {
+    const out = run(`
+      import * as fs from 'fs';
+      import { writeMeta, readMeta } from ${JSON.stringify(moduleUrl)};
+      const p = process.env.HOME + '/.agents/agents.yaml';
+      fs.writeFileSync(p, ['# keep this comment', 'projectRoot: /old/path', ''].join('\\n'));
+      writeMeta({ ...readMeta(), projectRoot: '/new/path' });
+      const after = fs.readFileSync(p, 'utf8');
+      console.log(JSON.stringify({
+        commentSurvived: after.includes('keep this comment'),
+        valueUpdated: after.includes('/new/path'),
+        oldGone: !after.includes('/old/path'),
+      }));
+    `);
+    const r = JSON.parse(out);
+    expect(r.commentSurvived).toBe(true);
+    expect(r.valueUpdated).toBe(true);
+    expect(r.oldGone).toBe(true);
+  });
+
   it('does not create a device file when there are no pins', () => {
     const out = run(`
       import * as fs from 'fs';

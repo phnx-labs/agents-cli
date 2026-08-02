@@ -705,6 +705,50 @@ function writeIfChanged(filePath: string, content: string): void {
  * All callers funnel through writeMeta → here, so nothing else changes. Empty
  * `agents:` / `versions:` are not written (no empty committed files).
  */
+/**
+ * Serialize the central (synced) meta to `agents.yaml` WITHOUT destroying the
+ * hand-written comments in the committed file.
+ *
+ * `yaml.stringify(central)` drops every comment, so the freshly-written bytes
+ * never equal the comment-annotated file on disk — `writeIfChanged`'s byte
+ * compare then rewrites on EVERY meta write, leaving `agents.yaml` perpetually
+ * dirty and wedging `agents sync` ("Blocked by local changes"). Instead we parse
+ * the existing file into a `yaml.Document` (which preserves comments + ordering)
+ * and edit only the keys that actually changed — untouched keys, and all their
+ * comments, are left byte-stable. If nothing central changed we return the exact
+ * existing bytes, so a device-field-only write no longer touches `agents.yaml` at
+ * all. Falls back to plain stringify only when the file doesn't exist yet.
+ */
+function serializeCentral(central: Record<string, unknown>): string {
+  let existing: string | null = null;
+  try {
+    existing = fs.readFileSync(META_FILE, 'utf-8');
+  } catch {
+    /* first write — no file yet */
+  }
+  if (existing == null) {
+    return META_HEADER + yaml.stringify(central);
+  }
+  const doc = yaml.parseDocument(existing);
+  const current: Record<string, unknown> = (doc.toJSON() as Record<string, unknown>) ?? {};
+  let changed = false;
+  for (const [k, v] of Object.entries(central)) {
+    if (JSON.stringify(current[k]) !== JSON.stringify(v)) {
+      doc.set(k, v);
+      changed = true;
+    }
+  }
+  for (const k of Object.keys(current)) {
+    if (!(k in central)) {
+      doc.delete(k);
+      changed = true;
+    }
+  }
+  // No central field changed → keep the file byte-identical (comments intact),
+  // so writeIfChanged skips it and the churn loop never starts.
+  return changed ? String(doc) : existing;
+}
+
 function writeMetaUnlocked(meta: Meta): void {
   const { agents, isolatedAgents, versions, defaultBrowserProfile, ...central } = meta;
 
@@ -741,7 +785,7 @@ function writeMetaUnlocked(meta: Meta): void {
     writeIfChanged(vrPath, JSON.stringify(versions, null, 2) + '\n');
   }
 
-  writeIfChanged(META_FILE, META_HEADER + yaml.stringify(central));
+  writeIfChanged(META_FILE, serializeCentral(central));
   metaCache = null;
 }
 
