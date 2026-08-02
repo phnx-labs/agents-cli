@@ -108,11 +108,14 @@ each run, not just *what* is running:
 - **Beyond sessions — events, routines, and browser tasks carry the actor too.**
   Every emitted **event** records `actor` + `kind` (via the audit origin), so
   `agents events` and its stats group by who did it (a `byActor` breakdown). A
-  **routine** stamps its creator's actor at creation and injects it into each fired
-  run's env, so an unattended cron traces back to the person who scheduled it (not
-  the `UNRESOLVED@<host>` a live resolve would give); its run records carry `actor`
-  (the creator) and `triggeredBy` (who kicked off that specific run). A **browser
-  task** records the `owner` who launched it, on the live task and in history.
+  **routine** stamps its creator's actor id at creation and seeds it into each fired
+  run's env (`AGENTS_ACTOR`), so an unattended cron's session and events attribute to
+  the person who scheduled it (not the `UNRESOLVED@<host>` a live resolve would give)
+  rather than the local box; its run records carry `actor` (the creator) and
+  `triggeredBy` (who kicked off that specific run). Only the actor *id* rides along —
+  the creator's git name/email are not stored, so git-author credit is out of scope
+  for scheduled runs. A **browser task** records the `owner` who launched it, on the
+  live task and in history.
 
 ```bash
 agents events                          # recent activity across everything

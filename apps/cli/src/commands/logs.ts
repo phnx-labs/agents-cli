@@ -398,6 +398,13 @@ async function runStats(opts: { since?: string; json?: boolean }): Promise<void>
     }
   }
 
+  if (Object.keys(s.byActor).length) {
+    console.log(chalk.bold('\n  By actor:'));
+    for (const [k, v] of Object.entries(s.byActor).sort((a, b) => b[1] - a[1])) {
+      console.log(`    ${k.padEnd(30)} ${v}`);
+    }
+  }
+
   console.log();
 }
 
