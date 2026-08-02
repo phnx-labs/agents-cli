@@ -50,6 +50,29 @@ export function loginHint(agentId: AgentId): string {
  * agents (the ones the feature is for), so the resume's `forceInteractive` flag is
  * consulted directly.
  */
+/**
+ * Is a Claude run on this box going to authenticate from an ambient
+ * `CLAUDE_CODE_OAUTH_TOKEN` rather than a per-version login?
+ *
+ * `AccountInfo.signedIn` is `!!email` read from a version home's `.claude.json`
+ * (agents.ts), so a version with no account written there reports signed-out —
+ * even though Claude Code authenticates fine from the env token and the run
+ * succeeds. Rendering that as "logged out" sends people hunting a login that is
+ * not missing (a real fleet incident: every version on a box read as locked out
+ * while all of them answered a live prompt).
+ *
+ * It is also the more useful warning: an ambient token is ONE account, so every
+ * version on the box resolves to it and balanced rotation across them rotates
+ * nothing. `env` is a parameter so the branch is testable without mutating the
+ * process environment.
+ */
+export function ambientClaudeToken(
+  agentId: AgentId | string,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return agentId === 'claude' && (env.CLAUDE_CODE_OAUTH_TOKEN ?? '').trim().length > 0;
+}
+
 export function shouldCheckLoginBeforeLaunch(o: {
   interactive?: boolean;
   forceInteractive?: boolean;
