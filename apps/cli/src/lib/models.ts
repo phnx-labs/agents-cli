@@ -3,9 +3,9 @@
  *
  * Each agent ships its model list differently -- Claude and Codex embed it in
  * compiled bundles/binaries, Gemini exports it from a JS module, and OpenCode/
- * Cursor/OpenClaw expose it via CLI commands. This module provides a unified
- * `getModelCatalog()` and `resolveModel()` interface over all of them, backed
- * by a file-system cache keyed on source mtime.
+ * Cursor/OpenClaw/Antigravity/Kimi/Grok expose it via CLI commands. This
+ * module provides a unified `getModelCatalog()` and `resolveModel()` interface
+ * over all of them, backed by a file-system cache keyed on source mtime.
  */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -13,7 +13,7 @@ import * as os from 'os';
 import { execFileSync } from 'child_process';
 import type { AgentId } from './types.js';
 import chalk from 'chalk';
-import { getVersionDir, getVersionHomePath } from './versions.js';
+import { getVersionDir, getVersionHomePath, getBinaryPath } from './versions.js';
 import { getModelsCachePath } from './state.js';
 import { agentConfigDirName } from './agents.js';
 import { resolveRunDefaults } from './run-defaults.js';
@@ -258,6 +258,33 @@ export function locateModelSource(
     return null;
   }
 
+  if (agent === 'grok') {
+    // Grok ships a native binary under the version home's `.grok/downloads/`,
+    // not node_modules/.bin. Prefer a real binary over a failed-download stub
+    // (a 99-byte placeholder sometimes left beside a prior good download).
+    const preferred = getBinaryPath('grok', version);
+    if (isUsableGrokBinary(preferred)) return { path: preferred, kind: 'cli' };
+    const downloads = path.join(getVersionHomePath('grok', version), '.grok', 'downloads');
+    try {
+      const candidates = fs
+        .readdirSync(downloads)
+        .filter((e) => e.startsWith('grok-'))
+        .map((e) => path.join(downloads, e))
+        .filter(isUsableGrokBinary)
+        .sort((a, b) => {
+          try {
+            return fs.statSync(b).size - fs.statSync(a).size;
+          } catch {
+            return 0;
+          }
+        });
+      if (candidates[0]) return { path: candidates[0], kind: 'cli' };
+    } catch {
+      /* empty downloads */
+    }
+    return null;
+  }
+
   if (agent === 'cursor') {
     // cursor-agent is installed via curl script, not agents-cli. Version argument
     // is accepted for API symmetry but ignored -- cursor lives on PATH.
@@ -267,6 +294,16 @@ export function locateModelSource(
   }
 
   return null;
+}
+
+/** Real Grok binaries are ~100MB+; failed-download stubs are tens of bytes. */
+function isUsableGrokBinary(filePath: string): boolean {
+  try {
+    const st = fs.statSync(filePath);
+    return st.isFile() && st.size > 1024 * 1024;
+  } catch {
+    return false;
+  }
 }
 
 /** Search PATH for a command and return its absolute path, or null. */
@@ -753,6 +790,95 @@ function extractAntigravityCatalog(binaryPath: string): { models: ModelInfo[]; a
 }
 
 /**
+ * Parse `grok models` stdout into a catalog. Exported for unit tests.
+ *
+ * Output shape (verified 0.2.118):
+ *   You are logged in with grok.com.
+ *
+ *   Default model: grok-4.5
+ *
+ *   Available models:
+ *     * grok-4.5 (default)
+ *
+ * The `Default model:` line is authoritative; rows may also carry a leading `*`
+ * and a `(default)` flag. Grok has no `--json` on this subcommand. Settings live
+ * in `config.toml` / `models_cache.json`, not `settings.json`, so the native
+ * settings.json reader cannot surface the default — the catalog is the source
+ * that makes `resolveConfiguredModel` return a cli-default for Grok.
+ */
+export function parseGrokModelsStdout(stdout: string): { models: ModelInfo[]; aliases: Record<string, string> } {
+  // Strip ANSI in case a spinner or color codes slip through.
+  // eslint-disable-next-line no-control-regex
+  const plain = stdout.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+
+  let defaultId: string | null = null;
+  const defaultLine = plain.match(/Default model:\s*(\S+)/i);
+  if (defaultLine) defaultId = defaultLine[1];
+
+  const models: ModelInfo[] = [];
+  const seen = new Set<string>();
+
+  for (const raw of plain.split('\n')) {
+    const line = raw.trim();
+    if (!line) continue;
+    // Rows: "* grok-4.5 (default)" or "grok-4.5" or "  grok-code-fast-1"
+    const m = line.match(/^\*?\s*([A-Za-z0-9][A-Za-z0-9._-]*)(?:\s+\(([^)]*)\))?\s*$/);
+    if (!m) continue;
+    const id = m[1];
+    // Real model ids are grok-* (or match the Default model: line). Skip banner words.
+    if (!/^grok[-_]/i.test(id) && id !== defaultId) continue;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const flags = (m[2] ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+    models.push({
+      id,
+      isDefault: (defaultId != null && id === defaultId) || flags.includes('default'),
+    });
+  }
+
+  // If Default model was set but did not appear as a row, still surface it.
+  if (defaultId && !seen.has(defaultId)) {
+    models.unshift({ id: defaultId, isDefault: true });
+  }
+
+  // Normalize: exactly one default when we know the Default model: id.
+  if (defaultId) {
+    for (const model of models) model.isDefault = model.id === defaultId;
+  } else if (models.length > 0 && !models.some((model) => model.isDefault)) {
+    models[0].isDefault = true;
+  }
+
+  return { models, aliases: {} };
+}
+
+/** Extract Grok's catalog via `grok models` (see parseGrokModelsStdout). */
+function extractGrokCatalog(binaryPath: string): { models: ModelInfo[]; aliases: Record<string, string> } {
+  const env = { ...process.env };
+  // Point GROK_HOME at the version home that owns this binary so auth +
+  // models_cache come from the right install, not a host ~/.grok symlink.
+  // binary: <home>/.grok/downloads/grok-<ver>-...
+  const downloadsDir = path.dirname(binaryPath);
+  if (path.basename(downloadsDir) === 'downloads') {
+    env.GROK_HOME = path.dirname(downloadsDir);
+  }
+
+  let stdout: string;
+  try {
+    stdout = execFileSync(binaryPath, ['models'], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 15_000,
+      maxBuffer: 8 * 1024 * 1024,
+      env,
+    });
+  } catch {
+    return { models: [], aliases: {} };
+  }
+
+  return parseGrokModelsStdout(stdout);
+}
+
+/**
  * Extract Kimi's catalog via `kimi provider list --json`, which emits the raw
  * providers/models config. Model ids are the `models` object keys (e.g.
  * `kimi-code/kimi-for-coding`). The default is reported on a separate plain
@@ -855,6 +981,7 @@ export function getModelCatalog(agent: AgentId, version: string): ModelCatalog |
     else if (agent === 'openclaw') ({ models, aliases } = extractOpenClawCatalog(src.path));
     else if (agent === 'antigravity') ({ models, aliases } = extractAntigravityCatalog(src.path));
     else if (agent === 'kimi') ({ models, aliases } = extractKimiCatalog(src.path));
+    else if (agent === 'grok') ({ models, aliases } = extractGrokCatalog(src.path));
   }
 
   const catalog: ModelCatalog = {

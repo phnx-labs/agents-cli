@@ -6,6 +6,8 @@ import {
   getModelCatalog,
   resolveModel,
   buildReasoningFlags,
+  parseGrokModelsStdout,
+  resolveConfiguredModel,
 } from '../models.js';
 import { getVersionDir, listInstalledVersions } from '../versions.js';
 
@@ -27,7 +29,7 @@ const claudeBinaryVer = listInstalledVersions('claude').find((v) =>
 // Prefer a version whose model source actually resolves on this host — partial
 // installs (e.g. ones missing the vendored binary) would otherwise short-circuit
 // the catalog tests with null catalogs.
-const firstLocatable = (agent: 'codex' | 'gemini' | 'opencode' | 'openclaw' | 'antigravity' | 'kimi'): string | null =>
+const firstLocatable = (agent: 'codex' | 'gemini' | 'opencode' | 'openclaw' | 'antigravity' | 'kimi' | 'grok'): string | null =>
   listInstalledVersions(agent).find((v) => locateModelSource(agent, v) !== null) ?? null;
 
 const codexVer = firstLocatable('codex');
@@ -36,6 +38,7 @@ const opencodeVer = firstLocatable('opencode');
 const openclawVer = firstLocatable('openclaw');
 const antigravityVer = firstLocatable('antigravity');
 const kimiVer = firstLocatable('kimi');
+const grokVer = firstLocatable('grok');
 
 describe('locateModelSource', () => {
   it('finds the JS bundle for Claude versions that ship one', () => {
@@ -289,6 +292,59 @@ describe('getModelCatalog (kimi)', () => {
     }
     // At most one default may be flagged (the "Default model:" line).
     expect(catalog.models.filter((m) => m.isDefault).length).toBeLessThanOrEqual(1);
+  });
+});
+
+describe('parseGrokModelsStdout', () => {
+  it('reads Default model: and * id (default) rows', () => {
+    const stdout = [
+      'You are logged in with grok.com.',
+      '',
+      'Default model: grok-4.5',
+      '',
+      'Available models:',
+      '  * grok-4.5 (default)',
+      '  grok-code-fast-1',
+      '',
+    ].join('\n');
+    const { models } = parseGrokModelsStdout(stdout);
+    expect(models.map((m) => m.id)).toEqual(['grok-4.5', 'grok-code-fast-1']);
+    expect(models.filter((m) => m.isDefault).map((m) => m.id)).toEqual(['grok-4.5']);
+  });
+
+  it('surfaces Default model: when it is missing from the row list', () => {
+    const { models } = parseGrokModelsStdout('Default model: grok-4.5\n\nAvailable models:\n');
+    expect(models).toEqual([{ id: 'grok-4.5', isDefault: true }]);
+  });
+
+  it('ignores banner lines that are not model ids', () => {
+    const { models } = parseGrokModelsStdout('You are logged in with grok.com.\nAvailable models:\n');
+    expect(models).toEqual([]);
+  });
+});
+
+describe('getModelCatalog (grok)', () => {
+  it('locates the version-home downloads binary and marks the default model', () => {
+    if (!grokVer) return;
+    const src = locateModelSource('grok', grokVer);
+    expect(src).not.toBeNull();
+    expect(src!.kind).toBe('cli');
+    expect(src!.path).toMatch(/[/\\]\.grok[/\\]downloads[/\\]grok-/);
+
+    const catalog = getModelCatalog('grok', grokVer);
+    // `grok models` may fail when offline / not signed in; skip rather than fail.
+    if (!catalog || catalog.models.length === 0) return;
+    for (const m of catalog.models) {
+      expect(m.id).toMatch(/^grok[-_]/i);
+    }
+    const defaults = catalog.models.filter((m) => m.isDefault);
+    expect(defaults.length).toBe(1);
+
+    // agents view / resolveConfiguredModel should surface that default.
+    const configured = resolveConfiguredModel('grok', grokVer);
+    expect(configured).not.toBeNull();
+    expect(configured!.model).toBe(defaults[0].id);
+    expect(configured!.source).toBe('cli-default');
   });
 });
 

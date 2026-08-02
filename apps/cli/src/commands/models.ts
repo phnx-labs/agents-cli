@@ -22,7 +22,7 @@ import { getModelCatalog, locateModelSource } from '../lib/models.js';
 import { terminalWidth, truncateToWidth, stringWidth } from '../lib/session/width.js';
 import { wrapJoined } from './inspect.js';
 
-const MODEL_CAPABLE_AGENTS: AgentId[] = ['claude', 'codex', 'opencode', 'cursor', 'openclaw', 'antigravity', 'kimi'];
+const MODEL_CAPABLE_AGENTS: AgentId[] = ['claude', 'codex', 'opencode', 'cursor', 'openclaw', 'antigravity', 'kimi', 'grok'];
 
 /**
  * Agents that don't necessarily install under ~/.agents/versions (cursor ships
