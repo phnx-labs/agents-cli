@@ -206,10 +206,10 @@ CACHE="\$HOME/.cache/factory-release/agents-cli"
 mkdir -p "\$(dirname "\$CACHE")"
 [ -d "\$CACHE/.git" ] || git clone --quiet "\$ORIGIN" "\$CACHE"
 git -C "\$CACHE" fetch --quiet origin
-git -C "\$CACHE" cat-file -e "\$SHA^{commit}" 2>/dev/null || {
-    echo "Error: commit \$SHA is not on origin - push the release commit first." >&2
+if [ -z "\$(git -C "\$CACHE" branch -r --contains "\$SHA" 2>/dev/null)" ]; then
+    echo "Error: commit \$SHA is not reachable from any origin branch - push the release commit first." >&2
     exit 1
-}
+fi
 git -C "\$CACHE" checkout --quiet --detach "\$SHA"
 
 cd "\$CACHE/apps/factory"
@@ -274,9 +274,19 @@ fi
 # Source of truth = marketplace, not git. If the version is already published
 # we abort — re-running with the same version would 409 on the publish step
 # anyway, but failing here is faster.
-if ! command -v vsce >/dev/null 2>&1 && command -v bun >/dev/null 2>&1; then
-    echo "vsce not installed - installing @vscode/vsce..."
-    bun add -g @vscode/vsce >/dev/null 2>&1 || true
+if command -v bun >/dev/null 2>&1; then
+    # Both publishing CLIs are tools, not credentials. Install whichever is
+    # missing so a local publish reaches both registries — the routed path
+    # already does this on the publish host, and skipping ovsx here would
+    # silently drop the Open VSX half of the release.
+    if ! command -v vsce >/dev/null 2>&1; then
+        echo "vsce not installed - installing @vscode/vsce..."
+        bun add -g @vscode/vsce >/dev/null 2>&1 || true
+    fi
+    if ! command -v ovsx >/dev/null 2>&1; then
+        echo "ovsx not installed - installing ovsx..."
+        bun add -g ovsx >/dev/null 2>&1 || true
+    fi
     export PATH="$HOME/.bun/bin:$PATH"
 fi
 if ! command -v vsce >/dev/null 2>&1; then
