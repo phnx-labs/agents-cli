@@ -26,6 +26,7 @@ import { registerSetupComputerCommand, runComputerWizard } from './setup-compute
 import { registerSetupShareCommand, runShareWizard } from './setup-share.js';
 import { registerSetupMineCommand } from './setup-mine.js';
 import { registerSetupSecretsCommand } from './setup-secrets.js';
+import { registerSetupFleetCommand } from './setup-fleet.js';
 
 const HOME = os.homedir();
 
@@ -276,13 +277,14 @@ async function runSetupHub(): Promise<void> {
   if (!isInteractiveTerminal()) return;
   try {
     const { checkbox } = await import('@inquirer/prompts');
-    const picks = await checkbox<'browser' | 'computer' | 'share' | 'secrets'>({
+    const picks = await checkbox<'browser' | 'computer' | 'share' | 'secrets' | 'fleet'>({
       message: 'Set up optional capabilities now? (space to select, enter to confirm)',
       choices: [
         { name: 'browser  — drive a real Chrome/Brave/Edge for web automation', value: 'browser' },
         { name: 'computer — control native macOS apps (screenshot, click, type)', value: 'computer' },
         { name: 'share    — publish shareable links (Cloudflare R2 + Worker)', value: 'share' },
         { name: 'secrets  — choose storage defaults and import existing credentials', value: 'secrets' },
+        { name: 'fleet    — discover Tailscale devices and configure SSH access', value: 'fleet' },
       ],
     });
     for (const pick of picks) {
@@ -291,6 +293,7 @@ async function runSetupHub(): Promise<void> {
       else if (pick === 'computer') await runComputerWizard();
       else if (pick === 'share') await runShareWizard();
       else if (pick === 'secrets') await import('./setup-secrets.js').then((m) => m.runSecretsSetupWizard());
+      else if (pick === 'fleet') await import('./setup-fleet.js').then((m) => m.runFleetSetupWizard());
     }
   } catch (err) {
     if (isPromptCancelled(err)) return;
@@ -306,12 +309,13 @@ export function registerSetupCommand(program: Command): void {
     .option('-f, --force', 'Re-run setup even if ~/.agents/.system/ already exists (use with caution)')
     .option('--no-system-repo', 'Skip cloning the system repo (you must populate ~/.agents/.system/ yourself)');
 
-  // Capability subcommands: `agents setup browser|computer|share|mine|secrets`.
+  // Capability subcommands: `agents setup browser|computer|share|mine|secrets|fleet`.
   registerSetupBrowserCommand(setupCmd);
   registerSetupComputerCommand(setupCmd);
   registerSetupShareCommand(setupCmd);
   registerSetupMineCommand(setupCmd);
   registerSetupSecretsCommand(setupCmd);
+  registerSetupFleetCommand(setupCmd);
 
   setHelpSections(setupCmd, {
     examples: `
@@ -326,18 +330,20 @@ export function registerSetupCommand(program: Command): void {
       agents setup computer
       agents setup share
       agents setup secrets
+      agents setup fleet
     `,
     notes: `
       What it does:
         1. Clones the system repo into ~/.agents/.system/
         2. Imports any unmanaged agent installations it finds
-        3. On a TTY, offers to set up optional capabilities (browser/computer/share/secrets)
+        3. On a TTY, offers to set up optional capabilities (browser/computer/share/secrets/fleet)
 
       Capability setup can also be run any time on its own:
         agents setup browser    # detect a browser + create the default profile
         agents setup computer    # install the signed macOS helper + grant permissions
         agents setup share       # provision or join a Cloudflare share endpoint
         agents setup secrets     # choose secrets backend/policy defaults + import
+        agents setup fleet       # discover Tailscale devices + configure SSH access
 
       To install CLIs from agents.yaml and sync resources into version homes:
         agents sync --local -y

@@ -12,13 +12,13 @@ const { registerSetupCommand } = await import('./setup.js');
 const { listInstalledBrowsers } = await import('../lib/browser/chrome.js');
 
 describe('agents setup command group', () => {
-  it('registers the browser/computer/share/mine/secrets capability subcommands', () => {
+  it('registers the browser/computer/share/fleet/mine/secrets capability subcommands', () => {
     const program = new Command();
     registerSetupCommand(program);
     const setup = program.commands.find((c) => c.name() === 'setup');
     expect(setup).toBeDefined();
     const subs = setup!.commands.map((c) => c.name()).sort();
-    expect(subs).toEqual(['browser', 'computer', 'mine', 'secrets', 'share']);
+    expect(subs).toEqual(['browser', 'computer', 'fleet', 'mine', 'secrets', 'share']);
   });
 
   it('keeps the bare `setup` command with its force / no-system-repo flags', () => {
@@ -89,6 +89,24 @@ describe('agents setup secrets', () => {
     registerSecretsCommands(importProgram);
     await importProgram.parseAsync(['secrets', 'import', 'setup-default-import', '--from', envPath], { from: 'user' });
     expect(readBundle('setup-default-import')?.backend).toBe('file');
+  });
+});
+
+describe('agents setup fleet', () => {
+  it('prints install guidance and exits cleanly when tailscale is unavailable', async () => {
+    const originalPath = process.env.PATH;
+    process.env.PATH = '';
+    try {
+      const program = new Command();
+      program.exitOverride();
+      registerSetupCommand(program);
+
+      await program.parseAsync(['setup', 'fleet', '--yes'], { from: 'user' });
+      expect(process.exitCode).not.toBe(1);
+    } finally {
+      process.env.PATH = originalPath;
+      process.exitCode = undefined;
+    }
   });
 });
 
