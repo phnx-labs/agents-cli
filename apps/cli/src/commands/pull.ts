@@ -6,7 +6,7 @@
  * etc.). It is replaced by the explicit split:
  *
  *   - `agents repo pull <alias>`     — git fetch+ff on system / user / extra
- *   - `agents repo refresh [agent]`  — re-materialize installed version homes
+ *   - `agents sync [--local] [agent]` — re-materialize installed version homes
  *   - `agents setup`                 — first-time bootstrap
  *
  * The command is kept registered so old muscle-memory invocations get a clear
@@ -19,14 +19,14 @@ import { setHelpSections } from '../lib/help.js';
 const REDIRECT =
   'agents-cli: "agents pull" was removed.\n' +
   '            Git pull a repo:   agents repo pull <alias>      (system | user | <extra>)\n' +
-  '            Re-materialize:    agents repo refresh [agent]   (claude | codex | ...)\n' +
+  '            Re-materialize:    agents sync --local           (all agents; or: agents sync <agent>)\n' +
   '            First-time setup:  agents setup\n\n';
 
 /** Register the deprecated `agents pull` command as a hard-error redirect. */
 export function registerPullCommand(program: Command): void {
   const pullCmd = program
     .command('pull [agent]')
-    .description('Removed. See `agents repo pull` + `agents repo refresh`.')
+    .description('Removed. See `agents repo pull` + `agents sync`.')
     .option('-y, --yes', '(no-op)')
     .option('--skip-clis', '(no-op)');
 
@@ -34,7 +34,7 @@ export function registerPullCommand(program: Command): void {
     notes: `
       Removed. Equivalents:
         agents repo pull <alias>     git pull (system | user | extra)
-        agents repo refresh [agent]  re-materialize version homes
+        agents sync --local          re-materialize version homes (or: agents sync <agent>)
         agents setup                 first-time bootstrap
     `,
   });

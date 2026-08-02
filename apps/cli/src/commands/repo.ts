@@ -83,7 +83,7 @@ import { machineId, normalizeHost } from '../lib/machine-id.js';
  * After a repo add/remove/enable/disable, reconcile each plugins-capable
  * agent's default version against the new marketplace set. Re-synthesizes
  * catalogs and known_marketplaces.json entries. Source-copy of plugins is
- * out of scope here — full sync still goes through `agents repo refresh`.
+ * out of scope here — full sync still goes through `agents sync`.
  */
 function syncMarketplacesForDefaults(): void {
   for (const agent of capableAgents('plugins')) {
@@ -1264,12 +1264,21 @@ export function registerRepoCommands(program: Command): void {
       }
     });
 
+  // Deprecated: superseded by `agents sync`. `agents sync --local` runs the same
+  // reconcile stage (sync-umbrella.ts calls this exact `refresh()`), and `agents
+  // sync <agent>` targets one agent — with the added reach `refresh` lacks
+  // (all installed versions, no silent skip when there is no global default).
+  // Hidden from help; kept as a warned, functional alias so old muscle-memory and
+  // scripts don't break. Migrate callers to `agents sync`.
   repoCmd
-    .command('refresh [agent]')
-    .description('Re-materialize resources into installed agent version homes. No git, no network.')
+    .command('refresh [agent]', { hidden: true })
+    .description('Deprecated — use `agents sync` instead.')
     .option('-y, --yes', 'Auto-sync everything without prompting')
     .option('--skip-clis', 'Skip CLI version install/upgrade from agents.yaml')
     .action(async (arg: string | undefined, options: { yes?: boolean; skipClis?: boolean }) => {
+      console.warn(chalk.yellow('`agents repo refresh` is deprecated — use `agents sync` instead:'));
+      console.warn(chalk.gray('  all agents:  agents sync --local'));
+      console.warn(chalk.gray('  one agent:   agents sync <agent>'));
       let agentFilter: AgentId | undefined;
       if (arg) {
         if (!isAgentName(arg)) {

@@ -334,7 +334,7 @@ export function registerSetupCommand(program: Command): void {
         agents setup share       # provision or join a Cloudflare share endpoint
 
       To install CLIs from agents.yaml and sync resources into version homes:
-        agents repo refresh -y
+        agents sync --local -y
     `,
   });
 
