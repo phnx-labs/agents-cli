@@ -58,19 +58,23 @@ process with its pid; end it and re-run `agents menubar enable`.
 ## Quick dispatch
 
 `Cmd-Shift-O` opens the Spotlight-style capture panel. Type a short request,
-optionally attach recent screenshots from the thumbnail strip, then pick one
-agent for **File Ticket** or one or more agents for **Fix**.
+optionally attach recent screenshots from the thumbnail strip, pick the repo to
+work in, then pick one agent for **Plan** or one or more agents for **Run**.
 
-- **File Ticket** sends the note and selected screenshots to the selected ticket
-  agent, which investigates and returns ticket fields as JSON. The helper then
-  runs `linear create` itself, appending `--image <path>` for every selected
+- **Plan** sends the note and selected screenshots to the selected ticket agent,
+  which investigates and returns ticket fields as JSON. The helper then runs
+  `linear create` itself, appending `--image <path>` for every selected
   screenshot so the image bytes are uploaded at create time and embedded in the
   issue description — screenshot paths never pass through an LLM-authored shell
   string.
-- **Fix** fans out to every selected agent with `agents run <agent> --mode auto
+- **Run** fans out to every selected agent with `agents run <agent> --mode auto
   --balanced --notify --name <slug-of-your-note>`, so the resulting sessions
   appear in normal `agents sessions` and menu-bar surfaces instead of as opaque
   background work.
+
+The repo dropdown comes from recent session working directories, never `$HOME`
+(running an agent straight in the home directory is too broad a permission
+surface), and passes `--cwd` to the dispatch. The last pick is remembered.
 
 `--notify` is what makes a dispatch report back. The run is launched **detached**
 and posts its own "finished"/"failed" notification when it ends (see
@@ -90,6 +94,40 @@ If another app steals focus while you are typing, the panel hides but keeps the
 draft note plus the selected screenshots, action, and agents for the next
 `Cmd-Shift-O` summon. Return submits and clears the draft; Escape clears it
 without dispatching.
+
+### The ticket list
+
+The panel captures new work; the rows under it are the work that already exists —
+the open Linear tickets of the repo you picked, so you can pick one up instead of
+filing a duplicate.
+
+- **Scope follows the repo.** Switching the repo dropdown switches the Linear
+  project: the repo name is matched against `linear projects` after both are
+  reduced to lowercase alphanumerics, so `agents-cli` finds **Agents CLI** with
+  nothing to configure. A repo whose name matches no project says so instead of
+  listing someone else's tickets — pick the project once from the dropdown and
+  that choice is remembered for that repo. A worktree resolves to its parent repo
+  (via git's common dir), not to the worktree's own directory name.
+- **Urgent first.** Rows are ranked by Linear priority (`P1` … `P4`, then
+  no-priority), then overdue, then already in progress, then newest — the order
+  answers "what should I pick up next", which is not the order Linear returns.
+  The top five show.
+- **Typing filters the list.** Every word you type has to appear in a row's
+  identifier or title, so an existing ticket surfaces before Return files a new
+  one.
+- **Click a row to dispatch it** to the selected agents in the picked repo
+  (`⌘1` … `⌘5` do the same from the keyboard). **Plan** posts an implementation
+  plan as a comment on the ticket and changes no code; **Run** claims the ticket
+  (`--status progress`), implements it per the repo's `AGENTS.md`, and comments
+  the result. Both are the same headless `agents run --mode auto --balanced
+  --notify` dispatch as a quick Run, named after the ticket (`rush-2098`,
+  `rush-2098-plan`) so it reads as that ticket in `agents sessions`.
+  **`⌘`-click** opens the ticket in Linear instead, when you want to read it
+  first.
+
+A `linear tasks` round trip costs seconds, so the list renders from a warm cache
+(`~/.agents/.history/menubar/linear-cache.json`) and refreshes in the background;
+entries older than 90 seconds are re-fetched on the next summon.
 
 ## The dropdown
 
@@ -188,6 +226,7 @@ The helper assembles the menu by reading these directly — no CLI, no re-index:
 | Cloud | `~/.agents/.cache/cloud/tasks.db` (SQLite) | cloud tasks, incl. `input_required` or `needs_review` → "awaiting input" |
 | Attention sentinels | `~/.agents/.cache/state/attention/<sessionId>` | terminal sessions awaiting input — mtime = wait start, content = the awaiting message (written by the Notification hook). On read, sentinels whose sessionId is not in the current live-terminals set are unlinked as orphans (defense against sessions killed hard, hookless Claude versions, or sessionId mismatches). |
 | Installed agents | `~/.agents/.history/versions/<agent>/` | the agent roster |
+| Linear tickets | `linear projects` / `linear tasks --all --project <p> --status open --cycle all` (warm cache, 90s TTL) | the quick-dispatch ticket list, scoped to the picked repo's project |
 
 Liveness is a `kill(pid, 0)` check; running-vs-idle is the transcript file's
 mtime. The teams directory accumulates history, so the periodic badge refresh
@@ -266,3 +305,5 @@ the current bundle on any version bump.
 | `~/Library/Application Support/agents-cli/.menubar-version` | installed-version stamp |
 | `~/.agents/.cache/state/menubar.disabled` | sticky opt-out marker |
 | `~/.agents/.cache/helpers/menubar/menubar.log` | helper stdout / stderr |
+| `~/.agents/.history/menubar/recent-tickets.json` | tickets filed from the quick-dispatch panel (RECENT TICKETS) |
+| `~/.agents/.history/menubar/linear-cache.json` | warm cache of Linear projects + each project's open tickets |
