@@ -17,9 +17,19 @@
  * takes the whole daemon down (the exact crash overdue.test.ts guards).
  */
 
-import { spawn } from 'child_process';
+import { spawn, type ChildProcess } from 'child_process';
 import * as os from 'os';
 import { resolveInstalledMenubarExecutable } from './install-menubar.js';
+
+/**
+ * Hard ceiling on a one-shot notifier's lifetime. A notifier posts and exits in
+ * well under a second on the happy path; if delivery stalls (locked screen, a
+ * WindowServer/XPC hiccup) a detached GUI helper can hang indefinitely and pile
+ * up in the menu bar. This is above the Swift one-shot's own 0.6s flush + its 3s
+ * self-terminate watchdog, so Node's kill is the last-resort guarantee that runs
+ * only if the child never self-exits.
+ */
+const NOTIFY_TIMEOUT_MS = 4000;
 
 export interface DesktopNotification {
   /** Bold first line. */
@@ -54,14 +64,44 @@ export function buildOsascriptNotifyArgs(n: DesktopNotification): string[] {
   return ['-e', script];
 }
 
-/** Spawn one detached, best-effort notifier process; swallow async ENOENT. */
-function spawnDetachedQuiet(command: string, args: string[]): void {
+/**
+ * Spawn one detached, best-effort notifier process with a bounded lifetime.
+ *
+ * The child is detached + unref'd so it never blocks the daemon, but — unlike a
+ * pure fire-and-forget — it is supervised: a watchdog SIGKILLs it after
+ * `timeoutMs` so a stalled notifier can never linger (the pile-up this fixes).
+ * The common path (a sub-second post + self-exit) clears the watchdog on the
+ * child's own 'exit', so the kill only ever fires for a genuinely hung child.
+ *
+ * `timeoutMs` is injectable so the bounded-lifetime behaviour is testable against
+ * a real long-running child without a multi-second wait. Returns the child so a
+ * caller/test can observe it; callers in this module ignore it.
+ */
+export function spawnDetachedQuiet(
+  command: string,
+  args: string[],
+  timeoutMs: number = NOTIFY_TIMEOUT_MS,
+): ChildProcess {
   const child = spawn(command, args, { detached: true, stdio: 'ignore' });
+  // Bound the lifetime: a stalled notifier is hard-killed after the timeout. The
+  // timer is unref'd so it never keeps a short-lived caller's event loop alive.
+  const watchdog = setTimeout(() => {
+    try {
+      child.kill('SIGKILL');
+    } catch {
+      /* already gone */
+    }
+  }, timeoutMs);
+  watchdog.unref();
   // A missing binary (headless box with no osascript/notify-send, or a helper
-  // that vanished) arrives as an async 'error' event. Without this listener Node
-  // re-throws it as an uncaught exception and crashes the daemon — swallow it.
-  child.on('error', () => {});
+  // that vanished) arrives as an async 'error' event — the process never started,
+  // so cancel the watchdog. Without a listener Node re-throws ENOENT as an
+  // uncaught exception and crashes the daemon; having one swallows it.
+  child.on('error', () => clearTimeout(watchdog));
+  // Fast, self-driven exit (the common path) — cancel the watchdog.
+  child.on('exit', () => clearTimeout(watchdog));
   child.unref();
+  return child;
 }
 
 /**

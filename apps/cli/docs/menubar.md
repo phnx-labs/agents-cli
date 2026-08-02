@@ -179,6 +179,18 @@ folder. The Node side lives in `src/lib/menubar/notify-desktop.ts` (routing) and
 `src/lib/routine-notify.ts` (routine start/finish content + anti-spam
 threshold); see [routines.md](03-routines.md#desktop-notifications).
 
+**Bounded lifetime (no pile-up).** A one-shot posts and exits in well under a
+second, but a stalled delivery — a locked screen, a WindowServer/XPC hiccup —
+could otherwise leave a detached notifier hanging and duplicate "Agents"
+instances accumulating in the menu bar. Two independent watchdogs bound it:
+`runOneShot` arms a background-thread force-exit at 3s (it runs off the main
+queue so a wedged main thread can't starve it, unlike the 0.6s runloop deadline
+it backs up), and the Node spawner (`spawnDetachedQuiet`) SIGKILLs the child at
+4s if it never self-exits. So a notifier can never linger indefinitely. Stale
+helpers that predate `--notify` (and would ignore it and hang) are replaced by
+the upgrade self-heal (`installMenubarLaunchAgentOnUpgrade`), which reinstalls
+the current bundle on any version bump.
+
 ## Files
 
 | Path | Purpose |

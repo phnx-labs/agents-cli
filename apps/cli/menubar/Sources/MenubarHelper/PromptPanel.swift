@@ -565,6 +565,17 @@ enum Notifier {
             return args[i + 1]
         }
         guard let title = value("--title"), let body = value("--body") else { exit(2) }
+        // Hard self-terminate watchdog: guarantee this one-shot exits even if
+        // delivery stalls (a locked screen or WindowServer/XPC hiccup can block
+        // NSUserNotificationCenter.deliver on the main thread, so the runloop spin
+        // below never reaches its deadline and the process hangs — piling up in
+        // the menu bar). It runs on a BACKGROUND queue, not `.main`: a wedged main
+        // thread can't starve it, so the force-exit fires regardless of runloop
+        // state. 3s sits above the 0.6s happy-path flush and below the Node-side
+        // 4s SIGKILL (notify-desktop.ts), so the process reliably ends itself.
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 3) {
+            exit(0)
+        }
         // Establish the app object so delivery has a running NSApplication to
         // attribute the notification to; never call run() — the runloop spin below
         // drives this short-lived process.

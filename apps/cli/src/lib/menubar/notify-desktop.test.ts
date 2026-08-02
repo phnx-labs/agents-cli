@@ -3,6 +3,7 @@ import {
   buildMenubarNotifyArgs,
   buildOsascriptNotifyArgs,
   notifyDesktop,
+  spawnDetachedQuiet,
 } from './notify-desktop.js';
 
 describe('buildMenubarNotifyArgs', () => {
@@ -86,5 +87,48 @@ describe('notifyDesktop — missing notifier must not crash the daemon', () => {
     // Let the async spawn 'error' event fire on the next libuv turn.
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(true).toBe(true);
+  });
+});
+
+describe('spawnDetachedQuiet — bounded lifetime', () => {
+  // The pile-up this fixes: a one-shot notifier that stalls (locked screen,
+  // WindowServer hiccup) must not linger forever. A real long-running child
+  // (`sleep 30`) that never self-exits must be hard-killed after the timeout.
+  // Real process, real signal — no mocking.
+  it('SIGKILLs a child that outlives the timeout', async () => {
+    const child = spawnDetachedQuiet('sleep', ['30'], 120);
+    const result = await new Promise<{ code: number | null; signal: string | null }>(
+      (resolve, reject) => {
+        const guard = setTimeout(
+          () => reject(new Error('child was not killed within the watchdog window')),
+          2000,
+        );
+        child.on('exit', (code, signal) => {
+          clearTimeout(guard);
+          resolve({ code, signal });
+        });
+        child.on('error', (err) => {
+          clearTimeout(guard);
+          reject(err);
+        });
+      },
+    );
+    expect(result.signal).toBe('SIGKILL');
+    expect(child.killed).toBe(true);
+  });
+
+  // The common path: a fast child that exits on its own is NOT signalled — the
+  // watchdog is cleared on 'exit', so `killed` stays false.
+  it('leaves a child that self-exits before the timeout untouched', async () => {
+    const child = spawnDetachedQuiet('true', [], 2000);
+    const result = await new Promise<{ code: number | null; signal: string | null }>(
+      (resolve, reject) => {
+        child.on('exit', (code, signal) => resolve({ code, signal }));
+        child.on('error', reject);
+      },
+    );
+    expect(result.signal).toBeNull();
+    expect(result.code).toBe(0);
+    expect(child.killed).toBe(false);
   });
 });
