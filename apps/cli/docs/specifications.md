@@ -1404,8 +1404,9 @@ not the watchdog's.
 #### 2.2 Detection — idle is the target
 
 - **WD-4 (MUST).** A candidate MUST be a session idle at least `WATCHDOG_STALL_MS` and less
-  than `WATCHDOG_DORMANT_MS`, past its per-session cooldown (`lib/watchdog/read.ts`,
-  `classifyTerminal`). Idle age is derived from the transcript's last-write time.
+  than `WATCHDOG_DORMANT_MS`, past its per-session cooldown (thresholds in
+  `lib/watchdog/read.ts:19-21`; the gate `classifyTerminal` in `lib/watchdog/watchdog.ts:84`).
+  Idle age is derived from the transcript's last-write time.
 - **WD-5 (MUST).** A session whose inferred activity is `working` MUST NOT be nudged
   (`lib/session/state.ts`).
 - **WD-6 (MUST NOT).** The watchdog MUST NOT fight the feed: a session in `waiting_input`
@@ -1416,8 +1417,10 @@ not the watchdog's.
   active most recently (a warm session is likeliest to be steerable).
 - **WD-8 (MUST).** A session whose transcript cannot be located (no timestamp) MUST be
   skipped, not guessed — and transcript resolution MUST search every version home, not just
-  the live `~/.claude` (`findClaudeSessionFile` → `getAgentSessionDirs`,
-  `lib/session/active.ts`), so an agent-version upgrade does not blind the watchdog.
+  the live `~/.claude`. Both resolvers do so via `getAgentSessionDirs`: the status/timestamp
+  path (`findClaudeSessionFile`, `lib/session/active.ts:412`, which sets the row's
+  last-activity time) and the tail-read path (`resolveWatchdogSessionPath`,
+  `lib/watchdog/read.ts:139`). So an agent-version upgrade does not blind the watchdog.
 
 #### 2.3 Decision — nudge vs skip
 
