@@ -22,7 +22,15 @@ set -euo pipefail
 _RUSH_SUPPORT="$HOME/Library/Application Support/rush"
 
 if [[ -f "$_RUSH_SUPPORT/signing.kcpass" ]]; then
-  security unlock-keychain -p "$(cat "$_RUSH_SUPPORT/signing.kcpass")" rush-signing.keychain-db
+  _kcpass="$(cat "$_RUSH_SUPPORT/signing.kcpass")"
+  security unlock-keychain -p "$_kcpass" rush-signing.keychain-db
+  # Authorize codesign/apple-tool to use the Developer ID key non-interactively.
+  # Without this the key ACL prompts for UI approval, which a headless SSH
+  # release session cannot answer -- codesign then fails with
+  # errSecInternalComponent. Idempotent; safe to run every release.
+  security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$_kcpass" \
+    rush-signing.keychain-db >/dev/null 2>&1 || true
+  unset _kcpass
 fi
 if [[ -f "$_RUSH_SUPPORT/secrets.pass" ]]; then
   AGENTS_SECRETS_PASSPHRASE="$(cat "$_RUSH_SUPPORT/secrets.pass")"
