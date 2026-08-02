@@ -33,6 +33,26 @@ Gotchas:
 
 For logic-only changes, `bun test` in `apps/factory/` runs the `mission-control/*.test.ts` suites (floorModel, floorAdapter, dispatch, savedViews, etc.).
 
+## Testing extension-host logic
+
+Extension-host behavior lives in `src/vscode/` and depends on the real `vscode` API. There are three verification paths, from cheapest to most real:
+
+1. **Mocked unit tests** — `bun test` runs `src/vscode/*.test.ts` with `mock.module('vscode', …)`. This covers terminal tracking, session detection, reconnect resilience, etc., without installing a `.vsix`. Fast, but not a real extension host.
+2. **Preview harness** — for Factory Floor UI verification, use the browser harness above. Do not drive a real VS Code/Cursor window for UI screenshots.
+3. **Installed end-to-end on a computer-equipped remote machine** — for behavior that genuinely needs a live extension host (command registration, webview ↔ host messages, terminal lifecycle), build and install the `.vsix` on a fleet box, then drive the editor via `agents computer`:
+
+```bash
+# Run on the target host (e.g. mac-mini), or wrap with `agents ssh mac-mini "..."`
+cd apps/factory
+bash scripts/build.sh <version>
+bash scripts/install.sh <version>   # installs to Code/Cursor/Codium + reloads via activate.sh
+
+# From any fleet box, drive the remote editor and screenshot/inspect the result
+agents computer --host mac-mini screenshot --bundle com.microsoft.VSCode --window-id <id>
+```
+
+`scripts/install.sh` calls `scripts/activate.sh`, which reloads open editor windows and proves the new host activated from `exthost.log`. Running this on a remote machine keeps the verification focus-safe and avoids interrupting your local IDE.
+
 ## Building + Testing
 
 ```bash
