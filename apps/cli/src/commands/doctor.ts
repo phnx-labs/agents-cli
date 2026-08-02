@@ -130,6 +130,19 @@ function renderOverviewText(
   signIn: Record<string, Pick<AccountInfo, 'signedIn' | 'email' | 'accountId'>>,
   repoBehindMarkers: FetchStatusMarker[],
 ): void {
+  // Triaged health banner FIRST, so a user running bare `agents doctor` sees what
+  // is unhealthy, why it matters, and the exact fix before scrolling the detail
+  // sections below. Same triage model as target mode, aggregated across versions.
+  const overviewHealth = computeOverviewHealth(syncRows, orphanRows, repoBehindMarkers);
+  console.log(chalk.bold('Health'));
+  renderHealthBlock(overviewHealth, {
+    healthySummary: syncRows.length
+      ? `${syncRows.length} version${syncRows.length === 1 ? '' : 's'} reconciled · hooks wired · sources current`
+      : 'no installed versions to check',
+    healFix: verdictIsAutoFixable(overviewHealth) ? 'agents doctor --fix' : undefined,
+  });
+  console.log();
+
   console.log(chalk.bold('Agent CLIs'));
   // Show the fleet you actually run — agents that are ready in PATH, plus any
   // you MANAGE (have installed versions) whose binary isn't resolving (a real
@@ -742,7 +755,32 @@ function readExpectedForDiff(kind: DoctorKind, row: ResourceDiff): string | null
 // Claude-style settings.json (matches checkVersionHookWiring's supported set).
 const HOOK_WIRING_FIX_AGENTS: AgentId[] = ['claude', 'droid'];
 
+export type IssueSeverity = 'critical' | 'warning' | 'info';
+
+/**
+ * One triaged health finding. `severity`/`category`/`subject`/`impact`/`fix` are
+ * the triage backbone the human report renders and `--json` carries; `text`/`color`
+ * stay the terse combined label older readers used, so the shape is additive.
+ *
+ * Severity model (agent-agnostic — applies to every agent doctor inspects):
+ *   - critical (silent breakage): an unwired hook, a missing/unparseable
+ *     settings.json, a MISSING resource.
+ *   - warning (stale / drift): a source layer behind origin, a DIVERGENT resource,
+ *     a stale / never-synced version.
+ *   - info (orphan): an EXTRA resource → `agents prune cleanup`.
+ */
 export interface VerdictIssue {
+  severity: IssueSeverity;
+  /** machine-stable class: unwired-hook | settings-missing | settings-unparseable
+   *  | missing | source-behind | divergent | extra | stale | never-synced | orphan */
+  category: string;
+  /** the hook / resource / layer / version the finding is about */
+  subject: string;
+  /** one-line plain-English consequence */
+  impact: string;
+  /** exact remediation command */
+  fix: string;
+  /** terse combined label (legacy) */
   text: string;
   color: 'yellow' | 'red' | 'magenta';
 }
@@ -750,42 +788,270 @@ export interface VerdictIssue {
 export interface DoctorVerdict {
   healthy: boolean;
   issues: VerdictIssue[];
+  /** Resources (target) / versions (overview) reconciled clean — drives the
+   *  healthy line's count. */
+  reconciled: number;
+}
+
+/** Categories `--fix` reconciles (vs. `agents repo pull` for a behind source, or
+ *  `agents prune cleanup` for an orphan). Drives the heal footer. */
+const AUTO_FIXABLE_CATEGORIES = new Set([
+  'unwired-hook', 'settings-missing', 'settings-unparseable', 'missing', 'divergent', 'stale', 'never-synced',
+]);
+
+export function verdictIsAutoFixable(v: DoctorVerdict): boolean {
+  return v.issues.some((i) => AUTO_FIXABLE_CATEGORIES.has(i.category));
 }
 
 /**
- * Fold a version report's divergences into a single verdict. Divergent files,
- * missing/extra resources, UNWIRED hooks, an absent/broken settings.json, and a
- * source layer behind origin all count against health — an UNWIRED hook or a
- * stale source is as unhealthy as a divergent file, not a footnote. Pure so the
- * health rollup is unit-testable without a version home.
+ * Fold a version report's divergences into a triaged verdict — one severity-tagged
+ * finding per unwired hook, missing/divergent/extra resource, and behind-origin
+ * source layer, each carrying its subject, plain-English impact, and exact fix. An
+ * UNWIRED hook or a stale source is as unhealthy as a divergent file, not a
+ * footnote. Pure so the health rollup is unit-testable without a version home.
  */
 export function computeVerdict(report: VersionResourceReport): DoctorVerdict {
   const issues: VerdictIssue[] = [];
-  const { diff, missing, extra } = report.summary;
-  if (diff) issues.push({ text: `${diff} divergent`, color: 'yellow' });
-  if (missing) issues.push({ text: `${missing} missing`, color: 'red' });
-  if (extra) issues.push({ text: `${extra} extra`, color: 'magenta' });
+  const idLabel = `${report.agent}@${report.version}`;
+  const fixCmd = `agents doctor ${idLabel} --fix`;
+  const syncCmd = `agents sync ${idLabel} --yes`;
 
+  // ── critical: settings.json / unwired hooks (silent breakage) ──
   const w = report.hookWiring;
   if (w?.settingsMissing) {
     const n = w.expected ?? 0;
-    issues.push({ text: `settings.json missing (${n} hook${n === 1 ? '' : 's'} unwired)`, color: 'red' });
+    issues.push({
+      severity: 'critical', category: 'settings-missing', subject: 'settings.json',
+      impact: `not found; ${n} declared hook${n === 1 ? '' : 's'} never fire`,
+      fix: syncCmd,
+      text: `settings.json missing (${n} hook${n === 1 ? '' : 's'} unwired)`, color: 'red',
+    });
   } else if (w?.settingsUnparseable) {
-    issues.push({ text: 'settings.json unparseable', color: 'red' });
-  } else if (w && w.unwired.length > 0) {
-    issues.push({ text: `${w.unwired.length} unwired`, color: 'red' });
-  }
-
-  for (const b of report.sourceBehind ?? []) {
-    if (b.behind > 0) {
+    issues.push({
+      severity: 'critical', category: 'settings-unparseable', subject: 'settings.json',
+      impact: `unparseable; hook wiring can't be verified`,
+      fix: syncCmd,
+      text: 'settings.json unparseable', color: 'red',
+    });
+  } else if (w) {
+    for (const u of w.unwired) {
       issues.push({
-        text: `source ${b.label} ${b.behind} commit${b.behind === 1 ? '' : 's'} behind ${b.branch}`,
-        color: 'red',
+        severity: 'critical', category: 'unwired-hook', subject: u.name,
+        impact: 'on disk but not wired into settings.json; the hook never fires',
+        fix: syncCmd,
+        text: `${u.name} unwired`, color: 'red',
       });
     }
   }
 
-  return { healthy: issues.length === 0, issues };
+  // ── critical: missing resources (declared in sources, absent from home) ──
+  for (const kind of DOCTOR_ALL_KINDS) {
+    for (const r of report.kinds[kind]) {
+      if (r.status !== 'missing') continue;
+      issues.push({
+        severity: 'critical', category: 'missing', subject: r.name,
+        impact: `declared in sources but absent from the version home (${kind})`,
+        fix: fixCmd,
+        text: `${r.name} missing`, color: 'red',
+      });
+    }
+  }
+
+  // ── warning: source layer behind origin (home reconciled against stale truth) ──
+  for (const b of report.sourceBehind ?? []) {
+    if (b.behind <= 0) continue;
+    issues.push({
+      severity: 'warning', category: 'source-behind', subject: b.label,
+      impact: `${b.behind} commit${b.behind === 1 ? '' : 's'} behind ${b.branch}; you're running stale config`,
+      fix: `agents repo pull ${b.alias}`,
+      text: `source ${b.label} ${b.behind} commit${b.behind === 1 ? '' : 's'} behind ${b.branch}`, color: 'yellow',
+    });
+  }
+
+  // ── warning: divergent resources (drifted from source) ──
+  for (const kind of DOCTOR_ALL_KINDS) {
+    for (const r of report.kinds[kind]) {
+      if (r.status !== 'diff') continue;
+      issues.push({
+        severity: 'warning', category: 'divergent', subject: r.name,
+        impact: r.detail ? collapseWhitespace(r.detail) : 'differs from source',
+        fix: fixCmd,
+        text: `${r.name} divergent`, color: 'yellow',
+      });
+    }
+  }
+
+  // ── info: extra / orphan resources (present in home, no source) ──
+  for (const kind of DOCTOR_ALL_KINDS) {
+    for (const r of report.kinds[kind]) {
+      if (r.status !== 'extra') continue;
+      issues.push({
+        severity: 'info', category: 'extra', subject: r.name,
+        impact: `orphan in the version home with no source (${kind})`,
+        fix: 'agents prune cleanup',
+        text: `${r.name} extra`, color: 'magenta',
+      });
+    }
+  }
+
+  return { healthy: issues.length === 0, issues, reconciled: report.summary.ok };
+}
+
+// ─── triaged health block (shared by target + overview) ────────────────────────
+
+const SEVERITY_COLOR: Record<IssueSeverity, (s: string) => string> = {
+  critical: chalk.red,
+  warning: chalk.yellow,
+  info: chalk.magenta,
+};
+// Restrained terminal glyphs — the ✓ ✗ ⚠ set plus a subtle info dot, colored via
+// chalk to match the man-page voice. No colorful emoji.
+const SEVERITY_GLYPH: Record<IssueSeverity, string> = {
+  critical: '✗',
+  warning: '⚠',
+  info: '·',
+};
+
+function severityCounts(issues: VerdictIssue[]): { critical: number; warning: number; info: number } {
+  return {
+    critical: issues.filter((i) => i.severity === 'critical').length,
+    warning: issues.filter((i) => i.severity === 'warning').length,
+    info: issues.filter((i) => i.severity === 'info').length,
+  };
+}
+
+/** The info tier (orphans; one identical `prune cleanup` fix, already enumerated
+ *  in the detail section) is capped with a rollup so the block stays scannable
+ *  when a version home carries dozens of orphans. Critical + warning are
+ *  actionable, each with a distinct subject/fix, so they are never capped. */
+const INFO_CAP = 5;
+
+/**
+ * Build the lines of a triaged health block: a single green ✓ line when healthy,
+ * otherwise a severity-counted ✗ header followed by one row per finding (icon ·
+ * severity · subject — impact, then the exact fix under it) and an optional heal
+ * footer. Pure — returns the lines so the rendered output is unit-testable. Shared
+ * by target mode and the bare overview so both read the same way.
+ */
+export function healthBlockLines(verdict: DoctorVerdict, opts: { healthySummary: string; healFix?: string }): string[] {
+  if (verdict.healthy) {
+    return [`  ${chalk.green('✓')} ${chalk.green('healthy')} ${chalk.gray('— ' + opts.healthySummary)}`];
+  }
+  const lines: string[] = [];
+  const c = severityCounts(verdict.issues);
+  const bits: string[] = [];
+  if (c.critical) bits.push(`${c.critical} critical`);
+  if (c.warning) bits.push(`${c.warning} warning${c.warning === 1 ? '' : 's'}`);
+  if (c.info) bits.push(`${c.info} info`);
+  const total = verdict.issues.length;
+  lines.push(`  ${chalk.red('✗')} ${chalk.red('unhealthy')} ${chalk.gray(`— ${total} issue${total === 1 ? '' : 's'} (${bits.join(' · ')})`)}`);
+  lines.push('');
+
+  const cont = ' '.repeat(14); // aligns the fix line under the subject column
+  const issueLines = (i: VerdictIssue): void => {
+    const glyph = SEVERITY_COLOR[i.severity](SEVERITY_GLYPH[i.severity]);
+    const word = SEVERITY_COLOR[i.severity](i.severity.padEnd(8));
+    lines.push(`  ${glyph} ${word}  ${chalk.bold(i.subject)} ${chalk.gray('— ' + i.impact)}`);
+    lines.push(chalk.gray(`${cont}→ ${i.fix}`));
+  };
+  const actionable = verdict.issues.filter((i) => i.severity !== 'info');
+  const infoIssues = verdict.issues.filter((i) => i.severity === 'info');
+  for (const i of actionable) issueLines(i);
+  for (const i of infoIssues.slice(0, INFO_CAP)) issueLines(i);
+  const hiddenInfo = infoIssues.length - Math.min(infoIssues.length, INFO_CAP);
+  if (hiddenInfo > 0) {
+    const glyph = SEVERITY_COLOR.info(SEVERITY_GLYPH.info);
+    const word = SEVERITY_COLOR.info('info'.padEnd(8));
+    lines.push(`  ${glyph} ${word}  ${chalk.gray(`+${hiddenInfo} more orphan${hiddenInfo === 1 ? '' : 's'}`)} ${chalk.gray('— agents prune cleanup')}`);
+  }
+
+  if (opts.healFix) {
+    lines.push('');
+    lines.push(`  ${chalk.gray("heal what's auto-fixable:")}  ${opts.healFix}`);
+  }
+  return lines;
+}
+
+function renderHealthBlock(verdict: DoctorVerdict, opts: { healthySummary: string; healFix?: string }): void {
+  for (const line of healthBlockLines(verdict, opts)) console.log(line);
+}
+
+/**
+ * Aggregate the bare `agents doctor` overview into the same triaged verdict target
+ * mode uses — folding per-version wiring/sync drift, behind-origin source layers,
+ * and orphan resources into severity-tagged findings. Agent-agnostic: every
+ * installed version is classified the same way. Pure, so it is unit-testable.
+ */
+export function computeOverviewHealth(
+  syncRows: SyncStatusRow[],
+  orphanRows: OrphanRow[],
+  repoBehindMarkers: FetchStatusMarker[],
+): DoctorVerdict {
+  const issues: VerdictIssue[] = [];
+  const pretty = (agent: string, version: string) => `${AGENT_NAMES[agent] || agent}@${version}`;
+
+  // critical: unwired hooks / broken settings.json per version
+  for (const row of syncRows) {
+    const n = row.unwiredHooks ?? 0;
+    if (n <= 0) continue;
+    const label = pretty(row.agent, row.version);
+    issues.push({
+      severity: 'critical', category: 'unwired-hook', subject: label,
+      impact: `${n} hook${n === 1 ? '' : 's'} present on disk but not wired into settings.json; never fire`,
+      fix: `agents sync ${row.agent}@${row.version} --yes`,
+      text: `${label} ${n} unwired`, color: 'red',
+    });
+  }
+
+  // warning: source layers behind origin
+  for (const m of repoBehindMarkers) {
+    if (m.behind <= 0) continue;
+    const label = m.alias === 'user' ? '~/.agents' : m.alias;
+    issues.push({
+      severity: 'warning', category: 'source-behind', subject: label,
+      impact: `${m.behind} commit${m.behind === 1 ? '' : 's'} behind ${m.branch}; you're running stale config`,
+      fix: `agents repo pull ${m.alias}`,
+      text: `${label} ${m.behind} behind`, color: 'yellow',
+    });
+  }
+
+  // warning: stale / never-synced versions
+  for (const row of syncRows) {
+    const label = pretty(row.agent, row.version);
+    if (row.status === 'stale') {
+      issues.push({
+        severity: 'warning', category: 'stale', subject: label,
+        impact: 'sources changed since last sync',
+        fix: `agents doctor ${row.agent}@${row.version} --fix`,
+        text: `${label} stale`, color: 'yellow',
+      });
+    } else if (row.status === 'never-synced') {
+      issues.push({
+        severity: 'warning', category: 'never-synced', subject: label,
+        impact: 'installed but never synced',
+        fix: `agents sync ${row.agent}@${row.version} --yes`,
+        text: `${label} never-synced`, color: 'yellow',
+      });
+    }
+  }
+
+  // info: orphan resources per version
+  for (const row of orphanRows) {
+    const parts: string[] = [];
+    if (row.commands) parts.push(`${row.commands} command${row.commands === 1 ? '' : 's'}`);
+    if (row.skills) parts.push(`${row.skills} skill${row.skills === 1 ? '' : 's'}`);
+    if (row.hooks) parts.push(`${row.hooks} hook${row.hooks === 1 ? '' : 's'}`);
+    const label = pretty(row.agent, row.version);
+    issues.push({
+      severity: 'info', category: 'orphan', subject: label,
+      impact: `${parts.join(', ')} in the version home with no source`,
+      fix: 'agents prune cleanup',
+      text: `${label} orphan`, color: 'magenta',
+    });
+  }
+
+  const reconciled = syncRows.filter((r) => r.status === 'fresh' && (r.unwiredHooks ?? 0) === 0).length;
+  return { healthy: issues.length === 0, issues, reconciled };
 }
 
 /**
@@ -857,29 +1123,16 @@ function renderTargetText(report: VersionResourceReport, options: { showDiff: bo
   }
 
   console.log();
-  const { ok } = report.summary;
   const verdict = computeVerdict(report);
-  if (verdict.healthy) {
-    console.log(chalk.green(`  Verdict: ${ok} resource${ok === 1 ? '' : 's'} reconciled. Version home matches resolved sources.`));
-  } else {
-    const colored = verdict.issues.map((i) => chalk[i.color](i.text));
-    console.log(`  Verdict: ${colored.join(', ')}.`);
-    // Lead with the remediation that matches the problem. A source layer behind
-    // origin is NOT healed by `--fix` (only `agents repo pull` reconciles it), so
-    // in the sourceBehind-only case the repo-pull hint must lead and the `--fix`
-    // hint is suppressed — it would mislead.
-    const behind = (report.sourceBehind ?? []).filter((b) => b.behind > 0);
-    for (const b of behind) {
-      printWrappedLine('  ', `Source ${b.label} is behind ${b.branch} — run \`agents repo pull ${b.alias}\` to reconcile against current sources.`);
-    }
-    const w = report.hookWiring;
-    const fixable =
-      report.summary.diff > 0 || report.summary.missing > 0 || report.summary.extra > 0 ||
-      (w != null && (w.unwired.length > 0 || !!w.settingsMissing || !!w.settingsUnparseable));
-    if (fixable) {
-      printWrappedLine('  ', `Run \`agents doctor ${report.agent}@${report.version} --fix\` to heal, or \`agents prune cleanup\` to drop extras.`);
-    }
-  }
+  // A source layer behind origin is healed by `agents repo pull`, not `--fix` —
+  // the per-issue fix already names the right command, so the heal footer only
+  // shows when something is genuinely `--fix`-able (never in the source-behind or
+  // orphan-only case, where it would mislead).
+  const hooksWired = report.hookWiring?.supported ? ' · hooks wired' : '';
+  renderHealthBlock(verdict, {
+    healthySummary: `${verdict.reconciled} resource${verdict.reconciled === 1 ? '' : 's'} reconciled${hooksWired} · sources current`,
+    healFix: verdictIsAutoFixable(verdict) ? `agents doctor ${report.agent}@${report.version} --fix` : undefined,
+  });
 }
 
 // ─── fix / heal mode ───────────────────────────────────────────────────────────
@@ -1160,6 +1413,10 @@ export function registerDoctorCommand(program: Command): void {
             auth: summarizeHostAuth(readAuthHealthCache(), machineId()),
             sync: syncRows,
             orphans: orphanRows,
+            // Triaged overview health — severity/category/subject/impact/fix per
+            // finding, aggregated across versions. Additive; existing consumers
+            // reading `sync`/`orphans`/`repos` are unaffected.
+            health: computeOverviewHealth(syncRows, orphanRows, repoBehindMarkers),
             // This host's harness inventory — installed resources per kind,
             // installed version ids per agent, and `.agents`/`.system` repo
             // state — so `agents doctor --devices` can compare presence across
@@ -1221,7 +1478,11 @@ export function registerDoctorCommand(program: Command): void {
       for (const r of reports) r.sourceBehind = sourceBehind;
 
       if (opts.json) {
-        console.log(JSON.stringify(reports.length === 1 ? reports[0] : reports, null, 2));
+        // Carry the triaged verdict (severity/category/subject/impact/fix per
+        // issue) alongside the report — additive, so existing consumers reading
+        // `summary`/`kinds`/`hookWiring`/`sourceBehind` are unaffected.
+        const withVerdict = reports.map((r) => ({ ...r, verdict: computeVerdict(r) }));
+        console.log(JSON.stringify(withVerdict.length === 1 ? withVerdict[0] : withVerdict, null, 2));
         return;
       }
 
