@@ -541,11 +541,12 @@ function locatorBadge(s: ActiveSession): string {
  * terminal width so the row never wraps.
  */
 function printActiveRow(s: ActiveSession, indent: string): void {
-  // shortId (8-char) · agent · host · status · badges · identity+todos+snippet
+  // shortId (8-char) · agent · host · status · owner · badges · identity+todos+snippet
   const idCol = chalk.dim(padToWidth((s.sessionId?.slice(0, 8)) ?? '-', 9));
   const kindCol = colorAgent(s.kind as any)(padToWidth(truncateToWidth(s.kind, 8), 9));
   const hostCol = chalk.gray(padToWidth(truncateToWidth(s.host ?? '-', 8), 9));
   const statusCol = statusColor(s.status)(padToWidth(truncateToWidth(activityLabel(s), 8), 9));
+  const ownerCol = chalk.cyan(padToWidth(truncateToWidth(ownerLabel(s), 8), 9));
   const fork = s.pidCount && s.pidCount > 1 ? chalk.dim(`×${s.pidCount} `) : '';
   const badges = (fork ? fork : '') + [signalBadges(s), locatorBadge(s)].filter(Boolean).join(' ');
   // Identity (label/project/ticket clickable) + checklist + live snippet.
@@ -553,10 +554,24 @@ function printActiveRow(s: ActiveSession, indent: string): void {
   // via the SSH fan-out already populated (including todos when the peer has them).
   const desc = formatActiveRowDescription(s) || '-';
   // Fill the remaining width with the preview so nothing wraps under tmux/SSH.
-  const fixed = stringWidth(indent) + 9 + 9 + 9 + 9 + (badges ? stringWidth(badges) + 1 : 0);
+  const fixed = stringWidth(indent) + 9 + 9 + 9 + 9 + 9 + (badges ? stringWidth(badges) + 1 : 0);
   const room = Math.max(12, terminalWidth() - fixed - 1);
   const descCol = chalk.white(truncateToWidth(desc, room));
-  console.log(indent + idCol + kindCol + hostCol + statusCol + (badges ? badges + ' ' : '') + descCol);
+  console.log(indent + idCol + kindCol + hostCol + statusCol + ownerCol + (badges ? badges + ' ' : '') + descCol);
+}
+
+/**
+ * Compact owner display for the `--active` owner column: the local-part of a
+ * resolved actor email/login (`muqsit@getrush.ai` -> `muqsit`), the id as-is
+ * when it has no `@`, and `-` when the actor is unresolved (`UNRESOLVED@<host>`)
+ * or absent (a launch predating actor stamping). Honest by design — an
+ * unresolved local run shows no owner rather than inventing one.
+ */
+export function ownerLabel(s: ActiveSession): string {
+  const owner = s.owner;
+  if (!owner || owner.startsWith('UNRESOLVED@')) return '-';
+  const at = owner.indexOf('@');
+  return at > 0 ? owner.slice(0, at) : owner;
 }
 
 /**

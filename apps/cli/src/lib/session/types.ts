@@ -204,6 +204,20 @@ export interface SessionMeta {
    */
   machine?: string;
   /**
+   * Resolved actor id (`resolveActor().id`) who initiated this session — a
+   * tailnet login/email for a resolved human, or `UNRESOLVED@<host>`. Persisted
+   * write-once at session creation and preserved across content rescans (kept
+   * out of the DB upsert's ON CONFLICT set). Undefined for rows created before
+   * actor stamping. RUSH-2018.
+   */
+  actor?: string;
+  /**
+   * The actor's kind (`resolveActor().kind`): `'human'` for a person-initiated
+   * run, `'agent'` for one an agent spawned. Pairs with {@link actor}, same
+   * split as `AGENTS_ACTOR` / `AGENTS_ACTOR_KIND` on the exec env. RUSH-2018.
+   */
+  initiatedBy?: 'human' | 'agent';
+  /**
    * True only for rows pulled from another machine over the live cross-machine
    * fan-out (`remote-list.ts`) — their transcript is on that peer's disk, so
    * reading/resuming has to hop back over SSH. Distinct from `machine`, which is

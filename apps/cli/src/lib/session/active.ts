@@ -160,6 +160,14 @@ export interface ActiveSession {
    */
   provenance?: SessionProvenance;
   /**
+   * Who initiated this session — the resolved actor id stamped at spawn
+   * (`resolveActor().id`, read back from the pid registry / teammate record).
+   * A tailnet login/email for a resolved human, `UNRESOLVED@<host>` when it
+   * couldn't be determined, absent when the launch predates actor stamping.
+   * Surfaced as the owner column in `--active` (RUSH-2018).
+   */
+  owner?: string;
+  /**
    * The machine this session runs on, as a normalized device id (machineId()
    * form). Set when merging cross-machine results so the grouped `--active`
    * view can bucket by computer. Absent for a purely local query (the renderer
@@ -685,6 +693,9 @@ export async function listTeamsActive(): Promise<ActiveSession[]> {
       lastActivityMs: sessionFileTimes(sessionFile).mtimeMs,
       teamName: a.taskName,
       agentId: a.agentId,
+      // The frozen actor stamped on the teammate record (RUSH-2028) — who ran
+      // this teammate, surfaced as the owner in --active (RUSH-2018).
+      owner: a.actor ?? undefined,
     }, state, sessionFile, pidAlive);
   });
 }
@@ -715,7 +726,8 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
     // back to the stale cached id — the duplicate-card fix comes from
     // pickSessionFile no longer borrowing a sibling, not from this lookup. Kept as
     // a forward-looking hook for the cases where the pid does line up.
-    const resolvedId = readPidSessionEntry(t.pid)?.sessionId ?? t.sessionId;
+    const pidEntry = readPidSessionEntry(t.pid);
+    const resolvedId = pidEntry?.sessionId ?? t.sessionId;
     const sessionFile = findSessionFileForKind(t.kind, t.cwd ?? undefined, resolvedId);
     // Prefer label from live terminal, fall back to Claude's session label
     const label = t.label ?? (t.sessionId ? labelMap.get(t.sessionId) : undefined) ?? undefined;
@@ -741,6 +753,7 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
       startedAtMs: t.startedAtMs,
       lastActivityMs: sessionFileTimes(sessionFile).mtimeMs,
       windowId: t.windowId,
+      owner: pidEntry?.actor ?? undefined,
     }, state, sessionFile, pidAlive);
   });
 }
@@ -1179,6 +1192,7 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
       startedAtMs: hookRec?.ts ?? birthtimeMs,
       lastActivityMs: mtimeMs,
       pidCount: 1 + (foldedByRoot.get(pid) ?? 0),
+      owner: entry?.actor ?? undefined,
     }, state, sessionFile, true));
   }
   // Housekeeping: drop registry files for pids that have since died.
@@ -1335,6 +1349,7 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
       startedAtMs: birthtimeMs,
       lastActivityMs: mtimeMs,
       provenance,
+      owner: liveEntry?.actor ?? undefined,
     }, state, sessionFile, pidAlive));
   }
   return out;

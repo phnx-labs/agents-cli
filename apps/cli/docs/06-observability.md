@@ -82,6 +82,21 @@ actors:
     github: bisma
 ```
 
+#### Surfacing the owner
+
+The resolved actor is stamped at spawn and read back so you can see *who* launched
+each run, not just *what* is running:
+
+- **`agents sessions --active`** shows an **owner** column — the actor's short id
+  (an email's local-part, or `-` when the run is unresolved-local). It is stamped
+  into the per-pid registry (`writePidSessionEntry`) at launch and onto each
+  teammate record, so a co-located fleet no longer collapses to one anonymous
+  account. `--active --json` carries the raw `owner` field for a consumer to join on.
+- **The session index** (`sessions.db`) carries `actor` and `initiated_by`
+  (`human`/`agent`) columns. They are **write-once at session creation** — a later
+  content rescan carries no actor and is deliberately kept out of the upsert's
+  `ON CONFLICT` update set, so the original owner is never clobbered by re-indexing.
+
 ```bash
 agents events                          # recent activity across everything
 agents events --module teams           # team lifecycle (create / add / disband)

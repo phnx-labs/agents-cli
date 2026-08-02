@@ -98,7 +98,7 @@ describe('schema migration v13 -> current (dir_ledger + resumable parser)', () =
   it('bumps the recorded schema version to the current version', () => {
     const db = getDB();
     const v = (db.prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string }).value;
-    expect(v).toBe('18');
+    expect(v).toBe('19');
   });
 
   it('preserves existing session rows through the migration', () => {

@@ -1066,6 +1066,8 @@ export async function execShimPassthrough(
         agent,
         sessionId: extractSessionIdArg(rawArgs),
         cwd,
+        actor: resolveActor().id,
+        initiatedBy: resolveActor().kind,
         launchId,
         terminalId: process.env.AGENT_TERMINAL_ID,
         startedAtMs: Date.now(),
@@ -1250,6 +1252,8 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
       agent: options.agent,
       sessionId: options.sessionId,
       cwd,
+      actor: resolveActor().id,
+      initiatedBy: resolveActor().kind,
       // spawnAgent injected AGENT_LAUNCH_ID into options.env before delegating
       // here; record the same id so the hook (running under the pane-leaf agent
       // pid) reconciles by launchId. This pane's pid usually IS the agent pid,
@@ -1479,6 +1483,8 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
       agent: options.agent,
       sessionId: options.sessionId,
       cwd: options.cwd || process.cwd(),
+      actor: resolveActor().id,
+      initiatedBy: resolveActor().kind,
       launchId,
       terminalId: process.env.AGENT_TERMINAL_ID,
       tmuxPane: process.env.TMUX_PANE,

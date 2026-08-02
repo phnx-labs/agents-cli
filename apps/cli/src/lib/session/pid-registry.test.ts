@@ -18,6 +18,8 @@ describe('pid session registry', () => {
       agent: 'claude',
       sessionId: 'abc-123-uuid',
       cwd: '/home/x/repo',
+      actor: 'ada@example.com',
+      initiatedBy: 'human',
       launchId: 'launch-abc',
       terminalId: 'CL-1700000000000-1',
       tmuxPane: '%18',
@@ -32,6 +34,9 @@ describe('pid session registry', () => {
     expect(got?.launchId).toBe('launch-abc');
     expect(got?.terminalId).toBe('CL-1700000000000-1');
     expect(got?.tmuxPane).toBe('%18');
+    // The actor stamped at spawn rides back so --active can show an owner (RUSH-2018).
+    expect(got?.actor).toBe('ada@example.com');
+    expect(got?.initiatedBy).toBe('human');
   });
 
   it('returns undefined for a pid with no entry', () => {

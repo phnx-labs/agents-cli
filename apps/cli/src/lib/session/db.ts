@@ -20,7 +20,7 @@ const SESSIONS_DIR = getSessionsDir();
 const DB_PATH = getSessionsDbPath();
 
 /** Current schema version; bumped when migrations are added. */
-const SCHEMA_VERSION = 18;
+const SCHEMA_VERSION = 19;
 
 /**
  * Canonicalize a file path for use as a scan_ledger key. The same physical
@@ -82,7 +82,9 @@ CREATE TABLE IF NOT EXISTS sessions (
   todos TEXT,
   recent_directories_touched TEXT,
   linear_project TEXT,
-  linear_project_url TEXT
+  linear_project_url TEXT,
+  actor TEXT,
+  initiated_by TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_timestamp ON sessions(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_cwd ON sessions(cwd);
@@ -176,6 +178,8 @@ export interface SessionRow {
   recent_directories_touched: string | null;
   linear_project: string | null;
   linear_project_url: string | null;
+  actor: string | null;
+  initiated_by: string | null;
 }
 
 /** File stat snapshot used to detect changes between scan runs. */
@@ -431,6 +435,17 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
       }
     });
     txn(rows);
+  }
+
+  if (fromVersion < 19) {
+    // v18 → v19: actor provenance (RUSH-2018) — who initiated the session and
+    // the actor's kind. Populated at write time from the resolved actor (the
+    // pid-registry/spawn path), not derivable from the transcript, so there is
+    // no ledger wipe here: a rescan can't backfill these, and forcing a full
+    // re-parse would be pure churn. Existing rows stay NULL until re-created.
+    const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
+    if (!cols.some(c => c.name === 'actor')) db.exec(`ALTER TABLE sessions ADD COLUMN actor TEXT`);
+    if (!cols.some(c => c.name === 'initiated_by')) db.exec(`ALTER TABLE sessions ADD COLUMN initiated_by TEXT`);
   }
 }
 
@@ -838,7 +853,8 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     output_tokens, cost_usd, duration_ms,
     file_path, file_mtime_ms, file_size, scanned_at, is_team_origin,
     pr_url, pr_number, worktree_slug, ticket_id, plan, todos,
-    recent_directories_touched, linear_project, linear_project_url, machine
+    recent_directories_touched, linear_project, linear_project_url, machine,
+    actor, initiated_by
   ) VALUES (
     @id, @short_id, @agent, @origin, @routine_name, @routine_run_id,
     @version, @account, @timestamp, @last_activity,
@@ -846,7 +862,8 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     @output_tokens, @cost_usd, @duration_ms,
     @file_path, @file_mtime_ms, @file_size, @scanned_at, @is_team_origin,
     @pr_url, @pr_number, @worktree_slug, @ticket_id, @plan, @todos,
-    @recent_directories_touched, @linear_project, @linear_project_url, @machine
+    @recent_directories_touched, @linear_project, @linear_project_url, @machine,
+    @actor, @initiated_by
   )
   ON CONFLICT(id) DO UPDATE SET
     short_id = excluded.short_id,
@@ -897,6 +914,10 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
       ELSE COALESCE(excluded.linear_project_url, sessions.linear_project_url)
     END,
     machine = excluded.machine
+    -- actor / initiated_by are deliberately NOT in this update set (RUSH-2018):
+    -- they record who launched the session, write-once at creation. A later
+    -- content rescan carries no actor, so updating here would clobber the real
+    -- owner with NULL. Omitting them preserves the original on every rescan.
 `);
 
 function enrichCachedSessionMeta(meta: SessionMeta): SessionMeta {
@@ -1004,6 +1025,8 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
     linear_project: meta.linearProject ?? null,
     linear_project_url: meta.linearProjectUrl ?? null,
     machine: resolveMachine(meta),
+    actor: meta.actor ?? null,
+    initiated_by: meta.initiatedBy ?? null,
   };
 
   const txn = db.transaction(() => {
@@ -1129,6 +1152,8 @@ export function upsertSessionsBatch(
         linear_project: meta.linearProject ?? null,
         linear_project_url: meta.linearProjectUrl ?? null,
     machine: resolveMachine(meta),
+        actor: meta.actor ?? null,
+        initiated_by: meta.initiatedBy ?? null,
       });
       delText.run(meta.id);
       insText.run(
@@ -1331,6 +1356,10 @@ function rowToMeta(row: SessionRow): SessionMeta {
     linearProject: row.linear_project ?? undefined,
     linearProjectUrl: row.linear_project_url ?? undefined,
     machine: row.machine ?? undefined,
+    actor: row.actor ?? undefined,
+    // Narrow the free-text column to the known kinds; an unexpected value maps
+    // to undefined rather than being asserted as a valid kind.
+    initiatedBy: row.initiated_by === 'human' || row.initiated_by === 'agent' ? row.initiated_by : undefined,
   };
 }
 

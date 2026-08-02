@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { serializeSessionsJson, serializeActiveSessionsForJson } from './sessions.js';
+import { serializeSessionsJson, serializeActiveSessionsForJson, ownerLabel } from './sessions.js';
 import type { SessionMeta } from '../lib/session/types.js';
 import type { ActiveSession } from '../lib/session/active.js';
 
@@ -104,5 +104,38 @@ describe('serializeActiveSessionsForJson (RUSH-1981 — join keys)', () => {
     expect(row.machine).toBe('yosemite-s1');
     expect(row.ticket).toBeUndefined();
     expect(row.project).toBe('repo');
+  });
+
+  it('carries the owner field through the JSON serializer (RUSH-2018)', () => {
+    // owner rides the ...s spread, so a watcher/VS Code consumer can join on who
+    // launched each active session without a second lookup.
+    const [row] = serializeActiveSessionsForJson([active({ owner: 'ada@example.com' })]);
+    expect(row.owner).toBe('ada@example.com');
+  });
+});
+
+/**
+ * RUSH-2018: the owner column in `agents sessions --active` shortens a resolved
+ * actor id to a compact display, and stays honest — an unresolved local run
+ * shows no owner rather than inventing one.
+ */
+describe('ownerLabel (RUSH-2018 — --active owner column)', () => {
+  const s = (owner?: string): ActiveSession =>
+    ({ context: 'terminal', kind: 'agent', status: 'running', owner } as ActiveSession);
+
+  it('shows the local-part of a resolved actor email', () => {
+    expect(ownerLabel(s('muqsit@getrush.ai'))).toBe('muqsit');
+  });
+
+  it('shows a non-email login id as-is', () => {
+    expect(ownerLabel(s('ada-lovelace'))).toBe('ada-lovelace');
+  });
+
+  it('shows "-" for an unresolved actor (honest: we do not know who)', () => {
+    expect(ownerLabel(s('UNRESOLVED@yosemite-s1'))).toBe('-');
+  });
+
+  it('shows "-" when no owner was stamped (launch predates actor stamping)', () => {
+    expect(ownerLabel(s(undefined))).toBe('-');
   });
 });

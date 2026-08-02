@@ -27,6 +27,19 @@ export interface PidSessionEntry {
   sessionId?: string;
   cwd?: string;
   /**
+   * Resolved actor id (`resolveActor().id`) stamped at spawn — who initiated this
+   * run. A tailnet login/email for a resolved human, or `UNRESOLVED@<host>` when
+   * it can't be determined. Read back by the active-sessions path to surface an
+   * `owner` per session (RUSH-2018), so a co-located fleet shows who launched what.
+   */
+  actor?: string;
+  /**
+   * The actor's kind (`resolveActor().kind`): `'human'` for a person-initiated
+   * run, `'agent'` for one an agent spawned. Pairs with {@link actor} the same way
+   * `AGENTS_ACTOR` / `AGENTS_ACTOR_KIND` do on the exec env.
+   */
+  initiatedBy?: 'human' | 'agent';
+  /**
    * The launch id minted by `ag run` and exported to the child as
    * `AGENT_LAUNCH_ID`. The agent's SessionStart hook records the SAME id in its
    * own state file (`terminals/sessions/<pid>.json`, `launch_id`), so the two
