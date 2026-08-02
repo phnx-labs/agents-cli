@@ -26,7 +26,7 @@ import type { CloudTaskStatus } from '../cloud/types.js';
 import { AgentManager } from '../teams/agents.js';
 import { getTerminalsDir } from '../state.js';
 import { readPidSessionEntry, listPidSessionEntries, prunePidSessionRegistry, type PidSessionEntry } from './pid-registry.js';
-import { loadHookSessionIndex, resolveHookSessionRecord, type HookSessionIndex, type HookSessionRecord } from './hook-sessions.js';
+import { loadHookSessionIndex, resolveHookSessionRecord, readStateSessionRecord, type HookSessionIndex, type HookSessionRecord } from './hook-sessions.js';
 import { buildClaudeLabelMap, getAgentSessionDirs } from './discover.js';
 import { buildRunNameMap } from './run-names.js';
 import { latestSessionFileForCwd } from './db.js';
@@ -1405,8 +1405,23 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
     if (!pane || !sessName) continue;
     const meta = readSessionMeta(sessName);
     const liveEntry = liveByPane.get(pane);
-    const id = resolvePaneIdentity(pane, meta, liveEntry, getHookIndex);
+    let id = resolvePaneIdentity(pane, meta, liveEntry, getHookIndex);
     if (!id) continue;
+    // RUSH-2007 Layer A: a non-Claude tmux session whose id resolved via neither the
+    // launch registry (no id minted at spawn) nor the session-tracker index (not
+    // deployed on the fleet — its dir is empty) — backfill it from the DEPLOYED
+    // hook's own per-pid record at state/sessions/<pid>.json. Targeted single-file
+    // reads on the pane leaf pid, then the registry launch pid; freshness-guarded by
+    // the launch's known start so a reused-pid graveyard file can't cross sessions.
+    // Without this the session surfaces id-less (keyed on the bare pane) and is
+    // invisible to `agents sessions focus` — the remaining RUSH-2007 discovery gap.
+    if (!id.sessionId) {
+      const panePid = parseInt(pidRaw, 10) || undefined;
+      const backfilled =
+        (panePid ? readStateSessionRecord(panePid, liveEntry?.startedAtMs)?.session_id : undefined)
+        ?? (liveEntry ? readStateSessionRecord(liveEntry.pid, liveEntry.startedAtMs)?.session_id : undefined);
+      if (backfilled) id = { ...id, sessionId: backfilled };
+    }
     // Dedupe by resolved session id; an as-yet-unresolved id (a hookless/lagging
     // split) keys on the unique pane so it still surfaces as its own row.
     const dedupKey = id.sessionId ?? pane;

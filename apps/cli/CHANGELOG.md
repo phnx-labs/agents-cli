@@ -2,6 +2,18 @@
 
 ## 1.20.81
 
+- **Non-Claude remote/tmux agent sessions now surface with their real id
+  (RUSH-2007).** `agents sessions --active` and the `agents sessions focus` picker
+  dropped every non-Claude tmux session (codex/gemini/kimi/grok/…) that lacked a
+  launch-minted id, so a live `agents run --device <host> <agent>` was invisible and
+  un-refocusable after an SSH drop. `listTmuxAgentSessions` now backfills the id from
+  the **deployed** SessionStart hook's own per-pid record at
+  `~/.agents/.cache/state/sessions/<pid>.json` — the CLI previously only read the
+  un-deployed session-tracker path (`terminals/sessions/`, empty on the fleet). A
+  targeted per-pid read (never a scan of that graveyard dir), freshness-guarded by
+  the launch's known start so a reused-pid record can't cross sessions. Source:
+  `apps/cli/src/lib/session/hook-sessions.ts`, `apps/cli/src/lib/session/active.ts`.
+
 - **Releases publish the CI-tested tree, not a drifted merge.** On a busy default
   branch, unrelated PRs merging during a release PR's CI window made the
   squash-merge tree diverge from what CI actually tested, so `release.sh` refused

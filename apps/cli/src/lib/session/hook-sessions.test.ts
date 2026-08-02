@@ -1,8 +1,8 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
-import { getTerminalsDir } from '../state.js';
-import { loadHookSessionIndex, resolveHookSessionId, resolveHookSessionRecord } from './hook-sessions.js';
+import { getTerminalsDir, getRuntimeStateDir } from '../state.js';
+import { loadHookSessionIndex, resolveHookSessionId, resolveHookSessionRecord, readStateSessionRecord } from './hook-sessions.js';
 
 // Fake pids far above any real process, so the test never reads or clobbers a
 // live hook state file.
@@ -95,5 +95,55 @@ describe('hook session index + resolver', () => {
     writeRecord(P1, { agent: 'codex', pid: P1, launch_id: 'L-empty', ts: 1 });
     const idx = loadHookSessionIndex();
     expect(resolveHookSessionId(idx, { pid: P1, kind: 'codex', launchId: 'L-empty' })).toBeUndefined();
+  });
+});
+
+// RUSH-2007 Layer A: the DEPLOYED hook writes state/sessions/<pid>.json (a distinct
+// path from the un-deployed session-tracker's terminals/sessions/ above). This is the
+// targeted per-pid reader that surfaces non-Claude ids from the real fleet source.
+const STATE_SESSIONS_DIR = path.join(getRuntimeStateDir(), 'sessions');
+const SP = 999_200_001; // fake pid, far above any real process
+
+function writeStateRecord(pid: number, rec: Record<string, unknown>): void {
+  fs.mkdirSync(STATE_SESSIONS_DIR, { recursive: true });
+  fs.writeFileSync(path.join(STATE_SESSIONS_DIR, `${pid}.json`), JSON.stringify(rec), 'utf8');
+}
+
+describe('readStateSessionRecord (deployed hook, state/sessions/<pid>.json)', () => {
+  afterEach(() => {
+    try { fs.unlinkSync(path.join(STATE_SESSIONS_DIR, `${SP}.json`)); } catch { /* absent */ }
+  });
+
+  it('reads the deployed hook record for a specific pid (the real fleet id source)', () => {
+    // ts is Unix SECONDS, as the hook stamps it (`date +%s`).
+    writeStateRecord(SP, { session_id: '33109c18-real', cwd: '/x', pid: SP, ts: 1785640088 });
+    expect(readStateSessionRecord(SP)?.session_id).toBe('33109c18-real');
+  });
+
+  it('returns undefined when no record exists for the pid (the common miss — no dir scan)', () => {
+    expect(readStateSessionRecord(SP)).toBeUndefined();
+  });
+
+  it('freshness guard: rejects a record whose ts predates the live process start (reused pid)', () => {
+    // Record written at ts=1000s (=1_000_000ms) by a DEAD predecessor; the live
+    // process at this reused pid started at 5_000_000ms — the stale id must not cross.
+    writeStateRecord(SP, { session_id: 'stale-predecessor', pid: SP, ts: 1000 });
+    expect(readStateSessionRecord(SP, 5_000_000)).toBeUndefined();
+  });
+
+  it('freshness guard: accepts a record written after the process start (within skew)', () => {
+    // Process started at 1_000_000ms; hook stamped ts=1000s (=1_000_000ms) just after.
+    writeStateRecord(SP, { session_id: 'fresh-current', pid: SP, ts: 1000 });
+    expect(readStateSessionRecord(SP, 1_000_000)?.session_id).toBe('fresh-current');
+  });
+
+  it('is best-effort without a start time: returns the record when startedAtMs is unknown', () => {
+    writeStateRecord(SP, { session_id: 'no-anchor', pid: SP, ts: 1 });
+    expect(readStateSessionRecord(SP)?.session_id).toBe('no-anchor');
+  });
+
+  it('ignores a record missing session_id', () => {
+    writeStateRecord(SP, { cwd: '/x', pid: SP, ts: 1785640088 });
+    expect(readStateSessionRecord(SP)).toBeUndefined();
   });
 });

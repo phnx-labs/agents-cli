@@ -1,13 +1,18 @@
 /**
  * Read-only view of the SessionStart hook's live-session state files.
  *
- * The `@agents/session-tracker` hook (installed into each agent's own config)
- * writes `~/.agents/.cache/terminals/sessions/<pid>.json` AFTER an agent boots,
- * carrying the agent's OWN authoritative session id (from its SessionStart
- * payload) plus the join keys `launch_id` / `terminal_id`. It is the only writer
- * that sees agents `ag run` did NOT launch (you typing `claude` in a terminal),
- * and the only source of an exact id for non-Claude agents (whose id we can't
- * know at spawn).
+ * Two on-disk sources carry a non-Claude agent's authoritative id (whose id we
+ * can't know at spawn), both read here:
+ *   1. The `@agents/session-tracker` hook writes
+ *      `~/.agents/.cache/terminals/sessions/<pid>.json` with the id plus the join
+ *      keys `launch_id` / `terminal_id`. Rich schema, but this package is NOT
+ *      deployed on the fleet — its dir is empty there. Scanned into the index by
+ *      {@link loadHookSessionIndex}.
+ *   2. The ACTUALLY-DEPLOYED SessionStart hook writes
+ *      `~/.agents/.cache/state/sessions/<pid>.json` ({@link readStateSessionRecord})
+ *      — `{session_id,cwd,pid,ts}`, keyed purely by pid. This is the real fleet id
+ *      source for every agent; read targeted per-pid, never scanned (RUSH-2007).
+ * Both see agents `ag run` did NOT launch (you typing `claude` in a terminal).
  *
  * This module lets `sessions --active` reconcile a `ps`-discovered pid to that
  * authoritative id. It is deliberately a small hand-rolled reader — the CLI does
@@ -23,7 +28,7 @@
  */
 import fs from 'fs';
 import path from 'path';
-import { getTerminalsDir } from '../state.js';
+import { getTerminalsDir, getRuntimeStateDir } from '../state.js';
 
 /** The subset of the hook's on-disk record this reader relies on. Extra fields are ignored. */
 export interface HookSessionRecord {
@@ -47,6 +52,51 @@ function hookSessionsDir(): string {
   // Sibling of the pid-registry's by-pid/ dir. The hook hardcodes this same path
   // (packages/session-tracker/src/hook.sh); we read it, never move it.
   return path.join(getTerminalsDir(), 'sessions');
+}
+
+/**
+ * The path the ACTUALLY-DEPLOYED SessionStart hook writes:
+ * `~/.agents/.cache/state/sessions/<pid>.json`, carrying `{session_id,cwd,pid,ts}`
+ * for EVERY agent (claude/codex/gemini/kimi/grok/antigravity). This is the fleet's
+ * real id source; the `terminals/sessions/` path above belongs to the separate
+ * `@agents/session-tracker` package, which is not deployed (its dir is empty on the
+ * fleet), so a non-Claude tmux session's id resolved ONLY through the index above
+ * never landed (RUSH-2007). These records are keyed purely by pid — no
+ * launch_id/terminal_id/agent — so they join only on pid. The dir is an unpruned
+ * graveyard (thousands of dead-pid files), so this is a TARGETED per-pid read on
+ * demand, never a full-dir scan folded into {@link loadHookSessionIndex}.
+ */
+function stateSessionRecordPath(pid: number): string {
+  return path.join(getRuntimeStateDir(), 'sessions', `${pid}.json`);
+}
+
+/**
+ * Read the deployed hook's record for one specific pid, or undefined if absent /
+ * corrupt / not fresh. `startedAtMs` (the live process's known start, when the
+ * caller has it) rejects a stale record left by a PRIOR process at a reused pid:
+ * the hook writes its record AFTER the agent boots, so a record whose `ts`
+ * predates the current process's start belongs to a dead predecessor. `ts` is
+ * Unix SECONDS (the hook stamps `date +%s`); `startedAtMs` is millis.
+ */
+export function readStateSessionRecord(
+  pid: number,
+  startedAtMs?: number,
+): HookSessionRecord | undefined {
+  if (!pid || pid < 1) return undefined;
+  let rec: HookSessionRecord | undefined;
+  try {
+    rec = parseRecord(fs.readFileSync(stateSessionRecordPath(pid), 'utf8'));
+  } catch {
+    return undefined; // absent (the common case) or unreadable
+  }
+  if (!rec) return undefined;
+  if (startedAtMs !== undefined && typeof rec.ts === 'number') {
+    // Allow a small skew: the hook fires just after exec, and ts is second-
+    // granular so it can floor to just before a sub-second process start.
+    const SKEW_MS = 5_000;
+    if (rec.ts * 1000 < startedAtMs - SKEW_MS) return undefined; // reused-pid graveyard record
+  }
+  return rec;
 }
 
 function parseRecord(raw: string): HookSessionRecord | undefined {
