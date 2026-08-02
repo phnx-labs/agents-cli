@@ -11,6 +11,8 @@ import {
   containsBroadGrants,
   convertDenyToCodexRules,
   convertToKimiFormat,
+  convertToCodexFormat,
+  codexDefaultWritableRoots,
   convertToDroidFormat,
   convertToHermesFormat,
   convertToOpenClawFormat,
@@ -338,6 +340,69 @@ describe('computer permission hints', () => {
     expect(hint).toContain('key');
     expect(COMPUTER_APP_GATED_VERBS).toContain('type-text');
     expect(COMPUTER_APP_GATED_VERBS).toContain('key');
+  });
+});
+
+describe('codex writable roots (build/test/install caches)', () => {
+  const HOME = '/home/u';
+
+  it('includes shared toolchain caches on every platform', () => {
+    for (const plat of ['darwin', 'linux'] as NodeJS.Platform[]) {
+      const roots = codexDefaultWritableRoots(HOME, plat);
+      for (const d of ['.cargo', '.rustup', '.npm', '.bun', 'go', '.deno', '.gradle', '.m2', '.gem']) {
+        expect(roots).toContain(path.join(HOME, d));
+      }
+    }
+  });
+
+  it('resolves the OS cache root per platform (Library/Caches on macOS, .cache on Linux)', () => {
+    const mac = codexDefaultWritableRoots(HOME, 'darwin');
+    expect(mac).toContain(path.join(HOME, 'Library', 'Caches'));
+    expect(mac).not.toContain(path.join(HOME, '.cache'));
+
+    const linux = codexDefaultWritableRoots(HOME, 'linux');
+    expect(linux).toContain(path.join(HOME, '.cache'));
+    expect(linux).toContain(path.join(HOME, '.local', 'share'));
+    expect(linux).not.toContain(path.join(HOME, 'Library', 'Caches'));
+  });
+
+  it('never grants credential dirs (keeps the sandbox meaningful, not YOLO)', () => {
+    for (const plat of ['darwin', 'linux'] as NodeJS.Platform[]) {
+      const roots = codexDefaultWritableRoots(HOME, plat);
+      for (const d of ['.ssh', '.aws', '.gnupg', '.config', '.netrc']) {
+        expect(roots).not.toContain(path.join(HOME, d));
+      }
+    }
+  });
+
+  it('convertToCodexFormat always emits the baseline writable_roots (even with no perms)', () => {
+    const codex = convertToCodexFormat({ name: 'empty', allow: [], deny: [] });
+    expect(codex.sandbox_workspace_write?.writable_roots).toEqual(codexDefaultWritableRoots());
+  });
+
+  it('keeps network_access alongside writable_roots when web perms are present', () => {
+    const codex = convertToCodexFormat({ name: 'net', allow: ['WebFetch(*)'], deny: [] });
+    expect(codex.sandbox_workspace_write?.network_access).toBe(true);
+    expect(codex.sandbox_workspace_write?.writable_roots).toContain(path.join(os.homedir(), '.cargo'));
+  });
+
+  it('unions the baseline with a writable_root the user configured directly (never clobbers)', () => {
+    const versionHome = makeTempHome();
+    const codexDir = path.join(versionHome, '.codex');
+    fs.mkdirSync(codexDir, { recursive: true });
+    // Pre-existing user config with a custom writable root.
+    fs.writeFileSync(
+      path.join(codexDir, 'config.toml'),
+      TOML.stringify({ sandbox_workspace_write: { writable_roots: ['/opt/custom'] } } as any),
+      'utf-8',
+    );
+    const res = applyPermissionsToVersion('codex', { name: 'x', allow: ['WebFetch'], deny: [] }, versionHome);
+    expect(res.success).toBe(true);
+    const written = TOML.parse(fs.readFileSync(path.join(codexDir, 'config.toml'), 'utf-8')) as any;
+    const roots: string[] = written.sandbox_workspace_write.writable_roots;
+    expect(roots).toContain('/opt/custom'); // user's root preserved
+    expect(roots).toContain(path.join(os.homedir(), '.cargo')); // baseline added
+    expect(new Set(roots).size).toBe(roots.length); // deduped
   });
 });
 

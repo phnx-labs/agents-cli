@@ -1109,6 +1109,55 @@ export function convertToOpenCodeFormat(set: PermissionSet): OpenCodePermissions
  * Convert canonical permission set to Codex format.
  * Codex uses coarse-grained modes, so we infer the best fit.
  */
+/**
+ * Default extra writable roots for Codex's `workspace-write` sandbox: the
+ * regenerable package/toolchain caches that build/test/install write OUTSIDE the
+ * workspace (cargo registry, npm/bun/pnpm caches, GOPATH/GOCACHE, the OS cache
+ * root, …). Without these, a sandboxed `cargo build` / `go build` / `npm install`
+ * fails on its cache write, which is what pushes users to `--mode full` (YOLO).
+ *
+ * Credential dirs (`~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config`, `~/.netrc`) are
+ * deliberately EXCLUDED so the sandbox stays meaningful — this is far from
+ * danger-full-access. Resolved per platform + home; each box regenerates its own
+ * Codex config on sync, so the paths always match the box Codex runs on.
+ */
+export function codexDefaultWritableRoots(
+  home: string = HOME,
+  platform: NodeJS.Platform = process.platform,
+): string[] {
+  const shared = ['.cargo', '.rustup', '.npm', '.bun', 'go', '.deno', '.gradle', '.m2', '.gem'];
+  const roots = shared.map((d) => path.join(home, d));
+  if (platform === 'darwin') {
+    roots.push(path.join(home, 'Library', 'Caches'), path.join(home, 'Library', 'pnpm'));
+  } else {
+    // Linux/XDG: ~/.cache covers pip, uv, go-build, ms-playwright, etc.
+    roots.push(path.join(home, '.cache'), path.join(home, '.local', 'share'), path.join(home, '.local', 'state'));
+  }
+  return roots;
+}
+
+/**
+ * Merge Codex `[sandbox_workspace_write]` config, UNIONing `writable_roots` so a
+ * baseline cache root never clobbers a root the user configured directly (a
+ * plain object spread would overwrite the whole array), while merging scalar
+ * keys (`network_access`) normally. Shared by the user- and version-scoped Codex
+ * config writers so the two can't drift.
+ */
+export function mergeCodexSandboxWrite(
+  existing: Record<string, unknown> | undefined,
+  incoming: NonNullable<CodexPermissions['sandbox_workspace_write']>,
+): Record<string, unknown> {
+  const existingRoots = Array.isArray(existing?.writable_roots)
+    ? (existing!.writable_roots as string[])
+    : [];
+  const unionRoots = [...new Set([...existingRoots, ...(incoming.writable_roots ?? [])])];
+  return {
+    ...existing,
+    ...incoming,
+    ...(unionRoots.length > 0 ? { writable_roots: unionRoots } : {}),
+  };
+}
+
 export function convertToCodexFormat(set: PermissionSet, cwd?: string): CodexPermissions {
   const result: CodexPermissions = {};
 
@@ -1142,6 +1191,16 @@ export function convertToCodexFormat(set: PermissionSet, cwd?: string): CodexPer
       network_access: true,
     };
   }
+
+  // Baseline (unconditional): always grant the regenerable build/test/install
+  // caches as writable roots so `agents run codex` in workspace-write can build,
+  // test, and install without escalating to danger-full-access. Merged with
+  // network_access above when set; applyCodexPermissions unions these with any
+  // writable_roots the user configured directly.
+  result.sandbox_workspace_write = {
+    ...result.sandbox_workspace_write,
+    writable_roots: codexDefaultWritableRoots(),
+  };
 
   return result;
 }
@@ -1499,7 +1558,7 @@ function applyCodexPermissions(
     if (newPermissions.sandbox_workspace_write) {
       const existing = config.sandbox_workspace_write as Record<string, unknown> | undefined;
       config.sandbox_workspace_write = merge
-        ? { ...existing, ...newPermissions.sandbox_workspace_write }
+        ? mergeCodexSandboxWrite(existing, newPermissions.sandbox_workspace_write)
         : newPermissions.sandbox_workspace_write;
     }
 
@@ -1643,7 +1702,7 @@ export function applyPermissionsToVersion(
       if (newPermissions.sandbox_workspace_write) {
         const existing = config.sandbox_workspace_write as Record<string, unknown> | undefined;
         config.sandbox_workspace_write = merge
-          ? { ...existing, ...newPermissions.sandbox_workspace_write }
+          ? mergeCodexSandboxWrite(existing, newPermissions.sandbox_workspace_write)
           : newPermissions.sandbox_workspace_write;
       }
 

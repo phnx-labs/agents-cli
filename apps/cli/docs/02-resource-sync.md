@@ -214,8 +214,15 @@ Per-agent conversion is lossy in both directions:
   dropped.
 - Codex (>= 0.138.0) writes `approval_policy` and `sandbox_mode` to
   `.codex/config.toml`, plus `sandbox_workspace_write.network_access=true` when
-  web tools are allowed. Deny rules are emitted as Starlark to a generated
-  `agents-deny.rules` file (`permissions.ts:38-56`).
+  web tools are allowed. It also writes a platform-resolved baseline of
+  `sandbox_workspace_write.writable_roots` — the regenerable toolchain caches
+  (`~/.cargo`, `~/.npm`, `~/go`, `~/.cache` / `~/Library/Caches`, …) so a
+  `workspace-write` run can build/test/install without escalating to
+  danger-full-access; credential dirs (`~/.ssh`, `~/.aws`, `~/.config`) are
+  excluded, and any roots the user set are unioned in, not clobbered
+  (`permissions.ts`: `codexDefaultWritableRoots`, `mergeCodexSandboxWrite`).
+  Deny rules are emitted as Starlark to a generated `agents-deny.rules` file
+  (`permissions.ts:38-56`).
 - Kiro 2.8.0+ maps canonical shell, filesystem, and web rules into v3
   capability rules under `.kiro/settings/permissions.yaml`. Existing user
   rules are preserved when managed rules are merged.
