@@ -45,6 +45,14 @@ describe('validateProjectDef', () => {
     expect(() => validateProjectDef('nope')).toThrow(/mapping/);
   });
 
+  it('throws when the in-file name disagrees with the filename', () => {
+    // The filename is the stable id — a def that names itself otherwise would
+    // resolve under one name and list under another.
+    expect(() => validateProjectDef({ name: 'other' }, 'rush')).toThrow(/must match the filename/);
+    expect(validateProjectDef({ name: 'rush' }, 'rush').name).toBe('rush');
+    expect(validateProjectDef({ root: '~/x' }, 'rush').name).toBe('rush'); // no name field → filename wins
+  });
+
   it('keeps well-formed nested fields and drops malformed list entries', () => {
     const def = validateProjectDef({
       name: 'rush',

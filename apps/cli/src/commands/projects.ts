@@ -65,6 +65,11 @@ function statusBar(r: ProjectSessionRollup): string {
   push(r.byStatus.idle, 'idle', chalk.gray);
   push(r.byStatus.input_required, 'need-input', chalk.yellow);
   push(r.byStatus.queued, 'queued', chalk.gray);
+  const shown =
+    (r.byStatus.running ?? 0) + (r.byStatus.idle ?? 0) + (r.byStatus.input_required ?? 0) + (r.byStatus.queued ?? 0);
+  // Sessions in a non-live state (orphaned/crashed/unknown) count toward the
+  // headline — render the remainder so the bar never sums to less than it.
+  if (r.agents > shown) parts.push(chalk.gray(`+${r.agents - shown} other`));
   return parts.join(' · ') || chalk.gray('no live agents');
 }
 
@@ -247,7 +252,9 @@ export function registerProjectsCommands(program: Command): void {
         process.exit(1);
       }
       const editor = process.env.VISUAL || process.env.EDITOR || 'vi';
-      const res = spawnSync(editor, [target], { stdio: 'inherit' });
+      // $EDITOR commonly carries args ("code --wait") — split like monitors/routines do.
+      const parts = editor.split(/\s+/).filter(Boolean);
+      const res = spawnSync(parts[0], [...parts.slice(1), target], { stdio: 'inherit' });
       process.exit(res.status ?? 0);
     });
 
@@ -260,7 +267,9 @@ export function registerProjectsCommands(program: Command): void {
     .option('--no-remote', 'Skip the GitHub lookup (merged-PR count); faster, offline')
     .action(async (name: string | undefined, opts: { json?: boolean; window?: string; remote?: boolean }) => {
       const all = listProjectDefs();
-      const defs = name ? all.filter((d) => d.name === name) : all;
+      // Named lookup goes through the strict single-def loader so a broken
+      // <name>.yaml surfaces its validation error instead of "No project named".
+      const defs = name ? [loadProjectDef(name)].filter((d): d is ProjectDef => d !== undefined) : all;
       if (name && !defs.length) {
         console.error(chalk.red(`No project named "${name}".`));
         process.exit(1);
@@ -321,11 +330,18 @@ export function registerProjectsCommands(program: Command): void {
     .option('--force', 'Overwrite existing definitions')
     .action((opts: { force?: boolean }) => {
       const src = factoryProjectsPath();
-      let rows: unknown;
+      let rawText: string;
       try {
-        rows = JSON.parse(fs.readFileSync(src, 'utf8'));
+        rawText = fs.readFileSync(src, 'utf8');
       } catch {
         console.error(chalk.red(`No Factory registry at ${src}`));
+        process.exit(1);
+      }
+      let rows: unknown;
+      try {
+        rows = JSON.parse(rawText);
+      } catch {
+        console.error(chalk.red(`Factory registry at ${src} is not valid JSON`));
         process.exit(1);
       }
       const list = Array.isArray(rows) ? rows : Array.isArray((rows as { projects?: unknown[] }).projects) ? (rows as { projects: unknown[] }).projects : [];

@@ -99,8 +99,9 @@ export function projectDefPath(name: string): string {
 
 /**
  * Validate a raw parsed object into a `ProjectDef`, throwing an actionable error
- * on the first problem. Fail loud at the boundary — a malformed definition is a
- * bug to surface, never a silent partial load.
+ * on the first problem. A malformed document or identity (bad/mismatched name)
+ * throws; malformed entries inside the optional lists (`repos`/`contexts`/
+ * `integrations`) are dropped so one bad row can't sink an otherwise good def.
  */
 export function validateProjectDef(raw: unknown, sourceName?: string): ProjectDef {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
@@ -121,6 +122,11 @@ export function validateProjectDef(raw: unknown, sourceName?: string): ProjectDe
   }
   if (!name || !isSafeProjectName(name)) {
     throw new Error('Project definition is missing a valid "name"');
+  }
+  // The filename IS the stable id — a def whose `name:` disagrees with its
+  // filename would resolve under one name and list under another.
+  if (hasNameField && sourceName && name !== sourceName) {
+    throw new Error(`Project ${sourceName}: "name" (${JSON.stringify(name)}) must match the filename — the filename is the stable id`);
   }
 
   const def: ProjectDef = { name };

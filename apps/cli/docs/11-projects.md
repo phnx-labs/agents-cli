@@ -35,7 +35,9 @@ contexts:                       # described starting points — an agent reads `
   - path: packages/api
     purpose: "FastAPI backend; Supabase models live here"
 integrations:                   # external context, surfaced in `projects show`
-  - kind: gdrive  url: https://drive.google.com/…  label: "design docs"
+  - kind: gdrive
+    url: https://drive.google.com/…
+    label: "design docs"
 linear:
   projectId: a1b2c3d4-…
 ```
@@ -57,6 +59,11 @@ linear:
 `root`); a `@worktree` suffix lands under the repo root's `.agents/worktrees/`. An
 **undefined** slug falls through to the unchanged convention. Home-relative paths mean
 `--project rush --host <box>` re-roots on the remote's home automatically.
+
+Resolution is intentionally **not** beta-gated — only the `agents projects` command
+tree is. A definition exists solely by explicit user action (`projects add`,
+`import --from-factory`, or hand-authoring the YAML), so honoring it in `--project`
+resolution is additive and safe; users without any definitions see zero change.
 
 ## The progress card — `agents projects status`
 
@@ -80,7 +87,8 @@ rush  ·  23 agents  ·  68% plan
 - **`live`, `plan`, open PRs, `tickets`, `worktrees`** come straight from the active
   session list (`rollupSessionsByProject`) — no network.
 - **`ships` merged-count** is a best-effort `gh pr list` on the primary repo
-  (`--no-remote` skips it; a missing `gh`/auth degrades to 0).
+  (`--no-remote` skips it; a missing `gh`/auth degrades to 0). It counts up to the
+  100 most recent merges within the window.
 - **`proof`** counts `artifact.created` activity milestones whose cwd is inside the
   project (`lib/project-status.ts`).
 - `--window <days>` sets the merged-PR / artifact window (default 7).
