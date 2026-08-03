@@ -349,6 +349,27 @@ describe('commitAndPush (clean-but-ahead + dirty)', () => {
     await simpleGit().clone(remote, verify);
     expect(fs.readFileSync(path.join(verify, 'safe-push.txt'), 'utf8')).toBe('ok\n');
   });
+
+  // #1061: `agents publish --branch dev` must land the index on `dev`, not on
+  // the checked-out `main`. commitAndPush(local, msg, 'dev') pushes to origin/dev
+  // and reports branch: 'dev' so the printed raw URL references where it landed.
+  it('pushes to a named target branch, not the checked-out one', async () => {
+    fs.writeFileSync(path.join(local, 'skills-index.json'), '{"skills":[]}\n');
+    const res = await commitAndPush(local, 'publish index', 'dev');
+    expect(res.success).toBe(true);
+    expect(res.pushed).toBe(true);
+    expect(res.branch).toBe('dev');
+
+    // origin/dev carries the index...
+    const onDev = path.join(root, 'verify-dev');
+    await simpleGit().clone(remote, onDev, ['--branch', 'dev']);
+    expect(fs.existsSync(path.join(onDev, 'skills-index.json'))).toBe(true);
+
+    // ...and origin/main does NOT (the bug: index landed on main regardless).
+    const onMain = path.join(root, 'verify-main');
+    await simpleGit().clone(remote, onMain, ['--branch', 'main']);
+    expect(fs.existsSync(path.join(onMain, 'skills-index.json'))).toBe(false);
+  });
 });
 
 describe('pullRepo reconciliation', () => {

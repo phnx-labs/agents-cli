@@ -93,9 +93,22 @@ export function assertValidBranchName(branch: string): void {
  *
  * Prefer this over `git.push(remote, branch)` whenever the branch comes from
  * repo state rather than a hard-coded literal.
+ *
+ * Pass `targetBranch` to push the local `branch` to a differently-named remote
+ * branch (`git push origin <branch>:<targetBranch>`) — used when publishing the
+ * working tree to a branch other than the checked-out one.
  */
-export async function pushOrigin(git: SimpleGit, branch: string): Promise<void> {
+export async function pushOrigin(
+  git: SimpleGit,
+  branch: string,
+  targetBranch?: string,
+): Promise<void> {
   assertValidBranchName(branch);
+  if (targetBranch && targetBranch !== branch) {
+    assertValidBranchName(targetBranch);
+    await git.raw(['push', '--', 'origin', `${branch}:${targetBranch}`]);
+    return;
+  }
   await git.raw(['push', '--', 'origin', branch]);
 }
 
@@ -513,6 +526,16 @@ export async function getRemoteUrl(repoPath: string): Promise<string | null> {
   }
 }
 
+/** The repo's checked-out branch, or 'main' on a detached HEAD / read failure. */
+export async function getCurrentBranch(repoPath: string): Promise<string> {
+  try {
+    const status = await simpleGit(repoPath).status();
+    return status.current || 'main';
+  } catch {
+    return 'main';
+  }
+}
+
 /**
  * Canonical `host/owner/repo` form of a git remote, transport-agnostic, so the
  * same repo cloned over SSH vs HTTPS compares equal. Strips protocol, any
@@ -585,13 +608,26 @@ export type CommitAndPushResult = {
  * Clean tree + local ahead of origin still pushes — "nothing to commit" is not
  * "nothing to push". Reports "already up to date" only when `ahead === 0` and
  * there is nothing to commit.
+ *
+ * `targetBranch` pushes the working tree to a differently-named remote branch
+ * (`<current>:<targetBranch>`) and is reported back as the result `branch`, so
+ * callers that print a branch-scoped URL reference where the commit actually
+ * landed — not the checked-out branch.
  */
-export async function commitAndPush(repoPath: string, message: string): Promise<CommitAndPushResult> {
+export async function commitAndPush(
+  repoPath: string,
+  message: string,
+  targetBranch?: string,
+): Promise<CommitAndPushResult> {
   try {
     const git = simpleGit(repoPath);
     let status = await git.status();
     const branch = status.current || 'main';
     assertValidBranchName(branch);
+    if (targetBranch) assertValidBranchName(targetBranch);
+    // The branch the commit ends up on remotely — the checked-out branch unless
+    // an explicit target was requested.
+    const pushedBranch = targetBranch || branch;
 
     let committed = false;
     if (status.files.length > 0) {
@@ -602,7 +638,10 @@ export async function commitAndPush(repoPath: string, message: string): Promise<
     }
 
     const ahead = status.ahead ?? 0;
-    if (!committed && ahead === 0) {
+    // A same-branch push short-circuits when there is nothing new; a push to a
+    // different target branch must still run even from a clean, non-ahead tree,
+    // since the target may not carry these commits yet.
+    if (!committed && ahead === 0 && pushedBranch === branch) {
       return {
         success: true,
         detail: 'already up to date',
@@ -615,12 +654,12 @@ export async function commitAndPush(repoPath: string, message: string): Promise<
     // Capture remote tip before push for a real ref range in the detail string.
     let before = '';
     try {
-      before = (await git.raw(['rev-parse', '--short=8', `origin/${branch}`])).trim();
+      before = (await git.raw(['rev-parse', '--short=8', `origin/${pushedBranch}`])).trim();
     } catch {
       /* origin/<branch> may not exist yet (first push) */
     }
 
-    await pushOrigin(git, branch);
+    await pushOrigin(git, branch, targetBranch);
 
     let after = '';
     try {
@@ -644,7 +683,7 @@ export async function commitAndPush(repoPath: string, message: string): Promise<
     return {
       success: true,
       detail,
-      branch,
+      branch: pushedBranch,
       committed,
       pushed: true,
     };
