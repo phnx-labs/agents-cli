@@ -954,6 +954,8 @@ agents routines run <name>            # Run immediately in foreground
 agents routines run <name> --host yosemite-s0  # Run on a specific remote device
 agents routines view <name>           # Show job config
 agents routines runs <name>           # View execution history (last 10)
+agents routines stats                 # Run count/failed/missed/avg/p50/p95 duration, every job
+agents routines stats <name>          # Same rollup, scoped to one job
 agents routines logs <name>           # Show concise summary from latest run
 agents routines logs <name> --run <id>  # Show specific run
 agents routines logs <name> --full    # Show raw stdout from latest run

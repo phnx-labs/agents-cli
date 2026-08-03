@@ -872,6 +872,7 @@ agents routines add daily-digest \
 agents routines list                   # All jobs + next run times
 agents routines run daily-digest       # Test it now, ignore the schedule
 agents routines logs daily-digest      # Last execution — status + report (add --full for raw stdout)
+agents routines stats                  # Run count, failed, missed, avg/p50/p95 duration — per job or all
 
 # Routines sync to every device; restrict to an allowlist with --devices
 agents routines add nightly-drain --schedule "0 3 * * *" --agent claude \

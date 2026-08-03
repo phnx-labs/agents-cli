@@ -85,21 +85,41 @@ Latency samples for optimization — **not** the audit log. Implementation:
 `apps/cli/src/lib/perf/db.ts`, CLI: `apps/cli/src/commands/perf.ts`.
 
 ```
-agents perf                     # summary: commands + hooks + runs
-agents perf hooks               # same as agents hooks profile (SQLite-first)
-agents perf commands --days 30  # slowest CLI entrypoints
-agents perf run --json          # agent.run / perf.timing labels
+agents perf                              # summary: commands + hooks + runs
+agents perf hooks                        # same as agents hooks profile (SQLite-first)
+agents perf commands --days 30           # slowest CLI entrypoints
+agents perf run --json                   # agent.run / perf.timing labels
+agents perf hooks --project agents-cli   # scope to one repo's samples
+agents perf friction                     # sessions stuck retrying the same guard block
 ```
 
 | Producer | Kind | How it lands |
 |---|---|---|
 | CLI `postAction` | `command.end` | Direct `recordSample` (skips the `perf` command itself) |
-| `createTimer` / `time` / `timeAsync` / `withTiming` | `perf.timing` | Best-effort from `events.ts` |
-| Hook cache/matches shims | `hook.fire` | NDJSON spool → drained into SQLite on open |
+| `createTimer` / `time` / `timeAsync` / `withTiming` | `perf.timing` | Best-effort from `events.ts`; also covers routine fires (`agent.run`) |
+| Every hook | `hook.fire` | Generated shim → NDJSON spool → drained into SQLite on open. `cache:`, `matches:`, or a bare `matcher:` are each enough to opt a hook into a shim — git-guard/rm-guard/git-require-clean-tree (matcher-only) are instrumented like any other hook |
+
+Every row carries `p50Ms`/`p95Ms`/`p99Ms`, and — when the underlying samples
+have them — `errorRate`/`timeoutRate` (fractions 0-1, from a nonzero exit code
+or a `status:'timeout'` sample). `--project <key>` scopes any subcommand to one
+repository: it resolves each sample's recorded `cwd` to a project key
+(`lib/project-key.ts` — a worktree cwd folds to the repo it branched from) and
+filters to samples matching the given key.
+
+`agents perf friction` reads a different sink: the `friction` event kind
+(`emitFriction` in `events.ts`, fed by `agents _internal friction` — the
+hidden command guard hooks self-report a block through before they exit 2,
+since they run before any `agents` process exists to emit in-process). It
+groups by (session, surface, failureId) and flags a session that hits the
+*same* guard block 3+ times — an agent retrying the identical denied action
+instead of adapting.
 
 **Disable:** `AGENTS_DISABLE_PERF=1`. **Redirect (tests):** `AGENTS_PERF_DB`,
-`AGENTS_PERF_SPOOL`. Retention: samples older than 30 days are pruned
-opportunistically on open. Wipe anytime: `rm -rf ~/.agents/.cache/perf`.
+`AGENTS_PERF_SPOOL`, `AGENTS_PERF_DIR` (also covers the hook shim's own
+timing/perf writes), plus `AGENTS_HOOK_SHIMS_DIR` / `AGENTS_HOOK_CACHE_DIR` /
+`AGENTS_LOGS_DIR` for the shim-generation side. Retention: samples older than
+30 days are pruned opportunistically on open. Wipe anytime:
+`rm -rf ~/.agents/.cache/perf`.
 
 ## Audit Event Log (`agents events`)
 
