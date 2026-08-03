@@ -26,6 +26,9 @@ import { setHelpSections } from '../lib/help.js';
 import { parseDuration } from '../lib/hooks/cache.js';
 import { getRuntimeStateDir } from '../lib/state.js';
 import { setJobEnabled } from '../lib/routines.js';
+import { getActiveSessions, type ActiveSession } from '../lib/session/active.js';
+import { mailboxIdForActiveSession } from '../lib/mailbox-target.js';
+import { gcMailbox } from '../lib/mailbox-gc.js';
 import {
   ensureWatchdogRoutine,
   isWatchdogRoutineEnabled,
@@ -73,6 +76,23 @@ function humanMs(ms: number): string {
   if (ms >= 3600_000) return `${Math.round(ms / 3600_000)}h`;
   if (ms >= 60_000) return `${Math.round(ms / 60_000)}m`;
   return `${Math.round(ms / 1000)}s`;
+}
+
+/**
+ * Run the mailbox liveness sweep against the same session set the tick just used.
+ * Idempotent and cheap: archiving a message twice is a no-op, and GC only scans
+ * directories. Failures are swallowed so a mailbox-root problem cannot break the
+ * watchdog tick.
+ */
+async function runMailboxGc(sessions: ActiveSession[]): Promise<void> {
+  const activeBoxIds = new Set(
+    sessions.map(mailboxIdForActiveSession).filter((id): id is string => !!id),
+  );
+  try {
+    gcMailbox(activeBoxIds);
+  } catch {
+    // GC is best-effort housekeeping; the next tick will retry.
+  }
 }
 
 function colorForOutcome(o: SessionOutcome): (s: string) => string {
@@ -139,7 +159,7 @@ export function registerWatchdogCommand(program: Command): void {
       // routine's enabled state IS the on/off switch, not a flag read here.
       const computeWillInject = (): boolean => opts.nudge === true;
 
-      const tickOnce = async (willInject: boolean): Promise<WatchdogTickResult> =>
+      const tickOnce = async (willInject: boolean, sessions: ActiveSession[]): Promise<WatchdogTickResult> =>
         runWatchdogTick({
           nudge: willInject,
           nudgeText: opts.text,
@@ -148,11 +168,14 @@ export function registerWatchdogCommand(program: Command): void {
           thresholds,
           allowGhosttyFocus: opts.allowGhosttyFocus === true,
           stateDir: stateDir(),
+          sessions,
         });
 
       if (!opts.watch) {
         const willInject = computeWillInject();
-        const result = await tickOnce(willInject);
+        const sessions = await getActiveSessions();
+        const result = await tickOnce(willInject, sessions);
+        await runMailboxGc(sessions);
         if (opts.json) console.log(JSON.stringify(result, null, 2));
         else printTick(result, willInject);
         return;
@@ -170,7 +193,9 @@ export function registerWatchdogCommand(program: Command): void {
       while (true) {
         // Re-evaluated each tick: picks up enable/disable flips mid-run.
         const willInject = computeWillInject();
-        const result = await tickOnce(willInject);
+        const sessions = await getActiveSessions();
+        const result = await tickOnce(willInject, sessions);
+        await runMailboxGc(sessions);
         if (opts.json) console.log(JSON.stringify(result));
         else printTick(result, willInject);
         await sleep(intervalMs);

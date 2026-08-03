@@ -196,7 +196,6 @@ import {
   loadUninstall,
   loadShare,
   loadSend,
-  loadHq,
   loadFeed,
   loadActivity,
   loadMailboxes,
@@ -208,6 +207,7 @@ import type { AgentId } from './lib/types.js';
 import { IS_WINDOWS } from './lib/platform/index.js';
 import { getCliLaunch } from './lib/cli-entry.js';
 import { emit, emitFriction, redactArgs } from './lib/events.js';
+import { die } from './lib/format.js';
 
 // Transparent shim delegate: the generated Windows `.cmd` shims invoke
 // `agents __shim <agent>[@version] <raw args>`. Intercept here, before commander
@@ -397,7 +397,6 @@ Run and dispatch:
   run <agent|profile> [prompt]    Run an agent. Omit prompt for interactive mode.
   defaults                        Configure run defaults by agent/version selector
   teams                           Coordinate multiple agents on shared work
-  hq                              JSON bridge for the interactive Agents HQ floor
   routines                        Run agents on a cron schedule (scheduler auto-starts)
   webhook                         Receive signed GitHub/Linear webhooks for trigger routines
   funnel                          Expose a webhook receiver through Tailscale Funnel
@@ -871,6 +870,22 @@ function registerResourcesTombstoneCommand(p: Command): void {
 }
 
 /**
+ * Removed `hq` command — the JSON bridge for the interactive Agents HQ floor
+ * (`agents hq floor --json`). No UI ever consumed it (apps/factory has zero
+ * references) and it had no external users, so it is gone with no replacement.
+ * Kept as a hidden tombstone so a stale invocation gets a clear message and a
+ * non-zero exit instead of commander's raw "unknown command".
+ */
+function registerHqTombstoneCommand(p: Command): void {
+  p.command('hq', { hidden: true })
+    .allowUnknownOption()
+    .allowExcessArguments()
+    .action(() => {
+      die('"agents hq" was removed (internal Agents HQ floor bridge, no longer used).');
+    });
+}
+
+/**
  * Hidden `agents _internal <sub>` namespace for machine-to-machine calls that
  * are not user-facing. The first subcommand is `friction`, used by shell guard
  * hooks (git-guard, rm-guard, …) to self-report a block into the event log
@@ -995,6 +1010,9 @@ async function registerEagerForRequest(name: string): Promise<boolean> {
       registerResourcesTombstoneCommand(program);
       await reg(loadView);
       return true;
+    case 'hq':
+      registerHqTombstoneCommand(program);
+      return true;
     case '_internal':
       registerInternalCommand(program);
       return true;
@@ -1087,7 +1105,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadAudit);
   await reg(loadWebhook);
   await reg(loadFunnel);
-  await reg(loadHq);
+  registerHqTombstoneCommand(program);
   await reg(loadFeed);
   await reg(loadActivity);
   await reg(loadMailboxes);

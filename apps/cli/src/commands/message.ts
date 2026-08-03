@@ -20,6 +20,7 @@ import type { Command } from 'commander';
 import chalk from 'chalk';
 import { spawn } from 'child_process';
 import { die } from '../lib/format.js';
+import { parseDuration } from '../lib/hooks/cache.js';
 import { getActiveSessions, type ActiveSession } from '../lib/session/active.js';
 import { getTaskById, updateTaskStatus } from '../lib/cloud/store.js';
 import { resolveProvider } from '../lib/cloud/registry.js';
@@ -86,13 +87,14 @@ async function deliverViaMailbox(
   mailboxId: string,
   text: string,
   block: OpenBlock | undefined,
-  opts: { from?: string },
+  opts: { from?: string; ttlSeconds?: number },
 ): Promise<void> {
   const msgId = enqueue(mailboxDir(mailboxId), {
     to: mailboxId,
     text,
     from: opts.from,
     blockId: block?.blockId,
+    ttlSeconds: opts.ttlSeconds,
   });
   if (block) {
     recordMessageReceipt(block.blockId, {
@@ -166,9 +168,18 @@ export function registerMessageCommand(program: Command): void {
     .option('--from <who>', 'Label recorded as the sender of this message')
     .option('--as <operator>', 'Verified operator id answering a high-consequence block')
     .option('--surface <surface>', 'Surface that is sending this answer (feed, terminal, etc.)', 'cli')
-    .action(async (target: string, text: string, opts: { from?: string; as?: string; surface?: string }) => {
+    .option('--ttl <dur>', 'Delivery TTL if the message is not consumed (e.g. 30m, 1h, 24h); 0 disables expiry')
+    .action(async (target: string, text: string, opts: { from?: string; as?: string; surface?: string; ttl?: string }) => {
       if (!target.trim()) {
         die('Target must be a session/agent id or cloud task id. Run `agents sessions --active` to list running agents.');
+      }
+      let ttlSeconds: number | undefined;
+      if (opts.ttl !== undefined) {
+        const parsed = parseDuration(opts.ttl);
+        if (parsed == null) {
+          die(`Invalid --ttl ${JSON.stringify(opts.ttl)}: expected a duration like 30m, 1h, 24h, or 0.`);
+        }
+        ttlSeconds = parsed;
       }
       const sessions = await getActiveSessions();
       const res = resolveMessageTarget(target, sessions, (id) => getTaskById(id) != null);
@@ -205,7 +216,7 @@ export function registerMessageCommand(program: Command): void {
             claimBlockAnswer(block, opts);
 
             if (route.kind === 'mailbox') {
-              await deliverViaMailbox(res.id, text, block, opts);
+              await deliverViaMailbox(res.id, text, block, { from: opts.from, ttlSeconds });
               return;
             }
             if (route.kind === 'tmux' || route.kind === 'iterm' || route.kind === 'pty') {

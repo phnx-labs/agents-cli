@@ -30,6 +30,7 @@ import * as os from 'os';
 import { spawnSync } from 'child_process';
 import { randomUUID } from 'crypto';
 import { isSessionTrackedAgent } from '../lib/session/types.js';
+import { applyActiveRulesPresetAtRun } from '../lib/rules/run-sync.js';
 
 interface ExecCommandActionOptions {
   mode: ExecMode;
@@ -2308,6 +2309,19 @@ export function registerRunCommand(program: Command): void {
       }
 
       const defaultVersion = version ?? resolveVersion(agent, cwd);
+
+      // Re-apply the active rules preset before every launch (issue: preset
+      // changes via `setActiveRulesPreset` only took effect after an explicit
+      // `agents rules switch` / `agents sync`). Version-scoped, skip-fast when
+      // nothing changed — see lib/rules/run-sync.ts. Placed here (immediately
+      // after the resolved version is known, before ACP/loop/fallback branch
+      // off) so every downstream dispatch path for this agent+version sees a
+      // fresh rules file, not just the plain execAgent path. `defaultVersion`
+      // is null when nothing is installed yet — execAgent handles that error
+      // path itself; there's no version home to sync into.
+      if (defaultVersion) {
+        applyActiveRulesPresetAtRun(agent, defaultVersion, getVersionHomePath(agent, defaultVersion));
+      }
 
       // Login preflight (advisory, warn + continue). On a local INTERACTIVE
       // launch, probe whether this agent's account has a credential and print a

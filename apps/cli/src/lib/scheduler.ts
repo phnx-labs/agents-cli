@@ -17,6 +17,8 @@ import {
   setJobEnabled,
   shouldPurgeCompletedOneShotRoutine,
   jobRunsOnThisDevice,
+  hasAmbiguousDevicePin,
+  routineOwnerDevice,
 } from './routines.js';
 
 /** A job config paired with its active cron instance. */
@@ -40,7 +42,18 @@ export class JobScheduler {
       // Trigger-only jobs (no cron schedule) fire via the webhook receiver,
       // not the cron loop — skip them here. Jobs pinned to another device
       // (routines are fleet-synced) never enter this machine's cron loop.
-      if (!config.enabled || !config.schedule || !jobRunsOnThisDevice(config)) continue;
+      if (!config.enabled || !config.schedule) continue;
+      // A multi-device pin is a misconfiguration: it used to fire the routine
+      // once per listed device. It now fires only on the owner, but say so —
+      // silently reinterpreting someone's config is how this went unnoticed.
+      if (hasAmbiguousDevicePin(config)) {
+        const owner = routineOwnerDevice(config);
+        console.warn(
+          `Job '${config.name}' pins ${config.devices!.length} devices; a routine runs on exactly one. ` +
+          `Firing only on '${owner}'. Fix with: agents routines devices ${config.name} --set ${owner}`,
+        );
+      }
+      if (!jobRunsOnThisDevice(config)) continue;
       if (shouldPurgeCompletedOneShotRoutine(config)) {
         deleteJob(config.name);
         continue;

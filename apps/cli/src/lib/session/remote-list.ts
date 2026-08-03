@@ -21,6 +21,7 @@ import { sshTargetFor } from '../devices/connect.js';
 import { resolveExplicitTargetSet } from '../devices/resolve-target.js';
 import { loadDevices, isControlDevice, isDialableDevice, type DeviceProfile } from '../devices/registry.js';
 import { remoteShellFor, buildWindowsAgentsCommand } from '../hosts/remote-cmd.js';
+import { gatherRemoteAgentsJson, type RemoteAgentsJsonParseResult } from '../remote-agents-json.js';
 import { machineId, normalizeHost } from './sync/config.js';
 import { NO_FANOUT_ENV } from './remote-active.js';
 import { terminalWidth } from './width.js';
@@ -45,9 +46,6 @@ import {
   sanitizeToolEvidenceText,
 } from './tool-calls.js';
 
-/** Per-host SSH budget. Slightly above SSH_OPTS' ConnectTimeout=10 so a
- * reachable-but-slow remote still answers before we give up. */
-const REMOTE_LIST_TIMEOUT_MS = 12_000;
 const REMOTE_TOOL_TIMEOUT_MS = 60_000;
 export const REMOTE_STDOUT_MAX_BYTES = 16 * 1024 * 1024;
 export const REMOTE_TOOL_AGGREGATE_MAX_BYTES = TOOL_QUERY_MAX_SERIALIZED_BYTES;
@@ -151,41 +149,27 @@ function isSafeResolverRow(value: Record<string, unknown>): boolean {
 }
 
 export function parseRemoteListPayload(stdout: string, machine: string, safeResolver = false): {
-  sessions: SessionMeta[];
+  items: SessionMeta[];
   valid: boolean;
 } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(stdout);
   } catch {
-    return { sessions: [], valid: false };
+    return { items: [], valid: false };
   }
-  if (!Array.isArray(parsed)) return { sessions: [], valid: false };
+  if (!Array.isArray(parsed)) return { items: [], valid: false };
   const out: SessionMeta[] = [];
   for (const x of parsed) {
-    if (!x || typeof x !== 'object' || Array.isArray(x)) return { sessions: [], valid: false };
+    if (!x || typeof x !== 'object' || Array.isArray(x)) return { items: [], valid: false };
     if (safeResolver && !isSafeResolverRow(x as Record<string, unknown>)) {
-      return { sessions: [], valid: false };
+      return { items: [], valid: false };
     }
     // `_remote` marks these as living on the peer's disk (not a local mirror),
     // so the picker routes read/resume back over SSH instead of the local FS.
     out.push({ ...(x as SessionMeta), machine, _remote: true });
   }
-  return { sessions: out, valid: true };
-}
-
-/** Convert one completed peer process into the exact aggregation result. This
- * is the production parent/peer seam and is exercised with real child output. */
-export function remoteListCaptureResult(
-  code: number | null,
-  stdout: string,
-  machine: string,
-  display: string,
-  safeResolver = false,
-): { sessions: SessionMeta[]; unreachable?: string } {
-  if (code !== 0) return { sessions: [], unreachable: display };
-  const parsed = parseRemoteListPayload(stdout, machine, safeResolver);
-  return parsed.valid ? { sessions: parsed.sessions } : { sessions: [], unreachable: display };
+  return { items: out, valid: true };
 }
 
 /** Run one remote `agents sessions … --json` and capture stdout. Resolves
@@ -240,22 +224,6 @@ export function sshCapture(
   });
 }
 
-async function fetchByTarget(
-  target: string,
-  machine: string,
-  display: string,
-  forwardedArgs: string[],
-  os?: string
-): Promise<{ sessions: SessionMeta[]; unreachable?: string }> {
-  const { code, stdout } = await sshCapture(target, remoteListCommand(forwardedArgs, os), REMOTE_LIST_TIMEOUT_MS);
-  const safeResolver = forwardedArgs.includes('--resolve-safe-v1');
-  const result = remoteListCaptureResult(code, stdout, machine, display, safeResolver);
-  if (result.unreachable) {
-    process.stderr.write(chalk.gray(`  ${display}: unreachable or no agents CLI — skipped\n`));
-  }
-  return result;
-}
-
 export interface RemoteListResult {
   sessions: SessionMeta[];
   /** How many peer machines we attempted to reach (drives the empty-fleet tip). */
@@ -284,46 +252,22 @@ export function isAutomaticSessionPeer(d: DeviceProfile, self: string): boolean 
  * already `--json`) so every peer returns the same slice this machine asked for.
  */
 export async function gatherRemoteList(forwardedArgs: string[], hosts?: string[]): Promise<RemoteListResult> {
-  const self = machineId();
-  const targets: Array<{ target: string; machine: string; name: string; os?: string }> = [];
-  const unresolved: string[] = [];
-
-  if (hosts && hosts.length > 0) {
-    // Resolve each token through the device registry so an explicit --host/--device
-    // dials the exact same address (and machine id) as the auto-discovery sweep.
-    const resolved = await resolveExplicitTargetSet(hosts);
-    targets.push(...resolved.targets);
-    unresolved.push(...resolved.unresolved);
-  } else {
-    let reg: Record<string, DeviceProfile>;
-    try {
-      reg = await loadDevices();
-    } catch {
-      return { sessions: [], deviceCount: 0, unreachable: ['device registry'] };
-    }
-    for (const d of Object.values(reg)) {
-      // Live SSH-probe verdict first, cached tailscale snapshot only as a
-      // fallback — see isDialableDevice. A manually-registered device has no
-      // tailscale peer entry, so gating on `online` alone hid its sessions.
-      if (!isAutomaticSessionPeer(d, self)) continue;
-      // Control-only devices (a phone/tablet running the cockpit) drive the fleet
-      // but never run agents — never dial them, whatever their platform reads as.
-      // Only machines that can actually run the CLI. iOS/tablet nodes register as
-      // `unknown` platform and can never answer, so skip them rather than burn a
-      // full ConnectTimeout on each.
-      try {
-        targets.push({ target: sshTargetFor(d), machine: normalizeHost(d.name), name: d.name, os: d.platform });
-      } catch {
-        // No address on the profile — nothing to dial; skip silently.
-      }
-    }
-  }
-
-  const results = await Promise.all(targets.map((t) => fetchByTarget(t.target, t.machine, t.name, forwardedArgs, t.os)));
+  const safeResolver = forwardedArgs.includes('--resolve-safe-v1');
+  const result = await gatherRemoteAgentsJson<SessionMeta>({
+    args: forwardedArgs,
+    noFanoutEnv: NO_FANOUT_ENV,
+    hosts,
+    parse: (stdout, machine): RemoteAgentsJsonParseResult<SessionMeta> =>
+      parseRemoteListPayload(stdout, machine, safeResolver),
+  });
   return {
-    sessions: results.flatMap((r) => r.sessions),
-    deviceCount: targets.length,
-    unreachable: [...unresolved, ...results.map((r) => r.unreachable).filter((n): n is string => !!n)],
+    sessions: result.items,
+    deviceCount: result.deviceCount,
+    unreachable: [
+      ...(result.discoveryFailed ? ['device registry'] : []),
+      ...result.skipped,
+      ...result.parseFailed,
+    ],
   };
 }
 

@@ -6,14 +6,16 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 
 /**
- * Real-CLI tests for the removed-command tombstones (RUSH-1234). `agents check`
- * and `agents resources` were deleted when their behavior folded into
+ * Real-CLI tests for the removed-command tombstones. `agents check` and
+ * `agents resources` (RUSH-1234) were deleted when their behavior folded into
  * `agents doctor --check` and `agents view --merged`; the hidden alias commands
  * in index.ts must (1) print a deprecation notice to STDERR — never stdout, so a
  * `--json` consumer's stdout stays clean — and (2) forward into the replacement,
- * preserving flags and the drift-gate exit code. No mocks: we build a temp HOME
- * with a real installed version + a real source command, then drive the actual
- * CLI in a subprocess.
+ * preserving flags and the drift-gate exit code. `agents hq` had no replacement
+ * (the interactive Agents HQ floor UI it bridged was never built), so its hidden
+ * tombstone just reports the removal and exits non-zero instead of forwarding.
+ * No mocks: we build a temp HOME with a real installed version + a real source
+ * command, then drive the actual CLI in a subprocess.
  */
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -107,5 +109,36 @@ describe('removed-command tombstones (RUSH-1234)', () => {
       const r = run(name, '--help');
       expect(r.stderr).not.toContain(`unknown command '${name}'`);
     }
+  });
+});
+
+describe('removed `hq` command (no replacement)', () => {
+  it('`agents hq` prints a removal notice on stderr and exits non-zero', () => {
+    seedHome();
+
+    const r = run('hq');
+
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('agents hq');
+    expect(r.stderr).toContain('removed');
+    expect(r.stdout).not.toContain('removed');
+  });
+
+  it('a stale `agents hq floor --json` invocation also hits the tombstone', () => {
+    seedHome();
+
+    // The old subcommand + flag: allowUnknownOption/allowExcessArguments must
+    // route this into the tombstone action rather than commander rejecting
+    // `floor` as an unrecognized subcommand.
+    const r = run('hq', 'floor', '--json');
+
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('removed');
+  });
+
+  it('`agents hq` does not appear as "unknown command"', () => {
+    seedHome();
+    const r = run('hq', '--help');
+    expect(r.stderr).not.toContain("unknown command 'hq'");
   });
 });

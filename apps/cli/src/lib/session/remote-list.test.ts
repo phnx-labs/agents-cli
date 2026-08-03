@@ -18,19 +18,15 @@ import {
   consumeParsedRemoteToolSearchBudget,
   consumeRemoteToolByteBudget,
   parseRemoteList,
+  parseRemoteListPayload,
   parseRemoteToolSearch,
   RemoteUtf8Accumulator,
   isAutomaticSessionPeer,
-  remoteListCaptureResult,
   remoteListCommand,
   sshCapture,
 } from './remote-list.js';
 import type { DeviceProfile } from '../devices/registry.js';
 import { TOOL_QUERY_MAX_CALL_ROWS } from './tool-index.js';
-
-function runPeer(source: string, ...args: string[]) {
-  return spawnSync(process.execPath, ['--eval', source, ...args], { encoding: 'utf8' });
-}
 
 interface RealSshPeer {
   port: number;
@@ -319,23 +315,20 @@ describe('fleet tool-result byte budget', () => {
   });
 });
 
-describe('remoteListCaptureResult', () => {
-  it('accepts real child output and tags the owning machine', () => {
-    const peer = runPeer("process.stdout.write(JSON.stringify([{id:'abcd7777',shortId:'abcd7777',agent:'claude',timestamp:'2026-08-03T00:00:00Z'}]))");
-
-    expect(remoteListCaptureResult(peer.status, peer.stdout, 'peer-one', 'Peer One', true)).toEqual({
-      sessions: [{
+describe('parseRemoteListPayload', () => {
+  it('accepts valid output and tags the owning machine', () => {
+    const stdout = JSON.stringify([{id:'abcd7777',shortId:'abcd7777',agent:'claude',timestamp:'2026-08-03T00:00:00Z'}]);
+    expect(parseRemoteListPayload(stdout, 'peer-one', true)).toEqual({
+      items: [{
         id: 'abcd7777', shortId: 'abcd7777', agent: 'claude',
         timestamp: '2026-08-03T00:00:00Z', machine: 'peer-one', _remote: true,
       }],
+      valid: true,
     });
   });
 
   it('marks an exit-0 structurally invalid resolver row incomplete', () => {
-    expect(remoteListCaptureResult(0, '[{}]', 'peer', 'peer', true)).toEqual({
-      sessions: [],
-      unreachable: 'peer',
-    });
+    expect(parseRemoteListPayload('[{}]', 'peer', true)).toEqual({ items: [], valid: false });
   });
 
   it('rejects unsafe fields from a versioned resolver peer', () => {
@@ -343,16 +336,12 @@ describe('remoteListCaptureResult', () => {
       id: 'abcd7777', shortId: 'abcd7777', agent: 'claude',
       timestamp: '2026-08-03T00:00:00Z', filePath: '/private/transcript.jsonl',
     }]);
-    expect(remoteListCaptureResult(0, unsafe, 'peer', 'peer', true)).toEqual({
-      sessions: [],
-      unreachable: 'peer',
-    });
+    expect(parseRemoteListPayload(unsafe, 'peer', true)).toEqual({ items: [], valid: false });
   });
 
   it('accepts an exit-0 empty array as a complete peer response', () => {
-    expect(remoteListCaptureResult(0, '[]', 'peer', 'peer')).toEqual({ sessions: [] });
+    expect(parseRemoteListPayload('[]', 'peer')).toEqual({ items: [], valid: true });
   });
-
 });
 
 describe('remoteListCommand', () => {
@@ -362,7 +351,7 @@ describe('remoteListCommand', () => {
     expect(cmd).toContain('agents');
   });
 
-  it('carries the caller query + filters over to the peer', () => {
+  it('carries the caller query and filters over to the peer', () => {
     const cmd = remoteListCommand(['sessions', 'deploy', '--since', '2d', '--json']);
     expect(cmd).toContain('deploy');
     expect(cmd).toContain('--since');
