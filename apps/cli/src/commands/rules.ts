@@ -603,6 +603,12 @@ Examples:
     .addHelpText('after', `
 Targets are <agent>@<version>. Use 'default' for the alias of the global default version.
 
+This re-syncs the version home immediately, AND the choice sticks: every later
+'agents run' for this agent+version re-applies the active preset before launch
+(skip-fast when nothing changed), so a preset set here never goes stale even if
+something changes it again without running 'switch' — you don't need to re-run
+'switch' or 'sync' by hand before the next launch.
+
 Examples:
   # Persist the cautious preset for claude 2.1.111
   agents rules switch claude@2.1.111 --preset cautious

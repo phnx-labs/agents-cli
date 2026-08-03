@@ -1349,6 +1349,40 @@ themselves are normative in [§Secrets](#secrets) — SEC-6..SEC-14 govern.)
   lands on disk via the informational `cmd` field
   (`lib/exec.ts:1155-1175`, RUSH-1758).
 
+#### 3.8 Rules preset auto-apply
+
+- **EXEC-44 (MUST).** `agents run` MUST re-apply the active rules preset
+  (`getActiveRulesPreset(agent, version)`, `lib/state.ts:1167`) for the
+  resolved (agent, version) into that version's home directory before
+  dispatch, on every invocation — not only after an explicit
+  `agents rules switch`/`agents add`/`agents use`
+  (`applyActiveRulesPresetAtRun`, `lib/rules/run-sync.ts:90`; called from
+  `commands/exec.ts:2323`, immediately after `defaultVersion` resolves and
+  before the ACP/loop/fallback/plain dispatch branches, so every one of
+  those paths for this agent+version sees a fresh rules file).
+- **EXEC-45 (MUST).** The re-apply MUST be skip-fast: it MUST compare the
+  resolved preset name AND the composed source-file fingerprints (mtime+size,
+  sha256 on a stat miss — `staleness/fingerprint.ts:isFileStale`) against a
+  small per-`(agent, version)` sentinel at
+  `~/.agents/.cache/rules-run-sync/<agent>@<version>.json`, and MUST skip the
+  version-home write when both match (`lib/rules/run-sync.ts:100-106`). The
+  preset name is tracked in ADDITION to the file-fingerprint set because
+  user/extra rules layers auto-append every un-named subrule
+  (`lib/rules/compose.ts`, "auto-append"), so two differently-named presets
+  can legitimately resolve to an IDENTICAL source-file set — a
+  fingerprint-only comparison would miss that a preset switch happened.
+- **EXEC-46 (MUST NOT block launch).** A missing `rules.yaml`, an unknown
+  preset name, or an unsupported agent (`capabilities.rules === false`)
+  MUST NOT throw out of `applyActiveRulesPresetAtRun` — every failure mode
+  is caught and the function returns `false` (no write attempted), mirroring
+  `syncResourcesToVersion`'s own catch-and-skip for rules
+  (`lib/rules/run-sync.ts:95-98,108-112`; `lib/versions.ts:2952-2960`).
+- **EXEC-47 (scope, not a bug).** The auto-apply is VERSION-scoped only —
+  keyed by `(agent, version)`, matching `getActiveRulesPreset`. Per-model
+  preset scoping (a different active preset per `--model` within the same
+  agent+version) is out of scope for EXEC-44..46 and is a separate,
+  not-yet-built follow-up.
+
 ---
 
 ### 4. Interface contract
@@ -1525,6 +1559,19 @@ and resolves exit code 7 (`lib/exec.ts:1571,1584`); given instead a `--loop
 Then the driver stops with `stoppedBy: 'budget'` and `loopExitCode` maps it
 to the same 7 (`commands/exec.ts:379`) — a CI caller can `if exit==7` for
 "budget," regardless of which path produced it.
+
+**GWT-E9 — A preset switch takes effect on the next `agents run`, no
+explicit sync needed.**
+Given `claude@2.1.111` already synced with rules preset `default`, and code
+that calls `setActiveRulesPreset('claude', '2.1.111', 'cautious')` directly
+(bypassing `agents rules switch`, which would itself trigger
+`syncResourcesToVersion`); When `agents run claude@2.1.111 "..."` executes
+next; Then `applyActiveRulesPresetAtRun` (EXEC-44) detects the preset-name
+mismatch against its sentinel, recomposes from the `cautious` preset, and
+overwrites `<versionHome>/.claude/CLAUDE.md` before the agent spawns — the
+harness never launches against the stale `default`-preset file. A THIRD run
+with no further preset or subrule change instead skip-fasts (EXEC-45): the
+file's mtime is left untouched.
 
 ---
 
