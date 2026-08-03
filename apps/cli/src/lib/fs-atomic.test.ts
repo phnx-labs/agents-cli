@@ -57,11 +57,11 @@ function peerVerdictAfterSyncHold(beat: ((heartbeat: () => void) => void) | null
         }
       }, { staleMs: STALE_MS, acquireTimeoutMs: 100 });
     } catch (err) {
-      // Once the peer breaks the lock as stale, withFileLock's own `release()`
-      // throws ENOTACQUIRED — the holder no longer owns what it is releasing.
-      // That only happens in the stolen case, so it corroborates the verdict
-      // rather than being an error to hide.
-      if ((err as NodeJS.ErrnoException).code !== 'ENOTACQUIRED') throw err;
+      // A stolen lock now surfaces synchronously as a "broken by another process"
+      // error instead of proper-lockfile crashing the process from its refresh
+      // timer. That only happens in the stolen case, so it corroborates the
+      // verdict rather than being an error to hide.
+      if (!/was broken by another process/.test((err as Error).message)) throw err;
       expect(verdict).toBe('stole');
     }
     return verdict;

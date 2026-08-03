@@ -81,12 +81,20 @@ export interface FileLockOptions {
 export function withFileLock<T>(filePath: string, fn: (heartbeat: () => void) => T, opts: FileLockOptions = {}): T {
   let release: (() => void) | null = null;
   let lastError: unknown;
+  // Set if a peer breaks this lock while we hold it. proper-lockfile reports that
+  // from its own refresh TIMER, so the default handler rethrows asynchronously —
+  // an uncatchable crash of the whole CLI process, from a callback no caller is
+  // on the stack for. Capture it instead and surface it synchronously below.
+  let compromised: Error | null = null;
   const staleMs = opts.staleMs ?? LOCK_STALE_MS;
   const acquireTimeoutMs = opts.acquireTimeoutMs ?? LOCK_ACQUIRE_TIMEOUT_MS;
   const deadline = Date.now() + acquireTimeoutMs;
   for (let attempt = 0; ; attempt++) {
     try {
-      release = lockfile.lockSync(filePath, { stale: staleMs });
+      release = lockfile.lockSync(filePath, {
+        stale: staleMs,
+        onCompromised: (err: Error) => { compromised = err; },
+      });
       break;
     } catch (err) {
       lastError = err;
@@ -110,8 +118,19 @@ export function withFileLock<T>(filePath: string, fn: (heartbeat: () => void) =>
     try { const now = new Date(); fs.utimesSync(lockDir, now, now); } catch { /* best effort */ }
   };
   try {
-    return fn(heartbeat);
+    const result = fn(heartbeat);
+    // A compromised lock means a peer may have written under us — the caller must
+    // not treat the result as if it held exclusivity throughout.
+    if (compromised) {
+      throw new Error(
+        `Lock for ${filePath} was broken by another process while held: ` +
+        `${(compromised as Error).message}`,
+      );
+    }
+    return result;
   } finally {
-    release();
+    // Releasing a lock a peer already stole throws ENOTACQUIRED; that is the
+    // stolen case, already reported above, so don't mask it with a teardown error.
+    try { release(); } catch { /* already gone */ }
   }
 }
