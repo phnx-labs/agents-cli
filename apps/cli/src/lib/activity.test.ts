@@ -43,6 +43,7 @@ function ev(partial: Partial<EnrichedActivityEvent>): EnrichedActivityEvent {
 }
 
 const hasPython = spawnSync('python3', ['--version']).status === 0;
+const pythonTest = hasPython ? it : it.skip;
 
 function tmpActivityDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-test-'));
@@ -180,7 +181,7 @@ describe('ensureActivityLogHook', () => {
 });
 
 describe('real activity-log hook (Python)', () => {
-  it.runIf(hasPython)('logs plan.created from a PreToolUse ExitPlanMode', () => {
+  pythonTest('logs plan.created from a PreToolUse ExitPlanMode', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-plan-'));
     const r = runHook(home, {
       session_id: 'sess-1',
@@ -200,7 +201,7 @@ describe('real activity-log hook (Python)', () => {
     expect(events[0].cwd).toBe('/home/muqsit/src/x');
   });
 
-  it.runIf(hasPython)('logs subagent.spawned from a PreToolUse Task', () => {
+  pythonTest('logs subagent.spawned from a PreToolUse Task', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-task-'));
     runHook(home, {
       session_id: 'sess-2',
@@ -214,7 +215,7 @@ describe('real activity-log hook (Python)', () => {
     expect(events[0].detail).toContain('Explore');
   });
 
-  it.runIf(hasPython)('logs pr.opened with the URL from a PostToolUse Bash gh pr create', () => {
+  pythonTest('logs pr.opened with the URL from a PostToolUse Bash gh pr create', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-pr-'));
     runHook(home, {
       session_id: 'sess-3',
@@ -224,12 +225,13 @@ describe('real activity-log hook (Python)', () => {
       tool_response: { stdout: 'https://github.com/muqsitnawaz/agents/pull/413\n' },
     });
     const events = readSessionActivity('sess-3', activityDirFor(home));
-    expect(events).toHaveLength(1);
-    expect(events[0].event).toBe('pr.opened');
-    expect(events[0].url).toBe('https://github.com/muqsitnawaz/agents/pull/413');
+    expect(events.map((e) => e.event)).toEqual(['bash.executed', 'pr.opened']);
+    expect(events[0].bashTool).toBe('gh');
+    expect(events[1].event).toBe('pr.opened');
+    expect(events[1].url).toBe('https://github.com/muqsitnawaz/agents/pull/413');
   });
 
-  it.runIf(hasPython)('logs worktree.created from a PostToolUse Bash git worktree add', () => {
+  pythonTest('logs worktree.created from a PostToolUse Bash git worktree add', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-wt-'));
     runHook(home, {
       session_id: 'sess-4',
@@ -239,10 +241,11 @@ describe('real activity-log hook (Python)', () => {
       tool_response: { stdout: '' },
     });
     const events = readSessionActivity('sess-4', activityDirFor(home));
-    expect(events.map((e) => e.event)).toEqual(['worktree.created']);
+    expect(events.map((e) => e.event)).toEqual(['bash.executed', 'worktree.created']);
+    expect(events[0].bashTool).toBe('git');
   });
 
-  it.runIf(hasPython)('logs file.edited (activity tier) from a PostToolUse Write', () => {
+  pythonTest('logs file.edited (activity tier) from a PostToolUse Write', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-edit-'));
     runHook(home, {
       session_id: 'sess-5',
@@ -258,7 +261,7 @@ describe('real activity-log hook (Python)', () => {
     expect(events[0].detail).toBe('foo.ts');
   });
 
-  it.runIf(hasPython)('logs artifact.created (milestone) for a Write to an HTML/tmp artifact', () => {
+  pythonTest('logs artifact.created (milestone) for a Write to an HTML/tmp artifact', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-artifact-'));
     runHook(home, {
       session_id: 'sess-art',
@@ -285,8 +288,8 @@ describe('real activity-log hook (Python)', () => {
     expect(after.map((e) => e.event)).toEqual(['artifact.created', 'file.edited']);
   });
 
-  it.runIf(hasPython)('writes NOTHING for a non-milestone Bash command', () => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-noop-'));
+  pythonTest('emits bash.executed for routine Bash commands', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-bash-'));
     runHook(home, {
       session_id: 'sess-6',
       hook_event_name: 'PostToolUse',
@@ -294,26 +297,61 @@ describe('real activity-log hook (Python)', () => {
       tool_input: { command: 'ls -la /tmp' },
       tool_response: { stdout: 'foo\n' },
     });
-    expect(readSessionActivity('sess-6', activityDirFor(home))).toHaveLength(0);
+    const events = readSessionActivity('sess-6', activityDirFor(home));
+    expect(events).toHaveLength(1);
+    expect(events[0].event).toBe('bash.executed');
+    expect(events[0].category).toBe('probe');
+    expect(events[0].bashTool).toBe('ls');
   });
 
-  it.runIf(hasPython)('does not mistake a path for a git subcommand (tokenized classify)', () => {
+  pythonTest('does not mistake a path for a git subcommand (tokenized classify)', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-fp-'));
     // A path containing "commit"/"push" must NOT trigger commit.created/pushed.
     runHook(home, {
       session_id: 'fp', hook_event_name: 'PostToolUse', tool_name: 'Bash',
       tool_input: { command: 'git diff -- src/commit.ts src/push.ts' }, tool_response: {},
     });
-    expect(readSessionActivity('fp', activityDirFor(home))).toHaveLength(0);
+    const first = readSessionActivity('fp', activityDirFor(home));
+    expect(first.map((e) => e.event)).toEqual(['bash.executed']);
+    expect(first[0].bashTool).toBe('git');
     // But a real `git -C <path> commit` (leading flags) is still detected.
     runHook(home, {
       session_id: 'fp', hook_event_name: 'PostToolUse', tool_name: 'Bash',
       tool_input: { command: 'git -C /repo commit -m "fix"' }, tool_response: {},
     });
-    expect(readSessionActivity('fp', activityDirFor(home)).map((e) => e.event)).toEqual(['commit.created']);
+    expect(readSessionActivity('fp', activityDirFor(home)).map((e) => e.event)).toEqual(['bash.executed', 'bash.executed', 'commit.created']);
   });
 
-  it.runIf(hasPython)('skips sub-agent tool calls (agent_type gate)', () => {
+  pythonTest('emits video.rendered + bash.executed for ffmpeg', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-ffmpeg-'));
+    runHook(home, {
+      session_id: 'sess-ffmpeg',
+      hook_event_name: 'PostToolUse',
+      tool_name: 'Bash',
+      tool_input: { command: 'ffmpeg -i a.mp4 -c:v libx264 b.mp4' },
+      tool_response: { stdout: '' },
+    });
+    const events = readSessionActivity('sess-ffmpeg', activityDirFor(home));
+    expect(events.map((e) => e.event)).toEqual(['bash.executed', 'video.rendered']);
+    expect(events[0].bashTool).toBe('ffmpeg');
+    expect(events[0].category).toBe('media');
+  });
+
+  pythonTest('emits image.upscaled + bash.executed for realesrgan', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-upscale-'));
+    runHook(home, {
+      session_id: 'sess-upscale',
+      hook_event_name: 'PostToolUse',
+      tool_name: 'Bash',
+      tool_input: { command: 'realesrgan-ncnn-vulkan -i in.png -o out.png' },
+      tool_response: { stdout: '' },
+    });
+    const events = readSessionActivity('sess-upscale', activityDirFor(home));
+    expect(events.map((e) => e.event)).toEqual(['bash.executed', 'image.upscaled']);
+    expect(events[0].category).toBe('upscaling');
+  });
+
+  pythonTest('skips sub-agent tool calls (agent_type gate)', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-subagent-'));
     runHook(home, {
       session_id: 'sess-7',
@@ -325,7 +363,7 @@ describe('real activity-log hook (Python)', () => {
     expect(readSessionActivity('sess-7', activityDirFor(home))).toHaveLength(0);
   });
 
-  it.runIf(hasPython)('emits checklist.created on the first TodoWrite', () => {
+  pythonTest('emits checklist.created on the first TodoWrite', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-todo-create-'));
     const sessionId = 'sess-todo-create';
     const transcript = path.join(home, `${sessionId}.jsonl`);
@@ -342,7 +380,7 @@ describe('real activity-log hook (Python)', () => {
     expect(events[0].detail).toBe('1 task');
   });
 
-  it.runIf(hasPython)('emits task.completed when a TodoWrite item flips to completed', () => {
+  pythonTest('emits task.completed when a TodoWrite item flips to completed', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-todo-done-'));
     const sessionId = 'sess-todo-done';
     const transcript = path.join(home, `${sessionId}.jsonl`);
@@ -366,7 +404,7 @@ describe('real activity-log hook (Python)', () => {
     expect(events[0].detail).toBe('Explore auth 1/1 done');
   });
 
-  it.runIf(hasPython)('emits task.completed with N/M detail for a multi-item TodoWrite', () => {
+  pythonTest('emits task.completed with N/M detail for a multi-item TodoWrite', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-todo-multi-'));
     const sessionId = 'sess-todo-multi';
     const transcript = path.join(home, `${sessionId}.jsonl`);
@@ -413,7 +451,7 @@ describe('real activity-log hook (Python)', () => {
     expect(events[0].detail).toBe('Write tests 2/3 done');
   });
 
-  it.runIf(hasPython)('emits nothing for a TodoWrite with no new completions', () => {
+  pythonTest('emits nothing for a TodoWrite with no new completions', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-todo-noop-'));
     const sessionId = 'sess-todo-noop';
     const transcript = path.join(home, `${sessionId}.jsonl`);
@@ -440,7 +478,7 @@ describe('real activity-log hook (Python)', () => {
     expect(readSessionActivity(sessionId, activityDirFor(home))).toHaveLength(0);
   });
 
-  it.runIf(hasPython)('emits task.completed for codex update_plan step completion', () => {
+  pythonTest('emits task.completed for codex update_plan step completion', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-plan-done-'));
     const sessionId = 'sess-plan-done';
     const transcript = path.join(home, `${sessionId}.jsonl`);
@@ -469,7 +507,7 @@ describe('real activity-log hook (Python)', () => {
     expect(events[0].detail).toBe('Read files 1/1 done');
   });
 
-  it.runIf(hasPython)('emits task.completed for TaskUpdate by resolving subject from transcript', () => {
+  pythonTest('emits task.completed for TaskUpdate by resolving subject from transcript', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-task-update-'));
     const sessionId = 'sess-task-update';
     const transcript = path.join(home, `${sessionId}.jsonl`);
@@ -500,7 +538,7 @@ describe('real activity-log hook (Python)', () => {
     expect(events[0].detail).toBe('Write tests 2/2 done');
   });
 
-  it.runIf(hasPython)('emits checklist.created on the first TaskCreate and resolves TaskUpdate subject from TaskCreate results', () => {
+  pythonTest('emits checklist.created on the first TaskCreate and resolves TaskUpdate subject from TaskCreate results', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-task-create-'));
     const sessionId = 'sess-task-create';
     const transcript = path.join(home, `${sessionId}.jsonl`);
@@ -561,7 +599,7 @@ describe('real activity-log hook (Python)', () => {
     expect(updateEvents[1].detail).toBe('Build the spine 1/1 done');
   });
 
-  it.runIf(hasPython)('excludes deleted tasks from the N/M total on a TaskUpdate completion', () => {
+  pythonTest('excludes deleted tasks from the N/M total on a TaskUpdate completion', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-task-deleted-'));
     const sessionId = 'sess-task-deleted';
     const transcript = path.join(home, `${sessionId}.jsonl`);
@@ -597,7 +635,7 @@ describe('real activity-log hook (Python)', () => {
     expect(events[0].detail).toBe('A2 2/2 done');
   });
 
-  it.runIf(hasPython)('is fail-open when transcript_path is missing', () => {
+  pythonTest('is fail-open when transcript_path is missing', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-todo-failopen-'));
     const sessionId = 'sess-todo-failopen';
     runHook(home, {

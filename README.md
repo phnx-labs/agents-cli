@@ -288,7 +288,7 @@ Filters **stack** (they AND together), the active set shows in the header, and t
 
 Each live session resolves to `working`, `waiting_input` (with why -- a question, a plan review, or a permission prompt), or `idle`, alongside badges for the PR it opened, the worktree it sits in, and the ticket it's working. `agents sessions focus [id]` attaches the live pane in place -- the tmux split locally or over SSH, or its Ghostty tab -- and falls back to a fresh tab + resume when the terminal is gone.
 
-Landing on a session cold? `agents sessions <id>` prints a catch-up digest: an inferred title, files changed grouped by directory (created / modified / deleted), a histogram of which tools did the work, and the last test verdict -- the signals to reload a task in seconds.
+Landing on a session cold? `agents sessions <id>` prints a catch-up digest: an inferred title, files changed grouped by directory (created / modified / deleted), a histogram of which tools did the work (including parsed Bash commands -- `git`, `npm`, `ffmpeg`, `ssh`, and so on), and the last test verdict -- the signals to reload a task in seconds.
 
 ### Resume anywhere — and stay resumed
 

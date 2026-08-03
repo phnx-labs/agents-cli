@@ -15,6 +15,7 @@ import { cleanSessionPrompt, extractSessionTopic } from './prompt.js';
 import { renderMarkdown } from '../markdown.js';
 import { redactSecrets } from '../redact.js';
 import { classifyFileChanges, changeCounts, toolHistogram, detectTestResult, type FileChange, type FileOp } from './digest.js';
+import { classifyBashCommand, unwrapCommand, type BashCategory } from './bash-command.js';
 import { extractArtifacts, extractHooks, extractLinks, extractSkills } from './highlights.js';
 import { extractTodoProgressFromEvents } from './state.js';
 
@@ -95,24 +96,6 @@ export function linkUrl(url: string, label: string): string {
 // ── Command grouping ──────────────────────────────────────────────────────────
 
 /**
- * Unwrap wrapper prefixes to find the actual executable.
- */
-export function unwrapCommand(cmd: string): string {
-  const ssh = cmd.match(/^ssh\s+\S+\s+"(.+)"\s*(?:\|.*)?$/);
-  if (ssh) return unwrapCommand(ssh[1]);
-  const lead = cmd.match(/^(?:sudo|env\s+\S+=\S+|time)\s+(.+)/);
-  if (lead) return unwrapCommand(lead[1]);
-  // Strip shell-style leading env assignments: `PATH=/x CMD ...`, `FOO=bar BAR=baz CMD ...`
-  const shellEnv = cmd.match(/^(?:[A-Z_][A-Z0-9_]*=\S+\s+)+(\S.*)$/);
-  if (shellEnv) return unwrapCommand(shellEnv[1]);
-  const cd = cmd.match(/^cd\s+\S+\s*&&\s*(.+)/);
-  if (cd) return unwrapCommand(cd[1]);
-  const npx = cmd.match(/^npx\s+(.+)/);
-  if (npx) return unwrapCommand(npx[1]);
-  return cmd;
-}
-
-/**
  * Normalize a command so trivial flag/pipe variations collapse to the same key.
  */
 export function normalizeForDedup(cmd: string): string {
@@ -129,26 +112,12 @@ export function normalizeForDedup(cmd: string): string {
   return s.trim();
 }
 
-/** Command classification categories with signal levels for summary rendering. */
-const CATEGORIES: Array<{
-  name: string;
-  match: (first: string) => boolean;
-  signal: 'high' | 'mid' | 'low';
-}> = [
-  { name: 'Probes',     match: t => ['ls','cat','head','tail','wc','stat','file','which','tree','pwd'].includes(t),                          signal: 'low'  },
-  { name: 'Search',     match: t => ['grep','rg','ag','fd','find'].includes(t),                                                               signal: 'low'  },
-  { name: 'Build/test', match: t => ['make','cargo','pytest','go','bun','npm','pnpm','yarn','tsc','vitest','tsx','node','python','python3','jest'].includes(t), signal: 'high' },
-  { name: 'Install',    match: t => ['brew','pip','apt','apk'].includes(t),                                                                    signal: 'high' },
-  { name: 'VCS',        match: t => ['git','gh'].includes(t),                                                                                  signal: 'mid'  },
-  { name: 'HTTP',       match: t => ['curl','wget','rush','http'].includes(t),                                                                 signal: 'mid'  },
-  { name: 'Remote',     match: t => ['ssh','scp','rsync'].includes(t),                                                                         signal: 'mid'  },
-  { name: 'Shell',      match: t => ['rm','mv','cp','mkdir','touch','echo','printf','chmod','ln','awk','sed','tee','xargs','for'].includes(t), signal: 'low'  },
-  { name: 'Wait',       match: t => ['sleep','wait'].includes(t),                                                                              signal: 'low'  },
-];
+// Re-export the shared classifier for callers that only need unwrapping.
+export { unwrapCommand };
 
 /** CLI tools whose subcommand (second token) is included in the bucket key. */
 const TWO_LEVEL_TOKENS = new Set([
-  'git','gh','bun','npm','cargo','docker','kubectl','rush','openclaw','pnpm','yarn',
+  'git', 'gh', 'bun', 'npm', 'cargo', 'docker', 'kubectl', 'rush', 'openclaw', 'pnpm', 'yarn',
 ]);
 
 /**
@@ -166,15 +135,31 @@ export function bucketKey(cmd: string): string {
   return isRemote ? `ssh\u2192${first}` : first;
 }
 
+const CATEGORY_NAMES: Record<BashCategory, string> = {
+  vcs: 'VCS',
+  'build-test': 'Build/test',
+  install: 'Install',
+  remote: 'Remote',
+  http: 'HTTP',
+  media: 'Media',
+  upscaling: 'Upscaling',
+  metadata: 'Metadata',
+  probe: 'Probes',
+  search: 'Search',
+  shell: 'Shell',
+  wait: 'Wait',
+  other: 'Other',
+};
+
 function categoryOf(cmd: string): { name: string; signal: 'high' | 'mid' | 'low' } | null {
   const rawFirst = cmd.trim().split(/\s+/)[0]?.toLowerCase() ?? '';
   // Remote wrappers: classify as Remote regardless of inner command.
   if (['ssh', 'scp', 'rsync'].includes(rawFirst)) {
-    return CATEGORIES.find(c => c.name === 'Remote') ?? null;
+    return { name: 'Remote', signal: 'mid' };
   }
-  const unwrapped = unwrapCommand(cmd);
-  const first = unwrapped.trim().split(/\s+/)[0]?.toLowerCase() ?? '';
-  return CATEGORIES.find(c => c.match(first)) ?? null;
+  const info = classifyBashCommand(cmd);
+  if (info.category === 'other') return null;
+  return { name: CATEGORY_NAMES[info.category], signal: info.signal };
 }
 
 interface CmdRun {
