@@ -43,26 +43,32 @@ describe('killTree', () => {
 });
 
 describe('backgroundSpawnOptions', () => {
+  it('always supplies an existing stable cwd', () => {
+    const options = backgroundSpawnOptions();
+    expect(path.isAbsolute(options.cwd)).toBe(true);
+    expect(fs.statSync(options.cwd).isDirectory()).toBe(true);
+  });
+
   it('uses a hidden console instead of detach on win32', () => {
     // CreateProcess ignores CREATE_NO_WINDOW under DETACHED_PROCESS, and a
     // console-less child makes every console descendant flash a visible
     // window — so on Windows the two options must never be combined.
-    expect(backgroundSpawnOptions({ platform: 'win32' })).toEqual({ detached: false, windowsHide: true });
+    expect(backgroundSpawnOptions({ platform: 'win32' })).toMatchObject({ detached: false, windowsHide: true });
   });
 
   it('detaches on win32 when stdio is fd-redirected (windowsHide cannot engage)', () => {
     // libuv skips CREATE_NO_WINDOW when any stdio fd is inherited (log-file
     // redirection), so a non-detached child would share the launcher's console
     // and die with it on console-close (#556). It must detach instead.
-    expect(backgroundSpawnOptions({ fdStdio: true, platform: 'win32' })).toEqual({
+    expect(backgroundSpawnOptions({ fdStdio: true, platform: 'win32' })).toMatchObject({
       detached: true,
       windowsHide: true,
     });
   });
 
   it('detaches into its own process group on POSIX', () => {
-    expect(backgroundSpawnOptions({ platform: 'darwin' })).toEqual({ detached: true, windowsHide: false });
-    expect(backgroundSpawnOptions({ fdStdio: true, platform: 'linux' })).toEqual({ detached: true, windowsHide: false });
+    expect(backgroundSpawnOptions({ platform: 'darwin' })).toMatchObject({ detached: true, windowsHide: false });
+    expect(backgroundSpawnOptions({ fdStdio: true, platform: 'linux' })).toMatchObject({ detached: true, windowsHide: false });
   });
 
   it('an fd-redirected background child survives its launcher console closing (#556 regression)', async () => {

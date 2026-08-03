@@ -3,6 +3,7 @@
  */
 import { execFileSync } from 'child_process';
 import { readFileSync } from 'fs';
+import * as os from 'os';
 import { sleepSync } from '../fs-atomic.js';
 
 /**
@@ -53,15 +54,16 @@ export function killTree(pid: number): void {
  *   sites pass their own `windowsHide` with piped stdio.
  */
 export function backgroundSpawnOptions(
-  opts: { fdStdio?: boolean; platform?: NodeJS.Platform } = {},
-): { detached: boolean; windowsHide: boolean } {
+  opts: { cwd?: string; fdStdio?: boolean; platform?: NodeJS.Platform } = {},
+): { cwd: string; detached: boolean; windowsHide: boolean } {
   const platform = opts.platform ?? process.platform;
+  const cwd = opts.cwd ?? os.homedir();
   if (platform === 'win32') {
     return opts.fdStdio
-      ? { detached: true, windowsHide: true }
-      : { detached: false, windowsHide: true };
+      ? { cwd, detached: true, windowsHide: true }
+      : { cwd, detached: false, windowsHide: true };
   }
-  return { detached: true, windowsHide: false };
+  return { cwd, detached: true, windowsHide: false };
 }
 
 /**

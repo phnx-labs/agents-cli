@@ -1141,7 +1141,7 @@ export function startDetached(opts: StartDetachedOptions = {}): { pid: number | 
   // and a console-close event tears it down when the launcher exits (#556).
   const child = spawn(command, args, {
     stdio: ['ignore', logFd, logFd],
-    ...backgroundSpawnOptions({ fdStdio: true }),
+    ...backgroundSpawnOptions({ cwd: os.homedir(), fdStdio: true }),
     env: opts.env ?? process.env,
   });
 

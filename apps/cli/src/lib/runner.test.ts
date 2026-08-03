@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
-import { archiveRoutineTranscripts, executeJob, executeJobDetached, monitorRunningJobs } from './runner.js';
+import { archiveRoutineTranscripts, executeJob, executeJobDetached, monitorRunningJobs, routineSpawnCwd } from './runner.js';
 import { getRunDir, writeRunMeta } from './routines.js';
 import type { JobConfig, RunMeta } from './routines.js';
 import { saveTask, hostsCacheDir } from './hosts/tasks.js';
@@ -25,6 +26,21 @@ function baseConfig(partial: Partial<JobConfig> = {}): JobConfig {
     ...partial,
   } as JobConfig;
 }
+
+describe('routine spawn cwd', () => {
+  it('uses the existing home directory when no repo is declared', () => {
+    const cwd = routineSpawnCwd({});
+    expect(cwd).toBe(os.homedir());
+    expect(fs.statSync(cwd).isDirectory()).toBe(true);
+  });
+
+  it('resolves owner/repo against the configured owner project root', () => {
+    expect(routineSpawnCwd(
+      { repo: 'phnx-labs/agents-cli' },
+      path.join(os.homedir(), 'src', 'github.com', 'phnx-labs'),
+    )).toBe(path.join(os.homedir(), 'src', 'github.com', 'phnx-labs', 'agents-cli'));
+  });
+});
 
 describe('runner device enforcement', () => {
   const savedId = process.env.AGENTS_SYNC_MACHINE_ID;
