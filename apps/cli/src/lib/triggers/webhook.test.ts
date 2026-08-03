@@ -230,7 +230,10 @@ describe('matchJobsToWebhook', () => {
         devices: ['mac-mini', 'zion'],
         trigger: { type: 'github_event', event: 'pull_request', repo: 'x/y' },
       });
-      expect(matchJobsToWebhook([foreign, local, multi], pullRequestWebhook('x/y')).map((j) => j.name)).toEqual(['local', 'multi']);
+      // 'multi' pins [mac-mini, zion]; mac-mini owns it (lowest normalized
+      // name), so a webhook on zion no longer fires it. A routine fires on
+      // exactly one device, on the trigger path as on the cron path.
+      expect(matchJobsToWebhook([foreign, local, multi], pullRequestWebhook('x/y')).map((j) => j.name)).toEqual(['local']);
     } finally {
       if (saved === undefined) delete process.env.AGENTS_SYNC_MACHINE_ID;
       else process.env.AGENTS_SYNC_MACHINE_ID = saved;

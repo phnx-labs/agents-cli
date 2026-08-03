@@ -14,6 +14,7 @@ import { loadDevices } from '../lib/devices/registry.js';
 import { runDeviceSync } from '../lib/devices/sync.js';
 import { tailscaleStatusJson } from '../lib/devices/tailscale.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
+import { maybePickInteractiveHost } from './setup-preferences.js';
 
 type FleetAuthMethod = 'key' | 'password';
 
@@ -190,6 +191,11 @@ export async function runFleetSetupWizard(opts: SetupFleetOptions = {}): Promise
   if (choices.fleetUpdate) runAgentsSubcommand(['fleet', 'update']);
 
   printOnboardingSummary(names, choices.auth);
+
+  // With a fleet registered, the next wrong-machine trap is artifacts opening on
+  // some other box — offer to pin the interactive host (TTY-only, skippable,
+  // silent non-TTY and when already set).
+  await maybePickInteractiveHost();
   return true;
 }
 

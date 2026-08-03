@@ -1165,7 +1165,11 @@ export async function gatherActiveSessions(
   const self = machineId();
   // An explicit --host/--device list scopes the view: seed local sessions only
   // when no hosts are named, or when this machine is one of the named targets.
-  const local = shouldIncludeLocal(opts.hosts, self) ? await getActiveSessions() : [];
+  // `localOnly: opts.local` (RUSH-2118) keeps a `--local` query from dialing a
+  // remote-host teammate over ssh even for this machine's OWN local gather —
+  // "this machine only" must mean zero ssh, not just "skip the cross-machine
+  // device fan-out below".
+  const local = shouldIncludeLocal(opts.hosts, self) ? await getActiveSessions({ localOnly: opts.local }) : [];
   for (const s of local) if (!s.machine) s.machine = self;
 
   let remoteDeviceCount = 0;
@@ -1347,9 +1351,9 @@ function canonicalSessionsCommand(query: string | undefined, options: SessionsOp
 
 /** Resolve a session by id/query globally and print its compact preview (no pager).
  * Backs `--preview` — the fast path for the "peek before resume" hot loop. */
-async function renderSessionPreview(
+export async function renderSessionPreview(
   query: string,
-  scope: { agent?: string; project?: string },
+  scope: { agent?: string; project?: string; local?: boolean },
 ): Promise<void> {
   const discovered = await discoverSessions({ all: true, cwd: process.cwd(), limit: 5000 });
   const pool = applyScopeFilters(discovered, scope);
@@ -1364,9 +1368,11 @@ async function renderSessionPreview(
   }
   // Lead with the live status when the session is still running, so the preview
   // says working / waiting / idle up front — not just the historical transcript.
+  // `--local --preview` is freely combinable with `--local` (RUSH-2118): thread
+  // it through so this probe never dials a remote-host teammate either.
   let live: ActiveSession | undefined;
   try {
-    live = indexActiveBySessionId(await getActiveSessions()).get(session.id);
+    live = indexActiveBySessionId(await getActiveSessions({ localOnly: scope.local === true })).get(session.id);
   } catch { /* plain preview on any probe failure */ }
   const headline = formatLiveStatusHeadline(live, isFavorite(session.id));
   if (headline) console.log(headline);
@@ -1528,7 +1534,7 @@ async function sessionsAction(
       console.error(chalk.red('--preview requires a session id or query.'));
       process.exit(1);
     }
-    await renderSessionPreview(query, { agent: options.agent, project: options.project });
+    await renderSessionPreview(query, { agent: options.agent, project: options.project, local: options.local });
     return;
   }
 
@@ -2095,10 +2101,14 @@ function treeSessionRow(session: SessionMeta, live?: ActiveSession): string {
  * not a hot loop, so the `ps`/`lsof` cost is acceptable; `--no-live` is the
  * escape hatch. Never throws — a probe failure just yields a plain listing.
  */
-async function maybeLiveIndex(options: SessionsOptions): Promise<Map<string, ActiveSession> | undefined> {
+export async function maybeLiveIndex(options: SessionsOptions): Promise<Map<string, ActiveSession> | undefined> {
   if (options.live === false || options.json) return undefined;
   try {
-    return indexActiveBySessionId(await getActiveSessions());
+    // `--local` promises "this machine only" for the default listing too (see
+    // the `--local` help text), so it must gate the live-enrichment probe the
+    // same way `--active --local` does — never dial a remote-host teammate
+    // over ssh here either (RUSH-2118).
+    return indexActiveBySessionId(await getActiveSessions({ localOnly: options.local === true }));
   } catch {
     return undefined;
   }

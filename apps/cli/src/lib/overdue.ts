@@ -14,7 +14,7 @@
 
 import * as fs from 'fs';
 import { Cron } from 'croner';
-import { listJobs, getLatestRun, getJobPath, jobRunsOnThisDevice, type JobConfig } from './routines.js';
+import { listJobs, getLatestRun, resolveJobFilePath, isPastEndAt, isOneShotRoutine, jobRunsOnThisDevice, type JobConfig } from './routines.js';
 import { notifyDesktop } from './menubar/notify-desktop.js';
 
 export interface OverdueJob {
@@ -28,24 +28,43 @@ export interface OverdueJob {
 // Tolerance between "expected fire" and "recorded run start" — accounts for
 // the small gap between the cron tick and when the runner writes meta.json.
 const GRACE_MS = 60_000;
-const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Lookback windows, narrowest first. A fixed one-week window silently blinded
+ * detection to any cron whose gap exceeds it: `0 9 1,13,25 * *` has 12-day gaps,
+ * so `nextRun(now - 7d)` jumped past `now`, the walk returned null, and the
+ * routine was never flagged overdue on any device — no missed record, no
+ * catch-up, permanently. Monthly, quarterly and annual routines were all in that
+ * class.
+ *
+ * A wider window is only tried when the narrower one found nothing, so a dense
+ * schedule (every minute, hourly, daily) never walks more than a week of
+ * occurrences. A sparse schedule has few occurrences to walk by definition.
+ */
+const LOOKBACK_WINDOWS_MS = [7 * DAY_MS, 32 * DAY_MS, 93 * DAY_MS, 400 * DAY_MS];
 
 /** Compute the most recent fire of `pattern` at or before `now`. Croner's
  *  `previousRun()` returns the cron instance's own last fire, which is null
  *  on a freshly-constructed instance — so we walk `nextRun(cursor)` forward
  *  from a week ago and keep the last fire still ≤ now. */
 function previousExpectedFire(cron: Cron, now: Date): Date | null {
-  let cursor: Date = new Date(now.getTime() - ONE_WEEK_MS);
-  let last: Date | null = null;
-  // Cap iterations: even an every-minute schedule yields ≤ 10080 steps over a
-  // week; we cap at 20k as a paranoia bound against pathological patterns.
-  for (let i = 0; i < 20000; i++) {
-    const next = cron.nextRun(cursor);
-    if (!next || next.getTime() > now.getTime()) break;
-    last = next;
-    cursor = next;
+  for (const window of LOOKBACK_WINDOWS_MS) {
+    let cursor: Date = new Date(now.getTime() - window);
+    let last: Date | null = null;
+    // Cap iterations: an every-minute schedule yields ≤ 10080 steps over a week;
+    // 20k is a paranoia bound against pathological patterns. Only a schedule
+    // that found nothing in the narrower window reaches a wider one, and such a
+    // schedule is sparse, so the cap is never the binding constraint.
+    for (let i = 0; i < 20000; i++) {
+      const next = cron.nextRun(cursor);
+      if (!next || next.getTime() > now.getTime()) break;
+      last = next;
+      cursor = next;
+    }
+    if (last) return last;
   }
-  return last;
+  return null;
 }
 
 /**
@@ -60,12 +79,17 @@ function previousExpectedFire(cron: Cron, now: Date): Date | null {
  * Returns null when neither is available, which leaves the routine unfloored
  * (previous behaviour) rather than silently skipping it.
  */
-export function routineEffectiveStart(job: JobConfig): Date | null {
+export function routineEffectiveStart(job: JobConfig, now: Date = new Date()): Date | null {
   if (job.createdAt) {
     const stamped = new Date(job.createdAt);
-    if (!isNaN(stamped.getTime())) return stamped;
+    // Clamp a future stamp (clock skew, a hand-edited year) to now. Left
+    // unclamped it sits after every possible expected fire, so the routine can
+    // never be flagged overdue until wall-clock time catches up.
+    if (!isNaN(stamped.getTime())) {
+      return stamped.getTime() > now.getTime() ? now : stamped;
+    }
   }
-  const path = getJobPath(job.name);
+  const path = resolveJobFilePath(job.name);
   if (!path) return null;
   try {
     return new Date(fs.statSync(path).mtimeMs);
@@ -80,7 +104,17 @@ export function detectOverdueJobs(now: Date = new Date()): OverdueJob[] {
   const overdue: OverdueJob[] = [];
 
   for (const job of listJobs()) {
-    if (!job.enabled || job.runOnce) continue;
+    if (!job.enabled) continue;
+    // One-shot: fires at most once, so a missed slot is not a backlog to replay.
+    // Use the same predicate the scheduler does — the raw `runOnce` flag alone
+    // missed a one-shot-LIKE schedule (a fixed minute/hour/day/month) that never
+    // carried the flag.
+    if (isOneShotRoutine(job)) continue;
+    // Past its configured end: catch-up must not resurrect a routine the author
+    // already retired. The scheduler only auto-disables lazily, inside a live
+    // cron tick, so a routine whose endAt elapsed while the daemon was down is
+    // still enabled on disk when the catch-up pass runs.
+    if (isPastEndAt(job, now)) continue;
     // Trigger-only jobs (no cron schedule) never have an expected fire time.
     if (!job.schedule) continue;
     // A job pinned to another device is that device's to run, notify, and
@@ -106,7 +140,7 @@ export function detectOverdueJobs(now: Date = new Date()): OverdueJob[] {
     // a miss. Without this, any newly created routine on a daily/weekly cron is
     // instantly "overdue" for the previous occurrence — and with auto-catchup
     // that means `agents routines add` runs the routine once, immediately.
-    const start = routineEffectiveStart(job);
+    const start = routineEffectiveStart(job, now);
     if (start && expected.getTime() < start.getTime()) continue;
 
     const latest = getLatestRun(job.name);

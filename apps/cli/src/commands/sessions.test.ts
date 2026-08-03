@@ -14,7 +14,9 @@ import {
   fleetCandidatesByQuery,
   metadataResolveForwardedArgs,
 } from './sessions.js';
-import { parseRemoteList, remoteListCommand } from '../lib/session/remote-list.js';
+import { remoteAgentsJsonCommand } from '../lib/remote-agents-json.js';
+import { NO_FANOUT_ENV } from '../lib/session/remote-active.js';
+import { parseRemoteList } from '../lib/session/remote-list.js';
 import { needsWindowsShell, composeWin32CommandLine } from '../lib/platform/index.js';
 import type { SessionMeta } from '../lib/session/types.js';
 
@@ -319,7 +321,10 @@ async function startSessionResolverSshPeer(
   const username = `srp-${crypto.randomBytes(16).toString('hex')}`;
   const target = `${username}@127.0.0.1`;
   const proofFile = path.join(tempHome, `${mode}-proof.txt`);
-  const expectedCommand = remoteListCommand(metadataResolveForwardedArgs('abcd7777', {}));
+  const expectedCommand = remoteAgentsJsonCommand(
+    metadataResolveForwardedArgs('abcd7777', {}),
+    NO_FANOUT_ENV,
+  );
   const controlPathTemplate = path.join(tempHome, '.agents', '.cache', 'ssh', 'cm-%C');
   fs.mkdirSync(path.dirname(controlPathTemplate), { recursive: true, mode: 0o700 });
   writeUpdateCache(peerHome);

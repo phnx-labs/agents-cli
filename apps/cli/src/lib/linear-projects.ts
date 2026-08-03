@@ -58,6 +58,37 @@ export function matchLinearProject(
   });
 }
 
+/**
+ * Collapse a Linear **display name** or a directory basename to one comparison
+ * key. Deliberately NOT `normalizeProjectKey`: that one keeps only the segment
+ * after the last `/`, which is right for an `owner/repo` slug or a filesystem
+ * path and wrong for a display name, where `/` is ordinary punctuation. Keying
+ * "Rush / Web" the path way yields `web`, which exact-matches an unrelated
+ * `web/` checkout — the precise silent mis-binding this whole match path exists
+ * to prevent.
+ */
+function checkoutMatchKey(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+/**
+ * Find the local checkout directory a Linear project name refers to, on EXACT
+ * key equality only — never containment. `matchLinearProject`'s containment
+ * fallback is right for suggesting a link a human then confirms; this backs
+ * `projects import --from-linear`, which writes `root`/`repo` with nobody
+ * looking, and "Agents CLI" must not silently bind `agents-cli-web`.
+ *
+ * Returns `undefined` when nothing matches, and also when SEVERAL dirs key to
+ * the same value (`agents-cli` and `agents_cli`) — an ambiguous match is not a
+ * match.
+ */
+export function matchLocalCheckoutExact(name: string, dirNames: string[]): string | undefined {
+  const key = checkoutMatchKey(name);
+  if (!key) return undefined;
+  const hits = dirNames.filter((d) => checkoutMatchKey(d) === key);
+  return hits.length === 1 ? hits[0] : undefined;
+}
+
 /** The outcome of picking one Linear project out of the workspace list. */
 export type LinearPick =
   | { kind: 'match'; project: LinearProjectLite }

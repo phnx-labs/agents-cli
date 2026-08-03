@@ -17,11 +17,10 @@ import * as path from 'path';
 import * as os from 'os';
 import { createHash } from 'node:crypto';
 import { gzipSync, gunzipSync } from 'node:zlib';
-import { parseSshConnection } from './session/provenance.js';
 import { ensureLockTarget, withFileLock } from './fs-atomic.js';
 import { getUserAgentsDir } from './state.js';
-import { resolveActor, type ActorKind } from './actor.js';
-import { machineId } from './machine-id.js';
+import { stampProvenance, resetEventProvenanceForTest } from './event-provenance.js';
+import type { ActorKind } from './actor.js';
 
 /** Lazy perf warehouse write — avoids a hard cycle at module load. */
 function recordPerfTiming(payload: {
@@ -290,7 +289,7 @@ export interface EventMeta {
   /** Resolved actor id — which human/agent is behind this event (RUSH-2020). */
   actor?: string;
   /** Actor kind (`human`/`agent`). */
-  kind?: ActorKind;
+  kind?: ActorKind | 'unknown';
 }
 
 export interface EventPayload {
@@ -547,73 +546,6 @@ export function detectCaller(
 
 // ─── Audit attribution ────────────────────────────────────────────────────────
 
-interface AuditOrigin {
-  osUser: string;
-  transport: 'local' | 'ssh';
-  sshClientIp?: string;
-  /** Resolved actor id (`resolveActor().id`) — which human/agent is behind this event. */
-  actor: string;
-  /** Actor kind (`resolveActor().kind`). */
-  kind: ActorKind;
-}
-
-/**
- * Who is running this process and from where. Derived once per process from the
- * OS user and $SSH_CONNECTION (via the same parser the sessions layer uses), then
- * cached — provenance can't change mid-process, so every emit() pays for it once.
- */
-let _origin: AuditOrigin | undefined;
-function auditOrigin(): AuditOrigin {
-  if (_origin) return _origin;
-  let osUser = 'unknown';
-  try {
-    osUser = os.userInfo().username;
-  } catch {
-    // Container/edge cases where the uid has no passwd entry.
-  }
-  const ssh = process.env.SSH_CONNECTION ? parseSshConnection(process.env.SSH_CONNECTION) : undefined;
-  const actor = resolveActor();
-  _origin = {
-    osUser,
-    transport: ssh ? 'ssh' : 'local',
-    ...(ssh ? { sshClientIp: ssh.clientIp } : {}),
-    actor: actor.id,
-    kind: actor.kind,
-  };
-  return _origin;
-}
-
-/**
- * Provenance the spawn env already carries but no call site passes: the full
- * (untruncated) session id, the harness `agent` name, the launch join key, and
- * the parent-session lineage edge. Stamped as DEFAULTS on every event so a
- * reader of `agents events` can answer "which agent, which session, spawned by
- * whom" without cross-referencing sessions.db — while an explicit payload value
- * (e.g. cloud.dispatch's own `agent`) still wins. Read fresh per emit: the reads
- * are trivial and this stays correct when a test mutates env between calls.
- */
-interface ProvenanceFloor {
-  sessionId?: string;
-  agent?: string;
-  launchId?: string;
-  parentSessionId?: string;
-}
-/** This machine's normalized device id, resolved once — it can't change mid-process. */
-let _machineId: string | undefined;
-function cachedMachineId(): string {
-  return (_machineId ??= machineId());
-}
-
-function resolveProvenance(env: NodeJS.ProcessEnv = process.env): ProvenanceFloor {
-  const p: ProvenanceFloor = {};
-  const sessionId = env.AGENT_SESSION_ID || env.AGENTS_SESSION_ID;
-  if (sessionId) p.sessionId = sessionId;
-  if (env.AGENTS_AGENT_NAME) p.agent = env.AGENTS_AGENT_NAME;
-  if (env.AGENT_LAUNCH_ID) p.launchId = env.AGENT_LAUNCH_ID;
-  if (env.AGENTS_PARENT_SESSION_ID) p.parentSessionId = env.AGENTS_PARENT_SESSION_ID;
-  return p;
-}
-
 // ─── Core API ─────────────────────────────────────────────────────────────────
 
 /**
@@ -638,13 +570,12 @@ export function emit(event: EventType, payload: EventPayload = {}, overrides: { 
     const safePayload = sanitizePayload(payload);
     const record: EventRecord = {
       // Provenance floor first: env-sourced defaults an explicit payload overrides.
-      ...resolveProvenance(),
+      ...stampProvenance(),
       ...safePayload,
       ts: overrides.ts ?? new Date().toISOString(),
       tz: getTimezoneOffset(),
       tzName: getTimezoneName(),
       hostname: os.hostname(),
-      machineId: cachedMachineId(),
       platform: os.platform(),
       arch: os.arch(),
       pid: process.pid,
@@ -653,7 +584,6 @@ export function emit(event: EventType, payload: EventPayload = {}, overrides: { 
       level: levelFor(event),
       caller: caller.kind,
       ...(caller.session ? { session: caller.session } : {}),
-      ...auditOrigin(),
     };
 
     const line = JSON.stringify(record) + '\n';
@@ -1250,8 +1180,7 @@ export function getLogsPath(): string {
 
 export function _resetForTest(overrideEventsPath?: string): void {
   _eventsPath = overrideEventsPath;
-  _origin = undefined;
-  _machineId = undefined;
+  resetEventProvenanceForTest();
   _chmoddedPath = undefined;
   lastRotationCheck = 0;
 }

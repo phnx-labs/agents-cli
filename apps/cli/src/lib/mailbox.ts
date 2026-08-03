@@ -20,6 +20,30 @@ import * as path from 'path';
 import { randomUUID } from 'crypto';
 import { getMailboxRootDir } from './state.js';
 import { recordMessageReceipt } from './feed.js';
+import { parseDuration } from './hooks/cache.js';
+
+/** Default delivery TTL for messages enqueued without an explicit one (24 hours). */
+export const DEFAULT_TTL_SECONDS = 24 * 60 * 60;
+
+/** Env var that overrides {@link DEFAULT_TTL_SECONDS} with a duration like "24h" or "3600". */
+export const MAILBOX_TTL_ENV = 'AGENTS_MAILBOX_TTL';
+
+/**
+ * Resolve the default mailbox TTL in seconds. Honors `AGENTS_MAILBOX_TTL`
+ * (parsed by {@link parseDuration}); falls back to 24h. A malformed env value
+ * fails loud instead of silently disabling expiry.
+ */
+export function resolveDefaultTtlSeconds(): number {
+  const raw = process.env[MAILBOX_TTL_ENV];
+  if (raw == null || raw === '') return DEFAULT_TTL_SECONDS;
+  const parsed = parseDuration(raw);
+  if (parsed == null || parsed <= 0) {
+    throw new Error(
+      `Invalid ${MAILBOX_TTL_ENV}=${JSON.stringify(raw)}: expected a positive duration (e.g. 24h, 30m, 3600).`,
+    );
+  }
+  return parsed;
+}
 
 /** A single mailbox message. `text` may embed `host:/path` clip tokens. */
 export interface MailboxMessage {
@@ -115,8 +139,9 @@ export function enqueue(boxDir: string, msg: { to: string; text: string; from?: 
     text: msg.text,
     blockId: msg.blockId,
   };
-  if (msg.ttlSeconds != null && msg.ttlSeconds > 0) {
-    record.expiresAt = new Date(now.getTime() + msg.ttlSeconds * 1000).toISOString();
+  const ttlSeconds = msg.ttlSeconds ?? resolveDefaultTtlSeconds();
+  if (ttlSeconds > 0) {
+    record.expiresAt = new Date(now.getTime() + ttlSeconds * 1000).toISOString();
   }
   const target = path.join(inboxDir(boxDir), `${msgId}.json`);
   const tmp = `${target}.${process.pid}.tmp`;
@@ -175,8 +200,16 @@ function archiveDropped(boxDir: string, name: string, reason: string): void {
 /**
  * Move expired messages from inbox/ and processing/ into consumed/ with a
  * `dropped: expired` marker. Called by drain/peek before returning messages.
+ *
+ * When a dropped message carries a `blockId`, a failure receipt is surfaced
+ * back to the feed store so the sender sees the bounce.
  */
-export function sweepExpired(boxDir: string, boxId: string = path.basename(boxDir), now: Date = new Date()): number {
+export function sweepExpired(
+  boxDir: string,
+  boxId: string = path.basename(boxDir),
+  now: Date = new Date(),
+  feedRoot?: string,
+): number {
   ensureDirs(boxDir);
   let n = 0;
   for (const dir of [inboxDir(boxDir), processingDir(boxDir)]) {
@@ -190,6 +223,17 @@ export function sweepExpired(boxDir: string, boxId: string = path.basename(boxDi
           fs.writeFileSync(tmp, JSON.stringify(msg, null, 2), 'utf-8');
           fs.renameSync(tmp, dest);
           fs.unlinkSync(path.join(dir, name));
+          if (msg.blockId) {
+            try {
+              recordMessageReceipt(
+                msg.blockId,
+                { msgId: msg.msgId, status: 'expired', at: new Date().toISOString(), from: msg.from },
+                feedRoot ?? process.env.AGENTS_FEED_DIR,
+              );
+            } catch {
+              // Receipt surfacing is best-effort; never stall expiry.
+            }
+          }
           n++;
         } catch {
           // ignore racing claimers
