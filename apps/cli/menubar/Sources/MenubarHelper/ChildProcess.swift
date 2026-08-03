@@ -89,23 +89,36 @@ enum ChildProcess {
         // Drain on a background thread so the deadline is enforceable. Draining
         // WHILE the child runs also keeps a child that outputs more than the
         // ~64 KiB pipe buffer from blocking on write forever.
+        //
+        // The reader OWNS readFD and closes it itself. That ownership is what
+        // lets the abandon path below be safe: closing a descriptor out from
+        // under a thread blocked in read(2) races that fd's reuse by any other
+        // thread, so the only correct way to walk away from a stuck reader is to
+        // leave the descriptor with it.
         var output = Data()
         let drained = DispatchSemaphore(value: 0)
         DispatchQueue.global(qos: .utility).async {
             output = readToEnd(readFD)
+            close(readFD)
             drained.signal()
         }
 
         var timedOut = false
         if drained.wait(timeout: .now() + timeout) == .timedOut {
             timedOut = true
-            // Kill the GROUP: the CLI plus every probe it forked. Closing their
-            // stdout is what releases the reader thread below.
+            // Kill the GROUP: the CLI plus every probe it forked. Every write end
+            // of the pipe closes as those processes die, which is what releases
+            // the reader.
             terminateGroup(pid)
-            drained.wait()
+            // Bounded, because this whole type exists to abolish unbounded waits
+            // — including its own. SIGKILL cannot be caught, so EOF must follow;
+            // if it somehow does not, abandon the reader (it owns its fd) and
+            // reap off-thread rather than hanging the caller's queue forever.
+            if drained.wait(timeout: .now() + 5) == .timedOut {
+                reapDetached(pid)
+                return nil
+            }
         }
-
-        close(readFD)
 
         // Always reap, even on timeout, so a killed child never lingers as a
         // zombie occupying a pid slot.
@@ -117,6 +130,15 @@ enum ChildProcess {
         let code = (status >> 8) & 0xFF
         guard exited, code == 0 else { return nil }
         return output
+    }
+
+    /// Reap a child we have stopped waiting on, without blocking the caller.
+    /// Skipping the reap entirely would leave a zombie holding its pid slot.
+    private static func reapDetached(_ pid: pid_t) {
+        DispatchQueue.global(qos: .utility).async {
+            var status: Int32 = 0
+            while waitpid(pid, &status, 0) == -1 && errno == EINTR {}
+        }
     }
 
     /// posix_spawn with the child as its own process-group leader.
@@ -191,7 +213,13 @@ enum ChildProcess {
     @discardableResult
     static func reapOrphansFromPreviousLaunch(file: String = Registry.path()) -> Int {
         let stale = Registry.readAll(file: file)
-        Registry.clear(file: file)
+        // Kill FIRST, clear after. Clearing first means a helper that dies part
+        // way through this sweep (entirely possible — the crash it is recovering
+        // from happens moments later, in the first AppKit call) has already
+        // erased the only record of the survivors, stranding them forever. In
+        // this order a death mid-sweep just leaves the record for the next launch
+        // to retry, and re-killing is harmless: the pid+path guard below refuses
+        // anything that is not still the process we spawned.
         var reaped = 0
         for entry in stale where entry.pid != getpid() {
             // Guard against pid reuse: the slot may now hold something else
@@ -201,6 +229,7 @@ enum ChildProcess {
             terminateGroup(entry.pid)
             reaped += 1
         }
+        Registry.clear(file: file)
         return reaped
     }
 
