@@ -562,6 +562,21 @@ enum IssueSelfTest {
         check("other machine is remote",
               ActiveDisplay.locality(machine: "yosemite-m0", thisMachine: "zion")
                   == "remote · yosemite-m0")
+        check("nil machine is local (local-only listing)",
+              ActiveDisplay.locality(machine: nil, thisMachine: "zion") == "local")
+        // Parity with CLI machineId()/normalizeHost — engine tags rows as the
+        // short lowercased hostname, never the Sharing computer name.
+        check("normalizeHost strips domain and lowercases",
+              ActiveDisplay.normalizeHost("Zion.local") == "zion")
+        check("normalizeHost collapses non-alphanumerics",
+              ActiveDisplay.normalizeHost("Muqsit's MacBook Pro") == "muqsit-s-macbook-pro")
+        check("thisMachineId honors AGENTS_SYNC_MACHINE_ID",
+              ActiveDisplay.thisMachineId(env: ["AGENTS_SYNC_MACHINE_ID": "ZION.tail"],
+                                          hostname: "other.local") == "zion")
+        check("locality matches after normalize (engine zion vs Host.local)",
+              ActiveDisplay.locality(machine: "zion",
+                                     thisMachine: ActiveDisplay.normalizeHost("Zion.local"))
+                  == "local")
 
         let summary = ActiveDisplay.projectSummary(repo: "agents-cli", running: 8, idle: 1,
                                                    machines: ["zion", "zion"])

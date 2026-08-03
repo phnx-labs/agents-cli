@@ -74,12 +74,13 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     // cache with NO extra CLI calls. Session *detail* lives in a side submenu (›),
     // not a second accordion level.
     private var expandedProjects = Set<String>()
-    private lazy var thisMachine: String = {
-        Host.current().localizedName
-            ?? ProcessInfo.processInfo.hostName
-                .split(separator: ".").first.map(String.init)
-            ?? "local"
-    }()
+    /// True after a project accordion toggle until menuDidClose schedules reopen.
+    private var pendingAccordionReopen = false
+    /// True for the menuWillOpen that follows accordion reopen — skip CLI schedule
+    /// and the expensive teams scan; rebuild from warm caches only.
+    private var accordionCacheOnlyOpen = false
+    /// Same form as CLI `machineId()` so engine-tagged sessions compare as local.
+    private lazy var thisMachine: String = ActiveDisplay.thisMachineId()
 
     private var densitySetting: Density {
         get {
@@ -294,6 +295,21 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     // MARK: - Menu
     func menuWillOpen(_ menu: NSMenu) {
+        // Accordion reopen: rebuild purely from warm caches. No teams history
+        // walk, no CLI schedule — expand must stay cheap and not re-shell
+        // `sessions --active`.
+        if accordionCacheOnlyOpen {
+            accordionCacheOnlyOpen = false
+            let sessions = LocalState.sessions(includeTeams: false)
+            let browserTasks = LocalState.browserTasks(limit: 3)
+            let pending = LocalState.pendingDevices()
+            rebuild(menu, sessions: sessions, browserTasks: browserTasks,
+                    recentSessions: cachedRecentSessions, routines: cachedRoutines,
+                    doctor: cachedDoctorOverview, daemonPid: AgentsCLI.daemonPid(),
+                    pending: pending)
+            return
+        }
+
         // Critical path is all cheap disk reads. CLI-backed sections come from
         // warm caches; opening the menu only schedules refreshes for next time.
         let sessions = LocalState.sessions(includeTeams: true)
@@ -311,6 +327,17 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         refreshActiveSessions()
         refreshDoctorOverview()
         refreshWatchdog()
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        // Accordion click dismissed the menu; reopen only AFTER close so
+        // performClick cannot race and toggle the status item shut again.
+        guard pendingAccordionReopen else { return }
+        pendingAccordionReopen = false
+        accordionCacheOnlyOpen = true
+        DispatchQueue.main.async { [weak self] in
+            self?.statusItem.button?.performClick(nil)
+        }
     }
 
     // The one rule: attention floats to the top triage strip (wait-time sorted,
@@ -812,27 +839,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         } else {
             expandedProjects.insert(repo)
         }
-        reopenMenu()
-    }
-
-    /// Rebuild the menu from warm caches and re-open it so project accordion
-    /// toggles feel like fold/unfold rather than dismiss. No network / re-index.
-    private func reopenMenu() {
-        guard let menu = statusItem.menu else { return }
-        let cheap = LocalState.sessions(includeTeams: false)
-        let browser = LocalState.browserTasks()
-        let pending = LocalState.pendingDevices()
-        rebuild(menu,
-                sessions: cheap,
-                browserTasks: browser,
-                recentSessions: cachedRecentSessions,
-                routines: cachedRoutines,
-                doctor: cachedDoctorOverview,
-                daemonPid: AgentsCLI.daemonPid(),
-                pending: pending)
-        DispatchQueue.main.async { [weak self] in
-            self?.statusItem.button?.performClick(nil)
-        }
+        // Defer reopen to menuDidClose so performClick cannot race the dismiss.
+        pendingAccordionReopen = true
     }
 
     @objc private func onRevealPath(_ sender: NSMenuItem) {

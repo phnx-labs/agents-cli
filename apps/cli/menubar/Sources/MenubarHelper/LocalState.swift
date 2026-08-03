@@ -80,11 +80,40 @@ enum ActiveDisplay {
         return "\(hr / 24)d"
     }
 
-    /// local vs remote for display. `thisMachine` is the local hostname short form.
+    /// Match CLI `normalizeHost` / `machineId()` so engine-tagged rows (`zion`)
+    /// compare equal to this box. First DNS label, lowercased, non [a-z0-9_-] → `-`.
+    static func normalizeHost(_ raw: String) -> String {
+        let first = raw.split(separator: ".", maxSplits: 1, omittingEmptySubsequences: true)
+            .first.map(String.init) ?? raw
+        let lowered = first.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let mapped = lowered.map { ch -> Character in
+            if ch.isLetter || ch.isNumber || ch == "-" || ch == "_" { return ch }
+            return "-"
+        }
+        let out = String(mapped)
+        return out.isEmpty ? "unknown" : out
+    }
+
+    /// This machine's id — same sources as CLI `machineId()` (env override, else hostname).
+    static func thisMachineId(
+        env: [String: String] = ProcessInfo.processInfo.environment,
+        hostname: String = ProcessInfo.processInfo.hostName
+    ) -> String {
+        if let override = env["AGENTS_SYNC_MACHINE_ID"], !override.isEmpty {
+            return normalizeHost(override)
+        }
+        return normalizeHost(hostname)
+    }
+
+    /// local vs remote for display. `thisMachine` must already be normalizeHost'd
+    /// (same form as engine `machine` tags). Nil machine on a local-only listing
+    /// is treated as local — the engine usually stamps machineId, but cold paths
+    /// (terminals.json) may omit it.
     static func locality(machine: String?, thisMachine: String) -> String {
-        guard let machine, !machine.isEmpty else { return "local?" }
-        if machine == thisMachine || machine == "localhost" { return "local" }
-        return "remote · \(machine)"
+        guard let machine, !machine.isEmpty else { return "local" }
+        let m = normalizeHost(machine)
+        if m == thisMachine || m == "localhost" || m == "unknown" { return "local" }
+        return "remote · \(m)"
     }
 
     /// Collapsed project row: `agents-cli  ●8 ◐1  zion`.
