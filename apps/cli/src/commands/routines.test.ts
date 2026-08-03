@@ -1200,6 +1200,7 @@ describe('buildRunsJson', () => {
         completedAt: null,
         exitCode: null,
         errorMessage: null,
+        duration: null,
       },
       {
         jobId: 'test-job',
@@ -1210,6 +1211,7 @@ describe('buildRunsJson', () => {
         completedAt: null,
         exitCode: null,
         errorMessage: null,
+        duration: null,
       },
     ]);
   });

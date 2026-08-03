@@ -33,6 +33,7 @@ import {
   writeJob,
   setJobEnabled,
   listRuns,
+  routineStats,
   getLatestRun,
   getRunDir,
   getJobPath,
@@ -425,6 +426,7 @@ function runMetaJson(run: RunMeta): Record<string, unknown> {
     completedAt: run.completedAt,
     exitCode: run.exitCode,
     errorMessage: run.errorMessage ?? null,
+    duration: run.duration ?? null,
   };
 }
 
@@ -1155,6 +1157,52 @@ export function registerRoutinesCommands(program: Command): void {
             : chalk.yellow(run.status);
         console.log(`  ${run.runId}  ${status}  ${run.startedAt}`);
       }
+    });
+
+  routinesCmd
+    .command('stats [name]')
+    .description('Duration + outcome rollup per job: run count, failed, missed, avg/p50/p95 duration')
+    .option('--json', 'Emit machine-readable JSON')
+    .action(async (name: string | undefined, options: { json?: boolean }) => {
+      // No name: summarize every job (like `routines list`). A name narrows to
+      // one job's rollup — no interactive picker, since a bare `stats` already
+      // has a useful all-jobs default.
+      if (!name) {
+        const jobs = listAllJobs();
+        const rows = jobs.map((j) => ({ name: j.name, ...routineStats(j.name) }));
+        if (options.json) {
+          writeJson({ jobs: rows });
+          return;
+        }
+        if (rows.length === 0) {
+          console.log(chalk.gray('No jobs configured'));
+          return;
+        }
+        console.log(chalk.bold('Routine stats\n'));
+        const pad = (s: string, w: number) => (s.length >= w ? s.slice(0, w) : s + ' '.repeat(w - s.length));
+        console.log(chalk.gray(`  ${pad('JOB', 28)} ${pad('N', 5)} ${pad('FAILED', 7)} ${pad('MISSED', 7)} ${pad('AVG', 7)} ${pad('P50', 7)} P95`));
+        for (const r of rows) {
+          console.log(`  ${pad(r.name, 28)} ${pad(String(r.count), 5)} ${pad(String(r.failed), 7)} ${pad(String(r.missed), 7)} ${pad(`${r.avgMs}ms`, 7)} ${pad(`${r.p50}ms`, 7)} ${r.p95}ms`);
+        }
+        return;
+      }
+
+      const stats = routineStats(name);
+      if (options.json) {
+        writeJson({ jobId: name, name, ...stats });
+        return;
+      }
+      if (stats.count === 0) {
+        console.log(chalk.yellow(`No runs found for job '${name}'`));
+        return;
+      }
+      console.log(chalk.bold(`Stats: ${name}\n`));
+      console.log(`  Runs:     ${stats.count}`);
+      console.log(`  Failed:   ${stats.failed}`);
+      console.log(`  Missed:   ${stats.missed}`);
+      console.log(`  Avg:      ${stats.avgMs}ms`);
+      console.log(`  P50:      ${stats.p50}ms`);
+      console.log(`  P95:      ${stats.p95}ms`);
     });
 
   routinesCmd
