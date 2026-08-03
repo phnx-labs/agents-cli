@@ -1,22 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- **`agents sessions --active --json` now reports who is watching each session.**
-  The `viewingIn` field carries the same string the table prints — `codium tab 3`,
-  `ghostty tab 2`, or `detached` for a live tmux pane with no client attached
-  (its terminal was closed or crashed), and `null` for a session that isn't
-  tmux-hosted. Previously the JSON path returned before the locator pass ran, so
-  the field never appeared and machine consumers could not distinguish a session
-  someone is looking at from an orphaned one. The JSON path resolves tmux clients
-  only — no osascript — so scriptable output stays cheap; a Ghostty-attached
-  client is reported as `ghostty` without its tab number. Peers on older versions
-  that emit the previous `{app, tab}` object are normalized at the fan-out
-  boundary. Source: `apps/cli/src/lib/session/viewing-in.ts` (`viewingInLabel`,
-  `parseViewingIn`), `apps/cli/src/commands/sessions.ts`
-  (`serializeActiveSessionsForJson`, `enrichTmuxLocators`),
-  `apps/cli/src/lib/session/remote-active.ts`.
-
 ## 1.20.88
 
 - **`agents doctor` redesigned into a prioritized, fleet-aware, per-version
