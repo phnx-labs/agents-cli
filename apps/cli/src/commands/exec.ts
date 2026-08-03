@@ -510,6 +510,7 @@ export async function runWorkflowForEach(
  * a session started when none did.
  */
 async function handleTerminalHandoff(
+  agentSpec: string,
   options: ExecCommandActionOptions,
   prompt: string | undefined,
 ): Promise<void> {
@@ -519,6 +520,19 @@ async function handleTerminalHandoff(
   const parsed = parseTerminalFlag(options.terminal);
   if (parsed.error) {
     console.error(chalk.red(parsed.error));
+    process.exit(1);
+  }
+
+  // Reject an unrunnable agent HERE, where the person can read it. The tab would
+  // otherwise open, print the same error, and close — the failure lands in a
+  // window that is gone before it can be read, which reads as "nothing happened".
+  const baseAgent = resolveAgentName(parseRunAccountPickerRequest(agentSpec).normalizedAgentSpec.split('@')[0]);
+  if (!baseAgent) {
+    console.error(chalk.red(`Unknown agent: ${agentSpec}. See \`agents list\` for the installed harnesses.`));
+    process.exit(1);
+  }
+  if (isAgentHardDeprecated(baseAgent)) {
+    console.error(chalk.red(hardDeprecationError(baseAgent)));
     process.exit(1);
   }
   if (options.host) {
@@ -827,7 +841,7 @@ export function registerRunCommand(program: Command): void {
       // other dispatch path because the tab re-runs this same argv without the
       // flag — arming --notify or picking a version here would happen twice.
       if (options.terminal) {
-        await handleTerminalHandoff(options, prompt);
+        await handleTerminalHandoff(agentSpec, options, prompt);
         return;
       }
 
