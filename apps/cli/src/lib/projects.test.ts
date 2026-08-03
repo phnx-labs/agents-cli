@@ -12,6 +12,7 @@ import {
   projectBasePath,
   resolveDefinedProjectPath,
   projectNameForCwd,
+  resolveProjectNameForCwd,
   type ProjectDef,
 } from './projects.js';
 
@@ -175,5 +176,40 @@ describe('projectNameForCwd', () => {
     // ~/src/rush-extra must NOT match ~/src/rush (segment-aware, not string prefix)
     expect(projectNameForCwd(path.join(HOME, 'src/rush-extra/x'), defs)).toBeUndefined();
     expect(projectNameForCwd(undefined, defs)).toBeUndefined();
+  });
+});
+
+describe('resolveProjectNameForCwd', () => {
+  it('prefers the defined project over the repo key', () => {
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'proj-canonical-'));
+    try {
+      fs.mkdirSync(path.join(repo, '.git'));
+      const sub = path.join(repo, 'apps', 'web');
+      fs.mkdirSync(sub, { recursive: true });
+      const defs: ProjectDef[] = [{ name: 'rush', root: repo }];
+      expect(resolveProjectNameForCwd(sub, defs)).toBe('rush'); // def name, not the repo basename
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to the repository key for a cwd no definition contains — and with no defs at all', () => {
+    // Real temp repo: the fallback does the fs walk and names the repo dir.
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'proj-fallback-'));
+    try {
+      fs.mkdirSync(path.join(repo, '.git'));
+      const sub = path.join(repo, 'apps', 'cli');
+      fs.mkdirSync(sub, { recursive: true });
+      const elsewhere: ProjectDef[] = [{ name: 'rush', root: path.join(repo, 'elsewhere-def-root') }];
+      expect(resolveProjectNameForCwd(sub, elsewhere)).toBe(path.basename(repo));
+      expect(resolveProjectNameForCwd(sub, [])).toBe(path.basename(repo)); // == today's behavior
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('undefined for an empty cwd', () => {
+    expect(resolveProjectNameForCwd(undefined, [])).toBeUndefined();
+    expect(resolveProjectNameForCwd('', [])).toBeUndefined();
   });
 });

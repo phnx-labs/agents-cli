@@ -65,6 +65,18 @@ tree is. A definition exists solely by explicit user action (`projects add`,
 `import --from-factory`, or hand-authoring the YAML), so honoring it in `--project`
 resolution is additive and safe; users without any definitions see zero change.
 
+## One name everywhere — activity, feed, sessions
+
+Definitions also rename the fleet's activity. `resolveProjectNameForCwd`
+(`lib/projects.ts`) is the single project resolver shared by the `agents activity`
+timeline (buckets and row chips), `agents feed post` (the stamped project), and the
+`agents sessions` overview: a cwd inside a defined project's root reads as the
+project's **name** — a multi-repo project is one bucket, not one per repo — and
+anything else falls back to the repository-level key (`lib/project-key.ts`). Each
+machine resolves its own cwds against its own (synced) definitions before events
+cross the wire. `agents activity --project <name>` narrows the stream to one
+project, exact-matched on this label.
+
 ## The progress card — `agents projects status`
 
 The headline. It matches every live session to a project **by cwd** (longest root

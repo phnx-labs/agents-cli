@@ -25,6 +25,7 @@ import * as yaml from 'yaml';
 import { getProjectsDir } from './state.js';
 import { safeJoin } from './paths.js';
 import { toHomeRelative, expandLocalHome } from './project-root.js';
+import { resolveProjectKey } from './project-key.js';
 
 /** A git repo bound to a project, with an optional monorepo subpath. */
 export interface ProjectRepo {
@@ -324,6 +325,19 @@ export function projectNameForCwd(cwd: string | undefined, defs: ProjectDef[]): 
     }
   }
   return best;
+}
+
+/**
+ * The canonical project label for a cwd, for every surface that buckets work by
+ * project (the activity timeline, feed posts, the sessions overview): the
+ * DEFINED project whose root contains the cwd (longest root wins, so a
+ * multi-repo project reads as one bucket), else the repository-level key from
+ * {@link resolveProjectKey}. `defs` comes from {@link listProjectDefs}, which is
+ * fail-open — with no definitions this degrades to exactly today's behavior.
+ */
+export function resolveProjectNameForCwd(cwd: string | undefined | null, defs: ProjectDef[]): string | undefined {
+  if (!cwd) return undefined;
+  return projectNameForCwd(cwd, defs) ?? resolveProjectKey(cwd);
 }
 
 /**
