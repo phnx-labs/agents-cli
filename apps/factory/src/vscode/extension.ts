@@ -112,7 +112,7 @@ import {
   type BrowsableSession,
   type SessionBrowserSessionRow,
 } from '../core/sessionBrowser';
-import { LatestSessionBrowserRequest, loadBrowsableSessions, runPickedSessionFork } from './sessionBrowser.vscode';
+import { createForkPickSessionCommand, loadBrowsableSessions, runPickedSessionFork, runSessionBrowserPicker } from './sessionBrowser.vscode';
 import type { RemoteSession, RawActiveSession } from '../core/remoteSessions';
 import {
   buildResumeCandidates,
@@ -1653,7 +1653,7 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('agents.forkPickSession', () => forkPickedSession(context))
+    vscode.commands.registerCommand('agents.forkPickSession', createForkPickSessionCommand(() => forkPickedSession(context)))
   );
 
   context.subscriptions.push(
@@ -4871,71 +4871,24 @@ async function pickSessionToFork(
   quickPick.matchOnDetail = true;
   quickPick.buttons = [switchDevice, reload];
 
-  let device: string | undefined;
-  const requests = new LatestSessionBrowserRequest();
-
-  const load = async (): Promise<void> => {
-    const request = requests.begin();
-    const loadingDevice = device;
-    quickPick.title = `Agents: Fork (Pick Session) · ${device ?? LOCAL_MACHINE_ID}`;
-    quickPick.busy = true;
-    quickPick.items = [];
-    try {
-      const sessions = await listBrowsableSessions(loadingDevice, currentSessionId, currentSessionDevice);
-      if (!request.current()) return;
+  try {
+    return await runSessionBrowserPicker({
+      quickPick,
+      switchButton: switchDevice,
+      reloadButton: reload,
+      localMachine: LOCAL_MACHINE_ID,
+      loadItems: async device => {
+        const sessions = await listBrowsableSessions(device, currentSessionId, currentSessionDevice);
       const rows = buildSessionBrowserRows(sessions, {
         localMachine: LOCAL_MACHINE_ID,
         currentSessionId,
         limitPerMachine: SESSION_BROWSER_LIMIT,
       });
-      quickPick.items = rows.length > 0
-        ? toBrowserItems(rows)
-        : [{ label: `No sessions found on ${device ?? LOCAL_MACHINE_ID}`, alwaysShow: true }];
-    } catch (err: any) {
-      if (!request.current()) return;
-      // A device that is off, unreachable, or missing the CLI fails here — say so
-      // in the list itself rather than closing the picker out from under the user.
-      const msg = (err?.stderr || err?.message || String(err)).trim().split('\n')[0];
-      quickPick.items = [{ label: `$(error) Could not list sessions: ${msg.slice(0, 120)}`, alwaysShow: true }];
-    } finally {
-      if (request.current()) quickPick.busy = false;
-    }
-  };
-
-  try {
-    return await new Promise<SessionBrowserSessionRow | null>((resolve) => {
-      // Set while the device sub-picker is up: VS Code hides this QuickPick when
-      // another opens, and that hide must not read as "the user cancelled".
-      let switching = false;
-
-      quickPick.onDidTriggerButton(async (button) => {
-        if (button === reload) {
-          void load();
-          return;
-        }
-        switching = true;
-        quickPick.hide();
-        const chosen = await pickBrowseDevice(device);
-        switching = false;
-        quickPick.show();
-        if (chosen.cancelled) return; // back to the list, same device
-        device = chosen.device;
-        void load();
-      });
-
-      quickPick.onDidAccept(() => {
-        const picked = quickPick.selectedItems[0];
-        if (!picked?.row) return; // an empty-state / error line is not selectable
-        resolve(picked.row);
-        quickPick.hide();
-      });
-
-      quickPick.onDidHide(() => {
-        if (!switching) resolve(null);
-      });
-
-      quickPick.show();
-      void load();
+        return toBrowserItems(rows);
+      },
+      chooseDevice: pickBrowseDevice,
+      emptyItem: device => ({ label: `No sessions found on ${device ?? LOCAL_MACHINE_ID}`, alwaysShow: true }),
+      errorItem: message => ({ label: `$(error) Could not list sessions: ${message.slice(0, 120)}`, alwaysShow: true }),
     });
   } finally {
     quickPick.dispose();

@@ -37,7 +37,7 @@ export async function loadBrowsableSessions(
     maxBuffer: 16 * 1024 * 1024,
     timeout,
   });
-  if (listed.stderr.trim()) throw new Error(listed.stderr.trim());
+  if (opts.device && listed.stderr.trim()) throw new Error(listed.stderr.trim());
   const sessions = parseSessionList(listed.stdout);
 
   const browsingCurrentDevice = (opts.device ?? opts.localMachine) ===
@@ -47,13 +47,15 @@ export async function loadBrowsableSessions(
     return sessions;
   }
 
-  const exact = await run(`sessions ${opts.quote(opts.currentSessionId)} --json${scope}`, {
+  const exact = await run(`sessions --active --json${scope}`, {
     maxBuffer: 16 * 1024 * 1024,
     timeout,
   });
   if (exact.stderr.trim()) throw new Error(exact.stderr.trim());
-  const detail = JSON.parse(exact.stdout);
-  const current = detail?.session ?? detail;
+  const active = JSON.parse(exact.stdout);
+  const current = Array.isArray(active)
+    ? active.find(session => session?.id === opts.currentSessionId || session?.shortId === opts.currentSessionId)
+    : undefined;
   if (current && typeof current === 'object' && typeof current.id === 'string') {
     sessions.push(current as BrowsableSession);
   }
@@ -67,6 +69,85 @@ export class LatestSessionBrowserRequest {
     const requestGeneration = ++this.generation;
     return { current: () => requestGeneration === this.generation };
   }
+}
+
+export interface SessionBrowserQuickPick<Item, Button> {
+  title: string | undefined;
+  busy: boolean;
+  items: readonly Item[];
+  selectedItems: readonly Item[];
+  show(): void;
+  hide(): void;
+  onDidTriggerButton(listener: (button: Button) => void): unknown;
+  onDidAccept(listener: () => void): unknown;
+  onDidHide(listener: () => void): unknown;
+}
+
+export function createForkPickSessionCommand(run: () => Promise<void>): () => Promise<void> {
+  return run;
+}
+
+export async function runSessionBrowserPicker<Item extends { row?: SessionBrowserSessionRow }, Button>(opts: {
+  quickPick: SessionBrowserQuickPick<Item, Button>;
+  switchButton: Button;
+  reloadButton: Button;
+  localMachine: string;
+  loadItems: (device?: string) => Promise<Item[]>;
+  chooseDevice: (current?: string) => Promise<{ device?: string; cancelled: boolean }>;
+  emptyItem: (device?: string) => Item;
+  errorItem: (message: string) => Item;
+}): Promise<SessionBrowserSessionRow | null> {
+  let device: string | undefined;
+  let switching = false;
+  const requests = new LatestSessionBrowserRequest();
+
+  const load = async (): Promise<void> => {
+    const request = requests.begin();
+    const loadingDevice = device;
+    opts.quickPick.title = `Agents: Fork (Pick Session) · ${loadingDevice ?? opts.localMachine}`;
+    opts.quickPick.busy = true;
+    opts.quickPick.items = [];
+    try {
+      const items = await opts.loadItems(loadingDevice);
+      if (!request.current()) return;
+      opts.quickPick.items = items.length > 0 ? items : [opts.emptyItem(loadingDevice)];
+    } catch (error: any) {
+      if (!request.current()) return;
+      const message = (error?.stderr || error?.message || String(error)).trim().split('\n')[0];
+      opts.quickPick.items = [opts.errorItem(message)];
+    } finally {
+      if (request.current()) opts.quickPick.busy = false;
+    }
+  };
+
+  return new Promise(resolve => {
+    opts.quickPick.onDidTriggerButton(async button => {
+      if (button === opts.reloadButton) {
+        void load();
+        return;
+      }
+      if (button !== opts.switchButton) return;
+      switching = true;
+      opts.quickPick.hide();
+      const chosen = await opts.chooseDevice(device);
+      switching = false;
+      opts.quickPick.show();
+      if (chosen.cancelled) return;
+      device = chosen.device;
+      void load();
+    });
+    opts.quickPick.onDidAccept(() => {
+      const picked = opts.quickPick.selectedItems[0];
+      if (!picked?.row) return;
+      resolve(picked.row);
+      opts.quickPick.hide();
+    });
+    opts.quickPick.onDidHide(() => {
+      if (!switching) resolve(null);
+    });
+    opts.quickPick.show();
+    void load();
+  });
 }
 
 export async function runPickedSessionFork(opts: {
