@@ -9,7 +9,9 @@
 // copy-pasteable `linear` CLI blocks so the run works whether or not the
 // linear.app secrets bundle is reachable from the run host.
 //
-// Usage: bun report.ts <findings.json> <meta.json>
+// Usage: bun report.ts <findings.json> <meta.json> [notes.md]
+//   notes.md — optional; appended under a "Verified distinct (not flagged)"
+//   heading so the report records what the review deliberately did NOT flag.
 
 import { readFileSync, existsSync } from "node:fs";
 
@@ -39,9 +41,9 @@ interface Meta {
   repo: string;
 }
 
-const [, , findingsPath, metaPath] = process.argv;
+const [, , findingsPath, metaPath, notesPath] = process.argv;
 if (!findingsPath || !metaPath || !existsSync(findingsPath) || !existsSync(metaPath)) {
-  console.error("usage: report.ts <findings.json> <meta.json>");
+  console.error("usage: report.ts <findings.json> <meta.json> [notes.md]");
   process.exit(1);
 }
 
@@ -125,6 +127,15 @@ findings.forEach((f, i) => {
   }
 });
 
+// Verified-distinct notes — what the review looked at and deliberately did NOT
+// flag. Records the false-positive discipline (message-to-agent != notify-a-human).
+if (notesPath && existsSync(notesPath)) {
+  out.push("## Verified distinct (not flagged)");
+  out.push("");
+  out.push(readFileSync(notesPath, "utf8").trim());
+  out.push("");
+}
+
 // Drafted tickets — copy-pasteable, so the run works with linear.app offline.
 out.push("## Drafted Linear tickets");
 out.push("");
@@ -155,5 +166,16 @@ findings.forEach((f, i) => {
   out.push("```");
   out.push("");
 });
+
+// Methodology footer.
+out.push("---");
+out.push("");
+out.push(
+  `_Produced by the \`design-drift\` skill — reuses the \`quality\` engine's ` +
+    `behavioral-signature clustering + a cross-surface consolidation lens over the ` +
+    `window's merged surfaces. Read-only: no code was changed. Every finding cites ` +
+    `\`file:line\`; the owner decides per-ticket whether to dispatch a fix._`,
+);
+out.push("");
 
 process.stdout.write(out.join("\n") + "\n");

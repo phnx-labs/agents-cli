@@ -140,7 +140,10 @@ keep the strongest evidence.
 ## Phase 4 — Render the report
 
 ```bash
-bun "$SKILL_DIR/report.ts" "$RUN_DIR/findings.json" "$RUN_DIR/meta.json" \
+# Optional notes.md records what the review looked at and deliberately did NOT
+# flag (the false-positive discipline) — write the synthesis subagent's
+# "verified distinct" list there and pass it as the third arg.
+bun "$SKILL_DIR/report.ts" "$RUN_DIR/findings.json" "$RUN_DIR/meta.json" "$RUN_DIR/notes.md" \
   > "$(git rev-parse --show-toplevel)/.agents/reports/design-drift-$(date -u +%F).md"
 ```
 
