@@ -123,11 +123,34 @@ describe('resolveSendEnvelope', () => {
     expect(r.envelope.to).toBe('local');
   });
 
+  it('ownerMode with full explicit flags works without notify.owner configured', () => {
+    // Regression: main allowed `notify --channel desktop --to local` with no yaml.
+    const r = resolveSendEnvelope(
+      { text: 'fallback', ownerMode: true, channel: 'desktop', to: 'local' },
+      metaEmpty,
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.envelope).toMatchObject({ channel: 'desktop', to: 'local', text: 'fallback' });
+  });
+
+  it('fills only the missing field from partial notify.owner', () => {
+    const partial = { notify: { owner: { channel: 'imessage', to: '' } } } as Meta;
+    const r = resolveSendEnvelope(
+      { text: 'x', ownerMode: true, to: '+1999' },
+      partial,
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.envelope.channel).toBe('imessage');
+    expect(r.envelope.to).toBe('+1999');
+  });
+
   it('fails owner alias when notify.owner is unset', () => {
     const r = resolveSendEnvelope({ text: 'x', to: 'owner' }, metaEmpty);
     expect(r.ok).toBe(false);
     if (r.ok) return;
-    expect(r.error).toMatch(/notify\.owner/);
+    expect(r.error).toMatch(/notify\.owner|--channel/);
   });
 
   it('requires channel and to for non-owner destinations', () => {

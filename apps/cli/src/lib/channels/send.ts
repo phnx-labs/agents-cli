@@ -107,32 +107,29 @@ export function resolveSendEnvelope(input: ResolveSendInput, meta: Meta): Resolv
     };
   }
 
-  const wantOwner = Boolean(input.ownerMode) || isOwnerAlias(input.to);
-  const owner = readOwnerDest(meta);
+  // Owner defaults fill only missing fields (and expand the bare "owner" alias).
+  // Explicit --channel/--to always win; a complete notify.owner is NOT required
+  // when both flags are already set (same merge-then-require shape as main).
+  const ownerCfg = meta.notify?.owner;
+  const ownerChannel = ownerCfg?.channel?.trim() || '';
+  const ownerTo = ownerCfg?.to?.trim() || '';
 
   let channel = (input.channel ?? '').trim();
   let to = (input.to ?? '').trim();
+  const usedOwnerAlias = isOwnerAlias(to);
 
-  if (wantOwner) {
-    if (!owner) {
-      return {
-        ok: false,
-        error:
-          'No notify.owner.{channel,to} in agents.yaml. Set notify.owner, or pass --channel and --to explicitly.',
-      };
-    }
-    // Explicit --channel/--to win; bare --to owner (or notify mode) uses config.
-    if (!channel) channel = owner.channel;
-    if (!to || isOwnerAlias(to)) to = owner.to;
+  if (input.ownerMode || usedOwnerAlias) {
+    if (!channel) channel = ownerChannel;
+    if (!to || usedOwnerAlias) to = ownerTo;
   }
 
   if (!channel || !to) {
-    return {
-      ok: false,
-      error:
-        'Need --channel and --to (or --to owner with notify.owner configured). ' +
-        'Example: agents send --channel desktop --to local --text "hi"',
-    };
+    const hint =
+      input.ownerMode || usedOwnerAlias
+        ? 'Set notify.owner.{channel,to} in agents.yaml, or pass --channel and --to explicitly.'
+        : 'Need --channel and --to (or --to owner with notify.owner configured). ' +
+          'Example: agents send --channel desktop --to local --text "hi"';
+    return { ok: false, error: hint };
   }
 
   const attachments = [
