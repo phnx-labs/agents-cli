@@ -47,8 +47,10 @@ cd apps/factory
 bash scripts/build.sh <version>
 bash scripts/install.sh <version>   # installs to Code/Cursor/Codium + reloads via activate.sh
 
-# From any fleet box, drive the remote editor and screenshot/inspect the result
-agents computer --host mac-mini screenshot --bundle com.microsoft.VSCode --window-id <id>
+# From any fleet box, drive the remote editor and screenshot/inspect the result.
+# `agents computer` drives the machine it runs on, so wrap it in `agents ssh` —
+# its own `--host` is a per-subcommand flag for remote *Windows* targets only.
+agents ssh mac-mini "agents computer screenshot --bundle com.microsoft.VSCode --window-id <id>"
 ```
 
 `scripts/install.sh` calls `scripts/activate.sh`, which reloads open editor windows and proves the new host activated from `exthost.log`. Running this on a remote machine keeps the verification focus-safe and avoids interrupting your local IDE.
