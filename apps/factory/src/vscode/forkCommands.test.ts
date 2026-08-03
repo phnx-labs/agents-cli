@@ -27,6 +27,10 @@ describe('fork command contributions', () => {
     expect(contributed('agents.forkPickHost')?.title).toBe('Agents: Fork (Pick Host)');
   });
 
+  test('Agents: Fork (Recap) is contributed under its stable command id', () => {
+    expect(contributed('agents.forkRecap')?.title).toBe('Agents: Fork (Recap)');
+  });
+
   test('registered Agents: Fork (Pick Host) creates a sibling on the picked host', async () => {
     let command = '';
     let callback!: () => Promise<void>;

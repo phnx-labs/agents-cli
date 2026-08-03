@@ -123,7 +123,14 @@ import {
   type BrowsableSession,
   type SessionBrowserSessionRow,
 } from '../core/sessionBrowser';
-import { handleForkPickedSession, loadBrowsableSessions, registerForkPickSessionCommand, runSessionBrowserPicker } from './sessionBrowser.vscode';
+import {
+  handleForkPickedSession,
+  loadBrowsableSessions,
+  registerForkPickSessionCommand,
+  registerForkRecapCommand,
+  runSessionBrowserPicker,
+  type PickedSessionIntent,
+} from './sessionBrowser.vscode';
 import type { RemoteSession, RawActiveSession } from '../core/remoteSessions';
 import {
   buildResumeCandidates,
@@ -1752,6 +1759,10 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     registerForkPickSessionCommand(vscode.commands.registerCommand, () => forkPickedSession(context))
+  );
+
+  context.subscriptions.push(
+    registerForkRecapCommand(vscode.commands.registerCommand, () => forkPickedSession(context, 'recap'))
   );
 
   context.subscriptions.push(
@@ -5150,6 +5161,7 @@ async function pickSessionToFork(
   context: vscode.ExtensionContext,
   currentSessionId: string | null,
   currentSessionDevice?: string,
+  intent: PickedSessionIntent = 'continue',
 ): Promise<SessionBrowserSessionRow | null> {
   const quickPick = vscode.window.createQuickPick<SessionBrowserItem>();
   const switchDevice: vscode.QuickInputButton = {
@@ -5160,7 +5172,9 @@ async function pickSessionToFork(
     iconPath: new vscode.ThemeIcon('refresh'),
     tooltip: 'Reload sessions',
   };
-  quickPick.placeholder = 'Pick a session to fork — filter by topic, project, harness or id';
+  quickPick.placeholder = intent === 'recap'
+    ? 'Pick a session to recap — filter by topic, project, harness or id'
+    : 'Pick a session to fork — filter by topic, project, harness or id';
   quickPick.matchOnDescription = true;
   quickPick.matchOnDetail = true;
   quickPick.buttons = [switchDevice, reload];
@@ -5168,6 +5182,7 @@ async function pickSessionToFork(
   try {
     return await runSessionBrowserPicker({
       quickPick,
+      title: intent === 'recap' ? 'Agents: Fork (Recap)' : 'Agents: Fork (Pick Session)',
       switchButton: switchDevice,
       reloadButton: reload,
       localMachine: LOCAL_MACHINE_ID,
@@ -5189,16 +5204,20 @@ async function pickSessionToFork(
   }
 }
 
-/** `Agents: Fork (Pick Session)` — browse sessions, fork the chosen one where it lives. */
-async function forkPickedSession(context: vscode.ExtensionContext): Promise<void> {
+/** Browse sessions once, then either continue one or seed a new sibling with its recap. */
+async function forkPickedSession(
+  context: vscode.ExtensionContext,
+  intent: PickedSessionIntent = 'continue',
+): Promise<void> {
   await handleForkPickedSession({
     localMachine: LOCAL_MACHINE_ID,
+    intent,
     currentSession: () => {
       const activeTerminal = vscode.window.activeTerminal;
       const entry = activeTerminal ? terminals.getByTerminal(activeTerminal) : null;
       return { sessionId: entry?.sessionId ?? null, device: entry?.host };
     },
-    pickSession: (sessionId, device) => pickSessionToFork(context, sessionId, device),
+    pickSession: (sessionId, device) => pickSessionToFork(context, sessionId, device, intent),
     showError: message => { void vscode.window.showErrorMessage(message); },
     resolveAgentConfig: agentKey => {
       const builtIn = BUILT_IN_AGENTS.find(a => a.key === agentKey);

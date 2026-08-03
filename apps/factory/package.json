@@ -423,6 +423,10 @@
         "title": "Agents: Fork (Pick Session)"
       },
       {
+        "command": "agents.forkRecap",
+        "title": "Agents: Fork (Recap)"
+      },
+      {
         "command": "agents.newClaudePickHost",
         "title": "Agents: New Claude (Pick Host)",
         "icon": {

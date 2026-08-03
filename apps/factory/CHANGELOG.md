@@ -6,6 +6,15 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [0.9.307] - 2026-08-03
 
+- **`Agents: Fork (Recap)` starts a new sibling with context from a session you pick.**
+  It reuses `Agents: Fork (Pick Session)`'s device-aware browser and launches on
+  the selected session's exact host, directory, and harness, but queues only
+  `/recap <full-id>`. The public `.agents-system` command produces the recap in an
+  isolated read-only subagent. Factory never resumes, attaches to, injects, or
+  inherits the historical session, so the user can ask a different question in a
+  small new session after the recap appears.
+  Source: `src/vscode/sessionBrowser.vscode.ts`, `src/vscode/extension.ts`.
+
 - **`Agents: Fork (Pick Host)` forks the session you are in onto a device you choose.**
   Same fork as `Agents: Fork` — same harness, same `--strategy balanced` account
   rotation — with the device picked first, from the same picker the
