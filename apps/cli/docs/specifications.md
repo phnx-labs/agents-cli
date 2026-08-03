@@ -738,16 +738,32 @@ access control (that is 1Password/Vault; this tool is device-local first).
 - **SEC-16 (MUST).** The following non-actionable operations — and no others
   without a change to this spec — MUST be silent no-ops rather than errors: `lock`/`unlock` on a non-macOS host
   (exit 0, no value output), a best-effort session-store write that fails
-  (resolution still succeeds), and a throttled `last_used` stamp
+  (resolution still succeeds), a throttled `last_used` stamp, and a best-effort
+  usage-metadata write to the read-model DB (`~/.agents/secrets/secrets.db`) that
+  fails or is suppressed by `AGENTS_NO_USAGE_TRACK`
   (`commands/secrets.ts:2219,2282`; `lib/secrets/session-store.ts:24-25`;
-  `lib/secrets/bundles.ts:938-945`). A silent no-op MUST NOT be used to swallow an
-  actionable failure (a real resolution error, a missing bundle, a decrypt
-  failure) — those MUST surface.
+  `lib/secrets/bundles.ts:938-945`; `lib/secrets/usage-db.ts`). A silent no-op MUST
+  NOT be used to swallow an actionable failure (a real resolution error, a missing
+  bundle, a decrypt failure) — those MUST surface.
 - **SEC-17 (SHOULD).** `agents doctor` SHOULD warn (name + line only, never the
   value) when a credential-shaped var is exported from a shell rc file, and point
   the user at `agents secrets` (`lib/secrets/rc-hygiene.ts:16-17` for the scan;
   the `rc-secret-export` finding in `lib/devices/doctor-findings.ts` for the
   warning the user sees).
+- **SEC-26 (MUST).** `emitSecretAudit` (`lib/secrets/audit.ts`) MUST be the single
+  write path for every secret lifecycle/access event — create, import, export,
+  view, access (read), unlock. One call writes to BOTH the append-only
+  `~/.agents/events.jsonl` audit log (via `emit()`) AND the derived per-bundle
+  usage read-model DB (`~/.agents/secrets/secrets.db`, `lib/secrets/usage-db.ts`);
+  there MUST be no standalone write path parallel to it. **Given** an access is
+  recorded **When** it flows through `emitSecretAudit` **Then** it appears exactly
+  once in each sink. Both sinks MUST be **value-free** — bundle name, event kind,
+  key count, resolving agent/host, and a status only, never a secret value. The
+  reads the read-model drives — the `secrets view` usage summary + held state,
+  `secrets list --sort used|uses`, and `secrets activity` — MUST NOT expose a value
+  and MUST degrade cleanly (no usage shown) when the DB is unavailable
+  (`commands/secrets.ts` `view` / `list` / `activity` actions). The read-model is a
+  bounded 90-day history; the full audit trail is `agents events --module secrets`.
 
 #### 3.4 Authorization model
 

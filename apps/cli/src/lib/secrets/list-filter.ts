@@ -222,9 +222,23 @@ export function bundleMatchesFilter(
   return true;
 }
 
-/** Sort fields for `--sort`. `name` is the default and matches `listBundles()`. */
-export const SORT_FIELDS = ['name', 'used', 'created', 'updated', 'expiry'] as const;
+/** Sort fields for `--sort`. `name` is the default and matches `listBundles()`.
+ * `used` is most-recently-used first and `uses` is most-frequently-accessed
+ * first; both read the value-free usage read-model (lib/secrets/usage-db.ts). */
+export const SORT_FIELDS = ['name', 'used', 'uses', 'created', 'updated', 'expiry'] as const;
 export type SortField = typeof SORT_FIELDS[number];
+
+/**
+ * The two value-free usage facts `--sort used|uses` needs, keyed by bundle name.
+ * Kept as a minimal shape (not the full BundleUsageSummary) so this module stays
+ * pure and unit-testable without opening the SQLite read-model.
+ */
+export interface BundleUsageHint {
+  /** Most recent recorded event across all kinds, ISO 8601, or null. */
+  lastUsedAt: string | null;
+  /** Recorded `access` (read/inject) count — what `--sort uses` ranks on. */
+  uses: number;
+}
 
 export function parseSortField(raw: string | undefined): SortField {
   if (!raw) return 'name';
@@ -248,11 +262,21 @@ function soonestExpiry(b: SecretsBundle): number {
 }
 
 /** Sort a copy. Time fields are most-recent-first (the useful direction for
- * "what did I touch lately"); `expiry` is soonest-first; ties fall back to name
- * so the order is stable. */
-export function sortBundles(bundles: SecretsBundle[], field: SortField): SecretsBundle[] {
-  const stamp = (iso: string | undefined): number => (iso ? new Date(iso).getTime() : 0);
+ * "what did I touch lately"); `uses` is most-frequently-accessed first; `expiry`
+ * is soonest-first; ties fall back to name so the order is stable. `usage`
+ * carries the value-free read-model facts `used`/`uses` rank on — when omitted,
+ * `used` falls back to the throttled `last_used` stamp and `uses` sees zero. */
+export function sortBundles(
+  bundles: SecretsBundle[],
+  field: SortField,
+  usage?: Map<string, BundleUsageHint>,
+): SecretsBundle[] {
+  const stamp = (iso: string | null | undefined): number => (iso ? new Date(iso).getTime() : 0);
   const byName = (a: SecretsBundle, z: SecretsBundle) => a.name.localeCompare(z.name);
+  // `used` combines the throttled keychain stamp with the exact usage-DB recency
+  // so a just-recorded access ranks a bundle even before its stamp catches up.
+  const usedMs = (b: SecretsBundle): number => Math.max(stamp(b.last_used), stamp(usage?.get(b.name)?.lastUsedAt));
+  const usesOf = (b: SecretsBundle): number => usage?.get(b.name)?.uses ?? 0;
   const out = [...bundles];
   if (field === 'name') return out.sort(byName);
   out.sort((a, z) => {
@@ -260,7 +284,15 @@ export function sortBundles(bundles: SecretsBundle[], field: SortField): Secrets
       const d = soonestExpiry(a) - soonestExpiry(z);
       return d !== 0 ? d : byName(a, z);
     }
-    const key = field === 'used' ? 'last_used' : field === 'created' ? 'created_at' : 'updated_at';
+    if (field === 'used') {
+      const d = usedMs(z) - usedMs(a);
+      return d !== 0 ? d : byName(a, z);
+    }
+    if (field === 'uses') {
+      const d = usesOf(z) - usesOf(a);
+      return d !== 0 ? d : byName(a, z);
+    }
+    const key = field === 'created' ? 'created_at' : 'updated_at';
     const d = stamp(z[key]) - stamp(a[key]);
     return d !== 0 ? d : byName(a, z);
   });

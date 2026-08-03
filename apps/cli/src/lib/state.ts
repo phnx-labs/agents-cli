@@ -341,6 +341,20 @@ export function getUserSubagentsDir(): string { return USER_SUBAGENTS_DIR; }
 export function getSystemWorkflowsDir(): string { return SYSTEM_WORKFLOWS_DIR; }
 export function getUserWorkflowsDir(): string { return USER_WORKFLOWS_DIR; }
 export function getUserSecretsDir(): string { return USER_SECRETS_DIR; }
+/**
+ * Path to the secrets usage read-model database (~/.agents/secrets/secrets.db).
+ * Read at CALL time so a test can redirect it to a temp file via
+ * AGENTS_SECRETS_DB without racing the module-load capture of USER_SECRETS_DIR —
+ * mirrors the AGENTS_EVENTS_PATH / AGENTS_DEVICES_DIR escape hatches. Holds only
+ * value-free usage telemetry (which bundle was created/imported/exported/viewed/
+ * accessed/unlocked, when, by whom), never a secret value. It is a derived index
+ * fed FROM the emitSecretAudit chokepoint alongside the append-only
+ * ~/.agents/events.jsonl audit log — the same way sessions.db indexes session
+ * metadata off the real session flow — not a second write path.
+ */
+export function getSecretsDbPath(): string {
+  return process.env.AGENTS_SECRETS_DB ?? path.join(USER_SECRETS_DIR, 'secrets.db');
+}
 export function getUserPromptcutsPath(): string { return USER_PROMPTCUTS_FILE; }
 
 // ─── User operational path getters ────────────────────────────────────────────

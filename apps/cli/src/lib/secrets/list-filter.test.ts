@@ -225,6 +225,25 @@ describe('sortBundles', () => {
     sortBundles(input, 'name');
     expect(input.map((b) => b.name)).toEqual(['zeta', 'alpha']);
   });
+
+  it('sorts by access frequency (--sort uses), most-used first, unrecorded last', () => {
+    const usage = new Map([
+      ['alpha', { lastUsedAt: null, uses: 2 }],
+      ['zeta', { lastUsedAt: null, uses: 9 }],
+      // nada has no recorded usage → 0 uses → last
+    ]);
+    expect(sortBundles([a, n, z], 'uses', usage).map((b) => b.name)).toEqual(['zeta', 'alpha', 'nada']);
+  });
+
+  it('--sort used prefers the usage-DB recency over a staler last_used stamp', () => {
+    // alpha's keychain stamp is older (Jan) than zeta's (Jun), but a fresh
+    // usage-DB access for alpha (Dec) must rank it first.
+    const usage = new Map([
+      ['alpha', { lastUsedAt: '2026-12-01T00:00:00Z', uses: 1 }],
+      ['zeta', { lastUsedAt: null, uses: 0 }],
+    ]);
+    expect(sortBundles([a, n, z], 'used', usage).map((b) => b.name)).toEqual(['alpha', 'zeta', 'nada']);
+  });
 });
 
 describe('describeFilter', () => {
