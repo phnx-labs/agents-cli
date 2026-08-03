@@ -300,6 +300,12 @@ export type HookCache = string | HookCacheConfig;
 export interface ManifestHook {
   script: string;
   events: string[];
+  /**
+   * Seconds before the hook is killed (default 600). In agents.yaml this may be
+   * written as a bare number (seconds) or a duration string (`5s`, `2m`,
+   * `1h30m`); `parseHookManifest` normalizes it to a seconds number here, so
+   * consumers always see a number.
+   */
   timeout?: number;
   matcher?: string;
   /** @deprecated Use the agent capability table; field is ignored. */

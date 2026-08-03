@@ -1117,13 +1117,52 @@ export function listCentralHooks(): HookEntry[] {
 }
 
 /**
+ * Normalize a hook `timeout` from agents.yaml into a whole number of seconds.
+ *
+ * A bare number stays seconds (`timeout: 30` → 30) for backward compatibility.
+ * A Go-style duration string is parsed into seconds: `5s`, `2m`, `1h30m`,
+ * `90s`, `1h`. This intentionally does NOT reuse {@link parseTimeout} from
+ * routines.ts — that one returns milliseconds, has no seconds (`s`) unit, and
+ * floors at one minute, none of which fit hook timeouts (typically 5–600s).
+ *
+ * Returns the seconds value, or `null` when the input is not a positive number
+ * or a parseable duration string — the caller decides how to surface that.
+ */
+export function normalizeHookTimeoutSeconds(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) && value > 0 ? value : null;
+  }
+  if (typeof value === 'string') {
+    const s = value.trim();
+    if (s === '') return null;
+    // A bare integer string means seconds, matching the bare-number form.
+    if (/^\d+$/.test(s)) {
+      const n = Number(s);
+      return n > 0 ? n : null;
+    }
+    const m = s.match(/^(?:(\d+)w)?(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/i);
+    if (!m || m[0] === '') return null;
+    const weeks = Number(m[1] || 0);
+    const days = Number(m[2] || 0);
+    const hours = Number(m[3] || 0);
+    const minutes = Number(m[4] || 0);
+    const seconds = Number(m[5] || 0);
+    const total = ((weeks * 7 + days) * 24 + hours) * 3600 + minutes * 60 + seconds;
+    return total > 0 ? total : null;
+  }
+  return null;
+}
+
+/**
  * Parse hook manifests. Reads system hooks from ~/.agents/.system/hooks.yaml
  * (npm-shipped defaults) and user hooks from the `hooks:` section of
  * ~/.agents/agents.yaml. Merges with user-wins-on-key-collision precedence.
  * A user entry with `enabled: false` disables the system-shipped hook of
  * the same name without forking the system file.
  *
- * Hooks marked `enabled: false` are dropped from the returned map.
+ * Hooks marked `enabled: false` are dropped from the returned map. A hook
+ * `timeout` written as a duration string (`5s`, `2m`) is normalized to a
+ * seconds number here, so every downstream serializer keeps reading a number.
  */
 export function parseHookManifest(opts: { warn?: boolean } = {}): Record<string, ManifestHook> {
   const warn = opts.warn !== false;
@@ -1186,6 +1225,28 @@ export function parseHookManifest(opts: { warn?: boolean } = {}): Record<string,
   for (const [name, def] of Object.entries(merged)) {
     if (def.enabled === false) delete merged[name];
   }
+
+  // Normalize each surviving hook's timeout to a seconds number, so the raw
+  // agents.yaml can express it as a duration string (`5s`, `2m`) while every
+  // downstream serializer keeps consuming a plain number. An unparseable value
+  // is dropped with a warning rather than silently coerced to a wrong duration.
+  for (const [name, def] of Object.entries(merged)) {
+    const raw = (def as { timeout?: unknown }).timeout;
+    if (raw === undefined) continue;
+    const seconds = normalizeHookTimeoutSeconds(raw);
+    if (seconds === null) {
+      if (warn) {
+        console.warn(
+          `[agents hooks] Hook '${name}' has an invalid timeout ${JSON.stringify(raw)}; ` +
+          `expected seconds or a duration string like '5s', '2m', '1h30m'. Ignoring it.`,
+        );
+      }
+      delete def.timeout;
+    } else {
+      def.timeout = seconds;
+    }
+  }
+
   return merged;
 }
 
