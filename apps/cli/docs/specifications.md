@@ -427,10 +427,11 @@ SSH access (§7); rendering sessions that no harness produced.
   across available requested machines, retain only redacted shell-call origins
   and classifications, bound each candidate query to at most twice the requested
   sample size, retain successful candidate classes when another class exceeds
-  its evidence envelope, report the failed class count as partial coverage, cap
-  its JSON artifact at 16 MiB, and record
+  its evidence envelope, retain the last successful partial pass when a later
+  pass fails, report every failed class and source as partial coverage, cap its
+  JSON artifact at 16 MiB, and record
   `sample_byte_limit` with partial coverage instead of silently dropping evidence
-  (`scripts/sample-session-shell-commands.ts:17-25,82-136,149-230,283-374,376-451`).
+  (`scripts/sample-session-shell-commands.ts:17-25,82-136,149-256,308-402,404-479`).
 
 ---
 

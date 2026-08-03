@@ -165,14 +165,44 @@ function toolQueryArgs(options: SampleOptions, devices: string[], local: boolean
   return args;
 }
 
-function querySource(args: string[], passes: number): ToolSearchEnvelope {
+interface QuerySourceResult {
+  envelope?: ToolSearchEnvelope;
+  failed: boolean;
+}
+
+function querySource(args: string[], passes: number): QuerySourceResult {
   let envelope: ToolSearchEnvelope | undefined;
   for (let pass = 0; pass < passes; pass++) {
-    envelope = JSON.parse(runAgents(args)) as ToolSearchEnvelope;
-    if (envelope.schemaVersion !== 1) throw new Error(`Unsupported tool-search schema ${envelope.schemaVersion}`);
+    try {
+      const next = JSON.parse(runAgents(args)) as ToolSearchEnvelope;
+      if (next.schemaVersion !== 1) throw new Error(`Unsupported tool-search schema ${next.schemaVersion}`);
+      envelope = next;
+    } catch {
+      if (envelope) envelope = { ...envelope, coverage: { ...envelope.coverage, complete: false } };
+      return { envelope, failed: true };
+    }
     if (envelope.coverage.complete || envelope.coverage.remainingFiles === 0) break;
   }
-  return envelope!;
+  return { envelope, failed: false };
+}
+
+export function failedCandidateQueryEnvelope(failedQueries: number): SampleEnvelope {
+  return {
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
+    query: { clauses: [] },
+    coverage: {
+      indexedFiles: 0,
+      indexedCalls: 0,
+      skippedFiles: 0,
+      limitedFiles: 0,
+      remainingFiles: 0,
+      complete: false,
+    },
+    sessions: [],
+    failedQueries,
+    failedSources: 1,
+  };
 }
 
 function queryScopeCandidates(
@@ -183,22 +213,17 @@ function queryScopeCandidates(
   const firstArgs = toolQueryArgs(options, devices, local, SHELL_CANDIDATE_QUERIES[0]);
   const envelopes: ToolSearchEnvelope[] = [];
   let failedQueries = 0;
-  try {
-    const warm = querySource(firstArgs, options.passes);
-    envelopes.push(warm.coverage.complete || warm.coverage.remainingFiles === 0
-      ? warm
-      : querySource(firstArgs, 1));
-  } catch {
-    failedQueries++;
-  }
+  const first = querySource(firstArgs, options.passes);
+  if (first.failed) failedQueries++;
+  if (first.envelope) envelopes.push(first.envelope);
   for (const query of SHELL_CANDIDATE_QUERIES.slice(1)) {
-    try {
-      envelopes.push(querySource(toolQueryArgs(options, devices, local, query), 1));
-    } catch {
-      failedQueries++;
-    }
+    const result = querySource(toolQueryArgs(options, devices, local, query), 1);
+    if (result.failed) failedQueries++;
+    if (result.envelope) envelopes.push(result.envelope);
   }
-  if (envelopes.length === 0) throw new Error('Every shell candidate query failed');
+  if (envelopes.length === 0) {
+    return failedCandidateQueryEnvelope(failedQueries);
+  }
   const merged = mergeCandidateQueryEnvelopes(envelopes, failedQueries);
   return { ...merged, failedQueries };
 }
@@ -298,6 +323,7 @@ export function loadEnvelope(
     try {
       const envelope = queryScopeCandidates(options, source.devices, source.local);
       failedQueries += envelope.failedQueries ?? 0;
+      failedSources += envelope.failedSources ?? 0;
       envelopes.push(envelope);
     } catch {
       failedSources++;
@@ -319,17 +345,19 @@ export function loadEnvelope(
       'sessions', candidate.id, '--include', 'tools', '--all', '--limit', '1',
       '--json', '--no-interactive', ...exactSampleTargetArgs(candidate.machine, self),
     ];
-    let exact: ToolSearchEnvelope;
-    try {
-      exact = querySource(args, options.passes);
-    } catch {
+    const result = querySource(args, options.passes);
+    if (result.failed) {
       failedSessions++;
       merged.coverage.complete = false;
+    }
+    const exact = result.envelope;
+    if (!exact) {
+      if (!result.failed) failedSessions++;
       continue;
     }
     const evaluated = evaluateExactSample(exact, candidate.id, merged.coverage);
     merged.coverage = evaluated.coverage;
-    if (evaluated.failed) failedSessions++;
+    if (evaluated.failed && !result.failed) failedSessions++;
     const hit = evaluated.hit;
     if (!hit) continue;
     const shellCalls = hit.calls.filter((call) => call.programs.length > 0).map((call) => ({

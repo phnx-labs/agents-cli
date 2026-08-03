@@ -10,6 +10,7 @@ import {
   deterministicSessionSample,
   exactSampleTargetArgs,
   evaluateExactSample,
+  failedCandidateQueryEnvelope,
   loadEnvelope,
   mergeCandidateQueryEnvelopes,
   mergeSampleEnvelopes,
@@ -48,6 +49,15 @@ describe('session shell-command sampler', () => {
   it('bounds each candidate query below the aggregate evidence ceiling', () => {
     expect(candidateQueryLimit(50)).toBe(100);
     expect(candidateQueryLimit(100)).toBe(200);
+  });
+
+  it('reports every failed candidate class when a source returns no envelope', () => {
+    expect(failedCandidateQueryEnvelope(4)).toMatchObject({
+      failedQueries: 4,
+      failedSources: 1,
+      coverage: { complete: false },
+      sessions: [],
+    });
   });
 
   it('validates the requested 50-100 session range and repeatable devices', () => {
@@ -171,6 +181,43 @@ describe('session shell-command sampler', () => {
       expect(envelope, JSON.stringify(envelope, null, 2)).toMatchObject({
         coverage: { complete: false }, failedSources: 0, failedSessions: 0,
       });
+
+      const shellId = 'retained-shell-result';
+      fs.writeFileSync(path.join(sessionsDir, `rollout-${shellId}.jsonl`), [
+        JSON.stringify({ type: 'session_meta', timestamp: now, payload: { id: shellId, timestamp: now, cwd: '/repo' } }),
+        JSON.stringify({ type: 'response_item', timestamp: now, payload: {
+          type: 'function_call', name: 'shell', call_id: 'shell-call', arguments: JSON.stringify({ command: 'gh pr view' }),
+        } }),
+      ].join('\n') + '\n');
+      const oversizedCommand = `echo ${'x '.repeat(16 * 1024)}`;
+      for (let fileIndex = 0; fileIndex < 2; fileIndex++) {
+        const oversizedId = `oversized-exec-result-${fileIndex}`;
+        fs.writeFileSync(path.join(sessionsDir, `rollout-${oversizedId}.jsonl`), [
+          JSON.stringify({ type: 'session_meta', timestamp: now, payload: { id: oversizedId, timestamp: now, cwd: '/repo' } }),
+          ...Array.from({ length: 340 }).flatMap((_, index) => [
+            JSON.stringify({
+              type: 'response_item', timestamp: now, payload: {
+                type: 'function_call', name: 'exec_command', call_id: `oversized-${fileIndex}-${index}`,
+                arguments: JSON.stringify({ cmd: oversizedCommand }),
+              },
+            }),
+            JSON.stringify({
+              type: 'response_item', timestamp: now, payload: {
+                type: 'function_call_output', call_id: `oversized-${fileIndex}-${index}`, output: 'ok',
+              },
+            }),
+          ]),
+        ].join('\n') + '\n');
+      }
+
+      const partial = loadEnvelope(
+        { sessions: 50, since: '7d', devices: ['fixture-host'], passes: 2 },
+        'fixture-host',
+      ) as ToolSearchEnvelope & { failedQueries: number; failedSources: number };
+      expect(partial.failedQueries).toBeGreaterThan(0);
+      expect(partial.failedSources).toBe(0);
+      expect(partial.coverage.complete).toBe(false);
+      expect(partial.sessions.map((item) => item.id)).toContain(shellId);
     } finally {
       if (previous.home === undefined) delete process.env.HOME; else process.env.HOME = previous.home;
       if (previous.userprofile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = previous.userprofile;
@@ -180,7 +227,7 @@ describe('session shell-command sampler', () => {
       if (previous.noUsage === undefined) delete process.env.AGENTS_NO_USAGE_TRACK; else process.env.AGENTS_NO_USAGE_TRACK = previous.noUsage;
       fs.rmSync(root, { recursive: true, force: true });
     }
-  }, 15_000);
+  }, 30_000);
 
   it('deduplicates bulk results from normalized machine names', () => {
     const first: ToolSearchEnvelope = {

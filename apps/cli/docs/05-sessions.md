@@ -246,6 +246,7 @@ device is represented, and retains redacted shell-call origins, program names,
 outcomes, and parser diagnostics. Each candidate query asks for at most twice
 the requested sample size to bound ordinary bulk growth. If one candidate class contains an
 individually oversized session, the sampler retains the successful classes,
+keeps the last successful partial pass if a later pass exceeds the envelope,
 reports `failedQueries`, and marks coverage partial. Its JSON artifact is capped
 at 16 MiB; if the requested corpus does
 not fit, `coverage.complete` is false and `truncation.reason` is
