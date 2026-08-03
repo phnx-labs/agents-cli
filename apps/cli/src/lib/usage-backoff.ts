@@ -132,17 +132,24 @@ export function noteUsageRateLimited(
  * Be honest about what that costs, because it is more than one request. A
  * shortened window means the next daemon tick is not suppressed, and that tick
  * fans out over every installed home for the provider — so the cost is a whole
- * batch, N requests, not one. Worse, those requests land inside a penalty the
- * server is still enforcing, and an early retry can EXTEND it: that is the exact
- * mechanism documented above as the original bug.
+ * batch, N requests, not one. Those requests land inside a penalty the server is
+ * still enforcing, and an early retry can EXTEND it: the exact mechanism
+ * documented above as the original bug.
  *
- * It is still the right trade, but on a narrower claim: the race needs two
- * processes recording the same provider in the same instant, so a shortened
- * window is occasional, and each one costs a single early batch that may push
- * the deadline out once. The behaviour being replaced was that same early batch
- * every three minutes, forever, with no exit. A stale lock on a cache path every
- * usage read touches is a new way to wedge the CLI, for a residue that is
- * bounded and self-correcting rather than unbounded.
+ * The trade is still right, but for one specific reason, and it is not that the
+ * damage is small — a lengthened penalty is not "self-correcting" in any
+ * comforting sense, and there is no basis for claiming it happens only once. It
+ * is that the two outcomes are asymmetric. Losing the race costs a batch and may
+ * lengthen the window; the module then honours whatever longer deadline comes
+ * back. So the failure mode degrades toward MORE suppression — a longer wait
+ * than strictly necessary — and never back toward unsuppressed polling, because
+ * every 429 re-records. Requests stay bounded by how often two processes record
+ * the same provider in the same instant, which is only when a 429 batch lands.
+ *
+ * That is what makes it survivable without a lock: the behaviour being replaced
+ * was an un-suppressed batch every three minutes, forever, with no exit. A stale
+ * lock on a cache path every usage read touches would be a new way to wedge the
+ * CLI, traded against a residue that cannot re-enter the original loop.
  *
  * What must not happen is a *torn* file, which would make every provider read as
  * free and silently restore the old behaviour. That is what the rename prevents,
