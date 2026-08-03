@@ -570,6 +570,12 @@ export function renderHoldSummary(holdStr: string, configured: boolean): string 
   return `hold: ${holdStr}${source} — a bundle on the hold policy prompts once, then stays silent for this long or until sleep/logout.`;
 }
 
+/** The empty-broker line under the hold summary. Named here, beside
+ * `renderHoldSummary`, for the same reason: it is the second line the rename
+ * left saying `daily`, and a test pins both. */
+export const NO_BUNDLES_HELD_LINE =
+  'No bundles held. The next read of each hold-policy bundle will prompt once, then hold.';
+
 /** Human-readable hold window for `secrets status`. Sub-hour values render in
  * minutes (so a near-floor `holdMs` never shows a confusing "0 hours"), whole
  * hours up to 2 days, whole days beyond. Pure — unit-tested. */
@@ -2412,7 +2418,7 @@ Examples:
       const entries = await agentStatus();
       const held = new Set(entries.map((e) => e.name));
       if (entries.length === 0) {
-        console.log(chalk.gray('No bundles held. The next read of each hold-policy bundle will prompt once, then hold.'));
+        console.log(chalk.gray(NO_BUNDLES_HELD_LINE));
         console.log(chalk.gray('Pre-warm now with: agents secrets unlock <bundle>  (or --all)'));
       } else {
         console.log(chalk.bold(`${'BUNDLE'.padEnd(24)} ${'KEYS'.padEnd(5)} LOCKS IN`));

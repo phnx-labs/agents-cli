@@ -21,6 +21,7 @@ import {
   registerSecretsCommands,
   renderHoldSummary,
   renderPolicyCol,
+  NO_BUNDLES_HELD_LINE,
 } from './secrets.js';
 import { parseDotenv, type SecretsBundle } from '../lib/secrets/bundles.js';
 
@@ -229,6 +230,11 @@ describe('renderHoldSummary', () => {
     expect(renderHoldSummary('24 hours', true)).toContain('(secrets.agent.holdMs)');
     expect(renderHoldSummary('7 days', false)).toContain('(default)');
     expect(renderHoldSummary('7 days', false)).not.toContain('secrets.agent.holdMs');
+  });
+
+  it('the empty-broker line names hold too — it drifted with the header', () => {
+    expect(NO_BUNDLES_HELD_LINE).toContain('hold-policy bundle');
+    expect(NO_BUNDLES_HELD_LINE).not.toMatch(/daily/i);
   });
 });
 

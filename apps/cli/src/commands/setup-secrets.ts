@@ -13,9 +13,10 @@ import { spawnSync } from 'node:child_process';
 import { getCliLaunch } from '../lib/cli-entry.js';
 import { getHistoryDir, updateMeta } from '../lib/state.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
+import { parsePolicyOpt } from './secrets.js';
+import type { SecretsPolicy } from '../lib/secrets/bundles.js';
 
 type SetupSecretsBackend = 'keychain' | 'file' | 'vault';
-type SetupSecretsPolicy = 'daily' | 'always' | 'never';
 type SetupSecretsImportSource = 'none' | 'env' | '1password' | 'icloud';
 
 interface SetupSecretsOptions {
@@ -30,7 +31,7 @@ interface SetupSecretsOptions {
 
 interface SetupSecretsPrefs {
   defaultBackend: SetupSecretsBackend;
-  defaultPolicy: SetupSecretsPolicy;
+  defaultPolicy: SecretsPolicy;
   updatedAt: string;
 }
 
@@ -48,10 +49,13 @@ function parseBackend(raw: string | undefined): SetupSecretsBackend {
   throw new Error(`Invalid --backend '${raw}'. Use keychain, file, or vault.`);
 }
 
-function parsePolicy(raw: string | undefined): SetupSecretsPolicy {
-  const value = (raw ?? 'daily').toLowerCase();
-  if (value === 'daily' || value === 'always' || value === 'never') return value;
-  throw new Error(`Invalid --policy '${raw}'. Use daily, always, or never.`);
+/** The wizard's `--policy` shares the canonical parser with `agents secrets
+ * policy`, so it accepts `hold` (and the `daily`/`session` aliases) rather than
+ * carrying its own copy that knows only the retired vocabulary. `parsePolicyOpt`
+ * defaults an absent value to `always`; the wizard's own default is `hold`, so
+ * it is supplied here rather than inherited. */
+export function parsePolicy(raw: string | undefined): SecretsPolicy {
+  return parsePolicyOpt(raw ?? 'hold');
 }
 
 function parseImportSource(raw: string | undefined): SetupSecretsImportSource {
@@ -72,7 +76,7 @@ function saveSetupSecretsPrefs(prefs: SetupSecretsPrefs): string {
   return file;
 }
 
-function applySecretsDefaults(backend: SetupSecretsBackend, policy: SetupSecretsPolicy): void {
+function applySecretsDefaults(backend: SetupSecretsBackend, policy: SecretsPolicy): void {
   updateMeta((meta) => ({
     ...meta,
     secrets: {
@@ -152,7 +156,7 @@ async function maybeImportSecrets(
 
 async function resolveInteractiveChoices(opts: SetupSecretsOptions): Promise<{
   backend: SetupSecretsBackend;
-  policy: SetupSecretsPolicy;
+  policy: SecretsPolicy;
   importSource: SetupSecretsImportSource;
 }> {
   if (!isInteractiveTerminal()) {
@@ -173,11 +177,11 @@ async function resolveInteractiveChoices(opts: SetupSecretsOptions): Promise<{
       { name: 'vault — synced ~/.agents/vault.age file; requires agents login', value: 'vault' },
     ],
   });
-  const policy = opts.policy ? parsePolicy(opts.policy) : await select<SetupSecretsPolicy>({
+  const policy = opts.policy ? parsePolicy(opts.policy) : await select<SecretsPolicy>({
     message: 'Default prompt policy',
-    default: 'daily',
+    default: 'hold',
     choices: [
-      { name: 'daily — ask once, then hold for the configured window', value: 'daily' },
+      { name: 'hold — ask once, then hold for the configured window (7 days by default)', value: 'hold' },
       { name: 'always — ask on every read', value: 'always' },
       { name: 'never — no biometry ACL; use only for automation-only bundles', value: 'never' },
     ],
@@ -196,7 +200,7 @@ async function resolveInteractiveChoices(opts: SetupSecretsOptions): Promise<{
   return { backend, policy, importSource };
 }
 
-function printOnboardingSummary(backend: SetupSecretsBackend, policy: SetupSecretsPolicy, prefsFile: string): void {
+function printOnboardingSummary(backend: SetupSecretsBackend, policy: SecretsPolicy, prefsFile: string): void {
   console.log(chalk.bold('\nSecrets setup saved.'));
   console.log(chalk.gray(`preferences: ${prefsFile}`));
   printBackendNotes(backend);
@@ -206,7 +210,7 @@ function printOnboardingSummary(backend: SetupSecretsBackend, policy: SetupSecre
     console.log(chalk.gray(`policy: ${policy} — used by bundles that do not set their own policy.`));
   }
   console.log(chalk.bold('\nTry:'));
-  console.log(chalk.cyan(`  agents secrets create prod ${backendArgs(backend).join(' ')} --policy ${policy === 'never' ? 'daily' : policy}`));
+  console.log(chalk.cyan(`  agents secrets create prod ${backendArgs(backend).join(' ')} --policy ${policy === 'never' ? 'hold' : policy}`));
   console.log(chalk.cyan('  agents secrets add prod API_KEY'));
   console.log(chalk.cyan('  agents run claude "deploy" --secrets prod'));
 }
@@ -241,7 +245,7 @@ export function registerSetupSecretsCommand(setupCmd: Command): void {
     .command('secrets')
     .description('Configure `agents secrets` defaults and optionally import existing secrets.')
     .option('--backend <backend>', 'default backend: keychain, file, or vault')
-    .option('--policy <policy>', 'default prompt policy: daily, always, or never')
+    .option('--policy <policy>', "default prompt policy: hold, always, or never ('daily'/'session' are accepted aliases for 'hold')")
     .option('--import-from <source>', 'optional import source: none, env, 1password, or icloud')
     .option('--bundle <name>', 'bundle name for optional imports')
     .option('--vault <name-or-path>', '1Password vault name, or .env path with --import-from env')
