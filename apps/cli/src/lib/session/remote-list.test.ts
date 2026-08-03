@@ -8,6 +8,10 @@
 
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { Server, type Connection } from 'ssh2';
 import {
   REMOTE_STDOUT_MAX_BYTES,
   REMOTE_TOOL_AGGREGATE_MAX_BYTES,
@@ -16,14 +20,147 @@ import {
   parseRemoteList,
   parseRemoteToolSearch,
   RemoteUtf8Accumulator,
+  isAutomaticSessionPeer,
   remoteListCaptureResult,
   remoteListCommand,
+  sshCapture,
 } from './remote-list.js';
+import type { DeviceProfile } from '../devices/registry.js';
 import { TOOL_QUERY_MAX_CALL_ROWS } from './tool-index.js';
 
 function runPeer(source: string, ...args: string[]) {
   return spawnSync(process.execPath, ['--eval', source, ...args], { encoding: 'utf8' });
 }
+
+interface RealSshPeer {
+  port: number;
+  connectionClosed: Promise<void>;
+  stop(): Promise<void>;
+}
+
+async function startRealSshPeer(mode: 'success' | 'hang'): Promise<RealSshPeer> {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-ssh-capture-'));
+  const hostKey = path.join(dir, 'host-key');
+  const keygen = spawnSync('ssh-keygen', ['-q', '-t', 'rsa', '-b', '2048', '-N', '', '-f', hostKey], {
+    encoding: 'utf8',
+  });
+  if (keygen.status !== 0) throw new Error(`ssh-keygen failed: ${keygen.stderr}`);
+
+  let resolveConnectionClosed!: () => void;
+  const connectionClosed = new Promise<void>((resolve) => { resolveConnectionClosed = resolve; });
+  const connections = new Set<Connection>();
+  const server = new Server({ hostKeys: [fs.readFileSync(hostKey)] }, (client) => {
+    connections.add(client);
+    client.on('authentication', (ctx) => {
+      if (ctx.method === 'none' && ctx.username === 'tool-index-test') ctx.accept();
+      else ctx.reject();
+    });
+    client.on('ready', () => {
+      client.on('session', (accept) => {
+        const session = accept();
+        session.on('exec', (acceptExec, reject, info) => {
+          if (info.command !== 'tool-index-command') {
+            reject();
+            return;
+          }
+          const stream = acceptExec();
+          if (mode === 'success') {
+            stream.write('{"ok":true}');
+            stream.exit(0);
+            stream.end();
+          }
+        });
+      });
+    });
+    client.on('close', () => {
+      connections.delete(client);
+      resolveConnectionClosed();
+    });
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('ssh2 peer did not bind TCP');
+
+  return {
+    port: address.port,
+    connectionClosed,
+    async stop() {
+      for (const connection of connections) connection.end();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      fs.rmSync(dir, { recursive: true, force: true });
+    },
+  };
+}
+
+const isolatedHostKeyOpts = [
+  '-o', 'StrictHostKeyChecking=no',
+  '-o', 'UserKnownHostsFile=/dev/null',
+];
+
+describe.skipIf(process.platform === 'win32')('sshCapture direct timeout connection', () => {
+  it('uses a real direct SSH connection without leaving a multiplexed master', async () => {
+    const peer = await startRealSshPeer('success');
+    try {
+      const result = await sshCapture(
+        'tool-index-test@127.0.0.1',
+        'tool-index-command',
+        2_000,
+        undefined,
+        { multiplex: false, port: peer.port, hostKeyOpts: isolatedHostKeyOpts },
+      );
+      expect(result).toEqual({ code: 0, stdout: '{"ok":true}', aggregateBudgetExceeded: undefined });
+      await expect(Promise.race([
+        peer.connectionClosed.then(() => 'closed'),
+        new Promise<string>((resolve) => setTimeout(() => resolve('open'), 1_000)),
+      ])).resolves.toBe('closed');
+    } finally {
+      await peer.stop();
+    }
+  });
+
+  it('closes the real remote SSH channel at its deadline', async () => {
+    const peer = await startRealSshPeer('hang');
+    try {
+      const result = await sshCapture(
+        'tool-index-test@127.0.0.1',
+        'tool-index-command',
+        500,
+        undefined,
+        { multiplex: false, port: peer.port, hostKeyOpts: isolatedHostKeyOpts },
+      );
+      expect(result.code).toBeNull();
+      await expect(Promise.race([
+        peer.connectionClosed.then(() => 'closed'),
+        new Promise<string>((resolve) => setTimeout(() => resolve('open'), 2_000)),
+      ])).resolves.toBe('closed');
+    } finally {
+      await peer.stop();
+    }
+  });
+});
+
+describe('isAutomaticSessionPeer', () => {
+  it('keeps manual and probe-reachable computers in both fleet sweeps', () => {
+    const manual = {
+      name: 'manual-linux',
+      platform: 'linux',
+      address: { via: 'manual', host: 'manual.example' },
+    } as DeviceProfile;
+    const probed = {
+      name: 'sleepy-mac',
+      platform: 'macos',
+      tailscale: { online: false },
+      reachability: { reachable: true },
+    } as DeviceProfile;
+
+    expect(isAutomaticSessionPeer(manual, 'local')).toBe(true);
+    expect(isAutomaticSessionPeer(probed, 'local')).toBe(true);
+    expect(isAutomaticSessionPeer({ ...manual, name: 'local' }, 'local')).toBe(false);
+  });
+});
 
 describe('parseRemoteList', () => {
   it('tags every parsed session with the source machine', () => {

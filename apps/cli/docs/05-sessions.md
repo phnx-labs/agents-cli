@@ -166,7 +166,9 @@ machine-stamped, re-redacted envelopes are charged against that remainder, so
 redaction expansion cannot overflow the final JSON. The receive budget stops
 retaining or starting more peer responses once exhausted;
 `coverage.complete=false` marks the partial fleet result. Malformed or oversized
-envelopes are rejected before merging.
+envelopes are rejected before merging. Fleet tool queries support
+`--sort recent`; `--sort cost` and `--sort duration` remain local-only because
+peer evidence omits those metrics.
 
 ### Index lifecycle and disk I/O
 
@@ -189,8 +191,9 @@ normal session cache.
   split `wire.jsonl` / `chat_history.jsonl` source captured before parsing, so
   an append racing the parse forces a retry instead of certifying stale calls.
 - Existing history is backfilled on the first scoped tool query, at most 25 files
-  or 16 MiB per invocation. One larger Claude/Codex JSONL transcript is admitted
-  alone and streamed with a 1 MiB record cap; non-streaming harness parsers do
+  or 16 MiB per invocation. One larger Claude/Codex JSONL transcript up to
+  64 MiB is admitted alone and streamed with a 1 MiB record cap; larger sources
+  persist `index_limit` without being read. Non-streaming harness parsers do
   not materialize a source over 16 MiB and persist an explicit `index_limit`
   row. `coverage.complete=false` names partial results; a rerun advances the
   independent ledger.

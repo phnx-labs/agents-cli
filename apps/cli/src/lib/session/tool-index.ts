@@ -25,6 +25,7 @@ const BACKFILL_MAX_FILES = 25;
 const BACKFILL_MAX_BYTES = 16 * 1024 * 1024;
 const BACKFILL_MAX_IN_MEMORY_SOURCE_BYTES = 16 * 1024 * 1024;
 const BACKFILL_MAX_JSONL_RECORD_BYTES = 1024 * 1024;
+export const BACKFILL_MAX_STREAM_SOURCE_BYTES = 64 * 1024 * 1024;
 
 export const TOOL_SEARCH_SCHEMA_VERSION = 1;
 export const TOOL_QUERY_MAX_CLAUSES = 32;
@@ -213,6 +214,12 @@ async function toolCallsForBackfill(
   sourceBytes: number,
 ): Promise<IndexedToolCall[]> {
   if (session.agent === 'claude' || session.agent === 'codex') {
+    if (sourceBytes > BACKFILL_MAX_STREAM_SOURCE_BYTES) {
+      return [backfillLimitCall(
+        session,
+        'Transcript exceeds the 64 MiB safe streaming tool-backfill limit.',
+      )];
+    }
     return streamJsonlToolCalls(session);
   }
   if (sourceBytes > BACKFILL_MAX_IN_MEMORY_SOURCE_BYTES) {

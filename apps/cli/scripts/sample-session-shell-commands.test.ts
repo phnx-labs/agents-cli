@@ -1,14 +1,23 @@
 import { describe, expect, it } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { fileURLToPath } from 'url';
 import {
+  automaticSampleDevices,
   buildSample,
   deterministicSessionSample,
   exactSampleTargetArgs,
+  evaluateExactSample,
   loadEnvelope,
+  mergeCandidateQueryEnvelopes,
   mergeSampleEnvelopes,
   parseSampleOptions,
   partitionSampleDevices,
+  runAgents,
   SAMPLE_MAX_SERIALIZED_BYTES,
 } from './sample-session-shell-commands.js';
+import type { DeviceProfile } from '../src/lib/devices/registry.js';
 import type { ToolSearchEnvelope, ToolSessionEvidence } from '../src/lib/session/tool-index.js';
 
 function session(id: string, machine: string): ToolSessionEvidence {
@@ -18,6 +27,19 @@ function session(id: string, machine: string): ToolSessionEvidence {
       id: `${id}-call`, ordinal: 0, timestamp: '2026-08-03T00:00:01Z',
       tool: 'exec_command', programs: ['git'], input: 'git status', outcome: 'unknown',
     }],
+  };
+}
+
+function device(name: string, overrides: Partial<DeviceProfile> = {}): DeviceProfile {
+  return {
+    name,
+    platform: 'linux',
+    shell: 'posix',
+    address: { via: 'manual', dnsName: `${name}.example` },
+    auth: { method: 'key' },
+    createdAt: '2026-08-03T00:00:00Z',
+    updatedAt: '2026-08-03T00:00:00Z',
+    ...overrides,
   };
 }
 
@@ -69,60 +91,89 @@ describe('session shell-command sampler', () => {
     expect(exactSampleTargetArgs('yosemite-m3', 'yosemite-s1')).toEqual(['--device', 'yosemite-m3']);
   });
 
-  it('bulk-queries each source and marks coverage partial when one fails', () => {
-    const calls: string[][] = [];
-    const envelope = loadEnvelope(
-      { sessions: 50, since: '7d', devices: ['yosemite-s1', 'peer-one'], passes: 1 },
-      (args) => {
-        calls.push(args);
-        if (args.includes('peer-one')) throw new Error('peer failed');
-        if (!args.includes('--query')) {
-          return JSON.stringify({
-            schemaVersion: 1,
-            generatedAt: '2026-08-03T00:00:00Z',
-            query: { clauses: [] },
-            coverage: { indexedFiles: 0, indexedCalls: 0, skippedFiles: 0, limitedFiles: 0, remainingFiles: 0, complete: true },
-            sessions: [session('local-session', 'yosemite-s1')],
-          });
-        }
-        return JSON.stringify({
-          schemaVersion: 1,
-          generatedAt: '2026-08-03T00:00:00Z',
-          query: { clauses: [] },
-          coverage: { indexedFiles: 1, indexedCalls: 1, skippedFiles: 0, limitedFiles: 0, remainingFiles: 0, complete: true },
-          sessions: [session('local-session', 'yosemite-s1')],
-        });
-      },
-      'yosemite-s1',
-    );
-    expect(calls).toHaveLength(6);
-    expect(calls[0]).toContain('--local');
-    expect(calls[4]).toContain('peer-one');
-    expect(calls.every((args) => args.includes('--include'))).toBe(true);
-    expect(calls.filter((args) => args.includes('--query'))).toHaveLength(5);
-    expect(envelope.sessions).toHaveLength(1);
-    expect(envelope.coverage).toMatchObject({ skippedFiles: 0, complete: false });
-    expect(envelope).toMatchObject({ failedSources: 1 });
+  it('uses canonical dialability and compute roles for default fleet sampling', () => {
+    expect(automaticSampleDevices([
+      device('manual'),
+      device('probe-reachable', {
+        tailscale: { online: false, direct: false },
+        reachability: { reachable: true, checkedAt: '2026-08-03T00:00:00Z' },
+      }),
+      device('offline', { tailscale: { online: false, direct: false } }),
+      device('controller', { role: 'control' }),
+      device('phone', { platform: 'unknown' }),
+    ])).toEqual(['manual', 'probe-reachable']);
   });
 
-  it('does not repeat a terminal partial result with no remaining backfill', () => {
-    let queryCalls = 0;
-    const envelope = loadEnvelope(
-      { sessions: 50, since: '7d', devices: ['peer-one'], passes: 4 },
-      (args) => {
-        queryCalls++;
-        return JSON.stringify({
-          schemaVersion: 1,
-          generatedAt: '2026-08-03T00:00:00Z',
-          query: { clauses: [] },
-          coverage: { indexedFiles: 1, indexedCalls: 1, skippedFiles: 0, limitedFiles: 1, remainingFiles: 0, complete: false },
-          sessions: [session('limited-session', 'peer-one')],
-        });
-      },
-      'yosemite-s1',
-    );
-    expect(queryCalls).toBe(5);
-    expect(envelope.sessions).toHaveLength(1);
+  it('spawns the production CLI path for candidate and exact local queries', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sampler-spawn-'));
+    const binDir = path.join(root, 'bin');
+    const sessionsDir = path.join(root, '.codex', 'sessions');
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    fs.mkdirSync(path.join(root, '.agents', '.system', '.git'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.agents', 'agents.yaml'), 'agents: {}\n');
+    const cliEntry = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/index.ts');
+    if (process.platform === 'win32') {
+      fs.writeFileSync(path.join(binDir, 'agents.cmd'), `@echo off\r\nbun "${cliEntry}" %*\r\n`);
+    } else {
+      fs.writeFileSync(path.join(binDir, 'agents'), `#!/bin/sh\nexec bun "${cliEntry}" "$@"\n`, { mode: 0o755 });
+    }
+    const id = 'real-sampler-spawn';
+    const now = new Date().toISOString();
+    fs.writeFileSync(path.join(sessionsDir, `rollout-${id}.jsonl`), [
+      JSON.stringify({ type: 'session_meta', timestamp: now, payload: { id, timestamp: now, cwd: '/repo' } }),
+      JSON.stringify({ type: 'response_item', timestamp: now, payload: {
+        type: 'function_call', name: 'exec_command', call_id: 'real-call', arguments: JSON.stringify({ cmd: 'git status' }),
+      } }),
+    ].join('\n') + '\n');
+
+    const previous = {
+      home: process.env.HOME,
+      userprofile: process.env.USERPROFILE,
+      path: process.env.PATH,
+      machine: process.env.AGENTS_SYNC_MACHINE_ID,
+      noUpdate: process.env.AGENTS_NO_UPDATE_CHECK,
+      noUsage: process.env.AGENTS_NO_USAGE_TRACK,
+    };
+    process.env.HOME = root;
+    process.env.USERPROFILE = root;
+    process.env.PATH = `${binDir}${path.delimiter}${previous.path ?? ''}`;
+    process.env.AGENTS_SYNC_MACHINE_ID = 'fixture-host';
+    process.env.AGENTS_NO_UPDATE_CHECK = '1';
+    process.env.AGENTS_NO_USAGE_TRACK = '1';
+    try {
+      expect(runAgents(['--version']).trim()).toMatch(/^\d+\.\d+\.\d+$/);
+      const direct = JSON.parse(runAgents([
+        'sessions', '--include', 'tools', '--since', '7d', '--query', 'tool:exec',
+        '--limit', '500', '--all', '--json', '--no-interactive', '--local',
+      ])) as ToolSearchEnvelope;
+      expect(direct.sessions).toHaveLength(1);
+      const unresolved = JSON.parse(runAgents([
+        'sessions', '--include', 'tools', '--since', '7d', '--query', 'tool:exec',
+        '--limit', '500', '--all', '--json', '--no-interactive', '--device', 'unregistered-peer',
+      ])) as ToolSearchEnvelope;
+      expect(unresolved.coverage.complete).toBe(false);
+      expect(evaluateExactSample(unresolved, id, direct.coverage)).toMatchObject({
+        coverage: { complete: false }, hit: undefined, failed: true,
+      });
+      const envelope = loadEnvelope(
+        { sessions: 50, since: '7d', devices: ['fixture-host', 'unregistered-peer'], passes: 1 },
+        'fixture-host',
+      );
+      expect(envelope.sessions, JSON.stringify(envelope, null, 2)).toHaveLength(1);
+      expect(envelope.sessions[0].calls).toMatchObject([{ programs: ['git'], input: 'git status' }]);
+      expect(envelope, JSON.stringify(envelope, null, 2)).toMatchObject({
+        coverage: { complete: false }, failedSources: 0, failedSessions: 0,
+      });
+    } finally {
+      if (previous.home === undefined) delete process.env.HOME; else process.env.HOME = previous.home;
+      if (previous.userprofile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = previous.userprofile;
+      if (previous.path === undefined) delete process.env.PATH; else process.env.PATH = previous.path;
+      if (previous.machine === undefined) delete process.env.AGENTS_SYNC_MACHINE_ID; else process.env.AGENTS_SYNC_MACHINE_ID = previous.machine;
+      if (previous.noUpdate === undefined) delete process.env.AGENTS_NO_UPDATE_CHECK; else process.env.AGENTS_NO_UPDATE_CHECK = previous.noUpdate;
+      if (previous.noUsage === undefined) delete process.env.AGENTS_NO_USAGE_TRACK; else process.env.AGENTS_NO_USAGE_TRACK = previous.noUsage;
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('deduplicates bulk results from normalized machine names', () => {
@@ -136,6 +187,23 @@ describe('session shell-command sampler', () => {
       sessions: [session('same', 'yosemite-s1')],
     };
     expect(mergeSampleEnvelopes([first, second]).sessions).toHaveLength(1);
+  });
+
+  it('keeps candidate coverage partial when an earlier query ran before backfill completed', () => {
+    const partial: ToolSearchEnvelope = {
+      schemaVersion: 1, generatedAt: '2026-08-03T00:00:00Z', query: { clauses: ['tool:exec'] },
+      coverage: { indexedFiles: 1, indexedCalls: 1, skippedFiles: 0, limitedFiles: 0, remainingFiles: 2, complete: false },
+      sessions: [session('exec-before-backfill', 'box-1')],
+    };
+    const complete: ToolSearchEnvelope = {
+      schemaVersion: 1, generatedAt: '2026-08-03T00:01:00Z', query: { clauses: ['tool:bash'] },
+      coverage: { indexedFiles: 3, indexedCalls: 3, skippedFiles: 0, limitedFiles: 0, remainingFiles: 0, complete: true },
+      sessions: [session('bash-after-backfill', 'box-1')],
+    };
+
+    const merged = mergeCandidateQueryEnvelopes([partial, complete]);
+    expect(merged.sessions.map((item) => item.id)).toEqual(['exec-before-backfill', 'bash-after-backfill']);
+    expect(merged.coverage).toMatchObject({ indexedFiles: 3, remainingFiles: 2, complete: false });
   });
 
   it('caps the serialized artifact even when every sampled session carries maximum-size inputs', () => {

@@ -1456,6 +1456,11 @@ export function mergeToolSearchEnvelopes(
   };
 }
 
+export function toolSearchFleetSortError(sort: string | undefined, spansDevices: boolean): string | undefined {
+  if (!spansDevices || !sort || sort === 'recent') return undefined;
+  return 'Tool search across devices supports only --sort recent; cost and duration are local-only.';
+}
+
 /** Compact grouped evidence for humans; JSON retains every bounded field. */
 export function printToolSearch(envelope: ToolSearchEnvelope): void {
   for (const session of envelope.sessions) {
@@ -1821,6 +1826,14 @@ async function sessionsAction(
   const since = wantsOverview
     ? options.since
     : (options.since ?? (isInteractive && !options.all && !wantsWholeTeam ? '30d' : undefined));
+  const toolSpansDevices = toolEvidenceMode
+    && (options.fleet || (options.host?.length ?? 0) > 0);
+  const toolSortError = toolSearchFleetSortError(options.sort, toolSpansDevices);
+  if (toolSortError) {
+    console.error(chalk.red(toolSortError));
+    process.exitCode = 1;
+    return;
+  }
   const spinner = options.json ? null : ora().start();
   const tracker = createScanProgressTracker(LOAD_VERBS, 'sessions', spinner);
 
@@ -1833,8 +1846,6 @@ async function sessionsAction(
     const sortBy: DiscoverOptions['sortBy'] =
       options.sort === 'cost' ? 'cost' : options.sort === 'duration' ? 'duration' : 'timestamp';
 
-    const toolSpansDevices = toolEvidenceMode
-      && (options.fleet || (options.host?.length ?? 0) > 0);
     const scope: DiscoverOptions = {
       agent,
       version,

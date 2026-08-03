@@ -46,7 +46,10 @@ describe('extractShellPrograms', () => {
   it('delegates only conservative wrapper forms', () => {
     expect(extractShellPrograms('env A=1 git status').programs).toEqual(['env', 'git']);
     expect(extractShellPrograms('command git status').programs).toEqual(['command', 'git']);
+    expect(extractShellPrograms('builtin printf test').programs).toEqual(['builtin', 'printf']);
+    expect(extractShellPrograms('nohup git status').programs).toEqual(['nohup', 'git']);
     expect(extractShellPrograms('sudo git status').programs).toEqual(['sudo', 'git']);
+    expect(extractShellPrograms('time git status').programs).toEqual(['git']);
     expect(extractShellPrograms('env -i git status').programs).toEqual(['env']);
     expect(extractShellPrograms('command -p git status').programs).toEqual(['command']);
     expect(extractShellPrograms('sudo -u root git status').programs).toEqual(['sudo']);

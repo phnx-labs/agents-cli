@@ -15,7 +15,7 @@ export interface ShellProgramExtraction {
 }
 
 const SHELL_WRAPPERS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh']);
-const PROGRAM_WRAPPERS = new Set(['command', 'builtin', 'env', 'nohup', 'sudo', 'time']);
+const PROGRAM_WRAPPERS = new Set(['command', 'builtin', 'env', 'nohup', 'sudo']);
 const MAX_NESTED_DEPTH = 3;
 
 function normalizeProgram(value: string): string | undefined {
@@ -221,7 +221,7 @@ export function extractShellPrograms(source: string, depth = 0): ShellProgramExt
             if (normalized === 'env') {
               const delegate = staticWords.find((word) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word));
               if (delegate && !delegate.startsWith('-')) add(delegate);
-            } else if ((normalized === 'command' || normalized === 'sudo') && staticWords[0] && !staticWords[0].startsWith('-')) {
+            } else if (staticWords[0] && !staticWords[0].startsWith('-')) {
               add(staticWords[0]);
             }
           }

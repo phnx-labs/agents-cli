@@ -15,6 +15,7 @@ const {
   toolSearchRemoteReceiveBudget,
   TOOL_QUERY_MAX_SERIALIZED_BYTES,
   TOOL_QUERY_MERGE_OVERHEAD_BYTES,
+  BACKFILL_MAX_STREAM_SOURCE_BYTES,
 } = await import('./tool-index.js');
 const { persistToolCalls } = await import('./tool-store.js');
 type SessionMeta = import('./types.js').SessionMeta;
@@ -135,6 +136,25 @@ describe('tool-call index', () => {
         { tool: 'Bash', outcome: 'ok' },
         { tool: 'index_limit', outcome: 'unknown' },
       ]);
+  });
+
+  it('records a limit without reading a streaming transcript over 64 MiB', async () => {
+    const filePath = path.join(TEST_HOME, 'oversized-streaming-session.jsonl');
+    fs.closeSync(fs.openSync(filePath, 'w'));
+    fs.truncateSync(filePath, BACKFILL_MAX_STREAM_SOURCE_BYTES + 1);
+    const session = {
+      id: 'oversized-streaming-session', shortId: 'oversize', agent: 'claude',
+      timestamp: '2026-08-03T00:00:00Z', filePath,
+    } as SessionMeta;
+    upsertSession(session, 'oversized streaming transcript');
+
+    const coverage = await ensureToolIndex([session]);
+    expect(coverage).toMatchObject({ indexedFiles: 1, limitedFiles: 1, remainingFiles: 0, complete: false });
+    expect(getDB().prepare(`SELECT tool, input FROM tool_calls WHERE session_id = ?`).get(session.id))
+      .toEqual({
+        tool: 'index_limit',
+        input: 'Transcript exceeds the 64 MiB safe streaming tool-backfill limit.',
+      });
   });
 
   it('does not materialize oversized transcripts for non-streaming harness parsers', async () => {

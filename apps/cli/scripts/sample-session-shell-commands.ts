@@ -2,6 +2,7 @@
 import { createHash } from 'crypto';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
+import { isControlDevice, isDialableDevice, type DeviceProfile } from '../src/lib/devices/registry.js';
 import type { ToolSearchEnvelope, ToolSessionEvidence } from '../src/lib/session/tool-index.js';
 import { machineId, normalizeHost } from '../src/lib/session/sync/config.js';
 
@@ -21,8 +22,6 @@ interface SampleEnvelope extends ToolSearchEnvelope {
   failedSources?: number;
   failedSessions?: number;
 }
-
-type AgentsRunner = (args: string[]) => string;
 
 export function parseSampleOptions(argv: string[]): SampleOptions {
   const options: SampleOptions = { sessions: 100, since: '7d', devices: [], passes: 4 };
@@ -107,7 +106,7 @@ export function deterministicSessionSample(
   return sampled;
 }
 
-function runAgents(args: string[]): string {
+export function runAgents(args: string[]): string {
   const run = spawnSync('agents', args, {
     encoding: 'utf8',
     maxBuffer: 16 * 1024 * 1024,
@@ -119,18 +118,18 @@ function runAgents(args: string[]): string {
   return run.stdout;
 }
 
-function defaultDevices(runner: AgentsRunner): string[] {
-  const parsed = JSON.parse(runner(['devices', 'list', '--json', '--no-stats'])) as Array<{
-    name?: string;
-    platform?: string;
-    role?: string;
-    tailscale?: { online?: boolean };
-  }>;
-  return parsed
-    .filter((device) => device.name && device.tailscale?.online === true
-      && device.role !== 'control'
-      && ['linux', 'macos', 'windows'].includes(device.platform ?? ''))
-    .map((device) => device.name!);
+export function automaticSampleDevices(devices: DeviceProfile[]): string[] {
+  return devices
+    .filter((device) => isDialableDevice(device)
+      && !isControlDevice(device)
+      && ['linux', 'macos', 'windows'].includes(device.platform))
+    .map((device) => device.name);
+}
+
+function defaultDevices(): string[] {
+  return automaticSampleDevices(
+    JSON.parse(runAgents(['devices', 'list', '--json', '--no-stats'])) as DeviceProfile[],
+  );
 }
 
 export function partitionSampleDevices(
@@ -159,10 +158,10 @@ function toolQueryArgs(options: SampleOptions, devices: string[], local: boolean
   return args;
 }
 
-function querySource(args: string[], passes: number, runner: AgentsRunner): ToolSearchEnvelope {
+function querySource(args: string[], passes: number): ToolSearchEnvelope {
   let envelope: ToolSearchEnvelope | undefined;
   for (let pass = 0; pass < passes; pass++) {
-    envelope = JSON.parse(runner(args)) as ToolSearchEnvelope;
+    envelope = JSON.parse(runAgents(args)) as ToolSearchEnvelope;
     if (envelope.schemaVersion !== 1) throw new Error(`Unsupported tool-search schema ${envelope.schemaVersion}`);
     if (envelope.coverage.complete || envelope.coverage.remainingFiles === 0) break;
   }
@@ -173,17 +172,40 @@ function queryScopeCandidates(
   options: SampleOptions,
   devices: string[],
   local: boolean,
-  runner: AgentsRunner,
 ): ToolSearchEnvelope {
+  const firstArgs = toolQueryArgs(options, devices, local, SHELL_CANDIDATE_QUERIES[0]);
+  const warm = querySource(firstArgs, options.passes);
+  const envelopes = [
+    warm.coverage.complete || warm.coverage.remainingFiles === 0
+      ? warm
+      : querySource(firstArgs, 1),
+    ...SHELL_CANDIDATE_QUERIES.slice(1).map((query) =>
+      querySource(toolQueryArgs(options, devices, local, query), 1)),
+  ];
+  return mergeCandidateQueryEnvelopes(envelopes);
+}
+
+export function mergeCandidateQueryEnvelopes(envelopes: ToolSearchEnvelope[]): ToolSearchEnvelope {
   const sessions = new Map<string, ToolSessionEvidence>();
-  let finalEnvelope: ToolSearchEnvelope | undefined;
-  for (const query of SHELL_CANDIDATE_QUERIES) {
-    finalEnvelope = querySource(toolQueryArgs(options, devices, local, query), options.passes, runner);
-    for (const session of finalEnvelope.sessions) {
+  for (const envelope of envelopes) {
+    for (const session of envelope.sessions) {
       sessions.set(`${normalizeHost(session.machine ?? 'local')}\0${session.id}`, session);
     }
   }
-  return { ...finalEnvelope!, query: { clauses: [] }, sessions: [...sessions.values()] };
+  const finalEnvelope = envelopes.at(-1);
+  if (!finalEnvelope) throw new Error('At least one candidate query is required');
+  return {
+    ...finalEnvelope,
+    query: { clauses: [] },
+    coverage: {
+      ...finalEnvelope.coverage,
+      skippedFiles: Math.max(...envelopes.map((envelope) => envelope.coverage.skippedFiles)),
+      limitedFiles: Math.max(...envelopes.map((envelope) => envelope.coverage.limitedFiles)),
+      remainingFiles: Math.max(...envelopes.map((envelope) => envelope.coverage.remainingFiles)),
+      complete: envelopes.every((envelope) => envelope.coverage.complete),
+    },
+    sessions: [...sessions.values()],
+  };
 }
 
 export function exactSampleTargetArgs(candidateMachine: string | undefined, self: string): string[] {
@@ -216,13 +238,33 @@ export function mergeSampleEnvelopes(envelopes: ToolSearchEnvelope[]): ToolSearc
   };
 }
 
+export function evaluateExactSample(
+  envelope: ToolSearchEnvelope,
+  sessionId: string,
+  aggregate: ToolSearchEnvelope['coverage'],
+): { coverage: ToolSearchEnvelope['coverage']; hit?: ToolSessionEvidence; failed: boolean } {
+  const hit = envelope.sessions.find((session) => session.id === sessionId);
+  return {
+    coverage: {
+      ...aggregate,
+      indexedFiles: Math.max(aggregate.indexedFiles, envelope.coverage.indexedFiles),
+      indexedCalls: Math.max(aggregate.indexedCalls, envelope.coverage.indexedCalls),
+      skippedFiles: Math.max(aggregate.skippedFiles, envelope.coverage.skippedFiles),
+      limitedFiles: Math.max(aggregate.limitedFiles, envelope.coverage.limitedFiles),
+      remainingFiles: Math.max(aggregate.remainingFiles, envelope.coverage.remainingFiles),
+      complete: aggregate.complete && envelope.coverage.complete && hit !== undefined,
+    },
+    hit,
+    failed: !envelope.coverage.complete || hit === undefined,
+  };
+}
+
 export function loadEnvelope(
   options: SampleOptions,
-  runner: AgentsRunner = runAgents,
   self: string = machineId(),
 ): ToolSearchEnvelope {
   const explicit = options.devices.length > 0;
-  const devices = explicit ? options.devices : defaultDevices(runner);
+  const devices = explicit ? options.devices : defaultDevices();
   const { includeLocal, remoteDevices } = partitionSampleDevices(devices, self, explicit);
   const envelopes: ToolSearchEnvelope[] = [];
   let failedSources = 0;
@@ -232,7 +274,7 @@ export function loadEnvelope(
   ];
   for (const source of sources) {
     try {
-      envelopes.push(queryScopeCandidates(options, source.devices, source.local, runner));
+      envelopes.push(queryScopeCandidates(options, source.devices, source.local));
     } catch {
       failedSources++;
     }
@@ -255,12 +297,16 @@ export function loadEnvelope(
     ];
     let exact: ToolSearchEnvelope;
     try {
-      exact = querySource(args, options.passes, runner);
+      exact = querySource(args, options.passes);
     } catch {
       failedSessions++;
+      merged.coverage.complete = false;
       continue;
     }
-    const hit = exact.sessions.find((session) => session.id === candidate.id);
+    const evaluated = evaluateExactSample(exact, candidate.id, merged.coverage);
+    merged.coverage = evaluated.coverage;
+    if (evaluated.failed) failedSessions++;
+    const hit = evaluated.hit;
     if (!hit) continue;
     const shellCalls = hit.calls.filter((call) => call.programs.length > 0).map((call) => ({
       id: call.id,

@@ -450,6 +450,41 @@ describe('B-2 live incremental scan parity', () => {
     expect(db.getDB().prepare('SELECT count(*) AS n FROM tool_calls WHERE session_id = ?').get(id)).toEqual({ n: 0 });
   });
 
+  it('UPGRADE: a pre-tool-call continuation forces one full parse without overwriting ordinal zero', async () => {
+    const id = 'legacy-continuation-tool-calls';
+    const fp = writeTranscript(id, [
+      { type: 'user', timestamp: '2026-06-28T06:00:00.000Z', cwd: '/home/u/repo', message: { role: 'user', content: 'run both checks' } },
+      { type: 'assistant', timestamp: '2026-06-28T06:01:00.000Z', message: { role: 'assistant', content: [
+        { type: 'tool_use', id: 'legacy-call', name: 'Bash', input: { command: 'git status' } },
+      ] } },
+    ]);
+    await runScan();
+
+    const legacyState = JSON.parse(db.getParserStatesForPaths([fp]).get(fp)!.parserState!);
+    legacyState.v = 1;
+    delete legacyState.toolCalls;
+    db.getDB().prepare('UPDATE scan_ledger SET parser_state = ? WHERE file_path = ?')
+      .run(JSON.stringify(legacyState), fp);
+
+    discover.__resetClaudeScanBranchCountsForTest();
+    appendTranscript(id, [
+      { type: 'assistant', timestamp: '2026-06-28T06:02:00.000Z', message: { role: 'assistant', content: [
+        { type: 'tool_use', id: 'new-call', name: 'Bash', input: { command: 'gh pr view' } },
+      ] } },
+    ]);
+    bumpMtimeToNow(fp, 1);
+    await runScan();
+
+    expect(discover.__claudeScanBranchCountsForTest().incremental).toBe(0);
+    expect(discover.__claudeScanBranchCountsForTest().full).toBeGreaterThanOrEqual(1);
+    expect(db.getDB().prepare(`
+      SELECT ordinal, source_call_id FROM tool_calls WHERE session_id = ? ORDER BY ordinal
+    `).all(id)).toEqual([
+      { ordinal: 0, source_call_id: 'legacy-call' },
+      { ordinal: 1, source_call_id: 'new-call' },
+    ]);
+  });
+
   it('LEDGER: parser_state + content_text are persisted after a scan, and rewritten after truncation', async () => {
     const id = 'ledger-persist';
     const fp = writeTranscript(id, baseEvents(id));
@@ -461,7 +496,7 @@ describe('B-2 live incremental scan parity', () => {
     expect(row!.parserState, 'parser_state persisted').not.toBeNull();
     expect(row!.contentText, 'content_text persisted').not.toBeNull();
     const parsed = JSON.parse(row!.parserState!);
-    expect(parsed.v).toBe(1);
+    expect(parsed.v).toBe(2);
     expect(typeof parsed.offset).toBe('number');
     const offsetAfterFirst = parsed.offset;
 

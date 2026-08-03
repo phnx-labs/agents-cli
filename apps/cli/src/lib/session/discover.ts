@@ -3268,7 +3268,7 @@ export async function scanClaudeSession(filePath: string): Promise<ClaudeSession
  * exact even when the recent window is smaller than the true count.
  */
 export interface ClaudeParserState {
-  v: 1;
+  v: 2;
   offset: number;
   jsonlDroppingOversizedLine?: boolean;
   timestamp?: string;
@@ -3301,7 +3301,7 @@ export interface ClaudeParserState {
   contentText?: string;
   checklistEvents: SessionEvent[];
   recentDirectoriesTouched: string[];
-  toolCalls?: ToolCallCollectorSnapshot;
+  toolCalls: ToolCallCollectorSnapshot;
 }
 
 /** Cap on the FIFO window of recent assistant ids persisted in the continuation. */
@@ -3323,7 +3323,7 @@ export function serializeClaudeParserState(
     : allIds;
   const ticket = detectTicket(state.userTexts.join('\n') || undefined, state.gitBranch);
   return {
-    v: 1,
+    v: 2,
     offset,
     jsonlDroppingOversizedLine: jsonlDroppingOversizedLine || undefined,
     timestamp: state.timestamp,
@@ -3569,7 +3569,7 @@ function parsePriorClaudeState(row: { parserState: string | null } | undefined):
   if (!row?.parserState) return null;
   try {
     const parsed = JSON.parse(row.parserState) as ClaudeParserState;
-    if (parsed?.v !== 1 || typeof parsed.offset !== 'number') return null;
+    if (parsed?.v !== 2 || typeof parsed.offset !== 'number' || parsed.toolCalls?.v !== 1) return null;
     return parsed;
   } catch {
     return null;
@@ -3844,7 +3844,7 @@ async function scanCodexSession(filePath: string): Promise<CodexSessionScan> {
  * finalize is identical after a resume.
  */
 export interface CodexParserState {
-  v: 1;
+  v: 2;
   offset: number;
   jsonlDroppingOversizedLine?: boolean;
   sessionId?: string;
@@ -3869,7 +3869,7 @@ export interface CodexParserState {
   contentText?: string;
   checklistEvents: SessionEvent[];
   recentDirectoriesTouched: string[];
-  toolCalls?: ToolCallCollectorSnapshot;
+  toolCalls: ToolCallCollectorSnapshot;
 }
 
 /**
@@ -3884,7 +3884,7 @@ export function serializeCodexParserState(
 ): CodexParserState {
   const ticket = detectTicket(state.userTexts.join('\n') || undefined, state.gitBranch);
   return {
-    v: 1,
+    v: 2,
     offset,
     jsonlDroppingOversizedLine: jsonlDroppingOversizedLine || undefined,
     sessionId: state.sessionId,
@@ -4087,7 +4087,7 @@ function parsePriorCodexState(row: { parserState: string | null } | undefined): 
   if (!row?.parserState) return null;
   try {
     const parsed = JSON.parse(row.parserState) as CodexParserState;
-    if (parsed?.v !== 1 || typeof parsed.offset !== 'number') return null;
+    if (parsed?.v !== 2 || typeof parsed.offset !== 'number' || parsed.toolCalls?.v !== 1) return null;
     return parsed;
   } catch {
     return null;

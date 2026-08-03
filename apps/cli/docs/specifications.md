@@ -374,11 +374,16 @@ SSH access (§7); rendering sessions that no harness produced.
   (`lib/session/tool-calls.ts:6-16,69-96,177-305,319-408,486-526`).
 - **SES-32 (MUST).** A changed Claude/Codex transcript MUST derive tool calls in
   the same resumable reducer and preserve pending native call identity across an
-  append. Appended JSONL MUST be processed one bounded record at a time; a record
-  over 1 MiB MUST be skipped without retaining the rest of the file in memory.
+  append. Adding accumulator state MUST bump the continuation version; a prior
+  shape without tool-call state MUST force one full reparse before append-mode
+  persistence. Each appended JSONL record MUST be processed within a fixed
+  bound; a record over 1 MiB MUST be skipped without retaining the rest of the
+  file in memory.
   Other harnesses MUST derive calls from the same normalized event parse
   used for metadata. A warm compatible ledger row MUST NOT reopen or Bash-parse
-  the transcript (`lib/session/discover.ts:3042-3044,3434-3468,3667-3669,3969-3992`;
+  the transcript
+  (`lib/session/discover.ts:3042-3044,3270-3364,3434-3468,3568-3573`;
+  `lib/session/discover.ts:3667-3669,3846-3926,3969-3992,4086-4091`;
   `lib/session/db.ts:1297-1307`; `lib/session/tool-index.ts:211-290`).
 - **SES-33 (MUST).** Repeated tool query clauses MUST be satisfied by distinct
   call rows in the same session using polynomial bipartite matching. A request
@@ -393,30 +398,36 @@ SSH access (§7); rendering sessions that no harness produced.
   normal session ledgers. Migration MUST NOT clear `scan_ledger` or
   `dir_ledger`; an existing-history backfill is bounded to 25 files or 16 MiB
   per invocation. Oversized Claude/Codex JSONL MUST stream with a 1 MiB record
-  cap; other harness parsers MUST NOT materialize a source over 16 MiB. Append
+  cap up to a 64 MiB source ceiling; larger sources MUST persist an explicit
+  limit row without reading the body. Other harness parsers MUST NOT materialize
+  a source over 16 MiB. Append
   persistence MUST use ledger byte totals and read only changed ordinals
   (`lib/session/db.ts:28,535-621`; `lib/session/tool-store.ts:88-231`;
-  `lib/session/tool-index.ts:19-22,211-290`).
+  `lib/session/tool-index.ts:24-28,212-313`).
 - **SES-35 (MUST).** Fleet tool search MUST cap each peer's stdout at 16 MiB,
   query at most six peers concurrently, and subtract the exact encoded local
   envelope plus 64 KiB of coordinator headroom from the 15 MiB aggregate receive
   ceiling before retaining peer bytes. Raw peer bytes and the validated,
   re-redacted envelope MUST each be charged against that remainder, because
   redaction may expand evidence. It MUST mark partial coverage when exhausted
-  and MUST validate every
-  versioned envelope field, strip terminal controls, and omit transcript paths before merging. A missing
-  transcript MUST purge its call rows, program rows, FTS rows, and tool ledger
-  when the source directory changes, without statting every indexed session.
+  and MUST validate every versioned envelope field, strip terminal controls, and
+  omit transcript paths before merging. A missing transcript MUST purge its call
+  rows, program rows, FTS rows, and tool ledger when the source directory changes,
+  without statting every indexed session.
+  Fleet tool-call peer queries MUST use a direct SSH connection so terminating
+  the client at its deadline also terminates remote indexing; they have a 60-second
+  deadline after the 64 MiB source ceiling bounds one backfill pass.
   An unreachable or incompatible peer MUST also mark aggregate coverage partial
-  (`lib/session/remote-list.ts:51,78-96,192-231,331-503`;
+  (`lib/session/remote-list.ts:50-53,78-96,193-240,337-541`;
+  `lib/devices/resolve-target.ts:120-133`;
   `lib/session/tool-index.ts:73-97`; `lib/session/tool-store.ts:40-85`;
-  `commands/sessions.ts:1915-1952`).
+  `commands/sessions.ts:1926-1973`).
 - **SES-36 (MUST).** The shell-command sampling script MUST accept 50–100
   sessions, read the current device directly, balance deterministic selection
   across available requested machines, retain only redacted shell-call origins
   and classifications, cap its JSON artifact at 16 MiB, and record
   `sample_byte_limit` with partial coverage instead of silently dropping evidence
-  (`scripts/sample-session-shell-commands.ts:17-18,79-107,136-302,305-379`).
+  (`scripts/sample-session-shell-commands.ts:17-18,79-133,148-209,241-425`).
 
 ---
 
@@ -476,8 +487,10 @@ The command surface (bare `sessions [query]`, `tail`, `sync`, `resume`, `focus`,
   `SessionMeta[]` and exact-session JSON remains `{ session, events }`. Repeated
   `--query` clauses require distinct calls. `--fleet` MUST execute the query on
   each device's local index under the recursion guard and transfer compact
-  evidence only (`commands/sessions.ts:1915-1962,3747-3754,3903-3948`;
-  `lib/session/remote-list.ts:98-115,331-503`).
+  evidence only. A fleet tool query MUST reject cost/duration sorting because
+  the compact peer envelope carries no global sort key
+  (`commands/sessions.ts:1432-1463,1813-1868,1926-1973,3918-3959,3995-4002`;
+  `lib/session/remote-list.ts:98-115,337-541`).
 
 #### 4.3 stdout / stderr / exit discipline
 

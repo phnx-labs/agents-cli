@@ -18,7 +18,7 @@ import { StringDecoder } from 'string_decoder';
 import chalk from 'chalk';
 import { SSH_OPTS, controlOpts, assertValidSshTarget, shellQuote } from '../ssh-exec.js';
 import { sshTargetFor } from '../devices/connect.js';
-import { resolveExplicitTargets } from '../devices/resolve-target.js';
+import { resolveExplicitTargetSet } from '../devices/resolve-target.js';
 import { loadDevices, isControlDevice, isDialableDevice, type DeviceProfile } from '../devices/registry.js';
 import { remoteShellFor, buildWindowsAgentsCommand } from '../hosts/remote-cmd.js';
 import { machineId, normalizeHost } from './sync/config.js';
@@ -47,7 +47,8 @@ import {
 
 /** Per-host SSH budget. Slightly above SSH_OPTS' ConnectTimeout=10 so a
  * reachable-but-slow remote still answers before we give up. */
-const REMOTE_TIMEOUT_MS = 12_000;
+const REMOTE_LIST_TIMEOUT_MS = 12_000;
+const REMOTE_TOOL_TIMEOUT_MS = 60_000;
 export const REMOTE_STDOUT_MAX_BYTES = 16 * 1024 * 1024;
 export const REMOTE_TOOL_AGGREGATE_MAX_BYTES = TOOL_QUERY_MAX_SERIALIZED_BYTES;
 
@@ -189,15 +190,23 @@ export function remoteListCaptureResult(
 
 /** Run one remote `agents sessions … --json` and capture stdout. Resolves
  * `{ code: null }` on spawn error or timeout (host treated as dead). */
-function sshCapture(
+export function sshCapture(
   target: string,
   remoteCmd: string,
   timeoutMs: number,
   aggregateBudget?: RemoteToolByteBudget,
+  options: { multiplex?: boolean; port?: number; hostKeyOpts?: string[] } = {},
 ): Promise<{ code: number | null; stdout: string; aggregateBudgetExceeded?: boolean }> {
   assertValidSshTarget(target);
   return new Promise((resolve) => {
-    const args = [...SSH_OPTS, ...controlOpts(), target, remoteCmd];
+    const args = [
+      ...(options.hostKeyOpts ?? []),
+      ...SSH_OPTS,
+      ...(options.multiplex === false ? [] : controlOpts()),
+      ...(options.port === undefined ? [] : ['-p', String(options.port)]),
+      target,
+      remoteCmd,
+    ];
     const child = spawn('ssh', args, { stdio: ['ignore', 'pipe', 'ignore'] });
     const decoded = new RemoteUtf8Accumulator();
     let stdoutBytes = 0;
@@ -238,7 +247,7 @@ async function fetchByTarget(
   forwardedArgs: string[],
   os?: string
 ): Promise<{ sessions: SessionMeta[]; unreachable?: string }> {
-  const { code, stdout } = await sshCapture(target, remoteListCommand(forwardedArgs, os), REMOTE_TIMEOUT_MS);
+  const { code, stdout } = await sshCapture(target, remoteListCommand(forwardedArgs, os), REMOTE_LIST_TIMEOUT_MS);
   const safeResolver = forwardedArgs.includes('--resolve-safe-v1');
   const result = remoteListCaptureResult(code, stdout, machine, display, safeResolver);
   if (result.unreachable) {
@@ -260,6 +269,13 @@ export interface RemoteListResult {
   unreachable: string[];
 }
 
+/** Keep browse and tool-search fan-out on the same automatic peer set. */
+export function isAutomaticSessionPeer(d: DeviceProfile, self: string): boolean {
+  if (!isDialableDevice(d)) return false;
+  if (normalizeHost(d.name) === self || isControlDevice(d)) return false;
+  return d.platform === 'windows' || d.platform === 'linux' || d.platform === 'macos';
+}
+
 /**
  * Gather listing sessions from other machines. With an explicit `hosts` list
  * (from `--host`), fan out to exactly those. Otherwise sweep the registered,
@@ -270,11 +286,14 @@ export interface RemoteListResult {
 export async function gatherRemoteList(forwardedArgs: string[], hosts?: string[]): Promise<RemoteListResult> {
   const self = machineId();
   const targets: Array<{ target: string; machine: string; name: string; os?: string }> = [];
+  const unresolved: string[] = [];
 
   if (hosts && hosts.length > 0) {
     // Resolve each token through the device registry so an explicit --host/--device
     // dials the exact same address (and machine id) as the auto-discovery sweep.
-    targets.push(...await resolveExplicitTargets(hosts));
+    const resolved = await resolveExplicitTargetSet(hosts);
+    targets.push(...resolved.targets);
+    unresolved.push(...resolved.unresolved);
   } else {
     let reg: Record<string, DeviceProfile>;
     try {
@@ -286,15 +305,12 @@ export async function gatherRemoteList(forwardedArgs: string[], hosts?: string[]
       // Live SSH-probe verdict first, cached tailscale snapshot only as a
       // fallback — see isDialableDevice. A manually-registered device has no
       // tailscale peer entry, so gating on `online` alone hid its sessions.
-      if (!isDialableDevice(d)) continue;
-      if (normalizeHost(d.name) === self) continue;
+      if (!isAutomaticSessionPeer(d, self)) continue;
       // Control-only devices (a phone/tablet running the cockpit) drive the fleet
       // but never run agents — never dial them, whatever their platform reads as.
-      if (isControlDevice(d)) continue;
       // Only machines that can actually run the CLI. iOS/tablet nodes register as
       // `unknown` platform and can never answer, so skip them rather than burn a
       // full ConnectTimeout on each.
-      if (d.platform !== 'windows' && d.platform !== 'linux' && d.platform !== 'macos') continue;
       try {
         targets.push({ target: sshTargetFor(d), machine: normalizeHost(d.name), name: d.name, os: d.platform });
       } catch {
@@ -307,7 +323,7 @@ export async function gatherRemoteList(forwardedArgs: string[], hosts?: string[]
   return {
     sessions: results.flatMap((r) => r.sessions),
     deviceCount: targets.length,
-    unreachable: results.map((r) => r.unreachable).filter((n): n is string => !!n),
+    unreachable: [...unresolved, ...results.map((r) => r.unreachable).filter((n): n is string => !!n)],
   };
 }
 
@@ -454,8 +470,11 @@ export async function gatherRemoteToolSearch(
 ): Promise<RemoteToolSearchResult> {
   const self = machineId();
   const targets: Array<{ target: string; machine: string; name: string; os?: string }> = [];
+  const unresolved: string[] = [];
   if (hosts && hosts.length > 0) {
-    targets.push(...await resolveExplicitTargets(hosts));
+    const resolved = await resolveExplicitTargetSet(hosts);
+    targets.push(...resolved.targets);
+    unresolved.push(...resolved.unresolved);
   } else {
     let reg: Record<string, DeviceProfile>;
     try {
@@ -464,8 +483,7 @@ export async function gatherRemoteToolSearch(
       return { envelopes: [], deviceCount: 0, unreachable: ['device registry'], truncated: [] };
     }
     for (const d of Object.values(reg)) {
-      if (d.tailscale?.online !== true || normalizeHost(d.name) === self || isControlDevice(d)) continue;
-      if (d.platform !== 'windows' && d.platform !== 'linux' && d.platform !== 'macos') continue;
+      if (!isAutomaticSessionPeer(d, self)) continue;
       try {
         targets.push({ target: sshTargetFor(d), machine: normalizeHost(d.name), name: d.name, os: d.platform });
       } catch {
@@ -488,8 +506,12 @@ export async function gatherRemoteToolSearch(
       const capture = await sshCapture(
         target.target,
         remoteListCommand(forwardedArgs, target.os),
-        REMOTE_TIMEOUT_MS,
+        REMOTE_TOOL_TIMEOUT_MS,
         aggregateBudget,
+        // A tool-index deadline must own the SSH connection. Killing a
+        // multiplexed child would leave its remote command running on the
+        // persistent control master.
+        { multiplex: false },
       );
       if (capture.aggregateBudgetExceeded) return { target, truncated: target.name };
       if (capture.code !== 0) return { target, unreachable: target.name };
@@ -513,7 +535,7 @@ export async function gatherRemoteToolSearch(
       ? [{ machine: result.target.machine, envelope: result.envelope }]
       : []),
     deviceCount: targets.length,
-    unreachable: results.map((result) => result.unreachable).filter((name): name is string => !!name),
+    unreachable: [...unresolved, ...results.map((result) => result.unreachable).filter((name): name is string => !!name)],
     truncated: results.map((result) => result.truncated).filter((name): name is string => !!name),
   };
 }

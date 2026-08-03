@@ -13,6 +13,7 @@ import {
   buildSessionDescription,
   fleetCandidatesByQuery,
   metadataResolveForwardedArgs,
+  toolSearchFleetSortError,
   toolSearchForwardedArgs,
 } from './sessions.js';
 import { parseRemoteList, remoteListCommand } from '../lib/session/remote-list.js';
@@ -38,6 +39,15 @@ describe('toolSearchForwardedArgs', () => {
     expect(toolSearchForwardedArgs(argv, ['peer-one'])).toEqual([
       'sessions', '--include', 'tools', '--query', 'program:git', '--json', '--all', '--local',
     ]);
+  });
+});
+
+describe('toolSearchFleetSortError', () => {
+  it('rejects cost and duration sorts only when tool evidence spans devices', () => {
+    expect(toolSearchFleetSortError('cost', true)).toContain('only --sort recent');
+    expect(toolSearchFleetSortError('duration', true)).toContain('only --sort recent');
+    expect(toolSearchFleetSortError('recent', true)).toBeUndefined();
+    expect(toolSearchFleetSortError('cost', false)).toBeUndefined();
   });
 });
 
