@@ -499,8 +499,19 @@ classifier in `lib/session/host-link.ts`) and promotes it into the status column
 The two signals behind them:
 
 - **`#{session_attached}`** — the count of clients attached to a tmux-hosted session,
-  read from the `list-panes` query `listTmuxAgentSessions` already makes. An *absent*
-  count (a tmux too old to report it) means "cannot tell", never zero.
+  folded on by `foldTmuxClients` (one `list-panes` per socket, only when some row is
+  tmux-hosted). It keys off `provenance.mux`, which `enrichProvenance` stamps on any row
+  whose process env names a pane — deliberately **not** off `listTmuxAgentSessions`,
+  which only emits a row when it can resolve the pane's agent *identity* and emits
+  nothing at all on a machine where neither the launch registry nor a session meta
+  resolves. Hanging the count off that source would leave the orphan signal silently
+  dead on exactly those machines. An *absent* count (a tmux too old to report the field)
+  means "cannot tell", never zero.
+
+  Note the separator: tmux **sanitizes non-printable characters out of format output**
+  (3.6a rewrites a literal tab to `_`), so every `-F` query here uses a printable
+  `TMUX_FIELD_SEP`. `listTmuxAgentSessions` split on `\t` and therefore returned zero
+  rows on any such tmux — fixed alongside this.
 - **The IDE window heartbeat** — the `at` stamp on each window's slice of
   `live-terminals.json`. The Factory extension force-republishes every 4 minutes, so a
   slice older than `HOST_HEARTBEAT_STALE_MS` (10 minutes, the same window the extension
