@@ -102,23 +102,51 @@ export function noteUsageRateLimited(
   const now = opts?.now ?? Date.now();
   const fallbackMs = opts?.fallbackMs ?? 15 * 60 * 1000;
   const ms = parseRetryAfterMs(retryAfter, now) ?? fallbackMs;
-  const state = readBackoff();
-  // Never shorten an existing, longer penalty: a second 429 with a smaller
-  // header must not let us back on the wire early.
-  state.until[agent] = Math.max(state.until[agent] ?? 0, now + Math.min(ms, MAX_BACKOFF_MS));
-  writeBackoff(state);
+  recordDeadline(agent, now + Math.min(ms, MAX_BACKOFF_MS));
+}
+
+/**
+ * Raise `agent`'s deadline to at least `deadline`, and make that hold across
+ * processes.
+ *
+ * A plain read-modify-write cannot: two processes recording the same provider
+ * both read the old value, and the one with the SHORTER deadline can rename
+ * last, silently undoing the longer penalty. That is not theoretical here — the
+ * triggering condition is a batch of concurrent same-provider requests, which is
+ * exactly what the daemon issues. So the write is verified by reading back, and
+ * retried when a concurrent writer has lowered it.
+ *
+ * The value only ever moves forward, so this converges: a loser re-applies, and
+ * whoever holds the longest deadline wins. Bounded at three attempts because an
+ * unbounded loop on a hot path is a worse failure than a marginally short
+ * backoff — after which the residual is one shortened window, self-correcting on
+ * the next 429.
+ */
+function recordDeadline(agent: AgentId, deadline: number): void {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const state = readBackoff();
+    if ((state.until[agent] ?? 0) >= deadline) return; // already at least this long
+    state.until[agent] = deadline;
+    writeBackoff(state);
+    if ((readBackoff().until[agent] ?? 0) >= deadline) return; // survived
+  }
 }
 
 /**
  * Write via a temp file + rename so a concurrent reader never sees a truncated
  * JSON document.
  *
- * This is read-modify-write with no lock, so two processes recording different
- * providers in the same instant can lose one entry. That is accepted rather than
- * locked: the loser simply makes one more request on its next tick and records
- * again, which is a single extra call — while a lock file on a path every usage
- * read touches is a new way to wedge the CLI. What must not happen is a *torn*
- * file, which would make every provider read as free; the rename prevents that.
+ * This is read-modify-write with no lock. For the provider being written that is
+ * made safe by `recordDeadline`, which reads back and retries — the deadline
+ * only moves forward, so concurrent writers converge on the longest one.
+ *
+ * What remains unlocked is a *different* provider's entry: two processes
+ * recording, say, Claude and Kimi in the same instant can lose one of the two.
+ * That is accepted rather than locked — the loser makes one more request on its
+ * next tick and records again, a single extra call, while a lock file on a path
+ * every usage read touches is a new way to wedge the CLI. What must not happen
+ * is a *torn* file, which would make every provider read as free; the rename
+ * prevents that.
  */
 function writeBackoff(state: BackoffFile): void {
   const target = backoffPath();

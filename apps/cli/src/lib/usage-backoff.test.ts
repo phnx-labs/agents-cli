@@ -116,3 +116,54 @@ describe('formatBackoffRemaining', () => {
     expect(formatBackoffRemaining(NOW + 3 * 60 * 60 * 1000, NOW)).toBe('about 3 hours');
   });
 });
+
+describe('a concurrent writer cannot shorten a recorded deadline', () => {
+  // The invariant the comment claims — "never shorten an existing, longer
+  // penalty" — was only true within one process. Unlocked read-modify-write let
+  // a second process with a SHORTER deadline rename last and undo the longer
+  // one, and the triggering condition is exactly the batch of concurrent
+  // same-provider requests the daemon issues. recordDeadline reads back and
+  // retries, so the longest deadline wins.
+  let dir: string;
+  let prevPath: string | null;
+  let file: string;
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-backoff-race-'));
+    file = path.join(dir, '.usage-backoff.json');
+    prevPath = setUsageBackoffPathForTest(file);
+  });
+
+  afterEach(() => {
+    setUsageBackoffPathForTest(prevPath);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('repairs a file another writer has lowered underneath it', () => {
+    noteUsageRateLimited('claude', '2678');
+    const long = usageRateLimitedUntil('claude')!;
+
+    // Stand in for the losing race: another process clobbers the file with a
+    // deadline 60s out, exactly as an unverified rename would have.
+    fs.writeFileSync(file, JSON.stringify({ until: { claude: Date.now() + 60_000 } }));
+
+    // The next 429 for the same provider must restore a full window, not accept
+    // the shortened one.
+    noteUsageRateLimited('claude', '2678');
+
+    expect(usageRateLimitedUntil('claude')! - Date.now()).toBeGreaterThan(40 * 60 * 1000);
+    expect(usageRateLimitedUntil('claude')).toBeGreaterThanOrEqual(long - 1000);
+  });
+
+  it('does not rewrite when the stored deadline is already longer', () => {
+    noteUsageRateLimited('claude', '2678');
+    const long = usageRateLimitedUntil('claude')!;
+    const before = fs.statSync(file).mtimeMs;
+
+    noteUsageRateLimited('claude', '10');
+
+    expect(usageRateLimitedUntil('claude')).toBe(long);
+    // Short-circuits before writing at all — no churn on the hot path.
+    expect(fs.statSync(file).mtimeMs).toBe(before);
+  });
+});
