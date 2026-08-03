@@ -84,7 +84,8 @@ import { composeRulesFromState, type ComposedSubrule } from '../lib/rules/compos
 import { getConfiguredRunStrategy } from '../lib/rotate.js';
 import { resolveRunDefaults } from '../lib/run-defaults.js';
 import { resolveConfiguredModel, type ConfiguredModelSource } from '../lib/models.js';
-import { listProfiles, profileSummary, type ProfileSummary } from '../lib/profiles.js';
+import { listProfiles, profileExists, profileSummary, readProfile, type ProfileSummary } from '../lib/profiles.js';
+import { renderHarnessDetail } from './harness.js';
 import { loadManifest, isStale } from '../lib/staleness/index.js';
 import { confirm } from '@inquirer/prompts';
 import { formatPath, isInteractiveTerminal, isPromptCancelled } from './utils.js';
@@ -94,26 +95,20 @@ import { terminalWidth, truncateToWidth, stringWidth } from '../lib/session/widt
 export const accountColumnLabel = accountDisplayLabel;
 
 /**
- * Group profile summaries by their host harness, optionally filtered to a
- * single agent. Profile YAMLs that fail validation are silently skipped by
- * `listProfiles` so this never throws on a malformed file.
+ * Custom harnesses (the `~/.agents/profiles/*.yml` bundles), sorted by name and
+ * optionally narrowed to the ones that run on one host agent. YAMLs that fail
+ * validation are silently skipped by `listProfiles`, so this never throws on a
+ * malformed file.
  */
-function getProfilesByAgent(filterAgentId?: AgentId): Map<AgentId, ProfileSummary[]> {
-  const byAgent = new Map<AgentId, ProfileSummary[]>();
-  for (const profile of listProfiles()) {
-    if (filterAgentId && profile.host.agent !== filterAgentId) continue;
-    const summary = profileSummary(profile);
-    const existing = byAgent.get(profile.host.agent);
-    if (existing) existing.push(summary);
-    else byAgent.set(profile.host.agent, [summary]);
-  }
-  return byAgent;
+function getHarnesses(filterAgentId?: AgentId): ProfileSummary[] {
+  return listProfiles()
+    .filter((profile) => !filterAgentId || profile.host.agent === filterAgentId)
+    .map(profileSummary);
 }
 
-/** Build the usage-column equivalent for a profile row: "profile  <model>". */
-function profileKindAndModel(model: string, planWidth: number): string {
-  const kind = 'profile'.padEnd(Math.max(planWidth, 'profile'.length));
-  return `${kind}  ${model}`;
+/** "via <host> <version>" — which native harness actually executes this one. */
+function harnessHostTag(harness: ProfileSummary): string {
+  return harness.hostVersion ? `via ${harness.agent} ${harness.hostVersion}` : `via ${harness.agent}`;
 }
 
 /**
@@ -226,38 +221,45 @@ export function descriptionForPrefix(desc: string | undefined, prefix: string): 
   return summarizeDescription(desc, budget);
 }
 
-function getProfileSummaries(filterAgentId?: AgentId): ProfileSummary[] {
-  return listProfiles()
-    .filter((profile) => !filterAgentId || profile.host.agent === filterAgentId)
-    .map(profileSummary);
-}
+/**
+ * Render custom harnesses as their own agent-type blocks — peers of the native
+ * Claude/Codex blocks, not indented rows under the host CLI that executes them.
+ * `agents run <name>` already treats a custom harness like a native agent id, so
+ * `agents view` lists it the same way: a bold name header, then one row carrying
+ * the model, the account/auth state, and the host it runs on.
+ *
+ * `installedHosts` is the set of agent ids with a usable install; a harness whose
+ * host is missing is flagged rather than silently listed as runnable.
+ */
+export function renderHarnessBlocks(
+  harnesses: ProfileSummary[],
+  installedHosts: Set<AgentId>,
+  showPaths: boolean,
+): void {
+  if (harnesses.length === 0) return;
 
-function renderProfilesSection(profiles: ProfileSummary[]): void {
-  if (profiles.length === 0) return;
+  const modelWidth = Math.max(...harnesses.map((h) => h.model.length));
+  const authWidth = Math.max(...harnesses.map((h) => h.auth.length));
 
-  const nameWidth = Math.max(4, ...profiles.map((p) => p.name.length));
-  const hostWidth = Math.max(4, ...profiles.map((p) => p.host.length));
-  const providerWidth = Math.max(8, ...profiles.map((p) => p.provider.length));
-
-  console.log(chalk.bold('Profiles\n'));
-  console.log(
-    `  ${chalk.gray('NAME'.padEnd(nameWidth))}  ` +
-    `${chalk.gray('HOST'.padEnd(hostWidth))}  ` +
-    `${chalk.gray('PROVIDER'.padEnd(providerWidth))}  ` +
-    chalk.gray('MODEL'),
-  );
-
-  for (const profile of profiles) {
+  for (const harness of harnesses) {
+    // The `via <host>` tag on the row already names a native fork parent, so
+    // only a fork of another custom harness adds lineage worth printing.
+    const origin =
+      harness.forkedFrom && harness.forkedFrom !== harness.agent
+        ? `custom · forked from ${harness.forkedFrom}`
+        : 'custom';
+    const missingHost = installedHosts.has(harness.agent)
+      ? ''
+      : chalk.yellow(` (host ${harness.agent} not installed)`);
+    console.log(`  ${chalk.bold(harness.label)}${chalk.gray(` (${origin})`)}${missingHost}`);
     console.log(
-      `  ${chalk.cyan(profile.name.padEnd(nameWidth))}  ` +
-      `${profile.host.padEnd(hostWidth)}  ` +
-      `${profile.provider.padEnd(providerWidth)}  ` +
-      chalk.gray(profile.model),
+      `    ${chalk.yellow(harness.model.padEnd(modelWidth))}  ` +
+        `${chalk.cyan(harness.auth.padEnd(authWidth))}  ` +
+        chalk.gray(harnessHostTag(harness)),
     );
+    if (showPaths) console.log(chalk.gray(`      ${harness.path}`));
+    console.log();
   }
-  console.log(chalk.gray('\n  Run: agents run <profile> [prompt]'));
-  console.log(chalk.gray('       agents profiles view <profile>'));
-  console.log();
 }
 
 /**
@@ -362,8 +364,7 @@ async function showInstalledVersions(
   ) as Partial<Record<AgentId, CliState>>;
   spinner.stop();
   const showPaths = !!filterAgentId;
-  const profilesByAgent = getProfilesByAgent(filterAgentId);
-  const profileSummaries = [...profilesByAgent.values()].flat();
+  const harnesses = getHarnesses(filterAgentId);
 
   // Auto-heal stale versioned aliases. Pre-v2 aliases (e.g. pre-CLAUDE_CONFIG_DIR
   // claude shims) silently route login through the default version's symlinked
@@ -472,12 +473,10 @@ async function showInstalledVersions(
   // Separate version-managed from globally-installed agents
   const versionManaged: AgentId[] = [];
   const globallyInstalled: AgentId[] = [];
-  const profileOnly: AgentId[] = [];
 
   for (const agentId of agentsToShow) {
     const versions = listInstalledVersions(agentId);
     const cliState = cliStates[agentId];
-    const hasProfiles = (profilesByAgent.get(agentId)?.length ?? 0) > 0;
 
     if (versions.length > 0) {
       versionManaged.push(agentId);
@@ -485,10 +484,11 @@ async function showInstalledVersions(
     if (cliState?.installed) {
       // Isolated-only installs sit alongside the global CLI rather than replacing it.
       if (!hasNonIsolatedVersion(agentId)) globallyInstalled.push(agentId);
-    } else if (versions.length === 0 && hasProfiles) {
-      profileOnly.push(agentId);
     }
   }
+  // A custom harness runs through its host CLI, so it is only launchable when
+  // that host has an install of some kind.
+  const installedHosts = new Set<AgentId>([...versionManaged, ...globallyInstalled]);
 
   // For self-updating global-binary agents (droid) the on-disk version-dir name
   // is a stale label — the real version is whatever `<cli> --version` reports.
@@ -550,12 +550,6 @@ async function showInstalledVersions(
           maxModelWidth = Math.max(maxModelWidth, model.length);
         }
       }
-      // Profile rows share these columns with version rows so they line up.
-      for (const profile of profilesByAgent.get(agentId) ?? []) {
-        maxVerLabel = Math.max(maxVerLabel, profile.name.length);
-        maxEmail = Math.max(maxEmail, profile.auth.length);
-        maxPlanWidth = Math.max(maxPlanWidth, 'profile'.length);
-      }
     }
     // Second pass: compute max visible usage + status widths (now that maxPlanWidth is settled)
     for (const agentId of versionManaged) {
@@ -570,10 +564,6 @@ async function showInstalledVersions(
         maxUsageWidth = Math.max(maxUsageWidth, visibleWidth(usageStr));
         const statusStr = formatUsageStatusBadge(info?.usageStatus);
         maxStatusWidth = Math.max(maxStatusWidth, visibleWidth(statusStr));
-      }
-      for (const profile of profilesByAgent.get(agentId) ?? []) {
-        const usageEquivalent = profileKindAndModel(profile.model, maxPlanWidth);
-        maxUsageWidth = Math.max(maxUsageWidth, visibleWidth(usageEquivalent));
       }
     }
 
@@ -688,21 +678,6 @@ async function showInstalledVersions(
         }
       }
 
-      // Profile rows share the same columns as versions: name | auth | "profile"+model.
-      // No status badge, no last-active — profiles don't accumulate usage state.
-      for (const profile of profilesByAgent.get(agentId) ?? []) {
-        const nameCol = chalk.cyan(profile.name.padEnd(maxVerLabel));
-        // Pad the model column so profile rows line up with version rows.
-        const modelPad = maxModelWidth > 0 ? `${' '.repeat(maxModelWidth)}  ` : '';
-        const authCol = chalk.gray(profile.auth.padEnd(maxEmail));
-        const usageEquivalent = profileKindAndModel(profile.model, maxPlanWidth);
-        const usagePad = ' '.repeat(Math.max(0, maxUsageWidth - visibleWidth(usageEquivalent)));
-        console.log(`    ${nameCol}  ${modelPad}${authCol}  ${chalk.gray(usageEquivalent + usagePad)}`);
-        if (showPaths) {
-          console.log(chalk.gray(`      ${profile.path}`));
-        }
-      }
-
       // Check for project override
       const projectVersion = getProjectVersionFromCwd(agentId);
       if (projectVersion && projectVersion !== globalDefault) {
@@ -712,6 +687,11 @@ async function showInstalledVersions(
       console.log();
     }
   }
+
+  // Custom harnesses sit in the same list as the native ones — they are run the
+  // same way (`agents run <name>`), so they read as their own agent type rather
+  // than as an indented row under whichever host CLI executes them.
+  renderHarnessBlocks(harnesses, installedHosts, showPaths);
 
   // Show globally installed (not managed) agents
   if (globallyInstalled.length > 0) {
@@ -767,27 +747,6 @@ async function showInstalledVersions(
       if (showPaths && cliState?.path) {
         console.log(chalk.gray(`      ${cliState.path}`));
       }
-      // Profile rows under a globally-installed harness. Use a simpler
-      // alignment here since this section doesn't share column state with
-      // the version-managed block.
-      // An isolated-only agent now appears in BOTH blocks; its profiles already
-      // rendered under the version-managed one, so don't print them twice.
-      const profilesHere = versionManaged.includes(agentId) ? [] : (profilesByAgent.get(agentId) ?? []);
-      if (profilesHere.length > 0) {
-        const nameWidth = Math.max(globalMaxVerLabel, ...profilesHere.map((p) => p.name.length));
-        const authWidth = Math.max(...profilesHere.map((p) => p.auth.length));
-        for (const profile of profilesHere) {
-          console.log(
-            `    ${chalk.cyan(profile.name.padEnd(nameWidth))}  ` +
-              `${chalk.gray(profile.auth.padEnd(authWidth))}  ` +
-              `${chalk.gray('profile')}  ` +
-              chalk.gray(profile.model),
-          );
-          if (showPaths) {
-            console.log(chalk.gray(`      ${profile.path}`));
-          }
-        }
-      }
       if (agent.npmPackage && cliState?.version) {
         console.log(chalk.gray(`    Manage: agents add ${agentId}@${cliState.version} -y`));
       } else if (!agent.npmPackage && cliState?.installed) {
@@ -799,38 +758,12 @@ async function showInstalledVersions(
     }
   }
 
-  // Agents with no install but with profiles defined — render under the same
-  // harness header so users find them where they look.
-  if (profileOnly.length > 0) {
-    if (versionManaged.length === 0 && globallyInstalled.length === 0) {
-      console.log(chalk.bold('Profile-only Agents\n'));
-    }
-    for (const agentId of profileOnly) {
-      const profilesHere = profilesByAgent.get(agentId) ?? [];
-      console.log(`  ${chalk.bold(agentLabel(agentId))}${chalk.yellow(' (profile only)')}`);
-      const nameWidth = Math.max(...profilesHere.map((p) => p.name.length));
-      const authWidth = Math.max(...profilesHere.map((p) => p.auth.length));
-      for (const profile of profilesHere) {
-        console.log(
-          `    ${chalk.cyan(profile.name.padEnd(nameWidth))}  ` +
-            `${chalk.gray(profile.auth.padEnd(authWidth))}  ` +
-            `${chalk.gray('profile')}  ` +
-            chalk.gray(profile.model),
-        );
-        if (showPaths) {
-          console.log(chalk.gray(`      ${profile.path}`));
-        }
-      }
-      console.log();
-    }
-  }
-
   // If filtering to a specific agent and not found
   if (
     filterAgentId &&
     versionManaged.length === 0 &&
     globallyInstalled.length === 0 &&
-    profileOnly.length === 0
+    harnesses.length === 0
   ) {
     console.log(`  ${chalk.bold(agentLabel(filterAgentId))}: ${chalk.gray('not installed')}`);
     console.log();
@@ -840,8 +773,7 @@ async function showInstalledVersions(
   if (
     versionManaged.length === 0 &&
     globallyInstalled.length === 0 &&
-    profileOnly.length === 0 &&
-    profileSummaries.length === 0 &&
+    harnesses.length === 0 &&
     !filterAgentId
   ) {
     console.log(chalk.gray('  No agent CLIs installed.'));
@@ -1250,7 +1182,8 @@ export interface ViewJsonVersion {
 export interface ViewJsonAgent {
   agent: AgentId;
   versions: ViewJsonVersion[];
-  profiles: ProfileSummary[];
+  /** Custom harnesses that run on this agent as their host CLI. */
+  harnesses: ProfileSummary[];
 }
 
 /** Resource sections that --resources can include in --json output. */
@@ -1528,7 +1461,7 @@ async function collectAgentsJson(filterAgentId?: AgentId, resourceSections?: Set
     else byAgent.set(agentId, [entry]);
   }
 
-  const profilesByAgent = getProfilesByAgent(filterAgentId);
+  const harnesses = getHarnesses(filterAgentId);
   const out: ViewJsonAgent[] = [];
   for (const agentId of agentsToShow) {
     const versions = byAgent.get(agentId) ?? [];
@@ -1536,7 +1469,7 @@ async function collectAgentsJson(filterAgentId?: AgentId, resourceSections?: Set
       if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
       return compareVersions(b.version, a.version);
     });
-    out.push({ agent: agentId, versions, profiles: profilesByAgent.get(agentId) ?? [] });
+    out.push({ agent: agentId, versions, harnesses: harnesses.filter((h) => h.agent === agentId) });
   }
   return out;
 }
@@ -1861,6 +1794,17 @@ export async function viewAction(
 
   const agentId = resolveAgentName(agentName);
   if (!agentId) {
+    // A custom harness is an agent type here, not an unknown name: `agents run
+    // <name>` launches it, so `agents view <name>` describes it.
+    if (profileExists(agentName)) {
+      const harness = profileSummary(readProfile(agentName));
+      if (json) {
+        console.log(JSON.stringify(harness, null, 2));
+        return;
+      }
+      renderHarnessDetail(agentName);
+      return;
+    }
     if (json) {
       console.log(JSON.stringify({ error: formatAgentError(agentName) }));
       process.exit(1);
@@ -1900,7 +1844,7 @@ export async function viewAction(
     // --json ignores the @version suffix, but --resources/--detailed (or a
     // section flag) now attach each version's resource inventory + sync-state.
     const data = await collectAgentsJson(agentId, resourceSections);
-    console.log(JSON.stringify(data[0] ?? { agent: agentId, versions: [], profiles: [] }, null, 2));
+    console.log(JSON.stringify(data[0] ?? { agent: agentId, versions: [], harnesses: [] }, null, 2));
     return;
   }
 
@@ -1947,6 +1891,9 @@ Examples:
   # Show versions for one agent
   agents view claude
 
+  # Describe one custom harness (host, model, provider, auth, path)
+  agents view deepseek-flash
+
   # Detailed view: resources, commands, skills, MCP servers for a specific version
   agents view claude@2.1.112
   agents view claude@default
@@ -1980,8 +1927,10 @@ When to use:
   - Cleaning up stale versions left behind after upgrading (--prune)
 
 Output:
-  - Without arguments: table of all agents with versions, emails, usage stats
+  - Without arguments: table of all agents with versions, emails, usage stats,
+    then one block per custom harness (see 'agents harness')
   - With agent name: versions for that agent, showing which is the default
+  - With a custom harness name: that harness's host, model, provider, and auth
   - With agent@version: detailed breakdown of resources synced to that version
   - With --json: structured JSON with version, isDefault, signedIn, email, plan,
     usageStatus, per-window usedPercent, lastActive, and path

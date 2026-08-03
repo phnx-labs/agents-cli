@@ -679,7 +679,7 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     expect(combined).not.toContain('Upgrade now');
   });
 
-  it('renders profile rows inline under their host harness in `agents view`', () => {
+  it('renders each custom harness as its own agent-type block in `agents view`', () => {
     const home = makeTempHome();
     tempHomes.push(home);
     writeFakeManagedVersion(home, 'claude', '2.1.143', 'claude');
@@ -699,14 +699,33 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     const combined = `${result.stdout}\n${result.stderr}`;
 
     expect(result.status, combined).toBe(0);
-    // No separate "Profiles" section header — rows live under the harness.
+    // No separate "Profiles" section header — a harness gets a name header of
+    // its own, exactly like Claude/Codex above it.
     expect(combined).not.toMatch(/^Profiles\s*$/m);
-    // Each profile row carries its name, the `profile` kind marker, and model.
-    expect(combined).toContain('test-proxy');
+    expect(combined).toMatch(/^ {2}test-proxy \(custom\)$/m);
+    expect(combined).toMatch(/^ {2}ollama \(custom\)$/m);
+    // The model + the host that executes it sit on the harness's own row.
+    expect(combined).toMatch(/truefoundry\/qwen3-coder\s.*via claude/);
+    expect(combined).toMatch(/qwen3-coder:30b\s.*via codex/);
+  }, 30_000);
+
+  it('describes a custom harness in `agents view <harness>` instead of rejecting the name', () => {
+    const home = makeTempHome();
+    tempHomes.push(home);
+    writeFakeManagedVersion(home, 'claude', '2.1.143', 'claude');
+    writeProfileYaml(home, 'test-proxy', {
+      agent: 'claude',
+      provider: 'truefoundry',
+      env: { ANTHROPIC_MODEL: 'truefoundry/qwen3-coder' },
+    });
+
+    const result = runAgents(home, ['view', 'test-proxy'], { AGENTS_CLI_DISABLE_AUTO_UPDATE: '1' });
+    const combined = `${result.stdout}\n${result.stderr}`;
+
+    expect(result.status, combined).toBe(0);
+    expect(combined).toContain('custom harness');
     expect(combined).toContain('truefoundry/qwen3-coder');
-    expect(combined).toContain('ollama');
-    expect(combined).toContain('qwen3-coder:30b');
-    expect(combined).toContain('profile');
+    expect(combined).toContain('agents run test-proxy');
   }, 30_000);
 
   it('filters profiles to the requested harness in `agents view claude`', () => {
@@ -749,10 +768,10 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     // `view <agent> --json` emits a single object, not an array.
     const claudeEntry = JSON.parse(result.stdout) as {
       agent: string;
-      profiles: Array<{ name: string; agent: string; model: string; provider: string }>;
+      harnesses: Array<{ name: string; agent: string; model: string; provider: string }>;
     };
     expect(claudeEntry.agent).toBe('claude');
-    expect(claudeEntry.profiles).toEqual([
+    expect(claudeEntry.harnesses).toEqual([
       expect.objectContaining({
         name: 'test-proxy',
         agent: 'claude',
