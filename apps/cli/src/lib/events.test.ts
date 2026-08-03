@@ -101,9 +101,9 @@ describe('events', () => {
         setupLogsDir();
         emit('info', { module: 'test' });
         const rec = query({})[0];
-        // Full untruncated session id (the 8-char `session` stays for back-compat).
+        // Full untruncated session id — the new floor field, stamped unconditionally
+        // (unlike the caller-gated 8-char `session`, which needs CLAUDECODE/terminal env).
         expect(rec.sessionId).toBe('11111111-2222-3333-4444-555555555555');
-        expect(rec.session).toBe('11111111');
         expect(rec.agent).toBe('claude');
         expect(rec.launchId).toBe('launch-abc');
         expect(rec.parentSessionId).toBe('99999999-8888-7777-6666-555555555555');
