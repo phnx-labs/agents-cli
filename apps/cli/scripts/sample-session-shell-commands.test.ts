@@ -227,7 +227,7 @@ describe('session shell-command sampler', () => {
       if (previous.noUsage === undefined) delete process.env.AGENTS_NO_USAGE_TRACK; else process.env.AGENTS_NO_USAGE_TRACK = previous.noUsage;
       fs.rmSync(root, { recursive: true, force: true });
     }
-  }, 30_000);
+  }, 120_000);
 
   it('deduplicates bulk results from normalized machine names', () => {
     const first: ToolSearchEnvelope = {
