@@ -46,6 +46,7 @@ import {
   sessionUsedPercent,
   buildLaunchCommand,
   buildHostLaunchCommand,
+  buildAgentRunLaunchCommand,
   buildResumeInput,
   isVersionStillUsable,
 } from '../core/resumeInBest';
@@ -124,6 +125,7 @@ import {
 import { handleForkPickedSession, loadBrowsableSessions, registerForkPickSessionCommand, runSessionBrowserPicker } from './sessionBrowser.vscode';
 import type { RemoteSession, RawActiveSession } from '../core/remoteSessions';
 import {
+  abandonedCandidates,
   buildResumeCandidates,
   defaultPickedIds,
   RESUME_PICKER_CACHE_KEY,
@@ -133,6 +135,8 @@ import {
   type ResumePickerCache,
   type ResumeState,
 } from '../core/resumePicker';
+import { buildHarnessOptions, type HarnessOption } from '../core/resumeTarget';
+import { fetchAgentInventories } from '../core/agentInventory';
 // readAgentRunStrategy no longer needed: agents-cli reads strategy from
 // agents.yaml itself when invoked via `agents run`.
 import { resolveAgentsBin, AgentsBinNotFoundError } from '../core/agentsBin';
@@ -1780,6 +1784,23 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand('agents.resumePickSession', () =>
+      resumeSessionsBatch(context, {
+        title: 'Agents: Resume (Pick Session)',
+        abandonedOnly: true,
+      })
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('agents.resumePickHost', () => resumeCurrentPickHost(context))
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('agents.resumePickHarness', () => resumeCurrentPickHarness(context))
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand(
       'agents.resumeCurrentInBestProfile',
       () => resumeCurrentInBestProfile(context)
@@ -3221,20 +3242,30 @@ async function fetchResumeCandidates(): Promise<ResumeCandidate[]> {
  * Stale-while-revalidate: the picker renders the persisted snapshot instantly
  * (the live fleet read takes seconds over SSH) and swaps items in place when
  * the background refresh lands, carrying the user's checks across the swap.
+ *
+ * `abandonedOnly` is the `Agents: Resume (Pick Session)` variant: it lists only
+ * sessions nobody is watching right now (detached / background / parked /
+ * idle). The cache stays unfiltered so both pickers share one snapshot — the
+ * filter applies at render.
  */
-async function resumeSessionsBatch(context: vscode.ExtensionContext) {
+async function resumeSessionsBatch(
+  context: vscode.ExtensionContext,
+  opts: { title?: string; abandonedOnly?: boolean } = {},
+) {
+  const select = (cs: ResumeCandidate[]) => (opts.abandonedOnly ? abandonedCandidates(cs) : cs);
   const rawCache = context.globalState.get<ResumePickerCache>(RESUME_PICKER_CACHE_KEY);
   // Shape-check like the host picker cache: a drifted entry must degrade to
   // the cold path, not crash item building on a non-array.
   const cached = rawCache && Array.isArray(rawCache.candidates) ? rawCache : undefined;
-  let initial = cached?.candidates ?? [];
+  let initial = select(cached?.candidates ?? []);
 
   // Cold start (no snapshot yet): the live read fans out across the fleet over
   // SSH, so it can take seconds — show progress rather than leaving the
   // palette looking hung. CLI-missing errors surface here, as before.
   if (initial.length === 0) {
+    let fresh: ResumeCandidate[];
     try {
-      initial = await vscode.window.withProgress(
+      fresh = await vscode.window.withProgress(
         { location: vscode.ProgressLocation.Window, title: 'Agents: finding resumable sessions…' },
         fetchResumeCandidates,
       );
@@ -3247,16 +3278,17 @@ async function resumeSessionsBatch(context: vscode.ExtensionContext) {
       }
       return;
     }
-    void context.globalState.update(RESUME_PICKER_CACHE_KEY, { candidates: initial, fetchedAt: Date.now() } satisfies ResumePickerCache);
+    void context.globalState.update(RESUME_PICKER_CACHE_KEY, { candidates: fresh, fetchedAt: Date.now() } satisfies ResumePickerCache);
+    initial = select(fresh);
   }
 
   if (initial.length === 0) {
-    vscode.window.showInformationMessage('No sessions found');
+    vscode.window.showInformationMessage(opts.abandonedOnly ? 'No abandoned sessions found' : 'No sessions found');
     return;
   }
 
   const quickPick = vscode.window.createQuickPick<ResumeCandidateItem>();
-  quickPick.title = 'Agents: Resume';
+  quickPick.title = opts.title ?? 'Agents: Resume';
   quickPick.canSelectMany = true;
   quickPick.matchOnDescription = true;
   quickPick.matchOnDetail = true;
@@ -3291,7 +3323,8 @@ async function resumeSessionsBatch(context: vscode.ExtensionContext) {
     void fetchResumeCandidates()
       .then((fresh) => {
         void context.globalState.update(RESUME_PICKER_CACHE_KEY, { candidates: fresh, fetchedAt: Date.now() } satisfies ResumePickerCache);
-        if (!pickerDisposed && fresh.length > 0) applyItems(fresh);
+        const filtered = select(fresh);
+        if (!pickerDisposed && filtered.length > 0) applyItems(filtered);
       })
       .catch((err) => console.error('[resumeSessionsBatch] refresh failed:', err))
       .finally(() => { if (!pickerDisposed) quickPick.busy = false; });
@@ -3410,6 +3443,204 @@ async function resumeCurrentInBestProfile(context: vscode.ExtensionContext) {
   if (outcome.status === 'no_session') {
     vscode.window.showInformationMessage('Active terminal has no session to resume');
   }
+}
+
+/**
+ * The active terminal's tracked entry for the resume-current commands, with
+ * the two "nothing to resume" toasts already handled. Requires a session id:
+ * without one there is no transcript to point the new tab at.
+ */
+function activeSessionTerminalEntry(): terminals.EditorTerminal | undefined {
+  const activeTerminal = vscode.window.activeTerminal;
+  if (!activeTerminal) {
+    vscode.window.showInformationMessage('No active terminal');
+    return undefined;
+  }
+  const entry = terminals.getByTerminal(activeTerminal);
+  if (!entry?.sessionId) {
+    vscode.window.showInformationMessage('Active terminal has no session to resume');
+    return undefined;
+  }
+  return entry;
+}
+
+/**
+ * `Agents: Resume (Pick Host)` — reopen the ACTIVE tab's session on another
+ * device. Only the host changes: the harness and its pinned version stay, so
+ * the host picker is the one decision the user makes. Transcripts sync
+ * fleet-wide, so `agents run --host <picked> --resume <id>` picks the session
+ * up wherever it lands (see buildVersionedResumeCommand).
+ */
+async function resumeCurrentPickHost(context: vscode.ExtensionContext) {
+  const entry = activeSessionTerminalEntry();
+  if (!entry) return;
+  const agentKey = entry.agentType || prefixToAgentType(entry.agentConfig?.prefix ?? null);
+  if (!agentKey || !agentKeyFromSession(agentKey)) {
+    vscode.window.showInformationMessage(`Cannot resume sessions of type ${agentKey || 'unknown'}`);
+    return;
+  }
+  const currentHost = entry.host ?? 'this Mac';
+  const pick = await pickLaunchHost(context, `Resume ${agentKey} on… (currently: ${currentHost})`, agentKey);
+  if (pick.cancelled) return;
+  const sessionId = entry.sessionId!;
+  const opened = await openResumedSessionTerminal(context, {
+    id: sessionId,
+    shortId: sessionId.slice(0, 8),
+    agent: agentKey,
+    version: entry.version ?? entry.statusVersion,
+    account: entry.account,
+    host: pick.host,
+  });
+  if (opened) {
+    vscode.window.setStatusBarMessage(
+      `Resuming ${agentKey} on ${pick.host ?? 'this Mac'} · ${sessionId.slice(0, 8)}`,
+      4000,
+    );
+  }
+}
+
+/**
+ * `Agents: Resume (Pick Harness)` — reopen the ACTIVE tab's session in a
+ * different harness on the SAME device. Native `--resume` only works inside
+ * the harness that wrote the transcript, so the new harness gets the old
+ * session through the universal continue replay (buildResumeInput → the agent
+ * loads the transcript via `agents sessions <id>` and keeps working).
+ */
+async function resumeCurrentPickHarness(context: vscode.ExtensionContext) {
+  const entry = activeSessionTerminalEntry();
+  if (!entry) return;
+  const currentAgent = entry.agentType || prefixToAgentType(entry.agentConfig?.prefix ?? null);
+  // Signed-in counts are a LOCAL read; for an offloaded tab this box can't see
+  // the device's installs, so the list falls back to the unranked full set and
+  // the launch fails loud on the device if the harness is missing there.
+  const inventories = entry.host
+    ? {}
+    : await fetchAgentInventories(BUILT_IN_AGENTS.filter((a) => a.key !== 'shell').map((a) => a.key));
+  const options = buildHarnessOptions(BUILT_IN_AGENTS, inventories, currentAgent ?? undefined);
+  if (options.length === 0) {
+    vscode.window.showInformationMessage('No other harness to resume in');
+    return;
+  }
+  const picked = await vscode.window.showQuickPick(
+    options.map((o) => ({
+      label: o.title,
+      description: o.agent,
+      detail: o.signedInCount > 0
+        ? `${o.signedInCount} signed-in version${o.signedInCount === 1 ? '' : 's'}${o.healthyCount > 0 ? ` · ${o.healthyCount} with usage` : ''}`
+        : undefined,
+      option: o,
+    })),
+    {
+      title: `Resume in…${currentAgent ? ` (from ${currentAgent})` : ''}`,
+      placeHolder: 'Pick the harness to continue this session in',
+      matchOnDescription: true,
+    },
+  );
+  if (!picked) return;
+  await launchResumeInHarness(context, {
+    agentKey: picked.option.agent,
+    host: entry.host,
+    oldSessionId: entry.sessionId!,
+  });
+}
+
+/**
+ * Open a fresh tab running `agents run <harness> --interactive` (balanced
+ * rotation picks the account — the user is switching harness, not account), on
+ * the session's device when offloaded, then feed it the OLD session through
+ * the universal continue replay once the TUI is live. The launch→ready→send
+ * shape mirrors the proven tail of rotateTerminalToBestVersion.
+ */
+async function launchResumeInHarness(
+  context: vscode.ExtensionContext,
+  opts: { agentKey: string; host?: string; oldSessionId: string },
+): Promise<void> {
+  const builtIn = BUILT_IN_AGENTS.find((a) => a.key === opts.agentKey);
+  if (!builtIn) {
+    vscode.window.showInformationMessage(`No built-in agent config for ${opts.agentKey}`);
+    return;
+  }
+  const agentConfig = createAgentConfig(
+    context.extensionPath,
+    builtIn.title,
+    builtIn.command,
+    builtIn.icon,
+    builtIn.prefix,
+  );
+  const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+
+  // Same contract as the rotate flow: only Claude can pin its new session id
+  // up front (--session-id), which gives readiness an exact jsonl to watch;
+  // other harnesses reuse the old id and the generic process probe.
+  const newSessionId = opts.agentKey === 'claude' ? randomUUID() : opts.oldSessionId;
+  const launchCmd = buildAgentRunLaunchCommand(
+    opts.agentKey,
+    opts.host,
+    opts.agentKey === 'claude' ? newSessionId : null,
+  );
+
+  const terminalId = terminals.nextId(builtIn.prefix);
+  const title = buildTerminalTitle(agentConfig.title, undefined, context, newSessionId);
+  const terminal = vscode.window.createTerminal({
+    iconPath: agentConfig.iconPath,
+    location: { viewColumn: vscode.ViewColumn.Active },
+    name: title,
+    env: buildAgentTerminalEnv(terminalId, newSessionId, workspacePath),
+    isTransient: true,
+  });
+
+  const pid = await terminal.processId;
+  terminals.register(terminal, terminalId, agentConfig, pid, context);
+  readiness.registerTerminal(terminal);
+  terminals.setSessionId(terminal, newSessionId);
+  terminals.setAgentType(terminal, opts.agentKey as SessionAgentType);
+  if (opts.host) terminals.setHost(terminal, opts.host);
+  startAutoLabelPollerForTerminal(terminal, context);
+
+  // Always inline the central continue.md: it works in ANY harness, and we
+  // can't know whether the target version's home has the /continue slash
+  // command synced (for a remote host we can't even check from here — same
+  // reasoning as the remote rotate).
+  let centralContinueMdBody: string | null = null;
+  try {
+    centralContinueMdBody = fsSync.readFileSync(
+      path.join(os.homedir(), '.agents-system', 'commands', 'continue.md'),
+      'utf-8',
+    );
+  } catch {
+    centralContinueMdBody = null;
+  }
+  const resumeInput = buildResumeInput(opts.oldSessionId, false, centralContinueMdBody);
+
+  try {
+    await readiness.waitFor(terminal, 'promptReady');
+  } catch (err) {
+    console.warn(`[RESUME-PICK-HARNESS] promptReady wait FAILED: ${err} — sending launch anyway`);
+  }
+  terminal.sendText(launchCmd);
+  readiness.armAgentReady(terminal, {
+    agentKey: opts.agentKey,
+    sessionId: newSessionId,
+    cwd: workspacePath,
+  });
+  terminal.show();
+
+  // Type the payload, then Enter as a separate keystroke — Claude's Ink TUI
+  // needs the explicit `\r`, and multi-line input swallows a same-tick one
+  // (see the rotate flow for the full rationale).
+  const submitToTui = () => {
+    terminal.sendText(resumeInput, false);
+    setTimeout(() => terminal.sendText('\r', false), 300);
+  };
+  readiness.waitFor(terminal, 'agentReady').then(submitToTui, (err) => {
+    console.warn(`[RESUME-PICK-HARNESS] agentReady wait FAILED: ${err} — sending resume input anyway`);
+    submitToTui();
+  });
+
+  vscode.window.setStatusBarMessage(
+    `Resuming in ${opts.agentKey}${opts.host ? ` on ${opts.host}` : ''} · ${opts.oldSessionId.slice(0, 8)}`,
+    5000,
+  );
 }
 
 export async function rotateTerminalToBestVersion(
