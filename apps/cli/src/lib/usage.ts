@@ -37,22 +37,36 @@ const CLAUDE_OAUTH_BETA_HEADER = 'oauth-2025-04-20';
 const CLAUDE_REFRESH_LEEWAY_MS = 5 * 60 * 1000;
 
 /**
- * Why a Claude usage read produced no snapshot, when the cause is the credential
- * rather than the network. Both cases used to return `error: null`, which made an
- * account nobody can read indistinguishable from a healthy one: the caller fell
- * back to whatever was in the SWR cache and rendered its bars as fact. On
- * `yosemite-s1` that hid five accounts whose stored access token had expired —
- * one of them eleven days earlier — behind a cache frozen for 26h, and balanced
- * routing launched into an account that was actually at its weekly cap.
+ * Why a usage read produced no snapshot, when the cause is the credential or the
+ * server rather than the payload. Every provider used to return `error: null`
+ * for all three, which made an account nobody can read indistinguishable from a
+ * healthy one: the caller fell back to whatever was in the SWR cache and
+ * rendered its bars as fact. On `yosemite-s1` that hid five Claude accounts
+ * whose stored access token had expired — one of them eleven days earlier —
+ * behind a cache frozen for 26h, and balanced routing launched into an account
+ * that was actually at its weekly cap.
  *
- * A usage read never refreshes a token (RUSH-1822), so neither state can heal on
- * its own: the account stays unreadable until a real `claude` run rotates the
- * credential, or a long-lived setup-token is provisioned for it.
+ * No usage read ever refreshes a token (RUSH-1822 for Claude; the same rule for
+ * Kimi/Droid/Cursor, whose own CLIs rotate on their next launch), so an expired
+ * credential cannot heal on its own — the account stays unreadable until that
+ * agent actually runs, or a long-lived token is provisioned for it.
+ *
+ * Shared across all four networked providers on purpose: the failure shape is
+ * identical, and wiring only Claude would leave `agents view --refresh`
+ * reporting Claude accounts while silently presenting stale Kimi, Droid, and
+ * Cursor readings as confirmed.
  */
-export const CLAUDE_NO_CREDENTIAL_ERROR =
-  'No readable Claude credential — sign in, or provision a setup-token for this account.';
-export const CLAUDE_EXPIRED_CREDENTIAL_ERROR =
-  'Claude credential expired — re-auth this account (a usage read never refreshes it).';
+export function usageNoCredentialError(agent: string): string {
+  return `No readable ${agent} credential — sign in, or provision a long-lived token for this account.`;
+}
+export function usageExpiredCredentialError(agent: string): string {
+  return `${agent} credential expired — re-auth this account (a usage read never refreshes it).`;
+}
+export function usageRejectedError(agent: string, status: number): string {
+  return status === 429
+    ? `${agent} is rate-limiting the usage endpoint for this machine (HTTP 429).`
+    : `${agent} rejected the usage read (HTTP ${status}).`;
+}
 
 /**
  * True when a Claude OAuth access token is within the refresh leeway of expiry
@@ -660,7 +674,7 @@ async function getClaudeUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
     // path and usage needs only the access token, so it kills the Touch ID storm.
     const oauth = await loadClaudeOauth(options?.home, { accessTokenCache: true });
     if (!oauth?.accessToken) {
-      return { snapshot: null, error: CLAUDE_NO_CREDENTIAL_ERROR };
+      return { snapshot: null, error: usageNoCredentialError('Claude') };
     }
 
     const requestedOrgId = normalizeString(options?.organizationId);
@@ -674,7 +688,7 @@ async function getClaudeUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
     // Read-only: never refresh a single-use token just to read usage (RUSH-1822).
     const accessToken = claudeUsageAccessTokenNoRefresh(oauth);
     if (!accessToken) {
-      return { snapshot: null, error: CLAUDE_EXPIRED_CREDENTIAL_ERROR };
+      return { snapshot: null, error: usageExpiredCredentialError('Claude') };
     }
 
     const response = await fetch(CLAUDE_USAGE_URL, {
@@ -689,7 +703,7 @@ async function getClaudeUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
     });
 
     if (!response.ok) {
-      return { snapshot: null, error: formatClaudeUsageError(response.status) };
+      return { snapshot: null, error: usageRejectedError('Claude', response.status) };
     }
 
     const data = await response.json() as ClaudeUsageResponse;
@@ -763,17 +777,17 @@ function resolveKimiCredentialPath(home?: string): string | null {
 async function getKimiUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
   try {
     const credPath = resolveKimiCredentialPath(options?.home);
-    if (!credPath) return { snapshot: null, error: null };
+    if (!credPath) return { snapshot: null, error: usageNoCredentialError('Kimi') };
 
     const cred = JSON.parse(fs.readFileSync(credPath, 'utf-8'));
     const accessToken = cred?.access_token;
     if (typeof accessToken !== 'string' || !accessToken) {
-      return { snapshot: null, error: null };
+      return { snapshot: null, error: usageNoCredentialError('Kimi') };
     }
 
     const expiresAt = typeof cred?.expires_at === 'number' ? cred.expires_at : null;
     if (expiresAt !== null && Date.now() / 1000 >= expiresAt) {
-      return { snapshot: null, error: null };
+      return { snapshot: null, error: usageExpiredCredentialError('Kimi') };
     }
 
     const response = await fetch(KIMI_USAGES_URL, {
@@ -785,10 +799,10 @@ async function getKimiUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
       signal: AbortSignal.timeout(5000),
     });
 
-    // 401/403/404 => expired token or no Kimi For Coding subscription; render
-    // nothing rather than a misleading empty bar.
+    // 401/403 => expired token, 404 => no Kimi For Coding subscription. Either
+    // way there are no bars to draw, and the status is what tells them apart.
     if (!response.ok) {
-      return { snapshot: null, error: null };
+      return { snapshot: null, error: usageRejectedError('Kimi', response.status) };
     }
 
     const data = await response.json() as KimiUsagesResponse;
@@ -930,12 +944,12 @@ async function getDroidUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
     const cred = decryptDroidAuthPayload(options?.home || os.homedir());
     const accessToken = cred?.access_token;
     if (typeof accessToken !== 'string' || !accessToken) {
-      return { snapshot: null, error: null };
+      return { snapshot: null, error: usageNoCredentialError('Droid') };
     }
 
     const exp = decodeJwtPayload(accessToken)?.exp;
     if (typeof exp === 'number' && Date.now() / 1000 >= exp) {
-      return { snapshot: null, error: null };
+      return { snapshot: null, error: usageExpiredCredentialError('Droid') };
     }
 
     const response = await fetch(DROID_USAGE_URL, {
@@ -947,10 +961,9 @@ async function getDroidUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
       signal: AbortSignal.timeout(5000),
     });
 
-    // 401 => revoked/expired token; render nothing rather than a misleading
-    // empty bar.
+    // 401 => revoked/expired token. No bars to draw, and the status says why.
     if (!response.ok) {
-      return { snapshot: null, error: null };
+      return { snapshot: null, error: usageRejectedError('Droid', response.status) };
     }
 
     const data = await response.json() as DroidBillingLimitsResponse;
@@ -1738,14 +1751,6 @@ function getClaudeUserAgent(cliVersion?: string | null): string {
   return cliVersion ? `claude-code/${cliVersion}` : 'claude-code';
 }
 
-/** Map an HTTP status code to a user-facing error message. */
-function formatClaudeUsageError(status: number): string {
-  if (status === 429) {
-    return 'Usage data unavailable right now.';
-  }
-  return 'Could not load usage data right now.';
-}
-
 /** Clamp a numeric value to 0..100, returning null for non-finite values. */
 function normalizePercent(value: number | null | undefined): number | null {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
@@ -2068,11 +2073,11 @@ async function getCursorUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
   try {
     const base = options?.home || os.homedir();
     const creds = readCursorCredentials(base);
-    if (!creds) return { snapshot: null, error: null };
+    if (!creds) return { snapshot: null, error: usageNoCredentialError('Cursor') };
 
     const exp = decodeJwtPayload(creds.accessToken)?.exp;
     if (typeof exp === 'number' && Date.now() / 1000 >= exp) {
-      return { snapshot: null, error: null };
+      return { snapshot: null, error: usageExpiredCredentialError('Cursor') };
     }
 
     const url = `${CURSOR_USAGE_URL}?user=${encodeURIComponent(creds.sub)}`;
@@ -2085,9 +2090,9 @@ async function getCursorUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
       signal: AbortSignal.timeout(5000),
     });
 
-    // 401/redirect => revoked/expired session; render nothing rather than a
-    // misleading empty bar.
-    if (!response.ok) return { snapshot: null, error: null };
+    // 401/redirect => revoked/expired session. No bars to draw, and the status
+    // says why.
+    if (!response.ok) return { snapshot: null, error: usageRejectedError('Cursor', response.status) };
 
     const data = (await response.json()) as CursorUsageResponse;
     return {

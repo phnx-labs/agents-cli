@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { claudeAccessTokenNeedsRefresh, claudeUsageAccessTokenNoRefresh, loadClaudeOauth, saveClaudeOauth, getClaudeKeychainService, swrWindowMsFor, getUsageInfo, formatUsageSummary, CLAUDE_NO_CREDENTIAL_ERROR, CLAUDE_EXPIRED_CREDENTIAL_ERROR } from './usage.js';
+import { claudeAccessTokenNeedsRefresh, claudeUsageAccessTokenNoRefresh, loadClaudeOauth, saveClaudeOauth, getClaudeKeychainService, swrWindowMsFor, getUsageInfo, formatUsageSummary, usageNoCredentialError, usageExpiredCredentialError, usageRejectedError } from './usage.js';
 import { setKeychainToken, setKeychainBackendForTest, secretsKeychainItem, type KeychainBackend } from './secrets/index.js';
 import { writeBundle, keychainRef, bundleItemStore } from './secrets/bundles.js';
 import { _resetFileStoreForTest } from './secrets/filestore.js';
@@ -340,7 +340,7 @@ describe('a Claude usage read reports WHY it produced no snapshot', () => {
     const usage = await getUsageInfo('claude', { home });
 
     expect(usage.snapshot).toBeNull();
-    expect(usage.error).toBe(CLAUDE_NO_CREDENTIAL_ERROR);
+    expect(usage.error).toBe(usageNoCredentialError('Claude'));
   });
 
   it('names an expired credential — the state a usage read can never heal', async () => {
@@ -356,7 +356,7 @@ describe('a Claude usage read reports WHY it produced no snapshot', () => {
     const usage = await getUsageInfo('claude', { home });
 
     expect(usage.snapshot).toBeNull();
-    expect(usage.error).toBe(CLAUDE_EXPIRED_CREDENTIAL_ERROR);
+    expect(usage.error).toBe(usageExpiredCredentialError('Claude'));
   });
 });
 
@@ -385,5 +385,38 @@ describe('formatUsageSummary marks bars the live read could not confirm', () => 
 
     expect(out).toContain('48%');
     expect(out).not.toContain('unverified');
+  });
+});
+
+describe('every networked provider names the same three failures', () => {
+  // The review that caught this: wiring only Claude would leave `agents view
+  // --refresh` reporting Claude accounts while silently presenting stale Kimi,
+  // Droid, and Cursor readings as confirmed — all four share one cache fallback
+  // in getUsageInfoForIdentity, so a silent null in any of them reproduces the
+  // exact bug this change exists to close.
+  const NETWORKED = ['Claude', 'Kimi', 'Droid', 'Cursor'];
+
+  it('says which agent could not be read, so a fleet row is actionable', () => {
+    for (const agent of NETWORKED) {
+      expect(usageNoCredentialError(agent)).toContain(agent);
+      expect(usageExpiredCredentialError(agent)).toContain(agent);
+      expect(usageRejectedError(agent, 401)).toContain(agent);
+    }
+  });
+
+  it('distinguishes a rejected read from a throttled one', () => {
+    // 429 is the machine being rate-limited on the usage endpoint, not a dead
+    // credential — re-authing would not fix it, so the two must not read alike.
+    expect(usageRejectedError('Claude', 429)).toContain('429');
+    expect(usageRejectedError('Claude', 429)).toContain('rate-limiting');
+    expect(usageRejectedError('Claude', 401)).toContain('401');
+    expect(usageRejectedError('Claude', 401)).not.toContain('rate-limiting');
+  });
+
+  it('says an expired credential will not heal on its own', () => {
+    // The yosemite-s1 state: a usage read never refreshes, so the account stays
+    // unreadable until the agent itself runs. The message has to say so, or the
+    // obvious next action (re-auth) is not obvious.
+    expect(usageExpiredCredentialError('Droid')).toContain('never refreshes');
   });
 });

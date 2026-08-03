@@ -890,11 +890,14 @@ a stable per-account key:
   number as a fact. The cache is strictly per machine and never synced, so a box
   whose refresh is failing would otherwise route on day-old numbers indefinitely.
 - **A read that fails on the credential names the reason.** No readable
-  credential and a locally-expired one are distinct errors
-  (`CLAUDE_NO_CREDENTIAL_ERROR` / `CLAUDE_EXPIRED_CREDENTIAL_ERROR`,
-  [`src/lib/usage.ts`](../src/lib/usage.ts)), not a silent null — because a usage
-  read never refreshes a token, neither state heals until a real `claude` run
-  rotates the credential or a long-lived setup-token is provisioned. `agents view`
+  credential, a locally-expired one, and a rejected request are distinct errors
+  (`usageNoCredentialError` / `usageExpiredCredentialError` /
+  `usageRejectedError`, [`src/lib/usage.ts`](../src/lib/usage.ts)), not a silent
+  null. All four networked providers — Claude, Kimi, Droid, Cursor — share them,
+  because they share one cache fallback: a silent null in any of them presents a
+  stale reading as confirmed. Because a usage read never refreshes a token,
+  an expired credential does not heal until that agent actually runs; a 429 reads
+  differently from a 401, since re-authing fixes one and not the other. `agents view`
   renders a cached reading that a failed live read could not confirm as the number
   plus `unverified`, and `--refresh` lists every account it could not reach rather
   than printing a table that looks fully refreshed. Measured on `yosemite-s1`,
