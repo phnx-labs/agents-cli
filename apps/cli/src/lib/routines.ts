@@ -491,7 +491,10 @@ export function checkJobDeviceEligibility(
   if (jobRunsOnThisDevice(config)) return null;
   const allowed = (config.devices ?? []).map((d) => normalizeHost(d));
   const allowedLabel = allowed.join(', ');
-  const firstHost = allowed[0] ?? 'HOST';
+  // The owner is the lowest normalized name, not the first entry as written —
+  // suggesting allowed[0] on an unsorted list points at a device that will
+  // refuse the run for exactly the same reason.
+  const firstHost = routineOwnerDevice(config) ?? allowed[0] ?? 'HOST';
   const message = `Job '${config.name}' can only run on: ${allowedLabel}`;
   const suggestion = `agents routines run ${config.name} --host ${firstHost}`;
   return { message, suggestion, allowedLabel, firstHost };
@@ -611,6 +614,18 @@ function readJobFile(filePath: string): JobConfig | null {
     // carries it after v12 startup migration is unmigrated state and must be
     // treated as unavailable/inert rather than unrestricted.
     if (Object.prototype.hasOwnProperty.call(parsed, 'device')) return null;
+
+    // Fail closed on a malformed `devices` too. Ownership treats a non-array as
+    // "no pin", and the daemon's load path never calls validateJob — so a YAML
+    // typo (`devices: yosemite-s0` instead of a list) would silently promote the
+    // routine to fleet-wide and fire it on EVERY box. Inert-and-loud beats
+    // unrestricted-and-silent.
+    if (Object.prototype.hasOwnProperty.call(parsed, 'devices')
+        && parsed.devices !== undefined
+        && parsed.devices !== null
+        && !Array.isArray(parsed.devices)) {
+      return null;
+    }
 
     return {
       ...JOB_DEFAULTS,

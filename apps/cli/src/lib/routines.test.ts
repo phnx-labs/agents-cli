@@ -384,6 +384,29 @@ describe('routineOwnerDevice / single-device ownership', () => {
     expect(hasAmbiguousDevicePin({ devices: ['Yosemite-S0', 'yosemite-s0.tailnet.ts.net'] })).toBe(false);
   });
 
+  // The daemon's load path never calls validateJob, and ownership treats a
+  // non-array `devices` as "no pin" — so without a guard a YAML typo
+  // (`devices: yosemite-s0`, a scalar) would silently promote the routine to
+  // fleet-wide and fire it on EVERY box. Inert-and-loud beats unrestricted.
+  it('refuses to load a routine whose devices is not a list', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-devices-malformed-'));
+    const prevHome = process.env.HOME;
+    try {
+      process.env.HOME = dir;
+      process.env.AGENTS_ROUTINES_DIR = path.join(dir, 'routines');
+      fs.mkdirSync(path.join(dir, 'routines'), { recursive: true });
+      fs.writeFileSync(
+        path.join(dir, 'routines', 'typo.yml'),
+        'name: typo\nschedule: "0 3 * * *"\nagent: claude\nprompt: noop\ndevices: yosemite-s0\n',
+      );
+      expect(readJob('typo')).toBeNull();
+    } finally {
+      if (prevHome === undefined) delete process.env.HOME; else process.env.HOME = prevHome;
+      delete process.env.AGENTS_ROUTINES_DIR;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('refuses to create a new multi-device routine', () => {
     const errors = validateJob({
       name: 'two-boxes', schedule: '0 3 * * *', agent: 'claude',
@@ -454,8 +477,11 @@ describe('checkJobDeviceEligibility', () => {
     expect(result).not.toBeNull();
     expect(result!.message).toBe("Job 'backup' can only run on: yosemite-s0, mac-mini");
     expect(result!.allowedLabel).toBe('yosemite-s0, mac-mini');
-    expect(result!.firstHost).toBe('yosemite-s0');
-    expect(result!.suggestion).toBe("agents routines run backup --host yosemite-s0");
+    // The suggested host is the OWNER (lowest normalized name), not the first
+    // entry as written. Suggesting yosemite-s0 here would send the operator to
+    // a box that refuses the run for exactly the same reason.
+    expect(result!.firstHost).toBe('mac-mini');
+    expect(result!.suggestion).toBe("agents routines run backup --host mac-mini");
   });
 });
 

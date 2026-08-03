@@ -1054,7 +1054,10 @@ describe('routines run wrong-host exact output', () => {
       expect(res.status).not.toBe(0);
       const output = res.stdout + res.stderr;
       expect(output).toContain("Job 'test-job' can only run on: yosemite-s0, mac-mini");
-      expect(output).toContain('  agents routines run test-job --host yosemite-s0');
+      // The suggested host is the OWNER (lowest normalized name), not the first
+      // entry as written — the old suggestion pointed at a box that would refuse
+      // the run for exactly the same reason.
+      expect(output).toContain('  agents routines run test-job --host mac-mini');
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }

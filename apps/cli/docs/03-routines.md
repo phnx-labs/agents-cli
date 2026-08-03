@@ -111,7 +111,7 @@ timeout: 10m
 runOnce: false                # true for one-shot jobs (--at)
 endAt: "2026-12-31T23:59:00Z" # optional: auto-disable on/after this time
 hostStrategy: local           # local | host | fleet | cloud (see Host placement strategy)
-devices:                      # optional: allowlist — each listed device fires independently
+devices:                      # optional: the ONE device that owns this routine
   - yosemite-s0               # omit entirely (or --clear) for unrestricted
   - mac-mini
 # source:                     # set by `agents routines enable-project` / sync
@@ -420,7 +420,8 @@ prompt: "Drain the local work queue"
 ```
 
 Each listed machine fires the job **independently** on its own schedule — both
-`yosemite-s0` and `mac-mini` run their own copy, with their own run history.
+Only the owner runs it — one copy, one run history. Listing several devices is a
+misconfiguration and is refused at creation.
 A single-entry list is equivalent to an exclusive pin: `devices: [yosemite-s0]`
 restricts the job to one machine.
 
@@ -428,7 +429,7 @@ Or set the allowlist at creation with `--devices`:
 
 ```bash
 agents routines add drain --schedule "0 3 * * *" --agent claude \
-  --devices yosemite-s0,mac-mini --prompt "Drain the local work queue"
+  --devices yosemite-s0 --prompt "Drain the local work queue"
 ```
 
 `--devices` is validated against the registered fleet (`agents devices sync`).
@@ -513,7 +514,7 @@ The picker starts with the current allowlist pre-checked. Confirm to overwrite.
 For scripting:
 
 ```bash
-agents routines devices drain --set yosemite-s0,mac-mini  # replace allowlist
+agents routines devices drain --set yosemite-s0            # set the owning device
 agents routines devices drain --clear                      # remove allowlist (unrestricted)
 ```
 
@@ -532,7 +533,7 @@ agents routines run drain --host yosemite-s0
 
 # Create a job pre-assigned to two hosts, then confirm it looks right on one
 agents routines add drain --schedule "0 3 * * *" --agent claude \
-  --devices yosemite-s0,mac-mini --prompt "Drain queue" --host yosemite-s0
+  --devices yosemite-s0 --prompt "Drain queue" --host yosemite-s0
 ```
 
 When you try to run a job on a host outside its allowlist, the CLI prints:
@@ -943,7 +944,7 @@ runs are finalized by the monitor sweep and do not emit one.
 agents routines list                  # List all jobs with next run + status
 agents routines list --host yosemite-s0  # List another device's routines
 agents routines add <name> --schedule "0 9 * * *" --agent claude --prompt "..."  # Inline
-agents routines add <name> --devices yosemite-s0,mac-mini --schedule "0 3 * * *" \
+agents routines add <name> --devices yosemite-s0 --schedule "0 3 * * *" \
   --agent claude --prompt "..."       # Add with device allowlist
 agents routines add <path.yml>        # Add from YAML file
 agents routines add <name> --at "14:30" --agent claude --prompt "..."            # One-shot
@@ -954,7 +955,7 @@ agents routines resume <name>         # Re-enable a paused job
 
 # Device allowlist management
 agents routines devices <name>                         # Interactive multi-select picker
-agents routines devices <name> --set yosemite-s0,mac-mini  # Replace allowlist
+agents routines devices <name> --set yosemite-s0           # Set the owning device
 agents routines devices <name> --clear                 # Remove allowlist (unrestricted)
 
 # Execution
