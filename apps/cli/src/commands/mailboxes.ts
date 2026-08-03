@@ -21,6 +21,7 @@ import * as os from 'os';
 import * as path from 'path';
 import chalk from 'chalk';
 import { die, humanDuration, relTime, truncate, visibleWidth } from '../lib/format.js';
+import { setHelpSections } from '../lib/help.js';
 import {
   listBoxes,
   readBox,
@@ -30,6 +31,7 @@ import {
   type StoredMessage,
   type CommsMsg,
 } from '../lib/mailbox.js';
+import { gcMailbox, type GcResult } from '../lib/mailbox-gc.js';
 import {
   GLYPH,
   masthead,
@@ -322,6 +324,28 @@ function renderBetween(boxes: BoxView[], a: string, b: string, json?: boolean): 
   }
 }
 
+async function runGcCommand(opts: { json?: boolean }): Promise<void> {
+  const sessions = await getActiveSessions();
+  const activeBoxIds = new Set(
+    sessions.map(mailboxIdForActiveSession).filter((id): id is string => !!id),
+  );
+  const result = gcMailbox(activeBoxIds);
+  if (opts.json) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+  if (result.messagesDroppedDead === 0 && result.messagesDroppedExpired === 0) {
+    console.log(chalk.dim(`gc: ${result.boxesScanned} boxes scanned, no pending messages dropped.`));
+    return;
+  }
+  console.log(
+    chalk.yellow(
+      `gc: ${result.messagesDroppedDead} dead-box messages, ${result.messagesDroppedExpired} expired messages dropped ` +
+        `(${result.boxesScanned} boxes scanned, ${result.deadBoxes} dead boxes).`,
+    ),
+  );
+}
+
 function renderGraph(boxes: BoxView[], filters: Filters, json?: boolean): void {
   const nonEmpty = boxes.filter((b) => b.messages.length > 0);
   const msgs = aggregate(nonEmpty).filter((m) => matchesFilters(m, m.toLabel, m.box, filters));
@@ -387,7 +411,7 @@ interface MailboxesOpts {
 }
 
 export function registerMailboxesCommand(program: Command): void {
-  program
+  const cmd = program
     .command('mailboxes')
     .alias('mailbox')
     .argument('[id]', 'A mailbox id (session UUID / teams agentId) to inspect in full')
@@ -471,4 +495,27 @@ export function registerMailboxesCommand(program: Command): void {
       }
       renderOverview(boxes, limit, filters);
     });
+
+  const gcCmd = cmd
+    .command('gc')
+    .description('Run a liveness sweep: archive pending messages in dead boxes and prune stale consumed mail.')
+    .option('--json', 'Emit the GC result as JSON')
+    .action(async (_opts: { json?: boolean }, command) => runGcCommand({ json: command.optsWithGlobals().json === true }));
+
+  setHelpSections(gcCmd, {
+    examples: `
+      # One-shot sweep using the live session set as the liveness source
+      agents mailboxes gc
+
+      # Machine-readable summary (for scripts / monitors)
+      agents mailboxes gc --json
+    `,
+    notes: `
+      A box is considered dead when no live session (the same source
+      \`agents sessions --active\` uses) owns it. Pending messages in dead boxes
+      are archived as \`dropped: dead\`; expired messages in live boxes are
+      archived as \`dropped: expired\'. Both surfaces a failure receipt back to
+      the feed store when the message carried a blockId.
+    `,
+  });
 }
