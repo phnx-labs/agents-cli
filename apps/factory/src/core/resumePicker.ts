@@ -234,6 +234,17 @@ export function sortResumeCandidates(candidates: ResumeCandidate[]): ResumeCandi
 }
 
 /**
+ * The `Agents: Resume (Pick Session)` set: sessions nobody is watching right
+ * now — the abandoned ones. A `watched` session already has a terminal on some
+ * host, so picking it here would double-attach it; the plain `Agents: Resume`
+ * picker still lists every state. Order is preserved (the input is already
+ * ranked by {@link sortResumeCandidates}).
+ */
+export function abandonedCandidates(candidates: ResumeCandidate[]): ResumeCandidate[] {
+  return candidates.filter((c) => c.state !== 'watched');
+}
+
+/**
  * The candidates checked when the picker opens: the crashed ones. Everything
  * else is a deliberate choice the user makes by ticking it — auto-selecting a
  * session someone is watching would double-attach it, and auto-selecting a
