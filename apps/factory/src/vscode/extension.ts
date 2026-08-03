@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { BUILT_IN_AGENTS, getBuiltInByKey, getBuiltInDefByTitle, getBuiltInByPrefix, STRATEGY_LAUNCH_AGENTS, modeFlagForAgent, AgentLaunchMode, RunStrategy, buildAgentLaunchCommand, wrapNativeAgentCommand, shquote } from '../core/agents';
 import { loadAutoLaunchPreferences, isAutoLaunchEnabled, isAutoLaunchPreferred } from '../core/deviceAutoLaunch';
-import { parseSpawnRequest, SpawnRequest } from '../core/spawn';
+import { parseSpawnRequest, resolveSpawnSurface, SpawnRequest } from '../core/spawn';
 import {
   AgentConfig,
   buildIconPath,
@@ -2320,28 +2320,75 @@ async function spawnCommandTerminal(
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
   const cwd = req.cwd || workspaceFolder;
   const terminalId = terminals.nextId(agentConfig.prefix);
+  const title = buildTerminalTitle(agentConfig.title, undefined, context, null);
+
+  // Honour `agents.terminalMode` here exactly as the Cmd+Shift+J launch path does
+  // (see launchAgent). Without this the URI path was hardwired to a plain VS Code
+  // terminal, so a session spawned by `agents sessions resume --vscodium` died with
+  // the window and left no tmux coords for the reconnect pass to re-attach — the
+  // one launch path that opted out of the crash resilience everything else has.
+  const config = vscode.workspace.getConfiguration('agents');
+  const terminalMode = normalizeTerminalMode(config.get('terminalMode'));
+  const tmuxAvailable = terminalMode === 'native' ? false : await isTmuxAvailable();
+  const { useTmux } = resolveTerminalMode(terminalMode, tmuxAvailable);
 
   const parent = req.split ? aliveSpawnParent() : undefined;
-  const location: vscode.TerminalEditorLocationOptions | vscode.TerminalSplitLocationOptions =
-    parent
-      ? { parentTerminal: parent }
-      : { viewColumn: vscode.ViewColumn.Active, preserveFocus: false };
-
-  const terminal = vscode.window.createTerminal({
-    iconPath: agentConfig.iconPath,
-    location,
-    name: buildTerminalTitle(agentConfig.title, undefined, context, null),
-    env: buildAgentTerminalEnv(terminalId, null, cwd, undefined, { scrubSensitive: false }),
-    cwd,
-    isTransient: true
+  const surface = resolveSpawnSurface({
+    useTmux,
+    wantsSplit: !!req.split,
+    hasParent: !!parent,
+    parentIsTmux: !!parent && isTmuxTerminal(parent),
   });
+
+  // A split into a live tmux parent stays inside that tmux session — splitting the
+  // VS Code tab instead would strand the new pane outside the parent's session.
+  if (surface === 'tmux-split' && parent) {
+    if (req.split === 'down') {
+      await tmuxSplitV(parent, req.command);
+    } else {
+      await tmuxSplitH(parent, req.command);
+    }
+    parent.show();
+    lastSpawnedTerminal = parent;
+    return;
+  }
+
+  const env = buildAgentTerminalEnv(terminalId, null, cwd, undefined, { scrubSensitive: false });
+
+  let terminal: vscode.Terminal;
+  if (surface === 'tmux-tab') {
+    // `agents tmux new --cmd` runs the command inside the detached session, so the
+    // agent outlives the window; no sendCommandWhenReady needed on this path.
+    terminal = createTmuxTerminal(title, shellDef.key, req.command, {
+      iconPath: agentConfig.iconPath as vscode.Uri,
+      env,
+      viewColumn: vscode.ViewColumn.Active,
+      cwd,
+    });
+  } else {
+    const location: vscode.TerminalEditorLocationOptions | vscode.TerminalSplitLocationOptions =
+      surface === 'native-split' && parent
+        ? { parentTerminal: parent }
+        : { viewColumn: vscode.ViewColumn.Active, preserveFocus: false };
+
+    terminal = vscode.window.createTerminal({
+      iconPath: agentConfig.iconPath,
+      location,
+      name: title,
+      env,
+      cwd,
+      isTransient: true
+    });
+  }
 
   const pid = await terminal.processId;
   terminals.register(terminal, terminalId, agentConfig, pid, context);
   readiness.registerTerminal(terminal);
   armShellAdoptionForTerminal(terminal, context);
 
-  await sendCommandWhenReady(terminal, req.command);
+  if (surface !== 'tmux-tab') {
+    await sendCommandWhenReady(terminal, req.command);
+  }
   terminal.show();
   lastSpawnedTerminal = terminal;
 }

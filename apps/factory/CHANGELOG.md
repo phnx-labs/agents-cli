@@ -6,6 +6,18 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **`…/spawn` URI tabs now honour `agents.terminalMode`.** A session reopened as
+  an editor tab — the path `agents sessions resume --vscodium` drives — was
+  hardwired to a plain VS Code terminal regardless of the setting, so it ran
+  outside tmux, died with the window, and left no tmux coords for the reconnect
+  pass to re-attach. It was the only launch path opted out of the crash
+  resilience every other spawn has. It now takes the same tmux-backed tab as
+  `launchAgent`; a split lands inside the parent's tmux session rather than
+  splitting the VS Code tab, which would strand the pane outside that session.
+  Users on `agents.terminalMode: native` are unaffected.
+  Source: `apps/factory/src/core/spawn.ts` (`resolveSpawnSurface`),
+  `apps/factory/src/vscode/extension.ts` (`spawnCommandTerminal`).
+
 ## [0.9.304] - 2026-08-02
 
 - **Respect per-device auto-launch preferences from the CLI (RUSH-2092).**

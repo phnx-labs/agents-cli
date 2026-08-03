@@ -35,3 +35,37 @@ export function parseSpawnRequest(query: string): SpawnRequest | null {
     obj?.split === 'right' || obj?.split === 'down' ? obj.split : undefined;
   return { command, cwd, split };
 }
+
+// Which surface a spawn request lands on.
+//   tmux-split  — split the live tmux parent (stay in its session)
+//   tmux-tab    — new editor tab backed by a detached tmux session
+//   native-split/native-tab — plain VS Code terminal (tmux off or unavailable)
+export type SpawnSurface = 'tmux-split' | 'tmux-tab' | 'native-split' | 'native-tab';
+
+export interface SpawnSurfaceInput {
+  // Result of resolveTerminalMode(...).useTmux for the current `agents.terminalMode`.
+  useTmux: boolean;
+  // The request asked to split beside the previously spawned pane.
+  wantsSplit: boolean;
+  // A previously spawned pane is still alive to split from.
+  hasParent: boolean;
+  // That parent is itself a tmux-backed terminal.
+  parentIsTmux: boolean;
+}
+
+// Pick the surface for a spawn request. Pure so the matrix is testable without
+// the VS Code API; the glue in spawnCommandTerminal just executes the choice.
+//
+// A split only happens with a live parent. When tmux is on we split *inside* the
+// parent's tmux session rather than splitting the VS Code tab, because a VS Code
+// split would put the new pane outside that session — losing the durable tmux
+// coords the reconnect pass needs. A tmux-mode spawn against a non-tmux parent
+// falls back to its own tmux tab rather than degrading to a native terminal, so
+// the session still survives a window crash.
+export function resolveSpawnSurface(input: SpawnSurfaceInput): SpawnSurface {
+  const splitting = input.wantsSplit && input.hasParent;
+  if (input.useTmux) {
+    return splitting && input.parentIsTmux ? 'tmux-split' : 'tmux-tab';
+  }
+  return splitting ? 'native-split' : 'native-tab';
+}
