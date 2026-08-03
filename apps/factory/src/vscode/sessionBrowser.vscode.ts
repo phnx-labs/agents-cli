@@ -151,7 +151,10 @@ export async function runSessionBrowserPicker<Item extends { row?: SessionBrowse
       const chosen = await opts.chooseDevice(device);
       switching = false;
       opts.quickPick.show();
-      if (chosen.cancelled) return;
+      if (chosen.cancelled) {
+        void load();
+        return;
+      }
       device = chosen.device;
       void load();
     });

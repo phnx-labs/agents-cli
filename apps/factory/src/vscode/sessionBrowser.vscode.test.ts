@@ -58,6 +58,39 @@ describe('session browser extension-host seam', () => {
     expect(busy).toBe(false);
   });
 
+  test('hiding the picker invalidates an in-flight load before disposal', () => {
+    const requests = new LatestSessionBrowserRequest();
+    const request = requests.begin();
+    requests.invalidate();
+    expect(request.current()).toBe(false);
+  });
+
+  test('cancelling a device switch reloads after invalidating an in-flight request', async () => {
+    const quickPick = new FakeQuickPick<{ label: string }, 'switch' | 'reload'>();
+    let resolveInitial!: (items: { label: string }[]) => void;
+    const initial = new Promise<{ label: string }[]>(resolve => { resolveInitial = resolve; });
+    let loads = 0;
+    const picker = runSessionBrowserPicker({
+      quickPick,
+      switchButton: 'switch',
+      reloadButton: 'reload',
+      localMachine: 'zion',
+      loadItems: async () => ++loads === 1 ? initial : [{ label: 'reloaded local session' }],
+      chooseDevice: async () => ({ cancelled: true }),
+      emptyItem: () => ({ label: 'empty' }),
+      errorItem: message => ({ label: message }),
+    });
+    await Bun.sleep(0);
+    quickPick.triggerButton('switch');
+    await Bun.sleep(0);
+    resolveInitial([{ label: 'stale local session' }]);
+    await Bun.sleep(0);
+    expect(quickPick.busy).toBe(false);
+    expect(quickPick.items).toEqual([{ label: 'reloaded local session' }]);
+    quickPick.hide();
+    expect(await picker).toBeNull();
+  });
+
   test('preserves an explicitly selected unreachable-device CLI boundary error instead of returning an empty list', async () => {
     const run: SessionBrowserRunner = async () => ({ stdout: '', stderr: 'ssh: connect to host offline: No route to host\n' });
     expect(loadBrowsableSessions(run, {
