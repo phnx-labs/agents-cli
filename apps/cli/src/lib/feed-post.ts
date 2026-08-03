@@ -17,10 +17,10 @@ import * as path from 'path';
 import { spawnSync } from 'child_process';
 import {
   appendActivityEvent,
-  projectFromCwd,
   type ActivityEvent,
   type Attachment,
 } from './activity.js';
+import { resolveProjectKey } from './project-key.js';
 import { getHistoryDir } from './state.js';
 import { machineId } from './machine-id.js';
 import { isValidMailboxId } from './mailbox.js';
@@ -347,7 +347,10 @@ export function postFeedStatus(input: FeedPostInput): FeedPostResult {
   }
 
   const ts = input.ts ?? new Date().toISOString();
-  const project = projectFromCwd(identity.cwd);
+  // The post is written where the agent runs, so the cwd is a local path and
+  // gets full repository resolution — a post from `<repo>/apps/cli` files under
+  // `<repo>`, matching how the timeline groups everything else.
+  const project = resolveProjectKey(identity.cwd);
   const attachments = buildAttachments(input.attach, {
     copyRoot: input.attachmentsRoot ?? path.join(getHistoryDir(), 'attachments'),
     sessionId: identity.sessionId,

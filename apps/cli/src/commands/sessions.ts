@@ -14,6 +14,7 @@ import { spawn, type ChildProcess } from 'child_process';
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { truncate, padRight } from '../lib/format.js';
+import { projectKeyFromCwd } from '../lib/project-key.js';
 import ora from 'ora';
 import type { AgentId } from '../lib/types.js';
 import type { SessionAgentId, SessionMeta, ViewMode } from '../lib/session/types.js';
@@ -2015,17 +2016,12 @@ async function maybeLiveIndex(options: SessionsOptions): Promise<Map<string, Act
 
 /**
  * Group key for the overview: prefer the indexed project name; else fold the cwd
- * to its repo — a worktree (`.../<repo>/.agents/worktrees/<slug>`) folds to the
- * repo, and a monorepo subdir falls back to its leaf dir basename. Pure.
+ * to its repo via the shared {@link projectKeyFromCwd} — the same fold the
+ * `agents activity` timeline groups by, so a project reads the same in both. Pure.
  */
 export function overviewProjectKey(s: Pick<SessionMeta, 'project' | 'cwd'>): string {
   if (s.project && s.project.trim()) return s.project.trim();
-  const cwd = (s.cwd ?? '').replace(/\/+$/, '');
-  if (!cwd) return '(no project)';
-  const wt = cwd.match(/\/([^/]+)\/\.agents\/worktrees\//);
-  if (wt) return wt[1];
-  const parts = cwd.split('/');
-  return parts[parts.length - 1] || cwd;
+  return projectKeyFromCwd(s.cwd) ?? '(no project)';
 }
 
 export interface OverviewGroup {

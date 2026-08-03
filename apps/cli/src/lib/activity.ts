@@ -24,6 +24,7 @@ import chalk from 'chalk';
 import { relTime, truncate } from './format.js';
 import { getActivityDir, getUserAgentsDir } from './state.js';
 import { normalizeHost } from './machine-id.js';
+import { projectKeyFromCwd } from './project-key.js';
 // Type-only import: no runtime dependency on events.ts, so no import cycle
 // (events.ts / event-stream.ts import THIS module at runtime).
 import type { EventRecord } from './events.js';
@@ -558,40 +559,35 @@ export interface ActivitySessionHint {
 }
 
 /**
- * Resolve a stable project/repo name from a working directory. A worktree cwd
- * (`…/<repo>/.agents/worktrees/<slug>[/sub]`) resolves to the repo dir name so
- * a worktree session groups with its own repo; any other path resolves to its
- * basename. Pure — no filesystem access, so it works for remote events too.
+ * Resolve a stable project/repo name from a working directory — the same fold
+ * the `agents sessions` overview groups by ({@link projectKeyFromCwd}), so a
+ * project reads identically in both views.
  */
 export function projectFromCwd(cwd?: string | null): string | undefined {
-  if (!cwd) return undefined;
-  const norm = cwd.replace(/\\/g, '/').replace(/\/+$/, '');
-  if (!norm) return undefined;
-  const wtIdx = norm.indexOf('/.agents/worktrees/');
-  if (wtIdx > 0) {
-    const repoPath = norm.slice(0, wtIdx);
-    const base = repoPath.slice(repoPath.lastIndexOf('/') + 1);
-    if (base) return base;
-  }
-  const base = norm.slice(norm.lastIndexOf('/') + 1);
-  return base || undefined;
+  return projectKeyFromCwd(cwd);
 }
 
 /**
  * Join session facts (ticket / project / execution host) onto each event by
  * `sessionId`. A hint wins; otherwise pre-baked enriched fields (from a remote
  * peer that already enriched its own stream) are preserved, and project/host
- * fall back to what the event itself carries (`cwd`, `host`). Pure.
+ * fall back to what the event itself carries (`cwd`, `host`).
+ *
+ * `resolveProject` is how a caller reading its OWN machine's logs upgrades the
+ * cwd fold to real repository detection ({@link resolveProjectKey}); it defaults
+ * to the pure {@link projectFromCwd}, which is all a path from another machine
+ * can be resolved with. Pure given a pure resolver.
  */
 export function enrichActivityEvents(
   events: EnrichedActivityEvent[],
   hints: ActivitySessionHint[],
+  resolveProject: (cwd?: string | null) => string | undefined = projectFromCwd,
 ): EnrichedActivityEvent[] {
   const bySession = new Map<string, ActivitySessionHint>();
   for (const h of hints) if (h.sessionId) bySession.set(h.sessionId, h);
   return events.map((ev) => {
     const hint = ev.sessionId ? bySession.get(ev.sessionId) : undefined;
-    const project = hint?.project ?? ev.project ?? projectFromCwd(ev.cwd);
+    const project = hint?.project ?? ev.project ?? resolveProject(ev.cwd);
     const ticket = hint?.ticket ?? ev.ticket ?? undefined;
     const executionHost = hint?.executionHost ?? ev.executionHost
       ?? (ev.host && ev.host !== 'unknown' ? ev.host : undefined);
@@ -643,6 +639,44 @@ export function mergeActivityEvents(...groups: EnrichedActivityEvent[][]): Enric
     if (!byKey.has(key)) byKey.set(key, ev);
   }
   return [...byKey.values()].sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts));
+}
+
+/**
+ * Apply `--limit` to the events a reader will actually SHOW.
+ *
+ * The default view collapses routine work (`file.edited`) to a count and shows
+ * milestones individually, so a plain `slice(limit)` spends the whole budget on
+ * churn: one busy machine editing 40 files hid every other device's PRs behind
+ * a single `file edited ×40` line. Milestones therefore carry the cap, and the
+ * routine events that ride along are the ones newer than the last milestone
+ * kept — so the collapsed counts describe exactly the window on screen.
+ *
+ * With `all` (routine shown inline) every event is displayed, so the cap is the
+ * plain slice again. Input must be newest-first; output preserves that order.
+ */
+export function capActivityEvents(
+  events: EnrichedActivityEvent[],
+  limit: number,
+  opts: { all?: boolean } = {},
+): EnrichedActivityEvent[] {
+  if (!Number.isFinite(limit) || limit <= 0) return [];
+  if (opts.all) return events.slice(0, limit);
+  const out: EnrichedActivityEvent[] = [];
+  let milestones = 0;
+  let lastMilestoneIdx = -1;
+  for (const ev of events) {
+    if (tierForEvent(ev.event) === 'milestone') {
+      if (milestones >= limit) {
+        // The cap is reached: the window ends at the oldest milestone kept, so
+        // trailing routine events (older than it) are outside it.
+        return out.slice(0, lastMilestoneIdx + 1);
+      }
+      milestones += 1;
+      lastMilestoneIdx = out.length;
+    }
+    out.push(ev);
+  }
+  return out;
 }
 
 export type ActivityGroupBy = 'project' | 'device' | 'agent';
@@ -718,14 +752,53 @@ export function formatEnrichedActivityLine(
   return `${opts.indent ?? ''}${base}${suffix}`;
 }
 
-/** Human header for one grouped bucket: `<label> · N events · M milestones`. */
-export function formatActivityGroupHeader(group: ActivityGroup): string {
+/** Max device names named in a group header before the rest collapse to `+N`. */
+export const GROUP_HEADER_DEVICE_LIMIT = 3;
+
+/**
+ * The distinct machines a group's events ran on, most-active first then
+ * alphabetical — so a project header can say WHERE the work happened without
+ * sub-grouping the timeline. Prefers the session-joined `executionHost` (where
+ * the process really lives) over the raw emitting `host`. Pure.
+ */
+export function activityGroupDevices(events: EnrichedActivityEvent[]): string[] {
+  const counts = new Map<string, number>();
+  for (const ev of events) {
+    const host = ev.executionHost ?? (ev.host && ev.host !== 'unknown' ? ev.host : undefined);
+    if (!host) continue;
+    counts.set(host, (counts.get(host) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => (b[1] !== a[1] ? b[1] - a[1] : a[0].localeCompare(b[0])))
+    .map(([host]) => host);
+}
+
+/**
+ * The trailing facts for one grouped bucket: `N events · M milestones`, plus
+ * the machines the work ran on when `showDevices` is set (redundant when the
+ * grouping dimension IS the device, so the caller decides). The device list is
+ * capped at {@link GROUP_HEADER_DEVICE_LIMIT} with a `+N` tail, so a project
+ * touched by a dozen boxes stays one scannable line. Separate from the label so
+ * a renderer can color the two differently without re-splitting a string.
+ */
+export function formatActivityGroupMeta(
+  group: ActivityGroup,
+  opts: { showDevices?: boolean } = {},
+): string {
   const { milestones } = collapseActivity(group.events);
   const n = group.events.length;
   const m = milestones.length;
   const parts = [`${n} event${n === 1 ? '' : 's'}`];
   if (m > 0) parts.push(`${m} milestone${m === 1 ? '' : 's'}`);
-  return `${group.label} · ${parts.join(' · ')}`;
+  if (opts.showDevices) {
+    const devices = activityGroupDevices(group.events);
+    if (devices.length > 0) {
+      const named = devices.slice(0, GROUP_HEADER_DEVICE_LIMIT);
+      const rest = devices.length - named.length;
+      parts.push(rest > 0 ? `${named.join(', ')} +${rest}` : named.join(', '));
+    }
+  }
+  return parts.join(' · ');
 }
 
 // ---------------------------------------------------------------------------
