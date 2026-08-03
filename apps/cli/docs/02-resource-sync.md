@@ -96,7 +96,10 @@ directory (`.claude/`, `.codex/`, `.cursor/`, `.opencode/`, etc.) with an
 ownership manifest at `.<agent>/.agents-managed.json`. On each refresh,
 agents-cli removes only the paths listed in that manifest, then copies current
 project resources. If a destination exists after manifest-owned paths are
-removed, it is treated as user-owned and left in place with a warning. The
+removed, it is yours: agents-cli leaves it exactly as it is and reports it once
+per sync as a single grouped line (`Kept 6 of your own files in
+.claude/commands: debug.md, doc-gaps.md, image-nbp.md, +3 more`) rather than one
+warning per file. The
 generated `.<agent>/` directory is intentionally not auto-added to `.gitignore`;
 projects that do not want to commit generated agent resources should ignore it
 themselves.

@@ -2491,6 +2491,12 @@ export interface SyncResult {
   subagents: string[];
   plugins: string[];
   workflows: string[];
+  /**
+   * Project files the sync left alone because the workspace already has them
+   * (repo-relative). Reported once, grouped, by the command that rendered the
+   * sync — never one line per file from down here.
+   */
+  projectSkipped: string[];
 }
 
 /**
@@ -2629,7 +2635,7 @@ export function mergeRepoScopedSelections(repos: string[], cwd: string = process
  */
 export function syncResourcesToVersion(agent: AgentId, version: string, selection?: ResourceSelection, options: { projectDir?: string; cwd?: string; force?: boolean } = {}): SyncResult {
   if (isAgentHardDeprecated(agent)) {
-    return { commands: false, skills: false, hooks: false, memory: [], permissions: false, mcp: [], subagents: [], plugins: [], workflows: [] };
+    return { commands: false, skills: false, hooks: false, memory: [], permissions: false, mcp: [], subagents: [], plugins: [], workflows: [], projectSkipped: [] };
   }
 
   const agentConfig = AGENTS[agent];
@@ -2642,7 +2648,7 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   // "full sync; persist the staleness manifest after."
   const userPassedSelection = selection !== undefined;
 
-  const result: SyncResult = { commands: false, skills: false, hooks: false, memory: [], permissions: false, mcp: [], subagents: [], plugins: [], workflows: [] };
+  const result: SyncResult = { commands: false, skills: false, hooks: false, memory: [], permissions: false, mcp: [], subagents: [], plugins: [], workflows: [], projectSkipped: [] };
   const cwd = options.cwd || process.cwd();
   const projectAgentsDir = options.projectDir || getProjectAgentsDir(cwd);
   const userAgentsDir = getUserAgentsDir();
@@ -2716,7 +2722,7 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   }
 
   if (projectAgentsDir) {
-    syncProjectResourcesToAgent(agent, version, projectAgentsDir);
+    result.projectSkipped = syncProjectResourcesToAgent(agent, version, projectAgentsDir).skipped;
   }
 
   // Fast guard: skip the entire sync when the caller requested a full sync and
@@ -2726,7 +2732,9 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   if (!userPassedSelection && !options.force) {
     const manifest = loadManifest(agent, version);
     if (manifest && !isStale(manifest, agent, version, cwd)) {
-      return { commands: false, skills: false, hooks: false, memory: [], permissions: false, mcp: [], subagents: [], plugins: [], workflows: [] };
+      // Nothing synced, but the project sync above already ran — carry its
+      // skipped files out so the caller can still report them.
+      return { ...result };
     }
   }
 

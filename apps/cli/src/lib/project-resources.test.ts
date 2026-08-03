@@ -1,9 +1,9 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as yaml from 'yaml';
-import { syncProjectResourcesToAgent } from './project-resources.js';
+import { formatKeptProjectResources, syncProjectResourcesToAgent } from './project-resources.js';
 
 const tempDirs: string[] = [];
 
@@ -170,5 +170,71 @@ describe('syncProjectResourcesToAgent', () => {
     expect(parent.agent?.subagents).toEqual({});
     const manifest = JSON.parse(fs.readFileSync(path.join(project, '.kimi-code', '.agents-managed.json'), 'utf-8')) as { paths: string[] };
     expect(manifest.paths).toEqual(['agents/_agents-cli.yaml']);
+  });
+
+  it('reports files it left alone in the result, without printing one warning per file', () => {
+    const project = makeTempProject();
+    const projectAgentsDir = path.join(project, '.agents');
+    for (const name of ['debug', 'product', 'prune']) {
+      const command = path.join(projectAgentsDir, 'commands', `${name}.md`);
+      fs.mkdirSync(path.dirname(command), { recursive: true });
+      fs.writeFileSync(command, `Project ${name}.`, 'utf-8');
+      const existing = path.join(project, '.claude', 'commands', `${name}.md`);
+      fs.mkdirSync(path.dirname(existing), { recursive: true });
+      fs.writeFileSync(existing, `Mine: ${name}.`, 'utf-8');
+    }
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const result = syncProjectResourcesToAgent('claude', '2.1.143', projectAgentsDir);
+
+      expect(result.skipped.sort()).toEqual([
+        path.join('.claude', 'commands', 'debug.md'),
+        path.join('.claude', 'commands', 'product.md'),
+        path.join('.claude', 'commands', 'prune.md'),
+      ]);
+      expect(warn).not.toHaveBeenCalled();
+      expect(log).not.toHaveBeenCalled();
+      // The user's own files survive untouched.
+      expect(fs.readFileSync(path.join(project, '.claude', 'commands', 'debug.md'), 'utf-8')).toBe('Mine: debug.');
+    } finally {
+      warn.mockRestore();
+      log.mockRestore();
+    }
+  });
+});
+
+describe('formatKeptProjectResources', () => {
+  it('says nothing when nothing was kept', () => {
+    expect(formatKeptProjectResources([])).toBeNull();
+  });
+
+  it('names a lone file in full', () => {
+    expect(formatKeptProjectResources(['.claude/commands/debug.md'])).toBe(
+      'Kept your existing .claude/commands/debug.md',
+    );
+  });
+
+  it('folds one directory into a single line with a preview', () => {
+    const kept = ['debug', 'product', 'prune', 'video-k3z', 'doc-gaps', 'image-nbp']
+      .map((n) => `.claude/commands/${n}.md`);
+    expect(formatKeptProjectResources(kept)).toBe(
+      'Kept 6 of your own files in .claude/commands: debug.md, doc-gaps.md, image-nbp.md, +3 more',
+    );
+  });
+
+  it('counts per directory when several are involved', () => {
+    expect(formatKeptProjectResources([
+      '.claude/commands/debug.md',
+      '.claude/commands/prune.md',
+      '.claude/skills/rqa',
+    ])).toBe('Kept 3 of your own files in .claude/commands (2), .claude/skills (1)');
+  });
+
+  it('normalizes Windows separators so the line reads the same on every platform', () => {
+    expect(formatKeptProjectResources(['.claude\\commands\\debug.md', '.claude\\commands\\prune.md'])).toBe(
+      'Kept 2 of your own files in .claude/commands: debug.md, prune.md',
+    );
   });
 });
