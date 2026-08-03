@@ -1879,13 +1879,6 @@ export async function activate(context: vscode.ExtensionContext) {
     terminal: vscode.Terminal;
   }
 
-  // Session warming has been removed; keep command for backwards compatibility.
-  context.subscriptions.push(
-    vscode.commands.registerCommand('agents.disableWarming', async () => {
-      vscode.window.showInformationMessage('Session warming is no longer used. Session IDs are discovered after launch.');
-    })
-  );
-
   // Agents: Init - create .agents config and symlinks
   context.subscriptions.push(
     vscode.commands.registerCommand('agents.init', async () => {
@@ -5039,11 +5032,6 @@ async function updateContextKeys(context: vscode.ExtensionContext): Promise<void
   // 'native' hides the "Disable Tmux" toggle; 'auto'/'tmux' show it (tmux is active).
   const tmuxEnabled = normalizeTerminalMode(config.get('terminalMode')) !== 'native';
   await vscode.commands.executeCommand('setContext', 'agents.tmuxEnabled', tmuxEnabled);
-
-  const viewEnabled = workbench.isStreamlineLayout();
-  await vscode.commands.executeCommand('setContext', 'agents.viewEnabled', viewEnabled);
-
-  await vscode.commands.executeCommand('setContext', 'agents.warmingEnabled', false);
 
   const readerEnabled = settings.getSettings(context).editor?.markdownViewerEnabled ?? true;
   await vscode.commands.executeCommand('setContext', 'agents.readerEnabled', readerEnabled);

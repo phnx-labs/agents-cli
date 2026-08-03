@@ -20,7 +20,7 @@ import {
   type ActivityEvent,
   type Attachment,
 } from './activity.js';
-import { resolveProjectKey } from './project-key.js';
+import { resolveProjectNameForCwd, listProjectDefs } from './projects.js';
 import { getHistoryDir } from './state.js';
 import { machineId } from './machine-id.js';
 import { isValidMailboxId } from './mailbox.js';
@@ -358,9 +358,11 @@ export function postFeedStatus(input: FeedPostInput): FeedPostResult {
 
   const ts = input.ts ?? new Date().toISOString();
   // The post is written where the agent runs, so the cwd is a local path and
-  // gets full repository resolution — a post from `<repo>/apps/cli` files under
-  // `<repo>`, matching how the timeline groups everything else.
-  const project = resolveProjectKey(identity.cwd);
+  // gets full canonical resolution — a defined project's name wins (a post from
+  // any repo of a multi-repo project files under that project), else the repo
+  // key, matching how the timeline groups everything else. listProjectDefs is
+  // fail-open, so this costs one small readdir + YAML parse per post.
+  const project = resolveProjectNameForCwd(identity.cwd, listProjectDefs());
   const attachments = buildAttachments(input.attach, {
     copyRoot: input.attachmentsRoot ?? path.join(getHistoryDir(), 'attachments'),
     sessionId: identity.sessionId,

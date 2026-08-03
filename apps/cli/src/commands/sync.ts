@@ -61,6 +61,7 @@ import { capableAgents } from '../lib/capabilities.js';
 import { parseHookManifest, registerHooksToSettings } from '../lib/hooks.js';
 import { compileRulesForProject } from '../lib/rules/compile.js';
 import { runLaunchSync } from '../lib/project-launch.js';
+import { formatKeptProjectResources } from '../lib/project-resources.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { runUmbrellaSync, type UmbrellaFlags } from '../lib/sync-umbrella.js';
 import { addHostOption } from '../lib/hosts/option.js';
@@ -589,8 +590,11 @@ function printSyncDetail(result: SyncResult, agent: AgentId, version: string, cw
   if (result.plugins.length > 0)    lines.push({ kind: 'plugins',     items: result.plugins });
   if (result.workflows.length > 0)  lines.push({ kind: 'workflows',   items: result.workflows });
 
+  const kept = formatKeptProjectResources(result.projectSkipped);
+
   if (lines.length === 0) {
     console.log(chalk.gray(`Already in sync — ${agentLabel(agent)}@${version}`));
+    if (kept) console.log(chalk.gray(kept));
     return;
   }
 
@@ -605,6 +609,7 @@ function printSyncDetail(result: SyncResult, agent: AgentId, version: string, cw
     const count = chalk.cyan(`(${sorted.length})`.padStart(5));
     console.log(`  ${chalk.bold(padded)}  ${count}  ${chalk.gray(preview)}${more}`);
   }
+  if (kept) console.log(chalk.gray(kept));
 }
 
 function runLaunchMode(agent: AgentId, version: string, cwd: string, quiet: boolean): void {
@@ -635,9 +640,6 @@ function runLaunchMode(agent: AgentId, version: string, cwd: string, quiet: bool
     console.log(chalk.green(`Launch sync: ${bits.join(', ')}`));
   }
 
-  if (result.workspaceSkipped.length > 0) {
-    console.log(chalk.yellow(
-      `Skipped (user-owned, not overwritten): ${result.workspaceSkipped.join(', ')}`,
-    ));
-  }
+  const kept = formatKeptProjectResources(result.workspaceSkipped);
+  if (kept) console.log(chalk.gray(kept));
 }

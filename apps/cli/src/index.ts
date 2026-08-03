@@ -265,10 +265,24 @@ function auditCommandPath(cmd: Command): string[] {
 
 const auditStarts = new WeakMap<Command, number>();
 
+/**
+ * Commands that WRITE the event stream, so recording their own invocation would
+ * add records to the log they are writing into. `events emit` is batched — one
+ * flush every few seconds per open editor window — so auditing it would bury the
+ * real events under two `command.*` records per flush. `_internal friction`
+ * exists for the same reason (shell guards fire before any `agents` process
+ * exists, so they cannot emit in-process) and had the same self-logging bug.
+ */
+const AUDIT_EXEMPT_COMMANDS: ReadonlySet<string> = new Set([
+  'events emit',
+  '_internal friction',
+]);
+
 program.hook('preAction', (_thisCommand, actionCommand) => {
   try {
     const parts = auditCommandPath(actionCommand);
     if (parts.length === 0) return;
+    if (AUDIT_EXEMPT_COMMANDS.has(parts.join(' '))) return;
     auditStarts.set(actionCommand, Date.now());
     emit('command.start', {
       module: parts[0],
@@ -288,6 +302,7 @@ program.hook('postAction', (_thisCommand, actionCommand) => {
   try {
     const parts = auditCommandPath(actionCommand);
     if (parts.length === 0) return;
+    if (AUDIT_EXEMPT_COMMANDS.has(parts.join(' '))) return;
     const started = auditStarts.get(actionCommand);
     const durationMs = started !== undefined ? Date.now() - started : undefined;
     const command = parts.join(' ');

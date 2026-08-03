@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Comms — Feed vs Mailbox vs Session-Inject</title>
+<style>
+  :root{
+    --bg:#0a0a0a; --panel:#111312; --panel2:#161a18; --ink:#e7ece8; --dim:#8b938c;
+    --line:#26302a; --accent:#a3e635; --amber:#f5c451; --red:#ff6b6b; --cyan:#5ad6c0;
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  }
+  :root[data-theme="light"]{
+    --bg:#faf9f6; --panel:#ffffff; --panel2:#f2f4f0; --ink:#1a1c1a; --dim:#5c655c;
+    --line:#e2e6df; --accent:#4d7c0f; --amber:#b45309; --red:#dc2626; --cyan:#0e7490;
+  }
+  :root[data-theme="light"] .fig{background:#0e120f;border-color:#26302a}
+  :root[data-theme="light"] .fig figcaption{color:#8b938c}
+  :root[data-theme="light"] .fig figcaption b{color:#e7ece8}
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1000px;margin:0 auto;padding:56px 28px 120px}
+  header.hero{border-bottom:1px solid var(--line);padding-bottom:28px;margin-bottom:40px}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--accent);margin:0 0 14px}
+  h1{font-size:34px;line-height:1.15;margin:0 0 12px;font-weight:700;letter-spacing:-.01em}
+  h1 .accent{color:var(--accent)}
+  .sub{color:var(--dim);font-size:17px;max-width:72ch;margin:0}
+  .meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+  .chip{font-family:var(--mono);font-size:11.5px;color:var(--dim);border:1px solid var(--line);
+    border-radius:999px;padding:4px 11px;background:var(--panel)}
+  .chip b{color:var(--ink);font-weight:500}
+  h2{font-size:23px;margin:52px 0 8px;letter-spacing:-.01em;scroll-margin-top:20px}
+  h2 .n{font-family:var(--mono);color:var(--accent);font-size:15px;margin-right:10px;opacity:.85}
+  h3{font-size:16.5px;margin:26px 0 8px;color:var(--ink)}
+  p{margin:10px 0}
+  .lead{color:var(--dim)}
+  code{font-family:var(--mono);font-size:.86em;background:var(--panel2);border:1px solid var(--line);
+    border-radius:5px;padding:1.5px 6px;color:var(--cyan)}
+  a{color:var(--accent);text-decoration:none;border-bottom:1px solid transparent}
+  a:hover{border-bottom-color:var(--accent)}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:18px 0}
+  .fig{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:26px 22px 18px;margin:22px 0;overflow-x:auto}
+  .fig figcaption{font-family:var(--mono);font-size:12px;color:var(--dim);margin-top:14px;text-align:center}
+  .fig figcaption b{color:var(--ink)}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);font-weight:500}
+  td code{font-size:.85em}
+  .tag{font-family:var(--mono);font-size:10.5px;padding:2px 8px;border-radius:6px;font-weight:600;white-space:nowrap}
+  .tag.a{background:rgba(163,230,53,.12);color:var(--accent);border:1px solid rgba(163,230,53,.3)}
+  .tag.b{background:rgba(90,214,192,.1);color:var(--cyan);border:1px solid rgba(90,214,192,.28)}
+  .tag.c{background:rgba(245,196,81,.1);color:var(--amber);border:1px solid rgba(245,196,81,.28)}
+  .tag.r{background:rgba(255,107,107,.1);color:var(--red);border:1px solid rgba(255,107,107,.28)}
+  ul{margin:10px 0;padding-left:22px}li{margin:6px 0}
+  .callout{border-left:3px solid var(--accent);background:var(--panel2);border-radius:0 10px 10px 0;
+    padding:14px 18px;margin:18px 0}
+  .callout.warn{border-left-color:var(--amber)}
+  .callout .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--accent);display:block;margin-bottom:5px}
+  .callout.warn .lbl{color:var(--amber)}
+  .toc{font-family:var(--mono);font-size:13px;display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:18px}
+  .toc a{color:var(--dim);border:0}.toc a:hover{color:var(--accent)}
+  .foot{margin-top:60px;padding-top:22px;border-top:1px solid var(--line);color:var(--dim);
+    font-family:var(--mono);font-size:12px}
+  .themebtn{position:fixed;top:16px;right:16px;z-index:9;font-family:var(--mono);font-size:12px;
+    color:var(--dim);background:var(--panel);border:1px solid var(--line);border-radius:999px;
+    padding:6px 13px;cursor:pointer}
+  .themebtn:hover{color:var(--accent);border-color:var(--accent)}
+</style>
+</head>
+<body>
+<button class="themebtn" onclick="tt()" id="tb">◐ light</button>
+<script>
+  var r=document.documentElement;
+  function set(t){r.setAttribute('data-theme',t);document.getElementById('tb').textContent=(t==='light'?'◑ dark':'◐ light')}
+  set(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');
+  function tt(){set(r.getAttribute('data-theme')==='light'?'dark':'light')}
+</script>
+<div class="wrap">
+
+<header class="hero">
+  <p class="kicker">AGENTS-CLI · AGENT COMMS · EXPLAINER</p>
+  <h1>How agents reach each other:<br><span class="accent">feed, mailbox, session-inject</span></h1>
+  <p class="sub">Three mechanisms that look similar and aren't. The <b>feed</b> is a bulletin
+  board you pull. The <b>mailbox</b> is private mail dropped into a running agent. <b>Inject</b>
+  types an answer into a parked agent's live terminal. <code>agents message</code> is a router
+  that picks between the last two by the recipient's state — the feed sits outside it entirely.</p>
+  <div class="meta">
+    <span class="chip">as of&nbsp;<b>2026-08-01</b></span>
+    <span class="chip">agents-cli&nbsp;<b>v1.20.76</b></span>
+    <span class="chip">source: <b>origin/main</b></span>
+    <span class="chip">verified with&nbsp;<b>file:line</b></span>
+  </div>
+  <nav class="toc">
+    <a href="#s1">01 · the router</a>
+    <a href="#s2">02 · side by side</a>
+    <a href="#s3">03 · feed</a>
+    <a href="#s4">04 · mailbox</a>
+    <a href="#s5">05 · session-inject</a>
+    <a href="#s6">06 · the gap</a>
+  </nav>
+</header>
+
+<!-- ============ 01 ============ -->
+<h2 id="s1"><span class="n">01</span>The router: delivery is chosen by agent state</h2>
+<p class="lead">These aren't three tools you choose between. <code>agents message</code> inspects
+the recipient and routes — the precedence lives in <code>lib/answer-router.ts&nbsp;·&nbsp;resolveAnswerRoute</code>.
+The <b>feed</b> is not in this tree; it's a board, not a delivery.</p>
+
+<figure class="fig">
+<svg viewBox="0 0 900 384" role="img" aria-label="agents message routing decision by agent state">
+  <defs>
+    <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0 L8 4.5 L0 9 z" fill="#8b938c"/></marker>
+    <marker id="arg" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0 L8 4.5 L0 9 z" fill="#a3e635"/></marker>
+  </defs>
+  <!-- entry -->
+  <rect x="30" y="168" width="196" height="50" rx="9" fill="#12160f" stroke="#a3e635"/>
+  <text x="128" y="190" fill="#a3e635" font-size="13" text-anchor="middle" font-family="monospace">agents message</text>
+  <text x="128" y="207" fill="#8b938c" font-size="11" text-anchor="middle" font-family="monospace">&lt;to&gt; "&lt;text&gt;"</text>
+  <!-- spine -->
+  <path d="M226 193 L286 193" stroke="#8b938c" fill="none" marker-end="url(#ar)"/>
+  <text x="330" y="180" fill="#e7ece8" font-size="12.5" text-anchor="middle" font-family="monospace">state?</text>
+  <path d="M330 168 L330 44 L360 44" stroke="#26302a" fill="none"/>
+  <path d="M330 168 L330 118 L360 118" stroke="#26302a" fill="none"/>
+  <path d="M330 218 L330 268 L360 268" stroke="#26302a" fill="none"/>
+  <path d="M330 218 L330 342 L360 342" stroke="#26302a" fill="none"/>
+  <circle cx="330" cy="193" r="4" fill="#a3e635"/>
+  <!-- branch condition labels -->
+  <text x="368" y="30" fill="#8b938c" font-size="10.5" font-family="monospace">parked · rail = tmux/iterm/pty</text>
+  <text x="368" y="104" fill="#8b938c" font-size="10.5" font-family="monospace">parked · headless (no rail)</text>
+  <text x="368" y="254" fill="#8b938c" font-size="10.5" font-family="monospace">parked · no rail · interactive</text>
+  <text x="368" y="328" fill="#8b938c" font-size="10.5" font-family="monospace">running · between tool calls</text>
+  <!-- outcome boxes -->
+  <path d="M360 44 L556 44" stroke="#a3e635" fill="none" marker-end="url(#arg)"/>
+  <rect x="560" y="22" width="300" height="44" rx="8" fill="#12160f" stroke="#a3e635"/>
+  <text x="576" y="49" fill="#a3e635" font-size="12.5" font-family="monospace">① keystroke INJECT</text>
+  <path d="M360 118 L556 118" stroke="#5ad6c0" fill="none" marker-end="url(#ar)"/>
+  <rect x="560" y="96" width="300" height="44" rx="8" fill="#0f1717" stroke="#5ad6c0"/>
+  <text x="576" y="123" fill="#5ad6c0" font-size="12.5" font-family="monospace">② agents run --resume &lt;id&gt;</text>
+  <path d="M360 268 L556 268" stroke="#ff6b6b" fill="none" marker-end="url(#ar)"/>
+  <rect x="560" y="246" width="300" height="44" rx="8" fill="#1a1010" stroke="#ff6b6b"/>
+  <text x="576" y="273" fill="#ff6b6b" font-size="12.5" font-family="monospace">③ REFUSE (don't mailbox-drop)</text>
+  <path d="M360 342 L556 342" stroke="#f5c451" fill="none" marker-end="url(#ar)"/>
+  <rect x="560" y="320" width="300" height="44" rx="8" fill="#191509" stroke="#f5c451"/>
+  <text x="576" y="347" fill="#f5c451" font-size="12.5" font-family="monospace">④ MAILBOX (drain next tool call)</text>
+</svg>
+<figcaption><b>The 4-way precedence.</b> First match wins, top to bottom — <code>resolveAnswerRoute</code>. A parked agent is answered where it waits; a running one gets mail.</figcaption>
+</figure>
+
+<!-- ============ 02 ============ -->
+<h2 id="s2"><span class="n">02</span>The three, side by side</h2>
+<table>
+  <thead><tr><th style="width:16%"></th><th>Feed</th><th>Mailbox</th><th>Session-inject</th></tr></thead>
+  <tbody>
+    <tr><td>Command</td><td><code>feed</code> / <code>feed post</code></td><td><code>message</code> → running</td><td><code>sessions inject</code> (parked)</td></tr>
+    <tr><td>Shape</td><td><span class="tag a">broadcast · pull</span></td><td><span class="tag c">1:1 · push</span></td><td><span class="tag b">1:1 · push</span></td></tr>
+    <tr><td>Privacy</td><td>public across your fleet</td><td>private, anti-misroute</td><td>private</td></tr>
+    <tr><td>Store</td><td><code>.history/feed/*.json</code> + <code>.history/activity/*.jsonl</code></td><td><code>.history/mailbox/&lt;id&gt;/…</code></td><td>none — the live terminal surface</td></tr>
+    <tr><td>Delivered by</td><td>someone runs <code>agents feed</code></td><td>PreToolUse <code>mailbox-inject</code> drain</td><td><code>tmux send-keys</code> / <code>osascript</code> / pty</td></tr>
+    <tr><td>Target must run?</td><td><span class="tag r">no</span> (it's a file)</td><td><span class="tag a">yes</span> — reaches next tool call</td><td><span class="tag a">yes</span> — parked in a terminal</td></tr>
+    <tr><td>Cross-machine?</td><td>blocks <span class="tag a">yes</span> (SSH fan-out) · status <span class="tag r">no</span></td><td>via <code>--host</code> SSH re-exec</td><td>tmux/iterm/vscodium <span class="tag a">yes</span> · pty <span class="tag r">no</span></td></tr>
+  </tbody>
+</table>
+
+<!-- ============ 03 ============ -->
+<h2 id="s3"><span class="n">03</span>Feed — a board, with two very different lanes</h2>
+<p class="lead">One command, two stores that behave oppositely. This split is the crux of the
+whole question, so it gets its own diagram.</p>
+<ul>
+  <li><b>Open blocks</b> — <code>.history/feed/&lt;blockId&gt;.json</code>. Last-writer-wins <i>state</i>
+  ("this agent needs you"), with a full answer / park / receipt lifecycle. The primary content of
+  <code>agents feed</code>. On read it <b>SSH fan-outs to every registered device</b> (<code>commands/feed.ts</code>
+  runs <code>agents feed --json</code> on each peer) — fleet-wide, no auth beyond fleet SSH.</li>
+  <li><b>Status posts</b> — <code>.history/activity/&lt;sessionId&gt;.jsonl</code>. Append-only <i>events</i>.
+  <code>agents feed post "text"</code> writes one as <code>tier:'milestone', event:'status.posted'</code>
+  (<code>lib/feed-post.ts</code>). Shown in the recent-activity lane at the bottom of <code>agents feed</code>
+  — but read <b>local-only</b>. The fan-out carries blocks, not the activity lane.</li>
+</ul>
+
+<figure class="fig">
+<svg viewBox="0 0 900 300" role="img" aria-label="feed blocks fan out fleet-wide but status posts stay local">
+  <defs>
+    <marker id="arg2" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0 L8 4.5 L0 9 z" fill="#a3e635"/></marker>
+  </defs>
+  <!-- this machine -->
+  <rect x="30" y="40" width="300" height="220" rx="12" fill="#0e120f" stroke="#26302a"/>
+  <text x="46" y="66" fill="#8b938c" font-size="11" font-family="monospace">this machine · ~/.agents/.history</text>
+  <rect x="52" y="86" width="256" height="64" rx="8" fill="#12160f" stroke="#a3e635"/>
+  <text x="66" y="112" fill="#a3e635" font-size="12" font-family="monospace">feed/*.json</text>
+  <text x="66" y="132" fill="#8b938c" font-size="10.5" font-family="monospace">open blocks · "needs you"</text>
+  <rect x="52" y="166" width="256" height="64" rx="8" fill="#191509" stroke="#f5c451"/>
+  <text x="66" y="192" fill="#f5c451" font-size="12" font-family="monospace">activity/*.jsonl</text>
+  <text x="66" y="212" fill="#8b938c" font-size="10.5" font-family="monospace">status.posted · feed post</text>
+  <!-- peers -->
+  <rect x="640" y="40" width="230" height="70" rx="10" fill="#0e120f" stroke="#26302a"/>
+  <text x="755" y="80" fill="#8b938c" font-size="12" text-anchor="middle" font-family="monospace">peer boxes (SSH)</text>
+  <text x="755" y="98" fill="#8b938c" font-size="10.5" text-anchor="middle" font-family="monospace">zion, yosemite-m*, …</text>
+  <!-- blocks fan out -->
+  <path d="M308 118 C 470 118, 500 75, 636 75" stroke="#a3e635" stroke-width="1.6" fill="none" marker-end="url(#arg2)"/>
+  <text x="470" y="104" fill="#a3e635" font-size="10.5" font-family="monospace">blocks fan out ✓</text>
+  <!-- status stays local -->
+  <path d="M308 198 C 430 198, 470 210, 560 210" stroke="#f5c451" stroke-width="1.6" stroke-dasharray="5 5" fill="none"/>
+  <line x1="560" y1="196" x2="588" y2="224" stroke="#ff6b6b" stroke-width="2.4"/>
+  <line x1="588" y1="196" x2="560" y2="224" stroke="#ff6b6b" stroke-width="2.4"/>
+  <text x="452" y="236" fill="#f5c451" font-size="10.5" font-family="monospace">status posts stay local ✗</text>
+</svg>
+<figcaption><b>The asymmetry.</b> A block on any box is visible fleet-wide; a status post is visible only on the box that wrote it.</figcaption>
+</figure>
+
+<!-- ============ 04 ============ -->
+<h2 id="s4"><span class="n">04</span>Mailbox — private mail for a running agent</h2>
+<p class="lead">A file spool, one box per logical agent, drained at the recipient's next tool call.</p>
+<ul>
+  <li><b>Store:</b> <code>.history/mailbox/&lt;mailboxId&gt;/{inbox,processing,consumed}/&lt;msgId&gt;.json</code>.
+  <code>mailboxId</code> = teams <code>agentId</code> ?? <code>sessionId</code> — one box, one consumer.</li>
+  <li><b>Anti-misroute:</b> "a message can never reach the wrong agent." The <code>to</code> field is stamped
+  into the JSON and validated on consume; a mismatched or corrupt file is archived, never delivered.</li>
+  <li><b>Consumption:</b> not passively pushed — the <code>mailbox-inject</code> PreToolUse hook drains the inbox
+  at the <b>next tool call</b>. The agent must be running (reaching a tool call); it does <b>not</b> need a terminal.
+  At-least-once via <code>inbox → processing → consumed</code>, dedup by <code>msgId</code>.</li>
+  <li><b>Cross-machine:</b> the spool is local; <code>--host</code> re-execs the whole <code>agents message</code>
+  over SSH so the box is written on the host that owns the agent. No shared relay.</li>
+</ul>
+<figure class="fig">
+<svg viewBox="0 0 900 150" role="img" aria-label="mailbox spool inbox processing consumed with hook drain">
+  <defs><marker id="arc" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0 L8 4.5 L0 9 z" fill="#5ad6c0"/></marker></defs>
+  <rect x="40" y="52" width="150" height="46" rx="8" fill="#12160f" stroke="#a3e635"/>
+  <text x="115" y="72" fill="#a3e635" font-size="12" text-anchor="middle" font-family="monospace">enqueue()</text>
+  <text x="115" y="88" fill="#8b938c" font-size="10" text-anchor="middle" font-family="monospace">atomic write</text>
+  <path d="M190 75 L232 75" stroke="#5ad6c0" fill="none" marker-end="url(#arc)"/>
+  <rect x="236" y="52" width="120" height="46" rx="8" fill="#0f1717" stroke="#5ad6c0"/>
+  <text x="296" y="79" fill="#5ad6c0" font-size="12" text-anchor="middle" font-family="monospace">inbox/</text>
+  <path d="M356 75 L398 75" stroke="#5ad6c0" fill="none" marker-end="url(#arc)"/>
+  <rect x="402" y="52" width="120" height="46" rx="8" fill="#0f1717" stroke="#5ad6c0"/>
+  <text x="462" y="79" fill="#5ad6c0" font-size="11.5" text-anchor="middle" font-family="monospace">processing/</text>
+  <path d="M522 75 L564 75" stroke="#5ad6c0" fill="none" marker-end="url(#arc)"/>
+  <rect x="568" y="52" width="120" height="46" rx="8" fill="#0f1717" stroke="#5ad6c0"/>
+  <text x="628" y="79" fill="#5ad6c0" font-size="12" text-anchor="middle" font-family="monospace">consumed/</text>
+  <rect x="712" y="44" width="150" height="62" rx="8" fill="#12160f" stroke="#f5c451"/>
+  <text x="787" y="70" fill="#f5c451" font-size="11" text-anchor="middle" font-family="monospace">PreToolUse</text>
+  <text x="787" y="88" fill="#8b938c" font-size="10" text-anchor="middle" font-family="monospace">drains at next call</text>
+  <path d="M462 52 C 500 20, 740 20, 770 42" stroke="#f5c451" stroke-dasharray="4 4" fill="none"/>
+</svg>
+<figcaption><b>Claim-first spool.</b> The hook drains <code>inbox</code>→<code>processing</code>→<code>consumed</code>; an interrupted drain is recovered next time.</figcaption>
+</figure>
+
+<!-- ============ 05 ============ -->
+<h2 id="s5"><span class="n">05</span>Session-inject — keystrokes into a parked agent</h2>
+<p class="lead">When an agent is blocked on a question, there's no next tool call to drain a mailbox.
+Inject types the answer straight into its live terminal.</p>
+<ul>
+  <li><b>Mechanism:</b> <code>tmux send-keys</code>, iTerm <code>osascript … write text</code> (focus-safe, no activate),
+  VSCodium <code>--open-url …/inject</code>, or pty <code>write</code>. Ink-TUI safe: text and Enter are two separate writes.</li>
+  <li><b>Requires:</b> parked on a question <b>and</b> an addressable rail. Only <b>tmux</b> rails are addressable by
+  session id; no rail → <i>"no addressable reply rail … relaunch under a tmux/pty rail to inject."</i></li>
+  <li><b>Locality — not strictly local:</b> tmux/iterm/vscodium inject into a <b>remote</b> session over SSH via
+  <code>--host</code>; only the <b>pty</b> backend is hard local-only. Session-id lookup reads local state (needs sync).
+  Ghostty is coarse (steals focus) and refused unless explicitly opted in.</li>
+  <li><b>Headless with no rail → can't inject.</b> Falls back to <code>agents run --resume</code> (route ② above).</li>
+</ul>
+
+<!-- ============ 06 ============ -->
+<h2 id="s6"><span class="n">06</span>The gap that blocks the goal</h2>
+<p>The reason to make agents post status is passive observability — so you don't have to
+poll each box to know what a headless run is doing. Two findings stand in the way today.</p>
+
+<div class="callout warn">
+  <span class="lbl">the gap</span>
+  <b>Status posts don't travel.</b> <code>feed post</code> writes to the <b>local-only</b> activity lane, and the
+  feed's SSH fan-out carries only open-<i>blocks</i>. A status posted by a headless agent on <code>yosemite-m3</code>
+  is <b>not</b> visible when you run <code>agents feed</code> on <code>zion</code>. Instructing agents to post is
+  <i>necessary but not sufficient</i> — the activity lane also needs fleet fan-out (or posts routed to a
+  fleet-visible surface) for the goal to work.
+</div>
+
+<div class="callout">
+  <span class="lbl">status · v1.20.76</span>
+  <code>agents feed post</code> is <b>released and live</b> (verified end-to-end). But <b>no composed
+  instruction</b> drives it — a sweep of <code>~/.agents</code> rules / memory / playbooks / commands / hooks and
+  <code>workspace/AGENTS.md</code> found zero references. The command ships; nothing tells any agent to use it.
+</div>
+
+<div class="foot">
+  agents-cli · rendered by visualize &nbsp;·&nbsp; evidence from origin/main @ v1.20.76 &nbsp;·&nbsp;
+  <span style="color:var(--accent)">feed = board · mailbox = mail · inject = keystrokes</span>
+</div>
+
+</div>
+</body>
+</html>

@@ -14,7 +14,7 @@ Six surfaces read the fleet's activity; each has one job. Reach for the one whos
 | **`events`** | **Raw unified event stream = the audit log.** Everything: secrets access, command invocations, version/skill/mcp/team ops, browser events, plus agent milestones. `--follow` to tail, `--audit` for ops-only. | `events.jsonl` + per-session `activity/*.jsonl`, merged by `readUnifiedEvents` | Audit, debugging, monitoring (human + machine) |
 | **`perf`** | **Latency rollups.** p50/p99 for hooks, CLI commands, and `agent.run` timings. Indexed SQLite — not a full scan of the audit log. | `~/.agents/.cache/perf/perf.db` (disposable) | Humans optimizing boot/run cost + `--json` |
 | **`feed`** | **Consolidated cross-agent surface.** Open blocks (decisions agents are waiting on) + `feed post` status updates — "what needs you / what are agents saying." | `.history/feed/*` + active sessions | Humans (operator inbox) + agents (progress) |
-| **`activity`** | **Human milestone timeline.** Recent plans / PRs / worktrees / sub-agents, newest-first — a friendly lens on the milestone tier of the event stream. | `activity/*.jsonl` | Human at the terminal |
+| **`activity`** | **Human milestone timeline.** Recent plans / PRs / worktrees / sub-agents, plus Bash-driven deliverables (video renders, image upscales, metadata edits), newest-first — a friendly lens on the milestone tier of the event stream. Every Bash call also emits a structured `bash.executed` activity record carrying its tool category. | `activity/*.jsonl` | Human at the terminal |
 | **`output`** | **Productivity accounting.** Token burn vs shipped output (PRs, commits) across agents — the "was it worth it" axis. (`agents cost` is the pure $-and-duration sibling.) | `sessions.db` + git/gh | Human + `--json` |
 | **`sessions`** | **Live agent roster + transcripts.** Which agents are running right now and their state; browse/read past conversation transcripts. A live process probe + transcript index, not an event log. | live pid/transcript probe + `sessions.db` | Human + `--json` |
 
@@ -26,6 +26,32 @@ separate SQLite file — **loss is acceptable** (under `.cache/`); it does **not
 foreign-key into `sessions.db`, but uses the same string shapes for
 `session_id` / `session_short` / `agent` / `machine` / `actor` / `cwd` so you can
 soft-join later.
+
+**Writing from outside the CLI — `agents events emit`.** In-process code calls
+`emit()` or `appendActivityEvent()` directly, but the producers that most need to
+record events are not agents-cli processes at all (the Factory VS Code extension
+host, a shell guard, any external tool). They pipe JSONL — one JSON object per
+line — into `agents events emit --source <name>`:
+
+```bash
+printf '%s\n' '{"event":"factory.command","commandId":"agents.newClaude"}' \
+  | agents events emit --source factory
+agents events --module factory --limit 0 --json      # read it back
+```
+
+`--source` is stamped as `module`, which is what makes `--module factory` filter to
+one producer. Which store a line lands in is **forced by the stores, not chosen**:
+the activity log is one file per session, so a milestone kind routes there and
+*requires* a `sessionId`, while everything else (and anything sessionless) goes to
+the operational log. A milestone with no `sessionId` is **rejected**, never quietly
+written elsewhere. Rejection is per line — one bad line never discards the batch —
+and the exit code is 1 if any line was rejected.
+
+Pass `ts` (ISO-8601) per line when the producer batches: without it every event in
+a flush is stamped at flush time, which collapses their real ordering and corrupts
+`--since` boundaries. `agents events emit` is itself exempt from the
+`command.start`/`command.end` audit hooks, so a batched writer does not bury the
+stream it is writing into.
 
 For the inspection/health cluster, `agents doctor` is the canonical detector of
 which resources are configured, synced, or drifted; `agents doctor --check` is its
@@ -180,6 +206,8 @@ agents events --event teams.disband    # a semantic event: a team torn down
 agents events --event secrets.get --since 7d --json
 agents events --event pr.opened --since 30d --limit 0 --json   # every match, uncapped
 agents events -f                       # live tail of today's log
+agents events --module factory         # what the VS Code extension recorded
+agents events emit --source factory --json < batch.jsonl        # write from outside
 ```
 
 `--module` filters the top-level group; `--command` matches a command path by
@@ -853,14 +881,20 @@ agents activity --milestones       # only plans / PRs / worktrees / sub-agents
   (`▸ agents-cli  12 events · 4 milestones · zion, yosemite-s0`, capped at three
   names plus a `+N` tail). `--filter <text>` narrows by project / device / agent /
   event / ticket.
-- **Projects are repositories.** A cwd resolves to the git repository containing
-  it (`resolveProjectKey`, `lib/project-key.ts`), so `<repo>/apps/cli` files under
+- **Projects are defined projects first, repositories otherwise.** A cwd inside a
+  defined project (`~/.agents/projects/<name>.yaml`, see docs/11-projects.md)
+  reads as that project's NAME — so a multi-repo project is one bucket, not one
+  per repo. Anything else resolves to the git repository containing it
+  (`resolveProjectKey`, `lib/project-key.ts`), so `<repo>/apps/cli` files under
   `<repo>` and a worktree under `<repo>/.agents/worktrees/<slug>` folds back into
   the repo it branched from. A directory in no repo groups as itself, and a
-  dotfiles repo at `$HOME` is deliberately not treated as a project. This is the
-  same fold the `agents sessions` overview groups by, so a project reads
-  identically in both. Each machine resolves its own paths — a peer stamps the
-  project before its events cross the wire.
+  dotfiles repo at `$HOME` is deliberately not treated as a project. This one
+  resolver (`resolveProjectNameForCwd`, `lib/projects.ts`) is shared by the
+  activity timeline, `agents feed post`, and the `agents sessions` overview, so
+  a project reads identically in all three. Each machine resolves its own paths
+  — a peer stamps the project before its events cross the wire. `--project
+  <name>` narrows the stream to one project (exact match on this resolved
+  label).
 - **`--limit` caps milestones, not churn.** The default view collapses routine
   `file.edited` work to a count, so `-n` bounds the milestones shown and the
   routine events inside that window ride along for the counts

@@ -40,6 +40,21 @@ describe('overviewProjectKey', () => {
     expect(overviewProjectKey({ project: undefined, cwd: '/definitely/not-inside-any/repo/path-xyz' })).toBe('path-xyz');
   });
 
+  it('a defined project name wins over the repo key when defs are given', () => {
+    // Same canonical resolver as the activity timeline: a multi-repo project's
+    // sessions group under the project's name, not the repo's.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'overview-canonical-'));
+    try {
+      const repo = path.join(tmp, 'agents');
+      const sub = path.join(repo, 'apps', 'cli');
+      fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
+      fs.mkdirSync(sub, { recursive: true });
+      expect(overviewProjectKey({ project: undefined, cwd: sub }, [{ name: 'agentic', root: repo }])).toBe('agentic');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('returns a sentinel for an empty cwd and no project', () => {
     expect(overviewProjectKey({ project: undefined, cwd: '' })).toBe('(no project)');
     expect(overviewProjectKey({ project: '  ', cwd: undefined })).toBe('(no project)');

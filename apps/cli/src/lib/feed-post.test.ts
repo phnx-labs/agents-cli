@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -17,6 +17,19 @@ import type { PidSessionEntry } from './session/pid-registry.js';
 function tmpActivityDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-post-'));
 }
+
+// postFeedStatus resolves project names against the defs dir — keep every test
+// hermetic (an empty dir) so a developer's real ~/.agents/projects can't flip a
+// label; the canonical-name test overrides this with its own seeded dir.
+let emptyDefsDir: string;
+beforeEach(() => {
+  emptyDefsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-post-defs-'));
+  process.env.AGENTS_PROJECTS_DIR = emptyDefsDir;
+});
+afterEach(() => {
+  delete process.env.AGENTS_PROJECTS_DIR;
+  fs.rmSync(emptyDefsDir, { recursive: true, force: true });
+});
 
 describe('normalizeStatusText', () => {
   it('collapses whitespace and rejects empty', () => {
@@ -276,6 +289,31 @@ describe('postFeedStatus attachments + project', () => {
     expect(stored[0].project).toBe('song-factory');
     expect(stored[0].attachments).toHaveLength(2);
     expect(stored[0].attachments?.[0].name).toBe('take.wav');
+  });
+
+  it('stamps the canonical defined-project name, not the repo key', () => {
+    const dir = tmpActivityDir();
+    const defsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-proj-defs-'));
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-proj-repo-'));
+    // A multi-repo project: any repo under its root files under the ONE name.
+    fs.writeFileSync(path.join(defsDir, 'song-suite.yaml'), `name: song-suite\nroot: ${repo}\n`);
+    process.env.AGENTS_PROJECTS_DIR = defsDir;
+    try {
+      const { event } = postFeedStatus({
+        text: 'mastered',
+        sessionId: 'sess-canonical',
+        activityRoot: dir,
+        cwd: path.join(repo, 'apps', 'studio'),
+        env: { AGENTS_AGENT_NAME: 'grok', AGENTS_SYNC_MACHINE_ID: 'yosemite-s1' },
+        ts: '2026-07-31T12:00:00.000Z',
+        listEntries: () => [],
+        readEntry: () => undefined,
+        startPid: 1,
+      });
+      expect(event.project).toBe('song-suite');
+    } finally {
+      delete process.env.AGENTS_PROJECTS_DIR;
+    }
   });
 
   it('omits attachments when none given', () => {

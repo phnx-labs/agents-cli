@@ -65,6 +65,7 @@ import {
   isVersionIsolated,
   getIsolatedDefault,
 } from '../lib/versions.js';
+import { formatKeptProjectResources } from '../lib/project-resources.js';
 import {
   getShimsDir,
   isShimsInPath,
@@ -843,6 +844,8 @@ async function showInstalledVersions(
             if (synced.length > 0) {
               console.log(chalk.green(`\nSynced to ${agentLabel(filterAgentId)}@${defaultVersion}: ${synced.join(', ')}`));
             }
+            const kept = formatKeptProjectResources(result.projectSkipped);
+            if (kept) console.log(chalk.gray(kept));
           }
         } catch (err) {
           if (isPromptCancelled(err)) return;
