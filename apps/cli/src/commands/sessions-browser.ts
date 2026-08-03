@@ -584,6 +584,10 @@ export async function runSessionBrowser(
     const filtered = applyFilters(rows, live ?? new Map(), f, self, favorites);
     cols = pickerColumnsFor(filtered);
     cols.showHost = shouldShowHostColumn(f, live, filtered);
+    // Status rides the same gate as the host column: both come from the live
+    // scan, so both belong to the running view and neither should widen a plain
+    // transcript listing that has no live rows to fill them.
+    cols.showStatus = !!f.running && !!live;
     return filtered;
   };
 
@@ -600,6 +604,7 @@ export async function runSessionBrowser(
         sshOriginTagFor(liveCache, s.id),
         liveHostLabel(liveCache?.get(s.id)),
         favorites.has(s.id),
+        liveCache?.get(s.id),
       ),
     matches: sessionMatchesQuery,
     // Lead the preview with the live status banner — the one place a `crashed` /

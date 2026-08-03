@@ -530,6 +530,14 @@ Precedence is deliberate, so the words keep their meaning:
 A `crashed` row is deliberately transient: once its transcript goes days-stale it
 degrades to `abandoned`, so the listing carries an alert, not a permanent tombstone.
 
+Both are visible everywhere a status already was — the `--active` grouped view, the
+default printed listing, `--active --json` (plus a `hostLink` field), and the session
+preview, which spells the state out in a sentence rather than a glyph. The interactive
+browser gained a status column of its own for the running view (`PickerColumns.showStatus`,
+gated exactly like `showHost`): it previously showed which terminal a session ran in but
+never what it was doing, so a session that had lost its host was indistinguishable from a
+healthy one in the row list.
+
 ## Favorites (starred sessions)
 
 `*` in the interactive browser stars the highlighted session; `f` filters the list to

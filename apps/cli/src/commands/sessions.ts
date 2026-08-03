@@ -529,11 +529,14 @@ export function liveStatusWord(a: ActiveSession | undefined): string {
   return '';
 }
 
+/** Width of the live status column — `crashed` is the longest word it renders. */
+const LIVE_STATUS_W = 8;
+
 /** The colored, space-padded status cell for a listing row (empty when not live). */
 function liveStatusCell(live: ActiveSession | undefined): { cell: string; width: number } {
   const word = liveStatusWord(live);
   if (!word || !live) return { cell: '', width: 0 };
-  return { cell: statusColor(live.status)(padToWidth(word, 8)), width: 8 };
+  return { cell: statusColor(live.status)(padToWidth(word, LIVE_STATUS_W)), width: LIVE_STATUS_W };
 }
 
 /**
@@ -2276,6 +2279,13 @@ export interface PickerColumns {
    */
   showFavorite?: boolean;
   /**
+   * Render the live status column (`working` / `waiting` / `orphan` / `crashed`).
+   * Live-only, gated the same way as {@link showHost}: it comes from the
+   * active-session scan, so the running-filtered browser sets it and a plain
+   * transcript listing — where no row has a status — leaves it off.
+   */
+  showStatus?: boolean;
+  /**
    * Cells the picker prepends before each row: 2 for the single-select cursor
    * ('> '), 6 for the multi-select cursor + checkbox ('> [x] '). Reserved from
    * the topic width so rows never wrap. Defaults to 2.
@@ -2375,6 +2385,7 @@ export function formatPickerLabel(
   ssh?: SshOriginTag,
   host = '',
   favorite = false,
+  live?: ActiveSession,
 ): string {
   const agentColor = colorAgent(s.agent);
   const when = formatRelativeTime(s.lastActivity ?? s.timestamp);
@@ -2426,9 +2437,18 @@ export function formatPickerLabel(
   // drops the column entirely (`showFavorite`) and costs nothing.
   const favW = cols.showFavorite ? 2 : 0;
   const favCell = cols.showFavorite ? (favorite ? chalk.yellow('★ ') : '  ') : '';
+  // The same status word the flat listing shows, so a session that is `orphan`
+  // or `crashed` reads that way in the browser too — not only in its preview.
+  // Constant width whenever the column is on. `liveStatusCell` already pads its
+  // word to LIVE_STATUS_W but returns an EMPTY cell (width 0) for a row with no
+  // live match — blanks fill in for those, so the topic column does not jog on
+  // exactly the rows that are not running.
+  const status = cols.showStatus ? liveStatusCell(live) : { cell: '', width: 0 };
+  const statusW = cols.showStatus ? LIVE_STATUS_W : 0;
+  const statusCell = cols.showStatus ? (status.cell || ' '.repeat(LIVE_STATUS_W)) : '';
   const topicW = Math.max(
     16,
-    terminalWidth() - gutter - favW - (10 + 9 + 8 + 16) - machineColW - hostW - ticketW - wtW - sshW - team.width - stringWidth(when) - 1,
+    terminalWidth() - gutter - favW - statusW - (10 + 9 + 8 + 16) - machineColW - hostW - ticketW - wtW - sshW - team.width - stringWidth(when) - 1,
   );
 
   return (
@@ -2442,6 +2462,7 @@ export function formatPickerLabel(
     machineCell +
     hostCell +
     chalk.cyan(padRight(truncate(project, 14), 16)) +
+    statusCell +
     sshSeg +
     teamSeg +
     renderTopicCell(label, topic, query, topicW, topicW) +
