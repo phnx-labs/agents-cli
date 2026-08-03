@@ -16,7 +16,6 @@ import { isFavorite, listFavorites, setFavorite } from '../lib/session/favorites
 interface FavoriteOptions {
   remove?: boolean;
   list?: boolean;
-  json?: boolean;
 }
 
 /**
@@ -66,10 +65,18 @@ export function registerSessionsFavoriteCommand(sessionsCmd: Command): void {
     `,
   });
 
-  cmd.action((ids: string[], options: FavoriteOptions) => {
+  cmd.action((ids: string[], options: FavoriteOptions, self: Command) => {
+    // `--json` has to come from the merged view, not `options`. The parent
+    // `sessions` command declares `--json` AND takes a positional `[query]`, so
+    // commander keeps parsing parent-known options past the subcommand name and
+    // binds `--json` to the PARENT — `options.json` is silently undefined here
+    // while `--remove`/`--list` (unknown to the parent) arrive fine.
+    // `optsWithGlobals` is commander's own answer for reading an option a parent
+    // owns; it is still declared on this command so `--help` documents it.
+    const json = (self.optsWithGlobals() as { json?: boolean }).json === true;
     if (options.list || ids.length === 0) {
       const starred = [...listFavorites()].sort();
-      if (options.json) {
+      if (json) {
         process.stdout.write(JSON.stringify({ favorites: starred }, null, 2) + '\n');
         return;
       }
@@ -96,7 +103,7 @@ export function registerSessionsFavoriteCommand(sessionsCmd: Command): void {
       results.push({ query: idQuery, id: resolved.id, favorite: isFavorite(resolved.id) });
     }
 
-    if (options.json) {
+    if (json) {
       process.stdout.write(JSON.stringify({ results }, null, 2) + '\n');
     } else {
       for (const r of results) {
