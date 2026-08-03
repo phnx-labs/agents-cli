@@ -108,11 +108,11 @@ import { buildForkSessionRequest } from '../core/forkSession';
 import {
   buildSessionBrowserRows,
   cleanSessionTopic,
-  forkHostForSession,
   formatSessionWhen,
   type BrowsableSession,
   type SessionBrowserSessionRow,
 } from '../core/sessionBrowser';
+import { handleForkPickedSession, loadBrowsableSessions, registerForkPickSessionCommand, runSessionBrowserPicker } from './sessionBrowser.vscode';
 import type { RemoteSession, RawActiveSession } from '../core/remoteSessions';
 import {
   buildResumeCandidates,
@@ -1653,7 +1653,7 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('agents.forkPickSession', () => forkPickedSession(context))
+    registerForkPickSessionCommand(vscode.commands.registerCommand, () => forkPickedSession(context))
   );
 
   context.subscriptions.push(
@@ -2186,9 +2186,7 @@ async function openSingleAgent(
       pinnedVersion,
       strategy,
       undefined,
-      targetHost,
-      false,
-      targetHost ? cwd : undefined,
+      { host: targetHost, cwd: targetHost ? cwd : undefined },
     );
   }
 
@@ -3625,9 +3623,9 @@ export async function openSingleAgentWithQueue(
   context: vscode.ExtensionContext,
   agentConfig: Omit<AgentConfig, 'count'>,
   messages: string[],
-  // `cwd` is where the TERMINAL starts on this machine; `remoteCwd` is the
-  // directory the agent starts in on `host` (emitted as `agents run --cwd`), for
-  // a launch that has to land in a specific repo over there.
+  // `cwd` starts the local terminal and, for an ordinary `host` launch, is sent
+  // as portable `--cwd` for agents-cli to re-root. `remoteCwd` is already exact
+  // on `host` and is reserved for a picked historical session.
   opts?: { cwd?: string; remoteCwd?: string; mode?: AgentLaunchMode; sessionId?: string; strategy?: RunStrategy; host?: string; local?: boolean }
 ): Promise<{ terminalId: string; sessionId: string | null }> {
   const editorLocation: vscode.TerminalEditorLocationOptions = {
@@ -3670,9 +3668,19 @@ export async function openSingleAgentWithQueue(
       // A caller (dispatch) may pre-supply the id so it can watch that exact
       // session file for a plan / completion afterwards.
       sessionId = opts?.sessionId ?? generateClaudeSessionId();
-      command = buildAgentLaunchCommand(agentKey, sessionId, defaultModel, undefined, undefined, opts?.strategy, opts?.mode, targetHost, opts?.local, opts?.remoteCwd);
+      command = buildAgentLaunchCommand(agentKey, sessionId, defaultModel, undefined, undefined, opts?.strategy, opts?.mode, {
+        host: targetHost,
+        local: opts?.local,
+        cwd: targetHost && !opts?.remoteCwd ? cwd : undefined,
+        remoteCwd: opts?.remoteCwd,
+      });
     } else {
-      command = buildAgentLaunchCommand(agentKey, null, defaultModel, undefined, undefined, opts?.strategy, opts?.mode, targetHost, opts?.local, opts?.remoteCwd);
+      command = buildAgentLaunchCommand(agentKey, null, defaultModel, undefined, undefined, opts?.strategy, opts?.mode, {
+        host: targetHost,
+        local: opts?.local,
+        cwd: targetHost && !opts?.remoteCwd ? cwd : undefined,
+        remoteCwd: opts?.remoteCwd,
+      });
     }
   }
 
@@ -4780,8 +4788,8 @@ async function forkCurrentSession(context: vscode.ExtensionContext): Promise<voi
 // a session that lives on `yosemite-s0` starts the sibling agent THERE (over
 // `agents run --host`), where its transcript actually is.
 
-/** Rows per machine in the browser. Enough to reach yesterday's work without
- *  turning the picker into a scroll marathon; the filter box covers the rest. */
+/** Rows requested from the one device currently shown in the browser. Enough to
+ *  reach yesterday's work without turning the picker into a scroll marathon. */
 const SESSION_BROWSER_LIMIT = 60;
 
 /**
@@ -4789,16 +4797,20 @@ const SESSION_BROWSER_LIMIT = 60;
  * SSH). With `device`, the CLI fans the same listing out to that box over SSH and
  * answers with the identical row shape — which is why one parser serves both.
  */
-async function listBrowsableSessions(device?: string): Promise<BrowsableSession[]> {
+async function listBrowsableSessions(
+  device?: string,
+  currentSessionId?: string | null,
+  currentSessionDevice?: string,
+): Promise<BrowsableSession[]> {
   const { runAgents } = await import('../core/agentsBin');
-  const scope = device ? ` --host ${shquote(device)}` : '';
-  const { stdout } = await runAgents(
-    `sessions --all -n ${SESSION_BROWSER_LIMIT} --json${scope}`,
-    { maxBuffer: 16 * 1024 * 1024, timeout: device ? 45_000 : 20_000 },
-  );
-  const parsed = JSON.parse(stdout);
-  if (!Array.isArray(parsed)) return [];
-  return parsed.filter((s): s is BrowsableSession => !!s && typeof s === 'object' && typeof s.id === 'string');
+  return loadBrowsableSessions(runAgents, {
+    device,
+    localMachine: LOCAL_MACHINE_ID,
+    limit: SESSION_BROWSER_LIMIT,
+    currentSessionId,
+    currentSessionDevice,
+    quote: shquote,
+  });
 }
 
 interface SessionBrowserItem extends vscode.QuickPickItem {
@@ -4849,7 +4861,10 @@ async function pickBrowseDevice(current: string | undefined): Promise<{ device?:
  * so the flow stays "open → filter → pick" instead of a wizard. Returns the row
  * the user chose, or null when they dismissed it.
  */
-async function pickSessionToFork(currentSessionId: string | null): Promise<SessionBrowserSessionRow | null> {
+async function pickSessionToFork(
+  currentSessionId: string | null,
+  currentSessionDevice?: string,
+): Promise<SessionBrowserSessionRow | null> {
   const quickPick = vscode.window.createQuickPick<SessionBrowserItem>();
   const switchDevice: vscode.QuickInputButton = {
     iconPath: new vscode.ThemeIcon('server-environment'),
@@ -4864,66 +4879,24 @@ async function pickSessionToFork(currentSessionId: string | null): Promise<Sessi
   quickPick.matchOnDetail = true;
   quickPick.buttons = [switchDevice, reload];
 
-  let device: string | undefined;
-
-  const load = async (): Promise<void> => {
-    quickPick.title = `Agents: Fork (Pick Session) · ${device ?? LOCAL_MACHINE_ID}`;
-    quickPick.busy = true;
-    quickPick.items = [];
-    try {
-      const sessions = await listBrowsableSessions(device);
-      const rows = buildSessionBrowserRows(sessions, {
-        localMachine: LOCAL_MACHINE_ID,
-        currentSessionId,
-        limitPerMachine: SESSION_BROWSER_LIMIT,
-      });
-      quickPick.items = rows.length > 0
-        ? toBrowserItems(rows)
-        : [{ label: `No sessions found on ${device ?? LOCAL_MACHINE_ID}`, alwaysShow: true }];
-    } catch (err: any) {
-      // A device that is off, unreachable, or missing the CLI fails here — say so
-      // in the list itself rather than closing the picker out from under the user.
-      const msg = (err?.stderr || err?.message || String(err)).trim().split('\n')[0];
-      quickPick.items = [{ label: `$(error) Could not list sessions: ${msg.slice(0, 120)}`, alwaysShow: true }];
-    } finally {
-      quickPick.busy = false;
-    }
-  };
-
   try {
-    return await new Promise<SessionBrowserSessionRow | null>((resolve) => {
-      // Set while the device sub-picker is up: VS Code hides this QuickPick when
-      // another opens, and that hide must not read as "the user cancelled".
-      let switching = false;
-
-      quickPick.onDidTriggerButton(async (button) => {
-        if (button === reload) {
-          void load();
-          return;
-        }
-        switching = true;
-        quickPick.hide();
-        const chosen = await pickBrowseDevice(device);
-        switching = false;
-        quickPick.show();
-        if (chosen.cancelled) return; // back to the list, same device
-        device = chosen.device;
-        void load();
-      });
-
-      quickPick.onDidAccept(() => {
-        const picked = quickPick.selectedItems[0];
-        if (!picked?.row) return; // an empty-state / error line is not selectable
-        resolve(picked.row);
-        quickPick.hide();
-      });
-
-      quickPick.onDidHide(() => {
-        if (!switching) resolve(null);
-      });
-
-      quickPick.show();
-      void load();
+    return await runSessionBrowserPicker({
+      quickPick,
+      switchButton: switchDevice,
+      reloadButton: reload,
+      localMachine: LOCAL_MACHINE_ID,
+      loadItems: async device => {
+        const sessions = await listBrowsableSessions(device, currentSessionId, currentSessionDevice);
+        const rows = buildSessionBrowserRows(sessions, {
+          localMachine: LOCAL_MACHINE_ID,
+          browsedMachine: device,
+          currentSessionId,
+        });
+        return toBrowserItems(rows);
+      },
+      chooseDevice: pickBrowseDevice,
+      emptyItem: device => ({ label: `No sessions found on ${device ?? LOCAL_MACHINE_ID}`, alwaysShow: true }),
+      errorItem: message => ({ label: `$(error) Could not list sessions: ${message.slice(0, 120)}`, alwaysShow: true }),
     });
   } finally {
     quickPick.dispose();
@@ -4932,55 +4905,30 @@ async function pickSessionToFork(currentSessionId: string | null): Promise<Sessi
 
 /** `Agents: Fork (Pick Session)` — browse sessions, fork the chosen one where it lives. */
 async function forkPickedSession(context: vscode.ExtensionContext): Promise<void> {
-  const activeTerminal = vscode.window.activeTerminal;
-  const entry = activeTerminal ? terminals.getByTerminal(activeTerminal) : null;
-
-  const row = await pickSessionToFork(entry?.sessionId ?? null);
-  if (!row) return;
-
-  const request = buildForkSessionRequest({
-    sessionId: row.session.id,
-    agentKey: row.session.agent,
-    host: forkHostForSession(row.session, LOCAL_MACHINE_ID),
+  await handleForkPickedSession({
+    localMachine: LOCAL_MACHINE_ID,
+    currentSession: () => {
+      const activeTerminal = vscode.window.activeTerminal;
+      const entry = activeTerminal ? terminals.getByTerminal(activeTerminal) : null;
+      return { sessionId: entry?.sessionId ?? null, device: entry?.host };
+    },
+    pickSession: pickSessionToFork,
+    showError: message => { void vscode.window.showErrorMessage(message); },
+    resolveAgentConfig: agentKey => {
+      const builtIn = BUILT_IN_AGENTS.find(a => a.key === agentKey);
+      return builtIn ? createAgentConfig(
+        context.extensionPath,
+        builtIn.title,
+        builtIn.command,
+        builtIn.icon,
+        builtIn.prefix,
+      ) : undefined;
+    },
+    launchQueued: async (agentConfig, request) => {
+      await openSingleAgentWithQueue(context, agentConfig, [request.prompt], request);
+    },
+    showStatus: message => { void vscode.window.setStatusBarMessage(message, 3000); },
   });
-  if (!request.ok) {
-    vscode.window.showErrorMessage(
-      request.reason === 'no_session'
-        ? `Session ${row.session.shortId} has no id to fork.`
-        : `Session ${row.session.shortId} has no agent harness to fork with.`,
-    );
-    return;
-  }
-
-  const builtIn = BUILT_IN_AGENTS.find(a => a.key === request.agentKey);
-  if (!builtIn) {
-    vscode.window.showErrorMessage(`Cannot fork a ${row.session.agent} session — no built-in agent config for it.`);
-    return;
-  }
-  const agentConfig = createAgentConfig(
-    context.extensionPath,
-    builtIn.title,
-    builtIn.command,
-    builtIn.icon,
-    builtIn.prefix,
-  );
-
-  // The fork belongs in the SESSION's directory, not whatever this window has
-  // open — the browser spans every project on the machine. Locally that pins the
-  // terminal; on a device it becomes the remote `--cwd`, since the path exists
-  // over there (that is where the transcript came from).
-  await openSingleAgentWithQueue(context, agentConfig, [request.prompt], {
-    strategy: request.strategy,
-    host: request.host,
-    local: request.local,
-    cwd: request.local ? row.session.cwd : undefined,
-    remoteCwd: request.local ? undefined : row.session.cwd,
-  });
-
-  vscode.window.setStatusBarMessage(
-    `Forking ${row.session.shortId}${request.host ? ` on ${request.host}` : ''}`,
-    3000,
-  );
 }
 
 // Store context reference for deactivate

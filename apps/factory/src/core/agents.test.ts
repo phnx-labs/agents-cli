@@ -368,23 +368,34 @@ describe('buildAgentLaunchCommand', () => {
   });
 
   test('host flag is shell-quoted and included', () => {
-    const cmd = buildAgentLaunchCommand('codex', null, undefined, undefined, undefined, undefined, undefined, 'mac-mini');
+    const cmd = buildAgentLaunchCommand('codex', null, undefined, undefined, undefined, undefined, undefined, { host: 'mac-mini' });
     expect(cmd).toContain("--host 'mac-mini'");
   });
 
-  test('remote host launch forwards the workspace cwd for CLI portability rewriting', () => {
+  test('ordinary remote launch sends a local Mac workspace as portable --cwd', () => {
     const cmd = buildAgentLaunchCommand(
-      'codex', null, undefined, undefined, undefined, undefined, undefined, 'mac-mini', false, '/Users/muqsit/src/agents-cli',
+      'codex', null, undefined, undefined, undefined, undefined, undefined,
+      { host: 'linux-box', cwd: '/Users/muqsit/src/agents-cli' },
     );
-    expect(cmd).toContain("--host 'mac-mini'");
+    expect(cmd).toContain("--host 'linux-box'");
     expect(cmd).toContain("--cwd '/Users/muqsit/src/agents-cli'");
+    expect(cmd).not.toContain('--remote-cwd');
   });
 
-  test('local launch does not emit an explicit cwd', () => {
+  test('picked remote session uses exact --remote-cwd and never portable --cwd', () => {
     const cmd = buildAgentLaunchCommand(
-      'codex', null, undefined, undefined, undefined, undefined, undefined, undefined, false, '/Users/muqsit/src/agents-cli',
+      'codex', null, undefined, undefined, undefined, undefined, undefined,
+      { host: 'linux-box', remoteCwd: '/srv/exact repo' },
     );
-    expect(cmd).not.toContain('--cwd');
+    expect(cmd).toContain("--remote-cwd '/srv/exact repo'");
+    expect(cmd).not.toContain(" --cwd ");
+  });
+
+  test('rejects an ambiguous remote target with both cwd forms', () => {
+    expect(() => buildAgentLaunchCommand(
+      'codex', null, undefined, undefined, undefined, undefined, undefined,
+      { host: 'linux-box', cwd: '/Users/muqsit/src', remoteCwd: '/srv/exact' },
+    )).toThrow('cannot combine portable cwd with exact remoteCwd');
   });
 
   test('default model is included when provided', () => {
@@ -397,7 +408,7 @@ describe('buildAgentLaunchCommand', () => {
   // signed-out / throttled version on the chosen device.
   test('balanced strategy + host emit --host and --strategy balanced together', () => {
     const cmd = buildAgentLaunchCommand(
-      'claude', 'sess-1', undefined, undefined, undefined, 'balanced', undefined, 'yosemite-s0',
+      'claude', 'sess-1', undefined, undefined, undefined, 'balanced', undefined, { host: 'yosemite-s0' },
     );
     expect(cmd).toContain("--host 'yosemite-s0'");
     expect(cmd).toContain('--strategy balanced');
@@ -405,7 +416,7 @@ describe('buildAgentLaunchCommand', () => {
 
   test('explicit local launch suppresses automatic device selection', () => {
     expect(buildAgentLaunchCommand(
-      'codex', null, undefined, undefined, undefined, 'balanced', undefined, undefined, true,
+      'codex', null, undefined, undefined, undefined, 'balanced', undefined, { local: true },
     )).toBe('agents run codex --interactive --strategy balanced --mode auto');
   });
 
@@ -413,7 +424,7 @@ describe('buildAgentLaunchCommand', () => {
     // Pick Version & Host: the exact pin wins, so no --strategy is emitted even
     // if a strategy is passed.
     const cmd = buildAgentLaunchCommand(
-      'claude', 'sess-2', undefined, undefined, '2.1.170', 'balanced', undefined, 'yosemite-s1',
+      'claude', 'sess-2', undefined, undefined, '2.1.170', 'balanced', undefined, { host: 'yosemite-s1' },
     );
     expect(cmd).toContain('claude@2.1.170');
     expect(cmd).toContain("--host 'yosemite-s1'");
@@ -432,7 +443,7 @@ describe('wrapNativeAgentCommand (RUSH-2026)', () => {
   });
 
   test('agent terminal with --host: exec prefix is preserved', () => {
-    const cmd = buildAgentLaunchCommand('claude', null, undefined, undefined, undefined, undefined, undefined, 'yosemite-s0');
+    const cmd = buildAgentLaunchCommand('claude', null, undefined, undefined, undefined, undefined, undefined, { host: 'yosemite-s0' });
     const wrapped = wrapNativeAgentCommand(cmd, false);
     expect(wrapped).toMatch(/^exec agents run claude --interactive/);
     expect(wrapped).toContain("--host 'yosemite-s0'");
