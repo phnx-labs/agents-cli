@@ -587,16 +587,22 @@ Median of three runs on this box; the fleet column is the default SSH fan-out ac
     <tr><td>Session query (FTS)</td><td><code>0.76 s</code></td><td><code>8.6 s</code></td><td>"find the session about X"</td></tr>
     <tr><td>Live status <code>--active</code></td><td><code>~3.0 s</code></td><td><code>~10 s</code></td><td>"who is running right now"</td></tr>
     <tr><td>Feed read</td><td><code>~3.2 s</code></td><td><code>13–22 s</code></td><td>"who needs me / what happened"</td></tr>
-    <tr><td>Mailbox read (spool)</td><td><code>~2.9 s</code></td><td>via <code>--host</code></td><td>"my pending messages"</td></tr>
+    <tr><td>Mailbox read (spool)</td><td><code>~2.9 s</code></td><td>no fan-out — <code>agents ssh</code></td><td>"my pending messages"</td></tr>
   </tbody>
 </table>
-<p>Two things fall out of the measurement. Every surface is <b>sub-4 s locally</b> and multiplies
-<b>3–7×</b> under fan-out — the tail is the slowest peer, not the local work. And the fan-out is
+<p>Three things fall out of the measurement. Every surface is <b>sub-4 s locally</b> and multiplies
+<b>3–7×</b> under fan-out — the tail is remote work, not the local read. The fan-out is
 <b>partition-safe in practice</b>: on these runs three boxes (<code>bismas-macbook-pro</code>,
 <code>winbox</code>, <code>gpu-box</code>) were unreachable and were <em>skipped</em>, not waited on —
-the live proof of the "dead boxes contribute zero rows, never block the view" claim from §08. The feed
-fan-out's wide spread (13–22 s) is the same story: one slow box sets the ceiling, capped by the 12 s
-per-host timeout.</p>
+the live proof of the "dead boxes contribute zero rows, never block the view" claim from §08. And the
+surfaces differ in what fan-out even means: the <b>mailbox spool has no built-in fan-out</b> — the
+<code>mailboxes</code> command takes no <code>--host</code>, so a peer's box is reached with
+<code>agents ssh</code>, unlike <code>feed</code>/<code>sessions</code>/<code>activity</code> which
+carry <code>-H/--host</code> natively. The per-host SSH timeout is 12 s
+(<code>remote-agents-json.ts:18</code>), but that is a <em>per-host cap</em>, not the total: the feed
+read's wider spread (13–22 s) reflects that it does more per peer than a session query — reading each
+reachable box's block <em>and</em> activity state — so the total is the summed work across all
+reachable peers, not a single capped wait.</p>
 
 <h3>How to make querying faster</h3>
 <ul>
