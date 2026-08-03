@@ -512,8 +512,25 @@ that child forked). The deaths are not preventable from inside the app:
 `NSApplication.shared` segfaults in `SLSNewConnection` when WindowServer is too
 starved to hand out a connection, and `KeepAlive` restarts into another doctor.
 Observed: 38 orphaned doctors + 92 orphaned probes, ~13 of 18 cores, load 490.
-So [`ChildProcess.swift`](menubar/Sources/MenubarHelper/ChildProcess.swift) holds
-three invariants, and a new CLI call MUST go through it rather than `Process`:
+**The property that made this fatal is accumulation, so the rule is scoped to
+what accumulates: every TIMER-DRIVEN, repeating CLI call MUST go through
+[`ChildProcess`](menubar/Sources/MenubarHelper/ChildProcess.swift)** — that is the
+`capture()` path behind the cached refreshers (`routines`, `recentSessions`,
+`activeSessions`, `doctorOverview`, `watchdog`). A poller is the only thing that
+can stack 38 copies of itself.
+
+**User-initiated one-shots deliberately do NOT** — `runDetached`,
+`runMonitored`, and `runMonitoredWithInput` keep a bare `Process` on purpose,
+because every one of their callers is a menu click (`routines run/pause`,
+`devices register`, `open <url>`, and the ticket-agent / quick-fix dispatches).
+Two reasons, and both would be violated by "bound everything": a deadline there
+would **kill the user's headless `agents run` mid-work**, and a fire-and-forget
+`open`/dispatch is *supposed* to outlive the helper. One click cannot stack, so
+there is nothing to accumulate. Do not "fix" these by routing them through
+`ChildProcess` — if a future caller makes one of them repeating, that caller is
+the bug.
+
+`ChildProcess` holds three invariants:
 
 - **Bounded.** Every spawn carries a deadline (30s; `ChildProcess.doctorTimeout`
   180s for `doctor --json`, above its real measured cost — a ceiling set *below*

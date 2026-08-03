@@ -666,17 +666,40 @@ enum AgentsCLI {
 
     // MARK: Process helpers
 
-    // Every synchronous CLI call is bounded and group-killable. This used to be a
-    // bare `Process` + `readDataToEndOfFile()`, which waits forever and leaves the
-    // child (and the child's own subprocesses) orphaned at PPID 1 whenever the
-    // helper dies mid-call. Under launchd KeepAlive that compounds: each crash
-    // restart spawns a new call while the previous one keeps running, and the
-    // orphans accumulate until the machine is unusable. See ChildProcess.swift for
-    // the full failure mode and the three invariants that close it.
+    // The TIMER-DRIVEN path: bounded, group-killable, reapable. Everything the
+    // cached refreshers poll goes through here, and it must, because a poller is
+    // the only caller that can stack copies of itself.
+    //
+    // This used to be a bare `Process` + `readDataToEndOfFile()`, which waits
+    // forever and leaves the child (and the child's own subprocesses) orphaned at
+    // PPID 1 whenever the helper dies mid-call. Under launchd KeepAlive that
+    // compounds: each crash restart spawns a new call while the previous one keeps
+    // running, and the orphans accumulate until the machine is unusable. See
+    // ChildProcess.swift for the full failure mode and the invariants that close
+    // it.
+    //
+    // The one-shot spawn helpers below (runDetached / runMonitored /
+    // runMonitoredWithInput) deliberately stay on bare `Process` — see the note
+    // above runDetached for why bounding them would be a bug, not a fix.
     private static func capture(_ argv: [String], timeout: TimeInterval = ChildProcess.defaultTimeout) -> Data? {
         ChildProcess.run(argv, timeout: timeout)
     }
 
+    // NOT routed through ChildProcess, and that is deliberate — do not "fix" it.
+    //
+    // ChildProcess exists to stop ACCUMULATION: a 10s timer that respawns work
+    // faster than it completes is what stacked 38 orphaned doctors. Every caller
+    // below is a user-initiated one-shot instead — a menu click (`routines
+    // run/pause`, `devices register`, `open <url>`) or a ticket-agent / quick-fix
+    // dispatch. One click cannot stack, so there is nothing to accumulate.
+    //
+    // Applying the timer-path invariants here would be actively wrong on both
+    // counts: a deadline would kill the user's headless `agents run` mid-work,
+    // and a fire-and-forget `open`/dispatch is SUPPOSED to outlive this helper —
+    // reaping it on the next launch would destroy work the user asked for.
+    //
+    // If a future caller ever makes one of these repeating, that caller is the
+    // bug; move it to `capture()` rather than bounding these.
     private static func runDetached(_ argv: [String]) {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: argv[0])
