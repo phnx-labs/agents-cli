@@ -125,7 +125,9 @@ agents monitors remove <name>
 - `--run <agent> --prompt '…'` — spawn an agent (shares `--mode`/`--effort`/
   `--action-timeout` with routines), dispatched through `executeJobDetached`.
 - `--routine <name>` — fire an existing routine (attach a monitor to a routine).
-- `--notify [channel]` — send via the openclaw Telegram path (default: telegram).
+- `--notify [channel]` — notify the owner through the one channel seam
+  (`resolveTransport` → provider). Recipient is `notify.owner` in agents.yaml;
+  `[channel]` overrides `notify.owner.channel` (which itself defaults the transport).
 - `--webhook-out <url>` — POST the event JSON.
 
 ### Placement (pin-to-one)
