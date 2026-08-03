@@ -43,7 +43,7 @@ export interface MessageReceipt {
   /** The message id this receipt describes. */
   msgId: string;
   /** Delivery lifecycle state. */
-  status: 'queued' | 'consumed' | 'continued';
+  status: 'queued' | 'consumed' | 'continued' | 'dropped' | 'expired';
   /** ISO-8601 timestamp of the state transition. */
   at: string;
   /** Optional sender label for the message. */
@@ -296,6 +296,8 @@ const RECEIPT_STATUS_RANK: Record<MessageReceipt['status'], number> = {
   queued: 0,
   consumed: 1,
   continued: 2,
+  dropped: 3,
+  expired: 3,
 };
 
 /**
