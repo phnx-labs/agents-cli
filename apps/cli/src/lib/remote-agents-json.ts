@@ -22,11 +22,20 @@ export interface RemoteAgentsJsonOptions<T> {
   noFanoutEnv: string;
   hosts?: string[];
   parse: (stdout: string, machine: string) => T[];
+  /**
+   * Suppress the per-device "unreachable — skipped" stderr line. The skipped
+   * names still come back in {@link RemoteAgentsJsonResult.skipped}, so a caller
+   * that fans out by DEFAULT can report them once, compactly, instead of
+   * printing a line per offline box above its output. Never a silent drop.
+   */
+  quiet?: boolean;
 }
 
 export interface RemoteAgentsJsonResult<T> {
   items: T[];
   deviceCount: number;
+  /** Devices that were dialed but answered with an error / no CLI / a timeout. */
+  skipped: string[];
 }
 
 /** Build the command one peer runs, with a guard that prevents recursive fan-out. */
@@ -75,7 +84,7 @@ export async function gatherRemoteAgentsJson<T>(
     try {
       devices = await loadDevices();
     } catch {
-      return { items: [], deviceCount: 0 };
+      return { items: [], deviceCount: 0, skipped: [] };
     }
     for (const device of Object.values(devices)) {
       if (device.tailscale?.online !== true) continue;
@@ -99,15 +108,19 @@ export async function gatherRemoteAgentsJson<T>(
     }
   }
 
+  const skipped: string[] = [];
   const results = await Promise.all(targets.map(async (target) => {
     const command = remoteAgentsJsonCommand(options.args, options.noFanoutEnv, target.os);
     const result = await sshCapture(target.target, command);
     if (result.code !== 0) {
-      process.stderr.write(chalk.gray(`  ${target.name}: unreachable or no agents CLI — skipped\n`));
+      skipped.push(target.name);
+      if (!options.quiet) {
+        process.stderr.write(chalk.gray(`  ${target.name}: unreachable or no agents CLI — skipped\n`));
+      }
       return [] as T[];
     }
     return options.parse(result.stdout, target.machine);
   }));
 
-  return { items: results.flat(), deviceCount: targets.length };
+  return { items: results.flat(), deviceCount: targets.length, skipped };
 }

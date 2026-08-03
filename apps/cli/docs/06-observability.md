@@ -752,28 +752,55 @@ must not cost the operator the post — it is already written.
 ### Activity lane (`agents activity`) — progress at a glance, fleet-wide
 
 `agents activity` reads the same append-only activity stream (never re-parsing
-transcripts) and, by opt-in, across the whole fleet:
+transcripts), across the whole fleet, bucketed by project:
 
 ```bash
-agents activity                                    # this machine, newest first (default)
-agents activity --devices-all --group-by project   # per project: what each agent did, where, for which ticket
-agents activity --host yosemite-s1                 # one box over SSH (--device is an alias)
-agents activity --devices-all --filter RUSH-2100   # one ticket, fleet-wide
-agents activity --milestones                       # only plans / PRs / worktrees / sub-agents
+agents activity                    # the whole fleet, by project (default)
+agents activity --local            # just this machine
+agents activity --flat             # one newest-first stream
+agents activity --host yosemite-s1 # one box over SSH (--device is an alias)
+agents activity --filter RUSH-2100 # one ticket, fleet-wide
+agents activity --group-by device  # by machine instead of project
+agents activity --milestones       # only plans / PRs / worktrees / sub-agents
 ```
 
-- **Fleet fan-out.** `--devices-all` (alias `--hosts-all`) runs the same
-  `activity --json` on every reachable device and merges each peer's stream
-  host-tagged (feed-style, via `gatherRemoteAgentsJson`); `-H/--host` / `--device`
-  scope to specific boxes; `--local` forces local-only. Local-only is the default.
-- **Grouping + filter.** `--group-by project|device|agent` buckets the stream;
-  `--filter <text>` narrows by project / device / agent / event / ticket. The flat
-  newest-first list stays the default.
+- **Fleet fan-out is the default.** Agents run on every box, so every invocation
+  runs the same `activity --json` on each reachable device and merges the peers'
+  streams host-tagged (feed-style, via `gatherRemoteAgentsJson`). `--local` scopes
+  to this machine, `-H/--host` / `--device` to named boxes; `--devices-all` /
+  `--hosts-all` remain accepted no-ops. A peer answering the fan-out carries the
+  `AGENTS_ACTIVITY_LOCAL` guard so it never re-fans out. Peers that don't answer
+  are named once in a trailing `· N devices unreachable: …` line — never dropped
+  silently, never a line each above the timeline.
+- **Grouping is by project by default.** `--group-by project|device|agent|none`
+  picks the dimension; `--flat` (or `--group-by none`) restores the single
+  newest-first stream. There is no sub-grouping: one level, and each project
+  header names the machines its work ran on
+  (`▸ agents-cli  12 events · 4 milestones · zion, yosemite-s0`, capped at three
+  names plus a `+N` tail). `--filter <text>` narrows by project / device / agent /
+  event / ticket.
+- **Projects are repositories.** A cwd resolves to the git repository containing
+  it (`resolveProjectKey`, `lib/project-key.ts`), so `<repo>/apps/cli` files under
+  `<repo>` and a worktree under `<repo>/.agents/worktrees/<slug>` folds back into
+  the repo it branched from. A directory in no repo groups as itself, and a
+  dotfiles repo at `$HOME` is deliberately not treated as a project. This is the
+  same fold the `agents sessions` overview groups by, so a project reads
+  identically in both. Each machine resolves its own paths — a peer stamps the
+  project before its events cross the wire.
+- **`--limit` caps milestones, not churn.** The default view collapses routine
+  `file.edited` work to a count, so `-n` bounds the milestones shown and the
+  routine events inside that window ride along for the counts
+  (`capActivityEvents`). Without this, one box editing 40 files hid every other
+  device's PRs behind a single `file edited ×40` line. `--all` shows routine work
+  inline and makes `-n` a plain event cap.
 - **Enrichment (the join, not transcript parsing).** Each item is joined to live
-  sessions for the **project** (repo/worktree slug from cwd), the **execution host**
-  (`provenance.host` — the box it actually runs on), and the **Linear ticket**
-  (`ActiveSession.ticket`). `--json` is a mergeable per-host payload carrying these
-  enriched fields.
+  sessions for the **project**, the **execution host** (`provenance.host` — the box
+  it actually runs on), and the **Linear ticket** (`ActiveSession.ticket`).
+  `--json` is a mergeable per-host payload carrying these enriched fields.
+- **Only failures of its own hooks are reported.** Registering the activity-log
+  hooks surfaces unrelated manifest problems (a missing `inject-session-id`
+  script, a half-installed plugin); those belong to `agents doctor` and are not
+  printed above the timeline.
 
 ### Live tail (`--watch`, `-f`) — the money shot
 
