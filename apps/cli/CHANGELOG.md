@@ -1,13 +1,5 @@
 # Changelog
 
-## 1.20.94
-
-- **Activity events now carry the same actor and session lineage as operational events.**
-  The TypeScript activity writer and the embedded PostToolUse hook stamp actor kind,
-  launch id, and parent session id from the shared execution provenance floor, so
-  `agents events` no longer invents an agent name as the activity record's OS user.
-  Source: `apps/cli/src/lib/event-provenance.ts`, `apps/cli/src/lib/activity.ts`.
-
 ## 1.20.93
 
 - **`agents send` is a real delivery envelope; `notify` is just `--to owner` (RUSH-2123).** Flag-first form: `--to`, `--text`, `--channel`, `--attach`, `--url`. `--to owner` expands from `notify.owner` in agents.yaml. Positional text still works. Help names the three planes (deliver / record / control) so send is not confused with `feed post`, `activity`, or `message`/`sessions inject`. Source: `apps/cli/src/commands/send.ts`, `apps/cli/src/lib/channels/send.ts`.
