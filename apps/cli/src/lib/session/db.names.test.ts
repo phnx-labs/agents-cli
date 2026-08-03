@@ -9,7 +9,7 @@ const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-dbnames-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
-const { upsertSession, seedLabelsFromNames, syncLabels, ftsSearch, getSessionById } =
+const { upsertSession, seedLabelsFromNames, syncLabels, ftsSearch, getSessionById, findSessionsByShortIds } =
   await import('./db.js');
 type SessionMeta = import('./types.js').SessionMeta;
 
@@ -125,5 +125,33 @@ describe('upsertSession preserves a good label; a real one still wins (clobber f
     upsertSession(meta('first-real', { label: 'born-with-a-label' }), '');
     expect(getSessionById('first-real')?.label).toBe('born-with-a-label');
     expect(ftsSearch('born-with-a-label')[0]?.sessionId).toBe('first-real');
+  });
+});
+
+describe('findSessionsByShortIds (batched short-id -> session, the live-scan resolver)', () => {
+  it('resolves many short ids in ONE map keyed by short_id; unknowns are absent', () => {
+    upsertSession(meta('11112222-aaaa-4bbb-8ccc-000000000001'), '');
+    upsertSession(meta('33334444-aaaa-4bbb-8ccc-000000000002'), '');
+    const map = findSessionsByShortIds(['11112222', '33334444', 'deadbeef']);
+    expect(map.get('11112222')?.id).toBe('11112222-aaaa-4bbb-8ccc-000000000001');
+    expect(map.get('33334444')?.id).toBe('33334444-aaaa-4bbb-8ccc-000000000002');
+    expect(map.has('deadbeef')).toBe(false);
+  });
+
+  it('is case-insensitive on the query side (uuid prefixes are lowercase hex)', () => {
+    upsertSession(meta('aabbccdd-aaaa-4bbb-8ccc-000000000003'), '');
+    expect(findSessionsByShortIds(['AABBCCDD']).get('aabbccdd')?.id)
+      .toBe('aabbccdd-aaaa-4bbb-8ccc-000000000003');
+  });
+
+  it('returns an empty map for empty input (no query at all)', () => {
+    expect(findSessionsByShortIds([]).size).toBe(0);
+  });
+
+  it('when two sessions share a short id, the most-recently-active one wins', () => {
+    upsertSession(meta('55556666-aaaa-4bbb-8ccc-000000000004', { timestamp: '2026-01-01T00:00:00.000Z' }), '');
+    upsertSession(meta('55556666-ffff-4bbb-8ccc-000000000005', { timestamp: '2026-02-01T00:00:00.000Z' }), '');
+    expect(findSessionsByShortIds(['55556666']).get('55556666')?.id)
+      .toBe('55556666-ffff-4bbb-8ccc-000000000005');
   });
 });

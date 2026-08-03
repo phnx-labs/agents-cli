@@ -30,7 +30,7 @@ import { readSessionActorRecord } from './actor-sidecar.js';
 import { loadHookSessionIndex, resolveHookSessionRecord, readStateSessionRecord, type HookSessionIndex, type HookSessionRecord } from './hook-sessions.js';
 import { buildClaudeLabelMap, getAgentSessionDirs } from './discover.js';
 import { buildRunNameMap } from './run-names.js';
-import { latestSessionFileForCwd } from './db.js';
+import { latestSessionFileForCwd, findSessionsByShortIds } from './db.js';
 import { extractSessionTopic } from './prompt.js';
 import { readSessionTailWithRaw } from './tail.js';
 import { parseSession } from './parse.js';
@@ -311,6 +311,14 @@ export interface ActiveSession {
    * did not inherit a terminal id.
    */
   terminalId?: string;
+  /**
+   * tmux pane id (`%N`) when this row was discovered via the tmux source AND its
+   * session id could not be resolved (a born-unidentifiable non-Claude pane). It
+   * is the dedupe key for such id-less rows, so two anonymous panes in the same
+   * cwd render as two distinct rows instead of collapsing onto each other. Unset
+   * once a session id resolves (the id is the identity then).
+   */
+  paneId?: string;
 }
 
 export function activeStatusFromCloudStatus(status: CloudTaskStatus): ActiveStatus {
@@ -339,6 +347,13 @@ const LIVE_TERMINALS_FILE = path.join(getTerminalsDir(), 'live-terminals.json');
  * healthy session writes several times a minute.
  */
 const ACTIVE_MTIME_WINDOW_MS = 2 * 60_000;
+
+/**
+ * Bound on the tmux `list-panes` call in {@link listTmuxAgentSessions}. A wedged
+ * tmux server would otherwise hang the whole `--active` scan (the other sources
+ * can't run past it); on timeout the tmux source degrades to empty.
+ */
+const TMUX_LIST_PANES_TIMEOUT_MS = 5_000;
 
 /**
  * A live process can only borrow an indexed session file if that transcript
@@ -410,6 +425,58 @@ export function agentKindFromComm(commRaw: string): string | undefined {
   // macOS's Claude desktop app process is named 'Claude' and must NOT match.
   const key = stripped === base ? base : stripped.toLowerCase();
   return AGENT_CLI_NAMES[key];
+}
+
+/**
+ * A tmux agent session name is `ag-<agent>-<shortid>` (see src/lib/exec.ts
+ * `runInTmux`), where `<agent>` is the agent kind passed to `agents run` (may
+ * contain a hyphen, e.g. `cursor-agent`) and `<shortid>` is the first 8 hex chars
+ * of the session UUID. Anchored on the 8-hex suffix so the agent part is split
+ * unambiguously. The agent part is NOT cross-checked against AGENT_CLI_NAMES (that
+ * map is the narrower ps-scan comm set): the panes live on the agent-only socket,
+ * and validating there would silently drop grok/kimi/antigravity — the exact
+ * harness-parity gap we are fixing.
+ */
+const AG_NAME_RE = /^ag-([a-z][a-z0-9-]*?)-([0-9a-f]{8})$/i;
+
+/** Agent kind from an `ag-<agent>-<shortid>` tmux session name, else undefined. */
+export function agentKindFromName(sessName: string): string | undefined {
+  const m = AG_NAME_RE.exec(sessName);
+  return m ? m[1].toLowerCase() : undefined;
+}
+
+/** The 8-char session-id prefix from an `ag-<agent>-<shortid>` name, else undefined. */
+export function shortIdFromName(sessName: string): string | undefined {
+  const m = AG_NAME_RE.exec(sessName);
+  return m ? m[2].toLowerCase() : undefined;
+}
+
+/**
+ * Map every `ag-<agent>-<shortid>` tmux session name to its full session UUID in
+ * ONE batched DB lookup. The live scan calls this once per poll (not per pane),
+ * then resolvePaneIdentity reads the map — the recovery that makes a detached
+ * agent findable by `focus <id>` even when its durable identity records are gone.
+ * `findSessionsByShortIds` is injected so this stays unit-testable without a DB.
+ */
+export function resolveNamesToSessionIds(
+  sessionNames: string[],
+  deps: { findSessionsByShortIds: (shortIds: string[]) => Map<string, { id: string }> },
+): Map<string, string> {
+  const shortIdToNames = new Map<string, string[]>();
+  for (const name of sessionNames) {
+    const short = shortIdFromName(name);
+    if (!short) continue;
+    const arr = shortIdToNames.get(short);
+    if (arr) arr.push(name);
+    else shortIdToNames.set(short, [name]);
+  }
+  const out = new Map<string, string>();
+  if (shortIdToNames.size === 0) return out;
+  const metas = deps.findSessionsByShortIds([...shortIdToNames.keys()]);
+  for (const [short, meta] of metas) {
+    for (const name of shortIdToNames.get(short) ?? []) out.set(name, meta.id);
+  }
+  return out;
 }
 
 /**
@@ -1490,27 +1557,43 @@ export interface PaneIdentity {
  */
 export function resolvePaneIdentity(
   pane: string,
+  sessName: string,
   meta: { labels?: Record<string, string>; source?: string; pane?: string } | null,
   liveEntry: PidSessionEntry | undefined,
   getHookIndex: () => HookSessionIndex,
+  nameToFullId: Map<string, string>,
 ): PaneIdentity | undefined {
   if (meta?.source === 'teams') return undefined;
+  // The tmux session name encodes the agent kind (100% of ag-* panes) and, for a
+  // spawn whose id was known at creation (Claude), the session-id prefix — already
+  // resolved to a full UUID in the batch map. It is the last-resort id source when
+  // every durable record is missing (the common fleet case: meta/pid-reg/hook all
+  // ~3% populated), and would otherwise leave the pane id-less and mis-collapsed.
+  const nameAgent = agentKindFromName(sessName);
+  const nameSessionId = nameToFullId.get(sessName);
   if (liveEntry) {
     // Exact id: the id recorded at launch (Claude), else the agent's own
     // SessionStart hook joined by launchId/terminalId (non-Claude, or agents we
-    // didn't launch) — kind-guarded against a stale reused-pid file.
+    // didn't launch) — kind-guarded against a stale reused-pid file — else the id
+    // carried in the pane's own tmux name.
     const sessionId = liveEntry.sessionId
       ?? resolveHookSessionRecord(getHookIndex(), {
         pid: liveEntry.pid,
         kind: liveEntry.agent,
         launchId: liveEntry.launchId,
         terminalId: liveEntry.terminalId,
-      })?.session_id;
+      })?.session_id
+      ?? nameSessionId;
     return { agent: liveEntry.agent, sessionId, pid: liveEntry.pid };
   }
+  // No live-registry entry. Session-meta labels are the wrapped-origin fallback;
+  // prefer them, then fall back to the name so a pane with neither a registry
+  // entry nor meta labels still resolves (agent from the name, id from the batch
+  // map when present) instead of being dropped and mis-attributed by the ps-scan.
   const agent = meta?.labels?.agent;
   const sessionId = meta?.labels?.sessionId;
   if (agent && sessionId && (meta?.pane == null || meta.pane === pane)) return { agent, sessionId };
+  if (nameAgent) return { agent: nameAgent, sessionId: nameSessionId };
   return undefined;
 }
 
@@ -1538,6 +1621,10 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
       socket,
       args: ['list-panes', '-a', '-F', ['#{pane_id}', '#{session_name}', '#{pane_pid}', '#{pane_current_path}'].join(TMUX_FIELD_SEP)],
       throwOnError: false,
+      // A wedged tmux server must not hang the whole active-session scan. The
+      // catch below turns a timeout into an empty tmux source (the other sources
+      // still report) rather than a frozen `agents sessions --active`.
+      timeoutMs: TMUX_LIST_PANES_TIMEOUT_MS,
     });
   } catch {
     return [];
@@ -1558,6 +1645,15 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
   let hookIndex: HookSessionIndex | undefined;
   const getHookIndex = (): HookSessionIndex => (hookIndex ??= loadHookSessionIndex());
 
+  // Resolve every `ag-<agent>-<shortid>` pane name to its full session UUID in one
+  // batched DB round-trip, so resolvePaneIdentity can recover the id straight from
+  // the pane name — the signal present on 100% of ag-* panes when the durable
+  // identity stores are empty.
+  const nameToFullId = resolveNamesToSessionIds(
+    res.stdout.split('\n').map((l) => l.split(TMUX_FIELD_SEP)[1]).filter((n): n is string => !!n),
+    { findSessionsByShortIds },
+  );
+
   const out: ActiveSession[] = [];
   const seen = new Set<string>();
   for (const line of res.stdout.split('\n')) {
@@ -1570,7 +1666,10 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
     if (!pane || !sessName) continue;
     const meta = readSessionMeta(sessName);
     const liveEntry = liveByPane.get(pane);
-    let id = resolvePaneIdentity(pane, meta, liveEntry, getHookIndex);
+    let id = resolvePaneIdentity(pane, sessName, meta, liveEntry, getHookIndex, nameToFullId);
+    // Only a genuinely foreign pane — no live entry, no meta labels, and not one
+    // of our `ag-*` names — is dropped now; every agent pane survives to be either
+    // id-resolved or emitted as its own distinct id-less row.
     if (!id) continue;
     // RUSH-2007 Layer A: a non-Claude tmux session whose id resolved via neither the
     // launch registry (no id minted at spawn) nor the session-tracker index (not
@@ -1598,7 +1697,11 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
     // does NOT also surface this agent as a duplicate headless row.
     const pid = id.pid ?? (parseInt(pidRaw, 10) || undefined);
     const cwd = liveEntry?.cwd ?? meta?.cwd ?? (curPath || undefined);
-    const sessionFile = findSessionFileForKind(id.agent, cwd, id.sessionId);
+    // Only resolve a transcript when we KNOW the session id. With no id,
+    // findSessionFileForKind falls back to the newest .jsonl in the cwd — which
+    // collapses every co-located pane onto one stranger's transcript (the ×N-badge
+    // bug). Refuse to guess: an id-less pane surfaces as its own row instead.
+    const sessionFile = id.sessionId ? findSessionFileForKind(id.agent, cwd, id.sessionId) : undefined;
     const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
     const pidAlive = pid ? isPidAlive(pid, liveEntry?.startedAtMs) : true;
     const { state, tokPerSec } = computeLiveSignals(id.agent, sessionFile, cwd, pidAlive);
@@ -1630,6 +1733,9 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
       lastActivityMs: mtimeMs,
       provenance,
       owner: resolveOwner(liveEntry?.actor, id.sessionId ?? sessionIdFromFile(sessionFile)),
+      // An id-less pane keys its dedupe on the unique pane, so two anonymous
+      // co-located panes stay two rows instead of folding into one.
+      paneId: id.sessionId ?? sessionIdFromFile(sessionFile) ? undefined : pane,
     }, state, sessionFile, pidAlive));
   }
   return out;
@@ -1899,7 +2005,7 @@ export function dedupeBySession(sessions: ActiveSession[]): ActiveSession[] {
   const out: ActiveSession[] = [];
   const byKey = new Map<string, ActiveSession>();
   for (const s of sessions) {
-    const key = s.sessionId || s.sessionFile || s.cloudTaskId || s.agentId || anonymousWorkerKey(s);
+    const key = s.sessionId || s.sessionFile || s.cloudTaskId || s.agentId || s.paneId || anonymousWorkerKey(s);
     if (!key) { out.push(s); continue; }
     const existing = byKey.get(key);
     if (existing) {

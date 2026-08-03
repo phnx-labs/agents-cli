@@ -128,6 +128,13 @@ export interface RunTmuxOptions {
   throwOnError?: boolean;
   /** Child process env. */
   env?: NodeJS.ProcessEnv;
+  /**
+   * Kill the child and reject after this many ms. Unset = wait forever (the
+   * historical behavior). A wedged tmux server would otherwise hang the caller
+   * indefinitely — the active-session scan passes a bound so a bad server can't
+   * freeze `agents sessions --active`.
+   */
+  timeoutMs?: number;
 }
 
 /**
@@ -150,10 +157,18 @@ export async function runTmux(opts: RunTmuxOptions): Promise<{ stdout: string; s
     });
     let stdout = '';
     let stderr = '';
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    if (opts.timeoutMs && opts.timeoutMs > 0) {
+      timer = setTimeout(() => {
+        child.kill();
+        reject(new Error(`tmux ${fullArgs.join(' ')} timed out after ${opts.timeoutMs}ms`));
+      }, opts.timeoutMs);
+    }
     child.stdout?.on('data', (b) => { stdout += b.toString('utf8'); });
     child.stderr?.on('data', (b) => { stderr += b.toString('utf8'); });
-    child.on('error', reject);
+    child.on('error', (err) => { if (timer) clearTimeout(timer); reject(err); });
     child.on('close', (code) => {
+      if (timer) clearTimeout(timer);
       const exitCode = code ?? -1;
       const throwOnError = opts.throwOnError !== false;
       if (throwOnError && exitCode !== 0) {

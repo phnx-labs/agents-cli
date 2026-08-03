@@ -300,6 +300,16 @@ it is indistinguishable from a session that isn't running:
   (`mergeLiveIntoPool`, `src/commands/sessions-browser.ts`). Rows keyed by session id
   merge with their indexed row; a session with no id yet is keyed by cloud task id or
   `machine:pid`, so two of them never collapse into one.
+- **A tmux agent pane is one row per session, resolved from its own name.** Each
+  shared-socket pane is named `ag-<agent>-<shortid>`, where `<shortid>` is the first 8
+  chars of the session UUID. `resolvePaneIdentity` (`src/lib/session/active.ts`) reads
+  the id back from that name — resolved to the full UUID via the `short_id` index in a
+  single batched query per scan (`findSessionsByShortIds`) — so a detached pane whose
+  durable identity records (session-meta JSON, pid registry, SessionStart-hook index)
+  have aged out is still attributed to its own session and stays `focus`-able. When no
+  id resolves, the pane keeps its own row keyed on the tmux pane id and never borrows a
+  co-located sibling's transcript — so N agents in one directory are N rows, not one row
+  wearing a stranger's id.
 - **The host column names the program the session runs in** — `codium`, `ghostty`,
   `tmux`, and `tmux→ghostty` when a tmux session is currently being watched through
   another app. A tmux row with no attached client stays a bare `tmux`, which is what

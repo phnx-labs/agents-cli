@@ -6,6 +6,14 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **Floor no longer collapses distinct sessions that arrive without an id.** A remote
+  session row was keyed `remote-<host>-<sessionId>`; when the CLI could not attribute a
+  tmux pane (empty id), every such row collided on `remote-<host>-`, a React key clash
+  that let distinct panes overwrite each other in the grid. Rows now fall back to the
+  tmux pane / pid / cloud-task handle when the id is empty, so each session stays its own
+  card. Pairs with the CLI fix that now attributes those panes in the first place.
+  Source: `ui/settings/components/mission-control/floorAdapter.ts`.
+
 ## [0.9.305] - 2026-08-03
 
 - **Session resume was broken everywhere, and `Agents: Resume` now batch-reopens

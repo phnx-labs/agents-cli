@@ -1825,6 +1825,40 @@ export function findSessionsById(
   return querySessions({ ...scope, idPrefix: q });
 }
 
+/**
+ * Batch-resolve many 8-char short ids to their sessions in ONE indexed query.
+ * The live-scan path (listTmuxAgentSessions) turns every `ag-<agent>-<shortid>`
+ * tmux pane name back into a full session id this way, so it pays a single
+ * `short_id IN (…)` round-trip per scan instead of N per-pane lookups.
+ *
+ * Returns a map keyed by short_id (lowercased). Short ids are the first 8 chars
+ * of the lowercase session UUID (deriveShortId), so a lowercased `IN` matches and
+ * still uses idx_sessions_short_id. When several sessions share a short id — only
+ * time-ordered ids (ULID/UUIDv7) ever collide; random UUIDv4 short ids are unique
+ * in practice — the most-recently-active one wins (the caller can further
+ * disambiguate by cwd).
+ */
+export function findSessionsByShortIds(shortIds: string[]): Map<string, SessionMeta> {
+  const out = new Map<string, SessionMeta>();
+  const uniq = [...new Set(shortIds.map((s) => s.trim().toLowerCase()).filter(Boolean))];
+  if (uniq.length === 0) return out;
+  const db = getDB();
+  const CHUNK = 500; // stay well under SQLite's default 999-variable limit
+  for (let i = 0; i < uniq.length; i += CHUNK) {
+    const batch = uniq.slice(i, i + CHUNK);
+    const placeholders = batch.map(() => '?').join(',');
+    // timestamp ASC so a later (newer) row overwrites an earlier one per short_id.
+    const rows = db
+      .prepare(`SELECT * FROM sessions WHERE short_id IN (${placeholders}) ORDER BY timestamp ASC`)
+      .all(...batch) as SessionRow[];
+    for (const row of rows) {
+      const key = (row.short_id ?? '').toLowerCase();
+      if (key) out.set(key, rowToMeta(row));
+    }
+  }
+  return out;
+}
+
 /** A single full-text search result with ranking score. */
 export interface FtsHit {
   sessionId: string;
