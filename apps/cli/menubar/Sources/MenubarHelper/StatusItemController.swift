@@ -6,6 +6,10 @@ import AppKit
 // has exactly one home — no section restates another.
 final class StatusItemController: NSObject, NSMenuDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    // The quick-dispatch bar (Cmd-Shift-O). Owned here so the menu's "New Task"
+    // row and the global chord summon the SAME panel — one panel means an
+    // interrupted capture is restored whichever way you come back to it.
+    let promptController = PromptPanelController()
     // Factory Floor status palette (design-system.css). Brand green is accent /
     // selection only — never a status. running/idle/waiting/failed are the four
     // status colors, shared with the full dashboard so this reads as its quick view.
@@ -535,7 +539,15 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         return true
     }
 
+    // Two ways to start work, most-direct first:
+    //   New Task    — the quick-dispatch bar: type it, agents pick it up headless.
+    //   New Session — an interactive TUI in the terminal the user works in.
     private func addNewSession(_ menu: NSMenu) {
+        let task = NSMenuItem(title: "New Task…", action: #selector(onNewTask(_:)), keyEquivalent: "t")
+        task.target = self
+        task.toolTip = "Describe a task and dispatch it to agents (Cmd-Shift-O)"
+        menu.addItem(task)
+
         let newItem = NSMenuItem(title: "New Session", action: nil, keyEquivalent: "n")
         let newSub = NSMenu()
         for agent in LocalState.desiredAgents {
@@ -945,6 +957,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     // MARK: Actions
     @objc private func onNewSession(_ s: NSMenuItem) {
         if let a = s.representedObject as? String { AgentsCLI.newSession(agent: a) }
+    }
+    // "New Task…" — the same quick-dispatch bar the Cmd-Shift-O chord summons.
+    // Dispatched async because the menu owns the run loop while it is open: the
+    // panel can only take key focus once the menu has finished dismissing.
+    @objc private func onNewTask(_ s: NSMenuItem) {
+        DispatchQueue.main.async { [weak self] in self?.promptController.summon() }
     }
     // RUSH-1415: flip global auto-nudge. Optimistically update local state so the
     // checkmark reflects immediately; the next tick re-reads the sentinel as truth.
