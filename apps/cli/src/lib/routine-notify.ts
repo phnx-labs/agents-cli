@@ -37,6 +37,16 @@ export function routineKind(r: Pick<JobConfig, 'agent' | 'workflow' | 'command'>
   return 'agent';
 }
 
+/**
+ * The harness a routine runs on, for the notification's right-hand avatar, or
+ * undefined when none owns it. A command routine is deterministic housekeeping
+ * with no agent; an agent or workflow routine names the harness that executes it.
+ */
+export function routineAgent(r: Pick<JobConfig, 'agent' | 'workflow' | 'command'>): string | undefined {
+  if (routineKind(r) === 'command') return undefined;
+  return r.agent?.trim() || undefined;
+}
+
 /** Human label for the routine body ("agent claude", "workflow deploy", "command"). */
 function routineLabel(r: Pick<JobConfig, 'agent' | 'workflow' | 'command'>): string {
   if (r.command) return 'command';
@@ -92,6 +102,7 @@ export function routineStartNotification(
     subtitle: config.name,
     body: `Running ${routineLabel(config)}`,
     action: 'routines:list',
+    agent: routineAgent(config),
   };
 }
 
@@ -114,6 +125,7 @@ export function routineStartFailedNotification(
     subtitle: config.name,
     body: `Failed to start: ${error}`,
     action: 'routines:list',
+    agent: routineAgent(config),
   };
 }
 
@@ -142,6 +154,7 @@ export function routineFinishNotification(
       subtitle: meta.jobName,
       body: snippet ?? (dur ? `Completed in ${dur}` : 'Completed'),
       action,
+      agent: routineAgent(meta),
     };
   }
 
@@ -157,6 +170,7 @@ export function routineFinishNotification(
     subtitle: meta.jobName,
     body: reason,
     action,
+    agent: routineAgent(meta),
   };
 }
 

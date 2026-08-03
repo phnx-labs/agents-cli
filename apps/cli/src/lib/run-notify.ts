@@ -55,6 +55,9 @@ export function buildRunFinishNotification(
   const n: DesktopNotification = {
     title: exitCode === 0 ? `${label} finished` : `${label} failed`,
     body: shorten(ctx.prompt?.trim() || `${ctx.agent} run`),
+    // The harness that ran becomes the banner's right-hand avatar, so a finished
+    // run is identifiable at a glance even when `--name` renamed the title.
+    agent: ctx.agent,
   };
   if (where) n.subtitle = where;
   if (ctx.url) n.action = `url:${ctx.url}`;

@@ -4,8 +4,12 @@
  * The one place the daemon (overdue routines, heal, routine start/finish/output)
  * emits a native desktop notification. On macOS it routes through the installed
  * `MenubarHelper.app` companion — a one-shot `MenubarHelper --notify` invocation —
- * so the notification is attributed to that bundle and carries the agents-cli /
- * Agentialized mark instead of the generic AppleScript icon. When the companion
+ * so the notification is attributed to that bundle and carries the agents-cli
+ * mark instead of the generic AppleScript icon. A banner carries two images: the
+ * agents-cli app icon on the LEFT (the sender) and, when the event belongs to one
+ * harness, that agent's avatar on the RIGHT (`agent`, rendered by
+ * AgentAvatar.swift) — the same layout macOS gives a YouTube notification, app on
+ * the left and the channel on the right. When the companion
  * app is not installed (menu bar disabled, a Linux package, a dev checkout), it
  * degrades to `osascript` so an overdue/heal notice is never silently lost — the
  * generic icon is the acceptable cost of preserving delivery, not a bug hidden by
@@ -46,6 +50,17 @@ export interface DesktopNotification {
    * macOS-only (osascript / notify-send have no click target). See routine-notify.ts.
    */
   action?: string;
+  /**
+   * Harness the notification is ABOUT (`claude`, `codex`, … — an `AgentId`).
+   * macOS draws two images on a banner: the sending bundle's app icon on the
+   * LEFT and `contentImage` on the RIGHT. The companion renders this id as the
+   * right-hand avatar (AgentAvatar.swift), so a banner reads "agents-cli, about
+   * Claude" the way a YouTube notification reads "YouTube, from this channel".
+   * Omit it when no single harness owns the event (a daemon heal, a fan-out
+   * across several agents) — the right slot then stays empty rather than
+   * repeating the left one. macOS-only; osascript / notify-send carry no image.
+   */
+  agent?: string;
 }
 
 /** Argv for the MenubarHelper one-shot notify mode. Exported for tests. */
@@ -53,6 +68,7 @@ export function buildMenubarNotifyArgs(n: DesktopNotification): string[] {
   const args = ['--notify', '--title', n.title, '--body', n.body];
   if (n.subtitle) args.push('--subtitle', n.subtitle);
   if (n.action) args.push('--action', n.action);
+  if (n.agent) args.push('--agent', n.agent);
   return args;
 }
 

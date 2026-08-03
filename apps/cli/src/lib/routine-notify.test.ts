@@ -6,6 +6,7 @@ import {
   routineStartNotification,
   routineStartFailedNotification,
   routineFinishNotification,
+  routineAgent,
 } from './routine-notify.js';
 import type { JobConfig, RunMeta } from './routines.js';
 
@@ -173,5 +174,27 @@ describe('routineFinishNotification — threshold + content', () => {
 
     const failCmd = meta({ agent: undefined, command: 'git pull', status: 'failed', exitCode: 1 });
     expect(routineFinishNotification(failCmd, {})).toMatchObject({ title: 'Routine failed' });
+  });
+});
+
+describe('routineAgent — the notification avatar', () => {
+  it('names the harness for an agent routine', () => {
+    expect(routineAgent(agentConfig())).toBe('claude');
+    expect(routineStartNotification(agentConfig())!.agent).toBe('claude');
+    expect(routineStartFailedNotification(agentConfig(), 'boom').agent).toBe('claude');
+    expect(routineFinishNotification(meta(), {})!.agent).toBe('claude');
+  });
+
+  it('names the harness a workflow routine executes on', () => {
+    const cfg = agentConfig({ agent: 'codex', workflow: 'deploy' });
+    expect(routineAgent(cfg)).toBe('codex');
+  });
+
+  it('leaves a command routine without an agent', () => {
+    // Deterministic housekeeping runs no harness, so its failure banner shows
+    // the agents-cli icon alone rather than an avatar for an agent that never ran.
+    const cmd = meta({ agent: undefined, command: 'git pull', status: 'failed', exitCode: 1 });
+    expect(routineAgent(cmd)).toBeUndefined();
+    expect(routineFinishNotification(cmd, {})!.agent).toBeUndefined();
   });
 });

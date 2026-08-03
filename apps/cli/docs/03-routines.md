@@ -798,7 +798,10 @@ Each execution creates a run directory with structured output:
 The daemon fires a native macOS notification on the routine lifecycle, routed
 through the `MenubarHelper.app` companion (`src/lib/menubar/notify-desktop.ts`)
 so it carries the agents-cli mark (the bundle's `AppIcon`) rather than the
-generic AppleScript/Script Editor icon. When the menu-bar helper is not
+generic AppleScript/Script Editor icon. An agent or workflow routine also carries
+the harness it runs on as the banner's right-hand avatar (`routineAgent`); a
+command routine has no agent and shows the agents-cli mark alone. When the
+menu-bar helper is not
 installed (Linux, or a machine that disabled it), delivery degrades to
 `osascript`/`notify-send` so a notice is never silently lost.
 
