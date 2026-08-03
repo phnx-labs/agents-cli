@@ -113,6 +113,15 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
     }
 
+    /// Open this helper's menu. Called when a duplicate launch surrenders
+    /// (SingleInstance) — re-launching a menu-bar app means "show me the one
+    /// that is already running", so the incumbent answers by dropping its menu.
+    func surface() {
+        guard let button = statusItem.button else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        button.performClick(nil)
+    }
+
     private func tick() {
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let s = LocalState.sessions(includeTeams: false)

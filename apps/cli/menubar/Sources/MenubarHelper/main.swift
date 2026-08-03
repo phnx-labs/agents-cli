@@ -48,11 +48,21 @@ if ProcessInfo.processInfo.environment["MENUBAR_GUARD_TEST"] == "1" {
     GuardsSelfTest.run()
 }
 
+// Single-instance self-test: take real flocks and assert the contention
+// outcomes that keep exactly one status item alive. See SingleInstance.swift.
+if ProcessInfo.processInfo.environment["MENUBAR_SINGLE_TEST"] == "1" {
+    SingleInstanceSelfTest.run()
+}
+
 // Everything past here installs the status item and registers the global
 // chords, so it must only run where those chords can actually be serviced.
 // Refuses an ssh-started launch or an unrecognized flag — the two ways a helper
 // that can never hold the Accessibility grant has ended up owning Cmd-Shift-V.
 Guards.enforceForInteractiveLaunch()
+
+// ...and only once. A second helper surfaces the running one's menu and exits
+// rather than installing a duplicate status item (see SingleInstance.swift).
+SingleInstance.enforceOrSurface()
 
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
@@ -66,6 +76,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let promptController = PromptPanelController()
     func applicationDidFinishLaunching(_ notification: Notification) {
         controller.install()
+        // A duplicate launch surrenders (SingleInstance) and posts this instead
+        // of adding a second status item — so answering it by opening the menu
+        // is what makes "launch it again" show the helper the user already has.
+        DistributedNotificationCenter.default().addObserver(
+            forName: SingleInstance.surfaceNotification, object: nil, queue: .main
+        ) { [weak controller] _ in controller?.surface() }
         // Own notification click-through (RUSH-2030): the daemon posts branded
         // notifications via one-shot `--notify` processes, but this persistent
         // instance is the NSUserNotificationCenter delegate that opens their

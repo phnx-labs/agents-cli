@@ -60,6 +60,7 @@ enum Guards {
 
             every other mode is env-gated:
               MENUBAR_BENCH=1  MENUBAR_CLIP_TEST=1  MENUBAR_ISSUE_TEST=1  MENUBAR_GUARD_TEST=1
+              MENUBAR_SINGLE_TEST=1
             """)
         }
 
