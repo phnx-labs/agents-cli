@@ -86,8 +86,12 @@ enum AgentsCLI {
         return (try? JSONDecoder().decode([ActiveSession].self, from: data)) ?? []
     }
 
+    // The heaviest call the helper makes: `doctor --json` probes every installed
+    // version of every harness with its own subprocess. Seconds on a healthy box,
+    // so it gets the longest deadline — but it does get one. An unbounded doctor
+    // is what consumed 13 of 18 cores on a real machine.
     static func doctorOverview() -> DoctorOverview? {
-        guard let data = capture(argv(["doctor", "--json"])) else { return nil }
+        guard let data = capture(argv(["doctor", "--json"]), timeout: ChildProcess.doctorTimeout) else { return nil }
         return try? JSONDecoder().decode(DoctorOverview.self, from: data)
     }
 
@@ -661,21 +665,16 @@ enum AgentsCLI {
     }
 
     // MARK: Process helpers
-    private static func capture(_ argv: [String]) -> Data? {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: argv[0])
-        p.arguments = Array(argv.dropFirst())
-        let out = Pipe()
-        p.standardOutput = out
-        p.standardError = FileHandle.nullDevice
-        do {
-            try p.run()
-        } catch {
-            return nil
-        }
-        let data = out.fileHandleForReading.readDataToEndOfFile()
-        p.waitUntilExit()
-        return p.terminationStatus == 0 ? data : nil
+
+    // Every synchronous CLI call is bounded and group-killable. This used to be a
+    // bare `Process` + `readDataToEndOfFile()`, which waits forever and leaves the
+    // child (and the child's own subprocesses) orphaned at PPID 1 whenever the
+    // helper dies mid-call. Under launchd KeepAlive that compounds: each crash
+    // restart spawns a new call while the previous one keeps running, and the
+    // orphans accumulate until the machine is unusable. See ChildProcess.swift for
+    // the full failure mode and the three invariants that close it.
+    private static func capture(_ argv: [String], timeout: TimeInterval = ChildProcess.defaultTimeout) -> Data? {
+        ChildProcess.run(argv, timeout: timeout)
     }
 
     private static func runDetached(_ argv: [String]) {

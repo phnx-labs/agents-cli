@@ -28,6 +28,22 @@ const APP_BUNDLE_NAME = 'MenubarHelper.app';
 const INSTALL_DIR_NAME = 'agents-cli';
 const SERVICE_LABEL = 'com.phnx-labs.agents-menubar';
 
+/**
+ * Minimum seconds between launchd restarts of the helper (`ThrottleInterval`).
+ *
+ * The helper can crash at startup on a loaded machine: `NSApplication.shared`
+ * segfaults inside `SLSNewConnection` when WindowServer is too starved to hand
+ * out a connection. With `KeepAlive` and no throttle, launchd relaunches on its
+ * 10s default, and each attempt spawns a fresh `agents doctor --json` before
+ * dying — so a starved box gets hit harder the worse it gets. 30s bounds that
+ * respawn rate while staying well inside "the menu bar came back on its own".
+ *
+ * This only paces the restarts. What actually stops the pile-up is the helper
+ * bounding and group-killing its own children (menubar/Sources/MenubarHelper/
+ * ChildProcess.swift); the two are complementary, not alternatives.
+ */
+const MENUBAR_THROTTLE_SECONDS = 30;
+
 function onDarwin(): boolean {
   return process.platform === 'darwin';
 }
@@ -264,7 +280,7 @@ function xmlEscape(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function generateServicePlist(execPath: string): string {
+export function generateServicePlist(execPath: string): string {
   const home = os.homedir();
   const logPath = path.join(getHelpersDir(), 'menubar', 'menubar.log');
   fs.mkdirSync(path.dirname(logPath), { recursive: true });
@@ -302,6 +318,8 @@ function generateServicePlist(execPath: string): string {
   <true/>
   <key>KeepAlive</key>
   <true/>
+  <key>ThrottleInterval</key>
+  <integer>${MENUBAR_THROTTLE_SECONDS}</integer>
   <key>ProcessType</key>
   <string>Interactive</string>
   <key>StandardOutPath</key>

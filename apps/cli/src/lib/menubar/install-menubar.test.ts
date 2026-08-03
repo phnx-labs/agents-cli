@@ -7,6 +7,7 @@ import {
   classifyMenubarProcesses,
   codesignVerifies,
   ensureValidSignature,
+  generateServicePlist,
   isMenubarStale,
   menubarPlistNeedsRepoint,
   processesToEnd,
@@ -241,5 +242,34 @@ darwinOnly('ensureValidSignature (real codesign)', () => {
     expect(ensureValidSignature(app)).toBe(true);
     expect(codesignVerifies(app)).toBe(true);
     fs.rmSync(path.dirname(app), { recursive: true, force: true });
+  });
+});
+
+// Regression guard for the ORPHAN-STORM incident. The helper can crash at
+// startup on a loaded machine — `NSApplication.shared` segfaults inside
+// `SLSNewConnection` when WindowServer is too starved to hand out a connection.
+// With `KeepAlive` and no `ThrottleInterval`, launchd relaunched on its ~10s
+// default and every attempt spawned another `agents doctor --json` before dying,
+// so a starved box got hit harder the worse it got: 38 orphaned doctors, ~13 of
+// 18 cores, load average 490. The throttle paces the respawn; ChildProcess.swift
+// bounds and reaps the children.
+describe('generateServicePlist — launchd crash-loop throttle', () => {
+  const plist = generateServicePlist('/Users/x/Library/Application Support/agents-cli/MenubarHelper.app/Contents/MacOS/MenubarHelper');
+
+  it('sets a ThrottleInterval so a startup crash-loop cannot respawn every 10s', () => {
+    expect(plist).toContain('<key>ThrottleInterval</key>');
+    const seconds = Number(/<key>ThrottleInterval<\/key>\s*<integer>(\d+)<\/integer>/.exec(plist)?.[1]);
+    expect(seconds).toBeGreaterThanOrEqual(30);
+  });
+
+  it('still keeps the helper alive and starts it at load', () => {
+    expect(plist).toContain('<key>KeepAlive</key>');
+    expect(plist).toContain('<key>RunAtLoad</key>');
+  });
+
+  it('emits a plist that plutil accepts', () => {
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'menubar-plist-')), 'x.plist');
+    fs.writeFileSync(file, plist);
+    expect(spawnSync('plutil', ['-lint', file], { encoding: 'utf8' }).status).toBe(0);
   });
 });
