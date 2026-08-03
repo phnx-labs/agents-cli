@@ -92,6 +92,7 @@ rush  ·  23 agents  ·  68% plan
   agents   claude · running · RUSH-2107 @zion  ·  codex · idle @mac-mini  ·  +21 more
   ships    4 merged (7d) · 2 open PRs · 3 worktrees · v1.20.91  # gh counts + latest release tag
   linear   12/30 done · 5 in progress           # Linear issue counts (needs linear.projectId)
+  next     Beta cut  ·  3/8  ·  due in 6 days     # the next unfinished Linear milestone
   tickets  RUSH-1201 · RUSH-1198 · …              # tickets worked or created
   proof    11 artifacts (7d) · last: plan-x.html  # artifact.created milestones by cwd
   repos    phnx-labs/rush · rush-infra
@@ -114,6 +115,25 @@ rush  ·  23 agents  ·  68% plan
   slow API (>8s) just omits the line, and `--no-remote` skips it too. `total`
   includes canceled issues; the fetch caps at 2,500 issues and a capped count
   renders as a lower bound (`2500+ done`), never as the complete total.
+- **`next`** is the project's next unfinished Linear milestone — the earliest
+  `targetDate` that is not yet complete — rendered `name · done/total · due …`.
+  A percentage says how far along a project is; the milestone says what it is due
+  to hit next, which is what a person plans around. Undated milestones sort last;
+  the line is omitted when the project declares none or all are complete.
+
+  The milestone **list comes from the project, not from its issues**
+  (`project.projectMilestones`), because a milestone commonly has nothing filed
+  under it yet — deriving the list from issue assignments hides exactly those.
+  Issues supply only the `done/total` progress, and when none are assigned the
+  fraction is omitted rather than printed as a meaningless `0/0`. The list rides
+  along on the **first** page of the existing issue fetch, so the line costs no
+  extra request and inherits the same 8s budget and best-effort degradation.
+
+  Dates read in human terms — `due today`, `due tomorrow`, `due in 6 days`,
+  `overdue by 3 days`, and `due Aug 21` once a countdown stops being useful.
+  Linear stores a calendar date with no timezone, so both sides are compared at
+  **local** midnight; parsing it as UTC would shift the answer by a day for
+  anyone west of Greenwich.
 - **`proof`** counts `artifact.created` activity milestones whose cwd is inside the
   project (`lib/project-status.ts`).
 - `--window <days>` sets the merged-PR / artifact window (default 7).
