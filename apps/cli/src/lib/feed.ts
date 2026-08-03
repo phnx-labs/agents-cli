@@ -424,7 +424,7 @@ export interface DeclareBlockInput {
 export function buildDeclaredBlock(agent: DeclaringAgent, input: DeclareBlockInput): OpenBlock {
   const text = input.text.trim().replace(/\s+/g, ' ');
   if (!text) {
-    throw new Error('Block text is empty. Usage: agents feed post "what you need from the user" --blocked');
+    throw new Error('Block text is empty. Usage: agents feed post --title "Short subject" "what you need from the user" --blocked');
   }
   const options = (input.options ?? [])
     .map((label) => label.trim())

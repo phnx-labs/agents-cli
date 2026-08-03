@@ -35,8 +35,8 @@ agents send --channel desktop --to local --text "deploy finished" --url https://
 agents send --to owner --text "need a decision"
 agents notify --text "same as send --to owner"
 
-# Record (not deliver by itself)
-agents feed post "CHANGELOG pushed; watching CI"
+# Record (not deliver by itself) — title (subject) + body required
+agents feed post --title "CHANGELOG pushed" "Watching CI and mac-mini E2E"
 ```
 
 The write-stores: `~/.agents/events.jsonl` (operational audit), per-session
@@ -750,19 +750,23 @@ agents feed --kill <id>    # SIGTERM a local process; cloud tasks are cancelled
 
 ### Status posts (`agents feed post`) — agent progress, not “needs you”
 
-Agents can deliberately announce progress without opening a feed block. The
-command is free-text and domain-agnostic; session/agent/host/runtime/pid
-identity is stamped automatically from the process env and the per-pid launch
-registry (`lib/session/pid-registry.ts`).
+Agents can deliberately announce progress without opening a feed block. Every
+post has a **title** (short subject, ~4–5 words — the phone first line) and a
+**body** (what happened / the ask). Session/agent/host/runtime/pid identity is
+stamped automatically from the process env and the per-pid launch registry
+(`lib/session/pid-registry.ts`), and rides the outbound `{message}` footer.
+
+Em/en dashes in title or body are scrubbed to ASCII ` - ` on the way out (phone
+and plain-text clients render them poorly).
 
 ```bash
 # Inside an agents-cli run (AGENT_SESSION_ID / AGENTS_MAILBOX_DIR already set):
-agents feed post "CHANGELOG pushed; watching CI and mac-mini E2E"
-agents feed post "cover render ready" --attach ./out/cover.png   # attach an artifact
-agents feed post "ready for review" --json
+agents feed post --title "CHANGELOG pushed" "Watching CI and mac-mini E2E"
+agents feed post --title "Cover ready" "render at ./out/cover.png" --attach ./out/cover.png
+agents feed post --title "Ready for review" "PR opened, waiting on prix-cloud" --json
 
 # Escape hatch when not in a managed run:
-agents feed post "note" --session <session-id>
+agents feed post --title "Manual note" "context for the next agent" --session <session-id>
 ```
 
 Each post appends a `status.posted` **milestone** to
@@ -778,9 +782,9 @@ A plain post is history the moment it lands. `--blocked` says the agent
 scroll away:
 
 ```bash
-agents feed post "force-push denied by git-guard on PR #1749" --blocked
-agents feed post "publish or wait for review?" --blocked --option publish --option wait
-agents feed post "delete the stale preview env?" --blocked --default "leave it"
+agents feed post --title "Force-push denied" "git-guard blocked PR #1749" --blocked
+agents feed post --title "Publish or wait?" "npm now or after review" --blocked --option publish --option wait
+agents feed post --title "Delete preview env?" "stale preview still running" --blocked --default "leave it"
 ```
 
 It is a flag on the existing verb rather than a separate command: the feed is
@@ -859,21 +863,25 @@ Two rules decide whether a sink runs, both read off the post itself:
   known — the template declares what it needs, and a sink can never fire with a
   hole in its argv (`linear update  --comment …` commenting on nothing).
 
-Available placeholders: `{text}` (the post verbatim), `{ticket}`, `{project}`,
-`{agent}`, `{host}`, `{session}`, `{level}`, `{links}` (attached URLs, space
-separated), and `{message}` — a composed multi-line body for messaging sinks:
+Available placeholders: `{title}` (short subject), `{text}` (body verbatim),
+`{ticket}`, `{project}`, `{agent}`, `{host}`, `{session}`, `{level}`, `{links}`
+(attached URLs, space separated), and `{message}` — a composed multi-line body
+for messaging sinks:
 
 ```
-<project> · <agent>@<host>
-<text>
+Title in a few words
+
+Body of what happened or the ask.
+
+Sent from <agent>/<session-chunk> on <host>
 [agents focus <id>  — blocked posts only]
 [first attached URL]
 ```
 
-Prefer `{message}` for a phone/Slack/iMessage sink: with a hundred agents on many
-devices, the free-text body alone is unusable — the operator needs **which
-product**, **which agent**, and **which machine** before the ask. `{text}` is
-still the bare post body when a sink wants only that.
+Prefer `{message}` for a phone/Slack/iMessage sink. Title first for a scan,
+blank line, then body, then a footer like "Sent from my iPhone" so a fleet of
+agents is attributable without crowding the ask (`agent/session` on `host`).
+`{text}` is still the bare body when a sink wants only that.
 
 **Blocked posts add four more:** `{focus}` (the literal `agents focus <id>` command
 that unblocks the session), `{class}` (`approval` | `decision`), `{cost}` (the

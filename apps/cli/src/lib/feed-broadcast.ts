@@ -55,7 +55,9 @@ export type FeedBroadcastConfig = Record<string, FeedSinkConfig>;
 
 /** Everything a template may interpolate. Absent values skip templates that need them. */
 export interface FeedBroadcastContext {
-  /** The post text, verbatim. */
+  /** Short subject line (~4–5 words). Phone line 1. */
+  title?: string;
+  /** The post body, verbatim. Phone line after the blank line. */
   text: string;
   level: FeedPostLevel;
   /** Tracker id for the work, e.g. `RUSH-2081`. */
@@ -100,12 +102,16 @@ export function blockBroadcastContext(
     ticket?: string;
     pr?: string;
   },
-  extras: { project?: string; agent?: string } = {},
+  extras: { project?: string; agent?: string; title?: string; body?: string } = {},
 ): FeedBroadcastContext {
   const ask = block.questions?.[0]?.text?.trim() || 'agent is blocked';
   const links = [block.pr].filter((l): l is string => !!l && /^https?:\/\//i.test(l));
+  // Prefer explicit title/body from the feed post; fall back to the ask as body.
+  const title = extras.title?.trim() || undefined;
+  const text = extras.body?.trim() || ask;
   return {
-    text: ask,
+    ...(title ? { title } : {}),
+    text,
     level: 'important',
     ticket: block.ticket,
     project: extras.project,
@@ -169,61 +175,108 @@ const PLACEHOLDER = /\{([a-z]+)\}/g;
 export function shortHost(host: string | undefined): string | undefined {
   if (!host?.trim()) return undefined;
   let h = host.trim();
-  // user@host → host
   const at = h.lastIndexOf('@');
   if (at !== -1) h = h.slice(at + 1);
-  // host.tail… or host.local → first label
   const dot = h.indexOf('.');
   if (dot > 0) h = h.slice(0, dot);
   return h || undefined;
 }
 
+/** First 8 hex chars of a session id for the footer (readable, not a full uuid). */
+export function shortSessionChunk(session: string | undefined): string | undefined {
+  if (!session?.trim()) return undefined;
+  const hex = session.replace(/-/g, '').toLowerCase();
+  const chunk = hex.replace(/[^a-f0-9]/g, '').slice(0, 8);
+  return chunk || undefined;
+}
+
 /**
- * Provenance chip for a phone banner: which product, which agent, which box.
- * Order is deliberate at fleet scale (100 agents on many devices):
- *   project first (what moved) · agent@host (who / where)
- * A message that is only the free-text body is unusable when many agents post.
+ * Scrub em/en dashes from outbound phone copy (house rule + iMessage readability).
+ * Collapses whitespace; does not invent meaning.
  */
-export function composeBroadcastProvenance(ctx: FeedBroadcastContext): string | undefined {
-  const host = shortHost(ctx.host);
-  const agent = ctx.agent?.trim() || undefined;
-  // Skip the uninformative default "agent" stamp from unmanaged headless runs —
-  // it adds noise without identifying a harness.
+export function scrubOutboundDashes(text: string): string {
+  return text
+    .replace(/\u2014/g, ' - ')
+    .replace(/\u2013/g, ' - ')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
+
+/**
+ * Footer like "Sent from my iPhone" — who posted, a session crumb, which box.
+ *
+ *   Sent from grok/a02da0e2 on mac-mini
+ *
+ * Agent name first; session chunk for disambiguation when many groks run;
+ * host last. Skip the uninformative default label `agent`.
+ */
+export function composeBroadcastFooter(ctx: FeedBroadcastContext): string | undefined {
+  const agent = ctx.agent?.trim();
   const agentLabel = agent && agent !== 'agent' ? agent : undefined;
-  const who =
-    agentLabel && host ? `${agentLabel}@${host}` : agentLabel || host || undefined;
-  const parts = [ctx.project?.trim() || undefined, who].filter(Boolean) as string[];
-  return parts.length ? parts.join(' · ') : undefined;
+  const session = shortSessionChunk(ctx.session);
+  const host = shortHost(ctx.host);
+
+  let who: string | undefined;
+  if (agentLabel && session) who = `${agentLabel}/${session}`;
+  else if (agentLabel) who = agentLabel;
+  else if (session) who = session;
+
+  if (who && host) return `Sent from ${who} on ${host}`;
+  if (who) return `Sent from ${who}`;
+  if (host) return `Sent from host ${host}`;
+  return undefined;
 }
 
 /**
  * Human-facing body for a messaging sink (`{message}`).
  *
- * Line 1 — provenance: `project · agent@host` (what + who + where).
- * Line 2 — the post text (what happened / the ask).
- * Line 3 — unblock command (blocks) or first URL attach.
+ * ```
+ * Title in a few words
  *
- * Phone banners show about two lines; putting identity first means a scan
- * still names the agent when the body truncates. Prefer `{message}` over bare
- * `{text}` in messaging sinks for that reason.
+ * Body of what happened or the ask.
+ *
+ * Sent from grok/a02da0e2 on mac-mini
+ * agents focus a02da0e2          (blocks only)
+ * https://…                      (optional attach URL)
+ * ```
+ *
+ * Title first (scannable subject). Blank line. Body. Footer provenance so a
+ * fleet of agents is attributable without crowding the ask. Prefer `{message}`
+ * over bare `{text}` in messaging sinks.
  */
 export function composeBroadcastMessage(ctx: FeedBroadcastContext): string {
-  const provenance = composeBroadcastProvenance(ctx);
-  const body = (ctx.text ?? '').trim();
-  const head = provenance ? (body ? `${provenance}\n${body}` : provenance) : body;
+  const title = scrubOutboundDashes(ctx.title ?? '');
+  const body = scrubOutboundDashes(ctx.text ?? '');
+  // Title preferred; if an older post has no title, body alone still sends.
+  const head = title || body;
+  const mid = title && body && title !== body ? body : undefined;
+  const footer = composeBroadcastFooter(ctx);
   const link = ctx.links?.find((l) => /^https?:\/\//i.test(l));
-  // A block's extra line is the command that unblocks it. The operator reading
-  // this on a phone should not have to go find the session — the one action they
-  // must take travels with the ask. A status post has no such action, so it keeps
-  // the link there instead.
-  const tail = [ctx.focus, link].filter(Boolean);
-  if (!head) return tail.join('\n');
-  return tail.length ? `${head}\n${tail.join('\n')}` : head;
+  // Block focus and link trail after the "Sent from" footer so the human
+  // sentence stays at the top and the action/link are still one glance away.
+  const trail = [footer, ctx.focus, link].filter(Boolean) as string[];
+
+  const parts: string[] = [];
+  if (head) parts.push(head);
+  if (mid) {
+    // Blank line between subject and body (title, then space, then message).
+    parts.push('');
+    parts.push(mid);
+  }
+  if (trail.length) {
+    // Blank line before the footer block (iPhone "Sent from my iPhone" spacing).
+    if (parts.length) parts.push('');
+    parts.push(trail.join('\n'));
+  }
+  return parts.join('\n').trim();
 }
 
 /** The values a template may reference, resolved once per post. */
 function templateVars(ctx: FeedBroadcastContext): Record<string, string | undefined> {
   return {
+    title: ctx.title,
     text: ctx.text,
     ticket: ctx.ticket,
     project: ctx.project,
