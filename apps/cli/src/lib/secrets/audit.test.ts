@@ -139,27 +139,30 @@ describe('emitSecretAudit', () => {
  */
 describe('emitSecretAudit feeds events.jsonl AND the usage read-model from one call', () => {
   let prevNoTrack: string | undefined;
-  let prevDbPath: string | undefined;
+  let prevSecretsDb: string | undefined;
+  let prevUsageDb: string | undefined;
   let dbDir: string;
 
   beforeEach(() => {
     setupEvents();
     prevNoTrack = process.env.AGENTS_NO_USAGE_TRACK;
-    prevDbPath = process.env.AGENTS_SECRETS_DB;
-    // Recording is off by the hermetic default — opt in and pin the DB to a
-    // fork-private temp file so the usage rows land there, not the real store.
+    prevSecretsDb = process.env.AGENTS_SECRETS_DB;
+    prevUsageDb = process.env.AGENTS_USAGE_DB;
     delete process.env.AGENTS_NO_USAGE_TRACK;
     closeSecretsUsageDb();
     dbDir = tempDir();
-    process.env.AGENTS_SECRETS_DB = path.join(dbDir, 'secrets.db');
+    process.env.AGENTS_SECRETS_DB = path.join(dbDir, 'secrets-legacy.db');
+    process.env.AGENTS_USAGE_DB = path.join(dbDir, 'usage.db');
   });
 
   afterEach(() => {
     closeSecretsUsageDb();
     if (prevNoTrack === undefined) delete process.env.AGENTS_NO_USAGE_TRACK;
     else process.env.AGENTS_NO_USAGE_TRACK = prevNoTrack;
-    if (prevDbPath === undefined) delete process.env.AGENTS_SECRETS_DB;
-    else process.env.AGENTS_SECRETS_DB = prevDbPath;
+    if (prevSecretsDb === undefined) delete process.env.AGENTS_SECRETS_DB;
+    else process.env.AGENTS_SECRETS_DB = prevSecretsDb;
+    if (prevUsageDb === undefined) delete process.env.AGENTS_USAGE_DB;
+    else process.env.AGENTS_USAGE_DB = prevUsageDb;
   });
 
   it('records ONE access in the audit log AND one row in the read-model DB', () => {
@@ -217,8 +220,8 @@ describe('emitSecretAudit feeds events.jsonl AND the usage read-model from one c
   it('a raw `secrets get <item>` (no bundle) audits but records no bundle usage', () => {
     emitSecretAudit({ event: 'secrets.get', item: 'raw-item', source: 'raw-item', status: 'success' });
     expect(query({ eventTypes: ['secrets.get'] })).toHaveLength(1);
-    // No bundle ⇒ nothing in the per-bundle read-model.
-    expect(getUsageHistory(undefined, 10)).toHaveLength(0);
+    expect(getBundleUsage('raw-item')).toBeUndefined();
+    expect(getUsageHistory('raw-item', 10)).toHaveLength(0);
   });
 });
 
