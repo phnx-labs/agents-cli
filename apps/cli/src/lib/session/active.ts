@@ -260,6 +260,16 @@ export interface ActiveSession {
    * renderer-set (see src/lib/session/viewing-in.ts) — NOT on the discovery path.
    */
   viewingIn?: { app: string; tab?: number };
+  /**
+   * The editor tab that launched this agent (`AGENT_TERMINAL_ID`), from the pid
+   * registry. This is the one identifier that survives an SSH hop AND a session
+   * rotation: a Factory tab offloaded to a device has no local process to inspect,
+   * and its spawn-time session id goes stale the moment the agent moves to another
+   * session (`/clear`, exit-and-rerun), so `--active --host <device>` joined on
+   * this is how that tab re-identifies its own session. Absent for any launch that
+   * did not inherit a terminal id.
+   */
+  terminalId?: string;
 }
 
 export function activeStatusFromCloudStatus(status: CloudTaskStatus): ActiveStatus {
@@ -1350,6 +1360,7 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
       lastActivityMs: mtimeMs,
       pidCount: 1 + (foldedByRoot.get(pid) ?? 0),
       owner: resolveOwner(entry?.actor, resolvedId),
+      terminalId: entry?.terminalId,
     }, state, sessionFile, true));
   }
   // Housekeeping: drop registry files for pids that have since died.
