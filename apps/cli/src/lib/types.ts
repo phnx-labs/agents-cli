@@ -940,10 +940,11 @@ export interface Meta {
   };
   /**
    * Owner/channel notification config for `agents send` / `agents notify`.
-   * `owner` is the default recipient for `agents notify` (channel + target).
-   * `transports` maps a user-facing channel name to the provider that actually
-   * delivers it — explicit, one provider per channel, no fallback. Omitted keys
-   * default to name-identity (channel `slack` -> provider `slack`).
+   * `owner` is the address expanded by `--to owner` and by `agents notify`
+   * (channel + target). `transports` maps a user-facing channel name to the
+   * provider that actually delivers it — explicit, one provider per channel,
+   * no fallback. Omitted keys default to name-identity (channel `slack` ->
+   * provider `slack`).
    */
   notify?: {
     owner?: { channel: string; to: string };

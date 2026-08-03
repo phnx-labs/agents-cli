@@ -6,8 +6,8 @@ Using agents-cli as a programmatic observability layer for agent fleets.
 
 ## Command roles at a glance
 
-Six surfaces read the fleet's activity; each has one job. Reach for the one whose
-*consumer* and *axis* match your question, not whichever you remember first.
+Six surfaces **read** the fleet's activity; each has one job. Reach for the one
+whose *consumer* and *axis* match your question, not whichever you remember first.
 
 | Command | Role (one line) | Source | Consumer |
 |---|---|---|---|
@@ -17,6 +17,27 @@ Six surfaces read the fleet's activity; each has one job. Reach for the one whos
 | **`activity`** | **Human milestone timeline.** Recent plans / PRs / worktrees / sub-agents, plus Bash-driven deliverables (video renders, image upscales, metadata edits), newest-first — a friendly lens on the milestone tier of the event stream. Every Bash call also emits a structured `bash.executed` activity record carrying its tool category. | `activity/*.jsonl` | Human at the terminal |
 | **`output`** | **Productivity accounting.** Token burn vs shipped output (PRs, commits) across agents — the "was it worth it" axis. (`agents cost` is the pure $-and-duration sibling.) | `sessions.db` + git/gh | Human + `--json` |
 | **`sessions`** | **Live agent roster + transcripts.** Which agents are running right now and their state; browse/read past conversation transcripts. A live process probe + transcript index, not an event log. | live pid/transcript probe + `sessions.db` | Human + `--json` |
+
+### Delivery vs record vs control (RUSH-2123)
+
+Outbound names that look interchangeable are three different planes:
+
+| Plane | Command | Job |
+|---|---|---|
+| **Deliver** | `agents send` / `agents notify` | Put a message in front of a recipient (`--to`, `--text`, `--channel`, `--attach`, `--url`). `notify` ≡ `send --to owner` (`notify.owner` in agents.yaml). |
+| **Record** | `agents feed post` | Append a status/milestone (and optional OpenBlock). May **forward** via `feed.broadcast` sinks that call `send`/`notify`. |
+| **Observe** | `agents activity` | **Read** the activity stream — not a send path. |
+| **Control** | `agents message` / `agents sessions inject` | Act on a running agent (mailbox answer vs terminal keystroke). Stay separate from `send`. |
+
+```bash
+# Deliver (flag-first envelope)
+agents send --channel desktop --to local --text "deploy finished" --url https://example.com/pr/1
+agents send --to owner --text "need a decision"
+agents notify --text "same as send --to owner"
+
+# Record (not deliver by itself)
+agents feed post "CHANGELOG pushed; watching CI"
+```
 
 The write-stores: `~/.agents/events.jsonl` (operational audit), per-session
 `~/.agents/.history/activity/<id>.jsonl` (agent milestones), and the disposable
