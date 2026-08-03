@@ -163,19 +163,61 @@ export interface SinkOutcome {
 const PLACEHOLDER = /\{([a-z]+)\}/g;
 
 /**
- * A human-facing one-liner for a messaging sink: what project, what happened,
- * and the link to go read more. Leading with the project is deliberate — a
- * message that opens with an agent name tells the reader nothing about which of
- * their projects just moved.
+ * Short host label for a phone line — strip user@ and domain so
+ * `muqsit@mac-mini.tailnet.ts.net` reads as `mac-mini`.
+ */
+export function shortHost(host: string | undefined): string | undefined {
+  if (!host?.trim()) return undefined;
+  let h = host.trim();
+  // user@host → host
+  const at = h.lastIndexOf('@');
+  if (at !== -1) h = h.slice(at + 1);
+  // host.tail… or host.local → first label
+  const dot = h.indexOf('.');
+  if (dot > 0) h = h.slice(0, dot);
+  return h || undefined;
+}
+
+/**
+ * Provenance chip for a phone banner: which product, which agent, which box.
+ * Order is deliberate at fleet scale (100 agents on many devices):
+ *   project first (what moved) · agent@host (who / where)
+ * A message that is only the free-text body is unusable when many agents post.
+ */
+export function composeBroadcastProvenance(ctx: FeedBroadcastContext): string | undefined {
+  const host = shortHost(ctx.host);
+  const agent = ctx.agent?.trim() || undefined;
+  // Skip the uninformative default "agent" stamp from unmanaged headless runs —
+  // it adds noise without identifying a harness.
+  const agentLabel = agent && agent !== 'agent' ? agent : undefined;
+  const who =
+    agentLabel && host ? `${agentLabel}@${host}` : agentLabel || host || undefined;
+  const parts = [ctx.project?.trim() || undefined, who].filter(Boolean) as string[];
+  return parts.length ? parts.join(' · ') : undefined;
+}
+
+/**
+ * Human-facing body for a messaging sink (`{message}`).
+ *
+ * Line 1 — provenance: `project · agent@host` (what + who + where).
+ * Line 2 — the post text (what happened / the ask).
+ * Line 3 — unblock command (blocks) or first URL attach.
+ *
+ * Phone banners show about two lines; putting identity first means a scan
+ * still names the agent when the body truncates. Prefer `{message}` over bare
+ * `{text}` in messaging sinks for that reason.
  */
 export function composeBroadcastMessage(ctx: FeedBroadcastContext): string {
-  const head = ctx.project ? `${ctx.project} · ${ctx.text}` : ctx.text;
+  const provenance = composeBroadcastProvenance(ctx);
+  const body = (ctx.text ?? '').trim();
+  const head = provenance ? (body ? `${provenance}\n${body}` : provenance) : body;
   const link = ctx.links?.find((l) => /^https?:\/\//i.test(l));
-  // A block's second line is the command that unblocks it. The operator reading
+  // A block's extra line is the command that unblocks it. The operator reading
   // this on a phone should not have to go find the session — the one action they
   // must take travels with the ask. A status post has no such action, so it keeps
   // the link there instead.
   const tail = [ctx.focus, link].filter(Boolean);
+  if (!head) return tail.join('\n');
   return tail.length ? `${head}\n${tail.join('\n')}` : head;
 }
 

@@ -64,17 +64,57 @@ describe('sink argv rendering', () => {
 });
 
 describe('message composition', () => {
-  it('leads with the project and appends the link', () => {
+  it('puts project · agent@host above the body, then the link', () => {
     expect(composeBroadcastMessage(ctx({ links: ['https://github.com/phnx-labs/agents-cli/pull/1690'] })))
-      .toBe('agents-cli · PR #1690 open, CI green, merging\nhttps://github.com/phnx-labs/agents-cli/pull/1690');
+      .toBe(
+        'agents-cli · claude@yosemite-s1\n' +
+          'PR #1690 open, CI green, merging\n' +
+          'https://github.com/phnx-labs/agents-cli/pull/1690',
+      );
   });
 
-  it('omits the link line when no URL is attached', () => {
-    expect(composeBroadcastMessage(ctx())).toBe('agents-cli · PR #1690 open, CI green, merging');
+  it('still names agent@host when there is no project', () => {
+    expect(composeBroadcastMessage(ctx({ project: undefined }))).toBe(
+      'claude@yosemite-s1\nPR #1690 open, CI green, merging',
+    );
   });
 
-  it('ignores a local file attachment as a link target', () => {
-    expect(composeBroadcastMessage(ctx({ links: [] }))).not.toContain('\n');
+  it('falls back to bare text when no provenance is known', () => {
+    expect(
+      composeBroadcastMessage(
+        ctx({ project: undefined, agent: undefined, host: undefined }),
+      ),
+    ).toBe('PR #1690 open, CI green, merging');
+  });
+
+  it('skips the uninformative default agent label "agent"', () => {
+    expect(composeBroadcastMessage(ctx({ agent: 'agent', project: 'agents-cli' }))).toBe(
+      'agents-cli · yosemite-s1\nPR #1690 open, CI green, merging',
+    );
+  });
+
+  it('shortens a long host to its first label', () => {
+    expect(
+      composeBroadcastMessage(
+        ctx({ host: 'muqsit@mac-mini.tail1a85a1.ts.net', agent: 'grok', project: undefined }),
+      ),
+    ).toBe('grok@mac-mini\nPR #1690 open, CI green, merging');
+  });
+
+  it('appends focus (blocks) before a link', () => {
+    expect(
+      composeBroadcastMessage(
+        ctx({
+          focus: 'agents focus c854ae60',
+          links: ['https://example.com/p'],
+        }),
+      ),
+    ).toBe(
+      'agents-cli · claude@yosemite-s1\n' +
+        'PR #1690 open, CI green, merging\n' +
+        'agents focus c854ae60\n' +
+        'https://example.com/p',
+    );
   });
 });
 
@@ -93,7 +133,11 @@ describe('broadcast planning', () => {
     const planned = planFeedBroadcast(CONFIG, ctx({ ticket: 'RUSH-2081', level: 'important' }));
     expect(planned.map((p) => p.name)).toEqual(['ticket', 'message']);
     expect(planned[1].argv).toEqual([
-      'rush', 'message', 'send', '--text', 'agents-cli · PR #1690 open, CI green, merging',
+      'rush',
+      'message',
+      'send',
+      '--text',
+      'agents-cli · claude@yosemite-s1\nPR #1690 open, CI green, merging',
     ]);
   });
 

@@ -861,10 +861,19 @@ Two rules decide whether a sink runs, both read off the post itself:
 
 Available placeholders: `{text}` (the post verbatim), `{ticket}`, `{project}`,
 `{agent}`, `{host}`, `{session}`, `{level}`, `{links}` (attached URLs, space
-separated), and `{message}` — a composed human line, `<project> · <text>` with the
-first attached URL on a second line. Prefer `{message}` for a messaging sink: it
-leads with the project the reader cares about and carries a clickable link,
-rather than opening with an agent name that tells them nothing.
+separated), and `{message}` — a composed multi-line body for messaging sinks:
+
+```
+<project> · <agent>@<host>
+<text>
+[agents focus <id>  — blocked posts only]
+[first attached URL]
+```
+
+Prefer `{message}` for a phone/Slack/iMessage sink: with a hundred agents on many
+devices, the free-text body alone is unusable — the operator needs **which
+product**, **which agent**, and **which machine** before the ask. `{text}` is
+still the bare post body when a sink wants only that.
 
 **Blocked posts add four more:** `{focus}` (the literal `agents focus <id>` command
 that unblocks the session), `{class}` (`approval` | `decision`), `{cost}` (the

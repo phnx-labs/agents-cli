@@ -1,0 +1,1 @@
+- **Feed broadcast phone texts name the agent and host, not just the free-text body.** `{message}` is now `project · agent@host` on line 1, the post text on line 2, then focus/URL. At fleet scale a bare "halfway done" on a phone is unusable — you cannot tell which of 100 agents on which box posted it. Source: `apps/cli/src/lib/feed-broadcast.ts`.

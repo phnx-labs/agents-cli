@@ -98,7 +98,9 @@ describe('blockBroadcastContext', () => {
     );
     expect(planned).toHaveLength(1);
     const message = planned[0].argv[2];
-    expect(message).toContain('agents-cli · npm token expired, cannot publish');
+    // Provenance line names project + host so a phone ping is attributable.
+    expect(message).toContain('agents-cli · yosemite-s1');
+    expect(message).toContain('npm token expired, cannot publish');
     expect(message).toContain('agents focus 74a4893f');
   });
 
@@ -116,13 +118,14 @@ describe('blockBroadcastContext', () => {
   });
 
   // A status post has no focus command, so the sink must still render for it.
-  it('leaves a plain post unaffected — no focus line appended', () => {
+  it('leaves a plain post without a focus line (provenance + body only)', () => {
     const argv = renderSinkArgv(['{message}'], {
       text: 'CI green',
       level: 'milestone',
       project: 'agents-cli',
     });
-    expect(argv).toEqual(['agents-cli · CI green']);
+    expect(argv).toEqual(['agents-cli\nCI green']);
+    expect(argv![0]).not.toContain('agents focus');
   });
 });
 
