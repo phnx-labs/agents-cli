@@ -135,11 +135,24 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// takes a suspensionBehavior, and this app is `.accessory` — never the
     /// active app — so the default behavior queues the notification instead of
     /// delivering it and the menu never opens.
-    @objc func surface() {
+    @objc func surface(_ note: Notification) {
         guard let button = statusItem.button else { return }
+        let info = note.userInfo as? [String: String] ?? [:]
+        // An agent/automation relaunched the helper (e.g. a coding agent running
+        // `agents menubar enable`). The human did not ask to see the menu, so
+        // re-home silently — popping the dropdown here steals the user's keyboard
+        // focus mid-task, the interruption this attribution was added to stop.
+        if info["automated"] == "1" {
+            let who = [info["agent"].map { "agent=\($0)" }, info["sessionId"].map { "session=\($0)" }]
+                .compactMap { $0 }.joined(separator: " ")
+            FileHandle.standardError.write(Data(
+                "MenubarHelper: automated relaunch (\(who.isEmpty ? "unknown" : who)) — re-homed silently, did not surface\n".utf8
+            ))
+            return
+        }
         // Logged: this is the one moment where a second launch changed what the
         // user sees, and the launchd plist routes stderr to menubar.log.
-        FileHandle.standardError.write(Data("MenubarHelper: surfacing menu for a duplicate launch\n".utf8))
+        FileHandle.standardError.write(Data("MenubarHelper: surfacing menu for a user relaunch\n".utf8))
         NSApp.activate(ignoringOtherApps: true)
         button.performClick(nil)
     }

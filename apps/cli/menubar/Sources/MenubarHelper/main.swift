@@ -86,7 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // notification for an inactive app rather than delivering it — the menu
         // would simply never open.
         DistributedNotificationCenter.default().addObserver(
-            controller, selector: #selector(StatusItemController.surface),
+            controller, selector: #selector(StatusItemController.surface(_:)),
             name: SingleInstance.surfaceNotification, object: nil,
             suspensionBehavior: .deliverImmediately
         )
