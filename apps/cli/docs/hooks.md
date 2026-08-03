@@ -172,7 +172,9 @@ script. The shim:
 3. Appends one JSONL line per fire to `~/.agents/.cache/logs/events-YYYY-MM-DD.jsonl`.
 4. Appends one NDJSON line to the disposable perf spool
    (`~/.agents/.cache/perf/spool.jsonl`), drained into `perf.db` on the next
-   `agents perf` / `agents hooks profile` open.
+   `agents perf` / `agents hooks profile` open. This line carries `cwd` and
+   `session_id` when the hook's own stdin JSON has them — that's what lets
+   `agents perf hooks --project <key>` scope a hook's rollup to one repo.
 
 Steps 3-4 (timing) run for EVERY shimmed hook, cache or not — that's what
 makes a matcher-only hook like git-guard show up in `agents perf hooks`.
