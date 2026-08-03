@@ -6,6 +6,24 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **Three new resume commands, and a shorter name for an old one.**
+  `Agents: Resume (Pick Session)` lists only abandoned sessions — detached,
+  background, parked, or idle; anything already open in a terminal somewhere is
+  left to plain `Agents: Resume` — and resumes each pick on the device the
+  session was created on. `Agents: Resume (Pick Host)` reopens the ACTIVE tab's
+  session on a device you pick, keeping the harness and its pinned version.
+  `Agents: Resume (Pick Harness)` continues the active tab's session in a
+  different harness on the same device: the new harness launches via
+  `agents run <harness> --interactive` (balanced account rotation) and loads the
+  old transcript through the universal `/continue` replay, so any harness can
+  pick up any other harness's session. `Agents: Resume Current Session in Best
+  Profile` is now titled `Agents: Resume (Best Profile)` — command id and the
+  ⌘⇧J keybinding unchanged. Source: `apps/factory/src/core/resumePicker.ts`
+  (`abandonedCandidates`), `apps/factory/src/core/resumeTarget.ts`
+  (`buildHarnessOptions`), `apps/factory/src/core/resumeInBest.ts`
+  (`buildAgentRunLaunchCommand`), `apps/factory/src/vscode/extension.ts`
+  (`resumeCurrentPickHost`, `resumeCurrentPickHarness`, `launchResumeInHarness`).
+
 - **Floor no longer collapses distinct sessions that arrive without an id.** A remote
   session row was keyed `remote-<host>-<sessionId>`; when the CLI could not attribute a
   tmux pane (empty id), every such row collided on `remote-<host>-`, a React key clash

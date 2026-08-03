@@ -70,6 +70,7 @@ Every open agent terminal is fully restorable. Session ID, icon, and custom labe
 - **Session history** - Browse recent sessions from the dashboard. Resume any previous conversation.
 - **Fork a session** - `Agents: Fork` starts a sibling agent on the active tab's session, leaving the original running. `Agents: Fork (Pick Session)` opens a session browser first — recent sessions grouped by the machine they live on, with a title-bar button to browse any registered device. The fork runs where the session lives, so picking a session from a fleet box starts the sibling agent on that box.
 - **Agents: Resume** - Pick several sessions at once; each reopens in its own tab with its agent's icon. Sessions still running with no terminal attached — the agent survived in tmux, the window that showed it did not — are listed first and pre-selected, so a crashed window is one command away from being back.
+- **Resume variants** - `Agents: Resume (Pick Session)` lists only abandoned sessions — detached, backgrounded, parked, or idle, nothing currently open anywhere — and resumes each on the device it was created on. `Agents: Resume (Pick Host)` reopens the active tab's session on a device you pick (same harness, same version). `Agents: Resume (Pick Harness)` continues the active tab's session in a different harness on the same device, replaying the transcript through the universal `/continue` flow. `Agents: Resume (Best Profile)` rotates the active tab to the signed-in account with the most usage headroom (`Cmd+Shift+J`).
 
 ### Factory Floor
 
