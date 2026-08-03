@@ -80,7 +80,7 @@ describe('parseCacheConfig', () => {
 
 describe('generateHookShim', () => {
   let tmpHome: string;
-  let testPaths: { shimsDir: string; cacheDir: string; logsDir: string };
+  let testPaths: { shimsDir: string; cacheDir: string; logsDir: string; perfDir: string };
 
   beforeEach(() => {
     tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-hook-cache-test-'));
@@ -88,6 +88,7 @@ describe('generateHookShim', () => {
       shimsDir: path.join(tmpHome, 'shims'),
       cacheDir: path.join(tmpHome, 'cache'),
       logsDir: path.join(tmpHome, 'logs'),
+      perfDir: path.join(tmpHome, 'perf'),
     };
   });
 

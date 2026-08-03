@@ -21,6 +21,14 @@ export interface Device {
   registeredAt: number;
 }
 
+/**
+ * The minimal device shape the fleet sweep actually reads (name + address +
+ * reachability). Both `Device` and the persisted `HostPickerDevice` satisfy it,
+ * so the host-picker cache can drive a usage sweep without carrying the full
+ * registry row.
+ */
+export type DeviceRef = Pick<Device, 'name' | 'host' | 'online'>;
+
 interface AgentsDeviceEntry {
   name: string;
   platform?: string;
@@ -39,8 +47,13 @@ interface AgentsDeviceEntry {
 export async function listRegisteredDevices(): Promise<Device[]> {
   try {
     const bin = await resolveAgentsBin();
+    // 20s, not 8s: on a loaded box the CLI's per-run startup alone can exceed
+    // 8s. The host picker's render path never waits on this (it renders from
+    // the persisted snapshot and refreshes in the background); cold-start
+    // callers like the browse-device switcher and balanced-launch still await
+    // it directly, so the timeout stays bounded rather than removed.
     const { stdout } = await execFileAsync(bin, ['devices', 'list', '--json'], {
-      timeout: 8_000,
+      timeout: 20_000,
       env: augmentedEnv(bin),
     });
     const parsed = JSON.parse(stdout) as unknown;

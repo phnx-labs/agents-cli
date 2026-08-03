@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { SessionEvent } from './types.js';
 import {
+  bashToolCounts,
   classifyFileChanges,
   changeCounts,
   toolHistogram,
@@ -291,5 +292,29 @@ describe('detectTestResult', () => {
     const r = detectTestResult([tool('Bash', undefined, 'bun test'), result(BUN_OUTPUT)]);
     expect(r?.runner).toBe('tests');
     expect(r?.passed).toBe(294);
+  });
+});
+
+describe('bashToolCounts', () => {
+  it('counts recognized Bash tools by bucket key', () => {
+    const counts = bashToolCounts([
+      tool('Bash', undefined, 'git status'),
+      tool('Bash', undefined, 'git commit -m fix'),
+      tool('Bash', undefined, 'git status'),
+      tool('Bash', undefined, 'ffmpeg -i a.mp4 b.mp4'),
+    ]);
+    expect(counts).toEqual({
+      'git status': 2,
+      'git commit': 1,
+      ffmpeg: 1,
+    });
+  });
+
+  it('ignores non-Bash tool_use events', () => {
+    expect(bashToolCounts([tool('Write', 'src/x.ts'), tool('Read', 'src/y.ts')])).toEqual({});
+  });
+
+  it('buckets unknown commands as other', () => {
+    expect(bashToolCounts([tool('Bash', undefined, './custom-script arg')])).toEqual({ other: 1 });
   });
 });

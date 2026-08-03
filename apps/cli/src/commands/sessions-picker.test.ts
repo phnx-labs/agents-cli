@@ -7,14 +7,14 @@
  * RUSH-2045 also surfaces compact checklist progress (✓N/M · step) from
  * SessionMeta.todos even when no transcript is on disk.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
-import { buildPreview, formatTodoCompact, githubRepoUrlFromCwd, relativizeDir } from './sessions-picker.js';
+import { buildPreview, extractTiming, formatTodoCompact, githubRepoUrlFromCwd, relativizeDir } from './sessions-picker.js';
 import { _resetLinearWorkspaceCache } from '../lib/session/linear.js';
-import type { SessionMeta, TodoProgress } from '../lib/session/types.js';
+import type { SessionEvent, SessionMeta, TodoProgress } from '../lib/session/types.js';
 
 function mk(overrides: Partial<SessionMeta>): SessionMeta {
   return {
@@ -362,5 +362,74 @@ describe('remote preview body — richer, and sanitized', () => {
     expect(out).not.toContain('\x1b[31m');
     expect(out).not.toContain('\x1b]0;');
     expect(stripVTControlCharacters(out)).toContain('red plan title');
+  });
+});
+
+/**
+ * The timing line used to come from the parsed transcript alone, so the two
+ * sessions you most often browse for — a remote one, and a live one not indexed
+ * on this box — showed no timing at all. It reads the indexed SessionMeta as
+ * well now, and reports creation and last activity as separate fields.
+ */
+describe('extractTiming — created / last active / lasted', () => {
+  afterEach(() => vi.useRealTimers());
+
+  const message = (timestamp: string): SessionEvent =>
+    ({ type: 'message', role: 'user', content: 'hi', timestamp } as SessionEvent);
+
+  const times = (over: Partial<SessionMeta> = {}) =>
+    mk({ timestamp: '2026-07-01T12:00:00.000Z', ...over });
+
+  it('reads the transcript when there is one', () => {
+    vi.setSystemTime(new Date('2026-07-04T12:00:00.000Z'));
+    expect(
+      extractTiming(times(), [message('2026-07-04T09:00:00.000Z'), message('2026-07-04T11:00:00.000Z')]),
+    ).toEqual({ createdAgo: '3h', lastActiveAgo: '1h', duration: '2h' });
+  });
+
+  it('falls back to the indexed metadata when there is no transcript to parse', () => {
+    // The remote-session case: this line was blank before.
+    vi.setSystemTime(new Date('2026-07-04T12:00:00.000Z'));
+    expect(extractTiming(times({ lastActivity: '2026-07-04T10:00:00.000Z' }), [])).toEqual({
+      createdAgo: '3d',
+      lastActiveAgo: '2h',
+      duration: '2d 22h',
+    });
+  });
+
+  it('prefers the scan-persisted duration over subtracting a possibly-mtime last activity', () => {
+    vi.setSystemTime(new Date('2026-07-04T12:00:00.000Z'));
+    expect(
+      extractTiming(times({ lastActivity: '2026-07-04T10:00:00.000Z', durationMs: 45 * 60_000 }), []).duration,
+    ).toBe('45m');
+  });
+
+  it('reports creation alone for a session that never spanned a minute', () => {
+    vi.setSystemTime(new Date('2026-07-04T12:00:00.000Z'));
+    expect(
+      extractTiming(times({ timestamp: '2026-07-04T09:00:00.000Z', lastActivity: '2026-07-04T09:00:20.000Z' }), []),
+    ).toEqual({ createdAgo: '3h' });
+  });
+
+  it('says nothing rather than guessing when the creation time is unparseable', () => {
+    expect(extractTiming(times({ timestamp: 'not-a-date' }), [])).toEqual({});
+  });
+});
+
+describe('buildPreview — timing for a session with no local transcript', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('shows created, last active and lasted from the indexed metadata', () => {
+    vi.setSystemTime(new Date('2026-07-04T12:00:00.000Z'));
+    const preview = stripVTControlCharacters(
+      buildPreview(mk({
+        timestamp: '2026-07-01T12:00:00.000Z',
+        lastActivity: '2026-07-04T10:00:00.000Z',
+        cwd: '/home/me/repo',
+      })),
+    );
+    expect(preview).toContain('created 3d ago');
+    expect(preview).toContain('last active 2h ago');
+    expect(preview).toContain('lasted 2d 22h');
   });
 });

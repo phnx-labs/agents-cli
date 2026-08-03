@@ -258,6 +258,7 @@ not fit, `coverage.complete` is false and `truncation.reason` is
   "version": "2.1.112",
   "account": "you@example.com",
   "timestamp": "2026-04-22T13:37:14.047Z",
+  "lastActivity": "2026-04-22T13:49:36.121Z",
   "project": "agents",
   "cwd": "/Users/you/src/github.com/phnx-labs/agents",
   "gitBranch": "main",
@@ -282,7 +283,8 @@ Fields:
 | `origin` | `cli` or `routine` | Routine rows are archived from a run directory and can be filtered with `--routine` |
 | `routineName` | Routine name | Present when `origin` is `routine` |
 | `routineRunId` | Routine run id | Present when `origin` is `routine`; `agents sessions <runId>` resolves it |
-| `timestamp` | Session start | ISO 8601 |
+| `timestamp` | Session start | ISO 8601 — the creation time, never overwritten by later activity |
+| `lastActivity` | Last message timestamp, else file mtime, else `timestamp` | The recency signal the listing sorts by; see [Two time fields per row](#two-time-fields-per-row) |
 | `project` | Derived from `cwd` | Basename of the working directory |
 | `cwd` | Recorded at spawn | Normalized absolute path |
 | `gitBranch` | Recorded at spawn | `null` outside a repo |
@@ -296,6 +298,36 @@ Fields:
 | `spawnedTeam` | The team this session CREATED, read off its `agents teams create/add` command at scan time | `null` for the ~everything that never ran one; the inverse of `isTeamOrigin` |
 | `teamOrigin` | For a teammate: its `{team, handle, mode, parentSessionId}`, read from the teammate's `meta.json` | `null` for a non-teammate; `team`/`parentSessionId` absent on records predating their capture, or once the 7-day teams cleanup removes the dir |
 | `plan` | Last `ExitPlanMode` plan markdown (Claude sessions only) | `null` when the session never entered plan-review |
+
+### Two time fields per row
+
+The trailing time cell of a listing row carries **both** ends of the session —
+when it was created and when it was last active:
+
+```
+03f1c81a  claude  2.1.219  agents-cli  Optimize agent workflow performance   3d → 1 hour ago
+019fc035  codex   0.146.0  muqsit      Debug hook adders in codex run           31 min ago
+```
+
+Last activity is the field the listing sorts by, so it stays on the right, in
+the long form (`1 hour ago`); creation is the compact age to its left (`3d`).
+Reading them together also gives the span — a row that says `3d → 1 hour ago` is
+a session that has been alive for three days and was touched an hour ago, which
+one label alone cannot express.
+
+Two cases collapse to a single field:
+
+- **The session ran for under a minute.** Both halves would name the same
+  moment, so only last activity renders (`sessionAgeParts`,
+  `src/lib/session/relative-time.ts`).
+- **The terminal is too narrow.** The creation age is dropped before the topic
+  is squeezed below its 16-column floor — the same fits-or-drops rule the model
+  column uses. A row never wraps to buy a second time field.
+
+The interactive picker's detail pane spells the same facts out as
+`created X ago · last active Y ago · lasted Z`, and reads them from the indexed
+`SessionMeta` when there is no local transcript to parse — so a **remote** or
+not-yet-indexed session reports its timing too, instead of showing none.
 
 ## SessionEvent (detail output)
 
@@ -617,6 +649,27 @@ agents sessions d3470b57-2af6-4c11-b1de-3fab94f43603
 - The parent uses the versioned hidden `--resolve-safe-v1` peer protocol. An older peer,
   malformed peer JSON, or an unreadable device registry makes the sweep incomplete;
   the command emits no JSON and exits 2 instead of deciding from partial results.
+- **Which peers get dialed** is `isDialableDevice`
+  ([`src/lib/devices/registry.ts`](../src/lib/devices/registry.ts)) — a **union** of the
+  two liveness signals, where either one saying "go" is enough:
+  - No `tailscale` block at all is **unknown-not-offline**, so the peer is dialed. A
+    device registered with `address.via: "manual"` never gets a Tailscale peer entry, so
+    its `online` is permanently `undefined`; the old strict `online === true` test
+    skipped it forever and made every session on that box unresolvable from elsewhere.
+    This matches `ssh.ts` `renderDeviceTable` and Factory's `isDeviceOnline`, so the
+    picker and the sweep agree on who exists.
+  - A **positive** live SSH probe (`DeviceProfile.reachability`, RUSH-1965) additionally
+    rescues a device whose snapshot says offline.
+  - A **failed** probe never removes a peer. The probe runs on a short SSH budget and
+    returns false negatives on a congested tailnet — it has been observed marking the
+    local machine unreachable — so excluding on it would hide sessions on healthy boxes.
+    Dialing a box that is actually asleep costs one `ConnectTimeout`.
+
+  Note the interaction with the exit-2 rule above: a peer that is dialed but does not
+  answer still counts as unreachable, and `--resolve` then refuses to decide rather than
+  return a possibly-non-unique match. A fleet with a permanently-sleeping registered
+  device will therefore keep reporting a partial resolve until that device is removed
+  from the registry or wakes up.
 
 ## Forking (branch a conversation)
 

@@ -56,6 +56,8 @@ interface ExecCommandActionOptions {
   name?: string;
   /** --notify: post a desktop notification when a headless run finishes. */
   notify?: boolean;
+  /** --terminal [backend]: open this run in a terminal tab; `true` = auto-detect. */
+  terminal?: string | boolean;
   verbose?: boolean;
   raw?: boolean;
   /** `--no-tmux` → commander sets this false (default true) to bypass the tmux wrapper. */
@@ -118,6 +120,25 @@ export function parseRunAccountPickerRequest(agentSpec: string): RunAccountPicke
 }
 
 /** Return every option whose routing semantics conflict with a local account choice. */
+/**
+ * The `--host` alias family — the flags that mean "dispatch this run to another
+ * machine over SSH". `--host` is canonical; `--device`/`--on`/`--computer` are
+ * aliases. Returns the values actually given (so callers can both test presence
+ * and read the target). Kept in ONE place because a guard that listed only a
+ * subset silently let `--terminal --device` open a local tab and drop the remote
+ * target — the drift this predicate exists to prevent.
+ */
+export function hostTargetGiven(options: {
+  host?: string;
+  device?: string;
+  on?: string;
+  computer?: string;
+}): string[] {
+  return [options.host, options.device, options.on, options.computer].filter(
+    (v): v is string => !!v,
+  );
+}
+
 export function runAccountPickerConflicts(options: {
   resume?: string | boolean;
   strategy?: string;
@@ -135,7 +156,7 @@ export function runAccountPickerConflicts(options: {
   if (options.balanced) conflicts.push('--balanced');
   if (options.lease) conflicts.push('--lease');
   if (options.box) conflicts.push('--box');
-  if (options.host || options.device || options.on || options.computer) conflicts.push('--host/--device');
+  if (hostTargetGiven(options).length) conflicts.push('--host/--device');
   return conflicts;
 }
 
@@ -504,6 +525,137 @@ export async function runWorkflowForEach(
   return 1;
 }
 
+/**
+ * The run's working directory from `--cwd` / `--project`. `--project <slug>` owns
+ * the directory and is mutually exclusive with `--cwd`/`--remote-cwd`; both the
+ * main dispatch and the `--terminal` handoff need the same answer, so the rule
+ * and its error live here once instead of in two places that can drift.
+ */
+async function resolveRunCwd(
+  options: Pick<ExecCommandActionOptions, 'cwd' | 'project' | 'remoteCwd'>,
+  opts: { forRemote: boolean },
+): Promise<string | undefined> {
+  if (!options.project) return options.cwd;
+  if (options.cwd || options.remoteCwd) {
+    console.error(chalk.red('Pass --project alone — not with --cwd or --remote-cwd.'));
+    process.exit(1);
+  }
+  const { resolveProjectRef } = await import('../lib/project-root.js');
+  try {
+    return await resolveProjectRef(options.project, { forRemote: opts.forRemote });
+  } catch (err) {
+    console.error(chalk.red((err as Error).message));
+    process.exit(1);
+  }
+}
+
+/**
+ * `--terminal`: hand this run to a real terminal tab and exit.
+ *
+ * The terminal is detected from the user's live sessions, so a run started from
+ * a surface that cannot host a TUI (the menu bar's "New Session", a script) lands
+ * in the terminal they actually work in instead of a hardcoded Terminal.app.
+ * Exits non-zero when no terminal could be opened — the caller must not believe
+ * a session started when none did.
+ */
+async function handleTerminalHandoff(
+  agentSpec: string,
+  options: ExecCommandActionOptions,
+  prompt: string | undefined,
+): Promise<void> {
+  const { parseTerminalFlag, openRunInTerminal, toHostSamples } = await import('../lib/terminal/run-surface.js');
+  const { currentContext } = await import('../lib/terminal/index.js');
+
+  const parsed = parseTerminalFlag(options.terminal);
+  if (parsed.error) {
+    console.error(chalk.red(parsed.error));
+    process.exit(1);
+  }
+
+  // Reject an unrunnable target HERE, where the person can read it. The tab would
+  // otherwise open, print the same error, and close — the failure lands in a
+  // window that is gone before it can be read, which reads as "nothing happened".
+  //
+  // `agents run <thing>` takes an agent id, a PROFILE, or a WORKFLOW (see the
+  // isValidAgent / profileExists / resolveWorkflowRef chain below), so this must
+  // accept all three. Gating on the agent table alone rejected every profile —
+  // the whole Kimi/DeepSeek/Qwen/GLM path — for `--terminal` runs only.
+  const rawTarget = parseRunAccountPickerRequest(agentSpec).normalizedAgentSpec.split('@')[0];
+  const knownAgent = resolveAgentName(rawTarget);
+  if (knownAgent && isAgentHardDeprecated(knownAgent)) {
+    console.error(chalk.red(hardDeprecationError(knownAgent)));
+    process.exit(1);
+  }
+  if (!knownAgent) {
+    const [{ profileExists }, { resolveWorkflowRef }] = await Promise.all([
+      import('../lib/profiles.js'),
+      import('../lib/workflows.js'),
+    ]);
+    const probeCwd = options.cwd ?? process.cwd();
+    if (!profileExists(rawTarget) && !resolveWorkflowRef(rawTarget, probeCwd)) {
+      console.error(chalk.red(
+        `Unknown agent, profile, or workflow: ${rawTarget}. See \`agents list\` for the installed harnesses.`,
+      ));
+      process.exit(1);
+    }
+  }
+  // --host and its aliases (--device/--on/--computer) all mean "dispatch this
+  // run to another machine over SSH", which is incompatible with opening a
+  // terminal tab on THIS machine — so reject the whole alias family, not just
+  // the canonical flag. The rule and its wording live once, in the --host
+  // forwarding table, so the classification a reviewer reads and the error a
+  // user sees can't drift.
+  if (hostTargetGiven(options).length) {
+    const { RUN_OPTION_REJECT_MESSAGES } = await import('../lib/hosts/remote-cmd.js');
+    console.error(chalk.red(RUN_OPTION_REJECT_MESSAGES.terminal));
+    process.exit(1);
+  }
+  // Machine-readable output would land in the tab, where the caller that asked
+  // for it can never read it. Same class of failure as --host: refuse, don't
+  // hand back a stream that goes nowhere.
+  const streamFlag = options.json ? '--json' : options.emitSessionId ? '--emit-session-id' : undefined;
+  if (streamFlag) {
+    console.error(chalk.red(
+      `${streamFlag} streams to stdout, but --terminal moves the run into a tab where you cannot read it. Drop one.`,
+    ));
+    process.exit(1);
+  }
+
+  // `--project` owns the working directory, but the main action resolves it far
+  // below this handoff — so without this the tab would open in THIS process's
+  // cwd (launchd's `/` for a menu-bar click) while the run inside it moved to
+  // the project. `forRemote: false` because --terminal is always local (--host
+  // is rejected above).
+  const cwd = await resolveRunCwd(options, { forRemote: false });
+
+  const { getActiveSessions } = await import('../lib/session/active.js');
+  let sessions: Awaited<ReturnType<typeof toHostSamples>> = [];
+  try {
+    sessions = await toHostSamples(await getActiveSessions());
+  } catch {
+    // Detection is best-effort — an unreadable session index must not block the
+    // launch; resolution falls through to the available-backend floor.
+  }
+
+  const result = await openRunInTerminal({
+    argv: process.argv.slice(2),
+    forced: parsed.backend,
+    consumedValue: typeof options.terminal === 'string' ? options.terminal : undefined,
+    cwd: cwd ?? process.cwd(),
+    sessions,
+    ctx: currentContext(),
+  });
+
+  if (!result.ok) {
+    console.error(chalk.red(`Could not open a terminal: ${result.error ?? 'unknown error'}`));
+    process.exit(1);
+  }
+  if (!options.quiet) {
+    const what = prompt === undefined ? 'session' : 'run';
+    console.log(chalk.gray(`Opened the ${what} in ${result.description}.`));
+  }
+}
+
 /** Register the `agents run <agent> [prompt]` command. */
 export function registerRunCommand(program: Command): void {
   const runCmd = program
@@ -553,6 +705,10 @@ export function registerRunCommand(program: Command): void {
     .option('--session-id <id>', 'Force a NEW conversation to use this exact session UUID (Claude only). This CREATES a session — to resume an existing one, use --resume.')
     .option('--name <slug>', 'Name the run — seeds the session label so it shows up as `<name>` in `agents sessions` and resolves by it (and `agents hosts logs <name>` for --host runs) instead of an opaque id. An agent-generated title later refines the label; your name shows until then. Optional.')
     .option('--notify', 'Post a desktop notification when a headless run finishes. Fired by this process on exit, so it survives whatever launched the run (the menu bar dispatching it, a terminal you closed).')
+    .option(
+      '--terminal [backend]',
+      "Open this run in a real terminal tab instead of here. Without a value the terminal is detected from your live sessions (`agents sessions --active` host), so it lands where you already work — Ghostty for a Ghostty user, iTerm for an iTerm user. Name one to force it: iterm | ghostty | terminal | tmux | vscodium-agent. This is how the menu bar's New Session opens.",
+    )
     .option('--verbose', 'Show detailed execution logs')
     .option('--raw', 'Interactive runs on macOS/Linux launch inside a shared tmux session (for %pane addressing + re-attach). Pass --raw to spawn the agent directly instead. Also disabled by AGENTS_NO_TMUX=1.')
     .option('--no-tmux', 'Spawn the agent directly instead of wrapping it in the shared tmux session. Same effect as --raw / AGENTS_NO_TMUX=1. Use this to see the agent\'s full startup output when a launch is failing.')
@@ -670,6 +826,11 @@ export function registerRunCommand(program: Command): void {
       # Pick a signed-in account/version for only this run
       agents run claude@
 
+      # Open the session in a terminal tab — detected from where your sessions
+      # already run (Ghostty / iTerm / Terminal.app); force one with a value
+      agents run claude --terminal
+      agents run claude --terminal ghostty
+
       # Pipe JSON events to a parser (--quiet drops the preamble)
       agents run claude "..." --json --quiet | jq
 
@@ -738,6 +899,16 @@ export function registerRunCommand(program: Command): void {
         // The token commander assigned to [prompt] came from behind `--` — it is
         // a native flag, not a prompt. Run interactively.
         prompt = undefined;
+      }
+
+      // --terminal: this process can't host the TUI (a menu-bar click, a script),
+      // so hand the run to a real terminal and exit. Resolved from the user's own
+      // live sessions, so it opens where they already work. Done before every
+      // other dispatch path because the tab re-runs this same argv without the
+      // flag — arming --notify or picking a version here would happen twice.
+      if (options.terminal) {
+        await handleTerminalHandoff(agentSpec, options, prompt);
+        return;
       }
 
       // --notify: post a desktop notification when this run finishes. Armed on
@@ -1162,24 +1333,14 @@ export function registerRunCommand(program: Command): void {
 
       // --host/--on/--computer: offload this run onto a registered agent host
       // over SSH instead of running locally. The three flags are aliases.
-      const hostGiven = [options.host, options.device, options.on, options.computer].filter((v): v is string => !!v);
+      const hostGiven = hostTargetGiven(options);
 
       // --project <slug>[@worktree]: resolve the projects-root shorthand into a
       // cwd. On a host run it resolves home-relative (`~/…`, so the host expands
       // it); locally it becomes an absolute path. It owns the working directory,
       // so it is mutually exclusive with both --cwd and --remote-cwd.
       if (options.project) {
-        if (options.cwd || options.remoteCwd) {
-          console.error(chalk.red('Pass --project alone — not with --cwd or --remote-cwd.'));
-          process.exit(1);
-        }
-        const { resolveProjectRef } = await import('../lib/project-root.js');
-        try {
-          options.cwd = await resolveProjectRef(options.project, { forRemote: hostGiven.length > 0 });
-        } catch (err) {
-          console.error(chalk.red((err as Error).message));
-          process.exit(1);
-        }
+        options.cwd = await resolveRunCwd(options, { forRemote: hostGiven.length > 0 });
       }
 
       if (hostGiven.length > 0) {

@@ -307,7 +307,19 @@ interface SessionResolverSshPeer {
   fixture: ChildProcess;
   socket: string;
   proofFile: string;
+  /** The test's temp home — every process of this test carries it in argv. */
+  home: string;
 }
+
+/**
+ * Temp base for the ssh-peer tests. The production ControlPath is
+ * `<home>/.agents/.cache/ssh/cm-%C`, and ssh appends a ~18-char listener
+ * suffix — under macOS CI's deep TMPDIR (/var/folders/<30 chars>/T/sr-XXXXXX)
+ * that blows past the 104-byte sun_path limit and every peer test fails at
+ * ControlMaster startup. `/tmp` resolves to /private/tmp (12 chars), keeping
+ * the full socket path under the limit. Linux paths are short already.
+ */
+const sshPeerTmpBase = process.platform === 'darwin' ? '/tmp' : os.tmpdir();
 
 /** Start the real ssh2 peer and graft its ephemeral TCP listener onto the exact
  * default-port OpenSSH ControlPath the production parent will look up. */
@@ -398,7 +410,7 @@ async function startSessionResolverSshPeer(
     '-o', 'ControlPersist=60s', target,
   ], { encoding: 'utf-8', timeout: 10_000 });
   if (master.status !== 0) throw new Error(`ssh ControlMaster failed: ${master.stderr}`);
-  return { target, fixture, socket, proofFile };
+  return { target, fixture, socket, proofFile, home: tempHome };
 }
 
 async function stopSessionResolverSshPeer(peer: SessionResolverSshPeer): Promise<void> {
@@ -407,6 +419,23 @@ async function stopSessionResolverSshPeer(peer: SessionResolverSshPeer): Promise
   });
   if (!peer.fixture.killed) peer.fixture.kill('SIGTERM');
   await new Promise<void>((resolve) => peer.fixture.once('exit', () => resolve()));
+  // The peer side lingers past fixture death: the npx'd old agents-cli that
+  // answered over ssh (still flushing its index into peer-home/.agents) and
+  // the parent's own ControlPersist master. Both keep writing into the temp
+  // home, which raced the cleanup rmdir ENOTEMPTY on CI even with rm retries.
+  // Every one of those processes carries this test's unique temp path in argv,
+  // so a path-scoped pkill reaps exactly them and nothing else.
+  spawnSync('pkill', ['-f', peer.home]);
+}
+
+/**
+ * rm -rf the peer test's temp home, tolerating the trailing writes the peer
+ * side (an npx'd old agents-cli answering over ssh, plus the ControlPersist
+ * master winding down) races into it after stop — a bare rmSync intermittently
+ * dies ENOTEMPTY on CI. Retries absorb exactly that window.
+ */
+function rmTempHomeWithRetries(tempHome: string): void {
+  fs.rmSync(tempHome, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 });
 }
 
 describe('resolveSessionQuery indexed metadata coverage', () => {
@@ -563,7 +592,7 @@ describe('agents sessions --resolve local-peer critical path', () => {
   });
 
   it('returns a partial fleet result when a real old peer rejects the safe resolver protocol', async () => {
-    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sr-'));
+    const tempHome = fs.mkdtempSync(path.join(sshPeerTmpBase, 'sr-'));
     let peer: SessionResolverSshPeer | undefined;
     try {
       writeUpdateCache(tempHome);
@@ -585,12 +614,12 @@ describe('agents sessions --resolve local-peer critical path', () => {
       );
     } finally {
       if (peer) await stopSessionResolverSshPeer(peer);
-      fs.rmSync(tempHome, { recursive: true, force: true });
+      rmTempHomeWithRetries(tempHome);
     }
   });
 
   it('returns a partial fleet result when a real exit-zero peer emits malformed safe output', async () => {
-    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sr-'));
+    const tempHome = fs.mkdtempSync(path.join(sshPeerTmpBase, 'sr-'));
     let peer: SessionResolverSshPeer | undefined;
     try {
       writeUpdateCache(tempHome);
@@ -609,7 +638,7 @@ describe('agents sessions --resolve local-peer critical path', () => {
       expect(result.stderr).toContain('No unique/no-match decision was made.');
     } finally {
       if (peer) await stopSessionResolverSshPeer(peer);
-      fs.rmSync(tempHome, { recursive: true, force: true });
+      rmTempHomeWithRetries(tempHome);
     }
   });
 

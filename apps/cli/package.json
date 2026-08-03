@@ -1,6 +1,6 @@
 {
   "name": "@phnx-labs/agents-cli",
-  "version": "1.20.90",
+  "version": "1.20.91",
   "description": "One CLI for all your AI coding agents - versions, config, cloud dispatch, sessions, and teams (now with first-class Grok Build CLI support)",
   "type": "module",
   "main": "dist/index.js",
@@ -99,6 +99,7 @@
     "marked-terminal": "7.3.0",
     "ora": "9.4.1",
     "proper-lockfile": "4.1.2",
+    "shlex": "3.0.0",
     "simple-git": "3.36.0",
     "smol-toml": "1.7.0",
     "unbash": "4.0.5",

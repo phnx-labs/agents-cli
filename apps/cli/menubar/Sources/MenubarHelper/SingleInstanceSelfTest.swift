@@ -17,6 +17,7 @@ enum SingleInstanceSelfTest {
         testLockReleasedWhenHolderDies()
         testLockPathIsRuntimeStateDir()
         testDumpProbeIsExempt()
+        testTriggerClassification()
         if failures == 0 {
             print("\nALL PASS")
             exit(0)
@@ -87,6 +88,27 @@ enum SingleInstanceSelfTest {
               "ordinary launch -> gated")
         check(!SingleInstance.isTransientProbe(["MENUBAR_DUMP": "0"]),
               "MENUBAR_DUMP=0 -> gated")
+    }
+
+    // An agent-spawned relaunch (buildExecEnv stamps AGENTS_AGENT_NAME /
+    // AGENTS_SESSION_ID) must be classified automated, so the incumbent re-homes
+    // without stealing focus; a bare user relaunch must surface.
+    private static func testTriggerClassification() {
+        let agentRun = SingleInstance.classifyTrigger(["AGENTS_AGENT_NAME": "claude"])
+        check(agentRun.automated, "AGENTS_AGENT_NAME set -> automated")
+        check(agentRun.agent == "claude", "automated trigger carries the agent name")
+
+        let sessionRun = SingleInstance.classifyTrigger(["AGENTS_SESSION_ID": "sess-123"])
+        check(sessionRun.automated, "AGENTS_SESSION_ID set -> automated")
+        check(sessionRun.sessionId == "sess-123", "automated trigger carries the session id")
+
+        let userRun = SingleInstance.classifyTrigger([:])
+        check(!userRun.automated, "no agent/session env -> user relaunch (surfaces)")
+        check(userRun.userInfo["automated"] == "0", "user trigger userInfo marks automated=0")
+
+        // The userInfo dict must be string-only so it survives distributed delivery.
+        check(agentRun.userInfo["automated"] == "1" && agentRun.userInfo["agent"] == "claude",
+              "automated userInfo is plist-safe strings")
     }
 
     private static func check(_ condition: Bool, _ label: String) {

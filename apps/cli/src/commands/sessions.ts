@@ -15,6 +15,8 @@ import { Option, type Command } from 'commander';
 import chalk from 'chalk';
 import { truncate, padRight } from '../lib/format.js';
 import { sanitizeForTerminal } from '../lib/redact.js';
+import { resolveProjectKey } from '../lib/project-key.js';
+import { listProjectDefs, resolveProjectNameForCwd, type ProjectDef } from '../lib/projects.js';
 import ora from 'ora';
 import type { AgentId } from '../lib/types.js';
 import type { SessionAgentId, SessionMeta, ViewMode } from '../lib/session/types.js';
@@ -37,7 +39,7 @@ import { purgeToolCalls } from '../lib/session/tool-store.js';
 import { filterTeamSessions, safeTeamText } from '../lib/session/team-filter.js';
 import { parseSession } from '../lib/session/parse.js';
 import { runRemoteSessions, buildForwardedArgs, ensureWholeIndex } from '../lib/session/remote.js';
-import { formatRelativeTime } from '../lib/session/relative-time.js';
+import { formatRelativeTime, sessionAgeParts, type SessionAgeParts } from '../lib/session/relative-time.js';
 import { renderConversationMarkdown, renderSummary, renderSummaryHeader, computeSummaryStats, renderJson, filterEvents, parseRoleList, linkPath, linkUrl, shortenModel, type FilterOptions } from '../lib/session/render.js';
 import { linearIssueUrl } from '../lib/session/linear.js';
 import { renderMarkdown } from '../lib/markdown.js';
@@ -2151,6 +2153,33 @@ function metaSignals(s: SessionMeta): Parameters<typeof signalBadges>[0] {
   };
 }
 
+/**
+ * Narrowest topic a row is willing to render. The time cell drops its creation
+ * field rather than squeeze the topic past this — a row that wraps is worse than
+ * a row missing one field.
+ */
+const MIN_TOPIC_W = 16;
+
+/**
+ * The trailing time cell, as two fields: `3d → 2 hours ago` — when the session
+ * was created, then when it was last active. One label answers neither "is this
+ * the old session I'm looking for" nor "how long did it run", since a session
+ * touched an hour ago may have started last week.
+ *
+ * Collapses to last-activity alone when the session ran under a minute (both
+ * halves would name the same moment) or when `topicSlack` — the columns the row
+ * has left for its topic — cannot spare the extra width. `extraW` is what the
+ * creation field cost, for the caller to take off the topic budget.
+ */
+function timeCell(age: SessionAgeParts, topicSlack: number): { plain: string; text: string; extraW: number } {
+  const lastOnly = { plain: age.last, text: chalk.gray(age.last), extraW: 0 };
+  if (!age.created) return lastOnly;
+  const prefix = `${age.created} → `;
+  const extraW = stringWidth(prefix);
+  if (topicSlack - extraW < MIN_TOPIC_W) return lastOnly;
+  return { plain: prefix + age.last, text: chalk.dim(prefix) + chalk.gray(age.last), extraW };
+}
+
 /** One flat table row:
  *   shortId · agent · version · model · project · [glyph] label·doing · [ticket] · [wt] · time
  * `doing` is the live preview when running, else the topic. The `ticket` column
@@ -2165,7 +2194,7 @@ export function flatSessionRow(
   favorite = false,
 ): string {
   const agentColor = colorAgent(session.agent);
-  const when = formatRelativeTime(session.lastActivity ?? session.timestamp);
+  const age = sessionAgeParts(session.timestamp, session.lastActivity);
   const project = session.project || '-';
   const tag = originTag(session) || teamTag(session);
   const label = (session as any).label;
@@ -2204,12 +2233,15 @@ export function flatSessionRow(
   // Same conditional 2 cells as the picker's marker, for the same reason.
   const favW = cols.showFavorite ? 2 : 0;
   const favCell = cols.showFavorite ? (favorite ? chalk.yellow('★ ') : '  ') : '';
-  const fixedW = favW + (10 + 9 + 8 + 16) + glyphW + statusW + machineW + ticketW + wtW + team.width + stringWidth(when) + 1;
-  const modelSlack = width - fixedW - 16;
+  // Sized against the last-activity label alone, so the creation field is an
+  // additive decision the row makes only once it knows what space is left.
+  const fixedW = favW + (10 + 9 + 8 + 16) + glyphW + statusW + machineW + ticketW + wtW + team.width + stringWidth(age.last) + 1;
+  const modelSlack = width - fixedW - MIN_TOPIC_W;
   const modelW = requestedModelW <= modelSlack
     ? requestedModelW
     : modelSlack >= PICKER_MODEL_MIN ? modelSlack : 0;
-  const topicW = Math.max(16, width - fixedW - modelW);
+  const when = timeCell(age, width - fixedW - modelW);
+  const topicW = Math.max(MIN_TOPIC_W, width - fixedW - modelW - when.extraW);
 
   return (
     favCell +
@@ -2225,14 +2257,14 @@ export function flatSessionRow(
     renderTopicCell(label, doing, '', topicW, topicW) +
     ticketCell +
     (wt ? wt + ' ' : '') +
-    chalk.gray(when)
+    when.text
   );
 }
 
 /** One tree-mode row (grouped under a dir header): id · agent · badges · topic · time. No version/project column. */
 function treeSessionRow(session: SessionMeta, live?: ActiveSession): string {
   const agentColor = colorAgent(session.agent);
-  const when = formatRelativeTime(session.lastActivity ?? session.timestamp);
+  const age = sessionAgeParts(session.timestamp, session.lastActivity);
   const tag = originTag(session) || teamTag(session);
   const label = (session as any).label;
   const { glyph, preview } = liveGlyphAndPreview(live);
@@ -2248,7 +2280,9 @@ function treeSessionRow(session: SessionMeta, live?: ActiveSession): string {
   const head = label ? `${label} · ${topic}` : topic;
   const { cell: statusCell, width: statusW } = liveStatusCell(live);
   const glyphW = glyph ? 2 : 0;
-  const topicW = Math.max(12, terminalWidth() - (2 + 9 + 8) - glyphW - statusW - badgeW - team.width - stringWidth(when) - 1);
+  const baseTopicW = terminalWidth() - (2 + 9 + 8) - glyphW - statusW - badgeW - team.width - stringWidth(age.last) - 1;
+  const when = timeCell(age, baseTopicW);
+  const topicW = Math.max(12, baseTopicW - when.extraW);
 
   return (
     '  ' +
@@ -2259,7 +2293,7 @@ function treeSessionRow(session: SessionMeta, live?: ActiveSession): string {
     statusCell +
     teamSeg +
     padToWidth(chalk.white(truncateToWidth(head, topicW)), topicW) +
-    ' ' + chalk.gray(when)
+    ' ' + when.text
   );
 }
 
@@ -2282,18 +2316,19 @@ async function maybeLiveIndex(options: SessionsOptions): Promise<Map<string, Act
 }
 
 /**
- * Group key for the overview: prefer the indexed project name; else fold the cwd
- * to its repo — a worktree (`.../<repo>/.agents/worktrees/<slug>`) folds to the
- * repo, and a monorepo subdir falls back to its leaf dir basename. Pure.
+ * Group key for the overview: resolve the cwd through the same canonical
+ * resolver the `agents activity` timeline groups by — a defined project's name
+ * when `defs` contains the cwd (multi-repo projects read as one group), else
+ * the repo-level key, so a monorepo subdir (`<repo>/apps/cli`) reads as
+ * `<repo>` in both views. Falls back to the indexed project name (stamped at
+ * scan time) when the cwd carries nothing usable, e.g. a remote path this
+ * machine cannot see still folds by basename through the same resolver.
  */
-export function overviewProjectKey(s: Pick<SessionMeta, 'project' | 'cwd'>): string {
+export function overviewProjectKey(s: Pick<SessionMeta, 'project' | 'cwd'>, defs?: ProjectDef[]): string {
+  const resolved = defs?.length ? resolveProjectNameForCwd(s.cwd, defs) : resolveProjectKey(s.cwd);
+  if (resolved) return resolved;
   if (s.project && s.project.trim()) return s.project.trim();
-  const cwd = (s.cwd ?? '').replace(/\/+$/, '');
-  if (!cwd) return '(no project)';
-  const wt = cwd.match(/\/([^/]+)\/\.agents\/worktrees\//);
-  if (wt) return wt[1];
-  const parts = cwd.split('/');
-  return parts[parts.length - 1] || cwd;
+  return '(no project)';
 }
 
 export interface OverviewGroup {
@@ -2313,10 +2348,11 @@ export interface OverviewGroup {
 export function buildOverviewGroups(
   pool: SessionMeta[],
   perProjectCap: number,
+  defs?: ProjectDef[],
 ): { groups: OverviewGroup[]; projectCount: number } {
   const byKey = new Map<string, SessionMeta[]>();
   for (const s of pool) {
-    const k = overviewProjectKey(s);
+    const k = overviewProjectKey(s, defs);
     (byKey.get(k) ?? byKey.set(k, []).get(k)!).push(s);
   }
   const cap = Math.max(1, perProjectCap);
@@ -2340,7 +2376,7 @@ function printSessionOverview(
   liveIndex: Map<string, ActiveSession> | undefined,
   opts: { perProjectCap: number; expand: boolean; hiddenUnmanaged?: number },
 ): void {
-  const { groups } = buildOverviewGroups(pool, opts.expand ? Infinity : opts.perProjectCap);
+  const { groups } = buildOverviewGroups(pool, opts.expand ? Infinity : opts.perProjectCap, listProjectDefs());
   const shownGroups = opts.expand ? groups : groups.slice(0, OVERVIEW_MAX_PROJECTS);
   const hiddenProjects = groups.length - shownGroups.length;
 
@@ -2743,7 +2779,7 @@ export function formatPickerLabel(
   live?: ActiveSession,
 ): string {
   const agentColor = colorAgent(s.agent);
-  const when = formatRelativeTime(s.lastActivity ?? s.timestamp);
+  const age = sessionAgeParts(s.timestamp, s.lastActivity);
   const project = s.project || '-';
   // SSH-launch origin (live rows only): mirrors the flat listing's `ssh←<device>`
   // badge. Rendered as its OWN red segment before the topic cell — folding it into
@@ -2801,10 +2837,12 @@ export function formatPickerLabel(
   const status = cols.showStatus ? liveStatusCell(live) : { cell: '', width: 0 };
   const statusW = cols.showStatus ? LIVE_STATUS_W : 0;
   const statusCell = cols.showStatus ? (status.cell || ' '.repeat(LIVE_STATUS_W)) : '';
-  const topicW = Math.max(
-    16,
-    terminalWidth() - gutter - favW - statusW - (10 + 9 + 8 + 16) - machineColW - hostW - ticketW - wtW - sshW - team.width - stringWidth(when) - 1,
-  );
+  // Sized against the last-activity label alone; the creation field is then an
+  // additive decision made against whatever width is left (see the flat listing).
+  const baseTopicW =
+    terminalWidth() - gutter - favW - statusW - (10 + 9 + 8 + 16) - machineColW - hostW - ticketW - wtW - sshW - team.width - stringWidth(age.last) - 1;
+  const when = timeCell(age, baseTopicW);
+  const topicW = Math.max(MIN_TOPIC_W, baseTopicW - when.extraW);
 
   return (
     favCell +
@@ -2823,7 +2861,7 @@ export function formatPickerLabel(
     renderTopicCell(label, topic, query, topicW, topicW) +
     ticketCell +
     (wt ? wt + ' ' : '') +
-    chalk.gray(when)
+    when.text
   );
 }
 

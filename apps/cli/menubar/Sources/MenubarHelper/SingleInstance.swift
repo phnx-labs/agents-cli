@@ -26,6 +26,38 @@ enum SingleInstance {
     /// Distributed (not local) because the sender is a different process.
     static let surfaceNotification = Notification.Name("com.phnx-labs.agents-menubar.surface")
 
+    /// Who triggered a duplicate launch, resolved from the loser's env and carried
+    /// in the notification so the incumbent can decide whether to steal focus.
+    struct SurfaceTrigger: Equatable {
+        /// True when a coding agent (not the human) relaunched the helper — its env
+        /// carries the provenance `buildExecEnv` stamps on every spawn. The human
+        /// didn't ask to see the menu, so the incumbent re-homes silently instead
+        /// of popping the dropdown and stealing keyboard focus mid-task.
+        let automated: Bool
+        let agent: String?
+        let sessionId: String?
+
+        /// String-only so it survives distributed-notification delivery (plist).
+        var userInfo: [String: String] {
+            var info = ["automated": automated ? "1" : "0"]
+            if let agent { info["agent"] = agent }
+            if let sessionId { info["sessionId"] = sessionId }
+            return info
+        }
+    }
+
+    /// Classify a duplicate launch from its environment. An agent-spawned relaunch
+    /// (e.g. `agents menubar enable` run by a coding agent) carries AGENTS_AGENT_NAME
+    /// / AGENTS_SESSION_ID from `buildExecEnv`; a genuine user relaunch from an
+    /// interactive shell or Finder does not. Pure so the decision is unit-testable.
+    static func classifyTrigger(
+        _ environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> SurfaceTrigger {
+        let agent = environment["AGENTS_AGENT_NAME"]
+        let sessionId = environment["AGENTS_SESSION_ID"] ?? environment["AGENT_SESSION_ID"]
+        return SurfaceTrigger(automated: agent != nil || sessionId != nil, agent: agent, sessionId: sessionId)
+    }
+
     /// ~/.agents/.cache/state/menubar.lock — the same runtime state dir the CLI
     /// uses (`getRuntimeStateDir()` in src/lib/state.ts).
     static func lockPath(home: String = NSHomeDirectory()) -> String {
@@ -99,12 +131,16 @@ enum SingleInstance {
         case .acquired:
             return
         case .alreadyRunning(let pid):
+            let trigger = classifyTrigger()
             DistributedNotificationCenter.default().postNotificationName(
-                surfaceNotification, object: nil, userInfo: nil, deliverImmediately: true
+                surfaceNotification, object: nil, userInfo: trigger.userInfo, deliverImmediately: true
             )
             let who = pid > 0 ? " (pid \(pid))" : ""
+            let how = trigger.automated
+                ? " — automated relaunch (\(trigger.agent ?? trigger.sessionId ?? "agent")), re-homed without stealing focus"
+                : " — surfaced it instead of adding a second status item"
             FileHandle.standardError.write(Data(
-                "MenubarHelper: already running\(who) — surfaced it instead of adding a second status item.\n".utf8
+                "MenubarHelper: already running\(who)\(how).\n".utf8
             ))
             exit(0)
         }

@@ -408,9 +408,9 @@ SSH access (§7); rendering sessions that no harness produced.
   transcript MUST purge its call rows, program rows, FTS rows, and tool ledger
   when the source directory changes, without statting every indexed session.
   An unreachable or incompatible peer MUST also mark aggregate coverage partial
-  (`lib/session/remote-list.ts:51,78-96,193-230,328-500`;
+  (`lib/session/remote-list.ts:51,78-96,192-231,331-503`;
   `lib/session/tool-index.ts:73-97`; `lib/session/tool-store.ts:40-85`;
-  `commands/sessions.ts:1913-1950`).
+  `commands/sessions.ts:1915-1952`).
 - **SES-36 (MUST).** The shell-command sampling script MUST accept 50–100
   sessions, read the current device directly, retain only redacted shell-call
   origins and classifications, cap its JSON artifact at 16 MiB, and record
@@ -475,8 +475,8 @@ The command surface (bare `sessions [query]`, `tail`, `sync`, `resume`, `focus`,
   `SessionMeta[]` and exact-session JSON remains `{ session, events }`. Repeated
   `--query` clauses require distinct calls. `--fleet` MUST execute the query on
   each device's local index under the recursion guard and transfer compact
-  evidence only (`commands/sessions.ts:1913-1960,3708-3716,3868-3911`;
-  `lib/session/remote-list.ts:98-115,328-500`).
+  evidence only (`commands/sessions.ts:1915-1962,3747-3754,3903-3948`;
+  `lib/session/remote-list.ts:98-115,331-503`).
 
 #### 4.3 stdout / stderr / exit discipline
 
@@ -783,7 +783,7 @@ access control (that is 1Password/Vault; this tool is device-local first).
 
 - **SEC-11 (MUST).** `agents secrets list` and every internal metadata scan MUST
   complete with no Touch ID prompt and MUST print metadata only, never values
-  (`commands/secrets.ts:900-903`; SEC-4).
+  (`commands/secrets.ts:991`; SEC-4).
 - **SEC-12 (MUST).** Value reads MUST be batched so a bundle costs at most one
   Touch ID prompt, not one per key (`commands/secrets.ts:1073-1076`;
   `lib/secrets/bundles.ts:772-776,1262-1273`).

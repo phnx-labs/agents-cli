@@ -4,6 +4,41 @@ All notable changes to the Factory extension are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); `scripts/release.sh` requires a
 `## [<version>]` section for the version being published.
 
+## [0.9.309] - 2026-08-03
+
+- **The `(Pick Host)` host list shows every device instantly, even on a busy machine.**
+  The picker's snapshot is now warmed at extension startup (the cheap `devices
+  list` registry read, no fleet SSH sweep), so the first `New <Agent> (Pick Host)`
+  in a window renders every host immediately instead of showing only *This Mac* +
+  *Balanced* while a cold snapshot loads. When the snapshot is stale, the refresh
+  runs in two phases: the device rows swap in as soon as the registry read lands,
+  and the recent-usage annotations fill in afterward from the fleet sweep — so the
+  host list never waits on the fleet fan-out, which is where the seconds went on a
+  loaded laptop (an interactive box under heavy agent load turned a 0.4s registry
+  read into a multi-second wait).
+  Source: `src/vscode/extension.ts`, `src/core/hostPickerCache.ts`,
+  `src/vscode/remoteSessions.vscode.ts`.
+
+- **The host picker never goes empty again: a failed refresh keeps the rows you last saw.**
+  (Landed after the 0.9.308 build was cut, so it ships in 0.9.309 despite the
+  entry living under that heading before.) The 0.9.307 stale-while-revalidate
+  picker persisted whatever the background refresh returned — and on a loaded
+  box, `agents devices list --json` exceeded the extension's 8s spawn timeout,
+  the catch returned `[]`, and that empty result was written straight into
+  `agents.hostPicker.v1`. The menu then opened instantly (the cache did its
+  job) showing only "This Mac" and "Balanced". An empty device list is a
+  failed registry read, never a real empty fleet, so the refresh now folds
+  through `mergeHostPickerSnapshot`: an empty fetch keeps the previous rows
+  and scores, and with no confident data at all nothing is persisted (the
+  picker stays in cold-start mode and retries next open), and the snapshot
+  keeps its true age so the rows' `updated Xm ago` label never claims a failed
+  refresh was fresh. The registry read's timeout also goes 8s → 20s — the host
+  picker's render path never waits on it (cold-start callers like the
+  browse-device switcher still do, bounded). Source:
+  `apps/factory/src/core/hostPickerCache.ts` (`mergeHostPickerSnapshot`),
+  `apps/factory/src/vscode/extension.ts` (`refreshHostPickerCache`),
+  `apps/factory/src/vscode/deviceHealth.vscode.ts`.
+
 ## [0.9.308] - 2026-08-03
 
 - **`Agents: Fork (Recap)` starts a new sibling with context from a session you pick.**
@@ -33,6 +68,44 @@ All notable changes to the Factory extension are documented here. Format follows
   finished on an earlier day keeps its own row.
   Source: `src/core/forkLineage.ts`, `ui/settings/components/mission-control/recapModel.ts`,
   `ui/settings/components/mission-control/RecapPane.tsx`.
+
+- **Three new resume commands, and a shorter name for an old one.**
+  `Agents: Resume (Pick Session)` lists only abandoned sessions — detached,
+  background, parked, or idle; anything already open in a terminal somewhere is
+  left to plain `Agents: Resume` — and resumes each pick on the device the
+  session was created on. `Agents: Resume (Pick Host)` reopens the ACTIVE tab's
+  session on a device you pick, keeping the harness and its pinned version.
+  `Agents: Resume (Pick Harness)` continues the active tab's session in a
+  different harness on the same device: the new harness launches via
+  `agents run <harness> --interactive` (balanced account rotation) and loads the
+  old transcript through the universal `/continue` replay, so any harness can
+  pick up any other harness's session. `Agents: Resume Current Session in Best
+  Profile` is now titled `Agents: Resume (Best Profile)` — command id and the
+  ⌘⇧J keybinding unchanged. Source: `apps/factory/src/core/resumePicker.ts`
+  (`abandonedCandidates`), `apps/factory/src/core/resumeTarget.ts`
+  (`buildHarnessOptions`), `apps/factory/src/core/resumeInBest.ts`
+  (`buildAgentRunLaunchCommand`), `apps/factory/src/vscode/extension.ts`
+  (`resumeCurrentPickHost`, `resumeCurrentPickHarness`, `launchResumeInHarness`).
+
+- **Four palette commands that could never run are gone.** `Agents: Enable View`,
+  `Agents: Disable View`, `Agents: Run Setup`, and `Agents: Enable Warming` were
+  declared in `package.json` but registered nowhere in `src/`, so picking any of them
+  from the palette failed with "command not found". `Enable Warming` was the worst of
+  them: its `when` clause is `!agents.warmingEnabled` and that context was hardcoded to
+  `false`, so the broken entry was **always** visible. Its partner
+  `Agents: Disable Warming` was registered but only to say warming no longer exists, and
+  its `when` clause meant it was never visible — both are removed along with the dead
+  `agents.warmingEnabled` / `agents.viewEnabled` context keys nothing else read.
+
+- **⌘⇧J no longer resolves to two different commands.** It was bound to both
+  `Agents: Spawn with Prompt` and `Agents: Resume Current Session in Best Profile`, so
+  which one fired was down to registration order. Spawn-with-Prompt keeps ⌘⇧J (it pairs
+  with Spawn-with-Context on ⌘⇧K); Resume-in-Best-Profile moves to ⌘⇧⌥J.
+
+- **Removed dead Floor code.** `handleNewAgent` in `UnifiedAgentsPane.tsx` was never
+  called from any JSX, and had rotted: it mapped `agents.newGemini` (deprecated, never
+  registered) and `agents.newOpencode` (the real id is `agents.newOpenCode`), so it would
+  have failed had anything wired it up.
 
 - **Floor no longer collapses distinct sessions that arrive without an id.** A remote
   session row was keyed `remote-<host>-<sessionId>`; when the CLI could not attribute a

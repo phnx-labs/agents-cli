@@ -17,10 +17,10 @@ import * as path from 'path';
 import { spawnSync } from 'child_process';
 import {
   appendActivityEvent,
-  projectFromCwd,
   type ActivityEvent,
   type Attachment,
 } from './activity.js';
+import { resolveProjectNameForCwd, listProjectDefs } from './projects.js';
 import { getHistoryDir } from './state.js';
 import { machineId } from './machine-id.js';
 import { isValidMailboxId } from './mailbox.js';
@@ -40,6 +40,16 @@ export interface FeedPostInput {
   sessionId?: string;
   /** Generic artifacts to attach: local paths (copied for durability) or URLs. */
   attach?: string[];
+  /**
+   * The agent is STUCK, not merely reporting. Writes `status.blocked` instead of
+   * `status.posted`, and the caller pairs it with an OpenBlock so the ask stays
+   * answerable until someone resolves it.
+   *
+   * This is a state, not a volume: a blocked post is always broadcast at
+   * `important`, so an agent never has to decide the level as well. One thing to
+   * say is what makes the habit stick.
+   */
+  blocked?: boolean;
   /** Override activity root (tests). */
   activityRoot?: string;
   /**
@@ -347,7 +357,12 @@ export function postFeedStatus(input: FeedPostInput): FeedPostResult {
   }
 
   const ts = input.ts ?? new Date().toISOString();
-  const project = projectFromCwd(identity.cwd);
+  // The post is written where the agent runs, so the cwd is a local path and
+  // gets full canonical resolution — a defined project's name wins (a post from
+  // any repo of a multi-repo project files under that project), else the repo
+  // key, matching how the timeline groups everything else. listProjectDefs is
+  // fail-open, so this costs one small readdir + YAML parse per post.
+  const project = resolveProjectNameForCwd(identity.cwd, listProjectDefs());
   const attachments = buildAttachments(input.attach, {
     copyRoot: input.attachmentsRoot ?? path.join(getHistoryDir(), 'attachments'),
     sessionId: identity.sessionId,
@@ -356,7 +371,7 @@ export function postFeedStatus(input: FeedPostInput): FeedPostResult {
 
   const event: Omit<ActivityEvent, 'v' | 'tier'> = {
     ts,
-    event: 'status.posted',
+    event: input.blocked ? 'status.blocked' : 'status.posted',
     sessionId: identity.sessionId,
     mailboxId: identity.mailboxId,
     host: identity.host,
