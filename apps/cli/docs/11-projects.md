@@ -131,10 +131,10 @@ rush  ·  3 agents
   `git fetch` — `↑`/`↓` measure against the peer's remote-tracking refs as they
   are. A repo with no upstream reports no drift (not zero).
 - **Unreachable or older peers are named once** in a trailing note
-  (`· N devices didn't answer (unreachable or older agents-cli): …`) — a peer
-  whose CLI predates the probe subcommand lands in the same skipped list, never
-  a silent gap. The `probe` subcommand itself is not beta-gated, so peers answer
-  whenever their binary carries it.
+  (`· N devices didn't answer (unreachable, older agents-cli, or timed out): …`)
+  — a peer whose CLI predates the probe subcommand lands in the same skipped
+  list, never a silent gap. The `probe` subcommand itself is not beta-gated, so
+  peers answer whenever their binary carries it.
 - `--json` includes the fleet data: per project `workspaces: [{host, path,
   present, branch, upstream, ahead, behind, dirty, lastCommit, error}]`.
 - Default is off — `--fleet` is the opt-in because it dials the fleet.

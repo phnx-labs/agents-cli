@@ -173,6 +173,15 @@ describe('workspaceTargetsForDef', () => {
   it('returns an empty list when the def carries no on-disk paths', () => {
     expect(workspaceTargetsForDef({ name: 'x', repo: 'a/b' })).toEqual([]);
   });
+
+  it('normalizes hand-edited def paths to the same home-relative form the probe echoes', () => {
+    // Defs are hand-editable YAML — an absolute path under home (or a trailing
+    // slash) must still match the probe row's `~/…` echo, or the row silently
+    // drops out of the fleet line.
+    const abs = path.join(os.homedir(), 'src', 'rush');
+    expect(workspaceTargetsForDef({ name: 'rush', root: abs })).toEqual(['~/src/rush']);
+    expect(workspaceTargetsForDef({ name: 'rush', root: '~/src/rush/' })).toEqual(['~/src/rush']);
+  });
 });
 
 describe('parseRemoteProbe', () => {

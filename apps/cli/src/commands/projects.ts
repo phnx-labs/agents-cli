@@ -57,9 +57,10 @@ const SKIPPED_NAME_LIMIT = 4;
 
 /**
  * One compact trailing note for peers that didn't answer the `--fleet`
- * fan-out — unreachable, or running an agents-cli too old to carry `projects
- * probe`. Mirrors `formatUnreachableNote` (activity) with the probe-specific
- * reason; empty string when everything answered.
+ * fan-out — unreachable, running an agents-cli too old to carry `projects
+ * probe`, or too slow to finish inside the 12s SSH budget. Mirrors
+ * `formatUnreachableNote` (activity) with the probe-specific reasons; empty
+ * string when everything answered.
  */
 export function formatFleetSkippedNote(skipped: string[]): string {
   if (skipped.length === 0) return '';
@@ -67,7 +68,7 @@ export function formatFleetSkippedNote(skipped: string[]): string {
   const rest = skipped.length - named.length;
   const list = rest > 0 ? `${named.join(', ')} +${rest}` : named.join(', ');
   const noun = skipped.length === 1 ? 'device' : 'devices';
-  return chalk.gray(`  · ${skipped.length} ${noun} didn't answer (unreachable or older agents-cli): ${list}\n`);
+  return chalk.gray(`  · ${skipped.length} ${noun} didn't answer (unreachable, older agents-cli, or timed out): ${list}\n`);
 }
 
 /** `path:purpose` → a context anchor. Purpose may contain colons. */

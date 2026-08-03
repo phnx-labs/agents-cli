@@ -19,11 +19,12 @@ import chalk from 'chalk';
 import { expandLocalHome, toHomeRelative } from './project-root.js';
 import type { ProjectDef } from './projects.js';
 
-/** Per-call git budget. A probe runs read-only commands that normally finish in
- * milliseconds; the timeout only bounds a genuinely wedged repo. 10s keeps
- * headroom for heavily loaded boxes (a loaded fleet laptop can take >5s just to
- * spawn git) while a probe of N repos stays bounded. */
-const GIT_TIMEOUT_MS = 10_000;
+/** Per-call git budget. A read-only git call taking >3s is wedged by any
+ * definition (NFS stall, index lock) — and the fleet fan-out SIGKILLs the SSH
+ * hop at 12s, so a probe must fit inside that budget to avoid a slow peer
+ * being misreported as unreachable: 3s × 5 calls leaves headroom even when
+ * one repo is genuinely stuck. */
+const GIT_TIMEOUT_MS = 3_000;
 
 /** The on-disk state of one workspace repo on one machine. */
 export interface RepoWorkspaceStatus {
@@ -110,11 +111,16 @@ export function probeProjectWorkspaces(paths: string[]): RepoWorkspaceStatus[] {
 
 /**
  * The home-relative paths to probe for a project definition: its `root` plus
- * each `repos[].path` (the opt-in for additional repos), deduped.
+ * each `repos[].path` (the opt-in for additional repos), deduped. Every target
+ * is normalized through the same `toHomeRelative(expandLocalHome(...))` the
+ * probe echoes, so a hand-edited def (absolute path under home, trailing
+ * slash) matches its probe rows exactly — `writeProjectDef` normalizes on
+ * write, but defs are hand-editable YAML and never silently drop a row.
  */
 export function workspaceTargetsForDef(def: ProjectDef): string[] {
   const targets = [def.root, ...(def.repos ?? []).map((r) => r.path)]
-    .filter((p): p is string => typeof p === 'string' && p.length > 0);
+    .filter((p): p is string => typeof p === 'string' && p.length > 0)
+    .map((p) => toHomeRelative(expandLocalHome(p)));
   return [...new Set(targets)];
 }
 
