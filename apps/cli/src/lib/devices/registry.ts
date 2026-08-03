@@ -153,6 +153,14 @@ export function isDialableDevice(d: DeviceProfile): boolean {
   if (d.reachability?.reachable) return true;
   return !d.tailscale || d.tailscale.online === true;
 }
+// Two more fan-outs still gate on the bare `tailscale.online === true` and so
+// still skip manual devices: `commands/apply.ts` (`devices: all` config-sync
+// targeting) and `commands/output.ts` (`--all-hosts`). They are left alone here
+// deliberately — neither is a session surface, and changing what `agents apply`
+// targets is a config-sync behaviour change that deserves its own PR rather
+// than riding along on a sessions fix. `devices/fleet.ts` planFleetTargets and
+// `smart-launch.ts` listOnlineDeviceNames already treat a missing tailscale
+// block as a candidate, so they need no change.
 
 /** Map of device name to profile. */
 export type DeviceRegistry = Record<string, DeviceProfile>;

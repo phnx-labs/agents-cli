@@ -178,6 +178,19 @@ describe('isDialableDevice', () => {
     } as any)).toBe(true);
   });
 
+  it('keeps dialing a manual device even after a probe says it is unreachable', () => {
+    // The deliberate cost of "a probe may only ADD a peer": a manual device has
+    // no tailscale block to say offline, so a confirmed-dead one stays in the
+    // sweep until it is removed from the registry. Pinned so the tradeoff is a
+    // decision on record, not an accident.
+    expect(isDialableDevice({
+      name: 'dead-manual',
+      platform: 'linux',
+      address: { via: 'manual', dnsName: 'dead-manual.ts.net' },
+      reachability: { reachable: false, via: 'manual', checkedAt: '2026-08-03T15:39:43.504Z' },
+    } as any)).toBe(true);
+  });
+
   it('skips a box both signals call offline', () => {
     expect(isDialableDevice({
       name: 'gpu-box',
