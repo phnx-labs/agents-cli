@@ -473,6 +473,27 @@ agents sessions d3470b57-2af6-4c11-b1de-3fab94f43603
 - The parent uses the versioned hidden `--resolve-safe-v1` peer protocol. An older peer,
   malformed peer JSON, or an unreadable device registry makes the sweep incomplete;
   the command emits no JSON and exits 2 instead of deciding from partial results.
+- **Which peers get dialed** is `isDialableDevice`
+  ([`src/lib/devices/registry.ts`](../src/lib/devices/registry.ts)) — a **union** of the
+  two liveness signals, where either one saying "go" is enough:
+  - No `tailscale` block at all is **unknown-not-offline**, so the peer is dialed. A
+    device registered with `address.via: "manual"` never gets a Tailscale peer entry, so
+    its `online` is permanently `undefined`; the old strict `online === true` test
+    skipped it forever and made every session on that box unresolvable from elsewhere.
+    This matches `ssh.ts` `renderDeviceTable` and Factory's `isDeviceOnline`, so the
+    picker and the sweep agree on who exists.
+  - A **positive** live SSH probe (`DeviceProfile.reachability`, RUSH-1965) additionally
+    rescues a device whose snapshot says offline.
+  - A **failed** probe never removes a peer. The probe runs on a short SSH budget and
+    returns false negatives on a congested tailnet — it has been observed marking the
+    local machine unreachable — so excluding on it would hide sessions on healthy boxes.
+    Dialing a box that is actually asleep costs one `ConnectTimeout`.
+
+  Note the interaction with the exit-2 rule above: a peer that is dialed but does not
+  answer still counts as unreachable, and `--resolve` then refuses to decide rather than
+  return a possibly-non-unique match. A fleet with a permanently-sleeping registered
+  device will therefore keep reporting a partial resolve until that device is removed
+  from the registry or wakes up.
 
 ## Forking (branch a conversation)
 
