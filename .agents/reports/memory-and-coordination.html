@@ -594,15 +594,17 @@ Median of three runs on this box; the fleet column is the default SSH fan-out ac
 <b>3–7×</b> under fan-out — the tail is remote work, not the local read. The fan-out is
 <b>partition-safe in practice</b>: on these runs three boxes (<code>bismas-macbook-pro</code>,
 <code>winbox</code>, <code>gpu-box</code>) were unreachable and were <em>skipped</em>, not waited on —
-the live proof of the "dead boxes contribute zero rows, never block the view" claim from §08. And the
-surfaces differ in what fan-out even means: the <b>mailbox spool has no built-in fan-out</b> — the
-<code>mailboxes</code> command takes no <code>--host</code>, so a peer's box is reached with
+the live proof of §08's point that a dead or slow box contributes zero rows and never blocks the view.
+And the surfaces differ in what fan-out even means: the <b>mailbox spool has no built-in fan-out</b> —
+the <code>mailboxes</code> command takes no <code>--host</code>, so a peer's box is reached with
 <code>agents ssh</code>, unlike <code>feed</code>/<code>sessions</code>/<code>activity</code> which
-carry <code>-H/--host</code> natively. The per-host SSH timeout is 12 s
-(<code>remote-agents-json.ts:18</code>), but that is a <em>per-host cap</em>, not the total: the feed
-read's wider spread (13–22 s) reflects that it does more per peer than a session query — reading each
-reachable box's block <em>and</em> activity state — so the total is the summed work across all
-reachable peers, not a single capped wait.</p>
+carry <code>-H/--host</code> natively. The feed read's wider spread (13–22 s) is <em>not</em> a second
+remote pass: a default <code>agents feed</code> (filter <code>needs</code>,
+<code>feed.ts:328</code>) makes one remote fan-out per peer (<code>feed.ts:592</code>) with a
+<em>local</em> activity lane after it — the same single-fan-out shape as <code>sessions</code>/
+<code>--active</code>. The spread over the same ~3 s local baseline is per-peer variance (larger feed
+payloads plus the local block-merge and ranking), bounded by the 12 s per-host SSH timeout
+(<code>remote-agents-json.ts:18</code>).</p>
 
 <h3>How to make querying faster</h3>
 <ul>
