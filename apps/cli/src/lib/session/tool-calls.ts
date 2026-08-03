@@ -13,10 +13,10 @@ export const TOOL_CHANGED_MAX_CALLS = 10_000;
 export const TOOL_INDEX_LIMIT_ORDINAL = Number.MAX_SAFE_INTEGER;
 export const TOOL_TEXT_PROCESSING_MAX_BYTES = 64 * 1024;
 export const TOOL_SHELL_PARSE_MAX_BYTES = 64 * 1024;
-export const TOOL_INDEX_VERSION = 2;
+export const TOOL_INDEX_VERSION = 3;
 
 const SHELL_TOOLS = new Set([
-  'bash', 'execute', 'exec_command', 'run_command', 'run_shell_command', 'shell',
+  'bash', 'exec', 'execute', 'exec_command', 'run_command', 'run_shell_command', 'shell',
 ]);
 const BASE64_BLOCK = /(?:[A-Za-z0-9+/]{256,}={0,2})/g;
 const SECRET_FIELD = /(?:token|secret|password|authorization|cookie|api[_-]?key|private[_-]?key)$/i;

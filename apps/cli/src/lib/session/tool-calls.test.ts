@@ -46,6 +46,14 @@ describe('ToolCallCollector', () => {
     expect(Buffer.byteLength(calls[0].output || '')).toBeLessThanOrEqual(1024);
   });
 
+  it("recognizes Codex's exec tool as a shell command", () => {
+    const calls = toolCallsFromEvents([{
+      type: 'tool_use', agent: 'codex', timestamp: '2026-08-03T00:00:00Z', tool: 'exec',
+      command: 'git status',
+    }]);
+    expect(calls[0].programs).toEqual(['git']);
+  });
+
   it('redacts nested secret-shaped argument fields before JSON persistence', () => {
     const calls = toolCallsFromEvents([{
       type: 'tool_use', agent: 'codex', timestamp: '2026-08-03T00:00:00Z', tool: 'http',
