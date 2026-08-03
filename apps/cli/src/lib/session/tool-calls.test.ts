@@ -49,7 +49,7 @@ describe('ToolCallCollector', () => {
   it("recognizes Codex's exec tool as a shell command", () => {
     const calls = toolCallsFromEvents([{
       type: 'tool_use', agent: 'codex', timestamp: '2026-08-03T00:00:00Z', tool: 'exec',
-      command: 'git status',
+      args: { input: 'git status' },
     }]);
     expect(calls[0].programs).toEqual(['git']);
   });
