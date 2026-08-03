@@ -21,13 +21,15 @@ class FakeQuickPick<Item, Button> implements SessionBrowserQuickPick<Item, Butto
   private buttonListener?: (button: Button) => void;
   private acceptListener?: () => void;
   private hideListener?: () => void;
+  private hidden = false;
   show(): void {}
-  hide(): void { this.hideListener?.(); }
+  hide(): void { this.hidden = true; this.hideListener?.(); }
   onDidTriggerButton(listener: (button: Button) => void): unknown { this.buttonListener = listener; return {}; }
   onDidAccept(listener: () => void): unknown { this.acceptListener = listener; return {}; }
   onDidHide(listener: () => void): unknown { this.hideListener = listener; return {}; }
   triggerButton(button: Button): void { this.buttonListener?.(button); }
   accept(): void { this.acceptListener?.(); }
+  get isHidden(): boolean { return this.hidden; }
 }
 
 describe('session browser extension-host seam', () => {
@@ -82,8 +84,10 @@ describe('session browser extension-host seam', () => {
       return args.startsWith('sessions --all')
         ? { stdout: JSON.stringify(recent), stderr: '' }
         : { stdout: JSON.stringify([{
-            sessionId: 'current-outside-limit', kind: 'claude', startedAtMs: Date.parse('2026-01-01T00:00:00Z'),
-            cwd: '/repo', project: 'agents-cli', machine: 'zion',
+            context: 'headless', kind: 'claude', host: 'tmux', pid: 4312,
+            sessionId: 'current-outside-limit', cwd: '/repo', topic: 'Repair picker',
+            project: 'agents-cli', machine: 'zion', status: 'working',
+            startedAtMs: Date.parse('2026-01-01T00:00:00Z'),
           }]), stderr: 'gpu-box: unreachable or no agents CLI — skipped\n' };
     };
 
@@ -98,6 +102,39 @@ describe('session browser extension-host seam', () => {
     expect(sessions.at(-1)?.id).toBe('current-outside-limit');
     expect(sessions.at(-1)?.agent).toBe('claude');
     expect(sessions.at(-1)?.timestamp).toBe('2026-01-01T00:00:00.000Z');
+  });
+
+  test('an explicitly selected device surfaces active-metadata stderr', async () => {
+    const recent = Array.from({ length: 60 }, (_, index) => ({
+      id: `recent-${index}`, shortId: `recent-${index}`, agent: 'claude', timestamp: '2026-08-03T00:00:00Z',
+    }));
+    const run: SessionBrowserRunner = async args => args.startsWith('sessions --all')
+      ? { stdout: JSON.stringify(recent), stderr: '' }
+      : { stdout: '[]', stderr: 'remote agents CLI unavailable\n' };
+    expect(loadBrowsableSessions(run, {
+      device: 'mac-mini', localMachine: 'zion', limit: 60,
+      currentSessionId: 'missing', currentSessionDevice: 'mac-mini', quote,
+    })).rejects.toThrow('remote agents CLI unavailable');
+  });
+
+  test('hiding invalidates an in-flight load before it can mutate the picker', async () => {
+    type Item = { label: string; row?: SessionBrowserSessionRow };
+    const quickPick = new FakeQuickPick<Item, 'switch' | 'reload'>();
+    let resolveLoad!: (items: Item[]) => void;
+    const picker = runSessionBrowserPicker({
+      quickPick,
+      switchButton: 'switch', reloadButton: 'reload', localMachine: 'zion',
+      loadItems: () => new Promise(resolve => { resolveLoad = resolve; }),
+      chooseDevice: async () => ({ cancelled: true }),
+      emptyItem: () => ({ label: 'empty' }),
+      errorItem: message => ({ label: message }),
+    });
+    quickPick.hide();
+    resolveLoad([{ label: 'stale result' }]);
+    expect(await picker).toBeNull();
+    await Bun.sleep(0);
+    expect(quickPick.items).toEqual([]);
+    expect(quickPick.busy).toBe(true);
   });
 
   test('pins active metadata without a start timestamp instead of throwing', async () => {

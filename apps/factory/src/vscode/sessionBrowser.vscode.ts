@@ -47,6 +47,7 @@ export async function loadBrowsableSessions(
       sessions.some(session => session.id === opts.currentSessionId || session.shortId === opts.currentSessionId)) {
     return sessions;
   }
+  const currentSessionId = opts.currentSessionId;
 
   const exact = await run(`sessions --active --json${scope}`, {
     maxBuffer: 16 * 1024 * 1024,
@@ -57,7 +58,7 @@ export async function loadBrowsableSessions(
     exact.stdout,
     opts.device ?? opts.localMachine,
     Date.now(),
-  ).filter(session => session.sessionId === opts.currentSessionId || session.sessionId.startsWith(opts.currentSessionId));
+  ).filter(session => session.sessionId === currentSessionId || session.sessionId.startsWith(currentSessionId));
   if (current) {
     sessions.push({
       id: current.sessionId,
