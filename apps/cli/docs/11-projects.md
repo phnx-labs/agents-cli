@@ -1,9 +1,9 @@
 # Projects (Named Multi-Repo Projects + Progress Rollup)
 
-A **project** names a body of work, binds it to one or more repos, and rolls the
-fleet's live activity up into one progress card. It is a **definition layer over the
-existing `--project` convention**, not a replacement — an undefined slug resolves
-exactly as before.
+A **project** names a body of work, binds it to one or more repos, and rolls live
+activity up into one progress card. It is a **definition layer over the existing
+`--project` convention**, not a replacement — an undefined slug resolves exactly as
+before.
 
 > Beta. Enable with `agents beta enable projects` (the command tree is hidden until then).
 

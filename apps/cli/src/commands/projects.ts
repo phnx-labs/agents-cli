@@ -1,5 +1,5 @@
 /**
- * `agents projects` — named, multi-repo projects and the cross-fleet progress
+ * `agents projects` — named, multi-repo projects and the progress
  * rollup. Definitions live in `~/.agents/projects/<name>.yaml` (see
  * `lib/projects.ts`); this registers the command tree over them. Beta-gated on
  * `isBetaEnabled('projects')`, mirroring `agents factory`.
@@ -106,7 +106,7 @@ export function registerProjectsCommands(program: Command): void {
   const enabled = isBetaEnabled('projects');
   const projects = program
     .command('projects', { hidden: !enabled })
-    .description('Named multi-repo projects with a cross-fleet progress rollup.');
+    .description('Named multi-repo projects with a progress rollup.');
 
   setHelpSections(projects, {
     examples: `

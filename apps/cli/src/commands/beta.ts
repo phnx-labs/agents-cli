@@ -12,7 +12,7 @@ const BETA_DESCRIPTIONS: Record<BetaFeatureName, string> = {
   drive: 'Google Drive integration for reading and writing files',
   factory: 'Cloud-based agent dispatch via Rush Factory',
   'session-sync': 'Cross-machine session transcript sync via R2 (daemon push/pull)',
-  projects: 'Named multi-repo projects with cross-fleet progress rollup (agents projects)',
+  projects: 'Named multi-repo projects with a progress rollup (agents projects)',
 };
 
 function parseFeatures(values: string[]): BetaFeatureName[] {

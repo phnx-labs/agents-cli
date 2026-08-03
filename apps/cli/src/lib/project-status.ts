@@ -92,7 +92,7 @@ export function planPct(plan: { done: number; total: number }): number | undefin
   return Math.round((plan.done / plan.total) * 100);
 }
 
-/** Cross-repo / cross-machine signals harvested for a project, in a time window. */
+/** Harvested signals not on the session list: repo-global merged PRs + local artifacts, in a time window. */
 export interface ProjectRemoteSignals {
   windowDays: number;
   /** PRs merged into the primary repo within the window (via `gh`). */
