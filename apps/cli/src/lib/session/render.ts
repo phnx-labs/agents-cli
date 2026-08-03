@@ -9,12 +9,13 @@
 
 import chalk from 'chalk';
 import { truncate } from '../format.js';
-import type { SessionEvent, SessionMeta } from './types.js';
+import type { SessionEvent, SessionMeta, TodoItem } from './types.js';
 import { summarizeToolUse } from './parse.js';
 import { cleanSessionPrompt, extractSessionTopic } from './prompt.js';
 import { renderMarkdown } from '../markdown.js';
 import { redactSecrets } from '../redact.js';
 import { classifyFileChanges, changeCounts, toolHistogram, detectTestResult, type FileChange, type FileOp } from './digest.js';
+import { extractArtifacts, extractHooks, extractLinks, extractSkills } from './highlights.js';
 import { extractTodoProgressFromEvents } from './state.js';
 
 // ── Path helpers ──────────────────────────────────────────────────────────────
@@ -32,6 +33,31 @@ export function relativeToCwd(absPath: string, cwd?: string): string {
     return '~' + absPath.slice(home.length);
   }
   return absPath;
+}
+
+/**
+ * Display form for a touched path: cwd-relative first; then collapse any
+ * `.agents/worktrees/<slug>` segment (in-cwd OR outside) to `⧉ <slug>/…` so
+ * group labels stay on one line instead of `~/src/…/.agents/worktrees/<slug>/…`;
+ * else home-collapse.
+ */
+export function displayPath(absPath: string, cwd?: string): string {
+  const rel = relativeToCwd(absPath, cwd);
+  const norm = rel.replace(/\\/g, '/');
+  const wt = norm.match(/(^|\/)\.agents\/worktrees\/([^/]+)/);
+  if (wt) {
+    const after = norm.slice(norm.indexOf(wt[0]) + wt[0].length).replace(/^\//, '');
+    return after ? `⧉ ${wt[2]}/${after}` : `⧉ ${wt[2]}`;
+  }
+  return rel;
+}
+
+/** One checklist line with a status marker: `[x] done` / `[>] doing` / `[ ] todo`. */
+function renderTodoMarker(item: TodoItem): string {
+  const text = item.content;
+  if (item.status === 'completed') return chalk.green('[x]') + ' ' + chalk.gray(text);
+  if (item.status === 'in_progress') return chalk.yellow('[>]') + ' ' + chalk.white(text);
+  return chalk.gray('[ ]') + ' ' + chalk.white(text);
 }
 
 /** Best-effort feature-detect for OSC 8 hyperlink support in the current TTY. */
@@ -445,11 +471,12 @@ function pickDistinct(samples: string[], max: number): string[] {
 
 // ── File grouping ─────────────────────────────────────────────────────────────
 
-/** Group file paths by their parent directory, relative to cwd. */
+/** Group file paths by their parent directory, in display form (cwd-relative,
+ * worktree-collapsed, home-collapsed). */
 function groupByParentDir(paths: Iterable<string>, cwd?: string): Map<string, string[]> {
   const groups = new Map<string, string[]>();
   for (const p of paths) {
-    const rel = relativeToCwd(p, cwd);
+    const rel = displayPath(p, cwd);
     const slashIdx = rel.lastIndexOf('/');
     const dir = slashIdx >= 0 ? rel.slice(0, slashIdx) : '.';
     const base = slashIdx >= 0 ? rel.slice(slashIdx + 1) : rel;
@@ -529,7 +556,7 @@ function renderChangesSection(lines: string[], events: SessionEvent[], cwd?: str
   if (changes.length === 0) return false;
   const c = changeCounts(changes);
   const opByRel = new Map<string, FileOp>();
-  for (const ch of changes) opByRel.set(relativeToCwd(ch.path, cwd), ch.op);
+  for (const ch of changes) opByRel.set(displayPath(ch.path, cwd), ch.op);
 
   const summary = [
     c.created ? chalk.green(`+${c.created}`) : '',
@@ -598,8 +625,8 @@ export function renderSummary(events: SessionEvent[], cwd?: string): string {
   // Commands with timestamps
   const cmdList: Array<{ cmd: string; ts: number }> = [];
 
-  // Plan items
-  const todoItems = extractTodoProgressFromEvents(events)?.items.map(item => item.content) ?? [];
+  // Plan items (checklist entries keep their status for [x]/[>]/[ ] markers)
+  const todoItems = extractTodoProgressFromEvents(events)?.items ?? [];
   let exitPlanContent: string | null = null;
   let planFilePath: string | null = null;
 
@@ -638,7 +665,7 @@ export function renderSummary(events: SessionEvent[], cwd?: string): string {
             planFilePath = p;
           } else {
             (isInsideCwd(p) || !cwd ? filesModifiedAbs : filesModifiedExternal).add(p);
-            recentActivity.push({ kind: 'edit', label: relativeToCwd(p, cwd), ts, absPath: p });
+            recentActivity.push({ kind: 'edit', label: displayPath(p, cwd), ts, absPath: p });
           }
         }
       }
@@ -703,11 +730,11 @@ export function renderSummary(events: SessionEvent[], cwd?: string): string {
   for (const p of filesModifiedAbs) filesReadAbs.delete(p);
   for (const p of filesModifiedExternal) filesReadAbs.delete(p);
 
-  // Build abs→rel mapping for linkPath
+  // Build abs→display mapping for linkPath
   const buildAbsMap = (absSet: Set<string>): Map<string, string> => {
     const m = new Map<string, string>();
     for (const abs of absSet) {
-      const rel = relativeToCwd(abs, cwd);
+      const rel = displayPath(abs, cwd);
       m.set(rel, abs);
     }
     return m;
@@ -754,20 +781,26 @@ export function renderSummary(events: SessionEvent[], cwd?: string): string {
     lines.push('');
   }
 
-  // 3. Plan
+  // 3. Plan — the plan document (ExitPlanMode text / plan file) AND the live
+  // checklist. Both render: the checklist used to be hidden whenever plan text
+  // existed, which read as "this session had no todos".
   if (todoItems.length > 0 || exitPlanContent || planFilePath) {
     lines.push(chalk.bold('Plan'));
     if (planFilePath) {
       const home = process.env.HOME ?? '';
-      const displayPath = home && planFilePath.startsWith(home) ? planFilePath.replace(home, '~') : planFilePath;
-      lines.push('  ' + chalk.cyan(displayPath));
+      const displayPath2 = home && planFilePath.startsWith(home) ? planFilePath.replace(home, '~') : planFilePath;
+      lines.push('  ' + chalk.cyan(displayPath2));
     }
     if (exitPlanContent) {
       const planLines = exitPlanContent.split('\n').slice(0, 10);
       for (const l of planLines) lines.push('  ' + l);
-    } else if (todoItems.length > 0) {
+    }
+    if (todoItems.length > 0) {
       for (const item of todoItems.slice(0, 20)) {
-        lines.push('  · ' + item);
+        lines.push('  ' + renderTodoMarker(item));
+      }
+      if (todoItems.length > 20) {
+        lines.push('  ' + chalk.gray(`… (${todoItems.length - 20} more)`));
       }
     }
     lines.push('');
@@ -781,6 +814,29 @@ export function renderSummary(events: SessionEvent[], cwd?: string): string {
       const typeSuffix = s.subagentType ? chalk.gray(` (${s.subagentType})`) : '';
       lines.push('  Task: ' + s.description + typeSuffix);
     }
+    lines.push('');
+  }
+
+  // 4b. Highlights — what the session USED (skills, hooks) and the references
+  // it mentioned (links). Shared extraction with the picker preview so the two
+  // renders never disagree.
+  const skills = extractSkills(events);
+  if (skills.length > 0) {
+    const shown = skills.map(s => chalk.white(s.name) + (s.count > 1 ? chalk.gray(` ×${s.count}`) : ''));
+    lines.push(chalk.bold('Skills') + chalk.gray(` (${skills.length})`) + '  ' + shown.join(chalk.gray(' · ')));
+    lines.push('');
+  }
+  const hooks = extractHooks(events);
+  if (hooks.length > 0) {
+    const shown = hooks.map(h =>
+      chalk.white(h.name) + (h.count > 1 ? chalk.gray(` ×${h.count}`) : '') + (h.failed ? chalk.red(` (${h.failed} failed)`) : ''));
+    lines.push(chalk.bold('Hooks') + chalk.gray(` (${hooks.length})`) + '  ' + shown.join(chalk.gray(' · ')));
+    lines.push('');
+  }
+  const links = extractLinks(events);
+  if (links.length > 0) {
+    const shown = links.map(l => chalk.blue(linkUrl(l.url, l.label)));
+    lines.push(chalk.bold('Links') + chalk.gray(` (${links.length})`) + '  ' + shown.join(chalk.gray(' · ')));
     lines.push('');
   }
 
@@ -804,6 +860,19 @@ export function renderSummary(events: SessionEvent[], cwd?: string): string {
   // 6. Changes — files grouped by directory with create/modify/delete lifecycle
   // (replaces the old flat "Modified" + "External edits" lists).
   renderChangesSection(lines, events, cwd);
+
+  // 6a. Artifacts — documents the session PRODUCED (`.agents/artifacts|plans|
+  // reports`, other *.md/*.html creations), named and clickable. These drown in
+  // the Changeset's source churn, so they get their own section.
+  const artifacts = extractArtifacts(events);
+  if (artifacts.length > 0) {
+    lines.push(chalk.bold('Artifacts') + chalk.gray(` (${artifacts.length})`));
+    for (const a of artifacts) {
+      const tag = a.bucket === 'docs' ? '' : chalk.gray(` (${a.bucket})`);
+      lines.push('  ' + chalk.green('+') + ' ' + chalk.cyan(linkPath(a.path, a.basename)) + tag);
+    }
+    lines.push('');
+  }
 
   // 6b. Catch-up signals: last test/build verdict, then the tool histogram.
   renderTestsLine(lines, events);
