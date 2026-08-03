@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { mailboxDir, enqueue, drain, peek, clear, assertValidMailboxId, isExpired, sweepExpired, listBoxes, readBox, watchMessages, type MailboxMessage } from './mailbox.js';
+import { mailboxDir, enqueue, drain, peek, clear, assertValidMailboxId, isExpired, sweepExpired, listBoxes, readBox, watchMessages, DEFAULT_TTL_SECONDS, MAILBOX_TTL_ENV, type MailboxMessage } from './mailbox.js';
 import { blockIdForSession, getBlockReceipts, publishBlock } from './feed.js';
 
 function tmpRoot(): string {
@@ -145,6 +145,33 @@ describe('mailbox', () => {
     expect(Date.parse(pending[0].expiresAt!)).toBeGreaterThan(Date.now());
   });
 
+  it('stamps expiresAt with a 24h default when ttlSeconds is omitted', () => {
+    const previous = process.env[MAILBOX_TTL_ENV];
+    delete process.env[MAILBOX_TTL_ENV];
+    try {
+      const box = mailboxDir(BOX, tmpRoot());
+      const before = Date.now();
+      const msgId = enqueue(box, { to: BOX, text: 'default ttl' });
+      const after = Date.now();
+      const pending = peek(box);
+      expect(pending).toHaveLength(1);
+      expect(pending[0].expiresAt).toBeTruthy();
+      const exp = Date.parse(pending[0].expiresAt!);
+      expect(exp).toBeGreaterThanOrEqual(before + DEFAULT_TTL_SECONDS * 1000);
+      expect(exp).toBeLessThanOrEqual(after + DEFAULT_TTL_SECONDS * 1000);
+    } finally {
+      if (previous === undefined) delete process.env[MAILBOX_TTL_ENV];
+      else process.env[MAILBOX_TTL_ENV] = previous;
+    }
+  });
+
+  it('honors ttlSeconds: 0 to disable expiry', () => {
+    const box = mailboxDir(BOX, tmpRoot());
+    enqueue(box, { to: BOX, text: 'no ttl', ttlSeconds: 0 });
+    const pending = peek(box);
+    expect(pending[0].expiresAt).toBeUndefined();
+  });
+
   it('drain/peek drop expired messages to consumed with a dropped marker', () => {
     const box = mailboxDir(BOX, tmpRoot());
     const now = new Date('2026-01-01T00:00:00.000Z');
@@ -196,6 +223,41 @@ describe('mailbox', () => {
       const receipts = getBlockReceipts(blockId, feedDir);
       expect(receipts).toHaveLength(1);
       expect(receipts[0]).toMatchObject({ msgId, status: 'consumed', from: 'feed' });
+    } finally {
+      process.env.AGENTS_FEED_DIR = previous;
+    }
+  });
+
+  it('surfaces an expired receipt when drain sweeps an expired message carrying blockId', () => {
+    const feedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-mailbox-expired-receipt-'));
+    const previous = process.env.AGENTS_FEED_DIR;
+    process.env.AGENTS_FEED_DIR = feedDir;
+    try {
+      const blockId = blockIdForSession(BOX);
+      publishBlock({
+        blockId,
+        sessionId: BOX,
+        mailboxId: BOX,
+        host: 'test-host',
+        runtime: 'claude',
+        ts: new Date().toISOString(),
+        questions: [{ text: 'Confirm?' }],
+      }, feedDir);
+
+      const box = mailboxDir(BOX, tmpRoot());
+      const now = new Date('2026-01-01T00:00:00.000Z');
+      const msgId = enqueue(box, { to: BOX, from: 'feed', text: 'too late', blockId });
+      const file = path.join(box, 'inbox', `${msgId}.json`);
+      const record = JSON.parse(fs.readFileSync(file, 'utf-8'));
+      record.ts = new Date(now.getTime() - 60_000).toISOString();
+      record.expiresAt = new Date(now.getTime() - 1).toISOString();
+      fs.writeFileSync(file, JSON.stringify(record, null, 2), 'utf-8');
+
+      expect(drain(box, BOX, now)).toEqual([]);
+
+      const receipts = getBlockReceipts(blockId, feedDir);
+      expect(receipts).toHaveLength(1);
+      expect(receipts[0]).toMatchObject({ msgId, status: 'expired', from: 'feed' });
     } finally {
       process.env.AGENTS_FEED_DIR = previous;
     }

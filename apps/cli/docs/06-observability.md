@@ -618,6 +618,7 @@ agents mailboxes <id>            # one box in full, across all three buckets
 agents mailboxes --watch         # live tail of cross-box traffic until Ctrl-C
 agents mailboxes --between a b   # one relationship as a thread, either direction
 agents mailboxes --graph         # who-talks-to-whom adjacency, busiest first
+agents mailboxes gc              # one-shot liveness sweep of pending messages
 ```
 
 The overview opens with a `fleet comms` masthead (`N live · M boxes`, total
@@ -625,6 +626,43 @@ messages, messages still awaiting delivery, last activity) and a 24-hour
 hourly-volume sparkline, then one row per box (live dot, pending/total counts,
 last activity, resolved live-session label), then the recency-ordered message
 log.
+
+### Delivery TTL and automatic reap
+
+Messages carry a delivery TTL. If a message is not consumed before the TTL, it
+is archived as `dropped: expired` rather than pending forever. The default TTL
+is **24 hours** (chosen because agents can be long-running). You can override it
+per message with `--ttl`:
+
+```bash
+agents message <target> "keep going" --ttl 2h
+agents message <target> "never expire" --ttl 0
+```
+
+The default also honors the `AGENTS_MAILBOX_TTL` environment variable
+(e.g. `AGENTS_MAILBOX_TTL=12h`).
+
+A background sweep runs on every watchdog tick (`agents watchdog` daemon
+routine), using the same live-session set as `agents sessions --active` to
+classify boxes. Dead boxes have their pending mail archived as `dropped: dead`,
+and stale consumed entries are pruned after 24 hours. You can run the sweep
+manually:
+
+```bash
+agents mailboxes gc          # human summary
+agents mailboxes gc --json   # machine-readable GcResult
+```
+
+### Bounce receipts
+
+When a message is dropped (dead box or TTL expiry) and it was tied to a feed
+block, a failure receipt is written to the block: `status: dropped` for a dead
+box, `status: expired` for TTL expiry. This surfaces the bounce in the feed
+store instead of leaving the sender with silence. Receipts are monotonic: a
+`queued` receipt can be overwritten by `consumed`/`continued` or a failure
+receipt, but a failure receipt does not regress. Dead blocks that receive bounce
+receipts are kept for 24 hours so the failure is visible, then removed by the
+next sweep.
 
 ## Agent feed (`agents feed`)
 
