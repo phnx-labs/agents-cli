@@ -152,6 +152,17 @@ describe.skipIf(process.platform === 'win32')('sshExecAsync (real spawn via a PA
     expect(res.code).toBeNull(); // SIGTERM-terminated child closes with a null exit code
   });
 
+  it('uses a fresh connection (no ControlMaster) when a timeout is set, even if multiplexing is requested', async () => {
+    const res = await withStubSsh(
+      '#!/bin/sh\nprintf "%s" "$*"\nexit 0\n',
+      () => sshExecAsync('testhost', 'cmd', { timeoutMs: 1000 }),
+    );
+    // If multiplexing were honoured, ControlMaster=auto would appear in the argv
+    // we forwarded to ssh. With a timeout we must use a direct connection so the
+    // local timeout actually stops the remote command (RUSH-2114).
+    expect(res.stdout).not.toContain('ControlMaster');
+  });
+
   it('does not crash on EPIPE when input is piped to a child that exits before reading it', async () => {
     // Stub exits immediately without reading stdin; end(bigInput) would emit EPIPE
     // on child.stdin. Without the stream 'error' guard that is an uncaught exception
