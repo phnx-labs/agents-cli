@@ -156,10 +156,9 @@ One rule shapes the menu: **attention floats up, context groups down.**
  │ New Session                                ⌘N │   submenu: one entry per agent
  ├────────────────────────────────────────────────┤
  │ ACTIVE · 3 run · 1 idle · 2 projects          │   projects collapsed by default
- │   ▶ agents-cli  ●2 ◐1  zion                   │   click ▶ to fold open (accordion)
- │   ▼ web  ●1  zion                             │   ▼ = expanded; sessions under it
- │     ▶ ● Codex · zion · tmux · 12m             │   click session for detail fold
- │       local · tmux · repo web · 47m           │   host / ticket / PR / duration
+ │   ▶ agents-cli  ●2 ◐1  zion                   │   accordion: ▶ folds agents open
+ │   ▼ web  ●1  zion                             │
+ │     ● Codex · zion · 12m  ⌥ PR#42 — title   › │   › side submenu = full detail
  ├────────────────────────────────────────────────┤
  │ ROUTINES · 16 · next 7:00 PM · 2 paused       │   next few upcoming + failing
  │   ◔ triage-tickets  in 22m                  ›  │   inline; All routines… for
@@ -184,17 +183,17 @@ One rule shapes the menu: **attention floats up, context groups down.**
   wait. Failed / overdue routines and a stopped scheduler append here. Empty
   when nothing needs attention.
 - **New Session** — launches `agents run <agent>` in a new Terminal window.
-- **ACTIVE** — live work as an **accordion**, not a wall of agent rows. Projects
-  are **collapsed by default**; each project row is a status strip
-  (`agents-cli  ●8 ◐1  zion`). Click `▶` to fold the project **open** (`▼`) and
-  list its sessions inline. Click a session to fold open a **detail** block:
-  work title, local/remote + surface (tmux/codium), repo/cwd, Linear ticket /
-  PR when the engine already knows them, duration (started / last active), and
-  a short session id — plus Open… actions (reveal cwd, copy id, open PR/ticket).
-  All of that comes from the warm `sessions --active --local` cache; expand
-  never shells the CLI or re-indexes transcripts. A session is *running* if
-  the engine says so (else *idle*). Work titles prefer the session `topic` over
-  a bare agent name.
+- **ACTIVE** — **project accordion** + **session detail submenu**. Projects are
+  **collapsed by default** as a status strip (`▶ agents-cli  ●8 ◐1  zion`).
+  Click `▶`/`▼` to fold the project open **inline** and list its agents.
+  Focusing an agent row opens a **side submenu (›)** with richer detail and
+  **linkable actions**: work title (and open URL if the title contains one),
+  local/remote + surface, clickable cwd, Linear ticket, GitHub PR, duration,
+  copy session id, optional preview snippet. Chips on the agent row itself
+  (`🎫 RUSH-…`, `⌥ PR#N`) surface links at a glance. All of that comes from the
+  warm `sessions --active --local` cache; expand never shells the CLI or
+  re-indexes transcripts. Work titles prefer the session `topic` over a bare
+  agent name.
 - **ROUTINES** — kept glanceable: the next few upcoming plus any failed, timed-out,
   or overdue routine inline. Failed and timed-out routines include the latest
   failure reason when available; overdue routines are labeled `overdue` even when

@@ -103,6 +103,16 @@ enum ActiveDisplay {
         }
         return parts.joined(separator: "  ·  ")
     }
+
+    /// Pull `123` from `…/pull/123` or `…/pulls/123`; nil if not a PR URL.
+    static func prNumber(from url: String?) -> String? {
+        guard let url, !url.isEmpty else { return nil }
+        let parts = url.split(separator: "/").map(String.init)
+        guard let i = parts.firstIndex(where: { $0 == "pull" || $0 == "pulls" }),
+              i + 1 < parts.count else { return nil }
+        let n = parts[i + 1].split(separator: "#").first.map(String.init) ?? parts[i + 1]
+        return n.allSatisfy(\.isNumber) ? n : nil
+    }
 }
 
 // One attention sentinel: mtime = when the session flagged, content = the

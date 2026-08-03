@@ -69,11 +69,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
     }
 
-    // ACTIVE accordion state — projects and sessions collapsed by default.
-    // In-memory only (resets on helper restart); toggling rebuilds the menu from
-    // the warm active-session cache with NO extra CLI calls.
+    // ACTIVE project accordion — projects collapsed by default. In-memory only
+    // (resets on helper restart). Toggling rebuilds from the warm active-session
+    // cache with NO extra CLI calls. Session *detail* lives in a side submenu (›),
+    // not a second accordion level.
     private var expandedProjects = Set<String>()
-    private var expandedSessions = Set<String>()
     private lazy var thisMachine: String = {
         Host.current().localizedName
             ?? ProcessInfo.processInfo.hostName
@@ -560,13 +560,15 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.addItem(newItem)
     }
 
-    // Live work as an ACCORDION: projects collapsed by default with a status
-    // strip (●N ◐M · host); click the disclosure (▼/▶) to fold the project open
-    // inline; click a session to fold its detail open. Expand toggles rebuild the
-    // menu from the warm cache — no CLI, no re-index.
+    // Live work: PROJECT accordion + SESSION side-submenu.
     //
-    // (NSMenu has no first-class accordion; we simulate it by re-populating the
-    // menu and re-opening it so the click does not feel like a dead end.)
+    //   ▶ agents-cli  ●8 ◐1  zion          ← project collapsed (default)
+    //   ▼ agents-cli  ●8 ◐1  zion          ← click folds open inline
+    //       ● Claude · zion · 3m — work… ›  ← agent row; › opens detail submenu
+    //
+    // Project expand is an accordion (▶/▼). Session detail is a native side
+    // submenu so linkable actions and multi-line context don't wall the main menu.
+    // Expand rebuilds from the warm cache only — no CLI, no re-index.
     private func addActive(_ menu: NSMenu, live: [Session], browserTasks: [BrowserTask], rich: Bool) {
         let totalRun = live.filter { $0.status == .running }.count
         let totalIdle = live.count - totalRun
@@ -616,7 +618,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                 return (a.lastActivityMs ?? 0) > (b.lastActivityMs ?? 0)
             }
             for s in sessions {
-                addSessionAccordion(menu, session: s, rich: rich)
+                addSessionRow(menu, session: s, rich: rich)
             }
         }
 
@@ -631,136 +633,168 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
     }
 
-    /// One session summary row (+ optional folded detail block under it).
-    private func addSessionAccordion(_ menu: NSMenu, session s: Session, rich: Bool) {
-        let key = sessionKey(s)
-        let open = expandedSessions.contains(key)
-        let arrow = open ? "▼" : "▶"
+    /// Agent summary under an expanded project. Detail lives in the › submenu
+    /// (linkable ticket/PR/cwd, locality, duration) — not a second accordion.
+    private func addSessionRow(_ menu: NSMenu, session s: Session, rich: Bool) {
         let glyph = s.status == .running ? "●" : (s.status == .attention ? "⚠" : "◐")
         let color = s.status == .running ? run : (s.status == .attention ? wait : idleC)
         let agent = LocalState.agentLabel(s.agent)
         let host = s.machine ?? thisMachine
         let age = ActiveDisplay.ageLabel(fromMs: s.lastActivityMs ?? s.startedAtMs)
         let work = s.workTitle
-        var line = "\(arrow) \(glyph) \(agent) · \(host)"
+
+        // Compact chips on the main row so you see signal without opening ›.
+        var chips: [String] = []
+        if let t = s.ticketId, !t.isEmpty { chips.append("🎫\(t)") }
+        if let pr = ActiveDisplay.prNumber(from: s.prLink) { chips.append("PR#\(pr)") }
+        else if let link = s.prLink, !link.isEmpty { chips.append("PR") }
+
+        var line = "\(glyph) \(agent) · \(host)"
         if let surface = s.surface, !surface.isEmpty { line += " · \(surface)" }
         if !age.isEmpty { line += " · \(age)" }
-        if rich && !work.isEmpty && !open {
-            line += " — \(trim(work, 28))"
-        }
+        if !chips.isEmpty { line += "  " + chips.joined(separator: " ") }
+        if rich && !work.isEmpty { line += " — \(trim(work, 32))" }
 
         let row = statusRow("", color, line)
-        // statusRow builds an attributed title with empty glyph — set plain title
-        // so the disclosure arrow is visible as part of the string.
         row.title = "    \(line)"
-        row.attributedTitle = NSAttributedString(string: "    \(line)", attributes: [
-            .foregroundColor: NSColor.labelColor,
-            .font: NSFont.menuFont(ofSize: 0),
-        ])
-        row.action = #selector(onToggleSession(_:))
-        row.target = self
-        row.representedObject = key
-        row.toolTip = open ? "Collapse session detail" : "Expand session detail"
+        row.attributedTitle = sessionRowTitle(glyph: glyph, glyphColor: color, rest: line)
+        row.submenu = sessionDetailSubmenu(s)
+        row.toolTip = work.isEmpty ? "Session detail" : work
         menu.addItem(row)
+    }
 
-        guard open else { return }
-
-        // Detail block — all from the already-cached active payload (no CLI).
-        for line in sessionDetailLines(s) {
-            let item = disabled("       \(line)")
-            item.toolTip = line
-            menu.addItem(item)
+    /// Status-colored glyph + label for the agent row.
+    private func sessionRowTitle(glyph: String, glyphColor: NSColor, rest: String) -> NSAttributedString {
+        let out = NSMutableAttributedString()
+        let font = NSFont.menuFont(ofSize: 0)
+        out.append(NSAttributedString(string: "    \(glyph) ", attributes: [
+            .foregroundColor: glyphColor, .font: font,
+        ]))
+        // rest already starts with glyph when built above — strip the leading glyph
+        // if present so we don't double it.
+        var body = rest
+        for prefix in ["● ", "◐ ", "⚠ "] {
+            if body.hasPrefix(prefix) { body = String(body.dropFirst(prefix.count)); break }
         }
-        // Actions stay available without another expand hop.
-        let actions = NSMenuItem(title: "       Open…", action: nil, keyEquivalent: "")
+        out.append(NSAttributedString(string: body, attributes: [
+            .foregroundColor: NSColor.labelColor, .font: font,
+        ]))
+        return out
+    }
+
+    /// Side submenu: graphical sections + linkable actions for one session.
+    /// All fields from the warm active payload — no CLI on open.
+    private func sessionDetailSubmenu(_ s: Session) -> NSMenu {
         let sub = NSMenu()
+        let work = s.workTitle
+
+        // ── What ──────────────────────────────────────────────────────────
+        if !work.isEmpty {
+            let head = NSMenuItem(title: "◎  \(trim(work, 72))", action: nil, keyEquivalent: "")
+            head.isEnabled = false
+            head.toolTip = work
+            sub.addItem(head)
+            // If the work title looks like a URL, make it one-click openable.
+            if let url = firstURL(in: work) {
+                let openWork = NSMenuItem(title: "   Open link in work title",
+                                          action: #selector(onOpenURL(_:)), keyEquivalent: "")
+                openWork.target = self
+                openWork.representedObject = url.absoluteString
+                sub.addItem(openWork)
+            }
+            sub.addItem(.separator())
+        }
+
+        // ── Where ─────────────────────────────────────────────────────────
+        let locality = ActiveDisplay.locality(machine: s.machine, thisMachine: thisMachine)
+        let locIcon = locality.hasPrefix("remote") ? "☁" : "💻"
+        var whereLine = "\(locIcon)  \(locality)"
+        if let surface = s.surface, !surface.isEmpty { whereLine += " · \(surface)" }
+        sub.addItem(disabled(whereLine))
+
+        if !s.repo.isEmpty {
+            sub.addItem(disabled("📁  \(s.repo)"))
+        }
         if let cwd = s.cwd {
-            let reveal = NSMenuItem(title: "Reveal working dir",
+            let reveal = NSMenuItem(title: "📂  \(shortHome(cwd))",
                                     action: #selector(onRevealPath(_:)), keyEquivalent: "")
             reveal.target = self
             reveal.representedObject = cwd
+            reveal.toolTip = "Reveal in Finder"
             sub.addItem(reveal)
         }
+
+        // ── Links (ticket / PR) — primary actions, not just labels ────────
+        let hasTicket = !(s.ticketId ?? "").isEmpty
+        let hasPR = !(s.prLink ?? "").isEmpty
+        if hasTicket || hasPR {
+            sub.addItem(.separator())
+            if let ticket = s.ticketId, !ticket.isEmpty {
+                let t = NSMenuItem(title: "🎫  \(ticket)  — open in Linear",
+                                   action: #selector(onOpenTicket(_:)), keyEquivalent: "")
+                t.target = self
+                t.representedObject = ticket
+                sub.addItem(t)
+            }
+            if let pr = s.prLink, !pr.isEmpty {
+                let label: String
+                if let n = ActiveDisplay.prNumber(from: pr) {
+                    label = "🔗  PR#\(n)  — open on GitHub"
+                } else {
+                    label = "🔗  Pull request  — open on GitHub"
+                }
+                let p = NSMenuItem(title: label, action: #selector(onOpenURL(_:)), keyEquivalent: "")
+                p.target = self
+                p.representedObject = pr
+                sub.addItem(p)
+            }
+        }
+
+        // ── Timing / status ───────────────────────────────────────────────
+        sub.addItem(.separator())
+        let started = ActiveDisplay.ageLabel(fromMs: s.startedAtMs)
+        let active = ActiveDisplay.ageLabel(fromMs: s.lastActivityMs)
+        let statusWord: String = {
+            switch s.status {
+            case .running: return "● running"
+            case .idle: return "◐ idle"
+            case .attention: return "⚠ needs you"
+            case .queued: return "queued"
+            }
+        }()
+        var timeLine = statusWord
+        if !started.isEmpty { timeLine += " · started \(started) ago" }
+        if !active.isEmpty { timeLine += " · active \(active) ago" }
+        sub.addItem(disabled("⏱  \(timeLine)"))
+
+        if let owner = s.owner, !owner.isEmpty, !owner.hasPrefix("UNRESOLVED") {
+            sub.addItem(disabled("👤  \(owner)"))
+        }
         if let sid = s.sessionId, !sid.isEmpty {
-            let copy = NSMenuItem(title: "Copy session id",
+            let copy = NSMenuItem(title: "⧉  Copy session id  (\(String(sid.prefix(8)))…)",
                                   action: #selector(onCopySessionId(_:)), keyEquivalent: "")
             copy.target = self
             copy.representedObject = sid
             sub.addItem(copy)
         }
-        if let url = s.prLink, !url.isEmpty {
-            let pr = NSMenuItem(title: "Open pull request",
-                                action: #selector(onOpenURL(_:)), keyEquivalent: "")
-            pr.target = self
-            pr.representedObject = url
-            sub.addItem(pr)
+
+        // Latest preview snippet (trimmed) — optional context, not a wall.
+        if let preview = s.preview?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !preview.isEmpty, preview != work {
+            sub.addItem(.separator())
+            let snip = disabled("💬  \(trim(preview, 80))")
+            snip.toolTip = preview
+            sub.addItem(snip)
         }
-        if let ticket = s.ticketId, !ticket.isEmpty {
-            let t = NSMenuItem(title: "Open \(ticket)",
-                               action: #selector(onOpenTicket(_:)), keyEquivalent: "")
-            t.target = self
-            t.representedObject = ticket
-            sub.addItem(t)
-        }
-        if !sub.items.isEmpty {
-            actions.submenu = sub
-            menu.addItem(actions)
-        }
+
+        return sub
     }
 
-    private func sessionKey(_ s: Session) -> String {
-        if let sid = s.sessionId, !sid.isEmpty { return sid }
-        return "\(s.agent)|\(s.cwd ?? "")|\(s.title)"
-    }
-
-    /// Quick-view lines for a folded-open session. Pure formatting over cached fields.
-    private func sessionDetailLines(_ s: Session) -> [String] {
-        var lines: [String] = []
-        let work = s.workTitle
-        if !work.isEmpty { lines.append(trim(work, 64)) }
-
-        let locality = ActiveDisplay.locality(machine: s.machine, thisMachine: thisMachine)
-        var whereBits = [locality]
-        if let surface = s.surface, !surface.isEmpty { whereBits.append(surface) }
-        if let owner = s.owner, !owner.isEmpty, !owner.hasPrefix("UNRESOLVED") {
-            whereBits.append(owner)
-        }
-        lines.append(whereBits.joined(separator: " · "))
-
-        if let repo = s.repo.isEmpty ? nil : s.repo {
-            var repoLine = "repo \(repo)"
-            if let cwd = s.cwd { repoLine += " · \(shortHome(cwd))" }
-            lines.append(repoLine)
-        } else if let cwd = s.cwd {
-            lines.append(shortHome(cwd))
-        }
-
-        var links: [String] = []
-        if let t = s.ticketId, !t.isEmpty { links.append(t) }
-        if let pr = s.prLink, !pr.isEmpty {
-            // Prefer a short PR# if the URL ends with /pull/N
-            if let n = pr.split(separator: "/").last, n.allSatisfy(\.isNumber) {
-                links.append("PR#\(n)")
-            } else {
-                links.append("PR")
-            }
-        }
-        if !links.isEmpty { lines.append(links.joined(separator: " · ")) }
-
-        let started = ActiveDisplay.ageLabel(fromMs: s.startedAtMs)
-        let active = ActiveDisplay.ageLabel(fromMs: s.lastActivityMs)
-        var times: [String] = []
-        if !started.isEmpty { times.append("started \(started) ago") }
-        if !active.isEmpty { times.append("active \(active) ago") }
-        if s.status == .running { times.append("running") }
-        else if s.status == .idle { times.append("idle") }
-        else if s.status == .attention { times.append("needs you") }
-        if !times.isEmpty { lines.append(times.joined(separator: " · ")) }
-
-        if let sid = s.sessionId, !sid.isEmpty {
-            lines.append("id \(String(sid.prefix(8)))")
-        }
-        return lines
+    private func firstURL(in text: String) -> URL? {
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+        else { return nil }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return detector.firstMatch(in: text, options: [], range: range)?.url
     }
 
     private func shortHome(_ path: String) -> String {
@@ -781,18 +815,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         reopenMenu()
     }
 
-    @objc private func onToggleSession(_ sender: NSMenuItem) {
-        guard let key = sender.representedObject as? String else { return }
-        if expandedSessions.contains(key) {
-            expandedSessions.remove(key)
-        } else {
-            expandedSessions.insert(key)
-        }
-        reopenMenu()
-    }
-
-    /// Rebuild the menu from warm caches and re-open it so accordion toggles
-    /// feel like fold/unfold rather than dismiss. No network, no sessions re-index.
+    /// Rebuild the menu from warm caches and re-open it so project accordion
+    /// toggles feel like fold/unfold rather than dismiss. No network / re-index.
     private func reopenMenu() {
         guard let menu = statusItem.menu else { return }
         let cheap = LocalState.sessions(includeTeams: false)
@@ -806,7 +830,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                 doctor: cachedDoctorOverview,
                 daemonPid: AgentsCLI.daemonPid(),
                 pending: pending)
-        // Re-open after the click closes the menu (next runloop).
         DispatchQueue.main.async { [weak self] in
             self?.statusItem.button?.performClick(nil)
         }
@@ -830,7 +853,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     @objc private func onOpenTicket(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String else { return }
-        // Linear deep link pattern used elsewhere in the stack.
         if let url = URL(string: "https://linear.app/getrush/issue/\(id)") {
             NSWorkspace.shared.open(url)
         }

@@ -573,6 +573,11 @@ enum IssueSelfTest {
                                                  machines: ["a", "b"])
         check("multi-host summary says N hosts",
               multi.contains("2 hosts"), detail: multi)
+
+        check("PR number from pull URL",
+              ActiveDisplay.prNumber(from: "https://github.com/org/repo/pull/1753") == "1753")
+        check("PR number nil for non-PR URL",
+              ActiveDisplay.prNumber(from: "https://github.com/org/repo") == nil)
     }
 
     // MARK: helpers
