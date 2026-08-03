@@ -173,7 +173,7 @@ const DOT = chalk.gray(' · ');
 
 function formatHeader(session: SessionMeta, events: SessionEvent[]): string {
   const model = extractModel(events) || session.model;
-  const { startedAgo, duration } = extractTiming(events);
+  const { createdAgo, lastActiveAgo, duration } = extractTiming(session, events);
   const totalMessages = session.messageCount ?? countMessages(events);
   const totalTokens = session.tokenCount;
 
@@ -184,7 +184,7 @@ function formatHeader(session: SessionMeta, events: SessionEvent[]): string {
   if (model) line1.push(chalk.bold.white(shortenModel(model)));
   if (session.account) line1.push(chalk.gray(session.account));
 
-  // Line 2: cwd · project · branch · started X ago · lasted Y
+  // Line 2: cwd · project · branch · created X ago · last active Y ago · lasted Z
   // Project is clickable: Linear issue URL is for tickets (line 4); for the
   // project name prefer a GitHub repo URL derived from the checkout path.
   const line2: string[] = [];
@@ -197,7 +197,8 @@ function formatHeader(session: SessionMeta, events: SessionEvent[]): string {
     line2.push(chalk.cyan(repoUrl ? linkUrl(repoUrl, session.project) : session.project));
   }
   if (session.gitBranch) line2.push(chalk.cyan(session.gitBranch));
-  if (startedAgo) line2.push(chalk.gray('started ') + chalk.white(startedAgo + ' ago'));
+  if (createdAgo) line2.push(chalk.gray('created ') + chalk.white(createdAgo + ' ago'));
+  if (lastActiveAgo) line2.push(chalk.gray('last active ') + chalk.white(lastActiveAgo + ' ago'));
   if (duration) line2.push(chalk.gray('lasted ') + chalk.white(duration));
 
   // Line 3: N msgs · T tokens · [label ·] uuid
@@ -318,14 +319,43 @@ function extractModel(events: SessionEvent[]): string | undefined {
   return undefined;
 }
 
-function extractTiming(events: SessionEvent[]): { startedAgo?: string; duration?: string } {
-  if (events.length === 0) return {};
-  const firstMs = Date.parse(events[0].timestamp);
-  const lastMs = Date.parse(events[events.length - 1].timestamp);
+/** Shortest span worth reporting as a separate last-activity field — matches the
+ * listing's rule, so the pane and the row agree on what counts as a one-shot. */
+const TIMING_SPAN_MIN_MS = 60_000;
+
+/**
+ * The three timing facts the header reports: when the session was created, when
+ * it was last active, and how long it ran. Reads the parsed transcript when
+ * there is one and otherwise the indexed `SessionMeta`, so a remote or
+ * unindexed session — which has no local transcript to parse — still reports
+ * them instead of silently dropping the whole line.
+ *
+ * `lastActive` and `lasted` are omitted for a session whose whole life was under
+ * a minute: there they just restate `created`.
+ */
+export function extractTiming(
+  session: Pick<SessionMeta, 'timestamp' | 'lastActivity' | 'durationMs'>,
+  events: SessionEvent[],
+): { createdAgo?: string; lastActiveAgo?: string; duration?: string } {
+  const firstMs = Date.parse(events[0]?.timestamp ?? session.timestamp);
   if (Number.isNaN(firstMs)) return {};
-  const ago = humanDuration(Math.max(0, Date.now() - firstMs));
-  const dur = Number.isNaN(lastMs) ? undefined : humanDuration(Math.max(0, lastMs - firstMs));
-  return { startedAgo: ago, duration: dur };
+  const createdAgo = humanDuration(Math.max(0, Date.now() - firstMs));
+
+  const lastMs = Date.parse(
+    events[events.length - 1]?.timestamp ?? session.lastActivity ?? session.timestamp,
+  );
+  if (Number.isNaN(lastMs)) return { createdAgo };
+  // A scan-persisted duration beats the timestamp subtraction when there are no
+  // events to read, because `lastActivity` may have fallen back to file mtime.
+  const spanMs = events.length === 0 && session.durationMs !== undefined
+    ? session.durationMs
+    : Math.max(0, lastMs - firstMs);
+  if (spanMs < TIMING_SPAN_MIN_MS) return { createdAgo };
+  return {
+    createdAgo,
+    lastActiveAgo: humanDuration(Math.max(0, Date.now() - lastMs)),
+    duration: humanDuration(spanMs),
+  };
 }
 
 
