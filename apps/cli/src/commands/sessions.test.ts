@@ -406,6 +406,16 @@ async function stopSessionResolverSshPeer(peer: SessionResolverSshPeer): Promise
   await new Promise<void>((resolve) => peer.fixture.once('exit', () => resolve()));
 }
 
+/**
+ * rm -rf the peer test's temp home, tolerating the trailing writes the peer
+ * side (an npx'd old agents-cli answering over ssh, plus the ControlPersist
+ * master winding down) races into it after stop — a bare rmSync intermittently
+ * dies ENOTEMPTY on CI. Retries absorb exactly that window.
+ */
+function rmTempHomeWithRetries(tempHome: string): void {
+  fs.rmSync(tempHome, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 });
+}
+
 describe('resolveSessionQuery indexed metadata coverage', () => {
   it('resolves complete and partial ids from the real index without using text matches', () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-resolve-index-'));
@@ -582,7 +592,7 @@ describe('agents sessions --resolve local-peer critical path', () => {
       );
     } finally {
       if (peer) await stopSessionResolverSshPeer(peer);
-      fs.rmSync(tempHome, { recursive: true, force: true });
+      rmTempHomeWithRetries(tempHome);
     }
   });
 
@@ -606,7 +616,7 @@ describe('agents sessions --resolve local-peer critical path', () => {
       expect(result.stderr).toContain('No unique/no-match decision was made.');
     } finally {
       if (peer) await stopSessionResolverSshPeer(peer);
-      fs.rmSync(tempHome, { recursive: true, force: true });
+      rmTempHomeWithRetries(tempHome);
     }
   });
 
