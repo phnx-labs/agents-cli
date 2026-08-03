@@ -314,6 +314,14 @@ project header names the machines its work ran on.
         process.exitCode = 1;
         return;
       }
+      // `parseInt` yields NaN for a non-numeric -n, and every downstream slice
+      // against NaN is empty — an unreadable flag would otherwise render as
+      // "No recent agent activity", which is a lie about the fleet.
+      if (!Number.isFinite(opts.limit) || opts.limit <= 0) {
+        process.stderr.write(chalk.red('--limit must be a positive number\n'));
+        process.exitCode = 1;
+        return;
+      }
 
       const self = machineId();
       const { includeLocal, wantRemote, remoteHosts } = resolveActivityScope(opts, self);

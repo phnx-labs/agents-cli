@@ -784,6 +784,8 @@ describe('capActivityEvents', () => {
     expect(capActivityEvents(stream, 10)).toHaveLength(3);
   });
 
+  // The command rejects such a limit before it gets here (`--limit must be a
+  // positive number`); this pins that the primitive never invents a window.
   it('returns nothing for a non-positive or unparsable limit', () => {
     expect(capActivityEvents([milestone('a')], 0)).toEqual([]);
     expect(capActivityEvents([milestone('a')], Number.NaN)).toEqual([]);
