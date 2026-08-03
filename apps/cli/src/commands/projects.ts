@@ -45,9 +45,12 @@ import {
   rollupSessionsByProject,
   planPct,
   enrichProjectSignals,
+  formatProjectMembers,
   type ProjectSessionRollup,
   type ProjectRemoteSignals,
 } from '../lib/project-status.js';
+import { fetchLinearProjectCounts, type LinearProjectCounts } from '../lib/linear-project-counts.js';
+import { listLinearProjects, pickLinearProject, type LinearPick } from '../lib/linear-projects.js';
 
 /** Recursion guard: a peer answering a probe fan-out never re-fans-out itself. */
 export const PROJECTS_NO_FANOUT_ENV = 'AGENTS_PROJECTS_LOCAL';
@@ -110,6 +113,7 @@ function renderCard(
   r: ProjectSessionRollup | undefined,
   remote: ProjectRemoteSignals | undefined,
   fleet?: HostWorkspaceStatus[],
+  linear?: LinearProjectCounts,
 ): void {
   const agents = r?.agents ?? 0;
   const pct = r ? planPct(r.plan) : undefined;
@@ -117,11 +121,16 @@ function renderCard(
   console.log(`${chalk.bold(def.name)}  ${chalk.dim('·')}  ${chalk.bold(`${agents} agents`)}${planStr}`);
   if (def.description) console.log(`  ${chalk.dim(def.description)}`);
   console.log(`  ${chalk.dim('live')}     ${r ? statusBar(r) : chalk.gray('no live agents')}`);
+  if (r && r.members.length) console.log(`  ${chalk.dim('agents')}   ${formatProjectMembers(r.members)}`);
   const ships: string[] = [];
   if (remote?.mergedPrs) ships.push(chalk.green(`${remote.mergedPrs} merged (${remote.windowDays}d)`));
   if (r?.openPrs.length) ships.push(`${r.openPrs.length} open PR${r.openPrs.length === 1 ? '' : 's'}`);
   if (r?.worktrees) ships.push(`${r.worktrees} worktree${r.worktrees === 1 ? '' : 's'}`);
+  if (remote?.latestRelease) ships.push(remote.latestRelease.tag);
   if (ships.length) console.log(`  ${chalk.dim('ships')}    ${ships.join(' · ')}`);
+  if (linear) {
+    console.log(`  ${chalk.dim('linear')}   ${linear.done}/${linear.total} done · ${linear.inProgress} in progress`);
+  }
   if (r && r.tickets.length) {
     console.log(`  ${chalk.dim('tickets')}  ${r.tickets.slice(0, 8).join(' · ')}${r.tickets.length > 8 ? ' …' : ''}`);
   }
@@ -162,6 +171,7 @@ export function registerProjectsCommands(program: Command): void {
       agents projects status              # progress card for every project
       agents projects status rush --json  # one project, machine-readable
       agents projects status --fleet      # + per-device workspace drift over SSH
+      agents projects link rush --linear  # bind the Linear project (auto-suggest)
       agents run --project rush           # land an agent in the project
     `,
     notes: `
@@ -359,11 +369,20 @@ export function registerProjectsCommands(program: Command): void {
 
       const roll = rollupSessionsByProject(all, [...await getActiveSessions(), ...fleetSessions]);
       // Enrich only the shown projects. --no-remote still reads the local artifact
-      // log but skips the gh call (def.repo left unused → mergedPrs stays 0).
+      // log but skips the gh calls + Linear counts (both are network).
       const remote = new Map<string, ProjectRemoteSignals>();
+      const linear = new Map<string, LinearProjectCounts>();
       await Promise.all(
         defs.map(async (d) => {
-          remote.set(d.name, await enrichProjectSignals(d, windowDays, nowMs, { skipRemote: opts.remote === false }));
+          const skipRemote = opts.remote === false;
+          const [sig, counts] = await Promise.all([
+            enrichProjectSignals(d, windowDays, nowMs, { skipRemote }),
+            !skipRemote && d.linear?.projectId
+              ? fetchLinearProjectCounts(d.linear.projectId)
+              : Promise.resolve(undefined),
+          ]);
+          remote.set(d.name, sig);
+          if (counts) linear.set(d.name, counts);
         }),
       );
 
@@ -384,10 +403,13 @@ export function registerProjectsCommands(program: Command): void {
                 name: d.name,
                 agents: r?.agents ?? 0,
                 byStatus: r?.byStatus ?? {},
+                members: r?.members ?? [],
                 plan: r?.plan ?? { done: 0, total: 0 },
                 planPct: r ? planPct(r.plan) ?? null : null,
                 openPrs: r?.openPrs ?? [],
                 mergedPrs: rem?.mergedPrs ?? 0,
+                latestRelease: rem?.latestRelease ?? null,
+                linear: linear.get(d.name) ?? null,
                 tickets: r?.tickets ?? [],
                 worktrees: r?.worktrees ?? 0,
                 artifacts: rem?.artifacts ?? 0,
@@ -403,7 +425,9 @@ export function registerProjectsCommands(program: Command): void {
         );
         return;
       }
-      for (const d of defs) renderCard(d, roll.get(d.name), remote.get(d.name), opts.fleet ? fleetFor(d) : undefined);
+      for (const d of defs) {
+        renderCard(d, roll.get(d.name), remote.get(d.name), opts.fleet ? fleetFor(d) : undefined, linear.get(d.name));
+      }
       if (fleetSkipped.length > 0) process.stdout.write(formatFleetSkippedNote(fleetSkipped));
     });
 
@@ -463,6 +487,67 @@ export function registerProjectsCommands(program: Command): void {
         created++;
       }
       console.log(chalk.green(`Imported ${created} project${created === 1 ? '' : 's'}${skipped ? chalk.gray(` (${skipped} skipped)`) : ''}`));
+    });
+
+  // ---- link ----
+  projects
+    .command('link <name>')
+    .description('Attach an external tracker to a project definition (writes linear.projectId into the YAML).')
+    .option('--linear [query]', 'Bind a Linear project by exact name or id; no value auto-suggests from the def name + repo')
+    .action((name: string, opts: { linear?: string | boolean }) => {
+      const def = loadProjectDef(name);
+      if (!def) {
+        console.error(chalk.red(`No project named "${name}". List them: agents projects list`));
+        process.exit(1);
+      }
+      if (opts.linear === undefined) {
+        console.error(chalk.red('Nothing to link. Pass a tracker flag, e.g. --linear [query].'));
+        process.exit(1);
+      }
+      // Explicit user command — a missing/unauthenticated `linear` CLI is loud,
+      // unlike the best-effort card enrichment.
+      let list: ReturnType<typeof listLinearProjects>;
+      try {
+        list = listLinearProjects();
+      } catch (e) {
+        console.error(chalk.red(e instanceof Error ? e.message : String(e)));
+        process.exit(1);
+      }
+      const query = typeof opts.linear === 'string' ? opts.linear.trim() : '';
+      let pick: LinearPick;
+      if (query) {
+        pick = pickLinearProject(query, list);
+      } else {
+        // Auto-suggest from the def's own identity — the primary repo slug is
+        // the sharpest key, then the def name. Only an exact normalized match
+        // writes itself; anything weaker asks the user to disambiguate.
+        pick = { kind: 'none' };
+        for (const hint of [def.repo, def.name].filter((h): h is string => typeof h === 'string' && h.length > 0)) {
+          const d = pickLinearProject(hint, list);
+          if (d.kind === 'match') {
+            pick = d;
+            break;
+          }
+          if (pick.kind === 'none') pick = d;
+        }
+      }
+      if (pick.kind !== 'match') {
+        if (pick.kind === 'candidates') {
+          console.error(chalk.yellow(`No confident Linear match${query ? ` for "${query}"` : ` for "${def.name}"`}. Candidates:`));
+          for (const c of pick.projects) console.error(`  ${chalk.cyan(c.id)}  ${c.name}`);
+        } else {
+          console.error(chalk.yellow(`No Linear project matches${query ? ` "${query}"` : ` "${def.name}"`}. Available:`));
+          for (const c of list) console.error(`  ${chalk.cyan(c.id)}  ${c.name}`);
+        }
+        console.error(chalk.gray(`Re-run with an explicit name or id: agents projects link ${name} --linear "<name-or-id>"`));
+        process.exit(1);
+      }
+      const p = pick.project;
+      // Preserve every other field — load, set linear, write back.
+      def.linear = { projectId: p.id };
+      if (p.url) def.linear.url = p.url;
+      writeProjectDef(def);
+      console.log(chalk.green(`${def.name} → Linear project "${p.name}" (${p.id})${p.url ? ` ${p.url}` : ''}`));
     });
 
   // ---- rm ----

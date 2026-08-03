@@ -89,18 +89,29 @@ different-home machine still matches — is a deferred follow-up (see below):
 ```
 rush  ·  23 agents  ·  68% plan
   live     14 running · 6 idle · 3 need-input     # active sessions by lifecycle state
-  ships    4 merged (7d) · 2 open PRs · 3 worktrees  # gh merged-PR count + open PRs held
+  agents   claude · running · RUSH-2107 @zion  ·  codex · idle @mac-mini  ·  +21 more
+  ships    4 merged (7d) · 2 open PRs · 3 worktrees · v1.20.91  # gh counts + latest release tag
+  linear   12/30 done · 5 in progress           # Linear issue counts (needs linear.projectId)
   tickets  RUSH-1201 · RUSH-1198 · …              # tickets worked or created
   proof    11 artifacts (7d) · last: plan-x.html  # artifact.created milestones by cwd
   repos    phnx-labs/rush · rush-infra
   context  apps/web · packages/api
 ```
 
-- **`live`, `plan`, open PRs, `tickets`, `worktrees`** come straight from the active
-  session list (`rollupSessionsByProject`) — no network.
+- **`live`, `agents`, `plan`, open PRs, `tickets`, `worktrees`** come straight from the
+  active session list (`rollupSessionsByProject`) — no network. The `agents` line
+  shows WHICH harness is on the project (one cell per session:
+  `agent · status · TICKET @host`), sorted running-first, capped at 6 with a
+  `+N more` tail. Under `--fleet` the remote sessions carry their peer's hostname.
 - **`ships` merged-count** is a best-effort `gh pr list` on the primary repo
   (`--no-remote` skips it; a missing `gh`/auth degrades to 0). It counts up to the
-  100 most recent merges within the window.
+  100 most recent merges within the window. The trailing tag is the **latest release
+  of the primary repo only** (`gh release list -L 1`; `repos[]` are not scanned),
+  absent when the repo has no releases.
+- **`linear`** counts issues by state TYPE (completed → done, started → in progress)
+  in the Linear project bound via `linear.projectId` — set it with
+  `agents projects link <name> --linear`. Best-effort: no credential, offline, or a
+  slow API (>8s) just omits the line, and `--no-remote` skips it too.
 - **`proof`** counts `artifact.created` activity milestones whose cwd is inside the
   project (`lib/project-status.ts`).
 - `--window <days>` sets the merged-PR / artifact window (default 7).
@@ -148,6 +159,7 @@ rush  ·  3 agents
 | `agents projects show <name> [--json]` | Full definition + resolved paths + contexts + links. |
 | `agents projects edit <name>` | Open the YAML in `$EDITOR`. |
 | `agents projects status [name] [--json] [--window N] [--no-remote] [--fleet]` | The progress card (all projects, or one). `--fleet` adds per-device workspace drift over SSH. |
+| `agents projects link <name> --linear [query]` | Bind a Linear project into the def (`linear.projectId` + url). No query → auto-suggests from the def name + repo slug; ambiguous/none lists candidates and exits 1. Powers the `linear` card line. |
 | `agents projects import --from-factory` | Absorb `~/.agents/factory/projects.json` into YAML definitions. |
 | `agents projects rm <name>` | Delete the definition (never touches the repo). |
 
@@ -162,5 +174,5 @@ definitions now.
   still local-home — a session recorded on a different-home machine only matches
   once home-relative cwd matching lands.
 - **Re-point `agents factory snapshot`** per-project Linear rollup at defined projects.
-- **Richer Linear ticket-state counts** on the card.
+- **Per-repo release lines** — the `ships` release tag is the primary repo only.
 - **Persisted `project_id` session column** — today membership is derived from cwd.
