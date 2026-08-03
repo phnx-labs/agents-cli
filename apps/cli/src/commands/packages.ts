@@ -520,7 +520,9 @@ the sha256 in the index and abort on mismatch.
           console.log(chalk.gray('The index was written locally — commit and push it manually to publish.'));
           process.exit(1);
         }
-        urlBranch = result.branch || options.branch || (await getCurrentBranch(repoDir));
+        // commitAndPush always reports the pushed branch on success; the `??`
+        // only satisfies the optional return type, it is not a behavior path.
+        urlBranch = result.branch ?? (await getCurrentBranch(repoDir));
         pushSpinner.succeed(`Pushed skills-index.json to ${urlBranch}`);
       }
 
