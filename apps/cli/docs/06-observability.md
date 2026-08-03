@@ -13,6 +13,7 @@ whose *consumer* and *axis* match your question, not whichever you remember firs
 |---|---|---|---|
 | **`events`** | **Raw unified event stream = the audit log.** Everything: secrets access, command invocations, version/skill/mcp/team ops, browser events, plus agent milestones. `--follow` to tail, `--audit` for ops-only. | `events.jsonl` + per-session `activity/*.jsonl`, merged by `readUnifiedEvents` | Audit, debugging, monitoring (human + machine) |
 | **`perf`** | **Latency rollups.** p50/p99 for hooks, CLI commands, and `agent.run` timings. Indexed SQLite — not a full scan of the audit log. | `~/.agents/.cache/perf/perf.db` (disposable) | Humans optimizing boot/run cost + `--json` |
+| **`trends`** | **Usage analytics.** Harness/model mix, tools per session, token ratios, hottest secrets/browser profiles — baked recipes over sessions + a durable resource warehouse. Distinct from quota (`agents usage`) and latency (`agents perf`). | `sessions.db` + `~/.agents/.history/analytics/usage.db` | Humans + `--json` |
 | **`feed`** | **Consolidated cross-agent surface.** Open blocks (decisions agents are waiting on) + `feed post` status updates — "what needs you / what are agents saying." | `.history/feed/*` + active sessions | Humans (operator inbox) + agents (progress) |
 | **`activity`** | **Human milestone timeline.** Recent plans / PRs / worktrees / sub-agents, plus Bash-driven deliverables (video renders, image upscales, metadata edits), newest-first — a friendly lens on the milestone tier of the event stream. Every Bash call also emits a structured `bash.executed` activity record carrying its tool category. | `activity/*.jsonl` | Human at the terminal |
 | **`output`** | **Productivity accounting.** Token burn vs shipped output (PRs, commits) across agents — the "was it worth it" axis. (`agents cost` is the pure $-and-duration sibling.) | `sessions.db` + git/gh | Human + `--json` |
@@ -100,6 +101,32 @@ agents perf run --json          # agent.run / perf.timing labels
 **Disable:** `AGENTS_DISABLE_PERF=1`. **Redirect (tests):** `AGENTS_PERF_DB`,
 `AGENTS_PERF_SPOOL`. Retention: samples older than 30 days are pruned
 opportunistically on open. Wipe anytime: `rm -rf ~/.agents/.cache/perf`.
+
+## Usage analytics (`agents trends`)
+
+Resource and session frequency — **not** model quota (`agents usage`) and **not**
+latency (`agents perf`). Implementation: `apps/cli/src/lib/analytics/`, CLI:
+`apps/cli/src/commands/trends.ts`.
+
+```
+agents trends                     # auto recipe board (skips empty sections)
+agents trends --days 30           # window
+agents trends harness-mix --json  # one baked recipe
+agents trends query --kind secret # raw warehouse rows
+agents trends recipes             # list recipe ids
+```
+
+| Store | Path | Holds |
+|---|---|---|
+| Session index | `sessions.db` | Harness/model mix, token ratios, `tool_call_count` (Claude scan rollup) |
+| Usage warehouse | `~/.agents/.history/analytics/usage.db` | Value-free `kind`/`name`/`event` rows (secret, agent, browser, …) |
+
+Secrets usage previously lived only in `~/.agents/secrets/secrets.db`; the warehouse
+migrates those rows once (`kind=secret`) and the secrets UI keeps reading through a
+thin adapter. New emitters: secret access paths, `agents run`, browser launch/close.
+
+**Disable:** `AGENTS_NO_USAGE_TRACK=1`. **Redirect (tests):** `AGENTS_USAGE_DB`,
+`AGENTS_SESSIONS_DB`. Retention: usage events older than 90 days are pruned on open.
 
 ## Audit Event Log (`agents events`)
 
