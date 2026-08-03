@@ -39,6 +39,44 @@ export interface ViewingIn {
   tab?: number;
 }
 
+/**
+ * The one display form of "where is this session being watched" — `'codium tab 3'`
+ * when a client is attached, the bare app name when the tab can't be resolved, and
+ * `'detached'` when the pane is live but nobody is looking at it (the terminal that
+ * displayed it was closed or crashed). `undefined` for a session that isn't
+ * tmux-hosted: there is no pane to attach to, so it isn't on this axis at all.
+ *
+ * Shared by the `--active` row renderer and the `--json` serializer so a machine
+ * consumer (the Factory extension's resume picker) reads exactly the string a human
+ * sees, instead of re-deriving "detached" from an absent field.
+ */
+export function viewingInLabel(
+  s: Pick<ActiveSession, 'provenance' | 'viewingIn'>,
+): string | undefined {
+  if (s.provenance?.mux?.kind !== 'tmux' || !s.provenance.mux.pane) return undefined;
+  if (!s.viewingIn) return 'detached';
+  return s.viewingIn.tab != null ? `${s.viewingIn.app} tab ${s.viewingIn.tab}` : s.viewingIn.app;
+}
+
+/**
+ * Wire form -> internal form for a row arriving from another machine's
+ * `--active --json`. The fan-out reaches peers whose CLI may predate
+ * {@link viewingInLabel} and still emit the `{app, tab}` object, so this boundary
+ * normalizes both shapes into one — the ONLY place either shape is accepted.
+ * `'detached'` maps to undefined, which is what "no attached client" means
+ * internally; {@link viewingInLabel} regenerates the word from the pane.
+ */
+export function parseViewingIn(raw: unknown): ViewingIn | undefined {
+  if (raw && typeof raw === 'object') {
+    const app = (raw as ViewingIn).app;
+    const tab = (raw as ViewingIn).tab;
+    return typeof app === 'string' ? { app, tab: typeof tab === 'number' ? tab : undefined } : undefined;
+  }
+  if (typeof raw !== 'string' || !raw || raw === 'detached') return undefined;
+  const m = raw.match(/^(.+?) tab (\d+)$/);
+  return m ? { app: m[1], tab: parseInt(m[2], 10) } : { app: raw };
+}
+
 /** Injection seams so `resolveViewingIn` is unit-testable without a live tmux/ps/osascript. */
 export interface ViewingInDeps {
   /** Ghostty surfaces (window/tab/cwd/title). Enumerated once by the caller and shared. */

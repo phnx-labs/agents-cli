@@ -21,9 +21,9 @@ import { SESSION_AGENTS } from '../lib/session/types.js';
 import { discoverArtifacts, readArtifact, resolveArtifact } from '../lib/session/artifacts.js';
 import { looksLikePath, toComparablePath, homeDir, needsWindowsShell, findExecutable, composeWin32CommandLine } from '../lib/platform/index.js';
 import { getActiveSessions, type ActiveSession } from '../lib/session/active.js';
-import { enumerateGhosttyTabs, assignGhosttyTabs } from '../lib/session/ghostty-tabs.js';
+import { enumerateGhosttyTabs, assignGhosttyTabs, type GhosttySurface } from '../lib/session/ghostty-tabs.js';
 import { mapPanesToTargets, listClients } from '../lib/tmux/session.js';
-import { resolveViewingIn } from '../lib/session/viewing-in.js';
+import { resolveViewingIn, viewingInLabel } from '../lib/session/viewing-in.js';
 import { machineId, normalizeHost } from '../lib/session/sync/config.js';
 import { gatherRemoteActive, NO_FANOUT_ENV } from '../lib/session/remote-active.js';
 import { gatherRemoteList, runOnPeer } from '../lib/session/remote-list.js';
@@ -549,15 +549,26 @@ function modelLabel(model?: string): string {
  * (null when unknown) alongside the raw fields, so every active row is joinable.
  * `project` uses the same derivation SessionMeta does — basename(cwd) (see
  * discover.ts) — so the active view and the history view join identically.
+ *
+ * `viewingIn` flattens to the same display string the row renderer prints —
+ * `'codium tab 3'` / `'detached'` / null — so a consumer can tell a watched
+ * session from an orphaned one (its terminal died, the agent is still running)
+ * without re-implementing the tmux client lookup.
  */
 export function serializeActiveSessionsForJson(
   sessions: ActiveSession[],
-): Array<ActiveSession & { ticketId: string | null; project: string | null; prLink: string | null }> {
+): Array<Omit<ActiveSession, 'viewingIn'> & {
+  ticketId: string | null;
+  project: string | null;
+  prLink: string | null;
+  viewingIn: string | null;
+}> {
   return sessions.map((s) => ({
     ...s,
     ticketId: s.ticket?.id ?? null,
     project: s.cwd ? path.basename(s.cwd) : null,
     prLink: s.pr?.url ?? null,
+    viewingIn: viewingInLabel(s) ?? null,
   }));
 }
 
@@ -602,12 +613,8 @@ function locatorBadge(s: ActiveSession): string {
     // For a tmux-hosted session, say which app+tab is looking at it right now
     // (or that it's running detached). Only meaningful for tmux (the pane is the
     // durable handle; the viewer is transient).
-    if (s.viewingIn) {
-      const tab = s.viewingIn.tab != null ? ` tab ${s.viewingIn.tab}` : '';
-      parts.push(chalk.gray(`viewing in ${s.viewingIn.app}${tab}`));
-    } else {
-      parts.push(chalk.gray('detached'));
-    }
+    const label = viewingInLabel(s);
+    if (label) parts.push(chalk.gray(label === 'detached' ? label : `viewing in ${label}`));
   } else if (p?.mux?.kind === 'screen') {
     parts.push(chalk.green('screen'));
   }
@@ -978,13 +985,34 @@ async function enrichLocalLocators(local: ActiveSession[]): Promise<void> {
     }
   } catch { /* non-fatal */ }
 
-  // tmux attach targets + "viewing in <app> tab N", one batched query per socket.
+  // One Ghostty enumeration shared across every socket's viewing-in resolve
+  // (a tmux client can be attached from a Ghostty tab).
+  await enrichTmuxLocators(local, await enumerateGhosttyTabsQuietly());
+}
+
+/** {@link enumerateGhosttyTabs}, best-effort — an osascript failure yields no surfaces. */
+async function enumerateGhosttyTabsQuietly(): Promise<GhosttySurface[]> {
+  try {
+    return await enumerateGhosttyTabs();
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The tmux half of {@link enrichLocalLocators}: the `session:window.pane` attach
+ * target and "viewing in <app> tab N" / detached, one batched query per socket.
+ *
+ * Split out because it is the only locator the `--json` path can afford. It costs
+ * tmux queries and a `ps` read — no osascript — so scriptable output stays cheap
+ * while still answering the question a consumer actually needs: is anyone looking
+ * at this session, or is it running orphaned? Without `surfaces`, a Ghostty-attached
+ * client still resolves as attached, just without its tab number.
+ */
+async function enrichTmuxLocators(local: ActiveSession[], surfaces: GhosttySurface[] = []): Promise<void> {
   try {
     const tmux = local.filter(s => s.provenance?.mux?.kind === 'tmux' && s.provenance.mux.pane);
     if (tmux.length > 0) {
-      // One Ghostty enumeration shared across every socket's viewing-in resolve
-      // (a tmux client can be attached from a Ghostty tab).
-      const surfaces = await enumerateGhosttyTabs();
       const sockets = new Set(tmux.map(s => s.provenance!.mux!.socket));
       for (const socket of sockets) {
         const paneMap = await mapPanesToTargets(socket);
@@ -1088,6 +1116,11 @@ async function renderActiveSessions(
   const sessions = waitingOnly ? merged.filter(s => s.status === 'input_required') : merged;
 
   if (asJson) {
+    // Resolve who is watching each local tmux pane before serializing: `viewingIn`
+    // is how a consumer distinguishes a session someone is looking at from one
+    // running orphaned after its terminal died. tmux-only (no osascript) so the
+    // scriptable path stays cheap — see enrichTmuxLocators.
+    await enrichTmuxLocators(sessions.filter(s => !s.machine || s.machine === self));
     process.stdout.write(JSON.stringify(serializeActiveSessionsForJson(sessions), null, 2) + '\n');
     if (waitingOnly && sessions.length > 0) process.exitCode = 1;
     return;
