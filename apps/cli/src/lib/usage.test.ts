@@ -525,12 +525,20 @@ describe('a recorded Retry-After actually suppresses the read', () => {
   });
 });
 
-describe('the throttle guard covers every provider, not just Claude', () => {
-  // The review that forced this: with only Claude tested, two real bugs shipped
+describe('the throttle guard is exercised beyond Claude', () => {
+  // The review that forced this: with only Claude tested, two real bugs got
   // through — Cursor's error `return` was left unconditional by a braceless
   // `if` (so every 200 would have failed), and Kimi's probe guard sat AHEAD of
   // its missing/expired credential checks, misreporting a broken credential as
-  // merely throttled. Per-provider coverage is what catches that class.
+  // merely throttled.
+  //
+  // What this actually covers is Claude and Kimi end-to-end, not all four. Droid
+  // and Cursor are guarded and recorded identically (see the four
+  // usageRateLimitedUntil / noteUsageRateLimited pairs in usage.ts) but are not
+  // driven here: Droid's credential is AES-GCM encrypted with an on-disk key, so
+  // there is no cheap way to seed one without mocking, which this repo does not
+  // do. Naming that is better than a describe() title implying coverage that is
+  // not present.
   let home: string;
   let dir: string;
   let prevPath: string | null;
