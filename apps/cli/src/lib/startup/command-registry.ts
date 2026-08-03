@@ -73,7 +73,6 @@ export const loadBeta: ModuleLoader = async () => (await import('../../commands/
 export const loadSync: ModuleLoader = async () => (await import('../../commands/sync.js')).registerSyncCommand;
 export const loadLock: ModuleLoader = async () => (await import('../../commands/lock.js')).registerLockCommand;
 export const loadRefreshRules: ModuleLoader = async () => (await import('../../commands/refresh-rules.js')).registerRefreshRulesCommand;
-export const loadDrive: ModuleLoader = async () => (await import('../../commands/drive.js')).registerDriveCommands;
 export const loadFactory: ModuleLoader = async () => (await import('../../commands/factory.js')).registerFactoryCommands;
 export const loadUsage: ModuleLoader = async () => (await import('../../commands/usage.js')).registerUsageCommand;
 export const loadCost: ModuleLoader = async () => (await import('../../commands/cost.js')).registerCostCommand;
@@ -191,7 +190,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   sync: [loadSync],
   lock: [loadLock],
   'refresh-rules': [loadRefreshRules],
-  drive: [loadDrive],
   factory: [loadFactory],
   usage: [loadUsage],
   cost: [loadCost],

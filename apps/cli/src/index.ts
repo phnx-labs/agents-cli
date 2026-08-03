@@ -168,7 +168,6 @@ import {
   loadSync,
   loadLock,
   loadRefreshRules,
-  loadDrive,
   loadFactory,
   loadUsage,
   loadCost,
@@ -417,14 +416,13 @@ Diagnostics:
   perf                            Latency rollups (hooks, commands, runs) from the disposable perf warehouse
 
 Config sync:
-  drive                           Sync session history across machines via rsync
   pull                            Clone or pull the system repo at ~/.agents/.system/
   repo init --path <dir>          Scaffold your own editable repo from a template
   repo add <path|gh:user/repo>    Merge an extra repo after the system repo
   lock [--frozen]                 Write/verify agents.lock (SHA-256 of resolved resources); --frozen fails on drift
 
 Beta features:
-  beta                            Enable preview features (factory, drive, and more)
+  beta                            Enable preview features (factory and more)
 
 Automation tips:
   Pass explicit names/IDs         Avoid pickers: agents sessions <id> --markdown
@@ -1067,7 +1065,6 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadSync);
   await reg(loadLock);
   await reg(loadRefreshRules);
-  await reg(loadDrive);
   await reg(loadFactory);
   await reg(loadUsage);
   await reg(loadCost);

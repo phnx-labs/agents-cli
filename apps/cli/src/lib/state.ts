@@ -134,7 +134,6 @@ const PACKAGES_DIR = path.join(CACHE_DIR, 'packages');
 // They live at the user-root so they're git-tracked as source of truth.
 const PLUGINS_DIR = path.join(USER_AGENTS_DIR, 'plugins');
 const CLOUD_DIR = path.join(CACHE_DIR, 'cloud');
-const DRIVE_DIR = path.join(CACHE_DIR, 'drive');
 const TERMINALS_DIR = path.join(CACHE_DIR, 'terminals');
 const LOGS_DIR = path.join(CACHE_DIR, 'logs');
 /** Disposable performance samples (~/.agents/.cache/perf/) — safe to wipe. */
@@ -485,9 +484,6 @@ export function getProjectPluginsDir(cwd: string = process.cwd()): string | null
   if (!projectAgentsDir) return null;
   return path.join(projectAgentsDir, 'plugins');
 }
-
-/** Path to synced remote session data (~/.agents/.cache/drive/). */
-export function getDriveDir(): string { return DRIVE_DIR; }
 
 /** Path to soft-deleted resources (~/.agents/.history/trash/). */
 export function getTrashDir(): string { return TRASH_DIR; }
