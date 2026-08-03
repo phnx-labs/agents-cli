@@ -64,13 +64,16 @@ export interface RemoteActiveResult {
  * (from `--host`), fan out to exactly those. Otherwise sweep the registered,
  * online devices from `ag devices`, excluding this machine and any without an
  * address. Results from all peers run in parallel and are flattened.
+ * `opts.quiet` suppresses the per-device stderr line for callers that report
+ * skipped peers once, compactly, themselves.
  */
-export async function gatherRemoteActive(hosts?: string[]): Promise<RemoteActiveResult> {
+export async function gatherRemoteActive(hosts?: string[], opts?: { quiet?: boolean }): Promise<RemoteActiveResult> {
   const result = await gatherRemoteAgentsJson({
     args: ['sessions', '--active', '--json'],
     noFanoutEnv: NO_FANOUT_ENV,
     hosts,
     parse: parseRemoteActive,
+    quiet: opts?.quiet,
   });
   return { sessions: result.items, deviceCount: result.deviceCount };
 }

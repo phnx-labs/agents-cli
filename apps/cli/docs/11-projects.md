@@ -47,7 +47,7 @@ linear:
 | `name` | Stable id, == filename. What `--project` takes. |
 | `root` | Repo / monorepo root, home-relative → portable. |
 | `defaultPath` | Where an agent's cwd lands (a monorepo subdir). Defaults to `root`. |
-| `repo` / `repos[]` | GitHub slug(s), each with an optional `subpath`, for the PR/merge rollup. |
+| `repo` / `repos[]` | GitHub slug(s), each with an optional `subpath`, for the PR/merge rollup. `repos[].path` (home-relative) names that repo's local checkout and opts it into workspace probing (`status --fleet`). |
 | `contexts[]` | `{path, purpose}` described starting points — indexed anchors for agents. |
 | `integrations[]` | `{kind, url, label}` external context sources. |
 | `linear` | `{projectId, url}` — reuses the existing Linear path. |
@@ -105,6 +105,40 @@ rush  ·  23 agents  ·  68% plan
   project (`lib/project-status.ts`).
 - `--window <days>` sets the merged-PR / artifact window (default 7).
 
+### `--fleet` — per-device workspace drift
+
+Projects are natively multi-device, so `status --fleet` adds a `fleet` line per
+project showing the state of its workspace repos on every fleet device — present
+or missing, on which branch, ahead/behind the upstream, and uncommitted changes:
+
+```
+rush  ·  3 agents
+  live     2 running · 1 idle
+  ships    4 merged (7d)
+  fleet    zion: ✓ clean · main  ·  mac-mini: ⚠ 12 dirty · ↑3 · feature/x  ·  gpu-box: ✗ missing
+```
+
+- **What it dials.** One parallel SSH call per online device (the canonical
+  `remote-agents-json` fan-out, 12s per-peer timeout) running the hidden
+  `agents projects probe --json <path...>` on each peer, plus the existing
+  sessions fan-out so the card's `live` line counts agents on every box, not
+  just this machine. Local paths are probed directly.
+- **What's probed.** Each shown def's `root` plus every `repos[].path` — the
+  field that opts an additional repo into drift tracking (the def otherwise
+  only knows the primary `root` on disk). Paths are home-relative, so they
+  re-root on each peer.
+- **Drift is against the last-fetched upstream.** The probe never runs
+  `git fetch` — `↑`/`↓` measure against the peer's remote-tracking refs as they
+  are. A repo with no upstream reports no drift (not zero).
+- **Unreachable or older peers are named once** in a trailing note
+  (`· N devices didn't answer (unreachable or older agents-cli): …`) — a peer
+  whose CLI predates the probe subcommand lands in the same skipped list, never
+  a silent gap. The `probe` subcommand itself is not beta-gated, so peers answer
+  whenever their binary carries it.
+- `--json` includes the fleet data: per project `workspaces: [{host, path,
+  present, branch, upstream, ahead, behind, dirty, lastCommit, error}]`.
+- Default is off — `--fleet` is the opt-in because it dials the fleet.
+
 ## Command surface
 
 | Command | Does |
@@ -113,7 +147,7 @@ rush  ·  23 agents  ·  68% plan
 | `agents projects add <name>` | Scaffold `<name>.yaml`; infers `root` + origin slug from the current repo. Flags: `--root`, `--path`, `--repo`, `--context path:purpose`, `--linear`. |
 | `agents projects show <name> [--json]` | Full definition + resolved paths + contexts + links. |
 | `agents projects edit <name>` | Open the YAML in `$EDITOR`. |
-| `agents projects status [name] [--json] [--window N] [--no-remote]` | The progress card (all projects, or one). |
+| `agents projects status [name] [--json] [--window N] [--no-remote] [--fleet]` | The progress card (all projects, or one). `--fleet` adds per-device workspace drift over SSH. |
 | `agents projects import --from-factory` | Absorb `~/.agents/factory/projects.json` into YAML definitions. |
 | `agents projects rm <name>` | Delete the definition (never touches the repo). |
 
@@ -122,10 +156,11 @@ definitions now.
 
 ## Not yet (fast-follow)
 
-- **Fleet-wide live rollup.** Today the live-agent count is this machine's active
-  sessions; a fan-out across `agents devices` plus home-relative cwd matching (so a
-  session from a different-home machine still maps to the project) would make it truly
-  cross-fleet.
+- **Fleet-wide live rollup by default.** `status --fleet` already widens the
+  live-agent count to the whole fleet (via the sessions fan-out) and adds
+  per-device workspace drift, but fleet remains opt-in, and cwd matching is
+  still local-home — a session recorded on a different-home machine only matches
+  once home-relative cwd matching lands.
 - **Re-point `agents factory snapshot`** per-project Linear rollup at defined projects.
 - **Richer Linear ticket-state counts** on the card.
 - **Persisted `project_id` session column** — today membership is derived from cwd.

@@ -19,8 +19,18 @@ import { setHelpSections } from '../lib/help.js';
 import { getMainRepoRoot } from '../lib/git.js';
 import { parseOwnerRepoFromRemote } from '../lib/registry.js';
 import { toHomeRelative } from '../lib/project-root.js';
+import { machineId } from '../lib/machine-id.js';
 import { getActiveSessions } from '../lib/session/active.js';
+import { gatherRemoteActive } from '../lib/session/remote-active.js';
+import { gatherRemoteAgentsJson } from '../lib/remote-agents-json.js';
 import { factoryProjectsPath } from '../lib/auto-dispatch.js';
+import {
+  formatFleetWorkspaces,
+  parseRemoteProbe,
+  probeProjectWorkspaces,
+  workspaceTargetsForDef,
+  type HostWorkspaceStatus,
+} from '../lib/project-probe.js';
 import {
   listProjectDefs,
   loadProjectDef,
@@ -38,6 +48,27 @@ import {
   type ProjectSessionRollup,
   type ProjectRemoteSignals,
 } from '../lib/project-status.js';
+
+/** Recursion guard: a peer answering a probe fan-out never re-fans-out itself. */
+export const PROJECTS_NO_FANOUT_ENV = 'AGENTS_PROJECTS_LOCAL';
+
+/** Max peers named in the skipped note before the rest collapse to `+N`. */
+const SKIPPED_NAME_LIMIT = 4;
+
+/**
+ * One compact trailing note for peers that didn't answer the `--fleet`
+ * fan-out — unreachable, or running an agents-cli too old to carry `projects
+ * probe`. Mirrors `formatUnreachableNote` (activity) with the probe-specific
+ * reason; empty string when everything answered.
+ */
+export function formatFleetSkippedNote(skipped: string[]): string {
+  if (skipped.length === 0) return '';
+  const named = skipped.slice(0, SKIPPED_NAME_LIMIT);
+  const rest = skipped.length - named.length;
+  const list = rest > 0 ? `${named.join(', ')} +${rest}` : named.join(', ');
+  const noun = skipped.length === 1 ? 'device' : 'devices';
+  return chalk.gray(`  · ${skipped.length} ${noun} didn't answer (unreachable or older agents-cli): ${list}\n`);
+}
 
 /** `path:purpose` → a context anchor. Purpose may contain colons. */
 function parseContextFlag(raw: string): ProjectContext {
@@ -77,6 +108,7 @@ function renderCard(
   def: ProjectDef,
   r: ProjectSessionRollup | undefined,
   remote: ProjectRemoteSignals | undefined,
+  fleet?: HostWorkspaceStatus[],
 ): void {
   const agents = r?.agents ?? 0;
   const pct = r ? planPct(r.plan) : undefined;
@@ -91,6 +123,15 @@ function renderCard(
   if (ships.length) console.log(`  ${chalk.dim('ships')}    ${ships.join(' · ')}`);
   if (r && r.tickets.length) {
     console.log(`  ${chalk.dim('tickets')}  ${r.tickets.slice(0, 8).join(' · ')}${r.tickets.length > 8 ? ' …' : ''}`);
+  }
+  if (fleet) {
+    const lines = formatFleetWorkspaces(fleet);
+    if (lines.length === 0) {
+      console.log(`  ${chalk.dim('fleet')}    ${chalk.gray('no workspace paths (set root or repos[].path)')}`);
+    }
+    lines.forEach((line, i) => {
+      console.log(`  ${chalk.dim((i === 0 ? 'fleet' : '').padEnd(5))}    ${line}`);
+    });
   }
   if (remote?.artifacts) {
     const last = remote.lastArtifact ? `  ${chalk.dim(`· last: ${remote.lastArtifact}`)}` : '';
@@ -119,6 +160,7 @@ export function registerProjectsCommands(program: Command): void {
       agents projects list
       agents projects status              # progress card for every project
       agents projects status rush --json  # one project, machine-readable
+      agents projects status --fleet      # + per-device workspace drift over SSH
       agents run --project rush           # land an agent in the project
     `,
     notes: `
@@ -127,8 +169,12 @@ export function registerProjectsCommands(program: Command): void {
     `,
   });
 
-  projects.hook('preAction', () => {
+  projects.hook('preAction', (_thisCommand, actionCommand) => {
     if (enabled) return;
+    // `probe` is the peer half of `status --fleet`: it must answer whenever the
+    // binary carries it, even where the beta flag is off — a gated peer would
+    // look unreachable to every fleet member on a newer CLI.
+    if (actionCommand.name() === 'probe') return;
     console.error(chalk.red('agents projects is in beta.'));
     console.error(chalk.gray(betaEnableHint('projects')));
     process.exit(1);
@@ -265,7 +311,8 @@ export function registerProjectsCommands(program: Command): void {
     .option('--json', 'Machine-readable output')
     .option('--window <days>', 'Window for merged PRs and artifacts', '7')
     .option('--no-remote', 'Skip the GitHub lookup (merged-PR count); faster, offline')
-    .action(async (name: string | undefined, opts: { json?: boolean; window?: string; remote?: boolean }) => {
+    .option('--fleet', 'Also dial every fleet device for workspace presence, branch, and drift (one SSH per peer)')
+    .action(async (name: string | undefined, opts: { json?: boolean; window?: string; remote?: boolean; fleet?: boolean }) => {
       const all = listProjectDefs();
       // Named lookup goes through the strict single-def loader so a broken
       // <name>.yaml surfaces its validation error instead of "No project named".
@@ -281,7 +328,35 @@ export function registerProjectsCommands(program: Command): void {
       }
       const windowDays = Math.max(1, Number.parseInt(opts.window ?? '7', 10) || 7);
       const nowMs = Date.now();
-      const roll = rollupSessionsByProject(all, await getActiveSessions());
+
+      // --fleet: probe each shown def's workspace paths (root + repos[].path)
+      // locally and on every peer in one parallel SSH round, and widen the
+      // live-session rollup to the whole fleet via the existing sessions
+      // fan-out. Both are opt-in — they dial the fleet.
+      const fleetTargets = opts.fleet ? [...new Set(defs.flatMap(workspaceTargetsForDef))] : [];
+      let fleetWs: HostWorkspaceStatus[] = [];
+      let fleetSkipped: string[] = [];
+      let fleetSessions: Awaited<ReturnType<typeof getActiveSessions>> = [];
+      if (opts.fleet) {
+        const self = machineId();
+        fleetWs.push(...probeProjectWorkspaces(fleetTargets).map((s) => ({ ...s, host: self })));
+        const [probeRes, activeRes] = await Promise.all([
+          fleetTargets.length > 0
+            ? gatherRemoteAgentsJson({
+                args: ['projects', 'probe', '--json', ...fleetTargets],
+                noFanoutEnv: PROJECTS_NO_FANOUT_ENV,
+                parse: parseRemoteProbe,
+                quiet: true,
+              })
+            : Promise.resolve({ items: [] as HostWorkspaceStatus[], deviceCount: 0, skipped: [] as string[] }),
+          gatherRemoteActive(undefined, { quiet: true }),
+        ]);
+        fleetWs.push(...probeRes.items);
+        fleetSkipped = probeRes.skipped;
+        fleetSessions = activeRes.sessions;
+      }
+
+      const roll = rollupSessionsByProject(all, [...await getActiveSessions(), ...fleetSessions]);
       // Enrich only the shown projects. --no-remote still reads the local artifact
       // log but skips the gh call (def.repo left unused → mergedPrs stays 0).
       const remote = new Map<string, ProjectRemoteSignals>();
@@ -291,7 +366,14 @@ export function registerProjectsCommands(program: Command): void {
         }),
       );
 
+      /** This def's slice of the fleet probe, in its own target order. */
+      const fleetFor = (d: ProjectDef): HostWorkspaceStatus[] => {
+        const targets = new Set(workspaceTargetsForDef(d));
+        return fleetWs.filter((s) => targets.has(s.path));
+      };
+
       if (opts.json) {
+        if (fleetSkipped.length > 0) process.stderr.write(formatFleetSkippedNote(fleetSkipped));
         console.log(
           JSON.stringify(
             defs.map((d) => {
@@ -311,6 +393,7 @@ export function registerProjectsCommands(program: Command): void {
                 lastArtifact: rem?.lastArtifact ?? null,
                 windowDays,
                 repos: [d.repo, ...(d.repos ?? []).map((r2) => r2.slug)].filter(Boolean),
+                ...(opts.fleet ? { workspaces: fleetFor(d) } : {}),
               };
             }),
             null,
@@ -319,7 +402,19 @@ export function registerProjectsCommands(program: Command): void {
         );
         return;
       }
-      for (const d of defs) renderCard(d, roll.get(d.name), remote.get(d.name));
+      for (const d of defs) renderCard(d, roll.get(d.name), remote.get(d.name), opts.fleet ? fleetFor(d) : undefined);
+      if (fleetSkipped.length > 0) process.stdout.write(formatFleetSkippedNote(fleetSkipped));
+    });
+
+  // ---- probe (hidden; the peer half of `status --fleet`) ----
+  projects
+    .command('probe [paths...]', { hidden: true })
+    .description('Probe workspace repos (presence, branch, drift, dirtiness) and print JSON. Answers for this machine only.')
+    .option('--json', 'Machine-readable output (the only output format)')
+    .action((paths: string[]) => {
+      // Never fans out — the recursion guard env is set by the parent fan-out,
+      // and this command has no remote code path either way.
+      console.log(JSON.stringify(probeProjectWorkspaces(paths ?? []), null, 2));
     });
 
   // ---- import ----
