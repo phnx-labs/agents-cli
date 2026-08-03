@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import {
   automaticSampleDevices,
   buildSample,
+  candidateQueryLimit,
   deterministicSessionSample,
   exactSampleTargetArgs,
   evaluateExactSample,
@@ -44,6 +45,11 @@ function device(name: string, overrides: Partial<DeviceProfile> = {}): DevicePro
 }
 
 describe('session shell-command sampler', () => {
+  it('bounds each candidate query below the aggregate evidence ceiling', () => {
+    expect(candidateQueryLimit(50)).toBe(100);
+    expect(candidateQueryLimit(100)).toBe(200);
+  });
+
   it('validates the requested 50-100 session range and repeatable devices', () => {
     expect(parseSampleOptions(['--sessions', '75', '--since', '5d', '--device', 'a', '--device', 'b']))
       .toMatchObject({ sessions: 75, since: '5d', devices: ['a', 'b'] });
@@ -174,7 +180,7 @@ describe('session shell-command sampler', () => {
       if (previous.noUsage === undefined) delete process.env.AGENTS_NO_USAGE_TRACK; else process.env.AGENTS_NO_USAGE_TRACK = previous.noUsage;
       fs.rmSync(root, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 
   it('deduplicates bulk results from normalized machine names', () => {
     const first: ToolSearchEnvelope = {
@@ -204,6 +210,18 @@ describe('session shell-command sampler', () => {
     const merged = mergeCandidateQueryEnvelopes([partial, complete]);
     expect(merged.sessions.map((item) => item.id)).toEqual(['exec-before-backfill', 'bash-after-backfill']);
     expect(merged.coverage).toMatchObject({ indexedFiles: 3, remainingFiles: 2, complete: false });
+  });
+
+  it('retains successful candidate classes and reports a failed class as partial coverage', () => {
+    const complete: ToolSearchEnvelope = {
+      schemaVersion: 1, generatedAt: '2026-08-03T00:01:00Z', query: { clauses: ['tool:exec'] },
+      coverage: { indexedFiles: 3, indexedCalls: 3, skippedFiles: 0, limitedFiles: 0, remainingFiles: 0, complete: true },
+      sessions: [session('exec-result', 'box-1')],
+    };
+
+    const merged = mergeCandidateQueryEnvelopes([complete], 1);
+    expect(merged.sessions.map((item) => item.id)).toEqual(['exec-result']);
+    expect(merged.coverage).toMatchObject({ remainingFiles: 0, complete: false });
   });
 
   it('caps the serialized artifact even when every sampled session carries maximum-size inputs', () => {

@@ -243,7 +243,11 @@ bun scripts/sample-session-shell-commands.ts \
 The sampler reads the current device directly, fans only peers out over SSH,
 round-robins deterministically across machines so every available requested
 device is represented, and retains redacted shell-call origins, program names,
-outcomes, and parser diagnostics. Its JSON artifact is capped at 16 MiB; if the requested corpus does
+outcomes, and parser diagnostics. Each candidate query asks for at most twice
+the requested sample size to bound ordinary bulk growth. If one candidate class contains an
+individually oversized session, the sampler retains the successful classes,
+reports `failedQueries`, and marks coverage partial. Its JSON artifact is capped
+at 16 MiB; if the requested corpus does
 not fit, `coverage.complete` is false and `truncation.reason` is
 `sample_byte_limit` instead of silently dropping evidence.
 

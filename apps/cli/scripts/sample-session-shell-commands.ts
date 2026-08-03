@@ -16,9 +16,11 @@ export interface SampleOptions {
 
 export const SAMPLE_MAX_SERIALIZED_BYTES = 16 * 1024 * 1024;
 const SAMPLE_PROJECTED_SESSION_BYTES = SAMPLE_MAX_SERIALIZED_BYTES - 1024 * 1024;
+const SAMPLE_CANDIDATE_SESSION_MULTIPLIER = 2;
 
 interface SampleEnvelope extends ToolSearchEnvelope {
   sampleTruncated?: boolean;
+  failedQueries?: number;
   failedSources?: number;
   failedSessions?: number;
 }
@@ -147,11 +149,16 @@ export function partitionSampleDevices(
 
 const SHELL_CANDIDATE_QUERIES = ['tool:exec', 'tool:command', 'tool:shell', 'tool:bash'];
 
+/** Avoid asking a broad candidate class for an unbounded session set. */
+export function candidateQueryLimit(requestedSessions: number): number {
+  return requestedSessions * SAMPLE_CANDIDATE_SESSION_MULTIPLIER;
+}
+
 function toolQueryArgs(options: SampleOptions, devices: string[], local: boolean, query: string): string[] {
   const args = [
     'sessions', '--include', 'tools', '--since', options.since,
     '--query', query,
-    '--limit', String(Math.min(1000, Math.max(500, options.sessions * 10))), '--all', '--json', '--no-interactive',
+    '--limit', String(candidateQueryLimit(options.sessions)), '--all', '--json', '--no-interactive',
   ];
   if (local) args.push('--local');
   else for (const device of devices) args.push('--device', device);
@@ -172,20 +179,34 @@ function queryScopeCandidates(
   options: SampleOptions,
   devices: string[],
   local: boolean,
-): ToolSearchEnvelope {
+): SampleEnvelope {
   const firstArgs = toolQueryArgs(options, devices, local, SHELL_CANDIDATE_QUERIES[0]);
-  const warm = querySource(firstArgs, options.passes);
-  const envelopes = [
-    warm.coverage.complete || warm.coverage.remainingFiles === 0
+  const envelopes: ToolSearchEnvelope[] = [];
+  let failedQueries = 0;
+  try {
+    const warm = querySource(firstArgs, options.passes);
+    envelopes.push(warm.coverage.complete || warm.coverage.remainingFiles === 0
       ? warm
-      : querySource(firstArgs, 1),
-    ...SHELL_CANDIDATE_QUERIES.slice(1).map((query) =>
-      querySource(toolQueryArgs(options, devices, local, query), 1)),
-  ];
-  return mergeCandidateQueryEnvelopes(envelopes);
+      : querySource(firstArgs, 1));
+  } catch {
+    failedQueries++;
+  }
+  for (const query of SHELL_CANDIDATE_QUERIES.slice(1)) {
+    try {
+      envelopes.push(querySource(toolQueryArgs(options, devices, local, query), 1));
+    } catch {
+      failedQueries++;
+    }
+  }
+  if (envelopes.length === 0) throw new Error('Every shell candidate query failed');
+  const merged = mergeCandidateQueryEnvelopes(envelopes, failedQueries);
+  return { ...merged, failedQueries };
 }
 
-export function mergeCandidateQueryEnvelopes(envelopes: ToolSearchEnvelope[]): ToolSearchEnvelope {
+export function mergeCandidateQueryEnvelopes(
+  envelopes: ToolSearchEnvelope[],
+  failedQueries = 0,
+): ToolSearchEnvelope {
   const sessions = new Map<string, ToolSessionEvidence>();
   for (const envelope of envelopes) {
     for (const session of envelope.sessions) {
@@ -202,7 +223,7 @@ export function mergeCandidateQueryEnvelopes(envelopes: ToolSearchEnvelope[]): T
       skippedFiles: Math.max(...envelopes.map((envelope) => envelope.coverage.skippedFiles)),
       limitedFiles: Math.max(...envelopes.map((envelope) => envelope.coverage.limitedFiles)),
       remainingFiles: Math.max(...envelopes.map((envelope) => envelope.coverage.remainingFiles)),
-      complete: envelopes.every((envelope) => envelope.coverage.complete),
+      complete: failedQueries === 0 && envelopes.every((envelope) => envelope.coverage.complete),
     },
     sessions: [...sessions.values()],
   };
@@ -267,6 +288,7 @@ export function loadEnvelope(
   const devices = explicit ? options.devices : defaultDevices();
   const { includeLocal, remoteDevices } = partitionSampleDevices(devices, self, explicit);
   const envelopes: ToolSearchEnvelope[] = [];
+  let failedQueries = 0;
   let failedSources = 0;
   const sources = [
     ...(includeLocal ? [{ devices: [] as string[], local: true }] : []),
@@ -274,7 +296,9 @@ export function loadEnvelope(
   ];
   for (const source of sources) {
     try {
-      envelopes.push(queryScopeCandidates(options, source.devices, source.local));
+      const envelope = queryScopeCandidates(options, source.devices, source.local);
+      failedQueries += envelope.failedQueries ?? 0;
+      envelopes.push(envelope);
     } catch {
       failedSources++;
     }
@@ -343,6 +367,7 @@ export function loadEnvelope(
     coverage: merged.coverage,
     sessions,
     sampleTruncated,
+    failedQueries,
     failedSources,
     failedSessions,
   } as SampleEnvelope;
@@ -400,6 +425,7 @@ export function buildSample(envelope: ToolSearchEnvelope, count: number) {
     generatedAt: new Date().toISOString(),
     requestedSessions: count,
     sampledSessions: sessions.length,
+    failedQueries: (envelope as SampleEnvelope).failedQueries ?? 0,
     failedSources: (envelope as SampleEnvelope).failedSources ?? 0,
     failedSessions: (envelope as SampleEnvelope).failedSessions ?? 0,
     coverage,
