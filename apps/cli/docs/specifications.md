@@ -412,10 +412,11 @@ SSH access (§7); rendering sessions that no harness produced.
   `lib/session/tool-index.ts:73-97`; `lib/session/tool-store.ts:40-85`;
   `commands/sessions.ts:1915-1952`).
 - **SES-36 (MUST).** The shell-command sampling script MUST accept 50–100
-  sessions, read the current device directly, retain only redacted shell-call
-  origins and classifications, cap its JSON artifact at 16 MiB, and record
+  sessions, read the current device directly, balance deterministic selection
+  across available requested machines, retain only redacted shell-call origins
+  and classifications, cap its JSON artifact at 16 MiB, and record
   `sample_byte_limit` with partial coverage instead of silently dropping evidence
-  (`scripts/sample-session-shell-commands.ts:16-17,109-216,219-300`).
+  (`scripts/sample-session-shell-commands.ts:17-18,79-107,135-255,259-323,326-331`).
 
 ---
 

@@ -32,6 +32,13 @@ describe('session shell-command sampler', () => {
     const sessions = [session('a', 'box-1'), session('b', 'box-2'), session('c', 'box-1')];
     expect(deterministicSessionSample(sessions, 2).map((item) => item.id))
       .toEqual(deterministicSessionSample([...sessions].reverse(), 2).map((item) => item.id));
+    expect(new Set(deterministicSessionSample(sessions, 2).map((item) => item.machine)))
+      .toEqual(new Set(['box-1', 'box-2']));
+    const skewed = [
+      ...Array.from({ length: 100 }, (_, index) => session(`local-${index}`, 'box-1')),
+      session('only-peer', 'box-2'),
+    ];
+    expect(deterministicSessionSample(skewed, 10).some((item) => item.machine === 'box-2')).toBe(true);
     const envelope: ToolSearchEnvelope = {
       schemaVersion: 1, generatedAt: '2026-08-03T00:00:00Z', query: { clauses: [] },
       coverage: { indexedFiles: 0, indexedCalls: 0, skippedFiles: 0, limitedFiles: 0, remainingFiles: 0, complete: true },

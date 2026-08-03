@@ -76,14 +76,34 @@ function sampleKey(session: ToolSessionEvidence): string {
     .digest('hex');
 }
 
-/** Stable hash sampling makes two runs comparable without biasing to one host. */
+/** Stable round-robin sampling keeps every available machine represented. */
 export function deterministicSessionSample(
   sessions: ToolSessionEvidence[],
   count: number,
 ): ToolSessionEvidence[] {
-  return [...sessions]
-    .sort((a, b) => sampleKey(a).localeCompare(sampleKey(b)))
-    .slice(0, count);
+  const byMachine = new Map<string, ToolSessionEvidence[]>();
+  for (const session of sessions) {
+    const machine = normalizeHost(session.machine ?? 'local');
+    const group = byMachine.get(machine) ?? [];
+    group.push(session);
+    byMachine.set(machine, group);
+  }
+  const groups = [...byMachine.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([, group]) => group.sort((a, b) => sampleKey(a).localeCompare(sampleKey(b))));
+  const sampled: ToolSessionEvidence[] = [];
+  for (let round = 0; sampled.length < count; round++) {
+    let advanced = false;
+    for (const group of groups) {
+      const session = group[round];
+      if (!session) continue;
+      sampled.push(session);
+      advanced = true;
+      if (sampled.length === count) break;
+    }
+    if (!advanced) break;
+  }
+  return sampled;
 }
 
 function runAgents(args: string[]): string {
@@ -153,9 +173,10 @@ export function loadEnvelope(
     const key = `${normalizeHost(candidate.machine ?? self)}\0${candidate.id}`;
     if (!unique.has(key)) unique.set(key, candidate);
   }
-  const candidates = [...unique.values()]
-    .sort((a, b) => sampleKey({ ...a, calls: [] } as ToolSessionEvidence)
-      .localeCompare(sampleKey({ ...b, calls: [] } as ToolSessionEvidence)));
+  const candidates = deterministicSessionSample(
+    [...unique.values()].map((candidate) => ({ ...candidate, calls: [] } as ToolSessionEvidence)),
+    unique.size,
+  );
   const sessions: ToolSessionEvidence[] = [];
   let retainedBytes = 0;
   let sampleTruncated = false;
