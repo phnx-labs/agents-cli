@@ -68,13 +68,23 @@ const CACHE_PATH = getModelsCachePath();
  * Bump when the extractor logic changes shape in an incompatible way so cached
  * catalogs from older agents-cli builds are re-extracted.
  */
-const CACHE_SCHEMA_VERSION = 2;
+const CACHE_SCHEMA_VERSION = 3;
+
+/**
+ * How long a cached 0-model extraction is trusted before we retry it. Bounds
+ * the self-healing window for a transient failure (mid-install, a broken
+ * extractor regex fixed in a later agents-cli release) without falling back
+ * to re-extracting -- and re-scanning the whole binary -- on every call.
+ */
+const EMPTY_CATALOG_RETRY_MS = 24 * 60 * 60 * 1000;
 
 /** A single cached model catalog entry keyed by source path and mtime. */
 interface CacheEntry {
   sourcePath: string;
   mtime: number;
   catalog: ModelCatalog;
+  /** When this entry was extracted. Only checked for a 0-model catalog, to bound its retry window. */
+  attemptedAt?: number;
 }
 
 /** On-disk shape of the model catalog cache file. */
@@ -956,7 +966,10 @@ export function getModelCatalog(agent: AgentId, version: string): ModelCatalog |
   const key = cacheKey(agent, version);
   const cached = cache.entries[key];
   if (cached && cached.sourcePath === src.path && cached.mtime === mtime) {
-    return cached.catalog;
+    const isFresh =
+      cached.catalog.models.length > 0 ||
+      Date.now() - (cached.attemptedAt ?? 0) < EMPTY_CATALOG_RETRY_MS;
+    if (isFresh) return cached.catalog;
   }
 
   let models: ModelInfo[] = [];
@@ -993,15 +1006,15 @@ export function getModelCatalog(agent: AgentId, version: string): ModelCatalog |
     aliases,
   };
 
-  // Never cache an empty extraction, regardless of source kind. A 0-model
-  // result is always suspect: the CLI may have been mid-install, network-
-  // dependent, or transiently failing, and a js/bundle/binary extractor that
-  // regex-misses would otherwise pin an empty catalog forever (mtime won't
-  // change until the source file does). Only persist a non-empty catalog.
-  if (models.length > 0) {
-    cache.entries[key] = { sourcePath: src.path, mtime, catalog };
-    saveCache();
-  }
+  // Cache a 0-model extraction too, stamped with when it was attempted, so a
+  // broken/mid-install extractor doesn't force a full re-scan of the source
+  // binary (up to ~1.85s each for a 230-270MB Claude binary) on every call --
+  // `getModelCatalog` runs once per installed version per invocation of
+  // commands like `agents view`. It self-heals: the read site above re-tries
+  // extraction once EMPTY_CATALOG_RETRY_MS has elapsed, or immediately once
+  // the source file's mtime changes (an upgrade/reinstall).
+  cache.entries[key] = { sourcePath: src.path, mtime, catalog, attemptedAt: Date.now() };
+  saveCache();
   return catalog;
 }
 

@@ -363,9 +363,74 @@ export function finalizeRunMeta(
  * catchup/overdue, manual run) gates on this.
  */
 export function jobRunsOnThisDevice(config: Pick<JobConfig, 'devices'>): boolean {
-  if (!config.devices || config.devices.length === 0) return true;
-  const self = machineId();
-  return config.devices.some((d) => normalizeHost(d) === self);
+  const owner = routineOwnerDevice(config);
+  // Unrestricted: no pin means fleet-wide by design (`watchdog`, `check-updates`).
+  if (owner === null) return true;
+  return owner === machineId();
+}
+
+/**
+ * The ONE device that owns a routine — the single daemon allowed to fire it.
+ *
+ * `devices` is an allowlist, and every listed device used to fire
+ * independently, so a routine pinned to two boxes ran **twice** per schedule:
+ * two full agent sessions doing identical work, burning double the quota. On
+ * this fleet seven routines were in that state, e.g. `security-sweep` running
+ * at 15:30:02 on one box and 15:30:03 on the other, both completing.
+ *
+ * Ownership is a pure function of the config — the first entry in normalized
+ * sort order — so every daemon independently reaches the same answer with no
+ * lease, no cross-device coordination, and no split brain when the fleet
+ * partitions. A multi-entry pin is a misconfiguration
+ * ({@link hasAmbiguousDevicePin}); this keeps such a routine running exactly
+ * once instead of silently dropping it, while `validateJob` refuses to create
+ * a new one and `agents doctor` surfaces the existing ones.
+ *
+ * Returns null when the routine is unrestricted (empty or omitted `devices`).
+ */
+export function routineOwnerDevice(config: Pick<JobConfig, 'devices'>): string | null {
+  // A non-array `devices` is a separate validation error; don't throw here and
+  // don't double-report it.
+  if (!Array.isArray(config.devices)) return null;
+  const devices = config.devices.map((d) => normalizeHost(String(d))).filter(Boolean);
+  if (devices.length === 0) return null;
+  return [...devices].sort()[0];
+}
+
+/**
+ * Does this routine name more than one distinct device? Such a pin used to mean
+ * "fire on each of them"; it now means "fire only on the first", which is
+ * almost certainly not what the author intended either way — so it is reported
+ * as a misconfiguration rather than silently reinterpreted.
+ */
+export function hasAmbiguousDevicePin(config: Pick<JobConfig, 'devices'>): boolean {
+  if (!Array.isArray(config.devices)) return false;
+  const devices = new Set(config.devices.map((d) => normalizeHost(String(d))).filter(Boolean));
+  return devices.size > 1;
+}
+
+/** One routine whose `devices` names more than one machine, with its resolved owner. */
+export interface AmbiguousDevicePin {
+  name: string;
+  devices: string[];
+  /** The device that now fires it — the rest are inert. */
+  owner: string;
+}
+
+/**
+ * Every routine carrying a multi-device pin. Surfaced by `agents doctor` and
+ * `agents routines list` so an existing misconfiguration is visible rather than
+ * silently reinterpreted: before ownership became singular each of these fired
+ * once per listed device, doubling the work and the agent spend.
+ */
+export function findAmbiguousDevicePins(cwd?: string): AmbiguousDevicePin[] {
+  return listJobs(cwd)
+    .filter((job) => job.enabled && hasAmbiguousDevicePin(job))
+    .map((job) => ({
+      name: job.name,
+      devices: (job.devices ?? []).map((d) => normalizeHost(d)),
+      owner: routineOwnerDevice(job) ?? '',
+    }));
 }
 
 /**
@@ -426,7 +491,10 @@ export function checkJobDeviceEligibility(
   if (jobRunsOnThisDevice(config)) return null;
   const allowed = (config.devices ?? []).map((d) => normalizeHost(d));
   const allowedLabel = allowed.join(', ');
-  const firstHost = allowed[0] ?? 'HOST';
+  // The owner is the lowest normalized name, not the first entry as written —
+  // suggesting allowed[0] on an unsorted list points at a device that will
+  // refuse the run for exactly the same reason.
+  const firstHost = routineOwnerDevice(config) ?? allowed[0] ?? 'HOST';
   const message = `Job '${config.name}' can only run on: ${allowedLabel}`;
   const suggestion = `agents routines run ${config.name} --host ${firstHost}`;
   return { message, suggestion, allowedLabel, firstHost };
@@ -546,6 +614,18 @@ function readJobFile(filePath: string): JobConfig | null {
     // carries it after v12 startup migration is unmigrated state and must be
     // treated as unavailable/inert rather than unrestricted.
     if (Object.prototype.hasOwnProperty.call(parsed, 'device')) return null;
+
+    // Fail closed on a malformed `devices` too. Ownership treats a non-array as
+    // "no pin", and the daemon's load path never calls validateJob — so a YAML
+    // typo (`devices: yosemite-s0` instead of a list) would silently promote the
+    // routine to fleet-wide and fire it on EVERY box. Inert-and-loud beats
+    // unrestricted-and-silent.
+    if (Object.prototype.hasOwnProperty.call(parsed, 'devices')
+        && parsed.devices !== undefined
+        && parsed.devices !== null
+        && !Array.isArray(parsed.devices)) {
+      return null;
+    }
 
     return {
       ...JOB_DEFAULTS,
@@ -814,6 +894,16 @@ export function validateJob(config: Partial<JobConfig>): string[] {
         }
       }
     }
+  }
+  // A routine belongs to exactly one device. Listing several used to fire it
+  // once per device — duplicate work, duplicate spend — and making them elect
+  // one owner at runtime would need cross-device coordination nobody wants.
+  if (hasAmbiguousDevicePin(config)) {
+    errors.push(
+      `devices lists ${new Set((config.devices as string[]).map((d) => normalizeHost(String(d)))).size} devices; a routine runs on exactly one. ` +
+      'Pin the single device that should own it, e.g. devices: [yosemite-s0]. ' +
+      'Omit devices entirely for a routine that genuinely belongs on every machine.',
+    );
   }
   if (config.catchup !== undefined && typeof config.catchup !== 'boolean') {
     errors.push('catchup must be a boolean (false to skip running a missed fire late)');
@@ -1343,6 +1433,27 @@ export function getJobPath(name: string): string | null {
     if (fs.existsSync(filePath)) {
       return filePath;
     }
+  }
+  return null;
+}
+
+/**
+ * Resolve a routine's YAML across EVERY layer `listJobs`/`readJob` read — user
+ * then system — not just the user dir.
+ *
+ * `getJobPath` is user-layer only because its callers write there. Read paths
+ * that ask "when did this routine come to exist" need the system layer too:
+ * a built-in shipped in the system repo has no user-layer file and no
+ * `createdAt`, so a user-layer-only lookup returns null, the overdue floor is
+ * skipped, and the routine reads as instantly overdue on first daemon start —
+ * exactly the case the floor exists to prevent.
+ */
+export function resolveJobFilePath(name: string): string | null {
+  const userPath = getJobPath(name);
+  if (userPath) return userPath;
+  for (const ext of ['.yml', '.yaml']) {
+    const filePath = safeJoin(getSystemRoutinesDir(), name + ext);
+    if (fs.existsSync(filePath)) return filePath;
   }
   return null;
 }

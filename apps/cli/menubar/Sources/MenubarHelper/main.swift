@@ -54,6 +54,13 @@ if ProcessInfo.processInfo.environment["MENUBAR_SINGLE_TEST"] == "1" {
     SingleInstanceSelfTest.run()
 }
 
+// Child-process self-test: spawn real processes and assert they are bounded by
+// a deadline, killed as a group, and tracked so the next launch can reap them.
+// See ChildProcess.swift.
+if ProcessInfo.processInfo.environment["MENUBAR_CHILD_TEST"] == "1" {
+    ChildProcessSelfTest.run()
+}
+
 // Everything past here installs the status item and registers the global
 // chords, so it must only run where those chords can actually be serviced.
 // Refuses an ssh-started launch or an unrecognized flag — the two ways a helper
@@ -63,6 +70,21 @@ Guards.enforceForInteractiveLaunch()
 // ...and only once. A second helper surfaces the running one's menu and exits
 // rather than installing a duplicate status item (see SingleInstance.swift).
 SingleInstance.enforceOrSurface()
+
+// Kill whatever the previous helper left running. This runs BEFORE any AppKit
+// call on purpose: the death being cleaned up after is a SIGSEGV inside
+// `NSApplication.shared` itself (SLSNewConnection returns null when WindowServer
+// is starved, AppKit dereferences it), so cleanup placed after that line would
+// be skipped by the exact crash it exists to recover from — and the CLI children
+// it abandons are what starve WindowServer in the first place. Only the winner
+// of the single-instance lock reaps, so a surfacing duplicate never kills the
+// incumbent's live children. See ChildProcess.swift.
+let reaped = ChildProcess.reapOrphansFromPreviousLaunch()
+if reaped > 0 {
+    FileHandle.standardError.write(Data(
+        "MenubarHelper: reaped \(reaped) orphaned CLI child process group(s) from a previous launch.\n".utf8
+    ))
+}
 
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)

@@ -27,6 +27,7 @@ import { registerSetupShareCommand, runShareWizard } from './setup-share.js';
 import { registerSetupMineCommand } from './setup-mine.js';
 import { registerSetupSecretsCommand } from './setup-secrets.js';
 import { registerSetupFleetCommand } from './setup-fleet.js';
+import { runPreferencesStep } from './setup-preferences.js';
 
 const HOME = os.homedir();
 
@@ -231,6 +232,11 @@ export async function runSetup(program: Command, options: { force?: boolean; sup
   // stops at the system-repo bootstrap above, unchanged.
   await runSetupHub();
 
+  // Preferences step: the two questions that keep agents off the wrong machine —
+  // which box you sit at (interactive host) and which browser agents drive here.
+  // TTY-only, skippable, and writes the same keys as `agents devices …`.
+  await runPreferencesStep();
+
   console.log(chalk.bold('\nSetup complete. Try:'));
   console.log(chalk.cyan('  agents view                 ') + chalk.gray(' # see what\'s installed'));
   console.log(chalk.cyan('  agents run <agent> "hello"  ') + chalk.gray(' # run an agent'));
@@ -337,6 +343,9 @@ export function registerSetupCommand(program: Command): void {
         1. Clones the system repo into ~/.agents/.system/
         2. Imports any unmanaged agent installations it finds
         3. On a TTY, offers to set up optional capabilities (browser/computer/share/secrets/fleet)
+        4. On a TTY, asks preferences: which machine you sit at (interactive host)
+           and which browser agents drive here — both skippable, both the same
+           keys 'agents devices set-interactive' / 'browser profiles set-default' write
 
       Capability setup can also be run any time on its own:
         agents setup browser    # detect a browser + create the default profile

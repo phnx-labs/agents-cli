@@ -10,10 +10,15 @@ function tmpRoot(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agents-mailbox-gc-'));
 }
 
+function backdateFile(file: string, iso: string): void {
+  const d = new Date(iso);
+  fs.utimesSync(file, d, d);
+}
+
 const BOX = 'a1b2';
 
 describe('mailbox GC', () => {
-  it('archives pending messages from a dead box and removes its feed block', () => {
+  it('archives pending messages from a dead box and removes its stale feed block', () => {
     const root = tmpRoot();
     const feedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-mailbox-gc-feed-'));
     const previous = process.env.AGENTS_FEED_DIR;
@@ -21,8 +26,10 @@ describe('mailbox GC', () => {
     try {
       const box = mailboxDir(BOX, root);
       enqueue(box, { to: BOX, text: 'to dead agent' });
+      const blockId = blockIdForSession(BOX);
+      const blockFile = path.join(feedDir, `${blockId}.json`);
       publishBlock({
-        blockId: blockIdForSession(BOX),
+        blockId,
         sessionId: BOX,
         mailboxId: BOX,
         host: 'test-host',
@@ -30,6 +37,8 @@ describe('mailbox GC', () => {
         ts: new Date().toISOString(),
         questions: [{ text: 'Dead?' }],
       }, feedDir);
+      // The block is stale (>24h) so GC removes it after dropping the message.
+      backdateFile(blockFile, '2020-01-01T00:00:00.000Z');
 
       const result = gcMailbox(new Set(), { root, feedRoot: feedDir });
 
@@ -42,7 +51,40 @@ describe('mailbox GC', () => {
       expect(consumed).toHaveLength(1);
       const archived = JSON.parse(fs.readFileSync(path.join(box, 'consumed', consumed[0]), 'utf-8'));
       expect(archived.dropped).toBe('dead');
-      expect(readBlock(blockIdForSession(BOX), feedDir)).toBeUndefined();
+      expect(readBlock(blockId, feedDir)).toBeUndefined();
+    } finally {
+      process.env.AGENTS_FEED_DIR = previous;
+    }
+  });
+
+  it('archives pending messages from a dead box and surfaces a dropped receipt on the block', () => {
+    const root = tmpRoot();
+    const feedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-mailbox-gc-feed-receipt-'));
+    const previous = process.env.AGENTS_FEED_DIR;
+    process.env.AGENTS_FEED_DIR = feedDir;
+    try {
+      const box = mailboxDir(BOX, root);
+      const blockId = blockIdForSession(BOX);
+      publishBlock({
+        blockId,
+        sessionId: BOX,
+        mailboxId: BOX,
+        host: 'test-host',
+        runtime: 'claude',
+        ts: new Date().toISOString(),
+        questions: [{ text: 'Dead?' }],
+      }, feedDir);
+      const msgId = enqueue(box, { to: BOX, text: 'to dead agent', from: 'operator', blockId });
+
+      const result = gcMailbox(new Set(), { root, feedRoot: feedDir });
+
+      expect(result.messagesDroppedDead).toBe(1);
+      // The block is kept so the bounce receipt is visible.
+      expect(result.blocksRemoved).toBe(0);
+      const block = readBlock(blockId, feedDir);
+      expect(block).toBeDefined();
+      expect(block!.receipts).toHaveLength(1);
+      expect(block!.receipts![0]).toMatchObject({ msgId, status: 'dropped', from: 'operator' });
     } finally {
       process.env.AGENTS_FEED_DIR = previous;
     }
@@ -94,5 +136,43 @@ describe('mailbox GC', () => {
     expect(consumed).toHaveLength(1);
     const archived = JSON.parse(fs.readFileSync(path.join(box, 'consumed', consumed[0]), 'utf-8'));
     expect(archived.dropped).toBe('expired');
+  });
+
+  it('archives messages that expired under the 24h default TTL and surfaces an expired receipt', () => {
+    const root = tmpRoot();
+    const feedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-mailbox-gc-expired-default-'));
+    const previous = process.env.AGENTS_FEED_DIR;
+    process.env.AGENTS_FEED_DIR = feedDir;
+    try {
+      const box = mailboxDir(BOX, root);
+      const blockId = blockIdForSession(BOX);
+      publishBlock({
+        blockId,
+        sessionId: BOX,
+        mailboxId: BOX,
+        host: 'test-host',
+        runtime: 'claude',
+        ts: new Date().toISOString(),
+        questions: [{ text: 'Alive?' }],
+      }, feedDir);
+      const msgId = enqueue(box, { to: BOX, text: 'stale default ttl', from: 'operator', blockId });
+      const inboxFile = path.join(box, 'inbox', `${msgId}.json`);
+      // Backdate the record so the default 24h TTL has passed.
+      const raw = JSON.parse(fs.readFileSync(inboxFile, 'utf-8'));
+      raw.ts = '2000-01-01T00:00:00.000Z';
+      raw.expiresAt = '2000-01-02T00:00:01.000Z';
+      fs.writeFileSync(inboxFile, JSON.stringify(raw, null, 2), 'utf-8');
+
+      const result = gcMailbox(new Set([BOX]), { root, feedRoot: feedDir, now: new Date('2026-07-14T00:00:00.000Z') });
+
+      expect(result.messagesDroppedExpired).toBe(1);
+      expect(fs.existsSync(inboxFile)).toBe(false);
+      const block = readBlock(blockId, feedDir);
+      expect(block).toBeDefined();
+      expect(block!.receipts).toHaveLength(1);
+      expect(block!.receipts![0]).toMatchObject({ msgId, status: 'expired', from: 'operator' });
+    } finally {
+      process.env.AGENTS_FEED_DIR = previous;
+    }
   });
 });

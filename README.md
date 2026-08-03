@@ -476,6 +476,9 @@ agents devices list                     # fleet + headroom: load, mem, idle/busy
 agents devices list --live              # force a live probe of every device (alias of --refresh)
 agents devices list --full              # add per-device cores and free/total RAM
 agents devices list --no-stats          # instant: names/addresses only, skip the probe
+agents devices set-interactive zion     # the device agents show YOU artifacts on (★ in the list)
+agents devices configure mac-mini --max-agents 4 --scheduler off   # per-device config (syncs via devices/<name>/agents.yaml)
+agents devices note mac-mini "runs the releases — don't reboot"    # operator notes, repeat to append
 agents ssh mac-mini                     # hardened SSH: fails fast if offline,
                                         # PowerShell on Windows, password-from-Keychain,
                                         # auto-syncs your terminfo (Ghostty/kitty/…) so

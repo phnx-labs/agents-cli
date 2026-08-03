@@ -128,6 +128,36 @@ password from a Keychain bundle via an askpass shim. `agents devices render --wr
 emits a `~/.ssh/config.d/agents` include so plain `ssh`/`scp`/`rsync` resolve the
 same logical names.
 
+**Per-device and fleet-wide settings** live in the same two-tier agents.yaml
+store as version pins. `agents devices configure <name>` sets device-scope keys
+(`--max-agents`, `--scheduler on|off`) and `agents devices
+note <name> "…"` appends free-form operator notes — both land under `config:` in
+`~/.agents/devices/<name>/agents.yaml`, so they are per-machine by default and
+can be written for a peer from any box (the `devices/` tree syncs, each machine
+reads only its own). `agents devices set-interactive <name>` sets the one
+user-scope key, `config.interactiveHost` in the *central* agents.yaml: the
+device agents show YOU artifacts on (browser opens, dashboards), so skills stop
+guessing "the online macOS box". The interactive host is marked `★ interactive`
+in `agents devices list`; `list --json` carries each row's `config` and an
+`interactive` flag. The default browser profile is likewise device-local config
+(`browser.profile` → `agents browser profiles set-default`). Unset keys always
+mean today's behavior. The key registry is `src/lib/device-config.ts`.
+
+The keys are consumed, not just stored. `scheduler.enabled=false` keeps the
+routines scheduler from starting on that device — `routines add` skips the
+auto-start with the reason, `routines start` refuses, and a running daemon
+re-evaluates the gate on every SIGHUP reload, so flipping the key never needs a
+daemon restart. `agents.max-concurrent` feeds host ranking, and what counts
+toward it depends on the consumer: Factory auto-launch counts device-wide
+running agents, while teams placement counts the team's own roster on the
+device (local teammates included); a capped device is excluded from auto-pick
+with a stated reason, and an all-capped pool fails loud. Setup asks instead of
+guessing: bare `agents setup` ends with a skippable preferences step (which
+machine you sit at → `interactive.host`; which browser agents drive here →
+`browser.profile`), `agents setup fleet` offers the interactive host after a
+sync, and `agents setup browser` highlights the auto-detect winner in its
+picker.
+
 **Hosts** — machines you dispatch agent work to. `agents hosts add` enrolls a
 target either from an existing `~/.ssh/config` stanza (connection details stay in
 ssh config; agents-cli stores only a caps/os overlay) or *inline* (with its own

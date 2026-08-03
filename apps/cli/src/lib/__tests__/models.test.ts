@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import {
   locateModelSource,
@@ -368,5 +369,144 @@ describe('buildReasoningFlags', () => {
 
   it('returns empty for agents with no known mapping', () => {
     expect(buildReasoningFlags('gemini', 'high')).toEqual([]);
+  });
+});
+
+// Reproduces the RUSH bug: extractClaudeCatalog's regexes miss on claude
+// >=2.1.207 bundles, so getModelCatalog extracted 0 models and (before this
+// fix) never cached that result -- forcing a full extractStrings() scan of
+// the whole binary (~1.85s per installed version) on every `agents view`.
+//
+// Unlike the rest of this file (which reads real installed agent versions),
+// these tests point HOME at a throwaway temp dir and re-import models.ts
+// fresh so the on-disk cache file and version dirs are isolated -- same
+// pattern as state.test.ts. Each test uses fake timers to control Date.now()
+// exactly and reads `attemptedAt` back off the on-disk cache file: a
+// re-extraction is the only thing that stamps a fresh attemptedAt (the
+// cache-hit read path returns the stored catalog untouched), so an
+// unchanged attemptedAt across calls is direct, unambiguous proof that
+// extraction did NOT re-run.
+describe('getModelCatalog caches a 0-model extraction, bounded by a retry TTL', () => {
+  let TMP = '';
+
+  function claudeBundlePath(version: string): string {
+    return path.join(
+      TMP,
+      '.agents',
+      '.history',
+      'versions',
+      'claude',
+      version,
+      'node_modules',
+      '@anthropic-ai',
+      'claude-code',
+      'cli.js'
+    );
+  }
+
+  function writeFakeBundle(version: string, contents: string) {
+    const p = claudeBundlePath(version);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, contents);
+  }
+
+  function cachePath(): string {
+    return path.join(TMP, '.agents', '.cache', '.models-cache.json');
+  }
+
+  function attemptedAtOnDisk(key: string): number {
+    const raw = JSON.parse(fs.readFileSync(cachePath(), 'utf-8'));
+    return raw.entries[key].attemptedAt;
+  }
+
+  async function freshModels() {
+    vi.resetModules();
+    return import('../models.js');
+  }
+
+  beforeEach(() => {
+    TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-models-test-'));
+    process.env.HOME = TMP;
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    try {
+      fs.rmSync(TMP, { recursive: true, force: true });
+    } catch {
+      /* best-effort */
+    }
+  });
+
+  it('persists a 0-model catalog with attemptedAt and does not re-extract on the next call', async () => {
+    // No text here matches any of extractClaudeCatalog's regexes -> 0 models.
+    writeFakeBundle('2.1.207', 'this bundle has no recognizable model constants in it');
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+
+    const { getModelCatalog: getCatalog } = await freshModels();
+    const key = 'claude@2.1.207';
+
+    const first = getCatalog('claude', '2.1.207');
+    expect(first?.models).toHaveLength(0);
+    expect(attemptedAtOnDisk(key)).toBe(new Date('2026-01-01T00:00:00Z').getTime());
+
+    // A little later, well inside the retry TTL, with the bundle untouched.
+    vi.setSystemTime(new Date('2026-01-01T00:00:01Z'));
+    const second = getCatalog('claude', '2.1.207');
+
+    expect(second?.models).toHaveLength(0);
+    expect(second).toEqual(first);
+    // attemptedAt on disk is unchanged -- proof the second call served the
+    // cached entry rather than re-running extractStrings + saveCache.
+    expect(attemptedAtOnDisk(key)).toBe(new Date('2026-01-01T00:00:00Z').getTime());
+  });
+
+  it('re-extracts a stale 0-model entry once the retry TTL elapses, even with mtime unchanged', async () => {
+    writeFakeBundle('2.1.208', 'no model constants here either');
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+
+    const { getModelCatalog: getCatalog } = await freshModels();
+    const key = 'claude@2.1.208';
+
+    const first = getCatalog('claude', '2.1.208');
+    expect(first?.models).toHaveLength(0);
+    const attemptedAtT0 = attemptedAtOnDisk(key);
+
+    // Just under the 24h TTL, bundle (and its mtime) untouched: the cached
+    // empty catalog is served, so attemptedAt on disk does not move.
+    vi.setSystemTime(new Date('2026-01-01T23:59:00Z'));
+    const stillCached = getCatalog('claude', '2.1.208');
+    expect(stillCached?.models).toHaveLength(0);
+    expect(attemptedAtOnDisk(key)).toBe(attemptedAtT0);
+
+    // Past the TTL: retries extraction (even though mtime never changed) and
+    // stamps a fresh attemptedAt.
+    vi.setSystemTime(new Date('2026-01-02T00:00:01Z'));
+    const reExtracted = getCatalog('claude', '2.1.208');
+    expect(reExtracted?.models).toHaveLength(0);
+    expect(attemptedAtOnDisk(key)).toBe(new Date('2026-01-02T00:00:01Z').getTime());
+    expect(attemptedAtOnDisk(key)).toBeGreaterThan(attemptedAtT0);
+  });
+
+  it('re-extracts immediately when the source mtime changes, regardless of TTL', async () => {
+    writeFakeBundle('2.1.209', 'no model constants here');
+
+    const { getModelCatalog: getCatalog } = await freshModels();
+    const first = getCatalog('claude', '2.1.209');
+    expect(first?.models).toHaveLength(0);
+
+    // An upgrade/reinstall: new content AND a new mtime (the normal write
+    // path). The existing mtime-keyed cache check already handles this;
+    // confirm the new empty-catalog caching doesn't regress it.
+    writeFakeBundle(
+      '2.1.209',
+      '{OPUS_ID:"claude-opus-5",OPUS_NAME:"Opus",SONNET_ID:"claude-sonnet-5",SONNET_NAME:"Sonnet",HAIKU_ID:"claude-haiku-5",HAIKU_NAME:"Haiku"'
+    );
+
+    const second = getCatalog('claude', '2.1.209');
+    expect(second?.models.length).toBeGreaterThan(0);
   });
 });

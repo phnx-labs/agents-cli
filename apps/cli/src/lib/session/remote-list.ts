@@ -17,37 +17,13 @@ import { spawn } from 'child_process';
 import chalk from 'chalk';
 import { SSH_OPTS, controlOpts, assertValidSshTarget, shellQuote } from '../ssh-exec.js';
 import { sshTargetFor } from '../devices/connect.js';
-import { resolveExplicitTargets } from '../devices/resolve-target.js';
-import { loadDevices, isControlDevice, isDialableDevice, type DeviceProfile } from '../devices/registry.js';
+import { loadDevices, type DeviceProfile } from '../devices/registry.js';
 import { remoteShellFor, buildWindowsAgentsCommand } from '../hosts/remote-cmd.js';
-import { machineId, normalizeHost } from './sync/config.js';
+import { gatherRemoteAgentsJson, type RemoteAgentsJsonParseResult } from '../remote-agents-json.js';
+import { normalizeHost } from './sync/config.js';
 import { NO_FANOUT_ENV } from './remote-active.js';
 import { terminalWidth } from './width.js';
 import type { SessionMeta } from './types.js';
-
-/** Per-host SSH budget. Slightly above SSH_OPTS' ConnectTimeout=10 so a
- * reachable-but-slow remote still answers before we give up. */
-const REMOTE_TIMEOUT_MS = 12_000;
-
-/**
- * The command run on each peer: answer for itself, as JSON, without recursing.
- * `forwardedArgs` carry the caller's own query/filters (already including the
- * leading `sessions` and a `--json`) so each peer returns a comparable slice.
- * A Windows peer gets a PowerShell invocation (ssh lands in cmd.exe/PowerShell
- * there, where `bash -lc` is not a command); every other OS keeps `bash -lc`.
- */
-export function remoteListCommand(forwardedArgs: string[], os?: string): string {
-  if (remoteShellFor(os) === 'powershell') {
-    return buildWindowsAgentsCommand({
-      args: forwardedArgs,
-      env: { [NO_FANOUT_ENV]: '1' },
-    });
-  }
-  const inner = [`${NO_FANOUT_ENV}=1`, 'agents', ...forwardedArgs].map((t, i) =>
-    i === 0 ? t : shellQuote(t),
-  ).join(' ');
-  return `bash -lc ${shellQuote(inner)}`;
-}
 
 /**
  * Parse a peer's `sessions --json` stdout into `SessionMeta[]`, tagging each
@@ -84,79 +60,27 @@ function isSafeResolverRow(value: Record<string, unknown>): boolean {
 }
 
 export function parseRemoteListPayload(stdout: string, machine: string, safeResolver = false): {
-  sessions: SessionMeta[];
+  items: SessionMeta[];
   valid: boolean;
 } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(stdout);
   } catch {
-    return { sessions: [], valid: false };
+    return { items: [], valid: false };
   }
-  if (!Array.isArray(parsed)) return { sessions: [], valid: false };
+  if (!Array.isArray(parsed)) return { items: [], valid: false };
   const out: SessionMeta[] = [];
   for (const x of parsed) {
-    if (!x || typeof x !== 'object' || Array.isArray(x)) return { sessions: [], valid: false };
+    if (!x || typeof x !== 'object' || Array.isArray(x)) return { items: [], valid: false };
     if (safeResolver && !isSafeResolverRow(x as Record<string, unknown>)) {
-      return { sessions: [], valid: false };
+      return { items: [], valid: false };
     }
     // `_remote` marks these as living on the peer's disk (not a local mirror),
     // so the picker routes read/resume back over SSH instead of the local FS.
     out.push({ ...(x as SessionMeta), machine, _remote: true });
   }
-  return { sessions: out, valid: true };
-}
-
-/** Convert one completed peer process into the exact aggregation result. This
- * is the production parent/peer seam and is exercised with real child output. */
-export function remoteListCaptureResult(
-  code: number | null,
-  stdout: string,
-  machine: string,
-  display: string,
-  safeResolver = false,
-): { sessions: SessionMeta[]; unreachable?: string } {
-  if (code !== 0) return { sessions: [], unreachable: display };
-  const parsed = parseRemoteListPayload(stdout, machine, safeResolver);
-  return parsed.valid ? { sessions: parsed.sessions } : { sessions: [], unreachable: display };
-}
-
-/** Run one remote `agents sessions … --json` and capture stdout. Resolves
- * `{ code: null }` on spawn error or timeout (host treated as dead). */
-function sshCapture(target: string, remoteCmd: string, timeoutMs: number): Promise<{ code: number | null; stdout: string }> {
-  assertValidSshTarget(target);
-  return new Promise((resolve) => {
-    const args = [...SSH_OPTS, ...controlOpts(), target, remoteCmd];
-    const child = spawn('ssh', args, { stdio: ['ignore', 'pipe', 'ignore'] });
-    let stdout = '';
-    let settled = false;
-    const done = (code: number | null) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve({ code, stdout });
-    };
-    const timer = setTimeout(() => { child.kill('SIGKILL'); done(null); }, timeoutMs);
-    child.stdout.on('data', (d) => { stdout += d.toString(); });
-    child.on('error', () => done(null));
-    child.on('close', (code) => done(code));
-  });
-}
-
-async function fetchByTarget(
-  target: string,
-  machine: string,
-  display: string,
-  forwardedArgs: string[],
-  os?: string
-): Promise<{ sessions: SessionMeta[]; unreachable?: string }> {
-  const { code, stdout } = await sshCapture(target, remoteListCommand(forwardedArgs, os), REMOTE_TIMEOUT_MS);
-  const safeResolver = forwardedArgs.includes('--resolve-safe-v1');
-  const result = remoteListCaptureResult(code, stdout, machine, display, safeResolver);
-  if (result.unreachable) {
-    process.stderr.write(chalk.gray(`  ${display}: unreachable or no agents CLI — skipped\n`));
-  }
-  return result;
+  return { items: out, valid: true };
 }
 
 export interface RemoteListResult {
@@ -180,46 +104,22 @@ export interface RemoteListResult {
  * already `--json`) so every peer returns the same slice this machine asked for.
  */
 export async function gatherRemoteList(forwardedArgs: string[], hosts?: string[]): Promise<RemoteListResult> {
-  const self = machineId();
-  const targets: Array<{ target: string; machine: string; name: string; os?: string }> = [];
-
-  if (hosts && hosts.length > 0) {
-    // Resolve each token through the device registry so an explicit --host/--device
-    // dials the exact same address (and machine id) as the auto-discovery sweep.
-    targets.push(...await resolveExplicitTargets(hosts));
-  } else {
-    let reg: Record<string, DeviceProfile>;
-    try {
-      reg = await loadDevices();
-    } catch {
-      return { sessions: [], deviceCount: 0, unreachable: ['device registry'] };
-    }
-    for (const d of Object.values(reg)) {
-      // Live SSH-probe verdict first, cached tailscale snapshot only as a
-      // fallback — see isDialableDevice. A manually-registered device has no
-      // tailscale peer entry, so gating on `online` alone hid its sessions.
-      if (!isDialableDevice(d)) continue;
-      if (normalizeHost(d.name) === self) continue;
-      // Control-only devices (a phone/tablet running the cockpit) drive the fleet
-      // but never run agents — never dial them, whatever their platform reads as.
-      if (isControlDevice(d)) continue;
-      // Only machines that can actually run the CLI. iOS/tablet nodes register as
-      // `unknown` platform and can never answer, so skip them rather than burn a
-      // full ConnectTimeout on each.
-      if (d.platform !== 'windows' && d.platform !== 'linux' && d.platform !== 'macos') continue;
-      try {
-        targets.push({ target: sshTargetFor(d), machine: normalizeHost(d.name), name: d.name, os: d.platform });
-      } catch {
-        // No address on the profile — nothing to dial; skip silently.
-      }
-    }
-  }
-
-  const results = await Promise.all(targets.map((t) => fetchByTarget(t.target, t.machine, t.name, forwardedArgs, t.os)));
+  const safeResolver = forwardedArgs.includes('--resolve-safe-v1');
+  const result = await gatherRemoteAgentsJson<SessionMeta>({
+    args: forwardedArgs,
+    noFanoutEnv: NO_FANOUT_ENV,
+    hosts,
+    parse: (stdout, machine): RemoteAgentsJsonParseResult<SessionMeta> =>
+      parseRemoteListPayload(stdout, machine, safeResolver),
+  });
   return {
-    sessions: results.flatMap((r) => r.sessions),
-    deviceCount: targets.length,
-    unreachable: results.map((r) => r.unreachable).filter((n): n is string => !!n),
+    sessions: result.items,
+    deviceCount: result.deviceCount,
+    unreachable: [
+      ...(result.discoveryFailed ? ['device registry'] : []),
+      ...result.skipped,
+      ...result.parseFailed,
+    ],
   };
 }
 

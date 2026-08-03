@@ -1,0 +1,38 @@
+# Nightly design-drift review for agents-cli.
+#
+# Committed but INERT by default: a project routine under .agents/routines/ is
+# inspection-only until the owner explicitly opts in — it never auto-fires on a
+# clone. Enabling the recurring schedule is Muqsit's call:
+#
+#   agents routines enable-project --yes     # opt this repo's routines into firing
+#   agents routines sync                      # materialise into the user layer
+#   agents routines run design-drift          # (optional) one-shot foreground test
+#
+# Until then it does nothing. Adjust `devices:` to whichever always-on box should
+# own the nightly run before enabling.
+name: design-drift
+schedule: "0 2 * * *"        # 02:00 daily
+timezone: America/Los_Angeles
+agent: claude
+mode: edit                    # writes the report + drafts/files tickets; NEVER edits code (enforced by the prompt + skill)
+effort: high
+timeout: 45m
+devices: [mac-mini]           # single owner so the fleet doesn't all fire it; change as needed
+prompt: |
+  Run the design-drift review for this repo by invoking the `design-drift` skill
+  (.agents/skills/design-drift/SKILL.md). Pass --notify so the owner gets the
+  summary message.
+
+  This is READ-ONLY analysis of recently-merged work. You MUST NOT edit, create,
+  or delete any source file, open any PR, or dispatch any fix. The ONLY files you
+  may write are the report under .agents/reports/ and scratch under
+  .agents/artifacts/. Your deliverables are exactly three:
+    1. a ranked report at .agents/reports/design-drift-<date>.md,
+    2. Linear tickets filed (or drafted into the report if the linear.app secrets
+       bundle is unreachable) — one per consolidation, tagged design-drift,
+    3. a SHORT (1-4 line) summary message to the owner via
+       `rush message send --from-agent claude` naming the finding count, the top
+       finding, and the report path.
+  Do NOT auto-fix and do NOT auto-dispatch — the owner decides per-ticket.
+  Unattended run: never call AskUserQuestion; if a step is blocked, note it in the
+  report and continue.

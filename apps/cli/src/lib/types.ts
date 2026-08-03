@@ -913,6 +913,22 @@ export interface Meta {
    */
   defaultBrowserProfile?: string;
   /**
+   * User-scope config block (`config:` in central agents.yaml). Holds the
+   * user-scope keys from the device-config registry (`lib/device-config.ts`) —
+   * today just `interactiveHost`. Syncs fleet-wide via `agents repo push/pull`.
+   * Device-scope keys live in {@link Meta.deviceConfig} instead.
+   */
+  config?: Record<string, unknown>;
+  /**
+   * Device-scope config block, carried in memory under a distinct field so it
+   * can never leak into the central (synced) agents.yaml: `writeMetaUnlocked`
+   * routes it to `~/.agents/devices/<machine>/agents.yaml` under the `config:`
+   * key (mirroring how `defaultBrowserProfile` is routed), and
+   * `overlayMachineLocal` reads it back. Holds the device-scope keys from the
+   * device-config registry (`maxAgents`, `schedulerEnabled`, `notes`). Per-machine by design — unset = today's behavior.
+   */
+  deviceConfig?: Record<string, unknown>;
+  /**
    * Agent-host registry keyed by host name (`agents hosts`). Portable user
    * config synced with `agents repo push/pull`. For `ssh-config` hosts this is
    * just an overlay (caps/os) — the connection details stay in ~/.ssh/config and

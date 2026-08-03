@@ -31,6 +31,7 @@ import {
   writeDaemonPid,
   removeDaemonPid,
   shouldTakeOverBroker,
+  schedulerGateTransition,
   anchorDaemonCwd,
   describeEphemeralDaemonRoot,
   warnEphemeralDaemonRoot,
@@ -814,5 +815,23 @@ describe('validateDaemonBinary (ephemeral-root warning)', () => {
   it('does not emit a wedge warning for a version-home install', () => {
     const { warnings } = validateDaemonBinary('/home/u/.agents/.history/versions/agents/1.20.88/dist/index.js');
     expect(warnings.some((w) => /worktree|temporary directory/.test(w))).toBe(false);
+  });
+});
+
+describe('schedulerGateTransition (scheduler.enabled re-evaluated on SIGHUP)', () => {
+  it('boots the scheduler when the gate flipped on while the daemon ran scheduler-less', () => {
+    expect(schedulerGateTransition(false, true)).toBe('boot');
+  });
+
+  it('stops a running scheduler when the gate flipped off', () => {
+    expect(schedulerGateTransition(true, false)).toBe('stop');
+  });
+
+  it('reloads a running scheduler when the gate is unchanged', () => {
+    expect(schedulerGateTransition(true, true)).toBe('reload');
+  });
+
+  it('stays dark when the gate is off and nothing runs', () => {
+    expect(schedulerGateTransition(false, false)).toBe('none');
   });
 });

@@ -111,9 +111,8 @@ timeout: 10m
 runOnce: false                # true for one-shot jobs (--at)
 endAt: "2026-12-31T23:59:00Z" # optional: auto-disable on/after this time
 hostStrategy: local           # local | host | fleet | cloud (see Host placement strategy)
-devices:                      # optional: allowlist — each listed device fires independently
-  - yosemite-s0               # omit entirely (or --clear) for unrestricted
-  - mac-mini
+devices:                      # optional: the ONE device that owns this routine
+  - yosemite-s0               # omit entirely (or --clear) to run on every device
 # source:                     # set by `agents routines enable-project` / sync
 #   kind: project
 #   projectPath: /path/to/repo
@@ -415,12 +414,14 @@ schedule: "0 3 * * *"
 agent: claude
 devices:
   - yosemite-s0
-  - mac-mini
 prompt: "Drain the local work queue"
 ```
 
-Each listed machine fires the job **independently** on its own schedule — both
-`yosemite-s0` and `mac-mini` run their own copy, with their own run history.
+Only the **owner** fires the job — one copy, one run history. Ownership is the
+first device in normalized sort order, computed from the config alone, so every
+daemon agrees without coordination. Listing several devices is a misconfiguration
+(it used to fire the routine once per device) and is refused at creation; omit
+`devices:` entirely for a routine that genuinely belongs on every machine.
 A single-entry list is equivalent to an exclusive pin: `devices: [yosemite-s0]`
 restricts the job to one machine.
 
@@ -428,7 +429,7 @@ Or set the allowlist at creation with `--devices`:
 
 ```bash
 agents routines add drain --schedule "0 3 * * *" --agent claude \
-  --devices yosemite-s0,mac-mini --prompt "Drain the local work queue"
+  --devices yosemite-s0 --prompt "Drain the local work queue"
 ```
 
 `--devices` is validated against the registered fleet (`agents devices sync`).
@@ -447,8 +448,16 @@ Device names are compared against the local `machineId()` (normalized hostname, 
 shown by `agents devices`), so `Yosemite-S0` and `yosemite-s0.tailnet.ts.net` both
 match `yosemite-s0`.
 
+**A routine runs on exactly one device.** `devices:` is an allowlist, but only its
+**owner** fires — the first entry in normalized sort order. Ownership is derived from
+the config alone, so every daemon independently reaches the same answer with no lease
+and no coordination. Listing several devices is a misconfiguration: it used to fire the
+routine once per listed device (duplicate work, duplicate spend), so `add`/`devices --set`
+now reject it and `agents doctor` reports any that remain on disk.
+
 **Omitting `devices:` means unrestricted** — the job fires on every device running
-the scheduler. `--clear` restores unrestricted behavior (see below).
+the scheduler. That is the genuine fleet-wide case (`watchdog`, `check-updates`).
+`--clear` restores it (see below).
 
 On a device not in the allowlist the job is fully inert:
 
@@ -505,7 +514,7 @@ The picker starts with the current allowlist pre-checked. Confirm to overwrite.
 For scripting:
 
 ```bash
-agents routines devices drain --set yosemite-s0,mac-mini  # replace allowlist
+agents routines devices drain --set yosemite-s0            # set the owning device
 agents routines devices drain --clear                      # remove allowlist (unrestricted)
 ```
 
@@ -524,7 +533,7 @@ agents routines run drain --host yosemite-s0
 
 # Create a job pre-assigned to two hosts, then confirm it looks right on one
 agents routines add drain --schedule "0 3 * * *" --agent claude \
-  --devices yosemite-s0,mac-mini --prompt "Drain queue" --host yosemite-s0
+  --devices yosemite-s0 --prompt "Drain queue" --host yosemite-s0
 ```
 
 When you try to run a job on a host outside its allowlist, the CLI prints:
@@ -786,6 +795,15 @@ and every 5 minutes** — a startup-only pass would miss a fire lost while the
 daemon stayed up but its event loop was wedged, or one lost across an OS suspend
 the process survived.
 
+Detection looks back far enough to see the routine's own period. The window widens
+week → month → quarter → year, and only when the narrower one finds nothing, so a
+dense schedule never walks more than a week of occurrences. A fixed one-week
+lookback silently skipped anything sparser: `0 9 1,13,25 * *` has 12-day gaps, so on
+10 of every 28 days it could not be evaluated at all.
+
+A routine past its `endAt`, and a one-shot (by flag *or* by schedule shape), is never
+caught up — catch-up replays a missed fire, it does not resurrect a retired routine.
+
 Catch-up is idempotent without a ledger: the `missed` record advances the overdue
 comparison, so the same missed fire is never reconsidered — across ticks, a daemon
 restart, or a restart storm.
@@ -942,7 +960,7 @@ runs are finalized by the monitor sweep and do not emit one.
 agents routines list                  # List all jobs with next run + status
 agents routines list --host yosemite-s0  # List another device's routines
 agents routines add <name> --schedule "0 9 * * *" --agent claude --prompt "..."  # Inline
-agents routines add <name> --devices yosemite-s0,mac-mini --schedule "0 3 * * *" \
+agents routines add <name> --devices yosemite-s0 --schedule "0 3 * * *" \
   --agent claude --prompt "..."       # Add with device allowlist
 agents routines add <path.yml>        # Add from YAML file
 agents routines add <name> --at "14:30" --agent claude --prompt "..."            # One-shot
@@ -953,7 +971,7 @@ agents routines resume <name>         # Re-enable a paused job
 
 # Device allowlist management
 agents routines devices <name>                         # Interactive multi-select picker
-agents routines devices <name> --set yosemite-s0,mac-mini  # Replace allowlist
+agents routines devices <name> --set yosemite-s0           # Set the owning device
 agents routines devices <name> --clear                 # Remove allowlist (unrestricted)
 
 # Execution

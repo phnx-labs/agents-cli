@@ -23,6 +23,7 @@ import {
   readDaemonLog,
   getDaemonStatus,
 } from '../lib/daemon.js';
+import { assertSchedulerEnabled } from '../lib/device-config.js';
 import { resolveAgentName, isAgentHardDeprecated, hardDeprecationError } from '../lib/agents.js';
 import { humanizeCron, humanizeNextRun, formatRepoLink, REPO_DISPLAY_MAX } from '../lib/routines-format.js';
 import {
@@ -369,9 +370,20 @@ function parseRoutineTrigger(options: Record<string, unknown>): JobTrigger | und
 /**
  * Start or reload the background scheduler so newly-added jobs fire on time.
  * `quiet` suppresses human status lines for JSON callers.
+ *
+ * When this device has `scheduler.enabled=false` the auto-start is skipped with
+ * the stated reason (the add itself already succeeded — the job is config and
+ * stays valid fleet-wide); the refusal message names the setting and the fix.
  */
 function ensureSchedulerRunning(opts: { quiet?: boolean; stderr?: boolean } = {}): void {
   const log = opts.stderr ? console.error : console.log;
+  try {
+    assertSchedulerEnabled();
+  } catch (err) {
+    // Loud stated skip, on stderr so --json stdout stays clean.
+    console.error(chalk.yellow((err as Error).message));
+    return;
+  }
   if (isDaemonRunning()) {
     signalDaemonReload();
     if (!opts.quiet) log(chalk.gray('Scheduler reloaded'));
@@ -1686,9 +1698,21 @@ export function registerRoutinesCommands(program: Command): void {
     .command('start')
     .description('Start the background scheduler. Usually unnecessary — it auto-starts when you add your first routine.')
     .action(() => {
+      try {
+        // A manual start on a scheduler-disabled device refuses with the same
+        // message the auto-start surfaces give.
+        assertSchedulerEnabled();
+      } catch (err) {
+        console.error(chalk.red((err as Error).message));
+        process.exit(1);
+      }
       const result = startDaemon();
       if (result.method === 'already-running') {
-        console.log(chalk.yellow(`Scheduler already running (PID: ${result.pid})`));
+        // Signal a reload even here: if the daemon booted while this device had
+        // scheduler.enabled=false, the reload re-evaluates the gate and boots
+        // the scheduler — a manual start heals a scheduler-less daemon.
+        signalDaemonReload();
+        console.log(chalk.yellow(`Scheduler already running (PID: ${result.pid}) — reloaded`));
       } else if (result.pid) {
         console.log(chalk.green(`Scheduler started (PID: ${result.pid})`));
       } else {

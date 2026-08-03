@@ -27,8 +27,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as yaml from 'yaml';
+import { execFileSync } from 'child_process';
 import { ensureLockTarget, atomicWriteFileSync, withFileLock } from './fs-atomic.js';
 import type { Meta, RegistryType } from './types.js';
+import { DEFAULT_SYSTEM_REPO, systemRepoSlug } from './types.js';
 import { machineId } from './machine-id.js';
 
 const HOME = process.env.HOME ?? os.homedir();
@@ -165,9 +167,16 @@ const USER_WORKFLOWS_DIR = path.join(USER_AGENTS_DIR, 'workflows');
 const USER_SECRETS_DIR = path.join(USER_AGENTS_DIR, 'secrets');
 const USER_PROMPTCUTS_FILE = path.join(USER_AGENTS_DIR, 'hooks', 'promptcuts.yaml');
 
-const META_HEADER = `# agents-cli metadata
+/**
+ * Header prepended to every agents.yaml the CLI writes (central and per-device
+ * docs). Carries the yaml-language-server schema hint so editors validate the
+ * file against `schema/agents-yaml.schema.json`. Exported so
+ * `lib/device-config.ts` writes a sibling device's doc with the same header.
+ */
+export const META_HEADER = `# agents-cli metadata
 # Auto-generated - do not edit manually
 # https://github.com/phnx-labs/agents-cli
+# yaml-language-server: $schema=https://raw.githubusercontent.com/phnx-labs/agents-cli/main/apps/cli/schema/agents-yaml.schema.json
 
 `;
 
@@ -213,6 +222,59 @@ export function getOptionalUserAgentsDir(): string | null {
   return USER_AGENTS_DIR;
 }
 
+/**
+ * Origin `owner/repo` slug (lowercased, `.git` stripped) of a git checkout, or
+ * null when `dir` isn't a git repo / has no origin. Extracts the slug from any
+ * remote URL form: `git@host:owner/repo.git`, `https://host/owner/repo.git`,
+ * `ssh://git@host/owner/repo`. Sync (mirrors readGitConfigUser in git.ts) so it
+ * can be used from the synchronous getProjectAgentsDir walk.
+ */
+function gitOriginSlug(dir: string): string | null {
+  let url: string;
+  try {
+    url = execFileSync('git', ['-C', dir, 'config', '--get', 'remote.origin.url'], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).toString().trim();
+  } catch {
+    return null;
+  }
+  if (!url) return null;
+  const m = url.replace(/\.git$/i, '').match(/[:/]([^/:]+\/[^/]+)$/);
+  return m ? m[1].toLowerCase() : null;
+}
+
+/** Slugs of the user + system DotAgents repos — a checkout of any of these is not a project layer. */
+function canonicalDotAgentsRepoSlugs(): Set<string> {
+  const slugs = new Set<string>([systemRepoSlug(DEFAULT_SYSTEM_REPO).toLowerCase()]);
+  for (const dir of [USER_AGENTS_DIR, SYSTEM_AGENTS_DIR]) {
+    const slug = gitOriginSlug(dir);
+    if (slug) slugs.add(slug);
+  }
+  return slugs;
+}
+
+/**
+ * True when `agentsPath` is itself a git checkout of the user's or system's
+ * DotAgents repo — i.e. a *clone* of the very repo whose rules already load as
+ * the user/system layer (e.g. `git clone …/.agents.git ~/src/github.com/<you>/.agents`).
+ * Such a clone must NOT also be treated as a *project* layer: because project
+ * outranks user, a stale clone would silently shadow the live user rules by
+ * filename and plant a compiled AGENTS.md in an ancestor dir (RUSH-2037).
+ *
+ * A legitimate project layer is a plain subdirectory of a project and is never
+ * itself a git-repo root, so the cheap `.git` gate skips the (git-spawning)
+ * origin comparison for the common case — only a `.agents/` that is its own
+ * checkout pays it, and even then it's kept unless its origin matches the
+ * user/system DotAgents repo (an unrelated repo checked out at `.agents/`,
+ * or a project's own versioned `.agents/`, stays a valid project layer).
+ */
+function isUserOrSystemRepoCheckout(agentsPath: string): boolean {
+  if (!fs.existsSync(path.join(agentsPath, '.git'))) return false;
+  const origin = gitOriginSlug(agentsPath);
+  if (!origin) return false;
+  return canonicalDotAgentsRepoSlugs().has(origin);
+}
+
 /** Walk up from startPath to find a project-scoped .agents/ directory (skipping both roots). */
 export function getProjectAgentsDir(startPath: string = process.cwd()): string | null {
   let dir = path.resolve(startPath);
@@ -220,7 +282,8 @@ export function getProjectAgentsDir(startPath: string = process.cwd()): string |
   while (true) {
     const agentsPath = path.join(dir, '.agents');
     if (fs.existsSync(agentsPath) && fs.statSync(agentsPath).isDirectory()) {
-      if (!isSamePath(agentsPath, SYSTEM_AGENTS_DIR) && !isSamePath(agentsPath, USER_AGENTS_DIR)) {
+      if (!isSamePath(agentsPath, SYSTEM_AGENTS_DIR) && !isSamePath(agentsPath, USER_AGENTS_DIR)
+          && !isUserOrSystemRepoCheckout(agentsPath)) {
         return agentsPath;
       }
     }
@@ -792,8 +855,9 @@ function writeIfChanged(filePath: string, content: string): void {
 /**
  * Partition the in-memory Meta across three files by sync-domain:
  *   - central  `~/.agents/agents.yaml`             — portable, everything else
+ *              (including the user-scope `config:` block)
  *   - device   `~/.agents/devices/<machine>/agents.yaml` — `agents:` pins +
- *              `defaultBrowserProfile:` (both per-device)
+ *              `defaultBrowserProfile:` + device-scope `config:` (all per-device)
  *   - history  `~/.agents/.history/version-resources.json` — `versions:` (machine-local)
  * All callers funnel through writeMeta → here, so nothing else changes. Empty
  * `agents:` / `versions:` are not written (no empty committed files).
@@ -854,7 +918,7 @@ function serializeCentral(central: Record<string, unknown>): string {
 }
 
 function writeMetaUnlocked(meta: Meta): void {
-  const { agents, isolatedAgents, versions, defaultBrowserProfile, ...central } = meta;
+  const { agents, isolatedAgents, versions, defaultBrowserProfile, deviceConfig, ...central } = meta;
 
   // Write the machine-local files FIRST, then strip central — so a crash mid-write
   // never removes pins/versions from central before they're persisted elsewhere.
@@ -866,13 +930,18 @@ function writeMetaUnlocked(meta: Meta): void {
   // it does not have.
   const hasIsolatedAgents = !!isolatedAgents && Object.keys(isolatedAgents).length > 0;
   const hasDefaultBrowser = !!defaultBrowserProfile;
-  if (hasAgents || hasIsolatedAgents || hasDefaultBrowser) {
-    // Device-local doc carries `agents:` pins and `defaultBrowserProfile:` — both
-    // are per-machine and must never land in central agents.yaml (which syncs).
+  // Device-scope config (`maxAgents`, `schedulerEnabled`, …) is per-machine, so it
+  // rides the device doc under `config:` — never the central doc that syncs.
+  const hasDeviceConfig = !!deviceConfig && Object.keys(deviceConfig).length > 0;
+  if (hasAgents || hasIsolatedAgents || hasDefaultBrowser || hasDeviceConfig) {
+    // Device-local doc carries `agents:` pins, `defaultBrowserProfile:`, and the
+    // device-scope `config:` — all per-machine and must never land in central
+    // agents.yaml (which syncs).
     const deviceDoc: Partial<Meta> = {};
     if (hasAgents) deviceDoc.agents = agents;
     if (hasIsolatedAgents) deviceDoc.isolatedAgents = isolatedAgents;
     if (hasDefaultBrowser) deviceDoc.defaultBrowserProfile = defaultBrowserProfile;
+    if (hasDeviceConfig) deviceDoc.config = deviceConfig;
     fs.mkdirSync(path.dirname(devicePath), { recursive: true });
     writeIfChanged(devicePath, META_HEADER + yaml.stringify(deviceDoc));
   } else if (fs.existsSync(devicePath)) {
@@ -900,6 +969,10 @@ function writeMetaUnlocked(meta: Meta): void {
  *     still has pins)
  *   - `defaultBrowserProfile:` from the device file (device is the sole source;
  *     the field is stripped from central on write, so nothing to merge against)
+ *   - `config:` from the device file into `deviceConfig` (device is the sole
+ *     source for device-scope config, same routing as `defaultBrowserProfile`;
+ *     the in-memory field is named `deviceConfig` so it can never collide with
+ *     the user-scope `config:` central carries)
  *   - `versions:` from the history JSON (wholesale replace; falls back to
  *     whatever central carried when the history file doesn't exist yet)
  */
@@ -911,6 +984,7 @@ function overlayMachineLocal(meta: Meta): Meta {
       if (dm?.agents) meta.agents = { ...meta.agents, ...dm.agents };
       if (dm?.isolatedAgents) meta.isolatedAgents = { ...meta.isolatedAgents, ...dm.isolatedAgents };
       if (dm?.defaultBrowserProfile) meta.defaultBrowserProfile = dm.defaultBrowserProfile;
+      if (dm?.config) meta.deviceConfig = dm.config;
     } catch { /* ignore malformed device file */ }
   }
   const vrPath = getVersionResourcesPath();

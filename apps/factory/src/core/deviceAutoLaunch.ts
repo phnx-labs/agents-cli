@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as yaml from 'yaml';
 
 export interface AutoLaunchPreference {
   enabled?: boolean;
@@ -17,6 +18,15 @@ function autoLaunchPath(): string {
     process.env.AGENTS_DEVICES_DIR ??
     path.join(os.homedir(), '.agents', '.history', 'devices');
   return path.join(dir, 'auto-launch.json');
+}
+
+/**
+ * Root of the user DotAgents repo (`~/.agents`), overridable for tests. The
+ * per-device config docs (`devices/<host>/agents.yaml`) live here — a
+ * different tree from the AGENTS_DEVICES_DIR registry dir above.
+ */
+function userAgentsDir(): string {
+  return process.env.AGENTS_USER_AGENTS_DIR ?? path.join(os.homedir(), '.agents');
 }
 
 /**
@@ -57,4 +67,35 @@ export function isAutoLaunchPreferred(
   name: string,
 ): boolean {
   return preferences[name]?.preferred === true;
+}
+
+/**
+ * Read a device's `agents.max-concurrent` cap from its synced device doc
+ * (`~/.agents/devices/<name>/agents.yaml`, `config.maxAgents`) — written by
+ * `agents devices configure <name> --max-agents N`. Local file read, no SSH;
+ * the devices/ tree syncs via the DotAgents repo so the cap the operator set
+ * on any box is visible here.
+ *
+ * Returns undefined when uncapped (the default). Same corruption contract as
+ * loadAutoLaunchPreferences above: a malformed doc degrades to "uncapped" with
+ * a log line rather than blocking a launch the user just triggered.
+ */
+export function readDeviceMaxConcurrent(name: string): number | undefined {
+  const docPath = path.join(userAgentsDir(), 'devices', name, 'agents.yaml');
+  let raw: string;
+  try {
+    raw = fs.readFileSync(docPath, 'utf-8');
+  } catch (err: any) {
+    if (err && err.code === 'ENOENT') return undefined;
+    console.error('[deviceAutoLaunch] failed to read device doc:', err?.message ?? err);
+    return undefined;
+  }
+  try {
+    const parsed = yaml.parse(raw) as { config?: { maxAgents?: unknown } } | null;
+    const cap = parsed?.config?.maxAgents;
+    return typeof cap === 'number' && Number.isInteger(cap) && cap >= 1 ? cap : undefined;
+  } catch (err: any) {
+    console.error('[deviceAutoLaunch] failed to parse device doc:', err?.message ?? err);
+    return undefined;
+  }
 }

@@ -12,6 +12,7 @@ const {
   loadAutoLaunchPreferences,
   isAutoLaunchEnabled,
   isAutoLaunchPreferred,
+  readDeviceMaxConcurrent,
 } = await import('./deviceAutoLaunch');
 
 function prefsPath(): string {
@@ -72,5 +73,51 @@ describe('deviceAutoLaunch', () => {
     fs.writeFileSync(prefsPath(), JSON.stringify({ devices: 'bad', updatedAt: new Date().toISOString() }));
     const prefs = loadAutoLaunchPreferences();
     expect(prefs).toEqual({});
+  });
+});
+
+describe('readDeviceMaxConcurrent (agents.max-concurrent from the device doc)', () => {
+  const ORIGINAL_USER_DIR = process.env.AGENTS_USER_AGENTS_DIR;
+
+  beforeEach(() => {
+    process.env.AGENTS_USER_AGENTS_DIR = path.join(TEST_HOME, '.agents');
+  });
+
+  afterAll(() => {
+    process.env.AGENTS_USER_AGENTS_DIR = ORIGINAL_USER_DIR;
+  });
+
+  function writeDeviceDoc(name: string, text: string): void {
+    const dir = path.join(process.env.AGENTS_USER_AGENTS_DIR!, 'devices', name);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'agents.yaml'), text);
+  }
+
+  test('missing doc means uncapped (undefined)', () => {
+    expect(readDeviceMaxConcurrent('never-configured')).toBeUndefined();
+  });
+
+  test('reads config.maxAgents from the device doc', () => {
+    writeDeviceDoc('mac-mini', 'config:\n  maxAgents: 4\n  schedulerEnabled: false\n');
+    expect(readDeviceMaxConcurrent('mac-mini')).toBe(4);
+  });
+
+  test('a doc without maxAgents is uncapped', () => {
+    writeDeviceDoc('zion', 'config:\n  schedulerEnabled: true\n');
+    expect(readDeviceMaxConcurrent('zion')).toBeUndefined();
+  });
+
+  test('invalid cap values are ignored (uncapped), not trusted', () => {
+    writeDeviceDoc('bad-zero', 'config:\n  maxAgents: 0\n');
+    writeDeviceDoc('bad-string', 'config:\n  maxAgents: four\n');
+    writeDeviceDoc('bad-float', 'config:\n  maxAgents: 2.5\n');
+    expect(readDeviceMaxConcurrent('bad-zero')).toBeUndefined();
+    expect(readDeviceMaxConcurrent('bad-string')).toBeUndefined();
+    expect(readDeviceMaxConcurrent('bad-float')).toBeUndefined();
+  });
+
+  test('a malformed doc degrades to uncapped rather than throwing', () => {
+    writeDeviceDoc('broken', 'config:\n  maxAgents: [unclosed\n');
+    expect(readDeviceMaxConcurrent('broken')).toBeUndefined();
   });
 });

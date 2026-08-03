@@ -13,7 +13,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { getDaemonDir as getDaemonDirRoot } from './state.js';
 import { isAlive, killTree, backgroundSpawnOptions, waitForExit } from './platform/index.js';
-import { listJobs as listAllJobs } from './routines.js';
+import { listJobs as listAllJobs, type JobConfig } from './routines.js';
 import { syncAllProjectRoutines } from './routines-project.js';
 import { JobScheduler } from './scheduler.js';
 import { MonitorEngine } from './monitors/engine.js';
@@ -25,6 +25,7 @@ import { BrowserService } from './browser/service.js';
 import { BrowserIPCServer } from './browser/ipc.js';
 import { redactSecrets } from './redact.js';
 import { getAgentsBinPath, getCliLaunch, BUN_VIRTUAL_ROOT } from './cli-entry.js';
+import { isSchedulerEnabled, assertSchedulerEnabled } from './device-config.js';
 
 const PID_FILE = 'daemon.pid';
 const LOCK_FILE = 'daemon.lock';
@@ -55,6 +56,24 @@ const WEDGE_THRESHOLD_TICKS = 3;
  */
 export function shouldTakeOverBroker(isHosting: boolean, brokerReachable: boolean): boolean {
   return !isHosting && !brokerReachable;
+}
+
+/**
+ * What a gate re-evaluation must do with the routines scheduler. The daemon
+ * re-evaluates `scheduler.enabled` on every SIGHUP reload so flipping the key
+ * takes effect without a daemon restart (and `routines add`'s reload signal on
+ * a re-enabled box boots the scheduler — the reload is truthful, not a no-op).
+ *
+ *   running + enabled   → reload (the normal SIGHUP path)
+ *   running + !enabled  → stop  (gate flipped off since boot)
+ *   !running + enabled  → boot  (gate flipped on since boot)
+ *   !running + !enabled → none  (stay dark)
+ */
+export type SchedulerGateTransition = 'reload' | 'stop' | 'boot' | 'none';
+
+export function schedulerGateTransition(running: boolean, enabled: boolean): SchedulerGateTransition {
+  if (running) return enabled ? 'reload' : 'stop';
+  return enabled ? 'boot' : 'none';
 }
 
 function getDaemonDir(): string {
@@ -416,7 +435,23 @@ export async function runDaemon(): Promise<void> {
     log('WARN', `Secrets broker host skipped: ${(err as Error).message}`);
   }
 
-  const scheduler = new JobScheduler(async (config) => {
+  // scheduler.enabled=false in this machine's device doc means NO routines fire
+  // here — the scheduler and its catchup recovery simply never start, while the
+  // daemon keeps its other duties (secrets broker, browser IPC, session sync).
+  // The refusal message is the same one the start surfaces
+  // (`routines add` auto-start, manual `routines start`) raise. The gate is
+  // re-evaluated on every SIGHUP reload (handleReload below) via
+  // schedulerGateTransition, so flipping the key never needs a daemon restart.
+  const schedulerEnabledAtBoot = isSchedulerEnabled();
+  if (!schedulerEnabledAtBoot) {
+    try {
+      assertSchedulerEnabled();
+    } catch (err) {
+      log('WARN', (err as Error).message);
+    }
+  }
+
+  const triggerJob = async (config: JobConfig) => {
     const jobLabel = config.command
       ? 'command'
       : config.workflow
@@ -445,7 +480,39 @@ export async function runDaemon(): Promise<void> {
       // "Routine started" and never told it failed.
       try { notifyRoutineStartFailed(config, message); } catch { /* best-effort */ }
     }
-  });
+  };
+
+  let scheduler: JobScheduler | null = null;
+  let catchupInterval: NodeJS.Timeout | undefined;
+  // Catchup overlap guard. Declared up here (not beside catchupPass) because
+  // bootScheduler() runs before catchupPass's textual position — a `let` down
+  // there would still be in its TDZ at the first call and crash the daemon.
+  let catchingUp = false;
+
+  // Boot the scheduler + catchup recovery. Called at daemon start when the gate
+  // allows, and again from handleReload when the gate flips on (function
+  // declarations hoist — catchupPass below is in scope).
+  function bootScheduler(): void {
+    scheduler = new JobScheduler(triggerJob);
+    scheduler.loadAll();
+    const scheduled = scheduler.listScheduled();
+    log('INFO', `Loaded ${scheduled.length} jobs`);
+    for (const job of scheduled) {
+      log('INFO', `  ${job.name} -> next: ${job.nextRun?.toISOString() || 'unknown'}`);
+    }
+    void catchupPass();
+    catchupInterval = setInterval(() => { void catchupPass(); }, CATCHUP_TICK_MS);
+  }
+
+  // Stop the scheduler + catchup recovery (gate flipped off on reload).
+  function stopScheduler(): void {
+    scheduler?.stopAll();
+    scheduler = null;
+    if (catchupInterval !== undefined) {
+      clearInterval(catchupInterval);
+      catchupInterval = undefined;
+    }
+  }
 
   // Materialise opted-in project routines into the user layer on every start
   // so a fresh daemon picks up project YAML without a separate sync step.
@@ -457,12 +524,7 @@ export async function runDaemon(): Promise<void> {
     log('WARN', `Project routines sync failed: ${(err as Error).message}`);
   }
 
-  scheduler.loadAll();
-  const scheduled = scheduler.listScheduled();
-  log('INFO', `Loaded ${scheduled.length} jobs`);
-  for (const job of scheduled) {
-    log('INFO', `  ${job.name} -> next: ${job.nextRun?.toISOString() || 'unknown'}`);
-  }
+  if (schedulerEnabledAtBoot) bootScheduler();
 
   // Monitor engine: event-triggered watchers, beside the cron scheduler. Same
   // daemon, same dispatch seam — a monitor is a routine whose trigger is a
@@ -490,8 +552,9 @@ export async function runDaemon(): Promise<void> {
   // overdue — the miss is recorded before the await, but only for jobs already
   // processed — and spawn it twice. The idempotency of the `missed` record
   // guards across passes, not within one that is mid-flight.
-  let catchingUp = false;
-  const catchupPass = async (): Promise<void> => {
+  // Function declaration (hoisted) so bootScheduler() can schedule it. Its
+  // guard (`catchingUp`) is declared beside `scheduler` above for TDZ safety.
+  async function catchupPass(): Promise<void> {
     if (catchingUp) return;
     catchingUp = true;
     try {
@@ -537,9 +600,7 @@ export async function runDaemon(): Promise<void> {
       // throw must not leave the guard latched shut for the daemon's lifetime.
       catchingUp = false;
     }
-  };
-  await catchupPass();
-  const catchupInterval = setInterval(() => { void catchupPass(); }, CATCHUP_TICK_MS);
+  }
 
   // Before the BrowserService comes up, reap browser + tunnel processes
   // spawned by previous daemons that are no longer alive. Without this,
@@ -839,9 +900,22 @@ export async function runDaemon(): Promise<void> {
     } catch (err) {
       log('WARN', `Project routines sync failed: ${(err as Error).message}`);
     }
-    scheduler.reloadAll();
-    const reloaded = scheduler.listScheduled();
-    log('INFO', `Reloaded ${reloaded.length} jobs`);
+    // Re-evaluate the scheduler.enabled gate: flipping the key takes effect on
+    // this reload, no daemon restart needed. A `routines add` on a re-enabled
+    // box signals exactly this reload, which boots the scheduler — the
+    // "Scheduler reloaded" it prints is then truthful, not a dead-end.
+    const transition = schedulerGateTransition(scheduler !== null, isSchedulerEnabled());
+    if (transition === 'boot') {
+      log('INFO', 'scheduler.enabled is now on — booting the scheduler');
+      bootScheduler();
+    } else if (transition === 'stop') {
+      log('WARN', 'scheduler.enabled is now off — stopping the scheduler; no routines will fire on this device');
+      stopScheduler();
+    } else if (transition === 'reload') {
+      scheduler!.reloadAll();
+      const reloaded = scheduler!.listScheduled();
+      log('INFO', `Reloaded ${reloaded.length} jobs`);
+    }
     try {
       monitorEngine.reload();
     } catch (err) {
@@ -854,11 +928,10 @@ export async function runDaemon(): Promise<void> {
 
   const handleShutdown = async () => {
     log('INFO', 'Daemon shutting down');
-    scheduler.stopAll();
+    stopScheduler();
     monitorEngine.stop();
     await browserIPC.stop();
     clearInterval(monitorInterval);
-    clearInterval(catchupInterval);
     clearInterval(syncInterval);
     clearInterval(healInterval);
     clearTimeout(healKickoff);

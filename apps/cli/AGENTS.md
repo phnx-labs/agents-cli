@@ -308,7 +308,7 @@ package's npm tarball; two more helpers are dev-only and live at repo-root `nati
 | Helper | Source | Ships in tarball? | Resolver |
 |---|---|---|---|
 | Keychain broker | `src/lib/secrets/keychain-helper.swift` → `bin/Agents CLI.app` | **Yes** (signed + notarized) | `src/lib/secrets/` |
-| Menu-bar helper | [`menubar/`](menubar) (SwiftPM) → `bin/MenubarHelper.app` | **Yes** (signed, no notarization) | `src/lib/menubar/install-menubar.ts` |
+| Menu-bar helper | [`menubar/`](menubar) (SwiftPM) → `bin/MenubarHelper.app` | **Yes** (signed + notarized) | `src/lib/menubar/install-menubar.ts` |
 | Standalone CLI binary | `src/` → `bun build --compile` → `bin/agents-macos` | **Yes** (signed + notarized, arm64 Mach-O at `dist/bin/agents`) | `scripts/postinstall.js` |
 | computer-mac | [`../../native/computer-mac`](../../native/computer-mac) | No — signed + notarized GitHub **release asset**, downloaded on demand | `src/lib/computer-rpc.ts`, `src/lib/computer/download.ts` |
 | computer-win | [`../../native/computer-win`](../../native/computer-win) | No (staged at release) | `src/lib/ssh-tunnel.ts` |
@@ -483,10 +483,19 @@ the helper only when `src/lib/secrets/keychain-helper.swift` changes.
 **Menu-bar helper** ([`menubar/`](menubar) → `bin/MenubarHelper.app`) ships the same
 way — built into `bin/`, copied to `dist/lib/menubar/` by `build`, gated in `prepack`
 by [`scripts/verify-menubar-helper.sh`](scripts/verify-menubar-helper.sh) (presence +
-`codesign --verify`). No notarization (a status item has no Keychain ACL / TCC
-grant). Keep it a **separate bundle** from the keychain app — a menu-bar crash must
-never take down the secret broker. Stage a freshly-built `bin/MenubarHelper.app`
-before any release or the menu bar ships code-only (the 1.20.22 bug the gate prevents).
+`codesign --verify` + a **stapled notarization ticket**). It is Developer-ID signed
+**and notarized + stapled** ([`menubar/scripts/build.sh`](menubar/scripts/build.sh),
+run inside the release's `agents secrets exec apple.com` context): Gatekeeper on
+macOS 26+ rejects an un-notarized `.app` as "damaged" (crashing AppKit at launch),
+and the stapled ticket rides inside the bundle so it survives npm's tarball
+round-trip — so the installed helper launches with **no per-machine re-signing**
+(the old `install-menubar.ts` ad-hoc re-sign band-aid is gone; the launch guards now
+verify Gatekeeper acceptance and fail loud instead — RUSH-2134). Notarization is
+mandatory for any real (Developer-ID) build; an ad-hoc dev build can't be notarized
+and the prepack gate refuses to pack it. Keep it a **separate bundle** from the
+keychain app — a menu-bar crash must never take down the secret broker. Stage a
+freshly-built `bin/MenubarHelper.app` before any release or the menu bar ships
+code-only (the 1.20.22 bug the gate prevents).
 
 **Exactly one status item is an invariant, enforced in the helper.** The bundle
 can be started from more than one place — launchd's `KeepAlive` service, a
@@ -502,6 +511,56 @@ process list cannot say which copy launchd will keep alive. On the CLI side,
 healthy `running: yes`. `agents menubar setup` is the recovery path — it ends
 every live helper and re-kickstarts the service so the survivor is always
 launchd's.
+
+**Every CLI child the helper spawns is bounded, group-killable, and reapable.**
+The helper shells `agents` on a timer, and an unbounded `Process` there is not a
+slow menu — it is a machine-killer. `doctor --json` measures **136s on an idle
+box**, the poll asked for it every 60s, and a helper that dies mid-call leaves the
+child reparented to launchd with nothing to reap it (plus the `node -e` probes
+that child forked). The deaths are not preventable from inside the app:
+`NSApplication.shared` segfaults in `SLSNewConnection` when WindowServer is too
+starved to hand out a connection, and `KeepAlive` restarts into another doctor.
+Observed: 38 orphaned doctors + 92 orphaned probes, ~13 of 18 cores, load 490.
+**The property that made this fatal is accumulation, so the rule is scoped to
+what accumulates: every TIMER-DRIVEN, repeating CLI call MUST go through
+[`ChildProcess`](menubar/Sources/MenubarHelper/ChildProcess.swift)** — that is the
+`capture()` path behind the cached refreshers (`routines`, `recentSessions`,
+`activeSessions`, `doctorOverview`, `watchdog`). A poller is the only thing that
+can stack 38 copies of itself.
+
+**User-initiated one-shots deliberately do NOT** — `runDetached`,
+`runMonitored`, and `runMonitoredWithInput` keep a bare `Process` on purpose,
+because every one of their callers is a menu click (`routines run/pause`,
+`devices register`, `open <url>`, and the ticket-agent / quick-fix dispatches).
+Two reasons, and both would be violated by "bound everything": a deadline there
+would **kill the user's headless `agents run` mid-work**, and a fire-and-forget
+`open`/dispatch is *supposed* to outlive the helper. One click cannot stack, so
+there is nothing to accumulate. Do not "fix" these by routing them through
+`ChildProcess` — if a future caller makes one of them repeating, that caller is
+the bug.
+
+`ChildProcess` holds three invariants:
+
+- **Bounded.** Every spawn carries a deadline (30s; `ChildProcess.doctorTimeout`
+  180s for `doctor --json`, above its real measured cost — a ceiling set *below*
+  the true cost just makes every poll fail while still paying full CPU).
+- **Killed as a group.** The child is spawned as its own process-group leader
+  (`POSIX_SPAWN_SETPGROUP`) so a timeout `kill(-pgid)`s the subtree. Signalling
+  the pid alone is what left 92 probes running. Foundation's `Process` cannot set
+  a process group — that is why this is `posix_spawn` and not `Process`.
+- **Reaped by the NEXT launch.** Live children are recorded in
+  `~/.agents/.cache/state/menubar-children`; `reapOrphansFromPreviousLaunch()`
+  runs in `main.swift` **before** the first AppKit call, since the crash being
+  recovered from happens *inside* that call. Do NOT move it after, and do NOT
+  replace it with an exit handler — SIGSEGV runs none. Pid reuse is guarded by
+  re-checking the executable path (`proc_pidpath`) before killing.
+
+Poll intervals must stay well above the call's real cost:
+`StatusItemController.doctorRefreshInterval` is 15 min against a 136s command
+(it was 60s — a >100% duty cycle). `MENUBAR_CHILD_TEST=1 MenubarHelper` exercises
+all of it against real processes, including reaping a real surviving orphan.
+Separately, **`doctor --json` taking 136s on an idle machine is its own defect**
+— the helper is now safe against it, not a reason to consider it acceptable.
 
 **Standalone `agents` binary (#315).** Every release also builds `dist/bin/agents`
 (`bun build --compile`, arm64 Mach-O), signs it (Developer ID + hardened runtime +

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { BUILT_IN_AGENTS, getBuiltInByKey, getBuiltInDefByTitle, getBuiltInByPrefix, STRATEGY_LAUNCH_AGENTS, usesManagedAgentLaunch, modeFlagForAgent, AgentLaunchMode, RunStrategy, buildAgentLaunchCommand, wrapNativeAgentCommand, shquote } from '../core/agents';
-import { loadAutoLaunchPreferences, isAutoLaunchEnabled, isAutoLaunchPreferred } from '../core/deviceAutoLaunch';
+import { loadAutoLaunchPreferences, isAutoLaunchEnabled, isAutoLaunchPreferred, readDeviceMaxConcurrent } from '../core/deviceAutoLaunch';
 import { parseSpawnRequest, resolveSpawnSurface, SpawnRequest } from '../core/spawn';
 import {
   AgentConfig,
@@ -14,7 +14,7 @@ import * as git from './git.vscode';
 import { AgentSettings, hasLoginEnabled, PromptEntry, QUICK_LAUNCH_SLOT_KEYS, getQuickLaunchSlot, QuickLaunchSlot, QuickLaunchSlotKey } from '../core/settings';
 import { listRegisteredDevices, countRunningAgents, fetchDeviceStats, resolveSecret } from './deviceHealth.vscode';
 import { normalizeHost } from '../core/remoteSessions';
-import { pickBestHost, deviceHasUsableVersion, resolveBalancePool, DeviceLoad } from '../core/launchHost';
+import { pickBestHost, cappedOutDevices, noHostReason, deviceHasUsableVersion, resolveBalancePool, DeviceLoad } from '../core/launchHost';
 import {
   LAUNCH_HEALTH_KEY,
   LAUNCH_HISTORY_KEY,
@@ -464,6 +464,9 @@ async function resolveBalancedHost(pool?: string[], agentKey?: string): Promise<
       online: !!d.online,
       running: 0,
       preferred: isAutoLaunchPreferred(preferences, d.name),
+      // Operator cap from the synced device doc (agents devices configure
+      // <name> --max-agents N) — local read, no SSH.
+      maxConcurrent: readDeviceMaxConcurrent(d.name),
     }));
   const eligible = resolveBalancePool(fleet, { localName, pool }).filter(c => c.online);
   if (eligible.length === 0) {
@@ -497,15 +500,14 @@ async function resolveBalancedHost(pool?: string[], agentKey?: string): Promise<
     })),
   );
   const best = pickBestHost(loaded);
-  if (!best && agentKey && loaded.length > 0) {
-    // Every online device lacks a signed-in, non-throttled version of this
-    // agent — fall back to local rather than launch into a broken agent.
-    vscode.window.showWarningMessage(
-      `No fleet device has a usable ${agentKey} version (signed in and not rate-limited) — running locally.`,
-    );
-    return undefined;
+  if (best) return best;
+  // State WHY the pool produced nothing — caps first (an operator boundary to
+  // raise), then agent usability. See noHostReason.
+  const reason = noHostReason(loaded, agentKey);
+  if (reason) {
+    vscode.window.showWarningMessage(`Balanced launch: ${reason} — running locally.`);
   }
-  return best ?? undefined;
+  return undefined;
 }
 
 // Resolve a Quick Launch slot's Run-on target to a device name (undefined =
