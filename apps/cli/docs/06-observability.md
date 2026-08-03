@@ -23,6 +23,32 @@ distinct on disk and merged only at read time by
 `event-stream.ts::readUnifiedEvents` — so `events` is the union, while `activity`
 is the milestone tier on its own.
 
+**Writing from outside the CLI — `agents events emit`.** In-process code calls
+`emit()` or `appendActivityEvent()` directly, but the producers that most need to
+record events are not agents-cli processes at all (the Factory VS Code extension
+host, a shell guard, any external tool). They pipe JSONL — one JSON object per
+line — into `agents events emit --source <name>`:
+
+```bash
+printf '%s\n' '{"event":"factory.command","commandId":"agents.newClaude"}' \
+  | agents events emit --source factory
+agents events --module factory --limit 0 --json      # read it back
+```
+
+`--source` is stamped as `module`, which is what makes `--module factory` filter to
+one producer. Which store a line lands in is **forced by the stores, not chosen**:
+the activity log is one file per session, so a milestone kind routes there and
+*requires* a `sessionId`, while everything else (and anything sessionless) goes to
+the operational log. A milestone with no `sessionId` is **rejected**, never quietly
+written elsewhere. Rejection is per line — one bad line never discards the batch —
+and the exit code is 1 if any line was rejected.
+
+Pass `ts` (ISO-8601) per line when the producer batches: without it every event in
+a flush is stamped at flush time, which collapses their real ordering and corrupts
+`--since` boundaries. `agents events emit` is itself exempt from the
+`command.start`/`command.end` audit hooks, so a batched writer does not bury the
+stream it is writing into.
+
 For the inspection/health cluster, `agents doctor` is the canonical detector of
 which resources are configured, synced, or drifted; `agents doctor --check` is its
 scriptable CI gate (exit non-zero on drift). See
@@ -154,6 +180,8 @@ agents events --event teams.disband    # a semantic event: a team torn down
 agents events --event secrets.get --since 7d --json
 agents events --event pr.opened --since 30d --limit 0 --json   # every match, uncapped
 agents events -f                       # live tail of today's log
+agents events --module factory         # what the VS Code extension recorded
+agents events emit --source factory --json < batch.jsonl        # write from outside
 ```
 
 `--module` filters the top-level group; `--command` matches a command path by
