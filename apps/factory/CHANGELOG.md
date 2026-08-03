@@ -6,6 +6,22 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [0.9.308] - 2026-08-03
 
+- **The host picker never goes empty again: a failed refresh keeps the rows you last saw.**
+  The 0.9.307 stale-while-revalidate picker persisted whatever the background
+  refresh returned — and on a loaded box, `agents devices list --json` exceeded
+  the extension's 8s spawn timeout, the catch returned `[]`, and that empty
+  result was written straight into `agents.hostPicker.v1`. The menu then opened
+  instantly (the cache did its job) showing only "This Mac" and "Balanced". An
+  empty device list is a failed registry read, never a real empty fleet, so the
+  refresh now folds through `mergeHostPickerSnapshot`: an empty fetch keeps the
+  previous rows and scores, and with no confident data at all nothing is
+  persisted (the picker stays in cold-start mode and retries next open). The
+  registry read's timeout also goes 8s → 20s — it only ever runs on the
+  background path now, never on the render path. Source:
+  `apps/factory/src/core/hostPickerCache.ts` (`mergeHostPickerSnapshot`),
+  `apps/factory/src/vscode/extension.ts` (`refreshHostPickerCache`),
+  `apps/factory/src/vscode/deviceHealth.vscode.ts`.
+
 - **`Agents: Fork (Recap)` starts a new sibling with context from a session you pick.**
   It reuses `Agents: Fork (Pick Session)`'s device-aware browser and launches on
   the selected session's exact host, directory, and harness, but queues only

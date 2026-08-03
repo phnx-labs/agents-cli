@@ -109,6 +109,7 @@ import {
   HOST_PICKER_CACHE_KEY,
   freshnessSuffix,
   isHostPickerStale,
+  mergeHostPickerSnapshot,
   parseHostPickerCache,
   serializeUsage,
   sortHostPickerDevices,
@@ -561,8 +562,13 @@ function readHostPickerCache(context: vscode.ExtensionContext): HostPickerCache 
  * and hosts the launch-health sweep already found unreachable are skipped
  * instead of dialed into a 10s timeout. Best-effort: a failed sweep keeps the
  * device rows and just leaves the usage ordering empty.
+ *
+ * An empty device list is a failed registry read (CLI timeout on a loaded
+ * box), never a real empty fleet — mergeHostPickerSnapshot keeps the previous
+ * rows in that case, and when there is nothing confident at all this returns
+ * null and persists nothing (the picker stays in cold-start mode).
  */
-async function refreshHostPickerCache(context: vscode.ExtensionContext): Promise<HostPickerCache> {
+async function refreshHostPickerCache(context: vscode.ExtensionContext): Promise<HostPickerCache | null> {
   const devices = await listRegisteredDevices();
   const health = context.globalState.get<LaunchHealthCache>(LAUNCH_HEALTH_KEY);
   const dead = new Set(
@@ -576,7 +582,8 @@ async function refreshHostPickerCache(context: vscode.ExtensionContext): Promise
   } catch (err) {
     console.error('[pickLaunchHost] usage sweep failed:', err);
   }
-  const cache: HostPickerCache = { devices, usage, fetchedAt: Date.now() };
+  const cache = mergeHostPickerSnapshot(readHostPickerCache(context), devices, usage, Date.now());
+  if (!cache) return null;
   hostPickerHot = cache;
   await context.globalState.update(HOST_PICKER_CACHE_KEY, cache);
   return cache;
@@ -636,7 +643,7 @@ async function pickLaunchHost(
     quickPick.busy = true;
     void refreshHostPickerCache(context)
       .then((fresh) => {
-        if (disposed) return; // user already picked/dismissed — nothing to update
+        if (disposed || !fresh) return; // user already picked/dismissed, or the refresh found nothing confident
         const activeHostId = quickPick.activeItems[0]?.hostId;
         quickPick.items = launchHostItems(fresh, Date.now());
         const restore = quickPick.items.find((i) => i.hostId === activeHostId);

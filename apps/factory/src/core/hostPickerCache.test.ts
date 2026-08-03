@@ -3,6 +3,7 @@ import {
   HOST_PICKER_STALE_MS,
   freshnessSuffix,
   isHostPickerStale,
+  mergeHostPickerSnapshot,
   parseHostPickerCache,
   serializeUsage,
   sortHostPickerDevices,
@@ -80,6 +81,36 @@ describe('freshnessSuffix', () => {
     expect(freshnessSuffix(NOW - 5 * 60_000, NOW)).toBe('updated 5m ago');
     expect(freshnessSuffix(NOW - 3 * 3_600_000, NOW)).toBe('updated 3h ago');
     expect(freshnessSuffix(NOW - 2 * 86_400_000, NOW)).toBe('updated 2d ago');
+  });
+});
+
+describe('mergeHostPickerSnapshot', () => {
+  const prev: HostPickerCache = {
+    devices: [{ name: 'zion', host: 'zion', online: true }],
+    usage: { zion: score('zion', 5) },
+    fetchedAt: NOW - 3_600_000,
+  };
+
+  test('a fresh non-empty fetch replaces the snapshot', () => {
+    const merged = mergeHostPickerSnapshot(prev, [{ name: 'mac-mini', host: 'mac-mini' }], { 'mac-mini': score('mac-mini', 9) }, NOW);
+    expect(merged).toEqual({ devices: [{ name: 'mac-mini', host: 'mac-mini' }], usage: { 'mac-mini': score('mac-mini', 9) }, fetchedAt: NOW });
+  });
+
+  test('an empty fetch keeps the previous rows — it is a failed read, not an empty fleet', () => {
+    const merged = mergeHostPickerSnapshot(prev, [], {}, NOW);
+    expect(merged?.devices).toEqual(prev.devices);
+    expect(merged?.usage).toEqual(prev.usage); // empty fresh usage must not wipe scores either
+    expect(merged?.fetchedAt).toBe(NOW);
+  });
+
+  test('an empty fetch with fresh usage keeps rows but takes the new scores', () => {
+    const merged = mergeHostPickerSnapshot(prev, [], { zion: score('zion', 8) }, NOW);
+    expect(merged?.devices).toEqual(prev.devices);
+    expect(merged?.usage).toEqual({ zion: score('zion', 8) });
+  });
+
+  test('an empty fetch with no previous snapshot yields nothing to persist', () => {
+    expect(mergeHostPickerSnapshot(null, [], {}, NOW)).toBeNull();
   });
 });
 

@@ -39,8 +39,11 @@ interface AgentsDeviceEntry {
 export async function listRegisteredDevices(): Promise<Device[]> {
   try {
     const bin = await resolveAgentsBin();
+    // 20s, not 8s: on a loaded box the CLI's per-run startup alone can exceed
+    // 8s, and this feed is only ever on a background refresh path — the picker
+    // renders from the persisted snapshot, never waits on this.
     const { stdout } = await execFileAsync(bin, ['devices', 'list', '--json'], {
-      timeout: 8_000,
+      timeout: 20_000,
       env: augmentedEnv(bin),
     });
     const parsed = JSON.parse(stdout) as unknown;
