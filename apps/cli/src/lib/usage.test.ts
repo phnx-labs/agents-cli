@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { claudeAccessTokenNeedsRefresh, claudeUsageAccessTokenNoRefresh, loadClaudeOauth, saveClaudeOauth, getClaudeKeychainService, swrWindowMsFor, getUsageInfo, formatUsageSummary, usageNoCredentialError, usageExpiredCredentialError, usageRejectedError } from './usage.js';
+import { noteUsageRateLimited, setUsageBackoffPathForTest } from './usage-backoff.js';
 import { setKeychainToken, setKeychainBackendForTest, secretsKeychainItem, type KeychainBackend } from './secrets/index.js';
 import { writeBundle, keychainRef, bundleItemStore } from './secrets/bundles.js';
 import { _resetFileStoreForTest } from './secrets/filestore.js';
@@ -449,5 +450,77 @@ describe('a usage read that THROWS is still a failed read', () => {
     expect(usage.snapshot).toBeNull();
     expect(usage.error).toBeTruthy();
     expect(usage.error).toContain('Kimi');
+  });
+});
+
+describe('a recorded Retry-After actually suppresses the read', () => {
+  /** Keychain backend holding exactly what the test seeds — nothing else. */
+  class MemBackend implements KeychainBackend {
+    store = new Map<string, string>();
+    has(item: string) { return this.store.has(item); }
+    get(item: string) {
+      const v = this.store.get(item);
+      if (v === undefined) throw new Error(`missing ${item}`);
+      return v;
+    }
+    set(item: string, value: string) { this.store.set(item, value); }
+    delete(item: string) { return this.store.delete(item); }
+    list(prefix: string) { return [...this.store.keys()].filter((k) => k.startsWith(prefix)); }
+  }
+
+  // End-to-end through the real getUsageInfo path: with a penalty recorded, the
+  // read must return the throttled error WITHOUT making a request. That is the
+  // whole fix — the old code fired again 3 minutes into a 45-minute window and
+  // re-armed the penalty, so the box never recovered and its cache froze.
+  let home: string;
+  let dir: string;
+  let prevPath: string | null;
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-throttle-'));
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-throttle-cache-'));
+    prevPath = setUsageBackoffPathForTest(path.join(dir, '.usage-backoff.json'));
+  });
+
+  afterEach(() => {
+    setUsageBackoffPathForTest(prevPath);
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('short-circuits the usage read while the window is open', async () => {
+    // A HEALTHY, unexpired credential — this is the case that matters. The
+    // credential checks ahead of the guard make no request, so they run first
+    // and correctly win for a home that has none; the guard exists to stop the
+    // request that a good credential would otherwise make into a live penalty.
+    const mem = new MemBackend();
+    const prevBackend = setKeychainBackendForTest(mem);
+    try {
+      setKeychainToken(
+        getClaudeKeychainService(home),
+        JSON.stringify({
+          claudeAiOauth: { accessToken: 'tok-fresh', refreshToken: 'r', expiresAt: Date.now() + 60 * 60 * 1000 },
+        })
+      );
+      // The exact header the endpoint sent on yosemite-s1.
+      noteUsageRateLimited('claude', '2678');
+
+      const usage = await getUsageInfo('claude', { home });
+
+      expect(usage.snapshot).toBeNull();
+      expect(usage.error).toContain('rate-limited this machine');
+      expect(usage.error).toContain('not retrying');
+    } finally {
+      setKeychainBackendForTest(prevBackend);
+    }
+  });
+
+  it('lets the read through once the window has passed', async () => {
+    noteUsageRateLimited('claude', '1', { now: Date.now() - 60_000 });
+
+    const usage = await getUsageInfo('claude', { home });
+
+    // Falls through to the ordinary credential check for this empty home.
+    expect(usage.error).toBe(usageNoCredentialError('Claude'));
   });
 });

@@ -889,6 +889,15 @@ a stable per-account key:
   reports `usage unverified` in the launch banner rather than presenting a stale
   number as a fact. The cache is strictly per machine and never synced, so a box
   whose refresh is failing would otherwise route on day-old numbers indefinitely.
+- **A 429 is backed off, not retried through.** The endpoint's `Retry-After` is
+  recorded per provider (`usage-backoff.ts`, on disk under `~/.agents/.cache/`
+  because the daemon and every one-shot CLI run are separate processes), and both
+  the usage fetch and the auth-health probe skip the network until it passes. The
+  daemon's 3-minute auth-health warm probes every installed version home in one
+  batch, so a box with several accounts could previously hold itself inside a
+  45-minute penalty window indefinitely and never refresh its cache — measured on
+  `yosemite-s1`, `retry-after: 2678` on all five accounts at once, with the
+  credentials reading healthy.
 - **A read that fails on the credential names the reason.** No readable
   credential, a locally-expired one, a rejected request, and a request that threw
   are distinct errors (`usageNoCredentialError` / `usageExpiredCredentialError` /
