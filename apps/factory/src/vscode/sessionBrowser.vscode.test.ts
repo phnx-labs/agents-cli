@@ -6,6 +6,7 @@ import {
   handleForkPickedSession,
   loadBrowsableSessions,
   registerForkPickSessionCommand,
+  runPickedSessionFork,
   runSessionBrowserPicker,
   type SessionBrowserQuickPick,
   type SessionBrowserRunner,
@@ -33,6 +34,52 @@ class FakeQuickPick<Item, Button> implements SessionBrowserQuickPick<Item, Butto
 }
 
 describe('session browser extension-host seam', () => {
+  test('picked Claude source id stays only in the queued continue prompt', async () => {
+    const historicalId = '51a57597-3e08-40fc-9d2b-ca623458dc55';
+    const launches: Record<string, unknown>[] = [];
+    const session = {
+      id: historicalId,
+      shortId: '51a57597',
+      agent: 'claude',
+      timestamp: '2026-08-03T00:00:00Z',
+    };
+
+    for (const row of [
+      { machine: 'zion', remote: false, cwd: '/Users/muqsit/agents-cli' },
+      { machine: 'yosemite-s0', remote: true, cwd: '/srv/agents-cli' },
+    ]) {
+      await runPickedSessionFork({
+        row: {
+          kind: 'session',
+          session: { ...session, cwd: row.cwd },
+          machine: row.machine,
+          remote: row.remote,
+          current: false,
+          label: historicalId,
+          description: '',
+          detail: '',
+        },
+        localMachine: 'zion',
+        launch: async request => { launches.push(request); return true; },
+        showError: message => { throw new Error(message); },
+      });
+    }
+
+    expect(launches).toHaveLength(2);
+    for (const request of launches) {
+      expect(request.prompt).toBe(`/continue ${historicalId}`);
+      expect(request).not.toHaveProperty('sessionId');
+    }
+    expect(launches[0]).toMatchObject({
+      agentKey: 'claude', strategy: 'balanced', local: true,
+      host: undefined, cwd: '/Users/muqsit/agents-cli', remoteCwd: undefined,
+    });
+    expect(launches[1]).toMatchObject({
+      agentKey: 'claude', strategy: 'balanced', local: false,
+      host: 'yosemite-s0', cwd: undefined, remoteCwd: '/srv/agents-cli',
+    });
+  });
+
   test('only the latest overlapping picker load may publish items or clear busy', async () => {
     const requests = new LatestSessionBrowserRequest();
     const published: string[] = [];

@@ -200,7 +200,11 @@ export async function runPickedSessionFork(opts: {
   }
 
   return opts.launch({
-    ...request,
+    agentKey: request.agentKey,
+    prompt: request.prompt,
+    strategy: request.strategy,
+    host: request.host,
+    local: request.local,
     cwd: request.local ? opts.row.session.cwd : undefined,
     remoteCwd: request.local ? undefined : opts.row.session.cwd,
   });
