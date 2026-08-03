@@ -56,6 +56,7 @@ import {
   type SecretsBundle,
   type SecretsPolicy,
   type VarMeta,
+  SECRET_TYPES,
 } from '../lib/secrets/bundles.js';
 import {
   parseListFilters,
@@ -72,7 +73,6 @@ import {
   type SecretsListFilter,
   type SortField,
 } from '../lib/secrets/list-filter.js';
-import { SECRET_TYPES } from '../lib/secrets/bundles.js';
 import { encryptForFallback, decryptForFallback, type EncFile } from '../lib/secrets/filestore.js';
 import {
   getKeychainToken,
@@ -620,8 +620,8 @@ export function renderPolicyCol(b: SecretsBundle, holdMs: number, held?: Map<str
   const window = compactDurationMs(holdMs);
   // A lapsed entry is not held. Without this guard a stale broker row renders
   // the countdown's `expired` sentinel as if it were a live hold.
-  const exp = held?.get(b.name);
-  return exp !== undefined && exp > Date.now()
+  const exp = liveHold(held?.get(b.name));
+  return exp !== null
     ? chalk.green(`hold ${window} · held ${compactRemaining(exp)}`)
     : chalk.gray(`hold ${window}`);
 }
@@ -658,6 +658,13 @@ export function formatHoldWindow(ms: number): string {
 
 /** Below this width the fixed date columns no longer fit; `list` uses cards. */
 const SECRETS_WIDE = 96;
+
+/** A broker hold expiry, or null once it has lapsed. One definition of "held",
+ * shared by the POLICY column, the `--held` filter, and the JSON payload, so the
+ * three can never disagree about the same bundle. */
+export function liveHold(expiresAt: number | undefined, now: number = Date.now()): number | null {
+  return expiresAt !== undefined && expiresAt > now ? expiresAt : null;
+}
 
 /** Width of the POLICY column. The widest cell is `hold 30d · held 30d` (19
  * visible chars) — `clampHoldMs` caps the window at 30d and `renderPolicyCol`
@@ -1081,7 +1088,11 @@ export function registerSecretsCommands(program: Command): void {
           createdAt: b.created_at ?? null,
           updatedAt: b.updated_at ?? null,
           lastUsed: b.last_used ?? null,
-          heldExpiresAt: held.get(b.name) ?? null,
+          // Same liveness rule the POLICY column and --held use: a broker entry
+          // past its expiry is not held. Without the check this field reported a
+          // stale past timestamp as if the bundle were still warm, disagreeing
+          // with the table and the filter about the very same bundle.
+          heldExpiresAt: liveHold(held.get(b.name), now),
         }));
         process.stdout.write(JSON.stringify(payload) + '\n');
         return;

@@ -72,6 +72,13 @@ describe('parseListFilters', () => {
     expect(() => parseListFilters({ expiring: '-3' })).toThrow(/Invalid --expiring/);
   });
 
+  it('rejects --expiring 0, which could never match anything', () => {
+    // The window is `0 <= d < N`, so N=0 excludes even a key expiring today —
+    // a flag that always returns nothing, silently. Point at --expired instead.
+    expect(() => parseListFilters({ expiring: '0' })).toThrow(/--expiring.*>= 1/s);
+    expect(() => parseListFilters({ expiring: '0' })).toThrow(/--expired/);
+  });
+
   it('lowercases the query so name matching is case-insensitive', () => {
     expect(parseListFilters({}, '  GitHub ').query).toBe('github');
   });
@@ -179,6 +186,14 @@ describe('bundleMatchesFilter', () => {
     expect(bundleMatchesFilter(fresh, { unusedBefore: cutoff }, ctx())).toBe(true);
     expect(bundleMatchesFilter(gh, { unusedBefore: cutoff }, ctx())).toBe(true);   // 200d ago
     expect(bundleMatchesFilter(fleet, { unusedBefore: cutoff }, ctx())).toBe(false); // 1d ago
+  });
+
+  it('ANDs --expired with --expiring, so together they mean "both", not "either"', () => {
+    // Deliberate, and worth pinning because the EXPIRING *column* sums the two
+    // (it shows expired + soon), so the column reads as OR while the flags AND.
+    // gh has a lapsed key and nothing upcoming.
+    expect(matches({ expired: true })).toEqual(['github.com']);
+    expect(matches({ expired: true, expiringDays: 30 })).toEqual([]);
   });
 
   it('ANDs every axis — each added flag narrows further', () => {

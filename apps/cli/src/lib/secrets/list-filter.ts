@@ -104,8 +104,14 @@ function parseExpiringDays(raw: string | boolean | undefined): number | undefine
   if (raw === undefined || raw === false) return undefined;
   if (raw === true || raw === '') return DEFAULT_EXPIRING_DAYS;
   const n = Number(raw);
-  if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
-    throw new Error(`Invalid --expiring '${raw}'. Use a whole number of days, e.g. --expiring 7.`);
+  // 0 is rejected rather than accepted as a no-op: the window is `0 <= d < N`,
+  // so `--expiring 0` can never match anything, not even a key expiring today.
+  // A flag that silently returns nothing is worse than one that says why.
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 1) {
+    throw new Error(
+      `Invalid --expiring '${raw}'. Use a whole number of days >= 1, e.g. --expiring 7. ` +
+      'For keys that have already lapsed, use --expired.',
+    );
   }
   return n;
 }

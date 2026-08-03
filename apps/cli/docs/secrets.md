@@ -485,7 +485,7 @@ agents secrets rotate prod STRIPE_API_KEY \
 agents secrets rotate prod STRIPE_API_KEY --clear-meta
 ```
 
-The `list` command flags secrets with `--expires` dates in the next 30 days in the EXPIRING column. Source: `src/commands/secrets.ts:331-340`.
+The `list` command's EXPIRING column counts keys needing attention — those already past their `--expires` date **and** those falling due in the next 30 days — and colours by the worse of the two: red once anything has lapsed, yellow while everything is merely upcoming. Filter on either with `agents secrets list --expired` or `--expiring [days]`. Source: `renderExpiringCol`, `src/commands/secrets.ts`.
 
 ### 5. Share a bundle with a teammate
 

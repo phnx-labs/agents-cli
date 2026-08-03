@@ -22,6 +22,7 @@ import {
   renderHoldSummary,
   renderPolicyCol,
   renderExpiringCol,
+  liveHold,
   compactDurationMs,
   buildRemoteListArgs,
   NO_BUNDLES_HELD_LINE,
@@ -284,6 +285,18 @@ describe('buildRemoteListArgs', () => {
 
   it('is just `list` when nothing is set', () => {
     expect(buildRemoteListArgs({})).toEqual(['list']);
+  });
+});
+
+describe('liveHold', () => {
+  it('is the one definition of held, shared by the column, the filter, and --json', () => {
+    const now = Date.now();
+    expect(liveHold(now + 60_000, now)).toBe(now + 60_000);
+    // A broker entry past its expiry is not held. Before this, the column and
+    // the --held filter said "not held" while --json still reported the stale
+    // timestamp for the same bundle.
+    expect(liveHold(now - 1, now)).toBeNull();
+    expect(liveHold(undefined, now)).toBeNull();
   });
 });
 
