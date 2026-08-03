@@ -14,6 +14,29 @@ All notable changes to the Factory extension are documented here. Format follows
   card. Pairs with the CLI fix that now attributes those panes in the first place.
   Source: `ui/settings/components/mission-control/floorAdapter.ts`.
 
+- **The host picker opens instantly — stale-while-revalidate instead of blocking on
+  the fleet sweep.** Every `(Pick Host)` menu used to await two serial
+  `agents devices list --json` spawns plus a fleet-wide per-host SSH fan-out
+  (`agents sessions --json --host <device>`, 10s timeout each, dead boxes included)
+  before rendering a single row — 30–40s whenever the old 60s in-memory cache had
+  lapsed. The picker now renders immediately from a snapshot persisted in
+  `globalState` (`agents.hostPicker.v1`), marks the rows with their age
+  (`updated 8m ago`), fires ONE background refresh, and swaps the items in place
+  when it lands, preserving the row you had highlighted; a pick made before the
+  refresh lands is honored as-is. The refresh itself is cheaper too: the registry
+  read happens once and is threaded into the usage sweep (no second
+  `devices list` spawn), and hosts the launch-health sweep already found
+  unreachable are skipped instead of dialed into a timeout. Once you have opened
+  a picker, the existing 60s background timer pre-warms the snapshot so later
+  opens are usually fresh as well as instant. `Agents: Resume` gets the same
+  treatment (renders the last candidate list instantly, swaps in the live fleet
+  read with your checks carried across, `agents.resumePicker.v1`), and the fork
+  browser's device switcher renders from the same snapshot. Source:
+  `apps/factory/src/core/hostPickerCache.ts`,
+  `apps/factory/src/vscode/extension.ts` (`pickLaunchHost`, `resumeSessionsBatch`,
+  `pickBrowseDevice`), `apps/factory/src/vscode/remoteSessions.vscode.ts`
+  (`discoverHosts`/`fetchRecapSessions` accept a pre-fetched device list).
+
 ## [0.9.306] - 2026-08-03
 
 - **`Agents: Fork Current Session` is now `Agents: Fork`, and a second command forks

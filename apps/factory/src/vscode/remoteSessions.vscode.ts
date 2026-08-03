@@ -34,7 +34,7 @@ import {
 } from '../core/remoteSessions';
 import type { ProjectRule } from '../core/settings';
 import { deriveHostLoad, parseRemoteCpuRatio } from '../core/dispatchRanking';
-import { listRegisteredDevices } from './deviceHealth.vscode';
+import { listRegisteredDevices, type Device } from './deviceHealth.vscode';
 
 const execFileAsync = promisify(execFile);
 const execAsync = promisify(exec);
@@ -155,11 +155,13 @@ async function findAgentsCli(): Promise<string> {
  * dispatch panel); reconcileHosts folds a registry entry that is the local machine
  * into the always-online local host so each machine appears exactly once under its
  * canonical name. The pure scoping/folding lives in core (reconcileHosts) so it is
- * unit-tested; this wrapper only does the I/O.
+ * unit-tested; this wrapper only does the I/O. Pass an already-fetched device
+ * list to skip the registry read (the host picker's refresh path fetches once
+ * and threads the same list through).
  */
-export async function discoverHosts(): Promise<ReconciledHost[]> {
-  const devices = await listRegisteredDevices();
-  const inputs: RegisteredDeviceInput[] = devices.map((d) => ({
+export async function discoverHosts(devices?: Device[]): Promise<ReconciledHost[]> {
+  const registered = devices ?? await listRegisteredDevices();
+  const inputs: RegisteredDeviceInput[] = registered.map((d) => ({
     name: d.name,
     address: d.host,
     online: d.online === true,
@@ -392,8 +394,9 @@ export async function fetchSessionIdentity(
 export async function fetchRecapSessions(
   limitPerHost: number,
   projectRules: ProjectRule[],
+  devices?: Device[],
 ): Promise<RemoteSession[]> {
-  const hosts = await discoverHosts();
+  const hosts = await discoverHosts(devices);
   const targets = hosts.filter((h) => h.isLocal || h.online);
   const results = await Promise.allSettled(
     targets.map((h) => fetchRecentForHost(h.isLocal ? LOCAL_LABEL : h.address, h.isLocal, h.name, limitPerHost, projectRules)),

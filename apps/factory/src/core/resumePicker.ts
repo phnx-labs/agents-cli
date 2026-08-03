@@ -47,6 +47,18 @@ export const STATE_HEADINGS: Record<ResumeState, string> = {
   watched: 'Already open elsewhere',
 };
 
+/**
+ * Persisted snapshot behind the resume picker's stale-while-revalidate flow:
+ * the picker renders the last candidate list instantly (the live fleet read
+ * takes seconds over SSH) and swaps items in place when the refresh lands.
+ */
+export interface ResumePickerCache {
+  candidates: ResumeCandidate[];
+  fetchedAt: number;
+}
+
+export const RESUME_PICKER_CACHE_KEY = 'agents.resumePicker.v1';
+
 /** The subset of `agents sessions --all --json` (SessionMeta) the picker reads. */
 export interface RecentSessionRow {
   id?: string;

@@ -104,6 +104,14 @@ import { DEFAULT_DISPLAY_PREFERENCES } from '../core/settings';
 import * as readiness from './terminalReadiness';
 import { resolveAlias, isAgentInstalled, checkInstalledAgentsViaCli } from '../core/agentModels';
 import { pickAgentByUsage, rankHostsByUsage, HostUsageScore } from '../core/agentUsage';
+import {
+  HOST_PICKER_CACHE_KEY,
+  freshnessSuffix,
+  isHostPickerStale,
+  parseHostPickerCache,
+  sortHostPickerDevices,
+  type HostPickerCache,
+} from '../core/hostPickerCache';
 import { buildForkSessionRequest } from '../core/forkSession';
 import {
   buildSessionBrowserRows,
@@ -117,9 +125,11 @@ import type { RemoteSession, RawActiveSession } from '../core/remoteSessions';
 import {
   buildResumeCandidates,
   defaultPickedIds,
+  RESUME_PICKER_CACHE_KEY,
   STATE_HEADINGS,
   type RecentSessionRow,
   type ResumeCandidate,
+  type ResumePickerCache,
   type ResumeState,
 } from '../core/resumePicker';
 // readAgentRunStrategy no longer needed: agents-cli reads strategy from
@@ -503,37 +513,64 @@ async function resolveSlotHost(slot: QuickLaunchSlot): Promise<string | undefine
   return dev.name;
 }
 
-// How long a host-usage ranking stays good enough to reuse. The picker opens
-// often and the underlying sweep is a fleet-wide SSH fan-out; a minute-old
-// ordering is indistinguishable from a fresh one.
-const HOST_USAGE_TTL_MS = 60_000;
-let hostUsageCache: { scores: Map<string, HostUsageScore>; fetchedAt: number } | null = null;
-
-/**
- * Recency-weighted session count per machine, keyed by normalized host name
- * (the local box under LOCAL_LABEL). Drives the host picker's order.
- *
- * Best-effort by design: the fan-out can be slow or partly unreachable, and a
- * picker that hangs behind it would be worse than one in registry order — so a
- * failure yields an empty map and the caller falls back to sorting by name.
- */
-async function fetchHostUsageScores(): Promise<Map<string, HostUsageScore>> {
-  const now = Date.now();
-  if (hostUsageCache && now - hostUsageCache.fetchedAt < HOST_USAGE_TTL_MS) return hostUsageCache.scores;
-  try {
-    const sessions = await fetchRecapSessions(HOST_USAGE_SESSION_LIMIT, []);
-    const scores = new Map(rankHostsByUsage(sessions, now).map((s) => [s.host, s]));
-    hostUsageCache = { scores, fetchedAt: now };
-    return scores;
-  } catch {
-    return new Map();
-  }
-}
+// --- Host picker cache (stale-while-revalidate) ------------------------------
+// The picker used to block its render on two serial CLI spawns plus a
+// fleet-wide SSH fan-out — 30s+ whenever the old 60s in-memory cache had
+// lapsed. Now it renders instantly from a snapshot persisted in globalState
+// and revalidates in the background, swapping the items in place when fresh
+// data lands (the same reload-in-place flow as pickSessionToFork).
 
 // Recent sessions pulled per host for the usage ranking. Enough to separate the
 // boxes you live on from the ones you touched once; small enough that the sweep
 // stays cheap.
 const HOST_USAGE_SESSION_LIMIT = 50;
+
+// In-memory mirror of the persisted snapshot so repeat opens within a session
+// skip the globalState read. Writes go through refreshHostPickerCache.
+let hostPickerHot: HostPickerCache | null = null;
+
+// Set on first picker open: the 60s health timer also pre-warms the picker
+// cache, but only once the user has actually used a picker this session — no
+// fleet sweep for someone who never opens one.
+let hostPickerUsed = false;
+
+function readHostPickerCache(context: vscode.ExtensionContext): HostPickerCache | null {
+  if (hostPickerHot) return hostPickerHot;
+  const parsed = parseHostPickerCache(context.globalState.get(HOST_PICKER_CACHE_KEY));
+  if (parsed) hostPickerHot = parsed;
+  return parsed ?? null;
+}
+
+/**
+ * One refresh of everything the host picker shows. The registry read happens
+ * ONCE and is threaded into the usage sweep (no second `devices list` spawn),
+ * and hosts the launch-health sweep already found unreachable are skipped
+ * instead of dialed into a 10s timeout. Best-effort: a failed sweep keeps the
+ * device rows and just leaves the usage ordering empty.
+ */
+async function refreshHostPickerCache(context: vscode.ExtensionContext): Promise<HostPickerCache> {
+  const devices = await listRegisteredDevices();
+  const health = context.globalState.get<LaunchHealthCache>(LAUNCH_HEALTH_KEY);
+  const dead = new Set(
+    (health?.devices ?? []).filter((d) => !d.sshReachable).map((d) => normalizeHost(d.name)),
+  );
+  const sweepable = devices.filter((d) => !dead.has(normalizeHost(d.name)));
+  const usage: Record<string, HostUsageScore> = {};
+  try {
+    const sessions = await fetchRecapSessions(HOST_USAGE_SESSION_LIMIT, [], sweepable);
+    for (const s of rankHostsByUsage(sessions, Date.now())) usage[s.host] = s;
+  } catch (err) {
+    console.error('[pickLaunchHost] usage sweep failed:', err);
+  }
+  const cache: HostPickerCache = { devices, usage, fetchedAt: Date.now() };
+  hostPickerHot = cache;
+  await context.globalState.update(HOST_PICKER_CACHE_KEY, cache);
+  return cache;
+}
+
+function refreshHostPickerCacheInBackground(context: vscode.ExtensionContext): void {
+  void refreshHostPickerCache(context).catch((err) => console.error('[pickLaunchHost] cache refresh failed:', err));
+}
 
 /** The QuickPick sub-label for one host: reachability first, then how much you use it. */
 function describeLaunchHost(online: boolean, score: HostUsageScore | undefined, onlineWord = 'online'): string {
@@ -542,41 +579,85 @@ function describeLaunchHost(online: boolean, score: HostUsageScore | undefined, 
   return `${state} · ${score.sessions} recent session${score.sessions === 1 ? '' : 's'}`;
 }
 
-// Interactive host picker (This Mac / a device / Balanced) for the per-agent
-// "(Pick Host)" commands and the ⌘⌥⇧n override. Returns { cancelled } if the
-// user dismissed it; host === undefined means "this Mac".
-async function pickLaunchHost(title = 'Run on…', agentKey?: string): Promise<{ host?: string; cancelled: boolean }> {
-  const devices = await listRegisteredDevices();
-  // Order by how much you actually use each box, not by registry order — with a
-  // dozen devices the two you work on daily otherwise land in an arbitrary spot.
-  // Online still outranks usage: an offline box cannot take the launch however
-  // familiar it is. History is best-effort; when the sweep returns nothing every
-  // score is 0 and the order falls back to the device name.
-  const usage = await fetchHostUsageScores();
-  const scoreOf = (name: string) => usage.get(normalizeHost(name))?.score ?? 0;
-  const sorted = [...devices].sort(
-    (a, b) =>
-      Number(b.online) - Number(a.online) ||
-      scoreOf(b.name) - scoreOf(a.name) ||
-      a.name.localeCompare(b.name),
-  );
-  const BALANCE_ID = ' balanced';
-  const items: (vscode.QuickPickItem & { hostId?: string })[] = [
-    { label: '$(vm) This Mac', description: describeLaunchHost(true, usage.get(LOCAL_LABEL), 'Run locally'), hostId: undefined },
-    { label: '$(sync) Balanced (least-busy)', description: 'Auto-pick the least-busy online device', hostId: BALANCE_ID },
-    ...sorted.map(d => ({
+type LaunchHostItem = vscode.QuickPickItem & { hostId?: string };
+const BALANCE_HOST_ID = ' balanced';
+
+function launchHostItems(cache: HostPickerCache | null, now: number): LaunchHostItem[] {
+  const usage = cache?.usage ?? {};
+  const stale = cache ? ` · ${freshnessSuffix(cache.fetchedAt, now)}` : '';
+  const devices = sortHostPickerDevices(cache?.devices ?? [], usage);
+  return [
+    { label: '$(vm) This Mac', description: describeLaunchHost(true, usage[LOCAL_LABEL], 'Run locally'), hostId: undefined },
+    { label: '$(sync) Balanced (least-busy)', description: 'Auto-pick the least-busy online device', hostId: BALANCE_HOST_ID },
+    ...devices.map(d => ({
       label: `${d.online ? '$(radio-tower)' : '$(circle-slash)'} ${d.name}`,
-      description: describeLaunchHost(!!d.online, usage.get(normalizeHost(d.name))),
+      description: describeLaunchHost(!!d.online, usage[normalizeHost(d.name)]) + stale,
       hostId: d.name,
     })),
   ];
-  const pick = await vscode.window.showQuickPick(items, { placeHolder: title, title });
-  if (!pick) return { cancelled: true };
-  // Balanced -> agent-aware best host (RUSH-2025). An explicit device pick is
-  // honored as-is; the launch still passes strategy 'balanced' so the CLI's
-  // account rotation routes around a signed-out / throttled version on it.
-  if (pick.hostId === BALANCE_ID) return { host: await resolveBalancedHost(undefined, agentKey), cancelled: false };
-  return { host: pick.hostId, cancelled: false };
+}
+
+// Interactive host picker (This Mac / a device / Balanced) for the per-agent
+// "(Pick Host)" commands and the ⌘⌥⇧n override. Returns { cancelled } if the
+// user dismissed it; host === undefined means "this Mac".
+//
+// Opens instantly from the persisted snapshot and revalidates in the
+// background, swapping items in place with the user's highlight preserved. A
+// pick made before the refresh lands is honored as-is; a device that went
+// offline since the snapshot fails at launch via the existing error path.
+async function pickLaunchHost(
+  context: vscode.ExtensionContext,
+  title = 'Run on…',
+  agentKey?: string,
+): Promise<{ host?: string; cancelled: boolean }> {
+  hostPickerUsed = true;
+  const cache = readHostPickerCache(context);
+  const quickPick = vscode.window.createQuickPick<LaunchHostItem>();
+  quickPick.title = title;
+  quickPick.placeholder = title;
+  quickPick.items = launchHostItems(cache, Date.now());
+
+  if (isHostPickerStale(cache)) {
+    quickPick.busy = true;
+    void refreshHostPickerCache(context)
+      .then((fresh) => {
+        if (disposed) return; // user already picked/dismissed — nothing to update
+        const activeHostId = quickPick.activeItems[0]?.hostId;
+        quickPick.items = launchHostItems(fresh, Date.now());
+        const restore = quickPick.items.find((i) => i.hostId === activeHostId);
+        if (restore) quickPick.activeItems = [restore];
+      })
+      .catch((err) => console.error('[pickLaunchHost] refresh failed:', err))
+      .finally(() => { if (!disposed) quickPick.busy = false; });
+  }
+
+  let disposed = false;
+  try {
+    return await new Promise<{ host?: string; cancelled: boolean }>((resolve) => {
+      // VS Code fires onDidHide for the hide() on accept too — only the hide
+      // WITHOUT an accept is a cancel.
+      let accepted = false;
+      quickPick.onDidAccept(() => {
+        const pick = quickPick.selectedItems[0];
+        if (!pick) return;
+        accepted = true;
+        quickPick.hide();
+        // Balanced -> agent-aware best host (RUSH-2025). An explicit device
+        // pick is honored as-is; the launch still passes strategy 'balanced'
+        // so the CLI's account rotation routes around a signed-out /
+        // throttled version on it.
+        void (async () => ({
+          host: pick.hostId === BALANCE_HOST_ID ? await resolveBalancedHost(undefined, agentKey) : pick.hostId,
+          cancelled: false,
+        }))().then(resolve);
+      });
+      quickPick.onDidHide(() => { if (!accepted) resolve({ cancelled: true }); });
+      quickPick.show();
+    });
+  } finally {
+    disposed = true;
+    quickPick.dispose();
+  }
 }
 
 // --- The one launch engine --------------------------------------------------
@@ -638,7 +719,7 @@ async function launchAgent(context: vscode.ExtensionContext, opts: LaunchAgentOp
   // 1. Host. Device-first pick, an explicit host, or (later) auto.
   let host = opts.host;
   if (opts.pickHost) {
-    const picked = await pickLaunchHost('New agent — run on…', opts.agentKey);
+    const picked = await pickLaunchHost(context, 'New agent — run on…', opts.agentKey);
     if (picked.cancelled) return;
     host = picked.host; // undefined here means the user chose "This Mac"
   }
@@ -654,7 +735,7 @@ async function launchAgent(context: vscode.ExtensionContext, opts: LaunchAgentOp
 
   if (opts.autoHost && !AUTO_HOST_AGENT_KEYS.has(agentKey)) {
     vscode.window.showInformationMessage(`${getBuiltInByKey(agentKey)?.title ?? agentKey} does not expose account health; pick a host instead.`);
-    const picked = await pickLaunchHost(`New ${getBuiltInByKey(agentKey)?.title ?? agentKey} — run on…`, agentKey);
+    const picked = await pickLaunchHost(context, `New ${getBuiltInByKey(agentKey)?.title ?? agentKey} — run on…`, agentKey);
     if (picked.cancelled) return;
     host = picked.host;
   }
@@ -1406,7 +1487,13 @@ export async function activate(context: vscode.ExtensionContext) {
   // Warm the persisted auto-launch cache away from the command path. Refreshes
   // are deliberately fire-and-forget: opening Factory must not wait on SSH.
   refreshLaunchHealthCacheInBackground(context);
-  const launchHealthTimer = setInterval(() => refreshLaunchHealthCacheInBackground(context), 60_000);
+  const launchHealthTimer = setInterval(() => {
+    refreshLaunchHealthCacheInBackground(context);
+    // Pre-warm the host picker's snapshot so a stale open usually finds the
+    // cache already fresh — but only once the user has actually opened a
+    // picker this session; no fleet sweep for someone who never uses it.
+    if (hostPickerUsed) refreshHostPickerCacheInBackground(context);
+  }, 60_000);
   context.subscriptions.push(new vscode.Disposable(() => clearInterval(launchHealthTimer)));
 
   // Open Dashboard on startup if enabled (welcome screen)
@@ -1891,7 +1978,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
     let host: string | undefined;
     if (forceHostPick) {
-      const picked = await pickLaunchHost(`Run ${slot.label || builtInDef.title} on…`);
+      const picked = await pickLaunchHost(context, `Run ${slot.label || builtInDef.title} on…`);
       if (picked.cancelled) return;
       host = picked.host;
     } else {
@@ -3086,50 +3173,12 @@ async function resumeSession(context: vscode.ExtensionContext) {
   }
 }
 
-/**
- * `Agents: Resume` — pick any number of sessions, each reopens as its own tab.
- *
- * The list leads with sessions that are still RUNNING with nobody attached: the
- * agent survived in its tmux pane while the window that displayed it closed or
- * crashed. Those are pre-ticked, because they are the ones a user opens this
- * command to rescue; everything else is available but unchecked.
- */
-async function resumeSessionsBatch(context: vscode.ExtensionContext) {
-  let candidates: ResumeCandidate[];
-  try {
-    // The live read fans out across the fleet over SSH, so it can take seconds —
-    // show progress rather than leaving the palette looking hung.
-    candidates = await vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Window, title: 'Agents: finding resumable sessions…' },
-      async () => {
-        const [recent, live] = await Promise.all([
-          listSessionsViaCli(RESUME_PICKER_LIMIT),
-          listActiveSessionsViaCli(),
-        ]);
-        return buildResumeCandidates(recent as RecentSessionRow[], live, normalizeHost(os.hostname()));
-      },
-    );
-  } catch (err: any) {
-    const msg = err?.stderr || err?.message || String(err);
-    if (msg.includes('ENOENT') || msg.includes('not found')) {
-      vscode.window.showInformationMessage('agents CLI not found. Install with: npm i -g @phnx-labs/agents-cli');
-    } else {
-      vscode.window.showInformationMessage(`Failed to list sessions: ${msg.slice(0, 160)}`);
-    }
-    return;
-  }
+interface ResumeCandidateItem extends vscode.QuickPickItem {
+  candidate?: ResumeCandidate;
+}
 
-  if (candidates.length === 0) {
-    vscode.window.showInformationMessage('No sessions found');
-    return;
-  }
-
-  interface CandidateItem extends vscode.QuickPickItem {
-    candidate?: ResumeCandidate;
-  }
-
-  const preselected = new Set(defaultPickedIds(candidates));
-  const items: CandidateItem[] = [];
+function resumeCandidateItems(candidates: ResumeCandidate[], checked: ReadonlySet<string>): ResumeCandidateItem[] {
+  const items: ResumeCandidateItem[] = [];
   let group: ResumeState | undefined;
   for (const c of candidates) {
     if (c.state !== group) {
@@ -3144,23 +3193,118 @@ async function resumeSessionsBatch(context: vscode.ExtensionContext) {
       label: `${marker}${c.shortId}  ${c.topic || '(no topic)'}`,
       description: `${agentLabel} · ${formatSessionWhen(new Date(c.lastActivityMs).toISOString())}${where}${viewing}`,
       detail: `${c.project || '-'}${c.cwd ? `  ${c.cwd}` : ''}`,
-      picked: preselected.has(c.id),
+      picked: checked.has(c.id),
       candidate: c,
     });
   }
+  return items;
+}
 
-  const detachedCount = preselected.size;
-  const picked = await vscode.window.showQuickPick<CandidateItem>(items, {
-    title: 'Agents: Resume',
-    placeHolder: detachedCount > 0
+async function fetchResumeCandidates(): Promise<ResumeCandidate[]> {
+  const [recent, live] = await Promise.all([
+    listSessionsViaCli(RESUME_PICKER_LIMIT),
+    listActiveSessionsViaCli(),
+  ]);
+  return buildResumeCandidates(recent as RecentSessionRow[], live, normalizeHost(os.hostname()));
+}
+
+/**
+ * `Agents: Resume` — pick any number of sessions, each reopens as its own tab.
+ *
+ * The list leads with sessions that are still RUNNING with nobody attached: the
+ * agent survived in its tmux pane while the window that displayed it closed or
+ * crashed. Those are pre-ticked, because they are the ones a user opens this
+ * command to rescue; everything else is available but unchecked.
+ *
+ * Stale-while-revalidate: the picker renders the persisted snapshot instantly
+ * (the live fleet read takes seconds over SSH) and swaps items in place when
+ * the background refresh lands, carrying the user's checks across the swap.
+ */
+async function resumeSessionsBatch(context: vscode.ExtensionContext) {
+  const cached = context.globalState.get<ResumePickerCache>(RESUME_PICKER_CACHE_KEY);
+  let initial = cached?.candidates ?? [];
+
+  // Cold start (no snapshot yet): the live read fans out across the fleet over
+  // SSH, so it can take seconds — show progress rather than leaving the
+  // palette looking hung. CLI-missing errors surface here, as before.
+  if (initial.length === 0) {
+    try {
+      initial = await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Window, title: 'Agents: finding resumable sessions…' },
+        fetchResumeCandidates,
+      );
+    } catch (err: any) {
+      const msg = err?.stderr || err?.message || String(err);
+      if (msg.includes('ENOENT') || msg.includes('not found')) {
+        vscode.window.showInformationMessage('agents CLI not found. Install with: npm i -g @phnx-labs/agents-cli');
+      } else {
+        vscode.window.showInformationMessage(`Failed to list sessions: ${msg.slice(0, 160)}`);
+      }
+      return;
+    }
+    void context.globalState.update(RESUME_PICKER_CACHE_KEY, { candidates: initial, fetchedAt: Date.now() } satisfies ResumePickerCache);
+  }
+
+  if (initial.length === 0) {
+    vscode.window.showInformationMessage('No sessions found');
+    return;
+  }
+
+  const quickPick = vscode.window.createQuickPick<ResumeCandidateItem>();
+  quickPick.title = 'Agents: Resume';
+  quickPick.canSelectMany = true;
+  quickPick.matchOnDescription = true;
+  quickPick.matchOnDetail = true;
+
+  const applyItems = (candidates: ResumeCandidate[]) => {
+    // Assigning items resets the checks, so carry the user's current selection
+    // across the swap; newly-seen detached sessions still get pre-ticked.
+    const checked = new Set(
+      quickPick.selectedItems.map((i) => i.candidate?.id).filter((id): id is string => !!id),
+    );
+    const preselected = new Set([...defaultPickedIds(candidates), ...checked]);
+    quickPick.items = resumeCandidateItems(candidates, preselected);
+    const detachedCount = defaultPickedIds(candidates).length;
+    quickPick.placeholder = detachedCount > 0
       ? `${detachedCount} detached session${detachedCount === 1 ? '' : 's'} pre-selected — space toggles, enter opens each in a tab`
-      : 'Select sessions to reopen, each in its own tab',
-    canPickMany: true,
-    matchOnDescription: true,
-    matchOnDetail: true,
-  });
+      : 'Select sessions to reopen, each in its own tab';
+  };
+  applyItems(initial);
 
-  const chosen = (picked ?? []).map(p => p.candidate).filter((c): c is ResumeCandidate => !!c);
+  // The warm path rendered a snapshot — revalidate in the background and swap
+  // the fresh list in when it lands. (The cold path just fetched, so it is
+  // already fresh.)
+  let pickerDisposed = false;
+  if (cached && cached.candidates.length > 0) {
+    quickPick.busy = true;
+    void fetchResumeCandidates()
+      .then((fresh) => {
+        void context.globalState.update(RESUME_PICKER_CACHE_KEY, { candidates: fresh, fetchedAt: Date.now() } satisfies ResumePickerCache);
+        if (!pickerDisposed && fresh.length > 0) applyItems(fresh);
+      })
+      .catch((err) => console.error('[resumeSessionsBatch] refresh failed:', err))
+      .finally(() => { if (!pickerDisposed) quickPick.busy = false; });
+  }
+
+  let chosen: ResumeCandidate[];
+  try {
+    chosen = await new Promise<ResumeCandidate[]>((resolve) => {
+      // VS Code fires onDidHide for the hide() on accept too — only the hide
+      // WITHOUT an accept is a cancel.
+      let accepted = false;
+      quickPick.onDidAccept(() => {
+        accepted = true;
+        resolve(quickPick.selectedItems.map((i) => i.candidate).filter((c): c is ResumeCandidate => !!c));
+        quickPick.hide();
+      });
+      quickPick.onDidHide(() => { if (!accepted) resolve([]); });
+      quickPick.show();
+    });
+  } finally {
+    pickerDisposed = true;
+    quickPick.dispose();
+  }
+
   if (chosen.length === 0) return;
 
   let opened = 0;
@@ -4819,8 +4963,14 @@ function toBrowserItems(rows: ReturnType<typeof buildSessionBrowserRows>): Sessi
 }
 
 /** Which machine's sessions the browser is listing. `undefined` = this one. */
-async function pickBrowseDevice(current: string | undefined): Promise<{ device?: string; cancelled: boolean }> {
-  const devices = await listRegisteredDevices();
+async function pickBrowseDevice(context: vscode.ExtensionContext, current: string | undefined): Promise<{ device?: string; cancelled: boolean }> {
+  hostPickerUsed = true;
+  // Render from the persisted snapshot when one exists; only a cold start
+  // waits on the registry read, and a stale snapshot revalidates in the
+  // background for the next open.
+  const cache = readHostPickerCache(context);
+  const devices = cache?.devices ?? await listRegisteredDevices();
+  if (isHostPickerStale(cache)) refreshHostPickerCacheInBackground(context);
   const items: (vscode.QuickPickItem & { deviceId?: string })[] = [
     {
       label: '$(vm) This machine',
@@ -4849,7 +4999,7 @@ async function pickBrowseDevice(current: string | undefined): Promise<{ device?:
  * so the flow stays "open → filter → pick" instead of a wizard. Returns the row
  * the user chose, or null when they dismissed it.
  */
-async function pickSessionToFork(currentSessionId: string | null): Promise<SessionBrowserSessionRow | null> {
+async function pickSessionToFork(context: vscode.ExtensionContext, currentSessionId: string | null): Promise<SessionBrowserSessionRow | null> {
   const quickPick = vscode.window.createQuickPick<SessionBrowserItem>();
   const switchDevice: vscode.QuickInputButton = {
     iconPath: new vscode.ThemeIcon('server-environment'),
@@ -4903,7 +5053,7 @@ async function pickSessionToFork(currentSessionId: string | null): Promise<Sessi
         }
         switching = true;
         quickPick.hide();
-        const chosen = await pickBrowseDevice(device);
+        const chosen = await pickBrowseDevice(context, device);
         switching = false;
         quickPick.show();
         if (chosen.cancelled) return; // back to the list, same device
@@ -4935,7 +5085,7 @@ async function forkPickedSession(context: vscode.ExtensionContext): Promise<void
   const activeTerminal = vscode.window.activeTerminal;
   const entry = activeTerminal ? terminals.getByTerminal(activeTerminal) : null;
 
-  const row = await pickSessionToFork(entry?.sessionId ?? null);
+  const row = await pickSessionToFork(context, entry?.sessionId ?? null);
   if (!row) return;
 
   const request = buildForkSessionRequest({
