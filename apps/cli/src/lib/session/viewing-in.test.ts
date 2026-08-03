@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveViewingIn, itermTabFromSessionId, type ViewingInDeps } from './viewing-in.js';
+import { resolveViewingIn, itermTabFromSessionId, viewingInLabel, parseViewingIn, type ViewingInDeps } from './viewing-in.js';
 import type { ActiveSession } from './active.js';
 import type { TmuxClient } from '../tmux/session.js';
 import type { GhosttySurface } from './ghostty-tabs.js';
@@ -104,5 +104,50 @@ describe('itermTabFromSessionId', () => {
     expect(itermTabFromSessionId(undefined)).toBeUndefined();
     expect(itermTabFromSessionId('')).toBeUndefined();
     expect(itermTabFromSessionId('no-tab-here')).toBeUndefined();
+  });
+});
+
+describe('viewingInLabel', () => {
+  it('names the app and tab when a client is attached', () => {
+    expect(viewingInLabel(tmuxSession({ viewingIn: { app: 'codium', tab: 3 } }))).toBe('codium tab 3');
+  });
+
+  it('drops the tab when it could not be resolved', () => {
+    expect(viewingInLabel(tmuxSession({ viewingIn: { app: 'ghostty' } }))).toBe('ghostty');
+  });
+
+  it('reports a LOCATED pane with no attached client as detached', () => {
+    expect(viewingInLabel(tmuxSession({ tmuxTarget: 'ag-claude-1:0.0' }))).toBe('detached');
+  });
+
+  it('says nothing when the pane could not be located — absence of evidence is not detached', () => {
+    // resolveViewingIn answers undefined for BOTH "no client" and "could not
+    // locate the pane"; without a resolved tmuxTarget we have not proven anyone
+    // left, and Factory pre-ticks every detached row for rescue.
+    expect(viewingInLabel(tmuxSession())).toBeUndefined();
+  });
+
+  it('says nothing for a session that is not tmux-hosted', () => {
+    const bare = tmuxSession();
+    delete bare.provenance!.mux;
+    expect(viewingInLabel(bare)).toBeUndefined();
+  });
+});
+
+describe('parseViewingIn', () => {
+  it('round-trips the label a current peer emits', () => {
+    expect(parseViewingIn('codium tab 3')).toEqual({ app: 'codium', tab: 3 });
+    expect(parseViewingIn('ghostty')).toEqual({ app: 'ghostty' });
+  });
+
+  it('maps detached and empty values to no viewer', () => {
+    expect(parseViewingIn('detached')).toBeUndefined();
+    expect(parseViewingIn(null)).toBeUndefined();
+    expect(parseViewingIn('')).toBeUndefined();
+  });
+
+  it('still accepts the object shape an older peer emits', () => {
+    expect(parseViewingIn({ app: 'iterm', tab: 2 })).toEqual({ app: 'iterm', tab: 2 });
+    expect(parseViewingIn({ app: 'iterm' })).toEqual({ app: 'iterm', tab: undefined });
   });
 });

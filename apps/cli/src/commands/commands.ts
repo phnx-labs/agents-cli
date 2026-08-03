@@ -89,7 +89,7 @@ Examples:
   agents commands add
 
   # Install specific commands by name
-  agents commands add --names README,debug --agents codex@0.116.0
+  agents commands add --names plan,debug --agents codex@0.116.0
 
 When to use:
   - Project setup: 'agents commands add gh:team/commands' to sync everyone's workflow
@@ -151,7 +151,7 @@ Examples:
   agents commands add
 
   # Install specific commands to a single version
-  agents commands add --names README,debug --agents codex@0.116.0
+  agents commands add --names plan,debug --agents codex@0.116.0
 
   # Pull commands from GitHub and sync to all installed agents
   agents commands add gh:user/repo --agents claude,codex,cursor
@@ -188,7 +188,7 @@ Examples:
           } else {
             if (!isInteractiveTerminal()) {
               requireInteractiveSelection('Selecting commands from ~/.agents/commands/', [
-                'agents commands add --names README,debug --agents codex',
+                'agents commands add --names plan,debug --agents codex',
                 'agents commands add gh:user/repo --agents codex',
               ]);
             }
@@ -351,7 +351,7 @@ Examples:
     .addHelpText('after', `
 Examples:
   # Remove a command by name
-  agents commands remove README
+  agents commands remove plan
 
   # Interactive: pick commands to remove
   agents commands remove
@@ -387,7 +387,7 @@ Examples:
 
         if (!isInteractiveTerminal()) {
           requireInteractiveSelection('Selecting commands to remove', [
-            'agents commands remove README',
+            'agents commands remove plan',
           ]);
         }
 
@@ -516,7 +516,7 @@ Examples:
     .addHelpText('after', `
 Examples:
   # View a specific command
-  agents commands view README
+  agents commands view plan
 
   # Interactive picker
   agents commands view
@@ -532,7 +532,7 @@ Examples:
 
         if (!isInteractiveTerminal()) {
           requireInteractiveSelection('Selecting a command to view', [
-            'agents commands view README',
+            'agents commands view plan',
           ]);
         }
 

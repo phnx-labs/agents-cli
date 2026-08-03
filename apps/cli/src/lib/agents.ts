@@ -1299,8 +1299,10 @@ export function decryptDroidAuthFile(filePath: string, keyPath: string): DroidAu
  *     -> email / org_id / sub.
  *   - kimi: credentials/kimi-code.json -> access-token JWT -> user_id / sub.
  *   - antigravity: antigravity-oauth-token -> token.refresh_token -> JWT sub
- *     when the token is a JWT, else the raw refresh-token value (opaque Google
- *     consumer tokens are stable per login).
+ *     when the token is a JWT, else a SHA-256 hash of the raw refresh-token
+ *     value (opaque Google consumer tokens are stable per login — hashed so
+ *     the identity key, which is persisted as a usage-cache key, never carries
+ *     a live credential).
  * Two directories for the SAME account compare equal; two DIFFERENT accounts
  * compare distinct. Used by carryForwardAuthFiles to refuse overwriting one
  * account's login with a credential that belongs to a DIFFERENT account
@@ -1341,7 +1343,11 @@ export function readAuthAccountIdentity(agent: AgentId, configDir: string): stri
         if (typeof refreshToken !== 'string' || !refreshToken) return null;
         const claims = decodeJwtPayload(refreshToken);
         const sub = normalizeIdentityPart(claims?.sub ?? claims?.user_id);
-        return buildIdentityKey(agent, [['sub', sub ?? refreshToken]]);
+        // An opaque (non-JWT) Google refresh token IS the credential — hash it
+        // so the identity key stays stable per login without embedding a live
+        // secret (the key is persisted as a usage-cache filename key).
+        const fallback = crypto.createHash('sha256').update(refreshToken).digest('hex').slice(0, 16);
+        return buildIdentityKey(agent, [['sub', sub ?? fallback]]);
       }
       default:
         return null;
@@ -1773,10 +1779,20 @@ export async function getAccountInfo(
         if (tokenPath) {
           const data = JSON.parse(await fs.promises.readFile(tokenPath, 'utf-8'));
           if (typeof data?.token?.refresh_token === 'string' && data.token.refresh_token) {
-            return { ...empty, signedIn: true, lastActive };
+            // A stable account/usage key (derived from the refresh token — see
+            // readAuthAccountIdentity) lets `agents view` dedupe and cache the
+            // per-model quota bars for this login.
+            const identity = readAuthAccountIdentity('antigravity', path.dirname(tokenPath));
+            return { ...empty, signedIn: true, lastActive, accountKey: identity, usageKey: identity };
           }
         }
-        if (await antigravityKeychainSignedIn()) return { ...empty, signedIn: true, lastActive };
+        if (await antigravityKeychainSignedIn()) {
+          // Keyring-only login (the macOS case): the OS keyring holds exactly
+          // ONE antigravity credential, so a stable singleton key identifies it
+          // for usage-cache dedup without reading the secret value here.
+          const identity = buildIdentityKey('antigravity', [['sub', 'keychain']]);
+          return { ...empty, signedIn: true, lastActive, accountKey: identity, usageKey: identity };
+        }
         return { ...empty, lastActive };
       }
       case 'kimi': {

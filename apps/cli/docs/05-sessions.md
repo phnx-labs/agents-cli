@@ -414,14 +414,30 @@ cases a live pull can't reach: a machine that is **offline / asleep / decommissi
   on-demand `--host` reads and explicit export/import; reach for sync only when you want
   a passive always-on mirror (further below).
 
-### Resolving a full session id across the fleet
+### Resolving a session id across the fleet
+
+For automation that needs session metadata without parsing or rendering transcript
+events, use the explicit resolver:
+
+```
+agents sessions --resolve d3470b57 --json
+agents sessions --resolve "recap resolver" --json
+```
+
+It reads the indexed `SessionMeta` rows on each machine and emits a one-element JSON
+array when exactly one logical session matches. A missing selector or an ambiguous ID
+prefix/keyword query exits non-zero; ambiguity output lists every full ID and machine.
+`--local` keeps the metadata lookup on this machine.
+`--agent <agent[@version]>` and `--project <name>` narrow the lookup on every peer;
+`--all` is implicit because historical resolution must not inherit the SSH login
+directory or recent-session window.
 
 `--host` names *which* box to look on. When you already have a full session id but
-**not** the box, `agents sessions <uuid>` finds it for you: a UUID is treated as an
-identifier, so on a local miss the CLI fans the **id lookup** out to the online fleet
-(the same `gatherRemoteList` SSH sweep the listing uses) and renders the session's
-summary from the machine that holds it — delegated to that peer via `runOnPeer`, since
-its transcript and agent binary live there.
+**not** the box, `agents sessions <uuid>` finds it for you. A unique short prefix works
+the same way: `agents sessions d3470b57` fans the **id lookup** out to the online fleet
+(the same `gatherRemoteList` SSH sweep the listing uses), resolves the prefix to its full
+id, and renders the session's summary from a machine that holds it. Rendering is
+delegated to that peer via `runOnPeer`, since its transcript and agent binary live there.
 
 ```
 # You have the id from a log or a teammate; you don't know the machine
@@ -434,8 +450,13 @@ agents sessions d3470b57-2af6-4c11-b1de-3fab94f43603
   into later sessions), so a fuzzy match would surface unrelated sessions as "matches."
   There is no FTS/content fallback for an id-shaped query: it is found by id or reported
   not found, locally and on every peer.
-- **Same id on more than one machine** surfaces a labeled conflict so you can pick one
-  with `--device <host>`.
+- **Ambiguous prefixes** fail with every matching full id and its machine labels; pass a
+  longer prefix to select one.
+- **Synced copies are one logical session.** The same full id reported by several machines
+  does not make a prefix ambiguous; the CLI renders one of those equivalent copies.
+- **Keywords keep the existing metadata search semantics.** The metadata-only resolver
+  accepts the same label, topic, project, account, path, agent, and version terms as the
+  canonical local resolver, then applies the uniqueness check across the fleet.
 - **`--local`** restricts the lookup to this machine — no cross-machine sweep — for
   scripts that want deterministic local behavior.
 - A peer already answering a parent's sweep (`AGENTS_SESSIONS_LOCAL=1`) never re-fans-out,
@@ -515,6 +536,108 @@ Presence is **derived, never asserted**: a record only says "this session was de
 whether it is `background` or `parked` is decided live from the recorded pid plus its
 start-time fingerprint (which defeats PID reuse). Ad-hoc headless runs and cloud/team
 rows carry no presence — they are not on this axis.
+
+## Lost hosts: `crashed` and `orphaned`
+
+Every other liveness signal answers "is the agent process alive". None of them answer
+"is anyone still driving it", and those come apart in the two ways a user notices — so
+`getActiveSessions` folds a **host link** onto every row (`foldHostLink`, from the pure
+classifier in `lib/session/host-link.ts`) and promotes it into the status column:
+
+| status | glyph | what happened |
+| --- | --- | --- |
+| `crashed` | `✗` | The host window (VS Code, the terminal, an SSH connection) went down hard and the agent died with it. Its slice of `live-terminals.json` is still there naming a dead pid, because the window never got to run its teardown. |
+| `orphaned` | `◍` | The agent is still alive with **no client attached** — tmux reports zero attached clients, or the IDE window that owned it stopped republishing. It is idle, or sitting on a question nobody will answer. |
+
+The two signals behind them:
+
+- **`#{session_attached}`** — the count of clients attached to a tmux-hosted session,
+  folded on by `foldTmuxClients` (one `list-panes` per socket, only when some row is
+  tmux-hosted). It keys off `provenance.mux`, which `enrichProvenance` stamps on any row
+  whose process env names a pane — deliberately **not** off `listTmuxAgentSessions`,
+  which only emits a row when it can resolve the pane's agent *identity* and emits
+  nothing at all on a machine where neither the launch registry nor a session meta
+  resolves. Hanging the count off that source would leave the orphan signal silently
+  dead on exactly those machines. An *absent* count (a tmux too old to report the field)
+  means "cannot tell", never zero.
+
+  Note the separator: tmux **sanitizes non-printable characters out of format output**
+  (3.6a rewrites a literal tab — and any non-ASCII sentinel — to `_`), so every `-F`
+  query here uses `TMUX_FIELD_SEP`. `listTmuxAgentSessions` split on `\t` and therefore
+  returned zero rows on any such tmux — fixed alongside this. The separator is `:`
+  specifically because tmux replaces `:` and `.` in a *session name* with `_`, so it
+  provably cannot occur in the one free-text field that is not last;
+  `pane_current_path` (which may contain `:`) is queried last and its tail rejoined.
+- **The IDE window heartbeat** — the `at` stamp on each window's slice of
+  `live-terminals.json`. The Factory extension force-republishes every 4 minutes, so a
+  slice older than `HOST_HEARTBEAT_STALE_MS` (10 minutes, the same window the extension
+  uses to GC a dead peer) means that window is gone.
+
+Precedence is deliberate, so the words keep their meaning:
+
+- `abandoned` (days-stale) wins outright and claims no host link.
+- `crashed` **replaces** `closed` — both mean the process is gone, but `closed` reads as
+  a normal exit.
+- `orphaned` replaces only `idle` / `input_required`. A session still **working** with
+  nobody watching is an ordinary headless run; flagging every one would bury the signal.
+- A session detached on purpose (`presence` `background`/`parked`) is never flagged — no
+  client is the point of detaching.
+
+A `crashed` row is deliberately transient: once its transcript goes days-stale it
+degrades to `abandoned`, so the listing carries an alert, not a permanent tombstone.
+And a dead session never trips the `--waiting` gate, however its last turn ended:
+`activity` is not rewritten on death, so a session that crashed mid-question would
+otherwise read as "needs your input" forever when what it needs is a relaunch
+(`isAwaitingUser`). `closed`/`crashed` are excluded outright — both are
+unconditionally dead. `abandoned` is not: it fires on transcript staleness *before*
+the liveness check, so it also covers a live-but-forgotten session that asked a
+question and sat untouched over a long weekend, which is still answerable and is
+exactly what the gate is for. That one is excluded only when its `pidAlive` is
+positively false; unknown liveness stays excluded rather than inventing a human who
+can answer. The session preview shares this one predicate, so the human-facing
+"needs you" line and the scriptable gate can never disagree about a row.
+
+**Known residual — an ambient tmux session.** `provenance.mux` is stamped from the
+process env, so an agent launched inside a tmux session the *developer* owns (rather
+than one the CLI spawned for it) reads that session's client count. Detach that tmux for
+unrelated reasons and its idle/waiting agents read `orphaned` until you reattach. The
+blast radius is bounded — a `running` session is never relabelled, `--waiting` still
+fires through `activity`, and the preview keeps the specific "waiting on you" sentence
+rather than replacing it with the generic orphan line — but the label is optimistic
+about whose tmux it is. Distinguishing a CLI-spawned pane from an ambient one is
+possible (`listPidSessionEntries()` knows which panes it launched) and is the fix if
+this proves noisy in practice.
+
+Both are visible everywhere a status already was — the `--active` grouped view, the
+default printed listing, `--active --json` (plus a `hostLink` field), and the session
+preview, which spells the state out in a sentence rather than a glyph. The interactive
+browser gained a status column of its own for the running view (`PickerColumns.showStatus`,
+gated exactly like `showHost`): it previously showed which terminal a session ran in but
+never what it was doing, so a session that had lost its host was indistinguishable from a
+healthy one in the row list.
+
+## Favorites (starred sessions)
+
+`*` in the interactive browser stars the highlighted session; `f` filters the list to
+the starred ones. Outside a TTY, `agents sessions favorite <id>` (`--remove`, `--list`,
+`--json`) does the same, and `agents sessions --favorites` is the flag twin of `f` — so
+the `y` copy-cmd round-trips a starred view into a command.
+
+Stars live in `~/.agents/.history/favorites.json` keyed by session id, **not** in
+`sessions.db`. The index is a rebuildable cache — a reindex re-derives every row from
+the transcripts on disk — and a favorite is not derivable from a transcript, so a column
+there would be silently lost on the next rebuild. `.history` is never pruned, so a star
+survives that rebuild.
+
+Favorites are **per-machine**. Session sync carries `.history/backups/`
+(`lib/session/sync/agents.ts`), not this file, so a session starred on one box is not
+starred on another — even though the session id itself is fleet-wide. Carrying them
+would mean adding the file to the sync manifest.
+
+That store is per-machine but the FILTER is not scoped to one: `--favorites` applies to
+every row in the merged fleet view, so a peer's session you starred from here still
+shows. This is why the live `--active` path filters after the remote fan-out rather than
+forwarding the flag to each peer — a peer has its own (different) star list.
 
 ## Export / Import (portable bundles)
 

@@ -95,7 +95,26 @@ export function remoteCdPrefix(remoteCwd?: string, opts: { mirror?: boolean } = 
  * collision, mirroring `buildExecEnv`'s `...options.env` precedence (exec.ts).
  */
 export function withActorEnv(env?: Record<string, string>): Record<string, string> {
-  return { ...actorEnv(resolveActor()), ...(env ?? {}) };
+  return { ...actorEnv(resolveActor()), ...terminalIdEnv(), ...(env ?? {}) };
+}
+
+/**
+ * Forward the launching editor tab's `AGENT_TERMINAL_ID` across the SSH hop.
+ *
+ * Factory stamps it on every terminal it spawns, and the remote `agents run`
+ * records it in its pid registry (`writePidSessionEntry`) — which is what lets a
+ * tab ask the device "which session is MY terminal running?" instead of guessing
+ * from local state. Without the forward the remote registry has no terminal id,
+ * that question is unanswerable, and the tab is stuck with its spawn-time id even
+ * after the agent has moved to a different session (a `/clear`, or an exit and
+ * rerun in the same tab).
+ *
+ * Same shape as the actor provenance above: absent when the launch did not come
+ * from a tracked terminal, never fabricated.
+ */
+function terminalIdEnv(): Record<string, string> {
+  const terminalId = process.env.AGENT_TERMINAL_ID?.trim();
+  return terminalId ? { AGENT_TERMINAL_ID: terminalId } : {};
 }
 
 /**

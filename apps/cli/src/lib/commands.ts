@@ -12,6 +12,7 @@ import * as path from 'path';
 import * as yaml from 'yaml';
 import { AGENTS, ensureCommandsDir, agentConfigDirName, resolveAgentName } from './agents.js';
 import { capableAgents, isCapable, supports } from './capabilities.js';
+import { isDirectoryDoc } from './resources.js';
 import { markdownToToml } from './convert.js';
 import { getCommandsDir, getUserCommandsDir, getEnabledExtraRepos, getProjectAgentsDir, getSkillsDir, getTrashCommandsDir } from './state.js';
 import { getEffectiveHome, getVersionHomePath, listInstalledVersions, resolveVersion } from './versions.js';
@@ -235,6 +236,7 @@ export function discoverCommands(repoPath: string): DiscoveredCommand[] {
     for (const file of fs.readdirSync(commandsDir)) {
       if (file.endsWith('.md')) {
         const name = file.replace('.md', '');
+        if (isDirectoryDoc('commands', name)) continue;
         const sourcePath = path.join(commandsDir, file);
         const metadata = parseCommandMetadata(sourcePath);
         const validation = validateCommandMetadata(metadata, name);
@@ -886,7 +888,11 @@ export function listCentralCommands(): string[] {
   for (const dir of [getUserCommandsDir(), getCommandsDir()]) {
     if (!fs.existsSync(dir)) continue;
     for (const f of fs.readdirSync(dir).filter((f) => f.endsWith('.md'))) {
-      seen.add(f.replace('.md', ''));
+      const name = f.replace('.md', '');
+      // A directory's README/AGENTS/CLAUDE/GEMINI documents the dir, it is not a
+      // command. Without this the picker offers a name resolveResource refuses.
+      if (isDirectoryDoc('commands', name)) continue;
+      seen.add(name);
     }
   }
   return Array.from(seen);

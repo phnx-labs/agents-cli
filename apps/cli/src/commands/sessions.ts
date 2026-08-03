@@ -21,9 +21,9 @@ import { SESSION_AGENTS } from '../lib/session/types.js';
 import { discoverArtifacts, readArtifact, resolveArtifact } from '../lib/session/artifacts.js';
 import { looksLikePath, toComparablePath, homeDir, needsWindowsShell, findExecutable, composeWin32CommandLine } from '../lib/platform/index.js';
 import { getActiveSessions, type ActiveSession } from '../lib/session/active.js';
-import { enumerateGhosttyTabs, assignGhosttyTabs } from '../lib/session/ghostty-tabs.js';
+import { enumerateGhosttyTabs, assignGhosttyTabs, type GhosttySurface } from '../lib/session/ghostty-tabs.js';
 import { mapPanesToTargets, listClients } from '../lib/tmux/session.js';
-import { resolveViewingIn } from '../lib/session/viewing-in.js';
+import { resolveViewingIn, viewingInLabel } from '../lib/session/viewing-in.js';
 import { machineId, normalizeHost } from '../lib/session/sync/config.js';
 import { gatherRemoteActive, NO_FANOUT_ENV } from '../lib/session/remote-active.js';
 import { gatherRemoteList, runOnPeer } from '../lib/session/remote-list.js';
@@ -31,7 +31,7 @@ import { stringWidth, truncateToWidth, padToWidth, terminalWidth } from '../lib/
 import type { SessionActivity, AwaitingReason } from '../lib/session/state.js';
 import { inferSessionState } from '../lib/session/state.js';
 import { discoverSessions, countSessionsInScope, resolveSessionById, isCompleteSessionId, looksLikeSessionId, searchContentIndex, parseTimeFilter, getSessionRoots, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
-import { findSessionsById } from '../lib/session/db.js';
+import { findSessionsById, querySessions } from '../lib/session/db.js';
 import { filterTeamSessions, safeTeamText } from '../lib/session/team-filter.js';
 import { parseSession } from '../lib/session/parse.js';
 import { runRemoteSessions, buildForwardedArgs, ensureWholeIndex } from '../lib/session/remote.js';
@@ -55,6 +55,8 @@ import { setHelpSections } from '../lib/help.js';
 import { registerSessionsTailCommand } from './sessions-tail.js';
 import { registerSessionsSyncCommand } from './sessions-sync.js';
 import { registerSessionsResumeCommand } from './sessions-resume.js';
+import { registerSessionsFavoriteCommand } from './sessions-favorite.js';
+import { isFavorite, listFavorites } from '../lib/session/favorites.js';
 import { registerGoCommand } from './go.js';
 import { registerFocusCommand } from './focus.js';
 import { registerDetachCommand } from './detach.js';
@@ -82,6 +84,8 @@ interface SessionsOptions extends SessionFilterOptions {
   /** Also list sessions from the user's own unmanaged ~/.<agent> installs. */
   unmanaged?: boolean;
   query?: string;
+  /** Resolve one historical selector to metadata only (requires --json). */
+  resolve?: string;
   limit?: string;
   sort?: string;
   json?: boolean;
@@ -105,6 +109,8 @@ interface SessionsOptions extends SessionFilterOptions {
   flat?: boolean;
   /** With --active: show only sessions waiting on user input; exit 1 if any. */
   waiting?: boolean;
+  /** Show only favorited (starred) sessions — the `f` key's flag twin. */
+  favorites?: boolean;
   /** Enrich the listing with live glyphs/preview for running rows. Default on;
    * `--no-live` sets this false. Commander's `--no-` convention. */
   live?: boolean;
@@ -310,6 +316,12 @@ function statusColor(status: ActiveSession['status']): (s: string) => string {
     case 'closed': return chalk.dim;
     // Days-stale / dangling: red so a session nobody is driving stands out.
     case 'abandoned': return chalk.red;
+    // The host window died and took the agent with it — an unclean exit, not the
+    // dimmed `closed` of a normal one. Red-bright so a crash reads as an event.
+    case 'crashed': return chalk.redBright;
+    // Alive with nobody attached. Yellow, like `input_required`: both mean the
+    // session is stuck waiting on a human, and this one has no human to wait for.
+    case 'orphaned': return chalk.yellow;
     // Alive but un-introspectable (a harness whose transcript we can't parse).
     // Magenta so it never reads as the gray "idle" it used to be faked as.
     case 'unknown': return chalk.magenta;
@@ -440,7 +452,11 @@ export function formatActiveRowDescription(s: ActiveSession): string {
 function activityLabel(s: ActiveSession): string {
   // Lifecycle status wins over any residual parsed activity — a dead/dangling
   // session must read `closed`/`abandoned`, not the `idle` its stale tail infers.
+  // `crashed`/`orphaned` are the same kind of claim about the session as a whole,
+  // and both outrank the `idle` its last parsed turn would otherwise show.
   if (s.status === 'closed' || s.status === 'abandoned') return s.status;
+  if (s.status === 'crashed') return 'crashed';
+  if (s.status === 'orphaned') return 'orphan';
   if (s.activity === 'waiting_input') return 'waiting';
   if (s.activity === 'working') return 'working';
   if (s.activity === 'idle') return 'idle';
@@ -474,8 +490,13 @@ export function liveGlyphAndPreview(a: ActiveSession | undefined): { glyph: stri
   // so an opaque harness is never mistaken for a finished one. `⊘` = abandoned /
   // dangling; `×` = closed (dead pid) — both distinct from the `○` idle a live,
   // stopped session shows, so a gone session never masquerades as a resting one.
+  // `✗` = crashed (died WITH its host window, uncleanly) — deliberately louder
+  // than the `×` of a clean close. `◍` = orphaned (alive, nothing attached): a
+  // filled ring, so it reads as "still burning" unlike the hollow `○` idle.
   if (a.status === 'abandoned') return { glyph: statusColor(a.status)('⊘'), preview: buildSessionDescription(a) };
   if (a.status === 'closed') return { glyph: statusColor(a.status)('×'), preview: buildSessionDescription(a) };
+  if (a.status === 'crashed') return { glyph: statusColor(a.status)('✗'), preview: buildSessionDescription(a) };
+  if (a.status === 'orphaned') return { glyph: statusColor(a.status)('◍'), preview: buildSessionDescription(a) };
 
   const waiting = a.status === 'input_required' || a.activity === 'waiting_input';
   const running = a.status === 'running' || a.activity === 'working';
@@ -500,6 +521,9 @@ export function liveStatusWord(a: ActiveSession | undefined): string {
   if (!a) return '';
   // Lifecycle status is definitive — surface it ahead of any parsed activity.
   if (a.status === 'closed' || a.status === 'abandoned') return a.status;
+  // Same rank: a lost host is a fact about the session, not about its last turn.
+  if (a.status === 'crashed') return 'crashed';
+  if (a.status === 'orphaned') return 'orphan';
   if (a.status === 'input_required' || a.activity === 'waiting_input') return 'waiting';
   if (a.status === 'running' || a.activity === 'working') return 'working';
   if (a.status === 'idle' || a.activity === 'idle') return 'idle';
@@ -507,11 +531,42 @@ export function liveStatusWord(a: ActiveSession | undefined): string {
   return '';
 }
 
+/**
+ * True when a session is blocked on a human — the `--waiting` contract.
+ *
+ * NOT `status === 'input_required'`. `foldHostLink` rewrites that status to
+ * `orphaned` when nothing is attached, and a session waiting on a question with
+ * NOBODY watching is the most acute case `--waiting` exists to surface, not one
+ * it should drop. The underlying `activity` is never rewritten, so it is the
+ * honest signal here.
+ *
+ * But `activity` is never rewritten for a DEAD session either: one that died
+ * mid-question keeps `waiting_input` forever, and answering it is not a thing a
+ * human can do — it needs a relaunch. `--waiting` is a scriptable gate ("does
+ * anything need me?"), so a corpse must not trip it.
+ *
+ * `closed` and `crashed` are unconditionally dead, so they are excluded outright.
+ * `abandoned` is NOT: it fires on transcript staleness before the liveness check,
+ * so it also covers the live-but-forgotten case — an interactive session that
+ * asked a question and sat untouched over a long weekend is still answerable, and
+ * is exactly what this gate exists for. It is excluded only when we positively
+ * know its process is gone; unknown liveness (an older peer, a row with no pid)
+ * stays excluded rather than inventing a human who can answer.
+ */
+export function isAwaitingUser(s: ActiveSession): boolean {
+  if (s.status === 'crashed' || s.status === 'closed') return false;
+  if (s.status === 'abandoned' && s.pidAlive !== true) return false;
+  return s.status === 'input_required' || s.activity === 'waiting_input';
+}
+
+/** Width of the live status column — `crashed` is the longest word it renders. */
+const LIVE_STATUS_W = 8;
+
 /** The colored, space-padded status cell for a listing row (empty when not live). */
 function liveStatusCell(live: ActiveSession | undefined): { cell: string; width: number } {
   const word = liveStatusWord(live);
   if (!word || !live) return { cell: '', width: 0 };
-  return { cell: statusColor(live.status)(padToWidth(word, 8)), width: 8 };
+  return { cell: statusColor(live.status)(padToWidth(word, LIVE_STATUS_W)), width: LIVE_STATUS_W };
 }
 
 /**
@@ -549,15 +604,26 @@ function modelLabel(model?: string): string {
  * (null when unknown) alongside the raw fields, so every active row is joinable.
  * `project` uses the same derivation SessionMeta does — basename(cwd) (see
  * discover.ts) — so the active view and the history view join identically.
+ *
+ * `viewingIn` flattens to the same display string the row renderer prints —
+ * `'codium tab 3'` / `'detached'` / null — so a consumer can tell a watched
+ * session from an orphaned one (its terminal died, the agent is still running)
+ * without re-implementing the tmux client lookup.
  */
 export function serializeActiveSessionsForJson(
   sessions: ActiveSession[],
-): Array<ActiveSession & { ticketId: string | null; project: string | null; prLink: string | null }> {
+): Array<Omit<ActiveSession, 'viewingIn'> & {
+  ticketId: string | null;
+  project: string | null;
+  prLink: string | null;
+  viewingIn: string | null;
+}> {
   return sessions.map((s) => ({
     ...s,
     ticketId: s.ticket?.id ?? null,
     project: s.cwd ? path.basename(s.cwd) : null,
     prLink: s.pr?.url ?? null,
+    viewingIn: viewingInLabel(s) ?? null,
   }));
 }
 
@@ -602,12 +668,8 @@ function locatorBadge(s: ActiveSession): string {
     // For a tmux-hosted session, say which app+tab is looking at it right now
     // (or that it's running detached). Only meaningful for tmux (the pane is the
     // durable handle; the viewer is transient).
-    if (s.viewingIn) {
-      const tab = s.viewingIn.tab != null ? ` tab ${s.viewingIn.tab}` : '';
-      parts.push(chalk.gray(`viewing in ${s.viewingIn.app}${tab}`));
-    } else {
-      parts.push(chalk.gray('detached'));
-    }
+    const label = viewingInLabel(s);
+    if (label) parts.push(chalk.gray(label === 'detached' ? label : `viewing in ${label}`));
   } else if (p?.mux?.kind === 'screen') {
     parts.push(chalk.green('screen'));
   }
@@ -898,9 +960,15 @@ function groupTally(sessions: ActiveSession[]): string {
   const running = sessions.filter(s => s.status === 'running').length;
   const idle = sessions.filter(s => s.status === 'idle').length;
   const waiting = sessions.filter(s => s.status === 'input_required').length;
+  // Counted by status, deliberately: an orphaned session gets its own bucket
+  // below, so counting it here too would double-count it in the tally.
   const queued = sessions.filter(s => s.status === 'queued').length;
   const closed = sessions.filter(s => s.status === 'closed').length;
   const abandoned = sessions.filter(s => s.status === 'abandoned').length;
+  // Without these two the tally silently loses rows: every status must have a
+  // bucket or "N active (…)" stops adding up to what the list shows.
+  const orphaned = sessions.filter(s => s.status === 'orphaned').length;
+  const crashed = sessions.filter(s => s.status === 'crashed').length;
   const unknown = sessions.filter(s => s.status === 'unknown').length;
   const parts: string[] = [];
   if (running) parts.push(`${running} running`);
@@ -909,6 +977,8 @@ function groupTally(sessions: ActiveSession[]): string {
   if (queued) parts.push(`${queued} queued`);
   if (closed) parts.push(`${closed} closed`);
   if (abandoned) parts.push(`${abandoned} abandoned`);
+  if (orphaned) parts.push(`${orphaned} orphaned`);
+  if (crashed) parts.push(`${crashed} crashed`);
   if (unknown) parts.push(`${unknown} unknown`);
   return parts.join(' · ');
 }
@@ -978,13 +1048,34 @@ async function enrichLocalLocators(local: ActiveSession[]): Promise<void> {
     }
   } catch { /* non-fatal */ }
 
-  // tmux attach targets + "viewing in <app> tab N", one batched query per socket.
+  // One Ghostty enumeration shared across every socket's viewing-in resolve
+  // (a tmux client can be attached from a Ghostty tab).
+  await enrichTmuxLocators(local, await enumerateGhosttyTabsQuietly());
+}
+
+/** {@link enumerateGhosttyTabs}, best-effort — an osascript failure yields no surfaces. */
+async function enumerateGhosttyTabsQuietly(): Promise<GhosttySurface[]> {
+  try {
+    return await enumerateGhosttyTabs();
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The tmux half of {@link enrichLocalLocators}: the `session:window.pane` attach
+ * target and "viewing in <app> tab N" / detached, one batched query per socket.
+ *
+ * Split out because it is the only locator the `--json` path can afford. It costs
+ * tmux queries and a `ps` read — no osascript — so scriptable output stays cheap
+ * while still answering the question a consumer actually needs: is anyone looking
+ * at this session, or is it running orphaned? Without `surfaces`, a Ghostty-attached
+ * client still resolves as attached, just without its tab number.
+ */
+async function enrichTmuxLocators(local: ActiveSession[], surfaces: GhosttySurface[] = []): Promise<void> {
   try {
     const tmux = local.filter(s => s.provenance?.mux?.kind === 'tmux' && s.provenance.mux.pane);
     if (tmux.length > 0) {
-      // One Ghostty enumeration shared across every socket's viewing-in resolve
-      // (a tmux client can be attached from a Ghostty tab).
-      const surfaces = await enumerateGhosttyTabs();
       const sockets = new Set(tmux.map(s => s.provenance!.mux!.socket));
       for (const socket of sockets) {
         const paneMap = await mapPanesToTargets(socket);
@@ -1078,16 +1169,30 @@ export async function gatherActiveSessions(
 async function renderActiveSessions(
   asJson: boolean,
   waitingOnly = false,
-  opts: { local?: boolean; hosts?: string[] } = {},
+  opts: { local?: boolean; hosts?: string[]; favoritesOnly?: boolean } = {},
 ): Promise<void> {
   const self = machineId();
-  const { sessions: merged, remoteDeviceCount } = await gatherActiveSessions(opts);
+  const gathered = await gatherActiveSessions(opts);
+  const { remoteDeviceCount } = gathered;
+  // --favorites narrows the live view too. Applied HERE, not only in the
+  // browser: the browser is skipped for --json, --waiting, a pipe, a multi-host
+  // scope, and an SSH-fanout peer, and the flag silently did nothing on every
+  // one of those paths — including `--active --favorites --json`, which is
+  // exactly what the browser's own `y` copy-cmd hands to an agent.
+  const merged = opts.favoritesOnly
+    ? gathered.sessions.filter((s) => !!s.sessionId && listFavorites().has(s.sessionId))
+    : gathered.sessions;
 
   // --waiting: only sessions blocked on the user. Exits non-zero when any are
   // present so a supervising agent or hook can poll it as a gate.
-  const sessions = waitingOnly ? merged.filter(s => s.status === 'input_required') : merged;
+  const sessions = waitingOnly ? merged.filter(isAwaitingUser) : merged;
 
   if (asJson) {
+    // Resolve who is watching each local tmux pane before serializing: `viewingIn`
+    // is how a consumer distinguishes a session someone is looking at from one
+    // running orphaned after its terminal died. tmux-only (no osascript) so the
+    // scriptable path stays cheap — see enrichTmuxLocators.
+    await enrichTmuxLocators(sessions.filter(s => !s.machine || s.machine === self));
     process.stdout.write(JSON.stringify(serializeActiveSessionsForJson(sessions), null, 2) + '\n');
     if (waitingOnly && sessions.length > 0) process.exitCode = 1;
     return;
@@ -1211,6 +1316,7 @@ function canonicalSessionsCommand(query: string | undefined, options: SessionsOp
   if (options.until) a.push('--until', options.until);
   if (options.local) a.push('--local');
   if (options.waiting) a.push('--waiting');
+  if (options.favorites) a.push('--favorites');
   const q = (query ?? '').trim();
   if (q) a.push(JSON.stringify(q));
   return 'ag ' + a.join(' ');
@@ -1239,15 +1345,45 @@ async function renderSessionPreview(
   try {
     live = indexActiveBySessionId(await getActiveSessions()).get(session.id);
   } catch { /* plain preview on any probe failure */ }
-  if (live) {
-    const { glyph } = liveGlyphAndPreview(live);
-    const word = liveStatusWord(live) || live.status;
-    const needsYou = live.status === 'input_required' || live.activity === 'waiting_input';
-    const reason = live.awaitingReason ? ` (${live.awaitingReason.replace('_', ' ')})` : '';
-    const suffix = needsYou ? chalk.yellow(`  ← needs you${reason}`) : '';
-    console.log(`${glyph} ${statusColor(live.status)(word)}${suffix}`);
-  }
+  const headline = formatLiveStatusHeadline(live, isFavorite(session.id));
+  if (headline) console.log(headline);
   console.log(buildPreview(session));
+}
+
+/**
+ * The one-line live status banner shown above a session preview: the glyph, the
+ * status word, and — when the session needs a human or has LOST one — a plain
+ * sentence saying so. Shared by `--preview` and the interactive browser's preview
+ * pane so both explain a state the same way.
+ *
+ * `crashed` and `orphaned` are the states a glyph alone cannot carry: nobody
+ * reads "orphan" and knows it means "still running in tmux with no window
+ * attached", so those two spell it out.
+ */
+export function formatLiveStatusHeadline(live: ActiveSession | undefined, favorite = false): string {
+  const star = favorite ? chalk.yellow('★ ') : '';
+  // With no live row there is no status to lead with, so the star has to say
+  // what it means on its own — a bare `★` above a preview reads as noise.
+  if (!live) return favorite ? chalk.yellow('★ favorited') : '';
+  const { glyph } = liveGlyphAndPreview(live);
+  const word = liveStatusWord(live) || live.status;
+  // One definition, shared with `--waiting`. A second local copy drifted: the
+  // preview said "needs you" for a dead session that `--waiting` had (rightly)
+  // stopped counting, so the human and the script disagreed about the same row.
+  const needsYou = isAwaitingUser(live);
+  const reason = live.awaitingReason ? ` (${live.awaitingReason.replace('_', ' ')})` : '';
+  let suffix = needsYou ? chalk.yellow(`  ← needs you${reason}`) : '';
+  if (live.status === 'crashed') {
+    suffix = chalk.redBright('  ← the host app or connection went away and took the agent with it');
+  } else if (live.status === 'orphaned') {
+    // Keep the needs-you half. A session sitting on a real question with nobody
+    // attached is strictly worse than either fact alone, and replacing the
+    // question with the generic orphan line undersells exactly that case.
+    suffix = needsYou
+      ? chalk.yellow(`  ← waiting on you${reason}, and no client is attached to answer it`)
+      : chalk.yellow('  ← still running, but no client is attached — nothing is showing it');
+  }
+  return `${star}${glyph} ${statusColor(live.status)(word)}${suffix}`;
 }
 
 /** Main action handler for `agents sessions`. Routes to picker, table, or single-session render. */
@@ -1287,6 +1423,31 @@ async function sessionsAction(
   // of hardcoding `~/.claude|.codex|.gemini`. Always local; ignores other flags.
   if (options.roots) {
     process.stdout.write(JSON.stringify(getSessionRoots(), null, 2) + '\n');
+    return;
+  }
+
+  // --resolve is the metadata-only contract for downstream context workflows.
+  // It reads indexed SessionMeta rows and never calls renderSession, buildPreview,
+  // parseSession, or any other transcript renderer/parser.
+  if (options.resolve !== undefined) {
+    if (!options.json) {
+      console.error(chalk.red('--resolve requires --json.'));
+      process.exit(1);
+    }
+    if (query) {
+      console.error(chalk.red('Pass the selector to --resolve, not as a positional query.'));
+      process.exit(1);
+    }
+    if (options.local === true && options.host && !shouldIncludeLocal(options.host, machineId())) {
+      console.error(chalk.red('--local and --device name opposite scopes: --local skips the SSH fan-out that --device needs.'));
+      process.exit(1);
+    }
+    await resolveSessionMetadata(options.resolve, {
+      agent: options.agent,
+      project: options.project,
+      local: options.local,
+      hosts: options.host,
+    });
     return;
   }
 
@@ -1371,6 +1532,7 @@ async function sessionsAction(
           host: options.host,
           since: options.since,
           all: options.all,
+          favorites: options.favorites,
         }),
         { local: options.local === true, hosts: options.host },
       );
@@ -1382,6 +1544,7 @@ async function sessionsAction(
     await renderActiveSessions(options.json === true, options.waiting === true, {
       local: forceLocal,
       hosts: options.host,
+      favoritesOnly: options.favorites === true,
     });
     return;
   }
@@ -1406,6 +1569,7 @@ async function sessionsAction(
         since: options.since,
         host: options.host,
         inTeam: options.inTeam,
+        favorites: options.favorites,
       }),
       { local: options.local === true, hosts: options.host },
     );
@@ -1547,6 +1711,13 @@ async function sessionsAction(
     // teammate only knows its team from the meta.json filterTeamSessions just
     // read. Match either, after that pass has populated `teamOrigin`.
     if (options.inTeam) sessions = sessions.filter((s) => matchesTeam(s, options.inTeam!));
+
+    // --favorites narrows to the starred set. Applied here, before the JSON
+    // emit, so `--favorites --json` is the machine-readable twin of the `f` key.
+    if (options.favorites) {
+      const starred = listFavorites();
+      sessions = sessions.filter((s) => starred.has(s.id));
+    }
 
     // Under --in-team the visible list is one team, so the whole-index team-origin
     // count would be a non-sequitur next to it.
@@ -1772,7 +1943,13 @@ function timeCell(age: SessionAgeParts, topicSlack: number): { plain: string; te
  * (tracker/PR ref, pulled out of the badge blob so refs align) is only rendered
  * when `showTicket` — otherwise a listing with no refs would waste a column of
  * dashes and needlessly truncate the topic. Worktree stays a trailing badge. */
-export function flatSessionRow(session: SessionMeta, live?: ActiveSession, showTicket = false, cols: PickerColumns = {}): string {
+export function flatSessionRow(
+  session: SessionMeta,
+  live?: ActiveSession,
+  showTicket = false,
+  cols: PickerColumns = {},
+  favorite = false,
+): string {
   const agentColor = colorAgent(session.agent);
   const age = sessionAgeParts(session.timestamp, session.lastActivity);
   const project = session.project || '-';
@@ -1810,9 +1987,12 @@ export function flatSessionRow(session: SessionMeta, live?: ActiveSession, showT
   const wtW = wt ? stringWidth(wt) + 1 : 0;
   const width = terminalWidth();
   const requestedModelW = cols.showModel ? (cols.modelWidth ?? PICKER_MODEL_MAX) : 0;
+  // Same conditional 2 cells as the picker's marker, for the same reason.
+  const favW = cols.showFavorite ? 2 : 0;
+  const favCell = cols.showFavorite ? (favorite ? chalk.yellow('★ ') : '  ') : '';
   // Sized against the last-activity label alone, so the creation field is an
   // additive decision the row makes only once it knows what space is left.
-  const fixedW = (10 + 9 + 8 + 16) + glyphW + statusW + machineW + ticketW + wtW + team.width + stringWidth(age.last) + 1;
+  const fixedW = favW + (10 + 9 + 8 + 16) + glyphW + statusW + machineW + ticketW + wtW + team.width + stringWidth(age.last) + 1;
   const modelSlack = width - fixedW - MIN_TOPIC_W;
   const modelW = requestedModelW <= modelSlack
     ? requestedModelW
@@ -1821,6 +2001,7 @@ export function flatSessionRow(session: SessionMeta, live?: ActiveSession, showT
   const topicW = Math.max(MIN_TOPIC_W, width - fixedW - modelW - when.extraW);
 
   return (
+    favCell +
     chalk.white(padToWidth(truncateToWidth(session.shortId, 9), 10)) +
     agentColor(padToWidth(truncateToWidth(session.agent, 8), 9)) +
     chalk.yellow(padToWidth(truncateToWidth(session.version || '-', 7), 8)) +
@@ -2014,7 +2195,10 @@ function printSessionTable(sessions: SessionMeta[], hiddenCount = 0, tree = fals
   // column (and its compact labels) is computed the same way the picker does it.
   const showTicket = sessions.some((s) => ticketLabel(s) !== '');
   const cols = pickerColumnsFor(sessions);
-  for (const session of sessions) console.log(flatSessionRow(session, liveIndex?.get(session.id), showTicket, cols));
+  const favorites = listFavorites();
+  for (const session of sessions) {
+    console.log(flatSessionRow(session, liveIndex?.get(session.id), showTicket, cols, favorites.has(session.id)));
+  }
 
   const countLine = `${sessions.length} session${sessions.length === 1 ? '' : 's'}.`;
   console.log(chalk.gray(`\n${countLine}`));
@@ -2235,6 +2419,19 @@ export interface PickerColumns {
    */
   showHost?: boolean;
   /**
+   * Render the favorite marker column. Like every other conditional column here,
+   * it earns its 2 cells only when some row in the pool is actually starred — a
+   * user who has never favorited anything pays nothing for the feature.
+   */
+  showFavorite?: boolean;
+  /**
+   * Render the live status column (`working` / `waiting` / `orphan` / `crashed`).
+   * Live-only, gated the same way as {@link showHost}: it comes from the
+   * active-session scan, so the running-filtered browser sets it and a plain
+   * transcript listing — where no row has a status — leaves it off.
+   */
+  showStatus?: boolean;
+  /**
    * Cells the picker prepends before each row: 2 for the single-select cursor
    * ('> '), 6 for the multi-select cursor + checkbox ('> [x] '). Reserved from
    * the topic width so rows never wrap. Defaults to 2.
@@ -2302,6 +2499,11 @@ export function pickerColumnsFor(sessions: SessionMeta[]): PickerColumns {
     showModel: sessions.some((s) => !!s.model),
     modelWidth: modelColumnWidth(sessions),
     showTicket: sessions.some((s) => ticketLabel(s) !== ''),
+    showFavorite: (() => {
+      // One read of the store per pool, not one per row.
+      const starred = listFavorites();
+      return starred.size > 0 && sessions.some((s) => starred.has(s.id));
+    })(),
   };
 }
 
@@ -2328,6 +2530,8 @@ export function formatPickerLabel(
   cols: PickerColumns = {},
   ssh?: SshOriginTag,
   host = '',
+  favorite = false,
+  live?: ActiveSession,
 ): string {
   const agentColor = colorAgent(s.agent);
   const age = sessionAgeParts(s.timestamp, s.lastActivity);
@@ -2374,12 +2578,29 @@ export function formatPickerLabel(
   const ticketW = cols.showTicket ? TICKET_W + 1 : 0;
   const hostW = cols.showHost ? PICKER_HOST_W : 0;
   const wtW = wt ? stringWidth(wt) + 1 : 0;
+  // Within a pool that HAS starred rows the marker holds its 2 cells whether this
+  // row is starred or not, so the columns after it never jog; a pool with none
+  // drops the column entirely (`showFavorite`) and costs nothing.
+  const favW = cols.showFavorite ? 2 : 0;
+  const favCell = cols.showFavorite ? (favorite ? chalk.yellow('★ ') : '  ') : '';
+  // The same status word the flat listing shows, so a session that is `orphan`
+  // or `crashed` reads that way in the browser too — not only in its preview.
+  // Constant width whenever the column is on. `liveStatusCell` already pads its
+  // word to LIVE_STATUS_W but returns an EMPTY cell (width 0) for a row with no
+  // live match — blanks fill in for those, so the topic column does not jog on
+  // exactly the rows that are not running.
+  const status = cols.showStatus ? liveStatusCell(live) : { cell: '', width: 0 };
+  const statusW = cols.showStatus ? LIVE_STATUS_W : 0;
+  const statusCell = cols.showStatus ? (status.cell || ' '.repeat(LIVE_STATUS_W)) : '';
+  // Sized against the last-activity label alone; the creation field is then an
+  // additive decision made against whatever width is left (see the flat listing).
   const baseTopicW =
-    terminalWidth() - gutter - (10 + 9 + 8 + 16) - machineColW - hostW - ticketW - wtW - sshW - team.width - stringWidth(age.last) - 1;
+    terminalWidth() - gutter - favW - statusW - (10 + 9 + 8 + 16) - machineColW - hostW - ticketW - wtW - sshW - team.width - stringWidth(age.last) - 1;
   const when = timeCell(age, baseTopicW);
   const topicW = Math.max(MIN_TOPIC_W, baseTopicW - when.extraW);
 
   return (
+    favCell +
     // Truncated, not just padded: an indexed shortId is always 8 chars, but a
     // live row with no session id is named by its pid or cloud task, which can
     // run past the column and shunt every later column out of alignment.
@@ -2389,6 +2610,7 @@ export function formatPickerLabel(
     machineCell +
     hostCell +
     chalk.cyan(padRight(truncate(project, 14), 16)) +
+    statusCell +
     sshSeg +
     teamSeg +
     renderTopicCell(label, topic, query, topicW, topicW) +
@@ -2846,7 +3068,11 @@ export interface SessionQueryResolution {
  * search (a bare id must not surface every transcript that merely mentions it).
  * A genuine search phrase keeps the ranked metadata+content search.
  */
-export function resolveSessionQuery(pool: SessionMeta[], query: string): SessionQueryResolution {
+export function resolveSessionQuery(
+  pool: SessionMeta[],
+  query: string,
+  options: { indexFallback?: boolean } = {},
+): SessionQueryResolution {
   // Normalize ONCE here. isCompleteSessionId trims but resolveSessionById does
   // not, so a padded id ("<uuid> ", e.g. pasted from a terminal) would classify
   // as complete and then miss the id lookup — reporting a session that IS on
@@ -2866,7 +3092,8 @@ export function resolveSessionQuery(pool: SessionMeta[], query: string): Session
     // id" — NOT fall back to fuzzy content search. A short id like "d3470b57"
     // otherwise surfaces every transcript that merely MENTIONS the string (a
     // resume prompt echoes the parent id into the body of many later sessions).
-    return { matches: findSessionsById(normalized), byId: true, completeId };
+    const matches = options.indexFallback === false ? [] : findSessionsById(normalized);
+    return { matches, byId: true, completeId };
   }
   return { matches: filterSessionsByQuery(pool, normalized), byId: false, completeId };
 }
@@ -3205,96 +3432,190 @@ export interface FleetResolveDeps {
   runOnPeer: typeof runOnPeer;
 }
 
-/** One distinct machine that reported the id, plus its winning row. */
+/** One distinct machine that reported a logical session, plus its winning row. */
 interface FleetHit {
   machine: string;
   session: SessionMeta;
 }
 
-/** Group a fleet sweep's rows to the DISTINCT machines that hold the id. Each
- * peer answered `sessions <id> --json --local`, which (post-fix) id-resolves and
- * so returns the matching row(s); a peer with a synced MIRROR of the same id can
- * emit more than one row, so we keep the first per machine. Rows the peer somehow
- * returned that do NOT match the id (defensive against version skew) are dropped
- * so a stray content hit can never masquerade as an exact resolution. */
-export function fleetHitsById(rows: SessionMeta[], id: string): FleetHit[] {
-  const q = id.trim().toLowerCase();
-  const byMachine = new Map<string, SessionMeta>();
-  for (const s of rows) {
-    const machine = s.machine;
+/** One logical session returned by the fleet, including every machine holding a copy. */
+export interface FleetSessionCandidate {
+  id: string;
+  hits: FleetHit[];
+}
+
+/** Resolve a fleet sweep through the same canonical full-id / prefix resolver as
+ * local lookups, then group copies by logical session id. Synced mirrors of one
+ * session therefore stay one candidate even when several machines report them;
+ * distinct ids sharing a prefix remain distinct ambiguity candidates. */
+export function fleetCandidatesByQuery(rows: SessionMeta[], query: string): FleetSessionCandidate[] {
+  // An id selector must still be prefix-filtered defensively against older peers
+  // returning content mentioners. Keyword rows, however, were already matched by
+  // each peer's own FTS index; the parent does not own that transcript/index and
+  // must not re-run metadata-only filtering that could discard a content hit.
+  const matched = looksLikeSessionId(query)
+    ? resolveSessionQuery(rows, query, { indexFallback: false }).matches
+    : rows;
+  const byId = new Map<string, Map<string, SessionMeta>>();
+  for (const session of matched) {
+    const machine = session.machine;
     if (!machine) continue; // an untagged row can't be routed back to a peer
-    if (s.id?.toLowerCase() !== q) continue; // exact id only — never a content hit
-    if (!byMachine.has(machine)) byMachine.set(machine, s);
+    const logicalId = session.id.toLowerCase();
+    let byMachine = byId.get(logicalId);
+    if (!byMachine) {
+      byMachine = new Map();
+      byId.set(logicalId, byMachine);
+    }
+    if (!byMachine.has(machine)) byMachine.set(machine, session);
   }
-  return Array.from(byMachine.entries()).map(([machine, session]) => ({ machine, session }));
+
+  return Array.from(byId.values()).map(byMachine => {
+    const hits = Array.from(byMachine.entries()).map(([machine, session]) => ({ machine, session }));
+    return { id: hits[0].session.id, hits };
+  });
+}
+
+/** Resolve against indexed metadata first, then preserve the existing keyword
+ * behavior by widening to this machine's FTS content index only on a metadata miss. */
+function resolveIndexedMetadataRows(indexed: SessionMeta[], selector: string): SessionMeta[] {
+  const resolution = resolveSessionQuery(indexed, selector, { indexFallback: false });
+  if (resolution.matches.length > 0 || resolution.byId) return resolution.matches;
+  return Array.from(searchContentIndex(indexed, selector).values())
+    .sort((a, b) => (b._bm25Score ?? 0) - (a._bm25Score ?? 0));
+}
+
+/** Fixed peer argv for the metadata resolver. Scope flags compose identically on
+ * every host; `--all` removes the SSH login cwd/time window, not agent/project filters. */
+export function metadataResolveForwardedArgs(
+  selector: string,
+  scope: Pick<SessionFilterOptions, 'agent' | 'project'>,
+): string[] {
+  const args = ['sessions', '--resolve', selector, '--json', '--all', '--local'];
+  if (scope.agent) args.push('--agent', scope.agent);
+  if (scope.project) args.push('--project', scope.project);
+  return args;
+}
+
+/** Resolve one selector to indexed metadata across the fleet without reading or
+ * rendering transcript events. A peer answering the parent sweep returns every
+ * local candidate; the parent performs the one logical-session uniqueness gate. */
+async function resolveSessionMetadata(
+  selector: string,
+  scope: { agent?: string; project?: string; local?: boolean; hosts?: string[] },
+  deps: Pick<FleetResolveDeps, 'gatherRemoteList'> = { gatherRemoteList },
+): Promise<void> {
+  const localMachine = machineId();
+  const includeLocal = !scope.hosts?.length || shouldIncludeLocal(scope.hosts, localMachine);
+  const indexed = includeLocal ? applyScopeFilters(querySessions(), scope) : [];
+  const localMatches = resolveIndexedMetadataRows(indexed, selector)
+    .map(session => ({ ...session, machine: session.machine || localMachine }));
+
+  // A peer is already inside gatherRemoteList. Return all local candidates so
+  // the parent can distinguish a fleet-wide unique match from an ambiguity.
+  if (process.env[NO_FANOUT_ENV] === '1') {
+    process.stdout.write(serializeSessionsJson(localMatches));
+    return;
+  }
+
+  let remoteMatches: SessionMeta[] = [];
+  if (scope.local !== true) {
+    try {
+      const forwarded = metadataResolveForwardedArgs(selector, scope);
+      const result = await deps.gatherRemoteList(forwarded, scope.hosts);
+      remoteMatches = result.sessions;
+    } catch {
+      // Match the sessions fleet contract: an unreachable peer degrades to the
+      // candidates available from the rest of the fleet.
+    }
+  }
+
+  const candidates = fleetCandidatesByQuery([...localMatches, ...remoteMatches], selector);
+  if (candidates.length === 0) {
+    console.error(chalk.red(`No session found matching: ${selector}`));
+    process.exit(1);
+  }
+  if (candidates.length > 1) {
+    console.error(chalk.red(`Multiple sessions match "${selector}" across the fleet:`));
+    for (const candidate of candidates) {
+      const session = candidate.hits[0].session;
+      const machines = candidate.hits.map(hit => hit.machine).join(', ');
+      console.error(chalk.cyan(`  ${session.shortId}  ${session.id}`) + chalk.gray(`  ${machines}  ${(session as any).label ?? session.topic ?? ''}`));
+    }
+    console.error(chalk.gray(looksLikeSessionId(selector) ? 'Pass a longer ID to narrow it down.' : 'Narrow the keywords to one session.'));
+    process.exit(1);
+  }
+
+  process.stdout.write(serializeSessionsJson([candidates[0].hits[0].session]));
 }
 
 /**
- * Locate a full session id across the online fleet and render it from the machine
+ * Locate a full session id or short id prefix across the online fleet and render it from the machine
  * that holds it. The local disk already missed; this fans `sessions <id> --json
  * --all` out to every registered online peer (or the explicit `hosts` set),
  * groups the rows to distinct machines, then:
  *
- *   - exactly one machine  → delegate rendering to that peer via `runOnPeer`
+ *   - exactly one logical session → delegate rendering to one peer via `runOnPeer`
  *     (its transcript and agent binary live there — a local `--host` hop would
  *     re-discover locally and dead-end), returning `'rendered'`.
- *   - more than one machine → print the conflict with machine labels so the user
- *     can disambiguate with `--device <host>`, returning `'conflict'`.
+ *   - more than one logical session → print every full-id candidate with its
+ *     machine labels, returning `'conflict'`.
  *   - none                 → `'not-found'`, letting the caller print the local
  *     "no session on this machine" message.
  *
- * No fuzzy/content fallback: the sweep forwards a UUID, each peer id-resolves it,
- * and `fleetHitsById` drops anything that isn't an exact id match.
+ * No fuzzy/content fallback: the sweep forwards the id selector and every result
+ * is resolved through `resolveSessionQuery`, the same id-only resolver used locally.
  */
 export async function resolveSessionAcrossFleet(
-  id: string,
+  query: string,
   mode: ViewMode,
   hosts?: string[],
   deps: FleetResolveDeps = { gatherRemoteList, runOnPeer },
 ): Promise<'rendered' | 'conflict' | 'not-found'> {
   const spinner = isInteractiveTerminal() ? ora('Searching the fleet...').start() : null;
-  let hits: FleetHit[];
+  let candidates: FleetSessionCandidate[];
   try {
     // Force whole-index scope (--all): the peer runs in its SSH-login home dir,
     // whose cwd would otherwise silently narrow the lookup and hide the row.
     // --json so each peer answers a parseable array; --local so it answers for
     // itself and never re-fans-out (belt-and-suspenders with the parent's
     // AGENTS_SESSIONS_LOCAL, which remote-list also sets on the peer).
-    const forwarded = ['sessions', id, '--json', '--all', '--local'];
+    const forwarded = ['sessions', query, '--json', '--all', '--local'];
     const { sessions } = await deps.gatherRemoteList(forwarded, hosts);
-    hits = fleetHitsById(sessions, id);
+    candidates = fleetCandidatesByQuery(sessions, query);
   } catch {
     // A fan-out failure is not an exact resolution — treat as not-found so the
     // caller prints the honest local message rather than a half-answer.
-    hits = [];
+    candidates = [];
   } finally {
     spinner?.stop();
   }
 
-  if (hits.length === 0) return 'not-found';
+  if (candidates.length === 0) return 'not-found';
 
-  if (hits.length > 1) {
-    console.error(chalk.red(`Session ${id} exists on multiple machines:`));
-    for (const h of hits) {
-      const s = h.session;
+  if (candidates.length > 1) {
+    console.error(chalk.red(`Multiple sessions match "${query}" across the fleet:`));
+    for (const candidate of candidates) {
+      const s = candidate.hits[0].session;
       const label = (s as any).label ?? s.topic ?? '';
-      console.error(chalk.cyan(`  ${h.machine}`) + chalk.gray(`  ${s.agent}${s.version ? ` ${s.version}` : ''}  ${label}`));
+      const machines = candidate.hits.map(hit => hit.machine).join(', ');
+      console.error(chalk.cyan(`  ${s.shortId}  ${s.id}`) + chalk.gray(`  ${machines}  ${s.agent}${s.version ? ` ${s.version}` : ''}  ${label}`));
     }
-    console.error(chalk.gray(`Pick one with: agents sessions ${id} --device <host>`));
+    console.error(chalk.gray('Pass a longer ID to narrow it down.'));
     return 'conflict';
   }
 
-  const { machine } = hits[0];
+  const candidate = candidates[0];
+  const { machine } = candidate.hits[0];
   // Render the remote summary by re-running `sessions <id>` ON the peer. --local
   // keeps that render on the peer (it owns the transcript); the mode flag matches
   // the mode the user asked for. No TTY: a summary/markdown/json render is a
   // one-shot capture, not an interactive resume.
-  const peerArgs = ['sessions', id, '--local'];
+  const peerArgs = ['sessions', candidate.id, '--local'];
   const flag = modeFlag(mode);
   if (flag) peerArgs.push(flag);
   const result = await deps.runOnPeer(peerArgs, machine);
   if (result === 'no-target') {
-    console.error(chalk.red(`Session ${id} is on ${machine}, but it is not a reachable registered device.`));
+    console.error(chalk.red(`Session ${candidate.id} is on ${machine}, but it is not a reachable registered device.`));
     console.error(chalk.gray('Register it with `agents devices` or run the command on that machine.'));
     return 'conflict'; // a definitive answer (found, un-renderable) — do NOT fall to the local not-found line
   }
@@ -3307,6 +3628,7 @@ export function registerSessionsCommands(program: Command): void {
     .command('sessions')
     .argument('[query]', 'Session ID, search query, or path (., ../, /path) to filter by project')
     .option('--query <text>', 'Search text — use when the term collides with a subcommand name (e.g. "go")')
+    .option('--resolve <selector>', 'Resolve one full ID, unique prefix, or keyword query to SessionMeta only (requires --json; searches the fleet unless --local)')
     .description('Find, browse, and read agent conversation transcripts across Claude, Codex, Gemini, and OpenCode.')
     .option('-a, --agent <agent>', 'Filter by agent type and version (e.g., claude, codex@0.116.0)')
     .option('--claude', 'Shorthand for --agent claude')
@@ -3338,6 +3660,7 @@ export function registerSessionsCommands(program: Command): void {
     .option('--roots', 'With --json: emit the on-disk directories scanned for session transcripts, per agent (for external watchers)')
     .option('--local', 'Only this machine — skip the cross-machine SSH fan-out (default listing and --active)')
     .option('--waiting', 'With --active: show only sessions waiting on your input (exits non-zero if any)')
+    .option('--favorites', 'Show only favorited (starred) sessions — star them with `*` in the browser or `agents sessions favorite <id>`')
     .option('--tree', 'Group the listing by directory; drops the id/version columns for readability')
     .option('--flat', 'Plain flat table (one row per session) instead of the grouped project overview')
     .option('--no-live', 'Do not enrich the listing with live status/preview for running sessions')
@@ -3381,6 +3704,9 @@ export function registerSessionsCommands(program: Command): void {
       # Export for analysis
       agents sessions --since 30d --limit 200 --json > sessions.json
 
+      # Resolve one historical selector to metadata only, across the fleet
+      agents sessions --resolve d3470b57 --json
+
       # Search another machine's sessions live over SSH (no sync needed)
       agents sessions "auth bug" --last 3 --host yosemite-s1
 
@@ -3412,6 +3738,7 @@ export function registerSessionsCommands(program: Command): void {
   registerSessionsTailCommand(sessionsCmd);
   registerSessionsSyncCommand(sessionsCmd);
   registerSessionsResumeCommand(sessionsCmd);
+  registerSessionsFavoriteCommand(sessionsCmd);
   registerGoCommand(sessionsCmd);
   registerFocusCommand(sessionsCmd);
   registerDetachCommand(sessionsCmd);

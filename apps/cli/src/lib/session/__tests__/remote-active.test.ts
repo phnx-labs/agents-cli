@@ -39,3 +39,20 @@ describe('parseRemoteActive', () => {
     expect(parseRemoteActive('', 'zion')).toEqual([]);
   });
 });
+
+describe('parseRemoteActive viewingIn normalization', () => {
+  it('turns a peer label back into the internal viewer shape', () => {
+    const rows = parseRemoteActive(JSON.stringify([{ sessionId: 'a', viewingIn: 'codium tab 3' }]), 'peer');
+    expect(rows[0].viewingIn).toEqual({ app: 'codium', tab: 3 });
+  });
+
+  it('treats a detached peer row as having no viewer', () => {
+    const rows = parseRemoteActive(JSON.stringify([{ sessionId: 'a', viewingIn: 'detached' }]), 'peer');
+    expect(rows[0].viewingIn).toBeUndefined();
+  });
+
+  it('accepts the object shape a peer on an older version emits', () => {
+    const rows = parseRemoteActive(JSON.stringify([{ sessionId: 'a', viewingIn: { app: 'ghostty', tab: 2 } }]), 'peer');
+    expect(rows[0].viewingIn).toEqual({ app: 'ghostty', tab: 2 });
+  });
+});

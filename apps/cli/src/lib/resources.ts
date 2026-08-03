@@ -74,6 +74,31 @@ function resourceIsActive(kind: ResourceKind, name: string, source: string): boo
 }
 
 /**
+ * Documentation filenames that live *beside* resources, describing the directory
+ * rather than being a resource in it. A DotAgents repo keeps a `README.md` (for
+ * humans) and an `AGENTS.md` (for agents) in each resource dir, with
+ * `CLAUDE.md`/`GEMINI.md` symlinked to the latter. Without this filter every one
+ * of them materializes as a resource — `commands/README.md` installs a bogus
+ * `/README` slash command into every agent home.
+ *
+ * `rules` is exempt: there `AGENTS.md` IS the resource (the composed ruleset that
+ * syncs as each agent's memory file), not documentation about the directory.
+ */
+const DOC_BASENAMES = new Set(['readme', 'agents', 'claude', 'gemini']);
+
+/**
+ * True when `rawName` (a filename with its extension already stripped) names a
+ * directory doc rather than a resource of `kind`. Exported so every enumerator
+ * shares one definition — `listCentralCommands` and `discoverCommands` in
+ * `commands.ts` do their own `readdirSync` scans, and without this they would
+ * list a `README` that `resolveResource` then refuses to open.
+ */
+export function isDirectoryDoc(kind: ResourceKind, rawName: string): boolean {
+  if (kind === 'rules') return false;
+  return DOC_BASENAMES.has(rawName.toLowerCase());
+}
+
+/**
  * Resolve a single resource by kind + name using project > user > system precedence.
  * For file-based resources the path ends in `.md`, `.yaml`, or `.yml` as appropriate.
  * Returns null when the resource does not exist in any scope.
@@ -107,7 +132,9 @@ export function resolveResource(
       continue;
     }
 
-    // Try with common file extensions
+    // Try with common file extensions. A directory doc (README/AGENTS/CLAUDE/
+    // GEMINI) describes the directory and is never itself a resource.
+    if (isDirectoryDoc(kind, name)) continue;
     for (const ext of ['.md', '.yaml', '.yml']) {
       const withExt = exactPath + ext;
       if (fs.existsSync(withExt)) {
@@ -153,6 +180,11 @@ export function listResources(
     for (const entry of entries) {
       if (entry.name.startsWith('.')) continue;
       const rawName = entry.name.replace(/\.(md|yaml|yml)$/, '');
+      // Not isFile(): a Dirent for a symlink reports isFile() === false, and
+      // CLAUDE.md/GEMINI.md are symlinks to AGENTS.md by convention. Anything
+      // that is not a directory is a candidate doc; a resource directory that
+      // happens to be named `agents/` is still a real resource.
+      if (!entry.isDirectory() && isDirectoryDoc(kind, rawName)) continue;
       if (seen.has(rawName)) continue;
       if (!resourceIsActive(kind, rawName, source)) continue;
       seen.add(rawName);

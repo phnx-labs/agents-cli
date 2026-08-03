@@ -878,7 +878,32 @@ a stable per-account key:
 - **Usage bars** — a separate network pass ([`src/lib/usage.ts`](../src/lib/usage.ts))
   fetches live quota and renders `S:`/`W:` bars + plan. It's **stale-while-revalidate**
   (on-disk cache under `~/.agents/.cache/`, keyed per account: 2-min fresh, 24-h
-  block) so `agents view` / `agents run` stay off the network on the hot path.
+  block) so `agents view` stays off the network on the hot path.
+- **Routing reads the same cache under a tighter rule.** Displaying a slightly old
+  bar costs nothing; *choosing an account* from one costs the whole run, so the
+  balanced router caps staleness at **5 minutes**
+  (`USAGE_DECISION_MAX_AGE_MS`, [`src/lib/rotate.ts`](../src/lib/rotate.ts)) and
+  blocks on a live read past that — one bounded, parallel round trip per account,
+  and none inside the 2-minute fresh window. When a read fails and the cache is
+  all it has, the router prefers any account whose snapshot IS verified, and
+  reports `usage unverified` in the launch banner rather than presenting a stale
+  number as a fact. The cache is strictly per machine and never synced, so a box
+  whose refresh is failing would otherwise route on day-old numbers indefinitely.
+- **A read that fails on the credential names the reason.** No readable
+  credential, a locally-expired one, a rejected request, and a request that threw
+  are distinct errors (`usageNoCredentialError` / `usageExpiredCredentialError` /
+  `usageRejectedError` / `usageUnreachableError`,
+  [`src/lib/usage.ts`](../src/lib/usage.ts)), not a silent
+  null. All four networked providers — Claude, Kimi, Droid, Cursor — share them,
+  because they share one cache fallback: a silent null in any of them presents a
+  stale reading as confirmed. Because a usage read never refreshes a token,
+  an expired credential does not heal until that agent actually runs; a 429 reads
+  differently from a 401, since re-authing fixes one and not the other. `agents view`
+  renders a cached reading that a failed live read could not confirm as the number
+  plus `unverified`, and `--refresh` lists every account it could not reach rather
+  than printing a table that looks fully refreshed. Measured on `yosemite-s1`,
+  where every account's stored token had expired and two `--refresh` runs wrote
+  nothing to the cache while reporting nothing wrong.
 
 What each agent can surface is bounded by what its local credential actually
 contains — this is a data-availability limit, not a policy choice:
@@ -892,7 +917,7 @@ contains — this is a data-availability limit, not a policy choice:
 | Droid | email | live (`api.factory.ai`) | `~/.factory/auth.v2.file` is AES-256-GCM (key on disk at `auth.v2.key`); decrypt locally, read the email from the WorkOS access-token JWT. That same token authorizes `GET /api/billing/limits` for the three rolling rate-limit windows (5-hour → `S`, weekly → `W`, monthly, detailed-view only). |
 | Kimi | `id:<user_id>` + tier | live (`api.kimi.com/coding/v1/usages`) | JWT carries no email — only an opaque `user_id`. Quota + membership tier come from the `/usages` endpoint. |
 | Cursor | email | live (`cursor.com/api/usage`) | email/authId from `~/.cursor/cli-config.json`; access token from `~/.config/cursor/auth.json`. The endpoint is authed with a `WorkosCursorSessionToken=<authId>::<token>` cookie and returns a monthly request bar (`M`) for request-capped (free/legacy) plans. Usage-based plans report no request cap, so they render the account row without a bar. |
-| Antigravity | `signed in` | — | OAuth grant with no id_token — presence only. File `~/.gemini/antigravity-cli/antigravity-oauth-token`, else macOS keychain / Linux libsecret (`service gemini` + user `antigravity`) |
+| Antigravity | `signed in` | live (`cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota`) | OAuth grant with no id_token — presence only. File `~/.gemini/antigravity-cli/antigravity-oauth-token`, else macOS keychain / Linux libsecret (`service gemini` + user `antigravity`). The stored Google OAuth token authorizes the Code Assist quota endpoint `agy` itself uses; it returns one bucket per model (`gemini-3.1-pro`, `gemini-2.5-flash`, …) with its own reset time, and each bucket renders as its own bar (compact model tag: `3.1P`, `2.5F`, …). |
 | others | `not signed in` unless a credential exists | — | `default` case: no detector |
 
 Two deliberate boundaries worth knowing:
@@ -908,6 +933,14 @@ Two deliberate boundaries worth knowing:
   snapshot; each agent's own CLI refreshes on its next launch (Droid's token
   lives 24h). Droid surfaces the `standard` (primary) rate-limit pool, not the
   free `core` fallback pool.
+- **Antigravity usage MAY refresh, in-memory only.** Google's OAuth refresh
+  tokens are stable and non-rotating — a refresh mints a new access token and
+  leaves the refresh token (and every other live access token) valid, so a
+  read-path refresh can't invalidate a running `agy` the way a Claude/WorkOS
+  rotation would. The refreshed access token is used for the quota call and
+  then dropped: the keychain item is never written (agy rewrites it on its own
+  launches). Without this the bars would never render — Google access tokens
+  live ~1 hour.
 
 The same fields are exposed programmatically via `agents view --json`
 (`email`, `accountId`, `plan`, `usageStatus`, `windows`).

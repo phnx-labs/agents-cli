@@ -37,6 +37,18 @@ export interface Profile {
   preset?: string;
   provider?: string;
   /**
+   * Human-facing label for the harness — what `agents view` prints as the
+   * agent-type header, the same slot `AGENTS[id].name` fills for a native
+   * harness. Defaults to the profile name when unset.
+   */
+  label?: string;
+  /**
+   * Name of the harness this one was forked from — either a native agent id
+   * (`claude`, `opencode`) or another custom harness. Display-only lineage:
+   * the fork is a full copy, so deleting the source never affects it.
+   */
+  forkedFrom?: string;
+  /**
    * Optional secondary model retried on the same host when the primary model
    * env value hits a rate limit. Reuses the `--fallback` cascade in
    * `runWithFallback` (src/lib/exec.ts) — the swap is expressed as an
@@ -53,12 +65,19 @@ export interface Profile {
  */
 export interface ProfileSummary {
   name: string;
+  /** Human-facing header label — `label` when set, else the profile name. */
+  label: string;
   agent: AgentId;
   host: string;
+  /** Host version pin, or null when the harness follows the host's default. */
+  hostVersion: string | null;
   provider: string;
   model: string;
   auth: string;
   path: string;
+  description: string | null;
+  /** Native agent id or custom harness this one was forked from, if recorded. */
+  forkedFrom: string | null;
 }
 
 const PROFILE_NAME_PATTERN = /^[a-z0-9][a-z0-9-_]{0,48}$/i;
@@ -257,16 +276,28 @@ export function profileAuthLabel(profile: Profile): string {
   return provider;
 }
 
+/**
+ * Header label for the harness — the slot `AGENTS[id].name` fills for a native
+ * harness, so `agents view` can print custom and native harnesses the same way.
+ */
+export function profileLabel(profile: Profile): string {
+  return profile.label || profile.name;
+}
+
 /** Build a stable, machine-readable summary for list and view surfaces. */
 export function profileSummary(profile: Profile): ProfileSummary {
   return {
     name: profile.name,
+    label: profileLabel(profile),
     agent: profile.host.agent,
     host: profileHostLabel(profile),
+    hostVersion: profile.host.version ?? null,
     provider: profileProviderLabel(profile),
     model: profileModelLabel(profile),
     auth: profileAuthLabel(profile),
     path: getProfilePath(profile.name),
+    description: profile.description ?? null,
+    forkedFrom: profile.forkedFrom ?? null,
   };
 }
 
@@ -288,6 +319,7 @@ export function profileFromPreset(profileName: string, preset: Preset, version?:
     description: preset.description,
     preset: preset.name,
     provider: preset.provider,
+    forkedFrom: preset.host,
   };
 }
 
@@ -344,6 +376,8 @@ export interface HostModelOptions {
   /** Env var the host reads its auth token from; pair with `provider` to attach keychain auth. */
   authEnvVar?: string;
   description?: string;
+  /** Human-facing header label; defaults to the harness name. */
+  label?: string;
 }
 
 /**
@@ -364,12 +398,81 @@ export function profileFromHostModel(name: string, host: AgentId, model: string,
     env,
     description: opts.description ?? `Custom harness: ${host} + ${model}`,
     provider: opts.provider ?? host,
+    forkedFrom: host,
   };
+  if (opts.label) profile.label = opts.label;
   if (opts.provider && opts.authEnvVar) {
     profile.auth = { envVar: opts.authEnvVar, keychainItem: keychainItemName(opts.provider) };
     profile.authOptional = false;
   }
   return profile;
+}
+
+/** Overrides applied on top of the source when forking a harness. */
+export interface ForkProfileOptions {
+  /** Swap the pinned model. Written onto the source's model env key when it has
+   *  one, else onto the host's canonical model var. */
+  model?: string;
+  /** Swap the endpoint. Only applied for hosts with a known base-URL var. */
+  baseUrl?: string;
+  /** Repoint auth at a different provider's keychain item. */
+  provider?: string;
+  /** Env var the host reads its token from; pair with `provider`. */
+  authEnvVar?: string;
+  /** Re-pin (or unpin, with an empty string) the host CLI version. */
+  version?: string;
+  label?: string;
+  description?: string;
+}
+
+/**
+ * Copy an existing harness under a new name, applying overrides. The fork is a
+ * full copy — env, auth binding, and fallback model all carry over — so the two
+ * diverge from here and deleting the source never affects the fork.
+ */
+export function forkProfile(source: Profile, name: string, opts: ForkProfileOptions = {}): Profile {
+  validateProfileName(name);
+  const host = source.host.agent;
+  const env = { ...source.env };
+  if (opts.model) {
+    env[profileModelEnvKey(source) ?? modelEnvKeyForHost(host)] = opts.model;
+  }
+  if (opts.baseUrl) {
+    const key = baseUrlEnvKeyForHost(host);
+    if (!key) {
+      throw new Error(`Host '${host}' has no known base-URL env var; drop --base-url or fork onto a claude/codex host.`);
+    }
+    env[key] = opts.baseUrl;
+  }
+  const forked: Profile = {
+    ...source,
+    name,
+    host: { agent: host, ...(opts.version ? { version: opts.version } : source.host.version ? { version: source.host.version } : {}) },
+    env,
+    // The source's description names the source's model, so inheriting it
+    // across a model swap would describe the fork wrongly.
+    description: opts.description ?? (opts.model ? `Forked from ${source.name}: ${opts.model}` : source.description),
+    forkedFrom: source.name,
+  };
+  // `label` is the header `agents view` prints, so an inherited one would make
+  // the fork and its source visually identical — the ambiguity a per-harness
+  // block exists to remove. A fork carries a label only when it is given one;
+  // otherwise `profileLabel` falls back to the fork's own name.
+  if (opts.label) forked.label = opts.label;
+  else delete forked.label;
+  // A fork that repoints the model or endpoint is no longer that preset — keep
+  // the preset link only while the fork still matches what the preset defines.
+  if (opts.model || opts.baseUrl) delete forked.preset;
+  if (opts.provider) {
+    const envVar = opts.authEnvVar ?? source.auth?.envVar ?? authEnvKeyForHost(host);
+    if (!envVar) {
+      throw new Error(`Host '${host}' has no known auth env var; --provider cannot be attached to this fork.`);
+    }
+    forked.provider = opts.provider;
+    forked.auth = { envVar, keychainItem: keychainItemName(opts.provider) };
+    forked.authOptional = source.authOptional ?? false;
+  }
+  return forked;
 }
 
 /**

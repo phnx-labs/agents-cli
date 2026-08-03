@@ -235,7 +235,46 @@ SSH access (§7); rendering sessions that no harness produced.
   boolean, but `unknown` remains valid input from older remote peers. A structural
   `AskUserQuestion` / `ExitPlanMode` as last event MUST report `waiting_input` and
   MUST NOT decay with the freshness window (`lib/session/state.ts`; test
-  `state.test.ts`).
+  `state.test.ts`). A dead process whose OWNING HOST WINDOW also stopped
+  republishing MUST report `crashed` rather than `closed` — see SES-18a, which
+  narrows this clause.
+- **SES-18a (MUST).** A session's **host link** — whether any client is still
+  driving it — MUST be derived, never asserted, and MUST be folded on centrally
+  (`foldHostLink`, `lib/session/active.ts`) from the pure classifier
+  (`lib/session/host-link.ts`), never decided per source. A live agent with a
+  tmux attached-client count of exactly zero, or whose owning IDE window has not
+  republished its `live-terminals.json` slice within `HOST_HEARTBEAT_STALE_MS`,
+  MUST classify as `no-client`; a dead agent under such a window MUST classify as
+  `host-gone`. An ABSENT client count MUST read as unknown, never as zero. A
+  session whose `presence` is `background`/`parked` MUST NOT be classified as
+  either — no client is the point of detaching. On the status column, `abandoned`
+  MUST win outright, `host-gone` MUST replace `closed` with `crashed`, and
+  `no-client` MUST replace ONLY `idle`/`input_required` with `orphaned` — a
+  session still `running` MUST keep that status, so an ordinary headless run is
+  never reported as orphaned (test `active.hostlink.test.ts`,
+  `host-link.test.ts`). A dead-pid registry entry whose window has gone stale MUST
+  be RETAINED by `readLiveTerminals` so the session reaches the listing at all —
+  dropping it made a crashed session indistinguishable from one that never ran
+  (test `active.registry-retention.test.ts`). Every `tmux -F` format query MUST
+  use a separator tmux cannot emit inside a field: it sanitizes non-printable
+  characters out of format output, so a tab-separated format returns one
+  unsplittable field, and a printable separator a session name MAY contain merely
+  lowers the probability of the same bug. `:` is safe because tmux itself
+  rewrites `:`/`.` in a session name; the one field that may contain it
+  (`pane_current_path`) MUST be queried last (test `active.tmux-clients.test.ts`).
+  Consumers that read `ActiveStatus` MUST handle `orphaned`/`crashed` rather than
+  falling through to a stale `activity` — the `--waiting` filter reads the
+  never-rewritten activity via `isAwaitingUser`, the `--active` tally carries a
+  bucket per status, and the HQ Floor maps both to a needs-a-human mood
+  (`lib/hq/floor.ts`; tests `active.hostlink.test.ts`, `floor.test.ts`).
+- **SES-18b (MUST).** A favorite MUST be stored outside `sessions.db`
+  (`~/.agents/.history/favorites.json`, keyed by session id;
+  `lib/session/favorites.ts`), because the index is a rebuildable cache and a
+  favorite is not derivable from a transcript. A malformed or absent store MUST
+  degrade to "nothing is favorited", never throw into the listing path (test
+  `favorites.test.ts`). Favorites are per-machine: the store is NOT in the sync
+  manifest (`lib/session/sync/agents.ts` syncs `.history/backups/`), and any doc
+  claiming otherwise is drift.
 - **SES-19 (MUST).** Detach/attach presence MUST be **derived, never asserted**:
   the record only says "this session was detached"; `background` vs `parked` is
   decided live from the recorded pid + start-time fingerprint
@@ -350,6 +389,18 @@ The command surface (bare `sessions [query]`, `tail`, `sync`, `resume`, `focus`,
   `sessions.serialize.test.ts:76-115`); `tail --json` MUST pass raw JSONL through
   one event per line (`commands/sessions-tail.ts:229-232`); `sync --json`,
   `inject --json`, `migrations --json` emit their documented shapes.
+- **SES-IF-2a (MUST).** `sessions --resolve <selector> --json` MUST resolve a full
+  id, unique id prefix, or keyword query from indexed `SessionMeta` rows without
+  parsing or rendering transcript events. It MUST search the online fleet unless
+  `--local` is set; `--agent` and `--project` MUST narrow every peer. Exactly one
+  logical session MUST emit a one-element `SessionMeta[]`; synced copies sharing
+  the same full id MUST count as one logical session. A missing selector or more
+  than one logical match MUST emit no JSON, list the no-match/ambiguity on stderr,
+  and exit 1; ambiguity MUST include every matching full id and machine
+  (`commands/sessions.ts` `resolveSessionMetadata`, `fleetCandidatesByQuery`,
+  `metadataResolveForwardedArgs`; tests
+  `commands/sessions-resolve-db.test.ts`,
+  `commands/sessions-resolve-fleet.test.ts`).
 - **SES-IF-3 (MUST).** The export **bundle format** is NDJSON, `kind`
   `agents-session-bundle`, `version` 1; parse MUST reject a wrong kind/version;
   per-record `hash`/`size` are always over **plaintext** for byte-exact dedup;

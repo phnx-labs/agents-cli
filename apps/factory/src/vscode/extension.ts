@@ -35,7 +35,7 @@ import { startWatchdogBridge } from '../mcp/watchdog-bridge';
 import { ensureWatchdogMcpInstalled } from '../mcp/watchdogInstall';
 import * as notifications from './notifications.vscode';
 import * as terminals from './terminals.vscode';
-import { fetchLocalSessions, fetchRemoteSessionLabelSource, fetchSessionIdentity, fetchRecapSessions, LOCAL_LABEL } from './remoteSessions.vscode';
+import { fetchLocalSessions, fetchRemoteSessionLabelSource, fetchSessionIdentity, fetchRecapSessions, LOCAL_LABEL, LOCAL_MACHINE_ID } from './remoteSessions.vscode';
 import * as sessionTracker from './sessionTracker';
 import { runRecapHeadless, isRecapSupported } from './recap.vscode';
 import { buildAgentTerminalEnv } from '../core/terminals';
@@ -105,12 +105,31 @@ import * as readiness from './terminalReadiness';
 import { resolveAlias, isAgentInstalled, checkInstalledAgentsViaCli } from '../core/agentModels';
 import { pickAgentByUsage, rankHostsByUsage, HostUsageScore } from '../core/agentUsage';
 import { buildForkSessionRequest } from '../core/forkSession';
-import type { RemoteSession } from '../core/remoteSessions';
+import {
+  buildSessionBrowserRows,
+  cleanSessionTopic,
+  forkHostForSession,
+  formatSessionWhen,
+  type BrowsableSession,
+  type SessionBrowserSessionRow,
+} from '../core/sessionBrowser';
+import type { RemoteSession, RawActiveSession } from '../core/remoteSessions';
+import {
+  buildResumeCandidates,
+  defaultPickedIds,
+  STATE_HEADINGS,
+  type RecentSessionRow,
+  type ResumeCandidate,
+  type ResumeState,
+} from '../core/resumePicker';
 // readAgentRunStrategy no longer needed: agents-cli reads strategy from
 // agents.yaml itself when invoked via `agents run`.
 import { resolveAgentsBin, AgentsBinNotFoundError } from '../core/agentsBin';
 
 const AGENTS_CLI_INSTALL_CMD = 'npm install -g @phnx-labs/agents-cli';
+/** How many recent transcripts `Agents: Resume` loads. Live sessions are always
+ *  included regardless of this cap — a detached one is often days old. */
+const RESUME_PICKER_LIMIT = 100;
 let agentsCliPromptShown = false;
 
 async function ensureAgentsCliInstalled(): Promise<void> {
@@ -1634,6 +1653,10 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand('agents.forkPickSession', () => forkPickedSession(context))
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand('agents.handoff', () => handoffToAgent(context))
   );
 
@@ -1659,6 +1682,10 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('agents.sessionResume', () => resumeSession(context))
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('agents.resume', () => resumeSessionsBatch(context))
   );
 
   context.subscriptions.push(
@@ -2757,9 +2784,15 @@ async function hostHasUsableVersion(host: string, agentKey: string): Promise<boo
   return deviceHasUsableVersion(versions);
 }
 
+/**
+ * The recent-transcript listing. `sessions` takes the query as a positional
+ * argument and has no `list` subcommand — passing one made commander treat the
+ * word "list" as a search term, which matched nothing and left every picker in
+ * the extension reporting "No sessions found".
+ */
 async function listSessionsViaCli(limit = 30): Promise<CliSessionItem[]> {
   const { runAgents } = await import('../core/agentsBin');
-  const { stdout } = await runAgents(`sessions list --all -n ${limit} --json`, {
+  const { stdout } = await runAgents(`sessions --all -n ${limit} --json`, {
     maxBuffer: 10 * 1024 * 1024,
   });
   const parsed = JSON.parse(stdout);
@@ -2767,23 +2800,26 @@ async function listSessionsViaCli(limit = 30): Promise<CliSessionItem[]> {
   return parsed as CliSessionItem[];
 }
 
-function formatSessionWhen(timestamp: string): string {
-  const ts = Date.parse(timestamp);
-  if (!Number.isFinite(ts)) return '';
-  const diffMs = Date.now() - ts;
-  const mins = Math.floor(diffMs / 60_000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins} min ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
-  const days = Math.floor(hours / 24);
-  return `${days} day${days === 1 ? '' : 's'} ago`;
+/**
+ * The live counterpart of {@link listSessionsViaCli}: which sessions have a
+ * process running right now, and — via `viewingIn` — whether anyone is looking
+ * at it. Bare (no `--local`) so a session stranded on another fleet box shows up
+ * too; those resume over SSH.
+ */
+async function listActiveSessionsViaCli(): Promise<RawActiveSession[]> {
+  const { runAgents } = await import('../core/agentsBin');
+  const { stdout } = await runAgents('sessions --active --json', {
+    maxBuffer: 16 * 1024 * 1024,
+    timeout: 45_000,
+  });
+  const parsed = JSON.parse(stdout);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((r) => r && typeof r === 'object') as RawActiveSession[];
 }
 
-function cleanSessionTopic(topic: string | undefined): string {
-  if (!topic) return '(no topic)';
-  return topic.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() || '(no topic)';
-}
+// formatSessionWhen and cleanSessionTopic moved to ../core/sessionBrowser (pure,
+// unit-tested) and are imported at the top of this file; the fork picker and the
+// resume picker both call the shared implementations.
 
 interface SessionPickerOptions {
   title: string;
@@ -2911,9 +2947,13 @@ async function copySessionId() {
   // The session id stored on terminalEntry is the spawn-time value. It goes
   // stale when the user exits and reruns the agent in the same terminal, or
   // after /clear. Prefer the live id captured by the SessionStart hook
-  // (~/.agents/.cache/state/sessions/<agent-pid>.json).
+  // (~/.agents/.cache/state/sessions/<agent-pid>.json). An offloaded tab has no
+  // local agent process, so the hook state cannot describe it — its spawn-time
+  // id is the only local truth (see tryHydrateLiveSessionId).
   const shellPid = await activeTerminal.processId;
-  const liveId = await liveSessionIdForShell(shellPid);
+  const liveId = terminalEntry.host
+    ? null
+    : await liveSessionIdForShell(shellPid, terminalEntry.createdAt);
   const sessionId = liveId || terminalEntry.sessionId;
 
   if (!sessionId) {
@@ -2925,38 +2965,40 @@ async function copySessionId() {
   vscode.window.setStatusBarMessage(`Session ID copied: ${sessionId.slice(0, 8)}...`, 3000);
 }
 
-function agentKeyFromSession(agent: CliSessionItem['agent']): PrewarmAgentType | null {
-  if (agent === 'claude' || agent === 'codex' || agent === 'gemini' ||
-      agent === 'opencode' || agent === 'cursor') {
-    return agent;
-  }
-  return null;
+/**
+ * The agent key a session resumes under, for the PICKER paths (`Agents: Resume`
+ * and `Agents: Session Resume`). Every harness Factory presents can be resumed
+ * here — the five prewarm agents through their native flag, the rest through
+ * `agents run --resume` (see buildVersionedResumeCommand) — so the gate is
+ * membership in the agent registry, not the prewarm subset. `shell` is excluded:
+ * a shell tab has no conversation to resume.
+ *
+ * The OTHER resume surfaces — `restoreAgentTerminals` (reload), the reopen-last
+ * command, and reload-active-terminal — still gate on `supportsPrewarming`, so
+ * grok/kimi/droid/antigravity do not come back through those. Widening them
+ * means touching the crash-restore persistence path, which is deliberately out
+ * of scope here; tracked in issue #1747.
+ */
+function agentKeyFromSession(agent: string): SessionAgentType | null {
+  if (!agent || agent === 'shell') return null;
+  return BUILT_IN_AGENTS.some(a => a.key === agent) ? (agent as SessionAgentType) : null;
 }
 
-async function resumeSession(context: vscode.ExtensionContext) {
-  const activeTerminal = vscode.window.activeTerminal;
-  const terminalEntry = activeTerminal ? terminals.getByTerminal(activeTerminal) : null;
-  const currentSessionId = terminalEntry?.sessionId ?? null;
-  const currentShortId = currentSessionId ? currentSessionId.slice(0, 8) : null;
-
-  const session = await pickSession({
-    title: 'Agents: Session Resume',
-    placeholder: 'Pick a session to resume in a new terminal',
-    pinShortId: currentShortId,
-    pinLabel: 'Current',
-  });
-  if (!session) return;
-
+/** One resumed session, opened as its own editor tab wearing that agent's icon. */
+async function openResumedSessionTerminal(
+  context: vscode.ExtensionContext,
+  session: { id: string; shortId: string; agent: string; version?: string; account?: string; cwd?: string; host?: string },
+): Promise<boolean> {
   const agentKey = agentKeyFromSession(session.agent);
   if (!agentKey) {
-    vscode.window.showInformationMessage(`Cannot resume sessions of type ${session.agent}`);
-    return;
+    vscode.window.showInformationMessage(`Cannot resume sessions of type ${session.agent || 'unknown'}`);
+    return false;
   }
 
   const builtIn = BUILT_IN_AGENTS.find(a => a.key === agentKey);
   if (!builtIn) {
     vscode.window.showInformationMessage(`No built-in agent config for ${agentKey}`);
-    return;
+    return false;
   }
 
   const agentConfig = createAgentConfig(
@@ -2967,8 +3009,10 @@ async function resumeSession(context: vscode.ExtensionContext) {
     builtIn.prefix,
   );
 
-  const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
-  const resumeCmd = buildVersionedResumeCommand(agentKey, session.id, session.version);
+  // A resumed session belongs in ITS OWN directory, not whatever workspace this
+  // window happens to have open — batch resume routinely spans several repos.
+  const workspacePath = session.cwd || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+  const resumeCmd = buildVersionedResumeCommand(agentKey, session.id, session.version, session.host);
 
   const terminalId = terminals.nextId(builtIn.prefix);
   const title = buildTerminalTitle(agentConfig.title, undefined, context, session.id);
@@ -2976,6 +3020,7 @@ async function resumeSession(context: vscode.ExtensionContext) {
     iconPath: agentConfig.iconPath,
     location: { viewColumn: vscode.ViewColumn.Active },
     name: title,
+    cwd: session.cwd,
     env: buildAgentTerminalEnv(terminalId, session.id, workspacePath, session.version),
     isTransient: true,
   });
@@ -2990,6 +3035,11 @@ async function resumeSession(context: vscode.ExtensionContext) {
   }
   if (session.account) {
     terminals.setAccount(terminal, session.account);
+  }
+  // Stamp the device so everything that later reads this session (label poller,
+  // rotate, resume) follows it to the machine the transcript actually lives on.
+  if (session.host) {
+    terminals.setHost(terminal, session.host);
   }
   startAutoLabelPollerForTerminal(terminal, context);
 
@@ -3006,11 +3056,123 @@ async function resumeSession(context: vscode.ExtensionContext) {
   readiness.armAgentReady(terminal, {
     agentKey,
     sessionId: session.id,
-    cwd: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+    cwd: workspacePath,
   });
 
   terminal.show();
-  vscode.window.setStatusBarMessage(`Resuming ${agentKey}${session.version ? `@${session.version}` : ''} · ${session.shortId}`, 3000);
+  return true;
+}
+
+async function resumeSession(context: vscode.ExtensionContext) {
+  const activeTerminal = vscode.window.activeTerminal;
+  const terminalEntry = activeTerminal ? terminals.getByTerminal(activeTerminal) : null;
+  const currentSessionId = terminalEntry?.sessionId ?? null;
+  const currentShortId = currentSessionId ? currentSessionId.slice(0, 8) : null;
+
+  const session = await pickSession({
+    title: 'Agents: Session Resume',
+    placeholder: 'Pick a session to resume in a new terminal',
+    pinShortId: currentShortId,
+    pinLabel: 'Current',
+  });
+  if (!session) return;
+
+  const opened = await openResumedSessionTerminal(context, session);
+  if (opened) {
+    vscode.window.setStatusBarMessage(
+      `Resuming ${session.agent}${session.version ? `@${session.version}` : ''} · ${session.shortId}`,
+      3000,
+    );
+  }
+}
+
+/**
+ * `Agents: Resume` — pick any number of sessions, each reopens as its own tab.
+ *
+ * The list leads with sessions that are still RUNNING with nobody attached: the
+ * agent survived in its tmux pane while the window that displayed it closed or
+ * crashed. Those are pre-ticked, because they are the ones a user opens this
+ * command to rescue; everything else is available but unchecked.
+ */
+async function resumeSessionsBatch(context: vscode.ExtensionContext) {
+  let candidates: ResumeCandidate[];
+  try {
+    // The live read fans out across the fleet over SSH, so it can take seconds —
+    // show progress rather than leaving the palette looking hung.
+    candidates = await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Window, title: 'Agents: finding resumable sessions…' },
+      async () => {
+        const [recent, live] = await Promise.all([
+          listSessionsViaCli(RESUME_PICKER_LIMIT),
+          listActiveSessionsViaCli(),
+        ]);
+        return buildResumeCandidates(recent as RecentSessionRow[], live, normalizeHost(os.hostname()));
+      },
+    );
+  } catch (err: any) {
+    const msg = err?.stderr || err?.message || String(err);
+    if (msg.includes('ENOENT') || msg.includes('not found')) {
+      vscode.window.showInformationMessage('agents CLI not found. Install with: npm i -g @phnx-labs/agents-cli');
+    } else {
+      vscode.window.showInformationMessage(`Failed to list sessions: ${msg.slice(0, 160)}`);
+    }
+    return;
+  }
+
+  if (candidates.length === 0) {
+    vscode.window.showInformationMessage('No sessions found');
+    return;
+  }
+
+  interface CandidateItem extends vscode.QuickPickItem {
+    candidate?: ResumeCandidate;
+  }
+
+  const preselected = new Set(defaultPickedIds(candidates));
+  const items: CandidateItem[] = [];
+  let group: ResumeState | undefined;
+  for (const c of candidates) {
+    if (c.state !== group) {
+      group = c.state;
+      items.push({ label: STATE_HEADINGS[c.state], kind: vscode.QuickPickItemKind.Separator });
+    }
+    const agentLabel = c.version ? `${c.agent}@${c.version}` : c.agent;
+    const where = c.host ? ` · ${c.host}` : '';
+    const viewing = c.viewingIn ? ` · ${c.viewingIn}` : '';
+    const marker = c.state === 'detached' ? '$(debug-disconnect) ' : '';
+    items.push({
+      label: `${marker}${c.shortId}  ${c.topic || '(no topic)'}`,
+      description: `${agentLabel} · ${formatSessionWhen(new Date(c.lastActivityMs).toISOString())}${where}${viewing}`,
+      detail: `${c.project || '-'}${c.cwd ? `  ${c.cwd}` : ''}`,
+      picked: preselected.has(c.id),
+      candidate: c,
+    });
+  }
+
+  const detachedCount = preselected.size;
+  const picked = await vscode.window.showQuickPick<CandidateItem>(items, {
+    title: 'Agents: Resume',
+    placeHolder: detachedCount > 0
+      ? `${detachedCount} detached session${detachedCount === 1 ? '' : 's'} pre-selected — space toggles, enter opens each in a tab`
+      : 'Select sessions to reopen, each in its own tab',
+    canPickMany: true,
+    matchOnDescription: true,
+    matchOnDetail: true,
+  });
+
+  const chosen = (picked ?? []).map(p => p.candidate).filter((c): c is ResumeCandidate => !!c);
+  if (chosen.length === 0) return;
+
+  let opened = 0;
+  for (const c of chosen) {
+    // Sequential, not Promise.all: each open awaits its terminal's promptReady
+    // before typing the resume command, and racing them interleaves the sends.
+    if (await openResumedSessionTerminal(context, c)) opened++;
+  }
+  vscode.window.setStatusBarMessage(
+    `Resumed ${opened} session${opened === 1 ? '' : 's'}`,
+    4000,
+  );
 }
 
 async function fetchAgentsViewJson(
@@ -3463,7 +3625,10 @@ export async function openSingleAgentWithQueue(
   context: vscode.ExtensionContext,
   agentConfig: Omit<AgentConfig, 'count'>,
   messages: string[],
-  opts?: { cwd?: string; mode?: AgentLaunchMode; sessionId?: string; strategy?: RunStrategy; host?: string; local?: boolean }
+  // `cwd` is where the TERMINAL starts on this machine; `remoteCwd` is the
+  // directory the agent starts in on `host` (emitted as `agents run --cwd`), for
+  // a launch that has to land in a specific repo over there.
+  opts?: { cwd?: string; remoteCwd?: string; mode?: AgentLaunchMode; sessionId?: string; strategy?: RunStrategy; host?: string; local?: boolean }
 ): Promise<{ terminalId: string; sessionId: string | null }> {
   const editorLocation: vscode.TerminalEditorLocationOptions = {
     viewColumn: vscode.ViewColumn.Active,
@@ -3505,9 +3670,9 @@ export async function openSingleAgentWithQueue(
       // A caller (dispatch) may pre-supply the id so it can watch that exact
       // session file for a plan / completion afterwards.
       sessionId = opts?.sessionId ?? generateClaudeSessionId();
-      command = buildAgentLaunchCommand(agentKey, sessionId, defaultModel, undefined, undefined, opts?.strategy, opts?.mode, targetHost, opts?.local);
+      command = buildAgentLaunchCommand(agentKey, sessionId, defaultModel, undefined, undefined, opts?.strategy, opts?.mode, targetHost, opts?.local, opts?.remoteCwd);
     } else {
-      command = buildAgentLaunchCommand(agentKey, null, defaultModel, undefined, undefined, opts?.strategy, opts?.mode, targetHost, opts?.local);
+      command = buildAgentLaunchCommand(agentKey, null, defaultModel, undefined, undefined, opts?.strategy, opts?.mode, targetHost, opts?.local, opts?.remoteCwd);
     }
   }
 
@@ -4034,13 +4199,21 @@ async function tryHydrateLiveSessionId(
 ): Promise<void> {
   const entry = terminals.getByTerminal(terminal);
   if (!entry) return;
+  // An offloaded tab's agent runs on another machine, so `terminal.processId` is
+  // the local ssh client and NO local state file can describe it. Reading one
+  // anyway binds the tab to whatever local session last held that pid — a pid the
+  // OS has since recycled — which is how a remote tab ended up displaying an
+  // unrelated 20-day-old session's id and version. The device's own session feed
+  // is the only authority here, and the label/preview/resume paths already route
+  // through it (see EditorTerminal.host).
+  if (entry.host) return;
   const inflightKey = entry.id || `live:${terminal.name}`;
   if (liveSessionInFlight.has(inflightKey)) return;
   liveSessionInFlight.add(inflightKey);
 
   try {
     const shellPid = await terminal.processId;
-    const liveId = await liveSessionIdForShell(shellPid);
+    const liveId = await liveSessionIdForShell(shellPid, entry.createdAt);
     if (!liveId) return;
 
     if (entry.sessionId !== liveId) {
@@ -4600,6 +4773,216 @@ async function forkCurrentSession(context: vscode.ExtensionContext): Promise<voi
   });
 }
 
+// --- The session browser (Agents: Fork (Pick Session)) ----------------------
+// `Agents: Fork` forks the tab you are sitting in. This is the other half: browse
+// every recent transcript — on this machine, or on any fleet device you switch to
+// — and fork the one you pick. A row's machine is where its fork runs, so picking
+// a session that lives on `yosemite-s0` starts the sibling agent THERE (over
+// `agents run --host`), where its transcript actually is.
+
+/** Rows per machine in the browser. Enough to reach yesterday's work without
+ *  turning the picker into a scroll marathon; the filter box covers the rest. */
+const SESSION_BROWSER_LIMIT = 60;
+
+/**
+ * Recent transcripts for the browser. Bare, this is the local index (fast, no
+ * SSH). With `device`, the CLI fans the same listing out to that box over SSH and
+ * answers with the identical row shape — which is why one parser serves both.
+ */
+async function listBrowsableSessions(device?: string): Promise<BrowsableSession[]> {
+  const { runAgents } = await import('../core/agentsBin');
+  const scope = device ? ` --host ${shquote(device)}` : '';
+  const { stdout } = await runAgents(
+    `sessions --all -n ${SESSION_BROWSER_LIMIT} --json${scope}`,
+    { maxBuffer: 16 * 1024 * 1024, timeout: device ? 45_000 : 20_000 },
+  );
+  const parsed = JSON.parse(stdout);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((s): s is BrowsableSession => !!s && typeof s === 'object' && typeof s.id === 'string');
+}
+
+interface SessionBrowserItem extends vscode.QuickPickItem {
+  row?: SessionBrowserSessionRow;
+}
+
+function toBrowserItems(rows: ReturnType<typeof buildSessionBrowserRows>): SessionBrowserItem[] {
+  return rows.map((row) =>
+    row.kind === 'group'
+      ? { label: row.label, kind: vscode.QuickPickItemKind.Separator }
+      : {
+          label: row.label,
+          description: row.description,
+          detail: row.detail,
+          row,
+        },
+  );
+}
+
+/** Which machine's sessions the browser is listing. `undefined` = this one. */
+async function pickBrowseDevice(current: string | undefined): Promise<{ device?: string; cancelled: boolean }> {
+  const devices = await listRegisteredDevices();
+  const items: (vscode.QuickPickItem & { deviceId?: string })[] = [
+    {
+      label: '$(vm) This machine',
+      description: LOCAL_MACHINE_ID,
+      picked: !current,
+    },
+    ...devices
+      .filter(d => normalizeHost(d.name) !== LOCAL_MACHINE_ID)
+      .sort((a, b) => Number(b.online) - Number(a.online) || a.name.localeCompare(b.name))
+      .map(d => ({
+        label: `${d.online ? '$(radio-tower)' : '$(circle-slash)'} ${d.name}`,
+        description: d.online ? 'online' : 'offline',
+        deviceId: normalizeHost(d.name),
+      })),
+  ];
+  const picked = await vscode.window.showQuickPick(items, {
+    title: 'Browse sessions on…',
+    placeHolder: 'Pick the machine whose sessions to browse',
+  });
+  if (!picked) return { cancelled: true };
+  return { device: picked.deviceId, cancelled: false };
+}
+
+/**
+ * The browser itself. One QuickPick that reloads in place when you switch device,
+ * so the flow stays "open → filter → pick" instead of a wizard. Returns the row
+ * the user chose, or null when they dismissed it.
+ */
+async function pickSessionToFork(currentSessionId: string | null): Promise<SessionBrowserSessionRow | null> {
+  const quickPick = vscode.window.createQuickPick<SessionBrowserItem>();
+  const switchDevice: vscode.QuickInputButton = {
+    iconPath: new vscode.ThemeIcon('server-environment'),
+    tooltip: 'Browse another device…',
+  };
+  const reload: vscode.QuickInputButton = {
+    iconPath: new vscode.ThemeIcon('refresh'),
+    tooltip: 'Reload sessions',
+  };
+  quickPick.placeholder = 'Pick a session to fork — filter by topic, project, harness or id';
+  quickPick.matchOnDescription = true;
+  quickPick.matchOnDetail = true;
+  quickPick.buttons = [switchDevice, reload];
+
+  let device: string | undefined;
+
+  const load = async (): Promise<void> => {
+    quickPick.title = `Agents: Fork (Pick Session) · ${device ?? LOCAL_MACHINE_ID}`;
+    quickPick.busy = true;
+    quickPick.items = [];
+    try {
+      const sessions = await listBrowsableSessions(device);
+      const rows = buildSessionBrowserRows(sessions, {
+        localMachine: LOCAL_MACHINE_ID,
+        currentSessionId,
+        limitPerMachine: SESSION_BROWSER_LIMIT,
+      });
+      quickPick.items = rows.length > 0
+        ? toBrowserItems(rows)
+        : [{ label: `No sessions found on ${device ?? LOCAL_MACHINE_ID}`, alwaysShow: true }];
+    } catch (err: any) {
+      // A device that is off, unreachable, or missing the CLI fails here — say so
+      // in the list itself rather than closing the picker out from under the user.
+      const msg = (err?.stderr || err?.message || String(err)).trim().split('\n')[0];
+      quickPick.items = [{ label: `$(error) Could not list sessions: ${msg.slice(0, 120)}`, alwaysShow: true }];
+    } finally {
+      quickPick.busy = false;
+    }
+  };
+
+  try {
+    return await new Promise<SessionBrowserSessionRow | null>((resolve) => {
+      // Set while the device sub-picker is up: VS Code hides this QuickPick when
+      // another opens, and that hide must not read as "the user cancelled".
+      let switching = false;
+
+      quickPick.onDidTriggerButton(async (button) => {
+        if (button === reload) {
+          void load();
+          return;
+        }
+        switching = true;
+        quickPick.hide();
+        const chosen = await pickBrowseDevice(device);
+        switching = false;
+        quickPick.show();
+        if (chosen.cancelled) return; // back to the list, same device
+        device = chosen.device;
+        void load();
+      });
+
+      quickPick.onDidAccept(() => {
+        const picked = quickPick.selectedItems[0];
+        if (!picked?.row) return; // an empty-state / error line is not selectable
+        resolve(picked.row);
+        quickPick.hide();
+      });
+
+      quickPick.onDidHide(() => {
+        if (!switching) resolve(null);
+      });
+
+      quickPick.show();
+      void load();
+    });
+  } finally {
+    quickPick.dispose();
+  }
+}
+
+/** `Agents: Fork (Pick Session)` — browse sessions, fork the chosen one where it lives. */
+async function forkPickedSession(context: vscode.ExtensionContext): Promise<void> {
+  const activeTerminal = vscode.window.activeTerminal;
+  const entry = activeTerminal ? terminals.getByTerminal(activeTerminal) : null;
+
+  const row = await pickSessionToFork(entry?.sessionId ?? null);
+  if (!row) return;
+
+  const request = buildForkSessionRequest({
+    sessionId: row.session.id,
+    agentKey: row.session.agent,
+    host: forkHostForSession(row.session, LOCAL_MACHINE_ID),
+  });
+  if (!request.ok) {
+    vscode.window.showErrorMessage(
+      request.reason === 'no_session'
+        ? `Session ${row.session.shortId} has no id to fork.`
+        : `Session ${row.session.shortId} has no agent harness to fork with.`,
+    );
+    return;
+  }
+
+  const builtIn = BUILT_IN_AGENTS.find(a => a.key === request.agentKey);
+  if (!builtIn) {
+    vscode.window.showErrorMessage(`Cannot fork a ${row.session.agent} session — no built-in agent config for it.`);
+    return;
+  }
+  const agentConfig = createAgentConfig(
+    context.extensionPath,
+    builtIn.title,
+    builtIn.command,
+    builtIn.icon,
+    builtIn.prefix,
+  );
+
+  // The fork belongs in the SESSION's directory, not whatever this window has
+  // open — the browser spans every project on the machine. Locally that pins the
+  // terminal; on a device it becomes the remote `--cwd`, since the path exists
+  // over there (that is where the transcript came from).
+  await openSingleAgentWithQueue(context, agentConfig, [request.prompt], {
+    strategy: request.strategy,
+    host: request.host,
+    local: request.local,
+    cwd: request.local ? row.session.cwd : undefined,
+    remoteCwd: request.local ? undefined : row.session.cwd,
+  });
+
+  vscode.window.setStatusBarMessage(
+    `Forking ${row.session.shortId}${request.host ? ` on ${request.host}` : ''}`,
+    3000,
+  );
+}
+
 // Store context reference for deactivate
 let extensionContext: vscode.ExtensionContext | undefined;
 
@@ -4672,7 +5055,9 @@ async function restoreAgentTerminals(context: vscode.ExtensionContext): Promise<
     });
 
     const pid = await terminal.processId;
-    terminals.register(terminal, session.terminalId, agentConfig, pid, context, session.label);
+    // Carry the tab's original creation time across the reload — the agent it is
+    // being restored onto is older than this widget (see register's createdAt).
+    terminals.register(terminal, session.terminalId, agentConfig, pid, context, session.label, session.createdAt);
     readiness.registerTerminal(terminal);
 
     // Preserve the version pin across reloads. The env var above is belt; this
@@ -4821,7 +5206,9 @@ async function reattachSession(
   );
 
   const pid = await terminal.processId;
-  terminals.register(terminal, session.terminalId, agentConfig, pid, context, session.label);
+  // Same as the reload path: the agent predates this widget by however long the
+  // client was disconnected, so the tab keeps its original creation time.
+  terminals.register(terminal, session.terminalId, agentConfig, pid, context, session.label, session.createdAt);
   // The agent is already running in the session we just attached to — mark all
   // readiness events fired so nothing probes it as if it were booting.
   readiness.registerTerminal(terminal, { restored: true });
