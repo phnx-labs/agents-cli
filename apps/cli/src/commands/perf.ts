@@ -32,6 +32,7 @@ interface PerfGlobalOpts {
   warnMs?: string;
   json?: boolean;
   limit?: string;
+  project?: string;
 }
 
 function parseDays(raw: string | undefined): number {
@@ -50,11 +51,12 @@ function parseLimit(raw: string | undefined, fallback: number): number {
 }
 
 /** Map warehouse rows shaped like hook.fire into the existing HookProfileRow UI. */
-function asHookRows(rows: PerfAggregateRow[]): HookProfileRow[] {
+export function asHookRows(rows: PerfAggregateRow[]): HookProfileRow[] {
   return rows.map((r) => ({
     hook: r.label,
     n: r.n,
     p50Ms: r.p50Ms,
+    p95Ms: r.p95Ms,
     p99Ms: r.p99Ms,
     meanMs: r.meanMs,
     maxMs: r.maxMs,
@@ -62,6 +64,9 @@ function asHookRows(rows: PerfAggregateRow[]): HookProfileRow[] {
     cacheStalePct: r.cacheStalePct ?? 0,
     cacheMissPct: r.cacheMissPct ?? 0,
     errorCount: r.errorCount ?? 0,
+    errorRate: r.errorRate,
+    timeoutRate: r.timeoutRate,
+    project: r.project,
   }));
 }
 
@@ -81,23 +86,33 @@ function printTable(
   }
 }
 
-function renderHookTable(rows: HookProfileRow[], warnMs: number): void {
+/** `err:12% to:4%` when either rate is present, else ''. */
+function formatRateColumn(r: { errorRate?: number; timeoutRate?: number }): string {
+  const parts: string[] = [];
+  if (r.errorRate) parts.push(`err:${Math.round(r.errorRate * 100)}%`);
+  if (r.timeoutRate) parts.push(`to:${Math.round(r.timeoutRate * 100)}%`);
+  return parts.join(' ');
+}
+
+export function renderHookTable(rows: HookProfileRow[], warnMs: number): void {
   if (rows.length === 0) {
     console.log(chalk.gray('No hook timing samples yet.'));
     console.log(chalk.gray(`Warehouse: ${perfDbPath()}`));
     console.log(chalk.gray('Hooks write via cache/matches shims into the spool; run a session or resync hooks.'));
     return;
   }
-  const widths = { hook: 36, n: 5, p50: 7, p99: 7, mean: 7, max: 7, cache: 28 };
+  const widths = { hook: 36, n: 5, p50: 7, p95: 7, p99: 7, mean: 7, max: 7, cache: 22, rate: 14 };
   const pad = (s: string, w: number) => (s.length >= w ? s.slice(0, w) : s + ' '.repeat(w - s.length));
   const header = [
     pad('HOOK', widths.hook),
     pad('N', widths.n),
     pad('P50', widths.p50),
+    pad('P95', widths.p95),
     pad('P99', widths.p99),
     pad('MEAN', widths.mean),
     pad('MAX', widths.max),
     pad('CACHE', widths.cache),
+    pad('ERR/TIMEOUT', widths.rate),
   ].join(' ');
   console.log(chalk.bold(header));
   console.log(chalk.gray('─'.repeat(header.length)));
@@ -109,10 +124,12 @@ function renderHookTable(rows: HookProfileRow[], warnMs: number): void {
       pad(r.hook, widths.hook),
       pad(String(r.n), widths.n),
       pad(formatMs(r.p50Ms), widths.p50),
+      pad(formatMs(r.p95Ms), widths.p95),
       pad(formatMs(r.p99Ms), widths.p99),
       pad(formatMs(r.meanMs), widths.mean),
       pad(formatMs(r.maxMs), widths.max),
       pad(cacheCol, widths.cache),
+      pad(formatRateColumn(r), widths.rate),
     ].join(' ') + warning;
     console.log(slow ? chalk.yellow(line) : line);
   }
@@ -124,17 +141,19 @@ function renderLabelTable(title: string, rows: PerfAggregateRow[], warnMs: numbe
     console.log(chalk.gray(`No ${title} samples yet.`));
     return;
   }
-  const widths = [40, 5, 7, 7, 7, 7];
+  const widths = [40, 5, 7, 7, 7, 7, 7, 14];
   printTable(
-    ['LABEL', 'N', 'P50', 'P99', 'MEAN', 'MAX'],
+    ['LABEL', 'N', 'P50', 'P95', 'P99', 'MEAN', 'MAX', 'ERR/TIMEOUT'],
     widths,
     sliced.map((r) => [
       r.label,
       String(r.n),
       formatMs(r.p50Ms),
+      formatMs(r.p95Ms),
       formatMs(r.p99Ms),
       formatMs(r.meanMs),
       formatMs(r.maxMs),
+      formatRateColumn(r),
     ]),
     sliced.map((r) => r.p99Ms > warnMs),
   );
@@ -142,18 +161,20 @@ function renderLabelTable(title: string, rows: PerfAggregateRow[], warnMs: numbe
 
 /**
  * Prefer SQLite samples; fall back to the legacy daily JSONL so existing
- * instrumentation still surfaces until shims are resynced.
+ * instrumentation still surfaces until shims are resynced. `project` only
+ * narrows the SQLite path — the legacy JSONL log has no cwd, so a fallback
+ * hit ignores it (a caller filtering by project has no legacy rows to miss).
  */
-function loadHookProfile(days: number): HookProfileRow[] {
-  const fromDb = asHookRows(aggregateSamples({ days, kinds: ['hook.fire'] }));
-  if (fromDb.length > 0) return fromDb;
+export function loadHookProfile(days: number, project?: string): HookProfileRow[] {
+  const fromDb = asHookRows(aggregateSamples({ days, kinds: ['hook.fire'], project }));
+  if (fromDb.length > 0 || project) return fromDb;
   return aggregateHookProfile(loadHookFireEvents(days));
 }
 
 function hooksAction(opts: PerfGlobalOpts): void {
   const days = parseDays(opts.days);
   const warnMs = parseWarnMs(opts.warnMs, DEFAULT_SLOW_HOOK_WARN_MS);
-  const rows = loadHookProfile(days);
+  const rows = loadHookProfile(days, opts.project);
   if (opts.json) {
     console.log(JSON.stringify(rows, null, 2));
     return;
@@ -165,7 +186,7 @@ function commandsAction(opts: PerfGlobalOpts): void {
   const days = parseDays(opts.days);
   const warnMs = parseWarnMs(opts.warnMs, 500);
   const limit = parseLimit(opts.limit, 40);
-  const rows = aggregateSamples({ days, kinds: ['command.end'] });
+  const rows = aggregateSamples({ days, kinds: ['command.end'], project: opts.project });
   if (opts.json) {
     console.log(JSON.stringify(rows.slice(0, limit), null, 2));
     return;
@@ -177,7 +198,7 @@ function runAction(opts: PerfGlobalOpts): void {
   const days = parseDays(opts.days);
   const warnMs = parseWarnMs(opts.warnMs, 60_000);
   const limit = parseLimit(opts.limit, 40);
-  const rows = aggregateSamples({ days, kinds: ['perf.timing'] });
+  const rows = aggregateSamples({ days, kinds: ['perf.timing'], project: opts.project });
   if (opts.json) {
     console.log(JSON.stringify(rows.slice(0, limit), null, 2));
     return;
@@ -187,31 +208,33 @@ function runAction(opts: PerfGlobalOpts): void {
 
 function summaryAction(opts: PerfGlobalOpts): void {
   const days = parseDays(opts.days);
+  const project = opts.project;
   if (opts.json) {
     console.log(JSON.stringify({
       days,
+      project: project ?? null,
       warehouse: perfDbPath(),
-      hooks: loadHookProfile(days),
-      commands: aggregateSamples({ days, kinds: ['command.end'] }).slice(0, 20),
-      run: aggregateSamples({ days, kinds: ['perf.timing'] }).slice(0, 20),
+      hooks: loadHookProfile(days, project),
+      commands: aggregateSamples({ days, kinds: ['command.end'], project }).slice(0, 20),
+      run: aggregateSamples({ days, kinds: ['perf.timing'], project }).slice(0, 20),
     }, null, 2));
     return;
   }
 
-  console.log(chalk.bold(`agents perf — last ${days} day${days === 1 ? '' : 's'}`));
+  console.log(chalk.bold(`agents perf — last ${days} day${days === 1 ? '' : 's'}${project ? ` — project ${project}` : ''}`));
   console.log(chalk.gray(`warehouse: ${perfDbPath()}  (disposable; soft-join sessions via session_id/agent/machine)`));
   console.log('');
 
   console.log(chalk.bold('Commands (slowest by p99)'));
-  renderLabelTable('command', aggregateSamples({ days, kinds: ['command.end'] }), parseWarnMs(opts.warnMs, 500), 12);
+  renderLabelTable('command', aggregateSamples({ days, kinds: ['command.end'], project }), parseWarnMs(opts.warnMs, 500), 12);
   console.log('');
 
   console.log(chalk.bold('Hooks'));
-  renderHookTable(loadHookProfile(days), parseWarnMs(opts.warnMs, DEFAULT_SLOW_HOOK_WARN_MS));
+  renderHookTable(loadHookProfile(days, project), parseWarnMs(opts.warnMs, DEFAULT_SLOW_HOOK_WARN_MS));
   console.log('');
 
   console.log(chalk.bold('Runs (perf.timing)'));
-  renderLabelTable('run/timing', aggregateSamples({ days, kinds: ['perf.timing'] }), parseWarnMs(opts.warnMs, 60_000), 12);
+  renderLabelTable('run/timing', aggregateSamples({ days, kinds: ['perf.timing'], project }), parseWarnMs(opts.warnMs, 60_000), 12);
 }
 
 function attachSharedOptions(cmd: Command): Command {
@@ -219,6 +242,7 @@ function attachSharedOptions(cmd: Command): Command {
     .option('--days <n>', 'Days of samples to include', '7')
     .option('--warn-ms <n>', 'p99 above this is highlighted')
     .option('--limit <n>', 'Max rows in the table', '40')
+    .option('--project <key>', 'Scope to one project (the repo directory name a sample\'s cwd resolves to — see project-key.ts)')
     .option('--json', 'Emit JSON instead of a table');
 }
 
@@ -243,11 +267,12 @@ Identity columns reuse sessions/events string shapes (session_id, agent, machine
 for soft cross-reference; there are no foreign keys.
 
 Examples:
-  agents perf                     # summary: commands + hooks + runs
-  agents perf hooks               # per-hook p50/p99 + cache hit rate
-  agents perf commands --days 30  # slowest CLI entrypoints
-  agents perf run --json          # agent.run timings as JSON
+  agents perf                        # summary: commands + hooks + runs
+  agents perf hooks                  # per-hook p50/p95/p99 + cache hit rate
+  agents perf commands --days 30     # slowest CLI entrypoints
+  agents perf run --json             # agent.run timings as JSON
   agents perf hooks --warn-ms 500
+  agents perf hooks --project agents-cli  # scope to one repo's samples
 `);
 
   // Options live on the parent so `agents perf --json` and

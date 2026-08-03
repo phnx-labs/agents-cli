@@ -125,4 +125,45 @@ describe('perf/db', () => {
     recordSample({ kind: 'hook.fire', label: '', durationMs: 10 });
     expect(aggregateSamples({ days: 1 })).toHaveLength(0);
   });
+
+  it('computes p95Ms, errorRate, and timeoutRate alongside p50/p99', () => {
+    const base = Date.now();
+    for (let i = 0; i < 10; i++) {
+      recordSample({ tsMs: base, kind: 'hook.fire', label: 'guard', durationMs: 10 + i, exitCode: 0 });
+    }
+    recordSample({ tsMs: base, kind: 'hook.fire', label: 'guard', durationMs: 500, exitCode: 1 });
+    recordSample({ tsMs: base, kind: 'hook.fire', label: 'guard', durationMs: 5000, status: 'timeout' });
+
+    const rows = aggregateSamples({ days: 1, kinds: ['hook.fire'] });
+    expect(rows).toHaveLength(1);
+    const row = rows[0];
+    expect(row.n).toBe(12);
+    expect(row.p95Ms).toBeGreaterThanOrEqual(row.p50Ms);
+    expect(row.p99Ms).toBeGreaterThanOrEqual(row.p95Ms);
+    expect(row.errorCount).toBe(1);
+    expect(row.errorRate).toBeCloseTo(1 / 12, 3);
+    expect(row.timeoutRate).toBeCloseTo(1 / 12, 3);
+  });
+
+  it('project filter scopes aggregation to samples whose cwd resolves to that project', () => {
+    const repoA = fs.mkdtempSync(path.join(os.tmpdir(), 'perf-proj-a-'));
+    fs.mkdirSync(path.join(repoA, '.git'));
+    const repoB = fs.mkdtempSync(path.join(os.tmpdir(), 'perf-proj-b-'));
+    fs.mkdirSync(path.join(repoB, '.git'));
+    try {
+      recordSample({ kind: 'hook.fire', label: 'guard', durationMs: 10, cwd: repoA });
+      recordSample({ kind: 'hook.fire', label: 'guard', durationMs: 20, cwd: repoA });
+      recordSample({ kind: 'hook.fire', label: 'guard', durationMs: 999, cwd: repoB });
+
+      const projectA = path.basename(repoA);
+      const rows = aggregateSamples({ days: 1, kinds: ['hook.fire'], project: projectA });
+      expect(rows).toHaveLength(1);
+      expect(rows[0].n).toBe(2);
+      expect(rows[0].project).toBe(projectA);
+      expect(rows[0].maxMs).toBe(20);
+    } finally {
+      fs.rmSync(repoA, { recursive: true, force: true });
+      fs.rmSync(repoB, { recursive: true, force: true });
+    }
+  });
 });
