@@ -104,6 +104,9 @@ const WEBHOOKS_DIR = path.join(USER_AGENTS_DIR, 'webhooks');
 // monitor is a routine whose trigger is a watched source instead of a clock.
 const MONITORS_DIR = path.join(USER_AGENTS_DIR, 'monitors');
 const TEAMS_DIR = path.join(USER_AGENTS_DIR, 'teams');
+// Named project definitions (the layer above the --project convention). Sibling
+// of ROUTINES_DIR/TEAMS_DIR: hand-editable YAML, synced across machines by push/pull.
+const PROJECTS_DIR = path.join(USER_AGENTS_DIR, 'projects');
 
 // History bucket (durable).
 const SESSIONS_DIR = path.join(HISTORY_DIR, 'sessions');
@@ -357,6 +360,9 @@ export function getPackagesDir(): string { return PACKAGES_DIR; }
 
 /** Path to routine YAML definitions (~/.agents/routines/). */
 export function getRoutinesDir(): string { return process.env.AGENTS_ROUTINES_DIR ?? ROUTINES_DIR; }
+
+/** Path to named project definitions (~/.agents/projects/). */
+export function getProjectsDir(): string { return process.env.AGENTS_PROJECTS_DIR ?? PROJECTS_DIR; }
 
 /**
  * Path to webhook handler YAML definitions (~/.agents/webhooks/). Handlers are
