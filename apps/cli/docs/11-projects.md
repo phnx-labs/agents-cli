@@ -30,8 +30,10 @@ repo: phnx-labs/rush            # primary GitHub slug (PR / merge rollup)
 repos:                          # additional repos, each with an optional monorepo subpath
   - slug: phnx-labs/rush-infra
 contexts:                       # described starting points — an agent reads `purpose`
-  - path: apps/web    purpose: "user-facing Next.js app; funnel + growth surfaces"
-  - path: packages/api purpose: "FastAPI backend; Supabase models live here"
+  - path: apps/web
+    purpose: "user-facing Next.js app; funnel + growth surfaces"
+  - path: packages/api
+    purpose: "FastAPI backend; Supabase models live here"
 integrations:                   # external context, surfaced in `projects show`
   - kind: gdrive  url: https://drive.google.com/…  label: "design docs"
 linear:
@@ -59,8 +61,11 @@ linear:
 ## The progress card — `agents projects status`
 
 The headline. It matches every live session to a project **by cwd** (longest root
-wins; no persisted column, so it works cross-machine because transcript cwd already
-syncs) and rolls up the signals already on disk:
+wins) and rolls up the signals already on disk. The live-agent rollup is over this
+machine's active sessions (the same set `agents sessions --active` shows, matched by
+local-home cwd); the **merged-PR count is repo-global** (via `gh`). A fleet-wide live
+rollup — SSH fan-out plus home-relative cwd matching so a session recorded on a
+different-home machine still matches — is a deferred follow-up (see below):
 
 ```
 rush  ·  23 agents  ·  68% plan
@@ -97,6 +102,10 @@ definitions now.
 
 ## Not yet (fast-follow)
 
-Re-pointing `agents factory snapshot`'s per-project Linear rollup at defined projects,
-richer Linear ticket-state counts on the card, and a persisted `project_id` session
-column (today membership is derived from cwd) are deferred follow-ups.
+- **Fleet-wide live rollup.** Today the live-agent count is this machine's active
+  sessions; a fan-out across `agents devices` plus home-relative cwd matching (so a
+  session from a different-home machine still maps to the project) would make it truly
+  cross-fleet.
+- **Re-point `agents factory snapshot`** per-project Linear rollup at defined projects.
+- **Richer Linear ticket-state counts** on the card.
+- **Persisted `project_id` session column** — today membership is derived from cwd.

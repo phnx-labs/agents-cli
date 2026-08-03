@@ -5,9 +5,11 @@
  * PROJECT. This aggregates the signals already carried per session (status,
  * plan progress, open PRs, tickets, worktrees) into one row per project, keyed
  * by matching each session's cwd to a defined project root (`projectNameForCwd`).
- * Pure over an `ActiveSession[]` so the aggregation is unit-testable; the richer
- * async signals (merged PRs via `gh`, Linear ticket counts, produced artifacts)
- * enrich this in `enrichProjectStatus` without changing the core shape.
+ * The session set is whatever the caller passes (today `getActiveSessions()` —
+ * this machine's live view, matched by local-home cwd; a fleet-wide fan-out is a
+ * deferred follow-up). Pure over an `ActiveSession[]` so the aggregation is
+ * unit-testable; the merged-PR signal IS repo-global (harvested via `gh`) and the
+ * artifact signal is local, both added in `enrichProjectSignals`.
  */
 
 import { execFile } from 'child_process';

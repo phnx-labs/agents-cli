@@ -94,6 +94,15 @@ describe('listProjectDefs', () => {
     expect(names).toEqual(['alpha', 'zeta']);
   });
 
+  it('ignores a .yml file so list and load agree on .yaml (no silent-drop)', () => {
+    writeProjectDef({ name: 'real' });
+    fs.writeFileSync(path.join(dir, 'ghost.yml'), 'name: ghost\n', 'utf8');
+    // listed set is exactly the .yaml files...
+    expect(listProjectDefs().map((d) => d.name)).toEqual(['real']);
+    // ...and loadProjectDef agrees: the .yml is not loadable, so it's not "there".
+    expect(loadProjectDef('ghost')).toBeUndefined();
+  });
+
   it('is empty when the dir does not exist', () => {
     process.env.AGENTS_PROJECTS_DIR = path.join(dir, 'nope');
     expect(listProjectDefs()).toEqual([]);

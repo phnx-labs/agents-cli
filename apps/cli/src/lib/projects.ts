@@ -75,8 +75,6 @@ export interface ProjectDef {
   linear?: { projectId?: string; url?: string };
   /** Free-form doc links surfaced in `projects show`. */
   docs?: string[];
-  /** Preferred hosts for runs/routines (phase 2). */
-  devices?: string[];
 }
 
 /** A project name safe to use as a filename: no separators, `..`, or leading dot. */
@@ -179,7 +177,6 @@ export function validateProjectDef(raw: unknown, sourceName?: string): ProjectDe
     if (typeof l.url === 'string') def.linear.url = l.url;
   }
   if (Array.isArray(o.docs)) def.docs = o.docs.filter((d): d is string => typeof d === 'string');
-  if (Array.isArray(o.devices)) def.devices = o.devices.filter((d): d is string => typeof d === 'string');
 
   return def;
 }
@@ -208,13 +205,16 @@ export function loadProjectDef(name: string): ProjectDef | undefined {
 export function listProjectDefs(): ProjectDef[] {
   let files: string[];
   try {
-    files = fs.readdirSync(getProjectsDir()).filter((f) => f.endsWith('.yaml') || f.endsWith('.yml'));
+    // Definitions are `<name>.yaml` (what projectDefPath/loadProjectDef read). We
+    // deliberately do NOT list `.yml` here — accepting it would then ENOENT in the
+    // loader and silently drop the project. One extension, one code path.
+    files = fs.readdirSync(getProjectsDir()).filter((f) => f.endsWith('.yaml'));
   } catch {
     return [];
   }
   const out: ProjectDef[] = [];
   for (const f of files) {
-    const name = f.replace(/\.ya?ml$/, '');
+    const name = f.replace(/\.yaml$/, '');
     try {
       const def = loadProjectDef(name);
       if (def) out.push(def);
@@ -298,8 +298,13 @@ function isUnder(child: string, parent: string): boolean {
  * directory. A session whose `cwd` sits inside a project's repo root (or a
  * worktree under it) is a member; the LONGEST matching root wins so a nested
  * project beats its parent. Returns undefined when no definition contains the
- * path. This is the join key for the progress rollup — it needs no persisted
- * column and works cross-machine because transcript `cwd` already syncs.
+ * path.
+ *
+ * The comparison is against the LOCAL home: roots and the cwd are both expanded
+ * with `expandLocalHome` and resolved, so this matches sessions whose cwd shares
+ * this machine's home layout. A session recorded on a different-home machine
+ * (`/Users/x/…` vs `/home/x/…`) will not match until the fleet-wide,
+ * home-relative variant lands (see the deferred item in docs/11-projects.md).
  */
 export function projectNameForCwd(cwd: string | undefined, defs: ProjectDef[]): string | undefined {
   if (!cwd) return undefined;
