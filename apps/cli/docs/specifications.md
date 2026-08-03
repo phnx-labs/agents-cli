@@ -416,7 +416,7 @@ SSH access (§7); rendering sessions that no harness produced.
   across available requested machines, retain only redacted shell-call origins
   and classifications, cap its JSON artifact at 16 MiB, and record
   `sample_byte_limit` with partial coverage instead of silently dropping evidence
-  (`scripts/sample-session-shell-commands.ts:17-18,79-107,135-255,259-323,326-331`).
+  (`scripts/sample-session-shell-commands.ts:17-18,79-107,135-262,265-337`).
 
 ---
 

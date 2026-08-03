@@ -145,6 +145,13 @@ export function partitionSampleDevices(
   };
 }
 
+export function exactSampleTargetArgs(candidateMachine: string | undefined, self: string): string[] {
+  if (candidateMachine && normalizeHost(candidateMachine) !== normalizeHost(self)) {
+    return ['--device', candidateMachine];
+  }
+  return ['--local'];
+}
+
 function listArgs(options: SampleOptions, devices: string[], local: boolean): string[] {
   const args = [
     'sessions', '--since', options.since,
@@ -195,8 +202,7 @@ export function loadEnvelope(
       'sessions', candidate.id, '--include', 'tools', '--all', '--limit', '1',
       '--json', '--no-interactive',
     ];
-    if (candidate.machine) args.push('--device', candidate.machine);
-    else args.push('--local');
+    args.push(...exactSampleTargetArgs(candidate.machine, self));
     let envelope: ToolSearchEnvelope | undefined;
     try {
       for (let pass = 0; pass < options.passes; pass++) {

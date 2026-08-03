@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildSample,
   deterministicSessionSample,
+  exactSampleTargetArgs,
   loadEnvelope,
   parseSampleOptions,
   partitionSampleDevices,
@@ -62,6 +63,10 @@ describe('session shell-command sampler', () => {
       includeLocal: true,
       remoteDevices: [],
     });
+    expect(exactSampleTargetArgs('yosemite-s1', 'yosemite-s1')).toEqual(['--local']);
+    expect(exactSampleTargetArgs('YOSEMITE-S1', 'yosemite-s1')).toEqual(['--local']);
+    expect(exactSampleTargetArgs(undefined, 'yosemite-s1')).toEqual(['--local']);
+    expect(exactSampleTargetArgs('yosemite-m3', 'yosemite-s1')).toEqual(['--device', 'yosemite-m3']);
   });
 
   it('marks coverage partial when an exact session query fails', () => {
