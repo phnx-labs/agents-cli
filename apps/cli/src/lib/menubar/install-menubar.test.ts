@@ -267,9 +267,23 @@ describe('generateServicePlist — launchd crash-loop throttle', () => {
     expect(plist).toContain('<key>RunAtLoad</key>');
   });
 
-  it('emits a plist that plutil accepts', () => {
+  // `plutil` is macOS-only and the CI test shards run on Linux, where spawnSync
+  // returns status null (ENOENT) rather than a non-zero exit — so gate on the
+  // tool actually being present instead of asserting against a missing binary.
+  const hasPlutil = spawnSync('plutil', ['-help'], { encoding: 'utf8' }).error === undefined;
+
+  it.skipIf(!hasPlutil)('emits a plist that plutil accepts', () => {
     const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'menubar-plist-')), 'x.plist');
     fs.writeFileSync(file, plist);
     expect(spawnSync('plutil', ['-lint', file], { encoding: 'utf8' }).status).toBe(0);
+  });
+
+  // Runs everywhere, so the structural contract is still pinned on Linux CI:
+  // a plist launchd will reject is a helper that never starts.
+  it('is well-formed XML with a single top-level dict', () => {
+    expect(plist.startsWith('<?xml version="1.0" encoding="UTF-8"?>')).toBe(true);
+    expect(plist).toContain('<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"');
+    expect(plist.match(/<dict>/g)?.length).toBe(plist.match(/<\/dict>/g)?.length);
+    expect(plist.trimEnd().endsWith('</plist>')).toBe(true);
   });
 });

@@ -1,27 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- **Menu-bar helper can no longer leak CLI processes until the machine is unusable.**
-  Its 10s poll shelled `agents doctor --json` through an unbounded `Process` +
-  `readDataToEndOfFile()`. Two properties composed badly: the call had no deadline, and
-  a helper that died mid-call left the child reparented to launchd (PPID 1) with
-  nothing to reap it — along with the `node -e` version probes that child had forked.
-  Both fire together, because the helper crashes under exactly the conditions that make
-  the CLI slow: `NSApplication.shared` segfaults inside `SLSNewConnection` when
-  WindowServer is too starved to hand out a connection, launchd's `KeepAlive` restarts
-  it, and the restart spawns a new doctor while the old one keeps running. Observed on a
-  real machine: 38 orphaned doctors + 92 orphaned probes, ~13 of 18 cores consumed, load
-  average 490, keystrokes visibly lagging. Three changes close it — every child now
-  carries a deadline (30s, 45s for `doctor --json`); it is spawned as its own
-  process-group leader so a timeout kills the whole subtree rather than just the CLI;
-  and each live child is recorded on disk so the *next* launch reaps whatever a crash
-  abandoned (no exit handler can help when the death is SIGSEGV). The launchd job also
-  gains `ThrottleInterval` 30 so a startup crash-loop cannot respawn every 10s.
-  A poll that blows its deadline now shows a stale menu instead of taking the machine
-  down with it. Source: `apps/cli/menubar/Sources/MenubarHelper/ChildProcess.swift`,
-  `AgentsCLI.swift`, `main.swift`, `apps/cli/src/lib/menubar/install-menubar.ts`.
-
 ## 1.20.93
 
 - **`agents send` is a real delivery envelope; `notify` is just `--to owner` (RUSH-2123).** Flag-first form: `--to`, `--text`, `--channel`, `--attach`, `--url`. `--to owner` expands from `notify.owner` in agents.yaml. Positional text still works. Help names the three planes (deliver / record / control) so send is not confused with `feed post`, `activity`, or `message`/`sessions inject`. Source: `apps/cli/src/commands/send.ts`, `apps/cli/src/lib/channels/send.ts`.
