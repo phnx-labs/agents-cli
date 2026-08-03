@@ -24,6 +24,7 @@ describe('handler config layer', () => {
     process.env.HOME = tmpHome;
     process.env.AGENTS_WEBHOOKS_DIR = path.join(tmpHome, '.agents', 'webhooks');
     process.env.AGENTS_SYSTEM_WEBHOOKS_DIR = path.join(tmpHome, '.agents', '.system', 'webhooks');
+    process.env.AGENTS_DEVICES_DIR = path.join(tmpHome, '.agents', '.history', 'devices');
     process.env.AGENTS_ROUTINES_DIR = path.join(tmpHome, '.agents', 'routines');
     process.env.AGENTS_SYSTEM_ROUTINES_DIR = path.join(tmpHome, '.agents', '.system', 'routines');
     eventsFile = path.join(tmpHome, 'events.jsonl');
@@ -38,6 +39,7 @@ describe('handler config layer', () => {
     else process.env.HOME = originalHome;
     delete process.env.AGENTS_WEBHOOKS_DIR;
     delete process.env.AGENTS_SYSTEM_WEBHOOKS_DIR;
+    delete process.env.AGENTS_DEVICES_DIR;
     delete process.env.AGENTS_ROUTINES_DIR;
     delete process.env.AGENTS_SYSTEM_ROUTINES_DIR;
     delete process.env.AGENTS_EVENTS_PATH;
@@ -62,6 +64,12 @@ describe('handler config layer', () => {
     const dir = process.env.AGENTS_ROUTINES_DIR!;
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, `${name}.yml`), yaml.stringify(content), 'utf-8');
+  }
+
+  function writeDeviceRegistry(devices: Record<string, unknown>) {
+    const dir = process.env.AGENTS_DEVICES_DIR!;
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'registry.json'), JSON.stringify(devices), 'utf-8');
   }
 
   function linearWebhook(overrides: Record<string, unknown> = {}): IncomingWebhook {
@@ -287,6 +295,55 @@ describe('handler config layer', () => {
       expect(dispatched[0].prompt).toBe('Plan the thing');
     });
 
+    it('passes host placement into the dispatched job config', async () => {
+      const saved = process.env.AGENTS_SYNC_MACHINE_ID;
+      process.env.AGENTS_SYNC_MACHINE_ID = 'zion';
+      try {
+        const handler: import('./handlers.js').WebhookHandler = {
+          name: 'remote-handler',
+          source: 'linear',
+          host: 'mac-mini',
+          run: { agent: 'claude', prompt: 'go' },
+        };
+        const dispatched: JobConfig[] = [];
+        await handlerMod.executeHandler(handler, linearWebhook(), {
+          dispatchAgent: async (config) => {
+            dispatched.push(config);
+            return {
+              jobName: handler.name, runId: 'run-remote', agent: 'claude', pid: 1,
+              status: 'running', startedAt: new Date().toISOString(),
+              completedAt: null, exitCode: null,
+            };
+          },
+        });
+        expect(dispatched[0].host).toBe('mac-mini');
+        expect(dispatched[0].hostStrategy).toBe('host');
+      } finally {
+        if (saved === undefined) delete process.env.AGENTS_SYNC_MACHINE_ID;
+        else process.env.AGENTS_SYNC_MACHINE_ID = saved;
+      }
+    });
+
+    it('passes run.env through to the dispatched job config', async () => {
+      const handler: import('./handlers.js').WebhookHandler = {
+        name: 'env-handler',
+        source: 'linear',
+        run: { agent: 'claude', prompt: 'go', env: { DEPLOY_TARGET: 'staging' } },
+      };
+      const dispatched: JobConfig[] = [];
+      await handlerMod.executeHandler(handler, linearWebhook(), {
+        dispatchAgent: async (config) => {
+          dispatched.push(config);
+          return {
+            jobName: handler.name, runId: 'run-env', agent: 'claude', pid: 1,
+            status: 'running', startedAt: new Date().toISOString(),
+            completedAt: null, exitCode: null,
+          };
+        },
+      });
+      expect(dispatched[0].env).toEqual({ DEPLOY_TARGET: 'staging' });
+    });
+
     it('runs a shell command action with substitution', async () => {
       const handler: import('./handlers.js').WebhookHandler = {
         name: 'cmd-handler',
@@ -425,6 +482,117 @@ describe('handler config layer', () => {
     it('does not affect single-brace variables like {day}', () => {
       const context = { source: 'linear', event: 'Issue', issue: { identifier: 'RUSH-1' } };
       expect(substituteWebhookPrompt('{day} {{issue.identifier}}', context)).toBe('{day} RUSH-1');
+    });
+  });
+
+  describe('resolveHandlerHost', () => {
+    it('returns local for empty or missing host', () => {
+      expect(handlerMod.resolveHandlerHost(undefined)).toEqual({});
+      expect(handlerMod.resolveHandlerHost('')).toEqual({});
+      expect(handlerMod.resolveHandlerHost('   ')).toEqual({});
+    });
+
+    it('returns local when host names this machine', () => {
+      const saved = process.env.AGENTS_SYNC_MACHINE_ID;
+      process.env.AGENTS_SYNC_MACHINE_ID = 'zion';
+      try {
+        expect(handlerMod.resolveHandlerHost('zion')).toEqual({});
+      } finally {
+        if (saved === undefined) delete process.env.AGENTS_SYNC_MACHINE_ID;
+        else process.env.AGENTS_SYNC_MACHINE_ID = saved;
+      }
+    });
+
+    it('resolves a specific peer host to host strategy', () => {
+      const saved = process.env.AGENTS_SYNC_MACHINE_ID;
+      process.env.AGENTS_SYNC_MACHINE_ID = 'zion';
+      try {
+        expect(handlerMod.resolveHandlerHost('mac-mini')).toEqual({
+          host: 'mac-mini',
+          hostStrategy: 'host',
+        });
+      } finally {
+        if (saved === undefined) delete process.env.AGENTS_SYNC_MACHINE_ID;
+        else process.env.AGENTS_SYNC_MACHINE_ID = saved;
+      }
+    });
+
+    it('picks any online worker for fleet host', () => {
+      const saved = process.env.AGENTS_SYNC_MACHINE_ID;
+      process.env.AGENTS_SYNC_MACHINE_ID = 'zion';
+      writeDeviceRegistry({
+        'mac-mini': {
+          name: 'mac-mini',
+          platform: 'macos',
+          shell: 'posix',
+          address: { via: 'tailscale', dnsName: 'mac-mini.tail1a85a1.ts.net' },
+          auth: { method: 'key' },
+          tailscale: { online: true },
+        },
+      });
+      try {
+        expect(handlerMod.resolveHandlerHost('fleet')).toEqual({
+          host: 'mac-mini',
+          hostStrategy: 'host',
+        });
+      } finally {
+        if (saved === undefined) delete process.env.AGENTS_SYNC_MACHINE_ID;
+        else process.env.AGENTS_SYNC_MACHINE_ID = saved;
+      }
+    });
+
+    it('picks an online worker matching the platform for fleet/linux', () => {
+      const saved = process.env.AGENTS_SYNC_MACHINE_ID;
+      process.env.AGENTS_SYNC_MACHINE_ID = 'zion';
+      writeDeviceRegistry({
+        'mac-mini': {
+          name: 'mac-mini',
+          platform: 'macos',
+          shell: 'posix',
+          address: { via: 'tailscale', dnsName: 'mac-mini.tail1a85a1.ts.net' },
+          auth: { method: 'key' },
+          tailscale: { online: true },
+        },
+        'yosemite-s0': {
+          name: 'yosemite-s0',
+          platform: 'linux',
+          shell: 'posix',
+          address: { via: 'tailscale', dnsName: 'yosemite-s0.tail1a85a1.ts.net' },
+          auth: { method: 'key' },
+          tailscale: { online: true },
+        },
+      });
+      try {
+        expect(handlerMod.resolveHandlerHost('fleet/linux')).toEqual({
+          host: 'yosemite-s0',
+          hostStrategy: 'host',
+        });
+        expect(handlerMod.resolveHandlerHost('linux/fleet')).toEqual({
+          host: 'yosemite-s0',
+          hostStrategy: 'host',
+        });
+        expect(handlerMod.resolveHandlerHost('linux')).toEqual({
+          host: 'yosemite-s0',
+          hostStrategy: 'host',
+        });
+      } finally {
+        if (saved === undefined) delete process.env.AGENTS_SYNC_MACHINE_ID;
+        else process.env.AGENTS_SYNC_MACHINE_ID = saved;
+      }
+    });
+
+    it('throws when fleet has no eligible device', () => {
+      const saved = process.env.AGENTS_SYNC_MACHINE_ID;
+      process.env.AGENTS_SYNC_MACHINE_ID = 'zion';
+      writeDeviceRegistry({});
+      try {
+        // No registry / nothing online still falls back to self, which is local.
+        expect(handlerMod.resolveHandlerHost('fleet')).toEqual({});
+        expect(() => handlerMod.resolveHandlerHost('fleet/linux')).toThrow(/no eligible online fleet device/);
+      } finally {
+        if (saved === undefined) delete process.env.AGENTS_SYNC_MACHINE_ID;
+        else process.env.AGENTS_SYNC_MACHINE_ID = saved;
+      }
     });
   });
 });

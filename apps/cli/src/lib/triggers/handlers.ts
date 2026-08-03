@@ -13,6 +13,8 @@ import * as yaml from 'yaml';
 import { emit } from '../events.js';
 import { machineId, normalizeHost } from '../machine-id.js';
 import { safeJoin } from '../paths.js';
+import { pickFleetDevice } from '../routines-placement.js';
+import type { DevicePlatform } from '../devices/registry.js';
 import type { JobConfig, RunMeta, WebhookContext } from '../routines.js';
 import {
   assertShellSubstitutionSupported,
@@ -37,11 +39,20 @@ export interface WebhookHandler {
   label?: string;
   repo?: string;
   branch?: string;
+  /**
+   * Where to run the action. A device name (`yosemite-s0`) runs there over SSH;
+   * `fleet` picks any eligible online worker; `fleet/<platform>` (or
+   * `<platform>/fleet`, or a bare `linux`/`macos`/`windows`) restricts that pick
+   * to one platform. Omitted runs locally.
+   */
+  host?: string;
   run?: {
     agent?: AgentId;
     workflow?: string;
     command?: string;
     prompt?: string;
+    /** Environment variables injected into the spawned process. */
+    env?: Record<string, string>;
   };
   routine?: string;
 }
@@ -167,6 +178,57 @@ function handlerRunsOnThisDevice(handler: Pick<WebhookHandler, 'devices'>): bool
   if (!handler.devices || handler.devices.length === 0) return true;
   const self = machineId();
   return handler.devices.some((d) => normalizeHost(d) === self);
+}
+
+const HOST_PLATFORMS: readonly string[] = ['linux', 'macos', 'windows'];
+
+function parseHostPlatform(raw: string): { base: string; platform?: DevicePlatform } {
+  const parts = raw
+    .split('/')
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => s.length > 0);
+  const platformIdx = parts.findIndex((p) => HOST_PLATFORMS.includes(p));
+  if (platformIdx === -1) return { base: parts.join('/') };
+  const platform = parts[platformIdx] as DevicePlatform;
+  const rest = parts.filter((_, i) => i !== platformIdx).join('/');
+  return { base: rest, platform };
+}
+
+export interface HandlerHostResolution {
+  /** Resolved execution host, or undefined to run locally. */
+  host?: string;
+  /** Strategy that should be set on the JobConfig. */
+  hostStrategy?: 'host' | 'fleet';
+}
+
+/**
+ * Resolve a handler `host` expression to a concrete host or local execution.
+ *
+ * - Specific device name (e.g. `yosemite-s0`) → run there over SSH, or locally
+ *   if it names this machine.
+ * - `fleet` → pick any online worker device.
+ * - `fleet/<platform>` or `<platform>/fleet` (e.g. `fleet/linux`, `linux/fleet`)
+ *   → pick any online worker on that platform. `linux` alone is accepted as a
+ *   shorthand for `fleet/linux`.
+ *
+ * Throws when a fleet expression matches no eligible device, rather than
+ * silently falling back to this machine — `fleet/linux` must never land on a
+ * macOS box.
+ */
+export function resolveHandlerHost(host: string | undefined): HandlerHostResolution {
+  if (!host || host.trim() === '') return {};
+  const { base, platform } = parseHostPlatform(host);
+  const isFleet = base === '' || base === 'fleet';
+  if (isFleet) {
+    const picked = pickFleetDevice(undefined, platform);
+    if (!picked) {
+      throw new Error(`handler host '${host}': no eligible online fleet device`);
+    }
+    if (normalizeHost(picked) === machineId()) return {};
+    return { host: picked, hostStrategy: 'host' };
+  }
+  if (normalizeHost(base) === machineId()) return {};
+  return { host: base, hostStrategy: 'host' };
 }
 
 /**
@@ -350,6 +412,8 @@ async function executeHandlerAction(
   opts: ExecuteHandlerOptions,
 ): Promise<Omit<FiredHandler, 'handlerName'>> {
   const substitutedPrompt = handler.run?.prompt ? substituteWebhookPrompt(handler.run.prompt, context) : '';
+  // Resolved once so a fleet pick can't differ between the two dispatch paths.
+  const hostFields = resolveHandlerHost(handler.host);
 
   if (handler.run?.agent || handler.run?.workflow) {
     const config: JobConfig = {
@@ -361,6 +425,9 @@ async function executeHandlerAction(
       prompt: substitutedPrompt,
       ...(handler.run.agent ? { agent: handler.run.agent } : { workflow: handler.run.workflow! }),
       ...(handler.devices ? { devices: handler.devices } : {}),
+      ...(handler.run.env ? { env: handler.run.env } : {}),
+      ...(hostFields.host ? { host: hostFields.host } : {}),
+      ...(hostFields.hostStrategy ? { hostStrategy: hostFields.hostStrategy } : {}),
     };
     const dispatch = handler.run.agent
       ? (opts.dispatchAgent ?? dispatchDefault)
@@ -384,6 +451,8 @@ async function executeHandlerAction(
       ...routine,
       prompt: substituteWebhookPrompt(routine.prompt, context),
       ...(handler.devices ? { devices: handler.devices } : {}),
+      ...(hostFields.host ? { host: hostFields.host } : {}),
+      ...(hostFields.hostStrategy ? { hostStrategy: hostFields.hostStrategy } : {}),
     };
     const dispatch = opts.dispatchRoutine ?? dispatchDefault;
     const meta = await dispatch(config);

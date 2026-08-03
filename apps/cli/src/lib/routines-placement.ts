@@ -13,7 +13,7 @@
 import type { JobConfig, HostStrategy } from './routines.js';
 import { resolveHostStrategy } from './routines.js';
 import { machineId, normalizeHost } from './machine-id.js';
-import { loadDevicesSync } from './devices/registry.js';
+import { loadDevicesSync, type DevicePlatform } from './devices/registry.js';
 import { planFleetTargets } from './devices/fleet.js';
 
 export type PlacementTarget =
@@ -33,7 +33,10 @@ export type PlacementTarget =
  * the double-fire pin (`devices: [self]`) would collapse fleet placement to
  * always-local. Control / offline / no-address devices are never chosen.
  */
-export function pickFleetDevice(_config?: Pick<JobConfig, 'devices'>): string | null {
+export function pickFleetDevice(
+  _config?: Pick<JobConfig, 'devices'>,
+  platform?: DevicePlatform,
+): string | null {
   let reg: ReturnType<typeof loadDevicesSync>;
   try {
     reg = loadDevicesSync();
@@ -41,11 +44,15 @@ export function pickFleetDevice(_config?: Pick<JobConfig, 'devices'>): string | 
     return null;
   }
   const planned = planFleetTargets(reg);
-  const candidates = planned.filter((t) => !t.skip).map((t) => t.device.name);
+  const candidates = planned
+    .filter((t) => !t.skip && (!platform || t.device.platform === platform))
+    .map((t) => t.device.name);
   if (candidates.length === 0) {
     // No registry / nothing online: fall back to self so a single-box fleet
-    // without a registry entry still runs locally.
-    return machineId();
+    // without a registry entry still runs locally. Only when no platform filter
+    // was requested — an unmet filter must fail loud so e.g. `fleet/linux` never
+    // silently lands on a macOS box.
+    return platform ? null : machineId();
   }
   const self = machineId();
   const selfMatch = candidates.find((n) => normalizeHost(n) === self);

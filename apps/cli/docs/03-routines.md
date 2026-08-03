@@ -301,7 +301,8 @@ run:
 | `source` | `github` or `linear`. |
 | `event` | Source event name (e.g. `Issue`, `pull_request`). |
 | `action` | Webhook action (e.g. `update`, `opened`, `labeled`). |
-| `run` | One-of `agent`, `workflow`, or `command`, plus an optional `prompt`. |
+| `run` | One-of `agent`, `workflow`, or `command`, plus an optional `prompt` and `env`. |
+| `host` | Where the action executes: a device name, `fleet`, or `fleet/<platform>`. Omitted runs locally. |
 | `routine` | Name of a routine to delegate to instead of `run`. |
 
 #### Filters
@@ -330,6 +331,39 @@ Handlers support the same filters as routine triggers:
   a command without placeholders there.
 - `routine` — load the named routine, substitute its prompt, and run it
   detached. The handler's `devices` pin overrides the routine's for this fire.
+
+#### Environment and placement
+
+`run.env` injects environment variables into the spawned process, on top of the
+sandbox overlay's own. It applies to both the foreground and detached paths.
+
+`host` chooses where the action executes. It is distinct from `devices`:
+`devices` says which daemon may *fire* the handler, `host` says where the fired
+run *executes*.
+
+| `host` | Effect |
+| --- | --- |
+| omitted | run locally |
+| `yosemite-s0` | run on that device over SSH (or locally if it names this machine) |
+| `fleet` | pick any eligible online worker device |
+| `fleet/linux`, `linux/fleet`, `linux` | pick any eligible online worker on that platform |
+
+Platforms are `linux`, `macos`, `windows`. A fleet expression that matches no
+eligible device raises `no eligible online fleet device` rather than falling back
+to this machine — otherwise `fleet/linux` could silently land on a macOS box.
+
+```yaml
+# ~/.agents/webhooks/deploy-on-merge.yml
+source: github
+event: pull_request
+action: closed
+host: fleet/linux
+run:
+  agent: claude
+  prompt: "Deploy {{pull_request.title}}"
+  env:
+    DEPLOY_TARGET: staging
+```
 
 #### Prompt variables
 

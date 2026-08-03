@@ -173,6 +173,12 @@ export interface JobConfig {
    */
   devices?: string[];
   /**
+   * Environment variables injected into the spawned run, on top of the sandbox
+   * overlay's own. Merged by `buildSpawnEnv`, so it applies to both the
+   * foreground and detached execution paths.
+   */
+  env?: Record<string, string>;
+  /**
    * Execution placement — run the job body on this machine over SSH (a
    * registered host, device, capability tag, or user@host) instead of locally.
    * Distinct from `devices`: `devices` says which daemon may FIRE the job,
