@@ -27,8 +27,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as yaml from 'yaml';
+import { execFileSync } from 'child_process';
 import { ensureLockTarget, atomicWriteFileSync, withFileLock } from './fs-atomic.js';
 import type { Meta, RegistryType } from './types.js';
+import { DEFAULT_SYSTEM_REPO, systemRepoSlug } from './types.js';
 import { machineId } from './machine-id.js';
 
 const HOME = process.env.HOME ?? os.homedir();
@@ -213,6 +215,59 @@ export function getOptionalUserAgentsDir(): string | null {
   return USER_AGENTS_DIR;
 }
 
+/**
+ * Origin `owner/repo` slug (lowercased, `.git` stripped) of a git checkout, or
+ * null when `dir` isn't a git repo / has no origin. Extracts the slug from any
+ * remote URL form: `git@host:owner/repo.git`, `https://host/owner/repo.git`,
+ * `ssh://git@host/owner/repo`. Sync (mirrors readGitConfigUser in git.ts) so it
+ * can be used from the synchronous getProjectAgentsDir walk.
+ */
+function gitOriginSlug(dir: string): string | null {
+  let url: string;
+  try {
+    url = execFileSync('git', ['-C', dir, 'config', '--get', 'remote.origin.url'], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).toString().trim();
+  } catch {
+    return null;
+  }
+  if (!url) return null;
+  const m = url.replace(/\.git$/i, '').match(/[:/]([^/:]+\/[^/]+)$/);
+  return m ? m[1].toLowerCase() : null;
+}
+
+/** Slugs of the user + system DotAgents repos — a checkout of any of these is not a project layer. */
+function canonicalDotAgentsRepoSlugs(): Set<string> {
+  const slugs = new Set<string>([systemRepoSlug(DEFAULT_SYSTEM_REPO).toLowerCase()]);
+  for (const dir of [USER_AGENTS_DIR, SYSTEM_AGENTS_DIR]) {
+    const slug = gitOriginSlug(dir);
+    if (slug) slugs.add(slug);
+  }
+  return slugs;
+}
+
+/**
+ * True when `agentsPath` is itself a git checkout of the user's or system's
+ * DotAgents repo — i.e. a *clone* of the very repo whose rules already load as
+ * the user/system layer (e.g. `git clone …/.agents.git ~/src/github.com/<you>/.agents`).
+ * Such a clone must NOT also be treated as a *project* layer: because project
+ * outranks user, a stale clone would silently shadow the live user rules by
+ * filename and plant a compiled AGENTS.md in an ancestor dir (RUSH-2037).
+ *
+ * A legitimate project layer is a plain subdirectory of a project and is never
+ * itself a git-repo root, so the cheap `.git` gate skips the (git-spawning)
+ * origin comparison for the common case — only a `.agents/` that is its own
+ * checkout pays it, and even then it's kept unless its origin matches the
+ * user/system DotAgents repo (an unrelated repo checked out at `.agents/`,
+ * or a project's own versioned `.agents/`, stays a valid project layer).
+ */
+function isUserOrSystemRepoCheckout(agentsPath: string): boolean {
+  if (!fs.existsSync(path.join(agentsPath, '.git'))) return false;
+  const origin = gitOriginSlug(agentsPath);
+  if (!origin) return false;
+  return canonicalDotAgentsRepoSlugs().has(origin);
+}
+
 /** Walk up from startPath to find a project-scoped .agents/ directory (skipping both roots). */
 export function getProjectAgentsDir(startPath: string = process.cwd()): string | null {
   let dir = path.resolve(startPath);
@@ -220,7 +275,8 @@ export function getProjectAgentsDir(startPath: string = process.cwd()): string |
   while (true) {
     const agentsPath = path.join(dir, '.agents');
     if (fs.existsSync(agentsPath) && fs.statSync(agentsPath).isDirectory()) {
-      if (!isSamePath(agentsPath, SYSTEM_AGENTS_DIR) && !isSamePath(agentsPath, USER_AGENTS_DIR)) {
+      if (!isSamePath(agentsPath, SYSTEM_AGENTS_DIR) && !isSamePath(agentsPath, USER_AGENTS_DIR)
+          && !isUserOrSystemRepoCheckout(agentsPath)) {
         return agentsPath;
       }
     }
