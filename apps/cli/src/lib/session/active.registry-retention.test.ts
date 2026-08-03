@@ -1,0 +1,77 @@
+import { describe, expect, it, beforeEach } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+
+const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-registry-'));
+process.env.HOME = TEST_HOME;
+
+const { listTerminalsActive, foldHostLink } = await import('./active.js');
+const { HOST_HEARTBEAT_STALE_MS } = await import('./host-link.js');
+
+const REGISTRY = path.join(TEST_HOME, '.agents', '.cache', 'terminals', 'live-terminals.json');
+/** Above any real pid, so `process.kill` throws ESRCH — a genuinely dead process. */
+const DEAD_PID = 2_000_000_003;
+
+function writeRegistry(windowAgeMs: number, pid: number): void {
+  fs.mkdirSync(path.dirname(REGISTRY), { recursive: true });
+  const at = new Date(Date.now() - windowAgeMs).toISOString();
+  fs.writeFileSync(
+    REGISTRY,
+    JSON.stringify({
+      'a-window': {
+        at,
+        entries: [
+          { sessionId: 'sess-under-test', pid, kind: 'claude', cwd: TEST_HOME, startedAtMs: Date.now() },
+        ],
+      },
+    }),
+  );
+}
+
+/**
+ * The regression this exists for: a VS Code window that crashed left a dead-pid
+ * entry behind, `readLiveTerminals` filtered it out, and the session simply
+ * DISAPPEARED from `--active` — indistinguishable from one that had never run.
+ * The retention rule is what puts it back, and it has to be narrow enough that an
+ * ordinary terminal close doesn't start reporting itself as a crash.
+ */
+describe('live-terminals retention for a crashed host', () => {
+  beforeEach(() => {
+    fs.rmSync(REGISTRY, { force: true });
+  });
+
+  it('keeps a dead-pid entry whose window stopped republishing, and reports it crashed', async () => {
+    writeRegistry(HOST_HEARTBEAT_STALE_MS + 60_000, DEAD_PID);
+    const rows = await listTerminalsActive();
+    const row = rows.find((r) => r.sessionId === 'sess-under-test');
+    expect(row, 'a crashed session must still reach the listing').toBeDefined();
+    // It arrives as a plain dead process; the fold is what names it a crash.
+    expect(row!.status).toBe('closed');
+    foldHostLink(rows);
+    expect(row!.status).toBe('crashed');
+    expect(row!.hostLink).toBe('host-gone');
+  });
+
+  it('drops a dead-pid entry while its window is still republishing — an ordinary close', async () => {
+    writeRegistry(30_000, DEAD_PID);
+    const rows = await listTerminalsActive();
+    expect(rows.find((r) => r.sessionId === 'sess-under-test')).toBeUndefined();
+  });
+
+  it('keeps a live entry regardless of the window heartbeat', async () => {
+    writeRegistry(HOST_HEARTBEAT_STALE_MS + 60_000, process.pid);
+    const rows = await listTerminalsActive();
+    const row = rows.find((r) => r.sessionId === 'sess-under-test');
+    expect(row).toBeDefined();
+    expect(row!.status).not.toBe('closed');
+  });
+
+  it('carries the window heartbeat through so the fold can read it', async () => {
+    writeRegistry(HOST_HEARTBEAT_STALE_MS + 60_000, process.pid);
+    const rows = await listTerminalsActive();
+    const row = rows.find((r) => r.sessionId === 'sess-under-test')!;
+    expect(row.windowHeartbeatMs).toBeTypeOf('number');
+    expect(Date.now() - row.windowHeartbeatMs!).toBeGreaterThanOrEqual(HOST_HEARTBEAT_STALE_MS);
+  });
+});

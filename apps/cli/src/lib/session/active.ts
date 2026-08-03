@@ -469,10 +469,12 @@ interface LiveTerminalEntry {
  * terminal that closed a moment ago, before its window republished — and is
  * dropped. But a dead pid whose owning window ALSO stopped republishing is the
  * signature of a crash: the window went down hard and never ran the teardown that
- * would have removed this entry. Those are kept (flagged `pidDead`) so
- * {@link foldHostLink} can report the session as `crashed` instead of letting it
- * silently vanish from the listing, which is what happened before — a VS Code
- * crash simply erased its agents from `--active`.
+ * would have removed this entry. Those are KEPT, so the session reaches the
+ * listing at all — it used to vanish outright, a VS Code crash simply erasing its
+ * agents from `--active`. Such a row arrives as `closed` (dead pid) carrying the
+ * stale `windowHeartbeatMs`, which is what {@link foldHostLink} promotes to
+ * `crashed`. `pidDead` is local to the dedupe below: a live entry must win a dead
+ * one for the same session.
  */
 function readLiveTerminals(): LiveTerminalEntry[] {
   let raw: string;
