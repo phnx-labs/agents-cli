@@ -31,7 +31,7 @@ import { stringWidth, truncateToWidth, padToWidth, terminalWidth } from '../lib/
 import type { SessionActivity, AwaitingReason } from '../lib/session/state.js';
 import { inferSessionState } from '../lib/session/state.js';
 import { discoverSessions, countSessionsInScope, resolveSessionById, isCompleteSessionId, looksLikeSessionId, searchContentIndex, parseTimeFilter, getSessionRoots, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
-import { findSessionsById } from '../lib/session/db.js';
+import { findSessionsById, querySessions } from '../lib/session/db.js';
 import { filterTeamSessions, safeTeamText } from '../lib/session/team-filter.js';
 import { parseSession } from '../lib/session/parse.js';
 import { runRemoteSessions, buildForwardedArgs, ensureWholeIndex } from '../lib/session/remote.js';
@@ -84,6 +84,8 @@ interface SessionsOptions extends SessionFilterOptions {
   /** Also list sessions from the user's own unmanaged ~/.<agent> installs. */
   unmanaged?: boolean;
   query?: string;
+  /** Resolve one historical selector to metadata only (requires --json). */
+  resolve?: string;
   limit?: string;
   sort?: string;
   json?: boolean;
@@ -1421,6 +1423,31 @@ async function sessionsAction(
   // of hardcoding `~/.claude|.codex|.gemini`. Always local; ignores other flags.
   if (options.roots) {
     process.stdout.write(JSON.stringify(getSessionRoots(), null, 2) + '\n');
+    return;
+  }
+
+  // --resolve is the metadata-only contract for downstream context workflows.
+  // It reads indexed SessionMeta rows and never calls renderSession, buildPreview,
+  // parseSession, or any other transcript renderer/parser.
+  if (options.resolve !== undefined) {
+    if (!options.json) {
+      console.error(chalk.red('--resolve requires --json.'));
+      process.exit(1);
+    }
+    if (query) {
+      console.error(chalk.red('Pass the selector to --resolve, not as a positional query.'));
+      process.exit(1);
+    }
+    if (options.local === true && options.host && !shouldIncludeLocal(options.host, machineId())) {
+      console.error(chalk.red('--local and --device name opposite scopes: --local skips the SSH fan-out that --device needs.'));
+      process.exit(1);
+    }
+    await resolveSessionMetadata(options.resolve, {
+      agent: options.agent,
+      project: options.project,
+      local: options.local,
+      hosts: options.host,
+    });
     return;
   }
 
@@ -3392,8 +3419,6 @@ export function fleetCandidatesByQuery(rows: SessionMeta[], query: string): Flee
   // canonical resolver's local-index fallback so a local row cannot be mistaken
   // for a peer result when no remote machine matched.
   const resolved = resolveSessionQuery(rows, query, { indexFallback: false });
-  if (!resolved.byId) return [];
-
   const byId = new Map<string, Map<string, SessionMeta>>();
   for (const session of resolved.matches) {
     const machine = session.machine;
@@ -3411,6 +3436,58 @@ export function fleetCandidatesByQuery(rows: SessionMeta[], query: string): Flee
     const hits = Array.from(byMachine.entries()).map(([machine, session]) => ({ machine, session }));
     return { id: hits[0].session.id, hits };
   });
+}
+
+/** Resolve one selector to indexed metadata across the fleet without reading or
+ * rendering transcript events. A peer answering the parent sweep returns every
+ * local candidate; the parent performs the one logical-session uniqueness gate. */
+async function resolveSessionMetadata(
+  selector: string,
+  scope: { agent?: string; project?: string; local?: boolean; hosts?: string[] },
+  deps: Pick<FleetResolveDeps, 'gatherRemoteList'> = { gatherRemoteList },
+): Promise<void> {
+  const localMachine = machineId();
+  const includeLocal = !scope.hosts?.length || shouldIncludeLocal(scope.hosts, localMachine);
+  const indexed = includeLocal ? applyScopeFilters(querySessions(), scope) : [];
+  const localMatches = resolveSessionQuery(indexed, selector, { indexFallback: false }).matches
+    .map(session => ({ ...session, machine: session.machine || localMachine }));
+
+  // A peer is already inside gatherRemoteList. Return all local candidates so
+  // the parent can distinguish a fleet-wide unique match from an ambiguity.
+  if (process.env[NO_FANOUT_ENV] === '1') {
+    process.stdout.write(serializeSessionsJson(localMatches));
+    return;
+  }
+
+  let remoteMatches: SessionMeta[] = [];
+  if (scope.local !== true) {
+    try {
+      const forwarded = ['sessions', '--resolve', selector, '--json', '--all', '--local'];
+      const result = await deps.gatherRemoteList(forwarded, scope.hosts);
+      remoteMatches = result.sessions;
+    } catch {
+      // Match the sessions fleet contract: an unreachable peer degrades to the
+      // candidates available from the rest of the fleet.
+    }
+  }
+
+  const candidates = fleetCandidatesByQuery([...localMatches, ...remoteMatches], selector);
+  if (candidates.length === 0) {
+    console.error(chalk.red(`No session found matching: ${selector}`));
+    process.exit(1);
+  }
+  if (candidates.length > 1) {
+    console.error(chalk.red(`Multiple sessions match "${selector}" across the fleet:`));
+    for (const candidate of candidates) {
+      const session = candidate.hits[0].session;
+      const machines = candidate.hits.map(hit => hit.machine).join(', ');
+      console.error(chalk.cyan(`  ${session.shortId}  ${session.id}`) + chalk.gray(`  ${machines}  ${(session as any).label ?? session.topic ?? ''}`));
+    }
+    console.error(chalk.gray(looksLikeSessionId(selector) ? 'Pass a longer ID to narrow it down.' : 'Narrow the keywords to one session.'));
+    process.exit(1);
+  }
+
+  process.stdout.write(serializeSessionsJson([candidates[0].hits[0].session]));
 }
 
 /**
@@ -3493,6 +3570,7 @@ export function registerSessionsCommands(program: Command): void {
     .command('sessions')
     .argument('[query]', 'Session ID, search query, or path (., ../, /path) to filter by project')
     .option('--query <text>', 'Search text — use when the term collides with a subcommand name (e.g. "go")')
+    .option('--resolve <selector>', 'Resolve one full ID, unique prefix, or keyword query to SessionMeta only (requires --json; searches the fleet unless --local)')
     .description('Find, browse, and read agent conversation transcripts across Claude, Codex, Gemini, and OpenCode.')
     .option('-a, --agent <agent>', 'Filter by agent type and version (e.g., claude, codex@0.116.0)')
     .option('--claude', 'Shorthand for --agent claude')
@@ -3567,6 +3645,9 @@ export function registerSessionsCommands(program: Command): void {
 
       # Export for analysis
       agents sessions --since 30d --limit 200 --json > sessions.json
+
+      # Resolve one historical selector to metadata only, across the fleet
+      agents sessions --resolve d3470b57 --json
 
       # Search another machine's sessions live over SSH (no sync needed)
       agents sessions "auth bug" --last 3 --host yosemite-s1

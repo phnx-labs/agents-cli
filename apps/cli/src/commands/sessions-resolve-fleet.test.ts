@@ -130,6 +130,28 @@ describe('fleetCandidatesByQuery — canonical id resolution grouped by logical 
     const candidates = fleetCandidatesByQuery([row(UUID, 'yosemite-s0')], UUID.toUpperCase());
     expect(candidates[0].hits.map(hit => hit.machine)).toEqual(['yosemite-s0']);
   });
+
+  it('keeps keyword resolution canonical while collapsing synced copies', () => {
+    const sibling = 'eeee4444-ffff-4c11-b1de-3fab94f43603';
+    const rows = [
+      row(UUID, 'yosemite-s0', { topic: 'session recap resolver' }),
+      row(UUID, 'mac-mini', { topic: 'session recap resolver' }),
+      row(sibling, 'bismas-macbook-pro', { topic: 'unrelated release work' }),
+    ];
+    const candidates = fleetCandidatesByQuery(rows, 'recap resolver');
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].id).toBe(UUID);
+    expect(candidates[0].hits.map(hit => hit.machine).sort()).toEqual(['mac-mini', 'yosemite-s0']);
+  });
+
+  it('reports every logical keyword candidate instead of choosing one by rank', () => {
+    const sibling = 'eeee4444-ffff-4c11-b1de-3fab94f43603';
+    const rows = [
+      row(UUID, 'yosemite-s0', { topic: 'recap resolver' }),
+      row(sibling, 'mac-mini', { topic: 'recap resolver docs' }),
+    ];
+    expect(fleetCandidatesByQuery(rows, 'recap resolver').map(candidate => candidate.id)).toEqual([UUID, sibling]);
+  });
 });
 
 describe('resolveSessionAcrossFleet — remote UUID resolution', () => {

@@ -384,6 +384,19 @@ cases a live pull can't reach: a machine that is **offline / asleep / decommissi
 
 ### Resolving a session id across the fleet
 
+For automation that needs session metadata without parsing or rendering transcript
+events, use the explicit resolver:
+
+```
+agents sessions --resolve d3470b57 --json
+agents sessions --resolve "recap resolver" --json
+```
+
+It reads the indexed `SessionMeta` rows on each machine and emits a one-element JSON
+array when exactly one logical session matches. A missing selector or an ambiguous ID
+prefix/keyword query exits non-zero; ambiguity output lists every full ID and machine.
+`--local` keeps the metadata lookup on this machine.
+
 `--host` names *which* box to look on. When you already have a full session id but
 **not** the box, `agents sessions <uuid>` finds it for you. A unique short prefix works
 the same way: `agents sessions d3470b57` fans the **id lookup** out to the online fleet
@@ -406,6 +419,9 @@ agents sessions d3470b57-2af6-4c11-b1de-3fab94f43603
   longer prefix to select one.
 - **Synced copies are one logical session.** The same full id reported by several machines
   does not make a prefix ambiguous; the CLI renders one of those equivalent copies.
+- **Keywords keep the existing metadata search semantics.** The metadata-only resolver
+  accepts the same label, topic, project, account, path, agent, and version terms as the
+  canonical local resolver, then applies the uniqueness check across the fleet.
 - **`--local`** restricts the lookup to this machine — no cross-machine sweep — for
   scripts that want deterministic local behavior.
 - A peer already answering a parent's sweep (`AGENTS_SESSIONS_LOCAL=1`) never re-fans-out,
