@@ -9,10 +9,11 @@
 # then reports "no bundle ships" and the auto-enable no-ops. 1.20.22 shipped
 # exactly this way. This gate fails the pack so it can't happen again.
 #
-# Unlike the keychain helper we don't pin a sha: the status-bar app is ad-hoc
-# signed and rebuilt freely, so a pinned sha would false-positive on every
-# rebuild. Presence + a valid signature catches the real failure mode (missing
-# or corrupt bundle) without blocking routine rebuilds.
+# Unlike the keychain helper we don't pin a sha: the app is rebuilt freely, so a
+# pinned sha would false-positive on every rebuild. Presence + a valid signature
+# + a stapled notarization ticket catches the real failure modes (a missing or
+# corrupt bundle, or an un-notarized cut Gatekeeper rejects as "damaged") without
+# blocking routine rebuilds.
 #
 # prepack only runs at `npm pack` / `npm publish` time, which is macOS-only
 # (releases are cut locally on macOS — see CLAUDE.md), so requiring the bundle
@@ -40,4 +41,17 @@ if command -v codesign >/dev/null 2>&1; then
   fi
 fi
 
-echo "menubar helper present and signed: $APP"
+# Require a stapled notarization ticket. build.sh notarizes + staples every
+# Developer-ID build; the ticket is a file inside the bundle, so it survives npm.
+# Refuse to pack an un-notarized helper — Gatekeeper rejects it as "damaged" on
+# macOS 26+, and the install path has no re-sign fallback to paper over it.
+if command -v xcrun >/dev/null 2>&1; then
+  if ! xcrun stapler validate "$APP" >/dev/null 2>&1; then
+    echo "menubar helper is not notarized/stapled: $APP" >&2
+    echo "Rebuild it with Developer ID + apple.com creds so it notarizes:" >&2
+    echo "  agents secrets exec apple.com -- menubar/scripts/build.sh release" >&2
+    exit 1
+  fi
+fi
+
+echo "menubar helper present, signed, and notarized: $APP"

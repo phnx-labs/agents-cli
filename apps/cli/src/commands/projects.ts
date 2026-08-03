@@ -12,13 +12,15 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import * as fs from 'fs';
+import * as path from 'path';
 import { execFileSync, spawnSync } from 'child_process';
 
 import { betaEnableHint, isBetaEnabled } from '../lib/beta.js';
 import { setHelpSections } from '../lib/help.js';
 import { getMainRepoRoot } from '../lib/git.js';
 import { parseOwnerRepoFromRemote } from '../lib/registry.js';
-import { toHomeRelative } from '../lib/project-root.js';
+import { truncate } from '../lib/format.js';
+import { expandLocalHome, getProjectRoot, toHomeRelative } from '../lib/project-root.js';
 import { machineId } from '../lib/machine-id.js';
 import { getActiveSessions } from '../lib/session/active.js';
 import { gatherRemoteActive } from '../lib/session/remote-active.js';
@@ -50,7 +52,15 @@ import {
   type ProjectRemoteSignals,
 } from '../lib/project-status.js';
 import { fetchLinearProjectCounts, type LinearProjectCounts } from '../lib/linear-project-counts.js';
-import { listLinearProjects, pickLinearProject, type LinearPick } from '../lib/linear-projects.js';
+import { listLinearProjects, pickLinearProject, type LinearPick, type LinearProjectLite } from '../lib/linear-projects.js';
+import {
+  buildFactoryImportCandidates,
+  buildLinearImportCandidates,
+  validateImportOpts,
+  type ImportOptions,
+  type ImportPlan,
+  type RawImportFlags,
+} from '../lib/project-import.js';
 
 /** Recursion guard: a peer answering a probe fan-out never re-fans-out itself. */
 export const PROJECTS_NO_FANOUT_ENV = 'AGENTS_PROJECTS_LOCAL';
@@ -89,6 +99,96 @@ function originSlug(cwd: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Read the Factory registry off disk and plan its import. Every read failure is
+ * fatal and named — an unreadable or malformed registry must not read as "0
+ * projects to import".
+ */
+function runFactoryImport(existing: Map<string, ProjectDef>, opts: ImportOptions): ImportPlan {
+  const src = factoryProjectsPath();
+  let rawText: string;
+  try {
+    rawText = fs.readFileSync(src, 'utf8');
+  } catch {
+    console.error(chalk.red(`No Factory registry at ${src}`));
+    process.exit(1);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawText);
+  } catch {
+    console.error(chalk.red(`Factory registry at ${src} is not valid JSON`));
+    process.exit(1);
+  }
+  const rows = Array.isArray(parsed)
+    ? parsed
+    : Array.isArray((parsed as { projects?: unknown[] })?.projects)
+      ? (parsed as { projects: unknown[] }).projects
+      : [];
+  return buildFactoryImportCandidates(rows, existing, opts);
+}
+
+/**
+ * List the workspace's Linear projects and plan their import, binding each to a
+ * local checkout under the configured projects root when the names match
+ * exactly. A missing / logged-out `linear` CLI is loud (this is an explicit user
+ * command), and nothing is written before the whole plan is built.
+ */
+function runLinearImport(existing: Map<string, ProjectDef>, opts: ImportOptions): ImportPlan {
+  let list: LinearProjectLite[];
+  try {
+    list = listLinearProjects();
+  } catch (e) {
+    console.error(chalk.red(e instanceof Error ? e.message : String(e)));
+    process.exit(1);
+  }
+  // No projects root configured (or unreadable) → no local matching; every def
+  // still imports, carrying its Linear link and nothing it can't prove.
+  const rootAbs = getProjectRoot() ? expandLocalHome(getProjectRoot()!) : undefined;
+  let localDirs: string[] = [];
+  if (rootAbs) {
+    try {
+      localDirs = fs
+        .readdirSync(rootAbs, { withFileTypes: true })
+        .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
+        .map((d) => d.name);
+    } catch {
+      localDirs = [];
+    }
+  }
+  return buildLinearImportCandidates(list, existing, {
+    localDirs,
+    resolveRoot: (dir) => (rootAbs ? toHomeRelative(path.join(rootAbs, dir)) : undefined),
+    resolveOrigin: (dir) => (rootAbs ? originSlug(path.join(rootAbs, dir)) : undefined),
+  }, opts);
+}
+
+/** One `projects list` row, pre-render. */
+export interface ProjectListRow {
+  name: string;
+  path: string;
+  repo: string;
+}
+
+/** Longest path a `list` row shows before it truncates. */
+const LIST_PATH_MAX = 48;
+
+/**
+ * Column widths for `projects list`, sized to the rows actually being printed.
+ * Fixed padding was the bug: home-relative roots run past 50 characters, so a
+ * hardcoded 32 pushed the repo column off its gridline on every long path.
+ * Paths longer than {@link LIST_PATH_MAX} truncate rather than widen the table.
+ */
+export function computeProjectListWidths(rows: ProjectListRow[]): { name: number; path: number; repo: number } {
+  const widest = (pick: (r: ProjectListRow) => string, cap: number) =>
+    Math.min(cap, rows.reduce((w, r) => Math.max(w, pick(r).length), 0));
+  return {
+    name: widest((r) => r.name, 64),
+    path: widest((r) => r.path, LIST_PATH_MAX),
+    repo: widest((r) => r.repo, 64),
+  };
 }
 
 function statusBar(r: ProjectSessionRollup): string {
@@ -166,6 +266,7 @@ export function registerProjectsCommands(program: Command): void {
 
   setHelpSections(projects, {
     examples: `
+      agents projects import --from-linear  # the projects you actually track
       agents projects add rush --repo phnx-labs/rush --path apps/web
       agents projects list
       agents projects status              # progress card for every project
@@ -177,6 +278,11 @@ export function registerProjectsCommands(program: Command): void {
     notes: `
       Definitions are hand-editable YAML in ~/.agents/projects/ and sync across
       machines with 'agents push/pull'. Enable with: agents beta enable projects.
+
+      'import --from-factory' reads Factory's auto-detected registry, which
+      guesses from checkouts on disk — it imports only 'high' confidence rows by
+      default. Widen with --min-confidence medium or --all, and drop a bad guess
+      with 'agents projects rm <name>'.
     `,
   });
 
@@ -214,11 +320,17 @@ export function registerProjectsCommands(program: Command): void {
         return;
       }
       const roll = rollupSessionsByProject(defs, await getActiveSessions());
-      for (const d of defs) {
+      const rows: ProjectListRow[] = defs.map((d) => ({
+        name: d.name,
+        path: truncate(d.root ?? d.defaultPath ?? '', LIST_PATH_MAX),
+        repo: d.repo ?? d.repos?.[0]?.slug ?? '',
+      }));
+      const w = computeProjectListWidths(rows);
+      for (const [i, d] of defs.entries()) {
         const agents = roll.get(d.name)?.agents ?? 0;
-        const repo = d.repo ?? d.repos?.[0]?.slug ?? '';
+        const row = rows[i];
         console.log(
-          `  ${chalk.bold(d.name.padEnd(16))} ${chalk.dim((d.root ?? d.defaultPath ?? '').padEnd(32))} ${chalk.cyan(repo.padEnd(24))} ${agents} agents`,
+          `  ${chalk.bold(row.name.padEnd(w.name))} ${chalk.dim(row.path.padEnd(w.path))} ${chalk.cyan(row.repo.padEnd(w.repo))} ${agents} agents`,
         );
       }
     });
@@ -445,48 +557,30 @@ export function registerProjectsCommands(program: Command): void {
   // ---- import ----
   projects
     .command('import')
-    .description('Absorb the Factory project registry (~/.agents/factory/projects.json) into YAML definitions.')
-    .requiredOption('--from-factory', 'Import from the Factory projects.json registry')
+    .description('Import project definitions from Linear (preferred) or the Factory auto-detection registry.')
+    .option('--from-linear', 'Import the workspace\'s Linear projects (via the `linear` CLI)')
+    .option('--from-factory', 'Import the Factory registry (~/.agents/factory/projects.json)')
+    .option('--min-confidence <level>', '--from-factory only: lowest detection confidence to import — low|medium|high (default: high)')
+    .option('--all', '--from-factory only: import every row regardless of confidence')
     .option('--force', 'Overwrite existing definitions')
-    .action((opts: { force?: boolean }) => {
-      const src = factoryProjectsPath();
-      let rawText: string;
+    .action((raw: RawImportFlags) => {
+      let opts: ImportOptions;
       try {
-        rawText = fs.readFileSync(src, 'utf8');
-      } catch {
-        console.error(chalk.red(`No Factory registry at ${src}`));
+        opts = validateImportOpts(raw);
+      } catch (e) {
+        console.error(chalk.red(e instanceof Error ? e.message : String(e)));
         process.exit(1);
       }
-      let rows: unknown;
-      try {
-        rows = JSON.parse(rawText);
-      } catch {
-        console.error(chalk.red(`Factory registry at ${src} is not valid JSON`));
-        process.exit(1);
+      const existing = new Map(listProjectDefs().map((d) => [d.name, d]));
+      const result = opts.source === 'linear' ? runLinearImport(existing, opts) : runFactoryImport(existing, opts);
+      for (const def of result.defs) writeProjectDef(def);
+      const n = result.defs.length;
+      const s = result.skipped.length;
+      console.log(chalk.green(`Imported ${n} project${n === 1 ? '' : 's'}${s ? chalk.gray(` (${s} skipped)`) : ''}`));
+      for (const skip of result.skipped) console.log(chalk.gray(`  skip ${skip.name}: ${skip.reason}`));
+      if (opts.source === 'factory' && s > 0 && opts.minConfidence === 'high') {
+        console.log(chalk.gray('  (widen with --min-confidence medium or --all)'));
       }
-      const list = Array.isArray(rows) ? rows : Array.isArray((rows as { projects?: unknown[] }).projects) ? (rows as { projects: unknown[] }).projects : [];
-      let created = 0;
-      let skipped = 0;
-      for (const raw of list) {
-        if (!raw || typeof raw !== 'object') continue;
-        const o = raw as Record<string, unknown>;
-        const name = typeof o.name === 'string' ? o.name : undefined;
-        if (!name || !isSafeProjectName(name)) {
-          skipped++;
-          continue;
-        }
-        if (loadProjectDef(name) && !opts.force) {
-          skipped++;
-          continue;
-        }
-        const def: ProjectDef = { name };
-        if (typeof o.path === 'string') def.root = toHomeRelative(o.path);
-        if (typeof o.repoSlug === 'string') def.repo = o.repoSlug;
-        if (typeof o.linearProjectId === 'string') def.linear = { projectId: o.linearProjectId };
-        writeProjectDef(def);
-        created++;
-      }
-      console.log(chalk.green(`Imported ${created} project${created === 1 ? '' : 's'}${skipped ? chalk.gray(` (${skipped} skipped)`) : ''}`));
     });
 
   // ---- link ----

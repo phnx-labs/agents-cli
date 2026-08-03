@@ -197,6 +197,9 @@ run_home_base_phase() {
     rm -rf bin/MenubarHelper.app
     cp -R menubar/dist/MenubarHelper.app bin/MenubarHelper.app
     codesign --verify --deep --strict "bin/MenubarHelper.app"
+    # build.sh notarizes + staples (apple.com creds are in scope here); fail fast
+    # if the staged bundle is not stapled, before the prepack gate catches it.
+    xcrun stapler validate "bin/MenubarHelper.app"
     scripts/build-keychain-helper.sh
     shasum -a 256 "bin/Agents CLI.app/Contents/MacOS/Agents CLI" > "scripts/Agents CLI.app.sha256"
   ' || die "signed helper build failed on $RELEASE_HOME_BASE"

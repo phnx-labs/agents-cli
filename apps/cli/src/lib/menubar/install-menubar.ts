@@ -211,44 +211,14 @@ export function codesignVerifies(appPath: string): boolean {
  * A Developer-ID-signed but un-notarized app is rejected by `spctl --assess`,
  * which macOS surfaces as "the app is damaged" and can crash AppKit during
  * launch. This is separate from `codesign --verify`: a signature can be valid
- * while Gatekeeper still refuses to run it.
+ * while Gatekeeper still refuses to run it. The release notarizes + staples the
+ * helper (menubar/scripts/build.sh, gated by verify-menubar-helper.sh), so a
+ * shipped bundle passes this; the launch guards use it to fail loud rather than
+ * bootstrap a helper macOS would reject.
  */
 export function gatekeeperAssesses(appPath: string): boolean {
   const r = spawnSync('spctl', ['--assess', '--type', 'exec', appPath], { stdio: ['ignore', 'ignore', 'ignore'] });
   return r.status === 0;
-}
-
-/**
- * Guarantee the installed bundle has a signature Gatekeeper will accept on THIS
- * machine.
- *
- * npm's pack/extract strips the ad-hoc/linker signature the release baked into
- * the helper, leaving `code object is not signed at all`. On macOS 26+ the
- * kernel's code-signing monitor SIGKILLs an unsigned/invalid binary at launch
- * (`SIGKILL (Code Signature Invalid)`), so under the launchd `KeepAlive` service
- * an ad-hoc release helper crash-loops forever and its unstable identity makes
- * the Accessibility grant (needed for the clip→paste keystroke in Clip.swift)
- * re-prompt every time. A fresh ad-hoc re-sign gives the on-disk bytes a
- * matching cdhash, which the kernel accepts.
- *
- * A Developer-ID-signed helper survives npm untouched — its embedded signature
- * still verifies — but if the release was not notarized, Gatekeeper rejects it.
- * In that case we strip the quarantine xattr and re-sign ad-hoc so the helper
- * can launch locally. The stable fix is to notarize the release build; this
- * fallback just prevents a crash-loop while the user is on an un-notarized cut.
- */
-export function ensureValidSignature(appPath: string): boolean {
-  if (codesignVerifies(appPath) && gatekeeperAssesses(appPath)) return true;
-  // Drop any quarantine/xattrs the tarball round-trip added (they can break
-  // both codesign and Gatekeeper), then re-sign ad-hoc under the helper's
-  // stable bundle identifier.
-  spawnSync('xattr', ['-cr', appPath], { stdio: ['ignore', 'ignore', 'ignore'] });
-  spawnSync(
-    'codesign',
-    ['--force', '--sign', '-', '--identifier', SERVICE_LABEL, appPath],
-    { stdio: ['ignore', 'ignore', 'ignore'] }
-  );
-  return codesignVerifies(appPath);
 }
 
 /**
@@ -262,13 +232,9 @@ export function ensureMenubarAppInstalled(opts: { forceReinstall?: boolean } = {
   if (!src) return null;
   const dest = installedAppPath();
   if (!opts.forceReinstall && fs.existsSync(dest)) {
-    // Self-heal an already-installed bundle whose signature npm stripped on a
-    // prior upgrade (macOS 26+ SIGKILLs it otherwise) without a forced recopy.
-    ensureValidSignature(dest);
     return installedExecutablePath();
   }
   copyAppBundle(src, dest);
-  ensureValidSignature(dest);
   // A fresh copy is exactly when the bundle's icon can be new (first install) or
   // superseded (upgrade) — register it so LaunchServices knows the bundle and can
   // resolve its AppIcon for the left-hand slot of daemon notifications.
@@ -366,13 +332,16 @@ export function enableMenubarService(opts: { clearOptOut?: boolean } = { clearOp
   const exec = ensureMenubarAppInstalled({ forceReinstall: true });
   if (!exec) return false;
 
-  // Never bootstrap a helper the kernel will kill on launch: an invalid
-  // signature under launchd KeepAlive is an infinite crash loop. If the bundle
-  // can't be made valid (re-sign already attempted in ensureMenubarAppInstalled),
-  // skip the service rather than spin the loop.
-  if (!codesignVerifies(installedAppPath())) {
+  // Never bootstrap a helper macOS will reject at launch: an invalid signature
+  // under launchd KeepAlive crash-loops forever, and an un-notarized bundle is
+  // rejected by Gatekeeper as "damaged". A shipped helper is Developer-ID signed
+  // AND notarized (release build + the verify-menubar-helper.sh prepack gate), so
+  // this passes; if it ever doesn't, skip the service and point at the upgrade
+  // rather than re-signing over it (an ad-hoc re-sign never satisfies Gatekeeper).
+  if (!(codesignVerifies(installedAppPath()) && gatekeeperAssesses(installedAppPath()))) {
     process.stderr.write(
-      'agents: menu-bar helper has no valid code signature; skipping launch to avoid a crash loop.\n'
+      'agents: menu-bar helper is not notarized/valid on this machine; skipping launch. ' +
+      'Upgrade to a notarized build (npm i -g @phnx-labs/agents-cli), then `agents menubar setup`.\n'
     );
     return false;
   }
@@ -610,12 +579,13 @@ export function runMenubarSetup(): SetupResult {
   step('bundle', before.installedVersion === getCliVersion() ? 'ok' : 'changed',
     `${installedAppPath()} (${getCliVersion()})`);
 
-  if (!codesignVerifies(installedAppPath())) {
+  if (!(codesignVerifies(installedAppPath()) && gatekeeperAssesses(installedAppPath()))) {
     step('signature', 'failed',
-      'no valid code signature — refusing to start it (launchd KeepAlive would crash-loop)');
+      'not notarized/valid on this machine — refusing to start it (Gatekeeper rejects an ' +
+      'un-notarized helper as "damaged"). Upgrade to a notarized build of agents-cli.');
     return { steps, configured: false, status: getMenubarStatus() };
   }
-  step('signature', 'ok', 'valid');
+  step('signature', 'ok', 'valid + notarized');
 
   // Clear the sticky opt-out: running `setup` is an explicit request for the
   // menu bar, so a stale `menubar disable` must not silently win.

@@ -6,7 +6,7 @@ import * as path from 'path';
 import {
   classifyMenubarProcesses,
   codesignVerifies,
-  ensureValidSignature,
+  gatekeeperAssesses,
   generateServicePlist,
   isMenubarStale,
   menubarPlistNeedsRepoint,
@@ -209,38 +209,35 @@ describe('restartMenubarLaunchAgent', () => {
   });
 });
 
-// Regression guard for the crash loop: npm strips the ad-hoc signature the
-// release bakes into MenubarHelper.app, leaving it "not signed at all" — which
-// macOS 26+ SIGKILLs on launch, spinning the launchd KeepAlive service forever.
-// ensureValidSignature must re-sign the copied bundle so codesign verifies.
-// Exercises the real `codesign` binary (no mocking), so it only runs on macOS.
+// Regression guard for the "damaged app" bug (RUSH-2134): the shipped helper is
+// Developer-ID signed AND notarized (menubar/scripts/build.sh + the
+// verify-menubar-helper.sh prepack gate). A signature alone is NOT enough —
+// Gatekeeper rejects an un-notarized bundle as "damaged" on macOS 26+ — so the
+// launch guards require BOTH `codesign --verify` (codesignVerifies) and
+// Gatekeeper acceptance (gatekeeperAssesses). This pins the reason both are
+// checked: an ad-hoc / un-notarized bundle passes codesign but fails Gatekeeper,
+// and must be refused, never re-signed. Real codesign/spctl (no mocking) → macOS.
 const darwinOnly = process.platform === 'darwin' ? describe : describe.skip;
-darwinOnly('ensureValidSignature (real codesign)', () => {
-  function makeUnsignedBundle(): string {
+darwinOnly('menubar launch guard requires notarization (real codesign/spctl)', () => {
+  function makeAdHocBundle(): string {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'menubar-sig-'));
     const app = path.join(dir, 'MenubarHelper.app');
     fs.mkdirSync(path.join(app, 'Contents', 'MacOS'), { recursive: true });
     // A real Mach-O so codesign has something to sign; /bin/echo is stable.
     fs.copyFileSync('/bin/echo', path.join(app, 'Contents', 'MacOS', 'MenubarHelper'));
-    // Strip the inherited system signature -> "not signed at all", the exact
-    // state npm's tarball round-trip leaves the shipped ad-hoc bundle in.
-    spawnSync('codesign', ['--remove-signature', app], { stdio: 'ignore' });
+    // Ad-hoc sign it: the signature is valid, but it is NOT notarized — the exact
+    // state a non-Developer-ID / un-notarized cut leaves the bundle in.
+    spawnSync('codesign', ['--force', '--sign', '-', '--identifier', 'com.phnx-labs.agents-menubar', app], { stdio: 'ignore' });
     return app;
   }
 
-  it('heals an unsigned bundle so it passes codesign --verify', () => {
-    const app = makeUnsignedBundle();
-    expect(codesignVerifies(app)).toBe(false);
-    expect(ensureValidSignature(app)).toBe(true);
+  it('an ad-hoc-signed (un-notarized) bundle passes codesign but FAILS Gatekeeper', () => {
+    const app = makeAdHocBundle();
+    // Signature is valid on its own...
     expect(codesignVerifies(app)).toBe(true);
-    fs.rmSync(path.dirname(app), { recursive: true, force: true });
-  });
-
-  it('leaves an already-valid signature untouched (idempotent)', () => {
-    const app = makeUnsignedBundle();
-    ensureValidSignature(app);
-    expect(ensureValidSignature(app)).toBe(true);
-    expect(codesignVerifies(app)).toBe(true);
+    // ...but Gatekeeper rejects it because it is not notarized. The guard's AND
+    // of the two is therefore false, so the helper is refused, not launched.
+    expect(gatekeeperAssesses(app)).toBe(false);
     fs.rmSync(path.dirname(app), { recursive: true, force: true });
   });
 });
