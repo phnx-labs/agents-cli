@@ -436,6 +436,21 @@ grant). Keep it a **separate bundle** from the keychain app — a menu-bar crash
 never take down the secret broker. Stage a freshly-built `bin/MenubarHelper.app`
 before any release or the menu bar ships code-only (the 1.20.22 bug the gate prevents).
 
+**Exactly one status item is an invariant, enforced in the helper.** The bundle
+can be started from more than one place — launchd's `KeepAlive` service, a
+LaunchServices/`open` launch, a second `agents menubar enable` — so the helper
+takes an `flock` on `~/.agents/.cache/state/menubar.lock` at launch
+([`SingleInstance.swift`](menubar/Sources/MenubarHelper/SingleInstance.swift)) and
+holds the descriptor for its lifetime; a loser surfaces the incumbent's menu and
+exits 0. Do NOT re-derive liveness from a pid file or a `ps` scan — the kernel
+releases an `flock` however the holder dies, which a pid cannot express, and a
+process list cannot say which copy launchd will keep alive. On the CLI side,
+`classifyMenubarProcesses` returns live copies of the installed bundle as a LIST
+(`own`), never a boolean: collapsing them is what let a duplicate icon read as a
+healthy `running: yes`. `agents menubar setup` is the recovery path — it ends
+every live helper and re-kickstarts the service so the survivor is always
+launchd's.
+
 **Standalone `agents` binary (#315).** Every release also builds `dist/bin/agents`
 (`bun build --compile`, arm64 Mach-O), signs it (Developer ID + hardened runtime +
 the JIT entitlement in `scripts/bun-jit-entitlements.plist` — bun's JavaScriptCore

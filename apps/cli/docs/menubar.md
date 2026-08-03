@@ -162,19 +162,75 @@ when sessions are running; otherwise it is the bare mark.
 
 ```
 agents menubar            # status (also: agents menubar status)
+agents menubar setup      # configure end-to-end: one instance, started at login
 agents menubar enable     # install + start the launchd login service
 agents menubar disable    # stop + remove it (sticky opt-out)
 agents menubar status     # installed / running, versions, staleness; --json
 ```
 
+`setup` is the command to reach for when the menu bar is wrong — a duplicate
+icon, a helper that did not come up, a machine that was never configured. It is
+idempotent, and each concern is a reported step, so a partial failure names
+itself instead of hiding behind "enabled":
+
+```
+$ agents menubar setup
+Menu bar setup
+
+  + duplicates      ended 2 running helpers (93048, 97417) — launchd restarts exactly one
+  ✓ bundle          /Users/me/Library/Application Support/agents-cli/MenubarHelper.app (1.20.89)
+  ✓ signature       valid
+  ✓ login item      com.phnx-labs.agents-menubar — starts at login, restarts if it dies
+  ✓ single instance pid 98566
+
+Menu bar configured.  One agents mark, started at login.
+```
+
+It ends **every** live helper and lets launchd restart one, so the survivor is
+always the login-managed copy — picking a survivor out of a process list cannot
+guarantee that, and keeping the un-managed copy would re-create the duplicate at
+the next login. It also clears a previous `agents menubar disable`, and exits
+nonzero if it cannot reach the one-instance end state. `--check` reports the
+current state without changing anything; `--json` emits the step list.
+
 `status` reports the installed bundle version vs. the current CLI version and
-whether the install is stale (see [Lifecycle](#lifecycle)). `running` tracks the
-**installed bundle** specifically, identified by its resolved executable; any
-other live `MenubarHelper` process is listed separately with its pid
-(`foreignInstances` in `--json`). `RegisterEventHotKey` is first-come, so a
-second copy may be the one holding the global chords — which of the two won is
-not answerable from a process list, so status reports the conflict rather than a
-winner. See [Do not hand-launch the helper](#do-not-hand-launch-the-helper).
+whether the install is stale (see [Lifecycle](#lifecycle)). Live helper processes
+are split two ways in `--json`: `instances` are copies of the **installed
+bundle**, identified by resolved executable, and `foreignInstances` is every
+other `MenubarHelper` process. **More than one entry in `instances` is the
+duplicate menu-bar icon** — see [One instance, always](#one-instance-always).
+`RegisterEventHotKey` is first-come, so a second copy may be the one holding the
+global chords — which of the two won is not answerable from a process list, so
+status reports the conflict rather than a winner. See
+[Do not hand-launch the helper](#do-not-hand-launch-the-helper).
+
+## One instance, always
+
+The helper refuses to be the second status item. At launch it takes an
+`flock(2)` on `~/.agents/.cache/state/menubar.lock` and holds the descriptor for
+its whole life; a helper that cannot take the lock posts a distributed
+notification that pops the **running** helper's menu open, then exits 0:
+
+```
+$ "…/MenubarHelper.app/Contents/MacOS/MenubarHelper"
+MenubarHelper: already running (pid 6815) — surfaced it instead of adding a second status item.
+```
+
+Re-launching a menu-bar app means "show me the one I already have", so
+surfacing the incumbent is the answer, and exiting 0 keeps launchd's `KeepAlive`
+from reading the surrender as a crash.
+
+An `flock` rather than a pid file: a helper `SIGKILL`ed by the code-signing
+monitor leaves its pid behind, and every later launch would then read a stale
+"already running" and never start. The kernel releases an `flock` when the holder
+dies however it dies, so the state cannot go stale.
+
+Two copies of the installed bundle used to be reachable through ordinary paths —
+launchd's `KeepAlive` service plus a LaunchServices/`open` launch of the same
+`.app` (a Finder open, a re-open after a crash, a second `agents menubar
+enable`). Both ran the same executable, so status collapsed them to a healthy
+`running: yes` while the user looked at two agents marks. Both halves are fixed:
+the helper can no longer become the second, and `status` now lists every copy.
 
 ## Data sources
 
@@ -210,7 +266,12 @@ The helper is a launchd user service (`com.phnx-labs.agents-menubar`,
 - **Opt-out is sticky.** `agents menubar disable` writes
   `~/.agents/.cache/state/menubar.disabled`; the auto-enable honors it, so a
   disabled menu bar never silently returns on the next upgrade. Re-enable with
-  `agents menubar enable`.
+  `agents menubar setup` (or `agents menubar enable`), either of which clears the
+  sentinel.
+- **Recovery is one command.** When any of the above has gone wrong on a
+  machine — never configured, helper down, duplicate icon —
+  `agents menubar setup` re-establishes the whole intended state and says which
+  parts it had to change.
 
 ## Notifications
 

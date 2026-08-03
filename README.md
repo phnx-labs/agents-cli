@@ -1002,9 +1002,15 @@ Other useful commands: `agents doctor` checks CLI availability and resource sync
 On macOS, `agents-cli` puts a status item in your menu bar -- a live glance at what your agents are doing, plus a Spotlight-style bar for filing work without breaking focus.
 
 ```bash
-agents menubar enable      # install + launch at login
+agents menubar setup       # configure end-to-end: one instance, started at login
 agents menubar status      # is it installed and running?
 ```
+
+There is only ever **one** agents mark: the helper takes a lock at launch, so a
+second copy surfaces the running one's menu and exits instead of adding a
+duplicate icon. `agents menubar setup` is the recovery command when a machine is
+already wrong -- it ends any duplicate, installs the bundle, wires the login
+item, and verifies exactly one helper came back up.
 
 The dropdown surfaces a **NEEDS YOU** queue (agents waiting on a question, a plan review, or a permission prompt), the running roster, and a routines summary -- the same live state as `agents sessions --active`, one click away.
 
