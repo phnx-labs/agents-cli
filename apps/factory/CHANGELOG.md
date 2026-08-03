@@ -4,7 +4,7 @@ All notable changes to the Factory extension are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); `scripts/release.sh` requires a
 `## [<version>]` section for the version being published.
 
-## [0.9.307] - 2026-08-03
+## [0.9.308] - 2026-08-03
 
 - **`Agents: Fork (Recap)` starts a new sibling with context from a session you pick.**
   It reuses `Agents: Fork (Pick Session)`'s device-aware browser and launches on
@@ -14,6 +14,8 @@ All notable changes to the Factory extension are documented here. Format follows
   inherits the historical session, so the user can ask a different question in a
   small new session after the recap appears.
   Source: `src/vscode/sessionBrowser.vscode.ts`, `src/vscode/extension.ts`.
+
+## [0.9.307] - 2026-08-03
 
 - **`Agents: Fork (Pick Host)` forks the session you are in onto a device you choose.**
   Same fork as `Agents: Fork` — same harness, same `--strategy balanced` account
