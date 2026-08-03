@@ -32,6 +32,8 @@ import {
   removeDaemonPid,
   shouldTakeOverBroker,
   anchorDaemonCwd,
+  describeEphemeralDaemonRoot,
+  validateDaemonBinary,
 } from './daemon.js';
 import { ipcEndpoint } from './platform/index.js';
 
@@ -726,5 +728,54 @@ describe('anchorDaemonCwd', () => {
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
+  });
+});
+
+describe('describeEphemeralDaemonRoot', () => {
+  // A daemon launched from an ephemeral path wedges on every dynamic import once
+  // that path is removed — the /tmp/rv-head incident. This predicate is what
+  // both the launch-time check (validateDaemonBinary) and the runtime startup
+  // self-check (warnEphemeralDaemonRoot) share, so it must classify precisely.
+  it('flags a git worktree entry', () => {
+    expect(describeEphemeralDaemonRoot('/home/u/.agents/worktrees/rv/apps/cli/src/index.ts')).toBe('a git worktree');
+  });
+
+  it('flags /tmp and /private/tmp entries (the /tmp/rv-head case)', () => {
+    expect(describeEphemeralDaemonRoot('/tmp/rv-head/apps/cli/src/index.ts')).toBe('a temporary directory');
+    expect(describeEphemeralDaemonRoot('/private/tmp/rv-head/apps/cli/src/index.ts')).toBe('a temporary directory');
+  });
+
+  it('flags macOS /var/folders and linux /dev/shm entries', () => {
+    expect(describeEphemeralDaemonRoot('/var/folders/xy/abc/T/build/index.js')).toBe('a temporary directory');
+    expect(describeEphemeralDaemonRoot('/private/var/folders/xy/abc/T/build/index.js')).toBe('a temporary directory');
+    expect(describeEphemeralDaemonRoot('/dev/shm/build/index.js')).toBe('a temporary directory');
+  });
+
+  it('returns null for stable install roots and normal checkouts', () => {
+    // Version home (the real install location), a global npm prefix, and an
+    // ordinary source checkout under $HOME must NOT be flagged — else every
+    // dev run and every install would emit a spurious wedge warning.
+    expect(describeEphemeralDaemonRoot('/home/u/.agents/.history/versions/agents/1.20.88/node_modules/@phnx-labs/agents-cli/dist/index.js')).toBeNull();
+    expect(describeEphemeralDaemonRoot('/opt/homebrew/lib/node_modules/@phnx-labs/agents-cli/dist/index.js')).toBeNull();
+    expect(describeEphemeralDaemonRoot('/home/u/src/github.com/x/agents-cli/apps/cli/src/index.ts')).toBeNull();
+    // A directory merely named "tmp" under $HOME is not a temp root (anchored match).
+    expect(describeEphemeralDaemonRoot('/home/u/tmp/agents-cli/dist/index.js')).toBeNull();
+  });
+});
+
+describe('validateDaemonBinary (ephemeral-root warning)', () => {
+  it('warns when the daemon binary is under /tmp', () => {
+    const { warnings } = validateDaemonBinary('/tmp/rv-head/apps/cli/src/index.ts');
+    expect(warnings.some((w) => w.includes('a temporary directory'))).toBe(true);
+  });
+
+  it('warns when the daemon binary is inside a git worktree', () => {
+    const { warnings } = validateDaemonBinary('/home/u/.agents/worktrees/rv/apps/cli/src/index.ts');
+    expect(warnings.some((w) => w.includes('a git worktree'))).toBe(true);
+  });
+
+  it('does not emit a wedge warning for a version-home install', () => {
+    const { warnings } = validateDaemonBinary('/home/u/.agents/.history/versions/agents/1.20.88/dist/index.js');
+    expect(warnings.some((w) => /worktree|temporary directory/.test(w))).toBe(false);
   });
 });

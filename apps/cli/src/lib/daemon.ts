@@ -318,6 +318,34 @@ export function anchorDaemonCwd(): string | null {
   }
 }
 
+/**
+ * Surface, at the daemon's OWN startup, that it was launched from an ephemeral
+ * root that will wedge it if the directory is removed. This is the runtime
+ * companion to the launch-time check in validateDaemonBinary (which only runs
+ * when the daemon is *spawned* via getDaemonLaunch): a direct
+ * `agents __daemon-run` from a temp or worktree build — e.g. a review/verify
+ * checkout under /tmp — never passes through that path, so without this the
+ * wedge risk stays invisible until jobs start ENOENT-ing on their dynamic
+ * imports. Best-effort and non-fatal; the cwd is already handled by
+ * anchorDaemonCwd, but a deleted module root can only be flagged, not repaired.
+ */
+export function warnEphemeralDaemonRoot(): void {
+  try {
+    const bin = getAgentsBinPath();
+    const ephemeralRoot = describeEphemeralDaemonRoot(bin);
+    if (ephemeralRoot) {
+      log(
+        'WARN',
+        `Daemon launched from ${ephemeralRoot} (${bin}); if that directory is removed, ` +
+        `every routine will fail with ENOENT on its module imports. Run the daemon from the ` +
+        `globally installed binary instead (npm i -g @phnx-labs/agents-cli), then restart it.`,
+      );
+    }
+  } catch (err) {
+    log('WARN', `Could not check daemon launch root: ${(err as Error).message}`);
+  }
+}
+
 export async function runDaemon(): Promise<void> {
   // Single-instance guard: a direct `agents __daemon-run` (manual, or a
   // service-manager restart racing a live predecessor) must not clobber a
@@ -332,6 +360,7 @@ export async function runDaemon(): Promise<void> {
   log('INFO', `Daemon started (PID: ${process.pid})`);
 
   anchorDaemonCwd();
+  warnEphemeralDaemonRoot();
 
   // The daemon holds NO Claude credential of its own. Routine runs authenticate
   // exactly like an interactive `agents run`: through the per-account
@@ -1100,6 +1129,25 @@ export function getAgentsInvocation(
   return getCliLaunch(subArgs, agentsBin);
 }
 
+/**
+ * A daemon binary living under an ephemeral path — a git worktree, or a temp
+ * directory (`/tmp`, `/var/folders`, `/dev/shm`) — is a latent wedge. The daemon
+ * is long-lived but resolves its own job modules by dynamic `import()` rooted at
+ * this entry (getAgentsBinPath → process.argv[1]). If that directory is later
+ * removed (`git worktree remove`, a `/tmp` cleanup, a review/verify checkout
+ * teardown) the running daemon keeps ENOENT-ing on every job it loads —
+ * `anchorDaemonCwd` rescues the cwd, but nothing can re-root a deleted module
+ * tree. Returns a human phrase naming the ephemeral kind, or null for a stable
+ * install path (version home, a global npm prefix, a normal source checkout).
+ */
+export function describeEphemeralDaemonRoot(binPath: string): string | null {
+  if (/[/\\]\.agents[/\\]worktrees[/\\]/.test(binPath)) return 'a git worktree';
+  if (/^(?:\/private)?\/tmp[/\\]|^(?:\/private)?\/var\/folders[/\\]|^\/dev\/shm[/\\]/.test(binPath)) {
+    return 'a temporary directory';
+  }
+  return null;
+}
+
 export function validateDaemonBinary(binPath: string): { warnings: string[] } {
   const warnings: string[] = [];
   if (BUN_VIRTUAL_ROOT.test(binPath)) {
@@ -1108,10 +1156,11 @@ export function validateDaemonBinary(binPath: string): { warnings: string[] } {
       `Install agents globally (npm i -g @phnx-labs/agents-cli) and restart.`,
     );
   }
-  if (/[/\\]\.agents[/\\]worktrees[/\\]/.test(binPath)) {
+  const ephemeralRoot = describeEphemeralDaemonRoot(binPath);
+  if (ephemeralRoot) {
     warnings.push(
-      `Warning: daemon binary is inside a git worktree (${binPath}). ` +
-      `A worktree deletion will wedge the daemon. Use the globally installed binary instead.`,
+      `Warning: daemon binary is inside ${ephemeralRoot} (${binPath}). ` +
+      `Deleting it will wedge the daemon. Use the globally installed binary instead.`,
     );
   }
   if (!fs.existsSync(binPath) && !/\.(c|m)?js$/.test(binPath)) {
