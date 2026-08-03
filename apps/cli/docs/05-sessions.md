@@ -393,11 +393,13 @@ agents sessions --resolve "recap resolver" --json
 ```
 
 It reads the indexed `SessionMeta` rows on each machine and emits a one-element JSON
-array with the safe resolver fields when exactly one logical session matches. Transcript
-paths, extracted plans, account data, and cost/token fields stay on the owning machine.
-A missing/empty selector, an ambiguous ID prefix/keyword query, or any selected peer that
-cannot answer exits non-zero; ambiguity output lists every full ID and machine, while an
-incomplete fleet never produces a false unique/no-match result.
+array containing only `id`, `shortId`, `agent`, timestamps, `project`, `version`,
+`label`, `topic`, and `machine` when exactly one logical session matches. Transcript
+paths/content (`filePath`, `plan`), account, cwd, cost, and token fields stay on the
+owning machine. A missing/empty selector or ambiguous ID prefix/keyword query exits 1.
+If any selected peer is unreachable, times out, or rejects `--resolve` because it runs
+an older CLI, the command emits no JSON, names the peer(s), and exits 2; it never makes
+a unique/no-match decision from partial fleet state.
 `--local` keeps the metadata lookup on this machine.
 `--agent <agent[@version]>` and `--project <name>` narrow the lookup on every peer;
 `--all` is implicit because historical resolution must not inherit the SSH login

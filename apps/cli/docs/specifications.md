@@ -394,14 +394,17 @@ The command surface (bare `sessions [query]`, `tail`, `sync`, `resume`, `focus`,
   parsing or rendering transcript events. It MUST search the online fleet unless
   `--local` is set; `--agent` and `--project` MUST narrow every peer. Exactly one
   logical session MUST emit a one-element safe metadata array containing only
-  `id`, `shortId`, `agent`, `origin`, `timestamp`, `lastActivity`, `project`,
+  `id`, `shortId`, `agent`, `timestamp`, `lastActivity`, `project`,
   `version`, `label`, `topic`, and `machine`; transcript-local fields including
   `filePath` and `plan` MUST NOT leave the owning machine. Synced copies sharing
   the same full id MUST count as one logical session. A missing selector or more
-  than one logical match, an empty selector, or an incomplete peer sweep MUST
-  emit no JSON, list the failure/ambiguity on stderr,
-  and exit 1; ambiguity MUST include every matching full id and machine
-  (`commands/sessions.ts` `resolveSessionMetadata`, `fleetCandidatesByQuery`,
+  than one logical match or an empty selector MUST emit no JSON, list the
+  failure/ambiguity on stderr, and exit 1; ambiguity MUST include every matching
+  full id and machine. An incomplete peer sweep (including an older peer rejecting
+  `--resolve`) MUST emit no JSON, MUST NOT decide unique/no-match from partial rows,
+  and MUST exit 2 with the failed peer(s) on stderr
+  (`commands/sessions.ts` `serializeResolvedSessionsJson`, `resolveSessionMetadata`,
+  `metadataResolveOutcome`, `fleetCandidatesByQuery`,
   `metadataResolveForwardedArgs`; tests
   `commands/sessions-resolve-db.test.ts`,
   `commands/__tests__/sessions.test.ts`).
