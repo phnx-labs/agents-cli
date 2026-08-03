@@ -157,6 +157,30 @@ describe('project opt-in + source tracking', () => {
     expect(readJob('daily')!.prompt).toBe('v2');
   });
 
+  // A sync rebuilds the user copy from the PROJECT yaml, which never carries
+  // createdAt. Without carrying it across, every sync re-stamps it to now,
+  // walking the overdue floor forward and hiding real missed fires.
+  it('sync preserves the original createdAt stamp across refreshes', () => {
+    writeRoutine(projectRoutinesDir, 'daily', {
+      schedule: '0 9 * * *',
+      agent: 'claude',
+      prompt: 'v1',
+    });
+    enableProjectRoutines(projectDir);
+    syncProjectRoutines(projectDir);
+    const first = readJob('daily')!.createdAt;
+    expect(first).toBeTruthy();
+
+    writeRoutine(projectRoutinesDir, 'daily', {
+      schedule: '0 9 * * *',
+      agent: 'claude',
+      prompt: 'v2',
+    });
+    syncProjectRoutines(projectDir);
+    expect(readJob('daily')!.prompt).toBe('v2');
+    expect(readJob('daily')!.createdAt).toBe(first);
+  });
+
   it('sync does not overwrite a hand-authored user routine of the same name', () => {
     writeRoutine(userRoutinesDir, 'daily', {
       schedule: '0 8 * * *',
