@@ -58,6 +58,24 @@ export function matchLinearProject(
   });
 }
 
+/**
+ * Find the local checkout directory a Linear project name refers to, on EXACT
+ * normalized-key equality only — never containment. `matchLinearProject`'s
+ * containment fallback is right for suggesting a link a human then confirms;
+ * this backs `projects import --from-linear`, which writes `root`/`repo` with
+ * nobody looking, and "Agents CLI" must not silently bind `agents-cli-web`.
+ *
+ * Returns `undefined` when nothing matches, and also when SEVERAL dirs
+ * normalize to the same key (`agents-cli` and `agents_cli`) — an ambiguous
+ * match is not a match.
+ */
+export function matchLocalCheckoutExact(name: string, dirNames: string[]): string | undefined {
+  const key = normalizeProjectKey(name);
+  if (!key) return undefined;
+  const hits = dirNames.filter((d) => normalizeProjectKey(d) === key);
+  return hits.length === 1 ? hits[0] : undefined;
+}
+
 /** The outcome of picking one Linear project out of the workspace list. */
 export type LinearPick =
   | { kind: 'match'; project: LinearProjectLite }
