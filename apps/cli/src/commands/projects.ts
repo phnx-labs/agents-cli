@@ -34,7 +34,9 @@ import {
 import {
   rollupSessionsByProject,
   planPct,
+  enrichProjectSignals,
   type ProjectSessionRollup,
+  type ProjectRemoteSignals,
 } from '../lib/project-status.js';
 
 /** `path:purpose` → a context anchor. Purpose may contain colons. */
@@ -66,20 +68,28 @@ function statusBar(r: ProjectSessionRollup): string {
   return parts.join(' · ') || chalk.gray('no live agents');
 }
 
-function renderCard(def: ProjectDef, r: ProjectSessionRollup | undefined): void {
+function renderCard(
+  def: ProjectDef,
+  r: ProjectSessionRollup | undefined,
+  remote: ProjectRemoteSignals | undefined,
+): void {
   const agents = r?.agents ?? 0;
   const pct = r ? planPct(r.plan) : undefined;
   const planStr = pct === undefined ? '' : `  ·  ${chalk.cyan(`${pct}% plan`)}`;
   console.log(`${chalk.bold(def.name)}  ${chalk.dim('·')}  ${chalk.bold(`${agents} agents`)}${planStr}`);
   if (def.description) console.log(`  ${chalk.dim(def.description)}`);
   console.log(`  ${chalk.dim('live')}     ${r ? statusBar(r) : chalk.gray('no live agents')}`);
-  if (r && (r.openPrs.length || r.worktrees)) {
-    const prs = r.openPrs.length ? `${r.openPrs.length} open PR${r.openPrs.length === 1 ? '' : 's'}` : '';
-    const wt = r.worktrees ? `${r.worktrees} worktree${r.worktrees === 1 ? '' : 's'}` : '';
-    console.log(`  ${chalk.dim('ships')}    ${[prs, wt].filter(Boolean).join(' · ')}`);
-  }
+  const ships: string[] = [];
+  if (remote?.mergedPrs) ships.push(chalk.green(`${remote.mergedPrs} merged (${remote.windowDays}d)`));
+  if (r?.openPrs.length) ships.push(`${r.openPrs.length} open PR${r.openPrs.length === 1 ? '' : 's'}`);
+  if (r?.worktrees) ships.push(`${r.worktrees} worktree${r.worktrees === 1 ? '' : 's'}`);
+  if (ships.length) console.log(`  ${chalk.dim('ships')}    ${ships.join(' · ')}`);
   if (r && r.tickets.length) {
     console.log(`  ${chalk.dim('tickets')}  ${r.tickets.slice(0, 8).join(' · ')}${r.tickets.length > 8 ? ' …' : ''}`);
+  }
+  if (remote?.artifacts) {
+    const last = remote.lastArtifact ? `  ${chalk.dim(`· last: ${remote.lastArtifact}`)}` : '';
+    console.log(`  ${chalk.dim('proof')}    ${remote.artifacts} artifact${remote.artifacts === 1 ? '' : 's'} (${remote.windowDays}d)${last}`);
   }
   const repos = [def.repo, ...(def.repos ?? []).map((x) => x.slug)].filter(Boolean) as string[];
   if (repos.length) console.log(`  ${chalk.dim('repos')}    ${[...new Set(repos)].join(' · ')}`);
@@ -244,41 +254,63 @@ export function registerProjectsCommands(program: Command): void {
   // ---- status ----
   projects
     .command('status [name]')
-    .description('Progress rollup: agents, plan completion, open PRs, and tickets per project.')
+    .description('Progress rollup: agents, plan %, merged/open PRs, tickets, and artifacts per project.')
     .option('--json', 'Machine-readable output')
-    .action(async (name: string | undefined, opts: { json?: boolean }) => {
+    .option('--window <days>', 'Window for merged PRs and artifacts', '7')
+    .option('--no-remote', 'Skip the GitHub lookup (merged-PR count); faster, offline')
+    .action(async (name: string | undefined, opts: { json?: boolean; window?: string; remote?: boolean }) => {
       const all = listProjectDefs();
       const defs = name ? all.filter((d) => d.name === name) : all;
       if (name && !defs.length) {
         console.error(chalk.red(`No project named "${name}".`));
         process.exit(1);
       }
+      if (!defs.length) {
+        if (opts.json) console.log('[]');
+        else console.log(chalk.gray('No projects defined. Add one: agents projects add <name>'));
+        return;
+      }
+      const windowDays = Math.max(1, Number.parseInt(opts.window ?? '7', 10) || 7);
+      const nowMs = Date.now();
       const roll = rollupSessionsByProject(all, await getActiveSessions());
+      // Enrich only the shown projects. --no-remote still reads the local artifact
+      // log but skips the gh call (def.repo left unused → mergedPrs stays 0).
+      const remote = new Map<string, ProjectRemoteSignals>();
+      await Promise.all(
+        defs.map(async (d) => {
+          remote.set(d.name, await enrichProjectSignals(d, windowDays, nowMs, { skipRemote: opts.remote === false }));
+        }),
+      );
+
       if (opts.json) {
         console.log(
           JSON.stringify(
-            defs.map((d) => ({
-              name: d.name,
-              agents: roll.get(d.name)?.agents ?? 0,
-              byStatus: roll.get(d.name)?.byStatus ?? {},
-              plan: roll.get(d.name)?.plan ?? { done: 0, total: 0 },
-              planPct: roll.get(d.name) ? planPct(roll.get(d.name)!.plan) ?? null : null,
-              openPrs: roll.get(d.name)?.openPrs ?? [],
-              tickets: roll.get(d.name)?.tickets ?? [],
-              worktrees: roll.get(d.name)?.worktrees ?? 0,
-              repos: [d.repo, ...(d.repos ?? []).map((r) => r.slug)].filter(Boolean),
-            })),
+            defs.map((d) => {
+              const r = roll.get(d.name);
+              const rem = remote.get(d.name);
+              return {
+                name: d.name,
+                agents: r?.agents ?? 0,
+                byStatus: r?.byStatus ?? {},
+                plan: r?.plan ?? { done: 0, total: 0 },
+                planPct: r ? planPct(r.plan) ?? null : null,
+                openPrs: r?.openPrs ?? [],
+                mergedPrs: rem?.mergedPrs ?? 0,
+                tickets: r?.tickets ?? [],
+                worktrees: r?.worktrees ?? 0,
+                artifacts: rem?.artifacts ?? 0,
+                lastArtifact: rem?.lastArtifact ?? null,
+                windowDays,
+                repos: [d.repo, ...(d.repos ?? []).map((r2) => r2.slug)].filter(Boolean),
+              };
+            }),
             null,
             2,
           ),
         );
         return;
       }
-      if (!defs.length) {
-        console.log(chalk.gray('No projects defined. Add one: agents projects add <name>'));
-        return;
-      }
-      for (const d of defs) renderCard(d, roll.get(d.name));
+      for (const d of defs) renderCard(d, roll.get(d.name), remote.get(d.name));
     });
 
   // ---- import ----

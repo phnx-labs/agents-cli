@@ -10,8 +10,13 @@
  * enrich this in `enrichProjectStatus` without changing the core shape.
  */
 
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import type { ActiveSession, ActiveStatus } from './session/active.js';
 import { projectNameForCwd, type ProjectDef } from './projects.js';
+import { readRecentActivity } from './activity.js';
+
+const execFileAsync = promisify(execFile);
 
 /** One project's live session rollup. */
 export interface ProjectSessionRollup {
@@ -83,4 +88,56 @@ export function rollupSessionsByProject(
 export function planPct(plan: { done: number; total: number }): number | undefined {
   if (plan.total <= 0) return undefined;
   return Math.round((plan.done / plan.total) * 100);
+}
+
+/** Cross-repo / cross-machine signals harvested for a project, in a time window. */
+export interface ProjectRemoteSignals {
+  windowDays: number;
+  /** PRs merged into the primary repo within the window (via `gh`). */
+  mergedPrs: number;
+  /** Artifacts agents produced within the window (activity.created milestones). */
+  artifacts: number;
+  /** Basename of the most recent artifact, when any. */
+  lastArtifact?: string;
+}
+
+/**
+ * Harvest the signals that don't live on the active-session list: recently
+ * merged PRs (from GitHub via `gh`) and artifacts agents produced (from the
+ * local activity-milestone log, matched to the project by cwd). Best-effort —
+ * a missing `gh`, no auth, or no repo degrades to zero rather than throwing, so
+ * `projects status` still renders. `nowMs` is injected for testability.
+ */
+export async function enrichProjectSignals(
+  def: ProjectDef,
+  windowDays: number,
+  nowMs: number,
+  opts: { activityRoot?: string; skipRemote?: boolean } = {},
+): Promise<ProjectRemoteSignals> {
+  const sinceMs = nowMs - windowDays * 86_400_000;
+  const out: ProjectRemoteSignals = { windowDays, mergedPrs: 0, artifacts: 0 };
+
+  try {
+    const evs = readRecentActivity({ events: ['artifact.created'], sinceMs, root: opts.activityRoot });
+    const mine = evs.filter((e) => projectNameForCwd(e.cwd, [def]) === def.name);
+    out.artifacts = mine.length;
+    if (mine.length && typeof mine[0].detail === 'string') out.lastArtifact = mine[0].detail;
+  } catch {
+    /* activity log unreadable — best-effort */
+  }
+
+  if (def.repo && !opts.skipRemote) {
+    try {
+      const { stdout } = await execFileAsync(
+        'gh',
+        ['pr', 'list', '--repo', def.repo, '--state', 'merged', '--json', 'number,mergedAt', '--limit', '100'],
+        { timeout: 8000, encoding: 'utf8' },
+      );
+      const rows = JSON.parse(stdout) as { mergedAt?: string }[];
+      out.mergedPrs = rows.filter((r) => r.mergedAt && Date.parse(r.mergedAt) >= sinceMs).length;
+    } catch {
+      /* gh missing / unauthenticated / repo not found — skip this signal */
+    }
+  }
+  return out;
 }
