@@ -191,7 +191,20 @@ export function codesignVerifies(appPath: string): boolean {
 }
 
 /**
- * Guarantee the installed bundle has a valid signature on THIS machine.
+ * True when Gatekeeper will let the bundle execute on this machine.
+ * A Developer-ID-signed but un-notarized app is rejected by `spctl --assess`,
+ * which macOS surfaces as "the app is damaged" and can crash AppKit during
+ * launch. This is separate from `codesign --verify`: a signature can be valid
+ * while Gatekeeper still refuses to run it.
+ */
+export function gatekeeperAssesses(appPath: string): boolean {
+  const r = spawnSync('spctl', ['--assess', '--type', 'exec', appPath], { stdio: ['ignore', 'ignore', 'ignore'] });
+  return r.status === 0;
+}
+
+/**
+ * Guarantee the installed bundle has a signature Gatekeeper will accept on THIS
+ * machine.
  *
  * npm's pack/extract strips the ad-hoc/linker signature the release baked into
  * the helper, leaving `code object is not signed at all`. On macOS 26+ the
@@ -203,14 +216,16 @@ export function codesignVerifies(appPath: string): boolean {
  * matching cdhash, which the kernel accepts.
  *
  * A Developer-ID-signed helper survives npm untouched — its embedded signature
- * still verifies — so we leave it alone and only re-sign when verification
- * fails. Returns whether the bundle ends up validly signed. No-op cost on the
- * common (already-valid) path is a single `codesign --verify`.
+ * still verifies — but if the release was not notarized, Gatekeeper rejects it.
+ * In that case we strip the quarantine xattr and re-sign ad-hoc so the helper
+ * can launch locally. The stable fix is to notarize the release build; this
+ * fallback just prevents a crash-loop while the user is on an un-notarized cut.
  */
 export function ensureValidSignature(appPath: string): boolean {
-  if (codesignVerifies(appPath)) return true;
+  if (codesignVerifies(appPath) && gatekeeperAssesses(appPath)) return true;
   // Drop any quarantine/xattrs the tarball round-trip added (they can break
-  // codesign), then re-sign ad-hoc under the helper's stable bundle identifier.
+  // both codesign and Gatekeeper), then re-sign ad-hoc under the helper's
+  // stable bundle identifier.
   spawnSync('xattr', ['-cr', appPath], { stdio: ['ignore', 'ignore', 'ignore'] });
   spawnSync(
     'codesign',

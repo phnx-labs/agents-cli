@@ -19,6 +19,7 @@ import { extractTodoProgress, WORKTREE_RE } from '../lib/session/state.js';
 import { renderMarkdown } from '../lib/markdown.js';
 import { itemPicker } from '../lib/picker.js';
 import { classifyFileChanges, changeCounts, toolHistogram, detectTestResult } from '../lib/session/digest.js';
+import { extractArtifacts, extractHooks, extractLinks, extractRepos, extractSkills } from '../lib/session/highlights.js';
 /** A session whose transcript lives on another machine (folded in over the live
  * cross-machine fan-out): its `filePath` is on that peer's disk, so the preview
  * can't parse it locally — it shows metadata + a "resume there" note instead.
@@ -173,7 +174,7 @@ const DOT = chalk.gray(' · ');
 
 function formatHeader(session: SessionMeta, events: SessionEvent[]): string {
   const model = extractModel(events) || session.model;
-  const { startedAgo, duration } = extractTiming(events);
+  const { createdAgo, lastActiveAgo, duration } = extractTiming(session, events);
   const totalMessages = session.messageCount ?? countMessages(events);
   const totalTokens = session.tokenCount;
 
@@ -184,7 +185,7 @@ function formatHeader(session: SessionMeta, events: SessionEvent[]): string {
   if (model) line1.push(chalk.bold.white(shortenModel(model)));
   if (session.account) line1.push(chalk.gray(session.account));
 
-  // Line 2: cwd · project · branch · started X ago · lasted Y
+  // Line 2: cwd · project · branch · created X ago · last active Y ago · lasted Z
   // Project is clickable: Linear issue URL is for tickets (line 4); for the
   // project name prefer a GitHub repo URL derived from the checkout path.
   const line2: string[] = [];
@@ -197,7 +198,8 @@ function formatHeader(session: SessionMeta, events: SessionEvent[]): string {
     line2.push(chalk.cyan(repoUrl ? linkUrl(repoUrl, session.project) : session.project));
   }
   if (session.gitBranch) line2.push(chalk.cyan(session.gitBranch));
-  if (startedAgo) line2.push(chalk.gray('started ') + chalk.white(startedAgo + ' ago'));
+  if (createdAgo) line2.push(chalk.gray('created ') + chalk.white(createdAgo + ' ago'));
+  if (lastActiveAgo) line2.push(chalk.gray('last active ') + chalk.white(lastActiveAgo + ' ago'));
   if (duration) line2.push(chalk.gray('lasted ') + chalk.white(duration));
 
   // Line 3: N msgs · T tokens · [label ·] uuid
@@ -318,14 +320,43 @@ function extractModel(events: SessionEvent[]): string | undefined {
   return undefined;
 }
 
-function extractTiming(events: SessionEvent[]): { startedAgo?: string; duration?: string } {
-  if (events.length === 0) return {};
-  const firstMs = Date.parse(events[0].timestamp);
-  const lastMs = Date.parse(events[events.length - 1].timestamp);
+/** Shortest span worth reporting as a separate last-activity field — matches the
+ * listing's rule, so the pane and the row agree on what counts as a one-shot. */
+const TIMING_SPAN_MIN_MS = 60_000;
+
+/**
+ * The three timing facts the header reports: when the session was created, when
+ * it was last active, and how long it ran. Reads the parsed transcript when
+ * there is one and otherwise the indexed `SessionMeta`, so a remote or
+ * unindexed session — which has no local transcript to parse — still reports
+ * them instead of silently dropping the whole line.
+ *
+ * `lastActive` and `lasted` are omitted for a session whose whole life was under
+ * a minute: there they just restate `created`.
+ */
+export function extractTiming(
+  session: Pick<SessionMeta, 'timestamp' | 'lastActivity' | 'durationMs'>,
+  events: SessionEvent[],
+): { createdAgo?: string; lastActiveAgo?: string; duration?: string } {
+  const firstMs = Date.parse(events[0]?.timestamp ?? session.timestamp);
   if (Number.isNaN(firstMs)) return {};
-  const ago = humanDuration(Math.max(0, Date.now() - firstMs));
-  const dur = Number.isNaN(lastMs) ? undefined : humanDuration(Math.max(0, lastMs - firstMs));
-  return { startedAgo: ago, duration: dur };
+  const createdAgo = humanDuration(Math.max(0, Date.now() - firstMs));
+
+  const lastMs = Date.parse(
+    events[events.length - 1]?.timestamp ?? session.lastActivity ?? session.timestamp,
+  );
+  if (Number.isNaN(lastMs)) return { createdAgo };
+  // A scan-persisted duration beats the timestamp subtraction when there are no
+  // events to read, because `lastActivity` may have fallen back to file mtime.
+  const spanMs = events.length === 0 && session.durationMs !== undefined
+    ? session.durationMs
+    : Math.max(0, lastMs - firstMs);
+  if (spanMs < TIMING_SPAN_MIN_MS) return { createdAgo };
+  return {
+    createdAgo,
+    lastActiveAgo: humanDuration(Math.max(0, Date.now() - lastMs)),
+    duration: humanDuration(spanMs),
+  };
 }
 
 
@@ -448,9 +479,16 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
 
   // Recent activity = directories touched (not raw tool calls). Prefer a
   // parser-supplied dirsTouched when present; else derive from event paths.
+  // Width-capped: a long Dirs line used to wrap and swamp the whole pane.
   const dirs = directoriesTouched(session, events, changes);
   if (dirs.length) {
-    lines.push(chalk.cyan('Dirs:    ') + chalk.white(dirs.join(chalk.gray(' · '))));
+    lines.push(chalk.cyan('Dirs:    ') + joinWidthCapped(dirs, termWidth - 12));
+  }
+
+  // Repos worked in (basename of each `.git` root under the touched paths).
+  const repos = extractRepos(events, session.cwd);
+  if (repos.length) {
+    lines.push(chalk.cyan('Repos:   ') + chalk.white(repos.slice(0, 4).join(chalk.gray(' · '))));
   }
 
   const teamLine = formatTeamLineage(session);
@@ -472,6 +510,47 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
   if (toolCalls) activity.push(chalk.gray(`${toolCalls} tool${toolCalls === 1 ? '' : 's'}`));
   if (activity.length) {
     lines.push(chalk.cyan('Changes:  ') + activity.join(chalk.gray(' · ')));
+  }
+
+  // Documents the session produced (`.agents/artifacts|plans|reports`, other
+  // *.md/*.html creations) — the files a human browses later, named + clickable.
+  const artifacts = extractArtifacts(changes);
+  if (artifacts.length) {
+    const shown = artifacts.slice(0, 5).map(a => linkPath(a.path, a.basename));
+    const more = artifacts.length > 5 ? chalk.gray(` · +${artifacts.length - 5} more`) : '';
+    lines.push(chalk.cyan('Artifacts: ') + shown.join(chalk.gray(' · ')) + more);
+  }
+
+  // Skills invoked (plugin skills included — they ride the same Skill tool).
+  const skills = extractSkills(events);
+  if (skills.length) {
+    const shown = skills.slice(0, 5).map(s => chalk.white(s.name) + (s.count > 1 ? chalk.gray(` ×${s.count}`) : ''));
+    const more = skills.length > 5 ? chalk.gray(` · +${skills.length - 5} more`) : '';
+    lines.push(chalk.cyan('Skills:  ') + shown.join(chalk.gray(' · ')) + more);
+  }
+
+  // Hooks fired (Claude transcripts record firings; other harnesses don't).
+  const hooks = extractHooks(events);
+  if (hooks.length) {
+    const shown = hooks.slice(0, 4).map(h =>
+      chalk.white(h.name) + (h.count > 1 ? chalk.gray(` ×${h.count}`) : '') + (h.failed ? chalk.red(` (${h.failed} failed)`) : ''));
+    const more = hooks.length > 4 ? chalk.gray(` · +${hooks.length - 4} more`) : '';
+    lines.push(chalk.cyan('Hooks:   ') + shown.join(chalk.gray(' · ')) + more);
+  }
+
+  // Links mentioned in the conversation — clickable (OSC 8), tracker-classified.
+  const links = extractLinks(events);
+  if (links.length) {
+    const shown = links.slice(0, 5).map(l => chalk.blue(linkUrl(l.url, l.label)));
+    const more = links.length > 5 ? chalk.gray(` · +${links.length - 5} more`) : '';
+    lines.push(chalk.cyan('Links:   ') + shown.join(chalk.gray(' · ')) + more);
+  }
+
+  // Error tally, mirroring the full summary's Errors section in one line.
+  const errorEvents = events.filter(e => e.type === 'error');
+  if (errorEvents.length) {
+    const first = errorEvents[0].tool || 'unknown';
+    lines.push(chalk.cyan('Errors:  ') + chalk.red(`${errorEvents.length} failure${errorEvents.length === 1 ? '' : 's'}`) + chalk.gray(` — first: ${first}`));
   }
 
   const metadata = [
@@ -599,10 +678,37 @@ function encodeClaudeSlug(absPath: string): string {
 /** The `.agents/worktrees/<name>` marker, Claude-slug-encoded (`/.` → `--`). */
 const SLUG_WORKTREE_RE = /--agents-worktrees-(.+)$/;
 
+/**
+ * Join display tokens with ` · `, stopping before the line exceeds `maxWidth`
+ * and appending `… +N more` for the rest. Keeps the Dirs line on one row.
+ */
+function joinWidthCapped(items: string[], maxWidth: number): string {
+  const sep = ' · ';
+  let out = '';
+  let shown = 0;
+  for (const item of items) {
+    const next = shown === 0 ? item : out + sep + item;
+    if (shown > 0 && next.length > maxWidth) break;
+    out = next;
+    shown++;
+  }
+  const remaining = items.length - shown;
+  const suffix = remaining > 0 ? ` … +${remaining} more` : '';
+  return chalk.white(out) + (suffix ? chalk.gray(suffix) : '');
+}
+
 /** Relativize a file path to its parent dir, short enough for one preview line. */
 export function relativizeDir(filePath: string, cwd?: string): string | undefined {
   const norm = filePath.replace(/\\/g, '/');
   if (!norm || norm.includes('node_modules') || norm.includes('/.git/') || norm.includes('/plans/')) {
+    return undefined;
+  }
+  // agents-cli internals — version homes, session/run archives, the bare
+  // worktree container/root — are never meaningful "directories the user works
+  // in". Cwd is exempt: a session running inside such a dir keeps its own paths.
+  const normBase = cwd?.replace(/\\/g, '/').replace(/\/$/, '');
+  const underCwd = normBase && (norm === normBase || norm.startsWith(normBase + '/'));
+  if (!underCwd && (norm.includes('/.agents/.history/') || /\/\.agents\/worktrees(\/[^/]+)?\/?$/.test(norm))) {
     return undefined;
   }
   let dir = path.posix.dirname(norm);

@@ -562,7 +562,9 @@ describe('routines list --json has devices+runsHere, no device', () => {
 
   it('can report overdue independently of a completed zero-exit latest run', () => {
     const home = makeHome({
-      jobs: [{ ...baseJob, schedule: '* * * * *' }],
+      // createdAt predates the run below, so the routine is old enough for a
+      // missed occurrence to count (overdue is floored at routine creation).
+      jobs: [{ ...baseJob, schedule: '* * * * *', createdAt: '2026-07-01T00:00:00.000Z' }],
       registry,
     });
     try {

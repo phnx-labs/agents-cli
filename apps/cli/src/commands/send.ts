@@ -1,6 +1,10 @@
 /**
  * `agents send <text> --channel <name> --to <target>` — deliver a message over
- * any registered channel (mailbox, telegram, imessage, slack, discord, apps).
+ * any registered channel (mailbox, telegram, imessage, slack, discord, desktop, apps).
+ *
+ * `desktop` is the local machine's notification centre — the only channel with no
+ * external dependency, so it still reaches the operator at their Mac when a
+ * messaging gateway is down.
  *
  * `agents notify <text>` — owner-facing alias. Fills channel + target from the
  * `notify.owner` block in agents.yaml when not passed, so routines/agents ping
@@ -56,7 +60,7 @@ async function doSend(text: string, channel: string, to: string, opts: SendCliOp
 export function registerSendCommand(program: Command): void {
   program
     .command('send <text>')
-    .description('Send a message through a channel provider (mailbox, telegram, imessage, slack, discord).')
+    .description('Send a message through a channel provider (mailbox, telegram, imessage, slack, discord, desktop).')
     .requiredOption('--channel <name>', 'channel / provider name')
     .requiredOption('--to <target>', 'channel-specific recipient id')
     .option('--thread <id>', 'channel thread id / timestamp')

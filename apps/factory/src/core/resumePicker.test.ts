@@ -4,6 +4,7 @@
 
 import { describe, it, expect } from 'bun:test';
 import {
+  abandonedCandidates,
   buildResumeCandidates,
   classifyResumeState,
   defaultPickedIds,
@@ -136,6 +137,26 @@ describe('buildResumeCandidates', () => {
       'zion',
     );
     expect(tagged[0].topic).toBe('ref: x fix resume');
+  });
+});
+
+describe('abandonedCandidates', () => {
+  it('drops sessions that already have a terminal somewhere, keeping rank order', () => {
+    const candidates: ResumeCandidate[] = sortResumeCandidates([
+      { id: 'd', shortId: 'd', agent: 'claude', state: 'detached', viewingIn: '', host: '', lastActivityMs: 5, pid: 1 },
+      { id: 'b', shortId: 'b', agent: 'codex', state: 'background', viewingIn: '', host: 'zion', lastActivityMs: 4, pid: 2 },
+      { id: 'p', shortId: 'p', agent: 'claude', state: 'parked', viewingIn: '', host: '', lastActivityMs: 3, pid: 0 },
+      { id: 'i', shortId: 'i', agent: 'grok', state: 'idle', viewingIn: '', host: '', lastActivityMs: 2, pid: 0 },
+      { id: 'w', shortId: 'w', agent: 'claude', state: 'watched', viewingIn: 'codium tab 1', host: '', lastActivityMs: 6, pid: 3 },
+    ]);
+    expect(abandonedCandidates(candidates).map(c => c.shortId)).toEqual(['d', 'b', 'p', 'i']);
+  });
+
+  it('returns an empty list when every session is watched', () => {
+    const candidates: ResumeCandidate[] = [
+      { id: 'w', shortId: 'w', agent: 'claude', state: 'watched', viewingIn: 'ghostty tab 2', host: '', lastActivityMs: 1, pid: 3 },
+    ];
+    expect(abandonedCandidates(candidates)).toEqual([]);
   });
 });
 

@@ -4,7 +4,88 @@ All notable changes to the Factory extension are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); `scripts/release.sh` requires a
 `## [<version>]` section for the version being published.
 
-## [Unreleased]
+## [0.9.309] - 2026-08-03
+
+- **The `(Pick Host)` host list shows every device instantly, even on a busy machine.**
+  The picker's snapshot is now warmed at extension startup (the cheap `devices
+  list` registry read, no fleet SSH sweep), so the first `New <Agent> (Pick Host)`
+  in a window renders every host immediately instead of showing only *This Mac* +
+  *Balanced* while a cold snapshot loads. When the snapshot is stale, the refresh
+  runs in two phases: the device rows swap in as soon as the registry read lands,
+  and the recent-usage annotations fill in afterward from the fleet sweep — so the
+  host list never waits on the fleet fan-out, which is where the seconds went on a
+  loaded laptop (an interactive box under heavy agent load turned a 0.4s registry
+  read into a multi-second wait).
+  Source: `src/vscode/extension.ts`, `src/core/hostPickerCache.ts`,
+  `src/vscode/remoteSessions.vscode.ts`.
+
+- **The host picker never goes empty again: a failed refresh keeps the rows you last saw.**
+  (Landed after the 0.9.308 build was cut, so it ships in 0.9.309 despite the
+  entry living under that heading before.) The 0.9.307 stale-while-revalidate
+  picker persisted whatever the background refresh returned — and on a loaded
+  box, `agents devices list --json` exceeded the extension's 8s spawn timeout,
+  the catch returned `[]`, and that empty result was written straight into
+  `agents.hostPicker.v1`. The menu then opened instantly (the cache did its
+  job) showing only "This Mac" and "Balanced". An empty device list is a
+  failed registry read, never a real empty fleet, so the refresh now folds
+  through `mergeHostPickerSnapshot`: an empty fetch keeps the previous rows
+  and scores, and with no confident data at all nothing is persisted (the
+  picker stays in cold-start mode and retries next open), and the snapshot
+  keeps its true age so the rows' `updated Xm ago` label never claims a failed
+  refresh was fresh. The registry read's timeout also goes 8s → 20s — the host
+  picker's render path never waits on it (cold-start callers like the
+  browse-device switcher still do, bounded). Source:
+  `apps/factory/src/core/hostPickerCache.ts` (`mergeHostPickerSnapshot`),
+  `apps/factory/src/vscode/extension.ts` (`refreshHostPickerCache`),
+  `apps/factory/src/vscode/deviceHealth.vscode.ts`.
+
+## [0.9.308] - 2026-08-03
+
+- **`Agents: Fork (Recap)` starts a new sibling with context from a session you pick.**
+  It reuses `Agents: Fork (Pick Session)`'s device-aware browser and launches on
+  the selected session's exact host, directory, and harness, but queues only
+  `/recap <full-id>`. The public `.agents-system` command produces the recap in an
+  isolated read-only subagent. Factory never resumes, attaches to, injects, or
+  inherits the historical session, so the user can ask a different question in a
+  small new session after the recap appears.
+  Source: `src/vscode/sessionBrowser.vscode.ts`, `src/vscode/extension.ts`.
+
+## [0.9.307] - 2026-08-03
+
+- **`Agents: Fork (Pick Host)` forks the session you are in onto a device you choose.**
+  Same fork as `Agents: Fork` — same harness, same `--strategy balanced` account
+  rotation — with the device picked first, from the same picker the
+  `New <Agent> (Pick Host)` commands use. A fork that moves machines gets a
+  `--device <source machine>` suffix on its `/continue` prompt, because a single-id
+  lookup does not fan out across the fleet and the transcript stays where it was
+  written. The sibling tab opens *beside* its parent instead of on top of it.
+  Source: `src/core/forkSession.ts`, `src/vscode/extension.ts`.
+- **Recap shows a fork next to the session it came from.** A fork shares no id with
+  its parent, so the ledger used to show two unrelated rows. The fork edge is now
+  recorded at launch and the two render as one side-by-side row — parent left, fork
+  right, each with its own machine, duration, cost and PR. Day rollups are counted
+  before pairing, so the numbers still describe both sessions, and a parent that
+  finished on an earlier day keeps its own row.
+  Source: `src/core/forkLineage.ts`, `ui/settings/components/mission-control/recapModel.ts`,
+  `ui/settings/components/mission-control/RecapPane.tsx`.
+
+- **Three new resume commands, and a shorter name for an old one.**
+  `Agents: Resume (Pick Session)` lists only abandoned sessions — detached,
+  background, parked, or idle; anything already open in a terminal somewhere is
+  left to plain `Agents: Resume` — and resumes each pick on the device the
+  session was created on. `Agents: Resume (Pick Host)` reopens the ACTIVE tab's
+  session on a device you pick, keeping the harness and its pinned version.
+  `Agents: Resume (Pick Harness)` continues the active tab's session in a
+  different harness on the same device: the new harness launches via
+  `agents run <harness> --interactive` (balanced account rotation) and loads the
+  old transcript through the universal `/continue` replay, so any harness can
+  pick up any other harness's session. `Agents: Resume Current Session in Best
+  Profile` is now titled `Agents: Resume (Best Profile)` — command id and the
+  ⌘⇧J keybinding unchanged. Source: `apps/factory/src/core/resumePicker.ts`
+  (`abandonedCandidates`), `apps/factory/src/core/resumeTarget.ts`
+  (`buildHarnessOptions`), `apps/factory/src/core/resumeInBest.ts`
+  (`buildAgentRunLaunchCommand`), `apps/factory/src/vscode/extension.ts`
+  (`resumeCurrentPickHost`, `resumeCurrentPickHarness`, `launchResumeInHarness`).
 
 - **Floor no longer collapses distinct sessions that arrive without an id.** A remote
   session row was keyed `remote-<host>-<sessionId>`; when the CLI could not attribute a
@@ -13,6 +94,29 @@ All notable changes to the Factory extension are documented here. Format follows
   tmux pane / pid / cloud-task handle when the id is empty, so each session stays its own
   card. Pairs with the CLI fix that now attributes those panes in the first place.
   Source: `ui/settings/components/mission-control/floorAdapter.ts`.
+
+- **The host picker opens instantly — stale-while-revalidate instead of blocking on
+  the fleet sweep.** Every `(Pick Host)` menu used to await two serial
+  `agents devices list --json` spawns plus a fleet-wide per-host SSH fan-out
+  (`agents sessions --json --host <device>`, 10s timeout each, dead boxes included)
+  before rendering a single row — 30–40s whenever the old 60s in-memory cache had
+  lapsed. The picker now renders immediately from a snapshot persisted in
+  `globalState` (`agents.hostPicker.v1`), marks the rows with their age
+  (`updated 8m ago`), fires ONE background refresh, and swaps the items in place
+  when it lands, preserving the row you had highlighted; a pick made before the
+  refresh lands is honored as-is. The refresh itself is cheaper too: the registry
+  read happens once and is threaded into the usage sweep (no second
+  `devices list` spawn), and hosts the launch-health sweep already found
+  unreachable are skipped instead of dialed into a timeout. Once you have opened
+  a picker, the existing 60s background timer pre-warms the snapshot so later
+  opens are usually fresh as well as instant. `Agents: Resume` gets the same
+  treatment (renders the last candidate list instantly, swaps in the live fleet
+  read with your checks carried across, `agents.resumePicker.v1`), and the fork
+  browser's device switcher renders from the same snapshot. Source:
+  `apps/factory/src/core/hostPickerCache.ts`,
+  `apps/factory/src/vscode/extension.ts` (`pickLaunchHost`, `resumeSessionsBatch`,
+  `pickBrowseDevice`), `apps/factory/src/vscode/remoteSessions.vscode.ts`
+  (`discoverHosts`/`fetchRecapSessions` accept a pre-fetched device list).
 
 ## [0.9.306] - 2026-08-03
 

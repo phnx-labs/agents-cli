@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { overviewProjectKey, buildOverviewGroups } from './sessions.js';
 import type { SessionMeta } from '../lib/session/types.js';
 
@@ -7,18 +10,34 @@ function s(id: string, project: string | undefined, timestamp: string, cwd?: str
 }
 
 describe('overviewProjectKey', () => {
-  it('prefers the indexed project name', () => {
-    expect(overviewProjectKey({ project: 'agents-cli', cwd: '/anything' })).toBe('agents-cli');
+  it('resolves a monorepo subdir to its repo, not the stale indexed basename', () => {
+    // The indexer stamps basename(cwd) at scan time; the overview must agree with
+    // the activity timeline, which groups by the repository containing the cwd.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'overview-key-'));
+    try {
+      const repo = path.join(tmp, 'agents');
+      const sub = path.join(repo, 'apps', 'cli');
+      fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
+      fs.mkdirSync(sub, { recursive: true });
+      expect(overviewProjectKey({ project: 'cli', cwd: sub })).toBe('agents');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
-  it('folds a worktree path back to its repo', () => {
+  it('falls back to the indexed project name when the cwd is unusable', () => {
+    expect(overviewProjectKey({ project: 'agents-cli', cwd: '' })).toBe('agents-cli');
+    expect(overviewProjectKey({ project: 'agents-cli' })).toBe('agents-cli');
+  });
+
+  it('folds a worktree path back to its repo even when the path is not local', () => {
+    // A synced session from another machine: the fs walk finds nothing, and the
+    // pure worktree fold inside the shared resolver still applies.
     expect(overviewProjectKey({ project: undefined, cwd: '/home/me/src/swarmify/.agents/worktrees/floor-redesign' })).toBe('swarmify');
   });
 
-  it('falls back to the leaf dir for a monorepo subdir with no project', () => {
-    // A monorepo subdir with no indexed project name groups by its leaf dir — the
-    // customizable path->project mapping is a separate follow-up.
-    expect(overviewProjectKey({ project: undefined, cwd: '/home/me/src/agents/prix/api' })).toBe('api');
+  it('uses the leaf dir for a path inside no repo', () => {
+    expect(overviewProjectKey({ project: undefined, cwd: '/definitely/not-inside-any/repo/path-xyz' })).toBe('path-xyz');
   });
 
   it('returns a sentinel for an empty cwd and no project', () => {

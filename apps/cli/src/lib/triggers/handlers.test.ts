@@ -344,7 +344,7 @@ describe('handler config layer', () => {
       expect(dispatched[0].env).toEqual({ DEPLOY_TARGET: 'staging' });
     });
 
-    it('runs a shell command action with substitution', async () => {
+    it.skipIf(process.platform === 'win32')('runs a shell command action with substitution', async () => {
       const handler: import('./handlers.js').WebhookHandler = {
         name: 'cmd-handler',
         source: 'linear',
@@ -361,7 +361,7 @@ describe('handler config layer', () => {
       expect(result.output).toBe('RUSH-1459\n');
     });
 
-    it('neutralizes shell metacharacters coming from the webhook payload', async () => {
+    it.skipIf(process.platform === 'win32')('neutralizes shell metacharacters coming from the webhook payload', async () => {
       // `title` is free text an outside contributor controls on a public tracker.
       const hostile = "x'; touch /tmp/pwned; echo '";
       const handler: import('./handlers.js').WebhookHandler = {

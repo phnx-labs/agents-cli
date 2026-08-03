@@ -85,6 +85,32 @@ with what, and how big it got.** The nine fields below are that contract.
 derived from events, so it drops. This is the one field in the preview that is
 genuinely lossy today.
 
+### Highlight lines (shared by both renders)
+
+Beyond the identity fields above, both renders show "what the session used and
+produced", extracted by one shared module — `highlights.ts` — so the panes
+never disagree:
+
+| Line | Source | Notes |
+|------|--------|-------|
+| `Skills:` / `Skills (N)` | `extractSkills` — `Skill` tool calls (`args.skill`) | plugin skills ride the same tool |
+| `Hooks:` / `Hooks (N)` | `extractHooks` — `hook` events from Claude's `hook_success`/`hook_error` attachments (`parse.ts`) | Claude-only: other harnesses don't record firings; the section doesn't render for them |
+| `Links:` / `Links (N)` | `extractLinks` — URLs in messages, classified Linear/Jira/GitHub/GitLab | deduped by label, OSC-8 clickable, capped |
+| `Artifacts:` / `Artifacts (N)` | `extractArtifacts` — created docs (`.agents/artifacts|plans|reports/`, other `*.md`/`*.html`) | clickable |
+| `Repos:` (preview only) | `extractRepos` — bounded `.git` walk-up over touched paths | relative paths resolve against the session cwd ONLY; skipped when cwd is unknown |
+| `Errors:` (preview) | `error` events | one-line tally, mirrors the summary's Errors section |
+
+These are transcript-derived, so remote/unindexed rows (`formatMetaOnlyBody`)
+don't show them — same constraint as `model` above. Rendering them remotely
+means persisting the signals at scan time (the "Gaps to close" model below).
+
+Path hygiene is standardized at the source: `digest.ts:isNoisePath` drops shell
+junk (`2>&1`, unexpanded `$VAR` paths), `node_modules`, `.system`, and
+`.agents/.history/` internal archives from every change/dir derivation, and
+`render.ts:displayPath` collapses `.agents/worktrees/<slug>` prefixes to
+`⧉ <slug>/…` after the session-cwd strip.
+
+
 ### Gaps to close (and how)
 
 Six of the nine fields are already in the preview. The work is the other three plus
@@ -186,10 +212,11 @@ cutoff 24 h (`active.ts:245`).
 (`lastActivityMs` = file mtime, `state.ts:531`, `active.ts:648`), but the primary
 `agents sessions --active` row (`printActiveRow`, `sessions.ts:543`) renders **no time
 column at all** — only id, kind, host, the status word, badges, description. The
-browser/picker listings show a trailing `formatRelativeTime(lastActivity)`
-(`sessions.ts:2004`), but it is an **unlabeled "X ago"** that renders identically for
-running and idle rows — not a called-out "idle for X" / "stuck for X". There is no
-explicit idle/stuck duration string anywhere.
+browser/picker listings do carry both ends of the session — `sessionAgeParts` renders
+`<created> → <last activity>` (`relative-time.ts`, `timeCell` in `sessions.ts`), so the
+span is readable off the row — but each half is still an **unlabeled "X ago"** that
+renders identically for running and idle rows, not a called-out "idle for X" /
+"stuck for X". There is no explicit idle/stuck duration string anywhere.
 
 **Gap 2 — a hung agent mid-tool-call is mislabeled `input_required`.** When the last
 tail event is a `tool_use` and the process is alive but not fresh, `inferActivity`

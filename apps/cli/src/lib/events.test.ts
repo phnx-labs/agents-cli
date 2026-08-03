@@ -93,6 +93,45 @@ describe('events', () => {
       }
     });
 
+    it('stamps the provenance floor (full sessionId, agent, launchId, parentSessionId, machineId) from env', () => {
+      process.env.AGENT_SESSION_ID = '11111111-2222-3333-4444-555555555555';
+      process.env.AGENTS_AGENT_NAME = 'claude';
+      process.env.AGENT_LAUNCH_ID = 'launch-abc';
+      process.env.AGENTS_PARENT_SESSION_ID = '99999999-8888-7777-6666-555555555555';
+      try {
+        setupLogsDir();
+        emit('info', { module: 'test' });
+        const rec = query({})[0];
+        // Full untruncated session id — the new floor field, stamped unconditionally
+        // (unlike the caller-gated 8-char `session`, which needs CLAUDECODE/terminal env).
+        expect(rec.sessionId).toBe('11111111-2222-3333-4444-555555555555');
+        expect(rec.agent).toBe('claude');
+        expect(rec.launchId).toBe('launch-abc');
+        expect(rec.parentSessionId).toBe('99999999-8888-7777-6666-555555555555');
+        // machineId is always present and joinable (normalized).
+        expect(rec.machineId).toBeDefined();
+        expect(rec.machineId).toBe(rec.machineId!.toLowerCase());
+      } finally {
+        delete process.env.AGENT_SESSION_ID;
+        delete process.env.AGENTS_AGENT_NAME;
+        delete process.env.AGENT_LAUNCH_ID;
+        delete process.env.AGENTS_PARENT_SESSION_ID;
+      }
+    });
+
+    it('lets an explicit payload field override the env provenance default', () => {
+      process.env.AGENTS_AGENT_NAME = 'claude';
+      try {
+        setupLogsDir();
+        // cloud.dispatch passes its own task agent — it must win over the env default.
+        emit('cloud.dispatch', { module: 'cloud', agent: 'codex' });
+        const rec = query({})[0];
+        expect(rec.agent).toBe('codex');
+      } finally {
+        delete process.env.AGENTS_AGENT_NAME;
+      }
+    });
+
     it('assigns debug level to debug events', () => {
       setupLogsDir();
       emit('debug', { module: 'test' });

@@ -6,13 +6,16 @@ import { spawnSync } from 'child_process';
 import {
   ACTIVITY_LOG_HOOK_SCRIPT,
   MILESTONE_EVENTS,
+  activityGroupDevices,
   activityGroupKey,
   appendActivityEvent,
   attachmentName,
+  capActivityEvents,
   collapseActivity,
   enrichActivityEvents,
   ensureActivityLogHook,
   filterActivityEvents,
+  formatActivityGroupMeta,
   formatEnrichedActivityLine,
   formatProgressUpdate,
   groupActivity,
@@ -752,6 +755,79 @@ describe('activityGroupKey / groupActivity', () => {
   });
 });
 
+describe('capActivityEvents', () => {
+  const milestone = (id: string, host = 'zion') =>
+    ev({ sessionId: id, event: 'pr.opened', tier: 'milestone', executionHost: host });
+  const routine = (id: string, host = 'zion') =>
+    ev({ sessionId: id, event: 'file.edited', tier: 'activity', executionHost: host });
+
+  it('spends the budget on milestones, not on collapsed churn', () => {
+    // The real regression: one box editing 40 files buried every other
+    // device's PRs behind a single `file edited ×40` line.
+    const stream = [...Array.from({ length: 40 }, (_, i) => routine(`edit-${i}`)), milestone('pr', 'yosemite-s0')];
+    const capped = capActivityEvents(stream, 40);
+    expect(capped.filter((e) => e.event === 'pr.opened')).toHaveLength(1);
+  });
+
+  it('stops at the milestone cap and keeps the routine events inside that window', () => {
+    const stream = [milestone('a'), routine('r1'), milestone('b'), routine('r2'), milestone('c')];
+    const capped = capActivityEvents(stream, 2);
+    expect(capped.map((e) => e.sessionId)).toEqual(['a', 'r1', 'b']);
+  });
+
+  it('--all makes it a plain cap on every event', () => {
+    const stream = [routine('r1'), routine('r2'), milestone('a')];
+    expect(capActivityEvents(stream, 2, { all: true }).map((e) => e.sessionId)).toEqual(['r1', 'r2']);
+  });
+
+  it('keeps everything when the stream holds fewer milestones than the cap', () => {
+    const stream = [routine('r1'), milestone('a'), routine('r2')];
+    expect(capActivityEvents(stream, 10)).toHaveLength(3);
+  });
+
+  // The command rejects such a limit before it gets here (`--limit must be a
+  // positive number`); this pins that the primitive never invents a window.
+  it('returns nothing for a non-positive or unparsable limit', () => {
+    expect(capActivityEvents([milestone('a')], 0)).toEqual([]);
+    expect(capActivityEvents([milestone('a')], Number.NaN)).toEqual([]);
+  });
+});
+
+describe('project group headers name the machines (device labels)', () => {
+  const group = (events: EnrichedActivityEvent[]) => ({ key: 'agents-cli', label: 'agents-cli', events });
+
+  it('orders devices by event count, then alphabetically', () => {
+    expect(activityGroupDevices([
+      ev({ sessionId: '1', executionHost: 'zion' }),
+      ev({ sessionId: '2', executionHost: 'mac-mini' }),
+      ev({ sessionId: '3', executionHost: 'zion' }),
+      ev({ sessionId: '4', executionHost: 'alpha' }),
+    ])).toEqual(['zion', 'alpha', 'mac-mini']);
+  });
+
+  it('ignores events with no resolvable machine instead of inventing one', () => {
+    expect(activityGroupDevices([ev({ sessionId: '1', host: 'unknown', executionHost: undefined })])).toEqual([]);
+  });
+
+  it('appends the machines to the group meta, capped with a +N tail', () => {
+    const events = ['zion', 'mac-mini', 'yosemite-s0', 'yosemite-s1', 'win-mini']
+      .map((h, i) => ev({ sessionId: String(i), executionHost: h, event: 'pr.opened', tier: 'milestone' }));
+    const meta = formatActivityGroupMeta(group(events), { showDevices: true });
+    expect(meta).toBe('5 events · 5 milestones · mac-mini, win-mini, yosemite-s0 +2');
+  });
+
+  it('omits the machines when the grouping dimension IS the device', () => {
+    const events = [ev({ sessionId: '1', executionHost: 'zion' })];
+    expect(formatActivityGroupMeta(group(events), { showDevices: false })).toBe('1 event');
+    expect(formatActivityGroupMeta(group(events))).toBe('1 event');
+  });
+
+  it('says nothing about machines when none are known', () => {
+    const events = [ev({ sessionId: '1', host: 'unknown', executionHost: undefined })];
+    expect(formatActivityGroupMeta(group(events), { showDevices: true })).toBe('1 event');
+  });
+});
+
 describe('formatEnrichedActivityLine', () => {
   it('appends project and ticket tags when asked', () => {
     const line = formatEnrichedActivityLine(ev({ event: 'pr.opened', project: 'agents-cli', ticket: 'RUSH-2100' }), { showHost: true, showProject: true });
@@ -894,11 +970,12 @@ describe('factory.launch as a milestone', () => {
   it('is deliberately ABSENT from the Python hook milestone set, and nothing else is', () => {
     // The hook script carries its own copy of MILESTONE_EVENTS, used only to
     // tier events the hook itself writes from PreToolUse/PostToolUse. It never
-    // writes factory.launch (that arrives via `agents events emit`), so the two
-    // lists legitimately differ by exactly that one member. Pinning it here
-    // turns an invisible divergence into a deliberate, reviewed one: if someone
-    // adds a milestone the hook DOES write and forgets the Python copy, this
-    // fails.
+    // writes factory.launch (that arrives via `agents events emit`) or
+    // status.blocked (that arrives via `agents feed post --blocked`), so the two
+    // lists legitimately differ by exactly those out-of-process members. Pinning
+    // it here turns an invisible divergence into a deliberate, reviewed one: if
+    // someone adds a milestone the hook DOES write and forgets the Python copy,
+    // this fails.
     const block = ACTIVITY_LOG_HOOK_SCRIPT.match(/MILESTONE_EVENTS = \{([^}]*)\}/);
     expect(block).not.toBeNull();
     const pythonSet = new Set(
@@ -906,7 +983,7 @@ describe('factory.launch as a milestone', () => {
     );
 
     const tsOnly = MILESTONE_EVENTS.filter((e) => !pythonSet.has(e));
-    expect(tsOnly).toEqual(['factory.launch']);
+    expect(tsOnly).toEqual(['factory.launch', 'status.blocked']);
 
     // And the Python copy must not invent kinds the TS union does not know.
     const pythonOnly = [...pythonSet].filter((e) => !MILESTONE_EVENTS.includes(e as never));

@@ -61,6 +61,8 @@ function sanitizeEvent(e: SessionEvent): void {
   if (e.tool) e.tool = sanitizeForTerminal(e.tool);
   if (e.model) e.model = sanitizeForTerminal(e.model);
   if (e.mediaType) e.mediaType = sanitizeForTerminal(e.mediaType);
+  if (e.hookName) e.hookName = sanitizeForTerminal(e.hookName);
+  if (e.hookEvent) e.hookEvent = sanitizeForTerminal(e.hookEvent);
   if (e.args) e.args = sanitizeArgsDeep(e.args);
 }
 
@@ -478,8 +480,25 @@ export function parseClaudeContent(content: string): SessionEvent[] {
         timestamp,
         content: raw.subtype || 'success',
       });
+    } else if (type === 'attachment') {
+      // Hook firings are recorded as attachments: `hook_success` / `hook_error` /
+      // `hook_blocked` per firing, plus a derivative `hook_additional_context`
+      // record for the SAME firing (shared toolUseID) — skip the derivative or
+      // every firing counts twice.
+      const att = raw.attachment;
+      const attType = att?.type;
+      if (typeof attType === 'string' && attType.startsWith('hook_') && attType !== 'hook_additional_context') {
+        events.push({
+          type: 'hook',
+          agent: 'claude',
+          timestamp,
+          hookName: typeof att.hookName === 'string' ? att.hookName : undefined,
+          hookEvent: typeof att.hookEvent === 'string' ? att.hookEvent : undefined,
+          success: attType === 'hook_success',
+        });
+      }
     }
-    // Skip: permission-mode, attachment, and other line types
+    // Skip: permission-mode, non-hook attachments, and other line types
   }
 
   return events;
