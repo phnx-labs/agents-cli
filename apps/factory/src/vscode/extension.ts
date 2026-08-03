@@ -2911,9 +2911,13 @@ async function copySessionId() {
   // The session id stored on terminalEntry is the spawn-time value. It goes
   // stale when the user exits and reruns the agent in the same terminal, or
   // after /clear. Prefer the live id captured by the SessionStart hook
-  // (~/.agents/.cache/state/sessions/<agent-pid>.json).
+  // (~/.agents/.cache/state/sessions/<agent-pid>.json). An offloaded tab has no
+  // local agent process, so the hook state cannot describe it — its spawn-time
+  // id is the only local truth (see tryHydrateLiveSessionId).
   const shellPid = await activeTerminal.processId;
-  const liveId = await liveSessionIdForShell(shellPid);
+  const liveId = terminalEntry.host
+    ? null
+    : await liveSessionIdForShell(shellPid, terminalEntry.createdAt);
   const sessionId = liveId || terminalEntry.sessionId;
 
   if (!sessionId) {
@@ -4034,13 +4038,21 @@ async function tryHydrateLiveSessionId(
 ): Promise<void> {
   const entry = terminals.getByTerminal(terminal);
   if (!entry) return;
+  // An offloaded tab's agent runs on another machine, so `terminal.processId` is
+  // the local ssh client and NO local state file can describe it. Reading one
+  // anyway binds the tab to whatever local session last held that pid — a pid the
+  // OS has since recycled — which is how a remote tab ended up displaying an
+  // unrelated 20-day-old session's id and version. The device's own session feed
+  // is the only authority here, and the label/preview/resume paths already route
+  // through it (see EditorTerminal.host).
+  if (entry.host) return;
   const inflightKey = entry.id || `live:${terminal.name}`;
   if (liveSessionInFlight.has(inflightKey)) return;
   liveSessionInFlight.add(inflightKey);
 
   try {
     const shellPid = await terminal.processId;
-    const liveId = await liveSessionIdForShell(shellPid);
+    const liveId = await liveSessionIdForShell(shellPid, entry.createdAt);
     if (!liveId) return;
 
     if (entry.sessionId !== liveId) {
