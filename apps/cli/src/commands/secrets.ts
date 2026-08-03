@@ -106,6 +106,7 @@ import { getVaultSession, vaultExists } from '../lib/secrets/vault.js';
 import { registerSecretsSyncCommands } from './secrets-sync.js';
 import { registerSecretsMigrateAclCommand } from './secrets-migrate.js';
 import { registerSecretsImportKeyringCommand } from './secrets-import.js';
+import { registerSecretsRotatePassphraseCommand } from './secrets-rotate-passphrase.js';
 
 /** Prompt the user for a secret value with masked input. Requires an interactive TTY. */
 async function promptForSecret(message: string): Promise<string> {
@@ -2536,6 +2537,7 @@ Examples:
   registerSecretsSyncCommands(cmd);
   registerSecretsMigrateAclCommand(cmd);
   registerSecretsImportKeyringCommand(cmd);
+  registerSecretsRotatePassphraseCommand(cmd);
 }
 
 /** Validate a prompt-policy value, throwing a clear message on a bad one (the
