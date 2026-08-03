@@ -456,11 +456,26 @@ export function getVersionsDir(): string { return VERSIONS_DIR; }
 /** Path to version-switching shim scripts (~/.agents/.cache/shims/). */
 export function getShimsDir(): string { return SHIMS_DIR; }
 
-/** Path to generated per-hook caching/timing shims (~/.agents/.cache/shims/hooks/). */
-export function getHookShimsDir(): string { return HOOK_SHIMS_DIR; }
+/**
+ * Path to generated per-hook caching/timing shims (~/.agents/.cache/shims/hooks/).
+ * Read at CALL time — since every hook now resolves through a shim (RUSH-2xxx,
+ * pass-through timing for matcher-only hooks), a test that registers hooks
+ * in-process (no subprocess HOME override) would otherwise write real shim
+ * files into the user's actual ~/.agents/.cache. AGENTS_HOOK_SHIMS_DIR mirrors
+ * the AGENTS_EVENTS_PATH / AGENTS_DEVICES_DIR test-isolation escape hatches;
+ * never set in production code.
+ */
+export function getHookShimsDir(): string {
+  return process.env.AGENTS_HOOK_SHIMS_DIR ?? HOOK_SHIMS_DIR;
+}
 
-/** Path to per-hook stdout cache files (~/.agents/.cache/state/hooks/). */
-export function getHookCacheDir(): string { return HOOK_CACHE_DIR; }
+/**
+ * Path to per-hook stdout cache files (~/.agents/.cache/state/hooks/). Read at
+ * CALL time for the same reason as {@link getHookShimsDir} — see its doc.
+ */
+export function getHookCacheDir(): string {
+  return process.env.AGENTS_HOOK_CACHE_DIR ?? HOOK_CACHE_DIR;
+}
 
 /** Path to per-agent installed CLI binaries (~/.agents/.cache/bin/). */
 export function getBinDir(): string { return BIN_DIR; }
@@ -537,20 +552,33 @@ export function getCloudDir(): string { return CLOUD_DIR; }
 /** Path to terminal session metadata (~/.agents/.cache/terminals/). */
 export function getTerminalsDir(): string { return TERMINALS_DIR; }
 
-/** Path to runtime logs (~/.agents/.cache/logs/). */
-export function getLogsDir(): string { return LOGS_DIR; }
+/**
+ * Path to runtime logs (~/.agents/.cache/logs/). Read at CALL time so
+ * AGENTS_LOGS_DIR can redirect it in tests — same test-isolation escape hatch
+ * as {@link getHookShimsDir}; never set in production code.
+ */
+export function getLogsDir(): string {
+  return process.env.AGENTS_LOGS_DIR ?? LOGS_DIR;
+}
 
 /**
  * Path to disposable performance samples (~/.agents/.cache/perf/).
  * Holds `perf.db` + a hook-shim spool. Loss is acceptable — wipe freely.
+ * Read at CALL time: AGENTS_PERF_DIR (the same override perf/db.ts and
+ * perf/spool.ts already honor for their own internal resolution) redirects
+ * this canonical getter too, so a caller that goes through it directly
+ * (hooks/cache.ts's shim generator, the OpenCode timeout sample writer in
+ * hooks.ts) doesn't leak samples into the user's real perf warehouse either.
  */
-export function getPerfDir(): string { return PERF_DIR; }
+export function getPerfDir(): string {
+  return process.env.AGENTS_PERF_DIR ?? PERF_DIR;
+}
 
 /** Path to the perf SQLite warehouse (~/.agents/.cache/perf/perf.db). */
-export function getPerfDbPath(): string { return path.join(PERF_DIR, 'perf.db'); }
+export function getPerfDbPath(): string { return path.join(getPerfDir(), 'perf.db'); }
 
 /** Path to the hook-shim NDJSON spool drained into perf.db on open. */
-export function getPerfSpoolPath(): string { return path.join(PERF_DIR, 'spool.jsonl'); }
+export function getPerfSpoolPath(): string { return path.join(getPerfDir(), 'spool.jsonl'); }
 
 /** Path to per-process runtime state (~/.agents/.cache/state/). */
 export function getRuntimeStateDir(): string { return RUNTIME_STATE_DIR; }
