@@ -117,11 +117,14 @@ describe('JobScheduler devices allowlist', () => {
 describe('detectOverdueJobs devices allowlist', () => {
   it('never flags a job restricted to another device as overdue here', () => {
     const pastRun = { status: 'completed', exitCode: 0, startedAt: '2020-01-01T00:00:00Z', completedAt: '2020-01-01T00:01:00Z' };
+    // createdAt predates the missed occurrences: overdue is floored at routine
+    // creation, and these fixtures are written to disk during the test.
+    const born = { createdAt: '2020-01-01T00:00:00.000Z' };
     const home = makeHome({
       jobs: [
-        { ...baseJob, name: 'foreign-overdue', devices: ['yosemite-s0'] },
-        { ...baseJob, name: 'local-overdue', devices: ['zion'] },
-        { ...baseJob, name: 'unpinned-overdue' },
+        { ...baseJob, ...born, name: 'foreign-overdue', devices: ['yosemite-s0'] },
+        { ...baseJob, ...born, name: 'local-overdue', devices: ['zion'] },
+        { ...baseJob, ...born, name: 'unpinned-overdue' },
       ],
       runs: [
         { jobName: 'foreign-overdue', runId: '2020-01-01T00-00-00-000Z', meta: pastRun },
