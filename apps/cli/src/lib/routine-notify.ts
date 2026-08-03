@@ -40,10 +40,17 @@ export function routineKind(r: Pick<JobConfig, 'agent' | 'workflow' | 'command'>
 /**
  * The harness a routine runs on, for the notification's right-hand avatar, or
  * undefined when none owns it. A command routine is deterministic housekeeping
- * with no agent; an agent or workflow routine names the harness that executes it.
+ * with no agent, so it gets no avatar. An agent routine names its own harness.
+ * A workflow routine has no `agent` field (the schema omits it — routines.ts
+ * `JobConfig.agent` and the validation that rejects setting both), and it runs
+ * via `agents run <workflow>`, which delegates to claude under the hood — so its
+ * avatar is the Claude mark, matching `effectiveAgent` on the finish path
+ * (runner.ts). Start and finish banners therefore show the same avatar.
  */
 export function routineAgent(r: Pick<JobConfig, 'agent' | 'workflow' | 'command'>): string | undefined {
-  if (routineKind(r) === 'command') return undefined;
+  const kind = routineKind(r);
+  if (kind === 'command') return undefined;
+  if (kind === 'workflow') return 'claude';
   return r.agent?.trim() || undefined;
 }
 

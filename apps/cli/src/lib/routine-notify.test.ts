@@ -185,9 +185,17 @@ describe('routineAgent — the notification avatar', () => {
     expect(routineFinishNotification(meta(), {})!.agent).toBe('claude');
   });
 
-  it('names the harness a workflow routine executes on', () => {
-    const cfg = agentConfig({ agent: 'codex', workflow: 'deploy' });
-    expect(routineAgent(cfg)).toBe('codex');
+  it('shows the Claude avatar for a workflow routine (the harness workflows run on)', () => {
+    // A workflow routine has no `agent` field (routines.ts JobConfig.agent is
+    // omitted for workflows, and validation rejects setting both). It runs via
+    // `agents run <workflow>`, which delegates to claude — so both the start and
+    // finish banners carry the Claude mark (runner.ts effectiveAgent).
+    const cfg = agentConfig({ agent: undefined, workflow: 'deploy' });
+    expect(routineAgent(cfg)).toBe('claude');
+    expect(routineStartNotification(cfg)!.agent).toBe('claude');
+    const finishMeta = meta({ agent: 'claude', workflow: 'deploy' });
+    expect(routineAgent(finishMeta)).toBe('claude');
+    expect(routineFinishNotification(finishMeta, {})!.agent).toBe('claude');
   });
 
   it('leaves a command routine without an agent', () => {
