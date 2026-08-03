@@ -140,7 +140,8 @@ enum AgentsCLI {
                 .map { $0.trimmingCharacters(in: .whitespaces) }
                 .last { !$0.isEmpty }
             Notifier.post(title: "Could not open \(agent)",
-                          body: detail ?? "The terminal launch failed. Try `agents run \(agent) --terminal` in a shell.")
+                          body: detail ?? "The terminal launch failed. Try `agents run \(agent) --terminal` in a shell.",
+                          agent: agent)
         }
     }
 
