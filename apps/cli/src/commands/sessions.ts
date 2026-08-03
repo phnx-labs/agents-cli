@@ -11,7 +11,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { spawn, type ChildProcess } from 'child_process';
-import type { Command } from 'commander';
+import { Option, type Command } from 'commander';
 import chalk from 'chalk';
 import { truncate, padRight } from '../lib/format.js';
 import ora from 'ora';
@@ -86,6 +86,8 @@ interface SessionsOptions extends SessionFilterOptions {
   query?: string;
   /** Resolve one historical selector to metadata only (requires --json). */
   resolve?: string;
+  /** Versioned internal peer protocol; old/unsafe peers must reject it. */
+  resolveSafeV1?: string;
   limit?: string;
   sort?: string;
   json?: boolean;
@@ -936,6 +938,7 @@ export function serializeResolvedSessionsJson(sessions: SessionMeta[]): string {
     id: session.id,
     shortId: session.shortId,
     agent: session.agent,
+    origin: session.origin,
     timestamp: session.timestamp,
     lastActivity: session.lastActivity,
     project: session.project,
@@ -1448,12 +1451,16 @@ async function sessionsAction(
   // --resolve is the metadata-only contract for downstream context workflows.
   // It reads indexed SessionMeta rows and never calls renderSession, buildPreview,
   // parseSession, or any other transcript renderer/parser.
-  if (options.resolve !== undefined) {
+  if (options.resolve !== undefined || options.resolveSafeV1 !== undefined) {
+    if (options.resolveSafeV1 !== undefined && process.env[NO_FANOUT_ENV] !== '1') {
+      console.error(chalk.red('--resolve-safe-v1 is an internal fleet protocol.'));
+      process.exit(1);
+    }
     if (!options.json) {
       console.error(chalk.red('--resolve requires --json.'));
       process.exit(1);
     }
-    const selector = options.resolve.trim();
+    const selector = (options.resolveSafeV1 ?? options.resolve ?? '').trim();
     if (!selector) {
       console.error(chalk.red('--resolve requires a non-empty selector.'));
       process.exit(1);
@@ -3471,13 +3478,9 @@ export function fleetCandidatesByQuery(rows: SessionMeta[], query: string): Flee
   });
 }
 
-/** Resolve against indexed metadata first, then preserve the existing keyword
- * behavior by widening to this machine's FTS content index only on a metadata miss. */
+/** Resolve through the canonical metadata+content union used by keyword search. */
 function resolveIndexedMetadataRows(indexed: SessionMeta[], selector: string): SessionMeta[] {
-  const resolution = resolveSessionQuery(indexed, selector, { indexFallback: false });
-  if (resolution.matches.length > 0 || resolution.byId) return resolution.matches;
-  return Array.from(searchContentIndex(indexed, selector).values())
-    .sort((a, b) => (b._bm25Score ?? 0) - (a._bm25Score ?? 0));
+  return resolveSessionQuery(indexed, selector, { indexFallback: false }).matches;
 }
 
 /** Fixed peer argv for the metadata resolver. Scope flags compose identically on
@@ -3486,7 +3489,7 @@ export function metadataResolveForwardedArgs(
   selector: string,
   scope: Pick<SessionFilterOptions, 'agent' | 'project'>,
 ): string[] {
-  const args = ['sessions', '--resolve', selector, '--json', '--all', '--local'];
+  const args = ['sessions', '--resolve-safe-v1', selector, '--json', '--all', '--local'];
   if (scope.agent) args.push('--agent', scope.agent);
   if (scope.project) args.push('--project', scope.project);
   return args;
@@ -3644,7 +3647,8 @@ export function registerSessionsCommands(program: Command): void {
     .command('sessions')
     .argument('[query]', 'Session ID, search query, or path (., ../, /path) to filter by project')
     .option('--query <text>', 'Search text — use when the term collides with a subcommand name (e.g. "go")')
-    .option('--resolve <selector>', 'Resolve one full ID, unique prefix, or keyword query to SessionMeta only (requires --json; searches the fleet unless --local)')
+    .option('--resolve <selector>', 'Resolve one full ID, unique prefix, or keyword query to safe session metadata (requires --json; searches the fleet unless --local)')
+    .addOption(new Option('--resolve-safe-v1 <selector>').hideHelp())
     .description('Find, browse, and read agent conversation transcripts across Claude, Codex, Gemini, and OpenCode.')
     .option('-a, --agent <agent>', 'Filter by agent type and version (e.g., claude, codex@0.116.0)')
     .option('--claude', 'Shorthand for --agent claude')

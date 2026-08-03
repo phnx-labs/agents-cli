@@ -149,7 +149,7 @@ describe('agents sessions --resolve metadata-only CLI contract', () => {
       expect(rows.map(row => row.id)).toEqual([id]);
       expect(rows[0]).not.toHaveProperty('filePath');
       expect(rows[0]).not.toHaveProperty('plan');
-      expect(rows[0]).not.toHaveProperty('origin');
+      expect(rows[0].origin).toBe('cli');
       expect(rows[0]).not.toHaveProperty('account');
       expect(rows[0]).not.toHaveProperty('cwd');
       expect(rows[0]).not.toHaveProperty('recentDirectoriesTouched');

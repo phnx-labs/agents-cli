@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { parseRemoteList, remoteListCommand } from '../remote-list.js';
+import { parseRemoteList, remoteListCaptureResult, remoteListCommand } from '../remote-list.js';
 
 describe('parseRemoteList', () => {
   it('tags every parsed session with the source machine', () => {
@@ -56,6 +56,19 @@ describe('parseRemoteList', () => {
 
   it('returns [] on empty stdout (peer produced nothing)', () => {
     expect(parseRemoteList('', 'zion')).toEqual([]);
+  });
+});
+
+describe('remoteListCaptureResult', () => {
+  it('marks an exit-0 malformed payload incomplete', () => {
+    expect(remoteListCaptureResult(0, '{not-json', 'peer', 'peer')).toEqual({
+      sessions: [],
+      unreachable: 'peer',
+    });
+  });
+
+  it('accepts an exit-0 empty array as a complete peer response', () => {
+    expect(remoteListCaptureResult(0, '[]', 'peer', 'peer')).toEqual({ sessions: [] });
   });
 });
 

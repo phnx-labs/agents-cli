@@ -12,10 +12,9 @@ import {
   resolveSessionQuery,
   buildSessionDescription,
   fleetCandidatesByQuery,
-  metadataResolveOutcome,
   metadataResolveForwardedArgs,
 } from '../sessions.js';
-import { parseRemoteList } from '../../lib/session/remote-list.js';
+import { parseRemoteList, remoteListCaptureResult } from '../../lib/session/remote-list.js';
 import { needsWindowsShell, composeWin32CommandLine } from '../../lib/platform/index.js';
 import type { SessionMeta } from '../../lib/session/types.js';
 
@@ -319,7 +318,7 @@ describe('agents sessions --resolve local-peer critical path', () => {
       expect(indexed.status, indexed.stderr).toBe(0);
 
       const peer = runAgents(
-        ['sessions', '--resolve', 'recap resolver', '--json', '--all', '--local'],
+        ['sessions', '--resolve-safe-v1', 'recap resolver', '--json', '--all', '--local'],
         repoDir,
         tempHome,
         { AGENTS_SESSIONS_LOCAL: '1' },
@@ -328,6 +327,7 @@ describe('agents sessions --resolve local-peer critical path', () => {
       const peerRows = JSON.parse(peer.stdout) as Array<Record<string, unknown>>;
       expect(peerRows).toHaveLength(1);
       expect(peerRows[0].id).toBe(sessionId);
+      expect(peerRows[0]).toHaveProperty('origin');
       expect(peerRows[0]).not.toHaveProperty('filePath');
       expect(peerRows[0]).not.toHaveProperty('plan');
 
@@ -348,21 +348,46 @@ describe('agents sessions --resolve local-peer critical path', () => {
       writeUpdateCache(tempHome);
       const repoDir = path.join(tempHome, 'work');
       fs.mkdirSync(repoDir, { recursive: true });
-      const oldPeer = runAgents(['sessions', '--resolve-from-newer-cli', 'abcd7777', '--json'], repoDir, tempHome);
+      const oldPeer = spawnSync(process.execPath, ['--eval', [
+        "const args = process.argv.slice(1);",
+        "if (args.includes('--resolve-safe-v1')) process.exit(1);",
+        "process.stdout.write(JSON.stringify([{id:'unsafe',filePath:'/private/transcript.jsonl'}]));",
+      ].join(' '), '--resolve-safe-v1', 'abcd7777'], { encoding: 'utf8' });
       expect(oldPeer.status).not.toBe(0);
-      const result = metadataResolveOutcome(
-        [{
-          id: 'abcd7777-1111-4222-8333-444455556666',
-          shortId: 'abcd7777',
-          agent: 'claude',
-          timestamp: '2026-08-03T09:00:00.000Z',
-          filePath: '/private/local.jsonl',
-          machine: 'local',
-        }],
-        { sessions: [], unreachable: oldPeer.status === 0 ? [] : ['old-peer'] },
-        'abcd7777',
+      const captured = remoteListCaptureResult(oldPeer.status, oldPeer.stdout, 'old-peer', 'old-peer');
+      expect(captured).toEqual({ sessions: [], unreachable: 'old-peer' });
+    } finally {
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it('marks successful malformed peer output incomplete at the production capture boundary', () => {
+    const malformedPeer = spawnSync(process.execPath, ['--eval', "process.stdout.write('{not-json')"], { encoding: 'utf8' });
+    expect(malformedPeer.status).toBe(0);
+    expect(remoteListCaptureResult(malformedPeer.status, malformedPeer.stdout, 'bad-peer', 'bad-peer')).toEqual({
+      sessions: [],
+      unreachable: 'bad-peer',
+    });
+  });
+
+  it('exits 2 when the real parent cannot read the device registry', () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-resolve-registry-'));
+    try {
+      writeUpdateCache(tempHome);
+      const repoDir = path.join(tempHome, 'work');
+      const devicesDir = path.join(tempHome, 'broken-devices');
+      fs.mkdirSync(repoDir, { recursive: true });
+      fs.mkdirSync(devicesDir, { recursive: true });
+      fs.writeFileSync(path.join(devicesDir, 'registry.json'), '{broken');
+      const result = runAgents(
+        ['sessions', '--resolve', 'abcd7777', '--json'],
+        repoDir,
+        tempHome,
+        { AGENTS_DEVICES_DIR: devicesDir },
       );
-      expect(result).toEqual({ kind: 'partial', failedPeers: ['old-peer'] });
+      expect(result.status).toBe(2);
+      expect(result.stdout).toBe('');
+      expect(result.stderr).toContain('device registry');
     } finally {
       fs.rmSync(tempHome, { recursive: true, force: true });
     }
@@ -370,7 +395,7 @@ describe('agents sessions --resolve local-peer critical path', () => {
 
   it('forwards resolver scope to every peer', () => {
     expect(metadataResolveForwardedArgs('recap resolver', { agent: 'codex@0.146.0', project: 'agents-cli' })).toEqual([
-      'sessions', '--resolve', 'recap resolver', '--json', '--all', '--local',
+      'sessions', '--resolve-safe-v1', 'recap resolver', '--json', '--all', '--local',
       '--agent', 'codex@0.146.0', '--project', 'agents-cli',
     ]);
   });

@@ -393,11 +393,13 @@ agents sessions --resolve "recap resolver" --json
 ```
 
 It reads the indexed `SessionMeta` rows on each machine and emits a one-element JSON
-array containing only `id`, `shortId`, `agent`, timestamps, `project`, `version`,
+array containing only `id`, `shortId`, `agent`, `origin`, timestamps, `project`, `version`,
 `label`, `topic`, and `machine` when exactly one logical session matches. Transcript
 paths/content (`filePath`, `plan`), account, cwd, cost, and token fields stay on the
 owning machine. A missing/empty selector or ambiguous ID prefix/keyword query exits 1.
-If any selected peer is unreachable, times out, or rejects `--resolve` because it runs
+Fleet peers receive a versioned, metadata-only `--resolve-safe-v1` request, so a peer
+carrying an older unsafe resolver rejects the request before serializing a row. If any
+selected peer is unreachable, returns malformed JSON, cannot list devices, times out, or rejects the protocol because it runs
 an older CLI, the command emits no JSON, names the peer(s), and exits 2; it never makes
 a unique/no-match decision from partial fleet state.
 `--local` keeps the metadata lookup on this machine.
@@ -427,14 +429,17 @@ agents sessions d3470b57-2af6-4c11-b1de-3fab94f43603
   longer prefix to select one.
 - **Synced copies are one logical session.** The same full id reported by several machines
   does not make a prefix ambiguous; the CLI renders one of those equivalent copies.
-- **Keywords keep the existing search semantics.** The resolver first searches indexed
-  metadata (label, topic, project, account, path, agent, and version), then widens a
-  metadata miss to that peer's transcript-content FTS index. The parent preserves those
-  peer-owned content hits and applies the uniqueness check across the fleet.
+- **Keywords keep the existing search semantics.** Each peer unions indexed metadata
+  matches (label, topic, project, account, path, agent, and version) with that peer's
+  transcript-content FTS hits. The parent preserves those peer-owned matches and applies
+  the uniqueness check across the fleet.
 - **`--local`** restricts the lookup to this machine — no cross-machine sweep — for
   scripts that want deterministic local behavior.
 - A peer already answering a parent's sweep (`AGENTS_SESSIONS_LOCAL=1`) never re-fans-out,
   so a fleet resolve can't recurse.
+- The parent uses the versioned hidden `--resolve-safe-v1` peer protocol. An older peer,
+  malformed peer JSON, or an unreadable device registry makes the sweep incomplete;
+  the command emits no JSON and exits 2 instead of deciding from partial results.
 
 ## Forking (branch a conversation)
 
