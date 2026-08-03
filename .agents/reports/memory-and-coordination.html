@@ -122,7 +122,7 @@
     <span class="chip"><b>7</b>&nbsp;sync-capable</span>
     <span class="chip"><b>3</b>&nbsp;coordination primitives</span>
     <span class="chip">schema <b>v21</b></span>
-    <span class="chip"><b>1,756</b>&nbsp;CLI calls mined</span>
+    <span class="chip"><b>1,760</b>&nbsp;CLI calls mined</span>
   </div>
   <div class="meta prov">
     <span class="chip">harness: <b>claude</b></span>
@@ -601,20 +601,20 @@ rest is process startup. The default fan-out then dwarfs everything. So the two 
 the last 14 days and tallied every <code>agents sessions</code> call that appears in a tool command.</p>
 
 <div class="stat-row">
-  <div class="stat"><div class="big">2,701</div><div class="lab">transcripts in the 14-day window (all scanned)</div></div>
+  <div class="stat"><div class="big">2,703</div><div class="lab">transcripts in the 14-day window (all scanned)</div></div>
   <div class="stat"><div class="big">128</div><div class="lab">sessions that invoked the CLI (~5%)</div></div>
-  <div class="stat"><div class="big">1,756</div><div class="lab">total invocations</div></div>
-  <div class="stat"><div class="big">96%</div><div class="lab">carried a query, id, or path argument</div></div>
+  <div class="stat"><div class="big">1,760</div><div class="lab">total invocations</div></div>
+  <div class="stat"><div class="big">97%</div><div class="lab">carried a query, id, or path argument</div></div>
 </div>
 
-<p>The subcommand mix is lopsided: <b>1,748 of 1,756 calls are the search/inspect form</b>; explicit
+<p>The subcommand mix is lopsided: <b>1,752 of 1,760 calls are the search/inspect form</b>; explicit
 <code>resume</code> appears 6 times and <code>sync</code> twice. Agents overwhelmingly <em>read</em>
 sessions — to recall context or check the fleet — and rarely drive resume/sync from the CLI. The flag
 distribution says what the tool is really <em>for</em>:</p>
 
 <figure class="fig">
 <svg viewBox="0 0 900 330" role="img" aria-label="Filter frequency across 1,756 sessions CLI invocations">
-  <text x="20" y="26" fill="#8b938c" font-size="12" font-family="var(--mono)">share of the 1,756 invocations carrying each flag</text>
+  <text x="20" y="26" fill="#8b938c" font-size="12" font-family="var(--mono)">share of the 1,760 invocations carrying each flag</text>
   <!-- rows: label(x0..150), bar from 160, scale 23% -> 660px -->
   <g font-family="var(--mono)" font-size="12">
     <text x="150" y="58" fill="#e7ece8" text-anchor="end">--json</text>

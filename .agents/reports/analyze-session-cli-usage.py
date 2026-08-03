@@ -92,14 +92,17 @@ def classify(argv_tail: str) -> tuple[str, list[str], bool]:
     toks = argv_tail.strip().split()
     sub = "list"
     has_query = False
+    seen_subcommand = False
     for t in toks:
         if t.startswith("-"):
             continue
-        if t in SUBCOMMANDS:
+        if t in SUBCOMMANDS and not seen_subcommand:
+            # e.g. `sessions resume <id>` — record the verb, keep scanning for its arg
             sub = t
-        else:
-            # a bare positional (a search term, id, or path) before any subcommand
-            has_query = True
+            seen_subcommand = True
+            continue
+        # any other bare positional is a query term, id, or path (incl. a subcommand's arg)
+        has_query = True
         break
     return sub, flags, has_query
 
