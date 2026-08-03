@@ -238,7 +238,15 @@ describe('readAuthFileIdentity — decodes each agent REAL format', () => {
   it('antigravity: identity from the refresh_token; null when absent', () => {
     writeAntigravityCred('a', 'REFRESH_A', 1_000_000);
     const dirA = path.join(TEST_VERSIONS_DIR, 'antigravity', 'a', 'home', '.gemini', 'antigravity-cli');
-    expect(readAuthFileIdentity('antigravity', dirA)).toBe('antigravity:sub=REFRESH_A');
+    // A non-JWT refresh token is a live credential — the identity carries its
+    // SHA-256 fingerprint, never the token itself (it lands in cache keys).
+    const idA = readAuthFileIdentity('antigravity', dirA);
+    expect(idA).toMatch(/^antigravity:sub=[0-9a-f]{16}$/);
+    expect(idA).not.toContain('REFRESH_A');
+    // Distinct refresh tokens -> distinct identities.
+    writeAntigravityCred('b', 'REFRESH_B', 1_000_000);
+    const dirB = path.join(TEST_VERSIONS_DIR, 'antigravity', 'b', 'home', '.gemini', 'antigravity-cli');
+    expect(readAuthFileIdentity('antigravity', dirB)).not.toBe(idA);
     // No refresh_token -> no identity.
     fs.writeFileSync(path.join(dirA, 'antigravity-oauth-token'), JSON.stringify({ token: {} }));
     expect(readAuthFileIdentity('antigravity', dirA)).toBeNull();
