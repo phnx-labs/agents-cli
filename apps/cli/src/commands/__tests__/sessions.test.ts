@@ -354,7 +354,7 @@ describe('agents sessions --resolve local-peer critical path', () => {
         "process.stdout.write(JSON.stringify([{id:'unsafe',filePath:'/private/transcript.jsonl'}]));",
       ].join(' '), '--resolve-safe-v1', 'abcd7777'], { encoding: 'utf8' });
       expect(oldPeer.status).not.toBe(0);
-      const captured = remoteListCaptureResult(oldPeer.status, oldPeer.stdout, 'old-peer', 'old-peer');
+      const captured = remoteListCaptureResult(oldPeer.status, oldPeer.stdout, 'old-peer', 'old-peer', true);
       expect(captured).toEqual({ sessions: [], unreachable: 'old-peer' });
     } finally {
       fs.rmSync(tempHome, { recursive: true, force: true });
@@ -364,7 +364,7 @@ describe('agents sessions --resolve local-peer critical path', () => {
   it('marks successful malformed peer output incomplete at the production capture boundary', () => {
     const malformedPeer = spawnSync(process.execPath, ['--eval', "process.stdout.write('{not-json')"], { encoding: 'utf8' });
     expect(malformedPeer.status).toBe(0);
-    expect(remoteListCaptureResult(malformedPeer.status, malformedPeer.stdout, 'bad-peer', 'bad-peer')).toEqual({
+    expect(remoteListCaptureResult(malformedPeer.status, malformedPeer.stdout, 'bad-peer', 'bad-peer', true)).toEqual({
       sessions: [],
       unreachable: 'bad-peer',
     });

@@ -72,7 +72,18 @@ export function parseRemoteList(stdout: string, machine: string): SessionMeta[] 
 
 /** Strict parser used at the live peer boundary. A successful process with
  * malformed/non-array JSON is an incomplete source, not an empty machine. */
-export function parseRemoteListPayload(stdout: string, machine: string): {
+const SAFE_RESOLVER_KEYS = new Set([
+  'id', 'shortId', 'agent', 'origin', 'timestamp', 'lastActivity', 'project',
+  'version', 'label', 'topic', 'machine',
+]);
+
+function isSafeResolverRow(value: Record<string, unknown>): boolean {
+  if (typeof value.id !== 'string' || typeof value.shortId !== 'string'
+    || typeof value.agent !== 'string' || typeof value.timestamp !== 'string') return false;
+  return Object.keys(value).every(key => SAFE_RESOLVER_KEYS.has(key));
+}
+
+export function parseRemoteListPayload(stdout: string, machine: string, safeResolver = false): {
   sessions: SessionMeta[];
   valid: boolean;
 } {
@@ -86,6 +97,9 @@ export function parseRemoteListPayload(stdout: string, machine: string): {
   const out: SessionMeta[] = [];
   for (const x of parsed) {
     if (!x || typeof x !== 'object' || Array.isArray(x)) return { sessions: [], valid: false };
+    if (safeResolver && !isSafeResolverRow(x as Record<string, unknown>)) {
+      return { sessions: [], valid: false };
+    }
     // `_remote` marks these as living on the peer's disk (not a local mirror),
     // so the picker routes read/resume back over SSH instead of the local FS.
     out.push({ ...(x as SessionMeta), machine, _remote: true });
@@ -100,9 +114,10 @@ export function remoteListCaptureResult(
   stdout: string,
   machine: string,
   display: string,
+  safeResolver = false,
 ): { sessions: SessionMeta[]; unreachable?: string } {
   if (code !== 0) return { sessions: [], unreachable: display };
-  const parsed = parseRemoteListPayload(stdout, machine);
+  const parsed = parseRemoteListPayload(stdout, machine, safeResolver);
   return parsed.valid ? { sessions: parsed.sessions } : { sessions: [], unreachable: display };
 }
 
@@ -136,7 +151,8 @@ async function fetchByTarget(
   os?: string
 ): Promise<{ sessions: SessionMeta[]; unreachable?: string }> {
   const { code, stdout } = await sshCapture(target, remoteListCommand(forwardedArgs, os), REMOTE_TIMEOUT_MS);
-  const result = remoteListCaptureResult(code, stdout, machine, display);
+  const safeResolver = forwardedArgs.includes('--resolve-safe-v1');
+  const result = remoteListCaptureResult(code, stdout, machine, display, safeResolver);
   if (result.unreachable) {
     process.stderr.write(chalk.gray(`  ${display}: unreachable or no agents CLI — skipped\n`));
   }

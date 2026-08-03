@@ -66,15 +66,36 @@ describe('parseRemoteList', () => {
 
 describe('remoteListCaptureResult', () => {
   it('accepts real child output and tags the owning machine', () => {
-    const peer = runPeer("process.stdout.write(JSON.stringify([{id:'abcd7777',shortId:'abcd7777'}]))");
+    const peer = runPeer("process.stdout.write(JSON.stringify([{id:'abcd7777',shortId:'abcd7777',agent:'claude',timestamp:'2026-08-03T00:00:00Z'}]))");
 
-    expect(remoteListCaptureResult(peer.status, peer.stdout, 'peer-one', 'Peer One')).toEqual({
-      sessions: [{ id: 'abcd7777', shortId: 'abcd7777', machine: 'peer-one', _remote: true }],
+    expect(remoteListCaptureResult(peer.status, peer.stdout, 'peer-one', 'Peer One', true)).toEqual({
+      sessions: [{
+        id: 'abcd7777', shortId: 'abcd7777', agent: 'claude',
+        timestamp: '2026-08-03T00:00:00Z', machine: 'peer-one', _remote: true,
+      }],
     });
   });
 
   it('marks an exit-0 malformed payload incomplete', () => {
-    expect(remoteListCaptureResult(0, '{not-json', 'peer', 'peer')).toEqual({
+    expect(remoteListCaptureResult(0, '{not-json', 'peer', 'peer', true)).toEqual({
+      sessions: [],
+      unreachable: 'peer',
+    });
+  });
+
+  it('marks an exit-0 structurally invalid resolver row incomplete', () => {
+    expect(remoteListCaptureResult(0, '[{}]', 'peer', 'peer', true)).toEqual({
+      sessions: [],
+      unreachable: 'peer',
+    });
+  });
+
+  it('rejects unsafe fields from a versioned resolver peer', () => {
+    const unsafe = JSON.stringify([{
+      id: 'abcd7777', shortId: 'abcd7777', agent: 'claude',
+      timestamp: '2026-08-03T00:00:00Z', filePath: '/private/transcript.jsonl',
+    }]);
+    expect(remoteListCaptureResult(0, unsafe, 'peer', 'peer', true)).toEqual({
       sessions: [],
       unreachable: 'peer',
     });
@@ -90,7 +111,7 @@ describe('remoteListCaptureResult', () => {
       "process.stdout.write(JSON.stringify([{id:'unsafe',filePath:'/private/transcript.jsonl'}]));",
     ].join(' '), '--resolve-safe-v1', 'abcd7777');
 
-    expect(remoteListCaptureResult(peer.status, peer.stdout, 'old-peer', 'Old Peer')).toEqual({
+    expect(remoteListCaptureResult(peer.status, peer.stdout, 'old-peer', 'Old Peer', true)).toEqual({
       sessions: [],
       unreachable: 'Old Peer',
     });
