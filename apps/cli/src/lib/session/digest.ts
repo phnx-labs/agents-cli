@@ -9,6 +9,7 @@
  */
 
 import type { SessionEvent } from './types.js';
+import { bucketKey, classifyBashCommand } from './bash-command.js';
 
 export type FileOp = 'created' | 'modified' | 'deleted';
 export interface FileChange {
@@ -117,6 +118,23 @@ export function toolHistogram(toolCounts: Record<string, number>, top = 8): Arra
     .map(([tool, count]) => ({ tool, count }))
     .sort((a, b) => b.count - a.count || a.tool.localeCompare(b.tool))
     .slice(0, top);
+}
+
+/**
+ * Aggregate recognized external tools invoked via Bash across a session.
+ * Unknown one-off commands are bucketed as `other` so the ranking surface
+ * (e.g. `agents activity --tools`) only surfaces repeatable tools.
+ */
+export function bashToolCounts(events: SessionEvent[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const e of events) {
+    if (e.type !== 'tool_use' || e._local) continue;
+    if (e.tool !== 'Bash' || !e.command) continue;
+    const info = classifyBashCommand(e.command);
+    const key = info.category === 'other' ? 'other' : bucketKey(e.command);
+    counts[key] = (counts[key] || 0) + 1;
+  }
+  return counts;
 }
 
 export interface TestResult {

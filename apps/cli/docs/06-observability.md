@@ -14,7 +14,7 @@ Six surfaces read the fleet's activity; each has one job. Reach for the one whos
 | **`events`** | **Raw unified event stream = the audit log.** Everything: secrets access, command invocations, version/skill/mcp/team ops, browser events, plus agent milestones. `--follow` to tail, `--audit` for ops-only. | `events.jsonl` + per-session `activity/*.jsonl`, merged by `readUnifiedEvents` | Audit, debugging, monitoring (human + machine) |
 | **`perf`** | **Latency rollups.** p50/p99 for hooks, CLI commands, and `agent.run` timings. Indexed SQLite — not a full scan of the audit log. | `~/.agents/.cache/perf/perf.db` (disposable) | Humans optimizing boot/run cost + `--json` |
 | **`feed`** | **Consolidated cross-agent surface.** Open blocks (decisions agents are waiting on) + `feed post` status updates — "what needs you / what are agents saying." | `.history/feed/*` + active sessions | Humans (operator inbox) + agents (progress) |
-| **`activity`** | **Human milestone timeline.** Recent plans / PRs / worktrees / sub-agents, newest-first — a friendly lens on the milestone tier of the event stream. | `activity/*.jsonl` | Human at the terminal |
+| **`activity`** | **Human milestone timeline.** Recent plans / PRs / worktrees / sub-agents, plus Bash-driven deliverables (video renders, image upscales, metadata edits), newest-first — a friendly lens on the milestone tier of the event stream. Every Bash call also emits a structured `bash.executed` activity record carrying its tool category. | `activity/*.jsonl` | Human at the terminal |
 | **`output`** | **Productivity accounting.** Token burn vs shipped output (PRs, commits) across agents — the "was it worth it" axis. (`agents cost` is the pure $-and-duration sibling.) | `sessions.db` + git/gh | Human + `--json` |
 | **`sessions`** | **Live agent roster + transcripts.** Which agents are running right now and their state; browse/read past conversation transcripts. A live process probe + transcript index, not an event log. | live pid/transcript probe + `sessions.db` | Human + `--json` |
 
@@ -853,14 +853,20 @@ agents activity --milestones       # only plans / PRs / worktrees / sub-agents
   (`▸ agents-cli  12 events · 4 milestones · zion, yosemite-s0`, capped at three
   names plus a `+N` tail). `--filter <text>` narrows by project / device / agent /
   event / ticket.
-- **Projects are repositories.** A cwd resolves to the git repository containing
-  it (`resolveProjectKey`, `lib/project-key.ts`), so `<repo>/apps/cli` files under
+- **Projects are defined projects first, repositories otherwise.** A cwd inside a
+  defined project (`~/.agents/projects/<name>.yaml`, see docs/11-projects.md)
+  reads as that project's NAME — so a multi-repo project is one bucket, not one
+  per repo. Anything else resolves to the git repository containing it
+  (`resolveProjectKey`, `lib/project-key.ts`), so `<repo>/apps/cli` files under
   `<repo>` and a worktree under `<repo>/.agents/worktrees/<slug>` folds back into
   the repo it branched from. A directory in no repo groups as itself, and a
-  dotfiles repo at `$HOME` is deliberately not treated as a project. This is the
-  same fold the `agents sessions` overview groups by, so a project reads
-  identically in both. Each machine resolves its own paths — a peer stamps the
-  project before its events cross the wire.
+  dotfiles repo at `$HOME` is deliberately not treated as a project. This one
+  resolver (`resolveProjectNameForCwd`, `lib/projects.ts`) is shared by the
+  activity timeline, `agents feed post`, and the `agents sessions` overview, so
+  a project reads identically in all three. Each machine resolves its own paths
+  — a peer stamps the project before its events cross the wire. `--project
+  <name>` narrows the stream to one project (exact match on this resolved
+  label).
 - **`--limit` caps milestones, not churn.** The default view collapses routine
   `file.edited` work to a count, so `-n` bounds the milestones shown and the
   routine events inside that window ride along for the counts
