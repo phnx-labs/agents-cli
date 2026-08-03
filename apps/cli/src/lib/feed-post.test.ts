@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -17,6 +17,19 @@ import type { PidSessionEntry } from './session/pid-registry.js';
 function tmpActivityDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-post-'));
 }
+
+// postFeedStatus resolves project names against the defs dir — keep every test
+// hermetic (an empty dir) so a developer's real ~/.agents/projects can't flip a
+// label; the canonical-name test overrides this with its own seeded dir.
+let emptyDefsDir: string;
+beforeEach(() => {
+  emptyDefsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-post-defs-'));
+  process.env.AGENTS_PROJECTS_DIR = emptyDefsDir;
+});
+afterEach(() => {
+  delete process.env.AGENTS_PROJECTS_DIR;
+  fs.rmSync(emptyDefsDir, { recursive: true, force: true });
+});
 
 describe('normalizeStatusText', () => {
   it('collapses whitespace and rejects empty', () => {

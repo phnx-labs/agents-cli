@@ -580,25 +580,32 @@ export function projectFromCwd(cwd?: string | null): string | undefined {
 
 /**
  * Join session facts (ticket / project / execution host) onto each event by
- * `sessionId`. A hint wins; otherwise pre-baked enriched fields (from a remote
- * peer that already enriched its own stream) are preserved, and project/host
- * fall back to what the event itself carries (`cwd`, `host`).
+ * `sessionId`. A hint wins; otherwise a CANONICAL def match (`canonicalProject`)
+ * upgrades whatever the event carries; otherwise pre-baked enriched fields (from
+ * a remote peer that already enriched its own stream) are preserved, and
+ * project/host fall back to what the event itself carries (`cwd`, `host`).
+ *
+ * The def match ranks above the pre-baked stamp because the stamp may be stale
+ * (posted before the def existed) or skewed (a peer whose defs haven't synced);
+ * the match is pure prefix compare against local defs, so a different-home
+ * peer's path simply doesn't match and its stamp is honored as before.
  *
  * `resolveProject` is how a caller reading its OWN machine's logs upgrades the
  * cwd fold to real repository detection ({@link resolveProjectKey}); it defaults
  * to the pure {@link projectFromCwd}, which is all a path from another machine
- * can be resolved with. Pure given a pure resolver.
+ * can be resolved with. Pure given pure resolvers.
  */
 export function enrichActivityEvents(
   events: EnrichedActivityEvent[],
   hints: ActivitySessionHint[],
   resolveProject: (cwd?: string | null) => string | undefined = projectFromCwd,
+  canonicalProject?: (cwd?: string | null) => string | undefined,
 ): EnrichedActivityEvent[] {
   const bySession = new Map<string, ActivitySessionHint>();
   for (const h of hints) if (h.sessionId) bySession.set(h.sessionId, h);
   return events.map((ev) => {
     const hint = ev.sessionId ? bySession.get(ev.sessionId) : undefined;
-    const project = hint?.project ?? ev.project ?? resolveProject(ev.cwd);
+    const project = hint?.project ?? canonicalProject?.(ev.cwd) ?? ev.project ?? resolveProject(ev.cwd);
     const ticket = hint?.ticket ?? ev.ticket ?? undefined;
     const executionHost = hint?.executionHost ?? ev.executionHost
       ?? (ev.host && ev.host !== 'unknown' ? ev.host : undefined);

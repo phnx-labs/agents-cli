@@ -44,7 +44,7 @@ import {
 } from '../lib/activity.js';
 import { gatherRemoteAgentsJson } from '../lib/remote-agents-json.js';
 import { resolveProjectKey } from '../lib/project-key.js';
-import { listProjectDefs, resolveProjectNameForCwd } from '../lib/projects.js';
+import { listProjectDefs, projectNameForCwd, resolveProjectNameForCwd } from '../lib/projects.js';
 import { machineId, normalizeHost } from '../lib/machine-id.js';
 import { shouldIncludeLocalFeed, remoteFeedHostsToDial } from './feed.js';
 import { getActiveSessions } from '../lib/session/active.js';
@@ -388,14 +388,31 @@ project header names the machines its work ran on.
       // fills local ones; the pure fallbacks (cwd->project, host->device) cover
       // everything either way. Skip the ps/lsof scan when there's nothing to show.
       // Project labels are canonical: a defined project's name wins over the
-      // repo-level key, so a multi-repo project buckets as one.
+      // repo-level key — including over a stale or def-skewed pre-baked stamp
+      // (the def match is a pure prefix compare; foreign paths just don't match),
+      // so a multi-repo project buckets as one even across version skew.
       const projectDefs = listProjectDefs();
+      const canonicalProject = (cwd?: string | null) => projectNameForCwd(cwd ?? undefined, projectDefs);
       const resolveProject = (cwd?: string | null) => resolveProjectNameForCwd(cwd, projectDefs);
       const sessions = includeLocal && events.length > 0 ? await getActiveSessions() : [];
-      let enriched = enrichActivityEvents(events, activityHintsFromSessions(sessions, resolveProject), resolveProject);
+      let enriched = enrichActivityEvents(events, activityHintsFromSessions(sessions, resolveProject), resolveProject, canonicalProject);
 
       if (opts.milestones) enriched = enriched.filter((e) => tierForEvent(e.event) === 'milestone');
-      if (opts.project) enriched = filterActivityByProject(enriched, opts.project);
+      if (opts.project) {
+        const unfiltered = enriched;
+        enriched = filterActivityByProject(enriched, opts.project);
+        // An exact-name flag that matches nothing deserves a useful answer, not
+        // a generic "no activity" that lies about the fleet.
+        if (enriched.length === 0 && unfiltered.length > 0) {
+          const seen = [...new Set(unfiltered.map((e) => e.project).filter((p): p is string => !!p))].sort();
+          const defined = projectDefs.map((d) => d.name);
+          const parts = [
+            seen.length ? `seen: ${seen.join(', ')}` : '',
+            defined.length ? `defined: ${defined.join(', ')}` : '',
+          ].filter(Boolean);
+          process.stderr.write(chalk.gray(`  · no events for project "${opts.project}" (exact match)${parts.length ? ` — ${parts.join(' · ')}` : ''}\n`));
+        }
+      }
       if (opts.filter) enriched = filterActivityEvents(enriched, opts.filter);
       enriched = capActivityEvents(enriched, opts.limit, { all: opts.all || opts.milestones });
 

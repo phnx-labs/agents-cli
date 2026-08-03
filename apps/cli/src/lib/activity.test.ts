@@ -665,6 +665,31 @@ describe('enrichActivityEvents', () => {
     expect(out).toMatchObject({ project: 'peer-repo', ticket: 'RUSH-9', executionHost: 'zion' });
   });
 
+  it('upgrades a stale or def-skewed pre-baked stamp when a local def matches the cwd', () => {
+    // A peer whose defs haven't synced (or a feed post written before the def
+    // existed) stamps the repo key; the reader's canonical def match wins, so a
+    // multi-repo project stays one bucket and `--project` doesn't miss it.
+    const canonical = (cwd?: string | null) => (cwd?.startsWith('/home/me/src/rush') ? 'rush' : undefined);
+    const [out] = enrichActivityEvents(
+      [ev({ sessionId: 'r', cwd: '/home/me/src/rush/apps/web', project: 'rush-web' })],
+      [],
+      () => undefined,
+      canonical,
+    );
+    expect(out.project).toBe('rush');
+  });
+
+  it('honors the pre-baked stamp when no local def matches (foreign path)', () => {
+    const canonical = () => undefined; // different-home peer: no def matches
+    const [out] = enrichActivityEvents(
+      [ev({ sessionId: 'r', cwd: '/Users/other/src/rush', project: 'rush' })],
+      [],
+      () => undefined,
+      canonical,
+    );
+    expect(out.project).toBe('rush');
+  });
+
   it('does not treat an unknown host as an execution host', () => {
     const [out] = enrichActivityEvents([ev({ host: 'unknown', cwd: undefined })], []);
     expect(out.executionHost).toBeUndefined();
