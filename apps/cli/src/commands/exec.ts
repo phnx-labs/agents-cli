@@ -529,6 +529,25 @@ async function handleTerminalHandoff(
     process.exit(1);
   }
 
+  // `--project <slug>` owns the working directory, but the main action resolves
+  // it far below this handoff. Resolve it here too, or the tab would open in
+  // THIS process's cwd (the launchd `/` for a menu-bar click) while the run
+  // inside it moved to the project — same rejection of the --cwd combination.
+  let cwd = options.cwd;
+  if (options.project) {
+    if (options.cwd || options.remoteCwd) {
+      console.error(chalk.red('Pass --project alone — not with --cwd or --remote-cwd.'));
+      process.exit(1);
+    }
+    const { resolveProjectRef } = await import('../lib/project-root.js');
+    try {
+      cwd = await resolveProjectRef(options.project, { forRemote: false });
+    } catch (err) {
+      console.error(chalk.red((err as Error).message));
+      process.exit(1);
+    }
+  }
+
   const { getActiveSessions } = await import('../lib/session/active.js');
   let sessions: Awaited<ReturnType<typeof toHostSamples>> = [];
   try {
@@ -542,7 +561,7 @@ async function handleTerminalHandoff(
     argv: process.argv.slice(2),
     forced: parsed.backend,
     consumedValue: typeof options.terminal === 'string' ? options.terminal : undefined,
-    cwd: options.cwd ?? process.cwd(),
+    cwd: cwd ?? process.cwd(),
     sessions,
     ctx: currentContext(),
   });
