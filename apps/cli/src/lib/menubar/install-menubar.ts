@@ -20,6 +20,7 @@ import { execFileSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { sleepSync } from '../fs-atomic.js';
 import { getRuntimeStateDir, getHelpersDir } from '../state.js';
 import { getCliVersion, resolveAgentsBin, resolveInstalledLayout } from '../version.js';
 
@@ -588,7 +589,7 @@ export function runMenubarSetup(): SetupResult {
 function waitForSingleInstance(): MenubarStatus {
   let status = getMenubarStatus();
   for (let i = 0; i < 15 && status.instances.length !== 1; i++) {
-    spawnSync('sleep', ['0.2'], { stdio: ['ignore', 'ignore', 'ignore'] });
+    sleepSync(200);
     status = getMenubarStatus();
   }
   return status;
