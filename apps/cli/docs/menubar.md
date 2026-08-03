@@ -141,6 +141,7 @@ One rule shapes the menu: **attention floats up, context groups down.**
  │   ⚠ Claude · web — awaiting input   ·  3m     ›│   + how long it's waited
  │   ✕ 2 routines failing                        ›│
  ├────────────────────────────────────────────────┤
+ │ New Task…                                  ⌘T │   opens the quick-dispatch bar
  │ New Session                                ⌘N │   submenu: one entry per agent
  ├────────────────────────────────────────────────┤
  │ ACTIVE · api  ·  1 running                    │   live work grouped by repo;
@@ -170,7 +171,18 @@ One rule shapes the menu: **attention floats up, context groups down.**
   lists each session (oldest first). Groups themselves sort by their oldest
   wait. Failed / overdue routines and a stopped scheduler append here. Empty
   when nothing needs attention.
-- **New Session** — launches `agents run <agent>` in a new Terminal window.
+- **New Task…** — opens the quick-dispatch bar (the same panel as `Cmd-Shift-O`):
+  type the task, pick agents and a repo, and it runs headless. One panel serves
+  both entry points, so an interrupted capture is restored whichever way you come
+  back to it. Use this when you want work *done*; use New Session when you want
+  to sit in the TUI.
+- **New Session** — shells `agents run <agent> --terminal`, which opens the agent
+  in **the terminal you actually work in**. The CLI resolves that from your live
+  sessions' host app (`agents sessions --active` → `host`), so a Ghostty user gets
+  a Ghostty tab and an iTerm user an iTerm tab; Terminal.app is the fallback when
+  nothing running names a terminal the engine can drive. See
+  [terminal-engine.md → Choosing a terminal](terminal-engine.md#choosing-a-terminal-for-a-gui-caller).
+  (It used to always open Terminal.app.)
 - **ACTIVE · \<repo\>** — live work grouped by repo. A session is *running* if
   its transcript was written in the last 2 minutes, else *idle*. Rich rows show
   the session's title inline; the row's submenu reveals the working dir. Idle

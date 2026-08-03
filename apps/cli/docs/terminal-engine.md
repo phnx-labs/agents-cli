@@ -16,7 +16,7 @@ back a run id and a PR.
 | | Terminal engine | Cloud providers |
 |---|---|---|
 | Opens | a tab / split you attach to now | a queued autonomous task |
-| Backends | iTerm, Ghostty, tmux | Rush / Codex / Factory / Antigravity |
+| Backends | iTerm, Ghostty, tmux, Terminal.app, VSCodium | Rush / Codex / Factory / Antigravity |
 | Interface | `buildTab/buildSplit(cwd, command) → argv` | `dispatch(repo, branch, task) → runId` |
 | Lifecycle | foreground, immediate | fire-and-forget, poll later |
 
@@ -44,8 +44,10 @@ caller ─▶ openSurfaces(items, {backend, host, packing})
 | Module | Role |
 |---|---|
 | [`types.ts`](../src/lib/terminal/types.ts) | `Backend`, `Layout`, `LaunchRequest`, `LaunchSpec`, `TerminalBackend`. |
-| [`backends/iterm.ts`](../src/lib/terminal/backends/iterm.ts) · [`ghostty.ts`](../src/lib/terminal/backends/ghostty.ts) · [`tmux.ts`](../src/lib/terminal/backends/tmux.ts) | Pure tab + split builders per emulator. |
+| [`backends/iterm.ts`](../src/lib/terminal/backends/iterm.ts) · [`ghostty.ts`](../src/lib/terminal/backends/ghostty.ts) · [`tmux.ts`](../src/lib/terminal/backends/tmux.ts) · [`terminal-app.ts`](../src/lib/terminal/backends/terminal-app.ts) | Pure tab + split builders per emulator. |
 | [`backends/index.ts`](../src/lib/terminal/backends/index.ts) | Registry, `detectCurrentBackend`, `availableBackends`. |
+| [`preferred.ts`](../src/lib/terminal/preferred.ts) | `resolveLaunchBackend` — which terminal to open for a caller that isn't in one (see [Choosing a terminal](#choosing-a-terminal-for-a-gui-caller)). |
+| [`run-surface.ts`](../src/lib/terminal/run-surface.ts) | `agents run --terminal` — re-open this run as a tab. |
 | [`policy.ts`](../src/lib/terminal/policy.ts) | `planLayouts` — the packing policy. |
 | [`transport.ts`](../src/lib/terminal/transport.ts) | `runLocal` / `runRemote` / `runSpec`, argv → ssh serialization. |
 | [`engine.ts`](../src/lib/terminal/engine.ts) | `specForRequest`, `buildRequests`, `openSurface`, `openSurfaces`. |
@@ -62,6 +64,11 @@ Each backend opens either a **tab** or a **split** (`right` = side-by-side,
 | `ghostty` | macOS + `/Applications/Ghostty.app` | `new tab … with configuration cfg` | `split (focused terminal of selected tab of front window) direction …` |
 | `tmux` | inside tmux (`$TMUX` set) | `tmux new-window -c <cwd>` | `tmux split-window -h`/`-v -c <cwd>` |
 | `vscodium-agent` | macOS + `/Applications/VSCodium.app` | `codium --open-url 'vscodium://swarmify.swarm-ext/spawn?p=<payload>'` | same URL, payload carries `split` |
+| `terminal` | macOS + Terminal.app, and NOT over SSH (`osascript` can't reach the GUI login there) | `do script … in front window` (a window if none open) | none — Terminal.app has no scriptable split, so a split request opens a **tab** |
+
+`terminal` is registered **last** deliberately: it exists on every Mac, so it is
+the floor that keeps a GUI caller working, and the ordering means a terminal the
+user actually installed still wins the available-backend fallback.
 
 `buildTab`/`buildSplit` return a `LaunchSpec { argv }`. Ghostty carries `cwd`
 natively via the surface configuration; iTerm/tmux `cd` inside the wrapped shell.
@@ -101,9 +108,83 @@ into the Mac's GUI session — `osascript` reaches the app through it. `tmux` ov
 to the already-open VSCodium instance over its user-scoped IPC socket, so it works
 from an SSH session as the same user (no `osascript`, no new window spawned).
 
+## Choosing a terminal for a GUI caller
+
+`detectCurrentBackend` reads `$TMUX` / `$TERM_PROGRAM` — right for a command the
+user typed in a terminal, useless to a caller that has no terminal in its
+ancestry. The menu-bar helper is launched by launchd, so it used to hardcode
+AppleScript at Terminal.app and opened every "New Session" there regardless of
+what the user actually works in.
+
+[`preferred.ts`](../src/lib/terminal/preferred.ts) closes that gap using a signal
+the session engine already computes: `ActiveSession.host` — the host app every
+live session is attributed to, resolved by walking the process table
+([`session/active.ts`](../src/lib/session/active.ts), `HOST_MATCHERS`). The
+terminal the user demonstrably runs agents in is the terminal a new session
+should open in.
+
+```ts
+resolveLaunchBackend(currentContext(), await getActiveSessions());
+// → { backend: 'ghostty', source: 'active-session', host: 'ghostty' }
+```
+
+Resolution order, each step skipped when it names nothing drivable here:
+
+| # | Step | `source` |
+|---|---|---|
+| 1 | the terminal this process runs in (`detectCurrentBackend`) | `current-terminal` |
+| 2 | the host app of the most recent live session | `active-session` |
+| 3 | the first available backend (Terminal.app is the every-Mac floor) | `available` |
+
+**A tmux-hosted session names its viewer, not the multiplexer.** `agents run`
+wraps interactive runs in tmux, so a session the user started in Ghostty is
+attributed `host: 'tmux'` on the discovery path — which names no terminal at all.
+`toHostSamples` ([`run-surface.ts`](../src/lib/terminal/run-surface.ts)) fills in
+`viewingApp` for those from `resolveViewingIn`
+([`session/viewing-in.ts`](../src/lib/session/viewing-in.ts)) — the same resolver
+behind `agents sessions`' "viewing in Ghostty tab 2" — by walking the attached
+tmux client's pid to its host app. `viewingApp` takes precedence over `host`. A
+detached session (no client attached) has no viewer and keeps `tmux`, which a GUI
+caller cannot drive, so it correctly contributes nothing.
+
+Cost: resolution is ~3s on a busy machine, dominated by `getActiveSessions()`
+itself (transcript tails across version homes). That is the price of opening in
+the right terminal; a cheaper host-only session query would cut it.
+
+`SESSION_HOST_BACKENDS` maps host → backend and is deliberately **partial**. A
+host is listed only when the engine can really drive it, because a wrong mapping
+opens the wrong app and looks like success:
+
+- `code` / `cursor` / `windsurf` are absent even though there is an editor
+  backend — the registered `vscodium-agent` is bound to the VSCodium variant
+  (`EDITOR_VARIANTS[0]`), so mapping Cursor to it would open VSCodium.
+- `warp` / `kitty` / `wezterm` / `alacritty` / `hyper` / `screen` are absent
+  because no backend drives them yet. Adding one is a backend plus a map entry.
+
+An unmapped host is not an error — resolution moves to the next session, and
+finally to the available-backend floor.
+
+### `agents run --terminal`
+
+The user-facing form. `--terminal` re-opens the run as a tab in the resolved
+terminal instead of running here; `--terminal <backend>` forces one and errors on
+an unknown id rather than quietly auto-detecting. The tab re-invokes the caller's
+own argv with the flag stripped ([`run-surface.ts`](../src/lib/terminal/run-surface.ts)),
+so `--mode`, `--cwd` and a `--` passthrough ride along and only one place knows
+how to spell a run. It cannot combine with `--host` (that opens a tab here, not
+there) and exits non-zero when no terminal could be opened.
+
+```bash
+agents run claude --terminal            # detect from live sessions
+agents run claude --terminal ghostty    # force
+```
+
+This is what the menu bar's **New Session** now shells
+(`menubar/Sources/MenubarHelper/AgentsCLI.swift` → `newSession`).
+
 ## Interactive login shell
 
-The `iterm`, `ghostty`, and `tmux` backends wrap their command in `zsh -ilc '…'`.
+The `iterm`, `ghostty`, `tmux`, and `terminal` backends wrap their command in `zsh -ilc '…'`.
 The `-i` is load-bearing: the version-pinned shims (`claude@2.1.187`) live in
 `~/.agents/.cache/shims`, which `.zshrc` adds to PATH for *interactive* shells
 only. A non-interactive `zsh -lc` can't find the shim and the surface dies with

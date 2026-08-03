@@ -56,6 +56,8 @@ interface ExecCommandActionOptions {
   name?: string;
   /** --notify: post a desktop notification when a headless run finishes. */
   notify?: boolean;
+  /** --terminal [backend]: open this run in a terminal tab; `true` = auto-detect. */
+  terminal?: string | boolean;
   verbose?: boolean;
   raw?: boolean;
   /** `--no-tmux` → commander sets this false (default true) to bypass the tmux wrapper. */
@@ -498,6 +500,63 @@ export async function runWorkflowForEach(
   return 1;
 }
 
+/**
+ * `--terminal`: hand this run to a real terminal tab and exit.
+ *
+ * The terminal is detected from the user's live sessions, so a run started from
+ * a surface that cannot host a TUI (the menu bar's "New Session", a script) lands
+ * in the terminal they actually work in instead of a hardcoded Terminal.app.
+ * Exits non-zero when no terminal could be opened — the caller must not believe
+ * a session started when none did.
+ */
+async function handleTerminalHandoff(
+  options: ExecCommandActionOptions,
+  prompt: string | undefined,
+): Promise<void> {
+  const { parseTerminalFlag, openRunInTerminal, toHostSamples } = await import('../lib/terminal/run-surface.js');
+  const { currentContext } = await import('../lib/terminal/index.js');
+
+  const parsed = parseTerminalFlag(options.terminal);
+  if (parsed.error) {
+    console.error(chalk.red(parsed.error));
+    process.exit(1);
+  }
+  if (options.host) {
+    // The rule and its wording live once, in the --host forwarding table, so the
+    // classification a reviewer reads and the error a user sees can't drift.
+    const { RUN_OPTION_REJECT_MESSAGES } = await import('../lib/hosts/remote-cmd.js');
+    console.error(chalk.red(RUN_OPTION_REJECT_MESSAGES.terminal));
+    process.exit(1);
+  }
+
+  const { getActiveSessions } = await import('../lib/session/active.js');
+  let sessions: Awaited<ReturnType<typeof toHostSamples>> = [];
+  try {
+    sessions = await toHostSamples(await getActiveSessions());
+  } catch {
+    // Detection is best-effort — an unreadable session index must not block the
+    // launch; resolution falls through to the available-backend floor.
+  }
+
+  const result = await openRunInTerminal({
+    argv: process.argv.slice(2),
+    forced: parsed.backend,
+    consumedValue: typeof options.terminal === 'string' ? options.terminal : undefined,
+    cwd: options.cwd ?? process.cwd(),
+    sessions,
+    ctx: currentContext(),
+  });
+
+  if (!result.ok) {
+    console.error(chalk.red(`Could not open a terminal: ${result.error ?? 'unknown error'}`));
+    process.exit(1);
+  }
+  if (!options.quiet) {
+    const what = prompt === undefined ? 'session' : 'run';
+    console.log(chalk.gray(`Opened the ${what} in ${result.description}.`));
+  }
+}
+
 /** Register the `agents run <agent> [prompt]` command. */
 export function registerRunCommand(program: Command): void {
   const runCmd = program
@@ -547,6 +606,10 @@ export function registerRunCommand(program: Command): void {
     .option('--session-id <id>', 'Force a NEW conversation to use this exact session UUID (Claude only). This CREATES a session — to resume an existing one, use --resume.')
     .option('--name <slug>', 'Name the run — seeds the session label so it shows up as `<name>` in `agents sessions` and resolves by it (and `agents hosts logs <name>` for --host runs) instead of an opaque id. An agent-generated title later refines the label; your name shows until then. Optional.')
     .option('--notify', 'Post a desktop notification when a headless run finishes. Fired by this process on exit, so it survives whatever launched the run (the menu bar dispatching it, a terminal you closed).')
+    .option(
+      '--terminal [backend]',
+      "Open this run in a real terminal tab instead of here. Without a value the terminal is detected from your live sessions (`agents sessions --active` host), so it lands where you already work — Ghostty for a Ghostty user, iTerm for an iTerm user. Name one to force it: iterm | ghostty | terminal | tmux | vscodium-agent. This is how the menu bar's New Session opens.",
+    )
     .option('--verbose', 'Show detailed execution logs')
     .option('--raw', 'Interactive runs on macOS/Linux launch inside a shared tmux session (for %pane addressing + re-attach). Pass --raw to spawn the agent directly instead. Also disabled by AGENTS_NO_TMUX=1.')
     .option('--no-tmux', 'Spawn the agent directly instead of wrapping it in the shared tmux session. Same effect as --raw / AGENTS_NO_TMUX=1. Use this to see the agent\'s full startup output when a launch is failing.')
@@ -664,6 +727,11 @@ export function registerRunCommand(program: Command): void {
       # Pick a signed-in account/version for only this run
       agents run claude@
 
+      # Open the session in a terminal tab — detected from where your sessions
+      # already run (Ghostty / iTerm / Terminal.app); force one with a value
+      agents run claude --terminal
+      agents run claude --terminal ghostty
+
       # Pipe JSON events to a parser (--quiet drops the preamble)
       agents run claude "..." --json --quiet | jq
 
@@ -732,6 +800,16 @@ export function registerRunCommand(program: Command): void {
         // The token commander assigned to [prompt] came from behind `--` — it is
         // a native flag, not a prompt. Run interactively.
         prompt = undefined;
+      }
+
+      // --terminal: this process can't host the TUI (a menu-bar click, a script),
+      // so hand the run to a real terminal and exit. Resolved from the user's own
+      // live sessions, so it opens where they already work. Done before every
+      // other dispatch path because the tab re-runs this same argv without the
+      // flag — arming --notify or picking a version here would happen twice.
+      if (options.terminal) {
+        await handleTerminalHandoff(options, prompt);
+        return;
       }
 
       // --notify: post a desktop notification when this run finishes. Armed on

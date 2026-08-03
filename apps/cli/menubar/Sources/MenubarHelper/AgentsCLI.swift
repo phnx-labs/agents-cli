@@ -115,12 +115,19 @@ enum AgentsCLI {
     }
 
     // MARK: Actions
-    // New interactive session: open a Terminal window running `agents run <agent>`.
-    // A status-bar click can't host a TUI, so hand off to the user's terminal.
+    // New interactive session: hand `agents run <agent>` to a real terminal.
+    // A status-bar click can't host a TUI, so the run has to open elsewhere —
+    // but WHICH terminal is the CLI's call, not ours. `--terminal` resolves it
+    // from the user's own live sessions (lib/terminal/preferred.ts), so a
+    // Ghostty user gets Ghostty and an iTerm user gets iTerm. This used to
+    // hardcode AppleScript at Terminal.app and dumped everyone there.
+    //
+    // `--cwd home` is explicit on purpose: launchd starts this helper with no
+    // WorkingDirectory (so cwd is `/`), and a child would inherit it. The old
+    // AppleScript path opened a login shell in the home directory, so passing it
+    // keeps New Session landing exactly where it always did instead of `/`.
     static func newSession(agent: String) {
-        let cmd = "\(shellQuote(binary)) run \(shellQuote(agent))"
-        let script = "tell application \"Terminal\"\nactivate\ndo script \"\(cmd)\"\nend tell"
-        runDetached(["/usr/bin/osascript", "-e", script])
+        runDetached(argv(["run", agent, "--terminal", "--cwd", home]))
     }
 
     static func routineRun(_ name: String) { runDetached(argv(["routines", "run", name])) }
