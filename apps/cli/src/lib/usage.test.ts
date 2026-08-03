@@ -639,15 +639,22 @@ describe('no response-status branch hides an unconditional return', () => {
     lines.forEach((line, idx) => {
       const m = line.match(/if\s*\(!response\.ok\)\s*(.*)$/);
       if (!m) return;
-      const tail = m[1].trim();
       // Target the hazard, not the style. `if (...) return x;`,
       // `if (...) continue;`, and `if (...) {` are all fine — the bug was a
       // NESTED if swallowing the condition, so that the statement below it ran
-      // unconditionally. An earlier version of this test demanded a block or a
-      // `return` and rejected a legitimate `continue;` another change had added,
-      // which is a test policing house style rather than catching a defect.
-      const ok = !/^if\b/.test(tail);
-      if (!ok) offenders.push(`usage.ts:${idx + 1}: ${line.trim()}`);
+      // unconditionally. An earlier version demanded a block or a `return` and
+      // rejected a legitimate `continue;` another change had added, which is a
+      // test policing house style rather than catching a defect.
+      let tail = m[1].trim();
+      // ...and when the tail is empty the guard's body is on a LATER line, so
+      // look there. Without this the multi-line form of the very bug being
+      // pinned — `if (!response.ok)` then a nested `if` beneath it — reads as an
+      // empty tail and passes, which is a regression test that certifies the
+      // regression.
+      for (let j = idx + 1; tail === '' && j < lines.length; j++) {
+        tail = lines[j].trim();
+      }
+      if (/^if\b/.test(tail)) offenders.push(`usage.ts:${idx + 1}: ${line.trim()}`);
     });
 
     expect(offenders).toEqual([]);
