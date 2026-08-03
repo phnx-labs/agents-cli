@@ -24,7 +24,7 @@ export function isSessionTrackedAgent(agent: string): agent is SessionAgentId {
 
 /** A single normalized event within a session (message, tool call, thinking, etc.). */
 export interface SessionEvent {
-  type: 'message' | 'tool_use' | 'tool_result' | 'thinking' | 'error' | 'init' | 'result' | 'usage' | 'attachment';
+  type: 'message' | 'tool_use' | 'tool_result' | 'thinking' | 'error' | 'init' | 'result' | 'usage' | 'attachment' | 'hook';
   agent: SessionAgentId;
   timestamp: string;
   role?: 'user' | 'assistant';
@@ -57,6 +57,12 @@ export interface SessionEvent {
   name?: string;
   mediaType?: string;
   sizeBytes?: number;
+  // Fields for hook events (type === 'hook') — a harness hook firing recorded in
+  // the transcript (Claude hook_success/hook_additional_context/hook_error
+  // attachments). Hook name as configured (e.g. "SessionStart:startup").
+  hookName?: string;
+  /** Lifecycle event the hook fired on (SessionStart, PreToolUse, …). */
+  hookEvent?: string;
 }
 
 /** A displayable file attachment discovered in a session transcript. */

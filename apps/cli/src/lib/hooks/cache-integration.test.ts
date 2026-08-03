@@ -28,6 +28,7 @@ describe('generated shim — bash execution', () => {
       shimsDir: path.join(tmpHome, 'shims'),
       cacheDir: path.join(tmpHome, 'cache'),
       logsDir: path.join(tmpHome, 'logs'),
+      perfDir: path.join(tmpHome, 'perf'),
     };
 
     // A real bash script the shim will invoke. It increments a counter file
@@ -123,6 +124,30 @@ echo "call=$count"
     expect(lines[0].cache).toBe('miss');
     expect(lines[1].cache).toBe('hit');
     expect(typeof lines[0].ms).toBe('number');
+  });
+
+  it('appends matching rows to the perf spool for the disposable warehouse', () => {
+    const shim = generateHookShim({
+      name: 'perf-spooled-hook',
+      scriptPath,
+      cache: { ttl: 300, key: 'global', prefetch: 'none' },
+      paths,
+    });
+
+    runShim(shim, '{}');
+    runShim(shim, '{}');
+
+    const spool = path.join(paths.perfDir!, 'spool.jsonl');
+    expect(fs.existsSync(spool)).toBe(true);
+    const lines = fs.readFileSync(spool, 'utf-8')
+      .split('\n').filter(Boolean).map(l => JSON.parse(l));
+    expect(lines.length).toBe(2);
+    expect(lines[0].kind).toBe('hook.fire');
+    expect(lines[0].label).toBe('perf-spooled-hook');
+    expect(lines[0].cache).toBe('miss');
+    expect(lines[1].cache).toBe('hit');
+    expect(typeof lines[0].duration_ms).toBe('number');
+    expect(typeof lines[0].ts_ms).toBe('number');
   });
 
   it('per-cwd key produces distinct cache files keyed on stdin cwd', () => {

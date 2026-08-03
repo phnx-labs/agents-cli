@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { spawnSync } from 'child_process';
+import { spawn, spawnSync, type ChildProcess } from 'child_process';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import {
@@ -13,10 +13,10 @@ import {
   buildSessionDescription,
   fleetCandidatesByQuery,
   metadataResolveForwardedArgs,
-} from '../sessions.js';
-import { parseRemoteList, remoteListCaptureResult } from '../../lib/session/remote-list.js';
-import { needsWindowsShell, composeWin32CommandLine } from '../../lib/platform/index.js';
-import type { SessionMeta } from '../../lib/session/types.js';
+} from './sessions.js';
+import { parseRemoteList, remoteListCommand } from '../lib/session/remote-list.js';
+import { needsWindowsShell, composeWin32CommandLine } from '../lib/platform/index.js';
+import type { SessionMeta } from '../lib/session/types.js';
 
 const repoRoot = process.cwd();
 const cliEntry = path.join(repoRoot, 'src', 'index.ts');
@@ -289,7 +289,243 @@ function runAgents(args: string[], cwd: string, home: string, envOverrides: Reco
   });
 }
 
+interface SessionResolverSshPeer {
+  target: string;
+  fixture: ChildProcess;
+  socket: string;
+  proofFile: string;
+  /** The test's temp home — every process of this test carries it in argv. */
+  home: string;
+}
+
+/**
+ * Temp base for the ssh-peer tests. The production ControlPath is
+ * `<home>/.agents/.cache/ssh/cm-%C`, and ssh appends a ~18-char listener
+ * suffix — under macOS CI's deep TMPDIR (/var/folders/<30 chars>/T/sr-XXXXXX)
+ * that blows past the 104-byte sun_path limit and every peer test fails at
+ * ControlMaster startup. `/tmp` resolves to /private/tmp (12 chars), keeping
+ * the full socket path under the limit. Linux paths are short already.
+ */
+const sshPeerTmpBase = process.platform === 'darwin' ? '/tmp' : os.tmpdir();
+
+/** Start the real ssh2 peer and graft its ephemeral TCP listener onto the exact
+ * default-port OpenSSH ControlPath the production parent will look up. */
+async function startSessionResolverSshPeer(
+  mode: 'old-peer' | 'malformed',
+  tempHome: string,
+): Promise<SessionResolverSshPeer> {
+  const hostKey = path.join(tempHome, 'fixture-host-key');
+  const peerHome = path.join(tempHome, 'peer-home');
+  const username = `srp-${crypto.randomBytes(16).toString('hex')}`;
+  const target = `${username}@127.0.0.1`;
+  const proofFile = path.join(tempHome, `${mode}-proof.txt`);
+  const expectedCommand = remoteListCommand(metadataResolveForwardedArgs('abcd7777', {}));
+  const controlPathTemplate = path.join(tempHome, '.agents', '.cache', 'ssh', 'cm-%C');
+  fs.mkdirSync(path.dirname(controlPathTemplate), { recursive: true, mode: 0o700 });
+  writeUpdateCache(peerHome);
+
+  const keygen = spawnSync('ssh-keygen', ['-q', '-t', 'rsa', '-b', '2048', '-N', '', '-f', hostKey], {
+    encoding: 'utf-8',
+  });
+  if (keygen.status !== 0) throw new Error(`ssh-keygen failed: ${keygen.stderr}`);
+
+  if (mode === 'old-peer') {
+    const oldVersion = '1.20.88';
+    const preflight = spawnSync(
+      'npx',
+      ['-y', '-p', `@phnx-labs/agents-cli@${oldVersion}`, 'agents', '--version'],
+      {
+        encoding: 'utf-8',
+        env: { ...process.env, npm_config_cache: path.join(peerHome, 'npm-cache') },
+        timeout: 60_000,
+      },
+    );
+    if (preflight.status !== 0 || preflight.stdout.trim() !== oldVersion) {
+      throw new Error(`old peer preflight failed: status=${preflight.status}; stdout=${preflight.stdout}; stderr=${preflight.stderr}`);
+    }
+  }
+
+  const fixture = spawn(process.execPath, [path.join(repoRoot, 'src', 'commands', 'testdata', 'session-resolver-ssh-peer.mjs')], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      SRP_MODE: mode,
+      SRP_HOST_KEY: hostKey,
+      SRP_PEER_HOME: peerHome,
+      SRP_USERNAME: username,
+      SRP_EXPECTED_COMMAND: expectedCommand,
+      SRP_PROOF_FILE: proofFile,
+      SRP_OLD_VERSION: '1.20.88',
+      SRP_TSX_LOADER: tsxLoaderUrl,
+      SRP_CLI_ENTRY: cliEntry,
+      NODE_NO_WARNINGS: '1',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const port = await new Promise<string>((resolve, reject) => {
+    let output = '';
+    const fail = (error: Error) => reject(new Error(`ssh2 fixture did not start: ${error.message}; ${output}`));
+    fixture.once('error', fail);
+    fixture.stderr?.on('data', (data) => { output += data.toString(); });
+    fixture.stdout?.on('data', (data) => {
+      output += data.toString();
+      const match = output.match(/PORT=(\d+)/);
+      if (match) resolve(match[1]);
+    });
+    fixture.once('exit', (code) => fail(new Error(`exited ${code ?? 'without a code'}`)));
+  });
+
+  // `ssh -G` expands `%C` exactly as the real parent will, including its
+  // default port 22. Do not use ~/.ssh/config: HOME is deliberately isolated.
+  const expanded = spawnSync('ssh', [
+    '-G',
+    '-o', 'ControlMaster=auto',
+    '-o', `ControlPath=${controlPathTemplate}`,
+    '-o', 'ControlPersist=60s',
+    target,
+  ], { encoding: 'utf-8' });
+  if (expanded.status !== 0) throw new Error(`ssh -G failed: ${expanded.stderr}`);
+  const socket = expanded.stdout.match(/^controlpath\s+(.+)$/m)?.[1];
+  if (!socket) throw new Error(`ssh -G did not emit a controlpath: ${expanded.stdout}`);
+
+  // The only TCP connection goes to the fixture's ephemeral port. `-S` forces
+  // that master to listen at the port-22 path production's unmodified ssh call
+  // will reuse below.
+  const master = spawnSync('ssh', [
+    '-F', '/dev/null', '-f', '-M', '-N', '-p', port, '-S', socket,
+    '-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null',
+    '-o', 'ControlPersist=60s', target,
+  ], { encoding: 'utf-8', timeout: 10_000 });
+  if (master.status !== 0) throw new Error(`ssh ControlMaster failed: ${master.stderr}`);
+  return { target, fixture, socket, proofFile, home: tempHome };
+}
+
+async function stopSessionResolverSshPeer(peer: SessionResolverSshPeer): Promise<void> {
+  spawnSync('ssh', ['-F', '/dev/null', '-S', peer.socket, '-O', 'exit', peer.target], {
+    encoding: 'utf-8', timeout: 10_000,
+  });
+  if (!peer.fixture.killed) peer.fixture.kill('SIGTERM');
+  await new Promise<void>((resolve) => peer.fixture.once('exit', () => resolve()));
+  // The peer side lingers past fixture death: the npx'd old agents-cli that
+  // answered over ssh (still flushing its index into peer-home/.agents) and
+  // the parent's own ControlPersist master. Both keep writing into the temp
+  // home, which raced the cleanup rmdir ENOTEMPTY on CI even with rm retries.
+  // Every one of those processes carries this test's unique temp path in argv,
+  // so a path-scoped pkill reaps exactly them and nothing else.
+  spawnSync('pkill', ['-f', peer.home]);
+}
+
+/**
+ * rm -rf the peer test's temp home, tolerating the trailing writes the peer
+ * side (an npx'd old agents-cli answering over ssh, plus the ControlPersist
+ * master winding down) races into it after stop — a bare rmSync intermittently
+ * dies ENOTEMPTY on CI. Retries absorb exactly that window.
+ */
+function rmTempHomeWithRetries(tempHome: string): void {
+  fs.rmSync(tempHome, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 });
+}
+
+describe('resolveSessionQuery indexed metadata coverage', () => {
+  it('resolves complete and partial ids from the real index without using text matches', () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-resolve-index-'));
+    try {
+      const runner = [
+        "import fs from 'node:fs';",
+        "import path from 'node:path';",
+        "const { upsertSession, closeDB } = await import('./src/lib/session/db.ts');",
+        "const { resolveSessionQuery } = await import('./src/commands/sessions.ts');",
+        "const home = process.env.HOME;",
+        "const add = (id, topic, content = '') => { const filePath = path.join(home, id + '.jsonl'); fs.writeFileSync(filePath, ''); upsertSession({ id, shortId: id.slice(0, 8), agent: 'claude', timestamp: new Date().toISOString(), filePath, topic }, content); };",
+        "const indexed = 'a7c1d88d-b543-48c1-993d-dd5cd8e210c9'; add(indexed, 'old but present');",
+        "const rush = 'session_001fa16e-9f97-453d-b0f0-5c35317bcd04'; add(rush, 'competitive watch');",
+        "const mentioner = 'aaaa1111-1111-2222-3333-444455556666'; add(mentioner, 'resume previous work: bbbb2222', 'resume previous work bbbb2222 earlier');",
+        "const prefix = 'cccc3333-1111-2222-3333-444455556666'; add(prefix, 'the real one');",
+        "const localOnly = 'dddd4444-1111-2222-3333-444455556666'; add(localOnly, 'local only');",
+        "const pick = (selector, options) => { const r = resolveSessionQuery([], selector, options); return { ids: r.matches.map(s => s.id), byId: r.byId, completeId: r.completeId }; };",
+        "const out = { indexed: pick(indexed), rush: pick(rush), absent: pick('2feeb449-5c73-4f1c-9163-8459e7aafeea'), phrase: pick('old but present'), mention: pick('bbbb2222'), prefix: pick('cccc3333'), noFallback: pick('dddd4444', { indexFallback: false }) };",
+        "closeDB(); process.stdout.write(JSON.stringify(out));",
+      ].join(' ');
+      const result = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '--eval', runner], {
+        cwd: repoRoot,
+        env: { ...process.env, HOME: tempHome, USERPROFILE: tempHome },
+        encoding: 'utf8',
+      });
+      expect(result.status, result.stderr).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual({
+        indexed: { ids: ['a7c1d88d-b543-48c1-993d-dd5cd8e210c9'], byId: true, completeId: true },
+        rush: { ids: ['session_001fa16e-9f97-453d-b0f0-5c35317bcd04'], byId: true, completeId: true },
+        absent: { ids: [], byId: true, completeId: true },
+        phrase: { ids: [], byId: false, completeId: false },
+        mention: { ids: [], byId: true, completeId: false },
+        prefix: { ids: ['cccc3333-1111-2222-3333-444455556666'], byId: true, completeId: false },
+        noFallback: { ids: [], byId: true, completeId: false },
+      });
+    } finally {
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('agents sessions --resolve local-peer critical path', () => {
+  it('resolves a full id, unique prefix, and keywords through the metadata-only CLI contract', () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-resolve-local-'));
+    try {
+      writeUpdateCache(tempHome);
+      const repoDir = path.join(tempHome, 'work', 'agents-cli');
+      const sessionId = 'face7777-1111-4222-8333-444455556666';
+      writeClaudeSession(tempHome, 'resolve-local', sessionId, repoDir, 'needle metadata contract', '2026-08-03T09:00:00.000Z');
+      const indexed = runAgents(['sessions', '--all', '--json', '--local'], repoDir, tempHome);
+      expect(indexed.status, indexed.stderr).toBe(0);
+
+      for (const selector of [sessionId, 'face7777', 'needle metadata contract']) {
+        const result = runAgents(['sessions', '--resolve', selector, '--json', '--local'], repoDir, tempHome);
+        expect(result.status, result.stderr).toBe(0);
+        const rows = JSON.parse(result.stdout) as SessionMeta[];
+        expect(rows.map(row => row.id)).toEqual([sessionId]);
+        expect(rows[0]).not.toHaveProperty('filePath');
+        expect(rows[0]).not.toHaveProperty('plan');
+        expect(rows[0].origin).toBe('cli');
+        expect(rows[0]).not.toHaveProperty('account');
+        expect(rows[0]).not.toHaveProperty('cwd');
+        expect(rows[0]).not.toHaveProperty('recentDirectoriesTouched');
+      }
+    } finally {
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it('fails ambiguity with every full-id candidate and keeps misses explicit', () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-resolve-errors-'));
+    try {
+      writeUpdateCache(tempHome);
+      const repoDir = path.join(tempHome, 'work', 'agents-cli');
+      const first = 'cafe8888-1111-4222-8333-444455556666';
+      const second = 'cafe8888-aaaa-4bbb-8ccc-ddddeeeeffff';
+      writeClaudeSession(tempHome, 'resolve-errors', first, repoDir, 'first ambiguity candidate', '2026-08-03T09:00:00.000Z');
+      writeClaudeSession(tempHome, 'resolve-errors', second, repoDir, 'second ambiguity candidate', '2026-08-03T09:01:00.000Z');
+      const indexed = runAgents(['sessions', '--all', '--json', '--local'], repoDir, tempHome);
+      expect(indexed.status, indexed.stderr).toBe(0);
+
+      const ambiguous = runAgents(['sessions', '--resolve', 'cafe8888', '--json', '--local'], repoDir, tempHome);
+      expect(ambiguous.status).toBe(1);
+      expect(ambiguous.stdout).toBe('');
+      expect(ambiguous.stderr).toContain(first);
+      expect(ambiguous.stderr).toContain(second);
+
+      const missing = runAgents(['sessions', '--resolve', 'bade9999', '--json', '--local'], repoDir, tempHome);
+      expect(missing.status).toBe(1);
+      expect(missing.stdout).toBe('');
+      expect(missing.stderr).toContain('No session found matching: bade9999');
+
+      const empty = runAgents(['sessions', '--resolve', '   ', '--json', '--local'], repoDir, tempHome);
+      expect(empty.status).toBe(1);
+      expect(empty.stdout).toBe('');
+      expect(empty.stderr).toContain('--resolve requires a non-empty selector');
+    } finally {
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
   it('keeps a peer-owned content-only FTS hit, projects safe metadata, and dedupes synced copies', () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-resolve-peer-'));
     try {
@@ -342,32 +578,55 @@ describe('agents sessions --resolve local-peer critical path', () => {
     }
   });
 
-  it('fails closed when an older peer rejects the resolver flag', () => {
-    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-resolve-old-peer-'));
+  it('returns a partial fleet result when a real old peer rejects the safe resolver protocol', async () => {
+    const tempHome = fs.mkdtempSync(path.join(sshPeerTmpBase, 'sr-'));
+    let peer: SessionResolverSshPeer | undefined;
     try {
       writeUpdateCache(tempHome);
       const repoDir = path.join(tempHome, 'work');
       fs.mkdirSync(repoDir, { recursive: true });
-      const oldPeer = spawnSync(process.execPath, ['--eval', [
-        "const args = process.argv.slice(1);",
-        "if (args.includes('--resolve-safe-v1')) process.exit(1);",
-        "process.stdout.write(JSON.stringify([{id:'unsafe',filePath:'/private/transcript.jsonl'}]));",
-      ].join(' '), '--resolve-safe-v1', 'abcd7777'], { encoding: 'utf8' });
-      expect(oldPeer.status).not.toBe(0);
-      const captured = remoteListCaptureResult(oldPeer.status, oldPeer.stdout, 'old-peer', 'old-peer', true);
-      expect(captured).toEqual({ sessions: [], unreachable: 'old-peer' });
+      peer = await startSessionResolverSshPeer('old-peer', tempHome);
+
+      const result = runAgents(
+        ['sessions', '--resolve', 'abcd7777', '--json', '--host', peer.target],
+        repoDir,
+        tempHome,
+      );
+      expect(result.status).toBe(2);
+      expect(result.stdout).toBe('');
+      expect(result.stderr).toContain(peer.target);
+      expect(result.stderr).toContain('No unique/no-match decision was made.');
+      expect(fs.readFileSync(peer.proofFile, 'utf-8')).toBe(
+        "1.20.88:unknown option '--resolve-safe-v1'\n",
+      );
     } finally {
-      fs.rmSync(tempHome, { recursive: true, force: true });
+      if (peer) await stopSessionResolverSshPeer(peer);
+      rmTempHomeWithRetries(tempHome);
     }
   });
 
-  it('marks successful malformed peer output incomplete at the production capture boundary', () => {
-    const malformedPeer = spawnSync(process.execPath, ['--eval', "process.stdout.write('{not-json')"], { encoding: 'utf8' });
-    expect(malformedPeer.status).toBe(0);
-    expect(remoteListCaptureResult(malformedPeer.status, malformedPeer.stdout, 'bad-peer', 'bad-peer', true)).toEqual({
-      sessions: [],
-      unreachable: 'bad-peer',
-    });
+  it('returns a partial fleet result when a real exit-zero peer emits malformed safe output', async () => {
+    const tempHome = fs.mkdtempSync(path.join(sshPeerTmpBase, 'sr-'));
+    let peer: SessionResolverSshPeer | undefined;
+    try {
+      writeUpdateCache(tempHome);
+      const repoDir = path.join(tempHome, 'work');
+      fs.mkdirSync(repoDir, { recursive: true });
+      peer = await startSessionResolverSshPeer('malformed', tempHome);
+
+      const result = runAgents(
+        ['sessions', '--resolve', 'abcd7777', '--json', '--host', peer.target],
+        repoDir,
+        tempHome,
+      );
+      expect(result.status).toBe(2);
+      expect(result.stdout).toBe('');
+      expect(result.stderr).toContain(peer.target);
+      expect(result.stderr).toContain('No unique/no-match decision was made.');
+    } finally {
+      if (peer) await stopSessionResolverSshPeer(peer);
+      rmTempHomeWithRetries(tempHome);
+    }
   });
 
   it('exits 2 when the real parent cannot read the device registry', () => {

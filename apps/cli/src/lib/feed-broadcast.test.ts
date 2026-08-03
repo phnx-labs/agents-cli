@@ -107,7 +107,7 @@ describe('broadcast planning', () => {
 });
 
 describe('running sinks', () => {
-  it('runs a real command and reports success', () => {
+  it.skipIf(process.platform === 'win32')('runs a real command and reports success', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'feed-broadcast-'));
     const out = path.join(dir, 'sink.txt');
     const planned = planFeedBroadcast(
@@ -118,7 +118,7 @@ describe('running sinks', () => {
     expect(fs.readFileSync(out, 'utf8')).toBe('PR #1690 open, CI green, merging');
   });
 
-  it('reports a failing sink without throwing — the post already stands', () => {
+  it.skipIf(process.platform === 'win32')('reports a failing sink without throwing — the post already stands', () => {
     const [outcome] = runFeedBroadcast([{ name: 'nope', argv: ['sh', '-c', 'echo boom >&2; exit 3'] }]);
     expect(outcome.ok).toBe(false);
     expect(outcome.error).toBe('boom');

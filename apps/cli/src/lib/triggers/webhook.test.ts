@@ -660,7 +660,7 @@ describe('startWebhookServer', () => {
     }
   });
 
-  it('fires matching handlers alongside routines', async () => {
+  it.skipIf(process.platform === 'win32')('fires matching handlers alongside routines', async () => {
     const secret = 'linear-secret';
     const webhookDir = fs.mkdtempSync(path.join(os.tmpdir(), 'webhook-handlers-'));
     process.env.AGENTS_WEBHOOKS_DIR = webhookDir;

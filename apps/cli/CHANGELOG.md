@@ -1,16 +1,125 @@
 # Changelog
 
-## Unreleased
+## 1.20.91
 
-- **Project sync no longer spams a warning per file it left alone.** Syncing a
-  project whose `.claude/commands/` you wrote yourself printed one wrapped
-  `Skipping project resource target …: already exists and is user-owned` line
-  per file — six hand-authored commands meant twelve lines of terminal noise in
-  the middle of `agents view claude`. Those files are the normal steady state,
-  not a warning, so the sync now reports them once, grouped, in plain words:
-  `Kept 6 of your own files in .claude/commands: debug.md, doc-gaps.md,
-  image-nbp.md, +3 more`. The list also rides out on `SyncResult.projectSkipped`
-  for callers that want it. Source: `apps/cli/src/lib/project-resources.ts`.
+- **An agent can now say it is stuck: `agents feed post --blocked` (RUSH-2110).** The
+  feed carried benign progress but had no way to signal "I cannot proceed", so agents
+  hand-rolled it into the status text (`NEEDS MUQSIT: …`) and it reached nobody. A
+  blocked post writes `status.blocked` to the shared activity stream *and* opens an
+  answerable block in the ledger, so the ask stays open until someone resolves it
+  instead of scrolling away. It is a flag on the existing verb, not a new command —
+  one thing for an agent to learn, and one stream where most posts are benign and
+  some need a human. Blocked is a state, not a volume: it always broadcasts at
+  `important`, so passing `--level` too is a usage error rather than a silent
+  override. Pair it with `--option` for an answerable choice or `--default` for a
+  safe fallback policy may apply. Source: `apps/cli/src/commands/feed.ts`,
+  `apps/cli/src/lib/feed.ts`.
+- **Feed blocks are actually delivered.** `publishBlock` wrote every "needs you"
+  record to the ledger and stopped there — `broadcastPostedEvent` ran only for
+  `feed post`, so a block was durable and invisible at the same time. Blocks now
+  reach the configured `feed.broadcast` sinks, carrying the ask and the literal
+  `agents focus <id>` command that unblocks it, and a block that reaches nobody
+  exits non-zero instead of looking like a success. Source:
+  `apps/cli/src/lib/feed-broadcast.ts`.
+- **New `desktop` channel provider.** `agents send --channel desktop` (and
+  `notify.owner.channel: desktop`) posts a native notification through the branded
+  menu-bar helper. It is the only channel with no external dependency — no network,
+  no login, no vendor CLI — so it still reaches you at your Mac when a messaging
+  gateway is down. It reports real deliverability rather than always succeeding:
+  on Linux it probes for `notify-send` instead of trusting the platform name.
+  Source: `apps/cli/src/lib/channels/providers/desktop.ts`.
+
+- **`agents perf` — disposable SQLite latency warehouse.** Indexed p50/p99
+  rollups for hooks, CLI commands, and `agent.run` timings without scanning the
+  audit JSONL. Warehouse lives at `~/.agents/.cache/perf/perf.db` (safe to wipe);
+  identity columns reuse sessions/events string shapes (`session_id`, `agent`,
+  `machine`, …) for soft cross-reference — no foreign keys. Hook shims spool
+  into the same DB; `agents hooks profile` reads it first. Source:
+  `apps/cli/src/lib/perf/db.ts`, `apps/cli/src/commands/perf.ts`.
+
+- **A routine that misses its fire now runs late instead of being silently lost.** Fires
+  are in-process croner timers, and croner only ever schedules forward from "now" — so a
+  daemon that was down, asleep, or wedged when a routine came due dropped that fire
+  outright, and `loadAll()` rebuilt every timer looking only at the future. Detection
+  existed but ran **once, at daemon startup**, and only logged a warning plus a
+  notification; catching up was a manual `agents routines catchup`. Observed cost: zion's
+  daemon was down from 02:03Z to 08:23Z while the laptop slept, `weekly-fleet-retro` was
+  armed for exactly 04:00Z, never ran, and the restart logged `2 routine(s) overdue` and
+  did nothing. The daemon now re-scans every 5 minutes as well as at startup and runs each
+  missed routine via the same detached path `catchup` already used. Source:
+  `apps/cli/src/lib/catchup.ts`, `apps/cli/src/lib/daemon.ts`.
+- **New `catchup:` routine field, and `agents routines add --no-catchup`.** Defaults to
+  true — a routine you scheduled is one you expect to have run. Set `catchup: false` for a
+  routine whose worth expires with its slot (a 9am brief is useless at 3pm); the miss is
+  still recorded, it just is not re-run. `agents routines list --json` reports the
+  effective value as `catchup`.
+- **New `missed` run status.** A missed fire previously left no trace anywhere — no run
+  record, no log line in the routine's history — so `agents routines list` kept showing the
+  previous run's `completed` as though it were current, sometimes for weeks. A miss is now
+  written as a real run stamped at the moment the fire was due, so `agents routines runs
+  <name>` shows the gap, and the listing renders it distinctly from `failed` (a miss is an
+  infrastructure problem, not a task failure). That record is also what makes catch-up
+  idempotent: it advances the overdue comparison, so the same missed fire is never
+  reconsidered across ticks or a daemon restart storm, and its directory is created with a
+  non-recursive `mkdir` — an atomic claim, so if the daemon's timer and a manual
+  `agents routines catchup` overlap, only one of them runs the routine. Source: `apps/cli/src/lib/routines.ts` (`RunMeta`),
+  `apps/cli/src/commands/routines.ts`.
+- **A routine is never caught up for a fire that predates it.** `detectOverdueJobs` walks back
+  a week for the most recent expected occurrence, and a routine with no runs is overdue by
+  definition — so before this, `agents routines add` on any daily or weekly schedule whose slot
+  had already passed made the routine instantly "overdue". That was cosmetic while catch-up was
+  a manual command; with the daemon now catching up automatically it would have run every newly
+  created routine once, within five minutes of creating it. Routines gain a `createdAt` stamp
+  (written once, like `actor`), and overdue detection floors the expected fire at it — falling
+  back to the routine file's mtime for routines written before the field existed. Observed on
+  the live fleet: `agents-cli-updates`, created Aug 1 and never run, was flagged overdue for a
+  Jul 27 fire. Source: `apps/cli/src/lib/overdue.ts` (`routineEffectiveStart`),
+  `apps/cli/src/lib/routines.ts` (`writeJob`).
+
+- **`agents secrets list` can be filtered.** It had no filtering at all —
+  `--host` picks a machine and `--json` picks a format, but nothing selected over
+  the bundles themselves, so "which of these read with no Touch ID?", "which
+  still store a raw value inline?", "what have I not touched in three months?"
+  meant piping the table through `grep` or went unanswered. There is now an axis
+  per question: a `[query]` positional over name and description, `--policy`,
+  `--backend`, `--type`, `--kind`, `--held`/`--not-held`, `--expired`,
+  `--expiring [days]`, `--unused <duration>`, plus `--sort` and `-n/--limit`.
+  Every axis narrows independently, so they compose. Following the `agents
+  sessions` house style, an unknown value is a loud error naming the valid set
+  rather than an empty list, filters apply before `--json` so the payload is the
+  exact twin of the table, and they are forwarded over `--host` so a remote list
+  narrows the same way. `--held`/`--not-held` read live broker state and so
+  refuse to run off macOS instead of reporting every bundle as unheld. An empty
+  result names the filters that emptied it and the total it started from. Source:
+  `apps/cli/src/lib/secrets/list-filter.ts`, `apps/cli/src/commands/secrets.ts`.
+
+- **The EXPIRING column no longer hides keys that have already expired.**
+  `countExpiringSoon` counted only keys due in the next 30 days — the guard is
+  `d >= 0` — so a bundle whose token died last month rendered `-`, identical to
+  one with no expiry at all. The only places a lapsed key surfaced were
+  `agents secrets view` and a hard abort at inject time, i.e. after it had already
+  broken a run. The column now counts lapsed and upcoming together and turns red
+  once anything has lapsed, and `secrets list --json` gains an `expired` count
+  alongside the existing `expiringSoon`. Source: `apps/cli/src/commands/secrets.ts`.
+
+- **`agents secrets list` now states the hold window instead of the bare word
+  `hold`.** The `hold` tier is a duration — prompt once, then stay silent for
+  `secrets.agent.holdMs` (7 days by default) — but the POLICY column printed only
+  the tier name, so a reader could not tell it meant a window, let alone which
+  one; finding out meant running `agents secrets status`. The column now reads
+  `hold 7d`, and `hold 7d · held 6d` while the broker is actually caching the
+  bundle. It follows the configured window, so a 24-hour hold reads `hold 1d`.
+  `always` and `never` are unchanged — neither has a window, and annotating one
+  would repeat the mistake the `daily` rename fixed. Two adjacent bugs go with
+  it: `agents secrets view` printed "7d by default" as a string literal and so
+  misstated the window for anyone who had configured `holdMs`, and a stale broker
+  entry past its expiry rendered as `hold · held expired` because the column
+  tested the entry for presence rather than liveness. `secrets list --json` and
+  `secrets view --json` gain an additive `holdMs` field (null on `always`/`never`)
+  so a machine caller gets the window too. Source:
+  `apps/cli/src/commands/secrets.ts`.
+
+- **Richer session previews: skills, hooks, links, artifacts, repos, todo status.** The `agents sessions` quick preview and full summary now show the skills a session invoked (with counts), the hooks that fired (Claude transcripts, with repeat counts and failures), a clickable Links section (Linear/Jira/GitHub/GitLab URLs harvested from the conversation), the documents the session produced (`.agents/artifacts|plans|reports` and other `*.md`/`*.html` creations), the repos it worked in (via `.git` walk-up), and an error tally in the picker. The full summary's Plan section now marks checklist items `[x]`/`[>]`/`[ ]` and renders the checklist alongside the ExitPlanMode text instead of hiding it. Changes/Dirs lines collapse `.agents/worktrees/<slug>` prefixes to `⧉ <slug>/…`, are width-capped, and no longer list shell junk (`2>&1`, `$VAR` paths), `node_modules`, or agents-cli internal archives. Source: `apps/cli/src/lib/session/highlights.ts`, `apps/cli/src/lib/session/parse.ts`, `apps/cli/src/lib/session/render.ts`, `apps/cli/src/commands/sessions-picker.ts`.
 
 ## 1.20.90
 

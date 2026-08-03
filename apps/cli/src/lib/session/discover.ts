@@ -17,6 +17,7 @@ import { promisify } from 'util';
 import Database from '../sqlite.js';
 import { getAgentsDir, getUserAgentsDir, getHistoryDir, getRunsDir } from '../state.js';
 import { shortCodexHome } from '../codex-home.js';
+import { parseTimeFilter } from './relative-time.js';
 
 const execFileAsync = promisify(execFile);
 import type { SessionAgentId, SessionEvent, SessionMeta, TodoProgress } from './types.js';
@@ -4791,21 +4792,9 @@ export function readGrokMeta(
   return { meta, content: topic || '' };
 }
 
-/** Parse a time filter string (relative like '7d' or ISO timestamp) into epoch milliseconds. */
-export function parseTimeFilter(input: string): number {
-  // Units: m=minute, h=hour, d=day, w=week, mo=month(30d), y=year(365d). `mo`
-  // must precede the single-letter alternatives so "1mo" isn't read as "1m"+"o".
-  const relativeMatch = input.match(/^(\d+)(mo|[mhdwy])$/i);
-  if (relativeMatch) {
-    const value = parseInt(relativeMatch[1], 10);
-    const unit = relativeMatch[2].toLowerCase();
-    if (unit === 'm') return Date.now() - value * 60_000;
-    if (unit === 'h') return Date.now() - value * 3_600_000;
-    if (unit === 'd') return Date.now() - value * 86_400_000;
-    if (unit === 'w') return Date.now() - value * 7 * 86_400_000;
-    if (unit === 'mo') return Date.now() - value * 30 * 86_400_000;
-    if (unit === 'y') return Date.now() - value * 365 * 86_400_000;
-  }
-  const ts = new Date(input).getTime();
-  return Number.isNaN(ts) ? 0 : ts;
-}
+// parseTimeFilter moved to ./relative-time.js — a leaf module — so a caller that
+// only needs the duration parser does not pull this file's `../sqlite.js` import
+// (and Node's SQLite ExperimentalWarning on stderr) into its module graph.
+// Re-exported so every existing importer keeps working unchanged. Imported too,
+// because a bare re-export does not bind the name for this file's own callers.
+export { parseTimeFilter } from './relative-time.js';

@@ -31,6 +31,7 @@ describe('generated shim — matches: gate', () => {
       shimsDir: path.join(tmpHome, 'shims'),
       cacheDir: path.join(tmpHome, 'cache'),
       logsDir: path.join(tmpHome, 'logs'),
+      perfDir: path.join(tmpHome, 'perf'),
     };
     counterFile = path.join(tmpHome, 'counter');
     fs.writeFileSync(counterFile, '0');

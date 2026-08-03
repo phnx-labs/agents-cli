@@ -51,12 +51,12 @@ export interface SessionBrowserSessionRow {
 export type SessionBrowserRow = SessionBrowserGroupRow | SessionBrowserSessionRow;
 
 export interface SessionBrowserOptions {
-  /** This machine's normalized id — the group that sorts first and forks locally. */
+  /** This machine's normalized id — rows here fork locally. */
   localMachine: string;
-  /** Session id of the terminal the user invoked from, pinned to the top of its group. */
+  /** The one device whose session listing supplied these rows. */
+  browsedMachine?: string;
+  /** Session id of the terminal the user invoked from, pinned to the top. */
   currentSessionId?: string | null;
-  /** Cap per machine group; omit for no cap. */
-  limitPerMachine?: number;
 }
 
 /** "just now" / "12 min ago" / "3 hours ago" / "2 days ago"; empty for an unparseable stamp. */
@@ -80,12 +80,15 @@ export function cleanSessionTopic(topic: string | undefined): string {
 }
 
 /**
- * The machine a session's fork must run on. Empty `machine` means the row came
- * from a listing that predates machine tagging — those are only ever produced by
- * the local index, so they belong to this machine.
+ * The machine a session's fork must run on. Empty `machine` falls back to the
+ * explicitly browsed device, or to this machine for the default local listing.
  */
-export function sessionMachine(session: BrowsableSession, localMachine: string): string {
-  return session.machine?.trim() || localMachine;
+export function sessionMachine(
+  session: BrowsableSession,
+  localMachine: string,
+  browsedMachine?: string,
+): string {
+  return session.machine?.trim() || browsedMachine || localMachine;
 }
 
 /**
@@ -93,8 +96,12 @@ export function sessionMachine(session: BrowsableSession, localMachine: string):
  * this machine (a local launch), the device name otherwise. This is the single
  * seam between "which row did the user pick" and "where does the agent start".
  */
-export function forkHostForSession(session: BrowsableSession, localMachine: string): string | undefined {
-  const machine = sessionMachine(session, localMachine);
+export function forkHostForSession(
+  session: BrowsableSession,
+  localMachine: string,
+  browsedMachine?: string,
+): string | undefined {
+  const machine = sessionMachine(session, localMachine, browsedMachine);
   return machine === localMachine ? undefined : machine;
 }
 
@@ -118,64 +125,41 @@ function detailForSession(session: BrowsableSession): string {
 }
 
 /**
- * Group the sessions by machine and render each into the label/description/detail
- * triple the QuickPick shows. This machine comes first (it is the common case and
- * the only one that forks without SSH), remaining devices follow alphabetically so
- * the order is stable between openings rather than shuffling with fleet load.
+ * Render the one browsed device's sessions into the label/description/detail
+ * triple the QuickPick shows. The CLI applies the ordinary list limit before this
+ * model runs; this layer only sorts the returned rows and pins the current session.
  */
 export function buildSessionBrowserRows(
   sessions: BrowsableSession[],
   opts: SessionBrowserOptions,
 ): SessionBrowserRow[] {
-  const byMachine = new Map<string, BrowsableSession[]>();
-  for (const session of sessions) {
-    if (!session?.id) continue;
-    const machine = sessionMachine(session, opts.localMachine);
-    const bucket = byMachine.get(machine);
-    if (bucket) bucket.push(session);
-    else byMachine.set(machine, [session]);
-  }
+  const machine = opts.browsedMachine || opts.localMachine;
+  const local = machine === opts.localMachine;
+  const shown = sessions.filter(session => !!session?.id).sort(byRecency);
+  const currentIdx = opts.currentSessionId
+    ? shown.findIndex(s => s.id === opts.currentSessionId || s.shortId === opts.currentSessionId)
+    : -1;
+  if (currentIdx > 0) shown.unshift(...shown.splice(currentIdx, 1));
+  if (shown.length === 0) return [];
 
-  const machines = [...byMachine.keys()].sort((a, b) => {
-    if (a === opts.localMachine) return -1;
-    if (b === opts.localMachine) return 1;
-    return a.localeCompare(b);
-  });
-
-  const rows: SessionBrowserRow[] = [];
-  for (const machine of machines) {
-    const local = machine === opts.localMachine;
-    const group = [...(byMachine.get(machine) ?? [])].sort(byRecency);
-
-    // The session the user is sitting in is what they most often want to fork —
-    // float it to the top of its own machine's group, wherever its timestamp fell.
-    const currentIdx = opts.currentSessionId
-      ? group.findIndex(s => s.id === opts.currentSessionId || s.shortId === opts.currentSessionId)
-      : -1;
-    if (currentIdx > 0) group.unshift(...group.splice(currentIdx, 1));
-
-    const shown = opts.limitPerMachine ? group.slice(0, opts.limitPerMachine) : group;
-    if (shown.length === 0) continue;
-
+  const rows: SessionBrowserRow[] = [{
+    kind: 'group',
+    machine,
+    label: local ? `${machine} · this machine` : machine,
+  }];
+  for (const session of shown) {
+    const current = !!opts.currentSessionId &&
+      (session.id === opts.currentSessionId || session.shortId === opts.currentSessionId);
     rows.push({
-      kind: 'group',
+      kind: 'session',
+      session,
       machine,
-      label: local ? `${machine} · this machine` : machine,
+      remote: !local,
+      current,
+      label: `${current ? '$(pinned) ' : ''}${session.shortId}  ${cleanSessionTopic(session.topic)}`,
+      description: describeSession(session),
+      detail: detailForSession(session),
     });
-    for (const session of shown) {
-      const current = !!opts.currentSessionId &&
-        (session.id === opts.currentSessionId || session.shortId === opts.currentSessionId);
-      rows.push({
-        kind: 'session',
-        session,
-        machine,
-        remote: !local,
-        current,
-        label: `${current ? '$(pinned) ' : ''}${session.shortId}  ${cleanSessionTopic(session.topic)}`,
-        description: describeSession(session),
-        detail: detailForSession(session),
-      });
-    }
   }
   return rows;
 }

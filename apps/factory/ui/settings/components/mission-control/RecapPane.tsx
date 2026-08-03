@@ -21,6 +21,11 @@ function RecapRow({ e, onOpenUrl }: { e: RecapEntry; onOpenUrl?: (url: string) =
       <span className={`av ${e.abbr}`}>{e.abbr}</span>
       <span className="rc-title" title={e.title}>{e.title}</span>
       <span className="rc-meta">{e.project} · {e.host}{e.branch ? ` · ${e.branch}` : ''}</span>
+      {e.fork && !e.forkedFrom && (
+        <span className="rc-fork-tag" title={`Forked from session ${e.fork.sourceId} on ${e.fork.sourceHost}`}>
+          <Icon name="gitBranch" size={10} /> fork of {e.fork.sourceHost}
+        </span>
+      )}
       {e.ticket && <span className="rc-ticket">{e.ticket}</span>}
       {e.prUrl && (
         <button type="button" className="rc-pr" title={e.prUrl} onClick={() => onOpenUrl?.(e.prUrl!)}>
@@ -30,6 +35,59 @@ function RecapRow({ e, onOpenUrl }: { e: RecapEntry; onOpenUrl?: (url: string) =
       {e.durationMs > 0 && <span className="rc-dur">{recapDuration(e.durationMs)}</span>}
       {recapCost(e.costUsd) && <span className="rc-cost">{recapCost(e.costUsd)}</span>}
       <span className="rc-ago">{ago}</span>
+    </div>
+  )
+}
+
+/**
+ * One half of a fork pair. A ledger row's single line does not survive being
+ * squeezed to half the pane — the title is the first thing to vanish — so a side
+ * stacks instead: title, then the machine and its numbers underneath.
+ */
+function RecapForkSide({ e, role, onOpenUrl }: { e: RecapEntry; role: 'parent' | 'fork'; onOpenUrl?: (url: string) => void }) {
+  return (
+    <div className={`rc-pair-side rc-pair-${role}`}>
+      <div className="rc-side-head">
+        <span className={`av ${e.abbr}`}>{e.abbr}</span>
+        <span className="rc-title" title={e.title}>{e.title}</span>
+        {e.prUrl && (
+          <button type="button" className="rc-pr" title={e.prUrl} onClick={() => onOpenUrl?.(e.prUrl!)}>
+            <Icon name="gitBranch" size={11} /> PR
+          </button>
+        )}
+      </div>
+      <div className="rc-side-meta">
+        <span className="rc-side-host">{e.host}</span>
+        <span className="rc-meta">{e.project}{e.branch ? ` · ${e.branch}` : ''}</span>
+        {e.ticket && <span className="rc-ticket">{e.ticket}</span>}
+        {e.durationMs > 0 && <span className="rc-dur">{recapDuration(e.durationMs)}</span>}
+        {recapCost(e.costUsd) && <span className="rc-cost">{recapCost(e.costUsd)}</span>}
+        <span className="rc-ago">{agoLabel(e.lastActivityMs)}</span>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * A fork and the session it came from, side by side. The whole point of forking
+ * onto another machine is the comparison, so the ledger keeps the two together
+ * instead of scattering two rows that share no id: parent on the left, fork on
+ * the right, each stamped with the machine it ran on.
+ */
+function RecapForkPair({ e, onOpenUrl }: { e: RecapEntry; onOpenUrl?: (url: string) => void }) {
+  const parent = e.forkedFrom!
+  const forkHost = e.fork?.forkHost ?? e.host
+  return (
+    <div className="recap-pair">
+      <div className="rc-pair-tag">
+        <Icon name="gitBranch" size={10} />
+        {parent.host === forkHost ? `forked on ${forkHost}` : `forked ${parent.host} → ${forkHost}`}
+      </div>
+      <div className="rc-pair-body">
+        <RecapForkSide e={parent} role="parent" onOpenUrl={onOpenUrl} />
+        <div className="rc-pair-arrow" aria-hidden="true">→</div>
+        <RecapForkSide e={e} role="fork" onOpenUrl={onOpenUrl} />
+      </div>
     </div>
   )
 }
@@ -70,9 +128,11 @@ export function RecapPane({ days, loading, onOpenUrl }: RecapPaneProps) {
             </span>
             <span className="ln" />
           </div>
-          {d.entries.map((e) => (
-            <RecapRow key={e.id} e={e} onOpenUrl={onOpenUrl} />
-          ))}
+          {d.entries.map((e) =>
+            e.forkedFrom
+              ? <RecapForkPair key={e.id} e={e} onOpenUrl={onOpenUrl} />
+              : <RecapRow key={e.id} e={e} onOpenUrl={onOpenUrl} />,
+          )}
         </React.Fragment>
       ))}
     </div>

@@ -395,12 +395,24 @@
         "title": "Agents: Resume"
       },
       {
+        "command": "agents.resumePickSession",
+        "title": "Agents: Resume (Pick Session)"
+      },
+      {
+        "command": "agents.resumePickHost",
+        "title": "Agents: Resume (Pick Host)"
+      },
+      {
+        "command": "agents.resumePickHarness",
+        "title": "Agents: Resume (Pick Harness)"
+      },
+      {
         "command": "agents.sessionResume",
         "title": "Agents: Session Resume"
       },
       {
         "command": "agents.resumeCurrentInBestProfile",
-        "title": "Agents: Resume Current Session in Best Profile"
+        "title": "Agents: Resume (Best Profile)"
       },
       {
         "command": "agents.spawnWithPrompt",
@@ -415,8 +427,16 @@
         "title": "Agents: Fork"
       },
       {
+        "command": "agents.forkPickHost",
+        "title": "Agents: Fork (Pick Host)"
+      },
+      {
         "command": "agents.forkPickSession",
         "title": "Agents: Fork (Pick Session)"
+      },
+      {
+        "command": "agents.forkRecap",
+        "title": "Agents: Fork (Recap)"
       },
       {
         "command": "agents.newClaudePickHost",

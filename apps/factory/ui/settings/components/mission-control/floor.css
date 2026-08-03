@@ -475,14 +475,28 @@
 .swarmify-root .feed-sec .rc-rollup { margin-left: 8px; color: var(--ds-text-dim); font-weight: 600; font-size: 10.5px; }
 .swarmify-root .recap-row { display: flex; align-items: center; gap: 9px; padding: 8px 8px; border-bottom: 1px solid var(--ds-border-subtle); border-radius: var(--r-sm); }
 .swarmify-root .recap-row:hover { background: var(--ds-bg-panel); }
-.swarmify-root .recap-row .rc-title { flex: 1; min-width: 0; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.swarmify-root .recap-row .rc-meta { flex: 0 1 auto; min-width: 0; color: var(--ds-text-dim); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.swarmify-root .recap-row .rc-ticket { flex: 0 0 auto; font-family: "Geist Mono", monospace; font-size: 10px; color: var(--ds-text-dim); border: 1px solid var(--ds-border); border-radius: 999px; padding: 1px 7px; }
-.swarmify-root .recap-row .rc-pr { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 3px; font-family: "Geist Mono", monospace; font-size: 10px; font-weight: 700; color: var(--brand-600); background: none; border: 1px solid var(--ds-border); border-radius: 999px; padding: 1px 7px; cursor: pointer; }
-.swarmify-root .recap-row .rc-pr:hover { border-color: var(--brand-600); }
-.swarmify-root .recap-row .rc-dur { flex: 0 0 auto; font-family: "Geist Mono", monospace; font-size: 10.5px; color: var(--ds-text-dim); font-variant-numeric: tabular-nums; }
-.swarmify-root .recap-row .rc-cost { flex: 0 0 auto; font-family: "Geist Mono", monospace; font-size: 10.5px; color: var(--ds-text-muted); font-variant-numeric: tabular-nums; }
-.swarmify-root .recap-row .rc-ago { flex: 0 0 auto; width: 64px; text-align: right; color: var(--ds-text-faint); font-size: 10.5px; }
+.swarmify-root :is(.recap-row, .rc-pair-side) .rc-title { flex: 1; min-width: 0; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.swarmify-root :is(.recap-row, .rc-pair-side) .rc-meta { flex: 0 1 auto; min-width: 0; color: var(--ds-text-dim); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.swarmify-root :is(.recap-row, .rc-pair-side) .rc-ticket { flex: 0 0 auto; font-family: "Geist Mono", monospace; font-size: 10px; color: var(--ds-text-dim); border: 1px solid var(--ds-border); border-radius: 999px; padding: 1px 7px; }
+.swarmify-root :is(.recap-row, .rc-pair-side) .rc-pr { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 3px; font-family: "Geist Mono", monospace; font-size: 10px; font-weight: 700; color: var(--brand-600); background: none; border: 1px solid var(--ds-border); border-radius: 999px; padding: 1px 7px; cursor: pointer; }
+.swarmify-root :is(.recap-row, .rc-pair-side) .rc-pr:hover { border-color: var(--brand-600); }
+.swarmify-root :is(.recap-row, .rc-pair-side) .rc-dur { flex: 0 0 auto; font-family: "Geist Mono", monospace; font-size: 10.5px; color: var(--ds-text-dim); font-variant-numeric: tabular-nums; }
+.swarmify-root :is(.recap-row, .rc-pair-side) .rc-cost { flex: 0 0 auto; font-family: "Geist Mono", monospace; font-size: 10.5px; color: var(--ds-text-muted); font-variant-numeric: tabular-nums; }
+.swarmify-root :is(.recap-row, .rc-pair-side) .rc-ago { flex: 0 0 auto; width: 64px; text-align: right; color: var(--ds-text-faint); font-size: 10.5px; }
+/* A fork and the session it came from, kept side by side so the two are comparable. */
+.swarmify-root .recap-pair { margin: 2px 0; padding: 6px 8px 8px; border: 1px dashed var(--ds-border); border-radius: var(--r-md); background: var(--ds-bg-panel); }
+.swarmify-root .recap-pair .rc-pair-tag { display: inline-flex; align-items: center; gap: 4px; margin-bottom: 4px; font-family: "Geist Mono", monospace; font-size: 10px; color: var(--brand-600); }
+.swarmify-root .recap-pair .rc-pair-body { display: flex; align-items: stretch; gap: 10px; }
+.swarmify-root .recap-pair .rc-pair-side { flex: 1 1 0; min-width: 0; padding: 4px 8px; border-radius: var(--r-sm); background: var(--ds-bg); }
+.swarmify-root .recap-pair .rc-pair-fork { box-shadow: inset 2px 0 0 var(--brand); }
+.swarmify-root .recap-pair .rc-pair-arrow { flex: 0 0 auto; align-self: center; color: var(--brand-600); font-size: 13px; }
+.swarmify-root .recap-pair .rc-side-head { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.swarmify-root .recap-pair .rc-side-head .rc-title { flex: 1; min-width: 0; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.swarmify-root .recap-pair .rc-side-meta { display: flex; align-items: center; gap: 7px; margin-top: 3px; padding-left: 27px; min-width: 0; }
+.swarmify-root .recap-pair .rc-side-meta .rc-meta { flex: 0 1 auto; min-width: 0; color: var(--ds-text-dim); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.swarmify-root .recap-pair .rc-side-host { flex: 0 0 auto; font-family: "Geist Mono", monospace; font-size: 10.5px; font-weight: 700; color: var(--ds-text-muted); }
+.swarmify-root .recap-pair .rc-side-meta .rc-ago { margin-left: auto; width: auto; }
+.swarmify-root .recap-row .rc-fork-tag { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 3px; font-family: "Geist Mono", monospace; font-size: 10px; color: var(--brand-600); border: 1px solid var(--ds-border); border-radius: 999px; padding: 1px 7px; }
 .swarmify-root .dispatch-panel { background: var(--ds-bg); border: 1px solid var(--ds-border-subtle); border-radius: var(--r-lg); padding: 12px 14px; }
 .swarmify-root .dispatch-panel.editing { border-color: var(--brand); box-shadow: inset 3px 0 0 var(--brand); background: var(--ds-bg-panel); }
 .swarmify-root .dp-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }

@@ -71,7 +71,20 @@ export interface OpenBlock {
   runtime: string;
   ts: string;
   questions: BlockQuestion[];
-  kind?: 'question' | 'notification' | 'control';
+  /**
+   * How this block came to exist.
+   *   question     — an AskUserQuestion the harness surfaced
+   *   notification — a permission/idle prompt the harness raised
+   *   control      — a synthetic card the feed itself computed (runaway, needy)
+   *   declared     — the AGENT decided it is stuck and said so (`feed post --blocked`)
+   *
+   * `declared` is the only kind that does not depend on the harness noticing
+   * anything. Every other kind is inferred from a harness event, and hook events
+   * are not portable across harnesses (only Claude fires Notification, only Codex
+   * fires PermissionRequest), so a declared block is the one signal every agent
+   * can raise — it is just a shell command.
+   */
+  kind?: 'question' | 'notification' | 'control' | 'declared';
   notificationType?: string;
   ticket?: string;
   pr?: string;
@@ -370,6 +383,66 @@ export function clearBlockLifecycle(blockId: string, root?: string): void {
       // ignore missing
     }
   }
+}
+
+/** Identity of the agent declaring a block — the subset of `PostIdentity` it needs. */
+export interface DeclaringAgent {
+  sessionId: string;
+  mailboxId: string;
+  host: string;
+  runtime: string;
+}
+
+export interface DeclareBlockInput {
+  /** What the agent needs from the user, front-loaded. */
+  text: string;
+  /** Answerable choices, if the ask is a pick-one. */
+  options?: string[];
+  /** A safe default makes this an approval; without one it is a decision. */
+  safeDefault?: string;
+  /** Minutes before the default-on-no-answer policy may fire. */
+  timeoutMinutes?: number;
+  ts?: string;
+}
+
+/**
+ * Build the block record for `agents feed post --blocked` — pure, so the shape is testable
+ * without touching the store or the broadcast layer.
+ *
+ * Class is derived, not asked for: a `--default` means the user could be absent
+ * and policy could still resolve it (approval); no default means only a human can
+ * choose (decision). `feed-policy.ts` reads exactly that distinction, so deriving
+ * it here keeps one rule in one place instead of letting a caller set a class that
+ * contradicts its own safeDefault.
+ *
+ * `costOfDelay: high` because a declared block is, by definition, an agent that
+ * has already stopped making progress — that is what makes it worth interrupting
+ * someone over, and what `feed --dispatch`'s urgency filter keys off.
+ */
+export function buildDeclaredBlock(agent: DeclaringAgent, input: DeclareBlockInput): OpenBlock {
+  const text = input.text.trim().replace(/\s+/g, ' ');
+  if (!text) {
+    throw new Error('Block text is empty. Usage: agents feed post "what you need from the user" --blocked');
+  }
+  const options = (input.options ?? [])
+    .map((label) => label.trim())
+    .filter(Boolean)
+    .map((label) => ({ label }));
+
+  return {
+    blockId: blockIdForSession(agent.sessionId),
+    sessionId: agent.sessionId,
+    mailboxId: agent.mailboxId,
+    host: agent.host,
+    runtime: agent.runtime,
+    ts: input.ts ?? new Date().toISOString(),
+    kind: 'declared',
+    questions: [{ text, header: 'Needs you', ...(options.length ? { options } : {}) }],
+    blockClass: input.safeDefault ? 'approval' : 'decision',
+    costOfDelay: 'high',
+    ...(input.safeDefault ? { safeDefault: input.safeDefault } : {}),
+    ...(input.timeoutMinutes !== undefined ? { timeoutMinutes: input.timeoutMinutes } : {}),
+  };
 }
 
 /** Atomic write a block record to the feed store. Clears stale lifecycle state. */

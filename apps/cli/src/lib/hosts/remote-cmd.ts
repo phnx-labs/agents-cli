@@ -110,6 +110,7 @@ export const RUN_OPTION_FORWARDING: Record<string, RunOptionForwarding> = {
   emitSessionId: 'forward', // remote prints its session id as a stdout sentinel the launcher captures (session-marker.ts)
 
   // rejected — cannot cross the SSH boundary; fail loud, never degrade
+  terminal: 'reject', // opens a tab on THIS machine's desktop; a remote tab is a different request
   secrets: 'reject',
   secretsKeys: 'reject',
   allowExpired: 'reject',
@@ -150,6 +151,10 @@ export const RUN_OPTION_FORWARDING: Record<string, RunOptionForwarding> = {
 
 /** Actionable messages for value-aware rejections, keyed by attribute name. */
 export const RUN_OPTION_REJECT_MESSAGES: Record<string, string> = {
+  terminal:
+    '--terminal opens a tab on THIS machine; it cannot be combined with --host. ' +
+    'Drop --terminal to dispatch to the host, or drop --host to open the tab here. ' +
+    'To watch a remote run in a terminal, dispatch it and follow with `agents sessions focus <id>`.',
   secrets:
     '--secrets cannot cross the SSH boundary — Keychain values are never sent to a host implicitly. ' +
     'Provision the bundle on the host first (agents secrets export --host <name>), then run without --secrets; ' +

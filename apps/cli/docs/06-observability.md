@@ -6,27 +6,53 @@ Using agents-cli as a programmatic observability layer for agent fleets.
 
 ## Command roles at a glance
 
-Five surfaces read the fleet's activity; each has one job. Reach for the one whose
+Six surfaces read the fleet's activity; each has one job. Reach for the one whose
 *consumer* and *axis* match your question, not whichever you remember first.
 
 | Command | Role (one line) | Source | Consumer |
 |---|---|---|---|
 | **`events`** | **Raw unified event stream = the audit log.** Everything: secrets access, command invocations, version/skill/mcp/team ops, browser events, plus agent milestones. `--follow` to tail, `--audit` for ops-only. | `events.jsonl` + per-session `activity/*.jsonl`, merged by `readUnifiedEvents` | Audit, debugging, monitoring (human + machine) |
+| **`perf`** | **Latency rollups.** p50/p99 for hooks, CLI commands, and `agent.run` timings. Indexed SQLite — not a full scan of the audit log. | `~/.agents/.cache/perf/perf.db` (disposable) | Humans optimizing boot/run cost + `--json` |
 | **`feed`** | **Consolidated cross-agent surface.** Open blocks (decisions agents are waiting on) + `feed post` status updates — "what needs you / what are agents saying." | `.history/feed/*` + active sessions | Humans (operator inbox) + agents (progress) |
 | **`activity`** | **Human milestone timeline.** Recent plans / PRs / worktrees / sub-agents, newest-first — a friendly lens on the milestone tier of the event stream. | `activity/*.jsonl` | Human at the terminal |
 | **`output`** | **Productivity accounting.** Token burn vs shipped output (PRs, commits) across agents — the "was it worth it" axis. (`agents cost` is the pure $-and-duration sibling.) | `sessions.db` + git/gh | Human + `--json` |
 | **`sessions`** | **Live agent roster + transcripts.** Which agents are running right now and their state; browse/read past conversation transcripts. A live process probe + transcript index, not an event log. | live pid/transcript probe + `sessions.db` | Human + `--json` |
 
-The two write-stores behind these: `~/.agents/events.jsonl` (operational audit) and
-per-session `~/.agents/.history/activity/<id>.jsonl` (agent milestones). They are
-distinct on disk and merged only at read time by
-`event-stream.ts::readUnifiedEvents` — so `events` is the union, while `activity`
-is the milestone tier on its own.
+The write-stores: `~/.agents/events.jsonl` (operational audit), per-session
+`~/.agents/.history/activity/<id>.jsonl` (agent milestones), and the disposable
+perf warehouse `~/.agents/.cache/perf/perf.db` (latency samples). Audit + activity
+are merged at read time by `event-stream.ts::readUnifiedEvents`. Perf is a
+separate SQLite file — **loss is acceptable** (under `.cache/`); it does **not**
+foreign-key into `sessions.db`, but uses the same string shapes for
+`session_id` / `session_short` / `agent` / `machine` / `actor` / `cwd` so you can
+soft-join later.
 
 For the inspection/health cluster, `agents doctor` is the canonical detector of
 which resources are configured, synced, or drifted; `agents doctor --check` is its
 scriptable CI gate (exit non-zero on drift). See
 [§Fleet health & cross-device divergence](#fleet-health--cross-device-divergence-agents-doctor).
+
+## Performance warehouse (`agents perf`)
+
+Latency samples for optimization — **not** the audit log. Implementation:
+`apps/cli/src/lib/perf/db.ts`, CLI: `apps/cli/src/commands/perf.ts`.
+
+```
+agents perf                     # summary: commands + hooks + runs
+agents perf hooks               # same as agents hooks profile (SQLite-first)
+agents perf commands --days 30  # slowest CLI entrypoints
+agents perf run --json          # agent.run / perf.timing labels
+```
+
+| Producer | Kind | How it lands |
+|---|---|---|
+| CLI `postAction` | `command.end` | Direct `recordSample` (skips the `perf` command itself) |
+| `createTimer` / `time` / `timeAsync` / `withTiming` | `perf.timing` | Best-effort from `events.ts` |
+| Hook cache/matches shims | `hook.fire` | NDJSON spool → drained into SQLite on open |
+
+**Disable:** `AGENTS_DISABLE_PERF=1`. **Redirect (tests):** `AGENTS_PERF_DB`,
+`AGENTS_PERF_SPOOL`. Retention: samples older than 30 days are pruned
+opportunistically on open. Wipe anytime: `rm -rf ~/.agents/.cache/perf`.
 
 ## Audit Event Log (`agents events`)
 
@@ -683,6 +709,45 @@ Each post appends a `status.posted` **milestone** to
 **not** create a feed block. Domain facts (tickets, PRs) are not CLI flags;
 join them from the session index / live session enrichment at read time.
 
+#### `--blocked` — the same post, but the agent is stuck
+
+A plain post is history the moment it lands. `--blocked` says the agent
+**cannot proceed** and needs a human, so the ask has to stay open rather than
+scroll away:
+
+```bash
+agents feed post "force-push denied by git-guard on PR #1749" --blocked
+agents feed post "publish or wait for review?" --blocked --option publish --option wait
+agents feed post "delete the stale preview env?" --blocked --default "leave it"
+```
+
+It is a flag on the existing verb rather than a separate command: the feed is
+**one shared stream** where most posts are benign and some need a human, and one
+verb is one thing for an agent to learn.
+
+A blocked post writes to **both** stores:
+
+- `status.blocked` on the activity stream — *what happened*.
+- an **`OpenBlock`** in `~/.agents/.history/feed/` — *what is still open*, which
+  is what makes it answerable (`recordAnswer`, `agents message`) and clearable
+  (`recordContinued`). Without the ledger entry the ask would be indistinguishable
+  from any other update.
+
+**Blocked is a state, not a volume.** It always broadcasts at `important`, so an
+agent never picks a level as well — passing `--level` alongside `--blocked` is a
+usage error, not a silent override. The broadcast carries the ask plus the literal
+`agents focus <id>` command that unblocks it, so the message contains the one
+action the operator has to take.
+
+`--option <label>` (repeatable) records an answerable choice; `--default <answer>`
+makes the block an **approval** (a safe default policy may apply on no answer)
+instead of a **decision** (only a human can choose) — the distinction
+`feed-policy.ts` already keys off.
+
+**It fails loud.** A block that reaches no sink exits non-zero: a silently
+undelivered "needs you" is precisely the failure this exists to remove. One sink
+failing among several is only a warning, since the channels are redundant.
+
 - **`--attach <path-or-url…>` (repeatable).** Attach an artifact to the post. A
   **local file** is copied under
   `~/.agents/.history/attachments/<sessionId>/<updateId>/` so the reference survives
@@ -739,6 +804,15 @@ first attached URL on a second line. Prefer `{message}` for a messaging sink: it
 leads with the project the reader cares about and carries a clickable link,
 rather than opening with an agent name that tells them nothing.
 
+**Blocked posts add four more:** `{focus}` (the literal `agents focus <id>` command
+that unblocks the session), `{class}` (`approval` | `decision`), `{cost}` (the
+cost-of-delay tag), and `{block}` (the block id). For a blocked post `{message}`
+already appends the `{focus}` line, so a messaging sink needs no extra template
+work to carry the one action the reader must take. Note the placeholder grammar is
+lowercase-only (`/\{([a-z]+)\}/`), which is why the id is `{block}` and not
+`{blockId}` — a camelCase token would never substitute, and a template with an
+unsubstituted token is **skipped**, not sent with a hole in it.
+
 The **ticket is joined from the session index**, not passed as a flag — it is a
 domain fact about the session (the rule above), and an agent that has to remember
 a `--ticket` argument is an agent that will forget it. Attach the PR or a shared
@@ -752,28 +826,55 @@ must not cost the operator the post — it is already written.
 ### Activity lane (`agents activity`) — progress at a glance, fleet-wide
 
 `agents activity` reads the same append-only activity stream (never re-parsing
-transcripts) and, by opt-in, across the whole fleet:
+transcripts), across the whole fleet, bucketed by project:
 
 ```bash
-agents activity                                    # this machine, newest first (default)
-agents activity --devices-all --group-by project   # per project: what each agent did, where, for which ticket
-agents activity --host yosemite-s1                 # one box over SSH (--device is an alias)
-agents activity --devices-all --filter RUSH-2100   # one ticket, fleet-wide
-agents activity --milestones                       # only plans / PRs / worktrees / sub-agents
+agents activity                    # the whole fleet, by project (default)
+agents activity --local            # just this machine
+agents activity --flat             # one newest-first stream
+agents activity --host yosemite-s1 # one box over SSH (--device is an alias)
+agents activity --filter RUSH-2100 # one ticket, fleet-wide
+agents activity --group-by device  # by machine instead of project
+agents activity --milestones       # only plans / PRs / worktrees / sub-agents
 ```
 
-- **Fleet fan-out.** `--devices-all` (alias `--hosts-all`) runs the same
-  `activity --json` on every reachable device and merges each peer's stream
-  host-tagged (feed-style, via `gatherRemoteAgentsJson`); `-H/--host` / `--device`
-  scope to specific boxes; `--local` forces local-only. Local-only is the default.
-- **Grouping + filter.** `--group-by project|device|agent` buckets the stream;
-  `--filter <text>` narrows by project / device / agent / event / ticket. The flat
-  newest-first list stays the default.
+- **Fleet fan-out is the default.** Agents run on every box, so every invocation
+  runs the same `activity --json` on each reachable device and merges the peers'
+  streams host-tagged (feed-style, via `gatherRemoteAgentsJson`). `--local` scopes
+  to this machine, `-H/--host` / `--device` to named boxes; `--devices-all` /
+  `--hosts-all` remain accepted no-ops. A peer answering the fan-out carries the
+  `AGENTS_ACTIVITY_LOCAL` guard so it never re-fans out. Peers that don't answer
+  are named once in a trailing `· N devices unreachable: …` line — never dropped
+  silently, never a line each above the timeline.
+- **Grouping is by project by default.** `--group-by project|device|agent|none`
+  picks the dimension; `--flat` (or `--group-by none`) restores the single
+  newest-first stream. There is no sub-grouping: one level, and each project
+  header names the machines its work ran on
+  (`▸ agents-cli  12 events · 4 milestones · zion, yosemite-s0`, capped at three
+  names plus a `+N` tail). `--filter <text>` narrows by project / device / agent /
+  event / ticket.
+- **Projects are repositories.** A cwd resolves to the git repository containing
+  it (`resolveProjectKey`, `lib/project-key.ts`), so `<repo>/apps/cli` files under
+  `<repo>` and a worktree under `<repo>/.agents/worktrees/<slug>` folds back into
+  the repo it branched from. A directory in no repo groups as itself, and a
+  dotfiles repo at `$HOME` is deliberately not treated as a project. This is the
+  same fold the `agents sessions` overview groups by, so a project reads
+  identically in both. Each machine resolves its own paths — a peer stamps the
+  project before its events cross the wire.
+- **`--limit` caps milestones, not churn.** The default view collapses routine
+  `file.edited` work to a count, so `-n` bounds the milestones shown and the
+  routine events inside that window ride along for the counts
+  (`capActivityEvents`). Without this, one box editing 40 files hid every other
+  device's PRs behind a single `file edited ×40` line. `--all` shows routine work
+  inline and makes `-n` a plain event cap.
 - **Enrichment (the join, not transcript parsing).** Each item is joined to live
-  sessions for the **project** (repo/worktree slug from cwd), the **execution host**
-  (`provenance.host` — the box it actually runs on), and the **Linear ticket**
-  (`ActiveSession.ticket`). `--json` is a mergeable per-host payload carrying these
-  enriched fields.
+  sessions for the **project**, the **execution host** (`provenance.host` — the box
+  it actually runs on), and the **Linear ticket** (`ActiveSession.ticket`).
+  `--json` is a mergeable per-host payload carrying these enriched fields.
+- **Only failures of its own hooks are reported.** Registering the activity-log
+  hooks surfaces unrelated manifest problems (a missing `inject-session-id`
+  script, a half-installed plugin); those belong to `agents doctor` and are not
+  printed above the timeline.
 
 ### Live tail (`--watch`, `-f`) — the money shot
 

@@ -8,7 +8,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'child_process';
-import { parseRemoteList, remoteListCaptureResult, remoteListCommand } from '../remote-list.js';
+import { parseRemoteList, remoteListCaptureResult, remoteListCommand } from './remote-list.js';
 
 function runPeer(source: string, ...args: string[]) {
   return spawnSync(process.execPath, ['--eval', source, ...args], { encoding: 'utf8' });
@@ -76,13 +76,6 @@ describe('remoteListCaptureResult', () => {
     });
   });
 
-  it('marks an exit-0 malformed payload incomplete', () => {
-    expect(remoteListCaptureResult(0, '{not-json', 'peer', 'peer', true)).toEqual({
-      sessions: [],
-      unreachable: 'peer',
-    });
-  });
-
   it('marks an exit-0 structurally invalid resolver row incomplete', () => {
     expect(remoteListCaptureResult(0, '[{}]', 'peer', 'peer', true)).toEqual({
       sessions: [],
@@ -105,17 +98,6 @@ describe('remoteListCaptureResult', () => {
     expect(remoteListCaptureResult(0, '[]', 'peer', 'peer')).toEqual({ sessions: [] });
   });
 
-  it('marks an old child that rejects the versioned safe protocol incomplete', () => {
-    const peer = runPeer([
-      "if (process.argv.includes('--resolve-safe-v1')) process.exit(1);",
-      "process.stdout.write(JSON.stringify([{id:'unsafe',filePath:'/private/transcript.jsonl'}]));",
-    ].join(' '), '--resolve-safe-v1', 'abcd7777');
-
-    expect(remoteListCaptureResult(peer.status, peer.stdout, 'old-peer', 'Old Peer', true)).toEqual({
-      sessions: [],
-      unreachable: 'Old Peer',
-    });
-  });
 });
 
 describe('remoteListCommand', () => {

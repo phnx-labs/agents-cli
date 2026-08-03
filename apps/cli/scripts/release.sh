@@ -894,10 +894,19 @@ fi
 check_bucket() { jq -r --arg n "$1" 'map(select(.name==$n)) | (.[0].bucket // "missing")' <<<"$2"; }
 wait_for_ci_green() {
   local pr="$1" ctx b results problem=0
-  bold "Waiting for CI on PR #$pr (full matrix + test + gitleaks; up to 60m)..."
+  # Pin the wait to the PR's CURRENT head sha and poll the check-runs API for
+  # that exact commit. `gh pr checks` right after a force-update briefly still
+  # reports the PREVIOUS commit's all-green checks — an all-pass read then
+  # breaks the wait before the new commit's checks even register, and the
+  # final assertion dies on "missing" (the 1.20.91 release hit this loop four
+  # times). Per-sha check-runs can never serve that stale state.
+  local head_sha
+  head_sha="$(gh pr view "$pr" --json headRefOid -q .headRefOid)" || die "could not read PR #$pr head sha"
+  bold "Waiting for CI on PR #$pr @ ${head_sha:0:9} (full matrix + test + gitleaks; up to 60m)..."
   local deadline=$(( $(date +%s) + 3600 ))
   while :; do
-    results="$(gh pr checks "$pr" --json name,bucket 2>/dev/null || echo '[]')"
+    results="$(gh api "repos/{owner}/{repo}/commits/$head_sha/check-runs?per_page=100" \
+      --jq '[.check_runs[] | {name, bucket: (if .status != "completed" then "pending" elif (.conclusion == "success" or .conclusion == "skipped" or .conclusion == "neutral") then "pass" else "fail" end)}]' 2>/dev/null || echo '[]')"
     local waiting=0
     for ctx in "${EXPECTED_CHECKS[@]}"; do
       b="$(check_bucket "$ctx" "$results")"
@@ -907,7 +916,8 @@ wait_for_ci_green() {
     (( $(date +%s) > deadline )) && { red "Timed out after 60m waiting for CI on PR #$pr."; break; }
     sleep 20
   done
-  results="$(gh pr checks "$pr" --json name,bucket 2>/dev/null || echo '[]')"
+  results="$(gh api "repos/{owner}/{repo}/commits/$head_sha/check-runs?per_page=100" \
+    --jq '[.check_runs[] | {name, bucket: (if .status != "completed" then "pending" elif (.conclusion == "success" or .conclusion == "skipped" or .conclusion == "neutral") then "pass" else "fail" end)}]' 2>/dev/null || echo '[]')"
   for ctx in "${EXPECTED_CHECKS[@]}"; do
     b="$(check_bucket "$ctx" "$results")"
     [[ "$b" == "pass" ]] || { red "  $ctx: $b"; problem=1; }

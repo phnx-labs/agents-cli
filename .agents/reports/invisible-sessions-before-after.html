@@ -1,0 +1,193 @@
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Invisible sessions — before / after</title>
+<style>
+  :root{
+    --bg:#0a0a0a; --panel:#121212; --line:#242424;
+    --ink:#ededed; --dim:#9a9a9a; --accent:#a3e635;
+    --bad:#f87171; --good:#a3e635;
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    --sans:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#fbfbfa; --panel:#fff; --line:#e4e4e2; --ink:#16181d; --dim:#5c6070; --accent:#4d7c0f; }
+  }
+  :root[data-theme="dark"]{ --bg:#0a0a0a; --panel:#121212; --line:#242424; --ink:#ededed; --dim:#9a9a9a; --accent:#a3e635; }
+  :root[data-theme="light"]{ --bg:#fbfbfa; --panel:#fff; --line:#e4e4e2; --ink:#16181d; --dim:#5c6070; --accent:#4d7c0f; }
+
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.6;
+       -webkit-font-smoothing:antialiased}
+  .wrap{max-width:1000px;margin:0 auto;padding:48px 24px 96px}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin:0 0 12px}
+  h1{font-size:clamp(28px,4.4vw,44px);line-height:1.15;margin:0 0 16px;letter-spacing:-.02em}
+  .lede{font-size:18px;color:var(--dim);margin:0 0 28px;max-width:70ch}
+  h2{font-size:22px;margin:44px 0 14px;letter-spacing:-.01em}
+  h2 .num{font-family:var(--mono);color:var(--accent);font-size:15px;margin-right:10px}
+  p{max-width:74ch}
+  code{font-family:var(--mono);font-size:.9em;background:var(--panel);border:1px solid var(--line);
+       border-radius:4px;padding:1px 5px}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 26px;padding:0;list-style:none}
+  .chips li{font-family:var(--mono);font-size:11.5px;color:var(--dim);
+            border:1px solid var(--line);border-radius:999px;padding:4px 11px;background:var(--panel)}
+  .toggle{position:fixed;top:16px;right:16px;font-family:var(--mono);font-size:15px;cursor:pointer;
+          background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:999px;
+          width:36px;height:36px;line-height:1}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:20px 22px;margin:20px 0}
+  .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  table{border-collapse:collapse;width:100%;font-size:14px;min-width:560px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);font-weight:500}
+  td.m{font-family:var(--mono);font-size:13px}
+  .bad{color:var(--bad)} .good{color:var(--good)}
+  pre{font-family:var(--mono);font-size:12.5px;line-height:1.55;background:var(--panel);
+      border:1px solid var(--line);border-left:2px solid var(--accent);border-radius:8px;
+      padding:14px 16px;overflow-x:auto;margin:16px 0}
+  .callout{border-left:2px solid var(--accent);background:var(--panel);border-radius:0 8px 8px 0;
+           padding:14px 18px;margin:20px 0;color:var(--dim)}
+  .callout strong{color:var(--ink)}
+  figure{margin:26px 0}
+  figcaption{font-size:13px;color:var(--dim);margin-top:10px;font-family:var(--mono)}
+  .foot{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);
+        font-family:var(--mono);font-size:12px;color:var(--dim)}
+  svg{max-width:100%;height:auto;display:block}
+</style>
+
+<button class="toggle" id="t" aria-label="Toggle light and dark">◐</button>
+
+<div class="wrap">
+  <p class="kicker">agents-cli · sessions</p>
+  <h1>The ~100 invisible sessions</h1>
+  <p class="lede">You asked to see the change before it altered what you look at every day.
+  It already shipped, so this is the <strong>real</strong> before/after — measured on your
+  fleet, not a mockup.</p>
+
+  <ul class="chips">
+    <li>zion · 1.20.90</li>
+    <li>PR #1765 · merged</li>
+    <li>11 hosts upgraded</li>
+    <li>2026-08-03</li>
+  </ul>
+
+  <div class="callout">
+    <strong>Two separate root causes.</strong> The first is fixed, shipped, and running on
+    every reachable box. The second I found while verifying the first — it is why
+    <code>--resolve</code> still could not find a session, and it has its own fix in review.
+  </div>
+
+  <h2><span class="num">01</span>Cause one — panes folded onto one wrong id</h2>
+  <p><code>agents sessions --active</code> reported <strong>one row per working directory</strong>,
+  not one row per agent. Panes it could not identify were dropped at
+  <code>active.ts:1466</code>; the fallback then resolved every remaining pane in a directory
+  to the same newest transcript, and dedupe folded them together. A <code>×25</code> badge was
+  never one session with 25 processes — it was ~25 distinct sessions wearing one id.</p>
+
+  <figure>
+    <svg viewBox="0 0 900 210" role="img" aria-label="Before: 87 process ids collapse into 6 rows. After: 88 rows, one per agent.">
+      <text x="0" y="16" font-family="ui-monospace,monospace" font-size="12" fill="#9a9a9a">BEFORE — yosemite-s0</text>
+      <g>
+        <!-- 87 pids -->
+        <g fill="#f87171" opacity="0.75">
+          <!-- rows of small squares representing pids -->
+          <g id="pids">
+            <rect x="0" y="30" width="7" height="7" rx="1"/><rect x="10" y="30" width="7" height="7" rx="1"/><rect x="20" y="30" width="7" height="7" rx="1"/><rect x="30" y="30" width="7" height="7" rx="1"/><rect x="40" y="30" width="7" height="7" rx="1"/><rect x="50" y="30" width="7" height="7" rx="1"/><rect x="60" y="30" width="7" height="7" rx="1"/><rect x="70" y="30" width="7" height="7" rx="1"/><rect x="80" y="30" width="7" height="7" rx="1"/><rect x="90" y="30" width="7" height="7" rx="1"/><rect x="100" y="30" width="7" height="7" rx="1"/><rect x="110" y="30" width="7" height="7" rx="1"/><rect x="120" y="30" width="7" height="7" rx="1"/><rect x="130" y="30" width="7" height="7" rx="1"/><rect x="140" y="30" width="7" height="7" rx="1"/>
+            <rect x="0" y="42" width="7" height="7" rx="1"/><rect x="10" y="42" width="7" height="7" rx="1"/><rect x="20" y="42" width="7" height="7" rx="1"/><rect x="30" y="42" width="7" height="7" rx="1"/><rect x="40" y="42" width="7" height="7" rx="1"/><rect x="50" y="42" width="7" height="7" rx="1"/><rect x="60" y="42" width="7" height="7" rx="1"/><rect x="70" y="42" width="7" height="7" rx="1"/><rect x="80" y="42" width="7" height="7" rx="1"/><rect x="90" y="42" width="7" height="7" rx="1"/><rect x="100" y="42" width="7" height="7" rx="1"/><rect x="110" y="42" width="7" height="7" rx="1"/><rect x="120" y="42" width="7" height="7" rx="1"/><rect x="130" y="42" width="7" height="7" rx="1"/><rect x="140" y="42" width="7" height="7" rx="1"/>
+            <rect x="0" y="54" width="7" height="7" rx="1"/><rect x="10" y="54" width="7" height="7" rx="1"/><rect x="20" y="54" width="7" height="7" rx="1"/><rect x="30" y="54" width="7" height="7" rx="1"/><rect x="40" y="54" width="7" height="7" rx="1"/><rect x="50" y="54" width="7" height="7" rx="1"/><rect x="60" y="54" width="7" height="7" rx="1"/><rect x="70" y="54" width="7" height="7" rx="1"/><rect x="80" y="54" width="7" height="7" rx="1"/><rect x="90" y="54" width="7" height="7" rx="1"/><rect x="100" y="54" width="7" height="7" rx="1"/><rect x="110" y="54" width="7" height="7" rx="1"/><rect x="120" y="54" width="7" height="7" rx="1"/><rect x="130" y="54" width="7" height="7" rx="1"/><rect x="140" y="54" width="7" height="7" rx="1"/>
+            <rect x="0" y="66" width="7" height="7" rx="1"/><rect x="10" y="66" width="7" height="7" rx="1"/><rect x="20" y="66" width="7" height="7" rx="1"/><rect x="30" y="66" width="7" height="7" rx="1"/><rect x="40" y="66" width="7" height="7" rx="1"/><rect x="50" y="66" width="7" height="7" rx="1"/><rect x="60" y="66" width="7" height="7" rx="1"/><rect x="70" y="66" width="7" height="7" rx="1"/><rect x="80" y="66" width="7" height="7" rx="1"/><rect x="90" y="66" width="7" height="7" rx="1"/><rect x="100" y="66" width="7" height="7" rx="1"/><rect x="110" y="66" width="7" height="7" rx="1"/><rect x="120" y="66" width="7" height="7" rx="1"/><rect x="130" y="66" width="7" height="7" rx="1"/><rect x="140" y="66" width="7" height="7" rx="1"/>
+            <rect x="0" y="78" width="7" height="7" rx="1"/><rect x="10" y="78" width="7" height="7" rx="1"/><rect x="20" y="78" width="7" height="7" rx="1"/><rect x="30" y="78" width="7" height="7" rx="1"/><rect x="40" y="78" width="7" height="7" rx="1"/><rect x="50" y="78" width="7" height="7" rx="1"/><rect x="60" y="78" width="7" height="7" rx="1"/><rect x="70" y="78" width="7" height="7" rx="1"/><rect x="80" y="78" width="7" height="7" rx="1"/><rect x="90" y="78" width="7" height="7" rx="1"/><rect x="100" y="78" width="7" height="7" rx="1"/><rect x="110" y="78" width="7" height="7" rx="1"/><rect x="120" y="78" width="7" height="7" rx="1"/><rect x="130" y="78" width="7" height="7" rx="1"/><rect x="140" y="78" width="7" height="7" rx="1"/>
+            <rect x="0" y="90" width="7" height="7" rx="1"/><rect x="10" y="90" width="7" height="7" rx="1"/><rect x="20" y="90" width="7" height="7" rx="1"/><rect x="30" y="90" width="7" height="7" rx="1"/><rect x="40" y="90" width="7" height="7" rx="1"/><rect x="50" y="90" width="7" height="7" rx="1"/><rect x="60" y="90" width="7" height="7" rx="1"/><rect x="70" y="90" width="7" height="7" rx="1"/><rect x="80" y="90" width="7" height="7" rx="1"/><rect x="90" y="90" width="7" height="7" rx="1"/><rect x="100" y="90" width="7" height="7" rx="1"/><rect x="110" y="90" width="7" height="7" rx="1"/>
+          </g>
+        </g>
+        <text x="0" y="112" font-family="ui-monospace,monospace" font-size="11" fill="#9a9a9a">87 live pids</text>
+
+        <path d="M175 62 L232 62" stroke="#9a9a9a" stroke-width="1.5" marker-end="url(#a)"/>
+        <defs><marker id="a" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 z" fill="#9a9a9a"/></marker></defs>
+
+        <g>
+          <rect x="245" y="32" width="150" height="14" rx="3" fill="#f87171" opacity="0.85"/>
+          <rect x="245" y="50" width="150" height="14" rx="3" fill="#f87171" opacity="0.85"/>
+          <rect x="245" y="68" width="150" height="14" rx="3" fill="#f87171" opacity="0.85"/>
+          <rect x="245" y="86" width="150" height="14" rx="3" fill="#f87171" opacity="0.6"/>
+          <rect x="245" y="104" width="150" height="14" rx="3" fill="#f87171" opacity="0.6"/>
+          <rect x="245" y="122" width="150" height="14" rx="3" fill="#f87171" opacity="0.6"/>
+          <text x="245" y="152" font-family="ui-monospace,monospace" font-size="11" fill="#f87171">6 rows — all sharing one wrong id</text>
+        </g>
+      </g>
+
+      <g transform="translate(520,0)">
+        <text x="0" y="16" font-family="ui-monospace,monospace" font-size="12" fill="#9a9a9a">AFTER — same box, 1.20.90</text>
+        <g fill="#a3e635" opacity="0.9">
+          <rect x="0" y="30" width="150" height="7" rx="2"/><rect x="0" y="40" width="150" height="7" rx="2"/>
+          <rect x="0" y="50" width="150" height="7" rx="2"/><rect x="0" y="60" width="150" height="7" rx="2"/>
+          <rect x="0" y="70" width="150" height="7" rx="2"/><rect x="0" y="80" width="150" height="7" rx="2"/>
+          <rect x="0" y="90" width="150" height="7" rx="2"/><rect x="0" y="100" width="150" height="7" rx="2"/>
+          <rect x="0" y="110" width="150" height="7" rx="2"/><rect x="0" y="120" width="150" height="7" rx="2"/>
+          <rect x="0" y="130" width="150" height="7" rx="2"/>
+        </g>
+        <text x="0" y="152" font-family="ui-monospace,monospace" font-size="11" fill="#a3e635">88 rows — 84 at pidCount 1</text>
+      </g>
+    </svg>
+    <figcaption>Measured on yosemite-s0. Each red square is a live pid; each bar is a row you actually see.</figcaption>
+  </figure>
+
+  <p>What that looks like on the machine you sit at, after the upgrade:</p>
+<pre>zion — agents 1.20.90
+total rows:        120
+distinct sessionIds: 76
+pidCount histogram:  {1: 111, 2: 8, 3: 1}
+
+  2942e114 claude  pids=1 agents-cli
+  42a05ecd claude  pids=2 agents-cli   &lt;- this very session, correctly named
+  4b1a7f22 claude  pids=1 muqsit</pre>
+
+  <div class="callout">
+    <strong>Honest caveat.</strong> 41 of those 120 rows still carry no session id. They are
+    now <em>distinct rows</em> instead of dropped or merged under a wrong id — which is the fix
+    working — but a pane not launched under an <code>ag-*</code> tmux session still cannot be
+    named. Closing that is a follow-up, and #1765 never claimed it.
+  </div>
+
+  <h2><span class="num">02</span>Cause two — the box holding your session was never dialed</h2>
+  <p>With attribution fixed, <code>agents sessions --resolve 2373284d</code> still could not
+  find the session you asked me to resume — even though its transcript is sitting on
+  <code>yosemite-s1</code>. The sweep picks peers by the cached Tailscale snapshot, and that
+  field is wrong in <em>both</em> directions:</p>
+
+  <div class="scroll">
+  <table>
+    <tr><th>device</th><th>live probe</th><th>cached snapshot</th><th>sweep did</th></tr>
+    <tr><td class="m">yosemite-s1</td><td class="m good">reachable (manual)</td><td class="m bad">absent</td>
+        <td class="bad">skipped it — your session invisible</td></tr>
+    <tr><td class="m">pinnacles</td><td class="m bad">unreachable</td><td class="m bad">online: true</td>
+        <td class="bad">dialed it — false "unreachable"</td></tr>
+    <tr><td class="m">gpu-box</td><td class="m bad">unreachable</td><td class="m bad">online: true</td>
+        <td class="bad">dialed it — false "unreachable"</td></tr>
+  </table>
+  </div>
+
+  <p>A device registered <code>via: "manual"</code> never gets a Tailscale peer entry, so its
+  <code>online</code> is permanently <code>undefined</code> — and the filter tested
+  <code>=== true</code>. Meanwhile every false "unreachable" is treated as doubt, so
+  <code>--resolve</code> refuses to return a match it has already found. One line caused both.</p>
+
+  <p>The fresh probe verdict the fix now reads was <em>already being written</em> to the
+  registry by <code>agents devices</code> — nothing new to collect, it was just never consulted
+  by the sweep. Factory's picker had already learned this same lesson
+  (<code>deviceHealth.ts:47</code>); the CLI sweep had not.</p>
+
+  <div class="foot">
+    claude · session 42a05ecd · zion · agents-cli · 2026-08-03<br>
+    cause one: PR #1765, merged &amp; live on 11 hosts &nbsp;·&nbsp; cause two: fix/sessions-fanout-reachability, in review
+  </div>
+</div>
+
+<script>
+  (function(){
+    var b=document.getElementById('t'), r=document.documentElement;
+    b.addEventListener('click',function(){
+      var cur=r.getAttribute('data-theme');
+      if(!cur) cur=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';
+      r.setAttribute('data-theme', cur==='dark'?'light':'dark');
+    });
+  })();
+</script>

@@ -52,13 +52,18 @@ DEST="$DEST_DIR/menubar-helper-mac"
 cp "$SRC" "$DEST"
 
 # .app bundle. LSUIElement=true keeps it out of the Dock and the ⌘-Tab
-# switcher — it lives only in the menu bar. We skip notarization (a status item
-# has no Keychain ACL), but the helper DOES need a stable code identity: its
-# clip→paste feature (Clip.swift) synthesizes a ⌘-V keystroke, which requires an
-# Accessibility (TCC) grant, and macOS 26+ SIGKILLs an unsigned/invalid binary
-# at launch. Prefer a Developer ID identity — it survives npm's tarball
-# round-trip (an ad-hoc/linker signature gets stripped to "not signed at all",
-# which the install-time re-sign in install-menubar.ts then heals per machine).
+# switcher — it lives only in the menu bar. The helper DOES need a stable code
+# identity: its clip→paste feature (Clip.swift) synthesizes a ⌘-V keystroke,
+# which requires an Accessibility (TCC) grant, and macOS 26+ SIGKILLs an
+# unsigned/invalid binary at launch. Prefer a Developer ID identity — it
+# survives npm's tarball round-trip (an ad-hoc/linker signature gets stripped to
+# "not signed at all", which the install-time re-sign in install-menubar.ts then
+# heals per machine).
+#
+# Developer ID alone is no longer enough: Gatekeeper on macOS 26+ rejects an
+# un-notarized app as "damaged" and AppKit can crash during launch. Pass
+# MENUBAR_HELPER_NOTARIZE=1 and MENUBAR_HELPER_NOTARIZE_KEYCHAIN_PROFILE to
+# submit the .app to Apple and staple the ticket.
 APP="$DEST_DIR/MenubarHelper.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
@@ -109,6 +114,18 @@ fi
 echo "  signing with: $SIGN_ID"
 codesign --force --options runtime --sign "$SIGN_ID" --identifier com.phnx-labs.agents-menubar "$APP" 2>&1 | sed 's/^/  /'
 codesign --force --options runtime --sign "$SIGN_ID" --identifier com.phnx-labs.agents-menubar "$DEST" 2>&1 | sed 's/^/  /'
+
+if [ -n "${MENUBAR_HELPER_NOTARIZE:-}" ] && [ "$SIGN_ID" != "-" ]; then
+  PROFILE="${MENUBAR_HELPER_NOTARIZE_KEYCHAIN_PROFILE:-}"
+  if [ -z "$PROFILE" ]; then
+    echo "  ERROR: MENUBAR_HELPER_NOTARIZE set but MENUBAR_HELPER_NOTARIZE_KEYCHAIN_PROFILE is empty" >&2
+    exit 1
+  fi
+  echo "  notarizing $APP with keychain profile '$PROFILE'..."
+  xcrun notarytool submit "$APP" --keychain-profile "$PROFILE" --wait 2>&1 | sed 's/^/  /'
+  echo "  stapling ticket to $APP..."
+  xcrun stapler staple "$APP" 2>&1 | sed 's/^/  /'
+fi
 
 echo "built: $DEST"
 echo "built: $APP"

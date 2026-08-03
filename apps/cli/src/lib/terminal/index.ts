@@ -18,7 +18,16 @@ export type {
 } from './types.js';
 export { currentContext } from './types.js';
 
-export { BACKENDS, detectCurrentBackend, availableBackends, itermBackend, ghosttyBackend, tmuxBackend, vscodiumAgentBackend } from './backends/index.js';
+export { BACKENDS, detectCurrentBackend, availableBackends, itermBackend, ghosttyBackend, tmuxBackend, vscodiumAgentBackend, terminalAppBackend } from './backends/index.js';
+export {
+  SESSION_HOST_BACKENDS,
+  backendFromSessions,
+  resolveLaunchBackend,
+  describeBackendChoice,
+  type SessionHostSample,
+  type BackendSource,
+  type LaunchBackendChoice,
+} from './preferred.js';
 export { makeVscodiumAgentBackend, spawnUri, EDITOR_VARIANTS, type EditorVariant } from './backends/vscodium-agent.js';
 export { planLayouts, type Packing } from './policy.js';
 export {

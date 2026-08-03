@@ -6,6 +6,10 @@ import AppKit
 // has exactly one home — no section restates another.
 final class StatusItemController: NSObject, NSMenuDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    // The quick-dispatch bar (Cmd-Shift-O). Owned here so the menu's "New Task"
+    // row and the global chord summon the SAME panel — one panel means an
+    // interrupted capture is restored whichever way you come back to it.
+    let promptController = PromptPanelController()
     // Factory Floor status palette (design-system.css). Brand green is accent /
     // selection only — never a status. running/idle/waiting/failed are the four
     // status colors, shared with the full dashboard so this reads as its quick view.
@@ -135,11 +139,24 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// takes a suspensionBehavior, and this app is `.accessory` — never the
     /// active app — so the default behavior queues the notification instead of
     /// delivering it and the menu never opens.
-    @objc func surface() {
+    @objc func surface(_ note: Notification) {
         guard let button = statusItem.button else { return }
+        let info = note.userInfo as? [String: String] ?? [:]
+        // An agent/automation relaunched the helper (e.g. a coding agent running
+        // `agents menubar enable`). The human did not ask to see the menu, so
+        // re-home silently — popping the dropdown here steals the user's keyboard
+        // focus mid-task, the interruption this attribution was added to stop.
+        if info["automated"] == "1" {
+            let who = [info["agent"].map { "agent=\($0)" }, info["sessionId"].map { "session=\($0)" }]
+                .compactMap { $0 }.joined(separator: " ")
+            FileHandle.standardError.write(Data(
+                "MenubarHelper: automated relaunch (\(who.isEmpty ? "unknown" : who)) — re-homed silently, did not surface\n".utf8
+            ))
+            return
+        }
         // Logged: this is the one moment where a second launch changed what the
         // user sees, and the launchd plist routes stderr to menubar.log.
-        FileHandle.standardError.write(Data("MenubarHelper: surfacing menu for a duplicate launch\n".utf8))
+        FileHandle.standardError.write(Data("MenubarHelper: surfacing menu for a user relaunch\n".utf8))
         NSApp.activate(ignoringOtherApps: true)
         button.performClick(nil)
     }
@@ -359,7 +376,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         // whenever the triage strip has anything to say, not only when a session
         // is blocked.
         let attention = sessions.filter { $0.status == .attention }.count
-        let routinesFailing = routines.contains { $0.lastStatus == "failed" || $0.lastStatus == "timeout" || $0.overdue }
+        let routinesFailing = routines.contains { routineNeedsAttention($0) }
         let schedulerStopped = daemonPid == nil && !routines.isEmpty
         let needsYou = attention + (routinesFailing ? 1 : 0) + (schedulerStopped ? 1 : 0)
         let rich = isRich(attention: needsYou)
@@ -509,7 +526,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             rows.append(("⚠", wait, "Scheduler stopped — routines won’t run", sub))
         }
 
-        let bad = routines.filter { $0.lastStatus == "failed" || $0.lastStatus == "timeout" || $0.overdue }
+        let bad = routines.filter { routineNeedsAttention($0) }
         if bad.count == 1, let r = bad.first {
             let why = r.overdue ? "overdue" : (r.lastStatus ?? "failed")
             rows.append(("✕", fail, "Routine \(r.name) \(why)", allRoutinesSubmenu(bad)))
@@ -574,7 +591,15 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         return true
     }
 
+    // Two ways to start work, most-direct first:
+    //   New Task    — the quick-dispatch bar: type it, agents pick it up headless.
+    //   New Session — an interactive TUI in the terminal the user works in.
     private func addNewSession(_ menu: NSMenu) {
+        let task = NSMenuItem(title: "New Task…", action: #selector(onNewTask(_:)), keyEquivalent: "t")
+        task.target = self
+        task.toolTip = "Describe a task and dispatch it to agents (Cmd-Shift-O)"
+        menu.addItem(task)
+
         let newItem = NSMenuItem(title: "New Session", action: nil, keyEquivalent: "n")
         let newSub = NSMenu()
         for agent in LocalState.desiredAgents {
@@ -943,7 +968,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
 
         addSectionTitle(menu, "ROUTINES · \(summary)", color: .secondaryLabelColor)
-        let failing = routines.filter { $0.lastStatus == "failed" || $0.lastStatus == "timeout" || $0.overdue }
+        let failing = routines.filter { routineNeedsAttention($0) }
         let upcoming = routines
             .filter { r in r.enabled && !failing.contains(where: { $0.name == r.name }) && r.nextRun != nil }
             .sorted { ($0.nextRun ?? "") < ($1.nextRun ?? "") }
@@ -955,7 +980,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
         for r in failing {
             let why = routineFailureSummary(r, max: 48)
-            let row = statusRow("✕", fail, "\(r.name)  \(why)")
+            let row = statusRow(routineIsMiss(r) ? "⃠" : "✕", routineIsMiss(r) ? wait : fail, "\(r.name)  \(why)")
             row.submenu = routineSubmenu(r)
             menu.addItem(row)
         }
@@ -1089,7 +1114,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private func allRoutinesSubmenu(_ routines: [Routine]) -> NSMenu {
         let sub = NSMenu()
         for r in routines {
-            let mark = r.lastStatus == "failed" || r.lastStatus == "timeout" || r.overdue ? "! "
+            let mark = routineNeedsAttention(r) ? "! "
                 : (r.enabled ? "  " : "· ")
             let when = routineFailureDetail(r, max: 52) ?? (r.enabled ? (r.nextRunHuman ?? r.schedule) : "paused")
             let item = NSMenuItem(title: "\(mark)\(r.name)  \(when)", action: nil, keyEquivalent: "")
@@ -1172,6 +1197,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     // MARK: Actions
     @objc private func onNewSession(_ s: NSMenuItem) {
         if let a = s.representedObject as? String { AgentsCLI.newSession(agent: a) }
+    }
+    // "New Task…" — the same quick-dispatch bar the Cmd-Shift-O chord summons.
+    // Dispatched async because the menu owns the run loop while it is open: the
+    // panel can only take key focus once the menu has finished dismissing.
+    @objc private func onNewTask(_ s: NSMenuItem) {
+        DispatchQueue.main.async { [weak self] in self?.promptController.summon() }
     }
     // RUSH-1415: flip global auto-nudge. Optimistically update local state so the
     // checkmark reflects immediately; the next tick re-reads the sentinel as truth.
@@ -1307,13 +1338,27 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 }
 
+/// A routine the operator should look at: it failed, timed out, never ran when
+/// it was due (`missed`), or is overdue. One predicate rather than the same
+/// disjunction repeated at each call site, so a new status cannot be added to
+/// four of five checks.
+func routineNeedsAttention(_ r: Routine) -> Bool {
+    r.lastStatus == "failed" || r.lastStatus == "timeout" || r.lastStatus == "missed" || r.overdue
+}
+
+/// `missed` means the run never started — infrastructure, not a task failure —
+/// so it reads as a warning rather than a red error.
+func routineIsMiss(_ r: Routine) -> Bool {
+    r.lastStatus == "missed" || (r.overdue && r.lastStatus != "failed" && r.lastStatus != "timeout")
+}
+
 func routineFailureSummary(_ r: Routine, max: Int) -> String {
     if let detail = routineFailureDetail(r, max: max) { return detail }
     return r.overdue ? "overdue" : (r.lastStatus ?? "failed")
 }
 
 func routineFailureDetail(_ r: Routine, max: Int) -> String? {
-    let lastRunFailed = r.lastStatus == "failed" || r.lastStatus == "timeout"
+    let lastRunFailed = r.lastStatus == "failed" || r.lastStatus == "timeout" || r.lastStatus == "missed"
     guard lastRunFailed || r.overdue else { return nil }
     if let reason = r.failureReason?.trimmingCharacters(in: .whitespacesAndNewlines), !reason.isEmpty {
         return trimText(reason.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression), max)
