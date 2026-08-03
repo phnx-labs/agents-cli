@@ -34,6 +34,7 @@ const row = (over: Partial<SessionMeta> = {}): SessionMeta =>
 const base: BrowserFilter = {
   running: false,
   teams: false,
+  favorites: false,
   agent: undefined,
   device: undefined,
   projectScope: 'repo',
@@ -44,6 +45,10 @@ describe('browserFilterToArgv — the human↔agent contract', () => {
   it('an empty repo-scoped filter is just `sessions`', () => {
     // projectScope 'repo' is the default view, so it emits no flag.
     expect(browserFilterToArgv(base)).toEqual(['sessions']);
+  });
+
+  it('favorites-only maps to --favorites, so `y` round-trips a starred view', () => {
+    expect(browserFilterToArgv({ ...base, favorites: true })).toEqual(['sessions', '--favorites']);
   });
 
   it('running-only maps to --active', () => {
@@ -449,5 +454,28 @@ describe('shouldShowHostColumn — live-only, gated on the filter not the cache'
 
   it('stays off before the live index has been fetched', () => {
     expect(shouldShowHostColumn({ ...base, running: true }, null, rows)).toBe(false);
+  });
+});
+
+/**
+ * `buildInitialFilter` copies the seed field by field, and an omitted field is
+ * SILENT — the field is optional, so the compiler says nothing and the browser
+ * just opens without that filter. `team` was lost exactly this way. So each new
+ * field earns an assertion that it survives the copy, in both directions.
+ */
+describe('favorites survives the seed → filter copy', () => {
+  it('carries a seeded favorites flag into the live filter', () => {
+    expect(buildInitialFilter({ favorites: true }).favorites).toBe(true);
+  });
+
+  it('defaults to off, never undefined', () => {
+    expect(buildInitialFilter({}).favorites).toBe(false);
+  });
+
+  it('is reachable from both entry points\u0027 seeds', () => {
+    expect(bareBrowserSeed({ favorites: true }).favorites).toBe(true);
+    expect(activeBrowserSeed({ favorites: true }).favorites).toBe(true);
+    expect(bareBrowserSeed({}).favorites).toBe(false);
+    expect(activeBrowserSeed({}).favorites).toBe(false);
   });
 });
