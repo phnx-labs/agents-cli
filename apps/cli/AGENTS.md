@@ -490,7 +490,7 @@ macOS 26+ rejects an un-notarized `.app` as "damaged" (crashing AppKit at launch
 and the stapled ticket rides inside the bundle so it survives npm's tarball
 round-trip — so the installed helper launches with **no per-machine re-signing**
 (the old `install-menubar.ts` ad-hoc re-sign band-aid is gone; the launch guards now
-verify Gatekeeper acceptance and fail loud instead — RUSH-2114). Notarization is
+verify Gatekeeper acceptance and fail loud instead — RUSH-2134). Notarization is
 mandatory for any real (Developer-ID) build; an ad-hoc dev build can't be notarized
 and the prepack gate refuses to pack it. Keep it a **separate bundle** from the
 keychain app — a menu-bar crash must never take down the secret broker. Stage a

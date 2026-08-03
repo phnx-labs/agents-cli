@@ -208,7 +208,7 @@ describe('restartMenubarLaunchAgent', () => {
   });
 });
 
-// Regression guard for the "damaged app" bug (RUSH-2114): the shipped helper is
+// Regression guard for the "damaged app" bug (RUSH-2134): the shipped helper is
 // Developer-ID signed AND notarized (menubar/scripts/build.sh + the
 // verify-menubar-helper.sh prepack gate). A signature alone is NOT enough —
 // Gatekeeper rejects an un-notarized bundle as "damaged" on macOS 26+ — so the
