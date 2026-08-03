@@ -40,8 +40,10 @@ export async function listRegisteredDevices(): Promise<Device[]> {
   try {
     const bin = await resolveAgentsBin();
     // 20s, not 8s: on a loaded box the CLI's per-run startup alone can exceed
-    // 8s, and this feed is only ever on a background refresh path — the picker
-    // renders from the persisted snapshot, never waits on this.
+    // 8s. The host picker's render path never waits on this (it renders from
+    // the persisted snapshot and refreshes in the background); cold-start
+    // callers like the browse-device switcher and balanced-launch still await
+    // it directly, so the timeout stays bounded rather than removed.
     const { stdout } = await execFileAsync(bin, ['devices', 'list', '--json'], {
       timeout: 20_000,
       env: augmentedEnv(bin),

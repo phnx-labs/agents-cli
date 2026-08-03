@@ -100,7 +100,9 @@ describe('mergeHostPickerSnapshot', () => {
     const merged = mergeHostPickerSnapshot(prev, [], {}, NOW);
     expect(merged?.devices).toEqual(prev.devices);
     expect(merged?.usage).toEqual(prev.usage); // empty fresh usage must not wipe scores either
-    expect(merged?.fetchedAt).toBe(NOW);
+    // ...and it keeps the rows' TRUE age: a failed refresh must not stamp the
+    // snapshot fresh, or the age label lies and the staleness gate stops retrying.
+    expect(merged?.fetchedAt).toBe(prev.fetchedAt);
   });
 
   test('an empty fetch with fresh usage keeps rows but takes the new scores', () => {

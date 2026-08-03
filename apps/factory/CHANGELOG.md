@@ -15,9 +15,11 @@ All notable changes to the Factory extension are documented here. Format follows
   empty device list is a failed registry read, never a real empty fleet, so the
   refresh now folds through `mergeHostPickerSnapshot`: an empty fetch keeps the
   previous rows and scores, and with no confident data at all nothing is
-  persisted (the picker stays in cold-start mode and retries next open). The
-  registry read's timeout also goes 8s → 20s — it only ever runs on the
-  background path now, never on the render path. Source:
+  persisted (the picker stays in cold-start mode and retries next open), and the
+  snapshot keeps its true age so the rows' `updated Xm ago` label never claims a
+  failed refresh was fresh. The registry read's timeout also goes 8s → 20s — the
+  host picker's render path never waits on it (cold-start callers like the
+  browse-device switcher still do, bounded). Source:
   `apps/factory/src/core/hostPickerCache.ts` (`mergeHostPickerSnapshot`),
   `apps/factory/src/vscode/extension.ts` (`refreshHostPickerCache`),
   `apps/factory/src/vscode/deviceHealth.vscode.ts`.
