@@ -619,3 +619,34 @@ describe('the throttle guard covers every provider, not just Claude', () => {
     expect(usage.error ?? '').not.toContain('rate-limited this machine');
   });
 });
+
+describe('no response-status branch hides an unconditional return', () => {
+  // The defect this pins, found in review and not by any behavioural test:
+  // inserting a 429-recording block into Cursor's one-liner
+  // `if (!response.ok) return {...};` left a braceless `if`, so the error return
+  // escaped the condition and EVERY 200 would have failed the read. tsc compiled
+  // it without complaint.
+  //
+  // A behavioural test cannot reach that line — it needs a real 200 from a live
+  // provider, and this repo does not mock. So the assertion is structural: it
+  // reads the shipped source and fails against the pre-fix text, which is what a
+  // regression test has to do.
+  it('braces every `if (!response.ok)` in the usage fetches', () => {
+    const src = fs.readFileSync(new URL('./usage.ts', import.meta.url), 'utf-8');
+    const lines = src.split('\n');
+    const offenders: string[] = [];
+
+    lines.forEach((line, idx) => {
+      const m = line.match(/if\s*\(!response\.ok\)\s*(.*)$/);
+      if (!m) return;
+      const tail = m[1].trim();
+      // Either it opens a block, or it is a complete single statement on the
+      // same line. A bare `if (...) if (...) {` — the shape that shipped — is
+      // neither, and is what this catches.
+      const ok = tail === '{' || (tail.startsWith('return') && tail.endsWith(';'));
+      if (!ok) offenders.push(`usage.ts:${idx + 1}: ${line.trim()}`);
+    });
+
+    expect(offenders).toEqual([]);
+  });
+});

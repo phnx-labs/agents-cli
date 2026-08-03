@@ -148,19 +148,6 @@ export function usageRateLimitedUntil(agent: AgentId, now: number = Date.now()):
   return typeof until === 'number' && until > now ? until : null;
 }
 
-/**
- * Drop a provider's penalty. Called from each provider's success path — a 2xx
- * means the window is over — so the state file stays self-cleaning instead of
- * accumulating elapsed entries. Not load-bearing for correctness: an elapsed
- * entry already reads as free.
- */
-export function clearUsageRateLimit(agent: AgentId): void {
-  const state = readBackoff();
-  if (!(agent in state.until)) return;
-  delete state.until[agent];
-  writeBackoff(state);
-}
-
 /** Human-readable remaining backoff, for the error a skipped read returns. */
 export function formatBackoffRemaining(untilMs: number, now: number = Date.now()): string {
   const mins = Math.ceil((untilMs - now) / 60_000);
