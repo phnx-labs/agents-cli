@@ -19,25 +19,27 @@ All notable changes to the Factory extension are documented here. Format follows
   Source: `src/vscode/extension.ts`, `src/core/hostPickerCache.ts`,
   `src/vscode/remoteSessions.vscode.ts`.
 
-## [0.9.308] - 2026-08-03
-
 - **The host picker never goes empty again: a failed refresh keeps the rows you last saw.**
-  The 0.9.307 stale-while-revalidate picker persisted whatever the background
-  refresh returned — and on a loaded box, `agents devices list --json` exceeded
-  the extension's 8s spawn timeout, the catch returned `[]`, and that empty
-  result was written straight into `agents.hostPicker.v1`. The menu then opened
-  instantly (the cache did its job) showing only "This Mac" and "Balanced". An
-  empty device list is a failed registry read, never a real empty fleet, so the
-  refresh now folds through `mergeHostPickerSnapshot`: an empty fetch keeps the
-  previous rows and scores, and with no confident data at all nothing is
-  persisted (the picker stays in cold-start mode and retries next open), and the
-  snapshot keeps its true age so the rows' `updated Xm ago` label never claims a
-  failed refresh was fresh. The registry read's timeout also goes 8s → 20s — the
-  host picker's render path never waits on it (cold-start callers like the
+  (Landed after the 0.9.308 build was cut, so it ships in 0.9.309 despite the
+  entry living under that heading before.) The 0.9.307 stale-while-revalidate
+  picker persisted whatever the background refresh returned — and on a loaded
+  box, `agents devices list --json` exceeded the extension's 8s spawn timeout,
+  the catch returned `[]`, and that empty result was written straight into
+  `agents.hostPicker.v1`. The menu then opened instantly (the cache did its
+  job) showing only "This Mac" and "Balanced". An empty device list is a
+  failed registry read, never a real empty fleet, so the refresh now folds
+  through `mergeHostPickerSnapshot`: an empty fetch keeps the previous rows
+  and scores, and with no confident data at all nothing is persisted (the
+  picker stays in cold-start mode and retries next open), and the snapshot
+  keeps its true age so the rows' `updated Xm ago` label never claims a failed
+  refresh was fresh. The registry read's timeout also goes 8s → 20s — the host
+  picker's render path never waits on it (cold-start callers like the
   browse-device switcher still do, bounded). Source:
   `apps/factory/src/core/hostPickerCache.ts` (`mergeHostPickerSnapshot`),
   `apps/factory/src/vscode/extension.ts` (`refreshHostPickerCache`),
   `apps/factory/src/vscode/deviceHealth.vscode.ts`.
+
+## [0.9.308] - 2026-08-03
 
 - **`Agents: Fork (Recap)` starts a new sibling with context from a session you pick.**
   It reuses `Agents: Fork (Pick Session)`'s device-aware browser and launches on
