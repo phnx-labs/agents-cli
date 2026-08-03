@@ -27,6 +27,7 @@ import { registerSetupShareCommand, runShareWizard } from './setup-share.js';
 import { registerSetupMineCommand } from './setup-mine.js';
 import { registerSetupSecretsCommand } from './setup-secrets.js';
 import { registerSetupFleetCommand } from './setup-fleet.js';
+import { runPreferencesStep } from './setup-preferences.js';
 
 const HOME = os.homedir();
 
@@ -155,15 +156,6 @@ export async function runSetup(program: Command, options: { force?: boolean; sup
     console.log(chalk.gray(`Discovered ${dev.synced} device${dev.synced === 1 ? '' : 's'} on your tailnet (agents devices list).`));
   }
 
-  // Offer guided cross-machine session-sync provisioning (interactive, opt-in,
-  // and never blocking — any failure/decline falls through to the rest of setup).
-  try {
-    const { promptAndProvisionSessionSync } = await import('./sync-provision.js');
-    await promptAndProvisionSessionSync({ explicit: false });
-  } catch (err) {
-    console.log(chalk.yellow(`Session-sync setup skipped: ${(err as Error).message}`));
-  }
-
   // Offer to import existing unmanaged installations
   if (unmanaged.length > 0 && isInteractiveTerminal()) {
     console.log(chalk.bold('\nFound existing installations:\n'));
@@ -230,6 +222,11 @@ export async function runSetup(program: Command, options: { force?: boolean; sup
   // own guided flow. TTY-only and fully opt-in — a non-interactive `agents setup`
   // stops at the system-repo bootstrap above, unchanged.
   await runSetupHub();
+
+  // Preferences step: the two questions that keep agents off the wrong machine —
+  // which box you sit at (interactive host) and which browser agents drive here.
+  // TTY-only, skippable, and writes the same keys as `agents devices …`.
+  await runPreferencesStep();
 
   console.log(chalk.bold('\nSetup complete. Try:'));
   console.log(chalk.cyan('  agents view                 ') + chalk.gray(' # see what\'s installed'));
@@ -337,6 +334,9 @@ export function registerSetupCommand(program: Command): void {
         1. Clones the system repo into ~/.agents/.system/
         2. Imports any unmanaged agent installations it finds
         3. On a TTY, offers to set up optional capabilities (browser/computer/share/secrets/fleet)
+        4. On a TTY, asks preferences: which machine you sit at (interactive host)
+           and which browser agents drive here — both skippable, both the same
+           keys 'agents devices set-interactive' / 'browser profiles set-default' write
 
       Capability setup can also be run any time on its own:
         agents setup browser    # detect a browser + create the default profile

@@ -9,9 +9,7 @@ import {
 import type { BetaFeatureName } from '../lib/types.js';
 
 const BETA_DESCRIPTIONS: Record<BetaFeatureName, string> = {
-  drive: 'Google Drive integration for reading and writing files',
   factory: 'Cloud-based agent dispatch via Rush Factory',
-  'session-sync': 'Cross-machine session transcript sync via R2 (daemon push/pull)',
   projects: 'Named multi-repo projects with a progress rollup (agents projects)',
 };
 
@@ -29,12 +27,12 @@ function parseFeatures(values: string[]): BetaFeatureName[] {
 export function registerBetaCommands(program: Command): void {
   const beta = program
     .command('beta')
-    .description('Enable or disable preview features like drive and factory.')
+    .description('Enable or disable preview features like factory.')
     .addHelpText('after', `
 Examples:
   agents beta list
-  agents beta enable drive factory
-  agents beta disable drive
+  agents beta enable factory
+  agents beta disable factory
 `);
 
   beta

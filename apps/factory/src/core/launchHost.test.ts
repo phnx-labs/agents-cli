@@ -2,6 +2,8 @@ import { test, expect } from 'bun:test';
 import {
   pickLeastBusyDevice,
   pickBestHost,
+  cappedOutDevices,
+  noHostReason,
   deviceHasUsableVersion,
   hostScore,
   PREFERENCE_BONUS,
@@ -226,4 +228,69 @@ test('pickBestHost: preference does not override a genuinely swamped host', () =
       { name: 'free', online: true, running: 1, usableVersion: true },
     ]),
   ).toBe('free');
+});
+
+test('pickBestHost: a device at its agents.max-concurrent cap is excluded', () => {
+  expect(
+    pickBestHost([
+      { name: 'mac-mini', online: true, running: 2, maxConcurrent: 2 },
+      { name: 's0', online: true, running: 5 },
+    ]),
+  ).toBe('s0');
+});
+
+test('pickBestHost: uncapped devices (undefined) keep legacy behavior', () => {
+  expect(
+    pickBestHost([
+      { name: 'mac-mini', online: true, running: 2 },
+      { name: 's0', online: true, running: 5 },
+    ]),
+  ).toBe('mac-mini');
+});
+
+test('pickBestHost: under the cap stays eligible', () => {
+  expect(
+    pickBestHost([
+      { name: 'mac-mini', online: true, running: 1, maxConcurrent: 2 },
+      { name: 's0', online: true, running: 5 },
+    ]),
+  ).toBe('mac-mini');
+});
+
+test('pickBestHost: an all-capped pool returns null, and cappedOutDevices states the reason', () => {
+  const pool: DeviceLoad[] = [
+    { name: 'mac-mini', online: true, running: 4, maxConcurrent: 4 },
+    { name: 's0', online: true, running: 2, maxConcurrent: 2 },
+  ];
+  expect(pickBestHost(pool)).toBeNull();
+  expect(cappedOutDevices(pool).map((d) => d.name)).toEqual(['mac-mini', 's0']);
+  // An offline capped device is not part of the stated reason — it was never a candidate.
+  expect(
+    cappedOutDevices([...pool, { name: 'ghost', online: false, running: 9, maxConcurrent: 1 }]),
+  ).toHaveLength(2);
+});
+
+test('noHostReason: an all-capped pool names the caps first, even with an agentKey', () => {
+  // Regression: caps were checked AFTER the usable-version branch, so a capped
+  // pool with no signed-in version reported "go sign in" — the wrong fix.
+  const pool: DeviceLoad[] = [
+    { name: 'mac-mini', online: true, running: 4, maxConcurrent: 4, usableVersion: false },
+  ];
+  const reason = noHostReason(pool, 'claude');
+  expect(reason).toContain('agents.max-concurrent cap: mac-mini (4/4)');
+  expect(reason).toContain('agents devices configure <name> --max-agents N');
+  expect(reason).not.toContain('usable claude version');
+});
+
+test('noHostReason: no caps + agentKey → usable-version reason', () => {
+  const pool: DeviceLoad[] = [{ name: 's0', online: true, running: 0, usableVersion: false }];
+  expect(noHostReason(pool, 'claude')).toBe(
+    'no fleet device has a usable claude version (signed in and not rate-limited)',
+  );
+});
+
+test('noHostReason: nothing to say → null', () => {
+  expect(noHostReason([], 'claude')).toBeNull();
+  // No agentKey (agent-unaware caller) keeps the legacy silent fallback.
+  expect(noHostReason([{ name: 's0', online: true, running: 0 }])).toBeNull();
 });

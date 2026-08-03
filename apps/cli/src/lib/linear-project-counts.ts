@@ -7,6 +7,12 @@
  * TYPE (triage / backlog / unstarted / started / completed / canceled), never
  * hardcoded state names, same convention as `auto-dispatch-linear.ts`.
  *
+ * The same fetch also yields the **next milestone** — the earliest-dated
+ * milestone with unfinished issues — because each issue node carries its
+ * `projectMilestone`. A percentage tells you how far along a project is; the
+ * milestone tells you what it is due to hit next, which is the thing a person
+ * actually plans around. Deriving it here costs no extra request.
+ *
  * This is a best-effort card enrichment, not an explicit command: every failure
  * (no credential, offline, API error, timeout) degrades to `undefined` and the
  * card simply omits the line — never a hang, never a throw. `--no-remote`
@@ -31,6 +37,34 @@ const PAGE_SIZE = 250;
 /** Hard page cap so a pathological project can't page forever within the budget. */
 const MAX_PAGES = 10;
 
+/**
+ * The next checkpoint the project is working toward: the earliest-dated
+ * milestone that still has unfinished issues. A percentage says how far along
+ * the project is; this says what it is due to hit next.
+ */
+export interface LinearMilestone {
+  name: string;
+  /** `YYYY-MM-DD` as Linear stores it. Absent when the milestone has no date. */
+  targetDate?: string;
+  /** Issues in this milestone in a `completed`-type state. */
+  done: number;
+  /**
+   * Issues assigned to this milestone. Legitimately `0` — a milestone can be
+   * declared with a date long before any issue is filed under it (that is the
+   * state of every milestone in this repo's own Linear project), and such a
+   * milestone is still the next checkpoint. The card omits the fraction rather
+   * than printing a meaningless `0/0`.
+   */
+  total: number;
+}
+
+/** A milestone as the project declares it, independent of any issue. */
+export interface LinearMilestoneNode {
+  id?: string;
+  name?: string;
+  targetDate?: string | null;
+}
+
 /** The counts the card renders. `total` counts every issue in the project. */
 export interface LinearProjectCounts {
   /** Issues in a `completed`-type state. */
@@ -44,14 +78,29 @@ export interface LinearProjectCounts {
    * bound (rendered `2500+`), never presented as the complete count.
    */
   truncated?: boolean;
+  /**
+   * The next unfinished milestone, when the project has one. Derived from the
+   * SAME paged issue fetch as the counts — a milestone is only ever a grouping
+   * of these issues, so asking Linear again would spend a second round trip to
+   * learn what the first already said.
+   */
+  nextMilestone?: LinearMilestone;
+}
+
+/** One issue node as the query selects it. */
+export interface LinearIssueNode {
+  state?: { type?: string } | null;
+  projectMilestone?: { id?: string; name?: string; targetDate?: string | null } | null;
 }
 
 /** The GraphQL response shape this module consumes (recorded for the tests). */
 export interface LinearIssuesResponse {
   issues?: {
-    nodes?: Array<{ state?: { type?: string } | null }>;
+    nodes?: LinearIssueNode[];
     pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
   };
+  /** Only the FIRST page asks for this — the milestone list does not paginate. */
+  project?: { projectMilestones?: { nodes?: LinearMilestoneNode[] } } | null;
 }
 
 /**
@@ -68,7 +117,60 @@ export function countsFromIssuesResponse(data: LinearIssuesResponse): LinearProj
     if (type === 'completed') done++;
     else if (type === 'started') inProgress++;
   }
-  return { done, total: nodes.length, inProgress };
+  const counts: LinearProjectCounts = { done, total: nodes.length, inProgress };
+  const next = nextMilestone(data.project?.projectMilestones?.nodes ?? [], nodes);
+  if (next) counts.nextMilestone = next;
+  return counts;
+}
+
+/**
+ * Pick the milestone the project is working toward next.
+ *
+ * The **declared** list is authoritative for which milestones exist, their
+ * names, and their dates; issues only supply progress. Deriving the list from
+ * issues instead looks tempting (it costs no extra request) and is wrong: a
+ * milestone with nothing filed under it yet would be invisible, and that is the
+ * common case — every milestone in this repo's own Linear project has zero
+ * issues assigned, so an issue-derived list showed nothing at all.
+ *
+ * Next = the earliest-dated milestone that is not finished. A milestone with no
+ * issues counts as unfinished (it is upcoming work, not completed work). Undated
+ * milestones sort last, ties break by declaration order, so the answer is stable.
+ */
+export function nextMilestone(
+  declared: LinearMilestoneNode[],
+  nodes: LinearIssueNode[],
+): LinearMilestone | undefined {
+  // Progress per milestone id, from whatever issues do carry one.
+  const progress = new Map<string, { done: number; total: number }>();
+  for (const n of nodes) {
+    const id = n?.projectMilestone?.id;
+    if (!id) continue;
+    const p = progress.get(id) ?? { done: 0, total: 0 };
+    p.total++;
+    if (n.state?.type === 'completed') p.done++;
+    progress.set(id, p);
+  }
+  const candidates = declared
+    .map((d, order) => {
+      if (!d?.id || typeof d.name !== 'string' || !d.name) return undefined;
+      const p = progress.get(d.id) ?? { done: 0, total: 0 };
+      const m: LinearMilestone & { order: number } = { name: d.name, done: p.done, total: p.total, order };
+      if (d.targetDate) m.targetDate = d.targetDate;
+      return m;
+    })
+    .filter((m): m is LinearMilestone & { order: number } => m !== undefined)
+    // total 0 means "declared, nothing filed yet" — unfinished, not done.
+    .filter((m) => m.total === 0 || m.done < m.total);
+  if (candidates.length === 0) return undefined;
+  candidates.sort((a, b) => {
+    if (a.targetDate && b.targetDate) return a.targetDate < b.targetDate ? -1 : a.targetDate > b.targetDate ? 1 : a.order - b.order;
+    if (a.targetDate) return -1;
+    if (b.targetDate) return 1;
+    return a.order - b.order;
+  });
+  const { order: _order, ...m } = candidates[0];
+  return m;
 }
 
 /** $LINEAR_API_KEY → macOS Keychain → ~/.linear-cli/config.json. Null if none. */
@@ -99,12 +201,15 @@ export async function fetchLinearProjectCounts(
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
-    const all: Array<{ state?: { type?: string } | null }> = [];
+    const all: LinearIssueNode[] = [];
+    // Declared on the project, not on its issues — only page 0 asks for it.
+    let declared: LinearMilestoneNode[] = [];
     let after: string | undefined;
     let truncated = false;
     for (let page = 0; ; page++) {
       const data = await fetchPage(projectId, after, ctrl.signal);
       if (!data) return undefined;
+      if (page === 0) declared = data.project?.projectMilestones?.nodes ?? [];
       all.push(...(data.issues?.nodes ?? []));
       const pi = data.issues?.pageInfo;
       if (!pi?.hasNextPage || !pi.endCursor) break;
@@ -115,7 +220,13 @@ export async function fetchLinearProjectCounts(
       }
       after = pi.endCursor;
     }
-    return { ...countsFromIssuesResponse({ issues: { nodes: all } }), ...(truncated ? { truncated } : {}) };
+    return {
+      ...countsFromIssuesResponse({
+        issues: { nodes: all },
+        project: { projectMilestones: { nodes: declared } },
+      }),
+      ...(truncated ? { truncated } : {}),
+    };
   } catch {
     return undefined;
   } finally {
@@ -131,15 +242,25 @@ async function fetchLinearIssuesPage(
 ): Promise<LinearIssuesResponse | undefined> {
   const apiKey = resolveApiKey();
   if (!apiKey) return undefined;
+  // The declared-milestone list rides along on the FIRST page only — it does
+  // not paginate, and re-requesting it per page would spend up to MAX_PAGES
+  // copies of the same answer.
+  const issuesSelection =
+    'issues(filter:{ project:{ id:{ eq:$p } } }, first:' +
+    PAGE_SIZE +
+    ', after:$after){ nodes{ state{ type } projectMilestone{ id } } pageInfo{ hasNextPage endCursor } }';
+  const milestonesSelection = 'project(id:$pid){ projectMilestones(first:50){ nodes{ id name targetDate } } }';
+  const first = after === undefined;
   const res = await fetch(LINEAR_API, {
     method: 'POST',
     headers: { Authorization: apiKey, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      query:
-        'query($p:ID!, $after:String){ issues(filter:{ project:{ id:{ eq:$p } } }, first:' +
-        PAGE_SIZE +
-        ', after:$after){ nodes{ state{ type } } pageInfo{ hasNextPage endCursor } } }',
-      variables: { p: projectId, after: after ?? null },
+      query: first
+        ? `query($p:ID!, $pid:String!, $after:String){ ${issuesSelection} ${milestonesSelection} }`
+        : `query($p:ID!, $after:String){ ${issuesSelection} }`,
+      variables: first
+        ? { p: projectId, pid: projectId, after: null }
+        : { p: projectId, after },
     }),
     signal,
   });

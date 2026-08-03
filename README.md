@@ -350,7 +350,7 @@ agents feed --flat                  # one row per agent (legacy)
 agents feed --host mac-mini         # scope the view to one or more hosts
 agents feed --local                 # skip the SSH fan-out
 agents feed --json                  # blocks stamped with their outcome key
-agents feed post "halfway done"     # agent status post (auto session identity)
+agents feed post --title "Halfway done" "CI green, watching merge"  # title + body
 ```
 
 Top-level questions and waiting notifications publish one atomic open-block record per session, including the mailbox id, host, runtime, and every answer option. The default view collapses agents under the **outcome** they serve (Linear ticket, PR, worktree slug, or Unassigned) so a 1,100-agent fleet reads as dozens of deliverables. Answered, resumed, and stopped blocks clear automatically; Task subagents are excluded. The rendered reply command uses the same mailbox id with `agents message`, so the decision routes back to the agent that asked it.
@@ -485,6 +485,9 @@ agents devices list                     # fleet + headroom: load, mem, idle/busy
 agents devices list --live              # force a live probe of every device (alias of --refresh)
 agents devices list --full              # add per-device cores and free/total RAM
 agents devices list --no-stats          # instant: names/addresses only, skip the probe
+agents devices set-interactive zion     # the device agents show YOU artifacts on (★ in the list)
+agents devices configure mac-mini --max-agents 4 --scheduler off   # per-device config (syncs via devices/<name>/agents.yaml)
+agents devices note mac-mini "runs the releases — don't reboot"    # operator notes, repeat to append
 agents ssh mac-mini                     # hardened SSH: fails fast if offline,
                                         # PowerShell on Windows, password-from-Keychain,
                                         # auto-syncs your terminfo (Ghostty/kitty/…) so

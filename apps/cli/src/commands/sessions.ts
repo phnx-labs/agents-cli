@@ -57,7 +57,6 @@ import {
 } from './sessions-picker.js';
 import { setHelpSections } from '../lib/help.js';
 import { registerSessionsTailCommand } from './sessions-tail.js';
-import { registerSessionsSyncCommand } from './sessions-sync.js';
 import { registerSessionsResumeCommand } from './sessions-resume.js';
 import { registerSessionsFavoriteCommand } from './sessions-favorite.js';
 import { isFavorite, listFavorites } from '../lib/session/favorites.js';
@@ -4055,7 +4054,6 @@ export function registerSessionsCommands(program: Command): void {
   });
 
   registerSessionsTailCommand(sessionsCmd);
-  registerSessionsSyncCommand(sessionsCmd);
   registerSessionsResumeCommand(sessionsCmd);
   registerSessionsFavoriteCommand(sessionsCmd);
   registerGoCommand(sessionsCmd);

@@ -81,7 +81,7 @@ hooks:
     script: post-edit.sh               # filename in ~/.agents/hooks/
     events:
       - PostToolUse
-    timeout: 30                        # seconds; default 600
+    timeout: 30s                       # seconds, or a duration string (5s, 2m, 1h30m); default 600
     matcher: "Edit"                    # optional: tool name filter (PreToolUse/PostToolUse)
     matches:
       cwd_includes: /projects/myapp    # predicate: only fire in this path
@@ -105,7 +105,7 @@ hooks:
 |-------|------|----------|-------------|
 | `script` | string | yes | Filename of the shell script in `~/.agents/hooks/` (or system hooks dir) |
 | `events` | `string[]` | yes | One or more lifecycle events that trigger this hook |
-| `timeout` | number | no | Seconds before the hook is killed; default `600` |
+| `timeout` | number \| string | no | Time before the hook is killed; default `600`. A bare number is seconds; a duration string (`5s`, `2m`, `1h30m`) is also accepted and normalized to seconds |
 | `matcher` | string | no | Tool name substring filter for `PreToolUse`/`PostToolUse` events (Codex) |
 | `matches` | `HookMatches` | no | Predicate set; all predicates AND together |
 | `enabled` | boolean | no | Set `false` in user layer to disable a system-shipped hook of the same name |

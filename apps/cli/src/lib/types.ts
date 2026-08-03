@@ -71,7 +71,7 @@ export interface BudgetConfig {
 }
 
 /** Preview features that users can opt into via `agents beta`. */
-export type BetaFeatureName = 'drive' | 'factory' | 'session-sync' | 'projects';
+export type BetaFeatureName = 'factory' | 'projects';
 
 /** Subset of chalk color names used for agent-specific terminal output. */
 export type ChalkColor = 'magenta' | 'green' | 'blue' | 'cyan' | 'yellowBright' | 'redBright' | 'whiteBright' | 'blueBright' | 'greenBright' | 'magentaBright' | 'cyanBright';
@@ -300,6 +300,12 @@ export type HookCache = string | HookCacheConfig;
 export interface ManifestHook {
   script: string;
   events: string[];
+  /**
+   * Seconds before the hook is killed (default 600). In agents.yaml this may be
+   * written as a bare number (seconds) or a duration string (`5s`, `2m`,
+   * `1h30m`); `parseHookManifest` normalizes it to a seconds number here, so
+   * consumers always see a number.
+   */
   timeout?: number;
   matcher?: string;
   /** @deprecated Use the agent capability table; field is ignored. */
@@ -912,6 +918,22 @@ export interface Meta {
    * `agents browser profiles set-default <name>`.
    */
   defaultBrowserProfile?: string;
+  /**
+   * User-scope config block (`config:` in central agents.yaml). Holds the
+   * user-scope keys from the device-config registry (`lib/device-config.ts`) —
+   * today just `interactiveHost`. Syncs fleet-wide via `agents repo push/pull`.
+   * Device-scope keys live in {@link Meta.deviceConfig} instead.
+   */
+  config?: Record<string, unknown>;
+  /**
+   * Device-scope config block, carried in memory under a distinct field so it
+   * can never leak into the central (synced) agents.yaml: `writeMetaUnlocked`
+   * routes it to `~/.agents/devices/<machine>/agents.yaml` under the `config:`
+   * key (mirroring how `defaultBrowserProfile` is routed), and
+   * `overlayMachineLocal` reads it back. Holds the device-scope keys from the
+   * device-config registry (`maxAgents`, `schedulerEnabled`, `notes`). Per-machine by design — unset = today's behavior.
+   */
+  deviceConfig?: Record<string, unknown>;
   /**
    * Agent-host registry keyed by host name (`agents hosts`). Portable user
    * config synced with `agents repo push/pull`. For `ssh-config` hosts this is

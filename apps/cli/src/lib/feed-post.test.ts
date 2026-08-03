@@ -6,10 +6,13 @@ import {
   buildAttachment,
   buildAttachments,
   normalizeStatusText,
+  normalizeStatusTitle,
   postFeedStatus,
   resolvePostIdentity,
+  scrubDashes,
   walkPidRegistry,
   STATUS_POST_MAX_CHARS,
+  STATUS_TITLE_MAX_CHARS,
 } from './feed-post.js';
 import { readSessionActivity, tierForEvent } from './activity.js';
 import type { PidSessionEntry } from './session/pid-registry.js';
@@ -31,7 +34,7 @@ afterEach(() => {
   fs.rmSync(emptyDefsDir, { recursive: true, force: true });
 });
 
-describe('normalizeStatusText', () => {
+describe('normalizeStatusText / title', () => {
   it('collapses whitespace and rejects empty', () => {
     expect(normalizeStatusText('  hello   world  ')).toBe('hello world');
     expect(normalizeStatusText(' \n\t ')).toBe('');
@@ -41,6 +44,19 @@ describe('normalizeStatusText', () => {
     const long = 'x'.repeat(STATUS_POST_MAX_CHARS + 50);
     const out = normalizeStatusText(long);
     expect(out.length).toBe(STATUS_POST_MAX_CHARS);
+    expect(out.endsWith('…')).toBe(true);
+  });
+
+  it('scrubs em/en dashes from title and body', () => {
+    expect(scrubDashes('Halfway done \u2014 CI')).toBe('Halfway done - CI');
+    expect(normalizeStatusTitle('Force push \u2013 denied')).toBe('Force push - denied');
+    expect(normalizeStatusText('watching merge \u2014 then ship')).toBe('watching merge - then ship');
+  });
+
+  it('caps title length with an ellipsis', () => {
+    const long = 'w'.repeat(STATUS_TITLE_MAX_CHARS + 20);
+    const out = normalizeStatusTitle(long);
+    expect(out.length).toBe(STATUS_TITLE_MAX_CHARS);
     expect(out.endsWith('…')).toBe(true);
   });
 });
@@ -143,7 +159,8 @@ describe('postFeedStatus', () => {
   it('writes a status.posted milestone with auto identity', () => {
     const dir = tmpActivityDir();
     const { event } = postFeedStatus({
-      text: '  Track complete  ',
+      title: 'Track complete',
+      text: '  All three surfaces green  ',
       sessionId: 'sess-post-1',
       activityRoot: dir,
       env: {
@@ -161,7 +178,8 @@ describe('postFeedStatus', () => {
 
     expect(event.event).toBe('status.posted');
     expect(tierForEvent(event.event)).toBe('milestone');
-    expect(event.detail).toBe('Track complete');
+    expect(event.title).toBe('Track complete');
+    expect(event.detail).toBe('All three surfaces green');
     expect(event.sessionId).toBe('sess-post-1');
     expect(event.agent).toBe('grok');
     expect(event.runtime).toBe('teams');
@@ -174,13 +192,24 @@ describe('postFeedStatus', () => {
     const stored = readSessionActivity('sess-post-1', dir);
     expect(stored).toHaveLength(1);
     expect(stored[0].event).toBe('status.posted');
-    expect(stored[0].detail).toBe('Track complete');
+    expect(stored[0].title).toBe('Track complete');
+    expect(stored[0].detail).toBe('All three surfaces green');
     expect(stored[0].agent).toBe('grok');
     expect(stored[0].launchId).toBe('launch-1');
   });
 
+  it('throws on empty title', () => {
+    expect(() => postFeedStatus({
+      title: '   ',
+      text: 'body is fine',
+      sessionId: 's',
+      activityRoot: tmpActivityDir(),
+    })).toThrow(/Title is empty/i);
+  });
+
   it('throws on empty text', () => {
     expect(() => postFeedStatus({
+      title: 'Subject here',
       text: '   ',
       sessionId: 's',
       activityRoot: tmpActivityDir(),
@@ -189,6 +218,7 @@ describe('postFeedStatus', () => {
 
   it('throws when session cannot be resolved', () => {
     expect(() => postFeedStatus({
+      title: 'Hello',
       text: 'hello',
       activityRoot: tmpActivityDir(),
       env: {},
@@ -202,6 +232,7 @@ describe('postFeedStatus', () => {
   it('does not invent domain-specific meta fields', () => {
     const dir = tmpActivityDir();
     const { event } = postFeedStatus({
+      title: 'Done',
       text: 'done',
       sessionId: 'sess-no-meta',
       activityRoot: dir,
@@ -265,7 +296,8 @@ describe('postFeedStatus attachments + project', () => {
     fs.writeFileSync(wav, 'RIFF');
 
     const { event } = postFeedStatus({
-      text: 'listen',
+      title: 'Listen',
+      text: 'take ready for review',
       sessionId: 'sess-attach',
       activityRoot: dir,
       attachmentsRoot: store,
@@ -300,7 +332,8 @@ describe('postFeedStatus attachments + project', () => {
     process.env.AGENTS_PROJECTS_DIR = defsDir;
     try {
       const { event } = postFeedStatus({
-        text: 'mastered',
+        title: 'Mastered',
+        text: 'final mix landed',
         sessionId: 'sess-canonical',
         activityRoot: dir,
         cwd: path.join(repo, 'apps', 'studio'),
@@ -319,7 +352,8 @@ describe('postFeedStatus attachments + project', () => {
   it('omits attachments when none given', () => {
     const dir = tmpActivityDir();
     const { event } = postFeedStatus({
-      text: 'no attachments',
+      title: 'No attachments',
+      text: 'plain status only',
       sessionId: 'sess-noattach',
       activityRoot: dir,
       cwd: '/repo/foo',

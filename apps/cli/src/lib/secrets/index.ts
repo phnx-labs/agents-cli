@@ -781,11 +781,10 @@ export function rekeyStatus(): {
  * Throws when the item cannot be reached — on macOS, when the signed helper is
  * unavailable. That is deliberate: this primitive gates destructive writes as
  * well as reads. Through `bundleExists()` it guards the `--force` overwrite
- * checks in `agents secrets create` (`../../commands/secrets.ts`), the
- * bundle-rename purge (`./bundles.ts`), the pull-rollback bookkeeping
- * (`./sync.ts`), and the reuse-never-overwrite rule for `R2_SYNC_ENC_KEY`
- * (`../session/sync/provision.ts`). A false "absent" silently disarms every one
- * of them, so an unreachable keychain must fail loudly rather than answer "no".
+ * checks in `agents secrets create` (`../../commands/secrets.ts`) and the
+ * bundle-rename purge (`./bundles.ts`), and the pull-rollback bookkeeping
+ * (`./sync.ts`). A false "absent" silently disarms every one of them, so an
+ * unreachable keychain must fail loudly rather than answer "no".
  *
  * Tests needing this path without a helper install a backend via
  * `setKeychainBackendForTest()`, which short-circuits on the next line.

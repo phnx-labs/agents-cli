@@ -13,7 +13,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { getDaemonDir as getDaemonDirRoot } from './state.js';
 import { isAlive, killTree, backgroundSpawnOptions, waitForExit } from './platform/index.js';
-import { listJobs as listAllJobs } from './routines.js';
+import { listJobs as listAllJobs, type JobConfig } from './routines.js';
 import { syncAllProjectRoutines } from './routines-project.js';
 import { JobScheduler } from './scheduler.js';
 import { MonitorEngine } from './monitors/engine.js';
@@ -25,6 +25,7 @@ import { BrowserService } from './browser/service.js';
 import { BrowserIPCServer } from './browser/ipc.js';
 import { redactSecrets } from './redact.js';
 import { getAgentsBinPath, getCliLaunch, BUN_VIRTUAL_ROOT } from './cli-entry.js';
+import { isSchedulerEnabled, assertSchedulerEnabled } from './device-config.js';
 
 const PID_FILE = 'daemon.pid';
 const LOCK_FILE = 'daemon.lock';
@@ -55,6 +56,24 @@ const WEDGE_THRESHOLD_TICKS = 3;
  */
 export function shouldTakeOverBroker(isHosting: boolean, brokerReachable: boolean): boolean {
   return !isHosting && !brokerReachable;
+}
+
+/**
+ * What a gate re-evaluation must do with the routines scheduler. The daemon
+ * re-evaluates `scheduler.enabled` on every SIGHUP reload so flipping the key
+ * takes effect without a daemon restart (and `routines add`'s reload signal on
+ * a re-enabled box boots the scheduler — the reload is truthful, not a no-op).
+ *
+ *   running + enabled   → reload (the normal SIGHUP path)
+ *   running + !enabled  → stop  (gate flipped off since boot)
+ *   !running + enabled  → boot  (gate flipped on since boot)
+ *   !running + !enabled → none  (stay dark)
+ */
+export type SchedulerGateTransition = 'reload' | 'stop' | 'boot' | 'none';
+
+export function schedulerGateTransition(running: boolean, enabled: boolean): SchedulerGateTransition {
+  if (running) return enabled ? 'reload' : 'stop';
+  return enabled ? 'boot' : 'none';
 }
 
 function getDaemonDir(): string {
@@ -397,7 +416,7 @@ export async function runDaemon(): Promise<void> {
   }
 
   // #416: host the secrets broker socket-first — before the scheduler and the
-  // heavy browser/session-sync services — so `agents secrets` resolves within
+  // heavy browser services — so `agents secrets` resolves within
   // ms of daemon start. Only host when no broker is already reachable, so we
   // never orphan a live standalone broker's clients (that broker stays the
   // server until it idle-exits or the daemon restarts). Best-effort: a failure
@@ -416,7 +435,23 @@ export async function runDaemon(): Promise<void> {
     log('WARN', `Secrets broker host skipped: ${(err as Error).message}`);
   }
 
-  const scheduler = new JobScheduler(async (config) => {
+  // scheduler.enabled=false in this machine's device doc means NO routines fire
+  // here — the scheduler and its catchup recovery simply never start, while the
+  // daemon keeps its other duties (secrets broker, browser IPC, session sync).
+  // The refusal message is the same one the start surfaces
+  // (`routines add` auto-start, manual `routines start`) raise. The gate is
+  // re-evaluated on every SIGHUP reload (handleReload below) via
+  // schedulerGateTransition, so flipping the key never needs a daemon restart.
+  const schedulerEnabledAtBoot = isSchedulerEnabled();
+  if (!schedulerEnabledAtBoot) {
+    try {
+      assertSchedulerEnabled();
+    } catch (err) {
+      log('WARN', (err as Error).message);
+    }
+  }
+
+  const triggerJob = async (config: JobConfig) => {
     const jobLabel = config.command
       ? 'command'
       : config.workflow
@@ -445,7 +480,39 @@ export async function runDaemon(): Promise<void> {
       // "Routine started" and never told it failed.
       try { notifyRoutineStartFailed(config, message); } catch { /* best-effort */ }
     }
-  });
+  };
+
+  let scheduler: JobScheduler | null = null;
+  let catchupInterval: NodeJS.Timeout | undefined;
+  // Catchup overlap guard. Declared up here (not beside catchupPass) because
+  // bootScheduler() runs before catchupPass's textual position — a `let` down
+  // there would still be in its TDZ at the first call and crash the daemon.
+  let catchingUp = false;
+
+  // Boot the scheduler + catchup recovery. Called at daemon start when the gate
+  // allows, and again from handleReload when the gate flips on (function
+  // declarations hoist — catchupPass below is in scope).
+  function bootScheduler(): void {
+    scheduler = new JobScheduler(triggerJob);
+    scheduler.loadAll();
+    const scheduled = scheduler.listScheduled();
+    log('INFO', `Loaded ${scheduled.length} jobs`);
+    for (const job of scheduled) {
+      log('INFO', `  ${job.name} -> next: ${job.nextRun?.toISOString() || 'unknown'}`);
+    }
+    void catchupPass();
+    catchupInterval = setInterval(() => { void catchupPass(); }, CATCHUP_TICK_MS);
+  }
+
+  // Stop the scheduler + catchup recovery (gate flipped off on reload).
+  function stopScheduler(): void {
+    scheduler?.stopAll();
+    scheduler = null;
+    if (catchupInterval !== undefined) {
+      clearInterval(catchupInterval);
+      catchupInterval = undefined;
+    }
+  }
 
   // Materialise opted-in project routines into the user layer on every start
   // so a fresh daemon picks up project YAML without a separate sync step.
@@ -457,12 +524,7 @@ export async function runDaemon(): Promise<void> {
     log('WARN', `Project routines sync failed: ${(err as Error).message}`);
   }
 
-  scheduler.loadAll();
-  const scheduled = scheduler.listScheduled();
-  log('INFO', `Loaded ${scheduled.length} jobs`);
-  for (const job of scheduled) {
-    log('INFO', `  ${job.name} -> next: ${job.nextRun?.toISOString() || 'unknown'}`);
-  }
+  if (schedulerEnabledAtBoot) bootScheduler();
 
   // Monitor engine: event-triggered watchers, beside the cron scheduler. Same
   // daemon, same dispatch seam — a monitor is a routine whose trigger is a
@@ -483,15 +545,16 @@ export async function runDaemon(): Promise<void> {
   // `catchup: false`, RUN late. Runs on a timer as well as at startup: a startup
   // pass alone misses a fire lost while the daemon stayed up but its event loop
   // was wedged, or one lost across an OS suspend that the process survived.
-  // Overlap guard, same shape as runSessionSync/runHealCheck below. A pass
+  // Overlap guard, same shape as runHealCheck below. A pass
   // awaits executeJobDetached per job and an off-box (host/cloud) dispatch can
   // block for a while, so a slow pass could still be working when the next tick
   // fires. Both passes would then see a job the first has not yet reached as
   // overdue — the miss is recorded before the await, but only for jobs already
   // processed — and spawn it twice. The idempotency of the `missed` record
   // guards across passes, not within one that is mid-flight.
-  let catchingUp = false;
-  const catchupPass = async (): Promise<void> => {
+  // Function declaration (hoisted) so bootScheduler() can schedule it. Its
+  // guard (`catchingUp`) is declared beside `scheduler` above for TDZ safety.
+  async function catchupPass(): Promise<void> {
     if (catchingUp) return;
     catchingUp = true;
     try {
@@ -537,9 +600,7 @@ export async function runDaemon(): Promise<void> {
       // throw must not leave the guard latched shut for the daemon's lifetime.
       catchingUp = false;
     }
-  };
-  await catchupPass();
-  const catchupInterval = setInterval(() => { void catchupPass(); }, CATCHUP_TICK_MS);
+  }
 
   // Before the BrowserService comes up, reap browser + tunnel processes
   // spawned by previous daemons that are no longer alive. Without this,
@@ -572,37 +633,6 @@ export async function runDaemon(): Promise<void> {
     writeHeartbeat();
     monitorRunningJobs();
   }, MONITOR_TICK_MS);
-
-  // Cross-machine session sync: push this machine's transcripts to R2 and pull
-  // every other machine's, ~every 90s. Skipped silently when the r2.backups
-  // bundle is absent. An overlap guard prevents a slow cycle from stacking.
-  let syncing = false;
-  const runSessionSync = async () => {
-    if (syncing) return;
-    syncing = true;
-    try {
-      const { isBetaEnabled } = await import('./beta.js');
-      // Off by default: session sync is an opt-in beta feature. Check the beta
-      // flag FIRST so a machine that hasn't opted in skips the keychain read
-      // (isSyncConfigured) entirely, not just the network cycle.
-      if (!isBetaEnabled('session-sync')) return;
-      const { isSyncConfigured } = await import('./session/sync/config.js');
-      if (!isSyncConfigured()) return;
-      const { syncSessions } = await import('./session/sync/sync.js');
-      const r = await syncSessions();
-      if (r.pushed || r.pulled || r.errors.length) {
-        log('INFO', `sessions sync: pushed ${r.pushed}, pulled ${r.pulled}, merged ${r.merged}` +
-          (r.errors.length ? `, ${r.errors.length} error(s): ${r.errors[0]}` : ''));
-      }
-      if (r.warnings.length) log('WARN', `sessions sync: ${r.warnings[0]}`);
-    } catch (err) {
-      log('ERROR', `sessions sync failed: ${(err as Error).message}`);
-    } finally {
-      syncing = false;
-    }
-  };
-  const syncInterval = setInterval(() => { void runSessionSync(); }, 90_000);
-  void runSessionSync(); // kick once at startup
 
   // Resource safety check: heal gaps between what DotAgents repos define and
   // what's actually installed in each agent home — the slow rot that nothing
@@ -839,27 +869,35 @@ export async function runDaemon(): Promise<void> {
     } catch (err) {
       log('WARN', `Project routines sync failed: ${(err as Error).message}`);
     }
-    scheduler.reloadAll();
-    const reloaded = scheduler.listScheduled();
-    log('INFO', `Reloaded ${reloaded.length} jobs`);
+    // Re-evaluate the scheduler.enabled gate: flipping the key takes effect on
+    // this reload, no daemon restart needed. A `routines add` on a re-enabled
+    // box signals exactly this reload, which boots the scheduler — the
+    // "Scheduler reloaded" it prints is then truthful, not a dead-end.
+    const transition = schedulerGateTransition(scheduler !== null, isSchedulerEnabled());
+    if (transition === 'boot') {
+      log('INFO', 'scheduler.enabled is now on — booting the scheduler');
+      bootScheduler();
+    } else if (transition === 'stop') {
+      log('WARN', 'scheduler.enabled is now off — stopping the scheduler; no routines will fire on this device');
+      stopScheduler();
+    } else if (transition === 'reload') {
+      scheduler!.reloadAll();
+      const reloaded = scheduler!.listScheduled();
+      log('INFO', `Reloaded ${reloaded.length} jobs`);
+    }
     try {
       monitorEngine.reload();
     } catch (err) {
       log('ERROR', `Monitor engine reload failed: ${(err as Error).message}`);
     }
-    // Drop the memoized R2 config so rotated/added sync credentials are re-read
-    // on the next cycle instead of waiting for a restart.
-    void import('./session/sync/config.js').then(m => m.clearR2ConfigCache());
   };
 
   const handleShutdown = async () => {
     log('INFO', 'Daemon shutting down');
-    scheduler.stopAll();
+    stopScheduler();
     monitorEngine.stop();
     await browserIPC.stop();
     clearInterval(monitorInterval);
-    clearInterval(catchupInterval);
-    clearInterval(syncInterval);
     clearInterval(healInterval);
     clearTimeout(healKickoff);
     clearInterval(autoDispatchInterval);

@@ -246,9 +246,24 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
     }
 
+    /// How often the System row's `doctor --json` may be refreshed.
+    ///
+    /// This was 60s against a command measured at **136s** on an idle machine —
+    /// i.e. the poll asked for a refresh more than twice as often as one could
+    /// possibly complete, so the helper ran a doctor essentially continuously.
+    /// (The in-flight guard kept it to one *per process*, which is why the
+    /// unbounded child and the crash-restart loop were needed to turn this into
+    /// the 38-orphan runaway — but a ~100% duty cycle was always the floor.)
+    ///
+    /// 15 minutes is matched to what the data actually is: installed CLIs,
+    /// per-version sign-in, and resource sync drift change on the timescale of a
+    /// person running `agents sync` or logging in, not second to second. That
+    /// takes the duty cycle from ~100% of one core to ~15%.
+    private static let doctorRefreshInterval: TimeInterval = 15 * 60
+
     private func refreshDoctorOverview() {
         if doctorInFlight { return }
-        if let t = doctorFetchedAt, Date().timeIntervalSince(t) < 60 { return }
+        if let t = doctorFetchedAt, Date().timeIntervalSince(t) < Self.doctorRefreshInterval { return }
         doctorInFlight = true
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let d = AgentsCLI.doctorOverview()

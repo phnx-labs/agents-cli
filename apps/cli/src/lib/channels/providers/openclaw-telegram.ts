@@ -26,7 +26,7 @@ export const openclawTelegramProvider: ChannelProvider = {
       return { ok: false, channel: name, id: opts.target, error: 'openclaw CLI not found on PATH' };
     }
     try {
-      await execFileAsync('openclaw', buildOpenClawNotifyArgs(text, { channel: 'telegram', target: opts.target }));
+      await execFileAsync('openclaw', buildOpenClawNotifyArgs(text, { target: opts.target }));
       return { ok: true, channel: name, id: opts.target };
     } catch (err) {
       return { ok: false, channel: name, id: opts.target, error: (err as Error).message };

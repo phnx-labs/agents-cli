@@ -13,7 +13,8 @@ import {
 } from './feed-broadcast.js';
 
 const ctx = (over: Partial<FeedBroadcastContext> = {}): FeedBroadcastContext => ({
-  text: 'PR #1690 open, CI green, merging',
+  title: 'CI green, merging',
+  text: 'PR #1690 open, waiting on prix-cloud',
   level: 'milestone',
   project: 'agents-cli',
   agent: 'claude',
@@ -47,7 +48,7 @@ describe('sink argv rendering', () => {
     );
     expect(argv).toEqual([
       'linear', 'update', 'RUSH-2081',
-      '--comment', 'agents-cli: PR #1690 open, CI green, merging',
+      '--comment', 'agents-cli: PR #1690 open, waiting on prix-cloud',
     ]);
   });
 
@@ -64,17 +65,66 @@ describe('sink argv rendering', () => {
 });
 
 describe('message composition', () => {
-  it('leads with the project and appends the link', () => {
+  it('title, blank line, body, Sent from footer, then link', () => {
     expect(composeBroadcastMessage(ctx({ links: ['https://github.com/phnx-labs/agents-cli/pull/1690'] })))
-      .toBe('agents-cli · PR #1690 open, CI green, merging\nhttps://github.com/phnx-labs/agents-cli/pull/1690');
+      .toBe(
+        'CI green, merging\n' +
+          '\n' +
+          'PR #1690 open, waiting on prix-cloud\n' +
+          '\n' +
+          'Sent from claude/c854ae60 on yosemite-s1\n' +
+          'https://github.com/phnx-labs/agents-cli/pull/1690',
+      );
   });
 
-  it('omits the link line when no URL is attached', () => {
-    expect(composeBroadcastMessage(ctx())).toBe('agents-cli · PR #1690 open, CI green, merging');
+  it('scrubs em-dashes from title and body', () => {
+    const msg = composeBroadcastMessage(
+      ctx({
+        title: 'Halfway done — CI',
+        text: 'watching merge — then ship',
+        agent: 'grok',
+        host: 'mac-mini',
+        session: 'a02da0e2-a8c0-455f-95c3-12f75f16579f',
+      }),
+    );
+    expect(msg).not.toMatch(/\u2014|\u2013/);
+    expect(msg).toContain('Halfway done - CI');
+    expect(msg).toContain('watching merge - then ship');
+    expect(msg).toContain('Sent from grok/a02da0e2 on mac-mini');
   });
 
-  it('ignores a local file attachment as a link target', () => {
-    expect(composeBroadcastMessage(ctx({ links: [] }))).not.toContain('\n');
+  it('falls back to body-only when there is no title', () => {
+    expect(
+      composeBroadcastMessage(
+        ctx({ title: undefined, text: 'legacy body only', agent: undefined, host: undefined, session: undefined }),
+      ),
+    ).toBe('legacy body only');
+  });
+
+  it('footer skips the uninformative default agent label', () => {
+    const msg = composeBroadcastMessage(
+      ctx({ agent: 'agent', host: 'mac-mini', session: 'aabbccdd-1111-2222-3333-444444444444' }),
+    );
+    expect(msg).toContain('Sent from aabbccdd on mac-mini');
+    expect(msg).not.toContain('Sent from agent/');
+  });
+
+  it('appends focus after the Sent from footer for blocks', () => {
+    const msg = composeBroadcastMessage(
+      ctx({
+        focus: 'agents focus c854ae60',
+        links: ['https://example.com/p'],
+      }),
+    );
+    expect(msg).toBe(
+      'CI green, merging\n' +
+        '\n' +
+        'PR #1690 open, waiting on prix-cloud\n' +
+        '\n' +
+        'Sent from claude/c854ae60 on yosemite-s1\n' +
+        'agents focus c854ae60\n' +
+        'https://example.com/p',
+    );
   });
 });
 
@@ -92,9 +142,10 @@ describe('broadcast planning', () => {
   it('reaches the messaging sink once the post is important', () => {
     const planned = planFeedBroadcast(CONFIG, ctx({ ticket: 'RUSH-2081', level: 'important' }));
     expect(planned.map((p) => p.name)).toEqual(['ticket', 'message']);
-    expect(planned[1].argv).toEqual([
-      'rush', 'message', 'send', '--text', 'agents-cli · PR #1690 open, CI green, merging',
-    ]);
+    expect(planned[1].argv[0]).toBe('rush');
+    expect(planned[1].argv[3]).toBe('--text');
+    expect(planned[1].argv[4]).toContain('CI green, merging');
+    expect(planned[1].argv[4]).toContain('Sent from claude/c854ae60 on yosemite-s1');
   });
 
   it('ignores a malformed sink rather than crashing the post', () => {
@@ -115,7 +166,7 @@ describe('running sinks', () => {
       ctx(),
     );
     expect(runFeedBroadcast(planned)).toEqual([{ name: 'file', ok: true }]);
-    expect(fs.readFileSync(out, 'utf8')).toBe('PR #1690 open, CI green, merging');
+    expect(fs.readFileSync(out, 'utf8')).toBe('PR #1690 open, waiting on prix-cloud');
   });
 
   it.skipIf(process.platform === 'win32')('reports a failing sink without throwing — the post already stands', () => {

@@ -51,9 +51,14 @@ export interface PlannedDispatch {
   delegateName: string;
 }
 
-/** Path to the shared factory project registry (written by the factory UI). */
+/**
+ * Path to the shared factory project registry (written by the factory UI).
+ * `AGENTS_FACTORY_PROJECTS_PATH` overrides it, mirroring `AGENTS_PROJECTS_DIR`
+ * (`state.ts`) — that seam is what lets `projects import --from-factory` be
+ * tested end-to-end against a real fixture file instead of a mock.
+ */
 export function factoryProjectsPath(): string {
-  return path.join(homedir(), '.agents', 'factory', 'projects.json');
+  return process.env.AGENTS_FACTORY_PROJECTS_PATH ?? path.join(homedir(), '.agents', 'factory', 'projects.json');
 }
 
 /** Read the project registry rows this module cares about. */

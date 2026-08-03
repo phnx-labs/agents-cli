@@ -7,45 +7,45 @@ import { planUmbrellaStages } from './sync-umbrella.js';
  * tested library functions.
  */
 describe('planUmbrellaStages', () => {
-  it('bare: fetch repos only, then reconcile (secrets/sessions are opt-in)', () => {
+  it('bare: fetch repos only, then reconcile (secrets are opt-in)', () => {
     expect(planUmbrellaStages({})).toEqual({
-      fetchRepos: true, fetchSecrets: false, fetchSessions: false, reconcile: true,
+      fetchRepos: true, fetchSecrets: false, reconcile: true,
     });
   });
 
   it('--local: reconcile only, no fetch', () => {
     expect(planUmbrellaStages({ local: true })).toEqual({
-      fetchRepos: false, fetchSecrets: false, fetchSessions: false, reconcile: true,
+      fetchRepos: false, fetchSecrets: false, reconcile: true,
     });
   });
 
   it('--local wins even if other flags are set', () => {
     expect(planUmbrellaStages({ local: true, repos: true, cloud: true })).toEqual({
-      fetchRepos: false, fetchSecrets: false, fetchSessions: false, reconcile: true,
+      fetchRepos: false, fetchSecrets: false, reconcile: true,
     });
   });
 
-  it('--cloud: fetch repos only, skip reconcile (secrets/sessions are opt-in)', () => {
+  it('--cloud: fetch repos only, skip reconcile (secrets are opt-in)', () => {
     expect(planUmbrellaStages({ cloud: true })).toEqual({
-      fetchRepos: true, fetchSecrets: false, fetchSessions: false, reconcile: false,
+      fetchRepos: true, fetchSecrets: false, reconcile: false,
     });
   });
 
-  it('single selector (--sessions): fetch only that, then reconcile', () => {
-    expect(planUmbrellaStages({ sessions: true })).toEqual({
-      fetchRepos: false, fetchSecrets: false, fetchSessions: true, reconcile: true,
+  it('single selector (--secrets): fetch only that, then reconcile', () => {
+    expect(planUmbrellaStages({ secrets: true })).toEqual({
+      fetchRepos: false, fetchSecrets: true, reconcile: true,
     });
   });
 
   it('multiple selectors: fetch exactly those, then reconcile', () => {
     expect(planUmbrellaStages({ repos: true, secrets: true })).toEqual({
-      fetchRepos: true, fetchSecrets: true, fetchSessions: false, reconcile: true,
+      fetchRepos: true, fetchSecrets: true, reconcile: true,
     });
   });
 
   it('selector + --cloud: fetch only the selected, skip reconcile', () => {
     expect(planUmbrellaStages({ repos: true, cloud: true })).toEqual({
-      fetchRepos: true, fetchSecrets: false, fetchSessions: false, reconcile: false,
+      fetchRepos: true, fetchSecrets: false, reconcile: false,
     });
   });
 });

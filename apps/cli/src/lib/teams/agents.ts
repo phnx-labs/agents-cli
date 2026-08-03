@@ -35,7 +35,9 @@ import { resolveRemoteOsSync } from '../hosts/remote-os.js';
 import { pullRemoteLogDelta, REMOTE_MIRROR_MAX_BYTES } from '../hosts/progress.js';
 import { createRemoteWorktree, ensureRemoteRepo } from './remoteWorktree.js';
 import { getTeam } from './registry.js';
-import { resolvePlacement } from './scheduler.js';
+import { resolvePlacement, cappedDevices } from './scheduler.js';
+import { readMaxConcurrentCaps } from '../device-config.js';
+import chalk from 'chalk';
 
 let lastMemoryWarnAt = 0;
 
@@ -2082,7 +2084,16 @@ export class AgentManager {
     const teamMeta = await getTeam(taskName);
     if (!teamMeta) return;
     const roster = await this.listByTask(taskName);
-    const { device } = resolvePlacement(teamMeta, null, roster);
+    const pool = teamMeta.devices ?? [];
+    const maxConcurrent = pool.length > 1 ? readMaxConcurrentCaps(pool) : undefined;
+    if (maxConcurrent) {
+      for (const c of cappedDevices(pool, roster, maxConcurrent)) {
+        console.error(chalk.dim(
+          `[placement] '${c.device}' excluded from auto-pick — at its agents.max-concurrent cap (${c.running}/${c.cap} running)`,
+        ));
+      }
+    }
+    const { device } = resolvePlacement(teamMeta, null, roster, { maxConcurrent });
     if (device) await this.resolveScheduledPlacement(agent, device, taskName);
   }
 

@@ -62,7 +62,7 @@ linear:
 
 Resolution is intentionally **not** beta-gated — only the `agents projects` command
 tree is. A definition exists solely by explicit user action (`projects add`,
-`import --from-factory`, or hand-authoring the YAML), so honoring it in `--project`
+`projects import`, or hand-authoring the YAML), so honoring it in `--project`
 resolution is additive and safe; users without any definitions see zero change.
 
 ## One name everywhere — activity, feed, sessions
@@ -92,6 +92,7 @@ rush  ·  23 agents  ·  68% plan
   agents   claude · running · RUSH-2107 @zion  ·  codex · idle @mac-mini  ·  +21 more
   ships    4 merged (7d) · 2 open PRs · 3 worktrees · v1.20.91  # gh counts + latest release tag
   linear   12/30 done · 5 in progress           # Linear issue counts (needs linear.projectId)
+  next     Beta cut  ·  3/8  ·  due in 6 days     # the next unfinished Linear milestone
   tickets  RUSH-1201 · RUSH-1198 · …              # tickets worked or created
   proof    11 artifacts (7d) · last: plan-x.html  # artifact.created milestones by cwd
   repos    phnx-labs/rush · rush-infra
@@ -114,6 +115,25 @@ rush  ·  23 agents  ·  68% plan
   slow API (>8s) just omits the line, and `--no-remote` skips it too. `total`
   includes canceled issues; the fetch caps at 2,500 issues and a capped count
   renders as a lower bound (`2500+ done`), never as the complete total.
+- **`next`** is the project's next unfinished Linear milestone — the earliest
+  `targetDate` that is not yet complete — rendered `name · done/total · due …`.
+  A percentage says how far along a project is; the milestone says what it is due
+  to hit next, which is what a person plans around. Undated milestones sort last;
+  the line is omitted when the project declares none or all are complete.
+
+  The milestone **list comes from the project, not from its issues**
+  (`project.projectMilestones`), because a milestone commonly has nothing filed
+  under it yet — deriving the list from issue assignments hides exactly those.
+  Issues supply only the `done/total` progress, and when none are assigned the
+  fraction is omitted rather than printed as a meaningless `0/0`. The list rides
+  along on the **first** page of the existing issue fetch, so the line costs no
+  extra request and inherits the same 8s budget and best-effort degradation.
+
+  Dates read in human terms — `due today`, `due tomorrow`, `due in 6 days`,
+  `overdue by 3 days`, and `due Aug 21` once a countdown stops being useful.
+  Linear stores a calendar date with no timezone, so both sides are compared at
+  **local** midnight; parsing it as UTC would shift the answer by a day for
+  anyone west of Greenwich.
 - **`proof`** counts `artifact.created` activity milestones whose cwd is inside the
   project (`lib/project-status.ts`).
 - `--window <days>` sets the merged-PR / artifact window (default 7).
@@ -162,11 +182,65 @@ rush  ·  3 agents
 | `agents projects edit <name>` | Open the YAML in `$EDITOR`. |
 | `agents projects status [name] [--json] [--window N] [--no-remote] [--fleet]` | The progress card (all projects, or one). `--fleet` adds per-device workspace drift over SSH. |
 | `agents projects link <name> --linear [query]` | Bind a Linear project into the def (`linear.projectId` + url). No query → auto-suggests from the def name + repo slug; ambiguous/none lists candidates and exits 1. Powers the `linear` card line. |
-| `agents projects import --from-factory` | Absorb `~/.agents/factory/projects.json` into YAML definitions. |
+| `agents projects import --from-linear` | Import the workspace's Linear projects (via the `linear` CLI) as definitions. See [Importing](#importing--linear-first-factory-gated). |
+| `agents projects import --from-factory [--min-confidence low\|medium\|high] [--all]` | Absorb `~/.agents/factory/projects.json`. Imports only `high`-confidence rows by default. |
 | `agents projects rm <name>` | Delete the definition (never touches the repo). |
 
 `agents run --project <name>` is unchanged in spelling — it just resolves richer
 definitions now.
+
+## Importing — Linear first, Factory gated
+
+Both sources write the **same** `ProjectDef` schema through `writeProjectDef`, and
+neither invents a field. What differs is how much each source knows.
+
+**`--from-linear` is the preferred source.** A Linear project exists because someone
+deliberately created it, so the name and the link are trustworthy. Each project
+becomes a def carrying `linear.projectId` (+ `url` when the CLI reports one), and
+the `show` backlink lights up immediately.
+
+The local checkout is bound **only on an exact normalized-name match** against the
+directories under the configured projects root (`matchLocalCheckoutExact`,
+`lib/linear-projects.ts`) — "Agents CLI" binds `agents-cli`, and nothing else. The
+containment fallback that powers `projects link`'s suggestion is deliberately not
+used on this write path: it would silently bind "Agents CLI" to `agents-cli-web`
+with nobody looking. A project with no exact local match still imports, carrying
+`name` + `linear` and nothing it cannot prove; fill the rest in with
+`projects add --force` or by editing the YAML.
+
+Re-importing is safe. An existing def is preserved field-for-field and only
+`linear` is overwritten, so a hand-set `description`, `contexts`, or `integrations`
+survives. A def that already carries `root`/`repo` is skipped unless `--force`,
+so a re-import never re-points a project you have already bound by hand.
+
+**`--from-factory` is a guess, so it is gated.** Factory's registry is
+auto-detected from checkouts on disk and stamps each row with a
+`confidence` — `high`, `medium`, `low`, or nothing at all. Importing every row is
+what buried two real projects under a dozen stale clones and someone else's repo,
+so the import takes only `high` rows by default:
+
+```
+agents projects import --from-factory                      # high only (default)
+agents projects import --from-factory --min-confidence medium
+agents projects import --from-factory --all                # every row, even unranked
+```
+
+`--all` is the only floor that takes a row stating **no** confidence — an unranked
+guess sits below `low`. An unrecognized `--min-confidence` value is an error, never
+a quiet fall back to the default. Every declined row prints its reason:
+
+```
+Imported 2 projects (3 skipped)
+  skip swarmify: confidence "medium" is below the "high" floor
+  skip inflow: confidence "low" is below the "high" floor
+  skip agents-cleaned-stale2: no confidence field is below the "high" floor
+  (widen with --min-confidence medium or --all)
+```
+
+The two sources are mutually exclusive in one invocation, and `--min-confidence` /
+`--all` are rejected on `--from-linear` (Linear rows carry no confidence) rather
+than silently ignored. Drop a bad import with `agents projects rm <name>` — it only
+unlinks the YAML, never the repo.
 
 ## Not yet (fast-follow)
 
