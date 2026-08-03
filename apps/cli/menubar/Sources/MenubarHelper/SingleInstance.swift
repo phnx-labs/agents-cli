@@ -76,11 +76,25 @@ enum SingleInstance {
         return Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
     }
 
+    /// `MENUBAR_DUMP=1` installs a status item, prints the menu, and exits
+    /// without running the app loop or registering the global chords — a
+    /// transient probe, not a second menu bar. It is the ONE mode that reaches
+    /// the interactive path (every other env-gated mode exits before Guards), so
+    /// without this exemption a diagnostic dump would surrender and print
+    /// nothing whenever the real helper is running: a silent no-op exactly where
+    /// someone is trying to diagnose.
+    static func isTransientProbe(
+        _ environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> Bool {
+        environment["MENUBAR_DUMP"] == "1"
+    }
+
     /// Launch-time gate for the interactive mode. Returns only when this process
     /// is the single owner; otherwise asks the incumbent to show itself and
     /// exits 0 (a duplicate launch is a user asking to see the menu, not an
     /// error, so launchd's KeepAlive must not treat it as a crash).
     static func enforceOrSurface(path: String = lockPath()) {
+        if isTransientProbe() { return }
         switch acquire(path: path) {
         case .acquired:
             return

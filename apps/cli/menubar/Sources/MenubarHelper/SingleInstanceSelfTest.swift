@@ -16,6 +16,7 @@ enum SingleInstanceSelfTest {
         testSecondAcquireSurrenders()
         testLockReleasedWhenHolderDies()
         testLockPathIsRuntimeStateDir()
+        testDumpProbeIsExempt()
         if failures == 0 {
             print("\nALL PASS")
             exit(0)
@@ -74,6 +75,18 @@ enum SingleInstanceSelfTest {
     private static func testLockPathIsRuntimeStateDir() {
         check(SingleInstance.lockPath(home: "/Users/x") == "/Users/x/.agents/.cache/state/menubar.lock",
               "lock path -> ~/.agents/.cache/state/menubar.lock")
+    }
+
+    // MENUBAR_DUMP is the one mode that reaches the interactive path, and it
+    // exits without an app loop or chords. Gating it would turn a diagnostic
+    // dump into a silent surrender whenever the real helper is running.
+    private static func testDumpProbeIsExempt() {
+        check(SingleInstance.isTransientProbe(["MENUBAR_DUMP": "1"]),
+              "MENUBAR_DUMP=1 -> exempt from the singleton gate")
+        check(!SingleInstance.isTransientProbe([:]),
+              "ordinary launch -> gated")
+        check(!SingleInstance.isTransientProbe(["MENUBAR_DUMP": "0"]),
+              "MENUBAR_DUMP=0 -> gated")
     }
 
     private static func check(_ condition: Bool, _ label: String) {
