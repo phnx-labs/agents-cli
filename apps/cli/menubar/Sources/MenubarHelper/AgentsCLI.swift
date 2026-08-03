@@ -126,8 +126,22 @@ enum AgentsCLI {
     // WorkingDirectory (so cwd is `/`), and a child would inherit it. The old
     // AppleScript path opened a login shell in the home directory, so passing it
     // keeps New Session landing exactly where it always did instead of `/`.
+    //
+    // MONITORED, not detached: the CLI exits non-zero when it could not open a
+    // terminal, and a detached spawn throws that away — so a failed click and a
+    // slow one look identical (detection takes a couple of seconds), and the user
+    // clicks again. On failure we surface the CLI's own stderr line; success stays
+    // silent, because the new terminal window IS the feedback.
     static func newSession(agent: String) {
-        runDetached(argv(["run", agent, "--terminal", "--cwd", home]))
+        runMonitored(argv(["run", agent, "--terminal", "--cwd", home]), captureStderr: true) { output, ok in
+            guard !ok else { return }
+            let detail = output
+                .split(separator: "\n")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .last { !$0.isEmpty }
+            Notifier.post(title: "Could not open \(agent)",
+                          body: detail ?? "The terminal launch failed. Try `agents run \(agent) --terminal` in a shell.")
+        }
     }
 
     static func routineRun(_ name: String) { runDetached(argv(["routines", "run", name])) }
@@ -676,14 +690,20 @@ enum AgentsCLI {
     // headless `agents run` output can be far more) blocks forever on write if
     // nothing reads until it exits, so the termination handler never fires and the
     // dispatch hangs with no notification.
+    //
+    // `captureStderr` folds the child's stderr into the same pipe, so a caller
+    // that reports a FAILURE can quote the CLI's own error line instead of an
+    // invented one. Off by default: the JSON-parsing callers (the ticket agent)
+    // must not have diagnostics interleaved into the payload they parse.
     private static var monitored: [Process] = []
-    private static func runMonitored(_ argv: [String], onFinish: @escaping (String, Bool) -> Void) {
+    private static func runMonitored(_ argv: [String], captureStderr: Bool = false,
+                                     onFinish: @escaping (String, Bool) -> Void) {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: argv[0])
         p.arguments = Array(argv.dropFirst())
         let out = Pipe()
         p.standardOutput = out
-        p.standardError = FileHandle.nullDevice
+        p.standardError = captureStderr ? out : FileHandle.nullDevice
         do {
             try p.run()
             monitored.append(p)

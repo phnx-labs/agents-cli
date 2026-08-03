@@ -36,8 +36,16 @@ export function parseTerminalFlag(value: unknown): { backend?: Backend; error?: 
   if (value === undefined || value === true || value === '') return {};
   const raw = String(value);
   if ((TERMINAL_FLAG_BACKENDS as string[]).includes(raw)) return { backend: raw as Backend };
+  // `--terminal [backend]` takes an OPTIONAL value, and commander assigns the
+  // next non-option token to it — so `agents run claude --terminal "fix the bug"`
+  // lands the prompt here. Say that, or the user just sees their prompt called a
+  // bad backend name and has no idea why.
+  const looksLikeAPrompt = /\s/.test(raw) || raw.length > 24;
+  const hint = looksLikeAPrompt
+    ? ` That looks like a prompt: put it BEFORE the flag — agents run <agent> "${raw.length > 40 ? `${raw.slice(0, 40)}…` : raw}" --terminal.`
+    : '';
   return {
-    error: `Unknown --terminal backend '${raw}'. Use one of: ${TERMINAL_FLAG_BACKENDS.join(', ')} (or pass --terminal alone to auto-detect).`,
+    error: `Unknown --terminal backend '${raw}'. Use one of: ${TERMINAL_FLAG_BACKENDS.join(', ')} (or pass --terminal alone to auto-detect).${hint}`,
   };
 }
 
@@ -84,6 +92,12 @@ export function buildRunCommand(argv: string[]): string[] {
  * its host app — the same resolver `agents sessions` uses to print
  * "viewing in Ghostty tab 2". Sessions that are detached (no client attached)
  * legitimately have no viewer and keep their `tmux` host.
+ *
+ * One inherited nuance: `resolveViewingIn` labels a client whose app it cannot
+ * identify `'terminal'` (viewing-in.ts:87), so a tmux session viewed from an
+ * unrecognized emulator resolves to Terminal.app rather than falling through.
+ * That lands on the same every-Mac floor the fallback chain ends at anyway, so
+ * it costs nothing here — but it is a default, not a detection.
  *
  * Best-effort: any probe failure degrades to the plain host, never throws.
  */

@@ -78,6 +78,21 @@ function byRecency(a: SessionHostSample, b: SessionHostSample): number {
 }
 
 /**
+ * Injection seam so the PRECEDENCE is testable without the machine's installed
+ * apps. `isAvailable` for iterm/ghostty/terminal probes `/Applications`, so a
+ * test that just passes `platform: 'darwin'` silently depends on the host having
+ * those apps — it passes on a dev Mac and fails on a Linux CI runner. Same shape
+ * as `ViewingInDeps` in session/viewing-in.ts.
+ */
+export interface BackendResolveDeps {
+  /** Defaults to the real backend availability probe. */
+  isAvailable?: (backend: Backend, ctx: EngineContext) => boolean;
+}
+
+const realIsAvailable = (backend: Backend, ctx: EngineContext): boolean =>
+  BACKENDS[backend].isAvailable(ctx);
+
+/**
  * The backend for the terminal the user's most recent live session runs in, or
  * null when no live session names a host this engine can drive. Pure — the
  * caller supplies the sessions, so the precedence is unit-testable without a
@@ -86,14 +101,19 @@ function byRecency(a: SessionHostSample, b: SessionHostSample): number {
 export function backendFromSessions(
   sessions: SessionHostSample[],
   ctx: EngineContext,
+  deps: BackendResolveDeps = {},
 ): { backend: Backend; host: string } | null {
+  const isAvailable = deps.isAvailable ?? realIsAvailable;
   for (const s of [...sessions].sort(byRecency)) {
     // The app an attached tmux client is in beats the multiplexer name.
     const host = s.viewingApp ?? s.host;
     if (!host) continue;
+    // hasOwn, not a bare index: the host is data, and `SESSION_HOST_BACKENDS['constructor']`
+    // would otherwise hand back a prototype member that BACKENDS cannot key on.
+    if (!Object.hasOwn(SESSION_HOST_BACKENDS, host)) continue;
     const backend = SESSION_HOST_BACKENDS[host];
     if (!backend) continue;
-    if (!BACKENDS[backend].isAvailable(ctx)) continue;
+    if (!isAvailable(backend, ctx)) continue;
     return { backend, host };
   }
   return null;
@@ -107,17 +127,19 @@ export function backendFromSessions(
 export function resolveLaunchBackend(
   ctx: EngineContext,
   sessions: SessionHostSample[] = [],
+  deps: BackendResolveDeps = {},
 ): LaunchBackendChoice | null {
+  const isAvailable = deps.isAvailable ?? realIsAvailable;
   const current = detectCurrentBackend(ctx);
-  if (current && BACKENDS[current].isAvailable(ctx)) {
+  if (current && isAvailable(current, ctx)) {
     return { backend: current, source: 'current-terminal' };
   }
-  const fromSession = backendFromSessions(sessions, ctx);
+  const fromSession = backendFromSessions(sessions, ctx, deps);
   if (fromSession) {
     return { backend: fromSession.backend, source: 'active-session', host: fromSession.host };
   }
-  const first = availableBackends(ctx)[0];
-  return first ? { backend: first.id, source: 'available' } : null;
+  const first = (Object.keys(BACKENDS) as Backend[]).find((b) => isAvailable(b, ctx));
+  return first ? { backend: first, source: 'available' } : null;
 }
 
 /** One line explaining a choice, for the `agents run --terminal` preamble. */

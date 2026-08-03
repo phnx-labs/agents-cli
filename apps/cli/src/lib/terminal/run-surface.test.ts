@@ -24,6 +24,15 @@ describe('parseTerminalFlag', () => {
     expect(backend).toBeUndefined();
     expect(error).toContain("Unknown --terminal backend 'warp'");
     expect(error).toContain('ghostty');
+    expect(error).not.toContain('looks like a prompt');
+  });
+
+  it('explains the swallowed prompt, since the optional value eats it', () => {
+    // commander assigns the next non-option token to `--terminal [backend]`, so
+    // `agents run claude --terminal "fix the bug"` arrives here as the value.
+    const { error } = parseTerminalFlag('fix the bug');
+    expect(error).toContain('That looks like a prompt');
+    expect(error).toContain('put it BEFORE the flag');
   });
 });
 
@@ -43,10 +52,21 @@ describe('stripTerminalFlag', () => {
       .toEqual(['run', 'claude', '--mode', 'edit']);
   });
 
-  it('does not eat a following prompt when no value was consumed', () => {
-    // `--terminal` took no value, so the next token is the user's, not the flag's.
-    expect(stripTerminalFlag(['run', 'claude', '--terminal', 'fix the bug'])).toEqual([
-      'run', 'claude', 'fix the bug',
+  it('strips only the flag when the next token is another option', () => {
+    // commander assigns an optional value only from a non-option token, so here
+    // `--mode` is not the flag's value and must survive.
+    expect(stripTerminalFlag(['run', 'claude', '--terminal', '--mode', 'auto'])).toEqual([
+      'run', 'claude', '--mode', 'auto',
+    ]);
+  });
+
+  it('removes a consumed prompt-shaped value exactly once, not every match', () => {
+    // `--terminal "fix the bug"` makes commander hand the PROMPT over as the
+    // value (parseTerminalFlag rejects it with a hint). If that argv ever reaches
+    // the stripper, only the token after the flag goes — a later identical
+    // operand is the user's and stays.
+    expect(stripTerminalFlag(['run', 'claude', '--terminal', 'auto', 'auto'], 'auto')).toEqual([
+      'run', 'claude', 'auto',
     ]);
   });
 

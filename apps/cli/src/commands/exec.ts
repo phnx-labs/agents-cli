@@ -501,6 +501,30 @@ export async function runWorkflowForEach(
 }
 
 /**
+ * The run's working directory from `--cwd` / `--project`. `--project <slug>` owns
+ * the directory and is mutually exclusive with `--cwd`/`--remote-cwd`; both the
+ * main dispatch and the `--terminal` handoff need the same answer, so the rule
+ * and its error live here once instead of in two places that can drift.
+ */
+async function resolveRunCwd(
+  options: Pick<ExecCommandActionOptions, 'cwd' | 'project' | 'remoteCwd'>,
+  opts: { forRemote: boolean },
+): Promise<string | undefined> {
+  if (!options.project) return options.cwd;
+  if (options.cwd || options.remoteCwd) {
+    console.error(chalk.red('Pass --project alone — not with --cwd or --remote-cwd.'));
+    process.exit(1);
+  }
+  const { resolveProjectRef } = await import('../lib/project-root.js');
+  try {
+    return await resolveProjectRef(options.project, { forRemote: opts.forRemote });
+  } catch (err) {
+    console.error(chalk.red((err as Error).message));
+    process.exit(1);
+  }
+}
+
+/**
  * `--terminal`: hand this run to a real terminal tab and exit.
  *
  * The terminal is detected from the user's live sessions, so a run started from
@@ -523,17 +547,32 @@ async function handleTerminalHandoff(
     process.exit(1);
   }
 
-  // Reject an unrunnable agent HERE, where the person can read it. The tab would
+  // Reject an unrunnable target HERE, where the person can read it. The tab would
   // otherwise open, print the same error, and close — the failure lands in a
   // window that is gone before it can be read, which reads as "nothing happened".
-  const baseAgent = resolveAgentName(parseRunAccountPickerRequest(agentSpec).normalizedAgentSpec.split('@')[0]);
-  if (!baseAgent) {
-    console.error(chalk.red(`Unknown agent: ${agentSpec}. See \`agents list\` for the installed harnesses.`));
+  //
+  // `agents run <thing>` takes an agent id, a PROFILE, or a WORKFLOW (see the
+  // isValidAgent / profileExists / resolveWorkflowRef chain below), so this must
+  // accept all three. Gating on the agent table alone rejected every profile —
+  // the whole Kimi/DeepSeek/Qwen/GLM path — for `--terminal` runs only.
+  const rawTarget = parseRunAccountPickerRequest(agentSpec).normalizedAgentSpec.split('@')[0];
+  const knownAgent = resolveAgentName(rawTarget);
+  if (knownAgent && isAgentHardDeprecated(knownAgent)) {
+    console.error(chalk.red(hardDeprecationError(knownAgent)));
     process.exit(1);
   }
-  if (isAgentHardDeprecated(baseAgent)) {
-    console.error(chalk.red(hardDeprecationError(baseAgent)));
-    process.exit(1);
+  if (!knownAgent) {
+    const [{ profileExists }, { resolveWorkflowRef }] = await Promise.all([
+      import('../lib/profiles.js'),
+      import('../lib/workflows.js'),
+    ]);
+    const probeCwd = options.cwd ?? process.cwd();
+    if (!profileExists(rawTarget) && !resolveWorkflowRef(rawTarget, probeCwd)) {
+      console.error(chalk.red(
+        `Unknown agent, profile, or workflow: ${rawTarget}. See \`agents list\` for the installed harnesses.`,
+      ));
+      process.exit(1);
+    }
   }
   if (options.host) {
     // The rule and its wording live once, in the --host forwarding table, so the
@@ -542,25 +581,23 @@ async function handleTerminalHandoff(
     console.error(chalk.red(RUN_OPTION_REJECT_MESSAGES.terminal));
     process.exit(1);
   }
-
-  // `--project <slug>` owns the working directory, but the main action resolves
-  // it far below this handoff. Resolve it here too, or the tab would open in
-  // THIS process's cwd (the launchd `/` for a menu-bar click) while the run
-  // inside it moved to the project — same rejection of the --cwd combination.
-  let cwd = options.cwd;
-  if (options.project) {
-    if (options.cwd || options.remoteCwd) {
-      console.error(chalk.red('Pass --project alone — not with --cwd or --remote-cwd.'));
-      process.exit(1);
-    }
-    const { resolveProjectRef } = await import('../lib/project-root.js');
-    try {
-      cwd = await resolveProjectRef(options.project, { forRemote: false });
-    } catch (err) {
-      console.error(chalk.red((err as Error).message));
-      process.exit(1);
-    }
+  // Machine-readable output would land in the tab, where the caller that asked
+  // for it can never read it. Same class of failure as --host: refuse, don't
+  // hand back a stream that goes nowhere.
+  const streamFlag = options.json ? '--json' : options.emitSessionId ? '--emit-session-id' : undefined;
+  if (streamFlag) {
+    console.error(chalk.red(
+      `${streamFlag} streams to stdout, but --terminal moves the run into a tab where you cannot read it. Drop one.`,
+    ));
+    process.exit(1);
   }
+
+  // `--project` owns the working directory, but the main action resolves it far
+  // below this handoff — so without this the tab would open in THIS process's
+  // cwd (launchd's `/` for a menu-bar click) while the run inside it moved to
+  // the project. `forRemote: false` because --terminal is always local (--host
+  // is rejected above).
+  const cwd = await resolveRunCwd(options, { forRemote: false });
 
   const { getActiveSessions } = await import('../lib/session/active.js');
   let sessions: Awaited<ReturnType<typeof toHostSamples>> = [];
@@ -1274,17 +1311,7 @@ export function registerRunCommand(program: Command): void {
       // it); locally it becomes an absolute path. It owns the working directory,
       // so it is mutually exclusive with both --cwd and --remote-cwd.
       if (options.project) {
-        if (options.cwd || options.remoteCwd) {
-          console.error(chalk.red('Pass --project alone — not with --cwd or --remote-cwd.'));
-          process.exit(1);
-        }
-        const { resolveProjectRef } = await import('../lib/project-root.js');
-        try {
-          options.cwd = await resolveProjectRef(options.project, { forRemote: hostGiven.length > 0 });
-        } catch (err) {
-          console.error(chalk.red((err as Error).message));
-          process.exit(1);
-        }
+        options.cwd = await resolveRunCwd(options, { forRemote: hostGiven.length > 0 });
       }
 
       if (hostGiven.length > 0) {

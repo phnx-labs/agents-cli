@@ -27,10 +27,18 @@
 - **Terminal.app is a real launch backend now (`terminal`).** Registered last, so
   it is the every-Mac floor without outranking a terminal the user chose to
   install, and reported unavailable over SSH where `osascript` cannot reach the
-  GUI login. It has no scriptable split, so a split request opens a tab — stated
-  rather than silently dropped. `detectCurrentBackend` also recognizes
-  `TERM_PROGRAM=Apple_Terminal`. Source:
-  `apps/cli/src/lib/terminal/backends/terminal-app.ts`.
+  GUI login. It has no scriptable split, so a split request opens a tab, and
+  `agents sessions resume --splits` now says so instead of quietly producing
+  tabs. `detectCurrentBackend` also recognizes `TERM_PROGRAM=Apple_Terminal`.
+  Source: `apps/cli/src/lib/terminal/backends/terminal-app.ts`.
+
+- **`agents sessions resume` / `sessions focus` reach Terminal.app too.** Adding
+  it to the backend registry changes both: on a Mac with neither iTerm, Ghostty,
+  nor VSCodium installed they used to fall back to resuming in the current
+  process, and now open a Terminal.app tab; `resume`'s interactive picker gains a
+  Terminal row, and `--terminal-app` forces it (named apart from
+  `run --terminal`, which means something different). Source:
+  `apps/cli/src/commands/sessions-resume.ts`, `apps/cli/src/commands/focus.ts`.
 
 - **New Task… in the menu bar.** A row above New Session that opens the
   quick-dispatch bar — the same panel as `Cmd-Shift-O`, now reachable without the

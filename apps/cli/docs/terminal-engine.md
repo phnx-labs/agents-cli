@@ -70,6 +70,13 @@ Each backend opens either a **tab** or a **split** (`right` = side-by-side,
 the floor that keeps a GUI caller working, and the ordering means a terminal the
 user actually installed still wins the available-backend fallback.
 
+Registering it changes the two existing consumers of the registry, not just
+`--terminal`: on a Mac with none of iTerm / Ghostty / VSCodium installed,
+`agents sessions focus` ([`focus.ts`](../src/commands/focus.ts)) and
+`agents sessions resume` ([`sessions-resume.ts`](../src/commands/sessions-resume.ts))
+used to have no backend and resumed in the current process — they now open a
+Terminal.app tab. `resume`'s picker also gains a Terminal row.
+
 `buildTab`/`buildSplit` return a `LaunchSpec { argv }`. Ghostty carries `cwd`
 natively via the surface configuration; iTerm/tmux `cd` inside the wrapped shell.
 `vscodium-agent` is different in kind — see [VSCodium agent terminals](#vscodium-agent-terminals).
@@ -210,7 +217,7 @@ await openSurfaces(items, {
 
 | Flag | Effect |
 |---|---|
-| `--iterm` / `--ghostty` / `--tmux` / `--vscodium` | Force a backend (else auto-detect / prompt). |
+| `--iterm` / `--ghostty` / `--tmux` / `--vscodium` / `--terminal-app` | Force a backend (else auto-detect / prompt). `--terminal-app` is spelled apart from `run --terminal`, which means "open in a terminal", not "use Terminal.app". |
 | `--host <alias>` | Resume on a remote host over SSH (defaults to `tmux`). |
 | `--splits` | Pack two sessions side by side per tab (default is one tab per session). |
 

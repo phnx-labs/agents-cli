@@ -5,13 +5,24 @@ import {
   resolveLaunchBackend,
   describeBackendChoice,
   type SessionHostSample,
+  type BackendResolveDeps,
 } from './preferred.js';
-import { terminalAppBackend, terminalAppTabScript } from './backends/terminal-app.js';
-import type { EngineContext } from './types.js';
+import type { Backend, EngineContext } from './types.js';
 
 // A GUI caller with no terminal in its ancestry — exactly the menu-bar helper's
 // launchd environment, which is the case this module exists for.
 const guiCtx: EngineContext = { platform: 'darwin', env: {} };
+
+/**
+ * Availability is injected, never inherited from the machine. The real probe
+ * stats `/Applications/Ghostty.app`, so tests that only set `platform: 'darwin'`
+ * pass on a dev Mac with those apps and fail on a Linux CI runner — which is
+ * exactly what happened to the first version of this file.
+ */
+function withApps(...installed: Backend[]): BackendResolveDeps {
+  return { isAvailable: (b) => installed.includes(b) };
+}
+const macDefaults = withApps('iterm', 'ghostty', 'vscodium-agent', 'terminal');
 
 describe('backendFromSessions', () => {
   it('picks the terminal the most recent live session runs in', () => {
@@ -20,7 +31,8 @@ describe('backendFromSessions', () => {
       { host: 'ghostty', lastActivityMs: 9_000 },
       { host: 'iterm', lastActivityMs: 5_000 },
     ];
-    expect(backendFromSessions(sessions, guiCtx)).toEqual({ backend: 'ghostty', host: 'ghostty' });
+    expect(backendFromSessions(sessions, guiCtx, macDefaults))
+      .toEqual({ backend: 'ghostty', host: 'ghostty' });
   });
 
   it('falls to the next session when the newest host has no drivable backend', () => {
@@ -30,7 +42,8 @@ describe('backendFromSessions', () => {
       { host: 'warp', lastActivityMs: 9_000 },
       { host: 'iterm', lastActivityMs: 5_000 },
     ];
-    expect(backendFromSessions(sessions, guiCtx)).toEqual({ backend: 'iterm', host: 'iterm' });
+    expect(backendFromSessions(sessions, guiCtx, macDefaults))
+      .toEqual({ backend: 'iterm', host: 'iterm' });
   });
 
   it('ranks by startedAtMs when a session has no activity stamp', () => {
@@ -38,35 +51,49 @@ describe('backendFromSessions', () => {
       { host: 'iterm', startedAtMs: 100 },
       { host: 'ghostty', startedAtMs: 900 },
     ];
-    expect(backendFromSessions(sessions, guiCtx)?.backend).toBe('ghostty');
+    expect(backendFromSessions(sessions, guiCtx, macDefaults)?.backend).toBe('ghostty');
   });
 
-  it('skips a backend that cannot be driven in this context', () => {
-    // tmux is only drivable from inside tmux ($TMUX). A tmux-hosted session must
-    // therefore not select it from a GUI caller.
+  it('skips a backend that is not installed, however recent the session', () => {
+    // A Ghostty session on a machine without Ghostty must not win.
+    const sessions: SessionHostSample[] = [
+      { host: 'ghostty', lastActivityMs: 9_000 },
+      { host: 'iterm', lastActivityMs: 1_000 },
+    ];
+    expect(backendFromSessions(sessions, guiCtx, withApps('iterm')))
+      .toEqual({ backend: 'iterm', host: 'iterm' });
+  });
+
+  it('skips tmux from a GUI caller, and takes it from inside tmux', () => {
+    // tmux is drivable only from inside tmux ($TMUX), and that check is env-only,
+    // so this case uses the REAL availability probe on every platform.
     expect(backendFromSessions([{ host: 'tmux', lastActivityMs: 1 }], guiCtx)).toBeNull();
     const inTmux: EngineContext = { platform: 'darwin', env: { TMUX: '/tmp/tmux-501/default,1,0' } };
-    expect(backendFromSessions([{ host: 'tmux', lastActivityMs: 1 }], inTmux)).toEqual({
-      backend: 'tmux',
-      host: 'tmux',
-    });
+    expect(backendFromSessions([{ host: 'tmux', lastActivityMs: 1 }], inTmux))
+      .toEqual({ backend: 'tmux', host: 'tmux' });
   });
 
   it('prefers the app a tmux session is VIEWED in over the multiplexer', () => {
     // `agents run` tmux-wraps interactive runs, so a session started in Ghostty
-    // is attributed host 'tmux'. Without viewingApp this resolves to nothing
-    // drivable and the menu bar guesses; with it, Ghostty wins.
-    expect(backendFromSessions([{ host: 'tmux', viewingApp: 'ghostty', lastActivityMs: 9 }], guiCtx))
+    // is attributed host 'tmux'. Without viewingApp it names nothing drivable
+    // and the menu bar guesses; with it, Ghostty wins.
+    expect(backendFromSessions([{ host: 'tmux', viewingApp: 'ghostty', lastActivityMs: 9 }], guiCtx, macDefaults))
       .toEqual({ backend: 'ghostty', host: 'ghostty' });
   });
 
   it('keeps the tmux host when the session is detached (no viewer)', () => {
-    // No client attached => no viewingApp => nothing drivable from a GUI caller.
-    expect(backendFromSessions([{ host: 'tmux', lastActivityMs: 9 }], guiCtx)).toBeNull();
+    expect(backendFromSessions([{ host: 'tmux', lastActivityMs: 9 }], guiCtx, macDefaults)).toBeNull();
   });
 
   it('returns null for sessions with no host at all', () => {
-    expect(backendFromSessions([{ lastActivityMs: 5 }, {}], guiCtx)).toBeNull();
+    expect(backendFromSessions([{ lastActivityMs: 5 }, {}], guiCtx, macDefaults)).toBeNull();
+  });
+
+  it('ignores a host that only matches Object.prototype', () => {
+    // The host is data off the process table; a bare index would hand back a
+    // prototype member that BACKENDS cannot key on, and .isAvailable would throw.
+    expect(backendFromSessions([{ host: 'constructor', lastActivityMs: 9 }], guiCtx, macDefaults)).toBeNull();
+    expect(backendFromSessions([{ host: 'toString', lastActivityMs: 9 }], guiCtx, macDefaults)).toBeNull();
   });
 
   it('maps only hosts the engine can really drive', () => {
@@ -83,49 +110,37 @@ describe('backendFromSessions', () => {
 describe('resolveLaunchBackend', () => {
   it('prefers the terminal the caller is already in over session history', () => {
     const inGhostty: EngineContext = { platform: 'darwin', env: { TERM_PROGRAM: 'ghostty' } };
-    expect(resolveLaunchBackend(inGhostty, [{ host: 'iterm', lastActivityMs: 9 }])).toEqual({
-      backend: 'ghostty',
-      source: 'current-terminal',
-    });
+    expect(resolveLaunchBackend(inGhostty, [{ host: 'iterm', lastActivityMs: 9 }], macDefaults))
+      .toEqual({ backend: 'ghostty', source: 'current-terminal' });
+  });
+
+  it('skips the current terminal when it is not drivable here', () => {
+    // Inside Ghostty over SSH, say: fall through to the session-derived answer
+    // rather than launching into an app this context cannot reach.
+    const inGhostty: EngineContext = { platform: 'darwin', env: { TERM_PROGRAM: 'ghostty' } };
+    expect(resolveLaunchBackend(inGhostty, [{ host: 'iterm', lastActivityMs: 9 }], withApps('iterm')))
+      .toEqual({ backend: 'iterm', source: 'active-session', host: 'iterm' });
   });
 
   it('uses live sessions when the caller has no terminal (the menu-bar case)', () => {
-    expect(resolveLaunchBackend(guiCtx, [{ host: 'iterm', lastActivityMs: 9 }])).toEqual({
-      backend: 'iterm',
-      source: 'active-session',
-      host: 'iterm',
-    });
+    expect(resolveLaunchBackend(guiCtx, [{ host: 'iterm', lastActivityMs: 9 }], macDefaults))
+      .toEqual({ backend: 'iterm', source: 'active-session', host: 'iterm' });
   });
 
   it('falls back to an available backend when nothing names a terminal', () => {
-    const choice = resolveLaunchBackend(guiCtx, []);
-    expect(choice?.source).toBe('available');
+    expect(resolveLaunchBackend(guiCtx, [], macDefaults))
+      .toEqual({ backend: 'iterm', source: 'available' });
+  });
+
+  it('lands on Terminal.app as the floor when it is the only thing installed', () => {
+    expect(resolveLaunchBackend(guiCtx, [], withApps('terminal')))
+      .toEqual({ backend: 'terminal', source: 'available' });
   });
 
   it('returns null where no terminal can be driven at all', () => {
-    // Linux, not inside tmux: no backend in the registry is available.
+    // Linux, not inside tmux: nothing in the registry is available. Uses the
+    // REAL probe — no backend is installable there, on any machine.
     expect(resolveLaunchBackend({ platform: 'linux', env: {} }, [{ host: 'iterm' }])).toBeNull();
-  });
-});
-
-describe('terminal-app backend', () => {
-  it('is unavailable over SSH — osascript cannot reach the GUI login there', () => {
-    expect(terminalAppBackend.isAvailable({ platform: 'darwin', env: {} })).toBe(true);
-    expect(
-      terminalAppBackend.isAvailable({ platform: 'darwin', env: { SSH_CONNECTION: '10.0.0.1 22' } }),
-    ).toBe(false);
-    expect(terminalAppBackend.isAvailable({ platform: 'linux', env: {} })).toBe(false);
-  });
-
-  it('cds into the working directory and execs the command in an interactive login shell', () => {
-    const script = terminalAppTabScript('/tmp/my repo', ['agents', 'run', 'claude']);
-    expect(script).toContain('tell application "Terminal"');
-    // The -i is load-bearing: version shims are only on PATH for interactive shells.
-    expect(script).toContain('zsh -ilc');
-    // The cwd is POSIX single-quoted ('\'' around the inner quote) and then the
-    // backslash is doubled for the AppleScript string literal, so AppleScript
-    // hands zsh exactly `cd '/tmp/my repo'` — a space in the path stays one arg.
-    expect(script).toContain(String.raw`cd '\\''/tmp/my repo'\\'' && exec agents run claude`);
   });
 });
 
@@ -137,5 +152,7 @@ describe('describeBackendChoice', () => {
       .toBe("iTerm (the terminal you're in)");
     expect(describeBackendChoice({ backend: 'terminal', source: 'available' }))
       .toBe('Terminal (no running session named a terminal)');
+    expect(describeBackendChoice({ backend: 'iterm', source: 'forced' }))
+      .toBe('iTerm (you asked for it)');
   });
 });
