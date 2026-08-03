@@ -4,7 +4,7 @@ All notable changes to the Factory extension are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); `scripts/release.sh` requires a
 `## [<version>]` section for the version being published.
 
-## [Unreleased]
+## [0.9.307] - 2026-08-03
 
 - **Floor no longer collapses distinct sessions that arrive without an id.** A remote
   session row was keyed `remote-<host>-<sessionId>`; when the CLI could not attribute a
