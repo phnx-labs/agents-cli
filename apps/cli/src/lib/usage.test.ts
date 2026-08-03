@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { claudeAccessTokenNeedsRefresh, claudeUsageAccessTokenNoRefresh, loadClaudeOauth, saveClaudeOauth, getClaudeKeychainService, swrWindowMsFor, getUsageInfo, formatUsageSummary, usageNoCredentialError, usageExpiredCredentialError, usageRejectedError } from './usage.js';
+import { claudeAccessTokenNeedsRefresh, claudeUsageAccessTokenNoRefresh, loadClaudeOauth, saveClaudeOauth, getClaudeKeychainService, swrWindowMsFor, getUsageInfo, formatUsageSummary, usageNoCredentialError, usageExpiredCredentialError, usageRejectedError, probeClaudeStatus, probeKimiStatus } from './usage.js';
 import { noteUsageRateLimited, setUsageBackoffPathForTest } from './usage-backoff.js';
 import { setKeychainToken, setKeychainBackendForTest, secretsKeychainItem, type KeychainBackend } from './secrets/index.js';
 import { writeBundle, keychainRef, bundleItemStore } from './secrets/bundles.js';
@@ -522,5 +522,100 @@ describe('a recorded Retry-After actually suppresses the read', () => {
 
     // Falls through to the ordinary credential check for this empty home.
     expect(usage.error).toBe(usageNoCredentialError('Claude'));
+  });
+});
+
+describe('the throttle guard covers every provider, not just Claude', () => {
+  // The review that forced this: with only Claude tested, two real bugs shipped
+  // through — Cursor's error `return` was left unconditional by a braceless
+  // `if` (so every 200 would have failed), and Kimi's probe guard sat AHEAD of
+  // its missing/expired credential checks, misreporting a broken credential as
+  // merely throttled. Per-provider coverage is what catches that class.
+  let home: string;
+  let dir: string;
+  let prevPath: string | null;
+  let prevRealHome: string | undefined;
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-throttle-all-'));
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-throttle-all-cache-'));
+    prevPath = setUsageBackoffPathForTest(path.join(dir, '.usage-backoff.json'));
+    // resolveKimiCredentialPath falls back to the ACTIVE home when the
+    // per-version one is absent (sign-in is account-global), so without this the
+    // "missing credential" case finds the developer's real Kimi login and the
+    // test passes for the wrong reason. AGENTS_REAL_HOME is the seam the code
+    // itself reads.
+    prevRealHome = process.env.AGENTS_REAL_HOME;
+    process.env.AGENTS_REAL_HOME = home;
+  });
+
+  afterEach(() => {
+    setUsageBackoffPathForTest(prevPath);
+    if (prevRealHome === undefined) delete process.env.AGENTS_REAL_HOME;
+    else process.env.AGENTS_REAL_HOME = prevRealHome;
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** A real, unexpired Kimi credential at the path the resolver looks for. */
+  const seedKimi = () => {
+    const credDir = path.join(home, '.kimi-code', 'credentials');
+    fs.mkdirSync(credDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(credDir, 'kimi-code.json'),
+      JSON.stringify({ access_token: 'tok-fresh', expires_at: Math.floor(Date.now() / 1000) + 3600 }),
+    );
+  };
+
+  it('suppresses the Kimi usage read while its window is open', async () => {
+    seedKimi();
+    noteUsageRateLimited('kimi', '2678');
+
+    const usage = await getUsageInfo('kimi', { home });
+
+    expect(usage.snapshot).toBeNull();
+    expect(usage.error).toContain('Kimi rate-limited this machine');
+  });
+
+  it('does not let a throttle mask a missing Kimi credential in the probe', async () => {
+    // The misplacement the reviewer caught: with the guard ahead of the local
+    // checks, this returned 429/present and the account read as merely
+    // throttled rather than unconfigured.
+    noteUsageRateLimited('kimi', '2678');
+
+    const probe = await probeKimiStatus(home);
+
+    expect(probe.token).toBe('missing');
+    expect(probe.status).toBeNull();
+  });
+
+  it('reports the throttle from the Kimi probe when the credential IS good', async () => {
+    seedKimi();
+    noteUsageRateLimited('kimi', '2678');
+
+    const probe = await probeKimiStatus(home);
+
+    // 429 without a request: the recorded window is the answer.
+    expect(probe.status).toBe(429);
+    expect(probe.token).toBe('present');
+  });
+
+  it('does not let a throttle mask a missing Claude credential in the probe', async () => {
+    noteUsageRateLimited('claude', '2678');
+
+    const probe = await probeClaudeStatus(home);
+
+    expect(probe.token).toBe('missing');
+  });
+
+  it("keeps one provider's penalty out of another's read", async () => {
+    seedKimi();
+    noteUsageRateLimited('claude', '2678');
+
+    const usage = await getUsageInfo('kimi', { home });
+
+    // Kimi is free; it fails on its own terms (a live call it cannot complete
+    // in the test environment), never with Claude's throttle message.
+    expect(usage.error ?? '').not.toContain('rate-limited this machine');
   });
 });

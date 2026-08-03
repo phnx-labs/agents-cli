@@ -26,6 +26,7 @@ import {
 } from './secrets/index.js';
 import { resolveClaudeSetupToken } from './claude-account-token.js';
 import {
+  clearUsageRateLimit,
   formatBackoffRemaining,
   noteUsageRateLimited,
   usageRateLimitedUntil,
@@ -742,6 +743,10 @@ async function getClaudeUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
       return { snapshot: null, error: usageRejectedError('Claude', response.status) };
     }
 
+    // A 2xx means any recorded penalty is over — drop it so the state file
+    // stays self-cleaning rather than accumulating expired entries.
+    clearUsageRateLimit('claude');
+
     const data = await response.json() as ClaudeUsageResponse;
     const windows = normalizeClaudeWindows(data);
     if (windows.length === 0) {
@@ -853,6 +858,10 @@ async function getKimiUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
       }
       return { snapshot: null, error: usageRejectedError('Kimi', response.status) };
     }
+
+    // A 2xx means any recorded penalty is over — drop it so the state file
+    // stays self-cleaning rather than accumulating expired entries.
+    clearUsageRateLimit('kimi');
 
     const data = await response.json() as KimiUsagesResponse;
     const windows = normalizeKimiWindows(data);
@@ -1028,6 +1037,10 @@ async function getDroidUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
       return { snapshot: null, error: usageRejectedError('Droid', response.status) };
     }
 
+    // A 2xx means any recorded penalty is over — drop it so the state file
+    // stays self-cleaning rather than accumulating expired entries.
+    clearUsageRateLimit('droid');
+
     const data = await response.json() as DroidBillingLimitsResponse;
     const windows = normalizeDroidWindows(data);
     if (windows.length === 0) {
@@ -1120,11 +1133,6 @@ export async function probeKimiStatus(home?: string): Promise<ProviderProbe> {
   if (!credPath) return { status: null, token: 'missing' };
   let accessToken: string | undefined;
   let expiresAt: number | null = null;
-  // A probe is a request like any other: while the provider's Retry-After
-  // window is open, report the throttle from the recorded state instead of
-  // firing again and re-arming it (usage-backoff.ts). This 3-min-cadence
-  // probe is what created the loop it now respects.
-  if (usageRateLimitedUntil('kimi')) return { status: 429, token: 'present' };
   try {
     const cred = JSON.parse(fs.readFileSync(credPath, 'utf-8'));
     accessToken = typeof cred?.access_token === 'string' ? cred.access_token : undefined;
@@ -1134,6 +1142,13 @@ export async function probeKimiStatus(home?: string): Promise<ProviderProbe> {
   }
   if (!accessToken) return { status: null, token: 'missing' };
   if (expiresAt !== null && Date.now() / 1000 >= expiresAt) return { status: null, token: 'expired' };
+  // A probe is a request like any other: while the provider's Retry-After
+  // window is open, report the throttle from the recorded state instead of
+  // firing again and re-arming it (usage-backoff.ts). This 3-min-cadence probe
+  // is what created the loop it now respects. It sits AFTER the local
+  // missing/expired checks — as in probeClaudeStatus and probeDroidStatus — so
+  // a genuinely broken credential is never misreported as merely throttled.
+  if (usageRateLimitedUntil('kimi')) return { status: 429, token: 'present' };
   try {
     const response = await fetch(KIMI_USAGES_URL, {
       method: 'GET',
@@ -2186,12 +2201,18 @@ async function getCursorUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
 
     // 401/redirect => revoked/expired session. No bars to draw, and the status
     // says why.
-    if (!response.ok) if (response.status === 429) {
+    if (!response.ok) {
+      if (response.status === 429) {
         noteUsageRateLimited('cursor', response.headers.get('retry-after'));
       }
       return { snapshot: null, error: usageRejectedError('Cursor', response.status) };
+    }
 
     const data = (await response.json()) as CursorUsageResponse;
+    // A 2xx means any recorded penalty is over — drop it so the state file
+    // stays self-cleaning rather than accumulating expired entries.
+    clearUsageRateLimit('cursor');
+
     return {
       snapshot: {
         source: 'live',

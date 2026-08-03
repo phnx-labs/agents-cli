@@ -106,12 +106,35 @@ export function noteUsageRateLimited(
   // Never shorten an existing, longer penalty: a second 429 with a smaller
   // header must not let us back on the wire early.
   state.until[agent] = Math.max(state.until[agent] ?? 0, now + Math.min(ms, MAX_BACKOFF_MS));
+  writeBackoff(state);
+}
+
+/**
+ * Write via a temp file + rename so a concurrent reader never sees a truncated
+ * JSON document.
+ *
+ * This is read-modify-write with no lock, so two processes recording different
+ * providers in the same instant can lose one entry. That is accepted rather than
+ * locked: the loser simply makes one more request on its next tick and records
+ * again, which is a single extra call — while a lock file on a path every usage
+ * read touches is a new way to wedge the CLI. What must not happen is a *torn*
+ * file, which would make every provider read as free; the rename prevents that.
+ */
+function writeBackoff(state: BackoffFile): void {
+  const target = backoffPath();
+  const tmp = `${target}.${process.pid}.tmp`;
   try {
-    fs.mkdirSync(path.dirname(backoffPath()), { recursive: true });
-    fs.writeFileSync(backoffPath(), JSON.stringify(state));
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(tmp, JSON.stringify(state));
+    fs.renameSync(tmp, target);
   } catch {
     // Best-effort. An unwritable cache dir costs us the cross-process backoff,
     // not correctness of this read.
+    try {
+      fs.rmSync(tmp, { force: true });
+    } catch {
+      /* nothing further to do */
+    }
   }
 }
 
@@ -125,16 +148,17 @@ export function usageRateLimitedUntil(agent: AgentId, now: number = Date.now()):
   return typeof until === 'number' && until > now ? until : null;
 }
 
-/** Clear a provider's penalty — used when a read succeeds, and by tests. */
+/**
+ * Drop a provider's penalty. Called from each provider's success path — a 2xx
+ * means the window is over — so the state file stays self-cleaning instead of
+ * accumulating elapsed entries. Not load-bearing for correctness: an elapsed
+ * entry already reads as free.
+ */
 export function clearUsageRateLimit(agent: AgentId): void {
   const state = readBackoff();
   if (!(agent in state.until)) return;
   delete state.until[agent];
-  try {
-    fs.writeFileSync(backoffPath(), JSON.stringify(state));
-  } catch {
-    /* best-effort */
-  }
+  writeBackoff(state);
 }
 
 /** Human-readable remaining backoff, for the error a skipped read returns. */
