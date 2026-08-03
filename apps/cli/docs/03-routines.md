@@ -112,8 +112,7 @@ runOnce: false                # true for one-shot jobs (--at)
 endAt: "2026-12-31T23:59:00Z" # optional: auto-disable on/after this time
 hostStrategy: local           # local | host | fleet | cloud (see Host placement strategy)
 devices:                      # optional: the ONE device that owns this routine
-  - yosemite-s0               # omit entirely (or --clear) for unrestricted
-  - mac-mini
+  - yosemite-s0               # omit entirely (or --clear) to run on every device
 # source:                     # set by `agents routines enable-project` / sync
 #   kind: project
 #   projectPath: /path/to/repo
@@ -415,13 +414,14 @@ schedule: "0 3 * * *"
 agent: claude
 devices:
   - yosemite-s0
-  - mac-mini
 prompt: "Drain the local work queue"
 ```
 
-Each listed machine fires the job **independently** on its own schedule — both
-Only the owner runs it — one copy, one run history. Listing several devices is a
-misconfiguration and is refused at creation.
+Only the **owner** fires the job — one copy, one run history. Ownership is the
+first device in normalized sort order, computed from the config alone, so every
+daemon agrees without coordination. Listing several devices is a misconfiguration
+(it used to fire the routine once per device) and is refused at creation; omit
+`devices:` entirely for a routine that genuinely belongs on every machine.
 A single-entry list is equivalent to an exclusive pin: `devices: [yosemite-s0]`
 restricts the job to one machine.
 
