@@ -58,6 +58,14 @@ import {
 } from './db.js';
 import { buildRunNameMap } from './run-names.js';
 import { resolveLinearApiKey } from '../auto-dispatch-linear.js';
+import {
+  ToolCallCollector,
+  collectClaudeToolCalls,
+  collectCodexToolCalls,
+  type IndexedToolCall,
+  type ToolCallCollectorSnapshot,
+} from './tool-calls.js';
+import { purgeMissingToolCallsInDirectory } from './tool-store.js';
 
 const HOME = os.homedir();
 // Versions can live under either repo: the user repo (current canonical
@@ -73,6 +81,75 @@ const HERMES_SESSIONS_DIR = path.join(HOME, '.hermes', 'sessions');
 /** How long OpenClaw channel/cron snapshots stay valid before we re-shell-out. */
 const OPENCLAW_TTL_MS = 60_000;
 const ACTIVE_APPEND_RESCAN_DEBOUNCE_MS = 5_000;
+/** One JSONL record may not force an unbounded string allocation. */
+export const SESSION_JSONL_LINE_MAX_BYTES = 1024 * 1024;
+
+/**
+ * Stream one appended JSONL range, applying only newline-terminated records.
+ * Memory is bounded to one record. An ordinary unterminated tail remains for the
+ * next scan. Once a record exceeds the cap, its consumed offset and a one-bit
+ * dropping state advance together so later scans never reread the growing tail.
+ */
+async function applyJsonlAppend(
+  filePath: string,
+  fromOffset: number,
+  wasDroppingOversizedLine: boolean,
+  apply: (parsed: any) => void,
+): Promise<{ consumedBytes: number; droppingOversizedLine: boolean; skippedOversizedLine: boolean }> {
+  let pending = Buffer.alloc(0);
+  let droppingOversizedLine = wasDroppingOversizedLine;
+  let bytesBeforeChunk = 0;
+  let consumedBytes = 0;
+  let skippedOversizedLine = false;
+  const stream = fs.createReadStream(filePath, { start: fromOffset });
+  try {
+    for await (const rawChunk of stream) {
+      const chunk = typeof rawChunk === 'string' ? Buffer.from(rawChunk, 'utf-8') : rawChunk as Buffer;
+      let cursor = 0;
+      for (;;) {
+        const newline = chunk.indexOf(0x0a, cursor);
+        if (newline === -1) {
+          if (!droppingOversizedLine) {
+            const tail = chunk.subarray(cursor);
+            if (pending.length + tail.length > SESSION_JSONL_LINE_MAX_BYTES) {
+              pending = Buffer.alloc(0);
+              droppingOversizedLine = true;
+              skippedOversizedLine = true;
+            } else if (tail.length > 0) {
+              pending = pending.length > 0 ? Buffer.concat([pending, tail]) : Buffer.from(tail);
+            }
+          }
+          if (droppingOversizedLine) consumedBytes = bytesBeforeChunk + chunk.length;
+          break;
+        }
+
+        if (!droppingOversizedLine) {
+          const segment = chunk.subarray(cursor, newline);
+          if (pending.length + segment.length <= SESSION_JSONL_LINE_MAX_BYTES) {
+            const line = (pending.length > 0 ? Buffer.concat([pending, segment]) : segment).toString('utf-8');
+            if (line.trim()) {
+              try {
+                apply(JSON.parse(line));
+              } catch {
+                // One malformed line never aborts the session scan.
+              }
+            }
+          } else {
+            skippedOversizedLine = true;
+          }
+        }
+        pending = Buffer.alloc(0);
+        droppingOversizedLine = false;
+        consumedBytes = bytesBeforeChunk + newline + 1;
+        cursor = newline + 1;
+      }
+      bytesBeforeChunk += chunk.length;
+    }
+  } finally {
+    stream.destroy();
+  }
+  return { consumedBytes, droppingOversizedLine, skippedOversizedLine };
+}
 
 /**
  * How recently a file must have been scanned to be treated as "hot" — a
@@ -116,6 +193,8 @@ export interface DiscoverOptions {
   /** Match any session whose cwd equals this or is a descendant. Overrides `cwd`. */
   cwdPrefix?: string;
   limit?: number;
+  /** Internal indexed-query path: return every row in scope instead of the default page. */
+  unbounded?: boolean;
   /** Filter sessions newer than this (ISO timestamp or "7d", "30d", "90d") */
   since?: string;
   /** Filter sessions older than this (ISO timestamp) */
@@ -128,6 +207,8 @@ export interface DiscoverOptions {
   origin?: 'cli' | 'routine';
   /** Column to order results by (all descending): 'timestamp' (default), 'cost', or 'duration'. */
   sortBy?: 'timestamp' | 'cost' | 'duration';
+  /** Trust scan-ledger rows without stat'ing every returned transcript. */
+  skipExistenceCheck?: boolean;
   /** Called as each agent makes parsing progress. Totals count only files that need re-parsing (cache misses). */
   onProgress?: (progress: ScanProgress) => void;
 }
@@ -222,6 +303,8 @@ interface ScanEntry {
   parserState?: string;
   /** Accumulated user doc to persist in scan_ledger.content_text for the next hydrate (Claude only). */
   contentText?: string;
+  toolCalls?: IndexedToolCall[];
+  toolIndexMode?: 'replace' | 'append';
 }
 
 /**
@@ -310,7 +393,7 @@ async function resolveLinearProjects(sessions: SessionMeta[]): Promise<void> {
  * An agent with no managed versions is left alone entirely — someone who has never
  * run `agents add` sees exactly what they saw before.
  */
-function scopeToManaged(
+export function scopeToManaged(
   sessions: SessionMeta[],
   agents: readonly SessionAgentId[],
   options?: DiscoverOptions,
@@ -477,11 +560,12 @@ function buildQueryOptions(
     project: projectQuery,
     sinceMs,
     untilMs: Number.isFinite(untilMs as number) ? untilMs : undefined,
-    limit: opts.includeLimit ? (options?.limit ?? 50) : undefined,
+    limit: opts.includeLimit && !options?.unbounded ? (options?.limit ?? 50) : undefined,
     excludeTeamOrigin: options?.excludeTeamOrigin,
     onlyTeamOrigin: options?.onlyTeamOrigin,
     origin: options?.origin,
     sortBy: options?.sortBy,
+    skipExistenceCheck: options?.skipExistenceCheck,
   };
 }
 
@@ -812,6 +896,7 @@ export function collectChangedFilesInLeafDirs(
         if (!stat) continue;
         toCompare.push({ filePath, fileMtimeMs: stat.mtimeMs, fileSize: stat.size });
       }
+      purgeMissingToolCallsInDirectory(getDB(), dirPath, files);
       if (!disabled) dirScansToRecord.push({ dirPath, dirMtimeMs, entryCount });
     }
   }
@@ -984,7 +1069,12 @@ function decorateRoutineSession(
 async function readRoutineArchiveMeta(
   agent: SessionAgentId,
   filePath: string,
-): Promise<{ meta: SessionMeta; content: string } | null> {
+): Promise<{
+  meta: SessionMeta;
+  content: string;
+  toolCalls?: IndexedToolCall[];
+  toolIndexMode?: 'replace' | 'append';
+} | null> {
   const info = routineArchiveInfo(filePath);
   if (!info) return null;
 
@@ -1042,7 +1132,13 @@ async function scanRoutineArchivesIncremental(
   for (const { filePath, scan } of changed) {
     try {
       const result = await readRoutineArchiveMeta(agent, filePath);
-      if (result) entries.push({ meta: result.meta, content: result.content, scan });
+      if (result) entries.push({
+        meta: result.meta,
+        content: result.content,
+        scan,
+        toolCalls: result.toolCalls,
+        toolIndexMode: result.toolIndexMode,
+      });
       else touched.push({ filePath, scan });
     } catch {
       touched.push({ filePath, scan });
@@ -1221,6 +1317,8 @@ async function scanClaudeIncremental(onProgress?: (p: ScanProgress) => void): Pr
             scan,
             parserState: result.parserState,
             contentText: result.contentText,
+            toolCalls: result.toolCalls,
+            toolIndexMode: result.toolIndexMode,
           });
         } else {
           touched.push({ filePath, scan });
@@ -1255,9 +1353,16 @@ async function readClaudeMeta(
   priorRow: { parserState: string | null; fileMtimeMs: number } | undefined,
   account?: string,
   label?: string,
-): Promise<{ meta: SessionMeta; content: string; parserState: string; contentText?: string } | null> {
+): Promise<{
+  meta: SessionMeta;
+  content: string;
+  parserState: string;
+  contentText?: string;
+  toolCalls?: IndexedToolCall[];
+  toolIndexMode: 'replace' | 'append';
+} | null> {
   const prior = parsePriorClaudeState(priorRow);
-  const { scan, newState, mode } = await scanClaudeSessionResumable(
+  const { scan, newState, toolCalls, mode } = await scanClaudeSessionResumable(
     filePath,
     prior,
     scanStamp.fileMtimeMs,
@@ -1341,6 +1446,8 @@ async function readClaudeMeta(
     // doc, cached so the resume can hydrate userTexts without re-reading the file.
     parserState: JSON.stringify(newState),
     contentText: newState.contentText,
+    toolCalls,
+    toolIndexMode: mode === 'full' ? 'replace' : 'append',
   };
 }
 
@@ -1491,6 +1598,8 @@ async function scanCodexIncremental(onProgress?: (p: ScanProgress) => void): Pro
           scan,
           parserState: result.parserState,
           contentText: result.contentText,
+          toolCalls: result.toolCalls,
+          toolIndexMode: result.toolIndexMode,
         });
       } else {
         touched.push({ filePath, scan });
@@ -1589,7 +1698,14 @@ export async function readCodexMeta(
   currentVersion?: string,
   scanStamp?: ScanStamp,
   priorRow?: { parserState: string | null; fileMtimeMs: number },
-): Promise<{ meta: SessionMeta; content: string; parserState?: string; contentText?: string } | null> {
+): Promise<{
+  meta: SessionMeta;
+  content: string;
+  parserState?: string;
+  contentText?: string;
+  toolCalls?: IndexedToolCall[];
+  toolIndexMode: 'replace' | 'append';
+} | null> {
   // Resume from the persisted continuation when the file merely grew; otherwise
   // full-parse from byte 0. Both branches share one reducer, so an append yields
   // a row identical to a from-scratch reparse. When no stamp is supplied (a
@@ -1598,6 +1714,8 @@ export async function readCodexMeta(
   let scan: CodexSessionScan;
   let newState: CodexParserState | undefined;
   let newOffset = 0;
+  let toolCalls: IndexedToolCall[] | undefined;
+  let toolIndexMode: 'replace' | 'append' = 'replace';
   if (scanStamp) {
     const prior = parsePriorCodexState(priorRow);
     const result = await scanCodexSessionResumable(
@@ -1612,6 +1730,8 @@ export async function readCodexMeta(
     scan = result.scan;
     newState = result.newState;
     newOffset = result.newOffset;
+    toolCalls = result.toolCalls;
+    toolIndexMode = result.mode === 'full' ? 'replace' : 'append';
   } else {
     scan = await scanCodexSession(filePath);
   }
@@ -1658,6 +1778,8 @@ export async function readCodexMeta(
     // doc for the resume's hydrate. Absent when no stamp was supplied.
     parserState: newState ? JSON.stringify(newState) : undefined,
     contentText: newState?.contentText,
+    toolCalls,
+    toolIndexMode,
   };
 }
 
@@ -2855,6 +2977,7 @@ export interface ClaudeParseState {
   plan?: string;
   checklistEvents: SessionEvent[];
   recentDirectoriesTouched: string[];
+  toolCollector: ToolCallCollector;
 }
 
 /** Zero-value accumulator for a fresh (from-byte-0) Claude parse. */
@@ -2888,6 +3011,7 @@ export function initClaudeParseState(): ClaudeParseState {
     plan: undefined,
     checklistEvents: [],
     recentDirectoriesTouched: [],
+    toolCollector: new ToolCallCollector(),
   };
 }
 
@@ -2916,6 +3040,7 @@ function foldDerivedToolState(
  * malformed-line skip happens in the caller, as before).
  */
 export function applyClaudeLine(state: ClaudeParseState, parsed: any): void {
+  collectClaudeToolCalls(state.toolCollector, parsed);
   // entrypoint ships on the first envelope event (attachment/user/assistant)
   // and is the clean structural signal for "was this a team spawn?"
   if (!state.entrypoint && typeof parsed.entrypoint === 'string') {
@@ -3144,6 +3269,7 @@ export async function scanClaudeSession(filePath: string): Promise<ClaudeSession
 export interface ClaudeParserState {
   v: 1;
   offset: number;
+  jsonlDroppingOversizedLine?: boolean;
   timestamp?: string;
   cwd?: string;
   gitBranch?: string;
@@ -3174,6 +3300,7 @@ export interface ClaudeParserState {
   contentText?: string;
   checklistEvents: SessionEvent[];
   recentDirectoriesTouched: string[];
+  toolCalls?: ToolCallCollectorSnapshot;
 }
 
 /** Cap on the FIFO window of recent assistant ids persisted in the continuation. */
@@ -3184,7 +3311,11 @@ const SEEN_IDS_RECENT_CAP = 256;
  * `offset` bytes consumed. Round-trips through {@link hydrateClaudeParseState}
  * so incremental replay equals a full parse.
  */
-export function serializeClaudeParserState(state: ClaudeParseState, offset: number): ClaudeParserState {
+export function serializeClaudeParserState(
+  state: ClaudeParseState,
+  offset: number,
+  jsonlDroppingOversizedLine = false,
+): ClaudeParserState {
   const allIds = [...state.seenAssistantIds];
   const seenIdsRecent = allIds.length > SEEN_IDS_RECENT_CAP
     ? allIds.slice(allIds.length - SEEN_IDS_RECENT_CAP)
@@ -3193,6 +3324,7 @@ export function serializeClaudeParserState(state: ClaudeParseState, offset: numb
   return {
     v: 1,
     offset,
+    jsonlDroppingOversizedLine: jsonlDroppingOversizedLine || undefined,
     timestamp: state.timestamp,
     cwd: state.cwd,
     gitBranch: state.gitBranch,
@@ -3227,6 +3359,7 @@ export function serializeClaudeParserState(state: ClaudeParseState, offset: numb
     contentText: state.userTexts.length > 0 ? state.userTexts.join('\n') : undefined,
     checklistEvents: state.checklistEvents,
     recentDirectoriesTouched: state.recentDirectoriesTouched,
+    toolCalls: state.toolCollector.snapshot(),
   };
 }
 
@@ -3283,6 +3416,7 @@ export function hydrateClaudeParseState(prior: ClaudeParserState): ClaudeParseSt
     plan: prior.plan,
     checklistEvents: prior.checklistEvents ?? [],
     recentDirectoriesTouched: prior.recentDirectoriesTouched ?? [],
+    toolCollector: new ToolCallCollector(prior.toolCalls),
   };
 }
 
@@ -3301,7 +3435,7 @@ export async function scanClaudeSessionIncremental(
   filePath: string,
   fromOffset: number,
   prior: ClaudeParserState,
-): Promise<{ scan: ClaudeSessionScan; newState: ClaudeParserState; newOffset: number }> {
+): Promise<{ scan: ClaudeSessionScan; newState: ClaudeParserState; newOffset: number; toolCalls: IndexedToolCall[] }> {
   const state = hydrateClaudeParseState(prior);
 
   // Read the appended byte range and apply ONLY newline-terminated lines. The
@@ -3312,47 +3446,25 @@ export async function scanClaudeSessionIncremental(
   // have no dedup, unlike assistant `seenAssistantIds`). A record written
   // non-atomically — bytes first, then '\n' in a second write — is exactly this
   // case. So we slice at the last '\n' ourselves: everything up to and including
-  // it is a run of complete lines we apply and commit; any tail after it
-  // (syntactically broken OR complete-but-not-yet-terminated) is a still-being-
-  // written record we DEFER to the next pass, once its '\n' lands.
-  const chunks: Buffer[] = [];
-  const stream = fs.createReadStream(filePath, { start: fromOffset });
-  try {
-    for await (const chunk of stream) {
-      chunks.push(typeof chunk === 'string' ? Buffer.from(chunk, 'utf-8') : chunk as Buffer);
-    }
-  } finally {
-    stream.destroy();
-  }
-  const appended = Buffer.concat(chunks);
+  // it is a run of complete lines we apply and commit. An ordinary tail after
+  // it is deferred until its '\n' lands; after a tail exceeds 1 MiB, its offset
+  // advances with a persisted discard-until-newline bit.
+  const append = await applyJsonlAppend(
+    filePath,
+    fromOffset,
+    prior.jsonlDroppingOversizedLine === true,
+    (parsed) => applyClaudeLine(state, parsed),
+  );
+  if (append.skippedOversizedLine) state.toolCollector.recordIndexLimit();
 
-  // Bytes up to AND INCLUDING the last '\n' are the committed, complete-line run.
-  const lastNl = appended.lastIndexOf(0x0a);
-  const consumedBytes = lastNl === -1 ? 0 : lastNl + 1;
-
-  if (consumedBytes > 0) {
-    // split('\n') on the committed run: the element after the final '\n' is ''
-    // (skipped by the trim guard). A stray '\r' from CRLF is tolerated by the
-    // JSON.parse below exactly as the full parse tolerates it.
-    for (const line of appended.subarray(0, consumedBytes).toString('utf-8').split('\n')) {
-      if (!line.trim()) continue;
-
-      let parsed: any;
-      try {
-        parsed = JSON.parse(line);
-      } catch {
-        continue;
-      }
-
-      applyClaudeLine(state, parsed);
-    }
-  }
-
-  const newOffset = fromOffset + consumedBytes;
+  const newOffset = fromOffset + append.consumedBytes;
+  const scan = finalizeClaudeScan(state);
+  const toolCalls = state.toolCollector.drainChanged();
   return {
-    scan: finalizeClaudeScan(state),
-    newState: serializeClaudeParserState(state, newOffset),
+    scan,
+    newState: serializeClaudeParserState(state, newOffset, append.droppingOversizedLine),
     newOffset,
+    toolCalls,
   };
 }
 
@@ -3383,7 +3495,7 @@ async function scanClaudeSessionResumable(
   currentFileMtimeMs: number,
   currentFileSize: number,
   priorFileMtimeMs?: number,
-): Promise<{ scan: ClaudeSessionScan; newState: ClaudeParserState; newOffset: number; mode: 'full' | 'incremental' }> {
+): Promise<{ scan: ClaudeSessionScan; newState: ClaudeParserState; newOffset: number; toolCalls: IndexedToolCall[]; mode: 'full' | 'incremental' }> {
   // File size + mtime cannot distinguish an APPEND from an in-place rewrite or a
   // restore that dropped DIFFERENT, larger content at the same path: both grow
   // the file and move mtime forward. Resuming from the stored offset across that
@@ -3515,6 +3627,7 @@ export interface CodexParseState {
   spawnedTeam?: string;
   checklistEvents: SessionEvent[];
   recentDirectoriesTouched: string[];
+  toolCollector: ToolCallCollector;
 }
 
 /** Zero-value accumulator for a fresh (from-byte-0) Codex parse. */
@@ -3541,6 +3654,7 @@ export function initCodexParseState(): CodexParseState {
     spawnedTeam: undefined,
     checklistEvents: [],
     recentDirectoriesTouched: [],
+    toolCollector: new ToolCallCollector(),
   };
 }
 
@@ -3551,6 +3665,7 @@ export function initCodexParseState(): CodexParseState {
  * malformed-line skip happens in the caller, as before).
  */
 export function applyCodexLine(state: CodexParseState, parsed: any): void {
+  collectCodexToolCalls(state.toolCollector, parsed);
   // PR signal, structurally: a Codex `function_call` whose command is
   // `gh pr create`, then the pull URL from a `function_call_output`.
   if (parsed.type === 'response_item') {
@@ -3730,6 +3845,7 @@ async function scanCodexSession(filePath: string): Promise<CodexSessionScan> {
 export interface CodexParserState {
   v: 1;
   offset: number;
+  jsonlDroppingOversizedLine?: boolean;
   sessionId?: string;
   timestamp?: string;
   cwd?: string;
@@ -3752,6 +3868,7 @@ export interface CodexParserState {
   contentText?: string;
   checklistEvents: SessionEvent[];
   recentDirectoriesTouched: string[];
+  toolCalls?: ToolCallCollectorSnapshot;
 }
 
 /**
@@ -3759,11 +3876,16 @@ export interface CodexParserState {
  * bytes consumed. Round-trips through {@link hydrateCodexParseState} so
  * incremental replay equals a full parse.
  */
-export function serializeCodexParserState(state: CodexParseState, offset: number): CodexParserState {
+export function serializeCodexParserState(
+  state: CodexParseState,
+  offset: number,
+  jsonlDroppingOversizedLine = false,
+): CodexParserState {
   const ticket = detectTicket(state.userTexts.join('\n') || undefined, state.gitBranch);
   return {
     v: 1,
     offset,
+    jsonlDroppingOversizedLine: jsonlDroppingOversizedLine || undefined,
     sessionId: state.sessionId,
     timestamp: state.timestamp,
     cwd: state.cwd,
@@ -3790,6 +3912,7 @@ export function serializeCodexParserState(state: CodexParseState, offset: number
     contentText: state.userTexts.length > 0 ? state.userTexts.join('\n') : undefined,
     checklistEvents: state.checklistEvents,
     recentDirectoriesTouched: state.recentDirectoriesTouched,
+    toolCalls: state.toolCollector.snapshot(),
   };
 }
 
@@ -3826,6 +3949,7 @@ export function hydrateCodexParseState(prior: CodexParserState): CodexParseState
     spawnedTeam: prior.spawnedTeam,
     checklistEvents: prior.checklistEvents ?? [],
     recentDirectoriesTouched: prior.recentDirectoriesTouched ?? [],
+    toolCollector: new ToolCallCollector(prior.toolCalls),
   };
 }
 
@@ -3836,9 +3960,9 @@ export function hydrateCodexParseState(prior: CodexParserState): CodexParseState
  *
  * Same trailing-line discipline as {@link scanClaudeSessionIncremental}: apply
  * ONLY the run of newline-terminated lines (slice at the last `'\n'`), and set
- * `newOffset = fromOffset + consumedBytes`. Any tail after the last `'\n'` —
- * syntactically broken OR a complete-but-not-yet-terminated record — is DEFERRED
- * to the next pass once its `'\n'` lands. Codex `messageCount` is additive with
+ * `newOffset = fromOffset + consumedBytes`. An ordinary tail after the last
+ * `'\n'` is deferred; an oversized one advances under a persisted discard bit.
+ * Codex `messageCount` is additive with
  * NO dedup, so re-reading a still-unterminated complete line would double-count
  * it; deferring prevents that (the bug class prix-cloud caught for Claude).
  */
@@ -3846,44 +3970,25 @@ export async function scanCodexSessionIncremental(
   filePath: string,
   fromOffset: number,
   prior: CodexParserState,
-): Promise<{ scan: CodexSessionScan; newState: CodexParserState; newOffset: number }> {
+): Promise<{ scan: CodexSessionScan; newState: CodexParserState; newOffset: number; toolCalls: IndexedToolCall[] }> {
   const state = hydrateCodexParseState(prior);
 
-  const chunks: Buffer[] = [];
-  const stream = fs.createReadStream(filePath, { start: fromOffset });
-  try {
-    for await (const chunk of stream) {
-      chunks.push(typeof chunk === 'string' ? Buffer.from(chunk, 'utf-8') : chunk as Buffer);
-    }
-  } finally {
-    stream.destroy();
-  }
-  const appended = Buffer.concat(chunks);
+  const append = await applyJsonlAppend(
+    filePath,
+    fromOffset,
+    prior.jsonlDroppingOversizedLine === true,
+    (parsed) => applyCodexLine(state, parsed),
+  );
+  if (append.skippedOversizedLine) state.toolCollector.recordIndexLimit();
 
-  // Bytes up to AND INCLUDING the last '\n' are the committed, complete-line run.
-  const lastNl = appended.lastIndexOf(0x0a);
-  const consumedBytes = lastNl === -1 ? 0 : lastNl + 1;
-
-  if (consumedBytes > 0) {
-    for (const line of appended.subarray(0, consumedBytes).toString('utf-8').split('\n')) {
-      if (!line.trim()) continue;
-
-      let parsed: any;
-      try {
-        parsed = JSON.parse(line);
-      } catch {
-        continue;
-      }
-
-      applyCodexLine(state, parsed);
-    }
-  }
-
-  const newOffset = fromOffset + consumedBytes;
+  const newOffset = fromOffset + append.consumedBytes;
+  const scan = finalizeCodexScan(state);
+  const toolCalls = state.toolCollector.drainChanged();
   return {
-    scan: finalizeCodexScan(state),
-    newState: serializeCodexParserState(state, newOffset),
+    scan,
+    newState: serializeCodexParserState(state, newOffset, append.droppingOversizedLine),
     newOffset,
+    toolCalls,
   };
 }
 
@@ -3940,7 +4045,7 @@ async function scanCodexSessionResumable(
   currentFileMtimeMs: number,
   currentFileSize: number,
   priorFileMtimeMs?: number,
-): Promise<{ scan: CodexSessionScan; newState: CodexParserState; newOffset: number; mode: 'full' | 'incremental' }> {
+): Promise<{ scan: CodexSessionScan; newState: CodexParserState; newOffset: number; toolCalls: IndexedToolCall[]; mode: 'full' | 'incremental' }> {
   // File size + mtime cannot distinguish an APPEND from an in-place rewrite or a
   // restore that dropped a DIFFERENT, larger rollout at the same path: both grow
   // the file and move mtime forward. Resuming from the stored offset across that

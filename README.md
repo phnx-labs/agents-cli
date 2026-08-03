@@ -244,11 +244,20 @@ agents sessions a1b2c3d4 --markdown
 
 # Just the last 3 turns, user messages only
 agents sessions a1b2c3d4 --last 3 --include user
+
+# Calls in recent Codex sessions on one device
+agents sessions --include tools --agent codex --device mac-mini --since 7d
+
+# One session where two different calls match; query every online device
+agents sessions --include tools \
+  --query 'program:git input:merge' \
+  --query 'program:gh output:CONFLICT' \
+  --fleet --json
 ```
 
 Interactive picker when you're in a terminal. Structured output (`--json`, `--markdown`, filtered by role or turn count) when piped.
 
-Backed by a SQLite + FTS5 index at `~/.agents/.history/sessions/sessions.db` with incremental scanning -- warm reads in ~100ms. External tools can consume `--json` output as a programmatic observability layer; see [docs/05-sessions.md](apps/cli/docs/05-sessions.md) for the schema and [docs/06-observability.md](apps/cli/docs/06-observability.md) for the consumption patterns.
+Backed by a SQLite + FTS5 index at `~/.agents/.history/sessions/sessions.db` with incremental scanning -- warm reads in ~100ms. Tool-call evidence is redacted and bounded before it is cached; repeated `--query` clauses must match distinct calls in one session. `--fleet` executes the indexed query on each device and returns compact evidence over SSH, while transcript bodies stay on their origin machine. External tools can consume `--json` output as a programmatic observability layer; see [docs/05-sessions.md](apps/cli/docs/05-sessions.md) for the schemas and [docs/06-observability.md](apps/cli/docs/06-observability.md) for the consumption patterns.
 
 ### Live state, and catching up fast
 
@@ -1091,9 +1100,10 @@ Conversations with Claude, Codex, legacy Gemini, and other agents scatter across
 ```bash
 agents sessions "auth middleware"     # Full-text search across all agents
 agents sessions --agent claude --since 7d
+agents sessions --include tools --query 'program:git' --fleet --json
 ```
 
-The index lives at `~/.agents/.history/sessions/sessions.db` (SQLite + FTS5). Nothing leaves your machine. See [Sessions](#sessions-across-agents) for full usage.
+The index lives at `~/.agents/.history/sessions/sessions.db` (SQLite + FTS5). A local query stays on the machine; an explicit `--fleet` tool query sends only redacted, bounded match evidence over SSH. See [Sessions](#sessions-across-agents) for full usage.
 
 ### Secrets
 

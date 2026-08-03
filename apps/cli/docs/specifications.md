@@ -353,8 +353,8 @@ SSH access (§7); rendering sessions that no harness produced.
   `lib/session/db.ts` — `journal_mode = WAL` ~`:442`, `busy_timeout = 30000`
   ~`:450`; binding selected in `lib/sqlite.ts:23-24`).
 - **SES-29 (MUST).** Schema migrations MUST run on open, land a several-versions-old
-  DB on the current `SCHEMA_VERSION` (**18** at time of writing,
-  `lib/session/db.ts:23` — treat the constant as the source of truth, not this number) in
+  DB on the current `SCHEMA_VERSION` (**24** at time of writing,
+  `lib/session/db.ts:28` — treat the constant as the source of truth, not this number) in
   one call, MUST NOT drop existing rows, and MUST bump the stamp only after the
   migration succeeds so a mid-migration crash re-enters cleanly
   (`lib/session/db.ts` around the `getDB` migration gate; tests `db.migrate-v10.test.ts:78-93`,
@@ -363,6 +363,59 @@ SSH access (§7); rendering sessions that no harness produced.
 - **SES-30 (MUST).** One malformed row's constraint failure MUST NOT roll back the
   batch and MUST NOT stamp that row's ledger entry, so it is retried next scan
   (self-healing) (`lib/session/db.ts:975-982,1035-1039`).
+- **SES-31 (MUST).** Tool-call evidence MUST be redacted before persistence and
+  bounded to 16 KiB input, 1 KiB successful output, or 4 KiB error output.
+  Raw evidence and shell source MUST be bounded to 64 KiB before redaction or
+  AST parsing.
+  The combined evidence payload MUST be capped at 5 MiB per session and MUST
+  leave an explicit terminal row when additional calls are omitted.
+  `--no-redact` MUST NOT disable index redaction. Outcomes and exit/status/error
+  codes MUST come from structured harness fields, never free-text inference
+  (`lib/session/tool-calls.ts:6-16,69-96,177-305,319-408,486-526`).
+- **SES-32 (MUST).** A changed Claude/Codex transcript MUST derive tool calls in
+  the same resumable reducer and preserve pending native call identity across an
+  append. Appended JSONL MUST be processed one bounded record at a time; a record
+  over 1 MiB MUST be skipped without retaining the rest of the file in memory.
+  Other harnesses MUST derive calls from the same normalized event parse
+  used for metadata. A warm compatible ledger row MUST NOT reopen or Bash-parse
+  the transcript (`lib/session/discover.ts:3042-3044,3434-3468,3667-3669,3969-3992`;
+  `lib/session/db.ts:1297-1307`; `lib/session/tool-index.ts:211-290`).
+- **SES-33 (MUST).** Repeated tool query clauses MUST be satisfied by distinct
+  call rows in the same session using polynomial bipartite matching. A request
+  MUST be bounded to 32 clauses, 4 KiB per clause, and 50,000 materialized call
+  rows. `--limit` MUST be bounded to 1–1,000 sessions and aggregate materialized
+  call evidence MUST be bounded to 8 MiB. The JSON encoding MUST be bounded to
+  15 MiB so a valid result remains below the fleet transport ceiling. Indexed
+  program/status/exit columns and FTS5 MUST prefilter candidates
+  before the exact assignment
+  (`lib/session/tool-index.ts:30-36,386-578,682-755`).
+- **SES-34 (MUST).** Schema v24's `tool_scan_ledger` MUST be independent of the
+  normal session ledgers. Migration MUST NOT clear `scan_ledger` or
+  `dir_ledger`; an existing-history backfill is bounded to 25 files or 16 MiB
+  per invocation. Oversized Claude/Codex JSONL MUST stream with a 1 MiB record
+  cap; other harness parsers MUST NOT materialize a source over 16 MiB. Append
+  persistence MUST use ledger byte totals and read only changed ordinals
+  (`lib/session/db.ts:28,535-621`; `lib/session/tool-store.ts:88-231`;
+  `lib/session/tool-index.ts:19-22,211-290`).
+- **SES-35 (MUST).** Fleet tool search MUST cap each peer's stdout at 16 MiB,
+  query at most six peers concurrently, and subtract the exact encoded local
+  envelope plus 64 KiB of coordinator headroom from the 15 MiB aggregate receive
+  ceiling before retaining peer bytes. Raw peer bytes and the validated,
+  re-redacted envelope MUST each be charged against that remainder, because
+  redaction may expand evidence. It MUST mark partial coverage when exhausted
+  and MUST validate every
+  versioned envelope field, strip terminal controls, and omit transcript paths before merging. A missing
+  transcript MUST purge its call rows, program rows, FTS rows, and tool ledger
+  when the source directory changes, without statting every indexed session.
+  An unreachable or incompatible peer MUST also mark aggregate coverage partial
+  (`lib/session/remote-list.ts:51,78-96,193-230,328-500`;
+  `lib/session/tool-index.ts:73-97`; `lib/session/tool-store.ts:40-85`;
+  `commands/sessions.ts:1913-1950`).
+- **SES-36 (MUST).** The shell-command sampling script MUST accept 50–100
+  sessions, read the current device directly, retain only redacted shell-call
+  origins and classifications, cap its JSON artifact at 16 MiB, and record
+  `sample_byte_limit` with partial coverage instead of silently dropping evidence
+  (`scripts/sample-session-shell-commands.ts:16-17,109-216,219-300`).
 
 ---
 
@@ -417,6 +470,13 @@ The command surface (bare `sessions [query]`, `tail`, `sync`, `resume`, `focus`,
   bundle files are written `0600` (`lib/session/bundle.ts:28-29,110-113,188-227`).
 - **SES-IF-4 (MUST).** `SessionEvent.type` is a **closed union** of the 9 documented
   types (`lib/session/types.ts:17-41`); a parser MUST NOT introduce a tenth.
+- **SES-IF-4a (MUST).** Broad `sessions --include tools --json` MUST emit the
+  versioned tool-search envelope, while ordinary list JSON remains
+  `SessionMeta[]` and exact-session JSON remains `{ session, events }`. Repeated
+  `--query` clauses require distinct calls. `--fleet` MUST execute the query on
+  each device's local index under the recursion guard and transfer compact
+  evidence only (`commands/sessions.ts:1913-1960,3708-3716,3868-3911`;
+  `lib/session/remote-list.ts:98-115,328-500`).
 
 #### 4.3 stdout / stderr / exit discipline
 
@@ -595,6 +655,19 @@ host replays offline cache, the slow host is killed to `[]`, and overall
 Given a v9 `sessions.db` with a `name` column and rows; When `getDB()` opens it;
 Then schema reaches the current version, `name` folds into `label` then drops, and every prior row
 survives searchable (`db.migrate-v10.test.ts:78-93`; `db.migrate-v14.test.ts:98-106`).
+
+**GWT-11 — Two different calls satisfy one session query.**
+Given one session where a `git merge` call ran and a later `gh` call returned
+`CONFLICT`; When two `--query` clauses name those facts; Then the versioned
+response contains that session and the two distinct call ids. Repeating the
+`program:git` clause twice with only one matching call returns no session
+(`lib/session/tool-index.test.ts`).
+
+**GWT-12 — Warm tool query does not parse history again.**
+Given a transcript whose file stamp and tool extractor version match
+`tool_scan_ledger`; When the same tool query runs again; Then `indexedFiles=0`,
+`indexedCalls=0`, and cached SQL/FTS evidence answers it
+(`lib/session/tool-index.test.ts`).
 
 ---
 

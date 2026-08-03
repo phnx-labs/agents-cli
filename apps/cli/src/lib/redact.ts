@@ -21,9 +21,32 @@ const SECRET_PATTERNS: Array<[RegExp, string]> = [
   [/\bxapp-[A-Za-z0-9-]{10,}\b/g, '[REDACTED_SLACK_TOKEN]'],
   [/\bnpm_[A-Za-z0-9]{36}\b/g, '[REDACTED_NPM_TOKEN]'],
   [/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, '[REDACTED_JWT]'],
+  // Headers frequently appear inside shell arguments. Consume a quoted header
+  // as one unit so cookie attributes after a space do not survive redaction.
+  [/(^|\s)(["'])(Cookie|Set-Cookie|Authorization|Proxy-Authorization)\s*:\s*.*?\2/gi, '$1$2$3: [REDACTED]$2'],
+  [/(^|\s)(["'])(Cookie|Set-Cookie|Authorization|Proxy-Authorization)\s*:\s*(?:(?!\2).)*$/gi, '$1$2$3: [REDACTED]'],
   [/Bearer\s+\S+/gi, 'Bearer [REDACTED]'],
+  [/\b((?:Cookie|Set-Cookie)\s*:\s*)\S+/gi, '$1[REDACTED]'],
+  [/\b(Authorization\s*:\s*)(?!Bearer\s+\[REDACTED\])\S+(?:\s+\S+)?/gi, '$1[REDACTED]'],
+  // Structured secret fields can arrive as raw JSON output rather than an
+  // argument object, so the object walker alone is not sufficient.
+  [/(^[,{\s]|["'])([A-Z0-9_-]*(?:TOKEN|KEY|SECRET|PASSWORD|AUTHORIZATION|COOKIE)[A-Z0-9_-]*["']?\s*:\s*)(["'][^"']*["']|[^,}\]\s]+)/gim, '$1$2"[REDACTED]"'],
+  [/(\s--?(?:password|token|secret|api[_-]?key)(?:=|\s+))(["']?)[^\s"']+\2/gi, '$1[REDACTED]'],
+  [/(\s--user(?:=|\s+))(["']?)[^\s"']+\2/gi, '$1[REDACTED]'],
+  [/(\s-u\s+)(["']?)[^\s"']+\2/g, '$1[REDACTED]'],
+  [/(\s--proxy-user(?:=|\s+))(["']?)[^\s"']+\2/gi, '$1[REDACTED]'],
+  [/(\s-U\s+)(["']?)[^\s"']+\2/g, '$1[REDACTED]'],
+  [/(https?:\/\/)[^/\s:@]+:[^@\s/]+@/gi, '$1[REDACTED]@'],
   [/\b([A-Z0-9_]*(?:TOKEN|KEY|SECRET|PASSWORD)[A-Z0-9_]*)=("[^"]*"|'[^']*'|\S+)/gi, '$1=[REDACTED]'],
 ];
+
+const TERMINAL_ESCAPE_REGEX = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x9d[^\x07\x9c]*(?:\x07|\x9c)|\x1b\[[0-?]*[ -/]*[@-~]|\x9b[0-?]*[ -/]*[@-~]|\x1b[@-_]|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g;
+
+/** Remove terminal control sequences from untrusted text before storage or display. */
+export function sanitizeForTerminal(text: string): string {
+  if (!text) return text;
+  return text.replace(TERMINAL_ESCAPE_REGEX, '');
+}
 
 /** Env vars whose NAME marks their VALUE as a credential worth masking literally. */
 const SECRET_ENV_NAME = /(?:TOKEN|KEY|SECRET|PASSWORD)/i;

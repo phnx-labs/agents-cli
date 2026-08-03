@@ -30,10 +30,17 @@ export interface SessionEvent {
   role?: 'user' | 'assistant';
   content?: string;
   tool?: string;
+  /** Harness-native call identity, used to correlate concurrent results. */
+  callId?: string;
   args?: Record<string, any>;
   path?: string;
   command?: string;
   success?: boolean;
+  /** Structured harness outcome; never inferred from free-text output. */
+  outcome?: 'ok' | 'error' | 'unknown';
+  exitCode?: number;
+  statusCode?: number;
+  errorCode?: string;
   output?: string;
   /** Internal: marks tool_use events from local commands */
   _local?: boolean;

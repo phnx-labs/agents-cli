@@ -101,6 +101,7 @@
     "proper-lockfile": "4.1.2",
     "simple-git": "3.36.0",
     "smol-toml": "1.7.0",
+    "unbash": "4.0.5",
     "ws": "^8.21.0",
     "yaml": "2.9.0"
   },

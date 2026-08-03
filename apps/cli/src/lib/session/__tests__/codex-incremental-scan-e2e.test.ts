@@ -184,6 +184,13 @@ describe('B-3 live incremental Codex scan parity', () => {
     const inc = db.getSessionById(id)!;
     expect(inc.prUrl).toBe('https://github.com/acme/repo/pull/4242');
     expect(inc.prNumber).toBe(4242);
+    expect(db.getDB().prepare(`
+      SELECT source_call_id, outcome, output FROM tool_calls WHERE session_id = ?
+    `).get(id)).toEqual({
+      source_call_id: 't1',
+      outcome: 'unknown',
+      output: 'https://github.com/acme/repo/pull/4242',
+    });
   });
 
   it('STRADDLED ticket: gh issue create first, its ref in the append → correct createdTickets', async () => {
@@ -296,6 +303,40 @@ describe('B-3 live incremental Codex scan parity', () => {
       gtSessionId,
     );
     assertRowParity(idB, gtId);
+  });
+
+  it('streams past an oversized appended JSONL record and resumes at the next record', async () => {
+    const id = 'oversized-append';
+    const fp = writeRollout(id, baseEvents(id));
+    await runScan();
+
+    fs.appendFileSync(fp, 'x'.repeat(1024 * 1024 + 1));
+    bumpMtimeToNow(fp, 1);
+    await runScan();
+    let state = JSON.parse(db.getParserStatesForPaths([fp]).get(fp)!.parserState!);
+    expect(state.offset).toBe(fs.statSync(fp).size);
+    expect(state.jsonlDroppingOversizedLine).toBe(true);
+    expect(db.getSessionById(id)?.messageCount).toBe(1);
+
+    fs.appendFileSync(fp, 'y'.repeat(64 * 1024));
+    bumpMtimeToNow(fp, 2);
+    await runScan();
+    state = JSON.parse(db.getParserStatesForPaths([fp]).get(fp)!.parserState!);
+    expect(state.offset).toBe(fs.statSync(fp).size);
+    expect(state.jsonlDroppingOversizedLine).toBe(true);
+
+    fs.appendFileSync(fp, `\n${line({
+      type: 'response_item', timestamp: '2026-06-28T00:03:00.000Z',
+      payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'after oversized record' }] },
+    })}\n`);
+    bumpMtimeToNow(fp, 3);
+    await runScan();
+
+    expect(discover.__codexScanBranchCountsForTest().incremental).toBeGreaterThanOrEqual(1);
+    expect(db.getSessionById(id)?.messageCount).toBe(2);
+    state = JSON.parse(db.getParserStatesForPaths([fp]).get(fp)!.parserState!);
+    expect(state.offset).toBe(fs.statSync(fp).size);
+    expect(state.jsonlDroppingOversizedLine).toBeUndefined();
   });
 
   it('LEDGER: parser_state is persisted after a scan, and its offset advances on append', async () => {

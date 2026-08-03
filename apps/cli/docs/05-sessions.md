@@ -99,6 +99,150 @@ trailing record to the next pass, so a record written before its `'\n'` is flush
 is never double-counted. Grok is not incremental — it reads a whole `summary.json`,
 not an append-only JSONL; Gemini and Cursor still full-parse each changed file.
 
+## Tool-call search
+
+`--include tools` has two related forms:
+
+```bash
+# Render every tool event from one exact session
+agents sessions a1b2c3d4 --include tools
+
+# Query cached call evidence across sessions on one device
+agents sessions --include tools --agent codex --device mac-mini --since 7d
+
+# Repeated clauses must match distinct calls in the same session
+agents sessions --include tools \
+  --query 'program:git input:merge' \
+  --query 'program:gh output:CONFLICT' \
+  --fleet --json
+```
+
+Terms in one `--query` clause are ANDed against one call. Repeating `--query`
+requires a distinct call row for each clause, then returns the session only when
+all clauses can be assigned. Supported prefixes are `tool:`, `program:`, `input:`,
+`output:`, `status:`, `exit:`, and `error:`. An unprefixed term searches all
+evidence fields. `output:` also searches a command's error result because some
+harnesses expose returned bytes only as an error channel.
+
+A query accepts at most 32 clauses and 4 KiB per clause. Distinct assignment is
+polynomial bipartite matching, not permutation backtracking. A listing or broad
+query that would materialize more than 50,000 call rows fails with a request to
+narrow the metadata filters or add a term. `--limit` accepts 1–1,000 sessions, a result
+that would materialize more than 8 MiB of evidence fails, and the encoded JSON
+must remain below 15 MiB so it cannot cross the fleet transport's 16 MiB cap.
+
+Tool search has a separate, versioned JSON envelope; it does not change the
+stable `SessionMeta[]` list or `{ session, events }` detail shapes:
+
+```json
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T00:00:00.000Z",
+  "query": { "clauses": ["program:git", "program:gh"] },
+  "coverage": {
+    "indexedFiles": 0,
+    "indexedCalls": 0,
+    "skippedFiles": 0,
+    "limitedFiles": 0,
+    "remainingFiles": 0,
+    "complete": true
+  },
+  "sessions": [{ "id": "...", "machine": "mac-mini", "calls": [] }]
+}
+```
+
+Each device owns its transcript files and its `sessions.db`. `--device` queries
+only the named device(s); `--fleet` queries every registered online compute
+device concurrently. A distributed tool query covers each target's whole local
+index unless metadata flags such as `--agent`, `--project`, or `--since` narrow
+it; the coordinator's current working directory is not forwarded as a peer-side
+scope. Peers run the same local SQLite query under the recursion
+guard and return only the compact envelope over SSH. Raw transcripts, parser
+continuations, local transcript paths, and unmatched calls do not cross the
+boundary. Peer stdout is capped at 16 MiB and fan-out runs at six devices at a
+time. Before fan-out, the coordinator subtracts the exact encoded local result
+and a 64 KiB merge reserve from the 15 MiB ceiling. Both raw peer bytes and the
+machine-stamped, re-redacted envelopes are charged against that remainder, so
+redaction expansion cannot overflow the final JSON. The receive budget stops
+retaining or starting more peer responses once exhausted;
+`coverage.complete=false` marks the partial fleet result. Malformed or oversized
+envelopes are rejected before merging.
+
+### Index lifecycle and disk I/O
+
+Schema v24 adds `tool_calls`, `tool_call_programs`, `tool_call_text` (trigram FTS5), and
+an independent `tool_scan_ledger` with aggregate byte accounting. The migration does **not** clear
+`scan_ledger` or `dir_ledger`, so enabling the feature does not invalidate the
+normal session cache.
+
+- A changed Claude/Codex transcript derives call rows inside the same resumable
+  reducer that already parses the appended bytes. Results that arrive in a later
+  append update the original call ordinal/native id. Appended JSONL is streamed
+  one record at a time; a record over 1 MiB is skipped without buffering the
+  remainder of the transcript.
+- Pending call/result correlation state is capped at 256 calls and 1 MiB. An
+  evicted unmatched call stays indexed as `unknown` with an explicit diagnostic;
+  a later result cannot be attached to a different call.
+- Other file-backed harnesses derive call rows from the normalized event array
+  produced by the pre-existing todo/recent-directory enrichment parse. Tool
+  indexing adds no transcript read to that scan path. Kimi and Grok stamp the
+  split `wire.jsonl` / `chat_history.jsonl` source captured before parsing, so
+  an append racing the parse forces a retry instead of certifying stale calls.
+- Existing history is backfilled on the first scoped tool query, at most 25 files
+  or 16 MiB per invocation. One larger Claude/Codex JSONL transcript is admitted
+  alone and streamed with a 1 MiB record cap; non-streaming harness parsers do
+  not materialize a source over 16 MiB and persist an explicit `index_limit`
+  row. `coverage.complete=false` names partial results; a rerun advances the
+  independent ledger.
+- Append persistence stores the aggregate evidence bytes in `tool_scan_ledger`
+  and reads only changed ordinals. A user-text-only append advances the file
+  stamp without reading historical tool rows.
+- A warm broad query reuses the session stamps refreshed by discovery and runs
+  indexed SQL/trigram-FTS matching. An exact-ID fast path re-stats only its small
+  resolved set because it bypasses discovery. An unchanged transcript is not
+  opened or Bash-parsed again.
+- When a transcript directory changes, call rows and tool-ledger rows for files
+  no longer present in that directory are removed without statting every indexed
+  session.
+- The query evaluates every metadata-filtered session row on each selected
+  device; there is no silent history cap. Trigram FTS and typed indexes prefilter
+  call rows before exact distinct-call assignment, and `--limit` bounds only the
+  matching sessions returned to the caller. Use `--since`, `--agent`,
+  `--project`, or `--device` to narrow the metadata scope when appropriate.
+
+Every persisted string is redacted regardless of `--no-redact`. Inputs are
+bounded to 16 KiB, successful output to 1 KiB, and error output to 4 KiB;
+the combined evidence payload is capped at 5 MiB per session with an explicit
+`index_limit` terminal row when more calls are omitted. Base64-like blocks are
+replaced before persistence. Raw strings are clipped to 64 KiB before secret
+scanning or Bash parsing, so one adversarial call cannot force unbounded parser
+or regular-expression work. Outcomes, exit codes, HTTP status codes, and error
+codes are stored only when the harness supplies structured fields. They are
+never inferred from output prose.
+
+Shell program extraction uses `unbash@4.0.5` and a typed AST walk. It recognizes
+static programs in pipelines, control flow, functions, subshells, command and
+process substitutions, arithmetic expansions, and unquoted heredocs. Dynamic
+program names are left unclassified; malformed Bash records parser diagnostics
+and emits no derived program rows. The parser is an ISC-licensed, zero-dependency
+TypeScript package built for typed AST inspection; its upstream comparison and
+reproducible benchmark are documented in the
+[`unbash` repository](https://github.com/webpro-nl/unbash#benchmarks).
+To inspect a redacted corpus of 50–100 recent
+sessions across the fleet:
+
+```bash
+bun scripts/sample-session-shell-commands.ts \
+  --sessions 100 --since 7d \
+  --output .agents/artifacts/shell-command-sample.json
+```
+
+The sampler reads the current device directly, fans only peers out over SSH,
+and retains redacted shell-call origins, program names, outcomes, and parser
+diagnostics. Its JSON artifact is capped at 16 MiB; if the requested corpus does
+not fit, `coverage.complete` is false and `truncation.reason` is
+`sample_byte_limit` instead of silently dropping evidence.
+
 ## SessionMeta (list output)
 
 `agents sessions --json` returns an array of `SessionMeta`:
