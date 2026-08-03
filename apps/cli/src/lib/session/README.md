@@ -186,10 +186,11 @@ cutoff 24 h (`active.ts:245`).
 (`lastActivityMs` = file mtime, `state.ts:531`, `active.ts:648`), but the primary
 `agents sessions --active` row (`printActiveRow`, `sessions.ts:543`) renders **no time
 column at all** — only id, kind, host, the status word, badges, description. The
-browser/picker listings show a trailing `formatRelativeTime(lastActivity)`
-(`sessions.ts:2004`), but it is an **unlabeled "X ago"** that renders identically for
-running and idle rows — not a called-out "idle for X" / "stuck for X". There is no
-explicit idle/stuck duration string anywhere.
+browser/picker listings do carry both ends of the session — `sessionAgeParts` renders
+`<created> → <last activity>` (`relative-time.ts`, `timeCell` in `sessions.ts`), so the
+span is readable off the row — but each half is still an **unlabeled "X ago"** that
+renders identically for running and idle rows, not a called-out "idle for X" /
+"stuck for X". There is no explicit idle/stuck duration string anywhere.
 
 **Gap 2 — a hung agent mid-tool-call is mislabeled `input_required`.** When the last
 tail event is a `tool_use` and the process is alive but not fresh, `inferActivity`
