@@ -274,7 +274,14 @@ export function register(
   agentConfig: Omit<AgentConfig, 'count'> | null,
   pid?: number,
   context?: vscode.ExtensionContext,
-  initialLabel?: string
+  initialLabel?: string,
+  // The tab's ORIGINAL creation time, when one is being restored. A reload or a
+  // tmux reattach builds a new vscode.Terminal widget for an agent that has been
+  // running for hours, and `createdAt` is what dates that agent's own session
+  // records (liveSessionIdForShell) — stamping it "now" would make the still-live
+  // agent's SessionStart record look like it predates its own tab and get
+  // discarded. Omitted for a genuinely new tab, which is created now by definition.
+  createdAt?: number,
 ): void {
   // Check if terminal is already registered (prevents race condition with onDidOpenTerminal)
   const existingId = terminalToId.get(terminal);
@@ -289,7 +296,7 @@ export function register(
     id,
     terminal,
     agentConfig,
-    createdAt: Date.now(),
+    createdAt: createdAt ?? Date.now(),
     pid,
     messageQueue: []
   };

@@ -4684,7 +4684,9 @@ async function restoreAgentTerminals(context: vscode.ExtensionContext): Promise<
     });
 
     const pid = await terminal.processId;
-    terminals.register(terminal, session.terminalId, agentConfig, pid, context, session.label);
+    // Carry the tab's original creation time across the reload — the agent it is
+    // being restored onto is older than this widget (see register's createdAt).
+    terminals.register(terminal, session.terminalId, agentConfig, pid, context, session.label, session.createdAt);
     readiness.registerTerminal(terminal);
 
     // Preserve the version pin across reloads. The env var above is belt; this
@@ -4833,7 +4835,9 @@ async function reattachSession(
   );
 
   const pid = await terminal.processId;
-  terminals.register(terminal, session.terminalId, agentConfig, pid, context, session.label);
+  // Same as the reload path: the agent predates this widget by however long the
+  // client was disconnected, so the tab keeps its original creation time.
+  terminals.register(terminal, session.terminalId, agentConfig, pid, context, session.label, session.createdAt);
   // The agent is already running in the session we just attached to — mark all
   // readiness events fired so nothing probes it as if it were booting.
   readiness.registerTerminal(terminal, { restored: true });

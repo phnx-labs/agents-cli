@@ -37,3 +37,27 @@ describe('recordPredatesTerminal', () => {
     expect(recordPredatesTerminal(rec(Number.NaN), terminalCreatedAtMs)).toBe(false);
   });
 });
+
+// The regression the first cut of this guard shipped: `register()` stamps
+// createdAt = Date.now(), and both restore paths (reload, tmux reattach) build a
+// NEW terminal widget for an agent that has been running for hours. Anchoring on
+// the widget's birth time instead of the tab's meant a reattached agent's own
+// live SessionStart record looked like it predated its tab, so it was discarded
+// on every scan — permanently stranding the tab on a stale session id, the same
+// class of bug this guard exists to prevent.
+describe('recordPredatesTerminal across a reattach', () => {
+  const originalTabCreatedAt = Date.UTC(2026, 7, 2, 20, 0, 0);
+  const agentStartedAt = Math.floor((originalTabCreatedAt + 60_000) / 1000); // 1 min into the tab
+  const reattachedAt = originalTabCreatedAt + 3 * 3600 * 1000; // client reconnects 3h later
+
+  it('keeps the live agent record when the tab carries its ORIGINAL creation time', () => {
+    expect(recordPredatesTerminal(rec(agentStartedAt), originalTabCreatedAt)).toBe(false);
+  });
+
+  it('would discard that same live record if the tab were re-stamped at reattach time', () => {
+    // Guards the fix itself: if register() ever goes back to stamping "now" on a
+    // restore, this is what the user would see — a live agent whose identity can
+    // never be refreshed again.
+    expect(recordPredatesTerminal(rec(agentStartedAt), reattachedAt)).toBe(true);
+  });
+});
