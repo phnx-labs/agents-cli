@@ -102,51 +102,41 @@ export function noteUsageRateLimited(
   const now = opts?.now ?? Date.now();
   const fallbackMs = opts?.fallbackMs ?? 15 * 60 * 1000;
   const ms = parseRetryAfterMs(retryAfter, now) ?? fallbackMs;
-  recordDeadline(agent, now + Math.min(ms, MAX_BACKOFF_MS));
-}
-
-/**
- * Raise `agent`'s deadline to at least `deadline`, and make that hold across
- * processes.
- *
- * A plain read-modify-write cannot: two processes recording the same provider
- * both read the old value, and the one with the SHORTER deadline can rename
- * last, silently undoing the longer penalty. That is not theoretical here — the
- * triggering condition is a batch of concurrent same-provider requests, which is
- * exactly what the daemon issues. So the write is verified by reading back, and
- * retried when a concurrent writer has lowered it.
- *
- * The value only ever moves forward, so this converges: a loser re-applies, and
- * whoever holds the longest deadline wins. Bounded at three attempts because an
- * unbounded loop on a hot path is a worse failure than a marginally short
- * backoff — after which the residual is one shortened window, self-correcting on
- * the next 429.
- */
-function recordDeadline(agent: AgentId, deadline: number): void {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const state = readBackoff();
-    if ((state.until[agent] ?? 0) >= deadline) return; // already at least this long
-    state.until[agent] = deadline;
-    writeBackoff(state);
-    if ((readBackoff().until[agent] ?? 0) >= deadline) return; // survived
-  }
+  const deadline = now + Math.min(ms, MAX_BACKOFF_MS);
+  const state = readBackoff();
+  // Within a process this is monotonic: a second 429 carrying a smaller header
+  // cannot pull the deadline in. Across processes it is not — see the note on
+  // writeBackoff for what that costs and why it is not locked.
+  if ((state.until[agent] ?? 0) >= deadline) return;
+  state.until[agent] = deadline;
+  writeBackoff(state);
 }
 
 /**
  * Write via a temp file + rename so a concurrent reader never sees a truncated
  * JSON document.
  *
- * This is read-modify-write with no lock. For the provider being written that is
- * made safe by `recordDeadline`, which reads back and retries — the deadline
- * only moves forward, so concurrent writers converge on the longest one.
+ * This is read-modify-write with **no lock**, and the limits of that are worth
+ * stating exactly, because it is easy to write a mechanism that looks like it
+ * closes the gap and does not. Two processes racing here can:
  *
- * What remains unlocked is a *different* provider's entry: two processes
- * recording, say, Claude and Kimi in the same instant can lose one of the two.
- * That is accepted rather than locked — the loser makes one more request on its
- * next tick and records again, a single extra call, while a lock file on a path
- * every usage read touches is a new way to wedge the CLI. What must not happen
- * is a *torn* file, which would make every provider read as free; the rename
- * prevents that.
+ *  - lose a *different* provider's entry (one records Claude, one Kimi, one
+ *    entry survives); or
+ *  - shorten the *same* provider's deadline, when the writer holding the older
+ *    snapshot renames last.
+ *
+ * A read-back-and-retry does NOT fix the second case — it only detects a clobber
+ * that already landed, and a stale writer can still rename after the check. Real
+ * mutual exclusion would need a lock file, and the cost of the race does not
+ * justify one: the loser retries early, gets another 429, and records again on
+ * the very next call. That is one extra request. The loop this module exists to
+ * break was ~100 requests an hour, indefinitely — so a rare shortened window is
+ * not a meaningful residue, whereas a stale lock on a cache path every usage
+ * read touches would be a new way to wedge the CLI.
+ *
+ * What must not happen is a *torn* file, which would make every provider read as
+ * free and silently restore the old behaviour. That is what the rename prevents,
+ * and it is the guarantee this write path actually makes.
  */
 function writeBackoff(state: BackoffFile): void {
   const target = backoffPath();
