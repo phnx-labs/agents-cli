@@ -559,6 +559,11 @@ Favorites are **per-machine**. Session sync carries `.history/backups/`
 starred on another — even though the session id itself is fleet-wide. Carrying them
 would mean adding the file to the sync manifest.
 
+That store is per-machine but the FILTER is not scoped to one: `--favorites` applies to
+every row in the merged fleet view, so a peer's session you starred from here still
+shows. This is why the live `--active` path filters after the remote fan-out rather than
+forwarding the flag to each peer — a peer has its own (different) star list.
+
 ## Export / Import (portable bundles)
 
 `agents sessions export` bundles selected sessions into a portable, self-describing
