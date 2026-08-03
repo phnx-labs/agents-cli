@@ -2100,10 +2100,14 @@ function treeSessionRow(session: SessionMeta, live?: ActiveSession): string {
  * not a hot loop, so the `ps`/`lsof` cost is acceptable; `--no-live` is the
  * escape hatch. Never throws — a probe failure just yields a plain listing.
  */
-async function maybeLiveIndex(options: SessionsOptions): Promise<Map<string, ActiveSession> | undefined> {
+export async function maybeLiveIndex(options: SessionsOptions): Promise<Map<string, ActiveSession> | undefined> {
   if (options.live === false || options.json) return undefined;
   try {
-    return indexActiveBySessionId(await getActiveSessions());
+    // `--local` promises "this machine only" for the default listing too (see
+    // the `--local` help text), so it must gate the live-enrichment probe the
+    // same way `--active --local` does — never dial a remote-host teammate
+    // over ssh here either (RUSH-2118).
+    return indexActiveBySessionId(await getActiveSessions({ localOnly: options.local === true }));
   } catch {
     return undefined;
   }
