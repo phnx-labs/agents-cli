@@ -116,8 +116,15 @@ describe('viewingInLabel', () => {
     expect(viewingInLabel(tmuxSession({ viewingIn: { app: 'ghostty' } }))).toBe('ghostty');
   });
 
-  it('reports a tmux-hosted session with no viewer as detached', () => {
-    expect(viewingInLabel(tmuxSession())).toBe('detached');
+  it('reports a LOCATED pane with no attached client as detached', () => {
+    expect(viewingInLabel(tmuxSession({ tmuxTarget: 'ag-claude-1:0.0' }))).toBe('detached');
+  });
+
+  it('says nothing when the pane could not be located — absence of evidence is not detached', () => {
+    // resolveViewingIn answers undefined for BOTH "no client" and "could not
+    // locate the pane"; without a resolved tmuxTarget we have not proven anyone
+    // left, and Factory pre-ticks every detached row for rescue.
+    expect(viewingInLabel(tmuxSession())).toBeUndefined();
   });
 
   it('says nothing for a session that is not tmux-hosted', () => {

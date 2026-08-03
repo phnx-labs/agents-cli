@@ -43,18 +43,28 @@ export interface ViewingIn {
  * The one display form of "where is this session being watched" — `'codium tab 3'`
  * when a client is attached, the bare app name when the tab can't be resolved, and
  * `'detached'` when the pane is live but nobody is looking at it (the terminal that
- * displayed it was closed or crashed). `undefined` for a session that isn't
- * tmux-hosted: there is no pane to attach to, so it isn't on this axis at all.
+ * displayed it was closed or crashed).
+ *
+ * `undefined` means **we do not know**, and it covers two different situations that
+ * must not be confused with `'detached'`: a session that isn't tmux-hosted (no pane
+ * to attach to, so it isn't on this axis at all), and a tmux session whose pane the
+ * locator could not resolve (`mapPanesToTargets` returned nothing for this socket,
+ * or the row was never enriched). {@link resolveViewingIn} answers `undefined` for
+ * BOTH "no client attached" and "could not locate the pane", so the pane's resolved
+ * `tmuxTarget` is what separates them: without it there is no evidence of absence,
+ * only absence of evidence. Claiming `'detached'` there would invent an orphaned
+ * session — and a consumer acts on that claim (Factory's picker pre-ticks every
+ * detached row for rescue), so the wrong answer resumes a session nobody asked for.
  *
  * Shared by the `--active` row renderer and the `--json` serializer so a machine
- * consumer (the Factory extension's resume picker) reads exactly the string a human
- * sees, instead of re-deriving "detached" from an absent field.
+ * consumer reads exactly the string a human sees, instead of re-deriving "detached"
+ * from an absent field.
  */
 export function viewingInLabel(
-  s: Pick<ActiveSession, 'provenance' | 'viewingIn'>,
+  s: Pick<ActiveSession, 'provenance' | 'viewingIn' | 'tmuxTarget'>,
 ): string | undefined {
   if (s.provenance?.mux?.kind !== 'tmux' || !s.provenance.mux.pane) return undefined;
-  if (!s.viewingIn) return 'detached';
+  if (!s.viewingIn) return s.tmuxTarget ? 'detached' : undefined;
   return s.viewingIn.tab != null ? `${s.viewingIn.app} tab ${s.viewingIn.tab}` : s.viewingIn.app;
 }
 

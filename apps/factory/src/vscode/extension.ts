@@ -2964,11 +2964,18 @@ async function copySessionId() {
 }
 
 /**
- * The agent key a session resumes under. Every harness Factory presents can be
- * resumed — the five prewarm agents through their native flag, the rest through
+ * The agent key a session resumes under, for the PICKER paths (`Agents: Resume`
+ * and `Agents: Session Resume`). Every harness Factory presents can be resumed
+ * here — the five prewarm agents through their native flag, the rest through
  * `agents run --resume` (see buildVersionedResumeCommand) — so the gate is
  * membership in the agent registry, not the prewarm subset. `shell` is excluded:
  * a shell tab has no conversation to resume.
+ *
+ * The OTHER resume surfaces — `restoreAgentTerminals` (reload), the reopen-last
+ * command, and reload-active-terminal — still gate on `supportsPrewarming`, so
+ * grok/kimi/droid/antigravity do not come back through those. Widening them
+ * means touching the crash-restore persistence path, which is deliberately out
+ * of scope here; tracked in issue #1747.
  */
 function agentKeyFromSession(agent: string): SessionAgentType | null {
   if (!agent || agent === 'shell') return null;

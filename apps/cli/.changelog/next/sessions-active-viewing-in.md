@@ -1,8 +1,10 @@
 - **`agents sessions --active --json` now reports who is watching each session.**
   The `viewingIn` field carries the same string the table prints — `codium tab 3`,
   `ghostty tab 2`, or `detached` for a live tmux pane with **no client attached**
-  (its terminal was closed or crashed), and `null` for a session that isn't
-  tmux-hosted and so isn't on that axis at all. Previously the JSON path returned
+  (its terminal was closed or crashed). It is `null` both for a session that isn't
+  tmux-hosted and for one whose pane the locator could not resolve — `detached` is
+  claimed only when the pane was actually located, so absence of evidence is never
+  reported as evidence of absence. Previously the JSON path returned
   before the locator pass ran, so the field never appeared and a machine consumer
   could not tell a session someone is looking at from an orphaned one — which is
   exactly what the Factory extension's `Agents: Resume` picker ranks by. The JSON
