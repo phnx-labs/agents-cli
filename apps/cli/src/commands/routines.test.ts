@@ -591,6 +591,55 @@ describe('routines list --json has devices+runsHere, no device', () => {
       fs.rmSync(home, { recursive: true, force: true });
     }
   });
+
+  // A routine re-pinned to other devices leaves its old run records behind on
+  // the machine that used to fire it. Reporting those as the routine's status
+  // painted a peer's healthy routine red in `list` and in the menu bar (which
+  // reads this JSON) — the record describes this device, not the owner.
+  it('reports no status for a routine pinned away from this device', () => {
+    const home = makeHome({
+      jobs: [
+        { ...baseJob, name: 'pinned-elsewhere', devices: ['yosemite-s0'] },
+        { ...baseJob, name: 'pinned-here', devices: ['zion'] },
+      ],
+      registry,
+    });
+    try {
+      for (const name of ['pinned-elsewhere', 'pinned-here']) {
+        writeRunMeta(home, name, '2026-07-25T10-00-00-000Z', {
+          jobName: name,
+          runId: '2026-07-25T10-00-00-000Z',
+          agent: 'claude',
+          pid: null,
+          status: 'failed',
+          startedAt: '2026-07-25T10:00:00.000Z',
+          completedAt: '2026-07-25T10:00:05.000Z',
+          exitCode: 1,
+          errorMessage: 'command exited with code 1',
+        });
+      }
+
+      const res = run(home, ['list', '--json'], { AGENTS_SYNC_MACHINE_ID: 'zion' });
+      expect(res.status).toBe(0);
+      const parsed = JSON.parse(res.stdout.trim());
+
+      const elsewhere = parsed.find((j: Record<string, unknown>) => j.name === 'pinned-elsewhere');
+      expect(elsewhere.runsHere).toBe(false);
+      expect(elsewhere.lastStatus).toBeNull();
+      expect(elsewhere.exitCode).toBeNull();
+      expect(elsewhere.failureReason).toBeNull();
+      expect(elsewhere.lastRunStartedAt).toBeNull();
+      expect(elsewhere.lastRunCompletedAt).toBeNull();
+
+      // The same record on a routine this device does fire is still reported.
+      const here = parsed.find((j: Record<string, unknown>) => j.name === 'pinned-here');
+      expect(here.runsHere).toBe(true);
+      expect(here.lastStatus).toBe('failed');
+      expect(here.exitCode).toBe(1);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('routines runs --json', () => {
@@ -734,6 +783,46 @@ describe('routines list grouped by device', () => {
       expect(stripped).toContain('Device: offline-box (offline)');
       expect(stripped).toContain('Host: mac-mini (offline)');
       for (const job of jobs) expect(stripped).toContain(job.name);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  // One routine pinned to two devices renders a row under each. Only the row
+  // under THIS machine may carry Last Status — the peer's row previously
+  // repeated our local record, which is how a green routine showed up red.
+  it('shows Last Status only under this machine, not under a peer device', () => {
+    const home = makeHome({
+      jobs: [{ ...baseJob, name: 'two-device-job', devices: ['zion', 'yosemite-s0'] }],
+      registry,
+    });
+    try {
+      writeRunMeta(home, 'two-device-job', '2026-07-25T10-00-00-000Z', {
+        jobName: 'two-device-job',
+        runId: '2026-07-25T10-00-00-000Z',
+        agent: 'claude',
+        pid: null,
+        status: 'failed',
+        startedAt: '2026-07-25T10:00:00.000Z',
+        completedAt: '2026-07-25T10:00:05.000Z',
+        exitCode: 1,
+      });
+
+      const res = run(home, ['list'], { AGENTS_SYNC_MACHINE_ID: 'zion' });
+      expect(res.status).toBe(0);
+      const stripped = res.stdout.replace(/\x1b\[[0-9;]*m/g, '');
+
+      const lines = stripped.split('\n');
+      const mineIdx = lines.findIndex((l) => l.includes('This machine (zion)'));
+      const peerIdx = lines.findIndex((l) => l.includes('Device: yosemite-s0'));
+      expect(mineIdx).toBeGreaterThanOrEqual(0);
+      expect(peerIdx).toBeGreaterThanOrEqual(0);
+
+      const rowAfter = (start: number): string =>
+        lines.slice(start).find((l) => l.includes('two-device-job')) ?? '';
+      expect(rowAfter(mineIdx)).toContain('failed');
+      expect(rowAfter(peerIdx)).not.toContain('failed');
+      expect(stripped).toContain('Last Status is per-device');
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }

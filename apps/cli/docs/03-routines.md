@@ -463,6 +463,28 @@ On a device not in the allowlist the job is fully inert:
 jobs display the word `all`; restricted lists are grayed when the local machine
 is not in the list. `--json` includes a `devices` array and `runsHere` boolean.
 
+#### Last Status is per-device
+
+Run records live in the runs dir of whichever machine fired the routine and carry
+no device attribution, so a record only ever describes the device you are reading
+it on. `agents routines list` therefore reports **Last Status only for routines
+this device fires**: a routine pinned elsewhere shows `-` in the table, and
+`--json` returns `null` for `lastStatus`, `exitCode`, `failureReason`,
+`lastRunStartedAt`, and `lastRunCompletedAt` (`runsHere: false` says why). The
+same routine renders one row per pinned device, and only the **This machine** row
+carries a status.
+
+Without this, a routine re-pinned from one device to another kept reporting the
+old device's leftover records — showing a peer's healthy routine as failed, both
+in the table and in the menu bar, which reads this JSON.
+
+Read a peer's status where it actually ran:
+
+```bash
+agents routines list --device yosemite-s0     # that device's own view
+agents routines runs <name> --device yosemite-s0
+```
+
 #### v12 migration
 
 Existing routines that use the legacy singular `device: X` field are automatically

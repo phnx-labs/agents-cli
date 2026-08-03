@@ -179,10 +179,32 @@ function deviceLabel(job: JobConfig, width?: number): { raw: string; display: st
   return { raw, display, dim: full.length === 0 || !jobRunsOnThisDevice(job) };
 }
 
+/**
+ * The last run THIS device can speak for.
+ *
+ * A run record is written by whichever daemon fired the routine, into that
+ * machine's own runs dir — records carry no device attribution, so a record
+ * found here only ever describes this device's history. When a routine is
+ * pinned away from this machine (`devices:` excludes it) any local record is a
+ * leftover from before the pin, and reporting it as the routine's status paints
+ * another device's healthy routine red. Report nothing instead; the local
+ * history stays readable via `agents routines runs <name>`, and the owning
+ * device's status via `agents routines list --device <name>`.
+ */
+export function localLatestRun(job: JobConfig): RunMeta | null {
+  return jobRunsOnThisDevice(job) ? getLatestRun(job.name) : null;
+}
+
 export interface RoutineListGroup {
   key: string;
   title: string;
   jobs: JobConfig[];
+  /**
+   * Whether this device's run records describe the group. False for a
+   * `Device: <peer>` group — the rows are the same routine seen from a machine
+   * that does not fire it there, so Last Status is not ours to report.
+   */
+  local: boolean;
 }
 
 export function groupRoutineJobsByDevice(
@@ -197,7 +219,9 @@ export function groupRoutineJobsByDevice(
       existing.jobs.push(job);
       return;
     }
-    groups.set(key, { key, title, jobs: [job] });
+    // `device:` is the only group that describes a machine other than this one,
+    // so it is the only one whose rows this device cannot report a status for.
+    groups.set(key, { key, title, jobs: [job], local: !key.startsWith('device:') });
   };
 
   for (const job of jobs) {
@@ -248,9 +272,15 @@ interface RenderRowsOptions {
   overdueSet: Set<string>;
   link: (label: string, url: string | null) => string;
   now: Date;
+  /**
+   * Whether this device's run records describe these rows. False for a
+   * `Device: <peer>` group, whose Last Status column stays blank rather than
+   * showing this machine's leftover records for the same routine name.
+   */
+  local?: boolean;
 }
 
-function renderRoutineRows({ jobs, scheduler, overdueSet, link, now }: RenderRowsOptions): void {
+function renderRoutineRows({ jobs, scheduler, overdueSet, link, now, local = true }: RenderRowsOptions): void {
   const NAME_W = 24;
   const AGENT_W = 10;
   const REPO_W = REPO_DISPLAY_MAX;
@@ -267,7 +297,7 @@ function renderRoutineRows({ jobs, scheduler, overdueSet, link, now }: RenderRow
   for (const job of jobs) {
     const nextStr = nextRunLabel(job, scheduler, now);
     const schedStr = scheduleLabel(job);
-    const latestRun = getLatestRun(job.name);
+    const latestRun = local ? localLatestRun(job) : null;
     const lastStatus = latestRun?.status || '-';
 
     const sourceRepo = job.source?.repo ?? job.repo;
@@ -590,7 +620,7 @@ export function registerRoutinesCommands(program: Command): void {
       if (options.json) {
         const nowJson = new Date();
         const payload = jobs.map((job) => {
-          const latestRun = getLatestRun(job.name);
+          const latestRun = localLatestRun(job);
           return {
             name: job.name,
             agent: job.agent ?? null,
@@ -645,9 +675,14 @@ export function registerRoutinesCommands(program: Command): void {
         } catch (err) {
           console.error(chalk.yellow(`Could not read device registry: ${(err as Error).message}`));
         }
-        for (const group of groupRoutineJobsByDevice(jobs, registry)) {
+        const groups = groupRoutineJobsByDevice(jobs, registry);
+        for (const group of groups) {
           console.log(chalk.bold(`\n${group.title}`));
-          renderRoutineRows({ jobs: group.jobs, scheduler, overdueSet, link, now });
+          renderRoutineRows({ jobs: group.jobs, scheduler, overdueSet, link, now, local: group.local });
+        }
+        if (groups.some((group) => !group.local)) {
+          console.log();
+          console.log(chalk.gray('  Last Status is per-device: rows under another device show "-" — read it there with: agents routines list --device <name>'));
         }
       }
 
