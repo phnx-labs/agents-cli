@@ -245,12 +245,16 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
     // A screenshot older than this isn't pre-selected — but it still shows in the
     // strip for manual attach, since the user can see exactly what they're picking.
     private static let recentClipWindow: TimeInterval = 10 * 60
-    private static let panelWidth: CGFloat = 640
+    private static let panelWidth: CGFloat = 680
     // Panel height is additive: the capture half is fixed, and the screenshot strip
     // and the ticket list each add their own block when they have content.
     private static let baseHeight: CGFloat = 156
     private static let thumbStripHeight: CGFloat = 92
-    private static let ticketSectionChrome: CGFloat = 36   // header row + stack spacing
+    private static let ticketSectionChrome: CGFloat = 36   // one control row + spacing
+    // Fixed viewport for the ticket list — rows scroll inside; panel height does not
+    // grow with every ticket (keeps the capture field pinned).
+    private static let ticketViewportHeight: CGFloat =
+        CGFloat(LinearTickets.viewportRows) * TicketRowView.height
 
     private var panel: PromptPanel?
     private let field = NSTextField()
@@ -266,21 +270,28 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
     private let repoPicker = NSPopUpButton(frame: .zero, pullsDown: false)
     private var repoDirs: [String] = []
     private static let lastRepoKey = "menubar.quickDispatch.lastRepo"
-    // Ticket half: the picked repo's Linear project, its open tickets ranked
-    // urgent-first, and the rows currently shown (the ranked list narrowed by
-    // whatever has been typed).
+    // Ticket half: one compact row of popups (project · filter · sort) — no chip
+    // matrices or two-column blocks — then a scrollable flat list.
     private let projectPicker = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let filterPicker = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let sortPicker = NSPopUpButton(frame: .zero, pullsDown: false)
     private let ticketStatus = NSTextField(labelWithString: "")
     private let ticketList = NSStackView()
+    private let ticketScroll = NSScrollView()
     private var linearCache = LinearTickets.Cache()
     private var activeProject: LinearProject?
     private var visibleTickets: [LinearTicket] = []
+    private var ticketFilter: LinearTickets.QuickFilter = .all
+    private var ticketSort: LinearTickets.QuickSort = .urgentFirst
     // Bumped on every scope change so a slow `linear tasks` answering after the
     // user switched repo/project is dropped instead of overwriting the new list.
     private var ticketFetchToken = 0
     private var repoNamesByDir: [String: String] = [:]
     private var rebuildingProjectPicker = false
+    private var rebuildingFilterPickers = false
     private static let projectOverrideKeyPrefix = "menubar.quickDispatch.project."
+    private static let lastFilterKey = "menubar.quickDispatch.ticketFilter"
+    private static let lastSortKey = "menubar.quickDispatch.ticketSort"
     private var selected: [String] = []   // newest-first order preserved
     private var selectedAgents = Set<String>()
     private var roster: [MenuAgent] = []
@@ -315,6 +326,7 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         // Tickets render from the warm cache first (a `linear tasks` round trip
         // costs seconds), then refresh in the background.
         linearCache = LinearTickets.loadCache()
+        restoreTicketControls()
         refreshTicketScope()
 
         thumbStrip.isHidden = thumbStrip.arrangedSubviews.isEmpty
@@ -562,6 +574,70 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         refreshTicketScope()
     }
 
+    @objc private func onFilterChanged(_ sender: NSPopUpButton) {
+        guard !rebuildingFilterPickers else { return }
+        let idx = sender.indexOfSelectedItem
+        let all = LinearTickets.QuickFilter.allCases
+        guard idx >= 0, idx < all.count else { return }
+        ticketFilter = all[idx]
+        UserDefaults.standard.set(ticketFilter.rawValue, forKey: Self.lastFilterKey)
+        reapplyTicketList()
+    }
+
+    @objc private func onSortChanged(_ sender: NSPopUpButton) {
+        guard !rebuildingFilterPickers else { return }
+        let idx = sender.indexOfSelectedItem
+        let all = LinearTickets.QuickSort.allCases
+        guard idx >= 0, idx < all.count else { return }
+        ticketSort = all[idx]
+        UserDefaults.standard.set(ticketSort.rawValue, forKey: Self.lastSortKey)
+        reapplyTicketList()
+    }
+
+    private func restoreTicketControls() {
+        if let raw = UserDefaults.standard.string(forKey: Self.lastFilterKey),
+           let f = LinearTickets.QuickFilter(rawValue: raw) {
+            ticketFilter = f
+        }
+        if let raw = UserDefaults.standard.string(forKey: Self.lastSortKey),
+           let s = LinearTickets.QuickSort(rawValue: raw) {
+            ticketSort = s
+        }
+        rebuildFilterAndSortPickers()
+    }
+
+    private func rebuildFilterAndSortPickers() {
+        rebuildingFilterPickers = true
+        defer { rebuildingFilterPickers = false }
+
+        filterPicker.removeAllItems()
+        for f in LinearTickets.QuickFilter.allCases {
+            filterPicker.addItem(withTitle: f.title)
+        }
+        if let idx = LinearTickets.QuickFilter.allCases.firstIndex(of: ticketFilter) {
+            filterPicker.selectItem(at: idx)
+        }
+
+        sortPicker.removeAllItems()
+        for s in LinearTickets.QuickSort.allCases {
+            sortPicker.addItem(withTitle: s.title)
+        }
+        if let idx = LinearTickets.QuickSort.allCases.firstIndex(of: ticketSort) {
+            sortPicker.selectItem(at: idx)
+        }
+    }
+
+    /// Re-run filter+sort on the cached tickets for the active project (no fetch).
+    private func reapplyTicketList() {
+        guard let project = activeProject,
+              let tickets = linearCache.scopes[project.name]?.tickets else {
+            updateHint()
+            return
+        }
+        visibleTickets = rankedAndFiltered(tickets)
+        renderTickets()
+    }
+
     // Point the ticket list at the project behind the picked repo: rebuild the
     // project popup, render whatever is cached, and fetch when the cache is stale.
     private func refreshTicketScope() {
@@ -626,12 +702,14 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         }
     }
 
-    // Urgent first, then narrowed by whatever the user has typed — so typing a few
-    // words shows the tickets that already cover it before Return files a new one.
+    // Quick filter + sort, then the typed note as a text search — so an existing
+    // ticket surfaces before Return files a duplicate. Flat list only (no groups).
     private func rankedAndFiltered(_ tickets: [LinearTicket]) -> [LinearTicket] {
         let query = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let matched = LinearTickets.filter(LinearTickets.rank(tickets), query: query)
-        return Array(matched.prefix(LinearTickets.displayLimit))
+        return LinearTickets.list(tickets,
+                                  filter: ticketFilter,
+                                  sort: ticketSort,
+                                  query: query)
     }
 
     private func renderTickets(status: String? = nil) {
@@ -646,8 +724,14 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
             ticketList.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: ticketList.widthAnchor).isActive = true
         }
-        ticketList.isHidden = visibleTickets.isEmpty
+        let empty = visibleTickets.isEmpty
+        ticketScroll.isHidden = empty
         ticketStatus.stringValue = status ?? ticketCountText()
+        // Document height grows with rows; the scroll viewport stays fixed so the
+        // user can scroll through the full filtered set.
+        let width = max(ticketScroll.contentSize.width, Self.panelWidth - 44)
+        let contentH = max(CGFloat(visibleTickets.count) * TicketRowView.height, 1)
+        ticketList.frame = NSRect(x: 0, y: 0, width: width, height: contentH)
         applyContentHeight()
         updateHint()
     }
@@ -656,8 +740,15 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         guard let project = activeProject else { return "" }
         let total = linearCache.scopes[project.name]?.tickets.count ?? 0
         if total == 0 { return "no open tickets" }
-        if visibleTickets.isEmpty { return "\(total) open · none match what you typed" }
-        return "\(total) open · urgent first · click or \u{2318}N dispatches"
+        if visibleTickets.isEmpty {
+            return "\(total) open · none match filter"
+        }
+        let shown = visibleTickets.count
+        let sortBit = ticketSort == .urgentFirst ? "urgent first" : ticketSort.title.lowercased()
+        if shown < total || ticketFilter != .all {
+            return "\(shown)/\(total) · \(sortBit) · \u{2318}N"
+        }
+        return "\(total) open · \(sortBit) · click or \u{2318}N"
     }
 
     private func rebuildProjectPicker() {
@@ -797,13 +888,16 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         renderTickets()
     }
 
-    // Height is additive over the fixed capture half; the panel grows downward from
-    // a fixed top edge while it is on screen, so a list that fills in after an async
-    // fetch doesn't shift the text field out from under the cursor.
+    // Height is additive over the fixed capture half; the ticket viewport is a
+    // fixed-height scroll area so many open tickets do not push the panel taller.
+    // Grows downward from a fixed top edge so an async fill does not shift the
+    // text field out from under the cursor.
     private func applyContentHeight() {
         guard let panel else { return }
         var height = Self.baseHeight + Self.ticketSectionChrome
-            + CGFloat(visibleTickets.count) * TicketRowView.height
+        if !ticketScroll.isHidden {
+            height += Self.ticketViewportHeight
+        }
         if !thumbStrip.isHidden { height += Self.thumbStripHeight }
         guard abs(panel.frame.height - height) > 0.5 else { return }
         let top = panel.frame.maxY
@@ -888,6 +982,19 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         projectPicker.target = self
         projectPicker.action = #selector(onProjectChanged(_:))
 
+        // Same control size as the project popup — one compact row of dropdowns,
+        // not a two-column chip matrix.
+        for picker in [filterPicker, sortPicker] {
+            picker.translatesAutoresizingMaskIntoConstraints = false
+            picker.controlSize = .small
+            picker.font = .systemFont(ofSize: 12)
+        }
+        filterPicker.target = self
+        filterPicker.action = #selector(onFilterChanged(_:))
+        sortPicker.target = self
+        sortPicker.action = #selector(onSortChanged(_:))
+        rebuildFilterAndSortPickers()
+
         ticketStatus.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
         ticketStatus.textColor = .tertiaryLabelColor
         ticketStatus.lineBreakMode = .byTruncatingTail
@@ -896,24 +1003,43 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         ticketList.orientation = .vertical
         ticketList.alignment = .leading
         ticketList.spacing = 0
+        ticketList.translatesAutoresizingMaskIntoConstraints = false
+
+        // Scrollable ticket body: fixed viewport, document grows with rows.
+        // Document view uses flipped coordinate + explicit width so rows stay
+        // full-width as the user scrolls (stack-as-document without a flip view
+        // pins from the bottom and clips the first rows).
+        ticketScroll.drawsBackground = false
+        ticketScroll.hasVerticalScroller = true
+        ticketScroll.hasHorizontalScroller = false
+        ticketScroll.autohidesScrollers = true
+        ticketScroll.borderType = .noBorder
+        ticketScroll.scrollerStyle = .overlay
+        ticketScroll.translatesAutoresizingMaskIntoConstraints = false
+        let clip = FlippedClipView()
+        clip.drawsBackground = false
+        ticketScroll.contentView = clip
+        ticketScroll.documentView = ticketList
+        clip.postsBoundsChangedNotifications = true
 
         let controlRow = NSStackView(views: [modeControl, repoPicker])
         controlRow.orientation = .horizontal
         controlRow.alignment = .centerY
         controlRow.spacing = 12
 
-        // The ticket header names the scope (project popup) and its state; the rows
-        // below it are the open tickets of that project.
+        // One row: project (1:1 Linear scope) · quick filter · quick sort · count.
+        // No block cards — same popup language as the repo picker above.
         let ticketTitle = NSTextField(labelWithString: "Tickets")
         ticketTitle.font = .monospacedSystemFont(ofSize: 11, weight: .medium)
         ticketTitle.textColor = .secondaryLabelColor
-        let ticketHeader = NSStackView(views: [ticketTitle, projectPicker, ticketStatus])
+        let ticketHeader = NSStackView(views: [ticketTitle, projectPicker, filterPicker,
+                                               sortPicker, ticketStatus])
         ticketHeader.orientation = .horizontal
         ticketHeader.alignment = .centerY
         ticketHeader.spacing = 8
 
         let stack = NSStackView(views: [field, controlRow, agentStrip, thumbStrip,
-                                        ticketHeader, ticketList, hint])
+                                        ticketHeader, ticketScroll, hint])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 10
@@ -925,12 +1051,14 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
             stack.centerYAnchor.constraint(equalTo: bg.centerYAnchor),
             field.widthAnchor.constraint(equalTo: stack.widthAnchor),
             modeControl.widthAnchor.constraint(equalToConstant: 180),
-            ticketList.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            // The panel is a fixed-width bar: cap the two popups so a long repo
-            // path or project name truncates inside them instead of stretching the
-            // window past panelWidth.
-            repoPicker.widthAnchor.constraint(lessThanOrEqualToConstant: 220),
-            projectPicker.widthAnchor.constraint(lessThanOrEqualToConstant: 190),
+            ticketScroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            ticketScroll.heightAnchor.constraint(equalToConstant: Self.ticketViewportHeight),
+            // The panel is a fixed-width bar: cap the popups so long names truncate
+            // inside them instead of stretching the window past panelWidth.
+            repoPicker.widthAnchor.constraint(lessThanOrEqualToConstant: 200),
+            projectPicker.widthAnchor.constraint(lessThanOrEqualToConstant: 160),
+            filterPicker.widthAnchor.constraint(lessThanOrEqualToConstant: 110),
+            sortPicker.widthAnchor.constraint(lessThanOrEqualToConstant: 120),
         ])
         return panel
     }
@@ -944,6 +1072,12 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         let y = vf.minY + (vf.height - size.height) / 2 + vf.height * 0.20
         panel.setFrameOrigin(NSPoint(x: x, y: y))
     }
+}
+
+// Top-left origin for the ticket list document view so row 0 is at the top of
+// the scroll view (AppKit's default NSClipView is bottom-left).
+private final class FlippedClipView: NSClipView {
+    override var isFlipped: Bool { true }
 }
 
 // Local notifications for the ticket flow. NSUserNotification is deprecated but

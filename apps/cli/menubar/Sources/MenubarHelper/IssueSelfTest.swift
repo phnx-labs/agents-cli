@@ -25,6 +25,7 @@ enum IssueSelfTest {
         testLinearProjectResolution()
         testLinearTicketRanking()
         testLinearTicketFilter()
+        testLinearTicketQuickFilterAndSort()
         testLinearCache()
         testTicketDispatchContract()
         if failures == 0 {
@@ -391,6 +392,55 @@ enum IssueSelfTest {
               LinearTickets.filter(tickets, query: "   ").count == 2)
     }
 
+    // Quick filter + sort are single dropdowns (not chip blocks). list() is the
+    // one path the panel uses: filter → text search → sort → cap. Flat list only.
+    private static func testLinearTicketQuickFilterAndSort() {
+        let now = date("2026-08-02T00:00:00Z")
+        let todoP1 = ticket("T-1", title: "todo urgent", priority: 1,
+                            createdAt: "2026-07-01T00:00:00.000Z", stateType: "unstarted")
+        let doingP2 = ticket("T-2", title: "doing mid", priority: 2,
+                             createdAt: "2026-08-01T00:00:00.000Z", stateType: "started")
+        let backlog = ticket("T-3", title: "backlog item", priority: 3,
+                             createdAt: "2026-06-01T00:00:00.000Z",
+                             stateType: "unstarted", stateName: "Backlog")
+        let overdue = ticket("T-4", title: "overdue low", priority: 4,
+                             createdAt: "2026-05-01T00:00:00.000Z",
+                             dueDate: "2026-07-01", stateType: "unstarted")
+        let pool = [todoP1, doingP2, backlog, overdue]
+
+        check("filter Doing keeps only started",
+              LinearTickets.list(pool, filter: .doing, sort: .urgentFirst, now: now)
+                  .map(\.identifier) == ["T-2"])
+        check("filter P1 keeps only priority 1",
+              LinearTickets.list(pool, filter: .p1, sort: .urgentFirst, now: now)
+                  .map(\.identifier) == ["T-1"])
+        check("filter Overdue keeps past due dates",
+              LinearTickets.list(pool, filter: .overdue, sort: .urgentFirst, now: now)
+                  .map(\.identifier) == ["T-4"])
+        check("filter Backlog matches state name",
+              LinearTickets.list(pool, filter: .backlog, sort: .urgentFirst, now: now)
+                  .map(\.identifier) == ["T-3"])
+        check("sort Newest leads with latest createdAt",
+              LinearTickets.list(pool, filter: .all, sort: .newest, now: now)
+                  .map(\.identifier).first == "T-2")
+        check("sort Oldest leads with earliest createdAt",
+              LinearTickets.list(pool, filter: .all, sort: .oldest, now: now)
+                  .map(\.identifier).first == "T-4")
+        check("sort Due puts dated tickets first",
+              LinearTickets.list(pool, filter: .all, sort: .due, now: now)
+                  .map(\.identifier).first == "T-4")
+        check("text query ANDs with the filter",
+              LinearTickets.list(pool, filter: .all, sort: .newest, query: "urgent", now: now)
+                  .map(\.identifier) == ["T-1"])
+        check("list cap truncates a long result",
+              LinearTickets.list(Array(repeating: todoP1, count: 60),
+                                 filter: .all, sort: .newest, now: now,
+                                 cap: 10).count == 10)
+        check("QuickFilter titles are human, not raw keys",
+              LinearTickets.QuickFilter.p1.title == "P1 only"
+                  && LinearTickets.QuickSort.urgentFirst.title == "Urgent first")
+    }
+
     // The cache is what makes the panel appear instantly; a write for one project
     // must not disturb another, and staleness has to be honest.
     private static func testLinearCache() {
@@ -489,12 +539,14 @@ enum IssueSelfTest {
     private static func ticket(_ identifier: String, title: String = "t", priority: Int = 2,
                                createdAt: String? = "2026-07-01T00:00:00.000Z",
                                dueDate: String? = nil,
-                               stateType: String = "unstarted") -> LinearTicket {
-        LinearTicket(identifier: identifier, title: title, priority: priority,
-                     state: LinearTicketState(name: stateType == "started" ? "Doing" : "Todo",
-                                              type: stateType),
-                     url: "https://linear.app/getrush/issue/\(identifier)",
-                     dueDate: dueDate, createdAt: createdAt)
+                               stateType: String = "unstarted",
+                               stateName: String? = nil) -> LinearTicket {
+        let name = stateName
+            ?? (stateType == "started" ? "Doing" : "Todo")
+        return LinearTicket(identifier: identifier, title: title, priority: priority,
+                            state: LinearTicketState(name: name, type: stateType),
+                            url: "https://linear.app/getrush/issue/\(identifier)",
+                            dueDate: dueDate, createdAt: createdAt)
     }
 
     private static func mouseEvent(modifiers: NSEvent.ModifierFlags) -> NSEvent {

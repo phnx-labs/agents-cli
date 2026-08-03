@@ -10,10 +10,137 @@ import Foundation
 // self-test (IssueSelfTest.swift). The actual fetch lives in AgentsCLI, which
 // shells the `linear` skill CLI the same way the ticket-create path does.
 enum LinearTickets {
-    // How many rows the panel shows, and how long a fetched scope is reused
-    // before the next summon refreshes it in the background.
-    static let displayLimit = 5
+    // How many rows fit in the ticket scroll viewport before the user scrolls.
+    // The list itself can be longer (see `viewportLimit` vs full filtered set).
+    static let viewportRows = 5
+    // Hard cap on rows kept after filter+sort so a huge project never materializes
+    // hundreds of AppKit views; scrolling still covers a useful slice.
+    static let listCap = 40
     static let cacheTTL: TimeInterval = 90
+    // Back-compat name used by older call sites / docs.
+    static let displayLimit = viewportRows
+
+    // MARK: Quick filter (one dropdown) — status / priority / overdue
+
+    // A single popup, not a chip matrix: each option is one predicate over the
+    // open tickets already loaded for the project. Labels are not in the model
+    // yet, so this stays status + priority + overdue.
+    enum QuickFilter: String, CaseIterable {
+        case all
+        case todo
+        case doing
+        case backlog
+        case p1
+        case p2
+        case overdue
+
+        var title: String {
+            switch self {
+            case .all: return "All open"
+            case .todo: return "Todo"
+            case .doing: return "Doing"
+            case .backlog: return "Backlog"
+            case .p1: return "P1 only"
+            case .p2: return "P2 only"
+            case .overdue: return "Overdue"
+            }
+        }
+
+        func matches(_ ticket: LinearTicket, now: Date = Date()) -> Bool {
+            switch self {
+            case .all:
+                return true
+            case .todo:
+                // Linear "unstarted" with a Todo-like name, or plain unstarted.
+                let t = ticket.state?.type ?? ""
+                let n = ticket.stateName.lowercased()
+                return t == "unstarted" && !n.contains("backlog")
+            case .doing:
+                return ticket.isStarted
+            case .backlog:
+                return ticket.stateName.lowercased().contains("backlog")
+                    || (ticket.state?.type == "backlog")
+            case .p1:
+                return ticket.priority == 1
+            case .p2:
+                return ticket.priority == 2
+            case .overdue:
+                return isOverdue(ticket, now: now)
+            }
+        }
+    }
+
+    // MARK: Quick sort (one dropdown) — flat list, no grouping
+
+    enum QuickSort: String, CaseIterable {
+        case urgentFirst
+        case newest
+        case oldest
+        case due
+        case priority
+
+        var title: String {
+            switch self {
+            case .urgentFirst: return "Urgent first"
+            case .newest: return "Newest"
+            case .oldest: return "Oldest"
+            case .due: return "Due date"
+            case .priority: return "Priority"
+            }
+        }
+    }
+
+    /// Apply the quick filter, then the chosen sort. No status-group headers —
+    /// one flat list. `query` is the capture field's text search (AND).
+    static func list(_ tickets: [LinearTicket],
+                     filter: QuickFilter = .all,
+                     sort: QuickSort = .urgentFirst,
+                     query: String = "",
+                     now: Date = Date(),
+                     cap: Int = listCap) -> [LinearTicket] {
+        let filtered = tickets.filter { filter.matches($0, now: now) }
+        let searched = Self.filter(filtered, query: query)
+        let ordered = applySort(searched, sort: sort, now: now)
+        return Array(ordered.prefix(cap))
+    }
+
+    static func applySort(_ tickets: [LinearTicket],
+                          sort: QuickSort,
+                          now: Date = Date()) -> [LinearTicket] {
+        switch sort {
+        case .urgentFirst:
+            return rank(tickets, now: now)
+        case .newest:
+            return tickets.sorted { a, b in
+                let (ca, cb) = (a.createdAt ?? "", b.createdAt ?? "")
+                if ca != cb { return ca > cb }
+                return a.identifier < b.identifier
+            }
+        case .oldest:
+            return tickets.sorted { a, b in
+                let (ca, cb) = (a.createdAt ?? "", b.createdAt ?? "")
+                if ca != cb { return ca < cb }
+                return a.identifier < b.identifier
+            }
+        case .due:
+            // Soonest due first; undated sink to the end; overdue still compare by date.
+            return tickets.sorted { a, b in
+                let (da, db) = (a.dueDate ?? "", b.dueDate ?? "")
+                switch (da.isEmpty, db.isEmpty) {
+                case (false, false) where da != db: return da < db
+                case (false, true): return true
+                case (true, false): return false
+                default: return a.identifier < b.identifier
+                }
+            }
+        case .priority:
+            return tickets.sorted { a, b in
+                let (pa, pb) = (priorityOrder(a.priority), priorityOrder(b.priority))
+                if pa != pb { return pa < pb }
+                return a.identifier < b.identifier
+            }
+        }
+    }
 
     // MARK: Repo -> Linear project
 
