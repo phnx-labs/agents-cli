@@ -42,17 +42,19 @@ All notable changes to the Factory extension are documented here. Format follows
 - **`Agents: Fork Current Session` is now `Agents: Fork`, and a second command forks
   a session you pick from a browser.** The rename is title-only — same command id,
   same behavior (fork the tab you are in). The new `Agents: Fork (Pick Session)`
-  opens a session browser instead: recent transcripts grouped by the machine they
-  live on, newest first, with the session you invoked from pinned to the top of its
-  group, filterable by topic / project / harness / id. A title-bar button switches
+  opens a session browser instead: recent transcripts from one browsed device,
+  newest first, with the session you invoked from pinned to the top, filterable by
+  topic / project / harness / id. A title-bar button switches
   the listing to any registered device (`agents sessions --all --json --host <device>`),
   so sessions on a fleet box are browsable from here. Picking one forks it **where it
   lives**: a row on this machine launches locally, a row on a device launches over
-  `agents run --host <device> --cwd <session cwd>`, so the sibling agent starts on the
-  box that actually holds the transcript, in the same repo. Source:
+  `agents run --host <device> --remote-cwd <session cwd>`, so the sibling agent starts on the
+  box that actually holds the transcript, in the same repo. This exact remote path
+  is deliberately distinct from ordinary target-host launches, which keep passing
+  the local workspace through portable `--cwd` for agents-cli to re-root. Source:
   `apps/factory/src/core/sessionBrowser.ts`, `apps/factory/src/vscode/extension.ts`
   (`pickSessionToFork`, `forkPickedSession`, `openSingleAgentWithQueue`'s new
-  `remoteCwd`), `apps/factory/package.json`.
+  `remoteCwd`, emitted as the CLI's exact `--remote-cwd`), `apps/factory/package.json`.
 
 ## [0.9.305] - 2026-08-03
 
