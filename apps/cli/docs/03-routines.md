@@ -463,6 +463,28 @@ On a device not in the allowlist the job is fully inert:
 jobs display the word `all`; restricted lists are grayed when the local machine
 is not in the list. `--json` includes a `devices` array and `runsHere` boolean.
 
+#### Last Status is per-device
+
+Run records live in the runs dir of whichever machine fired the routine and carry
+no device attribution, so a record only ever describes the device you are reading
+it on. `agents routines list` therefore reports **Last Status only for routines
+this device fires**: a routine pinned elsewhere shows `-` in the table, and
+`--json` returns `null` for `lastStatus`, `exitCode`, `failureReason`,
+`lastRunStartedAt`, and `lastRunCompletedAt` (`runsHere: false` says why). The
+same routine renders one row per pinned device, and only the **This machine** row
+carries a status.
+
+Without this, a routine re-pinned from one device to another kept reporting the
+old device's leftover records — showing a peer's healthy routine as failed, both
+in the table and in the menu bar, which reads this JSON.
+
+Read a peer's status where it actually ran:
+
+```bash
+agents routines list --device yosemite-s0     # that device's own view
+agents routines runs <name> --device yosemite-s0
+```
+
 #### v12 migration
 
 Existing routines that use the legacy singular `device: X` field are automatically
@@ -728,6 +750,89 @@ one-shot — a run never re-enters `running` once it leaves.
 
 Plus one error branch: `child.on('error')` at `runner.ts:208` (spawn itself
 failed — binary not found, EACCES, etc.) → `status='failed'` with `exitCode=null`.
+
+### `missed` — the run that never started
+
+`missed` is the one status the runner never writes, because no process was ever
+spawned. It records that a scheduled fire **did not happen**: the scheduler was
+down, asleep, or wedged when the routine came due. `claimMissedFire`
+(`catchup.ts`) writes it with `pid: null`, `exitCode: null`, and `startedAt` set
+to the moment the fire was **due** — not the moment it was noticed — so the gap
+lands at the right point in `agents routines runs <name>`.
+
+Without it a miss left no trace at all, and the listing kept showing the previous
+run's `completed` as though it were current.
+
+## Catching up a missed fire
+
+Fires are in-process croner timers, and croner only schedules forward from "now".
+A daemon that was not running when a routine came due therefore loses that fire —
+`loadAll()` (`scheduler.ts`) rebuilds every timer looking only at the future, so
+nothing replays it. This is routine on a laptop: close the lid over a 9pm
+schedule and the routine simply never ran.
+
+The daemon recovers from this itself. `detectOverdueJobs` (`overdue.ts`) compares
+each enabled routine's most recent expected fire against its most recent recorded
+run; `runCatchup` (`catchup.ts`) then records each miss and re-runs it via the
+same detached path `agents routines catchup` uses. It runs **at daemon startup
+and every 5 minutes** — a startup-only pass would miss a fire lost while the
+daemon stayed up but its event loop was wedged, or one lost across an OS suspend
+the process survived.
+
+Catch-up is idempotent without a ledger: the `missed` record advances the overdue
+comparison, so the same missed fire is never reconsidered — across ticks, a daemon
+restart, or a restart storm.
+
+Two callers that overlap are handled by a claim rather than a lock. Writing the
+`missed` record creates its run directory with a non-recursive `mkdir` — an
+atomic test-and-set — and only the caller that wins it runs the routine. So if
+the daemon's 5-minute pass and a manual `agents routines catchup` overlap, the
+routine still starts exactly once; the loser reports `already claimed by the
+scheduler`. This is deliberately at-most-once: a process that dies between
+claiming and spawning leaves that fire un-run, which is the right trade when the
+alternative is spawning an agent twice.
+
+Device scoping still applies: a routine pinned elsewhere is skipped, so a fleet of
+machines never all catch up the same routine.
+
+A routine is also never caught up for a fire that **predates it**. `writeJob` stamps
+`createdAt` once, and overdue detection floors the most recent expected occurrence at
+it (`routineEffectiveStart`, `overdue.ts`), falling back to the routine file's mtime
+for routines written before the field existed. Without that floor, adding a routine on
+any daily or weekly schedule whose slot had already passed would make it instantly
+overdue — and catch-up would run it once, immediately, minutes after you created it.
+
+### Opting out — `catchup: false`
+
+Catch-up defaults to **on**: a routine you scheduled is one you expect to have
+run, so losing a fire silently is never the helpful default.
+
+Set `catchup: false` on a routine whose value is tied to its clock — a 9am
+standup brief is worthless at 3pm:
+
+```yaml
+name: crm-pipeline-brief
+schedule: "0 8 * * 1-5"
+catchup: false
+```
+
+or at creation:
+
+```bash
+agents routines add crm-pipeline-brief --schedule "0 8 * * 1-5" --agent claude \
+  --no-catchup --prompt "Morning pipeline brief"
+```
+
+An opted-out routine still **records** the miss — you see it as `missed` in the
+listing and in `agents routines runs` — it is just not re-run.
+`agents routines list --json` reports the effective value as `catchup`.
+
+Force a pass by hand at any time:
+
+```bash
+agents routines catchup            # record + run every missed fire now
+agents routines catchup --dry-run  # record the misses, run nothing
+```
 
 ## Sandbox Data Flow
 

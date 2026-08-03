@@ -581,7 +581,13 @@ export function toFloorAgentFromRemote(r: RemoteSessionLike, pinned: Set<string>
       target = active.activeForm || active.content
     }
   }
-  const id = `remote-${r.host}-${r.sessionId}`
+  // Key on the session id when present. A row can arrive id-less (a tmux pane the
+  // CLI could not attribute); those would ALL collapse to `remote-<host>-`, a React
+  // key collision that makes distinct panes overwrite each other in the grid. Fall
+  // back to the pane / pid / cloud-task handle — each unique per row — so every
+  // session stays its own card. Once the CLI attributes the pane, sessionId wins.
+  const stableId = r.sessionId || r.tmuxPane || (r.pid ? String(r.pid) : '') || r.cloudTaskId || r.cwd
+  const id = `remote-${r.host}-${stableId}`
   const name = humanRemoteSessionName(r)
   const taskAnchor = firstNonEmptyStr(
     r.topic,

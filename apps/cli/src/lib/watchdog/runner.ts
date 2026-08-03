@@ -34,6 +34,13 @@ import * as path from 'path';
 import type { ActiveSession } from '../session/active.js';
 import { getActiveSessions } from '../session/active.js';
 import {
+  reconcilePresence,
+  loadPresence,
+  savePresence,
+  observedFromActive,
+  type PresenceTransition,
+} from '../session/presence.js';
+import {
   resolveInjectTargetForSession,
   type InjectRail,
 } from '../terminal/resolve.js';
@@ -177,6 +184,18 @@ export interface WatchdogTickResult {
     nudged: number;
     unaddressable: number;
     skipped: number;
+  };
+  /**
+   * RUSH-2007 Layer C: per-session presence reconciled from this tick's active
+   * scan. `transitions` carries only the sessions whose connect/disconnect status
+   * flipped this tick — an interactive drop is a reconnect-nudge candidate, a
+   * headless remote a keep-alive. Surfaced for the tray/status; does not alter the
+   * nudge decisions above.
+   */
+  presence: {
+    connected: number;
+    disconnected: number;
+    transitions: PresenceTransition[];
   };
 }
 
@@ -447,6 +466,22 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
   const injectFn = opts.injectFn ?? injectIntoTerminal;
 
   const sessions = opts.sessions ?? (await getActiveSessions());
+
+  // RUSH-2007 Layer C — reconcile per-session presence from this tick's active
+  // scan and persist it. Additive: it derives connect/disconnect from what this
+  // tick actually saw and surfaces the flips (interactive drop => reconnect-nudge
+  // candidate, headless remote => keep-alive) for the tray/status, without
+  // touching the nudge decisions below. Uses the tick's own session view (fleet-
+  // wide when the caller passes gatherRemoteActive results), so it adds no SSH
+  // fan-out of its own.
+  const presenceResult = reconcilePresence(loadPresence(dir), observedFromActive(sessions), nowMs);
+  savePresence(presenceResult.next, dir);
+  const presence = {
+    connected: Object.values(presenceResult.next).filter((r) => r.status === 'connected').length,
+    disconnected: Object.values(presenceResult.next).filter((r) => r.status === 'disconnected').length,
+    transitions: presenceResult.transitions,
+  };
+
   const ledger = readNudgeLedger(dir);
   // Cooldown timestamps this tick decided to (re)start — merged into the ledger
   // under a lock at the end so a concurrent tick's updates are never lost.
@@ -669,7 +704,7 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
     unaddressable: outcomes.filter((o) => o.addressable === false).length,
     skipped: outcomes.filter((o) => o.decision === 'skip').length,
   };
-  const result: WatchdogTickResult = { atMs: nowMs, didNudge: opts.nudge === true, outcomes, counts };
+  const result: WatchdogTickResult = { atMs: nowMs, didNudge: opts.nudge === true, outcomes, counts, presence };
   writeJsonFile(path.join(dir, 'last-tick.json'), result);
 
   // Heartbeat + decision/nudge events to the canonical watchdog.log the Factory

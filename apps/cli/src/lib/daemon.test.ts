@@ -147,7 +147,7 @@ describe('generateLaunchdPlist', () => {
   });
 });
 
-describe('generateSystemdUnit', () => {
+describe.skipIf(process.platform === 'win32')('generateSystemdUnit', () => {
   it('never embeds a token Environment line, only PATH', () => {
     expect(generateSystemdUnit()).not.toContain('CLAUDE_CODE_OAUTH_TOKEN');
   });

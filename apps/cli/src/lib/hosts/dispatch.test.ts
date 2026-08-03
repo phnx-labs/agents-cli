@@ -472,6 +472,28 @@ describe('withActorEnv — forward actor provenance across the SSH hop (RUSH-202
     expect(posixEnvExports(env)).toContain('export AGENTS_ACTOR=muqsit@example.com');
   });
 
+  it('forwards the launching tab AGENT_TERMINAL_ID so the remote registry can be joined back to it', () => {
+    setActor({ AGENTS_ACTOR: 'muqsit@example.com', AGENTS_ACTOR_KIND: 'human' });
+    process.env.AGENT_TERMINAL_ID = 'cl-1785738033788-17';
+    const env = withActorEnv();
+    expect(env.AGENT_TERMINAL_ID).toBe('cl-1785738033788-17');
+    // It has to survive into the command the dispatch builders actually ship —
+    // an env that stops at the local process leaves the device's session feed
+    // with no way to say which session belongs to this tab.
+    const cmd = buildRemoteAgentsInvocation(['run', 'claude', '--interactive'], undefined, undefined, env);
+    expect(cmd).toContain('export AGENT_TERMINAL_ID=cl-1785738033788-17');
+  });
+
+  it('omits AGENT_TERMINAL_ID entirely when the launch came from no tracked terminal', () => {
+    setActor({ AGENTS_ACTOR: 'muqsit@example.com', AGENTS_ACTOR_KIND: 'human' });
+    delete process.env.AGENT_TERMINAL_ID;
+    expect('AGENT_TERMINAL_ID' in withActorEnv()).toBe(false);
+    // A whitespace-only value is not a terminal id either — forwarding it would
+    // put an empty join key in the remote registry.
+    process.env.AGENT_TERMINAL_ID = '   ';
+    expect('AGENT_TERMINAL_ID' in withActorEnv()).toBe(false);
+  });
+
   it('merges the actor UNDER a caller env — the caller value wins, the doctor PATH coexists', () => {
     setActor({ AGENTS_ACTOR: 'muqsit@example.com', AGENTS_ACTOR_KIND: 'human' });
     const env = withActorEnv({

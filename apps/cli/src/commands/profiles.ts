@@ -86,7 +86,7 @@ async function promptForSecret(message: string): Promise<string> {
 /** Read all available data from stdin synchronously, trimmed. */
 
 /** Ensure a provider API key exists in keychain, prompting or reading stdin if missing. */
-async function ensureProviderToken(provider: string, signupUrl?: string, fromStdin?: boolean): Promise<void> {
+export async function ensureProviderToken(provider: string, signupUrl?: string, fromStdin?: boolean): Promise<void> {
   const item = keychainItemName(provider);
   if (hasKeychainToken(item)) {
     return;

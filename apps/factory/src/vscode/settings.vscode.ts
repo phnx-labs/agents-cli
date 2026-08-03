@@ -25,6 +25,7 @@ import { CLAUDE_TITLE } from '../core/utils';
 import { discoverRecentSessions, getSessionPathBySessionId } from './sessions.vscode';
 import { formatTerminalTitle, parseTerminalName, getSessionChunk } from '../core/utils';
 import { getBuiltInByKey, getBuiltInDefByTitle } from '../core/agents';
+import { FORK_LINEAGE_KEY, type ForkEdge } from '../core/forkLineage';
 import {
   mapInventoriesToInstalledAgents,
   buildDispatchHosts,
@@ -2204,13 +2205,16 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         // every online registered device — with the CLI's per-session outcome
         // metrics (duration/cost/tokens). Fetched lazily when the Recap center
         // opens; rides its own 'recapSessions' message.
+        // The fork edges ride along: a fork shares no id with its parent, so
+        // without them the ledger shows two rows that look unrelated.
+        const forkEdges = context.globalState.get<ForkEdge[]>(FORK_LINEAGE_KEY, []);
         try {
           const { fetchRecapSessions } = await import('./remoteSessions.vscode');
           const sessions = await fetchRecapSessions(20, getSettings(context).projectRules ?? []);
-          settingsPanel?.webview.postMessage({ type: 'recapSessions', sessions });
+          settingsPanel?.webview.postMessage({ type: 'recapSessions', sessions, forkEdges });
         } catch (err) {
           console.error('[SETTINGS] Error fetching recap sessions:', err);
-          settingsPanel?.webview.postMessage({ type: 'recapSessions', sessions: [] });
+          settingsPanel?.webview.postMessage({ type: 'recapSessions', sessions: [], forkEdges });
         }
         break;
       }

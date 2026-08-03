@@ -98,32 +98,44 @@ without dispatching.
 ### The ticket list
 
 The panel captures new work; the rows under it are the work that already exists —
-the open Linear tickets of the repo you picked, so you can pick one up instead of
-filing a duplicate.
+the open Linear tickets of the project scoped to the repo you picked, so you can
+pick one up instead of filing a duplicate.
 
-- **Scope follows the repo.** Switching the repo dropdown switches the Linear
-  project: the repo name is matched against `linear projects` after both are
-  reduced to lowercase alphanumerics, so `agents-cli` finds **Agents CLI** with
-  nothing to configure. A repo whose name matches no project says so instead of
-  listing someone else's tickets — pick the project once from the dropdown and
-  that choice is remembered for that repo. A worktree resolves to its parent repo
+Controls sit on **one compact row** of popups (same language as the repo picker —
+not a chip grid or two-column block):
+
+```
+Tickets  [Agents CLI ▾]  [All open ▾]  [Urgent first ▾]  12/58 · urgent first · ⌘N
+ ⌘1  P1  RUSH-1968  Doing  …
+ ⌘2  …                                    ← scroll when there are more rows
+```
+
+- **Project is 1:1 with Linear.** The project popup is the ticket scope. Switching
+  the repo dropdown auto-selects the matching Linear project (the repo name is
+  matched against `linear projects` after both are reduced to lowercase
+  alphanumerics, so `agents-cli` finds **Agents CLI** with nothing to configure).
+  A repo whose name matches no project says so — pick the project once and that
+  choice is remembered for that repo. A worktree resolves to its parent repo
   (via git's common dir), not to the worktree's own directory name.
-- **Urgent first.** Rows are ranked by Linear priority (`P1` … `P4`, then
-  no-priority), then overdue, then already in progress, then newest — the order
-  answers "what should I pick up next", which is not the order Linear returns.
-  The top five show.
-- **Typing filters the list.** Every word you type has to appear in a row's
-  identifier or title, so an existing ticket surfaces before Return files a new
-  one.
+- **Quick filter (dropdown).** One popup, not chips: All open · Todo · Doing ·
+  Backlog · P1 only · P2 only · Overdue. The last pick is remembered.
+- **Quick sort (dropdown).** Flat list only — no status group headers. Options:
+  Urgent first (default: Linear priority, then overdue, then in progress, then
+  newest) · Newest · Oldest · Due date · Priority. The last pick is remembered.
+- **Scrollable rows.** The list viewport shows about five rows; more matches
+  scroll inside the bar so the capture field stays put. Up to 40 rows are kept
+  after filter+sort.
+- **Typing also filters.** Every word you type has to appear in a row's
+  identifier or title (AND with the filter), so an existing ticket surfaces
+  before Return files a new one.
 - **Click a row to dispatch it** to the selected agents in the picked repo
-  (`⌘1` … `⌘5` do the same from the keyboard). **Plan** posts an implementation
-  plan as a comment on the ticket and changes no code; **Run** claims the ticket
+  (`⌘1` … `⌘9` for the first nine listed). **Plan** posts an implementation plan
+  as a comment on the ticket and changes no code; **Run** claims the ticket
   (moving it to whichever state `linear states` reports as `started`), implements
-  it per the repo's `AGENTS.md`, and comments the result. Both are the same headless `agents run --mode auto --balanced
-  --notify` dispatch as a quick Run, named after the ticket (`rush-2098`,
-  `rush-2098-plan`) so it reads as that ticket in `agents sessions`.
-  **`⌘`-click** opens the ticket in Linear instead, when you want to read it
-  first.
+  it per the repo's `AGENTS.md`, and comments the result. Both are the same
+  headless `agents run --mode auto --balanced --notify` dispatch as a quick Run,
+  named after the ticket (`rush-2098`, `rush-2098-plan`) so it reads as that
+  ticket in `agents sessions`. **`⌘`-click** opens the ticket in Linear instead.
 
 A `linear tasks` round trip costs seconds, so the list renders from a warm cache
 (`~/.agents/.history/menubar/linear-cache.json`) and refreshes in the background;
@@ -144,10 +156,10 @@ One rule shapes the menu: **attention floats up, context groups down.**
  │ New Task…                                  ⌘T │   opens the quick-dispatch bar
  │ New Session                                ⌘N │   submenu: one entry per agent
  ├────────────────────────────────────────────────┤
- │ ACTIVE · api  ·  1 running                    │   live work grouped by repo;
- │   ● Claude — draining Linear queue          ›  │   rich rows carry the session's
- │ ACTIVE · web  ·  1 running                    │   own title inline
- │   ● Codex — building hero section           ›  │
+ │ ACTIVE · 3 run · 1 idle · 2 projects          │   projects collapsed by default
+ │   ▶ agents-cli  ●2 ◐1  zion                   │   accordion: ▶ folds agents open
+ │   ▼ web  ●1  zion                             │
+ │     ● Codex · zion · 12m  ⌥ PR#42 — title   › │   › side submenu = full detail
  ├────────────────────────────────────────────────┤
  │ ROUTINES · 16 · next 7:00 PM · 2 paused       │   next few upcoming + failing
  │   ◔ triage-tickets  in 22m                  ›  │   inline; All routines… for
@@ -183,14 +195,17 @@ One rule shapes the menu: **attention floats up, context groups down.**
   nothing running names a terminal the engine can drive. See
   [terminal-engine.md → Choosing a terminal](terminal-engine.md#choosing-a-terminal-for-a-gui-caller).
   (It used to always open Terminal.app.)
-- **ACTIVE · \<repo\>** — live work grouped by repo. A session is *running* if
-  its transcript was written in the last 2 minutes, else *idle*. Rich rows show
-  the session's title inline; the row's submenu reveals the working dir. Idle
-  rows cap at 3 per repo; if the cap hides any, a `+ N more idle ›` row exposes
-  the hidden count and opens the rest in a submenu — the header count always
-  matches what's visible + explicit hidden. The `"other"` bucket (sessions with
-  no repo — a dumping-ground group whose rows carry no per-row signal) collapses
-  to a single `ACTIVE · other · N idle ›` row + submenu when it's idle-only.
+- **ACTIVE** — **project accordion** + **session detail submenu**. Projects are
+  **collapsed by default** as a status strip (`▶ agents-cli  ●8 ◐1  zion`).
+  Click `▶`/`▼` to fold the project open **inline** and list its agents.
+  Focusing an agent row opens a **side submenu (›)** with richer detail and
+  **linkable actions**: work title (and open URL if the title contains one),
+  local/remote + surface, clickable cwd, Linear ticket, GitHub PR, duration,
+  copy session id, optional preview snippet. Chips on the agent row itself
+  (`🎫 RUSH-…`, `⌥ PR#N`) surface links at a glance. All of that comes from the
+  warm `sessions --active --local` cache; expand never shells the CLI or
+  re-indexes transcripts. Work titles prefer the session `topic` over a bare
+  agent name.
 - **ROUTINES** — kept glanceable: the next few upcoming plus any failed, timed-out,
   or overdue routine inline. Failed and timed-out routines include the latest
   failure reason when available; overdue routines are labeled `overdue` even when

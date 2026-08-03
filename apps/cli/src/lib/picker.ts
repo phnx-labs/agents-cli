@@ -455,9 +455,16 @@ export interface DynamicPickerConfig<T, F> {
   /**
    * Side-effecting keys that don't change the filter (e.g. `y` copies a command).
    * Receives the live search `query` so the effect can be search-aware. Return a
-   * short string to flash under the list.
+   * short string to flash under the list, or `{ flash, reload }` when the effect
+   * changed something the rows RENDER (a star, a mark) and the list has to be
+   * rebuilt — the row labels are memoized, so a flash alone leaves them stale.
    */
-  onKey?: (name: string, filter: F, active: T | undefined, query: string) => string | void;
+  onKey?: (
+    name: string,
+    filter: F,
+    active: T | undefined,
+    query: string,
+  ) => string | void | { flash?: string; reload?: boolean };
   /** Key that enters search mode (default `s`). */
   searchKey?: string;
   /** Key that toggles the preview pane (default `tab`). */
@@ -466,6 +473,28 @@ export interface DynamicPickerConfig<T, F> {
   emptyMessage?: string;
   loadingMessage?: string;
   enterHint?: string;
+}
+
+/**
+ * The lookup token for a hotkey: the literal character the key produced, else
+ * readline's key name (`tab`, `escape`, arrows).
+ *
+ * readline reports both `f` and `F` as name `f` — only `sequence` tells them
+ * apart — and gives a punctuation key like `*` no name at all. Keying on the
+ * character makes shifted letters and punctuation bindable, and is a no-op for
+ * every existing binding: for a plain lowercase letter, sequence === name.
+ *
+ * Callers receiving this in `onKey` see the literal character, so a handler that
+ * wants to accept both cases of a letter must say so (`'y'` and `'Y'`); the
+ * keyBindings lookup falls back to the key NAME, which keeps the shifted form of
+ * an existing single-letter binding working without each caller restating it.
+ */
+export function hotkeyToken(key: { name?: string; sequence?: string; ctrl?: boolean; meta?: boolean }): string {
+  const seq = key.sequence;
+  // Printable single characters only — a control code's sequence (`\t`, `\r`,
+  // `\x7f`) must keep resolving to its name.
+  if (!key.ctrl && !key.meta && seq && seq.length === 1 && seq > ' ' && seq !== '\x7f') return seq;
+  return key.name ?? '';
 }
 
 /** The result returned when the user selects a row: the item plus the live filter. */
@@ -499,26 +528,48 @@ export function dynamicPicker<T, F>(config: DynamicPickerConfig<T, F>): Promise<
     const [previewOpen, setPreviewOpen] = useState(Boolean(cfg.buildPreview));
     const [active, setActive] = useState(0);
     const [flash, setFlash] = useState('');
+    // Bumped by an `onKey` that asks for a reload; a dep of the load effect, so a
+    // side effect that changed the rows can rebuild them without a filter change.
+    const [reloadNonce, setReloadNonce] = useState(0);
+    // The counter lives in a ref, not in the state read back from the keypress
+    // closure: that closure can hold a STALE `reloadNonce`, so a second reload
+    // would recompute the same value, the state would not change, and the
+    // repaint would silently never happen (the first star appeared, the second
+    // did not). A ref is always current.
+    const reloadCount = useRef(0);
+    // Bumped when a load RESOLVES. `load` is async, so the render that follows
+    // `setReloadNonce` still sees the pre-load data — memoizing the row labels on
+    // the nonce alone rendered each press's result one press late. Keying them on
+    // load COMPLETION is what actually makes them current.
+    const [loadedSeq, setLoadedSeq] = useState(0);
+    const loadedCount = useRef(0);
     const prefix = usePrefix({ status, theme });
     // Guards against a slow load resolving after a newer filter superseded it.
     const gen = useRef(0);
+    // The filter the last load ran on, so a nonce-only reload (a row's own state
+    // changed) can keep the cursor where the user left it. Snapping back to the
+    // top every time you star a row would make the key unusable for a second one.
+    const loadedFilter = useRef<F | undefined>(undefined);
 
     useEffect(() => {
       const my = ++gen.current;
+      const filterChanged = loadedFilter.current !== filter;
+      loadedFilter.current = filter;
       setLoading(true);
       Promise.resolve(cfg.load(filter))
         .then((rows) => {
           if (my !== gen.current) return;
           setItems(rows);
           setLoading(false);
-          setActive(0);
+          setLoadedSeq((loadedCount.current += 1));
+          if (filterChanged) setActive(0);
         })
         .catch(() => {
           if (my !== gen.current) return;
           setItems([]);
           setLoading(false);
         });
-    }, [filter]);
+    }, [filter, reloadNonce]);
 
     const results = useMemo(() => {
       const q = query.trim();
@@ -527,7 +578,12 @@ export function dynamicPicker<T, F>(config: DynamicPickerConfig<T, F>): Promise<
         value: item,
         label: cfg.labelFor(item, q),
       }));
-    }, [items, query]);
+      // `loadedSeq` is a dep because a reload can legitimately return the SAME
+      // array — `load` hands back its cached pool unchanged when no filter is
+      // active — while what a row RENDERS has changed underneath it. Without this
+      // the labels stay memoized on the old state and the side effect looks like
+      // it silently did nothing (starring a row left the star invisible).
+    }, [items, query, loadedSeq]);
 
     useEffect(() => {
       if (active >= results.length) setActive(0);
@@ -611,15 +667,27 @@ export function dynamicPicker<T, F>(config: DynamicPickerConfig<T, F>): Promise<
         setPreviewOpen(!previewOpen);
         return;
       }
-      const binding = cfg.keyBindings?.[key.name ?? ''];
+      const token = hotkeyToken(key);
+      // Exact character first (so `*` and a shifted `F` are addressable), then
+      // the readline name. The fallback is what preserves the shifted form of an
+      // existing single-letter hotkey: `R`/`C`/`A` used to reach their bindings
+      // via `key.name`, and keying on the character alone would silently retire
+      // them for anyone with caps lock on.
+      const binding = cfg.keyBindings?.[token] ?? cfg.keyBindings?.[key.name ?? ''];
       if (binding) {
         const next = binding(filter);
         if (!Object.is(next, filter)) setFilter(next);
         return;
       }
       if (cfg.onKey) {
-        const msg = cfg.onKey(key.name ?? '', filter, selected?.value, query);
-        if (msg) setFlash(msg);
+        const res = cfg.onKey(token, filter, selected?.value, query);
+        if (typeof res === 'string') setFlash(res);
+        else if (res) {
+          if (res.flash) setFlash(res.flash);
+          // The rows themselves changed — force the load effect to re-run so the
+          // memoized labels are rebuilt.
+          if (res.reload) setReloadNonce((reloadCount.current += 1));
+        }
       }
     });
 

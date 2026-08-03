@@ -23,6 +23,10 @@ import {
   formatKimiPlan,
   normalizeDroidWindows,
   normalizeCursorUsage,
+  antigravityModelShortLabel,
+  antigravityTokenNeedsRefresh,
+  normalizeAntigravityWindows,
+  parseAntigravityOauthPayload,
   USAGE_SOURCE_AGENT_IDS,
   type DroidBillingLimitsResponse,
   type KimiUsagesResponse,
@@ -141,7 +145,7 @@ describe('usage formatting', () => {
   });
 
   it('pins the complete usage source registry and derives support from it', () => {
-    expect(USAGE_SOURCE_AGENT_IDS).toEqual(['claude', 'codex', 'kimi', 'droid', 'grok', 'cursor']);
+    expect(USAGE_SOURCE_AGENT_IDS).toEqual(['claude', 'codex', 'kimi', 'droid', 'grok', 'cursor', 'antigravity']);
     for (const agentId of ALL_AGENT_IDS) {
       expect(agentReportsUsage(agentId)).toBe(USAGE_SOURCE_AGENT_IDS.includes(agentId as never));
     }
@@ -183,6 +187,85 @@ describe('usage formatting', () => {
     // Missing premium bucket entirely -> no window, no throw.
     expect(normalizeCursorUsage({ startOfMonth: '2026-07-22T11:35:59.000Z' })).toEqual([]);
     expect(normalizeCursorUsage({})).toEqual([]);
+  });
+
+  it('parseAntigravityOauthPayload reads the raw JSON and the go-keyring-base64 wrapper', () => {
+    // Linux file-fallback shape: raw { token: {…} } JSON.
+    const raw = JSON.stringify({
+      token: { access_token: 'ya29.x', refresh_token: 'rt', expiry: '2026-08-01T21:06:25Z' },
+      auth_method: 'consumer',
+    });
+    expect(parseAntigravityOauthPayload(raw)).toEqual({
+      access_token: 'ya29.x',
+      refresh_token: 'rt',
+      expiry: '2026-08-01T21:06:25Z',
+    });
+
+    // macOS Keychain shape: go-keyring prefixes the same JSON with base64.
+    const wrapped = `go-keyring-base64:${Buffer.from(raw, 'utf-8').toString('base64')}`;
+    expect(parseAntigravityOauthPayload(wrapped)?.refresh_token).toBe('rt');
+
+    // Malformed / empty / token-less payloads => null, never a throw.
+    expect(parseAntigravityOauthPayload('not json')).toBeNull();
+    expect(parseAntigravityOauthPayload('{}')).toBeNull();
+    expect(parseAntigravityOauthPayload(JSON.stringify({ token: {} }))).toBeNull();
+  });
+
+  it('antigravityTokenNeedsRefresh gates on the RFC3339 expiry with a leeway', () => {
+    const now = Date.parse('2026-08-03T06:00:00Z');
+    expect(antigravityTokenNeedsRefresh('2026-08-03T07:00:00Z', now)).toBe(false); // 1h out
+    expect(antigravityTokenNeedsRefresh('2026-08-03T06:00:30Z', now)).toBe(true); // inside leeway
+    expect(antigravityTokenNeedsRefresh('2026-08-01T21:06:25Z', now)).toBe(true); // expired
+    // Missing/unparseable expiry reads as still-fresh (the quota call is the truth).
+    expect(antigravityTokenNeedsRefresh(null, now)).toBe(false);
+    expect(antigravityTokenNeedsRefresh('not-a-date', now)).toBe(false);
+  });
+
+  it('antigravityModelShortLabel compacts gemini model ids', () => {
+    expect(antigravityModelShortLabel('gemini-2.5-flash-lite')).toBe('2.5FL');
+    expect(antigravityModelShortLabel('gemini-2.5-pro')).toBe('2.5P');
+    expect(antigravityModelShortLabel('gemini-3.1-flash-lite')).toBe('3.1FL');
+    // Unknown ids pass through untouched rather than rendering a blank tag.
+    expect(antigravityModelShortLabel('custom-model')).toBe('customM');
+  });
+
+  it('normalizeAntigravityWindows builds one bar per model, most-used first', () => {
+    // Real :retrieveUserQuota shape (plus a duplicated model and a junk bucket).
+    const windows = normalizeAntigravityWindows([
+      { modelId: 'gemini-2.5-flash', tokenType: 'REQUESTS', remainingFraction: 1, resetTime: '2026-08-04T07:07:52Z' },
+      { modelId: 'gemini-3.1-pro', tokenType: 'REQUESTS', remainingFraction: 0.42, resetTime: '2026-08-04T07:07:52Z' },
+      { modelId: 'gemini-3.1-pro', tokenType: 'REQUESTS', remainingFraction: 0.5, resetTime: '2026-08-04T07:07:52Z' },
+      { modelId: 'gemini-2.5-pro', remainingFraction: 0 },
+      { modelId: null, remainingFraction: 0.5 }, // no model id -> dropped
+      { modelId: 'gemini-2.5-flash-lite' }, // no fraction -> dropped
+    ]);
+
+    expect(windows.map((w) => w.label)).toEqual(['gemini-2.5-pro', 'gemini-3.1-pro', 'gemini-2.5-flash']);
+    const pro = windows.find((w) => w.label === 'gemini-3.1-pro');
+    // Duplicate buckets keep the LOWEST remaining fraction.
+    expect(pro?.usedPercent).toBeCloseTo(58, 5);
+    expect(pro?.shortLabel).toBe('3.1P');
+    expect(pro?.key).toBe('session');
+    expect(pro?.resetsAt?.toISOString()).toBe('2026-08-04T07:07:52.000Z');
+    // Unknown window length stays null (never an inferred 5h session).
+    expect(pro?.windowMinutes).toBeNull();
+    // A fully drained bucket reads as 100% used.
+    expect(windows[0]?.usedPercent).toBe(100);
+  });
+
+  it('getUsageInfo(antigravity) renders nothing when no credential exists', async () => {
+    // No credential file in the temp home, keyring probe disabled -> null, no throw.
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-agy-usage-'));
+    const prev = process.env.AGENTS_NO_KEYCHAIN_PROBE;
+    process.env.AGENTS_NO_KEYCHAIN_PROBE = '1';
+    try {
+      const info = await getUsageInfo('antigravity', { home });
+      expect(info).toEqual({ snapshot: null, error: null });
+    } finally {
+      if (prev === undefined) delete process.env.AGENTS_NO_KEYCHAIN_PROBE;
+      else process.env.AGENTS_NO_KEYCHAIN_PROBE = prev;
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it('parses Grok usage from the local unified.jsonl (real log shape)', async () => {

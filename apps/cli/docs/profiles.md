@@ -32,6 +32,37 @@ The model is written to the host's model env var — `OPENCODE_MODEL` for openco
 
 A harness *is* a profile — same `~/.agents/profiles/<name>.yml`, same `agents run` resolution, same device sync via `agents repo push user`. The difference from `agents profiles add`: `harness add` takes the host+model one-shot (no preset needed) and owns its own `--host` flag, whereas `agents profiles --host <device>` is reserved for running the profiles command on a remote device.
 
+### Forking a harness (`agents harness fork`)
+
+`fork` is the one verb for both starting points — a native harness, or a custom one you already tuned:
+
+```sh
+# fork the native OpenCode harness onto a DeepSeek model, keyed by OpenRouter
+agents harness fork opencode deepseek --model deepseek/deepseek-v4-flash-0731 --auth-provider openrouter
+
+# fork Claude Code onto a private gateway
+agents harness fork claude corp --model gpt-x --base-url https://gw.corp/v1 --auth-provider corp
+
+# copy an existing harness and swap only the model
+agents harness fork deepseek deepseek-chat --model deepseek/deepseek-chat-v3
+```
+
+Forking a **native** harness requires `--model` — there is no model to inherit. Forking a **custom** harness copies everything (env, endpoint, auth binding, `fallback_model`, host version pin) and applies only the flags you pass; the two diverge from that point, so removing the source never affects the fork. `--label` sets the name `agents view` prints, `--force` overwrites an existing harness of the same name. The fork records its parent as `forkedFrom:` in the YAML — display-only lineage.
+
+### Custom harnesses are their own agent type
+
+`agents view` lists each custom harness as its own block, beside Claude and Codex rather than indented under whichever host CLI executes it — because `agents run <name>` already launches it the same way a native agent id is launched:
+
+```
+  deepseek-flash (custom)
+    deepseek/deepseek-v4-flash-0731  openrouter stored  via claude
+
+  deepseek-chat (custom · forked from deepseek-flash)
+    deepseek/deepseek-chat-v3        openrouter stored  via claude
+```
+
+The row carries the pinned model, the account/auth state, and `via <host>` — the native harness that actually runs it, with its version when the harness pins one. A harness whose host CLI has no install is flagged `(host <id> not installed)` rather than listed as runnable. `agents view <name>` describes one harness (host, model, provider, auth, lineage, YAML path), and `agents view <name> --json` emits its summary. In `agents view <agent> --json`, the harnesses hosted by that agent are under the `harnesses` key.
+
 ## Top-level resource profiles
 
 `agents profile use <name>` activates a resource profile from `agents.yaml`.

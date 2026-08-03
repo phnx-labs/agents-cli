@@ -55,6 +55,12 @@ export interface RotateResult {
   healthy: RotateCandidate[];
   /** Candidates excluded (not signed in, or out of credits). */
   excluded: RotateCandidate[];
+  /**
+   * True when NO candidate on this machine had usage data fresh enough to decide
+   * on, so the pick was made from unverified snapshots. Callers surface it —
+   * routing blind is a fact the operator needs, not an internal detail.
+   */
+  usageUnverified?: boolean;
 }
 
 export const RUN_STRATEGIES: RunStrategy[] = ['pinned', 'available', 'balanced'];
@@ -112,6 +118,28 @@ function isRotationEligible(candidate: RotateCandidate): boolean {
 
 function isAvailableEligible(candidate: RotateCandidate): boolean {
   return isRotationEligible(candidate);
+}
+
+/**
+ * How old a usage snapshot may be and still settle a routing DECISION.
+ *
+ * Deliberately far tighter than the 24h stale-while-revalidate window the
+ * display paths use (`USAGE_CACHE_SWR_MS`): `agents view` rendering a slightly
+ * old bar costs nothing, but the router choosing an account from one costs the
+ * whole run. Measured case — `yosemite-s1` held snapshots 26h to 2.7 days old
+ * with a failing refresh, so balanced read `muqsit@getrush.ai` as 48% used and
+ * launched into it while the account was actually at its weekly cap.
+ */
+export const USAGE_DECISION_MAX_AGE_MS = 5 * 60 * 1000;
+
+/**
+ * Whether this candidate's usage number is recent enough to route on. A missing
+ * snapshot is unverified by definition — there is no number to trust.
+ */
+export function isUsageVerified(candidate: RotateCandidate, nowMs: number = Date.now()): boolean {
+  const capturedAt = candidate.usageSnapshot?.capturedAt;
+  if (!capturedAt) return false;
+  return nowMs - capturedAt.getTime() <= USAGE_DECISION_MAX_AGE_MS;
 }
 
 function hasUsageAvailable(candidate: RotateCandidate): boolean {
@@ -260,7 +288,10 @@ function dedupeAndSortCandidates(candidates: RotateCandidate[]): RotateCandidate
  * Returns null if no candidate is eligible — callers fall back to the pinned
  * version so behavior stays predictable.
  */
-export function pickBalancedCandidate(candidates: RotateCandidate[]): RotateResult | null {
+export function pickBalancedCandidate(
+  candidates: RotateCandidate[],
+  nowMs: number = Date.now(),
+): RotateResult | null {
   const healthy: RotateCandidate[] = [];
   const excluded: RotateCandidate[] = [];
   for (const c of candidates) {
@@ -279,8 +310,36 @@ export function pickBalancedCandidate(candidates: RotateCandidate[]): RotateResu
     if (!deduped.has(c)) excluded.push(c);
   }
 
-  const picked = weightedRandomByCapacity(sorted);
-  return { picked, healthy: sorted, excluded };
+  const { picked, usageUnverified } = preferVerified(sorted, nowMs, weightedRandomByCapacity);
+  return { picked, healthy: sorted, excluded, usageUnverified };
+}
+
+/**
+ * Choose from the VERIFIED candidates when any exist, else from the whole pool.
+ *
+ * An eligible account whose usage we could not confirm is a guess, not a green
+ * light: the snapshot reads "48% used" with equal confidence whether it was
+ * captured a minute or three days ago, and a box whose refresh is failing stays
+ * wrong indefinitely. Confirmed headroom therefore beats apparent headroom, even
+ * when the unconfirmed number looks better.
+ *
+ * `healthy` deliberately keeps every eligible candidate rather than just the
+ * verified ones. Declining to *pick* an account on stale data and declining to
+ * *fail over to* it after the primary has already hit a 429 are different risks:
+ * by then the alternative is not launching at all, so the failover chain
+ * (rotationFailoverChain, which reads `healthy`) keeps its full safety net —
+ * exactly on the machines this guard is protecting.
+ */
+function preferVerified(
+  pool: RotateCandidate[],
+  nowMs: number,
+  choose: (from: RotateCandidate[]) => RotateCandidate,
+): { picked: RotateCandidate; usageUnverified: boolean } {
+  const verified = pool.filter((c) => isUsageVerified(c, nowMs));
+  return {
+    picked: choose(verified.length > 0 ? verified : pool),
+    usageUnverified: verified.length === 0,
+  };
 }
 
 /**
@@ -314,6 +373,7 @@ function weightedRandomByCapacity(sorted: RotateCandidate[]): RotateCandidate {
 export function pickAvailableCandidate(
   candidates: RotateCandidate[],
   preferredVersion?: string | null,
+  nowMs: number = Date.now(),
 ): RotateResult | null {
   const healthy: RotateCandidate[] = [];
   const excluded: RotateCandidate[] = [];
@@ -333,10 +393,17 @@ export function pickAvailableCandidate(
     if (!deduped.has(c)) excluded.push(c);
   }
 
+  // `available` sorts by apparent headroom and takes the front of the list, so an
+  // unconfirmed "48% used" outranks an accurate "90% used" — the same inversion
+  // that put a launch on an exhausted account under `balanced`. It routes on the
+  // same cache, so it gets the same rule: confirmed headroom first.
+  const { picked: bestVerified, usageUnverified } = preferVerified(sorted, nowMs, (from) => from[0]);
+  // An explicit version preference is an instruction, not a ranking signal, so it
+  // still wins — but only while that version is actually eligible.
   const preferred = preferredVersion
     ? sorted.find((candidate) => candidate.version === preferredVersion)
     : undefined;
-  return { picked: preferred ?? sorted[0], healthy: sorted, excluded };
+  return { picked: preferred ?? bestVerified, healthy: sorted, excluded, usageUnverified };
 }
 
 export async function collectRunCandidates(agent: AgentId): Promise<RotateCandidate[]> {
@@ -368,13 +435,20 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
     })
   );
 
+  // These candidates feed a routing decision, so cap how stale their usage may
+  // be (see USAGE_DECISION_MAX_AGE_MS). Past that the fetch blocks on a live
+  // read instead of serving the cache — one bounded, parallel round trip per
+  // account, and none at all inside the 2-minute fresh window that back-to-back
+  // launches hit. A failed read still falls back to the cache; the pick then
+  // routes around it via isUsageVerified rather than trusting the old number.
   const { usageByKey } = await getUsageInfoByIdentity(
     rows.map(({ home, info, version }) => ({
       agentId: agent,
       home,
       cliVersion: version,
       info,
-    }))
+    })),
+    { maxAgeMs: USAGE_DECISION_MAX_AGE_MS }
   );
 
   return rows.map(({ home: _home, info, ...candidate }) => {

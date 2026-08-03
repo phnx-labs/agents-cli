@@ -65,15 +65,60 @@ export function parseRemoteList(stdout: string, machine: string): SessionMeta[] 
     return [];
   }
   if (!Array.isArray(parsed)) return [];
+  return parsed.flatMap((value) => value && typeof value === 'object' && !Array.isArray(value)
+    ? [{ ...(value as SessionMeta), machine, _remote: true }]
+    : []);
+}
+
+/** Strict parser used at the live peer boundary. A successful process with
+ * malformed/non-array JSON is an incomplete source, not an empty machine. */
+const SAFE_RESOLVER_KEYS = new Set([
+  'id', 'shortId', 'agent', 'origin', 'timestamp', 'lastActivity', 'project',
+  'version', 'label', 'topic', 'machine',
+]);
+
+function isSafeResolverRow(value: Record<string, unknown>): boolean {
+  if (typeof value.id !== 'string' || typeof value.shortId !== 'string'
+    || typeof value.agent !== 'string' || typeof value.timestamp !== 'string') return false;
+  return Object.keys(value).every(key => SAFE_RESOLVER_KEYS.has(key));
+}
+
+export function parseRemoteListPayload(stdout: string, machine: string, safeResolver = false): {
+  sessions: SessionMeta[];
+  valid: boolean;
+} {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    return { sessions: [], valid: false };
+  }
+  if (!Array.isArray(parsed)) return { sessions: [], valid: false };
   const out: SessionMeta[] = [];
   for (const x of parsed) {
-    if (x && typeof x === 'object' && !Array.isArray(x)) {
-      // `_remote` marks these as living on the peer's disk (not a local mirror),
-      // so the picker routes read/resume back over SSH instead of the local FS.
-      out.push({ ...(x as SessionMeta), machine, _remote: true });
+    if (!x || typeof x !== 'object' || Array.isArray(x)) return { sessions: [], valid: false };
+    if (safeResolver && !isSafeResolverRow(x as Record<string, unknown>)) {
+      return { sessions: [], valid: false };
     }
+    // `_remote` marks these as living on the peer's disk (not a local mirror),
+    // so the picker routes read/resume back over SSH instead of the local FS.
+    out.push({ ...(x as SessionMeta), machine, _remote: true });
   }
-  return out;
+  return { sessions: out, valid: true };
+}
+
+/** Convert one completed peer process into the exact aggregation result. This
+ * is the production parent/peer seam and is exercised with real child output. */
+export function remoteListCaptureResult(
+  code: number | null,
+  stdout: string,
+  machine: string,
+  display: string,
+  safeResolver = false,
+): { sessions: SessionMeta[]; unreachable?: string } {
+  if (code !== 0) return { sessions: [], unreachable: display };
+  const parsed = parseRemoteListPayload(stdout, machine, safeResolver);
+  return parsed.valid ? { sessions: parsed.sessions } : { sessions: [], unreachable: display };
 }
 
 /** Run one remote `agents sessions … --json` and capture stdout. Resolves
@@ -106,11 +151,12 @@ async function fetchByTarget(
   os?: string
 ): Promise<{ sessions: SessionMeta[]; unreachable?: string }> {
   const { code, stdout } = await sshCapture(target, remoteListCommand(forwardedArgs, os), REMOTE_TIMEOUT_MS);
-  if (code !== 0) {
+  const safeResolver = forwardedArgs.includes('--resolve-safe-v1');
+  const result = remoteListCaptureResult(code, stdout, machine, display, safeResolver);
+  if (result.unreachable) {
     process.stderr.write(chalk.gray(`  ${display}: unreachable or no agents CLI — skipped\n`));
-    return { sessions: [], unreachable: display };
   }
-  return { sessions: parseRemoteList(stdout, machine) };
+  return result;
 }
 
 export interface RemoteListResult {
@@ -146,7 +192,7 @@ export async function gatherRemoteList(forwardedArgs: string[], hosts?: string[]
     try {
       reg = await loadDevices();
     } catch {
-      return { sessions: [], deviceCount: 0, unreachable: [] };
+      return { sessions: [], deviceCount: 0, unreachable: ['device registry'] };
     }
     for (const d of Object.values(reg)) {
       if (d.tailscale?.online !== true) continue;

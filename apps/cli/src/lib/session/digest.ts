@@ -22,6 +22,23 @@ const READ_TOOLS = new Set(['Read', 'read_file', 'view_file', 'cat_file', 'get_f
 const WRITE_TOOLS = new Set(['Write', 'write_file', 'create_file']);
 const EDIT_TOOLS = new Set(['Edit', 'edit_file', 'replace', 'patch', 'MultiEdit', 'apply_patch']);
 
+/**
+ * Path-shaped noise that must never surface as a session "change": shell
+ * redirect tokens (`2>&1`), unexpanded env-var prefixes (`$WT/...`), dependency
+ * dirs (`node_modules`), and agents-cli's internal `.system` marker. Filtered at
+ * the source so every consumer (summary, picker, digest counts) agrees.
+ */
+export function isNoisePath(p: string): boolean {
+  if (!p) return true;
+  if (/^\d+>[&/]?/.test(p)) return true;                       // 2>&1, 1>&2, 2>/dev/null
+  if (p.includes('>&')) return true;
+  if (p.startsWith('$') || p.startsWith('"$') || p.startsWith("'$")) return true; // unexpanded $VAR
+  if (/(^|\/)node_modules(\/|$)/.test(p)) return true;
+  if (/(^|\/)\.system$/.test(p)) return true;
+  if (p.includes('/.agents/.history/')) return true;           // agents-cli internal archives
+  return false;
+}
+
 /** Extract file paths deleted by a shell command (rm / git rm / unlink). Conservative. */
 export function extractDeletedPaths(command: string): string[] {
   const out: string[] = [];
@@ -32,7 +49,9 @@ export function extractDeletedPaths(command: string): string[] {
     for (const tok of m[1].split(/\s+/)) {
       if (tok.startsWith('-')) continue;          // flags (-r, -f, --force)
       if (/[*?{}]/.test(tok)) continue;           // globs — too imprecise to attribute
-      out.push(tok.replace(/^['"]|['"]$/g, ''));  // unquote
+      const p = tok.replace(/^['"]|['"]$/g, '');   // unquote
+      if (isNoisePath(p)) continue;
+      out.push(p);
     }
   }
   return out;
@@ -62,6 +81,7 @@ export function classifyFileChanges(events: SessionEvent[]): FileChange[] {
     const p = e.path || args.file_path || args.path || '';
     if (!p) continue;
     if (p.includes('.claude/plans/') && p.endsWith('.md')) continue;
+    if (isNoisePath(p)) continue;
 
     if (READ_TOOLS.has(tool)) {
       readBefore.add(p);

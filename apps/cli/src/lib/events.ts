@@ -21,6 +21,36 @@ import { parseSshConnection } from './session/provenance.js';
 import { ensureLockTarget, withFileLock } from './fs-atomic.js';
 import { getUserAgentsDir } from './state.js';
 import { resolveActor, type ActorKind } from './actor.js';
+import { machineId } from './machine-id.js';
+
+/** Lazy perf warehouse write — avoids a hard cycle at module load. */
+function recordPerfTiming(payload: {
+  label: string;
+  durationMs: number;
+  status?: string;
+  agent?: string;
+  version?: string;
+  sessionId?: string;
+  cwd?: string;
+}): void {
+  try {
+    // Dynamic import keeps events.ts free of a load-time dependency on perf/db.
+    void import('./perf/spool.js').then(({ recordSample }) => {
+      recordSample({
+        kind: 'perf.timing',
+        label: payload.label,
+        durationMs: payload.durationMs,
+        status: payload.status,
+        agent: payload.agent,
+        agentVersion: payload.version,
+        sessionId: payload.sessionId,
+        cwd: payload.cwd,
+      });
+    }).catch(() => { /* fail soft */ });
+  } catch {
+    // fail soft
+  }
+}
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -176,6 +206,14 @@ export interface EventMeta {
   tz: string;
   tzName: string;
   hostname: string;
+  /**
+   * Normalized, joinable device id (`machine-id.ts::machineId()`) — the same key
+   * `agents devices`/session-sync use, so an event can be matched to a device.
+   * `hostname` is the raw `os.hostname()`; `machineId` is `zion` for `Zion.local`.
+   * Optional on the type so legacy records (pre-provenance-floor) and the activity
+   * stream still parse; `emit()` always stamps it on the operational log.
+   */
+  machineId?: string;
   platform: NodeJS.Platform;
   arch: string;
   pid: number;
@@ -198,6 +236,10 @@ export interface EventPayload {
   agent?: string;
   version?: string;
   sessionId?: string;
+  /** Spawn-time join key (AGENT_LAUNCH_ID) mapping this action to its launch. */
+  launchId?: string;
+  /** The session that spawned this one (AGENTS_PARENT_SESSION_ID) — lineage edge. */
+  parentSessionId?: string;
 
   // Context
   cwd?: string;
@@ -282,7 +324,7 @@ const SECRET_PATH = /\/(secrets|credentials|\.env|user\.yaml)\b/i;
 const SENSITIVE_ARG_NAME = /password|secret|token|key|api[-_]?key|auth/i;
 const SENSITIVE_PAYLOAD_KEY = /password|secret|token|api[-_]?key|auth/i;
 const RESERVED_META_KEYS = new Set([
-  'ts', 'tz', 'tzName', 'hostname', 'platform', 'arch', 'pid', 'ppid',
+  'ts', 'tz', 'tzName', 'hostname', 'machineId', 'platform', 'arch', 'pid', 'ppid',
   'event', 'level', 'caller', 'session', 'osUser', 'transport', 'sshClientIp',
   'actor', 'kind',
 ]);
@@ -479,6 +521,37 @@ function auditOrigin(): AuditOrigin {
   return _origin;
 }
 
+/**
+ * Provenance the spawn env already carries but no call site passes: the full
+ * (untruncated) session id, the harness `agent` name, the launch join key, and
+ * the parent-session lineage edge. Stamped as DEFAULTS on every event so a
+ * reader of `agents events` can answer "which agent, which session, spawned by
+ * whom" without cross-referencing sessions.db — while an explicit payload value
+ * (e.g. cloud.dispatch's own `agent`) still wins. Read fresh per emit: the reads
+ * are trivial and this stays correct when a test mutates env between calls.
+ */
+interface ProvenanceFloor {
+  sessionId?: string;
+  agent?: string;
+  launchId?: string;
+  parentSessionId?: string;
+}
+/** This machine's normalized device id, resolved once — it can't change mid-process. */
+let _machineId: string | undefined;
+function cachedMachineId(): string {
+  return (_machineId ??= machineId());
+}
+
+function resolveProvenance(env: NodeJS.ProcessEnv = process.env): ProvenanceFloor {
+  const p: ProvenanceFloor = {};
+  const sessionId = env.AGENT_SESSION_ID || env.AGENTS_SESSION_ID;
+  if (sessionId) p.sessionId = sessionId;
+  if (env.AGENTS_AGENT_NAME) p.agent = env.AGENTS_AGENT_NAME;
+  if (env.AGENT_LAUNCH_ID) p.launchId = env.AGENT_LAUNCH_ID;
+  if (env.AGENTS_PARENT_SESSION_ID) p.parentSessionId = env.AGENTS_PARENT_SESSION_ID;
+  return p;
+}
+
 // ─── Core API ─────────────────────────────────────────────────────────────────
 
 /**
@@ -496,11 +569,14 @@ export function emit(event: EventType, payload: EventPayload = {}): void {
     const caller = detectCaller();
     const safePayload = sanitizePayload(payload);
     const record: EventRecord = {
+      // Provenance floor first: env-sourced defaults an explicit payload overrides.
+      ...resolveProvenance(),
       ...safePayload,
       ts: new Date().toISOString(),
       tz: getTimezoneOffset(),
       tzName: getTimezoneName(),
       hostname: os.hostname(),
+      machineId: cachedMachineId(),
       platform: os.platform(),
       arch: os.arch(),
       pid: process.pid,
@@ -578,20 +654,40 @@ export function time<T>(label: string, fn: () => T, payload: EventPayload = {}):
   const start = Date.now();
   try {
     const result = fn();
+    const durationMs = Date.now() - start;
     emit('perf.timing', {
       ...payload,
       label,
-      durationMs: Date.now() - start,
+      durationMs,
       status: 'success',
+    });
+    recordPerfTiming({
+      label,
+      durationMs,
+      status: 'success',
+      agent: payload.agent,
+      version: payload.version,
+      sessionId: payload.sessionId,
+      cwd: payload.cwd,
     });
     return result;
   } catch (err) {
+    const durationMs = Date.now() - start;
     emit('perf.timing', {
       ...payload,
       label,
-      durationMs: Date.now() - start,
+      durationMs,
       status: 'error',
       error: err instanceof Error ? err.message : String(err),
+    });
+    recordPerfTiming({
+      label,
+      durationMs,
+      status: 'error',
+      agent: payload.agent,
+      version: payload.version,
+      sessionId: payload.sessionId,
+      cwd: payload.cwd,
     });
     throw err;
   }
@@ -612,20 +708,40 @@ export async function timeAsync<T>(
   const start = Date.now();
   try {
     const result = await fn();
+    const durationMs = Date.now() - start;
     emit('perf.timing', {
       ...payload,
       label,
-      durationMs: Date.now() - start,
+      durationMs,
       status: 'success',
+    });
+    recordPerfTiming({
+      label,
+      durationMs,
+      status: 'success',
+      agent: payload.agent,
+      version: payload.version,
+      sessionId: payload.sessionId,
+      cwd: payload.cwd,
     });
     return result;
   } catch (err) {
+    const durationMs = Date.now() - start;
     emit('perf.timing', {
       ...payload,
       label,
-      durationMs: Date.now() - start,
+      durationMs,
       status: 'error',
       error: err instanceof Error ? err.message : String(err),
+    });
+    recordPerfTiming({
+      label,
+      durationMs,
+      status: 'error',
+      agent: payload.agent,
+      version: payload.version,
+      sessionId: payload.sessionId,
+      cwd: payload.cwd,
     });
     throw err;
   }
@@ -661,12 +777,21 @@ export function createTimer(label: string, payload: EventPayload = {}): {
     },
     end(endPayload: EventPayload = {}): void {
       const durationMs = Date.now() - start;
+      const merged = { ...payload, ...endPayload };
       emit('perf.timing', {
-        ...payload,
-        ...endPayload,
+        ...merged,
         label,
         durationMs,
         phases: marks,
+      });
+      recordPerfTiming({
+        label,
+        durationMs,
+        status: typeof merged.status === 'string' ? merged.status : undefined,
+        agent: merged.agent,
+        version: merged.version,
+        sessionId: merged.sessionId,
+        cwd: merged.cwd,
       });
     },
   };
@@ -689,20 +814,40 @@ export function withTiming<Args extends unknown[], R>(
     const start = Date.now();
     try {
       const result = await fn(...args);
+      const durationMs = Date.now() - start;
       emit('perf.timing', {
         ...basePayload,
         label,
-        durationMs: Date.now() - start,
+        durationMs,
         status: 'success',
+      });
+      recordPerfTiming({
+        label,
+        durationMs,
+        status: 'success',
+        agent: basePayload.agent,
+        version: basePayload.version,
+        sessionId: basePayload.sessionId,
+        cwd: basePayload.cwd,
       });
       return result;
     } catch (err) {
+      const durationMs = Date.now() - start;
       emit('perf.timing', {
         ...basePayload,
         label,
-        durationMs: Date.now() - start,
+        durationMs,
         status: 'error',
         error: err instanceof Error ? err.message : String(err),
+      });
+      recordPerfTiming({
+        label,
+        durationMs,
+        status: 'error',
+        agent: basePayload.agent,
+        version: basePayload.version,
+        sessionId: basePayload.sessionId,
+        cwd: basePayload.cwd,
       });
       throw err;
     }
@@ -1038,6 +1183,7 @@ export function getLogsPath(): string {
 export function _resetForTest(overrideEventsPath?: string): void {
   _eventsPath = overrideEventsPath;
   _origin = undefined;
+  _machineId = undefined;
   _chmoddedPath = undefined;
   lastRotationCheck = 0;
 }

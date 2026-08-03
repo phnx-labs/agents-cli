@@ -13,7 +13,7 @@ struct Routine: Decodable {
     let overdue: Bool
     let nextRun: String?
     let nextRunHuman: String?
-    let lastStatus: String?            // completed | failed | timeout | running | null
+    let lastStatus: String?            // completed | failed | timeout | running | missed | null
     let exitCode: Int?
     let failureReason: String?
     let lastRunStartedAt: String?
@@ -132,11 +132,27 @@ struct DoctorOrphan: Decodable {
 // authoritative live view (terminals, tmux, IDE, headless). Richer coverage than
 // the cheap live-terminals.json file, which only carries extension-registered
 // terminals; used to feed the ACTIVE section from a warm cache.
+//
+// Field names match the engine JSON (camelCase). Optional fields are omitted by
+// some kinds of session (cloud vs tmux); decode must not require them.
 struct ActiveSession: Decodable {
-    let kind: String
+    let kind: String?
     let sessionId: String?
     let cwd: String?
     let status: String       // running | idle | queued | …
     let context: String?
+    /// Host that owns the process (e.g. zion, yosemite-m0).
     let machine: String?
+    /// Surface on that machine: tmux, codium, terminal, …
+    let host: String?
+    /// First-prompt / assigned task — best "what is it doing" signal.
+    let topic: String?
+    /// Latest-turn snippet (can be long; UI trims).
+    let preview: String?
+    let ticketId: String?
+    let prLink: String?
+    let startedAtMs: Double?
+    let lastActivityMs: Double?
+    let owner: String?
+    let label: String?
 }

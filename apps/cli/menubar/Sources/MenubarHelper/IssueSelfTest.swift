@@ -25,8 +25,10 @@ enum IssueSelfTest {
         testLinearProjectResolution()
         testLinearTicketRanking()
         testLinearTicketFilter()
+        testLinearTicketQuickFilterAndSort()
         testLinearCache()
         testTicketDispatchContract()
+        testActiveDisplay()
         if failures == 0 {
             print("\nALL PASS")
             exit(0)
@@ -391,6 +393,55 @@ enum IssueSelfTest {
               LinearTickets.filter(tickets, query: "   ").count == 2)
     }
 
+    // Quick filter + sort are single dropdowns (not chip blocks). list() is the
+    // one path the panel uses: filter → text search → sort → cap. Flat list only.
+    private static func testLinearTicketQuickFilterAndSort() {
+        let now = date("2026-08-02T00:00:00Z")
+        let todoP1 = ticket("T-1", title: "todo urgent", priority: 1,
+                            createdAt: "2026-07-01T00:00:00.000Z", stateType: "unstarted")
+        let doingP2 = ticket("T-2", title: "doing mid", priority: 2,
+                             createdAt: "2026-08-01T00:00:00.000Z", stateType: "started")
+        let backlog = ticket("T-3", title: "backlog item", priority: 3,
+                             createdAt: "2026-06-01T00:00:00.000Z",
+                             stateType: "unstarted", stateName: "Backlog")
+        let overdue = ticket("T-4", title: "overdue low", priority: 4,
+                             createdAt: "2026-05-01T00:00:00.000Z",
+                             dueDate: "2026-07-01", stateType: "unstarted")
+        let pool = [todoP1, doingP2, backlog, overdue]
+
+        check("filter Doing keeps only started",
+              LinearTickets.list(pool, filter: .doing, sort: .urgentFirst, now: now)
+                  .map(\.identifier) == ["T-2"])
+        check("filter P1 keeps only priority 1",
+              LinearTickets.list(pool, filter: .p1, sort: .urgentFirst, now: now)
+                  .map(\.identifier) == ["T-1"])
+        check("filter Overdue keeps past due dates",
+              LinearTickets.list(pool, filter: .overdue, sort: .urgentFirst, now: now)
+                  .map(\.identifier) == ["T-4"])
+        check("filter Backlog matches state name",
+              LinearTickets.list(pool, filter: .backlog, sort: .urgentFirst, now: now)
+                  .map(\.identifier) == ["T-3"])
+        check("sort Newest leads with latest createdAt",
+              LinearTickets.list(pool, filter: .all, sort: .newest, now: now)
+                  .map(\.identifier).first == "T-2")
+        check("sort Oldest leads with earliest createdAt",
+              LinearTickets.list(pool, filter: .all, sort: .oldest, now: now)
+                  .map(\.identifier).first == "T-4")
+        check("sort Due puts dated tickets first",
+              LinearTickets.list(pool, filter: .all, sort: .due, now: now)
+                  .map(\.identifier).first == "T-4")
+        check("text query ANDs with the filter",
+              LinearTickets.list(pool, filter: .all, sort: .newest, query: "urgent", now: now)
+                  .map(\.identifier) == ["T-1"])
+        check("list cap truncates a long result",
+              LinearTickets.list(Array(repeating: todoP1, count: 60),
+                                 filter: .all, sort: .newest, now: now,
+                                 cap: 10).count == 10)
+        check("QuickFilter titles are human, not raw keys",
+              LinearTickets.QuickFilter.p1.title == "P1 only"
+                  && LinearTickets.QuickSort.urgentFirst.title == "Urgent first")
+    }
+
     // The cache is what makes the panel appear instantly; a write for one project
     // must not disturb another, and staleness has to be honest.
     private static func testLinearCache() {
@@ -484,17 +535,79 @@ enum IssueSelfTest {
               detail: scopeArgs.joined(separator: " "))
     }
 
+    // ACTIVE accordion display helpers — title preference, age, locality, summary.
+    private static func testActiveDisplay() {
+        check("topic wins over terminal label and preview",
+              ActiveDisplay.workTitle(topic: "Fix auth", label: "tab", preview: "long dump",
+                                      terminalTitle: "term") == "Fix auth")
+        check("label wins when topic is empty",
+              ActiveDisplay.workTitle(topic: "  ", label: "My tab", preview: "x",
+                                      terminalTitle: nil) == "My tab")
+        check("preview falls back to first line only",
+              ActiveDisplay.workTitle(topic: nil, label: nil,
+                                      preview: "line one\nline two",
+                                      terminalTitle: nil) == "line one")
+        check("empty inputs yield empty work title",
+              ActiveDisplay.workTitle(topic: nil, label: nil, preview: nil,
+                                      terminalTitle: nil).isEmpty)
+
+        let now: Double = 100_000_000
+        check("age seconds", ActiveDisplay.ageLabel(fromMs: now - 15_000, nowMs: now) == "15s")
+        check("age minutes", ActiveDisplay.ageLabel(fromMs: now - 180_000, nowMs: now) == "3m")
+        check("age hours", ActiveDisplay.ageLabel(fromMs: now - 7_200_000, nowMs: now) == "2h")
+        check("missing timestamp is empty", ActiveDisplay.ageLabel(fromMs: nil).isEmpty)
+
+        check("same machine is local",
+              ActiveDisplay.locality(machine: "zion", thisMachine: "zion") == "local")
+        check("other machine is remote",
+              ActiveDisplay.locality(machine: "yosemite-m0", thisMachine: "zion")
+                  == "remote · yosemite-m0")
+        check("nil machine is local (local-only listing)",
+              ActiveDisplay.locality(machine: nil, thisMachine: "zion") == "local")
+        // Parity with CLI machineId()/normalizeHost — engine tags rows as the
+        // short lowercased hostname, never the Sharing computer name.
+        check("normalizeHost strips domain and lowercases",
+              ActiveDisplay.normalizeHost("Zion.local") == "zion")
+        check("normalizeHost collapses non-alphanumerics",
+              ActiveDisplay.normalizeHost("Muqsit's MacBook Pro") == "muqsit-s-macbook-pro")
+        check("thisMachineId honors AGENTS_SYNC_MACHINE_ID",
+              ActiveDisplay.thisMachineId(env: ["AGENTS_SYNC_MACHINE_ID": "ZION.tail"],
+                                          hostname: "other.local") == "zion")
+        check("locality matches after normalize (engine zion vs Host.local)",
+              ActiveDisplay.locality(machine: "zion",
+                                     thisMachine: ActiveDisplay.normalizeHost("Zion.local"))
+                  == "local")
+
+        let summary = ActiveDisplay.projectSummary(repo: "agents-cli", running: 8, idle: 1,
+                                                   machines: ["zion", "zion"])
+        check("project summary carries counts and single host",
+              summary.contains("agents-cli") && summary.contains("●8")
+                  && summary.contains("◐1") && summary.contains("zion"),
+              detail: summary)
+        let multi = ActiveDisplay.projectSummary(repo: "x", running: 2, idle: 0,
+                                                 machines: ["a", "b"])
+        check("multi-host summary says N hosts",
+              multi.contains("2 hosts"), detail: multi)
+
+        check("PR number from pull URL",
+              ActiveDisplay.prNumber(from: "https://github.com/org/repo/pull/1753") == "1753")
+        check("PR number nil for non-PR URL",
+              ActiveDisplay.prNumber(from: "https://github.com/org/repo") == nil)
+    }
+
     // MARK: helpers
 
     private static func ticket(_ identifier: String, title: String = "t", priority: Int = 2,
                                createdAt: String? = "2026-07-01T00:00:00.000Z",
                                dueDate: String? = nil,
-                               stateType: String = "unstarted") -> LinearTicket {
-        LinearTicket(identifier: identifier, title: title, priority: priority,
-                     state: LinearTicketState(name: stateType == "started" ? "Doing" : "Todo",
-                                              type: stateType),
-                     url: "https://linear.app/getrush/issue/\(identifier)",
-                     dueDate: dueDate, createdAt: createdAt)
+                               stateType: String = "unstarted",
+                               stateName: String? = nil) -> LinearTicket {
+        let name = stateName
+            ?? (stateType == "started" ? "Doing" : "Todo")
+        return LinearTicket(identifier: identifier, title: title, priority: priority,
+                            state: LinearTicketState(name: name, type: stateType),
+                            url: "https://linear.app/getrush/issue/\(identifier)",
+                            dueDate: dueDate, createdAt: createdAt)
     }
 
     private static func mouseEvent(modifiers: NSEvent.ModifierFlags) -> NSEvent {

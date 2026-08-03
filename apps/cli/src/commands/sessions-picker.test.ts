@@ -232,6 +232,68 @@ describe('buildPreview — ticket + PR links line', () => {
   });
 });
 
+describe('buildPreview — highlight lines (skills, hooks, links, artifacts, errors, repos)', () => {
+  it('renders the new sections from a real transcript', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-preview-hl-'));
+    try {
+      fs.mkdirSync(path.join(dir, '.git')); // a repo, so Repos: names it
+      const filePath = path.join(dir, 'session.jsonl');
+      fs.writeFileSync(filePath, [
+        JSON.stringify({ type: 'user', timestamp: '2026-08-01T14:00:00.000Z', message: { role: 'user', content: 'Fix https://linear.app/acme/issue/RUSH-2076/slug' } }),
+        JSON.stringify({ type: 'attachment', timestamp: '2026-08-01T14:00:01.000Z', attachment: { type: 'hook_success', hookName: 'SessionStart:startup', hookEvent: 'SessionStart', exitCode: 0 } }),
+        JSON.stringify({ type: 'assistant', timestamp: '2026-08-01T14:00:10.000Z', message: { role: 'assistant', content: [{ type: 'tool_use', id: 's1', name: 'Skill', input: { skill: 'teams' } }] } }),
+        JSON.stringify({ type: 'assistant', timestamp: '2026-08-01T14:00:12.000Z', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'w1', name: 'Write', input: { file_path: path.join(dir, '.agents', 'artifacts', 'plan.html') } }] } }),
+        JSON.stringify({ type: 'user', timestamp: '2026-08-01T14:00:13.000Z', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'w1', is_error: true, content: 'disk full' }] } }),
+      ].join('\n') + '\n');
+
+      const preview = stripVTControlCharacters(buildPreview(mk({
+        id: 'highlights-session',
+        shortId: 'highligh',
+        filePath,
+        cwd: dir,
+      })));
+      expect(preview).toContain('Skills:');
+      expect(preview).toContain('teams');
+      expect(preview).toContain('Hooks:');
+      expect(preview).toContain('SessionStart:startup');
+      expect(preview).toContain('Links:');
+      expect(preview).toContain('RUSH-2076');
+      expect(preview).toContain('Artifacts:');
+      expect(preview).toContain('plan.html');
+      expect(preview).toContain('Errors:');
+      expect(preview).toContain('1 failure');
+      expect(preview).toContain('Repos:');
+      expect(preview).toContain(path.basename(dir));
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('omits highlight lines when the transcript has none', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-preview-nohl-'));
+    try {
+      const filePath = path.join(dir, 'session.jsonl');
+      fs.writeFileSync(filePath, [
+        JSON.stringify({ type: 'user', timestamp: '2026-08-01T14:00:00.000Z', message: { role: 'user', content: 'plain task' } }),
+        JSON.stringify({ type: 'assistant', timestamp: '2026-08-01T14:00:10.000Z', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'r1', name: 'Read', input: { file_path: path.join(dir, 'a.ts') } }] } }),
+      ].join('\n') + '\n');
+      const preview = stripVTControlCharacters(buildPreview(mk({
+        id: 'no-highlights-session',
+        shortId: 'nohighl',
+        filePath,
+        cwd: dir,
+      })));
+      expect(preview).not.toContain('Skills:');
+      expect(preview).not.toContain('Hooks:');
+      expect(preview).not.toContain('Links:');
+      expect(preview).not.toContain('Artifacts:');
+      expect(preview).not.toContain('Errors:');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('buildPreview — usage metadata (RUSH-1994)', () => {
   it('shows browser/computer use and the sub-agent count from a real transcript', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-preview-'));

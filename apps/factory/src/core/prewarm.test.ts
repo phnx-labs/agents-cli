@@ -310,6 +310,18 @@ describe('buildVersionedResumeCommand', () => {
     );
   });
 
+  test('resumes a harness with no prewarm config through `agents run`', () => {
+    // grok / kimi / droid / antigravity have transcripts but no native resume
+    // one-liner in PREWARM_CONFIGS; `agents run --resume` is their path.
+    expect(buildVersionedResumeCommand('grok', 'abc123')).toBe('agents run grok --interactive --resume abc123');
+    expect(buildVersionedResumeCommand('kimi', 'abc123', '1.4.0')).toBe(
+      'agents run kimi@1.4.0 --interactive --resume abc123',
+    );
+    expect(buildVersionedResumeCommand('droid', 'abc123', undefined, 'mac-mini')).toBe(
+      "agents run droid --interactive --host 'mac-mini' --resume abc123",
+    );
+  });
+
   test('quotes a device name so it cannot break out of the command', () => {
     expect(buildVersionedResumeCommand('claude', 'abc123', undefined, "a'; rm -rf /; #")).toBe(
       `agents run claude --interactive --host 'a'\\''; rm -rf /; #' --resume abc123`,

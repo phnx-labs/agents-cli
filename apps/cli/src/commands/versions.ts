@@ -103,7 +103,7 @@ function fixSessionFilePaths(agent: AgentId, version: string, oldVersionDir: str
   updateSessionFilePaths(oldVersionDir, trashPath);
 }
 
-function formatAccountHint(info: AccountInfo, usage: UsageSnapshot | null): string {
+function formatAccountHint(info: AccountInfo, usage: UsageSnapshot | null, unverified = false): string {
   const parts: string[] = [];
   if (info.email) {
     // Same-email accounts can live in different orgs (personal Max vs a Team
@@ -111,7 +111,7 @@ function formatAccountHint(info: AccountInfo, usage: UsageSnapshot | null): stri
     const badge = accountOrgBadge(info);
     parts.push(badge ? `${info.email} (${badge})` : info.email);
   }
-  const usageSummary = formatUsageSummary(info.plan, usage);
+  const usageSummary = formatUsageSummary(info.plan, usage, 3, { unverified });
   if (usageSummary) parts.push(usageSummary);
   if (parts.length === 0) return '';
   return chalk.gray(` [${parts.join(', ')}]`);
@@ -646,7 +646,10 @@ export function registerVersionsCommands(program: Command): void {
                     cliVersion: installedVersion,
                     info,
                   });
-                  const accountHint = formatAccountHint(info, usage.snapshot);
+                  // This hint sits in a "switch your default to this version?"
+                  // confirm — the one place a stale reading directly steers a
+                  // choice, so it must not present an unconfirmed bar as fact.
+                  const accountHint = formatAccountHint(info, usage.snapshot, !!usage.snapshot && !!usage.error);
 
                   const message = `Switch default from ${agentLabel(agentConfig.id)}@${currentDefault} to ${agentLabel(agentConfig.id)}@${installedVersion}${accountHint}?`;
 
@@ -837,7 +840,12 @@ export function registerVersionsCommands(program: Command): void {
               const accountInfo = pickerAccountMap.get(v);
               const email = accountInfo?.email || '';
               const usageKey = getUsageLookupKey(accountInfo);
-              const usageSummary = usageKey ? formatUsageSummary(null, usageByKey.get(usageKey)?.snapshot || null) : '';
+              const versionUsage = usageKey ? usageByKey.get(usageKey) : undefined;
+              const usageSummary = usageKey
+                ? formatUsageSummary(null, versionUsage?.snapshot || null, 3, {
+                    unverified: !!versionUsage?.snapshot && !!versionUsage.error,
+                  })
+                : '';
 
               if (maxEmailLen > 0) {
                 label += '  ';

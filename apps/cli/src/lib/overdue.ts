@@ -12,8 +12,9 @@
  * `agents routines catchup` command that runs them on demand.
  */
 
+import * as fs from 'fs';
 import { Cron } from 'croner';
-import { listJobs, getLatestRun, jobRunsOnThisDevice } from './routines.js';
+import { listJobs, getLatestRun, getJobPath, jobRunsOnThisDevice, type JobConfig } from './routines.js';
 import { notifyDesktop } from './menubar/notify-desktop.js';
 
 export interface OverdueJob {
@@ -47,6 +48,32 @@ function previousExpectedFire(cron: Cron, now: Date): Date | null {
   return last;
 }
 
+/**
+ * When a routine started existing, and therefore the earliest fire it can
+ * sensibly be judged against.
+ *
+ * `createdAt` is stamped by `writeJob`. Routines written before that field
+ * existed have none, so the file's own mtime stands in — it is the closest
+ * honest answer available on disk, and it only ever moves the floor later,
+ * never earlier, so it cannot manufacture a false "overdue".
+ *
+ * Returns null when neither is available, which leaves the routine unfloored
+ * (previous behaviour) rather than silently skipping it.
+ */
+export function routineEffectiveStart(job: JobConfig): Date | null {
+  if (job.createdAt) {
+    const stamped = new Date(job.createdAt);
+    if (!isNaN(stamped.getTime())) return stamped;
+  }
+  const path = getJobPath(job.name);
+  if (!path) return null;
+  try {
+    return new Date(fs.statSync(path).mtimeMs);
+  } catch {
+    return null;
+  }
+}
+
 /** Return every enabled, recurring job whose most recent expected fire was
  *  missed. One-shot jobs are excluded — they fire at most once. */
 export function detectOverdueJobs(now: Date = new Date()): OverdueJob[] {
@@ -74,6 +101,13 @@ export function detectOverdueJobs(now: Date = new Date()): OverdueJob[] {
     }
 
     if (!expected) continue;
+
+    // A fire that predates the routine never could have happened, so it is not
+    // a miss. Without this, any newly created routine on a daily/weekly cron is
+    // instantly "overdue" for the previous occurrence — and with auto-catchup
+    // that means `agents routines add` runs the routine once, immediately.
+    const start = routineEffectiveStart(job);
+    if (start && expected.getTime() < start.getTime()) continue;
 
     const latest = getLatestRun(job.name);
     const lastRanAt = latest ? new Date(latest.startedAt) : null;

@@ -39,6 +39,54 @@ export interface ViewingIn {
   tab?: number;
 }
 
+/**
+ * The one display form of "where is this session being watched" — `'codium tab 3'`
+ * when a client is attached, the bare app name when the tab can't be resolved, and
+ * `'detached'` when the pane is live but nobody is looking at it (the terminal that
+ * displayed it was closed or crashed).
+ *
+ * `undefined` means **we do not know**, and it covers two different situations that
+ * must not be confused with `'detached'`: a session that isn't tmux-hosted (no pane
+ * to attach to, so it isn't on this axis at all), and a tmux session whose pane the
+ * locator could not resolve (`mapPanesToTargets` returned nothing for this socket,
+ * or the row was never enriched). {@link resolveViewingIn} answers `undefined` for
+ * BOTH "no client attached" and "could not locate the pane", so the pane's resolved
+ * `tmuxTarget` is what separates them: without it there is no evidence of absence,
+ * only absence of evidence. Claiming `'detached'` there would invent an orphaned
+ * session — and a consumer acts on that claim (Factory's picker pre-ticks every
+ * detached row for rescue), so the wrong answer resumes a session nobody asked for.
+ *
+ * Shared by the `--active` row renderer and the `--json` serializer so a machine
+ * consumer reads exactly the string a human sees, instead of re-deriving "detached"
+ * from an absent field.
+ */
+export function viewingInLabel(
+  s: Pick<ActiveSession, 'provenance' | 'viewingIn' | 'tmuxTarget'>,
+): string | undefined {
+  if (s.provenance?.mux?.kind !== 'tmux' || !s.provenance.mux.pane) return undefined;
+  if (!s.viewingIn) return s.tmuxTarget ? 'detached' : undefined;
+  return s.viewingIn.tab != null ? `${s.viewingIn.app} tab ${s.viewingIn.tab}` : s.viewingIn.app;
+}
+
+/**
+ * Wire form -> internal form for a row arriving from another machine's
+ * `--active --json`. The fan-out reaches peers whose CLI may predate
+ * {@link viewingInLabel} and still emit the `{app, tab}` object, so this boundary
+ * normalizes both shapes into one — the ONLY place either shape is accepted.
+ * `'detached'` maps to undefined, which is what "no attached client" means
+ * internally; {@link viewingInLabel} regenerates the word from the pane.
+ */
+export function parseViewingIn(raw: unknown): ViewingIn | undefined {
+  if (raw && typeof raw === 'object') {
+    const app = (raw as ViewingIn).app;
+    const tab = (raw as ViewingIn).tab;
+    return typeof app === 'string' ? { app, tab: typeof tab === 'number' ? tab : undefined } : undefined;
+  }
+  if (typeof raw !== 'string' || !raw || raw === 'detached') return undefined;
+  const m = raw.match(/^(.+?) tab (\d+)$/);
+  return m ? { app: m[1], tab: parseInt(m[2], 10) } : { app: raw };
+}
+
 /** Injection seams so `resolveViewingIn` is unit-testable without a live tmux/ps/osascript. */
 export interface ViewingInDeps {
   /** Ghostty surfaces (window/tab/cwd/title). Enumerated once by the caller and shared. */

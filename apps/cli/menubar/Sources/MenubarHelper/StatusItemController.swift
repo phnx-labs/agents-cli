@@ -73,6 +73,19 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
     }
 
+    // ACTIVE project accordion — projects collapsed by default. In-memory only
+    // (resets on helper restart). Toggling rebuilds from the warm active-session
+    // cache with NO extra CLI calls. Session *detail* lives in a side submenu (›),
+    // not a second accordion level.
+    private var expandedProjects = Set<String>()
+    /// True after a project accordion toggle until menuDidClose schedules reopen.
+    private var pendingAccordionReopen = false
+    /// True for the menuWillOpen that follows accordion reopen — skip CLI schedule
+    /// and the expensive teams scan; rebuild from warm caches only.
+    private var accordionCacheOnlyOpen = false
+    /// Same form as CLI `machineId()` so engine-tagged sessions compare as local.
+    private lazy var thisMachine: String = ActiveDisplay.thisMachineId()
+
     private var densitySetting: Density {
         get {
             // Env override so dump mode can probe a fixed density.
@@ -286,6 +299,21 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     // MARK: - Menu
     func menuWillOpen(_ menu: NSMenu) {
+        // Accordion reopen: rebuild purely from warm caches. No teams history
+        // walk, no CLI schedule — expand must stay cheap and not re-shell
+        // `sessions --active`.
+        if accordionCacheOnlyOpen {
+            accordionCacheOnlyOpen = false
+            let sessions = LocalState.sessions(includeTeams: false)
+            let browserTasks = LocalState.browserTasks(limit: 3)
+            let pending = LocalState.pendingDevices()
+            rebuild(menu, sessions: sessions, browserTasks: browserTasks,
+                    recentSessions: cachedRecentSessions, routines: cachedRoutines,
+                    doctor: cachedDoctorOverview, daemonPid: AgentsCLI.daemonPid(),
+                    pending: pending)
+            return
+        }
+
         // Critical path is all cheap disk reads. CLI-backed sections come from
         // warm caches; opening the menu only schedules refreshes for next time.
         let sessions = LocalState.sessions(includeTeams: true)
@@ -303,6 +331,17 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         refreshActiveSessions()
         refreshDoctorOverview()
         refreshWatchdog()
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        // Accordion click dismissed the menu; reopen only AFTER close so
+        // performClick cannot race and toggle the status item shut again.
+        guard pendingAccordionReopen else { return }
+        pendingAccordionReopen = false
+        accordionCacheOnlyOpen = true
+        DispatchQueue.main.async { [weak self] in
+            self?.statusItem.button?.performClick(nil)
+        }
     }
 
     // The one rule: attention floats to the top triage strip (wait-time sorted,
@@ -324,7 +363,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         // whenever the triage strip has anything to say, not only when a session
         // is blocked.
         let attention = sessions.filter { $0.status == .attention }.count
-        let routinesFailing = routines.contains { $0.lastStatus == "failed" || $0.lastStatus == "timeout" || $0.overdue }
+        let routinesFailing = routines.contains { routineNeedsAttention($0) }
         let schedulerStopped = daemonPid == nil && !routines.isEmpty
         let needsYou = attention + (routinesFailing ? 1 : 0) + (schedulerStopped ? 1 : 0)
         let rich = isRich(attention: needsYou)
@@ -474,7 +513,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             rows.append(("⚠", wait, "Scheduler stopped — routines won’t run", sub))
         }
 
-        let bad = routines.filter { $0.lastStatus == "failed" || $0.lastStatus == "timeout" || $0.overdue }
+        let bad = routines.filter { routineNeedsAttention($0) }
         if bad.count == 1, let r = bad.first {
             let why = r.overdue ? "overdue" : (r.lastStatus ?? "failed")
             rows.append(("✕", fail, "Routine \(r.name) \(why)", allRoutinesSubmenu(bad)))
@@ -560,75 +599,70 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.addItem(newItem)
     }
 
-    // Live work grouped by repo: one `ACTIVE · <repo>` header per project, the
-    // repo's sessions clustered under it. Rich rows carry the session's own
-    // title inline (the repo lives in the header, so rows don't repeat it).
+    // Live work: PROJECT accordion + SESSION side-submenu.
     //
-    // Two rendering rules keep the section from walling the menu:
-    //   • The "other" bucket (sessions with no repo) collapses to a single
-    //     clickable section header + submenu when it's idle-only. That's a
-    //     dumping-ground group whose individual rows don't repay their space.
-    //   • Idle rows cap at 3 per repo, but the 4th+ never disappears silently:
-    //     an explicit "+ N more idle" row shows the count with a submenu of
-    //     the rest, so the header count always matches what's on screen.
-    private let idlePerRepoCap = 3
-
+    //   ▶ agents-cli  ●8 ◐1  zion          ← project collapsed (default)
+    //   ▼ agents-cli  ●8 ◐1  zion          ← click folds open inline
+    //       ● Claude · zion · 3m — work… ›  ← agent row; › opens detail submenu
+    //
+    // Project expand is an accordion (▶/▼). Session detail is a native side
+    // submenu so linkable actions and multi-line context don't wall the main menu.
+    // Expand rebuilds from the warm cache only — no CLI, no re-index.
     private func addActive(_ menu: NSMenu, live: [Session], browserTasks: [BrowserTask], rich: Bool) {
+        let totalRun = live.filter { $0.status == .running }.count
+        let totalIdle = live.count - totalRun
+        let projectCount = Set(live.map { $0.repo.isEmpty ? "other" : $0.repo }).count
+        var head = "ACTIVE"
+        var bits: [String] = []
+        if totalRun > 0 { bits.append("\(totalRun) run") }
+        if totalIdle > 0 { bits.append("\(totalIdle) idle") }
+        if projectCount > 0 { bits.append("\(projectCount) project\(projectCount == 1 ? "" : "s")") }
+        if !bits.isEmpty { head += " · " + bits.joined(separator: " · ") }
+        addSectionTitle(menu, head, color: .secondaryLabelColor)
+
         let groups = Dictionary(grouping: live) { $0.repo.isEmpty ? "other" : $0.repo }
-        for (repo, group) in groups.sorted(by: { $0.key.lowercased() < $1.key.lowercased() }) {
+        // Running projects first, then name — scannable triage order.
+        let orderedKeys = groups.keys.sorted { a, b in
+            let ra = groups[a]!.filter { $0.status == .running }.count
+            let rb = groups[b]!.filter { $0.status == .running }.count
+            if ra != rb { return ra > rb }
+            return a.lowercased() < b.lowercased()
+        }
+
+        for repo in orderedKeys {
+            guard let group = groups[repo] else { continue }
             let running = group.filter { $0.status == .running }.count
             let idle = group.count - running
+            let machines = group.compactMap(\.machine)
+            let open = expandedProjects.contains(repo)
+            let arrow = open ? "▼" : "▶"
+            let summary = ActiveDisplay.projectSummary(repo: repo, running: running,
+                                                       idle: idle, machines: machines)
+            let header = NSMenuItem(title: "  \(arrow)  \(summary)",
+                                    action: #selector(onToggleProject(_:)),
+                                    keyEquivalent: "")
+            header.target = self
+            header.representedObject = repo
+            header.toolTip = open
+                ? "Collapse \(repo)"
+                : "Expand \(repo) — \(group.count) session\(group.count == 1 ? "" : "s")"
+            menu.addItem(header)
 
-            // Collapsed "other" bucket: idle-only groups render as one
-            // interactive section header. No fake ◐ session row — the header
-            // itself carries the count and opens the submenu.
-            if repo == "other" && running == 0 && idle > 0 {
-                let title = "ACTIVE · other  ·  \(idle) idle"
-                let item = statusRow("", .secondaryLabelColor, title)
-                item.submenu = collapsedIdleSubmenu(group, rich: rich)
-                menu.addItem(item)
-                continue
-            }
+            guard open else { continue }
 
-            var title = "ACTIVE · \(repo)"
-            var counts: [String] = []
-            if running > 0 { counts.append("\(running) running") }
-            if idle > 0 { counts.append("\(idle) idle") }
-            if !counts.isEmpty { title += "  ·  " + counts.joined(separator: " · ") }
-            addSectionTitle(menu, title, color: .secondaryLabelColor)
-
-            // Running rows always render; idle rows cap at idlePerRepoCap. If
-            // the cap hides any, an explicit "+ N more idle" row exposes the
-            // hidden count and opens the rest in a submenu.
-            let ordered = group.sorted { a, b in
-                (a.status == .running ? 0 : 1) < (b.status == .running ? 0 : 1)
+            let sessions = group.sorted { a, b in
+                let ra = a.status == .running ? 0 : 1
+                let rb = b.status == .running ? 0 : 1
+                if ra != rb { return ra < rb }
+                return (a.lastActivityMs ?? 0) > (b.lastActivityMs ?? 0)
             }
-            var idleShown = 0
-            var hiddenIdle: [Session] = []
-            for s in ordered {
-                if s.status != .running {
-                    if idleShown >= idlePerRepoCap {
-                        hiddenIdle.append(s)
-                        continue
-                    }
-                    idleShown += 1
-                }
-                let glyph = s.status == .running ? "●" : "◐"
-                let color = s.status == .running ? run : idleC
-                let detail = (rich && !s.title.isEmpty) ? " — \(trim(s.title, 36))" : ""
-                let row = statusRow(glyph, color, "\(LocalState.agentLabel(s.agent))\(detail)")
-                if let cwd = s.cwd { row.submenu = revealSubmenu(cwd) }
-                menu.addItem(row)
-            }
-            if !hiddenIdle.isEmpty {
-                let moreLabel = "+ \(hiddenIdle.count) more idle"
-                let more = statusRow("", info, moreLabel)
-                more.submenu = collapsedIdleSubmenu(hiddenIdle, rich: rich)
-                menu.addItem(more)
+            for s in sessions {
+                addSessionRow(menu, session: s, rich: rich)
             }
         }
+
         if !browserTasks.isEmpty {
-            addSectionTitle(menu, "ACTIVE · Browser", color: .secondaryLabelColor)
+            addSectionTitle(menu, "  Browser", color: .secondaryLabelColor)
             for task in browserTasks {
                 let tabs = task.tabCount == 1 ? "1 tab" : "\(task.tabCount) tabs"
                 let row = statusRow("◦", idleC, "\(trim(task.name, 24)) · \(shortProfile(task.profile)) · \(tabs)")
@@ -638,17 +672,210 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
     }
 
-    // Submenu for the "+N more idle" row and the collapsed "other" section
-    // header — every hidden session gets a row with agent · title.
-    private func collapsedIdleSubmenu(_ sessions: [Session], rich: Bool) -> NSMenu {
-        let sub = NSMenu()
-        for s in sessions {
-            let detail = (rich && !s.title.isEmpty) ? " — \(trim(s.title, 36))" : ""
-            let row = statusRow("◐", idleC, "\(LocalState.agentLabel(s.agent))\(detail)")
-            if let cwd = s.cwd { row.submenu = revealSubmenu(cwd) }
-            sub.addItem(row)
+    /// Agent summary under an expanded project. Detail lives in the › submenu
+    /// (linkable ticket/PR/cwd, locality, duration) — not a second accordion.
+    private func addSessionRow(_ menu: NSMenu, session s: Session, rich: Bool) {
+        let glyph = s.status == .running ? "●" : (s.status == .attention ? "⚠" : "◐")
+        let color = s.status == .running ? run : (s.status == .attention ? wait : idleC)
+        let agent = LocalState.agentLabel(s.agent)
+        let host = s.machine ?? thisMachine
+        let age = ActiveDisplay.ageLabel(fromMs: s.lastActivityMs ?? s.startedAtMs)
+        let work = s.workTitle
+
+        // Compact chips on the main row so you see signal without opening ›.
+        var chips: [String] = []
+        if let t = s.ticketId, !t.isEmpty { chips.append("🎫\(t)") }
+        if let pr = ActiveDisplay.prNumber(from: s.prLink) { chips.append("PR#\(pr)") }
+        else if let link = s.prLink, !link.isEmpty { chips.append("PR") }
+
+        var line = "\(glyph) \(agent) · \(host)"
+        if let surface = s.surface, !surface.isEmpty { line += " · \(surface)" }
+        if !age.isEmpty { line += " · \(age)" }
+        if !chips.isEmpty { line += "  " + chips.joined(separator: " ") }
+        if rich && !work.isEmpty { line += " — \(trim(work, 32))" }
+
+        let row = statusRow("", color, line)
+        row.title = "    \(line)"
+        row.attributedTitle = sessionRowTitle(glyph: glyph, glyphColor: color, rest: line)
+        row.submenu = sessionDetailSubmenu(s)
+        row.toolTip = work.isEmpty ? "Session detail" : work
+        menu.addItem(row)
+    }
+
+    /// Status-colored glyph + label for the agent row.
+    private func sessionRowTitle(glyph: String, glyphColor: NSColor, rest: String) -> NSAttributedString {
+        let out = NSMutableAttributedString()
+        let font = NSFont.menuFont(ofSize: 0)
+        out.append(NSAttributedString(string: "    \(glyph) ", attributes: [
+            .foregroundColor: glyphColor, .font: font,
+        ]))
+        // rest already starts with glyph when built above — strip the leading glyph
+        // if present so we don't double it.
+        var body = rest
+        for prefix in ["● ", "◐ ", "⚠ "] {
+            if body.hasPrefix(prefix) { body = String(body.dropFirst(prefix.count)); break }
         }
+        out.append(NSAttributedString(string: body, attributes: [
+            .foregroundColor: NSColor.labelColor, .font: font,
+        ]))
+        return out
+    }
+
+    /// Side submenu: graphical sections + linkable actions for one session.
+    /// All fields from the warm active payload — no CLI on open.
+    private func sessionDetailSubmenu(_ s: Session) -> NSMenu {
+        let sub = NSMenu()
+        let work = s.workTitle
+
+        // ── What ──────────────────────────────────────────────────────────
+        if !work.isEmpty {
+            let head = NSMenuItem(title: "◎  \(trim(work, 72))", action: nil, keyEquivalent: "")
+            head.isEnabled = false
+            head.toolTip = work
+            sub.addItem(head)
+            // If the work title looks like a URL, make it one-click openable.
+            if let url = firstURL(in: work) {
+                let openWork = NSMenuItem(title: "   Open link in work title",
+                                          action: #selector(onOpenURL(_:)), keyEquivalent: "")
+                openWork.target = self
+                openWork.representedObject = url.absoluteString
+                sub.addItem(openWork)
+            }
+            sub.addItem(.separator())
+        }
+
+        // ── Where ─────────────────────────────────────────────────────────
+        let locality = ActiveDisplay.locality(machine: s.machine, thisMachine: thisMachine)
+        let locIcon = locality.hasPrefix("remote") ? "☁" : "💻"
+        var whereLine = "\(locIcon)  \(locality)"
+        if let surface = s.surface, !surface.isEmpty { whereLine += " · \(surface)" }
+        sub.addItem(disabled(whereLine))
+
+        if !s.repo.isEmpty {
+            sub.addItem(disabled("📁  \(s.repo)"))
+        }
+        if let cwd = s.cwd {
+            let reveal = NSMenuItem(title: "📂  \(shortHome(cwd))",
+                                    action: #selector(onRevealPath(_:)), keyEquivalent: "")
+            reveal.target = self
+            reveal.representedObject = cwd
+            reveal.toolTip = "Reveal in Finder"
+            sub.addItem(reveal)
+        }
+
+        // ── Links (ticket / PR) — primary actions, not just labels ────────
+        let hasTicket = !(s.ticketId ?? "").isEmpty
+        let hasPR = !(s.prLink ?? "").isEmpty
+        if hasTicket || hasPR {
+            sub.addItem(.separator())
+            if let ticket = s.ticketId, !ticket.isEmpty {
+                let t = NSMenuItem(title: "🎫  \(ticket)  — open in Linear",
+                                   action: #selector(onOpenTicket(_:)), keyEquivalent: "")
+                t.target = self
+                t.representedObject = ticket
+                sub.addItem(t)
+            }
+            if let pr = s.prLink, !pr.isEmpty {
+                let label: String
+                if let n = ActiveDisplay.prNumber(from: pr) {
+                    label = "🔗  PR#\(n)  — open on GitHub"
+                } else {
+                    label = "🔗  Pull request  — open on GitHub"
+                }
+                let p = NSMenuItem(title: label, action: #selector(onOpenURL(_:)), keyEquivalent: "")
+                p.target = self
+                p.representedObject = pr
+                sub.addItem(p)
+            }
+        }
+
+        // ── Timing / status ───────────────────────────────────────────────
+        sub.addItem(.separator())
+        let started = ActiveDisplay.ageLabel(fromMs: s.startedAtMs)
+        let active = ActiveDisplay.ageLabel(fromMs: s.lastActivityMs)
+        let statusWord: String = {
+            switch s.status {
+            case .running: return "● running"
+            case .idle: return "◐ idle"
+            case .attention: return "⚠ needs you"
+            case .queued: return "queued"
+            }
+        }()
+        var timeLine = statusWord
+        if !started.isEmpty { timeLine += " · started \(started) ago" }
+        if !active.isEmpty { timeLine += " · active \(active) ago" }
+        sub.addItem(disabled("⏱  \(timeLine)"))
+
+        if let owner = s.owner, !owner.isEmpty, !owner.hasPrefix("UNRESOLVED") {
+            sub.addItem(disabled("👤  \(owner)"))
+        }
+        if let sid = s.sessionId, !sid.isEmpty {
+            let copy = NSMenuItem(title: "⧉  Copy session id  (\(String(sid.prefix(8)))…)",
+                                  action: #selector(onCopySessionId(_:)), keyEquivalent: "")
+            copy.target = self
+            copy.representedObject = sid
+            sub.addItem(copy)
+        }
+
+        // Latest preview snippet (trimmed) — optional context, not a wall.
+        if let preview = s.preview?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !preview.isEmpty, preview != work {
+            sub.addItem(.separator())
+            let snip = disabled("💬  \(trim(preview, 80))")
+            snip.toolTip = preview
+            sub.addItem(snip)
+        }
+
         return sub
+    }
+
+    private func firstURL(in text: String) -> URL? {
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+        else { return nil }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return detector.firstMatch(in: text, options: [], range: range)?.url
+    }
+
+    private func shortHome(_ path: String) -> String {
+        let home = NSHomeDirectory()
+        if path.hasPrefix(home) {
+            return "~" + path.dropFirst(home.count)
+        }
+        return path
+    }
+
+    @objc private func onToggleProject(_ sender: NSMenuItem) {
+        guard let repo = sender.representedObject as? String else { return }
+        if expandedProjects.contains(repo) {
+            expandedProjects.remove(repo)
+        } else {
+            expandedProjects.insert(repo)
+        }
+        // Defer reopen to menuDidClose so performClick cannot race the dismiss.
+        pendingAccordionReopen = true
+    }
+
+    @objc private func onRevealPath(_ sender: NSMenuItem) {
+        guard let path = sender.representedObject as? String else { return }
+        AgentsCLI.openPath(path)
+    }
+
+    @objc private func onCopySessionId(_ sender: NSMenuItem) {
+        guard let sid = sender.representedObject as? String else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(sid, forType: .string)
+    }
+
+    @objc private func onOpenURL(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let url = URL(string: raw) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    @objc private func onOpenTicket(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        if let url = URL(string: "https://linear.app/getrush/issue/\(id)") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     private func addRecent(_ menu: NSMenu, recentSessions: [RecentSession], rich: Bool) {
@@ -728,7 +955,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
 
         addSectionTitle(menu, "ROUTINES · \(summary)", color: .secondaryLabelColor)
-        let failing = routines.filter { $0.lastStatus == "failed" || $0.lastStatus == "timeout" || $0.overdue }
+        let failing = routines.filter { routineNeedsAttention($0) }
         let upcoming = routines
             .filter { r in r.enabled && !failing.contains(where: { $0.name == r.name }) && r.nextRun != nil }
             .sorted { ($0.nextRun ?? "") < ($1.nextRun ?? "") }
@@ -740,7 +967,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
         for r in failing {
             let why = routineFailureSummary(r, max: 48)
-            let row = statusRow("✕", fail, "\(r.name)  \(why)")
+            let row = statusRow(routineIsMiss(r) ? "⃠" : "✕", routineIsMiss(r) ? wait : fail, "\(r.name)  \(why)")
             row.submenu = routineSubmenu(r)
             menu.addItem(row)
         }
@@ -874,7 +1101,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private func allRoutinesSubmenu(_ routines: [Routine]) -> NSMenu {
         let sub = NSMenu()
         for r in routines {
-            let mark = r.lastStatus == "failed" || r.lastStatus == "timeout" || r.overdue ? "! "
+            let mark = routineNeedsAttention(r) ? "! "
                 : (r.enabled ? "  " : "· ")
             let when = routineFailureDetail(r, max: 52) ?? (r.enabled ? (r.nextRunHuman ?? r.schedule) : "paused")
             let item = NSMenuItem(title: "\(mark)\(r.name)  \(when)", action: nil, keyEquivalent: "")
@@ -1098,13 +1325,27 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 }
 
+/// A routine the operator should look at: it failed, timed out, never ran when
+/// it was due (`missed`), or is overdue. One predicate rather than the same
+/// disjunction repeated at each call site, so a new status cannot be added to
+/// four of five checks.
+func routineNeedsAttention(_ r: Routine) -> Bool {
+    r.lastStatus == "failed" || r.lastStatus == "timeout" || r.lastStatus == "missed" || r.overdue
+}
+
+/// `missed` means the run never started — infrastructure, not a task failure —
+/// so it reads as a warning rather than a red error.
+func routineIsMiss(_ r: Routine) -> Bool {
+    r.lastStatus == "missed" || (r.overdue && r.lastStatus != "failed" && r.lastStatus != "timeout")
+}
+
 func routineFailureSummary(_ r: Routine, max: Int) -> String {
     if let detail = routineFailureDetail(r, max: max) { return detail }
     return r.overdue ? "overdue" : (r.lastStatus ?? "failed")
 }
 
 func routineFailureDetail(_ r: Routine, max: Int) -> String? {
-    let lastRunFailed = r.lastStatus == "failed" || r.lastStatus == "timeout"
+    let lastRunFailed = r.lastStatus == "failed" || r.lastStatus == "timeout" || r.lastStatus == "missed"
     guard lastRunFailed || r.overdue else { return nil }
     if let reason = r.failureReason?.trimmingCharacters(in: .whitespacesAndNewlines), !reason.isEmpty {
         return trimText(reason.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression), max)

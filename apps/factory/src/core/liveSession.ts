@@ -63,6 +63,20 @@ async function readState(pid: number): Promise<SessionStateRecord | null> {
   }
 }
 
+// The hook keys its state files by pid and nothing deletes them when the agent
+// dies, so a file outlives its process and the OS eventually hands that pid to
+// something else. Reading it back then attributes a stranger's session to this
+// terminal. The record's SessionStart timestamp settles it: an agent under this
+// tab cannot have started before the tab existed, so a record older than the
+// terminal belongs to the pid's previous owner. Seconds-granularity `ts` gets a
+// small slack so a session started in the same second as the tab still counts.
+const RECYCLED_PID_SLACK_MS = 5_000;
+
+export function recordPredatesTerminal(rec: SessionStateRecord, terminalCreatedAtMs: number): boolean {
+  if (!Number.isFinite(rec.ts) || rec.ts <= 0) return false;
+  return rec.ts * 1000 < terminalCreatedAtMs - RECYCLED_PID_SLACK_MS;
+}
+
 /**
  * Find the live session UUID for a running agent process under the given shell.
  * Reads state files written by the SessionStart hook
@@ -70,8 +84,15 @@ async function readState(pid: number): Promise<SessionStateRecord | null> {
  *
  * Returns null when no agent process is currently running under the shell — caller
  * decides whether to fall back to a spawn-time env var or report "no session".
+ *
+ * `terminalCreatedAtMs` rejects a state file left behind by a dead agent whose pid
+ * the OS has since recycled (see {@link recordPredatesTerminal}). Callers that
+ * genuinely have no terminal to date the lookup against may omit it.
  */
-export async function liveSessionIdForShell(shellPid: number | undefined): Promise<string | null> {
+export async function liveSessionIdForShell(
+  shellPid: number | undefined,
+  terminalCreatedAtMs?: number,
+): Promise<string | null> {
   if (!shellPid) return null;
   // Check the root pid itself (covers cases where the agent runs directly under
   // the terminal with no wrapping shell), then descendants. When multiple pids
@@ -82,7 +103,9 @@ export async function liveSessionIdForShell(shellPid: number | undefined): Promi
   let best: SessionStateRecord | null = null;
   for (const pid of pids) {
     const rec = await readState(pid);
-    if (rec && (!best || rec.ts > best.ts)) best = rec;
+    if (!rec) continue;
+    if (terminalCreatedAtMs !== undefined && recordPredatesTerminal(rec, terminalCreatedAtMs)) continue;
+    if (!best || rec.ts > best.ts) best = rec;
   }
   return best?.session_id ?? null;
 }

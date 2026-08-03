@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import type { ActiveSession } from '../../lib/session/active.js';
 import chalk from 'chalk';
 import { stripVTControlCharacters } from 'node:util';
 import {
@@ -157,6 +158,42 @@ describe('formatPickerLabel', () => {
   it('omits the host column entirely when it is off', () => {
     const row = strip(formatPickerLabel(meta(), '', { showHost: false }, undefined, 'ghostty'));
     expect(row).not.toContain('ghostty');
+  });
+
+  // The browser showed which terminal a session ran in but never WHAT it was
+  // doing, so a session that had lost its host looked exactly like a healthy
+  // one in the row list — the whole point of the new statuses is that you can
+  // see them where you are already looking.
+  it('renders the live status word when the status column is on', () => {
+    const live = { context: 'terminal', kind: 'claude', status: 'orphaned' } as ActiveSession;
+    const row = strip(formatPickerLabel(meta(), '', { showStatus: true }, undefined, '', false, live));
+    expect(row).toContain('orphan');
+  });
+
+  it('renders `crashed` for a session whose host went down with it', () => {
+    const live = { context: 'terminal', kind: 'claude', status: 'crashed' } as ActiveSession;
+    const row = strip(formatPickerLabel(meta(), '', { showStatus: true }, undefined, '', false, live));
+    expect(row).toContain('crashed');
+  });
+
+  it('holds the status column width for a row with no live match, so nothing jogs', () => {
+    const live = { context: 'terminal', kind: 'claude', status: 'running' } as ActiveSession;
+    const withLive = strip(formatPickerLabel(meta(), '', { showStatus: true }, undefined, '', false, live));
+    const withoutLive = strip(formatPickerLabel(meta(), '', { showStatus: true }, undefined, '', false, undefined));
+    // The topic must start at the same column in both, or the list is ragged on
+    // exactly the rows that are not running.
+    const at = (row: string) => row.indexOf('do a thing');
+    expect(at(withLive)).toBeGreaterThan(0);
+    expect(at(withoutLive)).toBe(at(withLive));
+    // And the live row really did render its status, so this is not vacuous.
+    expect(withLive).toContain('working');
+    expect(withoutLive).not.toContain('working');
+  });
+
+  it('omits the status column entirely when it is off', () => {
+    const live = { context: 'terminal', kind: 'claude', status: 'orphaned' } as ActiveSession;
+    const row = strip(formatPickerLabel(meta(), '', { showStatus: false }, undefined, '', false, live));
+    expect(row).not.toContain('orphan');
   });
 });
 

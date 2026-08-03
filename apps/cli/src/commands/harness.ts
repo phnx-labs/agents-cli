@@ -13,24 +13,115 @@
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
-import { addProfile, type AddProfileOptions } from './profiles.js';
+import { addProfile, ensureProviderToken, type AddProfileOptions } from './profiles.js';
 import {
   listProfiles,
   readProfile,
+  writeProfile,
   deleteProfile,
+  profileExists,
   profileHostLabel,
   profileProviderLabel,
   profileModelLabel,
   profileAuthLabel,
+  profileLabel,
+  forkProfile,
+  profileFromHostModel,
+  authEnvKeyForHost,
   getProfilePath,
+  validateProfileName,
+  type Profile,
 } from '../lib/profiles.js';
 import { listPresets } from '../lib/profiles-presets.js';
-import { AGENTS, ALL_AGENT_IDS } from '../lib/agents.js';
+import { AGENTS, ALL_AGENT_IDS, resolveAgentName } from '../lib/agents.js';
+import type { AgentId } from '../lib/types.js';
 
 /** Short capability summary for a native harness — its supported run modes. */
 function nativeModes(id: (typeof ALL_AGENT_IDS)[number]): string {
   const modes = AGENTS[id]?.capabilities?.modes ?? [];
   return modes.length ? modes.join('/') : '-';
+}
+
+/**
+ * Print one custom harness. Shared by `agents harness view <name>` and by
+ * `agents view <name>` — a custom harness resolves as an agent type there, so
+ * both entry points must describe it identically.
+ */
+export function renderHarnessDetail(name: string): void {
+  const p = readProfile(name);
+  console.log(chalk.bold(profileLabel(p)) + chalk.gray('  (custom harness)'));
+  if (p.description) console.log(chalk.gray(p.description));
+  console.log('');
+  console.log(`Host:     ${profileHostLabel(p)}`);
+  console.log(`Model:    ${profileModelLabel(p)}`);
+  if (p.fallback_model) console.log(`Fallback: ${p.fallback_model}`);
+  console.log(`Provider: ${profileProviderLabel(p)}`);
+  console.log(`Auth:     ${profileAuthLabel(p)}`);
+  if (p.forkedFrom) console.log(`Forked:   from ${p.forkedFrom}`);
+  console.log(chalk.gray(getProfilePath(p.name)));
+  console.log('');
+  console.log(chalk.gray(`Run: agents run ${p.name} "hello"`));
+}
+
+/** Options accepted by `agents harness fork`. */
+export interface ForkOptions {
+  model?: string;
+  baseUrl?: string;
+  authProvider?: string;
+  version?: string;
+  label?: string;
+  description?: string;
+  keyStdin?: boolean;
+  force?: boolean;
+}
+
+/**
+ * Build the new harness for `agents harness fork <source> <name>`.
+ *
+ * Two sources, one verb: an existing custom harness is copied and overridden;
+ * a native agent id is turned into a harness pinned to `--model` on that host.
+ * Forking a native harness therefore requires `--model` — there is nothing to
+ * copy a model from.
+ */
+export function buildFork(source: string, name: string, opts: ForkOptions): Profile {
+  if (profileExists(source)) {
+    return forkProfile(readProfile(source), name, {
+      model: opts.model,
+      baseUrl: opts.baseUrl,
+      provider: opts.authProvider,
+      version: opts.version,
+      label: opts.label,
+      description: opts.description,
+    });
+  }
+
+  const host = resolveAgentName(source);
+  if (!host) {
+    throw new Error(
+      `No harness or agent named '${source}'.\n` +
+        `Fork from a custom harness (agents harness list) or a native one: ${ALL_AGENT_IDS.join(', ')}.`,
+    );
+  }
+  if (!opts.model) {
+    throw new Error(`--model <id> is required when forking the native '${host}' harness (there is no model to inherit).`);
+  }
+  return profileFromHostModel(name, host, opts.model, {
+    version: opts.version,
+    baseUrl: opts.baseUrl,
+    provider: opts.authProvider,
+    authEnvVar: opts.authProvider ? authEnvKeyForHostOrThrow(host) : undefined,
+    label: opts.label,
+    description: opts.description ?? `Forked from ${host}: ${opts.model}`,
+  });
+}
+
+/** Auth env var for a host, as a hard error when the host declares none. */
+function authEnvKeyForHostOrThrow(host: AgentId): string {
+  const key = authEnvKeyForHost(host);
+  if (!key) {
+    throw new Error(`--auth-provider is set but host '${host}' has no known auth env var; it manages its own login.`);
+  }
+  return key;
 }
 
 export function registerHarnessCommands(program: Command): void {
@@ -45,10 +136,17 @@ A custom harness pins a host CLI (opencode, claude, codex, grok, antigravity, ..
 model and gives it a name. 'agents run <name>' then behaves like a native agent
 type, and 'agents repo push user' syncs it to every device.
 
+A custom harness is its own agent type in 'agents view' — its own block beside Claude
+and Codex, not a row indented under the host CLI that executes it.
+
 Examples:
   # Meta Muse Spark 1.1 through OpenCode, called 'spark'
   agents harness add spark --host opencode --model meta/muse-spark-1.1
   agents run spark "refactor api/handlers/checkout.py"
+
+  # Fork a native harness, or copy one of your own and swap the model
+  agents harness fork opencode deepseek --model deepseek/deepseek-v4-flash-0731 --auth-provider openrouter
+  agents harness fork deepseek deepseek-chat --model deepseek/deepseek-chat-v3
 
   # Per-run model override still wins
   agents run spark --model opencode/big-pickle "quick pass"
@@ -77,6 +175,50 @@ Examples:
     .action(async (name: string, opts: AddProfileOptions) => {
       try {
         await addProfile(name, opts, 'Harness');
+      } catch (err) {
+        console.error(chalk.red((err as Error).message));
+        process.exit(1);
+      }
+    });
+
+  cmd
+    .command('fork <source> <name>')
+    .description('Fork a native harness (claude, opencode, ...) or an existing custom one into a new named harness.')
+    .option('--model <id>', 'Model to pin on the fork (required when forking a native harness)')
+    .option('--base-url <url>', 'Custom endpoint base URL (claude/codex hosts)')
+    .option('--auth-provider <provider>', 'Attach a keychain-backed API key under this provider')
+    .option('--version <version>', 'Pin the host CLI version (e.g., 1.16.0)')
+    .option('--label <text>', 'Human-facing name shown by `agents view` (defaults to <name>)')
+    .option('--description <text>', 'One-line description')
+    .option('--key-stdin', 'Read the API key from stdin instead of prompting (for scripts/CI)')
+    .option('--force', 'Overwrite an existing harness with the same name')
+    .addHelpText(
+      'after',
+      `
+Examples:
+  # Fork OpenCode into a harness pinned to a DeepSeek model on OpenRouter
+  agents harness fork opencode deepseek --model deepseek/deepseek-v4-flash-0731 --auth-provider openrouter
+
+  # Fork Claude Code onto a private gateway
+  agents harness fork claude corp --model gpt-x --base-url https://gw.corp/v1 --auth-provider corp
+
+  # Copy an existing harness and swap only the model
+  agents harness fork deepseek deepseek-chat --model deepseek/deepseek-chat-v3
+`,
+    )
+    .action(async (source: string, name: string, opts: ForkOptions) => {
+      try {
+        validateProfileName(name);
+        if (profileExists(name) && !opts.force) {
+          throw new Error(`Harness '${name}' already exists. Use --force to overwrite.`);
+        }
+        // Build first so a bad source/flag combination fails before prompting
+        // for a key the user would then have stored for nothing.
+        const forked = buildFork(source, name, opts);
+        if (opts.authProvider) await ensureProviderToken(opts.authProvider, undefined, opts.keyStdin);
+        writeProfile(forked);
+        console.log(chalk.green(`Harness '${name}' forked from ${source}.`));
+        console.log(chalk.gray(`Try: agents run ${name} "hello"`));
       } catch (err) {
         console.error(chalk.red((err as Error).message));
         process.exit(1);
@@ -143,15 +285,7 @@ Examples:
     .description('Show one custom harness (host, model, provider, auth, path).')
     .action((name: string) => {
       try {
-        const p = readProfile(name);
-        console.log(chalk.bold(p.name));
-        if (p.description) console.log(chalk.gray(p.description));
-        console.log('');
-        console.log(`Host:     ${profileHostLabel(p)}`);
-        console.log(`Model:    ${profileModelLabel(p)}`);
-        console.log(`Provider: ${profileProviderLabel(p)}`);
-        console.log(`Auth:     ${profileAuthLabel(p)}`);
-        console.log(chalk.gray(getProfilePath(p.name)));
+        renderHarnessDetail(name);
       } catch (err) {
         console.error(chalk.red((err as Error).message));
         process.exit(1);

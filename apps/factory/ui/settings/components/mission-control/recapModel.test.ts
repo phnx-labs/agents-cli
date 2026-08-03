@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test'
-import { buildRecap, recapDayLabel, recapCost } from './recapModel'
+import { buildRecap, recapDayLabel, recapCost, type RecapForkEdge } from './recapModel'
 import type { RemoteSessionLike } from './floorAdapter'
 
 const NOW = Date.parse('2026-07-10T18:00:00') // local-time anchor for day labels
@@ -101,5 +101,97 @@ describe('buildRecap', () => {
     expect(days[0]!.entries).toHaveLength(1)
     expect(days[0]!.entries[0]!.title).toBe('fix-rail')
     expect(days[0]!.entries[0]!.abbr).toBe('CC')
+  })
+})
+
+describe('buildRecap fork lineage', () => {
+  function edge(over: Partial<RecapForkEdge> = {}): RecapForkEdge {
+    return {
+      sourceSessionId: 'parent',
+      sourceHost: 'zion',
+      forkSessionId: 'fork',
+      forkHost: 'yosemite-m0',
+      agentKey: 'claude',
+      forkedAt: NOW - 900_000,
+      ...over,
+    }
+  }
+
+  test('pairs a fork with its parent and drops the parent row', () => {
+    const days = buildRecap(
+      [
+        session({ sessionId: 'fork', host: 'yosemite-m0', lastActivityMs: NOW - 600_000 }),
+        session({ sessionId: 'parent', host: 'zion', lastActivityMs: NOW - 1_800_000 }),
+      ],
+      new Set(),
+      NOW,
+      [edge()],
+    )
+    expect(days[0]!.entries.map((e) => e.id)).toEqual(['fork'])
+    const forked = days[0]!.entries[0]!
+    expect(forked.fork).toEqual({ sourceId: 'parent', sourceHost: 'zion', forkHost: 'yosemite-m0' })
+    expect(forked.forkedFrom?.id).toBe('parent')
+    expect(forked.forkedFrom?.host).toBe('zion')
+  })
+
+  test('the day rollup still counts both sessions in a pair', () => {
+    const days = buildRecap(
+      [
+        session({ sessionId: 'fork', costUsd: 1, prUrl: 'https://x/pr/2' }),
+        session({ sessionId: 'parent', costUsd: 3, prUrl: 'https://x/pr/1' }),
+      ],
+      new Set(),
+      NOW,
+      [edge()],
+    )
+    expect(days[0]!.entries).toHaveLength(1)
+    expect(days[0]!.sessions).toBe(2)
+    expect(days[0]!.costUsd).toBeCloseTo(4)
+    expect(days[0]!.prs).toBe(2)
+  })
+
+  test('keeps a cross-day parent on its own day and still marks the fork', () => {
+    const days = buildRecap(
+      [
+        session({ sessionId: 'fork', host: 'mac-mini', lastActivityMs: NOW - 600_000 }),
+        session({ sessionId: 'parent', lastActivityMs: NOW - 30 * 3_600_000 }),
+      ],
+      new Set(),
+      NOW,
+      [edge({ forkHost: 'mac-mini' })],
+    )
+    expect(days.map((d) => d.label)).toEqual(['Today', 'Yesterday'])
+    expect(days[0]!.entries[0]!.forkedFrom).toBeNull()
+    expect(days[0]!.entries[0]!.fork?.sourceHost).toBe('zion')
+    expect(days[1]!.entries.map((e) => e.id)).toEqual(['parent'])
+  })
+
+  test('a parent that is itself a fork keeps its own row', () => {
+    const days = buildRecap(
+      [
+        session({ sessionId: 'c', lastActivityMs: NOW - 600_000 }),
+        session({ sessionId: 'b', lastActivityMs: NOW - 900_000 }),
+        session({ sessionId: 'a', lastActivityMs: NOW - 1_200_000 }),
+      ],
+      new Set(),
+      NOW,
+      [edge({ sourceSessionId: 'b', forkSessionId: 'c' }), edge({ sourceSessionId: 'a', forkSessionId: 'b' })],
+    )
+    // b is a's fork, so it is not absorbed into c's pair — hiding it would
+    // erase a session from the ledger.
+    expect(days[0]!.entries.map((e) => e.id)).toEqual(['c', 'b'])
+    expect(days[0]!.entries[0]!.forkedFrom).toBeNull()
+    expect(days[0]!.entries[1]!.forkedFrom?.id).toBe('a')
+  })
+
+  test('an edge whose fork never reported an id pairs nothing', () => {
+    const days = buildRecap(
+      [session({ sessionId: 'parent' })],
+      new Set(),
+      NOW,
+      [edge({ forkSessionId: null })],
+    )
+    expect(days[0]!.entries.map((e) => e.id)).toEqual(['parent'])
+    expect(days[0]!.entries[0]!.fork).toBeNull()
   })
 })

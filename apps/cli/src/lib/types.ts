@@ -802,9 +802,10 @@ export interface Meta {
     secretsBundle?: string;
   };
   /** macOS secrets-agent config. `policy` is the default prompt policy for
-   * bundles without an explicit per-bundle policy: `daily` (the default) asks
-   * once per ~7 days, `always` asks every time. `auto` (default on) lets the
-   * first real keychain read of a `daily` bundle populate the broker so
+   * bundles without an explicit per-bundle policy: `hold` (the default) asks
+   * once per hold window (7 days out of the box), `always` asks every time.
+   * `auto` (default on) lets the
+   * first real keychain read of a `hold` bundle populate the broker so
    * concurrent runs read silently — set it `false` to force a prompt on every read.
    * `holdMs` caps how long an unlocked/auto-cached bundle is held before the next
    * read re-prompts (default 7 days; e.g. 86400000 for a 24h cap). Clamped to

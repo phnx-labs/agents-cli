@@ -151,7 +151,13 @@ function formatRotationBanner(result: RotateResult, verb: string = 'balanced'): 
   const { picked, healthy, excluded } = result;
   const label = picked.email ? `${picked.email} · ${picked.agent}@${picked.version}` : `${picked.agent}@${picked.version}`;
   const ratio = `${healthy.length} of ${healthy.length + excluded.length} healthy`;
-  return `[agents] ${verb} picked ${label} (${ratio})`;
+  // Say it when the pick was a guess. A machine whose usage refresh is failing
+  // reports old percentages with total confidence, so a silent banner reads
+  // identical whether the router knew the account had headroom or merely hoped
+  // so — and the operator only finds out when the agent answers "you've hit
+  // your weekly limit".
+  const caveat = result.usageUnverified ? ', usage unverified — no account could be refreshed' : '';
+  return `[agents] ${verb} picked ${label} (${ratio}${caveat})`;
 }
 
 /** The host descriptor fields the `--copy-creds` security gate reads. */

@@ -160,7 +160,8 @@ export function shquote(s: string): string {
 // does not specify one — auto is the writable-but-gated posture that lets an
 // interactive agent edit files without stalling for read-only plan approval.
 // Callers that need plan mode (e.g. a dispatch that explicitly wants planning)
-// must pass `'plan'` explicitly.
+// must pass `'plan'` explicitly. A target's `cwd` is portable input for the
+// CLI's `--cwd` rewrite; `remoteCwd` is an exact path already valid on `host`.
 export function buildAgentLaunchCommand(
   agentKey: string,
   sessionId: string | null,
@@ -169,10 +170,19 @@ export function buildAgentLaunchCommand(
   pinnedVersion?: string,
   strategy?: RunStrategy,
   mode?: AgentLaunchMode,
-  host?: string,
-  local = false,
-  cwd?: string,
+  target: {
+    host?: string;
+    local?: boolean;
+    /** Portable local path for CLI `--cwd`; agents-cli re-roots it on `host`. */
+    cwd?: string;
+    /** Exact path already resolved on `host`; emitted verbatim as `--remote-cwd`. */
+    remoteCwd?: string;
+  } = {},
 ): string {
+  const { host, local = false, cwd, remoteCwd } = target;
+  if (cwd && remoteCwd) {
+    throw new Error('Agent launch target cannot combine portable cwd with exact remoteCwd');
+  }
   const agentSpec = pinnedVersion ? `${agentKey}@${pinnedVersion}` : agentKey;
   let command = `agents run ${agentSpec} --interactive`;
   // Offload onto another machine over SSH — the CLI resolves the device from
@@ -181,6 +191,7 @@ export function buildAgentLaunchCommand(
   if (host) {
     command += ` --host ${shquote(host)}`;
     if (cwd) command += ` --cwd ${shquote(cwd)}`;
+    if (remoteCwd) command += ` --remote-cwd ${shquote(remoteCwd)}`;
   }
   // Unpinned, no explicit host: affinity-pick device via --device auto.
   // Explicit Pick Host / @version pin skip this.
@@ -232,6 +243,13 @@ export function wrapNativeAgentCommand(command: string, isShell: boolean): strin
 // so the CLI can apply balanced selection on local, picked-host, and auto-host
 // launches. Droid has no account enumeration and Shell is not an agent runner.
 export const STRATEGY_LAUNCH_AGENTS = ['claude', 'codex', 'gemini', 'opencode', 'cursor', 'antigravity', 'grok', 'kimi'] as const;
+
+/** Managed agents always launch through `agents run`, even when a host picker
+ * brings a remote source back to this machine. Any explicit remote target also
+ * uses `agents run` so non-strategy harnesses can cross the SSH boundary. */
+export function usesManagedAgentLaunch(agentKey: string, targetHost?: string): boolean {
+  return !!targetHost || (STRATEGY_LAUNCH_AGENTS as readonly string[]).includes(agentKey);
+}
 
 // Compare two dotted version strings (e.g. "2.1.170" vs "2.1.42") numerically.
 // Returns >0 when a is newer, <0 when b is newer, 0 when equal. Non-numeric

@@ -151,4 +151,65 @@ describe('buildHqFloor', () => {
     expect(snapshot.ambientEvents.some((event) => event.kind === 'error' && event.agentId === 'abandoned-session')).toBe(true);
     expect(snapshot.ambientEvents.some((event) => event.kind === 'idle_scene')).toBe(false);
   });
+
+  // A session whose host died keeps whatever `activity` its last parsed turn
+  // left behind — usually `working`. Without its own arm that falls through to
+  // the activity check and the Floor shows a cheerfully working agent for a
+  // process that is gone.
+  it('does not render a crashed or orphaned session as working on the floor', () => {
+    const sessions: ActiveSession[] = [
+      {
+        context: 'terminal',
+        kind: 'claude',
+        status: 'crashed',
+        activity: 'working',
+        sessionId: 'crashed-session',
+        machine: 'yosemite-s0',
+      },
+      {
+        context: 'terminal',
+        kind: 'claude',
+        status: 'orphaned',
+        activity: 'idle',
+        sessionId: 'orphaned-session',
+        machine: 'yosemite-s0',
+      },
+    ];
+
+    const snapshot = buildHqFloor({
+      generatedAt: new Date('2026-07-21T17:03:00.000Z'),
+      sessions,
+      teams: [],
+      teammatesByTeam: new Map(),
+      blocks: [],
+    });
+
+    // An orphaned session that is merely idle is stranded, not asking anything —
+    // giving it the same "needs input" alert as a genuinely blocked one trains
+    // the operator to ignore the alert.
+    expect(snapshot.agents.map((agent) => [agent.id, agent.mood])).toEqual([
+      ['crashed-session', 'blocked'],
+      ['orphaned-session', 'blocked'],
+    ]);
+  });
+
+  it('renders an orphaned session that is mid-question as waiting, not merely blocked', () => {
+    const snapshot = buildHqFloor({
+      generatedAt: new Date('2026-07-21T17:03:00.000Z'),
+      sessions: [
+        {
+          context: 'terminal',
+          kind: 'claude',
+          status: 'orphaned',
+          activity: 'waiting_input',
+          sessionId: 'orphan-asking',
+          machine: 'yosemite-s0',
+        },
+      ],
+      teams: [],
+      teammatesByTeam: new Map(),
+      blocks: [],
+    });
+    expect(snapshot.agents.map((agent) => agent.mood)).toEqual(['waiting']);
+  });
 });

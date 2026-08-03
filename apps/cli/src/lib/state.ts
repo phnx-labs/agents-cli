@@ -134,6 +134,8 @@ const CLOUD_DIR = path.join(CACHE_DIR, 'cloud');
 const DRIVE_DIR = path.join(CACHE_DIR, 'drive');
 const TERMINALS_DIR = path.join(CACHE_DIR, 'terminals');
 const LOGS_DIR = path.join(CACHE_DIR, 'logs');
+/** Disposable performance samples (~/.agents/.cache/perf/) — safe to wipe. */
+const PERF_DIR = path.join(CACHE_DIR, 'perf');
 const RUNTIME_STATE_DIR = path.join(CACHE_DIR, 'state');
 const COMPANION_CACHE_DIR = path.join(CACHE_DIR, 'companion');
 const BROWSER_RUNTIME_DIR = path.join(CACHE_DIR, 'browser');
@@ -517,6 +519,18 @@ export function getTerminalsDir(): string { return TERMINALS_DIR; }
 
 /** Path to runtime logs (~/.agents/.cache/logs/). */
 export function getLogsDir(): string { return LOGS_DIR; }
+
+/**
+ * Path to disposable performance samples (~/.agents/.cache/perf/).
+ * Holds `perf.db` + a hook-shim spool. Loss is acceptable — wipe freely.
+ */
+export function getPerfDir(): string { return PERF_DIR; }
+
+/** Path to the perf SQLite warehouse (~/.agents/.cache/perf/perf.db). */
+export function getPerfDbPath(): string { return path.join(PERF_DIR, 'perf.db'); }
+
+/** Path to the hook-shim NDJSON spool drained into perf.db on open. */
+export function getPerfSpoolPath(): string { return path.join(PERF_DIR, 'spool.jsonl'); }
 
 /** Path to per-process runtime state (~/.agents/.cache/state/). */
 export function getRuntimeStateDir(): string { return RUNTIME_STATE_DIR; }
