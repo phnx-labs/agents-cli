@@ -1,19 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- **`agents routines list` no longer reports another device's routine as failed.**
-  Run records are written into the runs dir of whichever machine fired the
-  routine and carry no device attribution, but the listing reported any local
-  record as the routine's status — so a routine re-pinned to another device kept
-  showing the old machine's leftover July failures, in the table and in the menu
-  bar (which reads `list --json`). Last Status is now per-device: a routine this
-  device does not fire shows `-`, and `--json` returns `null` for `lastStatus`,
-  `exitCode`, `failureReason`, `lastRunStartedAt`, and `lastRunCompletedAt`
-  (`runsHere: false` already says why). A routine pinned to several devices
-  carries a status only on its **This machine** row. Read a peer's status with
-  `agents routines list --device <name>`.
-
 ## 1.20.89
 
 - **Webhook handler layer for one-off agent/workflow/command/routine triggers.**
