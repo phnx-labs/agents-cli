@@ -172,7 +172,30 @@ parse in the picker): compact `✓done/total · current step` in the picker
 preview (`Todos:` line), the flat listing's `doing` cell, and `--active` /
 cross-machine rows (interactive, headless, teams, and sub-agent sessions share
 the same path). The picker preview also shows the originating user prompt and a
-`Dirs:` line of directories touched.
+width-capped `Dirs:` line of directories touched.
+
+Both renders of a session — the picker quick preview and the full summary —
+share one extraction module (`src/lib/session/highlights.ts`) for the "what did
+this session use and produce" lines, so they never disagree:
+
+- `Skills:` / `Skills (N)` — skills invoked (the `Skill` tool, plugin skills
+  included), repeat counts folded (`teams ×2`).
+- `Hooks:` / `Hooks (N)` — hooks that fired, from Claude's `hook_success` /
+  `hook_error` attachment records (other harnesses don't record firings, so the
+  section simply doesn't render for them).
+- `Links:` / `Links (N)` — URLs harvested from the conversation, classified
+  (Linear/Jira/GitHub/GitLab), deduped by label, clickable (OSC 8).
+- `Artifacts:` / `Artifacts (N)` — documents the session CREATED: anything under
+  `.agents/artifacts|plans|reports/`, plus other `*.md`/`*.html` creations.
+- `Repos:` (picker only) — repos worked in, from a bounded `.git` walk-up over
+  the touched paths (relative paths resolve against the session cwd only).
+- `Errors:` (picker) — the same failure tally the full summary shows.
+
+The full summary's `Plan` section renders the checklist with status markers
+(`[x]` / `[>]` / `[ ]`) alongside any ExitPlanMode plan text. Changes/Dirs
+labels collapse `.agents/worktrees/<slug>` prefixes to `⧉ <slug>/…` and drop
+shell junk (`2>&1`, unexpanded `$VAR` paths), `node_modules`, and agents-cli
+internal archives at the source (`digest.ts:isNoisePath`).
 
 ```json
 {

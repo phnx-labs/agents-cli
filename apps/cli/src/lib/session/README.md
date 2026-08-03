@@ -85,6 +85,32 @@ with what, and how big it got.** The nine fields below are that contract.
 derived from events, so it drops. This is the one field in the preview that is
 genuinely lossy today.
 
+### Highlight lines (shared by both renders)
+
+Beyond the identity fields above, both renders show "what the session used and
+produced", extracted by one shared module — `highlights.ts` — so the panes
+never disagree:
+
+| Line | Source | Notes |
+|------|--------|-------|
+| `Skills:` / `Skills (N)` | `extractSkills` — `Skill` tool calls (`args.skill`) | plugin skills ride the same tool |
+| `Hooks:` / `Hooks (N)` | `extractHooks` — `hook` events from Claude's `hook_success`/`hook_error` attachments (`parse.ts`) | Claude-only: other harnesses don't record firings; the section doesn't render for them |
+| `Links:` / `Links (N)` | `extractLinks` — URLs in messages, classified Linear/Jira/GitHub/GitLab | deduped by label, OSC-8 clickable, capped |
+| `Artifacts:` / `Artifacts (N)` | `extractArtifacts` — created docs (`.agents/artifacts|plans|reports/`, other `*.md`/`*.html`) | clickable |
+| `Repos:` (preview only) | `extractRepos` — bounded `.git` walk-up over touched paths | relative paths resolve against the session cwd ONLY; skipped when cwd is unknown |
+| `Errors:` (preview) | `error` events | one-line tally, mirrors the summary's Errors section |
+
+These are transcript-derived, so remote/unindexed rows (`formatMetaOnlyBody`)
+don't show them — same constraint as `model` above. Rendering them remotely
+means persisting the signals at scan time (the "Gaps to close" model below).
+
+Path hygiene is standardized at the source: `digest.ts:isNoisePath` drops shell
+junk (`2>&1`, unexpanded `$VAR` paths), `node_modules`, `.system`, and
+`.agents/.history/` internal archives from every change/dir derivation, and
+`render.ts:displayPath` collapses `.agents/worktrees/<slug>` prefixes to
+`⧉ <slug>/…` after the session-cwd strip.
+
+
 ### Gaps to close (and how)
 
 Six of the nine fields are already in the preview. The work is the other three plus
