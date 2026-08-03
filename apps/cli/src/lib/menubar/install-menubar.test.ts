@@ -8,6 +8,7 @@ import {
   codesignVerifies,
   gatekeeperAssesses,
   generateServicePlist,
+  hasDeveloperIdSignature,
   isMenubarStale,
   menubarPlistNeedsRepoint,
   processesToEnd,
@@ -238,6 +239,12 @@ darwinOnly('menubar launch guard requires notarization (real codesign/spctl)', (
     // ...but Gatekeeper rejects it because it is not notarized. The guard's AND
     // of the two is therefore false, so the helper is refused, not launched.
     expect(gatekeeperAssesses(app)).toBe(false);
+    fs.rmSync(path.dirname(app), { recursive: true, force: true });
+  });
+
+  it('hasDeveloperIdSignature is false for an ad-hoc bundle', () => {
+    const app = makeAdHocBundle();
+    expect(hasDeveloperIdSignature(app)).toBe(false);
     fs.rmSync(path.dirname(app), { recursive: true, force: true });
   });
 });

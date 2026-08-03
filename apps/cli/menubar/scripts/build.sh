@@ -86,7 +86,9 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleIdentifier</key>
     <string>com.phnx-labs.agents-menubar</string>
     <key>CFBundleName</key>
-    <string>Agents Menu Bar</string>
+    <string>AGI Menu</string>
+    <key>CFBundleDisplayName</key>
+    <string>AGI Menu</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundlePackageType</key>
