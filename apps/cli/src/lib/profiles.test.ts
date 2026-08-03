@@ -6,6 +6,8 @@ import * as state from './state.js';
 import {
   profileModelEnvKey,
   profileFromHostModel,
+  forkProfile,
+  profileSummary,
   modelEnvKeyForHost,
   resolveProfileEnv,
   readProfile,
@@ -222,5 +224,100 @@ describe('resolveProfileForRun surfaces fallback_model as an env-swap', () => {
       fallback_model: 'ignored-because-no-key-to-swap',
     });
     expect(resolveProfileForRun('weird').fallbackModel).toBeUndefined();
+  });
+});
+
+describe('forkProfile — copy an existing harness under a new name', () => {
+  const source: Profile = {
+    name: 'deepseek',
+    host: { agent: 'claude', version: '2.1.219' },
+    env: {
+      ANTHROPIC_MODEL: 'deepseek/deepseek-v4-flash-0731',
+      ANTHROPIC_BASE_URL: 'https://openrouter.ai/api',
+    },
+    auth: { envVar: 'ANTHROPIC_AUTH_TOKEN', keychainItem: 'agents-cli.openrouter.token' },
+    authOptional: false,
+    description: 'Custom harness: claude + deepseek/deepseek-v4-flash-0731',
+    preset: 'deepseek',
+    provider: 'openrouter',
+    fallback_model: 'deepseek/deepseek-chat-v3',
+  };
+
+  it('carries env, auth, host pin and fallback across, and records the lineage', () => {
+    const forked = forkProfile(source, 'deepseek-copy');
+    expect(forked.name).toBe('deepseek-copy');
+    expect(forked.forkedFrom).toBe('deepseek');
+    expect(forked.host).toEqual({ agent: 'claude', version: '2.1.219' });
+    expect(forked.env).toEqual(source.env);
+    expect(forked.auth).toEqual(source.auth);
+    expect(forked.fallback_model).toBe('deepseek/deepseek-chat-v3');
+  });
+
+  it('does not alias the source env — editing the fork leaves the source alone', () => {
+    const forked = forkProfile(source, 'deepseek-copy', { model: 'deepseek/deepseek-chat-v3' });
+    expect(forked.env.ANTHROPIC_MODEL).toBe('deepseek/deepseek-chat-v3');
+    expect(source.env.ANTHROPIC_MODEL).toBe('deepseek/deepseek-v4-flash-0731');
+  });
+
+  it('writes the swapped model onto the source model env key, keeping the endpoint', () => {
+    const forked = forkProfile(source, 'chat', { model: 'deepseek/deepseek-chat-v3' });
+    expect(forked.env.ANTHROPIC_MODEL).toBe('deepseek/deepseek-chat-v3');
+    expect(forked.env.ANTHROPIC_BASE_URL).toBe('https://openrouter.ai/api');
+  });
+
+  it('drops the preset link and the stale description once the model is swapped', () => {
+    const forked = forkProfile(source, 'chat', { model: 'deepseek/deepseek-chat-v3' });
+    expect(forked.preset).toBeUndefined();
+    expect(forked.description).toBe('Forked from deepseek: deepseek/deepseek-chat-v3');
+  });
+
+  it('keeps the preset link and description when nothing model-shaped changed', () => {
+    const forked = forkProfile(source, 'twin');
+    expect(forked.preset).toBe('deepseek');
+    expect(forked.description).toBe(source.description);
+  });
+
+  it('repoints auth at another provider keychain item, reusing the host auth env var', () => {
+    const forked = forkProfile(source, 'corp', { provider: 'corp' });
+    expect(forked.provider).toBe('corp');
+    expect(forked.auth).toEqual({ envVar: 'ANTHROPIC_AUTH_TOKEN', keychainItem: 'agents-cli.corp.token' });
+  });
+
+  it('re-pins the host version when asked', () => {
+    expect(forkProfile(source, 'pinned', { version: '2.1.170' }).host.version).toBe('2.1.170');
+  });
+
+  it('rejects --base-url on a host with no known base-URL env var', () => {
+    const opencodeSource: Profile = { name: 'spark', host: { agent: 'opencode' }, env: { OPENCODE_MODEL: 'm' } };
+    expect(() => forkProfile(opencodeSource, 'spark2', { baseUrl: 'https://gw.corp/v1' })).toThrow(/no known base-URL env var/i);
+  });
+
+  it('rejects an invalid fork name before copying anything', () => {
+    expect(() => forkProfile(source, 'bad name!')).toThrow(/invalid profile name/i);
+  });
+});
+
+describe('profileSummary — first-class harness fields', () => {
+  it('surfaces the label, host version, description and fork lineage', () => {
+    const summary = profileSummary({
+      name: 'spark',
+      label: 'Muse Spark',
+      host: { agent: 'opencode', version: '1.16.0' },
+      env: { OPENCODE_MODEL: 'meta/muse-spark-1.1' },
+      description: 'Muse Spark through OpenCode',
+      forkedFrom: 'opencode',
+    });
+    expect(summary.label).toBe('Muse Spark');
+    expect(summary.hostVersion).toBe('1.16.0');
+    expect(summary.description).toBe('Muse Spark through OpenCode');
+    expect(summary.forkedFrom).toBe('opencode');
+    expect(summary.model).toBe('meta/muse-spark-1.1');
+  });
+
+  it('falls back to the harness name when no label is set', () => {
+    const summary = profileSummary({ name: 'spark', host: { agent: 'opencode' }, env: {} });
+    expect(summary.label).toBe('spark');
+    expect(summary.hostVersion).toBeNull();
+    expect(summary.forkedFrom).toBeNull();
   });
 });
