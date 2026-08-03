@@ -93,6 +93,7 @@ describe('session shell-command sampler', () => {
           sessions: [session('local-session', 'yosemite-s1')],
         });
       },
+      'yosemite-s1',
     );
     expect(calls).toHaveLength(6);
     expect(calls[0]).toContain('--local');
@@ -118,6 +119,7 @@ describe('session shell-command sampler', () => {
           sessions: [session('limited-session', 'peer-one')],
         });
       },
+      'yosemite-s1',
     );
     expect(queryCalls).toBe(5);
     expect(envelope.sessions).toHaveLength(1);

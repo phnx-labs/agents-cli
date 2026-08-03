@@ -219,10 +219,10 @@ export function mergeSampleEnvelopes(envelopes: ToolSearchEnvelope[]): ToolSearc
 export function loadEnvelope(
   options: SampleOptions,
   runner: AgentsRunner = runAgents,
+  self: string = machineId(),
 ): ToolSearchEnvelope {
   const explicit = options.devices.length > 0;
   const devices = explicit ? options.devices : defaultDevices(runner);
-  const self = machineId();
   const { includeLocal, remoteDevices } = partitionSampleDevices(devices, self, explicit);
   const envelopes: ToolSearchEnvelope[] = [];
   let failedSources = 0;
