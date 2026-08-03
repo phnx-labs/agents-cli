@@ -14,6 +14,23 @@ All notable changes to the Factory extension are documented here. Format follows
   card. Pairs with the CLI fix that now attributes those panes in the first place.
   Source: `ui/settings/components/mission-control/floorAdapter.ts`.
 
+## [0.9.306] - 2026-08-03
+
+- **`Agents: Fork Current Session` is now `Agents: Fork`, and a second command forks
+  a session you pick from a browser.** The rename is title-only — same command id,
+  same behavior (fork the tab you are in). The new `Agents: Fork (Pick Session)`
+  opens a session browser instead: recent transcripts grouped by the machine they
+  live on, newest first, with the session you invoked from pinned to the top of its
+  group, filterable by topic / project / harness / id. A title-bar button switches
+  the listing to any registered device (`agents sessions --all --json --host <device>`),
+  so sessions on a fleet box are browsable from here. Picking one forks it **where it
+  lives**: a row on this machine launches locally, a row on a device launches over
+  `agents run --host <device> --cwd <session cwd>`, so the sibling agent starts on the
+  box that actually holds the transcript, in the same repo. Source:
+  `apps/factory/src/core/sessionBrowser.ts`, `apps/factory/src/vscode/extension.ts`
+  (`pickSessionToFork`, `forkPickedSession`, `openSingleAgentWithQueue`'s new
+  `remoteCwd`), `apps/factory/package.json`.
+
 ## [0.9.305] - 2026-08-03
 
 - **Session resume was broken everywhere, and `Agents: Resume` now batch-reopens

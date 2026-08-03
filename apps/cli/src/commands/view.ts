@@ -560,7 +560,8 @@ async function showInstalledVersions(
         const usageKey = getUsageLookupKey(info);
         const usageInfo = usageKey ? usageByKey.get(usageKey) : undefined;
         const usageUnavailable = agentReportsUsage(agentId) && !!info?.signedIn && !usageInfo?.snapshot;
-        const usageStr = formatUsageSummary(info?.plan || null, usageInfo?.snapshot || null, maxPlanWidth, { unavailable: usageUnavailable });
+        const usageUnverified = !!usageInfo?.snapshot && !!usageInfo.error;
+        const usageStr = formatUsageSummary(info?.plan || null, usageInfo?.snapshot || null, maxPlanWidth, { unavailable: usageUnavailable, unverified: usageUnverified });
         maxUsageWidth = Math.max(maxUsageWidth, visibleWidth(usageStr));
         const statusStr = formatUsageStatusBadge(info?.usageStatus);
         maxStatusWidth = Math.max(maxStatusWidth, visibleWidth(statusStr));
@@ -618,7 +619,8 @@ async function showInstalledVersions(
         const hasEmail = !!vInfo?.email;
         const signedIn = !!vInfo?.signedIn;
         const usageUnavailable = agentReportsUsage(agentId) && signedIn && !usageInfo?.snapshot;
-        const usageStr = formatUsageSummary(vInfo?.plan || null, usageInfo?.snapshot || null, maxPlanWidth, { unavailable: usageUnavailable });
+        const usageUnverified = !!usageInfo?.snapshot && !!usageInfo.error;
+        const usageStr = formatUsageSummary(vInfo?.plan || null, usageInfo?.snapshot || null, maxPlanWidth, { unavailable: usageUnavailable, unverified: usageUnverified });
         const hasUsage = usageStr.length > 0;
         // Only show lastActive for versions with an actual logged-in account.
         // Otherwise it reflects install time (misleading "just now" for fresh installs).
@@ -730,7 +732,9 @@ async function showInstalledVersions(
       const parts = [`    ${verLabel}${padding}`];
       const gUsageKey = getUsageLookupKey(gInfo);
       const gUsage = gUsageKey ? usageByKey.get(gUsageKey) : undefined;
-      const gUsageStr = formatUsageSummary(gInfo?.plan || null, gUsage?.snapshot || null);
+      const gUsageStr = formatUsageSummary(gInfo?.plan || null, gUsage?.snapshot || null, 3, {
+        unverified: !!gUsage?.snapshot && !!gUsage.error,
+      });
       const gActiveStr = gInfo ? formatLastActive(gInfo.lastActive) : '';
       if (gInfo?.email || gUsageStr || gActiveStr || gInfo?.signedIn) {
         const gDisplay = accountColumnLabel(gInfo);
@@ -779,6 +783,26 @@ async function showInstalledVersions(
     console.log(chalk.gray('  No agent CLIs installed.'));
     console.log(chalk.gray('  Run: agents add claude@latest'));
     console.log();
+  }
+
+  // `--refresh` used to print a table that looked fully refreshed no matter how
+  // many accounts it had failed to reach, so a box whose every Claude credential
+  // had expired rendered identically to a healthy one — the bars beside each row
+  // came from a cache that the run had not managed to update. Name the accounts
+  // it could not confirm, and why.
+  if (viewOpts?.forceRefresh) {
+    const unrefreshed: string[] = [];
+    for (const [key, usage] of usageByKey) {
+      if (!usage.error) continue;
+      const label = canonicalByUsageKey.get(key)?.email ?? key;
+      unrefreshed.push(`    ${label.padEnd(24)} ${chalk.gray(usage.error)}`);
+    }
+    if (unrefreshed.length > 0) {
+      const noun = unrefreshed.length === 1 ? 'account' : 'accounts';
+      console.log(chalk.yellow(`  Could not refresh ${unrefreshed.length} ${noun} — bars above are the last cached reading:`));
+      for (const line of unrefreshed) console.log(line);
+      console.log();
+    }
   }
 
   // Host CLIs are host-global, not per-agent — show them once in the overview.
@@ -1164,6 +1188,11 @@ export interface ViewJsonVersion {
   overageCredits?: { amount: number; currency: string } | null;
   windows: Array<{
     key: 'session' | 'week' | 'sonnet_week' | 'month';
+    // What the window meters — 'Current session'/'Current week' for most
+    // agents, the model id for Antigravity's per-model quota buckets (whose
+    // keys are all 'session', so the label is the only way to tell them
+    // apart). Optional for backward compatibility with older consumers.
+    label?: string;
     usedPercent: number;
     resetsAt: string | null;
   }>;
@@ -1436,6 +1465,7 @@ async function collectAgentsJson(filterAgentId?: AgentId, resourceSections?: Set
       windows: snapshot
         ? snapshot.windows.map((w) => ({
             key: w.key,
+            label: w.label,
             usedPercent: w.usedPercent,
             resetsAt: w.resetsAt ? w.resetsAt.toISOString() : null,
           }))

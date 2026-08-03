@@ -1,11 +1,13 @@
 /**
- * Usage and rate-limit tracking for Claude, Codex, Kimi, Droid, Grok, and Cursor agents.
+ * Usage and rate-limit tracking for Claude, Codex, Kimi, Droid, Grok, Cursor,
+ * and Antigravity agents.
  *
  * Fetches live usage data from each agent's usage API (Anthropic OAuth for
- * Claude, Kimi Code /usages, Factory billing limits for Droid) or parses
- * rate-limit events from Codex session logs. Results are normalized into a
- * common UsageSnapshot shape, cached to disk, and rendered as terminal
- * progress bars for the `agents view` command.
+ * Claude, Kimi Code /usages, Factory billing limits for Droid, Google Code
+ * Assist :retrieveUserQuota for Antigravity) or parses rate-limit events from
+ * Codex session logs. Results are normalized into a common UsageSnapshot
+ * shape, cached to disk, and rendered as terminal progress bars for the
+ * `agents view` command.
  */
 import { execFile } from 'child_process';
 import { createHash } from 'crypto';
@@ -35,6 +37,51 @@ const CLAUDE_TOKEN_URL = 'https://platform.claude.com/v1/oauth/token';
 const CLAUDE_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 const CLAUDE_OAUTH_BETA_HEADER = 'oauth-2025-04-20';
 const CLAUDE_REFRESH_LEEWAY_MS = 5 * 60 * 1000;
+
+/**
+ * Why a usage read produced no snapshot, when the cause is the credential or the
+ * server rather than the payload. Every provider used to return `error: null`
+ * for all three, which made an account nobody can read indistinguishable from a
+ * healthy one: the caller fell back to whatever was in the SWR cache and
+ * rendered its bars as fact. On `yosemite-s1` that hid five Claude accounts
+ * whose stored access token had expired — one of them eleven days earlier —
+ * behind a cache frozen for 26h, and balanced routing launched into an account
+ * that was actually at its weekly cap.
+ *
+ * No usage read ever refreshes a token (RUSH-1822 for Claude; the same rule for
+ * Kimi/Droid/Cursor, whose own CLIs rotate on their next launch), so an expired
+ * credential cannot heal on its own — the account stays unreadable until that
+ * agent actually runs, or a long-lived token is provisioned for it.
+ *
+ * Shared across all four networked providers on purpose: the failure shape is
+ * identical, and wiring only Claude would leave `agents view --refresh`
+ * reporting Claude accounts while silently presenting stale Kimi, Droid, and
+ * Cursor readings as confirmed.
+ */
+export function usageNoCredentialError(agent: string): string {
+  return `No readable ${agent} credential — sign in, or provision a long-lived token for this account.`;
+}
+export function usageExpiredCredentialError(agent: string): string {
+  return `${agent} credential expired — re-auth this account (a usage read never refreshes it).`;
+}
+export function usageRejectedError(agent: string, status: number): string {
+  return status === 429
+    ? `${agent} is rate-limiting the usage endpoint for this machine (HTTP 429).`
+    : `${agent} rejected the usage read (HTTP ${status}).`;
+}
+/**
+ * The read threw rather than answering — a timeout, DNS/TLS failure, a payload
+ * that would not parse, a credential that would not decrypt. Every provider
+ * swallowed these into `error: null`, which is the same silence as an expired
+ * token: the caller renders a stale snapshot as confirmed. The cause is carried
+ * verbatim because these are the failures a user cannot otherwise see.
+ */
+export function usageUnreachableError(agent: string, cause?: unknown): string {
+  const detail = cause instanceof Error ? cause.message : typeof cause === 'string' ? cause : '';
+  return detail
+    ? `${agent} usage read failed: ${detail}`
+    : `${agent} usage read failed.`;
+}
 
 /**
  * True when a Claude OAuth access token is within the refresh leeway of expiry
@@ -218,6 +265,7 @@ const USAGE_SOURCES = {
   droid: { fetch: getDroidUsageInfo, network: true },
   grok: { fetch: getGrokUsageInfo, network: false },
   cursor: { fetch: getCursorUsageInfo, network: true },
+  antigravity: { fetch: getAntigravityUsageInfo, network: true },
 } as const satisfies Partial<Record<AgentId, UsageSource>>;
 
 export const USAGE_SOURCE_AGENT_IDS = Object.keys(USAGE_SOURCES) as (keyof typeof USAGE_SOURCES)[];
@@ -274,11 +322,11 @@ export function buildCanonicalUsageContext(inputs: UsageIdentityInput[]): {
 }
 
 /**
- * Whether an agent exposes usage/limit data we can render — Claude/Kimi/Droid/Cursor
- * via a live API, Codex/Grok via local session logs. Everything else has no usage
- * concept, so callers use this to decide whether a missing snapshot is worth
- * flagging as "usage unavailable" (a signed-in Claude account with no data)
- * versus simply not applicable (Antigravity, OpenCode).
+ * Whether an agent exposes usage/limit data we can render — Claude/Kimi/Droid/
+ * Cursor/Antigravity via a live API, Codex/Grok via local session logs.
+ * Everything else has no usage concept, so callers use this to decide whether
+ * a missing snapshot is worth flagging as "usage unavailable" (a signed-in
+ * Claude account with no data) versus simply not applicable (OpenCode).
  */
 export function agentReportsUsage(agentId: AgentId): boolean {
   return getUsageSource(agentId) !== undefined;
@@ -353,8 +401,8 @@ export async function getUsageInfoForIdentity(
   // stay off the network on the hot path. Everything else (Codex reads local
   // session logs) takes the legacy blocking path. The on-disk cache is shared and
   // keyed by usageKey, which is namespaced per agent (`claude:org=…`,
-  // `kimi:user=…`, `droid:org=…`, `cursor:user=…`), so one cache file holds every
-  // account without collision.
+  // `kimi:user=…`, `droid:org=…`, `cursor:user=…`, `antigravity:sub=…`), so one
+  // cache file holds every account without collision.
   const usesNetworkUsage = getUsageSource(input.agentId)?.network === true;
   if (!usesNetworkUsage || !usageKey) {
     return getUsageInfo(input.agentId, {
@@ -450,7 +498,7 @@ export function formatUsageSummary(
   plan: string | null,
   snapshot: UsageSnapshot | null,
   planWidth = 3,
-  opts?: { unavailable?: boolean }
+  opts?: { unavailable?: boolean; unverified?: boolean }
 ): string {
   const parts: string[] = [];
 
@@ -476,6 +524,12 @@ export function formatUsageSummary(
       });
     if (windows.length > 0) {
       parts.push(windows.join('  '));
+    }
+    // The bars came from the cache and the live read that should have confirmed
+    // them failed, so they are the last thing we saw — not the current state.
+    // Drawing them unmarked is what let a 26h-old "48% used" read as fact.
+    if (opts?.unverified) {
+      parts.push(chalk.yellow('unverified'));
     }
   } else if (opts?.unavailable) {
     // Signed-in account we could NOT fetch usage for (no live token in a reachable
@@ -636,19 +690,21 @@ async function getClaudeUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
     // path and usage needs only the access token, so it kills the Touch ID storm.
     const oauth = await loadClaudeOauth(options?.home, { accessTokenCache: true });
     if (!oauth?.accessToken) {
-      return { snapshot: null, error: null };
+      return { snapshot: null, error: usageNoCredentialError('Claude') };
     }
 
     const requestedOrgId = normalizeString(options?.organizationId);
     const liveOrgId = normalizeString(oauth.organizationUuid);
     if (!isClaudeUsageOrgMatch(requestedOrgId, liveOrgId)) {
+      // Not a fault: this home is signed into a different org than the identity
+      // being read, so there is nothing to report for it.
       return { snapshot: null, error: null };
     }
 
     // Read-only: never refresh a single-use token just to read usage (RUSH-1822).
     const accessToken = claudeUsageAccessTokenNoRefresh(oauth);
     if (!accessToken) {
-      return { snapshot: null, error: null };
+      return { snapshot: null, error: usageExpiredCredentialError('Claude') };
     }
 
     const response = await fetch(CLAUDE_USAGE_URL, {
@@ -663,7 +719,7 @@ async function getClaudeUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
     });
 
     if (!response.ok) {
-      return { snapshot: null, error: formatClaudeUsageError(response.status) };
+      return { snapshot: null, error: usageRejectedError('Claude', response.status) };
     }
 
     const data = await response.json() as ClaudeUsageResponse;
@@ -681,8 +737,11 @@ async function getClaudeUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
       },
       error: null,
     };
-  } catch {
-    return { snapshot: null, error: 'Usage data unavailable right now.' };
+  } catch (err) {
+    // A thrown request (timeout, DNS, TLS, a malformed payload) is a failed
+    // read like any other — staying silent here would hand the caller a stale
+    // snapshot to render as confirmed, which is the bug this file just closed.
+    return { snapshot: null, error: usageUnreachableError('Claude', err) };
   }
 }
 
@@ -737,17 +796,17 @@ function resolveKimiCredentialPath(home?: string): string | null {
 async function getKimiUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
   try {
     const credPath = resolveKimiCredentialPath(options?.home);
-    if (!credPath) return { snapshot: null, error: null };
+    if (!credPath) return { snapshot: null, error: usageNoCredentialError('Kimi') };
 
     const cred = JSON.parse(fs.readFileSync(credPath, 'utf-8'));
     const accessToken = cred?.access_token;
     if (typeof accessToken !== 'string' || !accessToken) {
-      return { snapshot: null, error: null };
+      return { snapshot: null, error: usageNoCredentialError('Kimi') };
     }
 
     const expiresAt = typeof cred?.expires_at === 'number' ? cred.expires_at : null;
     if (expiresAt !== null && Date.now() / 1000 >= expiresAt) {
-      return { snapshot: null, error: null };
+      return { snapshot: null, error: usageExpiredCredentialError('Kimi') };
     }
 
     const response = await fetch(KIMI_USAGES_URL, {
@@ -759,10 +818,10 @@ async function getKimiUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
       signal: AbortSignal.timeout(5000),
     });
 
-    // 401/403/404 => expired token or no Kimi For Coding subscription; render
-    // nothing rather than a misleading empty bar.
+    // 401/403 => expired token, 404 => no Kimi For Coding subscription. Either
+    // way there are no bars to draw, and the status is what tells them apart.
     if (!response.ok) {
-      return { snapshot: null, error: null };
+      return { snapshot: null, error: usageRejectedError('Kimi', response.status) };
     }
 
     const data = await response.json() as KimiUsagesResponse;
@@ -781,8 +840,11 @@ async function getKimiUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
       },
       error: null,
     };
-  } catch {
-    return { snapshot: null, error: null };
+  } catch (err) {
+    // A thrown request (timeout, DNS, TLS, a malformed payload) is a failed
+    // read like any other — staying silent here would hand the caller a stale
+    // snapshot to render as confirmed, which is the bug this file just closed.
+    return { snapshot: null, error: usageUnreachableError('Kimi', err) };
   }
 }
 
@@ -904,12 +966,12 @@ async function getDroidUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
     const cred = decryptDroidAuthPayload(options?.home || os.homedir());
     const accessToken = cred?.access_token;
     if (typeof accessToken !== 'string' || !accessToken) {
-      return { snapshot: null, error: null };
+      return { snapshot: null, error: usageNoCredentialError('Droid') };
     }
 
     const exp = decodeJwtPayload(accessToken)?.exp;
     if (typeof exp === 'number' && Date.now() / 1000 >= exp) {
-      return { snapshot: null, error: null };
+      return { snapshot: null, error: usageExpiredCredentialError('Droid') };
     }
 
     const response = await fetch(DROID_USAGE_URL, {
@@ -921,10 +983,9 @@ async function getDroidUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
       signal: AbortSignal.timeout(5000),
     });
 
-    // 401 => revoked/expired token; render nothing rather than a misleading
-    // empty bar.
+    // 401 => revoked/expired token. No bars to draw, and the status says why.
     if (!response.ok) {
-      return { snapshot: null, error: null };
+      return { snapshot: null, error: usageRejectedError('Droid', response.status) };
     }
 
     const data = await response.json() as DroidBillingLimitsResponse;
@@ -942,8 +1003,11 @@ async function getDroidUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
       },
       error: null,
     };
-  } catch {
-    return { snapshot: null, error: null };
+  } catch (err) {
+    // A thrown request (timeout, DNS, TLS, a malformed payload) is a failed
+    // read like any other — staying silent here would hand the caller a stale
+    // snapshot to render as confirmed, which is the bug this file just closed.
+    return { snapshot: null, error: usageUnreachableError('Droid', err) };
   }
 }
 
@@ -1712,14 +1776,6 @@ function getClaudeUserAgent(cliVersion?: string | null): string {
   return cliVersion ? `claude-code/${cliVersion}` : 'claude-code';
 }
 
-/** Map an HTTP status code to a user-facing error message. */
-function formatClaudeUsageError(status: number): string {
-  if (status === 429) {
-    return 'Usage data unavailable right now.';
-  }
-  return 'Could not load usage data right now.';
-}
-
 /** Clamp a numeric value to 0..100, returning null for non-finite values. */
 function normalizePercent(value: number | null | undefined): number | null {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
@@ -2042,11 +2098,11 @@ async function getCursorUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
   try {
     const base = options?.home || os.homedir();
     const creds = readCursorCredentials(base);
-    if (!creds) return { snapshot: null, error: null };
+    if (!creds) return { snapshot: null, error: usageNoCredentialError('Cursor') };
 
     const exp = decodeJwtPayload(creds.accessToken)?.exp;
     if (typeof exp === 'number' && Date.now() / 1000 >= exp) {
-      return { snapshot: null, error: null };
+      return { snapshot: null, error: usageExpiredCredentialError('Cursor') };
     }
 
     const url = `${CURSOR_USAGE_URL}?user=${encodeURIComponent(creds.sub)}`;
@@ -2059,9 +2115,9 @@ async function getCursorUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
       signal: AbortSignal.timeout(5000),
     });
 
-    // 401/redirect => revoked/expired session; render nothing rather than a
-    // misleading empty bar.
-    if (!response.ok) return { snapshot: null, error: null };
+    // 401/redirect => revoked/expired session. No bars to draw, and the status
+    // says why.
+    if (!response.ok) return { snapshot: null, error: usageRejectedError('Cursor', response.status) };
 
     const data = (await response.json()) as CursorUsageResponse;
     return {
@@ -2070,6 +2126,289 @@ async function getCursorUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
         sourceLabel: 'live account data',
         capturedAt: new Date(),
         windows: normalizeCursorUsage(data),
+      },
+      error: null,
+    };
+  } catch (err) {
+    // A thrown request (timeout, DNS, TLS, a malformed payload) is a failed
+    // read like any other — staying silent here would hand the caller a stale
+    // snapshot to render as confirmed, which is the bug this file just closed.
+    return { snapshot: null, error: usageUnreachableError('Cursor', err) };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Antigravity (`agy`) usage — Google Code Assist per-model quota buckets
+// ---------------------------------------------------------------------------
+
+const ANTIGRAVITY_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+// Production Code Assist endpoint first; the daily track is where `agy` itself
+// points when the account is enrolled in the daily channel (its log shows
+// daily-cloudcode-pa), so fall back to it when prod rejects the call.
+const ANTIGRAVITY_QUOTA_URLS = [
+  'https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota',
+  'https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota',
+];
+// The public installed-app OAuth client the released `agy` binary itself
+// ships (Google installed-app clients are non-confidential by design — the
+// same client community tooling uses). Needed because a Google token refresh
+// requires the client id/secret pair the login was minted under.
+const ANTIGRAVITY_CLIENT_ID =
+  '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com';
+const ANTIGRAVITY_CLIENT_SECRET = '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';
+/** Refresh leeway — treat an access token expiring within a minute as expired. */
+const ANTIGRAVITY_REFRESH_LEEWAY_MS = 60 * 1000;
+
+/** The OAuth token `agy` stores (inside `{ token: … }`) in the OS keyring or file. */
+interface AntigravityOauthToken {
+  access_token?: string | null;
+  refresh_token?: string | null;
+  /** RFC3339 expiry timestamp for the access token. */
+  expiry?: string | null;
+}
+
+/** One per-model quota bucket from the :retrieveUserQuota response. */
+export interface AntigravityQuotaBucket {
+  modelId?: string | null;
+  tokenType?: string | null;
+  remainingFraction?: number | null;
+  resetTime?: string | null;
+}
+
+/** Response shape from the Code Assist :retrieveUserQuota endpoint. */
+export interface AntigravityQuotaResponse {
+  buckets?: AntigravityQuotaBucket[] | null;
+}
+
+/**
+ * Parse a stored `agy` OAuth payload into its token. Handles both on-disk
+ * shapes: the raw `{ token: {…} }` JSON (Linux file fallback) and the
+ * `go-keyring-base64:<base64>` wrapper zalando/go-keyring writes into the
+ * macOS Keychain item (service `gemini`, account `antigravity`). Never throws
+ * (malformed input => null).
+ */
+export function parseAntigravityOauthPayload(raw: string): AntigravityOauthToken | null {
+  try {
+    let text = raw.trim();
+    if (text.startsWith('go-keyring-base64:')) {
+      text = Buffer.from(text.slice('go-keyring-base64:'.length), 'base64').toString('utf-8');
+    }
+    const token = JSON.parse(text)?.token;
+    if (!token || typeof token !== 'object') return null;
+    if (typeof token.access_token !== 'string' && typeof token.refresh_token !== 'string') {
+      return null;
+    }
+    return token as AntigravityOauthToken;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True when the stored access token is expired (or inside the refresh leeway).
+ * A missing/unparseable expiry is treated as still-fresh — the quota call
+ * below is the source of truth if the token is actually dead (401 => render
+ * nothing), and we never want to force a refresh without evidence.
+ */
+export function antigravityTokenNeedsRefresh(
+  expiry: string | null | undefined,
+  nowMs: number = Date.now(),
+): boolean {
+  if (!expiry) return false;
+  const ms = Date.parse(expiry);
+  if (Number.isNaN(ms)) return false;
+  return nowMs + ANTIGRAVITY_REFRESH_LEEWAY_MS >= ms;
+}
+
+/**
+ * Resolve the `agy` OAuth credential file. agy is a self-updating global
+ * install (no per-version homes), but check the passed home first and then the
+ * active location under the real HOME — mirrors resolveKimiCredentialPath.
+ * Present only on Linux without a Secret Service daemon; macOS logins live in
+ * the Keychain instead.
+ */
+function resolveAntigravityCredentialPath(home?: string): string | null {
+  const rel = ['.gemini', 'antigravity-cli', 'antigravity-oauth-token'];
+  const perHome = path.join(home || os.homedir(), ...rel);
+  try { if (fs.existsSync(perHome)) return perHome; } catch { /* unreadable */ }
+  const active = path.join(process.env.AGENTS_REAL_HOME || os.homedir(), ...rel);
+  if (active !== perHome) {
+    try { if (fs.existsSync(active)) return active; } catch { /* unreadable */ }
+  }
+  return null;
+}
+
+/**
+ * Load the stored `agy` OAuth token: the file fallback first, then the OS
+ * keyring (macOS Keychain / Linux Secret Service — go-keyring's two stores;
+ * the probe command pair mirrors antigravityOsKeyringProbe in agents.ts, with
+ * `-w` on macOS to read the secret value, not just metadata). Returns null on
+ * Windows or when no readable credential exists. Honors the
+ * AGENTS_NO_KEYCHAIN_PROBE=1 test guard.
+ */
+async function loadAntigravityOauth(home?: string): Promise<AntigravityOauthToken | null> {
+  const credPath = resolveAntigravityCredentialPath(home);
+  if (credPath) {
+    try {
+      const parsed = parseAntigravityOauthPayload(fs.readFileSync(credPath, 'utf-8'));
+      if (parsed) return parsed;
+    } catch { /* unreadable file — fall through to the keyring */ }
+  }
+
+  if (process.env.AGENTS_NO_KEYCHAIN_PROBE === '1') return null;
+  const probe =
+    process.platform === 'darwin'
+      ? { cmd: 'security', args: ['find-generic-password', '-w', '-s', 'gemini', '-a', 'antigravity'] }
+      : process.platform === 'linux'
+        ? { cmd: 'secret-tool', args: ['lookup', 'service', 'gemini', 'username', 'antigravity'] }
+        : null;
+  if (!probe) return null;
+  try {
+    const { stdout } = await execFileAsync(probe.cmd, probe.args, { timeout: 5000 });
+    return parseAntigravityOauthPayload(stdout);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Refresh an `agy` access token against Google's token endpoint. This is safe
+ * from a read path in a way Claude/WorkOS refreshes are NOT: Google's OAuth
+ * refresh tokens are stable and non-rotating — a refresh mints a new access
+ * token and leaves the refresh token (and every other live access token)
+ * valid, so refreshing here cannot invalidate a concurrently running `agy`.
+ * We still never write the refreshed token back: `agy` rewrites its own
+ * keychain item on launch, and a read-only usage fetch must not mutate the
+ * user's credential.
+ */
+async function refreshAntigravityAccessToken(refreshToken: string): Promise<string | null> {
+  try {
+    const response = await fetch(ANTIGRAVITY_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: ANTIGRAVITY_CLIENT_ID,
+        client_secret: ANTIGRAVITY_CLIENT_SECRET,
+        refresh_token: refreshToken,
+        grant_type: 'refresh_token',
+      }).toString(),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!response.ok) return null;
+    const data = (await response.json()) as { access_token?: string };
+    return typeof data.access_token === 'string' && data.access_token ? data.access_token : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * POST :retrieveUserQuota against the Code Assist endpoints in order, returning
+ * the first successful bucket list. null when every endpoint rejects (expired
+ * token, no quota API for the account) or the network fails.
+ */
+async function fetchAntigravityQuota(accessToken: string): Promise<AntigravityQuotaBucket[] | null> {
+  for (const url of ANTIGRAVITY_QUOTA_URLS) {
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: '{}',
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!response.ok) continue;
+      const data = (await response.json()) as AntigravityQuotaResponse;
+      return Array.isArray(data?.buckets) ? data.buckets : [];
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+/** Compact model tag for the inline bar — 'gemini-2.5-flash-lite' => '2.5FL'. */
+export function antigravityModelShortLabel(modelId: string): string {
+  const stripped = modelId.replace(/^gemini-/i, '');
+  const parts = stripped.split('-').filter(Boolean);
+  if (parts.length === 0) return modelId;
+  const [version, ...rest] = parts;
+  return version + rest.map((part) => (part[0] ? part[0].toUpperCase() : '')).join('');
+}
+
+/**
+ * Normalize the per-model quota buckets into the common UsageWindow shape —
+ * one window per model (`gemini-3.1-pro`, `gemini-2.5-flash`, …), keyed
+ * `session` since each bucket is a short-cycle quota with its own reset time.
+ * Duplicate buckets for one model keep the LOWEST remaining fraction (the
+ * most conservative read). Sorted most-used first so the bar closest to
+ * throttling leads the row. `windowMinutes` stays null: the API reports only
+ * the reset timestamp, not the window length, and an inferred 5h session
+ * length would wrongly zero the SWR cache between resets.
+ */
+export function normalizeAntigravityWindows(buckets: AntigravityQuotaBucket[]): UsageWindow[] {
+  const byModel = new Map<string, { bucket: AntigravityQuotaBucket; remaining: number }>();
+  for (const bucket of buckets) {
+    const modelId = normalizeString(bucket?.modelId);
+    const remaining = bucket?.remainingFraction;
+    if (!modelId || typeof remaining !== 'number' || !Number.isFinite(remaining)) continue;
+    const existing = byModel.get(modelId);
+    if (!existing || remaining < existing.remaining) {
+      byModel.set(modelId, { bucket, remaining });
+    }
+  }
+
+  const windows: UsageWindow[] = [];
+  for (const [modelId, { bucket, remaining }] of byModel) {
+    const usedPercent = normalizePercent((1 - remaining) * 100);
+    if (usedPercent === null) continue;
+    windows.push({
+      key: 'session',
+      label: modelId,
+      shortLabel: antigravityModelShortLabel(modelId),
+      usedPercent,
+      resetsAt: parseDateValue(bucket.resetTime),
+      windowMinutes: null,
+    });
+  }
+  windows.sort((a, b) => b.usedPercent - a.usedPercent);
+  return windows;
+}
+
+/**
+ * Fetch Antigravity usage via Google Code Assist's :retrieveUserQuota — the
+ * quota API `agy` itself talks to (its log shows the sibling :loadCodeAssist
+ * and :fetchAvailableModels calls on the same host). Auth is the stored `agy`
+ * OAuth token (OS keyring on macOS, file fallback on Linux), refreshed
+ * in-memory when expired — safe because Google's refresh tokens are
+ * non-rotating (see refreshAntigravityAccessToken).
+ */
+async function getAntigravityUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
+  try {
+    const token = await loadAntigravityOauth(options?.home);
+    if (!token) return { snapshot: null, error: null };
+
+    let accessToken = normalizeString(token.access_token);
+    if ((!accessToken || antigravityTokenNeedsRefresh(token.expiry)) && token.refresh_token) {
+      accessToken = await refreshAntigravityAccessToken(token.refresh_token);
+    }
+    if (!accessToken) return { snapshot: null, error: null };
+
+    const buckets = await fetchAntigravityQuota(accessToken);
+    if (!buckets) return { snapshot: null, error: null };
+
+    const windows = normalizeAntigravityWindows(buckets);
+    if (windows.length === 0) return { snapshot: null, error: null };
+
+    return {
+      snapshot: {
+        source: 'live',
+        sourceLabel: 'live account data',
+        capturedAt: new Date(),
+        windows,
       },
       error: null,
     };

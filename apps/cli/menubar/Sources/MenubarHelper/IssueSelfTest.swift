@@ -28,6 +28,7 @@ enum IssueSelfTest {
         testLinearTicketQuickFilterAndSort()
         testLinearCache()
         testTicketDispatchContract()
+        testActiveDisplay()
         if failures == 0 {
             print("\nALL PASS")
             exit(0)
@@ -532,6 +533,66 @@ enum IssueSelfTest {
                   && scopeArgs.contains("open") && scopeArgs.contains("--cycle")
                   && scopeArgs.contains("all") && scopeArgs.contains("Agents CLI"),
               detail: scopeArgs.joined(separator: " "))
+    }
+
+    // ACTIVE accordion display helpers — title preference, age, locality, summary.
+    private static func testActiveDisplay() {
+        check("topic wins over terminal label and preview",
+              ActiveDisplay.workTitle(topic: "Fix auth", label: "tab", preview: "long dump",
+                                      terminalTitle: "term") == "Fix auth")
+        check("label wins when topic is empty",
+              ActiveDisplay.workTitle(topic: "  ", label: "My tab", preview: "x",
+                                      terminalTitle: nil) == "My tab")
+        check("preview falls back to first line only",
+              ActiveDisplay.workTitle(topic: nil, label: nil,
+                                      preview: "line one\nline two",
+                                      terminalTitle: nil) == "line one")
+        check("empty inputs yield empty work title",
+              ActiveDisplay.workTitle(topic: nil, label: nil, preview: nil,
+                                      terminalTitle: nil).isEmpty)
+
+        let now: Double = 100_000_000
+        check("age seconds", ActiveDisplay.ageLabel(fromMs: now - 15_000, nowMs: now) == "15s")
+        check("age minutes", ActiveDisplay.ageLabel(fromMs: now - 180_000, nowMs: now) == "3m")
+        check("age hours", ActiveDisplay.ageLabel(fromMs: now - 7_200_000, nowMs: now) == "2h")
+        check("missing timestamp is empty", ActiveDisplay.ageLabel(fromMs: nil).isEmpty)
+
+        check("same machine is local",
+              ActiveDisplay.locality(machine: "zion", thisMachine: "zion") == "local")
+        check("other machine is remote",
+              ActiveDisplay.locality(machine: "yosemite-m0", thisMachine: "zion")
+                  == "remote · yosemite-m0")
+        check("nil machine is local (local-only listing)",
+              ActiveDisplay.locality(machine: nil, thisMachine: "zion") == "local")
+        // Parity with CLI machineId()/normalizeHost — engine tags rows as the
+        // short lowercased hostname, never the Sharing computer name.
+        check("normalizeHost strips domain and lowercases",
+              ActiveDisplay.normalizeHost("Zion.local") == "zion")
+        check("normalizeHost collapses non-alphanumerics",
+              ActiveDisplay.normalizeHost("Muqsit's MacBook Pro") == "muqsit-s-macbook-pro")
+        check("thisMachineId honors AGENTS_SYNC_MACHINE_ID",
+              ActiveDisplay.thisMachineId(env: ["AGENTS_SYNC_MACHINE_ID": "ZION.tail"],
+                                          hostname: "other.local") == "zion")
+        check("locality matches after normalize (engine zion vs Host.local)",
+              ActiveDisplay.locality(machine: "zion",
+                                     thisMachine: ActiveDisplay.normalizeHost("Zion.local"))
+                  == "local")
+
+        let summary = ActiveDisplay.projectSummary(repo: "agents-cli", running: 8, idle: 1,
+                                                   machines: ["zion", "zion"])
+        check("project summary carries counts and single host",
+              summary.contains("agents-cli") && summary.contains("●8")
+                  && summary.contains("◐1") && summary.contains("zion"),
+              detail: summary)
+        let multi = ActiveDisplay.projectSummary(repo: "x", running: 2, idle: 0,
+                                                 machines: ["a", "b"])
+        check("multi-host summary says N hosts",
+              multi.contains("2 hosts"), detail: multi)
+
+        check("PR number from pull URL",
+              ActiveDisplay.prNumber(from: "https://github.com/org/repo/pull/1753") == "1753")
+        check("PR number nil for non-PR URL",
+              ActiveDisplay.prNumber(from: "https://github.com/org/repo") == nil)
     }
 
     // MARK: helpers

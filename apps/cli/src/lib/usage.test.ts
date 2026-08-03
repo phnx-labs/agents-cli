@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { claudeAccessTokenNeedsRefresh, claudeUsageAccessTokenNoRefresh, loadClaudeOauth, saveClaudeOauth, getClaudeKeychainService, swrWindowMsFor } from './usage.js';
+import { claudeAccessTokenNeedsRefresh, claudeUsageAccessTokenNoRefresh, loadClaudeOauth, saveClaudeOauth, getClaudeKeychainService, swrWindowMsFor, getUsageInfo, formatUsageSummary, usageNoCredentialError, usageExpiredCredentialError, usageRejectedError } from './usage.js';
 import { setKeychainToken, setKeychainBackendForTest, secretsKeychainItem, type KeychainBackend } from './secrets/index.js';
 import { writeBundle, keychainRef, bundleItemStore } from './secrets/bundles.js';
 import { _resetFileStoreForTest } from './secrets/filestore.js';
@@ -295,5 +295,159 @@ describe('swrWindowMsFor — a routing decision does not get day-old data', () =
 
   it('clamps a negative age to zero — that IS an opinion: never serve the cache', () => {
     expect(swrWindowMsFor(-1)).toBe(0);
+  });
+});
+
+describe('a Claude usage read reports WHY it produced no snapshot', () => {
+  // Both of these returned `error: null` before, which is what let an account
+  // nobody could read render exactly like a healthy one: the caller fell back to
+  // the SWR cache and drew its bars as fact. On yosemite-s1 that hid five
+  // accounts whose stored token had expired — one of them eleven days earlier —
+  // behind a cache frozen for 26h, and balanced routing launched into an account
+  // that was already at its weekly cap.
+  //
+  // Neither path reaches the network: both return before the fetch, so these
+  // exercise the real code path with no live call.
+
+  /** Keychain backend holding exactly what the test seeds — nothing else. */
+  class MemBackend implements KeychainBackend {
+    store = new Map<string, string>();
+    has(item: string) { return this.store.has(item); }
+    get(item: string) {
+      const v = this.store.get(item);
+      if (v === undefined) throw new Error(`missing ${item}`);
+      return v;
+    }
+    set(item: string, value: string) { this.store.set(item, value); }
+    delete(item: string) { return this.store.delete(item); }
+    list(prefix: string) { return [...this.store.keys()].filter((k) => k.startsWith(prefix)); }
+  }
+
+  let home: string;
+  let prevBackend: KeychainBackend | null;
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-usage-err-'));
+    prevBackend = setKeychainBackendForTest(new MemBackend());
+  });
+
+  afterEach(() => {
+    setKeychainBackendForTest(prevBackend);
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  it('names a missing credential instead of returning a silent null', async () => {
+    const usage = await getUsageInfo('claude', { home });
+
+    expect(usage.snapshot).toBeNull();
+    expect(usage.error).toBe(usageNoCredentialError('Claude'));
+  });
+
+  it('names an expired credential — the state a usage read can never heal', async () => {
+    // A usage read never refreshes (RUSH-1822), so this account stays unreadable
+    // until a real claude run rotates the token. Saying so is the whole point.
+    setKeychainToken(
+      getClaudeKeychainService(home),
+      JSON.stringify({
+        claudeAiOauth: { accessToken: 'tok-stale', refreshToken: 'r', expiresAt: Date.now() - 60_000 },
+      })
+    );
+
+    const usage = await getUsageInfo('claude', { home });
+
+    expect(usage.snapshot).toBeNull();
+    expect(usage.error).toBe(usageExpiredCredentialError('Claude'));
+  });
+});
+
+describe('formatUsageSummary marks bars the live read could not confirm', () => {
+  const snapshot = {
+    source: 'cache' as const,
+    sourceLabel: 'cached',
+    capturedAt: new Date(NOW),
+    windows: [
+      { key: 'week' as const, label: 'Current week', shortLabel: 'W', usedPercent: 48, resetsAt: null, windowMinutes: 10080 },
+    ],
+  };
+
+  it('draws the bars AND says they are unverified', () => {
+    // The incident in one assertion: a cached "48%" must never render the same
+    // as a confirmed one. The number still shows — it is the last thing we saw,
+    // and hiding it would be worse — but it no longer reads as current.
+    const out = formatUsageSummary(null, snapshot, 3, { unverified: true });
+
+    expect(out).toContain('48%');
+    expect(out).toContain('unverified');
+  });
+
+  it('stays clean when the reading was confirmed', () => {
+    const out = formatUsageSummary(null, snapshot, 3);
+
+    expect(out).toContain('48%');
+    expect(out).not.toContain('unverified');
+  });
+});
+
+describe('every networked provider names the same three failures', () => {
+  // The review that caught this: wiring only Claude would leave `agents view
+  // --refresh` reporting Claude accounts while silently presenting stale Kimi,
+  // Droid, and Cursor readings as confirmed — all four share one cache fallback
+  // in getUsageInfoForIdentity, so a silent null in any of them reproduces the
+  // exact bug this change exists to close.
+  const NETWORKED = ['Claude', 'Kimi', 'Droid', 'Cursor'];
+
+  it('says which agent could not be read, so a fleet row is actionable', () => {
+    for (const agent of NETWORKED) {
+      expect(usageNoCredentialError(agent)).toContain(agent);
+      expect(usageExpiredCredentialError(agent)).toContain(agent);
+      expect(usageRejectedError(agent, 401)).toContain(agent);
+    }
+  });
+
+  it('distinguishes a rejected read from a throttled one', () => {
+    // 429 is the machine being rate-limited on the usage endpoint, not a dead
+    // credential — re-authing would not fix it, so the two must not read alike.
+    expect(usageRejectedError('Claude', 429)).toContain('429');
+    expect(usageRejectedError('Claude', 429)).toContain('rate-limiting');
+    expect(usageRejectedError('Claude', 401)).toContain('401');
+    expect(usageRejectedError('Claude', 401)).not.toContain('rate-limiting');
+  });
+
+  it('says an expired credential will not heal on its own', () => {
+    // The yosemite-s1 state: a usage read never refreshes, so the account stays
+    // unreadable until the agent itself runs. The message has to say so, or the
+    // obvious next action (re-auth) is not obvious.
+    expect(usageExpiredCredentialError('Droid')).toContain('never refreshes');
+  });
+});
+
+describe('a usage read that THROWS is still a failed read', () => {
+  // The re-review caught this: every provider swallowed a thrown request into
+  // `error: null`, so a timeout, a TLS failure, or a payload that will not parse
+  // handed the caller a stale snapshot to render as confirmed — the same silence
+  // as an expired token, through a different door.
+  //
+  // Driven through a real provider fetch (Kimi) with a credential file that
+  // cannot be parsed: JSON.parse throws inside the try, so the catch is the code
+  // under test and no network call is made.
+  let home: string;
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-usage-throw-'));
+    const dir = path.join(home, '.kimi-code', 'credentials');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'kimi-code.json'), '{ not json');
+  });
+
+  afterEach(() => {
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  it('names the agent and carries the cause, instead of returning null', async () => {
+    const usage = await getUsageInfo('kimi', { home });
+
+    expect(usage.snapshot).toBeNull();
+    expect(usage.error).toBeTruthy();
+    expect(usage.error).toContain('Kimi');
   });
 });

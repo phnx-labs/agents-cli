@@ -412,7 +412,11 @@
       },
       {
         "command": "agents.forkCurrentSession",
-        "title": "Agents: Fork Current Session"
+        "title": "Agents: Fork"
+      },
+      {
+        "command": "agents.forkPickSession",
+        "title": "Agents: Fork (Pick Session)"
       },
       {
         "command": "agents.newClaudePickHost",

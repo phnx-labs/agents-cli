@@ -392,14 +392,30 @@ cases a live pull can't reach: a machine that is **offline / asleep / decommissi
   on-demand `--host` reads and explicit export/import; reach for sync only when you want
   a passive always-on mirror (further below).
 
-### Resolving a full session id across the fleet
+### Resolving a session id across the fleet
+
+For automation that needs session metadata without parsing or rendering transcript
+events, use the explicit resolver:
+
+```
+agents sessions --resolve d3470b57 --json
+agents sessions --resolve "recap resolver" --json
+```
+
+It reads the indexed `SessionMeta` rows on each machine and emits a one-element JSON
+array when exactly one logical session matches. A missing selector or an ambiguous ID
+prefix/keyword query exits non-zero; ambiguity output lists every full ID and machine.
+`--local` keeps the metadata lookup on this machine.
+`--agent <agent[@version]>` and `--project <name>` narrow the lookup on every peer;
+`--all` is implicit because historical resolution must not inherit the SSH login
+directory or recent-session window.
 
 `--host` names *which* box to look on. When you already have a full session id but
-**not** the box, `agents sessions <uuid>` finds it for you: a UUID is treated as an
-identifier, so on a local miss the CLI fans the **id lookup** out to the online fleet
-(the same `gatherRemoteList` SSH sweep the listing uses) and renders the session's
-summary from the machine that holds it — delegated to that peer via `runOnPeer`, since
-its transcript and agent binary live there.
+**not** the box, `agents sessions <uuid>` finds it for you. A unique short prefix works
+the same way: `agents sessions d3470b57` fans the **id lookup** out to the online fleet
+(the same `gatherRemoteList` SSH sweep the listing uses), resolves the prefix to its full
+id, and renders the session's summary from a machine that holds it. Rendering is
+delegated to that peer via `runOnPeer`, since its transcript and agent binary live there.
 
 ```
 # You have the id from a log or a teammate; you don't know the machine
@@ -412,8 +428,13 @@ agents sessions d3470b57-2af6-4c11-b1de-3fab94f43603
   into later sessions), so a fuzzy match would surface unrelated sessions as "matches."
   There is no FTS/content fallback for an id-shaped query: it is found by id or reported
   not found, locally and on every peer.
-- **Same id on more than one machine** surfaces a labeled conflict so you can pick one
-  with `--device <host>`.
+- **Ambiguous prefixes** fail with every matching full id and its machine labels; pass a
+  longer prefix to select one.
+- **Synced copies are one logical session.** The same full id reported by several machines
+  does not make a prefix ambiguous; the CLI renders one of those equivalent copies.
+- **Keywords keep the existing metadata search semantics.** The metadata-only resolver
+  accepts the same label, topic, project, account, path, agent, and version terms as the
+  canonical local resolver, then applies the uniqueness check across the fleet.
 - **`--local`** restricts the lookup to this machine — no cross-machine sweep — for
   scripts that want deterministic local behavior.
 - A peer already answering a parent's sweep (`AGENTS_SESSIONS_LOCAL=1`) never re-fans-out,

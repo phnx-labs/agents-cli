@@ -16,6 +16,7 @@ import { describe, it, expect, afterAll } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { spawnSync } from 'child_process';
 
 // Isolate the sessions DB under a temp HOME before db.js/state.js capture the
 // path at import time.
@@ -104,5 +105,58 @@ describe('resolveSessionQuery falls back to the index for a complete id', () => 
     const r = resolveSessionQuery([], 'cccc3333');
     expect(r.matches.map(s => s.id)).toEqual([full]);
     expect(r.byId).toBe(true);
+  });
+
+  it('can disable the local-index fallback when resolving an already-aggregated fleet result', () => {
+    const indexedOnly = 'dddd4444-1111-2222-3333-444455556666';
+    upsertSession(meta(indexedOnly, { topic: 'local only' }), '');
+    const r = resolveSessionQuery([], 'dddd4444', { indexFallback: false });
+    expect(r.matches).toEqual([]);
+    expect(r.byId).toBe(true);
+  });
+});
+
+describe('agents sessions --resolve metadata-only CLI contract', () => {
+  function runResolve(selector: string) {
+    const runner = [
+      "import { Command } from 'commander';",
+      "import { registerSessionsCommands } from './src/commands/sessions.ts';",
+      'const program = new Command();',
+      'registerSessionsCommands(program);',
+      "await program.parseAsync(['node', 'agents', 'sessions', '--resolve', process.argv[1], '--json', '--local']);",
+    ].join(' ');
+    return spawnSync(
+      process.execPath,
+      ['--import', 'tsx', '--input-type=module', '--eval', runner, selector],
+      { cwd: process.cwd(), env: { ...process.env, HOME: TEST_HOME, USERPROFILE: TEST_HOME }, encoding: 'utf8' },
+    );
+  }
+
+  it('resolves a full id, unique prefix, and keywords to the same indexed SessionMeta row', () => {
+    const id = 'face7777-1111-2222-3333-444455556666';
+    upsertSession(meta(id, { topic: 'needle metadata contract' }), 'transcript content must not be needed');
+
+    for (const selector of [id, 'face7777', 'needle metadata contract']) {
+      const result = runResolve(selector);
+      expect(result.status, result.stderr).toBe(0);
+      const rows = JSON.parse(result.stdout) as SessionMeta[];
+      expect(rows.map(row => row.id)).toEqual([id]);
+    }
+  });
+
+  it('fails ambiguity with every full-id candidate and keeps a miss explicit', () => {
+    const first = 'cafe8888-1111-2222-3333-444455556666';
+    const second = 'cafe8888-aaaa-bbbb-cccc-ddddeeeeffff';
+    upsertSession(meta(first, { topic: 'first ambiguity candidate' }), '');
+    upsertSession(meta(second, { topic: 'second ambiguity candidate' }), '');
+
+    const ambiguous = runResolve('cafe8888');
+    expect(ambiguous.status).toBe(1);
+    expect(ambiguous.stderr).toContain(first);
+    expect(ambiguous.stderr).toContain(second);
+
+    const missing = runResolve('bade9999');
+    expect(missing.status).toBe(1);
+    expect(missing.stderr).toContain('No session found matching: bade9999');
   });
 });

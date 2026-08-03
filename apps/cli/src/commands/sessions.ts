@@ -31,7 +31,7 @@ import { stringWidth, truncateToWidth, padToWidth, terminalWidth } from '../lib/
 import type { SessionActivity, AwaitingReason } from '../lib/session/state.js';
 import { inferSessionState } from '../lib/session/state.js';
 import { discoverSessions, countSessionsInScope, resolveSessionById, isCompleteSessionId, looksLikeSessionId, searchContentIndex, parseTimeFilter, getSessionRoots, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
-import { findSessionsById } from '../lib/session/db.js';
+import { findSessionsById, querySessions } from '../lib/session/db.js';
 import { filterTeamSessions, safeTeamText } from '../lib/session/team-filter.js';
 import { parseSession } from '../lib/session/parse.js';
 import { runRemoteSessions, buildForwardedArgs, ensureWholeIndex } from '../lib/session/remote.js';
@@ -84,6 +84,8 @@ interface SessionsOptions extends SessionFilterOptions {
   /** Also list sessions from the user's own unmanaged ~/.<agent> installs. */
   unmanaged?: boolean;
   query?: string;
+  /** Resolve one historical selector to metadata only (requires --json). */
+  resolve?: string;
   limit?: string;
   sort?: string;
   json?: boolean;
@@ -1421,6 +1423,31 @@ async function sessionsAction(
   // of hardcoding `~/.claude|.codex|.gemini`. Always local; ignores other flags.
   if (options.roots) {
     process.stdout.write(JSON.stringify(getSessionRoots(), null, 2) + '\n');
+    return;
+  }
+
+  // --resolve is the metadata-only contract for downstream context workflows.
+  // It reads indexed SessionMeta rows and never calls renderSession, buildPreview,
+  // parseSession, or any other transcript renderer/parser.
+  if (options.resolve !== undefined) {
+    if (!options.json) {
+      console.error(chalk.red('--resolve requires --json.'));
+      process.exit(1);
+    }
+    if (query) {
+      console.error(chalk.red('Pass the selector to --resolve, not as a positional query.'));
+      process.exit(1);
+    }
+    if (options.local === true && options.host && !shouldIncludeLocal(options.host, machineId())) {
+      console.error(chalk.red('--local and --device name opposite scopes: --local skips the SSH fan-out that --device needs.'));
+      process.exit(1);
+    }
+    await resolveSessionMetadata(options.resolve, {
+      agent: options.agent,
+      project: options.project,
+      local: options.local,
+      hosts: options.host,
+    });
     return;
   }
 
@@ -3007,7 +3034,11 @@ export interface SessionQueryResolution {
  * search (a bare id must not surface every transcript that merely mentions it).
  * A genuine search phrase keeps the ranked metadata+content search.
  */
-export function resolveSessionQuery(pool: SessionMeta[], query: string): SessionQueryResolution {
+export function resolveSessionQuery(
+  pool: SessionMeta[],
+  query: string,
+  options: { indexFallback?: boolean } = {},
+): SessionQueryResolution {
   // Normalize ONCE here. isCompleteSessionId trims but resolveSessionById does
   // not, so a padded id ("<uuid> ", e.g. pasted from a terminal) would classify
   // as complete and then miss the id lookup — reporting a session that IS on
@@ -3027,7 +3058,8 @@ export function resolveSessionQuery(pool: SessionMeta[], query: string): Session
     // id" — NOT fall back to fuzzy content search. A short id like "d3470b57"
     // otherwise surfaces every transcript that merely MENTIONS the string (a
     // resume prompt echoes the parent id into the body of many later sessions).
-    return { matches: findSessionsById(normalized), byId: true, completeId };
+    const matches = options.indexFallback === false ? [] : findSessionsById(normalized);
+    return { matches, byId: true, completeId };
   }
   return { matches: filterSessionsByQuery(pool, normalized), byId: false, completeId };
 }
@@ -3366,96 +3398,190 @@ export interface FleetResolveDeps {
   runOnPeer: typeof runOnPeer;
 }
 
-/** One distinct machine that reported the id, plus its winning row. */
+/** One distinct machine that reported a logical session, plus its winning row. */
 interface FleetHit {
   machine: string;
   session: SessionMeta;
 }
 
-/** Group a fleet sweep's rows to the DISTINCT machines that hold the id. Each
- * peer answered `sessions <id> --json --local`, which (post-fix) id-resolves and
- * so returns the matching row(s); a peer with a synced MIRROR of the same id can
- * emit more than one row, so we keep the first per machine. Rows the peer somehow
- * returned that do NOT match the id (defensive against version skew) are dropped
- * so a stray content hit can never masquerade as an exact resolution. */
-export function fleetHitsById(rows: SessionMeta[], id: string): FleetHit[] {
-  const q = id.trim().toLowerCase();
-  const byMachine = new Map<string, SessionMeta>();
-  for (const s of rows) {
-    const machine = s.machine;
+/** One logical session returned by the fleet, including every machine holding a copy. */
+export interface FleetSessionCandidate {
+  id: string;
+  hits: FleetHit[];
+}
+
+/** Resolve a fleet sweep through the same canonical full-id / prefix resolver as
+ * local lookups, then group copies by logical session id. Synced mirrors of one
+ * session therefore stay one candidate even when several machines report them;
+ * distinct ids sharing a prefix remain distinct ambiguity candidates. */
+export function fleetCandidatesByQuery(rows: SessionMeta[], query: string): FleetSessionCandidate[] {
+  // An id selector must still be prefix-filtered defensively against older peers
+  // returning content mentioners. Keyword rows, however, were already matched by
+  // each peer's own FTS index; the parent does not own that transcript/index and
+  // must not re-run metadata-only filtering that could discard a content hit.
+  const matched = looksLikeSessionId(query)
+    ? resolveSessionQuery(rows, query, { indexFallback: false }).matches
+    : rows;
+  const byId = new Map<string, Map<string, SessionMeta>>();
+  for (const session of matched) {
+    const machine = session.machine;
     if (!machine) continue; // an untagged row can't be routed back to a peer
-    if (s.id?.toLowerCase() !== q) continue; // exact id only — never a content hit
-    if (!byMachine.has(machine)) byMachine.set(machine, s);
+    const logicalId = session.id.toLowerCase();
+    let byMachine = byId.get(logicalId);
+    if (!byMachine) {
+      byMachine = new Map();
+      byId.set(logicalId, byMachine);
+    }
+    if (!byMachine.has(machine)) byMachine.set(machine, session);
   }
-  return Array.from(byMachine.entries()).map(([machine, session]) => ({ machine, session }));
+
+  return Array.from(byId.values()).map(byMachine => {
+    const hits = Array.from(byMachine.entries()).map(([machine, session]) => ({ machine, session }));
+    return { id: hits[0].session.id, hits };
+  });
+}
+
+/** Resolve against indexed metadata first, then preserve the existing keyword
+ * behavior by widening to this machine's FTS content index only on a metadata miss. */
+function resolveIndexedMetadataRows(indexed: SessionMeta[], selector: string): SessionMeta[] {
+  const resolution = resolveSessionQuery(indexed, selector, { indexFallback: false });
+  if (resolution.matches.length > 0 || resolution.byId) return resolution.matches;
+  return Array.from(searchContentIndex(indexed, selector).values())
+    .sort((a, b) => (b._bm25Score ?? 0) - (a._bm25Score ?? 0));
+}
+
+/** Fixed peer argv for the metadata resolver. Scope flags compose identically on
+ * every host; `--all` removes the SSH login cwd/time window, not agent/project filters. */
+export function metadataResolveForwardedArgs(
+  selector: string,
+  scope: Pick<SessionFilterOptions, 'agent' | 'project'>,
+): string[] {
+  const args = ['sessions', '--resolve', selector, '--json', '--all', '--local'];
+  if (scope.agent) args.push('--agent', scope.agent);
+  if (scope.project) args.push('--project', scope.project);
+  return args;
+}
+
+/** Resolve one selector to indexed metadata across the fleet without reading or
+ * rendering transcript events. A peer answering the parent sweep returns every
+ * local candidate; the parent performs the one logical-session uniqueness gate. */
+async function resolveSessionMetadata(
+  selector: string,
+  scope: { agent?: string; project?: string; local?: boolean; hosts?: string[] },
+  deps: Pick<FleetResolveDeps, 'gatherRemoteList'> = { gatherRemoteList },
+): Promise<void> {
+  const localMachine = machineId();
+  const includeLocal = !scope.hosts?.length || shouldIncludeLocal(scope.hosts, localMachine);
+  const indexed = includeLocal ? applyScopeFilters(querySessions(), scope) : [];
+  const localMatches = resolveIndexedMetadataRows(indexed, selector)
+    .map(session => ({ ...session, machine: session.machine || localMachine }));
+
+  // A peer is already inside gatherRemoteList. Return all local candidates so
+  // the parent can distinguish a fleet-wide unique match from an ambiguity.
+  if (process.env[NO_FANOUT_ENV] === '1') {
+    process.stdout.write(serializeSessionsJson(localMatches));
+    return;
+  }
+
+  let remoteMatches: SessionMeta[] = [];
+  if (scope.local !== true) {
+    try {
+      const forwarded = metadataResolveForwardedArgs(selector, scope);
+      const result = await deps.gatherRemoteList(forwarded, scope.hosts);
+      remoteMatches = result.sessions;
+    } catch {
+      // Match the sessions fleet contract: an unreachable peer degrades to the
+      // candidates available from the rest of the fleet.
+    }
+  }
+
+  const candidates = fleetCandidatesByQuery([...localMatches, ...remoteMatches], selector);
+  if (candidates.length === 0) {
+    console.error(chalk.red(`No session found matching: ${selector}`));
+    process.exit(1);
+  }
+  if (candidates.length > 1) {
+    console.error(chalk.red(`Multiple sessions match "${selector}" across the fleet:`));
+    for (const candidate of candidates) {
+      const session = candidate.hits[0].session;
+      const machines = candidate.hits.map(hit => hit.machine).join(', ');
+      console.error(chalk.cyan(`  ${session.shortId}  ${session.id}`) + chalk.gray(`  ${machines}  ${(session as any).label ?? session.topic ?? ''}`));
+    }
+    console.error(chalk.gray(looksLikeSessionId(selector) ? 'Pass a longer ID to narrow it down.' : 'Narrow the keywords to one session.'));
+    process.exit(1);
+  }
+
+  process.stdout.write(serializeSessionsJson([candidates[0].hits[0].session]));
 }
 
 /**
- * Locate a full session id across the online fleet and render it from the machine
+ * Locate a full session id or short id prefix across the online fleet and render it from the machine
  * that holds it. The local disk already missed; this fans `sessions <id> --json
  * --all` out to every registered online peer (or the explicit `hosts` set),
  * groups the rows to distinct machines, then:
  *
- *   - exactly one machine  → delegate rendering to that peer via `runOnPeer`
+ *   - exactly one logical session → delegate rendering to one peer via `runOnPeer`
  *     (its transcript and agent binary live there — a local `--host` hop would
  *     re-discover locally and dead-end), returning `'rendered'`.
- *   - more than one machine → print the conflict with machine labels so the user
- *     can disambiguate with `--device <host>`, returning `'conflict'`.
+ *   - more than one logical session → print every full-id candidate with its
+ *     machine labels, returning `'conflict'`.
  *   - none                 → `'not-found'`, letting the caller print the local
  *     "no session on this machine" message.
  *
- * No fuzzy/content fallback: the sweep forwards a UUID, each peer id-resolves it,
- * and `fleetHitsById` drops anything that isn't an exact id match.
+ * No fuzzy/content fallback: the sweep forwards the id selector and every result
+ * is resolved through `resolveSessionQuery`, the same id-only resolver used locally.
  */
 export async function resolveSessionAcrossFleet(
-  id: string,
+  query: string,
   mode: ViewMode,
   hosts?: string[],
   deps: FleetResolveDeps = { gatherRemoteList, runOnPeer },
 ): Promise<'rendered' | 'conflict' | 'not-found'> {
   const spinner = isInteractiveTerminal() ? ora('Searching the fleet...').start() : null;
-  let hits: FleetHit[];
+  let candidates: FleetSessionCandidate[];
   try {
     // Force whole-index scope (--all): the peer runs in its SSH-login home dir,
     // whose cwd would otherwise silently narrow the lookup and hide the row.
     // --json so each peer answers a parseable array; --local so it answers for
     // itself and never re-fans-out (belt-and-suspenders with the parent's
     // AGENTS_SESSIONS_LOCAL, which remote-list also sets on the peer).
-    const forwarded = ['sessions', id, '--json', '--all', '--local'];
+    const forwarded = ['sessions', query, '--json', '--all', '--local'];
     const { sessions } = await deps.gatherRemoteList(forwarded, hosts);
-    hits = fleetHitsById(sessions, id);
+    candidates = fleetCandidatesByQuery(sessions, query);
   } catch {
     // A fan-out failure is not an exact resolution — treat as not-found so the
     // caller prints the honest local message rather than a half-answer.
-    hits = [];
+    candidates = [];
   } finally {
     spinner?.stop();
   }
 
-  if (hits.length === 0) return 'not-found';
+  if (candidates.length === 0) return 'not-found';
 
-  if (hits.length > 1) {
-    console.error(chalk.red(`Session ${id} exists on multiple machines:`));
-    for (const h of hits) {
-      const s = h.session;
+  if (candidates.length > 1) {
+    console.error(chalk.red(`Multiple sessions match "${query}" across the fleet:`));
+    for (const candidate of candidates) {
+      const s = candidate.hits[0].session;
       const label = (s as any).label ?? s.topic ?? '';
-      console.error(chalk.cyan(`  ${h.machine}`) + chalk.gray(`  ${s.agent}${s.version ? ` ${s.version}` : ''}  ${label}`));
+      const machines = candidate.hits.map(hit => hit.machine).join(', ');
+      console.error(chalk.cyan(`  ${s.shortId}  ${s.id}`) + chalk.gray(`  ${machines}  ${s.agent}${s.version ? ` ${s.version}` : ''}  ${label}`));
     }
-    console.error(chalk.gray(`Pick one with: agents sessions ${id} --device <host>`));
+    console.error(chalk.gray('Pass a longer ID to narrow it down.'));
     return 'conflict';
   }
 
-  const { machine } = hits[0];
+  const candidate = candidates[0];
+  const { machine } = candidate.hits[0];
   // Render the remote summary by re-running `sessions <id>` ON the peer. --local
   // keeps that render on the peer (it owns the transcript); the mode flag matches
   // the mode the user asked for. No TTY: a summary/markdown/json render is a
   // one-shot capture, not an interactive resume.
-  const peerArgs = ['sessions', id, '--local'];
+  const peerArgs = ['sessions', candidate.id, '--local'];
   const flag = modeFlag(mode);
   if (flag) peerArgs.push(flag);
   const result = await deps.runOnPeer(peerArgs, machine);
   if (result === 'no-target') {
-    console.error(chalk.red(`Session ${id} is on ${machine}, but it is not a reachable registered device.`));
+    console.error(chalk.red(`Session ${candidate.id} is on ${machine}, but it is not a reachable registered device.`));
     console.error(chalk.gray('Register it with `agents devices` or run the command on that machine.'));
     return 'conflict'; // a definitive answer (found, un-renderable) — do NOT fall to the local not-found line
   }
@@ -3468,6 +3594,7 @@ export function registerSessionsCommands(program: Command): void {
     .command('sessions')
     .argument('[query]', 'Session ID, search query, or path (., ../, /path) to filter by project')
     .option('--query <text>', 'Search text — use when the term collides with a subcommand name (e.g. "go")')
+    .option('--resolve <selector>', 'Resolve one full ID, unique prefix, or keyword query to SessionMeta only (requires --json; searches the fleet unless --local)')
     .description('Find, browse, and read agent conversation transcripts across Claude, Codex, Gemini, and OpenCode.')
     .option('-a, --agent <agent>', 'Filter by agent type and version (e.g., claude, codex@0.116.0)')
     .option('--claude', 'Shorthand for --agent claude')
@@ -3542,6 +3669,9 @@ export function registerSessionsCommands(program: Command): void {
 
       # Export for analysis
       agents sessions --since 30d --limit 200 --json > sessions.json
+
+      # Resolve one historical selector to metadata only, across the fleet
+      agents sessions --resolve d3470b57 --json
 
       # Search another machine's sessions live over SSH (no sync needed)
       agents sessions "auth bug" --last 3 --host yosemite-s1

@@ -1,0 +1,1 @@
+- **Resolve historical session metadata across the fleet (#1757).** `agents sessions --resolve <full-id|prefix|keywords> --json` returns one indexed `SessionMeta` match without rendering transcript events, reports every full-ID candidate on ambiguity, and treats synced copies of one session as a single match. Source: `apps/cli/src/commands/sessions.ts`.
