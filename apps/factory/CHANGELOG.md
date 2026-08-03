@@ -6,6 +6,28 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **Session resume was broken everywhere, and `Agents: Resume` now batch-reopens
+  crashed sessions.** Every session picker in the extension shelled out to
+  `agents sessions list --all --json`; `sessions` has no `list` subcommand, so
+  commander read the word "list" as a search query, matched nothing, and each
+  picker reported "No sessions found". The call now passes the query positionally.
+  On top of that fix, the new **`Agents: Resume`** command multi-selects sessions
+  and opens each in its own editor tab with that agent's icon. It joins the
+  durable listing with `agents sessions --active --json` and leads with sessions
+  that are still running with **no terminal attached** — the tmux-hosted agent
+  whose window closed or crashed — grouped under a `Detached` header and
+  pre-ticked, since those are the ones the command exists to rescue. Then
+  background (headless via `agents sessions detach`), parked, recent, and last
+  the ones already open somewhere. A live session is listed even when it falls
+  outside the recent-transcript cap, each session resumes in its own `cwd`, and a
+  session stranded on another fleet box resumes over SSH against the machine that
+  holds its transcript. Resume now covers every harness Factory presents — grok,
+  kimi, droid and antigravity go through `agents run --resume` instead of being
+  refused as "cannot resume". Source: `apps/factory/src/core/resumePicker.ts`,
+  `apps/factory/src/core/prewarm.ts` (`buildVersionedResumeCommand`),
+  `apps/factory/src/vscode/extension.ts` (`resumeSessionsBatch`,
+  `openResumedSessionTerminal`, `listSessionsViaCli`).
+
 - **Fix: the status bar showed a wrong version + account and no session id for a session it didn't spawn (e.g. under Remote-SSH).** Two separate defects. (1) Version/account were resolved from `agents view --json` — the box-wide *default installed* version and its signed-in account — which has nothing to do with which version/account a `--strategy balanced` launch actually selected for the running session; on a Remote-SSH box whose default differs from the session's, the bar read e.g. `Claude 2.1.220 <someone@gmail.com>` while the session was really `2.1.207 <the-real-account>`. The bar now sources version + account from `agents sessions <id> --json` (`SessionMeta.version`/`.account`), host-aware for offloaded `--host` tabs, and no longer substitutes a misleading machine default when no session id is known. The resolved identity is keyed to the session id that produced it and re-fetched when the terminal's live id changes, so a rerun or `/clear` in the same terminal (which can land on a different balanced version/account) can't leave the previous session's identity stuck on the bar. (2) The live-session-id lookup read `~/.agents/.cache/terminals/sessions/` — the `@agents/session-tracker` package's directory, which is not deployed on the fleet and stays empty — so it never resolved an id and the bar showed none. It now reads the actually-deployed SessionStart hook path `~/.agents/.cache/state/sessions/<pid>.json` — and, since that directory is owned by agents-cli and kept as an intentional unpruned graveyard, the extension no longer prunes it (it does targeted per-pid reads only, like the CLI). Regression tests parse `parseSessionIdentity` against both payload shapes and a captured live remote payload. Source: `apps/factory/src/core/liveSession.ts`, `apps/factory/src/core/remoteSessions.ts` (`parseSessionIdentity`), `apps/factory/src/vscode/remoteSessions.vscode.ts` (`fetchSessionIdentity`), `apps/factory/src/vscode/extension.ts` (`tryHydrateSessionIdentity`, `updateStatusBarForTerminal`, `tryHydrateLiveSessionId`).
 
 - **`…/spawn` URI tabs now honour `agents.terminalMode`.** A session reopened as

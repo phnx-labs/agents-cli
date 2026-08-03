@@ -68,6 +68,7 @@ Every open agent terminal is fully restorable. Session ID, icon, and custom labe
 - **Labels** - Tag agents by task (`Cmd+Shift+L`). Status bar shows active agent and label.
 - **TODO.md parsing** - Discovers TODO.md files in your workspace. Spawn agents directly from task items.
 - **Session history** - Browse recent sessions from the dashboard. Resume any previous conversation.
+- **Agents: Resume** - Pick several sessions at once; each reopens in its own tab with its agent's icon. Sessions still running with no terminal attached — the agent survived in tmux, the window that showed it did not — are listed first and pre-selected, so a crashed window is one command away from being back.
 
 ### Factory Floor
 

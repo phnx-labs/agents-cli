@@ -187,18 +187,28 @@ export function buildResumeCommand(session: PrewarmedSession): string {
  * THAT machine, so the raw `claude -r <id>` form would start a brand-new local
  * agent against an id this box has never seen; route through
  * `agents run --host … --resume` so the resume happens where the session is.
+ *
+ * `agentType` widens past {@link PrewarmAgentType} because resume is not a
+ * prewarm-only capability: the CLI records transcripts for every harness it can
+ * run (grok, kimi, droid, antigravity, …) and `agents run --resume` resumes any
+ * of them under the version that started the session. Only the five agents with
+ * a {@link PREWARM_CONFIGS} entry get their native one-liner; the rest go
+ * through `agents run`, which is the same path the `--host` form already used.
  */
 export function buildVersionedResumeCommand(
-  agentType: PrewarmAgentType,
+  agentType: PrewarmAgentType | string,
   sessionId: string,
   version?: string,
   host?: string,
 ): string {
+  const spec = version ? `${agentType}@${version}` : agentType;
   if (host) {
-    const spec = version ? `${agentType}@${version}` : agentType;
     return `agents run ${spec} --interactive --host ${shellQuoteArg(host)} --resume ${sessionId}`;
   }
-  const config = PREWARM_CONFIGS[agentType];
+  if (!(agentType in PREWARM_CONFIGS)) {
+    return `agents run ${spec} --interactive --resume ${sessionId}`;
+  }
+  const config = PREWARM_CONFIGS[agentType as PrewarmAgentType];
   const baseCmd = config.resumeCommand(sessionId);
   if (!version) return baseCmd;
   const cmdName = config.command;

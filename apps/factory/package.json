@@ -391,6 +391,10 @@
         "title": "Agents: Session ID"
       },
       {
+        "command": "agents.resume",
+        "title": "Agents: Resume"
+      },
+      {
         "command": "agents.sessionResume",
         "title": "Agents: Session Resume"
       },

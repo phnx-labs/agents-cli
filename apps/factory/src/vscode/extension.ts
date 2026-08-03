@@ -105,12 +105,23 @@ import * as readiness from './terminalReadiness';
 import { resolveAlias, isAgentInstalled, checkInstalledAgentsViaCli } from '../core/agentModels';
 import { pickAgentByUsage, rankHostsByUsage, HostUsageScore } from '../core/agentUsage';
 import { buildForkSessionRequest } from '../core/forkSession';
-import type { RemoteSession } from '../core/remoteSessions';
+import type { RemoteSession, RawActiveSession } from '../core/remoteSessions';
+import {
+  buildResumeCandidates,
+  defaultPickedIds,
+  STATE_HEADINGS,
+  type RecentSessionRow,
+  type ResumeCandidate,
+  type ResumeState,
+} from '../core/resumePicker';
 // readAgentRunStrategy no longer needed: agents-cli reads strategy from
 // agents.yaml itself when invoked via `agents run`.
 import { resolveAgentsBin, AgentsBinNotFoundError } from '../core/agentsBin';
 
 const AGENTS_CLI_INSTALL_CMD = 'npm install -g @phnx-labs/agents-cli';
+/** How many recent transcripts `Agents: Resume` loads. Live sessions are always
+ *  included regardless of this cap — a detached one is often days old. */
+const RESUME_PICKER_LIMIT = 100;
 let agentsCliPromptShown = false;
 
 async function ensureAgentsCliInstalled(): Promise<void> {
@@ -1662,6 +1673,10 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand('agents.resume', () => resumeSessionsBatch(context))
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand(
       'agents.resumeCurrentInBestProfile',
       () => resumeCurrentInBestProfile(context)
@@ -2757,14 +2772,37 @@ async function hostHasUsableVersion(host: string, agentKey: string): Promise<boo
   return deviceHasUsableVersion(versions);
 }
 
+/**
+ * The recent-transcript listing. `sessions` takes the query as a positional
+ * argument and has no `list` subcommand — passing one made commander treat the
+ * word "list" as a search term, which matched nothing and left every picker in
+ * the extension reporting "No sessions found".
+ */
 async function listSessionsViaCli(limit = 30): Promise<CliSessionItem[]> {
   const { runAgents } = await import('../core/agentsBin');
-  const { stdout } = await runAgents(`sessions list --all -n ${limit} --json`, {
+  const { stdout } = await runAgents(`sessions --all -n ${limit} --json`, {
     maxBuffer: 10 * 1024 * 1024,
   });
   const parsed = JSON.parse(stdout);
   if (!Array.isArray(parsed)) return [];
   return parsed as CliSessionItem[];
+}
+
+/**
+ * The live counterpart of {@link listSessionsViaCli}: which sessions have a
+ * process running right now, and — via `viewingIn` — whether anyone is looking
+ * at it. Bare (no `--local`) so a session stranded on another fleet box shows up
+ * too; those resume over SSH.
+ */
+async function listActiveSessionsViaCli(): Promise<RawActiveSession[]> {
+  const { runAgents } = await import('../core/agentsBin');
+  const { stdout } = await runAgents('sessions --active --json', {
+    maxBuffer: 16 * 1024 * 1024,
+    timeout: 45_000,
+  });
+  const parsed = JSON.parse(stdout);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((r) => r && typeof r === 'object') as RawActiveSession[];
 }
 
 function formatSessionWhen(timestamp: string): string {
@@ -2925,38 +2963,33 @@ async function copySessionId() {
   vscode.window.setStatusBarMessage(`Session ID copied: ${sessionId.slice(0, 8)}...`, 3000);
 }
 
-function agentKeyFromSession(agent: CliSessionItem['agent']): PrewarmAgentType | null {
-  if (agent === 'claude' || agent === 'codex' || agent === 'gemini' ||
-      agent === 'opencode' || agent === 'cursor') {
-    return agent;
-  }
-  return null;
+/**
+ * The agent key a session resumes under. Every harness Factory presents can be
+ * resumed — the five prewarm agents through their native flag, the rest through
+ * `agents run --resume` (see buildVersionedResumeCommand) — so the gate is
+ * membership in the agent registry, not the prewarm subset. `shell` is excluded:
+ * a shell tab has no conversation to resume.
+ */
+function agentKeyFromSession(agent: string): SessionAgentType | null {
+  if (!agent || agent === 'shell') return null;
+  return BUILT_IN_AGENTS.some(a => a.key === agent) ? (agent as SessionAgentType) : null;
 }
 
-async function resumeSession(context: vscode.ExtensionContext) {
-  const activeTerminal = vscode.window.activeTerminal;
-  const terminalEntry = activeTerminal ? terminals.getByTerminal(activeTerminal) : null;
-  const currentSessionId = terminalEntry?.sessionId ?? null;
-  const currentShortId = currentSessionId ? currentSessionId.slice(0, 8) : null;
-
-  const session = await pickSession({
-    title: 'Agents: Session Resume',
-    placeholder: 'Pick a session to resume in a new terminal',
-    pinShortId: currentShortId,
-    pinLabel: 'Current',
-  });
-  if (!session) return;
-
+/** One resumed session, opened as its own editor tab wearing that agent's icon. */
+async function openResumedSessionTerminal(
+  context: vscode.ExtensionContext,
+  session: { id: string; shortId: string; agent: string; version?: string; account?: string; cwd?: string; host?: string },
+): Promise<boolean> {
   const agentKey = agentKeyFromSession(session.agent);
   if (!agentKey) {
-    vscode.window.showInformationMessage(`Cannot resume sessions of type ${session.agent}`);
-    return;
+    vscode.window.showInformationMessage(`Cannot resume sessions of type ${session.agent || 'unknown'}`);
+    return false;
   }
 
   const builtIn = BUILT_IN_AGENTS.find(a => a.key === agentKey);
   if (!builtIn) {
     vscode.window.showInformationMessage(`No built-in agent config for ${agentKey}`);
-    return;
+    return false;
   }
 
   const agentConfig = createAgentConfig(
@@ -2967,8 +3000,10 @@ async function resumeSession(context: vscode.ExtensionContext) {
     builtIn.prefix,
   );
 
-  const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
-  const resumeCmd = buildVersionedResumeCommand(agentKey, session.id, session.version);
+  // A resumed session belongs in ITS OWN directory, not whatever workspace this
+  // window happens to have open — batch resume routinely spans several repos.
+  const workspacePath = session.cwd || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+  const resumeCmd = buildVersionedResumeCommand(agentKey, session.id, session.version, session.host);
 
   const terminalId = terminals.nextId(builtIn.prefix);
   const title = buildTerminalTitle(agentConfig.title, undefined, context, session.id);
@@ -2976,6 +3011,7 @@ async function resumeSession(context: vscode.ExtensionContext) {
     iconPath: agentConfig.iconPath,
     location: { viewColumn: vscode.ViewColumn.Active },
     name: title,
+    cwd: session.cwd,
     env: buildAgentTerminalEnv(terminalId, session.id, workspacePath, session.version),
     isTransient: true,
   });
@@ -2990,6 +3026,11 @@ async function resumeSession(context: vscode.ExtensionContext) {
   }
   if (session.account) {
     terminals.setAccount(terminal, session.account);
+  }
+  // Stamp the device so everything that later reads this session (label poller,
+  // rotate, resume) follows it to the machine the transcript actually lives on.
+  if (session.host) {
+    terminals.setHost(terminal, session.host);
   }
   startAutoLabelPollerForTerminal(terminal, context);
 
@@ -3006,11 +3047,123 @@ async function resumeSession(context: vscode.ExtensionContext) {
   readiness.armAgentReady(terminal, {
     agentKey,
     sessionId: session.id,
-    cwd: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+    cwd: workspacePath,
   });
 
   terminal.show();
-  vscode.window.setStatusBarMessage(`Resuming ${agentKey}${session.version ? `@${session.version}` : ''} · ${session.shortId}`, 3000);
+  return true;
+}
+
+async function resumeSession(context: vscode.ExtensionContext) {
+  const activeTerminal = vscode.window.activeTerminal;
+  const terminalEntry = activeTerminal ? terminals.getByTerminal(activeTerminal) : null;
+  const currentSessionId = terminalEntry?.sessionId ?? null;
+  const currentShortId = currentSessionId ? currentSessionId.slice(0, 8) : null;
+
+  const session = await pickSession({
+    title: 'Agents: Session Resume',
+    placeholder: 'Pick a session to resume in a new terminal',
+    pinShortId: currentShortId,
+    pinLabel: 'Current',
+  });
+  if (!session) return;
+
+  const opened = await openResumedSessionTerminal(context, session);
+  if (opened) {
+    vscode.window.setStatusBarMessage(
+      `Resuming ${session.agent}${session.version ? `@${session.version}` : ''} · ${session.shortId}`,
+      3000,
+    );
+  }
+}
+
+/**
+ * `Agents: Resume` — pick any number of sessions, each reopens as its own tab.
+ *
+ * The list leads with sessions that are still RUNNING with nobody attached: the
+ * agent survived in its tmux pane while the window that displayed it closed or
+ * crashed. Those are pre-ticked, because they are the ones a user opens this
+ * command to rescue; everything else is available but unchecked.
+ */
+async function resumeSessionsBatch(context: vscode.ExtensionContext) {
+  let candidates: ResumeCandidate[];
+  try {
+    // The live read fans out across the fleet over SSH, so it can take seconds —
+    // show progress rather than leaving the palette looking hung.
+    candidates = await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Window, title: 'Agents: finding resumable sessions…' },
+      async () => {
+        const [recent, live] = await Promise.all([
+          listSessionsViaCli(RESUME_PICKER_LIMIT),
+          listActiveSessionsViaCli(),
+        ]);
+        return buildResumeCandidates(recent as RecentSessionRow[], live, normalizeHost(os.hostname()));
+      },
+    );
+  } catch (err: any) {
+    const msg = err?.stderr || err?.message || String(err);
+    if (msg.includes('ENOENT') || msg.includes('not found')) {
+      vscode.window.showInformationMessage('agents CLI not found. Install with: npm i -g @phnx-labs/agents-cli');
+    } else {
+      vscode.window.showInformationMessage(`Failed to list sessions: ${msg.slice(0, 160)}`);
+    }
+    return;
+  }
+
+  if (candidates.length === 0) {
+    vscode.window.showInformationMessage('No sessions found');
+    return;
+  }
+
+  interface CandidateItem extends vscode.QuickPickItem {
+    candidate?: ResumeCandidate;
+  }
+
+  const preselected = new Set(defaultPickedIds(candidates));
+  const items: CandidateItem[] = [];
+  let group: ResumeState | undefined;
+  for (const c of candidates) {
+    if (c.state !== group) {
+      group = c.state;
+      items.push({ label: STATE_HEADINGS[c.state], kind: vscode.QuickPickItemKind.Separator });
+    }
+    const agentLabel = c.version ? `${c.agent}@${c.version}` : c.agent;
+    const where = c.host ? ` · ${c.host}` : '';
+    const viewing = c.viewingIn ? ` · ${c.viewingIn}` : '';
+    const marker = c.state === 'detached' ? '$(debug-disconnect) ' : '';
+    items.push({
+      label: `${marker}${c.shortId}  ${c.topic || '(no topic)'}`,
+      description: `${agentLabel} · ${formatSessionWhen(new Date(c.lastActivityMs).toISOString())}${where}${viewing}`,
+      detail: `${c.project || '-'}${c.cwd ? `  ${c.cwd}` : ''}`,
+      picked: preselected.has(c.id),
+      candidate: c,
+    });
+  }
+
+  const detachedCount = preselected.size;
+  const picked = await vscode.window.showQuickPick<CandidateItem>(items, {
+    title: 'Agents: Resume',
+    placeHolder: detachedCount > 0
+      ? `${detachedCount} detached session${detachedCount === 1 ? '' : 's'} pre-selected — space toggles, enter opens each in a tab`
+      : 'Select sessions to reopen, each in its own tab',
+    canPickMany: true,
+    matchOnDescription: true,
+    matchOnDetail: true,
+  });
+
+  const chosen = (picked ?? []).map(p => p.candidate).filter((c): c is ResumeCandidate => !!c);
+  if (chosen.length === 0) return;
+
+  let opened = 0;
+  for (const c of chosen) {
+    // Sequential, not Promise.all: each open awaits its terminal's promptReady
+    // before typing the resume command, and racing them interleaves the sends.
+    if (await openResumedSessionTerminal(context, c)) opened++;
+  }
+  vscode.window.setStatusBarMessage(
+    `Resumed ${opened} session${opened === 1 ? '' : 's'}`,
+    4000,
+  );
 }
 
 async function fetchAgentsViewJson(
