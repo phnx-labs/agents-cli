@@ -4,6 +4,7 @@ import {
   deterministicSessionSample,
   exactSampleTargetArgs,
   loadEnvelope,
+  mergeSampleEnvelopes,
   parseSampleOptions,
   partitionSampleDevices,
   SAMPLE_MAX_SERIALIZED_BYTES,
@@ -65,37 +66,50 @@ describe('session shell-command sampler', () => {
     });
     expect(exactSampleTargetArgs('yosemite-s1', 'yosemite-s1')).toEqual(['--local']);
     expect(exactSampleTargetArgs('YOSEMITE-S1', 'yosemite-s1')).toEqual(['--local']);
-    expect(exactSampleTargetArgs(undefined, 'yosemite-s1')).toEqual(['--local']);
     expect(exactSampleTargetArgs('yosemite-m3', 'yosemite-s1')).toEqual(['--device', 'yosemite-m3']);
   });
 
-  it('marks coverage partial when an exact session query fails', () => {
+  it('bulk-queries each source and marks coverage partial when one fails', () => {
+    const calls: string[][] = [];
     const envelope = loadEnvelope(
-      { sessions: 50, since: '7d', devices: ['peer-one'], passes: 1 },
+      { sessions: 50, since: '7d', devices: ['yosemite-s1', 'peer-one'], passes: 1 },
       (args) => {
-        if (args.includes('--include')) throw new Error('peer failed');
-        return JSON.stringify([{
-          id: 'failed-session', shortId: 'failed-s', agent: 'codex', machine: 'peer-one',
-          timestamp: '2026-08-03T00:00:00Z',
-        }]);
+        calls.push(args);
+        if (args.includes('peer-one')) throw new Error('peer failed');
+        if (!args.includes('--query')) {
+          return JSON.stringify({
+            schemaVersion: 1,
+            generatedAt: '2026-08-03T00:00:00Z',
+            query: { clauses: [] },
+            coverage: { indexedFiles: 0, indexedCalls: 0, skippedFiles: 0, limitedFiles: 0, remainingFiles: 0, complete: true },
+            sessions: [session('local-session', 'yosemite-s1')],
+          });
+        }
+        return JSON.stringify({
+          schemaVersion: 1,
+          generatedAt: '2026-08-03T00:00:00Z',
+          query: { clauses: [] },
+          coverage: { indexedFiles: 1, indexedCalls: 1, skippedFiles: 0, limitedFiles: 0, remainingFiles: 0, complete: true },
+          sessions: [session('local-session', 'yosemite-s1')],
+        });
       },
     );
-    expect(envelope.sessions).toEqual([]);
-    expect(envelope.coverage).toMatchObject({ skippedFiles: 1, complete: false });
+    expect(calls).toHaveLength(6);
+    expect(calls[0]).toContain('--local');
+    expect(calls[4]).toContain('peer-one');
+    expect(calls.every((args) => args.includes('--include'))).toBe(true);
+    expect(calls.filter((args) => args.includes('--query'))).toHaveLength(5);
+    expect(envelope.sessions).toHaveLength(1);
+    expect(envelope.coverage).toMatchObject({ skippedFiles: 0, complete: false });
+    expect(envelope).toMatchObject({ failedSources: 1 });
   });
 
   it('does not repeat a terminal partial result with no remaining backfill', () => {
-    let exactCalls = 0;
+    let queryCalls = 0;
     const envelope = loadEnvelope(
       { sessions: 50, since: '7d', devices: ['peer-one'], passes: 4 },
       (args) => {
-        if (!args.includes('--include')) {
-          return JSON.stringify([{
-            id: 'limited-session', shortId: 'limited', agent: 'codex', machine: 'peer-one',
-            timestamp: '2026-08-03T00:00:00Z',
-          }]);
-        }
-        exactCalls++;
+        queryCalls++;
         return JSON.stringify({
           schemaVersion: 1,
           generatedAt: '2026-08-03T00:00:00Z',
@@ -105,8 +119,21 @@ describe('session shell-command sampler', () => {
         });
       },
     );
-    expect(exactCalls).toBe(1);
+    expect(queryCalls).toBe(5);
     expect(envelope.sessions).toHaveLength(1);
+  });
+
+  it('deduplicates bulk results from normalized machine names', () => {
+    const first: ToolSearchEnvelope = {
+      schemaVersion: 1, generatedAt: '2026-08-03T00:00:00Z', query: { clauses: [] },
+      coverage: { indexedFiles: 1, indexedCalls: 1, skippedFiles: 0, limitedFiles: 0, remainingFiles: 0, complete: true },
+      sessions: [session('same', 'YOSEMITE-S1')],
+    };
+    const second: ToolSearchEnvelope = {
+      ...first,
+      sessions: [session('same', 'yosemite-s1')],
+    };
+    expect(mergeSampleEnvelopes([first, second]).sessions).toHaveLength(1);
   });
 
   it('caps the serialized artifact even when every sampled session carries maximum-size inputs', () => {

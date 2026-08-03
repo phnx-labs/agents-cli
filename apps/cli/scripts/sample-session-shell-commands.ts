@@ -4,7 +4,6 @@ import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import type { ToolSearchEnvelope, ToolSessionEvidence } from '../src/lib/session/tool-index.js';
 import { machineId, normalizeHost } from '../src/lib/session/sync/config.js';
-import type { SessionMeta } from '../src/lib/session/types.js';
 
 export interface SampleOptions {
   sessions: number;
@@ -19,6 +18,8 @@ const SAMPLE_PROJECTED_SESSION_BYTES = SAMPLE_MAX_SERIALIZED_BYTES - 1024 * 1024
 
 interface SampleEnvelope extends ToolSearchEnvelope {
   sampleTruncated?: boolean;
+  failedSources?: number;
+  failedSessions?: number;
 }
 
 type AgentsRunner = (args: string[]) => string;
@@ -145,6 +146,46 @@ export function partitionSampleDevices(
   };
 }
 
+const SHELL_CANDIDATE_QUERIES = ['tool:exec', 'tool:command', 'tool:shell', 'tool:bash'];
+
+function toolQueryArgs(options: SampleOptions, devices: string[], local: boolean, query: string): string[] {
+  const args = [
+    'sessions', '--include', 'tools', '--since', options.since,
+    '--query', query,
+    '--limit', String(Math.min(1000, Math.max(500, options.sessions * 10))), '--all', '--json', '--no-interactive',
+  ];
+  if (local) args.push('--local');
+  else for (const device of devices) args.push('--device', device);
+  return args;
+}
+
+function querySource(args: string[], passes: number, runner: AgentsRunner): ToolSearchEnvelope {
+  let envelope: ToolSearchEnvelope | undefined;
+  for (let pass = 0; pass < passes; pass++) {
+    envelope = JSON.parse(runner(args)) as ToolSearchEnvelope;
+    if (envelope.schemaVersion !== 1) throw new Error(`Unsupported tool-search schema ${envelope.schemaVersion}`);
+    if (envelope.coverage.complete || envelope.coverage.remainingFiles === 0) break;
+  }
+  return envelope!;
+}
+
+function queryScopeCandidates(
+  options: SampleOptions,
+  devices: string[],
+  local: boolean,
+  runner: AgentsRunner,
+): ToolSearchEnvelope {
+  const sessions = new Map<string, ToolSessionEvidence>();
+  let finalEnvelope: ToolSearchEnvelope | undefined;
+  for (const query of SHELL_CANDIDATE_QUERIES) {
+    finalEnvelope = querySource(toolQueryArgs(options, devices, local, query), options.passes, runner);
+    for (const session of finalEnvelope.sessions) {
+      sessions.set(`${normalizeHost(session.machine ?? 'local')}\0${session.id}`, session);
+    }
+  }
+  return { ...finalEnvelope!, query: { clauses: [] }, sessions: [...sessions.values()] };
+}
+
 export function exactSampleTargetArgs(candidateMachine: string | undefined, self: string): string[] {
   if (candidateMachine && normalizeHost(candidateMachine) !== normalizeHost(self)) {
     return ['--device', candidateMachine];
@@ -152,14 +193,27 @@ export function exactSampleTargetArgs(candidateMachine: string | undefined, self
   return ['--local'];
 }
 
-function listArgs(options: SampleOptions, devices: string[], local: boolean): string[] {
-  const args = [
-    'sessions', '--since', options.since,
-    '--limit', String(Math.min(1000, Math.max(500, options.sessions * 10))), '--all', '--json', '--no-interactive',
-  ];
-  if (local) args.push('--local');
-  else for (const device of devices) args.push('--device', device);
-  return args;
+export function mergeSampleEnvelopes(envelopes: ToolSearchEnvelope[]): ToolSearchEnvelope {
+  const sessions = new Map<string, ToolSessionEvidence>();
+  for (const envelope of envelopes) {
+    for (const session of envelope.sessions) {
+      sessions.set(`${normalizeHost(session.machine ?? 'local')}\0${session.id}`, session);
+    }
+  }
+  return {
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
+    query: { clauses: [] },
+    coverage: {
+      indexedFiles: envelopes.reduce((total, envelope) => total + envelope.coverage.indexedFiles, 0),
+      indexedCalls: envelopes.reduce((total, envelope) => total + envelope.coverage.indexedCalls, 0),
+      skippedFiles: envelopes.reduce((total, envelope) => total + envelope.coverage.skippedFiles, 0),
+      limitedFiles: envelopes.reduce((total, envelope) => total + envelope.coverage.limitedFiles, 0),
+      remainingFiles: envelopes.reduce((total, envelope) => total + envelope.coverage.remainingFiles, 0),
+      complete: envelopes.every((envelope) => envelope.coverage.complete),
+    },
+    sessions: [...sessions.values()],
+  };
 }
 
 export function loadEnvelope(
@@ -170,59 +224,43 @@ export function loadEnvelope(
   const devices = explicit ? options.devices : defaultDevices(runner);
   const self = machineId();
   const { includeLocal, remoteDevices } = partitionSampleDevices(devices, self, explicit);
-  const listed: SessionMeta[] = [];
-  if (includeLocal) listed.push(...JSON.parse(runner(listArgs(options, [], true))) as SessionMeta[]);
-  if (remoteDevices.length > 0) {
-    listed.push(...JSON.parse(runner(listArgs(options, remoteDevices, false))) as SessionMeta[]);
+  const envelopes: ToolSearchEnvelope[] = [];
+  let failedSources = 0;
+  const sources = [
+    ...(includeLocal ? [{ devices: [] as string[], local: true }] : []),
+    ...(remoteDevices.length > 0 ? [{ devices: remoteDevices, local: false }] : []),
+  ];
+  for (const source of sources) {
+    try {
+      envelopes.push(queryScopeCandidates(options, source.devices, source.local, runner));
+    } catch {
+      failedSources++;
+    }
   }
-  const unique = new Map<string, SessionMeta>();
-  for (const candidate of listed) {
-    const key = `${normalizeHost(candidate.machine ?? self)}\0${candidate.id}`;
-    if (!unique.has(key)) unique.set(key, candidate);
+  const merged = mergeSampleEnvelopes(envelopes);
+  if (failedSources > 0) {
+    merged.coverage.complete = false;
   }
-  const candidates = deterministicSessionSample(
-    [...unique.values()].map((candidate) => ({ ...candidate, calls: [] } as ToolSessionEvidence)),
-    unique.size,
-  );
+  const candidates = deterministicSessionSample(merged.sessions, merged.sessions.length);
   const sessions: ToolSessionEvidence[] = [];
   let retainedBytes = 0;
   let sampleTruncated = false;
-  const coverage = {
-    indexedFiles: 0,
-    indexedCalls: 0,
-    skippedFiles: 0,
-    limitedFiles: 0,
-    remainingFiles: 0,
-    complete: true,
-  };
+  let failedSessions = 0;
 
   for (const candidate of candidates) {
     if (sessions.length >= options.sessions) break;
     const args = [
       'sessions', candidate.id, '--include', 'tools', '--all', '--limit', '1',
-      '--json', '--no-interactive',
+      '--json', '--no-interactive', ...exactSampleTargetArgs(candidate.machine, self),
     ];
-    args.push(...exactSampleTargetArgs(candidate.machine, self));
-    let envelope: ToolSearchEnvelope | undefined;
+    let exact: ToolSearchEnvelope;
     try {
-      for (let pass = 0; pass < options.passes; pass++) {
-        envelope = JSON.parse(runner(args)) as ToolSearchEnvelope;
-        if (envelope.schemaVersion !== 1) throw new Error(`Unsupported tool-search schema ${envelope.schemaVersion}`);
-        if (envelope.coverage.complete || envelope.coverage.remainingFiles === 0) break;
-      }
+      exact = querySource(args, options.passes, runner);
     } catch {
-      coverage.skippedFiles++;
-      coverage.complete = false;
+      failedSessions++;
       continue;
     }
-    if (!envelope) continue;
-    coverage.indexedFiles += envelope.coverage.indexedFiles;
-    coverage.indexedCalls += envelope.coverage.indexedCalls;
-    coverage.skippedFiles += envelope.coverage.skippedFiles;
-    coverage.limitedFiles += envelope.coverage.limitedFiles;
-    coverage.remainingFiles += envelope.coverage.remainingFiles;
-    coverage.complete &&= envelope.coverage.complete;
-    const hit = envelope.sessions.find((session) => session.id === candidate.id);
+    const hit = exact.sessions.find((session) => session.id === candidate.id);
     if (!hit) continue;
     const shellCalls = hit.calls.filter((call) => call.programs.length > 0).map((call) => ({
       id: call.id,
@@ -245,7 +283,7 @@ export function loadEnvelope(
     };
     const projectedBytes = Buffer.byteLength(JSON.stringify(projected));
     if (retainedBytes + projectedBytes > SAMPLE_PROJECTED_SESSION_BYTES) {
-      coverage.complete = false;
+      merged.coverage.complete = false;
       sampleTruncated = true;
       break;
     }
@@ -256,9 +294,11 @@ export function loadEnvelope(
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
     query: { clauses: [] },
-    coverage,
+    coverage: merged.coverage,
     sessions,
     sampleTruncated,
+    failedSources,
+    failedSessions,
   } as SampleEnvelope;
 }
 
@@ -314,6 +354,8 @@ export function buildSample(envelope: ToolSearchEnvelope, count: number) {
     generatedAt: new Date().toISOString(),
     requestedSessions: count,
     sampledSessions: sessions.length,
+    failedSources: (envelope as SampleEnvelope).failedSources ?? 0,
+    failedSessions: (envelope as SampleEnvelope).failedSessions ?? 0,
     coverage,
     truncation: truncated
       ? { reason: 'sample_byte_limit', maxBytes: SAMPLE_MAX_SERIALIZED_BYTES }
