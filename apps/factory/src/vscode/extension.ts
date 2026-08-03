@@ -109,6 +109,7 @@ import {
   freshnessSuffix,
   isHostPickerStale,
   parseHostPickerCache,
+  serializeUsage,
   sortHostPickerDevices,
   type HostPickerCache,
 } from '../core/hostPickerCache';
@@ -555,10 +556,10 @@ async function refreshHostPickerCache(context: vscode.ExtensionContext): Promise
     (health?.devices ?? []).filter((d) => !d.sshReachable).map((d) => normalizeHost(d.name)),
   );
   const sweepable = devices.filter((d) => !dead.has(normalizeHost(d.name)));
-  const usage: Record<string, HostUsageScore> = {};
+  let usage: Record<string, HostUsageScore> = {};
   try {
     const sessions = await fetchRecapSessions(HOST_USAGE_SESSION_LIMIT, [], sweepable);
-    for (const s of rankHostsByUsage(sessions, Date.now())) usage[s.host] = s;
+    usage = serializeUsage(new Map(rankHostsByUsage(sessions, Date.now()).map((s) => [s.host, s])));
   } catch (err) {
     console.error('[pickLaunchHost] usage sweep failed:', err);
   }
@@ -617,6 +618,7 @@ async function pickLaunchHost(
   quickPick.placeholder = title;
   quickPick.items = launchHostItems(cache, Date.now());
 
+  let disposed = false;
   if (isHostPickerStale(cache)) {
     quickPick.busy = true;
     void refreshHostPickerCache(context)
@@ -631,7 +633,6 @@ async function pickLaunchHost(
       .finally(() => { if (!disposed) quickPick.busy = false; });
   }
 
-  let disposed = false;
   try {
     return await new Promise<{ host?: string; cancelled: boolean }>((resolve) => {
       // VS Code fires onDidHide for the hide() on accept too — only the hide
@@ -645,11 +646,14 @@ async function pickLaunchHost(
         // Balanced -> agent-aware best host (RUSH-2025). An explicit device
         // pick is honored as-is; the launch still passes strategy 'balanced'
         // so the CLI's account rotation routes around a signed-out /
-        // throttled version on it.
+        // throttled version on it. The catch keeps a resolveBalancedHost
+        // rejection from hanging the launch promise forever.
         void (async () => ({
           host: pick.hostId === BALANCE_HOST_ID ? await resolveBalancedHost(undefined, agentKey) : pick.hostId,
           cancelled: false,
-        }))().then(resolve);
+        }))()
+          .then(resolve)
+          .catch(() => resolve({ cancelled: true }));
       });
       quickPick.onDidHide(() => { if (!accepted) resolve({ cancelled: true }); });
       quickPick.show();
@@ -3221,7 +3225,10 @@ async function fetchResumeCandidates(): Promise<ResumeCandidate[]> {
  * the background refresh lands, carrying the user's checks across the swap.
  */
 async function resumeSessionsBatch(context: vscode.ExtensionContext) {
-  const cached = context.globalState.get<ResumePickerCache>(RESUME_PICKER_CACHE_KEY);
+  const rawCache = context.globalState.get<ResumePickerCache>(RESUME_PICKER_CACHE_KEY);
+  // Shape-check like the host picker cache: a drifted entry must degrade to
+  // the cold path, not crash item building on a non-array.
+  const cached = rawCache && Array.isArray(rawCache.candidates) ? rawCache : undefined;
   let initial = cached?.candidates ?? [];
 
   // Cold start (no snapshot yet): the live read fans out across the fleet over
@@ -3256,15 +3263,21 @@ async function resumeSessionsBatch(context: vscode.ExtensionContext) {
   quickPick.matchOnDescription = true;
   quickPick.matchOnDetail = true;
 
+  // Ids rendered by the previous applyItems call. On a refresh swap, only
+  // detached sessions NOT in this set get pre-ticked — re-applying every
+  // default would re-tick a session the user deliberately unticked.
+  let renderedIds = new Set<string>();
   const applyItems = (candidates: ResumeCandidate[]) => {
     // Assigning items resets the checks, so carry the user's current selection
     // across the swap; newly-seen detached sessions still get pre-ticked.
     const checked = new Set(
       quickPick.selectedItems.map((i) => i.candidate?.id).filter((id): id is string => !!id),
     );
-    const preselected = new Set([...defaultPickedIds(candidates), ...checked]);
+    const defaults = defaultPickedIds(candidates);
+    const preselected = new Set([...defaults.filter((id) => !renderedIds.has(id)), ...checked]);
     quickPick.items = resumeCandidateItems(candidates, preselected);
-    const detachedCount = defaultPickedIds(candidates).length;
+    renderedIds = new Set(candidates.map((c) => c.id));
+    const detachedCount = defaults.length;
     quickPick.placeholder = detachedCount > 0
       ? `${detachedCount} detached session${detachedCount === 1 ? '' : 's'} pre-selected — space toggles, enter opens each in a tab`
       : 'Select sessions to reopen, each in its own tab';
