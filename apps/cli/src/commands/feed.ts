@@ -27,16 +27,6 @@ import {
   type OpenBlock,
 } from '../lib/feed.js';
 
-/** Flags for `feed post`. Declared once — the action reads them off both the child and the parent. */
-interface PostCliOpts {
-  session?: string;
-  attach?: string[];
-  level?: string;
-  blocked?: boolean;
-  option?: string[];
-  default?: string;
-  json?: boolean;
-}
 import {
   ensureActivityLogHook,
   readRecentActivity,
@@ -53,6 +43,7 @@ import {
   planFeedBroadcast,
   runFeedBroadcast,
   blockBroadcastContext,
+  blockDeliveryFailure,
   type FeedPostLevel,
   type SinkOutcome,
 } from '../lib/feed-broadcast.js';
@@ -90,6 +81,17 @@ import {
   synthesizeControlCards,
   type FeedSessionSignal,
 } from '../lib/feed-ranking.js';
+
+/** Flags for `feed post`. Declared once — the action reads them off both the child and the parent. */
+interface PostCliOpts {
+  session?: string;
+  attach?: string[];
+  level?: string;
+  blocked?: boolean;
+  option?: string[];
+  default?: string;
+  json?: boolean;
+}
 
 export const FEED_NO_FANOUT_ENV = 'AGENTS_FEED_LOCAL';
 
@@ -430,23 +432,24 @@ docs/06-observability.md.
           outcomes = broadcastPostedEvent(event, level);
         }
 
+        // Fail loud when a block reached nobody. This is computed BEFORE the
+        // --json early return: a machine caller is exactly the one that reads the
+        // exit code, so returning 0 there while a human gets 1 would make the
+        // undelivered block invisible to the caller most likely to act on it —
+        // reintroducing, behind a flag, the silent failure this exists to remove.
+        // One sink failing among several stays a warning: the channels are
+        // redundant by design.
+        const undelivered = blockDeliveryFailure(flags.blocked, outcomes);
+        if (undelivered) process.exitCode = 1;
+
         if (flags.json) {
           console.log(JSON.stringify(outcomes.length ? { ...event, broadcast: outcomes } : event, null, 2));
+          if (undelivered) console.error(chalk.red(undelivered));
           return;
         }
         console.log(formatProgressUpdate(event));
         reportBroadcast(outcomes);
-        // Fail loud when a block reached nobody. A silent undelivered block is
-        // the exact bug this subsystem exists to remove, so it must not be a
-        // clean exit -- but one sink failing among several is only a warning,
-        // since the channels are redundant by design.
-        if (flags.blocked && outcomes.length > 0 && outcomes.every((o) => !o.ok)) {
-          console.error(chalk.red('Block recorded but NOT delivered — every feed.broadcast sink failed.'));
-          process.exitCode = 1;
-        } else if (flags.blocked && outcomes.length === 0) {
-          console.error(chalk.yellow('Block recorded but not broadcast — no feed.broadcast sink configured.'));
-          process.exitCode = 1;
-        }
+        if (undelivered) console.error(chalk.red(undelivered));
       } catch (err) {
         console.error(chalk.red((err as Error).message));
         process.exitCode = 1;

@@ -122,6 +122,32 @@ export function blockBroadcastContext(
   };
 }
 
+/**
+ * Why a declared block reached nobody, or undefined when it got through.
+ *
+ * Pure so the fail-loud contract is testable without driving the CLI — the
+ * original version lived inline in the command action and was consequently
+ * never covered, which is how a `--json` early-return quietly bypassed it.
+ *
+ * Only a TOTAL failure counts. One sink failing among several is a warning, not
+ * an error: the channels are redundant by design, and a dead `rush` login must
+ * not mask a delivered desktop notification.
+ */
+export function blockDeliveryFailure(
+  blocked: boolean,
+  outcomes: SinkOutcome[],
+): string | undefined {
+  if (!blocked) return undefined;
+  if (outcomes.length === 0) {
+    return 'Block recorded but NOT delivered — no feed.broadcast sink configured.';
+  }
+  if (outcomes.every((o) => !o.ok)) {
+    const why = outcomes.map((o) => `${o.name}: ${o.error ?? 'failed'}`).join('; ');
+    return `Block recorded but NOT delivered — every feed.broadcast sink failed (${why}).`;
+  }
+  return undefined;
+}
+
 export interface PlannedSink {
   name: string;
   argv: string[];

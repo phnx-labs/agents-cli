@@ -76,7 +76,7 @@ export interface OpenBlock {
    *   question     — an AskUserQuestion the harness surfaced
    *   notification — a permission/idle prompt the harness raised
    *   control      — a synthetic card the feed itself computed (runaway, needy)
-   *   declared     — the AGENT decided it is stuck and said so (`agents feed block`)
+   *   declared     — the AGENT decided it is stuck and said so (`feed post --blocked`)
    *
    * `declared` is the only kind that does not depend on the harness noticing
    * anything. Every other kind is inferred from a harness event, and hook events
@@ -406,7 +406,7 @@ export interface DeclareBlockInput {
 }
 
 /**
- * Build the block record for `agents feed block` — pure, so the shape is testable
+ * Build the block record for `agents feed post --blocked` — pure, so the shape is testable
  * without touching the store or the broadcast layer.
  *
  * Class is derived, not asked for: a `--default` means the user could be absent
@@ -422,7 +422,7 @@ export interface DeclareBlockInput {
 export function buildDeclaredBlock(agent: DeclaringAgent, input: DeclareBlockInput): OpenBlock {
   const text = input.text.trim().replace(/\s+/g, ' ');
   if (!text) {
-    throw new Error('Block text is empty. Usage: agents feed block "what you need from the user"');
+    throw new Error('Block text is empty. Usage: agents feed post "what you need from the user" --blocked');
   }
   const options = (input.options ?? [])
     .map((label) => label.trim())

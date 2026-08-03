@@ -10,7 +10,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { buildDeclaredBlock, publishBlock, listBlocks, type DeclaringAgent } from './feed.js';
-import { blockBroadcastContext, planFeedBroadcast, renderSinkArgv } from './feed-broadcast.js';
+import { blockBroadcastContext, planFeedBroadcast, renderSinkArgv, blockDeliveryFailure } from './feed-broadcast.js';
 import { MILESTONE_EVENTS, tierForEvent } from './activity.js';
 
 const AGENT: DeclaringAgent = {
@@ -123,5 +123,38 @@ describe('blockBroadcastContext', () => {
       project: 'agents-cli',
     });
     expect(argv).toEqual(['agents-cli · CI green']);
+  });
+});
+
+describe('blockDeliveryFailure — the fail-loud contract', () => {
+  const ok = { name: 'owner', ok: true };
+  const bad = { name: 'owner', ok: false, error: 'rush CLI not found on PATH' };
+
+  // This lived inline in the command action and was therefore never covered,
+  // which is exactly how a `--json` early-return silently bypassed it: the
+  // machine caller — the one that actually reads the exit code — got 0 while a
+  // human got 1. Reviewer caught it; this pins the contract in a pure function.
+  it('reports failure when no sink is configured', () => {
+    expect(blockDeliveryFailure(true, [])).toMatch(/no feed\.broadcast sink configured/);
+  });
+
+  it('reports failure, with the reason, when every sink failed', () => {
+    const msg = blockDeliveryFailure(true, [bad, { name: 'other', ok: false, error: 'daemon down' }]);
+    expect(msg).toMatch(/every feed\.broadcast sink failed/);
+    expect(msg).toContain('rush CLI not found on PATH');
+    expect(msg).toContain('daemon down');
+  });
+
+  // Redundant channels are the whole point: a dead rush login must not mask a
+  // delivered desktop notification.
+  it('stays silent when at least one sink got through', () => {
+    expect(blockDeliveryFailure(true, [bad, ok])).toBeUndefined();
+    expect(blockDeliveryFailure(true, [ok])).toBeUndefined();
+  });
+
+  // A plain status post is fire-and-forget; an unconfigured sink is not an error.
+  it('never fails a non-blocked post', () => {
+    expect(blockDeliveryFailure(false, [])).toBeUndefined();
+    expect(blockDeliveryFailure(false, [bad])).toBeUndefined();
   });
 });
