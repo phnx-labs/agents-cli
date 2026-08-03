@@ -3258,6 +3258,11 @@ async function resumeSessionsBatch(
   // the cold path, not crash item building on a non-array.
   const cached = rawCache && Array.isArray(rawCache.candidates) ? rawCache : undefined;
   let initial = select(cached?.candidates ?? []);
+  // Set when the cold path just did a live fleet read — the background
+  // revalidate below must not fire a second, identical sweep right after it.
+  // (Reachable with a warm cache in abandonedOnly mode: the snapshot filters
+  // to empty, so the cold path runs even though `cached` is non-empty.)
+  let coldFetched = false;
 
   // Cold start (no snapshot yet): the live read fans out across the fleet over
   // SSH, so it can take seconds — show progress rather than leaving the
@@ -3280,6 +3285,7 @@ async function resumeSessionsBatch(
     }
     void context.globalState.update(RESUME_PICKER_CACHE_KEY, { candidates: fresh, fetchedAt: Date.now() } satisfies ResumePickerCache);
     initial = select(fresh);
+    coldFetched = true;
   }
 
   if (initial.length === 0) {
@@ -3318,7 +3324,7 @@ async function resumeSessionsBatch(
   // the fresh list in when it lands. (The cold path just fetched, so it is
   // already fresh.)
   let pickerDisposed = false;
-  if (cached && cached.candidates.length > 0) {
+  if (!coldFetched && cached && cached.candidates.length > 0) {
     quickPick.busy = true;
     void fetchResumeCandidates()
       .then((fresh) => {
@@ -3470,6 +3476,11 @@ function activeSessionTerminalEntry(): terminals.EditorTerminal | undefined {
  * the host picker is the one decision the user makes. Transcripts sync
  * fleet-wide, so `agents run --host <picked> --resume <id>` picks the session
  * up wherever it lands (see buildVersionedResumeCommand).
+ *
+ * Deliberate divergence from the batch path: no `cwd` is passed, so the new
+ * tab opens in the current workspace rather than the session's own directory.
+ * EditorTerminal doesn't track a cwd, and the session's directory may not
+ * exist on the picked device anyway — a cross-host move can't promise it.
  */
 async function resumeCurrentPickHost(context: vscode.ExtensionContext) {
   const entry = activeSessionTerminalEntry();
@@ -3550,6 +3561,10 @@ async function resumeCurrentPickHarness(context: vscode.ExtensionContext) {
  * the session's device when offloaded, then feed it the OLD session through
  * the universal continue replay once the TUI is live. The launch→ready→send
  * shape mirrors the proven tail of rotateTerminalToBestVersion.
+ *
+ * Fork-style contract: the original tab is left running. Non-claude targets
+ * reuse the old session id (only Claude can pin a fresh one up front), so two
+ * live processes can share one transcript — same contract as `Agents: Fork`.
  */
 async function launchResumeInHarness(
   context: vscode.ExtensionContext,
