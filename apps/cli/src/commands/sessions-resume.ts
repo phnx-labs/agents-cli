@@ -52,6 +52,8 @@ interface ResumeOptions {
   ghostty?: boolean;
   tmux?: boolean;
   vscodium?: boolean;
+  /** --terminal-app: force macOS Terminal.app. Named to avoid reading as `run --terminal`. */
+  terminalApp?: boolean;
   splits?: boolean;
 }
 
@@ -70,6 +72,7 @@ export function registerSessionsResumeCommand(sessionsCmd: Command): void {
     .option('--ghostty', 'Force the Ghostty backend')
     .option('--tmux', 'Force the tmux backend')
     .option('--vscodium', 'Force the VSCodium agent-terminal backend (swarm-ext)')
+    .option('--terminal-app', 'Force macOS Terminal.app (no split support — panes become tabs)')
     .option('--splits', 'Pack two sessions side by side per tab (default: one tab per session)');
 
   setHelpSections(cmd, {
@@ -196,6 +199,12 @@ async function sessionsResumeAction(query: string | undefined, options: ResumeOp
   // recovery; callers can explicitly opt into pairs of side-by-side panes.
   const packing = resolveResumePacking(options);
   const where = options.host ? `${backend} on ${options.host}` : backend;
+  // Terminal.app has no scriptable split, so its buildSplit opens a tab. Say so
+  // when the user actually asked for panes — the layout silently not happening
+  // is worse than one line of warning.
+  if (backend === 'terminal' && packing === 'two-per-tab') {
+    console.log(chalk.yellow('Terminal.app cannot split panes — opening one tab per session instead.'));
+  }
   console.log(chalk.gray(`Opening ${items.length} session${items.length === 1 ? '' : 's'} in ${where} (${packing})…`));
 
   const results = await openSurfaces(
@@ -236,6 +245,7 @@ async function resolveBackend(
       : options.ghostty ? 'ghostty'
       : options.tmux ? 'tmux'
       : options.vscodium ? 'vscodium-agent'
+      : options.terminalApp ? 'terminal'
       : undefined;
   if (forced) return forced;
   // Remote defaults to tmux (headless, no GUI session assumptions); override with a backend flag.

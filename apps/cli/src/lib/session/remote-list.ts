@@ -18,7 +18,7 @@ import chalk from 'chalk';
 import { SSH_OPTS, controlOpts, assertValidSshTarget, shellQuote } from '../ssh-exec.js';
 import { sshTargetFor } from '../devices/connect.js';
 import { resolveExplicitTargets } from '../devices/resolve-target.js';
-import { loadDevices, isControlDevice, type DeviceProfile } from '../devices/registry.js';
+import { loadDevices, isControlDevice, isDialableDevice, type DeviceProfile } from '../devices/registry.js';
 import { remoteShellFor, buildWindowsAgentsCommand } from '../hosts/remote-cmd.js';
 import { machineId, normalizeHost } from './sync/config.js';
 import { NO_FANOUT_ENV } from './remote-active.js';
@@ -195,7 +195,10 @@ export async function gatherRemoteList(forwardedArgs: string[], hosts?: string[]
       return { sessions: [], deviceCount: 0, unreachable: ['device registry'] };
     }
     for (const d of Object.values(reg)) {
-      if (d.tailscale?.online !== true) continue;
+      // Live SSH-probe verdict first, cached tailscale snapshot only as a
+      // fallback — see isDialableDevice. A manually-registered device has no
+      // tailscale peer entry, so gating on `online` alone hid its sessions.
+      if (!isDialableDevice(d)) continue;
       if (normalizeHost(d.name) === self) continue;
       // Control-only devices (a phone/tablet running the cockpit) drive the fleet
       // but never run agents — never dial them, whatever their platform reads as.

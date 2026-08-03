@@ -129,13 +129,17 @@ describe('availability + detection', () => {
     expect(detectCurrentBackend(ctx({ TMUX: 'x', TERM_PROGRAM: 'iTerm.app' }))).toBe('tmux');
     expect(detectCurrentBackend(ctx({ TERM_PROGRAM: 'iTerm.app' }))).toBe('iterm');
     expect(detectCurrentBackend(ctx({ TERM_PROGRAM: 'ghostty' }))).toBe('ghostty');
-    expect(detectCurrentBackend(ctx({ TERM_PROGRAM: 'Apple_Terminal' }))).toBeNull();
+    expect(detectCurrentBackend(ctx({ TERM_PROGRAM: 'Apple_Terminal' }))).toBe('terminal');
+    expect(detectCurrentBackend(ctx({ TERM_PROGRAM: 'WarpTerminal' }))).toBeNull();
   });
   it('availableBackends on linux with tmux = [tmux] only', () => {
     const a = availableBackends(ctx({ TMUX: 'x' }, 'linux'));
     expect(a.map((b) => b.id)).toEqual(['tmux']);
   });
-  it('registry has all four backends', () => {
-    expect(Object.keys(BACKENDS).sort()).toEqual(['ghostty', 'iterm', 'tmux', 'vscodium-agent']);
+  it('registry has every backend', () => {
+    expect(Object.keys(BACKENDS).sort()).toEqual(['ghostty', 'iterm', 'terminal', 'tmux', 'vscodium-agent']);
+  });
+  it('Terminal.app is last, so the available-backend floor never outranks a chosen terminal', () => {
+    expect(Object.keys(BACKENDS).at(-1)).toBe('terminal');
   });
 });

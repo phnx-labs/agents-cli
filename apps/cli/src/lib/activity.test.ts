@@ -5,13 +5,16 @@ import * as path from 'path';
 import { spawnSync } from 'child_process';
 import {
   ACTIVITY_LOG_HOOK_SCRIPT,
+  activityGroupDevices,
   activityGroupKey,
   appendActivityEvent,
   attachmentName,
+  capActivityEvents,
   collapseActivity,
   enrichActivityEvents,
   ensureActivityLogHook,
   filterActivityEvents,
+  formatActivityGroupMeta,
   formatEnrichedActivityLine,
   formatProgressUpdate,
   groupActivity,
@@ -748,6 +751,79 @@ describe('activityGroupKey / groupActivity', () => {
       ev({ sessionId: '2', host: 'mac-mini' }),
     ], 'device');
     expect(new Set(groups.map((g) => g.label))).toEqual(new Set(['zion', 'mac-mini']));
+  });
+});
+
+describe('capActivityEvents', () => {
+  const milestone = (id: string, host = 'zion') =>
+    ev({ sessionId: id, event: 'pr.opened', tier: 'milestone', executionHost: host });
+  const routine = (id: string, host = 'zion') =>
+    ev({ sessionId: id, event: 'file.edited', tier: 'activity', executionHost: host });
+
+  it('spends the budget on milestones, not on collapsed churn', () => {
+    // The real regression: one box editing 40 files buried every other
+    // device's PRs behind a single `file edited ×40` line.
+    const stream = [...Array.from({ length: 40 }, (_, i) => routine(`edit-${i}`)), milestone('pr', 'yosemite-s0')];
+    const capped = capActivityEvents(stream, 40);
+    expect(capped.filter((e) => e.event === 'pr.opened')).toHaveLength(1);
+  });
+
+  it('stops at the milestone cap and keeps the routine events inside that window', () => {
+    const stream = [milestone('a'), routine('r1'), milestone('b'), routine('r2'), milestone('c')];
+    const capped = capActivityEvents(stream, 2);
+    expect(capped.map((e) => e.sessionId)).toEqual(['a', 'r1', 'b']);
+  });
+
+  it('--all makes it a plain cap on every event', () => {
+    const stream = [routine('r1'), routine('r2'), milestone('a')];
+    expect(capActivityEvents(stream, 2, { all: true }).map((e) => e.sessionId)).toEqual(['r1', 'r2']);
+  });
+
+  it('keeps everything when the stream holds fewer milestones than the cap', () => {
+    const stream = [routine('r1'), milestone('a'), routine('r2')];
+    expect(capActivityEvents(stream, 10)).toHaveLength(3);
+  });
+
+  // The command rejects such a limit before it gets here (`--limit must be a
+  // positive number`); this pins that the primitive never invents a window.
+  it('returns nothing for a non-positive or unparsable limit', () => {
+    expect(capActivityEvents([milestone('a')], 0)).toEqual([]);
+    expect(capActivityEvents([milestone('a')], Number.NaN)).toEqual([]);
+  });
+});
+
+describe('project group headers name the machines (device labels)', () => {
+  const group = (events: EnrichedActivityEvent[]) => ({ key: 'agents-cli', label: 'agents-cli', events });
+
+  it('orders devices by event count, then alphabetically', () => {
+    expect(activityGroupDevices([
+      ev({ sessionId: '1', executionHost: 'zion' }),
+      ev({ sessionId: '2', executionHost: 'mac-mini' }),
+      ev({ sessionId: '3', executionHost: 'zion' }),
+      ev({ sessionId: '4', executionHost: 'alpha' }),
+    ])).toEqual(['zion', 'alpha', 'mac-mini']);
+  });
+
+  it('ignores events with no resolvable machine instead of inventing one', () => {
+    expect(activityGroupDevices([ev({ sessionId: '1', host: 'unknown', executionHost: undefined })])).toEqual([]);
+  });
+
+  it('appends the machines to the group meta, capped with a +N tail', () => {
+    const events = ['zion', 'mac-mini', 'yosemite-s0', 'yosemite-s1', 'win-mini']
+      .map((h, i) => ev({ sessionId: String(i), executionHost: h, event: 'pr.opened', tier: 'milestone' }));
+    const meta = formatActivityGroupMeta(group(events), { showDevices: true });
+    expect(meta).toBe('5 events · 5 milestones · mac-mini, win-mini, yosemite-s0 +2');
+  });
+
+  it('omits the machines when the grouping dimension IS the device', () => {
+    const events = [ev({ sessionId: '1', executionHost: 'zion' })];
+    expect(formatActivityGroupMeta(group(events), { showDevices: false })).toBe('1 event');
+    expect(formatActivityGroupMeta(group(events))).toBe('1 event');
+  });
+
+  it('says nothing about machines when none are known', () => {
+    const events = [ev({ sessionId: '1', host: 'unknown', executionHost: undefined })];
+    expect(formatActivityGroupMeta(group(events), { showDevices: true })).toBe('1 event');
   });
 });
 

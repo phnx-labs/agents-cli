@@ -18,6 +18,7 @@ import * as fs from 'fs';
 import { readMeta, updateMeta } from './state.js';
 import { getMainRepoRoot } from './git.js';
 import { toPosix } from './platform/index.js';
+import { loadProjectDef, resolveDefinedProjectPath } from './projects.js';
 
 const HOME = process.env.HOME ?? os.homedir();
 
@@ -134,6 +135,22 @@ export async function resolveProjectRef(
   ref: string,
   opts: { forRemote: boolean; cwd?: string },
 ): Promise<string> {
+  const { slug, worktree } = parseProjectRef(ref);
+  if (!slug) throw new Error(`Invalid --project value: "${ref}"`);
+
+  // Definition first: a named project in ~/.agents/projects/<slug>.yaml overrides
+  // the <root>/<slug> convention. Absent (or root-less) → fall through unchanged.
+  const def = loadProjectDef(slug);
+  if (def) {
+    const fromDef = resolveDefinedProjectPath(def, worktree, opts.forRemote);
+    if (fromDef) {
+      if (!opts.forRemote && !fs.existsSync(fromDef)) {
+        throw new Error(`Project path not found: ${fromDef} (defined in ${slug}.yaml)`);
+      }
+      return fromDef;
+    }
+  }
+
   const cwd = opts.cwd ?? process.cwd();
   const root = await ensureProjectRoot(cwd);
   const resolved = buildProjectPath(root, ref, opts.forRemote);

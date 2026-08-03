@@ -27,6 +27,7 @@ import {
   computeNetMode,
   decideCopyCredsGate,
   gitToplevel,
+  hostTargetGiven,
   isAlwaysFreshRepo,
   isInsideGitWorkTree,
   parseRunAccountPickerRequest,
@@ -315,5 +316,32 @@ describe('always-fresh repo set (F3 picker "remember for this repo")', () => {
     expect(base).toEqual(['/repo/one']); // original untouched
     // Re-adding returns the SAME array reference (no duplicate).
     expect(addAlwaysFreshRepo(added, '/repo/two')).toBe(added);
+  });
+});
+
+describe('hostTargetGiven — the --host alias family (the --terminal reject guard)', () => {
+  // Regression: the --terminal handoff guard checked only `options.host`, so
+  // `agents run <agent> --terminal --device box` (or --on/--computer) silently
+  // opened a LOCAL tab and dropped the remote target instead of rejecting the
+  // combination. Every alias must count as a host target.
+  it('detects each --host alias, not just --host', () => {
+    expect(hostTargetGiven({ host: 'box' })).toEqual(['box']);
+    expect(hostTargetGiven({ device: 'box' })).toEqual(['box']);
+    expect(hostTargetGiven({ on: 'box' })).toEqual(['box']);
+    expect(hostTargetGiven({ computer: 'box' })).toEqual(['box']);
+  });
+
+  it('is empty when no host target is given (a local --terminal run is allowed)', () => {
+    expect(hostTargetGiven({})).toEqual([]);
+    expect(hostTargetGiven({ host: undefined })).toEqual([]);
+  });
+
+  it('returns every target when several aliases are set at once', () => {
+    expect(hostTargetGiven({ host: 'a', device: 'b', on: 'c', computer: 'd' })).toEqual([
+      'a',
+      'b',
+      'c',
+      'd',
+    ]);
   });
 });

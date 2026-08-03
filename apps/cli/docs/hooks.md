@@ -161,21 +161,35 @@ When the registrar sees `cache:` on a hook, it writes a per-hook shim under `~/.
 4. If stale + `prefetch: background`, serves stale + spawns a detached refresh (cache=stale-prefetch).
 5. If stale + no prefetch, runs the real script + caches the output (cache=miss).
 6. Appends one JSONL line per fire to `~/.agents/.cache/logs/events-YYYY-MM-DD.jsonl`.
+7. Appends one NDJSON line to the disposable perf spool
+   (`~/.agents/.cache/perf/spool.jsonl`), drained into `perf.db` on the next
+   `agents perf` / `agents hooks profile` open.
 
 Stale shim files are garbage-collected automatically when a hook is renamed, deleted, or has its `cache:` field removed.
 
-### `agents hooks profile`
+### `agents hooks profile` / `agents perf hooks`
 
 ```
 agents hooks profile              # last 7 days, table form
 agents hooks profile --days 30
 agents hooks profile --json | jq
 agents hooks profile --warn-ms 500
+agents perf hooks                 # same rollup under the perf surface
 ```
 
-Aggregates `hook.fire` events into per-hook p50/p99/mean/max + cache hit rate. Any hook whose p99 exceeds `--warn-ms` (default 2000) and has no cache config gets flagged as a candidate for `cache:`.
+Aggregates hook timings into per-hook p50/p99/mean/max + cache hit rate. Primary
+source is the indexed warehouse `~/.agents/.cache/perf/perf.db` (safe to wipe).
+Falls back to the legacy daily JSONL when the warehouse is empty. Any hook whose
+p99 exceeds `--warn-ms` (default 2000) and has no cache hits gets flagged as a
+candidate for `cache:`.
 
-Only hooks with `cache:` are instrumented today — that's deliberate. Opting into the primitive is what surfaces the data. To make every hook show up, declare `cache: 5m` on it (or `cache: 1s` to effectively disable caching while still getting timing).
+Hooks are instrumented when a generated shim wraps them (`cache:` and/or
+`matches:`). To make every hook show up, declare `cache: 5m` on it (or
+`cache: 1s` to effectively disable caching while still getting timing), then
+resync.
+
+See also [`06-observability.md`](./06-observability.md) for the `agents perf`
+summary (`commands`, `run`, multi-section default).
 
 
 ### Supported Events

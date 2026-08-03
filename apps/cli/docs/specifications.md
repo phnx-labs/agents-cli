@@ -409,9 +409,8 @@ The command surface (bare `sessions [query]`, `tail`, `sync`, `resume`, `focus`,
   (`commands/sessions.ts` `serializeResolvedSessionsJson`, `resolveSessionMetadata`,
   `metadataResolveOutcome`, `fleetCandidatesByQuery`,
   `metadataResolveForwardedArgs`; tests
-  `commands/sessions-resolve-db.test.ts`,
-  `commands/__tests__/sessions.test.ts`,
-  `lib/session/__tests__/remote-list.test.ts`).
+  `commands/sessions.test.ts`,
+  `lib/session/remote-list.test.ts`).
 - **SES-IF-3 (MUST).** The export **bundle format** is NDJSON, `kind`
   `agents-session-bundle`, `version` 1; parse MUST reject a wrong kind/version;
   per-record `hash`/`size` are always over **plaintext** for byte-exact dedup;
@@ -711,7 +710,7 @@ access control (that is 1Password/Vault; this tool is device-local first).
 
 - **SEC-11 (MUST).** `agents secrets list` and every internal metadata scan MUST
   complete with no Touch ID prompt and MUST print metadata only, never values
-  (`commands/secrets.ts:900-903`; SEC-4).
+  (`commands/secrets.ts:991`; SEC-4).
 - **SEC-12 (MUST).** Value reads MUST be batched so a bundle costs at most one
   Touch ID prompt, not one per key (`commands/secrets.ts:1073-1076`;
   `lib/secrets/bundles.ts:772-776,1262-1273`).

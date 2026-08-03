@@ -17,7 +17,16 @@
  */
 import type { Command } from 'commander';
 import chalk from 'chalk';
-import { ensureFeedPublishHook, listAskStats, listBlocks, recordNotified, type OpenBlock } from '../lib/feed.js';
+import {
+  ensureFeedPublishHook,
+  listAskStats,
+  listBlocks,
+  recordNotified,
+  buildDeclaredBlock,
+  publishBlock,
+  type OpenBlock,
+} from '../lib/feed.js';
+
 import {
   ensureActivityLogHook,
   readRecentActivity,
@@ -33,6 +42,8 @@ import {
   parseFeedPostLevel,
   planFeedBroadcast,
   runFeedBroadcast,
+  blockBroadcastContext,
+  blockDeliveryFailure,
   type FeedPostLevel,
   type SinkOutcome,
 } from '../lib/feed-broadcast.js';
@@ -70,6 +81,17 @@ import {
   synthesizeControlCards,
   type FeedSessionSignal,
 } from '../lib/feed-ranking.js';
+
+/** Flags for `feed post`. Declared once — the action reads them off both the child and the parent. */
+interface PostCliOpts {
+  session?: string;
+  attach?: string[];
+  level?: string;
+  blocked?: boolean;
+  option?: string[];
+  default?: string;
+  json?: boolean;
+}
 
 export const FEED_NO_FANOUT_ENV = 'AGENTS_FEED_LOCAL';
 
@@ -320,6 +342,9 @@ export function registerFeedCommand(program: Command): void {
     .option('--session <id>', 'Session id escape hatch (default: auto from env / pid registry)')
     .option('--attach <path-or-url...>', 'Attach an artifact (local file or URL); repeatable')
     .option('--level <level>', 'How loudly to broadcast: milestone (default) or important. Configured sinks with minLevel: important only fire on the latter.', 'milestone')
+    .option('--blocked', 'You are STUCK and need the user. Opens an answerable block and always broadcasts at important — do not also pass --level.')
+    .option('--option <label...>', 'With --blocked: an answer the user can pick; repeatable')
+    .option('--default <answer>', 'With --blocked: a safe default policy may apply if nobody answers in time')
     .option('--json', 'Emit the written event as JSON')
     .addHelpText('after', `
 Examples:
@@ -330,6 +355,17 @@ Examples:
 
   # Worth interrupting someone over — reaches sinks gated on minLevel: important:
   agents feed post "release blocked: npm token expired" --level important
+
+  # You are STUCK and cannot proceed. Opens an answerable block that stays in
+  # 'agents feed' until someone resolves it, and always reaches the owner —
+  # do NOT also pass --level:
+  agents feed post "force-push denied by git-guard on PR #1749" --blocked
+  agents feed post "publish to npm or wait for review?" --blocked --option publish --option wait
+  agents feed post "delete the stale preview env?" --blocked --default "leave it"
+
+  # Exhaust self-serve FIRST. A block is for what you genuinely cannot do:
+  # a credential only the user holds, a decision only they can make, an
+  # approval only they can give. Not "should I do the obvious next step?".
 
   # Outside a run, pass the session explicitly:
   agents feed post "manual note" --session 00998b0e-2d15-4d2f-a58b-974a886c9b47
@@ -344,8 +380,8 @@ docs/06-observability.md.
 `)
     .action((
       textParts: string[],
-      opts: { session?: string; attach?: string[]; level?: string; json?: boolean },
-      cmd?: { opts: () => { session?: string; attach?: string[]; level?: string; json?: boolean }; parent?: { opts: () => { json?: boolean } } },
+      opts: PostCliOpts,
+      cmd?: { opts: () => PostCliOpts; parent?: { opts: () => { json?: boolean } } },
     ) => {
       // Parent `feed` also declares `--json` (for the list view). Commander
       // binds the flag on the parent, so a `feed post … --json` lands on
@@ -354,22 +390,66 @@ docs/06-observability.md.
         session: opts?.session ?? cmd?.opts?.()?.session,
         attach: opts?.attach ?? cmd?.opts?.()?.attach,
         level: opts?.level ?? cmd?.opts?.()?.level,
+        blocked: Boolean(opts?.blocked ?? cmd?.opts?.()?.blocked),
+        option: opts?.option ?? cmd?.opts?.()?.option,
+        default: opts?.default ?? cmd?.opts?.()?.default,
         json: Boolean(opts?.json ?? cmd?.opts?.()?.json ?? cmd?.parent?.opts?.()?.json),
       };
       try {
-        const level = parseFeedPostLevel(flags.level);
+        // Blocked is a state, not a volume: it always broadcasts at `important`,
+        // so an agent has exactly one thing to say. Passing both is a usage
+        // error rather than a silent override -- an agent that thinks it chose
+        // the level should not be quietly ignored.
+        if (flags.blocked && flags.level && flags.level !== 'milestone') {
+          throw new Error('--blocked already broadcasts at important; drop --level.');
+        }
+        if (!flags.blocked && (flags.option?.length || flags.default)) {
+          throw new Error('--option/--default only apply with --blocked.');
+        }
+        const level = flags.blocked ? 'important' : parseFeedPostLevel(flags.level);
+
         const { event } = postFeedStatus({
           text: Array.isArray(textParts) ? textParts.join(' ') : String(textParts ?? ''),
           sessionId: flags.session,
           attach: flags.attach,
+          blocked: flags.blocked,
         });
-        const outcomes = broadcastPostedEvent(event, level);
+
+        // A blocked post lands in BOTH stores: the event in the shared activity
+        // stream (what happened) and an OpenBlock in the ledger (what is still
+        // open). The ledger is what makes it answerable and clearable -- without
+        // it the ask would scroll away like any other update.
+        let outcomes: SinkOutcome[];
+        if (flags.blocked) {
+          const block = buildDeclaredBlock(event, {
+            text: event.detail ?? '',
+            options: flags.option,
+            safeDefault: flags.default,
+          });
+          publishBlock(block);
+          outcomes = broadcastBlock(block, { project: event.project, agent: event.agent });
+        } else {
+          outcomes = broadcastPostedEvent(event, level);
+        }
+
+        // Fail loud when a block reached nobody. This is computed BEFORE the
+        // --json early return: a machine caller is exactly the one that reads the
+        // exit code, so returning 0 there while a human gets 1 would make the
+        // undelivered block invisible to the caller most likely to act on it —
+        // reintroducing, behind a flag, the silent failure this exists to remove.
+        // One sink failing among several stays a warning: the channels are
+        // redundant by design.
+        const undelivered = blockDeliveryFailure(flags.blocked, outcomes);
+        if (undelivered) process.exitCode = 1;
+
         if (flags.json) {
           console.log(JSON.stringify(outcomes.length ? { ...event, broadcast: outcomes } : event, null, 2));
+          if (undelivered) console.error(chalk.red(undelivered));
           return;
         }
         console.log(formatProgressUpdate(event));
         reportBroadcast(outcomes);
+        if (undelivered) console.error(chalk.red(undelivered));
       } catch (err) {
         console.error(chalk.red((err as Error).message));
         process.exitCode = 1;
@@ -625,6 +705,24 @@ function broadcastPostedEvent(event: ActivityEvent, level: FeedPostLevel): SinkO
       .filter((href) => /^https?:\/\//i.test(href)),
   });
   return runFeedBroadcast(planned);
+}
+
+/**
+ * Mirror a declared block to the same sinks a post reaches.
+ *
+ * Blocks previously never broadcast at all: `broadcastPostedEvent` ran only for
+ * `feed post`, while every `publishBlock` call wrote to the ledger and stopped
+ * there — so a "needs you" record was durable and invisible at the same time.
+ */
+function broadcastBlock(
+  block: OpenBlock,
+  extras: { project?: string; agent?: string },
+): SinkOutcome[] {
+  const config = readMeta().feed?.broadcast;
+  if (!config || Object.keys(config).length === 0) return [];
+  const ticket = getSessionById(block.sessionId)?.ticketId;
+  const ctx = blockBroadcastContext({ ...block, ticket: block.ticket ?? ticket }, extras);
+  return runFeedBroadcast(planFeedBroadcast(config, ctx));
 }
 
 /** One line per sink that ran. Silent when nothing is configured. */

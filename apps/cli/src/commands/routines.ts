@@ -68,6 +68,7 @@ import { safeJoin } from '../lib/paths.js';
 import { executeJob, executeJobDetached, monitorRunningJobs, ROUTINE_AGENT_IDS } from '../lib/runner.js';
 import { JobScheduler } from '../lib/scheduler.js';
 import { detectOverdueJobs } from '../lib/overdue.js';
+import { runCatchup } from '../lib/catchup.js';
 import { isInteractiveTerminal, requireInteractiveSelection } from './utils.js';
 import { setHelpSections } from '../lib/help.js';
 import { loadDevices, loadDevicesSync } from '../lib/devices/registry.js';
@@ -320,6 +321,9 @@ function renderRoutineRows({ jobs, scheduler, overdueSet, link, now, local = tru
       lastStatus === 'completed' ? chalk.green
       : lastStatus === 'failed' ? chalk.red
       : lastStatus === 'timeout' ? chalk.yellow
+      // A miss is an infrastructure problem, not a task failure — the routine
+      // never ran. Distinct from red so the two prompt different reactions.
+      : lastStatus === 'missed' ? chalk.magenta
       : chalk.gray;
 
     const overdueTag = overdueSet.has(job.name) ? chalk.yellow(' (overdue)') : '';
@@ -638,6 +642,7 @@ export function registerRoutinesCommands(program: Command): void {
             sourceRepo: job.source?.repo ?? job.repo ?? null,
             sourceBranch: job.source?.branch ?? null,
             runOnce: Boolean(job.runOnce),
+            catchup: job.catchup !== false,
             oneShot: isOneShotRoutine(job),
             expired: isPastOneShotRoutine(job, nowJson),
             runsHere: jobRunsOnThisDevice(job),
@@ -721,6 +726,7 @@ export function registerRoutinesCommands(program: Command): void {
     .option('--state-to <name>', 'Linear current-state filter for --on linear:<event> (e.g. Plan)')
     .option('--state-from <name>', 'Linear previous-state filter for --on linear:<event> (e.g. Triage)')
     .option('--end-at <iso>', 'Stop firing on or after this ISO 8601 timestamp (e.g., "2026-12-31T23:59:00Z"); routine auto-disables.')
+    .option('--no-catchup', 'Do not run this routine late if its fire is missed (daemon down/asleep). The miss is still recorded. For routines whose value expires with their slot, e.g. a 9am brief.')
     .option('--disabled', 'Create the routine but keep it paused (enable later with resume)')
     .option('--resume <sessionId>', 'At fire time, resume this existing session id (via `agents run <agent> --resume`) instead of starting fresh — the actual session reopens with full context and the prompt becomes its next turn. Powers self-scheduled wake-ups (e.g. /hibernate). Requires --agent claude or codex; runs un-sandboxed (the session store lives in the real home, not the job overlay).')
     .option('--json', 'Emit machine-readable JSON with the created routine id and status')
@@ -846,6 +852,7 @@ export function registerRoutinesCommands(program: Command): void {
           ...(hostStrategy ? { hostStrategy } : {}),
           ...(options.runCwd ? { remoteCwd: options.runCwd } : {}),
           ...(runOnce ? { runOnce: true } : {}),
+          ...(options.catchup === false ? { catchup: false } : {}),
           ...(options.endAt ? { endAt: options.endAt } : {}),
           ...(options.resume ? { resume: options.resume } : {}),
         };
@@ -1246,47 +1253,42 @@ export function registerRoutinesCommands(program: Command): void {
 
   routinesCmd
     .command('catchup')
-    .description('Run any routines that missed their last scheduled fire (e.g. because your laptop was off). Detached — runs in the background under the scheduler.')
-    .option('--dry-run', 'List overdue routines without running them')
+    .description('Run any routines that missed their last scheduled fire on demand. The daemon already does this every 5 minutes — use this to force a pass now. Detached: runs in the background under the scheduler.')
+    .option('--dry-run', 'Record the misses and list them without running anything')
     .action(async (options) => {
       const overdue = detectOverdueJobs();
       if (overdue.length === 0) {
-        console.log(chalk.gray('No overdue routines.'));
+        console.log(chalk.gray('No missed fires.'));
         return;
       }
 
-      console.log(chalk.bold(`${overdue.length} overdue routine(s):\n`));
+      console.log(chalk.bold(`${overdue.length} missed fire(s):\n`));
       for (const job of overdue) {
         const last = job.lastRanAt ? job.lastRanAt.toLocaleString() : 'never';
         console.log(`  ${chalk.cyan(job.name)} — missed ${chalk.gray(job.expectedAt.toLocaleString())}, last ran ${chalk.gray(last)}`);
       }
 
-      if (options.dryRun) {
-        console.log(chalk.gray('\n(dry run — no jobs triggered)'));
-        return;
-      }
-
       // Need the daemon alive so spawned jobs are monitored and meta.json is
       // finalized. Start it if it isn't already running.
-      if (!isDaemonRunning()) {
+      if (!options.dryRun && !isDaemonRunning()) {
         const started = startDaemon();
         if (started.pid) {
           console.log(chalk.gray(`\nStarted scheduler (PID: ${started.pid}) so catchup runs are monitored.`));
         }
       }
 
-      console.log(chalk.bold('\nTriggering catchup runs...'));
-      for (const job of overdue) {
-        const config = readJob(job.name);
-        if (!config) {
-          console.log(`  ${job.name} → ${chalk.red('config not found')}`);
-          continue;
-        }
-        try {
-          const meta = await executeJobDetached(config);
-          console.log(`  ${job.name} → ${chalk.green('started')} (run: ${meta.runId}, PID: ${meta.pid ?? 'n/a'})`);
-        } catch (err) {
-          console.log(`  ${job.name} → ${chalk.red('failed to start')}: ${(err as Error).message}`);
+      console.log(chalk.bold(options.dryRun ? '\nRecording misses...' : '\nTriggering catchup runs...'));
+      const outcomes = await runCatchup({ overdue, dryRun: options.dryRun });
+      for (const o of outcomes) {
+        if (o.result === 'ran') {
+          console.log(`  ${o.name} → ${chalk.green('started')} (run: ${o.runId})`);
+        } else if (o.result === 'recorded') {
+          const why = options.dryRun ? 'dry run' : 'catchup: false';
+          console.log(`  ${o.name} → ${chalk.yellow('recorded as missed')} (${why})`);
+        } else if (o.result === 'claimed-elsewhere') {
+          console.log(`  ${o.name} → ${chalk.gray('already claimed by the scheduler')}`);
+        } else {
+          console.log(`  ${o.name} → ${chalk.red('failed to start')}: ${o.error}`);
         }
       }
       console.log(chalk.gray('\nTrack progress with: agents routines runs <name>'));
@@ -1417,6 +1419,7 @@ export function registerRoutinesCommands(program: Command): void {
       // is the concise view. Falls back to a bounded stdout tail when no report
       // was extracted (e.g. the run failed before finishing).
       const statusColor = run.status === 'completed' ? chalk.green
+        : run.status === 'missed' ? chalk.magenta
         : run.status === 'failed' || run.status === 'timeout' ? chalk.red
         : chalk.yellow;
       console.log(chalk.bold(name) + chalk.gray(`  run ${runId}`));

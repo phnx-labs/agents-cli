@@ -47,6 +47,18 @@ export const STATE_HEADINGS: Record<ResumeState, string> = {
   watched: 'Already open elsewhere',
 };
 
+/**
+ * Persisted snapshot behind the resume picker's stale-while-revalidate flow:
+ * the picker renders the last candidate list instantly (the live fleet read
+ * takes seconds over SSH) and swaps items in place when the refresh lands.
+ */
+export interface ResumePickerCache {
+  candidates: ResumeCandidate[];
+  fetchedAt: number;
+}
+
+export const RESUME_PICKER_CACHE_KEY = 'agents.resumePicker.v1';
+
 /** The subset of `agents sessions --all --json` (SessionMeta) the picker reads. */
 export interface RecentSessionRow {
   id?: string;
@@ -219,6 +231,17 @@ export function sortResumeCandidates(candidates: ResumeCandidate[]): ResumeCandi
     if (b.lastActivityMs !== a.lastActivityMs) return b.lastActivityMs - a.lastActivityMs;
     return a.shortId.localeCompare(b.shortId);
   });
+}
+
+/**
+ * The `Agents: Resume (Pick Session)` set: sessions nobody is watching right
+ * now — the abandoned ones. A `watched` session already has a terminal on some
+ * host, so picking it here would double-attach it; the plain `Agents: Resume`
+ * picker still lists every state. Order is preserved (the input is already
+ * ranked by {@link sortResumeCandidates}).
+ */
+export function abandonedCandidates(candidates: ResumeCandidate[]): ResumeCandidate[] {
+  return candidates.filter((c) => c.state !== 'watched');
 }
 
 /**

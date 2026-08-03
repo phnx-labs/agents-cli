@@ -117,6 +117,51 @@ export function isControlDevice(d: DeviceProfile): boolean {
   return deviceRole(d) === 'control';
 }
 
+/**
+ * Whether a fan-out should dial this device, honouring the preference stated on
+ * {@link DeviceProfile.reachability}: the live SSH probe wins over the cached
+ * {@link DeviceTailscale.online} snapshot.
+ *
+ * Reading only `tailscale.online` is wrong in both directions, and both were
+ * live on a real fleet. A `via:"manual"` device never gets a tailscale peer
+ * entry at all, so its `online` is permanently `undefined` and a strict
+ * `=== true` test skipped it forever — every session on that box was invisible
+ * to the cross-fleet sweep. Conversely a box that has since gone to sleep keeps
+ * a stale `online:true` and gets dialed, burning a full ConnectTimeout and
+ * reporting a false "unreachable" that callers treat as doubt.
+ */
+export function isDialableDevice(d: DeviceProfile): boolean {
+  // Union, deliberately: either signal saying "go" is enough. A probe may only
+  // ADD a peer to the sweep, never remove one.
+  //
+  // The probe is not trustworthy enough to exclude on. It runs with a short SSH
+  // budget, so on a congested tailnet it returns false negatives — observed
+  // marking the LOCAL machine unreachable, and flipping a live worker box from
+  // reachable to unreachable nine minutes apart. Letting that shrink the sweep
+  // would hide sessions on healthy boxes, a worse failure than the one below.
+  //
+  // The snapshot alone is not enough either: a device registered with
+  // `address.via: "manual"` never gets a tailscale peer entry, so `online`
+  // stays undefined and a strict `=== true` test skipped it forever, making
+  // every session on that box unresolvable from any other machine.
+  //
+  // So: no tailscale block at all is unknown-not-offline (the rule `ssh.ts`
+  // renderDeviceTable and Factory's `isDeviceOnline` already use, so the picker
+  // and the sweep agree on who exists), and a positive probe rescues a device
+  // whose snapshot says offline. The cost of dialing a box that is actually
+  // asleep is one ConnectTimeout — the pre-existing behaviour, not a regression.
+  if (d.reachability?.reachable) return true;
+  return !d.tailscale || d.tailscale.online === true;
+}
+// Two more fan-outs still gate on the bare `tailscale.online === true` and so
+// still skip manual devices: `commands/apply.ts` (`devices: all` config-sync
+// targeting) and `commands/output.ts` (`--all-hosts`). They are left alone here
+// deliberately — neither is a session surface, and changing what `agents apply`
+// targets is a config-sync behaviour change that deserves its own PR rather
+// than riding along on a sessions fix. `devices/fleet.ts` planFleetTargets and
+// `smart-launch.ts` listOnlineDeviceNames already treat a missing tailscale
+// block as a candidate, so they need no change.
+
 /** Map of device name to profile. */
 export type DeviceRegistry = Record<string, DeviceProfile>;
 

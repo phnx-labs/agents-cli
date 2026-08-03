@@ -104,6 +104,9 @@ const WEBHOOKS_DIR = path.join(USER_AGENTS_DIR, 'webhooks');
 // monitor is a routine whose trigger is a watched source instead of a clock.
 const MONITORS_DIR = path.join(USER_AGENTS_DIR, 'monitors');
 const TEAMS_DIR = path.join(USER_AGENTS_DIR, 'teams');
+// Named project definitions (the layer above the --project convention). Sibling
+// of ROUTINES_DIR/TEAMS_DIR: hand-editable YAML, synced across machines by push/pull.
+const PROJECTS_DIR = path.join(USER_AGENTS_DIR, 'projects');
 
 // History bucket (durable).
 const SESSIONS_DIR = path.join(HISTORY_DIR, 'sessions');
@@ -134,6 +137,8 @@ const CLOUD_DIR = path.join(CACHE_DIR, 'cloud');
 const DRIVE_DIR = path.join(CACHE_DIR, 'drive');
 const TERMINALS_DIR = path.join(CACHE_DIR, 'terminals');
 const LOGS_DIR = path.join(CACHE_DIR, 'logs');
+/** Disposable performance samples (~/.agents/.cache/perf/) — safe to wipe. */
+const PERF_DIR = path.join(CACHE_DIR, 'perf');
 const RUNTIME_STATE_DIR = path.join(CACHE_DIR, 'state');
 const COMPANION_CACHE_DIR = path.join(CACHE_DIR, 'companion');
 const BROWSER_RUNTIME_DIR = path.join(CACHE_DIR, 'browser');
@@ -358,6 +363,9 @@ export function getPackagesDir(): string { return PACKAGES_DIR; }
 /** Path to routine YAML definitions (~/.agents/routines/). */
 export function getRoutinesDir(): string { return process.env.AGENTS_ROUTINES_DIR ?? ROUTINES_DIR; }
 
+/** Path to named project definitions (~/.agents/projects/). */
+export function getProjectsDir(): string { return process.env.AGENTS_PROJECTS_DIR ?? PROJECTS_DIR; }
+
 /**
  * Path to webhook handler YAML definitions (~/.agents/webhooks/). Handlers are
  * one-off triggers for agents/workflows/commands/routines, layered the same way
@@ -517,6 +525,18 @@ export function getTerminalsDir(): string { return TERMINALS_DIR; }
 
 /** Path to runtime logs (~/.agents/.cache/logs/). */
 export function getLogsDir(): string { return LOGS_DIR; }
+
+/**
+ * Path to disposable performance samples (~/.agents/.cache/perf/).
+ * Holds `perf.db` + a hook-shim spool. Loss is acceptable — wipe freely.
+ */
+export function getPerfDir(): string { return PERF_DIR; }
+
+/** Path to the perf SQLite warehouse (~/.agents/.cache/perf/perf.db). */
+export function getPerfDbPath(): string { return path.join(PERF_DIR, 'perf.db'); }
+
+/** Path to the hook-shim NDJSON spool drained into perf.db on open. */
+export function getPerfSpoolPath(): string { return path.join(PERF_DIR, 'spool.jsonl'); }
 
 /** Path to per-process runtime state (~/.agents/.cache/state/). */
 export function getRuntimeStateDir(): string { return RUNTIME_STATE_DIR; }

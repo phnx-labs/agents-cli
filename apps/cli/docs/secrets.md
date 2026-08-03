@@ -259,6 +259,16 @@ The Windows push bridge is `buildWindowsStdinImportCommand` in
 | Command | Description | Example |
 |---------|-------------|---------|
 | `secrets list` / `ls` | List bundles with key count, expiry warnings, timestamps | `agents secrets list` |
+| `secrets list [query]` | Filter by name or description substring | `agents secrets list github` |
+| `secrets list --policy <list>` | Only these prompt policies — `--policy never` is the no-Touch-ID audit | `agents secrets list --policy never` |
+| `secrets list --backend <list>` | Only these backends (`keychain`, `file`, `vault`) | `agents secrets list --backend file` |
+| `secrets list --type <list>` | Only bundles carrying a key of these types | `agents secrets list --type ssh-key,certificate` |
+| `secrets list --kind <list>` | Only these ref kinds — finds raw inline values, or bundles that shell out | `agents secrets list --kind literal` |
+| `secrets list --held` / `--not-held` | Split by live broker state; macOS only (see [the secrets-agent](#the-secrets-agent-macos)) | `agents secrets list --not-held` |
+| `secrets list --expired` | Only bundles with a key whose expiry has already passed | `agents secrets list --expired` |
+| `secrets list --expiring [days]` | Only bundles with a key due within N days (default 30) | `agents secrets list --expiring 7` |
+| `secrets list --unused <duration>` | Not read since this far back; never-used bundles always match | `agents secrets list --unused 3mo` |
+| `secrets list --sort <field>` · `-n` | Sort by `name`/`used`/`created`/`updated`/`expiry`, and cap the count | `agents secrets list --sort expiry -n 10` |
 | `secrets view [name]` | Show keys in a bundle (values masked by default) | `agents secrets view prod` |
 | `secrets view [name] --reveal` | Print keychain values in the clear (TTY only) | `agents secrets view prod --reveal` |
 | `secrets view [name] --reveal --plaintext` | Allow `--reveal` in non-interactive shells | `agents secrets view prod --reveal --plaintext` |
@@ -475,7 +485,7 @@ agents secrets rotate prod STRIPE_API_KEY \
 agents secrets rotate prod STRIPE_API_KEY --clear-meta
 ```
 
-The `list` command flags secrets with `--expires` dates in the next 30 days in the EXPIRING column. Source: `src/commands/secrets.ts:331-340`.
+The `list` command's EXPIRING column counts keys needing attention — those already past their `--expires` date **and** those falling due in the next 30 days — and colours by the worse of the two: red once anything has lapsed, yellow while everything is merely upcoming. Filter on either with `agents secrets list --expired` or `--expiring [days]`. Source: `renderExpiringCol`, `src/commands/secrets.ts`.
 
 ### 5. Share a bundle with a teammate
 
@@ -623,6 +633,8 @@ Each bundle has a **prompt policy** that controls how often macOS asks for Touch
 - **`hold`** (default): ask once, then serve it silently for the **hold window** — `secrets.agent.holdMs`, 7 days by default. The **first real keychain read auto-loads it** into the broker (in the background, no added latency), so the next concurrent run reads it silently without you running `unlock` at all. Held from that unlock (not refreshed on use) — re-asks sooner after sleep, logout, or `lock`. A bare screen-lock does **not** drop it.
 
   This tier was called **`daily`**, which was simply wrong: it is not one calendar day, not one login session, and not any fixed period — it is whatever `secrets.agent.holdMs` says. `daily` and the wire token `session` are still accepted everywhere, so existing configs, scripts, and bundles already written to a keychain keep working unchanged.
+
+  Because the tier *is* a duration, the `POLICY` column states it rather than printing the bare word: `hold 7d`, or `hold 7d · held 6d` while the broker is actually caching the bundle. The window follows `secrets.agent.holdMs`, so a 24-hour hold reads `hold 1d`. `always` and `never` have no window and show none. `secrets list --json` and `secrets view --json` carry the same figure as `holdMs` (null on `always`/`never`).
 
   **The hold is not a property of the stored item.** The item itself always carries the biometry ACL; the silence comes entirely from the broker holding the value in RAM plus the no-ACL durable session backing it. If either is unavailable, every read falls through to the ACL'd item and prompts — so a broker that is down or unreachable silently degrades `hold` to prompt-every-read. Only `never` is prompt-free independently of the broker.
 - **`always`**: ask every time. Only an explicit `unlock` ever puts it in the agent; every other read pops Touch ID. Opt high-value bundles (signing keys, etc.) into this when you want to confirm every single read.

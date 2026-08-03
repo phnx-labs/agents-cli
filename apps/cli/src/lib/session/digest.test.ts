@@ -44,6 +44,16 @@ describe('classifyFileChanges', () => {
     expect(changes).toHaveLength(0);
   });
 
+  it('excludes noise paths (node_modules, .system, agents-cli internal archives)', () => {
+    const changes = classifyFileChanges([
+      tool('Write', '/repo/node_modules/pkg/index.js'),
+      tool('Write', '/repo/.system'),
+      tool('Write', '/home/u/.agents/.history/runs/daily/x.md'),
+      tool('Write', '/repo/src/real.ts'),
+    ]);
+    expect(changes).toEqual([{ path: '/repo/src/real.ts', op: 'created' }]);
+  });
+
   it('created then deleted then recreated nets to created (file exists)', () => {
     const changes = classifyFileChanges([
       tool('Write', 'tmp/x'),
@@ -65,6 +75,11 @@ describe('extractDeletedPaths', () => {
   });
   it('ignores non-delete commands', () => {
     expect(extractDeletedPaths('echo rm not-a-delete')).toEqual([]);
+  });
+  it('drops shell junk: redirect tokens, unexpanded vars, node_modules, .system', () => {
+    expect(extractDeletedPaths('rm -rf node_modules 2>&1')).toEqual([]);
+    expect(extractDeletedPaths('rm -rf "$WT/apps/cli/.system" 2>/dev/null')).toEqual([]);
+    expect(extractDeletedPaths('rm -f app.log 2>&1')).toEqual(['app.log']);
   });
 });
 
