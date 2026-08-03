@@ -14,7 +14,19 @@ import { buildPreview } from './sessions-picker.js';
 import { parseAgentFilter } from './sessions.js';
 import { selectSessions } from './sessions-export.js';
 
-export const MARKDOWN_RENDER_AGENTS = ['claude', 'codex', 'kimi', 'grok', 'cursor', 'droid'] as const;
+export const MARKDOWN_RENDER_AGENTS = [
+  'claude',
+  'codex',
+  'gemini',
+  'antigravity',
+  'opencode',
+  'grok',
+  'rush',
+  'hermes',
+  'kimi',
+  'droid',
+  'cursor',
+] as const;
 export type ReasoningMode = 'omit' | 'fold' | 'include';
 
 interface RenderGlobals {
