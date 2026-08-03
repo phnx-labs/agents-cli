@@ -6,6 +6,8 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.9.305] - 2026-08-03
+
 - **Session resume was broken everywhere, and `Agents: Resume` now batch-reopens
   crashed sessions.** Every session picker in the extension shelled out to
   `agents sessions list --all --json`; `sessions` has no `list` subcommand, so
