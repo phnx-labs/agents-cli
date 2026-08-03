@@ -1773,10 +1773,20 @@ export async function getAccountInfo(
         if (tokenPath) {
           const data = JSON.parse(await fs.promises.readFile(tokenPath, 'utf-8'));
           if (typeof data?.token?.refresh_token === 'string' && data.token.refresh_token) {
-            return { ...empty, signedIn: true, lastActive };
+            // A stable account/usage key (derived from the refresh token — see
+            // readAuthAccountIdentity) lets `agents view` dedupe and cache the
+            // per-model quota bars for this login.
+            const identity = readAuthAccountIdentity('antigravity', path.dirname(tokenPath));
+            return { ...empty, signedIn: true, lastActive, accountKey: identity, usageKey: identity };
           }
         }
-        if (await antigravityKeychainSignedIn()) return { ...empty, signedIn: true, lastActive };
+        if (await antigravityKeychainSignedIn()) {
+          // Keyring-only login (the macOS case): the OS keyring holds exactly
+          // ONE antigravity credential, so a stable singleton key identifies it
+          // for usage-cache dedup without reading the secret value here.
+          const identity = buildIdentityKey('antigravity', [['sub', 'keychain']]);
+          return { ...empty, signedIn: true, lastActive, accountKey: identity, usageKey: identity };
+        }
         return { ...empty, lastActive };
       }
       case 'kimi': {

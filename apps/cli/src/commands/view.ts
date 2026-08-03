@@ -1232,6 +1232,11 @@ export interface ViewJsonVersion {
   overageCredits?: { amount: number; currency: string } | null;
   windows: Array<{
     key: 'session' | 'week' | 'sonnet_week' | 'month';
+    // What the window meters — 'Current session'/'Current week' for most
+    // agents, the model id for Antigravity's per-model quota buckets (whose
+    // keys are all 'session', so the label is the only way to tell them
+    // apart). Optional for backward compatibility with older consumers.
+    label?: string;
     usedPercent: number;
     resetsAt: string | null;
   }>;
@@ -1503,6 +1508,7 @@ async function collectAgentsJson(filterAgentId?: AgentId, resourceSections?: Set
       windows: snapshot
         ? snapshot.windows.map((w) => ({
             key: w.key,
+            label: w.label,
             usedPercent: w.usedPercent,
             resetsAt: w.resetsAt ? w.resetsAt.toISOString() : null,
           }))

@@ -892,7 +892,7 @@ contains — this is a data-availability limit, not a policy choice:
 | Droid | email | live (`api.factory.ai`) | `~/.factory/auth.v2.file` is AES-256-GCM (key on disk at `auth.v2.key`); decrypt locally, read the email from the WorkOS access-token JWT. That same token authorizes `GET /api/billing/limits` for the three rolling rate-limit windows (5-hour → `S`, weekly → `W`, monthly, detailed-view only). |
 | Kimi | `id:<user_id>` + tier | live (`api.kimi.com/coding/v1/usages`) | JWT carries no email — only an opaque `user_id`. Quota + membership tier come from the `/usages` endpoint. |
 | Cursor | email | live (`cursor.com/api/usage`) | email/authId from `~/.cursor/cli-config.json`; access token from `~/.config/cursor/auth.json`. The endpoint is authed with a `WorkosCursorSessionToken=<authId>::<token>` cookie and returns a monthly request bar (`M`) for request-capped (free/legacy) plans. Usage-based plans report no request cap, so they render the account row without a bar. |
-| Antigravity | `signed in` | — | OAuth grant with no id_token — presence only. File `~/.gemini/antigravity-cli/antigravity-oauth-token`, else macOS keychain / Linux libsecret (`service gemini` + user `antigravity`) |
+| Antigravity | `signed in` | live (`cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota`) | OAuth grant with no id_token — presence only. File `~/.gemini/antigravity-cli/antigravity-oauth-token`, else macOS keychain / Linux libsecret (`service gemini` + user `antigravity`). The stored Google OAuth token authorizes the Code Assist quota endpoint `agy` itself uses; it returns one bucket per model (`gemini-3.1-pro`, `gemini-2.5-flash`, …) with its own reset time, and each bucket renders as its own bar (compact model tag: `3.1P`, `2.5F`, …). |
 | others | `not signed in` unless a credential exists | — | `default` case: no detector |
 
 Two deliberate boundaries worth knowing:
@@ -908,6 +908,14 @@ Two deliberate boundaries worth knowing:
   snapshot; each agent's own CLI refreshes on its next launch (Droid's token
   lives 24h). Droid surfaces the `standard` (primary) rate-limit pool, not the
   free `core` fallback pool.
+- **Antigravity usage MAY refresh, in-memory only.** Google's OAuth refresh
+  tokens are stable and non-rotating — a refresh mints a new access token and
+  leaves the refresh token (and every other live access token) valid, so a
+  read-path refresh can't invalidate a running `agy` the way a Claude/WorkOS
+  rotation would. The refreshed access token is used for the quota call and
+  then dropped: the keychain item is never written (agy rewrites it on its own
+  launches). Without this the bars would never render — Google access tokens
+  live ~1 hour.
 
 The same fields are exposed programmatically via `agents view --json`
 (`email`, `accountId`, `plan`, `usageStatus`, `windows`).

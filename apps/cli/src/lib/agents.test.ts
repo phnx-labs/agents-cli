@@ -554,6 +554,10 @@ describe('getAccountInfo — token-only agents (no local email)', () => {
     expect(info.signedIn).toBe(true);
     // Consumer Google OAuth exposes no email/identity claim locally.
     expect(info.email).toBeNull();
+    // A stable usage identity is derived from the refresh token so `agents
+    // view` can dedupe + cache the per-model quota bars for this login.
+    expect(info.accountKey).toBe('antigravity:sub=1//refresh');
+    expect(info.usageKey).toBe('antigravity:sub=1//refresh');
   });
 
   it('treats Antigravity as signed out when the token file is missing', async () => {
