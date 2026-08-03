@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawn } from '@homebridge/node-pty-prebuilt-multiarch';
 import { describe, expect, it } from 'vitest';
-import { limitPreviewHeight } from './picker.js';
+import { hotkeyToken, limitPreviewHeight } from './picker.js';
 
 function renderedRows(text: string, width: number): number {
   return text.split('\n').reduce((rows, line) => {
@@ -74,5 +74,47 @@ describe('multiItemPicker', () => {
     });
 
     expect(stripVTControlCharacters(output)).toContain('PREVIEW_VISIBLE');
+  });
+});
+
+/**
+ * The hotkey lookup token. readline collapses `f` and `F` onto the same `name`
+ * and gives punctuation no name at all, so keying bindings on the name alone
+ * makes `*` unbindable and a shifted letter indistinguishable from its lowercase
+ * twin. Every existing binding is a plain lowercase letter, where the token is
+ * unchanged — that no-op property is what makes this safe to swap in.
+ */
+describe('hotkeyToken', () => {
+  it('is a no-op for a plain lowercase letter (every existing binding)', () => {
+    for (const c of ['r', 'c', 'a', 'd', 't', 'p', 'w', 'y', 's', 'f']) {
+      expect(hotkeyToken({ name: c, sequence: c })).toBe(c);
+    }
+  });
+
+  it('separates a shifted letter from its lowercase twin', () => {
+    expect(hotkeyToken({ name: 'f', sequence: 'f' })).toBe('f');
+    expect(hotkeyToken({ name: 'f', sequence: 'F' })).toBe('F');
+  });
+
+  it('makes a punctuation key bindable at all — readline gives it no name', () => {
+    expect(hotkeyToken({ name: undefined, sequence: '*' })).toBe('*');
+    expect(hotkeyToken({ name: undefined, sequence: '/' })).toBe('/');
+  });
+
+  it('keeps control keys on their names, not their raw sequences', () => {
+    expect(hotkeyToken({ name: 'tab', sequence: '\t' })).toBe('tab');
+    expect(hotkeyToken({ name: 'return', sequence: '\r' })).toBe('return');
+    expect(hotkeyToken({ name: 'backspace', sequence: '\x7f' })).toBe('backspace');
+    expect(hotkeyToken({ name: 'space', sequence: ' ' })).toBe('space');
+    expect(hotkeyToken({ name: 'escape', sequence: '\x1b' })).toBe('escape');
+  });
+
+  it('never claims a modified key — ctrl-c must not read as the letter c', () => {
+    expect(hotkeyToken({ name: 'c', sequence: '\x03', ctrl: true })).toBe('c');
+    expect(hotkeyToken({ name: 'f', sequence: 'f', meta: true })).toBe('f');
+  });
+
+  it('degrades to an empty token when readline reports neither', () => {
+    expect(hotkeyToken({})).toBe('');
   });
 });
