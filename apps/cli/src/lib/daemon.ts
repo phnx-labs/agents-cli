@@ -397,7 +397,7 @@ export async function runDaemon(): Promise<void> {
   }
 
   // #416: host the secrets broker socket-first — before the scheduler and the
-  // heavy browser/session-sync services — so `agents secrets` resolves within
+  // heavy browser services — so `agents secrets` resolves within
   // ms of daemon start. Only host when no broker is already reachable, so we
   // never orphan a live standalone broker's clients (that broker stays the
   // server until it idle-exits or the daemon restarts). Best-effort: a failure
@@ -572,37 +572,6 @@ export async function runDaemon(): Promise<void> {
     writeHeartbeat();
     monitorRunningJobs();
   }, MONITOR_TICK_MS);
-
-  // Cross-machine session sync: push this machine's transcripts to R2 and pull
-  // every other machine's, ~every 90s. Skipped silently when the r2.backups
-  // bundle is absent. An overlap guard prevents a slow cycle from stacking.
-  let syncing = false;
-  const runSessionSync = async () => {
-    if (syncing) return;
-    syncing = true;
-    try {
-      const { isBetaEnabled } = await import('./beta.js');
-      // Off by default: session sync is an opt-in beta feature. Check the beta
-      // flag FIRST so a machine that hasn't opted in skips the keychain read
-      // (isSyncConfigured) entirely, not just the network cycle.
-      if (!isBetaEnabled('session-sync')) return;
-      const { isSyncConfigured } = await import('./session/sync/config.js');
-      if (!isSyncConfigured()) return;
-      const { syncSessions } = await import('./session/sync/sync.js');
-      const r = await syncSessions();
-      if (r.pushed || r.pulled || r.errors.length) {
-        log('INFO', `sessions sync: pushed ${r.pushed}, pulled ${r.pulled}, merged ${r.merged}` +
-          (r.errors.length ? `, ${r.errors.length} error(s): ${r.errors[0]}` : ''));
-      }
-      if (r.warnings.length) log('WARN', `sessions sync: ${r.warnings[0]}`);
-    } catch (err) {
-      log('ERROR', `sessions sync failed: ${(err as Error).message}`);
-    } finally {
-      syncing = false;
-    }
-  };
-  const syncInterval = setInterval(() => { void runSessionSync(); }, 90_000);
-  void runSessionSync(); // kick once at startup
 
   // Resource safety check: heal gaps between what DotAgents repos define and
   // what's actually installed in each agent home — the slow rot that nothing
@@ -847,9 +816,6 @@ export async function runDaemon(): Promise<void> {
     } catch (err) {
       log('ERROR', `Monitor engine reload failed: ${(err as Error).message}`);
     }
-    // Drop the memoized R2 config so rotated/added sync credentials are re-read
-    // on the next cycle instead of waiting for a restart.
-    void import('./session/sync/config.js').then(m => m.clearR2ConfigCache());
   };
 
   const handleShutdown = async () => {
@@ -859,7 +825,6 @@ export async function runDaemon(): Promise<void> {
     await browserIPC.stop();
     clearInterval(monitorInterval);
     clearInterval(catchupInterval);
-    clearInterval(syncInterval);
     clearInterval(healInterval);
     clearTimeout(healKickoff);
     clearInterval(autoDispatchInterval);
