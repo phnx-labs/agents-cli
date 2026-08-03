@@ -233,14 +233,14 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
   it('shows a plain hint instead of opening a picker', () => {
     const home = makeTempHome();
     tempHomes.push(home);
-    writeCentralCommand(home, 'README');
+    writeCentralCommand(home, 'demo');
 
     const result = runAgents(home, ['commands', 'view']);
     const combined = `${result.stdout}\n${result.stderr}`;
 
     expect(result.status).toBe(1);
     expect(combined).toContain('Selecting a command to view requires an interactive terminal.');
-    expect(combined).toContain('agents commands view README');
+    expect(combined).toContain('agents commands view plan');
   });
 
   it('prunes a specific version while preserving home data and session rows', () => {
@@ -388,10 +388,10 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
   it('syncs central commands with --names in a non-interactive shell', () => {
     const home = makeTempHome();
     tempHomes.push(home);
-    writeCentralCommand(home, 'README');
+    writeCentralCommand(home, 'demo');
     writeFakeManagedVersion(home, 'codex', '0.1.0', 'codex');
 
-    const result = runAgents(home, ['commands', 'add', '--names', 'README', '--agents', 'codex']);
+    const result = runAgents(home, ['commands', 'add', '--names', 'demo', '--agents', 'codex']);
     const targetPath = path.join(
       home,
       '.agents',
@@ -402,7 +402,7 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
       'home',
       '.codex',
       'prompts',
-      'README.md',
+      'demo.md',
     );
 
     expect(result.status).toBe(0);
@@ -413,11 +413,11 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
   it('syncs only the requested explicit version target', () => {
     const home = makeTempHome();
     tempHomes.push(home);
-    writeCentralCommand(home, 'README');
+    writeCentralCommand(home, 'demo');
     writeFakeManagedVersion(home, 'codex', '0.1.0', 'codex');
     writeFakeManagedVersion(home, 'codex', '0.2.0', 'codex');
 
-    const result = runAgents(home, ['commands', 'add', '--names', 'README', '--agents', 'codex@0.2.0']);
+    const result = runAgents(home, ['commands', 'add', '--names', 'demo', '--agents', 'codex@0.2.0']);
     const requestedPath = path.join(
       home,
       '.agents',
@@ -428,7 +428,7 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
       'home',
       '.codex',
       'prompts',
-      'README.md',
+      'demo.md',
     );
     const untouchedPath = path.join(
       home,
@@ -440,7 +440,7 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
       'home',
       '.codex',
       'prompts',
-      'README.md',
+      'demo.md',
     );
 
     expect(result.status).toBe(0);
@@ -452,7 +452,7 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
   it('uses defaults automatically for version switching in a non-interactive shell', () => {
     const home = makeTempHome();
     tempHomes.push(home);
-    writeCentralCommand(home, 'README');
+    writeCentralCommand(home, 'demo');
     writeFakeManagedVersion(home, 'codex', '0.1.0', 'codex');
 
     const result = runAgents(home, ['use', 'codex@0.1.0']);
