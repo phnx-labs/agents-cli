@@ -34,7 +34,7 @@ function recordPerfTiming(payload: {
 }): void {
   try {
     // Dynamic import keeps events.ts free of a load-time dependency on perf/db.
-    void import('./perf/db.js').then(({ recordSample }) => {
+    void import('./perf/spool.js').then(({ recordSample }) => {
       recordSample({
         kind: 'perf.timing',
         label: payload.label,

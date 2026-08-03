@@ -1,75 +1,23 @@
 /**
  * Disposable performance warehouse — SQLite under ~/.agents/.cache/perf/.
  *
- * Design:
- *  - Loss is acceptable (cache dir). No FKs into sessions.db.
- *  - Identity columns use the same *string shapes* as sessions/events
- *    (session_id, session_short, agent, machine, actor, cwd) for soft joins.
- *  - Producers call {@link recordSample} (fail-soft). Hook shims append NDJSON
- *    to a spool file; the next open drains it into the table.
- *  - Retention defaults to 30 days; wipe anytime with `rm -rf ~/.agents/.cache/perf`.
+ * Opened only by `agents perf` / `hooks profile` (read path). Writers use
+ * {@link recordSample} in `./spool.ts` (NDJSON, no SQLite).
  */
 
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import Database from '../sqlite.js';
-import { getPerfDbPath, getPerfDir, getPerfSpoolPath } from '../state.js';
+import { getPerfDbPath, getPerfDir } from '../state.js';
 import { localMachineId } from '../session/origin-machine.js';
+import { resolveSpoolPath, shortSessionId, _resetPerfSpoolForTest } from './spool.js';
+import type { AggregateOptions, PerfAggregateRow } from './types.js';
+
+export type { AggregateOptions, PerfAggregateRow, PerfSample } from './types.js';
+export { recordSample, shortSessionId, resolveSpoolPath } from './spool.js';
 
 export const PERF_SCHEMA_VERSION = 1;
 export const DEFAULT_RETENTION_DAYS = 30;
-
-export type PerfKind = 'hook.fire' | 'perf.timing' | 'command.end' | string;
-
-export interface PerfSample {
-  tsMs?: number;
-  kind: PerfKind;
-  label: string;
-  durationMs: number;
-  /** Full session id — same string as sessions.id when known. */
-  sessionId?: string;
-  /** First 8 chars of sessionId (sessions.short_id shape). */
-  sessionShort?: string;
-  agent?: string;
-  agentVersion?: string;
-  /** Fleet registry name (sessions.machine), preferred over raw hostname. */
-  machine?: string;
-  hostname?: string;
-  actor?: string;
-  cwd?: string;
-  cache?: string;
-  exitCode?: number;
-  status?: string;
-  metaJson?: string;
-}
-
-export interface PerfAggregateRow {
-  kind: string;
-  label: string;
-  n: number;
-  p50Ms: number;
-  p99Ms: number;
-  meanMs: number;
-  maxMs: number;
-  minMs: number;
-  /** Present for hook.fire rows with cache data. */
-  cacheHitPct?: number;
-  cacheStalePct?: number;
-  cacheMissPct?: number;
-  errorCount?: number;
-}
-
-export interface AggregateOptions {
-  /** Only samples with ts_ms >= now - days*86400000. Default 7. */
-  days?: number;
-  kinds?: string[];
-  label?: string;
-  machine?: string;
-  agent?: string;
-  /** Drop labels with fewer samples than this. Default 1. */
-  minN?: number;
-}
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS samples (
@@ -114,29 +62,21 @@ export function _resetPerfDbForTest(overridePath?: string | null): void {
   _db = null;
   _dbPath = overridePath === undefined ? null : overridePath;
   _disabled = false;
+  if (overridePath) {
+    _resetPerfSpoolForTest(path.join(path.dirname(overridePath), 'spool.jsonl'));
+  } else if (overridePath === null) {
+    _resetPerfSpoolForTest(null);
+  }
 }
 
 function resolveDbPath(): string {
   return process.env.AGENTS_PERF_DB || _dbPath || getPerfDbPath();
 }
 
-function resolveSpoolPath(): string {
-  if (process.env.AGENTS_PERF_SPOOL) return process.env.AGENTS_PERF_SPOOL;
-  if (_dbPath) return path.join(path.dirname(_dbPath), 'spool.jsonl');
-  return getPerfSpoolPath();
-}
-
 function isDisabled(): boolean {
   if (_disabled) return true;
   const v = process.env.AGENTS_DISABLE_PERF;
   return v === '1' || v === 'true';
-}
-
-/** Short session id: first 8 hex-ish chars of a full id. */
-export function shortSessionId(sessionId: string | undefined | null): string | undefined {
-  if (!sessionId) return undefined;
-  const cleaned = sessionId.replace(/^session_/, '');
-  return cleaned.length >= 8 ? cleaned.slice(0, 8) : cleaned || undefined;
 }
 
 function openDb(): Database.Database | null {
@@ -169,51 +109,7 @@ function openDb(): Database.Database | null {
   }
 }
 
-/**
- * Insert one timing sample. Never throws — perf must not break the critical path.
- */
-export function recordSample(sample: PerfSample): void {
-  if (isDisabled()) return;
-  if (!sample.label || !Number.isFinite(sample.durationMs)) return;
-  try {
-    const db = openDb();
-    if (!db) return;
-    const tsMs = sample.tsMs ?? Date.now();
-    const sessionId = sample.sessionId;
-    const sessionShort = sample.sessionShort ?? shortSessionId(sessionId);
-    const machine = sample.machine ?? localMachineId();
-    const hostname = sample.hostname ?? os.hostname();
-    db.prepare(`
-      INSERT INTO samples (
-        ts_ms, kind, label, duration_ms,
-        session_id, session_short, agent, agent_version,
-        machine, hostname, actor, cwd,
-        cache, exit_code, status, meta_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      tsMs,
-      sample.kind,
-      sample.label,
-      sample.durationMs,
-      sessionId ?? null,
-      sessionShort ?? null,
-      sample.agent ?? null,
-      sample.agentVersion ?? null,
-      machine ?? null,
-      hostname ?? null,
-      sample.actor ?? null,
-      sample.cwd ?? null,
-      sample.cache ?? null,
-      sample.exitCode ?? null,
-      sample.status ?? null,
-      sample.metaJson ?? null,
-    );
-  } catch {
-    // Fail soft.
-  }
-}
-
-/** Drain the bash-shim NDJSON spool into samples. Idempotent; truncates on success. */
+/** Drain the NDJSON spool into samples. Idempotent; truncates on success. */
 export function drainSpool(db?: Database.Database): number {
   const spool = resolveSpoolPath();
   if (!fs.existsSync(spool)) return 0;
@@ -260,7 +156,7 @@ export function drainSpool(db?: Database.Database): number {
         o.agent != null ? String(o.agent) : null,
         o.agent_version != null ? String(o.agent_version) : o.agentVersion != null ? String(o.agentVersion) : null,
         o.machine != null ? String(o.machine) : localMachineId(),
-        o.hostname != null ? String(o.hostname) : os.hostname(),
+        o.hostname != null ? String(o.hostname) : null,
         o.actor != null ? String(o.actor) : null,
         o.cwd != null ? String(o.cwd) : null,
         o.cache != null ? String(o.cache) : null,
@@ -285,7 +181,6 @@ function maybeRetain(db: Database.Database): void {
     const last = db.prepare(`SELECT value FROM meta WHERE key = 'last_retain_ms'`).get() as { value: string } | undefined;
     const lastMs = last ? parseInt(last.value, 10) : 0;
     const now = Date.now();
-    // At most once per hour.
     if (now - lastMs < 3_600_000) return;
     const cutoff = now - DEFAULT_RETENTION_DAYS * 86_400_000;
     db.prepare(`DELETE FROM samples WHERE ts_ms < ?`).run(cutoff);
@@ -401,19 +296,17 @@ export function aggregateSamples(opts: AggregateOptions = {}): PerfAggregateRow[
   return out;
 }
 
-/** Absolute path of the warehouse (for help / doctor). */
 export function perfDbPath(): string {
   return resolveDbPath();
 }
 
-/** Absolute path of the spool (for shim generation). */
 export function perfSpoolPath(): string {
   return resolveSpoolPath();
 }
 
-/** Ensure the perf dir exists and return it (for shims). */
 export function ensurePerfDir(): string {
   const dir = process.env.AGENTS_PERF_DIR || (_dbPath ? path.dirname(_dbPath) : getPerfDir());
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   return dir;
 }
+
