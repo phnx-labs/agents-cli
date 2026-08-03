@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { spawnSync } from 'child_process';
+import { spawn, spawnSync, type ChildProcess } from 'child_process';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import {
@@ -289,6 +289,90 @@ function runAgents(args: string[], cwd: string, home: string, envOverrides: Reco
   });
 }
 
+interface SessionResolverSshPeer {
+  target: string;
+  fixture: ChildProcess;
+  socket: string;
+}
+
+/** Start the real ssh2 peer and graft its ephemeral TCP listener onto the exact
+ * default-port OpenSSH ControlPath the production parent will look up. */
+async function startSessionResolverSshPeer(
+  mode: 'old-peer' | 'malformed',
+  tempHome: string,
+): Promise<SessionResolverSshPeer> {
+  const hostKey = path.join(tempHome, 'fixture-host-key');
+  const peerHome = path.join(tempHome, 'peer-home');
+  const target = 'test@127.0.0.1';
+  const controlPathTemplate = path.join(tempHome, '.agents', '.cache', 'ssh', 'cm-%C');
+  fs.mkdirSync(path.dirname(controlPathTemplate), { recursive: true, mode: 0o700 });
+  writeUpdateCache(peerHome);
+
+  const keygen = spawnSync('ssh-keygen', ['-q', '-t', 'rsa', '-b', '2048', '-N', '', '-f', hostKey], {
+    encoding: 'utf-8',
+  });
+  if (keygen.status !== 0) throw new Error(`ssh-keygen failed: ${keygen.stderr}`);
+
+  const fixture = spawn(process.execPath, [path.join(repoRoot, 'src', 'commands', 'testdata', 'session-resolver-ssh-peer.mjs')], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      SRP_MODE: mode,
+      SRP_HOST_KEY: hostKey,
+      SRP_PEER_HOME: peerHome,
+      SRP_OLD_VERSION: '1.20.88',
+      SRP_TSX_LOADER: tsxLoaderUrl,
+      SRP_CLI_ENTRY: cliEntry,
+      NODE_NO_WARNINGS: '1',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const port = await new Promise<string>((resolve, reject) => {
+    let output = '';
+    const fail = (error: Error) => reject(new Error(`ssh2 fixture did not start: ${error.message}; ${output}`));
+    fixture.once('error', fail);
+    fixture.stderr?.on('data', (data) => { output += data.toString(); });
+    fixture.stdout?.on('data', (data) => {
+      output += data.toString();
+      const match = output.match(/PORT=(\d+)/);
+      if (match) resolve(match[1]);
+    });
+    fixture.once('exit', (code) => fail(new Error(`exited ${code ?? 'without a code'}`)));
+  });
+
+  // `ssh -G` expands `%C` exactly as the real parent will, including its
+  // default port 22. Do not use ~/.ssh/config: HOME is deliberately isolated.
+  const expanded = spawnSync('ssh', [
+    '-G',
+    '-o', 'ControlMaster=auto',
+    '-o', `ControlPath=${controlPathTemplate}`,
+    '-o', 'ControlPersist=60s',
+    target,
+  ], { encoding: 'utf-8' });
+  if (expanded.status !== 0) throw new Error(`ssh -G failed: ${expanded.stderr}`);
+  const socket = expanded.stdout.match(/^controlpath\s+(.+)$/m)?.[1];
+  if (!socket) throw new Error(`ssh -G did not emit a controlpath: ${expanded.stdout}`);
+
+  // The only TCP connection goes to the fixture's ephemeral port. `-S` forces
+  // that master to listen at the port-22 path production's unmodified ssh call
+  // will reuse below.
+  const master = spawnSync('ssh', [
+    '-F', '/dev/null', '-f', '-M', '-N', '-p', port, '-S', socket,
+    '-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null',
+    '-o', 'ControlPersist=60s', target,
+  ], { encoding: 'utf-8', timeout: 10_000 });
+  if (master.status !== 0) throw new Error(`ssh ControlMaster failed: ${master.stderr}`);
+  return { target, fixture, socket };
+}
+
+async function stopSessionResolverSshPeer(peer: SessionResolverSshPeer): Promise<void> {
+  spawnSync('ssh', ['-F', '/dev/null', '-S', peer.socket, '-O', 'exit', peer.target], {
+    encoding: 'utf-8', timeout: 10_000,
+  });
+  if (!peer.fixture.killed) peer.fixture.kill('SIGTERM');
+  await new Promise<void>((resolve) => peer.fixture.once('exit', () => resolve()));
+}
+
 describe('resolveSessionQuery indexed metadata coverage', () => {
   it('resolves complete and partial ids from the real index without using text matches', () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-resolve-index-'));
@@ -442,52 +526,50 @@ describe('agents sessions --resolve local-peer critical path', () => {
     }
   });
 
-  it('returns a partial fleet result when an old peer rejects the safe resolver protocol', () => {
-    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-resolve-old-peer-'));
+  it('returns a partial fleet result when a real old peer rejects the safe resolver protocol', async () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sr-'));
+    let peer: SessionResolverSshPeer | undefined;
     try {
       writeUpdateCache(tempHome);
       const repoDir = path.join(tempHome, 'work');
-      const sshBin = path.join(tempHome, 'bin', 'ssh');
       fs.mkdirSync(repoDir, { recursive: true });
-      fs.mkdirSync(path.dirname(sshBin), { recursive: true });
-      fs.writeFileSync(sshBin, '#!/bin/sh\ncase "$*" in *--resolve-safe-v1*) exit 1;; esac\nprintf \'[{"id":"unsafe","filePath":"/private/transcript.jsonl"}]\'\n');
-      fs.chmodSync(sshBin, 0o755);
+      peer = await startSessionResolverSshPeer('old-peer', tempHome);
 
       const result = runAgents(
-        ['sessions', '--resolve', 'abcd7777', '--json', '--host', 'test@old-peer.example'],
+        ['sessions', '--resolve', 'abcd7777', '--json', '--host', peer.target],
         repoDir,
         tempHome,
       );
       expect(result.status).toBe(2);
       expect(result.stdout).toBe('');
-      expect(result.stderr).toContain('test@old-peer.example');
+      expect(result.stderr).toContain(peer.target);
       expect(result.stderr).toContain('No unique/no-match decision was made.');
     } finally {
+      if (peer) await stopSessionResolverSshPeer(peer);
       fs.rmSync(tempHome, { recursive: true, force: true });
     }
   });
 
-  it('returns a partial fleet result when an exit-zero peer emits malformed safe output', () => {
-    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-resolve-malformed-peer-'));
+  it('returns a partial fleet result when a real exit-zero peer emits malformed safe output', async () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sr-'));
+    let peer: SessionResolverSshPeer | undefined;
     try {
       writeUpdateCache(tempHome);
       const repoDir = path.join(tempHome, 'work');
-      const sshBin = path.join(tempHome, 'bin', 'ssh');
       fs.mkdirSync(repoDir, { recursive: true });
-      fs.mkdirSync(path.dirname(sshBin), { recursive: true });
-      fs.writeFileSync(sshBin, '#!/bin/sh\nprintf \'{not-json\'\nexit 0\n');
-      fs.chmodSync(sshBin, 0o755);
+      peer = await startSessionResolverSshPeer('malformed', tempHome);
 
       const result = runAgents(
-        ['sessions', '--resolve', 'abcd7777', '--json', '--host', 'test@bad-peer.example'],
+        ['sessions', '--resolve', 'abcd7777', '--json', '--host', peer.target],
         repoDir,
         tempHome,
       );
       expect(result.status).toBe(2);
       expect(result.stdout).toBe('');
-      expect(result.stderr).toContain('test@bad-peer.example');
+      expect(result.stderr).toContain(peer.target);
       expect(result.stderr).toContain('No unique/no-match decision was made.');
     } finally {
+      if (peer) await stopSessionResolverSshPeer(peer);
       fs.rmSync(tempHome, { recursive: true, force: true });
     }
   });
