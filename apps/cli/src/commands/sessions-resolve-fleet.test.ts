@@ -5,14 +5,14 @@
  * the id (a watchdog `/continue <uuid>` reference echoes the parent id into many
  * later transcripts).
  *
- * These exercise the two seams that own the remote path — `fleetHitsById` (pure
+ * These exercise the two seams that own the remote path — `fleetCandidatesByQuery` (pure
  * grouping) and `resolveSessionAcrossFleet` (the orchestration) — with the
  * SSH/peer boundary (`gatherRemoteList`/`runOnPeer`) FAKED via injected deps, so
  * no tailnet, no network, no real ssh. The fakes stand in for what a peer would
  * actually return over SSH.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { fleetHitsById, resolveSessionAcrossFleet, shouldFanOutForId, type FleetResolveDeps } from './sessions.js';
+import { fleetCandidatesByQuery, resolveSessionAcrossFleet, shouldFanOutForId, type FleetResolveDeps } from './sessions.js';
 type SessionMeta = import('../lib/session/types.js').SessionMeta;
 
 const UUID = 'd3470b57-2af6-4c11-b1de-3fab94f43603';
@@ -80,7 +80,7 @@ describe('shouldFanOutForId — the --local / recursion / id-shape gate', () => 
   });
 });
 
-describe('fleetHitsById — exact id only, one hit per machine', () => {
+describe('fleetCandidatesByQuery — canonical id resolution grouped by logical session', () => {
   it('keeps only rows whose id EXACTLY equals the query (drops content mentioners)', () => {
     const rows = [
       row(UUID, 'yosemite-s0', { topic: 'the real session' }),
@@ -88,32 +88,47 @@ describe('fleetHitsById — exact id only, one hit per machine', () => {
       // shape of the RUSH-2024 false match. It must NOT be treated as a hit.
       row('ffd7ed24-0840-4c11-b1de-3fab94f43603', 'zion', { topic: `watchdog /continue ${UUID}` }),
     ];
-    const hits = fleetHitsById(rows, UUID);
-    expect(hits.map(h => h.machine)).toEqual(['yosemite-s0']);
-    expect(hits[0].session.id).toBe(UUID);
+    const candidates = fleetCandidatesByQuery(rows, UUID);
+    expect(candidates.map(candidate => candidate.id)).toEqual([UUID]);
+    expect(candidates[0].hits.map(hit => hit.machine)).toEqual(['yosemite-s0']);
   });
 
   it('collapses a machine that returned the id twice (live + synced mirror) to one hit', () => {
     const rows = [row(UUID, 'yosemite-s0', { topic: 'live' }), row(UUID, 'yosemite-s0', { topic: 'mirror' })];
-    const hits = fleetHitsById(rows, UUID);
-    expect(hits).toHaveLength(1);
-    expect(hits[0].machine).toBe('yosemite-s0');
+    const candidates = fleetCandidatesByQuery(rows, UUID);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].hits).toHaveLength(1);
+    expect(candidates[0].hits[0].machine).toBe('yosemite-s0');
   });
 
-  it('surfaces DISTINCT machines when the same id is on more than one box', () => {
+  it('collapses synced copies on distinct machines into one logical candidate', () => {
     const rows = [row(UUID, 'yosemite-s0'), row(UUID, 'mac-mini')];
-    const hits = fleetHitsById(rows, UUID);
-    expect(hits.map(h => h.machine).sort()).toEqual(['mac-mini', 'yosemite-s0']);
+    const candidates = fleetCandidatesByQuery(rows, UUID);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].hits.map(hit => hit.machine).sort()).toEqual(['mac-mini', 'yosemite-s0']);
+  });
+
+  it('resolves a unique short prefix to its full logical session id', () => {
+    const candidates = fleetCandidatesByQuery([row(UUID, 'yosemite-s0')], 'd3470b57');
+    expect(candidates.map(candidate => candidate.id)).toEqual([UUID]);
+  });
+
+  it('keeps every distinct session sharing a short prefix as an ambiguity candidate', () => {
+    const sibling = 'd3470b57-ffff-4c11-b1de-3fab94f43603';
+    const rows = [row(UUID, 'yosemite-s0'), row(UUID, 'mac-mini'), row(sibling, 'bismas-macbook-pro')];
+    const candidates = fleetCandidatesByQuery(rows, 'd3470b57');
+    expect(candidates.map(candidate => candidate.id).sort()).toEqual([UUID, sibling].sort());
+    expect(candidates.find(candidate => candidate.id === UUID)?.hits).toHaveLength(2);
   });
 
   it('drops an untagged row (no machine to route a render back to)', () => {
     const rows = [{ ...row(UUID, ''), machine: undefined } as SessionMeta];
-    expect(fleetHitsById(rows, UUID)).toEqual([]);
+    expect(fleetCandidatesByQuery(rows, UUID)).toEqual([]);
   });
 
   it('is case-insensitive on the id', () => {
-    const hits = fleetHitsById([row(UUID, 'yosemite-s0')], UUID.toUpperCase());
-    expect(hits.map(h => h.machine)).toEqual(['yosemite-s0']);
+    const candidates = fleetCandidatesByQuery([row(UUID, 'yosemite-s0')], UUID.toUpperCase());
+    expect(candidates[0].hits.map(hit => hit.machine)).toEqual(['yosemite-s0']);
   });
 });
 
@@ -143,6 +158,13 @@ describe('resolveSessionAcrossFleet — remote UUID resolution', () => {
     expect(forwarded).toEqual(['sessions', UUID, '--json', '--all', '--local']);
   });
 
+  it('a unique short prefix renders the resolved full id from its peer', async () => {
+    const deps = fakeDeps({ remoteRows: [row(UUID, 'yosemite-s0')] });
+    const outcome = await resolveSessionAcrossFleet('d3470b57', 'summary', undefined, deps);
+    expect(outcome).toBe('rendered');
+    expect(deps.rendered[0]).toEqual({ args: ['sessions', UUID, '--local'], machine: 'yosemite-s0' });
+  });
+
   it('carries the render mode to the peer (markdown → --markdown)', async () => {
     const deps = fakeDeps({ remoteRows: [row(UUID, 'yosemite-s0')] });
     await resolveSessionAcrossFleet(UUID, 'markdown', undefined, deps);
@@ -151,8 +173,8 @@ describe('resolveSessionAcrossFleet — remote UUID resolution', () => {
 
   it('a content-only sweep result (no exact id) is NOT rendered — reports not-found', async () => {
     // Reproduces the bug at the remote layer: a peer that (wrongly) returned a
-    // mentioner instead of the id must not be treated as the session. fleetHitsById
-    // drops it, so the fleet resolve is not-found and no peer render fires.
+    // mentioner instead of the id must not be treated as the session. The canonical
+    // id resolver drops it, so the fleet resolve is not-found and no peer render fires.
     const mentioner = row('ffd7ed24-0840-4c11-b1de-3fab94f43603', 'zion', { topic: `/continue ${UUID}` });
     const deps = fakeDeps({ remoteRows: [mentioner] });
     const outcome = await resolveSessionAcrossFleet(UUID, 'summary', undefined, deps);
@@ -160,15 +182,26 @@ describe('resolveSessionAcrossFleet — remote UUID resolution', () => {
     expect(deps.rendered).toHaveLength(0);
   });
 
-  it('the same UUID on MULTIPLE machines surfaces a labeled conflict, renders nothing', async () => {
-    const deps = fakeDeps({ remoteRows: [row(UUID, 'yosemite-s0'), row(UUID, 'mac-mini')] });
-    const outcome = await resolveSessionAcrossFleet(UUID, 'summary', undefined, deps);
+  it('distinct sessions sharing a prefix surface every labeled candidate and render nothing', async () => {
+    const sibling = 'd3470b57-ffff-4c11-b1de-3fab94f43603';
+    const deps = fakeDeps({ remoteRows: [row(UUID, 'yosemite-s0'), row(UUID, 'mac-mini'), row(sibling, 'bismas-macbook-pro')] });
+    const outcome = await resolveSessionAcrossFleet('d3470b57', 'summary', undefined, deps);
     expect(outcome).toBe('conflict');
     expect(deps.rendered).toHaveLength(0);
     const printed = errSpy.mock.calls.flat().join('\n');
-    expect(printed).toContain('multiple machines');
+    expect(printed).toContain('Multiple sessions');
+    expect(printed).toContain(UUID);
+    expect(printed).toContain(sibling);
     expect(printed).toContain('yosemite-s0');
     expect(printed).toContain('mac-mini');
+    expect(printed).toContain('bismas-macbook-pro');
+  });
+
+  it('synced copies of one prefix match do not create false ambiguity', async () => {
+    const deps = fakeDeps({ remoteRows: [row(UUID, 'yosemite-s0'), row(UUID, 'mac-mini')] });
+    const outcome = await resolveSessionAcrossFleet('d3470b57', 'summary', undefined, deps);
+    expect(outcome).toBe('rendered');
+    expect(deps.rendered).toHaveLength(1);
   });
 
   it('found-but-unreachable peer (no-target) is a definitive conflict, not a silent fall-through', async () => {

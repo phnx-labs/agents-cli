@@ -1,0 +1,1 @@
+- **Resolve short session ID prefixes across the fleet (#1757).** `agents sessions <prefix>` now finds a unique remote session, reports every full-ID candidate when the prefix is ambiguous, and treats synced copies of one session as a single match. Source: `apps/cli/src/commands/sessions.ts`.
