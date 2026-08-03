@@ -761,6 +761,15 @@ describe('agents sessions', () => {
       expect(contradictoryScope.status).toBe(1);
       expect(contradictoryScope.stderr).toContain('--local and --device name opposite scopes');
 
+      for (const conflictingFlag of ['--markdown', '--no-redact']) {
+        const conflict = runAgents([
+          'sessions', sessionId, '--include', 'tools', conflictingFlag,
+          '--all', '--json', '--no-interactive',
+        ], repoDir, tempHome);
+        expect(conflict.status).toBe(1);
+        expect(conflict.stderr).toContain(`${conflictingFlag} cannot be used with --include tools`);
+      }
+
       const listResult = runAgents(['sessions', '--all', '--json', '--no-interactive'], repoDir, tempHome);
       expect(listResult.status).toBe(0);
       expect(Array.isArray(JSON.parse(listResult.stdout))).toBe(true);

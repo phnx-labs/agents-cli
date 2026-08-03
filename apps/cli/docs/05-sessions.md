@@ -213,7 +213,8 @@ normal session cache.
   matching sessions returned to the caller. Use `--since`, `--agent`,
   `--project`, or `--device` to narrow the metadata scope when appropriate.
 
-Every persisted string is redacted regardless of `--no-redact`. Inputs are
+`--markdown` and `--no-redact` are rejected with `--include tools`: the indexed
+view has a distinct bounded schema and is always redacted. Inputs are
 bounded to 16 KiB, successful output to 1 KiB, and error output to 4 KiB;
 the combined evidence payload is capped at 5 MiB per session with an explicit
 `index_limit` terminal row when more calls are omitted. Base64-like blocks are

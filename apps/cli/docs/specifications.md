@@ -421,7 +421,7 @@ SSH access (§7); rendering sessions that no harness produced.
   (`lib/session/remote-list.ts:50-53,78-96,193-240,337-541`;
   `lib/devices/resolve-target.ts:120-133`;
   `lib/session/tool-index.ts:73-97`; `lib/session/tool-store.ts:40-85`;
-  `commands/sessions.ts:1926-1973`).
+  `commands/sessions.ts:1937-1984`).
 - **SES-36 (MUST).** The shell-command sampling script MUST accept 50–100
   sessions, read the current device directly, balance deterministic selection
   across available requested machines, retain only redacted shell-call origins
@@ -492,8 +492,10 @@ The command surface (bare `sessions [query]`, `tail`, `sync`, `resume`, `focus`,
   `--query` clauses require distinct calls. `--fleet` MUST execute the query on
   each device's local index under the recursion guard and transfer compact
   evidence only. A fleet tool query MUST reject cost/duration sorting because
-  the compact peer envelope carries no global sort key
-  (`commands/sessions.ts:1432-1463,1813-1868,1926-1973,3918-3959,3995-4002`;
+  the compact peer envelope carries no global sort key. `--markdown` and
+  `--no-redact` MUST fail when combined with `--include tools` because the
+  indexed evidence schema is always bounded and redacted
+  (`commands/sessions.ts:1432-1463,1824-1879,1937-1984,3929-3970,4006-4013`;
   `lib/session/remote-list.ts:98-115,337-541`).
 
 #### 4.3 stdout / stderr / exit discipline
@@ -566,8 +568,8 @@ normative — a change that widens/narrows a cell is a spec change.
 
 **Known gaps (implemented-vs-intended drift to fix, not to hide):**
 - **SES-GAP-1.** `flatSessionRow` (`--flat`) and the picker's `formatPickerLabel`
-  both feed `renderTopicCell` (~`commands/sessions.ts:1500`, `:2060` →
-  `:1851`) without the `'-'` fallback the other renderers use, so a session with
+  both feed `renderTopicCell` (~`commands/sessions.ts:1500`, `:2071` →
+  `:1862`) without the `'-'` fallback the other renderers use, so a session with
   no live preview, no tag, and an empty `topic` renders a **blank** cell —
   untested. Directly contradicts "always show a preview" (SES-8).
 - **SES-GAP-2.** Metadata coverage is uneven. PR/ticket extractors are agent-agnostic

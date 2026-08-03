@@ -1542,6 +1542,16 @@ async function sessionsAction(
     process.exitCode = 1;
     return;
   }
+  if (toolEvidenceMode && (options.markdown || options.redact === false)) {
+    const incompatible = [
+      options.markdown ? '--markdown' : undefined,
+      options.redact === false ? '--no-redact' : undefined,
+    ].filter((flag): flag is string => flag !== undefined);
+    console.error(chalk.red(`${incompatible.join(' and ')} cannot be used with --include tools.`));
+    console.error(chalk.gray('Tool evidence is always redacted and byte-bounded; drop the conflicting render flag.'));
+    process.exitCode = 1;
+    return;
+  }
   if (toolEvidenceMode && queryClauses.length > TOOL_QUERY_MAX_CLAUSES) {
     console.error(chalk.red(`Tool search accepts at most ${TOOL_QUERY_MAX_CLAUSES} --query clauses.`));
     process.exitCode = 1;
@@ -4015,7 +4025,7 @@ export function registerSessionsCommands(program: Command): void {
       - --in-team matches both ends of the lineage: the session that ran 'agents teams create/add', and (with --teams) that team's teammates. In the interactive list, 't' cycles the same filter over the teams in view.
       - --include and --exclude are mutually exclusive.
       - With --include tools, repeat --query for same-session AND across distinct calls. Fields: tool, program, input, output, status, exit, error.
-      - Tool evidence is redacted and bounded before it reaches SQLite. --no-redact never disables index redaction.
+      - Tool evidence is redacted and bounded before it reaches SQLite. --markdown and --no-redact conflict with --include tools.
       - Tool queries accept 32 clauses (4 KiB each), --limit 1–1,000, and at most 8 MiB of materialized evidence.
       - --first and --last are mutually exclusive.
       - A filter flag (--include/--exclude/--first/--last) without --markdown/--json defaults to --markdown output.
