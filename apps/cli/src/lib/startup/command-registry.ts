@@ -50,6 +50,7 @@ export const loadExport: ModuleLoader = async () => (await import('../../command
 export const loadPackages: ModuleLoader = async () => (await import('../../commands/packages.js')).registerPackagesCommands;
 export const loadRoutines: ModuleLoader = async () => (await import('../../commands/routines.js')).registerRoutinesCommands;
 export const loadMonitors: ModuleLoader = async () => (await import('../../commands/monitors.js')).registerMonitorsCommands;
+export const loadProjects: ModuleLoader = async () => (await import('../../commands/projects.js')).registerProjectsCommands;
 export const loadRun: ModuleLoader = async () => (await import('../../commands/exec.js')).registerRunCommand;
 export const loadFork: ModuleLoader = async () => (await import('../../commands/fork.js')).registerForkCommand;
 export const loadDefaults: ModuleLoader = async () => (await import('../../commands/defaults.js')).registerDefaultsCommands;
@@ -163,6 +164,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   install: [loadPackages],
   routines: [loadRoutines],
   monitors: [loadMonitors],
+  projects: [loadProjects],
   run: [loadRun],
   fork: [loadFork],
   defaults: [loadDefaults],
