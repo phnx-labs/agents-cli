@@ -23,6 +23,7 @@ import * as path from 'path';
 import { performance } from 'perf_hooks';
 import { discoverSessions, searchContentIndex } from '../src/lib/session/discover.js';
 import { filterSessionsByQuery } from '../src/commands/sessions.js';
+import { searchToolCalls, type ToolIndexCoverage } from '../src/lib/session/tool-index.js';
 import { getSessionsDbPath, getSessionsDir } from '../src/lib/state.js';
 
 // Resolved through the same helpers the CLI itself uses. Re-deriving the path
@@ -194,6 +195,47 @@ async function main() {
   const contentBest = Math.min(...contentRuns);
   console.error(`E. searchContentIndex best of 5: ${contentBest.toFixed(1)}ms`);
 
+  // ------------------------------------------------------------------
+  // F/G. Indexed tool-call queries, including same-session distinct calls
+  // ------------------------------------------------------------------
+  const toolCoverage: ToolIndexCoverage = {
+    indexedFiles: 0,
+    indexedCalls: 0,
+    skippedFiles: 0,
+    limitedFiles: 0,
+    remainingFiles: 0,
+    complete: true,
+  };
+  const toolSingleRuns: number[] = [];
+  let toolSingleMatches = 0;
+  for (let i = 0; i < 5; i++) {
+    const r = await time(() => searchToolCalls(
+      warmSessions,
+      ['program:git input:status'],
+      toolCoverage,
+      25,
+    ));
+    toolSingleRuns.push(r.ms);
+    toolSingleMatches = r.value.sessions.length;
+  }
+  const toolSingleBest = Math.min(...toolSingleRuns);
+  console.error(`F. one tool-call clause best of 5: ${toolSingleBest.toFixed(1)}ms, ${toolSingleMatches} matches`);
+
+  const toolTwoCallRuns: number[] = [];
+  let toolTwoCallMatches = 0;
+  for (let i = 0; i < 5; i++) {
+    const r = await time(() => searchToolCalls(
+      warmSessions,
+      ['program:git input:merge', 'program:gh output:CONFLICT'],
+      toolCoverage,
+      25,
+    ));
+    toolTwoCallRuns.push(r.ms);
+    toolTwoCallMatches = r.value.sessions.length;
+  }
+  const toolTwoCallBest = Math.min(...toolTwoCallRuns);
+  console.error(`G. two distinct tool-call clauses best of 5: ${toolTwoCallBest.toFixed(1)}ms, ${toolTwoCallMatches} matches`);
+
   const post = {
     sessionsDbBytes: fileSize(DB_PATH),
     walBytes: fileSize(DB_PATH + '-wal'),
@@ -217,6 +259,12 @@ async function main() {
     D_typingPerKeyMs: perKey,
     E_searchContentBestMs: contentBest,
     E_searchContentAllRunsMs: contentRuns,
+    F_toolSingleBestMs: toolSingleBest,
+    F_toolSingleAllRunsMs: toolSingleRuns,
+    F_toolSingleMatches: toolSingleMatches,
+    G_toolTwoCallBestMs: toolTwoCallBest,
+    G_toolTwoCallAllRunsMs: toolTwoCallRuns,
+    G_toolTwoCallMatches: toolTwoCallMatches,
   };
 
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
