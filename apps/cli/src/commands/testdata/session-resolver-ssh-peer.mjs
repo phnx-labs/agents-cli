@@ -3,9 +3,9 @@
  * Real SSH2-protocol peer used by sessions.test.ts's two fleet-failure tests.
  *
  * Listens on 127.0.0.1 with an ephemeral port, accepts one real ssh connection
- * (any auth method — this is a throwaway loopback fixture, not a security
- * boundary), and on the exec channel runs the EXACT command string the real
- * `ssh` client sent (production's `bash -lc '...'`) through a real shell, with
+ * for one random test-only username, and on the exec channel runs only the
+ * exact command string the test computed through production's
+ * `remoteListCommand`. The command uses a real shell, with
  * PATH arranged so `agents` resolves to whichever CLI this test case needs:
  *
  *   - mode=old-peer:   the actual published @phnx-labs/agents-cli@1.20.88,
@@ -22,6 +22,9 @@
  *   SRP_MODE        'old-peer' | 'malformed'
  *   SRP_HOST_KEY    path to an OpenSSH-format private host key (PEM)
  *   SRP_PEER_HOME   HOME the spawned peer CLI runs with (pre-initialized)
+ *   SRP_USERNAME    random username accepted through SSH's `none` method
+ *   SRP_EXPECTED_COMMAND exact production command accepted by the exec channel
+ *   SRP_PROOF_FILE  written only after the old CLI rejects the new protocol
  *   SRP_OLD_VERSION exact npm version to fetch for mode=old-peer
  *   SRP_TSX_LOADER  file:// URL of the tsx ESM loader (mode=malformed)
  *   SRP_CLI_ENTRY   absolute path to src/index.ts (mode=malformed)
@@ -44,6 +47,12 @@ if (mode !== 'old-peer' && mode !== 'malformed') {
 }
 const hostKey = fs.readFileSync(process.env.SRP_HOST_KEY);
 const peerHome = process.env.SRP_PEER_HOME;
+const username = process.env.SRP_USERNAME;
+const expectedCommand = process.env.SRP_EXPECTED_COMMAND;
+const proofFile = process.env.SRP_PROOF_FILE;
+if (!username || !expectedCommand || !proofFile) {
+  throw new Error('SRP_USERNAME, SRP_EXPECTED_COMMAND, and SRP_PROOF_FILE are required');
+}
 
 /** A one-shot shim dir so the peer's `bash -lc` finds `agents` on PATH,
  * resolving to whichever CLI this mode needs to actually run. */
@@ -52,7 +61,7 @@ const shimBin = path.join(shimDir, 'agents');
 if (mode === 'old-peer') {
   fs.writeFileSync(
     shimBin,
-    `#!/bin/sh\nexec env npm_config_cache='${path.join(peerHome, 'npm-cache')}' npx -y -p @phnx-labs/agents-cli@${process.env.SRP_OLD_VERSION} agents "$@"\n`,
+    `#!/bin/sh\nexec env npm_config_cache='${path.join(peerHome, 'npm-cache')}' npm_config_offline=true npx -y -p @phnx-labs/agents-cli@${process.env.SRP_OLD_VERSION} agents "$@"\n`,
   );
 } else {
   fs.writeFileSync(
@@ -64,45 +73,63 @@ fs.chmodSync(shimBin, 0o755);
 
 function runExecCommand(command) {
   return new Promise((resolve) => {
+    const inherited = process.env;
     const child = spawn('bash', ['-c', command], {
       cwd: peerHome,
       env: {
-        ...process.env,
         HOME: peerHome,
         USERPROFILE: peerHome,
-        PATH: `${shimDir}${path.delimiter}${process.env.PATH || ''}`,
+        PATH: `${shimDir}${path.delimiter}${inherited.PATH || ''}`,
         NODE_NO_WARNINGS: '1',
+        ...(inherited.HTTP_PROXY ? { HTTP_PROXY: inherited.HTTP_PROXY } : {}),
+        ...(inherited.HTTPS_PROXY ? { HTTPS_PROXY: inherited.HTTPS_PROXY } : {}),
+        ...(inherited.NO_PROXY ? { NO_PROXY: inherited.NO_PROXY } : {}),
+        ...(inherited.NODE_EXTRA_CA_CERTS ? { NODE_EXTRA_CA_CERTS: inherited.NODE_EXTRA_CA_CERTS } : {}),
       },
     });
     let stdout = '';
+    let stderr = '';
     child.stdout.on('data', (d) => { stdout += d.toString(); });
-    child.on('close', (code) => resolve({ code, stdout }));
+    child.stderr.on('data', (d) => { stderr += d.toString(); });
+    child.on('close', (code) => resolve({ code, stdout, stderr }));
   });
 }
 
 const server = new Server({ hostKeys: [hostKey] }, (client) => {
-  // Loopback, single-use, throwaway keypair — accepting on the first
-  // attempted method is a deliberate test-fixture simplification, not a
-  // production auth policy.
-  client.on('authentication', (ctx) => ctx.accept());
+  client.on('authentication', (ctx) => {
+    if (ctx.method === 'none' && ctx.username === username) ctx.accept();
+    else ctx.reject();
+  });
   client.on('ready', () => {
     client.on('session', (accept) => {
       const session = accept();
       session.on('exec', (accept, _reject, info) => {
         const stream = accept();
-        runExecCommand(info.command).then(({ code, stdout }) => {
+        if (info.command !== expectedCommand) {
+          stream.stderr.write('fixture: rejected unexpected command');
+          stream.exit(126);
+          stream.end();
+          return;
+        }
+        runExecCommand(info.command).then(({ code, stdout, stderr }) => {
           if (mode === 'old-peer') {
-            // The real 1.20.88 CLI's own rejection IS the fixture — forward
-            // its real exit code and (empty) stdout verbatim.
+            const expectedError = "unknown option '--resolve-safe-v1'";
+            if (code !== 1 || !stderr.includes(expectedError)) {
+              stream.stderr.write(`fixture: old CLI did not reject the protocol as expected (code=${code}): ${stderr}`);
+              stream.exit(98);
+              stream.end();
+              return;
+            }
+            fs.writeFileSync(proofFile, `${process.env.SRP_OLD_VERSION}:${expectedError}\n`);
             stream.write(stdout);
-            stream.exit(code ?? 1);
+            stream.exit(code);
             stream.end();
           } else {
             if (code !== 0) {
               // The current CLI must genuinely succeed first; a nonzero exit
               // here means the fixture's own setup is broken, not that the
               // transport-corruption path was exercised. Fail loudly.
-              stream.stderr.write(`fixture: current CLI did not exit 0 (code=${code}): ${stdout}`);
+              stream.stderr.write(`fixture: current CLI did not exit 0 (code=${code}): ${stdout}${stderr}`);
               stream.exit(97);
               stream.end();
               return;

@@ -14,7 +14,7 @@ import {
   fleetCandidatesByQuery,
   metadataResolveForwardedArgs,
 } from './sessions.js';
-import { parseRemoteList } from '../lib/session/remote-list.js';
+import { parseRemoteList, remoteListCommand } from '../lib/session/remote-list.js';
 import { needsWindowsShell, composeWin32CommandLine } from '../lib/platform/index.js';
 import type { SessionMeta } from '../lib/session/types.js';
 
@@ -293,6 +293,7 @@ interface SessionResolverSshPeer {
   target: string;
   fixture: ChildProcess;
   socket: string;
+  proofFile: string;
 }
 
 /** Start the real ssh2 peer and graft its ephemeral TCP listener onto the exact
@@ -303,7 +304,10 @@ async function startSessionResolverSshPeer(
 ): Promise<SessionResolverSshPeer> {
   const hostKey = path.join(tempHome, 'fixture-host-key');
   const peerHome = path.join(tempHome, 'peer-home');
-  const target = 'test@127.0.0.1';
+  const username = `srp-${crypto.randomBytes(16).toString('hex')}`;
+  const target = `${username}@127.0.0.1`;
+  const proofFile = path.join(tempHome, `${mode}-proof.txt`);
+  const expectedCommand = remoteListCommand(metadataResolveForwardedArgs('abcd7777', {}));
   const controlPathTemplate = path.join(tempHome, '.agents', '.cache', 'ssh', 'cm-%C');
   fs.mkdirSync(path.dirname(controlPathTemplate), { recursive: true, mode: 0o700 });
   writeUpdateCache(peerHome);
@@ -313,6 +317,22 @@ async function startSessionResolverSshPeer(
   });
   if (keygen.status !== 0) throw new Error(`ssh-keygen failed: ${keygen.stderr}`);
 
+  if (mode === 'old-peer') {
+    const oldVersion = '1.20.88';
+    const preflight = spawnSync(
+      'npx',
+      ['-y', '-p', `@phnx-labs/agents-cli@${oldVersion}`, 'agents', '--version'],
+      {
+        encoding: 'utf-8',
+        env: { ...process.env, npm_config_cache: path.join(peerHome, 'npm-cache') },
+        timeout: 60_000,
+      },
+    );
+    if (preflight.status !== 0 || preflight.stdout.trim() !== oldVersion) {
+      throw new Error(`old peer preflight failed: status=${preflight.status}; stdout=${preflight.stdout}; stderr=${preflight.stderr}`);
+    }
+  }
+
   const fixture = spawn(process.execPath, [path.join(repoRoot, 'src', 'commands', 'testdata', 'session-resolver-ssh-peer.mjs')], {
     cwd: repoRoot,
     env: {
@@ -320,6 +340,9 @@ async function startSessionResolverSshPeer(
       SRP_MODE: mode,
       SRP_HOST_KEY: hostKey,
       SRP_PEER_HOME: peerHome,
+      SRP_USERNAME: username,
+      SRP_EXPECTED_COMMAND: expectedCommand,
+      SRP_PROOF_FILE: proofFile,
       SRP_OLD_VERSION: '1.20.88',
       SRP_TSX_LOADER: tsxLoaderUrl,
       SRP_CLI_ENTRY: cliEntry,
@@ -362,7 +385,7 @@ async function startSessionResolverSshPeer(
     '-o', 'ControlPersist=60s', target,
   ], { encoding: 'utf-8', timeout: 10_000 });
   if (master.status !== 0) throw new Error(`ssh ControlMaster failed: ${master.stderr}`);
-  return { target, fixture, socket };
+  return { target, fixture, socket, proofFile };
 }
 
 async function stopSessionResolverSshPeer(peer: SessionResolverSshPeer): Promise<void> {
@@ -544,6 +567,9 @@ describe('agents sessions --resolve local-peer critical path', () => {
       expect(result.stdout).toBe('');
       expect(result.stderr).toContain(peer.target);
       expect(result.stderr).toContain('No unique/no-match decision was made.');
+      expect(fs.readFileSync(peer.proofFile, 'utf-8')).toBe(
+        "1.20.88:unknown option '--resolve-safe-v1'\n",
+      );
     } finally {
       if (peer) await stopSessionResolverSshPeer(peer);
       fs.rmSync(tempHome, { recursive: true, force: true });
