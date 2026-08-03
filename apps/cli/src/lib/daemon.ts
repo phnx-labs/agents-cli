@@ -19,6 +19,7 @@ import { JobScheduler } from './scheduler.js';
 import { MonitorEngine } from './monitors/engine.js';
 import { executeJobDetached, monitorRunningJobs } from './runner.js';
 import { detectOverdueJobs, notifyOverdue } from './overdue.js';
+import { runCatchup } from './catchup.js';
 import { notifyRoutineStart, notifyRoutineFinish, notifyRoutineStartFailed } from './routine-notify.js';
 import { BrowserService } from './browser/service.js';
 import { BrowserIPCServer } from './browser/ipc.js';
@@ -34,6 +35,14 @@ const LOG_ROTATE_COUNT = 3;
 const PLIST_NAME = 'com.phnx-labs.agents-daemon';
 const SYSTEMD_UNIT = 'agents-daemon.service';
 const MONITOR_TICK_MS = 60_000;
+/**
+ * How often to re-scan for missed fires. Deliberately slower than the monitor
+ * tick: detection walks a week of cron occurrences per routine
+ * (`previousExpectedFire`), and a fire that was already missed is not urgent to
+ * the second — five minutes bounds the cost while still recovering from a
+ * wedge or an OS suspend the process survived.
+ */
+const CATCHUP_TICK_MS = 5 * 60_000;
 const WEDGE_THRESHOLD_TICKS = 3;
 
 /**
@@ -465,24 +474,37 @@ export async function runDaemon(): Promise<void> {
     log('ERROR', `Monitor engine failed to start: ${(err as Error).message}`);
   }
 
-  // Backlog detection: any enabled recurring job whose most-recent expected
-  // fire is older than its most-recent recorded run is overdue. Happens when
-  // the laptop was off or the daemon crashed through a scheduled fire.
-  // We log it and pop a native notification — the user can review with
-  // `agents routines list` and run them with `agents routines catchup`.
-  try {
-    const overdue = detectOverdueJobs();
-    if (overdue.length > 0) {
-      log('WARN', `${overdue.length} routine(s) overdue:`);
+  // Backlog recovery: any enabled recurring job whose most-recent expected fire
+  // is older than its most-recent recorded run was missed — the laptop slept,
+  // the machine was off, or the daemon crashed through the fire. croner only
+  // schedules forward from "now", so nothing replays it on its own.
+  //
+  // Every miss is RECORDED as a `missed` run and, unless the routine sets
+  // `catchup: false`, RUN late. Runs on a timer as well as at startup: a startup
+  // pass alone misses a fire lost while the daemon stayed up but its event loop
+  // was wedged, or one lost across an OS suspend that the process survived.
+  const catchupPass = async (): Promise<void> => {
+    try {
+      const overdue = detectOverdueJobs();
+      if (overdue.length === 0) return;
+      log('WARN', `${overdue.length} routine(s) missed their fire:`);
       for (const job of overdue) {
         const last = job.lastRanAt ? job.lastRanAt.toISOString() : 'never';
         log('WARN', `  ${job.name} -- expected ${job.expectedAt.toISOString()}, last ran ${last}`);
       }
       notifyOverdue(overdue);
+      const outcomes = await runCatchup({ overdue });
+      for (const o of outcomes) {
+        if (o.result === 'ran') log('INFO', `Caught up '${o.name}' (run: ${o.runId})`);
+        else if (o.result === 'recorded') log('INFO', `Recorded missed fire for '${o.name}' (catchup disabled)`);
+        else log('ERROR', `Catchup for '${o.name}' failed: ${o.error}`);
+      }
+    } catch (err) {
+      log('ERROR', `Catchup pass failed: ${(err as Error).message}`);
     }
-  } catch (err) {
-    log('ERROR', `Overdue detection failed: ${(err as Error).message}`);
-  }
+  };
+  await catchupPass();
+  const catchupInterval = setInterval(() => { void catchupPass(); }, CATCHUP_TICK_MS);
 
   // Before the BrowserService comes up, reap browser + tunnel processes
   // spawned by previous daemons that are no longer alive. Without this,
@@ -801,6 +823,7 @@ export async function runDaemon(): Promise<void> {
     monitorEngine.stop();
     await browserIPC.stop();
     clearInterval(monitorInterval);
+    clearInterval(catchupInterval);
     clearInterval(syncInterval);
     clearInterval(healInterval);
     clearTimeout(healKickoff);

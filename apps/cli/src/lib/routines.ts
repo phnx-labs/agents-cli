@@ -173,6 +173,17 @@ export interface JobConfig {
    */
   devices?: string[];
   /**
+   * Whether a fire this device missed (daemon down, laptop asleep, wedged event
+   * loop) is run late. Defaults to true: croner only schedules forward from
+   * "now", so without catch-up a missed fire is simply lost and the routine
+   * silently does not run.
+   *
+   * Set `catchup: false` for a routine whose value is tied to its clock — a
+   * 9am standup brief is worthless at 3pm. An opted-out routine still records
+   * the miss (a `missed` run), it just is not re-run.
+   */
+  catchup?: boolean;
+  /**
    * Environment variables injected into the spawned run, on top of the sandbox
    * overlay's own. Merged by `buildSpawnEnv`, so it applies to both the
    * foreground and detached execution paths.
@@ -269,7 +280,14 @@ export interface RunMeta {
   pid: number | null;
   /** Process birth time (epoch ms) recorded at spawn for pid-reuse detection. */
   spawnedAt?: number;
-  status: 'running' | 'completed' | 'failed' | 'timeout';
+  /**
+   * `missed` is not an execution outcome — it is the record that a scheduled
+   * fire never happened (the daemon was down, asleep, or wedged when it came
+   * due). Without it a miss leaves no trace at all and the listing keeps
+   * showing the previous run's status as if it were current. Written by
+   * `recordMissedFire` (catchup.ts), never by the runner.
+   */
+  status: 'running' | 'completed' | 'failed' | 'timeout' | 'missed';
   startedAt: string;
   completedAt: string | null;
   exitCode: number | null;
@@ -560,6 +578,7 @@ export function writeJob(config: JobConfig): void {
   if (output.timeout === '10m') delete output.timeout;
   if (output.enabled === true) delete output.enabled;
   if (output.runOnce === false || output.runOnce === undefined) delete output.runOnce;
+  if (output.catchup === true || output.catchup === undefined) delete output.catchup;
   const devArr = output.devices as string[] | undefined;
   if (!devArr || devArr.length === 0) delete output.devices;
 
@@ -779,6 +798,9 @@ export function validateJob(config: Partial<JobConfig>): string[] {
         }
       }
     }
+  }
+  if (config.catchup !== undefined && typeof config.catchup !== 'boolean') {
+    errors.push('catchup must be a boolean (false to skip running a missed fire late)');
   }
   // Off-box placement without a devices pin fires on every fleet daemon and
   // each dispatches once (RUSH-1980). Enforce the pin at validation so hand

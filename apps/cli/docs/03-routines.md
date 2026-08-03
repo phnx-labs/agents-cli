@@ -729,6 +729,73 @@ one-shot — a run never re-enters `running` once it leaves.
 Plus one error branch: `child.on('error')` at `runner.ts:208` (spawn itself
 failed — binary not found, EACCES, etc.) → `status='failed'` with `exitCode=null`.
 
+### `missed` — the run that never started
+
+`missed` is the one status the runner never writes, because no process was ever
+spawned. It records that a scheduled fire **did not happen**: the scheduler was
+down, asleep, or wedged when the routine came due. `recordMissedFire`
+(`catchup.ts`) writes it with `pid: null`, `exitCode: null`, and `startedAt` set
+to the moment the fire was **due** — not the moment it was noticed — so the gap
+lands at the right point in `agents routines runs <name>`.
+
+Without it a miss left no trace at all, and the listing kept showing the previous
+run's `completed` as though it were current.
+
+## Catching up a missed fire
+
+Fires are in-process croner timers, and croner only schedules forward from "now".
+A daemon that was not running when a routine came due therefore loses that fire —
+`loadAll()` (`scheduler.ts`) rebuilds every timer looking only at the future, so
+nothing replays it. This is routine on a laptop: close the lid over a 9pm
+schedule and the routine simply never ran.
+
+The daemon recovers from this itself. `detectOverdueJobs` (`overdue.ts`) compares
+each enabled routine's most recent expected fire against its most recent recorded
+run; `runCatchup` (`catchup.ts`) then records each miss and re-runs it via the
+same detached path `agents routines catchup` uses. It runs **at daemon startup
+and every 5 minutes** — a startup-only pass would miss a fire lost while the
+daemon stayed up but its event loop was wedged, or one lost across an OS suspend
+the process survived.
+
+Catch-up is idempotent without a ledger: the `missed` record advances the overdue
+comparison, so the same missed fire is never re-fired — across ticks, a daemon
+restart, or a restart storm.
+
+Device scoping still applies: a routine pinned elsewhere is skipped, so a fleet of
+machines never all catch up the same routine.
+
+### Opting out — `catchup: false`
+
+Catch-up defaults to **on**: a routine you scheduled is one you expect to have
+run, so losing a fire silently is never the helpful default.
+
+Set `catchup: false` on a routine whose value is tied to its clock — a 9am
+standup brief is worthless at 3pm:
+
+```yaml
+name: crm-pipeline-brief
+schedule: "0 8 * * 1-5"
+catchup: false
+```
+
+or at creation:
+
+```bash
+agents routines add crm-pipeline-brief --schedule "0 8 * * 1-5" --agent claude \
+  --no-catchup --prompt "Morning pipeline brief"
+```
+
+An opted-out routine still **records** the miss — you see it as `missed` in the
+listing and in `agents routines runs` — it is just not re-run.
+`agents routines list --json` reports the effective value as `catchup`.
+
+Force a pass by hand at any time:
+
+```bash
+agents routines catchup            # record + run every missed fire now
+agents routines catchup --dry-run  # record the misses, run nothing
+```
+
 ## Sandbox Data Flow
 
 What `prepareJobHome` produces on disk, given a job config.
