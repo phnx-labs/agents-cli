@@ -295,7 +295,7 @@ const SECRET_PATH = /\/(secrets|credentials|\.env|user\.yaml)\b/i;
 const SENSITIVE_ARG_NAME = /password|secret|token|key|api[-_]?key|auth/i;
 const SENSITIVE_PAYLOAD_KEY = /password|secret|token|api[-_]?key|auth/i;
 const RESERVED_META_KEYS = new Set([
-  'ts', 'tz', 'tzName', 'hostname', 'platform', 'arch', 'pid', 'ppid',
+  'ts', 'tz', 'tzName', 'hostname', 'machineId', 'platform', 'arch', 'pid', 'ppid',
   'event', 'level', 'caller', 'session', 'osUser', 'transport', 'sshClientIp',
   'actor', 'kind',
 ]);
