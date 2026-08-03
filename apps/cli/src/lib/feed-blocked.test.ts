@@ -1,0 +1,127 @@
+/**
+ * `agents feed post --blocked` — the declared-block path.
+ *
+ * Real path throughout: a block is built from a real posted event, written to a
+ * real temp feed dir, read back with the real reader, and planned against a real
+ * sink config. Nothing is mocked.
+ */
+import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { buildDeclaredBlock, publishBlock, listBlocks, type DeclaringAgent } from './feed.js';
+import { blockBroadcastContext, planFeedBroadcast, renderSinkArgv } from './feed-broadcast.js';
+import { MILESTONE_EVENTS, tierForEvent } from './activity.js';
+
+const AGENT: DeclaringAgent = {
+  sessionId: '74a4893f-63b3-49ef-bbcb-2437914f792e',
+  mailboxId: '74a4893f-63b3-49ef-bbcb-2437914f792e',
+  host: 'yosemite-s1',
+  runtime: 'headless',
+};
+
+let root: string;
+beforeEach(() => {
+  root = fs.mkdtempSync(path.join(os.tmpdir(), 'feed-blocked-'));
+});
+afterEach(() => {
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+describe('status.blocked event kind', () => {
+  // A blocked post must rank as a milestone, not routine activity — readers
+  // collapse `activity` tier to counts, which would bury the one thing that
+  // needs a human.
+  it('is a milestone, so readers never collapse it into a count', () => {
+    expect(MILESTONE_EVENTS).toContain('status.blocked');
+    expect(tierForEvent('status.blocked')).toBe('milestone');
+  });
+});
+
+describe('buildDeclaredBlock', () => {
+  it('derives approval from a safe default and decision without one', () => {
+    const decision = buildDeclaredBlock(AGENT, { text: 'publish or wait?' });
+    expect(decision.blockClass).toBe('decision');
+    expect(decision.safeDefault).toBeUndefined();
+
+    const approval = buildDeclaredBlock(AGENT, { text: 'delete stale env?', safeDefault: 'leave it' });
+    expect(approval.blockClass).toBe('approval');
+    expect(approval.safeDefault).toBe('leave it');
+  });
+
+  // costOfDelay drives the urgency filter (isPhoneUrgent). A declared block is by
+  // definition an agent that has stopped, so it must not rank as low-cost.
+  it('marks a declared block high cost-of-delay', () => {
+    expect(buildDeclaredBlock(AGENT, { text: 'stuck' }).costOfDelay).toBe('high');
+    expect(buildDeclaredBlock(AGENT, { text: 'stuck' }).kind).toBe('declared');
+  });
+
+  it('carries answerable options through as BlockOptions', () => {
+    const b = buildDeclaredBlock(AGENT, { text: 'pick', options: ['publish', ' wait ', ''] });
+    expect(b.questions[0].options).toEqual([{ label: 'publish' }, { label: 'wait' }]);
+  });
+
+  it('refuses empty text rather than opening a block nobody can act on', () => {
+    expect(() => buildDeclaredBlock(AGENT, { text: '   ' })).toThrow(/empty/i);
+  });
+
+  it('round-trips through the real store and is readable as an open block', () => {
+    const block = buildDeclaredBlock(AGENT, { text: 'force-push denied by git-guard on PR #1749' });
+    publishBlock(block, root);
+    const read = listBlocks(root);
+    expect(read).toHaveLength(1);
+    expect(read[0].kind).toBe('declared');
+    expect(read[0].questions[0].text).toBe('force-push denied by git-guard on PR #1749');
+    expect(read[0].sessionId).toBe(AGENT.sessionId);
+  });
+});
+
+describe('blockBroadcastContext', () => {
+  const block = buildDeclaredBlock(AGENT, { text: 'npm token expired, cannot publish' });
+
+  it('always broadcasts a block at important — the state implies the volume', () => {
+    expect(blockBroadcastContext(block).level).toBe('important');
+  });
+
+  // The operator reading this on a phone should not have to go find the session.
+  it('carries the exact command that unblocks it', () => {
+    const ctx = blockBroadcastContext(block);
+    expect(ctx.focus).toBe('agents focus 74a4893f');
+  });
+
+  // A sink gated on minLevel:important must actually receive a block. Before this
+  // wiring, publishBlock never reached the broadcast layer at all.
+  it('reaches an important-gated sink, with the ask and the fix in the message', () => {
+    const planned = planFeedBroadcast(
+      { owner: { command: ['agents', 'notify', '{message}'], minLevel: 'important' } },
+      blockBroadcastContext(block, { project: 'agents-cli' }),
+    );
+    expect(planned).toHaveLength(1);
+    const message = planned[0].argv[2];
+    expect(message).toContain('agents-cli · npm token expired, cannot publish');
+    expect(message).toContain('agents focus 74a4893f');
+  });
+
+  // The placeholder regex is /\{([a-z]+)\}/g — lowercase only. A camelCase name
+  // would never substitute, and renderSinkArgv would silently skip the sink.
+  it('exposes block placeholders that the lowercase-only regex can actually match', () => {
+    const argv = renderSinkArgv(['x', '{focus}', '{class}', '{cost}', '{block}'], blockBroadcastContext(block));
+    expect(argv).toBeDefined();
+    expect(argv!.slice(1)).toEqual([
+      'agents focus 74a4893f',
+      'decision',
+      'high',
+      block.blockId,
+    ]);
+  });
+
+  // A status post has no focus command, so the sink must still render for it.
+  it('leaves a plain post unaffected — no focus line appended', () => {
+    const argv = renderSinkArgv(['{message}'], {
+      text: 'CI green',
+      level: 'milestone',
+      project: 'agents-cli',
+    });
+    expect(argv).toEqual(['agents-cli · CI green']);
+  });
+});

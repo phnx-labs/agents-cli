@@ -42,7 +42,17 @@ export type MilestoneEvent =
   | 'task.completed'
   | 'checklist.created'
   /** Deliberate agent-authored progress post (`agents feed post`). */
-  | 'status.posted';
+  | 'status.posted'
+  /**
+   * The same post, but the agent is STUCK (`agents feed post --blocked`).
+   *
+   * A distinct event rather than a flag on `status.posted` because it is a
+   * different kind of thing in the stream: a benign update is history the
+   * moment it lands, while a blocked post stays open until someone answers it.
+   * Readers that show "what needs a human" select on this; readers that show
+   * "what happened" get both.
+   */
+  | 'status.blocked';
 
 /** Routine activity events, collapsed to counts by readers. */
 export type ActivityKind = 'file.edited';
@@ -89,6 +99,7 @@ export const MILESTONE_EVENTS: readonly MilestoneEvent[] = [
   'task.completed',
   'checklist.created',
   'status.posted',
+  'status.blocked',
 ];
 
 const MILESTONE_SET = new Set<string>(MILESTONE_EVENTS);

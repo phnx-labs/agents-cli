@@ -67,6 +67,59 @@ export interface FeedBroadcastContext {
   session?: string;
   /** URLs attached to the post — the PR, the ticket, a shared plan. */
   links?: string[];
+  /** Block-only: the block's stable id. Absent on a status post. */
+  blockId?: string;
+  /** Block-only: `approval` (has a safe default) or `decision` (needs a human). */
+  class?: string;
+  /** Block-only: cost-of-delay tag used by the urgency filter. */
+  cost?: string;
+  /** Block-only: the literal `agents focus <id>` command that unblocks it. */
+  focus?: string;
+}
+
+/**
+ * Map an open block onto the broadcast context, so a block reaches the same sinks
+ * a post does instead of dying in the ledger.
+ *
+ * The `text` is the ask itself, front-loaded — a notification banner shows roughly
+ * two lines, and a phone message is scanned, not read. `focus` carries the literal
+ * command that unblocks it, so the message the operator receives contains the one
+ * action they have to take rather than making them go find the session.
+ *
+ * Level is always `important`: a block is by definition an agent that has stopped
+ * making progress, so there is no per-block level flag to get wrong.
+ */
+export function blockBroadcastContext(
+  block: {
+    blockId: string;
+    sessionId: string;
+    host?: string;
+    questions?: Array<{ text?: string }>;
+    blockClass?: string;
+    costOfDelay?: string;
+    ticket?: string;
+    pr?: string;
+  },
+  extras: { project?: string; agent?: string } = {},
+): FeedBroadcastContext {
+  const ask = block.questions?.[0]?.text?.trim() || 'agent is blocked';
+  const links = [block.pr].filter((l): l is string => !!l && /^https?:\/\//i.test(l));
+  return {
+    text: ask,
+    level: 'important',
+    ticket: block.ticket,
+    project: extras.project,
+    agent: extras.agent,
+    host: block.host,
+    session: block.sessionId,
+    blockId: block.blockId,
+    class: block.blockClass,
+    cost: block.costOfDelay,
+    // Short id: `agents focus` matches on a prefix, and a full uuid in a phone
+    // message is noise the operator has to skip past to reach the verb.
+    focus: `agents focus ${block.sessionId.slice(0, 8)}`,
+    ...(links.length ? { links } : {}),
+  };
 }
 
 export interface PlannedSink {
@@ -92,7 +145,12 @@ const PLACEHOLDER = /\{([a-z]+)\}/g;
 export function composeBroadcastMessage(ctx: FeedBroadcastContext): string {
   const head = ctx.project ? `${ctx.project} · ${ctx.text}` : ctx.text;
   const link = ctx.links?.find((l) => /^https?:\/\//i.test(l));
-  return link ? `${head}\n${link}` : head;
+  // A block's second line is the command that unblocks it. The operator reading
+  // this on a phone should not have to go find the session — the one action they
+  // must take travels with the ask. A status post has no such action, so it keeps
+  // the link there instead.
+  const tail = [ctx.focus, link].filter(Boolean);
+  return tail.length ? `${head}\n${tail.join('\n')}` : head;
 }
 
 /** The values a template may reference, resolved once per post. */
@@ -107,6 +165,10 @@ function templateVars(ctx: FeedBroadcastContext): Record<string, string | undefi
     level: ctx.level,
     links: ctx.links?.length ? ctx.links.join(' ') : undefined,
     message: composeBroadcastMessage(ctx),
+    block: ctx.blockId,
+    class: ctx.class,
+    cost: ctx.cost,
+    focus: ctx.focus,
   };
 }
 
