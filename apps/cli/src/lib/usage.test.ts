@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { claudeAccessTokenNeedsRefresh, claudeUsageAccessTokenNoRefresh, loadClaudeOauth, saveClaudeOauth, getClaudeKeychainService, swrWindowMsFor } from './usage.js';
+import { claudeAccessTokenNeedsRefresh, claudeUsageAccessTokenNoRefresh, loadClaudeOauth, saveClaudeOauth, getClaudeKeychainService, swrWindowMsFor, getUsageInfo, formatUsageSummary, CLAUDE_NO_CREDENTIAL_ERROR, CLAUDE_EXPIRED_CREDENTIAL_ERROR } from './usage.js';
 import { setKeychainToken, setKeychainBackendForTest, secretsKeychainItem, type KeychainBackend } from './secrets/index.js';
 import { writeBundle, keychainRef, bundleItemStore } from './secrets/bundles.js';
 import { _resetFileStoreForTest } from './secrets/filestore.js';
@@ -295,5 +295,95 @@ describe('swrWindowMsFor — a routing decision does not get day-old data', () =
 
   it('clamps a negative age to zero — that IS an opinion: never serve the cache', () => {
     expect(swrWindowMsFor(-1)).toBe(0);
+  });
+});
+
+describe('a Claude usage read reports WHY it produced no snapshot', () => {
+  // Both of these returned `error: null` before, which is what let an account
+  // nobody could read render exactly like a healthy one: the caller fell back to
+  // the SWR cache and drew its bars as fact. On yosemite-s1 that hid five
+  // accounts whose stored token had expired — one of them eleven days earlier —
+  // behind a cache frozen for 26h, and balanced routing launched into an account
+  // that was already at its weekly cap.
+  //
+  // Neither path reaches the network: both return before the fetch, so these
+  // exercise the real code path with no live call.
+
+  /** Keychain backend holding exactly what the test seeds — nothing else. */
+  class MemBackend implements KeychainBackend {
+    store = new Map<string, string>();
+    has(item: string) { return this.store.has(item); }
+    get(item: string) {
+      const v = this.store.get(item);
+      if (v === undefined) throw new Error(`missing ${item}`);
+      return v;
+    }
+    set(item: string, value: string) { this.store.set(item, value); }
+    delete(item: string) { return this.store.delete(item); }
+    list(prefix: string) { return [...this.store.keys()].filter((k) => k.startsWith(prefix)); }
+  }
+
+  let home: string;
+  let prevBackend: KeychainBackend | null;
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-usage-err-'));
+    prevBackend = setKeychainBackendForTest(new MemBackend());
+  });
+
+  afterEach(() => {
+    setKeychainBackendForTest(prevBackend);
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  it('names a missing credential instead of returning a silent null', async () => {
+    const usage = await getUsageInfo('claude', { home });
+
+    expect(usage.snapshot).toBeNull();
+    expect(usage.error).toBe(CLAUDE_NO_CREDENTIAL_ERROR);
+  });
+
+  it('names an expired credential — the state a usage read can never heal', async () => {
+    // A usage read never refreshes (RUSH-1822), so this account stays unreadable
+    // until a real claude run rotates the token. Saying so is the whole point.
+    setKeychainToken(
+      getClaudeKeychainService(home),
+      JSON.stringify({
+        claudeAiOauth: { accessToken: 'tok-stale', refreshToken: 'r', expiresAt: Date.now() - 60_000 },
+      })
+    );
+
+    const usage = await getUsageInfo('claude', { home });
+
+    expect(usage.snapshot).toBeNull();
+    expect(usage.error).toBe(CLAUDE_EXPIRED_CREDENTIAL_ERROR);
+  });
+});
+
+describe('formatUsageSummary marks bars the live read could not confirm', () => {
+  const snapshot = {
+    source: 'cache' as const,
+    sourceLabel: 'cached',
+    capturedAt: new Date(NOW),
+    windows: [
+      { key: 'week' as const, label: 'Current week', shortLabel: 'W', usedPercent: 48, resetsAt: null, windowMinutes: 10080 },
+    ],
+  };
+
+  it('draws the bars AND says they are unverified', () => {
+    // The incident in one assertion: a cached "48%" must never render the same
+    // as a confirmed one. The number still shows — it is the last thing we saw,
+    // and hiding it would be worse — but it no longer reads as current.
+    const out = formatUsageSummary(null, snapshot, 3, { unverified: true });
+
+    expect(out).toContain('48%');
+    expect(out).toContain('unverified');
+  });
+
+  it('stays clean when the reading was confirmed', () => {
+    const out = formatUsageSummary(null, snapshot, 3);
+
+    expect(out).toContain('48%');
+    expect(out).not.toContain('unverified');
   });
 });

@@ -889,6 +889,17 @@ a stable per-account key:
   reports `usage unverified` in the launch banner rather than presenting a stale
   number as a fact. The cache is strictly per machine and never synced, so a box
   whose refresh is failing would otherwise route on day-old numbers indefinitely.
+- **A read that fails on the credential names the reason.** No readable
+  credential and a locally-expired one are distinct errors
+  (`CLAUDE_NO_CREDENTIAL_ERROR` / `CLAUDE_EXPIRED_CREDENTIAL_ERROR`,
+  [`src/lib/usage.ts`](../src/lib/usage.ts)), not a silent null — because a usage
+  read never refreshes a token, neither state heals until a real `claude` run
+  rotates the credential or a long-lived setup-token is provisioned. `agents view`
+  renders a cached reading that a failed live read could not confirm as the number
+  plus `unverified`, and `--refresh` lists every account it could not reach rather
+  than printing a table that looks fully refreshed. Measured on `yosemite-s1`,
+  where every account's stored token had expired and two `--refresh` runs wrote
+  nothing to the cache while reporting nothing wrong.
 
 What each agent can surface is bounded by what its local credential actually
 contains — this is a data-availability limit, not a policy choice:

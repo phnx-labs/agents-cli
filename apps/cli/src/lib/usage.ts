@@ -37,6 +37,24 @@ const CLAUDE_OAUTH_BETA_HEADER = 'oauth-2025-04-20';
 const CLAUDE_REFRESH_LEEWAY_MS = 5 * 60 * 1000;
 
 /**
+ * Why a Claude usage read produced no snapshot, when the cause is the credential
+ * rather than the network. Both cases used to return `error: null`, which made an
+ * account nobody can read indistinguishable from a healthy one: the caller fell
+ * back to whatever was in the SWR cache and rendered its bars as fact. On
+ * `yosemite-s1` that hid five accounts whose stored access token had expired —
+ * one of them eleven days earlier — behind a cache frozen for 26h, and balanced
+ * routing launched into an account that was actually at its weekly cap.
+ *
+ * A usage read never refreshes a token (RUSH-1822), so neither state can heal on
+ * its own: the account stays unreadable until a real `claude` run rotates the
+ * credential, or a long-lived setup-token is provisioned for it.
+ */
+export const CLAUDE_NO_CREDENTIAL_ERROR =
+  'No readable Claude credential — sign in, or provision a setup-token for this account.';
+export const CLAUDE_EXPIRED_CREDENTIAL_ERROR =
+  'Claude credential expired — re-auth this account (a usage read never refreshes it).';
+
+/**
  * True when a Claude OAuth access token is within the refresh leeway of expiry
  * (or already expired) — i.e. it "would need a refresh" before the next use.
  *
@@ -450,7 +468,7 @@ export function formatUsageSummary(
   plan: string | null,
   snapshot: UsageSnapshot | null,
   planWidth = 3,
-  opts?: { unavailable?: boolean }
+  opts?: { unavailable?: boolean; unverified?: boolean }
 ): string {
   const parts: string[] = [];
 
@@ -476,6 +494,12 @@ export function formatUsageSummary(
       });
     if (windows.length > 0) {
       parts.push(windows.join('  '));
+    }
+    // The bars came from the cache and the live read that should have confirmed
+    // them failed, so they are the last thing we saw — not the current state.
+    // Drawing them unmarked is what let a 26h-old "48% used" read as fact.
+    if (opts?.unverified) {
+      parts.push(chalk.yellow('unverified'));
     }
   } else if (opts?.unavailable) {
     // Signed-in account we could NOT fetch usage for (no live token in a reachable
@@ -636,19 +660,21 @@ async function getClaudeUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
     // path and usage needs only the access token, so it kills the Touch ID storm.
     const oauth = await loadClaudeOauth(options?.home, { accessTokenCache: true });
     if (!oauth?.accessToken) {
-      return { snapshot: null, error: null };
+      return { snapshot: null, error: CLAUDE_NO_CREDENTIAL_ERROR };
     }
 
     const requestedOrgId = normalizeString(options?.organizationId);
     const liveOrgId = normalizeString(oauth.organizationUuid);
     if (!isClaudeUsageOrgMatch(requestedOrgId, liveOrgId)) {
+      // Not a fault: this home is signed into a different org than the identity
+      // being read, so there is nothing to report for it.
       return { snapshot: null, error: null };
     }
 
     // Read-only: never refresh a single-use token just to read usage (RUSH-1822).
     const accessToken = claudeUsageAccessTokenNoRefresh(oauth);
     if (!accessToken) {
-      return { snapshot: null, error: null };
+      return { snapshot: null, error: CLAUDE_EXPIRED_CREDENTIAL_ERROR };
     }
 
     const response = await fetch(CLAUDE_USAGE_URL, {
