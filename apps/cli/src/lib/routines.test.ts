@@ -127,6 +127,21 @@ describe('validateTrigger', () => {
     expect(validateTrigger({ type: 'linear_event', event: 'Issue', action: 'update', teamKey: 'RUSH', label: 'agent' })).toEqual([]);
   });
 
+  it('accepts stateTo and stateFrom on linear_event triggers', () => {
+    expect(validateTrigger({
+      type: 'linear_event',
+      event: 'Issue',
+      action: 'update',
+      stateTo: 'Plan',
+      stateFrom: 'Triage',
+    })).toEqual([]);
+  });
+
+  it('rejects non-string stateTo/stateFrom on linear_event triggers', () => {
+    expect(validateTrigger({ type: 'linear_event', event: 'Issue', stateTo: 123 as never })).toContain('trigger.stateTo must be a string');
+    expect(validateTrigger({ type: 'linear_event', event: 'Issue', stateFrom: 123 as never })).toContain('trigger.stateFrom must be a string');
+  });
+
   it('rejects a bad type', () => {
     expect(validateTrigger({ type: 'gitlab', event: 'pull_request' })).toContain("trigger.type must be 'github_event' or 'linear_event'");
   });
@@ -661,5 +676,27 @@ describe('getLatestCompletedRun / {last_report} poison-stop', () => {
     expect(resolved).toContain('GOOD REPORT');
     expect(resolved).not.toContain('Not logged in');
     expect(resolved).not.toContain('/login');
+  });
+
+  it('substitutes {{...}} webhook context placeholders when context is passed', () => {
+    const config = {
+      name: jobName,
+      agent: 'claude',
+      schedule: '0 3 * * *',
+      prompt: 'Issue {{issue.identifier}}: {{issue.title}} (from {{updatedFrom.state.name}})',
+      mode: 'auto',
+      effort: 'auto',
+      timeout: '10m',
+      enabled: true,
+    } as JobConfig;
+
+    const resolved = resolveJobPrompt(config, {
+      source: 'linear',
+      event: 'Issue',
+      action: 'update',
+      issue: { identifier: 'RUSH-42', title: 'Fix it', state: { name: 'Plan' } },
+      updatedFrom: { state: { name: 'Triage' } },
+    });
+    expect(resolved).toBe('Issue RUSH-42: Fix it (from Triage)');
   });
 });

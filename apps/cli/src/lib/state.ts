@@ -84,6 +84,7 @@ const SYSTEM_PLUGINS_DIR = path.join(SYSTEM_AGENTS_DIR, 'plugins');
 // Unioned under user routines by listJobs()/readJob() so a routine shipped here
 // fires for every install, while a user routine of the same name overrides it.
 const SYSTEM_ROUTINES_DIR = path.join(SYSTEM_AGENTS_DIR, 'routines');
+const SYSTEM_WEBHOOKS_DIR = path.join(SYSTEM_AGENTS_DIR, 'webhooks');
 const SYSTEM_PROMPTCUTS_FILE = path.join(SYSTEM_AGENTS_DIR, 'hooks', 'promptcuts.yaml');
 const SYSTEM_MCP_CONFIG_FILE = path.join(SYSTEM_AGENTS_DIR, 'mcp.json');
 const SYSTEM_INSTRUCTIONS_FILE = path.join(SYSTEM_AGENTS_DIR, 'instructions.md');
@@ -98,6 +99,7 @@ const CACHE_DIR = path.join(USER_AGENTS_DIR, '.cache');
 
 // Top-level user dirs (config/definitions only — runtime moves into .history/.cache).
 const ROUTINES_DIR = path.join(USER_AGENTS_DIR, 'routines');
+const WEBHOOKS_DIR = path.join(USER_AGENTS_DIR, 'webhooks');
 // Monitor definitions (event-triggered watchers). Sibling of ROUTINES_DIR: a
 // monitor is a routine whose trigger is a watched source instead of a clock.
 const MONITORS_DIR = path.join(USER_AGENTS_DIR, 'monitors');
@@ -354,7 +356,14 @@ export function getCacheDir(): string { return CACHE_DIR; }
 export function getPackagesDir(): string { return PACKAGES_DIR; }
 
 /** Path to routine YAML definitions (~/.agents/routines/). */
-export function getRoutinesDir(): string { return ROUTINES_DIR; }
+export function getRoutinesDir(): string { return process.env.AGENTS_ROUTINES_DIR ?? ROUTINES_DIR; }
+
+/**
+ * Path to webhook handler YAML definitions (~/.agents/webhooks/). Handlers are
+ * one-off triggers for agents/workflows/commands/routines, layered the same way
+ * as routines (project > user > system).
+ */
+export function getWebhooksDir(): string { return process.env.AGENTS_WEBHOOKS_DIR ?? WEBHOOKS_DIR; }
 
 /**
  * Path to built-in routine definitions shipped in the system repo
@@ -363,7 +372,13 @@ export function getRoutinesDir(): string { return ROUTINES_DIR; }
  * user routine of the same name overrides it (a user copy with `enabled: false`
  * disables the built-in). The daemon fires these; the directory need not exist.
  */
-export function getSystemRoutinesDir(): string { return SYSTEM_ROUTINES_DIR; }
+export function getSystemRoutinesDir(): string { return process.env.AGENTS_SYSTEM_ROUTINES_DIR ?? SYSTEM_ROUTINES_DIR; }
+
+/**
+ * Path to built-in webhook handler definitions shipped in the system repo
+ * (`~/.agents/.system/webhooks/`). Layered under user handlers by `listHandlers()`.
+ */
+export function getSystemWebhooksDir(): string { return process.env.AGENTS_SYSTEM_WEBHOOKS_DIR ?? SYSTEM_WEBHOOKS_DIR; }
 
 /**
  * Path to a project-scoped routines directory (`<project>/.agents/routines/`),
@@ -381,6 +396,17 @@ export function getProjectRoutinesDir(cwd: string = process.cwd()): string | nul
   const projectAgentsDir = getProjectAgentsDir(cwd);
   if (!projectAgentsDir) return null;
   return path.join(projectAgentsDir, 'routines');
+}
+
+/**
+ * Path to a project-scoped webhook handlers directory
+ * (`<project>/.agents/webhooks/`), or null when no project `.agents/` is found
+ * by walking up from cwd.
+ */
+export function getProjectWebhooksDir(cwd: string = process.cwd()): string | null {
+  const projectAgentsDir = getProjectAgentsDir(cwd);
+  if (!projectAgentsDir) return null;
+  return path.join(projectAgentsDir, 'webhooks');
 }
 
 /** Path to routine execution logs (~/.agents/.history/runs/). */
@@ -601,6 +627,7 @@ export function ensureAgentsDir(): void {
   if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, opts);
   if (!fs.existsSync(PACKAGES_DIR)) fs.mkdirSync(PACKAGES_DIR, opts);
   if (!fs.existsSync(ROUTINES_DIR)) fs.mkdirSync(ROUTINES_DIR, opts);
+  if (!fs.existsSync(WEBHOOKS_DIR)) fs.mkdirSync(WEBHOOKS_DIR, opts);
   if (!fs.existsSync(RUNS_DIR)) fs.mkdirSync(RUNS_DIR, opts);
   if (!fs.existsSync(VERSIONS_DIR)) fs.mkdirSync(VERSIONS_DIR, opts);
   if (!fs.existsSync(SHIMS_DIR)) fs.mkdirSync(SHIMS_DIR, opts);
@@ -610,6 +637,7 @@ export function ensureAgentsDir(): void {
   if (!fs.existsSync(SYSTEM_RULES_DIR)) fs.mkdirSync(SYSTEM_RULES_DIR, opts);
   if (!fs.existsSync(SYSTEM_PERMISSIONS_DIR)) fs.mkdirSync(SYSTEM_PERMISSIONS_DIR, opts);
   if (!fs.existsSync(SYSTEM_SUBAGENTS_DIR)) fs.mkdirSync(SYSTEM_SUBAGENTS_DIR, opts);
+  if (!fs.existsSync(SYSTEM_WEBHOOKS_DIR)) fs.mkdirSync(SYSTEM_WEBHOOKS_DIR, opts);
   try { fs.chmodSync(SYSTEM_AGENTS_DIR, 0o700); } catch {}
 }
 

@@ -114,6 +114,8 @@ function fireConditionLabel(job: JobConfig): string {
       job.trigger.action ? `action=${job.trigger.action}` : null,
       job.trigger.teamKey ? `team=${job.trigger.teamKey}` : null,
       job.trigger.label ? `label=${job.trigger.label}` : null,
+      job.trigger.stateTo ? `stateTo=${job.trigger.stateTo}` : null,
+      job.trigger.stateFrom ? `stateFrom=${job.trigger.stateFrom}` : null,
     ].filter(Boolean).join(', ');
     return `on linear:${job.trigger.event}${filters ? ` (${filters})` : ''}`;
   }
@@ -322,6 +324,8 @@ function parseRoutineTrigger(options: Record<string, unknown>): JobTrigger | und
     if (typeof options.action === 'string') trigger.action = options.action;
     if (typeof options.teamKey === 'string') trigger.teamKey = options.teamKey;
     if (typeof options.label === 'string') trigger.label = options.label;
+    if (typeof options.stateTo === 'string') trigger.stateTo = options.stateTo;
+    if (typeof options.stateFrom === 'string') trigger.stateFrom = options.stateFrom;
     return trigger;
   }
   throw new Error('--on source must be github or linear');
@@ -679,6 +683,8 @@ export function registerRoutinesCommands(program: Command): void {
     .option('--action <name>', 'Webhook action filter for --on triggers (GitHub: labeled/opened; Linear: update)')
     .option('--team-key <key>', 'Linear team key filter for --on linear:<event> (e.g. RUSH)')
     .option('--label <name>', 'Label filter for --on triggers (GitHub label name or Linear issue label)')
+    .option('--state-to <name>', 'Linear current-state filter for --on linear:<event> (e.g. Plan)')
+    .option('--state-from <name>', 'Linear previous-state filter for --on linear:<event> (e.g. Triage)')
     .option('--end-at <iso>', 'Stop firing on or after this ISO 8601 timestamp (e.g., "2026-12-31T23:59:00Z"); routine auto-disables.')
     .option('--disabled', 'Create the routine but keep it paused (enable later with resume)')
     .option('--resume <sessionId>', 'At fire time, resume this existing session id (via `agents run <agent> --resume`) instead of starting fresh — the actual session reopens with full context and the prompt becomes its next turn. Powers self-scheduled wake-ups (e.g. /hibernate). Requires --agent claude or codex; runs un-sandboxed (the session store lives in the real home, not the job overlay).')
@@ -1004,10 +1010,23 @@ export function registerRoutinesCommands(program: Command): void {
   routinesCmd
     .command('edit [name]')
     .description('Open a routine in $EDITOR. Creates a new YAML template if the routine does not exist.')
-    .action(async (name: string | undefined) => {
+    .option('--state-to <name>', 'Update the Linear current-state filter before opening the editor')
+    .option('--state-from <name>', 'Update the Linear previous-state filter before opening the editor')
+    .action(async (name: string | undefined, options: { stateTo?: string; stateFrom?: string }) => {
       if (!name) {
         name = await pickJob('Select job to edit', undefined, ['agents routines edit <name>']) ?? undefined;
         if (!name) return;
+      }
+
+      const existing = readJob(name);
+      if (existing && (options.stateTo !== undefined || options.stateFrom !== undefined)) {
+        if (!existing.trigger || existing.trigger.type !== 'linear_event') {
+          console.error(chalk.red(`'${name}' does not have a Linear trigger; --state-to/--state-from only apply to linear triggers`));
+          process.exit(1);
+        }
+        if (options.stateTo !== undefined) existing.trigger.stateTo = options.stateTo || undefined;
+        if (options.stateFrom !== undefined) existing.trigger.stateFrom = options.stateFrom || undefined;
+        writeJob(existing);
       }
 
       const jobPath = getJobPath(name);

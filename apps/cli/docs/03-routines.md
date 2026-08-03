@@ -268,6 +268,106 @@ Operational runbook:
    agents funnel status yosemite-s0
    ```
 
+### Webhook handlers
+
+In addition to routine triggers, you can define one-off **webhook handlers** in
+`~/.agents/webhooks/*.yml`. A handler matches incoming webhooks the same way a
+routine trigger does, but instead of scheduling a recurring job it runs an
+agent, workflow, shell command, or an existing routine once.
+
+```yaml
+# ~/.agents/webhooks/linear-status-planner.yml
+name: linear-status-planner
+source: linear
+event: Issue
+action: update
+stateTo: Plan
+devices:
+  - mac-mini
+run:
+  agent: claude
+  prompt: |
+    Issue {{issue.identifier}} moved from {{updatedFrom.state.name}} to {{issue.state.name}}.
+    Create a concise implementation plan and post it as a Linear comment.
+```
+
+#### Handler YAML format
+
+| Field | Description |
+| --- | --- |
+| `name` | Unique handler name. |
+| `enabled` | Set to `false` to disable without deleting the file. |
+| `devices` | Same fleet allowlist as routines — only matching devices run the handler. |
+| `source` | `github` or `linear`. |
+| `event` | Source event name (e.g. `Issue`, `pull_request`). |
+| `action` | Webhook action (e.g. `update`, `opened`, `labeled`). |
+| `run` | One-of `agent`, `workflow`, or `command`, plus an optional `prompt`. |
+| `routine` | Name of a routine to delegate to instead of `run`. |
+
+#### Filters
+
+Handlers support the same filters as routine triggers:
+
+- `source`, `event`, `action` — always available.
+- Linear: `teamKey`, `label`, `stateTo`, `stateFrom`.
+- GitHub: `repo`, `branch`, `label`.
+
+`stateTo` matches the current Linear state name (`payload.data.state.name`);
+`stateFrom` matches the previous state (`payload.updatedFrom.state.name`).
+
+#### Actions
+
+- `run.agent` — run the agent headlessly with the substituted prompt.
+- `run.workflow` — run `agents run <workflow>` with the prompt.
+- `run.command` — run a shell command directly (the command string is also
+  variable-substituted). Substituted values are **shell-quoted**: the webhook
+  payload is external input, so `{{issue.title}}` and friends arrive as one inert
+  argument and cannot inject extra commands. Your own template is not quoted, so
+  pipes, redirects, and `&&` still work — write `grep {{issue.title}} log.txt`,
+  not `grep '{{issue.title}}' log.txt` (the quotes are added for you). On Windows
+  this path runs through `cmd.exe`, which these quoting rules do not cover, so a
+  `run.command` containing `{{…}}` is refused with an error; use `run.prompt` or
+  a command without placeholders there.
+- `routine` — load the named routine, substitute its prompt, and run it
+  detached. The handler's `devices` pin overrides the routine's for this fire.
+
+#### Prompt variables
+
+Use `{{dotted.path}}` placeholders in `run.prompt` (and in the delegated
+routine's prompt). For Linear webhooks the context is:
+
+```ts
+{
+  source: 'linear',
+  event: 'Issue',
+  action: 'update',
+  issue: payload.data,
+  updatedFrom: payload.updatedFrom,
+}
+```
+
+Examples: `{{issue.identifier}}`, `{{issue.state.name}}`,
+`{{updatedFrom.state.name}}`, `{{issue.title}}`, `{{issue.description}}`.
+
+For GitHub webhooks the context includes `repository`, `pull_request`, and
+`issue`.
+
+#### mac-mini ingress with funnel
+
+Handlers are fired by the same `agents webhook serve` receiver as routine
+triggers. On a headless Mac (e.g. `mac-mini`), expose it publicly with
+Tailscale Funnel:
+
+```bash
+# On mac-mini
+agents webhook serve --secrets-bundle webhooks --port 8787 &
+agents funnel up mac-mini --local-port 8787 --port 443
+```
+
+Then point Linear/GitHub at `https://mac-mini.<tailnet>.ts.net/hooks/<source>`.
+The handler's `devices: [mac-mini]` pin ensures only that machine dispatches the
+one-off agent run.
+
 ### Device Allowlist
 
 `~/.agents/routines/` rides the user repo, so every routine syncs to every machine —

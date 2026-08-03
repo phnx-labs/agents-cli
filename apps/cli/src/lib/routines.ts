@@ -125,6 +125,10 @@ export interface LinearJobTrigger {
   teamKey?: string;
   /** Required issue label name. */
   label?: string;
+  /** Current Linear state name that must match (e.g. `Plan`). */
+  stateTo?: string;
+  /** Previous Linear state name that must match (e.g. `Triage`). */
+  stateFrom?: string;
 }
 
 export type JobTrigger = GithubJobTrigger | LinearJobTrigger;
@@ -828,6 +832,12 @@ export function validateTrigger(trigger: unknown): string[] {
   if (linear.label !== undefined && typeof linear.label !== 'string') {
     errors.push('trigger.label must be a string');
   }
+  if (linear.stateTo !== undefined && typeof linear.stateTo !== 'string') {
+    errors.push('trigger.stateTo must be a string');
+  }
+  if (linear.stateFrom !== undefined && typeof linear.stateFrom !== 'string') {
+    errors.push('trigger.stateFrom must be a string');
+  }
   return errors;
 }
 
@@ -982,8 +992,91 @@ export function shouldPurgeCompletedOneShotRoutine(
   return hasCompletedOneShotRun(config, now);
 }
 
+/**
+ * Context passed to `resolveJobPrompt` when a job is fired by a webhook. Lets
+ * prompts use `{{issue.identifier}}`, `{{updatedFrom.state.name}}`, etc.
+ */
+export interface WebhookContext {
+  source: string;
+  event: string;
+  action?: string;
+  issue?: unknown;
+  updatedFrom?: unknown;
+  pull_request?: unknown;
+  repository?: unknown;
+}
+
+function getPath(obj: unknown, path: string): unknown {
+  const parts = path.split('.');
+  let current: unknown = obj;
+  for (const part of parts) {
+    if (current === null || current === undefined) return undefined;
+    current = (current as Record<string, unknown>)[part];
+  }
+  return current;
+}
+
+/**
+ * Substitute `{{dotted.path}}` placeholders in a string using a webhook context.
+ * Missing values are replaced with an empty string.
+ */
+export function substituteWebhookPrompt(prompt: string, context: WebhookContext): string {
+  return prompt.replace(/\{\{([^{}]+)\}\}/g, (_, rawPath: string) => {
+    const value = getPath(context, rawPath.trim());
+    if (value === undefined || value === null) return '';
+    return String(value);
+  });
+}
+
+/**
+ * Substitute `{{dotted.path}}` placeholders in a string destined for a SHELL,
+ * quoting every substituted value so payload content cannot break out of it.
+ *
+ * `run.command` is executed through a shell, and its context is built from an
+ * external webhook payload — `issue.title`, `issue.description`, and the GitHub
+ * `pull_request` fields are free text any outside contributor can set. Pasting
+ * those in raw (as {@link substituteWebhookPrompt} does, correctly, for prompts)
+ * turns an operator's `echo {{issue.title}}` into a command-injection sink.
+ *
+ * The template itself is operator-authored and stays unquoted, so pipes,
+ * redirects, and `&&` in the configured command keep working. Only the
+ * interpolated values are quoted.
+ *
+ * POSIX `sh` quoting: wrap in single quotes and close/escape/reopen for any
+ * embedded single quote. `exec` uses `cmd.exe` on Windows, which does not
+ * honour these rules — see `assertShellSubstitutionSupported`.
+ */
+export function substituteWebhookCommand(command: string, context: WebhookContext): string {
+  return command.replace(/\{\{([^{}]+)\}\}/g, (_, rawPath: string) => {
+    const value = getPath(context, rawPath.trim());
+    if (value === undefined || value === null) return "''";
+    return `'${String(value).replace(/'/g, `'\\''`)}'`;
+  });
+}
+
+/**
+ * Refuse a `run.command` carrying placeholders on a platform whose shell we
+ * cannot safely quote for. `child_process.exec` runs through `cmd.exe` on
+ * Windows, where POSIX single-quoting is not a quoting mechanism at all, so
+ * {@link substituteWebhookCommand} would not contain a hostile value.
+ *
+ * Fail loud rather than execute something we cannot prove is safe.
+ */
+export function assertShellSubstitutionSupported(
+  command: string,
+  platform: NodeJS.Platform = process.platform,
+): void {
+  if (platform === 'win32' && /\{\{[^{}]+\}\}/.test(command)) {
+    throw new Error(
+      'run.command with {{…}} placeholders is not supported on Windows: the values come from an ' +
+        'untrusted webhook payload and cmd.exe cannot be quoted safely. Use run.prompt, or a ' +
+        'command with no placeholders.',
+    );
+  }
+}
+
 /** Expand built-in and user-defined template variables in a job's prompt string. */
-export function resolveJobPrompt(config: JobConfig): string {
+export function resolveJobPrompt(config: JobConfig, context?: WebhookContext): string {
   const now = new Date();
   const tz = config.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
   const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -1008,6 +1101,11 @@ export function resolveJobPrompt(config: JobConfig): string {
     for (const [key, value] of Object.entries(config.variables)) {
       prompt = prompt.replace(new RegExp(`\\{${key}\\}`, 'g'), value);
     }
+  }
+
+  // Webhook-driven variables ({{issue.identifier}}, {{updatedFrom.state.name}}, ...)
+  if (context) {
+    prompt = substituteWebhookPrompt(prompt, context);
   }
 
   // Last report (special handling). Only a COMPLETED run's report is injected —

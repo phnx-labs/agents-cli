@@ -11,6 +11,7 @@ import * as path from 'path';
 import chalk from 'chalk';
 import { readAndResolveBundleEnv, isHeadlessSecretsContext } from '../lib/secrets/bundles.js';
 import { createFileDeliveryStore, startWebhookServer, type WebhookSecrets } from '../lib/triggers/webhook.js';
+import type { FiredHandler } from '../lib/triggers/handlers.js';
 import { getRuntimeStateDir } from '../lib/state.js';
 
 const DEFAULT_HOST = '127.0.0.1';
@@ -94,10 +95,13 @@ export function registerWebhookCommand(program: Command): void {
           deliveryStore: createFileDeliveryStore(
             path.join(getRuntimeStateDir(), 'webhook', 'deliveries.json'),
           ),
-          onDelivery: (webhook, fired) => {
+          onDelivery: (webhook, fired, handlers) => {
+            const parts: string[] = [];
+            if (fired.length) parts.push(`routines ${fired.map((f) => f.jobName).join(', ')}`);
+            if (handlers.length) parts.push(`handlers ${handlers.map((h) => h.handlerName).join(', ')}`);
             console.log(
               `${new Date().toISOString()} ${webhook.source}:${webhook.event} ` +
-              `${fired.length ? `fired ${fired.map((f) => f.jobName).join(', ')}` : 'no match'}`,
+              (parts.length ? `fired ${parts.join('; ')}` : 'no match'),
             );
           },
         });

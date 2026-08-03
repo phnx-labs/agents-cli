@@ -121,6 +121,14 @@ export type EventType =
   // Sessions
   | 'session.start'
   | 'session.end'
+  // Webhooks
+  | 'webhook.received'
+  | 'webhook.authorized'
+  | 'webhook.rejected'
+  | 'webhook.matched'
+  | 'webhook.fired'
+  | 'webhook.handler.start'
+  | 'webhook.handler.end'
   // Agent activity (emitted at hook time; see lib/activity.ts). These share the
   // one event vocabulary so operational and agent-semantic events read as a
   // single stream via lib/event-stream.ts.

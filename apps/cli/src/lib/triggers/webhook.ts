@@ -22,9 +22,18 @@ import type {
   JobConfig,
   LinearJobTrigger,
   RunMeta,
+  WebhookContext,
 } from '../routines.js';
-import { jobRunsOnThisDevice, listJobs } from '../routines.js';
+import { jobRunsOnThisDevice, listJobs, substituteWebhookPrompt } from '../routines.js';
 import { executeJobDetached } from '../runner.js';
+import { emit } from '../events.js';
+import {
+  listHandlers,
+  handlerMatchesWebhook,
+  executeHandler,
+  buildWebhookContext,
+  type FiredHandler,
+} from './handlers.js';
 
 export type WebhookSource = 'github' | 'linear';
 
@@ -88,11 +97,11 @@ export function webhookBranches(event: string, payload: Record<string, unknown>)
   return [...branches];
 }
 
-function linearAction(payload: Record<string, unknown>): string | null {
+export function linearAction(payload: Record<string, unknown>): string | null {
   return typeof payload.action === 'string' ? payload.action : null;
 }
 
-function linearTeamKey(payload: Record<string, unknown>): string | null {
+export function linearTeamKey(payload: Record<string, unknown>): string | null {
   const data = payload.data as Record<string, unknown> | undefined;
   const identifier = data?.identifier;
   if (typeof identifier === 'string') {
@@ -103,7 +112,7 @@ function linearTeamKey(payload: Record<string, unknown>): string | null {
   return typeof team?.key === 'string' ? team.key : null;
 }
 
-function linearLabels(payload: Record<string, unknown>): string[] {
+export function linearLabels(payload: Record<string, unknown>): string[] {
   // Linear webhook bodies flatten list relations: an Issue event carries
   // `data.labels` as a flat array of label objects (`[{ id, name, color }]`),
   // NOT the `{ nodes: [...] }` connection shape returned by the GraphQL API.
@@ -115,11 +124,11 @@ function linearLabels(payload: Record<string, unknown>): string[] {
     .filter((n): n is string => typeof n === 'string' && n.length > 0);
 }
 
-function githubAction(payload: Record<string, unknown>): string | null {
+export function githubAction(payload: Record<string, unknown>): string | null {
   return typeof payload.action === 'string' ? payload.action : null;
 }
 
-function githubLabels(payload: Record<string, unknown>): string[] {
+export function githubLabels(payload: Record<string, unknown>): string[] {
   const names = new Set<string>();
   const add = (value: unknown) => {
     if (typeof value === 'string' && value.length > 0) names.add(value);
@@ -175,6 +184,16 @@ function linearTriggerMatches(trigger: LinearJobTrigger, webhook: IncomingWebhoo
     const expected = trigger.label.toLowerCase();
     if (!linearLabels(webhook.payload).some((name) => name.toLowerCase() === expected)) return false;
   }
+  if (trigger.stateTo) {
+    const data = webhook.payload.data as Record<string, unknown> | undefined;
+    const current = (data?.state as Record<string, unknown> | undefined)?.name;
+    if (current !== trigger.stateTo) return false;
+  }
+  if (trigger.stateFrom) {
+    const updatedFrom = webhook.payload.updatedFrom as Record<string, unknown> | undefined;
+    const previous = (updatedFrom?.state as Record<string, unknown> | undefined)?.name;
+    if (previous !== trigger.stateFrom) return false;
+  }
   return true;
 }
 
@@ -210,6 +229,8 @@ export interface FireWebhookOptions {
   skipJobNames?: ReadonlySet<string>;
   /** Called immediately after a single matched job dispatch succeeds. */
   onJobFired?: (job: JobConfig, fired: FiredJob) => void;
+  /** Optional webhook context used to expand `{{...}}` placeholders in prompts. */
+  context?: WebhookContext;
 }
 
 /** Result of firing one matched job. */
@@ -246,8 +267,12 @@ export async function fireWebhookJobs(
   const failures: { jobName: string; error: Error }[] = [];
   for (const job of matched) {
     if (skipJobNames.has(job.name)) continue;
+    emit('webhook.matched', { source: webhook.source, event: webhook.event, jobName: job.name });
     try {
-      const meta = await dispatch(job);
+      const jobToDispatch = options.context
+        ? { ...job, prompt: substituteWebhookPrompt(job.prompt, options.context) }
+        : job;
+      const meta = await dispatch(jobToDispatch);
       const firedJob = { jobName: job.name, runId: meta.runId };
       fired.push(firedJob);
       options.onJobFired?.(job, firedJob);
@@ -490,7 +515,7 @@ export interface WebhookServerOptions {
   /** Override the fire options (mainly for tests). */
   fire?: FireWebhookOptions;
   /** Called after each delivery is handled (mainly for tests/observability). */
-  onDelivery?: (webhook: IncomingWebhook, fired: FiredJob[]) => void;
+  onDelivery?: (webhook: IncomingWebhook, fired: FiredJob[], handlers: FiredHandler[]) => void;
   deliveryStore?: DeliveryStore;
   rateLimiter?: RateLimiter;
   rateLimitPerMinute?: number;
@@ -533,6 +558,7 @@ export function startWebhookServer(options: WebhookServerOptions): http.Server {
 
       const secret = options.secrets[source];
       if (!secret) {
+        emit('webhook.rejected', { source, reason: 'missing webhook secret' });
         res.writeHead(503, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ ok: false, error: `missing ${source} webhook secret` }));
         return;
@@ -545,12 +571,14 @@ export function startWebhookServer(options: WebhookServerOptions): http.Server {
       // shed this load on its own.
       const ip = req.socket.remoteAddress ?? 'unknown';
       if (!ipRateLimiter.take(ip)) {
+        emit('webhook.rejected', { source, reason: 'ip rate limit exceeded' });
         res.writeHead(429, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ ok: false, error: 'rate limit exceeded' }));
         return;
       }
       const declaredLength = Number.parseInt(header(req.headers, 'content-length') ?? '', 10);
       if (Number.isFinite(declaredLength) && declaredLength > maxBodyBytes) {
+        emit('webhook.rejected', { source, reason: 'payload too large' });
         res.writeHead(413, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ ok: false, error: `payload exceeds ${maxBodyBytes} bytes` }));
         return;
@@ -562,12 +590,16 @@ export function startWebhookServer(options: WebhookServerOptions): http.Server {
           ? verifyGithubSignature(req.headers, rawBody, secret)
           : verifyLinearSignature(req.headers, rawBody, secret);
         if (!valid) {
+          emit('webhook.rejected', { source, reason: 'invalid signature' });
           res.writeHead(401, { 'content-type': 'application/json' });
           res.end(JSON.stringify({ ok: false, error: 'invalid signature' }));
           return;
         }
 
         const id = deliveryId(source, req.headers, rawBody);
+        const event = source === 'github' ? (header(req.headers, 'x-github-event') ?? '') : '';
+        emit('webhook.received', { source, event, deliveryId: id });
+
         if (deliveryStore.seen(id)) {
           res.writeHead(200, { 'content-type': 'application/json' });
           res.end(JSON.stringify({ ok: true, duplicate: true, fired: [] }));
@@ -575,13 +607,16 @@ export function startWebhookServer(options: WebhookServerOptions): http.Server {
         }
 
         const payload = rawBody.length > 0 ? JSON.parse(rawBody.toString('utf-8')) as Record<string, unknown> : {};
+        const webhookEvent = source === 'github' ? event : String(payload.type ?? '');
         if (source === 'linear' && !verifyLinearTimestamp(payload)) {
+          emit('webhook.rejected', { source, event: webhookEvent, deliveryId: id, reason: 'stale linear webhook timestamp' });
           res.writeHead(401, { 'content-type': 'application/json' });
           res.end(JSON.stringify({ ok: false, error: 'stale linear webhook timestamp' }));
           return;
         }
 
         if (!rateLimiter.take(source)) {
+          emit('webhook.rejected', { source, event: webhookEvent, deliveryId: id, reason: 'rate limit exceeded' });
           res.writeHead(429, { 'content-type': 'application/json' });
           res.end(JSON.stringify({ ok: false, error: 'rate limit exceeded' }));
           return;
@@ -589,22 +624,52 @@ export function startWebhookServer(options: WebhookServerOptions): http.Server {
 
         const webhook: IncomingWebhook = {
           source,
-          event: source === 'github' ? (header(req.headers, 'x-github-event') ?? '') : String(payload.type ?? ''),
+          event: webhookEvent,
           payload,
         };
+        emit('webhook.authorized', { source, event: webhookEvent, deliveryId: id });
+        const context = buildWebhookContext(webhook);
+
         const fireOptions = options.fire ?? {};
-        const fired = await fireWebhookJobs(webhook, {
+        const firedJobs = await fireWebhookJobs(webhook, {
           ...fireOptions,
+          context,
           skipJobNames: deliveryStore.completedJobs(id),
           onJobFired: (job, firedJob) => {
+            emit('webhook.fired', { source, event: webhookEvent, deliveryId: id, jobName: job.name, runId: firedJob.runId });
             deliveryStore.markJob(id, job.name);
             fireOptions.onJobFired?.(job, firedJob);
           },
         });
+
+        const handlers = listHandlers();
+        const matchedHandlers = handlers.filter((handler) => handlerMatchesWebhook(handler, webhook));
+        const firedHandlers: FiredHandler[] = [];
+        const handlerErrors: { handlerName: string; error: string }[] = [];
+        await Promise.allSettled(
+          matchedHandlers.map(async (handler) => {
+            if (deliveryStore.completedJobs(id).has(handler.name)) return;
+            emit('webhook.matched', { source, event: webhookEvent, deliveryId: id, handlerName: handler.name });
+            try {
+              const result = await executeHandler(handler, webhook);
+              deliveryStore.markJob(id, handler.name);
+              firedHandlers.push(result);
+            } catch (err) {
+              handlerErrors.push({ handlerName: handler.name, error: (err as Error).message });
+            }
+          }),
+        );
+
         deliveryStore.mark(id);
-        options.onDelivery?.(webhook, fired);
+        options.onDelivery?.(webhook, firedJobs, firedHandlers);
         res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ ok: true, fired: fired.map((f) => f.jobName), runs: fired }));
+        res.end(JSON.stringify({
+          ok: true,
+          fired: firedJobs.map((f) => f.jobName),
+          runs: firedJobs,
+          handlers: firedHandlers,
+          ...(handlerErrors.length > 0 ? { handlerErrors } : {}),
+        }));
       } catch (err) {
         res.writeHead(400, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ ok: false, error: (err as Error).message }));
