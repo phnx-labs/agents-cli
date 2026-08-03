@@ -732,7 +732,9 @@ async function showInstalledVersions(
       const parts = [`    ${verLabel}${padding}`];
       const gUsageKey = getUsageLookupKey(gInfo);
       const gUsage = gUsageKey ? usageByKey.get(gUsageKey) : undefined;
-      const gUsageStr = formatUsageSummary(gInfo?.plan || null, gUsage?.snapshot || null);
+      const gUsageStr = formatUsageSummary(gInfo?.plan || null, gUsage?.snapshot || null, 3, {
+        unverified: !!gUsage?.snapshot && !!gUsage.error,
+      });
       const gActiveStr = gInfo ? formatLastActive(gInfo.lastActive) : '';
       if (gInfo?.email || gUsageStr || gActiveStr || gInfo?.signedIn) {
         const gDisplay = accountColumnLabel(gInfo);
