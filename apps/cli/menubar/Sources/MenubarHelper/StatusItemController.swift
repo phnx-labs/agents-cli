@@ -116,8 +116,17 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// Open this helper's menu. Called when a duplicate launch surrenders
     /// (SingleInstance) — re-launching a menu-bar app means "show me the one
     /// that is already running", so the incumbent answers by dropping its menu.
-    func surface() {
+    ///
+    /// @objc + NSObject because the observer must be registered with the
+    /// selector-based DistributedNotificationCenter API: only that overload
+    /// takes a suspensionBehavior, and this app is `.accessory` — never the
+    /// active app — so the default behavior queues the notification instead of
+    /// delivering it and the menu never opens.
+    @objc func surface() {
         guard let button = statusItem.button else { return }
+        // Logged: this is the one moment where a second launch changed what the
+        // user sees, and the launchd plist routes stderr to menubar.log.
+        FileHandle.standardError.write(Data("MenubarHelper: surfacing menu for a duplicate launch\n".utf8))
         NSApp.activate(ignoringOtherApps: true)
         button.performClick(nil)
     }

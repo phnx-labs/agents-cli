@@ -79,9 +79,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // A duplicate launch surrenders (SingleInstance) and posts this instead
         // of adding a second status item — so answering it by opening the menu
         // is what makes "launch it again" show the helper the user already has.
+        //
+        // .deliverImmediately is load-bearing, and only the selector-based
+        // overload accepts it: this app is `.accessory` and so never the active
+        // app, and the default suspension behavior queues a distributed
+        // notification for an inactive app rather than delivering it — the menu
+        // would simply never open.
         DistributedNotificationCenter.default().addObserver(
-            forName: SingleInstance.surfaceNotification, object: nil, queue: .main
-        ) { [weak controller] _ in controller?.surface() }
+            controller, selector: #selector(StatusItemController.surface),
+            name: SingleInstance.surfaceNotification, object: nil,
+            suspensionBehavior: .deliverImmediately
+        )
         // Own notification click-through (RUSH-2030): the daemon posts branded
         // notifications via one-shot `--notify` processes, but this persistent
         // instance is the NSUserNotificationCenter delegate that opens their
