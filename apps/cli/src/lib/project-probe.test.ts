@@ -44,7 +44,11 @@ function commit(p: string, msg: string): void {
 /** A repo with an upstream set to a local bare remote, pushed and even. */
 function repoWithUpstream(name: string): { repo: string; remote: string } {
   const remote = path.join(dir, `${name}.git`);
-  git(dir, ['init', '--bare', remote]);
+  // `-b main` on the bare init too: its HEAD symref decides what a clone checks
+  // out, and CI's init.defaultBranch is master — a bare HEAD→master leaves the
+  // sibling clone branchless and its push fails with "src refspec main does not
+  // match any".
+  git(dir, ['init', '--bare', '-b', 'main', remote]);
   const repo = path.join(dir, name);
   initRepo(repo);
   commit(repo, 'initial');
