@@ -4,6 +4,21 @@ All notable changes to the Factory extension are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); `scripts/release.sh` requires a
 `## [<version>]` section for the version being published.
 
+## [0.9.309] - 2026-08-03
+
+- **The `(Pick Host)` host list shows every device instantly, even on a busy machine.**
+  The picker's snapshot is now warmed at extension startup (the cheap `devices
+  list` registry read, no fleet SSH sweep), so the first `New <Agent> (Pick Host)`
+  in a window renders every host immediately instead of showing only *This Mac* +
+  *Balanced* while a cold snapshot loads. When the snapshot is stale, the refresh
+  runs in two phases: the device rows swap in as soon as the registry read lands,
+  and the recent-usage annotations fill in afterward from the fleet sweep — so the
+  host list never waits on the fleet fan-out, which is where the seconds went on a
+  loaded laptop (an interactive box under heavy agent load turned a 0.4s registry
+  read into a multi-second wait).
+  Source: `src/vscode/extension.ts`, `src/core/hostPickerCache.ts`,
+  `src/vscode/remoteSessions.vscode.ts`.
+
 ## [0.9.308] - 2026-08-03
 
 - **`Agents: Fork (Recap)` starts a new sibling with context from a session you pick.**

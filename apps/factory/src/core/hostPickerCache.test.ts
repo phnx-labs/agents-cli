@@ -6,6 +6,7 @@ import {
   parseHostPickerCache,
   serializeUsage,
   sortHostPickerDevices,
+  withRefreshedDevices,
   type HostPickerCache,
 } from './hostPickerCache';
 import type { HostUsageScore } from './agentUsage';
@@ -87,5 +88,30 @@ describe('serializeUsage', () => {
   test('serializes a score map to a plain record', () => {
     const map = new Map([['zion', score('zion', 7)]]);
     expect(serializeUsage(map)).toEqual({ zion: score('zion', 7) });
+  });
+});
+
+describe('withRefreshedDevices', () => {
+  const prev: HostPickerCache = {
+    devices: [{ name: 'old', host: 'old', online: false }],
+    usage: { zion: score('zion', 7) },
+    fetchedAt: NOW - 10 * 60_000,
+  };
+
+  test('swaps in the fresh device rows and stamps the refresh time', () => {
+    const next = withRefreshedDevices(prev, [{ name: 'zion', host: 'zion', online: true }], NOW);
+    expect(next.devices.map((d) => d.name)).toEqual(['zion']);
+    expect(next.fetchedAt).toBe(NOW);
+  });
+
+  test('preserves the prior usage scores (the cheap device refresh must not clear them)', () => {
+    const next = withRefreshedDevices(prev, [{ name: 'zion', host: 'zion', online: true }], NOW);
+    expect(next.usage).toEqual({ zion: score('zion', 7) });
+  });
+
+  test('starts usage empty when there is no prior cache', () => {
+    const next = withRefreshedDevices(null, [{ name: 'zion', host: 'zion', online: true }], NOW);
+    expect(next.usage).toEqual({});
+    expect(next.devices.map((d) => d.name)).toEqual(['zion']);
   });
 });

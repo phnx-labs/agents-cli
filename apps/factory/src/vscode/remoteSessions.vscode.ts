@@ -34,7 +34,7 @@ import {
 } from '../core/remoteSessions';
 import type { ProjectRule } from '../core/settings';
 import { deriveHostLoad, parseRemoteCpuRatio } from '../core/dispatchRanking';
-import { listRegisteredDevices, type Device } from './deviceHealth.vscode';
+import { listRegisteredDevices, type Device, type DeviceRef } from './deviceHealth.vscode';
 
 const execFileAsync = promisify(execFile);
 const execAsync = promisify(exec);
@@ -159,7 +159,7 @@ async function findAgentsCli(): Promise<string> {
  * list to skip the registry read (the host picker's refresh path fetches once
  * and threads the same list through).
  */
-export async function discoverHosts(devices?: Device[]): Promise<ReconciledHost[]> {
+export async function discoverHosts(devices?: readonly DeviceRef[]): Promise<ReconciledHost[]> {
   const registered = devices ?? await listRegisteredDevices();
   const inputs: RegisteredDeviceInput[] = registered.map((d) => ({
     name: d.name,
@@ -394,7 +394,7 @@ export async function fetchSessionIdentity(
 export async function fetchRecapSessions(
   limitPerHost: number,
   projectRules: ProjectRule[],
-  devices?: Device[],
+  devices?: readonly DeviceRef[],
 ): Promise<RemoteSession[]> {
   const hosts = await discoverHosts(devices);
   const targets = hosts.filter((h) => h.isLocal || h.online);

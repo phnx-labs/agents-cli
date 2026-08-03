@@ -21,6 +21,14 @@ export interface Device {
   registeredAt: number;
 }
 
+/**
+ * The minimal device shape the fleet sweep actually reads (name + address +
+ * reachability). Both `Device` and the persisted `HostPickerDevice` satisfy it,
+ * so the host-picker cache can drive a usage sweep without carrying the full
+ * registry row.
+ */
+export type DeviceRef = Pick<Device, 'name' | 'host' | 'online'>;
+
 interface AgentsDeviceEntry {
   name: string;
   platform?: string;

@@ -50,6 +50,21 @@ export function isHostPickerStale(cache: HostPickerCache | null | undefined, now
 }
 
 /**
+ * Merge a fresh device snapshot into the prior cache while PRESERVING its usage
+ * scores. The device rows (names + reachability) come from the cheap registry
+ * read; the expensive fleet usage sweep fills `usage` on its own pass. Splitting
+ * them this way is what lets the picker render every host from the registry read
+ * alone, without waiting on the SSH sweep — the usage annotations arrive after.
+ */
+export function withRefreshedDevices(
+  prev: HostPickerCache | null | undefined,
+  devices: HostPickerDevice[],
+  now = Date.now(),
+): HostPickerCache {
+  return { devices, usage: prev?.usage ?? {}, fetchedAt: now };
+}
+
+/**
  * The picker's device order: online first, then how much the box is actually
  * used, then name. Pure so the stale render and the revalidated render sort
  * identically — the item swap never reshuffles a row the scores didn't move.

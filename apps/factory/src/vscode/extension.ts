@@ -112,6 +112,7 @@ import {
   parseHostPickerCache,
   serializeUsage,
   sortHostPickerDevices,
+  withRefreshedDevices,
   type HostPickerCache,
 } from '../core/hostPickerCache';
 import { buildForkSessionRequest } from '../core/forkSession';
@@ -555,31 +556,56 @@ function readHostPickerCache(context: vscode.ExtensionContext): HostPickerCache 
   return parsed ?? null;
 }
 
+async function writeHostPickerCache(context: vscode.ExtensionContext, cache: HostPickerCache): Promise<HostPickerCache> {
+  hostPickerHot = cache;
+  await context.globalState.update(HOST_PICKER_CACHE_KEY, cache);
+  return cache;
+}
+
 /**
- * One refresh of everything the host picker shows. The registry read happens
- * ONCE and is threaded into the usage sweep (no second `devices list` spawn),
- * and hosts the launch-health sweep already found unreachable are skipped
- * instead of dialed into a 10s timeout. Best-effort: a failed sweep keeps the
- * device rows and just leaves the usage ordering empty.
+ * Phase 1 (cheap): refresh just the device rows from the registry snapshot —
+ * one `devices list --json`, NO fleet SSH sweep — while preserving the prior
+ * usage scores. The device names + reachability are all the picker needs to
+ * render every host, so this runs on its own (warmed at activation, and as the
+ * first half of a stale-open refresh) instead of being gated behind the usage
+ * sweep. On a loaded box the sweep is where the seconds go; the rows should not
+ * wait on it.
  */
-async function refreshHostPickerCache(context: vscode.ExtensionContext): Promise<HostPickerCache> {
+async function refreshHostPickerDevices(context: vscode.ExtensionContext): Promise<HostPickerCache> {
   const devices = await listRegisteredDevices();
+  return writeHostPickerCache(context, withRefreshedDevices(readHostPickerCache(context), devices));
+}
+
+/**
+ * Phase 2 (expensive): the fleet usage sweep, layered on top of a device
+ * snapshot. Hosts the launch-health sweep already found unreachable are skipped
+ * instead of dialed into a 10s timeout. Best-effort: a failed sweep keeps the
+ * device rows and leaves the prior usage ordering unchanged.
+ */
+async function sweepHostPickerUsage(context: vscode.ExtensionContext, base: HostPickerCache): Promise<HostPickerCache> {
   const health = context.globalState.get<LaunchHealthCache>(LAUNCH_HEALTH_KEY);
   const dead = new Set(
     (health?.devices ?? []).filter((d) => !d.sshReachable).map((d) => normalizeHost(d.name)),
   );
-  const sweepable = devices.filter((d) => !dead.has(normalizeHost(d.name)));
-  let usage: Record<string, HostUsageScore> = {};
+  const sweepable = base.devices.filter((d) => !dead.has(normalizeHost(d.name)));
+  let usage: Record<string, HostUsageScore> = base.usage;
   try {
     const sessions = await fetchRecapSessions(HOST_USAGE_SESSION_LIMIT, [], sweepable);
     usage = serializeUsage(new Map(rankHostsByUsage(sessions, Date.now()).map((s) => [s.host, s])));
   } catch (err) {
     console.error('[pickLaunchHost] usage sweep failed:', err);
   }
-  const cache: HostPickerCache = { devices, usage, fetchedAt: Date.now() };
-  hostPickerHot = cache;
-  await context.globalState.update(HOST_PICKER_CACHE_KEY, cache);
-  return cache;
+  return writeHostPickerCache(context, { devices: base.devices, usage, fetchedAt: Date.now() });
+}
+
+/** Full refresh: the current device rows, then the usage annotations on top. */
+async function refreshHostPickerCache(context: vscode.ExtensionContext): Promise<HostPickerCache> {
+  return sweepHostPickerUsage(context, await refreshHostPickerDevices(context));
+}
+
+/** Warm just the device rows off the command path — cheap, no fleet sweep. */
+function refreshHostPickerDevicesInBackground(context: vscode.ExtensionContext): void {
+  void refreshHostPickerDevices(context).catch((err) => console.error('[pickLaunchHost] device refresh failed:', err));
 }
 
 function refreshHostPickerCacheInBackground(context: vscode.ExtensionContext): void {
@@ -632,16 +658,25 @@ async function pickLaunchHost(
   quickPick.items = launchHostItems(cache, Date.now());
 
   let disposed = false;
+  const applyItems = (fresh: HostPickerCache) => {
+    if (disposed) return; // user already picked/dismissed — nothing to update
+    const activeHostId = quickPick.activeItems[0]?.hostId;
+    quickPick.items = launchHostItems(fresh, Date.now());
+    const restore = quickPick.items.find((i) => i.hostId === activeHostId);
+    if (restore) quickPick.activeItems = [restore];
+  };
   if (isHostPickerStale(cache)) {
     quickPick.busy = true;
-    void refreshHostPickerCache(context)
-      .then((fresh) => {
-        if (disposed) return; // user already picked/dismissed — nothing to update
-        const activeHostId = quickPick.activeItems[0]?.hostId;
-        quickPick.items = launchHostItems(fresh, Date.now());
-        const restore = quickPick.items.find((i) => i.hostId === activeHostId);
-        if (restore) quickPick.activeItems = [restore];
+    // Two-phase: swap in the fresh device rows as soon as the cheap registry
+    // read lands (never gated on the fleet sweep), then swap in the usage
+    // annotations once the sweep completes. On a busy box the device rows show
+    // in registry-read time instead of waiting on the whole fleet fan-out.
+    void refreshHostPickerDevices(context)
+      .then((withDevices) => {
+        applyItems(withDevices);
+        return sweepHostPickerUsage(context, withDevices);
       })
+      .then((fresh) => applyItems(fresh))
       .catch((err) => console.error('[pickLaunchHost] refresh failed:', err))
       .finally(() => { if (!disposed) quickPick.busy = false; });
   }
@@ -1504,6 +1539,11 @@ export async function activate(context: vscode.ExtensionContext) {
   // Warm the persisted auto-launch cache away from the command path. Refreshes
   // are deliberately fire-and-forget: opening Factory must not wait on SSH.
   refreshLaunchHealthCacheInBackground(context);
+  // Warm the host picker's device rows at startup — the cheap registry read
+  // only (no fleet sweep) — so the FIRST "(Pick Host)" open renders every host
+  // instantly instead of showing only This Mac + Balanced while a cold snapshot
+  // loads. The expensive usage sweep stays lazy (below), gated on actual use.
+  refreshHostPickerDevicesInBackground(context);
   const launchHealthTimer = setInterval(() => {
     refreshLaunchHealthCacheInBackground(context);
     // Pre-warm the host picker's snapshot so a stale open usually finds the
@@ -5374,7 +5414,9 @@ async function pickBrowseDevice(context: vscode.ExtensionContext, current: strin
   // background for the next open.
   const cache = readHostPickerCache(context);
   const devices = cache?.devices ?? await listRegisteredDevices();
-  if (isHostPickerStale(cache)) refreshHostPickerCacheInBackground(context);
+  // This picker only shows device rows, so revalidate with the cheap device
+  // refresh (no fleet usage sweep) for the next open.
+  if (isHostPickerStale(cache)) refreshHostPickerDevicesInBackground(context);
   const items: (vscode.QuickPickItem & { deviceId?: string })[] = [
     {
       label: '$(vm) This machine',
