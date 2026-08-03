@@ -20,6 +20,8 @@
   written as a real run stamped at the moment the fire was due, so `agents routines runs
   <name>` shows the gap, and the listing renders it distinctly from `failed` (a miss is an
   infrastructure problem, not a task failure). That record is also what makes catch-up
-  idempotent: it advances the overdue comparison, so the same missed fire is never re-fired
-  across ticks or a daemon restart storm. Source: `apps/cli/src/lib/routines.ts` (`RunMeta`),
+  idempotent: it advances the overdue comparison, so the same missed fire is never
+  reconsidered across ticks or a daemon restart storm, and its directory is created with a
+  non-recursive `mkdir` — an atomic claim, so if the daemon's timer and a manual
+  `agents routines catchup` overlap, only one of them runs the routine. Source: `apps/cli/src/lib/routines.ts` (`RunMeta`),
   `apps/cli/src/commands/routines.ts`.

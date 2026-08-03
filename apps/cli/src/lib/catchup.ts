@@ -10,10 +10,11 @@
  *
  * This module closes that loop. A missed fire is:
  *
- *   1. RECORDED — `recordMissedFire` writes a real run with status `missed`,
+ *   1. CLAIMED — `claimMissedFire` writes a real run with status `missed`,
  *      stamped at the time the fire was DUE, so `agents routines runs <name>`
  *      shows the gap instead of the listing showing a weeks-old `completed` as
- *      though it were current.
+ *      though it were current. The write is an atomic claim (see below), and
+ *      only the claimant proceeds to step 2.
  *   2. RUN — unless the routine sets `catchup: false`, it is executed late via
  *      the same `executeJobDetached` path `agents routines catchup` already used.
  *
@@ -21,14 +22,25 @@
  * separate ledger to keep in sync. `detectOverdueJobs` compares the most recent
  * expected fire against `getLatestRun(...).startedAt`; a `missed` record stamped
  * at `expectedAt` advances that comparison, so the same missed fire is never
- * processed twice — across ticks, daemon restarts, or a restart storm. (A job
- * that is overdue by definition has no run later than `expectedAt`, so the
+ * reconsidered — across ticks, daemon restarts, or a restart storm. (A job that
+ * is overdue by definition has no run later than `expectedAt`, so the
  * back-stamped record always sorts last in `listRuns`.)
+ *
+ * That comparison alone is not enough when two callers overlap, because both
+ * can read the same overdue set before either writes. The claim in
+ * `claimMissedFire` closes that: the record's directory is created with a
+ * non-recursive `mkdir`, an atomic test-and-set, and only the caller that wins
+ * it runs the routine. This holds across processes — the daemon's timer and a
+ * human running `agents routines catchup` — which neither an in-process flag
+ * nor `withFileLock` (synchronous; this pass awaits a spawn) can cover.
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
 import {
   readJob,
   writeRunMeta,
+  getRunDir,
   type JobConfig,
   type RunMeta,
 } from './routines.js';
@@ -40,8 +52,12 @@ export interface CatchupOutcome {
   name: string;
   /** The fire that was missed. */
   expectedAt: Date;
-  /** `ran` — re-run late. `recorded` — miss logged, `catchup: false`. `error` — could not run. */
-  result: 'ran' | 'recorded' | 'error';
+  /**
+   * `ran` — re-run late. `recorded` — miss logged, not re-run (`catchup: false`
+   * or a dry run). `claimed-elsewhere` — a concurrent pass or process already
+   * owns this fire. `error` — could not start the late run.
+   */
+  result: 'ran' | 'recorded' | 'claimed-elsewhere' | 'error';
   /** Run id of the late run, when one was started. */
   runId?: string;
   /** Why the late run could not be started. */
@@ -57,16 +73,47 @@ export function shouldCatchUp(job: Pick<JobConfig, 'catchup'>): boolean {
   return job.catchup !== false;
 }
 
+/** The run id a missed fire is recorded under — derived from when it was DUE. */
+export function missedRunId(expectedAt: Date): string {
+  return expectedAt.toISOString().replace(/[:.]/g, '-');
+}
+
 /**
- * Persist the fact that a fire never happened, stamped at the moment it was due.
+ * CLAIM a missed fire: atomically record that it never happened, and report
+ * whether this caller is the one that recorded it.
  *
- * The run id is derived from `expectedAt` (not "now") for two reasons: run ids
- * are ISO timestamps that `listRuns` sorts lexically, so the record lands in
- * history at the point the gap actually occurred; and re-deriving the same id
- * for the same missed fire makes the write idempotent.
+ * Returns the run on a successful claim, or `null` when another caller already
+ * claimed the same (routine, expected-fire) pair. That return value is the
+ * concurrency control for the whole module — only the claimant runs the routine
+ * late, so a fire can never be spawned twice.
+ *
+ * The atomicity is the non-recursive `mkdir` of the run directory: on every
+ * POSIX filesystem that is a single test-and-set, failing with EEXIST if the
+ * directory is already there. It therefore holds between the daemon's timer and
+ * a human running `agents routines catchup` in a separate process — which an
+ * in-process re-entrancy flag cannot cover, and which a lock cannot cover either
+ * (`withFileLock` is synchronous and this pass awaits a spawn).
+ *
+ * The run id is derived from `expectedAt` rather than "now" so the same missed
+ * fire always maps to the same directory — that is what makes the claim
+ * meaningful — and so the record sorts into `listRuns` (lexical over ISO run
+ * ids) at the point the gap actually occurred.
+ *
+ * Deliberately at-most-once: a process that dies between claiming and spawning
+ * leaves the fire un-run. That is the right trade for something that starts
+ * agent processes — a double spawn costs real work and money, while the miss is
+ * still on the record for a human to see and re-run.
  */
-export function recordMissedFire(job: JobConfig, expectedAt: Date): RunMeta {
-  const runId = expectedAt.toISOString().replace(/[:.]/g, '-');
+export function claimMissedFire(job: JobConfig, expectedAt: Date): RunMeta | null {
+  const runId = missedRunId(expectedAt);
+  const runDir = getRunDir(job.name, runId);
+  fs.mkdirSync(path.dirname(runDir), { recursive: true });
+  try {
+    fs.mkdirSync(runDir); // non-recursive: throws EEXIST if already claimed
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') return null;
+    throw err;
+  }
   const at = expectedAt.toISOString();
   const meta: RunMeta = {
     jobName: job.name,
@@ -118,9 +165,12 @@ export async function runCatchup(opts: CatchupOptions = {}): Promise<CatchupOutc
       continue;
     }
 
-    // Record first: if the late run fails to spawn, the miss is still on record
-    // and the same fire is not reconsidered on the next tick.
-    recordMissedFire(config, entry.expectedAt);
+    // Claim first. Losing the claim means another pass (or another process)
+    // already owns this fire — say so rather than running it a second time.
+    if (claimMissedFire(config, entry.expectedAt) === null) {
+      outcomes.push({ name: entry.name, expectedAt: entry.expectedAt, result: 'claimed-elsewhere' });
+      continue;
+    }
 
     if (!shouldCatchUp(config) || opts.dryRun) {
       outcomes.push({ name: entry.name, expectedAt: entry.expectedAt, result: 'recorded' });

@@ -733,7 +733,7 @@ failed — binary not found, EACCES, etc.) → `status='failed'` with `exitCode=
 
 `missed` is the one status the runner never writes, because no process was ever
 spawned. It records that a scheduled fire **did not happen**: the scheduler was
-down, asleep, or wedged when the routine came due. `recordMissedFire`
+down, asleep, or wedged when the routine came due. `claimMissedFire`
 (`catchup.ts`) writes it with `pid: null`, `exitCode: null`, and `startedAt` set
 to the moment the fire was **due** — not the moment it was noticed — so the gap
 lands at the right point in `agents routines runs <name>`.
@@ -758,8 +758,17 @@ daemon stayed up but its event loop was wedged, or one lost across an OS suspend
 the process survived.
 
 Catch-up is idempotent without a ledger: the `missed` record advances the overdue
-comparison, so the same missed fire is never re-fired — across ticks, a daemon
+comparison, so the same missed fire is never reconsidered — across ticks, a daemon
 restart, or a restart storm.
+
+Two callers that overlap are handled by a claim rather than a lock. Writing the
+`missed` record creates its run directory with a non-recursive `mkdir` — an
+atomic test-and-set — and only the caller that wins it runs the routine. So if
+the daemon's 5-minute pass and a manual `agents routines catchup` overlap, the
+routine still starts exactly once; the loser reports `already claimed by the
+scheduler`. This is deliberately at-most-once: a process that dies between
+claiming and spawning leaves that fire un-run, which is the right trade when the
+alternative is spawning an agent twice.
 
 Device scoping still applies: a routine pinned elsewhere is skipped, so a fleet of
 machines never all catch up the same routine.

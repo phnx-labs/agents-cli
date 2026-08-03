@@ -1250,6 +1250,8 @@ export function registerRoutinesCommands(program: Command): void {
         } else if (o.result === 'recorded') {
           const why = options.dryRun ? 'dry run' : 'catchup: false';
           console.log(`  ${o.name} → ${chalk.yellow('recorded as missed')} (${why})`);
+        } else if (o.result === 'claimed-elsewhere') {
+          console.log(`  ${o.name} → ${chalk.gray('already claimed by the scheduler')}`);
         } else {
           console.log(`  ${o.name} → ${chalk.red('failed to start')}: ${o.error}`);
         }

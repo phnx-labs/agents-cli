@@ -68,9 +68,9 @@ afterEach(() => {
   fs.rmSync(home, { recursive: true, force: true });
 });
 
-describe('recordMissedFire', () => {
+describe('claimMissedFire', () => {
   it('writes a missed run stamped at the time the fire was due', async () => {
-    const { recordMissedFire } = await import('./catchup.js');
+    const { claimMissedFire } = await import('./catchup.js');
     const job = {
       name: 'weekly-fleet-retro', schedule: '0 21 * * 0', agent: 'claude' as const,
       mode: 'auto' as const, effort: 'auto' as const, timeout: '10m', enabled: true, prompt: 'noop',
@@ -78,7 +78,7 @@ describe('recordMissedFire', () => {
     writeRoutine(job);
 
     const expectedAt = new Date('2026-08-03T04:00:00.000Z');
-    const meta = recordMissedFire(job, expectedAt);
+    const meta = claimMissedFire(job, expectedAt)!;
 
     expect(meta.status).toBe('missed');
     // Stamped when it was DUE, not when it was noticed — so the gap lands at
@@ -92,8 +92,10 @@ describe('recordMissedFire', () => {
     expect(runs[0].status).toBe('missed');
   });
 
-  it('is idempotent for the same missed fire', async () => {
-    const { recordMissedFire } = await import('./catchup.js');
+  // The claim is what stops two overlapping callers -- the daemon's timer and a
+  // human running `agents routines catchup` -- from both spawning the routine.
+  it('grants the claim exactly once for the same missed fire', async () => {
+    const { claimMissedFire } = await import('./catchup.js');
     const job = {
       name: 'nightly', schedule: '0 2 * * *', agent: 'claude' as const,
       mode: 'auto' as const, effort: 'auto' as const, timeout: '10m', enabled: true, prompt: 'noop',
@@ -101,10 +103,12 @@ describe('recordMissedFire', () => {
     writeRoutine(job);
     const expectedAt = new Date('2026-08-02T09:00:00.000Z');
 
-    recordMissedFire(job, expectedAt);
-    recordMissedFire(job, expectedAt);
+    const first = claimMissedFire(job, expectedAt);
+    const second = claimMissedFire(job, expectedAt);
 
-    // Same fire, same derived run id — one record, not a duplicate per pass.
+    expect(first).not.toBeNull();
+    expect(second).toBeNull();
+    // Same fire, same derived run id — one record, not a duplicate per caller.
     expect(readRuns('nightly')).toHaveLength(1);
   });
 });
@@ -151,6 +155,27 @@ describe('runCatchup', () => {
     const second = await runCatchup({ now });
     expect(second).toHaveLength(0);
     expect(readRuns('nightly')).toHaveLength(2);
+  });
+
+  // Simulates the daemon tick and a manual `agents routines catchup` overlapping:
+  // the second caller sees the same overdue set (it was captured before either
+  // wrote) but must lose the claim rather than spawning the routine twice.
+  it('a concurrent pass over the same overdue set does not double-run', async () => {
+    const { runCatchup } = await import('./catchup.js');
+    const { detectOverdueJobs } = await import('./overdue.js');
+    writeRoutine(nightly);
+    writeRun('nightly', '2026-08-01T02:00:00.000Z');
+
+    // Both callers captured the overdue set before either acted.
+    const shared = detectOverdueJobs(now);
+    expect(shared).toHaveLength(1);
+
+    const first = await runCatchup({ now, overdue: shared, dryRun: true });
+    const second = await runCatchup({ now, overdue: shared, dryRun: true });
+
+    expect(first[0].result).toBe('recorded');
+    expect(second[0].result).toBe('claimed-elsewhere');
+    expect(readRuns('nightly').map((r) => r.status)).toEqual(['completed', 'missed']);
   });
 
   it('dry run records the miss without starting a late run', async () => {

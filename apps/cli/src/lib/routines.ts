@@ -285,7 +285,7 @@ export interface RunMeta {
    * fire never happened (the daemon was down, asleep, or wedged when it came
    * due). Without it a miss leaves no trace at all and the listing keeps
    * showing the previous run's status as if it were current. Written by
-   * `recordMissedFire` (catchup.ts), never by the runner.
+   * `claimMissedFire` (catchup.ts), never by the runner.
    */
   status: 'running' | 'completed' | 'failed' | 'timeout' | 'missed';
   startedAt: string;
