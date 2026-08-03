@@ -196,6 +196,17 @@ export interface ActiveSession {
    */
   hostLink?: HostLink;
   /**
+   * Whether this session's process was alive at scan time — the boolean
+   * {@link applyState} already computes, kept rather than thrown away.
+   *
+   * `status` cannot stand in for it. `abandoned` fires on transcript staleness
+   * BEFORE the liveness check, so it covers a live-but-stuck process as well as
+   * a long-dead one; only `closed`/`crashed` are unconditionally dead. A consumer
+   * that must tell "still there, just quiet" from "gone" needs this, not the
+   * status. Absent from cloud rows (no pid) and from a peer running an older CLI.
+   */
+  pidAlive?: boolean;
+  /**
    * Clients attached to this session's tmux session (`#{session_attached}`), for
    * a tmux-hosted row. Absent — NOT zero — when the session is not tmux-hosted:
    * zero means "tmux says nobody is looking", absent means "we cannot tell".
@@ -781,7 +792,7 @@ function statusFromActivity(activity: SessionActivity): ActiveStatus {
  * for an alive process) rather than the old blanket `unknown`.
  */
 function applyState(base: Omit<ActiveSession, 'status'>, state: SessionState | undefined, fallbackFile: string | undefined, pidAlive: boolean): ActiveSession {
-  if (!state) return { ...base, status: resolveFallbackStatus(fallbackFile, pidAlive) };
+  if (!state) return { ...base, pidAlive, status: resolveFallbackStatus(fallbackFile, pidAlive) };
   // Lifecycle (closed/abandoned) is computed from PID + mtime and OVERRIDES the
   // activity-derived status: a dead or days-stale process is closed/abandoned no
   // matter what its last parsed transcript turn looked like (a dead session whose
@@ -790,6 +801,7 @@ function applyState(base: Omit<ActiveSession, 'status'>, state: SessionState | u
   const life = lifecycleStatus(pidAlive, base.lastActivityMs ?? sessionFileTimes(fallbackFile).mtimeMs);
   return {
     ...base,
+    pidAlive,
     status: life ?? statusFromActivity(state.activity),
     activity: state.activity,
     awaitingReason: state.awaitingReason,

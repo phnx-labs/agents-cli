@@ -129,6 +129,28 @@ describe('a lost host does not hide a session that needs a human', () => {
     expect(isAwaitingUser(rows[0])).toBe(false);
   });
 
+  // `abandoned` fires on transcript staleness BEFORE the liveness check, so it
+  // is the one dangling status that can still be a live, answerable process.
+  it('still counts a LIVE abandoned session that is mid-question — forgotten, not gone', () => {
+    const rows = [row({ status: 'abandoned', activity: 'waiting_input', pidAlive: true })];
+    foldHostLink(rows);
+    expect(isAwaitingUser(rows[0])).toBe(true);
+  });
+
+  it('does not count an abandoned session whose process is gone', () => {
+    const rows = [row({ status: 'abandoned', activity: 'waiting_input', pidAlive: false })];
+    foldHostLink(rows);
+    expect(isAwaitingUser(rows[0])).toBe(false);
+  });
+
+  it('does not count an abandoned session of unknown liveness — no invented human', () => {
+    // An older peer sends no `pidAlive`; claiming someone can answer would be a
+    // guess, and this gate drives a non-zero exit.
+    const rows = [row({ status: 'abandoned', activity: 'waiting_input' })];
+    foldHostLink(rows);
+    expect(isAwaitingUser(rows[0])).toBe(false);
+  });
+
   it('an orphaned IDLE session is not awaiting — it is stranded, not blocked on you', () => {
     const rows = [row({ status: 'idle', activity: 'idle', tmuxClients: 0 })];
     foldHostLink(rows);

@@ -535,7 +535,14 @@ degrades to `abandoned`, so the listing carries an alert, not a permanent tombst
 And a dead session never trips the `--waiting` gate, however its last turn ended:
 `activity` is not rewritten on death, so a session that crashed mid-question would
 otherwise read as "needs your input" forever when what it needs is a relaunch
-(`isAwaitingUser`).
+(`isAwaitingUser`). `closed`/`crashed` are excluded outright — both are
+unconditionally dead. `abandoned` is not: it fires on transcript staleness *before*
+the liveness check, so it also covers a live-but-forgotten session that asked a
+question and sat untouched over a long weekend, which is still answerable and is
+exactly what the gate is for. That one is excluded only when its `pidAlive` is
+positively false; unknown liveness stays excluded rather than inventing a human who
+can answer. The session preview shares this one predicate, so the human-facing
+"needs you" line and the scriptable gate can never disagree about a row.
 
 **Known residual — an ambient tmux session.** `provenance.mux` is stamped from the
 process env, so an agent launched inside a tmux session the *developer* owns (rather

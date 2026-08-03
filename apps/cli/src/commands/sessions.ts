@@ -542,9 +542,18 @@ export function liveStatusWord(a: ActiveSession | undefined): string {
  * mid-question keeps `waiting_input` forever, and answering it is not a thing a
  * human can do — it needs a relaunch. `--waiting` is a scriptable gate ("does
  * anything need me?"), so a corpse must not trip it.
+ *
+ * `closed` and `crashed` are unconditionally dead, so they are excluded outright.
+ * `abandoned` is NOT: it fires on transcript staleness before the liveness check,
+ * so it also covers the live-but-forgotten case — an interactive session that
+ * asked a question and sat untouched over a long weekend is still answerable, and
+ * is exactly what this gate exists for. It is excluded only when we positively
+ * know its process is gone; unknown liveness (an older peer, a row with no pid)
+ * stays excluded rather than inventing a human who can answer.
  */
 export function isAwaitingUser(s: ActiveSession): boolean {
-  if (s.status === 'crashed' || s.status === 'closed' || s.status === 'abandoned') return false;
+  if (s.status === 'crashed' || s.status === 'closed') return false;
+  if (s.status === 'abandoned' && s.pidAlive !== true) return false;
   return s.status === 'input_required' || s.activity === 'waiting_input';
 }
 
@@ -1323,7 +1332,10 @@ export function formatLiveStatusHeadline(live: ActiveSession | undefined, favori
   if (!live) return favorite ? chalk.yellow('★ favorited') : '';
   const { glyph } = liveGlyphAndPreview(live);
   const word = liveStatusWord(live) || live.status;
-  const needsYou = live.status === 'input_required' || live.activity === 'waiting_input';
+  // One definition, shared with `--waiting`. A second local copy drifted: the
+  // preview said "needs you" for a dead session that `--waiting` had (rightly)
+  // stopped counting, so the human and the script disagreed about the same row.
+  const needsYou = isAwaitingUser(live);
   const reason = live.awaitingReason ? ` (${live.awaitingReason.replace('_', ' ')})` : '';
   let suffix = needsYou ? chalk.yellow(`  ← needs you${reason}`) : '';
   if (live.status === 'crashed') {
