@@ -550,7 +550,7 @@ function compactRemaining(expiresAt: number): string {
 }
 
 /** The POLICY column for `secrets list`: the prompt policy, plus a concise
- * state hint. `daily` shows `held Nh` when the secrets-agent is currently
+ * state hint. `hold` shows `held Nh` when the secrets-agent is currently
  * caching the bundle; `always` and `never` show whether they prompt. `held`
  * maps bundle name → expiry epoch-ms (from agentStatus()). */
 export function renderPolicyCol(b: SecretsBundle, held?: Map<string, number>): string {
@@ -559,6 +559,15 @@ export function renderPolicyCol(b: SecretsBundle, held?: Map<string, number>): s
   if (bundlePolicy(b) === 'always') return chalk.yellow('always · prompt');
   const exp = held?.get(b.name);
   return exp ? chalk.green(`hold · held ${compactRemaining(exp)}`) : chalk.gray('hold');
+}
+
+/** The hold-window line at the top of `secrets status`. Names the `hold` policy
+ * the window belongs to — the rename in #1604 left this surface still saying
+ * "daily", the one name the CLI no longer accepts in its own help. Pure so the
+ * vocabulary is pinned by a test rather than re-drifting on the next rename. */
+export function renderHoldSummary(holdStr: string, configured: boolean): string {
+  const source = configured ? ' (secrets.agent.holdMs)' : ' (default)';
+  return `hold: ${holdStr}${source} — a bundle on the hold policy prompts once, then stays silent for this long or until sleep/logout.`;
 }
 
 /** Human-readable hold window for `secrets status`. Sub-hour values render in
@@ -899,7 +908,7 @@ export function registerSecretsCommands(program: Command): void {
         return;
       }
       const bundles = listBundles();
-      // Cross-reference the secrets-agent so `daily` bundles that are currently
+      // Cross-reference the secrets-agent so `hold` bundles that are currently
       // held can show "· held Nh". Soft-fails to no hint if the broker is down.
       const held = new Map<string, number>();
       if (process.platform === 'darwin') {
@@ -1246,7 +1255,7 @@ export function registerSecretsCommands(program: Command): void {
         const resolvedName = name ?? (await promptBundleName());
         validateBundleName(resolvedName);
         // Leave policy unset unless the user explicitly chose one, so the bundle
-        // inherits the configured default (`daily`) instead of being pinned.
+        // inherits the configured default (`hold`) instead of being pinned.
         const policyOpt = opts.policy ?? opts.tier;
         const policy = policyOpt ? parsePolicyOpt(policyOpt) : undefined;
         const backend = opts.synced ? 'vault' : resolveBackendOpt(opts.backend);
@@ -2383,7 +2392,7 @@ Examples:
           ? chalk.green('running') + chalk.gray(isDaemonRunning() ? ' (hosted by the daemon)' : ' (standalone)')
           : chalk.yellow('not running — starts on demand, or run `agents secrets start` to bring the daemon up now')),
       );
-      // Diagnostic: version skew is the top reason a `daily` bundle keeps
+      // Diagnostic: version skew is the top reason a `hold` bundle keeps
       // re-prompting — a broker on an older build gets torn down when the CLI
       // version changes (e.g. `agents-cli-update`), wiping every held bundle.
       const onDisk = getCliVersionFresh();
@@ -2399,11 +2408,11 @@ Examples:
       // an invalid value (0/NaN/negative) falls back to the default via
       // clampHoldMs, so it must read "(default)", not misattribute to config.
       const configured = (() => { try { const v = readMeta().secrets?.agent?.holdMs; return typeof v === 'number' && Number.isFinite(v) && v > 0; } catch { return false; } })();
-      console.log(chalk.gray(`hold: ${holdStr}${configured ? ' (secrets.agent.holdMs)' : ' (default)'} — a daily bundle prompts once, then stays silent for this long or until sleep/logout.`));
+      console.log(chalk.gray(renderHoldSummary(holdStr, configured)));
       const entries = await agentStatus();
       const held = new Set(entries.map((e) => e.name));
       if (entries.length === 0) {
-        console.log(chalk.gray('No bundles held. The next read of each daily bundle will prompt once, then hold.'));
+        console.log(chalk.gray('No bundles held. The next read of each hold-policy bundle will prompt once, then hold.'));
         console.log(chalk.gray('Pre-warm now with: agents secrets unlock <bundle>  (or --all)'));
       } else {
         console.log(chalk.bold(`${'BUNDLE'.padEnd(24)} ${'KEYS'.padEnd(5)} LOCKS IN`));

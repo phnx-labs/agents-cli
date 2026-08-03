@@ -19,6 +19,7 @@ import {
   quoteWin32ExecArg,
   readImportDotenv,
   registerSecretsCommands,
+  renderHoldSummary,
   renderPolicyCol,
 } from './secrets.js';
 import { parseDotenv, type SecretsBundle } from '../lib/secrets/bundles.js';
@@ -212,6 +213,22 @@ describe('formatHoldWindow', () => {
 
   it('rounds 59.99 minutes to "1 hour", not "60 minutes"', () => {
     expect(formatHoldWindow(3_599_999)).toBe('1 hour');
+  });
+});
+
+describe('renderHoldSummary', () => {
+  it('names the hold policy, never the retired `daily` name', () => {
+    const line = renderHoldSummary('7 days', false);
+    expect(line).toContain('hold policy');
+    // The rename in #1604 retired `daily`; this line kept saying it for two
+    // releases. `daily` is no longer a name the CLI's own help accepts.
+    expect(line).not.toMatch(/daily/i);
+  });
+
+  it('attributes the window to config only when it is actually configured', () => {
+    expect(renderHoldSummary('24 hours', true)).toContain('(secrets.agent.holdMs)');
+    expect(renderHoldSummary('7 days', false)).toContain('(default)');
+    expect(renderHoldSummary('7 days', false)).not.toContain('secrets.agent.holdMs');
   });
 });
 
