@@ -109,6 +109,24 @@ describe('classifyBashCommand', () => {
     });
   });
 
+  it('skips per-tool value flags for two-level tools not in the registry', () => {
+    // kubectl -n <ns> and docker -H <host> take a value; the subcommand follows.
+    expect(classifyBashCommand('kubectl -n prod get pods')).toMatchObject({
+      tool: 'kubectl',
+      subcommand: 'get',
+      summary: 'kubectl get',
+    });
+    expect(classifyBashCommand('docker -H tcp://1.2.3.4:2375 ps')).toMatchObject({
+      tool: 'docker',
+      subcommand: 'ps',
+      summary: 'docker ps',
+    });
+    expect(classifyBashCommand('openclaw browser profiles')).toMatchObject({
+      tool: 'openclaw',
+      subcommand: 'browser',
+    });
+  });
+
   it('classifies ffmpeg', () => {
     expect(classifyBashCommand('ffmpeg -i a.mp4 b.mp4')).toEqual({
       tool: 'ffmpeg',
@@ -170,6 +188,9 @@ describe('bucketKey', () => {
     // `git -C /repo commit` must bucket as `git commit`, never `git -C`.
     expect(bucketKey('git -C /repo commit -m "fix"')).toBe('git commit');
     expect(bucketKey('gh -R owner/repo pr create --title x')).toBe('gh pr');
+    // docker/kubectl carry their own value flags, not git's.
+    expect(bucketKey('kubectl -n prod get pods')).toBe('kubectl get');
+    expect(bucketKey('docker -H tcp://1.2.3.4:2375 ps')).toBe('docker ps');
   });
 
   it('prefixes remote-wrapped commands with ssh→', () => {

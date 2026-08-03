@@ -322,6 +322,35 @@ describe('real activity-log hook (Python)', () => {
     expect(readSessionActivity('fp', activityDirFor(home)).map((e) => e.event)).toEqual(['bash.executed', 'bash.executed', 'commit.created']);
   });
 
+  pythonTest('detects commit.created behind an env-var prefix with a quoted value', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-envcommit-'));
+    runHook(home, {
+      session_id: 'envc', hook_event_name: 'PostToolUse', tool_name: 'Bash',
+      tool_input: { command: 'GIT_AUTHOR_NAME="Jane Doe" git commit -m "automated fix"' }, tool_response: {},
+    });
+    const events = readSessionActivity('envc', activityDirFor(home));
+    expect(events.map((e) => e.event)).toEqual(['bash.executed', 'commit.created']);
+    expect(events[0].bashTool).toBe('git');
+  });
+
+  pythonTest('skips per-tool value flags so kubectl/docker report the real subcommand', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-k8s-'));
+    runHook(home, {
+      session_id: 'k8s', hook_event_name: 'PostToolUse', tool_name: 'Bash',
+      tool_input: { command: 'kubectl -n prod get pods' }, tool_response: {},
+    });
+    const kEvents = readSessionActivity('k8s', activityDirFor(home));
+    expect(kEvents[0].bashTool).toBe('kubectl');
+    expect(kEvents[0].detail).toBe('kubectl get');
+    runHook(home, {
+      session_id: 'dock', hook_event_name: 'PostToolUse', tool_name: 'Bash',
+      tool_input: { command: 'docker -H tcp://1.2.3.4:2375 ps' }, tool_response: {},
+    });
+    const dEvents = readSessionActivity('dock', activityDirFor(home));
+    expect(dEvents[0].bashTool).toBe('docker');
+    expect(dEvents[0].detail).toBe('docker ps');
+  });
+
   pythonTest('emits video.rendered + bash.executed for ffmpeg', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-ffmpeg-'));
     runHook(home, {

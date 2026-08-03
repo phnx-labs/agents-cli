@@ -146,15 +146,31 @@ const TOOL_REGISTRY: Record<string, BashToolInfo> = {
   wait: { category: 'wait', signal: 'low', action: 'waiting' },
 };
 
-/** Tools whose bucket key should include the second token (subcommand). */
-const TWO_LEVEL_TOOLS = new Set(['git', 'gh', 'bun', 'npm', 'cargo', 'docker', 'kubectl', 'rush', 'openclaw', 'pnpm', 'yarn']);
-
 /**
- * Flags on a two-level tool that consume the *following* token as their value, so
- * the subcommand scan must skip both. Missing one here mis-reads the value as the
- * subcommand (e.g. `gh -R owner/repo pr create` → subcommand `owner/repo`).
+ * Two-level tools (bucket key includes the subcommand) mapped to the flags that
+ * consume the *following* token as their value, per tool. The subcommand scan
+ * skips both a value flag and its argument, so `git -C /repo commit` → `commit`
+ * and `kubectl -n prod get` → `get`. Missing a value flag mis-reads the value as
+ * the subcommand; over-listing one only drops the subcommand (a safe tool-only
+ * bucket), so err toward listing. A tool with no such leading flags maps to an
+ * empty set. TWO_LEVEL_TOOLS is derived from these keys so the two never drift.
  */
-const VALUE_FLAGS = new Set(['-C', '-c', '--git-dir', '--work-tree', '-R', '--repo', '--cwd']);
+const VALUE_FLAGS: Record<string, Set<string>> = {
+  git: new Set(['-C', '-c', '--git-dir', '--work-tree']),
+  gh: new Set(['-R', '--repo']),
+  bun: new Set(['--cwd']),
+  npm: new Set(['--prefix', '-w', '--workspace']),
+  pnpm: new Set(['--filter', '-C', '--dir']),
+  yarn: new Set(['--cwd']),
+  cargo: new Set(['--manifest-path']),
+  docker: new Set(['-H', '--host', '-c', '--context', '--config', '-l', '--log-level']),
+  kubectl: new Set(['-n', '--namespace', '--kubeconfig', '--context', '--cluster', '--user', '-s', '--server', '--as', '--token', '--cache-dir', '--request-timeout']),
+  rush: new Set(),
+  openclaw: new Set(),
+};
+
+/** Tools whose bucket key includes the second token (subcommand). */
+const TWO_LEVEL_TOOLS = new Set(Object.keys(VALUE_FLAGS));
 
 /** Remote wrappers whose bucket key carries an `ssh→` prefix on the inner command. */
 const REMOTE_WRAPPERS = new Set(['ssh', 'scp', 'rsync']);
@@ -261,15 +277,17 @@ export function tokenizeBash(cmd: string): string[][] {
 
 /**
  * First non-flag token after the executable — its subcommand. Skips leading
- * flags, and skips the argument of a value-taking flag (see VALUE_FLAGS) so e.g.
- * `git -C /repo commit` resolves to `commit`, not `-C`/`/repo`.
+ * flags, and skips the argument of a value-taking flag for that tool (see
+ * VALUE_FLAGS) so e.g. `git -C /repo commit` resolves to `commit`, not `-C`, and
+ * `kubectl -n prod get` resolves to `get`, not `prod`.
  */
-function scanSubcommand(tokens: string[]): string {
+function scanSubcommand(tokens: string[], tool: string): string {
+  const valueFlags = VALUE_FLAGS[tool];
   let i = 1;
   while (i < tokens.length) {
     const t = tokens[i];
     if (t.startsWith('-')) {
-      i += VALUE_FLAGS.has(t) ? 2 : 1;
+      i += valueFlags?.has(t) ? 2 : 1;
       continue;
     }
     return t.toLowerCase();
@@ -302,12 +320,12 @@ export function classifyBashCommand(command: string): BashCommandInfo {
     // Unknown executable. A known two-level tool that isn't in the registry
     // (docker/kubectl/rush/openclaw) still surfaces its subcommand so bucketing
     // stays useful; the category stays honestly 'other'.
-    const subcommand = TWO_LEVEL_TOOLS.has(base) ? scanSubcommand(tokens) : '';
+    const subcommand = TWO_LEVEL_TOOLS.has(base) ? scanSubcommand(tokens, base) : '';
     const summary = subcommand ? `${base} ${subcommand}` : base;
     return { tool: base, category: 'other', subcommand, action: 'running command', summary, signal: 'low' };
   }
 
-  const subcommand = canonical && TWO_LEVEL_TOOLS.has(canonical) ? scanSubcommand(tokens) : '';
+  const subcommand = canonical && TWO_LEVEL_TOOLS.has(canonical) ? scanSubcommand(tokens, canonical) : '';
 
   const safeCanonical = canonical || base;
   const summary = subcommand ? `${safeCanonical} ${subcommand}` : safeCanonical;

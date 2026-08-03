@@ -906,11 +906,26 @@ BASH_TOOL_REGISTRY = {
     "wait": {"category": "wait", "action": "waiting"},
 }
 
-TWO_LEVEL_TOOLS = {"git", "gh", "bun", "npm", "cargo", "docker", "kubectl", "rush", "openclaw", "pnpm", "yarn"}
+# Two-level tools mapped to the flags that consume the following token as their
+# value, per tool; the subcommand scan skips both. Missing a value flag mis-reads
+# the value as the subcommand; over-listing only drops the subcommand (safe). A
+# tool with no such leading flags maps to an empty set. Mirrors VALUE_FLAGS in
+# lib/session/bash-command.ts; TWO_LEVEL_TOOLS is derived from its keys.
+VALUE_FLAGS = {
+    "git": {"-C", "-c", "--git-dir", "--work-tree"},
+    "gh": {"-R", "--repo"},
+    "bun": {"--cwd"},
+    "npm": {"--prefix", "-w", "--workspace"},
+    "pnpm": {"--filter", "-C", "--dir"},
+    "yarn": {"--cwd"},
+    "cargo": {"--manifest-path"},
+    "docker": {"-H", "--host", "-c", "--context", "--config", "-l", "--log-level"},
+    "kubectl": {"-n", "--namespace", "--kubeconfig", "--context", "--cluster", "--user", "-s", "--server", "--as", "--token", "--cache-dir", "--request-timeout"},
+    "rush": set(),
+    "openclaw": set(),
+}
 
-# Flags on a two-level tool that consume the following token as their value; the
-# subcommand scan must skip both. Mirrors VALUE_FLAGS in lib/session/bash-command.ts.
-VALUE_FLAGS = {"-C", "-c", "--git-dir", "--work-tree", "-R", "--repo", "--cwd"}
+TWO_LEVEL_TOOLS = set(VALUE_FLAGS.keys())
 
 
 def _unwrap_command(cmd):
@@ -1000,14 +1015,15 @@ def _tokenize_bash(command):
     return out
 
 
-def _scan_subcommand(tokens):
+def _scan_subcommand(tokens, tool):
     """First non-flag token after the executable, skipping flags and the argument
-    of a value-taking flag (VALUE_FLAGS). Mirrors scanSubcommand in bash-command.ts."""
+    of a value-taking flag for that tool. Mirrors scanSubcommand in bash-command.ts."""
+    value_flags = VALUE_FLAGS.get(tool, set())
     i = 1
     while i < len(tokens):
         t = tokens[i]
         if t.startswith("-"):
-            i += 2 if t in VALUE_FLAGS else 1
+            i += 2 if t in value_flags else 1
             continue
         return t.lower()
     return ""
@@ -1030,11 +1046,11 @@ def classify_bash_command(command):
     if not info:
         # Known two-level tool absent from the registry (docker/kubectl/rush/
         # openclaw) still surfaces its subcommand; category stays 'other'.
-        sub = _scan_subcommand(tokens) if base in TWO_LEVEL_TOOLS else ""
+        sub = _scan_subcommand(tokens, base) if base in TWO_LEVEL_TOOLS else ""
         summary = "{} {}".format(base, sub) if sub else first
         return {"tool": first, "category": "other", "subcommand": sub, "action": "running command", "summary": summary}
 
-    subcommand = _scan_subcommand(tokens) if base in TWO_LEVEL_TOOLS else ""
+    subcommand = _scan_subcommand(tokens, base) if base in TWO_LEVEL_TOOLS else ""
 
     summary = "{} {}".format(base, subcommand) if subcommand else base
     return {
