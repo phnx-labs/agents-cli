@@ -6,6 +6,7 @@
  *   agents perf hooks        per-hook p50/p99 + cache hit rates
  *   agents perf commands     slowest CLI command paths (from command.end)
  *   agents perf run          agent.run / perf.timing labels
+ *   agents perf friction     sessions stuck repeatedly hitting the same guard
  *
  * Soft-joins sessions.db via shared string keys (session_id, agent, machine) —
  * no foreign keys. Warehouse lives at ~/.agents/.cache/perf/perf.db (safe to wipe).
@@ -26,6 +27,8 @@ import {
   aggregateHookProfile,
   type HookProfileRow,
 } from '../lib/hooks/profile.js';
+import { query } from '../lib/events.js';
+import { detectRepeatedGuardBlocks } from '../lib/friction-heuristics.js';
 
 interface PerfGlobalOpts {
   days?: string;
@@ -206,6 +209,39 @@ function runAction(opts: PerfGlobalOpts): void {
   renderLabelTable('run/timing', rows, warnMs, limit);
 }
 
+/**
+ * Sessions stuck repeatedly hitting the SAME guard block (git-guard,
+ * rm-guard, git-require-clean-tree, …) instead of adapting after the first
+ * denial. Reads the `friction` event sink (emitFriction in events.ts) that
+ * guard hooks self-report into via `agents _internal friction` before they
+ * exit 2 — see lib/friction-heuristics.ts for the grouping.
+ */
+function frictionAction(opts: PerfGlobalOpts): void {
+  const days = parseDays(opts.days);
+  const startDate = new Date(Date.now() - days * 86_400_000);
+  const events = query({ eventTypes: ['friction'], startDate });
+  const findings = detectRepeatedGuardBlocks(events);
+
+  if (opts.json) {
+    console.log(JSON.stringify(findings, null, 2));
+    return;
+  }
+
+  if (findings.length === 0) {
+    console.log(chalk.gray(`No repeated guard blocks in the last ${days} day${days === 1 ? '' : 's'}.`));
+    return;
+  }
+
+  console.log(chalk.bold(`Repeated guard blocks — last ${days} day${days === 1 ? '' : 's'}\n`));
+  const widths = [14, 10, 24, 5, 22, 22];
+  printTable(
+    ['SESSION', 'SURFACE', 'FAILURE ID', 'N', 'FIRST', 'LAST'],
+    widths,
+    findings.map((f) => [f.session, f.surface, f.failureId, String(f.count), f.firstTs, f.lastTs]),
+    findings.map(() => false),
+  );
+}
+
 function summaryAction(opts: PerfGlobalOpts): void {
   const days = parseDays(opts.days);
   const project = opts.project;
@@ -273,6 +309,7 @@ Examples:
   agents perf run --json             # agent.run timings as JSON
   agents perf hooks --warn-ms 500
   agents perf hooks --project agents-cli  # scope to one repo's samples
+  agents perf friction               # sessions stuck retrying the same guard block
 `);
 
   // Options live on the parent so `agents perf --json` and
@@ -294,5 +331,10 @@ Examples:
   perf.command('run').description('agent.run / perf.timing label rollups')
     .action(function run(this: Command) {
       runAction(leafOpts(this));
+    });
+
+  perf.command('friction').description('Sessions stuck repeatedly hitting the same guard block')
+    .action(function friction(this: Command) {
+      frictionAction(leafOpts(this));
     });
 }
