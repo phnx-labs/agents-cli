@@ -9,8 +9,10 @@
  *
  * The rule: a worktree cwd (`…/<repo>/.agents/worktrees/<slug>[/sub]`) folds to
  * the REPO directory name, so a worktree groups with the repo it branched from;
- * any other path resolves to its own basename. Pure — no filesystem, no git, so
- * it works identically for a remote peer's events as for local ones.
+ * any other path resolves to its own basename. {@link projectKeyFromCwd} is pure
+ * — no filesystem, no git, so it works identically for a remote peer's events as
+ * for local ones; {@link resolveProjectKey} adds the filesystem repo-root walk
+ * for paths this machine can see.
  */
 
 import * as fs from 'fs';
@@ -49,13 +51,8 @@ export function projectKeyFromCwd(cwd?: string | null): string | undefined {
  * non-project directory under it into one bogus "project".
  */
 export function repoRootForCwd(dir: string, home: string = os.homedir()): string | undefined {
-  let current: string;
-  try {
-    current = path.resolve(dir);
-  } catch {
-    return undefined;
-  }
   const stop = path.resolve(home);
+  let current = path.resolve(dir);
   for (;;) {
     if (fs.existsSync(path.join(current, '.git'))) return current === stop ? undefined : current;
     const parent = path.dirname(current);

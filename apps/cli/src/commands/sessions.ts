@@ -14,7 +14,7 @@ import { spawn, type ChildProcess } from 'child_process';
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { truncate, padRight } from '../lib/format.js';
-import { projectKeyFromCwd } from '../lib/project-key.js';
+import { resolveProjectKey } from '../lib/project-key.js';
 import ora from 'ora';
 import type { AgentId } from '../lib/types.js';
 import type { SessionAgentId, SessionMeta, ViewMode } from '../lib/session/types.js';
@@ -2015,13 +2015,18 @@ async function maybeLiveIndex(options: SessionsOptions): Promise<Map<string, Act
 }
 
 /**
- * Group key for the overview: prefer the indexed project name; else fold the cwd
- * to its repo via the shared {@link projectKeyFromCwd} — the same fold the
- * `agents activity` timeline groups by, so a project reads the same in both. Pure.
+ * Group key for the overview: resolve the cwd to its repo via the shared
+ * {@link resolveProjectKey} — the same resolver the `agents activity` timeline
+ * groups by, so a monorepo subdir (`<repo>/apps/cli`) reads as `<repo>` in both
+ * views. Falls back to the indexed project name (stamped at scan time) when the
+ * cwd carries nothing usable, e.g. a remote path this machine cannot see still
+ * folds by basename through the same resolver.
  */
 export function overviewProjectKey(s: Pick<SessionMeta, 'project' | 'cwd'>): string {
+  const resolved = resolveProjectKey(s.cwd);
+  if (resolved) return resolved;
   if (s.project && s.project.trim()) return s.project.trim();
-  return projectKeyFromCwd(s.cwd) ?? '(no project)';
+  return '(no project)';
 }
 
 export interface OverviewGroup {

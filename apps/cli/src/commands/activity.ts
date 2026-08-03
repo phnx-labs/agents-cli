@@ -89,7 +89,10 @@ interface ActivityOpts {
  * missing `inject-session-id` script, someone else's half-installed plugin —
  * and echoing all of them printed five wrapped lines of unrelated noise above
  * the timeline on every run. Those belong to `agents doctor`, which exists to
- * find them; here they are dropped and only an activity-hook failure surfaces.
+ * find them; here they are dropped. What still surfaces: an activity-hook
+ * failure, and any error attributable to NO manifest hook — a corrupt
+ * settings.json or an unwritable hooks file aborts registration for the whole
+ * agent, which is exactly a failure that leaves the activity log unwritten.
  */
 async function installActivityHooks(): Promise<string[]> {
   const warnings: string[] = [];
@@ -103,9 +106,12 @@ async function installActivityHooks(): Promise<string[]> {
     import('../lib/versions.js'),
   ]);
   const manifest = parseHookManifest({ warn: false });
+  const manifestNames = Object.keys(manifest);
   for (const { agent, version } of iterHooksCapableVersions({ agent: 'claude' })) {
     const result = registerHooksToSettings(agent, getVersionHomePath(agent, version), manifest);
-    const ours = result.errors.filter(isActivityHookError);
+    const ours = result.errors.filter(
+      (e) => isActivityHookError(e) || !isManifestHookError(e, manifestNames),
+    );
     if (ours.length > 0) warnings.push(`${agent}@${version}: ${ours.join('; ')}`);
   }
   return warnings;
@@ -118,6 +124,16 @@ async function installActivityHooks(): Promise<string[]> {
  */
 export function isActivityHookError(error: string): boolean {
   return Object.keys(ACTIVITY_HOOK_DEFINITIONS).some((name) => error.startsWith(`${name}:`));
+}
+
+/**
+ * Is this error attributable to a named manifest hook at all? Errors that name
+ * no hook — `Failed to parse settings.json`, `Failed to write
+ * agents-cli-hooks.ts: …` — are agent-level aborts, not per-hook noise, and
+ * must never be filtered out.
+ */
+export function isManifestHookError(error: string, manifestNames: string[]): boolean {
+  return manifestNames.some((name) => error.startsWith(`${name}:`));
 }
 
 /**
@@ -369,6 +385,8 @@ project header names the machines its work ran on.
       enriched = capActivityEvents(enriched, opts.limit, { all: opts.all || opts.milestones });
 
       if (opts.json) {
+        // stdout stays clean JSON, but an unanswered peer is never a silent drop.
+        if (unreachable.length > 0) process.stderr.write(formatUnreachableNote(unreachable));
         process.stdout.write(`${JSON.stringify(enriched, null, 2)}\n`);
         return;
       }

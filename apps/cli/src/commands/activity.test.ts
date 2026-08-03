@@ -3,6 +3,7 @@ import { Command } from 'commander';
 import {
   formatUnreachableNote,
   isActivityHookError,
+  isManifestHookError,
   registerActivityCommand,
   resolveActivityGrouping,
   resolveActivityScope,
@@ -127,5 +128,21 @@ describe('isActivityHookError', () => {
     // The five wrapped lines this command used to print above every timeline.
     expect(isActivityHookError('inject-session-id: script not found in user or system hooks dir')).toBe(false);
     expect(isActivityHookError('register-session-pid: script not found in user or system hooks dir')).toBe(false);
+  });
+});
+
+describe('isManifestHookError', () => {
+  const manifestNames = ['activity-log-intent', 'activity-log-result', 'inject-session-id'];
+
+  it('keeps an agent-level abort that names no hook — it leaves the log unwritten', () => {
+    // A corrupt settings.json aborts registration for the whole agent; filtering
+    // it out would silently stop activity logging for that version.
+    expect(isManifestHookError('Failed to parse settings.json', manifestNames)).toBe(false);
+    expect(isManifestHookError('Failed to write agents-cli-hooks.ts: EACCES', manifestNames)).toBe(false);
+  });
+
+  it('attributes per-hook failures to their hook', () => {
+    expect(isManifestHookError('inject-session-id: script not found', manifestNames)).toBe(true);
+    expect(isManifestHookError('activity-log-intent: script not found', manifestNames)).toBe(true);
   });
 });
