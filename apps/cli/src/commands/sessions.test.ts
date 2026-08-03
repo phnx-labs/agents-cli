@@ -294,6 +294,8 @@ interface SessionResolverSshPeer {
   fixture: ChildProcess;
   socket: string;
   proofFile: string;
+  /** The test's temp home — every process of this test carries it in argv. */
+  home: string;
 }
 
 /**
@@ -395,7 +397,7 @@ async function startSessionResolverSshPeer(
     '-o', 'ControlPersist=60s', target,
   ], { encoding: 'utf-8', timeout: 10_000 });
   if (master.status !== 0) throw new Error(`ssh ControlMaster failed: ${master.stderr}`);
-  return { target, fixture, socket, proofFile };
+  return { target, fixture, socket, proofFile, home: tempHome };
 }
 
 async function stopSessionResolverSshPeer(peer: SessionResolverSshPeer): Promise<void> {
@@ -404,6 +406,13 @@ async function stopSessionResolverSshPeer(peer: SessionResolverSshPeer): Promise
   });
   if (!peer.fixture.killed) peer.fixture.kill('SIGTERM');
   await new Promise<void>((resolve) => peer.fixture.once('exit', () => resolve()));
+  // The peer side lingers past fixture death: the npx'd old agents-cli that
+  // answered over ssh (still flushing its index into peer-home/.agents) and
+  // the parent's own ControlPersist master. Both keep writing into the temp
+  // home, which raced the cleanup rmdir ENOTEMPTY on CI even with rm retries.
+  // Every one of those processes carries this test's unique temp path in argv,
+  // so a path-scoped pkill reaps exactly them and nothing else.
+  spawnSync('pkill', ['-f', peer.home]);
 }
 
 /**
