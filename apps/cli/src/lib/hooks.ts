@@ -1141,7 +1141,7 @@ export function normalizeHookTimeoutSeconds(value: unknown): number | null {
       return n > 0 ? n : null;
     }
     const m = s.match(/^(?:(\d+)w)?(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/i);
-    if (!m || m[0] === '') return null;
+    if (!m) return null;
     const weeks = Number(m[1] || 0);
     const days = Number(m[2] || 0);
     const hours = Number(m[3] || 0);
