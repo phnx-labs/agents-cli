@@ -10,7 +10,6 @@ import {
   deterministicSessionSample,
   exactSampleTargetArgs,
   evaluateExactSample,
-  failedCandidateQueryEnvelope,
   loadEnvelope,
   mergeCandidateQueryEnvelopes,
   mergeSampleEnvelopes,
@@ -49,15 +48,6 @@ describe('session shell-command sampler', () => {
   it('bounds each candidate query below the aggregate evidence ceiling', () => {
     expect(candidateQueryLimit(50)).toBe(100);
     expect(candidateQueryLimit(100)).toBe(200);
-  });
-
-  it('reports every failed candidate class when a source returns no envelope', () => {
-    expect(failedCandidateQueryEnvelope(4)).toMatchObject({
-      failedQueries: 4,
-      failedSources: 1,
-      coverage: { complete: false },
-      sessions: [],
-    });
   });
 
   it('validates the requested 50-100 session range and repeatable devices', () => {
@@ -182,32 +172,41 @@ describe('session shell-command sampler', () => {
         coverage: { complete: false }, failedSources: 0, failedSessions: 0,
       });
 
-      const shellId = 'retained-shell-result';
-      fs.writeFileSync(path.join(sessionsDir, `rollout-${shellId}.jsonl`), [
-        JSON.stringify({ type: 'session_meta', timestamp: now, payload: { id: shellId, timestamp: now, cwd: '/repo' } }),
-        JSON.stringify({ type: 'response_item', timestamp: now, payload: {
-          type: 'function_call', name: 'shell', call_id: 'shell-call', arguments: JSON.stringify({ command: 'gh pr view' }),
-        } }),
-      ].join('\n') + '\n');
-      const oversizedCommand = `echo ${'x '.repeat(16 * 1024)}`;
-      for (let fileIndex = 0; fileIndex < 2; fileIndex++) {
-        const oversizedId = `oversized-exec-result-${fileIndex}`;
-        fs.writeFileSync(path.join(sessionsDir, `rollout-${oversizedId}.jsonl`), [
-          JSON.stringify({ type: 'session_meta', timestamp: now, payload: { id: oversizedId, timestamp: now, cwd: '/repo' } }),
-          ...Array.from({ length: 340 }).flatMap((_, index) => [
-            JSON.stringify({
-              type: 'response_item', timestamp: now, payload: {
-                type: 'function_call', name: 'exec_command', call_id: `oversized-${fileIndex}-${index}`,
-                arguments: JSON.stringify({ cmd: oversizedCommand }),
-              },
-            }),
-            JSON.stringify({
-              type: 'response_item', timestamp: now, payload: {
-                type: 'function_call_output', call_id: `oversized-${fileIndex}-${index}`, output: 'ok',
-              },
-            }),
-          ]),
+      for (let fileIndex = 0; fileIndex < 26; fileIndex++) {
+        const isExecCandidate = fileIndex % 5 === 0;
+        const sessionId = isExecCandidate
+          ? `retained-exec-result-${fileIndex}`
+          : `non-shell-backfill-${fileIndex}`;
+        fs.writeFileSync(path.join(sessionsDir, `rollout-${sessionId}.jsonl`), [
+          JSON.stringify({ type: 'session_meta', timestamp: now, payload: { id: sessionId, timestamp: now, cwd: '/repo' } }),
+          JSON.stringify({ type: 'response_item', timestamp: now, payload: {
+            type: 'function_call', name: isExecCandidate ? 'exec_command' : 'read_file', call_id: `filler-${fileIndex}`,
+            arguments: JSON.stringify(isExecCandidate
+              ? { cmd: `git diff -- file-${fileIndex}.txt` }
+              : { path: `/repo/${fileIndex}.txt` }),
+          } }),
         ].join('\n') + '\n');
+      }
+
+      const counterPath = path.join(root, 'agents-driver-count');
+      const driverPath = path.join(root, 'agents-driver.mjs');
+      fs.writeFileSync(driverPath, [
+        "import fs from 'fs';",
+        "import { spawnSync } from 'child_process';",
+        `const counterPath = ${JSON.stringify(counterPath)};`,
+        `const cliEntry = ${JSON.stringify(cliEntry)};`,
+        "let count = 0;",
+        "try { count = Number.parseInt(fs.readFileSync(counterPath, 'utf8'), 10) || 0; } catch {}",
+        "count += 1;",
+        "fs.writeFileSync(counterPath, String(count));",
+        "if (count >= 2 && count <= 5) process.exit(1);",
+        "const child = spawnSync('bun', [cliEntry, ...process.argv.slice(2)], { stdio: 'inherit', env: process.env });",
+        "process.exit(Number.isInteger(child.status) ? child.status : 1);",
+      ].join('\n') + '\n');
+      if (process.platform === 'win32') {
+        fs.writeFileSync(path.join(binDir, 'agents.cmd'), `@echo off\r\nnode "${driverPath}" %*\r\n`);
+      } else {
+        fs.writeFileSync(path.join(binDir, 'agents'), `#!/bin/sh\nexec node "${driverPath}" "$@"\n`, { mode: 0o755 });
       }
 
       const partial = loadEnvelope(
@@ -217,7 +216,19 @@ describe('session shell-command sampler', () => {
       expect(partial.failedQueries).toBeGreaterThan(0);
       expect(partial.failedSources).toBe(0);
       expect(partial.coverage.complete).toBe(false);
-      expect(partial.sessions.map((item) => item.id)).toContain(shellId);
+      expect(partial.sessions.some((item) => item.id.startsWith('retained-exec-result-'))).toBe(true);
+
+      fs.writeFileSync(counterPath, '1');
+      const allQueriesFailed = loadEnvelope(
+        { sessions: 50, since: '7d', devices: ['fixture-host'], passes: 1 },
+        'fixture-host',
+      ) as ToolSearchEnvelope & { failedQueries: number; failedSources: number };
+      expect(allQueriesFailed).toMatchObject({
+        failedQueries: 4,
+        failedSources: 1,
+        coverage: { complete: false },
+        sessions: [],
+      });
     } finally {
       if (previous.home === undefined) delete process.env.HOME; else process.env.HOME = previous.home;
       if (previous.userprofile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = previous.userprofile;

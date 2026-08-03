@@ -494,7 +494,7 @@ The command surface (bare `sessions [query]`, `tail`, `sync`, `resume`, `focus`,
   the compact peer envelope carries no global sort key. `--markdown` and
   `--no-redact` MUST fail when combined with `--include tools` because the
   indexed evidence schema is always bounded and redacted
-  (`commands/sessions.ts:1432-1463,1824-1879,1937-1984,3929-3970,4006-4013`;
+  (`commands/sessions.ts:1432-1463,1551-1559,1824-1879,1937-1984,3929-3970,4006-4013`;
   `lib/session/remote-list.ts:98-115,337-541`).
 
 #### 4.3 stdout / stderr / exit discipline
