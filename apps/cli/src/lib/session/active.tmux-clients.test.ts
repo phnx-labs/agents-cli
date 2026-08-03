@@ -1,0 +1,98 @@
+/**
+ * Integration test for the attached-client signal behind the `orphaned` status.
+ *
+ * Spawns a REAL tmux server on a temp socket — no mocks — because the bug this
+ * pins is a property of tmux itself: it sanitizes non-printable characters out
+ * of `-F` format output (3.6a rewrites a literal tab to `_`), so a tab-separated
+ * format comes back as one unsplittable field. Nothing short of a real tmux
+ * shows that, and a mocked `runTmux` would have happily "passed" while the
+ * feature was dead on every machine running a recent tmux.
+ */
+
+import { describe, it, expect, afterEach, beforeEach } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { isTmuxInstalled, runTmux } from '../tmux/binary.js';
+import { foldTmuxClients, type ActiveSession } from './active.js';
+
+const skipReason = isTmuxInstalled() ? null : 'tmux not installed';
+
+describe.skipIf(skipReason)('tmux attached-client fold', () => {
+  let socket: string;
+  let tempDir: string;
+  const sessionName = 'agents-clients-test';
+
+  beforeEach(async () => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-tmux-clients-'));
+    socket = path.join(tempDir, 'server.sock');
+    await runTmux({ socket, args: ['new-session', '-d', '-s', sessionName, 'sleep', '120'] });
+  });
+
+  afterEach(async () => {
+    await runTmux({ socket, args: ['kill-server'], throwOnError: false });
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  async function firstPane(): Promise<string> {
+    const res = await runTmux({ socket, args: ['list-panes', '-a', '-F', '#{pane_id}'] });
+    return res.stdout.split('\n').filter(Boolean)[0];
+  }
+
+  function row(pane: string): ActiveSession {
+    return {
+      context: 'terminal',
+      kind: 'claude',
+      status: 'idle',
+      provenance: { host: 'test', transport: 'local', mux: { kind: 'tmux', socket, pane } },
+    } as ActiveSession;
+  }
+
+  it('reads zero clients for a detached session — the orphan signal', async () => {
+    const pane = await firstPane();
+    const rows = [row(pane)];
+    await foldTmuxClients(rows);
+    // `new-session -d` leaves nobody attached, which is exactly the state a
+    // crashed editor window leaves behind.
+    expect(rows[0].tmuxClients).toBe(0);
+  });
+
+  it('survives tmux sanitizing the format separator (the tab bug)', async () => {
+    // A tab-separated format is mangled by tmux into a single field; the
+    // separator the code uses must come back splittable. If this ever regresses,
+    // every pane silently reports an unknown client count and `orphaned` never
+    // fires again.
+    const tabbed = await runTmux({
+      socket,
+      args: ['list-panes', '-a', '-F', '#{pane_id}\t#{session_attached}'],
+      throwOnError: false,
+    });
+    const printable = await runTmux({
+      socket,
+      args: ['list-panes', '-a', '-F', '#{pane_id}|#{session_attached}'],
+      throwOnError: false,
+    });
+    expect(printable.stdout.split('\n')[0].split('|')).toHaveLength(2);
+    // Document the actual tmux behavior this separator choice exists for: on a
+    // tmux that sanitizes the tab, the tab-split yields one field, not two.
+    const tabFields = tabbed.stdout.split('\n')[0].split('\t').length;
+    if (tabFields === 1) expect(tabbed.stdout).not.toContain('\t');
+  });
+
+  it('leaves rows on another socket untouched', async () => {
+    const pane = await firstPane();
+    const mine = row(pane);
+    const other = row(pane);
+    other.provenance!.mux!.socket = path.join(tempDir, 'not-a-server.sock');
+    const rows = [mine, other];
+    await foldTmuxClients(rows);
+    expect(mine.tmuxClients).toBe(0);
+    expect(other.tmuxClients).toBeUndefined();
+  });
+
+  it('does nothing when no row is tmux-hosted', async () => {
+    const plain: ActiveSession = { context: 'terminal', kind: 'claude', status: 'idle' };
+    await foldTmuxClients([plain]);
+    expect(plain.tmuxClients).toBeUndefined();
+  });
+});

@@ -484,6 +484,54 @@ whether it is `background` or `parked` is decided live from the recorded pid plu
 start-time fingerprint (which defeats PID reuse). Ad-hoc headless runs and cloud/team
 rows carry no presence — they are not on this axis.
 
+## Lost hosts: `crashed` and `orphaned`
+
+Every other liveness signal answers "is the agent process alive". None of them answer
+"is anyone still driving it", and those come apart in the two ways a user notices — so
+`getActiveSessions` folds a **host link** onto every row (`foldHostLink`, from the pure
+classifier in `lib/session/host-link.ts`) and promotes it into the status column:
+
+| status | glyph | what happened |
+| --- | --- | --- |
+| `crashed` | `✗` | The host window (VS Code, the terminal, an SSH connection) went down hard and the agent died with it. Its slice of `live-terminals.json` is still there naming a dead pid, because the window never got to run its teardown. |
+| `orphaned` | `◍` | The agent is still alive with **no client attached** — tmux reports zero attached clients, or the IDE window that owned it stopped republishing. It is idle, or sitting on a question nobody will answer. |
+
+The two signals behind them:
+
+- **`#{session_attached}`** — the count of clients attached to a tmux-hosted session,
+  read from the `list-panes` query `listTmuxAgentSessions` already makes. An *absent*
+  count (a tmux too old to report it) means "cannot tell", never zero.
+- **The IDE window heartbeat** — the `at` stamp on each window's slice of
+  `live-terminals.json`. The Factory extension force-republishes every 4 minutes, so a
+  slice older than `HOST_HEARTBEAT_STALE_MS` (10 minutes, the same window the extension
+  uses to GC a dead peer) means that window is gone.
+
+Precedence is deliberate, so the words keep their meaning:
+
+- `abandoned` (days-stale) wins outright and claims no host link.
+- `crashed` **replaces** `closed` — both mean the process is gone, but `closed` reads as
+  a normal exit.
+- `orphaned` replaces only `idle` / `input_required`. A session still **working** with
+  nobody watching is an ordinary headless run; flagging every one would bury the signal.
+- A session detached on purpose (`presence` `background`/`parked`) is never flagged — no
+  client is the point of detaching.
+
+A `crashed` row is deliberately transient: once its transcript goes days-stale it
+degrades to `abandoned`, so the listing carries an alert, not a permanent tombstone.
+
+## Favorites (starred sessions)
+
+`*` in the interactive browser stars the highlighted session; `f` filters the list to
+the starred ones. Outside a TTY, `agents sessions favorite <id>` (`--remove`, `--list`,
+`--json`) does the same, and `agents sessions --favorites` is the flag twin of `f` — so
+the `y` copy-cmd round-trips a starred view into a command.
+
+Stars live in `~/.agents/.history/favorites.json` keyed by session id, **not** in
+`sessions.db`. The index is a rebuildable cache — a reindex re-derives every row from
+the transcripts on disk — and a favorite is not derivable from a transcript, so a column
+there would be silently lost on the next rebuild. `.history` is never pruned and syncs
+across machines, so a session starred on one box is starred on every box.
+
 ## Export / Import (portable bundles)
 
 `agents sessions export` bundles selected sessions into a portable, self-describing

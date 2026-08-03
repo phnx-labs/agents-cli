@@ -40,6 +40,7 @@ import { isSessionTrackedAgent, type SessionAgentId, type SessionAttachment, typ
 import { detectProvenance, type SessionProvenance } from './provenance.js';
 import { loadDevices, type DeviceRegistry } from '../devices/registry.js';
 import { presenceFromStore, type Presence } from './detached.js';
+import { classifyHostLink, HOST_HEARTBEAT_STALE_MS, type HostLink } from './host-link.js';
 import { mapBounded } from '../concurrency.js';
 
 const execFileAsync = promisify(execFile);
@@ -98,7 +99,18 @@ export type ActiveContext = 'terminal' | 'teams' | 'cloud' | 'headless';
  * antigravity) gets a real working/waiting/idle from its own parser — see
  * {@link computeLiveSignals}, {@link lifecycleStatus} and {@link resolveFallbackStatus}.
  */
-export type ActiveStatus = 'running' | 'idle' | 'queued' | 'input_required' | 'closed' | 'abandoned' | 'unknown';
+export type ActiveStatus =
+  | 'running'
+  | 'idle'
+  | 'queued'
+  | 'input_required'
+  | 'closed'
+  | 'abandoned'
+  /** Alive, but no client is attached — the host window died and the agent outlived it. */
+  | 'orphaned'
+  /** The host window died and took the agent with it — an unclean exit, not a normal close. */
+  | 'crashed'
+  | 'unknown';
 
 export interface ActiveSession {
   context: ActiveContext;
@@ -177,6 +189,24 @@ export interface ActiveSession {
    * from the detach store — never asserted by a source.
    */
   presence?: Presence;
+  /**
+   * Whether anything is still on the other end of this session — folded on at the
+   * end of {@link getActiveSessions} by {@link foldHostLink} from the raw signals
+   * below, never asserted by a source. Drives the `orphaned` / `crashed` statuses.
+   */
+  hostLink?: HostLink;
+  /**
+   * Clients attached to this session's tmux session (`#{session_attached}`), for
+   * a tmux-hosted row. Absent — NOT zero — when the session is not tmux-hosted:
+   * zero means "tmux says nobody is looking", absent means "we cannot tell".
+   */
+  tmuxClients?: number;
+  /**
+   * When the owning IDE window last refreshed its slice of the live-terminals
+   * registry. Absent for a session no IDE window owns. A stale value means that
+   * window is gone — see {@link HOST_HEARTBEAT_STALE_MS}.
+   */
+  windowHeartbeatMs?: number;
   /** How many live PIDs resolve to this same session (subagents/forks). 1 unless collapsed. */
   pidCount?: number;
   /**
@@ -309,6 +339,18 @@ export const ACTIVE_SESSION_STALE_MS = 24 * 60 * 60_000;
  */
 export const ABANDONED_STALE_MS = 2 * 24 * 60 * 60_000;
 
+/**
+ * Field separator for every `tmux list-panes -F` query here.
+ *
+ * NOT a tab: tmux sanitizes non-printable characters out of format output (3.6a
+ * rewrites a literal tab to `_`), so a tab-separated format comes back as one
+ * unsplittable field. {@link listTmuxAgentSessions} split on `\t`, so on such a
+ * tmux every line failed its `sessName` guard and the function returned ZERO
+ * rows — silently losing the authoritative tmux source (exact `%pane`, real
+ * identities) on every box running a recent tmux. A printable separator survives.
+ */
+const TMUX_FIELD_SEP = '|';
+
 /** Executables we recognize as agent CLIs when scanning the process table. */
 const AGENT_CLI_NAMES: Record<string, string> = {
   claude: 'claude',
@@ -414,9 +456,24 @@ interface LiveTerminalEntry {
   startedAtMs: number;
   /** Slice key from the registry — the IDE window that owns this terminal. */
   windowId?: string;
+  /** The slice's `at` stamp — when that window last republished. See {@link HOST_HEARTBEAT_STALE_MS}. */
+  windowHeartbeatMs?: number;
+  /** This entry's pid is gone; kept only because its window never tore it down. */
+  pidDead?: boolean;
 }
 
-/** Read the live-terminals registry, dedupe by sessionId, keep only pid-alive entries. */
+/**
+ * Read the live-terminals registry, dedupe by sessionId.
+ *
+ * A pid-alive entry is a live session. A pid-DEAD entry is normally noise — a
+ * terminal that closed a moment ago, before its window republished — and is
+ * dropped. But a dead pid whose owning window ALSO stopped republishing is the
+ * signature of a crash: the window went down hard and never ran the teardown that
+ * would have removed this entry. Those are kept (flagged `pidDead`) so
+ * {@link foldHostLink} can report the session as `crashed` instead of letting it
+ * silently vanish from the listing, which is what happened before — a VS Code
+ * crash simply erased its agents from `--active`.
+ */
 function readLiveTerminals(): LiveTerminalEntry[] {
   let raw: string;
   try {
@@ -432,11 +489,24 @@ function readLiveTerminals(): LiveTerminalEntry[] {
   }
   if (!parsed || typeof parsed !== 'object') return [];
 
+  const now = Date.now();
   const merged = new Map<string, LiveTerminalEntry>();
   for (const [windowId, slice] of Object.entries(parsed) as [string, any][]) {
+    const at = Date.parse(slice?.at ?? '');
+    const windowHeartbeatMs = Number.isFinite(at) ? at : undefined;
+    const windowGone = windowHeartbeatMs !== undefined && now - windowHeartbeatMs >= HOST_HEARTBEAT_STALE_MS;
     for (const e of (slice?.entries ?? []) as LiveTerminalEntry[]) {
-      if (!e?.sessionId || !isPidAlive(e.pid, e.startedAtMs)) continue;
-      merged.set(e.sessionId, { ...e, windowId });
+      if (!e?.sessionId) continue;
+      const alive = isPidAlive(e.pid, e.startedAtMs);
+      // Dead pid + a window still republishing = an ordinary close mid-debounce.
+      // Dead pid + a window that stopped republishing = the crash we must report.
+      if (!alive && !windowGone) continue;
+      const entry: LiveTerminalEntry = { ...e, windowId, windowHeartbeatMs, pidDead: !alive };
+      // A live entry always wins a dead one for the same session (the agent was
+      // relaunched into a new window while the crashed window's slice lingers).
+      const prev = merged.get(e.sessionId);
+      if (prev && !prev.pidDead && !alive) continue;
+      merged.set(e.sessionId, entry);
     }
   }
   return Array.from(merged.values());
@@ -910,6 +980,7 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
       startedAtMs: t.startedAtMs,
       lastActivityMs: sessionFileTimes(sessionFile).mtimeMs,
       windowId: t.windowId,
+      windowHeartbeatMs: t.windowHeartbeatMs,
       owner: resolveOwner(pidEntry?.actor, resolvedId),
     }, state, sessionFile, pidAlive);
   });
@@ -1432,7 +1503,7 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
   try {
     res = await runTmux({
       socket,
-      args: ['list-panes', '-a', '-F', '#{pane_id}\t#{session_name}\t#{pane_pid}\t#{pane_current_path}'],
+      args: ['list-panes', '-a', '-F', ['#{pane_id}', '#{session_name}', '#{pane_pid}', '#{pane_current_path}'].join(TMUX_FIELD_SEP)],
       throwOnError: false,
     });
   } catch {
@@ -1458,7 +1529,11 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
   const seen = new Set<string>();
   for (const line of res.stdout.split('\n')) {
     if (!line.trim()) continue;
-    const [pane, sessName, pidRaw, curPath] = line.split('\t');
+    // The path is the LAST field, so rejoin its tail: a directory containing the
+    // separator must not truncate it (the earlier fields cannot contain one).
+    const parts = line.split(TMUX_FIELD_SEP);
+    const [pane, sessName, pidRaw] = parts;
+    const curPath = parts.slice(3).join(TMUX_FIELD_SEP);
     if (!pane || !sessName) continue;
     const meta = readSessionMeta(sessName);
     const liveEntry = liveByPane.get(pane);
@@ -1553,8 +1628,110 @@ export async function getActiveSessions(opts: ActiveQueryOptions = {}): Promise<
   await enrichProvenance(merged);
   await resolveOrigins(merged);
   foldPresence(merged);
+  await foldTmuxClients(merged);
+  foldHostLink(merged);
   annotateOrchestratorLabels(merged);
   return merged;
+}
+
+/**
+ * Fold tmux's attached-client count onto every tmux-hosted row.
+ *
+ * Keyed off `provenance.mux` — which {@link enrichProvenance} has already stamped
+ * on any row whose process env names a tmux pane — rather than off
+ * {@link listTmuxAgentSessions}. That source only emits a row when it can resolve
+ * the pane's agent IDENTITY (launch registry or session meta), and on a machine
+ * where neither resolves it emits nothing at all while the same sessions still
+ * arrive through the terminal/headless sources carrying full tmux provenance.
+ * Hanging the client count off the identity-resolving source would have made the
+ * whole orphan signal silently dead on exactly those machines.
+ *
+ * One `list-panes` per distinct socket, and only when some row is tmux-hosted —
+ * a fleet with no tmux pays nothing. A query failure leaves the count undefined,
+ * which the classifier reads as "cannot tell", never as a false zero.
+ */
+export async function foldTmuxClients(rows: ActiveSession[]): Promise<void> {
+  const tmuxRows = rows.filter((s) => s.provenance?.mux?.kind === 'tmux' && s.provenance.mux.pane);
+  if (tmuxRows.length === 0) return;
+  const { runTmux } = await import('../tmux/binary.js');
+  const sockets = new Set(tmuxRows.map((s) => s.provenance!.mux!.socket));
+  for (const socket of sockets) {
+    const byPane = new Map<string, number>();
+    try {
+      const res = await runTmux({
+        socket,
+        args: ['list-panes', '-a', '-F', `#{pane_id}${TMUX_FIELD_SEP}#{session_attached}`],
+        throwOnError: false,
+      });
+      if (res.code !== 0) continue;
+      for (const line of res.stdout.split('\n')) {
+        const [pane, attached] = line.split(TMUX_FIELD_SEP);
+        if (!pane) continue;
+        const n = parseInt(attached ?? '', 10);
+        // A tmux too old to report `session_attached` yields NaN — leave the pane
+        // unmapped so it stays "cannot tell" rather than becoming a false zero.
+        if (Number.isFinite(n)) byPane.set(pane, n);
+      }
+    } catch {
+      continue; // best-effort: no count is honest, a guessed count is not
+    }
+    for (const s of tmuxRows) {
+      if (s.provenance!.mux!.socket !== socket) continue;
+      const n = byPane.get(s.provenance!.mux!.pane!);
+      if (n !== undefined) s.tmuxClients = n;
+    }
+  }
+}
+
+/**
+ * Fold the host link onto each row and, where it changes the answer, onto the
+ * status. Runs AFTER {@link foldPresence}, because a deliberately backgrounded
+ * session (`presence` `background`/`parked`) is supposed to have no client and
+ * must not be reported as an orphan.
+ *
+ * Precedence is deliberate, and the two new statuses slot in where they add
+ * information rather than destroy it:
+ *
+ *   - `abandoned` wins outright. A days-stale session is already dangling; that
+ *     it also lost its window is not the headline, and it keeps a crashed row
+ *     from lingering as an alert forever.
+ *   - `crashed` REPLACES `closed`. Both mean the process is gone, but `closed`
+ *     reads as a normal exit; `crashed` says the host window went down with it
+ *     and never cleaned up.
+ *   - `orphaned` replaces only `idle` / `input_required`. A session still WORKING
+ *     with nobody watching is a normal headless run, and flagging every one would
+ *     bury the real signal. A session sitting idle — or worse, waiting on a
+ *     question — with no client attached is the stranded case: nobody is coming.
+ */
+export function foldHostLink(rows: ActiveSession[]): void {
+  for (const s of rows) {
+    // Cloud tasks have no local pid, window, or tmux server; there is no host
+    // link to classify and no honest answer to give.
+    if (s.context === 'cloud') continue;
+    // A days-stale row is already `abandoned`; whether its window is also gone
+    // adds nothing, and its pid liveness is genuinely unknown from the status
+    // (abandoned outranks closed), so claim no host link rather than guess one.
+    if (s.status === 'abandoned') continue;
+    // `closed` IS the dead-pid status — `lifecycleStatus` assigns it from
+    // `!pidAlive` and nothing else — so the status is the pid answer here.
+    const link = classifyHostLink({
+      pidAlive: s.status !== 'closed',
+      windowHeartbeatMs: s.windowHeartbeatMs,
+      tmuxClients: s.tmuxClients,
+      deliberatelyDetached: s.presence === 'background' || s.presence === 'parked',
+    });
+    s.hostLink = link;
+    // `foldPresence` gives every terminal row a DERIVED `attached` — "a live
+    // interactive TUI you're watching" — which is exactly the claim a lost host
+    // disproves. A stored record never yields `attached` (it is background or
+    // parked), so clearing only that value drops the derived lie and leaves a
+    // real detach record untouched.
+    if (link !== 'connected' && s.presence === 'attached') s.presence = undefined;
+    if (link === 'host-gone' && s.status === 'closed') s.status = 'crashed';
+    else if (link === 'no-client' && (s.status === 'idle' || s.status === 'input_required')) {
+      s.status = 'orphaned';
+    }
+  }
 }
 
 /**

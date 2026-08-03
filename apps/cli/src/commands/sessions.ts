@@ -55,6 +55,8 @@ import { setHelpSections } from '../lib/help.js';
 import { registerSessionsTailCommand } from './sessions-tail.js';
 import { registerSessionsSyncCommand } from './sessions-sync.js';
 import { registerSessionsResumeCommand } from './sessions-resume.js';
+import { registerSessionsFavoriteCommand } from './sessions-favorite.js';
+import { isFavorite, listFavorites } from '../lib/session/favorites.js';
 import { registerGoCommand } from './go.js';
 import { registerFocusCommand } from './focus.js';
 import { registerDetachCommand } from './detach.js';
@@ -105,6 +107,8 @@ interface SessionsOptions extends SessionFilterOptions {
   flat?: boolean;
   /** With --active: show only sessions waiting on user input; exit 1 if any. */
   waiting?: boolean;
+  /** Show only favorited (starred) sessions — the `f` key's flag twin. */
+  favorites?: boolean;
   /** Enrich the listing with live glyphs/preview for running rows. Default on;
    * `--no-live` sets this false. Commander's `--no-` convention. */
   live?: boolean;
@@ -310,6 +314,12 @@ function statusColor(status: ActiveSession['status']): (s: string) => string {
     case 'closed': return chalk.dim;
     // Days-stale / dangling: red so a session nobody is driving stands out.
     case 'abandoned': return chalk.red;
+    // The host window died and took the agent with it — an unclean exit, not the
+    // dimmed `closed` of a normal one. Red-bright so a crash reads as an event.
+    case 'crashed': return chalk.redBright;
+    // Alive with nobody attached. Yellow, like `input_required`: both mean the
+    // session is stuck waiting on a human, and this one has no human to wait for.
+    case 'orphaned': return chalk.yellow;
     // Alive but un-introspectable (a harness whose transcript we can't parse).
     // Magenta so it never reads as the gray "idle" it used to be faked as.
     case 'unknown': return chalk.magenta;
@@ -440,7 +450,11 @@ export function formatActiveRowDescription(s: ActiveSession): string {
 function activityLabel(s: ActiveSession): string {
   // Lifecycle status wins over any residual parsed activity — a dead/dangling
   // session must read `closed`/`abandoned`, not the `idle` its stale tail infers.
+  // `crashed`/`orphaned` are the same kind of claim about the session as a whole,
+  // and both outrank the `idle` its last parsed turn would otherwise show.
   if (s.status === 'closed' || s.status === 'abandoned') return s.status;
+  if (s.status === 'crashed') return 'crashed';
+  if (s.status === 'orphaned') return 'orphan';
   if (s.activity === 'waiting_input') return 'waiting';
   if (s.activity === 'working') return 'working';
   if (s.activity === 'idle') return 'idle';
@@ -474,8 +488,13 @@ export function liveGlyphAndPreview(a: ActiveSession | undefined): { glyph: stri
   // so an opaque harness is never mistaken for a finished one. `⊘` = abandoned /
   // dangling; `×` = closed (dead pid) — both distinct from the `○` idle a live,
   // stopped session shows, so a gone session never masquerades as a resting one.
+  // `✗` = crashed (died WITH its host window, uncleanly) — deliberately louder
+  // than the `×` of a clean close. `◍` = orphaned (alive, nothing attached): a
+  // filled ring, so it reads as "still burning" unlike the hollow `○` idle.
   if (a.status === 'abandoned') return { glyph: statusColor(a.status)('⊘'), preview: buildSessionDescription(a) };
   if (a.status === 'closed') return { glyph: statusColor(a.status)('×'), preview: buildSessionDescription(a) };
+  if (a.status === 'crashed') return { glyph: statusColor(a.status)('✗'), preview: buildSessionDescription(a) };
+  if (a.status === 'orphaned') return { glyph: statusColor(a.status)('◍'), preview: buildSessionDescription(a) };
 
   const waiting = a.status === 'input_required' || a.activity === 'waiting_input';
   const running = a.status === 'running' || a.activity === 'working';
@@ -500,6 +519,9 @@ export function liveStatusWord(a: ActiveSession | undefined): string {
   if (!a) return '';
   // Lifecycle status is definitive — surface it ahead of any parsed activity.
   if (a.status === 'closed' || a.status === 'abandoned') return a.status;
+  // Same rank: a lost host is a fact about the session, not about its last turn.
+  if (a.status === 'crashed') return 'crashed';
+  if (a.status === 'orphaned') return 'orphan';
   if (a.status === 'input_required' || a.activity === 'waiting_input') return 'waiting';
   if (a.status === 'running' || a.activity === 'working') return 'working';
   if (a.status === 'idle' || a.activity === 'idle') return 'idle';
@@ -1211,6 +1233,7 @@ function canonicalSessionsCommand(query: string | undefined, options: SessionsOp
   if (options.until) a.push('--until', options.until);
   if (options.local) a.push('--local');
   if (options.waiting) a.push('--waiting');
+  if (options.favorites) a.push('--favorites');
   const q = (query ?? '').trim();
   if (q) a.push(JSON.stringify(q));
   return 'ag ' + a.join(' ');
@@ -1239,15 +1262,37 @@ async function renderSessionPreview(
   try {
     live = indexActiveBySessionId(await getActiveSessions()).get(session.id);
   } catch { /* plain preview on any probe failure */ }
-  if (live) {
-    const { glyph } = liveGlyphAndPreview(live);
-    const word = liveStatusWord(live) || live.status;
-    const needsYou = live.status === 'input_required' || live.activity === 'waiting_input';
-    const reason = live.awaitingReason ? ` (${live.awaitingReason.replace('_', ' ')})` : '';
-    const suffix = needsYou ? chalk.yellow(`  ← needs you${reason}`) : '';
-    console.log(`${glyph} ${statusColor(live.status)(word)}${suffix}`);
-  }
+  const headline = formatLiveStatusHeadline(live, isFavorite(session.id));
+  if (headline) console.log(headline);
   console.log(buildPreview(session));
+}
+
+/**
+ * The one-line live status banner shown above a session preview: the glyph, the
+ * status word, and — when the session needs a human or has LOST one — a plain
+ * sentence saying so. Shared by `--preview` and the interactive browser's preview
+ * pane so both explain a state the same way.
+ *
+ * `crashed` and `orphaned` are the states a glyph alone cannot carry: nobody
+ * reads "orphan" and knows it means "still running in tmux with no window
+ * attached", so those two spell it out.
+ */
+export function formatLiveStatusHeadline(live: ActiveSession | undefined, favorite = false): string {
+  const star = favorite ? chalk.yellow('★ ') : '';
+  // With no live row there is no status to lead with, so the star has to say
+  // what it means on its own — a bare `★` above a preview reads as noise.
+  if (!live) return favorite ? chalk.yellow('★ favorited') : '';
+  const { glyph } = liveGlyphAndPreview(live);
+  const word = liveStatusWord(live) || live.status;
+  const needsYou = live.status === 'input_required' || live.activity === 'waiting_input';
+  const reason = live.awaitingReason ? ` (${live.awaitingReason.replace('_', ' ')})` : '';
+  let suffix = needsYou ? chalk.yellow(`  ← needs you${reason}`) : '';
+  if (live.status === 'crashed') {
+    suffix = chalk.redBright('  ← the host app or connection went away and took the agent with it');
+  } else if (live.status === 'orphaned') {
+    suffix = chalk.yellow('  ← still running, but no client is attached — nothing is showing it');
+  }
+  return `${star}${glyph} ${statusColor(live.status)(word)}${suffix}`;
 }
 
 /** Main action handler for `agents sessions`. Routes to picker, table, or single-session render. */
@@ -1371,6 +1416,7 @@ async function sessionsAction(
           host: options.host,
           since: options.since,
           all: options.all,
+          favorites: options.favorites,
         }),
         { local: options.local === true, hosts: options.host },
       );
@@ -1406,6 +1452,7 @@ async function sessionsAction(
         since: options.since,
         host: options.host,
         inTeam: options.inTeam,
+        favorites: options.favorites,
       }),
       { local: options.local === true, hosts: options.host },
     );
@@ -1547,6 +1594,13 @@ async function sessionsAction(
     // teammate only knows its team from the meta.json filterTeamSessions just
     // read. Match either, after that pass has populated `teamOrigin`.
     if (options.inTeam) sessions = sessions.filter((s) => matchesTeam(s, options.inTeam!));
+
+    // --favorites narrows to the starred set. Applied here, before the JSON
+    // emit, so `--favorites --json` is the machine-readable twin of the `f` key.
+    if (options.favorites) {
+      const starred = listFavorites();
+      sessions = sessions.filter((s) => starred.has(s.id));
+    }
 
     // Under --in-team the visible list is one team, so the whole-index team-origin
     // count would be a non-sequitur next to it.
@@ -1745,7 +1799,13 @@ function metaSignals(s: SessionMeta): Parameters<typeof signalBadges>[0] {
  * (tracker/PR ref, pulled out of the badge blob so refs align) is only rendered
  * when `showTicket` — otherwise a listing with no refs would waste a column of
  * dashes and needlessly truncate the topic. Worktree stays a trailing badge. */
-export function flatSessionRow(session: SessionMeta, live?: ActiveSession, showTicket = false, cols: PickerColumns = {}): string {
+export function flatSessionRow(
+  session: SessionMeta,
+  live?: ActiveSession,
+  showTicket = false,
+  cols: PickerColumns = {},
+  favorite = false,
+): string {
   const agentColor = colorAgent(session.agent);
   const when = formatRelativeTime(session.lastActivity ?? session.timestamp);
   const project = session.project || '-';
@@ -1783,7 +1843,10 @@ export function flatSessionRow(session: SessionMeta, live?: ActiveSession, showT
   const wtW = wt ? stringWidth(wt) + 1 : 0;
   const width = terminalWidth();
   const requestedModelW = cols.showModel ? (cols.modelWidth ?? PICKER_MODEL_MAX) : 0;
-  const fixedW = (10 + 9 + 8 + 16) + glyphW + statusW + machineW + ticketW + wtW + team.width + stringWidth(when) + 1;
+  // Same conditional 2 cells as the picker's marker, for the same reason.
+  const favW = cols.showFavorite ? 2 : 0;
+  const favCell = cols.showFavorite ? (favorite ? chalk.yellow('★ ') : '  ') : '';
+  const fixedW = favW + (10 + 9 + 8 + 16) + glyphW + statusW + machineW + ticketW + wtW + team.width + stringWidth(when) + 1;
   const modelSlack = width - fixedW - 16;
   const modelW = requestedModelW <= modelSlack
     ? requestedModelW
@@ -1791,6 +1854,7 @@ export function flatSessionRow(session: SessionMeta, live?: ActiveSession, showT
   const topicW = Math.max(16, width - fixedW - modelW);
 
   return (
+    favCell +
     chalk.white(padToWidth(truncateToWidth(session.shortId, 9), 10)) +
     agentColor(padToWidth(truncateToWidth(session.agent, 8), 9)) +
     chalk.yellow(padToWidth(truncateToWidth(session.version || '-', 7), 8)) +
@@ -1982,7 +2046,10 @@ function printSessionTable(sessions: SessionMeta[], hiddenCount = 0, tree = fals
   // column (and its compact labels) is computed the same way the picker does it.
   const showTicket = sessions.some((s) => ticketLabel(s) !== '');
   const cols = pickerColumnsFor(sessions);
-  for (const session of sessions) console.log(flatSessionRow(session, liveIndex?.get(session.id), showTicket, cols));
+  const favorites = listFavorites();
+  for (const session of sessions) {
+    console.log(flatSessionRow(session, liveIndex?.get(session.id), showTicket, cols, favorites.has(session.id)));
+  }
 
   const countLine = `${sessions.length} session${sessions.length === 1 ? '' : 's'}.`;
   console.log(chalk.gray(`\n${countLine}`));
@@ -2203,6 +2270,12 @@ export interface PickerColumns {
    */
   showHost?: boolean;
   /**
+   * Render the favorite marker column. Like every other conditional column here,
+   * it earns its 2 cells only when some row in the pool is actually starred — a
+   * user who has never favorited anything pays nothing for the feature.
+   */
+  showFavorite?: boolean;
+  /**
    * Cells the picker prepends before each row: 2 for the single-select cursor
    * ('> '), 6 for the multi-select cursor + checkbox ('> [x] '). Reserved from
    * the topic width so rows never wrap. Defaults to 2.
@@ -2270,6 +2343,11 @@ export function pickerColumnsFor(sessions: SessionMeta[]): PickerColumns {
     showModel: sessions.some((s) => !!s.model),
     modelWidth: modelColumnWidth(sessions),
     showTicket: sessions.some((s) => ticketLabel(s) !== ''),
+    showFavorite: (() => {
+      // One read of the store per pool, not one per row.
+      const starred = listFavorites();
+      return starred.size > 0 && sessions.some((s) => starred.has(s.id));
+    })(),
   };
 }
 
@@ -2296,6 +2374,7 @@ export function formatPickerLabel(
   cols: PickerColumns = {},
   ssh?: SshOriginTag,
   host = '',
+  favorite = false,
 ): string {
   const agentColor = colorAgent(s.agent);
   const when = formatRelativeTime(s.lastActivity ?? s.timestamp);
@@ -2342,12 +2421,18 @@ export function formatPickerLabel(
   const ticketW = cols.showTicket ? TICKET_W + 1 : 0;
   const hostW = cols.showHost ? PICKER_HOST_W : 0;
   const wtW = wt ? stringWidth(wt) + 1 : 0;
+  // Within a pool that HAS starred rows the marker holds its 2 cells whether this
+  // row is starred or not, so the columns after it never jog; a pool with none
+  // drops the column entirely (`showFavorite`) and costs nothing.
+  const favW = cols.showFavorite ? 2 : 0;
+  const favCell = cols.showFavorite ? (favorite ? chalk.yellow('★ ') : '  ') : '';
   const topicW = Math.max(
     16,
-    terminalWidth() - gutter - (10 + 9 + 8 + 16) - machineColW - hostW - ticketW - wtW - sshW - team.width - stringWidth(when) - 1,
+    terminalWidth() - gutter - favW - (10 + 9 + 8 + 16) - machineColW - hostW - ticketW - wtW - sshW - team.width - stringWidth(when) - 1,
   );
 
   return (
+    favCell +
     // Truncated, not just padded: an indexed shortId is always 8 chars, but a
     // live row with no session id is named by its pid or cloud task, which can
     // run past the column and shunt every later column out of alignment.
@@ -3306,6 +3391,7 @@ export function registerSessionsCommands(program: Command): void {
     .option('--roots', 'With --json: emit the on-disk directories scanned for session transcripts, per agent (for external watchers)')
     .option('--local', 'Only this machine — skip the cross-machine SSH fan-out (default listing and --active)')
     .option('--waiting', 'With --active: show only sessions waiting on your input (exits non-zero if any)')
+    .option('--favorites', 'Show only favorited (starred) sessions — star them with `*` in the browser or `agents sessions favorite <id>`')
     .option('--tree', 'Group the listing by directory; drops the id/version columns for readability')
     .option('--flat', 'Plain flat table (one row per session) instead of the grouped project overview')
     .option('--no-live', 'Do not enrich the listing with live status/preview for running sessions')
@@ -3380,6 +3466,7 @@ export function registerSessionsCommands(program: Command): void {
   registerSessionsTailCommand(sessionsCmd);
   registerSessionsSyncCommand(sessionsCmd);
   registerSessionsResumeCommand(sessionsCmd);
+  registerSessionsFavoriteCommand(sessionsCmd);
   registerGoCommand(sessionsCmd);
   registerFocusCommand(sessionsCmd);
   registerDetachCommand(sessionsCmd);

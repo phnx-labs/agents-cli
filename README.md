@@ -265,6 +265,8 @@ On a terminal, `agents sessions --active` (and a bare `agents sessions`) open th
 |---|---|---|
 | `s` | search text | `--query` / positional |
 | `r` | running only | `--active` |
+| `f` | favorites only | `--favorites` |
+| `*` | star / unstar the highlighted session | `agents sessions favorite <id>` |
 | `c` | team sessions | `--teams` |
 | `a` | agent (cycles) | `-a` |
 | `d` | device (cycles) | `--device` |
@@ -273,6 +275,10 @@ On a terminal, `agents sessions --active` (and a bare `agents sessions`) open th
 | `tab` | toggle the preview pane | — |
 | `⏎` | resume / attach | `resume` / `focus` |
 | `y` | copy the equivalent command | `--print-cmd` |
+
+**Star the sessions you keep coming back to.** `*` marks the highlighted row (a `★` shows in the listing), `f` narrows to the starred ones, and `agents sessions favorite <id>` / `--favorites` do the same outside a TTY. Stars live in `~/.agents/.history/favorites.json` keyed by session id, so they survive a reindex and follow the session to your other machines.
+
+**A session that lost its host says so.** When an editor window or an SSH connection goes down hard, the agent it owned used to simply disappear from `--active`; when an agent outlived its window in tmux, it reported a plain `idle`. Both now carry their own status: `✗ crashed` (the host went down and took the agent with it) and `◍ orphan` (still alive, but no client is attached — nothing is showing it). Read from tmux's attached-client count and the editor window's registry heartbeat, so a deliberate `agents sessions detach` is never mistaken for one, and a session that is still *working* headlessly is left alone.
 
 Filters **stack** (they AND together), the active set shows in the header, and the highlighted row **previews below by default** (`tab` hides it) — prompt, activity, last response, plus a links line where the worked-on ticket and the PR the session opened are **clickable** (OSC 8 hyperlinks: the ticket jumps to Linear, the `PR#` to GitHub, in terminals that support them). The Linear workspace is resolved from `LINEAR_WORKSPACE` or the linear-cli config, so tickets stay plain text when it's unknown. Because every hotkey has a flag, the view you build by hand is a real command: press `y` (or run `--print-cmd`) to get the exact `ag sessions …` line — explore interactively, hand the line to an agent. Piped output, `--json`, or `--no-interactive` keep the plain listing for scripts. Peek without opening the pager with `agents sessions <id> --preview`.
 

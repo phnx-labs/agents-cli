@@ -19,6 +19,7 @@ import type { ActiveSession } from '../lib/session/active.js';
 import { discoverSessions } from '../lib/session/discover.js';
 import { gatherRemoteList } from '../lib/session/remote-list.js';
 import { enrichTeamOrigins, safeTeamText } from '../lib/session/team-filter.js';
+import { listFavorites, toggleFavorite } from '../lib/session/favorites.js';
 import { machineId, normalizeHost } from '../lib/session/sync/config.js';
 import { buildPreview } from './sessions-picker.js';
 import {
@@ -35,6 +36,7 @@ import {
   shouldIncludeLocal,
   remoteHostsToDial,
   matchesTeam,
+  formatLiveStatusHeadline,
   type PickerColumns,
 } from './sessions.js';
 
@@ -53,6 +55,8 @@ export interface BrowserFilter {
   device?: string;
   /** filter to one team's lineage, or all — the `T` key / `--in-team`. */
   team?: string;
+  /** favorited-only — the `f` key / `--favorites`. */
+  favorites: boolean;
   /** this-repo subtree vs every directory — the `P` key / `--all`. */
   projectScope: 'repo' | 'all';
   /** time window (undefined = all time) — the `W` key / `--since`. */
@@ -76,6 +80,7 @@ export function buildInitialFilter(initial: Partial<BrowserFilter>): BrowserFilt
   return {
     running: initial.running ?? false,
     teams: initial.teams ?? false,
+    favorites: initial.favorites ?? false,
     agent: initial.agent,
     device: initial.device,
     team: initial.team,
@@ -151,6 +156,7 @@ export function browserFilterToArgv(f: BrowserFilter, query = ''): string[] {
   const a = ['sessions'];
   if (f.running) a.push('--active');
   if (f.teams) a.push('--teams');
+  if (f.favorites) a.push('--favorites');
   if (f.agent) a.push('-a', f.agent);
   if (f.device) a.push('--device', f.device);
   if (f.team) a.push('--in-team', f.team);
@@ -181,10 +187,12 @@ export function activeBrowserSeed(opts: {
   host?: string[];
   since?: string;
   all?: boolean;
+  favorites?: boolean;
 }): Partial<BrowserFilter> {
   return {
     running: true,
     teams: !!opts.teams,
+    favorites: !!opts.favorites,
     agent: opts.agent,
     projectScope: 'all',
     device: normalizeDeviceSeed(opts.host?.[0]),
@@ -208,6 +216,7 @@ export function bareBrowserSeed(opts: {
   since?: string;
   host?: string[];
   inTeam?: string;
+  favorites?: boolean;
 }): Partial<BrowserFilter> {
   // An explicit --device scopes the pool to a peer, whose cwds live under that
   // machine's home — none of them can be under OUR process.cwd(), so the default
@@ -223,6 +232,7 @@ export function bareBrowserSeed(opts: {
   const wholeTeam = !!opts.inTeam;
   return {
     teams: !!opts.teams,
+    favorites: !!opts.favorites,
     agent: opts.agent,
     // The filter carries one device; seed it only when the scope names exactly
     // one, so a two-device scope isn't narrowed to the first of them.
@@ -426,14 +436,19 @@ export function shouldShowHostColumn(
   return rows.some((r) => liveHostLabel(live.get(r.id)) !== '');
 }
 
-/** Apply the cheap in-memory filters (agent / device / project / running). */
+/** Apply the cheap in-memory filters (agent / device / project / running / favorites). */
 function applyFilters(
   rows: SessionMeta[],
   live: Map<string, ActiveSession>,
   f: BrowserFilter,
   self: string,
+  favorites: Set<string>,
 ): SessionMeta[] {
   let out = rows;
+  // A projected live row is keyed by pid/task when it has no session id, and a
+  // favorite is always keyed by a real session id — so an id-less row can never
+  // be favorited and correctly drops out here.
+  if (f.favorites) out = out.filter((r) => favorites.has(r.id));
   if (f.agent) out = out.filter((r) => r.agent === f.agent);
   if (f.device) out = out.filter((r) => (r.machine ?? self) === f.device);
   if (f.team) out = out.filter((r) => matchesTeam(r, f.team!));
@@ -465,6 +480,7 @@ function headerFor(f: BrowserFilter): string {
   ];
   if (f.running) bits.push('running');
   if (f.teams) bits.push('teams');
+  if (f.favorites) bits.push('favorites');
   return bits.join(' · ');
 }
 
@@ -472,7 +488,7 @@ function helpFor(_f: BrowserFilter, mode: 'nav' | 'search'): string {
   if (mode === 'search') {
     return 'type to filter · ↑↓ navigate · esc exit search · ⏎ resume';
   }
-  return 's search · r running · c teams · t team · a agent · d device · p project · w window · tab preview · y copy-cmd · ⏎ resume · esc quit';
+  return 's search · r running · f favorites · * star · c teams · t team · a agent · d device · p project · w window · tab preview · y copy-cmd · ⏎ resume · esc quit';
 }
 
 /**
@@ -505,6 +521,10 @@ export async function runSessionBrowser(
   // The live index is slow (a full ps/tmux scan) and only the running filter
   // needs it — fetch it once, lazily, the first time running is toggled on.
   let liveCache: Map<string, ActiveSession> | null = null;
+  // Re-read every load (it's an mtime-memoized parse of one small file), so the
+  // `*` key's reload picks up the star it just wrote — and so does a favorite
+  // starred by another session on this machine.
+  let favorites = new Set<string>();
   // Generation guard: two quick keypresses can start overlapping loads whose
   // SSH fan-outs settle out of order. dynamicPicker's own gen ref guards which
   // rows become `items`, but the shared closure state below (cols / cycle pools /
@@ -560,7 +580,8 @@ export async function runSessionBrowser(
       ...rows.map((r) => safeTeamText(r.spawnedTeam)),
       ...rows.map((r) => safeTeamText(r.teamOrigin?.team)),
     ]);
-    const filtered = applyFilters(rows, live ?? new Map(), f, self);
+    favorites = listFavorites();
+    const filtered = applyFilters(rows, live ?? new Map(), f, self, favorites);
     cols = pickerColumnsFor(filtered);
     cols.showHost = shouldShowHostColumn(f, live, filtered);
     return filtered;
@@ -572,9 +593,24 @@ export async function runSessionBrowser(
     load,
     keyFor: (s) => s.id,
     labelFor: (s, q) =>
-      formatPickerLabel(s, q, cols, sshOriginTagFor(liveCache, s.id), liveHostLabel(liveCache?.get(s.id))),
+      formatPickerLabel(
+        s,
+        q,
+        cols,
+        sshOriginTagFor(liveCache, s.id),
+        liveHostLabel(liveCache?.get(s.id)),
+        favorites.has(s.id),
+      ),
     matches: sessionMatchesQuery,
-    buildPreview,
+    // Lead the preview with the live status banner — the one place a `crashed` /
+    // `orphaned` session gets a sentence instead of a glyph. `buildPreview` is
+    // memoized per session, so the volatile live half is prepended here rather
+    // than baked into the cached body.
+    buildPreview: (s) => {
+      const headline = formatLiveStatusHeadline(liveCache?.get(s.id), favorites.has(s.id));
+      const body = buildPreview(s);
+      return headline ? `${headline}\n${body}` : body;
+    },
     headerFor: (f) =>
       unreachable.length > 0
         ? `${headerFor(f)} · ${chalk.yellow(`${unreachable.join(', ')}: unreachable`)}`
@@ -585,6 +621,7 @@ export async function runSessionBrowser(
     loadingMessage: local ? 'Loading…' : 'Loading (reaching other machines)…',
     keyBindings: {
       r: (f) => ({ ...f, running: !f.running }),
+      f: (f) => ({ ...f, favorites: !f.favorites }),
       c: (f) => ({ ...f, teams: !f.teams }),
       a: (f) => ({ ...f, agent: cycle(f.agent, agentsInPool) }),
       d: (f) => ({ ...f, device: cycle(f.device, devicesInPool) }),
@@ -595,7 +632,15 @@ export async function runSessionBrowser(
       p: (f) => (hosts ? f : { ...f, projectScope: f.projectScope === 'repo' ? 'all' : 'repo' }),
       w: (f) => ({ ...f, window: cycleWindow(f.window) }),
     },
-    onKey: (name, f, _active, query) => {
+    onKey: (name, f, active, query) => {
+      if (name === '*') {
+        // Only a row with a real session id can be starred: a projected live row
+        // with no id is keyed by pid, which is gone the moment the process is.
+        if (!active || active.id.startsWith(LIVE_ROW_PREFIX)) return 'nothing to star on this row';
+        const on = toggleFavorite(active.id);
+        // reload so the row's star is repainted — labels are memoized per row.
+        return { flash: on ? `★ favorited ${active.shortId}` : `☆ unfavorited ${active.shortId}`, reload: true };
+      }
       if (name === 'y') {
         // Thread the live search query so the copied command reproduces the
         // exact view — the human→agent bridge must include the search term.
