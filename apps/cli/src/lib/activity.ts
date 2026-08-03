@@ -430,6 +430,7 @@ export const EVENT_STYLE: Record<string, { glyph: string; color: (s: string) => 
   'checklist.created': { glyph: '☐', color: chalk.cyan, label: 'checklist created' },
   'status.posted': { glyph: '▸', color: chalk.white, label: 'status' },
   'file.edited': { glyph: '·', color: chalk.gray, label: 'file edited' },
+  'bash.executed': { glyph: '$', color: chalk.gray, label: 'command run' },
 };
 
 export function styleForEvent(event: string) {
@@ -820,25 +821,6 @@ def first_line(text, limit=140):
     return ""
 
 
-def _subcommand(tokens, tool):
-    """First non-flag token after 'tool', i.e. its subcommand (skips -C <path>,
-    -c <cfg>, and other leading flags). None if 'tool' isn't the invoked command."""
-    try:
-        i = tokens.index(tool) + 1
-    except ValueError:
-        return None, []
-    while i < len(tokens):
-        t = tokens[i]
-        if t in ("-C", "-c", "--git-dir", "--work-tree"):
-            i += 2  # flag that consumes the next token
-            continue
-        if t.startswith("-"):
-            i += 1
-            continue
-        return t, tokens[i + 1:]
-    return None, []
-
-
 # Canonical command taxonomy for Bash tool calls. Mirrors the TypeScript
 # registry in lib/session/bash-command.ts; keep them in sync.
 BASH_TOOL_REGISTRY = {
@@ -926,6 +908,10 @@ BASH_TOOL_REGISTRY = {
 
 TWO_LEVEL_TOOLS = {"git", "gh", "bun", "npm", "cargo", "docker", "kubectl", "rush", "openclaw", "pnpm", "yarn"}
 
+# Flags on a two-level tool that consume the following token as their value; the
+# subcommand scan must skip both. Mirrors VALUE_FLAGS in lib/session/bash-command.ts.
+VALUE_FLAGS = {"-C", "-c", "--git-dir", "--work-tree", "-R", "--repo", "--cwd"}
+
 
 def _unwrap_command(cmd):
     """Strip wrapper prefixes so the real executable is classified."""
@@ -933,10 +919,12 @@ def _unwrap_command(cmd):
     ssh = re.match(r'^ssh\s+\S+\s+["\']?(.+?)["\']?\s*(?:\|.*)?$', s)
     if ssh:
         return _unwrap_command(ssh.group(1))
-    env = re.match(r'^([A-Za-z_][A-Za-z0-9_]*=\S+\s+)+(.+)$', s)
+    # VAR=value prefix (value may be a single- or double-quoted string with spaces)
+    env = re.match(r'^([A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|' + r"'[^']*'" + r'|\S+)\s+)+(.+)$', s)
     if env:
         return _unwrap_command(env.group(2))
-    prefix = re.match(r'^(?:sudo|time)(?:\s+-\S+)*\s+(.+)$', s)
+    # sudo / time prefix (value-taking flags such as -u user consume their argument)
+    prefix = re.match(r'^(?:sudo|time)(?:\s+(?:-[uUgGhpCrtDR]\s+\S+|-\S+))*\s+(.+)$', s)
     if prefix:
         return _unwrap_command(prefix.group(1))
     cd = re.match(r'^cd\s+\S+\s*&&\s*(.+)$', s)
@@ -1012,6 +1000,19 @@ def _tokenize_bash(command):
     return out
 
 
+def _scan_subcommand(tokens):
+    """First non-flag token after the executable, skipping flags and the argument
+    of a value-taking flag (VALUE_FLAGS). Mirrors scanSubcommand in bash-command.ts."""
+    i = 1
+    while i < len(tokens):
+        t = tokens[i]
+        if t.startswith("-"):
+            i += 2 if t in VALUE_FLAGS else 1
+            continue
+        return t.lower()
+    return ""
+
+
 def classify_bash_command(command):
     """Return {tool, category, subcommand, action, summary} for the first simple command."""
     simple_commands = _tokenize_bash(command)
@@ -1027,21 +1028,13 @@ def classify_bash_command(command):
         base = base[:-4]
     info = BASH_TOOL_REGISTRY.get(base)
     if not info:
-        return {"tool": first, "category": "other", "subcommand": "", "action": "running command", "summary": first}
+        # Known two-level tool absent from the registry (docker/kubectl/rush/
+        # openclaw) still surfaces its subcommand; category stays 'other'.
+        sub = _scan_subcommand(tokens) if base in TWO_LEVEL_TOOLS else ""
+        summary = "{} {}".format(base, sub) if sub else first
+        return {"tool": first, "category": "other", "subcommand": sub, "action": "running command", "summary": summary}
 
-    subcommand = ""
-    if base in TWO_LEVEL_TOOLS:
-        i = 1
-        while i < len(tokens):
-            t = tokens[i]
-            if t.startswith("-"):
-                if t in ("-C", "-c", "--git-dir", "--work-tree"):
-                    i += 2
-                else:
-                    i += 1
-                continue
-            subcommand = t.lower()
-            break
+    subcommand = _scan_subcommand(tokens) if base in TWO_LEVEL_TOOLS else ""
 
     summary = "{} {}".format(base, subcommand) if subcommand else base
     return {

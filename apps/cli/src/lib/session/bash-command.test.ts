@@ -43,6 +43,19 @@ describe('tokenizeBash', () => {
     expect(tokenizeBash('sudo -S apt update')).toEqual([['apt', 'update']]);
   });
 
+  it('unwraps sudo with a value-taking flag (-u user)', () => {
+    expect(tokenizeBash('sudo -u deploy apt install foo')).toEqual([['apt', 'install', 'foo']]);
+  });
+
+  it('unwraps env prefixes whose value is a quoted string with spaces', () => {
+    expect(tokenizeBash('GIT_AUTHOR_NAME="Jane Doe" git commit -m "automated fix"')).toEqual([
+      ['git', 'commit', '-m', 'automated fix'],
+    ]);
+    expect(tokenizeBash("GIT_AUTHOR_NAME='Jane Doe' GIT_AUTHOR_EMAIL=bot@x.com git commit -m x")).toEqual([
+      ['git', 'commit', '-m', 'x'],
+    ]);
+  });
+
   it('unwraps cd && prefixes', () => {
     expect(tokenizeBash('cd /repo && git status')).toEqual([['git', 'status']]);
   });
@@ -77,6 +90,22 @@ describe('classifyBashCommand', () => {
       action: 'working in git',
       summary: 'git status',
       signal: 'mid',
+    });
+  });
+
+  it('skips a value-taking flag on gh (-R owner/repo)', () => {
+    expect(classifyBashCommand('gh -R owner/repo pr create --title x')).toMatchObject({
+      tool: 'gh',
+      subcommand: 'pr',
+      summary: 'gh pr',
+    });
+  });
+
+  it('skips a value-taking flag on bun (--cwd dir)', () => {
+    expect(classifyBashCommand('bun --cwd apps/cli test')).toMatchObject({
+      tool: 'bun',
+      subcommand: 'test',
+      summary: 'bun test',
     });
   });
 
@@ -136,6 +165,18 @@ describe('bucketKey', () => {
   it('returns the executable for unknown commands', () => {
     expect(bucketKey('./something-weird')).toBe('something-weird');
   });
+
+  it('buckets by real subcommand, skipping value-taking flags', () => {
+    // `git -C /repo commit` must bucket as `git commit`, never `git -C`.
+    expect(bucketKey('git -C /repo commit -m "fix"')).toBe('git commit');
+    expect(bucketKey('gh -R owner/repo pr create --title x')).toBe('gh pr');
+  });
+
+  it('prefixes remote-wrapped commands with ssh→', () => {
+    expect(bucketKey('ssh host "git push"')).toBe('ssh→git push');
+    expect(bucketKey('ssh host "ls -la"')).toBe('ssh→ls');
+    expect(bucketKey('scp a host:/b')).toBe('ssh→scp');
+  });
 });
 
 describe('detectBashMilestone', () => {
@@ -190,6 +231,20 @@ describe('detectBashMilestone', () => {
 
   it('detects pr.opened', () => {
     expect(detectBashMilestone('gh pr create --title x')).toEqual({
+      event: 'pr.opened',
+      detail: 'gh pr create',
+    });
+  });
+
+  it('detects commit.created behind an env-var prefix with a quoted value', () => {
+    expect(detectBashMilestone('GIT_AUTHOR_NAME="Jane Doe" git commit -m "x"')).toEqual({
+      event: 'commit.created',
+      detail: 'git commit',
+    });
+  });
+
+  it('detects pr.opened behind gh -R owner/repo', () => {
+    expect(detectBashMilestone('gh -R owner/repo pr create --title x')).toEqual({
       event: 'pr.opened',
       detail: 'gh pr create',
     });

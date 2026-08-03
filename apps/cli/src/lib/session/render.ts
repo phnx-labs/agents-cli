@@ -15,7 +15,7 @@ import { cleanSessionPrompt, extractSessionTopic } from './prompt.js';
 import { renderMarkdown } from '../markdown.js';
 import { redactSecrets } from '../redact.js';
 import { classifyFileChanges, changeCounts, toolHistogram, detectTestResult, type FileChange, type FileOp } from './digest.js';
-import { classifyBashCommand, unwrapCommand, type BashCategory } from './bash-command.js';
+import { classifyBashCommand, unwrapCommand, bucketKey, type BashCategory } from './bash-command.js';
 import { extractArtifacts, extractHooks, extractLinks, extractSkills } from './highlights.js';
 import { extractTodoProgressFromEvents } from './state.js';
 
@@ -112,28 +112,10 @@ export function normalizeForDedup(cmd: string): string {
   return s.trim();
 }
 
-// Re-export the shared classifier for callers that only need unwrapping.
-export { unwrapCommand };
-
-/** CLI tools whose subcommand (second token) is included in the bucket key. */
-const TWO_LEVEL_TOKENS = new Set([
-  'git', 'gh', 'bun', 'npm', 'cargo', 'docker', 'kubectl', 'rush', 'openclaw', 'pnpm', 'yarn',
-]);
-
-/**
- * Return the bucket key for a command (used for grouping within a category).
- */
-export function bucketKey(cmd: string): string {
-  const unwrapped = unwrapCommand(cmd);
-  const tokens = unwrapped.trim().split(/\s+/);
-  const first = tokens[0] ?? 'other';
-  const isRemote = cmd.trim().startsWith('ssh ') || cmd.trim().startsWith('scp ');
-  if (TWO_LEVEL_TOKENS.has(first) && tokens[1]) {
-    const key = `${first} ${tokens[1]}`;
-    return isRemote ? `ssh\u2192${key}` : key;
-  }
-  return isRemote ? `ssh\u2192${first}` : first;
-}
+// Re-export the shared classifier/bucketing for callers in this module's surface.
+// `bucketKey` is the single source of truth in bash-command.ts (correct subcommand
+// scan + `ssh\u2192` remote prefix); render must not keep a divergent copy.
+export { unwrapCommand, bucketKey };
 
 const CATEGORY_NAMES: Record<BashCategory, string> = {
   vcs: 'VCS',

@@ -149,6 +149,16 @@ const TOOL_REGISTRY: Record<string, BashToolInfo> = {
 /** Tools whose bucket key should include the second token (subcommand). */
 const TWO_LEVEL_TOOLS = new Set(['git', 'gh', 'bun', 'npm', 'cargo', 'docker', 'kubectl', 'rush', 'openclaw', 'pnpm', 'yarn']);
 
+/**
+ * Flags on a two-level tool that consume the *following* token as their value, so
+ * the subcommand scan must skip both. Missing one here mis-reads the value as the
+ * subcommand (e.g. `gh -R owner/repo pr create` → subcommand `owner/repo`).
+ */
+const VALUE_FLAGS = new Set(['-C', '-c', '--git-dir', '--work-tree', '-R', '--repo', '--cwd']);
+
+/** Remote wrappers whose bucket key carries an `ssh→` prefix on the inner command. */
+const REMOTE_WRAPPERS = new Set(['ssh', 'scp', 'rsync']);
+
 const ALIAS_MAP: Map<string, string> = new Map();
 for (const [name, info] of Object.entries(TOOL_REGISTRY)) {
   ALIAS_MAP.set(name, name);
@@ -162,11 +172,11 @@ export function unwrapCommand(cmd: string): string {
   // ssh host command
   const ssh = s.match(/^ssh\s+\S+\s+["']?(.+?)["']?\s*(?:\|.*)?$/);
   if (ssh) return unwrapCommand(ssh[1]);
-  // VAR=value prefix
-  const env = s.match(/^([A-Za-z_][A-Za-z0-9_]*=\S+\s+)+(.+)$/);
+  // VAR=value prefix (value may be a single- or double-quoted string with spaces)
+  const env = s.match(/^([A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S+)\s+)+(.+)$/);
   if (env) return unwrapCommand(env[2]);
-  // sudo / time prefix
-  const prefix = s.match(/^(?:sudo|time)(?:\s+-\S+)*\s+(.+)$/);
+  // sudo / time prefix (value-taking flags like `-u user` consume their argument)
+  const prefix = s.match(/^(?:sudo|time)(?:\s+(?:-[uUgGhpCrtDR]\s+\S+|-\S+))*\s+(.+)$/);
   if (prefix) return unwrapCommand(prefix[1]);
   // cd foo && command
   const cd = s.match(/^cd\s+\S+\s*&&\s*(.+)$/);
@@ -250,6 +260,24 @@ export function tokenizeBash(cmd: string): string[][] {
 }
 
 /**
+ * First non-flag token after the executable — its subcommand. Skips leading
+ * flags, and skips the argument of a value-taking flag (see VALUE_FLAGS) so e.g.
+ * `git -C /repo commit` resolves to `commit`, not `-C`/`/repo`.
+ */
+function scanSubcommand(tokens: string[]): string {
+  let i = 1;
+  while (i < tokens.length) {
+    const t = tokens[i];
+    if (t.startsWith('-')) {
+      i += VALUE_FLAGS.has(t) ? 2 : 1;
+      continue;
+    }
+    return t.toLowerCase();
+  }
+  return '';
+}
+
+/**
  * Classify the first simple command in a Bash string. Returns coarse metadata
  * (tool name, category, subcommand, human action) used for summaries and
  * activity logging. Unknown executables fall back to `other`.
@@ -271,26 +299,15 @@ export function classifyBashCommand(command: string): BashCommandInfo {
   const info = canonical ? TOOL_REGISTRY[canonical] : undefined;
 
   if (!info) {
-    return { tool: base, category: 'other', subcommand: '', action: 'running command', summary: base, signal: 'low' };
+    // Unknown executable. A known two-level tool that isn't in the registry
+    // (docker/kubectl/rush/openclaw) still surfaces its subcommand so bucketing
+    // stays useful; the category stays honestly 'other'.
+    const subcommand = TWO_LEVEL_TOOLS.has(base) ? scanSubcommand(tokens) : '';
+    const summary = subcommand ? `${base} ${subcommand}` : base;
+    return { tool: base, category: 'other', subcommand, action: 'running command', summary, signal: 'low' };
   }
 
-  let subcommand = '';
-  if (canonical && TWO_LEVEL_TOOLS.has(canonical)) {
-    let i = 1;
-    while (i < tokens.length) {
-      const t = tokens[i];
-      if (t.startsWith('-')) {
-        if (t === '-C' || t === '-c' || t === '--git-dir' || t === '--work-tree') {
-          i += 2;
-        } else {
-          i += 1;
-        }
-        continue;
-      }
-      subcommand = t.toLowerCase();
-      break;
-    }
-  }
+  const subcommand = canonical && TWO_LEVEL_TOOLS.has(canonical) ? scanSubcommand(tokens) : '';
 
   const safeCanonical = canonical || base;
   const summary = subcommand ? `${safeCanonical} ${subcommand}` : safeCanonical;
@@ -305,15 +322,19 @@ export function classifyBashCommand(command: string): BashCommandInfo {
 }
 
 /**
- * Stable bucket key for grouping similar Bash commands in summaries.
+ * Stable bucket key for grouping similar Bash commands in summaries. Commands run
+ * through a remote wrapper (ssh/scp/rsync) get an `ssh→` prefix on the inner key,
+ * so `ssh host "git push"` buckets as `ssh→git push`, distinct from a local push.
  */
 export function bucketKey(command: string): string {
   const info = classifyBashCommand(command);
-  if (!info.tool) return 'other';
-  if (info.subcommand && TWO_LEVEL_TOOLS.has(info.tool)) {
-    return `${info.tool} ${info.subcommand}`;
-  }
-  return info.tool;
+  const base = !info.tool
+    ? 'other'
+    : info.subcommand && TWO_LEVEL_TOOLS.has(info.tool)
+      ? `${info.tool} ${info.subcommand}`
+      : info.tool;
+  const first = command.trim().split(/\s+/)[0]?.toLowerCase() ?? '';
+  return REMOTE_WRAPPERS.has(first) ? `ssh→${base}` : base;
 }
 
 /**
