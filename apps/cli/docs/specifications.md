@@ -393,14 +393,18 @@ The command surface (bare `sessions [query]`, `tail`, `sync`, `resume`, `focus`,
   id, unique id prefix, or keyword query from indexed `SessionMeta` rows without
   parsing or rendering transcript events. It MUST search the online fleet unless
   `--local` is set; `--agent` and `--project` MUST narrow every peer. Exactly one
-  logical session MUST emit a one-element `SessionMeta[]`; synced copies sharing
+  logical session MUST emit a one-element safe metadata array containing only
+  `id`, `shortId`, `agent`, `origin`, `timestamp`, `lastActivity`, `project`,
+  `version`, `label`, `topic`, and `machine`; transcript-local fields including
+  `filePath` and `plan` MUST NOT leave the owning machine. Synced copies sharing
   the same full id MUST count as one logical session. A missing selector or more
-  than one logical match MUST emit no JSON, list the no-match/ambiguity on stderr,
+  than one logical match, an empty selector, or an incomplete peer sweep MUST
+  emit no JSON, list the failure/ambiguity on stderr,
   and exit 1; ambiguity MUST include every matching full id and machine
   (`commands/sessions.ts` `resolveSessionMetadata`, `fleetCandidatesByQuery`,
   `metadataResolveForwardedArgs`; tests
   `commands/sessions-resolve-db.test.ts`,
-  `commands/sessions-resolve-fleet.test.ts`).
+  `commands/__tests__/sessions.test.ts`).
 - **SES-IF-3 (MUST).** The export **bundle format** is NDJSON, `kind`
   `agents-session-bundle`, `version` 1; parse MUST reject a wrong kind/version;
   per-record `hash`/`size` are always over **plaintext** for byte-exact dedup;

@@ -928,6 +928,25 @@ export function serializeSessionsJson(sessions: SessionMeta[]): string {
   return JSON.stringify(serializable, null, 2) + '\n';
 }
 
+/** The intentionally small metadata contract emitted by `sessions --resolve`.
+ * Transcript locations, extracted plans, account data, costs, and other indexed
+ * payload stay local to the machine that owns them. */
+export function serializeResolvedSessionsJson(sessions: SessionMeta[]): string {
+  const safe = sessions.map((session) => ({
+    id: session.id,
+    shortId: session.shortId,
+    agent: session.agent,
+    timestamp: session.timestamp,
+    lastActivity: session.lastActivity,
+    project: session.project,
+    version: session.version,
+    label: session.label,
+    topic: session.topic,
+    machine: session.machine,
+  }));
+  return JSON.stringify(safe, null, 2) + '\n';
+}
+
 /**
  * `agents sessions --json --host <h>` — fan the RECENT (non-active) listing out
  * to the named host(s) and emit ONE clean merged `SessionMeta[]` JSON array,
@@ -1434,6 +1453,11 @@ async function sessionsAction(
       console.error(chalk.red('--resolve requires --json.'));
       process.exit(1);
     }
+    const selector = options.resolve.trim();
+    if (!selector) {
+      console.error(chalk.red('--resolve requires a non-empty selector.'));
+      process.exit(1);
+    }
     if (query) {
       console.error(chalk.red('Pass the selector to --resolve, not as a positional query.'));
       process.exit(1);
@@ -1442,7 +1466,7 @@ async function sessionsAction(
       console.error(chalk.red('--local and --device name opposite scopes: --local skips the SSH fan-out that --device needs.'));
       process.exit(1);
     }
-    await resolveSessionMetadata(options.resolve, {
+    await resolveSessionMetadata(selector, {
       agent: options.agent,
       project: options.project,
       local: options.local,
@@ -3410,6 +3434,12 @@ export interface FleetSessionCandidate {
   hits: FleetHit[];
 }
 
+export type MetadataResolveOutcome =
+  | { kind: 'resolved'; session: SessionMeta }
+  | { kind: 'not-found' }
+  | { kind: 'ambiguous'; candidates: FleetSessionCandidate[] }
+  | { kind: 'partial'; failedPeers: string[] };
+
 /** Resolve a fleet sweep through the same canonical full-id / prefix resolver as
  * local lookups, then group copies by logical session id. Synced mirrors of one
  * session therefore stay one candidate even when several machines report them;
@@ -3462,6 +3492,22 @@ export function metadataResolveForwardedArgs(
   return args;
 }
 
+/** Resolution must fail closed when any selected peer did not answer. Choosing
+ * from a partial fleet can turn an unseen candidate into a false unique match. */
+export function metadataResolveOutcome(
+  localMatches: SessionMeta[],
+  remote: { sessions: SessionMeta[]; unreachable: string[] },
+  selector: string,
+): MetadataResolveOutcome {
+  if (remote.unreachable.length > 0) {
+    return { kind: 'partial', failedPeers: remote.unreachable };
+  }
+  const candidates = fleetCandidatesByQuery([...localMatches, ...remote.sessions], selector);
+  if (candidates.length === 0) return { kind: 'not-found' };
+  if (candidates.length > 1) return { kind: 'ambiguous', candidates };
+  return { kind: 'resolved', session: candidates[0].hits[0].session };
+}
+
 /** Resolve one selector to indexed metadata across the fleet without reading or
  * rendering transcript events. A peer answering the parent sweep returns every
  * local candidate; the parent performs the one logical-session uniqueness gate. */
@@ -3479,30 +3525,34 @@ async function resolveSessionMetadata(
   // A peer is already inside gatherRemoteList. Return all local candidates so
   // the parent can distinguish a fleet-wide unique match from an ambiguity.
   if (process.env[NO_FANOUT_ENV] === '1') {
-    process.stdout.write(serializeSessionsJson(localMatches));
+    process.stdout.write(serializeResolvedSessionsJson(localMatches));
     return;
   }
 
-  let remoteMatches: SessionMeta[] = [];
+  let remoteResult = { sessions: [] as SessionMeta[], unreachable: [] as string[] };
   if (scope.local !== true) {
     try {
       const forwarded = metadataResolveForwardedArgs(selector, scope);
       const result = await deps.gatherRemoteList(forwarded, scope.hosts);
-      remoteMatches = result.sessions;
-    } catch {
-      // Match the sessions fleet contract: an unreachable peer degrades to the
-      // candidates available from the rest of the fleet.
+      remoteResult = { sessions: result.sessions, unreachable: result.unreachable };
+    } catch (error: any) {
+      remoteResult = { sessions: [], unreachable: [error?.message ?? 'fleet fan-out'] };
     }
   }
 
-  const candidates = fleetCandidatesByQuery([...localMatches, ...remoteMatches], selector);
-  if (candidates.length === 0) {
+  const outcome = metadataResolveOutcome(localMatches, remoteResult, selector);
+  if (outcome.kind === 'partial') {
+    console.error(chalk.red(`Partial session resolution: ${outcome.failedPeers.join(', ')} did not answer.`));
+    console.error(chalk.gray('No unique/no-match decision was made. Upgrade or reconnect every peer, then retry.'));
+    process.exit(2);
+  }
+  if (outcome.kind === 'not-found') {
     console.error(chalk.red(`No session found matching: ${selector}`));
     process.exit(1);
   }
-  if (candidates.length > 1) {
+  if (outcome.kind === 'ambiguous') {
     console.error(chalk.red(`Multiple sessions match "${selector}" across the fleet:`));
-    for (const candidate of candidates) {
+    for (const candidate of outcome.candidates) {
       const session = candidate.hits[0].session;
       const machines = candidate.hits.map(hit => hit.machine).join(', ');
       console.error(chalk.cyan(`  ${session.shortId}  ${session.id}`) + chalk.gray(`  ${machines}  ${(session as any).label ?? session.topic ?? ''}`));
@@ -3511,7 +3561,7 @@ async function resolveSessionMetadata(
     process.exit(1);
   }
 
-  process.stdout.write(serializeSessionsJson([candidates[0].hits[0].session]));
+  process.stdout.write(serializeResolvedSessionsJson([outcome.session]));
 }
 
 /**

@@ -393,8 +393,11 @@ agents sessions --resolve "recap resolver" --json
 ```
 
 It reads the indexed `SessionMeta` rows on each machine and emits a one-element JSON
-array when exactly one logical session matches. A missing selector or an ambiguous ID
-prefix/keyword query exits non-zero; ambiguity output lists every full ID and machine.
+array with the safe resolver fields when exactly one logical session matches. Transcript
+paths, extracted plans, account data, and cost/token fields stay on the owning machine.
+A missing/empty selector, an ambiguous ID prefix/keyword query, or any selected peer that
+cannot answer exits non-zero; ambiguity output lists every full ID and machine, while an
+incomplete fleet never produces a false unique/no-match result.
 `--local` keeps the metadata lookup on this machine.
 `--agent <agent[@version]>` and `--project <name>` narrow the lookup on every peer;
 `--all` is implicit because historical resolution must not inherit the SSH login
@@ -422,9 +425,10 @@ agents sessions d3470b57-2af6-4c11-b1de-3fab94f43603
   longer prefix to select one.
 - **Synced copies are one logical session.** The same full id reported by several machines
   does not make a prefix ambiguous; the CLI renders one of those equivalent copies.
-- **Keywords keep the existing metadata search semantics.** The metadata-only resolver
-  accepts the same label, topic, project, account, path, agent, and version terms as the
-  canonical local resolver, then applies the uniqueness check across the fleet.
+- **Keywords keep the existing search semantics.** The resolver first searches indexed
+  metadata (label, topic, project, account, path, agent, and version), then widens a
+  metadata miss to that peer's transcript-content FTS index. The parent preserves those
+  peer-owned content hits and applies the uniqueness check across the fleet.
 - **`--local`** restricts the lookup to this machine — no cross-machine sweep — for
   scripts that want deterministic local behavior.
 - A peer already answering a parent's sweep (`AGENTS_SESSIONS_LOCAL=1`) never re-fans-out,

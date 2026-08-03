@@ -134,13 +134,25 @@ describe('agents sessions --resolve metadata-only CLI contract', () => {
 
   it('resolves a full id, unique prefix, and keywords to the same indexed SessionMeta row', () => {
     const id = 'face7777-1111-2222-3333-444455556666';
-    upsertSession(meta(id, { topic: 'needle metadata contract' }), 'transcript content must not be needed');
+    upsertSession(meta(id, {
+      topic: 'needle metadata contract',
+      plan: 'private extracted plan',
+      account: 'private@example.com',
+      cwd: '/private/worktree',
+      recentDirectoriesTouched: ['/private/worktree/src'],
+    }), 'transcript content must not be needed');
 
     for (const selector of [id, 'face7777', 'needle metadata contract']) {
       const result = runResolve(selector);
       expect(result.status, result.stderr).toBe(0);
       const rows = JSON.parse(result.stdout) as SessionMeta[];
       expect(rows.map(row => row.id)).toEqual([id]);
+      expect(rows[0]).not.toHaveProperty('filePath');
+      expect(rows[0]).not.toHaveProperty('plan');
+      expect(rows[0]).not.toHaveProperty('origin');
+      expect(rows[0]).not.toHaveProperty('account');
+      expect(rows[0]).not.toHaveProperty('cwd');
+      expect(rows[0]).not.toHaveProperty('recentDirectoriesTouched');
     }
   });
 
@@ -158,5 +170,9 @@ describe('agents sessions --resolve metadata-only CLI contract', () => {
     const missing = runResolve('bade9999');
     expect(missing.status).toBe(1);
     expect(missing.stderr).toContain('No session found matching: bade9999');
+
+    const empty = runResolve('   ');
+    expect(empty.status).toBe(1);
+    expect(empty.stderr).toContain('--resolve requires a non-empty selector');
   });
 });

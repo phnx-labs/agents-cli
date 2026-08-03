@@ -6,7 +6,16 @@ import * as crypto from 'crypto';
 import { spawnSync } from 'child_process';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { buildResumeCommand, resumeSpawnInvocation, resolveSessionQuery, buildSessionDescription } from '../sessions.js';
+import {
+  buildResumeCommand,
+  resumeSpawnInvocation,
+  resolveSessionQuery,
+  buildSessionDescription,
+  fleetCandidatesByQuery,
+  metadataResolveOutcome,
+  metadataResolveForwardedArgs,
+} from '../sessions.js';
+import { parseRemoteList } from '../../lib/session/remote-list.js';
 import { needsWindowsShell, composeWin32CommandLine } from '../../lib/platform/index.js';
 import type { SessionMeta } from '../../lib/session/types.js';
 
@@ -260,7 +269,7 @@ exit 1
   return path.join(activeHome, 'sergey');
 }
 
-function runAgents(args: string[], cwd: string, home: string) {
+function runAgents(args: string[], cwd: string, home: string, envOverrides: Record<string, string> = {}) {
   return spawnSync(process.execPath, ['--import', tsxLoaderUrl, cliEntry, ...args], {
     cwd,
     env: {
@@ -275,10 +284,97 @@ function runAgents(args: string[], cwd: string, home: string) {
       // move those into ~/.agents-system/, breaking workspace-scoped lookups.
       AGENTS_SKIP_MIGRATION: '1',
       NODE_NO_WARNINGS: '1',
+      ...envOverrides,
     },
     encoding: 'utf-8',
   });
 }
+
+describe('agents sessions --resolve local-peer critical path', () => {
+  it('keeps a peer-owned content-only FTS hit, projects safe metadata, and dedupes synced copies', () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-resolve-peer-'));
+    try {
+      writeUpdateCache(tempHome);
+      const repoDir = path.join(tempHome, 'work', 'agents-cli');
+      const sessionId = 'abcd7777-1111-4222-8333-444455556666';
+      const sessionsDir = path.join(tempHome, '.claude', 'projects', 'resolve-peer');
+      fs.mkdirSync(repoDir, { recursive: true });
+      fs.mkdirSync(sessionsDir, { recursive: true });
+      fs.writeFileSync(path.join(sessionsDir, `${sessionId}.jsonl`), [
+        JSON.stringify({
+          type: 'user', timestamp: '2026-08-03T09:00:00.000Z', cwd: repoDir,
+          sessionId, version: '2.1.110', gitBranch: 'main',
+          message: { role: 'user', content: 'unrelated first prompt' },
+        }),
+        JSON.stringify({
+          type: 'user', timestamp: '2026-08-03T09:01:00.000Z', cwd: repoDir,
+          sessionId, version: '2.1.110', gitBranch: 'main',
+          message: { role: 'user', content: 'recap resolver hidden content' },
+        }),
+      ].join('\n') + '\n');
+
+      // Prime the durable index the same way a normal sessions listing does.
+      // The resolver invocation below must then read only that indexed row.
+      const indexed = runAgents(['sessions', '--all', '--json', '--local'], repoDir, tempHome);
+      expect(indexed.status, indexed.stderr).toBe(0);
+
+      const peer = runAgents(
+        ['sessions', '--resolve', 'recap resolver', '--json', '--all', '--local'],
+        repoDir,
+        tempHome,
+        { AGENTS_SESSIONS_LOCAL: '1' },
+      );
+      expect(peer.status, peer.stderr).toBe(0);
+      const peerRows = JSON.parse(peer.stdout) as Array<Record<string, unknown>>;
+      expect(peerRows).toHaveLength(1);
+      expect(peerRows[0].id).toBe(sessionId);
+      expect(peerRows[0]).not.toHaveProperty('filePath');
+      expect(peerRows[0]).not.toHaveProperty('plan');
+
+      const remoteRows = parseRemoteList(peer.stdout, 'peer-one');
+      const mirrored = remoteRows.map(row => ({ ...row, machine: 'peer-two' }));
+      const candidates = fleetCandidatesByQuery([...remoteRows, ...mirrored], 'recap resolver');
+      expect(candidates).toHaveLength(1);
+      expect(candidates[0].id).toBe(sessionId);
+      expect(candidates[0].hits.map(hit => hit.machine).sort()).toEqual(['peer-one', 'peer-two']);
+    } finally {
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it('fails closed when an older peer rejects the resolver flag', () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-resolve-old-peer-'));
+    try {
+      writeUpdateCache(tempHome);
+      const repoDir = path.join(tempHome, 'work');
+      fs.mkdirSync(repoDir, { recursive: true });
+      const oldPeer = runAgents(['sessions', '--resolve-from-newer-cli', 'abcd7777', '--json'], repoDir, tempHome);
+      expect(oldPeer.status).not.toBe(0);
+      const result = metadataResolveOutcome(
+        [{
+          id: 'abcd7777-1111-4222-8333-444455556666',
+          shortId: 'abcd7777',
+          agent: 'claude',
+          timestamp: '2026-08-03T09:00:00.000Z',
+          filePath: '/private/local.jsonl',
+          machine: 'local',
+        }],
+        { sessions: [], unreachable: oldPeer.status === 0 ? [] : ['old-peer'] },
+        'abcd7777',
+      );
+      expect(result).toEqual({ kind: 'partial', failedPeers: ['old-peer'] });
+    } finally {
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it('forwards resolver scope to every peer', () => {
+    expect(metadataResolveForwardedArgs('recap resolver', { agent: 'codex@0.146.0', project: 'agents-cli' })).toEqual([
+      'sessions', '--resolve', 'recap resolver', '--json', '--all', '--local',
+      '--agent', 'codex@0.146.0', '--project', 'agents-cli',
+    ]);
+  });
+});
 
 function outputOf(result: { stdout: string; stderr: string }): string {
   return `${result.stdout}${result.stderr}`;
