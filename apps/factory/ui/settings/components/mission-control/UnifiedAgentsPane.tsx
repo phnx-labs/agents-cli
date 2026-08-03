@@ -1384,21 +1384,6 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
     postMessage({ type: 'draftPrompt', tickets: payload.tickets, hint: payload.hint })
   }, [])
 
-  const handleNewAgent = (agent: string) => {
-    const commands: Record<string, string> = {
-      claude: 'agents.newClaude',
-      codex: 'agents.newCodex',
-      gemini: 'agents.newGemini',
-      antigravity: 'agents.newAntigravity',
-      grok: 'agents.newGrok',
-      kimi: 'agents.newKimi',
-      droid: 'agents.newDroid',
-      opencode: 'agents.newOpencode',
-      cursor: 'agents.newCursor',
-    }
-    postMessage({ type: 'executeCommand', command: commands[agent] })
-  }
-
   const handleFocusTerminal = (t: TerminalInfo) => {
     postMessage({ type: 'focusTerminal', terminalId: t.id })
   }

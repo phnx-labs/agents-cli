@@ -6,6 +6,26 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **Four palette commands that could never run are gone.** `Agents: Enable View`,
+  `Agents: Disable View`, `Agents: Run Setup`, and `Agents: Enable Warming` were
+  declared in `package.json` but registered nowhere in `src/`, so picking any of them
+  from the palette failed with "command not found". `Enable Warming` was the worst of
+  them: its `when` clause is `!agents.warmingEnabled` and that context was hardcoded to
+  `false`, so the broken entry was **always** visible. Its partner
+  `Agents: Disable Warming` was registered but only to say warming no longer exists, and
+  its `when` clause meant it was never visible — both are removed along with the dead
+  `agents.warmingEnabled` / `agents.viewEnabled` context keys nothing else read.
+
+- **⌘⇧J no longer resolves to two different commands.** It was bound to both
+  `Agents: Spawn with Prompt` and `Agents: Resume Current Session in Best Profile`, so
+  which one fired was down to registration order. Spawn-with-Prompt keeps ⌘⇧J (it pairs
+  with Spawn-with-Context on ⌘⇧K); Resume-in-Best-Profile moves to ⌘⇧⌥J.
+
+- **Removed dead Floor code.** `handleNewAgent` in `UnifiedAgentsPane.tsx` was never
+  called from any JSX, and had rotted: it mapped `agents.newGemini` (deprecated, never
+  registered) and `agents.newOpencode` (the real id is `agents.newOpenCode`), so it would
+  have failed had anything wired it up.
+
 - **Floor no longer collapses distinct sessions that arrive without an id.** A remote
   session row was keyed `remote-<host>-<sessionId>`; when the CLI could not attribute a
   tmux pane (empty id), every such row collided on `remote-<host>-`, a React key clash
