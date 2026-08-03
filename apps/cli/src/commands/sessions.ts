@@ -35,7 +35,7 @@ import { findSessionsById } from '../lib/session/db.js';
 import { filterTeamSessions, safeTeamText } from '../lib/session/team-filter.js';
 import { parseSession } from '../lib/session/parse.js';
 import { runRemoteSessions, buildForwardedArgs, ensureWholeIndex } from '../lib/session/remote.js';
-import { formatRelativeTime } from '../lib/session/relative-time.js';
+import { formatRelativeTime, sessionAgeParts, type SessionAgeParts } from '../lib/session/relative-time.js';
 import { renderConversationMarkdown, renderSummary, renderSummaryHeader, computeSummaryStats, renderJson, filterEvents, parseRoleList, linkPath, linkUrl, shortenModel, type FilterOptions } from '../lib/session/render.js';
 import { linearIssueUrl } from '../lib/session/linear.js';
 import { renderMarkdown } from '../lib/markdown.js';
@@ -1739,6 +1739,33 @@ function metaSignals(s: SessionMeta): Parameters<typeof signalBadges>[0] {
   };
 }
 
+/**
+ * Narrowest topic a row is willing to render. The time cell drops its creation
+ * field rather than squeeze the topic past this — a row that wraps is worse than
+ * a row missing one field.
+ */
+const MIN_TOPIC_W = 16;
+
+/**
+ * The trailing time cell, as two fields: `3d → 2 hours ago` — when the session
+ * was created, then when it was last active. One label answers neither "is this
+ * the old session I'm looking for" nor "how long did it run", since a session
+ * touched an hour ago may have started last week.
+ *
+ * Collapses to last-activity alone when the session ran under a minute (both
+ * halves would name the same moment) or when `topicSlack` — the columns the row
+ * has left for its topic — cannot spare the extra width. `extraW` is what the
+ * creation field cost, for the caller to take off the topic budget.
+ */
+function timeCell(age: SessionAgeParts, topicSlack: number): { plain: string; text: string; extraW: number } {
+  const lastOnly = { plain: age.last, text: chalk.gray(age.last), extraW: 0 };
+  if (!age.created) return lastOnly;
+  const prefix = `${age.created} → `;
+  const extraW = stringWidth(prefix);
+  if (topicSlack - extraW < MIN_TOPIC_W) return lastOnly;
+  return { plain: prefix + age.last, text: chalk.dim(prefix) + chalk.gray(age.last), extraW };
+}
+
 /** One flat table row:
  *   shortId · agent · version · model · project · [glyph] label·doing · [ticket] · [wt] · time
  * `doing` is the live preview when running, else the topic. The `ticket` column
@@ -1747,7 +1774,7 @@ function metaSignals(s: SessionMeta): Parameters<typeof signalBadges>[0] {
  * dashes and needlessly truncate the topic. Worktree stays a trailing badge. */
 export function flatSessionRow(session: SessionMeta, live?: ActiveSession, showTicket = false, cols: PickerColumns = {}): string {
   const agentColor = colorAgent(session.agent);
-  const when = formatRelativeTime(session.lastActivity ?? session.timestamp);
+  const age = sessionAgeParts(session.timestamp, session.lastActivity);
   const project = session.project || '-';
   const tag = originTag(session) || teamTag(session);
   const label = (session as any).label;
@@ -1783,12 +1810,15 @@ export function flatSessionRow(session: SessionMeta, live?: ActiveSession, showT
   const wtW = wt ? stringWidth(wt) + 1 : 0;
   const width = terminalWidth();
   const requestedModelW = cols.showModel ? (cols.modelWidth ?? PICKER_MODEL_MAX) : 0;
-  const fixedW = (10 + 9 + 8 + 16) + glyphW + statusW + machineW + ticketW + wtW + team.width + stringWidth(when) + 1;
-  const modelSlack = width - fixedW - 16;
+  // Sized against the last-activity label alone, so the creation field is an
+  // additive decision the row makes only once it knows what space is left.
+  const fixedW = (10 + 9 + 8 + 16) + glyphW + statusW + machineW + ticketW + wtW + team.width + stringWidth(age.last) + 1;
+  const modelSlack = width - fixedW - MIN_TOPIC_W;
   const modelW = requestedModelW <= modelSlack
     ? requestedModelW
     : modelSlack >= PICKER_MODEL_MIN ? modelSlack : 0;
-  const topicW = Math.max(16, width - fixedW - modelW);
+  const when = timeCell(age, width - fixedW - modelW);
+  const topicW = Math.max(MIN_TOPIC_W, width - fixedW - modelW - when.extraW);
 
   return (
     chalk.white(padToWidth(truncateToWidth(session.shortId, 9), 10)) +
@@ -1803,14 +1833,14 @@ export function flatSessionRow(session: SessionMeta, live?: ActiveSession, showT
     renderTopicCell(label, doing, '', topicW, topicW) +
     ticketCell +
     (wt ? wt + ' ' : '') +
-    chalk.gray(when)
+    when.text
   );
 }
 
 /** One tree-mode row (grouped under a dir header): id · agent · badges · topic · time. No version/project column. */
 function treeSessionRow(session: SessionMeta, live?: ActiveSession): string {
   const agentColor = colorAgent(session.agent);
-  const when = formatRelativeTime(session.lastActivity ?? session.timestamp);
+  const age = sessionAgeParts(session.timestamp, session.lastActivity);
   const tag = originTag(session) || teamTag(session);
   const label = (session as any).label;
   const { glyph, preview } = liveGlyphAndPreview(live);
@@ -1826,7 +1856,9 @@ function treeSessionRow(session: SessionMeta, live?: ActiveSession): string {
   const head = label ? `${label} · ${topic}` : topic;
   const { cell: statusCell, width: statusW } = liveStatusCell(live);
   const glyphW = glyph ? 2 : 0;
-  const topicW = Math.max(12, terminalWidth() - (2 + 9 + 8) - glyphW - statusW - badgeW - team.width - stringWidth(when) - 1);
+  const baseTopicW = terminalWidth() - (2 + 9 + 8) - glyphW - statusW - badgeW - team.width - stringWidth(age.last) - 1;
+  const when = timeCell(age, baseTopicW);
+  const topicW = Math.max(12, baseTopicW - when.extraW);
 
   return (
     '  ' +
@@ -1837,7 +1869,7 @@ function treeSessionRow(session: SessionMeta, live?: ActiveSession): string {
     statusCell +
     teamSeg +
     padToWidth(chalk.white(truncateToWidth(head, topicW)), topicW) +
-    ' ' + chalk.gray(when)
+    ' ' + when.text
   );
 }
 
@@ -2298,7 +2330,7 @@ export function formatPickerLabel(
   host = '',
 ): string {
   const agentColor = colorAgent(s.agent);
-  const when = formatRelativeTime(s.lastActivity ?? s.timestamp);
+  const age = sessionAgeParts(s.timestamp, s.lastActivity);
   const project = s.project || '-';
   // SSH-launch origin (live rows only): mirrors the flat listing's `ssh←<device>`
   // badge. Rendered as its OWN red segment before the topic cell — folding it into
@@ -2342,10 +2374,10 @@ export function formatPickerLabel(
   const ticketW = cols.showTicket ? TICKET_W + 1 : 0;
   const hostW = cols.showHost ? PICKER_HOST_W : 0;
   const wtW = wt ? stringWidth(wt) + 1 : 0;
-  const topicW = Math.max(
-    16,
-    terminalWidth() - gutter - (10 + 9 + 8 + 16) - machineColW - hostW - ticketW - wtW - sshW - team.width - stringWidth(when) - 1,
-  );
+  const baseTopicW =
+    terminalWidth() - gutter - (10 + 9 + 8 + 16) - machineColW - hostW - ticketW - wtW - sshW - team.width - stringWidth(age.last) - 1;
+  const when = timeCell(age, baseTopicW);
+  const topicW = Math.max(MIN_TOPIC_W, baseTopicW - when.extraW);
 
   return (
     // Truncated, not just padded: an indexed shortId is always 8 chars, but a
@@ -2362,7 +2394,7 @@ export function formatPickerLabel(
     renderTopicCell(label, topic, query, topicW, topicW) +
     ticketCell +
     (wt ? wt + ' ' : '') +
-    chalk.gray(when)
+    when.text
   );
 }
 

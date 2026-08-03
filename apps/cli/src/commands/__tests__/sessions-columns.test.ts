@@ -5,7 +5,7 @@
  * pinning so a session tied to both doesn't flip between them.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import chalk from 'chalk';
 import { stripVTControlCharacters } from 'node:util';
 import {
@@ -315,5 +315,66 @@ describe('team badge — the orchestrator end of the lineage', () => {
 
   it('shows the badge in the flat listing too', () => {
     expect(strip(flatSessionRow(meta({ spawnedTeam: 'redesign' })))).toContain('team:redesign');
+  });
+});
+
+describe('the time cell reports creation and last activity, not just one', () => {
+  // A listing sorted by last activity cannot answer "which of these is the
+  // session I started last Tuesday" — the row has to carry both ends.
+  afterEach(() => {
+    vi.useRealTimers();
+    if (savedColumns === undefined) delete process.env.COLUMNS;
+    else process.env.COLUMNS = savedColumns;
+  });
+
+  let savedColumns: string | undefined;
+  beforeEach(() => {
+    savedColumns = process.env.COLUMNS;
+    process.env.COLUMNS = '200';
+    vi.setSystemTime(new Date('2026-07-04T12:00:00.000Z'));
+  });
+
+  const ranForDays = meta({
+    timestamp: '2026-07-01T12:00:00.000Z',
+    lastActivity: '2026-07-04T11:00:00.000Z',
+  });
+
+  it('renders both fields in the picker row', () => {
+    expect(strip(formatPickerLabel(ranForDays, '', {}))).toContain('3d → 1 hour ago');
+  });
+
+  it('renders both fields in the flat listing row', () => {
+    expect(strip(flatSessionRow(ranForDays))).toContain('3d → 1 hour ago');
+  });
+
+  it('shows one field for a session that never spanned a minute', () => {
+    const oneShot = meta({
+      timestamp: '2026-07-04T09:00:00.000Z',
+      lastActivity: '2026-07-04T09:00:20.000Z',
+    });
+    const row = strip(formatPickerLabel(oneShot, '', {}));
+    expect(row).toContain('2 hours ago');
+    expect(row).not.toContain('→');
+  });
+
+  it('takes the extra width out of the topic, not out of the row', () => {
+    // Same invariant as the team badge: a wider time cell must shrink the topic
+    // rather than push the row past the terminal edge and wrap it.
+    const long = { topic: 'x'.repeat(400) };
+    const oneField = strip(flatSessionRow(meta({ ...long, timestamp: '2026-07-04T11:00:00.000Z' })));
+    const twoFields = strip(flatSessionRow(meta({ ...long, ...ranForDays })));
+
+    expect(twoFields).toContain('3d → 1 hour ago');
+    expect(stringWidth(twoFields)).toBe(stringWidth(oneField));
+  });
+
+  it('gives up the creation field before it squeezes the topic past its floor', () => {
+    // A narrow terminal keeps the row intact and the topic readable; the
+    // creation age is the part that yields.
+    process.env.COLUMNS = '70';
+    const row = strip(flatSessionRow(meta({ ...ranForDays, topic: 'x'.repeat(400) })));
+    expect(row).toContain('1 hour ago');
+    expect(row).not.toContain('→');
+    expect(stringWidth(row)).toBeLessThanOrEqual(70);
   });
 });
