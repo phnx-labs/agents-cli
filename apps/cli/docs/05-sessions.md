@@ -532,6 +532,21 @@ Precedence is deliberate, so the words keep their meaning:
 
 A `crashed` row is deliberately transient: once its transcript goes days-stale it
 degrades to `abandoned`, so the listing carries an alert, not a permanent tombstone.
+And a dead session never trips the `--waiting` gate, however its last turn ended:
+`activity` is not rewritten on death, so a session that crashed mid-question would
+otherwise read as "needs your input" forever when what it needs is a relaunch
+(`isAwaitingUser`).
+
+**Known residual — an ambient tmux session.** `provenance.mux` is stamped from the
+process env, so an agent launched inside a tmux session the *developer* owns (rather
+than one the CLI spawned for it) reads that session's client count. Detach that tmux for
+unrelated reasons and its idle/waiting agents read `orphaned` until you reattach. The
+blast radius is bounded — a `running` session is never relabelled, `--waiting` still
+fires through `activity`, and the preview keeps the specific "waiting on you" sentence
+rather than replacing it with the generic orphan line — but the label is optimistic
+about whose tmux it is. Distinguishing a CLI-spawned pane from an ambient one is
+possible (`listPidSessionEntries()` knows which panes it launched) and is the fix if
+this proves noisy in practice.
 
 Both are visible everywhere a status already was — the `--active` grouped view, the
 default printed listing, `--active --json` (plus a `hostLink` field), and the session

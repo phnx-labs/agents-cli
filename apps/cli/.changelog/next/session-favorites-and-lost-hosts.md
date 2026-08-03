@@ -19,3 +19,7 @@
   into the interactive browser only, so every path that skips it — `--json`,
   `--waiting`, a pipe, a multi-host scope, an SSH-fanout peer — silently returned the
   whole fleet. Source: `apps/cli/src/commands/sessions.ts`.
+- **`agents sessions --active --waiting` no longer counts a dead session.** `activity`
+  is not rewritten when a session dies, so one that crashed mid-question reported "needs
+  your input" forever — what it needs is a relaunch. Source:
+  `apps/cli/src/commands/sessions.ts`.

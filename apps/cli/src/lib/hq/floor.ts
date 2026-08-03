@@ -132,7 +132,13 @@ function moodForSession(session: ActiveSession, hasOpenBlock: boolean): HqAgentM
   // parsed turn often still says `working`, which would otherwise reach the Floor
   // as a happily-running agent. Both lost-host states need a human.
   if (session.status === 'crashed') return 'blocked';
-  if (session.status === 'orphaned') return 'waiting';
+  // An orphaned session that is genuinely mid-question needs an answer; one that
+  // is merely idle-and-unwatched needs someone to reattach or clean it up. Same
+  // distinction `isAwaitingUser` draws — giving both the high-intensity "needs
+  // input" alert would train the operator to ignore it.
+  if (session.status === 'orphaned') {
+    return session.activity === 'waiting_input' ? 'waiting' : 'blocked';
+  }
   if (session.status === 'closed') return 'done';
   if (session.status === 'input_required' || session.activity === 'waiting_input' || hasOpenBlock) return 'waiting';
   if (session.rateLimited) return 'blocked';

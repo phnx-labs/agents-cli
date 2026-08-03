@@ -119,6 +119,16 @@ describe('a lost host does not hide a session that needs a human', () => {
     expect(isAwaitingUser(rows[0])).toBe(true);
   });
 
+  it('a DEAD session that died mid-question is not awaiting — it needs a relaunch, not an answer', () => {
+    // `activity` is never rewritten, so a session that crashed while asking keeps
+    // `waiting_input` forever. `--waiting` is a scriptable "does anything need
+    // me?" gate; answering a corpse is not something a human can do.
+    const rows = [row({ status: 'closed', activity: 'waiting_input', windowHeartbeatMs: staleWindow })];
+    foldHostLink(rows);
+    expect(rows[0].status).toBe('crashed');
+    expect(isAwaitingUser(rows[0])).toBe(false);
+  });
+
   it('an orphaned IDLE session is not awaiting — it is stranded, not blocked on you', () => {
     const rows = [row({ status: 'idle', activity: 'idle', tmuxClients: 0 })];
     foldHostLink(rows);

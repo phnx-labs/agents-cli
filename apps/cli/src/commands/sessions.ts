@@ -537,8 +537,14 @@ export function liveStatusWord(a: ActiveSession | undefined): string {
  * NOBODY watching is the most acute case `--waiting` exists to surface, not one
  * it should drop. The underlying `activity` is never rewritten, so it is the
  * honest signal here.
+ *
+ * But `activity` is never rewritten for a DEAD session either: one that died
+ * mid-question keeps `waiting_input` forever, and answering it is not a thing a
+ * human can do — it needs a relaunch. `--waiting` is a scriptable gate ("does
+ * anything need me?"), so a corpse must not trip it.
  */
 export function isAwaitingUser(s: ActiveSession): boolean {
+  if (s.status === 'crashed' || s.status === 'closed' || s.status === 'abandoned') return false;
   return s.status === 'input_required' || s.activity === 'waiting_input';
 }
 
@@ -1323,7 +1329,12 @@ export function formatLiveStatusHeadline(live: ActiveSession | undefined, favori
   if (live.status === 'crashed') {
     suffix = chalk.redBright('  ← the host app or connection went away and took the agent with it');
   } else if (live.status === 'orphaned') {
-    suffix = chalk.yellow('  ← still running, but no client is attached — nothing is showing it');
+    // Keep the needs-you half. A session sitting on a real question with nobody
+    // attached is strictly worse than either fact alone, and replacing the
+    // question with the generic orphan line undersells exactly that case.
+    suffix = needsYou
+      ? chalk.yellow(`  ← waiting on you${reason}, and no client is attached to answer it`)
+      : chalk.yellow('  ← still running, but no client is attached — nothing is showing it');
   }
   return `${star}${glyph} ${statusColor(live.status)(word)}${suffix}`;
 }

@@ -184,9 +184,32 @@ describe('buildHqFloor', () => {
       blocks: [],
     });
 
+    // An orphaned session that is merely idle is stranded, not asking anything —
+    // giving it the same "needs input" alert as a genuinely blocked one trains
+    // the operator to ignore the alert.
     expect(snapshot.agents.map((agent) => [agent.id, agent.mood])).toEqual([
       ['crashed-session', 'blocked'],
-      ['orphaned-session', 'waiting'],
+      ['orphaned-session', 'blocked'],
     ]);
+  });
+
+  it('renders an orphaned session that is mid-question as waiting, not merely blocked', () => {
+    const snapshot = buildHqFloor({
+      generatedAt: new Date('2026-07-21T17:03:00.000Z'),
+      sessions: [
+        {
+          context: 'terminal',
+          kind: 'claude',
+          status: 'orphaned',
+          activity: 'waiting_input',
+          sessionId: 'orphan-asking',
+          machine: 'yosemite-s0',
+        },
+      ],
+      teams: [],
+      teammatesByTeam: new Map(),
+      blocks: [],
+    });
+    expect(snapshot.agents.map((agent) => agent.mood)).toEqual(['waiting']);
   });
 });
