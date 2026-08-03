@@ -112,7 +112,7 @@ import {
   type BrowsableSession,
   type SessionBrowserSessionRow,
 } from '../core/sessionBrowser';
-import { createForkPickSessionCommand, loadBrowsableSessions, runPickedSessionFork, runSessionBrowserPicker } from './sessionBrowser.vscode';
+import { loadBrowsableSessions, registerForkPickSessionCommand, runPickedSessionFork, runSessionBrowserPicker } from './sessionBrowser.vscode';
 import type { RemoteSession, RawActiveSession } from '../core/remoteSessions';
 import {
   buildResumeCandidates,
@@ -1653,7 +1653,7 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('agents.forkPickSession', createForkPickSessionCommand(() => forkPickedSession(context)))
+    registerForkPickSessionCommand(vscode.commands.registerCommand, () => forkPickedSession(context))
   );
 
   context.subscriptions.push(

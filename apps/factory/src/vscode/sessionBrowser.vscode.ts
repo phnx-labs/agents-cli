@@ -2,6 +2,7 @@ import type { BrowsableSession } from '../core/sessionBrowser';
 import type { RunStrategy } from '../core/agents';
 import { buildForkSessionRequest } from '../core/forkSession';
 import { forkHostForSession, type SessionBrowserSessionRow } from '../core/sessionBrowser';
+import { normalizeActiveSessions } from '../core/remoteSessions';
 
 export interface SessionBrowserRunResult {
   stdout: string;
@@ -51,21 +52,22 @@ export async function loadBrowsableSessions(
     maxBuffer: 16 * 1024 * 1024,
     timeout,
   });
-  if (exact.stderr.trim()) throw new Error(exact.stderr.trim());
-  const active = JSON.parse(exact.stdout);
-  const current = Array.isArray(active)
-    ? active.find(session => session?.sessionId === opts.currentSessionId || session?.sessionId?.startsWith(opts.currentSessionId))
-    : undefined;
-  if (current && typeof current === 'object' && typeof current.sessionId === 'string') {
+  if (opts.device && exact.stderr.trim()) throw new Error(exact.stderr.trim());
+  const [current] = normalizeActiveSessions(
+    exact.stdout,
+    opts.device ?? opts.localMachine,
+    Date.now(),
+  ).filter(session => session.sessionId === opts.currentSessionId || session.sessionId.startsWith(opts.currentSessionId));
+  if (current) {
     sessions.push({
       id: current.sessionId,
       shortId: current.sessionId.slice(0, 8),
-      agent: current.kind,
-      timestamp: new Date(current.startedAtMs).toISOString(),
+      agent: current.agentType,
+      timestamp: new Date(current.startedAtMs ?? current.lastActivityMs ?? 0).toISOString(),
       project: current.project,
       cwd: current.cwd,
       topic: current.topic,
-      machine: current.machine,
+      machine: current.host,
     });
   }
   return sessions;
@@ -77,6 +79,10 @@ export class LatestSessionBrowserRequest {
   begin(): { current: () => boolean } {
     const requestGeneration = ++this.generation;
     return { current: () => requestGeneration === this.generation };
+  }
+
+  invalidate(): void {
+    this.generation++;
   }
 }
 
@@ -92,8 +98,11 @@ export interface SessionBrowserQuickPick<Item, Button> {
   onDidHide(listener: () => void): unknown;
 }
 
-export function createForkPickSessionCommand(run: () => Promise<void>): () => Promise<void> {
-  return run;
+export function registerForkPickSessionCommand<Disposable>(
+  register: (command: string, callback: () => Promise<void>) => Disposable,
+  run: () => Promise<void>,
+): Disposable {
+  return register('agents.forkPickSession', run);
 }
 
 export async function runSessionBrowserPicker<Item extends { row?: SessionBrowserSessionRow }, Button>(opts: {
@@ -152,6 +161,7 @@ export async function runSessionBrowserPicker<Item extends { row?: SessionBrowse
       opts.quickPick.hide();
     });
     opts.quickPick.onDidHide(() => {
+      requests.invalidate();
       if (!switching) resolve(null);
     });
     opts.quickPick.show();

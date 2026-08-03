@@ -3,9 +3,9 @@ import { buildAgentLaunchCommand } from '../core/agents';
 import { buildSessionBrowserRows, type SessionBrowserSessionRow } from '../core/sessionBrowser';
 import {
   LatestSessionBrowserRequest,
-  createForkPickSessionCommand,
   loadBrowsableSessions,
   runPickedSessionFork,
+  registerForkPickSessionCommand,
   runSessionBrowserPicker,
   type SessionBrowserQuickPick,
   type SessionBrowserRunner,
@@ -84,7 +84,7 @@ describe('session browser extension-host seam', () => {
         : { stdout: JSON.stringify([{
             sessionId: 'current-outside-limit', kind: 'claude', startedAtMs: Date.parse('2026-01-01T00:00:00Z'),
             cwd: '/repo', project: 'agents-cli', machine: 'zion',
-          }]), stderr: '' };
+          }]), stderr: 'gpu-box: unreachable or no agents CLI — skipped\n' };
     };
 
     const sessions = await loadBrowsableSessions(run, {
@@ -100,6 +100,16 @@ describe('session browser extension-host seam', () => {
     expect(sessions.at(-1)?.timestamp).toBe('2026-01-01T00:00:00.000Z');
   });
 
+  test('pins active metadata without a start timestamp instead of throwing', async () => {
+    const run: SessionBrowserRunner = async (args) => args.startsWith('sessions --all')
+      ? { stdout: '[]', stderr: '' }
+      : { stdout: JSON.stringify([{ sessionId: 'current-no-time', kind: 'codex', cwd: '/repo' }]), stderr: '' };
+    const sessions = await loadBrowsableSessions(run, {
+      localMachine: 'zion', limit: 60, currentSessionId: 'current-no-time', quote,
+    });
+    expect(sessions[0]?.timestamp).toBe('1970-01-01T00:00:00.000Z');
+  });
+
   test('registered command -> QuickPick load/switch/reload/accept -> fork -> queued launch uses the real seams', async () => {
     const commands: string[] = [];
     const run: SessionBrowserRunner = async (args) => {
@@ -113,7 +123,13 @@ describe('session browser extension-host seam', () => {
     type Item = { label: string; row?: SessionBrowserSessionRow };
     const quickPick = new FakeQuickPick<Item, 'switch' | 'reload'>();
     let queued = '';
-    const registered = createForkPickSessionCommand(async () => {
+    let registeredId = '';
+    let registered!: () => Promise<void>;
+    registerForkPickSessionCommand((id, callback) => {
+      registeredId = id;
+      registered = callback;
+      return {};
+    }, async () => {
       const picked = await runSessionBrowserPicker({
         quickPick,
         switchButton: 'switch',
@@ -143,6 +159,7 @@ describe('session browser extension-host seam', () => {
         },
       });
     });
+    expect(registeredId).toBe('agents.forkPickSession');
     const commandRun = registered();
     await Bun.sleep(0);
     quickPick.triggerButton('switch');
