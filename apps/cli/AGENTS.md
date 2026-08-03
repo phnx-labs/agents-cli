@@ -283,6 +283,7 @@ src/
     hooks.ts           # hooks.yaml parser + per-agent registrar
     hooks/match.ts     # `matches:` predicate evaluator
     monitors/          # `agents monitors` — event-triggered watchers (source→condition→action); native state-diff store; MonitorEngine runs in the daemon beside the cron scheduler. See docs/10-monitors.md
+    projects.ts        # `agents projects` — named multi-repo project defs (~/.agents/projects/*.yaml) layered above the --project convention (resolveProjectRef in project-root.ts); project-status.ts rolls live sessions + merged PRs + artifacts into the progress card. Beta-gated. See docs/11-projects.md
     migrate.ts         # One-shot idempotent migrations
     session/           # `agents sessions` READER — discovery/parse/render of agent transcripts; also `migrate-targets.ts` (the `sessions migrate` target scorer)
     terminal/          # Terminal launch engine — tab/split in iTerm/Ghostty/tmux, local or --host
