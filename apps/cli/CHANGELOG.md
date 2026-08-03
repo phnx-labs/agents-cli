@@ -2,7 +2,16 @@
 
 ## 1.20.90
 
-- **Bash commands are now parsed and classified for richer activity summaries.** The `11-activity-log.py` hook tokenizes every Bash tool call and emits a structured `bash.executed` activity record with `category`, `bashTool`, and `bashAction`. High-signal commands also raise milestones: `video.rendered`/`video.converted` for ffmpeg, `image.upscaled` for realesrgan/waifu2x/swin2sr, and `metadata.edited` for exiftool/id3v2/metaflac/vorbiscomment. The session renderer and digest use the shared `lib/session/bash-command.ts` classifier. Source: `apps/cli/src/lib/session/bash-command.ts`, `apps/cli/src/lib/activity.ts`, `apps/cli/src/lib/session/digest.ts`, `apps/cli/src/lib/session/render.ts`.
+- **Bash commands are now parsed and classified for richer activity summaries.** The
+  `11-activity-log.py` hook tokenizes every Bash tool call and emits a structured
+  `bash.executed` activity record with `category`, `bashTool`, and `bashAction`.
+  High-signal commands also raise milestones: `video.rendered`/`video.converted`
+  for `ffmpeg`, `image.upscaled` for `realesrgan`/`waifu2x`/`swin2sr`, and
+  `metadata.edited` for `exiftool`/`id3v2`/`metaflac`/`vorbiscomment`. The session
+  renderer and digest use the shared `lib/session/bash-command.ts` classifier.
+  Source: `apps/cli/src/lib/session/bash-command.ts`,
+  `apps/cli/src/lib/activity.ts`, `apps/cli/src/lib/session/digest.ts`,
+  `apps/cli/src/lib/session/render.ts`.
 
 - **`agents sessions --active` now shows one row per agent, not one per directory.**
   A live tmux agent pane whose durable identity records were missing (the common case
