@@ -22,6 +22,35 @@ import { ensureLockTarget, withFileLock } from './fs-atomic.js';
 import { getUserAgentsDir } from './state.js';
 import { resolveActor, type ActorKind } from './actor.js';
 
+/** Lazy perf warehouse write — avoids a hard cycle at module load. */
+function recordPerfTiming(payload: {
+  label: string;
+  durationMs: number;
+  status?: string;
+  agent?: string;
+  version?: string;
+  sessionId?: string;
+  cwd?: string;
+}): void {
+  try {
+    // Dynamic import keeps events.ts free of a load-time dependency on perf/db.
+    void import('./perf/db.js').then(({ recordSample }) => {
+      recordSample({
+        kind: 'perf.timing',
+        label: payload.label,
+        durationMs: payload.durationMs,
+        status: payload.status,
+        agent: payload.agent,
+        agentVersion: payload.version,
+        sessionId: payload.sessionId,
+        cwd: payload.cwd,
+      });
+    }).catch(() => { /* fail soft */ });
+  } catch {
+    // fail soft
+  }
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 // Resolved lazily: events.ts is imported transitively by most CLI surfaces, and
@@ -578,20 +607,40 @@ export function time<T>(label: string, fn: () => T, payload: EventPayload = {}):
   const start = Date.now();
   try {
     const result = fn();
+    const durationMs = Date.now() - start;
     emit('perf.timing', {
       ...payload,
       label,
-      durationMs: Date.now() - start,
+      durationMs,
       status: 'success',
+    });
+    recordPerfTiming({
+      label,
+      durationMs,
+      status: 'success',
+      agent: payload.agent,
+      version: payload.version,
+      sessionId: payload.sessionId,
+      cwd: payload.cwd,
     });
     return result;
   } catch (err) {
+    const durationMs = Date.now() - start;
     emit('perf.timing', {
       ...payload,
       label,
-      durationMs: Date.now() - start,
+      durationMs,
       status: 'error',
       error: err instanceof Error ? err.message : String(err),
+    });
+    recordPerfTiming({
+      label,
+      durationMs,
+      status: 'error',
+      agent: payload.agent,
+      version: payload.version,
+      sessionId: payload.sessionId,
+      cwd: payload.cwd,
     });
     throw err;
   }
@@ -612,20 +661,40 @@ export async function timeAsync<T>(
   const start = Date.now();
   try {
     const result = await fn();
+    const durationMs = Date.now() - start;
     emit('perf.timing', {
       ...payload,
       label,
-      durationMs: Date.now() - start,
+      durationMs,
       status: 'success',
+    });
+    recordPerfTiming({
+      label,
+      durationMs,
+      status: 'success',
+      agent: payload.agent,
+      version: payload.version,
+      sessionId: payload.sessionId,
+      cwd: payload.cwd,
     });
     return result;
   } catch (err) {
+    const durationMs = Date.now() - start;
     emit('perf.timing', {
       ...payload,
       label,
-      durationMs: Date.now() - start,
+      durationMs,
       status: 'error',
       error: err instanceof Error ? err.message : String(err),
+    });
+    recordPerfTiming({
+      label,
+      durationMs,
+      status: 'error',
+      agent: payload.agent,
+      version: payload.version,
+      sessionId: payload.sessionId,
+      cwd: payload.cwd,
     });
     throw err;
   }
@@ -661,12 +730,21 @@ export function createTimer(label: string, payload: EventPayload = {}): {
     },
     end(endPayload: EventPayload = {}): void {
       const durationMs = Date.now() - start;
+      const merged = { ...payload, ...endPayload };
       emit('perf.timing', {
-        ...payload,
-        ...endPayload,
+        ...merged,
         label,
         durationMs,
         phases: marks,
+      });
+      recordPerfTiming({
+        label,
+        durationMs,
+        status: typeof merged.status === 'string' ? merged.status : undefined,
+        agent: merged.agent,
+        version: merged.version,
+        sessionId: merged.sessionId,
+        cwd: merged.cwd,
       });
     },
   };
@@ -689,20 +767,40 @@ export function withTiming<Args extends unknown[], R>(
     const start = Date.now();
     try {
       const result = await fn(...args);
+      const durationMs = Date.now() - start;
       emit('perf.timing', {
         ...basePayload,
         label,
-        durationMs: Date.now() - start,
+        durationMs,
         status: 'success',
+      });
+      recordPerfTiming({
+        label,
+        durationMs,
+        status: 'success',
+        agent: basePayload.agent,
+        version: basePayload.version,
+        sessionId: basePayload.sessionId,
+        cwd: basePayload.cwd,
       });
       return result;
     } catch (err) {
+      const durationMs = Date.now() - start;
       emit('perf.timing', {
         ...basePayload,
         label,
-        durationMs: Date.now() - start,
+        durationMs,
         status: 'error',
         error: err instanceof Error ? err.message : String(err),
+      });
+      recordPerfTiming({
+        label,
+        durationMs,
+        status: 'error',
+        agent: basePayload.agent,
+        version: basePayload.version,
+        sessionId: basePayload.sessionId,
+        cwd: basePayload.cwd,
       });
       throw err;
     }

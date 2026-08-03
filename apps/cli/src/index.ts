@@ -171,6 +171,7 @@ import {
   loadFactory,
   loadUsage,
   loadCost,
+  loadPerf,
   loadOutput,
   loadBudget,
   loadAlias,
@@ -206,6 +207,7 @@ import type { AgentId } from './lib/types.js';
 import { IS_WINDOWS } from './lib/platform/index.js';
 import { getCliLaunch } from './lib/cli-entry.js';
 import { emit, emitFriction, redactArgs } from './lib/events.js';
+import { recordSample } from './lib/perf/db.js';
 
 // Transparent shim delegate: the generated Windows `.cmd` shims invoke
 // `agents __shim <agent>[@version] <raw args>`. Intercept here, before commander
@@ -287,11 +289,22 @@ program.hook('postAction', (_thisCommand, actionCommand) => {
     const parts = auditCommandPath(actionCommand);
     if (parts.length === 0) return;
     const started = auditStarts.get(actionCommand);
+    const durationMs = started !== undefined ? Date.now() - started : undefined;
+    const command = parts.join(' ');
     emit('command.end', {
       module: parts[0],
-      command: parts.join(' '),
-      ...(started !== undefined ? { durationMs: Date.now() - started } : {}),
+      command,
+      ...(durationMs !== undefined ? { durationMs } : {}),
     });
+    // Disposable perf warehouse — fail-soft, no FK to sessions.
+    if (durationMs !== undefined && parts[0] !== 'perf') {
+      recordSample({
+        kind: 'command.end',
+        label: command,
+        durationMs,
+        cwd: process.cwd(),
+      });
+    }
   } catch {
     // Best-effort completion record; the start line is the durable audit fact.
   }
@@ -384,6 +397,7 @@ Credentials and profiles:
 Diagnostics:
   doctor [agent[@version]]        Diagnose CLI availability, sync status, and resource divergence; --check for the CI drift gate
   usage [agent]                   Show rate-limit and quota usage per agent
+  perf                            Latency rollups (hooks, commands, runs) from the disposable perf warehouse
 
 Config sync:
   drive                           Sync session history across machines via rsync
@@ -1039,6 +1053,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadFactory);
   await reg(loadUsage);
   await reg(loadCost);
+  await reg(loadPerf);
   await reg(loadOutput);
   await reg(loadBudget);
   await reg(loadAlias);
