@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   countsFromIssuesResponse,
   fetchLinearProjectCounts,
+  nextMilestone,
   type LinearIssuesResponse,
 } from './linear-project-counts.js';
 
@@ -87,5 +88,74 @@ describe('fetchLinearProjectCounts — pagination accumulator', () => {
   it('a failed page degrades the whole enrichment to undefined (card omits the line)', async () => {
     const fetchPage = async () => undefined;
     expect(await fetchLinearProjectCounts('proj-1', fetchPage)).toBeUndefined();
+  });
+});
+
+/** An issue node as the query selects it: state plus a milestone id, if any. */
+function issue(stateType: string, msId?: string) {
+  return { state: { type: stateType }, ...(msId ? { projectMilestone: { id: msId } } : {}) };
+}
+
+const M1 = { id: 'm1', name: 'Beta cut', targetDate: '2026-08-21' };
+const M2 = { id: 'm2', name: 'GA', targetDate: '2026-09-30' };
+
+describe('nextMilestone', () => {
+  it('picks the earliest-dated milestone that still has work', () => {
+    expect(
+      nextMilestone([M2, M1], [issue('completed', 'm2'), issue('started', 'm2'), issue('completed', 'm1'), issue('unstarted', 'm1')]),
+    ).toEqual({ name: 'Beta cut', targetDate: '2026-08-21', done: 1, total: 2 });
+  });
+
+  it('surfaces a declared milestone with NO issues filed under it', () => {
+    // The real case: the milestone exists on the project, nothing is assigned
+    // to it yet. Deriving the list from issues made these invisible.
+    expect(nextMilestone([M1], [issue('started'), issue('completed')])).toEqual({
+      name: 'Beta cut',
+      targetDate: '2026-08-21',
+      done: 0,
+      total: 0,
+    });
+  });
+
+  it('skips a finished milestone — done is not "next"', () => {
+    expect(nextMilestone([M1, M2], [issue('completed', 'm1'), issue('completed', 'm1'), issue('started', 'm2')])).toEqual({
+      name: 'GA',
+      targetDate: '2026-09-30',
+      done: 0,
+      total: 1,
+    });
+  });
+
+  it('returns nothing when the project declares no milestones, or all are complete', () => {
+    expect(nextMilestone([], [issue('started', 'm1')])).toBeUndefined();
+    expect(nextMilestone([M1], [issue('completed', 'm1')])).toBeUndefined();
+  });
+
+  it('sorts undated milestones last but still surfaces one when nothing is dated', () => {
+    const undated = { id: 'm3', name: 'Someday' };
+    expect(nextMilestone([undated, M1], [])?.name).toBe('Beta cut');
+    const only = nextMilestone([undated], []);
+    expect(only).toEqual({ name: 'Someday', done: 0, total: 0 });
+    expect(only?.targetDate).toBeUndefined();
+  });
+
+  it('ignores a malformed declared milestone rather than inventing one', () => {
+    expect(nextMilestone([{ name: 'no id' }, { id: 'x', name: '' }], [])).toBeUndefined();
+  });
+});
+
+describe('countsFromIssuesResponse — milestone', () => {
+  it('carries the next milestone alongside the counts, and omits it when there is none', () => {
+    const withMs = countsFromIssuesResponse({
+      issues: { nodes: [issue('completed', 'm1'), issue('started', 'm1')] },
+      project: { projectMilestones: { nodes: [M1] } },
+    });
+    expect(withMs).toEqual({
+      done: 1,
+      total: 2,
+      inProgress: 1,
+      nextMilestone: { name: 'Beta cut', targetDate: '2026-08-21', done: 1, total: 2 },
+    });
+    expect(countsFromIssuesResponse(response(['completed', 'started']))).not.toHaveProperty('nextMilestone');
   });
 });
