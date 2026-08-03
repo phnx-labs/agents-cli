@@ -184,6 +184,17 @@ export interface JobConfig {
    */
   catchup?: boolean;
   /**
+   * When this routine came into existence, ISO 8601. Stamped once by
+   * {@link writeJob}, like `actor`.
+   *
+   * Overdue detection needs it: `detectOverdueJobs` walks back a week for the
+   * most recent expected fire, so without a floor a brand-new routine is
+   * "overdue" for occurrences that happened before it was written. Harmless
+   * when catch-up was a manual command; with auto-catchup it would run every
+   * newly created routine once, immediately.
+   */
+  createdAt?: string;
+  /**
    * Environment variables injected into the spawned run, on top of the sandbox
    * overlay's own. Merged by `buildSpawnEnv`, so it applies to both the
    * foreground and detached execution paths.
@@ -558,6 +569,11 @@ export function writeJob(config: JobConfig): void {
   // disk, which already carries `actor`, so this preserves the original creator;
   // only a brand-new routine (no actor yet) gets the current resolver.
   if (!config.actor) config.actor = resolveActor().id;
+  // Stamped once, on first write, and preserved by every later edit (an edit
+  // re-writes a config loaded from disk, which already carries it). This is the
+  // floor overdue detection uses so a routine is never judged against fires
+  // that predate it.
+  if (!config.createdAt) config.createdAt = new Date().toISOString();
   const jobsDir = getRoutinesDir();
   const ymlPath = safeJoin(jobsDir, config.name + '.yml');
   const yamlPath = safeJoin(jobsDir, config.name + '.yaml');

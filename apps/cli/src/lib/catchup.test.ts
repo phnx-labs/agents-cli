@@ -116,10 +116,13 @@ describe('claimMissedFire', () => {
 describe('runCatchup', () => {
   /** A routine due daily at 02:00 UTC whose last run was two days before "now". */
   // timezone pinned so the cron occurrences line up with the UTC instants the
-  // fixtures use, whatever TZ the test machine runs in.
+  // fixtures use, whatever TZ the test machine runs in. createdAt predates the
+  // fixtures' runs so the routine is old enough for its slots to count as real
+  // misses (see "a routine is never judged against fires that predate it").
   const nightly = {
     name: 'nightly', schedule: '0 2 * * *', timezone: 'UTC', agent: 'claude' as const,
     mode: 'auto' as const, effort: 'auto' as const, timeout: '10m', enabled: true, prompt: 'noop',
+    createdAt: '2026-07-25T00:00:00.000Z',
   };
   const now = new Date('2026-08-03T09:00:00.000Z');
 
@@ -198,6 +201,57 @@ describe('runCatchup', () => {
 
     expect(await runCatchup({ now })).toHaveLength(0);
     expect(readRuns('nightly').map((r) => r.status)).toEqual(['completed']);
+  });
+});
+
+// The footgun this floor exists to prevent: `agents routines add` for any daily
+// or weekly schedule whose slot already passed today would otherwise be judged
+// overdue for a fire that predates the routine, and auto-catchup would run it
+// once, immediately, within five minutes of creating it.
+describe('a routine is never judged against fires that predate it', () => {
+  const now = new Date('2026-08-03T09:00:00.000Z');
+
+  it('a routine created after its last slot is not overdue and is not caught up', async () => {
+    const { runCatchup } = await import('./catchup.js');
+    const { detectOverdueJobs } = await import('./overdue.js');
+    // Daily at 02:00Z; "now" is 09:00Z, so today's slot already passed...
+    writeRoutine({
+      name: 'just-added', schedule: '0 2 * * *', timezone: 'UTC', agent: 'claude',
+      mode: 'auto', effort: 'auto', timeout: '10m', enabled: true, prompt: 'noop',
+      // ...but the routine was only written an hour ago.
+      createdAt: '2026-08-03T08:00:00.000Z',
+    });
+
+    expect(detectOverdueJobs(now)).toHaveLength(0);
+    expect(await runCatchup({ now })).toHaveLength(0);
+    expect(readRuns('just-added')).toHaveLength(0);
+  });
+
+  it('still catches up a slot that falls after the routine was created', async () => {
+    const { runCatchup } = await import('./catchup.js');
+    writeRoutine({
+      name: 'older', schedule: '0 2 * * *', timezone: 'UTC', agent: 'claude',
+      mode: 'auto', effort: 'auto', timeout: '10m', enabled: true, prompt: 'noop',
+      createdAt: '2026-07-30T00:00:00.000Z',
+    });
+
+    // Today's 02:00Z slot is after createdAt and never ran — a real miss.
+    const outcomes = await runCatchup({ now, dryRun: true });
+    expect(outcomes).toHaveLength(1);
+    expect(outcomes[0].name).toBe('older');
+    expect(readRuns('older').map((r) => r.status)).toEqual(['missed']);
+  });
+
+  it('falls back to the file mtime for a routine written before createdAt existed', async () => {
+    const { detectOverdueJobs } = await import('./overdue.js');
+    // No createdAt — the pre-field case every existing routine on disk is in.
+    writeRoutine({
+      name: 'legacy', schedule: '0 2 * * *', timezone: 'UTC', agent: 'claude',
+      mode: 'auto', effort: 'auto', timeout: '10m', enabled: true, prompt: 'noop',
+    });
+    // The file was just written, so its mtime is "now" — later than today's
+    // 02:00Z slot, which therefore cannot be a miss.
+    expect(detectOverdueJobs(now)).toHaveLength(0);
   });
 });
 

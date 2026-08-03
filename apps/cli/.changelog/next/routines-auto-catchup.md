@@ -25,3 +25,14 @@
   non-recursive `mkdir` — an atomic claim, so if the daemon's timer and a manual
   `agents routines catchup` overlap, only one of them runs the routine. Source: `apps/cli/src/lib/routines.ts` (`RunMeta`),
   `apps/cli/src/commands/routines.ts`.
+- **A routine is never caught up for a fire that predates it.** `detectOverdueJobs` walks back
+  a week for the most recent expected occurrence, and a routine with no runs is overdue by
+  definition — so before this, `agents routines add` on any daily or weekly schedule whose slot
+  had already passed made the routine instantly "overdue". That was cosmetic while catch-up was
+  a manual command; with the daemon now catching up automatically it would have run every newly
+  created routine once, within five minutes of creating it. Routines gain a `createdAt` stamp
+  (written once, like `actor`), and overdue detection floors the expected fire at it — falling
+  back to the routine file's mtime for routines written before the field existed. Observed on
+  the live fleet: `agents-cli-updates`, created Aug 1 and never run, was flagged overdue for a
+  Jul 27 fire. Source: `apps/cli/src/lib/overdue.ts` (`routineEffectiveStart`),
+  `apps/cli/src/lib/routines.ts` (`writeJob`).

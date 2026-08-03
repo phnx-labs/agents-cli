@@ -773,6 +773,13 @@ alternative is spawning an agent twice.
 Device scoping still applies: a routine pinned elsewhere is skipped, so a fleet of
 machines never all catch up the same routine.
 
+A routine is also never caught up for a fire that **predates it**. `writeJob` stamps
+`createdAt` once, and overdue detection floors the most recent expected occurrence at
+it (`routineEffectiveStart`, `overdue.ts`), falling back to the routine file's mtime
+for routines written before the field existed. Without that floor, adding a routine on
+any daily or weekly schedule whose slot had already passed would make it instantly
+overdue — and catch-up would run it once, immediately, minutes after you created it.
+
 ### Opting out — `catchup: false`
 
 Catch-up defaults to **on**: a routine you scheduled is one you expect to have
