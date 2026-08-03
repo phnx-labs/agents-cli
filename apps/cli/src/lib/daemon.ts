@@ -505,9 +505,30 @@ export async function runDaemon(): Promise<void> {
       notifyOverdue(overdue);
       const outcomes = await runCatchup({ overdue });
       for (const o of outcomes) {
-        if (o.result === 'ran') log('INFO', `Caught up '${o.name}' (run: ${o.runId})`);
-        else if (o.result === 'recorded') log('INFO', `Recorded missed fire for '${o.name}' (catchup disabled)`);
-        else log('ERROR', `Catchup for '${o.name}' failed: ${o.error}`);
+        // Every variant handled explicitly: a catch-all else would log the
+        // benign 'claimed-elsewhere' (another process legitimately won the
+        // claim) as an ERROR with an undefined reason.
+        switch (o.result) {
+          case 'ran':
+            log('INFO', `Caught up '${o.name}' (run: ${o.runId})`);
+            break;
+          case 'recorded':
+            log('INFO', `Recorded missed fire for '${o.name}' (catchup disabled)`);
+            break;
+          case 'claimed-elsewhere':
+            log('INFO', `Missed fire for '${o.name}' already claimed by another catchup`);
+            break;
+          case 'error':
+            log('ERROR', `Catchup for '${o.name}' failed: ${o.error}`);
+            break;
+          default: {
+            // Compile-time exhaustiveness: a new CatchupOutcome variant fails
+            // typecheck here rather than silently landing in the wrong log level,
+            // which is exactly how 'claimed-elsewhere' was first missed.
+            const unhandled: never = o.result;
+            log('ERROR', `Catchup for '${o.name}' returned an unhandled result: ${String(unhandled)}`);
+          }
+        }
       }
     } catch (err) {
       log('ERROR', `Catchup pass failed: ${(err as Error).message}`);
