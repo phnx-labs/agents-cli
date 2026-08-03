@@ -87,6 +87,29 @@ export function buildHostLaunchCommand(
   return cmd;
 }
 
+/**
+ * Launch a harness through `agents run` with NO version pin — the balanced
+ * rotation picks the account. This is the `Agents: Resume (Pick Harness)`
+ * launch: the user is switching harness, not account, so any healthy install
+ * of the target harness will do. `claudeSessionId` pins the new Claude
+ * session's id (same contract as {@link buildLaunchCommand}); ignored for
+ * other harnesses.
+ */
+export function buildAgentRunLaunchCommand(
+  agentKey: string,
+  host?: string,
+  claudeSessionId?: string | null,
+): string {
+  let cmd = `agents run ${agentKey} --interactive`;
+  if (host) {
+    cmd += ` --host ${shellQuoteHost(host)}`;
+  }
+  if (agentKey === 'claude' && claudeSessionId) {
+    cmd += ` --session-id ${claudeSessionId}`;
+  }
+  return cmd;
+}
+
 /** Single-quote a device name so it can never break out of the built command. */
 function shellQuoteHost(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;

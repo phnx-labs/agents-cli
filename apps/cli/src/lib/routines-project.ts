@@ -294,6 +294,11 @@ export function syncProjectRoutines(projectRoot: string): SyncProjectResult {
       if (job.devices === undefined && existing.devices && existing.devices.length > 0) {
         job.devices = existing.devices;
       }
+      // Carry the original creation stamp across. A sync rebuilds the config
+      // from the PROJECT yaml, which never carries `createdAt`, so without this
+      // every `agents routines sync` would re-stamp it to now — walking the
+      // overdue floor forward and hiding real missed fires for project routines.
+      if (existing.createdAt) job.createdAt = existing.createdAt;
     }
 
     // Placement that leaves the firing machine must pin devices to avoid

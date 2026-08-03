@@ -73,7 +73,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let controller: StatusItemController
     init(_ c: StatusItemController) { self.controller = c }
     let hotkey = HotkeyManager()
-    let promptController = PromptPanelController()
+    // One panel, two entry points: the Cmd-Shift-O chord and the menu's
+    // "New Task…" row. The status item owns it so both summon the same instance
+    // and an interrupted capture is restored either way.
+    var promptController: PromptPanelController { controller.promptController }
     func applicationDidFinishLaunching(_ notification: Notification) {
         controller.install()
         // A duplicate launch surrenders (SingleInstance) and posts this instead
@@ -86,7 +89,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // notification for an inactive app rather than delivering it — the menu
         // would simply never open.
         DistributedNotificationCenter.default().addObserver(
-            controller, selector: #selector(StatusItemController.surface),
+            controller, selector: #selector(StatusItemController.surface(_:)),
             name: SingleInstance.surfaceNotification, object: nil,
             suspensionBehavior: .deliverImmediately
         )

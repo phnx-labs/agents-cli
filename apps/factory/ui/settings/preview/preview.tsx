@@ -736,12 +736,24 @@ function Recap() {
   const days = buildRecap(
     [
       rs({ topic: 'Floor rail flyouts — Projects/Hosts menus, Dispatch button', prUrl: 'https://github.com/phnx-labs/agents-cli/pull/862', ticket: 'RUSH-1521', lastActivityMs: now - 40 * 60_000 }),
+      // A fork and the session it came from: `Agents: Fork (Pick Host)` sent the
+      // sibling to yosemite-m0, and the ledger reunites the two side by side.
+      rs({ sessionId: 'parent-1', topic: 'Session resume drops the tmux pane', host: 'zion', costUsd: 2.1, durationMs: 1_500_000, lastActivityMs: now - 70 * 60_000 }),
+      rs({ sessionId: 'fork-1', topic: 'Session resume drops the tmux pane (fork)', host: 'yosemite-m0', prUrl: 'https://github.com/phnx-labs/agents-cli/pull/871', costUsd: 1.7, durationMs: 1_050_000, lastActivityMs: now - 55 * 60_000 }),
       rs({ topic: 'In-flight ticket linkage on the backlog', agentType: 'codex', host: 'yosemite-s0', prUrl: 'https://github.com/phnx-labs/agents-cli/pull/866', costUsd: 3.2, durationMs: 1_100_000, lastActivityMs: now - 2 * 3_600_000 }),
       rs({ topic: 'Fix PKCE http client pinning', agentType: 'gemini', host: 'mac-mini', project: 'rush', costUsd: 0.8, durationMs: 600_000, lastActivityMs: now - 26 * 3_600_000 }),
       rs({ topic: 'Deploy agents on mac-mini and sync system repo', costUsd: 1.4, durationMs: 900_000, lastActivityMs: now - 27 * 3_600_000, branch: 'HEAD' }),
     ],
     new Set(),
     now,
+    [{
+      sourceSessionId: 'parent-1',
+      sourceHost: 'zion',
+      forkSessionId: 'fork-1',
+      forkHost: 'yosemite-m0',
+      agentKey: 'claude',
+      forkedAt: now - 70 * 60_000,
+    }],
   )
   return <div className="feed-col"><RecapPane days={days} loading={false} onOpenUrl={noop} /></div>
 }

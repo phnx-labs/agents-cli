@@ -1,5 +1,366 @@
 # Changelog
 
+## 1.20.91
+
+- **An agent can now say it is stuck: `agents feed post --blocked` (RUSH-2110).** The
+  feed carried benign progress but had no way to signal "I cannot proceed", so agents
+  hand-rolled it into the status text (`NEEDS MUQSIT: …`) and it reached nobody. A
+  blocked post writes `status.blocked` to the shared activity stream *and* opens an
+  answerable block in the ledger, so the ask stays open until someone resolves it
+  instead of scrolling away. It is a flag on the existing verb, not a new command —
+  one thing for an agent to learn, and one stream where most posts are benign and
+  some need a human. Blocked is a state, not a volume: it always broadcasts at
+  `important`, so passing `--level` too is a usage error rather than a silent
+  override. Pair it with `--option` for an answerable choice or `--default` for a
+  safe fallback policy may apply. Source: `apps/cli/src/commands/feed.ts`,
+  `apps/cli/src/lib/feed.ts`.
+- **Feed blocks are actually delivered.** `publishBlock` wrote every "needs you"
+  record to the ledger and stopped there — `broadcastPostedEvent` ran only for
+  `feed post`, so a block was durable and invisible at the same time. Blocks now
+  reach the configured `feed.broadcast` sinks, carrying the ask and the literal
+  `agents focus <id>` command that unblocks it, and a block that reaches nobody
+  exits non-zero instead of looking like a success. Source:
+  `apps/cli/src/lib/feed-broadcast.ts`.
+- **New `desktop` channel provider.** `agents send --channel desktop` (and
+  `notify.owner.channel: desktop`) posts a native notification through the branded
+  menu-bar helper. It is the only channel with no external dependency — no network,
+  no login, no vendor CLI — so it still reaches you at your Mac when a messaging
+  gateway is down. It reports real deliverability rather than always succeeding:
+  on Linux it probes for `notify-send` instead of trusting the platform name.
+  Source: `apps/cli/src/lib/channels/providers/desktop.ts`.
+
+- **`agents perf` — disposable SQLite latency warehouse.** Indexed p50/p99
+  rollups for hooks, CLI commands, and `agent.run` timings without scanning the
+  audit JSONL. Warehouse lives at `~/.agents/.cache/perf/perf.db` (safe to wipe);
+  identity columns reuse sessions/events string shapes (`session_id`, `agent`,
+  `machine`, …) for soft cross-reference — no foreign keys. Hook shims spool
+  into the same DB; `agents hooks profile` reads it first. Source:
+  `apps/cli/src/lib/perf/db.ts`, `apps/cli/src/commands/perf.ts`.
+
+- **A routine that misses its fire now runs late instead of being silently lost.** Fires
+  are in-process croner timers, and croner only ever schedules forward from "now" — so a
+  daemon that was down, asleep, or wedged when a routine came due dropped that fire
+  outright, and `loadAll()` rebuilt every timer looking only at the future. Detection
+  existed but ran **once, at daemon startup**, and only logged a warning plus a
+  notification; catching up was a manual `agents routines catchup`. Observed cost: zion's
+  daemon was down from 02:03Z to 08:23Z while the laptop slept, `weekly-fleet-retro` was
+  armed for exactly 04:00Z, never ran, and the restart logged `2 routine(s) overdue` and
+  did nothing. The daemon now re-scans every 5 minutes as well as at startup and runs each
+  missed routine via the same detached path `catchup` already used. Source:
+  `apps/cli/src/lib/catchup.ts`, `apps/cli/src/lib/daemon.ts`.
+- **New `catchup:` routine field, and `agents routines add --no-catchup`.** Defaults to
+  true — a routine you scheduled is one you expect to have run. Set `catchup: false` for a
+  routine whose worth expires with its slot (a 9am brief is useless at 3pm); the miss is
+  still recorded, it just is not re-run. `agents routines list --json` reports the
+  effective value as `catchup`.
+- **New `missed` run status.** A missed fire previously left no trace anywhere — no run
+  record, no log line in the routine's history — so `agents routines list` kept showing the
+  previous run's `completed` as though it were current, sometimes for weeks. A miss is now
+  written as a real run stamped at the moment the fire was due, so `agents routines runs
+  <name>` shows the gap, and the listing renders it distinctly from `failed` (a miss is an
+  infrastructure problem, not a task failure). That record is also what makes catch-up
+  idempotent: it advances the overdue comparison, so the same missed fire is never
+  reconsidered across ticks or a daemon restart storm, and its directory is created with a
+  non-recursive `mkdir` — an atomic claim, so if the daemon's timer and a manual
+  `agents routines catchup` overlap, only one of them runs the routine. Source: `apps/cli/src/lib/routines.ts` (`RunMeta`),
+  `apps/cli/src/commands/routines.ts`.
+- **A routine is never caught up for a fire that predates it.** `detectOverdueJobs` walks back
+  a week for the most recent expected occurrence, and a routine with no runs is overdue by
+  definition — so before this, `agents routines add` on any daily or weekly schedule whose slot
+  had already passed made the routine instantly "overdue". That was cosmetic while catch-up was
+  a manual command; with the daemon now catching up automatically it would have run every newly
+  created routine once, within five minutes of creating it. Routines gain a `createdAt` stamp
+  (written once, like `actor`), and overdue detection floors the expected fire at it — falling
+  back to the routine file's mtime for routines written before the field existed. Observed on
+  the live fleet: `agents-cli-updates`, created Aug 1 and never run, was flagged overdue for a
+  Jul 27 fire. Source: `apps/cli/src/lib/overdue.ts` (`routineEffectiveStart`),
+  `apps/cli/src/lib/routines.ts` (`writeJob`).
+
+- **`agents secrets list` can be filtered.** It had no filtering at all —
+  `--host` picks a machine and `--json` picks a format, but nothing selected over
+  the bundles themselves, so "which of these read with no Touch ID?", "which
+  still store a raw value inline?", "what have I not touched in three months?"
+  meant piping the table through `grep` or went unanswered. There is now an axis
+  per question: a `[query]` positional over name and description, `--policy`,
+  `--backend`, `--type`, `--kind`, `--held`/`--not-held`, `--expired`,
+  `--expiring [days]`, `--unused <duration>`, plus `--sort` and `-n/--limit`.
+  Every axis narrows independently, so they compose. Following the `agents
+  sessions` house style, an unknown value is a loud error naming the valid set
+  rather than an empty list, filters apply before `--json` so the payload is the
+  exact twin of the table, and they are forwarded over `--host` so a remote list
+  narrows the same way. `--held`/`--not-held` read live broker state and so
+  refuse to run off macOS instead of reporting every bundle as unheld. An empty
+  result names the filters that emptied it and the total it started from. Source:
+  `apps/cli/src/lib/secrets/list-filter.ts`, `apps/cli/src/commands/secrets.ts`.
+
+- **The EXPIRING column no longer hides keys that have already expired.**
+  `countExpiringSoon` counted only keys due in the next 30 days — the guard is
+  `d >= 0` — so a bundle whose token died last month rendered `-`, identical to
+  one with no expiry at all. The only places a lapsed key surfaced were
+  `agents secrets view` and a hard abort at inject time, i.e. after it had already
+  broken a run. The column now counts lapsed and upcoming together and turns red
+  once anything has lapsed, and `secrets list --json` gains an `expired` count
+  alongside the existing `expiringSoon`. Source: `apps/cli/src/commands/secrets.ts`.
+
+- **`agents secrets list` now states the hold window instead of the bare word
+  `hold`.** The `hold` tier is a duration — prompt once, then stay silent for
+  `secrets.agent.holdMs` (7 days by default) — but the POLICY column printed only
+  the tier name, so a reader could not tell it meant a window, let alone which
+  one; finding out meant running `agents secrets status`. The column now reads
+  `hold 7d`, and `hold 7d · held 6d` while the broker is actually caching the
+  bundle. It follows the configured window, so a 24-hour hold reads `hold 1d`.
+  `always` and `never` are unchanged — neither has a window, and annotating one
+  would repeat the mistake the `daily` rename fixed. Two adjacent bugs go with
+  it: `agents secrets view` printed "7d by default" as a string literal and so
+  misstated the window for anyone who had configured `holdMs`, and a stale broker
+  entry past its expiry rendered as `hold · held expired` because the column
+  tested the entry for presence rather than liveness. `secrets list --json` and
+  `secrets view --json` gain an additive `holdMs` field (null on `always`/`never`)
+  so a machine caller gets the window too. Source:
+  `apps/cli/src/commands/secrets.ts`.
+
+- **Richer session previews: skills, hooks, links, artifacts, repos, todo status.** The `agents sessions` quick preview and full summary now show the skills a session invoked (with counts), the hooks that fired (Claude transcripts, with repeat counts and failures), a clickable Links section (Linear/Jira/GitHub/GitLab URLs harvested from the conversation), the documents the session produced (`.agents/artifacts|plans|reports` and other `*.md`/`*.html` creations), the repos it worked in (via `.git` walk-up), and an error tally in the picker. The full summary's Plan section now marks checklist items `[x]`/`[>]`/`[ ]` and renders the checklist alongside the ExitPlanMode text instead of hiding it. Changes/Dirs lines collapse `.agents/worktrees/<slug>` prefixes to `⧉ <slug>/…`, are width-capped, and no longer list shell junk (`2>&1`, `$VAR` paths), `node_modules`, or agents-cli internal archives. Source: `apps/cli/src/lib/session/highlights.ts`, `apps/cli/src/lib/session/parse.ts`, `apps/cli/src/lib/session/render.ts`, `apps/cli/src/commands/sessions-picker.ts`.
+
+## 1.20.90
+
+- **`agents sessions --active` now shows one row per agent, not one per directory.**
+  A live tmux agent pane whose durable identity records were missing (the common case
+  once meta/pid-registry entries age out) was dropped, then re-surfaced by the ps-scan
+  under the newest transcript in its cwd — so many distinct sessions collapsed onto one
+  stranger's id with an inflated `×N` badge, and `agents sessions focus <id>` could not
+  find them. The scanner now recovers the session id straight from the `ag-<agent>-<shortid>`
+  tmux pane name (resolved to the full UUID via the short-id index in one batched query),
+  and refuses to borrow a co-located sibling's transcript when no id is known — so every
+  live session surfaces as its own row and is focus-able again. Also adds a `runTmux`
+  timeout so a wedged tmux server can't hang the scan. Source: `apps/cli/src/lib/session/active.ts`.
+
+- **`agents view` now shows live usage bars for Antigravity.** The `agy` account
+  row renders one bar per model quota bucket (`3.1P: ███░░ 42% (1d)` style),
+  sourced from the same Google Code Assist `:retrieveUserQuota` endpoint `agy`
+  itself talks to. Auth reuses the stored `agy` OAuth credential (macOS Keychain
+  item `gemini`/`antigravity`, Linux Secret Service, or the
+  `~/.gemini/antigravity-cli/antigravity-oauth-token` file fallback), refreshing
+  the access token in memory when expired — safe from a read path because
+  Google's refresh tokens are non-rotating, and never written back to the
+  keychain. Each per-model bucket also flows into the throttle badge, run
+  rotation eligibility, and `agents view --json` (whose usage windows now carry
+  a `label` so same-keyed per-model bars are distinguishable). Source:
+  `apps/cli/src/lib/usage.ts`, `apps/cli/src/lib/agents.ts`,
+  `apps/cli/src/commands/view.ts`.
+
+- **A custom harness is now its own agent type in `agents view`.** A harness created
+  with `agents harness add` (or `agents profiles add`) used to render as an indented
+  `profile` row under whichever host CLI executes it. It now gets its own block beside
+  Claude and Codex — a bold name header, then one row carrying the pinned model, the
+  account/auth state, and `via <host> <version>` naming the native harness underneath.
+  That matches how it is already launched: `agents run <name>` treats a custom harness
+  exactly like a native agent id. A harness whose host CLI has no install is flagged
+  `(host <id> not installed)` rather than listed as runnable, and the separate
+  "Profile-only Agents" section is gone — those harnesses now render in the main list
+  like every other one. Source: `apps/cli/src/commands/view.ts`.
+- **`agents view <harness>` describes a custom harness** — host, model, provider, auth,
+  fork lineage, YAML path — instead of failing with "unknown agent";
+  `agents view <harness> --json` emits its summary. Source:
+  `apps/cli/src/commands/harness.ts` (`renderHarnessDetail`).
+- **New `agents harness fork <source> <name>`.** One verb over both starting points:
+  fork a native harness (`agents harness fork opencode deepseek --model
+  deepseek/deepseek-v4-flash-0731 --auth-provider openrouter`) or copy a custom one you
+  already tuned and change only what you name (`agents harness fork deepseek
+  deepseek-chat --model deepseek/deepseek-chat-v3`). Forking a custom harness is a full
+  copy — env, endpoint, auth binding, `fallback_model`, host version pin — so the two
+  diverge and deleting the source never affects the fork; forking a native harness
+  requires `--model` because there is no model to inherit. Flags: `--model`,
+  `--base-url`, `--auth-provider`, `--version`, `--label`, `--description`,
+  `--key-stdin`, `--force`. Source: `apps/cli/src/lib/profiles.ts` (`forkProfile`).
+- **Profile YAML gains optional `label:` and `forkedFrom:`.** `label` sets the name
+  `agents view` prints for the harness (defaults to the file name); `forkedFrom` records
+  the parent as display-only lineage. Existing profiles keep working untouched. Source:
+  `apps/cli/src/lib/profiles.ts`.
+- **Breaking (`--json`):** in `agents view <agent> --json`, the per-agent `profiles` key
+  is now `harnesses`, and each entry carries new `label`, `hostVersion`, `description`,
+  and `forkedFrom` fields alongside the existing ones. Source:
+  `apps/cli/src/commands/view.ts` (`ViewJsonAgent`).
+
+- **Menu bar ACTIVE: project accordion + session detail submenu.** Projects are
+  collapsed by default as a status strip (`▶ agents-cli  ●8 ◐1  zion`); click
+  `▶`/`▼` to fold agents open under the project (idle-row caps removed — collapse
+  is the wall protection). Focusing an agent opens a side submenu with linkable
+  detail (work title URL, cwd, Linear ticket, GitHub PR, duration, copy session
+  id) from the warm `sessions --active` cache. Accordion reopen rebuilds from
+  cache only (no teams walk / no CLI schedule). Local/remote uses the same host
+  normalize as CLI `machineId()` so local rows are not mislabeled remote. Source:
+  `apps/cli/menubar/Sources/MenubarHelper/StatusItemController.swift`,
+  `LocalState.swift`, `Models.swift`.
+
+- **An offloaded editor tab no longer displays another session's id.** A Factory
+  tab launched with `agents run --host <device>` has no local agent process, but
+  the extension still resolved its "live" session id by reading the SessionStart
+  hook's `~/.agents/.cache/state/sessions/<pid>.json` for the local pid tree —
+  the pid of the ssh client. Those files are keyed by pid alone and are only
+  pruned when the pid is dead, so once the OS recycled a pid the tab adopted
+  whatever session had last held it: one remote tab showed the id and version of
+  an unrelated synthetic run from 20 days earlier while `/status` inside it
+  reported the truth. An offloaded tab now takes its identity from the device
+  instead of local disk, and a local tab rejects any state record whose
+  SessionStart timestamp predates the tab itself.
+- **`AGENT_TERMINAL_ID` now rides the SSH hop.** `agents run --host` forwarded
+  actor provenance but not the launching tab's terminal id, so the remote pid
+  registry recorded no terminal — leaving `agents sessions --active --host
+  <device>` unable to answer "which session is this tab running?" once the agent
+  moved on (a `/clear`, or an exit and rerun in the same tab).
+- **`agents sessions --active --json` now carries `terminalId`.** The pid registry
+  has always recorded it; the emitted row dropped it, so no consumer could join a
+  live session back to the editor tab that launched it.
+
+- **Balanced routing no longer launches into an account it only *thinks* has
+  headroom.** Account usage is cached per machine under stale-while-revalidate:
+  a snapshot up to 24h old was served instantly, and the background refresh that
+  should have corrected it lands after the pick is already made. On a box whose
+  refresh is failing that state is permanent — measured on `yosemite-s1`, every
+  Claude snapshot sat 26 hours to 2.7 days old, so balanced read
+  `muqsit@getrush.ai` as 48% used and launched into it while the account was at
+  its weekly cap; the session answered "You've hit your weekly limit" on its
+  first turn. Routing now caps how stale a snapshot may be when it is about to
+  decide (5 minutes), blocking on one bounded, parallel live read past that — and
+  no read at all inside the existing 2-minute fresh window, which back-to-back
+  launches hit. Display paths (`agents view`) keep the full 24h window and stay
+  off the network.
+- **A pick made on unconfirmed data says so.** When no account on the machine
+  could be refreshed, routing still launches — a broken refresh must not make a
+  box unusable — but the banner now reads `… (2 of 5 healthy, usage unverified —
+  no account could be refreshed)` instead of presenting a guess as a fact. An
+  account with a verified snapshot always wins over one with a stale snapshot,
+  even when the stale number looks emptier. This applies to `--strategy
+  available` as well as `balanced` — both route on the same cache, and
+  `available`'s headroom sort was inverted by a stale number in exactly the same
+  way. An explicit version preference is an instruction, not a ranking signal, so
+  it still wins.
+- **The mid-run failover chain is unchanged.** Declining to *pick* an account on
+  unconfirmed data and declining to *fail over to* it after the primary already
+  hit a 429 are different risks — by then the alternative is not launching at
+  all. Every eligible account stays in the failover chain; only the initial pick
+  prefers verified ones.
+
+- **`agents routines list` no longer reports another device's routine as failed.** Run
+  records are written into the runs dir of whichever machine fired the routine and carry
+  no device attribution, but the listing resolved Last Status from any local record and
+  rendered it even on rows for routines pinned elsewhere. A routine re-pinned to another
+  device therefore kept reporting the old machine's leftover records forever — on zion,
+  `security-sweep`, `review-open-prs` and `hetzner-lease-gc` all read `failed` from late
+  July while `yosemite-s0`/`s1`, the devices that actually fire them, had completed them
+  that morning. The macOS menu bar reads this JSON, so it painted a column of red `exit 1`
+  rows for routines that were green. Last Status is now scoped to the device that owns the
+  run: a routine this device does not fire shows `-`, and `--json` returns `null` for
+  `lastStatus`, `exitCode`, `failureReason`, `lastRunStartedAt` and `lastRunCompletedAt`
+  (`runsHere: false` already says why). A routine pinned to several devices renders one row
+  per device but carries a status only on its **This machine** row. Read a peer's status
+  with `agents routines list --device <name>`; the local history is untouched and still
+  readable via `agents routines runs <name>`. Source: `apps/cli/src/commands/routines.ts`
+  (`localLatestRun`, `groupRoutineJobsByDevice`), `apps/cli/docs/03-routines.md`.
+
+- **`agents watchdog` now tracks per-session presence (RUSH-2007 Layer C).** Each
+  tick reconciles a per-session presence record — `{location, device, transport,
+  lastSeen, status}` at `~/.agents/.cache/state/watchdog/presence.json` — from the
+  tick's active scan, deriving `connected` / `disconnected` by diffing consecutive
+  ticks. A session that was tracked but is now absent (its SSH link dropped or the
+  peer went unreachable) flips to `disconnected`, and the flip is surfaced in
+  `agents watchdog --json` under `presence.transitions` — an interactive drop as a
+  `reconnect-nudge` candidate, a headless remote as `keep-alive`. Folded into the
+  existing tick (no revived daemon, no extra SSH fan-out); additive and does not
+  change the tick's nudge decisions. Source:
+  `apps/cli/src/lib/session/presence.ts`, `apps/cli/src/lib/watchdog/runner.ts`.
+
+- **`agents setup secrets --policy hold` no longer fails, and `agents secrets
+  status` stops naming the retired `daily` policy.** The 1.20.79 `daily` → `hold`
+  rename swept the help, docs, and the `secrets list` POLICY column, but two
+  surfaces were never migrated. The worse one was functional: the onboarding
+  wizard carried its own copy of the policy vocabulary, so
+  `agents setup secrets --policy hold` — the canonical name every other secrets
+  command prints — exited with `Invalid --policy 'hold'. Use daily, always, or
+  never.`, and its interactive prompt still offered `daily` as the default
+  choice. It now shares `parsePolicyOpt` with `agents secrets policy`, so the two
+  commands can't disagree about what a policy is called; `daily`/`session` stay
+  accepted as aliases and the wizard's default is unchanged (the hold tier). The
+  second was cosmetic: `agents secrets status` printed "a daily bundle prompts
+  once…" and "the next read of each daily bundle…" — the one command a user runs
+  to answer *why did it prompt again*, naming a policy its sibling commands no
+  longer emit. Both lines now say `hold` and are pure values pinned by tests, so
+  the vocabulary can't drift again. Source:
+  `apps/cli/src/commands/setup-secrets.ts`, `apps/cli/src/commands/secrets.ts`.
+
+- **Favorite sessions from the browser.** `*` stars the highlighted session in
+  `agents sessions` and `f` filters the list to the starred ones; outside a TTY,
+  `agents sessions favorite <id>` (`--remove` / `--list` / `--json`) and
+  `agents sessions --favorites` do the same. Stars live in
+  `~/.agents/.history/favorites.json` keyed by session id, so they survive a reindex
+  of the session cache. They are per-machine — session sync carries transcripts, not
+  this file. Source:
+  `apps/cli/src/lib/session/favorites.ts`, `apps/cli/src/commands/sessions-favorite.ts`.
+- **Detect sessions that lost their host — two new statuses, `crashed` and `orphaned`.**
+  A session whose editor window or connection went down hard used to just VANISH from
+  `agents sessions --active` (its dead-pid registry entry was filtered out), and one
+  still running in tmux with nobody attached reported a plain `idle`. Both now say so:
+  `✗ crashed` when the host window stopped republishing and the agent died with it,
+  `◍ orphan` when the agent is alive with zero clients attached. Derived from tmux's
+  `#{session_attached}` and the IDE window's registry heartbeat — never from a
+  deliberate `agents sessions detach`, and never over a session that is still working.
+  Source: `apps/cli/src/lib/session/host-link.ts`, `apps/cli/src/lib/session/active.ts`.
+- **`agents sessions --active --favorites` now actually filters.** The flag was wired
+  into the interactive browser only, so every path that skips it — `--json`,
+  `--waiting`, a pipe, a multi-host scope, an SSH-fanout peer — silently returned the
+  whole fleet. Source: `apps/cli/src/commands/sessions.ts`.
+- **`agents sessions --active --waiting` no longer counts a dead session.** `activity`
+  is not rewritten when a session dies, so one that crashed mid-question reported "needs
+  your input" forever — what it needs is a relaunch. Source:
+  `apps/cli/src/commands/sessions.ts`.
+
+- **Resolve historical sessions safely across the fleet (#1757).** `agents sessions --resolve <full-id|prefix|keywords> --json` uses a versioned safe peer protocol, returns only resolver metadata, reports every full-ID candidate on ambiguity, treats synced copies as one match, and exits 2 without deciding when a peer fails, returns malformed output, or runs an older CLI. Source: `apps/cli/src/commands/sessions.ts`.
+
+- **A rate-limited usage endpoint is now backed off instead of hammered.** The
+  daemon warms auth-health every 3 minutes and probes *every installed version
+  home* in one parallel batch, so a machine with five Claude accounts sent five
+  concurrent requests to `api.anthropic.com/api/oauth/usage` every three minutes
+  — roughly 100/hour — before the usage refresh added its own. Nothing read
+  `Retry-After`. Measured on `yosemite-s1`: the endpoint answered
+  `429 rate_limit_error` with `retry-after: 2678` (about 45 minutes) for every
+  account while the credentials themselves read healthy, and the next tick fired
+  three minutes later, deep inside the penalty window, re-arming it. The box
+  never recovered, every usage read failed, and its cache froze — the
+  permanently-stale state balanced routing was already having to defend against.
+- **A 429 now records its deadline and every read honours it.** Usage fetches and
+  health probes for that provider short-circuit until the window passes — no
+  request, no renewed penalty — and report
+  `Claude rate-limited this machine — not retrying for 45 minutes.` The state is
+  on disk, because the callers are separate processes: the long-lived daemon and
+  every one-shot `agents view` / `agents run` — one empty file per penalty under
+  `~/.agents/.cache/usage-backoff/`, named `<agent>.<deadline>`, so two
+  processes recording the same provider at once cannot displace each other and a
+  read takes the furthest deadline. A server delay is capped at an hour, and a
+  missing or unparseable `Retry-After` still backs off.
+
+- **A usage read that fails now says so, instead of returning a silent null.**
+  Four branches in every networked usage fetch — Claude, Kimi, Droid and
+  Cursor — returned `{ snapshot: null, error: null }`: no readable credential, a
+  locally-expired one, a rejected request, and a request that threw (timeout,
+  DNS/TLS, an unparseable payload). The caller could not tell any of them apart
+  from a healthy read, so it fell
+  back to whatever the stale-while-revalidate cache held and drew those bars as
+  fact. Measured on `yosemite-s1`: every Claude account's stored access token had
+  expired (one of them eleven days earlier), so no read could succeed, and
+  `agents view claude --refresh` printed a full, healthy-looking table twice
+  while writing nothing to the cache. A usage read never refreshes a token
+  (RUSH-1822), so an expired credential does not heal on its own — the account
+  stays unreadable until that agent actually runs. A rate-limited endpoint (429)
+  now reads differently from a rejected credential (401), because re-authing
+  fixes one and not the other.
+- **`agents view` marks bars the live read could not confirm.** A row whose
+  snapshot came from the cache after a failed live read renders the reading plus
+  `unverified`, rather than looking identical to a confirmed one. The number
+  still shows — it is the last thing we saw — but it no longer reads as current.
+- **`agents view --refresh` reports what it could not refresh.** It now lists
+  each account it failed to reach and why, instead of rendering a table that
+  looks fully refreshed regardless.
+
 ## 1.20.89
 
 - **Webhook handler layer for one-off agent/workflow/command/routine triggers.**

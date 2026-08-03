@@ -68,6 +68,7 @@ import { safeJoin } from '../lib/paths.js';
 import { executeJob, executeJobDetached, monitorRunningJobs, ROUTINE_AGENT_IDS } from '../lib/runner.js';
 import { JobScheduler } from '../lib/scheduler.js';
 import { detectOverdueJobs } from '../lib/overdue.js';
+import { runCatchup } from '../lib/catchup.js';
 import { isInteractiveTerminal, requireInteractiveSelection } from './utils.js';
 import { setHelpSections } from '../lib/help.js';
 import { loadDevices, loadDevicesSync } from '../lib/devices/registry.js';
@@ -179,10 +180,32 @@ function deviceLabel(job: JobConfig, width?: number): { raw: string; display: st
   return { raw, display, dim: full.length === 0 || !jobRunsOnThisDevice(job) };
 }
 
+/**
+ * The last run THIS device can speak for.
+ *
+ * A run record is written by whichever daemon fired the routine, into that
+ * machine's own runs dir — records carry no device attribution, so a record
+ * found here only ever describes this device's history. When a routine is
+ * pinned away from this machine (`devices:` excludes it) any local record is a
+ * leftover from before the pin, and reporting it as the routine's status paints
+ * another device's healthy routine red. Report nothing instead; the local
+ * history stays readable via `agents routines runs <name>`, and the owning
+ * device's status via `agents routines list --device <name>`.
+ */
+export function localLatestRun(job: JobConfig): RunMeta | null {
+  return jobRunsOnThisDevice(job) ? getLatestRun(job.name) : null;
+}
+
 export interface RoutineListGroup {
   key: string;
   title: string;
   jobs: JobConfig[];
+  /**
+   * Whether this device's run records describe the group. False for a
+   * `Device: <peer>` group — the rows are the same routine seen from a machine
+   * that does not fire it there, so Last Status is not ours to report.
+   */
+  local: boolean;
 }
 
 export function groupRoutineJobsByDevice(
@@ -197,7 +220,9 @@ export function groupRoutineJobsByDevice(
       existing.jobs.push(job);
       return;
     }
-    groups.set(key, { key, title, jobs: [job] });
+    // `device:` is the only group that describes a machine other than this one,
+    // so it is the only one whose rows this device cannot report a status for.
+    groups.set(key, { key, title, jobs: [job], local: !key.startsWith('device:') });
   };
 
   for (const job of jobs) {
@@ -248,9 +273,15 @@ interface RenderRowsOptions {
   overdueSet: Set<string>;
   link: (label: string, url: string | null) => string;
   now: Date;
+  /**
+   * Whether this device's run records describe these rows. False for a
+   * `Device: <peer>` group, whose Last Status column stays blank rather than
+   * showing this machine's leftover records for the same routine name.
+   */
+  local?: boolean;
 }
 
-function renderRoutineRows({ jobs, scheduler, overdueSet, link, now }: RenderRowsOptions): void {
+function renderRoutineRows({ jobs, scheduler, overdueSet, link, now, local = true }: RenderRowsOptions): void {
   const NAME_W = 24;
   const AGENT_W = 10;
   const REPO_W = REPO_DISPLAY_MAX;
@@ -267,7 +298,7 @@ function renderRoutineRows({ jobs, scheduler, overdueSet, link, now }: RenderRow
   for (const job of jobs) {
     const nextStr = nextRunLabel(job, scheduler, now);
     const schedStr = scheduleLabel(job);
-    const latestRun = getLatestRun(job.name);
+    const latestRun = local ? localLatestRun(job) : null;
     const lastStatus = latestRun?.status || '-';
 
     const sourceRepo = job.source?.repo ?? job.repo;
@@ -290,6 +321,9 @@ function renderRoutineRows({ jobs, scheduler, overdueSet, link, now }: RenderRow
       lastStatus === 'completed' ? chalk.green
       : lastStatus === 'failed' ? chalk.red
       : lastStatus === 'timeout' ? chalk.yellow
+      // A miss is an infrastructure problem, not a task failure — the routine
+      // never ran. Distinct from red so the two prompt different reactions.
+      : lastStatus === 'missed' ? chalk.magenta
       : chalk.gray;
 
     const overdueTag = overdueSet.has(job.name) ? chalk.yellow(' (overdue)') : '';
@@ -590,7 +624,7 @@ export function registerRoutinesCommands(program: Command): void {
       if (options.json) {
         const nowJson = new Date();
         const payload = jobs.map((job) => {
-          const latestRun = getLatestRun(job.name);
+          const latestRun = localLatestRun(job);
           return {
             name: job.name,
             agent: job.agent ?? null,
@@ -608,6 +642,7 @@ export function registerRoutinesCommands(program: Command): void {
             sourceRepo: job.source?.repo ?? job.repo ?? null,
             sourceBranch: job.source?.branch ?? null,
             runOnce: Boolean(job.runOnce),
+            catchup: job.catchup !== false,
             oneShot: isOneShotRoutine(job),
             expired: isPastOneShotRoutine(job, nowJson),
             runsHere: jobRunsOnThisDevice(job),
@@ -645,9 +680,14 @@ export function registerRoutinesCommands(program: Command): void {
         } catch (err) {
           console.error(chalk.yellow(`Could not read device registry: ${(err as Error).message}`));
         }
-        for (const group of groupRoutineJobsByDevice(jobs, registry)) {
+        const groups = groupRoutineJobsByDevice(jobs, registry);
+        for (const group of groups) {
           console.log(chalk.bold(`\n${group.title}`));
-          renderRoutineRows({ jobs: group.jobs, scheduler, overdueSet, link, now });
+          renderRoutineRows({ jobs: group.jobs, scheduler, overdueSet, link, now, local: group.local });
+        }
+        if (groups.some((group) => !group.local)) {
+          console.log();
+          console.log(chalk.gray('  Last Status is per-device: rows under another device show "-" — read it there with: agents routines list --device <name>'));
         }
       }
 
@@ -686,6 +726,7 @@ export function registerRoutinesCommands(program: Command): void {
     .option('--state-to <name>', 'Linear current-state filter for --on linear:<event> (e.g. Plan)')
     .option('--state-from <name>', 'Linear previous-state filter for --on linear:<event> (e.g. Triage)')
     .option('--end-at <iso>', 'Stop firing on or after this ISO 8601 timestamp (e.g., "2026-12-31T23:59:00Z"); routine auto-disables.')
+    .option('--no-catchup', 'Do not run this routine late if its fire is missed (daemon down/asleep). The miss is still recorded. For routines whose value expires with their slot, e.g. a 9am brief.')
     .option('--disabled', 'Create the routine but keep it paused (enable later with resume)')
     .option('--resume <sessionId>', 'At fire time, resume this existing session id (via `agents run <agent> --resume`) instead of starting fresh — the actual session reopens with full context and the prompt becomes its next turn. Powers self-scheduled wake-ups (e.g. /hibernate). Requires --agent claude or codex; runs un-sandboxed (the session store lives in the real home, not the job overlay).')
     .option('--json', 'Emit machine-readable JSON with the created routine id and status')
@@ -811,6 +852,7 @@ export function registerRoutinesCommands(program: Command): void {
           ...(hostStrategy ? { hostStrategy } : {}),
           ...(options.runCwd ? { remoteCwd: options.runCwd } : {}),
           ...(runOnce ? { runOnce: true } : {}),
+          ...(options.catchup === false ? { catchup: false } : {}),
           ...(options.endAt ? { endAt: options.endAt } : {}),
           ...(options.resume ? { resume: options.resume } : {}),
         };
@@ -1211,47 +1253,42 @@ export function registerRoutinesCommands(program: Command): void {
 
   routinesCmd
     .command('catchup')
-    .description('Run any routines that missed their last scheduled fire (e.g. because your laptop was off). Detached — runs in the background under the scheduler.')
-    .option('--dry-run', 'List overdue routines without running them')
+    .description('Run any routines that missed their last scheduled fire on demand. The daemon already does this every 5 minutes — use this to force a pass now. Detached: runs in the background under the scheduler.')
+    .option('--dry-run', 'Record the misses and list them without running anything')
     .action(async (options) => {
       const overdue = detectOverdueJobs();
       if (overdue.length === 0) {
-        console.log(chalk.gray('No overdue routines.'));
+        console.log(chalk.gray('No missed fires.'));
         return;
       }
 
-      console.log(chalk.bold(`${overdue.length} overdue routine(s):\n`));
+      console.log(chalk.bold(`${overdue.length} missed fire(s):\n`));
       for (const job of overdue) {
         const last = job.lastRanAt ? job.lastRanAt.toLocaleString() : 'never';
         console.log(`  ${chalk.cyan(job.name)} — missed ${chalk.gray(job.expectedAt.toLocaleString())}, last ran ${chalk.gray(last)}`);
       }
 
-      if (options.dryRun) {
-        console.log(chalk.gray('\n(dry run — no jobs triggered)'));
-        return;
-      }
-
       // Need the daemon alive so spawned jobs are monitored and meta.json is
       // finalized. Start it if it isn't already running.
-      if (!isDaemonRunning()) {
+      if (!options.dryRun && !isDaemonRunning()) {
         const started = startDaemon();
         if (started.pid) {
           console.log(chalk.gray(`\nStarted scheduler (PID: ${started.pid}) so catchup runs are monitored.`));
         }
       }
 
-      console.log(chalk.bold('\nTriggering catchup runs...'));
-      for (const job of overdue) {
-        const config = readJob(job.name);
-        if (!config) {
-          console.log(`  ${job.name} → ${chalk.red('config not found')}`);
-          continue;
-        }
-        try {
-          const meta = await executeJobDetached(config);
-          console.log(`  ${job.name} → ${chalk.green('started')} (run: ${meta.runId}, PID: ${meta.pid ?? 'n/a'})`);
-        } catch (err) {
-          console.log(`  ${job.name} → ${chalk.red('failed to start')}: ${(err as Error).message}`);
+      console.log(chalk.bold(options.dryRun ? '\nRecording misses...' : '\nTriggering catchup runs...'));
+      const outcomes = await runCatchup({ overdue, dryRun: options.dryRun });
+      for (const o of outcomes) {
+        if (o.result === 'ran') {
+          console.log(`  ${o.name} → ${chalk.green('started')} (run: ${o.runId})`);
+        } else if (o.result === 'recorded') {
+          const why = options.dryRun ? 'dry run' : 'catchup: false';
+          console.log(`  ${o.name} → ${chalk.yellow('recorded as missed')} (${why})`);
+        } else if (o.result === 'claimed-elsewhere') {
+          console.log(`  ${o.name} → ${chalk.gray('already claimed by the scheduler')}`);
+        } else {
+          console.log(`  ${o.name} → ${chalk.red('failed to start')}: ${o.error}`);
         }
       }
       console.log(chalk.gray('\nTrack progress with: agents routines runs <name>'));
@@ -1382,6 +1419,7 @@ export function registerRoutinesCommands(program: Command): void {
       // is the concise view. Falls back to a bounded stdout tail when no report
       // was extracted (e.g. the run failed before finishing).
       const statusColor = run.status === 'completed' ? chalk.green
+        : run.status === 'missed' ? chalk.magenta
         : run.status === 'failed' || run.status === 'timeout' ? chalk.red
         : chalk.yellow;
       console.log(chalk.bold(name) + chalk.gray(`  run ${runId}`));

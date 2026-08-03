@@ -24,7 +24,7 @@ import * as path from 'path';
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-devices-registry-test-'));
 process.env.AGENTS_DEVICES_DIR = path.join(TEST_HOME, 'devices');
 
-const { upsertDevice, loadDevices, getDevice, removeDevice, deviceRole, isControlDevice } =
+const { upsertDevice, loadDevices, getDevice, removeDevice, deviceRole, isControlDevice, isDialableDevice } =
   await import('./registry.js');
 
 function registryPath(): string {
@@ -132,5 +132,99 @@ describe('device registry corruption surfacing', () => {
   it('returns {} only when the file truly does not exist', async () => {
     expect(fs.existsSync(registryPath())).toBe(false);
     expect(await loadDevices()).toEqual({});
+  });
+});
+
+/**
+ * Which devices a cross-fleet sweep dials. Both directions below were live on a
+ * real 17-device fleet and together made `agents sessions --resolve` unable to
+ * ever answer: the manual box holding the transcript was skipped, while two
+ * sleeping boxes were dialed and their timeouts read as doubt.
+ */
+describe('isDialableDevice', () => {
+  it('dials a manually-registered device that the live probe reached', () => {
+    // The real yosemite-s1: address.via 'manual', so it never gets a tailscale
+    // peer entry and `tailscale.online` is permanently undefined. Gating on
+    // `online === true` hid every session on that box from the fleet sweep.
+    expect(isDialableDevice({
+      name: 'yosemite-s1',
+      platform: 'linux',
+      address: { via: 'manual', dnsName: 'yosemite-s1.tail1a85a1.ts.net' },
+      reachability: { reachable: true, via: 'manual', checkedAt: '2026-08-03T15:30:39.876Z' },
+    } as any)).toBe(true);
+  });
+
+  it('a failed probe never removes a peer the snapshot still calls online', () => {
+    // The probe runs on a short SSH budget and produces false negatives on a
+    // congested tailnet — it was observed calling the LOCAL machine unreachable.
+    // Excluding on it would hide sessions on healthy boxes, so a negative probe
+    // must not override a snapshot that says online.
+    expect(isDialableDevice({
+      name: 'mac-mini',
+      platform: 'macos',
+      address: { via: 'tailscale', dnsName: 'mac-mini.tail1a85a1.ts.net' },
+      tailscale: { online: true },
+      reachability: { reachable: false, via: 'tailscale', checkedAt: '2026-08-03T15:39:43.427Z' },
+    } as any)).toBe(true);
+  });
+
+  it('a positive probe rescues a device whose snapshot says offline', () => {
+    expect(isDialableDevice({
+      name: 'woken-box',
+      platform: 'linux',
+      address: { via: 'tailscale', dnsName: 'woken-box.tail1a85a1.ts.net' },
+      tailscale: { online: false },
+      reachability: { reachable: true, via: 'tailscale', checkedAt: '2026-08-03T15:39:43.427Z' },
+    } as any)).toBe(true);
+  });
+
+  it('keeps dialing a manual device even after a probe says it is unreachable', () => {
+    // The deliberate cost of "a probe may only ADD a peer": a manual device has
+    // no tailscale block to say offline, so a confirmed-dead one stays in the
+    // sweep until it is removed from the registry. Pinned so the tradeoff is a
+    // decision on record, not an accident.
+    expect(isDialableDevice({
+      name: 'dead-manual',
+      platform: 'linux',
+      address: { via: 'manual', dnsName: 'dead-manual.ts.net' },
+      reachability: { reachable: false, via: 'manual', checkedAt: '2026-08-03T15:39:43.504Z' },
+    } as any)).toBe(true);
+  });
+
+  it('skips a box both signals call offline', () => {
+    expect(isDialableDevice({
+      name: 'gpu-box',
+      platform: 'linux',
+      address: { via: 'tailscale', dnsName: 'gpu-box.tail1a85a1.ts.net' },
+      tailscale: { online: false },
+      reachability: { reachable: false, via: 'tailscale', checkedAt: '2026-08-03T15:39:43.427Z' },
+    } as any)).toBe(false);
+  });
+
+  it('falls back to the tailscale snapshot when no probe has run yet', () => {
+    expect(isDialableDevice({
+      name: 'never-probed',
+      platform: 'linux',
+      address: { via: 'tailscale', dnsName: 'never-probed.ts.net' },
+      tailscale: { online: true },
+    } as any)).toBe(true);
+    expect(isDialableDevice({
+      name: 'never-probed-offline',
+      platform: 'linux',
+      address: { via: 'tailscale', dnsName: 'never-probed-offline.ts.net' },
+      tailscale: { online: false },
+    } as any)).toBe(false);
+  });
+
+  it('treats a never-probed manual device as unknown-not-offline, so it is still dialed', () => {
+    // Matches ssh.ts renderDeviceTable and Factory's isDeviceOnline: offline only
+    // when a tailscale block SAYS offline. Without this, a manual device stays
+    // invisible to the sweep until something happens to probe it — the same class
+    // of bug as yosemite-s1 above, just before the first probe.
+    expect(isDialableDevice({
+      name: 'unknown-manual',
+      platform: 'linux',
+      address: { via: 'manual', dnsName: 'unknown-manual.ts.net' },
+    } as any)).toBe(true);
   });
 });

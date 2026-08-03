@@ -72,4 +72,25 @@ describe('dedupeBySession', () => {
     const out = dedupeBySession([bare, { ...bare, pid: 10 }]);
     expect(out).toHaveLength(2);
   });
+
+  it('keeps two id-less tmux panes in the same cwd DISTINCT via paneId (the anti-collapse fix)', () => {
+    // Two born-unidentifiable non-Claude panes sharing a cwd. Without paneId they
+    // would fold under anonymousWorkerKey (kind+context+cwd) into one ×2 row —
+    // exactly the misattribution we are fixing. paneId keeps them two rows.
+    const pane = (paneId: string): ActiveSession => ({
+      context: 'terminal', kind: 'codex', cwd: '/repo', paneId,
+    } as ActiveSession);
+    const out = dedupeBySession([pane('%1'), pane('%2')]);
+    expect(out).toHaveLength(2);
+    expect(out.map((s) => s.pidCount)).toEqual([1, 1]);
+  });
+
+  it('still folds by sessionId when the id resolved (paneId is ignored once identified)', () => {
+    const withId = (paneId: string): ActiveSession => ({
+      context: 'terminal', kind: 'claude', cwd: '/repo', sessionId: 's1', paneId,
+    } as ActiveSession);
+    const out = dedupeBySession([withId('%1'), withId('%2')]);
+    expect(out).toHaveLength(1);
+    expect(out[0].pidCount).toBe(2);
+  });
 });

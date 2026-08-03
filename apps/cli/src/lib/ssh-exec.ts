@@ -162,10 +162,19 @@ export function sshExec(target: string, remoteCmd: string, opts: SshExecOptions 
 /**
  * Async variant of {@link sshExec}. Same hardened argv composition, but uses
  * child_process.spawn so fleet fan-outs can probe multiple hosts concurrently.
+ *
+ * A timeout-bearing call uses a fresh ssh connection (`multiplex: false`) even
+ * when the caller requests multiplexing: a control-master outlives the local
+ * client, so killing the local ssh process on timeout would leave the remote
+ * command running. With a direct connection, terminating the local child tears
+ * down the remote side (RUSH-2114).
  */
 export function sshExecAsync(target: string, remoteCmd: string, opts: SshExecOptions = {}): Promise<SshExecResult> {
   assertValidSshTarget(target);
-  const mux = opts.multiplex === false ? [] : controlOpts();
+  // Control-master connections defeat local timeouts — the master keeps the
+  // remote command alive after we kill the client. Force a fresh connection
+  // whenever the caller asked for a timeout so the timeout actually stops work.
+  const mux = opts.multiplex === false || opts.timeoutMs ? [] : controlOpts();
   const args = [...sshConnectOpts(mux, opts.hostKeyOpts), ...(opts.extraSshArgs ?? []), target, remoteCmd];
   return new Promise((resolve) => {
     const child = spawn('ssh', args, {

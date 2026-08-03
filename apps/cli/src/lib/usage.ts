@@ -27,6 +27,11 @@ import {
   isKeychainBackendOverridden,
 } from './secrets/index.js';
 import { resolveClaudeSetupToken } from './claude-account-token.js';
+import {
+  formatBackoffRemaining,
+  noteUsageRateLimited,
+  usageRateLimitedUntil,
+} from './usage-backoff.js';
 import { getCacheDir } from './state.js';
 import type { AgentId } from './types.js';
 
@@ -76,6 +81,14 @@ export function usageRejectedError(agent: string, status: number): string {
  * token: the caller renders a stale snapshot as confirmed. The cause is carried
  * verbatim because these are the failures a user cannot otherwise see.
  */
+/**
+ * The provider told us to back off and we are still inside that window, so this
+ * read made no request at all. Distinct from `usageRejectedError(agent, 429)`,
+ * which is the 429 itself: this one says we are *honouring* it.
+ */
+export function usageThrottledError(agent: string, untilMs: number): string {
+  return `${agent} rate-limited this machine — not retrying for ${formatBackoffRemaining(untilMs)}.`;
+}
 export function usageUnreachableError(agent: string, cause?: unknown): string {
   const detail = cause instanceof Error ? cause.message : typeof cause === 'string' ? cause : '';
   return detail
@@ -707,6 +720,13 @@ async function getClaudeUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
       return { snapshot: null, error: usageExpiredCredentialError('Claude') };
     }
 
+    // Honour a live Retry-After rather than re-arming the penalty (see
+    // usage-backoff.ts). No request at all while the window is open.
+    const throttledUntil = usageRateLimitedUntil('claude');
+    if (throttledUntil) {
+      return { snapshot: null, error: usageThrottledError('Claude', throttledUntil) };
+    }
+
     const response = await fetch(CLAUDE_USAGE_URL, {
       method: 'GET',
       headers: {
@@ -719,9 +739,11 @@ async function getClaudeUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
     });
 
     if (!response.ok) {
+      if (response.status === 429) {
+        noteUsageRateLimited('claude', response.headers.get('retry-after'));
+      }
       return { snapshot: null, error: usageRejectedError('Claude', response.status) };
     }
-
     const data = await response.json() as ClaudeUsageResponse;
     const windows = normalizeClaudeWindows(data);
     if (windows.length === 0) {
@@ -809,6 +831,13 @@ async function getKimiUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
       return { snapshot: null, error: usageExpiredCredentialError('Kimi') };
     }
 
+    // Honour a live Retry-After rather than re-arming the penalty (see
+    // usage-backoff.ts). No request at all while the window is open.
+    const throttledUntil = usageRateLimitedUntil('kimi');
+    if (throttledUntil) {
+      return { snapshot: null, error: usageThrottledError('Kimi', throttledUntil) };
+    }
+
     const response = await fetch(KIMI_USAGES_URL, {
       method: 'GET',
       headers: {
@@ -821,9 +850,11 @@ async function getKimiUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
     // 401/403 => expired token, 404 => no Kimi For Coding subscription. Either
     // way there are no bars to draw, and the status is what tells them apart.
     if (!response.ok) {
+      if (response.status === 429) {
+        noteUsageRateLimited('kimi', response.headers.get('retry-after'));
+      }
       return { snapshot: null, error: usageRejectedError('Kimi', response.status) };
     }
-
     const data = await response.json() as KimiUsagesResponse;
     const windows = normalizeKimiWindows(data);
     if (windows.length === 0) {
@@ -974,6 +1005,13 @@ async function getDroidUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
       return { snapshot: null, error: usageExpiredCredentialError('Droid') };
     }
 
+    // Honour a live Retry-After rather than re-arming the penalty (see
+    // usage-backoff.ts). No request at all while the window is open.
+    const throttledUntil = usageRateLimitedUntil('droid');
+    if (throttledUntil) {
+      return { snapshot: null, error: usageThrottledError('Droid', throttledUntil) };
+    }
+
     const response = await fetch(DROID_USAGE_URL, {
       method: 'GET',
       headers: {
@@ -985,9 +1023,11 @@ async function getDroidUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
 
     // 401 => revoked/expired token. No bars to draw, and the status says why.
     if (!response.ok) {
+      if (response.status === 429) {
+        noteUsageRateLimited('droid', response.headers.get('retry-after'));
+      }
       return { snapshot: null, error: usageRejectedError('Droid', response.status) };
     }
-
     const data = await response.json() as DroidBillingLimitsResponse;
     const windows = normalizeDroidWindows(data);
     if (windows.length === 0) {
@@ -1049,6 +1089,11 @@ export async function probeClaudeStatus(home?: string, cliVersion?: string | nul
   if (claudeAccessTokenNeedsRefresh(oauth?.expiresAt ?? null)) {
     return { status: null, token: 'expired' };
   }
+  // A probe is a request like any other: while the provider's Retry-After
+  // window is open, report the throttle from the recorded state instead of
+  // firing again and re-arming it (usage-backoff.ts). This 3-min-cadence
+  // probe is what created the loop it now respects.
+  if (usageRateLimitedUntil('claude')) return { status: 429, token: 'present' };
   try {
     const response = await fetch(CLAUDE_USAGE_URL, {
       method: 'GET',
@@ -1060,6 +1105,9 @@ export async function probeClaudeStatus(home?: string, cliVersion?: string | nul
       },
       signal: AbortSignal.timeout(8000),
     });
+    if (response.status === 429) {
+      noteUsageRateLimited('claude', response.headers.get('retry-after'));
+    }
     return { status: response.status, token: 'present' };
   } catch (err) {
     return { status: null, token: 'present', error: err instanceof Error ? err.message : String(err) };
@@ -1081,12 +1129,22 @@ export async function probeKimiStatus(home?: string): Promise<ProviderProbe> {
   }
   if (!accessToken) return { status: null, token: 'missing' };
   if (expiresAt !== null && Date.now() / 1000 >= expiresAt) return { status: null, token: 'expired' };
+  // A probe is a request like any other: while the provider's Retry-After
+  // window is open, report the throttle from the recorded state instead of
+  // firing again and re-arming it (usage-backoff.ts). This 3-min-cadence probe
+  // is what created the loop it now respects. It sits AFTER the local
+  // missing/expired checks — as in probeClaudeStatus and probeDroidStatus — so
+  // a genuinely broken credential is never misreported as merely throttled.
+  if (usageRateLimitedUntil('kimi')) return { status: 429, token: 'present' };
   try {
     const response = await fetch(KIMI_USAGES_URL, {
       method: 'GET',
       headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
       signal: AbortSignal.timeout(8000),
     });
+    if (response.status === 429) {
+      noteUsageRateLimited('kimi', response.headers.get('retry-after'));
+    }
     return { status: response.status, token: 'present' };
   } catch (err) {
     return { status: null, token: 'present', error: err instanceof Error ? err.message : String(err) };
@@ -1100,12 +1158,20 @@ export async function probeDroidStatus(home?: string): Promise<ProviderProbe> {
   if (typeof accessToken !== 'string' || !accessToken) return { status: null, token: 'missing' };
   const exp = decodeJwtPayload(accessToken)?.exp;
   if (typeof exp === 'number' && Date.now() / 1000 >= exp) return { status: null, token: 'expired' };
+  // A probe is a request like any other: while the provider's Retry-After
+  // window is open, report the throttle from the recorded state instead of
+  // firing again and re-arming it (usage-backoff.ts). This 3-min-cadence
+  // probe is what created the loop it now respects.
+  if (usageRateLimitedUntil('droid')) return { status: 429, token: 'present' };
   try {
     const response = await fetch(DROID_USAGE_URL, {
       method: 'GET',
       headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
       signal: AbortSignal.timeout(8000),
     });
+    if (response.status === 429) {
+      noteUsageRateLimited('droid', response.headers.get('retry-after'));
+    }
     return { status: response.status, token: 'present' };
   } catch (err) {
     return { status: null, token: 'present', error: err instanceof Error ? err.message : String(err) };
@@ -2106,6 +2172,11 @@ async function getCursorUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
     }
 
     const url = `${CURSOR_USAGE_URL}?user=${encodeURIComponent(creds.sub)}`;
+    const throttledUntil = usageRateLimitedUntil('cursor');
+    if (throttledUntil) {
+      return { snapshot: null, error: usageThrottledError('Cursor', throttledUntil) };
+    }
+
     const response = await fetch(url, {
       method: 'GET',
       headers: {
@@ -2117,7 +2188,12 @@ async function getCursorUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
 
     // 401/redirect => revoked/expired session. No bars to draw, and the status
     // says why.
-    if (!response.ok) return { snapshot: null, error: usageRejectedError('Cursor', response.status) };
+    if (!response.ok) {
+      if (response.status === 429) {
+        noteUsageRateLimited('cursor', response.headers.get('retry-after'));
+      }
+      return { snapshot: null, error: usageRejectedError('Cursor', response.status) };
+    }
 
     const data = (await response.json()) as CursorUsageResponse;
     return {

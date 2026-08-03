@@ -3,7 +3,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { claudeAccessTokenNeedsRefresh, claudeUsageAccessTokenNoRefresh, loadClaudeOauth, saveClaudeOauth, getClaudeKeychainService, swrWindowMsFor, getUsageInfo, formatUsageSummary, usageNoCredentialError, usageExpiredCredentialError, usageRejectedError } from './usage.js';
+import { claudeAccessTokenNeedsRefresh, claudeUsageAccessTokenNoRefresh, loadClaudeOauth, saveClaudeOauth, getClaudeKeychainService, swrWindowMsFor, getUsageInfo, formatUsageSummary, usageNoCredentialError, usageExpiredCredentialError, usageRejectedError, probeClaudeStatus, probeKimiStatus } from './usage.js';
+import { noteUsageRateLimited, setUsageBackoffDirForTest } from './usage-backoff.js';
 import { setKeychainToken, setKeychainBackendForTest, secretsKeychainItem, type KeychainBackend } from './secrets/index.js';
 import { writeBundle, keychainRef, bundleItemStore } from './secrets/bundles.js';
 import { _resetFileStoreForTest } from './secrets/filestore.js';
@@ -449,5 +450,180 @@ describe('a usage read that THROWS is still a failed read', () => {
     expect(usage.snapshot).toBeNull();
     expect(usage.error).toBeTruthy();
     expect(usage.error).toContain('Kimi');
+  });
+});
+
+describe('a recorded Retry-After actually suppresses the read', () => {
+  /** Keychain backend holding exactly what the test seeds — nothing else. */
+  class MemBackend implements KeychainBackend {
+    store = new Map<string, string>();
+    has(item: string) { return this.store.has(item); }
+    get(item: string) {
+      const v = this.store.get(item);
+      if (v === undefined) throw new Error(`missing ${item}`);
+      return v;
+    }
+    set(item: string, value: string) { this.store.set(item, value); }
+    delete(item: string) { return this.store.delete(item); }
+    list(prefix: string) { return [...this.store.keys()].filter((k) => k.startsWith(prefix)); }
+  }
+
+  // End-to-end through the real getUsageInfo path: with a penalty recorded, the
+  // read must return the throttled error WITHOUT making a request. That is the
+  // whole fix — the old code fired again 3 minutes into a 45-minute window and
+  // re-armed the penalty, so the box never recovered and its cache froze.
+  let home: string;
+  let dir: string;
+  let prevPath: string | null;
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-throttle-'));
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-throttle-cache-'));
+    prevPath = setUsageBackoffDirForTest(dir);
+  });
+
+  afterEach(() => {
+    setUsageBackoffDirForTest(prevPath);
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('short-circuits the usage read while the window is open', async () => {
+    // A HEALTHY, unexpired credential — this is the case that matters. The
+    // credential checks ahead of the guard make no request, so they run first
+    // and correctly win for a home that has none; the guard exists to stop the
+    // request that a good credential would otherwise make into a live penalty.
+    const mem = new MemBackend();
+    const prevBackend = setKeychainBackendForTest(mem);
+    try {
+      setKeychainToken(
+        getClaudeKeychainService(home),
+        JSON.stringify({
+          claudeAiOauth: { accessToken: 'tok-fresh', refreshToken: 'r', expiresAt: Date.now() + 60 * 60 * 1000 },
+        })
+      );
+      // The exact header the endpoint sent on yosemite-s1.
+      noteUsageRateLimited('claude', '2678');
+
+      const usage = await getUsageInfo('claude', { home });
+
+      expect(usage.snapshot).toBeNull();
+      expect(usage.error).toContain('rate-limited this machine');
+      expect(usage.error).toContain('not retrying');
+    } finally {
+      setKeychainBackendForTest(prevBackend);
+    }
+  });
+
+  it('lets the read through once the window has passed', async () => {
+    noteUsageRateLimited('claude', '1', { now: Date.now() - 60_000 });
+
+    const usage = await getUsageInfo('claude', { home });
+
+    // Falls through to the ordinary credential check for this empty home.
+    expect(usage.error).toBe(usageNoCredentialError('Claude'));
+  });
+});
+
+describe('the throttle guard is exercised beyond Claude', () => {
+  // The review that forced this: with only Claude tested, two real bugs got
+  // through — Cursor's error `return` was left unconditional by a braceless
+  // `if` (so every 200 would have failed), and Kimi's probe guard sat AHEAD of
+  // its missing/expired credential checks, misreporting a broken credential as
+  // merely throttled.
+  //
+  // What this actually covers is Claude and Kimi end-to-end, not all four. Droid
+  // and Cursor are guarded and recorded identically (see the four
+  // usageRateLimitedUntil / noteUsageRateLimited pairs in usage.ts) but are not
+  // driven here: Droid's credential is AES-GCM encrypted with an on-disk key, so
+  // there is no cheap way to seed one without mocking, which this repo does not
+  // do. Naming that is better than a describe() title implying coverage that is
+  // not present.
+  let home: string;
+  let dir: string;
+  let prevPath: string | null;
+  let prevRealHome: string | undefined;
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-throttle-all-'));
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-throttle-all-cache-'));
+    prevPath = setUsageBackoffDirForTest(dir);
+    // resolveKimiCredentialPath falls back to the ACTIVE home when the
+    // per-version one is absent (sign-in is account-global), so without this the
+    // "missing credential" case finds the developer's real Kimi login and the
+    // test passes for the wrong reason. AGENTS_REAL_HOME is the seam the code
+    // itself reads.
+    prevRealHome = process.env.AGENTS_REAL_HOME;
+    process.env.AGENTS_REAL_HOME = home;
+  });
+
+  afterEach(() => {
+    setUsageBackoffDirForTest(prevPath);
+    if (prevRealHome === undefined) delete process.env.AGENTS_REAL_HOME;
+    else process.env.AGENTS_REAL_HOME = prevRealHome;
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** A real, unexpired Kimi credential at the path the resolver looks for. */
+  const seedKimi = () => {
+    const credDir = path.join(home, '.kimi-code', 'credentials');
+    fs.mkdirSync(credDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(credDir, 'kimi-code.json'),
+      JSON.stringify({ access_token: 'tok-fresh', expires_at: Math.floor(Date.now() / 1000) + 3600 }),
+    );
+  };
+
+  it('suppresses the Kimi usage read while its window is open', async () => {
+    seedKimi();
+    noteUsageRateLimited('kimi', '2678');
+
+    const usage = await getUsageInfo('kimi', { home });
+
+    expect(usage.snapshot).toBeNull();
+    expect(usage.error).toContain('Kimi rate-limited this machine');
+  });
+
+  it('does not let a throttle mask a missing Kimi credential in the probe', async () => {
+    // The misplacement the reviewer caught: with the guard ahead of the local
+    // checks, this returned 429/present and the account read as merely
+    // throttled rather than unconfigured.
+    noteUsageRateLimited('kimi', '2678');
+
+    const probe = await probeKimiStatus(home);
+
+    expect(probe.token).toBe('missing');
+    expect(probe.status).toBeNull();
+  });
+
+  it('reports the throttle from the Kimi probe when the credential IS good', async () => {
+    seedKimi();
+    noteUsageRateLimited('kimi', '2678');
+
+    const probe = await probeKimiStatus(home);
+
+    // 429 without a request: the recorded window is the answer.
+    expect(probe.status).toBe(429);
+    expect(probe.token).toBe('present');
+  });
+
+  it('does not let a throttle mask a missing Claude credential in the probe', async () => {
+    noteUsageRateLimited('claude', '2678');
+
+    const probe = await probeClaudeStatus(home);
+
+    expect(probe.token).toBe('missing');
+  });
+
+  it("keeps one provider's penalty out of another's read", async () => {
+    seedKimi();
+    noteUsageRateLimited('claude', '2678');
+
+    const usage = await getUsageInfo('kimi', { home });
+
+    // Kimi is free; it fails on its own terms (a live call it cannot complete
+    // in the test environment), never with Claude's throttle message.
+    expect(usage.error ?? '').not.toContain('rate-limited this machine');
   });
 });

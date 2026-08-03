@@ -43,7 +43,7 @@ import { getCliVersion } from '../lib/version.js';
 import { resolveHost } from '../lib/hosts/registry.js';
 import { sshExecAsync } from '../lib/ssh-exec.js';
 import { sshTargetFor } from '../lib/hosts/types.js';
-import { machineId } from '../lib/session/sync/config.js';
+import { machineId, normalizeHost } from '../lib/session/sync/config.js';
 import chalk from 'chalk';
 import { checkAllClis, collectTeamsDoctorData, type TeamsDoctorEntry } from '../lib/teams/agents.js';
 import { AGENTS, ALL_AGENT_IDS, resolveAgentName, formatAgentError, getAccountInfo, type AccountInfo } from '../lib/agents.js';
@@ -198,7 +198,9 @@ async function resolveFleetTargets(opts: DoctorOptions): Promise<FleetTarget[]> 
   const registry = await loadDevices();
   const localName = machineId();
   return Object.values(registry)
-    .filter((d) => d.name.toLowerCase() !== localName)
+    // Normalize names so zion/ZION/zion.local all match machineId() and we never
+    // self-SSH the local box during fleet probes (RUSH-2114).
+    .filter((d) => normalizeHost(d.name) !== localName)
     // Control devices (a cockpit) never run agents — skip them in the fleet
     // fan-out (an explicit --device <name> still resolves above).
     .filter((d) => !isControlDevice(d))

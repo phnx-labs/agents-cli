@@ -32,42 +32,39 @@ describe('forkHostForSession', () => {
     expect(forkHostForSession(session({ id: 'remote-1', machine: 'yosemite-s0' }), 'zion')).toBe('yosemite-s0');
   });
 
-  test('an untagged row is local — only the local index emits rows without a machine', () => {
+  test('an untagged row falls back to the browsed device, then this machine', () => {
     expect(forkHostForSession(session({ id: 'old-1' }), 'zion')).toBeUndefined();
+    expect(forkHostForSession(session({ id: 'old-1' }), 'zion', 'mac-mini')).toBe('mac-mini');
     expect(sessionMachine(session({ id: 'old-1', machine: '  ' }), 'zion')).toBe('zion');
+    expect(sessionMachine(session({ id: 'old-1', machine: '  ' }), 'zion', 'mac-mini')).toBe('mac-mini');
   });
 });
 
 describe('buildSessionBrowserRows', () => {
-  test('groups by machine with this machine first and remote devices alphabetical', () => {
+  test('renders one group for the explicitly browsed device', () => {
     const rows = buildSessionBrowserRows(
       [
-        session({ id: 'r-1', machine: 'yosemite-s1' }),
-        session({ id: 'l-1', machine: 'zion' }),
-        session({ id: 'm-1', machine: 'mac-mini' }),
+        session({ id: 'r-1', machine: 'mac-mini' }),
+        session({ id: 'old-r-2', machine: undefined }),
       ],
-      { localMachine: 'zion' },
+      { localMachine: 'zion', browsedMachine: 'mac-mini' },
     );
-    expect(rows.filter(r => r.kind === 'group').map(r => r.machine)).toEqual([
-      'zion',
-      'mac-mini',
-      'yosemite-s1',
+    expect(rows.filter(r => r.kind === 'group').map(r => r.machine)).toEqual(['mac-mini']);
+    expect(sessionRows(rows).map(r => [r.session.id, r.machine, r.remote])).toEqual([
+      ['r-1', 'mac-mini', true],
+      ['old-r-2', 'mac-mini', true],
     ]);
-    expect(rows.find(r => r.kind === 'group')?.label).toBe('zion · this machine');
   });
 
-  test('marks off-machine rows remote so the launch carries --device', () => {
+  test('marks the browsed machine remote so the launch carries --device', () => {
     const rows = sessionRows(buildSessionBrowserRows(
-      [session({ id: 'l-1', machine: 'zion' }), session({ id: 'r-1', machine: 'mac-mini' })],
-      { localMachine: 'zion' },
+      [session({ id: 'r-1', machine: 'mac-mini' })],
+      { localMachine: 'zion', browsedMachine: 'mac-mini' },
     ));
-    expect(rows.map(r => [r.session.id, r.remote])).toEqual([
-      ['l-1', false],
-      ['r-1', true],
-    ]);
+    expect(rows.map(r => [r.session.id, r.remote])).toEqual([['r-1', true]]);
   });
 
-  test('orders each machine newest first', () => {
+  test('orders the browsed device newest first', () => {
     const rows = sessionRows(buildSessionBrowserRows(
       [
         session({ id: 'older', machine: 'zion', timestamp: '2026-08-01T00:00:00.000Z' }),
@@ -79,34 +76,18 @@ describe('buildSessionBrowserRows', () => {
     expect(rows.map(r => r.session.id)).toEqual(['newest', 'middle', 'older']);
   });
 
-  test('pins the current session to the top of its own machine, not the whole list', () => {
+  test('pins the current session to the top of the browsed device list', () => {
     const rows = buildSessionBrowserRows(
       [
-        session({ id: 'remote-new', machine: 'mac-mini', timestamp: '2026-08-03T09:00:00.000Z' }),
         session({ id: 'local-new', machine: 'zion', timestamp: '2026-08-03T08:00:00.000Z' }),
         session({ id: 'current-old', machine: 'zion', timestamp: '2026-07-01T00:00:00.000Z' }),
       ],
       { localMachine: 'zion', currentSessionId: 'current-old' },
     );
-    const local = sessionRows(rows).filter(r => r.machine === 'zion');
+    const local = sessionRows(rows);
     expect(local.map(r => r.session.id)).toEqual(['current-old', 'local-new']);
     expect(local[0].current).toBe(true);
     expect(local[0].label.startsWith('$(pinned) ')).toBe(true);
-    // The pin never reorders machines: mac-mini still sorts after this machine.
-    expect(rows.filter(r => r.kind === 'group').map(r => r.machine)).toEqual(['zion', 'mac-mini']);
-  });
-
-  test('caps each machine independently so one busy box cannot crowd out another', () => {
-    const rows = sessionRows(buildSessionBrowserRows(
-      [
-        session({ id: 'z-1', machine: 'zion', timestamp: '2026-08-03T05:00:00.000Z' }),
-        session({ id: 'z-2', machine: 'zion', timestamp: '2026-08-03T04:00:00.000Z' }),
-        session({ id: 'z-3', machine: 'zion', timestamp: '2026-08-03T03:00:00.000Z' }),
-        session({ id: 'm-1', machine: 'mac-mini', timestamp: '2026-08-03T02:00:00.000Z' }),
-      ],
-      { localMachine: 'zion', limitPerMachine: 2 },
-    ));
-    expect(rows.map(r => r.session.id)).toEqual(['z-1', 'z-2', 'm-1']);
   });
 
   test('skips rows with no session id rather than emitting an unforkable entry', () => {
@@ -159,10 +140,11 @@ describe('picked row -> launch command', () => {
 
     const command = buildAgentLaunchCommand(
       request.agentKey, 'new-id', undefined, undefined, undefined,
-      request.strategy, undefined, request.host, request.local, picked.cwd,
+      request.strategy, undefined, { host: request.host, local: request.local, remoteCwd: picked.cwd },
     );
     expect(command).toContain("--host 'yosemite-s1'");
-    expect(command).toContain("--cwd '/home/muqsit/src/github.com/muqsitnawaz/agents-cli'");
+    expect(command).toContain("--remote-cwd '/home/muqsit/src/github.com/muqsitnawaz/agents-cli'");
+    expect(command).not.toContain(" --cwd ");
     expect(request.prompt).toBe('/continue sess-remote');
   });
 
@@ -178,10 +160,10 @@ describe('picked row -> launch command', () => {
 
     const command = buildAgentLaunchCommand(
       request.agentKey, 'new-id', undefined, undefined, undefined,
-      request.strategy, undefined, request.host, request.local, undefined,
+      request.strategy, undefined, { host: request.host, local: request.local },
     );
     expect(command).not.toContain('--host');
-    expect(command).not.toContain('--cwd');
+    expect(command).not.toContain('--remote-cwd');
   });
 });
 

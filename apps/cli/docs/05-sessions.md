@@ -114,6 +114,7 @@ not an append-only JSONL; Gemini and Cursor still full-parse each changed file.
   "version": "2.1.112",
   "account": "you@example.com",
   "timestamp": "2026-04-22T13:37:14.047Z",
+  "lastActivity": "2026-04-22T13:49:36.121Z",
   "project": "agents",
   "cwd": "/Users/you/src/github.com/phnx-labs/agents",
   "gitBranch": "main",
@@ -138,7 +139,8 @@ Fields:
 | `origin` | `cli` or `routine` | Routine rows are archived from a run directory and can be filtered with `--routine` |
 | `routineName` | Routine name | Present when `origin` is `routine` |
 | `routineRunId` | Routine run id | Present when `origin` is `routine`; `agents sessions <runId>` resolves it |
-| `timestamp` | Session start | ISO 8601 |
+| `timestamp` | Session start | ISO 8601 — the creation time, never overwritten by later activity |
+| `lastActivity` | Last message timestamp, else file mtime, else `timestamp` | The recency signal the listing sorts by; see [Two time fields per row](#two-time-fields-per-row) |
 | `project` | Derived from `cwd` | Basename of the working directory |
 | `cwd` | Recorded at spawn | Normalized absolute path |
 | `gitBranch` | Recorded at spawn | `null` outside a repo |
@@ -152,6 +154,36 @@ Fields:
 | `spawnedTeam` | The team this session CREATED, read off its `agents teams create/add` command at scan time | `null` for the ~everything that never ran one; the inverse of `isTeamOrigin` |
 | `teamOrigin` | For a teammate: its `{team, handle, mode, parentSessionId}`, read from the teammate's `meta.json` | `null` for a non-teammate; `team`/`parentSessionId` absent on records predating their capture, or once the 7-day teams cleanup removes the dir |
 | `plan` | Last `ExitPlanMode` plan markdown (Claude sessions only) | `null` when the session never entered plan-review |
+
+### Two time fields per row
+
+The trailing time cell of a listing row carries **both** ends of the session —
+when it was created and when it was last active:
+
+```
+03f1c81a  claude  2.1.219  agents-cli  Optimize agent workflow performance   3d → 1 hour ago
+019fc035  codex   0.146.0  muqsit      Debug hook adders in codex run           31 min ago
+```
+
+Last activity is the field the listing sorts by, so it stays on the right, in
+the long form (`1 hour ago`); creation is the compact age to its left (`3d`).
+Reading them together also gives the span — a row that says `3d → 1 hour ago` is
+a session that has been alive for three days and was touched an hour ago, which
+one label alone cannot express.
+
+Two cases collapse to a single field:
+
+- **The session ran for under a minute.** Both halves would name the same
+  moment, so only last activity renders (`sessionAgeParts`,
+  `src/lib/session/relative-time.ts`).
+- **The terminal is too narrow.** The creation age is dropped before the topic
+  is squeezed below its 16-column floor — the same fits-or-drops rule the model
+  column uses. A row never wraps to buy a second time field.
+
+The interactive picker's detail pane spells the same facts out as
+`created X ago · last active Y ago · lasted Z`, and reads them from the indexed
+`SessionMeta` when there is no local transcript to parse — so a **remote** or
+not-yet-indexed session reports its timing too, instead of showing none.
 
 ## SessionEvent (detail output)
 
@@ -172,7 +204,30 @@ parse in the picker): compact `✓done/total · current step` in the picker
 preview (`Todos:` line), the flat listing's `doing` cell, and `--active` /
 cross-machine rows (interactive, headless, teams, and sub-agent sessions share
 the same path). The picker preview also shows the originating user prompt and a
-`Dirs:` line of directories touched.
+width-capped `Dirs:` line of directories touched.
+
+Both renders of a session — the picker quick preview and the full summary —
+share one extraction module (`src/lib/session/highlights.ts`) for the "what did
+this session use and produce" lines, so they never disagree:
+
+- `Skills:` / `Skills (N)` — skills invoked (the `Skill` tool, plugin skills
+  included), repeat counts folded (`teams ×2`).
+- `Hooks:` / `Hooks (N)` — hooks that fired, from Claude's `hook_success` /
+  `hook_error` attachment records (other harnesses don't record firings, so the
+  section simply doesn't render for them).
+- `Links:` / `Links (N)` — URLs harvested from the conversation, classified
+  (Linear/Jira/GitHub/GitLab), deduped by label, clickable (OSC 8).
+- `Artifacts:` / `Artifacts (N)` — documents the session CREATED: anything under
+  `.agents/artifacts|plans|reports/`, plus other `*.md`/`*.html` creations.
+- `Repos:` (picker only) — repos worked in, from a bounded `.git` walk-up over
+  the touched paths (relative paths resolve against the session cwd only).
+- `Errors:` (picker) — the same failure tally the full summary shows.
+
+The full summary's `Plan` section renders the checklist with status markers
+(`[x]` / `[>]` / `[ ]`) alongside any ExitPlanMode plan text. Changes/Dirs
+labels collapse `.agents/worktrees/<slug>` prefixes to `⧉ <slug>/…` and drop
+shell junk (`2>&1`, unexpanded `$VAR` paths), `node_modules`, and agents-cli
+internal archives at the source (`digest.ts:isNoisePath`).
 
 ```json
 {
@@ -300,6 +355,16 @@ it is indistinguishable from a session that isn't running:
   (`mergeLiveIntoPool`, `src/commands/sessions-browser.ts`). Rows keyed by session id
   merge with their indexed row; a session with no id yet is keyed by cloud task id or
   `machine:pid`, so two of them never collapse into one.
+- **A tmux agent pane is one row per session, resolved from its own name.** Each
+  shared-socket pane is named `ag-<agent>-<shortid>`, where `<shortid>` is the first 8
+  chars of the session UUID. `resolvePaneIdentity` (`src/lib/session/active.ts`) reads
+  the id back from that name — resolved to the full UUID via the `short_id` index in a
+  single batched query per scan (`findSessionsByShortIds`) — so a detached pane whose
+  durable identity records (session-meta JSON, pid registry, SessionStart-hook index)
+  have aged out is still attributed to its own session and stays `focus`-able. When no
+  id resolves, the pane keeps its own row keyed on the tmux pane id and never borrows a
+  co-located sibling's transcript — so N agents in one directory are N rows, not one row
+  wearing a stranger's id.
 - **The host column names the program the session runs in** — `codium`, `ghostty`,
   `tmux`, and `tmux→ghostty` when a tmux session is currently being watched through
   another app. A tmux row with no attached client stays a bare `tmux`, which is what
@@ -382,14 +447,37 @@ cases a live pull can't reach: a machine that is **offline / asleep / decommissi
   on-demand `--host` reads and explicit export/import; reach for sync only when you want
   a passive always-on mirror (further below).
 
-### Resolving a full session id across the fleet
+### Resolving a session id across the fleet
+
+For automation that needs session metadata without parsing or rendering transcript
+events, use the explicit resolver:
+
+```
+agents sessions --resolve d3470b57 --json
+agents sessions --resolve "recap resolver" --json
+```
+
+It reads the indexed `SessionMeta` rows on each machine and emits a one-element JSON
+array containing only `id`, `shortId`, `agent`, `origin`, timestamps, `project`, `version`,
+`label`, `topic`, and `machine` when exactly one logical session matches. Transcript
+paths/content (`filePath`, `plan`), account, cwd, cost, and token fields stay on the
+owning machine. A missing/empty selector or ambiguous ID prefix/keyword query exits 1.
+Fleet peers receive a versioned, metadata-only `--resolve-safe-v1` request, so a peer
+carrying an older unsafe resolver rejects the request before serializing a row. If any
+selected peer is unreachable, returns malformed JSON, cannot list devices, times out, or rejects the protocol because it runs
+an older CLI, the command emits no JSON, names the peer(s), and exits 2; it never makes
+a unique/no-match decision from partial fleet state.
+`--local` keeps the metadata lookup on this machine.
+`--agent <agent[@version]>` and `--project <name>` narrow the lookup on every peer;
+`--all` is implicit because historical resolution must not inherit the SSH login
+directory or recent-session window.
 
 `--host` names *which* box to look on. When you already have a full session id but
-**not** the box, `agents sessions <uuid>` finds it for you: a UUID is treated as an
-identifier, so on a local miss the CLI fans the **id lookup** out to the online fleet
-(the same `gatherRemoteList` SSH sweep the listing uses) and renders the session's
-summary from the machine that holds it — delegated to that peer via `runOnPeer`, since
-its transcript and agent binary live there.
+**not** the box, `agents sessions <uuid>` finds it for you. A unique short prefix works
+the same way: `agents sessions d3470b57` fans the **id lookup** out to the online fleet
+(the same `gatherRemoteList` SSH sweep the listing uses), resolves the prefix to its full
+id, and renders the session's summary from a machine that holds it. Rendering is
+delegated to that peer via `runOnPeer`, since its transcript and agent binary live there.
 
 ```
 # You have the id from a log or a teammate; you don't know the machine
@@ -402,12 +490,42 @@ agents sessions d3470b57-2af6-4c11-b1de-3fab94f43603
   into later sessions), so a fuzzy match would surface unrelated sessions as "matches."
   There is no FTS/content fallback for an id-shaped query: it is found by id or reported
   not found, locally and on every peer.
-- **Same id on more than one machine** surfaces a labeled conflict so you can pick one
-  with `--device <host>`.
+- **Ambiguous prefixes** fail with every matching full id and its machine labels; pass a
+  longer prefix to select one.
+- **Synced copies are one logical session.** The same full id reported by several machines
+  does not make a prefix ambiguous; the CLI renders one of those equivalent copies.
+- **Keywords keep the existing search semantics.** Each peer unions indexed metadata
+  matches (label, topic, project, account, path, agent, and version) with that peer's
+  transcript-content FTS hits. The parent preserves those peer-owned matches and applies
+  the uniqueness check across the fleet.
 - **`--local`** restricts the lookup to this machine — no cross-machine sweep — for
   scripts that want deterministic local behavior.
 - A peer already answering a parent's sweep (`AGENTS_SESSIONS_LOCAL=1`) never re-fans-out,
   so a fleet resolve can't recurse.
+- The parent uses the versioned hidden `--resolve-safe-v1` peer protocol. An older peer,
+  malformed peer JSON, or an unreadable device registry makes the sweep incomplete;
+  the command emits no JSON and exits 2 instead of deciding from partial results.
+- **Which peers get dialed** is `isDialableDevice`
+  ([`src/lib/devices/registry.ts`](../src/lib/devices/registry.ts)) — a **union** of the
+  two liveness signals, where either one saying "go" is enough:
+  - No `tailscale` block at all is **unknown-not-offline**, so the peer is dialed. A
+    device registered with `address.via: "manual"` never gets a Tailscale peer entry, so
+    its `online` is permanently `undefined`; the old strict `online === true` test
+    skipped it forever and made every session on that box unresolvable from elsewhere.
+    This matches `ssh.ts` `renderDeviceTable` and Factory's `isDeviceOnline`, so the
+    picker and the sweep agree on who exists.
+  - A **positive** live SSH probe (`DeviceProfile.reachability`, RUSH-1965) additionally
+    rescues a device whose snapshot says offline.
+  - A **failed** probe never removes a peer. The probe runs on a short SSH budget and
+    returns false negatives on a congested tailnet — it has been observed marking the
+    local machine unreachable — so excluding on it would hide sessions on healthy boxes.
+    Dialing a box that is actually asleep costs one `ConnectTimeout`.
+
+  Note the interaction with the exit-2 rule above: a peer that is dialed but does not
+  answer still counts as unreachable, and `--resolve` then refuses to decide rather than
+  return a possibly-non-unique match. A fleet with a permanently-sleeping registered
+  device will therefore keep reporting a partial resolve until that device is removed
+  from the registry or wakes up.
 
 ## Forking (branch a conversation)
 

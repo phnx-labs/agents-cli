@@ -389,6 +389,28 @@ The command surface (bare `sessions [query]`, `tail`, `sync`, `resume`, `focus`,
   `sessions.serialize.test.ts:76-115`); `tail --json` MUST pass raw JSONL through
   one event per line (`commands/sessions-tail.ts:229-232`); `sync --json`,
   `inject --json`, `migrations --json` emit their documented shapes.
+- **SES-IF-2a (MUST).** `sessions --resolve <selector> --json` MUST resolve a full
+  id, unique id prefix, or keyword query from indexed `SessionMeta` rows without
+  parsing or rendering transcript events. It MUST search the online fleet unless
+  `--local` is set; `--agent` and `--project` MUST narrow every peer. Exactly one
+  logical session MUST emit a one-element safe metadata array containing only
+  `id`, `shortId`, `agent`, `origin`, `timestamp`, `lastActivity`, `project`,
+  `version`, `label`, `topic`, and `machine`; transcript-local fields including
+  `filePath` and `plan` MUST NOT leave the owning machine. Synced copies sharing
+  the same full id MUST count as one logical session. A missing selector or more
+  than one logical match or an empty selector MUST emit no JSON, list the
+  failure/ambiguity on stderr, and exit 1; ambiguity MUST include every matching
+  full id and machine. Fleet peers MUST receive the versioned `--resolve-safe-v1`
+  protocol so an older unsafe peer rejects before serializing a row. An incomplete
+  peer sweep (including malformed successful output, device-registry failure, or an
+  older peer rejecting that protocol) MUST emit no JSON, MUST NOT decide
+  unique/no-match from partial rows, and MUST exit 2 with the failed source(s) on
+  stderr
+  (`commands/sessions.ts` `serializeResolvedSessionsJson`, `resolveSessionMetadata`,
+  `metadataResolveOutcome`, `fleetCandidatesByQuery`,
+  `metadataResolveForwardedArgs`; tests
+  `commands/sessions.test.ts`,
+  `lib/session/remote-list.test.ts`).
 - **SES-IF-3 (MUST).** The export **bundle format** is NDJSON, `kind`
   `agents-session-bundle`, `version` 1; parse MUST reject a wrong kind/version;
   per-record `hash`/`size` are always over **plaintext** for byte-exact dedup;
@@ -688,7 +710,7 @@ access control (that is 1Password/Vault; this tool is device-local first).
 
 - **SEC-11 (MUST).** `agents secrets list` and every internal metadata scan MUST
   complete with no Touch ID prompt and MUST print metadata only, never values
-  (`commands/secrets.ts:900-903`; SEC-4).
+  (`commands/secrets.ts:991`; SEC-4).
 - **SEC-12 (MUST).** Value reads MUST be batched so a bundle costs at most one
   Touch ID prompt, not one per key (`commands/secrets.ts:1073-1076`;
   `lib/secrets/bundles.ts:772-776,1262-1273`).

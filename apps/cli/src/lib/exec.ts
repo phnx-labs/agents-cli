@@ -499,6 +499,16 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
     result.AGENT_SESSION_ID = options.sessionId;
     result.AGENTS_SESSION_ID = options.sessionId;
   }
+  // Lineage edge: the child's parent is THIS process's session (the spawner), so a
+  // sub-agent's events carry a walkable edge back to who spawned it. The event floor
+  // (events.ts::resolveProvenance) reads AGENTS_PARENT_SESSION_ID and stamps it on
+  // every event the child emits. `options.sessionId` is the CHILD's id, so read the
+  // spawner from the live env; guard a same-session resume from naming itself parent.
+  // Local-spawn scope here; forwarding it across the `--host` SSH hop is Phase 4.
+  const spawnerSessionId = process.env.AGENTS_SESSION_ID || process.env.AGENT_SESSION_ID;
+  if (spawnerSessionId && spawnerSessionId !== options.sessionId) {
+    result.AGENTS_PARENT_SESSION_ID = spawnerSessionId;
+  }
   result.AGENTS_RUNTIME = resolveInteractive(options) ? 'terminal' : 'headless';
   // So activity / feed posts stamp the right harness without re-detecting.
   if (options.agent) {
