@@ -3415,12 +3415,15 @@ export interface FleetSessionCandidate {
  * session therefore stay one candidate even when several machines report them;
  * distinct ids sharing a prefix remain distinct ambiguity candidates. */
 export function fleetCandidatesByQuery(rows: SessionMeta[], query: string): FleetSessionCandidate[] {
-  // `rows` already are the complete output of the remote sweep. Disable the
-  // canonical resolver's local-index fallback so a local row cannot be mistaken
-  // for a peer result when no remote machine matched.
-  const resolved = resolveSessionQuery(rows, query, { indexFallback: false });
+  // An id selector must still be prefix-filtered defensively against older peers
+  // returning content mentioners. Keyword rows, however, were already matched by
+  // each peer's own FTS index; the parent does not own that transcript/index and
+  // must not re-run metadata-only filtering that could discard a content hit.
+  const matched = looksLikeSessionId(query)
+    ? resolveSessionQuery(rows, query, { indexFallback: false }).matches
+    : rows;
   const byId = new Map<string, Map<string, SessionMeta>>();
-  for (const session of resolved.matches) {
+  for (const session of matched) {
     const machine = session.machine;
     if (!machine) continue; // an untagged row can't be routed back to a peer
     const logicalId = session.id.toLowerCase();
@@ -3438,6 +3441,27 @@ export function fleetCandidatesByQuery(rows: SessionMeta[], query: string): Flee
   });
 }
 
+/** Resolve against indexed metadata first, then preserve the existing keyword
+ * behavior by widening to this machine's FTS content index only on a metadata miss. */
+function resolveIndexedMetadataRows(indexed: SessionMeta[], selector: string): SessionMeta[] {
+  const resolution = resolveSessionQuery(indexed, selector, { indexFallback: false });
+  if (resolution.matches.length > 0 || resolution.byId) return resolution.matches;
+  return Array.from(searchContentIndex(indexed, selector).values())
+    .sort((a, b) => (b._bm25Score ?? 0) - (a._bm25Score ?? 0));
+}
+
+/** Fixed peer argv for the metadata resolver. Scope flags compose identically on
+ * every host; `--all` removes the SSH login cwd/time window, not agent/project filters. */
+export function metadataResolveForwardedArgs(
+  selector: string,
+  scope: Pick<SessionFilterOptions, 'agent' | 'project'>,
+): string[] {
+  const args = ['sessions', '--resolve', selector, '--json', '--all', '--local'];
+  if (scope.agent) args.push('--agent', scope.agent);
+  if (scope.project) args.push('--project', scope.project);
+  return args;
+}
+
 /** Resolve one selector to indexed metadata across the fleet without reading or
  * rendering transcript events. A peer answering the parent sweep returns every
  * local candidate; the parent performs the one logical-session uniqueness gate. */
@@ -3449,7 +3473,7 @@ async function resolveSessionMetadata(
   const localMachine = machineId();
   const includeLocal = !scope.hosts?.length || shouldIncludeLocal(scope.hosts, localMachine);
   const indexed = includeLocal ? applyScopeFilters(querySessions(), scope) : [];
-  const localMatches = resolveSessionQuery(indexed, selector, { indexFallback: false }).matches
+  const localMatches = resolveIndexedMetadataRows(indexed, selector)
     .map(session => ({ ...session, machine: session.machine || localMachine }));
 
   // A peer is already inside gatherRemoteList. Return all local candidates so
@@ -3462,7 +3486,7 @@ async function resolveSessionMetadata(
   let remoteMatches: SessionMeta[] = [];
   if (scope.local !== true) {
     try {
-      const forwarded = ['sessions', '--resolve', selector, '--json', '--all', '--local'];
+      const forwarded = metadataResolveForwardedArgs(selector, scope);
       const result = await deps.gatherRemoteList(forwarded, scope.hosts);
       remoteMatches = result.sessions;
     } catch {

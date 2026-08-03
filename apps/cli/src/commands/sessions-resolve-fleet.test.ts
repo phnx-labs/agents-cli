@@ -12,7 +12,7 @@
  * actually return over SSH.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { fleetCandidatesByQuery, resolveSessionAcrossFleet, shouldFanOutForId, type FleetResolveDeps } from './sessions.js';
+import { fleetCandidatesByQuery, metadataResolveForwardedArgs, resolveSessionAcrossFleet, shouldFanOutForId, type FleetResolveDeps } from './sessions.js';
 type SessionMeta = import('../lib/session/types.js').SessionMeta;
 
 const UUID = 'd3470b57-2af6-4c11-b1de-3fab94f43603';
@@ -132,11 +132,9 @@ describe('fleetCandidatesByQuery — canonical id resolution grouped by logical 
   });
 
   it('keeps keyword resolution canonical while collapsing synced copies', () => {
-    const sibling = 'eeee4444-ffff-4c11-b1de-3fab94f43603';
     const rows = [
       row(UUID, 'yosemite-s0', { topic: 'session recap resolver' }),
       row(UUID, 'mac-mini', { topic: 'session recap resolver' }),
-      row(sibling, 'bismas-macbook-pro', { topic: 'unrelated release work' }),
     ];
     const candidates = fleetCandidatesByQuery(rows, 'recap resolver');
     expect(candidates).toHaveLength(1);
@@ -151,6 +149,24 @@ describe('fleetCandidatesByQuery — canonical id resolution grouped by logical 
       row(sibling, 'mac-mini', { topic: 'recap resolver docs' }),
     ];
     expect(fleetCandidatesByQuery(rows, 'recap resolver').map(candidate => candidate.id)).toEqual([UUID, sibling]);
+  });
+
+  it('retains a remote content-only keyword hit already matched by the peer FTS index', () => {
+    const contentHit = row(UUID, 'yosemite-s0', {
+      topic: 'metadata contains none of the selector terms',
+      _matchedTerms: ['recap', 'resolver'],
+      _bm25Score: 42,
+    });
+    expect(fleetCandidatesByQuery([contentHit], 'recap resolver').map(candidate => candidate.id)).toEqual([UUID]);
+  });
+});
+
+describe('metadataResolveForwardedArgs — peer scope parity', () => {
+  it('forwards agent and project filters while widening only cwd/time scope', () => {
+    expect(metadataResolveForwardedArgs('recap resolver', { agent: 'codex@0.146.0', project: 'agents-cli' })).toEqual([
+      'sessions', '--resolve', 'recap resolver', '--json', '--all', '--local',
+      '--agent', 'codex@0.146.0', '--project', 'agents-cli',
+    ]);
   });
 });
 

@@ -396,6 +396,9 @@ It reads the indexed `SessionMeta` rows on each machine and emits a one-element 
 array when exactly one logical session matches. A missing selector or an ambiguous ID
 prefix/keyword query exits non-zero; ambiguity output lists every full ID and machine.
 `--local` keeps the metadata lookup on this machine.
+`--agent <agent[@version]>` and `--project <name>` narrow the lookup on every peer;
+`--all` is implicit because historical resolution must not inherit the SSH login
+directory or recent-session window.
 
 `--host` names *which* box to look on. When you already have a full session id but
 **not** the box, `agents sessions <uuid>` finds it for you. A unique short prefix works
