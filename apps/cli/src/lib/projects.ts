@@ -20,6 +20,7 @@
  */
 
 import * as fs from 'fs';
+import * as path from 'path';
 import * as yaml from 'yaml';
 import { getProjectsDir } from './state.js';
 import { safeJoin } from './paths.js';
@@ -266,4 +267,74 @@ export function projectBasePath(def: ProjectDef, forRemote: boolean): string | u
   const base = def.defaultPath ?? def.root;
   if (!base) return undefined;
   return forRemote ? base : expandLocalHome(base);
+}
+
+/** A project plus its repo root as an absolute local path, for cwd matching. */
+interface ProjectRootAbs {
+  name: string;
+  /** Absolute, normalized repo root (`root` preferred, else `defaultPath`). */
+  abs: string;
+}
+
+function projectRootsAbs(defs: ProjectDef[]): ProjectRootAbs[] {
+  const out: ProjectRootAbs[] = [];
+  for (const def of defs) {
+    const raw = def.root ?? def.defaultPath;
+    if (!raw) continue;
+    out.push({ name: def.name, abs: path.resolve(expandLocalHome(raw)) });
+  }
+  return out;
+}
+
+/** True when `child` is `parent` or nested under it (path-segment aware). */
+function isUnder(child: string, parent: string): boolean {
+  if (child === parent) return true;
+  const withSep = parent.endsWith(path.sep) ? parent : parent + path.sep;
+  return child.startsWith(withSep);
+}
+
+/**
+ * Which defined project a session belongs to, derived from its working
+ * directory. A session whose `cwd` sits inside a project's repo root (or a
+ * worktree under it) is a member; the LONGEST matching root wins so a nested
+ * project beats its parent. Returns undefined when no definition contains the
+ * path. This is the join key for the progress rollup — it needs no persisted
+ * column and works cross-machine because transcript `cwd` already syncs.
+ */
+export function projectNameForCwd(cwd: string | undefined, defs: ProjectDef[]): string | undefined {
+  if (!cwd) return undefined;
+  const abs = path.resolve(expandLocalHome(cwd));
+  let best: string | undefined;
+  let bestLen = -1;
+  for (const { name, abs: root } of projectRootsAbs(defs)) {
+    if (isUnder(abs, root) && root.length > bestLen) {
+      best = name;
+      bestLen = root.length;
+    }
+  }
+  return best;
+}
+
+/**
+ * Resolve a defined project's ref to a working directory, mirroring
+ * `buildProjectPath`'s `forRemote` contract (a home-relative `~/…` for the
+ * remote shell to expand, an absolute local path otherwise). A `@worktree`
+ * lands under the repo ROOT's `.agents/worktrees/`, not the `defaultPath`
+ * subdir — worktrees are per-repo, not per-focus. Returns undefined when the
+ * definition carries no `root`/`defaultPath` (caller falls back to convention).
+ */
+export function resolveDefinedProjectPath(
+  def: ProjectDef,
+  worktree: string | undefined,
+  forRemote: boolean,
+): string | undefined {
+  if (worktree) {
+    const rootRaw = def.root ?? def.defaultPath;
+    if (!rootRaw) return undefined;
+    const wt = `${rootRaw}/.agents/worktrees/${worktree}`;
+    return forRemote ? wt : path.resolve(expandLocalHome(wt));
+  }
+  const base = projectBasePath(def, forRemote);
+  if (!base) return undefined;
+  return forRemote ? base : path.resolve(base);
 }

@@ -10,6 +10,8 @@ import {
   removeProjectDef,
   validateProjectDef,
   projectBasePath,
+  resolveDefinedProjectPath,
+  projectNameForCwd,
   type ProjectDef,
 } from './projects.js';
 
@@ -116,5 +118,45 @@ describe('projectBasePath', () => {
   it('falls back to root, and undefined when neither set', () => {
     expect(projectBasePath({ name: 'x', root: '~/r' }, true)).toBe('~/r');
     expect(projectBasePath({ name: 'x' }, true)).toBeUndefined();
+  });
+});
+
+describe('resolveDefinedProjectPath', () => {
+  const def: ProjectDef = { name: 'rush', root: '~/src/rush', defaultPath: '~/src/rush/apps/web' };
+  it('no worktree → defaultPath, ~ kept for remote', () => {
+    expect(resolveDefinedProjectPath(def, undefined, true)).toBe('~/src/rush/apps/web');
+    expect(resolveDefinedProjectPath(def, undefined, false)).toBe(path.join(HOME, 'src/rush/apps/web'));
+  });
+  it('worktree hangs off the repo ROOT, not the defaultPath subdir', () => {
+    expect(resolveDefinedProjectPath(def, 'fix', true)).toBe('~/src/rush/.agents/worktrees/fix');
+    expect(resolveDefinedProjectPath(def, 'fix', false)).toBe(
+      path.join(HOME, 'src/rush/.agents/worktrees/fix'),
+    );
+  });
+  it('undefined when the definition has no root/defaultPath', () => {
+    expect(resolveDefinedProjectPath({ name: 'bare' }, undefined, true)).toBeUndefined();
+    expect(resolveDefinedProjectPath({ name: 'bare' }, 'wt', true)).toBeUndefined();
+  });
+});
+
+describe('projectNameForCwd', () => {
+  const defs: ProjectDef[] = [
+    { name: 'rush', root: '~/src/rush' },
+    { name: 'rush-web', root: '~/src/rush/apps/web' }, // nested — must win over rush
+    { name: 'other', root: '~/src/other' },
+  ];
+  it('matches a cwd inside a project root, longest (nested) wins', () => {
+    expect(projectNameForCwd(path.join(HOME, 'src/rush/packages/api'), defs)).toBe('rush');
+    expect(projectNameForCwd(path.join(HOME, 'src/rush/apps/web/components'), defs)).toBe('rush-web');
+    expect(projectNameForCwd(path.join(HOME, 'src/rush'), defs)).toBe('rush');
+  });
+  it('matches a worktree under the project root', () => {
+    expect(projectNameForCwd(path.join(HOME, 'src/rush/.agents/worktrees/fix'), defs)).toBe('rush');
+  });
+  it('undefined for a cwd outside every project, or a sibling-prefix false match', () => {
+    expect(projectNameForCwd(path.join(HOME, 'src/unrelated'), defs)).toBeUndefined();
+    // ~/src/rush-extra must NOT match ~/src/rush (segment-aware, not string prefix)
+    expect(projectNameForCwd(path.join(HOME, 'src/rush-extra/x'), defs)).toBeUndefined();
+    expect(projectNameForCwd(undefined, defs)).toBeUndefined();
   });
 });

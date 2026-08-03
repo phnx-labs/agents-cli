@@ -10,7 +10,9 @@ import {
   parseProjectRef,
   buildProjectPath,
   inferProjectRoot,
+  resolveProjectRef,
 } from './project-root.js';
+import { writeProjectDef } from './projects.js';
 
 const HOME = process.env.HOME ?? os.homedir();
 
@@ -83,6 +85,31 @@ describe('buildProjectPath', () => {
   it('rejects an empty slug', () => {
     expect(() => buildProjectPath('~/src', '@wt', true)).toThrow(/Invalid --project/);
   });
+});
+
+describe('resolveProjectRef — definition first', () => {
+  let projDir: string;
+  beforeAll(() => {
+    projDir = fs.mkdtempSync(path.join(os.tmpdir(), 'proj-def-'));
+    process.env.AGENTS_PROJECTS_DIR = projDir;
+    writeProjectDef({ name: 'acme', root: '~/src/acme', defaultPath: '~/src/acme/apps/api' });
+  });
+  afterAll(() => {
+    delete process.env.AGENTS_PROJECTS_DIR;
+    fs.rmSync(projDir, { recursive: true, force: true });
+  });
+
+  it('a defined project resolves to its defaultPath (forRemote keeps ~)', async () => {
+    expect(await resolveProjectRef('acme', { forRemote: true })).toBe('~/src/acme/apps/api');
+  });
+  it('a defined project @worktree resolves under the repo root', async () => {
+    expect(await resolveProjectRef('acme@fix', { forRemote: true })).toBe(
+      '~/src/acme/.agents/worktrees/fix',
+    );
+  });
+  // The convention fallback (undefined slug → <root>/<slug>) is covered by the
+  // buildProjectPath tests above; exercising it through resolveProjectRef would
+  // couple to the machine's cached projectRoot, so it is not re-tested here.
 });
 
 describe('inferProjectRoot', () => {
