@@ -111,7 +111,9 @@ rush  ·  23 agents  ·  68% plan
 - **`linear`** counts issues by state TYPE (completed → done, started → in progress)
   in the Linear project bound via `linear.projectId` — set it with
   `agents projects link <name> --linear`. Best-effort: no credential, offline, or a
-  slow API (>8s) just omits the line, and `--no-remote` skips it too.
+  slow API (>8s) just omits the line, and `--no-remote` skips it too. `total`
+  includes canceled issues; the fetch caps at 2,500 issues and a capped count
+  renders as a lower bound (`2500+ done`), never as the complete total.
 - **`proof`** counts `artifact.created` activity milestones whose cwd is inside the
   project (`lib/project-status.ts`).
 - `--window <days>` sets the merged-PR / artifact window (default 7).

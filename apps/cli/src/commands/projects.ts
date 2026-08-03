@@ -129,7 +129,7 @@ function renderCard(
   if (remote?.latestRelease) ships.push(remote.latestRelease.tag);
   if (ships.length) console.log(`  ${chalk.dim('ships')}    ${ships.join(' · ')}`);
   if (linear) {
-    console.log(`  ${chalk.dim('linear')}   ${linear.done}/${linear.total} done · ${linear.inProgress} in progress`);
+    console.log(`  ${chalk.dim('linear')}   ${linear.done}/${linear.total}${linear.truncated ? '+' : ''} done · ${linear.inProgress} in progress`);
   }
   if (r && r.tickets.length) {
     console.log(`  ${chalk.dim('tickets')}  ${r.tickets.slice(0, 8).join(' · ')}${r.tickets.length > 8 ? ' …' : ''}`);
@@ -543,8 +543,12 @@ export function registerProjectsCommands(program: Command): void {
         process.exit(1);
       }
       const p = pick.project;
-      // Preserve every other field — load, set linear, write back.
-      def.linear = { projectId: p.id };
+      // Preserve every other field — load, set linear, write back. Keep a
+      // previously linked url when the new CLI row carries none.
+      if (def.linear?.projectId && def.linear.projectId !== p.id) {
+        console.log(chalk.gray(`  replacing previous Linear link (${def.linear.projectId})`));
+      }
+      def.linear = { ...def.linear, projectId: p.id };
       if (p.url) def.linear.url = p.url;
       writeProjectDef(def);
       console.log(chalk.green(`${def.name} → Linear project "${p.name}" (${p.id})${p.url ? ` ${p.url}` : ''}`));

@@ -38,6 +38,11 @@ export function normalizeProjectKey(s: string): string {
  * Find the Linear project that best matches a repo slug or folder name.
  * Exact normalized match first, then a containment fallback (either direction),
  * so "agents-cli-web" still suggests "Agents CLI" when no exact peer exists.
+ *
+ * Kept for parity with the Factory original — the `link` command uses
+ * {@link pickLinearProject} instead: this one returns the FIRST match (silent
+ * on duplicate names), which is fine for a UI suggestion but never for a write
+ * path.
  */
 export function matchLinearProject(
   slugOrName: string,

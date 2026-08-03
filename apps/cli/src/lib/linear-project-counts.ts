@@ -13,6 +13,10 @@
  * skips it (it's network). The API key resolves through the same chain the rest
  * of the stack uses: $LINEAR_API_KEY → macOS Keychain (`resolveLinearApiKey`)
  * → the linear-cli config (`~/.linear-cli/config.json` `apiKey`).
+ *
+ * Paging is capped (10 × 250 issues) so a pathological project can't burn the
+ * budget; a capped fetch reports `truncated: true` and the card renders the
+ * total as a lower bound (`2500+ done`), never as the complete count.
  */
 
 import * as fs from 'fs';
@@ -35,6 +39,11 @@ export interface LinearProjectCounts {
   total: number;
   /** Issues in a `started`-type state. */
   inProgress: number;
+  /**
+   * True when the page cap cut the fetch short — `total` is then a LOWER
+   * bound (rendered `2500+`), never presented as the complete count.
+   */
+  truncated?: boolean;
 }
 
 /** The GraphQL response shape this module consumes (recorded for the tests). */
@@ -80,41 +89,62 @@ function resolveApiKey(): string | null {
  * Fetch issue counts for one Linear project, paging `issues` filtered by
  * project id. One shared AbortController bounds the WHOLE paged fetch at ~8s;
  * any failure (no key, network, API error, abort) returns undefined so the
- * card just omits the line.
+ * card just omits the line. `fetchPage` is injectable for tests — the
+ * accumulator (cursor hand-off, cap) is the risky logic, not the HTTP.
  */
-export async function fetchLinearProjectCounts(projectId: string): Promise<LinearProjectCounts | undefined> {
-  const apiKey = resolveApiKey();
-  if (!apiKey) return undefined;
+export async function fetchLinearProjectCounts(
+  projectId: string,
+  fetchPage: (projectId: string, after: string | undefined, signal: AbortSignal) => Promise<LinearIssuesResponse | undefined> = fetchLinearIssuesPage,
+): Promise<LinearProjectCounts | undefined> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
     const all: Array<{ state?: { type?: string } | null }> = [];
     let after: string | undefined;
-    for (let page = 0; page < MAX_PAGES; page++) {
-      const res = await fetch(LINEAR_API, {
-        method: 'POST',
-        headers: { Authorization: apiKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query:
-            'query($p:ID!, $after:String){ issues(filter:{ project:{ id:{ eq:$p } } }, first:' +
-            PAGE_SIZE +
-            ', after:$after){ nodes{ state{ type } } pageInfo{ hasNextPage endCursor } } }',
-          variables: { p: projectId, after: after ?? null },
-        }),
-        signal: ctrl.signal,
-      });
-      if (!res.ok) return undefined;
-      const json = (await res.json()) as { data?: LinearIssuesResponse; errors?: unknown[] };
-      if (json.errors?.length || !json.data) return undefined;
-      all.push(...(json.data.issues?.nodes ?? []));
-      const pi = json.data.issues?.pageInfo;
+    let truncated = false;
+    for (let page = 0; ; page++) {
+      const data = await fetchPage(projectId, after, ctrl.signal);
+      if (!data) return undefined;
+      all.push(...(data.issues?.nodes ?? []));
+      const pi = data.issues?.pageInfo;
       if (!pi?.hasNextPage || !pi.endCursor) break;
+      if (page + 1 >= MAX_PAGES) {
+        // The cap cut the fetch short — total is a lower bound, say so.
+        truncated = true;
+        break;
+      }
       after = pi.endCursor;
     }
-    return countsFromIssuesResponse({ issues: { nodes: all } });
+    return { ...countsFromIssuesResponse({ issues: { nodes: all } }), ...(truncated ? { truncated } : {}) };
   } catch {
     return undefined;
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** One real GraphQL page; undefined on any HTTP/API-level failure. */
+async function fetchLinearIssuesPage(
+  projectId: string,
+  after: string | undefined,
+  signal: AbortSignal,
+): Promise<LinearIssuesResponse | undefined> {
+  const apiKey = resolveApiKey();
+  if (!apiKey) return undefined;
+  const res = await fetch(LINEAR_API, {
+    method: 'POST',
+    headers: { Authorization: apiKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      query:
+        'query($p:ID!, $after:String){ issues(filter:{ project:{ id:{ eq:$p } } }, first:' +
+        PAGE_SIZE +
+        ', after:$after){ nodes{ state{ type } } pageInfo{ hasNextPage endCursor } } }',
+      variables: { p: projectId, after: after ?? null },
+    }),
+    signal,
+  });
+  if (!res.ok) return undefined;
+  const json = (await res.json()) as { data?: LinearIssuesResponse; errors?: unknown[] };
+  if (json.errors?.length || !json.data) return undefined;
+  return json.data;
 }
