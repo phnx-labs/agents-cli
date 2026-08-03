@@ -48,7 +48,7 @@ guarantee, the reference for the mechanism.
 
 ## Contents
 
-- [Sessions](#sessions) — `agents sessions`: discovery, parsing, preview, metadata, lifecycle, sync
+- [Sessions](#sessions) — `agents sessions`: discovery, parsing, preview, metadata, lifecycle, export/import
 - [Secrets](#secrets) — `agents secrets`: storage & materialization boundaries, sharing, no-noise
 - [Agent execution](#agent-execution) — `agents run`: the one execution engine, env, isolation, fallback, dispatch
 - [Watchdog](#watchdog) — `agents watchdog`: detect idle agents, decide nudge/skip, deliver to the exact split
@@ -83,7 +83,7 @@ across the fleet, and cross-platform**.
 **In scope:** discovery + harness parsing, the SQLite/FTS index, the preview and
 metadata contract, the list/active/overview display, session lifecycle
 (active/idle/waiting, detach/attach/fork/migrate), and cross-machine reach
-(`--host` live query, export/import bundles, R2+CRDT sync).
+(`--host` live query, export/import bundles).
 
 **Out of scope (non-goals):** writing transcripts (that is the harnesses
 themselves + `packages/session-tracker`); an identity/authorization layer beyond
@@ -272,9 +272,10 @@ SSH access (§7); rendering sessions that no harness produced.
   `lib/session/favorites.ts`), because the index is a rebuildable cache and a
   favorite is not derivable from a transcript. A malformed or absent store MUST
   degrade to "nothing is favorited", never throw into the listing path (test
-  `favorites.test.ts`). Favorites are per-machine: the store is NOT in the sync
-  manifest (`lib/session/sync/agents.ts` syncs `.history/backups/`), and any doc
-  claiming otherwise is drift.
+  `favorites.test.ts`). Favorites are per-machine: the store is NOT carried in
+  an export bundle or the import mirror (`lib/session/sync/agents.ts` defines
+  the `.history/backups/` layout those write into), and any doc claiming
+  otherwise is drift.
 - **SES-19 (MUST).** Detach/attach presence MUST be **derived, never asserted**:
   the record only says "this session was detached"; `background` vs `parked` is
   decided live from the recorded pid + start-time fingerprint
@@ -290,7 +291,7 @@ SSH access (§7); rendering sessions that no harness produced.
   yet handle with a clear message (Claude-only in v1)
   (`lib/session/fork.ts:1-16,84-86`).
 
-#### 3.5 Sync & remote
+#### 3.5 Remote & export/import
 
 - **SES-22 (MUST).** `--host`/`--device` MUST run the peer's **own**
   `agents sessions` over hardened SSH; transcripts stay on the origin machine and
@@ -319,31 +320,26 @@ SSH access (§7); rendering sessions that no harness produced.
     this machine leaves nothing remote to dial; the fan-out MUST be skipped rather
     than passing an empty list to `gatherRemoteList`, which reads `[]` as "no hosts
     given" and sweeps every online device.
-- **SES-24 (MUST).** R2 sync MUST converge as a CRDT **G-Set union** of transcript
-  events keyed by SHA-256 of raw line bytes — associative, commutative,
-  idempotent, byte-identical across machines regardless of order
-  (`lib/session/sync/crdt.ts:6-19,73-117`). Each machine MUST be the single writer
-  of its own R2 prefix (`lib/session/sync/sync.ts:5-7`).
-- **SES-25 (MUST).** When an encryption key is configured, sync MUST be
-  zero-knowledge: each transcript body is sealed client-side with AES-256-GCM
-  (fresh IV) under the shared `R2_SYNC_ENC_KEY` — separate from the R2 access
-  token, never leaving the machine — so the bucket only ever holds ciphertext;
-  merge identity stays over plaintext
-  (`lib/session/sync/transcript-crypto.ts:13-24,83-96`). If no `R2_SYNC_ENC_KEY`
-  is configured, sync MAY fall back to plaintext upload with a loud once-per-cycle
-  warning (`lib/session/sync/sync.ts:94-99`); that fallback is explicitly **not**
-  zero-knowledge — the SES-25 guarantee holds only in the encrypted mode.
-  Fail-closed instead of the plaintext fallback is a reasonable future hardening
-  (see SES-GAP-9).
-- **SES-26 (MUST).** A partial fetch MUST be safe: if any copy of a session fails
-  to fetch this tick, the whole session is skipped (no write, no pull-state
-  stamp) and retried intact (`lib/session/sync/sync.ts:260-284,343-379`).
-  Peer-controlled paths MUST be containment-checked so `../` cannot escape the
-  mirror root (`lib/session/sync/agents.ts:213-221`).
-- **SES-27 (MUST).** Sync/import credentials MUST come only from the `r2.backups`
-  keychain bundle, never env/disk (`lib/session/sync/config.ts:3-5,59-64`).
-  Cross-machine sync is an **opt-in beta, off by default**
-  (`lib/session/sync/config.ts:12-15`).
+- **SES-24 (MUST).** `agents sessions export --encrypt` MUST seal each
+  transcript body client-side with AES-256-GCM (fresh IV) before it leaves the
+  machine, and `agents sessions import` MUST decrypt before writing it to the
+  mirror — the bundle only ever carries ciphertext when encryption is on
+  (`lib/session/sync/transcript-crypto.ts:82-96,161-171`;
+  `lib/session/bundle.ts:124,256,299`).
+- **SES-25 (MUST).** The export encryption key MUST be the shared
+  `R2_SYNC_ENC_KEY` from the `r2.backups` bundle when that bundle is configured
+  (so any machine holding it can decrypt), else an ephemeral key MUST be minted
+  and printed once and MUST NOT be persisted anywhere
+  (`commands/sessions-export.ts:309-322`). `agents sessions import` MUST accept
+  either the bundle key or an explicit `--decrypt <key>` for an ephemeral one
+  (`commands/sessions-import.ts:186-207`).
+- **SES-26 (MUST).** Peer-controlled paths in a bundle MUST be
+  containment-checked so a crafted `relKey`/machine name cannot escape the
+  mirror root via `../` (`lib/session/sync/agents.ts:213-221`, shared by export
+  and the mirror-placement path).
+- **SES-27 (MUST).** The `R2_SYNC_ENC_KEY` / R2 credentials used by export and
+  import MUST come only from the `r2.backups` keychain bundle, never env/disk
+  (`lib/session/sync/config.ts:11,45`).
 
 #### 3.6 Index / DB
 
@@ -505,7 +501,7 @@ normative — a change that widens/narrows a cell is a spec change.
   (`lib/session/types.ts:32,105,135`). Surfacing either needs a schema addition.
 - **SES-GAP-4.** `opencode` has a reserved `SYNC_AGENTS` slot but SQLite→JSONL export
   is **not implemented** (`lib/session/sync/agents.ts:130-138`) — opencode
-  sessions do not sync today.
+  sessions are not included in `agents sessions export` today.
 - **SES-GAP-5.** `dedupeBySession` runs only over local sources, never across the
   local↔remote seam; a session surfacing both locally and via a peer's self-report
   is not provably collapsed and is untested
@@ -522,17 +518,6 @@ normative — a change that widens/narrows a cell is a spec change.
   older CLI opening a DB written by a newer one silently proceeds instead of
   failing safe (`lib/session/db.ts` schema gate). The "fail safe on newer DB"
   guarantee is aspirational until a guard is added.
-- **SES-GAP-9.** The zero-knowledge guarantee (SES-25) is opt-in, not enforced:
-  with no `R2_SYNC_ENC_KEY` in the `r2.backups` bundle, `pushOwn` warns once per
-  cycle and uploads transcript bodies in **plaintext** rather than refusing
-  (`lib/session/sync/sync.ts:90-99`, comment: *"the feature predates
-  encryption"*). Provisioning mints a key when one is absent
-  (`lib/session/sync/provision.ts:71-77`), so the plaintext path is reachable
-  mainly by a pre-encryption or hand-edited bundle — but a machine that loses its
-  key downgrades from sealed to readable without failing. Fail-closed (refuse the
-  upload unless a key is present, or require an explicit opt-in flag) is the
-  hardening; neither branch is covered by a test today.
-
 ---
 
 ### 8. Given/When/Then scenarios
@@ -577,12 +562,14 @@ from `/proc/<pid>/environ`, and `context` gives the launch context — no single
 `origin` field carries all three (`discover.ts:2892`; `provenance.ts:225-230`;
 `active.ts:76,1352-1358`).
 
-**GWT-8 — CRDT sync converges, encrypted, and never half-writes.**
-Given two machines each appended distinct events to one session with
-`R2_SYNC_ENC_KEY` set; When each pushes to its own prefix and both pull+merge;
-Then both derive a byte-identical union (R2 stored only AES-256-GCM envelopes),
-and if any copy 404s this tick the whole session is skipped and retried intact
-(`crdt.ts:73-117`; `transcript-crypto.ts:83-96`; `sync.ts:260-284`).
+**GWT-8 — An encrypted export round-trips on another machine.**
+Given a machine with `R2_SYNC_ENC_KEY` set in its `r2.backups` bundle; When it
+runs `agents sessions export --encrypt -o b.bundle`; Then every record body is
+an AES-256-GCM envelope, and a peer holding the same `r2.backups` bundle can
+`agents sessions import b.bundle` and decrypt without passing `--decrypt`
+(`sessions-export.ts:309-322`; `bundle.ts:124`; `transcript-crypto.ts:82-96`).
+A peer without that bundle must pass the printed ephemeral key explicitly
+(`sessions-import.ts:186-207`).
 
 **GWT-9 — Remote fan-out degrades, never blanks.**
 Given 3 fleet hosts, one unreachable (ssh 255) and one slow past budget; When

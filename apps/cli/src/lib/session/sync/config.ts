@@ -24,8 +24,8 @@ export interface R2Config {
    * Shared 32-byte key (hex or base64) for client-side transcript encryption,
    * held in the bundle as `R2_SYNC_ENC_KEY`. Optional and deliberately separate
    * from the R2 credentials so rotating the access token never orphans already
-   * encrypted objects. When absent, transcripts upload unencrypted (with a loud
-   * per-cycle warning) — see transcript-crypto.ts + pushOwn.
+   * encrypted bundles. `agents sessions export --encrypt` prefers this key when
+   * present, else mints and prints an ephemeral one — see transcript-crypto.ts.
    */
   syncEncKey?: string;
 }
@@ -57,7 +57,7 @@ function resolveR2Config(): R2Config {
   ].filter(Boolean);
   if (missing.length > 0) {
     throw new Error(
-      `Sessions sync: bundle '${SYNC_BUNDLE}' is missing ${missing.join(', ')}. ` +
+      `Session R2 transport: bundle '${SYNC_BUNDLE}' is missing ${missing.join(', ')}. ` +
       `Add them with: agents secrets add ${SYNC_BUNDLE} <KEY>`,
     );
   }
@@ -68,8 +68,8 @@ function resolveR2Config(): R2Config {
     accessKeyId: accessKeyId!,
     secretAccessKey: secretAccessKey!,
     // Default to the account's R2 endpoint; an explicit R2_ENDPOINT override
-    // points sync at any S3-compatible store (MinIO, another provider) — which
-    // is also how the feature is verified end-to-end without live R2.
+    // points at any S3-compatible store (MinIO, another provider) — which is
+    // also how the feature is verified end-to-end without live R2.
     endpoint: env.R2_ENDPOINT?.trim() || `https://${accountId}.r2.cloudflarestorage.com`,
     syncEncKey,
   };
