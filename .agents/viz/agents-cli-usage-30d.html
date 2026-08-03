@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agents-cli · 30-day command usage</title>
+<style>
+  :root{
+    --bg:#0a0a0a; --panel:#111312; --panel2:#161a18; --ink:#e7ece8; --dim:#8b938c;
+    --line:#26302a; --accent:#a3e635; --amber:#f5c451; --red:#ff6b6b; --cyan:#5ad6c0;
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  }
+  :root[data-theme="light"]{
+    --bg:#faf9f6; --panel:#ffffff; --panel2:#f2f4f0; --ink:#1a1c1a; --dim:#5c655c;
+    --line:#e2e6df; --accent:#4d7c0f; --amber:#b45309; --red:#dc2626; --cyan:#0e7490;
+  }
+  :root[data-theme="light"] .fig{background:#0e120f;border-color:#26302a}
+  :root[data-theme="light"] .fig figcaption{color:#8b938c}
+  :root[data-theme="light"] .fig figcaption b{color:#e7ece8}
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1000px;margin:0 auto;padding:56px 28px 120px}
+  header.hero{border-bottom:1px solid var(--line);padding-bottom:28px;margin-bottom:40px}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--accent);margin:0 0 14px}
+  h1{font-size:34px;line-height:1.15;margin:0 0 12px;font-weight:700;letter-spacing:-.01em}
+  h1 .accent{color:var(--accent)}
+  .sub{color:var(--dim);font-size:17px;max-width:70ch;margin:0}
+  .meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+  .chip{font-family:var(--mono);font-size:11.5px;color:var(--dim);border:1px solid var(--line);
+    border-radius:999px;padding:4px 11px;background:var(--panel)}
+  .chip b{color:var(--ink);font-weight:500}
+  h2{font-size:23px;margin:52px 0 8px;letter-spacing:-.01em;scroll-margin-top:20px}
+  h2 .n{font-family:var(--mono);color:var(--accent);font-size:15px;margin-right:10px;opacity:.85}
+  p{margin:10px 0}
+  .lead{color:var(--dim)}
+  code{font-family:var(--mono);font-size:.88em;background:var(--panel2);border:1px solid var(--line);
+    border-radius:5px;padding:1.5px 6px;color:var(--cyan)}
+  a{color:var(--accent);text-decoration:none}
+  .fig{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:26px 22px 18px;margin:22px 0;overflow-x:auto}
+  .fig figcaption{font-family:var(--mono);font-size:12px;color:var(--dim);margin-top:14px;text-align:center}
+  .fig figcaption b{color:var(--ink)}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:760px){.grid2{grid-template-columns:1fr}}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);font-weight:500}
+  td:last-child,th:last-child{text-align:right}
+  .tag{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:6px;font-weight:600}
+  .tag.a{background:rgba(163,230,53,.12);color:var(--accent);border:1px solid rgba(163,230,53,.3)}
+  .tag.b{background:rgba(90,214,192,.1);color:var(--cyan);border:1px solid rgba(90,214,192,.28)}
+  .tag.c{background:rgba(245,196,81,.1);color:var(--amber);border:1px solid rgba(245,196,81,.28)}
+  .callout{border-left:3px solid var(--accent);background:var(--panel2);border-radius:0 10px 10px 0;
+    padding:14px 18px;margin:18px 0}
+  .callout.warn{border-left-color:var(--amber)}
+  .callout .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--accent);display:block;margin-bottom:5px}
+  .callout.warn .lbl{color:var(--amber)}
+  .toc{font-family:var(--mono);font-size:13px;display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:18px}
+  .toc a{color:var(--dim)}.toc a:hover{color:var(--accent)}
+  .foot{margin-top:60px;padding-top:22px;border-top:1px solid var(--line);color:var(--dim);
+    font-family:var(--mono);font-size:12px}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;font-family:var(--mono);font-size:11.5px;color:var(--dim);
+    justify-content:center;margin-top:6px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .sw{width:11px;height:11px;border-radius:3px;display:inline-block}
+  .themebtn{position:fixed;top:16px;right:16px;z-index:9;font-family:var(--mono);font-size:12px;
+    color:var(--dim);background:var(--panel);border:1px solid var(--line);border-radius:999px;
+    padding:6px 13px;cursor:pointer}
+  .themebtn:hover{color:var(--accent);border-color:var(--accent)}
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:22px 0}
+  @media(max-width:760px){.stats{grid-template-columns:repeat(2,1fr)}}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 16px}
+  .stat .v{font-family:var(--mono);font-size:28px;font-weight:700;color:var(--accent);line-height:1}
+  .stat .u{font-family:var(--mono);font-size:11px;color:var(--dim);margin-top:8px;letter-spacing:.08em;text-transform:uppercase}
+  @media print{
+    *{-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important}
+    .themebtn{display:none !important}
+  }
+</style>
+</head>
+<body>
+<button class="themebtn" onclick="tt()" id="tb">◐ light</button>
+<script>
+  var r=document.documentElement;
+  function set(t){r.setAttribute('data-theme',t);document.getElementById('tb').textContent=(t==='light'?'◑ dark':'◐ light')}
+  set(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');
+  function tt(){set(r.getAttribute('data-theme')==='light'?'dark':'light')}
+  if(!navigator.webdriver){
+    document.querySelectorAll('.stat .v[data-n]').forEach(function(el){
+      var t=+el.getAttribute('data-n'), s=0, steps=24;
+      var id=setInterval(function(){
+        s++; el.textContent=Math.round(t*s/steps).toLocaleString();
+        if(s>=steps) clearInterval(id);
+      },20);
+    });
+  }
+</script>
+<div class="wrap">
+
+<header class="hero">
+  <p class="kicker">agents-cli · fleet usage · 30 days</p>
+  <h1>What agents actually<br><span class="accent">type into agents</span></h1>
+  <p class="sub">Dual-source mine of the last 30 days: session Bash/Shell transcripts
+  (what agents typed) plus <code>events.jsonl</code> <code>command.start</code> (CLI audit).
+  Prefer the sessions table — events mix hooks and daemons. Hostnames are pseudonymized.</p>
+  <div class="meta">
+    <span class="chip"><b>473,484</b>&nbsp;invocations</span>
+    <span class="chip"><b>26,584</b>&nbsp;from sessions</span>
+    <span class="chip"><b>446,900</b>&nbsp;from events</span>
+    <span class="chip">hosts&nbsp;<b>7</b></span>
+    <span class="chip">as of&nbsp;<b>2026-08-03</b></span>
+  </div>
+  <nav class="toc">
+    <a href="#s1">01 · takeaway</a>
+    <a href="#s2">02 · sessions</a>
+    <a href="#s3">03 · events</a>
+    <a href="#s4">04 · purpose</a>
+    <a href="#s5">05 · hosts</a>
+  </nav>
+</header>
+
+<div class="stats">
+  <div class="stat"><div class="v" data-n="26584">26,584</div><div class="u">session hits</div></div>
+  <div class="stat"><div class="v" data-n="1478">1,478</div><div class="u">top: sessions</div></div>
+  <div class="stat"><div class="v" data-n="13660">13,660</div><div class="u">events: devices list</div></div>
+  <div class="stat"><div class="v" data-n="7">7</div><div class="u">hosts mined</div></div>
+</div>
+
+<h2 id="s1"><span class="n">01</span>The takeaway</h2>
+<p class="lead">Agents spend most CLI energy on fleet ops and browser automation, not on
+install/sync. Session transcripts and agent-tagged events agree on the spine:
+<code>sessions</code>, <code>ssh</code>, <code>browser *</code>, <code>secrets</code>, <code>run</code>.</p>
+
+<div class="callout">
+  <span class="lbl">read this first</span>
+  Use the <b>sessions-only</b> ranking to judge agent behavior. The all-sources total
+  (473,484) is dominated by polling (<code>view</code>, <code>sessions --active</code>,
+  <code>watchdog</code>) from scripts and daemons.
+</div>
+
+<div class="callout warn">
+  <span class="lbl">method</span>
+  Sessions: <code>agents sessions --since 30d</code> → Bash/Shell with <code>agents</code>/<code>ag</code>.
+  Events: fleet <code>~/.agents/events.jsonl*</code> <code>command.start</code>.
+  Session rows deduped across shared NFS (s1/fleet-relay).
+</div>
+
+<h2 id="s2"><span class="n">02</span>Sessions — what agents typed</h2>
+<p class="lead">Deduped Bash/Shell invocations of <code>agents</code>/<code>ag</code> across
+host-desk, worker-s0/s1, build-mac, fleet-relay. <code>(root)</code> is bare <code>agents</code> / help.</p>
+
+<figure class="fig">
+<svg viewBox="0 0 900 376" role="img" aria-label="bar chart">
+<text x="212" y="34" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">(root)</text>
+<rect x="230" y="22" width="600" height="16" rx="4" fill="#a3e635" opacity="0.9"/>
+<text x="838" y="34" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">1,902</text>
+<text x="212" y="62" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">sessions</text>
+<rect x="230" y="50" width="466" height="16" rx="4" fill="#a3e635" opacity="0.9"/>
+<text x="704" y="62" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">1,478</text>
+<text x="212" y="90" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">browser evaluate</text>
+<rect x="230" y="78" width="409" height="16" rx="4" fill="#a3e635" opacity="0.9"/>
+<text x="647" y="90" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">1,297</text>
+<text x="212" y="118" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">ssh build-mac</text>
+<rect x="230" y="106" width="364" height="16" rx="4" fill="#a3e635" opacity="0.9"/>
+<text x="602" y="118" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">1,155</text>
+<text x="212" y="146" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">browser screenshot</text>
+<rect x="230" y="134" width="349" height="16" rx="4" fill="#a3e635" opacity="0.9"/>
+<text x="587" y="146" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">1,107</text>
+<text x="212" y="174" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">ssh host-desk</text>
+<rect x="230" y="162" width="320" height="16" rx="4" fill="#a3e635" opacity="0.9"/>
+<text x="558" y="174" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">1,015</text>
+<text x="212" y="202" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">ssh worker-s0</text>
+<rect x="230" y="190" width="284" height="16" rx="4" fill="#a3e635" opacity="0.9"/>
+<text x="522" y="202" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">903</text>
+<text x="212" y="230" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">browser navigate</text>
+<rect x="230" y="218" width="237" height="16" rx="4" fill="#a3e635" opacity="0.9"/>
+<text x="475" y="230" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">753</text>
+<text x="212" y="258" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">browser refs</text>
+<rect x="230" y="246" width="235" height="16" rx="4" fill="#a3e635" opacity="0.9"/>
+<text x="473" y="258" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">748</text>
+<text x="212" y="286" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">secrets list</text>
+<rect x="230" y="274" width="217" height="16" rx="4" fill="#a3e635" opacity="0.9"/>
+<text x="455" y="286" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">689</text>
+<text x="212" y="314" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">ssh</text>
+<rect x="230" y="302" width="166" height="16" rx="4" fill="#a3e635" opacity="0.9"/>
+<text x="404" y="314" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">527</text>
+<text x="212" y="342" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">computer screenshot</text>
+<rect x="230" y="330" width="136" height="16" rx="4" fill="#a3e635" opacity="0.9"/>
+<text x="374" y="342" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">433</text>
+</svg>
+<div class="legend">
+  <span><span class="sw" style="background:#a3e635"></span>session Bash hits</span>
+</div>
+<figcaption><b>Top 12 session commands.</b> Independent of events.jsonl attribution.</figcaption>
+</figure>
+
+<table>
+  <thead><tr><th>#</th><th>command</th><th>count</th><th>purpose</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td><code>(root)</code></td><td>1,902</td><td><span class="tag a">help / bare</span></td></tr>
+    <tr><td>2</td><td><code>sessions</code></td><td>1,478</td><td><span class="tag a">browse / search</span></td></tr>
+    <tr><td>3</td><td><code>browser evaluate</code></td><td>1,297</td><td><span class="tag a">browser automation</span></td></tr>
+    <tr><td>4</td><td><code>ssh build-mac</code></td><td>1,155</td><td><span class="tag b">remote shell</span></td></tr>
+    <tr><td>5</td><td><code>browser screenshot</code></td><td>1,107</td><td><span class="tag a">browser automation</span></td></tr>
+    <tr><td>6</td><td><code>ssh host-desk</code></td><td>1,015</td><td><span class="tag b">remote shell</span></td></tr>
+    <tr><td>7</td><td><code>ssh worker-s0</code></td><td>903</td><td><span class="tag b">remote shell</span></td></tr>
+    <tr><td>8</td><td><code>browser navigate</code></td><td>753</td><td><span class="tag a">browser automation</span></td></tr>
+    <tr><td>9</td><td><code>browser refs</code></td><td>748</td><td><span class="tag a">browser automation</span></td></tr>
+    <tr><td>10</td><td><code>secrets list</code></td><td>689</td><td><span class="tag c">credentials</span></td></tr>
+    <tr><td>11</td><td><code>ssh</code></td><td>527</td><td><span class="tag b">remote shell</span></td></tr>
+    <tr><td>12</td><td><code>computer screenshot</code></td><td>433</td><td><span class="tag a">desktop automation</span></td></tr>
+  </tbody>
+</table>
+
+<h2 id="s3"><span class="n">03</span>Events — agent callers only</h2>
+<p class="lead"><code>command.start</code> where <code>caller</code> is a harness
+(<code>claude-code</code>, <code>cursor</code>, …). Hooks with <code>caller: script</code> excluded.</p>
+
+<figure class="fig">
+<svg viewBox="0 0 900 376" role="img" aria-label="bar chart">
+<text x="212" y="34" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">devices list</text>
+<rect x="230" y="22" width="600" height="16" rx="4" fill="#5ad6c0" opacity="0.9"/>
+<text x="838" y="34" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">13,660</text>
+<text x="212" y="62" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">ssh</text>
+<rect x="230" y="50" width="426" height="16" rx="4" fill="#5ad6c0" opacity="0.9"/>
+<text x="664" y="62" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">9,718</text>
+<text x="212" y="90" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">sessions</text>
+<rect x="230" y="78" width="210" height="16" rx="4" fill="#5ad6c0" opacity="0.9"/>
+<text x="448" y="90" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">4,783</text>
+<text x="212" y="118" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">browser evaluate</text>
+<rect x="230" y="106" width="150" height="16" rx="4" fill="#5ad6c0" opacity="0.9"/>
+<text x="388" y="118" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">3,434</text>
+<text x="212" y="146" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">secrets export</text>
+<rect x="230" y="134" width="98" height="16" rx="4" fill="#5ad6c0" opacity="0.9"/>
+<text x="336" y="146" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">2,242</text>
+<text x="212" y="174" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">models</text>
+<rect x="230" y="162" width="74" height="16" rx="4" fill="#5ad6c0" opacity="0.9"/>
+<text x="312" y="174" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">1,701</text>
+<text x="212" y="202" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">run</text>
+<rect x="230" y="190" width="62" height="16" rx="4" fill="#5ad6c0" opacity="0.9"/>
+<text x="300" y="202" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">1,421</text>
+<text x="212" y="230" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">browser press</text>
+<rect x="230" y="218" width="56" height="16" rx="4" fill="#5ad6c0" opacity="0.9"/>
+<text x="294" y="230" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">1,285</text>
+<text x="212" y="258" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">secrets _agent-load</text>
+<rect x="230" y="246" width="41" height="16" rx="4" fill="#5ad6c0" opacity="0.9"/>
+<text x="279" y="258" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">951</text>
+<text x="212" y="286" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">browser navigate</text>
+<rect x="230" y="274" width="40" height="16" rx="4" fill="#5ad6c0" opacity="0.9"/>
+<text x="278" y="286" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">923</text>
+<text x="212" y="314" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">browser screenshot</text>
+<rect x="230" y="302" width="38" height="16" rx="4" fill="#5ad6c0" opacity="0.9"/>
+<text x="276" y="314" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">869</text>
+<text x="212" y="342" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">secrets exec</text>
+<rect x="230" y="330" width="32" height="16" rx="4" fill="#5ad6c0" opacity="0.9"/>
+<text x="270" y="342" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">742</text>
+</svg>
+<div class="legend">
+  <span><span class="sw" style="background:#5ad6c0"></span>agent-caller events</span>
+</div>
+<figcaption><b>Top 12 agent-attributed CLI events.</b> <code>devices list</code> and <code>ssh</code> lead — fleet awareness loops.</figcaption>
+</figure>
+
+<div class="grid2">
+<table>
+  <thead><tr><th>caller</th><th>count</th></tr></thead>
+  <tbody>
+    <tr><td><code>script</code></td><td>394,957</td></tr>
+    <tr><td><code>claude-code</code></td><td>50,150</td></tr>
+    <tr><td><code>claude</code></td><td>26,985</td></tr>
+    <tr><td><code>terminal</code></td><td>954</td></tr>
+    <tr><td><code>shell</code></td><td>260</td></tr>
+    <tr><td><code>cursor</code></td><td>80</td></tr>
+    <tr><td><code>agent</code></td><td>60</td></tr>
+    <tr><td><code>grok</code></td><td>18</td></tr>
+  </tbody>
+</table>
+<table>
+  <thead><tr><th>source</th><th>count</th></tr></thead>
+  <tbody>
+    <tr><td>events</td><td>446,900</td></tr>
+    <tr><td>sessions (deduped)</td><td>26,584</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="s4"><span class="n">04</span>Purpose buckets</h2>
+<p class="lead">Inferred from command path + common flags across both sources.</p>
+
+<figure class="fig">
+<svg viewBox="0 0 900 120" role="img" aria-label="purpose share">
+  <text x="40" y="28" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">share of classified invocations</text>
+  <rect x="40" y="40" width="307" height="36" fill="#a3e635"/><rect x="347" y="40" width="189" height="36" fill="#5ad6c0"/><rect x="536" y="40" width="94" height="36" fill="#f5c451"/><rect x="630" y="40" width="59" height="36" fill="#ff6b6b"/><rect x="689" y="40" width="54" height="36" fill="#8b938c"/><rect x="743" y="40" width="44" height="36" fill="#7dd3fc"/><rect x="787" y="40" width="38" height="36" fill="#c084fc"/><rect x="825" y="40" width="31" height="36" fill="#fb7185"/>
+</svg>
+<div class="legend"><span><span class="sw" style="background:#a3e635"></span>diagnostics</span><span><span class="sw" style="background:#5ad6c0"></span>live session polling</span><span><span class="sw" style="background:#f5c451"></span>other</span><span><span class="sw" style="background:#ff6b6b"></span>machine-readable sessi</span><span><span class="sw" style="background:#8b938c"></span>cron</span><span><span class="sw" style="background:#7dd3fc"></span>remote fleet shell</span><span><span class="sw" style="background:#c084fc"></span>fleet device inventory</span><span><span class="sw" style="background:#fb7185"></span>browser automation</span></div>
+<figcaption><b>Purpose mix.</b> Diagnostics + live session polling dominate all-sources volume.</figcaption>
+</figure>
+
+<figure class="fig">
+<svg viewBox="0 0 900 264" role="img" aria-label="bar chart">
+<text x="212" y="34" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">diagnostics / inventory</text>
+<rect x="230" y="22" width="600" height="16" rx="4" fill="#f5c451" opacity="0.9"/>
+<text x="838" y="34" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">165,585</text>
+<text x="212" y="62" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">live session polling</text>
+<rect x="230" y="50" width="368" height="16" rx="4" fill="#f5c451" opacity="0.9"/>
+<text x="606" y="62" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">101,692</text>
+<text x="212" y="90" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">other</text>
+<rect x="230" y="78" width="183" height="16" rx="4" fill="#f5c451" opacity="0.9"/>
+<text x="421" y="90" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">50,667</text>
+<text x="212" y="118" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">machine-readable session query</text>
+<rect x="230" y="106" width="115" height="16" rx="4" fill="#f5c451" opacity="0.9"/>
+<text x="353" y="118" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">31,895</text>
+<text x="212" y="146" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">cron / scheduled agents</text>
+<rect x="230" y="134" width="105" height="16" rx="4" fill="#f5c451" opacity="0.9"/>
+<text x="343" y="146" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">29,242</text>
+<text x="212" y="174" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">remote fleet shell</text>
+<rect x="230" y="162" width="86" height="16" rx="4" fill="#f5c451" opacity="0.9"/>
+<text x="324" y="174" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">23,950</text>
+<text x="212" y="202" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">fleet device inventory</text>
+<rect x="230" y="190" width="75" height="16" rx="4" fill="#f5c451" opacity="0.9"/>
+<text x="313" y="202" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">20,781</text>
+<text x="212" y="230" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">browser automation</text>
+<rect x="230" y="218" width="62" height="16" rx="4" fill="#f5c451" opacity="0.9"/>
+<text x="300" y="230" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">17,184</text>
+</svg>
+<figcaption><b>Purpose counts</b> (all sources).</figcaption>
+</figure>
+
+<h2 id="s5"><span class="n">05</span>Where it ran</h2>
+<p class="lead">Event hostnames from the audit log. host-desk carries the largest share of CLI traffic.</p>
+
+<figure class="fig">
+<svg viewBox="0 0 900 208" role="img" aria-label="bar chart">
+<text x="212" y="34" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">host-desk</text>
+<rect x="230" y="22" width="600" height="16" rx="4" fill="#a3e635" opacity="0.9"/>
+<text x="838" y="34" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">228,582</text>
+<text x="212" y="62" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">worker-s1</text>
+<rect x="230" y="50" width="338" height="16" rx="4" fill="#a3e635" opacity="0.9"/>
+<text x="576" y="62" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">128,960</text>
+<text x="212" y="90" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">worker-s0</text>
+<rect x="230" y="78" width="133" height="16" rx="4" fill="#a3e635" opacity="0.9"/>
+<text x="371" y="90" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">50,765</text>
+<text x="212" y="118" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">worker-m1</text>
+<rect x="230" y="106" width="108" height="16" rx="4" fill="#a3e635" opacity="0.9"/>
+<text x="346" y="118" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">41,414</text>
+<text x="212" y="146" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">worker-m0</text>
+<rect x="230" y="134" width="61" height="16" rx="4" fill="#a3e635" opacity="0.9"/>
+<text x="299" y="146" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">23,423</text>
+<text x="212" y="174" fill="#e7ece8" font-size="12" text-anchor="end" font-family="ui-monospace,monospace">build-mac</text>
+<rect x="230" y="162" width="4" height="16" rx="4" fill="#a3e635" opacity="0.9"/>
+<text x="242" y="174" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">340</text>
+</svg>
+<figcaption><b>Invocations by host</b> (events + sessions attributed hostname).</figcaption>
+</figure>
+
+<table>
+  <thead><tr><th>host</th><th>invocations</th></tr></thead>
+  <tbody>
+    <tr><td><code>host-desk</code></td><td>228,582</td></tr>
+    <tr><td><code>worker-s1</code></td><td>128,960</td></tr>
+    <tr><td><code>worker-s0</code></td><td>50,765</td></tr>
+    <tr><td><code>worker-m1</code></td><td>41,414</td></tr>
+    <tr><td><code>worker-m0</code></td><td>23,423</td></tr>
+    <tr><td><code>build-mac</code></td><td>340</td></tr>
+  </tbody>
+</table>
+
+<div class="foot">
+  agents-cli · mined from sessions + events.jsonl &nbsp;·&nbsp;
+  <span style="color:var(--accent)">as of 2026-08-03</span>
+  &nbsp;·&nbsp; source: .agents/reports/agents-cli-usage-30d.json
+</div>
+
+</div>
+</body>
+</html>
