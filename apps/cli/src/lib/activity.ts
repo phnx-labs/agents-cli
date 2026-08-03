@@ -42,6 +42,11 @@ export type MilestoneEvent =
   | 'artifact.created'
   | 'task.completed'
   | 'checklist.created'
+  /** Bash-driven deliverables detected by command parsing. */
+  | 'video.rendered'
+  | 'video.converted'
+  | 'image.upscaled'
+  | 'metadata.edited'
   /** Deliberate agent-authored progress post (`agents feed post`). */
   | 'status.posted'
   /**
@@ -64,7 +69,7 @@ export type MilestoneEvent =
   | 'status.blocked';
 
 /** Routine activity events, collapsed to counts by readers. */
-export type ActivityKind = 'file.edited';
+export type ActivityKind = 'file.edited' | 'bash.executed';
 
 export type ActivityEventKind = MilestoneEvent | ActivityKind;
 
@@ -107,6 +112,10 @@ export const MILESTONE_EVENTS: readonly MilestoneEvent[] = [
   'artifact.created',
   'task.completed',
   'checklist.created',
+  'video.rendered',
+  'video.converted',
+  'image.upscaled',
+  'metadata.edited',
   'status.posted',
   // NOTE: intentionally absent from the Python hook's own MILESTONE_EVENTS copy
   // (see ACTIVITY_LOG_HOOK_SCRIPT below) — that set only classifies events the
@@ -165,6 +174,10 @@ export interface ActivityEvent {
   terminalId?: string;
   /** `$TMUX_PANE` at launch when recorded. */
   tmuxPane?: string;
+  /** Bash command taxonomy (set for bash.executed events). */
+  category?: string;
+  bashTool?: string;
+  bashAction?: string;
   /** Generic artifacts attached to a deliberate progress post. */
   attachments?: Attachment[];
 }
@@ -251,6 +264,9 @@ function parseLine(line: string): ActivityEvent | undefined {
       launchId: parsed.launchId,
       terminalId: parsed.terminalId,
       tmuxPane: parsed.tmuxPane,
+      category: typeof parsed.category === 'string' ? parsed.category : undefined,
+      bashTool: typeof parsed.bashTool === 'string' ? parsed.bashTool : undefined,
+      bashAction: typeof parsed.bashAction === 'string' ? parsed.bashAction : undefined,
       attachments: sanitizeAttachments(parsed.attachments),
     };
   } catch {
@@ -441,6 +457,7 @@ export const EVENT_STYLE: Record<string, { glyph: string; color: (s: string) => 
   'status.posted': { glyph: '▸', color: chalk.white, label: 'status' },
   'file.edited': { glyph: '·', color: chalk.gray, label: 'file edited' },
   'factory.launch': { glyph: '⌁', color: chalk.cyan, label: 'factory launch' },
+  'bash.executed': { glyph: '$', color: chalk.gray, label: 'command run' },
 };
 
 export function styleForEvent(event: string) {
@@ -841,15 +858,15 @@ export function formatActivityGroupMeta(
  * read-only tools never pay the hook cost. Fail-open: any error is swallowed so
  * a logging hiccup never blocks a tool call.
  */
-export const ACTIVITY_LOG_HOOK_SCRIPT = `#!/usr/bin/env python3
-"""Append agent-activity events for \`agents feed\` / \`agents activity\`.
+export const ACTIVITY_LOG_HOOK_SCRIPT = String.raw`#!/usr/bin/env python3
+"""Append agent-activity events for 'agents feed' / 'agents activity'.
 
 Bound to PreToolUse (ExitPlanMode, Task) and PostToolUse (Bash, Write, Edit,
 MultiEdit, TodoWrite, update_plan, TaskUpdate, todo_write, TaskCreate). One
 append-only file per session; read-only tools never trigger it because the
 manifest matcher excludes them.
 
-Sub-agent gate: when the payload carries \`agent_type\`, this is a Task/Agent
+Sub-agent gate: when the payload carries 'agent_type', this is a Task/Agent
 sub-agent -- skip so only the top-level agent logs its own activity.
 
 Fail-open: ANY error is swallowed so a logging hiccup never blocks a tool call.
@@ -866,7 +883,9 @@ MAX_LOG_BYTES = 5 * 1024 * 1024  # cap a pathological session's log
 MILESTONE_EVENTS = {
     "plan.created", "pr.opened", "pr.merged", "worktree.created",
     "worktree.removed", "commit.created", "pushed", "subagent.spawned",
-    "artifact.created", "task.completed", "checklist.created", "status.posted",
+    "artifact.created", "task.completed", "checklist.created",
+    "video.rendered", "video.converted", "image.upscaled", "metadata.edited",
+    "status.posted",
 }
 
 # Deliverable file types + locations -- a Write here is a recognizable artifact
@@ -901,52 +920,291 @@ def first_line(text, limit=140):
     return ""
 
 
-def _subcommand(tokens, tool):
-    """First non-flag token after \`tool\`, i.e. its subcommand (skips -C <path>,
-    -c <cfg>, and other leading flags). None if \`tool\` isn't the invoked command."""
-    try:
-        i = tokens.index(tool) + 1
-    except ValueError:
-        return None, []
-    while i < len(tokens):
-        t = tokens[i]
-        if t in ("-C", "-c", "--git-dir", "--work-tree"):
-            i += 2  # flag that consumes the next token
-            continue
-        if t.startswith("-"):
+# Canonical command taxonomy for Bash tool calls. Mirrors the TypeScript
+# registry in lib/session/bash-command.ts; keep them in sync.
+BASH_TOOL_REGISTRY = {
+    "git": {"category": "vcs", "action": "working in git"},
+    "gh": {"category": "vcs", "action": "using GitHub CLI"},
+    "bun": {"category": "build-test", "action": "running bun"},
+    "npm": {"category": "build-test", "action": "running npm"},
+    "pnpm": {"category": "build-test", "action": "running pnpm"},
+    "yarn": {"category": "build-test", "action": "running yarn"},
+    "vitest": {"category": "build-test", "action": "running vitest"},
+    "jest": {"category": "build-test", "action": "running jest"},
+    "mocha": {"category": "build-test", "action": "running mocha"},
+    "pytest": {"category": "build-test", "action": "running pytest"},
+    "cargo": {"category": "build-test", "action": "running cargo"},
+    "go": {"category": "build-test", "action": "running go"},
+    "tsc": {"category": "build-test", "action": "running tsc"},
+    "tsx": {"category": "build-test", "action": "running tsx"},
+    "node": {"category": "build-test", "action": "running node"},
+    "python": {"category": "build-test", "action": "running python"},
+    "python3": {"category": "build-test", "action": "running python"},
+    "make": {"category": "build-test", "action": "running make"},
+    "brew": {"category": "install", "action": "installing with brew"},
+    "pip": {"category": "install", "action": "installing with pip"},
+    "pip3": {"category": "install", "action": "installing with pip"},
+    "apt": {"category": "install", "action": "installing with apt"},
+    "apk": {"category": "install", "action": "installing with apk"},
+    "ssh": {"category": "remote", "action": "using ssh"},
+    "scp": {"category": "remote", "action": "using scp"},
+    "rsync": {"category": "remote", "action": "using rsync"},
+    "curl": {"category": "http", "action": "fetching with curl"},
+    "wget": {"category": "http", "action": "fetching with wget"},
+    "ffmpeg": {"category": "media", "action": "using ffmpeg"},
+    "ffprobe": {"category": "media", "action": "probing media"},
+    "magick": {"category": "media", "action": "using ImageMagick"},
+    "convert": {"category": "media", "action": "converting images"},
+    "composite": {"category": "media", "action": "compositing images"},
+    "montage": {"category": "media", "action": "montaging images"},
+    "identify": {"category": "media", "action": "identifying images"},
+    "realesrgan": {"category": "upscaling", "action": "upscaling with realesrgan"},
+    "realesrgan-ncnn-vulkan": {"category": "upscaling", "action": "upscaling with realesrgan"},
+    "waifu2x": {"category": "upscaling", "action": "upscaling with waifu2x"},
+    "waifu2x-caffe": {"category": "upscaling", "action": "upscaling with waifu2x"},
+    "waifu2x-converter-cpp": {"category": "upscaling", "action": "upscaling with waifu2x"},
+    "swin2sr": {"category": "upscaling", "action": "upscaling with swin2sr"},
+    "resdet": {"category": "upscaling", "action": "detecting upscale"},
+    "id3v2": {"category": "metadata", "action": "editing id3 tags"},
+    "exiftool": {"category": "metadata", "action": "editing exif metadata"},
+    "metaflac": {"category": "metadata", "action": "editing flac metadata"},
+    "vorbiscomment": {"category": "metadata", "action": "editing vorbis comments"},
+    # Shell
+    "rm": {"category": "shell", "action": "removing files"},
+    "mv": {"category": "shell", "action": "moving files"},
+    "cp": {"category": "shell", "action": "copying files"},
+    "mkdir": {"category": "shell", "action": "making directories"},
+    "touch": {"category": "shell", "action": "touching files"},
+    "echo": {"category": "shell", "action": "echoing"},
+    "printf": {"category": "shell", "action": "printing"},
+    "chmod": {"category": "shell", "action": "changing permissions"},
+    "ln": {"category": "shell", "action": "linking files"},
+    "awk": {"category": "shell", "action": "running awk"},
+    "sed": {"category": "shell", "action": "running sed"},
+    "tee": {"category": "shell", "action": "teeing output"},
+    "xargs": {"category": "shell", "action": "running xargs"},
+    # Probes
+    "ls": {"category": "probe", "action": "listing files"},
+    "cat": {"category": "probe", "action": "reading files"},
+    "head": {"category": "probe", "action": "reading files"},
+    "tail": {"category": "probe", "action": "reading files"},
+    "wc": {"category": "probe", "action": "counting"},
+    "stat": {"category": "probe", "action": "statting files"},
+    "file": {"category": "probe", "action": "inspecting files"},
+    "which": {"category": "probe", "action": "locating binaries"},
+    "tree": {"category": "probe", "action": "listing files"},
+    "pwd": {"category": "probe", "action": "printing pwd"},
+    # Search
+    "grep": {"category": "search", "action": "searching"},
+    "rg": {"category": "search", "action": "searching with ripgrep"},
+    "ag": {"category": "search", "action": "searching with the silver searcher"},
+    "fd": {"category": "search", "action": "searching files"},
+    "find": {"category": "search", "action": "finding files"},
+    # Wait
+    "sleep": {"category": "wait", "action": "sleeping"},
+    "wait": {"category": "wait", "action": "waiting"},
+}
+
+# Two-level tools mapped to the flags that consume the following token as their
+# value, per tool; the subcommand scan skips both. Missing a value flag mis-reads
+# the value as the subcommand; over-listing only drops the subcommand (safe). A
+# tool with no such leading flags maps to an empty set. Mirrors VALUE_FLAGS in
+# lib/session/bash-command.ts; TWO_LEVEL_TOOLS is derived from its keys.
+VALUE_FLAGS = {
+    "git": {"-C", "-c", "--git-dir", "--work-tree"},
+    "gh": {"-R", "--repo"},
+    "bun": {"--cwd"},
+    "npm": {"--prefix", "-w", "--workspace"},
+    "pnpm": {"--filter", "-C", "--dir"},
+    "yarn": {"--cwd"},
+    "cargo": {"--manifest-path"},
+    "docker": {"-H", "--host", "-c", "--context", "--config", "-l", "--log-level"},
+    "kubectl": {"-n", "--namespace", "--kubeconfig", "--context", "--cluster", "--user", "-s", "--server", "--as", "--token", "--cache-dir", "--request-timeout"},
+    "rush": set(),
+    "openclaw": set(),
+}
+
+TWO_LEVEL_TOOLS = set(VALUE_FLAGS.keys())
+
+
+def _unwrap_command(cmd):
+    """Strip wrapper prefixes so the real executable is classified."""
+    s = (cmd or "").strip()
+    ssh = re.match(r'^ssh\s+\S+\s+["\']?(.+?)["\']?\s*(?:\|.*)?$', s)
+    if ssh:
+        return _unwrap_command(ssh.group(1))
+    # VAR=value prefix (value may be a single- or double-quoted string with spaces)
+    env = re.match(r'^([A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|' + r"'[^']*'" + r'|\S+)\s+)+(.+)$', s)
+    if env:
+        return _unwrap_command(env.group(2))
+    # sudo / time prefix (value-taking flags such as -u user consume their argument)
+    prefix = re.match(r'^(?:sudo|time)(?:\s+(?:-[uUgGhpCrtDR]\s+\S+|-\S+))*\s+(.+)$', s)
+    if prefix:
+        return _unwrap_command(prefix.group(1))
+    cd = re.match(r'^cd\s+\S+\s*&&\s*(.+)$', s)
+    if cd:
+        return _unwrap_command(cd.group(1))
+    npx = re.match(r'^(?:npx|bunx)\s+(?:-\S+\s+)*(.+)$', s)
+    if npx:
+        return _unwrap_command(npx.group(1))
+    return s
+
+
+def _split_on_operators(cmd):
+    """Split a command on && || | ; while respecting quotes and escapes."""
+    parts = []
+    current = ""
+    quote = None
+    escaped = False
+    i = 0
+    while i < len(cmd):
+        ch = cmd[i]
+        if escaped:
+            current += ch
+            escaped = False
             i += 1
             continue
-        return t, tokens[i + 1:]
-    return None, []
+        if ch == "\\":
+            current += ch
+            escaped = True
+            i += 1
+            continue
+        if quote:
+            current += ch
+            if ch == quote:
+                quote = None
+            i += 1
+            continue
+        if ch in ('"', "'"):
+            current += ch
+            quote = ch
+            i += 1
+            continue
+        if cmd[i:i+2] in ("&&", "||"):
+            if current.strip():
+                parts.append(current.strip())
+            current = ""
+            i += 2
+            continue
+        if ch in ("|", ";"):
+            if current.strip():
+                parts.append(current.strip())
+            current = ""
+            i += 1
+            continue
+        current += ch
+        i += 1
+    if current.strip():
+        parts.append(current.strip())
+    return parts
 
 
-def classify_bash(command):
-    """Return the milestone event for a git/gh command, else None. Tokenizes so a
-    path like \`git diff -- src/commit.ts\` is not mistaken for a commit."""
-    try:
-        tokens = shlex.split(command or "")
-    except Exception:
-        tokens = (command or "").split()
+def _tokenize_bash(command):
+    """Return a list of token lists, one per simple command."""
+    unwrapped = _unwrap_command(command)
+    segments = _split_on_operators(unwrapped)
+    out = []
+    for seg in segments:
+        try:
+            tokens = shlex.split(seg)
+        except Exception:
+            tokens = seg.split()
+        if tokens:
+            out.append(tokens)
+    return out
 
-    verb, rest = _subcommand(tokens, "git")
-    if verb == "worktree":
-        sub = rest[0] if rest else ""
-        if sub == "add":
-            return "worktree.created"
-        if sub == "remove":
-            return "worktree.removed"
-    elif verb == "commit":
-        return "commit.created"
-    elif verb == "push":
-        return "pushed"
 
-    verb, rest = _subcommand(tokens, "gh")
-    if verb == "pr" and rest:
-        if rest[0] == "create":
-            return "pr.opened"
-        if rest[0] == "merge":
-            return "pr.merged"
+def _scan_subcommand(tokens, tool):
+    """First non-flag token after the executable, skipping flags and the argument
+    of a value-taking flag for that tool. Mirrors scanSubcommand in bash-command.ts."""
+    value_flags = VALUE_FLAGS.get(tool, set())
+    i = 1
+    while i < len(tokens):
+        t = tokens[i]
+        if t.startswith("-"):
+            i += 2 if t in value_flags else 1
+            continue
+        return t.lower()
+    return ""
+
+
+def classify_bash_command(command):
+    """Return {tool, category, subcommand, action, summary} for the first simple command."""
+    simple_commands = _tokenize_bash(command)
+    if not simple_commands:
+        return {"tool": "other", "category": "other", "subcommand": "", "action": "running command", "summary": ""}
+    tokens = simple_commands[0]
+    if not tokens:
+        return {"tool": "other", "category": "other", "subcommand": "", "action": "running command", "summary": ""}
+
+    first = tokens[0]
+    base = re.sub(r'^[./]+', '', first).lower()
+    if base.endswith(".exe"):
+        base = base[:-4]
+    info = BASH_TOOL_REGISTRY.get(base)
+    if not info:
+        # Known two-level tool absent from the registry (docker/kubectl/rush/
+        # openclaw) still surfaces its subcommand; category stays 'other'.
+        sub = _scan_subcommand(tokens, base) if base in TWO_LEVEL_TOOLS else ""
+        summary = "{} {}".format(base, sub) if sub else first
+        return {"tool": first, "category": "other", "subcommand": sub, "action": "running command", "summary": summary}
+
+    subcommand = _scan_subcommand(tokens, base) if base in TWO_LEVEL_TOOLS else ""
+
+    summary = "{} {}".format(base, subcommand) if subcommand else base
+    return {
+        "tool": base,
+        "category": info["category"],
+        "subcommand": subcommand,
+        "action": info["action"],
+        "summary": summary,
+    }
+
+
+def detect_bash_milestone(command):
+    """Return (event, detail) for high-signal Bash commands, else None."""
+    info = classify_bash_command(command)
+    lower = (command or "").lower()
+
+    if info["category"] == "upscaling":
+        return "image.upscaled", info["action"]
+
+    if info["tool"] == "ffmpeg":
+        has_output = re.search(r'\s+\S+\.\w{2,5}\s*$', command or "")
+        if has_output or "-c:v" in lower or "-codec" in lower or "libx264" in lower:
+            return "video.rendered", "ffmpeg render"
+        return "video.converted", "ffmpeg"
+
+    if info["category"] == "metadata":
+        return "metadata.edited", info["action"]
+
+    if info["tool"] == "git":
+        if info["subcommand"] == "commit":
+            return "commit.created", "git commit"
+        if info["subcommand"] == "push":
+            return "pushed", "git push"
+        if info["subcommand"] == "worktree":
+            if "worktree add" in lower:
+                return "worktree.created", "git worktree add"
+            if "worktree remove" in lower:
+                return "worktree.removed", "git worktree remove"
+
+    if info["tool"] == "gh" and info["subcommand"] == "pr":
+        if "pr create" in lower:
+            return "pr.opened", "gh pr create"
+        if "pr merge" in lower:
+            return "pr.merged", "gh pr merge"
+
     return None
+
+
+def first_line_of_command(command):
+    """First non-empty line of a command, trimmed."""
+    for raw in (command or "").splitlines():
+        s = raw.strip()
+        if s:
+            return s[:140]
+    return ""
 
 
 def extract_url(tool_response):
@@ -956,7 +1214,7 @@ def extract_url(tool_response):
         text = str(tool_response.get("stdout") or tool_response.get("output") or "")
     elif isinstance(tool_response, str):
         text = tool_response
-    m = re.search(r"https?://\\S+", text)
+    m = re.search(r"https?://\S+", text)
     return m.group(0).rstrip(").,") if m else None
 
 
@@ -1387,10 +1645,24 @@ def build_event(payload, hook_event):
             detail = (role + ": " + first_line(desc)).strip(": ").strip()
     elif hook_event == "PostToolUse":
         if tool_name == "Bash":
-            event = classify_bash(tool_input.get("command", ""))
-            if event:
-                detail = first_line(tool_input.get("command", ""))
+            cmd = tool_input.get("command", "")
+            info = classify_bash_command(cmd)
+            records = []
+            # Always emit a structured bash.executed activity event.
+            bash_record = _make_record("bash.executed", info.get("summary") or first_line_of_command(cmd), tool_name)
+            bash_record["category"] = info.get("category")
+            bash_record["bashTool"] = info.get("tool")
+            bash_record["bashAction"] = info.get("action")
+            records.append(bash_record)
+            milestone = detect_bash_milestone(cmd)
+            if milestone:
+                event, detail = milestone
+                milestone_record = _make_record(event, detail, tool_name)
                 url = extract_url(tool_response)
+                if url:
+                    milestone_record["url"] = url
+                records.append(milestone_record)
+            return records, tool_name
         elif tool_name in ("Write", "Edit", "MultiEdit"):
             fp = tool_input.get("file_path") or tool_input.get("path") or ""
             # A freshly-written deliverable is a milestone; edits and code
@@ -1464,7 +1736,7 @@ def main():
             for record in records:
                 if over_limit and record.get("tier") != "milestone":
                     continue
-                f.write(json.dumps(record) + "\\n")
+                f.write(json.dumps(record) + "\n")
     except Exception:
         pass  # fail open
 

@@ -1,0 +1,719 @@
+<!doctype html>
+<!--
+  agents-cli — Memory & Coordination across a fleet of agents.
+  Self-contained (inline CSS, no CDN). Dark + light with a ◐ toggle.
+  Every quantitative claim is grounded in source; file:line refs are inline as code spans.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agents-cli — Memory &amp; Coordination across the fleet</title>
+<style>
+  :root{
+    --bg:#0a0a0a; --panel:#111312; --panel2:#161a18; --ink:#e7ece8; --dim:#8b938c;
+    --line:#26302a; --accent:#a3e635; --amber:#f5c451; --red:#ff6b6b; --cyan:#5ad6c0;
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  }
+  :root[data-theme="light"]{
+    --bg:#faf9f6; --panel:#ffffff; --panel2:#f2f4f0; --ink:#1a1c1a; --dim:#5c655c;
+    --line:#e2e6df; --accent:#4d7c0f; --amber:#b45309; --red:#dc2626; --cyan:#0e7490;
+  }
+  :root[data-theme="light"] .fig{background:#0e120f;border-color:#26302a}
+  :root[data-theme="light"] .fig figcaption{color:#8b938c}
+  :root[data-theme="light"] .fig figcaption b{color:#e7ece8}
+  :root[data-theme="light"] .fig .legend{color:#8b938c}
+
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    font-size:16px;line-height:1.68;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1000px;margin:0 auto;padding:56px 28px 120px}
+  header.hero{border-bottom:1px solid var(--line);padding-bottom:30px;margin-bottom:40px}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--accent);margin:0 0 14px}
+  h1{font-size:37px;line-height:1.14;margin:0 0 16px;font-weight:700;letter-spacing:-.015em}
+  h1 .accent{color:var(--accent)}
+  .sub{color:var(--dim);font-size:17.5px;max-width:74ch;margin:0}
+  .sub b{color:var(--ink);font-weight:600}
+  .meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px}
+  .chip{font-family:var(--mono);font-size:11.5px;color:var(--dim);border:1px solid var(--line);
+    border-radius:999px;padding:4px 11px;background:var(--panel)}
+  .chip b{color:var(--ink);font-weight:600}
+  .prov{margin-top:10px}
+  .prov .chip{font-size:11px;opacity:.82}
+  .prov .chip b{color:var(--cyan)}
+  h2{font-size:24px;margin:56px 0 8px;letter-spacing:-.01em;scroll-margin-top:20px}
+  h2 .n{font-family:var(--mono);color:var(--accent);font-size:15px;margin-right:10px;opacity:.85}
+  h3{font-size:16.5px;margin:28px 0 8px;color:var(--ink)}
+  p{margin:12px 0}
+  .lead{color:var(--dim);font-size:16.5px}
+  code{font-family:var(--mono);font-size:.86em;background:var(--panel2);border:1px solid var(--line);
+    border-radius:5px;padding:1.5px 6px;color:var(--cyan)}
+  a{color:var(--accent);text-decoration:none;border-bottom:1px solid transparent}
+  a:hover{border-bottom-color:var(--accent)}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:18px 0}
+  .fig{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:26px 22px 18px;margin:26px 0;overflow-x:auto}
+  .fig figcaption{font-family:var(--mono);font-size:12px;color:var(--dim);margin-top:16px;text-align:center;line-height:1.5}
+  .fig figcaption b{color:var(--ink)}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:760px){.grid2{grid-template-columns:1fr}}
+  table{width:100%;border-collapse:collapse;margin:18px 0;font-size:14.5px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);font-weight:500}
+  td code{font-size:.85em}
+  .tag{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:6px;font-weight:600;white-space:nowrap}
+  .tag.a{background:rgba(163,230,53,.12);color:var(--accent);border:1px solid rgba(163,230,53,.3)}
+  .tag.b{background:rgba(90,214,192,.1);color:var(--cyan);border:1px solid rgba(90,214,192,.28)}
+  .tag.c{background:rgba(245,196,81,.1);color:var(--amber);border:1px solid rgba(245,196,81,.28)}
+  .tag.r{background:rgba(255,107,107,.1);color:var(--red);border:1px solid rgba(255,107,107,.28)}
+  ul{margin:10px 0;padding-left:22px}li{margin:7px 0}
+  .callout{border-left:3px solid var(--accent);background:var(--panel2);border-radius:0 10px 10px 0;
+    padding:15px 19px;margin:20px 0}
+  .callout.warn{border-left-color:var(--amber)}
+  .callout .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--accent);display:block;margin-bottom:6px}
+  .callout.warn .lbl{color:var(--amber)}
+  .toc{font-family:var(--mono);font-size:13px;display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:20px}
+  .toc a{color:var(--dim);border:0}.toc a:hover{color:var(--accent)}
+  pre{font-family:var(--mono);font-size:13px;background:#0c0f0d;border:1px solid var(--line);
+    border-radius:12px;padding:16px 18px;overflow-x:auto;line-height:1.55;color:#e7ece8}
+  :root[data-theme="light"] pre{background:#0e120f;color:#e7ece8}
+  pre .c{color:#8b938c}pre .k{color:#a3e635}pre .s{color:#5ad6c0}pre .r{color:#ff6b6b}
+  .stat-row{display:flex;flex-wrap:wrap;gap:14px;margin:22px 0}
+  .stat{flex:1 1 150px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+  .stat .big{font-family:var(--mono);font-size:30px;font-weight:700;color:var(--accent);line-height:1}
+  .stat .lab{font-size:12.5px;color:var(--dim);margin-top:8px}
+  .foot{margin-top:64px;padding-top:22px;border-top:1px solid var(--line);color:var(--dim);
+    font-family:var(--mono);font-size:12px;line-height:1.8}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;font-family:var(--mono);font-size:11.5px;color:var(--dim);
+    justify-content:center;margin-top:10px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .sw{width:11px;height:11px;border-radius:3px;display:inline-block}
+  .themebtn{position:fixed;top:16px;right:16px;z-index:9;font-family:var(--mono);font-size:12px;
+    color:var(--dim);background:var(--panel);border:1px solid var(--line);border-radius:999px;
+    padding:6px 13px;cursor:pointer}
+  .themebtn:hover{color:var(--accent);border-color:var(--accent)}
+</style>
+</head>
+<body>
+<button class="themebtn" onclick="tt()" id="tb">◐ light</button>
+<script>
+  var r=document.documentElement;
+  function set(t){r.setAttribute('data-theme',t);document.getElementById('tb').textContent=(t==='light'?'◑ dark':'◐ light')}
+  set(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');
+  function tt(){set(r.getAttribute('data-theme')==='light'?'dark':'light')}
+</script>
+<div class="wrap">
+
+<header class="hero">
+  <p class="kicker">agents-cli · memory &amp; coordination · field notes</p>
+  <h1>How a fleet of agents shares <span class="accent">memory</span><br>and <span class="accent">coordinates</span> across machines</h1>
+  <p class="sub">One person runs many coding agents across many machines they own. Nothing here is a
+  cloud broker: there is <b>no central server, no fleet enumeration, no shared relay</b>. Yet the agents
+  still need to remember what they did, find each other's work, and answer each other's questions —
+  across boxes that sleep, move networks, and go dark. This is how agents-cli does it today, what is
+  real versus planned, and where the seams still show.</p>
+  <div class="meta">
+    <span class="chip"><b>15</b>&nbsp;harnesses managed</span>
+    <span class="chip"><b>12</b>&nbsp;session-tracked</span>
+    <span class="chip"><b>7</b>&nbsp;sync-capable</span>
+    <span class="chip"><b>3</b>&nbsp;coordination primitives</span>
+    <span class="chip">schema <b>v21</b></span>
+    <span class="chip"><b>1,760</b>&nbsp;CLI calls mined</span>
+  </div>
+  <div class="meta prov">
+    <span class="chip">harness: <b>claude</b></span>
+    <span class="chip">agent: <b>opus-4.8</b></span>
+    <span class="chip">host: <b>yosemite-s1</b></span>
+    <span class="chip">session: <b>d66e73be</b></span>
+    <span class="chip"><b>2026-08-03</b></span>
+  </div>
+  <nav class="toc">
+    <a href="#s1">01 · the problem</a>
+    <a href="#s2">02 · two meanings of session</a>
+    <a href="#s3">03 · live identity</a>
+    <a href="#s4">04 · durable transcript</a>
+    <a href="#s5">05 · cross-device memory</a>
+    <a href="#s6">06 · three coordination primitives</a>
+    <a href="#s7">07 · the router</a>
+    <a href="#s8">08 · the fleet view</a>
+    <a href="#s9">09 · shipped vs proposed</a>
+    <a href="#s10">10 · performance</a>
+    <a href="#s11">11 · how it's used</a>
+    <a href="#s12">12 · the evidence</a>
+    <a href="#s13">appendix · the docs</a>
+  </nav>
+</header>
+
+<!-- ============ 01 ============ -->
+<h2 id="s1"><span class="n">01</span>The problem: one owner, many machines, many minds</h2>
+<p class="lead">Start with the shape of the day. You are sitting at a laptop. On the desk next to it a
+Mac mini is always on. In a rack somewhere are eight Linux boxes. Each one can run a coding agent —
+Claude, Codex, Grok, Kimi — and often several at once. You dispatch a task to whichever box has the
+headroom, walk away, and come back an hour later.</p>
+
+<p>Three questions now have no obvious answer. <b>What did that agent do?</b> The transcript is a file
+on a machine you are not sitting at. <b>Which of my agents is stuck?</b> One of them is parked on a
+question, waiting, and you don't know which. <b>How does the agent on box A answer the agent on box
+B?</b> They share no memory and no channel.</p>
+
+<p>The cloud-agent platforms answer these by owning the machines: a central control plane holds the
+sessions, a broker routes the messages, a vendor sandbox runs the work. agents-cli inverts that
+assumption. <b>You</b> own the machines; SSH reachability <em>is</em> the trust model; secrets never
+leave the box. The engineering problem is to get durable memory and real coordination out of that
+constraint, not despite it. The rest of this document is the answer, in three parts: how a session
+becomes memory, how that memory travels, and how one agent reaches another.</p>
+
+<div class="callout">
+  <span class="lbl">the one idea</span>
+  There is no coordinator. Every machine is authoritative for its own sessions; shared views are
+  <em>assembled on demand</em> (SSH fan-out) or <em>converged without conflict</em> (a grow-only set
+  in object storage). Nothing in the system needs a machine to be up for another machine to make
+  progress.
+</div>
+
+<!-- ============ 02 ============ -->
+<h2 id="s2"><span class="n">02</span>Two meanings of the word "session"</h2>
+<p class="lead">Every confusion about memory in agents-cli dissolves once you separate the two things the
+word "session" names. They have different lifetimes, different stores, and different failure modes.</p>
+
+<ul>
+  <li><b>A live identity</b> — which process, on which machine, is which session <em>right now</em>.
+  It exists only while the agent is running. It is a cache keyed by PID, and it is recomputed, never
+  trusted stale.</li>
+  <li><b>A durable transcript</b> — the conversation itself, on disk, indexed for search. It outlives
+  the process, the reboot, and (optionally) the machine. This is the memory.</li>
+</ul>
+
+<figure class="fig">
+<svg viewBox="0 0 900 300" role="img" aria-label="The two meanings of a session: live identity versus durable transcript">
+  <!-- left: live identity -->
+  <text x="215" y="34" fill="#a3e635" font-size="13" text-anchor="middle" font-family="var(--mono)" letter-spacing="1">LIVE IDENTITY  ·  ephemeral</text>
+  <rect x="60" y="56" width="310" height="200" rx="12" fill="#111312" stroke="#26302a"/>
+  <rect x="86" y="82" width="120" height="40" rx="7" fill="#161a18" stroke="#26302a"/>
+  <text x="146" y="107" fill="#e7ece8" font-size="12" text-anchor="middle" font-family="var(--mono)">agent PID</text>
+  <path d="M206 102 L250 102" stroke="#5ad6c0" fill="none" marker-end="url(#a1)"/>
+  <rect x="250" y="82" width="96" height="40" rx="7" fill="#12160f" stroke="#5ad6c0"/>
+  <text x="298" y="100" fill="#5ad6c0" font-size="11" text-anchor="middle" font-family="var(--mono)">by-pid</text>
+  <text x="298" y="114" fill="#5ad6c0" font-size="11" text-anchor="middle" font-family="var(--mono)">cache</text>
+  <text x="215" y="164" fill="#8b938c" font-size="11.5" text-anchor="middle" font-family="var(--mono)">process.kill(pid, 0)  → alive?</text>
+  <text x="215" y="186" fill="#8b938c" font-size="11.5" text-anchor="middle" font-family="var(--mono)">+ startedAtMs  → not a reused PID?</text>
+  <rect x="86" y="206" width="260" height="34" rx="7" fill="#161a18" stroke="#26302a"/>
+  <text x="216" y="228" fill="#8b938c" font-size="11" text-anchor="middle" font-family="var(--mono)">recomputed every --active call · never stored</text>
+  <!-- right: durable transcript -->
+  <text x="685" y="34" fill="#a3e635" font-size="13" text-anchor="middle" font-family="var(--mono)" letter-spacing="1">DURABLE TRANSCRIPT  ·  the memory</text>
+  <rect x="530" y="56" width="310" height="200" rx="12" fill="#111312" stroke="#26302a"/>
+  <rect x="556" y="82" width="120" height="40" rx="7" fill="#161a18" stroke="#26302a"/>
+  <text x="616" y="107" fill="#e7ece8" font-size="12" text-anchor="middle" font-family="var(--mono)">JSONL on disk</text>
+  <path d="M676 102 L720 102" stroke="#a3e635" fill="none" marker-end="url(#a2)"/>
+  <rect x="720" y="82" width="96" height="40" rx="7" fill="#12160f" stroke="#a3e635"/>
+  <text x="768" y="100" fill="#a3e635" font-size="11" text-anchor="middle" font-family="var(--mono)">sessions</text>
+  <text x="768" y="114" fill="#a3e635" font-size="11" text-anchor="middle" font-family="var(--mono)">.db</text>
+  <text x="685" y="164" fill="#8b938c" font-size="11.5" text-anchor="middle" font-family="var(--mono)">SQLite + FTS5 · BM25 ranked search</text>
+  <text x="685" y="186" fill="#8b938c" font-size="11.5" text-anchor="middle" font-family="var(--mono)">incremental mtime-diff scan (not a re-parse)</text>
+  <rect x="556" y="206" width="260" height="34" rx="7" fill="#161a18" stroke="#26302a"/>
+  <text x="686" y="228" fill="#8b938c" font-size="11" text-anchor="middle" font-family="var(--mono)">survives reboot · optionally syncs off-box</text>
+  <!-- divider -->
+  <line x1="450" y1="60" x2="450" y2="252" stroke="#26302a" stroke-dasharray="4 5"/>
+  <defs>
+    <marker id="a1" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L7 4 L0 8 z" fill="#5ad6c0"/></marker>
+    <marker id="a2" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L7 4 L0 8 z" fill="#a3e635"/></marker>
+  </defs>
+</svg>
+<div class="legend">
+  <span><span class="sw" style="background:#5ad6c0"></span>ephemeral / recomputed</span>
+  <span><span class="sw" style="background:#a3e635"></span>durable / indexed</span>
+</div>
+<figcaption><b>Two stores, two lifetimes.</b> The left half vanishes when the process exits; the right
+half is the thing you search a week later. Confusing them is why "why did my session disappear?" and
+"why can't I find my session?" feel like the same bug — they are opposite halves of this picture.</figcaption>
+</figure>
+
+<!-- ============ 03 ============ -->
+<h2 id="s3"><span class="n">03</span>Live identity: liveness you ask for, never liveness you keep</h2>
+<p class="lead">The live layer is deliberately dumb, and that is its strength.</p>
+
+<p>When an agent launches, the CLI drops a small entry into a per-PID cache under
+<code>terminals/by-pid</code> (<code>pid-registry.ts:91</code>) — best-effort, it never throws
+(<code>pid-registry.ts:100</code>). For Claude the exact session id is known at spawn (the CLI mints
+the UUID and passes <code>--session-id</code>); for every other harness the launcher never receives
+the id, so the entry holds <code>pid + agent + cwd</code> and the id is recovered later from the
+transcript on disk. The middle link in that recovery chain is the working directory:
+<code>pid → cwd → transcript file → id</code>.</p>
+
+<p>Liveness itself is not a state machine. Every <code>agents sessions --active</code> call recomputes
+it: <code>isPidAlive</code> (<code>active.ts:528</code>) issues <code>process.kill(pid, 0)</code>
+(<code>active.ts:531</code>) and guards against PID reuse by comparing the process start time
+(<code>startedAtMs</code>). Nothing is persisted. The question the system answers is "is this PID
+alive <em>right now</em>," never "what happened to it." The honest cost of that simplicity: a crashed
+agent doesn't leave a tombstone — it just stops appearing in the list, and crash-versus-clean-exit is
+indistinguishable.</p>
+
+<div class="callout warn">
+  <span class="lbl">a real seam</span>
+  A <code>SessionStart</code> hook would let a self-id'ing harness report its exact id at the source —
+  collapsing every harness up to Claude's precision. It is built but <b>not wired in</b>. Until it is,
+  non-Claude ids are recovered heuristically from disk.
+</div>
+
+<!-- ============ 04 ============ -->
+<h2 id="s4"><span class="n">04</span>The durable transcript: turning conversations into searchable memory</h2>
+<p class="lead">The memory is the transcript, and the index over it is a plain SQLite database — no
+embeddings, no vector store, no model in the hot path.</p>
+
+<p>The index lives at <code>~/.agents/.history/sessions/sessions.db</code>, currently
+<code>SCHEMA_VERSION = 21</code> (<code>db.ts:26</code>). The <code>sessions</code> table carries the
+metadata you sort and filter on — topic, cost, PR, plus provenance columns like <code>actor</code> and
+<code>initiated_by</code>. Full-text search rides an FTS5 virtual table, <code>session_text</code>
+(<code>db.ts:102</code>), and results are BM25-ranked with deliberate column weights —
+<code>[5.0, 2.0, 1.5, 1.0]</code> for label, topic, project, and body (<code>db.ts:48</code>). A label
+match outweighs a body match five to one, because that is what a human searching their own history
+actually wants.</p>
+
+<p>Search is a database read. Opening one session is a full parse of that transcript from disk — the
+DB never stores the conversation body. And the index only touches files whose size or mtime changed
+(<code>scan_ledger</code>), so listing 500 sessions is not 500 re-parses. Each harness stores its
+transcripts in its own layout — one JSONL file per session (Claude, Codex), a directory of artifacts
+per session (Kimi, Grok), or a SQLite database (OpenCode, Antigravity) — and a per-harness scanner
+normalizes them into the one index.</p>
+
+<div class="stat-row">
+  <div class="stat"><div class="big">v21</div><div class="lab">sessions.db schema version (<code>db.ts:26</code>)</div></div>
+  <div class="stat"><div class="big">5 : 1</div><div class="lab">BM25 label-vs-body search weight (<code>db.ts:48</code>)</div></div>
+  <div class="stat"><div class="big">12</div><div class="lab">harnesses normalized into one index</div></div>
+</div>
+
+<!-- ============ 05 ============ -->
+<h2 id="s5"><span class="n">05</span>Cross-device memory: a grow-only set in object storage</h2>
+<p class="lead">A transcript indexed on one box is memory for that box. To make it memory for the
+<em>fleet</em>, agents-cli uses the one data structure that never needs conflict resolution.</p>
+
+<p>The insight is that a transcript is <b>append-only</b>. Events are added; nothing is ever mutated
+or deleted. That makes a session a <b>grow-only set (G-Set)</b> — a CRDT whose merge is simply set
+union (<code>crdt.ts:1</code>). Two machines that each hold a copy of the same session can merge them
+by unioning their events, sorted deterministically by <code>(timestamp, hash)</code>
+(<code>crdt.ts:108</code>), with a fast path when one copy is already a superset of the other
+(<code>crdt.ts:97</code>). There is no "who wins" question, because both are right.</p>
+
+<p>Transport is opt-in R2 (S3-compatible object storage). Each machine pushes only to <b>its own
+prefix</b> — <code>sessions/&lt;machine&gt;/&lt;agent&gt;/&lt;sessionId&gt;</code>
+(<code>agents.ts:236</code>) — so <b>no two machines ever write the same object</b>
+(<code>sync.ts:4</code>). The bodies are sealed client-side with AES-256-GCM
+(<code>transcript-crypto.ts:30</code>), the key resolved locally from an <code>R2_SYNC_ENC_KEY</code>
+bundle; the store sees ciphertext. Convergence is eventual, not real-time: the store is a durable
+mailbox for history, not a live wire.</p>
+
+<figure class="fig">
+<svg viewBox="0 0 900 340" role="img" aria-label="Cross-device sync: single-writer R2 prefixes merged by CRDT union on pull">
+  <!-- machines -->
+  <rect x="40" y="60" width="150" height="52" rx="9" fill="#12160f" stroke="#a3e635"/>
+  <text x="115" y="82" fill="#a3e635" font-size="12.5" text-anchor="middle" font-family="var(--mono)">yosemite-s0</text>
+  <text x="115" y="99" fill="#8b938c" font-size="10.5" text-anchor="middle" font-family="var(--mono)">writes its prefix</text>
+
+  <rect x="40" y="150" width="150" height="52" rx="9" fill="#12160f" stroke="#a3e635"/>
+  <text x="115" y="172" fill="#a3e635" font-size="12.5" text-anchor="middle" font-family="var(--mono)">yosemite-s1</text>
+  <text x="115" y="189" fill="#8b938c" font-size="10.5" text-anchor="middle" font-family="var(--mono)">writes its prefix</text>
+
+  <rect x="40" y="240" width="150" height="52" rx="9" fill="#12160f" stroke="#a3e635"/>
+  <text x="115" y="262" fill="#a3e635" font-size="12.5" text-anchor="middle" font-family="var(--mono)">zion (laptop)</text>
+  <text x="115" y="279" fill="#8b938c" font-size="10.5" text-anchor="middle" font-family="var(--mono)">writes its prefix</text>
+
+  <!-- push arrows (encrypt) -->
+  <path d="M190 86 C 300 86, 320 150, 400 158" stroke="#5ad6c0" fill="none" marker-end="url(#b1)"/>
+  <path d="M190 176 L400 176" stroke="#5ad6c0" fill="none" marker-end="url(#b1)"/>
+  <path d="M190 266 C 300 266, 320 200, 400 194" stroke="#5ad6c0" fill="none" marker-end="url(#b1)"/>
+  <text x="292" y="140" fill="#5ad6c0" font-size="10.5" text-anchor="middle" font-family="var(--mono)">AES-256-GCM</text>
+
+  <!-- R2 store -->
+  <rect x="400" y="120" width="220" height="112" rx="12" fill="#111312" stroke="#26302a"/>
+  <text x="510" y="112" fill="#e7ece8" font-size="12.5" text-anchor="middle" font-family="var(--mono)">R2 object store</text>
+  <text x="510" y="150" fill="#8b938c" font-size="11" text-anchor="middle" font-family="var(--mono)">sessions/s0/…</text>
+  <text x="510" y="172" fill="#8b938c" font-size="11" text-anchor="middle" font-family="var(--mono)">sessions/s1/…</text>
+  <text x="510" y="194" fill="#8b938c" font-size="11" text-anchor="middle" font-family="var(--mono)">sessions/zion/…</text>
+  <text x="510" y="220" fill="#f5c451" font-size="10.5" text-anchor="middle" font-family="var(--mono)">single-writer prefixes</text>
+
+  <!-- pull + merge -->
+  <path d="M620 176 L720 176" stroke="#a3e635" fill="none" marker-end="url(#b2)"/>
+  <rect x="720" y="140" width="150" height="72" rx="12" fill="#12160f" stroke="#a3e635"/>
+  <text x="795" y="168" fill="#a3e635" font-size="12.5" text-anchor="middle" font-family="var(--mono)">CRDT union</text>
+  <text x="795" y="188" fill="#8b938c" font-size="10.5" text-anchor="middle" font-family="var(--mono)">G-Set merge</text>
+  <text x="795" y="202" fill="#8b938c" font-size="10.5" text-anchor="middle" font-family="var(--mono)">no conflicts</text>
+  <text x="670" y="166" fill="#8b938c" font-size="10.5" text-anchor="middle" font-family="var(--mono)">pull</text>
+  <defs>
+    <marker id="b1" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L7 4 L0 8 z" fill="#5ad6c0"/></marker>
+    <marker id="b2" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L7 4 L0 8 z" fill="#a3e635"/></marker>
+  </defs>
+</svg>
+<div class="legend">
+  <span><span class="sw" style="background:#5ad6c0"></span>encrypted push (own prefix)</span>
+  <span><span class="sw" style="background:#a3e635"></span>pull + union merge</span>
+  <span><span class="sw" style="background:#f5c451"></span>no-collision invariant</span>
+</div>
+<figcaption><b>Every writer owns its lane.</b> Because a machine only ever writes under its own prefix,
+two boxes can push concurrently with zero coordination; a puller reconstructs any session by unioning
+the lanes. Losing a machine loses none of the already-pushed history.</figcaption>
+</figure>
+
+<p>How many harnesses actually ride this path is the number to be honest about. Three registries
+count different things, and conflating them is the easy mistake:</p>
+
+<div class="stat-row">
+  <div class="stat"><div class="big">15</div><div class="lab">harnesses the CLI manages (<code>AgentId</code>, <code>lib/types.ts:13</code>)</div></div>
+  <div class="stat"><div class="big">12</div><div class="lab">tracked in the session index (<code>SESSION_AGENTS</code>)</div></div>
+  <div class="stat"><div class="big">7 <span style="font-size:16px;color:var(--dim)">→ 6</span></div><div class="lab">listed as R2-syncable (<code>SYNC_AGENTS</code>); OpenCode's slot is reserved but not yet implemented</div></div>
+</div>
+
+<!-- ============ 06 ============ -->
+<h2 id="s6"><span class="n">06</span>Coordination: three primitives, different in kind</h2>
+<p class="lead">Memory is half the story. The other half is one agent reaching another. agents-cli has
+three ways, and the important design decision is that they are <em>not</em> a menu you pick from —
+they are matched to the recipient's state.</p>
+
+<table>
+  <thead><tr><th>Primitive</th><th>What it is</th><th>Store</th><th>Cross-machine?</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><span class="tag a">feed</span></td>
+      <td>"A bulletin board you pull." Open <em>blocks</em> (last-writer-wins state: "this agent needs you") plus status <em>posts</em> (append-only events).</td>
+      <td><code>.history/feed/</code>, <code>.history/activity/</code></td>
+      <td>Blocks: <b>yes</b> (SSH fan-out). Status posts: <b>no</b> — local-only lane.</td>
+    </tr>
+    <tr>
+      <td><span class="tag b">mailbox</span></td>
+      <td>"Private mail dropped into a running agent," drained at its next tool call.</td>
+      <td><code>.history/mailbox/&lt;id&gt;/{inbox,processing,consumed}</code></td>
+      <td><b>Yes</b>, via <code>--host</code> SSH re-exec — the spool is written on the box that owns the agent. No shared relay.</td>
+    </tr>
+    <tr>
+      <td><span class="tag c">session-inject</span></td>
+      <td>"Types the answer straight into a parked agent's live terminal" when there is no next tool call to drain a mailbox.</td>
+      <td>the live terminal (tmux / iTerm / pty)</td>
+      <td>tmux / iTerm: <b>yes</b> over SSH. pty: local-only.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Their stores mirror their natures. The feed is two files because it is two ideas: an
+<code>OpenBlock</code> is <em>state</em> ("still blocked" overwrites "blocked"), while a status post is
+an <em>event</em> (append-only). The mailbox is a three-stage spool — <code>inbox</code> →
+<code>processing</code> → <code>consumed</code> (<code>mailbox.ts:78</code>) — with a claim-first drain
+(<code>mailbox.ts:245</code>) so a message can never be delivered twice or to the wrong agent. Inject
+has real backends: tmux <code>send-keys</code> and iTerm <code>osascript … write text</code> are
+shipped; pty <code>write</code> is shipped; the VSCodium URI backend routes on the CLI side but the
+extension still no-ops the verb, so <b>it is not yet live</b>.</p>
+
+<!-- ============ 07 ============ -->
+<h2 id="s7"><span class="n">07</span>The router: how a message finds a mind</h2>
+<p class="lead">You do not choose feed vs mailbox vs inject. <code>agents message</code> inspects the
+recipient and routes. The precedence is four rules, first match wins
+(<code>answer-router.ts:123</code>).</p>
+
+<figure class="fig">
+<svg viewBox="0 0 900 320" role="img" aria-label="answer-router decision tree: how a message is routed by recipient state">
+  <rect x="360" y="20" width="180" height="44" rx="9" fill="#111312" stroke="#e7ece8"/>
+  <text x="450" y="47" fill="#e7ece8" font-size="12.5" text-anchor="middle" font-family="var(--mono)">agents message</text>
+
+  <!-- parked? -->
+  <path d="M450 64 L450 96" stroke="#8b938c" fill="none" marker-end="url(#c0)"/>
+  <polygon points="450,96 540,132 450,168 360,132" fill="#161a18" stroke="#26302a"/>
+  <text x="450" y="128" fill="#e7ece8" font-size="11.5" text-anchor="middle" font-family="var(--mono)">parked on an</text>
+  <text x="450" y="143" fill="#e7ece8" font-size="11.5" text-anchor="middle" font-family="var(--mono)">open question?</text>
+
+  <!-- running branch (right) -->
+  <path d="M540 132 L735 132" stroke="#5ad6c0" fill="none" marker-end="url(#c1)"/>
+  <text x="628" y="123" fill="#8b938c" font-size="10.5" text-anchor="middle" font-family="var(--mono)">no · running</text>
+  <rect x="735" y="110" width="140" height="44" rx="9" fill="#12160f" stroke="#5ad6c0"/>
+  <text x="805" y="130" fill="#5ad6c0" font-size="12" text-anchor="middle" font-family="var(--mono)">④ MAILBOX</text>
+  <text x="805" y="145" fill="#8b938c" font-size="10" text-anchor="middle" font-family="var(--mono)">drain next tool call</text>
+
+  <!-- parked branch (down): has rail? -->
+  <path d="M450 168 L450 200" stroke="#a3e635" fill="none" marker-end="url(#c2)"/>
+  <text x="486" y="190" fill="#8b938c" font-size="10.5" text-anchor="middle" font-family="var(--mono)">yes</text>
+  <polygon points="450,200 540,232 450,264 360,232" fill="#161a18" stroke="#26302a"/>
+  <text x="450" y="228" fill="#e7ece8" font-size="11.5" text-anchor="middle" font-family="var(--mono)">injectable rail?</text>
+  <text x="450" y="243" fill="#8b938c" font-size="10.5" text-anchor="middle" font-family="var(--mono)">tmux / iterm / pty</text>
+
+  <!-- rail yes -> inject -->
+  <path d="M360 232 L215 232" stroke="#a3e635" fill="none" marker-end="url(#c3)"/>
+  <text x="288" y="223" fill="#8b938c" font-size="10.5" text-anchor="middle" font-family="var(--mono)">yes</text>
+  <rect x="60" y="210" width="155" height="44" rx="9" fill="#12160f" stroke="#a3e635"/>
+  <text x="137" y="230" fill="#a3e635" font-size="12" text-anchor="middle" font-family="var(--mono)">① INJECT</text>
+  <text x="137" y="245" fill="#8b938c" font-size="10" text-anchor="middle" font-family="var(--mono)">keystroke into terminal</text>
+
+  <!-- rail no -> headless? -->
+  <path d="M450 264 L450 292" stroke="#8b938c" fill="none" marker-end="url(#c4)"/>
+  <text x="486" y="284" fill="#8b938c" font-size="10.5" text-anchor="middle" font-family="var(--mono)">no rail</text>
+  <rect x="300" y="292" width="150" height="26" rx="7" fill="#12160f" stroke="#a3e635"/>
+  <text x="375" y="309" fill="#a3e635" font-size="10.5" text-anchor="middle" font-family="var(--mono)">② headless → resume</text>
+  <rect x="470" y="292" width="180" height="26" rx="7" fill="#161a18" stroke="#ff6b6b"/>
+  <text x="560" y="309" fill="#ff6b6b" font-size="10.5" text-anchor="middle" font-family="var(--mono)">③ interactive → refuse</text>
+  <defs>
+    <marker id="c0" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L7 4 L0 8 z" fill="#8b938c"/></marker>
+    <marker id="c1" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L7 4 L0 8 z" fill="#5ad6c0"/></marker>
+    <marker id="c2" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L7 4 L0 8 z" fill="#a3e635"/></marker>
+    <marker id="c3" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L7 4 L0 8 z" fill="#a3e635"/></marker>
+    <marker id="c4" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L7 4 L0 8 z" fill="#8b938c"/></marker>
+  </defs>
+</svg>
+<div class="legend">
+  <span><span class="sw" style="background:#a3e635"></span>parked (answer where it waits)</span>
+  <span><span class="sw" style="background:#5ad6c0"></span>running (mail it)</span>
+  <span><span class="sw" style="background:#ff6b6b"></span>refuse (don't mis-deliver)</span>
+</div>
+<figcaption><b>State picks the channel, not the caller.</b> A parked agent is answered where it waits;
+a running one gets mail. Rule ③ is the interesting one — it would rather <em>refuse</em> than drop an
+answer into a mailbox the interactive agent will not check, because a mis-delivered answer is worse
+than a visible failure.</figcaption>
+</figure>
+
+<!-- ============ 08 ============ -->
+<h2 id="s8"><span class="n">08</span>The fleet view: assembled on demand, fired exactly once</h2>
+<p class="lead">With no coordinator, "what is my whole fleet doing?" is answered by asking every box
+at once and merging the replies.</p>
+
+<p>Both the live view and the feed use the same move: an SSH fan-out that runs the same command on
+each reachable device and merges the host-tagged results (<code>gatherRemoteAgentsJson</code>,
+<code>remote-agents-json.ts:74</code>). An agent posts progress on whichever box ran it —
+<code>agents feed post</code> appends a <code>status.posted</code> milestone; <code>--blocked</code>
+writes a <code>status.blocked</code> event plus an answerable <code>OpenBlock</code> and broadcasts the
+literal <code>agents focus &lt;id&gt;</code> command to run — and the fleet's posts merge into one
+recency-ordered list on read. A dead or slow box simply contributes zero rows; it never blocks the view.</p>
+
+<p>For <em>reactive</em> coordination there are monitors: watch a source, detect a change, fire an
+action (spawn an agent, run a routine, send a notification, POST a webhook). Because a monitor config
+syncs to every machine, firing it everywhere would fire it N times — so each monitor names a single
+<b>owner device</b> and only that machine's daemon evaluates and fires it
+(<code>monitors/config.ts:192</code>). That pin is the exactly-once guarantee for v1; there is no
+distributed lock, by design.</p>
+
+<div class="callout warn">
+  <span class="lbl">the honest gap in the fleet view</span>
+  Status <em>posts</em> are written to a <b>local-only</b> activity lane; the feed's SSH fan-out
+  carries only open <em>blocks</em>. So "who needs me" travels the fleet, but "here's what I just
+  finished" does not — yet. Closing that is the first job of the context plane below.
+</div>
+
+<!-- ============ 09 ============ -->
+<h2 id="s9"><span class="n">09</span>What is shipped, and what is proposed</h2>
+<p class="lead">A document like this is only useful if it refuses to blur the line between code that runs
+and design that is written down. Here is the line.</p>
+
+<table>
+  <thead><tr><th>Capability</th><th>State</th><th>Note</th></tr></thead>
+  <tbody>
+    <tr><td>SQLite + FTS5 transcript index, BM25 search</td><td><span class="tag a">shipped</span></td><td>schema v21; 12 harnesses normalized in</td></tr>
+    <tr><td>On-demand live <code>--active</code> across the fleet</td><td><span class="tag a">shipped</span></td><td>SSH fan-out; PID-reuse guarded</td></tr>
+    <tr><td>R2 + CRDT G-Set transcript sync</td><td><span class="tag a">shipped</span></td><td>7 listed, ~6 functional; opt-in; encrypted</td></tr>
+    <tr><td>Feed (blocks + posts), mailbox spool, session-inject</td><td><span class="tag a">shipped</span></td><td>VSCodium inject backend still no-ops</td></tr>
+    <tr><td>State-routed <code>agents message</code></td><td><span class="tag a">shipped</span></td><td>the 4-rule answer-router</td></tr>
+    <tr><td>Monitors with exactly-once owner device</td><td><span class="tag a">shipped</span></td><td>no monitor→monitor chaining in v1</td></tr>
+    <tr><td>Status posts that travel the fleet</td><td><span class="tag c">gap</span></td><td>posts are local-only today</td></tr>
+    <tr><td><code>SessionStart</code> id-reporting hook</td><td><span class="tag c">built, unwired</span></td><td>would exact-id every harness</td></tr>
+    <tr><td>Shared context plane (GitHub metadata + warm mirror)</td><td><span class="tag b">proposed</span></td><td>"awaiting go"; extends the event stream, not a new store</td></tr>
+    <tr><td>Structured memory graph (query without embeddings)</td><td><span class="tag b">proposed</span></td><td>extract decisions / files-touched at scan time</td></tr>
+    <tr><td>Partition tolerance for recall</td><td><span class="tag r">open</span></td><td>SSH-partition falls back to a stale per-query cache</td></tr>
+  </tbody>
+</table>
+
+<p>The proposed direction is coherent and modest: <b>do not build a broker.</b> Extend the activity
+event stream that already exists, emit a few missing event types, and publish a small non-sensitive
+metadata manifest per machine to a private GitHub repo — reachable even when SSH is partitioned — with
+the always-on Mac mini keeping a warm cache. Transcripts stay local or in R2; only lightweight
+metadata travels through GitHub; every device stays authoritative for its own sessions. It is the same
+grow-only, no-coordinator philosophy pushed one layer up.</p>
+
+<!-- ============ 10 ============ -->
+<h2 id="s10"><span class="n">10</span>Performance: what indexing and querying actually cost</h2>
+<p class="lead">You asked the sharp operational question: how long does it take to index a session and
+to query, and how do we make querying faster? Here are measured numbers from this box, plus the
+documented internals — labeled so you can tell which is which.</p>
+
+<div class="stat-row">
+  <div class="stat"><div class="big">0.76 s</div><div class="lab">local warm query, <code>--local</code> (full-text, 50 results)</div></div>
+  <div class="stat"><div class="big">8.6 s</div><div class="lab">default query — it fans out to the whole fleet over SSH</div></div>
+  <div class="stat"><div class="big">~48 s</div><div class="lab">first cold call (SSH connections not yet warmed)</div></div>
+  <div class="stat"><div class="big">661 MB</div><div class="lab"><code>sessions.db</code> on this box</div></div>
+</div>
+
+<p>The headline is a 10× gap that has nothing to do with the index: the default query <b>fans out to
+every reachable box</b> and merges the replies, so wall-clock is bounded by the slowest peer (and a
+12 s per-host timeout), not by SQLite. Add <code>--local</code> and the same query is sub-second. The
+index itself is not the bottleneck — and it is not re-parsing anything. Listing only re-scans files
+whose size or mtime changed (the <code>scan_ledger</code>), so a 661 MB database is a read, not a
+re-parse.</p>
+
+<figure class="fig">
+<svg viewBox="0 0 900 220" role="img" aria-label="Where the wall-clock of one local query goes">
+  <text x="20" y="30" fill="#8b938c" font-size="12" font-family="var(--mono)">one local query ≈ 760 ms — where it goes</text>
+  <!-- stacked bar, total 700px = 760ms -->
+  <g>
+    <rect x="20" y="52" width="250" height="40" fill="#a3e635"/>
+    <rect x="270" y="52" width="117" height="40" fill="#5ad6c0"/>
+    <rect x="387" y="52" width="101" height="40" fill="#f5c451"/>
+    <rect x="488" y="52" width="232" height="40" fill="#2a322b"/>
+  </g>
+  <text x="145" y="77" fill="#0a0a0a" font-size="12" text-anchor="middle" font-family="var(--mono)">code load 271ms</text>
+  <text x="328" y="77" fill="#0a0a0a" font-size="11" text-anchor="middle" font-family="var(--mono)">paths 127ms</text>
+  <text x="437" y="77" fill="#0a0a0a" font-size="11" text-anchor="middle" font-family="var(--mono)">FTS ~110</text>
+  <text x="604" y="77" fill="#8b938c" font-size="11" text-anchor="middle" font-family="var(--mono)">serialize + rest</text>
+  <!-- fanout annotation -->
+  <text x="20" y="130" fill="#8b938c" font-size="12" font-family="var(--mono)">default (fleet fan-out) ≈ 8.6 s — same query, +11 SSH round-trips</text>
+  <rect x="20" y="142" width="720" height="26" fill="#161a18" stroke="#26302a"/>
+  <rect x="20" y="142" width="64" height="26" fill="#a3e635"/>
+  <text x="52" y="159" fill="#0a0a0a" font-size="10.5" text-anchor="middle" font-family="var(--mono)">local</text>
+  <text x="410" y="159" fill="#ff6b6b" font-size="11" text-anchor="middle" font-family="var(--mono)">+ ~7.8 s waiting on the slowest peer (12 s timeout cap)</text>
+  <text x="20" y="200" fill="#8b938c" font-size="11" font-family="var(--mono)">documented internals: timeline doc · measured wall: this box, warm</text>
+</svg>
+<div class="legend">
+  <span><span class="sw" style="background:#a3e635"></span>node / code load</span>
+  <span><span class="sw" style="background:#5ad6c0"></span>path resolution</span>
+  <span><span class="sw" style="background:#f5c451"></span>the actual FTS query</span>
+  <span><span class="sw" style="background:#2a322b"></span>serialize + overhead</span>
+</div>
+<figcaption><b>The query is the small slice.</b> The FTS read is ~110 ms of a ~760 ms local call; the
+rest is process startup. The default fan-out then dwarfs everything. So the two real levers are
+<em>avoid the fan-out</em> and <em>amortize the startup</em>.</figcaption>
+</figure>
+
+<h3>How to make querying faster</h3>
+<ul>
+  <li><b>Scope to the box when you can.</b> <code>--local</code> skips the SSH fan-out entirely — the
+  measured 10× win. Reach for the fleet view only when you actually need it.</li>
+  <li><b>The index is already incremental.</b> The <code>scan_ledger</code> re-scans only changed
+  files, so indexing cost is proportional to <em>new</em> transcript bytes, not the 661 MB total. The
+  "is it re-parsing everything?" worry is unfounded — the measured cost is ~271 ms loading code and
+  ~127 ms resolving paths, per the timeline profile.</li>
+  <li><b>Amortize the fixed ~400 ms startup.</b> Today the menu-bar and extension re-poll by spawning
+  a <em>fresh process every 3 s, per machine</em> — paying that startup over and over. The proposed
+  fix is "parse once, push changes, subscribe": a persistent reader that pushes deltas instead of
+  being re-invoked. That is the single biggest available speedup for the live view.</li>
+  <li><b>Keep the fan-out bounded.</b> The 12 s per-host timeout and "dead boxes contribute zero rows"
+  behavior already stop one asleep laptop from hanging the whole fleet query.</li>
+</ul>
+
+<!-- ============ 11 ============ -->
+<h2 id="s11"><span class="n">11</span>How the sessions CLI is actually used</h2>
+<p class="lead">Rather than guess which filters matter, I mined it. A committed script
+(<code>analyze-session-cli-usage.py</code>, next to this doc) walked every transcript on this box from
+the last 14 days and tallied every <code>agents sessions</code> call that appears in a tool command.</p>
+
+<div class="stat-row">
+  <div class="stat"><div class="big">2,703</div><div class="lab">transcripts in the 14-day window (all scanned)</div></div>
+  <div class="stat"><div class="big">128</div><div class="lab">sessions that invoked the CLI (~5%)</div></div>
+  <div class="stat"><div class="big">1,760</div><div class="lab">total invocations</div></div>
+  <div class="stat"><div class="big">97%</div><div class="lab">carried a query, id, or path argument</div></div>
+</div>
+
+<p>The subcommand mix is lopsided: <b>1,752 of 1,760 calls are the search/inspect form</b>; explicit
+<code>resume</code> appears 6 times and <code>sync</code> twice. Agents overwhelmingly <em>read</em>
+sessions — to recall context or check the fleet — and rarely drive resume/sync from the CLI. The flag
+distribution says what the tool is really <em>for</em>:</p>
+
+<figure class="fig">
+<svg viewBox="0 0 900 330" role="img" aria-label="Filter frequency across 1,756 sessions CLI invocations">
+  <text x="20" y="26" fill="#8b938c" font-size="12" font-family="var(--mono)">share of the 1,760 invocations carrying each flag</text>
+  <!-- rows: label(x0..150), bar from 160, scale 23% -> 660px -->
+  <g font-family="var(--mono)" font-size="12">
+    <text x="150" y="58" fill="#e7ece8" text-anchor="end">--json</text>
+    <rect x="160" y="47" width="660" height="16" rx="3" fill="#a3e635"/><text x="828" y="60" fill="#8b938c" font-size="11">23%</text>
+    <text x="150" y="84" fill="#e7ece8" text-anchor="end">--active</text>
+    <rect x="160" y="73" width="602" height="16" rx="3" fill="#a3e635"/><text x="770" y="86" fill="#8b938c" font-size="11">21%</text>
+    <text x="150" y="110" fill="#e7ece8" text-anchor="end">--limit</text>
+    <rect x="160" y="99" width="545" height="16" rx="3" fill="#5ad6c0"/><text x="713" y="112" fill="#8b938c" font-size="11">19%</text>
+    <text x="150" y="136" fill="#e7ece8" text-anchor="end">--all</text>
+    <rect x="160" y="125" width="516" height="16" rx="3" fill="#5ad6c0"/><text x="684" y="138" fill="#8b938c" font-size="11">18%</text>
+    <text x="150" y="162" fill="#e7ece8" text-anchor="end">--since</text>
+    <rect x="160" y="151" width="344" height="16" rx="3" fill="#5ad6c0"/><text x="512" y="164" fill="#8b938c" font-size="11">12%</text>
+    <text x="150" y="188" fill="#e7ece8" text-anchor="end">--host</text>
+    <rect x="160" y="177" width="258" height="16" rx="3" fill="#f5c451"/><text x="426" y="190" fill="#8b938c" font-size="11">9%</text>
+    <text x="150" y="214" fill="#e7ece8" text-anchor="end">--local</text>
+    <rect x="160" y="203" width="172" height="16" rx="3" fill="#f5c451"/><text x="340" y="216" fill="#8b938c" font-size="11">6%</text>
+    <text x="150" y="240" fill="#e7ece8" text-anchor="end">--last</text>
+    <rect x="160" y="229" width="172" height="16" rx="3" fill="#f5c451"/><text x="340" y="242" fill="#8b938c" font-size="11">6%</text>
+    <text x="150" y="266" fill="#e7ece8" text-anchor="end">--markdown</text>
+    <rect x="160" y="255" width="172" height="16" rx="3" fill="#f5c451"/><text x="340" y="268" fill="#8b938c" font-size="11">6%</text>
+    <text x="150" y="292" fill="#e7ece8" text-anchor="end">--include</text>
+    <rect x="160" y="281" width="143" height="16" rx="3" fill="#f5c451"/><text x="311" y="294" fill="#8b938c" font-size="11">5%</text>
+  </g>
+</svg>
+<div class="legend">
+  <span><span class="sw" style="background:#a3e635"></span>read shape (json / live)</span>
+  <span><span class="sw" style="background:#5ad6c0"></span>scope (count / project / time)</span>
+  <span><span class="sw" style="background:#f5c451"></span>target &amp; format</span>
+</div>
+<figcaption><b>The tool is a read surface.</b> <code>--json</code> (23%) and <code>--active</code>
+(21%) lead — machine-readable reads (agents consuming other agents' state) and live fleet status.
+<code>--all</code> (18%) + <code>--since</code> (12%) are cross-project, time-scoped recall. That is
+memory-and-coordination, measured.</figcaption>
+</figure>
+
+<div class="callout">
+  <span class="lbl">what the usage confirms</span>
+  The design thesis and the telemetry agree. The two most-used flags are exactly the two jobs this
+  document is about: <code>--json</code> (one agent reading another's state as data) and
+  <code>--active</code> (the live fleet view). Resume and sync are rare; <em>recall</em> and
+  <em>situational awareness</em> are the product.
+</div>
+
+<!-- ============ 12 ============ -->
+<h2 id="s12"><span class="n">12</span>The evidence: what two boxes actually did</h2>
+<p class="lead">The abstractions above are not hypothetical. Over a recent three-day window, a snapshot
+was taken of every substantive agent session on two worker boxes — probe runs and title-generators
+filtered out.</p>
+
+<div class="stat-row">
+  <div class="stat"><div class="big">109</div><div class="lab">real sessions across yosemite-s0 &amp; s1</div></div>
+  <div class="stat"><div class="big">17,006</div><div class="lab">messages exchanged</div></div>
+  <div class="stat"><div class="big">4</div><div class="lab">harnesses side by side — claude · codex · grok · kimi</div></div>
+  <div class="stat"><div class="big">3 days</div><div class="lab">the observation window</div></div>
+</div>
+
+<p>Each session was indexed, searchable, and readable from either box — the transcript layer doing
+exactly its job at fleet scale. What that snapshot does <b>not</b> contain is a measurement of the
+coordination path itself: there is no benchmark of sync latency, mailbox delivery time, or fan-out
+cost. That is the most valuable missing number, and the clearest next experiment — instrument a push,
+a pull-merge, and a cross-box <code>agents message</code>, and put real milliseconds on this diagram.</p>
+
+<div class="callout">
+  <span class="lbl">where this leaves us</span>
+  The memory layer is real and proven at scale. The coordination layer is real and state-aware. The
+  two known seams — status posts that stay home, and no partition-tolerant recall — are exactly what
+  the proposed context plane targets, and neither requires a coordinator to fix.
+</div>
+
+<!-- ============ 11 ============ -->
+<h2 id="s13"><span class="n">appendix</span>Where the source documents live</h2>
+<p class="lead">This synthesis draws on a scattered corpus. For the reader who wants the primary
+sources, ranked for this topic:</p>
+
+<table>
+  <thead><tr><th>Document</th><th>Covers</th><th>Home</th></tr></thead>
+  <tbody>
+    <tr><td><code>distributed-agent-execution-architecture.md</code></td><td>the whole memory + coordination layer, file:line grounded; frontier comparison</td><td><span class="tag a">repo</span> <code>.agents/reports/</code></td></tr>
+    <tr><td><code>agent-comms.html</code></td><td>the three comms primitives + routing, in depth</td><td><span class="tag c">zion scratchpad</span> uncommitted</td></tr>
+    <tr><td><code>session-tracking-explainer.html</code></td><td>live identity + per-harness transcript layouts</td><td><span class="tag c">zion scratchpad</span> uncommitted</td></tr>
+    <tr><td><code>plan-distributed-agent-execution.html</code></td><td>the shared context plane design</td><td><span class="tag b">repo</span> <code>.agents/plans/</code> (gitignored)</td></tr>
+    <tr><td><code>05-sessions.md</code> · <code>06-observability.md</code> · <code>10-monitors.md</code></td><td>the canonical shipped reference for sessions, feed/mailbox, monitors</td><td><span class="tag a">repo</span> <code>apps/cli/docs/</code></td></tr>
+    <tr><td><code>agents-cli-architecture.html</code></td><td>the distributed execution core (SSH model)</td><td><span class="tag a">repo</span> <code>docs/plans/2026-07-30/</code></td></tr>
+    <tr><td><code>agents-cli-s0-s1-sessions/</code></td><td>the 109-session work catalog behind §12</td><td><span class="tag c">zion artifacts</span></td></tr>
+    <tr><td><code>analyze-session-cli-usage.py</code></td><td>the re-runnable miner behind §11 (filter frequency)</td><td><span class="tag a">repo</span> next to this file</td></tr>
+  </tbody>
+</table>
+
+<p>Two of the best sources — <code>agent-comms.html</code> and
+<code>session-tracking-explainer.html</code> — live only in a scratchpad on one machine. They are
+worth rescuing into <code>.agents/reports/</code> so they survive; this document is a step toward
+consolidating that knowledge into one committed place.</p>
+
+<div class="foot">
+  agents-cli · memory &amp; coordination · rendered by plan-render &nbsp;·&nbsp;
+  claude · opus-4.8 · yosemite-s1 · session d66e73be · 2026-08-03 &nbsp;·&nbsp;
+  every quantitative claim source-grounded · <span style="color:var(--accent)">read the code, not the vibe</span>
+</div>
+
+</div>
+</body>
+</html>

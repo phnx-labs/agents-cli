@@ -426,8 +426,13 @@ describe('bucketKey', () => {
     expect(bucketKey('ssh host "git status"')).toBe('ssh\u2192git status');
   });
 
-  it('returns single token for unknown commands', () => {
-    expect(bucketKey('python3 bench.py')).toBe('python3');
+  it('canonicalizes an aliased executable to its registry name', () => {
+    // `python3` is an alias of `python`; bucketing groups them under `python`.
+    expect(bucketKey('python3 bench.py')).toBe('python');
+  });
+
+  it('returns the raw token for genuinely unknown commands', () => {
+    expect(bucketKey('./something-weird')).toBe('something-weird');
   });
 });
 
