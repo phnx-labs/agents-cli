@@ -153,6 +153,25 @@ describe('formatProjectMembers', () => {
   it('is empty for no members', () => {
     expect(formatProjectMembers([])).toBe('');
   });
+
+  it('collapses identical cells to one ×N cell — a same-harness fleet is one fact', () => {
+    const members: ProjectMember[] = [
+      ...Array.from({ length: 14 }, () => ({ agent: 'claude', status: 'running', host: 'zion' })),
+      { agent: 'codex', status: 'idle', host: 'mac-mini' },
+      { agent: 'claude', status: 'running', ticket: 'RUSH-2107', host: 'zion' },
+    ];
+    const line = stripAnsi(formatProjectMembers(members));
+    expect(line).toBe('claude · running @zion ×14  ·  claude · running · RUSH-2107 @zion  ·  codex · idle @mac-mini');
+  });
+
+  it('the +N tail counts members, not cells, when collapsed groups are capped', () => {
+    const members: ProjectMember[] = [
+      ...Array.from({ length: 30 }, () => ({ agent: 'claude', status: 'running' })),
+      ...Array.from({ length: MEMBERS_LINE_LIMIT }, (_, i) => ({ agent: `agent${i}`, status: 'idle' })),
+    ];
+    // 6 cells cap: [claude ×30, agent0..agent4] = 35 members shown, 1 left over.
+    expect(stripAnsi(formatProjectMembers(members)).endsWith('+1 more')).toBe(true);
+  });
 });
 
 describe('enrichProjectSignals — artifact counting from the activity log', () => {

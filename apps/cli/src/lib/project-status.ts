@@ -142,19 +142,32 @@ export function sortProjectMembers(members: ProjectMember[]): ProjectMember[] {
 export const MEMBERS_LINE_LIMIT = 6;
 
 /**
- * The `agents` line under `live`: one cell per member —
- * `claude · running · RUSH-2107 @zion` — capped at {@link MEMBERS_LINE_LIMIT}
- * with a `+N more` tail. Pure (chalk styling only); the caller adds the label.
+ * The `agents` line under `live`: one cell per DISTINCT member state —
+ * `claude · running · RUSH-2107 @zion` — with identical cells collapsed to a
+ * `×N` count (35 same-harness sessions in one state are one fact, not six
+ * truncated duplicates), capped at {@link MEMBERS_LINE_LIMIT} cells with a
+ * `+N more` tail counting members, not cells. Pure (chalk styling only); the
+ * caller adds the label.
  */
 export function formatProjectMembers(members: ProjectMember[], limit = MEMBERS_LINE_LIMIT): string {
   if (members.length === 0) return '';
-  const shown = sortProjectMembers(members).slice(0, Math.max(1, limit));
-  const cells = shown.map((m) => {
+  // Collapse identical cells — 35 same-harness sessions in the same state are
+  // one fact (`claude · running ×16`), not six truncated duplicates.
+  const counts = new Map<string, { cell: string; n: number }>();
+  for (const m of sortProjectMembers(members)) {
     const parts = [m.agent, m.status];
     if (m.ticket) parts.push(m.ticket);
-    return parts.join(' · ') + (m.host ? ` @${m.host}` : '');
-  });
-  const more = members.length - shown.length;
+    const cell = parts.join(' · ') + (m.host ? ` @${m.host}` : '');
+    const key = cell.toLowerCase();
+    const entry = counts.get(key);
+    if (entry) entry.n++;
+    else counts.set(key, { cell, n: 1 });
+  }
+  const entries = [...counts.values()];
+  const shown = entries.slice(0, Math.max(1, limit));
+  const shownMembers = shown.reduce((acc, e) => acc + e.n, 0);
+  const more = members.length - shownMembers;
+  const cells = shown.map(({ cell, n }) => (n > 1 ? `${cell} ×${n}` : cell));
   return cells.join(chalk.dim('  ·  ')) + (more > 0 ? chalk.dim(`  ·  +${more} more`) : '');
 }
 
