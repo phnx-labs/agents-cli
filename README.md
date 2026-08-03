@@ -276,7 +276,7 @@ On a terminal, `agents sessions --active` (and a bare `agents sessions`) open th
 | `⏎` | resume / attach | `resume` / `focus` |
 | `y` | copy the equivalent command | `--print-cmd` |
 
-**Star the sessions you keep coming back to.** `*` marks the highlighted row (a `★` shows in the listing), `f` narrows to the starred ones, and `agents sessions favorite <id>` / `--favorites` do the same outside a TTY. Stars live in `~/.agents/.history/favorites.json` keyed by session id, so they survive a reindex and follow the session to your other machines.
+**Star the sessions you keep coming back to.** `*` marks the highlighted row (a `★` shows in the listing), `f` narrows to the starred ones, and `agents sessions favorite <id>` / `--favorites` do the same outside a TTY. Stars live in `~/.agents/.history/favorites.json` keyed by session id, so they survive a reindex of the session cache. They're per-machine — session sync carries transcripts, not this file.
 
 **A session that lost its host says so.** When an editor window or an SSH connection goes down hard, the agent it owned used to simply disappear from `--active`; when an agent outlived its window in tmux, it reported a plain `idle`. Both now carry their own status: `✗ crashed` (the host went down and took the agent with it) and `◍ orphan` (still alive, but no client is attached — nothing is showing it). Read from tmux's attached-client count and the editor window's registry heartbeat, so a deliberate `agents sessions detach` is never mistaken for one, and a session that is still *working* headlessly is left alone.
 

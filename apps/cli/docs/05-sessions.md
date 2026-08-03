@@ -551,8 +551,13 @@ the `y` copy-cmd round-trips a starred view into a command.
 Stars live in `~/.agents/.history/favorites.json` keyed by session id, **not** in
 `sessions.db`. The index is a rebuildable cache — a reindex re-derives every row from
 the transcripts on disk — and a favorite is not derivable from a transcript, so a column
-there would be silently lost on the next rebuild. `.history` is never pruned and syncs
-across machines, so a session starred on one box is starred on every box.
+there would be silently lost on the next rebuild. `.history` is never pruned, so a star
+survives that rebuild.
+
+Favorites are **per-machine**. Session sync carries `.history/backups/`
+(`lib/session/sync/agents.ts`), not this file, so a session starred on one box is not
+starred on another — even though the session id itself is fleet-wide. Carrying them
+would mean adding the file to the sync manifest.
 
 ## Export / Import (portable bundles)
 

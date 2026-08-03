@@ -272,7 +272,9 @@ SSH access (§7); rendering sessions that no harness produced.
   `lib/session/favorites.ts`), because the index is a rebuildable cache and a
   favorite is not derivable from a transcript. A malformed or absent store MUST
   degrade to "nothing is favorited", never throw into the listing path (test
-  `favorites.test.ts`).
+  `favorites.test.ts`). Favorites are per-machine: the store is NOT in the sync
+  manifest (`lib/session/sync/agents.ts` syncs `.history/backups/`), and any doc
+  claiming otherwise is drift.
 - **SES-19 (MUST).** Detach/attach presence MUST be **derived, never asserted**:
   the record only says "this session was detached"; `background` vs `parked` is
   decided live from the recorded pid + start-time fingerprint

@@ -8,9 +8,11 @@
  * be silently lost on the next rebuild. It lives in `~/.agents/.history/` instead,
  * next to the actor sidecars, which is never pruned.
  *
- * One flat set of session ids, because a session id is the transcript's own uuid
- * and is therefore stable across machines: the file syncs with the rest of
- * `.history`, so a session starred on one box is starred on every box.
+ * One flat set of session ids. The id is the transcript's own uuid, so it is
+ * stable and machine-independent — but the file is NOT synced today: session sync
+ * carries `.history/backups/` (`lib/session/sync/agents.ts`), not this. Favorites
+ * are therefore per-machine; carrying them across the fleet would mean adding
+ * them to the sync manifest, which this does not do.
  *
  * Reads are memoized against the file's mtime — the picker asks `isFavorite` once
  * per rendered row, and re-reading a JSON file per row on every keystroke is the

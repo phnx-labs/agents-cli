@@ -3,7 +3,8 @@
   `agents sessions favorite <id>` (`--remove` / `--list` / `--json`) and
   `agents sessions --favorites` do the same. Stars live in
   `~/.agents/.history/favorites.json` keyed by session id, so they survive a reindex
-  of the session cache and follow the session across machines. Source:
+  of the session cache. They are per-machine — session sync carries transcripts, not
+  this file. Source:
   `apps/cli/src/lib/session/favorites.ts`, `apps/cli/src/commands/sessions-favorite.ts`.
 - **Detect sessions that lost their host — two new statuses, `crashed` and `orphaned`.**
   A session whose editor window or connection went down hard used to just VANISH from

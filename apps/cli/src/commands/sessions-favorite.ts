@@ -69,8 +69,9 @@ export function registerSessionsFavoriteCommand(sessionsCmd: Command): void {
       In the interactive browser (\`agents sessions\`), \`*\` stars the highlighted
       session and \`f\` filters the list down to the starred ones.
 
-      Stars live in ~/.agents/.history/favorites.json, keyed by session id — so
-      they survive a reindex and follow the session across your machines.
+      Stars live in ~/.agents/.history/favorites.json, keyed by session id, so
+      they survive a reindex of the session cache. They are per-machine: session
+      sync carries transcripts, not this file.
     `,
   });
 
