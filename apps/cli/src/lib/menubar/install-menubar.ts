@@ -451,6 +451,149 @@ export function installMenubarLaunchAgentOnUpgrade(): void {
   }
 }
 
+/** One step of `agents menubar setup`, and how it came out. */
+export interface SetupStep {
+  /** What was configured. */
+  name: string;
+  /** `ok` — already correct or now correct; `changed` — this run fixed it;
+   *  `failed` — could not be configured (setup reports and exits nonzero). */
+  outcome: 'ok' | 'changed' | 'failed';
+  detail: string;
+}
+
+export interface SetupResult {
+  steps: SetupStep[];
+  /** Every step landed on `ok`/`changed` and exactly one helper is running. */
+  configured: boolean;
+  status: MenubarStatus;
+}
+
+/**
+ * Decide which live helper processes must be ended so exactly one status item
+ * survives. Pure so the choice is unit-testable without a live menu bar.
+ *
+ * EVERY current process is ended, including the wanted one: the caller
+ * re-kickstarts the launchd service straight after, so the survivor is the one
+ * launchd owns (RunAtLoad + KeepAlive), not whichever copy happened to win a
+ * race. Picking a survivor from a `ps` listing cannot do this — the list says
+ * nothing about which pid launchd will keep alive, so leaving one alive risks
+ * keeping the un-managed copy and re-creating the duplicate on next login.
+ */
+export function processesToEnd(status: Pick<MenubarStatus, 'instances' | 'foreignInstances'>): MenubarProcess[] {
+  return [...status.instances, ...status.foreignInstances];
+}
+
+function endProcess(pid: number): void {
+  try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
+}
+
+/**
+ * `agents menubar setup` — configure the menu bar end-to-end, idempotently.
+ *
+ * The one command that gets a machine to the intended state: exactly one status
+ * item, owned by a launchd service that starts it at login and restarts it if it
+ * dies. Each concern is a reported step, so a partial failure names itself
+ * instead of hiding behind "enabled".
+ *
+ *   1. bundle      — install/refresh the .app at the stable App Support path
+ *   2. signature   — a valid code identity (macOS 26+ SIGKILLs an invalid one)
+ *   3. duplicates  — end every live helper, so the only survivor is launchd's
+ *   4. login item  — write the plist (RunAtLoad + KeepAlive) and bootstrap it
+ *   5. single      — verify exactly one helper came back up
+ */
+export function runMenubarSetup(): SetupResult {
+  const steps: SetupStep[] = [];
+  const step = (name: string, outcome: SetupStep['outcome'], detail: string) => {
+    steps.push({ name, outcome, detail });
+  };
+
+  if (!onDarwin()) {
+    step('platform', 'failed', `the menu bar helper is macOS only (this is ${process.platform})`);
+    return { steps, configured: false, status: getMenubarStatus() };
+  }
+
+  const before = getMenubarStatus();
+
+  if (!sourceAppPath()) {
+    step('bundle', 'failed', 'no menu-bar helper bundle ships with this install');
+    return { steps, configured: false, status: before };
+  }
+
+  // 3 before 1: end the running copies BEFORE swapping the bundle underneath
+  // them, so no helper keeps a status item alive on a binary that no longer
+  // exists on disk.
+  const doomed = processesToEnd(before);
+  for (const p of doomed) endProcess(p.pid);
+  if (doomed.length > 1) {
+    step('duplicates', 'changed',
+      `ended ${doomed.length} running helpers (${doomed.map((p) => p.pid).join(', ')}) — launchd restarts exactly one`);
+  } else if (doomed.length === 1) {
+    step('duplicates', 'ok', 'one helper was running; restarting it under launchd');
+  } else {
+    step('duplicates', 'ok', 'no helper was running');
+  }
+
+  const exec = ensureMenubarAppInstalled({ forceReinstall: true });
+  if (!exec) {
+    step('bundle', 'failed', 'could not install the helper bundle');
+    return { steps, configured: false, status: getMenubarStatus() };
+  }
+  step('bundle', before.installedVersion === getCliVersion() ? 'ok' : 'changed',
+    `${installedAppPath()} (${getCliVersion()})`);
+
+  if (!codesignVerifies(installedAppPath())) {
+    step('signature', 'failed',
+      'no valid code signature — refusing to start it (launchd KeepAlive would crash-loop)');
+    return { steps, configured: false, status: getMenubarStatus() };
+  }
+  step('signature', 'ok', 'valid');
+
+  // Clear the sticky opt-out: running `setup` is an explicit request for the
+  // menu bar, so a stale `menubar disable` must not silently win.
+  try { fs.rmSync(disabledSentinelPath(), { force: true }); } catch { /* already gone */ }
+
+  const plist = servicePlistPath();
+  fs.mkdirSync(path.dirname(plist), { recursive: true });
+  fs.writeFileSync(plist, generateServicePlist(exec));
+  restartMenubarLaunchAgent(process.getuid?.() ?? 0, plist);
+  try { fs.writeFileSync(installedVersionMarkerPath(), getCliVersion()); } catch { /* best effort */ }
+  step('login item', before.serviceInstalled ? 'ok' : 'changed',
+    `${SERVICE_LABEL} — starts at login, restarts if it dies`);
+
+  // launchd's bootstrap+kickstart is asynchronous; give the status item a beat
+  // to claim the lock before counting instances, or `setup` reports zero on a
+  // machine that is in fact coming up correctly.
+  const after = waitForSingleInstance();
+  if (after.instances.length === 1 && after.foreignInstances.length === 0) {
+    step('single instance', 'ok', `pid ${after.instances[0].pid}`);
+  } else if (after.instances.length === 0) {
+    step('single instance', 'failed', 'the helper did not come back up — see `agents menubar status`');
+  } else {
+    const extra = [...after.instances.slice(1), ...after.foreignInstances];
+    step('single instance', 'failed',
+      `${after.instances.length + after.foreignInstances.length} helpers running (${extra.map((p) => p.pid).join(', ')} are extra)`);
+  }
+
+  return {
+    steps,
+    configured: steps.every((s) => s.outcome !== 'failed'),
+    status: after,
+  };
+}
+
+/**
+ * Poll (up to ~3s) for launchd to bring the single helper back. Returns the
+ * last status read either way — the caller decides what a miss means.
+ */
+function waitForSingleInstance(): MenubarStatus {
+  let status = getMenubarStatus();
+  for (let i = 0; i < 15 && status.instances.length !== 1; i++) {
+    spawnSync('sleep', ['0.2'], { stdio: ['ignore', 'ignore', 'ignore'] });
+    status = getMenubarStatus();
+  }
+  return status;
+}
+
 /** A live MenubarHelper process: its pid and the executable it is running. */
 export interface MenubarProcess {
   pid: number;
@@ -470,12 +613,19 @@ function parsePsLines(psOutput: string): Map<number, string> {
 
 /**
  * Split the live MenubarHelper processes into the installed bundle's own
- * (`running`) and every other copy (`foreign`).
+ * (`own`) and every other copy (`foreign`).
  *
  * `pgrep -f MenubarHelper` conflated the two, so a stray dev build could hold
  * the global Cmd-Shift-V chord (RegisterEventHotKey is first-come) while status
  * still reported a healthy `running: yes` — the paste was dead and nothing said
  * so. A foreign copy is the thing to look for, so name it.
+ *
+ * `own` is a LIST, not a boolean: two copies of the INSTALLED bundle can run at
+ * once (launchd's KeepAlive service plus a LaunchServices/`open` launch of the
+ * same .app), which is the duplicate the user actually sees — two agents marks
+ * in the menu bar. Collapsing them to `running: true` reported that state as
+ * healthy. The helper now refuses to be the second (SingleInstance.swift), and
+ * `agents menubar setup` ends any duplicate a pre-fix helper left behind.
  *
  * Identity comes from `comm` (the resolved executable), never from a substring
  * of the command line: matching the latter flags any shell that merely mentions
@@ -485,19 +635,19 @@ export function classifyMenubarProcesses(
   commOutput: string,
   commandOutput: string,
   installedExec: string,
-): { running: boolean; foreign: MenubarProcess[] } {
+): { own: MenubarProcess[]; foreign: MenubarProcess[] } {
   const commands = parsePsLines(commandOutput);
+  const own: MenubarProcess[] = [];
   const foreign: MenubarProcess[] = [];
-  let running = false;
   for (const [pid, executable] of parsePsLines(commOutput)) {
     if (path.basename(executable) !== 'MenubarHelper') continue;
     // `--notify` is a one-shot that posts a notification and exits; it runs the
     // installed binary but never claims the status item or the chords.
     if ((commands.get(pid) || '').includes('--notify')) continue;
-    if (executable === installedExec) running = true;
+    if (executable === installedExec) own.push({ pid, executable });
     else foreign.push({ pid, executable });
   }
-  return { running, foreign };
+  return { own, foreign };
 }
 
 export interface MenubarStatus {
@@ -509,26 +659,27 @@ export interface MenubarStatus {
   stale: boolean;
   serviceInstalled: boolean;
   running: boolean;
+  /** Live processes of the INSTALLED bundle. More than one is the duplicate. */
+  instances: MenubarProcess[];
   /** Live MenubarHelper processes that are NOT the installed bundle. */
   foreignInstances: MenubarProcess[];
   disabledByUser: boolean;
 }
 
+/** Live MenubarHelper processes, split by whether they are the installed bundle. */
+function liveMenubarProcesses(): { own: MenubarProcess[]; foreign: MenubarProcess[] } {
+  if (!onDarwin()) return { own: [], foreign: [] };
+  const ps = (format: string) =>
+    spawnSync('ps', ['-axo', format], { stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf-8' });
+  const comm = ps('pid=,comm=');
+  const command = ps('pid=,command=');
+  if (comm.status !== 0 || command.status !== 0) return { own: [], foreign: [] };
+  return classifyMenubarProcesses(comm.stdout || '', command.stdout || '', installedExecutablePath());
+}
+
 export function getMenubarStatus(): MenubarStatus {
   const dest = installedAppPath();
-  let running = false;
-  let foreignInstances: MenubarProcess[] = [];
-  if (onDarwin()) {
-    const ps = (format: string) =>
-      spawnSync('ps', ['-axo', format], { stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf-8' });
-    const comm = ps('pid=,comm=');
-    const command = ps('pid=,command=');
-    if (comm.status === 0 && command.status === 0) {
-      const c = classifyMenubarProcesses(comm.stdout || '', command.stdout || '', installedExecutablePath());
-      running = c.running;
-      foreignInstances = c.foreign;
-    }
-  }
+  const { own, foreign } = liveMenubarProcesses();
   const serviceInstalled = menubarServiceInstalled();
   return {
     platform: process.platform,
@@ -538,8 +689,9 @@ export function getMenubarStatus(): MenubarStatus {
     currentVersion: getCliVersion(),
     stale: onDarwin() && serviceInstalled && menubarSetupStale(),
     serviceInstalled,
-    running,
-    foreignInstances,
+    running: own.length > 0,
+    instances: own,
+    foreignInstances: foreign,
     disabledByUser: menubarDisabledByUser(),
   };
 }

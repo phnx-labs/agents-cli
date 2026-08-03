@@ -9,6 +9,7 @@ import {
   ensureValidSignature,
   isMenubarStale,
   menubarPlistNeedsRepoint,
+  processesToEnd,
   restartMenubarLaunchAgent,
 } from './install-menubar.js';
 
@@ -29,21 +30,32 @@ describe('classifyMenubarProcesses', () => {
 
   it('reports the installed bundle as running', () => {
     const r = classifyMenubarProcesses(`74027 ${INSTALLED}`, `74027 ${INSTALLED}`, INSTALLED);
-    expect(r.running).toBe(true);
+    expect(r.own.map((p) => p.pid)).toEqual([74027]);
     expect(r.foreign).toEqual([]);
   });
 
   it('flags a stray build as foreign, not as the installed helper running', () => {
     const r = classifyMenubarProcesses(`58619 ${ORPHAN}`, `58619 .build/debug/MenubarHelper --self-test`, INSTALLED);
-    expect(r.running).toBe(false);
+    expect(r.own).toEqual([]);
     expect(r.foreign).toEqual([{ pid: 58619, executable: ORPHAN }]);
   });
 
   it('separates the two when both are alive — the state that broke the paste', () => {
     const comm = `74027 ${INSTALLED}\n58619 ${ORPHAN}`;
     const r = classifyMenubarProcesses(comm, comm, INSTALLED);
-    expect(r.running).toBe(true);
+    expect(r.own.map((p) => p.pid)).toEqual([74027]);
     expect(r.foreign.map((p) => p.pid)).toEqual([58619]);
+  });
+
+  // The DUPLICATE-ICON blind spot: launchd's KeepAlive copy and a
+  // LaunchServices/`open` launch of the SAME .app both run the installed
+  // executable, so a boolean `running` reported this as healthy while the user
+  // looked at two agents marks in the menu bar. Both pids must be visible.
+  it('reports BOTH copies when the installed bundle is running twice', () => {
+    const comm = `43244 ${INSTALLED}\n93684 ${INSTALLED}`;
+    const r = classifyMenubarProcesses(comm, comm, INSTALLED);
+    expect(r.own.map((p) => p.pid)).toEqual([43244, 93684]);
+    expect(r.foreign).toEqual([]);
   });
 
   it('ignores --notify one-shots (installed binary, but never the status item)', () => {
@@ -52,8 +64,17 @@ describe('classifyMenubarProcesses', () => {
       `91002 ${INSTALLED} --notify --title Done`,
       INSTALLED,
     );
-    expect(r.running).toBe(false);
+    expect(r.own).toEqual([]);
     expect(r.foreign).toEqual([]);
+  });
+
+  // A --notify one-shot running alongside the real status item must not be
+  // mistaken for the duplicate — setup would then kill a healthy single helper.
+  it('does not count a --notify one-shot as a second copy', () => {
+    const comm = `43244 ${INSTALLED}\n91002 ${INSTALLED}`;
+    const command = `43244 ${INSTALLED}\n91002 ${INSTALLED} --notify --title Done`;
+    const r = classifyMenubarProcesses(comm, command, INSTALLED);
+    expect(r.own.map((p) => p.pid)).toEqual([43244]);
   });
 
   // The false positive that a command-line substring match produced: this
@@ -64,15 +85,41 @@ describe('classifyMenubarProcesses', () => {
       '18933 /bin/zsh -c cp /bin/sleep .build/debug/MenubarHelper',
       INSTALLED,
     );
-    expect(r.running).toBe(false);
+    expect(r.own).toEqual([]);
     expect(r.foreign).toEqual([]);
   });
 
   it('ignores unrelated processes', () => {
     const ps = '3675 /System/Library/.../com.apple.Passwords.MenuBarExtra\n1 /sbin/launchd';
     const r = classifyMenubarProcesses(ps, ps, INSTALLED);
-    expect(r.running).toBe(false);
+    expect(r.own).toEqual([]);
     expect(r.foreign).toEqual([]);
+  });
+});
+
+// `agents menubar setup` ends every live helper and lets launchd restart one,
+// so the survivor is always the login-managed copy. Selecting a survivor from
+// a `ps` listing instead would risk keeping the UNMANAGED copy alive — the
+// duplicate would then come straight back at next login.
+describe('processesToEnd', () => {
+  const A = { pid: 43244, executable: '/Applications/…/MenubarHelper' };
+  const B = { pid: 93684, executable: '/Applications/…/MenubarHelper' };
+  const STRAY = { pid: 58619, executable: '/tmp/.build/debug/MenubarHelper' };
+
+  it('ends both copies of a duplicated installed helper', () => {
+    expect(processesToEnd({ instances: [A, B], foreignInstances: [] })).toEqual([A, B]);
+  });
+
+  it('ends the lone running helper too, so launchd owns the restart', () => {
+    expect(processesToEnd({ instances: [A], foreignInstances: [] })).toEqual([A]);
+  });
+
+  it('ends foreign copies as well — they hold Cmd-Shift-V/O first-come', () => {
+    expect(processesToEnd({ instances: [A], foreignInstances: [STRAY] })).toEqual([A, STRAY]);
+  });
+
+  it('ends nothing when no helper is running', () => {
+    expect(processesToEnd({ instances: [], foreignInstances: [] })).toEqual([]);
   });
 });
 
