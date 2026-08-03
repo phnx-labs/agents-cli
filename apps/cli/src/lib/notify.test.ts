@@ -59,7 +59,7 @@ describe('formatUrgentBlockMessage', () => {
 /**
  * Real-path tests for the consolidated owner-send seam. No mocking: a real
  * `openclaw` executable (a shell script that records its argv) is placed on PATH,
- * so the assertions run through resolveTransport → openclaw-telegram provider →
+ * so the assertions run through lookupTransport → openclaw-telegram provider →
  * exec, the actual delivery path.
  */
 describe('sendToOwner (owner resolution + provider routing)', () => {
@@ -145,6 +145,32 @@ describe('sendToOwner (owner resolution + provider routing)', () => {
     const result = await sendToOwner('ping', { meta: {} as Meta });
     expect(result.ok).toBe(false);
     expect(result.error).toContain('notify.owner');
+  });
+
+  it('returns ok:false on an unresolvable channel — never process.exit()', async () => {
+    // sendToOwner is called from the monitor daemon and the feed-dispatch loop,
+    // so it must resolve via lookupTransport, not the die()-capable
+    // resolveTransport: an exit here bypasses both callers' try/catch.
+    let exited: number | undefined;
+    const realExit = process.exit;
+    // Tripwire, not a mock of the code under test: if the seam still exits, the
+    // call would abort the run — record the attempt and let the assertion fail.
+    process.exit = ((code?: number) => {
+      exited = code ?? 0;
+      throw new Error(`process.exit(${exited})`);
+    }) as typeof process.exit;
+    try {
+      const result = await sendToOwner('ping', {
+        meta: { notify: { owner: { channel: 'typo-channel', to: 'owner-chat-4' } } } as Meta,
+      });
+      expect(exited).toBeUndefined();
+      expect(result.ok).toBe(false);
+      expect(result.channel).toBe('typo-channel');
+      expect(result.id).toBe('owner-chat-4');
+      expect(result.error).toMatch(/No channel provider 'typo-channel'/);
+    } finally {
+      process.exit = realExit;
+    }
   });
 });
 

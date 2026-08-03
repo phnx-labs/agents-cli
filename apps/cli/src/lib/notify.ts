@@ -3,18 +3,21 @@
  *
  * Every human-facing owner notification (feed urgent-block dispatch, monitor
  * `notify` action, `agents notify`) funnels through the single channel seam:
- * `resolveTransport(channel, meta).send(text, opts)`. The recipient comes from
- * `notify.owner` in agents.yaml — never a hardcoded chat id — so changing the
+ * `lookupTransport(channel, meta).provider.send(text, opts)`. The recipient comes
+ * from `notify.owner` in agents.yaml — never a hardcoded chat id — so changing the
  * owner is honoured by every path at once. `notify.transports` picks the actual
  * provider per host (rush telegram on zion, openclaw-telegram on mac-mini).
  * Best-effort: a delivery failure is returned to the caller, never thrown, so a
- * notification hiccup never blocks the agent.
+ * notification hiccup never blocks the agent. That is why this module resolves
+ * with `lookupTransport` and not the `die()`-capable `resolveTransport` — the
+ * monitor daemon and the feed-dispatch loop call in here, and `process.exit()`
+ * would take them down on a typo'd channel name, bypassing their try/catch.
  */
 import type { OpenBlock } from './feed.js';
 import type { Meta } from './types.js';
 import { readMeta } from './state.js';
 import { registerBuiltinProviders } from './channels/providers/index.js';
-import { resolveTransport } from './channels/resolve.js';
+import { lookupTransport } from './channels/resolve.js';
 import type { SendResult } from './channels/registry.js';
 
 export interface OwnerNotifyOptions {
@@ -90,7 +93,10 @@ export async function sendToOwner(text: string, options: OwnerNotifyOptions = {}
     };
   }
   registerBuiltinProviders();
-  const provider = resolveTransport(channel, meta);
+  const { provider, error } = lookupTransport(channel, meta);
+  if (!provider) {
+    return { ok: false, channel, id: target, error };
+  }
   return provider.send(text, { target, dryRun: options.dryRun });
 }
 

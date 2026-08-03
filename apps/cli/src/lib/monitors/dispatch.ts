@@ -5,8 +5,9 @@
  * action goes through the *same* detached spawn cron and webhook fires use
  * (executeJobDetached, lib/runner.ts) — a monitor never duplicates spawn logic,
  * it synthesizes a JobConfig and hands it to the one dispatch seam. `notify`
- * routes the owner through the one channel seam (sendToOwner → resolveTransport,
- * lib/notify.ts) — recipient from notify.owner, no hardcoded chat id;
+ * routes the owner through the one channel seam (sendToOwner → lookupTransport,
+ * lib/notify.ts) — recipient from notify.owner, no hardcoded chat id, and an
+ * unresolvable channel comes back as `ok: false` instead of exiting the daemon;
  * `webhook-out` POSTs the event.
  */
 
