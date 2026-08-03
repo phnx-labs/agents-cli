@@ -31,6 +31,9 @@ import {
   type ActivityEvent,
   type EnrichedActivityEvent,
 } from './activity.js';
+import { emit, query, _resetForTest as resetEventsForTest } from './events.js';
+import { resetActorCache } from './actor.js';
+import { resetEventProvenanceForTest } from './event-provenance.js';
 
 /** Minimal well-formed enriched event; override any field per test. */
 function ev(partial: Partial<EnrichedActivityEvent>): EnrichedActivityEvent {
@@ -67,6 +70,52 @@ function activityDirFor(home: string): string {
 }
 
 describe('activity log store (TS)', () => {
+  it('stamps the same actor, kind, launch, and parent provenance as emit()', () => {
+    const dir = tmpActivityDir();
+    const operationalPath = path.join(dir, 'events.jsonl');
+    Object.assign(process.env, {
+      AGENTS_ACTOR: 'ada@example.com',
+      AGENTS_ACTOR_KIND: 'human',
+      AGENTS_AGENT_NAME: 'codex',
+      AGENT_LAUNCH_ID: 'launch-shared',
+      AGENTS_PARENT_SESSION_ID: 'parent-shared',
+    });
+    resetActorCache();
+    resetEventProvenanceForTest();
+    try {
+      appendActivityEvent({
+        ts: '2026-08-03T12:00:00.000Z', event: 'file.edited', sessionId: 'activity-session',
+        mailboxId: 'activity-session', host: 'yosemite-s0', runtime: 'headless',
+      }, dir);
+      resetEventsForTest(operationalPath);
+      emit('info', { module: 'test' });
+
+      const activity = readSessionActivity('activity-session', dir)[0];
+      const operational = query({})[0];
+      expect({
+        actor: activity.actor,
+        kind: activity.kind,
+        agent: activity.agent,
+        launchId: activity.launchId,
+        parentSessionId: activity.parentSessionId,
+      }).toEqual({
+        actor: operational.actor,
+        kind: operational.kind,
+        agent: operational.agent,
+        launchId: operational.launchId,
+        parentSessionId: operational.parentSessionId,
+      });
+    } finally {
+      delete process.env.AGENTS_ACTOR;
+      delete process.env.AGENTS_ACTOR_KIND;
+      delete process.env.AGENTS_AGENT_NAME;
+      delete process.env.AGENT_LAUNCH_ID;
+      delete process.env.AGENTS_PARENT_SESSION_ID;
+      resetActorCache();
+      resetEventsForTest();
+    }
+  });
+
   it('appends and reads back events for a session, newest-first across sessions', () => {
     const dir = tmpActivityDir();
     appendActivityEvent({ ts: '2026-07-29T10:00:00.000Z', event: 'plan.created', sessionId: 's1', mailboxId: 's1', host: 'zion', runtime: 'headless', detail: 'Build the spine' }, dir);
@@ -186,6 +235,30 @@ describe('ensureActivityLogHook', () => {
 });
 
 describe('real activity-log hook (Python)', () => {
+  pythonTest('reads actor, kind, launch, and parent provenance from the child env', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-provenance-'));
+    const r = runHook(home, {
+      session_id: 'child-session',
+      hook_event_name: 'PostToolUse',
+      tool_name: 'Write',
+      tool_input: { file_path: '/home/muqsit/src/x/foo.ts' },
+      tool_response: {},
+    }, {
+      AGENTS_ACTOR: 'ada@example.com',
+      AGENTS_ACTOR_KIND: 'human',
+      AGENTS_AGENT_NAME: 'codex',
+      AGENT_LAUNCH_ID: 'launch-hook',
+      AGENTS_PARENT_SESSION_ID: 'parent-hook',
+    });
+    expect(r.status).toBe(0);
+    const event = readSessionActivity('child-session', activityDirFor(home))[0];
+    expect(event.actor).toBe('ada@example.com');
+    expect(event.kind).toBe('human');
+    expect(event.agent).toBe('codex');
+    expect(event.launchId).toBe('launch-hook');
+    expect(event.parentSessionId).toBe('parent-hook');
+  });
+
   pythonTest('logs plan.created from a PreToolUse ExitPlanMode', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-plan-'));
     const r = runHook(home, {
