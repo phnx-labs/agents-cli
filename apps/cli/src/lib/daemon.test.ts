@@ -33,6 +33,7 @@ import {
   shouldTakeOverBroker,
   anchorDaemonCwd,
   describeEphemeralDaemonRoot,
+  warnEphemeralDaemonRoot,
   validateDaemonBinary,
 } from './daemon.js';
 import { ipcEndpoint } from './platform/index.js';
@@ -760,6 +761,42 @@ describe('describeEphemeralDaemonRoot', () => {
     expect(describeEphemeralDaemonRoot('/home/u/src/github.com/x/agents-cli/apps/cli/src/index.ts')).toBeNull();
     // A directory merely named "tmp" under $HOME is not a temp root (anchored match).
     expect(describeEphemeralDaemonRoot('/home/u/tmp/agents-cli/dist/index.js')).toBeNull();
+  });
+});
+
+describe('warnEphemeralDaemonRoot', () => {
+  // The runtime startup self-check: it must warn (return the message) for an
+  // ephemeral launch root, stay silent (null) for a stable one, and never throw
+  // — including when the bin resolver itself throws (getAgentsBinPath can, when a
+  // shim's main entry is missing). resolveBin is injected so all three branches
+  // hit the real code path without mocking the module.
+  it('warns for an ephemeral launch root (the /tmp/rv-head case)', () => {
+    const msg = warnEphemeralDaemonRoot(() => '/tmp/rv-head/apps/cli/src/index.ts');
+    expect(msg).not.toBeNull();
+    expect(msg).toContain('a temporary directory');
+    expect(msg).toContain('/tmp/rv-head/apps/cli/src/index.ts');
+  });
+
+  it('stays silent for a stable version-home launch root', () => {
+    expect(
+      warnEphemeralDaemonRoot(() => '/home/u/.agents/.history/versions/agents/1.20.88/dist/index.js'),
+    ).toBeNull();
+  });
+
+  it('is non-fatal when the bin resolver throws', () => {
+    let result: string | null = 'sentinel';
+    expect(() => {
+      result = warnEphemeralDaemonRoot(() => {
+        throw new Error('no main CLI entry');
+      });
+    }).not.toThrow();
+    expect(result).toBeNull();
+  });
+
+  it('does not throw when resolving the real launch binary', () => {
+    // Default resolver (getAgentsBinPath against the live argv[1]) must run
+    // through the try without throwing — this is what runDaemon calls at startup.
+    expect(() => warnEphemeralDaemonRoot()).not.toThrow();
   });
 });
 

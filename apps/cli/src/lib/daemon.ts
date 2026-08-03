@@ -328,21 +328,26 @@ export function anchorDaemonCwd(): string | null {
  * wedge risk stays invisible until jobs start ENOENT-ing on their dynamic
  * imports. Best-effort and non-fatal; the cwd is already handled by
  * anchorDaemonCwd, but a deleted module root can only be flagged, not repaired.
+ *
+ * `resolveBin` is injectable (defaults to getAgentsBinPath) so the wiring — the
+ * predicate call, the WARN, and the non-fatal guard around a throwing resolver —
+ * is testable. Returns the warning message it logged, or null when the launch
+ * root is stable (or could not be resolved).
  */
-export function warnEphemeralDaemonRoot(): void {
+export function warnEphemeralDaemonRoot(resolveBin: () => string = getAgentsBinPath): string | null {
   try {
-    const bin = getAgentsBinPath();
+    const bin = resolveBin();
     const ephemeralRoot = describeEphemeralDaemonRoot(bin);
-    if (ephemeralRoot) {
-      log(
-        'WARN',
-        `Daemon launched from ${ephemeralRoot} (${bin}); if that directory is removed, ` +
-        `every routine will fail with ENOENT on its module imports. Run the daemon from the ` +
-        `globally installed binary instead (npm i -g @phnx-labs/agents-cli), then restart it.`,
-      );
-    }
+    if (!ephemeralRoot) return null;
+    const message =
+      `Daemon launched from ${ephemeralRoot} (${bin}); if that directory is removed, ` +
+      `every routine will fail with ENOENT on its module imports. Run the daemon from the ` +
+      `globally installed binary instead (npm i -g @phnx-labs/agents-cli), then restart it.`;
+    log('WARN', message);
+    return message;
   } catch (err) {
     log('WARN', `Could not check daemon launch root: ${(err as Error).message}`);
+    return null;
   }
 }
 
