@@ -5,8 +5,8 @@
 const SECRET_PATTERNS: Array<[RegExp, string]> = [
   // Local home paths identify operators and disclose internal filesystem layout.
   // Keep the useful path suffix while masking the machine-specific home prefix.
-  [/(^|[\s"'`(=:])\/(?:home|Users)\/[^/\s"'`]+/g, '$1[HOME]'],
-  [/(^|[\s"'`(=])[A-Z]:\\Users\\[^\\\s"'`]+/gi, '$1[HOME]'],
+  [/(^|[\s,"'`(=:])\/(?:home|Users)\/[^/\s,"'`]+/g, '$1[HOME]'],
+  [/(^|[\s,"'`(=])[A-Z]:\\Users\\[^\\\s,"'`]+/gi, '$1[HOME]'],
   [/\bAKIA[0-9A-Z]{16}\b/g, '[REDACTED_AWS_KEY]'],
   // GitHub: classic PATs (ghp_), OAuth (gho_), app/refresh/server tokens
   // (ghs_/ghr_), and fine-grained PATs (github_pat_). All share the 36-char

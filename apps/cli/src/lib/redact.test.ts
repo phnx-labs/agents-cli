@@ -42,6 +42,8 @@ describe('redactSecrets', () => {
     expect(redactSecrets('C:\\Users\\alice\\src\\private')).toBe('[HOME]\\src\\private');
     expect(redactSecrets('/home/alice/.agents/versions/codex/home/.codex/sessions'))
       .toBe('[HOME]/.agents/versions/codex/home/.codex/sessions');
+    expect(redactSecrets('path=/Users/alice/a,/Users/bob/b'))
+      .toBe('path=[HOME]/a,[HOME]/b');
   });
   const cases: Array<[string, string, string]> = [
     ...TOKENS.map(([label, secret, marker]): [string, string, string] => [label, `pre ${secret} post`, marker]),

@@ -65,4 +65,11 @@ describe('sessions render harness parity', () => {
     const markdown = renderSessionMarkdownDocument(meta('codex', FIXTURES.codex));
     expect(markdown).not.toContain('internal scaffold');
   });
+
+  it('lets the renderer truncate full normalized output with an exact note', () => {
+    const markdown = renderSessionMarkdownDocument(meta('codex', FIXTURES.codex), {
+      maxToolOutputChars: 20,
+    });
+    expect(markdown).toContain('[Output truncated: 580 characters omitted.]');
+  });
 });

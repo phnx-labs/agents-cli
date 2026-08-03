@@ -44,14 +44,21 @@ function quotePreview(preview: string): string {
 /** Build one shareable Markdown document from the canonical preview and event model. */
 export function renderSessionMarkdownDocument(
   session: SessionMeta,
-  options: { redact?: boolean; reasoning?: ReasoningMode; knownSecrets?: readonly string[] } = {},
+  options: {
+    redact?: boolean;
+    reasoning?: ReasoningMode;
+    knownSecrets?: readonly string[];
+    maxToolOutputChars?: number;
+  } = {},
 ): string {
   if (!(MARKDOWN_RENDER_AGENTS as readonly string[]).includes(session.agent)) {
     throw new Error(
       `Cannot render ${session.agent} session ${session.shortId || session.id}: Markdown rendering supports ${MARKDOWN_RENDER_AGENTS.join(', ')}.`,
     );
   }
-  const events = parseSession(session.filePath, session.agent);
+  // Preserve normalized tool output here so the Markdown renderer owns the
+  // visible cap and can report exactly how much it omitted.
+  const events = parseSession(session.filePath, session.agent, { maxToolOutputChars: Infinity });
   if (events.length === 0) {
     throw new Error(`Cannot render ${session.agent} session ${session.shortId || session.id}: transcript produced no normalized events.`);
   }
@@ -69,6 +76,7 @@ export function renderSessionMarkdownDocument(
     redact: shouldRedact,
     knownSecrets: options.knownSecrets,
     reasoning: options.reasoning ?? 'omit',
+    maxToolOutputChars: options.maxToolOutputChars,
   });
   return `# ${title}\n\n## Session preview\n\n${quotePreview(preview)}\n\n## Conversation\n\n${conversation}\n`;
 }
