@@ -779,6 +779,15 @@ and every 5 minutes** — a startup-only pass would miss a fire lost while the
 daemon stayed up but its event loop was wedged, or one lost across an OS suspend
 the process survived.
 
+Detection looks back far enough to see the routine's own period. The window widens
+week → month → quarter → year, and only when the narrower one finds nothing, so a
+dense schedule never walks more than a week of occurrences. A fixed one-week
+lookback silently skipped anything sparser: `0 9 1,13,25 * *` has 12-day gaps, so on
+10 of every 28 days it could not be evaluated at all.
+
+A routine past its `endAt`, and a one-shot (by flag *or* by schedule shape), is never
+caught up — catch-up replays a missed fire, it does not resurrect a retired routine.
+
 Catch-up is idempotent without a ledger: the `missed` record advances the overdue
 comparison, so the same missed fire is never reconsidered — across ticks, a daemon
 restart, or a restart storm.

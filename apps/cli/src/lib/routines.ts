@@ -1299,6 +1299,27 @@ export function getJobPath(name: string): string | null {
 }
 
 /**
+ * Resolve a routine's YAML across EVERY layer `listJobs`/`readJob` read — user
+ * then system — not just the user dir.
+ *
+ * `getJobPath` is user-layer only because its callers write there. Read paths
+ * that ask "when did this routine come to exist" need the system layer too:
+ * a built-in shipped in the system repo has no user-layer file and no
+ * `createdAt`, so a user-layer-only lookup returns null, the overdue floor is
+ * skipped, and the routine reads as instantly overdue on first daemon start —
+ * exactly the case the floor exists to prevent.
+ */
+export function resolveJobFilePath(name: string): string | null {
+  const userPath = getJobPath(name);
+  if (userPath) return userPath;
+  for (const ext of ['.yml', '.yaml']) {
+    const filePath = safeJoin(getSystemRoutinesDir(), name + ext);
+    if (fs.existsSync(filePath)) return filePath;
+  }
+  return null;
+}
+
+/**
  * Parse an "at" time string into a one-shot cron expression.
  * Supports formats like:
  * - "9:00" or "09:00" - today at 9:00 AM (or tomorrow if past)
