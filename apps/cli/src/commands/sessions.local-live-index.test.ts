@@ -1,23 +1,30 @@
 /**
- * RUSH-2118 follow-up (prix-cloud review on PR #1827): the `--local` help
- * text promises "this machine only" for BOTH the default listing and
- * `--active` (sessions.ts `--local` option help). The `--active` path was
- * fixed to never dial a remote-host teammate under `--local`, but the
- * DEFAULT (non `--active`) listing enriches every row via `maybeLiveIndex()`,
- * which called the local-only `getActiveSessions()` with no `localOnly`
- * threaded through — so a bare `agents sessions --local` still fired an ssh
- * round-trip per remote-host teammate.
+ * RUSH-2118 follow-up (prix-cloud review on PR #1827, two rounds): the
+ * `--local` help text promises "this machine only" for BOTH the default
+ * listing and `--active` (sessions.ts `--local` option help). The `--active`
+ * path was fixed first to never dial a remote-host teammate under `--local`,
+ * but two more call sites called the local-only `getActiveSessions()` with no
+ * `localOnly` threaded through, each still firing a real ssh round-trip:
+ *
+ *   1. `maybeLiveIndex()` — enriches every row of the bare (non `--active`)
+ *      listing with a live glyph/preview.
+ *   2. `renderSessionPreview()` — backs `--preview <id>`, which is freely
+ *      combinable with `--local` (no mutual exclusion), so
+ *      `agents sessions --local --preview <id>` reached it too.
  *
  * HOME is pinned to a temp dir BEFORE importing anything that resolves
- * `~/.agents` (teams/agents.ts, sessions.ts), so AgentManager's default
- * construction (no explicit baseDir — `maybeLiveIndex` has no way to inject
- * one) reads/writes under our temp fixture instead of the real fleet. Only
- * the ssh network boundary is stubbed; AgentManager/AgentProcess run for real.
+ * `~/.agents` (teams/agents.ts, sessions.ts) or `~/.claude` (discover.ts), so
+ * AgentManager's default construction (no explicit baseDir — neither
+ * `maybeLiveIndex` nor `renderSessionPreview` has a way to inject one) and
+ * `discoverSessions()`'s filesystem scan both read/write under our temp
+ * fixture instead of the real fleet. Only the ssh network boundary is
+ * stubbed; AgentManager/AgentProcess/discoverSessions run for real.
  */
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as crypto from 'crypto';
 
 const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sessions-local-live-index-home-'));
 const originalHome = process.env.HOME;
@@ -36,7 +43,7 @@ vi.mock('../lib/ssh-exec.js', async () => {
   return { ...actual, sshExec: sshExecMock, sshExecRaw: sshExecRawMock };
 });
 
-const { maybeLiveIndex } = await import('./sessions.js');
+const { maybeLiveIndex, renderSessionPreview } = await import('./sessions.js');
 const { AgentProcess, AgentStatus } = await import('../lib/teams/agents.js');
 
 afterEach(() => {
@@ -70,6 +77,31 @@ async function makeRemoteTeammate(id: string): Promise<void> {
   await agent.saveMeta();
 }
 
+/**
+ * Minimal discoverable Claude transcript so `discoverSessions()` (which
+ * `renderSessionPreview` calls) resolves a real session for `query` to key
+ * `--preview` off. Mirrors `writeClaudeSession` in sessions.test.ts.
+ */
+function writeClaudeSession(sessionId: string, cwd: string): void {
+  fs.mkdirSync(cwd, { recursive: true });
+  const projectKey = cwd.replace(/[/.]/g, '-');
+  const sessionsDir = path.join(fakeHome, '.claude', 'projects', projectKey);
+  fs.mkdirSync(sessionsDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(sessionsDir, `${sessionId}.jsonl`),
+    JSON.stringify({
+      type: 'user',
+      timestamp: new Date().toISOString(),
+      cwd,
+      sessionId,
+      version: '2.1.110',
+      gitBranch: 'main',
+      message: { role: 'user', content: 'RUSH-2118 preview fixture' },
+    }) + '\n',
+    'utf-8',
+  );
+}
+
 describe('maybeLiveIndex --local (RUSH-2118 default-listing gap)', () => {
   it('a bare `agents sessions --local` (no --active) issues zero ssh for a remote-host teammate', async () => {
     await makeRemoteTeammate('remote-running-local');
@@ -97,5 +129,41 @@ describe('maybeLiveIndex --local (RUSH-2118 default-listing gap)', () => {
     // running remote teammate's log — proves --local is the actual gate, not
     // some accidental global disablement.
     expect(sshExecRawMock).toHaveBeenCalled();
+  });
+});
+
+describe('renderSessionPreview --local (RUSH-2118 --preview gap)', () => {
+  const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  afterAll(() => consoleLogSpy.mockRestore());
+
+  it('`agents sessions --local --preview <id>` issues zero ssh for a remote-host teammate', async () => {
+    const sessionId = crypto.randomUUID();
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'rush2118-preview-cwd-'));
+    writeClaudeSession(sessionId, cwd);
+    await makeRemoteTeammate('remote-running-preview-local');
+
+    sshExecMock.mockReturnValue({ code: 0, stdout: '', stderr: '' });
+    sshExecRawMock.mockReturnValue({ code: 0, stdout: Buffer.alloc(0), stderr: '' });
+
+    await renderSessionPreview(sessionId, { local: true });
+
+    expect(sshExecMock).not.toHaveBeenCalled();
+    expect(sshExecRawMock).not.toHaveBeenCalled();
+    fs.rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it('sanity: `agents sessions --preview <id>` WITHOUT --local still dials the remote-host teammate', async () => {
+    const sessionId = crypto.randomUUID();
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'rush2118-preview-cwd-'));
+    writeClaudeSession(sessionId, cwd);
+    await makeRemoteTeammate('remote-running-preview-nonlocal');
+
+    sshExecMock.mockReturnValue({ code: 0, stdout: '', stderr: '' });
+    sshExecRawMock.mockReturnValue({ code: 0, stdout: Buffer.alloc(0), stderr: '' });
+
+    await renderSessionPreview(sessionId, {});
+
+    expect(sshExecRawMock).toHaveBeenCalled();
+    fs.rmSync(cwd, { recursive: true, force: true });
   });
 });

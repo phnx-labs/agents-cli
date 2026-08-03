@@ -1352,9 +1352,9 @@ function canonicalSessionsCommand(query: string | undefined, options: SessionsOp
 
 /** Resolve a session by id/query globally and print its compact preview (no pager).
  * Backs `--preview` — the fast path for the "peek before resume" hot loop. */
-async function renderSessionPreview(
+export async function renderSessionPreview(
   query: string,
-  scope: { agent?: string; project?: string },
+  scope: { agent?: string; project?: string; local?: boolean },
 ): Promise<void> {
   const discovered = await discoverSessions({ all: true, cwd: process.cwd(), limit: 5000 });
   const pool = applyScopeFilters(discovered, scope);
@@ -1369,9 +1369,11 @@ async function renderSessionPreview(
   }
   // Lead with the live status when the session is still running, so the preview
   // says working / waiting / idle up front — not just the historical transcript.
+  // `--local --preview` is freely combinable with `--local` (RUSH-2118): thread
+  // it through so this probe never dials a remote-host teammate either.
   let live: ActiveSession | undefined;
   try {
-    live = indexActiveBySessionId(await getActiveSessions()).get(session.id);
+    live = indexActiveBySessionId(await getActiveSessions({ localOnly: scope.local === true })).get(session.id);
   } catch { /* plain preview on any probe failure */ }
   const headline = formatLiveStatusHeadline(live, isFavorite(session.id));
   if (headline) console.log(headline);
@@ -1533,7 +1535,7 @@ async function sessionsAction(
       console.error(chalk.red('--preview requires a session id or query.'));
       process.exit(1);
     }
-    await renderSessionPreview(query, { agent: options.agent, project: options.project });
+    await renderSessionPreview(query, { agent: options.agent, project: options.project, local: options.local });
     return;
   }
 
