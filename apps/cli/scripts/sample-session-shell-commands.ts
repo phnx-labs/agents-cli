@@ -148,7 +148,7 @@ export function partitionSampleDevices(
 function listArgs(options: SampleOptions, devices: string[], local: boolean): string[] {
   const args = [
     'sessions', '--since', options.since,
-    '--limit', String(Math.max(200, options.sessions * 4)), '--all', '--json', '--no-interactive',
+    '--limit', String(Math.min(1000, Math.max(500, options.sessions * 10))), '--all', '--json', '--no-interactive',
   ];
   if (local) args.push('--local');
   else for (const device of devices) args.push('--device', device);
@@ -202,7 +202,7 @@ export function loadEnvelope(
       for (let pass = 0; pass < options.passes; pass++) {
         envelope = JSON.parse(runner(args)) as ToolSearchEnvelope;
         if (envelope.schemaVersion !== 1) throw new Error(`Unsupported tool-search schema ${envelope.schemaVersion}`);
-        if (envelope.coverage.complete) break;
+        if (envelope.coverage.complete || envelope.coverage.remainingFiles === 0) break;
       }
     } catch {
       coverage.skippedFiles++;

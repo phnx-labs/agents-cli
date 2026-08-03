@@ -79,6 +79,31 @@ describe('session shell-command sampler', () => {
     expect(envelope.coverage).toMatchObject({ skippedFiles: 1, complete: false });
   });
 
+  it('does not repeat a terminal partial result with no remaining backfill', () => {
+    let exactCalls = 0;
+    const envelope = loadEnvelope(
+      { sessions: 50, since: '7d', devices: ['peer-one'], passes: 4 },
+      (args) => {
+        if (!args.includes('--include')) {
+          return JSON.stringify([{
+            id: 'limited-session', shortId: 'limited', agent: 'codex', machine: 'peer-one',
+            timestamp: '2026-08-03T00:00:00Z',
+          }]);
+        }
+        exactCalls++;
+        return JSON.stringify({
+          schemaVersion: 1,
+          generatedAt: '2026-08-03T00:00:00Z',
+          query: { clauses: [] },
+          coverage: { indexedFiles: 1, indexedCalls: 1, skippedFiles: 0, limitedFiles: 1, remainingFiles: 0, complete: false },
+          sessions: [session('limited-session', 'peer-one')],
+        });
+      },
+    );
+    expect(exactCalls).toBe(1);
+    expect(envelope.sessions).toHaveLength(1);
+  });
+
   it('caps the serialized artifact even when every sampled session carries maximum-size inputs', () => {
     const sessions = Array.from({ length: 50 }, (_, sessionIndex) => {
       const item = session(`large-${sessionIndex}`, `box-${sessionIndex % 2}`);
