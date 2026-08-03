@@ -317,21 +317,29 @@ export function enableMenubarService(opts: { clearOptOut?: boolean } = { clearOp
     return false;
   }
 
-  if (opts.clearOptOut) {
-    try { fs.rmSync(disabledSentinelPath(), { force: true }); } catch { /* already gone */ }
-  }
+  if (opts.clearOptOut) clearMenubarOptOut();
+  installAndStartService(exec);
+  return true;
+}
 
+/** Drop the sticky `agents menubar disable` sentinel. */
+function clearMenubarOptOut(): void {
+  try { fs.rmSync(disabledSentinelPath(), { force: true }); } catch { /* already gone */ }
+}
+
+/**
+ * Write the launchd plist for `exec`, restart the job, and stamp the installed
+ * version. Shared by `enableMenubarService` and `runMenubarSetup` so the two
+ * cannot drift on what "installed and started" means — the version stamp in
+ * particular is what the upgrade self-heal reads to decide staleness, and a
+ * path that skipped it would make every later `agents` invocation reinstall.
+ */
+function installAndStartService(exec: string): void {
   const plist = servicePlistPath();
   fs.mkdirSync(path.dirname(plist), { recursive: true });
   fs.writeFileSync(plist, generateServicePlist(exec));
-
-  const uid = process.getuid?.() ?? 0;
-  restartMenubarLaunchAgent(uid, plist);
-
-  // Stamp the version we just installed so the upgrade self-heal can tell when
-  // a later release ships a newer helper that needs reinstalling.
+  restartMenubarLaunchAgent(process.getuid?.() ?? 0, plist);
   try { fs.writeFileSync(installedVersionMarkerPath(), getCliVersion()); } catch { /* best effort */ }
-  return true;
 }
 
 /**
@@ -551,13 +559,9 @@ export function runMenubarSetup(): SetupResult {
 
   // Clear the sticky opt-out: running `setup` is an explicit request for the
   // menu bar, so a stale `menubar disable` must not silently win.
-  try { fs.rmSync(disabledSentinelPath(), { force: true }); } catch { /* already gone */ }
+  clearMenubarOptOut();
 
-  const plist = servicePlistPath();
-  fs.mkdirSync(path.dirname(plist), { recursive: true });
-  fs.writeFileSync(plist, generateServicePlist(exec));
-  restartMenubarLaunchAgent(process.getuid?.() ?? 0, plist);
-  try { fs.writeFileSync(installedVersionMarkerPath(), getCliVersion()); } catch { /* best effort */ }
+  installAndStartService(exec);
   step('login item', before.serviceInstalled ? 'ok' : 'changed',
     `${SERVICE_LABEL} — starts at login, restarts if it dies`);
 
