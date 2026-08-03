@@ -538,10 +538,11 @@ function humanAge(iso: string): string {
   return `${age} ago`;
 }
 
-/** Compact remaining-time for the list POLICY column: "19h" / "45m" / "2d". */
-function compactRemaining(expiresAt: number): string {
-  const ms = expiresAt - Date.now();
-  if (ms <= 0) return 'expired';
+/** Compact span for a fixed duration: "45m" / "19h" / "2d". Shared by
+ * `compactRemaining` (a countdown) and the POLICY column's hold-window
+ * annotation (a fixed length) so the two can never round onto different unit
+ * thresholds and disagree about the same number of milliseconds. */
+export function compactDurationMs(ms: number): string {
   const mins = Math.round(ms / 60000);
   if (mins < 60) return `${mins}m`;
   const hours = Math.round(mins / 60);
@@ -549,16 +550,31 @@ function compactRemaining(expiresAt: number): string {
   return `${Math.round(hours / 24)}d`;
 }
 
-/** The POLICY column for `secrets list`: the prompt policy, plus a concise
- * state hint. `hold` shows `held Nh` when the secrets-agent is currently
- * caching the bundle; `always` and `never` show whether they prompt. `held`
+/** Compact remaining-time for the list POLICY column: "19h" / "45m" / "2d". */
+function compactRemaining(expiresAt: number): string {
+  const ms = expiresAt - Date.now();
+  if (ms <= 0) return 'expired';
+  return compactDurationMs(ms);
+}
+
+/** The POLICY column for `secrets list`. `hold` is a duration, not a mode — it
+ * means "prompt once, then stay silent for this long" — so the column states
+ * the window (`hold 7d`) rather than the bare tier name, and appends `· held Nd`
+ * while the secrets-agent is actually caching the bundle. `always` and `never`
+ * carry no window and gain nothing here. `holdMs` is the configured global hold
+ * (`secretsHoldMs()`), passed in rather than read so this stays pure; `held`
  * maps bundle name → expiry epoch-ms (from agentStatus()). */
-export function renderPolicyCol(b: SecretsBundle, held?: Map<string, number>): string {
+export function renderPolicyCol(b: SecretsBundle, holdMs: number, held?: Map<string, number>): string {
   // `never` is loud on purpose — it's the only tier with no user-presence gate.
   if (bundlePolicy(b) === 'never') return chalk.red.bold('never · no prompt');
   if (bundlePolicy(b) === 'always') return chalk.yellow('always · prompt');
+  const window = compactDurationMs(holdMs);
+  // A lapsed entry is not held. Without this guard a stale broker row renders
+  // the countdown's `expired` sentinel as if it were a live hold.
   const exp = held?.get(b.name);
-  return exp ? chalk.green(`hold · held ${compactRemaining(exp)}`) : chalk.gray('hold');
+  return exp !== undefined && exp > Date.now()
+    ? chalk.green(`hold ${window} · held ${compactRemaining(exp)}`)
+    : chalk.gray(`hold ${window}`);
 }
 
 /** The hold-window line at the top of `secrets status`. Names the `hold` policy
@@ -594,8 +610,13 @@ export function formatHoldWindow(ms: number): string {
 /** Below this width the fixed date columns no longer fit; `list` uses cards. */
 const SECRETS_WIDE = 96;
 
+/** Width of the POLICY column. The widest cell is `hold 30d · held 30d` (19
+ * visible chars) — `clampHoldMs` caps the window at 30d and `renderPolicyCol`
+ * drops lapsed holds, so nothing longer can be produced. */
+const POLICY_COL_WIDTH = 20;
+
 /** Format a single bundle as a table row for the `secrets list` output. */
-function renderBundleRow(b: SecretsBundle, held?: Map<string, number>, cols = terminalWidth()): string {
+function renderBundleRow(b: SecretsBundle, holdMs: number, held?: Map<string, number>, cols = terminalWidth()): string {
   const entries = describeBundle(b);
   const keys = entries.length;
   const expiringCount = countExpiringSoon(b.meta);
@@ -614,7 +635,7 @@ function renderBundleRow(b: SecretsBundle, held?: Map<string, number>, cols = te
   const head =
     `${chalk.cyan(b.name.padEnd(20))} ` +
     `${String(keys).padEnd(5)} ` +
-    `${padVisible(renderPolicyCol(b, held), 18)} ` +
+    `${padVisible(renderPolicyCol(b, holdMs, held), POLICY_COL_WIDTH)} ` +
     `${padVisible(expiring, 9)} ` +
     `${padVisible(created, 9)} ` +
     `${padVisible(updated, 9)} ` +
@@ -636,7 +657,7 @@ function renderBundleRow(b: SecretsBundle, held?: Map<string, number>, cols = te
 }
 
 /** Narrow-terminal card: name + compact meta on one line, description below. */
-function renderBundleCard(b: SecretsBundle, held: Map<string, number> | undefined, cols: number): string {
+function renderBundleCard(b: SecretsBundle, holdMs: number, held: Map<string, number> | undefined, cols: number): string {
   const keys = describeBundle(b).length;
   const used = b.last_used ? relativeAge(b.last_used) : (b.created_at ? 'never' : '?');
   const tag = b.backend === 'file'
@@ -644,7 +665,7 @@ function renderBundleCard(b: SecretsBundle, held: Map<string, number> | undefine
     : b.backend === 'vault'
       ? chalk.blue(' [synced]')
       : '';
-  const meta = chalk.gray(`${keys} key${keys === 1 ? '' : 's'} · `) + renderPolicyCol(b, held) + chalk.gray(` · used ${used}`);
+  const meta = chalk.gray(`${keys} key${keys === 1 ? '' : 's'} · `) + renderPolicyCol(b, holdMs, held) + chalk.gray(` · used ${used}`);
   const line1 = `${chalk.cyan(b.name)}  ${meta}${tag}`;
   if (!b.description) return line1;
   return `${line1}\n    ${chalk.gray(truncateToWidth(safePrint(b.description), cols - 4))}`;
@@ -914,6 +935,9 @@ export function registerSecretsCommands(program: Command): void {
         return;
       }
       const bundles = listBundles();
+      // The configured hold window, read once for the whole listing — it is
+      // global, so every `hold` bundle renders the same span.
+      const holdMs = secretsHoldMs();
       // Cross-reference the secrets-agent so `hold` bundles that are currently
       // held can show "· held Nh". Soft-fails to no hint if the broker is down.
       const held = new Map<string, number>();
@@ -932,6 +956,9 @@ export function registerSecretsCommands(program: Command): void {
           name: b.name,
           keys: describeBundle(b).length,
           policy: bundlePolicy(b),
+          // The window `policy: "hold"` is shorthand for. Null on always/never,
+          // which have no window at all.
+          holdMs: bundlePolicy(b) === 'hold' ? holdMs : null,
           backend: b.backend === 'file' ? 'file' : 'keychain',
           allowExec: Boolean(b.allow_exec),
           expiringSoon: countExpiringSoon(b.meta),
@@ -952,14 +979,14 @@ export function registerSecretsCommands(program: Command): void {
       const cols = terminalWidth();
       if (cols >= SECRETS_WIDE) {
         console.log(chalk.bold(
-          `${'NAME'.padEnd(20)} ${'KEYS'.padEnd(5)} ${'POLICY'.padEnd(18)} ${'EXPIRING'.padEnd(9)} ${'CREATED'.padEnd(9)} ${'UPDATED'.padEnd(9)} ${'USED'.padEnd(7)} DESCRIPTION`,
+          `${'NAME'.padEnd(20)} ${'KEYS'.padEnd(5)} ${'POLICY'.padEnd(POLICY_COL_WIDTH)} ${'EXPIRING'.padEnd(9)} ${'CREATED'.padEnd(9)} ${'UPDATED'.padEnd(9)} ${'USED'.padEnd(7)} DESCRIPTION`,
         ));
         for (const b of bundles) {
-          console.log(renderBundleRow(b, held, cols));
+          console.log(renderBundleRow(b, holdMs, held, cols));
         }
       } else {
         for (const b of bundles) {
-          console.log(renderBundleCard(b, held, cols));
+          console.log(renderBundleCard(b, holdMs, held, cols));
         }
       }
     });
@@ -1061,6 +1088,9 @@ export function registerSecretsCommands(program: Command): void {
               name: bundle.name,
               description: bundle.description ?? null,
               policy: bundlePolicy(bundle),
+              // The window `policy: "hold"` is shorthand for. Null on
+              // always/never, which have no window at all.
+              holdMs: bundlePolicy(bundle) === 'hold' ? secretsHoldMs() : null,
               backend: bundle.backend === 'file' ? 'file' : 'keychain',
               allowExec: Boolean(bundle.allow_exec),
               createdAt: bundle.created_at ?? null,
@@ -1082,7 +1112,10 @@ export function registerSecretsCommands(program: Command): void {
         } else {
           console.log(
             bundlePolicy(bundle) === 'hold'
-              ? chalk.gray('policy: hold (ask once, then held for the hold window — 7d by default — until sleep / logout; screen-lock does not drop it)')
+              // The window comes from secretsHoldMs(), never a literal — this
+              // line used to hardcode "7d by default" and so misstated the
+              // window for anyone who had configured secrets.agent.holdMs.
+              ? chalk.gray(`policy: hold (ask once, then held for ${formatHoldWindow(secretsHoldMs())} — until sleep / logout; screen-lock does not drop it)`)
               : chalk.gray('policy: always (asks for Touch ID every time — never auto-held)'),
           );
         }
