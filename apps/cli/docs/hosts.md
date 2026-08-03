@@ -534,8 +534,11 @@ agents hosts sessions <box> --search "<topic>"   # runs `agents sessions` ON the
 The agent on box A searches box B's history without ever copying it — the same
 "expose a capability over the daemon" shape this design uses for dispatch. For the
 narrow case where a transcript must actually be *present* on the target (resume /
-handoff, Phase 2), the existing CRDT G-Set / R2 substrate (`src/lib/session/sync/`)
-replicates **that one session** selectively — never the whole tree.
+handoff), `agents sessions migrate` (shipped since this doc was written) ships
+**that one session** selectively over the direct SSH transport
+(`resolveExplicitTargets` + `ssh-exec`) — never the whole tree, and no R2/CRDT
+substrate (that background-sync mechanism this doc originally cited has since
+been removed; see [05-sessions.md](05-sessions.md#migration-relocate-a-live-session)).
 
 ## Phase 2 — session handoff (the differentiator)
 
@@ -544,9 +547,10 @@ uncommitted work*, to another box and continue:
 
 1. **Code**: push/sync the git branch; **`rsync` the working tree** (uncommitted
    included) over SSH — the thing the cloud tools can't do.
-2. **Conversation**: sync the transcript. The CRDT session-sync substrate already
-   exists (`src/lib/session/sync/`, the `sessions-sync` work — G-Set union over
-   R2); for a direct SSH hop we can also rsync the JSONL directly.
+2. **Conversation**: ship the transcript. `agents sessions migrate` already does
+   this over a direct SSH hop (`resolveExplicitTargets` + `ssh-exec`) — the R2/CRDT
+   background-sync substrate this section originally proposed reusing has since
+   been removed; the direct-transport path is the one that shipped.
 3. **Resume**: `agents run <agent> --resume <session-id>` on the target.
 4. **Relay/attach mode**: attach to a still-running remote session by tailing its
    transcript (Phase 1 §4) and sending follow-ups over SSH — the "remote-control"
@@ -674,13 +678,13 @@ just relocates the storm):
 | Transcript parse → events | `src/lib/session/parse.ts` (`parseClaude`/`parseCodex`/…) |
 | Incremental offset read | `src/lib/session/active.ts:200-248` |
 | Per-agent transcript dirs | `src/lib/session/discover.ts:getAgentSessionDirs` |
-| Cross-machine transcript sync | `src/lib/session/sync/` (CRDT G-Set / R2) |
+| Cross-machine transcript transport | `src/commands/sessions-migrate.ts` (direct SSH, shipped) — the CRDT G-Set / R2 background-sync substrate this row originally named has been removed |
 | Scheduling | `src/lib/daemon.ts` (routines scheduler) |
 | Task tracking store | `src/lib/cloud/store.ts` (free-text `provider`, reserved `provider_data`) |
 | Config schema | `src/lib/types.ts` (`Meta`) + `src/lib/state.ts` (`readMeta`) |
 | Config bootstrap on host | `agents pull` (git-backed) + `scripts/sandbox.sh:218-239` |
 | Secret injection (on demand) | `src/commands/secrets.ts:1089-1097` (`--to-ssh`, env over ssh stdin) + `SSH_TARGET_RE`/`assertValidSshTarget` (`secrets.ts:189-195`) |
-| Selective transcript replication | `src/lib/session/sync/` (per-session, not whole tree) |
+| Selective transcript replication | `src/lib/session/sync/agents.ts` (per-agent mirror layout, per-session not whole tree) |
 
 ## Prior art studied
 

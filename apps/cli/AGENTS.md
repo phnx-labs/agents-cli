@@ -548,8 +548,9 @@ bug; fix the drift. It uses RFC-2119 MUST/SHOULD language, cites the implementin
   picker share the one unguarded renderer, SES-GAP-1); "where a session started"
   spans three fields (`cwd` + `provenance` + `context`), not one `origin`
   (SES-13); the `--json` shapes and `SessionEvent` union are a stability contract
-  (SES-IF-1, SES-IF-4); R2 sync is a CRDT G-Set union, zero-knowledge whenever an
-  encryption key is configured (SES-24, SES-25).
+  (SES-IF-1, SES-IF-4); `agents sessions export --encrypt` seals every transcript
+  body client-side with AES-256-GCM under the shared `r2.backups` bundle key, or
+  an ephemeral one when unconfigured (SES-24, SES-25).
 - **[`docs/specifications.md` §Secrets](docs/specifications.md#secrets)** — the `agents secrets`
   contract. Load-bearing invariants: **inject into the child, never materialize
   to the agent** — every command is on one side of the boundary by construction

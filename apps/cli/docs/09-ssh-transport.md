@@ -268,7 +268,7 @@ Follow-ups (non-blocking):
 
 - Remove the now-unused `sshReachable` export.
 - Keep specialized direct-`ssh` sites (for example `-L`/`-N` tunnels,
-  `ProxyCommand` relays, browser CDP, and drive-sync) composed from
+  `ProxyCommand` relays, and browser CDP) composed from
   `sshConnectOpts(...)` so they inherit the shared baseline while preserving
   their required extra flags.
 - Consider moving cloud task streaming from bounded polling to the same
