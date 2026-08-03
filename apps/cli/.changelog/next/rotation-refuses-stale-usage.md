@@ -16,4 +16,13 @@
   box unusable — but the banner now reads `… (2 of 5 healthy, usage unverified —
   no account could be refreshed)` instead of presenting a guess as a fact. An
   account with a verified snapshot always wins over one with a stale snapshot,
-  even when the stale number looks emptier.
+  even when the stale number looks emptier. This applies to `--strategy
+  available` as well as `balanced` — both route on the same cache, and
+  `available`'s headroom sort was inverted by a stale number in exactly the same
+  way. An explicit version preference is an instruction, not a ranking signal, so
+  it still wins.
+- **The mid-run failover chain is unchanged.** Declining to *pick* an account on
+  unconfirmed data and declining to *fail over to* it after the primary already
+  hit a 429 are different risks — by then the alternative is not launching at
+  all. Every eligible account stays in the failover chain; only the initial pick
+  prefers verified ones.

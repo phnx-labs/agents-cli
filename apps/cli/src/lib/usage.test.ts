@@ -288,9 +288,12 @@ describe('swrWindowMsFor — a routing decision does not get day-old data', () =
     expect(swrWindowMsFor(7 * DAY)).toBe(DAY);
   });
 
-  it('treats a nonsensical age as no opinion rather than zero', () => {
+  it('treats an unusable age as no opinion — the caller simply did not ask', () => {
     expect(swrWindowMsFor(Number.NaN)).toBe(DAY);
     expect(swrWindowMsFor(Number.POSITIVE_INFINITY)).toBe(DAY);
+  });
+
+  it('clamps a negative age to zero — that IS an opinion: never serve the cache', () => {
     expect(swrWindowMsFor(-1)).toBe(0);
   });
 });

@@ -304,27 +304,42 @@ export function pickBalancedCandidate(
 
   if (healthy.length === 0) return null;
 
-  // An eligible account whose usage we could not confirm is a guess, not a
-  // green light: the snapshot says "48% used" with equal confidence whether it
-  // was read a minute or three days ago, and a box whose refresh is failing
-  // stays wrong indefinitely. So route to a VERIFIED account whenever one
-  // exists, and fall back to the unverified pool only when nothing on this
-  // machine could be confirmed — a launch that still happens, but says so.
-  const verified = healthy.filter((c) => isUsageVerified(c, nowMs));
-  const pool = verified.length > 0 ? verified : healthy;
-  const usageUnverified = verified.length === 0;
-  for (const c of healthy) {
-    if (!pool.includes(c)) excluded.push(c);
-  }
-
-  const sorted = dedupeAndSortCandidates(pool);
+  const sorted = dedupeAndSortCandidates(healthy);
   const deduped = new Set(sorted);
-  for (const c of pool) {
+  for (const c of healthy) {
     if (!deduped.has(c)) excluded.push(c);
   }
 
-  const picked = weightedRandomByCapacity(sorted);
+  const { picked, usageUnverified } = preferVerified(sorted, nowMs, weightedRandomByCapacity);
   return { picked, healthy: sorted, excluded, usageUnverified };
+}
+
+/**
+ * Choose from the VERIFIED candidates when any exist, else from the whole pool.
+ *
+ * An eligible account whose usage we could not confirm is a guess, not a green
+ * light: the snapshot reads "48% used" with equal confidence whether it was
+ * captured a minute or three days ago, and a box whose refresh is failing stays
+ * wrong indefinitely. Confirmed headroom therefore beats apparent headroom, even
+ * when the unconfirmed number looks better.
+ *
+ * `healthy` deliberately keeps every eligible candidate rather than just the
+ * verified ones. Declining to *pick* an account on stale data and declining to
+ * *fail over to* it after the primary has already hit a 429 are different risks:
+ * by then the alternative is not launching at all, so the failover chain
+ * (rotationFailoverChain, which reads `healthy`) keeps its full safety net —
+ * exactly on the machines this guard is protecting.
+ */
+function preferVerified(
+  pool: RotateCandidate[],
+  nowMs: number,
+  choose: (from: RotateCandidate[]) => RotateCandidate,
+): { picked: RotateCandidate; usageUnverified: boolean } {
+  const verified = pool.filter((c) => isUsageVerified(c, nowMs));
+  return {
+    picked: choose(verified.length > 0 ? verified : pool),
+    usageUnverified: verified.length === 0,
+  };
 }
 
 /**
@@ -358,6 +373,7 @@ function weightedRandomByCapacity(sorted: RotateCandidate[]): RotateCandidate {
 export function pickAvailableCandidate(
   candidates: RotateCandidate[],
   preferredVersion?: string | null,
+  nowMs: number = Date.now(),
 ): RotateResult | null {
   const healthy: RotateCandidate[] = [];
   const excluded: RotateCandidate[] = [];
@@ -377,10 +393,17 @@ export function pickAvailableCandidate(
     if (!deduped.has(c)) excluded.push(c);
   }
 
+  // `available` sorts by apparent headroom and takes the front of the list, so an
+  // unconfirmed "48% used" outranks an accurate "90% used" — the same inversion
+  // that put a launch on an exhausted account under `balanced`. It routes on the
+  // same cache, so it gets the same rule: confirmed headroom first.
+  const { picked: bestVerified, usageUnverified } = preferVerified(sorted, nowMs, (from) => from[0]);
+  // An explicit version preference is an instruction, not a ranking signal, so it
+  // still wins — but only while that version is actually eligible.
   const preferred = preferredVersion
     ? sorted.find((candidate) => candidate.version === preferredVersion)
     : undefined;
-  return { picked: preferred ?? sorted[0], healthy: sorted, excluded };
+  return { picked: preferred ?? bestVerified, healthy: sorted, excluded, usageUnverified };
 }
 
 export async function collectRunCandidates(agent: AgentId): Promise<RotateCandidate[]> {
