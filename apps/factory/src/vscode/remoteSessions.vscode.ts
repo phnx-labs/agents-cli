@@ -29,6 +29,8 @@ import {
   groupByHost,
   parseSessionLabelSource,
   SessionLabelSource,
+  parseSessionIdentity,
+  SessionIdentity,
 } from '../core/remoteSessions';
 import type { ProjectRule } from '../core/settings';
 import { deriveHostLoad, parseRemoteCpuRatio } from '../core/dispatchRanking';
@@ -344,6 +346,36 @@ export async function fetchRemoteSessionLabelSource(
       { timeout: DETAIL_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, env: pathAugmentedEnv() },
     );
     return parseSessionLabelSource(stdout, sessionId);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve a running session's real `version` + `account` via
+ * `agents sessions <id> [--host <device>] --json`. `host` is passed for an
+ * offloaded (`--host`) tab whose session lives on another machine; omitted for a
+ * local session. This is the authoritative source for the status bar's
+ * version/account — `agents view` reports only machine-default install metadata.
+ *
+ * Returns null when the host is unreachable or the session is not indexed yet;
+ * the status-bar hydration simply retries on its next tick.
+ */
+export async function fetchSessionIdentity(
+  sessionId: string,
+  host?: string,
+): Promise<SessionIdentity | null> {
+  const agentsBin = await findAgentsCli();
+  const args = host
+    ? ['sessions', sessionId, '--host', host, '--json']
+    : ['sessions', sessionId, '--json'];
+  try {
+    const { stdout } = await execFileAsync(
+      agentsBin,
+      args,
+      { timeout: DETAIL_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, env: pathAugmentedEnv() },
+    );
+    return parseSessionIdentity(stdout, sessionId);
   } catch {
     return null;
   }

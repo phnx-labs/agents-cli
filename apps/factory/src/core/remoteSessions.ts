@@ -914,6 +914,39 @@ export function parseSessionLabelSource(rawJson: string, sessionId?: string): Se
   return { label: label && isDerivedSessionName(label, cwd) ? null : label, topic };
 }
 
+export interface SessionIdentity {
+  /** The agent version this session actually launched under (e.g. "2.1.207"). */
+  version: string | null;
+  /** The account/email this session is authenticated as. */
+  account: string | null;
+}
+
+/**
+ * Pull the running session's real `version` + `account` out of
+ * `agents sessions <id> --json` — the only source that knows which version and
+ * account a `--strategy balanced` launch actually selected for THIS session.
+ *
+ * `agents view --json` is the wrong source: it reports the machine's installed
+ * versions and their signed-in accounts (the box-wide default), which is
+ * unrelated to a specific running session. Handles the same two payload shapes
+ * as {@link parseSessionLabelSource} (local `{ session, events }` and the flat
+ * `SessionMeta[]` array returned with `--host`); `sessionId` disambiguates.
+ */
+export function parseSessionIdentity(rawJson: string, sessionId?: string): SessionIdentity | null {
+  let data: unknown;
+  try {
+    data = JSON.parse(rawJson);
+  } catch {
+    return null;
+  }
+  const record = pickSessionRecord(data, sessionId);
+  if (!record) return null;
+  const version = typeof record.version === 'string' && record.version.trim() ? record.version.trim() : null;
+  const account = typeof record.account === 'string' && record.account.trim() ? record.account.trim() : null;
+  if (!version && !account) return null;
+  return { version, account };
+}
+
 /** The one session record out of either payload shape, or null when absent. */
 function pickSessionRecord(data: unknown, sessionId?: string): Record<string, unknown> | null {
   if (Array.isArray(data)) {

@@ -35,7 +35,7 @@ import { startWatchdogBridge } from '../mcp/watchdog-bridge';
 import { ensureWatchdogMcpInstalled } from '../mcp/watchdogInstall';
 import * as notifications from './notifications.vscode';
 import * as terminals from './terminals.vscode';
-import { fetchLocalSessions, fetchRemoteSessionLabelSource, fetchRecapSessions, LOCAL_LABEL } from './remoteSessions.vscode';
+import { fetchLocalSessions, fetchRemoteSessionLabelSource, fetchSessionIdentity, fetchRecapSessions, LOCAL_LABEL } from './remoteSessions.vscode';
 import * as sessionTracker from './sessionTracker';
 import { runRecapHeadless, isRecapSupported } from './recap.vscode';
 import { buildAgentTerminalEnv } from '../core/terminals';
@@ -134,7 +134,7 @@ async function ensureAgentsCliInstalled(): Promise<void> {
 }
 import { supportsPrewarming, buildVersionedResumeCommand, PREWARM_CONFIGS, PrewarmAgentType } from '../core/prewarm';
 import { generateClaudeSessionId, listOpencodeSessions } from '../core/prewarm.simple';
-import { liveSessionIdForShell, pruneStaleSessionState } from '../core/liveSession';
+import { liveSessionIdForShell } from '../core/liveSession';
 import { getSessionPathBySessionId, getSessionPreviewInfo, getOpenCodeSessionPreviewInfo, getCursorSessionPreviewInfo } from './sessions.vscode';
 import * as tasksImport from './tasks.vscode';
 import { SOURCE_BADGES } from '../core/tasks';
@@ -152,7 +152,7 @@ const STATUS_BAR_AGENTS_VIEW_TTL_MS = 30_000;
 // Keyed by agent, or `agent@host` for an offloaded terminal — account usage is
 // per machine, so a device's view must never be served from this box's entry.
 const agentsViewCache = new Map<string, { fetchedAtMs: number; data: AgentsViewJsonAgent | null }>();
-const statusBarMetaInFlight = new Set<string>();
+const statusIdentityInFlight = new Set<string>();
 
 // BUILT_IN_AGENTS is now imported from ./agents
 
@@ -1074,11 +1074,6 @@ export async function activate(context: vscode.ExtensionContext) {
   // resolveAgentsBin runs in the background; if it throws AgentsBinNotFoundError
   // we surface a notification with a one-click installer.
   void ensureAgentsCliInstalled();
-
-  // Drop session-state files left behind by agents that have exited. The
-  // SessionStart hook keys files by pid; without a SessionEnd cleanup hook,
-  // those files would otherwise accumulate forever.
-  void pruneStaleSessionState();
 
   // Initialize terminal readiness event tracking (shell integration + close cleanup)
   readiness.initReadiness(context);
@@ -2916,7 +2911,7 @@ async function copySessionId() {
   // The session id stored on terminalEntry is the spawn-time value. It goes
   // stale when the user exits and reruns the agent in the same terminal, or
   // after /clear. Prefer the live id captured by the SessionStart hook
-  // (~/.agents/.cache/terminals/sessions/<agent-pid>.json).
+  // (~/.agents/.cache/state/sessions/<agent-pid>.json).
   const shellPid = await activeTerminal.processId;
   const liveId = await liveSessionIdForShell(shellPid);
   const sessionId = liveId || terminalEntry.sessionId;
@@ -3979,68 +3974,55 @@ function formatAgentStatusBarText(
   return text;
 }
 
-function resolveStatusFromAgentsView(
-  view: AgentsViewJsonAgent,
-  pinnedVersion?: string
-): { version?: string; account?: string } {
-  const versions = Array.isArray(view.versions) ? view.versions : [];
-  if (versions.length === 0) return {};
-
-  if (pinnedVersion) {
-    const matched = versions.find(v => v.version === pinnedVersion);
-    return {
-      version: pinnedVersion,
-      account: normalizeStatusEmail(matched?.email),
-    };
-  }
-
-  const selected = versions.find(v => v.isDefault) ?? versions[0];
-  if (!selected) return {};
-  return {
-    version: selected.version,
-    account: normalizeStatusEmail(selected.email),
-  };
-}
-
-async function tryHydrateStatusBarAgentMeta(
+// Resolve the running session's REAL version + account from the CLI session feed
+// (`agents sessions <id> --json`, host-aware) and stamp them on the entry. This is
+// the only source that knows which version/account a `--strategy balanced` launch
+// actually selected for this session — `agents view` reports only the box-wide
+// default install, which is unrelated to a specific terminal and was the cause of
+// the status bar showing a wrong version/account (esp. under Remote-SSH, where the
+// remote box's default differs from what the session actually ran).
+async function tryHydrateSessionIdentity(
   terminal: vscode.Terminal,
   entry: terminals.EditorTerminal,
-  prefix: string
+  prefix: string,
+  sessionId: string,
 ): Promise<void> {
-  const agentKey = (entry.agentType || prefixToAgentType(prefix)) as PrewarmAgentType | null;
-  if (!agentKey) return;
+  // The cached version/account belong to a specific session. Skip only when they
+  // are already resolved for THIS session id — a rerun or /clear in the same
+  // terminal produces a new id (often a different balanced version/account), and
+  // the stale cache must be replaced, not kept.
+  if (entry.identitySessionId === sessionId && entry.version && entry.account) return;
 
-  const inflightKey = entry.id || `${agentKey}:${entry.sessionId || terminal.name}`;
-  if (statusBarMetaInFlight.has(inflightKey)) return;
-  statusBarMetaInFlight.add(inflightKey);
+  const inflightKey = `${sessionId}@${entry.host ?? 'local'}`;
+  if (statusIdentityInFlight.has(inflightKey)) return;
+  statusIdentityInFlight.add(inflightKey);
 
   try {
-    const view = await fetchAgentsViewJson(agentKey, { quiet: true, useCache: true });
-    if (!view) return;
-
-    const resolved = resolveStatusFromAgentsView(view, entry.version);
-    if (!entry.statusVersion && resolved.version) {
-      entry.statusVersion = resolved.version;
-    }
-    if (entry.version && resolved.account && !entry.account) {
-      terminals.setAccount(terminal, resolved.account);
-    } else if (!entry.statusAccount && resolved.account) {
-      entry.statusAccount = resolved.account;
-    }
+    const identity = await fetchSessionIdentity(sessionId, entry.host);
+    if (!identity) return;
+    // The terminal may have moved on to another session while this was queued;
+    // never stamp a stale session's identity over the current one.
+    if (entry.sessionId && entry.sessionId !== sessionId) return;
+    if (identity.version) terminals.setVersion(terminal, identity.version);
+    if (identity.account) terminals.setAccount(terminal, identity.account);
+    // Only mark this session's identity resolved once BOTH fields came back, so a
+    // transient partial result (e.g. account not yet indexed) is retried on the
+    // next tick instead of leaving the missing field frozen for the session.
+    if (identity.version && identity.account) entry.identitySessionId = sessionId;
 
     if (!agentStatusBarItem || vscode.window.activeTerminal !== terminal) return;
     const rawLabel = entry.label;
     const displayLabel = rawLabel ? rawLabel.replace(/<[^>]*>/g, '').trim() : null;
     agentStatusBarItem.text = formatAgentStatusBarText(
       getExpandedAgentName(prefix),
-      entry.version || entry.statusVersion,
-      normalizeStatusEmail(entry.account || entry.statusAccount),
+      entry.version,
+      normalizeStatusEmail(entry.account),
       displayLabel,
       entry.sessionId,
       entry.agentType === 'codex',
     );
   } finally {
-    statusBarMetaInFlight.delete(inflightKey);
+    statusIdentityInFlight.delete(inflightKey);
   }
 }
 
@@ -4065,13 +4047,21 @@ async function tryHydrateLiveSessionId(
       terminals.setSessionId(terminal, liveId);
     }
 
+    // Now that the real (live) session id is known, resolve its actual
+    // version/account from the session feed. Drive it off the LIVE id, not the
+    // stale entry.sessionId, and re-fetch whenever the cached identity belongs to
+    // a different session (rerun / /clear in the same terminal).
+    if (entry.identitySessionId !== liveId) {
+      void tryHydrateSessionIdentity(terminal, entry, prefix, liveId);
+    }
+
     if (!agentStatusBarItem || vscode.window.activeTerminal !== terminal) return;
     const rawLabel = entry.label;
     const displayLabel = rawLabel ? rawLabel.replace(/<[^>]*>/g, '').trim() : null;
     agentStatusBarItem.text = formatAgentStatusBarText(
       getExpandedAgentName(prefix),
-      entry.version || entry.statusVersion,
-      normalizeStatusEmail(entry.account || entry.statusAccount),
+      entry.version,
+      normalizeStatusEmail(entry.account),
       displayLabel,
       liveId,
       entry.agentType === 'codex',
@@ -4107,13 +4097,19 @@ function updateStatusBarForTerminal(terminal: vscode.Terminal, extensionPath: st
       entry?.agentType === 'codex',
     );
 
-    if (entry && (!version || !account)) {
-      void tryHydrateStatusBarAgentMeta(terminal, entry, info.prefix);
+    // When we already know the session id (e.g. an offloaded --host tab, where the
+    // live-id lookup below can't reach the remote box), resolve its real
+    // version/account from the session feed (host-aware), re-fetching when the
+    // cached identity is for a different session. We deliberately do NOT fall back
+    // to `agents view` machine defaults when there is no id — that showed a version
+    // and account unrelated to the running session (the reported bug).
+    if (entry && sessionId && entry.identitySessionId !== sessionId) {
+      void tryHydrateSessionIdentity(terminal, entry, info.prefix, sessionId);
     }
-    // Async-resolve the live session id from the SessionStart hook's state file
-    // and re-render. Catches the case where the user exited and reran the
-    // agent in the same terminal, or fired /clear — entry.sessionId is the
-    // spawn-time value and goes stale; the hook's per-pid file has the truth.
+    // Async-resolve the live session id from the SessionStart hook's state file,
+    // then hydrate its identity. Catches the case where the user exited and reran
+    // the agent in the same terminal, fired /clear, or ran the agent by hand so
+    // entry.sessionId was never stamped — the hook's per-pid file has the truth.
     void tryHydrateLiveSessionId(terminal, info.prefix);
 
     return;

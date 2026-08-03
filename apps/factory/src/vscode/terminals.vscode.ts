@@ -96,6 +96,7 @@ export interface EditorTerminal {
   account?: string;         // Resolved account email for this terminal when known
   statusVersion?: string;   // Display-only version from agents-cli metadata
   statusAccount?: string;   // Display-only account from agents-cli metadata
+  identitySessionId?: string; // Session id whose version/account are cached above; re-fetch when the live id differs (rerun / /clear in the same terminal)
   approvalStatus?: 'pending' | 'approved' | 'running' | 'complete'; // Swarm approval status
   autoLabelPollerId?: NodeJS.Timeout; // Poller for auto-label fetch (cleared once label is set)
   detached?: boolean;       // The client tab closed on a live tmux detach (SSH drop) but the
