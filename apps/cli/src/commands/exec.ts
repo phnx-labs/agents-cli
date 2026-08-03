@@ -120,6 +120,25 @@ export function parseRunAccountPickerRequest(agentSpec: string): RunAccountPicke
 }
 
 /** Return every option whose routing semantics conflict with a local account choice. */
+/**
+ * The `--host` alias family — the flags that mean "dispatch this run to another
+ * machine over SSH". `--host` is canonical; `--device`/`--on`/`--computer` are
+ * aliases. Returns the values actually given (so callers can both test presence
+ * and read the target). Kept in ONE place because a guard that listed only a
+ * subset silently let `--terminal --device` open a local tab and drop the remote
+ * target — the drift this predicate exists to prevent.
+ */
+export function hostTargetGiven(options: {
+  host?: string;
+  device?: string;
+  on?: string;
+  computer?: string;
+}): string[] {
+  return [options.host, options.device, options.on, options.computer].filter(
+    (v): v is string => !!v,
+  );
+}
+
 export function runAccountPickerConflicts(options: {
   resume?: string | boolean;
   strategy?: string;
@@ -137,7 +156,7 @@ export function runAccountPickerConflicts(options: {
   if (options.balanced) conflicts.push('--balanced');
   if (options.lease) conflicts.push('--lease');
   if (options.box) conflicts.push('--box');
-  if (options.host || options.device || options.on || options.computer) conflicts.push('--host/--device');
+  if (hostTargetGiven(options).length) conflicts.push('--host/--device');
   return conflicts;
 }
 
@@ -580,9 +599,13 @@ async function handleTerminalHandoff(
       process.exit(1);
     }
   }
-  if (options.host) {
-    // The rule and its wording live once, in the --host forwarding table, so the
-    // classification a reviewer reads and the error a user sees can't drift.
+  // --host and its aliases (--device/--on/--computer) all mean "dispatch this
+  // run to another machine over SSH", which is incompatible with opening a
+  // terminal tab on THIS machine — so reject the whole alias family, not just
+  // the canonical flag. The rule and its wording live once, in the --host
+  // forwarding table, so the classification a reviewer reads and the error a
+  // user sees can't drift.
+  if (hostTargetGiven(options).length) {
     const { RUN_OPTION_REJECT_MESSAGES } = await import('../lib/hosts/remote-cmd.js');
     console.error(chalk.red(RUN_OPTION_REJECT_MESSAGES.terminal));
     process.exit(1);
@@ -1310,7 +1333,7 @@ export function registerRunCommand(program: Command): void {
 
       // --host/--on/--computer: offload this run onto a registered agent host
       // over SSH instead of running locally. The three flags are aliases.
-      const hostGiven = [options.host, options.device, options.on, options.computer].filter((v): v is string => !!v);
+      const hostGiven = hostTargetGiven(options);
 
       // --project <slug>[@worktree]: resolve the projects-root shorthand into a
       // cwd. On a host run it resolves home-relative (`~/…`, so the host expands
