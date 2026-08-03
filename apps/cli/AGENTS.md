@@ -308,7 +308,7 @@ package's npm tarball; two more helpers are dev-only and live at repo-root `nati
 | Helper | Source | Ships in tarball? | Resolver |
 |---|---|---|---|
 | Keychain broker | `src/lib/secrets/keychain-helper.swift` → `bin/Agents CLI.app` | **Yes** (signed + notarized) | `src/lib/secrets/` |
-| Menu-bar helper | [`menubar/`](menubar) (SwiftPM) → `bin/MenubarHelper.app` | **Yes** (signed, no notarization) | `src/lib/menubar/install-menubar.ts` |
+| Menu-bar helper | [`menubar/`](menubar) (SwiftPM) → `bin/MenubarHelper.app` | **Yes** (signed + notarized) | `src/lib/menubar/install-menubar.ts` |
 | Standalone CLI binary | `src/` → `bun build --compile` → `bin/agents-macos` | **Yes** (signed + notarized, arm64 Mach-O at `dist/bin/agents`) | `scripts/postinstall.js` |
 | computer-mac | [`../../native/computer-mac`](../../native/computer-mac) | No — signed + notarized GitHub **release asset**, downloaded on demand | `src/lib/computer-rpc.ts`, `src/lib/computer/download.ts` |
 | computer-win | [`../../native/computer-win`](../../native/computer-win) | No (staged at release) | `src/lib/ssh-tunnel.ts` |
@@ -483,10 +483,19 @@ the helper only when `src/lib/secrets/keychain-helper.swift` changes.
 **Menu-bar helper** ([`menubar/`](menubar) → `bin/MenubarHelper.app`) ships the same
 way — built into `bin/`, copied to `dist/lib/menubar/` by `build`, gated in `prepack`
 by [`scripts/verify-menubar-helper.sh`](scripts/verify-menubar-helper.sh) (presence +
-`codesign --verify`). No notarization (a status item has no Keychain ACL / TCC
-grant). Keep it a **separate bundle** from the keychain app — a menu-bar crash must
-never take down the secret broker. Stage a freshly-built `bin/MenubarHelper.app`
-before any release or the menu bar ships code-only (the 1.20.22 bug the gate prevents).
+`codesign --verify` + a **stapled notarization ticket**). It is Developer-ID signed
+**and notarized + stapled** ([`menubar/scripts/build.sh`](menubar/scripts/build.sh),
+run inside the release's `agents secrets exec apple.com` context): Gatekeeper on
+macOS 26+ rejects an un-notarized `.app` as "damaged" (crashing AppKit at launch),
+and the stapled ticket rides inside the bundle so it survives npm's tarball
+round-trip — so the installed helper launches with **no per-machine re-signing**
+(the old `install-menubar.ts` ad-hoc re-sign band-aid is gone; the launch guards now
+verify Gatekeeper acceptance and fail loud instead — RUSH-2114). Notarization is
+mandatory for any real (Developer-ID) build; an ad-hoc dev build can't be notarized
+and the prepack gate refuses to pack it. Keep it a **separate bundle** from the
+keychain app — a menu-bar crash must never take down the secret broker. Stage a
+freshly-built `bin/MenubarHelper.app` before any release or the menu bar ships
+code-only (the 1.20.22 bug the gate prevents).
 
 **Exactly one status item is an invariant, enforced in the helper.** The bundle
 can be started from more than one place — launchd's `KeepAlive` service, a
