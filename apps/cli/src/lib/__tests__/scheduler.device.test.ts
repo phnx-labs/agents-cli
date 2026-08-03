@@ -81,6 +81,8 @@ describe('JobScheduler devices allowlist', () => {
         { ...baseJob, name: 'unpinned' },
         { ...baseJob, name: 'allowed-here', devices: ['zion'] },
         { ...baseJob, name: 'allowed-elsewhere', devices: ['yosemite-s0'] },
+        // Multi-device pin: owner is 'mac-mini' (lowest normalized name), so on
+        // zion it is NOT loaded — the routine fires once, not once per device.
         { ...baseJob, name: 'multi-includes-here', devices: ['mac-mini', 'zion'] },
       ],
     });
@@ -92,10 +94,13 @@ describe('JobScheduler devices allowlist', () => {
         findJob(home, ['list', '--json'], 'allowed-elsewhere', { AGENTS_SYNC_MACHINE_ID: 'zion' })!,
       ];
 
-      expect(entries[0].nextRun).not.toBeNull();
-      expect(entries[1].nextRun).not.toBeNull();
-      expect(entries[2].nextRun).not.toBeNull();
-      expect(entries[3].nextRun).toBeNull();
+      expect(entries[0].nextRun).not.toBeNull();  // unpinned — fleet-wide
+      expect(entries[1].nextRun).not.toBeNull();  // pinned here
+      // 'multi-includes-here' pins [mac-mini, zion]; mac-mini owns it (lowest
+      // normalized name), so on zion it is NOT scheduled — the routine fires
+      // once, not once per listed device.
+      expect(entries[2].nextRun).toBeNull();
+      expect(entries[3].nextRun).toBeNull();      // pinned elsewhere
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }

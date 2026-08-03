@@ -447,8 +447,16 @@ Device names are compared against the local `machineId()` (normalized hostname, 
 shown by `agents devices`), so `Yosemite-S0` and `yosemite-s0.tailnet.ts.net` both
 match `yosemite-s0`.
 
+**A routine runs on exactly one device.** `devices:` is an allowlist, but only its
+**owner** fires — the first entry in normalized sort order. Ownership is derived from
+the config alone, so every daemon independently reaches the same answer with no lease
+and no coordination. Listing several devices is a misconfiguration: it used to fire the
+routine once per listed device (duplicate work, duplicate spend), so `add`/`devices --set`
+now reject it and `agents doctor` reports any that remain on disk.
+
 **Omitting `devices:` means unrestricted** — the job fires on every device running
-the scheduler. `--clear` restores unrestricted behavior (see below).
+the scheduler. That is the genuine fleet-wide case (`watchdog`, `check-updates`).
+`--clear` restores it (see below).
 
 On a device not in the allowlist the job is fully inert:
 

@@ -44,6 +44,7 @@ import { resolveHost } from '../lib/hosts/registry.js';
 import { sshExecAsync } from '../lib/ssh-exec.js';
 import { sshTargetFor } from '../lib/hosts/types.js';
 import { machineId, normalizeHost } from '../lib/session/sync/config.js';
+import { findAmbiguousDevicePins } from '../lib/routines.js';
 import chalk from 'chalk';
 import { checkAllClis, collectTeamsDoctorData, type TeamsDoctorEntry } from '../lib/teams/agents.js';
 import { AGENTS, ALL_AGENT_IDS, resolveAgentName, formatAgentError, getAccountInfo, type AccountInfo } from '../lib/agents.js';
@@ -1515,6 +1516,10 @@ export function registerDoctorCommand(program: Command): void {
         const inventory = await collectLocalFleetInventory(cwd);
         const localName = machineId();
         const duplicateHooks = inspectDuplicateVersionHooks(cwd);
+        // A routine belongs to one device. A multi-device pin used to fire it
+        // once per listed device — duplicate agent runs, duplicate spend — so
+        // surface any that are still on disk with the exact fix.
+        const ambiguousPins = findAmbiguousDevicePins(cwd);
 
         // Legacy account-global sign-in map, kept for `--json` back-compat
         // (ssh.ts RemoteDoctorJson / menubar read `signIn`). File-based, no home.
@@ -1586,6 +1591,9 @@ export function registerDoctorCommand(program: Command): void {
             // reading `sync`/`orphans`/`repos` are unaffected.
             health: computeOverviewHealth(syncRows, orphanRows, repoBehindMarkers, duplicateHooks),
             duplicateHooks,
+            // Routines whose `devices` names more than one machine — each used to
+            // fire once per device. `owner` is the one that fires now.
+            ambiguousDevicePins: ambiguousPins,
             // Prioritized RUSH-2069 findings (critical/warning, per-version, with
             // remediation). Additive alongside the legacy fields above.
             findings,
@@ -1629,6 +1637,25 @@ export function registerDoctorCommand(program: Command): void {
         // reviews and applies them together (opt-in, never auto-fires here).
         if (syncRows.some((r) => r.status !== 'fresh' || (r.unwiredHooks ?? 0) > 0) || repoBehindMarkers.some((m) => m.behind > 0)) {
           console.log(chalk.gray('\nRun `agents status` to review and sync what has drifted.'));
+        }
+        // A routine runs on exactly one device. Each of these named several and
+        // used to fire once per device — duplicate agent runs on every schedule.
+        if (ambiguousPins.length > 0) {
+          console.log();
+          console.log(chalk.yellow(`${ambiguousPins.length} routine(s) pin more than one device — a routine runs on exactly one:`));
+          for (const pin of ambiguousPins) {
+            console.log(
+              `  ${chalk.cyan(pin.name)} ${chalk.gray(`[${pin.devices.join(', ')}]`)} ` +
+              `${chalk.gray('→ fires only on')} ${pin.owner}`,
+            );
+            // Deliberately not prescribing `--set ${pin.owner}`: ownership is the
+            // lowest-sorted name, which can be a registry alias that matches no
+            // live machine (`worker` here), and cementing that keeps the routine
+            // dead. Name the candidates and let the operator pick the real box.
+            console.log(chalk.gray(
+              `      fix: agents routines devices ${pin.name} --set <${pin.devices.join('|')}>`,
+            ));
+          }
         }
         return;
       }
