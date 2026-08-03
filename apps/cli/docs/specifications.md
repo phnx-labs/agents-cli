@@ -411,7 +411,7 @@ The command surface (bare `sessions [query]`, `tail`, `sync`, `resume`, `focus`,
   `metadataResolveForwardedArgs`; tests
   `commands/sessions-resolve-db.test.ts`,
   `commands/__tests__/sessions.test.ts`,
-  `lib/session/remote-list.test.ts`).
+  `lib/session/__tests__/remote-list.test.ts`).
 - **SES-IF-3 (MUST).** The export **bundle format** is NDJSON, `kind`
   `agents-session-bundle`, `version` 1; parse MUST reject a wrong kind/version;
   per-record `hash`/`size` are always over **plaintext** for byte-exact dedup;
