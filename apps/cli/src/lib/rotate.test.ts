@@ -9,6 +9,7 @@ import {
   pickBalancedCandidate,
   readinessFromCandidate,
   matchAccountVersion,
+  isUsageVerified,
   type RotateCandidate,
   type RotateResult,
   type FailoverArmingContext,
@@ -370,5 +371,70 @@ describe('readinessFromCandidate (pre-flight warning for version-pinned teammate
     expect(
       readinessFromCandidate(candidate({ version: '1.0.0', signedIn: false })),
     ).toEqual({ ready: false, reason: 'signed_out', email: '1.0.0@example.com' });
+  });
+});
+
+/** A snapshot stamped with a real capture time, for the freshness gate. */
+function snapshotAt(
+  capturedAt: Date,
+  windows: Array<{ key: UsageWindowKey; usedPercent: number }>,
+): UsageSnapshot {
+  return { ...snapshot(windows), capturedAt };
+}
+
+describe('routing refuses to decide on usage it cannot verify', () => {
+  // The real incident: yosemite-s1's usage cache sat 26h–2.7d old with a
+  // failing refresh, so balanced read muqsit@getrush.ai as 48% used and
+  // launched into it. The account was actually at its weekly cap and the
+  // session answered "You've hit your weekly limit" on its first turn.
+  const NOW = Date.UTC(2026, 7, 3, 6, 57);
+  const fresh = (usedPercent: number) =>
+    snapshotAt(new Date(NOW - 60_000), [{ key: 'week', usedPercent }]);
+  const dayOld = (usedPercent: number) =>
+    snapshotAt(new Date(NOW - 26 * 3600 * 1000), [{ key: 'week', usedPercent }]);
+
+  it('never picks a day-old candidate while a verified one exists — even when the stale one looks emptier', () => {
+    const stale = candidate({ version: '2.1.181', usageSnapshot: dayOld(48) });
+    const verified = candidate({ version: '2.1.219', usageSnapshot: fresh(90) });
+
+    const result = pickBalancedCandidate([stale, verified], NOW)!;
+
+    // 48% "used" would outweigh 90% under pure capacity weighting; unverified
+    // loses to verified regardless, because the 48% is not evidence.
+    expect(result.picked.version).toBe('2.1.219');
+    expect(result.healthy.map((c) => c.version)).toEqual(['2.1.219']);
+    expect(result.excluded.map((c) => c.version)).toContain('2.1.181');
+    expect(result.usageUnverified).toBe(false);
+  });
+
+  it('still launches when NOTHING can be verified, and says the pick was unverified', () => {
+    // A box with a broken refresh must not become unlaunchable — but the
+    // operator has to learn the route was blind, not silently inherit it.
+    const a = candidate({ version: '2.1.181', usageSnapshot: dayOld(48) });
+    const b = candidate({ version: '2.1.207', usageSnapshot: dayOld(70) });
+
+    const result = pickBalancedCandidate([a, b], NOW)!;
+
+    expect(result.usageUnverified).toBe(true);
+    expect(result.healthy.length).toBe(2);
+    expect(['2.1.181', '2.1.207']).toContain(result.picked.version);
+  });
+
+  it('a verified rate-limited account is still excluded outright, not merely deprioritized', () => {
+    const limited = candidate({ version: '2.1.170', usageSnapshot: fresh(100) });
+    const ok = candidate({ version: '2.1.219', usageSnapshot: fresh(20) });
+
+    const result = pickBalancedCandidate([limited, ok], NOW)!;
+
+    expect(result.picked.version).toBe('2.1.219');
+    expect(result.excluded.map((c) => c.version)).toContain('2.1.170');
+  });
+
+  it('isUsageVerified: a snapshot with no capture time is unverified, not assumed current', () => {
+    expect(isUsageVerified(candidate({ version: '1.0.0', usageSnapshot: fresh(10) }), NOW)).toBe(true);
+    expect(isUsageVerified(candidate({ version: '1.0.0', usageSnapshot: dayOld(10) }), NOW)).toBe(false);
+    // snapshot() leaves capturedAt null — an undated number proves nothing.
+    expect(isUsageVerified(candidate({ version: '1.0.0', usageSnapshot: snapshot([{ key: 'week', usedPercent: 10 }]) }), NOW)).toBe(false);
+    expect(isUsageVerified(candidate({ version: '1.0.0' }), NOW)).toBe(false);
   });
 });

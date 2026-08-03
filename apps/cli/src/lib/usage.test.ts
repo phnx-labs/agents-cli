@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { claudeAccessTokenNeedsRefresh, claudeUsageAccessTokenNoRefresh, loadClaudeOauth, saveClaudeOauth, getClaudeKeychainService } from './usage.js';
+import { claudeAccessTokenNeedsRefresh, claudeUsageAccessTokenNoRefresh, loadClaudeOauth, saveClaudeOauth, getClaudeKeychainService, swrWindowMsFor } from './usage.js';
 import { setKeychainToken, setKeychainBackendForTest, secretsKeychainItem, type KeychainBackend } from './secrets/index.js';
 import { writeBundle, keychainRef, bundleItemStore } from './secrets/bundles.js';
 import { _resetFileStoreForTest } from './secrets/filestore.js';
@@ -264,5 +264,33 @@ describe('loadClaudeOauth — file-based `auth` setup-token (Touch-ID-free usage
     // With no keychain item and no .credentials.json, that resolves to null.
     const oauth = await loadClaudeOauth(home);
     expect(oauth).toBeNull();
+  });
+});
+
+describe('swrWindowMsFor — a routing decision does not get day-old data', () => {
+  const DAY = 24 * 60 * 60 * 1000;
+
+  it('defaults to the full stale-while-revalidate window for display callers', () => {
+    // `agents view` rendering a slightly old bar costs nothing, so it stays off
+    // the network exactly as before.
+    expect(swrWindowMsFor(undefined)).toBe(DAY);
+  });
+
+  it('shortens the window for a caller that is about to route on the number', () => {
+    // The measured failure: a 26h-old snapshot read as "48% used" while the
+    // account was at its weekly cap. Five minutes is inside the window; a day
+    // is not, so the read blocks on a live fetch instead of serving the cache.
+    expect(swrWindowMsFor(5 * 60 * 1000)).toBe(5 * 60 * 1000);
+    expect(swrWindowMsFor(5 * 60 * 1000)).toBeLessThan(26 * 60 * 60 * 1000);
+  });
+
+  it('never lets a caller opt into MORE staleness than the cache policy allows', () => {
+    expect(swrWindowMsFor(7 * DAY)).toBe(DAY);
+  });
+
+  it('treats a nonsensical age as no opinion rather than zero', () => {
+    expect(swrWindowMsFor(Number.NaN)).toBe(DAY);
+    expect(swrWindowMsFor(Number.POSITIVE_INFINITY)).toBe(DAY);
+    expect(swrWindowMsFor(-1)).toBe(0);
   });
 });

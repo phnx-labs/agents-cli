@@ -287,7 +287,7 @@ export function agentReportsUsage(agentId: AgentId): boolean {
 /** Fetch usage info for all unique accounts in parallel, keyed by usage key. */
 export async function getUsageInfoByIdentity(
   inputs: UsageIdentityInput[],
-  opts?: { forceRefresh?: boolean }
+  opts?: { forceRefresh?: boolean; maxAgeMs?: number }
 ): Promise<{
   canonicalByUsageKey: Map<string, AccountInfo>;
   usageByKey: Map<string, UsageInfo>;
@@ -314,6 +314,18 @@ export async function getUsageInfoByIdentity(
 const USAGE_CACHE_FRESH_MS = 2 * 60 * 1000; // 2 minutes — fresh window: don't refresh.
 const USAGE_CACHE_SWR_MS = 24 * 60 * 60 * 1000; // 24 hours — beyond this, block on live fetch.
 
+/**
+ * How stale a cached snapshot may be before the read stops serving it and blocks
+ * on the network. Defaults to the full 24h stale-while-revalidate window; a
+ * caller that is about to ROUTE on the number passes a shorter `maxAgeMs` and
+ * gets a live read instead of a day-old one. Never widens past 24h — a caller
+ * cannot opt into more staleness than the cache policy allows.
+ */
+export function swrWindowMsFor(maxAgeMs?: number): number {
+  if (maxAgeMs === undefined || !Number.isFinite(maxAgeMs)) return USAGE_CACHE_SWR_MS;
+  return Math.min(USAGE_CACHE_SWR_MS, Math.max(0, maxAgeMs));
+}
+
 /** In-process dedup: don't fire concurrent background refreshes for the same identity. */
 const inFlightRefreshes = new Map<string, Promise<void>>();
 
@@ -331,7 +343,7 @@ const inFlightRefreshes = new Map<string, Promise<void>>();
  */
 export async function getUsageInfoForIdentity(
   input: UsageIdentityInput,
-  opts?: { forceRefresh?: boolean }
+  opts?: { forceRefresh?: boolean; maxAgeMs?: number }
 ): Promise<UsageInfo> {
   const usageKey = getUsageLookupKey(input.info);
   const forceRefresh = opts?.forceRefresh === true;
@@ -366,7 +378,15 @@ export async function getUsageInfoForIdentity(
 
     // Stale-while-revalidate: cache exists and isn't ancient, return it now and
     // refresh in the background so the next invocation has fresh data.
-    if (cached && ageMs < USAGE_CACHE_SWR_MS) {
+    //
+    // `maxAgeMs` shortens that window for callers that are about to make a
+    // DECISION on the number rather than display it. Serving a day-old snapshot
+    // to the account router is how a launch lands on an already-exhausted
+    // account: the box picks from its own cache, the background refresh lands
+    // after the choice is made, and nothing reconciles. Display callers keep the
+    // full 24h window and stay off the hot path.
+    const swrWindowMs = swrWindowMsFor(opts?.maxAgeMs);
+    if (cached && ageMs < swrWindowMs) {
       triggerBackgroundUsageRefresh(input, usageKey);
       return { snapshot: cached, error: null };
     }

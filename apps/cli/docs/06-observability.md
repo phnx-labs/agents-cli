@@ -878,7 +878,17 @@ a stable per-account key:
 - **Usage bars** — a separate network pass ([`src/lib/usage.ts`](../src/lib/usage.ts))
   fetches live quota and renders `S:`/`W:` bars + plan. It's **stale-while-revalidate**
   (on-disk cache under `~/.agents/.cache/`, keyed per account: 2-min fresh, 24-h
-  block) so `agents view` / `agents run` stay off the network on the hot path.
+  block) so `agents view` stays off the network on the hot path.
+- **Routing reads the same cache under a tighter rule.** Displaying a slightly old
+  bar costs nothing; *choosing an account* from one costs the whole run, so the
+  balanced router caps staleness at **5 minutes**
+  (`USAGE_DECISION_MAX_AGE_MS`, [`src/lib/rotate.ts`](../src/lib/rotate.ts)) and
+  blocks on a live read past that — one bounded, parallel round trip per account,
+  and none inside the 2-minute fresh window. When a read fails and the cache is
+  all it has, the router prefers any account whose snapshot IS verified, and
+  reports `usage unverified` in the launch banner rather than presenting a stale
+  number as a fact. The cache is strictly per machine and never synced, so a box
+  whose refresh is failing would otherwise route on day-old numbers indefinitely.
 
 What each agent can surface is bounded by what its local credential actually
 contains — this is a data-availability limit, not a policy choice:
