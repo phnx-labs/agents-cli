@@ -359,7 +359,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         // whenever the triage strip has anything to say, not only when a session
         // is blocked.
         let attention = sessions.filter { $0.status == .attention }.count
-        let routinesFailing = routines.contains { $0.lastStatus == "failed" || $0.lastStatus == "timeout" || $0.overdue }
+        let routinesFailing = routines.contains { routineNeedsAttention($0) }
         let schedulerStopped = daemonPid == nil && !routines.isEmpty
         let needsYou = attention + (routinesFailing ? 1 : 0) + (schedulerStopped ? 1 : 0)
         let rich = isRich(attention: needsYou)
@@ -509,7 +509,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             rows.append(("⚠", wait, "Scheduler stopped — routines won’t run", sub))
         }
 
-        let bad = routines.filter { $0.lastStatus == "failed" || $0.lastStatus == "timeout" || $0.overdue }
+        let bad = routines.filter { routineNeedsAttention($0) }
         if bad.count == 1, let r = bad.first {
             let why = r.overdue ? "overdue" : (r.lastStatus ?? "failed")
             rows.append(("✕", fail, "Routine \(r.name) \(why)", allRoutinesSubmenu(bad)))
@@ -943,7 +943,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
 
         addSectionTitle(menu, "ROUTINES · \(summary)", color: .secondaryLabelColor)
-        let failing = routines.filter { $0.lastStatus == "failed" || $0.lastStatus == "timeout" || $0.overdue }
+        let failing = routines.filter { routineNeedsAttention($0) }
         let upcoming = routines
             .filter { r in r.enabled && !failing.contains(where: { $0.name == r.name }) && r.nextRun != nil }
             .sorted { ($0.nextRun ?? "") < ($1.nextRun ?? "") }
@@ -955,7 +955,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
         for r in failing {
             let why = routineFailureSummary(r, max: 48)
-            let row = statusRow("✕", fail, "\(r.name)  \(why)")
+            let row = statusRow(routineIsMiss(r) ? "⃠" : "✕", routineIsMiss(r) ? wait : fail, "\(r.name)  \(why)")
             row.submenu = routineSubmenu(r)
             menu.addItem(row)
         }
@@ -1089,7 +1089,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private func allRoutinesSubmenu(_ routines: [Routine]) -> NSMenu {
         let sub = NSMenu()
         for r in routines {
-            let mark = r.lastStatus == "failed" || r.lastStatus == "timeout" || r.overdue ? "! "
+            let mark = routineNeedsAttention(r) ? "! "
                 : (r.enabled ? "  " : "· ")
             let when = routineFailureDetail(r, max: 52) ?? (r.enabled ? (r.nextRunHuman ?? r.schedule) : "paused")
             let item = NSMenuItem(title: "\(mark)\(r.name)  \(when)", action: nil, keyEquivalent: "")
@@ -1307,13 +1307,27 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 }
 
+/// A routine the operator should look at: it failed, timed out, never ran when
+/// it was due (`missed`), or is overdue. One predicate rather than the same
+/// disjunction repeated at each call site, so a new status cannot be added to
+/// four of five checks.
+func routineNeedsAttention(_ r: Routine) -> Bool {
+    r.lastStatus == "failed" || r.lastStatus == "timeout" || r.lastStatus == "missed" || r.overdue
+}
+
+/// `missed` means the run never started — infrastructure, not a task failure —
+/// so it reads as a warning rather than a red error.
+func routineIsMiss(_ r: Routine) -> Bool {
+    r.lastStatus == "missed" || (r.overdue && r.lastStatus != "failed" && r.lastStatus != "timeout")
+}
+
 func routineFailureSummary(_ r: Routine, max: Int) -> String {
     if let detail = routineFailureDetail(r, max: max) { return detail }
     return r.overdue ? "overdue" : (r.lastStatus ?? "failed")
 }
 
 func routineFailureDetail(_ r: Routine, max: Int) -> String? {
-    let lastRunFailed = r.lastStatus == "failed" || r.lastStatus == "timeout"
+    let lastRunFailed = r.lastStatus == "failed" || r.lastStatus == "timeout" || r.lastStatus == "missed"
     guard lastRunFailed || r.overdue else { return nil }
     if let reason = r.failureReason?.trimmingCharacters(in: .whitespacesAndNewlines), !reason.isEmpty {
         return trimText(reason.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression), max)

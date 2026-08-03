@@ -483,7 +483,17 @@ export async function runDaemon(): Promise<void> {
   // `catchup: false`, RUN late. Runs on a timer as well as at startup: a startup
   // pass alone misses a fire lost while the daemon stayed up but its event loop
   // was wedged, or one lost across an OS suspend that the process survived.
+  // Overlap guard, same shape as runSessionSync/runHealCheck below. A pass
+  // awaits executeJobDetached per job and an off-box (host/cloud) dispatch can
+  // block for a while, so a slow pass could still be working when the next tick
+  // fires. Both passes would then see a job the first has not yet reached as
+  // overdue — the miss is recorded before the await, but only for jobs already
+  // processed — and spawn it twice. The idempotency of the `missed` record
+  // guards across passes, not within one that is mid-flight.
+  let catchingUp = false;
   const catchupPass = async (): Promise<void> => {
+    if (catchingUp) return;
+    catchingUp = true;
     try {
       const overdue = detectOverdueJobs();
       if (overdue.length === 0) return;
@@ -501,6 +511,10 @@ export async function runDaemon(): Promise<void> {
       }
     } catch (err) {
       log('ERROR', `Catchup pass failed: ${(err as Error).message}`);
+    } finally {
+      // finally, not a tail assignment: the no-overdue path returns early, and a
+      // throw must not leave the guard latched shut for the daemon's lifetime.
+      catchingUp = false;
     }
   };
   await catchupPass();
