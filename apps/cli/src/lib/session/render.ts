@@ -548,11 +548,11 @@ const OP_MARK: Record<FileOp, string> = { created: '+', modified: '~', deleted: 
  * create/modify/delete lifecycle, plus a `+N ~N −N` summary. Replaces the old
  * flat "Modified" list. Returns true if anything was rendered.
  */
-function renderChangesSection(lines: string[], events: SessionEvent[], cwd?: string): boolean {
+function renderChangesSection(lines: string[], allChanges: FileChange[], cwd?: string): boolean {
   // In-project changes only; edits outside cwd (e.g. /tmp) keep their own
   // "External edits" section so they don't clutter the project's changeset.
   const inCwd = (p: string): boolean => !cwd || !p.startsWith('/') || p.startsWith(cwd + '/');
-  const changes = classifyFileChanges(events).filter(ch => inCwd(ch.path));
+  const changes = allChanges.filter(ch => inCwd(ch.path));
   if (changes.length === 0) return false;
   const c = changeCounts(changes);
   const opByRel = new Map<string, FileOp>();
@@ -788,8 +788,8 @@ export function renderSummary(events: SessionEvent[], cwd?: string): string {
     lines.push(chalk.bold('Plan'));
     if (planFilePath) {
       const home = process.env.HOME ?? '';
-      const displayPath2 = home && planFilePath.startsWith(home) ? planFilePath.replace(home, '~') : planFilePath;
-      lines.push('  ' + chalk.cyan(displayPath2));
+      const planPathDisplay = home && planFilePath.startsWith(home) ? planFilePath.replace(home, '~') : planFilePath;
+      lines.push('  ' + chalk.cyan(planPathDisplay));
     }
     if (exitPlanContent) {
       const planLines = exitPlanContent.split('\n').slice(0, 10);
@@ -835,8 +835,11 @@ export function renderSummary(events: SessionEvent[], cwd?: string): string {
   }
   const links = extractLinks(events);
   if (links.length > 0) {
-    const shown = links.map(l => chalk.blue(linkUrl(l.url, l.label)));
-    lines.push(chalk.bold('Links') + chalk.gray(` (${links.length})`) + '  ' + shown.join(chalk.gray(' · ')));
+    // Width-capped like the picker's Dirs line: a link-heavy session must not
+    // wrap the summary pane.
+    const shown = links.slice(0, 6).map(l => chalk.blue(linkUrl(l.url, l.label)));
+    const more = links.length > 6 ? chalk.gray(` · +${links.length - 6} more`) : '';
+    lines.push(chalk.bold('Links') + chalk.gray(` (${links.length})`) + '  ' + shown.join(chalk.gray(' · ')) + more);
     lines.push('');
   }
 
@@ -858,13 +861,15 @@ export function renderSummary(events: SessionEvent[], cwd?: string): string {
   }
 
   // 6. Changes — files grouped by directory with create/modify/delete lifecycle
-  // (replaces the old flat "Modified" + "External edits" lists).
-  renderChangesSection(lines, events, cwd);
+  // (replaces the old flat "Modified" + "External edits" lists). Classified
+  // once here and shared with the Artifacts section below.
+  const allChanges = classifyFileChanges(events);
+  renderChangesSection(lines, allChanges, cwd);
 
   // 6a. Artifacts — documents the session PRODUCED (`.agents/artifacts|plans|
   // reports`, other *.md/*.html creations), named and clickable. These drown in
   // the Changeset's source churn, so they get their own section.
-  const artifacts = extractArtifacts(events);
+  const artifacts = extractArtifacts(allChanges);
   if (artifacts.length > 0) {
     lines.push(chalk.bold('Artifacts') + chalk.gray(` (${artifacts.length})`));
     for (const a of artifacts) {

@@ -61,6 +61,8 @@ function sanitizeEvent(e: SessionEvent): void {
   if (e.tool) e.tool = sanitizeForTerminal(e.tool);
   if (e.model) e.model = sanitizeForTerminal(e.model);
   if (e.mediaType) e.mediaType = sanitizeForTerminal(e.mediaType);
+  if (e.hookName) e.hookName = sanitizeForTerminal(e.hookName);
+  if (e.hookEvent) e.hookEvent = sanitizeForTerminal(e.hookEvent);
   if (e.args) e.args = sanitizeArgsDeep(e.args);
 }
 

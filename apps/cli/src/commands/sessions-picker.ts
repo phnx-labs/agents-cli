@@ -484,7 +484,7 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
 
   // Documents the session produced (`.agents/artifacts|plans|reports`, other
   // *.md/*.html creations) — the files a human browses later, named + clickable.
-  const artifacts = extractArtifacts(events);
+  const artifacts = extractArtifacts(changes);
   if (artifacts.length) {
     const shown = artifacts.slice(0, 5).map(a => linkPath(a.path, a.basename));
     const more = artifacts.length > 5 ? chalk.gray(` · +${artifacts.length - 5} more`) : '';
@@ -495,7 +495,8 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
   const skills = extractSkills(events);
   if (skills.length) {
     const shown = skills.slice(0, 5).map(s => chalk.white(s.name) + (s.count > 1 ? chalk.gray(` ×${s.count}`) : ''));
-    lines.push(chalk.cyan('Skills:  ') + shown.join(chalk.gray(' · ')));
+    const more = skills.length > 5 ? chalk.gray(` · +${skills.length - 5} more`) : '';
+    lines.push(chalk.cyan('Skills:  ') + shown.join(chalk.gray(' · ')) + more);
   }
 
   // Hooks fired (Claude transcripts record firings; other harnesses don't).
@@ -503,7 +504,8 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
   if (hooks.length) {
     const shown = hooks.slice(0, 4).map(h =>
       chalk.white(h.name) + (h.count > 1 ? chalk.gray(` ×${h.count}`) : '') + (h.failed ? chalk.red(` (${h.failed} failed)`) : ''));
-    lines.push(chalk.cyan('Hooks:   ') + shown.join(chalk.gray(' · ')));
+    const more = hooks.length > 4 ? chalk.gray(` · +${hooks.length - 4} more`) : '';
+    lines.push(chalk.cyan('Hooks:   ') + shown.join(chalk.gray(' · ')) + more);
   }
 
   // Links mentioned in the conversation — clickable (OSC 8), tracker-classified.

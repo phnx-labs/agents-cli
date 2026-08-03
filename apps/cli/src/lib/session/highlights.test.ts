@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { SessionEvent } from './types.js';
+import { classifyFileChanges } from './digest.js';
 import {
   extractArtifacts,
   extractHooks,
@@ -91,11 +92,17 @@ describe('extractLinks', () => {
     ]);
     expect(links.map((l) => l.url)).toEqual(['https://example.com/docs']);
   });
+
+  it('skips harness-injected synthetic messages', () => {
+    const synthetic: SessionEvent = { ...msg('user', '<bash-stdout>see https://noise.example.com/x</bash-stdout>'), _synthetic: true };
+    const links = extractLinks([synthetic, msg('assistant', 'real https://real.example.com/y')]);
+    expect(links.map((l) => l.label)).toEqual(['real.example.com']);
+  });
 });
 
 describe('extractArtifacts', () => {
   it('keeps created docs under .agents buckets and other *.md/*.html, skips source churn', () => {
-    const artifacts = extractArtifacts([
+    const changes = classifyFileChanges([
       tool('Write', { file_path: '/repo/.agents/artifacts/report.html' }, '/repo/.agents/artifacts/report.html'),
       tool('Write', { file_path: '/repo/.agents/plans/fix.md' }, '/repo/.agents/plans/fix.md'),
       tool('Write', { file_path: '/repo/.agents/reports/audit.md' }, '/repo/.agents/reports/audit.md'),
@@ -103,6 +110,7 @@ describe('extractArtifacts', () => {
       tool('Write', { file_path: '/repo/src/new.ts' }, '/repo/src/new.ts'),
       tool('Edit', { file_path: '/repo/docs/existing.md' }, '/repo/docs/existing.md'),
     ]);
+    const artifacts = extractArtifacts(changes);
     expect(artifacts).toEqual([
       { path: '/repo/.agents/artifacts/report.html', basename: 'report.html', bucket: 'artifacts' },
       { path: '/repo/.agents/plans/fix.md', basename: 'fix.md', bucket: 'plans' },

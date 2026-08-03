@@ -294,7 +294,8 @@ describe('buildPreview — highlight lines (skills, hooks, links, artifacts, err
   });
 });
 
-describe('buildPreview — usage metadata (RUSH-1994)', () => {  it('shows browser/computer use and the sub-agent count from a real transcript', () => {
+describe('buildPreview — usage metadata (RUSH-1994)', () => {
+  it('shows browser/computer use and the sub-agent count from a real transcript', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-preview-'));
     try {
       const filePath = path.join(dir, 'session.jsonl');

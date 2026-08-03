@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { SessionEvent } from './types.js';
-import { classifyFileChanges, isNoisePath } from './digest.js';
+import { isNoisePath, type FileChange } from './digest.js';
 
 // ── Skills ────────────────────────────────────────────────────────────────────
 
@@ -149,6 +149,10 @@ export function extractLinks(events: SessionEvent[]): SessionLink[] {
   const out: SessionLink[] = [];
   for (const e of events) {
     if (e.type !== 'message' || !e.content) continue;
+    // Harness-injected scaffolding (bash wrappers, system reminders) carries
+    // URLs that aren't conversation references — same exclusion the rest of
+    // the pipeline applies.
+    if (e._synthetic) continue;
     for (const raw of e.content.match(URL_RE) ?? []) {
       const url = raw.replace(/[.,;:)\]`]+$/, '');
       if (seenUrl.has(url)) continue;
@@ -177,14 +181,15 @@ const ARTIFACT_EXT_RE = /\.(md|markdown|html?)$/i;
 const MAX_ARTIFACTS = 12;
 
 /**
- * Documents/files the session CREATED (first-write creations, per
- * `classifyFileChanges`), keeping the ones a human browses later: anything
- * under `.agents/artifacts|plans|reports/`, plus other `*.md`/`*.html`
- * creations. Source/config churn (the bulk of `+N`) stays in the Changes line.
+ * Documents/files the session CREATED, from the already-classified changes
+ * (callers classify once — this never re-derives). Keeps the ones a human
+ * browses later: anything under `.agents/artifacts|plans|reports/`, plus other
+ * `*.md`/`*.html` creations. Source/config churn (the bulk of `+N`) stays in
+ * the Changes line.
  */
-export function extractArtifacts(events: SessionEvent[]): ProducedArtifact[] {
+export function extractArtifacts(changes: FileChange[]): ProducedArtifact[] {
   const out: ProducedArtifact[] = [];
-  for (const ch of classifyFileChanges(events)) {
+  for (const ch of changes) {
     if (ch.op !== 'created') continue;
     const p = ch.path;
     if (isNoisePath(p)) continue;

@@ -1,5 +1,15 @@
 import { describe, expect, test } from 'vitest';
-import { parseClaudeContent } from '../parse.js';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { parseClaudeContent, parseSession } from '../parse.js';
+
+function writeTempTranscript(lines: string[]): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-hooks-'));
+  const filePath = path.join(dir, 'session.jsonl');
+  fs.writeFileSync(filePath, lines.join('\n') + '\n');
+  return filePath;
+}
 
 /**
  * Claude records every hook firing as a top-level `attachment` line whose
@@ -53,5 +63,25 @@ describe('Claude hook attachment parsing', () => {
       line({ type: 'some_other_attachment', foo: 'bar' }),
     );
     expect(events).toHaveLength(0);
+  });
+
+  test('hook names/events are stripped of terminal escapes at the sanitize chokepoint', () => {
+    // An untrusted transcript can carry OSC sequences inside hookName — they
+    // must not reach the TTY via the Hooks: line (same contract as every other
+    // string field; see parse.ts sanitizeEvent).
+    const events = parseSession(
+      writeTempTranscript([
+        line({
+          type: 'hook_success',
+          hookName: 'evil\x1b]52;c;aGk7\x07\x1b[2Jhook',
+          hookEvent: 'Session\x1b[31mStart',
+        }),
+      ]),
+      'claude',
+    );
+    const hook = events.find((e) => e.type === 'hook');
+    expect(hook?.hookName).toBe('evilhook');
+    expect(hook?.hookEvent).toBe('SessionStart');
+    expect(JSON.stringify(hook)).not.toContain('\x1b');
   });
 });
