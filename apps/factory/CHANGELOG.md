@@ -6,6 +6,8 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.9.306] - 2026-08-03
+
 - **`Agents: Fork Current Session` is now `Agents: Fork`, and a second command forks
   a session you pick from a browser.** The rename is title-only — same command id,
   same behavior (fork the tab you are in). The new `Agents: Fork (Pick Session)`
