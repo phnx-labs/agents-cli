@@ -242,6 +242,9 @@ agents sessions --project my-app
 # Read a full conversation
 agents sessions a1b2c3d4 --markdown
 
+# Render a shareable, redacted Markdown transcript with the session preview on top
+agents sessions render a1b2c3d4 -o session.md
+
 # Just the last 3 turns, user messages only
 agents sessions a1b2c3d4 --last 3 --include user
 ```
@@ -289,6 +292,8 @@ Filters **stack** (they AND together), the active set shows in the header, and t
 Each live session resolves to `working`, `waiting_input` (with why -- a question, a plan review, or a permission prompt), or `idle`, alongside badges for the PR it opened, the worktree it sits in, and the ticket it's working. `agents sessions focus [id]` attaches the live pane in place -- the tmux split locally or over SSH, or its Ghostty tab -- and falls back to a fresh tab + resume when the terminal is gone.
 
 Landing on a session cold? `agents sessions <id>` prints a catch-up digest: an inferred title, files changed grouped by directory (created / modified / deleted), a histogram of which tools did the work (including parsed Bash commands -- `git`, `npm`, `ffmpeg`, `ssh`, and so on), and the last test verdict -- the signals to reload a task in seconds.
+
+Sharing a session uses `agents sessions render <id> -o session.md`, not the raw harness JSONL. The document starts with that same preview, then presents user and assistant turns, fenced commands, structured tool arguments, and bounded tool output. Credential-shaped values and local home paths are redacted by default; `--no-redact` is for local-only inspection.
 
 ### Resume anywhere — and stay resumed
 

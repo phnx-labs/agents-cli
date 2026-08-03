@@ -300,6 +300,12 @@ agents sessions --sort duration --all
 # Replay one session as markdown
 agents sessions c07ec355 --markdown
 
+# Produce a readable, redacted document for a PR or confidential gist
+agents sessions render c07ec355 -o session.md
+
+# Combine selected sessions; reasoning is omitted unless requested
+agents sessions render c07ec355 a1b2c3d4 --reasoning fold -o delivery.md
+
 # Full normalized event array for one session
 agents sessions c07ec355 --json --last 30
 
@@ -318,6 +324,26 @@ default, even when stdout is piped. They show messages, tool calls, elided tool
 results, and errors; thinking, usage, init, and result metadata are hidden. Use
 `agents sessions tail --json` for the raw JSONL stream, or `agents logs -f --full`
 for the raw transcript follow.
+
+### Shareable Markdown (`sessions render`)
+
+`agents sessions render <selectors...>` is the human-sharing surface for Claude,
+Codex, Kimi, Grok, Cursor, and Droid transcripts. It consumes the same normalized
+`SessionEvent[]` model as session search and detail rendering. Every document begins
+with the same preview shown in the interactive session browser, followed by ordered
+user/assistant sections, fenced shell commands, JSON tool arguments, and tool results.
+Large tool results carry an explicit truncation note.
+
+Output is redacted by default through the shared session redactor: credential-shaped
+values, injected known secret values, and local home-directory identities are masked.
+Reasoning defaults to `omit`; use `--reasoning fold` for collapsible details or
+`--reasoning include` for visible sections. `--no-redact` is intended only for local
+inspection. Never attach or gist a raw harness `.jsonl`; render a `.md` file first.
+
+`-o/--output` writes mode `0600`. Without it, Markdown goes to stdout. Multiple
+selectors produce one document separated by horizontal rules. `--json` emits the
+selected ids, harnesses, redaction/reasoning settings, and Markdown strings for
+machine consumers.
 
 ## Live sessions (`--active`) and the interactive browser
 

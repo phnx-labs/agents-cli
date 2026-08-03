@@ -12,7 +12,7 @@ import { truncate, humanDuration } from '../lib/format.js';
 import type { SessionEvent, SessionMeta, TodoProgress } from '../lib/session/types.js';
 import { parseSession, sanitizeForTerminal, SNAPSHOT_TODO_TOOLS } from '../lib/session/parse.js';
 import { safeTeamText } from '../lib/session/team-filter.js';
-import { cleanSessionPrompt, extractSessionTopic } from '../lib/session/prompt.js';
+import { cleanSessionPrompt, extractSessionTopic, isSyntheticUserMessage } from '../lib/session/prompt.js';
 import { linkPath, linkUrl, relativeToCwd, shortenModel } from '../lib/session/render.js';
 import { linearIssueUrl } from '../lib/session/linear.js';
 import { extractTodoProgress, WORKTREE_RE } from '../lib/session/state.js';
@@ -413,7 +413,7 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
 
   for (const event of events) {
     if (event.type === 'message') {
-      if (event.role === 'user' && !firstUser && event.content) {
+      if (event.role === 'user' && !event._synthetic && !firstUser && event.content) {
         if (!SYSTEM_MESSAGE_PATTERNS.some(p => p.test(event.content!))) {
           firstUser = event.content;
         }
@@ -463,7 +463,7 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
     if (first) {
       lines.push(chalk.cyan('Prompt: ') + chalk.white(truncate(first.trim(), termWidth - 12)));
     }
-  } else if (session.topic) {
+  } else if (session.topic && !isSyntheticUserMessage(session.topic)) {
     lines.push(chalk.cyan('Prompt: ') + chalk.white(truncate(session.topic.trim(), termWidth - 12)));
   }
 

@@ -1,0 +1,3 @@
+{"role":"user","message":{"content":[{"type":"text","text":"<timestamp>Sunday, Aug 3, 2026, 10:00 AM (UTC-7)</timestamp>\n<user_query>Deploy with TOKEN=fixture-secret</user_query>"}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"I will verify it."},{"type":"tool_use","id":"c1","name":"Shell","input":{"command":"TOKEN=fixture-secret bun test"}}]}}
+{"role":"user","message":{"content":[{"type":"tool_result","tool_use_id":"c1","content":"tests passed"}]}}

@@ -55,6 +55,24 @@ agents sessions --markdown --include user,assistant <session-id>
 agents sessions --markdown --last 10 <session-id>
 ```
 
+## Sharing Sessions
+
+Never attach or gist a raw harness `.jsonl`. Raw transcripts are difficult to read
+and may contain credentials or internal paths. Render redacted Markdown first:
+
+```bash
+# Share this file or place it in a secret gist
+agents sessions render <session-id> -o /tmp/session.md
+gh gist create --secret /tmp/session.md
+
+# Render several delivery sessions into one document
+agents sessions render <id-1> <id-2> -o /tmp/delivery-sessions.md
+```
+
+Redaction is on by default. `--no-redact` is for local-only inspection and its output
+must not be attached to a PR, issue, ticket, or gist. Reasoning is omitted by default;
+use `--reasoning fold` only when the reviewer needs it.
+
 ## Artifacts
 
 ```bash

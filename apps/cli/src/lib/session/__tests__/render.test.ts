@@ -141,17 +141,17 @@ describe('parseRoleList', () => {
 // ── renderConversationMarkdown ────────────────────────────────────────────────
 
 describe('renderConversationMarkdown', () => {
-  it('includes user, assistant, thinking, and tool calls in event order', () => {
+  it('includes user, assistant, requested reasoning, and tool calls in event order', () => {
     const events: SessionEvent[] = [
       { type: 'message', agent: 'claude', timestamp: 't0', role: 'user', content: 'Read foo.ts' },
       { type: 'thinking', agent: 'claude', timestamp: 't1', content: 'I should open the file first.' },
       { type: 'message', agent: 'claude', timestamp: 't2', role: 'assistant', content: 'Reading now.' },
       { type: 'tool_use', agent: 'claude', timestamp: 't3', tool: 'Read', args: { file_path: '/x/foo.ts' }, path: '/x/foo.ts' },
     ];
-    const out = renderConversationMarkdown(events);
+    const out = renderConversationMarkdown(events, { reasoning: 'include' });
     expect(out).toContain('## User');
     expect(out).toContain('Read foo.ts');
-    expect(out).toContain('### Thinking');
+    expect(out).toContain('### Reasoning');
     expect(out).toContain('I should open the file first.');
     expect(out).toContain('## Assistant');
     expect(out).toContain('Reading now.');
@@ -159,12 +159,31 @@ describe('renderConversationMarkdown', () => {
     expect(out).toContain('/x/foo.ts');
     // Order: user before thinking before assistant before tool
     const userIdx = out.indexOf('## User');
-    const thinkIdx = out.indexOf('### Thinking');
+    const thinkIdx = out.indexOf('### Reasoning');
     const asstIdx = out.indexOf('## Assistant');
     const toolIdx = out.indexOf('### Tool: Read');
     expect(userIdx).toBeLessThan(thinkIdx);
     expect(thinkIdx).toBeLessThan(asstIdx);
     expect(asstIdx).toBeLessThan(toolIdx);
+  });
+
+  it('can omit or fold reasoning explicitly', () => {
+    const events: SessionEvent[] = [
+      { type: 'thinking', agent: 'claude', timestamp: 't0', content: 'private reasoning' },
+    ];
+    expect(renderConversationMarkdown(events, { reasoning: 'omit' })).not.toContain('private reasoning');
+    expect(renderConversationMarkdown(events, { reasoning: 'fold' })).toContain('<summary>Reasoning</summary>');
+  });
+
+  it('shows full tool args and names truncated output explicitly', () => {
+    const events: SessionEvent[] = [
+      { type: 'tool_use', agent: 'claude', timestamp: 't0', tool: 'Read', args: { path: '/tmp/file.ts', limit: 5 } },
+      { type: 'tool_result', agent: 'claude', timestamp: 't1', tool: 'Read', output: 'abcdefghij' },
+    ];
+    const out = renderConversationMarkdown(events, { maxToolOutputChars: 5 });
+    expect(out).toContain('"limit": 5');
+    expect(out).toContain('Tool Result: Read');
+    expect(out).toContain('[Output truncated: 5 characters omitted.]');
   });
 
   it('renders bash commands inside a code fence', () => {

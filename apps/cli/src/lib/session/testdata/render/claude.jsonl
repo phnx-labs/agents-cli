@@ -1,0 +1,3 @@
+{"type":"user","message":{"role":"user","content":"Deploy from /Users/alice/private with TOKEN=fixture-secret"},"timestamp":"2026-08-03T10:00:00.000Z","cwd":"/Users/alice/private","sessionId":"render-claude"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I will run the deployment check."},{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"TOKEN=fixture-secret bun test"}}]},"timestamp":"2026-08-03T10:00:01.000Z"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"tests passed"}]},"timestamp":"2026-08-03T10:00:02.000Z"}

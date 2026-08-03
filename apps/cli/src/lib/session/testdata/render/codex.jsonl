@@ -1,0 +1,6 @@
+{"type":"session_meta","timestamp":"2026-08-03T10:00:00.000Z","payload":{"id":"render-codex","cwd":"/home/alice/private","cli_version":"0.146.0"}}
+{"type":"response_item","timestamp":"2026-08-03T10:00:00.500Z","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"<apps_instructions>internal scaffold</apps_instructions>"}]}}
+{"type":"response_item","timestamp":"2026-08-03T10:00:01.000Z","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Deploy with TOKEN=fixture-secret"}]}}
+{"type":"response_item","timestamp":"2026-08-03T10:00:02.000Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"I will verify it."}]}}
+{"type":"response_item","timestamp":"2026-08-03T10:00:03.000Z","payload":{"type":"function_call","name":"exec_command","call_id":"c1","arguments":"{\"cmd\":\"TOKEN=fixture-secret bun test\"}"}}
+{"type":"response_item","timestamp":"2026-08-03T10:00:04.000Z","payload":{"type":"function_call_output","call_id":"c1","output":"tests passed"}}

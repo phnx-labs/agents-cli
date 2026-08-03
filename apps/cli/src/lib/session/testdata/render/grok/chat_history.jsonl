@@ -1,0 +1,3 @@
+{"type":"user","content":[{"type":"text","text":"Deploy with TOKEN=fixture-secret"}]}
+{"type":"assistant","content":"I will verify it.","tool_calls":[{"id":"c1","name":"shell","arguments":"{\"command\":\"TOKEN=fixture-secret bun test\"}"}]}
+{"type":"tool_result","tool_call_id":"c1","content":"tests passed"}

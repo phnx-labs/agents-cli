@@ -1,0 +1,4 @@
+{"type":"context.append_message","message":{"role":"user","content":"Deploy with TOKEN=fixture-secret"},"time":1785751200000}
+{"type":"context.append_loop_event","event":{"type":"content.part","part":{"type":"text","text":"I will verify it."}},"time":1785751201000}
+{"type":"context.append_loop_event","event":{"type":"tool.call","uuid":"c1","toolCallId":"c1","name":"Bash","args":{"command":"TOKEN=fixture-secret bun test"}},"time":1785751202000}
+{"type":"context.append_loop_event","event":{"type":"tool.result","toolCallId":"c1","result":{"output":"tests passed"}},"time":1785751203000}

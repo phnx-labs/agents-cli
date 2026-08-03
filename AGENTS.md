@@ -250,6 +250,12 @@ are designed to be safely version-controlled. Use `agents secrets` (macOS
 Keychain-backed, metadata only, never raw credentials on disk). Committed a secret by
 accident? Rotate immediately — git history persists.
 
+**Never attach a raw session transcript.** Before linking a session from a PR, issue,
+or ticket, run `agents sessions render <id> -o /tmp/session.md` and attach or place
+that redacted Markdown file in a secret gist. The renderer masks credential-shaped
+values and local home paths by default. `--no-redact` output is local-only and must
+never be shared.
+
 ## Assets & voice
 
 Only if you touch `assets/`, `demo/`, or `website/`. Visual language is terminal-coded —

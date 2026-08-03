@@ -1038,6 +1038,19 @@ export function filterEvents(events: SessionEvent[], opts: FilterOptions): Sessi
  */
 export interface RenderConversationMarkdownOptions {
   redact?: boolean;
+  knownSecrets?: readonly string[];
+  reasoning?: 'omit' | 'fold' | 'include';
+  maxToolOutputChars?: number;
+}
+
+function markdownFence(content: string, language = ''): string {
+  const fence = content.includes('```') ? '````' : '```';
+  return `${fence}${language}\n${content}\n${fence}`;
+}
+
+function truncateToolOutput(content: string, maxChars: number): string {
+  if (content.length <= maxChars) return content;
+  return `${content.slice(0, maxChars)}\n\n[Output truncated: ${content.length - maxChars} characters omitted.]`;
 }
 
 export function renderConversationMarkdown(
@@ -1046,7 +1059,11 @@ export function renderConversationMarkdown(
 ): string {
   const parts: string[] = [];
   const shouldRedact = opts.redact !== false;
-  const sanitize = (text: string): string => shouldRedact ? redactSecrets(text) : text;
+  const sanitize = (text: string): string => shouldRedact ? redactSecrets(text, opts.knownSecrets) : text;
+  // Preserve the long-standing `sessions <id> --markdown` full-fidelity default.
+  // The shareable `sessions render` surface passes `omit` explicitly.
+  const reasoning = opts.reasoning ?? 'include';
+  const maxToolOutputChars = opts.maxToolOutputChars ?? 4000;
 
   for (const event of events) {
     if (event.type === 'message') {
@@ -1056,22 +1073,31 @@ export function renderConversationMarkdown(
         parts.push(`## Assistant\n\n${sanitize(event.content ?? '')}`);
       }
     } else if (event.type === 'thinking') {
-      if (event.content) parts.push(`### Thinking\n\n${sanitize(event.content)}`);
+      if (event.content && reasoning === 'include') {
+        parts.push(`### Reasoning\n\n${sanitize(event.content)}`);
+      } else if (event.content && reasoning === 'fold') {
+        parts.push(`<details>\n<summary>Reasoning</summary>\n\n${sanitize(event.content)}\n\n</details>`);
+      }
     } else if (event.type === 'tool_use') {
       const tool = event.tool || 'unknown';
       if (event.command) {
-        parts.push(`### Tool: ${tool}\n\n\`\`\`bash\n${sanitize(event.command)}\n\`\`\``);
+        const args = event.args && Object.keys(event.args).length > 0
+          ? `\n\nArguments:\n\n${markdownFence(sanitize(JSON.stringify(event.args, null, 2)), 'json')}`
+          : '';
+        parts.push(`### Tool: ${tool}\n\n${markdownFence(sanitize(event.command), 'bash')}${args}`);
+      } else if (event.args && Object.keys(event.args).length > 0) {
+        parts.push(`### Tool: ${tool}\n\nArguments:\n\n${markdownFence(sanitize(JSON.stringify(event.args, null, 2)), 'json')}`);
       } else if (event.path) {
-        parts.push(`### Tool: ${tool}\n\n\`${shortenPathTrace(event.path)}\``);
+        parts.push(`### Tool: ${tool}\n\n\`${sanitize(shortenPathTrace(event.path))}\``);
       } else {
         const summary = summarizeToolUse(tool, event.args);
-        parts.push(`### Tool: ${tool}\n\n${summary}`);
+        parts.push(`### Tool: ${tool}\n\n${sanitize(summary)}`);
       }
     } else if (event.type === 'tool_result') {
-      if (event.content) {
-        const truncated = event.content.length > 2000 ? event.content.slice(0, 2000) + '\n…' : event.content;
-        const body = sanitize(truncated);
-        parts.push(`### Tool Result\n\n\`\`\`\n${body}\n\`\`\``);
+      const output = event.content || event.output;
+      if (output) {
+        const body = sanitize(truncateToolOutput(output, maxToolOutputChars));
+        parts.push(`### Tool Result${event.tool ? `: ${event.tool}` : ''}\n\n${markdownFence(body)}`);
       }
     } else if (event.type === 'error') {
       parts.push(`### Error\n\n${event.content ? sanitize(event.content) : (event.tool || 'Unknown error')}`);

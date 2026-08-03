@@ -65,6 +65,7 @@ import { registerDetachCommand } from './detach.js';
 import { registerAttachCommand } from './attach.js';
 import { registerSessionsInjectCommand } from './sessions-inject.js';
 import { registerSessionsExportCommand } from './sessions-export.js';
+import { registerSessionsRenderCommand } from './sessions-render.js';
 import { registerSessionsImportCommand } from './sessions-import.js';
 import { registerSessionsMigrateCommand, registerSessionsMigrationsCommand } from './sessions-migrate.js';
 import { runBrowserSessions } from '../lib/browser/sessions-list.js';
@@ -3803,6 +3804,7 @@ export function registerSessionsCommands(program: Command): void {
   registerAttachCommand(sessionsCmd);
   registerSessionsInjectCommand(sessionsCmd);
   registerSessionsExportCommand(sessionsCmd);
+  registerSessionsRenderCommand(sessionsCmd);
   registerSessionsImportCommand(sessionsCmd);
   registerSessionsMigrateCommand(sessionsCmd);
   registerSessionsMigrationsCommand(sessionsCmd);
