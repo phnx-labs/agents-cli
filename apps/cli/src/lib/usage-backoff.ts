@@ -127,12 +127,22 @@ export function noteUsageRateLimited(
  *
  * A read-back-and-retry does NOT fix the second case — it only detects a clobber
  * that already landed, and a stale writer can still rename after the check. Real
- * mutual exclusion would need a lock file, and the cost of the race does not
- * justify one: the loser retries early, gets another 429, and records again on
- * the very next call. That is one extra request. The loop this module exists to
- * break was ~100 requests an hour, indefinitely — so a rare shortened window is
- * not a meaningful residue, whereas a stale lock on a cache path every usage
- * read touches would be a new way to wedge the CLI.
+ * mutual exclusion would need a lock file, which this deliberately does not use.
+ *
+ * Be honest about what that costs, because it is more than one request. A
+ * shortened window means the next daemon tick is not suppressed, and that tick
+ * fans out over every installed home for the provider — so the cost is a whole
+ * batch, N requests, not one. Worse, those requests land inside a penalty the
+ * server is still enforcing, and an early retry can EXTEND it: that is the exact
+ * mechanism documented above as the original bug.
+ *
+ * It is still the right trade, but on a narrower claim: the race needs two
+ * processes recording the same provider in the same instant, so a shortened
+ * window is occasional, and each one costs a single early batch that may push
+ * the deadline out once. The behaviour being replaced was that same early batch
+ * every three minutes, forever, with no exit. A stale lock on a cache path every
+ * usage read touches is a new way to wedge the CLI, for a residue that is
+ * bounded and self-correcting rather than unbounded.
  *
  * What must not happen is a *torn* file, which would make every provider read as
  * free and silently restore the old behaviour. That is what the rename prevents,
