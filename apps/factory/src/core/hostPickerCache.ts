@@ -24,7 +24,14 @@ export interface HostPickerCache {
   devices: HostPickerDevice[];
   /** Usage scores keyed by normalized host name ('this-mac' for the local box). */
   usage: Record<string, HostUsageScore>;
+  /** When the device rows (names + reachability) were last read from the registry. Drives the row freshness label. */
   fetchedAt: number;
+  /**
+   * When the fleet usage sweep last ran. Drives `isHostPickerStale`, kept SEPARATE
+   * from `fetchedAt` so a cheap device-only refresh (which bumps `fetchedAt`) can
+   * never mask stale usage scores as fresh and skip the sweep.
+   */
+  usageFetchedAt: number;
 }
 
 export const HOST_PICKER_CACHE_KEY = 'agents.hostPicker.v1';
@@ -42,11 +49,17 @@ export function parseHostPickerCache(raw: unknown): HostPickerCache | undefined 
   const c = raw as Partial<HostPickerCache>;
   if (!Array.isArray(c.devices) || typeof c.fetchedAt !== 'number') return undefined;
   if (!c.usage || typeof c.usage !== 'object' || Array.isArray(c.usage)) return undefined;
+  // Legacy caches (pre two-phase split) carried one timestamp; it WAS the combined
+  // device+usage refresh time, so read it as the usage time.
+  if (typeof c.usageFetchedAt !== 'number') c.usageFetchedAt = c.fetchedAt;
   return c as HostPickerCache;
 }
 
 export function isHostPickerStale(cache: HostPickerCache | null | undefined, now = Date.now()): boolean {
-  return !cache || now - cache.fetchedAt >= HOST_PICKER_STALE_MS;
+  // Gate on the USAGE sweep time, not the device-row time: a cheap device-only
+  // refresh keeps `usageFetchedAt` old, so the picker still runs the sweep on
+  // the next open instead of trusting a "fresh"-looking device snapshot.
+  return !cache || now - cache.usageFetchedAt >= HOST_PICKER_STALE_MS;
 }
 
 /**
@@ -61,7 +74,10 @@ export function withRefreshedDevices(
   devices: HostPickerDevice[],
   now = Date.now(),
 ): HostPickerCache {
-  return { devices, usage: prev?.usage ?? {}, fetchedAt: now };
+  // Bump `fetchedAt` (device rows are freshly read) but carry the OLD
+  // `usageFetchedAt` forward untouched — the usage scores were NOT refreshed
+  // here, so the next open must still see the cache as usage-stale and sweep.
+  return { devices, usage: prev?.usage ?? {}, fetchedAt: now, usageFetchedAt: prev?.usageFetchedAt ?? 0 };
 }
 
 /**

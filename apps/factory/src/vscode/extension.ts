@@ -595,7 +595,8 @@ async function sweepHostPickerUsage(context: vscode.ExtensionContext, base: Host
   } catch (err) {
     console.error('[pickLaunchHost] usage sweep failed:', err);
   }
-  return writeHostPickerCache(context, { devices: base.devices, usage, fetchedAt: Date.now() });
+  const now = Date.now();
+  return writeHostPickerCache(context, { devices: base.devices, usage, fetchedAt: base.fetchedAt, usageFetchedAt: now });
 }
 
 /** Full refresh: the current device rows, then the usage annotations on top. */
