@@ -51,6 +51,12 @@ export function stripTerminalFlag(argv: string[], consumedValue?: string): strin
   const out: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const tok = argv[i];
+    // Everything past a bare `--` is forwarded verbatim to the agent's own CLI
+    // (`agents run kimi -- --terminal`), so it is not ours to rewrite.
+    if (tok === '--') {
+      out.push(...argv.slice(i));
+      break;
+    }
     if (tok === '--terminal') {
       if (consumedValue !== undefined && argv[i + 1] === consumedValue) i++;
       continue;

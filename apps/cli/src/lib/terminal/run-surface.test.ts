@@ -55,6 +55,17 @@ describe('stripTerminalFlag', () => {
       'run', 'kimi', '--', '--plan',
     ]);
   });
+
+  it('never rewrites past --, where the tokens belong to the agent CLI', () => {
+    // `--terminal` after `--` is the AGENT's flag, forwarded verbatim. Stripping
+    // it here would silently corrupt the passthrough.
+    expect(stripTerminalFlag(['run', 'kimi', '--terminal', '--', '--terminal', 'x'])).toEqual([
+      'run', 'kimi', '--', '--terminal', 'x',
+    ]);
+    expect(stripTerminalFlag(['run', 'kimi', '--', '--terminal=ghostty'])).toEqual([
+      'run', 'kimi', '--', '--terminal=ghostty',
+    ]);
+  });
 });
 
 describe('buildRunCommand', () => {
