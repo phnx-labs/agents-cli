@@ -21,7 +21,9 @@ import {
   registerSecretsCommands,
   renderHoldSummary,
   renderPolicyCol,
+  renderExpiringCol,
   compactDurationMs,
+  buildRemoteListArgs,
   NO_BUNDLES_HELD_LINE,
 } from './secrets.js';
 import { MIN_HOLD_MS as MIN_HOLD, MAX_HOLD_MS as MAX_HOLD } from '../lib/secrets/agent.js';
@@ -238,6 +240,75 @@ describe('renderHoldSummary', () => {
   it('the empty-broker line names hold too — it drifted with the header', () => {
     expect(NO_BUNDLES_HELD_LINE).toContain('hold-policy bundle');
     expect(NO_BUNDLES_HELD_LINE).not.toMatch(/daily/i);
+  });
+});
+
+describe('buildRemoteListArgs', () => {
+  it('forwards every filter, so a remote list narrows the same way', () => {
+    // browseRemote sends this argv verbatim. A flag missing here is not an
+    // error — the remote just lists everything, and `--host zion --expired`
+    // reports every bundle on zion as expired.
+    const args = buildRemoteListArgs({
+      json: true,
+      policy: 'never',
+      backend: 'file',
+      type: 'token',
+      kind: 'literal',
+      expired: true,
+      unused: '90d',
+      sort: 'used',
+      limit: '5',
+    }, 'github');
+    expect(args).toEqual([
+      'list', 'github', '--json',
+      '--policy', 'never',
+      '--backend', 'file',
+      '--type', 'token',
+      '--kind', 'literal',
+      '--expired',
+      '--unused', '90d',
+      '--sort', 'used',
+      '--limit', '5',
+    ]);
+  });
+
+  it('sends a bare --expiring without a value, and a valued one with it', () => {
+    expect(buildRemoteListArgs({ expiring: true })).toEqual(['list', '--expiring']);
+    expect(buildRemoteListArgs({ expiring: '7' })).toEqual(['list', '--expiring', '7']);
+  });
+
+  it('forwards the held pair, which the remote resolves against its own broker', () => {
+    expect(buildRemoteListArgs({ held: true })).toEqual(['list', '--held']);
+    expect(buildRemoteListArgs({ notHeld: true })).toEqual(['list', '--not-held']);
+  });
+
+  it('is just `list` when nothing is set', () => {
+    expect(buildRemoteListArgs({})).toEqual(['list']);
+  });
+});
+
+describe('renderExpiringCol', () => {
+  const iso = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+
+  it('shows a dash when nothing expires', () => {
+    expect(renderExpiringCol({ name: 'b', vars: {} })).toContain('-');
+  });
+
+  it('counts an already-expired key, which used to render as a dash', () => {
+    // countExpiringSoon guards on d >= 0, so a lapsed key was indistinguishable
+    // from a bundle with no expiry at all.
+    const col = renderExpiringCol({ name: 'b', vars: {}, meta: { K: { expires: iso(-30) } } });
+    expect(col).toContain('1');
+    expect(col).not.toContain('-');
+  });
+
+  it('counts lapsed and upcoming together', () => {
+    const col = renderExpiringCol({
+      name: 'b',
+      vars: {},
+      meta: { DEAD: { expires: iso(-5) }, SOON: { expires: iso(3) }, FAR: { expires: iso(400) } },
+    });
+    expect(col).toContain('2');
   });
 });
 

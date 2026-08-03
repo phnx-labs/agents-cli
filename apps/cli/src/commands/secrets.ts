@@ -57,6 +57,22 @@ import {
   type SecretsPolicy,
   type VarMeta,
 } from '../lib/secrets/bundles.js';
+import {
+  parseListFilters,
+  bundleMatchesFilter,
+  bundleExpiry,
+  filterIsActive,
+  describeFilter,
+  parseSortField,
+  sortBundles,
+  SORT_FIELDS,
+  REF_KINDS,
+  DEFAULT_EXPIRING_DAYS,
+  type SecretsListFilterOpts,
+  type SecretsListFilter,
+  type SortField,
+} from '../lib/secrets/list-filter.js';
+import { SECRET_TYPES } from '../lib/secrets/bundles.js';
 import { encryptForFallback, decryptForFallback, type EncFile } from '../lib/secrets/filestore.js';
 import {
   getKeychainToken,
@@ -362,6 +378,39 @@ export function buildRemoteUnlockArgs(names: string[], opts: { all?: boolean; tt
   ];
 }
 
+/**
+ * Build the remote `agents secrets list` argv for `list --host`. Every filter
+ * must be forwarded: `browseRemote` sends this argv verbatim, so a flag left out
+ * here is not an error — the remote just lists everything, and
+ * `secrets list --host zion --expired` reports every bundle on zion as expired.
+ * Silent and wrong beats loud and wrong only for the person who wrote the bug.
+ *
+ * Values pass through unparsed so the REMOTE validates them under its own rules,
+ * matching how `--ttl` is forwarded by buildRemoteUnlockArgs.
+ */
+export function buildRemoteListArgs(
+  opts: SecretsListFilterOpts & { json?: boolean; sort?: string; limit?: string },
+  query?: string,
+): string[] {
+  return [
+    'list',
+    ...(query ? [query] : []),
+    ...(opts.json ? ['--json'] : []),
+    ...(opts.policy ? ['--policy', opts.policy] : []),
+    ...(opts.backend ? ['--backend', opts.backend] : []),
+    ...(opts.type ? ['--type', opts.type] : []),
+    ...(opts.kind ? ['--kind', opts.kind] : []),
+    ...(opts.held ? ['--held'] : []),
+    ...(opts.notHeld ? ['--not-held'] : []),
+    ...(opts.expired ? ['--expired'] : []),
+    // `--expiring` is optional-value: `true` means the bare flag was passed.
+    ...(opts.expiring === true ? ['--expiring'] : opts.expiring ? ['--expiring', String(opts.expiring)] : []),
+    ...(opts.unused ? ['--unused', opts.unused] : []),
+    ...(opts.sort ? ['--sort', opts.sort] : []),
+    ...(opts.limit ? ['--limit', opts.limit] : []),
+  ];
+}
+
 // SSH target validation is defined canonically in src/lib/ssh-exec.ts and
 // re-exported here for back-compat with existing importers of these symbols.
 export { SSH_TARGET_RE, assertValidSshTarget };
@@ -619,8 +668,7 @@ const POLICY_COL_WIDTH = 20;
 function renderBundleRow(b: SecretsBundle, holdMs: number, held?: Map<string, number>, cols = terminalWidth()): string {
   const entries = describeBundle(b);
   const keys = entries.length;
-  const expiringCount = countExpiringSoon(b.meta);
-  const expiring = expiringCount > 0 ? chalk.yellow(String(expiringCount)) : chalk.gray('-');
+  const expiring = renderExpiringCol(b);
   // Timestamp distinction:
   //   "?"     -> legacy bundle, never written under the timestamping code.
   //   "never" -> bundle has been written but the action never happened
@@ -776,7 +824,10 @@ function renderMetaLine(meta: VarMeta | undefined, reveal: boolean): string {
   return `    ${parts.join('  ')}`;
 }
 
-/** Count entries in `meta` whose `expires` falls in the next 30 days. */
+/** Count entries in `meta` whose `expires` falls in the next 30 days. Excludes
+ * keys that have ALREADY expired — those are counted by `bundleExpiry().expired`
+ * and rendered separately, since a lapsed key is a different problem from one
+ * coming due. */
 function countExpiringSoon(meta: Record<string, VarMeta> | undefined): number {
   if (!meta) return 0;
   let n = 0;
@@ -786,6 +837,23 @@ function countExpiringSoon(meta: Record<string, VarMeta> | undefined): number {
     if (d >= 0 && d < 30) n++;
   }
   return n;
+}
+
+/**
+ * The EXPIRING cell. Counts keys needing attention — already expired plus due
+ * within 30 days — and colours by the worst of the two: red once anything has
+ * lapsed, yellow while everything is merely upcoming.
+ *
+ * Expired keys used to be invisible here. `countExpiringSoon` requires
+ * `d >= 0`, so a bundle whose token died last month rendered `-`, identical to
+ * one with no expiry at all; the only places it surfaced were `secrets view`
+ * and a hard abort at inject time, i.e. after it had already broken something.
+ */
+export function renderExpiringCol(b: SecretsBundle, now: number = Date.now()): string {
+  const { expired, soon } = bundleExpiry(b, now);
+  const total = expired + soon;
+  if (total === 0) return chalk.gray('-');
+  return expired > 0 ? chalk.red(String(total)) : chalk.yellow(String(total));
 }
 
 /**
@@ -919,22 +987,60 @@ export function registerSecretsCommands(program: Command): void {
     { title: 'Utilities', names: ['exec', 'mcp', 'generate', 'migrate-acl'] },
   ]);
 
-  cmd
-    .command('list')
+  const listCmd = cmd
+    .command('list [query]')
     .alias('ls')
-    .description('List configured secrets bundles (use --host/--hosts to list bundles on other machines over SSH)')
+    .description('List configured secrets bundles, optionally filtered (use --host/--hosts for other machines over SSH)')
     .option('--host <target>', 'List bundles on a remote host over SSH (enrolled `agents hosts` name, ssh-config alias, or user@host)')
     .option('--hosts <list>', 'Comma-separated hosts to list in one shot, e.g. yosemite-s0,yosemite-s1')
     .option('--device <target>', 'Alias for --host')
     .option('--devices <list>', 'Alias for --hosts')
     .option('--json', 'Emit machine-readable JSON (bundle metadata only — never secret values) instead of the table')
-    .action(async (opts: { host?: string; hosts?: string; device?: string; devices?: string; json?: boolean }) => {
+    .option('--policy <list>', "Only these prompt policies (comma-separated): hold, always, never. '--policy never' is the audit for bundles that read with no Touch ID at all")
+    .option('--backend <list>', 'Only these backends (comma-separated): keychain, file, vault')
+    .option('--type <list>', `Only bundles carrying a key of these types (comma-separated): ${SECRET_TYPES.join(', ')}`)
+    .option('--kind <list>', `Only bundles carrying a value of these ref kinds (comma-separated): ${REF_KINDS.join(', ')}. '--kind literal' finds raw values stored inline; '--kind exec' finds bundles that shell out`)
+    .option('--held', 'Only bundles the secrets-agent is holding right now (read silently, no Touch ID). macOS only')
+    .option('--not-held', 'Only bundles the agent is NOT holding — the next read of each will prompt. macOS only')
+    .option('--expired', 'Only bundles with at least one key whose expiry has already passed')
+    .option('--expiring [days]', `Only bundles with a key falling due within N days (default ${DEFAULT_EXPIRING_DAYS})`)
+    .option('--unused <duration>', 'Only bundles not read since this far back (e.g. 30d, 4w, 3mo). Never-used bundles always match')
+    .addOption(new Option('--sort <field>', 'Sort by: name (default), used, created, updated, expiry').choices([...SORT_FIELDS]))
+    .option('-n, --limit <n>', 'Show at most this many bundles (after filtering and sorting)')
+    .action(async (query: string | undefined, opts: SecretsListFilterOpts & {
+      host?: string; hosts?: string; device?: string; devices?: string;
+      json?: boolean; sort?: string; limit?: string;
+    }) => {
       const targets = parseHostsOption(opts);
       if (targets.length > 0) {
-        await browseRemote(targets, opts.json ? ['list', '--json'] : ['list'], false);
+        // Forward the filters — browseRemote sends this argv verbatim, so a
+        // dropped flag would make the remote silently list everything.
+        await browseRemote(targets, buildRemoteListArgs(opts, query), false);
         return;
       }
-      const bundles = listBundles();
+      // Parse before touching the keychain so a typo'd flag fails instantly,
+      // and render the message rather than a stack trace (the `policy` pattern).
+      let filter: SecretsListFilter;
+      let sortField: SortField;
+      let limit: number | undefined;
+      try {
+        filter = parseListFilters(opts, query);
+        sortField = parseSortField(opts.sort);
+        limit = opts.limit === undefined ? undefined : Number(opts.limit);
+        if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+          throw new Error(`Invalid --limit '${opts.limit}'. Use a whole number of bundles, e.g. --limit 10.`);
+        }
+        // The broker is macOS-only, so off darwin `held` is always empty and a
+        // hold-state filter would answer from no data — every bundle would look
+        // not-held. Refuse rather than return a confidently wrong list.
+        if (filter.held !== undefined && process.platform !== 'darwin') {
+          throw new Error('--held/--not-held need the secrets-agent, which is macOS-only. Run it on a Mac, or with --host <mac>.');
+        }
+      } catch (err) {
+        console.error(chalk.red((err as Error).message));
+        process.exit(1);
+      }
+      const all = listBundles();
       // The configured hold window, read once for the whole listing — it is
       // global, so every `hold` bundle renders the same span.
       const holdMs = secretsHoldMs();
@@ -948,6 +1054,12 @@ export function registerSecretsCommands(program: Command): void {
           /* broker not running — render policy without the countdown */
         }
       }
+      // Filter, sort, then cap — before the --json branch, so the machine
+      // payload is the exact twin of the table (the sessions ordering rule).
+      const now = Date.now();
+      const matched = all.filter((b) => bundleMatchesFilter(b, filter, { held, now }));
+      const sorted = sortBundles(matched, sortField);
+      const bundles = limit === undefined ? sorted : sorted.slice(0, limit);
       if (opts.json) {
         // Discovery payload for agents: metadata only, no secret values. Gated on
         // the explicit --json flag (not stdout.isTTY) so piping the human table to
@@ -962,6 +1074,9 @@ export function registerSecretsCommands(program: Command): void {
           backend: b.backend === 'file' ? 'file' : 'keychain',
           allowExec: Boolean(b.allow_exec),
           expiringSoon: countExpiringSoon(b.meta),
+          // Already-lapsed keys, which `expiringSoon` deliberately excludes. A
+          // machine caller polling for rotation needs both numbers.
+          expired: bundleExpiry(b, now).expired,
           description: b.description ?? null,
           createdAt: b.created_at ?? null,
           updatedAt: b.updated_at ?? null,
@@ -972,8 +1087,16 @@ export function registerSecretsCommands(program: Command): void {
         return;
       }
       if (bundles.length === 0) {
-        console.log(chalk.gray('No secrets bundles configured.'));
-        console.log(chalk.gray('Try: agents secrets create <name>'));
+        // Distinguish "you have none" from "your filter excluded all of them",
+        // and name the axes that did it — otherwise the only way to find out
+        // which flag emptied the list is to remove them one at a time.
+        if (filterIsActive(filter)) {
+          console.log(chalk.gray(`No bundles ${describeFilter(filter)}. ${all.length} bundle${all.length === 1 ? '' : 's'} total.`));
+          console.log(chalk.gray('Try: agents secrets list  (no filters)'));
+        } else {
+          console.log(chalk.gray('No secrets bundles configured.'));
+          console.log(chalk.gray('Try: agents secrets create <name>'));
+        }
         return;
       }
       const cols = terminalWidth();
@@ -990,6 +1113,48 @@ export function registerSecretsCommands(program: Command): void {
         }
       }
     });
+
+  setHelpSections(listCmd, {
+    examples: `
+      # Everything, newest-used first
+      agents secrets list --sort used
+
+      # Find one by name or description
+      agents secrets list github
+
+      # The security audit: which bundles read with NO Touch ID at all?
+      agents secrets list --policy never
+
+      # Which still store a raw value inline, or can shell out?
+      agents secrets list --kind literal
+      agents secrets list --kind exec
+
+      # What has already lapsed, and what is about to
+      agents secrets list --expired
+      agents secrets list --expiring 7 --sort expiry
+
+      # What can I delete? Untouched in three months
+      agents secrets list --unused 3mo --sort used
+
+      # Which bundles will prompt me on the next read (macOS)
+      agents secrets list --not-held
+
+      # Combine axes — every filter narrows further
+      agents secrets list --policy hold --backend file --expiring
+
+      # Same filters, on another machine, machine-readable
+      agents secrets list --expired --host mac-mini --json
+    `,
+    notes: `
+      - Filters compose: every flag you add narrows the list further.
+      - An unknown value is an error, not an empty list — '--policy hodl' names the valid set.
+      - --held/--not-held read live broker state, so they need macOS. Use --host <mac> from elsewhere.
+      - --expired and --expiring are different questions: already lapsed vs coming due. The EXPIRING column counts both and turns red once anything has lapsed.
+      - --unused matches bundles never read at all, not just old ones.
+      - Filters apply before --json, so the JSON is the exact twin of the table.
+      - Filters are forwarded over --host, so a remote list narrows the same way.
+    `,
+  });
 
   cmd
     .command('view [name]')

@@ -259,6 +259,16 @@ The Windows push bridge is `buildWindowsStdinImportCommand` in
 | Command | Description | Example |
 |---------|-------------|---------|
 | `secrets list` / `ls` | List bundles with key count, expiry warnings, timestamps | `agents secrets list` |
+| `secrets list [query]` | Filter by name or description substring | `agents secrets list github` |
+| `secrets list --policy <list>` | Only these prompt policies — `--policy never` is the no-Touch-ID audit | `agents secrets list --policy never` |
+| `secrets list --backend <list>` | Only these backends (`keychain`, `file`, `vault`) | `agents secrets list --backend file` |
+| `secrets list --type <list>` | Only bundles carrying a key of these types | `agents secrets list --type ssh-key,certificate` |
+| `secrets list --kind <list>` | Only these ref kinds — finds raw inline values, or bundles that shell out | `agents secrets list --kind literal` |
+| `secrets list --held` / `--not-held` | Split by live broker state; macOS only (see [the secrets-agent](#the-secrets-agent-macos)) | `agents secrets list --not-held` |
+| `secrets list --expired` | Only bundles with a key whose expiry has already passed | `agents secrets list --expired` |
+| `secrets list --expiring [days]` | Only bundles with a key due within N days (default 30) | `agents secrets list --expiring 7` |
+| `secrets list --unused <duration>` | Not read since this far back; never-used bundles always match | `agents secrets list --unused 3mo` |
+| `secrets list --sort <field>` · `-n` | Sort by `name`/`used`/`created`/`updated`/`expiry`, and cap the count | `agents secrets list --sort expiry -n 10` |
 | `secrets view [name]` | Show keys in a bundle (values masked by default) | `agents secrets view prod` |
 | `secrets view [name] --reveal` | Print keychain values in the clear (TTY only) | `agents secrets view prod --reveal` |
 | `secrets view [name] --reveal --plaintext` | Allow `--reveal` in non-interactive shells | `agents secrets view prod --reveal --plaintext` |
