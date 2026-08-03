@@ -51,7 +51,7 @@ import {
   type ProjectSessionRollup,
   type ProjectRemoteSignals,
 } from '../lib/project-status.js';
-import { fetchLinearProjectCounts, type LinearProjectCounts } from '../lib/linear-project-counts.js';
+import { fetchLinearProjectCounts, type LinearMilestone, type LinearProjectCounts } from '../lib/linear-project-counts.js';
 import { listLinearProjects, pickLinearProject, type LinearPick, type LinearProjectLite } from '../lib/linear-projects.js';
 import {
   buildFactoryImportCandidates,
@@ -191,6 +191,46 @@ export function computeProjectListWidths(rows: ProjectListRow[]): { name: number
   };
 }
 
+/**
+ * A milestone's target date as a person would say it — "due tomorrow",
+ * "overdue by 3 days", "due Aug 21" — never a raw `2026-08-21` or a duration in
+ * hours. Linear stores a calendar date with no timezone, so both sides are
+ * compared at LOCAL midnight; parsing `YYYY-MM-DD` with `new Date(str)` would
+ * read it as UTC and shift the answer by a day for anyone west of Greenwich.
+ */
+export function formatMilestoneDue(targetDate: string, nowMs: number): string | undefined {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(targetDate.trim());
+  if (!m) return undefined;
+  const due = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  if (Number.isNaN(due.getTime())) return undefined;
+  const now = new Date(nowMs);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const days = Math.round((due.getTime() - today.getTime()) / 86_400_000);
+  if (days === 0) return 'due today';
+  if (days === 1) return 'due tomorrow';
+  if (days === -1) return 'overdue by a day';
+  if (days < 0) return `overdue by ${-days} days`;
+  if (days <= 14) return `due in ${days} days`;
+  const sameYear = due.getFullYear() === today.getFullYear();
+  const label = due.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    ...(sameYear ? {} : { year: 'numeric' }),
+  });
+  return `due ${label}`;
+}
+
+/** The `next` card line: what this project is due to hit, and how far along it is. */
+export function formatNextMilestone(ms: LinearMilestone, nowMs: number): string {
+  const parts = [chalk.bold(ms.name)];
+  // A milestone with nothing filed under it yet has no progress to report —
+  // `0/0` is noise, not information.
+  if (ms.total > 0) parts.push(`${ms.done}/${ms.total}`);
+  const due = ms.targetDate ? formatMilestoneDue(ms.targetDate, nowMs) : undefined;
+  if (due) parts.push(due.startsWith('overdue') ? chalk.yellow(due) : chalk.dim(due));
+  return parts.join(chalk.dim('  ·  '));
+}
+
 function statusBar(r: ProjectSessionRollup): string {
   const parts: string[] = [];
   const push = (n: number | undefined, label: string, color: (s: string) => string) => {
@@ -214,6 +254,7 @@ function renderCard(
   remote: ProjectRemoteSignals | undefined,
   fleet?: HostWorkspaceStatus[],
   linear?: LinearProjectCounts,
+  nowMs: number = Date.now(),
 ): void {
   const agents = r?.agents ?? 0;
   const pct = r ? planPct(r.plan) : undefined;
@@ -230,6 +271,9 @@ function renderCard(
   if (ships.length) console.log(`  ${chalk.dim('ships')}    ${ships.join(' · ')}`);
   if (linear) {
     console.log(`  ${chalk.dim('linear')}   ${linear.done}/${linear.total}${linear.truncated ? '+' : ''} done · ${linear.inProgress} in progress`);
+  }
+  if (linear?.nextMilestone) {
+    console.log(`  ${chalk.dim('next')}     ${formatNextMilestone(linear.nextMilestone, nowMs)}`);
   }
   if (r && r.tickets.length) {
     console.log(`  ${chalk.dim('tickets')}  ${r.tickets.slice(0, 8).join(' · ')}${r.tickets.length > 8 ? ' …' : ''}`);
@@ -538,7 +582,7 @@ export function registerProjectsCommands(program: Command): void {
         return;
       }
       for (const d of defs) {
-        renderCard(d, roll.get(d.name), remote.get(d.name), opts.fleet ? fleetFor(d) : undefined, linear.get(d.name));
+        renderCard(d, roll.get(d.name), remote.get(d.name), opts.fleet ? fleetFor(d) : undefined, linear.get(d.name), nowMs);
       }
       if (fleetSkipped.length > 0) process.stdout.write(formatFleetSkippedNote(fleetSkipped));
     });

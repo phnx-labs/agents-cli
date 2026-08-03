@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { computeProjectListWidths, formatFleetSkippedNote, type ProjectListRow } from './projects.js';
+import {
+  computeProjectListWidths,
+  formatFleetSkippedNote,
+  formatMilestoneDue,
+  formatNextMilestone,
+  type ProjectListRow,
+} from './projects.js';
 
 const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
 
@@ -45,5 +51,63 @@ describe('computeProjectListWidths', () => {
   it('collapses to zero-width columns when there is nothing to show', () => {
     expect(computeProjectListWidths([])).toEqual({ name: 0, path: 0, repo: 0 });
     expect(computeProjectListWidths([{ name: 'a', path: '', repo: '' }])).toEqual({ name: 1, path: 0, repo: 0 });
+  });
+});
+
+describe('formatMilestoneDue', () => {
+  /** Local noon on 2026-08-03, so a timezone slip shows up as a whole-day error. */
+  const now = new Date(2026, 7, 3, 12, 0, 0).getTime();
+
+  it('speaks in days a person would use', () => {
+    expect(formatMilestoneDue('2026-08-03', now)).toBe('due today');
+    expect(formatMilestoneDue('2026-08-04', now)).toBe('due tomorrow');
+    expect(formatMilestoneDue('2026-08-09', now)).toBe('due in 6 days');
+    expect(formatMilestoneDue('2026-08-02', now)).toBe('overdue by a day');
+    expect(formatMilestoneDue('2026-07-27', now)).toBe('overdue by 7 days');
+  });
+
+  it('switches to a calendar date once the countdown stops being useful', () => {
+    expect(formatMilestoneDue('2026-08-21', now)).toBe('due Aug 21');
+    // A different year has to say which one.
+    expect(formatMilestoneDue('2027-01-15', now)).toBe('due Jan 15, 2027');
+  });
+
+  it('reads the date at LOCAL midnight, not UTC', () => {
+    // `new Date('2026-08-03')` is UTC midnight — west of Greenwich that is
+    // Aug 2 locally, and this would read "overdue by a day" instead of "today".
+    expect(formatMilestoneDue('2026-08-03', new Date(2026, 7, 3, 23, 59).getTime())).toBe('due today');
+    expect(formatMilestoneDue('2026-08-03', new Date(2026, 7, 3, 0, 1).getTime())).toBe('due today');
+  });
+
+  it('returns nothing for a value that is not a calendar date', () => {
+    expect(formatMilestoneDue('', now)).toBeUndefined();
+    expect(formatMilestoneDue('someday', now)).toBeUndefined();
+    expect(formatMilestoneDue('2026-08-03T00:00:00Z', now)).toBeUndefined();
+  });
+});
+
+describe('formatNextMilestone', () => {
+  const now = new Date(2026, 7, 3, 12, 0, 0).getTime();
+
+  it('reads name, progress, then when it is due', () => {
+    expect(stripAnsi(formatNextMilestone({ name: 'Beta cut', targetDate: '2026-08-09', done: 3, total: 8 }, now)))
+      .toBe('Beta cut  ·  3/8  ·  due in 6 days');
+  });
+
+  it('omits the date entirely when the milestone has none', () => {
+    expect(stripAnsi(formatNextMilestone({ name: 'Someday', done: 0, total: 4 }, now)))
+      .toBe('Someday  ·  0/4');
+  });
+
+  it('omits the fraction when nothing is filed under the milestone yet', () => {
+    // 0/0 is noise. This is the real shape of every milestone in this repo's
+    // own Linear project.
+    expect(stripAnsi(formatNextMilestone({ name: 'Factory onboarding', targetDate: '2026-09-15', done: 0, total: 0 }, now)))
+      .toBe('Factory onboarding  ·  due Sep 15');
+  });
+
+  it('does not print a raw date when the stored value is unparseable', () => {
+    expect(stripAnsi(formatNextMilestone({ name: 'Odd', targetDate: 'not-a-date', done: 1, total: 2 }, now)))
+      .toBe('Odd  ·  1/2');
   });
 });
