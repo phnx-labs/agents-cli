@@ -683,6 +683,45 @@ Each post appends a `status.posted` **milestone** to
 **not** create a feed block. Domain facts (tickets, PRs) are not CLI flags;
 join them from the session index / live session enrichment at read time.
 
+#### `--blocked` — the same post, but the agent is stuck
+
+A plain post is history the moment it lands. `--blocked` says the agent
+**cannot proceed** and needs a human, so the ask has to stay open rather than
+scroll away:
+
+```bash
+agents feed post "force-push denied by git-guard on PR #1749" --blocked
+agents feed post "publish or wait for review?" --blocked --option publish --option wait
+agents feed post "delete the stale preview env?" --blocked --default "leave it"
+```
+
+It is a flag on the existing verb rather than a separate command: the feed is
+**one shared stream** where most posts are benign and some need a human, and one
+verb is one thing for an agent to learn.
+
+A blocked post writes to **both** stores:
+
+- `status.blocked` on the activity stream — *what happened*.
+- an **`OpenBlock`** in `~/.agents/.history/feed/` — *what is still open*, which
+  is what makes it answerable (`recordAnswer`, `agents message`) and clearable
+  (`recordContinued`). Without the ledger entry the ask would be indistinguishable
+  from any other update.
+
+**Blocked is a state, not a volume.** It always broadcasts at `important`, so an
+agent never picks a level as well — passing `--level` alongside `--blocked` is a
+usage error, not a silent override. The broadcast carries the ask plus the literal
+`agents focus <id>` command that unblocks it, so the message contains the one
+action the operator has to take.
+
+`--option <label>` (repeatable) records an answerable choice; `--default <answer>`
+makes the block an **approval** (a safe default policy may apply on no answer)
+instead of a **decision** (only a human can choose) — the distinction
+`feed-policy.ts` already keys off.
+
+**It fails loud.** A block that reaches no sink exits non-zero: a silently
+undelivered "needs you" is precisely the failure this exists to remove. One sink
+failing among several is only a warning, since the channels are redundant.
+
 - **`--attach <path-or-url…>` (repeatable).** Attach an artifact to the post. A
   **local file** is copied under
   `~/.agents/.history/attachments/<sessionId>/<updateId>/` so the reference survives
@@ -738,6 +777,15 @@ separated), and `{message}` — a composed human line, `<project> · <text>` wit
 first attached URL on a second line. Prefer `{message}` for a messaging sink: it
 leads with the project the reader cares about and carries a clickable link,
 rather than opening with an agent name that tells them nothing.
+
+**Blocked posts add four more:** `{focus}` (the literal `agents focus <id>` command
+that unblocks the session), `{class}` (`approval` | `decision`), `{cost}` (the
+cost-of-delay tag), and `{block}` (the block id). For a blocked post `{message}`
+already appends the `{focus}` line, so a messaging sink needs no extra template
+work to carry the one action the reader must take. Note the placeholder grammar is
+lowercase-only (`/\{([a-z]+)\}/`), which is why the id is `{block}` and not
+`{blockId}` — a camelCase token would never substitute, and a template with an
+unsubstituted token is **skipped**, not sent with a hole in it.
 
 The **ticket is joined from the session index**, not passed as a flag — it is a
 domain fact about the session (the rule above), and an agent that has to remember
