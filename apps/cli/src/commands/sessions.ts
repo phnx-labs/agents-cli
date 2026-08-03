@@ -1166,7 +1166,11 @@ export async function gatherActiveSessions(
   const self = machineId();
   // An explicit --host/--device list scopes the view: seed local sessions only
   // when no hosts are named, or when this machine is one of the named targets.
-  const local = shouldIncludeLocal(opts.hosts, self) ? await getActiveSessions() : [];
+  // `localOnly: opts.local` (RUSH-2118) keeps a `--local` query from dialing a
+  // remote-host teammate over ssh even for this machine's OWN local gather —
+  // "this machine only" must mean zero ssh, not just "skip the cross-machine
+  // device fan-out below".
+  const local = shouldIncludeLocal(opts.hosts, self) ? await getActiveSessions({ localOnly: opts.local }) : [];
   for (const s of local) if (!s.machine) s.machine = self;
 
   let remoteDeviceCount = 0;
