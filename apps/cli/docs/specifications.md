@@ -264,9 +264,8 @@ SSH access (§7); rendering sessions that no harness produced.
   (`pane_current_path`) MUST be queried last (test `active.tmux-clients.test.ts`).
   Consumers that read `ActiveStatus` MUST handle `orphaned`/`crashed` rather than
   falling through to a stale `activity` — the `--waiting` filter reads the
-  never-rewritten activity via `isAwaitingUser`, the `--active` tally carries a
-  bucket per status, and the HQ Floor maps both to a needs-a-human mood
-  (`lib/hq/floor.ts`; tests `active.hostlink.test.ts`, `floor.test.ts`).
+  never-rewritten activity via `isAwaitingUser`, and the `--active` tally carries
+  a bucket per status (test `active.hostlink.test.ts`).
 - **SES-18b (MUST).** A favorite MUST be stored outside `sessions.db`
   (`~/.agents/.history/favorites.json`, keyed by session id;
   `lib/session/favorites.ts`), because the index is a rebuildable cache and a
