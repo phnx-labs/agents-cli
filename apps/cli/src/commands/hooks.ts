@@ -710,23 +710,39 @@ Examples:
     .option('--warn-ms <n>', 'p99 threshold above which a hook is flagged as slow', '2000')
     .option('--json', 'Emit raw JSON rows instead of the table')
     .addHelpText('after', `
-Shows aggregated stats for every hook that emitted a hook.fire event into
-~/.agents/.cache/logs/events-YYYY-MM-DD.jsonl. Only hooks with \`cache:\` in
-their manifest are instrumented today — the generated shim writes the events.
+Shows aggregated stats for every hook that fired through a generated shim.
+Primary source: disposable SQLite warehouse ~/.agents/.cache/perf/perf.db
+(same data as \`agents perf hooks\`). Falls back to the legacy daily JSONL under
+~/.agents/.cache/logs/ when the warehouse is empty.
 
 Examples:
   agents hooks profile                # last 7 days, table form
   agents hooks profile --days 30      # roll up the full month
   agents hooks profile --json | jq    # pipe somewhere
+  agents perf hooks                   # same rollup under the perf surface
 
 A hook whose p99 exceeds --warn-ms gets flagged in the cache column. Add
 'cache: 5m' or 'cache: 5m-bg' to its hooks.yaml entry to fix it.
 `)
     .action(async (options: { days: string; warnMs: string; json?: boolean }) => {
       const { aggregateHookProfile, loadHookFireEvents, formatMs, formatCacheColumn, DEFAULT_SLOW_HOOK_WARN_MS } = await import('../lib/hooks/profile.js');
+      const { aggregateSamples } = await import('../lib/perf/db.js');
       const days = Math.max(1, parseInt(options.days, 10) || 7);
       const warnMs = Math.max(0, parseInt(options.warnMs, 10) || DEFAULT_SLOW_HOOK_WARN_MS);
-      const rows = aggregateHookProfile(loadHookFireEvents(days));
+      // Prefer the indexed warehouse; fall back to legacy JSONL for pre-warehouse shims.
+      const fromDb = aggregateSamples({ days, kinds: ['hook.fire'] }).map((r) => ({
+        hook: r.label,
+        n: r.n,
+        p50Ms: r.p50Ms,
+        p99Ms: r.p99Ms,
+        meanMs: r.meanMs,
+        maxMs: r.maxMs,
+        cacheHitPct: r.cacheHitPct ?? 0,
+        cacheStalePct: r.cacheStalePct ?? 0,
+        cacheMissPct: r.cacheMissPct ?? 0,
+        errorCount: r.errorCount ?? 0,
+      }));
+      const rows = fromDb.length > 0 ? fromDb : aggregateHookProfile(loadHookFireEvents(days));
 
       if (options.json) {
         console.log(JSON.stringify(rows, null, 2));
@@ -734,8 +750,8 @@ A hook whose p99 exceeds --warn-ms gets flagged in the cache column. Add
       }
 
       if (rows.length === 0) {
-        console.log(chalk.gray(`No hook.fire events in the last ${days} day${days === 1 ? '' : 's'}.`));
-        console.log(chalk.gray('Add \'cache: 5m\' to a hook in hooks.yaml to start collecting stats.'));
+        console.log(chalk.gray(`No hook.fire samples in the last ${days} day${days === 1 ? '' : 's'}.`));
+        console.log(chalk.gray('Add \'cache: 5m\' to a hook (or matches:) so a shim instruments it, then resync.'));
         return;
       }
 

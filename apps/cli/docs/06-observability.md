@@ -6,27 +6,53 @@ Using agents-cli as a programmatic observability layer for agent fleets.
 
 ## Command roles at a glance
 
-Five surfaces read the fleet's activity; each has one job. Reach for the one whose
+Six surfaces read the fleet's activity; each has one job. Reach for the one whose
 *consumer* and *axis* match your question, not whichever you remember first.
 
 | Command | Role (one line) | Source | Consumer |
 |---|---|---|---|
 | **`events`** | **Raw unified event stream = the audit log.** Everything: secrets access, command invocations, version/skill/mcp/team ops, browser events, plus agent milestones. `--follow` to tail, `--audit` for ops-only. | `events.jsonl` + per-session `activity/*.jsonl`, merged by `readUnifiedEvents` | Audit, debugging, monitoring (human + machine) |
+| **`perf`** | **Latency rollups.** p50/p99 for hooks, CLI commands, and `agent.run` timings. Indexed SQLite — not a full scan of the audit log. | `~/.agents/.cache/perf/perf.db` (disposable) | Humans optimizing boot/run cost + `--json` |
 | **`feed`** | **Consolidated cross-agent surface.** Open blocks (decisions agents are waiting on) + `feed post` status updates — "what needs you / what are agents saying." | `.history/feed/*` + active sessions | Humans (operator inbox) + agents (progress) |
 | **`activity`** | **Human milestone timeline.** Recent plans / PRs / worktrees / sub-agents, newest-first — a friendly lens on the milestone tier of the event stream. | `activity/*.jsonl` | Human at the terminal |
 | **`output`** | **Productivity accounting.** Token burn vs shipped output (PRs, commits) across agents — the "was it worth it" axis. (`agents cost` is the pure $-and-duration sibling.) | `sessions.db` + git/gh | Human + `--json` |
 | **`sessions`** | **Live agent roster + transcripts.** Which agents are running right now and their state; browse/read past conversation transcripts. A live process probe + transcript index, not an event log. | live pid/transcript probe + `sessions.db` | Human + `--json` |
 
-The two write-stores behind these: `~/.agents/events.jsonl` (operational audit) and
-per-session `~/.agents/.history/activity/<id>.jsonl` (agent milestones). They are
-distinct on disk and merged only at read time by
-`event-stream.ts::readUnifiedEvents` — so `events` is the union, while `activity`
-is the milestone tier on its own.
+The write-stores: `~/.agents/events.jsonl` (operational audit), per-session
+`~/.agents/.history/activity/<id>.jsonl` (agent milestones), and the disposable
+perf warehouse `~/.agents/.cache/perf/perf.db` (latency samples). Audit + activity
+are merged at read time by `event-stream.ts::readUnifiedEvents`. Perf is a
+separate SQLite file — **loss is acceptable** (under `.cache/`); it does **not**
+foreign-key into `sessions.db`, but uses the same string shapes for
+`session_id` / `session_short` / `agent` / `machine` / `actor` / `cwd` so you can
+soft-join later.
 
 For the inspection/health cluster, `agents doctor` is the canonical detector of
 which resources are configured, synced, or drifted; `agents doctor --check` is its
 scriptable CI gate (exit non-zero on drift). See
 [§Fleet health & cross-device divergence](#fleet-health--cross-device-divergence-agents-doctor).
+
+## Performance warehouse (`agents perf`)
+
+Latency samples for optimization — **not** the audit log. Implementation:
+`apps/cli/src/lib/perf/db.ts`, CLI: `apps/cli/src/commands/perf.ts`.
+
+```
+agents perf                     # summary: commands + hooks + runs
+agents perf hooks               # same as agents hooks profile (SQLite-first)
+agents perf commands --days 30  # slowest CLI entrypoints
+agents perf run --json          # agent.run / perf.timing labels
+```
+
+| Producer | Kind | How it lands |
+|---|---|---|
+| CLI `postAction` | `command.end` | Direct `recordSample` (skips the `perf` command itself) |
+| `createTimer` / `time` / `timeAsync` / `withTiming` | `perf.timing` | Best-effort from `events.ts` |
+| Hook cache/matches shims | `hook.fire` | NDJSON spool → drained into SQLite on open |
+
+**Disable:** `AGENTS_DISABLE_PERF=1`. **Redirect (tests):** `AGENTS_PERF_DB`,
+`AGENTS_PERF_SPOOL`. Retention: samples older than 30 days are pruned
+opportunistically on open. Wipe anytime: `rm -rf ~/.agents/.cache/perf`.
 
 ## Audit Event Log (`agents events`)
 

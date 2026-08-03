@@ -109,10 +109,10 @@ import {
   HOST_PICKER_CACHE_KEY,
   freshnessSuffix,
   isHostPickerStale,
+  mergeHostPickerSnapshot,
   parseHostPickerCache,
   serializeUsage,
   sortHostPickerDevices,
-  withRefreshedDevices,
   type HostPickerCache,
 } from '../core/hostPickerCache';
 import { buildForkSessionRequest } from '../core/forkSession';
@@ -564,16 +564,20 @@ async function writeHostPickerCache(context: vscode.ExtensionContext, cache: Hos
 
 /**
  * Phase 1 (cheap): refresh just the device rows from the registry snapshot —
- * one `devices list --json`, NO fleet SSH sweep — while preserving the prior
- * usage scores. The device names + reachability are all the picker needs to
- * render every host, so this runs on its own (warmed at activation, and as the
- * first half of a stale-open refresh) instead of being gated behind the usage
- * sweep. On a loaded box the sweep is where the seconds go; the rows should not
- * wait on it.
+ * one `devices list --json`, NO fleet SSH sweep — preserving the prior usage
+ * scores AND their sweep time (`usageFetchedAt`). The device names + reachability
+ * are all the picker needs to render every host, so this runs on its own (warmed
+ * at activation, and as the first half of a stale-open refresh) instead of being
+ * gated behind the usage sweep. An EMPTY fetch is a failed registry read (CLI
+ * timeout on a loaded box), never a real empty fleet — mergeHostPickerSnapshot
+ * keeps the previous rows at their true age, and yields null (persist nothing)
+ * when there is nothing confident yet.
  */
-async function refreshHostPickerDevices(context: vscode.ExtensionContext): Promise<HostPickerCache> {
+async function refreshHostPickerDevices(context: vscode.ExtensionContext): Promise<HostPickerCache | null> {
   const devices = await listRegisteredDevices();
-  return writeHostPickerCache(context, withRefreshedDevices(readHostPickerCache(context), devices));
+  const prev = readHostPickerCache(context);
+  const merged = mergeHostPickerSnapshot(prev, devices, prev?.usage ?? {}, Date.now(), prev?.usageFetchedAt ?? 0);
+  return merged ? writeHostPickerCache(context, merged) : null;
 }
 
 /**
@@ -595,13 +599,15 @@ async function sweepHostPickerUsage(context: vscode.ExtensionContext, base: Host
   } catch (err) {
     console.error('[pickLaunchHost] usage sweep failed:', err);
   }
-  const now = Date.now();
-  return writeHostPickerCache(context, { devices: base.devices, usage, fetchedAt: base.fetchedAt, usageFetchedAt: now });
+  // base is a confident non-empty snapshot: stamp the usage sweep time now, keep
+  // the device-row age (base.fetchedAt).
+  return writeHostPickerCache(context, { devices: base.devices, usage, fetchedAt: base.fetchedAt, usageFetchedAt: Date.now() });
 }
 
-/** Full refresh: the current device rows, then the usage annotations on top. */
-async function refreshHostPickerCache(context: vscode.ExtensionContext): Promise<HostPickerCache> {
-  return sweepHostPickerUsage(context, await refreshHostPickerDevices(context));
+/** Full refresh: the current device rows, then the usage annotations on top. Null when the registry read found nothing confident. */
+async function refreshHostPickerCache(context: vscode.ExtensionContext): Promise<HostPickerCache | null> {
+  const withDevices = await refreshHostPickerDevices(context);
+  return withDevices ? sweepHostPickerUsage(context, withDevices) : null;
 }
 
 /** Warm just the device rows off the command path — cheap, no fleet sweep. */
@@ -671,13 +677,16 @@ async function pickLaunchHost(
     // Two-phase: swap in the fresh device rows as soon as the cheap registry
     // read lands (never gated on the fleet sweep), then swap in the usage
     // annotations once the sweep completes. On a busy box the device rows show
-    // in registry-read time instead of waiting on the whole fleet fan-out.
+    // in registry-read time instead of waiting on the whole fleet fan-out. A
+    // null device phase is a failed read with nothing confident — keep what's
+    // already shown.
     void refreshHostPickerDevices(context)
       .then((withDevices) => {
+        if (!withDevices) return null;
         applyItems(withDevices);
         return sweepHostPickerUsage(context, withDevices);
       })
-      .then((fresh) => applyItems(fresh))
+      .then((fresh) => { if (fresh) applyItems(fresh); })
       .catch((err) => console.error('[pickLaunchHost] refresh failed:', err))
       .finally(() => { if (!disposed) quickPick.busy = false; });
   }

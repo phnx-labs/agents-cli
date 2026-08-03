@@ -63,24 +63,6 @@ export function isHostPickerStale(cache: HostPickerCache | null | undefined, now
 }
 
 /**
- * Merge a fresh device snapshot into the prior cache while PRESERVING its usage
- * scores. The device rows (names + reachability) come from the cheap registry
- * read; the expensive fleet usage sweep fills `usage` on its own pass. Splitting
- * them this way is what lets the picker render every host from the registry read
- * alone, without waiting on the SSH sweep — the usage annotations arrive after.
- */
-export function withRefreshedDevices(
-  prev: HostPickerCache | null | undefined,
-  devices: HostPickerDevice[],
-  now = Date.now(),
-): HostPickerCache {
-  // Bump `fetchedAt` (device rows are freshly read) but carry the OLD
-  // `usageFetchedAt` forward untouched — the usage scores were NOT refreshed
-  // here, so the next open must still see the cache as usage-stale and sweep.
-  return { devices, usage: prev?.usage ?? {}, fetchedAt: now, usageFetchedAt: prev?.usageFetchedAt ?? 0 };
-}
-
-/**
  * The picker's device order: online first, then how much the box is actually
  * used, then name. Pure so the stale render and the revalidated render sort
  * identically — the item swap never reshuffles a row the scores didn't move.
@@ -107,4 +89,45 @@ export function freshnessSuffix(fetchedAt: number, now = Date.now()): string {
   const hours = Math.floor(mins / 60);
   if (hours < 24) return `updated ${hours}h ago`;
   return `updated ${Math.floor(hours / 24)}d ago`;
+}
+
+/**
+ * Fold a fresh fetch into the previous snapshot. An EMPTY device list is a
+ * failed registry read (CLI timeout on a loaded box, a hiccup mid-upgrade),
+ * never a real empty fleet — so it must never overwrite rows the user saw a
+ * minute ago. Returns null when there is no confident data at all, in which
+ * case the caller persists nothing and the picker stays in cold-start mode.
+ *
+ * Keeping the previous rows also keeps their TRUE age (`previous.fetchedAt` AND
+ * `previous.usageFetchedAt`): a failed refresh must not stamp the snapshot fresh,
+ * or the rows' age label would read "updated just now" while showing hour-old
+ * data and the staleness gate would stop retrying. (Known edge: a registry
+ * emptied down to zero devices can never clear the picker — "empty" is treated as
+ * never real.)
+ *
+ * The two timestamps are separate on purpose: the cheap device-only phase
+ * (`refreshHostPickerDevices`) calls this with fresh `devices` but carries the
+ * PRIOR `usageFetchedAt` forward, so a device refresh never masks stale usage
+ * scores as fresh — `isHostPickerStale` keys off `usageFetchedAt` and still runs
+ * the sweep on the next open.
+ */
+export function mergeHostPickerSnapshot(
+  previous: HostPickerCache | null,
+  devices: HostPickerDevice[],
+  usage: Record<string, HostUsageScore>,
+  fetchedAt: number,
+  usageFetchedAt: number,
+): HostPickerCache | null {
+  if (devices.length === 0) {
+    if (previous && previous.devices.length > 0) {
+      return {
+        devices: previous.devices,
+        usage: Object.keys(usage).length > 0 ? usage : previous.usage,
+        fetchedAt: previous.fetchedAt,
+        usageFetchedAt: previous.usageFetchedAt,
+      };
+    }
+    return null;
+  }
+  return { devices, usage, fetchedAt, usageFetchedAt };
 }

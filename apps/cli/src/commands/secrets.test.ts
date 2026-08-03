@@ -21,8 +21,14 @@ import {
   registerSecretsCommands,
   renderHoldSummary,
   renderPolicyCol,
+  renderExpiringCol,
+  liveHold,
+  compactDurationMs,
+  buildRemoteListArgs,
   NO_BUNDLES_HELD_LINE,
 } from './secrets.js';
+import { MIN_HOLD_MS as MIN_HOLD, MAX_HOLD_MS as MAX_HOLD } from '../lib/secrets/agent.js';
+import { visibleWidth } from '../lib/format.js';
 import { parseDotenv, type SecretsBundle } from '../lib/secrets/bundles.js';
 
 // On macOS, `secrets create --backend file` still stores bundle METADATA in the
@@ -238,21 +244,163 @@ describe('renderHoldSummary', () => {
   });
 });
 
+describe('buildRemoteListArgs', () => {
+  it('forwards every filter, so a remote list narrows the same way', () => {
+    // browseRemote sends this argv verbatim. A flag missing here is not an
+    // error — the remote just lists everything, and `--host zion --expired`
+    // reports every bundle on zion as expired.
+    const args = buildRemoteListArgs({
+      json: true,
+      policy: 'never',
+      backend: 'file',
+      type: 'token',
+      kind: 'literal',
+      expired: true,
+      unused: '90d',
+      sort: 'used',
+      limit: '5',
+    }, 'github');
+    expect(args).toEqual([
+      'list', 'github', '--json',
+      '--policy', 'never',
+      '--backend', 'file',
+      '--type', 'token',
+      '--kind', 'literal',
+      '--expired',
+      '--unused', '90d',
+      '--sort', 'used',
+      '--limit', '5',
+    ]);
+  });
+
+  it('sends a bare --expiring without a value, and a valued one with it', () => {
+    expect(buildRemoteListArgs({ expiring: true })).toEqual(['list', '--expiring']);
+    expect(buildRemoteListArgs({ expiring: '7' })).toEqual(['list', '--expiring', '7']);
+  });
+
+  it('forwards the held pair, which the remote resolves against its own broker', () => {
+    expect(buildRemoteListArgs({ held: true })).toEqual(['list', '--held']);
+    expect(buildRemoteListArgs({ notHeld: true })).toEqual(['list', '--not-held']);
+  });
+
+  it('is just `list` when nothing is set', () => {
+    expect(buildRemoteListArgs({})).toEqual(['list']);
+  });
+});
+
+describe('liveHold', () => {
+  it('is the one definition of held, shared by the column, the filter, and --json', () => {
+    const now = Date.now();
+    expect(liveHold(now + 60_000, now)).toBe(now + 60_000);
+    // A broker entry past its expiry is not held. Before this, the column and
+    // the --held filter said "not held" while --json still reported the stale
+    // timestamp for the same bundle.
+    expect(liveHold(now - 1, now)).toBeNull();
+    expect(liveHold(undefined, now)).toBeNull();
+  });
+});
+
+describe('renderExpiringCol', () => {
+  const iso = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+
+  it('shows a dash when nothing expires', () => {
+    expect(renderExpiringCol({ name: 'b', vars: {} })).toContain('-');
+  });
+
+  it('counts an already-expired key, which used to render as a dash', () => {
+    // countExpiringSoon guards on d >= 0, so a lapsed key was indistinguishable
+    // from a bundle with no expiry at all.
+    const col = renderExpiringCol({ name: 'b', vars: {}, meta: { K: { expires: iso(-30) } } });
+    expect(col).toContain('1');
+    expect(col).not.toContain('-');
+  });
+
+  it('counts lapsed and upcoming together', () => {
+    const col = renderExpiringCol({
+      name: 'b',
+      vars: {},
+      meta: { DEAD: { expires: iso(-5) }, SOON: { expires: iso(3) }, FAR: { expires: iso(400) } },
+    });
+    expect(col).toContain('2');
+  });
+});
+
+describe('compactDurationMs', () => {
+  it('rounds onto minute/hour/day thresholds', () => {
+    expect(compactDurationMs(45 * 60_000)).toBe('45m');
+    expect(compactDurationMs(19 * 3_600_000)).toBe('19h');
+    expect(compactDurationMs(2 * 86_400_000)).toBe('2d');
+  });
+
+  it('covers the whole clamp range, so the POLICY column width is bounded', () => {
+    // clampHoldMs pins the window to [1m, 30d], so these are the real extremes.
+    expect(compactDurationMs(MIN_HOLD)).toBe('1m');
+    expect(compactDurationMs(MAX_HOLD)).toBe('30d');
+  });
+});
+
 describe('renderPolicyCol', () => {
   const bundle = (policy: SecretsBundle['policy']): SecretsBundle => ({ name: 'b', vars: {}, policy });
+  const HOLD_7D = 7 * 24 * 60 * 60 * 1000;
 
   it('marks a never bundle distinctly and loudly', () => {
-    const never = renderPolicyCol(bundle('never'));
+    const never = renderPolicyCol(bundle('never'), HOLD_7D);
     expect(never).toMatch(/never/);
     expect(never).toMatch(/no prompt/i);
     // Distinct from the other tiers — the marking is not shared.
-    expect(never).not.toBe(renderPolicyCol(bundle('always')));
-    expect(never).not.toBe(renderPolicyCol(bundle('hold')));
+    expect(never).not.toBe(renderPolicyCol(bundle('always'), HOLD_7D));
+    expect(never).not.toBe(renderPolicyCol(bundle('hold'), HOLD_7D));
   });
 
-  it('does not label always/daily bundles as never', () => {
-    expect(renderPolicyCol(bundle('always'))).not.toMatch(/never/i);
-    expect(renderPolicyCol(bundle('hold'))).not.toMatch(/never/i);
+  it('does not label always/hold bundles as never', () => {
+    expect(renderPolicyCol(bundle('always'), HOLD_7D)).not.toMatch(/never/i);
+    expect(renderPolicyCol(bundle('hold'), HOLD_7D)).not.toMatch(/never/i);
+  });
+
+  it('states the window, because `hold` IS a duration', () => {
+    const col = renderPolicyCol(bundle('hold'), HOLD_7D);
+    expect(col).toContain('hold 7d');
+    // Not currently held — no countdown to show.
+    expect(col).not.toMatch(/held/);
+  });
+
+  it('renders the window from the configured hold, not a hardcoded 7d', () => {
+    // Same thresholds as the countdown, so a 24h hold reads `1d` — the two
+    // halves of the cell must never round differently for the same span.
+    expect(renderPolicyCol(bundle('hold'), 24 * 3_600_000)).toContain('hold 1d');
+    expect(renderPolicyCol(bundle('hold'), 12 * 3_600_000)).toContain('hold 12h');
+    expect(renderPolicyCol(bundle('hold'), 30 * 60_000)).toContain('hold 30m');
+  });
+
+  it('appends the countdown while the broker actually holds it', () => {
+    const held = new Map([['b', Date.now() + 2 * 86_400_000]]);
+    const col = renderPolicyCol(bundle('hold'), HOLD_7D, held);
+    expect(col).toContain('hold 7d');
+    expect(col).toContain('held 2d');
+  });
+
+  it('treats a lapsed hold as not held — never renders the `expired` sentinel', () => {
+    // A stale broker row past its expiry used to render `hold · held expired`,
+    // because the branch tested the map entry for truthiness, not for liveness.
+    const stale = new Map([['b', Date.now() - 60_000]]);
+    const col = renderPolicyCol(bundle('hold'), HOLD_7D, stale);
+    expect(col).not.toMatch(/expired/);
+    expect(col).not.toMatch(/held/);
+    expect(col).toContain('hold 7d');
+  });
+
+  it('gives always/never no window, whatever the hold is', () => {
+    // Neither tier has a window; annotating one would repeat the `daily` lie.
+    for (const holdMs of [1, HOLD_7D, MAX_HOLD]) {
+      expect(renderPolicyCol(bundle('always'), holdMs)).toBe(renderPolicyCol(bundle('always'), HOLD_7D));
+      expect(renderPolicyCol(bundle('never'), holdMs)).toBe(renderPolicyCol(bundle('never'), HOLD_7D));
+    }
+  });
+
+  it('never exceeds the POLICY column width at the widest possible cell', () => {
+    const held = new Map([['b', Date.now() + MAX_HOLD]]);
+    const widest = renderPolicyCol(bundle('hold'), MAX_HOLD, held);
+    expect(visibleWidth(widest)).toBeLessThanOrEqual(20);
   });
 });
 
@@ -371,6 +519,14 @@ describe('secrets list/view --json (agent discovery, RUSH-1834)', () => {
       expect(gh.backend).toBe('file');
       expect(gh.description).toBe('gh creds');
       expect(typeof gh.policy).toBe('string');
+      // A machine caller shouldn't have to know that `hold` means a duration,
+      // nor read agents.yaml to find which one — the window rides the record.
+      if (gh.policy === 'hold') {
+        expect(typeof gh.holdMs).toBe('number');
+        expect(gh.holdMs).toBeGreaterThan(0);
+      } else {
+        expect(gh.holdMs).toBeNull();
+      }
       // The list is a discovery surface — it must never carry the secret value.
       expect(res.stdout).not.toContain('sk-live-xyz');
     } finally {
@@ -390,6 +546,9 @@ describe('secrets list/view --json (agent discovery, RUSH-1834)', () => {
       const obj = JSON.parse(res.stdout);
       expect(obj.name).toBe('github.com');
       expect(obj.revealed).toBe(false);
+      // Same window field as list --json, so the two surfaces agree.
+      if (obj.policy === 'hold') expect(typeof obj.holdMs).toBe('number');
+      else expect(obj.holdMs).toBeNull();
       expect(Array.isArray(obj.keys)).toBe(true);
       const k = obj.keys.find((e: { key: string }) => e.key === 'API_TOKEN');
       expect(k).toBeTruthy();
