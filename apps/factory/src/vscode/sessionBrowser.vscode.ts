@@ -54,10 +54,19 @@ export async function loadBrowsableSessions(
   if (exact.stderr.trim()) throw new Error(exact.stderr.trim());
   const active = JSON.parse(exact.stdout);
   const current = Array.isArray(active)
-    ? active.find(session => session?.id === opts.currentSessionId || session?.shortId === opts.currentSessionId)
+    ? active.find(session => session?.sessionId === opts.currentSessionId || session?.sessionId?.startsWith(opts.currentSessionId))
     : undefined;
-  if (current && typeof current === 'object' && typeof current.id === 'string') {
-    sessions.push(current as BrowsableSession);
+  if (current && typeof current === 'object' && typeof current.sessionId === 'string') {
+    sessions.push({
+      id: current.sessionId,
+      shortId: current.sessionId.slice(0, 8),
+      agent: current.kind,
+      timestamp: new Date(current.startedAtMs).toISOString(),
+      project: current.project,
+      cwd: current.cwd,
+      topic: current.topic,
+      machine: current.machine,
+    });
   }
   return sessions;
 }

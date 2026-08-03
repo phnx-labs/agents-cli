@@ -82,7 +82,8 @@ describe('session browser extension-host seam', () => {
       return args.startsWith('sessions --all')
         ? { stdout: JSON.stringify(recent), stderr: '' }
         : { stdout: JSON.stringify([{
-            id: 'current-outside-limit', shortId: 'current-', agent: 'claude', timestamp: '2026-01-01T00:00:00Z',
+            sessionId: 'current-outside-limit', kind: 'claude', startedAtMs: Date.parse('2026-01-01T00:00:00Z'),
+            cwd: '/repo', project: 'agents-cli', machine: 'zion',
           }]), stderr: '' };
     };
 
@@ -95,6 +96,8 @@ describe('session browser extension-host seam', () => {
     ]);
     expect(sessions).toHaveLength(61);
     expect(sessions.at(-1)?.id).toBe('current-outside-limit');
+    expect(sessions.at(-1)?.agent).toBe('claude');
+    expect(sessions.at(-1)?.timestamp).toBe('2026-01-01T00:00:00.000Z');
   });
 
   test('registered command -> QuickPick load/switch/reload/accept -> fork -> queued launch uses the real seams', async () => {
