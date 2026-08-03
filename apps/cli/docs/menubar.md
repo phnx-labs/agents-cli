@@ -346,7 +346,7 @@ The helper doubles as the branded desktop-notification channel for the daemon
 spawning the installed bundle in a one-shot mode:
 
 ```bash
-MenubarHelper --notify --title T --body B [--subtitle S] [--action A]
+MenubarHelper --notify --title T --body B [--subtitle S] [--action A] [--agent claude]
 ```
 
 Because the poster is the app bundle, macOS attributes the notification to the
@@ -363,6 +363,26 @@ notification argument can never become an open-anything primitive), and
 (routine start/finish content + anti-spam threshold; see
 [routines.md](03-routines.md#desktop-notifications)), and `src/lib/run-notify.ts`
 (the `agents run --notify` finish notice).
+
+**Two images: the app on the left, the agent on the right.** macOS draws the
+sending bundle's icon on the LEFT of a banner and its `contentImage` on the
+RIGHT — the layout a YouTube notification uses for "YouTube" plus the channel's
+avatar. The left slot is the agents-cli mark, resolved by LaunchServices from the
+installed bundle (`refreshBundleIconRegistration` re-registers it at install, or
+that slot renders blank). The right slot is `--agent`: the harness the
+notification is *about*, drawn by `AgentAvatar` (`menubar/Sources/MenubarHelper/
+AgentAvatar.swift`) as a brand-colored tile with the agent's two-letter mark —
+`CL` for claude, `CX` for codex, `GK` for grok. The mark is drawn rather than
+shipped as an image set: fifteen bundled logos would be fifteen more binaries to
+code-sign each release, and the upstream marks are trademarks agents-cli does not
+redistribute. An id with no brand entry falls back to its own initial on the
+agents-cli lime, so a harness new to the registry still renders.
+
+Omit `--agent` when no single harness owns the event — a daemon heal, an overdue
+sweep, a command routine, a fan-out across several agents. The right slot then
+stays empty rather than repeating the left one, which is what it did before
+`--agent` existed (`contentImage` was the app icon, so both slots showed the same
+lime `a`).
 
 **A run notifies for itself.** `agents run --notify` arms the finish notification
 on the run process's own `exit`, so it covers every dispatch path — local spawn,

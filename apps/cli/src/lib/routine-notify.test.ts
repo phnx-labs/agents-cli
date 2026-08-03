@@ -6,6 +6,7 @@ import {
   routineStartNotification,
   routineStartFailedNotification,
   routineFinishNotification,
+  routineAgent,
 } from './routine-notify.js';
 import type { JobConfig, RunMeta } from './routines.js';
 
@@ -173,5 +174,35 @@ describe('routineFinishNotification — threshold + content', () => {
 
     const failCmd = meta({ agent: undefined, command: 'git pull', status: 'failed', exitCode: 1 });
     expect(routineFinishNotification(failCmd, {})).toMatchObject({ title: 'Routine failed' });
+  });
+});
+
+describe('routineAgent — the notification avatar', () => {
+  it('names the harness for an agent routine', () => {
+    expect(routineAgent(agentConfig())).toBe('claude');
+    expect(routineStartNotification(agentConfig())!.agent).toBe('claude');
+    expect(routineStartFailedNotification(agentConfig(), 'boom').agent).toBe('claude');
+    expect(routineFinishNotification(meta(), {})!.agent).toBe('claude');
+  });
+
+  it('shows the Claude avatar for a workflow routine (the harness workflows run on)', () => {
+    // A workflow routine has no `agent` field (routines.ts JobConfig.agent is
+    // omitted for workflows, and validation rejects setting both). It runs via
+    // `agents run <workflow>`, which delegates to claude — so both the start and
+    // finish banners carry the Claude mark (runner.ts effectiveAgent).
+    const cfg = agentConfig({ agent: undefined, workflow: 'deploy' });
+    expect(routineAgent(cfg)).toBe('claude');
+    expect(routineStartNotification(cfg)!.agent).toBe('claude');
+    const finishMeta = meta({ agent: 'claude', workflow: 'deploy' });
+    expect(routineAgent(finishMeta)).toBe('claude');
+    expect(routineFinishNotification(finishMeta, {})!.agent).toBe('claude');
+  });
+
+  it('leaves a command routine without an agent', () => {
+    // Deterministic housekeeping runs no harness, so its failure banner shows
+    // the agents-cli icon alone rather than an avatar for an agent that never ran.
+    const cmd = meta({ agent: undefined, command: 'git pull', status: 'failed', exitCode: 1 });
+    expect(routineAgent(cmd)).toBeUndefined();
+    expect(routineFinishNotification(cmd, {})!.agent).toBeUndefined();
   });
 });

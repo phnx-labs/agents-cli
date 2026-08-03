@@ -18,6 +18,18 @@ describe('run finish notification', () => {
     expect(n.subtitle).toBe('agents-cli');
   });
 
+  it('carries the harness through to the companion argv as the right-hand avatar', () => {
+    // The title is the --name slug, which says nothing about which harness ran —
+    // the avatar is what identifies it, so `agent` must survive to the one-shot.
+    const n = buildRunFinishNotification(
+      { agent: 'codex', name: 'it-seems-like-the-to', prompt: 'p' },
+      0,
+    );
+    expect(n.agent).toBe('codex');
+    const args = buildMenubarNotifyArgs(n);
+    expect(args[args.indexOf('--agent') + 1]).toBe('codex');
+  });
+
   it('reports a non-zero exit as failed and falls back to the agent name', () => {
     const n = buildRunFinishNotification({ agent: 'codex', prompt: 'ship it' }, 1);
     expect(n.title).toBe('codex failed');
@@ -54,6 +66,7 @@ describe('run finish notification', () => {
       '--title', 'kimi-todo finished',
       '--body', 'p',
       '--action', 'url:https://github.com/phnx-labs/agents-cli/pull/1690',
+      '--agent', 'claude',
     ]);
   });
 });

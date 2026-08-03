@@ -38,6 +38,19 @@ describe('buildMenubarNotifyArgs', () => {
     ]);
   });
 
+  it('forwards the agent so the companion can draw its right-hand avatar', () => {
+    expect(
+      buildMenubarNotifyArgs({ title: 'claude finished', body: 'ship it', agent: 'claude' }),
+    ).toEqual(['--notify', '--title', 'claude finished', '--body', 'ship it', '--agent', 'claude']);
+  });
+
+  it('omits --agent when no single harness owns the event', () => {
+    // A daemon heal or a fan-out across agents has no one agent to depict; the
+    // companion then leaves the right slot empty rather than repeating the left.
+    expect(buildMenubarNotifyArgs({ title: 'T', body: 'B' })).not.toContain('--agent');
+    expect(buildMenubarNotifyArgs({ title: 'T', body: 'B', agent: '' })).not.toContain('--agent');
+  });
+
   it('passes title/body verbatim as separate argv (no shell interpolation)', () => {
     // The one-shot receives each field as its own argv entry, so quotes and
     // shell metacharacters are inert — no escaping needed, no injection surface.

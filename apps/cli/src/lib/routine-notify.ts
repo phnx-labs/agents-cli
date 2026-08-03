@@ -37,6 +37,23 @@ export function routineKind(r: Pick<JobConfig, 'agent' | 'workflow' | 'command'>
   return 'agent';
 }
 
+/**
+ * The harness a routine runs on, for the notification's right-hand avatar, or
+ * undefined when none owns it. A command routine is deterministic housekeeping
+ * with no agent, so it gets no avatar. An agent routine names its own harness.
+ * A workflow routine has no `agent` field (the schema omits it — routines.ts
+ * `JobConfig.agent` and the validation that rejects setting both), and it runs
+ * via `agents run <workflow>`, which delegates to claude under the hood — so its
+ * avatar is the Claude mark, matching `effectiveAgent` on the finish path
+ * (runner.ts). Start and finish banners therefore show the same avatar.
+ */
+export function routineAgent(r: Pick<JobConfig, 'agent' | 'workflow' | 'command'>): string | undefined {
+  const kind = routineKind(r);
+  if (kind === 'command') return undefined;
+  if (kind === 'workflow') return 'claude';
+  return r.agent?.trim() || undefined;
+}
+
 /** Human label for the routine body ("agent claude", "workflow deploy", "command"). */
 function routineLabel(r: Pick<JobConfig, 'agent' | 'workflow' | 'command'>): string {
   if (r.command) return 'command';
@@ -92,6 +109,7 @@ export function routineStartNotification(
     subtitle: config.name,
     body: `Running ${routineLabel(config)}`,
     action: 'routines:list',
+    agent: routineAgent(config),
   };
 }
 
@@ -114,6 +132,7 @@ export function routineStartFailedNotification(
     subtitle: config.name,
     body: `Failed to start: ${error}`,
     action: 'routines:list',
+    agent: routineAgent(config),
   };
 }
 
@@ -142,6 +161,7 @@ export function routineFinishNotification(
       subtitle: meta.jobName,
       body: snippet ?? (dur ? `Completed in ${dur}` : 'Completed'),
       action,
+      agent: routineAgent(meta),
     };
   }
 
@@ -157,6 +177,7 @@ export function routineFinishNotification(
     subtitle: meta.jobName,
     body: reason,
     action,
+    agent: routineAgent(meta),
   };
 }
 
