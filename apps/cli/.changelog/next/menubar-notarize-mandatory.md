@@ -1,6 +1,6 @@
 - **The macOS menu-bar helper is now notarized, ending the "app is damaged"
   dialog and the per-run `no valid code signature; skipping launch` spam
-  (RUSH-2114).** The helper shipped Developer-ID signed but *not* notarized, so
+  (RUSH-2134).** The helper shipped Developer-ID signed but *not* notarized, so
   Gatekeeper on macOS 26+ rejected it as damaged and the install path tried to
   heal it by re-signing ad-hoc on every `agents` invocation — which can never
   satisfy Gatekeeper, so the dialog and the noise persisted. The release now
