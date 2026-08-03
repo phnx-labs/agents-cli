@@ -94,6 +94,22 @@ describe('buildFactoryImportCandidates', () => {
     expect(names(forced)).toEqual(['agents-cli', 'agents']);
   });
 
+  it('skips a duplicate name in the same registry instead of silently clobbering the first', () => {
+    // The registry keys by owner/repo but names by basename, so two orgs with
+    // the same repo name arrive as two rows called `inflow`.
+    const r = buildFactoryImportCandidates(
+      [
+        { name: 'inflow', path: '/tmp/a/inflow', repoSlug: 'grinich/inflow', confidence: 'high' },
+        { name: 'inflow', path: '/tmp/b/inflow', repoSlug: 'me/inflow', confidence: 'high' },
+      ],
+      new Map(),
+      { minConfidence: 'high', force: false },
+    );
+    expect(r.defs).toHaveLength(1);
+    expect(r.defs[0].repo).toBe('grinich/inflow');
+    expect(r.skipped).toEqual([{ name: 'inflow', reason: 'another row in this registry already claimed the name' }]);
+  });
+
   it('skips rows with an unusable name rather than writing a bad filename', () => {
     const r = buildFactoryImportCandidates(
       [{ name: '../escape', confidence: 'high' }, { confidence: 'high' }],
@@ -138,6 +154,13 @@ describe('matchLocalCheckoutExact', () => {
   it('refuses an ambiguous match', () => {
     expect(matchLocalCheckoutExact('Agents CLI', ['agents-cli', 'agents_cli'])).toBeUndefined();
   });
+
+  it('treats a slash in a display name as punctuation, not a path boundary', () => {
+    // "Rush / Web" is one name, not `rush/web`. Keying it the path way (last
+    // segment) yields `web`, which exact-matches an unrelated `web/` checkout.
+    expect(matchLocalCheckoutExact('Rush / Web', ['web', 'agents-cli'])).toBeUndefined();
+    expect(matchLocalCheckoutExact('Rush / Web', ['rush-web', 'web'])).toBe('rush-web');
+  });
 });
 
 describe('buildLinearImportCandidates', () => {
@@ -171,6 +194,19 @@ describe('buildLinearImportCandidates', () => {
   it('does NOT auto-bind on a containment-only match', () => {
     const r = buildLinearImportCandidates([{ id: 'lin_3', name: 'Agents' }], new Map(), deps, { force: false });
     expect(r.defs[0]).toEqual({ name: 'agents', linear: { projectId: 'lin_3' } });
+  });
+
+  it('does NOT bind a slashed display name to the checkout after the slash', () => {
+    // Regression: "Rush / Web" once bound `~/src/web` because the match key
+    // kept only the last path segment. The def name and the match key must be
+    // derived from the same reading of the string.
+    const r = buildLinearImportCandidates(
+      [{ id: 'lin_rw', name: 'Rush / Web' }],
+      new Map(),
+      { localDirs: ['web', 'agents-cli'], resolveRoot: (d) => `~/src/${d}`, resolveOrigin: (d) => `someone/${d}` },
+      { force: false },
+    );
+    expect(r.defs[0]).toEqual({ name: 'rush-web', linear: { projectId: 'lin_rw' } });
   });
 
   it('preserves hand-set fields on an existing def and overwrites only linear', () => {

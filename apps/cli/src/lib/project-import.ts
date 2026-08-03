@@ -110,6 +110,11 @@ export function buildFactoryImportCandidates(
   const floor = CONFIDENCE_RANK[opts.minConfidence];
   const defs: ProjectDef[] = [];
   const skipped: ImportSkip[] = [];
+  // The registry keys rows by `owner/repo` but names them by basename, so two
+  // repos with the same basename in different orgs (grinich/inflow, me/inflow)
+  // arrive as two rows called `inflow`. Without this the second silently
+  // overwrote the first on disk and the run still reported both as imported.
+  const seen = new Set<string>();
   for (const raw of rows) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
     const o = raw as Record<string, unknown>;
@@ -124,10 +129,15 @@ export function buildFactoryImportCandidates(
       skipped.push({ name, reason: `${stated} is below the "${opts.minConfidence}" floor` });
       continue;
     }
+    if (seen.has(name)) {
+      skipped.push({ name, reason: 'another row in this registry already claimed the name' });
+      continue;
+    }
     if (existing.has(name) && !opts.force) {
       skipped.push({ name, reason: 'already defined — pass --force to overwrite' });
       continue;
     }
+    seen.add(name);
     const def: ProjectDef = { name };
     if (typeof o.path === 'string') def.root = toHomeRelative(o.path);
     if (typeof o.repoSlug === 'string') def.repo = o.repoSlug;
