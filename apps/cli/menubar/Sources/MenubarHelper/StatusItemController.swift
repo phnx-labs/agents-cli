@@ -69,6 +69,18 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
     }
 
+    // ACTIVE accordion state — projects and sessions collapsed by default.
+    // In-memory only (resets on helper restart); toggling rebuilds the menu from
+    // the warm active-session cache with NO extra CLI calls.
+    private var expandedProjects = Set<String>()
+    private var expandedSessions = Set<String>()
+    private lazy var thisMachine: String = {
+        Host.current().localizedName
+            ?? ProcessInfo.processInfo.hostName
+                .split(separator: ".").first.map(String.init)
+            ?? "local"
+    }()
+
     private var densitySetting: Density {
         get {
             // Env override so dump mode can probe a fixed density.
@@ -548,75 +560,68 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.addItem(newItem)
     }
 
-    // Live work grouped by repo: one `ACTIVE · <repo>` header per project, the
-    // repo's sessions clustered under it. Rich rows carry the session's own
-    // title inline (the repo lives in the header, so rows don't repeat it).
+    // Live work as an ACCORDION: projects collapsed by default with a status
+    // strip (●N ◐M · host); click the disclosure (▼/▶) to fold the project open
+    // inline; click a session to fold its detail open. Expand toggles rebuild the
+    // menu from the warm cache — no CLI, no re-index.
     //
-    // Two rendering rules keep the section from walling the menu:
-    //   • The "other" bucket (sessions with no repo) collapses to a single
-    //     clickable section header + submenu when it's idle-only. That's a
-    //     dumping-ground group whose individual rows don't repay their space.
-    //   • Idle rows cap at 3 per repo, but the 4th+ never disappears silently:
-    //     an explicit "+ N more idle" row shows the count with a submenu of
-    //     the rest, so the header count always matches what's on screen.
-    private let idlePerRepoCap = 3
-
+    // (NSMenu has no first-class accordion; we simulate it by re-populating the
+    // menu and re-opening it so the click does not feel like a dead end.)
     private func addActive(_ menu: NSMenu, live: [Session], browserTasks: [BrowserTask], rich: Bool) {
+        let totalRun = live.filter { $0.status == .running }.count
+        let totalIdle = live.count - totalRun
+        let projectCount = Set(live.map { $0.repo.isEmpty ? "other" : $0.repo }).count
+        var head = "ACTIVE"
+        var bits: [String] = []
+        if totalRun > 0 { bits.append("\(totalRun) run") }
+        if totalIdle > 0 { bits.append("\(totalIdle) idle") }
+        if projectCount > 0 { bits.append("\(projectCount) project\(projectCount == 1 ? "" : "s")") }
+        if !bits.isEmpty { head += " · " + bits.joined(separator: " · ") }
+        addSectionTitle(menu, head, color: .secondaryLabelColor)
+
         let groups = Dictionary(grouping: live) { $0.repo.isEmpty ? "other" : $0.repo }
-        for (repo, group) in groups.sorted(by: { $0.key.lowercased() < $1.key.lowercased() }) {
+        // Running projects first, then name — scannable triage order.
+        let orderedKeys = groups.keys.sorted { a, b in
+            let ra = groups[a]!.filter { $0.status == .running }.count
+            let rb = groups[b]!.filter { $0.status == .running }.count
+            if ra != rb { return ra > rb }
+            return a.lowercased() < b.lowercased()
+        }
+
+        for repo in orderedKeys {
+            guard let group = groups[repo] else { continue }
             let running = group.filter { $0.status == .running }.count
             let idle = group.count - running
+            let machines = group.compactMap(\.machine)
+            let open = expandedProjects.contains(repo)
+            let arrow = open ? "▼" : "▶"
+            let summary = ActiveDisplay.projectSummary(repo: repo, running: running,
+                                                       idle: idle, machines: machines)
+            let header = NSMenuItem(title: "  \(arrow)  \(summary)",
+                                    action: #selector(onToggleProject(_:)),
+                                    keyEquivalent: "")
+            header.target = self
+            header.representedObject = repo
+            header.toolTip = open
+                ? "Collapse \(repo)"
+                : "Expand \(repo) — \(group.count) session\(group.count == 1 ? "" : "s")"
+            menu.addItem(header)
 
-            // Collapsed "other" bucket: idle-only groups render as one
-            // interactive section header. No fake ◐ session row — the header
-            // itself carries the count and opens the submenu.
-            if repo == "other" && running == 0 && idle > 0 {
-                let title = "ACTIVE · other  ·  \(idle) idle"
-                let item = statusRow("", .secondaryLabelColor, title)
-                item.submenu = collapsedIdleSubmenu(group, rich: rich)
-                menu.addItem(item)
-                continue
-            }
+            guard open else { continue }
 
-            var title = "ACTIVE · \(repo)"
-            var counts: [String] = []
-            if running > 0 { counts.append("\(running) running") }
-            if idle > 0 { counts.append("\(idle) idle") }
-            if !counts.isEmpty { title += "  ·  " + counts.joined(separator: " · ") }
-            addSectionTitle(menu, title, color: .secondaryLabelColor)
-
-            // Running rows always render; idle rows cap at idlePerRepoCap. If
-            // the cap hides any, an explicit "+ N more idle" row exposes the
-            // hidden count and opens the rest in a submenu.
-            let ordered = group.sorted { a, b in
-                (a.status == .running ? 0 : 1) < (b.status == .running ? 0 : 1)
+            let sessions = group.sorted { a, b in
+                let ra = a.status == .running ? 0 : 1
+                let rb = b.status == .running ? 0 : 1
+                if ra != rb { return ra < rb }
+                return (a.lastActivityMs ?? 0) > (b.lastActivityMs ?? 0)
             }
-            var idleShown = 0
-            var hiddenIdle: [Session] = []
-            for s in ordered {
-                if s.status != .running {
-                    if idleShown >= idlePerRepoCap {
-                        hiddenIdle.append(s)
-                        continue
-                    }
-                    idleShown += 1
-                }
-                let glyph = s.status == .running ? "●" : "◐"
-                let color = s.status == .running ? run : idleC
-                let detail = (rich && !s.title.isEmpty) ? " — \(trim(s.title, 36))" : ""
-                let row = statusRow(glyph, color, "\(LocalState.agentLabel(s.agent))\(detail)")
-                if let cwd = s.cwd { row.submenu = revealSubmenu(cwd) }
-                menu.addItem(row)
-            }
-            if !hiddenIdle.isEmpty {
-                let moreLabel = "+ \(hiddenIdle.count) more idle"
-                let more = statusRow("", info, moreLabel)
-                more.submenu = collapsedIdleSubmenu(hiddenIdle, rich: rich)
-                menu.addItem(more)
+            for s in sessions {
+                addSessionAccordion(menu, session: s, rich: rich)
             }
         }
+
         if !browserTasks.isEmpty {
-            addSectionTitle(menu, "ACTIVE · Browser", color: .secondaryLabelColor)
+            addSectionTitle(menu, "  Browser", color: .secondaryLabelColor)
             for task in browserTasks {
                 let tabs = task.tabCount == 1 ? "1 tab" : "\(task.tabCount) tabs"
                 let row = statusRow("◦", idleC, "\(trim(task.name, 24)) · \(shortProfile(task.profile)) · \(tabs)")
@@ -626,17 +631,209 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
     }
 
-    // Submenu for the "+N more idle" row and the collapsed "other" section
-    // header — every hidden session gets a row with agent · title.
-    private func collapsedIdleSubmenu(_ sessions: [Session], rich: Bool) -> NSMenu {
-        let sub = NSMenu()
-        for s in sessions {
-            let detail = (rich && !s.title.isEmpty) ? " — \(trim(s.title, 36))" : ""
-            let row = statusRow("◐", idleC, "\(LocalState.agentLabel(s.agent))\(detail)")
-            if let cwd = s.cwd { row.submenu = revealSubmenu(cwd) }
-            sub.addItem(row)
+    /// One session summary row (+ optional folded detail block under it).
+    private func addSessionAccordion(_ menu: NSMenu, session s: Session, rich: Bool) {
+        let key = sessionKey(s)
+        let open = expandedSessions.contains(key)
+        let arrow = open ? "▼" : "▶"
+        let glyph = s.status == .running ? "●" : (s.status == .attention ? "⚠" : "◐")
+        let color = s.status == .running ? run : (s.status == .attention ? wait : idleC)
+        let agent = LocalState.agentLabel(s.agent)
+        let host = s.machine ?? thisMachine
+        let age = ActiveDisplay.ageLabel(fromMs: s.lastActivityMs ?? s.startedAtMs)
+        let work = s.workTitle
+        var line = "\(arrow) \(glyph) \(agent) · \(host)"
+        if let surface = s.surface, !surface.isEmpty { line += " · \(surface)" }
+        if !age.isEmpty { line += " · \(age)" }
+        if rich && !work.isEmpty && !open {
+            line += " — \(trim(work, 28))"
         }
-        return sub
+
+        let row = statusRow("", color, line)
+        // statusRow builds an attributed title with empty glyph — set plain title
+        // so the disclosure arrow is visible as part of the string.
+        row.title = "    \(line)"
+        row.attributedTitle = NSAttributedString(string: "    \(line)", attributes: [
+            .foregroundColor: NSColor.labelColor,
+            .font: NSFont.menuFont(ofSize: 0),
+        ])
+        row.action = #selector(onToggleSession(_:))
+        row.target = self
+        row.representedObject = key
+        row.toolTip = open ? "Collapse session detail" : "Expand session detail"
+        menu.addItem(row)
+
+        guard open else { return }
+
+        // Detail block — all from the already-cached active payload (no CLI).
+        for line in sessionDetailLines(s) {
+            let item = disabled("       \(line)")
+            item.toolTip = line
+            menu.addItem(item)
+        }
+        // Actions stay available without another expand hop.
+        let actions = NSMenuItem(title: "       Open…", action: nil, keyEquivalent: "")
+        let sub = NSMenu()
+        if let cwd = s.cwd {
+            let reveal = NSMenuItem(title: "Reveal working dir",
+                                    action: #selector(onRevealPath(_:)), keyEquivalent: "")
+            reveal.target = self
+            reveal.representedObject = cwd
+            sub.addItem(reveal)
+        }
+        if let sid = s.sessionId, !sid.isEmpty {
+            let copy = NSMenuItem(title: "Copy session id",
+                                  action: #selector(onCopySessionId(_:)), keyEquivalent: "")
+            copy.target = self
+            copy.representedObject = sid
+            sub.addItem(copy)
+        }
+        if let url = s.prLink, !url.isEmpty {
+            let pr = NSMenuItem(title: "Open pull request",
+                                action: #selector(onOpenURL(_:)), keyEquivalent: "")
+            pr.target = self
+            pr.representedObject = url
+            sub.addItem(pr)
+        }
+        if let ticket = s.ticketId, !ticket.isEmpty {
+            let t = NSMenuItem(title: "Open \(ticket)",
+                               action: #selector(onOpenTicket(_:)), keyEquivalent: "")
+            t.target = self
+            t.representedObject = ticket
+            sub.addItem(t)
+        }
+        if !sub.items.isEmpty {
+            actions.submenu = sub
+            menu.addItem(actions)
+        }
+    }
+
+    private func sessionKey(_ s: Session) -> String {
+        if let sid = s.sessionId, !sid.isEmpty { return sid }
+        return "\(s.agent)|\(s.cwd ?? "")|\(s.title)"
+    }
+
+    /// Quick-view lines for a folded-open session. Pure formatting over cached fields.
+    private func sessionDetailLines(_ s: Session) -> [String] {
+        var lines: [String] = []
+        let work = s.workTitle
+        if !work.isEmpty { lines.append(trim(work, 64)) }
+
+        let locality = ActiveDisplay.locality(machine: s.machine, thisMachine: thisMachine)
+        var whereBits = [locality]
+        if let surface = s.surface, !surface.isEmpty { whereBits.append(surface) }
+        if let owner = s.owner, !owner.isEmpty, !owner.hasPrefix("UNRESOLVED") {
+            whereBits.append(owner)
+        }
+        lines.append(whereBits.joined(separator: " · "))
+
+        if let repo = s.repo.isEmpty ? nil : s.repo {
+            var repoLine = "repo \(repo)"
+            if let cwd = s.cwd { repoLine += " · \(shortHome(cwd))" }
+            lines.append(repoLine)
+        } else if let cwd = s.cwd {
+            lines.append(shortHome(cwd))
+        }
+
+        var links: [String] = []
+        if let t = s.ticketId, !t.isEmpty { links.append(t) }
+        if let pr = s.prLink, !pr.isEmpty {
+            // Prefer a short PR# if the URL ends with /pull/N
+            if let n = pr.split(separator: "/").last, n.allSatisfy(\.isNumber) {
+                links.append("PR#\(n)")
+            } else {
+                links.append("PR")
+            }
+        }
+        if !links.isEmpty { lines.append(links.joined(separator: " · ")) }
+
+        let started = ActiveDisplay.ageLabel(fromMs: s.startedAtMs)
+        let active = ActiveDisplay.ageLabel(fromMs: s.lastActivityMs)
+        var times: [String] = []
+        if !started.isEmpty { times.append("started \(started) ago") }
+        if !active.isEmpty { times.append("active \(active) ago") }
+        if s.status == .running { times.append("running") }
+        else if s.status == .idle { times.append("idle") }
+        else if s.status == .attention { times.append("needs you") }
+        if !times.isEmpty { lines.append(times.joined(separator: " · ")) }
+
+        if let sid = s.sessionId, !sid.isEmpty {
+            lines.append("id \(String(sid.prefix(8)))")
+        }
+        return lines
+    }
+
+    private func shortHome(_ path: String) -> String {
+        let home = NSHomeDirectory()
+        if path.hasPrefix(home) {
+            return "~" + path.dropFirst(home.count)
+        }
+        return path
+    }
+
+    @objc private func onToggleProject(_ sender: NSMenuItem) {
+        guard let repo = sender.representedObject as? String else { return }
+        if expandedProjects.contains(repo) {
+            expandedProjects.remove(repo)
+        } else {
+            expandedProjects.insert(repo)
+        }
+        reopenMenu()
+    }
+
+    @objc private func onToggleSession(_ sender: NSMenuItem) {
+        guard let key = sender.representedObject as? String else { return }
+        if expandedSessions.contains(key) {
+            expandedSessions.remove(key)
+        } else {
+            expandedSessions.insert(key)
+        }
+        reopenMenu()
+    }
+
+    /// Rebuild the menu from warm caches and re-open it so accordion toggles
+    /// feel like fold/unfold rather than dismiss. No network, no sessions re-index.
+    private func reopenMenu() {
+        guard let menu = statusItem.menu else { return }
+        let cheap = LocalState.sessions(includeTeams: false)
+        let browser = LocalState.browserTasks()
+        let pending = LocalState.pendingDevices()
+        rebuild(menu,
+                sessions: cheap,
+                browserTasks: browser,
+                recentSessions: cachedRecentSessions,
+                routines: cachedRoutines,
+                doctor: cachedDoctorOverview,
+                daemonPid: AgentsCLI.daemonPid(),
+                pending: pending)
+        // Re-open after the click closes the menu (next runloop).
+        DispatchQueue.main.async { [weak self] in
+            self?.statusItem.button?.performClick(nil)
+        }
+    }
+
+    @objc private func onRevealPath(_ sender: NSMenuItem) {
+        guard let path = sender.representedObject as? String else { return }
+        AgentsCLI.openPath(path)
+    }
+
+    @objc private func onCopySessionId(_ sender: NSMenuItem) {
+        guard let sid = sender.representedObject as? String else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(sid, forType: .string)
+    }
+
+    @objc private func onOpenURL(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let url = URL(string: raw) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    @objc private func onOpenTicket(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        // Linear deep link pattern used elsewhere in the stack.
+        if let url = URL(string: "https://linear.app/getrush/issue/\(id)") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     private func addRecent(_ menu: NSMenu, recentSessions: [RecentSession], rich: Bool) {

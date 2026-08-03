@@ -155,10 +155,11 @@ One rule shapes the menu: **attention floats up, context groups down.**
  ├────────────────────────────────────────────────┤
  │ New Session                                ⌘N │   submenu: one entry per agent
  ├────────────────────────────────────────────────┤
- │ ACTIVE · api  ·  1 running                    │   live work grouped by repo;
- │   ● Claude — draining Linear queue          ›  │   rich rows carry the session's
- │ ACTIVE · web  ·  1 running                    │   own title inline
- │   ● Codex — building hero section           ›  │
+ │ ACTIVE · 3 run · 1 idle · 2 projects          │   projects collapsed by default
+ │   ▶ agents-cli  ●2 ◐1  zion                   │   click ▶ to fold open (accordion)
+ │   ▼ web  ●1  zion                             │   ▼ = expanded; sessions under it
+ │     ▶ ● Codex · zion · tmux · 12m             │   click session for detail fold
+ │       local · tmux · repo web · 47m           │   host / ticket / PR / duration
  ├────────────────────────────────────────────────┤
  │ ROUTINES · 16 · next 7:00 PM · 2 paused       │   next few upcoming + failing
  │   ◔ triage-tickets  in 22m                  ›  │   inline; All routines… for
@@ -183,14 +184,17 @@ One rule shapes the menu: **attention floats up, context groups down.**
   wait. Failed / overdue routines and a stopped scheduler append here. Empty
   when nothing needs attention.
 - **New Session** — launches `agents run <agent>` in a new Terminal window.
-- **ACTIVE · \<repo\>** — live work grouped by repo. A session is *running* if
-  its transcript was written in the last 2 minutes, else *idle*. Rich rows show
-  the session's title inline; the row's submenu reveals the working dir. Idle
-  rows cap at 3 per repo; if the cap hides any, a `+ N more idle ›` row exposes
-  the hidden count and opens the rest in a submenu — the header count always
-  matches what's visible + explicit hidden. The `"other"` bucket (sessions with
-  no repo — a dumping-ground group whose rows carry no per-row signal) collapses
-  to a single `ACTIVE · other · N idle ›` row + submenu when it's idle-only.
+- **ACTIVE** — live work as an **accordion**, not a wall of agent rows. Projects
+  are **collapsed by default**; each project row is a status strip
+  (`agents-cli  ●8 ◐1  zion`). Click `▶` to fold the project **open** (`▼`) and
+  list its sessions inline. Click a session to fold open a **detail** block:
+  work title, local/remote + surface (tmux/codium), repo/cwd, Linear ticket /
+  PR when the engine already knows them, duration (started / last active), and
+  a short session id — plus Open… actions (reveal cwd, copy id, open PR/ticket).
+  All of that comes from the warm `sessions --active --local` cache; expand
+  never shells the CLI or re-indexes transcripts. A session is *running* if
+  the engine says so (else *idle*). Work titles prefer the session `topic` over
+  a bare agent name.
 - **ROUTINES** — kept glanceable: the next few upcoming plus any failed, timed-out,
   or overdue routine inline. Failed and timed-out routines include the latest
   failure reason when available; overdue routines are labeled `overdue` even when

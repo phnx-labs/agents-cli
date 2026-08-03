@@ -22,13 +22,87 @@ enum SessionStatus: String {
 
 struct Session {
     let agent: String
-    let repo: String      // grouping key: working-dir name (falls back to the label)
+    let repo: String      // grouping key: git repo / working-dir name
     let cwd: String?
     let status: SessionStatus
     let context: String   // terminal | teams | cloud
-    let title: String     // what it's doing: terminal label / teams task / cloud prompt
+    let title: String     // what it's doing: topic / terminal label / preview
     let question: String  // what it's waiting on — attention-sentinel content ("" when empty)
     let attentionSinceMs: Double?  // sentinel mtime — when it started waiting
+    /// Process host (zion, yosemite-m0). Nil when unknown.
+    let machine: String?
+    /// Surface on the host (tmux, codium, …).
+    let surface: String?
+    let sessionId: String?
+    let ticketId: String?
+    let prLink: String?
+    let startedAtMs: Double?
+    let lastActivityMs: Double?
+    let preview: String?
+    let owner: String?
+
+    /// Prefer topic/label/preview for "what" — never leave a bare agent name alone
+    /// when the engine already carried a better signal.
+    var workTitle: String {
+        let candidates = [title, preview ?? "", question]
+        for c in candidates {
+            let t = c.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !t.isEmpty { return t }
+        }
+        return ""
+    }
+}
+
+// Pure formatting helpers for the ACTIVE accordion (unit-tested).
+enum ActiveDisplay {
+    /// Prefer engine topic, then terminal label, then a short preview line.
+    static func workTitle(topic: String?, label: String?, preview: String?,
+                          terminalTitle: String?) -> String {
+        for raw in [topic, label, terminalTitle, preview] {
+            guard let s = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty
+            else { continue }
+            // Previews can be multi-paragraph agent dumps — first line only.
+            let first = s.split(whereSeparator: \.isNewline).first.map(String.init) ?? s
+            return first
+        }
+        return ""
+    }
+
+    /// Human duration from an epoch-ms timestamp to now (e.g. "3m", "2h", "1d").
+    static func ageLabel(fromMs: Double?, nowMs: Double = Date().timeIntervalSince1970 * 1000) -> String {
+        guard let fromMs, fromMs > 0, nowMs >= fromMs else { return "" }
+        let sec = Int((nowMs - fromMs) / 1000)
+        if sec < 60 { return "\(max(sec, 0))s" }
+        let min = sec / 60
+        if min < 60 { return "\(min)m" }
+        let hr = min / 60
+        if hr < 48 { return "\(hr)h" }
+        return "\(hr / 24)d"
+    }
+
+    /// local vs remote for display. `thisMachine` is the local hostname short form.
+    static func locality(machine: String?, thisMachine: String) -> String {
+        guard let machine, !machine.isEmpty else { return "local?" }
+        if machine == thisMachine || machine == "localhost" { return "local" }
+        return "remote · \(machine)"
+    }
+
+    /// Collapsed project row: `agents-cli  ●8 ◐1  zion`.
+    static func projectSummary(repo: String, running: Int, idle: Int,
+                               machines: [String]) -> String {
+        var parts: [String] = [repo]
+        var counts: [String] = []
+        if running > 0 { counts.append("●\(running)") }
+        if idle > 0 { counts.append("◐\(idle)") }
+        if !counts.isEmpty { parts.append(counts.joined(separator: " ")) }
+        let hosts = Array(Set(machines.filter { !$0.isEmpty })).sorted()
+        if hosts.count == 1 {
+            parts.append(hosts[0])
+        } else if hosts.count > 1 {
+            parts.append("\(hosts.count) hosts")
+        }
+        return parts.joined(separator: "  ·  ")
+    }
 }
 
 // One attention sentinel: mtime = when the session flagged, content = the
@@ -178,16 +252,26 @@ enum LocalState {
         for a in active {
             let sid = a.sessionId ?? ""
             let mark = sid.isEmpty ? nil : attention[sid]
-            let repo = a.cwd.map { ($0 as NSString).lastPathComponent } ?? ""
+            // Prefer real git repo name over worktree slug / bare last path component.
+            let repo = Self.repoName(from: a.cwd)
+                ?? a.cwd.map { ($0 as NSString).lastPathComponent }
+                ?? ""
             let status: SessionStatus = mark != nil ? .attention
                 : a.status == "running" ? .running
                 : a.status == "input_required" ? .attention
                 : a.status == "queued" ? .queued : .idle
-            out.append(Session(agent: a.kind, repo: repo, cwd: a.cwd, status: status,
+            let work = ActiveDisplay.workTitle(topic: a.topic, label: a.label,
+                                               preview: a.preview,
+                                               terminalTitle: sid.isEmpty ? nil : titles[sid])
+            out.append(Session(agent: a.kind ?? "agent", repo: repo, cwd: a.cwd, status: status,
                                context: a.context ?? "terminal",
-                               title: sid.isEmpty ? "" : (titles[sid] ?? ""),
+                               title: work,
                                question: mark?.text ?? "",
-                               attentionSinceMs: status == .attention ? mark?.sinceMs : nil))
+                               attentionSinceMs: status == .attention ? mark?.sinceMs : nil,
+                               machine: a.machine, surface: a.host, sessionId: a.sessionId,
+                               ticketId: a.ticketId, prLink: a.prLink,
+                               startedAtMs: a.startedAtMs, lastActivityMs: a.lastActivityMs,
+                               preview: a.preview, owner: a.owner))
         }
         return out
     }
@@ -278,7 +362,11 @@ enum LocalState {
                 out.append(Session(agent: kind, repo: repo, cwd: cwd, status: status,
                                    context: "terminal", title: label,
                                    question: mark?.text ?? "",
-                                   attentionSinceMs: status == .attention ? mark?.sinceMs : nil))
+                                   attentionSinceMs: status == .attention ? mark?.sinceMs : nil,
+                                   machine: nil, surface: nil, sessionId: sid.isEmpty ? nil : sid,
+                                   ticketId: nil, prLink: nil,
+                                   startedAtMs: nil, lastActivityMs: nil,
+                                   preview: nil, owner: nil))
             }
         }
         return out
@@ -301,7 +389,11 @@ enum LocalState {
             let repo = Self.repoName(from: cwd) ?? ""
             out.append(Session(agent: agent, repo: repo, cwd: cwd,
                                status: .running, context: "teams", title: task,
-                               question: "", attentionSinceMs: nil))
+                               question: "", attentionSinceMs: nil,
+                               machine: nil, surface: nil, sessionId: id,
+                               ticketId: nil, prLink: nil,
+                               startedAtMs: nil, lastActivityMs: nil,
+                               preview: nil, owner: nil))
         }
         return out
     }
@@ -333,7 +425,11 @@ enum LocalState {
                                status: status, context: "cloud",
                                title: String(prompt.prefix(60)),
                                question: status == .attention ? "needs review" : "",
-                               attentionSinceMs: nil))
+                               attentionSinceMs: nil,
+                               machine: nil, surface: "cloud", sessionId: nil,
+                               ticketId: nil, prLink: nil,
+                               startedAtMs: nil, lastActivityMs: nil,
+                               preview: nil, owner: nil))
         }
         return out
     }
