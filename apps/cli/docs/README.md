@@ -30,6 +30,7 @@ How agents-cli is laid out on disk and how it decides what to load.
 | [SSH transport](09-ssh-transport.md) | The one multiplexed engine every `--host` command rides — default connection reuse, keepalive, one-round-trip follow. |
 | [Optimizations](99-optimizations.md) | Sync manifest, SSH transport, startup profiling, hot-path notes. |
 | [Landscape](04-landscape.md) | Where agents-cli sits next to similar tools. |
+| [Product acceptance](product-acceptance.md) | User stories + Product cards: stop product regressions when agents write the code. |
 
 ## Credentials and model routing
 

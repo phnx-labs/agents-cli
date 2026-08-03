@@ -4,6 +4,9 @@ How agents-cli fits alongside other tools in the AI coding agent ecosystem.
 
 The space is young and moving fast. Many of these tools are excellent and solve real problems. This document maps where they focus and where agents-cli offers something different.
 
+For product regressions when agents write the code and humans only plan — see
+**[Product acceptance](product-acceptance.md)** (user stories / Product cards).
+
 ---
 
 ## What agents-cli does
