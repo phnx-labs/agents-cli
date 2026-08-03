@@ -6,8 +6,8 @@ Using agents-cli as a programmatic observability layer for agent fleets.
 
 ## Command roles at a glance
 
-Six surfaces read the fleet's activity; each has one job. Reach for the one whose
-*consumer* and *axis* match your question, not whichever you remember first.
+Six surfaces **read** the fleet's activity; each has one job. Reach for the one
+whose *consumer* and *axis* match your question, not whichever you remember first.
 
 | Command | Role (one line) | Source | Consumer |
 |---|---|---|---|
@@ -18,6 +18,27 @@ Six surfaces read the fleet's activity; each has one job. Reach for the one whos
 | **`output`** | **Productivity accounting.** Token burn vs shipped output (PRs, commits) across agents — the "was it worth it" axis. (`agents cost` is the pure $-and-duration sibling.) | `sessions.db` + git/gh | Human + `--json` |
 | **`sessions`** | **Live agent roster + transcripts.** Which agents are running right now and their state; browse/read past conversation transcripts. A live process probe + transcript index, not an event log. | live pid/transcript probe + `sessions.db` | Human + `--json` |
 
+### Delivery vs record vs control (RUSH-2123)
+
+Outbound names that look interchangeable are three different planes:
+
+| Plane | Command | Job |
+|---|---|---|
+| **Deliver** | `agents send` / `agents notify` | Put a message in front of a recipient (`--to`, `--text`, `--channel`, `--attach`, `--url`). `notify` ≡ `send --to owner` (`notify.owner` in agents.yaml). |
+| **Record** | `agents feed post` | Append a status/milestone (and optional OpenBlock). May **forward** via `feed.broadcast` sinks that call `send`/`notify`. |
+| **Observe** | `agents activity` | **Read** the activity stream — not a send path. |
+| **Control** | `agents message` / `agents sessions inject` | Act on a running agent (mailbox answer vs terminal keystroke). Stay separate from `send`. |
+
+```bash
+# Deliver (flag-first envelope)
+agents send --channel desktop --to local --text "deploy finished" --url https://example.com/pr/1
+agents send --to owner --text "need a decision"
+agents notify --text "same as send --to owner"
+
+# Record (not deliver by itself)
+agents feed post "CHANGELOG pushed; watching CI"
+```
+
 The write-stores: `~/.agents/events.jsonl` (operational audit), per-session
 `~/.agents/.history/activity/<id>.jsonl` (agent milestones), and the disposable
 perf warehouse `~/.agents/.cache/perf/perf.db` (latency samples). Audit + activity
@@ -26,6 +47,32 @@ separate SQLite file — **loss is acceptable** (under `.cache/`); it does **not
 foreign-key into `sessions.db`, but uses the same string shapes for
 `session_id` / `session_short` / `agent` / `machine` / `actor` / `cwd` so you can
 soft-join later.
+
+**Writing from outside the CLI — `agents events emit`.** In-process code calls
+`emit()` or `appendActivityEvent()` directly, but the producers that most need to
+record events are not agents-cli processes at all (the Factory VS Code extension
+host, a shell guard, any external tool). They pipe JSONL — one JSON object per
+line — into `agents events emit --source <name>`:
+
+```bash
+printf '%s\n' '{"event":"factory.command","commandId":"agents.newClaude"}' \
+  | agents events emit --source factory
+agents events --module factory --limit 0 --json      # read it back
+```
+
+`--source` is stamped as `module`, which is what makes `--module factory` filter to
+one producer. Which store a line lands in is **forced by the stores, not chosen**:
+the activity log is one file per session, so a milestone kind routes there and
+*requires* a `sessionId`, while everything else (and anything sessionless) goes to
+the operational log. A milestone with no `sessionId` is **rejected**, never quietly
+written elsewhere. Rejection is per line — one bad line never discards the batch —
+and the exit code is 1 if any line was rejected.
+
+Pass `ts` (ISO-8601) per line when the producer batches: without it every event in
+a flush is stamped at flush time, which collapses their real ordering and corrupts
+`--since` boundaries. `agents events emit` is itself exempt from the
+`command.start`/`command.end` audit hooks, so a batched writer does not bury the
+stream it is writing into.
 
 For the inspection/health cluster, `agents doctor` is the canonical detector of
 which resources are configured, synced, or drifted; `agents doctor --check` is its
@@ -180,6 +227,8 @@ agents events --event teams.disband    # a semantic event: a team torn down
 agents events --event secrets.get --since 7d --json
 agents events --event pr.opened --since 30d --limit 0 --json   # every match, uncapped
 agents events -f                       # live tail of today's log
+agents events --module factory         # what the VS Code extension recorded
+agents events emit --source factory --json < batch.jsonl        # write from outside
 ```
 
 `--module` filters the top-level group; `--command` matches a command path by

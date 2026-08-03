@@ -67,6 +67,17 @@ describe('validateProjectDef', () => {
     expect(def.integrations).toEqual([{ kind: 'gdrive', url: 'https://d', label: 'docs' }]);
     expect(def.linear).toEqual({ projectId: 'abc', url: 'https://linear' });
   });
+
+  it('accepts repos[].path (string) and drops an entry whose path is malformed', () => {
+    const def = validateProjectDef({
+      name: 'rush',
+      repos: [
+        { slug: 'phnx-labs/rush-infra', path: '~/src/rush-infra' },
+        { slug: 'phnx-labs/bad', path: 42 },
+      ],
+    });
+    expect(def.repos).toEqual([{ slug: 'phnx-labs/rush-infra', path: '~/src/rush-infra' }]);
+  });
 });
 
 describe('write/load roundtrip', () => {
@@ -80,6 +91,22 @@ describe('write/load roundtrip', () => {
     const loaded = loadProjectDef('rush');
     expect(loaded?.name).toBe('rush');
     expect(loaded?.root).toBe('~/src/github.com/me/rush');
+  });
+
+  it('normalizes repos[].path to home-relative and preserves it through the roundtrip', () => {
+    const abs = path.join(HOME, 'src', 'github.com', 'me', 'rush-infra');
+    writeProjectDef({
+      name: 'rush',
+      root: path.join(HOME, 'src', 'github.com', 'me', 'rush'),
+      repos: [{ slug: 'phnx-labs/rush-infra', subpath: 'deploy', path: abs }],
+    });
+    const raw = fs.readFileSync(path.join(dir, 'rush.yaml'), 'utf8');
+    expect(raw).toContain('path: ~/src/github.com/me/rush-infra');
+
+    const loaded = loadProjectDef('rush');
+    expect(loaded?.repos).toEqual([
+      { slug: 'phnx-labs/rush-infra', subpath: 'deploy', path: '~/src/github.com/me/rush-infra' },
+    ]);
   });
 
   it('loadProjectDef returns undefined for an absent project', () => {

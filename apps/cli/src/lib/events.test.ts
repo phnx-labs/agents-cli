@@ -7,6 +7,7 @@ import {
   emit, emitStart, emitCommand, emitFriction, query, rotate, stats,
   redactPrompt, redactArgs, truncate,
   detectCaller,
+  levelFor, isEventType, EVENT_TYPES,
   _resetForTest,
 } from './events.js';
 import { resetActorCache } from './actor.js';
@@ -499,5 +500,69 @@ describe('events', () => {
       expect(lists).toHaveLength(1);
       expect(lists[0].event).toBe('checklist.created');
     });
+  });
+});
+
+describe('event-kind table (the drift guard for out-of-process producers)', () => {
+  it('exposes every union member at runtime, including the factory.* kinds', () => {
+    // EVENT_TYPES is derived from a Record<EventType, true>, so tsc already
+    // rejects a union member with no table entry. This pins the runtime half:
+    // isEventType is what `agents events emit` uses to reject an unknown kind.
+    for (const kind of ['factory.command', 'factory.action', 'factory.uri', 'factory.launch']) {
+      expect(EVENT_TYPES).toContain(kind);
+      expect(isEventType(kind)).toBe(true);
+    }
+    expect(EVENT_TYPES).toContain('command.start');
+    expect(EVENT_TYPES).toContain('status.posted');
+  });
+
+  it('rejects a near-miss kind rather than accepting a typo', () => {
+    expect(isEventType('factory.clik')).toBe(false);
+    expect(isEventType('')).toBe(false);
+    expect(isEventType('Factory.Command')).toBe(false);
+  });
+
+  it('classifies factory.uri as audit and the other factory kinds as info', () => {
+    // An external process driving the user's editor is a "who reached in" fact.
+    expect(levelFor('factory.uri')).toBe('audit');
+    // A palette press is not.
+    expect(levelFor('factory.command')).toBe('info');
+    expect(levelFor('factory.action')).toBe('info');
+    expect(levelFor('factory.launch')).toBe('info');
+  });
+});
+
+describe('emit() timestamp override', () => {
+  it('honours a caller-supplied ts so a batched producer keeps real event times', () => {
+    setupLogsDir();
+    const happenedAt = '2026-08-03T01:02:03.000Z';
+
+    emit('factory.command', { module: 'factory' }, { ts: happenedAt });
+
+    const records = query({});
+    expect(records).toHaveLength(1);
+    expect(records[0].ts).toBe(happenedAt);
+  });
+
+  it('still refuses a ts smuggled through the PAYLOAD', () => {
+    setupLogsDir();
+    const forged = '1999-01-01T00:00:00.000Z';
+
+    // ts stays in RESERVED_META_KEYS: only the explicit override channel may set
+    // it, so an arbitrary payload cannot backdate a record.
+    emit('factory.command', { ts: forged } as unknown as Record<string, unknown>);
+
+    const records = query({});
+    expect(records).toHaveLength(1);
+    expect(records[0].ts).not.toBe(forged);
+  });
+
+  it('defaults to write time when no override is passed', () => {
+    setupLogsDir();
+    const before = Date.now();
+    emit('factory.command', {});
+    const ts = Date.parse(query({})[0].ts);
+    expect(ts).toBeGreaterThanOrEqual(before - 1000);
+    expect(ts).toBeLessThanOrEqual(Date.now() + 1000);
   });
 });

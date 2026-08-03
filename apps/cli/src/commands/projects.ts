@@ -19,8 +19,18 @@ import { setHelpSections } from '../lib/help.js';
 import { getMainRepoRoot } from '../lib/git.js';
 import { parseOwnerRepoFromRemote } from '../lib/registry.js';
 import { toHomeRelative } from '../lib/project-root.js';
+import { machineId } from '../lib/machine-id.js';
 import { getActiveSessions } from '../lib/session/active.js';
+import { gatherRemoteActive } from '../lib/session/remote-active.js';
+import { gatherRemoteAgentsJson } from '../lib/remote-agents-json.js';
 import { factoryProjectsPath } from '../lib/auto-dispatch.js';
+import {
+  formatFleetWorkspaces,
+  parseRemoteProbe,
+  probeProjectWorkspaces,
+  workspaceTargetsForDef,
+  type HostWorkspaceStatus,
+} from '../lib/project-probe.js';
 import {
   listProjectDefs,
   loadProjectDef,
@@ -35,9 +45,34 @@ import {
   rollupSessionsByProject,
   planPct,
   enrichProjectSignals,
+  formatProjectMembers,
   type ProjectSessionRollup,
   type ProjectRemoteSignals,
 } from '../lib/project-status.js';
+import { fetchLinearProjectCounts, type LinearProjectCounts } from '../lib/linear-project-counts.js';
+import { listLinearProjects, pickLinearProject, type LinearPick } from '../lib/linear-projects.js';
+
+/** Recursion guard: a peer answering a probe fan-out never re-fans-out itself. */
+export const PROJECTS_NO_FANOUT_ENV = 'AGENTS_PROJECTS_LOCAL';
+
+/** Max peers named in the skipped note before the rest collapse to `+N`. */
+const SKIPPED_NAME_LIMIT = 4;
+
+/**
+ * One compact trailing note for peers that didn't answer the `--fleet`
+ * fan-out — unreachable, running an agents-cli too old to carry `projects
+ * probe`, or too slow to finish inside the 12s SSH budget. Mirrors
+ * `formatUnreachableNote` (activity) with the probe-specific reasons; empty
+ * string when everything answered.
+ */
+export function formatFleetSkippedNote(skipped: string[]): string {
+  if (skipped.length === 0) return '';
+  const named = skipped.slice(0, SKIPPED_NAME_LIMIT);
+  const rest = skipped.length - named.length;
+  const list = rest > 0 ? `${named.join(', ')} +${rest}` : named.join(', ');
+  const noun = skipped.length === 1 ? 'device' : 'devices';
+  return chalk.gray(`  · ${skipped.length} ${noun} didn't answer (unreachable, older agents-cli, or timed out): ${list}\n`);
+}
 
 /** `path:purpose` → a context anchor. Purpose may contain colons. */
 function parseContextFlag(raw: string): ProjectContext {
@@ -77,6 +112,8 @@ function renderCard(
   def: ProjectDef,
   r: ProjectSessionRollup | undefined,
   remote: ProjectRemoteSignals | undefined,
+  fleet?: HostWorkspaceStatus[],
+  linear?: LinearProjectCounts,
 ): void {
   const agents = r?.agents ?? 0;
   const pct = r ? planPct(r.plan) : undefined;
@@ -84,13 +121,27 @@ function renderCard(
   console.log(`${chalk.bold(def.name)}  ${chalk.dim('·')}  ${chalk.bold(`${agents} agents`)}${planStr}`);
   if (def.description) console.log(`  ${chalk.dim(def.description)}`);
   console.log(`  ${chalk.dim('live')}     ${r ? statusBar(r) : chalk.gray('no live agents')}`);
+  if (r && r.members.length) console.log(`  ${chalk.dim('agents')}   ${formatProjectMembers(r.members)}`);
   const ships: string[] = [];
   if (remote?.mergedPrs) ships.push(chalk.green(`${remote.mergedPrs} merged (${remote.windowDays}d)`));
   if (r?.openPrs.length) ships.push(`${r.openPrs.length} open PR${r.openPrs.length === 1 ? '' : 's'}`);
   if (r?.worktrees) ships.push(`${r.worktrees} worktree${r.worktrees === 1 ? '' : 's'}`);
+  if (remote?.latestRelease) ships.push(remote.latestRelease.tag);
   if (ships.length) console.log(`  ${chalk.dim('ships')}    ${ships.join(' · ')}`);
+  if (linear) {
+    console.log(`  ${chalk.dim('linear')}   ${linear.done}/${linear.total}${linear.truncated ? '+' : ''} done · ${linear.inProgress} in progress`);
+  }
   if (r && r.tickets.length) {
     console.log(`  ${chalk.dim('tickets')}  ${r.tickets.slice(0, 8).join(' · ')}${r.tickets.length > 8 ? ' …' : ''}`);
+  }
+  if (fleet) {
+    const lines = formatFleetWorkspaces(fleet);
+    if (lines.length === 0) {
+      console.log(`  ${chalk.dim('fleet')}    ${chalk.gray('no workspace paths (set root or repos[].path)')}`);
+    }
+    lines.forEach((line, i) => {
+      console.log(`  ${chalk.dim((i === 0 ? 'fleet' : '').padEnd(5))}    ${line}`);
+    });
   }
   if (remote?.artifacts) {
     const last = remote.lastArtifact ? `  ${chalk.dim(`· last: ${remote.lastArtifact}`)}` : '';
@@ -119,6 +170,8 @@ export function registerProjectsCommands(program: Command): void {
       agents projects list
       agents projects status              # progress card for every project
       agents projects status rush --json  # one project, machine-readable
+      agents projects status --fleet      # + per-device workspace drift over SSH
+      agents projects link rush --linear  # bind the Linear project (auto-suggest)
       agents run --project rush           # land an agent in the project
     `,
     notes: `
@@ -127,8 +180,12 @@ export function registerProjectsCommands(program: Command): void {
     `,
   });
 
-  projects.hook('preAction', () => {
+  projects.hook('preAction', (_thisCommand, actionCommand) => {
     if (enabled) return;
+    // `probe` is the peer half of `status --fleet`: it must answer whenever the
+    // binary carries it, even where the beta flag is off — a gated peer would
+    // look unreachable to every fleet member on a newer CLI.
+    if (actionCommand.name() === 'probe') return;
     console.error(chalk.red('agents projects is in beta.'));
     console.error(chalk.gray(betaEnableHint('projects')));
     process.exit(1);
@@ -265,7 +322,8 @@ export function registerProjectsCommands(program: Command): void {
     .option('--json', 'Machine-readable output')
     .option('--window <days>', 'Window for merged PRs and artifacts', '7')
     .option('--no-remote', 'Skip the GitHub lookup (merged-PR count); faster, offline')
-    .action(async (name: string | undefined, opts: { json?: boolean; window?: string; remote?: boolean }) => {
+    .option('--fleet', 'Also dial every fleet device for workspace presence, branch, and drift (one SSH per peer)')
+    .action(async (name: string | undefined, opts: { json?: boolean; window?: string; remote?: boolean; fleet?: boolean }) => {
       const all = listProjectDefs();
       // Named lookup goes through the strict single-def loader so a broken
       // <name>.yaml surfaces its validation error instead of "No project named".
@@ -281,17 +339,61 @@ export function registerProjectsCommands(program: Command): void {
       }
       const windowDays = Math.max(1, Number.parseInt(opts.window ?? '7', 10) || 7);
       const nowMs = Date.now();
-      const roll = rollupSessionsByProject(all, await getActiveSessions());
+
+      // --fleet: probe each shown def's workspace paths (root + repos[].path)
+      // locally and on every peer in one parallel SSH round, and widen the
+      // live-session rollup to the whole fleet via the existing sessions
+      // fan-out. Both are opt-in — they dial the fleet.
+      const fleetTargets = opts.fleet ? [...new Set(defs.flatMap(workspaceTargetsForDef))] : [];
+      let fleetWs: HostWorkspaceStatus[] = [];
+      let fleetSkipped: string[] = [];
+      let fleetSessions: Awaited<ReturnType<typeof getActiveSessions>> = [];
+      if (opts.fleet) {
+        const self = machineId();
+        fleetWs.push(...probeProjectWorkspaces(fleetTargets).map((s) => ({ ...s, host: self })));
+        const [probeRes, activeRes] = await Promise.all([
+          fleetTargets.length > 0
+            ? gatherRemoteAgentsJson({
+                args: ['projects', 'probe', '--json', ...fleetTargets],
+                noFanoutEnv: PROJECTS_NO_FANOUT_ENV,
+                parse: parseRemoteProbe,
+                quiet: true,
+              })
+            : Promise.resolve({ items: [] as HostWorkspaceStatus[], deviceCount: 0, skipped: [] as string[] }),
+          gatherRemoteActive(undefined, { quiet: true }),
+        ]);
+        fleetWs.push(...probeRes.items);
+        fleetSkipped = probeRes.skipped;
+        fleetSessions = activeRes.sessions;
+      }
+
+      const roll = rollupSessionsByProject(all, [...await getActiveSessions(), ...fleetSessions]);
       // Enrich only the shown projects. --no-remote still reads the local artifact
-      // log but skips the gh call (def.repo left unused → mergedPrs stays 0).
+      // log but skips the gh calls + Linear counts (both are network).
       const remote = new Map<string, ProjectRemoteSignals>();
+      const linear = new Map<string, LinearProjectCounts>();
       await Promise.all(
         defs.map(async (d) => {
-          remote.set(d.name, await enrichProjectSignals(d, windowDays, nowMs, { skipRemote: opts.remote === false }));
+          const skipRemote = opts.remote === false;
+          const [sig, counts] = await Promise.all([
+            enrichProjectSignals(d, windowDays, nowMs, { skipRemote }),
+            !skipRemote && d.linear?.projectId
+              ? fetchLinearProjectCounts(d.linear.projectId)
+              : Promise.resolve(undefined),
+          ]);
+          remote.set(d.name, sig);
+          if (counts) linear.set(d.name, counts);
         }),
       );
 
+      /** This def's slice of the fleet probe, in its own target order. */
+      const fleetFor = (d: ProjectDef): HostWorkspaceStatus[] => {
+        const targets = new Set(workspaceTargetsForDef(d));
+        return fleetWs.filter((s) => targets.has(s.path));
+      };
+
       if (opts.json) {
+        if (fleetSkipped.length > 0) process.stderr.write(formatFleetSkippedNote(fleetSkipped));
         console.log(
           JSON.stringify(
             defs.map((d) => {
@@ -301,16 +403,20 @@ export function registerProjectsCommands(program: Command): void {
                 name: d.name,
                 agents: r?.agents ?? 0,
                 byStatus: r?.byStatus ?? {},
+                members: r?.members ?? [],
                 plan: r?.plan ?? { done: 0, total: 0 },
                 planPct: r ? planPct(r.plan) ?? null : null,
                 openPrs: r?.openPrs ?? [],
                 mergedPrs: rem?.mergedPrs ?? 0,
+                latestRelease: rem?.latestRelease ?? null,
+                linear: linear.get(d.name) ?? null,
                 tickets: r?.tickets ?? [],
                 worktrees: r?.worktrees ?? 0,
                 artifacts: rem?.artifacts ?? 0,
                 lastArtifact: rem?.lastArtifact ?? null,
                 windowDays,
                 repos: [d.repo, ...(d.repos ?? []).map((r2) => r2.slug)].filter(Boolean),
+                ...(opts.fleet ? { workspaces: fleetFor(d) } : {}),
               };
             }),
             null,
@@ -319,7 +425,21 @@ export function registerProjectsCommands(program: Command): void {
         );
         return;
       }
-      for (const d of defs) renderCard(d, roll.get(d.name), remote.get(d.name));
+      for (const d of defs) {
+        renderCard(d, roll.get(d.name), remote.get(d.name), opts.fleet ? fleetFor(d) : undefined, linear.get(d.name));
+      }
+      if (fleetSkipped.length > 0) process.stdout.write(formatFleetSkippedNote(fleetSkipped));
+    });
+
+  // ---- probe (hidden; the peer half of `status --fleet`) ----
+  projects
+    .command('probe [paths...]', { hidden: true })
+    .description('Probe workspace repos (presence, branch, drift, dirtiness) and print JSON. Answers for this machine only.')
+    .option('--json', 'Machine-readable output (the only output format)')
+    .action((paths: string[]) => {
+      // Never fans out — the recursion guard env is set by the parent fan-out,
+      // and this command has no remote code path either way.
+      console.log(JSON.stringify(probeProjectWorkspaces(paths ?? []), null, 2));
     });
 
   // ---- import ----
@@ -367,6 +487,71 @@ export function registerProjectsCommands(program: Command): void {
         created++;
       }
       console.log(chalk.green(`Imported ${created} project${created === 1 ? '' : 's'}${skipped ? chalk.gray(` (${skipped} skipped)`) : ''}`));
+    });
+
+  // ---- link ----
+  projects
+    .command('link <name>')
+    .description('Attach an external tracker to a project definition (writes linear.projectId into the YAML).')
+    .option('--linear [query]', 'Bind a Linear project by exact name or id; no value auto-suggests from the def name + repo')
+    .action((name: string, opts: { linear?: string | boolean }) => {
+      const def = loadProjectDef(name);
+      if (!def) {
+        console.error(chalk.red(`No project named "${name}". List them: agents projects list`));
+        process.exit(1);
+      }
+      if (opts.linear === undefined) {
+        console.error(chalk.red('Nothing to link. Pass a tracker flag, e.g. --linear [query].'));
+        process.exit(1);
+      }
+      // Explicit user command — a missing/unauthenticated `linear` CLI is loud,
+      // unlike the best-effort card enrichment.
+      let list: ReturnType<typeof listLinearProjects>;
+      try {
+        list = listLinearProjects();
+      } catch (e) {
+        console.error(chalk.red(e instanceof Error ? e.message : String(e)));
+        process.exit(1);
+      }
+      const query = typeof opts.linear === 'string' ? opts.linear.trim() : '';
+      let pick: LinearPick;
+      if (query) {
+        pick = pickLinearProject(query, list);
+      } else {
+        // Auto-suggest from the def's own identity — the primary repo slug is
+        // the sharpest key, then the def name. Only an exact normalized match
+        // writes itself; anything weaker asks the user to disambiguate.
+        pick = { kind: 'none' };
+        for (const hint of [def.repo, def.name].filter((h): h is string => typeof h === 'string' && h.length > 0)) {
+          const d = pickLinearProject(hint, list);
+          if (d.kind === 'match') {
+            pick = d;
+            break;
+          }
+          if (pick.kind === 'none') pick = d;
+        }
+      }
+      if (pick.kind !== 'match') {
+        if (pick.kind === 'candidates') {
+          console.error(chalk.yellow(`No confident Linear match${query ? ` for "${query}"` : ` for "${def.name}"`}. Candidates:`));
+          for (const c of pick.projects) console.error(`  ${chalk.cyan(c.id)}  ${c.name}`);
+        } else {
+          console.error(chalk.yellow(`No Linear project matches${query ? ` "${query}"` : ` "${def.name}"`}. Available:`));
+          for (const c of list) console.error(`  ${chalk.cyan(c.id)}  ${c.name}`);
+        }
+        console.error(chalk.gray(`Re-run with an explicit name or id: agents projects link ${name} --linear "<name-or-id>"`));
+        process.exit(1);
+      }
+      const p = pick.project;
+      // Preserve every other field — load, set linear, write back. Keep a
+      // previously linked url when the new CLI row carries none.
+      if (def.linear?.projectId && def.linear.projectId !== p.id) {
+        console.log(chalk.gray(`  replacing previous Linear link (${def.linear.projectId})`));
+      }
+      def.linear = { ...def.linear, projectId: p.id };
+      if (p.url) def.linear.url = p.url;
+      writeProjectDef(def);
+      console.log(chalk.green(`${def.name} → Linear project "${p.name}" (${p.id})${p.url ? ` ${p.url}` : ''}`));
     });
 
   // ---- rm ----

@@ -33,6 +33,12 @@ export interface ProjectRepo {
   slug: string;
   /** Optional path within the repo an agent working this project cares about. */
   subpath?: string;
+  /**
+   * Optional home-relative local checkout of this repo. The def's `root` only
+   * knows the primary repo on disk; `path` opts an additional repo into
+   * workspace probing (`projects status --fleet`).
+   */
+  path?: string;
 }
 
 /**
@@ -140,8 +146,12 @@ export function validateProjectDef(raw: unknown, sourceName?: string): ProjectDe
     def.repos = o.repos.flatMap((r) => {
       if (r && typeof r === 'object' && typeof (r as Record<string, unknown>).slug === 'string') {
         const rr = r as Record<string, unknown>;
+        // A malformed `path` sinks the whole entry, like any other malformed
+        // list row — a half-valid repo must not probe a surprising location.
+        if (rr.path !== undefined && typeof rr.path !== 'string') return [];
         const repo: ProjectRepo = { slug: rr.slug as string };
         if (typeof rr.subpath === 'string') repo.subpath = rr.subpath;
+        if (typeof rr.path === 'string') repo.path = rr.path;
         return [repo];
       }
       return [];
@@ -244,6 +254,11 @@ export function writeProjectDef(def: ProjectDef): string {
     defaultPath: validated.defaultPath
       ? toHomeRelative(expandLocalHome(validated.defaultPath))
       : undefined,
+    repos: validated.repos?.map((r) => {
+      const repo: ProjectRepo = { ...r };
+      if (r.path) repo.path = toHomeRelative(expandLocalHome(r.path));
+      return repo;
+    }),
   };
   // Drop undefined keys so the YAML stays clean.
   const clean = Object.fromEntries(

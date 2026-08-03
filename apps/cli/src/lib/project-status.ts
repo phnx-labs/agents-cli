@@ -14,11 +14,24 @@
 
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import chalk from 'chalk';
 import type { ActiveSession, ActiveStatus } from './session/active.js';
 import { projectNameForCwd, type ProjectDef } from './projects.js';
 import { readRecentActivity } from './activity.js';
 
 const execFileAsync = promisify(execFile);
+
+/** One live agent on a project — the WHO behind the byStatus count. */
+export interface ProjectMember {
+  /** Harness name (claude / codex / …), from the session's `kind`. */
+  agent: string;
+  /** Lifecycle status (running / idle / …). */
+  status: string;
+  /** Tracker ticket the session is tied to, when any. */
+  ticket?: string;
+  /** Machine the session runs on (provenance host / fleet peer), when known. */
+  host?: string;
+}
 
 /** One project's live session rollup. */
 export interface ProjectSessionRollup {
@@ -27,6 +40,8 @@ export interface ProjectSessionRollup {
   agents: number;
   /** Count per lifecycle status. */
   byStatus: Partial<Record<ActiveStatus, number>>;
+  /** Which agents are on the project (one per matched session). */
+  members: ProjectMember[];
   /** Summed checklist progress across this project's sessions. */
   plan: { done: number; total: number };
   /** Distinct open PRs held by this project's sessions. */
@@ -38,7 +53,16 @@ export interface ProjectSessionRollup {
 }
 
 function blank(name: string): ProjectSessionRollup {
-  return { name, agents: 0, byStatus: {}, plan: { done: 0, total: 0 }, openPrs: [], tickets: [], worktrees: 0 };
+  return {
+    name,
+    agents: 0,
+    byStatus: {},
+    members: [],
+    plan: { done: 0, total: 0 },
+    openPrs: [],
+    tickets: [],
+    worktrees: 0,
+  };
 }
 
 /**
@@ -66,6 +90,10 @@ export function rollupSessionsByProject(
     }
     r.agents++;
     r.byStatus[s.status] = (r.byStatus[s.status] ?? 0) + 1;
+    const member: ProjectMember = { agent: s.kind, status: s.status };
+    if (s.ticket?.id) member.ticket = s.ticket.id;
+    if (s.machine) member.host = s.machine;
+    r.members.push(member);
     if (s.todos) {
       r.plan.done += s.todos.done;
       r.plan.total += s.todos.total;
@@ -92,7 +120,58 @@ export function planPct(plan: { done: number; total: number }): number | undefin
   return Math.round((plan.done / plan.total) * 100);
 }
 
-/** Harvested signals not on the session list: repo-global merged PRs + local artifacts, in a time window. */
+/**
+ * Display order for the members line: the states a human scans for first
+ * (running, then idle, then need-input, then queued), everything else after,
+ * status name then agent name ascending within a state.
+ */
+const MEMBER_STATUS_RANK: Record<string, number> = { running: 0, idle: 1, input_required: 2, queued: 3 };
+
+/** Sort members for the card: running first, then idle, then the rest; agent name asc within a state. */
+export function sortProjectMembers(members: ProjectMember[]): ProjectMember[] {
+  return [...members].sort((a, b) => {
+    const ra = MEMBER_STATUS_RANK[a.status] ?? 4;
+    const rb = MEMBER_STATUS_RANK[b.status] ?? 4;
+    if (ra !== rb) return ra - rb;
+    if (ra === 4 && a.status !== b.status) return a.status.localeCompare(b.status);
+    return a.agent.localeCompare(b.agent);
+  });
+}
+
+/** Cap for the members line before it collapses to `+N more`. */
+export const MEMBERS_LINE_LIMIT = 6;
+
+/**
+ * The `agents` line under `live`: one cell per DISTINCT member state —
+ * `claude · running · RUSH-2107 @zion` — with identical cells collapsed to a
+ * `×N` count (35 same-harness sessions in one state are one fact, not six
+ * truncated duplicates), capped at {@link MEMBERS_LINE_LIMIT} cells with a
+ * `+N more` tail counting members, not cells. Pure (chalk styling only); the
+ * caller adds the label.
+ */
+export function formatProjectMembers(members: ProjectMember[], limit = MEMBERS_LINE_LIMIT): string {
+  if (members.length === 0) return '';
+  // Collapse identical cells — 35 same-harness sessions in the same state are
+  // one fact (`claude · running ×16`), not six truncated duplicates.
+  const counts = new Map<string, { cell: string; n: number }>();
+  for (const m of sortProjectMembers(members)) {
+    const parts = [m.agent, m.status];
+    if (m.ticket) parts.push(m.ticket);
+    const cell = parts.join(' · ') + (m.host ? ` @${m.host}` : '');
+    const key = cell.toLowerCase();
+    const entry = counts.get(key);
+    if (entry) entry.n++;
+    else counts.set(key, { cell, n: 1 });
+  }
+  const entries = [...counts.values()];
+  const shown = entries.slice(0, Math.max(1, limit));
+  const shownMembers = shown.reduce((acc, e) => acc + e.n, 0);
+  const more = members.length - shownMembers;
+  const cells = shown.map(({ cell, n }) => (n > 1 ? `${cell} ×${n}` : cell));
+  return cells.join(chalk.dim('  ·  ')) + (more > 0 ? chalk.dim(`  ·  +${more} more`) : '');
+}
+
+/** Harvested signals not on the session list: repo-global merged PRs + releases, local artifacts, in a time window. */
 export interface ProjectRemoteSignals {
   windowDays: number;
   /** PRs merged into the primary repo within the window (via `gh`). */
@@ -101,6 +180,8 @@ export interface ProjectRemoteSignals {
   artifacts: number;
   /** Basename of the most recent artifact, when any. */
   lastArtifact?: string;
+  /** Latest release of the PRIMARY repo (via `gh release list`), when any. */
+  latestRelease?: { tag: string; publishedAt: string };
 }
 
 /**
@@ -139,6 +220,20 @@ export async function enrichProjectSignals(
       out.mergedPrs = rows.filter((r) => r.mergedAt && Date.parse(r.mergedAt) >= sinceMs).length;
     } catch {
       /* gh missing / unauthenticated / repo not found — skip this signal */
+    }
+    // Latest release of the PRIMARY repo only (repos[] is deliberately not
+    // scanned — one release line per card). Same best-effort degradation.
+    try {
+      const { stdout } = await execFileAsync(
+        'gh',
+        ['release', 'list', '-R', def.repo, '-L', '1', '--json', 'tagName,publishedAt'],
+        { timeout: 8000, encoding: 'utf8' },
+      );
+      const rows = JSON.parse(stdout) as { tagName?: string; publishedAt?: string }[];
+      const first = rows[0];
+      if (first?.tagName) out.latestRelease = { tag: first.tagName, publishedAt: first.publishedAt ?? '' };
+    } catch {
+      /* gh missing / unauthenticated / repo has no releases — skip this signal */
     }
   }
   return out;

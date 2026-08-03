@@ -1116,10 +1116,17 @@ enum Notifier {
 
     // `url`, when present, is opened on click (the created ticket, or a routine
     // report/log for daemon notifications). `subtitle` is the secondary line.
-    // `image` is shown as the notification icon so the banner carries the
-    // agents-cli branding even when the bundle icon lookup is slow.
+    //
+    // `agent` names the harness the notification is ABOUT (`claude`, `codex`, …)
+    // and drives the banner's RIGHT-hand `contentImage` via AgentAvatar. The LEFT
+    // slot is the sending bundle's app icon, which macOS resolves from
+    // MenubarHelper.app's LaunchServices record — so the two slots read as
+    // "agents-cli, about Claude", the layout the system uses for a YouTube
+    // notification (app icon left, channel avatar right). Passing no agent leaves
+    // the right slot empty on purpose: `contentImage` used to be the agents-cli
+    // app icon, which just repeated the left slot and said nothing.
     static func post(title: String, body: String, subtitle: String? = nil,
-                     url: String? = nil, image: NSImage? = appIconImage()) {
+                     url: String? = nil, agent: String? = nil) {
         wireClickHandler()
         let note = NSUserNotification()
         note.title = title
@@ -1130,16 +1137,17 @@ enum Notifier {
             note.hasActionButton = true
             note.actionButtonTitle = "Open"
         }
-        if let image {
+        if let image = AgentAvatar.image(for: agent) {
             note.contentImage = image
         }
         NSUserNotificationCenter.default.deliver(note)
     }
 
     // Daemon notification one-shot: `MenubarHelper --notify --title T --body B
-    // [--subtitle S] [--action A]` (RUSH-2030). The daemon spawns the installed
-    // .app in this mode, so the notification is attributed to this bundle and
-    // shows its AppIcon (the agents-cli mark) — not the generic osascript icon.
+    // [--subtitle S] [--action A] [--agent claude]` (RUSH-2030). The daemon spawns
+    // the installed .app in this mode, so the notification is attributed to this
+    // bundle and shows its AppIcon (the agents-cli mark) on the left — not the
+    // generic osascript icon. `--agent` adds the harness avatar on the right.
     // Delivers, briefly spins the runloop so NSUserNotificationCenter flushes
     // before the short-lived process exits, then exits.
     static func runOneShot(_ args: [String]) -> Never {
@@ -1165,7 +1173,7 @@ enum Notifier {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
         post(title: title, body: body, subtitle: value("--subtitle"),
-             url: clickURL(for: value("--action")))
+             url: clickURL(for: value("--action")), agent: value("--agent"))
         RunLoop.main.run(until: Date().addingTimeInterval(0.6))
         exit(0)
     }
@@ -1193,11 +1201,5 @@ enum Notifier {
             return URL(fileURLWithPath: "\(NSHomeDirectory())/.agents/.history/runs").absoluteString
         }
         return nil
-    }
-
-    // Load the bundled app icon as an NSImage, if one exists.
-    private static func appIconImage() -> NSImage? {
-        guard let iconPath = Bundle.main.path(forResource: "AppIcon", ofType: "icns") else { return nil }
-        return NSImage(contentsOfFile: iconPath)
     }
 }

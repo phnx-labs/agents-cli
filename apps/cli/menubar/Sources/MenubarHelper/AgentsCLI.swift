@@ -140,7 +140,8 @@ enum AgentsCLI {
                 .map { $0.trimmingCharacters(in: .whitespaces) }
                 .last { !$0.isEmpty }
             Notifier.post(title: "Could not open \(agent)",
-                          body: detail ?? "The terminal launch failed. Try `agents run \(agent) --terminal` in a shell.")
+                          body: detail ?? "The terminal launch failed. Try `agents run \(agent) --terminal` in a shell.",
+                          agent: agent)
         }
     }
 
@@ -375,7 +376,8 @@ enum AgentsCLI {
                         ? "Planning \(ticket.identifier)…"
                         : "Dispatching \(ticket.identifier)…",
                       body: shortenForNotice(ticket.title),
-                      url: ticket.url)
+                      url: ticket.url,
+                      agent: selected.count == 1 ? selected[0] : nil)
         for agent in selected {
             runDetached(argv(ticketWorkRunArgs(agent: agent, prompt: prompt, ticket: ticket,
                                                action: action, cwd: cwd)))
@@ -517,27 +519,29 @@ enum AgentsCLI {
     static func dispatchTicketAgent(note: String, screenshotPaths: [String], agent: String? = nil, cwd: String? = nil) {
         let prompt = ticketAgentPrompt(note: note, screenshotPaths: screenshotPaths)
         let agent = agent ?? env["AGENTS_ISSUE_AGENT"] ?? "claude"
-        Notifier.post(title: "Filing ticket…", body: shortenForNotice(note))
+        Notifier.post(title: "Filing ticket…", body: shortenForNotice(note), agent: agent)
         var planArgs = ["run", agent, prompt, "--mode", "auto"]
         if let cwd, !cwd.isEmpty { planArgs += ["--cwd", cwd] }
         runMonitored(argv(planArgs)) { output, ok in
             guard ok, let draft = parseTicketDraft(output) else {
                 Notifier.post(title: "Ticket agent finished",
                               body: ok ? "Could not parse ticket draft from agent output."
-                                       : "The ticket agent exited with an error.")
+                                       : "The ticket agent exited with an error.",
+                              agent: agent)
                 return
             }
             let args = ticketCreateArgs(draft: draft, screenshotPaths: screenshotPaths)
             guard let descriptionData = draft.description.data(using: .utf8) else {
-                Notifier.post(title: "Ticket agent finished", body: "Could not encode description.")
+                Notifier.post(title: "Ticket agent finished", body: "Could not encode description.", agent: agent)
                 return
             }
-            Notifier.post(title: "Creating ticket…", body: shortenForNotice(note))
+            Notifier.post(title: "Creating ticket…", body: shortenForNotice(note), agent: agent)
             runMonitoredWithInput(args, input: descriptionData) { createOutput, createOk in
                 guard createOk, let completion = ticketCompletion(output: createOutput) else {
                     Notifier.post(title: "Ticket creation failed",
                                   body: createOk ? "Could not confirm a ticket was created."
-                                               : "linear create exited with an error.")
+                                               : "linear create exited with an error.",
+                                  agent: agent)
                     return
                 }
                 // Persist to the ledger so the menu bar's RECENT TICKETS section can
@@ -545,7 +549,8 @@ enum AgentsCLI {
                 RecentTickets.record(id: completion.id, title: note, url: completion.url,
                                      createdAt: ISO8601DateFormatter().string(from: Date()))
                 // Attach the ticket URL so the notification is clickable → opens it.
-                Notifier.post(title: "Created \(completion.id)", body: shortenForNotice(note), url: completion.url)
+                Notifier.post(title: "Created \(completion.id)", body: shortenForNotice(note), url: completion.url,
+                              agent: agent)
             }
         }
     }
@@ -562,8 +567,11 @@ enum AgentsCLI {
         let selected = agents.isEmpty ? ["claude"] : agents
         let prompt = quickFixPrompt(note: note, screenshotPaths: screenshotPaths)
         let name = quickDispatchName(note: note)
+        // The avatar depicts one harness, so it rides only a single-agent dispatch;
+        // a fan-out across several agents has no one agent to show.
         Notifier.post(title: "Dispatching \(selected.count) agent\(selected.count == 1 ? "" : "s")…",
-                      body: shortenForNotice(note))
+                      body: shortenForNotice(note),
+                      agent: selected.count == 1 ? selected[0] : nil)
         for agent in selected {
             runDetached(argv(quickFixRunArgs(agent: agent, prompt: prompt, name: name,
                                              cwd: cwd, device: device)))

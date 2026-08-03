@@ -5,6 +5,7 @@ import * as path from 'path';
 import { spawnSync } from 'child_process';
 import {
   ACTIVITY_LOG_HOOK_SCRIPT,
+  MILESTONE_EVENTS,
   activityGroupDevices,
   activityGroupKey,
   appendActivityEvent,
@@ -1066,5 +1067,37 @@ describe('shortSessionId / attachmentName', () => {
   it('falls back to href basename when name absent', () => {
     expect(attachmentName({ kind: 'image', href: '/a/b/cover.png' })).toBe('cover.png');
     expect(attachmentName({ kind: 'link', href: 'https://x/y/z', name: '  ' })).toBe('z');
+  });
+});
+
+describe('factory.launch as a milestone', () => {
+  it('classifies to the milestone tier so it surfaces individually in the lane', () => {
+    expect(tierForEvent('factory.launch')).toBe('milestone');
+    expect(MILESTONE_EVENTS).toContain('factory.launch');
+    // A routine, count-collapsed kind for contrast.
+    expect(tierForEvent('file.edited')).toBe('activity');
+  });
+
+  it('is deliberately ABSENT from the Python hook milestone set, and nothing else is', () => {
+    // The hook script carries its own copy of MILESTONE_EVENTS, used only to
+    // tier events the hook itself writes from PreToolUse/PostToolUse. It never
+    // writes factory.launch (that arrives via `agents events emit`) or
+    // status.blocked (that arrives via `agents feed post --blocked`), so the two
+    // lists legitimately differ by exactly those out-of-process members. Pinning
+    // it here turns an invisible divergence into a deliberate, reviewed one: if
+    // someone adds a milestone the hook DOES write and forgets the Python copy,
+    // this fails.
+    const block = ACTIVITY_LOG_HOOK_SCRIPT.match(/MILESTONE_EVENTS = \{([^}]*)\}/);
+    expect(block).not.toBeNull();
+    const pythonSet = new Set(
+      Array.from(block![1].matchAll(/"([^"]+)"/g)).map((m) => m[1]),
+    );
+
+    const tsOnly = MILESTONE_EVENTS.filter((e) => !pythonSet.has(e));
+    expect(tsOnly).toEqual(['factory.launch', 'status.blocked']);
+
+    // And the Python copy must not invent kinds the TS union does not know.
+    const pythonOnly = [...pythonSet].filter((e) => !MILESTONE_EVENTS.includes(e as never));
+    expect(pythonOnly).toEqual([]);
   });
 });

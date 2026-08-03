@@ -19,6 +19,8 @@ import chalk from 'chalk';
 import * as fs from 'fs';
 import { getLogsPath, type EventRecord, type EventType } from '../lib/events.js';
 import { readUnifiedEvents } from '../lib/event-stream.js';
+import { ingestBatch } from '../lib/events-ingest.js';
+import { setHelpSections } from '../lib/help.js';
 
 /**
  * Resolve `--limit` into a record cap. `0` means "no cap" — without it there is
@@ -107,8 +109,94 @@ function renderRow(r: EventRecord): string {
   return `${time}  ${originLabel(r).padEnd(24)} ${user.padEnd(22)} ${ev.padEnd(26)}${agent}  ${detailFor(r)}`;
 }
 
+/** Read all of stdin. Returns '' when nothing is piped. */
+async function readStdin(): Promise<string> {
+  if (process.stdin.isTTY) return '';
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
+  return Buffer.concat(chunks).toString('utf-8');
+}
+
+function registerEmitSubcommand(events: Command): void {
+  const emitCmd = events
+    .command('emit')
+    .description('Record events produced outside this process (reads JSONL on stdin)')
+    .requiredOption('--source <name>', 'Producer name; stamped as `module` so `events --module <name>` filters to it')
+    .option('--dry-run', 'Validate and report without writing')
+    .option('--json', 'Report {written, rejected} as JSON')
+    .action(async (
+      opts: { source: string; dryRun?: boolean; json?: boolean },
+      cmd?: { parent?: { opts: () => { json?: boolean } } },
+    ) => {
+      // The parent `events` command also declares `--json` (for its read view).
+      // Commander binds a flag declared on BOTH to the parent, so a bare
+      // `events emit … --json` lands on parent.opts().json and the child sees
+      // undefined — the human string would print where a caller expects JSON.
+      // Read both, same as `feed post`.
+      const wantJson = Boolean(opts?.json ?? cmd?.parent?.opts?.().json);
+      const input = await readStdin();
+      if (input.trim() === '') {
+        console.error('events emit: nothing on stdin — pipe one JSON object per line.');
+        process.exitCode = 1;
+        return;
+      }
+
+      let result;
+      try {
+        result = ingestBatch(input, { source: opts.source, dryRun: opts.dryRun });
+      } catch (err) {
+        console.error(`events emit: ${err instanceof Error ? err.message : String(err)}`);
+        process.exitCode = 1;
+        return;
+      }
+
+      if (wantJson) {
+        console.log(JSON.stringify({ written: result.written, rejected: result.rejected, routed: result.routed }, null, 2));
+      } else if (result.rejected.length === 0) {
+        console.log(`${result.written} event(s) recorded${opts.dryRun ? ' (dry run)' : ''}.`);
+      } else {
+        console.log(`${result.written} event(s) recorded${opts.dryRun ? ' (dry run)' : ''}.`);
+        console.error(`rejected ${result.rejected.length} line(s):`);
+        for (const r of result.rejected) console.error(`  line ${r.line}: ${r.reason}`);
+      }
+      // Valid siblings are already written; a non-zero exit reports that the
+      // batch was not fully accepted without pretending nothing landed.
+      if (result.rejected.length > 0) process.exitCode = 1;
+    });
+
+  setHelpSections(emitCmd, {
+    examples: `
+      # 1. Produce one JSON object per line (this is the whole input format).
+      printf '%s\\n' '{"event":"factory.command","commandId":"agents.newClaude"}' \\
+        | agents events emit --source factory
+
+      # 2. Flush a batch and check what landed.
+      agents events emit --source factory --json < batch.jsonl
+
+      # 3. Read it back. --limit 0 matters whenever you aggregate.
+      agents events --module factory --limit 0 --json
+    `,
+    notes: `
+      \`event\` is required and must be a known kind. \`ts\` (ISO-8601) is optional
+      and defaults to now — pass it so a batched producer records when each event
+      HAPPENED rather than when it flushed.
+
+      Envelope keys: ts, sessionId, mailboxId, terminalId, launchId, tmuxPane,
+      host, runtime, agent, tool, detail, url, project, cwd. Any other key is
+      payload and passes through the usual redaction.
+
+      A milestone kind (e.g. factory.launch) REQUIRES a sessionId — the activity
+      log is one file per session. Milestones route there; everything else goes
+      to the operational log. \`agents events\` reads both.
+
+      Rejection is per line: one bad line never discards the batch. Exit is 1 if
+      any line was rejected.
+    `,
+  });
+}
+
 export function registerEventsCommand(program: Command): void {
-  program
+  const events = program
     .command('events')
     .description('Read the unified event stream (operational + agent activity)')
     .option('--module <name>', 'Only events from this group (e.g. teams, secrets, activity)')
@@ -177,6 +265,10 @@ Examples:
       console.log(chalk.gray(`\n${records.length} event(s). Log: ${getLogsPath()}`));
       if (truncated) console.log(chalk.yellow(capNote));
     });
+
+  // `events` both reads (its own action, above) and writes (this subcommand) —
+  // the same shape as `feed` / `feed post`.
+  registerEmitSubcommand(events);
 }
 
 /** commander repeatable-option collector. */

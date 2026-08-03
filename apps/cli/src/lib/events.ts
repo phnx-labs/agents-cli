@@ -114,9 +114,14 @@ export type EventType =
   | 'browser.close'
   | 'browser.navigate'
   | 'browser.screenshot'
-  // Secrets (no values logged)
+  // Secrets (no values logged) — the value-free lifecycle vocabulary funnelled
+  // through emitSecretAudit (lib/secrets/audit.ts).
   | 'secrets.get'
   | 'secrets.unlocked'
+  | 'secrets.create'
+  | 'secrets.import'
+  | 'secrets.export'
+  | 'secrets.view'
   | 'secrets.set'
   | 'secrets.delete'
   | 'secrets.rename'
@@ -175,6 +180,13 @@ export type EventType =
   | 'checklist.created'
   | 'status.posted'
   | 'file.edited'
+  // Factory (the VS Code extension). Emitted OUT OF PROCESS via
+  // `agents events emit` — the extension host is not an agents-cli process, so
+  // it cannot call emit() directly. See commands/events.ts.
+  | 'factory.command'
+  | 'factory.action'
+  | 'factory.uri'
+  | 'factory.launch'
   // Generic
   | 'friction'
   | 'error'
@@ -182,9 +194,54 @@ export type EventType =
   | 'info'
   | 'debug';
 
+/**
+ * Every {@link EventType}, as a runtime-checkable table.
+ *
+ * Typed `Record<EventType, true>` on purpose: the object literal is
+ * exhaustiveness-checked at COMPILE time, so adding a member to the union
+ * without adding it here fails `tsc`. That is what keeps the runtime validator
+ * (`isEventType`, used by `agents events emit` to reject an unknown kind from an
+ * out-of-process producer) from silently drifting behind the union.
+ */
+const EVENT_TYPE_TABLE: Record<EventType, true> = {
+  'agent.run.start': true, 'agent.run.end': true, 'agent.spawn.start': true, 'agent.spawn.end': true,
+  'version.install': true, 'version.switch': true, 'version.remove': true,
+  'skill.install': true, 'skill.remove': true,
+  'browser.launch': true, 'browser.close': true, 'browser.navigate': true, 'browser.screenshot': true,
+  'secrets.get': true, 'secrets.unlocked': true, 'secrets.create': true, 'secrets.import': true, 'secrets.export': true, 'secrets.view': true, 'secrets.set': true, 'secrets.delete': true, 'secrets.rename': true,
+  'cloud.dispatch': true, 'cloud.complete': true, 'cloud.cancel': true, 'cloud.message': true,
+  'teams.create': true, 'teams.add': true, 'teams.start': true, 'teams.complete': true, 'teams.disband': true,
+  'hook.fire': true, 'hook.complete': true, 'hook.error': true,
+  'mcp.add': true, 'mcp.remove': true, 'mcp.register': true,
+  'resource.sync': true,
+  'rotation.resolved': true,
+  'command.start': true, 'command.end': true,
+  'perf.timing': true,
+  'session.start': true, 'session.end': true,
+  'webhook.received': true, 'webhook.authorized': true, 'webhook.rejected': true, 'webhook.matched': true,
+  'webhook.fired': true, 'webhook.handler.start': true, 'webhook.handler.end': true,
+  'plan.created': true, 'pr.opened': true, 'pr.merged': true, 'worktree.created': true,
+  'worktree.removed': true, 'commit.created': true, 'pushed': true, 'subagent.spawned': true,
+  'artifact.created': true, 'task.completed': true, 'checklist.created': true, 'status.posted': true,
+  'file.edited': true,
+  'factory.command': true, 'factory.action': true, 'factory.uri': true, 'factory.launch': true,
+  'friction': true, 'error': true, 'warn': true, 'info': true, 'debug': true,
+};
+
+/** Every known event kind. Derived from {@link EVENT_TYPE_TABLE}, never hand-listed. */
+export const EVENT_TYPES: readonly EventType[] = Object.keys(EVENT_TYPE_TABLE) as EventType[];
+
+const EVENT_TYPE_SET: ReadonlySet<string> = new Set<string>(EVENT_TYPES);
+
+/** Runtime guard for an event kind arriving from outside this process. */
+export function isEventType(value: string): value is EventType {
+  return EVENT_TYPE_SET.has(value);
+}
+
 const AUDIT_EVENTS: ReadonlySet<string> = new Set([
   'command.start', 'command.end',
-  'secrets.get', 'secrets.unlocked', 'secrets.set', 'secrets.delete', 'secrets.rename',
+  'secrets.get', 'secrets.unlocked', 'secrets.create', 'secrets.import', 'secrets.export', 'secrets.view',
+  'secrets.set', 'secrets.delete', 'secrets.rename',
   'teams.create', 'teams.add', 'teams.start', 'teams.complete', 'teams.disband',
   'cloud.dispatch', 'cloud.complete', 'cloud.cancel', 'cloud.message',
   'version.install', 'version.switch', 'version.remove',
@@ -192,6 +249,11 @@ const AUDIT_EVENTS: ReadonlySet<string> = new Set([
   'mcp.add', 'mcp.remove', 'mcp.register',
   'rotation.resolved',
   'session.start', 'session.end',
+  // An external process reaching into the user's editor (the CLI's
+  // vscodium-agent backend driving `/spawn` / `/inject` / `/focus`) is a
+  // "who reached in from outside" fact, which is what the audit lane answers.
+  // The other factory.* kinds are ordinary info — a palette press is not audit.
+  'factory.uri',
 ]);
 
 export function levelFor(event: EventType): EventLevel {
@@ -559,8 +621,14 @@ function resolveProvenance(env: NodeJS.ProcessEnv = process.env): ProvenanceFloo
  *
  * @param event - The event type
  * @param payload - Event-specific data (agent, version, cwd, etc.)
+ * @param overrides - Envelope fields the CALLER owns rather than the writer.
+ *   Only `ts` today: a batched out-of-process producer (`agents events emit`)
+ *   records when each event HAPPENED, but flushes them together later, so
+ *   stamping write-time would collapse a whole batch onto the flush instant and
+ *   corrupt every `--since` boundary. `ts` stays in RESERVED_META_KEYS so a
+ *   *payload* still cannot inject it — this explicit channel is the only way in.
  */
-export function emit(event: EventType, payload: EventPayload = {}): void {
+export function emit(event: EventType, payload: EventPayload = {}, overrides: { ts?: string } = {}): void {
   if (isDisabled()) return;
 
   try {
@@ -572,7 +640,7 @@ export function emit(event: EventType, payload: EventPayload = {}): void {
       // Provenance floor first: env-sourced defaults an explicit payload overrides.
       ...resolveProvenance(),
       ...safePayload,
-      ts: new Date().toISOString(),
+      ts: overrides.ts ?? new Date().toISOString(),
       tz: getTimezoneOffset(),
       tzName: getTimezoneName(),
       hostname: os.hostname(),

@@ -1,5 +1,149 @@
 # Changelog
 
+## 1.20.92
+
+- **`agents sessions` rows show creation time as well as last activity (RUSH-2107).**
+  The trailing time cell used to carry one unlabeled "X ago" — last activity — so a
+  row could not say when the session began or how long it had been alive. It now
+  reads `3d → 1 hour ago`: the compact creation age, then the last-activity label the
+  listing sorts by. Both the interactive picker and the flat/tree listings render it.
+  A session that ran for under a minute keeps a single field (the two halves would
+  name the same moment), and a terminal too narrow for both drops the creation age
+  rather than squeezing the topic below its floor, so rows never wrap. The picker's
+  detail pane spells the same facts out as `created X ago · last active Y ago ·
+  lasted Z`, and now derives them from the indexed session metadata when no local
+  transcript exists — so **remote** and not-yet-indexed sessions report their timing
+  instead of showing none. Source: `apps/cli/src/lib/session/relative-time.ts`,
+  `apps/cli/src/commands/sessions.ts`, `apps/cli/src/commands/sessions-picker.ts`.
+
+- **Stop fleet health probes from orphaning remote processes on timeout (RUSH-2114).** `sshExecAsync` now uses a direct ssh connection whenever a `timeoutMs` is set, because a control-master outlives the local client and keeps the remote command running after we kill it. `agents doctor` also normalizes host names before excluding the local machine, so `zion.local` can no longer be self-SSH'd. Source: `apps/cli/src/lib/ssh-exec.ts`, `apps/cli/src/commands/doctor.ts`.
+- **Harden menubar install against Gatekeeper rejection.** `ensureValidSignature` now checks `spctl --assess`; a Developer-ID-signed but un-notarized bundle is stripped of quarantine and re-signed ad-hoc so the launchd service does not crash-loop with "app is damaged". The release build script gained optional notarization via `MENUBAR_HELPER_NOTARIZE` and `MENUBAR_HELPER_NOTARIZE_KEYCHAIN_PROFILE`. Source: `apps/cli/src/lib/menubar/install-menubar.ts`, `apps/cli/menubar/scripts/build.sh`.
+
+- **`agents activity` now shows the whole fleet, grouped by project.** The
+  question the command answers is "what are my agents doing", and agents run on
+  every box — but it read only the local logs unless you remembered
+  `--devices-all`, and printed one flat newest-first stream. Both defaults are
+  inverted: every run fans `activity --json` out to each reachable device and
+  merges the peers' streams host-tagged, then buckets them by project, one level,
+  no sub-grouping. `--local` scopes back to this machine, `-H/--host` to named
+  boxes, and `--flat` (or `--group-by none`) restores the single stream;
+  `--devices-all`/`--hosts-all` remain accepted so existing scripts keep working.
+  A peer answering the fan-out still carries the recursion guard, so it never
+  re-fans the fleet.
+
+- **Each project header names the machines its work ran on.** A bucket reads
+  `▸ agents-cli  12 events · 4 milestones · zion, yosemite-s0` — up to three
+  machines by name plus a `+N` tail, so a project touched by a dozen boxes stays
+  one scannable line; individual rows keep their own `[host]` tag. Peers that
+  never answered are reported once at the end (`· 2 devices unreachable: …`)
+  rather than a line each above the timeline, so a missing machine is visible but
+  not noisy.
+
+- **A project is now the repository, not whatever directory the agent sat in.**
+  A cwd resolves to the git repository containing it, so `<repo>/apps/cli` files
+  under `<repo>` instead of `cli`, and a worktree under
+  `<repo>/.agents/worktrees/<slug>` folds back into the repo it branched from.
+  A directory in no repo groups as itself, and a dotfiles repo at `$HOME` is not
+  treated as a project. The `agents sessions` overview and `agents feed post` now
+  share this one resolver (`lib/project-key.ts`), so a project reads identically
+  everywhere instead of each view folding cwds its own way.
+
+- **`--limit` is spent on milestones, not on collapsed churn.** The default view
+  rolls routine `file.edited` work up to a count, so a plain slice let one busy
+  machine's 40 file edits hide every other device's PRs behind a single
+  `file edited ×40` line. The cap now bounds the milestones shown, with the
+  routine events inside that window riding along for the counts. `--all` still
+  shows routine work inline and caps every event.
+
+- **The activity header no longer carries other subsystems' hook warnings.**
+  Registering the activity-log hooks surfaced every unresolved entry in the hook
+  manifest — a missing `inject-session-id` script, someone else's half-installed
+  plugin — printing five wrapped yellow lines above the timeline on every run.
+  Those are `agents doctor`'s job; only a failure that would leave the activity
+  log unwritten is reported here.
+
+- **The menu bar's New Session opens in the terminal you actually work in.** It
+  hardcoded AppleScript at Terminal.app, so a Ghostty or iTerm user got a
+  Terminal.app window every time. It now shells `agents run <agent> --terminal`,
+  and the CLI resolves the terminal from the user's own live sessions — the host
+  app `agents sessions --active` already attributes every session to
+  (`ActiveSession.host`). Order: the terminal the caller is in, then the host of
+  the most recent live session, then the first available backend. Hosts map to
+  backends only where the engine can really drive them, so an undrivable host
+  (Warp, kitty, Cursor) falls through instead of opening the wrong app. A
+  tmux-hosted session (every interactive `agents run`) resolves to the app its
+  attached tmux client is in, via the same resolver behind
+  `agents sessions`' "viewing in Ghostty tab 2" — without that it would name the
+  multiplexer and no terminal at all. Source:
+  `apps/cli/src/lib/terminal/preferred.ts`,
+  `apps/cli/src/lib/terminal/backends/terminal-app.ts`,
+  `apps/cli/menubar/Sources/MenubarHelper/AgentsCLI.swift`.
+
+- **`agents run <agent> --terminal` opens a run in a real terminal tab.** For a
+  caller that cannot host a TUI (the menu bar, a script). Without a value the
+  terminal is detected as above; `--terminal <backend>` forces one
+  (`iterm | ghostty | terminal | tmux | vscodium-agent`) and errors on an unknown
+  id rather than silently auto-detecting. The tab re-invokes the same argv with
+  the flag stripped, so `--mode`, `--cwd`, and a `--` passthrough ride along.
+  Cannot combine with `--host`. Source: `apps/cli/src/lib/terminal/run-surface.ts`,
+  `apps/cli/src/commands/exec.ts`.
+
+- **Terminal.app is a real launch backend now (`terminal`).** Registered last, so
+  it is the every-Mac floor without outranking a terminal the user chose to
+  install, and reported unavailable over SSH where `osascript` cannot reach the
+  GUI login. It has no scriptable split, so a split request opens a tab, and
+  `agents sessions resume --splits` now says so instead of quietly producing
+  tabs. `detectCurrentBackend` also recognizes `TERM_PROGRAM=Apple_Terminal`.
+  Source: `apps/cli/src/lib/terminal/backends/terminal-app.ts`.
+
+- **`agents sessions resume` / `sessions focus` reach Terminal.app too.** Adding
+  it to the backend registry changes both: on a Mac with neither iTerm, Ghostty,
+  nor VSCodium installed they used to fall back to resuming in the current
+  process, and now open a Terminal.app tab; `resume`'s interactive picker gains a
+  Terminal row, and `--terminal-app` forces it (named apart from
+  `run --terminal`, which means something different). Source:
+  `apps/cli/src/commands/sessions-resume.ts`, `apps/cli/src/commands/focus.ts`.
+
+- **New Task… in the menu bar.** A row above New Session that opens the
+  quick-dispatch bar — the same panel as `Cmd-Shift-O`, now reachable without the
+  chord (and without the Accessibility grant the chord needs). The status item
+  owns the one panel instance, so an interrupted capture is restored whichever
+  entry point you return through. Source:
+  `apps/cli/menubar/Sources/MenubarHelper/StatusItemController.swift`.
+
+- **Activity, feed posts, and the sessions overview now speak defined project
+  names.** One resolver (`resolveProjectNameForCwd`, `lib/projects.ts`) backs all
+  three: a cwd inside a defined project (`~/.agents/projects/<name>.yaml`) reads
+  as the project's name — a multi-repo project is a single bucket in `agents
+  activity`, not one per repo — and anything else falls back to the
+  repository-level key, so nothing changes without definitions. Each peer
+  resolves its own cwds against its synced definitions before events cross the
+  wire. Source: `apps/cli/src/lib/projects.ts`, `apps/cli/src/commands/activity.ts`.
+
+- **`agents activity --project <name>`** narrows the fleet stream to one project,
+  exact-matched on the resolved label — one project's PRs, plans, and worktrees
+  across every box without the rest of the fleet's noise. Source:
+  `apps/cli/src/lib/activity.ts` (`filterActivityByProject`).
+
+- **`agents projects` — named multi-repo projects with a project progress rollup (beta).**
+  Define a project once in `~/.agents/projects/<name>.yaml` (name, home-relative
+  root/defaultPath, multiple repos with monorepo subpaths, described `contexts[]`
+  starting points, external `integrations[]`, Linear link) and `agents run --project
+  <name>` resolves the definition before the old `<root>/<slug>` convention — undefined
+  slugs behave exactly as before. The headline is `agents projects status`: instead of a
+  per-agent activity line, it renders one card per project — live agents by state, plan
+  completion, open **and** recently-merged PRs, tickets in flight, and the artifacts
+  agents produced — by rolling up signals already on disk (live agents matched to a project
+  by this machine's session cwd; the merged-PR count is repo-global via `gh`). `--window
+  <days>` and `--no-remote`
+  tune the PR/artifact lookup. Also `list` / `add` (infers root + origin slug) / `show` /
+  `edit` / `import --from-factory` (absorbs the Factory `projects.json` registry) / `rm`.
+  Enable with `agents beta enable projects`. Source: `apps/cli/src/lib/projects.ts`,
+  `apps/cli/src/lib/project-status.ts`, `apps/cli/src/commands/projects.ts`,
+  `apps/cli/src/lib/project-root.ts`.
+
+- **The cross-fleet session sweep no longer hides sessions on manually-registered devices.** `agents sessions` fan-out (and therefore `--resolve`, cross-machine resume, and `--active`) picked peers with a strict `tailscale.online === true` test. A device registered with `address.via: "manual"` never gets a Tailscale peer entry at all, so its `online` stayed `undefined` and the sweep skipped it **permanently** — every session on that box was invisible and could not be resolved or resumed from any other machine. Peer selection is now `isDialableDevice`, a union of both liveness signals: a device with no Tailscale block is unknown-not-offline (the rule `ssh.ts` `renderDeviceTable` and Factory's `isDeviceOnline` already used, so the picker and the sweep finally agree on who exists), and a positive live SSH probe (`DeviceProfile.reachability`, RUSH-1965) additionally rescues a device whose snapshot says offline. A **failed** probe deliberately does not remove a peer — the probe runs on a short SSH budget and returns false negatives on a congested tailnet (observed calling the local machine unreachable), and letting that shrink the sweep would hide sessions on healthy boxes. Applied to both sweeps that share this shape. Source: `apps/cli/src/lib/devices/registry.ts` (`isDialableDevice`), `apps/cli/src/lib/session/remote-list.ts`, `apps/cli/src/lib/remote-agents-json.ts`.
+
 ## 1.20.91
 
 - **An agent can now say it is stuck: `agents feed post --blocked` (RUSH-2110).** The

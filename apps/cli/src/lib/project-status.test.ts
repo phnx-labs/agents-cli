@@ -2,7 +2,16 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { rollupSessionsByProject, planPct, enrichProjectSignals } from './project-status.js';
+import {
+  rollupSessionsByProject,
+  planPct,
+  enrichProjectSignals,
+  sortProjectMembers,
+  formatProjectMembers,
+  MEMBERS_LINE_LIMIT,
+  type ProjectMember,
+} from './project-status.js';
+import { stripAnsi } from './session/width.js';
 import type { ProjectDef } from './projects.js';
 import type { ActiveSession } from './session/active.js';
 
@@ -52,6 +61,28 @@ describe('rollupSessionsByProject', () => {
     expect(map.has('unrelated')).toBe(false);
   });
 
+  it('carries one member per session with agent, status, ticket, and host', () => {
+    const sessions = [
+      s({
+        cwd: path.join(HOME, 'src/rush/apps/web'),
+        kind: 'claude',
+        status: 'running',
+        ticket: { id: 'RUSH-2107' } as never,
+        machine: 'zion',
+      }),
+      s({ cwd: path.join(HOME, 'src/rush/apps/api'), kind: 'codex', status: 'idle', machine: 'mac-mini' }),
+      s({ cwd: path.join(HOME, 'src/rush'), kind: 'gemini', status: 'queued' }), // no ticket, no host
+    ];
+    const rush = rollupSessionsByProject(defs, sessions).get('rush')!;
+    expect(rush.members).toEqual([
+      { agent: 'claude', status: 'running', ticket: 'RUSH-2107', host: 'zion' },
+      { agent: 'codex', status: 'idle', host: 'mac-mini' },
+      { agent: 'gemini', status: 'queued' },
+    ]);
+    // planPct is untouched by the members extension
+    expect(planPct(rush.plan)).toBeUndefined();
+  });
+
   it('is empty when no session matches a project', () => {
     const map = rollupSessionsByProject(defs, [s({ cwd: path.join(HOME, 'elsewhere') })]);
     expect(map.size).toBe(0);
@@ -62,6 +93,84 @@ describe('planPct', () => {
   it('rounds a percentage and returns undefined for nothing tracked', () => {
     expect(planPct({ done: 5, total: 7 })).toBe(71);
     expect(planPct({ done: 0, total: 0 })).toBeUndefined();
+  });
+});
+
+describe('sortProjectMembers', () => {
+  it('orders running → idle → input_required → queued → rest, agent asc within a state', () => {
+    const members: ProjectMember[] = [
+      { agent: 'grok', status: 'unknown' },
+      { agent: 'zed', status: 'idle' },
+      { agent: 'codex', status: 'running' },
+      { agent: 'claude', status: 'running' },
+      { agent: 'gemini', status: 'input_required' },
+      { agent: 'amp', status: 'queued' },
+      { agent: 'droid', status: 'abandoned' },
+    ];
+    expect(sortProjectMembers(members).map((m) => m.agent)).toEqual([
+      'claude', // running first; agent asc within a state (claude < codex)
+      'codex',
+      'zed', // idle
+      'gemini', // input_required
+      'amp', // queued
+      'droid', // rest: status asc (abandoned < unknown)
+      'grok',
+    ]);
+  });
+
+  it('does not mutate the input', () => {
+    const members: ProjectMember[] = [
+      { agent: 'b', status: 'idle' },
+      { agent: 'a', status: 'running' },
+    ];
+    sortProjectMembers(members);
+    expect(members.map((m) => m.agent)).toEqual(['b', 'a']);
+  });
+});
+
+describe('formatProjectMembers', () => {
+  it('renders agent · status · ticket @host cells joined by a wide dot', () => {
+    const line = stripAnsi(
+      formatProjectMembers([
+        { agent: 'codex', status: 'idle', host: 'mac-mini' },
+        { agent: 'claude', status: 'running', ticket: 'RUSH-2107', host: 'zion' },
+      ]),
+    );
+    expect(line).toBe('claude · running · RUSH-2107 @zion  ·  codex · idle @mac-mini');
+  });
+
+  it('caps at MEMBERS_LINE_LIMIT with a +N more tail, sorted so the live ones show', () => {
+    const members: ProjectMember[] = Array.from({ length: MEMBERS_LINE_LIMIT + 2 }, (_, i) => ({
+      agent: `agent${i}`,
+      status: i === MEMBERS_LINE_LIMIT + 1 ? 'running' : 'idle',
+    }));
+    const line = stripAnsi(formatProjectMembers(members));
+    expect(line.startsWith(`agent${MEMBERS_LINE_LIMIT + 1} · running`)).toBe(true); // running sorts first
+    expect(line.endsWith('+2 more')).toBe(true);
+    expect(line.split('·').length).toBeGreaterThan(2);
+  });
+
+  it('is empty for no members', () => {
+    expect(formatProjectMembers([])).toBe('');
+  });
+
+  it('collapses identical cells to one ×N cell — a same-harness fleet is one fact', () => {
+    const members: ProjectMember[] = [
+      ...Array.from({ length: 14 }, () => ({ agent: 'claude', status: 'running', host: 'zion' })),
+      { agent: 'codex', status: 'idle', host: 'mac-mini' },
+      { agent: 'claude', status: 'running', ticket: 'RUSH-2107', host: 'zion' },
+    ];
+    const line = stripAnsi(formatProjectMembers(members));
+    expect(line).toBe('claude · running @zion ×14  ·  claude · running · RUSH-2107 @zion  ·  codex · idle @mac-mini');
+  });
+
+  it('the +N tail counts members, not cells, when collapsed groups are capped', () => {
+    const members: ProjectMember[] = [
+      ...Array.from({ length: 30 }, () => ({ agent: 'claude', status: 'running' })),
+      ...Array.from({ length: MEMBERS_LINE_LIMIT }, (_, i) => ({ agent: `agent${i}`, status: 'idle' })),
+    ];
+    // 6 cells cap: [claude ×30, agent0..agent4] = 35 members shown, 1 left over.
+    expect(stripAnsi(formatProjectMembers(members)).endsWith('+1 more')).toBe(true);
   });
 });
 

@@ -178,6 +178,34 @@ agents secrets tier prod session            # or: secrets create prod --tier ses
 
 A `biometry`-tier bundle (the default) is never auto-held — keep high-value bundles there so every read is confirmed. While a bundle is unlocked, any process running as you can read it from the socket without a prompt; that's the trade-off, so keep TTLs short and `lock` when you step away.
 
+## "Which bundles do I actually use, and when was one last touched?"
+
+Every create / import / export / view / access / unlock is recorded value-free (bundle
+name, event kind, count, agent — never a value) through one chokepoint, and surfaced
+three ways:
+
+```bash
+agents secrets view stripe.com          # usage summary + held state + per-agent
+agents secrets list --sort uses         # most-accessed bundles first
+agents secrets list --sort used         # most-recently-used first
+agents secrets activity stripe.com      # recent event timeline (last 90 days)
+```
+
+`agents secrets view` prints e.g. `usage: accessed 42× (last 2h ago) · exported 3× (last
+1d ago)`. The full audit trail is `agents events --module secrets`. Disable recording
+with `AGENTS_NO_USAGE_TRACK=1`.
+
+## "How should I name a bundle?"
+
+Name it after what it holds, so an agent can guess it without listing — a website by its
+domain with the real suffix (`stripe.com`, `openai.ai`, `github.com`), a desktop app by
+its binary suffix (`slack.app`, `photoshop.exe`). Always pass `--description`; an
+undescribed bundle prints a "No description found" nudge in `list` / `view` / `create`.
+
+```bash
+agents secrets create stripe.com --description "Stripe live + test API keys"
+```
+
 ## "What else can I do?"
 
 Run `agents secrets --help` — there's more: viewing/revealing values, rotating secrets with preserved metadata, exporting to shell, organizing by environment or service.

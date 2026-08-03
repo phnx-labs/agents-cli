@@ -29,6 +29,7 @@ enum IssueSelfTest {
         testLinearCache()
         testTicketDispatchContract()
         testActiveDisplay()
+        testAgentAvatar()
         if failures == 0 {
             print("\nALL PASS")
             exit(0)
@@ -626,6 +627,43 @@ enum IssueSelfTest {
         try? Data("x".utf8).write(to: url)
         try? FileManager.default.setAttributes(
             [.modificationDate: Date().addingTimeInterval(offset)], ofItemAtPath: url.path)
+    }
+
+    // The notification's RIGHT-hand image. macOS draws the sending bundle's icon
+    // on the left and `contentImage` on the right; AgentAvatar owns the right one,
+    // so a banner reads "agents-cli, about <agent>". Pins the decisions that can
+    // silently produce an unreadable or misleading badge.
+    private static func testAgentAvatar() {
+        // No agent yields NO image, not a blank tile and not a repeat of the left
+        // icon — a heal notice or a multi-agent fan-out has nobody to depict.
+        check("no agent renders no right-hand image", AgentAvatar.image(for: nil) == nil)
+        check("blank agent renders no right-hand image", AgentAvatar.image(for: "   ") == nil)
+        check("a known agent renders an image", AgentAvatar.image(for: "claude") != nil)
+
+        // Marks must be unique, or two harnesses become the same badge. Four ids
+        // start with `c` and two with `g`, which is why the mark is not an initial.
+        let marks = AgentAvatar.brands.values.map(\.mark)
+        check("every brand mark is unique", Set(marks).count == marks.count,
+              detail: marks.sorted().joined(separator: ","))
+        check("claude and codex are told apart",
+              AgentAvatar.brand(for: "claude")?.mark != AgentAvatar.brand(for: "codex")?.mark)
+        check("grok and goose are told apart",
+              AgentAvatar.brand(for: "grok")?.mark != AgentAvatar.brand(for: "goose")?.mark)
+
+        check("agent id is case/whitespace insensitive",
+              AgentAvatar.brand(for: " Claude ")?.mark == AgentAvatar.brand(for: "claude")?.mark)
+
+        // An unregistered id must still render — its initial on the fallback lime,
+        // not a crash — so a harness added to the registry works before it is branded.
+        check("unknown agent falls back to its initial",
+              AgentAvatar.brand(for: "newharness")?.mark == "N")
+        check("unknown agent still renders", AgentAvatar.image(for: "newharness") != nil)
+
+        // Contrast: a dark brand takes white ink, a light one takes black.
+        check("dark tile takes white ink",
+              AgentAvatar.glyphColor(on: AgentAvatar.brand(for: "grok")!.color) == .white)
+        check("light tile takes black ink",
+              AgentAvatar.glyphColor(on: AgentAvatar.brand(for: "hermes")!.color) == .black)
     }
 
     private static func check(_ name: String, _ ok: Bool, detail: String? = nil) {

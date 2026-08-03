@@ -50,6 +50,14 @@ export type MilestoneEvent =
   /** Deliberate agent-authored progress post (`agents feed post`). */
   | 'status.posted'
   /**
+   * An agent terminal spawned from the Factory VS Code extension. A milestone
+   * because it is the BIRTH of a session — it carries the sessionId and the
+   * terminalId that every later event on that session joins through, the same
+   * way `subagent.spawned` roots a sub-agent. Written out of process by
+   * `agents events emit`; the other factory.* kinds are operational-only.
+   */
+  | 'factory.launch'
+  /**
    * The same post, but the agent is STUCK (`agents feed post --blocked`).
    *
    * A distinct event rather than a flag on `status.posted` because it is a
@@ -109,6 +117,12 @@ export const MILESTONE_EVENTS: readonly MilestoneEvent[] = [
   'image.upscaled',
   'metadata.edited',
   'status.posted',
+  // NOTE: intentionally absent from the Python hook's own MILESTONE_EVENTS copy
+  // (see ACTIVITY_LOG_HOOK_SCRIPT below) — that set only classifies events the
+  // hook itself writes from PreToolUse/PostToolUse, and the hook never writes
+  // this one. activity.test.ts pins the difference so the divergence stays
+  // deliberate rather than becoming drift.
+  'factory.launch',
   'status.blocked',
 ];
 
@@ -442,6 +456,7 @@ export const EVENT_STYLE: Record<string, { glyph: string; color: (s: string) => 
   'checklist.created': { glyph: '☐', color: chalk.cyan, label: 'checklist created' },
   'status.posted': { glyph: '▸', color: chalk.white, label: 'status' },
   'file.edited': { glyph: '·', color: chalk.gray, label: 'file edited' },
+  'factory.launch': { glyph: '⌁', color: chalk.cyan, label: 'factory launch' },
   'bash.executed': { glyph: '$', color: chalk.gray, label: 'command run' },
 };
 
