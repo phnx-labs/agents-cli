@@ -454,7 +454,12 @@ export function forkProfile(source: Profile, name: string, opts: ForkProfileOpti
     description: opts.description ?? (opts.model ? `Forked from ${source.name}: ${opts.model}` : source.description),
     forkedFrom: source.name,
   };
+  // `label` is the header `agents view` prints, so an inherited one would make
+  // the fork and its source visually identical — the ambiguity a per-harness
+  // block exists to remove. A fork carries a label only when it is given one;
+  // otherwise `profileLabel` falls back to the fork's own name.
   if (opts.label) forked.label = opts.label;
+  else delete forked.label;
   // A fork that repoints the model or endpoint is no longer that preset — keep
   // the preset link only while the fork still matches what the preset defines.
   if (opts.model || opts.baseUrl) delete forked.preset;

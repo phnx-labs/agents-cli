@@ -283,6 +283,20 @@ describe('forkProfile — copy an existing harness under a new name', () => {
     expect(forked.auth).toEqual({ envVar: 'ANTHROPIC_AUTH_TOKEN', keychainItem: 'agents-cli.corp.token' });
   });
 
+  it('never inherits the source label — two harnesses must not share one view header', () => {
+    const labelled: Profile = { ...source, label: 'DeepSeek Flash' };
+    const forked = forkProfile(labelled, 'deepseek-chat', { model: 'deepseek/deepseek-chat-v3' });
+    expect(forked.label).toBeUndefined();
+    expect(profileSummary(forked).label).toBe('deepseek-chat');
+    // A straight copy with no overrides must not inherit it either.
+    expect(forkProfile(labelled, 'twin').label).toBeUndefined();
+  });
+
+  it('carries an explicitly given label onto the fork', () => {
+    const forked = forkProfile(source, 'chat', { label: 'DeepSeek Chat' });
+    expect(profileSummary(forked).label).toBe('DeepSeek Chat');
+  });
+
   it('re-pins the host version when asked', () => {
     expect(forkProfile(source, 'pinned', { version: '2.1.170' }).host.version).toBe('2.1.170');
   });
