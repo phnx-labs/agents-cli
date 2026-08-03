@@ -27,6 +27,7 @@ import {
   enrichActivityEvents,
   capActivityEvents,
   ensureActivityLogHook,
+  filterActivityByProject,
   filterActivityEvents,
   formatActivityGroupMeta,
   formatEnrichedActivityLine,
@@ -43,6 +44,7 @@ import {
 } from '../lib/activity.js';
 import { gatherRemoteAgentsJson } from '../lib/remote-agents-json.js';
 import { resolveProjectKey } from '../lib/project-key.js';
+import { listProjectDefs, resolveProjectNameForCwd } from '../lib/projects.js';
 import { machineId, normalizeHost } from '../lib/machine-id.js';
 import { shouldIncludeLocalFeed, remoteFeedHostsToDial } from './feed.js';
 import { getActiveSessions } from '../lib/session/active.js';
@@ -78,6 +80,7 @@ interface ActivityOpts {
   hostsAll?: boolean;
   groupBy?: string;
   flat?: boolean;
+  project?: string;
   filter?: string;
 }
 
@@ -138,17 +141,20 @@ export function isManifestHookError(error: string, manifestNames: string[]): boo
 
 /**
  * Session facts (project / ticket / execution host) keyed for the read-time
- * join. These sessions are this machine's, so their cwds get the repository-
- * aware resolution rather than the bare cwd fold.
+ * join. These sessions are this machine's, so their cwds get the canonical
+ * defined-project-first resolution rather than the bare cwd fold.
  */
-function activityHintsFromSessions(sessions: ActiveSession[]): ActivitySessionHint[] {
+function activityHintsFromSessions(
+  sessions: ActiveSession[],
+  resolveProject: (cwd?: string | null) => string | undefined = resolveProjectKey,
+): ActivitySessionHint[] {
   return sessions.map((s) => ({
     sessionId: s.sessionId,
     ticket: s.ticket?.id,
     // Where the process actually lives — the SSH-resolved provenance host, else
     // the cross-machine `machine` id. Normalized to match the event `host` form.
     executionHost: s.provenance?.host ? normalizeHost(s.provenance.host) : s.machine,
-    project: resolveProjectKey(s.cwd),
+    project: resolveProject(s.cwd),
   }));
 }
 
@@ -304,6 +310,7 @@ export function registerActivityCommand(program: Command): void {
     .option('--hosts-all', 'Alias for --devices-all')
     .option('--group-by <field>', 'Bucket the stream by project | device | agent | none (default: project)')
     .option('--flat', 'One newest-first stream instead of project buckets')
+    .option('--project <name>', 'Only items under one project; exact match on the resolved (defined-project-first) label')
     .option('--filter <text>', 'Narrow to items matching a project / device / agent / event / ticket')
     .addHelpText('after', `
 Examples:
@@ -311,13 +318,16 @@ Examples:
   agents activity --local                      # just this machine
   agents activity --flat                       # one newest-first stream
   agents activity --host yosemite-s1           # one box over SSH
+  agents activity --project rush               # one defined project, fleet-wide
   agents activity --filter RUSH-2100           # one ticket, fleet-wide
   agents activity --group-by device            # by machine instead of project
 
 Fleet-wide and project-grouped by default: the same 'activity --json' runs on
 every reachable peer and the streams merge host-tagged. Each item is enriched by
 JOINING to live sessions (project, execution host, Linear ticket) -- never by
-re-parsing transcripts. Projects fold worktrees back into their repo, and each
+re-parsing transcripts. Project labels are canonical: a cwd inside a defined
+project (~/.agents/projects/<name>.yaml) reads as that project's name, so a
+multi-repo project is one bucket; anything else folds to its repository. Each
 project header names the machines its work ran on.
 `)
     .action(async (opts: ActivityOpts) => {
@@ -377,10 +387,15 @@ project header names the machines its work ran on.
       // Remote events arrive already enriched by their own peer, so the join only
       // fills local ones; the pure fallbacks (cwd->project, host->device) cover
       // everything either way. Skip the ps/lsof scan when there's nothing to show.
+      // Project labels are canonical: a defined project's name wins over the
+      // repo-level key, so a multi-repo project buckets as one.
+      const projectDefs = listProjectDefs();
+      const resolveProject = (cwd?: string | null) => resolveProjectNameForCwd(cwd, projectDefs);
       const sessions = includeLocal && events.length > 0 ? await getActiveSessions() : [];
-      let enriched = enrichActivityEvents(events, activityHintsFromSessions(sessions), resolveProjectKey);
+      let enriched = enrichActivityEvents(events, activityHintsFromSessions(sessions, resolveProject), resolveProject);
 
       if (opts.milestones) enriched = enriched.filter((e) => tierForEvent(e.event) === 'milestone');
+      if (opts.project) enriched = filterActivityByProject(enriched, opts.project);
       if (opts.filter) enriched = filterActivityEvents(enriched, opts.filter);
       enriched = capActivityEvents(enriched, opts.limit, { all: opts.all || opts.milestones });
 

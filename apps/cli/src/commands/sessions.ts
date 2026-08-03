@@ -15,6 +15,7 @@ import { Option, type Command } from 'commander';
 import chalk from 'chalk';
 import { truncate, padRight } from '../lib/format.js';
 import { resolveProjectKey } from '../lib/project-key.js';
+import { listProjectDefs, resolveProjectNameForCwd, type ProjectDef } from '../lib/projects.js';
 import ora from 'ora';
 import type { AgentId } from '../lib/types.js';
 import type { SessionAgentId, SessionMeta, ViewMode } from '../lib/session/types.js';
@@ -2073,15 +2074,16 @@ async function maybeLiveIndex(options: SessionsOptions): Promise<Map<string, Act
 }
 
 /**
- * Group key for the overview: resolve the cwd to its repo via the shared
- * {@link resolveProjectKey} — the same resolver the `agents activity` timeline
- * groups by, so a monorepo subdir (`<repo>/apps/cli`) reads as `<repo>` in both
- * views. Falls back to the indexed project name (stamped at scan time) when the
- * cwd carries nothing usable, e.g. a remote path this machine cannot see still
- * folds by basename through the same resolver.
+ * Group key for the overview: resolve the cwd through the same canonical
+ * resolver the `agents activity` timeline groups by — a defined project's name
+ * when `defs` contains the cwd (multi-repo projects read as one group), else
+ * the repo-level key, so a monorepo subdir (`<repo>/apps/cli`) reads as
+ * `<repo>` in both views. Falls back to the indexed project name (stamped at
+ * scan time) when the cwd carries nothing usable, e.g. a remote path this
+ * machine cannot see still folds by basename through the same resolver.
  */
-export function overviewProjectKey(s: Pick<SessionMeta, 'project' | 'cwd'>): string {
-  const resolved = resolveProjectKey(s.cwd);
+export function overviewProjectKey(s: Pick<SessionMeta, 'project' | 'cwd'>, defs?: ProjectDef[]): string {
+  const resolved = defs?.length ? resolveProjectNameForCwd(s.cwd, defs) : resolveProjectKey(s.cwd);
   if (resolved) return resolved;
   if (s.project && s.project.trim()) return s.project.trim();
   return '(no project)';
@@ -2104,10 +2106,11 @@ export interface OverviewGroup {
 export function buildOverviewGroups(
   pool: SessionMeta[],
   perProjectCap: number,
+  defs?: ProjectDef[],
 ): { groups: OverviewGroup[]; projectCount: number } {
   const byKey = new Map<string, SessionMeta[]>();
   for (const s of pool) {
-    const k = overviewProjectKey(s);
+    const k = overviewProjectKey(s, defs);
     (byKey.get(k) ?? byKey.set(k, []).get(k)!).push(s);
   }
   const cap = Math.max(1, perProjectCap);
@@ -2131,7 +2134,7 @@ function printSessionOverview(
   liveIndex: Map<string, ActiveSession> | undefined,
   opts: { perProjectCap: number; expand: boolean; hiddenUnmanaged?: number },
 ): void {
-  const { groups } = buildOverviewGroups(pool, opts.expand ? Infinity : opts.perProjectCap);
+  const { groups } = buildOverviewGroups(pool, opts.expand ? Infinity : opts.perProjectCap, listProjectDefs());
   const shownGroups = opts.expand ? groups : groups.slice(0, OVERVIEW_MAX_PROJECTS);
   const hiddenProjects = groups.length - shownGroups.length;
 

@@ -278,6 +278,31 @@ describe('postFeedStatus attachments + project', () => {
     expect(stored[0].attachments?.[0].name).toBe('take.wav');
   });
 
+  it('stamps the canonical defined-project name, not the repo key', () => {
+    const dir = tmpActivityDir();
+    const defsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-proj-defs-'));
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-proj-repo-'));
+    // A multi-repo project: any repo under its root files under the ONE name.
+    fs.writeFileSync(path.join(defsDir, 'song-suite.yaml'), `name: song-suite\nroot: ${repo}\n`);
+    process.env.AGENTS_PROJECTS_DIR = defsDir;
+    try {
+      const { event } = postFeedStatus({
+        text: 'mastered',
+        sessionId: 'sess-canonical',
+        activityRoot: dir,
+        cwd: path.join(repo, 'apps', 'studio'),
+        env: { AGENTS_AGENT_NAME: 'grok', AGENTS_SYNC_MACHINE_ID: 'yosemite-s1' },
+        ts: '2026-07-31T12:00:00.000Z',
+        listEntries: () => [],
+        readEntry: () => undefined,
+        startPid: 1,
+      });
+      expect(event.project).toBe('song-suite');
+    } finally {
+      delete process.env.AGENTS_PROJECTS_DIR;
+    }
+  });
+
   it('omits attachments when none given', () => {
     const dir = tmpActivityDir();
     const { event } = postFeedStatus({

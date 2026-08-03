@@ -14,6 +14,7 @@ import {
   enrichActivityEvents,
   ensureActivityLogHook,
   filterActivityEvents,
+  filterActivityByProject,
   formatActivityGroupMeta,
   formatEnrichedActivityLine,
   formatProgressUpdate,
@@ -722,6 +723,24 @@ describe('filterActivityEvents', () => {
   });
   it('an empty filter is a no-op', () => {
     expect(filterActivityEvents(events, '   ')).toHaveLength(2);
+  });
+});
+
+describe('filterActivityByProject', () => {
+  const events = [
+    ev({ sessionId: '1', project: 'rush', event: 'pr.opened' }),
+    ev({ sessionId: '2', project: 'rush', event: 'pushed' }),
+    ev({ sessionId: '3', project: 'rush-infra', event: 'pushed' }),
+    ev({ sessionId: '4', event: 'plan.created' }), // no project label
+  ];
+  it('exact-matches the resolved project label — no substring bleed', () => {
+    // 'rush' must NOT pull in 'rush-infra'; a multi-repo project only matches
+    // because the resolver already collapsed it to one label upstream.
+    expect(filterActivityByProject(events, 'rush').map((e) => e.sessionId)).toEqual(['1', '2']);
+  });
+  it('misses nothing silently — unknown or empty names', () => {
+    expect(filterActivityByProject(events, 'nope')).toHaveLength(0);
+    expect(filterActivityByProject(events, '  ')).toHaveLength(4);
   });
 });
 

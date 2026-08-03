@@ -853,14 +853,20 @@ agents activity --milestones       # only plans / PRs / worktrees / sub-agents
   (`▸ agents-cli  12 events · 4 milestones · zion, yosemite-s0`, capped at three
   names plus a `+N` tail). `--filter <text>` narrows by project / device / agent /
   event / ticket.
-- **Projects are repositories.** A cwd resolves to the git repository containing
-  it (`resolveProjectKey`, `lib/project-key.ts`), so `<repo>/apps/cli` files under
+- **Projects are defined projects first, repositories otherwise.** A cwd inside a
+  defined project (`~/.agents/projects/<name>.yaml`, see docs/11-projects.md)
+  reads as that project's NAME — so a multi-repo project is one bucket, not one
+  per repo. Anything else resolves to the git repository containing it
+  (`resolveProjectKey`, `lib/project-key.ts`), so `<repo>/apps/cli` files under
   `<repo>` and a worktree under `<repo>/.agents/worktrees/<slug>` folds back into
   the repo it branched from. A directory in no repo groups as itself, and a
-  dotfiles repo at `$HOME` is deliberately not treated as a project. This is the
-  same fold the `agents sessions` overview groups by, so a project reads
-  identically in both. Each machine resolves its own paths — a peer stamps the
-  project before its events cross the wire.
+  dotfiles repo at `$HOME` is deliberately not treated as a project. This one
+  resolver (`resolveProjectNameForCwd`, `lib/projects.ts`) is shared by the
+  activity timeline, `agents feed post`, and the `agents sessions` overview, so
+  a project reads identically in all three. Each machine resolves its own paths
+  — a peer stamps the project before its events cross the wire. `--project
+  <name>` narrows the stream to one project (exact match on this resolved
+  label).
 - **`--limit` caps milestones, not churn.** The default view collapses routine
   `file.edited` work to a count, so `-n` bounds the milestones shown and the
   routine events inside that window ride along for the counts

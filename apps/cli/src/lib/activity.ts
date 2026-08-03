@@ -750,6 +750,18 @@ export function filterActivityEvents(events: EnrichedActivityEvent[], filter: st
   });
 }
 
+/**
+ * Narrow events to one resolved project, exact match on the enriched label
+ * (unlike {@link filterActivityEvents}'s cross-field substring). This is the
+ * `--project` flag: the label is canonical (a defined project's name) once the
+ * reader's resolver has run, so a multi-repo project matches as one bucket. Pure.
+ */
+export function filterActivityByProject(events: EnrichedActivityEvent[], project: string): EnrichedActivityEvent[] {
+  const name = project.trim();
+  if (!name) return events;
+  return events.filter((ev) => ev.project === name);
+}
+
 /** One rendered enriched line: the base activity line + `· project · ticket` tags. */
 export function formatEnrichedActivityLine(
   ev: EnrichedActivityEvent,
