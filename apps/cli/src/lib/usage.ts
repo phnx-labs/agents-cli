@@ -67,6 +67,19 @@ export function usageRejectedError(agent: string, status: number): string {
     ? `${agent} is rate-limiting the usage endpoint for this machine (HTTP 429).`
     : `${agent} rejected the usage read (HTTP ${status}).`;
 }
+/**
+ * The read threw rather than answering — a timeout, DNS/TLS failure, a payload
+ * that would not parse, a credential that would not decrypt. Every provider
+ * swallowed these into `error: null`, which is the same silence as an expired
+ * token: the caller renders a stale snapshot as confirmed. The cause is carried
+ * verbatim because these are the failures a user cannot otherwise see.
+ */
+export function usageUnreachableError(agent: string, cause?: unknown): string {
+  const detail = cause instanceof Error ? cause.message : typeof cause === 'string' ? cause : '';
+  return detail
+    ? `${agent} usage read failed: ${detail}`
+    : `${agent} usage read failed.`;
+}
 
 /**
  * True when a Claude OAuth access token is within the refresh leeway of expiry
@@ -721,8 +734,11 @@ async function getClaudeUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
       },
       error: null,
     };
-  } catch {
-    return { snapshot: null, error: 'Usage data unavailable right now.' };
+  } catch (err) {
+    // A thrown request (timeout, DNS, TLS, a malformed payload) is a failed
+    // read like any other — staying silent here would hand the caller a stale
+    // snapshot to render as confirmed, which is the bug this file just closed.
+    return { snapshot: null, error: usageUnreachableError('Claude', err) };
   }
 }
 
@@ -821,8 +837,11 @@ async function getKimiUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
       },
       error: null,
     };
-  } catch {
-    return { snapshot: null, error: null };
+  } catch (err) {
+    // A thrown request (timeout, DNS, TLS, a malformed payload) is a failed
+    // read like any other — staying silent here would hand the caller a stale
+    // snapshot to render as confirmed, which is the bug this file just closed.
+    return { snapshot: null, error: usageUnreachableError('Kimi', err) };
   }
 }
 
@@ -981,8 +1000,11 @@ async function getDroidUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
       },
       error: null,
     };
-  } catch {
-    return { snapshot: null, error: null };
+  } catch (err) {
+    // A thrown request (timeout, DNS, TLS, a malformed payload) is a failed
+    // read like any other — staying silent here would hand the caller a stale
+    // snapshot to render as confirmed, which is the bug this file just closed.
+    return { snapshot: null, error: usageUnreachableError('Droid', err) };
   }
 }
 
@@ -2104,7 +2126,10 @@ async function getCursorUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
       },
       error: null,
     };
-  } catch {
-    return { snapshot: null, error: null };
+  } catch (err) {
+    // A thrown request (timeout, DNS, TLS, a malformed payload) is a failed
+    // read like any other — staying silent here would hand the caller a stale
+    // snapshot to render as confirmed, which is the bug this file just closed.
+    return { snapshot: null, error: usageUnreachableError('Cursor', err) };
   }
 }

@@ -890,9 +890,10 @@ a stable per-account key:
   number as a fact. The cache is strictly per machine and never synced, so a box
   whose refresh is failing would otherwise route on day-old numbers indefinitely.
 - **A read that fails on the credential names the reason.** No readable
-  credential, a locally-expired one, and a rejected request are distinct errors
-  (`usageNoCredentialError` / `usageExpiredCredentialError` /
-  `usageRejectedError`, [`src/lib/usage.ts`](../src/lib/usage.ts)), not a silent
+  credential, a locally-expired one, a rejected request, and a request that threw
+  are distinct errors (`usageNoCredentialError` / `usageExpiredCredentialError` /
+  `usageRejectedError` / `usageUnreachableError`,
+  [`src/lib/usage.ts`](../src/lib/usage.ts)), not a silent
   null. All four networked providers — Claude, Kimi, Droid, Cursor — share them,
   because they share one cache fallback: a silent null in any of them presents a
   stale reading as confirmed. Because a usage read never refreshes a token,

@@ -1,8 +1,9 @@
-- **A usage read that fails on the credential now says so, instead of returning
-  a silent null.** Three branches in every networked usage fetch — Claude, Kimi,
-  Droid and Cursor — returned `{ snapshot: null, error: null }`: no readable
-  credential, a locally-expired one, and a rejected request. The caller could
-  not tell any of them apart from a healthy read, so it fell
+- **A usage read that fails now says so, instead of returning a silent null.**
+  Four branches in every networked usage fetch — Claude, Kimi, Droid and
+  Cursor — returned `{ snapshot: null, error: null }`: no readable credential, a
+  locally-expired one, a rejected request, and a request that threw (timeout,
+  DNS/TLS, an unparseable payload). The caller could not tell any of them apart
+  from a healthy read, so it fell
   back to whatever the stale-while-revalidate cache held and drew those bars as
   fact. Measured on `yosemite-s1`: every Claude account's stored access token had
   expired (one of them eleven days earlier), so no read could succeed, and

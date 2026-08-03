@@ -420,3 +420,34 @@ describe('every networked provider names the same three failures', () => {
     expect(usageExpiredCredentialError('Droid')).toContain('never refreshes');
   });
 });
+
+describe('a usage read that THROWS is still a failed read', () => {
+  // The re-review caught this: every provider swallowed a thrown request into
+  // `error: null`, so a timeout, a TLS failure, or a payload that will not parse
+  // handed the caller a stale snapshot to render as confirmed — the same silence
+  // as an expired token, through a different door.
+  //
+  // Driven through a real provider fetch (Kimi) with a credential file that
+  // cannot be parsed: JSON.parse throws inside the try, so the catch is the code
+  // under test and no network call is made.
+  let home: string;
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-usage-throw-'));
+    const dir = path.join(home, '.kimi-code', 'credentials');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'kimi-code.json'), '{ not json');
+  });
+
+  afterEach(() => {
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  it('names the agent and carries the cause, instead of returning null', async () => {
+    const usage = await getUsageInfo('kimi', { home });
+
+    expect(usage.snapshot).toBeNull();
+    expect(usage.error).toBeTruthy();
+    expect(usage.error).toContain('Kimi');
+  });
+});
