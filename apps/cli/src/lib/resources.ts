@@ -86,7 +86,14 @@ function resourceIsActive(kind: ResourceKind, name: string, source: string): boo
  */
 const DOC_BASENAMES = new Set(['readme', 'agents', 'claude', 'gemini']);
 
-function isDirectoryDoc(kind: ResourceKind, rawName: string): boolean {
+/**
+ * True when `rawName` (a filename with its extension already stripped) names a
+ * directory doc rather than a resource of `kind`. Exported so every enumerator
+ * shares one definition — `listCentralCommands` and `discoverCommands` in
+ * `commands.ts` do their own `readdirSync` scans, and without this they would
+ * list a `README` that `resolveResource` then refuses to open.
+ */
+export function isDirectoryDoc(kind: ResourceKind, rawName: string): boolean {
   if (kind === 'rules') return false;
   return DOC_BASENAMES.has(rawName.toLowerCase());
 }

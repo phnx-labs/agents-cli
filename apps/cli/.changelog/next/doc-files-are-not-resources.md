@@ -12,6 +12,13 @@
   convention — a resource *directory* named `agents/` is still a real resource.
   Verified against the real installed layers: 30 commands with `README` leaking
   before, 29 with none after.
+- **`agents commands list` and the command picker no longer offer a name that
+  cannot be opened.** `listCentralCommands` and `discoverCommands`
+  (`src/lib/commands.ts`) run their own `readdirSync` scans rather than going
+  through `listResources`, so they kept offering `README` while
+  `agents commands view README` answered "not found" — a listed-but-unopenable
+  name. Both now share the one exported `isDirectoryDoc` predicate, so every
+  enumerator agrees. Verified: 27 names with `README` before, 26 with none after.
 - **`agents commands add/remove/view` no longer suggest `README` as the example
   command name.** With `README` reserved as a directory doc, the six hardcoded
   examples in the help text and non-interactive hints named a command that can never
