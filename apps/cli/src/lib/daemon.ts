@@ -483,7 +483,7 @@ export async function runDaemon(): Promise<void> {
   // `catchup: false`, RUN late. Runs on a timer as well as at startup: a startup
   // pass alone misses a fire lost while the daemon stayed up but its event loop
   // was wedged, or one lost across an OS suspend that the process survived.
-  // Overlap guard, same shape as runSessionSync/runHealCheck below. A pass
+  // Overlap guard, same shape as runHealCheck below. A pass
   // awaits executeJobDetached per job and an off-box (host/cloud) dispatch can
   // block for a while, so a slow pass could still be working when the next tick
   // fires. Both passes would then see a job the first has not yet reached as

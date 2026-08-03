@@ -1,11 +1,15 @@
 /**
- * R2 credentials + this machine's stable identity, shared by every feature
- * that moves session transcripts through Cloudflare R2 — today
- * `agents sessions export --encrypt` / `import` (the shared `R2_SYNC_ENC_KEY`
- * transcript key), and this module's `R2Client` (`./r2.ts`) is reusable
- * transport for any future R2-backed feature. Credentials come from the
- * `r2.backups` secrets bundle (OS keychain on macOS, libsecret on Linux) —
- * never from env or disk.
+ * R2 credential resolution + this machine's stable identity. The only field
+ * `agents sessions export --encrypt` / `import` actually consume is the
+ * shared `R2_SYNC_ENC_KEY` transcript key (`resolveSyncEncKey`); the other R2
+ * fields (account/bucket/access keys) are validated here as a presence gate —
+ * no `r2.backups` bundle configured means no shared key, so export/import
+ * fall back to an ephemeral one. There is no R2 network client in this
+ * codebase today (it moved with the rest of the R2/CRDT background sync this
+ * bundle used to back — see git history for `./r2.ts`); a future R2-backed
+ * feature (an export destination, a fleet cache) would add one where it's
+ * actually wired. Credentials come from the `r2.backups` secrets bundle (OS
+ * keychain on macOS, libsecret on Linux) — never from env or disk.
  */
 
 import { readAndResolveBundleEnv, isHeadlessSecretsContext } from '../../secrets/bundles.js';
