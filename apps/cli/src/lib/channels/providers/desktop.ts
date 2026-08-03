@@ -115,11 +115,14 @@ export const desktopProvider: ChannelProvider = {
     // provider, and `agents notify` still requires notify.owner.to to be set.
     const id = opts.target || os.hostname();
 
-    const deliverable = desktopDeliverable();
-    if (!deliverable.ok) {
-      return { ok: false, channel: NAME, id, error: deliverable.reason };
-    }
-
+    // Order matters, and CI caught it: validate the CALLER first, then honour
+    // dry-run, and only then probe the platform.
+    //
+    // An empty message is a caller error on every platform, so it must not be
+    // masked by "this box has no notifier" — the specific, actionable error wins.
+    // And `--dry-run` means "resolve + build but do not send", so it must not
+    // depend on the ability to send; the sibling rush provider likewise returns
+    // ok for a dry run before its own `which rush` check (providers/rush.ts).
     const { title, body } = splitDesktopMessage(text);
     if (!title) {
       return { ok: false, channel: NAME, id, error: 'refusing to send an empty notification' };
@@ -127,6 +130,11 @@ export const desktopProvider: ChannelProvider = {
 
     if (opts.dryRun) {
       return { ok: true, channel: NAME, id };
+    }
+
+    const deliverable = desktopDeliverable();
+    if (!deliverable.ok) {
+      return { ok: false, channel: NAME, id, error: deliverable.reason };
     }
 
     notifyDesktop({ title, body });

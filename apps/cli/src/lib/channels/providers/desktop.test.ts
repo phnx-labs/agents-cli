@@ -64,7 +64,13 @@ describe('desktopProvider', () => {
     expect(listChannelProviders()).toContain('desktop');
   });
 
-  it('dry-run resolves without posting a notification', async () => {
+  // These two pin an ORDERING that CI caught and a dev box hides: a machine WITH
+  // notify-send passes them either way, so both bugs were invisible locally and
+  // only failed on a runner with no notifier. `--dry-run` means "resolve + build
+  // but do not send", so it must not depend on the ability to send; and an empty
+  // message is a caller error on every platform, so it must not be masked by
+  // "this box has no notifier". Both must therefore hold regardless of platform.
+  it('dry-run resolves even where nothing could actually be delivered', async () => {
     const res = await desktopProvider.send('hi', { target: 'local', dryRun: true });
     expect(res.ok).toBe(true);
     expect(res.channel).toBe('desktop');
@@ -77,11 +83,13 @@ describe('desktopProvider', () => {
   });
 
   // Empty text would post a blank banner the operator cannot act on, and on macOS
-  // MenubarHelper's one-shot exits 2 without a title. Fail loud instead.
-  it('refuses an empty message rather than posting a blank banner', async () => {
+  // MenubarHelper's one-shot exits 2 without a title. Fail loud instead — and with
+  // the CALLER's error, not the platform's, on a box with no notifier.
+  it('refuses an empty message with the caller error, not the platform error', async () => {
     const res = await desktopProvider.send('   \n  ', { target: 'local', dryRun: true });
     expect(res.ok).toBe(false);
     expect(res.error).toMatch(/empty/i);
+    expect(res.error).not.toMatch(/notify-send|no desktop notifier/);
   });
 
   // Runs the REAL send path (notifyDesktop is detached + best effort, so this
