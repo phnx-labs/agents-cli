@@ -117,4 +117,15 @@ describe('hotkeyToken', () => {
   it('degrades to an empty token when readline reports neither', () => {
     expect(hotkeyToken({})).toBe('');
   });
+
+  // The shifted form of an existing single-letter hotkey reached its binding
+  // through `key.name` before this token existed. Keying on the character alone
+  // would have retired `R`/`C`/`A` for anyone with caps lock on, so the lookup
+  // falls back to the name — which only works if the token and the name differ
+  // in exactly the way asserted here.
+  it('leaves the readline name available as the fallback for a shifted letter', () => {
+    const shifted = { name: 'r', sequence: 'R' };
+    expect(hotkeyToken(shifted)).toBe('R');
+    expect(shifted.name).toBe('r');
+  });
 });

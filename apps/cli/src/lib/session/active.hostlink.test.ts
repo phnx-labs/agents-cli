@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { foldHostLink, type ActiveSession } from './active';
+import { isAwaitingUser } from '../../commands/sessions.js';
 import { HOST_HEARTBEAT_STALE_MS } from './host-link';
 
 const staleWindow = Date.now() - HOST_HEARTBEAT_STALE_MS - 1;
@@ -92,5 +93,36 @@ describe('foldHostLink presence honesty', () => {
     const rows = [row({ status: 'idle', tmuxClients: 0, presence: 'parked' })];
     foldHostLink(rows);
     expect(rows[0].presence).toBe('parked');
+  });
+});
+
+/**
+ * `foldHostLink` rewrites `input_required` to `orphaned`, which quietly moved a
+ * session OUT of every consumer that recognised "needs a human" by that status —
+ * `--waiting`'s filter and its non-zero exit among them. A session waiting on a
+ * question with nobody watching is the most acute case those consumers exist to
+ * surface, not one they should drop, so the predicate reads the `activity` the
+ * fold never rewrites.
+ */
+describe('a lost host does not hide a session that needs a human', () => {
+  it('still counts as awaiting after the fold turns it orphaned', () => {
+    const rows = [row({ status: 'input_required', activity: 'waiting_input', tmuxClients: 0 })];
+    foldHostLink(rows);
+    expect(rows[0].status).toBe('orphaned');
+    expect(isAwaitingUser(rows[0])).toBe(true);
+  });
+
+  it('a plain waiting session is unaffected', () => {
+    const rows = [row({ status: 'input_required', activity: 'waiting_input', tmuxClients: 1 })];
+    foldHostLink(rows);
+    expect(rows[0].status).toBe('input_required');
+    expect(isAwaitingUser(rows[0])).toBe(true);
+  });
+
+  it('an orphaned IDLE session is not awaiting — it is stranded, not blocked on you', () => {
+    const rows = [row({ status: 'idle', activity: 'idle', tmuxClients: 0 })];
+    foldHostLink(rows);
+    expect(rows[0].status).toBe('orphaned');
+    expect(isAwaitingUser(rows[0])).toBe(false);
   });
 });

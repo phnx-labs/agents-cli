@@ -509,9 +509,12 @@ The two signals behind them:
   means "cannot tell", never zero.
 
   Note the separator: tmux **sanitizes non-printable characters out of format output**
-  (3.6a rewrites a literal tab to `_`), so every `-F` query here uses a printable
-  `TMUX_FIELD_SEP`. `listTmuxAgentSessions` split on `\t` and therefore returned zero
-  rows on any such tmux — fixed alongside this.
+  (3.6a rewrites a literal tab — and any non-ASCII sentinel — to `_`), so every `-F`
+  query here uses `TMUX_FIELD_SEP`. `listTmuxAgentSessions` split on `\t` and therefore
+  returned zero rows on any such tmux — fixed alongside this. The separator is `:`
+  specifically because tmux replaces `:` and `.` in a *session name* with `_`, so it
+  provably cannot occur in the one free-text field that is not last;
+  `pane_current_path` (which may contain `:`) is queried last and its tail rejoined.
 - **The IDE window heartbeat** — the `at` stamp on each window's slice of
   `live-terminals.json`. The Factory extension force-republishes every 4 minutes, so a
   slice older than `HOST_HEARTBEAT_STALE_MS` (10 minutes, the same window the extension

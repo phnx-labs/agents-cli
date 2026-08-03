@@ -342,14 +342,22 @@ export const ABANDONED_STALE_MS = 2 * 24 * 60 * 60_000;
 /**
  * Field separator for every `tmux list-panes -F` query here.
  *
- * NOT a tab: tmux sanitizes non-printable characters out of format output (3.6a
- * rewrites a literal tab to `_`), so a tab-separated format comes back as one
- * unsplittable field. {@link listTmuxAgentSessions} split on `\t`, so on such a
- * tmux every line failed its `sessName` guard and the function returned ZERO
- * rows — silently losing the authoritative tmux source (exact `%pane`, real
- * identities) on every box running a recent tmux. A printable separator survives.
+ * NOT a tab. tmux sanitizes non-printable characters out of format output (3.6a
+ * rewrites a literal tab — and any non-ASCII sentinel — to `_`), so a
+ * tab-separated format comes back as one unsplittable field.
+ * {@link listTmuxAgentSessions} split on `\t`, so on such a tmux every line
+ * failed its `sessName` guard and the function returned ZERO rows, silently
+ * losing the authoritative tmux source (exact `%pane`, real identities) on every
+ * box running a recent tmux.
+ *
+ * `:` specifically, and not some other printable: tmux itself replaces `:` (and
+ * `.`) in a session name with `_`, so the separator provably cannot occur inside
+ * the one free-text field that is not last. A path CAN contain `:`, which is why
+ * `pane_current_path` is queried last and its tail rejoined rather than
+ * destructured. A separator that a session name may contain — `|`, say — would
+ * just reintroduce the same class of bug with a lower probability.
  */
-const TMUX_FIELD_SEP = '|';
+const TMUX_FIELD_SEP = ':';
 
 /** Executables we recognize as agent CLIs when scanning the process table. */
 const AGENT_CLI_NAMES: Record<string, string> = {

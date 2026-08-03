@@ -11,6 +11,7 @@ import chalk from 'chalk';
 import type { Command } from 'commander';
 import { setHelpSections } from '../lib/help.js';
 import { findSessionsById } from '../lib/session/db.js';
+import { isCompleteSessionId } from '../lib/session/discover.js';
 import { isFavorite, listFavorites, setFavorite } from '../lib/session/favorites.js';
 
 interface FavoriteOptions {
@@ -25,7 +26,15 @@ interface FavoriteOptions {
  */
 export function resolveFavoriteTarget(idQuery: string): { id: string } | { error: string } {
   const matches = findSessionsById(idQuery);
-  if (matches.length === 0) return { error: `No session matches "${idQuery}".` };
+  // A COMPLETE id needs no index entry: the id is the key the store is built on,
+  // and requiring a transcript row would refuse exactly the newest sessions — a
+  // live one that has not been indexed yet. The browser's `*` stars those from
+  // the live row, so demanding a DB hit here would make the two disagree.
+  if (matches.length === 0) {
+    return isCompleteSessionId(idQuery.trim())
+      ? { id: idQuery.trim() }
+      : { error: `No session matches "${idQuery}".` };
+  }
   if (matches.length > 1) {
     const ids = matches.slice(0, 5).map((m) => m.shortId).join(', ');
     return { error: `"${idQuery}" matches ${matches.length} sessions (${ids}…) — use a longer id.` };

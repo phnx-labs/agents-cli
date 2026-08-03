@@ -646,7 +646,9 @@ export async function runSessionBrowser(
         // reload so the row's star is repainted — labels are memoized per row.
         return { flash: on ? `★ favorited ${active.shortId}` : `☆ unfavorited ${active.shortId}`, reload: true };
       }
-      if (name === 'y') {
+      // Both cases: `hotkeyToken` hands `onKey` the literal character, and this
+      // key worked with caps lock on before it existed.
+      if (name === 'y' || name === 'Y') {
         // Thread the live search query so the copied command reproduces the
         // exact view — the human→agent bridge must include the search term.
         const cmd = 'ag ' + browserFilterToArgv(f, query).join(' ');

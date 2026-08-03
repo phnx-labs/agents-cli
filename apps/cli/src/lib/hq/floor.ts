@@ -128,6 +128,11 @@ function teammateName(session: ActiveSession, teammatesById: Map<string, AgentSt
 
 function moodForSession(session: ActiveSession, hasOpenBlock: boolean): HqAgentMood {
   if (session.status === 'abandoned') return 'blocked';
+  // A crashed session is NOT `done` — it stopped without finishing, and its last
+  // parsed turn often still says `working`, which would otherwise reach the Floor
+  // as a happily-running agent. Both lost-host states need a human.
+  if (session.status === 'crashed') return 'blocked';
+  if (session.status === 'orphaned') return 'waiting';
   if (session.status === 'closed') return 'done';
   if (session.status === 'input_required' || session.activity === 'waiting_input' || hasOpenBlock) return 'waiting';
   if (session.rateLimited) return 'blocked';

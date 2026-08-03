@@ -69,10 +69,10 @@ describe.skipIf(skipReason)('tmux attached-client fold', () => {
     });
     const printable = await runTmux({
       socket,
-      args: ['list-panes', '-a', '-F', '#{pane_id}|#{session_attached}'],
+      args: ['list-panes', '-a', '-F', '#{pane_id}:#{session_attached}'],
       throwOnError: false,
     });
-    expect(printable.stdout.split('\n')[0].split('|')).toHaveLength(2);
+    expect(printable.stdout.split('\n')[0].split(':')).toHaveLength(2);
     // Document the actual tmux behavior this separator choice exists for: on a
     // tmux that sanitizes the tab, the tab-split yields one field, not two.
     const tabFields = tabbed.stdout.split('\n')[0].split('\t').length;
@@ -94,5 +94,36 @@ describe.skipIf(skipReason)('tmux attached-client fold', () => {
     const plain: ActiveSession = { context: 'terminal', kind: 'claude', status: 'idle' };
     await foldTmuxClients([plain]);
     expect(plain.tmuxClients).toBeUndefined();
+  });
+});
+
+/**
+ * The separator has to be one tmux cannot emit inside a field, or the tab bug
+ * comes back with a lower probability. tmux replaces `:` and `.` in a session
+ * name with `_`, which is what makes `:` provably safe for the fields ahead of
+ * the path — and a session name is the one free-text field that is not last.
+ */
+describe.skipIf(skipReason)('tmux format separator safety', () => {
+  it('cannot appear in a session name — tmux rewrites it', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-tmux-sep-'));
+    const sock = path.join(dir, 'server.sock');
+    try {
+      await runTmux({ socket: sock, args: ['new-session', '-d', '-s', 'has:colon.dot', 'sleep', '60'] });
+      const res = await runTmux({ socket: sock, args: ['list-sessions', '-F', '#{session_name}'] });
+      const name = res.stdout.trim();
+      expect(name).not.toContain(':');
+      expect(name).toBe('has_colon_dot');
+      // So a 4-field query still splits into exactly 4 leading fields.
+      const panes = await runTmux({
+        socket: sock,
+        args: ['list-panes', '-a', '-F', '#{pane_id}:#{session_name}:#{pane_pid}:#{pane_current_path}'],
+      });
+      const parts = panes.stdout.split('\n').filter(Boolean)[0].split(':');
+      expect(parts.length).toBeGreaterThanOrEqual(4);
+      expect(parts[1]).toBe('has_colon_dot');
+    } finally {
+      await runTmux({ socket: sock, args: ['kill-server'], throwOnError: false });
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

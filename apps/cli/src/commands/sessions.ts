@@ -529,6 +529,19 @@ export function liveStatusWord(a: ActiveSession | undefined): string {
   return '';
 }
 
+/**
+ * True when a session is blocked on a human — the `--waiting` contract.
+ *
+ * NOT `status === 'input_required'`. `foldHostLink` rewrites that status to
+ * `orphaned` when nothing is attached, and a session waiting on a question with
+ * NOBODY watching is the most acute case `--waiting` exists to surface, not one
+ * it should drop. The underlying `activity` is never rewritten, so it is the
+ * honest signal here.
+ */
+export function isAwaitingUser(s: ActiveSession): boolean {
+  return s.status === 'input_required' || s.activity === 'waiting_input';
+}
+
 /** Width of the live status column — `crashed` is the longest word it renders. */
 const LIVE_STATUS_W = 8;
 
@@ -923,9 +936,15 @@ function groupTally(sessions: ActiveSession[]): string {
   const running = sessions.filter(s => s.status === 'running').length;
   const idle = sessions.filter(s => s.status === 'idle').length;
   const waiting = sessions.filter(s => s.status === 'input_required').length;
+  // Counted by status, deliberately: an orphaned session gets its own bucket
+  // below, so counting it here too would double-count it in the tally.
   const queued = sessions.filter(s => s.status === 'queued').length;
   const closed = sessions.filter(s => s.status === 'closed').length;
   const abandoned = sessions.filter(s => s.status === 'abandoned').length;
+  // Without these two the tally silently loses rows: every status must have a
+  // bucket or "N active (…)" stops adding up to what the list shows.
+  const orphaned = sessions.filter(s => s.status === 'orphaned').length;
+  const crashed = sessions.filter(s => s.status === 'crashed').length;
   const unknown = sessions.filter(s => s.status === 'unknown').length;
   const parts: string[] = [];
   if (running) parts.push(`${running} running`);
@@ -934,6 +953,8 @@ function groupTally(sessions: ActiveSession[]): string {
   if (queued) parts.push(`${queued} queued`);
   if (closed) parts.push(`${closed} closed`);
   if (abandoned) parts.push(`${abandoned} abandoned`);
+  if (orphaned) parts.push(`${orphaned} orphaned`);
+  if (crashed) parts.push(`${crashed} crashed`);
   if (unknown) parts.push(`${unknown} unknown`);
   return parts.join(' · ');
 }
@@ -1103,14 +1124,23 @@ export async function gatherActiveSessions(
 async function renderActiveSessions(
   asJson: boolean,
   waitingOnly = false,
-  opts: { local?: boolean; hosts?: string[] } = {},
+  opts: { local?: boolean; hosts?: string[]; favoritesOnly?: boolean } = {},
 ): Promise<void> {
   const self = machineId();
-  const { sessions: merged, remoteDeviceCount } = await gatherActiveSessions(opts);
+  const gathered = await gatherActiveSessions(opts);
+  const { remoteDeviceCount } = gathered;
+  // --favorites narrows the live view too. Applied HERE, not only in the
+  // browser: the browser is skipped for --json, --waiting, a pipe, a multi-host
+  // scope, and an SSH-fanout peer, and the flag silently did nothing on every
+  // one of those paths — including `--active --favorites --json`, which is
+  // exactly what the browser's own `y` copy-cmd hands to an agent.
+  const merged = opts.favoritesOnly
+    ? gathered.sessions.filter((s) => !!s.sessionId && listFavorites().has(s.sessionId))
+    : gathered.sessions;
 
   // --waiting: only sessions blocked on the user. Exits non-zero when any are
   // present so a supervising agent or hook can poll it as a gate.
-  const sessions = waitingOnly ? merged.filter(s => s.status === 'input_required') : merged;
+  const sessions = waitingOnly ? merged.filter(isAwaitingUser) : merged;
 
   if (asJson) {
     process.stdout.write(JSON.stringify(serializeActiveSessionsForJson(sessions), null, 2) + '\n');
@@ -1431,6 +1461,7 @@ async function sessionsAction(
     await renderActiveSessions(options.json === true, options.waiting === true, {
       local: forceLocal,
       hosts: options.host,
+      favoritesOnly: options.favorites === true,
     });
     return;
   }

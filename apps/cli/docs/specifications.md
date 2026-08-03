@@ -256,9 +256,17 @@ SSH access (§7); rendering sessions that no harness produced.
   be RETAINED by `readLiveTerminals` so the session reaches the listing at all —
   dropping it made a crashed session indistinguishable from one that never ran
   (test `active.registry-retention.test.ts`). Every `tmux -F` format query MUST
-  use a printable field separator: tmux sanitizes non-printable characters out of
-  format output, so a tab-separated format returns one unsplittable field (test
-  `active.tmux-clients.test.ts`).
+  use a separator tmux cannot emit inside a field: it sanitizes non-printable
+  characters out of format output, so a tab-separated format returns one
+  unsplittable field, and a printable separator a session name MAY contain merely
+  lowers the probability of the same bug. `:` is safe because tmux itself
+  rewrites `:`/`.` in a session name; the one field that may contain it
+  (`pane_current_path`) MUST be queried last (test `active.tmux-clients.test.ts`).
+  Consumers that read `ActiveStatus` MUST handle `orphaned`/`crashed` rather than
+  falling through to a stale `activity` — the `--waiting` filter reads the
+  never-rewritten activity via `isAwaitingUser`, the `--active` tally carries a
+  bucket per status, and the HQ Floor maps both to a needs-a-human mood
+  (`lib/hq/floor.ts`; tests `active.hostlink.test.ts`, `floor.test.ts`).
 - **SES-18b (MUST).** A favorite MUST be stored outside `sessions.db`
   (`~/.agents/.history/favorites.json`, keyed by session id;
   `lib/session/favorites.ts`), because the index is a rebuildable cache and a

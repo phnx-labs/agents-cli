@@ -14,3 +14,7 @@
   `#{session_attached}` and the IDE window's registry heartbeat — never from a
   deliberate `agents sessions detach`, and never over a session that is still working.
   Source: `apps/cli/src/lib/session/host-link.ts`, `apps/cli/src/lib/session/active.ts`.
+- **`agents sessions --active --favorites` now actually filters.** The flag was wired
+  into the interactive browser only, so every path that skips it — `--json`,
+  `--waiting`, a pipe, a multi-host scope, an SSH-fanout peer — silently returned the
+  whole fleet. Source: `apps/cli/src/commands/sessions.ts`.

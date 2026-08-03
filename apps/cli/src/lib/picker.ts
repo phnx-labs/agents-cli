@@ -483,6 +483,11 @@ export interface DynamicPickerConfig<T, F> {
  * apart — and gives a punctuation key like `*` no name at all. Keying on the
  * character makes shifted letters and punctuation bindable, and is a no-op for
  * every existing binding: for a plain lowercase letter, sequence === name.
+ *
+ * Callers receiving this in `onKey` see the literal character, so a handler that
+ * wants to accept both cases of a letter must say so (`'y'` and `'Y'`); the
+ * keyBindings lookup falls back to the key NAME, which keeps the shifted form of
+ * an existing single-letter binding working without each caller restating it.
  */
 export function hotkeyToken(key: { name?: string; sequence?: string; ctrl?: boolean; meta?: boolean }): string {
   const seq = key.sequence;
@@ -663,7 +668,12 @@ export function dynamicPicker<T, F>(config: DynamicPickerConfig<T, F>): Promise<
         return;
       }
       const token = hotkeyToken(key);
-      const binding = cfg.keyBindings?.[token];
+      // Exact character first (so `*` and a shifted `F` are addressable), then
+      // the readline name. The fallback is what preserves the shifted form of an
+      // existing single-letter hotkey: `R`/`C`/`A` used to reach their bindings
+      // via `key.name`, and keying on the character alone would silently retire
+      // them for anyone with caps lock on.
+      const binding = cfg.keyBindings?.[token] ?? cfg.keyBindings?.[key.name ?? ''];
       if (binding) {
         const next = binding(filter);
         if (!Object.is(next, filter)) setFilter(next);

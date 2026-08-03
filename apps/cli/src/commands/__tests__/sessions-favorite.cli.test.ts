@@ -67,6 +67,61 @@ describe('agents sessions favorite (real CLI parse)', () => {
     expect(parsed.results[0].error).toContain('No session matches');
   });
 
+  // `--favorites` was wired into the interactive BROWSER only, so on every path
+  // that skips the browser — --json, --waiting, a pipe, a multi-host scope, an
+  // SSH-fanout peer — the flag silently did nothing and `--active --favorites`
+  // returned the whole fleet. That is the exact command the browser's own `y`
+  // copy-cmd hands to an agent.
+  it('narrows --active to the starred sessions, not just in the browser', () => {
+    const registry = path.join(home, '.agents', '.cache', 'terminals', 'live-terminals.json');
+    fs.mkdirSync(path.dirname(registry), { recursive: true });
+    const starred = 'aaaaaaaa-0000-0000-0000-000000000001';
+    const other = 'bbbbbbbb-0000-0000-0000-000000000002';
+    fs.writeFileSync(
+      registry,
+      JSON.stringify({
+        w: {
+          at: new Date().toISOString(),
+          entries: [starred, other].map((sessionId) => ({
+            sessionId,
+            pid: process.pid,
+            kind: 'claude',
+            cwd: home,
+            startedAtMs: Date.now(),
+          })),
+        },
+      }),
+    );
+
+    const all = JSON.parse(run(['sessions', '--active', '--local', '--json']).stdout) as { sessionId?: string }[];
+    expect(all.filter((r) => r.sessionId === starred || r.sessionId === other)).toHaveLength(2);
+
+    expect(run(['sessions', 'favorite', starred]).status).toBe(0);
+    const only = JSON.parse(run(['sessions', '--active', '--favorites', '--local', '--json']).stdout) as {
+      sessionId?: string;
+    }[];
+    expect(only.map((r) => r.sessionId)).toEqual([starred]);
+
+    // Leave the store clean for the other cases in this file.
+    run(['sessions', 'favorite', starred, '--remove']);
+    fs.rmSync(registry, { force: true });
+  });
+
+  it('stars a complete id with no transcript row — a live session may not be indexed yet', () => {
+    const fresh = 'cccccccc-0000-0000-0000-000000000003';
+    expect(run(['sessions', 'favorite', fresh]).status).toBe(0);
+    expect(JSON.parse(run(['sessions', 'favorite', '--list', '--json']).stdout)).toEqual({ favorites: [fresh] });
+    run(['sessions', 'favorite', fresh, '--remove']);
+  });
+
+  it('still refuses a partial id that resolves to nothing', () => {
+    // Only a COMPLETE id skips the index; a short prefix must still fail loudly
+    // rather than starring an id that names no session at all.
+    const res = run(['sessions', 'favorite', 'ccccc']);
+    expect(res.status).toBe(1);
+    expect(res.stderr).toContain('No session matches');
+  });
+
   it('lists the favorite flag on its own --help', () => {
     const res = run(['sessions', 'favorite', '--help']);
     expect(res.stdout).toContain('--json');
