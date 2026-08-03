@@ -16,7 +16,8 @@ describe('buildForkSessionRequest', () => {
     });
     if (!request.ok) throw new Error('expected fork request');
     expect(buildAgentLaunchCommand(
-      request.agentKey, null, undefined, undefined, undefined, request.strategy, undefined, request.host, request.local,
+      request.agentKey, null, undefined, undefined, undefined, request.strategy, undefined,
+      { host: request.host, local: request.local },
     )).toBe('agents run codex --interactive --strategy balanced --mode auto');
   });
 
@@ -32,7 +33,8 @@ describe('buildForkSessionRequest', () => {
     });
     if (!request.ok) throw new Error('expected fork request');
     const command = buildAgentLaunchCommand(
-      request.agentKey, 'new-session', undefined, undefined, undefined, request.strategy, undefined, request.host, request.local,
+      request.agentKey, 'new-session', undefined, undefined, undefined, request.strategy, undefined,
+      { host: request.host, local: request.local },
     );
     expect(command).toContain("--host 'yosemite-s0'");
     expect(command).toContain('--session-id new-session');

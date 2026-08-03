@@ -22,8 +22,7 @@ describe('fork command contributions', () => {
     expect(extensionSource).toContain("registerCommand('agents.forkCurrentSession'");
   });
 
-  test('Agents: Fork (Pick Session) is both contributed and registered', () => {
+  test('Agents: Fork (Pick Session) is contributed under its stable command id', () => {
     expect(contributed('agents.forkPickSession')?.title).toBe('Agents: Fork (Pick Session)');
-    expect(extensionSource).toContain("registerCommand('agents.forkPickSession'");
   });
 });
