@@ -32,7 +32,7 @@ import { BacklogCenter } from './BacklogCenter'
 import { PrBoardPane } from './PrBoardPane'
 import { buildPrBoard, collectPrUrls, type PrStatusLike } from './prBoardModel'
 import { RecapPane } from './RecapPane'
-import { buildRecap } from './recapModel'
+import { buildRecap, type RecapForkEdge } from './recapModel'
 import { TaskDetail } from '../bench/TaskDetail'
 import type { FlatTask } from '../bench/TaskCard'
 import { TicketDetail } from './TicketDetail'
@@ -652,6 +652,9 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   // Recap ledger: fleet-wide recent (ended) sessions. null = not fetched yet — the
   // sweep is expensive (SSH fan-out), so it runs lazily when the Recap center opens.
   const [recapSessions, setRecapSessions] = useState<RemoteSessionLike[] | null>(null)
+  // Fork edges recorded at launch by `Agents: Fork …` — what lets the ledger pair
+  // a fork back up with the session it came from (their ids share nothing).
+  const [recapForkEdges, setRecapForkEdges] = useState<RecapForkEdge[]>([])
   const [floorSort, setFloorSort] = useState<FloorSort>('needs')
   // Group the live feed by an axis. Defaults to 'outcome' (ticket/PR/worktree) so a
   // fleet-scale floor shows deliverables, not ~1,100 agents (RUSH-1479). NEEDS YOU
@@ -808,6 +811,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
         }
       } else if (msg?.type === 'recapSessions') {
         setRecapSessions(Array.isArray(msg.sessions) ? (msg.sessions as RemoteSessionLike[]) : [])
+        setRecapForkEdges(Array.isArray(msg.forkEdges) ? (msg.forkEdges as RecapForkEdge[]) : [])
       }
     }
     window.addEventListener('message', onMsg)
@@ -1554,8 +1558,8 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   const recapDays = useMemo(() => {
     if (!recapSessions) return []
     const liveIds = new Set(floorAgents.map((a) => a.sessionId).filter((id): id is string => !!id))
-    return buildRecap(recapSessions, liveIds, Date.now())
-  }, [recapSessions, floorAgents])
+    return buildRecap(recapSessions, liveIds, Date.now(), recapForkEdges)
+  }, [recapSessions, floorAgents, recapForkEdges])
 
   const feedPartition = useMemo(() => partitionFloorAgents(scopedAgents), [scopedAgents])
   const needsAgents = feedPartition.needs

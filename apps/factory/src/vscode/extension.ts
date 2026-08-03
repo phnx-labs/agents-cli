@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { BUILT_IN_AGENTS, getBuiltInByKey, getBuiltInDefByTitle, getBuiltInByPrefix, STRATEGY_LAUNCH_AGENTS, modeFlagForAgent, AgentLaunchMode, RunStrategy, buildAgentLaunchCommand, wrapNativeAgentCommand, shquote } from '../core/agents';
+import { BUILT_IN_AGENTS, getBuiltInByKey, getBuiltInDefByTitle, getBuiltInByPrefix, STRATEGY_LAUNCH_AGENTS, usesManagedAgentLaunch, modeFlagForAgent, AgentLaunchMode, RunStrategy, buildAgentLaunchCommand, wrapNativeAgentCommand, shquote } from '../core/agents';
 import { loadAutoLaunchPreferences, isAutoLaunchEnabled, isAutoLaunchPreferred } from '../core/deviceAutoLaunch';
 import { parseSpawnRequest, resolveSpawnSurface, SpawnRequest } from '../core/spawn';
 import {
@@ -114,6 +114,8 @@ import {
   type HostPickerCache,
 } from '../core/hostPickerCache';
 import { buildForkSessionRequest } from '../core/forkSession';
+import { handleForkPickHost, registerForkPickHostCommand, remoteForkSessionId, resolveForkSessionId } from './forkCommands.vscode';
+import { FORK_LINEAGE_KEY, recordForkEdge, type ForkEdge } from '../core/forkLineage';
 import {
   buildSessionBrowserRows,
   cleanSessionTopic,
@@ -1742,6 +1744,11 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand('agents.forkCurrentSession', () => forkCurrentSession(context))
   );
+
+  context.subscriptions.push(registerForkPickHostCommand(
+    vscode.commands.registerCommand,
+    () => forkCurrentSession(context, { pickHost: true }),
+  ));
 
   context.subscriptions.push(
     registerForkPickSessionCommand(vscode.commands.registerCommand, () => forkPickedSession(context))
@@ -3783,10 +3790,12 @@ export async function openSingleAgentWithQueue(
   // `cwd` starts the local terminal and, for an ordinary `host` launch, is sent
   // as portable `--cwd` for agents-cli to re-root. `remoteCwd` is already exact
   // on `host` and is reserved for a picked historical session.
-  opts?: { cwd?: string; remoteCwd?: string; mode?: AgentLaunchMode; sessionId?: string; strategy?: RunStrategy; host?: string; local?: boolean }
+  // `viewColumn` places the new tab: `Active` (the default) takes over the
+  // current group, `Beside` splits so the launch sits next to what spawned it.
+  opts?: { cwd?: string; remoteCwd?: string; mode?: AgentLaunchMode; sessionId?: string; strategy?: RunStrategy; host?: string; local?: boolean; viewColumn?: vscode.ViewColumn }
 ): Promise<{ terminalId: string; sessionId: string | null }> {
   const editorLocation: vscode.TerminalEditorLocationOptions = {
-    viewColumn: vscode.ViewColumn.Active,
+    viewColumn: opts?.viewColumn ?? vscode.ViewColumn.Active,
     preserveFocus: false
   };
 
@@ -3818,8 +3827,7 @@ export async function openSingleAgentWithQueue(
   // their session post-spawn. opts?.mode defaults to 'auto' (writable-but-gated)
   // inside buildAgentLaunchCommand when the caller does not supply an explicit mode.
   const targetHost = opts?.host && opts.host !== 'local' ? opts.host : undefined;
-  const LAUNCHABLE_SET: ReadonlySet<string> = new Set(['claude', 'codex', 'gemini', 'opencode', 'cursor', 'antigravity']);
-  if (agentKey && (LAUNCHABLE_SET.has(agentKey) || targetHost)) {
+  if (agentKey && usesManagedAgentLaunch(agentKey, targetHost)) {
     if (agentKey === 'claude') {
       // Claude: generate session ID at open time; others are discovered post-spawn.
       // A caller (dispatch) may pre-supply the id so it can watch that exact
@@ -4899,7 +4907,21 @@ async function spawnWithContext(context: vscode.ExtensionContext): Promise<void>
   await openSingleAgentWithQueue(context, entry.agentConfig, [`/continue ${entry.sessionId}`]);
 }
 
-async function forkCurrentSession(context: vscode.ExtensionContext): Promise<void> {
+/**
+ * `Agents: Fork` — a sibling of the tab you are sitting in, same harness, same
+ * transcript, on the machine the session already lives on.
+ *
+ * `Agents: Fork (Pick Host)` (`pickHost: true`) is the same fork with one extra
+ * step: you choose the device first, and the sibling starts THERE. Everything
+ * else is deliberately held constant — the harness is the source's harness, and
+ * the account still rotates through `--strategy balanced` — so the only variable
+ * is the machine. The pair is recorded as a fork edge so the Recap ledger can
+ * show parent and fork side by side once they finish.
+ */
+async function forkCurrentSession(
+  context: vscode.ExtensionContext,
+  opts: { pickHost?: boolean } = {},
+): Promise<void> {
   const activeTerminal = vscode.window.activeTerminal;
   if (!activeTerminal) {
     vscode.window.showErrorMessage('No active terminal to fork.');
@@ -4917,26 +4939,126 @@ async function forkCurrentSession(context: vscode.ExtensionContext): Promise<voi
     return;
   }
 
-  const request = buildForkSessionRequest({
+  const source = {
     sessionId: entry.sessionId,
     agentKey: entry.agentType ?? prefixToAgentType(entry.agentConfig.prefix) ?? undefined,
+    // Where the TRANSCRIPT is. A moved fork has to read it from here, wherever
+    // it ends up running.
     host: entry.host,
-  });
-  if (!request.ok) {
-    vscode.window.showErrorMessage(
-      request.reason === 'no_session'
-        ? 'No session ID found for the active terminal.'
-        : 'No agent harness found for the active terminal.',
-    );
+    localHost: LOCAL_MACHINE_ID,
+  };
+
+  if (opts.pickHost) {
+    await handleForkPickHost({
+      source,
+      pickHost: async (agentKey) => {
+        const harness = getBuiltInByKey(agentKey)?.title ?? agentKey;
+        return pickLaunchHost(context, `Fork this ${harness} session — run on…`, agentKey);
+      },
+      openFork: async ({ prompt, strategy, host, local, viewColumn }) => openSingleAgentWithQueue(
+        context,
+        entry.agentConfig!,
+        [prompt],
+        { strategy, host, local, viewColumn },
+      ),
+      recordFork: (edge) => { void recordFork(context, edge); },
+      showRejection: showForkRejection,
+      viewColumn: vscode.ViewColumn.Beside,
+      now: Date.now,
+    });
     return;
   }
 
-  await openSingleAgentWithQueue(context, entry.agentConfig, [request.prompt], {
+  // The standard command keeps the source session on its own host.
+  const request = buildForkSessionRequest(source);
+  if (!request.ok) {
+    showForkRejection(request.reason);
+    return;
+  }
+
+  // Land the fork BESIDE its parent, not on top of it. A fork exists to be
+  // compared with the session it came from, so the two tabs share the screen.
+  const { terminalId, sessionId } = await openSingleAgentWithQueue(context, entry.agentConfig, [request.prompt], {
     strategy: request.strategy,
     host: request.host,
     local: request.local,
+    viewColumn: vscode.ViewColumn.Beside,
   });
+
+  void recordFork(context, {
+    sourceSessionId: request.sessionId,
+    sourceHost: request.sourceHost ?? LOCAL_MACHINE_ID,
+    forkSessionId: sessionId,
+    forkHost: request.host ?? LOCAL_MACHINE_ID,
+    agentKey: request.agentKey,
+    forkedAt: Date.now(),
+    terminalId,
+  });
+
+  const where = request.host ?? 'this Mac';
+  vscode.window.setStatusBarMessage(
+    request.moved
+      ? `Forked ${shortSessionId(request.sessionId)} onto ${where} — it reads the transcript from ${request.sourceHost ?? LOCAL_MACHINE_ID}`
+      : `Forked ${shortSessionId(request.sessionId)} on ${where}`,
+    5000,
+  );
 }
+
+function showForkRejection(reason: 'no_session' | 'no_agent'): void {
+  vscode.window.showErrorMessage(
+    reason === 'no_session'
+      ? 'No session ID found for the active terminal.'
+      : 'No agent harness found for the active terminal.',
+  );
+}
+
+/** First segment of a session id — enough to recognize it, short enough for a status line. */
+function shortSessionId(sessionId: string): string {
+  return sessionId.split('-')[0] ?? sessionId;
+}
+
+/**
+ * Persist the fork edge. Claude mints its session id at launch, so the pair is
+ * complete immediately; every other harness discovers its id after the CLI
+ * writes the first transcript line, so we watch the terminal entry until the id
+ * lands and record the finished edge then. A fork whose id never appears (the
+ * tab was closed first) is recorded idless — an honest "this fork happened",
+ * which the ledger skips rather than pairing wrongly.
+ */
+async function recordFork(
+  context: vscode.ExtensionContext,
+  edge: ForkEdge & { terminalId: string },
+): Promise<void> {
+  const { terminalId, ...base } = edge;
+  const save = async (forkSessionId: string | null) => {
+    const edges = context.globalState.get<ForkEdge[]>(FORK_LINEAGE_KEY, []);
+    await context.globalState.update(FORK_LINEAGE_KEY, recordForkEdge(edges, { ...base, forkSessionId }));
+  };
+
+  const forkSessionId = await resolveForkSessionId({
+    initialSessionId: base.forkSessionId,
+    terminalId,
+    forkHost: base.forkHost,
+    localHost: LOCAL_MACHINE_ID,
+    attempts: FORK_ID_WAIT_MS / FORK_ID_POLL_MS,
+    wait: () => new Promise(resolve => setTimeout(resolve, FORK_ID_POLL_MS)),
+    readLocal: id => terminals.getById(id)?.sessionId ?? null,
+    readRemote: async (host, id) => {
+      try {
+        const { runAgents } = await import('../core/agentsBin');
+        return remoteForkSessionId(runAgents, host, id, shquote);
+      } catch {
+        return null;
+      }
+    },
+  });
+  await save(forkSessionId);
+}
+
+// A harness that discovers its session id post-spawn writes the first transcript
+// line within a few seconds; a minute is generous cover for a cold remote start.
+const FORK_ID_POLL_MS = 2_000;
+const FORK_ID_WAIT_MS = 60_000;
 
 // --- The session browser (Agents: Fork (Pick Session)) ----------------------
 // `Agents: Fork` forks the tab you are sitting in. This is the other half: browse

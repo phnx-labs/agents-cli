@@ -6,6 +6,23 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **`Agents: Fork (Pick Host)` forks the session you are in onto a device you choose.**
+  Same fork as `Agents: Fork` — same harness, same `--strategy balanced` account
+  rotation — with the device picked first, from the same picker the
+  `New <Agent> (Pick Host)` commands use. A fork that moves machines gets a
+  `--device <source machine>` suffix on its `/continue` prompt, because a single-id
+  lookup does not fan out across the fleet and the transcript stays where it was
+  written. The sibling tab opens *beside* its parent instead of on top of it.
+  Source: `src/core/forkSession.ts`, `src/vscode/extension.ts`.
+- **Recap shows a fork next to the session it came from.** A fork shares no id with
+  its parent, so the ledger used to show two unrelated rows. The fork edge is now
+  recorded at launch and the two render as one side-by-side row — parent left, fork
+  right, each with its own machine, duration, cost and PR. Day rollups are counted
+  before pairing, so the numbers still describe both sessions, and a parent that
+  finished on an earlier day keeps its own row.
+  Source: `src/core/forkLineage.ts`, `ui/settings/components/mission-control/recapModel.ts`,
+  `ui/settings/components/mission-control/RecapPane.tsx`.
+
 - **Floor no longer collapses distinct sessions that arrive without an id.** A remote
   session row was keyed `remote-<host>-<sessionId>`; when the CLI could not attribute a
   tmux pane (empty id), every such row collided on `remote-<host>-`, a React key clash

@@ -244,6 +244,13 @@ export function wrapNativeAgentCommand(command: string, isShell: boolean): strin
 // launches. Droid has no account enumeration and Shell is not an agent runner.
 export const STRATEGY_LAUNCH_AGENTS = ['claude', 'codex', 'gemini', 'opencode', 'cursor', 'antigravity', 'grok', 'kimi'] as const;
 
+/** Managed agents always launch through `agents run`, even when a host picker
+ * brings a remote source back to this machine. Any explicit remote target also
+ * uses `agents run` so non-strategy harnesses can cross the SSH boundary. */
+export function usesManagedAgentLaunch(agentKey: string, targetHost?: string): boolean {
+  return !!targetHost || (STRATEGY_LAUNCH_AGENTS as readonly string[]).includes(agentKey);
+}
+
 // Compare two dotted version strings (e.g. "2.1.170" vs "2.1.42") numerically.
 // Returns >0 when a is newer, <0 when b is newer, 0 when equal. Non-numeric
 // segments sort below numeric ones so prerelease tags lose to plain releases.

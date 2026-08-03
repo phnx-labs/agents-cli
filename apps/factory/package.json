@@ -415,6 +415,10 @@
         "title": "Agents: Fork"
       },
       {
+        "command": "agents.forkPickHost",
+        "title": "Agents: Fork (Pick Host)"
+      },
+      {
         "command": "agents.forkPickSession",
         "title": "Agents: Fork (Pick Session)"
       },

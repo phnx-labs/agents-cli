@@ -6,6 +6,7 @@ import {
   getBuiltInDefByTitle,
   pickLatestVersion,
   STRATEGY_LAUNCH_AGENTS,
+  usesManagedAgentLaunch,
   modeFlagForAgent,
   buildAgentLaunchCommand,
   wrapNativeAgentCommand,
@@ -318,6 +319,15 @@ describe('STRATEGY_LAUNCH_AGENTS', () => {
   test('every strategy-launch agent is a known built-in', () => {
     for (const key of STRATEGY_LAUNCH_AGENTS) {
       expect(getBuiltInByKey(key)).toBeDefined();
+    }
+  });
+
+  test('Grok and Kimi stay managed when a picked remote source comes back local', () => {
+    for (const agent of ['grok', 'kimi']) {
+      expect(usesManagedAgentLaunch(agent)).toBe(true);
+      expect(buildAgentLaunchCommand(
+        agent, null, undefined, undefined, undefined, 'balanced', undefined, { local: true },
+      )).toBe(`agents run ${agent} --interactive --strategy balanced --mode auto`);
     }
   });
 });
