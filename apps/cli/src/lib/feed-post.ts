@@ -33,10 +33,8 @@ import {
 
 /** Soft cap so a runaway agent can't flood the activity lane with essays. */
 export const STATUS_POST_MAX_CHARS = 500;
-/** Title is a phone subject line — about four or five words, not a paragraph. */
+/** Title is a phone subject line - about four or five words, not a paragraph. */
 export const STATUS_TITLE_MAX_CHARS = 60;
-/** Soft word budget for a title (guidance; hard cap is chars). */
-export const STATUS_TITLE_MAX_WORDS = 6;
 
 export interface FeedPostInput {
   /**

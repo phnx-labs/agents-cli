@@ -836,7 +836,7 @@ function renderUpdatesView(updates: ActivityEvent[]): void {
   );
   console.log();
   if (updates.length === 0) {
-    console.log(chalk.gray('  No progress updates yet. Agents post them with `agents feed post "…"`.'));
+    console.log(chalk.gray('  No progress updates yet. Agents post them with `agents feed post --title "…" "…"`.'));
     return;
   }
   for (const ev of updates) {
