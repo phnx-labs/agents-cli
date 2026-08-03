@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>agents-cli · session tracking, the complete picture</title>
+<style>
+  :root{
+    --bg:#0a0a0a;--panel:#111312;--panel2:#0d0f0e;--ink:#e8ece8;--dim:#9aa39a;--line:#232823;
+    --accent:#a3e635;--accent-dim:#5c7a1f;--warn:#f0b429;--bad:#f2695f;--good:#a3e635;--blue:#6ab7ff;
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;--sans:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;--chip:#161a16;
+  }
+  html[data-theme="light"]{
+    --bg:#f6f7f4;--panel:#fff;--panel2:#f0f2ec;--ink:#14170f;--dim:#5c6356;--line:#e0e4d8;
+    --accent:#4d7c0f;--accent-dim:#a3e635;--warn:#b45309;--bad:#c2410c;--good:#4d7c0f;--blue:#1d4ed8;--chip:#eef1e6;
+  }
+  *{box-sizing:border-box}html,body{margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.6;-webkit-font-smoothing:antialiased;font-size:16px}
+  a{color:var(--accent)}code,.mono{font-family:var(--mono)}
+  .wrap{max-width:1000px;margin:0 auto;padding:0 24px 96px}
+  header.hero{padding:56px 0 26px;border-bottom:1px solid var(--line)}
+  .kicker{font-family:var(--mono);font-size:12.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);margin-bottom:16px}
+  h1{font-size:36px;line-height:1.12;margin:0 0 16px;letter-spacing:-.02em;font-weight:700}
+  .lede{font-size:17.5px;color:var(--dim);max-width:76ch;margin:0 0 22px}
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chip{font-family:var(--mono);font-size:12px;background:var(--chip);border:1px solid var(--line);color:var(--dim);padding:6px 10px;border-radius:6px}
+  .chip b{color:var(--ink);font-weight:600}
+  .toc{margin:24px 0 0;padding:16px 18px;background:var(--panel);border:1px solid var(--line);border-radius:10px}
+  .toc h4{margin:0 0 10px;font-family:var(--mono);font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+  .toc ol{margin:0;padding-left:20px;columns:2;column-gap:32px}.toc a{color:var(--ink);text-decoration:none}.toc a:hover{color:var(--accent)}
+  section{padding:40px 0 8px;border-bottom:1px solid var(--line)}
+  h2{font-size:24px;margin:0 0 4px;letter-spacing:-.01em}h2 .num{font-family:var(--mono);color:var(--accent);font-size:15px;margin-right:12px}
+  h3{font-size:16px;margin:22px 0 6px}
+  p{margin:10px 0}.muted{color:var(--dim)}
+  ul.clean{list-style:none;padding:0;margin:12px 0}
+  ul.clean>li{position:relative;padding:7px 0 7px 26px;border-bottom:1px solid var(--line)}
+  ul.clean>li:before{content:"▸";position:absolute;left:4px;top:7px;color:var(--accent);font-family:var(--mono)}
+  ul.clean>li b{color:var(--ink)}
+  .fig{margin:20px 0;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 18px 14px;overflow-x:auto}
+  .fig .cap{font-family:var(--mono);font-size:11.5px;color:var(--dim);margin-top:10px;line-height:1.55}
+  .callout{border-left:3px solid var(--accent);background:var(--panel);padding:13px 18px;border-radius:0 10px 10px 0;margin:16px 0}
+  .callout.warn{border-color:var(--warn)}.callout.bad{border-color:var(--bad)}
+  .callout .t{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-bottom:5px}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13.5px}
+  th,td{text-align:left;padding:9px 11px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim)}
+  td code,p code,li code{font-size:12px;background:var(--chip);padding:1px 5px;border-radius:4px;font-family:var(--mono);word-break:break-word}
+  .yes{color:var(--good);font-weight:600}.no{color:var(--bad);font-weight:600}.maybe{color:var(--warn);font-weight:600}
+  .cite{font-family:var(--mono);font-size:11px;color:var(--accent-dim)}html[data-theme="light"] .cite{color:#6b8e23}
+  .toggle{position:fixed;top:16px;right:16px;font-family:var(--mono);font-size:13px;background:var(--panel);border:1px solid var(--line);color:var(--ink);border-radius:20px;padding:7px 13px;cursor:pointer;z-index:10}
+  .toggle:hover{border-color:var(--accent)}
+  svg{max-width:100%;height:auto;display:block}
+  .t-i{font-family:var(--mono);font-size:11.5px;fill:var(--ink)}.t-d{font-family:var(--mono);font-size:10.5px;fill:var(--dim)}
+  .t-a{font-family:var(--mono);font-size:11.5px;fill:var(--accent)}.t-b{font-family:var(--mono);font-size:11.5px;fill:var(--blue)}
+  .bx{fill:var(--panel2);stroke:var(--line);stroke-width:1}.bxa{fill:none;stroke:var(--accent);stroke-width:1.4}.bxb{fill:none;stroke:var(--blue);stroke-width:1.4}.bxr{fill:none;stroke:var(--bad);stroke-width:1.3}.bxw{fill:none;stroke:var(--warn);stroke-width:1.3}
+  .fl{stroke:var(--dim);stroke-width:1.4;fill:none;marker-end:url(#a1)}.fla{stroke:var(--accent);stroke-width:1.7;fill:none;marker-end:url(#a2)}.flb{stroke:var(--blue);stroke-width:1.7;fill:none;marker-end:url(#a3)}.flr{stroke:var(--bad);stroke-width:1.4;fill:none;stroke-dasharray:4 3;marker-end:url(#a4)}
+  @media(max-width:760px){.toc ol{columns:1}h1{font-size:28px}}
+</style>
+</head>
+<body>
+<button class="toggle" onclick="(function(){var h=document.documentElement;h.dataset.theme=h.dataset.theme==='dark'?'light':'dark'})()">◐ theme</button>
+<svg width="0" height="0"><defs>
+  <marker id="a1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="var(--dim)"/></marker>
+  <marker id="a2" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="var(--accent)"/></marker>
+  <marker id="a3" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="var(--blue)"/></marker>
+  <marker id="a4" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="var(--bad)"/></marker>
+</defs></svg>
+<div class="wrap">
+
+<header class="hero">
+  <div class="kicker">agents-cli · session tracking · complete reference · source-verified</div>
+  <h1>How agents-cli sees sessions: id, format, cwd, and state</h1>
+  <p class="lede">The architecture, in four parts: (1) how a session acquires its <b>id</b> and which harness assigns it, (2) the <b>transcript storage layout</b> each harness uses, (3) why <b>cwd</b> is the join key from a PID to its transcript, and (4) which <b>runtime states</b> (running / idle / waiting / dead) are detected, and which are not. Every claim is quoted from source.</p>
+  <div class="chips">
+    <span class="chip">id assignment: <b>caller-assigned</b> vs <b>agent-minted</b></span>
+    <span class="chip">4 transcript storage layouts</span>
+    <span class="chip">cwd = <b>PID → transcript</b> join key</span>
+    <span class="chip">liveness = <b>on-demand kill(0) probe</b>, not persisted</span>
+  </div>
+  <div class="toc"><h4>Contents</h4>
+    <ol>
+      <li><a href="#id">1 · Two id models</a></li>
+      <li><a href="#formats">2 · Transcript storage layouts</a></li>
+      <li><a href="#rollout">3 · What "rollout" is</a></li>
+      <li><a href="#cwd">4 · Why cwd is tracked</a></li>
+      <li><a href="#state">5 · Runtime state detection</a></li>
+      <li><a href="#matrix">6 · Per-harness matrix</a></li>
+      <li><a href="#gaps">7 · What doesn't add up</a></li>
+    </ol>
+  </div>
+</header>
+
+<section id="id">
+  <h2><span class="num">01</span>Two id models — who chooses the session id</h2>
+  <p>Binding a live process to a session needs two things. The <b>PID</b> is always known (the parent learns it from <code>spawn()</code>, <span class="cite">exec.ts:1004</span>). The <b>session id (a UUID)</b> is where harnesses split:</p>
+  <ul class="clean">
+    <li><b style="color:var(--accent)">Model A — launcher assigns it (Claude only).</b> The CLI mints a UUID and passes <code>--session-id &lt;uuid&gt;</code>; it's hard-gated to Claude. So the exact id is known at spawn and stored in <code>by-pid</code>. <span class="cite">exec.ts:814-816, :1269-1271</span></li>
+    <li><b style="color:var(--blue)">Model B — agent mints its own (all other harnesses).</b> codex, kimi, grok, gemini, opencode, antigravity, cursor generate the id internally. The launcher never receives it → the <code>by-pid</code> entry has <code>sessionId: ∅</code> (pid + agent + cwd only). The id is recovered afterward, from the transcript on disk. <span class="cite">exec.ts:1367 · pid-registry.ts:26</span></li>
+  </ul>
+  <div class="fig">
+    <svg viewBox="0 0 900 168" role="img" aria-label="two id models">
+      <text class="t-a" x="16" y="20">MODEL A · Claude — id flows FORWARD from launcher</text>
+      <rect class="bxa" x="16" y="30" width="160" height="40" rx="8"/><text class="t-i" x="28" y="48">CLI mints UUID</text><text class="t-d" x="28" y="63">+ --session-id</text>
+      <path class="fla" d="M176,50 L226,50"/>
+      <rect class="bx" x="226" y="30" width="150" height="40" rx="8"/><text class="t-i" x="238" y="48">spawn child</text><text class="t-d" x="238" y="63">pid known</text>
+      <path class="fla" d="M376,50 L426,50"/>
+      <rect class="bxa" x="426" y="30" width="200" height="40" rx="8"/><text class="t-a" x="438" y="48">by-pid: EXACT id</text><text class="t-d" x="438" y="63">read directly later</text>
+      <text class="t-d" x="650" y="53" style="fill:var(--good)">✓ known at spawn</text>
+      <line x1="16" y1="90" x2="884" y2="90" stroke="var(--line)"/>
+      <text class="t-b" x="16" y="112">MODEL B · codex/kimi/grok/… — id must be recovered BACKWARD</text>
+      <rect class="bx" x="16" y="122" width="160" height="40" rx="8"/><text class="t-i" x="28" y="140">CLI launches</text><text class="t-d" x="28" y="155">no id flag</text>
+      <path class="flb" d="M176,142 L226,142"/>
+      <rect class="bxb" x="226" y="122" width="150" height="40" rx="8"/><text class="t-b" x="238" y="140">agent mints id</text><text class="t-d" x="238" y="155">writes transcript</text>
+      <path class="flb" d="M376,142 L426,142"/>
+      <rect class="bx" x="426" y="122" width="200" height="40" rx="8"/><text class="t-i" x="438" y="140">by-pid: id = ∅</text><text class="t-d" x="438" y="155">pid + agent + cwd</text>
+      <path class="flr" d="M626,142 L676,142"/>
+      <rect class="bxr" x="676" y="122" width="200" height="40" rx="8"/><text class="t-d" x="688" y="140" style="fill:var(--warn)">recover from disk</text><text class="t-d" x="688" y="155">via cwd → transcript</text>
+    </svg>
+  </div>
+</section>
+
+<section id="formats">
+  <h2><span class="num">02</span>Transcript storage layouts — four categories</h2>
+  <p>A <b>transcript storage layout</b> is the triple {directory structure, session-id encoding, serialization format} a harness uses to persist a conversation. Every harness uses exactly one of the four below. This is the search space that Model B's disk-recovery must resolve against.</p>
+  <div class="fig">
+    <svg viewBox="0 0 900 200" role="img" aria-label="four transcript storage layouts">
+      <!-- L1 -->
+      <rect class="bx" x="14" y="20" width="210" height="164" rx="10"/>
+      <text class="t-a" x="28" y="42" style="font-size:12px">L1 · per-session JSONL</text>
+      <text class="t-d" x="28" y="64">~/.claude/projects/</text><text class="t-d" x="28" y="79">  &lt;cwd-slug&gt;/</text><text class="t-d" x="28" y="94">    &lt;uuid&gt;.jsonl</text>
+      <text class="t-i" x="28" y="122">cwd-partitioned dir</text><text class="t-d" x="28" y="138">id = filename stem</text>
+      <text class="t-a" x="28" y="168">Claude</text>
+      <!-- L2 -->
+      <rect class="bx" x="238" y="20" width="210" height="164" rx="10"/>
+      <text class="t-a" x="252" y="42" style="font-size:12px">L2 · per-session JSONL</text>
+      <text class="t-d" x="252" y="64">~/.codex/sessions/</text><text class="t-d" x="252" y="79">  Y/M/D/</text><text class="t-d" x="252" y="94">   rollout-&lt;ts&gt;-&lt;uuid&gt;</text><text class="t-d" x="252" y="109">   .jsonl</text>
+      <text class="t-i" x="252" y="134">date-partitioned tree</text>
+      <text class="t-a" x="252" y="168">Codex</text>
+      <!-- L3 -->
+      <rect class="bx" x="462" y="20" width="210" height="164" rx="10"/>
+      <text class="t-a" x="476" y="42" style="font-size:12px">L3 · dir per session</text>
+      <text class="t-d" x="476" y="64">session_&lt;uuid&gt;/</text><text class="t-d" x="476" y="79">  state.json</text><text class="t-d" x="476" y="94">  wire.jsonl</text>
+      <text class="t-i" x="476" y="122">multiple artifact files</text><text class="t-d" x="476" y="138">id = directory name</text>
+      <text class="t-a" x="476" y="168">Kimi · Grok</text>
+      <!-- L4 -->
+      <rect class="bx" x="686" y="20" width="200" height="164" rx="10"/>
+      <text class="t-a" x="700" y="42" style="font-size:12px">L4 · SQLite database</text>
+      <text class="t-d" x="700" y="64">opencode.db  (shared)</text><text class="t-d" x="700" y="83">&lt;uuid&gt;.db  (per convo)</text>
+      <text class="t-i" x="700" y="122">rows, not files</text><text class="t-d" x="700" y="138">id = primary key / name</text>
+      <text class="t-a" x="700" y="168">OpenCode · Antigravity</text>
+    </svg>
+    <div class="cap">L1 and L2 are both one-JSONL-file-per-session; they differ only in directory partitioning (by cwd vs by date). L3 is a directory of artifact files per session. L4 replaces the filesystem with a relational database. <span class="cite">discover.ts:482-483, :2859, :1451, :1351 · watchdog/read.ts:96</span></div>
+  </div>
+  <table>
+    <thead><tr><th style="width:14%">Harness</th><th>Location</th><th>Id lives in</th><th>Format</th><th>Indexed?</th></tr></thead>
+    <tbody>
+      <tr><td><b>Claude</b></td><td><code>~/.claude/projects/&lt;cwd-slug&gt;/&lt;uuid&gt;.jsonl</code></td><td>filename</td><td>JSONL</td><td class="yes">yes</td></tr>
+      <tr><td><b>Codex</b></td><td><code>~/.codex/sessions/Y/M/D/rollout-&lt;ts&gt;-&lt;uuid&gt;.jsonl</code></td><td>filename + inside (<code>session_meta.payload.id</code>)</td><td>JSONL</td><td class="yes">yes</td></tr>
+      <tr><td><b>Kimi</b></td><td><code>~/.kimi-code/sessions/&lt;wd-hash&gt;/session_&lt;uuid&gt;/{state.json, wire.jsonl}</code></td><td>directory name</td><td>JSON + JSONL</td><td class="yes">yes</td></tr>
+      <tr><td><b>Grok</b></td><td><code>~/.grok/sessions/&lt;enc-cwd&gt;/&lt;uuid&gt;/{summary.json, *.jsonl}</code></td><td>directory name</td><td>JSON + JSONL</td><td class="no">no (stub)</td></tr>
+      <tr><td><b>OpenCode</b></td><td><code>~/.local/share/opencode/opencode.db</code> (one shared DB)</td><td>DB row <code>session.id</code></td><td>SQLite</td><td class="yes">yes</td></tr>
+      <tr><td><b>Antigravity</b></td><td><code>~/.gemini/antigravity-cli/conversations/&lt;uuid&gt;.db</code></td><td>filename</td><td>SQLite</td><td class="yes">yes</td></tr>
+    </tbody>
+  </table>
+  <div class="callout bad"><div class="t">Support gap — Grok is not indexed</div>
+    <code>dispatchAgentScan</code> only has cases for claude/codex/kimi/opencode/antigravity (<span class="cite">discover.ts:237-247</span>). <b>Grok has no scanner</b> — just a type slot and a placeholder parser (<span class="cite">parse.ts:1056 "minimal stub for now"</span>). So Grok sessions do <b>not</b> show up in <code>agents sessions</code> from the on-disk index today.</div>
+</section>
+
+<section id="rollout">
+  <h2><span class="num">03</span>What "rollout" actually is</h2>
+  <ul class="clean">
+    <li><b>"Rollout" is Codex's own native name</b> for its transcript file — not an agents-cli invention, and not a flag you pass. agents-cli only ever <i>reads</i> files that Codex chose to name <code>rollout-…</code>. <span class="cite">discover.ts:1082-1083 · active.ts:364 · watchdog/read.ts:114-115</span></li>
+    <li><b>It's always written and required</b> — it's Codex's sole transcript artifact; there is no flag-gated alternative. Each session = one <code>rollout-&lt;iso-ts&gt;-&lt;uuid&gt;.jsonl</code> under a <code>Y/M/D</code> folder.</li>
+    <li><b>The uuid is in the filename AND inside the file</b> — discovery reads it from the first-line <code>session_meta.payload.id</code> (<span class="cite">discover.ts:2537</span>); the sync/watchdog paths parse it out of the filename with a UUID regex (<span class="cite">watchdog/read.ts:115</span>).</li>
+    <li><b>Only the titles file is optional</b> — the sibling <code>~/.codex/session_index.jsonl</code> (thread titles) is tolerated-if-absent (<span class="cite">discover.ts:1026-1027</span>); confirmed missing on zion while rollouts still exist.</li>
+    <li><b>Compared to others:</b> it's just Codex's flavor of the same idea — Claude names its file <code>&lt;uuid&gt;.jsonl</code>, Codex names it <code>rollout-…-&lt;uuid&gt;.jsonl</code>. Same JSONL content, different naming/foldering convention chosen by each vendor.</li>
+  </ul>
+</section>
+
+<section id="cwd">
+  <h2><span class="num">04</span>Why cwd is tracked</h2>
+  <p>We store <b>pid + agent + cwd</b>. The pid and agent are obvious; cwd is the subtle one. <b>cwd is the join key that maps a live PID back to its transcript</b> — because transcripts are addressed by <i>directory</i>, not by PID.</p>
+  <div class="fig">
+    <svg viewBox="0 0 900 92" role="img" aria-label="pid to cwd to transcript chain">
+      <rect class="bx" x="20" y="26" width="150" height="42" rx="8"/><text class="t-i" x="34" y="46">live PID (from ps)</text><text class="t-d" x="34" y="61">e.g. codex @ 41031</text>
+      <path class="fla" d="M170,47 L240,47"/><text class="t-d" x="176" y="38">cwd (lsof / registry)</text>
+      <rect class="bxa" x="240" y="26" width="150" height="42" rx="8"/><text class="t-a" x="254" y="46">cwd = /repo/x</text><text class="t-d" x="254" y="61">the join key</text>
+      <path class="fla" d="M390,47 L460,47"/><text class="t-d" x="396" y="38">WHERE cwd=?</text>
+      <rect class="bx" x="460" y="26" width="180" height="42" rx="8"/><text class="t-i" x="474" y="46">newest transcript</text><text class="t-d" x="474" y="61">for that dir</text>
+      <path class="fla" d="M640,47 L710,47"/>
+      <rect class="bx" x="710" y="26" width="170" height="42" rx="8"/><text class="t-i" x="724" y="46">session id + topic</text><text class="t-d" x="724" y="61">parsed from file</text>
+    </svg>
+    <div class="cap">pid → cwd → transcript file → id. cwd is the middle link. <span class="cite">active.ts:935 (cwd resolve), :360 → db.ts:988-992 (WHERE cwd=?), :289-291 (Claude project dir)</span></div>
+  </div>
+  <ul class="clean">
+    <li><b>Codex has no other handle.</b> Its rollouts are date-partitioned, not cwd-named, so <code>WHERE agent='codex' AND cwd=?</code> is the <i>only</i> way to find the right file. <span class="cite">db.ts:988-992</span></li>
+    <li><b>Claude's folder is literally the cwd.</b> <code>claudeProjectDirName(cwd)</code> = cwd with <code>/</code> and <code>.</code> replaced by <code>-</code> → <code>~/.claude/projects/&lt;slug&gt;</code>. <span class="cite">active.ts:289-291</span></li>
+    <li><b>Captured twice:</b> at launch (<code>writePidSessionEntry</code>, <span class="cite">exec.ts:1367</span>) and, for processes not launched via the CLI, live via <code>lsof -a -p &lt;pid&gt; -d cwd</code> (<span class="cite">active.ts:729-746</span>). On <b>Windows there is no lsof</b>, so the launch-time cwd is the only source. <span class="cite">exec.ts:1000-1001</span></li>
+    <li><b>Without cwd:</b> you can see a PID is alive but can't say which session it is — worst for Codex (no other key) and Windows (no lsof fallback).</li>
+  </ul>
+</section>
+
+<section id="state">
+  <h2><span class="num">05</span>Runtime state — what we detect, and what we don't</h2>
+  <p>The big idea: <b>liveness is a cheap on-demand scan, not a maintained state machine.</b> Every <code>agents sessions --active</code> call recomputes state live (<span class="cite">sessions.ts:847</span>) — nothing is persisted. It asks "is this PID alive <i>right now</i>," not "what happened to it."</p>
+  <div class="fig">
+    <svg viewBox="0 0 900 150" role="img" aria-label="state derivation">
+      <rect class="bx" x="16" y="20" width="150" height="42" rx="8"/><text class="t-i" x="30" y="40">ps → agent pids</text><text class="t-d" x="30" y="55">every invocation</text>
+      <path class="fla" d="M166,41 L216,41"/>
+      <rect class="bxa" x="216" y="20" width="160" height="42" rx="8"/><text class="t-a" x="230" y="40">kill(pid, 0)</text><text class="t-d" x="230" y="55">alive? → running/dead</text>
+      <path class="fla" d="M376,41 L426,41"/>
+      <rect class="bx" x="426" y="20" width="180" height="42" rx="8"/><text class="t-i" x="440" y="40">transcript mtime</text><text class="t-d" x="440" y="55">&lt;2 min ⇒ active, else idle</text>
+      <path class="fla" d="M606,41 L656,41"/>
+      <rect class="bx" x="656" y="20" width="220" height="42" rx="8"/><text class="t-i" x="670" y="40">read transcript tail</text><text class="t-d" x="670" y="55">working / waiting-for-input</text>
+      <path class="flr" d="M291,62 L291,110 L640,110"/>
+      <rect class="bxr" x="16" y="96" width="624" height="34" rx="8"/>
+      <text class="t-d" x="30" y="117" style="fill:var(--bad)">dead PID → session just VANISHES from the list. crash vs clean-exit vs power-off: indistinguishable →</text>
+    </svg>
+    <div class="cap">Left→right is the enrichment chain; the red path is the gap. <span class="cite">active.ts:241-249 (isPidAlive), :198/:338-350 (mtime window), state.ts:464-508 (working/waiting)</span></div>
+  </div>
+  <table>
+    <thead><tr><th style="width:24%">State</th><th style="width:14%">Detected?</th><th>How</th></tr></thead>
+    <tbody>
+      <tr><td><b>Running / dead</b></td><td class="yes">Yes</td><td><code>process.kill(pid,0)</code> <span class="cite">active.ts:241-249</span></td></tr>
+      <tr><td><b>Active vs idle</b></td><td class="maybe">Yes (coarse)</td><td>transcript-file mtime within a 2-min window <span class="cite">active.ts:198, :338-350</span></td></tr>
+      <tr><td><b>Working (mid-turn)</b></td><td class="yes">Yes</td><td>tail event is a pending <code>tool_use</code> / user msg + alive + fresh <span class="cite">state.ts:481-497</span></td></tr>
+      <tr><td><b>Waiting for input</b></td><td class="maybe">Yes (partial)</td><td>structural for Claude (<code>ExitPlanMode</code>/<code>AskUserQuestion</code>); prose-"?" heuristic w/ 30-min decay for the rest <span class="cite">state.ts:464-478, :504-508</span></td></tr>
+      <tr><td><b>Abrupt quit / crash / power-off</b></td><td class="no">No</td><td>a dead PID simply disappears — no exit code, no clean-exit marker, no "crashed" state</td></tr>
+      <tr><td><b>Network failure (remote host)</b></td><td class="no">No</td><td>an unreachable host just contributes zero sessions; no per-session "last-seen" <span class="cite">sessions.ts:857</span></td></tr>
+      <tr><td><b>Persisted / refreshed?</b></td><td class="no">Not persisted</td><td>recomputed live per <code>--active</code> call; SQLite <code>sessions</code> table holds only history (topic/cost/PR), no status column <span class="cite">db.ts:46-109</span></td></tr>
+    </tbody>
+  </table>
+  <div class="callout warn"><div class="t">Two different subsystems, don't conflate</div>
+    The <b>SQLite <code>sessions.db</code></b> is a <i>historical</i> transcript index (for search/sort/cost), refreshed by an incremental mtime-diff scan on the <i>listing</i> path (<span class="cite">discover.ts:182-210</span>). The <b>live <code>--active</code> state</b> is computed fresh in memory and never written there. The daemon has its own crash-recovery (heartbeat, stale-lock) but does <b>not</b> compute session liveness. <span class="cite">daemon.ts:175-184</span></div>
+</section>
+
+<section id="matrix">
+  <h2><span class="num">06</span>Per-harness matrix (id + format + live visibility)</h2>
+  <table>
+    <thead><tr><th style="width:13%">Harness</th><th>Id assignment</th><th>Storage layout</th><th>Live <code>--active</code> id</th><th>N co-located in one cwd</th></tr></thead>
+    <tbody>
+      <tr><td><b style="color:var(--accent)">claude</b></td><td>launcher-assigned</td><td>L1 · cwd-partitioned JSONL</td><td class="yes">exact (from registry)</td><td class="yes">resolve distinctly</td></tr>
+      <tr><td><b style="color:var(--blue)">codex</b></td><td>agent-minted</td><td>L2 · date-partitioned JSONL</td><td class="maybe">heuristic (cwd → newest)</td><td class="no">collapse to 1 row</td></tr>
+      <tr><td><b style="color:var(--blue)">kimi</b></td><td>agent-minted</td><td>L3 · directory per session</td><td class="no">unresolved</td><td class="no">no id resolved</td></tr>
+      <tr><td><b style="color:var(--blue)">grok</b></td><td>agent-minted</td><td>L3 · directory per session</td><td class="no">unresolved (+ not indexed)</td><td class="no">no id resolved</td></tr>
+      <tr><td><b style="color:var(--blue)">opencode</b></td><td>agent-minted</td><td>L4 · shared SQLite DB</td><td class="no">unresolved</td><td class="no">no id resolved</td></tr>
+      <tr><td><b style="color:var(--blue)">antigravity</b></td><td>agent-minted</td><td>L4 · SQLite DB per conversation</td><td class="no">unresolved</td><td class="no">no id resolved</td></tr>
+    </tbody>
+  </table>
+  <p class="muted" style="font-size:13px">"Live <code>--active</code> id" = the runtime path only exact-resolves Claude and heuristic-resolves Codex (<code>findSessionFileForKind</code> has cases only for those two, <span class="cite">active.ts:357-362</span>). The <i>historical</i> index is broader (5 harnesses, not Grok).</p>
+</section>
+
+<section id="gaps" style="border-bottom:none">
+  <h2><span class="num">07</span>What doesn't add up (design calls, not sneaked-in fixes)</h2>
+  <ul class="clean">
+    <li><b>Attribution quality is uneven by harness.</b> Claude exact; Codex fuzzy (wrong when co-located); the other four get no live id. The one mechanism that makes Claude exact (<code>--session-id</code>) doesn't exist for the rest.</li>
+    <li><b>Grok is a real hole.</b> It has a type slot, a stub parser, and sync/watchdog hooks — but no discovery scanner, so it's invisible to <code>agents sessions</code>. Adding a <code>scanGrokIncremental</code> case is the fix.</li>
+    <li><b>Live id recovery is implemented for only two harnesses.</b> <code>findSessionFileForKind</code> branches on claude and codex only; adding a resolver per storage layout (L3 directory-per-session for kimi/grok, L4 SQLite for opencode/antigravity) would move the remaining harnesses out of "unresolved."</li>
+    <li><b>Crash ≠ clean exit is undetectable.</b> There's no exit-code or clean-shutdown marker anywhere in the runtime path — a killed/crashed/powered-off agent is indistinguishable from a graceful quit; it just vanishes. A durable "last-seen + why-gone" would need a persisted state row, which today's design deliberately avoids.</li>
+    <li><b>The SessionStart hook would fix the id problem at the source</b> — it's the only way to get an <i>exact</i> id from an agent that mints its own (the agent self-reports it). It's built but unwired/uninstalled; wiring it collapses the id tiers up to Claude's exactness for every hook-supporting harness.</li>
+  </ul>
+  <p class="muted" style="font-size:12.5px;margin-top:20px">Verified against <span class="mono">agents-cli</span>: <code>apps/cli/src/lib/{exec.ts, session/pid-registry.ts, session/active.ts, session/state.ts, session/db.ts, session/discover.ts, session/parse.ts, watchdog/read.ts, daemon.ts}</code>, <code>apps/cli/src/commands/sessions.ts</code>, <code>packages/session-tracker/src/{hook.sh, install-hook.ts}</code>. Five parallel source traces, file:line quoted, cross-checked against live state on zion. 2026-07-30.</p>
+</section>
+
+</div>
+</body>
+</html>
