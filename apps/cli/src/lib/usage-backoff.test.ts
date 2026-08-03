@@ -7,7 +7,7 @@ import {
   formatBackoffRemaining,
   noteUsageRateLimited,
   parseRetryAfterMs,
-  setUsageBackoffPathForTest,
+  setUsageBackoffDirForTest,
   usageRateLimitedUntil,
 } from './usage-backoff.js';
 
@@ -51,21 +51,21 @@ describe('the recorded backoff survives across processes', () => {
   // the real ~/.agents/.cache/ and parked live usage reads behind a 45-minute
   // penalty. Use the explicit seam.
   let dir: string;
-  let prevPath: string | null;
+  let prevDir: string | null;
 
   beforeEach(() => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-backoff-'));
-    prevPath = setUsageBackoffPathForTest(path.join(dir, '.usage-backoff.json'));
+    prevDir = setUsageBackoffDirForTest(dir);
   });
 
   afterEach(() => {
-    setUsageBackoffPathForTest(prevPath);
+    setUsageBackoffDirForTest(prevDir);
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it('writes to the overridden path and NOT the real cache dir', () => {
+  it('writes to the overridden dir and NOT the real cache dir', () => {
     noteUsageRateLimited('claude', '2678');
-    expect(fs.existsSync(path.join(dir, '.usage-backoff.json'))).toBe(true);
+    expect(fs.readdirSync(dir).some((n) => n.startsWith('claude.'))).toBe(true);
   });
 
   it('holds a provider off for the window the server asked for', () => {
@@ -117,45 +117,62 @@ describe('formatBackoffRemaining', () => {
   });
 });
 
-describe('the monotonic guarantee, stated as narrowly as it is true', () => {
-  // An earlier draft of this block claimed to test the cross-process race. It
-  // did not — it wrote a shorter deadline to the file and then called
-  // noteUsageRateLimited SEQUENTIALLY, which the plain max-and-write it was
-  // meant to distinguish would also have passed. A test that cannot fail
-  // against the implementation it claims to improve on is worse than no test:
-  // it certifies a guarantee nobody has.
-  //
-  // So this pins only what actually holds — monotonicity within a process — and
-  // the module comment says plainly that a concurrent same-provider writer can
-  // still shorten a window, and what that costs (one extra request).
+describe('a shorter deadline cannot displace a longer one', () => {
+  // Three rounds of review went into arguing that an unlocked read-modify-write
+  // on one shared JSON document was survivable. It was not: two processes could
+  // both read the old value and let the SHORTER deadline write last, and it
+  // could recur on every 429 batch. The argument was replaced with a design that
+  // does not need one — the deadline lives in the FILENAME, so concurrent
+  // writers create separate files and a read takes the maximum. Monotonicity is
+  // structural, and these tests pin that rather than a claim about interleaving.
   let dir: string;
-  let prevPath: string | null;
-  let file: string;
+  let prevDir: string | null;
 
   beforeEach(() => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-backoff-mono-'));
-    file = path.join(dir, '.usage-backoff.json');
-    prevPath = setUsageBackoffPathForTest(file);
+    prevDir = setUsageBackoffDirForTest(dir);
   });
 
   afterEach(() => {
-    setUsageBackoffPathForTest(prevPath);
+    setUsageBackoffDirForTest(prevDir);
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it('raises a shorter stored deadline to the longer one', () => {
+  it('takes the furthest deadline when several are recorded', () => {
     noteUsageRateLimited('claude', '60');
     noteUsageRateLimited('claude', '2678');
 
     expect(usageRateLimitedUntil('claude')! - Date.now()).toBeGreaterThan(40 * 60 * 1000);
   });
 
-  it('never lets a shorter 429 pull an existing deadline in', () => {
+  it('is unaffected by the ORDER they were written in', () => {
+    // The exact interleaving the shared-document version could not survive: the
+    // longer penalty lands first, then a stale writer records a shorter one.
+    // Here the shorter file simply loses the max — it cannot erase the longer.
     noteUsageRateLimited('claude', '2678');
     const long = usageRateLimitedUntil('claude')!;
 
     noteUsageRateLimited('claude', '10');
 
     expect(usageRateLimitedUntil('claude')).toBe(long);
+  });
+
+  it('keeps both writers when they land together, rather than losing one', () => {
+    noteUsageRateLimited('claude', '2678');
+    noteUsageRateLimited('kimi', '600');
+
+    // Separate files, so a cross-provider write can never drop the other's
+    // entry the way one shared document could.
+    expect(usageRateLimitedUntil('claude')).not.toBeNull();
+    expect(usageRateLimitedUntil('kimi')).not.toBeNull();
+  });
+
+  it('sweeps elapsed deadlines instead of letting them pile up', () => {
+    noteUsageRateLimited('claude', '1', { now: Date.now() - 60_000 });
+    expect(fs.readdirSync(dir).filter((n) => n.startsWith('claude.')).length).toBe(1);
+
+    expect(usageRateLimitedUntil('claude')).toBeNull();
+
+    expect(fs.readdirSync(dir).filter((n) => n.startsWith('claude.')).length).toBe(0);
   });
 });

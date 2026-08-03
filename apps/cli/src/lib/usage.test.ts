@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { claudeAccessTokenNeedsRefresh, claudeUsageAccessTokenNoRefresh, loadClaudeOauth, saveClaudeOauth, getClaudeKeychainService, swrWindowMsFor, getUsageInfo, formatUsageSummary, usageNoCredentialError, usageExpiredCredentialError, usageRejectedError, probeClaudeStatus, probeKimiStatus } from './usage.js';
-import { noteUsageRateLimited, setUsageBackoffPathForTest } from './usage-backoff.js';
+import { noteUsageRateLimited, setUsageBackoffDirForTest } from './usage-backoff.js';
 import { setKeychainToken, setKeychainBackendForTest, secretsKeychainItem, type KeychainBackend } from './secrets/index.js';
 import { writeBundle, keychainRef, bundleItemStore } from './secrets/bundles.js';
 import { _resetFileStoreForTest } from './secrets/filestore.js';
@@ -479,11 +479,11 @@ describe('a recorded Retry-After actually suppresses the read', () => {
   beforeEach(() => {
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-throttle-'));
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-throttle-cache-'));
-    prevPath = setUsageBackoffPathForTest(path.join(dir, '.usage-backoff.json'));
+    prevPath = setUsageBackoffDirForTest(dir);
   });
 
   afterEach(() => {
-    setUsageBackoffPathForTest(prevPath);
+    setUsageBackoffDirForTest(prevPath);
     fs.rmSync(home, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
   });
@@ -539,7 +539,7 @@ describe('the throttle guard covers every provider, not just Claude', () => {
   beforeEach(() => {
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-throttle-all-'));
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-throttle-all-cache-'));
-    prevPath = setUsageBackoffPathForTest(path.join(dir, '.usage-backoff.json'));
+    prevPath = setUsageBackoffDirForTest(dir);
     // resolveKimiCredentialPath falls back to the ACTIVE home when the
     // per-version one is absent (sign-in is account-global), so without this the
     // "missing credential" case finds the developer's real Kimi login and the
@@ -550,7 +550,7 @@ describe('the throttle guard covers every provider, not just Claude', () => {
   });
 
   afterEach(() => {
-    setUsageBackoffPathForTest(prevPath);
+    setUsageBackoffDirForTest(prevPath);
     if (prevRealHome === undefined) delete process.env.AGENTS_REAL_HOME;
     else process.env.AGENTS_REAL_HOME = prevRealHome;
     fs.rmSync(home, { recursive: true, force: true });

@@ -14,6 +14,8 @@
   request, no renewed penalty — and report
   `Claude rate-limited this machine — not retrying for 45 minutes.` The state is
   on disk, because the callers are separate processes: the long-lived daemon and
-  every one-shot `agents view` / `agents run`. A server delay is capped at an
-  hour, a missing or unparseable `Retry-After` still backs off, and a later 429
-  carrying a shorter delay never shortens an existing window.
+  every one-shot `agents view` / `agents run` — one empty file per penalty under
+  `~/.agents/.cache/usage-backoff/`, named `<agent>.<deadline>`, so two
+  processes recording the same provider at once cannot displace each other and a
+  read takes the furthest deadline. A server delay is capped at an hour, and a
+  missing or unparseable `Retry-After` still backs off.

@@ -10,15 +10,34 @@
  * `Promise.all`, so five Claude homes meant five concurrent requests to one
  * endpoint every three minutes — ~100/hour from a single machine. Nothing read
  * `Retry-After`, so each tick fired deep inside the penalty window and re-armed
- * the throttle. The box never recovered, every usage read failed, and its cache
- * froze: exactly the permanently-stale state the routing freshness rule
- * (`rotate.ts`, `USAGE_DECISION_MAX_AGE_MS`) was written to defend against.
+ * the throttle. Measured 75 minutes apart, the box never got out: `retry-after`
+ * 2678s at 08:42Z, still 429 at 09:57Z on a freshly-issued 1208s penalty. Its
+ * usage cache froze — exactly the permanently-stale state the routing freshness
+ * rule (`rotate.ts`, `USAGE_DECISION_MAX_AGE_MS`) was written to defend against.
  *
  * So a 429 is recorded here with its deadline, and every usage read and health
  * probe for that provider short-circuits until the deadline passes — no request,
  * no renewed penalty. State is on disk rather than in memory because the
  * offenders are separate processes: the long-lived daemon, and every one-shot
  * `agents view` / `agents run` invocation.
+ *
+ * ## The deadline lives in the FILENAME, and that is the whole design
+ *
+ * The obvious shape — one JSON document holding `{agent: deadline}` — is
+ * read-modify-write, and without a lock two processes recording the same
+ * provider can both read the old value and let the SHORTER deadline write last,
+ * silently undoing the longer penalty. That is not a theoretical race here: the
+ * triggering condition is a batch of concurrent same-provider 429s, which is
+ * precisely what the daemon issues, and it can recur on every batch. Reading
+ * back and retrying does not fix it either — that only detects a clobber which
+ * already landed, and a stale writer can still write after the check.
+ *
+ * So no shared document. Each penalty is its own file named `<agent>.<deadline>`
+ * with empty contents, and a read takes the MAXIMUM deadline across that
+ * provider's files. Two concurrent writers create two different files and
+ * neither can erase the other, so a shorter deadline cannot displace a longer
+ * one — monotonicity is structural rather than argued, and there is no lock to
+ * go stale on a path every usage read touches. Elapsed files are swept on read.
  *
  * Deliberately per-provider, not per-account: the endpoint throttles the caller,
  * and the observed 429 hit all five accounts on the box at once. Backing off one
@@ -33,39 +52,23 @@ import type { AgentId } from './types.js';
 /** Cap a server-supplied delay so a bad header cannot park a provider forever. */
 const MAX_BACKOFF_MS = 60 * 60 * 1000;
 
-interface BackoffFile {
-  /** agent id -> epoch ms after which requests may resume. */
-  until: Record<string, number>;
-}
-
 /**
  * Test seam, mirroring `setKeychainBackendForTest`. The cache dir is resolved
  * from a module-level constant at import time, so overriding `HOME` in a test
- * does NOT redirect this file — it silently writes into the developer's real
+ * does NOT redirect this state — it silently writes into the developer's real
  * `~/.agents/.cache/` and parks their own usage reads behind a 45-minute
  * penalty. (It did exactly that once while this was being written.) Returns the
  * previous value so a test can restore it.
  */
-let backoffPathOverride: string | null = null;
-export function setUsageBackoffPathForTest(p: string | null): string | null {
-  const prev = backoffPathOverride;
-  backoffPathOverride = p;
+let backoffDirOverride: string | null = null;
+export function setUsageBackoffDirForTest(dir: string | null): string | null {
+  const prev = backoffDirOverride;
+  backoffDirOverride = dir;
   return prev;
 }
 
-function backoffPath(): string {
-  return backoffPathOverride ?? path.join(getCacheDir(), '.usage-backoff.json');
-}
-
-function readBackoff(): BackoffFile {
-  try {
-    const raw = JSON.parse(fs.readFileSync(backoffPath(), 'utf-8')) as BackoffFile;
-    return raw && typeof raw.until === 'object' && raw.until !== null ? raw : { until: {} };
-  } catch {
-    // Missing or unreadable: no backoff recorded. Never throws — a broken cache
-    // file must not take down a usage read.
-    return { until: {} };
-  }
+function backoffDir(): string {
+  return backoffDirOverride ?? path.join(getCacheDir(), 'usage-backoff');
 }
 
 /**
@@ -88,6 +91,25 @@ export function parseRetryAfterMs(header: string | null | undefined, now: number
   return ms > 0 ? Math.min(ms, MAX_BACKOFF_MS) : null;
 }
 
+/** Every recorded deadline for `agent`, newest-first. Never throws. */
+function deadlinesFor(agent: AgentId): number[] {
+  let names: string[];
+  try {
+    names = fs.readdirSync(backoffDir());
+  } catch {
+    // No directory yet: nothing is throttled.
+    return [];
+  }
+  const prefix = `${agent}.`;
+  const out: number[] = [];
+  for (const name of names) {
+    if (!name.startsWith(prefix)) continue;
+    const at = Number(name.slice(prefix.length));
+    if (Number.isFinite(at)) out.push(at);
+  }
+  return out;
+}
+
 /**
  * Record that `agent`'s usage endpoint threw a 429. `retryAfter` is the raw
  * header; when it is absent or unparseable we still back off for `fallbackMs`,
@@ -103,84 +125,39 @@ export function noteUsageRateLimited(
   const fallbackMs = opts?.fallbackMs ?? 15 * 60 * 1000;
   const ms = parseRetryAfterMs(retryAfter, now) ?? fallbackMs;
   const deadline = now + Math.min(ms, MAX_BACKOFF_MS);
-  const state = readBackoff();
-  // Within a process this is monotonic: a second 429 carrying a smaller header
-  // cannot pull the deadline in. Across processes it is not — see the note on
-  // writeBackoff for what that costs and why it is not locked.
-  if ((state.until[agent] ?? 0) >= deadline) return;
-  state.until[agent] = deadline;
-  writeBackoff(state);
-}
-
-/**
- * Write via a temp file + rename so a concurrent reader never sees a truncated
- * JSON document.
- *
- * This is read-modify-write with **no lock**, and the limits of that are worth
- * stating exactly, because it is easy to write a mechanism that looks like it
- * closes the gap and does not. Two processes racing here can:
- *
- *  - lose a *different* provider's entry (one records Claude, one Kimi, one
- *    entry survives); or
- *  - shorten the *same* provider's deadline, when the writer holding the older
- *    snapshot renames last.
- *
- * A read-back-and-retry does NOT fix the second case — it only detects a clobber
- * that already landed, and a stale writer can still rename after the check. Real
- * mutual exclusion would need a lock file, which this deliberately does not use.
- *
- * Be honest about what that costs, because it is more than one request. A
- * shortened window means the next daemon tick is not suppressed, and that tick
- * fans out over every installed home for the provider — so the cost is a whole
- * batch, N requests, not one. Those requests land inside a penalty the server is
- * still enforcing, and an early retry can EXTEND it: the exact mechanism
- * documented above as the original bug.
- *
- * The trade is still right, but for one specific reason, and it is not that the
- * damage is small — a lengthened penalty is not "self-correcting" in any
- * comforting sense, and there is no basis for claiming it happens only once. It
- * is that the two outcomes are asymmetric. Losing the race costs a batch and may
- * lengthen the window; the module then honours whatever longer deadline comes
- * back. So the failure mode degrades toward MORE suppression — a longer wait
- * than strictly necessary — and never back toward unsuppressed polling, because
- * every 429 re-records. Requests stay bounded by how often two processes record
- * the same provider in the same instant, which is only when a 429 batch lands.
- *
- * That is what makes it survivable without a lock: the behaviour being replaced
- * was an un-suppressed batch every three minutes, forever, with no exit. A stale
- * lock on a cache path every usage read touches would be a new way to wedge the
- * CLI, traded against a residue that cannot re-enter the original loop.
- *
- * What must not happen is a *torn* file, which would make every provider read as
- * free and silently restore the old behaviour. That is what the rename prevents,
- * and it is the guarantee this write path actually makes.
- */
-function writeBackoff(state: BackoffFile): void {
-  const target = backoffPath();
-  const tmp = `${target}.${process.pid}.tmp`;
   try {
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(tmp, JSON.stringify(state));
-    fs.renameSync(tmp, target);
+    fs.mkdirSync(backoffDir(), { recursive: true });
+    // Empty file: the name carries the whole value, so there is no content a
+    // concurrent reader could catch half-written, and no document to merge.
+    fs.writeFileSync(path.join(backoffDir(), `${agent}.${deadline}`), '');
   } catch {
-    // Best-effort. An unwritable cache dir costs us the cross-process backoff,
-    // not correctness of this read.
-    try {
-      fs.rmSync(tmp, { force: true });
-    } catch {
-      /* nothing further to do */
-    }
+    // Best-effort. An unwritable cache dir costs the cross-process backoff, not
+    // the correctness of this read.
   }
 }
 
 /**
  * Epoch ms until which `agent`'s usage endpoint should not be called, or null
- * when it is free. An elapsed entry reads as free (and is not rewritten — the
- * next successful read simply stops consulting it).
+ * when it is free — the furthest recorded deadline still in the future, so a
+ * concurrently-written shorter one can never pull it in.
+ *
+ * Sweeps elapsed files while it is here: they can only accumulate at the rate
+ * penalties are issued, and this is the one place that already lists them.
  */
 export function usageRateLimitedUntil(agent: AgentId, now: number = Date.now()): number | null {
-  const until = readBackoff().until[agent];
-  return typeof until === 'number' && until > now ? until : null;
+  let latest: number | null = null;
+  for (const at of deadlinesFor(agent)) {
+    if (at > now) {
+      if (latest === null || at > latest) latest = at;
+    } else {
+      try {
+        fs.rmSync(path.join(backoffDir(), `${agent}.${at}`), { force: true });
+      } catch {
+        /* another process may have swept it already */
+      }
+    }
+  }
+  return latest;
 }
 
 /** Human-readable remaining backoff, for the error a skipped read returns. */

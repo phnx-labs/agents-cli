@@ -890,8 +890,11 @@ a stable per-account key:
   number as a fact. The cache is strictly per machine and never synced, so a box
   whose refresh is failing would otherwise route on day-old numbers indefinitely.
 - **A 429 is backed off, not retried through.** The endpoint's `Retry-After` is
-  recorded per provider (`usage-backoff.ts`, on disk under `~/.agents/.cache/`
-  because the daemon and every one-shot CLI run are separate processes), and both
+  recorded per provider (`usage-backoff.ts`, on disk under
+  `~/.agents/.cache/usage-backoff/` because the daemon and every one-shot CLI run
+  are separate processes — one empty file per penalty, named
+  `<agent>.<deadline>`, so concurrent writers cannot displace each other's
+  deadline and a read simply takes the furthest one), and both
   the usage fetch and the auth-health probe skip the network until it passes. The
   daemon's 3-minute auth-health warm probes every installed version home in one
   batch, so a box with several accounts could previously hold itself inside a
