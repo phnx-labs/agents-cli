@@ -162,7 +162,7 @@ describe('picked row -> launch command', () => {
       request.strategy, undefined, request.host, request.local, picked.cwd,
     );
     expect(command).toContain("--host 'yosemite-s1'");
-    expect(command).toContain("--cwd '/home/muqsit/src/github.com/muqsitnawaz/agents-cli'");
+    expect(command).toContain("--remote-cwd '/home/muqsit/src/github.com/muqsitnawaz/agents-cli'");
     expect(request.prompt).toBe('/continue sess-remote');
   });
 
@@ -181,7 +181,7 @@ describe('picked row -> launch command', () => {
       request.strategy, undefined, request.host, request.local, undefined,
     );
     expect(command).not.toContain('--host');
-    expect(command).not.toContain('--cwd');
+    expect(command).not.toContain('--remote-cwd');
   });
 });
 

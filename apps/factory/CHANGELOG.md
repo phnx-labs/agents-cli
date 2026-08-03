@@ -19,7 +19,7 @@ All notable changes to the Factory extension are documented here. Format follows
   box that actually holds the transcript, in the same repo. Source:
   `apps/factory/src/core/sessionBrowser.ts`, `apps/factory/src/vscode/extension.ts`
   (`pickSessionToFork`, `forkPickedSession`, `openSingleAgentWithQueue`'s new
-  `remoteCwd`), `apps/factory/package.json`.
+  `remoteCwd`, emitted as the CLI's exact `--remote-cwd`), `apps/factory/package.json`.
 
 ## [0.9.305] - 2026-08-03
 
