@@ -1116,14 +1116,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         return sub.items.isEmpty ? nil : sub
     }
 
-    private func revealSubmenu(_ cwd: String) -> NSMenu {
-        let sub = NSMenu()
-        let reveal = NSMenuItem(title: "Reveal working dir", action: #selector(onOpenPath(_:)), keyEquivalent: "")
-        reveal.target = self
-        reveal.representedObject = cwd
-        sub.addItem(reveal)
-        return sub
-    }
 
     private func routineSubmenu(_ r: Routine) -> NSMenu {
         let sub = NSMenu()

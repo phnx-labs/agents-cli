@@ -172,6 +172,7 @@ enum AgentsCLI {
     // `ignore` dismisses it for good. Both clear the pending sentinel CLI-side,
     // so the badge/section updates on the next 10s poll. TS owns the truth.
     static func deviceRegister(_ name: String) { runDetached(argv(["devices", "register", name])) }
+    static func deviceIgnore(_ name: String) { runDetached(argv(["devices", "ignore", name])) }
 
     /// Take the operator to a blocked session: attach its terminal, or open a new
     /// tab and resume it (`agents focus` decides, and handles a remote host).
@@ -182,7 +183,6 @@ enum AgentsCLI {
     static func focusSession(_ sessionId: String) {
         runDetached(argv(["focus", sessionId]))
     }
-    static func deviceIgnore(_ name: String) { runDetached(argv(["devices", "ignore", name])) }
 
     // Surface CLI health in a terminal — `agents doctor` is interactive output.
     static func runDoctor() {
