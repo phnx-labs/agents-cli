@@ -936,6 +936,13 @@ installed (Linux, or a machine that disabled it), delivery degrades to
 | **Finish** | The run reaches a terminal state | Always for agent/workflow; command routines notify only on **failure** |
 | **Overdue** | Daemon startup finds a missed recurring routine | Any overdue routine (`src/lib/overdue.ts`) |
 
+All three of the above fire from **inside** `runDaemon()`, so none of them can
+ever notice that the daemon itself has died — the exact outage that means no
+routine will fire again until someone restarts it. That gap is closed by a
+separate, daemon-independent watchdog in the menu-bar helper (which runs as its
+own launchd `KeepAlive` service): see
+[menubar.md → Daemon-down watchdog](menubar.md#daemon-down-watchdog).
+
 "Notable output" is folded into the single **Finish** notification, not sent as
 a third message: on success the body is the first line of `report.md` (the
 routine's user-facing result), on failure it is the error reason. So a normal
