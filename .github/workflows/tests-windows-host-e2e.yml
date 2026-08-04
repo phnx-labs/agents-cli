@@ -6,14 +6,17 @@ name: Windows-host e2e (tailnet)
 # task + ssh -L tunnel + JSON-RPC roundtrip, and the Edge-over-CDP browser path.
 # They are env-gated on AGENTS_TEST_WIN_HOST and skip everywhere else.
 #
-# Runner: the self-hosted `tailnet-win-e2e` runner (yosemite-s0) has fleet SSH
-# reach to win-mini and a device registry entry for it (`agents devices sync`).
+# Runner: the `crabbox-ci` org runner pool (ci-runner-fsn1, Hetzner) — two
+# persistent org-scoped runners labeled [crabbox-ci, tailnet], joined to the
+# tailnet with fleet SSH reach to win-mini and a device registry entry for it
+# (`agents devices sync`). The pool is an org runner group restricted to
+# agents-cli + agi-cli.
 #
-# SECURITY: this repo is public and the runner is self-hosted, so this workflow
-# deliberately has NO pull_request trigger — fork PRs must never execute code on
-# the tailnet runner. Trusted triggers only: push to main (path-filtered),
-# nightly schedule (catches Windows-side drift with no code change), and manual
-# dispatch. Keep it that way.
+# LABEL RULE: `crabbox-ci` may only appear in workflows with trusted triggers
+# (push to main / schedule / workflow_dispatch). Never on pull_request — this
+# repo is public and the runner is self-hosted, so fork PRs must never execute
+# code on it. This workflow deliberately has NO pull_request trigger. Keep it
+# that way.
 #
 # Tool versions are NOT pinned here — setup-bun reads from package.json; dotnet
 # matches computer-helper-win.yml (build-win.sh cross-publishes the win-x64
@@ -46,7 +49,7 @@ jobs:
   win-host-e2e:
     # Belt-and-braces with the trigger list above: never run from a fork context.
     if: github.repository == 'phnx-labs/agents-cli'
-    runs-on: [self-hosted, tailnet-win-e2e]
+    runs-on: [self-hosted, crabbox-ci, tailnet]
     timeout-minutes: 30
     defaults:
       run:
