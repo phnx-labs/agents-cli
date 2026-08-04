@@ -10,7 +10,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { _resetPerfDbForTest, recordSample } from '../lib/perf/db.js';
-import { asHookRows, loadHookProfile } from './perf.js';
+import { asHookRows, loadHookProfile, frictionAction } from './perf.js';
 
 describe('loadHookProfile', () => {
   let tmp: string;
@@ -94,5 +94,25 @@ describe('asHookRows', () => {
     expect(rows[0]).toMatchObject({
       hook: 'guard', n: 4, p95Ms: 18, errorRate: 0.25, timeoutRate: 0.1, project: 'demo',
     });
+  });
+});
+
+describe('frictionAction', () => {
+  // friction events (emitFriction in events.ts) carry no cwd today — agents
+  // _internal friction has no --cwd flag — so --project (inherited from the
+  // shared `perf` parent command) must fail loud instead of silently
+  // returning unfiltered results, which would look like it filtered.
+  it('rejects --project with a clear error instead of silently ignoring it', () => {
+    const errors: string[] = [];
+    const originalError = console.error;
+    const originalExitCode = process.exitCode;
+    console.error = (msg: string) => { errors.push(msg); };
+    try {
+      frictionAction({ project: 'some-repo' });
+    } finally {
+      console.error = originalError;
+      process.exitCode = originalExitCode;
+    }
+    expect(errors.some((e) => e.includes('--project'))).toBe(true);
   });
 });

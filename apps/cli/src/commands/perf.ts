@@ -216,7 +216,17 @@ function runAction(opts: PerfGlobalOpts): void {
  * guard hooks self-report into via `agents _internal friction` before they
  * exit 2 — see lib/friction-heuristics.ts for the grouping.
  */
-function frictionAction(opts: PerfGlobalOpts): void {
+export function frictionAction(opts: PerfGlobalOpts): void {
+  // --project is declared on the shared `perf` parent for hooks/commands/run,
+  // where every sample carries a cwd. friction events (emitFriction in
+  // events.ts) don't carry one today — agents _internal friction has no
+  // --cwd flag — so silently accepting the flag here would look like it
+  // filtered when it did nothing. Fail loud instead of no-op.
+  if (opts.project) {
+    console.error(chalk.red("agents perf friction does not support --project yet — friction events carry no cwd to filter on."));
+    process.exitCode = 1;
+    return;
+  }
   const days = parseDays(opts.days);
   const startDate = new Date(Date.now() - days * 86_400_000);
   const events = query({ eventTypes: ['friction'], startDate });

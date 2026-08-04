@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -6,6 +6,7 @@ import { archiveRoutineTranscripts, executeJob, executeJobDetached, monitorRunni
 import { getRunDir, writeRunMeta } from './routines.js';
 import type { JobConfig, RunMeta } from './routines.js';
 import { saveTask, hostsCacheDir } from './hosts/tasks.js';
+import { _resetPerfDbForTest, aggregateSamples } from './perf/db.js';
 
 /** Remove every run directory for a job (its parent dir), best-effort. */
 function cleanupJobRuns(jobName: string): void {
@@ -151,6 +152,38 @@ describe('routine transcript archiving', () => {
     const archived = path.join(runDir, 'sessions', 'claude', 'projects', 'tmp-project', 'sess-archive.jsonl');
     expect(fs.readFileSync(archived, 'utf-8')).toContain('"content":"hi"');
   });
+
+  // Regression: Kimi splits a session across state.json (metadata) and
+  // agents/main/wire.jsonl (the actual conversation) — see
+  // session/discover.ts:4382-4384. A ROUTINE_TRANSCRIPT_SPECS entry that only
+  // matched `.json` archived the metadata shell and silently dropped every
+  // message; both extensions must be captured.
+  it('archives BOTH state.json and wire.jsonl for a kimi routine session', () => {
+    const kimiJobName = 'archive-kimi-test';
+    const kimiRunId = 'run-kimi-1';
+    const overlayHome = path.join(getRunDir(kimiJobName, kimiRunId), 'overlay-home');
+    const sessionDir = path.join(overlayHome, '.kimi-code', 'sessions', 'workdir-hash', 'session_abc123');
+    const runDir = getRunDir(kimiJobName, kimiRunId);
+    fs.mkdirSync(path.join(sessionDir, 'agents', 'main'), { recursive: true });
+    fs.writeFileSync(path.join(sessionDir, 'state.json'), '{"title":"demo"}', 'utf-8');
+    fs.writeFileSync(
+      path.join(sessionDir, 'agents', 'main', 'wire.jsonl'),
+      '{"role":"user","content":"the actual conversation"}\n',
+      'utf-8',
+    );
+
+    try {
+      archiveRoutineTranscripts({ jobName: kimiJobName, runId: kimiRunId, agent: 'kimi' }, runDir, overlayHome);
+
+      const archivedState = path.join(runDir, 'sessions', 'kimi', 'sessions', 'workdir-hash', 'session_abc123', 'state.json');
+      const archivedWire = path.join(runDir, 'sessions', 'kimi', 'sessions', 'workdir-hash', 'session_abc123', 'agents', 'main', 'wire.jsonl');
+      expect(fs.readFileSync(archivedState, 'utf-8')).toContain('demo');
+      expect(fs.readFileSync(archivedWire, 'utf-8')).toContain('the actual conversation');
+    } finally {
+      fs.rmSync(overlayHome, { recursive: true, force: true });
+      cleanupJobRuns(kimiJobName);
+    }
+  });
 });
 
 describe('command-mode routines (executeJob foreground)', () => {
@@ -275,5 +308,62 @@ describe('command-mode routines (executeJobDetached — daemon/cron path)', () =
     expect(final.exitCode).toBe(3);
     expect(final.duration).toBeGreaterThanOrEqual(0);
     expect(final.errorMessage).toBeUndefined();
+  });
+});
+
+// Regression: executeJobDetached / executeCommandJobDetached (the daemon's
+// normal firing path) never wrapped their settle() with createTimer(...).end(),
+// unlike executeJob/executeJobOnCloud/executeJobOnHost — so every routine that
+// actually fired off the daemon's own schedule emitted ZERO perf.timing
+// samples, and `agents perf run` / `agents routines stats` had nothing to show
+// for the most common firing path. Verifies against the REAL disposable perf
+// warehouse (recordPerfTiming's dynamic import into perf/spool.ts respects the
+// same _resetPerfDbForTest override db.test.ts uses), not a mock.
+describe('detached routine fires record a perf.timing sample (agent.run)', () => {
+  const jobs: string[] = [];
+  let tmp: string;
+
+  function commandConfig(name: string, command: string): JobConfig {
+    jobs.push(name);
+    return {
+      name, schedule: '0 3 * * *', command,
+      mode: 'auto', effort: 'auto', timeout: '1m', enabled: true, prompt: '',
+    } as JobConfig;
+  }
+
+  async function waitForPerfSample(label: string, ms = 4000): Promise<ReturnType<typeof aggregateSamples>> {
+    const deadline = Date.now() + ms;
+    for (;;) {
+      const rows = aggregateSamples({ days: 1, kinds: ['perf.timing'], label });
+      if (rows.length > 0 || Date.now() > deadline) return rows;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  }
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-perf-'));
+    process.env.AGENTS_PERF_DB = path.join(tmp, 'perf.db');
+    _resetPerfDbForTest(process.env.AGENTS_PERF_DB);
+  });
+
+  afterEach(() => {
+    for (const j of jobs.splice(0)) cleanupJobRuns(j);
+    _resetPerfDbForTest(null);
+    delete process.env.AGENTS_PERF_DB;
+    delete process.env.AGENTS_PERF_SPOOL;
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('executeCommandJobDetached records an agent.run sample with status + jobName on success', async () => {
+    await executeJobDetached(commandConfig('cmd-perf-ok', 'exit 0'));
+    const rows = await waitForPerfSample('agent.run');
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows[0].n).toBeGreaterThan(0);
+  });
+
+  it('executeCommandJobDetached records the sample on a FAILED run too (not just success)', async () => {
+    await executeJobDetached(commandConfig('cmd-perf-fail', 'exit 5'));
+    const rows = await waitForPerfSample('agent.run');
+    expect(rows.length).toBeGreaterThan(0);
   });
 });
