@@ -51,6 +51,27 @@ describe('scheduleVerdict', () => {
     expect(edge).toEqual({ kind: 'due-soon', milestone: 'Cut', days: DUE_SOON_DAYS });
   });
 
+  it('does NOT let untracked hide an approaching deadline', () => {
+    // A milestone due in 2 days with nothing filed against it reported
+    // "untracked" and buried the date. A deadline moves; "nothing is filed"
+    // will still be true tomorrow, so the date wins.
+    const v = scheduleVerdict(
+      [ms({ name: 'Beta', targetDate: '2026-08-05' }), ms({ name: 'Alpha', targetDate: '2026-08-10' })],
+      NOW,
+    );
+    expect(v).toEqual({ kind: 'due-soon', milestone: 'Beta', days: 2 });
+  });
+
+  it('a completed milestone means the project is not untracked', () => {
+    // Completed implies issues exist, so "no issues filed against any" is false.
+    const v = scheduleVerdict(
+      [ms({ name: 'Done', targetDate: '2026-07-01', done: 2, total: 2 }), ms({ name: 'Far', targetDate: '2026-12-01' })],
+      NOW,
+    );
+    expect(v.kind).not.toBe('untracked');
+    expect(v).toEqual({ kind: 'scheduled', milestone: 'Far', days: 120 });
+  });
+
   it('says untracked when nothing is filed against any milestone', () => {
     // The real shape of this repo's Linear project: three dated milestones,
     // zero issues assigned to any of them.

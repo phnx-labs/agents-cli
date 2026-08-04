@@ -58,9 +58,13 @@ export function daysUntil(targetDate: string, nowMs: number): number | undefined
 const unfinished = (m: LinearMilestone) => m.total === 0 || m.done < m.total;
 
 /**
- * Decide what the dates prove. Precedence is worst-news-first: an overdue
- * milestone outranks a soon one, which outranks the observation that nothing is
- * filed. `declared` overrides everything, because a human said it.
+ * Decide what the dates prove. Precedence is time-sensitivity first:
+ *
+ *   declared > overdue > due-soon > untracked > no-dates > scheduled
+ *
+ * An overdue milestone outranks an approaching one, and both outrank the
+ * observation that nothing is filed — a deadline moves, that observation does
+ * not. `declared` overrides everything, because a human said it.
  */
 export function scheduleVerdict(
   milestones: LinearMilestone[],
@@ -79,13 +83,20 @@ export function scheduleVerdict(
   const worst = dated[0];
   if (worst && worst.days < 0) return { kind: 'overdue', milestone: worst.m.name, days: -worst.days };
 
+  // A date bearing down is time-sensitive; "nothing is filed" is a standing
+  // condition that will still be true tomorrow. So an approaching deadline is
+  // reported even when the milestone has no issues against it — reversing these
+  // hid a milestone due in two days behind "3 milestones, no issues filed".
+  if (worst && worst.days <= DUE_SOON_DAYS) return { kind: 'due-soon', milestone: worst.m.name, days: worst.days };
+
   // Nothing is filed against ANY milestone, so no progress can be computed for
   // them — the useful thing to say, and the actual state of a project whose
-  // milestones were created before its issues.
+  // milestones were created before its issues. Checked against the full list,
+  // not just the open ones: a COMPLETED milestone necessarily has issues, so a
+  // project with one cannot honestly be called untracked.
   if (milestones.every((m) => m.total === 0)) return { kind: 'untracked', milestones: milestones.length };
 
   if (!worst) return { kind: 'no-dates', milestones: open.length };
-  if (worst.days <= DUE_SOON_DAYS) return { kind: 'due-soon', milestone: worst.m.name, days: worst.days };
   return { kind: 'scheduled', milestone: worst.m.name, days: worst.days };
 }
 
