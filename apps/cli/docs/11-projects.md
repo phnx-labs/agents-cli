@@ -18,8 +18,25 @@ noise; what matters is the **project**. This subsystem fills both gaps.
 ## The definition — `~/.agents/projects/<name>.yaml`
 
 One hand-editable YAML file per project, beside `routines/` and `monitors/` in the
-user repo, so it syncs across machines via `agents push/pull`. Paths are stored
-home-relative (`~/…`) so a definition re-roots on any machine.
+user repo. Paths are stored home-relative (`~/…`) so a definition re-roots on any
+machine.
+
+> **Commit them, or lose them.** Sitting in the user repo makes a definition
+> *syncable*, not synced. `agents projects add` writes the file; nothing commits it.
+> Until you run `agents repo push user`, `projects/` is an **untracked** directory, and
+> any reconcile that cleans the working tree deletes it — this cost one machine its four
+> definitions twice in a day. The only trace afterwards is a
+> `chore(local): save …-sync drift` commit that is unreachable from `HEAD`, so it is
+> recoverable until git collects it and not after. Recover with:
+>
+> ```bash
+> cd ~/.agents
+> git log --all --oneline --diff-filter=A -- 'projects/*'   # find the drift commit
+> git show <sha>:projects/<name>.yaml > projects/<name>.yaml
+> ```
+>
+> (`agents push` was removed; the command is `agents repo push <alias>`. Note that it
+> stages with `git add -A`, so check `git status` for unrelated drift first.)
 
 ```yaml
 name: rush                      # stable id == filename; what --project takes
