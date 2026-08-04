@@ -902,6 +902,44 @@ Delivery is best-effort and reported: each sink that ran prints `→ <name>`, a
 failure prints a warning and a non-zero exit is never propagated. Losing a mirror
 must not cost the operator the post — it is already written.
 
+##### `channel:` sinks — in-process delivery, no argv (RUSH-2123)
+
+A sink can declare `channel:` instead of `command:`. It delivers through the
+same channel-provider registry `agents send` / `agents notify` use
+(`deliverEnvelope()`) — no spawn, no argv template, just the composed
+`{message}` body:
+
+```yaml
+feed:
+  broadcast:
+    owner:
+      channel: owner          # notify.owner.{channel,to} in agents.yaml
+      minLevel: important
+    ops-slack:
+      channel: slack           # any registered channel / notify.transports name
+      to: "#ops"
+```
+
+`channel: owner` is the address alias — same one `agents send --to owner` and
+`agents notify` use — and needs no `to`. Any other channel name needs an
+explicit `to`, or the sink is skipped (same "never fire with a hole in it"
+contract a `command:` sink already follows for a missing placeholder). Gated by
+`minLevel` exactly like a `command:` sink; the two shapes are interchangeable
+per sink.
+
+##### The implicit owner fallback
+
+An operator who sets `notify.owner` (for `agents notify`) but never writes a
+`feed.broadcast` block used to get a `--blocked` post that looked recorded and
+reached nobody — `feed.broadcast` and `notify.owner` were two disconnected
+config blocks. Now, when `feed.broadcast` is unset or empty **and** the post is
+`important` (which `--blocked` always is), the post falls back to
+`notify.owner` automatically, as if `feed.broadcast: { owner: { channel: owner
+} }` had been declared. A routine `milestone` post still stays record-only even
+with the fallback available — the fallback follows the same `minLevel` contract
+every sink already does — and writing an actual `feed.broadcast` block always
+wins outright over the fallback.
+
 ### Activity lane (`agents activity`) — progress at a glance, fleet-wide
 
 `agents activity` reads the same append-only activity stream (never re-parsing

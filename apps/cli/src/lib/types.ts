@@ -836,10 +836,14 @@ export interface Meta {
   /** Spend guardrails (issue #346). User-global caps; project agents.yaml overrides. */
   budget?: BudgetConfig;
   /**
-   * `agents feed post` fan-out. `broadcast` maps a sink name to the argv template
-   * run for each post, so mirroring to a tracker or a messaging CLI is the
-   * operator's config rather than an integration compiled into this CLI. See
-   * lib/feed-broadcast.ts and docs/06-observability.md.
+   * `agents feed post` fan-out. `broadcast` maps a sink name to either an argv
+   * template (`command:`, run for each post) or an in-process channel delivery
+   * (`channel:`, the same registry `agents send`/`agents notify` use), so
+   * mirroring to a tracker, a messaging CLI, or a channel provider is the
+   * operator's config rather than an integration compiled into this CLI. When
+   * this is unset/empty, an important-level post falls back to `notify.owner`
+   * implicitly (RUSH-2123) — see lib/feed-broadcast.ts and
+   * docs/06-observability.md.
    */
   feed?: {
     broadcast?: FeedBroadcastConfig;
