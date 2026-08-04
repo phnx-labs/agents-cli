@@ -174,10 +174,10 @@ export function wrapRemoteExitCode(cmd: string): string {
 /**
  * The remote command a reattach runs — the peer's own reconnect verb
  * (`agents sessions focus <id> --local --attach-only`), wrapped by
- * {@link wrapRemoteExitCode} so a stray remote-origin 255 (an unsupervised
- * shell fallback closing, a nested remote-tmux hop dropping) can never
- * masquerade as a network drop. Split out from {@link reattachRemoteSession} so
- * it is unit-tested without SSH — mirrors `remoteAgentsJsonCommand` in
+ * {@link wrapRemoteExitCode} so a stray remote-origin 255 (from this command,
+ * whatever produces it — see the file header) can never masquerade as a
+ * network drop. Split out from {@link reattachRemoteSession} so it is
+ * unit-tested without SSH — mirrors `remoteAgentsJsonCommand` in
  * lib/remote-agents-json.ts.
  */
 export function reattachRemoteCommand(sessionId: string): string {
