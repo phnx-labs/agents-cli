@@ -6,6 +6,18 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **Fleet health probes no longer stack duplicate `agents` subprocesses (fixes
+  CPU thrash on a loaded box).** `countRunningAgents` — the per-host running-agent
+  count behind the Dispatch panel's device health and the launch-health refresh —
+  spawned a fresh `agents sessions --active --json --host <box>` subprocess per
+  fleet device on every call, with no cache and no in-flight dedup (unlike its
+  sibling `fetchDeviceStats`). Several uncoordinated callers each fanned out over
+  the whole fleet, and on a loaded box where an `agents` cold-start alone exceeds
+  8s the batches piled up into dozens of concurrent duplicate processes. Both
+  probes now share one `cachedInFlight` guard: concurrent calls for a host
+  coalesce into a single in-flight run, and repeats within 6s serve the cache.
+  Source: `src/core/cachedInFlight.ts`, `src/vscode/deviceHealth.vscode.ts`.
+
 ## [0.9.310] - 2026-08-04
 
 - **Every New-agent launch is balanced — `agents run <agent> --interactive
