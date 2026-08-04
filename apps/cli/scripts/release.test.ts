@@ -13,7 +13,10 @@ describe('release.sh PR-head synchronization', () => {
     expect(waitFunction).toBeDefined();
     expect(waitFunction).toContain('local pr="$1" head_sha="${2:-}"');
     expect(waitFunction).not.toContain('gh pr view');
-    expect(RELEASE_SH).toContain('wait_for_ci_green "$PR_NUMBER" "$RELEASE_COMMIT"');
+    expect(RELEASE_SH).toContain('RELEASE_CI_HEAD="$EXISTING_HEAD"');
+    expect(RELEASE_SH.match(/RELEASE_CI_HEAD="\$RELEASE_COMMIT"/g)).toHaveLength(2);
+    expect(RELEASE_SH).toContain('wait_for_ci_green "$PR_NUMBER" "$RELEASE_CI_HEAD"');
+    expect(RELEASE_SH).not.toContain('wait_for_ci_green "$PR_NUMBER" "$RELEASE_COMMIT"');
     expect(RELEASE_SH).toContain(
       'wait_for_ci_green "$MERGED_RELEASE_PR" "$CI_TESTED_HEAD"',
     );

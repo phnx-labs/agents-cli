@@ -1014,13 +1014,16 @@ if ! $MAIN_AT_TARGET; then
   RELEASE_COMMIT="$(git commit-tree "$BRANCH_TREE" -p "$BASE_SHA" -m "chore(release): $TARGET")"
 
   PR_NUMBER=""
+  RELEASE_CI_HEAD=""
   if [[ -n "$EXISTING_PR" ]]; then
     PR_NUMBER="$EXISTING_PR"
     EXISTING_HEAD="$(gh pr view "$EXISTING_PR" --json headRefOid --jq .headRefOid 2>/dev/null || true)"
     if [[ -n "$EXISTING_HEAD" && "$(git rev-parse "$EXISTING_HEAD^{tree}" 2>/dev/null || true)" == "$BRANCH_TREE" ]]; then
+      RELEASE_CI_HEAD="$EXISTING_HEAD"
       gray "Reusing open PR #$PR_NUMBER ($RELEASE_BRANCH); branch tree already matches."
     else
       git push --force-with-lease origin "$RELEASE_COMMIT:refs/heads/$RELEASE_BRANCH"
+      RELEASE_CI_HEAD="$RELEASE_COMMIT"
       gray "Updated PR #$PR_NUMBER branch to the freshly built release commit."
     fi
   else
@@ -1030,6 +1033,7 @@ if ! $MAIN_AT_TARGET; then
     # push would be rejected non-fast-forward and brick the re-run. The lease is
     # safe -- preflight fetched origin, so we only overwrite a ref we have seen.
     git push --force-with-lease origin "$RELEASE_COMMIT:refs/heads/$RELEASE_BRANCH"
+    RELEASE_CI_HEAD="$RELEASE_COMMIT"
     green "Pushed $RELEASE_BRANCH"
   fi
 
@@ -1046,7 +1050,8 @@ if ! $MAIN_AT_TARGET; then
     green "Opened release PR #$PR_NUMBER"
   fi
 
-  wait_for_ci_green "$PR_NUMBER" "$RELEASE_COMMIT"
+  [[ -n "$RELEASE_CI_HEAD" ]] || die "could not resolve CI-tested head for PR #$PR_NUMBER"
+  wait_for_ci_green "$PR_NUMBER" "$RELEASE_CI_HEAD"
 
   # Squash-merge. Never --admin: branch protection must hold, and the ruleset has
   # no PR-review rule, so green test+gitleaks is a sufficient, non-bypass merge.
