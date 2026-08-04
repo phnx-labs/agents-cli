@@ -169,7 +169,7 @@ async function ensureAgentsCliInstalled(): Promise<void> {
     }
   }
 }
-import { supportsPrewarming, buildVersionedResumeCommand, PREWARM_CONFIGS, PrewarmAgentType } from '../core/prewarm';
+import { supportsPrewarming, buildVersionedResumeCommand, exitSequenceFor, PrewarmAgentType } from '../core/prewarm';
 import { generateClaudeSessionId, listOpencodeSessions } from '../core/prewarm.simple';
 import { liveSessionIdForShell } from '../core/liveSession';
 import { getSessionPathBySessionId, getSessionPreviewInfo, getOpenCodeSessionPreviewInfo, getCursorSessionPreviewInfo } from './sessions.vscode';
@@ -2381,8 +2381,11 @@ async function openSingleAgent(
         : {});
     }
 
-    if (agentKey && supportsPrewarming(agentKey)) {
-      terminals.setAgentType(terminal, agentKey);
+    // Track + poll any known harness, not just the prewarm five (#1747), so
+    // grok/kimi/droid/antigravity tabs are resumable through restore/reopen/reload.
+    const resumeKey = agentKey ? agentKeyFromSession(agentKey) : null;
+    if (resumeKey) {
+      terminals.setAgentType(terminal, resumeKey);
     }
     // Stamp the host BEFORE the label poller starts: the poller reads the entry
     // to decide whether to look the session up locally or over `--host`.
@@ -2391,7 +2394,7 @@ async function openSingleAgent(
     }
     if (sessionId) {
       terminals.setSessionId(terminal, sessionId);
-      if (agentKey && supportsPrewarming(agentKey)) {
+      if (resumeKey) {
         startAutoLabelPollerForTerminal(terminal, context);
       }
     }
@@ -2431,8 +2434,10 @@ async function openSingleAgent(
   terminals.register(terminal, terminalId, agentConfig, pid, context);
   readiness.registerTerminal(terminal);
 
-  if (agentKey && supportsPrewarming(agentKey)) {
-    terminals.setAgentType(terminal, agentKey);
+  // Track + poll any known harness, not just the prewarm five (#1747).
+  const resumeKey = agentKey ? agentKeyFromSession(agentKey) : null;
+  if (resumeKey) {
+    terminals.setAgentType(terminal, resumeKey);
   }
   // Stamp the host BEFORE the label poller starts: the poller reads the entry
   // to decide whether to look the session up locally or over `--host`.
@@ -2441,7 +2446,7 @@ async function openSingleAgent(
   }
   if (sessionId) {
     terminals.setSessionId(terminal, sessionId);
-    if (agentKey && supportsPrewarming(agentKey)) {
+    if (resumeKey) {
       startAutoLabelPollerForTerminal(terminal, context);
     }
   }
@@ -3139,10 +3144,10 @@ async function copySessionId() {
  * a shell tab has no conversation to resume.
  *
  * The OTHER resume surfaces — `restoreAgentTerminals` (reload), the reopen-last
- * command, and reload-active-terminal — still gate on `supportsPrewarming`, so
- * grok/kimi/droid/antigravity do not come back through those. Widening them
- * means touching the crash-restore persistence path, which is deliberately out
- * of scope here; tracked in issue #1747.
+ * command, and reload-active-terminal — now gate on this same registry check
+ * rather than `supportsPrewarming`, so grok/kimi/droid/antigravity come back
+ * through those too (#1747); reload falls back to a generic exit sequence for
+ * agents without a PREWARM_CONFIGS entry.
  */
 function agentKeyFromSession(agent: string): SessionAgentType | null {
   if (!agent || agent === 'shell') return null;
@@ -4122,8 +4127,11 @@ export async function openSingleAgentWithQueue(
   if (targetHost) terminals.setHost(terminal, targetHost);
   readiness.registerTerminal(terminal);
 
-  // Track session ID and agent type
-  if (agentKey && supportsPrewarming(agentKey)) {
+  // Track session ID and agent type. Any known harness is tracked, not just the
+  // prewarm five (#1747) — this feeds the persistence path that restore/reopen
+  // read, so grok/kimi/droid/antigravity tabs must be tracked here too or they
+  // have nothing to come back to.
+  if (agentKey && agentKeyFromSession(agentKey)) {
     // Set agent type unconditionally so the sessionTracker fs watcher can adopt
     // a session id when the CLI writes a fresh rollout/jsonl (Codex 0.124+
     // dropped session id from the TUI banner so this is the only signal).
@@ -4242,8 +4250,10 @@ async function openAgentTerminals(context: vscode.ExtensionContext) {
       terminals.register(terminal, terminalId, agent, pid, context);
       readiness.registerTerminal(terminal);
 
-      // Track session ID
-      if (agentKey && supportsPrewarming(agentKey)) {
+      // Track session ID for any known harness, not just the prewarm five (#1747):
+      // this path also starts the label poller that hydrates the live session id,
+      // so a grok/kimi/droid/antigravity tab needs it too to be resumable.
+      if (agentKey && agentKeyFromSession(agentKey)) {
         // Set agent type unconditionally so sessionTracker fs watcher can adopt
         // a session id from the CLI's rollout file (Codex 0.124+ banner has none).
         terminals.setAgentType(terminal, agentKey);
@@ -4953,13 +4963,16 @@ async function reloadActiveTerminal(context: vscode.ExtensionContext) {
       return;
     }
 
-    if (!supportsPrewarming(agentType)) {
+    // Any known harness with a transcript can reload, not just the prewarm five —
+    // `agents run --resume` resumes grok/kimi/droid/antigravity too (#1747). Only
+    // a shell / unknown tab has nothing to reload.
+    if (!agentKeyFromSession(agentType)) {
       vscode.window.showErrorMessage('This agent type does not support session reload.');
       return;
     }
 
-    const config = PREWARM_CONFIGS[agentType];
-    const exitSequence = config.exitSequence;
+    // Prewarm agents use their tuned exit keys; the rest fall back to Ctrl+C twice.
+    const exitSequence = exitSequenceFor(agentType);
     const resumeCommand = buildVersionedResumeCommand(agentType, sessionId, entry.version, entry.host);
 
     terminal.show();
@@ -5586,8 +5599,10 @@ async function restoreAgentTerminals(context: vscode.ExtensionContext): Promise<
       }
       startAutoLabelPollerForTerminal(terminal, context);
 
-      // Actually resume the session by sending the resume command
-      if (supportsPrewarming(session.agentType)) {
+      // Actually resume the session by sending the resume command. Any known
+      // harness resumes here, not just the prewarm five (#1747) — buildVersioned-
+      // ResumeCommand routes non-prewarm agents through `agents run --resume`.
+      if (agentKeyFromSession(session.agentType)) {
         const resumeCmd = buildVersionedResumeCommand(
           session.agentType,
           session.sessionId,
@@ -5779,7 +5794,8 @@ async function reopenLastClosedSession(context: vscode.ExtensionContext): Promis
     }
     startAutoLabelPollerForTerminal(terminal, context);
 
-    if (supportsPrewarming(closed.agentType)) {
+    // Any known harness reopens, not just the prewarm five (#1747).
+    if (agentKeyFromSession(closed.agentType)) {
       const resumeCmd = buildVersionedResumeCommand(
         closed.agentType,
         closed.sessionId,
