@@ -22,6 +22,7 @@ import {
 const tmpDirs: string[] = [];
 let prevNoTrack: string | undefined;
 let prevDbPath: string | undefined;
+let prevSecretsDb: string | undefined;
 
 function pinDb(): string {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-usage-db-'));
@@ -35,6 +36,7 @@ function pinDb(): string {
 beforeEach(() => {
   prevNoTrack = process.env.AGENTS_NO_USAGE_TRACK;
   prevDbPath = process.env.AGENTS_USAGE_DB;
+  prevSecretsDb = process.env.AGENTS_SECRETS_DB;
   delete process.env.AGENTS_NO_USAGE_TRACK;
   closeSecretsUsageDb();
   pinDb();
@@ -46,7 +48,8 @@ afterEach(() => {
   else process.env.AGENTS_NO_USAGE_TRACK = prevNoTrack;
   if (prevDbPath === undefined) delete process.env.AGENTS_USAGE_DB;
   else process.env.AGENTS_USAGE_DB = prevDbPath;
-  delete process.env.AGENTS_SECRETS_DB;
+  if (prevSecretsDb === undefined) delete process.env.AGENTS_SECRETS_DB;
+  else process.env.AGENTS_SECRETS_DB = prevSecretsDb;
   for (const d of tmpDirs) {
     try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* ok */ }
   }
